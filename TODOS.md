@@ -1,18 +1,13 @@
 # TODOS — 游戏角色资产工作流
 
-> 最后更新：2026-05-15（CEO Review 产出）
+> 最后更新：2026-05-15（/plan-design-review 产出）
 > 格式：优先级 P1/P2/P3，工期 S(<4h) / M(<1d) / L(<3d) / XL(>3d)
 
 ---
 
 ## P1 — 阻塞下一步
 
-### [design-review] 进 writing-plans 前先跑 /plan-design-review
-- **背景**：v2.1 §4.2 的三栏布局描述粗糙，信息层级、状态覆盖（loading/empty/error）、图廊交互模式（Lightbox vs inline expand）均未设计。Web UI 是 B+ 的"以人为本"核心，设计缺口应在实施任务拆解前补齐，否则 writing-plans 做出来的 UI 任务可能返工。
-- **行动**：在 writing-plans 阶段开始前，对 v2.1 §4.2 跑 `/plan-design-review`，产出三栏 UI 的交互规格
-- **验收**：§4.2 交付物 4（前端单页）的设计方案补充到 v2.x
-- **工期**：M（CC ~30-60 min）
-- **依赖**：v2.1 文档已就绪 ✅
+*（当前无 P1 阻塞项，可进入 writing-plans）*
 
 ---
 
@@ -51,3 +46,4 @@
 | 项 | 关闭原因 |
 |---|---|
 | B+ 验收标准（TBD）| v2.1 §4.6 已回填 4 个可测指标（2026-05-15）|
+| [design-review] 三栏 UI 设计缺口 | /plan-design-review 7 passes 完成；D1 图廊交互模式决策落地；v2.3 §4.2.A 全量补充（2026-05-15）|
