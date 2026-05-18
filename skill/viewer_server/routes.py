@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Body, HTTPException
+from fastapi.responses import FileResponse
 
 from skill.character_workflow.lib.active_character import read_active, write_active
 from skill.character_workflow.lib.schemas import (
@@ -139,6 +140,21 @@ def post_clipboard_attempt(attempt: ClipboardAttempt) -> dict:
     with log_path.open("a", encoding="utf-8") as f:
         f.write(attempt.model_dump_json() + "\n")
     return {"ok": True}
+
+
+@router.get("/raw")
+def get_raw_image(path: str) -> FileResponse:
+    cfg_path = _runtime() / "config.json"
+    if not cfg_path.exists():
+        raise HTTPException(403, detail="config missing")
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    root = Path(cfg.get("image_storage_root", "")).resolve()
+    target = Path(path).resolve()
+    if not str(target).startswith(str(root)):
+        raise HTTPException(403, detail="path outside image_storage_root")
+    if not target.exists():
+        raise HTTPException(404)
+    return FileResponse(str(target))
 
 
 @router.post("/config")
