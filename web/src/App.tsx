@@ -3,6 +3,7 @@ import { LeftSidebar } from './components/LeftSidebar';
 import { CharacterGallery } from './components/CharacterGallery';
 import { SpecForm } from './components/SpecForm';
 import { ImageDetail } from './components/ImageDetail';
+import { FirstRunConfig } from './components/FirstRunConfig';
 import { useSSE } from './hooks/useSSE';
 
 interface Config { image_storage_root: string }
@@ -16,18 +17,9 @@ export function App() {
 
   if (config === null) return <div style={{ padding: 24 }}>加载中…</div>;
   if (!config.image_storage_root) {
-    return <FirstRunConfigPlaceholder onSaved={setConfig} />;
+    return <FirstRunConfig onSaved={root => setConfig({ image_storage_root: root })} />;
   }
   return <ThreeColumnLayout />;
-}
-
-function FirstRunConfigPlaceholder({ onSaved }: { onSaved: (c: Config) => void }) {
-  return (
-    <div style={{ padding: 24 }}>
-      <h1>首次配置（Task D8 替换）</h1>
-      <button onClick={() => onSaved({ image_storage_root: '/tmp/images' })}>跳过</button>
-    </div>
-  );
 }
 
 function ThreeColumnLayout() {
