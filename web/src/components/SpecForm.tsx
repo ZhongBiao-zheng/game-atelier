@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+import { RefreshCw, Save, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useClipboard } from '../hooks/useClipboard';
 import { FeedbackInput } from './FeedbackInput';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 
 interface Props { characterId: string | null; sseSignal: number }
 
@@ -60,40 +65,99 @@ export function SpecForm({ characterId, sseSignal }: Props) {
     }
   }
 
-  if (!characterId) return <section style={panelStyle}><p>请在左栏选择角色</p></section>;
+  async function refresh() {
+    if (!characterId) return;
+    const r = await fetch(`/api/spec/${characterId}`);
+    if (!r.ok) { setToast({ kind: 'warn', msg: '刷新失败' }); return; }
+    const d = await r.json();
+    setServerContent(d.content);
+    setContent(d.content);
+    setDirty(false);
+  }
 
-  const stale = serverContent !== content && !dirty;  // server-side changed while not editing
+  if (!characterId) {
+    return (
+      <section className="h-screen border-l border-border flex items-center justify-center">
+        <p className="text-sm text-muted-foreground">请在左栏选择角色</p>
+      </section>
+    );
+  }
+
+  const stale = serverContent !== content && !dirty;
 
   return (
-    <section style={panelStyle}>
-      <h2 style={{ fontSize: 'var(--fs-section)', marginBottom: 12 }}>规格表单</h2>
+    <section className="h-screen border-l border-border flex flex-col bg-background">
+      <header className="flex items-center justify-between px-5 py-3 border-b border-border">
+        <h2 className="text-[15px] font-semibold tracking-tight">规格表单</h2>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={refresh}
+          title="重新从磁盘读取（终端 Claude 改完档案后用）"
+        >
+          <RefreshCw className="size-3.5" />
+          刷新
+        </Button>
+      </header>
+
       {stale && (
-        <div style={{ fontSize: 'var(--fs-meta)', color: 'var(--color-status-running)', marginBottom: 8 }}>
-          文件已变更 <button style={{ padding: '2px 8px', fontSize: 'var(--fs-meta)' }}
-                          onClick={() => { setContent(serverContent); }}>[刷新]</button>
+        <div className="mx-5 mt-3 flex items-center gap-2 rounded-md border border-[color:var(--status-running)]/30 bg-[color:var(--status-running)]/10 px-3 py-2 text-xs text-[color:var(--status-running)]">
+          <AlertCircle className="size-3.5 shrink-0" />
+          <span className="flex-1">文件已变更</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            onClick={() => setContent(serverContent)}
+          >
+            采用磁盘版
+          </Button>
         </div>
       )}
-      <textarea
-        value={content}
-        onChange={e => { setContent(e.target.value); setDirty(true); }}
-        style={{ width: '100%', height: 'calc(100% - 120px)', fontFamily: 'monospace', resize: 'none' }} />
-      <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-        <button onClick={() => save(true)} disabled={!dirty}>保存</button>
-        {dirty && <span style={{ fontSize: 'var(--fs-meta)', color: 'var(--color-text-muted)' }}>· 未保存</span>}
+
+      <div className="flex-1 min-h-0 flex flex-col px-5 py-4 gap-3">
+        <Textarea
+          value={content}
+          onChange={e => { setContent(e.target.value); setDirty(true); }}
+          className="flex-1 resize-none font-mono text-[13px] leading-relaxed"
+          placeholder="角色规格 markdown…"
+          spellCheck={false}
+        />
+
+        <div className="flex items-center gap-3">
+          <Button onClick={() => save(true)} disabled={!dirty} size="sm">
+            <Save className="size-3.5" />
+            保存
+          </Button>
+          {dirty && (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="inline-block size-1.5 rounded-full bg-[color:var(--status-running)]" />
+              未保存
+            </span>
+          )}
+        </div>
+
+        {toast && (
+          <div
+            className={cn(
+              'flex items-start gap-2 rounded-md px-3 py-2 text-xs',
+              toast.kind === 'ok'
+                ? 'bg-[color:var(--status-done)]/15 border border-[color:var(--status-done)]/30 text-[color:var(--status-done)]'
+                : 'bg-[color:var(--status-running)]/15 border border-[color:var(--status-running)]/30 text-[color:var(--status-running)]',
+            )}
+          >
+            {toast.kind === 'ok'
+              ? <CheckCircle2 className="size-3.5 shrink-0 mt-0.5" />
+              : <AlertCircle className="size-3.5 shrink-0 mt-0.5" />}
+            <span>{toast.msg}</span>
+          </div>
+        )}
       </div>
-      {toast && (
-        <div style={{
-          marginTop: 12, padding: 8, borderRadius: 6,
-          background: toast.kind === 'ok' ? 'var(--color-status-done)' : 'var(--color-status-running)',
-          color: 'black',
-        }}>{toast.msg}</div>
-      )}
-      <FeedbackInput characterId={characterId} />
+
+      <Separator />
+      <div className="px-5 py-4">
+        <FeedbackInput characterId={characterId} />
+      </div>
     </section>
   );
 }
-
-const panelStyle: React.CSSProperties = {
-  borderLeft: '1px solid var(--color-border)',
-  padding: 16, height: '100vh', overflow: 'auto',
-};

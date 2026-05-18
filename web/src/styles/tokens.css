@@ -1,32 +1,89 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-status-pending: var(--status-pending);
+  --color-status-running: var(--status-running);
+  --color-status-done: var(--status-done);
+  --color-status-failed: var(--status-failed);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
 :root {
-  /* 色彩 */
-  --color-bg: #0F0F0F;
-  --color-bg-elevated: #1A1A1A;
-  --color-border: #2A2A2A;
-  --color-text: #E5E5E5;
-  --color-text-muted: #9CA3AF;
+  --radius: 0.625rem;
+
+  /* shadcn semantic tokens (dark-first; project has no light mode) */
+  --background: #0F0F0F;
+  --foreground: #E5E5E5;
+  --card: #1A1A1A;
+  --card-foreground: #E5E5E5;
+  --popover: #1A1A1A;
+  --popover-foreground: #E5E5E5;
+  --primary: #3B82F6;
+  --primary-foreground: #FFFFFF;
+  --secondary: #2A2A2A;
+  --secondary-foreground: #E5E5E5;
+  --muted: #1A1A1A;
+  --muted-foreground: #9CA3AF;
+  --accent: #2A2A2A;
+  --accent-foreground: #E5E5E5;
+  --destructive: #EF4444;
+  --destructive-foreground: #FFFFFF;
+  --border: #2A2A2A;
+  --input: #2A2A2A;
+  --ring: #3B82F6;
+
+  --status-pending: #6B7280;
+  --status-running: #FBBF24;
+  --status-done: #10B981;
+  --status-failed: #EF4444;
+
+  /* Legacy aliases — kept so untouched components (CharacterGallery, LeftSidebar,
+     FirstRunConfig, FeedbackInput) keep working. Remove once they migrate. */
+  --color-bg: var(--background);
+  --color-bg-elevated: var(--card);
+  --color-border: var(--border);
+  --color-text: var(--foreground);
+  --color-text-muted: var(--muted-foreground);
   --color-text-dim: #6B7280;
-  --color-accent: #3B82F6;
+  --color-accent: var(--primary);
   --color-accent-hover: #2563EB;
 
-  /* 状态色 */
-  --color-status-pending: #6B7280;
-  --color-status-running: #FBBF24;
-  --color-status-done: #10B981;
-  --color-status-failed: #EF4444;
-
-  /* 字号 */
   --fs-section: 15px;
   --fs-label: 13px;
   --fs-value: 14px;
   --fs-meta: 12px;
 
-  /* 字重 */
   --fw-semibold: 600;
   --fw-medium: 500;
   --fw-regular: 400;
 
-  /* 间距 */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -34,35 +91,41 @@
   --space-6: 24px;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+@layer base {
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-background text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+  }
 
-html, body, #root { height: 100%; }
+  /* Native button/input fallback styles for components not yet on shadcn.
+     shadcn components override these via their own className stacks. */
+  button:not([class*="bg-"]):not([class*="border-"]) {
+    font: inherit; color: inherit;
+    background: var(--color-accent);
+    border: none;
+    border-radius: 6px;
+    padding: var(--space-2) var(--space-4);
+    cursor: pointer;
+  }
+  button:not([class*="bg-"]):not([class*="border-"]):hover { background: var(--color-accent-hover); }
+  button:not([class*="bg-"]):not([class*="border-"]):disabled {
+    background: var(--color-bg-elevated); color: var(--color-text-dim); cursor: not-allowed;
+  }
 
-body {
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: var(--fs-value);
+  input:not([class*="bg-"]):not([class*="border-"]),
+  textarea:not([class*="bg-"]):not([class*="border-"]) {
+    font: inherit; color: inherit;
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: var(--space-2) var(--space-3);
+    width: 100%;
+  }
+  input:not([class*="bg-"]):not([class*="border-"]):focus,
+  textarea:not([class*="bg-"]):not([class*="border-"]):focus {
+    outline: 2px solid var(--color-accent); outline-offset: -2px;
+  }
 }
-
-button {
-  font: inherit;
-  color: inherit;
-  background: var(--color-accent);
-  border: none;
-  border-radius: 6px;
-  padding: var(--space-2) var(--space-4);
-  cursor: pointer;
-}
-button:hover { background: var(--color-accent-hover); }
-button:disabled { background: var(--color-bg-elevated); color: var(--color-text-dim); cursor: not-allowed; }
-
-input, textarea {
-  font: inherit; color: inherit;
-  background: var(--color-bg-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: var(--space-2) var(--space-3);
-  width: 100%;
-}
-input:focus, textarea:focus { outline: 2px solid var(--color-accent); outline-offset: -2px; }

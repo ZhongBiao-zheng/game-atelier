@@ -1,8 +1,23 @@
 import { useEffect, useState } from 'react';
+import { ArrowLeft, Trash2, Copy, CheckCircle2 } from 'lucide-react';
 import type { Job, WebEditableJobPatch } from '../schema/jobs';
 import { useClipboard } from '../hooks/useClipboard';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 
 interface Props { jobId: string; path: string; onBack: () => void }
+
+const statusVariant: Record<string, 'secondary' | 'warning' | 'success' | 'destructive'> = {
+  pending: 'secondary',
+  running: 'warning',
+  done: 'success',
+  failed: 'destructive',
+};
 
 export function ImageDetail({ jobId, path, onBack }: Props) {
   const [job, setJob] = useState<Job | null>(null);
@@ -22,7 +37,13 @@ export function ImageDetail({ jobId, path, onBack }: Props) {
     return () => document.removeEventListener('keydown', onKey);
   }, [onBack]);
 
-  if (!job) return <section style={panelStyle}><p>加载中…</p></section>;
+  if (!job) {
+    return (
+      <section className="h-screen border-l border-border flex items-center justify-center">
+        <p className="text-sm text-muted-foreground">加载中…</p>
+      </section>
+    );
+  }
 
   async function copyAndTriggerRetry() {
     const promptToCopy = patch.prompt ?? job!.prompt;
@@ -44,66 +65,108 @@ export function ImageDetail({ jobId, path, onBack }: Props) {
   }
 
   return (
-    <section style={panelStyle}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <button onClick={onBack} aria-label="返回">← 返回</button>
-        <button onClick={deleteImage} title="删除这张图（磁盘也会删）"
-                style={{ color: 'var(--color-status-failed)' }}>
+    <section className="h-screen border-l border-border flex flex-col bg-background overflow-hidden">
+      <header className="flex items-center justify-between px-5 py-3 border-b border-border">
+        <Button variant="ghost" size="sm" onClick={onBack} aria-label="返回">
+          <ArrowLeft className="size-4" />
+          返回
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={deleteImage}
+          title="删除这张图（磁盘也会删）"
+          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+        >
+          <Trash2 className="size-3.5" />
           删除
-        </button>
-      </div>
-      <img src={`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`}
-           alt="大图" style={{
-             width: '100%', marginTop: 12, borderRadius: 8,
-             maxHeight: '50vh', objectFit: 'contain',
-             background: 'var(--color-bg-elevated)',
-           }} />
-      <div style={{ marginTop: 16 }}>
-        <Field label="prompt" copyable onCopy={copyAndTriggerRetry}>
-          <textarea value={patch.prompt ?? job.prompt}
-                    onChange={e => setPatch({ ...patch, prompt: e.target.value })}
-                    style={{
-                      width: '100%', minHeight: 240, fontFamily: 'monospace',
-                      resize: 'vertical', boxSizing: 'border-box',
-                    }} />
+        </Button>
+      </header>
+
+      <div className="flex-1 overflow-auto px-5 py-4 space-y-5">
+        <div className="rounded-lg border border-border bg-card overflow-hidden">
+          <img
+            src={`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`}
+            alt="大图"
+            className="w-full max-h-[50vh] object-contain"
+          />
+        </div>
+
+        <Field
+          label="prompt"
+          action={
+            <Button size="sm" variant="secondary" onClick={copyAndTriggerRetry}>
+              <Copy className="size-3.5" />
+              复制 → 重出图
+            </Button>
+          }
+        >
+          <Textarea
+            value={patch.prompt ?? job.prompt}
+            onChange={e => setPatch({ ...patch, prompt: e.target.value })}
+            className="min-h-[240px] font-mono text-[13px] leading-relaxed resize-y"
+            spellCheck={false}
+          />
         </Field>
+
         <Field label="model">
-          <input value={patch.model ?? job.model}
-                 onChange={e => setPatch({ ...patch, model: e.target.value })}
-                 style={{ width: '100%', boxSizing: 'border-box' }} />
+          <Input
+            value={patch.model ?? job.model}
+            onChange={e => setPatch({ ...patch, model: e.target.value })}
+            className="font-mono text-[13px]"
+          />
         </Field>
+
         <Field label="seed">
-          <input value={(patch.seed ?? job.seed ?? '') as string | number}
-                 onChange={e => setPatch({ ...patch, seed: e.target.value ? Number(e.target.value) : null })}
-                 style={{ width: '100%', boxSizing: 'border-box' }} />
+          <Input
+            value={(patch.seed ?? job.seed ?? '') as string | number}
+            onChange={e => setPatch({ ...patch, seed: e.target.value ? Number(e.target.value) : null })}
+            className="font-mono text-[13px]"
+          />
         </Field>
-        <Field label="submitted_at">
-          <span style={{ color: 'var(--color-text-muted)' }}>{job.submitted_at}</span>
-        </Field>
-        <Field label="status">
-          <span style={{ color: `var(--color-status-${job.status})` }}>{job.status}</span>
-        </Field>
+
+        <Separator />
+
+        <div className="grid grid-cols-2 gap-4 text-[13px]">
+          <MetaRow label="submitted_at" value={<span className="font-mono text-muted-foreground">{job.submitted_at}</span>} />
+          <MetaRow
+            label="status"
+            value={<Badge variant={statusVariant[job.status] ?? 'secondary'}>{job.status}</Badge>}
+          />
+        </div>
+
+        {toast && (
+          <div className="flex items-start gap-2 rounded-md border border-[color:var(--status-done)]/30 bg-[color:var(--status-done)]/15 px-3 py-2 text-xs text-[color:var(--status-done)]">
+            <CheckCircle2 className="size-3.5 shrink-0 mt-0.5" />
+            <span>{toast}</span>
+          </div>
+        )}
       </div>
-      {toast && <div style={{ marginTop: 12, padding: 8, background: 'var(--color-status-done)', borderRadius: 6, color: 'black' }}>{toast}</div>}
     </section>
   );
 }
 
-function Field({ label, copyable, onCopy, children }: {
-  label: string; copyable?: boolean; onCopy?: () => void; children: React.ReactNode;
+function Field({ label, action, children }: {
+  label: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
 }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-        <label style={{ fontSize: 'var(--fs-label)', color: 'var(--color-text-muted)' }}>{label}</label>
-        {copyable && <button onClick={onCopy} style={{ fontSize: 'var(--fs-meta)', padding: '2px 8px' }}>复制 → 重出图</button>}
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label className={cn('text-xs uppercase tracking-wider text-muted-foreground font-medium')}>{label}</Label>
+        {action}
       </div>
       {children}
     </div>
   );
 }
 
-const panelStyle: React.CSSProperties = {
-  borderLeft: '1px solid var(--color-border)',
-  padding: 16, height: '100vh', overflow: 'auto',
-};
+function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs uppercase tracking-wider text-muted-foreground">{label}</span>
+      {value}
+    </div>
+  );
+}
