@@ -26,3 +26,10 @@ venv/
 # 前端构建产物（由 vite build 生成）
 skill/viewer_server/static/
 
+# tsc -b 的中间产物（与 .tsx 源同目录生成的 .js / .tsbuildinfo）
+web/src/**/*.js
+web/tsconfig.tsbuildinfo
+
+# pnpm 内部生成
+web/pnpm-workspace.yaml
+
