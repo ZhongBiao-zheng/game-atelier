@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { LeftSidebar } from './components/LeftSidebar';
 
 interface Config { image_storage_root: string }
 
@@ -26,17 +27,15 @@ function FirstRunConfigPlaceholder({ onSaved }: { onSaved: (c: Config) => void }
 }
 
 function ThreeColumnLayout() {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const sseSignal = 0;  // Task D8 接 SSE 后改为 hook 返回值
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: '20% 50% 30%',
-      height: '100vh',
-    }}>
-      <aside style={{ borderRight: '1px solid var(--color-border)', padding: 16 }}>
-        <h2 style={{ fontSize: 'var(--fs-section)' }}>角色列表</h2>
-      </aside>
+    <div style={{ display: 'grid', gridTemplateColumns: '20% 50% 30%', height: '100vh' }}>
+      <LeftSidebar sseSignal={sseSignal} onSelect={setSelectedId} />
       <main style={{ padding: 16 }}>
-        <h2 style={{ fontSize: 'var(--fs-section)' }}>图廊</h2>
+        <h2 style={{ fontSize: 'var(--fs-section)' }}>
+          图廊 {selectedId ? `(${selectedId})` : ''}
+        </h2>
       </main>
       <section style={{ borderLeft: '1px solid var(--color-border)', padding: 16 }}>
         <h2 style={{ fontSize: 'var(--fs-section)' }}>规格表单</h2>
