@@ -36,24 +36,46 @@ export function ImageDetail({ jobId, path, onBack }: Props) {
       : '已保存，但剪贴板失败，请手动复制 prompt');
   }
 
+  async function deleteImage() {
+    if (!window.confirm(`删除这张图？\n${path}\n（磁盘文件也会删，不可恢复）`)) return;
+    const r = await fetch(`/api/jobs/${jobId}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    if (!r.ok) { setToast(`删除失败：HTTP ${r.status}`); return; }
+    onBack();
+  }
+
   return (
     <section style={panelStyle}>
-      <button onClick={onBack} aria-label="返回">← 返回</button>
-      <img src={`/api/raw?path=${encodeURIComponent(path)}`}
-           alt="大图" style={{ width: '100%', marginTop: 12, borderRadius: 8 }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <button onClick={onBack} aria-label="返回">← 返回</button>
+        <button onClick={deleteImage} title="删除这张图（磁盘也会删）"
+                style={{ color: 'var(--color-status-failed)' }}>
+          删除
+        </button>
+      </div>
+      <img src={`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`}
+           alt="大图" style={{
+             width: '100%', marginTop: 12, borderRadius: 8,
+             maxHeight: '50vh', objectFit: 'contain',
+             background: 'var(--color-bg-elevated)',
+           }} />
       <div style={{ marginTop: 16 }}>
         <Field label="prompt" copyable onCopy={copyAndTriggerRetry}>
           <textarea value={patch.prompt ?? job.prompt}
                     onChange={e => setPatch({ ...patch, prompt: e.target.value })}
-                    rows={4} />
+                    style={{
+                      width: '100%', minHeight: 240, fontFamily: 'monospace',
+                      resize: 'vertical', boxSizing: 'border-box',
+                    }} />
         </Field>
         <Field label="model">
           <input value={patch.model ?? job.model}
-                 onChange={e => setPatch({ ...patch, model: e.target.value })} />
+                 onChange={e => setPatch({ ...patch, model: e.target.value })}
+                 style={{ width: '100%', boxSizing: 'border-box' }} />
         </Field>
         <Field label="seed">
           <input value={(patch.seed ?? job.seed ?? '') as string | number}
-                 onChange={e => setPatch({ ...patch, seed: e.target.value ? Number(e.target.value) : null })} />
+                 onChange={e => setPatch({ ...patch, seed: e.target.value ? Number(e.target.value) : null })}
+                 style={{ width: '100%', boxSizing: 'border-box' }} />
         </Field>
         <Field label="submitted_at">
           <span style={{ color: 'var(--color-text-muted)' }}>{job.submitted_at}</span>

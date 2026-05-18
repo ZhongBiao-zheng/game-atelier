@@ -1,47 +1,53 @@
 ---
 name: character-workflow
-description: 游戏角色资产工作流。承接画师在 Web UI 上的反馈/改 prompt/改 spec，每 turn 起始读取 .runtime/draft/、同步活跃角色、按需调 Lovart 出图。仅在画师明确说"开始角色工作流"或调用 /character-workflow 时触发。
+description: 游戏角色资产工作流。承接画师在 Web UI 上的反馈、改 prompt、改 spec，对话驱动逐项问清风格/配色/镜头/道具后调 Lovart 中文 prompt 出图。**主动触发**当用户说"开始角色工作流"、"做个角色"、"出张角色立绘"、"加个新角色"、`/character-workflow <名>`，或 Web 端 viewer-server 已开着且用户粘"继续"。**禁止**生成带 `?`/"待补充"/"留空" 占位的 spec 文档 —— 决策永远走对话。
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Edit
+  - AskUserQuestion
+version: 2.0.0
 ---
 
-# Character Workflow Skill
+# Character Workflow
 
-## Turn 起始三步（**每次 turn 必做**）
+## 哲学锚（任何场景下都不许违反）
 
-### 1. 处理 draft 反馈（原子 rename）
+1. **文件系统是唯一 source of truth** —— `characters/<id>.md`、`.runtime/draft/*.md`、`.runtime/jobs/*.json`
+2. **画师的每个动作终态都是文件** —— Web UI 写文件，Skill 读文件
+3. **对话决策、文档归档** —— 永远不出"待补充"占位让画师补全
+4. **中文 prompt 优先** —— 画师的链路全程中文
 
-调用 `skill/character_workflow/lib/draft_processor.py` 的 `process_drafts()`：
+## Turn 起始三步（每次 turn 必做）
 
-- 将 `.runtime/draft/*.md` 原子 rename 到 `.runtime/processing/<ts>-<original>.md`
-- 读取 processing 目录全部内容、按文件名升序合并到当前上下文
-- 读完后将 processing 文件移到 `.runtime/draft-processed/`
-
-```bash
-python -c "from skill.character_workflow.lib.draft_processor import process_drafts; print(process_drafts())"
+```
+1. draft_processor.process_drafts()  → 读 .runtime/draft/ 拿画师反馈
+2. active_character.read_active()    → 同步当前处理的角色 id
+3. read characters/<active_id>.md    → 拿最新 spec
 ```
 
-### 2. 同步活跃角色
+**详细步骤** → `references/turn-flow.md`
 
-调用 `skill/character_workflow/lib/active_character.py`：
+## 关键协议
 
-- 读 `.runtime/active-character.json` 拿 `active_id`
-- 如果文件不存在或 `active_id` 为 null：根据上下文判断当前讨论的角色，或问画师"想处理哪个角色？"
-- 处理某角色前：写入 `.runtime/active-character.json` `{"active_id":"<id>","updated_at":"<iso>"}`
+### 新建角色 / 补全 spec
 
-### 3. 读取角色档案
+不要凭模板生成 `?` 占位文档。改为对话逐项问清：风格档 → 配色 → 镜头 → 视觉锚点。一次问 1–3 个，二选一优先。
 
-- 读 `characters/<active_id>.md` 拿最新 spec
-- 如果文件 mtime 新于上次 turn 结束时记录的 mtime：使用新内容覆盖记忆
+**完整协议（含反例）** → `references/spec-protocol.md`
 
-## 出图流程
+### 写出图 prompt
 
-当画师确认要出图时：
+只在已确定要点齐了之后写。中文模板，按 "主体 → 服装 → 头部 → 道具 → 姿势 → 场景 → 风格 → 规格" 8 段式。
 
-1. 生成 `job_id = job-<ulid>`
-2. 写 `.runtime/jobs/<job_id>.json` `status=pending`（用 `lib/jobs.py` 的 `write_job_pending`）
-3. 调用 lovart-api skill（`/Users/zhengzhongbiao/.claude/skills/lovart-api/`）出图
-4. 出图开始时更新 `status=running`
-5. 出图完成后更新 `status=done`、填充 `output_paths`
-6. 出图失败时更新 `status=failed`、填充 `error`
+**模板和示例** → `references/prompt-zh.md`
+
+### 调 Lovart 出图
+
+**永远先确认再调用。** `jobs.write_job_pending_confirm` 把"出图卡片"（模型/厂家/尺寸/n/参考图/中文 prompt）落盘 → 在终端把卡片完整打给画师 → 等画师明确说"出图/确认"或 Web 端点确认（推到 PENDING）→ 再调 `/Users/zhengzhongbiao/.claude/skills/lovart-api/` → 更新状态 → **在终端用 `![v1](绝对路径)` markdown 把每张图打出来**（让 CC 终端直接渲染图）。一次 4 张做对比。
+
+**完整调用流程** → `references/lovart-call.md`
 
 ## viewer-server 启停
 
@@ -49,26 +55,12 @@ python -c "from skill.character_workflow.lib.draft_processor import process_draf
 
 ```bash
 python skill/viewer-server/server.py start
-```
-
-完成后：
-
-```bash
 python skill/viewer-server/server.py open-browser
 ```
 
-server 启动时会自动清理 stale PID（见 viewer-server SKILL.md）。
+server 启动时会自动清理 stale PID。详见 `skill/viewer_server/SKILL.md`。
 
-## 哲学锚（不许违反）
+## 何时跳过本 Skill
 
-1. 文件系统是唯一 source of truth
-2. 画师写动作的最终归宿是文件
-3. Skill 内核纯 markdown + Python helpers，不绑死 host
-4. 零部署、零账号、零云
-
-## 触发条件
-
-仅在以下情况触发：
-- 用户输入 `/character-workflow <角色名>` 命令
-- 用户明确说"开始角色工作流"或"开始处理角色 X"
-- viewer-server 已运行时，用户在 CC 按 Cmd+V + Enter 粘贴 "继续"
+- 用户问的是 git / 代码 / 部署 / 纯问答 → 跳过 turn 起始三步
+- 用户没明确开始角色工作流且 viewer-server 没开 → 不要主动推角色话题
