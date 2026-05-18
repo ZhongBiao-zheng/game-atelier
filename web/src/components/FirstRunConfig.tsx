@@ -48,11 +48,11 @@ export function FirstRunConfig({ onSaved }: Props) {
   return (
     <div className="min-h-screen flex items-center justify-center px-6 bg-background">
       <div className="w-full max-w-[560px]">
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-3 mb-3">
           <Sparkles className="size-5 text-primary" />
-          <h1 className="text-2xl font-semibold tracking-tight">角色资产工作流</h1>
+          <h1 className="font-[var(--font-display)] text-4xl tracking-tight">角色资产工作流</h1>
         </div>
-        <p className="text-sm text-muted-foreground mb-8">
+        <p className="text-sm text-muted-foreground mb-10 leading-relaxed">
           选一个目录存放你的出图。可以用默认目录，也可以手动指定。
         </p>
 

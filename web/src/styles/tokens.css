@@ -1,3 +1,9 @@
+/* Atelier 字体加载 —— Google Fonts CDN（必须在所有 @import 前面）
+   Display: Instrument Serif (italic + regular)
+   Body: Geist (400/500/600)
+   Mono: JetBrains Mono (400/500)
+*/
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -33,46 +39,65 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  --font-display: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 :root {
-  --radius: 0.625rem;
+  --radius: 0.5rem;
 
-  /* Dark-first palette (project has no light mode) */
-  --background: #0F0F0F;
-  --foreground: #E5E5E5;
-  --card: #1A1A1A;
-  --card-foreground: #E5E5E5;
-  --popover: #1A1A1A;
-  --popover-foreground: #E5E5E5;
-  --primary: #3B82F6;
-  --primary-foreground: #FFFFFF;
-  --secondary: #2A2A2A;
-  --secondary-foreground: #E5E5E5;
-  --muted: #1A1A1A;
-  --muted-foreground: #9CA3AF;
-  --accent: #2A2A2A;
-  --accent-foreground: #E5E5E5;
-  --destructive: #EF4444;
+  /* Atelier — warm dark palette (see DESIGN.md) */
+  --background: #0F0E0D;
+  --foreground: #EDEAE3;
+  --card: #1B1917;
+  --card-foreground: #EDEAE3;
+  --popover: #1B1917;
+  --popover-foreground: #EDEAE3;
+  --primary: #D4A574;
+  --primary-foreground: #1B1917;
+  --secondary: #2A2725;
+  --secondary-foreground: #EDEAE3;
+  --muted: #1B1917;
+  --muted-foreground: #94908B;
+  --accent: #2A2725;
+  --accent-foreground: #EDEAE3;
+  --destructive: #C95C5C;
   --destructive-foreground: #FFFFFF;
-  --border: #2A2A2A;
-  --input: #2A2A2A;
-  --ring: #3B82F6;
+  --border: #2A2725;
+  --input: #2A2725;
+  --ring: #D4A574;
 
-  /* Status colors — addressed as bg-[color:var(--status-*)] in components.
-     Also exposed via @theme inline as bg-status-* utilities. */
-  --status-pending: #6B7280;
-  --status-running: #FBBF24;
-  --status-done: #10B981;
-  --status-failed: #EF4444;
+  /* Status colors — warm-aligned semantic palette */
+  --status-pending: #6B6967;
+  --status-running: #E5B570;
+  --status-done: #7FB069;
+  --status-failed: #C95C5C;
 }
 
 @layer base {
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body, #root { height: 100%; }
   body {
-    @apply bg-background text-foreground;
-    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    @apply text-foreground;
+    background-color: var(--background);
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(212, 165, 116, 0.045), transparent 60%),
+      radial-gradient(ellipse 60% 40% at 100% 100%, rgba(212, 165, 116, 0.025), transparent 65%);
+    background-attachment: fixed;
+    font-family: var(--font-sans);
     font-size: 14px;
+    font-feature-settings: "cv11", "ss01", "ss03";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
+  code, pre, kbd, samp { font-family: var(--font-mono); }
+  /* 衬线斜体在小字号下抗锯齿优化 */
+  .italic { font-synthesis-style: none; }
+  /* 滚动条贴合暖暗主题 */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--secondary); border-radius: 999px; border: 2px solid var(--background); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
 }

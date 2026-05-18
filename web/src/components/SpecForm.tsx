@@ -4,12 +4,11 @@ import { useClipboard } from '../hooks/useClipboard';
 import { FeedbackInput } from './FeedbackInput';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 
-interface Props { characterId: string | null; sseSignal: number }
+interface Props { characterId: string | null; characterName: string | null; sseSignal: number }
 
-export function SpecForm({ characterId, sseSignal }: Props) {
+export function SpecForm({ characterId, characterName, sseSignal }: Props) {
   const [content, setContent] = useState('');
   const [serverContent, setServerContent] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -23,16 +22,11 @@ export function SpecForm({ characterId, sseSignal }: Props) {
       .then(r => r.ok ? r.json() : { content: '' })
       .then(d => {
         setServerContent(d.content);
-        // §5.4: don't overwrite dirty content — surface stale notice instead
         if (!dirty) { setContent(d.content); }
       });
-    // dirty is intentionally excluded from deps: refetch should only run when
-    // characterId or sseSignal change. Reading dirty via closure is fine here
-    // because the effect won't fire on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characterId, sseSignal]);
 
-  // Reset state when switching characters
   useEffect(() => {
     setDirty(false);
     setToast(null);
@@ -77,8 +71,11 @@ export function SpecForm({ characterId, sseSignal }: Props) {
 
   if (!characterId) {
     return (
-      <section className="h-screen border-l border-border flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">请在左栏选择角色</p>
+      <section className="h-screen border-l border-border/60 bg-card/30 flex flex-col items-center justify-center px-6 text-center">
+        <p className="font-[var(--font-display)] italic text-xl text-foreground/65 mb-2">
+          档案区
+        </p>
+        <p className="text-xs text-muted-foreground">选中角色后在此编辑规格</p>
       </section>
     );
   }
@@ -86,14 +83,22 @@ export function SpecForm({ characterId, sseSignal }: Props) {
   const stale = serverContent !== content && !dirty;
 
   return (
-    <section className="h-screen border-l border-border flex flex-col bg-background">
-      <header className="flex items-center justify-between px-5 py-3 border-b border-border">
-        <h2 className="text-[15px] font-semibold tracking-tight">规格表单</h2>
+    <section className="h-screen border-l border-border/60 bg-card/30 flex flex-col">
+      <header className="flex items-end justify-between px-6 pt-6 pb-4 border-b border-border/40 gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground/70 mb-1">
+            spec · 档案
+          </div>
+          <h2 className="font-[var(--font-display)] italic text-2xl tracking-tight truncate text-foreground/95">
+            {characterName ?? '—'}
+          </h2>
+        </div>
         <Button
           variant="ghost"
           size="sm"
           onClick={refresh}
-          title="重新从磁盘读取（终端 Claude 改完档案后用）"
+          title="重新从磁盘读取"
+          className="shrink-0"
         >
           <RefreshCw className="size-3.5" />
           刷新
@@ -115,11 +120,11 @@ export function SpecForm({ characterId, sseSignal }: Props) {
         </div>
       )}
 
-      <div className="flex-1 min-h-0 flex flex-col px-5 py-4 gap-3">
+      <div className="flex-1 min-h-0 flex flex-col px-5 pt-4 pb-3 gap-3">
         <Textarea
           value={content}
           onChange={e => { setContent(e.target.value); setDirty(true); }}
-          className="flex-1 resize-none font-mono text-[13px] leading-relaxed"
+          className="flex-1 resize-none font-mono text-[13px] leading-[1.7] bg-background/40"
           placeholder="角色规格 markdown…"
           spellCheck={false}
         />
@@ -131,7 +136,7 @@ export function SpecForm({ characterId, sseSignal }: Props) {
           </Button>
           {dirty && (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <span className="inline-block size-1.5 rounded-full bg-[color:var(--status-running)]" />
+              <span className="inline-block size-1.5 rounded-full bg-[color:var(--status-running)] animate-pulse" />
               未保存
             </span>
           )}
@@ -154,8 +159,7 @@ export function SpecForm({ characterId, sseSignal }: Props) {
         )}
       </div>
 
-      <Separator />
-      <div className="px-5 py-4">
+      <div className="px-5 py-4 border-t border-border/40 bg-background/30">
         <FeedbackInput characterId={characterId} />
       </div>
     </section>

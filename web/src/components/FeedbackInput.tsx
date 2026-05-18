@@ -3,7 +3,6 @@ import { Send, CheckCircle2 } from 'lucide-react';
 import { useClipboard } from '../hooks/useClipboard';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
 
 interface Props { characterId: string | null }
 
@@ -24,8 +23,11 @@ export function FeedbackInput({ characterId }: Props) {
   }
 
   return (
-    <div className="space-y-2">
-      <Label className="text-xs uppercase tracking-wider text-muted-foreground">反馈</Label>
+    <div className="space-y-2.5">
+      <div className="flex items-baseline justify-between">
+        <span className="font-[var(--font-display)] italic text-base text-foreground/90">反馈</span>
+        <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground/60">to AI</span>
+      </div>
       <Textarea
         value={text}
         onChange={e => setText(e.target.value)}
