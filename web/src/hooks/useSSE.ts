@@ -16,6 +16,7 @@ export function useSSE(): number {
       es.addEventListener('image-added', bump);
       es.addEventListener('spec-changed', bump);
       es.addEventListener('active-character-changed', bump);
+      es.addEventListener('projects-changed', bump);
 
       es.onopen = () => {
         // T6: 连接（含重连）后触发全量刷新，避免错过断连期间的事件

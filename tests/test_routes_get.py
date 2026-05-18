@@ -55,8 +55,19 @@ def test_get_spec_404(client):
 def test_get_characters_lists_md_files(client):
     r = client.get("/api/characters")
     assert r.status_code == 200
-    ids = [c["id"] for c in r.json()]
+    entries = r.json()
+    ids = [c["id"] for c in entries]
     assert "shadow" in ids
+    # Display name comes from first `# heading`, not file stem.
+    by_id = {c["id"]: c for c in entries}
+    assert by_id["shadow"]["name"] == "暗影刺客女"
+
+
+def test_get_home_returns_user_home(client):
+    r = client.get("/api/home")
+    assert r.status_code == 200
+    from pathlib import Path
+    assert r.json()["home"] == str(Path.home())
 
 
 def test_get_active_character_default_null(client):

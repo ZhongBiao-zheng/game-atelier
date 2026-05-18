@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
-interface Props { sseSignal: number; onSelect: (id: string) => void }
+interface Props { sseSignal: number; onSelect: (id: string, name: string) => void }
 
 const UNCATEGORIZED = '__uncategorized__';
 
@@ -200,20 +200,26 @@ export function LeftSidebar({ sseSignal, onSelect }: Props) {
 
   if (characters.length === 0 && projects.projects.length === 0) {
     return (
-      <aside className="h-screen border-r border-border bg-background p-4 overflow-y-auto flex flex-col">
-        <p className="text-sm text-muted-foreground text-center mb-4">还没有角色档案</p>
-        <Button variant="outline" size="sm" className="w-full">
-          <Plus className="size-3.5" />
-          新建第一个角色
-        </Button>
+      <aside className="h-screen border-r border-border/60 bg-card/30 overflow-y-auto flex flex-col">
+        <BrandHeader />
+        <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-4">
+          <p className="font-[var(--font-display)] italic text-xl text-foreground/70">尚无作品</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            在终端 Claude Code<br />
+            输入"开始角色工作流"开始建档
+          </p>
+          <Button variant="outline" size="sm" className="mt-2">
+            <Plus className="size-3.5" />
+            新建角色
+          </Button>
+        </div>
       </aside>
     );
   }
 
   return (
-    <aside className="h-screen border-r border-border bg-background overflow-y-auto flex flex-col">
-      <header className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <h2 className="text-[15px] font-semibold tracking-tight">角色列表</h2>
+    <aside className="h-screen border-r border-border/60 bg-card/30 overflow-y-auto flex flex-col">
+      <BrandHeader>
         <Button
           variant="outline"
           size="sm"
@@ -223,11 +229,11 @@ export function LeftSidebar({ sseSignal, onSelect }: Props) {
           className="h-7 px-2 text-xs"
         >
           <FolderPlus className="size-3" />
-          项目
+          新项目
         </Button>
-      </header>
+      </BrandHeader>
 
-      <div className="flex-1 px-2 py-2">
+      <div className="flex-1 px-2 py-3">
         {creatingProject && (
           <section className="mb-2 flex items-center gap-1.5 px-2 py-1">
             <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
@@ -289,15 +295,15 @@ export function LeftSidebar({ sseSignal, onSelect }: Props) {
         key={c.id}
         draggable={!isEditing}
         onDragStart={(e) => onDragStart(e, c.id)}
-        onClick={() => !isEditing && onSelect(c.id)}
+        onClick={() => !isEditing && onSelect(c.id, c.name)}
         onDoubleClick={(e) => startCharEdit(c, e)}
         title="双击重命名 · 拖到项目"
         className={cn(
-          'flex items-center gap-2 px-2.5 py-1.5 rounded-md text-sm transition-colors',
+          'flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors',
           isEditing ? 'cursor-text' : 'cursor-pointer',
           isActive
             ? 'bg-primary text-primary-foreground'
-            : 'text-foreground hover:bg-accent/60',
+            : 'text-foreground/85 hover:bg-accent/50 hover:text-foreground',
         )}
       >
         <StatusBadge status={c.status} isActive={isActive} />
@@ -439,14 +445,27 @@ function DropZone({ label, active, onDrop, onDragOver, onDragLeave, children }: 
 
 function StatusBadge({ status, isActive }: { status: CharacterEntry['status']; isActive: boolean }) {
   if (status === 'idle') {
-    return <span className={cn('size-1.5 rounded-full shrink-0', isActive ? 'bg-primary-foreground/40' : 'bg-transparent')} />;
+    return <span className={cn('size-2 rounded-full shrink-0 border', isActive ? 'border-primary-foreground/40 bg-transparent' : 'border-muted-foreground/25 bg-transparent')} />;
   }
   const colorClass: Record<string, string> = {
     pending: 'bg-[color:var(--status-pending)]',
-    running: 'bg-[color:var(--status-running)] animate-pulse',
+    running: 'bg-[color:var(--status-running)] animate-pulse shadow-[0_0_8px_var(--status-running)]',
     pending_confirm: 'bg-[color:var(--status-running)]',
     done: 'bg-[color:var(--status-done)]',
     failed: 'bg-[color:var(--status-failed)]',
   };
-  return <span className={cn('size-1.5 rounded-full shrink-0', colorClass[status] || 'bg-muted-foreground/40')} />;
+  return <span className={cn('size-2 rounded-full shrink-0', colorClass[status] || 'bg-muted-foreground/40')} />;
+}
+
+function BrandHeader({ children }: { children?: React.ReactNode }) {
+  return (
+    <header className="flex items-center justify-between px-5 py-4 border-b border-border/60">
+      <div className="flex items-baseline gap-2 leading-none">
+        <span className="size-1.5 rounded-full bg-primary translate-y-[-2px]" />
+        <span className="font-[var(--font-display)] italic text-lg text-foreground">Atelier</span>
+        <span className="text-[10px] tracking-[0.18em] uppercase text-muted-foreground/70 ml-1">工坊</span>
+      </div>
+      {children}
+    </header>
+  );
 }

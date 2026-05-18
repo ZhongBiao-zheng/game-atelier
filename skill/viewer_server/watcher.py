@@ -37,13 +37,42 @@ class JobsHandler(FileSystemEventHandler):
 
 
 class CharactersHandler(FileSystemEventHandler):
+    # Skill / routes 用 atomic replace（tmp.replace），FSEvents 可能只发
+    # on_moved 或 on_created，不补全这两个 hook 就会漏掉 spec 改动。
     def on_modified(self, event: FileSystemEvent) -> None:
-        if event.is_directory:
+        self._emit(event.src_path, event.is_directory)
+
+    def on_created(self, event: FileSystemEvent) -> None:
+        self._emit(event.src_path, event.is_directory)
+
+    def on_moved(self, event: FileSystemEvent) -> None:
+        dest = getattr(event, "dest_path", "") or event.src_path
+        self._emit(dest, event.is_directory)
+
+    def _emit(self, raw_path: str, is_dir: bool) -> None:
+        if is_dir:
             return
-        p = Path(event.src_path)
-        if p.suffix != ".md":
+        p = Path(raw_path)
+        if p.suffix != ".md" or p.name.endswith(".md.tmp"):
             return
         hub.broadcast("spec-changed", {"character_id": p.stem})
+
+
+class ProjectsHandler(FileSystemEventHandler):
+    def on_modified(self, event: FileSystemEvent) -> None:
+        self._emit(event.src_path)
+
+    def on_created(self, event: FileSystemEvent) -> None:
+        self._emit(event.src_path)
+
+    def on_moved(self, event: FileSystemEvent) -> None:
+        dest = getattr(event, "dest_path", "") or event.src_path
+        self._emit(dest)
+
+    def _emit(self, raw_path: str) -> None:
+        if Path(raw_path).name != "projects.json":
+            return
+        hub.broadcast("projects-changed", {})
 
 
 class ActiveCharacterHandler(FileSystemEventHandler):
@@ -84,6 +113,7 @@ def start_watchers() -> Observer:
 
     runtime.mkdir(parents=True, exist_ok=True)
     observer.schedule(ActiveCharacterHandler(), str(runtime), recursive=False)
+    observer.schedule(ProjectsHandler(), str(runtime), recursive=False)
 
     chars_dir = project_root / "characters"
     if chars_dir.exists():

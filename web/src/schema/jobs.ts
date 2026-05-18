@@ -1,9 +1,12 @@
-export type JobStatus = 'pending' | 'running' | 'done' | 'failed';
+export type JobStatus = 'pending_confirm' | 'pending' | 'running' | 'done' | 'failed';
 
 export interface JobParams {
   size?: string;
   steps?: number;
   cfg_scale?: number;
+  vendor?: string;
+  n?: number;
+  reference_images?: string[];
   [key: string]: unknown;
 }
 
@@ -40,4 +43,15 @@ export interface CharacterEntry {
 export interface ActiveCharacterFile {
   active_id: string | null;
   updated_at: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface ProjectsFile {
+  projects: Project[];
+  assignments: Record<string, string>;  // character_id → project_id
 }
