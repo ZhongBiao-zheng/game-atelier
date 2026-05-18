@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CharacterGallery } from './components/CharacterGallery';
 import { SpecForm } from './components/SpecForm';
+import { ImageDetail } from './components/ImageDetail';
 
 interface Config { image_storage_root: string }
 
@@ -33,7 +34,11 @@ function ThreeColumnLayout() {
   const [detailJob, setDetailJob] = useState<{ path: string; jobId: string } | null>(null);
   const sseSignal = 0;  // Task D7 接 SSE 后改为 hook 返回值
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '20% 50% 30%', height: '100vh' }}>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: detailJob === null ? '20% 50% 30%' : '20% 30% 50%',
+      height: '100vh',
+    }}>
       <LeftSidebar sseSignal={sseSignal} onSelect={setSelectedId} />
       <CharacterGallery
         characterId={selectedId}
@@ -43,16 +48,7 @@ function ThreeColumnLayout() {
       />
       {detailJob === null
         ? <SpecForm characterId={selectedId} sseSignal={sseSignal} />
-        : <ImageDetailPlaceholder onBack={() => setDetailJob(null)} />}
+        : <ImageDetail jobId={detailJob.jobId} path={detailJob.path} onBack={() => setDetailJob(null)} />}
     </div>
-  );
-}
-
-function ImageDetailPlaceholder({ onBack }: { onBack: () => void }) {
-  return (
-    <section style={{ borderLeft: '1px solid var(--color-border)', padding: 16 }}>
-      <button onClick={onBack}>← 返回</button>
-      <p>图片详情（Task D5）</p>
-    </section>
   );
 }
