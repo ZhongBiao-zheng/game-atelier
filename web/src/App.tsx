@@ -3,6 +3,7 @@ import { LeftSidebar } from './components/LeftSidebar';
 import { CharacterGallery } from './components/CharacterGallery';
 import { SpecForm } from './components/SpecForm';
 import { ImageDetail } from './components/ImageDetail';
+import { useSSE } from './hooks/useSSE';
 
 interface Config { image_storage_root: string }
 
@@ -32,7 +33,7 @@ function FirstRunConfigPlaceholder({ onSaved }: { onSaved: (c: Config) => void }
 function ThreeColumnLayout() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailJob, setDetailJob] = useState<{ path: string; jobId: string } | null>(null);
-  const sseSignal = 0;  // Task D7 接 SSE 后改为 hook 返回值
+  const sseSignal = useSSE();
   return (
     <div style={{
       display: 'grid',
