@@ -22,3 +22,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# 前端构建产物（由 vite build 生成）
+skill/viewer-server/static/
+
