@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useClipboard } from '../hooks/useClipboard';
+import { FeedbackInput } from './FeedbackInput';
 
 interface Props { characterId: string | null; sseSignal: number }
 
@@ -87,6 +88,7 @@ export function SpecForm({ characterId, sseSignal }: Props) {
           color: 'black',
         }}>{toast.msg}</div>
       )}
+      <FeedbackInput characterId={characterId} />
     </section>
   );
 }
