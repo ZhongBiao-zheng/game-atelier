@@ -1,0 +1,58 @@
+# game-ui-ai-workflow
+
+游戏角色资产工作流 — Claude Code Skill + 本地 Web UI，画师可视化管理角色档案与出图。
+
+## 快速开始
+
+### 一次性安装
+
+```bash
+make install
+```
+
+需要：Python 3.11+、Node 18+、`uv`、`pnpm`。
+
+### 启动
+
+终端 A — viewer-server：
+```bash
+uv run python skill/viewer_server/server.py start
+```
+
+终端 B — 前端（开发模式）：
+```bash
+cd web && pnpm dev
+```
+
+打开浏览器：`http://localhost:5173/`
+
+首次启动会要求选图片存储目录。
+
+### 在 Claude Code 中触发 Skill
+
+```
+/character-workflow 暗影刺客女
+```
+
+Skill 会读 `characters/<id>.md`、调 Lovart 出图、把 jobs 状态写到 `.runtime/jobs/`。
+
+### 工作循环
+
+1. 在 Web 上看图 / 改 spec / 改 prompt / 写反馈
+2. 点保存 → 浏览器自动复制"继续"到剪贴板
+3. 切到 CC 窗口（Cmd+Tab）→ Cmd+V + Enter
+4. Skill 继续下一轮
+
+## 故障排查
+
+| 现象 | 解决 |
+|---|---|
+| 端口 5174 被占用 | server 会自动 +1 找空端口，看 `.runtime/server.port` |
+| `server.pid` 残留 | start 命令会自动清理 stale PID |
+| 剪贴板失败 | toast 内显示"手动复制"按钮，点一下即可 |
+| 浏览器不支持 clipboard API | 推荐 Chrome / Edge；Safari 在 HTTPS / localhost 下也可用 |
+| 多 tab 行为异常 | **限制**：同一时间只开一个 tab |
+
+## 项目结构
+
+见 `docs/api-contract.md` 和 `docs/plans/2026-05-15 游戏角色资产工作流-产品形态设计方案-v2.md`。
