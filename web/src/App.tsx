@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CharacterGallery } from './components/CharacterGallery';
+import { SpecForm } from './components/SpecForm';
 
 interface Config { image_storage_root: string }
 
@@ -21,7 +22,7 @@ export function App() {
 function FirstRunConfigPlaceholder({ onSaved }: { onSaved: (c: Config) => void }) {
   return (
     <div style={{ padding: 24 }}>
-      <h1>首次配置（Task D9 替换）</h1>
+      <h1>首次配置（Task D8 替换）</h1>
       <button onClick={() => onSaved({ image_storage_root: '/tmp/images' })}>跳过</button>
     </div>
   );
@@ -30,7 +31,7 @@ function FirstRunConfigPlaceholder({ onSaved }: { onSaved: (c: Config) => void }
 function ThreeColumnLayout() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailJob, setDetailJob] = useState<{ path: string; jobId: string } | null>(null);
-  const sseSignal = 0;  // Task D8 接 SSE 后改为 hook 返回值
+  const sseSignal = 0;  // Task D7 接 SSE 后改为 hook 返回值
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '20% 50% 30%', height: '100vh' }}>
       <LeftSidebar sseSignal={sseSignal} onSelect={setSelectedId} />
@@ -40,9 +41,18 @@ function ThreeColumnLayout() {
         onSelectImage={(path, jobId) => setDetailJob({ path, jobId })}
         sseSignal={sseSignal}
       />
-      <section style={{ borderLeft: '1px solid var(--color-border)', padding: 16 }}>
-        <h2 style={{ fontSize: 'var(--fs-section)' }}>规格表单</h2>
-      </section>
+      {detailJob === null
+        ? <SpecForm characterId={selectedId} sseSignal={sseSignal} />
+        : <ImageDetailPlaceholder onBack={() => setDetailJob(null)} />}
     </div>
+  );
+}
+
+function ImageDetailPlaceholder({ onBack }: { onBack: () => void }) {
+  return (
+    <section style={{ borderLeft: '1px solid var(--color-border)', padding: 16 }}>
+      <button onClick={onBack}>← 返回</button>
+      <p>图片详情（Task D5）</p>
+    </section>
   );
 }
