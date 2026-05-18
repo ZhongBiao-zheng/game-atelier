@@ -5,7 +5,7 @@ import path from 'path'
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: path.resolve(__dirname, '../skill/viewer-server/static'),
+    outDir: path.resolve(__dirname, '../skill/viewer_server/static'),
     emptyOutDir: true,
   },
   server: {
