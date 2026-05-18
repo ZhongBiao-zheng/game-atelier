@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
+import { X, AlertTriangle, ImageOff, Loader2 } from 'lucide-react';
 import type { Job } from '../schema/jobs';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 interface Props {
   characterId: string | null;
@@ -23,6 +26,7 @@ export function CharacterGallery({ characterId, detailMode, onSelectImage, sseSi
 
   if (!characterId) return <Empty>请在左栏选择角色</Empty>;
   if (loading && jobs.length === 0) return <Skeleton cols={detailMode ? 2 : 4} />;
+
   const allImages: { path: string; jobId: string; status: Job['status'] }[] = [];
   jobs.forEach(j => j.output_paths.forEach(p => allImages.push({ path: p, jobId: j.job_id, status: j.status })));
   const failedJobs = jobs.filter(j => j.status === 'failed');
@@ -43,39 +47,37 @@ export function CharacterGallery({ characterId, detailMode, onSelectImage, sseSi
   }
 
   const cols = detailMode ? 2 : 4;
+  const gridCols = cols === 2 ? 'grid-cols-2' : 'grid-cols-4';
+
   return (
-    <main style={{ padding: 16, overflowY: 'auto' }}>
+    <main className="overflow-y-auto p-5 bg-background">
       {pendingConfirm.map(j => <ConfirmCard key={j.job_id} job={j} />)}
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 12 }}>
+
+      <div className={cn('grid gap-3', gridCols)}>
         {allImages.map((img, i) => (
-          <div key={i} style={{ position: 'relative', aspectRatio: '1' }}>
+          <div key={i} className="group relative aspect-square">
             <button
               onClick={() => onSelectImage(img.path, img.jobId)}
-              style={{
-                padding: 0, background: 'var(--color-bg-elevated)',
-                border: '1px solid var(--color-border)', borderRadius: 8,
-                overflow: 'hidden', width: '100%', height: '100%', cursor: 'pointer',
-              }}>
-              <img src={`/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`}
-                   alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              className="size-full overflow-hidden rounded-lg border border-border bg-card transition-all hover:border-primary/40 hover:shadow-lg cursor-pointer p-0"
+            >
+              <img
+                src={`/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`}
+                alt=""
+                className="size-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+              />
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); void deleteImage(img.jobId, img.path); }}
               title="删除这张图"
-              style={{
-                position: 'absolute', top: 6, right: 6,
-                width: 24, height: 24, borderRadius: '50%',
-                background: 'rgba(0,0,0,0.6)', color: 'white',
-                border: 'none', cursor: 'pointer', fontSize: 14, lineHeight: 1,
-              }}>×</button>
+              className="absolute right-1.5 top-1.5 size-6 rounded-full bg-black/60 text-white grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm hover:bg-black/80 cursor-pointer border-0"
+            >
+              <X className="size-3.5" />
+            </button>
           </div>
         ))}
-        {isRunning && Array.from({ length: 4 }).map((_, i) => (
-          <SkeletonCard key={`s${i}`} />
-        ))}
-        {failedJobs.map(j => (
-          <ErrorCard key={j.job_id} error={j.error || '未知错误'} jobId={j.job_id} />
-        ))}
+
+        {isRunning && Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={`s${i}`} />)}
+        {failedJobs.map(j => <ErrorCard key={j.job_id} jobId={j.job_id} error={j.error || '未知错误'} />)}
       </div>
     </main>
   );
@@ -83,16 +85,20 @@ export function CharacterGallery({ characterId, detailMode, onSelectImage, sseSi
 
 function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <main style={{ padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>
-      {children}
+    <main className="flex items-center justify-center p-5 text-sm text-muted-foreground bg-background">
+      <div className="flex flex-col items-center gap-3">
+        <ImageOff className="size-8 opacity-40" />
+        <span>{children}</span>
+      </div>
     </main>
   );
 }
 
 function Skeleton({ cols }: { cols: number }) {
+  const gridCols = cols === 2 ? 'grid-cols-2' : 'grid-cols-4';
   return (
-    <main style={{ padding: 16 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 12 }}>
+    <main className="p-5 bg-background">
+      <div className={cn('grid gap-3', gridCols)}>
         {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
       </div>
     </main>
@@ -101,19 +107,11 @@ function Skeleton({ cols }: { cols: number }) {
 
 function SkeletonCard() {
   return (
-    <div style={{
-      aspectRatio: '1', background: 'var(--color-bg-elevated)',
-      borderRadius: 8, position: 'relative', overflow: 'hidden',
-    }}>
-      <div style={{
-        position: 'absolute', inset: 0,
-        background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent)',
-        animation: 'shimmer 1.5s infinite',
-      }} />
-      <div style={{ position: 'absolute', bottom: 8, left: 8, fontSize: 'var(--fs-meta)', color: 'var(--color-status-running)' }}>
+    <div className="relative aspect-square overflow-hidden rounded-lg border border-border bg-card animate-pulse">
+      <div className="absolute bottom-2 left-2 flex items-center gap-1.5 text-xs text-[color:var(--status-running)]">
+        <Loader2 className="size-3 animate-spin" />
         生成中…
       </div>
-      <style>{`@keyframes shimmer {0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}`}</style>
     </div>
   );
 }
@@ -131,7 +129,6 @@ function ConfirmCard({ job }: { job: Job }) {
         const d = await r.json().catch(() => ({}));
         throw new Error(d.detail || `HTTP ${r.status}`);
       }
-      // SSE 自动会重新拉 jobs，组件自然消失
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -143,38 +140,42 @@ function ConfirmCard({ job }: { job: Job }) {
   const refs = (params.reference_images || []) as string[];
 
   return (
-    <div style={{
-      border: '1px solid var(--color-status-running)',
-      borderRadius: 8, padding: 16, marginBottom: 16,
-      background: 'var(--color-bg-elevated)',
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
-        <strong style={{ color: 'var(--color-status-running)' }}>即将出图 · 待确认</strong>
-        <span style={{ fontSize: 'var(--fs-meta)', color: 'var(--color-text-muted)' }}>{job.job_id}</span>
+    <div className="mb-5 rounded-lg border border-[color:var(--status-running)]/40 bg-[color:var(--status-running)]/5 p-4">
+      <div className="flex items-baseline justify-between mb-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--status-running)]">
+          <span className="inline-block size-1.5 rounded-full bg-[color:var(--status-running)] animate-pulse" />
+          即将出图 · 待确认
+        </div>
+        <span className="font-mono text-xs text-muted-foreground">{job.job_id}</span>
       </div>
-      <dl style={{ fontSize: 'var(--fs-meta)', lineHeight: 1.7, margin: 0 }}>
+
+      <dl className="text-xs leading-relaxed space-y-1">
         <Row label="模型 / 厂家">{job.model}{params.vendor ? ` · ${params.vendor}` : ''}</Row>
         <Row label="尺寸">{params.size || '默认'}</Row>
         <Row label="数量">{params.n ?? 1} 张</Row>
-        <Row label="参考图">{refs.length ? refs.map((p, i) => <div key={i} style={{ fontFamily: 'monospace' }}>{p}</div>) : '无'}</Row>
+        <Row label="参考图">
+          {refs.length
+            ? <div className="space-y-0.5">{refs.map((p, i) => <div key={i} className="font-mono">{p}</div>)}</div>
+            : '无'}
+        </Row>
         <Row label="seed">{job.seed ?? '随机'}</Row>
         <Row label="中文 prompt">
-          <pre style={{
-            whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0,
-            fontFamily: 'inherit', background: 'transparent',
-          }}>{job.prompt}</pre>
+          <pre className="whitespace-pre-wrap break-words font-sans bg-transparent">{job.prompt}</pre>
         </Row>
       </dl>
-      <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-        <button onClick={() => act('confirm')} disabled={busy !== null}>
+
+      <div className="mt-4 flex gap-2">
+        <Button size="sm" onClick={() => act('confirm')} disabled={busy !== null}>
           {busy === 'confirm' ? '推进中…' : '出图'}
-        </button>
-        <button onClick={() => act('cancel')} disabled={busy !== null}>
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => act('cancel')} disabled={busy !== null}>
           {busy === 'cancel' ? '取消中…' : '取消'}
-        </button>
+        </Button>
       </div>
+
       {error && (
-        <div style={{ marginTop: 8, color: 'var(--color-status-failed)', fontSize: 'var(--fs-meta)' }}>
+        <div className="mt-3 text-xs text-destructive flex items-center gap-1.5">
+          <AlertTriangle className="size-3.5" />
           {error}
         </div>
       )}
@@ -184,28 +185,24 @@ function ConfirmCard({ job }: { job: Job }) {
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: 12, marginBottom: 4 }}>
-      <dt style={{ color: 'var(--color-text-muted)' }}>{label}</dt>
-      <dd style={{ margin: 0 }}>{children}</dd>
+    <div className="grid grid-cols-[80px_1fr] gap-3">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="m-0">{children}</dd>
     </div>
   );
 }
 
 function ErrorCard({ jobId }: { error: string; jobId: string }) {
   return (
-    <div style={{
-      aspectRatio: '1', background: 'var(--color-bg-elevated)',
-      border: '1px solid var(--color-status-failed)', borderRadius: 8,
-      padding: 12, display: 'flex', flexDirection: 'column', justifyContent: 'center', textAlign: 'center',
-    }}>
-      <div style={{ fontSize: 24 }}>⚠️</div>
-      <div style={{ fontSize: 'var(--fs-meta)', color: 'var(--color-status-failed)', margin: '4px 0' }}>
-        出图失败
-      </div>
-      <a href="#" onClick={e => { e.preventDefault(); alert(`重试 ${jobId}：复制 prompt 后 Cmd+V`); }}
-         style={{ fontSize: 'var(--fs-meta)', color: 'var(--color-accent)' }}>
+    <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-center">
+      <AlertTriangle className="size-7 text-destructive" />
+      <div className="text-xs text-destructive font-medium">出图失败</div>
+      <button
+        onClick={() => alert(`重试 ${jobId}：复制 prompt 后 Cmd+V`)}
+        className="text-xs text-primary hover:underline cursor-pointer bg-transparent border-0 p-0"
+      >
         [重试]
-      </a>
+      </button>
     </div>
   );
 }

@@ -1,5 +1,9 @@
 import { useState } from 'react';
+import { Send, CheckCircle2 } from 'lucide-react';
 import { useClipboard } from '../hooks/useClipboard';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 
 interface Props { characterId: string | null }
 
@@ -20,16 +24,27 @@ export function FeedbackInput({ characterId }: Props) {
   }
 
   return (
-    <div style={{ borderTop: '1px solid var(--color-border)', padding: 16 }}>
-      <h3 style={{ fontSize: 'var(--fs-label)', marginBottom: 8, color: 'var(--color-text-muted)' }}>
-        反馈
-      </h3>
-      <textarea value={text} onChange={e => setText(e.target.value)}
-                placeholder="例如：2 号那张光线再阴一点" rows={3} />
-      <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
-        <button onClick={submit} disabled={!text.trim()}>提交</button>
+    <div className="space-y-2">
+      <Label className="text-xs uppercase tracking-wider text-muted-foreground">反馈</Label>
+      <Textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder="例如：2 号那张光线再阴一点"
+        rows={3}
+        className="resize-none text-[13px]"
+      />
+      <div className="flex justify-end">
+        <Button size="sm" onClick={submit} disabled={!text.trim()}>
+          <Send className="size-3.5" />
+          提交
+        </Button>
       </div>
-      {toast && <div style={{ marginTop: 8, fontSize: 'var(--fs-meta)', color: 'var(--color-status-done)' }}>{toast}</div>}
+      {toast && (
+        <div className="flex items-start gap-2 rounded-md border border-[color:var(--status-done)]/30 bg-[color:var(--status-done)]/15 px-3 py-2 text-xs text-[color:var(--status-done)]">
+          <CheckCircle2 className="size-3.5 shrink-0 mt-0.5" />
+          <span>{toast}</span>
+        </div>
+      )}
     </div>
   );
 }

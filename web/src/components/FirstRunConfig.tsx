@@ -1,26 +1,43 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { FolderOpen, FolderEdit, AlertCircle, Sparkles } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 
 interface Props { onSaved: (root: string) => void }
 
+const DEFAULT_PATH = '~/Pictures/character-assets';
+
 export function FirstRunConfig({ onSaved }: Props) {
-  const [path, setPath] = useState('');
+  const [mode, setMode] = useState<'default' | 'custom'>('default');
+  const [customPath, setCustomPath] = useState('');
+  const [defaultPath, setDefaultPath] = useState(DEFAULT_PATH);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    fetch('/api/home').then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.home) setDefaultPath(`${d.home}/Pictures/character-assets`);
+    }).catch(() => {});
+  }, []);
+
+  const effectivePath = mode === 'default' ? defaultPath : customPath.trim();
+
   async function submit() {
-    if (!path.trim()) return;
+    if (!effectivePath) return;
     setSubmitting(true);
     setError(null);
     try {
       const r = await fetch('/api/config', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_storage_root: path.trim() }),
+        body: JSON.stringify({ image_storage_root: effectivePath }),
       });
       if (!r.ok) {
         const data = await r.json().catch(() => ({}));
         throw new Error(data.detail || `HTTP ${r.status}`);
       }
-      onSaved(path.trim());
+      const saved = await r.json();
+      onSaved(saved.image_storage_root || effectivePath);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -29,23 +46,105 @@ export function FirstRunConfig({ onSaved }: Props) {
   }
 
   return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }}>
-      <div style={{ width: 480, padding: 32 }}>
-        <h1 style={{ fontSize: 24, marginBottom: 8 }}>角色资产工作流</h1>
-        <p style={{ color: 'var(--color-text-muted)', marginBottom: 24 }}>
-          你的角色资产工作流管理台。先选一个目录存放出图。
+    <div className="min-h-screen flex items-center justify-center px-6 bg-background">
+      <div className="w-full max-w-[560px]">
+        <div className="flex items-center gap-2 mb-2">
+          <Sparkles className="size-5 text-primary" />
+          <h1 className="text-2xl font-semibold tracking-tight">角色资产工作流</h1>
+        </div>
+        <p className="text-sm text-muted-foreground mb-8">
+          选一个目录存放你的出图。可以用默认目录，也可以手动指定。
         </p>
-        <label style={{ display: 'block', fontSize: 'var(--fs-label)', marginBottom: 4 }}>图片存储目录</label>
-        <input value={path} onChange={e => setPath(e.target.value)}
-               placeholder="/Users/<you>/Pictures/character-assets"
-               style={{ marginBottom: 12 }} />
-        <button onClick={submit} disabled={!path.trim() || submitting} style={{ width: '100%' }}>
+
+        <div className="space-y-3 mb-6">
+          <OptionCard
+            active={mode === 'default'}
+            onClick={() => setMode('default')}
+            icon={<FolderOpen className="size-4" />}
+            title="使用默认目录"
+            badge="推荐"
+          >
+            <div className="font-mono text-xs text-muted-foreground mt-1 truncate">{defaultPath}</div>
+          </OptionCard>
+
+          <OptionCard
+            active={mode === 'custom'}
+            onClick={() => setMode('custom')}
+            icon={<FolderEdit className="size-4" />}
+            title="自定义目录"
+          >
+            <Input
+              value={customPath}
+              onChange={e => { setCustomPath(e.target.value); setMode('custom'); }}
+              onClick={e => e.stopPropagation()}
+              placeholder="例如 /Users/<you>/Pictures/我的角色资产"
+              className="font-mono text-xs mt-2"
+            />
+          </OptionCard>
+        </div>
+
+        <Button
+          onClick={submit}
+          disabled={!effectivePath || submitting}
+          className="w-full"
+          size="lg"
+        >
           {submitting ? '保存中…' : '开始使用'}
-        </button>
-        {error && <p style={{ color: 'var(--color-status-failed)', fontSize: 'var(--fs-meta)', marginTop: 8 }}>{error}</p>}
+        </Button>
+
+        <p className="text-xs text-muted-foreground mt-3 text-center">
+          目录不存在会自动创建。<span className="font-mono">~</span> 会展开成你的 home 目录。
+        </p>
+
+        {error && (
+          <div className="mt-4 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <AlertCircle className="size-3.5 shrink-0 mt-0.5" />
+            <span>{error}</span>
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function OptionCard({
+  active, onClick, icon, title, badge, children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  title: string;
+  badge?: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'w-full text-left rounded-lg border bg-card px-4 py-3 transition-all cursor-pointer',
+        'hover:border-primary/40',
+        active
+          ? 'border-primary ring-2 ring-primary/20'
+          : 'border-border',
+      )}
+    >
+      <div className="flex items-center gap-2.5">
+        <span className={cn('shrink-0', active ? 'text-primary' : 'text-muted-foreground')}>{icon}</span>
+        <span className="text-sm font-medium flex-1">{title}</span>
+        {badge && (
+          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/15 text-primary uppercase tracking-wider">
+            {badge}
+          </span>
+        )}
+        <span className={cn(
+          'size-4 rounded-full border-2 shrink-0 grid place-items-center transition-colors',
+          active ? 'border-primary' : 'border-muted-foreground/40',
+        )}>
+          {active && <span className="size-1.5 rounded-full bg-primary" />}
+        </span>
+      </div>
+      {children && <div>{children}</div>}
+    </button>
   );
 }

@@ -38,7 +38,7 @@
 :root {
   --radius: 0.625rem;
 
-  /* shadcn semantic tokens (dark-first; project has no light mode) */
+  /* Dark-first palette (project has no light mode) */
   --background: #0F0F0F;
   --foreground: #E5E5E5;
   --card: #1A1A1A;
@@ -59,36 +59,12 @@
   --input: #2A2A2A;
   --ring: #3B82F6;
 
+  /* Status colors — addressed as bg-[color:var(--status-*)] in components.
+     Also exposed via @theme inline as bg-status-* utilities. */
   --status-pending: #6B7280;
   --status-running: #FBBF24;
   --status-done: #10B981;
   --status-failed: #EF4444;
-
-  /* Legacy aliases — kept so untouched components (CharacterGallery, LeftSidebar,
-     FirstRunConfig, FeedbackInput) keep working. Remove once they migrate. */
-  --color-bg: var(--background);
-  --color-bg-elevated: var(--card);
-  --color-border: var(--border);
-  --color-text: var(--foreground);
-  --color-text-muted: var(--muted-foreground);
-  --color-text-dim: #6B7280;
-  --color-accent: var(--primary);
-  --color-accent-hover: #2563EB;
-
-  --fs-section: 15px;
-  --fs-label: 13px;
-  --fs-value: 14px;
-  --fs-meta: 12px;
-
-  --fw-semibold: 600;
-  --fw-medium: 500;
-  --fw-regular: 400;
-
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-6: 24px;
 }
 
 @layer base {
@@ -98,34 +74,5 @@
     @apply bg-background text-foreground;
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
     font-size: 14px;
-  }
-
-  /* Native button/input fallback styles for components not yet on shadcn.
-     shadcn components override these via their own className stacks. */
-  button:not([class*="bg-"]):not([class*="border-"]) {
-    font: inherit; color: inherit;
-    background: var(--color-accent);
-    border: none;
-    border-radius: 6px;
-    padding: var(--space-2) var(--space-4);
-    cursor: pointer;
-  }
-  button:not([class*="bg-"]):not([class*="border-"]):hover { background: var(--color-accent-hover); }
-  button:not([class*="bg-"]):not([class*="border-"]):disabled {
-    background: var(--color-bg-elevated); color: var(--color-text-dim); cursor: not-allowed;
-  }
-
-  input:not([class*="bg-"]):not([class*="border-"]),
-  textarea:not([class*="bg-"]):not([class*="border-"]) {
-    font: inherit; color: inherit;
-    background: var(--color-bg-elevated);
-    border: 1px solid var(--color-border);
-    border-radius: 6px;
-    padding: var(--space-2) var(--space-3);
-    width: 100%;
-  }
-  input:not([class*="bg-"]):not([class*="border-"]):focus,
-  textarea:not([class*="bg-"]):not([class*="border-"]):focus {
-    outline: 2px solid var(--color-accent); outline-offset: -2px;
   }
 }

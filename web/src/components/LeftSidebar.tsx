@@ -1,67 +1,452 @@
-import { useEffect, useState } from 'react';
-import type { CharacterEntry } from '../schema/jobs';
+import { useEffect, useRef, useState } from 'react';
+import { ChevronDown, ChevronRight, Plus, X, AlertCircle, FolderPlus } from 'lucide-react';
+import type { CharacterEntry, Project, ProjectsFile } from '../schema/jobs';
 import { useActiveCharacter } from '../hooks/useActiveCharacter';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 
 interface Props { sseSignal: number; onSelect: (id: string) => void }
 
+const UNCATEGORIZED = '__uncategorized__';
+
 export function LeftSidebar({ sseSignal, onSelect }: Props) {
   const [characters, setCharacters] = useState<CharacterEntry[]>([]);
+  const [projects, setProjects] = useState<ProjectsFile>({ projects: [], assignments: {} });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
   const activeId = useActiveCharacter(sseSignal);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const newProjectInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     fetch('/api/characters').then(r => r.json()).then(setCharacters);
+    fetch('/api/projects').then(r => r.json()).then(setProjects);
   }, [sseSignal]);
 
-  if (characters.length === 0) {
+  useEffect(() => {
+    if ((editingId || editingProjectId) && inputRef.current) inputRef.current.select();
+  }, [editingId, editingProjectId]);
+
+  useEffect(() => {
+    if (creatingProject && newProjectInputRef.current) newProjectInputRef.current.focus();
+  }, [creatingProject]);
+
+  function startCharEdit(c: CharacterEntry, e: React.MouseEvent) {
+    e.stopPropagation();
+    setEditingProjectId(null);
+    setEditingId(c.id);
+    setDraftName(c.name);
+    setError(null);
+  }
+
+  function startProjectEdit(p: Project, e: React.MouseEvent) {
+    e.stopPropagation();
+    setEditingId(null);
+    setEditingProjectId(p.id);
+    setDraftName(p.name);
+    setError(null);
+  }
+
+  async function commitCharEdit() {
+    if (!editingId) return;
+    const name = draftName.trim();
+    if (!name) { cancelEdit(); return; }
+    const original = characters.find(c => c.id === editingId);
+    if (original && name === original.name) { cancelEdit(); return; }
+    try {
+      const r = await fetch(`/api/characters/${editingId}/rename`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data.detail || `HTTP ${r.status}`);
+      }
+      setCharacters(cs => cs.map(c => c.id === editingId ? { ...c, name } : c));
+      cancelEdit();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function commitProjectEdit() {
+    if (!editingProjectId) return;
+    const name = draftName.trim();
+    if (!name) { cancelEdit(); return; }
+    const original = projects.projects.find(p => p.id === editingProjectId);
+    if (original && name === original.name) { cancelEdit(); return; }
+    try {
+      const r = await fetch(`/api/projects/${editingProjectId}/rename`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data.detail || `HTTP ${r.status}`);
+      }
+      const updated = await r.json();
+      setProjects(updated);
+      cancelEdit();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditingProjectId(null);
+    setDraftName('');
+  }
+
+  function startNewProject() {
+    setCreatingProject(true);
+    setNewProjectName('');
+    setError(null);
+  }
+
+  function cancelNewProject() {
+    setCreatingProject(false);
+    setNewProjectName('');
+  }
+
+  async function commitNewProject() {
+    const name = newProjectName.trim();
+    if (!name) { cancelNewProject(); return; }
+    try {
+      const r = await fetch('/api/projects', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setProjects(await r.json());
+      cancelNewProject();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function deleteProject(p: Project, e: React.MouseEvent) {
+    e.stopPropagation();
+    const members = Object.entries(projects.assignments).filter(([, pid]) => pid === p.id).length;
+    const ok = window.confirm(
+      members > 0
+        ? `删除项目「${p.name}」？里面的 ${members} 个角色会回到"未分类"，角色文件不会丢。`
+        : `删除项目「${p.name}」？`,
+    );
+    if (!ok) return;
+    try {
+      const r = await fetch(`/api/projects/${p.id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setProjects(await r.json());
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function assignTo(characterId: string, projectId: string | null) {
+    try {
+      const r = await fetch(`/api/characters/${characterId}/project`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId }),
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data.detail || `HTTP ${r.status}`);
+      }
+      setProjects(await r.json());
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  function onDragStart(e: React.DragEvent, characterId: string) {
+    e.dataTransfer.setData('text/character-id', characterId);
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function onDrop(e: React.DragEvent, target: string) {
+    e.preventDefault();
+    setDragOver(null);
+    const cid = e.dataTransfer.getData('text/character-id');
+    if (!cid) return;
+    const current = projects.assignments[cid] || UNCATEGORIZED;
+    if (current === target) return;
+    void assignTo(cid, target === UNCATEGORIZED ? null : target);
+  }
+
+  function onDragOver(e: React.DragEvent, target: string) {
+    if (e.dataTransfer.types.includes('text/character-id')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      setDragOver(target);
+    }
+  }
+
+  const grouped = new Map<string, CharacterEntry[]>();
+  for (const p of projects.projects) grouped.set(p.id, []);
+  grouped.set(UNCATEGORIZED, []);
+  for (const c of characters) {
+    const key = projects.assignments[c.id] && grouped.has(projects.assignments[c.id])
+      ? projects.assignments[c.id]
+      : UNCATEGORIZED;
+    grouped.get(key)!.push(c);
+  }
+
+  if (characters.length === 0 && projects.projects.length === 0) {
     return (
-      <aside style={{ padding: 16, textAlign: 'center' }}>
-        <p style={{ color: 'var(--color-text-muted)', marginBottom: 16 }}>
-          还没有角色档案
-        </p>
-        <button>+ 新建第一个角色</button>
+      <aside className="h-screen border-r border-border bg-background p-4 overflow-y-auto flex flex-col">
+        <p className="text-sm text-muted-foreground text-center mb-4">还没有角色档案</p>
+        <Button variant="outline" size="sm" className="w-full">
+          <Plus className="size-3.5" />
+          新建第一个角色
+        </Button>
       </aside>
     );
   }
 
   return (
-    <aside style={{ borderRight: '1px solid var(--color-border)', padding: 16 }}>
-      <h2 style={{ fontSize: 'var(--fs-section)', fontWeight: 'var(--fw-semibold)', marginBottom: 12 }}>
-        角色列表
-      </h2>
-      <ul style={{ listStyle: 'none' }}>
-        {characters.map(c => (
-          <li key={c.id}
-              onClick={() => onSelect(c.id)}
-              style={{
-                padding: '8px 12px',
-                borderRadius: 6,
-                cursor: 'pointer',
-                background: c.id === activeId ? 'var(--color-accent)' : 'transparent',
-                color: c.id === activeId ? 'white' : 'var(--color-text)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}>
-            <StatusBadge status={c.status} />
-            <span>{c.name}</span>
-          </li>
+    <aside className="h-screen border-r border-border bg-background overflow-y-auto flex flex-col">
+      <header className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <h2 className="text-[15px] font-semibold tracking-tight">角色列表</h2>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={startNewProject}
+          disabled={creatingProject}
+          title="新建项目（用来给角色分类）"
+          className="h-7 px-2 text-xs"
+        >
+          <FolderPlus className="size-3" />
+          项目
+        </Button>
+      </header>
+
+      <div className="flex-1 px-2 py-2">
+        {creatingProject && (
+          <section className="mb-2 flex items-center gap-1.5 px-2 py-1">
+            <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
+            <Input
+              ref={newProjectInputRef}
+              value={newProjectName}
+              onChange={e => setNewProjectName(e.target.value)}
+              onBlur={commitNewProject}
+              onKeyDown={e => {
+                if (e.key === 'Enter') commitNewProject();
+                if (e.key === 'Escape') cancelNewProject();
+              }}
+              placeholder="项目名（如：魔幻 / 武侠）"
+              className="h-7 text-xs"
+            />
+          </section>
+        )}
+
+        {projects.projects.map(p => (
+          <ProjectGroup
+            key={p.id} project={p} chars={grouped.get(p.id) || []}
+            isEditing={editingProjectId === p.id} draftName={draftName}
+            dragOver={dragOver === p.id} onDrop={onDrop} onDragOver={onDragOver}
+            onDragLeave={() => setDragOver(null)}
+            onRenameStart={startProjectEdit} onRenameChange={setDraftName}
+            onRenameCommit={commitProjectEdit} onRenameCancel={cancelEdit}
+            onDelete={deleteProject} inputRef={inputRef}
+            renderChar={c => renderChar(c)}
+          />
         ))}
-      </ul>
+
+        <DropZone
+          label={projects.projects.length > 0 ? '未分类' : null}
+          active={dragOver === UNCATEGORIZED}
+          onDrop={e => onDrop(e, UNCATEGORIZED)}
+          onDragOver={e => onDragOver(e, UNCATEGORIZED)}
+          onDragLeave={() => setDragOver(null)}
+        >
+          <ul className="list-none m-0 p-0">
+            {(grouped.get(UNCATEGORIZED) || []).map(renderChar)}
+          </ul>
+        </DropZone>
+
+        {error && (
+          <div className="mt-3 mx-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+            <AlertCircle className="size-3 shrink-0 mt-0.5" />
+            <span>{error}</span>
+          </div>
+        )}
+      </div>
     </aside>
+  );
+
+  function renderChar(c: CharacterEntry) {
+    const isActive = c.id === activeId;
+    const isEditing = c.id === editingId;
+    return (
+      <li
+        key={c.id}
+        draggable={!isEditing}
+        onDragStart={(e) => onDragStart(e, c.id)}
+        onClick={() => !isEditing && onSelect(c.id)}
+        onDoubleClick={(e) => startCharEdit(c, e)}
+        title="双击重命名 · 拖到项目"
+        className={cn(
+          'flex items-center gap-2 px-2.5 py-1.5 rounded-md text-sm transition-colors',
+          isEditing ? 'cursor-text' : 'cursor-pointer',
+          isActive
+            ? 'bg-primary text-primary-foreground'
+            : 'text-foreground hover:bg-accent/60',
+        )}
+      >
+        <StatusBadge status={c.status} isActive={isActive} />
+        {isEditing ? (
+          <Input
+            ref={inputRef}
+            value={draftName}
+            onChange={e => setDraftName(e.target.value)}
+            onBlur={commitCharEdit}
+            onKeyDown={e => {
+              if (e.key === 'Enter') commitCharEdit();
+              if (e.key === 'Escape') cancelEdit();
+            }}
+            onClick={e => e.stopPropagation()}
+            className="h-6 text-xs flex-1 bg-background/20 border-background/30"
+          />
+        ) : (
+          <span className="flex-1 truncate">{c.name}</span>
+        )}
+      </li>
+    );
+  }
+}
+
+interface ProjectGroupProps {
+  project: Project;
+  chars: CharacterEntry[];
+  isEditing: boolean;
+  draftName: string;
+  dragOver: boolean;
+  onDrop: (e: React.DragEvent, target: string) => void;
+  onDragOver: (e: React.DragEvent, target: string) => void;
+  onDragLeave: () => void;
+  onRenameStart: (p: Project, e: React.MouseEvent) => void;
+  onRenameChange: (v: string) => void;
+  onRenameCommit: () => void;
+  onRenameCancel: () => void;
+  onDelete: (p: Project, e: React.MouseEvent) => void;
+  inputRef: React.MutableRefObject<HTMLInputElement | null>;
+  renderChar: (c: CharacterEntry) => React.ReactNode;
+}
+
+function ProjectGroup({
+  project, chars, isEditing, draftName, dragOver,
+  onDrop, onDragOver, onDragLeave,
+  onRenameStart, onRenameChange, onRenameCommit, onRenameCancel,
+  onDelete, inputRef, renderChar,
+}: ProjectGroupProps) {
+  const [open, setOpen] = useState(true);
+  return (
+    <section
+      onDrop={e => onDrop(e, project.id)}
+      onDragOver={e => onDragOver(e, project.id)}
+      onDragLeave={onDragLeave}
+      className={cn(
+        'mb-1.5 rounded-md transition-colors',
+        dragOver && 'bg-primary/5 ring-2 ring-primary/30 ring-inset',
+      )}
+    >
+      <header className="group/header flex items-center gap-1 px-1.5 py-1 text-xs text-muted-foreground select-none">
+        <button
+          onClick={() => !isEditing && setOpen(o => !o)}
+          title={open ? '收起' : '展开'}
+          className="grid place-items-center size-4 rounded hover:bg-accent/60 cursor-pointer bg-transparent border-0 p-0 text-inherit"
+        >
+          {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+        </button>
+        {isEditing ? (
+          <Input
+            ref={inputRef}
+            value={draftName}
+            onChange={e => onRenameChange(e.target.value)}
+            onBlur={onRenameCommit}
+            onKeyDown={e => {
+              if (e.key === 'Enter') onRenameCommit();
+              if (e.key === 'Escape') onRenameCancel();
+            }}
+            onClick={e => e.stopPropagation()}
+            className="h-6 text-xs flex-1"
+          />
+        ) : (
+          <span
+            onClick={() => setOpen(o => !o)}
+            onDoubleClick={(e) => onRenameStart(project, e)}
+            title="双击重命名"
+            className="flex-1 font-semibold text-foreground cursor-pointer truncate"
+          >
+            {project.name}
+          </span>
+        )}
+        <span className="text-[10px] tabular-nums text-muted-foreground/70 px-1">
+          {chars.length}
+        </span>
+        <button
+          onClick={(e) => onDelete(project, e)}
+          title="删除项目（角色不会丢）"
+          className="grid place-items-center size-4 rounded hover:bg-destructive/15 hover:text-destructive cursor-pointer opacity-0 group-hover/header:opacity-100 transition-opacity bg-transparent border-0 p-0 text-inherit"
+        >
+          <X className="size-3" />
+        </button>
+      </header>
+      {open && (
+        <ul className="list-none m-0 p-0 pl-2">
+          {chars.length > 0
+            ? chars.map(renderChar)
+            : <li className="px-2.5 py-1.5 text-xs text-muted-foreground/70 italic">空 —— 把角色拖进来</li>}
+        </ul>
+      )}
+    </section>
   );
 }
 
-function StatusBadge({ status }: { status: CharacterEntry['status'] }) {
-  if (status === 'idle') return null;
-  const colorVar = `var(--color-status-${status})`;
-  const pulse = status === 'running' ? { animation: 'pulse 1.5s ease-in-out infinite' } : {};
+function DropZone({ label, active, onDrop, onDragOver, onDragLeave, children }: {
+  label: string | null; active: boolean;
+  onDrop: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: () => void;
+  children: React.ReactNode;
+}) {
   return (
-    <>
-      <span style={{
-        width: 8, height: 8, borderRadius: '50%',
-        background: colorVar, display: 'inline-block', ...pulse,
-      }} />
-      <style>{`@keyframes pulse {0%,100%{opacity:1}50%{opacity:.4}}`}</style>
-    </>
+    <section
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      className={cn(
+        'rounded-md transition-colors',
+        active && 'bg-primary/5 ring-2 ring-primary/30 ring-inset',
+      )}
+    >
+      {label && (
+        <header className="px-1.5 py-1 text-xs text-muted-foreground select-none">
+          {label}
+        </header>
+      )}
+      {children}
+    </section>
   );
+}
+
+function StatusBadge({ status, isActive }: { status: CharacterEntry['status']; isActive: boolean }) {
+  if (status === 'idle') {
+    return <span className={cn('size-1.5 rounded-full shrink-0', isActive ? 'bg-primary-foreground/40' : 'bg-transparent')} />;
+  }
+  const colorClass: Record<string, string> = {
+    pending: 'bg-[color:var(--status-pending)]',
+    running: 'bg-[color:var(--status-running)] animate-pulse',
+    pending_confirm: 'bg-[color:var(--status-running)]',
+    done: 'bg-[color:var(--status-done)]',
+    failed: 'bg-[color:var(--status-failed)]',
+  };
+  return <span className={cn('size-1.5 rounded-full shrink-0', colorClass[status] || 'bg-muted-foreground/40')} />;
 }
