@@ -135,14 +135,27 @@ class RecentCharacter(BaseModel):
     tagline: str  # spec.md 首行非空、非标题内容，≤30 字
 
 
+class RecommendAction(str, Enum):
+    # v4.1.0 决策表 —— 把"裸触发 default 默认出图"误推从 LLM 收回。
+    RENDER_CARD = "render_card"
+    ASK = "ask"
+    SWITCH = "switch"
+    NOOP = "noop"
+
+
 class TurnStartResult(BaseModel):
     # v4.0.0 CLI 输出契约。Skill 端按 stage 分支。
+    # v4.1.0：新增 recommend_action / recommend_reason / active_age_minutes
+    # —— SKILL.md 按 recommend_action 分叉，intent 字段保留 debug 用。
     model_config = ConfigDict(extra="forbid")
     stage: TurnStage
     stage_reason: str
     intent: IntentKind | None
     intent_signal: str
     intent_conflict: bool
+    recommend_action: RecommendAction
+    recommend_reason: str
+    active_age_minutes: int | None
     recent_chars: list[RecentCharacter]
     drafts: list[dict]
     active_id: str | None

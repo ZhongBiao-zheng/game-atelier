@@ -54,13 +54,18 @@ def test_intent_kind_enum_values():
 
 
 def test_turn_start_result_minimal():
-    from skill.character_workflow.lib.schemas import TurnStartResult, TurnStage
+    from skill.character_workflow.lib.schemas import (
+        RecommendAction, TurnStage, TurnStartResult,
+    )
     r = TurnStartResult(
         stage=TurnStage.A,
         stage_reason="characters/ 目录不存在",
         intent=None,
         intent_signal="default",
         intent_conflict=False,
+        recommend_action=RecommendAction.ASK,
+        recommend_reason="stage A: 前置未齐",
+        active_age_minutes=None,
         recent_chars=[],
         drafts=[],
         active_id=None,
@@ -72,11 +77,12 @@ def test_turn_start_result_minimal():
     )
     assert r.stage == TurnStage.A
     assert r.intent is None
+    assert r.recommend_action == RecommendAction.ASK
 
 
 def test_turn_start_result_full_stage_d():
     from skill.character_workflow.lib.schemas import (
-        TurnStartResult, TurnStage, IntentKind, RecentCharacter,
+        IntentKind, RecentCharacter, RecommendAction, TurnStage, TurnStartResult,
     )
     r = TurnStartResult(
         stage=TurnStage.D,
@@ -84,6 +90,9 @@ def test_turn_start_result_full_stage_d():
         intent=IntentKind.REVISE,
         intent_signal="drafts_present",
         intent_conflict=False,
+        recommend_action=RecommendAction.RENDER_CARD,
+        recommend_reason="revise: drafts 中有 1 条反馈",
+        active_age_minutes=10,
         recent_chars=[RecentCharacter(id="holy", tagline="治愈系祭祀")],
         drafts=[{"path": "holy-1.md", "text": "调色"}],
         active_id="holy",
@@ -95,3 +104,12 @@ def test_turn_start_result_full_stage_d():
     )
     assert r.intent == IntentKind.REVISE
     assert r.recent_chars[0].id == "holy"
+    assert r.recommend_action == RecommendAction.RENDER_CARD
+
+
+def test_recommend_action_enum_values():
+    from skill.character_workflow.lib.schemas import RecommendAction
+    assert RecommendAction.RENDER_CARD.value == "render_card"
+    assert RecommendAction.ASK.value == "ask"
+    assert RecommendAction.SWITCH.value == "switch"
+    assert RecommendAction.NOOP.value == "noop"

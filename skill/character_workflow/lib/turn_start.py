@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 # 设计稿 §4.4 关键词清单。本轮写死，后续扩展时再抽到 YAML。
@@ -142,6 +143,46 @@ def _read_active_spec(active_id: str | None) -> str | None:
         return None
 
 
+def _active_age_minutes(updated_at: str) -> int | None:
+    """返回 active 更新到现在的分钟数（向下取整）。无效或空 → None。"""
+    if not updated_at:
+        return None
+    try:
+        ts = datetime.fromisoformat(updated_at)
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - ts
+    return max(0, int(delta.total_seconds() // 60))
+
+
+def _last_job_status(active_id: str | None) -> str | None:
+    """读 .runtime/jobs/*.json，返回当前 active 最近一条 job 的 status。
+
+    没 active / 没 job 文件 → None。读取失败的单个 job 跳过。
+    """
+    if not active_id:
+        return None
+    jobs_dir = _runtime_dir() / "jobs"
+    if not jobs_dir.exists():
+        return None
+    latest_ts = ""
+    latest_status: str | None = None
+    for p in jobs_dir.glob("*.json"):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if data.get("character_id") != active_id:
+            continue
+        ts = data.get("submitted_at", "")
+        if ts > latest_ts:
+            latest_ts = ts
+            latest_status = data.get("status")
+    return latest_status
+
+
 def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
     """v4 编排器：file system 探 stage + 读 active + 推 intent + 拉上下文。
 
@@ -150,6 +191,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
     from skill.character_workflow.lib.active_character import read_active
     from skill.character_workflow.lib.context_loader import load_lessons, load_worldview
     from skill.character_workflow.lib.draft_processor import process_drafts
+    from skill.character_workflow.lib.intent import compute_recommend_action
 
     stage, reason = detect_stage()
     active = read_active() if stage in ("C", "D") else None
@@ -162,8 +204,21 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
 
     if stage == "D":
         intent, signal, conflict = infer_intent(message, drafts, active_id)
+        age_min = _active_age_minutes(active_updated_at)
+        last_status = _last_job_status(active_id)
     else:
         intent, signal, conflict = None, "none", False
+        age_min = None
+        last_status = None
+
+    action, action_reason = compute_recommend_action(
+        stage=stage,
+        message=message,
+        drafts=drafts,
+        active_age_minutes=age_min,
+        last_job_status=last_status,
+        active_id=active_id,
+    )
 
     return {
         "stage": stage,
@@ -171,6 +226,9 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         "intent": intent,
         "intent_signal": signal,
         "intent_conflict": conflict,
+        "recommend_action": action,
+        "recommend_reason": action_reason,
+        "active_age_minutes": age_min,
         "recent_chars": recent,
         "drafts": drafts,
         "active_id": active_id,
