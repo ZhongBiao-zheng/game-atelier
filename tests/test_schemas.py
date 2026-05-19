@@ -35,3 +35,63 @@ def test_spec_patch_accepts_partial():
 
 
 _ = JobStatus  # silence unused import
+
+
+def test_turn_stage_enum_values():
+    from skill.character_workflow.lib.schemas import TurnStage
+    assert TurnStage.A.value == "A"
+    assert TurnStage.B.value == "B"
+    assert TurnStage.C.value == "C"
+    assert TurnStage.D.value == "D"
+
+
+def test_intent_kind_enum_values():
+    from skill.character_workflow.lib.schemas import IntentKind
+    assert IntentKind.NEW.value == "new"
+    assert IntentKind.REVISE.value == "revise"
+    assert IntentKind.CREATE.value == "create"
+    assert IntentKind.SWITCH.value == "switch"
+
+
+def test_turn_start_result_minimal():
+    from skill.character_workflow.lib.schemas import TurnStartResult, TurnStage
+    r = TurnStartResult(
+        stage=TurnStage.A,
+        stage_reason="characters/ 目录不存在",
+        intent=None,
+        intent_signal="default",
+        intent_conflict=False,
+        recent_chars=[],
+        drafts=[],
+        active_id=None,
+        active_updated_at="",
+        spec=None,
+        worldview="",
+        lessons="",
+        lessons_kind="portrait",
+    )
+    assert r.stage == TurnStage.A
+    assert r.intent is None
+
+
+def test_turn_start_result_full_stage_d():
+    from skill.character_workflow.lib.schemas import (
+        TurnStartResult, TurnStage, IntentKind, RecentCharacter,
+    )
+    r = TurnStartResult(
+        stage=TurnStage.D,
+        stage_reason="active 存在",
+        intent=IntentKind.REVISE,
+        intent_signal="drafts_present",
+        intent_conflict=False,
+        recent_chars=[RecentCharacter(id="holy", tagline="治愈系祭祀")],
+        drafts=[{"path": "holy-1.md", "text": "调色"}],
+        active_id="holy",
+        active_updated_at="2026-05-19T08:00:00+00:00",
+        spec="# 圣灵祭祀\n",
+        worldview="光明大陆",
+        lessons="- 2026-05-19 holy",
+        lessons_kind="portrait",
+    )
+    assert r.intent == IntentKind.REVISE
+    assert r.recent_chars[0].id == "holy"

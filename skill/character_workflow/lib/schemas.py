@@ -110,3 +110,44 @@ class ProjectRename(BaseModel):
 
 class CharacterProjectAssign(BaseModel):
     project_id: str | None = None  # None = 取消归属
+
+
+class TurnStage(str, Enum):
+    # turn-start v4：file system 探测结果
+    # A = characters/ 不存在；B = 空 characters/；C = active 缺失/失效；D = 正常回流。
+    A = "A"
+    B = "B"
+    C = "C"
+    D = "D"
+
+
+class IntentKind(str, Enum):
+    # 仅 stage D 时有值。null = 不在 stage D。
+    NEW = "new"
+    REVISE = "revise"
+    CREATE = "create"
+    SWITCH = "switch"
+
+
+class RecentCharacter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    tagline: str  # spec.md 首行非空、非标题内容，≤30 字
+
+
+class TurnStartResult(BaseModel):
+    # v4.0.0 CLI 输出契约。Skill 端按 stage 分支。
+    model_config = ConfigDict(extra="forbid")
+    stage: TurnStage
+    stage_reason: str
+    intent: IntentKind | None
+    intent_signal: str
+    intent_conflict: bool
+    recent_chars: list[RecentCharacter]
+    drafts: list[dict]
+    active_id: str | None
+    active_updated_at: str
+    spec: str | None
+    worldview: str
+    lessons: str
+    lessons_kind: str
