@@ -118,3 +118,65 @@ def test_list_recent_chars_sorted(project):
     from skill.character_workflow.lib.turn_start import list_recent_chars
     result = list_recent_chars()
     assert [r["id"] for r in result] == ["alex", "mira", "zelda"]
+
+
+def test_intent_default_no_drafts_no_message():
+    from skill.character_workflow.lib.turn_start import infer_intent
+    intent, signal, conflict = infer_intent(message=None, drafts=[], active_id="holy")
+    assert intent == "new"
+    assert signal == "default"
+    assert conflict is False
+
+
+def test_intent_revise_when_drafts_nonempty():
+    from skill.character_workflow.lib.turn_start import infer_intent
+    intent, signal, conflict = infer_intent(
+        message=None,
+        drafts=[{"path": "x.md", "text": "调色"}],
+        active_id="holy",
+    )
+    assert intent == "revise"
+    assert signal == "drafts_present"
+    assert conflict is False
+
+
+def test_intent_create_when_keyword_in_message():
+    from skill.character_workflow.lib.turn_start import infer_intent
+    for msg in ("新建一个角色叫光辉骑士", "我想做个新角色", "另一个角色"):
+        intent, signal, _ = infer_intent(message=msg, drafts=[], active_id="holy")
+        assert intent == "create", f"msg={msg!r}"
+        assert signal == "new_keyword"
+
+
+def test_intent_switch_when_slash_command_different_id():
+    from skill.character_workflow.lib.turn_start import infer_intent
+    intent, signal, _ = infer_intent(
+        message="/character-workflow ghost-knight 继续",
+        drafts=[],
+        active_id="holy",
+    )
+    assert intent == "switch"
+    assert signal == "switch_keyword"
+
+
+def test_intent_switch_same_id_falls_back_to_new():
+    """/character-workflow holy 但 active 已经是 holy → 不算 switch。"""
+    from skill.character_workflow.lib.turn_start import infer_intent
+    intent, signal, _ = infer_intent(
+        message="/character-workflow holy",
+        drafts=[],
+        active_id="holy",
+    )
+    assert intent == "new"
+    assert signal == "default"
+
+
+def test_intent_conflict_drafts_plus_new_keyword():
+    from skill.character_workflow.lib.turn_start import infer_intent
+    intent, signal, conflict = infer_intent(
+        message="新建一个角色",
+        drafts=[{"path": "x.md", "text": "改 holy 的色"}],
+        active_id="holy",
+    )
+    assert conflict is True
+    assert intent is None

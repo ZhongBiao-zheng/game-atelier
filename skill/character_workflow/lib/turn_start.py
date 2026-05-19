@@ -12,7 +12,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
+
+# 设计稿 §4.4 关键词清单。本轮写死，后续扩展时再抽到 YAML。
+_NEW_KEYWORDS = ("新建", "新角色", "另一个角色")
+_SLASH_CMD_RE = re.compile(r"/character-workflow\s+([\w\-]+)")
 
 
 def _project_root() -> Path:
@@ -88,3 +93,38 @@ def list_recent_chars(limit: int = 10) -> list[dict]:
                 break
         out.append({"id": sub.name, "tagline": tagline})
     return out[:limit]
+
+
+def infer_intent(
+    message: str | None,
+    drafts: list[dict],
+    active_id: str | None,
+) -> tuple[str | None, str, bool]:
+    """Return (intent, signal, conflict).
+
+    设计稿 §4.4 规则：
+    - drafts 非空 → revise
+    - message 含 "新建/新角色/另一个角色" → create
+    - message 含 "/character-workflow <name>" 且 name != active_id → switch
+    - 都不匹配 → new（default）
+
+    多信号同时命中 → conflict=True, intent=None。
+    """
+    signals: list[tuple[str, str]] = []
+
+    if drafts:
+        signals.append(("revise", "drafts_present"))
+
+    if message:
+        if any(kw in message for kw in _NEW_KEYWORDS):
+            signals.append(("create", "new_keyword"))
+        m = _SLASH_CMD_RE.search(message)
+        if m and m.group(1) != active_id:
+            signals.append(("switch", "switch_keyword"))
+
+    if len(signals) > 1:
+        return None, "conflict", True
+    if signals:
+        intent, signal = signals[0]
+        return intent, signal, False
+    return "new", "default", False
