@@ -281,3 +281,45 @@ def test_turn_start_schema_validates(project):
     r = turn_start(kind="portrait", message=None)
     parsed = TurnStartResult.model_validate(r)
     assert parsed.stage.value == "A"
+
+
+def test_cli_turn_start_stage_a(project, capsys):
+    from skill.character_workflow.__main__ import main
+    rc = main(["turn-start"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert payload["stage"] == "A"
+    assert payload["intent"] is None
+
+
+def test_cli_turn_start_with_message(project, capsys):
+    chars = project / "characters"
+    (chars / "holy").mkdir(parents=True)
+    (chars / "holy" / "spec.md").write_text("# 圣灵\n")
+    (project / ".runtime").mkdir()
+    (project / ".runtime" / "active-character.json").write_text(
+        json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
+    )
+    from skill.character_workflow.__main__ import main
+    rc = main(["turn-start", "--message", "新建一个光辉骑士"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["stage"] == "D"
+    assert payload["intent"] == "create"
+    assert payload["intent_signal"] == "new_keyword"
+
+
+def test_cli_turn_start_no_message_defaults_to_new(project, capsys):
+    chars = project / "characters"
+    (chars / "holy").mkdir(parents=True)
+    (chars / "holy" / "spec.md").write_text("# 圣灵\n")
+    (project / ".runtime").mkdir()
+    (project / ".runtime" / "active-character.json").write_text(
+        json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
+    )
+    from skill.character_workflow.__main__ import main
+    rc = main(["turn-start"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["intent"] == "new"
