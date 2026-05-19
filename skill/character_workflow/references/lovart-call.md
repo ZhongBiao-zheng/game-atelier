@@ -12,29 +12,27 @@ SKILL.md 已经写了 6 步主线，这里只补**代码片段**和**失败处�
 
 ### 1. 落盘 PENDING_CONFIRM
 
+prompt 走文件（8 段式中文几百字，作为 shell 参数会被引号/顿号/换行卡）：
+
 ```bash
-python -c "
-from skill.character_workflow.lib.jobs import write_job
-from ulid import ULID
-job_id = f'job-{ULID()}'
-write_job(
-    job_id=job_id,
-    character_id='holy-spirit-priestess',
-    prompt='...中文 prompt...',
-    model='gpt_image_2',
-    params={
-        'vendor': 'OpenAI (via Lovart)',
-        'size': '1024x1024',
-        'n': 4,
-        'reference_images': [],
-    },
-    seed=None,
-)  # 默认 status=PENDING_CONFIRM
-print(job_id)
-"
+# 写到临时文件（PID 后缀避免并发冲突）
+cat > /tmp/cw-prompt-$$.md <<'PROMPT'
+...中文 8 段式 prompt...
+PROMPT
+
+# submit 子命令是默认值 SSoT —— 不要自己决定 model / n / size
+JOB_ID=$(uv run python -m skill.character_workflow submit \
+  --kind portrait --prompt-file /tmp/cw-prompt-$$.md)
+rm /tmp/cw-prompt-$$.md
+echo "$JOB_ID"
 ```
 
-落盘后 watcher 广播 `job-changed`，Web 端 CharacterGallery 自动渲染"待确认"卡片。
+要点：
+- `--character` 缺省读 `.runtime/active-character.json`，stage A/B/C 时**必传**
+- `--n` 默认 1，画师明示"多出几张"才传 `--n 4`
+- 调用方负责创建 + 删除临时 prompt 文件（避免 `/tmp` 残留）
+- stdout 是纯 job_id 字符串，可直接 `$(...)` 捕获
+- 落盘后 watcher 广播 `job-changed`，Web 端 CharacterGallery 自动渲染"待确认"卡片
 
 ### 2. 终端出图卡片格式
 

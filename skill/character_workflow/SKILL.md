@@ -146,7 +146,18 @@ stage D 推断到 `switch` 时 Skill 自动调一次，**然后必须重新 turn
 
 **永远先确认再调用。** 流程：
 
-1. `jobs.write_job(..., kind=JobKind.PORTRAIT)` 落盘 `PENDING_CONFIRM`（默认状态）
+1. 用 `submit` CLI 落盘 `PENDING_CONFIRM`（默认值集中点，**禁止自己导 jobs.write_job**）：
+
+   ```bash
+   cat > /tmp/cw-prompt-$$.md <<'PROMPT'
+   ...中文 8 段式 prompt...
+   PROMPT
+   JOB_ID=$(uv run python -m skill.character_workflow submit \
+     --kind portrait --prompt-file /tmp/cw-prompt-$$.md)
+   rm /tmp/cw-prompt-$$.md
+   ```
+
+   `--character` 缺省读 `.runtime/active-character.json`；`--n` 默认 1（画师明示对比才传 `--n 4`）；`--source-image <绝对路径>` 给 promo/turnaround 用；stdout 是纯 job_id。
 2. 终端打可读出图卡片（模型/厂家/尺寸/n/参考图/中文 prompt 全列）
 3. 等画师明确说"出图/确认/OK"，或 Web 端点确认（后端推到 `PENDING`）
 4. 调 `lib.lovart_caller.submit_and_wait(...)`，`output_dir=jobs.job_output_dir(id, kind)` —— 立绘自动落到 `characters/<id>/portrait/`（同步阻塞，job 停在 `PENDING`）

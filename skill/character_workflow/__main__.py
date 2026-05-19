@@ -4,16 +4,70 @@
   python -m skill.character_workflow turn-start [--kind portrait|promo|turnaround] [--message "..."]
   python -m skill.character_workflow set-active <id>
   python -m skill.character_workflow append-lesson --kind portrait --line "...经验..."
+  python -m skill.character_workflow submit --kind portrait --prompt-file <path> [--character <id>]
 """
 from __future__ import annotations
 
 import argparse
 import json
+import secrets
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
-from skill.character_workflow.lib.active_character import write_active
+from skill.character_workflow.lib.active_character import read_active, write_active
+from skill.character_workflow.lib.jobs import write_job
 from skill.character_workflow.lib.lessons import append_lesson
+from skill.character_workflow.lib.schemas import JobKind, JobStatus
 from skill.character_workflow.lib.turn_start import turn_start
+
+
+def _submit(args: argparse.Namespace) -> int:
+    """落盘一条 PENDING_CONFIRM job，stdout 输出纯 job_id。
+
+    集中默认值（model / n / size / seed / status / job_id 格式），
+    SKILL.md 调用方不应该再次决定这些值。
+    """
+    char_id = args.character
+    if not char_id:
+        active = read_active()
+        char_id = active.active_id if active else None
+        if not char_id:
+            print(
+                "submit: --character 未指定且 .runtime/active-character.json 不存在或为空",
+                file=sys.stderr,
+            )
+            return 1
+
+    prompt_path = Path(args.prompt_file)
+    if not prompt_path.exists():
+        print(f"submit: --prompt-file {args.prompt_file} 不存在", file=sys.stderr)
+        return 1
+    prompt = prompt_path.read_text(encoding="utf-8")
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    job_id = f"job-{ts}{secrets.token_hex(4)}"
+
+    params: dict = {
+        "vendor": "OpenAI (via Lovart)",
+        "size": args.size,
+        "n": args.n,
+        "reference_images": [],
+    }
+
+    write_job(
+        job_id=job_id,
+        character_id=char_id,
+        prompt=prompt,
+        model=args.model,
+        params=params,
+        seed=None,
+        status=JobStatus.PENDING_CONFIRM,
+        kind=JobKind(args.kind),
+        source_image=args.source_image,
+    )
+    print(job_id)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -35,6 +89,29 @@ def main(argv: list[str] | None = None) -> int:
     p_lesson.add_argument("--kind", required=True, choices=("portrait", "promo", "turnaround"))
     p_lesson.add_argument("--line", required=True, help="完整一行 markdown，不带换行")
 
+    p_submit = sub.add_parser(
+        "submit",
+        help="落盘 PENDING_CONFIRM job —— 默认值集中点，stdout 输出纯 job_id",
+    )
+    p_submit.add_argument(
+        "--kind", required=True, choices=("portrait", "promo", "turnaround"),
+    )
+    p_submit.add_argument("--prompt-file", required=True, help="中文 8 段式 prompt 文件路径")
+    p_submit.add_argument(
+        "--character", default=None,
+        help="角色 id；缺省读 .runtime/active-character.json",
+    )
+    p_submit.add_argument("--n", type=int, default=1, help="出图数量，默认 1")
+    p_submit.add_argument("--size", default="1024x1536", help="出图尺寸，默认 1024x1536")
+    p_submit.add_argument(
+        "--model", default="generate_image_gpt_image_2",
+        help="模型 id，默认 generate_image_gpt_image_2",
+    )
+    p_submit.add_argument(
+        "--source-image", default=None,
+        help="参考源图绝对路径（promo / turnaround 用）",
+    )
+
     args = parser.parse_args(argv)
     if args.cmd == "turn-start":
         print(json.dumps(turn_start(args.kind, args.message), ensure_ascii=False, indent=2))
@@ -50,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
         path = append_lesson(args.kind, args.line)
         print(json.dumps({"ok": True, "path": str(path)}, ensure_ascii=False))
         return 0
+    if args.cmd == "submit":
+        return _submit(args)
     return 1
 
 
