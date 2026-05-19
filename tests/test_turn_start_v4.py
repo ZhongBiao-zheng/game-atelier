@@ -73,3 +73,48 @@ def test_stage_d_active_ok(project):
     from skill.character_workflow.lib.turn_start import detect_stage
     stage, _ = detect_stage()
     assert stage == "D"
+
+
+def test_list_recent_chars_empty(project):
+    from skill.character_workflow.lib.turn_start import list_recent_chars
+    assert list_recent_chars() == []
+
+
+def test_list_recent_chars_skips_non_dirs(project):
+    chars = project / "characters"
+    chars.mkdir()
+    (chars / "a-file.txt").write_text("noise")
+    from skill.character_workflow.lib.turn_start import list_recent_chars
+    assert list_recent_chars() == []
+
+
+def test_list_recent_chars_extracts_tagline(project):
+    chars = project / "characters"
+    (chars / "holy").mkdir(parents=True)
+    (chars / "holy" / "spec.md").write_text(
+        "# 圣灵祭祀\n\n治愈系女性祭祀，金白配色，兜帽低垂遮眼\n## 风格\n..."
+    )
+    from skill.character_workflow.lib.turn_start import list_recent_chars
+    result = list_recent_chars()
+    assert len(result) == 1
+    assert result[0]["id"] == "holy"
+    assert "治愈系" in result[0]["tagline"]
+    assert len(result[0]["tagline"]) <= 30
+
+
+def test_list_recent_chars_no_spec(project):
+    chars = project / "characters"
+    (chars / "ghost").mkdir(parents=True)
+    from skill.character_workflow.lib.turn_start import list_recent_chars
+    result = list_recent_chars()
+    assert result == [{"id": "ghost", "tagline": ""}]
+
+
+def test_list_recent_chars_sorted(project):
+    chars = project / "characters"
+    for name in ("zelda", "alex", "mira"):
+        (chars / name).mkdir(parents=True)
+        (chars / name / "spec.md").write_text(f"# {name}\n短描述-{name}\n")
+    from skill.character_workflow.lib.turn_start import list_recent_chars
+    result = list_recent_chars()
+    assert [r["id"] for r in result] == ["alex", "mira", "zelda"]

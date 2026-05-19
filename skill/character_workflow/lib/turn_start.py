@@ -56,3 +56,35 @@ def detect_stage() -> tuple[str, str]:
         return "C", f"{active_id}/spec.md 不存在"
 
     return "D", "active 完整"
+
+
+def list_recent_chars(limit: int = 10) -> list[dict]:
+    """List existing characters with taglines, sorted alphabetically by id.
+
+    tagline = spec.md 首行非空、非标题 markdown 内容，截断到 30 字。
+    spec.md 不存在 → tagline = ""。
+    """
+    chars = _characters_dir()
+    if not chars.exists():
+        return []
+    out: list[dict] = []
+    for sub in sorted(chars.iterdir()):
+        if not sub.is_dir():
+            continue
+        spec = sub / "spec.md"
+        tagline = ""
+        if spec.exists():
+            try:
+                text = spec.read_text(encoding="utf-8")
+            except OSError:
+                text = ""
+            for line in text.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if stripped.startswith("#"):
+                    continue
+                tagline = stripped[:30]
+                break
+        out.append({"id": sub.name, "tagline": tagline})
+    return out[:limit]
