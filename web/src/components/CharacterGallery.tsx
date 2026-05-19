@@ -12,7 +12,33 @@ interface Props {
   sseSignal: number;
 }
 
-type TabKind = 'portrait' | 'promo';
+type TabKind = 'portrait' | 'promo' | 'turnaround';
+
+const TAB_META: Record<TabKind, {
+  label: string;
+  emptyTitle: string;
+  emptyHint: string;
+  // 控制台标题 / 触发命令前缀；portrait 不显示 launchpad
+  launchpad?: { title: string; command: string };
+}> = {
+  portrait: {
+    label: '立绘',
+    emptyTitle: '等待第一张作品',
+    emptyHint: '保存档案后将触发首轮出图',
+  },
+  promo: {
+    label: '美宣',
+    emptyTitle: '等待第一张美宣',
+    emptyHint: '上传源图后复制命令到 CC 触发 /character-promo',
+    launchpad: { title: '美宣出图 · 控制台', command: '/character-promo' },
+  },
+  turnaround: {
+    label: '三视图',
+    emptyTitle: '等待第一张三视图',
+    emptyHint: '上传源图后复制命令到 CC 触发 /character-turnaround',
+    launchpad: { title: '三视图出图 · 控制台', command: '/character-turnaround' },
+  },
+};
 
 export function CharacterGallery({ characterId, characterName, detailMode, onSelectImage, sseSignal }: Props) {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -36,6 +62,7 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
   const tabCounts: Record<TabKind, number> = {
     portrait: jobs.filter(j => jobKind(j) === 'portrait').length,
     promo: jobs.filter(j => jobKind(j) === 'promo').length,
+    turnaround: jobs.filter(j => jobKind(j) === 'turnaround').length,
   };
 
   if (loading && jobs.length === 0) {
@@ -71,17 +98,23 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
       name={characterName} count={allImages.length} rounds={tabJobs.length}
       compact={detailMode} tab={tab} setTab={setTab} tabCounts={tabCounts}
     >
-      {tab === 'promo' && <PromoLaunchpad characterId={characterId} />}
+      {TAB_META[tab].launchpad && (
+        <SkillLaunchpad
+          characterId={characterId}
+          title={TAB_META[tab].launchpad!.title}
+          command={TAB_META[tab].launchpad!.command}
+        />
+      )}
 
       {pendingConfirm.map(j => <ConfirmCard key={j.job_id} job={j} />)}
 
       {!hasAny && (
         <div className="py-16 text-center">
           <p className="font-[var(--font-display)] italic text-2xl text-foreground/70 mb-2">
-            {tab === 'portrait' ? '等待第一张作品' : '等待第一张美宣'}
+            {TAB_META[tab].emptyTitle}
           </p>
           <p className="text-xs text-muted-foreground">
-            {tab === 'portrait' ? '保存档案后将触发首轮出图' : '上传源图后复制命令到 CC 触发 /character-promo'}
+            {TAB_META[tab].emptyHint}
           </p>
         </div>
       )}
@@ -163,10 +196,8 @@ function GalleryShell({
 function TabStrip({
   tab, setTab, counts, compact,
 }: { tab: TabKind; setTab: (t: TabKind) => void; counts: Record<TabKind, number>; compact: boolean }) {
-  const tabs: { key: TabKind; label: string }[] = [
-    { key: 'portrait', label: '立绘' },
-    { key: 'promo', label: '美宣' },
-  ];
+  const tabs: { key: TabKind; label: string }[] = (Object.keys(TAB_META) as TabKind[])
+    .map(k => ({ key: k, label: TAB_META[k].label }));
   return (
     <div className={cn('flex items-baseline gap-5 mt-3', compact && 'mt-2')}>
       {tabs.map(t => {
@@ -198,7 +229,9 @@ function TabStrip({
   );
 }
 
-function PromoLaunchpad({ characterId }: { characterId: string }) {
+function SkillLaunchpad({
+  characterId, title, command: commandPrefix,
+}: { characterId: string; title: string; command: string }) {
   const [uploadedPath, setUploadedPath] = useState<string | null>(null);
   const [uploadedName, setUploadedName] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -207,8 +240,8 @@ function PromoLaunchpad({ characterId }: { characterId: string }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const command = uploadedPath
-    ? `/character-promo ${characterId} --upload ${uploadedPath}`
-    : `/character-promo ${characterId}`;
+    ? `${commandPrefix} ${characterId} --upload ${uploadedPath}`
+    : `${commandPrefix} ${characterId}`;
 
   async function handleFile(file: File) {
     setBusy(true);
@@ -245,7 +278,7 @@ function PromoLaunchpad({ characterId }: { characterId: string }) {
   return (
     <div className="mb-6 rounded-lg border border-border/50 bg-card/50 p-5 space-y-4">
       <div className="flex items-baseline justify-between">
-        <h2 className="font-[var(--font-display)] italic text-lg text-foreground">美宣出图 · 控制台</h2>
+        <h2 className="font-[var(--font-display)] italic text-lg text-foreground">{title}</h2>
         <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">
           web 不直接触发 · 复制命令到 CC
         </span>
