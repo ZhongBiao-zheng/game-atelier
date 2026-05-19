@@ -71,7 +71,7 @@ def get_job(job_id: str) -> Job:
 
 @router.get("/spec/{character_id}")
 def get_spec(character_id: str) -> dict:
-    p = _project_root() / "characters" / f"{character_id}.md"
+    p = _project_root() / "characters" / character_id / "spec.md"
     if not p.exists():
         raise HTTPException(404, detail=f"spec {character_id} not found")
     return {"content": p.read_text(encoding="utf-8")}
@@ -83,9 +83,14 @@ def get_characters() -> list[CharacterEntry]:
     if not chars_dir.exists():
         return []
     out: list[CharacterEntry] = []
-    for p in sorted(chars_dir.glob("*.md")):
+    for d in sorted(chars_dir.iterdir()):
+        if not d.is_dir():
+            continue
+        spec = d / "spec.md"
+        if not spec.exists():
+            continue
         out.append(CharacterEntry(
-            id=p.stem, name=_display_name(p), status="idle", latest_job_id=None,
+            id=d.name, name=_display_name(spec), status="idle", latest_job_id=None,
         ))
     return out
 
@@ -102,7 +107,7 @@ def rename_character(character_id: str, payload: dict = Body(...)) -> dict:
         raise HTTPException(422, detail="name required")
     if "\n" in new_name or len(new_name) > 80:
         raise HTTPException(422, detail="name too long or contains newline")
-    p = _project_root() / "characters" / f"{character_id}.md"
+    p = _project_root() / "characters" / character_id / "spec.md"
     if not p.exists():
         raise HTTPException(404, detail=f"character {character_id} not found")
     text = p.read_text(encoding="utf-8")
@@ -149,7 +154,7 @@ def get_config() -> dict:
 
 @router.post("/spec/{character_id}")
 def post_spec(character_id: str, patch: SpecPatch) -> dict:
-    p = _project_root() / "characters" / f"{character_id}.md"
+    p = _project_root() / "characters" / character_id / "spec.md"
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".md.tmp")
     tmp.write_text(patch.content, encoding="utf-8")

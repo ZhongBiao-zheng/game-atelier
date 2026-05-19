@@ -1,7 +1,7 @@
 import pytest
 
 from skill.character_workflow.lib.jobs import (
-    write_job_pending, update_job_status, read_job,
+    write_job, update_job_status, read_job,
 )
 from skill.character_workflow.lib.schemas import JobStatus
 
@@ -14,17 +14,26 @@ def runtime(tmp_path, monkeypatch):
     return runtime
 
 
-def test_write_pending_creates_file(runtime):
-    job = write_job_pending(
+def test_write_default_is_pending_confirm(runtime):
+    job = write_job(
         job_id="job-001", character_id="c1", prompt="p",
         model="gpt-image-2", params={"size": "1024x1024"}, seed=42,
     )
-    assert job.status == JobStatus.PENDING
+    assert job.status == JobStatus.PENDING_CONFIRM
     assert (runtime / "jobs" / "job-001.json").exists()
 
 
+def test_write_with_explicit_pending(runtime):
+    job = write_job(
+        job_id="job-002", character_id="c1", prompt="p",
+        model="gpt-image-2", params={}, seed=None,
+        status=JobStatus.PENDING,
+    )
+    assert job.status == JobStatus.PENDING
+
+
 def test_update_status_to_done(runtime):
-    write_job_pending(
+    write_job(
         job_id="job-001", character_id="c1", prompt="p",
         model="gpt-image-2", params={}, seed=None,
     )
@@ -37,7 +46,7 @@ def test_update_status_to_done(runtime):
 
 
 def test_update_status_to_failed_records_error(runtime):
-    write_job_pending(
+    write_job(
         job_id="job-001", character_id="c1", prompt="p",
         model="gpt-image-2", params={}, seed=None,
     )
@@ -47,10 +56,10 @@ def test_update_status_to_failed_records_error(runtime):
 
 
 def test_read_returns_full_job(runtime):
-    write_job_pending(
+    write_job(
         job_id="job-001", character_id="c1", prompt="p",
         model="gpt-image-2", params={}, seed=None,
     )
     job = read_job("job-001")
     assert job.job_id == "job-001"
-    assert job.status == JobStatus.PENDING
+    assert job.status == JobStatus.PENDING_CONFIRM

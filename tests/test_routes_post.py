@@ -13,8 +13,9 @@ def runtime(tmp_path, monkeypatch):
     (runtime / "jobs").mkdir(parents=True)
     (runtime / "draft").mkdir()
     monkeypatch.setenv("RUNTIME_DIR", str(runtime))
-    (tmp_path / "characters").mkdir()
-    (tmp_path / "characters" / "shadow.md").write_text("# old")
+    shadow = tmp_path / "characters" / "shadow"
+    shadow.mkdir(parents=True)
+    (shadow / "spec.md").write_text("# old")
     monkeypatch.chdir(tmp_path)
     return runtime
 
@@ -27,7 +28,7 @@ def client(runtime):
 def test_post_spec_writes_file(client, runtime):
     r = client.post("/api/spec/shadow", json={"content": "# new content"})
     assert r.status_code == 200
-    assert (Path.cwd() / "characters" / "shadow.md").read_text() == "# new content"
+    assert (Path.cwd() / "characters" / "shadow" / "spec.md").read_text() == "# new content"
 
 
 def test_post_spec_rejects_empty(client):
@@ -96,7 +97,7 @@ def test_post_config_rejects_empty(client):
 
 
 def test_post_rename_character_updates_heading(client, runtime):
-    p = Path.cwd() / "characters" / "shadow.md"
+    p = Path.cwd() / "characters" / "shadow" / "spec.md"
     p.write_text("# 暗影刺客女\n\n职业：刺客", encoding="utf-8")
     r = client.post("/api/characters/shadow/rename", json={"name": "暗影女刺客"})
     assert r.status_code == 200, r.json()
@@ -106,7 +107,7 @@ def test_post_rename_character_updates_heading(client, runtime):
 
 
 def test_post_rename_inserts_heading_if_missing(client, runtime):
-    p = Path.cwd() / "characters" / "shadow.md"
+    p = Path.cwd() / "characters" / "shadow" / "spec.md"
     p.write_text("职业：刺客\n年龄：24", encoding="utf-8")
     r = client.post("/api/characters/shadow/rename", json={"name": "暗影"})
     assert r.status_code == 200
@@ -191,7 +192,7 @@ def test_post_job_confirm_rejects_wrong_status(client, runtime):
         "job_id": "j1", "character_id": "c", "prompt": "p",
         "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt_image_2",
         "params": {}, "seed": None, "output_paths": [],
-        "status": "running", "error": None,
+        "status": "pending", "error": None,
     }))
     r = client.post("/api/jobs/j1/confirm")
     assert r.status_code == 409

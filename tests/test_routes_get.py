@@ -11,8 +11,9 @@ def runtime(tmp_path, monkeypatch):
     runtime = tmp_path / ".runtime"
     (runtime / "jobs").mkdir(parents=True)
     monkeypatch.setenv("RUNTIME_DIR", str(runtime))
-    (tmp_path / "characters").mkdir()
-    (tmp_path / "characters" / "shadow.md").write_text("# 暗影刺客女\n年龄: 24")
+    shadow = tmp_path / "characters" / "shadow"
+    shadow.mkdir(parents=True)
+    (shadow / "spec.md").write_text("# 暗影刺客女\n年龄: 24")
     monkeypatch.chdir(tmp_path)
     return runtime
 
@@ -52,13 +53,13 @@ def test_get_spec_404(client):
     assert r.status_code == 404
 
 
-def test_get_characters_lists_md_files(client):
+def test_get_characters_lists_character_dirs(client):
     r = client.get("/api/characters")
     assert r.status_code == 200
     entries = r.json()
     ids = [c["id"] for c in entries]
     assert "shadow" in ids
-    # Display name comes from first `# heading`, not file stem.
+    # Display name comes from first `# heading`, not directory name.
     by_id = {c["id"]: c for c in entries}
     assert by_id["shadow"]["name"] == "暗影刺客女"
 

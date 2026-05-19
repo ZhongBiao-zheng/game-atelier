@@ -26,7 +26,7 @@ Why：画师反馈过 —— 看到一份满是 `?` 的文档，他需要回头�
 
 ## 怎么写档案
 
-每次画师答完一轮，把回答**即时归档**到 `characters/<id>.md`，调 `/api/spec/{id}` POST 保存（Web UI 自动刷新右栏）。
+每次画师答完一轮，把回答**即时归档**到 `characters/<id>/spec.md`，调 `/api/spec/{id}` POST 保存（Web UI 自动刷新右栏）。
 
 ### 档案模板（无占位、按需扩展）
 

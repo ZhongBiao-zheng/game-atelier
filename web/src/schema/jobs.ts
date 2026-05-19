@@ -1,4 +1,6 @@
-export type JobStatus = 'pending_confirm' | 'pending' | 'running' | 'done' | 'failed';
+export type JobStatus = 'pending_confirm' | 'pending' | 'done' | 'failed';
+
+export type JobKind = 'portrait' | 'promo' | 'turnaround';
 
 export interface JobParams {
   size?: string;
@@ -21,6 +23,9 @@ export interface Job {
   output_paths: string[];
   status: JobStatus;
   error: string | null;
+  // Skill 套件扩展（2026-05-19）：旧 json 无字段时后端 Pydantic 默认 portrait。
+  kind?: JobKind;
+  source_image?: string | null;
 }
 
 export const WEB_EDITABLE_FIELDS = ['prompt', 'model', 'params', 'seed'] as const;

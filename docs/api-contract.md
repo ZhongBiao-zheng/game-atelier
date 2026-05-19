@@ -11,14 +11,14 @@
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `job_id` | string | ✅ | 唯一 ID（建议 `job-<ulid>`）|
-| `character_id` | string | ✅ | `characters/<id>.md` 的 id（filename without ext）|
+| `character_id` | string | ✅ | `characters/<id>/spec.md` 的 id（顶层目录名）|
 | `prompt` | string | ✅ | 完整出图 prompt |
 | `submitted_at` | string (ISO 8601) | ✅ | UTC 提交时间 |
 | `model` | string | ✅ | Lovart `--include-tools` 值 |
 | `params` | object | ✅ | size / steps / cfg_scale / etc |
 | `seed` | int \| null | ✅ | 随机种子 |
 | `output_paths` | string[] | ✅ | PNG 落地绝对路径（成功后填充）|
-| `status` | enum | ✅ | `pending` \| `running` \| `done` \| `failed` |
+| `status` | enum | ✅ | `pending_confirm` \| `pending` \| `done` \| `failed` |
 | `error` | string \| null | ✅ | `status=failed` 时填错误消息 |
 
 ### `.runtime/active-character.json`

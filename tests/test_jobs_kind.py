@@ -1,0 +1,87 @@
+"""Tests for JobKind enum + 写盘按 kind 分发 + 旧 json fallback.
+
+覆盖 plan §11.3 + §11.4 三条断言：
+1. JobKind round-trip 落盘 / 读回字段不丢
+2. 旧 .runtime/jobs/*.json 无 kind 字段 → Pydantic 自动 fallback PORTRAIT
+3. job_output_dir() 按 kind 写到 characters/<id>/<kind>/
+"""
+import json
+
+import pytest
+
+from skill.character_workflow.lib.jobs import (
+    job_output_dir, read_job, write_job,
+)
+from skill.character_workflow.lib.schemas import Job, JobKind, JobStatus
+
+
+@pytest.fixture
+def runtime(tmp_path, monkeypatch):
+    runtime = tmp_path / ".runtime"
+    (runtime / "jobs").mkdir(parents=True)
+    monkeypatch.setenv("RUNTIME_DIR", str(runtime))
+    monkeypatch.chdir(tmp_path)
+    return runtime
+
+
+def test_default_kind_is_portrait(runtime):
+    job = write_job(
+        job_id="j1", character_id="holy", prompt="p",
+        model="gpt_image_2", params={}, seed=None,
+    )
+    assert job.kind == JobKind.PORTRAIT
+    assert job.source_image is None
+
+
+def test_kind_round_trip(runtime):
+    write_job(
+        job_id="j1", character_id="holy", prompt="p",
+        model="gpt_image_2", params={}, seed=None,
+        kind=JobKind.PROMO, source_image="/abs/upload.png",
+    )
+    re_read = read_job("j1")
+    assert re_read.kind == JobKind.PROMO
+    assert re_read.source_image == "/abs/upload.png"
+
+
+def test_legacy_json_without_kind_falls_back_to_portrait(runtime):
+    """模拟历史 job json 没有 kind / source_image —— Pydantic 默认补上 PORTRAIT/None。"""
+    (runtime / "jobs" / "legacy.json").write_text(json.dumps({
+        "job_id": "legacy", "character_id": "old", "prompt": "p",
+        "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt-image-2",
+        "params": {}, "seed": None, "output_paths": [],
+        "status": "done", "error": None,
+    }))
+    job = read_job("legacy")
+    assert job.kind == JobKind.PORTRAIT
+    assert job.source_image is None
+    assert job.status == JobStatus.DONE
+
+
+def test_job_output_dir_routes_by_kind(tmp_path):
+    base = tmp_path
+    assert job_output_dir("holy", JobKind.PORTRAIT, base) == base / "characters" / "holy" / "portrait"
+    assert job_output_dir("holy", JobKind.PROMO, base) == base / "characters" / "holy" / "promo"
+    assert job_output_dir("holy", JobKind.TURNAROUND, base) == base / "characters" / "holy" / "turnaround"
+
+
+def test_job_model_accepts_all_three_kinds():
+    base_kwargs = dict(
+        job_id="x", character_id="c", prompt="p", submitted_at="2026-05-19T10:00:00Z",
+        model="m", params={}, seed=None, output_paths=[],
+        status=JobStatus.PENDING_CONFIRM, error=None,
+    )
+    for k in (JobKind.PORTRAIT, JobKind.PROMO, JobKind.TURNAROUND):
+        j = Job(**base_kwargs, kind=k)
+        assert j.kind == k
+
+
+def test_source_image_persists_to_disk(runtime):
+    write_job(
+        job_id="j2", character_id="holy", prompt="p",
+        model="gpt_image_2", params={}, seed=None,
+        kind=JobKind.TURNAROUND, source_image="/abs/refs/three-view-source.png",
+    )
+    raw = json.loads((runtime / "jobs" / "j2.json").read_text(encoding="utf-8"))
+    assert raw["kind"] == "turnaround"
+    assert raw["source_image"] == "/abs/refs/three-view-source.png"

@@ -31,7 +31,7 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
   const allImages: { path: string; jobId: string; status: Job['status'] }[] = [];
   jobs.forEach(j => j.output_paths.forEach(p => allImages.push({ path: p, jobId: j.job_id, status: j.status })));
   const failedJobs = jobs.filter(j => j.status === 'failed');
-  const isRunning = jobs.some(j => j.status === 'running');
+  const isRunning = jobs.some(j => j.status === 'pending');
   const pendingConfirm = jobs.filter(j => j.status === 'pending_confirm');
 
   async function deleteImage(jobId: string, path: string) {

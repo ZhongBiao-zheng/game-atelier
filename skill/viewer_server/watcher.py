@@ -53,9 +53,9 @@ class CharactersHandler(FileSystemEventHandler):
         if is_dir:
             return
         p = Path(raw_path)
-        if p.suffix != ".md" or p.name.endswith(".md.tmp"):
+        if p.name != "spec.md":
             return
-        hub.broadcast("spec-changed", {"character_id": p.stem})
+        hub.broadcast("spec-changed", {"character_id": p.parent.name})
 
 
 class ProjectsHandler(FileSystemEventHandler):
@@ -117,7 +117,8 @@ def start_watchers() -> Observer:
 
     chars_dir = project_root / "characters"
     if chars_dir.exists():
-        observer.schedule(CharactersHandler(), str(chars_dir), recursive=False)
+        # recursive=True: spec.md 现在嵌在 characters/<id>/ 下，FSEvents 不递归看不见。
+        observer.schedule(CharactersHandler(), str(chars_dir), recursive=True)
 
     cfg_path = runtime / "config.json"
     if cfg_path.exists():

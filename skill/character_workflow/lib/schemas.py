@@ -9,13 +9,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class JobStatus(str, Enum):
-    # 画师在 Web 端要看到出图前的"配置卡片"，看清楚才点确认。
     # PENDING_CONFIRM = Skill 已组装好调用参数、等画师在终端或 Web 点确认。
+    # PENDING = 已确认 & in-flight（Skill 同步调 lovart 期间停在此状态）。
     PENDING_CONFIRM = "pending_confirm"
     PENDING = "pending"
-    RUNNING = "running"
     DONE = "done"
     FAILED = "failed"
+
+
+class JobKind(str, Enum):
+    # PORTRAIT 立绘（Skill #1）/ PROMO 美宣图（Skill #2）/ TURNAROUND 三视图（Skill #3）。
+    # 写盘按 kind 分发到 characters/<id>/<kind>/。旧 job 无字段 → 默认 PORTRAIT。
+    PORTRAIT = "portrait"
+    PROMO = "promo"
+    TURNAROUND = "turnaround"
 
 
 class JobParams(BaseModel):
@@ -41,6 +48,9 @@ class Job(BaseModel):
     output_paths: list[str]
     status: JobStatus
     error: str | None
+    # Skill 套件扩展（2026-05-19）：旧 json 无字段时 Pydantic 自动 fallback。
+    kind: JobKind = JobKind.PORTRAIT
+    source_image: str | None = None  # promo/turnaround 用，绝对路径
 
 
 class WebEditableJobPatch(BaseModel):

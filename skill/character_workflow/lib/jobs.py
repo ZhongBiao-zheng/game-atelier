@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from skill.character_workflow.lib.schemas import Job, JobParams, JobStatus
+from skill.character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
 
 
 def _runtime_dir() -> Path:
@@ -16,6 +16,12 @@ def _runtime_dir() -> Path:
 
 def _path(job_id: str) -> Path:
     return _runtime_dir() / "jobs" / f"{job_id}.json"
+
+
+def job_output_dir(character_id: str, kind: JobKind, project_root: Path | None = None) -> Path:
+    """按 kind 决定 lovart 输出落到 characters/<id>/<portrait|promo|turnaround>/。"""
+    root = project_root if project_root is not None else Path.cwd()
+    return root / "characters" / character_id / kind.value
 
 
 def _write(job: Job) -> Job:
@@ -27,10 +33,18 @@ def _write(job: Job) -> Job:
     return job
 
 
-def write_job_pending(
+def write_job(
     *, job_id: str, character_id: str, prompt: str, model: str,
     params: dict[str, Any], seed: int | None,
+    status: JobStatus = JobStatus.PENDING_CONFIRM,
+    kind: JobKind = JobKind.PORTRAIT,
+    source_image: str | None = None,
 ) -> Job:
+    """落盘一条 job 文件。默认 PENDING_CONFIRM —— Skill 先写好调用细节，
+    UI 渲染"出图卡片"，画师在终端或 Web 点确认后才推进到 PENDING 调 lovart。
+
+    kind 决定 lovart 输出目录（characters/<id>/<kind>/），由 job_output_dir() 计算。
+    source_image 给 promo / turnaround Skill 传画师上传的参考图绝对路径。"""
     job = Job(
         job_id=job_id,
         character_id=character_id,
@@ -40,29 +54,10 @@ def write_job_pending(
         params=JobParams(**params),
         seed=seed,
         output_paths=[],
-        status=JobStatus.PENDING,
+        status=status,
         error=None,
-    )
-    return _write(job)
-
-
-def write_job_pending_confirm(
-    *, job_id: str, character_id: str, prompt: str, model: str,
-    params: dict[str, Any], seed: int | None,
-) -> Job:
-    """画师确认前的中间态 —— Skill 先把出图调用细节落盘，UI 渲染卡片，
-    画师在终端说"出图"或在 Web 点确认后才推进到 RUNNING。"""
-    job = Job(
-        job_id=job_id,
-        character_id=character_id,
-        prompt=prompt,
-        submitted_at=datetime.now(timezone.utc).isoformat(),
-        model=model,
-        params=JobParams(**params),
-        seed=seed,
-        output_paths=[],
-        status=JobStatus.PENDING_CONFIRM,
-        error=None,
+        kind=kind,
+        source_image=source_image,
     )
     return _write(job)
 
