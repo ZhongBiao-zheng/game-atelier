@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { X, AlertTriangle, Loader2 } from 'lucide-react';
-import type { Job } from '../schema/jobs';
+import { useEffect, useRef, useState } from 'react';
+import { X, AlertTriangle, Loader2, Upload, ClipboardCopy } from 'lucide-react';
+import type { Job, JobKind } from '../schema/jobs';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -12,9 +12,12 @@ interface Props {
   sseSignal: number;
 }
 
+type TabKind = 'portrait' | 'promo';
+
 export function CharacterGallery({ characterId, characterName, detailMode, onSelectImage, sseSignal }: Props) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState<TabKind>('portrait');
 
   useEffect(() => {
     if (!characterId) return;
@@ -26,13 +29,29 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
   }, [characterId, sseSignal]);
 
   if (!characterId) return <EmptyShell title="请在左栏选择角色" subtitle="Atelier · 角色资产工坊" />;
-  if (loading && jobs.length === 0) return <GalleryShell name={characterName} count={0} rounds={0} compact={detailMode}><Skeleton cols={detailMode ? 2 : 3} /></GalleryShell>;
+
+  // 旧 job 无 kind 字段时按 PORTRAIT 处理（后端 Pydantic 默认值，前端二次兜底防漂移）
+  const jobKind = (j: Job): JobKind => j.kind ?? 'portrait';
+  const tabJobs = jobs.filter(j => jobKind(j) === tab);
+  const tabCounts: Record<TabKind, number> = {
+    portrait: jobs.filter(j => jobKind(j) === 'portrait').length,
+    promo: jobs.filter(j => jobKind(j) === 'promo').length,
+  };
+
+  if (loading && jobs.length === 0) {
+    return (
+      <GalleryShell name={characterName} count={0} rounds={0} compact={detailMode}
+        tab={tab} setTab={setTab} tabCounts={tabCounts}>
+        <Skeleton cols={detailMode ? 2 : 3} />
+      </GalleryShell>
+    );
+  }
 
   const allImages: { path: string; jobId: string; status: Job['status'] }[] = [];
-  jobs.forEach(j => j.output_paths.forEach(p => allImages.push({ path: p, jobId: j.job_id, status: j.status })));
-  const failedJobs = jobs.filter(j => j.status === 'failed');
-  const isRunning = jobs.some(j => j.status === 'pending');
-  const pendingConfirm = jobs.filter(j => j.status === 'pending_confirm');
+  tabJobs.forEach(j => j.output_paths.forEach(p => allImages.push({ path: p, jobId: j.job_id, status: j.status })));
+  const failedJobs = tabJobs.filter(j => j.status === 'failed');
+  const isRunning = tabJobs.some(j => j.status === 'pending');
+  const pendingConfirm = tabJobs.filter(j => j.status === 'pending_confirm');
 
   async function deleteImage(jobId: string, path: string) {
     if (!window.confirm(`删除这张图？\n${path}\n（磁盘文件也会删，不可恢复）`)) return;
@@ -48,15 +67,22 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
   const hasAny = allImages.length > 0 || isRunning || failedJobs.length > 0 || pendingConfirm.length > 0;
 
   return (
-    <GalleryShell name={characterName} count={allImages.length} rounds={jobs.length} compact={detailMode}>
+    <GalleryShell
+      name={characterName} count={allImages.length} rounds={tabJobs.length}
+      compact={detailMode} tab={tab} setTab={setTab} tabCounts={tabCounts}
+    >
+      {tab === 'promo' && <PromoLaunchpad characterId={characterId} />}
+
       {pendingConfirm.map(j => <ConfirmCard key={j.job_id} job={j} />)}
 
       {!hasAny && (
         <div className="py-16 text-center">
           <p className="font-[var(--font-display)] italic text-2xl text-foreground/70 mb-2">
-            等待第一张作品
+            {tab === 'portrait' ? '等待第一张作品' : '等待第一张美宣'}
           </p>
-          <p className="text-xs text-muted-foreground">保存档案后将触发首轮出图</p>
+          <p className="text-xs text-muted-foreground">
+            {tab === 'portrait' ? '保存档案后将触发首轮出图' : '上传源图后复制命令到 CC 触发 /character-promo'}
+          </p>
         </div>
       )}
 
@@ -97,8 +123,11 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
 }
 
 function GalleryShell({
-  name, count, rounds, children, compact = false,
-}: { name: string | null; count: number; rounds: number; children: React.ReactNode; compact?: boolean }) {
+  name, count, rounds, children, compact = false, tab, setTab, tabCounts,
+}: {
+  name: string | null; count: number; rounds: number; children: React.ReactNode; compact?: boolean;
+  tab: TabKind; setTab: (t: TabKind) => void; tabCounts: Record<TabKind, number>;
+}) {
   return (
     <main className="flex flex-col h-screen overflow-hidden">
       <header className={cn('border-b border-border/40', compact ? 'px-5 pt-5 pb-3' : 'px-8 pt-8 pb-5')}>
@@ -122,11 +151,158 @@ function GalleryShell({
             </div>
           )}
         </div>
+        <TabStrip tab={tab} setTab={setTab} counts={tabCounts} compact={compact} />
       </header>
       <div className={cn('flex-1 overflow-y-auto', compact ? 'px-4 py-4' : 'px-8 py-6')}>
         {children}
       </div>
     </main>
+  );
+}
+
+function TabStrip({
+  tab, setTab, counts, compact,
+}: { tab: TabKind; setTab: (t: TabKind) => void; counts: Record<TabKind, number>; compact: boolean }) {
+  const tabs: { key: TabKind; label: string }[] = [
+    { key: 'portrait', label: '立绘' },
+    { key: 'promo', label: '美宣' },
+  ];
+  return (
+    <div className={cn('flex items-baseline gap-5 mt-3', compact && 'mt-2')}>
+      {tabs.map(t => {
+        const active = tab === t.key;
+        return (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={cn(
+              'group relative bg-transparent border-0 p-0 cursor-pointer',
+              'flex items-baseline gap-1.5 transition-colors',
+              active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground/80',
+            )}
+          >
+            <span className={cn(
+              'font-[var(--font-display)] italic',
+              compact ? 'text-sm' : 'text-base',
+            )}>{t.label}</span>
+            <span className="font-mono tabular-nums text-[10px] text-muted-foreground/70">
+              {counts[t.key]}
+            </span>
+            {active && (
+              <span className="absolute -bottom-[6px] left-0 right-0 h-px bg-primary" />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function PromoLaunchpad({ characterId }: { characterId: string }) {
+  const [uploadedPath, setUploadedPath] = useState<string | null>(null);
+  const [uploadedName, setUploadedName] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const command = uploadedPath
+    ? `/character-promo ${characterId} --upload ${uploadedPath}`
+    : `/character-promo ${characterId}`;
+
+  async function handleFile(file: File) {
+    setBusy(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch('/api/uploads', { method: 'POST', body: fd });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.detail || `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+      setUploadedPath(data.path);
+      setUploadedName(data.filename);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyCommand() {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard 不可用时退化为提示用户手动复制
+      setError('复制失败，请手动选中命令字符串');
+    }
+  }
+
+  return (
+    <div className="mb-6 rounded-lg border border-border/50 bg-card/50 p-5 space-y-4">
+      <div className="flex items-baseline justify-between">
+        <h2 className="font-[var(--font-display)] italic text-lg text-foreground">美宣出图 · 控制台</h2>
+        <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">
+          web 不直接触发 · 复制命令到 CC
+        </span>
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">源图（可选）</div>
+        <div className="flex items-center gap-3">
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) void handleFile(f);
+              e.target.value = '';
+            }}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => inputRef.current?.click()}
+            disabled={busy}
+          >
+            <Upload className="size-3.5" />
+            {busy ? '上传中…' : uploadedPath ? '换一张' : '选择文件'}
+          </Button>
+          {uploadedName && (
+            <div className="min-w-0 text-xs text-muted-foreground">
+              <div className="truncate text-foreground/85">{uploadedName}</div>
+              <div className="truncate font-mono text-[10px] text-muted-foreground/70">{uploadedPath}</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">触发命令</div>
+        <div className="flex items-center gap-2">
+          <pre className="flex-1 m-0 px-3 py-2 rounded border border-border/50 bg-background font-mono text-xs text-foreground/90 overflow-x-auto whitespace-nowrap">
+            {command}
+          </pre>
+          <Button size="sm" onClick={copyCommand}>
+            <ClipboardCopy className="size-3.5" />
+            {copied ? '已复制' : '复制'}
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="text-xs text-destructive flex items-center gap-1.5">
+          <AlertTriangle className="size-3.5" />
+          {error}
+        </div>
+      )}
+    </div>
   );
 }
 

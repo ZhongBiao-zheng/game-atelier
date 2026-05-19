@@ -4,10 +4,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from skill.character_workflow.lib.active_character import read_active, write_active
@@ -203,8 +204,9 @@ def post_clipboard_attempt(attempt: ClipboardAttempt) -> dict:
 
 @router.get("/raw")
 def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
-    """两条鉴权路径：
-    - `job_id` 在场：以 job.output_paths / params.reference_images 作为白名单（任意磁盘位置）
+    """三条鉴权路径：
+    - `job_id` 在场：以 job.output_paths / params.reference_images / source_image 作为白名单
+    - 路径在 .runtime/uploads/ 下：放行（画师刚上传，还没绑到 job 上时的 preview 用）
     - 否则回退到 image_storage_root 前缀检查（兼容老链接）
     """
     target = Path(path).resolve()
@@ -218,8 +220,13 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
         whitelist = set(job.output_paths)
         refs = (job.params.model_dump().get("reference_images") or []) if job.params else []
         whitelist.update(refs)
+        if job.source_image:
+            whitelist.add(job.source_image)
         if str(target) not in {str(Path(p).resolve()) for p in whitelist}:
             raise HTTPException(403, detail="path not in job whitelist")
+        return FileResponse(str(target))
+    uploads_dir = (_runtime() / "uploads").resolve()
+    if str(target).startswith(str(uploads_dir) + os.sep):
         return FileResponse(str(target))
     cfg_path = _runtime() / "config.json"
     if not cfg_path.exists():
@@ -229,6 +236,33 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
     if not str(target).startswith(str(root)):
         raise HTTPException(403, detail="path outside image_storage_root")
     return FileResponse(str(target))
+
+
+_UPLOAD_ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10MB
+
+
+@router.post("/uploads")
+async def post_upload(file: UploadFile = File(...)) -> dict:
+    """画师在 Web 上传源图 → .runtime/uploads/<uuid><ext>。
+    返回的 path 可直接拼到 `/character-promo <id> --upload <path>` 复制命令里，
+    Skill 拿到后将其挪到 characters/<id>/source/。
+    """
+    raw_name = file.filename or "upload"
+    ext = Path(raw_name).suffix.lower()
+    if ext not in _UPLOAD_ALLOWED_EXTS:
+        raise HTTPException(422, detail=f"extension {ext or '(none)'} not allowed")
+    body = await file.read()
+    if len(body) > _UPLOAD_MAX_BYTES:
+        raise HTTPException(413, detail=f"file too large: {len(body)} bytes (limit {_UPLOAD_MAX_BYTES})")
+    uploads = _runtime() / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex}{ext}"
+    target = uploads / name
+    tmp = target.with_suffix(ext + ".tmp")
+    tmp.write_bytes(body)
+    tmp.replace(target)
+    return {"path": str(target.resolve()), "filename": raw_name}
 
 
 @router.delete("/jobs/{job_id}/image")
