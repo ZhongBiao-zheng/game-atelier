@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, AlertTriangle, Loader2, Upload, ClipboardCopy } from 'lucide-react';
+import { X, AlertTriangle, Loader2, Upload, ClipboardCopy, Clock } from 'lucide-react';
 import type { Job, JobKind } from '../schema/jobs';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -106,7 +106,7 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
         />
       )}
 
-      {pendingConfirm.map(j => <ConfirmCard key={j.job_id} job={j} />)}
+      {pendingConfirm.length > 0 && <PendingConfirmBadge jobs={pendingConfirm} />}
 
       {!hasAny && (
         <div className="py-16 text-center">
@@ -376,78 +376,19 @@ function SkeletonCard() {
   );
 }
 
-function ConfirmCard({ job }: { job: Job }) {
-  const [busy, setBusy] = useState<'confirm' | 'cancel' | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function act(kind: 'confirm' | 'cancel') {
-    setBusy(kind);
-    setError(null);
-    try {
-      const r = await fetch(`/api/jobs/${job.job_id}/${kind}`, { method: 'POST' });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error(d.detail || `HTTP ${r.status}`);
-      }
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  const params = job.params || {};
-  const refs = (params.reference_images || []) as string[];
-
+function PendingConfirmBadge({ jobs }: { jobs: Job[] }) {
+  // 决策面是终端，Web 只显示存在感 —— 不放确认/取消按钮，不渲染 prompt / 参数细节
   return (
-    <div className="mb-6 rounded-lg border border-[color:var(--status-running)]/40 bg-[color:var(--status-running)]/[0.06] p-5">
-      <div className="flex items-baseline justify-between mb-4 gap-4">
-        <div className="flex items-baseline gap-2.5 text-[color:var(--status-running)] min-w-0">
-          <span className="inline-block size-2 rounded-full bg-[color:var(--status-running)] animate-pulse shadow-[0_0_8px_var(--status-running)] translate-y-[-2px] shrink-0" />
-          <span className="font-[var(--font-display)] italic text-xl truncate">即将出图 · 待确认</span>
-        </div>
-        <span className="font-mono text-[10px] text-muted-foreground tracking-wider shrink-0">{job.job_id}</span>
+    <div className="mb-6 rounded-md border border-[color:var(--status-running)]/40 bg-[color:var(--status-running)]/[0.06] px-4 py-2.5 flex items-center justify-between gap-3 text-xs">
+      <div className="flex items-center gap-2.5 text-[color:var(--status-running)] min-w-0">
+        <Clock className="size-3.5 shrink-0" />
+        <span className="font-[var(--font-display)] italic text-sm">
+          {jobs.length} 个 job 等终端确认
+        </span>
       </div>
-
-      <dl className="text-xs leading-relaxed space-y-1.5">
-        <Row label="模型">{job.model}{params.vendor ? ` · ${params.vendor}` : ''}</Row>
-        <Row label="尺寸">{params.size || '默认'}</Row>
-        <Row label="数量">{params.n ?? 1} 张</Row>
-        <Row label="参考图">
-          {refs.length
-            ? <div className="space-y-0.5">{refs.map((p, i) => <div key={i} className="font-mono text-muted-foreground">{p}</div>)}</div>
-            : <span className="text-muted-foreground">无</span>}
-        </Row>
-        <Row label="seed">{job.seed ?? '随机'}</Row>
-        <Row label="prompt">
-          <pre className="whitespace-pre-wrap break-words font-sans bg-transparent text-foreground/90 leading-relaxed">{job.prompt}</pre>
-        </Row>
-      </dl>
-
-      <div className="mt-5 flex gap-2">
-        <Button size="sm" onClick={() => act('confirm')} disabled={busy !== null}>
-          {busy === 'confirm' ? '推进中…' : '出图'}
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => act('cancel')} disabled={busy !== null}>
-          {busy === 'cancel' ? '取消中…' : '取消'}
-        </Button>
-      </div>
-
-      {error && (
-        <div className="mt-3 text-xs text-destructive flex items-center gap-1.5">
-          <AlertTriangle className="size-3.5" />
-          {error}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="grid grid-cols-[72px_1fr] gap-3">
-      <dt className="text-muted-foreground text-[10px] uppercase tracking-[0.18em] mt-0.5">{label}</dt>
-      <dd className="m-0 text-foreground/90">{children}</dd>
+      <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80 shrink-0">
+        去 CC 跟 Claude 说「出图」或「取消」
+      </span>
     </div>
   );
 }
