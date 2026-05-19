@@ -7,7 +7,7 @@ allowed-tools:
   - Write
   - Edit
   - AskUserQuestion
-version: 3.0.0
+version: 4.0.0
 ---
 
 # Character Workflow
@@ -19,35 +19,114 @@ version: 3.0.0
 3. **对话决策、文档归档** —— 永远不出"待补充"占位让画师补全
 4. **中文 prompt 优先** —— 画师的链路全程中文
 
-## Turn 起始（每次 turn 必做）
+## Turn 起始（每次 turn 必做 —— 4 stage 分支）
+
+每轮开头先调一次 CLI，把画师本轮最近一条消息原文（含 `/character-workflow X` 命令前缀）整段塞进 `--message`：
 
 ```bash
-uv run python -m skill.character_workflow turn-start
-# 默认 --kind portrait；做 promo/turnaround 时显式传 --kind 进对应 lessons
+uv run python -m skill.character_workflow turn-start --message "<画师本轮原文>"
+# 出图 promo/turnaround 时显式加 --kind 切换对应 lessons
 ```
 
-一次返回 JSON：
+`--message` 必传 —— intent 推断靠它。返回 JSON：
 
 ```json
 {
-  "drafts":   [...],        # .runtime/draft/ 里画师还没消化的反馈
-  "active_id": "holy",      # 当前活跃角色
-  "spec":      "<markdown>",# characters/<id>/spec.md
-  "worldview": "<markdown>",# 项目根 worldview.md（共享）
-  "lessons":   "<markdown>",# references/lessons/<kind>.md（共享）
-  "lessons_kind": "portrait"
+  "stage":           "A" | "B" | "C" | "D",
+  "stage_reason":    "characters/ 目录不存在",
+  "intent":          "new" | "revise" | "create" | "switch" | null,
+  "intent_signal":   "drafts_present" | "new_keyword" | "switch_keyword" | "default" | "conflict" | "none",
+  "intent_conflict": false,
+  "recent_chars":    [{"id": "holy", "tagline": "治愈系祭祀，金白配色"}],
+  "drafts":          [...],
+  "active_id":       "holy",
+  "active_updated_at": "2026-05-19T08:00:00+00:00",
+  "spec":            "<markdown>" | null,
+  "worldview":       "<markdown>",
+  "lessons":         "<markdown>",
+  "lessons_kind":    "portrait"
 }
 ```
 
-把 `worldview` + `lessons` + `spec` 拼到对话前缀（建议走 `lib.prompt_builder.assemble_character_prompt`），它们就是这一轮的专家上下文。
+按 `stage` 字段分叉，**不要自己重新探测 file system**：
 
-切换处理对象：
+### Stage A —— `characters/` 目录不存在
+
+**用 1 个 AskUserQuestion 同时问 3 题**（AskUserQuestion 支持 1-4 题 per call）：
+
+1. **项目名**（默认 git basename，画师可改）
+2. **一句话世界观**（10-30 字，影响后续 prompt 质量）
+3. **第一个角色名 + 一句话定位**（如 `圣灵祭祀 / 治愈系女性祭祀，金白配色`）
+
+画师答完后落盘：
+- `worldview.md`（画师输入的世界观）
+- `.runtime/projects.json` `{"projects":[{"id":"<proj-id>","name":"<项目名>","created_at":"..."}],"assignments":{"<char-id>":"<proj-id>"}}`
+- `characters/<char-id>/spec.md`（spec 模板，定位字段填画师输入）
+- `.runtime/active-character.json` `{"active_id":"<char-id>","updated_at":"..."}`
+
+完成后直接进入 stage D 出图对话 —— **不重新调 turn-start**，沿用已有 worldview / 新建的 spec 继续做。
+
+### Stage B —— 有项目但 `characters/` 为空
+
+**用 1 个 AskUserQuestion 问 1 题：**
+> 项目里还没有角色。第一个角色名 + 一句话定位（≤20 字）。
+> 示例：`圣灵祭祀 / 治愈系女性祭祀，金白配色`
+
+落盘：
+- `characters/<char-id>/spec.md`（spec 模板）
+- `.runtime/active-character.json`
+
+完成后进 stage D。
+
+### Stage C —— `active-character.json` 缺失或失效
+
+**用 AskUserQuestion 列 N+2 选项**（参考 `recent_chars` 的 `id` 和 `tagline`）：
+
+- 已有角色 1（tagline 1）
+- 已有角色 2（tagline 2）
+- ...
+- 新建一个角色
+- 跳过本轮（不出图）
+
+画师选已有 → 写 `.runtime/active-character.json` → 进 stage D。
+画师选新建 → 走 stage B 流程。
+画师选跳过 → 退出 turn，不动 file system。
+
+### Stage D —— 正常回流（默认不打扰）
+
+按 `intent` 字段分叉，**不要问画师**（除非 `intent_conflict: true`）：
+
+| intent | 行为 |
+|---|---|
+| `new` | 默认。走出图 8 段式 prompt → PENDING_CONFIRM 卡片 |
+| `revise` | drafts 非空。先读 drafts 内容，融进 prompt 修订，再 PENDING_CONFIRM |
+| `create` | 消息含"新建"关键词。即时转 stage B 流程问"新角色名 + 定位" |
+| `switch` | 消息含 `/character-workflow Y` 且 Y ≠ active。写 `active-character.json={"active_id":"Y"}` 后**重新调一次** turn-start |
+| `null` + `intent_conflict: true` | 信号冲突（如 drafts 非空 + 消息有"新建"）。用 AskUserQuestion 让画师二选一：A "继续改当前角色的图" / B "新建另一个角色" |
+
+把 `worldview` + `lessons` + `spec` 拼成对话前缀（建议走 `lib.prompt_builder.assemble_character_prompt`），它们就是这一轮的专家上下文。
+
+## Painter Intent 推断（仅 stage D —— CLI 已算好，Skill 直接读）
+
+CLI 端 `infer_intent()` 已在 turn-start 时算好结果。Skill 端读 `intent` 和 `intent_conflict` 字段即可，**不要自己重写推断逻辑**。规则（参考）：
+
+1. `drafts` 非空 → `revise`，signal=`drafts_present`
+2. message 含"新建 / 新角色 / 另一个角色" → `create`，signal=`new_keyword`
+3. message 含 `/character-workflow <name>` 且 name ≠ active_id → `switch`，signal=`switch_keyword`
+4. 都不匹配 → `new`，signal=`default`
+5. 多信号同时命中 → `intent=null`, `intent_conflict=true`
+
+## Related Discovery（stage C / D 列角色用）
+
+`recent_chars` 数组提供 `id` + `tagline`：tagline 从 `characters/<id>/spec.md` 首行非空、非标题 markdown 内容截取，≤30 字。stage C 列选项时直接用这两个字段拼"角色 id（tagline）"显示，让画师快速分辨。
+
+## 切换处理对象
 
 ```bash
 uv run python -m skill.character_workflow set-active <character-id>
 ```
 
-**跳过条件**：用户消息明显是 git/代码/纯问答 → 跳过。没有 active_id 且没有 draft → 问"想处理哪个角色？"，不要凭空创建文件。
+stage D 推断到 `switch` 时 Skill 自动调一次，**然后必须重新 turn-start**（新 active 才能反映到 spec / drafts / recent_chars）。
 
 ## 关键协议
 
@@ -108,5 +187,7 @@ server 启动时会自动清理 stale PID。详见 `skill/viewer_server/SKILL.md
 
 ## 何时跳过本 Skill
 
-- 用户问的是 git / 代码 / 部署 / 纯问答 → 跳过 turn 起始
+- 用户消息明显是 git / 代码 / 部署 / 纯问答 → 完全跳过 turn-start
 - 用户没明确开始角色工作流且 viewer-server 没开 → 不要主动推角色话题
+- Stage A/B/C 时画师选"跳过本轮" → 退出 turn，不动 file system
+- v3 的兜底逻辑"没有 active_id 且没有 draft → 问'哪个角色？'"已被 4 stage 协议替代，**不再适用**
