@@ -128,3 +128,55 @@ def infer_intent(
         intent, signal = signals[0]
         return intent, signal, False
     return "new", "default", False
+
+
+def _read_active_spec(active_id: str | None) -> str | None:
+    if not active_id:
+        return None
+    p = _characters_dir() / active_id / "spec.md"
+    if not p.exists():
+        return None
+    try:
+        return p.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
+    """v4 编排器：file system 探 stage + 读 active + 推 intent + 拉上下文。
+
+    返回 dict（JSON 序列化用）；调用方需要时可用 TurnStartResult.model_validate 校验。
+    """
+    from skill.character_workflow.lib.active_character import read_active
+    from skill.character_workflow.lib.context_loader import load_lessons, load_worldview
+    from skill.character_workflow.lib.draft_processor import process_drafts
+
+    stage, reason = detect_stage()
+    active = read_active() if stage in ("C", "D") else None
+    active_id = active.active_id if active else None
+    active_updated_at = active.updated_at if active else ""
+
+    drafts = process_drafts() if stage == "D" else []
+    spec = _read_active_spec(active_id) if stage == "D" else None
+    recent = list_recent_chars() if stage in ("C", "D") else []
+
+    if stage == "D":
+        intent, signal, conflict = infer_intent(message, drafts, active_id)
+    else:
+        intent, signal, conflict = None, "none", False
+
+    return {
+        "stage": stage,
+        "stage_reason": reason,
+        "intent": intent,
+        "intent_signal": signal,
+        "intent_conflict": conflict,
+        "recent_chars": recent,
+        "drafts": drafts,
+        "active_id": active_id,
+        "active_updated_at": active_updated_at,
+        "spec": spec,
+        "worldview": load_worldview(),
+        "lessons": load_lessons(kind),
+        "lessons_kind": kind,
+    }

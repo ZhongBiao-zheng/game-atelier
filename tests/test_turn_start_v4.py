@@ -180,3 +180,104 @@ def test_intent_conflict_drafts_plus_new_keyword():
     )
     assert conflict is True
     assert intent is None
+
+
+def test_turn_start_stage_a_payload(project):
+    from skill.character_workflow.lib.turn_start import turn_start
+    r = turn_start(kind="portrait", message=None)
+    assert r["stage"] == "A"
+    assert r["intent"] is None
+    assert r["active_id"] is None
+    assert r["spec"] is None
+    assert r["recent_chars"] == []
+
+
+def test_turn_start_stage_b_payload(project):
+    (project / "characters").mkdir()
+    from skill.character_workflow.lib.turn_start import turn_start
+    r = turn_start(kind="portrait", message=None)
+    assert r["stage"] == "B"
+    assert r["intent"] is None
+    assert r["active_id"] is None
+    assert r["recent_chars"] == []
+
+
+def test_turn_start_stage_c_payload(project):
+    chars = project / "characters"
+    (chars / "holy").mkdir(parents=True)
+    (chars / "holy" / "spec.md").write_text("# 圣灵\n治愈系祭祀\n")
+    (chars / "alex").mkdir()
+    (chars / "alex" / "spec.md").write_text("# 亚历克斯\n剑士定位\n")
+    from skill.character_workflow.lib.turn_start import turn_start
+    r = turn_start(kind="portrait", message=None)
+    assert r["stage"] == "C"
+    assert r["intent"] is None
+    assert len(r["recent_chars"]) == 2
+    ids = sorted(c["id"] for c in r["recent_chars"])
+    assert ids == ["alex", "holy"]
+
+
+def test_turn_start_stage_d_default_new(project):
+    chars = project / "characters"
+    (chars / "holy").mkdir(parents=True)
+    (chars / "holy" / "spec.md").write_text("# 圣灵\n治愈系\n")
+    runtime = project / ".runtime"
+    runtime.mkdir()
+    (runtime / "active-character.json").write_text(
+        json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
+    )
+    from skill.character_workflow.lib.turn_start import turn_start
+    r = turn_start(kind="portrait", message=None)
+    assert r["stage"] == "D"
+    assert r["intent"] == "new"
+    assert r["intent_signal"] == "default"
+    assert r["intent_conflict"] is False
+    assert r["active_id"] == "holy"
+    assert "圣灵" in r["spec"]
+
+
+def test_turn_start_stage_d_with_drafts(project):
+    chars = project / "characters"
+    (chars / "holy").mkdir(parents=True)
+    (chars / "holy" / "spec.md").write_text("# 圣灵\n")
+    runtime = project / ".runtime"
+    runtime.mkdir()
+    (runtime / "active-character.json").write_text(
+        json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
+    )
+    draft_dir = runtime / "draft"
+    draft_dir.mkdir()
+    (draft_dir / "holy-2026.md").write_text("color: more golden\n")
+    from skill.character_workflow.lib.turn_start import turn_start
+    r = turn_start(kind="portrait", message=None)
+    assert r["stage"] == "D"
+    assert r["intent"] == "revise"
+    assert r["intent_signal"] == "drafts_present"
+
+
+def test_turn_start_stage_d_conflict(project):
+    chars = project / "characters"
+    (chars / "holy").mkdir(parents=True)
+    (chars / "holy" / "spec.md").write_text("# 圣灵\n")
+    runtime = project / ".runtime"
+    runtime.mkdir()
+    (runtime / "active-character.json").write_text(
+        json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
+    )
+    draft_dir = runtime / "draft"
+    draft_dir.mkdir()
+    (draft_dir / "holy-2026.md").write_text("调色\n")
+    from skill.character_workflow.lib.turn_start import turn_start
+    r = turn_start(kind="portrait", message="新建一个光辉骑士")
+    assert r["stage"] == "D"
+    assert r["intent"] is None
+    assert r["intent_conflict"] is True
+
+
+def test_turn_start_schema_validates(project):
+    """编排器返回的 dict 必须能通过 TurnStartResult Pydantic 校验。"""
+    from skill.character_workflow.lib.schemas import TurnStartResult
+    from skill.character_workflow.lib.turn_start import turn_start
+    r = turn_start(kind="portrait", message=None)
+    parsed = TurnStartResult.model_validate(r)
+    assert parsed.stage.value == "A"
