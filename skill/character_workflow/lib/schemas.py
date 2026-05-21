@@ -96,6 +96,7 @@ class ActiveCharacterFile(BaseModel):
 
 class Project(BaseModel):
     id: str
+    slug: str
     name: str
     created_at: str
 

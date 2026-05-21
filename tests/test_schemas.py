@@ -113,3 +113,17 @@ def test_recommend_action_enum_values():
     assert RecommendAction.ASK.value == "ask"
     assert RecommendAction.SWITCH.value == "switch"
     assert RecommendAction.NOOP.value == "noop"
+
+
+def test_project_has_slug_field():
+    from skill.character_workflow.lib.schemas import Project
+    p = Project(id="p-x", slug="my-game", name="名字", created_at="2026-05-21T00:00:00+00:00")
+    assert p.slug == "my-game"
+
+
+def test_project_slug_required():
+    import pytest
+    from pydantic import ValidationError
+    from skill.character_workflow.lib.schemas import Project
+    with pytest.raises(ValidationError):
+        Project(id="p-x", name="名字", created_at="2026-05-21T00:00:00+00:00")

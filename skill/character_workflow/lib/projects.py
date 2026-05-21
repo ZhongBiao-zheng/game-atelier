@@ -45,10 +45,14 @@ def _write(file: ProjectsFile) -> ProjectsFile:
 
 
 def create_project(name: str) -> Project:
+    import re
     f = read_projects()
+    clean = name.strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", clean.lower()).strip("-") or uuid4().hex[:8]
     project = Project(
         id=f"p-{uuid4().hex[:10]}",
-        name=name.strip(),
+        slug=slug,
+        name=clean,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
     f.projects.append(project)
