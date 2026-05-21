@@ -75,6 +75,22 @@ uv run python -m skill.character_workflow turn-start --kind turnaround
 **共享底层** → `skill/character_workflow/references/art-prompt-system.md`
 **三视图专项** → `references/prompt-turnaround-zh.md`（含 downstream_use 映射、严格禁止项、多面可见信息拆解规则）
 
+### 修改已出图（三模式协议）
+
+**触发条件**：画师指着现有图（`turnaround/v1.png` 等）说"换 X / 加 Y / 改 Z"的修改需求时，**必须先用 AskUserQuestion 问**选哪种模式，不得自行假设：
+
+| 模式 | 做法 | 适用场景 |
+|---|---|---|
+| **A 编辑当前图** | 上传当前图作参考图；prompt **只写改动指令**，不重写三面设定的完整描述 | 只改局部细节（某个配件/颜色），整体比例满意 |
+| **B 完全重出** | **不带参考图**；重新走四维度引导，写完整新 prompt | 整张三视图都不满意，从零开始 |
+| **C 局部参考混合** | 带参考图锚定满意部分；prompt 完整重写，但**明确标注**哪部分以参考图为准、哪部分重画 | 比例/基线满意，但服装/武器细节要大改 |
+
+三种模式互斥，**绝不混用**（带参考图 + 整张重写 prompt = 模型不知锚哪边，三面对不齐风险更高）。
+
+A 模式时 spec 只更新被改的字段；B 模式可大改 spec；C 模式改受影响段并注明"参考图锁定哪部分"。
+
+首次出图、用户主动说"重画"等场景不适用此规则。
+
 ### 调 Lovart 出图
 
 先落盘 PENDING_CONFIRM，画师预览尺寸/视图组合并确认后再调用，三视图一旦跑偏比立绘更难二次修正。流程：

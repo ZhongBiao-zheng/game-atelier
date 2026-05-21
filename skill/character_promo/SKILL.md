@@ -74,6 +74,22 @@ uv run python -m skill.character_workflow turn-start --kind promo
 **共享底层** → `skill/character_workflow/references/art-prompt-system.md`
 **美宣专项** → `references/prompt-promo-zh.md`（含画幅映射、先光后衣决策顺序、narrative_beat 转动作规则）
 
+### 修改已出图（三模式协议）
+
+**触发条件**：画师指着现有图（`promo/v1.png` 等）说"换 X / 加 Y / 改 Z"的修改需求时，**必须先用 AskUserQuestion 问**选哪种模式，不得自行假设：
+
+| 模式 | 做法 | 适用场景 |
+|---|---|---|
+| **A 编辑当前图** | 上传当前图作参考图；prompt **只写改动指令**，不重写人物外观/服装/姿势的完整设定 | 只改局部，对整体满意 |
+| **B 完全重出** | **不带参考图**；重新走五维度引导，写完整新 prompt | 整张图都不满意，从零开始 |
+| **C 局部参考混合** | 带参考图锚定满意部分；prompt 完整重写，但**明确标注**哪部分以参考图为准、哪部分重画 | 人脸/配色满意，但构图/场景要大改 |
+
+三种模式互斥，**绝不混用**（带参考图 + 整张重写 prompt = 模型不知锚哪边，输出不稳定）。
+
+A 模式时 spec 只更新被改的字段；B 模式可大改 spec；C 模式改受影响段并注明"参考图锁定哪部分"。
+
+首次出图、用户主动说"重画"等场景不适用此规则。
+
 ### 调 Lovart 出图
 
 先落盘 PENDING_CONFIRM，画师预览 prompt 并确认后再调用，避免出方向跑偏的图。流程：
