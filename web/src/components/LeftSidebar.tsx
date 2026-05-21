@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, X, AlertCircle, FolderPlus } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, X, AlertCircle, FolderPlus, UserPlus } from 'lucide-react';
 import type { CharacterEntry, Project, ProjectsFile } from '../schema/jobs';
 import { useActiveCharacter } from '../hooks/useActiveCharacter';
 import { Button } from '@/components/ui/button';
@@ -20,9 +20,12 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect }: Props) {
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  const [creatingCharacter, setCreatingCharacter] = useState(false);
+  const [newCharacterName, setNewCharacterName] = useState('');
   const activeId = useActiveCharacter(sseSignal);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const newProjectInputRef = useRef<HTMLInputElement | null>(null);
+  const newCharInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     fetch('/api/characters').then(r => r.json()).then(setCharacters);
@@ -36,6 +39,10 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect }: Props) {
   useEffect(() => {
     if (creatingProject && newProjectInputRef.current) newProjectInputRef.current.focus();
   }, [creatingProject]);
+
+  useEffect(() => {
+    if (creatingCharacter && newCharInputRef.current) newCharInputRef.current.focus();
+  }, [creatingCharacter]);
 
   function startCharEdit(c: CharacterEntry, e: React.MouseEvent) {
     e.stopPropagation();
@@ -113,6 +120,34 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect }: Props) {
   function cancelNewProject() {
     setCreatingProject(false);
     setNewProjectName('');
+  }
+
+  function startNewCharacter() {
+    setCreatingCharacter(true);
+    setNewCharacterName('');
+    setError(null);
+  }
+
+  function cancelNewCharacter() {
+    setCreatingCharacter(false);
+    setNewCharacterName('');
+  }
+
+  async function commitNewCharacter() {
+    const name = newCharacterName.trim();
+    if (!name) { cancelNewCharacter(); return; }
+    try {
+      const r = await fetch('/api/characters', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const entry = await r.json() as { id: string; name: string };
+      cancelNewCharacter();
+      onSelect(entry.id, entry.name);
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }
 
   async function commitNewProject() {
@@ -208,10 +243,30 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect }: Props) {
             在终端 Claude Code<br />
             输入"开始角色工作流"开始建档
           </p>
-          <Button variant="outline" size="sm" className="mt-2">
-            <Plus className="size-3.5" />
-            新建角色
-          </Button>
+          {creatingCharacter ? (
+            <div className="flex items-center gap-1.5 w-full max-w-[180px]">
+              <Input
+                ref={newCharInputRef}
+                value={newCharacterName}
+                onChange={e => setNewCharacterName(e.target.value)}
+                onBlur={commitNewCharacter}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') commitNewCharacter();
+                  if (e.key === 'Escape') cancelNewCharacter();
+                }}
+                placeholder="角色名（如：烈拳猴）"
+                className="h-7 text-xs"
+              />
+            </div>
+          ) : (
+            <Button variant="outline" size="sm" className="mt-2" onClick={startNewCharacter}>
+              <Plus className="size-3.5" />
+              新建角色
+            </Button>
+          )}
+          {error && (
+            <p className="text-xs text-destructive">{error}</p>
+          )}
         </div>
       </aside>
     );
@@ -220,20 +275,50 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect }: Props) {
   return (
     <aside className="h-screen border-r border-border/60 bg-card/30 overflow-y-auto flex flex-col">
       <BrandHeader>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={startNewProject}
-          disabled={creatingProject}
-          title="新建项目（用来给角色分类）"
-          className="h-7 px-2 text-xs"
-        >
-          <FolderPlus className="size-3" />
-          新项目
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={startNewCharacter}
+            disabled={creatingCharacter}
+            title="新建角色"
+            className="h-7 px-2 text-xs"
+          >
+            <UserPlus className="size-3" />
+            新角色
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={startNewProject}
+            disabled={creatingProject}
+            title="新建项目（用来给角色分类）"
+            className="h-7 px-2 text-xs"
+          >
+            <FolderPlus className="size-3" />
+            新项目
+          </Button>
+        </div>
       </BrandHeader>
 
       <div className="flex-1 px-2 py-3">
+        {creatingCharacter && (
+          <div className="mb-2 flex items-center gap-1.5 px-2 py-1">
+            <UserPlus className="size-3.5 text-muted-foreground shrink-0" />
+            <Input
+              ref={newCharInputRef}
+              value={newCharacterName}
+              onChange={e => setNewCharacterName(e.target.value)}
+              onBlur={commitNewCharacter}
+              onKeyDown={e => {
+                if (e.key === 'Enter') commitNewCharacter();
+                if (e.key === 'Escape') cancelNewCharacter();
+              }}
+              placeholder="角色名（如：烈拳猴）"
+              className="h-7 text-xs"
+            />
+          </div>
+        )}
         {creatingProject && (
           <section className="mb-2 flex items-center gap-1.5 px-2 py-1">
             <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
