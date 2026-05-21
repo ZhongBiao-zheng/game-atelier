@@ -41,11 +41,10 @@ triggers:
 每次调用本 Skill 时，Turn 起始之前先执行：
 
 ```bash
-uv run python skill/viewer_server/server.py start
-uv run python skill/viewer_server/server.py open-browser
+uv run python skill/viewer_server/server.py start --background
 ```
 
-server 自动检测 PID，已在运行则跳过重启；open-browser 每次都会弹出窗口。
+`--background` 模式：已在运行则静默跳过（不重开浏览器）；首次启动则后台起 uvicorn 并自动打开浏览器一次。
 
 ## Turn 起始（每次 turn 必做）
 

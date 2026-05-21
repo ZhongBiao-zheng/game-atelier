@@ -32,7 +32,7 @@ def _find_free_port(start: int) -> int:
     raise RuntimeError(f"No free port in range {start}-{start+100}")
 
 
-def cmd_start() -> None:
+def cmd_start(background: bool = False) -> None:
     runtime = Path(os.environ.get("RUNTIME_DIR", ".runtime"))
     runtime.mkdir(parents=True, exist_ok=True)
     cleanup_stale_pid(runtime)
@@ -41,15 +41,35 @@ def cmd_start() -> None:
     if existing_pid:
         port = read_port(runtime) or DEFAULT_PORT
         print(f"viewer-server already running (pid={existing_pid}, port={port})")
-        return
+        return  # 已在运行 — 跳过重启，也不开浏览器
 
     port = _find_free_port(DEFAULT_PORT)
-    write_pid(runtime, os.getpid())
     write_port(runtime, port)
-    print(f"viewer-server starting at http://127.0.0.1:{port}/")
 
-    from skill.viewer_server.server_app import build_app  # late import
-    uvicorn.run(build_app(), host="127.0.0.1", port=port, log_level="info")
+    if background:
+        # 后台启动（Skill 调用路径）：非阻塞，只在首次启动时开浏览器
+        import time
+        project_root = str(Path(__file__).parent.parent.parent)
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn",
+             "skill.viewer_server.server_app:build_app", "--factory",
+             "--host", "127.0.0.1", "--port", str(port), "--log-level", "info"],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=project_root,
+            env=os.environ.copy(),
+        )
+        write_pid(runtime, proc.pid)
+        print(f"viewer-server started at http://127.0.0.1:{port}/ (pid={proc.pid})")
+        time.sleep(1.5)  # 等 uvicorn 就绪
+        cmd_open_browser()
+    else:
+        # 前台启动（终端 A 手动路径）：阻塞直到 Ctrl-C
+        write_pid(runtime, os.getpid())
+        print(f"viewer-server starting at http://127.0.0.1:{port}/")
+        from skill.viewer_server.server_app import build_app  # late import
+        uvicorn.run(build_app(), host="127.0.0.1", port=port, log_level="info")
 
 
 def cmd_stop() -> None:
@@ -77,6 +97,15 @@ def cmd_open_browser() -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("usage: server.py {start|stop|open-browser}")
+        print("usage: server.py {start [--background]|stop|open-browser}")
         sys.exit(1)
-    {"start": cmd_start, "stop": cmd_stop, "open-browser": cmd_open_browser}[sys.argv[1]]()
+    cmd = sys.argv[1]
+    if cmd == "start":
+        cmd_start(background="--background" in sys.argv)
+    elif cmd == "stop":
+        cmd_stop()
+    elif cmd == "open-browser":
+        cmd_open_browser()
+    else:
+        print(f"unknown command: {cmd}")
+        sys.exit(1)
