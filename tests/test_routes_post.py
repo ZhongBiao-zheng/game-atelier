@@ -238,3 +238,36 @@ def test_delete_failed_job_rejects_done_job(client, runtime):
 
     assert r.status_code == 409
     assert (runtime / "jobs" / "j1.json").exists()
+
+
+def test_create_character_creates_dirs_and_spec(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    r = client.post("/api/characters", json={"name": "烈拳猴"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["name"] == "烈拳猴"
+    char_id = data["id"]
+    assert char_id.startswith("char-")
+    root = tmp_path / "characters" / char_id
+    for d in ("portrait", "promo", "turnaround", "source"):
+        assert (root / d).is_dir(), f"missing {d}/"
+    spec = (root / "spec.md").read_text(encoding="utf-8")
+    assert spec.startswith("# 烈拳猴")
+
+
+def test_create_character_rejects_empty_name(client):
+    r = client.post("/api/characters", json={"name": ""})
+    assert r.status_code == 422
+
+
+def test_create_character_sets_active(client, tmp_path, monkeypatch):
+    import json as _json
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".runtime" / "jobs").mkdir(parents=True, exist_ok=True)
+    r = client.post("/api/characters", json={"name": "测试角色"})
+    assert r.status_code == 200
+    char_id = r.json()["id"]
+    active_file = tmp_path / ".runtime" / "active-character.json"
+    assert active_file.exists()
+    active = _json.loads(active_file.read_text())
+    assert active["active_id"] == char_id

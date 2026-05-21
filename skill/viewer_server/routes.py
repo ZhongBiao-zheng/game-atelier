@@ -20,11 +20,17 @@ from skill.character_workflow.lib.projects import (
     assign_character, create_project, delete_project, read_projects,
     rename_project,
 )
+from pydantic import BaseModel
+
 from skill.character_workflow.lib.schemas import (
     ActiveCharacterFile, CharacterEntry, CharacterProjectAssign, ClipboardAttempt,
     FeedbackPost, Job, JobStatus, ProjectCreate, ProjectRename, ProjectsFile,
     SpecPatch, WebEditableJobPatch,
 )
+
+
+class CharacterCreate(BaseModel):
+    name: str
 
 
 def _display_name(spec_path: Path) -> str:
@@ -314,6 +320,22 @@ async def post_gallery_image(
     update_job_status(job_id, status=JobStatus.DONE, output_paths=[str(target.resolve())])
 
     return {"job_id": job_id, "path": str(target.resolve()), "filename": raw_name}
+
+
+@router.post("/characters", response_model=CharacterEntry)
+def create_character(payload: CharacterCreate) -> CharacterEntry:
+    import time as _time
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(422, detail="name required")
+    char_id = f"char-{int(_time.time())}"
+    root = _project_root() / "characters" / char_id
+    for sub in ("portrait", "promo", "turnaround", "source"):
+        (root / sub).mkdir(parents=True, exist_ok=True)
+    spec_content = f"# {name}\n\n（尚无档案 — 请在终端 /character-workflow 对话补全）\n"
+    (root / "spec.md").write_text(spec_content, encoding="utf-8")
+    write_active(char_id)
+    return CharacterEntry(id=char_id, name=name, status="idle", latest_job_id=None)
 
 
 @router.delete("/jobs/{job_id}/image")
