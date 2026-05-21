@@ -18,7 +18,7 @@ def out_dir(tmp_path):
 
 
 def _fake_run_factory(stdout: str = "", stderr: str = "", returncode: int = 0):
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, timeout, env=None):
         return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
     return fake_run
 
@@ -84,12 +84,37 @@ def test_submit_missing_output_paths_raises(monkeypatch, out_dir):
 def test_build_cmd_includes_n_and_refs(out_dir):
     cmd = lc._build_cmd(
         prompt="圣灵", model="generate_image_gpt_image_2",
-        output_dir=out_dir, n=2, reference_images=["/refs/a.png", "/refs/b.png"],
+        output_dir=out_dir, n=2, attachments=["https://cdn/a.png", "https://cdn/b.png"],
     )
+    assert str(lc.DEFAULT_LOVART_CLI) in cmd
+    assert "/tmp/lovart_wrapper" not in " ".join(cmd)
     assert "--include-tools" in cmd
     assert "generate_image_gpt_image_2" in cmd
-    assert "--n" in cmd and "2" in cmd
-    assert cmd.count("--reference-image") == 2
-    assert "/refs/a.png" in cmd
-    assert "/refs/b.png" in cmd
+    assert "--n" not in cmd
+    assert "--reference-image" not in cmd
+    assert cmd.count("--attachments") == 1
+    assert "https://cdn/a.png" in cmd
+    assert "https://cdn/b.png" in cmd
     assert "--json" in cmd and "--download" in cmd
+
+
+def test_submit_uses_clean_proxy_env(monkeypatch, out_dir):
+    captured = {}
+
+    def fake_run(cmd, capture_output, text, timeout, env=None):
+        captured["env"] = env
+        return SimpleNamespace(
+            stdout=json.dumps({"output_paths": ["/abs/v1.png"]}),
+            stderr="",
+            returncode=0,
+        )
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.invalid:8080")
+    monkeypatch.setenv("http_proxy", "http://proxy.invalid:8080")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    lc.submit_and_wait(prompt="x", output_dir=out_dir)
+
+    assert captured["env"]["HTTPS_PROXY"] == ""
+    assert captured["env"]["http_proxy"] == ""
+    assert captured["env"]["NO_PROXY"] == "lovart.ai,.lovart.ai"

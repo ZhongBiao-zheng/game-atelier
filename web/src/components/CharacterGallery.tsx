@@ -54,9 +54,9 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
   const jobKind = (j: Job): JobKind => j.kind ?? 'portrait';
   const tabJobs = jobs.filter(j => jobKind(j) === tab);
   const tabCounts: Record<TabKind, number> = {
-    portrait: jobs.filter(j => jobKind(j) === 'portrait').length,
-    promo: jobs.filter(j => jobKind(j) === 'promo').length,
-    turnaround: jobs.filter(j => jobKind(j) === 'turnaround').length,
+    portrait: jobs.filter(j => jobKind(j) === 'portrait').reduce((s, j) => s + j.output_paths.length, 0),
+    promo: jobs.filter(j => jobKind(j) === 'promo').reduce((s, j) => s + j.output_paths.length, 0),
+    turnaround: jobs.filter(j => jobKind(j) === 'turnaround').reduce((s, j) => s + j.output_paths.length, 0),
   };
 
   if (loading && jobs.length === 0) {
@@ -146,7 +146,9 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
             </figure>
           ))}
 
-          {isRunning && Array.from({ length: cols }).map((_, i) => <SkeletonCard key={`s${i}`} />)}
+          {tabJobs.filter(j => j.status === 'pending').flatMap(j =>
+            Array.from({ length: j.params?.n ?? 1 }, (_, i) => <SkeletonCard key={`${j.job_id}-s${i}`} />)
+          )}
           {failedJobs.map(j => (
             <ErrorCard
               key={j.job_id}

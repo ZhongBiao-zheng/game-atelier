@@ -1,7 +1,8 @@
 # 立绘出图历代经验 · LESSONS
 
 > Skill #1 `/character-workflow` 收尾时（job DONE / FAILED 有明确原因 / spec 归档），
-> 主动询问"要不要把本轮 prompt 经验沉淀一句到 lessons？"，画师答 Y 才追加到本文件末尾。
+> 默认主动询问"要不要把本轮 prompt 经验沉淀一句到 lessons？"；画师明确授权 Skill 自行判断时，
+> 直接追加 1–2 条能复用的经验到本文件末尾。
 >
 > **一条经验 = 一行 markdown，格式严格**：
 > ```
@@ -16,3 +17,7 @@
 ## 经验条目（按时间倒序）
 
 <!-- 第一条经验由首次完整跑通 /character-workflow 后追加。 -->
+- 2026-05-21 young-emperor-monkey · 精灵类角色首轮出图避免直呼现有 IP 与“幼年+强攻”等组合，改成原创怪兽图鉴风、初阶形态、蓄势展示动作更稳 · prompt 片段：`原创日式怪兽图鉴官方设定图风格，适合全年龄向游戏角色`
+- 2026-05-21 young-emperor-monkey · Lovart 返回 artifact 但 runner 因 final_status=timeout 或 downloader failed 标失败时，先检查响应里的 artifacts URL，再用 curl -sS -L --fail 手动补下载并回填 job · prompt 片段：`download failed + artifacts/agent/*.png`
+- 2026-05-21 blazefist-monkey · 出进化形态立绘时把前置进化 portrait/v1.png 上传为参考图，能保持配色血统一致性 · 操作：lovart_wrapper upload + chat --attachments CDN_URL
+- 2026-05-21 blazefist-monkey · lovart_wrapper upload_file 用 curl 子进程代替 requests，绕开服务端 chunked 响应提前关闭导致空 body 的问题 · 关键代码：subprocess.check_output(['curl', '-sS', '-F', 'file=@path', url])

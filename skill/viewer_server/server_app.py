@@ -1,6 +1,7 @@
 """FastAPI app factory — REST routes + SSE + filesystem watchers."""
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -8,12 +9,13 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from skill.viewer_server.routes import router
-from skill.viewer_server.sse import sse_router
+from skill.viewer_server.sse import hub, sse_router
 from skill.viewer_server.watcher import start_watchers
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    hub.set_loop(asyncio.get_running_loop())
     observer = start_watchers()
     try:
         yield

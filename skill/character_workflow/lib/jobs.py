@@ -10,6 +10,9 @@ from typing import Any
 from skill.character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
 
 
+_UNSET = object()
+
+
 def _runtime_dir() -> Path:
     return Path(os.environ.get("RUNTIME_DIR", ".runtime"))
 
@@ -31,6 +34,21 @@ def _write(job: Job) -> Job:
     tmp.write_text(job.model_dump_json(indent=2), encoding="utf-8")
     tmp.replace(p)
     return job
+
+
+def save_job(job: Job) -> Job:
+    """Persist a complete Job model after structured updates."""
+    return _write(job)
+
+
+def list_jobs() -> list[Job]:
+    jobs_dir = _runtime_dir() / "jobs"
+    if not jobs_dir.exists():
+        return []
+    jobs: list[Job] = []
+    for p in sorted(jobs_dir.glob("*.json")):
+        jobs.append(Job.model_validate(json.loads(p.read_text(encoding="utf-8"))))
+    return jobs
 
 
 def write_job(
@@ -70,13 +88,13 @@ def read_job(job_id: str) -> Job:
 def update_job_status(
     job_id: str, *, status: JobStatus,
     output_paths: list[str] | None = None,
-    error: str | None = None,
+    error: str | None | object = _UNSET,
 ) -> Job:
     job = read_job(job_id)
     update: dict[str, Any] = {"status": status}
     if output_paths is not None:
         update["output_paths"] = output_paths
-    if error is not None:
+    if error is not _UNSET:
         update["error"] = error
     updated = job.model_copy(update=update)
     return _write(updated)
@@ -94,3 +112,15 @@ def remove_image_from_job(job_id: str, image_path: str) -> Job:
     new_paths = [x for x in job.output_paths if x != image_path]
     updated = job.model_copy(update={"output_paths": new_paths})
     return _write(updated)
+
+
+def delete_failed_job(job_id: str) -> None:
+    """删除 failed job 的元数据；若它意外带 output_paths，也一并清理文件。"""
+    job = read_job(job_id)
+    if job.status != JobStatus.FAILED:
+        raise ValueError(f"job {job_id} is {job.status.value}, not failed")
+    for image_path in job.output_paths:
+        p = Path(image_path)
+        if p.exists():
+            p.unlink()
+    _path(job_id).unlink()

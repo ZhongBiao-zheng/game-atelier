@@ -34,6 +34,12 @@ class JobParams(BaseModel):
     vendor: str | None = None
     n: int | None = None
     reference_images: list[str] | None = None
+    requested_size: str | None = None
+    actual_size: str | None = None
+    lovart_attachments: list[str] | None = None
+    lovart_thread_id: str | None = None
+    lovart_final_status: str | None = None
+    warnings: list[str] | None = None
 
 
 class Job(BaseModel):

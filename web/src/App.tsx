@@ -43,6 +43,7 @@ function ThreeColumnLayout() {
     )}>
       <LeftSidebar
         sseSignal={sseSignal}
+        selectedId={selected?.id}
         onSelect={(id, name) => setSelected({ id, name })}
       />
       <CharacterGallery

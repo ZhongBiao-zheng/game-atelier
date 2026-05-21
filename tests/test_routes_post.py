@@ -210,3 +210,31 @@ def test_post_job_cancel_marks_failed(client, runtime):
     data = json.loads((runtime / "jobs" / "j1.json").read_text())
     assert data["status"] == "failed"
     assert "画师取消" in data["error"]
+
+
+def test_delete_failed_job_removes_job_file(client, runtime):
+    (runtime / "jobs" / "j1.json").write_text(json.dumps({
+        "job_id": "j1", "character_id": "c", "prompt": "p",
+        "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt_image_2",
+        "params": {}, "seed": None, "output_paths": [],
+        "status": "failed", "error": "Lovart timeout",
+    }))
+
+    r = client.delete("/api/jobs/j1")
+
+    assert r.status_code == 200, r.text
+    assert not (runtime / "jobs" / "j1.json").exists()
+
+
+def test_delete_failed_job_rejects_done_job(client, runtime):
+    (runtime / "jobs" / "j1.json").write_text(json.dumps({
+        "job_id": "j1", "character_id": "c", "prompt": "p",
+        "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt_image_2",
+        "params": {}, "seed": None, "output_paths": [],
+        "status": "done", "error": None,
+    }))
+
+    r = client.delete("/api/jobs/j1")
+
+    assert r.status_code == 409
+    assert (runtime / "jobs" / "j1.json").exists()

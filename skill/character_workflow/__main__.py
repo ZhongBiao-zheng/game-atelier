@@ -17,6 +17,7 @@ from pathlib import Path
 
 from skill.character_workflow.lib.active_character import read_active, write_active
 from skill.character_workflow.lib.jobs import write_job
+from skill.character_workflow.lib.job_runner import run_job, run_latest
 from skill.character_workflow.lib.lessons import append_lesson
 from skill.character_workflow.lib.schemas import JobKind, JobStatus
 from skill.character_workflow.lib.turn_start import turn_start
@@ -48,11 +49,18 @@ def _submit(args: argparse.Namespace) -> int:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     job_id = f"job-{ts}{secrets.token_hex(4)}"
 
+    source_image = (
+        str(Path(args.source_image).expanduser().resolve())
+        if args.source_image else None
+    )
+    reference_images = [source_image] if source_image else []
+
     params: dict = {
         "vendor": "OpenAI (via Lovart)",
         "size": args.size,
+        "requested_size": args.size,
         "n": args.n,
-        "reference_images": [],
+        "reference_images": reference_images,
     }
 
     write_job(
@@ -64,7 +72,7 @@ def _submit(args: argparse.Namespace) -> int:
         seed=None,
         status=JobStatus.PENDING_CONFIRM,
         kind=JobKind(args.kind),
-        source_image=args.source_image,
+        source_image=source_image,
     )
     print(job_id)
     return 0
@@ -112,6 +120,16 @@ def main(argv: list[str] | None = None) -> int:
         help="参考源图绝对路径（promo / turnaround 用）",
     )
 
+    p_run_job = sub.add_parser("run-job", help="确认并执行一个 PENDING_CONFIRM job")
+    p_run_job.add_argument("job_id")
+
+    p_run_latest = sub.add_parser(
+        "run-latest",
+        help="执行当前角色最近一个 PENDING_CONFIRM job",
+    )
+    p_run_latest.add_argument("--kind", choices=("portrait", "promo", "turnaround"))
+    p_run_latest.add_argument("--character", default=None)
+
     args = parser.parse_args(argv)
     if args.cmd == "turn-start":
         print(json.dumps(turn_start(args.kind, args.message), ensure_ascii=False, indent=2))
@@ -129,6 +147,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "submit":
         return _submit(args)
+    if args.cmd == "run-job":
+        try:
+            job = run_job(args.job_id)
+        except Exception as e:
+            print(f"run-job: {e}", file=sys.stderr)
+            return 1
+        print(json.dumps(job.model_dump(), ensure_ascii=False, indent=2))
+        return 0
+    if args.cmd == "run-latest":
+        try:
+            job = run_latest(
+                kind=JobKind(args.kind) if args.kind else None,
+                character_id=args.character,
+            )
+        except Exception as e:
+            print(f"run-latest: {e}", file=sys.stderr)
+            return 1
+        print(json.dumps(job.model_dump(), ensure_ascii=False, indent=2))
+        return 0
     return 1
 
 

@@ -32,9 +32,12 @@ echo "$JOB_ID"
 - `--n` 默认 1，画师明示"多出几张"才传 `--n 4`
 - 调用方负责创建 + 删除临时 prompt 文件（避免 `/tmp` 残留）
 - stdout 是纯 job_id 字符串，可直接 `$(...)` 捕获
+- `--source-image` 会同时写入顶层 `source_image` 和 `params.reference_images`
 - 落盘后 watcher 广播 `job-changed`，Web 端 CharacterGallery 自动渲染"待确认"卡片
 
 ### 2. 终端出图卡片格式
+
+确认卡片必须包含即将提交给模型的完整 prompt 原文。不能用摘要、文件路径、"见上文"、"同 spec" 或省略号替代。
 
 ```
 即将调用：
@@ -43,29 +46,48 @@ echo "$JOB_ID"
 - 数量：4 张
 - 参考图：（无）/ <path>
 - 中文 prompt：
-  「...」
+  <PROMPT_START>
+  <逐字贴出本次将提交给模型的完整 prompt，保留换行>
+  <PROMPT_END>
 
 确认出图吗？回"出图"/"确认"/"OK" 推进；不满意直接说要改哪段。
 ```
 
-### 3. 画师确认后推进
+### 3. 画师确认后执行 runner
 
-- 终端说"出图"/"确认"/"OK"/"go" → 下一轮 turn 把 `status` 改 `PENDING`
-- Web 点确认 → `POST /api/jobs/<id>/confirm` 自动改 `PENDING`
-- 取消 → 改 prompt 重走第 1 步；或 `POST /api/jobs/<id>/cancel` 标 `FAILED + error="画师取消"`
-
-### 4. 调 lovart-api（job 停在 PENDING）
+终端说"出图"/"确认"/"OK"/"go" 后，不再手拼 Lovart 命令：
 
 ```bash
-# 直接调 /Users/zhengzhongbiao/.claude/skills/lovart-api/
-# 默认 chat，--include-tools generate_image_gpt_image_2
-# --output-dir <image_storage_root>/<character_id>/<job_id>/
-# --json --download
+uv run python -m skill.character_workflow run-job "$JOB_ID"
 ```
 
-调用是同步阻塞的，画师看不到中间态，所以 job 整个调用期间停在 `PENDING`。返回后：
-- 成功 → `update_job_status(job_id, status=JobStatus.DONE, output_paths=[...])`
-- 失败 → `update_job_status(job_id, status=JobStatus.FAILED, error=...)`
+如果画师只说"出图"，没有指定 job：
+
+```bash
+uv run python -m skill.character_workflow run-latest --kind portrait
+```
+
+promo / turnaround 按对应 kind：
+
+```bash
+uv run python -m skill.character_workflow run-latest --kind promo
+uv run python -m skill.character_workflow run-latest --kind turnaround
+```
+
+取消 → 改 prompt 重走第 1 步；或 `POST /api/jobs/<id>/cancel` 标 `FAILED + error="画师取消"`。
+
+### 4. runner 做什么
+
+runner 是唯一执行入口：
+
+- 校验 `status == pending_confirm`
+- 归一 `source_image -> params.reference_images`
+- 上传参考图并写 `params.lovart_attachments`
+- 标 `PENDING` 且清空旧 `error`
+- 调 project-local `lovart_wrapper.py`，清空 proxy env，使用 Lovart `chat --json --download`
+- 下载到 temp，筛掉 0 字节/无效图片，再移动到 `characters/<id>/<kind>/vN.png`
+- 写 `vN.md` sidecar
+- `DONE` 时写 `output_paths`、`actual_size`、`lovart_thread_id`、`lovart_final_status`、`warnings`，并清空旧 `error`
 
 ### 5. 终端贴图
 
@@ -89,6 +111,7 @@ echo "$JOB_ID"
 
 - 跳第 1–3 步直接调 lovart-api
 - `PENDING_CONFIRM` 卡片省略 vendor/size/n/参考图
+- `PENDING_CONFIRM` 卡片只给 prompt 文件路径、摘要、"同 spec" 或带 `...` 的截断 prompt
 - 硬编码 cfg_scale 等 Lovart 内部参数
 - 用英文 prompt
 - 一次出超过 4 张

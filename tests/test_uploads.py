@@ -145,3 +145,21 @@ def test_upload_path_returned_is_resolvable_via_raw(client, runtime):
     r2 = client.get(f"/api/raw?path={path}")
     assert r2.status_code == 200
     assert r2.content == PNG_MAGIC
+
+
+def test_gallery_upload_creates_done_job_and_file(client, runtime):
+    r = client.post(
+        "/api/characters/holy/gallery/portrait",
+        files={"file": ("portrait.png", io.BytesIO(PNG_MAGIC), "image/png")},
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    path = Path(body["path"])
+    assert path.exists()
+    assert path.parent == Path.cwd() / "characters" / "holy" / "portrait"
+    job_path = runtime / "jobs" / f"{body['job_id']}.json"
+    data = json.loads(job_path.read_text(encoding="utf-8"))
+    assert data["status"] == "done"
+    assert data["kind"] == "portrait"
+    assert data["output_paths"] == [str(path)]

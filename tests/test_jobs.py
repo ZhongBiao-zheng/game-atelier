@@ -55,6 +55,19 @@ def test_update_status_to_failed_records_error(runtime):
     assert updated.error == "API timeout"
 
 
+def test_update_status_to_done_can_clear_old_error(runtime):
+    write_job(
+        job_id="job-001", character_id="c1", prompt="p",
+        model="gpt-image-2", params={}, seed=None,
+    )
+    update_job_status("job-001", status=JobStatus.FAILED, error="stale timeout")
+
+    updated = update_job_status("job-001", status=JobStatus.DONE, error=None)
+
+    assert updated.status == JobStatus.DONE
+    assert updated.error is None
+
+
 def test_read_returns_full_job(runtime):
     write_job(
         job_id="job-001", character_id="c1", prompt="p",

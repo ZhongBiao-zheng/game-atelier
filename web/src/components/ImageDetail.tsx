@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Trash2, Copy, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Trash2, CheckCircle2, Copy } from 'lucide-react';
 import type { Job, WebEditableJobPatch } from '../schema/jobs';
-import { useClipboard } from '../hooks/useClipboard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -20,7 +19,6 @@ const statusVariant: Record<string, 'secondary' | 'warning' | 'success' | 'destr
 export function ImageDetail({ jobId, path, onBack }: Props) {
   const [job, setJob] = useState<Job | null>(null);
   const [patch, setPatch] = useState<WebEditableJobPatch>({});
-  const copyToClipboard = useClipboard();
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -41,18 +39,6 @@ export function ImageDetail({ jobId, path, onBack }: Props) {
         <p className="font-[var(--font-display)] italic text-muted-foreground">加载中…</p>
       </section>
     );
-  }
-
-  async function copyAndTriggerRetry() {
-    const promptToCopy = patch.prompt ?? job!.prompt;
-    await fetch(`/api/prompt/${jobId}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
-    });
-    const { success } = await copyToClipboard(`继续\n${promptToCopy}`);
-    setToast(success
-      ? '已保存 + 剪贴板复制完成，切到 CC 按 Cmd+V Enter 重新出图'
-      : '已保存，但剪贴板失败，请手动复制 prompt');
   }
 
   async function deleteImage() {
@@ -96,15 +82,9 @@ export function ImageDetail({ jobId, path, onBack }: Props) {
         </div>
 
         <div className="px-8 pb-8 space-y-6 max-w-[760px] mx-auto w-full">
-          <Field
-            label="prompt"
-            action={
-              <Button size="sm" variant="secondary" onClick={copyAndTriggerRetry}>
-                <Copy className="size-3.5" />
-                复制 → 重出图
-              </Button>
-            }
-          >
+          <ImageIdChip characterId={job.character_id} path={path} />
+
+          <Field label="prompt">
             <Textarea
               value={patch.prompt ?? job.prompt}
               onChange={e => setPatch({ ...patch, prompt: e.target.value })}
@@ -156,17 +136,43 @@ export function ImageDetail({ jobId, path, onBack }: Props) {
   );
 }
 
-function Field({ label, action, children }: {
+function ImageIdChip({ characterId, path }: { characterId: string; path: string }) {
+  const [copied, setCopied] = useState(false);
+
+  // 提取 characters/ 开头的相对路径，供 AI 理解图片来源
+  const idx = path.indexOf('characters/');
+  const relPath = idx >= 0 ? path.slice(idx) : `characters/${characterId}/.../${path.split('/').pop()}`;
+
+  async function copy() {
+    await navigator.clipboard.writeText(relPath).catch(() => null);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">图片路径</span>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 min-w-0 font-mono text-[12px] text-foreground/85 bg-card/60 border border-border/40 rounded px-2.5 py-1.5 truncate">
+          {relPath}
+        </code>
+        <Button size="sm" variant="ghost" onClick={copy} className="shrink-0 px-2">
+          {copied
+            ? <CheckCircle2 className="size-3.5 text-[color:var(--status-done)]" />
+            : <Copy className="size-3.5" />}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: {
   label: string;
-  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-2">
-      <div className="flex items-end justify-between gap-3">
-        <span className="font-[var(--font-display)] italic text-lg text-foreground/85 leading-none">{label}</span>
-        {action}
-      </div>
+      <span className="font-[var(--font-display)] italic text-lg text-foreground/85 leading-none block">{label}</span>
       {children}
     </div>
   );

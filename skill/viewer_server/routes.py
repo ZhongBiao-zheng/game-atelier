@@ -12,7 +12,10 @@ from fastapi import APIRouter, Body, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from skill.character_workflow.lib.active_character import read_active, write_active
-from skill.character_workflow.lib.jobs import read_job, remove_image_from_job
+from skill.character_workflow.lib.jobs import (
+    delete_failed_job, read_job, remove_image_from_job, update_job_status, write_job,
+)
+from skill.character_workflow.lib.schemas import JobKind as _JobKind
 from skill.character_workflow.lib.projects import (
     assign_character, create_project, delete_project, read_projects,
     rename_project,
@@ -265,6 +268,54 @@ async def post_upload(file: UploadFile = File(...)) -> dict:
     return {"path": str(target.resolve()), "filename": raw_name}
 
 
+@router.post("/characters/{character_id}/gallery/{kind}")
+async def post_gallery_image(
+    character_id: str,
+    kind: str,
+    file: UploadFile = File(...),
+) -> dict:
+    """直接上传图片到角色图廊，落盘到 characters/<id>/<kind>/，并创建 done 状态 job。"""
+    valid_kinds = {k.value for k in _JobKind}
+    if kind not in valid_kinds:
+        raise HTTPException(422, detail=f"kind must be one of {sorted(valid_kinds)}")
+
+    raw_name = file.filename or "upload"
+    ext = Path(raw_name).suffix.lower()
+    if ext not in _UPLOAD_ALLOWED_EXTS:
+        raise HTTPException(422, detail=f"extension {ext or '(none)'} not allowed")
+
+    body = await file.read()
+    if len(body) > _UPLOAD_MAX_BYTES:
+        raise HTTPException(413, detail=f"file too large: {len(body)} bytes (limit {_UPLOAD_MAX_BYTES})")
+
+    out_dir = _project_root() / "characters" / character_id / kind
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    job_id = f"job-{ts}{uuid.uuid4().hex[:8]}"
+    # 命名对齐 AI 出图规范：v1/v2/v3...，保留上传文件的原始扩展名
+    n = 1
+    while (out_dir / f"v{n}{ext}").exists():
+        n += 1
+    target = out_dir / f"v{n}{ext}"
+    tmp = target.with_suffix(ext + ".tmp")
+    tmp.write_bytes(body)
+    tmp.replace(target)
+
+    write_job(
+        job_id=job_id,
+        character_id=character_id,
+        prompt="手动上传",
+        model="manual",
+        params={},
+        seed=None,
+        kind=_JobKind(kind),
+    )
+    update_job_status(job_id, status=JobStatus.DONE, output_paths=[str(target.resolve())])
+
+    return {"job_id": job_id, "path": str(target.resolve()), "filename": raw_name}
+
+
 @router.delete("/jobs/{job_id}/image")
 def delete_job_image(job_id: str, path: str) -> dict:
     try:
@@ -273,6 +324,17 @@ def delete_job_image(job_id: str, path: str) -> dict:
         raise HTTPException(404, detail=f"job {job_id} not found") from e
     except ValueError as e:
         raise HTTPException(404, detail=str(e)) from e
+    return {"ok": True}
+
+
+@router.delete("/jobs/{job_id}")
+def delete_job(job_id: str) -> dict:
+    try:
+        delete_failed_job(job_id)
+    except FileNotFoundError as e:
+        raise HTTPException(404, detail=f"job {job_id} not found") from e
+    except ValueError as e:
+        raise HTTPException(409, detail=str(e)) from e
     return {"ok": True}
 
 

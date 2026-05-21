@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { RefreshCw, Save, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useClipboard } from '../hooks/useClipboard';
-import { FeedbackInput } from './FeedbackInput';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
@@ -159,9 +158,6 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
         )}
       </div>
 
-      <div className="px-5 py-4 border-t border-border/40 bg-background/30">
-        <FeedbackInput characterId={characterId} />
-      </div>
     </section>
   );
 }

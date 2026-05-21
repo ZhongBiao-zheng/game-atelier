@@ -6,11 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
-interface Props { sseSignal: number; onSelect: (id: string, name: string) => void }
+interface Props { sseSignal: number; selectedId?: string | null; onSelect: (id: string, name: string) => void }
 
 const UNCATEGORIZED = '__uncategorized__';
 
-export function LeftSidebar({ sseSignal, onSelect }: Props) {
+export function LeftSidebar({ sseSignal, selectedId, onSelect }: Props) {
   const [characters, setCharacters] = useState<CharacterEntry[]>([]);
   const [projects, setProjects] = useState<ProjectsFile>({ projects: [], assignments: {} });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -288,7 +288,7 @@ export function LeftSidebar({ sseSignal, onSelect }: Props) {
   );
 
   function renderChar(c: CharacterEntry) {
-    const isActive = c.id === activeId;
+    const isActive = c.id === (selectedId ?? activeId);
     const isEditing = c.id === editingId;
     return (
       <li

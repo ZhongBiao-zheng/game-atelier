@@ -8,6 +8,7 @@ dependencies = [
   "watchdog>=5.0",
   "pydantic>=2.9",
   "python-multipart>=0.0.9",
+  "requests>=2.32",
 ]
 
 [dependency-groups]

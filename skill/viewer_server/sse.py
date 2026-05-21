@@ -12,6 +12,10 @@ from fastapi.responses import StreamingResponse
 class SSEHub:
     def __init__(self) -> None:
         self._subscribers: set[asyncio.Queue[str]] = set()
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
 
     async def subscribe(self) -> asyncio.Queue[str]:
         q: asyncio.Queue[str] = asyncio.Queue(maxsize=200)
@@ -22,12 +26,12 @@ class SSEHub:
         self._subscribers.discard(q)
 
     def broadcast(self, event: str, data: dict) -> None:
+        # watchdog 在后台线程调用此方法，必须用 call_soon_threadsafe 才能安全投递到 asyncio Queue。
+        if self._loop is None or not self._loop.is_running():
+            return
         payload = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
         for q in list(self._subscribers):
-            try:
-                q.put_nowait(payload)
-            except asyncio.QueueFull:
-                pass  # drop event for slow consumer; full refresh on reconnect catches up
+            self._loop.call_soon_threadsafe(q.put_nowait, payload)
 
 
 hub = SSEHub()

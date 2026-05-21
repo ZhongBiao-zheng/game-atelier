@@ -20,6 +20,20 @@
 | `output_paths` | string[] | ✅ | PNG 落地绝对路径（成功后填充）|
 | `status` | enum | ✅ | `pending_confirm` \| `pending` \| `done` \| `failed` |
 | `error` | string \| null | ✅ | `status=failed` 时填错误消息 |
+| `kind` | enum | ✅ | `portrait` \| `promo` \| `turnaround`；旧 job 缺省按 `portrait` |
+| `source_image` | string \| null | ✅ | 本地源参考图；runner 会归一进 `params.reference_images` |
+
+`params` 中 runner 维护的扩展字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `reference_images` | string[] | Web 展示和本地调用输入，至少包含 `source_image` |
+| `requested_size` | string \| null | 画师请求尺寸；兼容旧 `size` |
+| `actual_size` | string \| null | runner 从最终图片读到的实际尺寸 |
+| `lovart_attachments` | string[] | 本地参考图上传 Lovart 后得到的远端 URL |
+| `lovart_thread_id` | string \| null | 本次 Lovart 线程 |
+| `lovart_final_status` | string \| null | Lovart 返回的最终状态；有有效图时 `timeout` 也可 DONE + warning |
+| `warnings` | string[] | 非阻塞异常，例如 timeout 但已选到有效 artifact |
 
 ### `.runtime/active-character.json`
 
@@ -39,12 +53,16 @@ Web 通过 `POST /api/prompt/<job_id>` 只能修改：`prompt`、`model`、`para
 |---|---|---|---|
 | GET | `/api/jobs` | — | `Job[]` |
 | GET | `/api/jobs/<job_id>` | — | `Job` |
+| DELETE | `/api/jobs/<job_id>` | — | `{ ok: true }`；仅允许删除 `status=failed` 的失败记录 |
+| DELETE | `/api/jobs/<job_id>/image?path=<path>` | — | `{ ok: true }`；删除 job 内的一张输出图 |
 | GET | `/api/images?character=<id>` | — | `{ character_id, output_paths: string[] }` |
 | GET | `/api/spec/<character_id>` | — | `{ content: string }` |
 | POST | `/api/spec/<character_id>` | `SpecPatch` | `{ ok: true, path: string }` |
 | POST | `/api/prompt/<job_id>` | `WebEditableJobPatch` | `{ ok: true }` |
 | POST | `/api/feedback` | `FeedbackPost` | `{ ok: true, path: string }` |
 | POST | `/api/clipboard-attempt` | `ClipboardAttempt` | `{ ok: true }` |
+| POST | `/api/uploads` | multipart `file` | `{ path: string, filename: string }`；上传到 `.runtime/uploads/` |
+| POST | `/api/characters/<character_id>/gallery/<kind>` | multipart `file` | `{ job_id: string, path: string, filename: string }`；直接加入角色图廊 |
 | GET | `/api/active-character` | — | `ActiveCharacterFile` |
 | GET | `/api/characters` | — | `CharacterEntry[]` |
 | GET | `/api/config` | — | `{ image_storage_root: string }` |

@@ -91,6 +91,7 @@ def test_submit_promo_with_source_image(tmp_path):
     )
     assert data["kind"] == "promo"
     assert data["source_image"] == str(src)
+    assert data["params"]["reference_images"] == [str(src)]
 
 
 def test_submit_turnaround_kind(tmp_path):
