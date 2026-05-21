@@ -1,22 +1,35 @@
 ---
 name: character-workflow
-description: 游戏角色资产工作流。承接画师在 Web UI 上的反馈、改 prompt、改 spec，对话驱动逐项问清风格/配色/镜头/道具后调 Lovart 中文 prompt 出图。**主动触发**当用户说"开始角色工作流"、"做个角色"、"出张角色立绘"、"加个新角色"、`/character-workflow <名>`，或 Web 端 viewer-server 已开着且用户粘"继续"。**禁止**生成带 `?`/"待补充"/"留空" 占位的 spec 文档 —— 决策永远走对话。
+version: 4.1.1
+description: |
+  游戏角色资产工作流。承接画师在 Web UI 上的反馈，通过对话逐项问清
+  风格/配色/镜头/道具，然后调 Lovart 出中文 prompt 图。
+  当用户说"做个角色"、"出张立绘"、"继续角色工作流"或调用
+  /character-workflow 时主动使用。spec 里不出现占位词，
+  所有缺失信息都通过对话补全，不猜测不假设。
 allowed-tools:
   - Bash
   - Read
   - Write
   - Edit
   - AskUserQuestion
-version: 4.1.0
+triggers:
+  - /character-workflow
+  - 开始角色工作流
+  - 做个角色
+  - 出张角色立绘
+  - 加个新角色
+  - 继续角色工作流
+  - 角色立绘
 ---
 
 # Character Workflow
 
-## 哲学锚（任何场景下都不许违反）
+## 哲学锚
 
 1. **文件系统是唯一 source of truth** —— `characters/<id>/spec.md`、`.runtime/draft/*.md`、`.runtime/jobs/*.json`
 2. **画师的每个动作终态都是文件** —— Web UI 写文件，Skill 读文件
-3. **对话决策、文档归档** —— 永远不出"待补充"占位让画师补全
+3. **对话决策、文档归档** —— spec 里不出占位词，缺什么就问什么
 4. **中文 prompt 优先** —— 画师的链路全程中文
 
 ## Turn 起始（每次 turn 必做 —— 决策走 `recommend_action`）
@@ -28,7 +41,7 @@ uv run python -m skill.character_workflow turn-start --message "<画师本轮原
 # 出图 promo/turnaround 时显式加 --kind 切换对应 lessons
 ```
 
-`--message` 必传 —— 决策推断靠它。返回 JSON 关键字段：
+`--message` 要带上，CLI 靠它推断 `recommend_action` 决策。返回 JSON 关键字段：
 
 ```json
 {
@@ -50,7 +63,7 @@ uv run python -m skill.character_workflow turn-start --message "<画师本轮原
 }
 ```
 
-**只看 `recommend_action`，按它分叉**（`intent` 字段保留 debug 用，**不再用于决策**）：
+**只看 `recommend_action`，按它分叉**（`intent` 字段保留 debug 用，不再用于决策）：
 
 | recommend_action | Skill 行为 |
 |---|---|
@@ -59,7 +72,7 @@ uv run python -m skill.character_workflow turn-start --message "<画师本轮原
 | `switch` | `set-active <target>` + **重新调** turn-start |
 | `noop` | 退出 turn，不动 file system（预留，目前不会出现）|
 
-CLI 已经把"裸触发 default 该不该出图"算好了 —— Skill 端**不要再做这一层判断**。判定不明确一律是 `ask`：宁可多问，"误问"成本只是画师多打一个数字，"误出图"成本是空跑 job + 占位卡片 + 画师还要取消。
+CLI 已经把"该 ask 还是该 render_card"算好了，Skill 端不必重复判断。判定不明确时 CLI 一律给 `ask`：宁可多问，"误问"成本只是画师多打一个数字，"误出图"成本是空跑 job + 占位卡片。
 
 把 `worldview` + `lessons` + `spec` 拼成对话前缀（建议走 `lib.prompt_builder.assemble_character_prompt`），它们就是这一轮的专家上下文。
 
@@ -73,7 +86,7 @@ CLI 已经把"裸触发 default 该不该出图"算好了 —— Skill 端**不�
 2. **一句话世界观**（10-30 字）
 3. **第一个角色名 + 一句话定位**
 
-画师答完后落盘 `worldview.md` / `.runtime/projects.json` / `characters/<id>/spec.md` / `.runtime/active-character.json`。完成后直接进 render_card 流程 —— **不重新 turn-start**。
+画师答完后落盘 `worldview.md` / `.runtime/projects.json` / `characters/<id>/spec.md` / `.runtime/active-character.json`。完成后直接进 render_card 流程 —— 不重新 turn-start。
 
 #### Stage B —— 有项目但 `characters/` 为空
 
@@ -98,15 +111,15 @@ CLI 已经把"裸触发 default 该不该出图"算好了 —— Skill 端**不�
 
 ### action = render_card
 
-按下面"调 Lovart 出图"节流程：写 prompt → submit CLI → 卡片 → 等画师明示 → `submit_and_wait` → DONE 贴图。
+按下面"调 Lovart 出图"节流程：写 prompt → submit CLI → 卡片 → 等画师明示 → run-job → DONE 贴图。
 
 ### action = switch
 
-`uv run python -m skill.character_workflow set-active <target>`，然后**必须重新调一次 turn-start**（新 active 才能反映到 spec / drafts / recent_chars）。
+`uv run python -m skill.character_workflow set-active <target>`，然后必须重新调一次 turn-start（新 active 才能反映到 spec / drafts / recent_chars）。
 
 ## Painter Intent 推断（debug 用，决策看 `recommend_action`）
 
-CLI 仍输出 `intent` / `intent_signal` / `intent_conflict` 字段，但**实际决策一律走 `recommend_action`**。intent 是底层信号，留给 debug 和向后兼容。
+CLI 仍输出 `intent` / `intent_signal` / `intent_conflict` 字段，但实际决策一律走 `recommend_action`。intent 是底层信号，留给 debug 和向后兼容。
 
 `compute_recommend_action()` 的决策表（在 `lib/intent.py`）：
 1. stage A/B/C → ask
@@ -118,7 +131,7 @@ CLI 仍输出 `intent` / `intent_signal` / `intent_conflict` 字段，但**实�
 7. stage D + default + last job ∈ {DONE, FAILED} → ask（已闭环）
 8. 其他 → ask（兜底）
 
-加新动词只改 `lib/intent.py` 一处。**不要在 SKILL.md 自己关键词匹配**。
+加新动词只改 `lib/intent.py` 一处，不要在 SKILL.md 自己做关键词匹配。
 
 ## Related Discovery（stage C / D 列角色用）
 
@@ -130,7 +143,7 @@ CLI 仍输出 `intent` / `intent_signal` / `intent_conflict` 字段，但**实�
 uv run python -m skill.character_workflow set-active <character-id>
 ```
 
-stage D 推断到 `switch` 时 Skill 自动调一次，**然后必须重新 turn-start**（新 active 才能反映到 spec / drafts / recent_chars）。
+stage D 推断到 `switch` 时 Skill 自动调一次，然后必须重新 turn-start（新 active 才能反映到 spec / drafts / recent_chars）。
 
 ## 关键协议
 
@@ -142,15 +155,16 @@ stage D 推断到 `switch` 时 Skill 自动调一次，**然后必须重新 turn
 
 ### 写出图 prompt
 
-中文 8 段式："主体 → 服装 → 头部 → 道具 → 姿势 → 场景 → 风格 → 规格"。
+写 prompt 前先读共享底层规则（spec 锚点协议 / generation_mode / 禁止项 / 输出格式），再按立绘专项规则写。
 
-**模板** → `references/prompt-zh.md`
+**共享底层** → `references/art-prompt-system.md`
+**立绘专项** → `references/prompt-zh.md`
 
 ### 调 Lovart 出图
 
-**永远先确认再调用。** 流程：
+先落盘 PENDING_CONFIRM 再调 Lovart，画师可以预览完整 prompt 并随时取消，避免空跑 job。流程：
 
-1. 用 `submit` CLI 落盘 `PENDING_CONFIRM`（默认值集中点，**禁止自己导 jobs.write_job**）：
+1. 用 `submit` CLI 落盘 `PENDING_CONFIRM`（默认值集中在 CLI 里管理，不要直接调 `jobs.write_job`）：
 
    ```bash
    cat > /tmp/cw-prompt-$$.md <<'PROMPT'
@@ -162,11 +176,25 @@ stage D 推断到 `switch` 时 Skill 自动调一次，**然后必须重新 turn
    ```
 
    `--character` 缺省读 `.runtime/active-character.json`；`--n` 默认 1（画师明示对比才传 `--n 4`）；`--source-image <绝对路径>` 给 promo/turnaround 用；stdout 是纯 job_id。
-2. 终端打可读出图卡片（模型/厂家/尺寸/n/参考图/中文 prompt 全列）
-3. 等画师明确说"出图/确认/OK"，或 Web 端点确认（后端推到 `PENDING`）
-4. 调 `lib.lovart_caller.submit_and_wait(...)`，`output_dir=jobs.job_output_dir(id, kind)` —— 立绘自动落到 `characters/<id>/portrait/`（同步阻塞，job 停在 `PENDING`）
-5. 成功 `update_job_status(DONE, output_paths=[...])` / 失败 `FAILED`
-6. **在终端用 `![v1](绝对路径)` markdown 把每张图打出来**（CC 终端直接渲染）。**默认 n=1**，画师明示"多出几张/对比" 才提到 n=4。
+2. 终端打可读出图卡片（模型/厂家/尺寸/n/参考图/完整中文 prompt 全列）
+
+   **硬规则：确认卡必须直接贴出“本次将要提交给模型的完整 prompt 原文”。**
+   不许只写 prompt 文件路径、不许摘要、不许用 `...` 省略、不许说“同 spec”。
+   画师必须能在确认前完整审读即将出图的 prompt。
+3. 等画师明确说"出图/确认/OK"后，调用 runner：
+
+   ```bash
+   uv run python -m skill.character_workflow run-job "$JOB_ID"
+   ```
+
+   用户只说"出图"且没有指定 job 时，调用：
+
+   ```bash
+   uv run python -m skill.character_workflow run-latest --kind portrait
+   ```
+
+4. runner 负责推进 `PENDING_CONFIRM -> PENDING -> DONE/FAILED`、上传参考图、清空旧 error、筛掉无效 artifact，并把正式产物写到 `characters/<id>/<kind>/vN.png`。
+5. 在终端用 `![v1](绝对路径)` markdown 把每张图打出来（CC 终端直接渲染）。默认 n=1，画师明示"多出几张/对比" 才提到 n=4。
 
 **完整调用流程 + 失败处理** → `references/lovart-call.md`
 
@@ -187,22 +215,23 @@ Skill 主动问画师：
 uv run python -m skill.character_workflow append-lesson --kind portrait --line "- 2026-05-19 holy-spirit-priestess · 金白配色高识别度 · prompt 片段：\`兜帽低垂遮眼\`"
 ```
 
-格式严格遵守 `- YYYY-MM-DD <id> · <一句话> · prompt 片段：\`...\``。同 turn 多次出图 → 每次都问；画师一次性说"全部不追加" 则后续都跳过。**画师 cancel / 网络抖动 FAILED 不问。**
+画师明确授权 Skill 自行判断（例如"你自行判断哪些需要沉淀"、"我在测试 Skill 工作模式"）→ 不再追问，直接选 1–2 条能防止下次失败或提升出图质量的可复用经验追加。只沉淀规则，不写流水账。
+
+格式：`- YYYY-MM-DD <id> · <一句话> · prompt 片段：\`...\``。同 turn 多次出图每次都问；画师一次性说"全部不追加"则后续跳过。画师 cancel / 网络抖动 FAILED 不问。
 
 ## viewer-server 启停
 
-画师 `/character-workflow <角色>` 第一次触发时：
+每次调用本 Skill 时，Turn 起始之前先执行：
 
 ```bash
-python skill/viewer-server/server.py start
-python skill/viewer-server/server.py open-browser
+uv run python skill/viewer_server/server.py start
+uv run python skill/viewer_server/server.py open-browser
 ```
 
-server 启动时会自动清理 stale PID。详见 `skill/viewer_server/SKILL.md`。
+server 自动检测 PID，已在运行则跳过重启；open-browser 每次都会弹出窗口。详见 `skill/viewer_server/SKILL.md`。
 
 ## 何时跳过本 Skill
 
 - 用户消息明显是 git / 代码 / 部署 / 纯问答 → 完全跳过 turn-start
 - 用户没明确开始角色工作流且 viewer-server 没开 → 不要主动推角色话题
 - `recommend_action == "ask"` 时画师选"跳过本轮" → 退出 turn，不动 file system
-- v3 的兜底"没有 active_id 且没有 draft → 问'哪个角色？'"、v4.0 的"stage D 默认 intent=new 就出图" —— 都已被 `recommend_action` 决策表替代，**不再适用**
