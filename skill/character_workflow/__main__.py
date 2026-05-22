@@ -78,6 +78,49 @@ def _submit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _append_memory(args: argparse.Namespace) -> int:
+    """append-memory --scope {project|workspace|global}。
+
+    project scope 自动解析 active → assignments → slug。
+    未归属 → 返回码 2 + stderr 明确错误。
+    """
+    from skill.character_workflow.lib.lessons import append_memory
+    from skill.character_workflow.lib.active_character import read_active
+    from skill.character_workflow.lib.projects import read_projects
+
+    project_slug: str | None = None
+    if args.scope == "project":
+        active = read_active()
+        if not active.active_id:
+            print("append-memory: 无 active 角色,无法解析项目;改用 --scope workspace 或先 set-active",
+                  file=sys.stderr)
+            return 2
+        pf = read_projects()
+        project_id = pf.assignments.get(active.active_id)
+        if not project_id:
+            print(
+                f"append-memory: 角色 {active.active_id!r} 未归属任何项目;"
+                "先走 Stage E(assign-character)或显式 --scope workspace",
+                file=sys.stderr,
+            )
+            return 2
+        proj = next((p for p in pf.projects if p.id == project_id), None)
+        if not proj:
+            print(f"append-memory: project {project_id!r} 不存在(projects.json 损坏)",
+                  file=sys.stderr)
+            return 2
+        project_slug = proj.slug
+
+    try:
+        path = append_memory(kind=args.kind, line=args.line, scope=args.scope, project_slug=project_slug)
+    except ValueError as e:
+        print(f"append-memory: {e}", file=sys.stderr)
+        return 2
+
+    print(json.dumps({"ok": True, "path": str(path), "scope": args.scope}, ensure_ascii=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="character-workflow")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -96,6 +139,14 @@ def main(argv: list[str] | None = None) -> int:
     p_lesson = sub.add_parser("append-lesson", help="原子追加一条历代经验到 lessons/<kind>.md")
     p_lesson.add_argument("--kind", required=True, choices=("portrait", "promo", "turnaround"))
     p_lesson.add_argument("--line", required=True, help="完整一行 markdown，不带换行")
+
+    p_memory = sub.add_parser("append-memory", help="原子追加一条经验到三层 MEMORY.md")
+    p_memory.add_argument("--kind", required=True, choices=("portrait", "promo", "turnaround"))
+    p_memory.add_argument("--line", required=True, help="完整一行 markdown,不带换行")
+    p_memory.add_argument(
+        "--scope", default="project", choices=("global", "workspace", "project"),
+        help="写入层级,默认 project(需要 active 角色已归属)",
+    )
 
     p_submit = sub.add_parser(
         "submit",
@@ -145,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         path = append_lesson(args.kind, args.line)
         print(json.dumps({"ok": True, "path": str(path)}, ensure_ascii=False))
         return 0
+    if args.cmd == "append-memory":
+        return _append_memory(args)
     if args.cmd == "submit":
         return _submit(args)
     if args.cmd == "run-job":
