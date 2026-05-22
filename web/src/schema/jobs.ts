@@ -32,6 +32,9 @@ export interface Job {
   // Skill 套件扩展（2026-05-19）：旧 json 无字段时后端 Pydantic 默认 portrait。
   kind?: JobKind;
   source_image?: string | null;
+  // Phase 3 (2026-05-22): 用了哪个 Key + provider，Web 只读。
+  alias?: string | null;
+  provider?: string | null;
 }
 
 export const WEB_EDITABLE_FIELDS = ['prompt', 'model', 'params', 'seed'] as const;

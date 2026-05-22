@@ -57,6 +57,9 @@ class Job(BaseModel):
     # Skill 套件扩展（2026-05-19）：旧 json 无字段时 Pydantic 自动 fallback。
     kind: JobKind = JobKind.PORTRAIT
     source_image: str | None = None  # promo/turnaround 用，绝对路径
+    # Phase 3 (2026-05-22): which Key was used. Web 不能改这两个字段。
+    alias: str | None = None
+    provider: str | None = None
 
 
 class WebEditableJobPatch(BaseModel):
@@ -181,3 +184,6 @@ class TurnStartResult(BaseModel):
     lessons_workspace: str
     lessons_project: str
     lessons_kind: str
+    # v5.1.0 (Phase 3): Key 选择协议 — AI 决策时读这两个字段。
+    available_keys: list[dict] = Field(default_factory=list)
+    preferred_alias: str | None = None

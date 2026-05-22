@@ -15,7 +15,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from character_workflow.lib import data_root
+from character_workflow.lib import data_root, keys
 
 # 设计稿 §4.4 关键词清单。本轮写死，后续扩展时再抽到 YAML。
 _NEW_KEYWORDS = ("新建", "新角色", "另一个角色")
@@ -266,4 +266,6 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         "lessons_workspace": load_lessons_workspace(kind),
         "lessons_project": load_lessons_project(project_slug, kind),
         "lessons_kind": kind,
+        "available_keys": keys.keys_for_turn_start(),
+        "preferred_alias": keys.preferred_alias_for_kind(kind) if kind in ("portrait", "promo", "turnaround") else None,
     }
