@@ -1,3 +1,6 @@
+> **DEPRECATED** — 自 2026-05-21 起,新经验请用 `append-memory` CLI 写入工作区 `MEMORY.md` 或项目级 `projects/<slug>/MEMORY.md`。
+> 本文件保留历史档案,context_loader 不再读取,SKILL 也不再追加。
+
 # 三视图出图历代经验 · LESSONS
 
 > Skill #3 `/character-turnaround` 收尾时（job DONE / FAILED 有明确原因），主动询问

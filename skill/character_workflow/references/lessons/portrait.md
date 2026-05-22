@@ -1,3 +1,6 @@
+> **DEPRECATED** — 自 2026-05-21 起,新经验请用 `append-memory` CLI 写入工作区 `MEMORY.md` 或项目级 `projects/<slug>/MEMORY.md`。
+> 本文件保留历史档案,context_loader 不再读取,SKILL 也不再追加。
+
 # 立绘出图历代经验 · LESSONS
 
 > Skill #1 `/character-workflow` 收尾时（job DONE / FAILED 有明确原因 / spec 归档），
@@ -21,3 +24,5 @@
 - 2026-05-21 young-emperor-monkey · Lovart 返回 artifact 但 runner 因 final_status=timeout 或 downloader failed 标失败时，先检查响应里的 artifacts URL，再用 curl -sS -L --fail 手动补下载并回填 job · prompt 片段：`download failed + artifacts/agent/*.png`
 - 2026-05-21 blazefist-monkey · 出进化形态立绘时把前置进化 portrait/v1.png 上传为参考图，能保持配色血统一致性 · 操作：lovart_wrapper upload + chat --attachments CDN_URL
 - 2026-05-21 blazefist-monkey · lovart_wrapper upload_file 用 curl 子进程代替 requests，绕开服务端 chunked 响应提前关闭导致空 body 的问题 · 关键代码：subprocess.check_output(['curl', '-sS', '-F', 'file=@path', url])
+- 2026-05-21 holy-spirit-priestess · 画师改已出图必须先问修改模式（A 编辑当前图 / B 完全重出 / C 局部参考重出），三种 prompt 写法互斥，混着写会让模型不知道锚定参考图还是按 prompt 重画 · 操作：AskUserQuestion 三选一
+- 2026-05-21 holy-spirit-priestess · A 模式编辑当前图时 prompt 只写差异指令，不重述外观/画风/规格（参考图已承载），引导而非规定，能短就短 · prompt 片段：`以参考图为底图，仅做以下三处改动：1. 武器... 2. 披风纹理... 3. 动作...`
