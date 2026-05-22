@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from skill.character_workflow.lib import context_loader as cl
-from skill.character_workflow.lib import lovart_caller as lc
-from skill.character_workflow.lib.jobs import (
+from character_workflow.lib import context_loader as cl
+from character_workflow.lib import lovart_caller as lc
+from character_workflow.lib.jobs import (
     job_output_dir, read_job, update_job_status, write_job,
 )
-from skill.character_workflow.lib.schemas import JobKind, JobStatus
+from character_workflow.lib.schemas import JobKind, JobStatus
 
 
 @pytest.fixture
@@ -124,7 +124,7 @@ def test_turnaround_job_does_not_pollute_other_dirs(project):
 
 def test_turnaround_skill_files_exist():
     """Skill #3 的关键文件都得在位，免得 CC 路由进来发现找不到。"""
-    skill_root = Path(__file__).resolve().parent.parent / "skill" / "character_turnaround"
+    skill_root = Path(__file__).resolve().parent.parent / "skills" / "character-turnaround"
     assert (skill_root / "SKILL.md").exists()
     assert (skill_root / "references" / "personas" / "turnaround-expert.md").exists()
     assert (skill_root / "references" / "prompt-turnaround-zh.md").exists()
@@ -134,7 +134,7 @@ def test_turnaround_skill_md_declares_default_n_one_and_landscape_size():
     """SKILL.md 必须显式声明 n=1 默认 + 1536x1024 横幅，是 turnaround 的关键工程约束。"""
     skill_md = (
         Path(__file__).resolve().parent.parent
-        / "skill" / "character_turnaround" / "SKILL.md"
+        / "skills" / "character-turnaround" / "SKILL.md"
     ).read_text(encoding="utf-8")
     assert "n=1" in skill_md
     assert "1536" in skill_md and "1024" in skill_md

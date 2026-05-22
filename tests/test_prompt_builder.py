@@ -1,8 +1,8 @@
 """Tests for skill.character_workflow.lib.prompt_builder."""
 import pytest
 
-from skill.character_workflow.lib.context_loader import CharacterContext
-from skill.character_workflow.lib.prompt_builder import (
+from character_workflow.lib.context_loader import CharacterContext
+from character_workflow.lib.prompt_builder import (
     assemble_character_prompt, render,
 )
 

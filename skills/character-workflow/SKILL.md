@@ -37,7 +37,7 @@ triggers:
 每轮开头先调一次 CLI，把画师本轮最近一条消息原文（含 `/character-workflow X` 命令前缀）整段塞进 `--message`：
 
 ```bash
-uv run python -m skill.character_workflow turn-start --message "<画师本轮原文>"
+uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 # 出图 promo/turnaround 时显式加 --kind 切换对应 lessons
 ```
 
@@ -129,7 +129,7 @@ CLI 已经把"该 ask 还是该 render_card"算好了，Skill 端不必重复判
 3. 新开项目
 4. 跳过本轮（不归属、不出图）
 
-画师选 1/2 → `uv run python -m skill.character_workflow assign-character <active_id> --project <project_id>` → 重新 turn-start
+画师选 1/2 → `uv run python -m character_workflow assign-character <active_id> --project <project_id>` → 重新 turn-start
 画师选 3 → 走 Stage A-like 子流程问"项目名 + 一句话世界观"，调 `create-project --name <name>` → `assign-character` → 重新 turn-start
 画师选 4 → 退出 turn
 
@@ -139,7 +139,7 @@ CLI 已经把"该 ask 还是该 render_card"算好了，Skill 端不必重复判
 
 ### action = switch
 
-`uv run python -m skill.character_workflow set-active <target>`，然后必须重新调一次 turn-start（新 active 才能反映到 spec / drafts / recent_chars）。
+`uv run python -m character_workflow set-active <target>`，然后必须重新调一次 turn-start（新 active 才能反映到 spec / drafts / recent_chars）。
 
 ## Painter Intent 推断（debug 用，决策看 `recommend_action`）
 
@@ -164,7 +164,7 @@ CLI 仍输出 `intent` / `intent_signal` / `intent_conflict` 字段，但实际�
 ## 切换处理对象
 
 ```bash
-uv run python -m skill.character_workflow set-active <character-id>
+uv run python -m character_workflow set-active <character-id>
 ```
 
 stage D 推断到 `switch` 时 Skill 自动调一次，然后必须重新 turn-start（新 active 才能反映到 spec / drafts / recent_chars）。
@@ -210,7 +210,7 @@ A 模式时 spec 只更新被改的字段；B 模式可大改 spec；C 模式改
    cat > /tmp/cw-prompt-$$.md <<'PROMPT'
    ...中文 8 段式 prompt...
    PROMPT
-   JOB_ID=$(uv run python -m skill.character_workflow submit \
+   JOB_ID=$(uv run python -m character_workflow submit \
      --kind portrait --prompt-file /tmp/cw-prompt-$$.md)
    rm /tmp/cw-prompt-$$.md
    ```
@@ -224,13 +224,13 @@ A 模式时 spec 只更新被改的字段；B 模式可大改 spec；C 模式改
 3. 等画师明确说"出图/确认/OK"后，调用 runner：
 
    ```bash
-   uv run python -m skill.character_workflow run-job "$JOB_ID"
+   uv run python -m character_workflow run-job "$JOB_ID"
    ```
 
    用户只说"出图"且没有指定 job 时，调用：
 
    ```bash
-   uv run python -m skill.character_workflow run-latest --kind portrait
+   uv run python -m character_workflow run-latest --kind portrait
    ```
 
 4. runner 负责推进 `PENDING_CONFIRM -> PENDING -> DONE/FAILED`、上传参考图、清空旧 error、筛掉无效 artifact，并把正式产物写到 `characters/<id>/<kind>/vN.png`。
@@ -252,7 +252,7 @@ Skill 主动问画师：
 画师答 Y / 给出一句话 → 调：
 
 ```bash
-uv run python -m skill.character_workflow append-memory \
+uv run python -m character_workflow append-memory \
   --kind portrait \
   --line "- 2026-05-21 holy-spirit-priestess · 金白配色高识别度 · prompt 片段：\`兜帽低垂遮眼\`" \
   --scope project

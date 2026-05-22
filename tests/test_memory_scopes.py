@@ -1,7 +1,7 @@
 """append_memory 三 scope 测试。"""
 import pytest
 
-from skill.character_workflow.lib import lessons
+from character_workflow.lib import lessons
 
 
 @pytest.fixture

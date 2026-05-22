@@ -37,9 +37,9 @@ def runtime(tmp_path, monkeypatch):
 def _run_cli(cwd, env_runtime: str) -> dict:
     env = os.environ.copy()
     env["RUNTIME_DIR"] = env_runtime
-    env["PYTHONPATH"] = f"{PROJECT_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    env["PYTHONPATH"] = f"{PROJECT_ROOT / 'src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
     out = subprocess.run(
-        [sys.executable, "-m", "skill.character_workflow", "turn-start"],
+        [sys.executable, "-m", "character_workflow", "turn-start"],
         cwd=cwd, capture_output=True, text=True, env=env,
     )
     assert out.returncode == 0, f"CLI failed: {out.stderr}"

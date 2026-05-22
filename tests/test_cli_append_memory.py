@@ -22,7 +22,7 @@ def cli_env(tmp_path, monkeypatch):
 
 
 def test_append_memory_workspace_scope(cli_env):
-    from skill.character_workflow.__main__ import main
+    from character_workflow.__main__ import main
     exit_code = main(["append-memory", "--kind", "portrait",
                       "--line", "- 2026-05-21 test · note · prompt:`x`",
                       "--scope", "workspace"])
@@ -50,7 +50,7 @@ def test_append_memory_project_scope_with_assignment(cli_env):
         encoding="utf-8",
     )
 
-    from skill.character_workflow.__main__ import main
+    from character_workflow.__main__ import main
     exit_code = main(["append-memory", "--kind", "portrait",
                       "--line", "- 2026-05-21 alice · proj-note · prompt:`x`",
                       "--scope", "project"])
@@ -70,7 +70,7 @@ def test_append_memory_project_scope_unassigned_returns_2(cli_env, capsys):
         encoding="utf-8",
     )
 
-    from skill.character_workflow.__main__ import main
+    from character_workflow.__main__ import main
     exit_code = main(["append-memory", "--kind", "portrait",
                       "--line", "- 2026-05-21 orphan · x",
                       "--scope", "project"])

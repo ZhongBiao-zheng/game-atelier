@@ -12,7 +12,7 @@ import uvicorn
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from skill.viewer_server.pid import (  # noqa: E402
+from viewer_server.pid import (  # noqa: E402
     cleanup_stale_pid, read_pid, read_port, write_pid, write_port,
 )
 
@@ -68,7 +68,7 @@ def cmd_start(background: bool = False) -> None:
         # 前台启动（终端 A 手动路径）：阻塞直到 Ctrl-C
         write_pid(runtime, os.getpid())
         print(f"viewer-server starting at http://127.0.0.1:{port}/")
-        from skill.viewer_server.server_app import build_app  # late import
+        from viewer_server.server_app import build_app  # late import
         uvicorn.run(build_app(), host="127.0.0.1", port=port, log_level="info")
 
 

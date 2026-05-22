@@ -9,10 +9,10 @@ import json
 
 import pytest
 
-from skill.character_workflow.lib.jobs import (
+from character_workflow.lib.jobs import (
     job_output_dir, read_job, write_job,
 )
-from skill.character_workflow.lib.schemas import Job, JobKind, JobStatus
+from character_workflow.lib.schemas import Job, JobKind, JobStatus
 
 
 @pytest.fixture

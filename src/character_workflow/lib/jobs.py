@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from skill.character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
+from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
 
 
 _UNSET = object()

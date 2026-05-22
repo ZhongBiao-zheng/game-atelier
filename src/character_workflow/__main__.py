@@ -15,12 +15,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from skill.character_workflow.lib.active_character import read_active, write_active
-from skill.character_workflow.lib.jobs import write_job
-from skill.character_workflow.lib.job_runner import run_job, run_latest
-from skill.character_workflow.lib.lessons import append_lesson
-from skill.character_workflow.lib.schemas import JobKind, JobStatus
-from skill.character_workflow.lib.turn_start import turn_start
+from character_workflow.lib.active_character import read_active, write_active
+from character_workflow.lib.jobs import write_job
+from character_workflow.lib.job_runner import run_job, run_latest
+from character_workflow.lib.lessons import append_lesson
+from character_workflow.lib.schemas import JobKind, JobStatus
+from character_workflow.lib.turn_start import turn_start
 
 
 def _submit(args: argparse.Namespace) -> int:
@@ -79,7 +79,7 @@ def _submit(args: argparse.Namespace) -> int:
 
 
 def _create_project(args: argparse.Namespace) -> int:
-    from skill.character_workflow.lib.projects import create_project
+    from character_workflow.lib.projects import create_project
     try:
         p = create_project(name=args.name, slug=args.slug)
     except ValueError as e:
@@ -90,7 +90,7 @@ def _create_project(args: argparse.Namespace) -> int:
 
 
 def _assign_character(args: argparse.Namespace) -> int:
-    from skill.character_workflow.lib.projects import assign_character
+    from character_workflow.lib.projects import assign_character
     try:
         assign_character(args.character_id, args.project)
     except KeyError as e:
@@ -109,9 +109,9 @@ def _append_memory(args: argparse.Namespace) -> int:
     project scope 自动解析 active → assignments → slug。
     未归属 → 返回码 2 + stderr 明确错误。
     """
-    from skill.character_workflow.lib.lessons import append_memory
-    from skill.character_workflow.lib.active_character import read_active
-    from skill.character_workflow.lib.projects import read_projects
+    from character_workflow.lib.lessons import append_memory
+    from character_workflow.lib.active_character import read_active
+    from character_workflow.lib.projects import read_projects
 
     project_slug: str | None = None
     if args.scope == "project":

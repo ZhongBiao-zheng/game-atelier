@@ -5,7 +5,7 @@ draft_processor 本身不依赖 characters/，但要确保迁移过程中没人
 """
 import pytest
 
-from skill.character_workflow.lib.draft_processor import process_drafts
+from character_workflow.lib.draft_processor import process_drafts
 
 
 @pytest.fixture

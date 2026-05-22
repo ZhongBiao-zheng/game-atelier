@@ -8,9 +8,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from skill.viewer_server.routes import router
-from skill.viewer_server.sse import hub, sse_router
-from skill.viewer_server.watcher import start_watchers
+from viewer_server.routes import router
+from viewer_server.sse import hub, sse_router
+from viewer_server.watcher import start_watchers
 
 
 @asynccontextmanager

@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from skill.character_workflow.lib.active_character import (
+from character_workflow.lib.active_character import (
     read_active, write_active, ActiveCharacter,
 )
 

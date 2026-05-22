@@ -17,8 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from skill.character_workflow.lib import slug as slug_util
-from skill.character_workflow.lib.schemas import Project, ProjectsFile
+from character_workflow.lib import slug as slug_util
+from character_workflow.lib.schemas import Project, ProjectsFile
 
 
 def _runtime_dir() -> Path:

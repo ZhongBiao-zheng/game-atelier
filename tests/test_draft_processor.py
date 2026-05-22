@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from skill.character_workflow.lib.draft_processor import process_drafts
+from character_workflow.lib.draft_processor import process_drafts
 
 
 @pytest.fixture

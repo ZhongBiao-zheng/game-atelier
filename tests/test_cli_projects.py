@@ -14,7 +14,7 @@ def cli_env(tmp_path, monkeypatch):
 
 
 def test_create_project_default_slug(cli_env, capsys):
-    from skill.character_workflow.__main__ import main
+    from character_workflow.__main__ import main
     exit_code = main(["create-project", "--name", "宝可梦游戏"])
     assert exit_code == 0
     out = capsys.readouterr().out
@@ -26,7 +26,7 @@ def test_create_project_default_slug(cli_env, capsys):
 
 
 def test_create_project_explicit_slug(cli_env, capsys):
-    from skill.character_workflow.__main__ import main
+    from character_workflow.__main__ import main
     exit_code = main(["create-project", "--name", "随便", "--slug", "my-explicit-slug"])
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
@@ -34,7 +34,7 @@ def test_create_project_explicit_slug(cli_env, capsys):
 
 
 def test_assign_character_writes_assignment(cli_env, capsys):
-    from skill.character_workflow.__main__ import main
+    from character_workflow.__main__ import main
     main(["create-project", "--name", "G", "--slug", "g"])
     pf = json.loads((cli_env / ".runtime" / "projects.json").read_text(encoding="utf-8"))
     project_id = pf["projects"][0]["id"]
@@ -47,7 +47,7 @@ def test_assign_character_writes_assignment(cli_env, capsys):
 
 
 def test_assign_character_no_project_unassigns(cli_env, capsys):
-    from skill.character_workflow.__main__ import main
+    from character_workflow.__main__ import main
     main(["create-project", "--name", "G", "--slug", "g"])
     pf = json.loads((cli_env / ".runtime" / "projects.json").read_text(encoding="utf-8"))
     project_id = pf["projects"][0]["id"]
@@ -61,7 +61,7 @@ def test_assign_character_no_project_unassigns(cli_env, capsys):
 
 
 def test_assign_character_unknown_project_returns_error(cli_env, capsys):
-    from skill.character_workflow.__main__ import main
+    from character_workflow.__main__ import main
     exit_code = main(["assign-character", "alice", "--project", "p-nonexistent"])
     assert exit_code != 0
     captured = capsys.readouterr()

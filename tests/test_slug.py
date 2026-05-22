@@ -1,7 +1,7 @@
 """Slug 生成 — 中文 → 拼音 → kebab-case。"""
 import pytest
 
-from skill.character_workflow.lib import slug
+from character_workflow.lib import slug
 
 
 def test_pure_ascii_passthrough():

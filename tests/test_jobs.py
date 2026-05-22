@@ -1,9 +1,9 @@
 import pytest
 
-from skill.character_workflow.lib.jobs import (
+from character_workflow.lib.jobs import (
     write_job, update_job_status, read_job,
 )
-from skill.character_workflow.lib.schemas import JobStatus
+from character_workflow.lib.schemas import JobStatus
 
 
 @pytest.fixture

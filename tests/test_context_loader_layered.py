@@ -1,7 +1,7 @@
 """三层 lessons + 项目级 worldview 加载测试。"""
 import pytest
 
-from skill.character_workflow.lib import context_loader
+from character_workflow.lib import context_loader
 
 
 @pytest.fixture

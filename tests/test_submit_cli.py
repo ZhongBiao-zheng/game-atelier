@@ -17,24 +17,28 @@ import sys
 
 
 def _run(args, cwd, env=None):
-    """直接调 python -m skill.character_workflow，捕获 stdout/stderr/exit。"""
-    cmd = [sys.executable, "-m", "skill.character_workflow", *args]
+    """直接调 python -m character_workflow，捕获 stdout/stderr/exit。"""
+    cmd = [sys.executable, "-m", "character_workflow", *args]
     return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
 
 
 def _make_env(tmp_path, monkeypatch_env=None):
     import os
+    from pathlib import Path
     env = os.environ.copy()
     env["RUNTIME_DIR"] = str(tmp_path / ".runtime")
     env["CHARACTERS_DIR"] = str(tmp_path / "characters")
     env["PROJECT_ROOT"] = str(tmp_path)
+    # Ensure src/ is on PYTHONPATH so subprocesses can find character_workflow
+    src_dir = str(Path(__file__).resolve().parent.parent / "src")
+    env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{env.get('PYTHONPATH', '')}"
     if monkeypatch_env:
         env.update(monkeypatch_env)
     return env
 
 
 def _project_root() -> str:
-    """子进程要在仓库根跑，否则找不到 skill 包。"""
+    """子进程要在仓库根跑，否则找不到包。"""
     from pathlib import Path
     return str(Path(__file__).resolve().parent.parent)
 

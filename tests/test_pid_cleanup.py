@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from skill.viewer_server.pid import (
+from viewer_server.pid import (
     cleanup_stale_pid, read_pid, read_port, write_pid, write_port, _is_alive,
 )
 

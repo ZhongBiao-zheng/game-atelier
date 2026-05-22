@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from skill.viewer_server.server_app import build_app
+from viewer_server.server_app import build_app
 
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64

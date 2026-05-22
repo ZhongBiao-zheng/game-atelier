@@ -21,7 +21,7 @@ cat > /tmp/cw-prompt-$$.md <<'PROMPT'
 PROMPT
 
 # submit 子命令是默认值 SSoT —— 不要自己决定 model / n / size
-JOB_ID=$(uv run python -m skill.character_workflow submit \
+JOB_ID=$(uv run python -m character_workflow submit \
   --kind portrait --prompt-file /tmp/cw-prompt-$$.md)
 rm /tmp/cw-prompt-$$.md
 echo "$JOB_ID"
@@ -58,23 +58,23 @@ echo "$JOB_ID"
 终端说"出图"/"确认"/"OK"/"go" 后，不再手拼 Lovart 命令：
 
 ```bash
-uv run python -m skill.character_workflow run-job "$JOB_ID"
+uv run python -m character_workflow run-job "$JOB_ID"
 ```
 
 如果画师只说"出图"，没有指定 job：
 
 ```bash
-uv run python -m skill.character_workflow run-latest --kind portrait
+uv run python -m character_workflow run-latest --kind portrait
 ```
 
 promo / turnaround 按对应 kind：
 
 ```bash
-uv run python -m skill.character_workflow run-latest --kind promo
-uv run python -m skill.character_workflow run-latest --kind turnaround
+uv run python -m character_workflow run-latest --kind promo
+uv run python -m character_workflow run-latest --kind turnaround
 ```
 
-取消 → 改 prompt 重走第 1 步；或 `POST /api/jobs/<id>/cancel` 标 `FAILED + error="画师取消"`。
+取消 → 改 prompt 重走第 1 步；或 `POST /api/jobs/<id>/cancel` 直接删 job 文件（pending_confirm 从未真出图，无保留意义）。
 
 ### 4. runner 做什么
 

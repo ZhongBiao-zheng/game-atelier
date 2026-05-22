@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from skill.viewer_server.server_app import build_app
+from viewer_server.server_app import build_app
 
 
 @pytest.fixture
@@ -198,7 +198,7 @@ def test_post_job_confirm_rejects_wrong_status(client, runtime):
     assert r.status_code == 409
 
 
-def test_post_job_cancel_marks_failed(client, runtime):
+def test_post_job_cancel_deletes_job_file(client, runtime):
     (runtime / "jobs" / "j1.json").write_text(json.dumps({
         "job_id": "j1", "character_id": "c", "prompt": "p",
         "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt_image_2",
@@ -207,9 +207,20 @@ def test_post_job_cancel_marks_failed(client, runtime):
     }))
     r = client.post("/api/jobs/j1/cancel")
     assert r.status_code == 200
-    data = json.loads((runtime / "jobs" / "j1.json").read_text())
-    assert data["status"] == "failed"
-    assert "画师取消" in data["error"]
+    assert r.json() == {"ok": True, "job_id": "j1", "deleted": True}
+    assert not (runtime / "jobs" / "j1.json").exists()
+
+
+def test_post_job_cancel_rejects_non_pending_confirm(client, runtime):
+    (runtime / "jobs" / "j1.json").write_text(json.dumps({
+        "job_id": "j1", "character_id": "c", "prompt": "p",
+        "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt_image_2",
+        "params": {}, "seed": None, "output_paths": [],
+        "status": "done", "error": None,
+    }))
+    r = client.post("/api/jobs/j1/cancel")
+    assert r.status_code == 409
+    assert (runtime / "jobs" / "j1.json").exists()
 
 
 def test_delete_failed_job_removes_job_file(client, runtime):

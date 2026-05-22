@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from skill.character_workflow.lib import context_loader as cl
-from skill.character_workflow.lib import lovart_caller as lc
-from skill.character_workflow.lib.jobs import (
+from character_workflow.lib import context_loader as cl
+from character_workflow.lib import lovart_caller as lc
+from character_workflow.lib.jobs import (
     job_output_dir, read_job, update_job_status, write_job,
 )
-from skill.character_workflow.lib.schemas import JobKind, JobStatus
+from character_workflow.lib.schemas import JobKind, JobStatus
 
 
 @pytest.fixture
@@ -119,7 +119,7 @@ def test_promo_job_does_not_pollute_portrait_dir(project, monkeypatch):
 
 def test_promo_skill_files_exist():
     """Skill #2 的关键文件都得在位，免得 CC 路由进来发现找不到。"""
-    skill_root = Path(__file__).resolve().parent.parent / "skill" / "character_promo"
+    skill_root = Path(__file__).resolve().parent.parent / "skills" / "character-promo"
     assert (skill_root / "SKILL.md").exists()
     assert (skill_root / "references" / "personas" / "promo-expert.md").exists()
     assert (skill_root / "references" / "prompt-promo-zh.md").exists()
@@ -129,6 +129,6 @@ def test_promo_skill_md_declares_default_n_one():
     """SKILL.md 必须显式声明 n=1 默认，避免 character_workflow 旧 'n=4' 习惯漏过来。"""
     skill_md = (
         Path(__file__).resolve().parent.parent
-        / "skill" / "character_promo" / "SKILL.md"
+        / "skills" / "character-promo" / "SKILL.md"
     ).read_text(encoding="utf-8")
     assert "n=1" in skill_md

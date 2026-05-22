@@ -23,9 +23,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 游戏角色资产工作流 — 画师/设计师可视化管理角色档案与 AI 出图的本地工具。两个进程协作：
 
-- **viewer-server** (`skill/viewer_server/`)：FastAPI，绑死 `127.0.0.1:5174`（被占用自动 +1）。文件读写 + SSE 推送。
+- **viewer-server** (`src/viewer_server/`)：FastAPI，绑死 `127.0.0.1:5174`（被占用自动 +1）。文件读写 + SSE 推送。
 - **web** (`web/`)：Vite + React，dev 在 `5173`，调用 viewer-server REST + 订阅 `/events` SSE。
-- **character-workflow Skill** (`skill/character_workflow/`)：在 CC 里被 `/character-workflow <名>` 触发，读 `.runtime/draft/` 反馈、对话补全 spec、调 Lovart 出图。
+- **character-workflow Skill** (`src/character_workflow/`，Skill 定义见 `skills/character-workflow/`)：在 CC 里被 `/character-workflow <名>` 触发，读 `.runtime/draft/` 反馈、对话补全 spec、调 Lovart 出图。
 
 ## 核心架构原则
 
@@ -43,7 +43,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Web 不能改 job 状态字段**：`WebEditableJobPatch` 白名单只允许 `prompt / model / params / seed`；`status / output_paths / submitted_at / character_id / job_id / error` 是 Skill 独占。
 
-**Schema 双端同步**：`skill/character_workflow/lib/schemas.py`（Pydantic）↔ `web/src/schema/jobs.ts`（TS）。改一边必须同步另一边。`docs/api-contract.md` 是契约源。
+**Schema 双端同步**：`src/character_workflow/lib/schemas.py`（Pydantic）↔ `web/src/schema/jobs.ts`（TS）。改一边必须同步另一边。`docs/api-contract.md` 是契约源。
 
 **出图前必须确认**：Skill 先 `jobs.write_job(...)` 写 `PENDING_CONFIRM` 状态 + 把出图卡片打到终端 → 画师明确说"出图"或 Web 点确认 → 才推进到 `PENDING` 调 Lovart（同步阻塞期间停留在 `PENDING`，无独立 `RUNNING` 状态）。
 
@@ -54,7 +54,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 make install                                          # uv sync + pnpm install
 
 # 启动（双终端）
-uv run python skill/viewer_server/server.py start     # 终端 A — server
+uv run python src/viewer_server/server.py start     # 终端 A — server
 cd web && pnpm dev                                    # 终端 B — Vite dev
 
 # Skill 软链到 .claude/skills/（重启 CC 生效）
@@ -68,15 +68,15 @@ uv run pytest -v -k "test_pending_confirm"            # 按名字过滤
 cd web && pnpm test                                   # vitest run
 
 # Lint / TypeCheck
-uv run ruff check skill tests                         # Python lint（line-length=100）
+uv run ruff check src tests                           # Python lint（line-length=100）
 cd web && pnpm lint                                   # tsc -b --noEmit
 
 # 构建
-make build                                            # vite build → skill/viewer_server/static/
+make build                                            # vite build → src/viewer_server/static/
 
 # Server 控制
-uv run python skill/viewer_server/server.py stop
-uv run python skill/viewer_server/server.py open-browser
+uv run python src/viewer_server/server.py stop
+uv run python src/viewer_server/server.py open-browser
 ```
 
 ## 技术栈（不要偏离）
@@ -97,7 +97,7 @@ uv run python skill/viewer_server/server.py open-browser
 一次 CLI 拿齐三件事：
 
 ```
-uv run python -m skill.character_workflow turn-start
+uv run python -m character_workflow turn-start
 # → {"drafts": [...], "active_id": "...", "spec": "<characters/<id>/spec.md 内容>"}
 ```
 

@@ -10,7 +10,7 @@ Claude 读了这段 markdown 之后才动笔写 8 段式中文出图 prompt。
 """
 from __future__ import annotations
 
-from skill.character_workflow.lib.context_loader import CharacterContext
+from character_workflow.lib.context_loader import CharacterContext
 
 
 def render(template: str, context: dict, persona: str | None = None) -> str:

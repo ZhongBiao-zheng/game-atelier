@@ -11,18 +11,18 @@ from pathlib import Path
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from skill.character_workflow.lib.active_character import read_active, write_active
-from skill.character_workflow.lib.jobs import (
+from character_workflow.lib.active_character import read_active, write_active
+from character_workflow.lib.jobs import (
     delete_failed_job, read_job, remove_image_from_job, update_job_status, write_job,
 )
-from skill.character_workflow.lib.schemas import JobKind as _JobKind
-from skill.character_workflow.lib.projects import (
+from character_workflow.lib.schemas import JobKind as _JobKind
+from character_workflow.lib.projects import (
     assign_character, create_project, delete_project, read_projects,
     rename_project,
 )
 from pydantic import BaseModel
 
-from skill.character_workflow.lib.schemas import (
+from character_workflow.lib.schemas import (
     ActiveCharacterFile, CharacterEntry, CharacterProjectAssign, ClipboardAttempt,
     FeedbackPost, Job, JobStatus, ProjectCreate, ProjectRename, ProjectsFile,
     SpecPatch, WebEditableJobPatch,
@@ -415,20 +415,16 @@ def post_job_confirm(job_id: str) -> dict:
 
 @router.post("/jobs/{job_id}/cancel")
 def post_job_cancel(job_id: str) -> dict:
-    """画师不要这版 prompt —— 把 pending_confirm 推到 failed 并写明原因。
-    Skill 在终端看见就停手，重新对话改 prompt。"""
+    """画师不要这版 prompt —— 直接删 json 文件。
+    pending_confirm 从未真出图，留 FAILED 残骸会让 Web 把"作废的 prompt"误显示成"出图失败"。"""
     p = _runtime() / "jobs" / f"{job_id}.json"
     if not p.exists():
         raise HTTPException(404, detail=f"job {job_id} not found")
     data = json.loads(p.read_text(encoding="utf-8"))
     if data.get("status") != JobStatus.PENDING_CONFIRM.value:
         raise HTTPException(409, detail=f"job not in pending_confirm (current: {data.get('status')})")
-    data["status"] = JobStatus.FAILED.value
-    data["error"] = "画师取消"
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(p)
-    return {"ok": True, "job_id": job_id, "status": JobStatus.FAILED.value}
+    p.unlink()
+    return {"ok": True, "job_id": job_id, "deleted": True}
 
 
 @router.post("/config")

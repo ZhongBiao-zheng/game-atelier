@@ -42,44 +42,44 @@ def stage_e_setup(tmp_path, monkeypatch):
 
 
 def test_stage_e_when_orphan_active(stage_e_setup):
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     result = turn_start(kind="portrait", message="出图")
     assert result["stage"] == "E"
 
 
 def test_stage_e_project_slug_is_none(stage_e_setup):
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     result = turn_start(kind="portrait", message="出图")
     assert result["project_slug"] is None
     assert result["project_id"] is None
 
 
 def test_stage_e_recommend_action_is_ask(stage_e_setup):
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     result = turn_start(kind="portrait", message="出图")
     assert result["recommend_action"] == "ask"
 
 
 def test_stage_e_lessons_global_loaded(stage_e_setup):
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     result = turn_start(kind="portrait", message="出图")
     assert "G1" in result["lessons_global"]
 
 
 def test_stage_e_lessons_workspace_loaded(stage_e_setup):
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     result = turn_start(kind="portrait", message="出图")
     assert "W1" in result["lessons_workspace"]
 
 
 def test_stage_e_lessons_project_empty(stage_e_setup):
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     result = turn_start(kind="portrait", message="出图")
     assert result["lessons_project"] == ""
 
 
 def test_stage_e_worldview_project_empty(stage_e_setup):
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     result = turn_start(kind="portrait", message="出图")
     assert result["worldview_project"] == ""
 
@@ -101,7 +101,7 @@ def test_stage_d_with_assignment_has_project_slug(stage_e_setup):
     )
     (stage_e_setup / "projects" / "test-slug" / "worldview.md").write_text("PWV", encoding="utf-8")
 
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     result = turn_start(kind="portrait", message="出图")
     assert result["stage"] == "D"
     assert result["project_slug"] == "test-slug"

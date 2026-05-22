@@ -62,7 +62,7 @@ def detect_stage() -> tuple[str, str]:
         return "C", f"{active_id}/spec.md 不存在"
 
     # Stage E: active 完整但 assignments 里缺失
-    from skill.character_workflow.lib.projects import read_projects
+    from character_workflow.lib.projects import read_projects
     pf = read_projects()
     if active_id not in pf.assignments:
         return "E", f"active_id={active_id!r} 未归属任何项目"
@@ -194,17 +194,17 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
 
     返回 dict（JSON 序列化用）；调用方需要时可用 TurnStartResult.model_validate 校验。
     """
-    from skill.character_workflow.lib.active_character import read_active
-    from skill.character_workflow.lib.context_loader import (
+    from character_workflow.lib.active_character import read_active
+    from character_workflow.lib.context_loader import (
         load_lessons_global,
         load_lessons_project,
         load_lessons_workspace,
         load_project_worldview,
         load_worldview,
     )
-    from skill.character_workflow.lib.draft_processor import process_drafts
-    from skill.character_workflow.lib.intent import compute_recommend_action
-    from skill.character_workflow.lib.projects import read_projects
+    from character_workflow.lib.draft_processor import process_drafts
+    from character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.projects import read_projects
 
     stage, reason = detect_stage()
     active = read_active() if stage in ("C", "D", "E") else None

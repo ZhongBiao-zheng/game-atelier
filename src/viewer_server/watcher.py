@@ -10,7 +10,7 @@ from pathlib import Path
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from skill.viewer_server.sse import hub
+from viewer_server.sse import hub
 
 
 class JobsHandler(FileSystemEventHandler):

@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from skill.character_workflow.lib import job_runner
-from skill.character_workflow.lib import lovart_caller as lc
-from skill.character_workflow.lib.active_character import write_active
-from skill.character_workflow.lib.jobs import read_job, write_job
-from skill.character_workflow.lib.schemas import JobKind, JobStatus
+from character_workflow.lib import job_runner
+from character_workflow.lib import lovart_caller as lc
+from character_workflow.lib.active_character import write_active
+from character_workflow.lib.jobs import read_job, write_job
+from character_workflow.lib.schemas import JobKind, JobStatus
 
 
 @pytest.fixture

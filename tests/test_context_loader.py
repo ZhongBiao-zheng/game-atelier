@@ -5,7 +5,7 @@
 """
 import pytest
 
-from skill.character_workflow.lib import context_loader as cl
+from character_workflow.lib import context_loader as cl
 
 
 @pytest.fixture

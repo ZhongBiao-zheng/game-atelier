@@ -1,7 +1,7 @@
 """create_project 自动生成 slug + 建项目目录骨架。"""
 import pytest
 
-from skill.character_workflow.lib import projects
+from character_workflow.lib import projects
 
 
 @pytest.fixture

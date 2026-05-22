@@ -16,7 +16,7 @@ def _run_server(host: str, port: int, runtime_dir: str, cwd: str) -> None:
     os.environ["RUNTIME_DIR"] = runtime_dir
     os.chdir(cwd)
     # Late import so env vars and cwd are set first
-    from skill.viewer_server.server_app import build_app
+    from viewer_server.server_app import build_app
     uvicorn.run(build_app(), host=host, port=port, log_level="error")
 
 

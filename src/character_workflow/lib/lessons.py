@@ -146,8 +146,8 @@ def append_lesson(kind: str, line: str) -> Path:
     """Deprecated alias —— 等价于 `append_memory(scope="project", project_slug=<active>)`。
     解析 active_id → assignments → slug;未归属抛 ValueError 让上层捕获 + 退出码 2。
     """
-    from skill.character_workflow.lib.active_character import read_active
-    from skill.character_workflow.lib.projects import read_projects
+    from character_workflow.lib.active_character import read_active
+    from character_workflow.lib.projects import read_projects
 
     active = read_active()
     if not active.active_id:

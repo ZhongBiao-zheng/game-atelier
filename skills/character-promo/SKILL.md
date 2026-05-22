@@ -47,7 +47,7 @@ uv run python skill/viewer_server/server.py start --background
 ## Turn 起始（每次 turn 必做）
 
 ```bash
-uv run python -m skill.character_workflow turn-start --kind promo
+uv run python -m character_workflow turn-start --kind promo
 ```
 
 返回 JSON 含 `stage`、`recommend_action`、`active_id`、`spec`、`lessons`（加载 `references/lessons/promo.md`）。按 `recommend_action` 决策，处理方式同 character-workflow 主 Skill。
@@ -93,10 +93,10 @@ A 模式时 spec 只更新被改的字段；B 模式可大改 spec；C 模式改
 
 先落盘 PENDING_CONFIRM，画师预览 prompt 并确认后再调用，避免出方向跑偏的图。流程：
 
-1. `uv run python -m skill.character_workflow submit --kind promo --prompt-file <path> --source-image <上传图绝对路径或 None>` 落盘 `PENDING_CONFIRM`
+1. `uv run python -m character_workflow submit --kind promo --prompt-file <path> --source-image <上传图绝对路径或 None>` 落盘 `PENDING_CONFIRM`
 2. 终端打可读出图卡片（模型 / 厂家 / 尺寸 / n=1 / 源图 / 中文 prompt 全列）
 3. 等画师明确"出图/确认/OK"后，调用 runner
-4. `uv run python -m skill.character_workflow run-job <job_id>` — runner 自动上传参考图、筛有效 artifact、落到 `characters/<id>/promo/vN.png`
+4. `uv run python -m character_workflow run-job <job_id>` — runner 自动上传参考图、筛有效 artifact、落到 `characters/<id>/promo/vN.png`
 5. 终端 `![v1](绝对路径)` 渲染 — 默认 n=1
 
 完整出图流程 + 失败处理 → `skill/character_workflow/references/lovart-call.md`
@@ -123,7 +123,7 @@ job → DONE 或 FAILED（结构化原因）时，问画师：
 画师答 Y → 调：
 
 ```bash
-uv run python -m skill.character_workflow append-lesson --kind promo --line "- 2026-05-19 <id> · <一句话> · prompt 片段：\`...\`"
+uv run python -m character_workflow append-lesson --kind promo --line "- 2026-05-19 <id> · <一句话> · prompt 片段：\`...\`"
 ```
 
 ## 何时跳过本 Skill

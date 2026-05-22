@@ -8,16 +8,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from skill.character_workflow.lib import lovart_caller
-from skill.character_workflow.lib.active_character import read_active
-from skill.character_workflow.lib.jobs import (
+from character_workflow.lib import lovart_caller
+from character_workflow.lib.active_character import read_active
+from character_workflow.lib.jobs import (
     job_output_dir,
     list_jobs,
     read_job,
     save_job,
     update_job_status,
 )
-from skill.character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
+from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
 
 
 class JobRunnerError(RuntimeError):

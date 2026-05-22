@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from skill.character_workflow.lib.schemas import (
+from character_workflow.lib.schemas import (
     Job, JobStatus, WebEditableJobPatch, SpecPatch, FeedbackPost, ClipboardAttempt,
 )
 
@@ -38,7 +38,7 @@ _ = JobStatus  # silence unused import
 
 
 def test_turn_stage_enum_values():
-    from skill.character_workflow.lib.schemas import TurnStage
+    from character_workflow.lib.schemas import TurnStage
     assert TurnStage.A.value == "A"
     assert TurnStage.B.value == "B"
     assert TurnStage.C.value == "C"
@@ -47,7 +47,7 @@ def test_turn_stage_enum_values():
 
 
 def test_intent_kind_enum_values():
-    from skill.character_workflow.lib.schemas import IntentKind
+    from character_workflow.lib.schemas import IntentKind
     assert IntentKind.NEW.value == "new"
     assert IntentKind.REVISE.value == "revise"
     assert IntentKind.CREATE.value == "create"
@@ -55,7 +55,7 @@ def test_intent_kind_enum_values():
 
 
 def test_turn_start_result_minimal():
-    from skill.character_workflow.lib.schemas import (
+    from character_workflow.lib.schemas import (
         RecommendAction, TurnStage, TurnStartResult,
     )
     r = TurnStartResult(
@@ -88,7 +88,7 @@ def test_turn_start_result_minimal():
 
 
 def test_turn_start_result_full_stage_d():
-    from skill.character_workflow.lib.schemas import (
+    from character_workflow.lib.schemas import (
         IntentKind, RecentCharacter, RecommendAction, TurnStage, TurnStartResult,
     )
     r = TurnStartResult(
@@ -121,7 +121,7 @@ def test_turn_start_result_full_stage_d():
 
 
 def test_recommend_action_enum_values():
-    from skill.character_workflow.lib.schemas import RecommendAction
+    from character_workflow.lib.schemas import RecommendAction
     assert RecommendAction.RENDER_CARD.value == "render_card"
     assert RecommendAction.ASK.value == "ask"
     assert RecommendAction.SWITCH.value == "switch"
@@ -129,7 +129,7 @@ def test_recommend_action_enum_values():
 
 
 def test_project_has_slug_field():
-    from skill.character_workflow.lib.schemas import Project
+    from character_workflow.lib.schemas import Project
     p = Project(id="p-x", slug="my-game", name="名字", created_at="2026-05-21T00:00:00+00:00")
     assert p.slug == "my-game"
 
@@ -137,6 +137,6 @@ def test_project_has_slug_field():
 def test_project_slug_required():
     import pytest
     from pydantic import ValidationError
-    from skill.character_workflow.lib.schemas import Project
+    from character_workflow.lib.schemas import Project
     with pytest.raises(ValidationError):
         Project(id="p-x", name="名字", created_at="2026-05-21T00:00:00+00:00")
