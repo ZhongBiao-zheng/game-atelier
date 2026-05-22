@@ -5,8 +5,7 @@ import pytest
 def isolated_data_root(tmp_path, monkeypatch):
     """Every test gets a clean data root via CHARACTER_WORKFLOW_DATA_ROOT.
 
-    Pollutes neither user data nor other tests. Keeps PROJECT_ROOT untouched
-    until Phase 2 migrates code paths.
+    Pollutes neither user data nor other tests.
     """
     root = tmp_path / "wf-data-root"
     root.mkdir()

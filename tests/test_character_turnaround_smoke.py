@@ -22,8 +22,6 @@ from character_workflow.lib.schemas import JobKind, JobStatus
 def project(tmp_path, monkeypatch):
     runtime = tmp_path / ".runtime"
     (runtime / "jobs").mkdir(parents=True)
-    monkeypatch.setenv("RUNTIME_DIR", str(runtime))
-    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
     monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
     chars = tmp_path / "characters" / "holy"
     (chars / "portrait").mkdir(parents=True)

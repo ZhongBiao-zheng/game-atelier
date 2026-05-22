@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
@@ -37,9 +37,7 @@ def runtime(tmp_path, monkeypatch):
 def _run_cli(data_root: str) -> dict:
     env = os.environ.copy()
     env["CHARACTER_WORKFLOW_DATA_ROOT"] = data_root
-    # active_character.py still reads RUNTIME_DIR until it is migrated
-    env["RUNTIME_DIR"] = str(Path(data_root) / ".runtime")
-    env["PYTHONPATH"] = f"{PROJECT_ROOT / 'src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    env["PYTHONPATH"] = f"{REPO_ROOT / 'src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
     out = subprocess.run(
         [sys.executable, "-m", "character_workflow", "turn-start"],
         capture_output=True, text=True, env=env,
