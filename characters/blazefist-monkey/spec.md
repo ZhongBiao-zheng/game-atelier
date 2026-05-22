@@ -38,3 +38,7 @@
 
 - 2026-05-21 · `job-202605210747516747e87c` · Nano Banana Pro · `portrait/v1.png`（GPT Image 2 内容审核静默拒绝，改 Nano Banana Pro + lovart_wrapper 成功）
 - 2026-05-21 · `job-202605210811397939640d` · GPT Image 2 · `portrait/v2.png`（带幼皇猴参考图 `young-emperor-monkey/portrait/v1.png`；GPT Image 2 本次未拒绝，生成成功）
+
+## 美宣记录
+
+- 2026-05-22 · `promo/v1.png` · `job-202605220756323d413466` · 2048×1152（Lovart 实际输出）/ 请求 1536×1024 · narrative_beat=怒喝振拳的爆发瞬间 · 决策：冷蓝爆发烟尘 + 中性冷白主光 + 唯一暖色锚点是咆哮口中喷出的一线热气和眼神内焰 · 焦点：头部表情和热气线 · source_image=portrait/v2.png（立绘做主参考图锚定外观；runner 不自动上传立绘，必须显式传）· KV 镜头参考图本轮未上传（Lovart 一次只消化一张参考图，立绘优先；镜头透视由文字 prompt 描述完成）· prompt 4 段约 230 字（学习幼皇猴 promo 风格，零外观罗列）· runner downloader 又失败，curl 兜底从 artifact URL 拉图

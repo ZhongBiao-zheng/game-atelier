@@ -4,10 +4,11 @@ T3: Skill turn 起始读 / 处理角色时写；Web 左栏读取并高亮。
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from character_workflow.lib import data_root
 
 
 @dataclass
@@ -17,7 +18,7 @@ class ActiveCharacter:
 
 
 def _runtime_dir() -> Path:
-    return Path(os.environ.get("RUNTIME_DIR", ".runtime"))
+    return data_root.runtime_dir()
 
 
 def _path() -> Path:

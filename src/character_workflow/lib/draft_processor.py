@@ -3,13 +3,14 @@ T5: 原子 rename 消除"列出文件 → 处理 → 移动"竞态窗口。
 """
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from character_workflow.lib import data_root
+
 
 def _runtime_dir() -> Path:
-    return Path(os.environ.get("RUNTIME_DIR", ".runtime"))
+    return data_root.runtime_dir()
 
 
 def process_drafts() -> list[dict[str, str]]:
