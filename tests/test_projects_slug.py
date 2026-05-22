@@ -53,3 +53,16 @@ def test_create_project_explicit_slug_collision_raises(isolated_project):
     projects.create_project(name="X", slug="taken")
     with pytest.raises(ValueError, match="already exists"):
         projects.create_project(name="Y", slug="taken")
+
+
+def test_create_project_preserves_existing_files(isolated_project):
+    """目录或 MEMORY.md 已存在时,create_project 不覆盖。"""
+    proj_dir = isolated_project / "projects" / "preserved"
+    proj_dir.mkdir(parents=True)
+    (proj_dir / "MEMORY.md").write_text("EXISTING CONTENT", encoding="utf-8")
+    (proj_dir / "worldview.md").write_text("EXISTING WV", encoding="utf-8")
+
+    projects.create_project(name="X", slug="preserved")
+
+    assert (proj_dir / "MEMORY.md").read_text(encoding="utf-8") == "EXISTING CONTENT"
+    assert (proj_dir / "worldview.md").read_text(encoding="utf-8") == "EXISTING WV"

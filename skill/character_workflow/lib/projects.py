@@ -97,12 +97,16 @@ def create_project(name: str, slug: str | None = None) -> Project:
 
     project_dir = _projects_root() / final_slug
     project_dir.mkdir(parents=True, exist_ok=True)
-    (project_dir / "MEMORY.md").write_text(
-        _MEMORY_SKELETON.format(name=name.strip()), encoding="utf-8"
-    )
-    (project_dir / "worldview.md").write_text(
-        _WORLDVIEW_SKELETON.format(name=name.strip()), encoding="utf-8"
-    )
+    memory_path = project_dir / "MEMORY.md"
+    worldview_path = project_dir / "worldview.md"
+    if not memory_path.exists():
+        memory_path.write_text(
+            _MEMORY_SKELETON.format(name=name.strip()), encoding="utf-8"
+        )
+    if not worldview_path.exists():
+        worldview_path.write_text(
+            _WORLDVIEW_SKELETON.format(name=name.strip()), encoding="utf-8"
+        )
 
     return project
 
