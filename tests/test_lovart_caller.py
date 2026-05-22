@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from character_workflow.lib import lovart_caller as lc
+from character_workflow.lib.callers import lovart as lc
 
 
 @pytest.fixture

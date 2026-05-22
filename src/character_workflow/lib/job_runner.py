@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from character_workflow.lib import data_root
-from character_workflow.lib import lovart_caller
+from character_workflow.lib.callers import lovart as lovart_caller
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
     job_output_dir,

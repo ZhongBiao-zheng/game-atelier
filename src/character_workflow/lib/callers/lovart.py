@@ -8,6 +8,9 @@
 失败 → 抛 `LovartError`；超时 → 抛 `LovartTimeout`（subclass of LovartError）
 
 Lovart CLI 安装在 ~/.claude/skills/lovart-api/，由 LOVART_CLI 环境变量覆盖。
+
+Task 11: 顶层新增 `render(*, prompt, model, alias, output_dir, **kwargs)`，
+按 alias 查 keys 注入凭证，再调内部 submit_and_wait。
 """
 from __future__ import annotations
 
@@ -20,7 +23,7 @@ from pathlib import Path
 
 
 DEFAULT_LOVART_CLI = (
-    Path(__file__).resolve().parents[1] / "bin" / "lovart_wrapper.py"
+    Path(__file__).resolve().parents[2] / "bin" / "lovart_wrapper.py"
 )
 _PROXY_ENV_KEYS = (
     "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY",
@@ -153,3 +156,65 @@ def submit_and_wait(
     if not paths or not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
         raise LovartError(f"output_paths missing or malformed in lovart-api response: {payload!r}")
     return LovartResult(output_paths=paths, raw_json=payload)
+
+
+def render(
+    *,
+    prompt: str,
+    model: str,
+    alias: str,
+    output_dir: Path | str,
+    reference_images: list[str] | None = None,
+    attachments: list[str] | None = None,
+    n: int = 1,
+    timeout: float = 600.0,
+    **_unused,
+) -> list[str]:
+    """Alias-aware entrypoint used by dispatch().
+
+    Looks up the key by alias, injects LOVART_ACCESS_KEY/LOVART_SECRET_KEY
+    into os.environ, then delegates to submit_and_wait. Returns the
+    resulting output_paths (list[str]).
+
+    Raises:
+        ValueError: if alias provider is not "lovart".
+        LovartError / LovartTimeout: propagated from submit_and_wait.
+    """
+    from character_workflow.lib import keys as _keys
+
+    key = _keys.find_by_alias(alias)
+    if key is None:
+        raise ValueError(f"alias not found: {alias}")
+    if key.provider != "lovart":
+        raise ValueError(
+            f"alias {alias!r} has provider {key.provider!r}, expected 'lovart'"
+        )
+
+    out_path = Path(output_dir) if not isinstance(output_dir, Path) else output_dir
+
+    saved_ak = os.environ.get("LOVART_ACCESS_KEY")
+    saved_sk = os.environ.get("LOVART_SECRET_KEY")
+    os.environ["LOVART_ACCESS_KEY"] = key.access_key
+    if key.secret_key:
+        os.environ["LOVART_SECRET_KEY"] = key.secret_key
+    try:
+        result = submit_and_wait(
+            prompt=prompt,
+            model=model,
+            output_dir=out_path,
+            n=n,
+            reference_images=reference_images,
+            attachments=attachments,
+            timeout=timeout,
+        )
+    finally:
+        if saved_ak is None:
+            os.environ.pop("LOVART_ACCESS_KEY", None)
+        else:
+            os.environ["LOVART_ACCESS_KEY"] = saved_ak
+        if saved_sk is None:
+            os.environ.pop("LOVART_SECRET_KEY", None)
+        else:
+            os.environ["LOVART_SECRET_KEY"] = saved_sk
+
+    return list(result.output_paths)

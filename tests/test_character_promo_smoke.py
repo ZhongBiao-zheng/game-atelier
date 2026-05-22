@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from character_workflow.lib import context_loader as cl
-from character_workflow.lib import lovart_caller as lc
+from character_workflow.lib.callers import lovart as lc
 from character_workflow.lib.jobs import (
     job_output_dir, read_job, update_job_status, write_job,
 )
