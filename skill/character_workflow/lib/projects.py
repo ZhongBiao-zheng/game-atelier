@@ -17,11 +17,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from skill.character_workflow.lib import slug as slug_util
 from skill.character_workflow.lib.schemas import Project, ProjectsFile
 
 
 def _runtime_dir() -> Path:
     return Path(os.environ.get("RUNTIME_DIR", ".runtime"))
+
+
+def _projects_root() -> Path:
+    return Path(os.environ.get("PROJECT_ROOT", Path.cwd())) / "projects"
 
 
 def _path() -> Path:
@@ -44,19 +49,61 @@ def _write(file: ProjectsFile) -> ProjectsFile:
     return file
 
 
-def create_project(name: str) -> Project:
-    import re
+_MEMORY_SKELETON = """# {name} MEMORY (项目级)
+
+## character-workflow
+
+### Portrait
+
+### Promo
+
+### Turnaround
+"""
+
+_WORLDVIEW_SKELETON = """# {name} · WORLDVIEW
+
+> 本项目世界观。Skill turn-start 自动加载到出图上下文。
+
+## 项目定位
+
+## 视觉调性
+
+## 用语风格
+
+## 待补 / 未决项
+"""
+
+
+def create_project(name: str, slug: str | None = None) -> Project:
     f = read_projects()
-    clean = name.strip()
-    slug = re.sub(r"[^a-z0-9]+", "-", clean.lower()).strip("-") or uuid4().hex[:8]
+    existing_slugs = {p.slug for p in f.projects}
+
+    if slug is None:
+        candidate = slug_util.generate(name)
+        final_slug = slug_util.dedupe(candidate, existing_slugs)
+    else:
+        if slug in existing_slugs:
+            raise ValueError(f"slug already exists: {slug!r}")
+        final_slug = slug
+
     project = Project(
         id=f"p-{uuid4().hex[:10]}",
-        slug=slug,
-        name=clean,
+        slug=final_slug,
+        name=name.strip(),
         created_at=datetime.now(timezone.utc).isoformat(),
     )
     f.projects.append(project)
     _write(f)
+
+    project_dir = _projects_root() / final_slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "MEMORY.md").write_text(
+        _MEMORY_SKELETON.format(name=name.strip()), encoding="utf-8"
+    )
+    (project_dir / "worldview.md").write_text(
+        _WORLDVIEW_SKELETON.format(name=name.strip()), encoding="utf-8"
+    )
+
     return project
 
 

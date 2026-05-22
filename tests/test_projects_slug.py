@@ -1,0 +1,55 @@
+"""create_project 自动生成 slug + 建项目目录骨架。"""
+import pytest
+
+from skill.character_workflow.lib import projects
+
+
+@pytest.fixture
+def isolated_project(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNTIME_DIR", str(tmp_path / ".runtime"))
+    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def test_create_project_auto_slug(isolated_project):
+    p = projects.create_project(name="宝可梦风格-精灵游戏")
+    # pypinyin 真实输出是带 hyphen 的拼音 + 截断到 32 字符
+    # 实测值: "bao-ke-meng-feng-ge-jing-ling-yo"
+    assert p.slug.startswith("bao-ke-meng")
+    assert len(p.slug) <= 32
+
+
+def test_create_project_explicit_slug(isolated_project):
+    p = projects.create_project(name="任意名字", slug="custom-slug")
+    assert p.slug == "custom-slug"
+
+
+def test_create_project_dedupe_slug(isolated_project):
+    projects.create_project(name="测试内容")
+    p2 = projects.create_project(name="测试内容")
+    assert p2.slug.endswith("-2")
+
+
+def test_create_project_creates_directory(isolated_project):
+    p = projects.create_project(name="Hard Mecha")
+    project_dir = isolated_project / "projects" / p.slug
+    assert project_dir.is_dir()
+    assert (project_dir / "MEMORY.md").exists()
+    assert (project_dir / "worldview.md").exists()
+
+
+def test_create_project_directory_contains_skeleton(isolated_project):
+    p = projects.create_project(name="Hard Mecha")
+    project_dir = isolated_project / "projects" / p.slug
+    memory_text = (project_dir / "MEMORY.md").read_text(encoding="utf-8")
+    assert "character-workflow" in memory_text
+    assert "Portrait" in memory_text
+    assert "Promo" in memory_text
+    assert "Turnaround" in memory_text
+
+
+def test_create_project_explicit_slug_collision_raises(isolated_project):
+    projects.create_project(name="X", slug="taken")
+    with pytest.raises(ValueError, match="already exists"):
+        projects.create_project(name="Y", slug="taken")
