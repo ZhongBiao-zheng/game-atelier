@@ -4169,6 +4169,106 @@ git commit -m "docs: skill distribution implementation completion report"
 
 ---
 
+## Task 1 验证结果 — 2026-05-22
+
+### 验证过程
+
+**Step 1-3:** 成功创建 `/tmp/test-plugin-minimal/` 探针目录，写入 `plugin.json`（带 `skills` array 字段）和 `skills/echo/SKILL.md`。
+
+**Step 4: `claude plugins install` 输出（verbatim）**
+
+```
+$ claude plugins install /tmp/test-plugin-minimal
+Installing plugin "/tmp/test-plugin-minimal"...
+✘ Failed to install plugin "/tmp/test-plugin-minimal": Plugin "/tmp/test-plugin-minimal" not found in any configured marketplace
+
+EXIT_CODE: 1
+```
+
+**关键发现：** `claude plugins install` 只接受 marketplace 名，不接受本地路径安装。但 `claude plugins validate <path>` 和 `claude --plugin-dir <path>` 支持本地目录。
+
+**Step 4 补充：Validate 探针**
+
+```
+# 原始 plugin.json（skills 为 array）在 plugin 根目录
+$ claude plugins validate /tmp/test-plugin-minimal
+✘ Found 1 error:
+  ❯ directory: No manifest found in directory. Expected .claude-plugin/marketplace.json or .claude-plugin/plugin.json
+EXIT_CODE: 1
+
+# 移动到 .claude-plugin/plugin.json 后，skills 为 array
+$ claude plugins validate /tmp/test-plugin-minimal
+✘ Found 1 error:
+  ❯ skills: Invalid input
+EXIT_CODE: 1
+
+# skills 为 object
+✘ root: Unrecognized key: "entries"
+# skills 为 string "./skills"
+✔ Validation passed with warnings (只缺 author)
+EXIT_CODE: 0
+
+# 测试 bootstrap/onLoad/preinstall
+✘ root: Unrecognized keys: "bootstrap", "onLoad", "preinstall"
+
+# 测试 hooks/mcpServers/commands
+✔ Validation passed
+EXIT_CODE: 0
+```
+
+### 实测结论（所有为 ground truth，从 validate 输出 + 已安装插件 plugin.json 对照）
+
+| 问题 | 答案 |
+|---|---|
+| manifest 路径 | **`.claude-plugin/plugin.json`**（不是仓库根的 `plugin.json`） |
+| `skills` 字段类型 | **string**，指向 skills 目录路径（如 `"./skills"`）；**不是 array** |
+| 多 Skill 支持 | **支持**：skills 目录下每个子目录 = 一个 Skill（`skills/<skill-name>/SKILL.md`），一个 Plugin 可含任意多个 Skill |
+| Plugin 安装目录 | **`~/.claude/plugins/marketplaces/<marketplace>/<plugin-name>/`**（通过 marketplace 安装）或 `~/.claude/plugins/cache/<marketplace>/<plugin-name>/<version>/`（缓存） |
+| `bootstrap` 字段 | **不存在**（validate 报 "Unrecognized key"）|
+| `onLoad` 字段 | **不存在**（validate 报 "Unrecognized key"）|
+| `preinstall` 字段 | **不存在**（validate 报 "Unrecognized key"）|
+| 有效的 lifecycle/配置字段 | `skills`（string path）、`hooks`（string path）、`mcpServers`（string path）、`commands`（string path）、`author`、`version`、`description`、`repository`、`license`、`keywords`、`homepage` |
+| `skills` 目录下发现规则 | `<plugin-root>/skills/<skill-name>/SKILL.md` — CLI 自动发现，无需在 manifest 显式列出每个 Skill |
+
+**从真实安装插件（`example-plugin`、`ljg-skills`、`superpowers`、`claude-mem`）对照确认：**
+- `example-plugin`（Anthropic 官方）`.claude-plugin/plugin.json` 没有 `skills` 字段，但 `skills/example-skill/SKILL.md` 被自动发现
+- `ljg-skills` 有 `"skills": "./skills"`（17 个 Skill），一个 Plugin 含多个 Skill 完全正常
+- `claude-mem` 生产版本有 `"skills": "./plugin/skills/"`, `"mcpServers": "./.mcp.json"`, `"hooks": "./plugin/hooks/codex-hooks.json"`
+
+### 对原计划假设的影响
+
+| 原假设 | 实测结果 | 影响 |
+|---|---|---|
+| `plugin.json` 放仓库根 | 必须放在 `.claude-plugin/plugin.json` | **需改**：创建 `.claude-plugin/` 子目录 |
+| `"skills": [...]`（array） | 实为 `"skills": "./skills"`（string，目录路径） | **需改**：schema 调整 |
+| 单 Plugin 多 Skill 支持 | **确认支持** — 目录自动发现 | **原计划保持不变** |
+| `bootstrap` 字段驱动 onboarding | **字段不存在** — Plugin 不支持 lifecycle hooks | **需重新设计**：bootstrap 只能通过 SKILL.md 内 instructions 或 hooks.json 触发，不是 plugin manifest 级别的字段 |
+| `claude plugins install <local-path>` | 不支持本地路径，只支持 marketplace 名 | **开发/测试**：用 `--plugin-dir` 或手动软链到 `~/.claude/skills/` |
+
+### 决策
+
+**PAUSE — 需 R-1 局部回退讨论（不是全局回退，仅 bootstrap 设计）**
+
+- ✅ Plugin manifest 结构可行（只需改文件位置和字段名）
+- ✅ 单 Plugin 多 Skill 支持确认 → 原计划"4 个 Skill 一个 Plugin"架构不变
+- ⚠️ `bootstrap` 字段不存在 → 阶段 4 的 bootstrap 状态机**不能**通过 plugin.json 触发，需改为：
+  - 方案 A：bootstrap 逻辑放在 SKILL.md instructions 里（Skill 自检）
+  - 方案 B：通过 `hooks.json` 在 `PostToolUse` 或 session 启动时触发 bootstrap 脚本
+  - 方案 C：保留 `bootstrap.py` 作为 CLI 工具，在 SKILL.md 里明确告知 AI 首次运行时调用
+
+R-1 决策只影响阶段 4（Tasks 14-18），不影响阶段 0-3、5-7。建议先继续阶段 1-3（无风险），同时确认 bootstrap 方案。
+
+### Step 5 — 手动验证（待完成）
+
+**用户必须：** 重启 Claude Code，然后在新会话中触发 `/echo-skill 测试`（通过 `claude --plugin-dir /tmp/test-plugin-minimal`），确认 Skill 被正确识别和执行。
+
+命令：
+```bash
+claude --plugin-dir /tmp/test-plugin-minimal -p "/echo-skill 你好"
+```
+
+---
+
 ## 总结
 
 | 阶段 | 任务范围 | 验证 |
