@@ -78,6 +78,31 @@ def _submit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _create_project(args: argparse.Namespace) -> int:
+    from skill.character_workflow.lib.projects import create_project
+    try:
+        p = create_project(name=args.name, slug=args.slug)
+    except ValueError as e:
+        print(f"create-project: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(p.model_dump(), ensure_ascii=False))
+    return 0
+
+
+def _assign_character(args: argparse.Namespace) -> int:
+    from skill.character_workflow.lib.projects import assign_character
+    try:
+        assign_character(args.character_id, args.project)
+    except KeyError as e:
+        print(f"assign-character: 项目不存在: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(
+        {"character_id": args.character_id, "project_id": args.project, "ok": True},
+        ensure_ascii=False,
+    ))
+    return 0
+
+
 def _append_memory(args: argparse.Namespace) -> int:
     """append-memory --scope {project|workspace|global}。
 
@@ -140,6 +165,14 @@ def main(argv: list[str] | None = None) -> int:
     p_lesson.add_argument("--kind", required=True, choices=("portrait", "promo", "turnaround"))
     p_lesson.add_argument("--line", required=True, help="完整一行 markdown，不带换行")
 
+    p_cp = sub.add_parser("create-project", help="新建项目目录骨架 + 写 projects.json")
+    p_cp.add_argument("--name", required=True)
+    p_cp.add_argument("--slug", default=None, help="手动指定 slug,缺省自动生成")
+
+    p_ac = sub.add_parser("assign-character", help="把角色归属到项目;省略 --project 等于取消归属")
+    p_ac.add_argument("character_id")
+    p_ac.add_argument("--project", default=None)
+
     p_memory = sub.add_parser("append-memory", help="原子追加一条经验到三层 MEMORY.md")
     p_memory.add_argument("--kind", required=True, choices=("portrait", "promo", "turnaround"))
     p_memory.add_argument("--line", required=True, help="完整一行 markdown,不带换行")
@@ -196,6 +229,10 @@ def main(argv: list[str] | None = None) -> int:
         path = append_lesson(args.kind, args.line)
         print(json.dumps({"ok": True, "path": str(path)}, ensure_ascii=False))
         return 0
+    if args.cmd == "create-project":
+        return _create_project(args)
+    if args.cmd == "assign-character":
+        return _assign_character(args)
     if args.cmd == "append-memory":
         return _append_memory(args)
     if args.cmd == "submit":
