@@ -12,6 +12,7 @@ import uvicorn
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from character_workflow.lib import data_root  # noqa: E402
 from viewer_server.pid import (  # noqa: E402
     cleanup_stale_pid, read_pid, read_port, write_pid, write_port,
 )
@@ -33,7 +34,7 @@ def _find_free_port(start: int) -> int:
 
 
 def cmd_start(background: bool = False) -> None:
-    runtime = Path(os.environ.get("RUNTIME_DIR", ".runtime"))
+    runtime = data_root.runtime_dir()
     runtime.mkdir(parents=True, exist_ok=True)
     cleanup_stale_pid(runtime)
 
@@ -73,7 +74,7 @@ def cmd_start(background: bool = False) -> None:
 
 
 def cmd_stop() -> None:
-    runtime = Path(os.environ.get("RUNTIME_DIR", ".runtime"))
+    runtime = data_root.runtime_dir()
     pid = read_pid(runtime)
     if not pid:
         print("viewer-server not running")
@@ -87,7 +88,7 @@ def cmd_stop() -> None:
 
 
 def cmd_open_browser() -> None:
-    runtime = Path(os.environ.get("RUNTIME_DIR", ".runtime"))
+    runtime = data_root.runtime_dir()
     port = read_port(runtime) or DEFAULT_PORT
     url = f"http://127.0.0.1:{port}/"
     opener = "open" if platform.system() == "Darwin" else "xdg-open"

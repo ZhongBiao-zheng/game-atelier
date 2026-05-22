@@ -4,12 +4,12 @@ macOS 用 FSEvents（默认）；Linux 用 inotify；显式不用 PollingObserve
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from character_workflow.lib import data_root
 from viewer_server.sse import hub
 
 
@@ -102,8 +102,8 @@ class ImagesHandler(FileSystemEventHandler):
 
 
 def start_watchers() -> Observer:
-    runtime = Path(os.environ.get("RUNTIME_DIR", ".runtime"))
-    project_root = Path.cwd()
+    runtime = data_root.runtime_dir()
+    project_root = data_root.resolve_data_root()
 
     observer = Observer()
 

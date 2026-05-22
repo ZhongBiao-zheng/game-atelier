@@ -7,14 +7,13 @@ from viewer_server.server_app import build_app
 
 
 @pytest.fixture
-def runtime(tmp_path, monkeypatch):
-    runtime = tmp_path / ".runtime"
-    (runtime / "jobs").mkdir(parents=True)
-    monkeypatch.setenv("RUNTIME_DIR", str(runtime))
-    shadow = tmp_path / "characters" / "shadow"
-    shadow.mkdir(parents=True)
+def runtime(isolated_data_root):
+    """Use the isolated_data_root already set up by the autouse fixture."""
+    runtime = isolated_data_root / ".runtime"
+    (runtime / "jobs").mkdir(parents=True, exist_ok=True)
+    shadow = isolated_data_root / "characters" / "shadow"
+    shadow.mkdir(parents=True, exist_ok=True)
     (shadow / "spec.md").write_text("# 暗影刺客女\n年龄: 24")
-    monkeypatch.chdir(tmp_path)
     return runtime
 
 

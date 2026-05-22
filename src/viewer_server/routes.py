@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from character_workflow.lib import data_root
 from character_workflow.lib.active_character import read_active, write_active
 from character_workflow.lib.jobs import (
     delete_failed_job, read_job, remove_image_from_job, update_job_status, write_job,
@@ -53,11 +54,11 @@ router = APIRouter(prefix="/api")
 
 
 def _runtime() -> Path:
-    return Path(os.environ.get("RUNTIME_DIR", ".runtime"))
+    return data_root.runtime_dir()
 
 
 def _project_root() -> Path:
-    return Path.cwd()
+    return data_root.resolve_data_root()
 
 
 @router.get("/jobs", response_model=list[Job])

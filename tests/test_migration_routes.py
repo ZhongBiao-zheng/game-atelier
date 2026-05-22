@@ -14,20 +14,19 @@ from viewer_server.server_app import build_app
 
 
 @pytest.fixture
-def runtime(tmp_path, monkeypatch):
-    runtime = tmp_path / ".runtime"
-    (runtime / "jobs").mkdir(parents=True)
-    (runtime / "draft").mkdir()
-    monkeypatch.setenv("RUNTIME_DIR", str(runtime))
+def runtime(isolated_data_root):
+    """Use the isolated_data_root already set up by the autouse fixture."""
+    runtime = isolated_data_root / ".runtime"
+    (runtime / "jobs").mkdir(parents=True, exist_ok=True)
+    (runtime / "draft").mkdir(exist_ok=True)
     # 新结构：characters/<id>/spec.md
-    chars = tmp_path / "characters" / "shadow"
-    chars.mkdir(parents=True)
+    chars = isolated_data_root / "characters" / "shadow"
+    chars.mkdir(parents=True, exist_ok=True)
     (chars / "spec.md").write_text("# 暗影刺客女\n年龄: 24", encoding="utf-8")
-    (chars / "portrait").mkdir()
-    (chars / "promo").mkdir()
-    (chars / "turnaround").mkdir()
-    (chars / "source").mkdir()
-    monkeypatch.chdir(tmp_path)
+    (chars / "portrait").mkdir(exist_ok=True)
+    (chars / "promo").mkdir(exist_ok=True)
+    (chars / "turnaround").mkdir(exist_ok=True)
+    (chars / "source").mkdir(exist_ok=True)
     return runtime
 
 
@@ -48,20 +47,20 @@ def test_get_spec_404_when_dir_missing(client):
     assert r.status_code == 404
 
 
-def test_post_spec_writes_into_nested_dir(client):
+def test_post_spec_writes_into_nested_dir(client, runtime):
     """POST /api/spec/<id> 必须落到 characters/<id>/spec.md。"""
     r = client.post("/api/spec/shadow", json={"content": "# 新名\n新内容"})
     assert r.status_code == 200, r.json()
-    p = Path.cwd() / "characters" / "shadow" / "spec.md"
+    p = runtime.parent / "characters" / "shadow" / "spec.md"
     assert p.exists(), f"spec.md not at {p}"
     assert p.read_text(encoding="utf-8") == "# 新名\n新内容"
 
 
-def test_post_spec_creates_dir_for_new_character(client):
+def test_post_spec_creates_dir_for_new_character(client, runtime):
     """新角色第一次保存 spec，目录应自动创建。"""
     r = client.post("/api/spec/brand-new", json={"content": "# 新角色"})
     assert r.status_code == 200
-    p = Path.cwd() / "characters" / "brand-new" / "spec.md"
+    p = runtime.parent / "characters" / "brand-new" / "spec.md"
     assert p.exists()
 
 
@@ -76,20 +75,20 @@ def test_get_characters_lists_nested_dirs(client):
     assert by_id["shadow"]["name"] == "暗影刺客女"
 
 
-def test_get_characters_ignores_top_level_md_files(client, runtime, tmp_path):
+def test_get_characters_ignores_top_level_md_files(client, runtime):
     """旧扁平 characters/foo.md 不应被列入（已迁移后只识别 dir/spec.md）。"""
-    stray = tmp_path / "characters" / "leftover.md"
+    stray = runtime.parent / "characters" / "leftover.md"
     stray.write_text("# 残留旧文件")
     r = client.get("/api/characters")
     ids = [c["id"] for c in r.json()]
     assert "leftover" not in ids, f"stray md leaked into listing: {ids}"
 
 
-def test_rename_character_writes_into_nested_spec(client):
+def test_rename_character_writes_into_nested_spec(client, runtime):
     """POST /api/characters/<id>/rename 改 characters/<id>/spec.md 第一行。"""
     r = client.post("/api/characters/shadow/rename", json={"name": "暗影"})
     assert r.status_code == 200, r.json()
-    p = Path.cwd() / "characters" / "shadow" / "spec.md"
+    p = runtime.parent / "characters" / "shadow" / "spec.md"
     text = p.read_text(encoding="utf-8")
     assert text.startswith("# 暗影")
     assert "年龄: 24" in text
@@ -107,7 +106,7 @@ def test_gallery_data_flow_via_api(client, runtime):
         "job_id": "j1", "character_id": "shadow", "prompt": "p",
         "submitted_at": "2026-05-19T10:00:00Z", "model": "gpt_image_2",
         "params": {}, "seed": None,
-        "output_paths": [str(Path.cwd() / "characters" / "shadow" / "portrait" / "v1.png")],
+        "output_paths": [str(runtime.parent / "characters" / "shadow" / "portrait" / "v1.png")],
         "status": "done", "error": None,
     }))
     r1 = client.get("/api/characters")
