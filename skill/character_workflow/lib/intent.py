@@ -76,9 +76,13 @@ def compute_recommend_action(
     reason 是人类可读字符串，供 SKILL.md 在调用 AskUserQuestion / 出图卡片
     时附在 turn 决策日志里。
     """
-    # 1. stage A/B/C/E —— 还没建好前置或 active 未归属项目，问就是了
-    if stage in ("A", "B", "C", "E"):
+    # 1. stage A/B/C —— 还没建好前置，问就是了
+    if stage in ("A", "B", "C"):
         return "ask", f"stage {stage}: 前置未齐，需要画师补全"
+
+    # 1.5 stage E —— active 完整但未归属，问画师怎么归属
+    if stage == "E":
+        return "ask", "stage E: 角色未归属任何项目，需要画师选项目或新建"
 
     # 2. switch 信号优先 —— 切角色不能再读旧 spec
     target = _detect_switch(message or "", active_id)

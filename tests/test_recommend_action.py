@@ -220,3 +220,18 @@ def test_turn_start_stage_d_age_calc(env):
     assert result["stage"] == "D"
     assert isinstance(result["active_age_minutes"], int)
     assert 9 <= result["active_age_minutes"] <= 11
+
+
+def test_stage_e_returns_ask_with_未归属_reason():
+    from skill.character_workflow.lib.intent import compute_recommend_action
+    action, reason = compute_recommend_action(
+        stage="E",
+        message="出图",
+        drafts=[],
+        active_age_minutes=5,
+        last_job_status="done",
+        active_id="orphan-char",
+    )
+    assert action == "ask"
+    assert "未归属" in reason
+    assert "前置未齐" not in reason
