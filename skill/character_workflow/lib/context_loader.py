@@ -104,3 +104,93 @@ def load_character_context(character_id: str, kind: str) -> CharacterContext:
         spec=load_spec(character_id),
         character_id=character_id,
     )
+
+
+# ---------------------------------------------------------------------------
+# 三层 lessons + 项目级 worldview（Task 7 新增）
+# ---------------------------------------------------------------------------
+
+def _global_memory_path() -> Path:
+    return Path(os.environ.get("HOME", "~")).expanduser() / ".claude" / "MEMORY.md"
+
+
+def _workspace_memory_path() -> Path:
+    return _project_root() / "MEMORY.md"
+
+
+def _project_memory_path(slug: str) -> Path:
+    return _project_root() / "projects" / slug / "MEMORY.md"
+
+
+def _project_worldview_path(slug: str) -> Path:
+    return _project_root() / "projects" / slug / "worldview.md"
+
+
+_KIND_HEADERS = {
+    "portrait": "Portrait",
+    "promo": "Promo",
+    "turnaround": "Turnaround",
+}
+
+
+def _extract_kind_section(text: str, kind: str, depth: int) -> str:
+    """从 MEMORY.md 文本里抽出指定 kind 的 section 内容。
+
+    depth = 3 时找 `### {Kind}`（工作区 / 项目层）
+    depth = 4 时找 `#### {Kind}`（全局层，在 ## Skills Memory > ### character-workflow 下）
+    遇到同级或更高级别 header 时停止 capture；深度更深的 header 不停。
+    """
+    if not text:
+        return ""
+    if kind not in _KIND_HEADERS:
+        raise ValueError(f"unknown lessons kind: {kind!r}")
+    header = "#" * depth + " " + _KIND_HEADERS[kind]
+    lines = text.splitlines()
+    out: list[str] = []
+    capture = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped == header:
+            capture = True
+            continue
+        if capture and stripped.startswith("#"):
+            level = len(stripped) - len(stripped.lstrip("#"))
+            if level <= depth:
+                break
+        if capture:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
+def load_lessons_global(kind: str) -> str:
+    if kind not in VALID_KINDS:
+        raise ValueError(f"unknown lessons kind: {kind!r}")
+    text = _read_text(_global_memory_path())
+    return _extract_kind_section(text, kind, depth=4)
+
+
+def load_lessons_workspace(kind: str) -> str:
+    if kind not in VALID_KINDS:
+        raise ValueError(f"unknown lessons kind: {kind!r}")
+    text = _read_text(_workspace_memory_path())
+    return _extract_kind_section(text, kind, depth=3)
+
+
+def load_lessons_project(slug: str | None, kind: str) -> str:
+    if kind not in VALID_KINDS:
+        raise ValueError(f"unknown lessons kind: {kind!r}")
+    if not slug:
+        return ""
+    path = _project_memory_path(slug)
+    if not path.exists():
+        return ""
+    return _extract_kind_section(_read_text(path), kind, depth=3)
+
+
+def load_project_worldview(slug: str | None) -> str:
+    if not slug:
+        return ""
+    path = _project_worldview_path(slug)
+    if not path.exists():
+        return ""
+    return _read_text(path)
