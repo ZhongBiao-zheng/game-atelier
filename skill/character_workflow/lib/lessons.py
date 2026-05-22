@@ -16,6 +16,7 @@ scope:
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 
@@ -68,7 +69,7 @@ def _ensure_section(path: Path, headers: list[str]) -> None:
         path.write_text("# MEMORY\n\n", encoding="utf-8")
     text = path.read_text(encoding="utf-8")
     for header in headers:
-        if header not in text:
+        if not re.search(rf'^{re.escape(header)}\s*$', text, re.MULTILINE):
             text = text.rstrip() + f"\n\n{header}\n"
     path.write_text(text, encoding="utf-8")
 
@@ -110,7 +111,7 @@ def append_memory(
     scope: str = "project",
     project_slug: str | None = None,
 ) -> Path:
-    """原子追加一条经验到对应 scope 的 MEMORY.md 指定 kind section。
+    """追加一条经验到对应 scope 的 MEMORY.md 指定 kind section。
 
     line 必须单行,< 4000 字节,符合 PIPE_BUF 单行原子写入边界。
     """
