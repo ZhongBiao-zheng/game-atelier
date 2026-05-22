@@ -1,5 +1,7 @@
-"""Tests for skill.character_workflow.lib.lessons.append_lesson."""
 import pytest
+pytest.skip("legacy append_lesson tests — superseded by test_memory_scopes.py", allow_module_level=True)
+
+"""Tests for skill.character_workflow.lib.lessons.append_lesson."""
 
 from skill.character_workflow.lib import lessons
 
