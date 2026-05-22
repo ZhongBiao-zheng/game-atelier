@@ -1,6 +1,7 @@
 from pathlib import Path
-import os
+
 import pytest
+
 from character_workflow.lib import data_root
 
 
