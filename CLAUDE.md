@@ -1,5 +1,22 @@
 # CLAUDE.md
 
+## ⚠️ 启动必读 Memory 三层
+
+每次进入本仓库的对话, 你必须先 Read 以下文件 (按顺序), 把内容作为本轮上下文:
+
+1. `~/.claude/MEMORY.md` — 全局跨工作区经验
+2. `MEMORY.md` (仓库根) — 本工作区跨项目通用经验
+3. 如果对话涉及具体角色:
+   - 从 `.runtime/projects.json::assignments` 解析角色所属 project_id
+   - 从 `.runtime/projects.json::projects[].slug` 找到 slug
+   - Read `projects/<slug>/MEMORY.md` + `projects/<slug>/worldview.md`
+
+不读 MEMORY 就开始写 prompt / 出图 / 改 spec / 改 Skill 视为违规。
+
+走 /character-workflow 等 Skill 命令时, Skill 内部已自动加载, 无需重复 Read。
+
+---
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this project is
