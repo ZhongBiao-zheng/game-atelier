@@ -9,6 +9,7 @@ dependencies = [
   "pydantic>=2.9",
   "python-multipart>=0.0.9",
   "requests>=2.32",
+  "pypinyin>=0.53",
 ]
 
 [dependency-groups]
