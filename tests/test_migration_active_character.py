@@ -25,6 +25,10 @@ def runtime(tmp_path, monkeypatch):
     (runtime / "active-character.json").write_text(json.dumps({
         "active_id": "holy", "updated_at": "2026-05-19T10:00:00Z",
     }), encoding="utf-8")
+    (runtime / "projects.json").write_text(json.dumps({
+        "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+        "assignments": {"holy": "p-1"},
+    }), encoding="utf-8")
     monkeypatch.setenv("RUNTIME_DIR", str(runtime))
     monkeypatch.chdir(tmp_path)
     return tmp_path

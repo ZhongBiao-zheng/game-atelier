@@ -70,6 +70,12 @@ def test_stage_d_active_ok(project):
     (project / ".runtime" / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
     )
+    (project / ".runtime" / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
+    )
     from skill.character_workflow.lib.turn_start import detect_stage
     stage, _ = detect_stage()
     assert stage == "D"
@@ -226,6 +232,12 @@ def test_turn_start_stage_d_default_new(project):
     (runtime / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
     )
+    (runtime / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
+    )
     from skill.character_workflow.lib.turn_start import turn_start
     r = turn_start(kind="portrait", message=None)
     assert r["stage"] == "D"
@@ -245,6 +257,12 @@ def test_turn_start_stage_d_with_drafts(project):
     (runtime / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
     )
+    (runtime / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
+    )
     draft_dir = runtime / "draft"
     draft_dir.mkdir()
     (draft_dir / "holy-2026.md").write_text("color: more golden\n")
@@ -263,6 +281,12 @@ def test_turn_start_stage_d_conflict(project):
     runtime.mkdir()
     (runtime / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
+    )
+    (runtime / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
     )
     draft_dir = runtime / "draft"
     draft_dir.mkdir()
@@ -297,9 +321,16 @@ def test_cli_turn_start_with_message(project, capsys):
     chars = project / "characters"
     (chars / "holy").mkdir(parents=True)
     (chars / "holy" / "spec.md").write_text("# 圣灵\n")
-    (project / ".runtime").mkdir()
-    (project / ".runtime" / "active-character.json").write_text(
+    runtime = project / ".runtime"
+    runtime.mkdir()
+    (runtime / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
+    )
+    (runtime / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
     )
     from skill.character_workflow.__main__ import main
     rc = main(["turn-start", "--message", "新建一个光辉骑士"])
@@ -314,9 +345,16 @@ def test_cli_turn_start_no_message_defaults_to_new(project, capsys):
     chars = project / "characters"
     (chars / "holy").mkdir(parents=True)
     (chars / "holy" / "spec.md").write_text("# 圣灵\n")
-    (project / ".runtime").mkdir()
-    (project / ".runtime" / "active-character.json").write_text(
+    runtime = project / ".runtime"
+    runtime.mkdir()
+    (runtime / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
+    )
+    (runtime / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
     )
     from skill.character_workflow.__main__ import main
     rc = main(["turn-start"])

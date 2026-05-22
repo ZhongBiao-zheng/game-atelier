@@ -34,7 +34,7 @@ def _characters_dir() -> Path:
 
 
 def detect_stage() -> tuple[str, str]:
-    """Return (stage, human-readable reason). Stage values: A/B/C/D."""
+    """Return (stage, human-readable reason). Stage values: A/B/C/D/E."""
     chars = _characters_dir()
     if not chars.exists():
         return "A", "characters/ 目录不存在"
@@ -61,7 +61,13 @@ def detect_stage() -> tuple[str, str]:
     if not (char_dir / "spec.md").exists():
         return "C", f"{active_id}/spec.md 不存在"
 
-    return "D", "active 完整"
+    # Stage E: active 完整但 assignments 里缺失
+    from skill.character_workflow.lib.projects import read_projects
+    pf = read_projects()
+    if active_id not in pf.assignments:
+        return "E", f"active_id={active_id!r} 未归属任何项目"
+
+    return "D", "active 完整且已归属"
 
 
 def list_recent_chars(limit: int = 10) -> list[dict]:
@@ -184,23 +190,43 @@ def _last_job_status(active_id: str | None) -> str | None:
 
 
 def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
-    """v4 编排器：file system 探 stage + 读 active + 推 intent + 拉上下文。
+    """v5 编排器：file system 探 stage + 解析项目 + 推 intent + 拉三层上下文。
 
     返回 dict（JSON 序列化用）；调用方需要时可用 TurnStartResult.model_validate 校验。
     """
     from skill.character_workflow.lib.active_character import read_active
-    from skill.character_workflow.lib.context_loader import load_lessons, load_worldview
+    from skill.character_workflow.lib.context_loader import (
+        load_lessons_global,
+        load_lessons_project,
+        load_lessons_workspace,
+        load_project_worldview,
+        load_worldview,
+    )
     from skill.character_workflow.lib.draft_processor import process_drafts
     from skill.character_workflow.lib.intent import compute_recommend_action
+    from skill.character_workflow.lib.projects import read_projects
 
     stage, reason = detect_stage()
-    active = read_active() if stage in ("C", "D") else None
+    active = read_active() if stage in ("C", "D", "E") else None
     active_id = active.active_id if active else None
     active_updated_at = active.updated_at if active else ""
 
+    # 解析项目(只在 stage D 有归属)
+    pf = read_projects()
+    project_id: str | None = None
+    project_slug: str | None = None
+    project_name: str | None = None
+    if stage == "D" and active_id:
+        project_id = pf.assignments.get(active_id)
+        if project_id:
+            proj = next((p for p in pf.projects if p.id == project_id), None)
+            if proj:
+                project_slug = proj.slug
+                project_name = proj.name
+
     drafts = process_drafts() if stage == "D" else []
-    spec = _read_active_spec(active_id) if stage == "D" else None
-    recent = list_recent_chars() if stage in ("C", "D") else []
+    spec = _read_active_spec(active_id) if stage in ("D", "E") else None
+    recent = list_recent_chars() if stage in ("C", "D", "E") else []
 
     if stage == "D":
         intent, signal, conflict = infer_intent(message, drafts, active_id)
@@ -234,7 +260,13 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         "active_id": active_id,
         "active_updated_at": active_updated_at,
         "spec": spec,
-        "worldview": load_worldview(),
-        "lessons": load_lessons(kind),
+        "project_id": project_id,
+        "project_slug": project_slug,
+        "project_name": project_name,
+        "worldview_workspace": load_worldview(),
+        "worldview_project": load_project_worldview(project_slug),
+        "lessons_global": load_lessons_global(kind),
+        "lessons_workspace": load_lessons_workspace(kind),
+        "lessons_project": load_lessons_project(project_slug, kind),
         "lessons_kind": kind,
     }

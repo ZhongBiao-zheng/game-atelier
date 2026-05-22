@@ -120,12 +120,15 @@ class CharacterProjectAssign(BaseModel):
 
 
 class TurnStage(str, Enum):
-    # turn-start v4：file system 探测结果
-    # A = characters/ 不存在；B = 空 characters/；C = active 缺失/失效；D = 正常回流。
+    # turn-start v4/v5：file system 探测结果
+    # A = characters/ 不存在；B = 空 characters/；C = active 缺失/失效
+    # D = 正常回流（active 完整且已归属项目）
+    # E = active 完整但未归属任何项目（Stage E 兜底）
     A = "A"
     B = "B"
     C = "C"
     D = "D"
+    E = "E"
 
 
 class IntentKind(str, Enum):
@@ -154,6 +157,7 @@ class TurnStartResult(BaseModel):
     # v4.0.0 CLI 输出契约。Skill 端按 stage 分支。
     # v4.1.0：新增 recommend_action / recommend_reason / active_age_minutes
     # —— SKILL.md 按 recommend_action 分叉，intent 字段保留 debug 用。
+    # v5.0.0：新增 Stage E + 三层 lessons/worldview 字段 + project_{id,slug,name}
     model_config = ConfigDict(extra="forbid")
     stage: TurnStage
     stage_reason: str
@@ -168,6 +172,12 @@ class TurnStartResult(BaseModel):
     active_id: str | None
     active_updated_at: str
     spec: str | None
-    worldview: str
-    lessons: str
+    project_id: str | None
+    project_slug: str | None
+    project_name: str | None
+    worldview_workspace: str
+    worldview_project: str
+    lessons_global: str
+    lessons_workspace: str
+    lessons_project: str
     lessons_kind: str

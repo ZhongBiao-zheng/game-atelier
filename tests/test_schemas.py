@@ -43,6 +43,7 @@ def test_turn_stage_enum_values():
     assert TurnStage.B.value == "B"
     assert TurnStage.C.value == "C"
     assert TurnStage.D.value == "D"
+    assert TurnStage.E.value == "E"
 
 
 def test_intent_kind_enum_values():
@@ -71,8 +72,14 @@ def test_turn_start_result_minimal():
         active_id=None,
         active_updated_at="",
         spec=None,
-        worldview="",
-        lessons="",
+        project_id=None,
+        project_slug=None,
+        project_name=None,
+        worldview_workspace="",
+        worldview_project="",
+        lessons_global="",
+        lessons_workspace="",
+        lessons_project="",
         lessons_kind="portrait",
     )
     assert r.stage == TurnStage.A
@@ -86,7 +93,7 @@ def test_turn_start_result_full_stage_d():
     )
     r = TurnStartResult(
         stage=TurnStage.D,
-        stage_reason="active 存在",
+        stage_reason="active 完整且已归属",
         intent=IntentKind.REVISE,
         intent_signal="drafts_present",
         intent_conflict=False,
@@ -98,8 +105,14 @@ def test_turn_start_result_full_stage_d():
         active_id="holy",
         active_updated_at="2026-05-19T08:00:00+00:00",
         spec="# 圣灵祭祀\n",
-        worldview="光明大陆",
-        lessons="- 2026-05-19 holy",
+        project_id="p-1",
+        project_slug="test-proj",
+        project_name="Test",
+        worldview_workspace="光明大陆",
+        worldview_project="",
+        lessons_global="",
+        lessons_workspace="- 2026-05-19 holy",
+        lessons_project="",
         lessons_kind="portrait",
     )
     assert r.intent == IntentKind.REVISE

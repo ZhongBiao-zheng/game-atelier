@@ -207,6 +207,13 @@ def test_turn_start_stage_d_age_calc(env):
         json.dumps({"active_id": "holy", "updated_at": past.isoformat()}),
         encoding="utf-8",
     )
+    (env / ".runtime" / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        }),
+        encoding="utf-8",
+    )
 
     from skill.character_workflow.lib.turn_start import turn_start
     result = turn_start("portrait", message=None)
