@@ -6,31 +6,28 @@
 - infer_intent(message, drafts, active_id) → (intent, signal, conflict)：stage D 意图推断
 - turn_start(kind, message) → dict：编排器，组装 v4 JSON
 
-文件路径走 PROJECT_ROOT / RUNTIME_DIR / CHARACTERS_DIR 三个环境变量，方便测试 monkeypatch。
+文件路径全部走 data_root 抽象（CHARACTER_WORKFLOW_DATA_ROOT 环境变量驱动），方便测试 monkeypatch。
 """
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+
+from character_workflow.lib import data_root
 
 # 设计稿 §4.4 关键词清单。本轮写死，后续扩展时再抽到 YAML。
 _NEW_KEYWORDS = ("新建", "新角色", "另一个角色")
 _SLASH_CMD_RE = re.compile(r"/character-workflow\s+([\w\-]+)")
 
 
-def _project_root() -> Path:
-    return Path(os.environ.get("PROJECT_ROOT", Path.cwd()))
-
-
 def _runtime_dir() -> Path:
-    return Path(os.environ.get("RUNTIME_DIR", ".runtime"))
+    return data_root.runtime_dir()
 
 
 def _characters_dir() -> Path:
-    return Path(os.environ.get("CHARACTERS_DIR", "characters"))
+    return data_root.characters_dir()
 
 
 def detect_stage() -> tuple[str, str]:

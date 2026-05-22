@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from character_workflow.lib import data_root
 from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
 
 
@@ -14,7 +14,7 @@ _UNSET = object()
 
 
 def _runtime_dir() -> Path:
-    return Path(os.environ.get("RUNTIME_DIR", ".runtime"))
+    return data_root.runtime_dir()
 
 
 def _path(job_id: str) -> Path:
@@ -23,7 +23,7 @@ def _path(job_id: str) -> Path:
 
 def job_output_dir(character_id: str, kind: JobKind, project_root: Path | None = None) -> Path:
     """按 kind 决定 lovart 输出落到 characters/<id>/<portrait|promo|turnaround>/。"""
-    root = project_root if project_root is not None else Path.cwd()
+    root = project_root if project_root is not None else data_root.resolve_data_root()
     return root / "characters" / character_id / kind.value
 
 

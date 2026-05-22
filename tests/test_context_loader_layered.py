@@ -6,7 +6,7 @@ from character_workflow.lib import context_loader
 
 @pytest.fixture
 def memory_tree(tmp_path, monkeypatch):
-    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
     (tmp_path / "home" / ".claude").mkdir(parents=True)

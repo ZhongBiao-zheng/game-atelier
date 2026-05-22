@@ -15,9 +15,10 @@ scope:
 """
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
+
+from character_workflow.lib import data_root
 
 
 VALID_KINDS = ("portrait", "promo", "turnaround")
@@ -26,20 +27,18 @@ VALID_SCOPES = ("global", "workspace", "project")
 _KIND_TITLE = {"portrait": "Portrait", "promo": "Promo", "turnaround": "Turnaround"}
 
 
-def _project_root() -> Path:
-    return Path(os.environ.get("PROJECT_ROOT", Path.cwd()))
-
-
 def _global_memory_path() -> Path:
-    return Path(os.environ.get("HOME", "~")).expanduser() / ".claude" / "MEMORY.md"
+    from pathlib import Path as _Path
+    import os as _os
+    return _Path(_os.environ.get("HOME", "~")).expanduser() / ".claude" / "MEMORY.md"
 
 
 def _workspace_memory_path() -> Path:
-    return _project_root() / "MEMORY.md"
+    return data_root.workspace_memory()
 
 
 def _project_memory_path(slug: str) -> Path:
-    return _project_root() / "projects" / slug / "MEMORY.md"
+    return data_root.projects_dir() / slug / "MEMORY.md"
 
 
 def _resolve_memory_path(scope: str, project_slug: str | None) -> Path:

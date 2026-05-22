@@ -12,10 +12,11 @@ Token 预算告警（详 §11.6）写在加载函数里，画师能直接在 ser
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 from typing import TypedDict
+
+from character_workflow.lib import data_root
 
 
 WORLDVIEW_SOFT_LIMIT_CHARS = 2000
@@ -29,10 +30,6 @@ class CharacterContext(TypedDict):
     lessons: str
     spec: str
     character_id: str
-
-
-def _project_root() -> Path:
-    return Path(os.environ.get("PROJECT_ROOT", Path.cwd()))
 
 
 def _skill_root() -> Path:
@@ -53,7 +50,7 @@ def _read_text(p: Path) -> str:
 
 
 def load_worldview() -> str:
-    p = _project_root() / "worldview.md"
+    p = data_root.workspace_worldview()
     text = _read_text(p)
     if not text:
         print("[context_loader] worldview.md missing or empty — skill will run with no project background", file=sys.stderr)
@@ -90,7 +87,7 @@ def load_lessons(kind: str) -> str:
 def load_spec(character_id: str) -> str:
     if not character_id:
         return ""
-    p = _project_root() / "characters" / character_id / "spec.md"
+    p = data_root.characters_dir() / character_id / "spec.md"
     if not p.exists():
         raise FileNotFoundError(f"spec not found: {p}")
     return _read_text(p)
@@ -111,19 +108,20 @@ def load_character_context(character_id: str, kind: str) -> CharacterContext:
 # ---------------------------------------------------------------------------
 
 def _global_memory_path() -> Path:
-    return Path(os.environ.get("HOME", "~")).expanduser() / ".claude" / "MEMORY.md"
+    import os as _os
+    return Path(_os.environ.get("HOME", "~")).expanduser() / ".claude" / "MEMORY.md"
 
 
 def _workspace_memory_path() -> Path:
-    return _project_root() / "MEMORY.md"
+    return data_root.workspace_memory()
 
 
 def _project_memory_path(slug: str) -> Path:
-    return _project_root() / "projects" / slug / "MEMORY.md"
+    return data_root.projects_dir() / slug / "MEMORY.md"
 
 
 def _project_worldview_path(slug: str) -> Path:
-    return _project_root() / "projects" / slug / "worldview.md"
+    return data_root.projects_dir() / slug / "worldview.md"
 
 
 _KIND_HEADERS = {

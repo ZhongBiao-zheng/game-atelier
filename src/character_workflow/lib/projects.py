@@ -12,21 +12,21 @@ assignments 里没有的角色 → 未归属（在 UI 上落到"未分类"分组
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from character_workflow.lib import data_root
 from character_workflow.lib import slug as slug_util
 from character_workflow.lib.schemas import Project, ProjectsFile
 
 
 def _runtime_dir() -> Path:
-    return Path(os.environ.get("RUNTIME_DIR", ".runtime"))
+    return data_root.runtime_dir()
 
 
 def _projects_root() -> Path:
-    return Path(os.environ.get("PROJECT_ROOT", Path.cwd())) / "projects"
+    return data_root.projects_dir()
 
 
 def _path() -> Path:

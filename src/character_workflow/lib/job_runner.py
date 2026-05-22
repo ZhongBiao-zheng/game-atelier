@@ -1,13 +1,13 @@
 """Job runner — turns PENDING_CONFIRM JSON jobs into durable image assets."""
 from __future__ import annotations
 
-import os
 import shutil
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from character_workflow.lib import data_root
 from character_workflow.lib import lovart_caller
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
@@ -25,7 +25,7 @@ class JobRunnerError(RuntimeError):
 
 
 def _project_root() -> Path:
-    return Path(os.environ.get("PROJECT_ROOT", Path.cwd())).resolve()
+    return data_root.resolve_data_root()
 
 
 def _params(job: Job) -> dict[str, Any]:

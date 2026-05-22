@@ -26,9 +26,9 @@ def _make_env(tmp_path, monkeypatch_env=None):
     import os
     from pathlib import Path
     env = os.environ.copy()
+    env["CHARACTER_WORKFLOW_DATA_ROOT"] = str(tmp_path)
+    # active_character.py still reads RUNTIME_DIR until it is migrated
     env["RUNTIME_DIR"] = str(tmp_path / ".runtime")
-    env["CHARACTERS_DIR"] = str(tmp_path / "characters")
-    env["PROJECT_ROOT"] = str(tmp_path)
     # Ensure src/ is on PYTHONPATH so subprocesses can find character_workflow
     src_dir = str(Path(__file__).resolve().parent.parent / "src")
     env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{env.get('PYTHONPATH', '')}"

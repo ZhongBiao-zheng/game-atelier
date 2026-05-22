@@ -6,7 +6,7 @@ import pytest
 
 @pytest.fixture
 def cli_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("RUNTIME_DIR", str(tmp_path / ".runtime"))
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".runtime").mkdir()

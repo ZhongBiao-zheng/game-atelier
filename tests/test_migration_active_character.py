@@ -29,18 +29,20 @@ def runtime(tmp_path, monkeypatch):
         "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
         "assignments": {"holy": "p-1"},
     }), encoding="utf-8")
-    monkeypatch.setenv("RUNTIME_DIR", str(runtime))
+    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
 
-def _run_cli(cwd, env_runtime: str) -> dict:
+def _run_cli(data_root: str) -> dict:
     env = os.environ.copy()
-    env["RUNTIME_DIR"] = env_runtime
+    env["CHARACTER_WORKFLOW_DATA_ROOT"] = data_root
+    # active_character.py still reads RUNTIME_DIR until it is migrated
+    env["RUNTIME_DIR"] = str(Path(data_root) / ".runtime")
     env["PYTHONPATH"] = f"{PROJECT_ROOT / 'src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
     out = subprocess.run(
         [sys.executable, "-m", "character_workflow", "turn-start"],
-        cwd=cwd, capture_output=True, text=True, env=env,
+        capture_output=True, text=True, env=env,
     )
     assert out.returncode == 0, f"CLI failed: {out.stderr}"
     return json.loads(out.stdout)
@@ -48,7 +50,7 @@ def _run_cli(cwd, env_runtime: str) -> dict:
 
 def test_turn_start_reads_spec_from_nested_dir(runtime):
     """turn-start 必须从 characters/<id>/spec.md 读到内容。"""
-    result = _run_cli(runtime, str(runtime / ".runtime"))
+    result = _run_cli(str(runtime))
     assert result["active_id"] == "holy"
     assert result["spec"] is not None, "spec should be loaded from <id>/spec.md"
     assert "圣灵祭祀" in result["spec"]
@@ -60,7 +62,7 @@ def test_turn_start_returns_none_spec_when_dir_missing(runtime):
     (runtime / ".runtime" / "active-character.json").write_text(json.dumps({
         "active_id": "ghost", "updated_at": "2026-05-19T10:00:00Z",
     }), encoding="utf-8")
-    result = _run_cli(runtime, str(runtime / ".runtime"))
+    result = _run_cli(str(runtime))
     assert result["active_id"] == "ghost"
     assert result["spec"] is None
 
@@ -68,6 +70,6 @@ def test_turn_start_returns_none_spec_when_dir_missing(runtime):
 def test_turn_start_drafts_still_work(runtime):
     """迁移不应破坏 draft 处理。"""
     (runtime / ".runtime" / "draft" / "20260519-100000.md").write_text("反馈一", encoding="utf-8")
-    result = _run_cli(runtime, str(runtime / ".runtime"))
+    result = _run_cli(str(runtime))
     assert len(result["drafts"]) == 1
     assert "反馈一" in result["drafts"][0]["content"]

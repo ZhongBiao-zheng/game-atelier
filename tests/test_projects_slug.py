@@ -6,8 +6,7 @@ from character_workflow.lib import projects
 
 @pytest.fixture
 def isolated_project(tmp_path, monkeypatch):
-    monkeypatch.setenv("RUNTIME_DIR", str(tmp_path / ".runtime"))
-    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
