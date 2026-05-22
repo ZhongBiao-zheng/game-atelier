@@ -41,40 +41,51 @@ uv run python -m skill.character_workflow turn-start --message "<画师本轮原
 # 出图 promo/turnaround 时显式加 --kind 切换对应 lessons
 ```
 
-`--message` 要带上，CLI 靠它推断 `recommend_action` 决策。返回 JSON 关键字段：
+`--message` 要带上，CLI 靠它推断 `recommend_action` 决策。返回 JSON 关键字段（v5）：
 
 ```json
 {
-  "stage":            "A" | "B" | "C" | "D",
+  "stage":            "A" | "B" | "C" | "D" | "E",
   "stage_reason":     "...",
   "recommend_action": "ask" | "render_card" | "switch" | "noop",
   "recommend_reason": "...",
-  "active_age_minutes": 1234,
+  "active_id":        "holy",
+  "active_updated_at": "...",
+  "active_age_minutes": 5,
   "intent":           "new" | "revise" | "create" | "switch" | null,
   "intent_signal":    "...",
   "intent_conflict":  false,
   "recent_chars":     [{"id": "holy", "tagline": "治愈系祭祀"}],
   "drafts":           [...],
-  "active_id":        "holy",
   "spec":             "<markdown>" | null,
-  "worldview":        "...",
-  "lessons":          "...",
+  "project_id":       "p-..." | null,
+  "project_slug":     "pokemon-style-elf-game" | null,
+  "project_name":     "宝可梦风格-精灵游戏" | null,
+  "worldview_workspace": "...",
+  "worldview_project":   "...",
+  "lessons_global":      "...",
+  "lessons_workspace":   "...",
+  "lessons_project":     "...",
   "lessons_kind":     "portrait"
 }
 ```
+
+**拼装规则（供 prompt_builder 用）**：
+- `worldview` = `worldview_project or worldview_workspace`（项目级覆盖工作区）
+- `lessons` = `lessons_global + "\n" + lessons_workspace + "\n" + lessons_project`（三层字面拼接，不去重）
 
 **只看 `recommend_action`，按它分叉**（`intent` 字段保留 debug 用，不再用于决策）：
 
 | recommend_action | Skill 行为 |
 |---|---|
-| `ask` | 用 AskUserQuestion 让画师选 —— 具体问什么按 `stage` 分（A/B/C 走前置补全，D 走 4 选项） |
+| `ask` | 用 AskUserQuestion 让画师选 —— 具体问什么按 `stage` 分（A/B/C/E 走前置补全，D 走 4 选项） |
 | `render_card` | 终端现编 PENDING_CONFIRM 卡片 → `submit` CLI 落盘 → 等画师明示"出图/确认/OK" |
 | `switch` | `set-active <target>` + **重新调** turn-start |
 | `noop` | 退出 turn，不动 file system（预留，目前不会出现）|
 
 CLI 已经把"该 ask 还是该 render_card"算好了，Skill 端不必重复判断。判定不明确时 CLI 一律给 `ask`：宁可多问，"误问"成本只是画师多打一个数字，"误出图"成本是空跑 job + 占位卡片。
 
-把 `worldview` + `lessons` + `spec` 拼成对话前缀（建议走 `lib.prompt_builder.assemble_character_prompt`），它们就是这一轮的专家上下文。
+把拼装后的 `worldview` + `lessons` + `spec` 拼成对话前缀（建议走 `lib.prompt_builder.assemble_character_prompt`），它们就是这一轮的专家上下文。
 
 ### action = ask：按 `stage` 分叉问什么
 
@@ -108,6 +119,19 @@ CLI 已经把"该 ask 还是该 render_card"算好了，Skill 端不必重复判
 2. **改 spec** → 进 spec 补全对话
 3. **新建另一个角色** → 走 stage B 流程
 4. **跳过本轮** → 退出 turn
+
+#### Stage E —— `active_id` 完整但未归属任何项目
+
+`projects.json::assignments` 里没有 `active_id`。用 1 个 AskUserQuestion 列：
+
+1. 归到 `<最大项目名>`（N 个角色）
+2. 归到 `<次大项目名>`（M 个角色）
+3. 新开项目
+4. 跳过本轮（不归属、不出图）
+
+画师选 1/2 → `uv run python -m skill.character_workflow assign-character <active_id> --project <project_id>` → 重新 turn-start
+画师选 3 → 走 Stage A-like 子流程问"项目名 + 一句话世界观"，调 `create-project --name <name>` → `assign-character` → 重新 turn-start
+画师选 4 → 退出 turn
 
 ### action = render_card
 
@@ -228,12 +252,24 @@ Skill 主动问画师：
 画师答 Y / 给出一句话 → 调：
 
 ```bash
-uv run python -m skill.character_workflow append-lesson --kind portrait --line "- 2026-05-19 holy-spirit-priestess · 金白配色高识别度 · prompt 片段：\`兜帽低垂遮眼\`"
+uv run python -m skill.character_workflow append-memory \
+  --kind portrait \
+  --line "- 2026-05-21 holy-spirit-priestess · 金白配色高识别度 · prompt 片段：\`兜帽低垂遮眼\`" \
+  --scope project
 ```
+
+`--scope` 默认 project（写到 `projects/<slug>/MEMORY.md`），解析当前 active → assignments → slug。
+未归属时 CLI 返回码 2 + stderr 明确错误，需画师先走 Stage E 或显式 `--scope workspace`。
 
 画师明确授权 Skill 自行判断（例如"你自行判断哪些需要沉淀"、"我在测试 Skill 工作模式"）→ 不再追问，直接选 1–2 条能防止下次失败或提升出图质量的可复用经验追加。只沉淀规则，不写流水账。
 
 格式：`- YYYY-MM-DD <id> · <一句话> · prompt 片段：\`...\``。同 turn 多次出图每次都问；画师一次性说"全部不追加"则后续跳过。画师 cancel / 网络抖动 FAILED 不问。
+
+**画师明确授权 Skill 自行判断 scope 时的决策**：
+- 包含具体角色 id / 风格关键词 / 配色 / 类目术语 → `--scope project`
+- 通用工具行为 / prompt 协议 / runner 兜底 → `--scope workspace`
+- 跨工作区都成立的（画师明确说"这是通用规律"）→ `--scope global`
+- 默认 fallback：`--scope project`
 
 ## viewer-server 启停
 
