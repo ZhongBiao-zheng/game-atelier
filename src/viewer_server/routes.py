@@ -448,3 +448,39 @@ def post_config(payload: dict = Body(...)) -> dict:
     tmp.write_text(json.dumps({"image_storage_root": resolved}, indent=2))
     tmp.replace(cfg_path)
     return {"ok": True, "image_storage_root": resolved}
+
+
+class _DataRootPayload(BaseModel):
+    path: str
+
+
+def _bootstrap_script() -> Path:
+    return Path(__file__).resolve().parents[2] / "scripts" / "bootstrap.py"
+
+
+@router.get("/onboarding/status")
+def onboarding_status() -> dict:
+    """Proxies `bootstrap.py --check` so Web 不用知道状态机细节。"""
+    import subprocess
+    import sys
+    proc = subprocess.run(
+        [sys.executable, str(_bootstrap_script()), "--check"],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise HTTPException(500, f"bootstrap --check failed: {proc.stderr}")
+    return json.loads(proc.stdout)
+
+
+@router.post("/onboarding/data-root")
+def set_data_root(payload: _DataRootPayload) -> dict:
+    """Web 选完目录后落 global config，Skill 下次启动会从 global config 读。"""
+    import subprocess
+    import sys
+    proc = subprocess.run(
+        [sys.executable, str(_bootstrap_script()), "--init-data-root", payload.path],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        raise HTTPException(500, f"init-data-root failed: {proc.stderr}")
+    return json.loads(proc.stdout)
