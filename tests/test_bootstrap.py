@@ -149,3 +149,39 @@ def test_check_returns_ready_when_keys_present(tmp_path):
         assert out["status"] == "ready"
     else:
         assert out["status"] in ("ready", "needs_uv")
+
+
+def test_init_data_root_creates_skeleton(tmp_path):
+    target = tmp_path / "data"
+    cfg_home = tmp_path / "config"
+    result = run_bootstrap(
+        ["--init-data-root", str(target)],
+        env_overrides={
+            "XDG_CONFIG_HOME": str(cfg_home),
+            "APPDATA": str(cfg_home),
+            "CHARACTER_WORKFLOW_DATA_ROOT": "",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    for sub in (".config", ".runtime", "projects", "characters"):
+        assert (target / sub).is_dir(), f"missing {sub}"
+
+
+def test_init_data_root_writes_global_config(tmp_path):
+    target = tmp_path / "data"
+    cfg_home = tmp_path / "config"
+    result = run_bootstrap(
+        ["--init-data-root", str(target)],
+        env_overrides={
+            "XDG_CONFIG_HOME": str(cfg_home),
+            "APPDATA": str(cfg_home),
+            "CHARACTER_WORKFLOW_DATA_ROOT": "",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout)
+    assert out["data_root"] == str(target.resolve())
+    # The global config file is named "data-root" and lives somewhere under cfg_home
+    matches = list(cfg_home.rglob("data-root"))
+    assert len(matches) == 1, f"expected one data-root config file, got {matches}"
+    assert matches[0].read_text().strip() == str(target.resolve())

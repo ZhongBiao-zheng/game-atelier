@@ -141,14 +141,40 @@ def check() -> dict:
     }
 
 
+def init_data_root(target: Path) -> int:
+    """Create the data-root skeleton and write the global config pointer."""
+    resolved = target.expanduser().resolve()
+    for sub in (".config", ".runtime", "projects", "characters"):
+        (resolved / sub).mkdir(parents=True, exist_ok=True)
+
+    cfg = global_config_file()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(str(resolved) + "\n")
+
+    print(json.dumps({
+        "status": "ok",
+        "data_root": str(resolved),
+        "config_file": str(cfg),
+    }, ensure_ascii=False))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Bootstrap the character-workflow plugin.")
     parser.add_argument("--check", action="store_true", help="Report current bootstrap state.")
+    parser.add_argument(
+        "--init-data-root",
+        metavar="PATH",
+        help="Create data-root skeleton at PATH and write global config pointer.",
+    )
     args = parser.parse_args()
 
     if args.check:
         print(json.dumps(check(), ensure_ascii=False))
         return 0
+
+    if args.init_data_root:
+        return init_data_root(Path(args.init_data_root))
 
     parser.print_help()
     return 1
