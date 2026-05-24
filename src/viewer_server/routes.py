@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from character_workflow.lib import data_root
+from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
 from character_workflow.lib.jobs import (
     delete_failed_job, read_job, remove_image_from_job, update_job_status, write_job,
@@ -484,3 +484,73 @@ def set_data_root(payload: _DataRootPayload) -> dict:
     if proc.returncode != 0:
         raise HTTPException(500, f"init-data-root failed: {proc.stderr}")
     return json.loads(proc.stdout)
+
+
+class _KeyCreatePayload(BaseModel):
+    alias: str
+    provider: str
+    access_key: str
+    secret_key: str | None = None
+    capabilities: list[str] = []
+    models: list[str] = []
+    notes: str = ""
+    created_at: str | None = None
+
+
+class _KeyPatchPayload(BaseModel):
+    access_key: str | None = None
+    secret_key: str | None = None
+    capabilities: list[str] | None = None
+    models: list[str] | None = None
+    notes: str | None = None
+
+
+@router.get("/keys")
+def list_keys() -> dict:
+    db = keys.read_keys_db()
+    return {"keys": keys.keys_for_api(), "default_alias": db.default_alias}
+
+
+@router.post("/keys", status_code=201)
+def create_key(payload: _KeyCreatePayload) -> dict:
+    from datetime import datetime, timezone
+    try:
+        spec = keys.KeySpec(
+            alias=payload.alias, provider=payload.provider,
+            access_key=payload.access_key, secret_key=payload.secret_key,
+            capabilities=payload.capabilities, models=payload.models,
+            notes=payload.notes,
+            created_at=payload.created_at or datetime.now(timezone.utc).isoformat(),
+        )
+    except Exception as e:
+        raise HTTPException(422, str(e)) from e
+    try:
+        keys.add_key(spec)
+    except keys.DuplicateAliasError:
+        raise HTTPException(409, f"alias '{payload.alias}' already exists") from None
+    return {"alias": payload.alias}
+
+
+@router.patch("/keys/{alias}")
+def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
+    patch_data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    try:
+        keys.patch_key(alias, patch_data)
+    except keys.NoSuchAliasError:
+        raise HTTPException(404, f"alias '{alias}' not found") from None
+    return {"alias": alias}
+
+
+@router.delete("/keys/{alias}", status_code=204)
+def delete_key_endpoint(alias: str) -> None:
+    keys.delete_key(alias)
+    return None
+
+
+@router.post("/keys/{alias}/default")
+def set_default_alias_endpoint(alias: str) -> dict:
+    try:
+        keys.set_default_alias(alias)
+    except keys.NoSuchAliasError:
+        raise HTTPException(404, f"alias '{alias}' not found") from None
+    return {"default_alias": alias}
