@@ -39,7 +39,7 @@ def build_app() -> FastAPI:
     app = FastAPI(title="game-ui-ai-workflow viewer-server", lifespan=lifespan)
     app.include_router(router)
     app.include_router(sse_router)
-    static_dir = Path(__file__).parent / "static"
+    static_dir = Path(__file__).resolve().parents[2] / "web" / "dist"
     if static_dir.exists():
         app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="ui")
     return app

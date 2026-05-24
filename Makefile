@@ -17,7 +17,7 @@ test:
 
 clean:
 	rm -rf .runtime/server.pid .runtime/server.port
-	rm -rf src/viewer_server/static
+	rm -rf web/dist src/viewer_server/static
 
 # 把项目内 Skill 链接到 .claude/skills/，Claude Code 即可发现所有 /character-* 命令
 # 编辑 skills/*/SKILL.md 立即生效，无需复制部署
