@@ -5,7 +5,6 @@ test_migration_routes + test_migration_gallery 合并（后者改 Python API
 测试覆盖，因为 web 还没装 vitest jsdom 框架）。
 """
 import json
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient

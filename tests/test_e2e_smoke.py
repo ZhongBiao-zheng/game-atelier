@@ -5,7 +5,6 @@ import json
 import os
 import time
 from multiprocessing import Process
-from pathlib import Path
 
 import httpx
 import pytest

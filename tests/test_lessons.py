@@ -1,9 +1,12 @@
+"""Legacy append_lesson tests — superseded by test_memory_scopes.py."""
 import pytest
-pytest.skip("legacy append_lesson tests — superseded by test_memory_scopes.py", allow_module_level=True)
 
-"""Tests for skill.character_workflow.lib.lessons.append_lesson."""
+pytest.skip(
+    "legacy append_lesson tests — superseded by test_memory_scopes.py",
+    allow_module_level=True,
+)
 
-from character_workflow.lib import lessons
+from character_workflow.lib import lessons  # noqa: E402
 
 
 @pytest.fixture
