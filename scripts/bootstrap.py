@@ -207,7 +207,32 @@ def init_data_root(target: Path) -> int:
     return 0
 
 
+def run_in_venv(forward_args: list[str]) -> int:
+    """Forward `forward_args` to <data_root>/.venv/python. Use from SKILL.md so
+    installed-Plugin invocations don't depend on system python."""
+    data_root = resolve_data_root()
+    if data_root is None:
+        print(json.dumps({
+            "status": "error",
+            "error": "data_root not set — run bootstrap.py --init-data-root first",
+        }, ensure_ascii=False))
+        return 1
+    venv_py = _venv_python(data_root)
+    if not venv_py.exists():
+        print(json.dumps({
+            "status": "error",
+            "error": "venv not built — run bootstrap.py --ensure-venv",
+        }, ensure_ascii=False))
+        return 2
+    proc = subprocess.run([str(venv_py), *forward_args])
+    return proc.returncode
+
+
 def main() -> int:
+    # Handle --run before argparse so the remaining args pass through unparsed.
+    if len(sys.argv) >= 2 and sys.argv[1] == "--run":
+        return run_in_venv(sys.argv[2:])
+
     parser = argparse.ArgumentParser(description="Bootstrap the character-workflow plugin.")
     parser.add_argument("--check", action="store_true", help="Report current bootstrap state.")
     parser.add_argument(
@@ -219,6 +244,11 @@ def main() -> int:
         "--ensure-venv",
         action="store_true",
         help="Run `uv sync` into <data_root>/.venv and write venv-hash.",
+    )
+    parser.add_argument(
+        "--run",
+        action="store_true",
+        help="Forward remaining args to <data_root>/.venv/python (handled before argparse).",
     )
     args = parser.parse_args()
 

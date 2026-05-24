@@ -63,6 +63,20 @@ turn-start 返回 `available_keys` 和 `preferred_alias`：
 4. **`preferred_alias` 是 null** — 停下来告诉用户："当前 kind=X 没有可用 Key，去 Web 加一个"
 5. **永远不要在终端 / 文档 / log 里显示 access_key / secret_key** — 你看不到，也不该看到
 
+## 命令调用方式（installed Plugin vs dev mode）
+
+下面所有 `uv run python -m character_workflow ...` 命令在**仓库内 dev 模式**下用。
+
+**Installed Plugin 模式**（用户 `claude plugins install` 装到 `~/.claude/plugins/`）走 bootstrap 转发：
+
+```bash
+python ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m character_workflow <subcmd>
+```
+
+bootstrap.py 会读 data_root，把命令转发给 `<data_root>/.venv/python`。判断当前模式：
+- 仓库根有 `pyproject.toml` 且 `CHARACTER_WORKFLOW_DATA_ROOT=$(pwd)` → dev mode，用 uv 命令
+- 否则 → installed mode，用 bootstrap.py --run
+
 # Character Workflow
 
 ## 哲学锚

@@ -266,3 +266,52 @@ def test_init_data_root_writes_global_config(tmp_path):
     matches = list(cfg_home.rglob("data-root"))
     assert len(matches) == 1, f"expected one data-root config file, got {matches}"
     assert matches[0].read_text().strip() == str(target.resolve())
+
+
+def test_run_fails_when_no_data_root(tmp_path):
+    result = run_bootstrap(
+        ["--run", "-c", "print('hi')"],
+        env_overrides={
+            "XDG_CONFIG_HOME": str(tmp_path / "cfg"),
+            "APPDATA": str(tmp_path / "cfg"),
+            "CHARACTER_WORKFLOW_DATA_ROOT": "",
+        },
+    )
+    assert result.returncode != 0
+    assert "data_root" in result.stdout
+
+
+def test_run_fails_when_venv_missing(tmp_path):
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    (data_root / ".config").mkdir()
+    result = run_bootstrap(
+        ["--run", "-c", "print('hi')"],
+        env_overrides={"CHARACTER_WORKFLOW_DATA_ROOT": str(data_root)},
+    )
+    assert result.returncode != 0
+    assert "venv not built" in result.stdout
+
+
+def test_run_forwards_to_venv_python(tmp_path):
+    data_root = tmp_path / "data"
+    if sys.platform == "win32":
+        venv_py = data_root / ".venv" / "Scripts" / "python.exe"
+    else:
+        venv_py = data_root / ".venv" / "bin" / "python"
+    venv_py.parent.mkdir(parents=True)
+    if sys.platform == "win32":
+        import shutil as _sh
+        _sh.copy(sys.executable, venv_py)
+    else:
+        venv_py.write_text(f"#!{sys.executable}\n")
+        venv_py.chmod(0o755)
+        # Link to real interpreter via symlink for execution
+        venv_py.unlink()
+        venv_py.symlink_to(sys.executable)
+    result = run_bootstrap(
+        ["--run", "-c", "print('forwarded')"],
+        env_overrides={"CHARACTER_WORKFLOW_DATA_ROOT": str(data_root)},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "forwarded" in result.stdout
