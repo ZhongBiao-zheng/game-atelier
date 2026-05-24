@@ -1,69 +1,62 @@
-import { useEffect, useState } from 'react';
-import { LeftSidebar } from './components/LeftSidebar';
-import { CharacterGallery } from './components/CharacterGallery';
-import { SpecForm } from './components/SpecForm';
-import { ImageDetail } from './components/ImageDetail';
-import { FirstRunConfig } from './components/FirstRunConfig';
-import { useSSE } from './hooks/useSSE';
-import { cn } from '@/lib/utils';
-
-interface Config { image_storage_root: string }
+import { useCallback, useEffect, useState } from 'react';
+import { fetchOnboardingStatus, type OnboardingState } from './api/onboarding';
+import { DataRootPage } from './pages/onboarding/DataRoot';
+import { KeysPage } from './pages/settings/Keys';
+import { MainApp } from './MainApp';
 
 export function App() {
-  const [config, setConfig] = useState<Config | null>(null);
+  const [state, setState] = useState<OnboardingState | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch('/api/config').then(r => r.json()).then(setConfig);
+  const reload = useCallback(() => {
+    fetchOnboardingStatus()
+      .then(s => { setState(s); setError(null); })
+      .catch(e => setError(String(e)));
   }, []);
 
-  if (config === null) {
+  useEffect(() => { reload(); }, [reload]);
+
+  if (error) {
     return (
-      <div className="grid h-screen place-items-center bg-background text-muted-foreground">
-        <span className="font-[var(--font-display)] italic text-2xl">读取设置…</span>
+      <div className="grid h-screen place-items-center bg-background p-8 text-red-500">
+        {error}
       </div>
     );
   }
-  if (!config.image_storage_root) {
-    return <FirstRunConfig onSaved={root => setConfig({ image_storage_root: root })} />;
+  if (!state) {
+    return (
+      <div className="grid h-screen place-items-center bg-background text-muted-foreground">
+        <span className="font-[var(--font-display)] italic text-2xl">加载中…</span>
+      </div>
+    );
   }
-  return <ThreeColumnLayout />;
-}
 
-function ThreeColumnLayout() {
-  const [selected, setSelected] = useState<{ id: string; name: string } | null>(null);
-  const [detailJob, setDetailJob] = useState<{ path: string; jobId: string } | null>(null);
-  const sseSignal = useSSE();
-  const detailMode = detailJob !== null;
-  return (
-    <div className={cn(
-      'grid h-screen',
-      detailMode
-        ? 'grid-cols-[280px_360px_1fr]'
-        : 'grid-cols-[280px_1fr_380px]',
-    )}>
-      <LeftSidebar
-        sseSignal={sseSignal}
-        selectedId={selected?.id}
-        onSelect={(id, name) => setSelected({ id, name })}
-      />
-      <CharacterGallery
-        characterId={selected?.id ?? null}
-        characterName={selected?.name ?? null}
-        detailMode={detailMode}
-        onSelectImage={(path, jobId) => setDetailJob({ path, jobId })}
-        sseSignal={sseSignal}
-      />
-      {detailJob === null
-        ? <SpecForm
-            characterId={selected?.id ?? null}
-            characterName={selected?.name ?? null}
-            sseSignal={sseSignal}
-          />
-        : <ImageDetail
-            jobId={detailJob.jobId}
-            path={detailJob.path}
-            onBack={() => setDetailJob(null)}
-          />}
-    </div>
-  );
+  switch (state.status) {
+    case 'needs_data_root':
+      return <DataRootPage onComplete={reload} />;
+    case 'needs_first_key':
+    case 'needs_keys_repair':
+      return <KeysPage mode="onboarding" onComplete={reload} />;
+    case 'needs_uv':
+    case 'needs_venv':
+      return (
+        <div className="max-w-2xl mx-auto p-8 space-y-4">
+          <h2 className="text-xl font-medium">需要终端操作</h2>
+          <p className="text-stone-600">在终端按下面提示完成后再回到这里刷新：</p>
+          <pre className="bg-stone-100 p-4 text-sm whitespace-pre-wrap break-all rounded">
+            {state.next_action}
+          </pre>
+          <button
+            type="button"
+            onClick={reload}
+            className="px-4 py-2 bg-stone-900 text-white rounded"
+          >
+            重新检查
+          </button>
+        </div>
+      );
+    case 'ready':
+    default:
+      return <MainApp />;
+  }
 }
