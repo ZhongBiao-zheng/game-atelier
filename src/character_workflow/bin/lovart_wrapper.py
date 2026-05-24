@@ -90,7 +90,6 @@ def _patched_request(self, method, path, body=None, params=None, retries=10):
 
 
 def _patched_upload_file(self, local_path: str) -> str:
-    import os
     import subprocess
     path = f"{self.prefix}/file/upload"
     url = f"{self.base_url}{path}"
