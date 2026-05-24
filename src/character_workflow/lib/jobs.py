@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from character_workflow.lib import data_root
+from character_workflow.lib import data_root, keys
 from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
 
 
@@ -57,12 +57,20 @@ def write_job(
     status: JobStatus = JobStatus.PENDING_CONFIRM,
     kind: JobKind = JobKind.PORTRAIT,
     source_image: str | None = None,
+    alias: str | None = None,
 ) -> Job:
     """落盘一条 job 文件。默认 PENDING_CONFIRM —— Skill 先写好调用细节，
     UI 渲染"出图卡片"，画师在终端或 Web 点确认后才推进到 PENDING 调 lovart。
 
     kind 决定 lovart 输出目录（characters/<id>/<kind>/），由 job_output_dir() 计算。
-    source_image 给 promo / turnaround Skill 传画师上传的参考图绝对路径。"""
+    source_image 给 promo / turnaround Skill 传画师上传的参考图绝对路径。
+    alias 不传时，按 keys.preferred_alias_for_kind(kind) 自动解析；同步从 keys.json 拿 provider。"""
+    if alias is None:
+        alias = keys.preferred_alias_for_kind(kind.value)
+    provider: str | None = None
+    if alias is not None:
+        k = keys.find_by_alias(alias)
+        provider = k.provider if k else None
     job = Job(
         job_id=job_id,
         character_id=character_id,
@@ -76,6 +84,8 @@ def write_job(
         error=None,
         kind=kind,
         source_image=source_image,
+        alias=alias,
+        provider=provider,
     )
     return _write(job)
 

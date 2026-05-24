@@ -76,3 +76,48 @@ def test_read_returns_full_job(runtime):
     job = read_job("job-001")
     assert job.job_id == "job-001"
     assert job.status == JobStatus.PENDING_CONFIRM
+
+
+def test_write_job_fills_alias_from_preferred_when_missing(runtime):
+    from character_workflow.lib import keys
+    keys.add_key(keys.KeySpec(
+        alias="lov", provider="lovart", access_key="ak", secret_key="sk",
+        capabilities=["portrait"], models=[], notes="",
+        created_at="2026-05-22T00:00:00+08:00",
+    ))
+    job = write_job(
+        job_id="job-alias-auto", character_id="c1", prompt="p",
+        model="m", params={}, seed=None,
+    )
+    assert job.alias == "lov"
+    assert job.provider == "lovart"
+
+
+def test_write_job_alias_null_when_no_key_matches(runtime):
+    job = write_job(
+        job_id="job-alias-none", character_id="c1", prompt="p",
+        model="m", params={}, seed=None,
+    )
+    assert job.alias is None
+    assert job.provider is None
+
+
+def test_write_job_explicit_alias_overrides_default(runtime):
+    from character_workflow.lib import keys
+    keys.add_key(keys.KeySpec(
+        alias="lov", provider="lovart", access_key="ak", secret_key="sk",
+        capabilities=["portrait"], models=[], notes="",
+        created_at="2026-05-22T00:00:00+08:00",
+    ))
+    keys.add_key(keys.KeySpec(
+        alias="oa", provider="openai", access_key="x", secret_key=None,
+        capabilities=["portrait"], models=[], notes="",
+        created_at="2026-05-22T00:00:00+08:00",
+    ))
+    keys.set_default_alias("lov")
+    job = write_job(
+        job_id="job-alias-explicit", character_id="c1", prompt="p",
+        model="m", params={}, seed=None, alias="oa",
+    )
+    assert job.alias == "oa"
+    assert job.provider == "openai"
