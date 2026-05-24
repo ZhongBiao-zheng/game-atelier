@@ -11,6 +11,7 @@ dependencies = [
   "requests>=2.32",
   "pypinyin>=0.53",
   "platformdirs>=4",
+  'pywin32>=308; sys_platform == "win32"',
 ]
 
 [dependency-groups]
