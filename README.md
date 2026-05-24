@@ -2,15 +2,47 @@
 
 游戏角色资产工作流 — Claude Code Skill + 本地 Web UI，画师可视化管理角色档案与出图。
 
-## 快速开始
+## 安装
 
-### 一次性安装
+### macOS / Linux
 
 ```bash
-make install
+claude plugins install github:zhengzhongbiao/game-ui-ai-workflow
 ```
 
-需要：Python 3.11+、Node 18+、`uv`、`pnpm`。
+首次触发 `/character-workflow` 会引导：
+1. 选数据目录（默认 `~/character-workflow/`）
+2. 装 `uv`（如果还没装）
+3. 自动 `uv sync` 装 Python 依赖
+4. 在 Web 上加第一个 API Key
+
+### Windows
+
+```powershell
+claude plugins install github:zhengzhongbiao/game-ui-ai-workflow
+```
+
+向导步骤同上。装 `uv` 命令：
+
+```powershell
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+数据目录默认 `C:\Users\<user>\character-workflow\`。
+
+### 开发模式（仓库内）
+
+```bash
+git clone https://github.com/zhengzhongbiao/game-ui-ai-workflow
+cd game-ui-ai-workflow
+make install
+make dev-link
+export CHARACTER_WORKFLOW_DATA_ROOT=$(pwd)
+```
+
+Dev 模式跳过 onboarding 向导，仓库根直接当 data root。
+
+## 快速开始
 
 ### 启动
 
