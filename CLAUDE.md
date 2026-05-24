@@ -21,15 +21,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-游戏角色资产工作流 — 画师/设计师可视化管理角色档案与 AI 出图的本地工具。两个进程协作：
+本仓库是 `game-ui-ai-workflow` **Plugin 源码**。Plugin 通过 `claude plugins install` 装到用户机器后，安装路径在 `~/.claude/plugins/game-ui-ai-workflow/`，用户数据在独立的 `<data_root>/`（默认 `~/character-workflow/`，由 `CHARACTER_WORKFLOW_DATA_ROOT` 环境变量覆盖）。
+
+详见 `docs/superpowers/specs/2026-05-22-skill-distribution-design.md` 和 `docs/superpowers/plans/2026-05-22-skill-distribution-impl.md`。
+
+工作流由两个进程 + 一组 Skill 组成：
 
 - **viewer-server** (`src/viewer_server/`)：FastAPI，绑死 `127.0.0.1:5174`（被占用自动 +1）。文件读写 + SSE 推送。
-- **web** (`web/`)：Vite + React，dev 在 `5173`，调用 viewer-server REST + 订阅 `/events` SSE。
-- **character-workflow Skill** (`src/character_workflow/`，Skill 定义见 `skills/character-workflow/`)：在 CC 里被 `/character-workflow <名>` 触发，读 `.runtime/draft/` 反馈、对话补全 spec、调 Lovart 出图。
+- **web** (`web/`)：Vite + React，dev 在 `5173`，build 落在 `web/dist/`，由 viewer-server 直接挂载。
+- **Skill 套件** (`skills/{character-workflow,character-promo,character-turnaround,viewer-server}/SKILL.md` + `src/character_workflow/` Python lib)：在 CC 里被 `/character-workflow <名>` 等触发，读 `<data_root>/.runtime/draft/`、调 Lovart / OpenAI / ... 出图。
+
+## Dev mode
+
+仓库内开发时，把仓库根当 data root：
+
+```bash
+export CHARACTER_WORKFLOW_DATA_ROOT=$(pwd)
+make dev-link              # symlink skills/* → .claude/skills/
+make install               # uv sync + pnpm install
+```
+
+用 direnv 自动化（推荐）：
+
+```sh
+# .envrc
+export CHARACTER_WORKFLOW_DATA_ROOT=$PWD
+```
+
+Dev 模式下 bootstrap 自检直接读环境变量，跳过首启动向导。pytest 用 autouse `isolated_data_root` fixture 给每个测试一个独立 tmp 目录，不污染仓库。
 
 ## 核心架构原则
 
-**文件系统是唯一 source of truth**：
+**文件系统是唯一 source of truth**（路径均相对 `<data_root>/`）：
 
 | 文件 | 谁写 | 谁读 |
 |---|---|---|
@@ -40,6 +63,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `.runtime/active-character.json` | 双向 | 双向 |
 | `.runtime/projects.json` | Web (`POST /api/projects`) | Skill / Web |
 | `.runtime/server.{pid,port}` | viewer-server CLI | viewer-server CLI |
+| `.config/keys.json` | Skill / Web (`POST /api/keys`) | Skill 通过 `lib/keys.py` 读 |
+| `.config/venv-hash` | `bootstrap.py --ensure-venv` | `bootstrap.py --check` |
 
 **Web 不能改 job 状态字段**：`WebEditableJobPatch` 白名单只允许 `prompt / model / params / seed`；`status / output_paths / submitted_at / character_id / job_id / error` 是 Skill 独占。
 
@@ -72,7 +97,7 @@ uv run ruff check src tests                           # Python lint（line-lengt
 cd web && pnpm lint                                   # tsc -b --noEmit
 
 # 构建
-make build                                            # vite build → src/viewer_server/static/
+make build                                            # vite build → web/dist/（viewer-server 自动挂载）
 
 # Server 控制
 uv run python src/viewer_server/server.py stop
