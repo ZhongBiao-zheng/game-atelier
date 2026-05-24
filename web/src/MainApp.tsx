@@ -4,6 +4,7 @@ import { CharacterGallery } from './components/CharacterGallery';
 import { SpecForm } from './components/SpecForm';
 import { ImageDetail } from './components/ImageDetail';
 import { FirstRunConfig } from './components/FirstRunConfig';
+import { KeysPage } from './pages/settings/Keys';
 import { useSSE } from './hooks/useSSE';
 import { cn } from '@/lib/utils';
 
@@ -11,6 +12,7 @@ interface Config { image_storage_root: string }
 
 export function MainApp() {
   const [config, setConfig] = useState<Config | null>(null);
+  const [view, setView] = useState<'main' | 'keys'>('main');
 
   useEffect(() => {
     fetch('/api/config').then(r => r.json()).then(setConfig);
@@ -26,7 +28,18 @@ export function MainApp() {
   if (!config.image_storage_root) {
     return <FirstRunConfig onSaved={root => setConfig({ image_storage_root: root })} />;
   }
-  return <ThreeColumnLayout />;
+  return (
+    <div className="relative h-screen">
+      <button
+        type="button"
+        onClick={() => setView(view === 'keys' ? 'main' : 'keys')}
+        className="absolute right-4 top-3 z-50 rounded border border-stone-700/60 bg-stone-900/80 px-3 py-1 text-sm text-stone-100 backdrop-blur hover:bg-stone-800"
+      >
+        {view === 'keys' ? '返回' : 'API Keys'}
+      </button>
+      {view === 'keys' ? <KeysPage /> : <ThreeColumnLayout />}
+    </div>
+  );
 }
 
 function ThreeColumnLayout() {
