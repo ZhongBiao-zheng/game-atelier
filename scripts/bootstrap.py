@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -141,6 +142,53 @@ def check() -> dict:
     }
 
 
+def ensure_venv() -> int:
+    """Run `uv sync` against PLUGIN_DIR into <data_root>/.venv, then write venv-hash."""
+    data_root = resolve_data_root()
+    if data_root is None:
+        print(json.dumps({
+            "status": "error",
+            "error": "data_root not configured — run --init-data-root first",
+        }, ensure_ascii=False))
+        return 1
+
+    uv_path = shutil.which("uv")
+    if uv_path is None:
+        print(json.dumps({
+            "status": "error",
+            "error": f"uv not installed — install via: {_uv_install_instruction()}",
+        }, ensure_ascii=False))
+        return 2
+
+    venv = data_root / ".venv"
+    venv.parent.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)}
+    proc = subprocess.run(
+        [uv_path, "sync", "--project", str(PLUGIN_DIR)],
+        env=env, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        print(json.dumps({
+            "status": "error",
+            "error": "uv sync failed",
+            "stderr": proc.stderr or "",
+            "stdout": proc.stdout or "",
+        }, ensure_ascii=False))
+        return 3
+
+    hash_file = _venv_hash_file(data_root)
+    hash_file.parent.mkdir(parents=True, exist_ok=True)
+    hash_file.write_text(_pyproject_hash())
+
+    print(json.dumps({
+        "status": "ok",
+        "data_root": str(data_root),
+        "venv_python": str(_venv_python(data_root)),
+        "venv_hash": _pyproject_hash(),
+    }, ensure_ascii=False))
+    return 0
+
+
 def init_data_root(target: Path) -> int:
     """Create the data-root skeleton and write the global config pointer."""
     resolved = target.expanduser().resolve()
@@ -167,6 +215,11 @@ def main() -> int:
         metavar="PATH",
         help="Create data-root skeleton at PATH and write global config pointer.",
     )
+    parser.add_argument(
+        "--ensure-venv",
+        action="store_true",
+        help="Run `uv sync` into <data_root>/.venv and write venv-hash.",
+    )
     args = parser.parse_args()
 
     if args.check:
@@ -175,6 +228,9 @@ def main() -> int:
 
     if args.init_data_root:
         return init_data_root(Path(args.init_data_root))
+
+    if args.ensure_venv:
+        return ensure_venv()
 
     parser.print_help()
     return 1

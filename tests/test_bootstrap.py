@@ -167,6 +167,87 @@ def test_init_data_root_creates_skeleton(tmp_path):
         assert (target / sub).is_dir(), f"missing {sub}"
 
 
+def _make_fake_uv(bin_dir: Path) -> Path:
+    """Drop a stub `uv` executable that mimics `uv sync --project ...` by
+    creating <UV_PROJECT_ENVIRONMENT>/bin/python (or Scripts/python.exe on win32).
+    """
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        # Skip win32 — this stub uses /bin/sh.
+        pytest.skip("fake uv stub requires POSIX shell")
+    uv = bin_dir / "uv"
+    uv.write_text(
+        "#!/bin/sh\n"
+        "# fake uv: create <UV_PROJECT_ENVIRONMENT>/bin/python and exit 0\n"
+        "venv=\"$UV_PROJECT_ENVIRONMENT\"\n"
+        "if [ -z \"$venv\" ]; then\n"
+        "  echo 'no UV_PROJECT_ENVIRONMENT' >&2; exit 99\n"
+        "fi\n"
+        "mkdir -p \"$venv/bin\"\n"
+        "cat > \"$venv/bin/python\" <<'PY'\n"
+        "#!/bin/sh\n"
+        "exit 0\n"
+        "PY\n"
+        "chmod +x \"$venv/bin/python\"\n"
+        "exit 0\n"
+    )
+    uv.chmod(uv.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return uv
+
+
+def test_ensure_venv_creates_venv_and_writes_hash(tmp_path):
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    (data_root / ".config").mkdir()
+    fake_bin = tmp_path / "fakebin"
+    _make_fake_uv(fake_bin)
+    result = run_bootstrap(
+        ["--ensure-venv"],
+        env_overrides={
+            "CHARACTER_WORKFLOW_DATA_ROOT": str(data_root),
+            "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout)
+    assert out["status"] == "ok"
+    assert (data_root / ".venv" / "bin" / "python").exists()
+    hash_file = data_root / ".config" / "venv-hash"
+    assert hash_file.exists()
+    assert hash_file.read_text().strip() == _pyproject_hash()
+
+
+def test_ensure_venv_fails_without_data_root(tmp_path):
+    result = run_bootstrap(
+        ["--ensure-venv"],
+        env_overrides={
+            "CHARACTER_WORKFLOW_DATA_ROOT": "",
+            "XDG_CONFIG_HOME": str(tmp_path / "config"),
+            "APPDATA": str(tmp_path / "appdata"),
+        },
+    )
+    assert result.returncode != 0
+    out = json.loads(result.stdout) if result.stdout.strip() else {}
+    # error reporting may go to stdout or stderr — accept either, but status must not be ok
+    assert out.get("status") != "ok"
+
+
+def test_ensure_venv_fails_without_uv(tmp_path):
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    (data_root / ".config").mkdir()
+    result = run_bootstrap(
+        ["--ensure-venv"],
+        env_overrides={
+            "CHARACTER_WORKFLOW_DATA_ROOT": str(data_root),
+            "PATH": "",
+        },
+    )
+    assert result.returncode != 0
+    out = json.loads(result.stdout) if result.stdout.strip() else {}
+    assert out.get("status") != "ok"
+
+
 def test_init_data_root_writes_global_config(tmp_path):
     target = tmp_path / "data"
     cfg_home = tmp_path / "config"
