@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import os
-import platform
+import signal
 import socket
 import subprocess
 import sys
+import webbrowser
 from pathlib import Path
 
 import uvicorn
@@ -19,6 +20,39 @@ from viewer_server.pid import (  # noqa: E402
 
 
 DEFAULT_PORT = 5174
+
+
+def _spawn_detached(cmd: list[str], *, cwd: str, env: dict[str, str]) -> int:
+    """Cross-platform: detach a subprocess so the parent can exit while it keeps running."""
+    if sys.platform == "win32":
+        flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+        proc = subprocess.Popen(
+            cmd, creationflags=flags,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            cwd=cwd, env=env,
+        )
+    else:
+        proc = subprocess.Popen(
+            cmd, start_new_session=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            cwd=cwd, env=env,
+        )
+    return proc.pid
+
+
+def _terminate(pid: int) -> bool:
+    """Send terminate signal cross-platform. Returns True if signal was delivered."""
+    if sys.platform == "win32":
+        result = subprocess.run(
+            ["taskkill", "/F", "/PID", str(pid)],
+            capture_output=True,
+        )
+        return result.returncode == 0
+    try:
+        os.kill(pid, signal.SIGTERM)
+        return True
+    except ProcessLookupError:
+        return False
 
 
 def _find_free_port(start: int) -> int:
@@ -51,18 +85,15 @@ def cmd_start(background: bool = False) -> None:
         # 后台启动（Skill 调用路径）：非阻塞，只在首次启动时开浏览器
         import time
         project_root = str(Path(__file__).parent.parent.parent)
-        proc = subprocess.Popen(
+        pid = _spawn_detached(
             [sys.executable, "-m", "uvicorn",
-             "skill.viewer_server.server_app:build_app", "--factory",
+             "viewer_server.server_app:build_app", "--factory",
              "--host", "127.0.0.1", "--port", str(port), "--log-level", "info"],
-            start_new_session=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
             cwd=project_root,
             env=os.environ.copy(),
         )
-        write_pid(runtime, proc.pid)
-        print(f"viewer-server started at http://127.0.0.1:{port}/ (pid={proc.pid})")
+        write_pid(runtime, pid)
+        print(f"viewer-server started at http://127.0.0.1:{port}/ (pid={pid})")
         time.sleep(1.5)  # 等 uvicorn 就绪
         cmd_open_browser()
     else:
@@ -79,10 +110,9 @@ def cmd_stop() -> None:
     if not pid:
         print("viewer-server not running")
         return
-    try:
-        os.kill(pid, 15)  # SIGTERM
-        print(f"sent SIGTERM to pid {pid}")
-    except ProcessLookupError:
+    if _terminate(pid):
+        print(f"sent terminate signal to pid {pid}")
+    else:
         print(f"pid {pid} not found — cleaning stale PID")
         cleanup_stale_pid(runtime)
 
@@ -91,8 +121,7 @@ def cmd_open_browser() -> None:
     runtime = data_root.runtime_dir()
     port = read_port(runtime) or DEFAULT_PORT
     url = f"http://127.0.0.1:{port}/"
-    opener = "open" if platform.system() == "Darwin" else "xdg-open"
-    subprocess.run([opener, url], check=False)
+    webbrowser.open(url)
     print(url)
 
 
