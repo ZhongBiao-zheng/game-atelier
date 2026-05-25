@@ -108,3 +108,49 @@ server 必须绑定 `127.0.0.1`，**绝不绑 `0.0.0.0`**（共享 WiFi security
 ## 端口
 
 默认 `5174`（前端 dev server `5173`）。被占用时 viewer-server 自动 +1 直到找到空端口，并把实际端口写到 `.runtime/server.port`。
+
+---
+
+## v2（2026-05-25）— Atelier-Web PR1
+
+### Schema 重命名（向后兼容靠迁移脚本）
+
+- 老 `kind` 字段（`portrait` / `promo` / `turnaround`）→ 拆出为独立类型 `AssetSlot`，枚举值不变
+- 新 `JobKind`（`image` / `video`）—— 媒体类型；`video` 仅占位，runner 会抛 `NotImplementedError`
+- `Job` 新增三个字段：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `asset_slot` | `AssetSlot` | `portrait` | 替代原 `kind` 字段的语义 |
+| `kind` | `JobKind` | `image` | 媒体类型 |
+| `namespace` | string | `character` | `character` \| `studio`；runner 按此分流 |
+
+- `Job.character_id` 保持 `str`（非 `Optional`）。Studio job 把 alias 写在此处作 placeholder，runner 看 `namespace` 而非 `character_id`。
+
+### 新增端点
+
+| Method | Path | Request body | Response |
+|---|---|---|---|
+| GET | `/api/gallery/recent?limit=24` | — | `{items: [{character_id, asset_slot, filename, path, mtime}]}`；按 mtime 倒序，仅扫 `characters/*/{portrait,promo,turnaround}/` |
+| GET | `/api/gallery/image?path=<rel>` | — | 二进制 `FileResponse`；仅接受 `characters/` 和 `studio/` 前缀，越界返回 400 |
+| POST | `/api/studio/jobs` | `{prompt, model, params, alias?, kind?}` | `Job`（`status=pending_confirm`，`namespace=studio`）；`kind=video` 返回 422；端点末尾 schedule background runner |
+| GET | `/api/jobs/{job_id}` | — | `Job`；Studio UI 用它做 2 s polling |
+
+### 修改的端点
+
+- `POST /api/keys` 现在返回 `{...row, secret_revealed: true}`，其中 `secret_revealed` 字段 **仅在创建时一次性返回**（值为原始 secret）；`GET /api/keys` 列表永远只返回 masked 值。
+
+### 不变的安全边界
+
+- `/api/raw` 仍走 `job_id` 白名单（只能读 `output_paths` 里已登记的文件）。
+- `WebEditableJobPatch` 白名单**不扩展**：`status`、`output_paths`、`character_id`、`namespace`、`asset_slot`、`kind`、`error` 均为 Skill / server 独占，Web 不可写。
+
+### 数据迁移
+
+老 `.runtime/jobs/<id>.json` 必须跑一次迁移脚本以补齐新字段：
+
+```bash
+CHARACTER_WORKFLOW_DATA_ROOT=/path/to/data uv run python scripts/migrate_jobs_2026_05_25.py
+```
+
+脚本幂等：重复执行无副作用。
