@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from character_workflow.lib import data_root, keys
@@ -545,6 +545,42 @@ def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
 def delete_key_endpoint(alias: str) -> None:
     keys.delete_key(alias)
     return None
+
+
+_GALLERY_SLOTS = ("portrait", "promo", "turnaround")
+_GALLERY_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+@router.get("/gallery/recent")
+def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
+    """Return most-recent images across all characters, sorted by mtime desc."""
+    characters_dir = _project_root() / "characters"
+    items: list[dict] = []
+    if not characters_dir.exists():
+        return {"items": []}
+    for char_dir in characters_dir.iterdir():
+        if not char_dir.is_dir():
+            continue
+        for slot in _GALLERY_SLOTS:
+            slot_dir = char_dir / slot
+            if not slot_dir.is_dir():
+                continue
+            for f in slot_dir.iterdir():
+                if f.suffix.lower() not in _GALLERY_EXTS:
+                    continue
+                try:
+                    mtime = f.stat().st_mtime
+                except OSError:
+                    continue  # F3: broken symlink / permissions issue
+                items.append({
+                    "character_id": char_dir.name,
+                    "asset_slot": slot,
+                    "filename": f.name,
+                    "path": str(f.relative_to(_project_root())),
+                    "mtime": mtime,
+                })
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    return {"items": items[:limit]}
 
 
 @router.post("/keys/{alias}/default")
