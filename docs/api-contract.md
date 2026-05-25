@@ -133,7 +133,7 @@ server 必须绑定 `127.0.0.1`，**绝不绑 `0.0.0.0`**（共享 WiFi security
 |---|---|---|---|
 | GET | `/api/gallery/recent?limit=24` | — | `{items: [{character_id, asset_slot, filename, path, mtime}]}`；按 mtime 倒序，仅扫 `characters/*/{portrait,promo,turnaround}/` |
 | GET | `/api/gallery/image?path=<rel>` | — | 二进制 `FileResponse`；仅接受 `characters/` 和 `studio/` 前缀，越界返回 400 |
-| POST | `/api/studio/jobs` | `{prompt, model, params, alias?, kind?}` | `Job`（`status=pending_confirm`，`namespace=studio`）；`kind=video` 返回 422；端点末尾 schedule background runner |
+| POST | `/api/studio/jobs` | `{prompt, model, params, alias?, kind?}` | `Job`（`status=pending`，`namespace=studio`，跳过 `pending_confirm`——UI 点 ↑ 即确认）；`kind=video` 返回 422；端点末尾 schedule background runner |
 | GET | `/api/jobs/{job_id}` | — | `Job`；Studio UI 用它做 2 s polling |
 
 ### 修改的端点
