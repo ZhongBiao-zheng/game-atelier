@@ -11,7 +11,7 @@ from character_workflow.lib import data_root
 from character_workflow.lib.callers import lovart as lovart_caller
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
-    job_output_dir,
+    job_output_dir_for,
     list_jobs,
     read_job,
     save_job,
@@ -172,9 +172,14 @@ def _select_valid_outputs(
 
 
 def run_job(job_id: str) -> Job:
+    from character_workflow.lib.schemas import JobKind
     job = read_job(job_id)
-    if job.status != JobStatus.PENDING_CONFIRM:
-        raise JobRunnerError(f"job not in pending_confirm (current: {job.status.value})")
+    # Studio jobs start PENDING (UI submit = consent); character jobs start PENDING_CONFIRM.
+    allowed_statuses = (JobStatus.PENDING_CONFIRM, JobStatus.PENDING)
+    if job.status not in allowed_statuses:
+        raise JobRunnerError(f"job not in a runnable status (current: {job.status.value})")
+    if job.kind == JobKind.VIDEO:
+        raise NotImplementedError("video jobs are not implemented")
 
     job = _normalize_reference_images(job)
     params = _params(job)
@@ -184,7 +189,9 @@ def run_job(job_id: str) -> Job:
         attachments = lovart_caller.upload_files(refs) if refs else []
         params["lovart_attachments"] = attachments
         job = _save_params(job, params)
-        update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
+        # Only transition to PENDING if currently in PENDING_CONFIRM; studio jobs already PENDING.
+        if job.status == JobStatus.PENDING_CONFIRM:
+            update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
 
         with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-lovart-") as tmp:
             result = lovart_caller.submit_and_wait(
@@ -198,7 +205,7 @@ def run_job(job_id: str) -> Job:
             if not selected:
                 raise JobRunnerError("lovart returned no valid image artifacts")
 
-            output_dir = job_output_dir(job.character_id, job.asset_slot, _project_root())
+            output_dir = job_output_dir_for(job)
             output_paths: list[str] = []
             first_dims: tuple[int, int] | None = None
             for src, dims in selected:

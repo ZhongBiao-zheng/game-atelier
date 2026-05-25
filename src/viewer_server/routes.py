@@ -8,25 +8,25 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
 from character_workflow.lib.jobs import (
-    delete_failed_job, read_job, remove_image_from_job, update_job_status, write_job,
+    delete_failed_job, read_job, remove_image_from_job, save_job, update_job_status, write_job,
 )
 from character_workflow.lib.schemas import AssetSlot as _AssetSlot
 from character_workflow.lib.projects import (
     assign_character, create_project, delete_project, read_projects,
     rename_project,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CharacterEntry, CharacterProjectAssign, ClipboardAttempt,
-    FeedbackPost, Job, JobStatus, ProjectCreate, ProjectRename, ProjectsFile,
-    SpecPatch, WebEditableJobPatch,
+    FeedbackPost, Job, JobKind, JobParams, JobStatus, ProjectCreate, ProjectRename,
+    ProjectsFile, SpecPatch, WebEditableJobPatch,
 )
 
 
@@ -604,3 +604,80 @@ def set_default_alias_endpoint(alias: str) -> dict:
     except keys.NoSuchAliasError:
         raise HTTPException(404, f"alias '{alias}' not found") from None
     return {"default_alias": alias}
+
+
+class _StudioJobCreate(BaseModel):
+    model_config = {"extra": "forbid"}
+    prompt: str = Field(min_length=1)
+    model: str
+    params: JobParams
+    alias: str | None = None
+    kind: JobKind = JobKind.IMAGE
+
+
+def _run_studio_job_safely(job_id: str) -> None:
+    """BackgroundTasks wrapper — runs job_runner.run_job and pins failures to job state.
+
+    Lazy import keeps test monkeypatching (`routes._run_studio_job_safely`) effective
+    and avoids importing lovart caller chain at module load.
+    """
+    from character_workflow.lib.job_runner import run_job
+    try:
+        run_job(job_id)
+    except Exception as e:  # noqa: BLE001
+        # run_job already calls update_job_status(FAILED) on its own exception path,
+        # but guard against any uncaught path (e.g., raised before its try block).
+        try:
+            job = read_job(job_id)
+        except FileNotFoundError:
+            return
+        if job.status != JobStatus.DONE and job.status != JobStatus.FAILED:
+            update_job_status(job_id, status=JobStatus.FAILED, error=str(e))
+
+
+@router.post("/studio/jobs", status_code=201)
+def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> dict:
+    """Create a standalone studio job (namespace='studio') and schedule the runner.
+
+    Skips pending_confirm — UI submit is the explicit user consent.
+    Output will be written to <data_root>/studio/<job_id>/ when run.
+    JobKind.VIDEO is not implemented and returns 422.
+
+    The runner is fired via BackgroundTasks so the response returns immediately;
+    the UI then polls /api/jobs/<id> to observe status transitions.
+    """
+    if body.kind == JobKind.VIDEO:
+        raise HTTPException(status_code=422, detail="video not implemented")
+    db = keys.read_keys_db()
+    alias = body.alias or db.default_alias
+    if not alias:
+        raise HTTPException(status_code=400, detail="no default key configured")
+    key_row = next((k for k in db.keys if k.alias == alias), None)
+    if not key_row:
+        raise HTTPException(status_code=400, detail=f"unknown alias {alias}")
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    job_id = f"job-{ts}{uuid.uuid4().hex[:8]}"
+
+    job = Job(
+        job_id=job_id,
+        character_id=alias,  # placeholder for non-null invariant; runner reads namespace
+        prompt=body.prompt,
+        submitted_at=datetime.now(timezone.utc).isoformat(),
+        model=body.model,
+        params=body.params,
+        seed=None,
+        output_paths=[],
+        status=JobStatus.PENDING,  # Studio skips pending_confirm (UI submit = explicit consent)
+        error=None,
+        asset_slot=_AssetSlot.PORTRAIT,  # ignored when namespace="studio"
+        kind=JobKind.IMAGE,
+        namespace="studio",
+        alias=alias,
+        provider=key_row.provider,
+    )
+    save_job(job)
+    # Dispatch through module-level symbol so tests can monkeypatch routes._run_studio_job_safely.
+    from viewer_server import routes as _self
+    background.add_task(_self._run_studio_job_safely, job.job_id)
+    return job.model_dump(mode="json")

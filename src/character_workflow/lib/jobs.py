@@ -27,6 +27,17 @@ def job_output_dir(character_id: str, kind: AssetSlot, project_root: Path | None
     return root / "characters" / character_id / kind.value
 
 
+def job_output_dir_for(job: "Job") -> Path:
+    """Namespace-aware output dir dispatcher.
+    Studio jobs → <data_root>/studio/<job_id>/
+    Character jobs → <data_root>/characters/<character_id>/<asset_slot>/
+    """
+    if job.namespace == "studio":
+        from character_workflow.lib.studio_jobs import studio_output_dir
+        return studio_output_dir(job.job_id)
+    return job_output_dir(job.character_id, job.asset_slot)
+
+
 def _write(job: Job) -> Job:
     p = _path(job.job_id)
     p.parent.mkdir(parents=True, exist_ok=True)
