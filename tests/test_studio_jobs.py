@@ -105,3 +105,13 @@ def test_post_studio_job_schedules_background_runner(client, monkeypatch):
     assert resp.status_code == 201
     # TestClient runs background tasks synchronously after response sent.
     assert called == [resp.json()["job_id"]]
+
+
+def test_get_single_job(client):
+    """GET /api/jobs/{job_id} returns the job by id."""
+    r1 = client.post("/api/studio/jobs", json={"prompt": "x", "model": "gpt-image-2", "params": {}})
+    assert r1.status_code == 201
+    job_id = r1.json()["job_id"]
+    r2 = client.get(f"/api/jobs/{job_id}")
+    assert r2.status_code == 200
+    assert r2.json()["job_id"] == job_id
