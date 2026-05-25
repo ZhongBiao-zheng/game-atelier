@@ -10,7 +10,12 @@ import { cn } from '@/lib/utils';
 
 interface Config { image_storage_root: string }
 
-export function MainApp() {
+interface MainAppProps {
+  // T4 will wire this up; declared here so CharacterDetail can pass it without TS errors
+  _routedCharacterId?: string;
+}
+
+export function MainApp({ _routedCharacterId: _ }: MainAppProps = {}) {
   const [config, setConfig] = useState<Config | null>(null);
   const [view, setView] = useState<'main' | 'keys'>('main');
 
