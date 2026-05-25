@@ -16,7 +16,7 @@ from character_workflow.lib.active_character import read_active, write_active
 from character_workflow.lib.jobs import (
     delete_failed_job, read_job, remove_image_from_job, update_job_status, write_job,
 )
-from character_workflow.lib.schemas import JobKind as _JobKind
+from character_workflow.lib.schemas import AssetSlot as _AssetSlot
 from character_workflow.lib.projects import (
     assign_character, create_project, delete_project, read_projects,
     rename_project,
@@ -282,7 +282,7 @@ async def post_gallery_image(
     file: UploadFile = File(...),
 ) -> dict:
     """直接上传图片到角色图廊，落盘到 characters/<id>/<kind>/，并创建 done 状态 job。"""
-    valid_kinds = {k.value for k in _JobKind}
+    valid_kinds = {k.value for k in _AssetSlot}
     if kind not in valid_kinds:
         raise HTTPException(422, detail=f"kind must be one of {sorted(valid_kinds)}")
 
@@ -316,7 +316,7 @@ async def post_gallery_image(
         model="manual",
         params={},
         seed=None,
-        kind=_JobKind(kind),
+        asset_slot=_AssetSlot(kind),
     )
     update_job_status(job_id, status=JobStatus.DONE, output_paths=[str(target.resolve())])
 

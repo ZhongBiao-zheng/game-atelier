@@ -17,12 +17,18 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 
-class JobKind(str, Enum):
-    # PORTRAIT 立绘（Skill #1）/ PROMO 美宣图（Skill #2）/ TURNAROUND 三视图（Skill #3）。
-    # 写盘按 kind 分发到 characters/<id>/<kind>/。旧 job 无字段 → 默认 PORTRAIT。
+class AssetSlot(str, Enum):
+    # 角色资产槽位 — 决定 characters/<id>/<slot>/ 物理路径。
+    # 老 JobKind = PORTRAIT/PROMO/TURNAROUND 改名而来（2026-05-25 重构）。
     PORTRAIT = "portrait"
     PROMO = "promo"
     TURNAROUND = "turnaround"
+
+
+class JobKind(str, Enum):
+    # 媒体类型 — 与 AssetSlot 解耦。VIDEO 占位，runner 抛 NotImplementedError。
+    IMAGE = "image"
+    VIDEO = "video"
 
 
 class JobParams(BaseModel):
@@ -54,8 +60,10 @@ class Job(BaseModel):
     output_paths: list[str]
     status: JobStatus
     error: str | None
-    # Skill 套件扩展（2026-05-19）：旧 json 无字段时 Pydantic 自动 fallback。
-    kind: JobKind = JobKind.PORTRAIT
+    # 2026-05-25 重构：原 kind 拆成 asset_slot + kind + namespace。
+    asset_slot: AssetSlot = AssetSlot.PORTRAIT
+    kind: JobKind = JobKind.IMAGE
+    namespace: str = "character"  # "character" | "studio"
     source_image: str | None = None  # promo/turnaround 用，绝对路径
     # Phase 3 (2026-05-22): which Key was used. Web 不能改这两个字段。
     alias: str | None = None

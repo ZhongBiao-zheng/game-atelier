@@ -11,7 +11,7 @@ from character_workflow.lib import job_runner
 from character_workflow.lib.callers import lovart as lc
 from character_workflow.lib.active_character import write_active
 from character_workflow.lib.jobs import read_job, write_job
-from character_workflow.lib.schemas import JobKind, JobStatus
+from character_workflow.lib.schemas import AssetSlot, JobStatus
 
 
 @pytest.fixture
@@ -64,7 +64,7 @@ def test_run_job_normalizes_refs_clears_error_and_selects_valid_new_artifact(
         params={"size": "2048x1152", "n": 1, "reference_images": []},
         seed=None,
         status=JobStatus.PENDING_CONFIRM,
-        kind=JobKind.PROMO,
+        asset_slot=AssetSlot.PROMO,
         source_image=str(src),
     )
     _add_stale_error(project, "promo-001")
@@ -128,15 +128,15 @@ def test_run_latest_uses_active_character_kind_and_newest_pending_job(project, m
     write_active("holy")
     write_job(
         job_id="portrait-001", character_id="holy", prompt="old",
-        model="m", params={}, seed=None, kind=JobKind.PORTRAIT,
+        model="m", params={}, seed=None, asset_slot=AssetSlot.PORTRAIT,
     )
     write_job(
         job_id="promo-001", character_id="holy", prompt="old",
-        model="m", params={}, seed=None, kind=JobKind.PROMO,
+        model="m", params={}, seed=None, asset_slot=AssetSlot.PROMO,
     )
     write_job(
         job_id="promo-002", character_id="holy", prompt="new",
-        model="m", params={}, seed=None, kind=JobKind.PROMO,
+        model="m", params={}, seed=None, asset_slot=AssetSlot.PROMO,
     )
 
     captured: list[str] = []
@@ -147,7 +147,7 @@ def test_run_latest_uses_active_character_kind_and_newest_pending_job(project, m
 
     monkeypatch.setattr(job_runner, "run_job", fake_run_job)
 
-    selected = job_runner.run_latest(kind=JobKind.PROMO)
+    selected = job_runner.run_latest(kind=AssetSlot.PROMO)
 
     assert selected.job_id == "promo-002"
     assert captured == ["promo-002"]

@@ -19,7 +19,7 @@ from character_workflow.lib.active_character import read_active, write_active
 from character_workflow.lib.jobs import write_job
 from character_workflow.lib.job_runner import run_job, run_latest
 from character_workflow.lib.lessons import append_lesson
-from character_workflow.lib.schemas import JobKind, JobStatus
+from character_workflow.lib.schemas import AssetSlot, JobStatus
 from character_workflow.lib.turn_start import turn_start
 
 
@@ -71,7 +71,7 @@ def _submit(args: argparse.Namespace) -> int:
         params=params,
         seed=None,
         status=JobStatus.PENDING_CONFIRM,
-        kind=JobKind(args.kind),
+        asset_slot=AssetSlot(args.kind),
         source_image=source_image,
     )
     print(job_id)
@@ -248,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "run-latest":
         try:
             job = run_latest(
-                kind=JobKind(args.kind) if args.kind else None,
+                kind=AssetSlot(args.kind) if args.kind else None,
                 character_id=args.character,
             )
         except Exception as e:

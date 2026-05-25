@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, AlertTriangle, Loader2, Upload, Clock } from 'lucide-react';
-import type { Job, JobKind } from '../schema/jobs';
+import type { AssetSlot, Job } from '../schema/jobs';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FeedbackInput } from './FeedbackInput';
@@ -51,7 +51,7 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
   if (!characterId) return <EmptyShell title="请在左栏选择角色" subtitle="Atelier · 角色资产工坊" />;
 
   // 旧 job 无 kind 字段时按 PORTRAIT 处理（后端 Pydantic 默认值，前端二次兜底防漂移）
-  const jobKind = (j: Job): JobKind => j.kind ?? 'portrait';
+  const jobKind = (j: Job): AssetSlot => j.asset_slot ?? 'portrait';
   const tabJobs = jobs.filter(j => jobKind(j) === tab);
   const tabCounts: Record<TabKind, number> = {
     portrait: jobs.filter(j => jobKind(j) === 'portrait').reduce((s, j) => s + j.output_paths.length, 0),

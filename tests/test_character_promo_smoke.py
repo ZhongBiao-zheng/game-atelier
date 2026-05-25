@@ -15,7 +15,7 @@ from character_workflow.lib.callers import lovart as lc
 from character_workflow.lib.jobs import (
     job_output_dir, read_job, update_job_status, write_job,
 )
-from character_workflow.lib.schemas import JobKind, JobStatus
+from character_workflow.lib.schemas import AssetSlot, JobStatus
 
 
 @pytest.fixture
@@ -51,11 +51,11 @@ def test_promo_full_flow_writes_job_and_image(project, monkeypatch):
         job_id="promo-001", character_id="holy",
         prompt="圣灵祭祀末战前夕 KV", model="generate_image_gpt_image_2",
         params={"size": "1536x864", "n": 1, "vendor": "OpenAI (via Lovart)"},
-        seed=None, kind=JobKind.PROMO, source_image=str(src),
+        seed=None, asset_slot=AssetSlot.PROMO, source_image=str(src),
     )
     j = read_job("promo-001")
     assert j.status == JobStatus.PENDING_CONFIRM
-    assert j.kind == JobKind.PROMO
+    assert j.asset_slot == AssetSlot.PROMO
     assert j.source_image == str(src)
 
     # 2. 画师确认 → PENDING
@@ -63,7 +63,7 @@ def test_promo_full_flow_writes_job_and_image(project, monkeypatch):
     assert read_job("promo-001").status == JobStatus.PENDING
 
     # 3. mock lovart 返回一张图，确认 output_dir 正确
-    out_dir = job_output_dir("holy", JobKind.PROMO)
+    out_dir = job_output_dir("holy", AssetSlot.PROMO)
     expected_path = out_dir / "v1.png"
 
     captured_output_dir: list[Path] = []
@@ -107,10 +107,10 @@ def test_promo_job_does_not_pollute_portrait_dir(project, monkeypatch):
     write_job(
         job_id="promo-002", character_id="holy",
         prompt="p", model="generate_image_gpt_image_2",
-        params={"n": 1}, seed=None, kind=JobKind.PROMO,
+        params={"n": 1}, seed=None, asset_slot=AssetSlot.PROMO,
     )
-    out_dir = job_output_dir("holy", JobKind.PROMO)
-    portrait_dir = job_output_dir("holy", JobKind.PORTRAIT)
+    out_dir = job_output_dir("holy", AssetSlot.PROMO)
+    portrait_dir = job_output_dir("holy", AssetSlot.PORTRAIT)
     assert out_dir != portrait_dir
     assert out_dir.name == "promo"
     assert portrait_dir.name == "portrait"

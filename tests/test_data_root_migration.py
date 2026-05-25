@@ -35,6 +35,6 @@ def test_jobs_module_writes_to_runtime_dir(isolated_data_root):
         params={},
         seed=None,
         status=jobs.JobStatus.PENDING_CONFIRM,
-        kind=jobs.JobKind.PORTRAIT,
+        asset_slot=jobs.AssetSlot.PORTRAIT,
     )
     assert (data_root.runtime_dir() / "jobs" / f"{job_id}.json").exists()

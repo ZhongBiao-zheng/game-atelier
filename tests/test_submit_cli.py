@@ -65,7 +65,7 @@ def test_submit_portrait_default_values(tmp_path):
     assert job_path.exists()
     data = json.loads(job_path.read_text(encoding="utf-8"))
     assert data["status"] == "pending_confirm"
-    assert data["kind"] == "portrait"
+    assert data["asset_slot"] == "portrait"
     assert data["character_id"] == "holy"
     assert data["prompt"] == "中文 8 段式 prompt"
     assert data["model"] == "generate_image_gpt_image_2"
@@ -93,7 +93,7 @@ def test_submit_promo_with_source_image(tmp_path):
     data = json.loads(
         (tmp_path / ".runtime" / "jobs" / f"{job_id}.json").read_text(encoding="utf-8")
     )
-    assert data["kind"] == "promo"
+    assert data["asset_slot"] == "promo"
     assert data["source_image"] == str(src)
     assert data["params"]["reference_images"] == [str(src)]
 
@@ -113,7 +113,7 @@ def test_submit_turnaround_kind(tmp_path):
     data = json.loads(
         (tmp_path / ".runtime" / "jobs" / f"{job_id}.json").read_text(encoding="utf-8")
     )
-    assert data["kind"] == "turnaround"
+    assert data["asset_slot"] == "turnaround"
 
 
 def test_submit_n4_explicit(tmp_path):

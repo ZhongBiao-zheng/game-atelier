@@ -17,7 +17,7 @@ from character_workflow.lib.jobs import (
     save_job,
     update_job_status,
 )
-from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
+from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
 
 
 class JobRunnerError(RuntimeError):
@@ -144,7 +144,7 @@ def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
     lines = [
         f"# {path.stem}",
         "",
-        f"- kind: {job.kind.value}",
+        f"- asset_slot: {job.asset_slot.value}",
         f"- job_id: {job.job_id}",
         f"- created_at: {created_at}",
         f"- source_image: {job.source_image or ''}",
@@ -198,7 +198,7 @@ def run_job(job_id: str) -> Job:
             if not selected:
                 raise JobRunnerError("lovart returned no valid image artifacts")
 
-            output_dir = job_output_dir(job.character_id, job.kind, _project_root())
+            output_dir = job_output_dir(job.character_id, job.asset_slot, _project_root())
             output_paths: list[str] = []
             first_dims: tuple[int, int] | None = None
             for src, dims in selected:
@@ -238,7 +238,7 @@ def run_job(job_id: str) -> Job:
 
 def run_latest(
     *,
-    kind: JobKind | None = None,
+    kind: AssetSlot | None = None,
     character_id: str | None = None,
 ) -> Job:
     if character_id is None:
@@ -252,11 +252,11 @@ def run_latest(
         if (
             job.character_id == character_id
             and job.status == JobStatus.PENDING_CONFIRM
-            and (kind is None or job.kind == kind)
+            and (kind is None or job.asset_slot == kind)
         )
     ]
     if not candidates:
-        suffix = f" kind={kind.value}" if kind else ""
+        suffix = f" asset_slot={kind.value}" if kind else ""
         raise JobRunnerError(f"no pending_confirm job for {character_id}{suffix}")
     candidates.sort(key=lambda j: (j.submitted_at, j.job_id))
     return run_job(candidates[-1].job_id)

@@ -121,7 +121,7 @@ def test_raw_includes_source_image_in_job_whitelist(client, runtime):
         "job_id": "promo-1", "character_id": "holy", "prompt": "p",
         "submitted_at": "2026-05-19T10:00:00Z", "model": "generate_image_gpt_image_2",
         "params": {"n": 1}, "seed": None, "output_paths": [],
-        "status": "pending", "error": None, "kind": "promo",
+        "status": "pending", "error": None, "asset_slot": "promo",
         "source_image": str(src),
     }))
     r = client.get(f"/api/raw?path={src}&job_id=promo-1")
@@ -162,5 +162,5 @@ def test_gallery_upload_creates_done_job_and_file(client, runtime):
     job_path = runtime / "jobs" / f"{body['job_id']}.json"
     data = json.loads(job_path.read_text(encoding="utf-8"))
     assert data["status"] == "done"
-    assert data["kind"] == "portrait"
+    assert data["asset_slot"] == "portrait"
     assert data["output_paths"] == [str(path)]
