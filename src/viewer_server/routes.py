@@ -583,6 +583,20 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     return {"items": items[:limit]}
 
 
+@router.get("/gallery/image")
+def gallery_image(path: str) -> FileResponse:
+    """Serve image files under characters/* OR studio/*. Rejects path traversal."""
+    root = _project_root()
+    target = (root / path).resolve()
+    characters_dir = (root / "characters").resolve()
+    studio_dir = (root / "studio").resolve()
+    if not (target.is_relative_to(characters_dir) or target.is_relative_to(studio_dir)):
+        raise HTTPException(status_code=400, detail="path outside allowed roots")
+    if not target.is_file():
+        raise HTTPException(status_code=404)
+    return FileResponse(target)
+
+
 @router.post("/keys/{alias}/default")
 def set_default_alias_endpoint(alias: str) -> dict:
     try:

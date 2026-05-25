@@ -1,14 +1,93 @@
+import { useEffect, useState } from 'react';
+import { Link } from 'wouter';
+
+import { fetchGalleryRecent, type GalleryItem } from '@/api/gallery';
+
+type State =
+  | { kind: 'loading' }
+  | { kind: 'success'; items: GalleryItem[] }
+  | { kind: 'error' };
+
 export function Home() {
+  const [state, setState] = useState<State>({ kind: 'loading' });
+
+  useEffect(() => {
+    let cancel = false;
+    fetchGalleryRecent(24)
+      .then((items) => !cancel && setState({ kind: 'success', items }))
+      .catch(() => !cancel && setState({ kind: 'error' }));
+    return () => {
+      cancel = true;
+    };
+  }, []);
+
   return (
-    <div className="px-6 py-12 text-foreground">
-      <h1
-        className="text-5xl italic mb-3"
-        style={{ fontFamily: 'var(--font-display)' }}
-      >
-        Atelier
-      </h1>
-      <p className="text-sm text-muted-foreground italic">一间安静的暖色画廊</p>
-      <p className="mt-8 text-sm text-muted-foreground">(masonry 占位 — T6 实现)</p>
+    <div className="px-8 py-12">
+      <section className="mb-12 text-center">
+        <h1
+          className="text-5xl italic text-foreground"
+          style={{ fontFamily: "'Instrument Serif', serif" }}
+        >
+          Atelier
+        </h1>
+        <p className="mt-3 text-sm italic text-muted-foreground">一间安静的暖色画廊</p>
+      </section>
+
+      {state.kind === 'loading' && (
+        <div className="columns-3 lg:columns-4 2xl:columns-5 gap-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={i}
+              data-skeleton
+              className="mb-6 break-inside-avoid bg-card/40 rounded-lg"
+              style={{ height: 200 + (i % 3) * 80 }}
+            />
+          ))}
+        </div>
+      )}
+
+      {state.kind === 'error' && (
+        <div className="text-sm text-muted-foreground text-center py-12">
+          暂时拿不到图片，刷新试试。
+        </div>
+      )}
+
+      {state.kind === 'success' && state.items.length === 0 && (
+        <div className="text-center py-12">
+          <p
+            className="text-2xl italic text-foreground"
+            style={{ fontFamily: "'Instrument Serif', serif" }}
+          >
+            工坊还空着。
+          </p>
+          <p className="mt-3 text-sm text-muted-foreground">
+            在终端跑{' '}
+            <code className="font-mono text-foreground/80 bg-card px-1.5 py-0.5 rounded">
+              /character-workflow &lt;名字&gt;
+            </code>{' '}
+            开始第一个角色。
+          </p>
+        </div>
+      )}
+
+      {state.kind === 'success' && state.items.length > 0 && (
+        <div className="columns-3 lg:columns-4 2xl:columns-5 gap-6">
+          {state.items.map((item) => (
+            <Link
+              key={`${item.character_id}-${item.filename}`}
+              href={`/character/${item.character_id}`}
+              className="mb-6 block break-inside-avoid"
+            >
+              <img
+                src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
+                alt=""
+                className="w-full rounded-lg border border-border/40 hover:border-primary/40 transition-all duration-150 hover:scale-[1.02]"
+                loading="lazy"
+              />
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

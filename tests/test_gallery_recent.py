@@ -80,3 +80,25 @@ def test_handles_missing_file_gracefully(client, tmp_path):
     items = resp.json()["items"]
     # good.png 必须返回；broken.png 跳过
     assert any(i["filename"] == "good.png" for i in items)
+
+
+def test_gallery_image_endpoint_rejects_traversal(client, tmp_path):
+    resp = client.get("/api/gallery/image?path=../../../etc/passwd")
+    assert resp.status_code == 400
+
+
+def test_gallery_image_endpoint_serves_valid_path(client, tmp_path):
+    _make_image(tmp_path / "characters" / "char-a" / "portrait" / "x.png")
+    resp = client.get("/api/gallery/image?path=characters/char-a/portrait/x.png")
+    assert resp.status_code == 200
+
+
+def test_gallery_image_endpoint_serves_studio(client, tmp_path):
+    _make_image(tmp_path / "studio" / "job-x" / "v1.png")
+    resp = client.get("/api/gallery/image?path=studio/job-x/v1.png")
+    assert resp.status_code == 200
+
+
+def test_gallery_image_endpoint_404_for_missing_file(client, tmp_path):
+    resp = client.get("/api/gallery/image?path=characters/foo/portrait/missing.png")
+    assert resp.status_code == 404
