@@ -74,7 +74,7 @@ export function DataRootPage({ onComplete }: Props) {
         type="button"
         onClick={save}
         disabled={!path || saving}
-        className="px-4 py-2 bg-stone-900 text-white rounded disabled:opacity-50"
+        className="px-4 py-2 bg-stone-900 text-white rounded disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
         {saving ? '保存中...' : '保存并继续'}
       </button>

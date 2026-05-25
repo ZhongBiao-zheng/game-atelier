@@ -215,8 +215,9 @@ function TabStrip({
             key={t.key}
             onClick={() => setTab(t.key)}
             className={cn(
-              'group relative bg-transparent border-0 p-0 cursor-pointer',
+              'group relative bg-transparent border-0 p-0 cursor-pointer rounded-sm',
               'flex items-baseline gap-1.5 transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
               active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground/80',
             )}
           >

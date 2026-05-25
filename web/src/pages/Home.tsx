@@ -22,7 +22,7 @@ export function Home() {
   }, []);
 
   return (
-    <div className="px-8 py-12">
+    <div className="px-8 py-12" aria-label="作品集首页">
       <section className="mb-12 text-center">
         <h1
           className="text-5xl italic text-foreground"

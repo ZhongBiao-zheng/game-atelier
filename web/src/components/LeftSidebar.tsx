@@ -451,8 +451,9 @@ function ProjectGroup({
       <header className="group/header flex items-center gap-1 px-1.5 py-1 text-xs text-muted-foreground select-none">
         <button
           onClick={() => !isEditing && setOpen(o => !o)}
+          aria-label={open ? '收起项目' : '展开项目'}
           title={open ? '收起' : '展开'}
-          className="grid place-items-center size-4 rounded hover:bg-accent/60 cursor-pointer bg-transparent border-0 p-0 text-inherit"
+          className="grid place-items-center size-4 rounded hover:bg-accent/60 cursor-pointer bg-transparent border-0 p-0 text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
         </button>
@@ -484,8 +485,9 @@ function ProjectGroup({
         </span>
         <button
           onClick={(e) => onDelete(project, e)}
+          aria-label={`删除项目 ${project.name}`}
           title="删除项目（角色不会丢）"
-          className="grid place-items-center size-4 rounded hover:bg-destructive/15 hover:text-destructive cursor-pointer opacity-0 group-hover/header:opacity-100 transition-opacity bg-transparent border-0 p-0 text-inherit"
+          className="grid place-items-center size-4 rounded hover:bg-destructive/15 hover:text-destructive cursor-pointer opacity-0 group-hover/header:opacity-100 transition-opacity bg-transparent border-0 p-0 text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
         >
           <X className="size-3" />
         </button>

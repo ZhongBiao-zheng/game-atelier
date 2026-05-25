@@ -11,7 +11,7 @@ function NavTab({ to, label, isActive }: { to: string; label: string; isActive: 
     <Link
       href={to}
       className={[
-        'h-14 inline-flex items-center px-3 text-sm transition-colors',
+        'h-14 inline-flex items-center px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm',
         isActive
           ? 'text-foreground border-b-2 border-primary -mb-px font-medium'
           : 'text-muted-foreground hover:text-foreground',
@@ -32,7 +32,7 @@ export function AppShell() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-30 bg-card border-b border-border">
         <div className="mx-auto flex h-14 items-center justify-between px-6">
-          <Link href="/" className="flex items-baseline gap-2">
+          <Link href="/" className="flex items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
             <span
               className="text-2xl font-normal"
               style={{ fontFamily: 'var(--font-display)' }}
@@ -50,7 +50,7 @@ export function AppShell() {
               href="/settings/keys"
               aria-label="API Keys 设置"
               className={[
-                'inline-flex h-9 w-9 items-center justify-center rounded-md transition-colors',
+                'inline-flex h-9 w-9 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
                 onKeys ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
               ].join(' ')}
             >

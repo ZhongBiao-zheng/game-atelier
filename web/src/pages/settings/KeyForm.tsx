@@ -123,14 +123,14 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
           type="button"
           onClick={submit}
           disabled={!alias || !accessKey || saving}
-          className="px-4 py-2 bg-stone-900 text-white rounded disabled:opacity-50"
+          className="px-4 py-2 bg-stone-900 text-white rounded disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           {saving ? '保存中...' : submitLabel}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 border rounded"
+          className="px-4 py-2 border rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           取消
         </button>
