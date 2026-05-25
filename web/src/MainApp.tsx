@@ -4,20 +4,17 @@ import { CharacterGallery } from './components/CharacterGallery';
 import { SpecForm } from './components/SpecForm';
 import { ImageDetail } from './components/ImageDetail';
 import { FirstRunConfig } from './components/FirstRunConfig';
-import { KeysPage } from './pages/settings/Keys';
 import { useSSE } from './hooks/useSSE';
 import { cn } from '@/lib/utils';
 
 interface Config { image_storage_root: string }
 
 interface MainAppProps {
-  // T4 will wire this up; declared here so CharacterDetail can pass it without TS errors
-  _routedCharacterId?: string;
+  routedCharacterId?: string;
 }
 
-export function MainApp({ _routedCharacterId: _ }: MainAppProps = {}) {
+export function MainApp({ routedCharacterId }: MainAppProps = {}) {
   const [config, setConfig] = useState<Config | null>(null);
-  const [view, setView] = useState<'main' | 'keys'>('main');
 
   useEffect(() => {
     fetch('/api/config').then(r => r.json()).then(setConfig);
@@ -34,22 +31,23 @@ export function MainApp({ _routedCharacterId: _ }: MainAppProps = {}) {
     return <FirstRunConfig onSaved={root => setConfig({ image_storage_root: root })} />;
   }
   return (
-    <div className="relative h-screen">
-      <button
-        type="button"
-        onClick={() => setView(view === 'keys' ? 'main' : 'keys')}
-        className="absolute right-4 top-3 z-50 rounded border border-stone-700/60 bg-stone-900/80 px-3 py-1 text-sm text-stone-100 backdrop-blur hover:bg-stone-800"
-      >
-        {view === 'keys' ? '返回' : 'API Keys'}
-      </button>
-      {view === 'keys' ? <KeysPage /> : <ThreeColumnLayout />}
+    <div className="h-screen">
+      <ThreeColumnLayout routedCharacterId={routedCharacterId} />
     </div>
   );
 }
 
-function ThreeColumnLayout() {
-  const [selected, setSelected] = useState<{ id: string; name: string } | null>(null);
+function ThreeColumnLayout({ routedCharacterId }: { routedCharacterId?: string }) {
+  const [selected, setSelected] = useState<{ id: string; name: string } | null>(
+    routedCharacterId ? { id: routedCharacterId, name: '' } : null,
+  );
   const [detailJob, setDetailJob] = useState<{ path: string; jobId: string } | null>(null);
+
+  useEffect(() => {
+    if (routedCharacterId && routedCharacterId !== selected?.id) {
+      setSelected({ id: routedCharacterId, name: '' });
+    }
+  }, [routedCharacterId]); // eslint-disable-line react-hooks/exhaustive-deps
   const sseSignal = useSSE();
   const detailMode = detailJob !== null;
   return (
