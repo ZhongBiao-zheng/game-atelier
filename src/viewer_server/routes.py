@@ -528,7 +528,8 @@ def create_key(payload: _KeyCreatePayload) -> dict:
         keys.add_key(spec)
     except keys.DuplicateAliasError:
         raise HTTPException(409, f"alias '{payload.alias}' already exists") from None
-    return {"alias": payload.alias}
+    # secret_revealed is only emitted once at creation — never on GET/PATCH
+    return {"alias": payload.alias, "secret_revealed": payload.access_key}
 
 
 @router.patch("/keys/{alias}")

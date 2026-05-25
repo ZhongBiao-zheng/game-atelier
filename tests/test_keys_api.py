@@ -28,12 +28,19 @@ def test_list_keys_returns_empty_initially(client):
 def test_create_then_list_masks_secrets(client):
     r1 = client.post("/api/keys", json=_make_payload())
     assert r1.status_code == 201, r1.text
+    # POST response MUST include the raw secret_revealed exactly once.
+    post_body = r1.json()
+    assert "secret_revealed" in post_body
+    assert post_body["secret_revealed"] == "ak"
     body = client.get("/api/keys").json()
     assert len(body["keys"]) == 1
     k = body["keys"][0]
     assert k["alias"] == "lov"
     assert k["access_key"] != "ak"
     assert k["secret_key"] is None
+    # GET response must NEVER leak the raw secret.
+    for row in body["keys"]:
+        assert "secret_revealed" not in row
 
 
 def test_create_duplicate_alias_409(client):

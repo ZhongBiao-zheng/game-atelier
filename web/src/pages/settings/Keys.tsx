@@ -1,130 +1,152 @@
 import { useEffect, useState } from 'react';
-import {
-  listKeys,
-  createKey,
-  deleteKey,
-  setDefaultKey,
-  type KeyView,
-  type KeyCreatePayload,
-} from '@/api/keys';
+
+import { KeyCard, type KeyRow } from '@/components/keys/KeyCard';
+import { RevealModal } from '@/components/keys/RevealModal';
 import { KeyForm } from './KeyForm';
+import { listKeys, deleteKey, setDefaultKey } from '@/api/keys';
 
 interface Props {
-  mode?: 'onboarding' | 'normal';
+  /** Backward-compat: onboarding flow passes mode="onboarding" + onComplete */
+  mode?: 'onboarding';
   onComplete?: () => void;
 }
 
-export function KeysPage({ mode = 'normal', onComplete }: Props = {}) {
-  const [keys, setKeys] = useState<KeyView[]>([]);
-  const [showForm, setShowForm] = useState(mode === 'onboarding');
+export function KeysPage({ mode, onComplete }: Props = {}) {
+  const [keys, setKeys] = useState<KeyRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(mode === 'onboarding');
+  const [revealSecret, setRevealSecret] = useState<string | null>(null);
 
-  const reload = () =>
-    listKeys()
-      .then(r => {
-        setKeys(r.keys);
-      })
-      .catch(e => setError(String(e)));
+  const refresh = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const resp = await listKeys();
+      setKeys(resp.keys.map(toKeyRow(resp.default_alias)));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { void refresh(); }, []);
 
-  const onAdd = async (p: KeyCreatePayload) => {
-    await createKey(p);
+  const onCreated = (secret: string) => {
     setShowForm(false);
-    reload();
-    if (mode === 'onboarding' && onComplete) onComplete();
-  };
-
-  const onDelete = async (alias: string) => {
-    const confirmed = window.prompt(`删除 Key "${alias}" — 输入别名确认：`);
-    if (confirmed !== alias) return;
-    try {
-      await deleteKey(alias);
-      reload();
-    } catch (e) {
-      setError(String(e));
-    }
-  };
-
-  const onSetDefault = async (alias: string) => {
-    try {
-      await setDefaultKey(alias);
-      reload();
-    } catch (e) {
-      setError(String(e));
-    }
+    setRevealSecret(secret);
+    void refresh();
+    // Don't fire onComplete here — RevealModal close handles it so the
+    // onboarding fork doesn't unmount the modal before the user reads the secret.
   };
 
   return (
-    <div className="max-w-3xl mx-auto p-8 space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl">API Keys</h1>
+    <div className="px-6 py-8 max-w-2xl mx-auto">
+      <div className="flex justify-between items-baseline mb-6">
+        <h1
+          className="text-2xl text-foreground"
+          style={{ fontFamily: "'Instrument Serif', serif" }}
+        >
+          API Keys
+        </h1>
         {!showForm && (
           <button
             type="button"
             onClick={() => setShowForm(true)}
-            className="px-4 py-2 bg-stone-900 text-white rounded"
+            className="text-sm bg-primary text-primary-foreground rounded-md px-3 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
           >
-            + 添加 Key
+            + 新建 Key
           </button>
         )}
       </div>
 
-      {error && <div className="text-red-600">{error}</div>}
+      {loading && (
+        <div className="space-y-3">
+          {[0, 1].map((i) => (
+            <div key={i} data-skeleton className="h-28 w-full max-w-2xl bg-card/40 rounded-lg" />
+          ))}
+        </div>
+      )}
+
+      {!loading && error && (
+        <div className="text-sm text-destructive">{error}</div>
+      )}
+
+      {!loading && !error && keys.length === 0 && !showForm && (
+        <div className="text-center py-16">
+          <p
+            className="text-2xl italic text-foreground"
+            style={{ fontFamily: "'Instrument Serif', serif" }}
+          >
+            还没有 API Key。
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowForm(true)}
+            className="mt-6 text-sm bg-primary text-primary-foreground rounded-md px-4 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            + 新建 Key
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && keys.length > 0 && (
+        <div className="space-y-3">
+          {keys.map((k) => (
+            <KeyCard
+              key={k.alias}
+              row={k}
+              onSetDefault={async () => { await setDefaultKey(k.alias); void refresh(); }}
+              onDelete={async () => {
+                const confirm = window.prompt(`输入 "${k.alias}" 确认删除`);
+                if (confirm !== k.alias) return;
+                await deleteKey(k.alias);
+                void refresh();
+              }}
+            />
+          ))}
+        </div>
+      )}
 
       {showForm && (
-        <div className="border p-4 rounded">
-          <h2 className="text-lg mb-4">新增 API Key</h2>
+        <div className="mt-6 border border-border rounded-lg p-6">
+          <h2
+            className="text-lg mb-4 text-foreground"
+            style={{ fontFamily: "'Instrument Serif', serif" }}
+          >
+            新增 API Key
+          </h2>
           <KeyForm
-            onSubmit={onAdd}
+            onCreated={onCreated}
             onCancel={() => setShowForm(false)}
             submitLabel={mode === 'onboarding' ? '保存并开始工作' : '保存'}
           />
         </div>
       )}
 
-      <ul className="space-y-3">
-        {keys.map(k => (
-          <li
-            key={k.alias}
-            className="border rounded p-4 flex justify-between items-start"
-          >
-            <div>
-              <div className="font-medium">
-                {k.alias}
-                {k.is_default && (
-                  <span className="ml-2 text-xs bg-stone-200 px-2 py-0.5 rounded">默认</span>
-                )}
-              </div>
-              <div className="text-sm text-stone-500">
-                {k.provider} · {k.capabilities.join(' / ')} · key: {k.access_key}
-              </div>
-              {k.notes && <div className="text-sm text-stone-700 mt-1">{k.notes}</div>}
-            </div>
-            <div className="flex gap-2">
-              {!k.is_default && (
-                <button
-                  type="button"
-                  onClick={() => onSetDefault(k.alias)}
-                  className="px-3 py-1 text-sm border rounded"
-                >
-                  设为默认
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => onDelete(k.alias)}
-                className="px-3 py-1 text-sm border rounded text-red-600"
-              >
-                删除
-              </button>
-            </div>
-          </li>
-        ))}
-        {keys.length === 0 && !showForm && (
-          <li className="text-stone-500 text-center py-8">还没有 API Key — 点上方添加一个</li>
-        )}
-      </ul>
+      {revealSecret && (
+        <RevealModal
+          secret={revealSecret}
+          onClose={() => {
+            setRevealSecret(null);
+            // Fire onboarding completion only after the user has acknowledged
+            // the secret — prevents App.tsx from unmounting the modal early.
+            if (mode === 'onboarding' && onComplete) onComplete();
+          }}
+        />
+      )}
     </div>
   );
+}
+
+function toKeyRow(defaultAlias: string | null) {
+  return (k: { alias: string; provider: string; access_key: string; is_default?: boolean; last_used_at?: string | null; created_at?: string | null }): KeyRow => ({
+    alias: k.alias,
+    provider: k.provider,
+    masked_secret: k.access_key ?? '****',
+    is_default: k.alias === defaultAlias,
+    last_used_at: k.last_used_at ?? null,
+    created_at: k.created_at ?? null,
+  });
 }

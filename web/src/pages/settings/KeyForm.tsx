@@ -1,17 +1,18 @@
 import { useState } from 'react';
-import type { KeyCreatePayload } from '@/api/keys';
+import { createKey, type KeyCreatePayload } from '@/api/keys';
 
 const PROVIDERS = ['lovart', 'openai', 'midjourney', 'nano_banana', 'seedream', 'custom'];
 const CAPABILITIES = ['portrait', 'promo', 'turnaround'];
 
 interface Props {
   initial?: Partial<KeyCreatePayload>;
-  onSubmit: (payload: KeyCreatePayload) => Promise<void>;
+  /** Called with the raw access_key after successful creation. */
+  onCreated: (secret: string) => void;
   onCancel: () => void;
   submitLabel?: string;
 }
 
-export function KeyForm({ initial, onSubmit, onCancel, submitLabel = '保存' }: Props) {
+export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }: Props) {
   const [alias, setAlias] = useState(initial?.alias ?? '');
   const [provider, setProvider] = useState(initial?.provider ?? 'lovart');
   const [accessKey, setAccessKey] = useState(initial?.access_key ?? '');
@@ -30,7 +31,7 @@ export function KeyForm({ initial, onSubmit, onCancel, submitLabel = '保存' }:
     setSaving(true);
     setError(null);
     try {
-      await onSubmit({
+      const result = await createKey({
         alias,
         provider,
         access_key: accessKey,
@@ -38,6 +39,7 @@ export function KeyForm({ initial, onSubmit, onCancel, submitLabel = '保存' }:
         capabilities: caps,
         notes,
       });
+      onCreated(result.secret_revealed);
     } catch (e) {
       setError(String(e));
     } finally {

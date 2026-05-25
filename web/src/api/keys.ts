@@ -26,7 +26,8 @@ export async function listKeys(): Promise<{ keys: KeyView[]; default_alias: stri
   return r.json();
 }
 
-export async function createKey(payload: KeyCreatePayload): Promise<void> {
+/** Returns the raw access_key for one-time reveal. */
+export async function createKey(payload: KeyCreatePayload): Promise<{ secret_revealed: string }> {
   const r = await fetch('/api/keys', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -36,6 +37,7 @@ export async function createKey(payload: KeyCreatePayload): Promise<void> {
     const body = await r.text();
     throw new Error(`createKey ${r.status}: ${body}`);
   }
+  return r.json();
 }
 
 export async function patchKey(alias: string, patch: Partial<KeyCreatePayload>): Promise<void> {
