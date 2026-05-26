@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from character_workflow.lib import data_root
+from character_workflow.lib.callers import dispatch
 from character_workflow.lib.callers import lovart as lovart_caller
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
@@ -186,6 +187,45 @@ def run_job(job_id: str) -> Job:
     refs = list(params.get("reference_images") or [])
 
     try:
+        if job.provider and job.provider != "lovart":
+            if not job.alias:
+                raise JobRunnerError("non-lovart studio job requires alias")
+            if job.status == JobStatus.PENDING_CONFIRM:
+                update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
+            with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider}-") as tmp:
+                paths = dispatch(
+                    prompt=job.prompt,
+                    model=job.model,
+                    alias=job.alias,
+                    output_dir=Path(tmp),
+                    n=params.get("n") or 1,
+                    size=params.get("size"),
+                    params=params,
+                )
+                selected = [(Path(p), dims) for p in paths if (dims := image_dimensions(Path(p)))]
+                if not selected:
+                    raise JobRunnerError(f"{job.provider} returned no valid image artifacts")
+
+                output_dir = job_output_dir_for(job)
+                output_paths: list[str] = []
+                first_dims: tuple[int, int] | None = None
+                for src, dims in selected[: max(1, int(params.get("n") or 1))]:
+                    target = _next_asset_path(output_dir)
+                    shutil.move(str(src), target)
+                    output_paths.append(str(target))
+                    first_dims = first_dims or dims
+                if first_dims:
+                    params["actual_size"] = f"{first_dims[0]}x{first_dims[1]}"
+                job = _save_params(read_job(job.job_id), params)
+                for output_path in output_paths:
+                    _write_sidecar(Path(output_path), job, params)
+                return update_job_status(
+                    job.job_id,
+                    status=JobStatus.DONE,
+                    output_paths=output_paths,
+                    error=None,
+                )
+
         attachments = lovart_caller.upload_files(refs) if refs else []
         params["lovart_attachments"] = attachments
         job = _save_params(job, params)

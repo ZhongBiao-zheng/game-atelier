@@ -20,8 +20,10 @@ def nano_banana_render(**_kwargs) -> list[str]:
 
 
 def seedream_render(**_kwargs) -> list[str]:
-    raise NotImplementedError("seedream provider not yet wired")
+    from character_workflow.lib.callers import openai_image
+    return openai_image.render(**_kwargs)
 
 
 def custom_render(**_kwargs) -> list[str]:
-    raise NotImplementedError("custom provider not yet wired")
+    from character_workflow.lib.callers import openai_image
+    return openai_image.render(**_kwargs)
