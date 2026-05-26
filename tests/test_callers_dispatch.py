@@ -154,3 +154,23 @@ def test_lovart_render_rejects_wrong_provider_alias(isolated_keys_db, tmp_path):
             alias="oai-2",
             output_dir=tmp_path / "out",
         )
+
+
+def test_video_provider_keys_can_be_stored_without_dispatch_regression(isolated_keys_db):
+    for provider in ["runway", "kling", "veo", "seedance"]:
+        spec = KeySpec(
+            alias=f"{provider}-main",
+            provider=provider,  # type: ignore[arg-type]
+            base_url=None,
+            access_key="video-secret",
+            secret_key=None,
+            capabilities=["promo"],
+            models=[{"name": provider.title(), "id": provider}],
+            modalities=["video"],
+            notes="",
+            created_at="2026-05-26T18:30:00Z",
+        )
+        keys.add_key(spec)
+
+    assert keys.find_by_alias("runway-main").modalities == ["video"]
+    assert keys.find_by_alias("kling-main").models[0].id == "kling"
