@@ -11,10 +11,10 @@ function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string
     <Link
       href={to}
       className={[
-        'h-11 inline-flex items-center gap-2 rounded-full px-5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary backdrop-blur-xl',
+        'h-10 inline-flex items-center gap-2 rounded-full px-5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary backdrop-blur-xl',
         isActive
-          ? 'bg-card/70 text-foreground ring-1 ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),inset_0_-1px_0_rgba(255,255,255,0.08),0_1px_18px_rgba(255,255,255,0.08),0_10px_28px_rgba(0,0,0,0.24)]'
-          : 'bg-card/35 text-muted-foreground hover:bg-card/60 hover:text-foreground',
+          ? 'bg-card/70 text-foreground ring-1 ring-white/10'
+          : 'text-muted-foreground hover:text-foreground hover:bg-card/30',
       ].join(' ')}
     >
       <Icon size={18} aria-hidden />

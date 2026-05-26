@@ -50,6 +50,13 @@ describe('AppShell', () => {
     expect(screen.getByText('主页').className).toContain('bg-card/70');
   });
 
+  it('active tab has h-10 and no inset shadow', () => {
+    renderAt('/');
+    const tab = screen.getByText('主页');
+    expect(tab.className).toContain('h-10');
+    expect(tab.className).not.toContain('shadow-[inset');
+  });
+
   it('Keys icon turns primary on /settings/keys', () => {
     renderAt('/settings/keys');
     const link = screen.getByLabelText('API Keys 设置');
