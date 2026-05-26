@@ -31,22 +31,23 @@ describe('AppShell', () => {
     expect(screen.getByText('Atelier')).toBeInTheDocument();
   });
 
-  it('highlights 试稿 tab on /studio', () => {
+  it('highlights 出图 tab on /studio', () => {
     renderAt('/studio');
-    const tab = screen.getByText('试稿');
-    expect(tab.className).toContain('border-primary');
+    const tab = screen.getByText('出图');
+    expect(tab.className).toContain('bg-card/70');
   });
 
   it('highlights 工坊 tab on /character/foo', () => {
     renderAt('/character/foo');
     const tab = screen.getByText('工坊');
-    expect(tab.className).toContain('border-primary');
+    expect(tab.className).toContain('bg-card/70');
   });
 
   it('does not highlight either tab on /', () => {
     renderAt('/');
-    expect(screen.getByText('试稿').className).not.toContain('border-primary');
-    expect(screen.getByText('工坊').className).not.toContain('border-primary');
+    expect(screen.getByText('出图').className).not.toContain('bg-card/70');
+    expect(screen.getByText('工坊').className).not.toContain('bg-card/70');
+    expect(screen.getByText('主页').className).toContain('bg-card/70');
   });
 
   it('Keys icon turns primary on /settings/keys', () => {

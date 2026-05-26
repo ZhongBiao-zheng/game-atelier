@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'wouter';
 
 import { fetchGalleryRecent, type GalleryItem } from '@/api/gallery';
+import { Studio } from './Studio';
 
 type State =
   | { kind: 'loading' }
@@ -22,16 +23,14 @@ export function Home() {
   }, []);
 
   return (
-    <div className="px-8 py-12" aria-label="作品集首页">
-      <section className="mb-12 text-center">
-        <h1
-          className="text-5xl italic text-foreground"
-          style={{ fontFamily: "'Instrument Serif', serif" }}
-        >
-          Atelier
-        </h1>
-        <p className="mt-3 text-sm italic text-muted-foreground">一间安静的暖色画廊</p>
+    <div className="px-8 pb-12" aria-label="作品集首页">
+      <section className="min-h-[520px] flex items-center justify-center">
+        <div className="w-full">
+          <Studio compact />
+        </div>
       </section>
+
+      <h2 className="mb-5 text-lg font-semibold text-foreground">作品展示</h2>
 
       {state.kind === 'loading' && (
         <div className="columns-3 lg:columns-4 2xl:columns-5 gap-6">

@@ -1,22 +1,23 @@
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
-import { Settings } from 'lucide-react';
+import { HomeIcon, Settings, Sparkles, UserRound } from 'lucide-react';
 
 import { Home } from '@/pages/Home';
 import { Studio } from '@/pages/Studio';
 import { CharacterDetail } from '@/pages/CharacterDetail';
 import { KeysPage } from '@/pages/settings/Keys';
 
-function NavTab({ to, label, isActive }: { to: string; label: string; isActive: boolean }) {
+function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string; isActive: boolean; icon: typeof HomeIcon }) {
   return (
     <Link
       href={to}
       className={[
-        'h-14 inline-flex items-center px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm',
+        'h-11 inline-flex items-center gap-2 rounded-full px-5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary backdrop-blur-xl',
         isActive
-          ? 'text-foreground border-b-2 border-primary -mb-px font-medium'
-          : 'text-muted-foreground hover:text-foreground',
+          ? 'bg-card/70 text-foreground ring-1 ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),inset_0_-1px_0_rgba(255,255,255,0.08),0_1px_18px_rgba(255,255,255,0.08),0_10px_28px_rgba(0,0,0,0.24)]'
+          : 'bg-card/35 text-muted-foreground hover:bg-card/60 hover:text-foreground',
       ].join(' ')}
     >
+      <Icon size={18} aria-hidden />
       {label}
     </Link>
   );
@@ -26,12 +27,13 @@ export function AppShell() {
   const [loc] = useLocation();
   const onCharacter = loc.startsWith('/character');
   const onStudio = loc === '/studio';
+  const onHome = loc === '/';
   const onKeys = loc === '/settings/keys';
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-30 bg-card border-b border-border">
-        <div className="mx-auto flex h-14 items-center justify-between px-6">
+      <header className="sticky top-0 z-30">
+        <div className="mx-auto flex h-20 items-center justify-between px-8">
           <Link href="/" className="flex items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
             <span
               className="text-2xl font-normal"
@@ -41,17 +43,18 @@ export function AppShell() {
             </span>
             <span className="text-xs text-muted-foreground">· 工作流</span>
           </Link>
-          <nav className="flex h-14 items-stretch gap-1">
-            <NavTab to="/character" label="工坊" isActive={onCharacter} />
-            <NavTab to="/studio" label="试稿" isActive={onStudio} />
+          <nav className="flex items-center gap-3">
+            <NavTab to="/" label="主页" isActive={onHome} icon={HomeIcon} />
+            <NavTab to="/studio" label="出图" isActive={onStudio} icon={Sparkles} />
+            <NavTab to="/character" label="工坊" isActive={onCharacter} icon={UserRound} />
           </nav>
           <div className="flex items-center gap-2">
             <Link
               href="/settings/keys"
               aria-label="API Keys 设置"
               className={[
-                'inline-flex h-9 w-9 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                onKeys ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+                'inline-flex h-10 w-10 items-center justify-center rounded-full bg-card/35 backdrop-blur-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                onKeys ? 'text-primary ring-1 ring-border/80' : 'text-muted-foreground hover:bg-card/60 hover:text-foreground',
               ].join(' ')}
             >
               <Settings size={18} aria-hidden />

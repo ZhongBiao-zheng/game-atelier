@@ -6,7 +6,12 @@ import { memoryLocation } from 'wouter/memory-location';
 import { Home } from './Home';
 
 beforeEach(() => {
-  globalThis.fetch = vi.fn() as any;
+  globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+    if (url === '/api/keys') {
+      return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);
+    }
+    return Promise.resolve({ ok: true, json: async () => ({ items: [] }) } as any);
+  }) as any;
 });
 
 afterEach(() => {
@@ -23,27 +28,24 @@ function renderHome() {
 }
 
 describe('Home', () => {
-  it('shows hero title and italic tagline', async () => {
-    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ items: [] }),
-    });
+  it('shows TapNow-style studio prompt on top', async () => {
     renderHome();
-    expect(screen.getByText('Atelier')).toBeInTheDocument();
-    expect(screen.getByText(/一间安静的暖色画廊/)).toBeInTheDocument();
+    expect(screen.getByText('描述你想生成的图片')).toBeInTheDocument();
+    expect(screen.getByText('作品展示')).toBeInTheDocument();
   });
 
   it('shows skeleton during LOADING', () => {
-    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockReturnValueOnce(new Promise(() => {}));
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);
+      }
+      return new Promise(() => {});
+    }) as any;
     const { container } = renderHome();
     expect(container.querySelectorAll('[data-skeleton]').length).toBeGreaterThan(0);
   });
 
   it('shows EMPTY copy when 0 characters', async () => {
-    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ items: [] }),
-    });
     renderHome();
     await waitFor(() => {
       expect(screen.getByText(/工坊还空着/)).toBeInTheDocument();
@@ -51,20 +53,25 @@ describe('Home', () => {
   });
 
   it('renders masonry images on SUCCESS', async () => {
-    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        items: [
-          {
-            character_id: 'char-a',
-            asset_slot: 'portrait',
-            filename: 'a.png',
-            path: 'characters/char-a/portrait/a.png',
-            mtime: 0,
-          },
-        ],
-      }),
-    });
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          items: [
+            {
+              character_id: 'char-a',
+              asset_slot: 'portrait',
+              filename: 'a.png',
+              path: 'characters/char-a/portrait/a.png',
+              mtime: 0,
+            },
+          ],
+        }),
+      } as any);
+    }) as any;
     const { container } = renderHome();
     await waitFor(() => {
       expect(container.querySelectorAll('img').length).toBe(1);
@@ -74,7 +81,12 @@ describe('Home', () => {
   });
 
   it('shows ERROR state on fetch failure', async () => {
-    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, status: 500 });
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);
+      }
+      return Promise.reject(new Error('boom'));
+    }) as any;
     renderHome();
     await waitFor(() => {
       expect(screen.getByText(/暂时拿不到图片/)).toBeInTheDocument();
