@@ -236,7 +236,12 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect }: Props) {
   if (characters.length === 0 && projects.projects.length === 0) {
     return (
       <aside className="h-screen border-r border-border/60 bg-card/30 overflow-y-auto flex flex-col">
-        <BrandHeader />
+        <BrandHeader
+          onNewCharacter={startNewCharacter}
+          onNewProject={startNewProject}
+          creatingCharacter={creatingCharacter}
+          creatingProject={creatingProject}
+        />
         <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-4">
           <p className="font-[var(--font-display)] italic text-xl text-foreground/70">尚无作品</p>
           <p className="text-xs text-muted-foreground leading-relaxed">
@@ -274,32 +279,12 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect }: Props) {
 
   return (
     <aside className="h-screen border-r border-border/60 bg-card/30 overflow-y-auto flex flex-col">
-      <BrandHeader>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={startNewCharacter}
-            disabled={creatingCharacter}
-            title="新建角色"
-            className="h-7 px-2 text-xs"
-          >
-            <UserPlus className="size-3" />
-            新角色
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={startNewProject}
-            disabled={creatingProject}
-            title="新建项目（用来给角色分类）"
-            className="h-7 px-2 text-xs"
-          >
-            <FolderPlus className="size-3" />
-            新项目
-          </Button>
-        </div>
-      </BrandHeader>
+      <BrandHeader
+        onNewCharacter={startNewCharacter}
+        onNewProject={startNewProject}
+        creatingCharacter={creatingCharacter}
+        creatingProject={creatingProject}
+      />
 
       <div className="flex-1 px-2 py-3">
         {creatingCharacter && (
@@ -544,15 +529,43 @@ function StatusBadge({ status, isActive }: { status: CharacterEntry['status']; i
   return <span className={cn('size-2 rounded-full shrink-0', colorClass[status] || 'bg-muted-foreground/40')} />;
 }
 
-function BrandHeader({ children }: { children?: React.ReactNode }) {
+function BrandHeader({
+  onNewCharacter,
+  onNewProject,
+  creatingCharacter,
+  creatingProject,
+}: {
+  onNewCharacter: () => void;
+  onNewProject: () => void;
+  creatingCharacter: boolean;
+  creatingProject: boolean;
+}) {
   return (
     <header className="flex items-center justify-between px-5 py-4 border-b border-border/60">
-      <div className="flex items-baseline gap-2 leading-none">
-        <span className="size-1.5 rounded-full bg-primary translate-y-[-2px]" />
-        <span className="font-[var(--font-display)] italic text-lg text-foreground">Atelier</span>
-        <span className="text-[10px] tracking-[0.18em] uppercase text-muted-foreground/70 ml-1">工坊</span>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onNewCharacter}
+          disabled={creatingCharacter}
+          title="新建角色"
+          className="h-9 px-3 text-sm"
+        >
+          <UserPlus className="size-4" />
+          新角色
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onNewProject}
+          disabled={creatingProject}
+          title="新建项目（用来给角色分类）"
+          className="h-9 px-3 text-sm"
+        >
+          <FolderPlus className="size-4" />
+          新项目
+        </Button>
       </div>
-      {children}
     </header>
   );
 }

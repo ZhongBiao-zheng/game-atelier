@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CharacterGallery } from './components/CharacterGallery';
-import { SpecForm } from './components/SpecForm';
 import { ImageDetail } from './components/ImageDetail';
 import { FirstRunConfig } from './components/FirstRunConfig';
 import { useSSE } from './hooks/useSSE';
@@ -55,7 +54,7 @@ function ThreeColumnLayout({ routedCharacterId }: { routedCharacterId?: string }
       'grid h-screen',
       detailMode
         ? 'grid-cols-[280px_360px_1fr]'
-        : 'grid-cols-[280px_1fr_380px]',
+        : 'grid-cols-[280px_1fr]',
     )}>
       <LeftSidebar
         sseSignal={sseSignal}
@@ -70,11 +69,7 @@ function ThreeColumnLayout({ routedCharacterId }: { routedCharacterId?: string }
         sseSignal={sseSignal}
       />
       {detailJob === null
-        ? <SpecForm
-            characterId={selected?.id ?? null}
-            characterName={selected?.name ?? null}
-            sseSignal={sseSignal}
-          />
+        ? null
         : <ImageDetail
             jobId={detailJob.jobId}
             path={detailJob.path}
