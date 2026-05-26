@@ -60,9 +60,9 @@ function renderStudio() {
 }
 
 describe('Studio', () => {
-  it('renders hero "Studio." in serif', () => {
+  it('renders prompt input on studio page', () => {
     renderStudio();
-    expect(screen.getByText('Studio.')).toBeInTheDocument();
+    expect(screen.getByLabelText('生图 prompt')).toBeInTheDocument();
   });
 
   it('shows inspiration chips when no rounds', () => {

@@ -81,30 +81,62 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     }
   };
 
+  if (compact) {
+    return (
+      <div className="py-8" aria-label="生图沙箱">
+        <h1 className="text-2xl leading-tight mb-8 max-w-[780px] mx-auto font-semibold">
+          描述你想生成的图片
+        </h1>
+        <PromptInput
+          onSubmit={onSubmit}
+          disabled={pending}
+          initialValue={seedText}
+          providers={keys}
+          providerAlias={providerAlias}
+          model={model}
+          ratio={ratio}
+          resolution={resolution}
+          onProviderChange={setProviderAlias}
+          onModelChange={setModel}
+          onRatioChange={setRatio}
+          onResolutionChange={setResolution}
+        />
+        {rounds.length === 0 && <InspirationChips onPick={(t) => setSeedText(t)} />}
+        <RoundList rounds={rounds} />
+      </div>
+    );
+  }
+
   return (
-    <div className={compact ? 'py-8' : 'px-6 py-8'} aria-label="生图沙箱">
-      <h1
-        className={compact ? 'text-[36px] leading-tight mb-8 max-w-[780px] mx-auto font-semibold' : 'text-3xl mb-6 max-w-3xl mx-auto'}
-        style={{ fontFamily: compact ? undefined : "'Instrument Serif', serif" }}
-      >
-        {compact ? '描述你想生成的图片' : 'Studio.'}
-      </h1>
-      <PromptInput
-        onSubmit={onSubmit}
-        disabled={pending}
-        initialValue={seedText}
-        providers={keys}
-        providerAlias={providerAlias}
-        model={model}
-        ratio={ratio}
-        resolution={resolution}
-        onProviderChange={setProviderAlias}
-        onModelChange={setModel}
-        onRatioChange={setRatio}
-        onResolutionChange={setResolution}
-      />
-      {rounds.length === 0 && <InspirationChips onPick={(t) => setSeedText(t)} />}
-      <RoundList rounds={rounds} />
+    <div
+      className="h-[calc(100vh-80px)] flex flex-col overflow-hidden px-6"
+      aria-label="生图沙箱"
+    >
+      <div className="flex-1 min-h-0 overflow-y-auto py-6">
+        {rounds.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <InspirationChips onPick={(t) => setSeedText(t)} />
+          </div>
+        ) : (
+          <RoundList rounds={rounds} />
+        )}
+      </div>
+      <div className="shrink-0 py-4 border-t border-border/30">
+        <PromptInput
+          onSubmit={onSubmit}
+          disabled={pending}
+          initialValue={seedText}
+          providers={keys}
+          providerAlias={providerAlias}
+          model={model}
+          ratio={ratio}
+          resolution={resolution}
+          onProviderChange={setProviderAlias}
+          onModelChange={setModel}
+          onRatioChange={setRatio}
+          onResolutionChange={setResolution}
+        />
+      </div>
     </div>
   );
 }
