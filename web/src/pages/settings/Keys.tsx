@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 
 import { KeyCard, type KeyRow } from '@/components/keys/KeyCard';
-import { RevealModal } from '@/components/keys/RevealModal';
 import { KeyForm } from './KeyForm';
 import { listKeys, deleteKey, setDefaultKey } from '@/api/keys';
 
@@ -16,7 +15,7 @@ export function KeysPage({ mode, onComplete }: Props = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(mode === 'onboarding');
-  const [revealSecret, setRevealSecret] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -33,12 +32,11 @@ export function KeysPage({ mode, onComplete }: Props = {}) {
 
   useEffect(() => { void refresh(); }, []);
 
-  const onCreated = (secret: string) => {
+  const onCreated = () => {
     setShowForm(false);
-    setRevealSecret(secret);
+    setSuccessMessage('创建成功');
     void refresh();
-    // Don't fire onComplete here — RevealModal close handles it so the
-    // onboarding fork doesn't unmount the modal before the user reads the secret.
+    if (mode === 'onboarding' && onComplete) onComplete();
   };
 
   return (
@@ -71,6 +69,12 @@ export function KeysPage({ mode, onComplete }: Props = {}) {
 
       {!loading && error && (
         <div className="text-sm text-destructive">{error}</div>
+      )}
+
+      {successMessage && (
+        <div className="mb-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
+          {successMessage}
+        </div>
       )}
 
       {!loading && !error && keys.length === 0 && !showForm && (
@@ -123,18 +127,6 @@ export function KeysPage({ mode, onComplete }: Props = {}) {
             submitLabel={mode === 'onboarding' ? '保存并开始工作' : '保存'}
           />
         </div>
-      )}
-
-      {revealSecret && (
-        <RevealModal
-          secret={revealSecret}
-          onClose={() => {
-            setRevealSecret(null);
-            // Fire onboarding completion only after the user has acknowledged
-            // the secret — prevents App.tsx from unmounting the modal early.
-            if (mode === 'onboarding' && onComplete) onComplete();
-          }}
-        />
       )}
     </div>
   );

@@ -105,6 +105,38 @@ describe('KeysPage', () => {
     await waitFor(() => expect(screen.getByText(/还没有 API Key/)).toBeInTheDocument());
     expect(screen.getAllByText('+ 新建 Key').length).toBeGreaterThan(0);
   });
+
+  it('shows success feedback without revealing the created key', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ keys: [], default_alias: null }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ secret_revealed: 'sk-created-secret' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          keys: [{ ...mockKey, alias: 'seedream', provider: 'seedream', access_key: 'sk...ret' }],
+          default_alias: null,
+        }),
+      });
+    globalThis.fetch = fetchMock as any;
+
+    render(<KeysPage />);
+
+    await waitFor(() => expect(screen.getByText(/还没有 API Key/)).toBeInTheDocument());
+    fireEvent.click(screen.getAllByText('+ 新建 Key')[0]);
+    fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'seedream' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sk-created-secret' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(screen.getByText('创建成功')).toBeInTheDocument());
+    expect(screen.queryByText('新 Key 已创建')).not.toBeInTheDocument();
+    expect(screen.queryByText('sk-created-secret')).not.toBeInTheDocument();
+  });
 });
 
 describe('KeyForm', () => {
