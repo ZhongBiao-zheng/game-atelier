@@ -59,40 +59,39 @@ export function PromptInput({
   };
 
   return (
-    <div className="bg-card/80 rounded-[2rem] border border-input/80 p-8 space-y-6 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl">
+    <div className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl h-[174px] flex flex-col gap-3">
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={onKey}
         placeholder="开始一段灵感对话..."
-        rows={5}
-        className="w-full bg-transparent text-2xl text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-md p-2"
+        className="flex-1 min-h-0 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none rounded-md px-2"
         aria-label="生图 prompt"
       />
-      <div className="flex justify-between items-center gap-4">
+      <div className="flex justify-between items-center gap-4 shrink-0">
         <div className="flex flex-wrap gap-2">
           <ControlButton active aria-label="图片生成">
-            <ImageIcon size={18} aria-hidden /> 图片生成
+            <ImageIcon size={14} aria-hidden /> 图片生成
           </ControlButton>
           <ControlButton
             aria-label="选择厂商"
             onClick={() => setOpenPanel(openPanel === 'provider' ? null : 'provider')}
             disabled={providers.length === 0}
           >
-            <Building2 size={18} aria-hidden /> {provider ? provider.alias : '未配置厂商'}
+            <Building2 size={14} aria-hidden /> {provider ? provider.alias : '未配置厂商'}
           </ControlButton>
           <ControlButton
             aria-label="选择模型"
             onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
             disabled={!provider || models.length === 0}
           >
-            <Box size={18} aria-hidden /> {selectedModel ? selectedModel.name : '未配置模型'}
+            <Box size={14} aria-hidden /> {selectedModel ? selectedModel.name : '未配置模型'}
           </ControlButton>
           <ControlButton
             aria-label="选择比例和分辨率"
             onClick={() => setOpenPanel(openPanel === 'size' ? null : 'size')}
           >
-            <Square size={18} aria-hidden /> {ratio} <span className="text-muted-foreground">|</span> 高清 {resolution}
+            <Square size={14} aria-hidden /> {ratio} <span className="text-muted-foreground">|</span> 高清 {resolution}
           </ControlButton>
         </div>
         <button
@@ -205,7 +204,7 @@ function ControlButton({
   return (
     <button
       type="button"
-      className={`inline-flex h-12 items-center gap-2 rounded-xl border px-4 text-base font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+      className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         active
           ? 'border-primary/40 bg-primary/10 text-primary'
           : 'border-border bg-background/30 text-foreground hover:bg-secondary'
