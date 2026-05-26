@@ -137,6 +137,32 @@ describe('KeysPage', () => {
     expect(screen.queryByText('新 Key 已创建')).not.toBeInTheDocument();
     expect(screen.queryByText('sk-created-secret')).not.toBeInTheDocument();
   });
+
+  it('shows key provider metadata and model count on key cards', async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        keys: [{
+          ...mockKey,
+          alias: 'seedream-main',
+          provider: 'seedream',
+          homepage_url: 'https://www.volcengine.com',
+          docs_url: 'https://www.volcengine.com/docs',
+          modalities: ['image'],
+          models: [{ name: '图片 5.0', id: 'doubao-seedream-5-0-260128' }],
+        }],
+        default_alias: null,
+      }),
+    });
+
+    render(<KeysPage />);
+
+    await waitFor(() => expect(screen.getByText('seedream-main')).toBeInTheDocument());
+    expect(screen.getByText('image')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '官网' })).toHaveAttribute('href', 'https://www.volcengine.com');
+    expect(screen.getByRole('link', { name: '文档' })).toHaveAttribute('href', 'https://www.volcengine.com/docs');
+    expect(screen.getByText('1 个模型')).toBeInTheDocument();
+  });
 });
 
 describe('KeyForm', () => {
