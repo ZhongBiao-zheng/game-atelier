@@ -35,9 +35,9 @@ export function App() {
   switch (state.status) {
     case 'needs_data_root':
       return <DataRootPage onComplete={reload} />;
-    case 'needs_first_key':
     case 'needs_keys_repair':
       return <KeysPage mode="onboarding" onComplete={reload} />;
+    case 'needs_first_key':
     case 'ready':
     default:
       return (

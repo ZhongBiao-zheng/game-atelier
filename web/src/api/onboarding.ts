@@ -1,8 +1,6 @@
 export type OnboardingStatus =
   | 'ready'
   | 'needs_data_root'
-  | 'needs_uv'
-  | 'needs_venv'
   | 'needs_first_key'
   | 'needs_keys_repair';
 
