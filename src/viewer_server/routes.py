@@ -495,6 +495,10 @@ class _KeyCreatePayload(BaseModel):
     secret_key: str | None = None
     capabilities: list[str] = []
     models: list[keys.ModelSpec] = []
+    homepage_url: str | None = None
+    docs_url: str | None = None
+    api_key_url: str | None = None
+    modalities: list[str] = []
     notes: str = ""
     created_at: str | None = None
 
@@ -515,6 +519,10 @@ class _KeyPatchPayload(BaseModel):
     secret_key: str | None = None
     capabilities: list[str] | None = None
     models: list[keys.ModelSpec] | None = None
+    homepage_url: str | None = None
+    docs_url: str | None = None
+    api_key_url: str | None = None
+    modalities: list[str] | None = None
     notes: str | None = None
 
     @field_validator("models", mode="before")
@@ -543,6 +551,10 @@ def create_key(payload: _KeyCreatePayload) -> dict:
             base_url=payload.base_url,
             access_key=payload.access_key, secret_key=payload.secret_key,
             capabilities=payload.capabilities, models=payload.models,
+            homepage_url=payload.homepage_url,
+            docs_url=payload.docs_url,
+            api_key_url=payload.api_key_url,
+            modalities=payload.modalities,
             notes=payload.notes,
             created_at=payload.created_at or datetime.now(timezone.utc).isoformat(),
         )

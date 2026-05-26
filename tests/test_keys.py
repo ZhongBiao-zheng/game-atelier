@@ -36,6 +36,34 @@ def test_write_and_read_roundtrip(isolated_data_root):
     assert db.keys[0].access_key == "ak_test"
 
 
+def test_key_spec_persists_provider_metadata(isolated_data_root):
+    spec = keys.KeySpec(
+        alias="seedream-main",
+        provider="seedream",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        access_key="ark-secret",
+        secret_key=None,
+        capabilities=["portrait"],
+        models=[{"name": "图片 5.0", "id": "doubao-seedream-5-0-260128"}],
+        homepage_url="https://www.volcengine.com",
+        docs_url="https://www.volcengine.com/docs",
+        api_key_url="https://console.volcengine.com/ark",
+        modalities=["image"],
+        notes="legacy note",
+        created_at="2026-05-26T18:30:00+08:00",
+    )
+
+    keys.add_key(spec)
+    row = keys.find_by_alias("seedream-main")
+
+    assert row is not None
+    assert row.homepage_url == "https://www.volcengine.com"
+    assert row.docs_url == "https://www.volcengine.com/docs"
+    assert row.api_key_url == "https://console.volcengine.com/ark"
+    assert row.modalities == ["image"]
+    assert row.notes == "legacy note"
+
+
 def test_find_by_alias(isolated_data_root):
     _seed({"version": 1, "default_alias": None, "keys": [
         {"alias": "a", "provider": "lovart", "access_key": "x", "secret_key": "y",

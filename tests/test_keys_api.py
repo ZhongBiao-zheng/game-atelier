@@ -60,6 +60,32 @@ def test_create_custom_key_persists_base_url_without_leaking_secret(client):
     assert row["secret_key"] is None
 
 
+def test_create_key_persists_provider_metadata(client):
+    payload = _make_payload("seedream-main")
+    payload.update({
+        "provider": "seedream",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "access_key": "ark-secret",
+        "secret_key": None,
+        "homepage_url": "https://www.volcengine.com",
+        "docs_url": "https://www.volcengine.com/docs",
+        "api_key_url": "https://console.volcengine.com/ark",
+        "modalities": ["image"],
+        "notes": "",
+    })
+
+    r1 = client.post("/api/keys", json=payload)
+    assert r1.status_code == 201, r1.text
+
+    row = client.get("/api/keys").json()["keys"][0]
+    assert row["homepage_url"] == "https://www.volcengine.com"
+    assert row["docs_url"] == "https://www.volcengine.com/docs"
+    assert row["api_key_url"] == "https://console.volcengine.com/ark"
+    assert row["modalities"] == ["image"]
+    assert row["notes"] == ""
+    assert row["access_key"] != "ark-secret"
+
+
 def test_create_key_persists_named_models(client):
     payload = _make_payload("volc")
     payload.update({

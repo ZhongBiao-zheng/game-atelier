@@ -15,7 +15,18 @@ from pydantic import BaseModel, Field, field_validator
 
 from character_workflow.lib import data_root
 
-Provider = Literal["lovart", "openai", "midjourney", "nano_banana", "seedream", "custom"]
+Provider = Literal[
+    "lovart",
+    "openai",
+    "midjourney",
+    "nano_banana",
+    "seedream",
+    "runway",
+    "kling",
+    "veo",
+    "seedance",
+    "custom",
+]
 Kind = Literal["portrait", "promo", "turnaround"]
 
 
@@ -32,6 +43,10 @@ class KeySpec(BaseModel):
     secret_key: str | None = None
     capabilities: list[Kind] = Field(default_factory=list)
     models: list[ModelSpec] = Field(default_factory=list)
+    homepage_url: str | None = None
+    docs_url: str | None = None
+    api_key_url: str | None = None
+    modalities: list[str] = Field(default_factory=list)
     notes: str = ""
     created_at: str
 
