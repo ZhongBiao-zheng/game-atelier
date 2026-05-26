@@ -11,7 +11,7 @@ function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string
     <Link
       href={to}
       className={[
-        'h-10 inline-flex items-center gap-2 rounded-full px-5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary backdrop-blur-xl',
+        'h-9 md:h-10 inline-flex items-center gap-2 rounded-full px-3 md:px-5 text-xs md:text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary backdrop-blur-xl',
         isActive
           ? 'bg-card/70 text-foreground ring-1 ring-white/10'
           : 'text-muted-foreground hover:text-foreground hover:bg-card/30',
@@ -33,7 +33,7 @@ export function AppShell() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-30">
-        <div className="mx-auto flex h-20 items-center justify-between px-8">
+        <div className="mx-auto flex h-14 md:h-20 items-center justify-between px-4 md:px-8">
           <Link href="/" className="flex items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
             <span
               className="text-2xl font-normal"
@@ -43,7 +43,7 @@ export function AppShell() {
             </span>
             <span className="text-xs text-muted-foreground">· 工作流</span>
           </Link>
-          <nav className="flex items-center gap-3">
+          <nav className="flex items-center gap-1 md:gap-3">
             <NavTab to="/" label="主页" isActive={onHome} icon={HomeIcon} />
             <NavTab to="/studio" label="出图" isActive={onStudio} icon={Sparkles} />
             <NavTab to="/character" label="工坊" isActive={onCharacter} icon={UserRound} />

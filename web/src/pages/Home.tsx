@@ -33,7 +33,7 @@ export function Home() {
       <h2 className="mb-5 text-lg font-semibold text-foreground">作品展示</h2>
 
       {state.kind === 'loading' && (
-        <div className="columns-3 lg:columns-4 2xl:columns-5 gap-6">
+        <div className="columns-2 sm:columns-3 lg:columns-4 2xl:columns-5 gap-6">
           {Array.from({ length: 6 }).map((_, i) => (
             <div
               key={i}
@@ -70,7 +70,7 @@ export function Home() {
       )}
 
       {state.kind === 'success' && state.items.length > 0 && (
-        <div className="columns-3 lg:columns-4 2xl:columns-5 gap-6">
+        <div className="columns-2 sm:columns-3 lg:columns-4 2xl:columns-5 gap-6">
           {state.items.map((item) => (
             <Link
               key={`${item.character_id}-${item.filename}`}

@@ -84,7 +84,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   if (compact) {
     return (
       <div className="py-8" aria-label="生图沙箱">
-        <h1 className="text-2xl leading-tight mb-8 max-w-[780px] mx-auto font-semibold">
+        <h1 className="text-xl sm:text-2xl leading-tight mb-6 sm:mb-8 max-w-[780px] mx-auto font-semibold">
           描述你想生成的图片
         </h1>
         <PromptInput
@@ -109,7 +109,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
 
   return (
     <div
-      className="h-[calc(100vh-80px)] flex flex-col overflow-hidden px-6"
+      className="h-[calc(100vh-56px)] md:h-[calc(100vh-80px)] flex flex-col overflow-hidden px-3 sm:px-6"
       aria-label="生图沙箱"
     >
       <div className="flex-1 min-h-0 overflow-y-auto py-6">

@@ -106,7 +106,7 @@ export function PromptInput({
         </button>
       </div>
       {openPanel === 'provider' && (
-        <div role="listbox" aria-label="选择厂商列表" className="absolute left-40 right-8 top-full z-20 mt-3 rounded-2xl border border-border bg-popover p-2 shadow-2xl">
+        <div role="listbox" aria-label="选择厂商列表" className="absolute left-0 sm:left-40 right-0 sm:right-8 top-full z-20 mt-3 rounded-2xl border border-border bg-popover p-2 shadow-2xl">
           <div className="px-3 py-2 text-sm text-muted-foreground">选择厂商</div>
           {providers.map((item) => (
             <button
@@ -131,7 +131,7 @@ export function PromptInput({
         </div>
       )}
       {openPanel === 'model' && (
-        <div role="listbox" aria-label="选择模型列表" className="absolute left-64 right-8 top-full z-20 mt-3 rounded-2xl border border-border bg-popover p-2 shadow-2xl">
+        <div role="listbox" aria-label="选择模型列表" className="absolute left-0 sm:left-64 right-0 sm:right-8 top-full z-20 mt-3 rounded-2xl border border-border bg-popover p-2 shadow-2xl">
           <div className="px-3 py-2 text-sm text-muted-foreground">选择模型：{provider?.alias}</div>
           {models.map((item) => (
             <button
@@ -155,7 +155,7 @@ export function PromptInput({
         </div>
       )}
       {openPanel === 'size' && (
-        <div className="absolute left-96 right-8 top-full z-20 mt-3 rounded-2xl border border-border bg-popover p-8 shadow-2xl space-y-8">
+        <div className="absolute left-0 sm:left-96 right-0 sm:right-8 top-full z-20 mt-3 rounded-2xl border border-border bg-popover p-8 shadow-2xl space-y-8">
           <section>
             <div className="mb-3 text-sm text-muted-foreground">选择比例</div>
             <div role="listbox" aria-label="选择比例" className="grid grid-cols-9 gap-1 rounded-2xl bg-secondary p-2">
