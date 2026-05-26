@@ -141,7 +141,7 @@ describe('KeyForm', () => {
       access_key: 'ark-test',
       secret_key: null,
     });
-    expect(body.base_url).toBeNull();
+    expect(body.base_url).toBe('https://ark.cn-beijing.volces.com/api/v3');
   });
 
   it('creates a custom provider key with base URL and API Key', async () => {
@@ -153,8 +153,7 @@ describe('KeyForm', () => {
 
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
     fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'custom' } });
-    fireEvent.change(screen.getByLabelText('供应商名称'), { target: { value: 'custom-image' } });
-    fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'OpenAI-compatible image API' } });
+    fireEvent.change(screen.getByLabelText('配置名称'), { target: { value: 'custom-image' } });
     fireEvent.change(screen.getByLabelText('官网链接'), { target: { value: 'https://example.com' } });
     fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'https://ark.cn-beijing.volces.com/api/v3' } });
     fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sk-custom' } });
@@ -167,8 +166,45 @@ describe('KeyForm', () => {
       provider: 'custom',
       base_url: 'https://ark.cn-beijing.volces.com/api/v3',
       access_key: 'sk-custom',
+      homepage_url: 'https://example.com',
+      notes: '',
     });
-    expect(body.notes).toBe('OpenAI-compatible image API\n官网：https://example.com');
+  });
+
+  it('labels custom provider as a named configuration that supports multiple instances', () => {
+    render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
+
+    fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'custom' } });
+
+    expect(screen.getByLabelText('配置名称')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('例如：openrouter-image-main')).toBeInTheDocument();
+    expect(screen.queryByLabelText('备注')).not.toBeInTheDocument();
+    expect(screen.getByText('自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。')).toBeInTheDocument();
+  });
+
+  it('creates a third-party image provider with structured metadata', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ secret_revealed: 'ark-test' }),
+    });
+    globalThis.fetch = fetchMock as any;
+
+    render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
+    fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'seedream' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'ark-test' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({
+      alias: 'seedream',
+      provider: 'seedream',
+      base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+      access_key: 'ark-test',
+      homepage_url: 'https://www.volcengine.com',
+      modalities: ['image'],
+      notes: '',
+    });
   });
 
   it('validates the custom API request URL from the test button', () => {

@@ -1,3 +1,5 @@
+export type ApiModality = 'image' | 'video' | 'audio' | 'llm' | string;
+
 export interface KeyView {
   alias: string;
   provider: string;
@@ -6,6 +8,10 @@ export interface KeyView {
   secret_key: null;
   capabilities: string[];
   models: KeyModel[];
+  homepage_url?: string | null;
+  docs_url?: string | null;
+  api_key_url?: string | null;
+  modalities?: ApiModality[];
   notes: string;
   created_at: string;
   is_default: boolean;
@@ -19,6 +25,10 @@ export interface KeyCreatePayload {
   secret_key?: string | null;
   capabilities: string[];
   models?: KeyModel[];
+  homepage_url?: string | null;
+  docs_url?: string | null;
+  api_key_url?: string | null;
+  modalities?: ApiModality[];
   notes?: string;
 }
 

@@ -1,23 +1,36 @@
 import { useState } from 'react';
 import { createKey, type KeyCreatePayload, type KeyModel } from '@/api/keys';
 
-const PROVIDERS = [
-  { value: 'lovart', label: 'Lovart' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'midjourney', label: 'Midjourney' },
-  { value: 'nano_banana', label: 'Nano Banana' },
-  { value: 'seedream', label: 'Seedream' },
-  { value: 'custom', label: '自定义' },
+type ProviderKind = 'official' | 'third_party' | 'custom';
+type ApiModality = 'image' | 'video' | 'audio' | 'llm';
+
+interface ProviderPreset {
+  value: string;
+  label: string;
+  kind: ProviderKind;
+  modalities: ApiModality[];
+  homepageUrl?: string;
+  docsUrl?: string;
+  apiKeyUrl?: string;
+  defaultBaseUrl?: string | null;
+  defaultModels: KeyModel[];
+}
+
+const PROVIDER_PRESETS: ProviderPreset[] = [
+  { value: 'lovart', label: 'Lovart', kind: 'official', modalities: ['image', 'video', 'audio'], homepageUrl: 'https://www.lovart.ai', defaultBaseUrl: null, defaultModels: [{ name: 'GPT Image 2', id: 'gpt-image-2' }] },
+  { value: 'openai', label: 'OpenAI', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://platform.openai.com', docsUrl: 'https://platform.openai.com/docs', apiKeyUrl: 'https://platform.openai.com/api-keys', defaultBaseUrl: 'https://api.openai.com/v1', defaultModels: [{ name: 'GPT Image 1', id: 'gpt-image-1' }] },
+  { value: 'seedream', label: 'Volcengine Seedream', kind: 'third_party', modalities: ['image'], homepageUrl: 'https://www.volcengine.com', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModels: [{ name: '图片 5.0', id: 'doubao-seedream-5-0-260128' }] },
+  { value: 'midjourney', label: 'Midjourney', kind: 'third_party', modalities: ['image'], homepageUrl: 'https://www.midjourney.com', defaultBaseUrl: null, defaultModels: [{ name: 'Midjourney', id: 'midjourney' }] },
+  { value: 'nano_banana', label: 'Nano Banana', kind: 'third_party', modalities: ['image'], defaultBaseUrl: null, defaultModels: [{ name: 'Nano Banana', id: 'nano-banana' }] },
+  { value: 'runway', label: 'Runway', kind: 'third_party', modalities: ['video'], homepageUrl: 'https://runwayml.com', defaultBaseUrl: null, defaultModels: [{ name: 'Runway Gen', id: 'runway-gen' }] },
+  { value: 'kling', label: 'Kling', kind: 'third_party', modalities: ['video'], homepageUrl: 'https://klingai.com', defaultBaseUrl: null, defaultModels: [{ name: 'Kling Video', id: 'kling-video' }] },
+  { value: 'veo', label: 'Google Veo', kind: 'third_party', modalities: ['video'], homepageUrl: 'https://deepmind.google/technologies/veo/', defaultBaseUrl: null, defaultModels: [{ name: 'Veo', id: 'veo' }] },
+  { value: 'seedance', label: 'Seedance', kind: 'third_party', modalities: ['video'], homepageUrl: 'https://www.volcengine.com', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModels: [{ name: 'Seedance', id: 'doubao-seedance-1-0-pro' }] },
+  { value: 'custom', label: '自定义', kind: 'custom', modalities: ['image'], defaultBaseUrl: '', defaultModels: [{ name: '', id: '' }] },
 ];
 
-const DEFAULT_MODELS: Record<string, KeyModel[]> = {
-  lovart: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
-  openai: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
-  midjourney: [{ name: 'Midjourney', id: 'midjourney' }],
-  nano_banana: [{ name: 'Nano Banana', id: 'nano-banana' }],
-  seedream: [{ name: 'Seedream', id: 'doubao-seedream-5-0-260128' }],
-  custom: [{ name: '', id: '' }],
-};
+const providerByValue = (value: string) =>
+  PROVIDER_PRESETS.find((preset) => preset.value === value) ?? PROVIDER_PRESETS[0];
 
 const fieldClass = 'w-full rounded-2xl border border-input/80 bg-background/40 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/60';
 
@@ -33,18 +46,20 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
   const [alias, setAlias] = useState(initial?.alias ?? initial?.provider ?? 'lovart');
   const [provider, setProvider] = useState(initial?.provider ?? 'lovart');
   const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? '');
-  const [homepage, setHomepage] = useState('');
+  const [homepage, setHomepage] = useState(initial?.homepage_url ?? providerByValue(initial?.provider ?? 'lovart').homepageUrl ?? '');
   const [accessKey, setAccessKey] = useState(initial?.access_key ?? '');
-  const [models, setModels] = useState<KeyModel[]>(initial?.models?.length ? initial.models : DEFAULT_MODELS[initial?.provider ?? 'lovart']);
-  const [notes, setNotes] = useState(initial?.notes ?? '');
+  const [models, setModels] = useState<KeyModel[]>(initial?.models?.length ? initial.models : providerByValue(initial?.provider ?? 'lovart').defaultModels);
   const [urlTest, setUrlTest] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const changeProvider = (nextProvider: string) => {
+    const preset = providerByValue(nextProvider);
     setProvider(nextProvider);
     setAlias(nextProvider === 'custom' ? '' : nextProvider);
-    setModels(DEFAULT_MODELS[nextProvider] ?? [{ name: '', id: '' }]);
+    setBaseUrl(preset.defaultBaseUrl ?? '');
+    setHomepage(preset.homepageUrl ?? '');
+    setModels(preset.defaultModels);
     setUrlTest(null);
   };
 
@@ -62,21 +77,22 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
     setSaving(true);
     setError(null);
     try {
-      const cleanNotes = notes.trim();
-      const cleanHomepage = homepage.trim();
+      const preset = providerByValue(provider);
       const result = await createKey({
         alias: provider === 'custom' ? alias.trim() : provider,
         provider,
-        base_url: provider === 'custom' ? baseUrl.trim() || null : null,
-        access_key: accessKey,
+        base_url: baseUrl.trim() || null,
+        access_key: accessKey.trim(),
         secret_key: null,
         capabilities: ['portrait', 'promo', 'turnaround'],
         models: models
           .map((model) => ({ name: model.name.trim(), id: model.id.trim() }))
           .filter((model) => model.name && model.id),
-        notes: provider === 'custom' && cleanHomepage
-          ? `${cleanNotes}\n官网：${cleanHomepage}`.trim()
-          : cleanNotes,
+        homepage_url: homepage.trim() || preset.homepageUrl || null,
+        docs_url: preset.docsUrl ?? null,
+        api_key_url: preset.apiKeyUrl ?? null,
+        modalities: preset.modalities,
+        notes: '',
       });
       onCreated(result.secret_revealed);
     } catch (e) {
@@ -103,31 +119,23 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
             onChange={e => changeProvider(e.target.value)}
             className={fieldClass}
           >
-            {PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+            {PROVIDER_PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
           </select>
         </div>
         {provider === 'custom' && (
           <>
             <div>
-              <label htmlFor="key-provider-name" className="block text-sm mb-2 text-muted-foreground">供应商名称</label>
+              <label htmlFor="key-provider-name" className="block text-sm mb-2 text-muted-foreground">配置名称</label>
               <input
                 id="key-provider-name"
                 value={alias}
                 onChange={e => setAlias(e.target.value)}
                 className={fieldClass}
-                placeholder="my-image-provider"
+                placeholder="例如：openrouter-image-main"
               />
-            </div>
-            <div>
-              <label htmlFor="key-notes" className="block text-sm mb-2 text-muted-foreground">备注</label>
-              <textarea
-                id="key-notes"
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                className={`${fieldClass} resize-none`}
-                rows={2}
-                placeholder="用途、额度、支持能力..."
-              />
+              <p className="mt-2 text-xs text-muted-foreground">
+                自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。
+              </p>
             </div>
             <div>
               <label htmlFor="key-homepage" className="block text-sm mb-2 text-muted-foreground">官网链接</label>
