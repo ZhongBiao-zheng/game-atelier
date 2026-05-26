@@ -108,6 +108,18 @@ describe('KeysPage', () => {
 });
 
 describe('KeyForm', () => {
+  it('shows the streamlined official provider fields', () => {
+    render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
+
+    expect(screen.getByLabelText('供应商选择')).toBeInTheDocument();
+    expect(screen.getByLabelText('API Key')).toBeInTheDocument();
+    expect(screen.getByLabelText('模型名称 1')).toBeInTheDocument();
+    expect(screen.queryByLabelText('供应商名称')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('API 请求地址')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Secret Key/)).not.toBeInTheDocument();
+    expect(screen.queryByText('图种能力')).not.toBeInTheDocument();
+  });
+
   it('creates an official provider key with only API Key required', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
@@ -117,15 +129,14 @@ describe('KeyForm', () => {
     const onCreated = vi.fn();
 
     render(<KeyForm onCreated={onCreated} onCancel={() => {}} />);
-    fireEvent.change(screen.getByLabelText('别名（唯一）'), { target: { value: 'volcengine' } });
-    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'seedream' } });
+    fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'seedream' } });
     fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'ark-test' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body).toMatchObject({
-      alias: 'volcengine',
+      alias: 'seedream',
       provider: 'seedream',
       access_key: 'ark-test',
       secret_key: null,
@@ -141,8 +152,10 @@ describe('KeyForm', () => {
     globalThis.fetch = fetchMock as any;
 
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
-    fireEvent.change(screen.getByLabelText('别名（唯一）'), { target: { value: 'custom-image' } });
-    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'custom' } });
+    fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'custom' } });
+    fireEvent.change(screen.getByLabelText('供应商名称'), { target: { value: 'custom-image' } });
+    fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'OpenAI-compatible image API' } });
+    fireEvent.change(screen.getByLabelText('官网链接'), { target: { value: 'https://example.com' } });
     fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'https://ark.cn-beijing.volces.com/api/v3' } });
     fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sk-custom' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -155,6 +168,20 @@ describe('KeyForm', () => {
       base_url: 'https://ark.cn-beijing.volces.com/api/v3',
       access_key: 'sk-custom',
     });
+    expect(body.notes).toBe('OpenAI-compatible image API\n官网：https://example.com');
+  });
+
+  it('validates the custom API request URL from the test button', () => {
+    render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
+
+    fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'custom' } });
+    fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'not-a-url' } });
+    fireEvent.click(screen.getByRole('button', { name: '测试' }));
+    expect(screen.getByText('请输入完整的 HTTP(S) API 请求地址')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'https://example.com/v1' } });
+    fireEvent.click(screen.getByRole('button', { name: '测试' }));
+    expect(screen.getByText('地址格式可用')).toBeInTheDocument();
   });
 
   it('creates a key with custom model names and ids', async () => {
@@ -165,8 +192,7 @@ describe('KeyForm', () => {
     globalThis.fetch = fetchMock as any;
 
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
-    fireEvent.change(screen.getByLabelText('别名（唯一）'), { target: { value: 'volcengine' } });
-    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'seedream' } });
+    fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'seedream' } });
     fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'ark-test' } });
     fireEvent.change(screen.getByLabelText('模型名称 1'), { target: { value: '图片 5.0 Lite' } });
     fireEvent.change(screen.getByLabelText('模型 ID 1'), { target: { value: 'doubao-seedream-5-0-260128' } });
