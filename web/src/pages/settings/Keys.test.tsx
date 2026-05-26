@@ -207,6 +207,26 @@ describe('KeyForm', () => {
     });
   });
 
+  it('visibly distinguishes model alias from model id', () => {
+    render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
+
+    expect(screen.getByText('模型别名')).toBeInTheDocument();
+    expect(screen.getByText('模型 ID')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('给人看的名字，例如：图片 5.0')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('请求里使用的 ID，例如：doubao-seedream-5-0-260128')).toBeInTheDocument();
+  });
+
+  it('shows API request URL examples instead of account-password style copy', () => {
+    render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
+    fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'custom' } });
+
+    expect(screen.getByLabelText('API 请求地址')).toHaveAttribute(
+      'placeholder',
+      '例如：https://api.example.com/v1 或 https://ark.cn-beijing.volces.com/api/v3',
+    );
+    expect(screen.getByText('请求时会自动拼接 /images/generations；如果你填的是完整路径，也会直接使用。')).toBeInTheDocument();
+  });
+
   it('validates the custom API request URL from the test button', () => {
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
 

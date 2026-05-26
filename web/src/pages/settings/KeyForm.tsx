@@ -32,7 +32,7 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
 const providerByValue = (value: string) =>
   PROVIDER_PRESETS.find((preset) => preset.value === value) ?? PROVIDER_PRESETS[0];
 
-const fieldClass = 'w-full rounded-2xl border border-input/80 bg-background/40 px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/60';
+const fieldClass = 'w-full rounded-2xl border border-input/70 bg-background/35 px-4 py-3 text-sm text-foreground shadow-inner shadow-black/5 placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-primary/50';
 
 interface Props {
   initial?: Partial<KeyCreatePayload>;
@@ -144,7 +144,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
                 value={homepage}
                 onChange={e => setHomepage(e.target.value)}
                 className={fieldClass}
-                placeholder="https://example.com"
+                placeholder="例如：https://platform.openai.com"
                 autoComplete="off"
               />
             </div>
@@ -159,7 +159,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
                     setUrlTest(null);
                   }}
                   className={fieldClass}
-                  placeholder="https://ark.cn-beijing.volces.com/api/v3"
+                  placeholder="例如：https://api.example.com/v1 或 https://ark.cn-beijing.volces.com/api/v3"
                   autoComplete="off"
                 />
                 <button
@@ -175,6 +175,9 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
                   {urlTest.message}
                 </div>
               )}
+              <p className="mt-2 text-xs text-muted-foreground">
+                请求时会自动拼接 /images/generations；如果你填的是完整路径，也会直接使用。
+              </p>
             </div>
           </>
         )}
@@ -185,7 +188,8 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
             type="password"
             value={accessKey}
             onChange={e => setAccessKey(e.target.value)}
-            className={fieldClass}
+            className={`${fieldClass} font-mono`}
+            placeholder="粘贴 API Key，例如 sk-..."
             autoComplete="off"
           />
         </div>
@@ -200,6 +204,11 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
               添加模型
             </button>
           </div>
+          <div className="grid grid-cols-[1fr_1fr_auto] gap-2 text-xs text-muted-foreground mb-2">
+            <span>模型别名</span>
+            <span>模型 ID</span>
+            <span className="sr-only">操作</span>
+          </div>
           <div className="space-y-2">
             {models.map((model, index) => (
               <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2">
@@ -210,7 +219,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
                   value={model.name}
                   onChange={e => setModels(models.map((m, i) => i === index ? { ...m, name: e.target.value } : m))}
                   className={fieldClass}
-                  placeholder="图片 5.0 Lite"
+                  placeholder="给人看的名字，例如：图片 5.0"
                 />
                 <label className="sr-only" htmlFor={`key-model-id-${index}`}>模型 ID {index + 1}</label>
                 <input
@@ -219,7 +228,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
                   value={model.id}
                   onChange={e => setModels(models.map((m, i) => i === index ? { ...m, id: e.target.value } : m))}
                   className={`${fieldClass} font-mono`}
-                  placeholder="doubao-seedream-5-0-260128"
+                  placeholder="请求里使用的 ID，例如：doubao-seedream-5-0-260128"
                 />
                 <button
                   type="button"
