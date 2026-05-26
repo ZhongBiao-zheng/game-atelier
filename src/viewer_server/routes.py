@@ -22,6 +22,7 @@ from character_workflow.lib.projects import (
     rename_project,
 )
 from pydantic import BaseModel, Field
+from pydantic import field_validator
 
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CharacterEntry, CharacterProjectAssign, ClipboardAttempt,
@@ -489,20 +490,42 @@ def set_data_root(payload: _DataRootPayload) -> dict:
 class _KeyCreatePayload(BaseModel):
     alias: str
     provider: str
+    base_url: str | None = None
     access_key: str
     secret_key: str | None = None
     capabilities: list[str] = []
-    models: list[str] = []
+    models: list[keys.ModelSpec] = []
     notes: str = ""
     created_at: str | None = None
 
+    @field_validator("models", mode="before")
+    @classmethod
+    def _normalize_models(cls, value: object) -> object:
+        if isinstance(value, list):
+            return [
+                {"name": item, "id": item} if isinstance(item, str) else item
+                for item in value
+            ]
+        return value
+
 
 class _KeyPatchPayload(BaseModel):
+    base_url: str | None = None
     access_key: str | None = None
     secret_key: str | None = None
     capabilities: list[str] | None = None
-    models: list[str] | None = None
+    models: list[keys.ModelSpec] | None = None
     notes: str | None = None
+
+    @field_validator("models", mode="before")
+    @classmethod
+    def _normalize_models(cls, value: object) -> object:
+        if isinstance(value, list):
+            return [
+                {"name": item, "id": item} if isinstance(item, str) else item
+                for item in value
+            ]
+        return value
 
 
 @router.get("/keys")
@@ -517,6 +540,7 @@ def create_key(payload: _KeyCreatePayload) -> dict:
     try:
         spec = keys.KeySpec(
             alias=payload.alias, provider=payload.provider,
+            base_url=payload.base_url,
             access_key=payload.access_key, secret_key=payload.secret_key,
             capabilities=payload.capabilities, models=payload.models,
             notes=payload.notes,

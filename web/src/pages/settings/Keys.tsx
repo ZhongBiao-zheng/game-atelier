@@ -141,10 +141,11 @@ export function KeysPage({ mode, onComplete }: Props = {}) {
 }
 
 function toKeyRow(defaultAlias: string | null) {
-  return (k: { alias: string; provider: string; access_key: string; is_default?: boolean; last_used_at?: string | null; created_at?: string | null }): KeyRow => ({
+  return (k: { alias: string; provider: string; access_key: string; models?: { name: string; id: string }[]; is_default?: boolean; last_used_at?: string | null; created_at?: string | null }): KeyRow => ({
     alias: k.alias,
     provider: k.provider,
     masked_secret: k.access_key ?? '****',
+    models: k.models ?? [],
     is_default: k.alias === defaultAlias,
     last_used_at: k.last_used_at ?? null,
     created_at: k.created_at ?? null,

@@ -43,6 +43,44 @@ def test_create_then_list_masks_secrets(client):
         assert "secret_revealed" not in row
 
 
+def test_create_custom_key_persists_base_url_without_leaking_secret(client):
+    payload = _make_payload("volc")
+    payload.update({
+        "provider": "custom",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "access_key": "ark-secret",
+        "secret_key": None,
+    })
+    r1 = client.post("/api/keys", json=payload)
+    assert r1.status_code == 201, r1.text
+
+    row = client.get("/api/keys").json()["keys"][0]
+    assert row["base_url"] == "https://ark.cn-beijing.volces.com/api/v3"
+    assert row["access_key"] != "ark-secret"
+    assert row["secret_key"] is None
+
+
+def test_create_key_persists_named_models(client):
+    payload = _make_payload("volc")
+    payload.update({
+        "provider": "seedream",
+        "access_key": "ark-test",
+        "secret_key": None,
+        "models": [
+            {"name": "图片 5.0 Lite", "id": "doubao-seedream-5-0-260128"},
+            {"name": "图片 4.7", "id": "doubao-seedream-4-5-251128"},
+        ],
+    })
+    r1 = client.post("/api/keys", json=payload)
+    assert r1.status_code == 201, r1.text
+
+    row = client.get("/api/keys").json()["keys"][0]
+    assert row["models"] == [
+        {"name": "图片 5.0 Lite", "id": "doubao-seedream-5-0-260128"},
+        {"name": "图片 4.7", "id": "doubao-seedream-4-5-251128"},
+    ]
+
+
 def test_create_duplicate_alias_409(client):
     client.post("/api/keys", json=_make_payload())
     r = client.post("/api/keys", json=_make_payload())

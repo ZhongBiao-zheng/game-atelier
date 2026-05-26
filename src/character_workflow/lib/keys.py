@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from character_workflow.lib import data_root
 
@@ -19,15 +19,31 @@ Provider = Literal["lovart", "openai", "midjourney", "nano_banana", "seedream", 
 Kind = Literal["portrait", "promo", "turnaround"]
 
 
+class ModelSpec(BaseModel):
+    name: str
+    id: str
+
+
 class KeySpec(BaseModel):
     alias: str
     provider: Provider
+    base_url: str | None = None
     access_key: str
     secret_key: str | None = None
     capabilities: list[Kind] = Field(default_factory=list)
-    models: list[str] = Field(default_factory=list)
+    models: list[ModelSpec] = Field(default_factory=list)
     notes: str = ""
     created_at: str
+
+    @field_validator("models", mode="before")
+    @classmethod
+    def _normalize_models(cls, value: object) -> object:
+        if isinstance(value, list):
+            return [
+                {"name": item, "id": item} if isinstance(item, str) else item
+                for item in value
+            ]
+        return value
 
 
 class KeysDB(BaseModel):

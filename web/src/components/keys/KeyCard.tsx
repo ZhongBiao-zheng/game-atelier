@@ -4,6 +4,7 @@ export interface KeyRow {
   alias: string;
   provider: string;
   masked_secret: string;
+  models?: { name: string; id: string }[];
   is_default: boolean;
   last_used_at?: string | null;
   created_at?: string | null;
@@ -26,6 +27,9 @@ export function KeyCard({ row, onSetDefault, onDelete }: Props) {
         <span className="text-xs text-muted-foreground">{row.provider}</span>
       </div>
       <div className="font-mono text-sm text-muted-foreground">{row.masked_secret}</div>
+      {row.models && row.models.length > 0 && (
+        <div className="text-xs text-muted-foreground">{row.models.length} 个模型</div>
+      )}
       <div className="flex items-center justify-between pt-1">
         <span className="text-xs text-muted-foreground">
           {row.last_used_at ? `最近使用 ${formatRelative(row.last_used_at)}` : '从未使用'}

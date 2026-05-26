@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 
 import { KeysPage } from './Keys';
+import { KeyForm } from './KeyForm';
 
 const mockKey = {
   alias: 'lov',
@@ -103,5 +104,82 @@ describe('KeysPage', () => {
     render(<KeysPage />);
     await waitFor(() => expect(screen.getByText(/还没有 API Key/)).toBeInTheDocument());
     expect(screen.getAllByText('+ 新建 Key').length).toBeGreaterThan(0);
+  });
+});
+
+describe('KeyForm', () => {
+  it('creates an official provider key with only API Key required', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ secret_revealed: 'ark-test' }),
+    });
+    globalThis.fetch = fetchMock as any;
+    const onCreated = vi.fn();
+
+    render(<KeyForm onCreated={onCreated} onCancel={() => {}} />);
+    fireEvent.change(screen.getByLabelText('别名（唯一）'), { target: { value: 'volcengine' } });
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'seedream' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'ark-test' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({
+      alias: 'volcengine',
+      provider: 'seedream',
+      access_key: 'ark-test',
+      secret_key: null,
+    });
+    expect(body.base_url).toBeNull();
+  });
+
+  it('creates a custom provider key with base URL and API Key', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ secret_revealed: 'sk-custom' }),
+    });
+    globalThis.fetch = fetchMock as any;
+
+    render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
+    fireEvent.change(screen.getByLabelText('别名（唯一）'), { target: { value: 'custom-image' } });
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'custom' } });
+    fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'https://ark.cn-beijing.volces.com/api/v3' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sk-custom' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({
+      alias: 'custom-image',
+      provider: 'custom',
+      base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+      access_key: 'sk-custom',
+    });
+  });
+
+  it('creates a key with custom model names and ids', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ secret_revealed: 'ark-test' }),
+    });
+    globalThis.fetch = fetchMock as any;
+
+    render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
+    fireEvent.change(screen.getByLabelText('别名（唯一）'), { target: { value: 'volcengine' } });
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'seedream' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'ark-test' } });
+    fireEvent.change(screen.getByLabelText('模型名称 1'), { target: { value: '图片 5.0 Lite' } });
+    fireEvent.change(screen.getByLabelText('模型 ID 1'), { target: { value: 'doubao-seedream-5-0-260128' } });
+    fireEvent.click(screen.getByRole('button', { name: '添加模型' }));
+    fireEvent.change(screen.getByLabelText('模型名称 2'), { target: { value: '图片 4.7' } });
+    fireEvent.change(screen.getByLabelText('模型 ID 2'), { target: { value: 'doubao-seedream-4-5-251128' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.models).toEqual([
+      { name: '图片 5.0 Lite', id: 'doubao-seedream-5-0-260128' },
+      { name: '图片 4.7', id: 'doubao-seedream-4-5-251128' },
+    ]);
   });
 });

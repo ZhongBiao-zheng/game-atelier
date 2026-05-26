@@ -1,10 +1,11 @@
 export interface KeyView {
   alias: string;
   provider: string;
+  base_url: string | null;
   access_key: string; // masked
   secret_key: null;
   capabilities: string[];
-  models: string[];
+  models: KeyModel[];
   notes: string;
   created_at: string;
   is_default: boolean;
@@ -13,11 +14,17 @@ export interface KeyView {
 export interface KeyCreatePayload {
   alias: string;
   provider: string;
+  base_url?: string | null;
   access_key: string;
   secret_key?: string | null;
   capabilities: string[];
-  models?: string[];
+  models?: KeyModel[];
   notes?: string;
+}
+
+export interface KeyModel {
+  name: string;
+  id: string;
 }
 
 export async function listKeys(): Promise<{ keys: KeyView[]; default_alias: string | null }> {
