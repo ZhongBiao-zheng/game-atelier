@@ -1,6 +1,7 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useState } from 'react';
 import { ArrowUp, Box, ImageIcon, Square, Building2, Link2 } from 'lucide-react';
 import type { KeyView } from '@/api/keys';
+import { computeStudioPixelSize } from '@/lib/studioSize';
 
 interface Props {
   onSubmit: (prompt: string) => void | Promise<void>;
@@ -77,7 +78,10 @@ export function PromptInput({
   };
 
   return (
-    <div className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl h-[174px] flex flex-col gap-3">
+    <div
+      data-testid="studio-prompt-shell"
+      className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl h-[174px] flex flex-col gap-3"
+    >
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -91,26 +95,158 @@ export function PromptInput({
           <ControlButton active aria-label="图片生成">
             <ImageIcon size={14} aria-hidden /> 图片生成
           </ControlButton>
-          <ControlButton
-            aria-label="选择厂商"
-            onClick={() => setOpenPanel(openPanel === 'provider' ? null : 'provider')}
-            disabled={providers.length === 0}
-          >
-            <Building2 size={14} aria-hidden /> {providerDisplayName}
-          </ControlButton>
-          <ControlButton
-            aria-label="选择模型"
-            onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
-            disabled={!provider || models.length === 0}
-          >
-            <Box size={14} aria-hidden /> {selectedModel ? selectedModel.name : '未配置模型'}
-          </ControlButton>
-          <ControlButton
-            aria-label="选择比例和分辨率"
-            onClick={() => setOpenPanel(openPanel === 'size' ? null : 'size')}
-          >
-            <Square size={14} aria-hidden /> {ratio} <span className="text-muted-foreground">|</span> {resolution === '2K' ? '高清 2K' : '超清 4K'}
-          </ControlButton>
+
+          <div data-testid="provider-control-wrap" className="relative">
+            <ControlButton
+              aria-label="选择厂商"
+              onClick={() => setOpenPanel(openPanel === 'provider' ? null : 'provider')}
+              disabled={providers.length === 0}
+            >
+              <Building2 size={14} aria-hidden /> {providerDisplayName}
+            </ControlButton>
+            {openPanel === 'provider' && (
+              <div role="listbox" aria-label="选择厂商列表" className={`absolute left-0 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-popover p-2 shadow-2xl`}>
+                <div className="px-3 py-2 text-sm text-muted-foreground">选择厂商</div>
+                {providers.map((item) => (
+                  <button
+                    key={item.alias}
+                    type="button"
+                    role="option"
+                    aria-selected={item.alias === provider?.alias}
+                    onClick={() => {
+                      onProviderChange?.(item.alias);
+                      onModelChange?.(item.models[0]?.id ?? '');
+                      setOpenPanel(null);
+                    }}
+                    className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary aria-selected:bg-secondary"
+                  >
+                    <Building2 size={20} aria-hidden />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">{providerName(item)}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{item.alias} · {item.models.length} models</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div data-testid="model-control-wrap" className="relative">
+            <ControlButton
+              aria-label="选择模型"
+              onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
+              disabled={!provider || models.length === 0}
+            >
+              <Box size={14} aria-hidden /> {selectedModel ? selectedModel.name : '未配置模型'}
+            </ControlButton>
+            {openPanel === 'model' && (
+              <div role="listbox" aria-label="选择模型列表" className={`absolute left-0 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-popover p-2 shadow-2xl`}>
+                <div className="px-3 py-2 text-sm text-muted-foreground">选择模型：{providerDisplayName}</div>
+                {models.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="option"
+                    aria-selected={selectedModel?.id === item.id}
+                    onClick={() => {
+                      onModelChange?.(item.id);
+                      setOpenPanel(null);
+                    }}
+                    className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary aria-selected:bg-secondary"
+                  >
+                    <Box size={22} aria-hidden />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">{item.name}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{item.id}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div data-testid="size-control-wrap" className="relative">
+            <ControlButton
+              aria-label="选择比例和分辨率"
+              onClick={() => setOpenPanel(openPanel === 'size' ? null : 'size')}
+            >
+              <Square size={14} aria-hidden /> {ratio} <span className="text-muted-foreground">|</span> {resolution === '2K' ? '高清 2K' : '超清 4K'}
+            </ControlButton>
+            {openPanel === 'size' && (
+              <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-[304px] max-w-[calc(100vw-32px)] max-h-[70vh] overflow-y-auto rounded-2xl border border-border bg-popover shadow-2xl`}>
+                <div className="p-5 space-y-4">
+                  <section>
+                    <div className="mb-2 text-sm font-semibold text-muted-foreground">比例</div>
+                    <div
+                      role="listbox"
+                      aria-label="选择比例"
+                      className="flex h-[98px] gap-2 rounded-2xl bg-secondary p-1"
+                    >
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={ratio === '1:1'}
+                        onClick={() => onRatioChange?.('1:1')}
+                        className="flex h-[90px] w-[56px] shrink-0 flex-col items-center justify-center gap-2 rounded-xl text-sm hover:bg-card aria-selected:bg-card transition-colors"
+                      >
+                        <RatioIcon ratio="1:1" box={28} />
+                        <span>1:1</span>
+                      </button>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {SIDE_RATIOS.map((item) => (
+                          <button
+                            key={item}
+                            type="button"
+                            role="option"
+                            aria-selected={ratio === item}
+                            onClick={() => onRatioChange?.(item)}
+                            className="flex h-[43px] w-[53.5px] flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-card aria-selected:bg-card transition-colors"
+                          >
+                            <RatioIcon ratio={item} box={18} />
+                            <span>{item}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </section>
+
+                  <section>
+                    <div className="mb-2 text-sm font-semibold text-muted-foreground">分辨率</div>
+                    <div role="listbox" aria-label="选择分辨率" className="grid h-9 grid-cols-2 gap-1 rounded-2xl bg-secondary p-0.5">
+                      {(['2K', '4K'] as const).map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          role="option"
+                          aria-selected={resolution === item}
+                          onClick={() => onResolutionChange?.(item)}
+                          className="h-8 rounded-xl text-center text-sm hover:bg-card aria-selected:bg-card transition-colors"
+                        >
+                          {item === '2K' ? '高清 2K' : '超清 4K'}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section>
+                    <div className="mb-2 text-sm font-semibold text-muted-foreground">尺寸</div>
+                    <div className="flex h-9 items-center gap-2 rounded-2xl bg-secondary p-0.5">
+                      <div aria-label="输出宽度" className="flex h-8 flex-1 items-center gap-2 rounded-xl px-3 text-sm">
+                        <span className="font-medium text-muted-foreground">W</span>
+                        <span className="flex-1 text-center tabular-nums">{computeStudioPixelSize(ratio, resolution, provider?.provider).w}</span>
+                      </div>
+                      <Link2 size={15} className="shrink-0 text-muted-foreground" aria-hidden />
+                      <div aria-label="输出高度" className="flex h-8 flex-1 items-center gap-2 rounded-xl px-3 text-sm">
+                        <span className="font-medium text-muted-foreground">H</span>
+                        <span className="flex-1 text-center tabular-nums">{computeStudioPixelSize(ratio, resolution, provider?.provider).h}</span>
+                      </div>
+                      <span className="shrink-0 pr-3 text-sm text-muted-foreground">PX</span>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         <button
           type="button"
@@ -123,127 +259,6 @@ export function PromptInput({
           <ArrowUp size={18} aria-hidden />
         </button>
       </div>
-      {openPanel === 'provider' && (
-        <div role="listbox" aria-label="选择厂商列表" className={`absolute left-0 sm:left-40 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-popover p-2 shadow-2xl`}>
-          <div className="px-3 py-2 text-sm text-muted-foreground">选择厂商</div>
-          {providers.map((item) => (
-            <button
-              key={item.alias}
-              type="button"
-              role="option"
-              aria-selected={item.alias === provider?.alias}
-              onClick={() => {
-                onProviderChange?.(item.alias);
-                onModelChange?.(item.models[0]?.id ?? '');
-                setOpenPanel(null);
-              }}
-              className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary aria-selected:bg-secondary"
-            >
-              <Building2 size={20} aria-hidden />
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium">{providerName(item)}</span>
-                <span className="block truncate text-xs text-muted-foreground">{item.alias} · {item.models.length} models</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-      {openPanel === 'model' && (
-        <div role="listbox" aria-label="选择模型列表" className={`absolute left-0 sm:left-64 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-popover p-2 shadow-2xl`}>
-          <div className="px-3 py-2 text-sm text-muted-foreground">选择模型：{providerDisplayName}</div>
-          {models.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="option"
-              aria-selected={selectedModel?.id === item.id}
-              onClick={() => {
-                onModelChange?.(item.id);
-                setOpenPanel(null);
-              }}
-              className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary aria-selected:bg-secondary"
-            >
-              <Box size={22} aria-hidden />
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium">{item.name}</span>
-                <span className="block truncate text-xs text-muted-foreground">{item.id}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-      {openPanel === 'size' && (
-        <div className={`absolute left-0 sm:left-96 right-0 sm:right-8 ${panelPosition} z-20 max-h-[70vh] overflow-y-auto rounded-2xl border border-border bg-popover shadow-2xl`}>
-          <div className="p-6 space-y-6">
-            <section>
-              <div className="mb-3 text-sm text-muted-foreground">选择比例</div>
-              <div
-                role="listbox"
-                aria-label="选择比例"
-                className="flex gap-3 rounded-2xl bg-secondary p-2"
-              >
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={ratio === '1:1'}
-                  onClick={() => onRatioChange?.('1:1')}
-                  className="flex h-[90px] w-[59px] shrink-0 flex-col items-center justify-center gap-2 rounded-xl text-[13px] hover:bg-card aria-selected:bg-card transition-colors"
-                >
-                  <RatioIcon ratio="1:1" box={28} />
-                  <span>1:1</span>
-                </button>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {SIDE_RATIOS.map((item) => (
-                    <button
-                      key={item}
-                      type="button"
-                      role="option"
-                      aria-selected={ratio === item}
-                      onClick={() => onRatioChange?.(item)}
-                      className="flex h-[43px] w-[53.5px] flex-col items-center justify-center gap-0.5 rounded-lg text-[13px] hover:bg-card aria-selected:bg-card transition-colors"
-                    >
-                      <RatioIcon ratio={item} box={18} />
-                      <span>{item}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </section>
-            <section>
-              <div className="mb-3 text-sm text-muted-foreground">选择分辨率</div>
-              <div role="listbox" aria-label="选择分辨率" className="grid grid-cols-2 gap-2 rounded-2xl bg-secondary p-2">
-                {(['2K', '4K'] as const).map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    role="option"
-                    aria-selected={resolution === item}
-                    onClick={() => onResolutionChange?.(item)}
-                    className="h-10 rounded-xl text-center text-[13px] hover:bg-card aria-selected:bg-card transition-colors"
-                  >
-                    {item === '2K' ? '高清 2K' : '超清 4K'}
-                  </button>
-                ))}
-              </div>
-            </section>
-            <section>
-              <div className="mb-3 text-sm text-muted-foreground">尺寸</div>
-              <div className="flex items-center gap-3">
-                <div aria-label="输出宽度" className="flex h-10 flex-1 items-center gap-3 rounded-xl bg-secondary px-4 text-[13px]">
-                  <span className="font-medium text-muted-foreground">W</span>
-                  <span className="flex-1 text-center tabular-nums">{computePixelSize(ratio, resolution).w}</span>
-                </div>
-                <Link2 size={16} className="shrink-0 text-muted-foreground" aria-hidden />
-                <div aria-label="输出高度" className="flex h-10 flex-1 items-center gap-3 rounded-xl bg-secondary px-4 text-[13px]">
-                  <span className="font-medium text-muted-foreground">H</span>
-                  <span className="flex-1 text-center tabular-nums">{computePixelSize(ratio, resolution).h}</span>
-                </div>
-                <span className="shrink-0 text-sm text-muted-foreground">PX</span>
-              </div>
-            </section>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -283,12 +298,4 @@ function RatioIcon({ ratio, box = 20 }: { ratio: string; box?: number }) {
       <rect x={x} y={y} width={w} height={h} rx="2" stroke="currentColor" strokeWidth="1.5" />
     </svg>
   );
-}
-
-function computePixelSize(ratio: string, resolution: '2K' | '4K'): { w: number; h: number } {
-  const base = resolution === '4K' ? 4096 : 2048;
-  if (ratio === '智能' || ratio === '1:1') return { w: base, h: base };
-  const [a, b] = ratio.split(':').map(Number);
-  if (a >= b) return { w: base, h: Math.round((b / a) * base) };
-  return { w: Math.round((a / b) * base), h: base };
 }

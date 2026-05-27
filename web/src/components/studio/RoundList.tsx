@@ -132,9 +132,13 @@ function DoneBatch({
           <p className="mt-1 text-sm text-muted-foreground">{meta.join(' | ')}</p>
         </div>
       </div>
-      <div className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="flex flex-wrap gap-1">
         {round.imagePaths.map((path, index) => (
-          <figure key={path} className="group relative overflow-hidden rounded-md bg-card">
+          <figure
+            key={path}
+            data-testid={`studio-result-thumb-${index + 1}`}
+            className="group relative w-[251.5px] overflow-hidden rounded-md bg-card"
+          >
             <img
               src={imageSrc(path)}
               alt={`生成结果 ${index + 1}`}
@@ -152,34 +156,40 @@ function DoneBatch({
           </figure>
         ))}
       </div>
-      <div className="relative flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <ActionButton onClick={() => onReEdit?.(round.config)}>重新编辑</ActionButton>
         <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
-        <ActionButton aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
-        {menuOpen && (
-          <div className="absolute left-0 top-full z-10 mt-2 w-44 rounded-xl border border-border bg-popover p-1 shadow-xl">
-            <button
-              type="button"
-              className="h-10 w-full rounded-lg px-3 text-left text-sm text-destructive hover:bg-destructive/10"
-              onClick={() => {
-                setMenuOpen(false);
-                void onDeleteBatch?.(round.jobId, round.imagePaths);
-              }}
-            >
-              删除当前批次的结果
-            </button>
-          </div>
-        )}
+        <div className="relative">
+          <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
+          {menuOpen && (
+            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 w-44 rounded-xl border border-border bg-popover p-1 shadow-xl">
+              <button
+                type="button"
+                className="h-10 w-full rounded-lg px-3 text-left text-sm text-destructive hover:bg-destructive/10"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void onDeleteBatch?.(round.jobId, round.imagePaths);
+                }}
+              >
+                删除当前批次的结果
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </section>
   );
 }
 
-function ActionButton(props: ButtonHTMLAttributes<HTMLButtonElement>) {
+function ActionButton({
+  compact = false,
+  className = '',
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { compact?: boolean }) {
   return (
     <button
       type="button"
-      className="h-12 rounded-xl bg-secondary px-5 text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      className={`${compact ? 'h-9 w-9 px-0' : 'h-9 w-[94px] px-3'} rounded-xl bg-secondary text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
       {...props}
     />
   );

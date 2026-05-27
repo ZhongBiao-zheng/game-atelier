@@ -5,6 +5,7 @@ import { createStudioJob } from '@/api/studio';
 import { listKeys, type KeyView } from '@/api/keys';
 import { PromptInput } from '@/components/studio/PromptInput';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
+import { studioSizeFor } from '@/lib/studioSize';
 import type { Job } from '@/schema/jobs';
 
 export function Studio({ compact = false }: { compact?: boolean }) {
@@ -66,13 +67,14 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const effectiveResolution = overrideConfig?.resolution ?? resolution;
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
     const effectiveModel = overrideConfig?.model ?? model;
-    const effectiveSize = overrideConfig?.size ?? sizeFor(effectiveRatio, effectiveResolution);
     const selectedKey = keys.find((item) => item.alias === effectiveAlias);
+    const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
+    const effectiveSize = overrideConfig?.size ?? studioSizeFor(effectiveRatio, effectiveResolution, effectiveProvider);
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
     const config: RoundConfig = {
       prompt,
       alias: effectiveAlias,
-      provider: selectedKey?.provider ?? overrideConfig?.provider,
+      provider: effectiveProvider,
       model: effectiveModel,
       modelName: selectedModel?.name ?? overrideConfig?.modelName,
       ratio: effectiveRatio,
@@ -241,15 +243,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     if (responses.some((resp) => !resp.ok)) return;
     setRounds((items) => items.filter((item) => item.kind !== 'done' || item.jobId !== jobId));
   }
-}
-
-function sizeFor(ratio: string, resolution: '2K' | '4K') {
-  const base = resolution === '4K' ? 4096 : 2048;
-  if (ratio === '1:1') return `${base}x${base}`;
-  const [a, b] = ratio.split(':').map(Number);
-  if (!a || !b) return `${base}x${base}`;
-  if (a >= b) return `${base}x${Math.round((b / a) * base)}`;
-  return `${Math.round((a / b) * base)}x${base}`;
 }
 
 function referenceImagesFor(job: Job): string[] {

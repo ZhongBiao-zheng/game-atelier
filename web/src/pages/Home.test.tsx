@@ -47,6 +47,17 @@ describe('Home', () => {
     expect(screen.getByText('作品展示')).toBeInTheDocument();
   });
 
+  it('uses the 174px prompt shell on the home page', () => {
+    renderHome();
+
+    expect(screen.getByTestId('studio-prompt-shell')).toHaveClass(
+      'h-[174px]',
+      'pt-[14px]',
+      'px-4',
+      'pb-4',
+    );
+  });
+
   it('shows skeleton during LOADING', () => {
     globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
       if (url === '/api/keys') {
@@ -144,6 +155,44 @@ describe('Home', () => {
     renderHome();
     fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
     expect(screen.getByRole('listbox', { name: '选择厂商列表' })).toHaveClass('top-full');
+  });
+
+  it('anchors compact prompt popovers to their selected trigger on the home page', async () => {
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'seedream',
+            keys: [{
+              alias: 'seedream',
+              provider: 'seedream',
+              access_key: 'ark...key',
+              secret_key: null,
+              capabilities: ['portrait'],
+              models: [{ name: 'Doubao', id: 'doubao' }],
+              notes: '',
+              created_at: '2026-05-27T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) } as any);
+    }) as any;
+
+    renderHome();
+
+    fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
+    expect(screen.getByRole('listbox', { name: '选择厂商列表' })).toHaveClass('absolute', 'left-0', 'top-full');
+    expect(screen.getByRole('listbox', { name: '选择厂商列表' })).not.toHaveClass('sm:left-40');
+
+    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    expect(screen.getByTestId('size-popover')).toHaveClass('absolute', 'left-0', 'top-full');
+    expect(screen.getByTestId('size-popover')).not.toHaveClass('sm:left-96');
   });
 
   it('does not show persisted studio generation rounds on the home page', async () => {

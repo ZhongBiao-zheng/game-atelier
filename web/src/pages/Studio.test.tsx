@@ -98,7 +98,7 @@ function mockCompletedBatchAndKeys() {
           params: {
             ratio: '4:3',
             resolution: '2K',
-            size: '2048x1536',
+            size: '2304x1728',
             reference_images: ['/tmp/ref.png'],
           },
           seed: null,
@@ -152,6 +152,17 @@ describe('Studio', () => {
   it('renders prompt input on studio page', () => {
     renderStudio();
     expect(screen.getByLabelText('生图 prompt')).toBeInTheDocument();
+  });
+
+  it('uses the 174px prompt shell on the studio page', () => {
+    renderStudio();
+
+    expect(screen.getByTestId('studio-prompt-shell')).toHaveClass(
+      'h-[174px]',
+      'pt-[14px]',
+      'px-4',
+      'pb-4',
+    );
   });
 
   it('shows no example prompt chips when no rounds', () => {
@@ -280,6 +291,70 @@ describe('Studio', () => {
                 created_at: '2026-05-25T00:00:00Z',
                 is_default: true,
               },
+              {
+                alias: 'oa',
+                provider: 'openai',
+                access_key: 'sk...key',
+                secret_key: null,
+                capabilities: ['portrait'],
+                models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
+                notes: '',
+                created_at: '2026-05-25T00:00:00Z',
+                is_default: false,
+              },
+            ],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ job_id: 'j1', status: 'pending', submitted_at: '2026-05-25T00:00:00Z' }),
+      } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+
+    await screen.findByRole('button', { name: /选择厂商/ });
+    fireEvent.click(screen.getByRole('button', { name: /选择厂商/ }));
+    fireEvent.click(screen.getByRole('option', { name: /oa/ }));
+    await screen.findByRole('button', { name: /选择比例和分辨率/ });
+    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    fireEvent.click(screen.getByRole('option', { name: '16:9' }));
+    expect(screen.getByLabelText('输出宽度')).toHaveTextContent('2048');
+    expect(screen.getByLabelText('输出高度')).toHaveTextContent('1152');
+
+    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '宽幅海报' } });
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body.params.size).toBe('2048x1152');
+  });
+
+  it('submits the valid Seedream 2K 3:4 size instead of the too-small 1536x2048 request', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'volc',
+            keys: [
+              {
+                alias: 'volc',
+                provider: 'seedream',
+                access_key: 'ark...key',
+                secret_key: null,
+                capabilities: ['portrait'],
+                models: [{ name: '图片 5.0 Lite', id: 'doubao-seedream-5-0-260128' }],
+                notes: '',
+                created_at: '2026-05-25T00:00:00Z',
+                is_default: true,
+              },
             ],
           }),
         } as any);
@@ -298,17 +373,18 @@ describe('Studio', () => {
 
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
-    fireEvent.click(screen.getByRole('option', { name: '16:9' }));
-    expect(screen.getByLabelText('输出宽度')).toHaveTextContent('2048');
-    expect(screen.getByLabelText('输出高度')).toHaveTextContent('1152');
+    fireEvent.click(screen.getByRole('option', { name: '3:4' }));
+    expect(screen.getByLabelText('输出宽度')).toHaveTextContent('1728');
+    expect(screen.getByLabelText('输出高度')).toHaveTextContent('2304');
 
-    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '宽幅海报' } });
+    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '竖版角色海报' } });
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
     const body = JSON.parse(String(studioCall![1]!.body));
-    expect(body.params.size).toBe('2048x1152');
+    expect(body.params.size).toBe('1728x2304');
+    expect(1728 * 2304).toBeGreaterThanOrEqual(3686400);
   });
 
   it('opens prompt menus upward on the studio page', async () => {
@@ -317,17 +393,38 @@ describe('Studio', () => {
     expect(screen.getByRole('listbox', { name: '选择厂商列表' })).toHaveClass('bottom-full');
   });
 
+  it('anchors prompt popovers to their selected trigger on the studio page', async () => {
+    renderStudio();
+
+    fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
+    expect(screen.getByTestId('provider-control-wrap')).toHaveClass('relative');
+    expect(screen.getByRole('listbox', { name: '选择厂商列表' })).toHaveClass('absolute', 'left-0', 'bottom-full');
+    expect(screen.getByRole('listbox', { name: '选择厂商列表' })).not.toHaveClass('sm:left-40');
+
+    fireEvent.click(screen.getByRole('button', { name: /选择模型/ }));
+    expect(screen.getByTestId('model-control-wrap')).toHaveClass('relative');
+    expect(screen.getByRole('listbox', { name: '选择模型列表' })).toHaveClass('absolute', 'left-0', 'bottom-full');
+    expect(screen.getByRole('listbox', { name: '选择模型列表' })).not.toHaveClass('sm:left-64');
+
+    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    expect(screen.getByTestId('size-control-wrap')).toHaveClass('relative');
+    expect(screen.getByTestId('size-popover')).toHaveClass('absolute', 'left-0', 'bottom-full');
+    expect(screen.getByTestId('size-popover')).not.toHaveClass('sm:left-96');
+  });
+
   it('renders the size panel without smart ratio and with emphasized 1:1 option', async () => {
     renderStudio();
 
     fireEvent.click(await screen.findByRole('button', { name: /选择比例和分辨率/ }));
 
     expect(screen.queryByRole('option', { name: '智能' })).not.toBeInTheDocument();
-    expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('w-[59px]', 'h-[90px]');
-    expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('w-[53.5px]', 'h-[43px]');
-    expect(screen.getByRole('option', { name: /高清 2K/ })).toHaveClass('h-10', 'text-[13px]');
-    expect(screen.getByLabelText('输出宽度')).toHaveClass('h-10', 'text-[13px]');
-    expect(screen.getByLabelText('输出高度')).toHaveClass('h-10', 'text-[13px]');
+    expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('h-[98px]', 'p-1');
+    expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('w-[56px]', 'h-[90px]', 'text-sm');
+    expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('w-[53.5px]', 'h-[43px]', 'text-sm');
+    expect(screen.getByRole('listbox', { name: '选择分辨率' })).toHaveClass('h-9', 'p-0.5');
+    expect(screen.getByRole('option', { name: /高清 2K/ })).toHaveClass('h-8', 'text-sm');
+    expect(screen.getByLabelText('输出宽度')).toHaveClass('h-8', 'text-sm');
+    expect(screen.getByLabelText('输出高度')).toHaveClass('h-8', 'text-sm');
   });
 
   it('uses fixed width and row height for provider and model menus', async () => {
@@ -418,11 +515,26 @@ describe('Studio', () => {
     expect(screen.getByRole('img', { name: '参考图' })).toHaveAttribute('src', '/api/gallery/image?path=%2Ftmp%2Fref.png');
     await waitFor(() => expect(screen.getAllByText(/图片 4.7/).length).toBeGreaterThan(0));
     expect(screen.getByText(/4:3/)).toBeInTheDocument();
-    expect(screen.getByText(/2048x1536/)).toBeInTheDocument();
+    expect(screen.getByText(/2304x1728/)).toBeInTheDocument();
     expect(screen.getAllByRole('img', { name: /生成结果/ })).toHaveLength(2);
+    expect(screen.getByTestId('studio-result-thumb-1')).toHaveClass('w-[251.5px]');
+    expect(screen.getByTestId('studio-result-thumb-2')).toHaveClass('w-[251.5px]');
     expect(screen.getByRole('button', { name: '重新编辑' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '再次生成' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument();
+  });
+
+  it('uses fixed batch action sizes and opens the more menu to the right', async () => {
+    renderStudioWithCompletedBatch();
+
+    expect(await screen.findByRole('button', { name: '重新编辑' })).toHaveClass('h-9', 'w-[94px]');
+    expect(screen.getByRole('button', { name: '再次生成' })).toHaveClass('h-9', 'w-[94px]');
+    expect(screen.getByRole('button', { name: '更多操作' })).toHaveClass('h-9', 'w-9');
+
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
+
+    expect(screen.getByTestId('studio-more-menu')).toHaveClass('absolute', 'left-full', 'top-0', 'ml-2');
+    expect(screen.getByTestId('studio-more-menu')).not.toHaveClass('top-full');
   });
 
   it('re-edits a completed batch into the prompt input and restores controls', async () => {
@@ -452,7 +564,7 @@ describe('Studio', () => {
       params: {
         ratio: '4:3',
         resolution: '2K',
-        size: '2048x1536',
+        size: '2304x1728',
       },
     });
   });
