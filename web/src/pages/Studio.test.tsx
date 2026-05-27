@@ -418,10 +418,10 @@ describe('Studio', () => {
     fireEvent.click(await screen.findByRole('button', { name: /选择比例和分辨率/ }));
 
     expect(screen.queryByRole('option', { name: '智能' })).not.toBeInTheDocument();
-    expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('grid', 'grid-cols-[112px_1fr]', 'h-[196px]', 'p-2');
-    expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('h-full', 'w-full', 'text-base');
+    expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('grid', 'grid-cols-[56px_1fr]', 'h-[98px]', 'p-1');
+    expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('h-[90px]', 'w-[56px]', 'text-sm');
     expect(screen.getByTestId('side-ratio-grid')).toHaveClass('grid-cols-4', 'grid-rows-2');
-    expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('h-full', 'w-full', 'text-sm');
+    expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('h-[43px]', 'w-[53.5px]', 'text-sm');
     expect(screen.getByRole('listbox', { name: '选择分辨率' })).toHaveClass('h-9', 'p-0.5');
     expect(screen.getByRole('option', { name: /高清 2K/ })).toHaveClass('h-8', 'text-sm');
     expect(screen.getByLabelText('输出宽度')).toHaveClass('h-8', 'text-sm');
@@ -551,8 +551,8 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
 
     expect(screen.getByTestId('studio-more-menu')).toHaveClass('absolute', 'left-full', 'top-0', 'ml-2');
-    expect(screen.getByTestId('studio-more-menu')).toHaveClass('w-[392px]', 'rounded-2xl', 'p-0');
-    expect(screen.getByRole('button', { name: '删除该批次结果' })).toHaveClass('h-[88px]', 'text-[22px]');
+    expect(screen.getByTestId('studio-more-menu')).toHaveClass('w-[195px]', 'h-11', 'rounded-xl', 'bg-secondary', 'p-0');
+    expect(screen.getByRole('button', { name: '删除该批次结果' })).toHaveClass('h-11', 'px-3', 'py-[9px]', 'text-[13px]');
     expect(screen.getByTestId('studio-more-menu')).not.toHaveClass('top-full');
   });
 

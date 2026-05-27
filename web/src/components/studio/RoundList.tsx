@@ -162,17 +162,17 @@ function DoneBatch({
         <div className="relative">
           <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
           {menuOpen && (
-            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 w-[392px] rounded-2xl border border-border bg-popover p-0 shadow-xl">
+            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 h-11 w-[195px] rounded-xl bg-secondary p-0 shadow-xl">
               <button
                 type="button"
                 aria-label="删除该批次结果"
-                className="flex h-[88px] w-full items-center gap-4 rounded-2xl px-8 text-left text-[22px] font-medium text-foreground hover:bg-secondary"
+                className="flex h-11 w-full items-center gap-2 rounded-xl px-3 py-[9px] text-left text-[13px] font-medium text-foreground hover:bg-secondary/80"
                 onClick={() => {
                   setMenuOpen(false);
                   void onDeleteBatch?.(round.jobId, round.imagePaths);
                 }}
               >
-                <Trash2 className="size-6 shrink-0" aria-hidden />
+                <Trash2 className="size-4 shrink-0" aria-hidden />
                 删除该批次结果
               </button>
             </div>
