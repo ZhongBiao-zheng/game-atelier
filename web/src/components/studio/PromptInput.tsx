@@ -5,6 +5,8 @@ import type { KeyView } from '@/api/keys';
 interface Props {
   onSubmit: (prompt: string) => void | Promise<void>;
   disabled?: boolean;
+  value?: string;
+  onValueChange?: (value: string) => void;
   providers?: KeyView[];
   providerAlias?: string;
   model?: string;
@@ -14,13 +16,28 @@ interface Props {
   onModelChange?: (model: string) => void;
   onRatioChange?: (ratio: string) => void;
   onResolutionChange?: (resolution: '2K' | '4K') => void;
+  menuDirection?: 'up' | 'down';
 }
 
-const RATIOS = ['智能', '21:9', '16:9', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16'];
+const SIDE_RATIOS = ['4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
+const PROVIDER_LABELS: Record<string, string> = {
+  openai: 'OpenAI',
+  seedream: '火山引擎',
+  midjourney: 'Midjourney',
+  nano_banana: 'Nano Banana',
+  lovart: 'Lovart',
+};
+
+function providerName(provider?: KeyView) {
+  if (!provider) return '未配置厂商';
+  return PROVIDER_LABELS[provider.provider] ?? provider.alias;
+}
 
 export function PromptInput({
   onSubmit,
   disabled,
+  value,
+  onValueChange,
   providers = [],
   providerAlias,
   model,
@@ -30,13 +47,20 @@ export function PromptInput({
   onModelChange,
   onRatioChange,
   onResolutionChange,
+  menuDirection = 'up',
 }: Props) {
-  const [text, setText] = useState('');
+  const [internalText, setInternalText] = useState('');
+  const text = value ?? internalText;
+  const setText = onValueChange ?? setInternalText;
   const [openPanel, setOpenPanel] = useState<'provider' | 'model' | 'size' | null>(null);
   const provider = providers.find((item) => item.alias === providerAlias) ?? providers[0];
+  const providerDisplayName = providerName(provider);
   const models = provider?.models ?? [];
   const selectedModel = models.find((item) => item.id === model) ?? models[0];
   const canSubmit = Boolean(provider && selectedModel && text.trim() && !disabled);
+  const panelPosition = menuDirection === 'down'
+    ? 'top-full mt-3'
+    : 'bottom-full mb-3';
 
   const submit = useCallback(() => {
     const trimmed = text.trim();
@@ -72,7 +96,7 @@ export function PromptInput({
             onClick={() => setOpenPanel(openPanel === 'provider' ? null : 'provider')}
             disabled={providers.length === 0}
           >
-            <Building2 size={14} aria-hidden /> {provider ? provider.alias : '未配置厂商'}
+            <Building2 size={14} aria-hidden /> {providerDisplayName}
           </ControlButton>
           <ControlButton
             aria-label="选择模型"
@@ -100,7 +124,7 @@ export function PromptInput({
         </button>
       </div>
       {openPanel === 'provider' && (
-        <div role="listbox" aria-label="选择厂商列表" className="absolute left-0 sm:left-40 right-0 sm:right-8 top-full z-20 mt-3 rounded-2xl border border-border bg-popover p-2 shadow-2xl">
+        <div role="listbox" aria-label="选择厂商列表" className={`absolute left-0 sm:left-40 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-popover p-2 shadow-2xl`}>
           <div className="px-3 py-2 text-sm text-muted-foreground">选择厂商</div>
           {providers.map((item) => (
             <button
@@ -113,20 +137,20 @@ export function PromptInput({
                 onModelChange?.(item.models[0]?.id ?? '');
                 setOpenPanel(null);
               }}
-              className="w-full flex items-center gap-4 rounded-lg px-4 py-4 text-left hover:bg-secondary aria-selected:bg-secondary"
+              className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary aria-selected:bg-secondary"
             >
-              <Building2 size={24} aria-hidden />
-              <span>
-                <span className="block text-base font-medium">{item.alias}</span>
-                <span className="block text-sm text-muted-foreground">{item.provider} · {item.models.length} models</span>
+              <Building2 size={20} aria-hidden />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium">{providerName(item)}</span>
+                <span className="block truncate text-xs text-muted-foreground">{item.alias} · {item.models.length} models</span>
               </span>
             </button>
           ))}
         </div>
       )}
       {openPanel === 'model' && (
-        <div role="listbox" aria-label="选择模型列表" className="absolute left-0 sm:left-64 right-0 sm:right-8 top-full z-20 mt-3 rounded-2xl border border-border bg-popover p-2 shadow-2xl">
-          <div className="px-3 py-2 text-sm text-muted-foreground">选择模型：{provider?.alias}</div>
+        <div role="listbox" aria-label="选择模型列表" className={`absolute left-0 sm:left-64 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-popover p-2 shadow-2xl`}>
+          <div className="px-3 py-2 text-sm text-muted-foreground">选择模型：{providerDisplayName}</div>
           {models.map((item) => (
             <button
               key={item.id}
@@ -137,36 +161,52 @@ export function PromptInput({
                 onModelChange?.(item.id);
                 setOpenPanel(null);
               }}
-              className="w-full flex items-center gap-4 rounded-lg px-4 py-4 text-left hover:bg-secondary aria-selected:bg-secondary"
+              className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary aria-selected:bg-secondary"
             >
-              <Box size={28} aria-hidden />
-              <span>
-                <span className="block text-lg font-medium">{item.name}</span>
-                <span className="block text-sm text-muted-foreground">{item.id}</span>
+              <Box size={22} aria-hidden />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium">{item.name}</span>
+                <span className="block truncate text-xs text-muted-foreground">{item.id}</span>
               </span>
             </button>
           ))}
         </div>
       )}
       {openPanel === 'size' && (
-        <div className="absolute left-0 sm:left-96 right-0 sm:right-8 top-full z-20 mt-3 rounded-2xl border border-border bg-popover shadow-2xl">
+        <div className={`absolute left-0 sm:left-96 right-0 sm:right-8 ${panelPosition} z-20 max-h-[70vh] overflow-y-auto rounded-2xl border border-border bg-popover shadow-2xl`}>
           <div className="p-6 space-y-6">
             <section>
               <div className="mb-3 text-sm text-muted-foreground">选择比例</div>
-              <div role="listbox" aria-label="选择比例" className="grid grid-cols-9 gap-1 rounded-2xl bg-secondary p-2">
-                {RATIOS.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    role="option"
-                    aria-selected={ratio === item || (item === '智能' && ratio === '1:1')}
-                    onClick={() => onRatioChange?.(item === '智能' ? '1:1' : item)}
-                    className="flex flex-col items-center gap-1.5 rounded-lg px-1 py-3 hover:bg-card aria-selected:bg-card transition-colors"
-                  >
-                    <RatioIcon ratio={item} />
-                    <span className="text-xs">{item}</span>
-                  </button>
-                ))}
+              <div
+                role="listbox"
+                aria-label="选择比例"
+                className="flex gap-3 rounded-2xl bg-secondary p-2"
+              >
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={ratio === '1:1'}
+                  onClick={() => onRatioChange?.('1:1')}
+                  className="flex h-[90px] w-[59px] shrink-0 flex-col items-center justify-center gap-2 rounded-xl text-[13px] hover:bg-card aria-selected:bg-card transition-colors"
+                >
+                  <RatioIcon ratio="1:1" box={28} />
+                  <span>1:1</span>
+                </button>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {SIDE_RATIOS.map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      role="option"
+                      aria-selected={ratio === item}
+                      onClick={() => onRatioChange?.(item)}
+                      className="flex h-[43px] w-[53.5px] flex-col items-center justify-center gap-0.5 rounded-lg text-[13px] hover:bg-card aria-selected:bg-card transition-colors"
+                    >
+                      <RatioIcon ratio={item} box={18} />
+                      <span>{item}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </section>
             <section>
@@ -179,7 +219,7 @@ export function PromptInput({
                     role="option"
                     aria-selected={resolution === item}
                     onClick={() => onResolutionChange?.(item)}
-                    className="rounded-xl py-4 text-center text-base hover:bg-card aria-selected:bg-card transition-colors"
+                    className="h-10 rounded-xl text-center text-[13px] hover:bg-card aria-selected:bg-card transition-colors"
                   >
                     {item === '2K' ? '高清 2K' : '超清 4K'}
                   </button>
@@ -189,14 +229,14 @@ export function PromptInput({
             <section>
               <div className="mb-3 text-sm text-muted-foreground">尺寸</div>
               <div className="flex items-center gap-3">
-                <div className="flex flex-1 items-center gap-3 rounded-xl bg-secondary px-4 py-3">
-                  <span className="text-sm font-medium text-muted-foreground">W</span>
-                  <span className="flex-1 text-center text-sm tabular-nums">{computePixelSize(ratio, resolution).w}</span>
+                <div aria-label="输出宽度" className="flex h-10 flex-1 items-center gap-3 rounded-xl bg-secondary px-4 text-[13px]">
+                  <span className="font-medium text-muted-foreground">W</span>
+                  <span className="flex-1 text-center tabular-nums">{computePixelSize(ratio, resolution).w}</span>
                 </div>
                 <Link2 size={16} className="shrink-0 text-muted-foreground" aria-hidden />
-                <div className="flex flex-1 items-center gap-3 rounded-xl bg-secondary px-4 py-3">
-                  <span className="text-sm font-medium text-muted-foreground">H</span>
-                  <span className="flex-1 text-center text-sm tabular-nums">{computePixelSize(ratio, resolution).h}</span>
+                <div aria-label="输出高度" className="flex h-10 flex-1 items-center gap-3 rounded-xl bg-secondary px-4 text-[13px]">
+                  <span className="font-medium text-muted-foreground">H</span>
+                  <span className="flex-1 text-center tabular-nums">{computePixelSize(ratio, resolution).h}</span>
                 </div>
                 <span className="shrink-0 text-sm text-muted-foreground">PX</span>
               </div>
@@ -226,16 +266,7 @@ function ControlButton({
   );
 }
 
-function RatioIcon({ ratio }: { ratio: string }) {
-  const box = 20;
-  if (ratio === '智能') {
-    return (
-      <svg width={box} height={box} viewBox={`0 0 ${box} ${box}`} fill="none" stroke="currentColor" strokeWidth="1.5">
-        <rect x="2" y="2" width={box - 4} height={box - 4} rx="2" />
-        <path d="M7 10h6M10 7v6" strokeLinecap="round" />
-      </svg>
-    );
-  }
+function RatioIcon({ ratio, box = 20 }: { ratio: string; box?: number }) {
   const [a, b] = ratio.split(':').map(Number);
   let w: number, h: number;
   if (a >= b) {
