@@ -17,15 +17,10 @@ interface ProviderPreset {
 }
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
-  { value: 'lovart', label: 'Lovart', kind: 'official', modalities: ['image', 'video', 'audio'], homepageUrl: 'https://www.lovart.ai', defaultBaseUrl: null, defaultModels: [{ name: 'GPT Image 2', id: 'gpt-image-2' }] },
-  { value: 'openai', label: 'OpenAI', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://platform.openai.com', docsUrl: 'https://platform.openai.com/docs', apiKeyUrl: 'https://platform.openai.com/api-keys', defaultBaseUrl: 'https://api.openai.com/v1', defaultModels: [{ name: 'GPT Image 1', id: 'gpt-image-1' }] },
-  { value: 'seedream', label: 'Volcengine Seedream', kind: 'third_party', modalities: ['image'], homepageUrl: 'https://www.volcengine.com', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModels: [{ name: '图片 5.0', id: 'doubao-seedream-5-0-260128' }] },
+  { value: 'openai', label: 'OpenAI', kind: 'official', modalities: ['image'], homepageUrl: 'https://platform.openai.com', docsUrl: 'https://platform.openai.com/docs', apiKeyUrl: 'https://platform.openai.com/api-keys', defaultBaseUrl: 'https://api.openai.com/v1', defaultModels: [{ name: 'GPT Image 1', id: 'gpt-image-1' }] },
+  { value: 'seedream', label: '火山引擎', kind: 'third_party', modalities: ['image'], homepageUrl: 'https://www.volcengine.com', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModels: [{ name: '图片 5.0', id: 'doubao-seedream-5-0-260128' }] },
   { value: 'midjourney', label: 'Midjourney', kind: 'third_party', modalities: ['image'], homepageUrl: 'https://www.midjourney.com', defaultBaseUrl: null, defaultModels: [{ name: 'Midjourney', id: 'midjourney' }] },
   { value: 'nano_banana', label: 'Nano Banana', kind: 'third_party', modalities: ['image'], defaultBaseUrl: null, defaultModels: [{ name: 'Nano Banana', id: 'nano-banana' }] },
-  { value: 'runway', label: 'Runway', kind: 'third_party', modalities: ['video'], homepageUrl: 'https://runwayml.com', defaultBaseUrl: null, defaultModels: [{ name: 'Runway Gen', id: 'runway-gen' }] },
-  { value: 'kling', label: 'Kling', kind: 'third_party', modalities: ['video'], homepageUrl: 'https://klingai.com', defaultBaseUrl: null, defaultModels: [{ name: 'Kling Video', id: 'kling-video' }] },
-  { value: 'veo', label: 'Google Veo', kind: 'third_party', modalities: ['video'], homepageUrl: 'https://deepmind.google/technologies/veo/', defaultBaseUrl: null, defaultModels: [{ name: 'Veo', id: 'veo' }] },
-  { value: 'seedance', label: 'Seedance', kind: 'third_party', modalities: ['video'], homepageUrl: 'https://www.volcengine.com', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModels: [{ name: 'Seedance', id: 'doubao-seedance-1-0-pro' }] },
   { value: 'custom', label: '自定义', kind: 'custom', modalities: ['image'], defaultBaseUrl: '', defaultModels: [{ name: '', id: '' }] },
 ];
 
@@ -43,12 +38,12 @@ interface Props {
 }
 
 export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }: Props) {
-  const [alias, setAlias] = useState(initial?.alias ?? initial?.provider ?? 'lovart');
-  const [provider, setProvider] = useState(initial?.provider ?? 'lovart');
+  const [alias, setAlias] = useState(initial?.alias ?? initial?.provider ?? 'openai');
+  const [provider, setProvider] = useState(initial?.provider ?? 'openai');
   const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? '');
-  const [homepage, setHomepage] = useState(initial?.homepage_url ?? providerByValue(initial?.provider ?? 'lovart').homepageUrl ?? '');
+  const [homepage, setHomepage] = useState(initial?.homepage_url ?? providerByValue(initial?.provider ?? 'openai').homepageUrl ?? '');
   const [accessKey, setAccessKey] = useState(initial?.access_key ?? '');
-  const [models, setModels] = useState<KeyModel[]>(initial?.models?.length ? initial.models : providerByValue(initial?.provider ?? 'lovart').defaultModels);
+  const [models, setModels] = useState<KeyModel[]>(initial?.models?.length ? initial.models : providerByValue(initial?.provider ?? 'openai').defaultModels);
   const [urlTest, setUrlTest] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
