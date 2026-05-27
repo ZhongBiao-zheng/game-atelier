@@ -1,6 +1,7 @@
 """Viewer server entry — start/stop/open-browser CLI."""
 from __future__ import annotations
 
+import json
 import os
 import signal
 import socket
@@ -11,7 +12,7 @@ from pathlib import Path
 
 import uvicorn
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from character_workflow.lib import data_root  # noqa: E402
 from viewer_server.pid import (  # noqa: E402
@@ -20,6 +21,56 @@ from viewer_server.pid import (  # noqa: E402
 
 
 DEFAULT_PORT = 5174
+_BOOTSTRAP = Path(__file__).resolve().parents[2] / "scripts" / "bootstrap.py"
+
+
+def _bootstrap_gate(background: bool) -> bool:
+    """Check deps before launching uvicorn. Returns True if ready to start.
+
+    needs_uv      → print install command, exit (cannot auto-install uv).
+    needs_venv    → foreground: prompt Y/n; background: auto-install.
+    other states  → handled by Web onboarding (data-root, keys); pass through.
+    """
+    check = subprocess.run(
+        [sys.executable, str(_BOOTSTRAP), "--check"],
+        capture_output=True, text=True,
+    )
+    if check.returncode != 0:
+        print(f"bootstrap --check failed: {check.stderr}", file=sys.stderr)
+        return False
+    state = json.loads(check.stdout)
+    status = state.get("status")
+
+    if status == "needs_uv":
+        print(f"缺少 uv，请先安装：\n  {state['next_action'].removeprefix('安装 uv: ')}")
+        return False
+
+    if status == "needs_venv":
+        if background:
+            print("依赖未安装/已过期，自动运行 bootstrap.py --ensure-venv …")
+            ok = _run_ensure_venv()
+            if not ok:
+                return False
+        else:
+            print("依赖未安装或已过期 (pyproject.toml 变化)。一键安装？[Y/n] ", end="", flush=True)
+            ans = sys.stdin.readline().strip().lower()
+            if ans in ("", "y", "yes"):
+                ok = _run_ensure_venv()
+                if not ok:
+                    return False
+            else:
+                print("已取消。手动安装：uv run python scripts/bootstrap.py --ensure-venv")
+                return False
+
+    return True
+
+
+def _run_ensure_venv() -> bool:
+    proc = subprocess.run([sys.executable, str(_BOOTSTRAP), "--ensure-venv"])
+    if proc.returncode != 0:
+        print(f"bootstrap --ensure-venv 失败 (exit={proc.returncode})", file=sys.stderr)
+        return False
+    return True
 
 
 def _spawn_detached(cmd: list[str], *, cwd: str, env: dict[str, str]) -> int:
@@ -68,6 +119,9 @@ def _find_free_port(start: int) -> int:
 
 
 def cmd_start(background: bool = False) -> None:
+    if not _bootstrap_gate(background):
+        sys.exit(1)
+
     runtime = data_root.runtime_dir()
     runtime.mkdir(parents=True, exist_ok=True)
     cleanup_stale_pid(runtime)
@@ -85,12 +139,18 @@ def cmd_start(background: bool = False) -> None:
         # 后台启动（Skill 调用路径）：非阻塞，只在首次启动时开浏览器
         import time
         project_root = str(Path(__file__).parent.parent.parent)
+        env = os.environ.copy()
+        src_path = str(Path(__file__).parent.parent)
+        env["PYTHONPATH"] = (
+            f"{src_path}{os.pathsep}{env['PYTHONPATH']}"
+            if env.get("PYTHONPATH") else src_path
+        )
         pid = _spawn_detached(
             [sys.executable, "-m", "uvicorn",
              "viewer_server.server_app:build_app", "--factory",
              "--host", "127.0.0.1", "--port", str(port), "--log-level", "info"],
             cwd=project_root,
-            env=os.environ.copy(),
+            env=env,
         )
         write_pid(runtime, pid)
         print(f"viewer-server started at http://127.0.0.1:{port}/ (pid={pid})")

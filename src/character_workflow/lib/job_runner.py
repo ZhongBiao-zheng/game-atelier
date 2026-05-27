@@ -92,7 +92,7 @@ def _webp_dimensions(data: bytes) -> tuple[int, int] | None:
 def image_dimensions(path: Path) -> tuple[int, int] | None:
     if not path.exists() or path.stat().st_size <= 0:
         return None
-    data = path.read_bytes()[:4096]
+    data = path.read_bytes()[:262144]
     for parser in (_png_dimensions, _jpeg_dimensions, _webp_dimensions):
         dims = parser(data)
         if dims and dims[0] > 0 and dims[1] > 0:

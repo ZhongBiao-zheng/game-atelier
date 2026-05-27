@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -160,7 +162,7 @@ def get_images(character: str) -> dict:
 def get_config() -> dict:
     p = _runtime() / "config.json"
     if not p.exists():
-        return {"image_storage_root": ""}
+        return {"image_storage_root": str(_project_root())}
     return json.loads(p.read_text(encoding="utf-8"))
 
 
@@ -455,6 +457,15 @@ class _DataRootPayload(BaseModel):
     path: str
 
 
+class _FolderPickerPayload(BaseModel):
+    title: str = "选择项目文件夹"
+    initial_path: str | None = None
+
+
+def _osascript_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def _bootstrap_script() -> Path:
     return Path(__file__).resolve().parents[2] / "scripts" / "bootstrap.py"
 
@@ -462,8 +473,6 @@ def _bootstrap_script() -> Path:
 @router.get("/onboarding/status")
 def onboarding_status() -> dict:
     """Proxies `bootstrap.py --check` so Web 不用知道状态机细节。"""
-    import subprocess
-    import sys
     proc = subprocess.run(
         [sys.executable, str(_bootstrap_script()), "--check"],
         capture_output=True, text=True,
@@ -473,18 +482,42 @@ def onboarding_status() -> dict:
     return json.loads(proc.stdout)
 
 
+@router.post("/folder-picker")
+def folder_picker(payload: _FolderPickerPayload) -> dict:
+    """Open a native directory picker and return an absolute local path."""
+    if sys.platform != "darwin":
+        raise HTTPException(501, detail="folder picker is currently supported on macOS only")
+
+    script = f"choose folder with prompt {_osascript_string(payload.title)}"
+    if payload.initial_path:
+        initial = Path(os.path.expandvars(os.path.expanduser(payload.initial_path)))
+        script += f" default location POSIX file {_osascript_string(str(initial))}"
+    proc = subprocess.run(
+        ["osascript", "-e", f"POSIX path of ({script})"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip()
+        if "User canceled" in stderr or "用户已取消" in stderr:
+            return {"path": None}
+        raise HTTPException(500, detail=stderr or "folder picker failed")
+    return {"path": str(Path(proc.stdout.strip()).expanduser().resolve())}
+
+
 @router.post("/onboarding/data-root")
 def set_data_root(payload: _DataRootPayload) -> dict:
     """Web 选完目录后落 global config，Skill 下次启动会从 global config 读。"""
-    import subprocess
-    import sys
     proc = subprocess.run(
         [sys.executable, str(_bootstrap_script()), "--init-data-root", payload.path],
         capture_output=True, text=True,
     )
     if proc.returncode != 0:
         raise HTTPException(500, f"init-data-root failed: {proc.stderr}")
-    return json.loads(proc.stdout)
+    body = json.loads(proc.stdout)
+    if root := body.get("data_root"):
+        os.environ["CHARACTER_WORKFLOW_DATA_ROOT"] = root
+    return body
 
 
 class _KeyCreatePayload(BaseModel):
@@ -590,7 +623,7 @@ _GALLERY_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
 @router.get("/gallery/recent")
 def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
-    """Return most-recent images across all characters, sorted by mtime desc."""
+    """Return most-recent character images, sorted by mtime desc."""
     characters_dir = _project_root() / "characters"
     items: list[dict] = []
     if not characters_dir.exists():
