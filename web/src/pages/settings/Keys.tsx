@@ -8,9 +8,10 @@ interface Props {
   /** Backward-compat: onboarding flow passes mode="onboarding" + onComplete */
   mode?: 'onboarding';
   onComplete?: () => void;
+  embedded?: boolean;
 }
 
-export function KeysPage({ mode, onComplete }: Props = {}) {
+export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   const [keys, setKeys] = useState<KeyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,12 +40,12 @@ export function KeysPage({ mode, onComplete }: Props = {}) {
     if (mode === 'onboarding' && onComplete) onComplete();
   };
 
-  return (
-    <div className="px-6 py-8 max-w-2xl mx-auto">
+  const content = (
+    <>
       <div className="flex justify-between items-baseline mb-6">
         <h1
-          className="text-2xl text-foreground"
-          style={{ fontFamily: "'Instrument Serif', serif" }}
+          className={embedded ? 'text-base font-medium text-foreground' : 'text-2xl text-foreground'}
+          style={embedded ? undefined : { fontFamily: "'Instrument Serif', serif" }}
         >
           API Keys
         </h1>
@@ -128,6 +129,20 @@ export function KeysPage({ mode, onComplete }: Props = {}) {
           />
         </div>
       )}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="rounded-lg border border-border bg-card/55 p-5">
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-6 py-8 max-w-2xl mx-auto">
+      {content}
     </div>
   );
 }
