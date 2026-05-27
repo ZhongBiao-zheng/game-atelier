@@ -65,9 +65,10 @@ describe('Studio', () => {
     expect(screen.getByLabelText('生图 prompt')).toBeInTheDocument();
   });
 
-  it('shows inspiration chips when no rounds', () => {
+  it('shows no example prompt chips when no rounds', () => {
     renderStudio();
-    expect(screen.getByText(/soft cotton low-angle/)).toBeInTheDocument();
+    expect(screen.queryByText(/试试/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/soft cotton low-angle/)).not.toBeInTheDocument();
   });
 
   it('disables submit when prompt empty', () => {

@@ -2,14 +2,12 @@ import { useEffect, useState } from 'react';
 
 import { createStudioJob } from '@/api/studio';
 import { listKeys, type KeyView } from '@/api/keys';
-import { InspirationChips } from '@/components/studio/InspirationChips';
 import { PromptInput } from '@/components/studio/PromptInput';
 import { RoundList, type RoundState } from '@/components/studio/RoundList';
 
 export function Studio({ compact = false }: { compact?: boolean }) {
   const [rounds, setRounds] = useState<RoundState[]>([]);
   const [pending, setPending] = useState(false);
-  const [seedText, setSeedText] = useState('');
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
@@ -90,7 +88,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
         <PromptInput
           onSubmit={onSubmit}
           disabled={pending}
-          initialValue={seedText}
           providers={keys}
           providerAlias={providerAlias}
           model={model}
@@ -101,7 +98,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           onRatioChange={setRatio}
           onResolutionChange={setResolution}
         />
-        {rounds.length === 0 && <InspirationChips onPick={(t) => setSeedText(t)} />}
         <RoundList rounds={rounds} />
       </div>
     );
@@ -113,19 +109,12 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       aria-label="生图沙箱"
     >
       <div className="flex-1 min-h-0 overflow-y-auto py-6">
-        {rounds.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <InspirationChips onPick={(t) => setSeedText(t)} />
-          </div>
-        ) : (
-          <RoundList rounds={rounds} />
-        )}
+        <RoundList rounds={rounds} />
       </div>
       <div className="shrink-0 py-4 border-t border-border/30">
         <PromptInput
           onSubmit={onSubmit}
           disabled={pending}
-          initialValue={seedText}
           providers={keys}
           providerAlias={providerAlias}
           model={model}
