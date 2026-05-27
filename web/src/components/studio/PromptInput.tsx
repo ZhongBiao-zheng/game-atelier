@@ -1,11 +1,10 @@
-import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useState, useEffect } from 'react';
+import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useState } from 'react';
 import { ArrowUp, Box, ImageIcon, Square, Building2 } from 'lucide-react';
 import type { KeyView } from '@/api/keys';
 
 interface Props {
   onSubmit: (prompt: string) => void | Promise<void>;
   disabled?: boolean;
-  initialValue?: string;
   providers?: KeyView[];
   providerAlias?: string;
   model?: string;
@@ -22,7 +21,6 @@ const RATIOS = ['智能', '21:9', '16:9', '3:2', '4:3', '1:1', '3:4', '2:3', '9:
 export function PromptInput({
   onSubmit,
   disabled,
-  initialValue = '',
   providers = [],
   providerAlias,
   model,
@@ -33,16 +31,12 @@ export function PromptInput({
   onRatioChange,
   onResolutionChange,
 }: Props) {
-  const [text, setText] = useState(initialValue);
+  const [text, setText] = useState('');
   const [openPanel, setOpenPanel] = useState<'provider' | 'model' | 'size' | null>(null);
   const provider = providers.find((item) => item.alias === providerAlias) ?? providers[0];
   const models = provider?.models ?? [];
   const selectedModel = models.find((item) => item.id === model) ?? models[0];
   const canSubmit = Boolean(provider && selectedModel && text.trim() && !disabled);
-
-  useEffect(() => {
-    if (initialValue) setText(initialValue);
-  }, [initialValue]);
 
   const submit = useCallback(() => {
     const trimmed = text.trim();
