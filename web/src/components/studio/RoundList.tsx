@@ -1,5 +1,5 @@
 import { type ButtonHTMLAttributes, useState } from 'react';
-import { Download } from 'lucide-react';
+import { Download, Trash2 } from 'lucide-react';
 
 import { WaitingCopy } from './WaitingCopy';
 
@@ -162,16 +162,18 @@ function DoneBatch({
         <div className="relative">
           <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
           {menuOpen && (
-            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 w-44 rounded-xl border border-border bg-popover p-1 shadow-xl">
+            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 w-[392px] rounded-2xl border border-border bg-popover p-0 shadow-xl">
               <button
                 type="button"
-                className="h-10 w-full rounded-lg px-3 text-left text-sm text-destructive hover:bg-destructive/10"
+                aria-label="删除该批次结果"
+                className="flex h-[88px] w-full items-center gap-4 rounded-2xl px-8 text-left text-[22px] font-medium text-foreground hover:bg-secondary"
                 onClick={() => {
                   setMenuOpen(false);
                   void onDeleteBatch?.(round.jobId, round.imagePaths);
                 }}
               >
-                删除当前批次的结果
+                <Trash2 className="size-6 shrink-0" aria-hidden />
+                删除该批次结果
               </button>
             </div>
           )}

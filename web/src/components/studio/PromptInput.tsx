@@ -98,6 +98,7 @@ export function PromptInput({
 
           <div data-testid="provider-control-wrap" className="relative">
             <ControlButton
+              active={openPanel === 'provider'}
               aria-label="选择厂商"
               onClick={() => setOpenPanel(openPanel === 'provider' ? null : 'provider')}
               disabled={providers.length === 0}
@@ -133,6 +134,7 @@ export function PromptInput({
 
           <div data-testid="model-control-wrap" className="relative">
             <ControlButton
+              active={openPanel === 'model'}
               aria-label="选择模型"
               onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
               disabled={!provider || models.length === 0}
@@ -167,32 +169,33 @@ export function PromptInput({
 
           <div data-testid="size-control-wrap" className="relative">
             <ControlButton
+              active={openPanel === 'size'}
               aria-label="选择比例和分辨率"
               onClick={() => setOpenPanel(openPanel === 'size' ? null : 'size')}
             >
               <Square size={14} aria-hidden /> {ratio} <span className="text-muted-foreground">|</span> {resolution === '2K' ? '高清 2K' : '超清 4K'}
             </ControlButton>
             {openPanel === 'size' && (
-              <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-[304px] max-w-[calc(100vw-32px)] max-h-[70vh] overflow-y-auto rounded-2xl border border-border bg-popover shadow-2xl`}>
+              <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-[620px] max-w-[calc(100vw-32px)] max-h-[70vh] overflow-y-auto rounded-2xl border border-border bg-popover shadow-2xl`}>
                 <div className="p-5 space-y-4">
                   <section>
                     <div className="mb-2 text-sm font-semibold text-muted-foreground">比例</div>
                     <div
                       role="listbox"
                       aria-label="选择比例"
-                      className="flex h-[98px] gap-2 rounded-2xl bg-secondary p-1"
+                      className="grid h-[196px] grid-cols-[112px_1fr] gap-2 rounded-2xl bg-secondary p-2"
                     >
                       <button
                         type="button"
                         role="option"
                         aria-selected={ratio === '1:1'}
                         onClick={() => onRatioChange?.('1:1')}
-                        className="flex h-[90px] w-[56px] shrink-0 flex-col items-center justify-center gap-2 rounded-xl text-sm hover:bg-card aria-selected:bg-card transition-colors"
+                        className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-xl text-base hover:bg-card aria-selected:bg-card transition-colors"
                       >
-                        <RatioIcon ratio="1:1" box={28} />
+                        <RatioIcon ratio="1:1" box={38} />
                         <span>1:1</span>
                       </button>
-                      <div className="grid grid-cols-4 gap-1.5">
+                      <div data-testid="side-ratio-grid" className="grid grid-cols-4 grid-rows-2 gap-1.5">
                         {SIDE_RATIOS.map((item) => (
                           <button
                             key={item}
@@ -200,9 +203,9 @@ export function PromptInput({
                             role="option"
                             aria-selected={ratio === item}
                             onClick={() => onRatioChange?.(item)}
-                            className="flex h-[43px] w-[53.5px] flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-card aria-selected:bg-card transition-colors"
+                            className="flex h-full w-full flex-col items-center justify-center gap-1 rounded-lg text-sm hover:bg-card aria-selected:bg-card transition-colors"
                           >
-                            <RatioIcon ratio={item} box={18} />
+                            <RatioIcon ratio={item} box={24} />
                             <span>{item}</span>
                           </button>
                         ))}
@@ -273,7 +276,7 @@ function ControlButton({
       type="button"
       className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         active
-          ? 'border-primary/40 bg-primary/10 text-primary'
+          ? 'border-border bg-secondary text-foreground'
           : 'border-border bg-background/30 text-foreground hover:bg-secondary'
       } ${className}`}
       {...props}

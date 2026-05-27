@@ -418,13 +418,30 @@ describe('Studio', () => {
     fireEvent.click(await screen.findByRole('button', { name: /选择比例和分辨率/ }));
 
     expect(screen.queryByRole('option', { name: '智能' })).not.toBeInTheDocument();
-    expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('h-[98px]', 'p-1');
-    expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('w-[56px]', 'h-[90px]', 'text-sm');
-    expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('w-[53.5px]', 'h-[43px]', 'text-sm');
+    expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('grid', 'grid-cols-[112px_1fr]', 'h-[196px]', 'p-2');
+    expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('h-full', 'w-full', 'text-base');
+    expect(screen.getByTestId('side-ratio-grid')).toHaveClass('grid-cols-4', 'grid-rows-2');
+    expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('h-full', 'w-full', 'text-sm');
     expect(screen.getByRole('listbox', { name: '选择分辨率' })).toHaveClass('h-9', 'p-0.5');
     expect(screen.getByRole('option', { name: /高清 2K/ })).toHaveClass('h-8', 'text-sm');
     expect(screen.getByLabelText('输出宽度')).toHaveClass('h-8', 'text-sm');
     expect(screen.getByLabelText('输出高度')).toHaveClass('h-8', 'text-sm');
+  });
+
+  it('highlights prompt control buttons while their popovers are open', async () => {
+    renderStudio();
+
+    const providerButton = await screen.findByRole('button', { name: /选择厂商/ });
+    fireEvent.click(providerButton);
+    expect(providerButton).toHaveClass('bg-secondary');
+
+    const modelButton = screen.getByRole('button', { name: /选择模型/ });
+    fireEvent.click(modelButton);
+    expect(modelButton).toHaveClass('bg-secondary');
+
+    const sizeButton = screen.getByRole('button', { name: /选择比例和分辨率/ });
+    fireEvent.click(sizeButton);
+    expect(sizeButton).toHaveClass('bg-secondary');
   });
 
   it('uses fixed width and row height for provider and model menus', async () => {
@@ -534,6 +551,8 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
 
     expect(screen.getByTestId('studio-more-menu')).toHaveClass('absolute', 'left-full', 'top-0', 'ml-2');
+    expect(screen.getByTestId('studio-more-menu')).toHaveClass('w-[392px]', 'rounded-2xl', 'p-0');
+    expect(screen.getByRole('button', { name: '删除该批次结果' })).toHaveClass('h-[88px]', 'text-[22px]');
     expect(screen.getByTestId('studio-more-menu')).not.toHaveClass('top-full');
   });
 
@@ -574,7 +593,7 @@ describe('Studio', () => {
     renderStudio();
 
     fireEvent.click(await screen.findByRole('button', { name: '更多操作' }));
-    fireEvent.click(screen.getByRole('button', { name: '删除当前批次的结果' }));
+    fireEvent.click(screen.getByRole('button', { name: '删除该批次结果' }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/jobs/job-studio-1/image?path=%2Ftmp%2Fstudio%2Fjob-studio-1%2Fv1.png', { method: 'DELETE' });
