@@ -37,11 +37,44 @@ def test_post_data_root_writes_global_config(client, tmp_path, monkeypatch):
     assert new_root.exists()
     for sub in (".config", ".runtime", "projects", "characters"):
         assert (new_root / sub).is_dir()
+    assert os.environ["CHARACTER_WORKFLOW_DATA_ROOT"] == str(new_root.resolve())
 
 
 def test_post_data_root_validates_payload(client):
     resp = client.post("/api/onboarding/data-root", json={})
     assert resp.status_code == 422
+
+
+def test_folder_picker_returns_selected_path(client, tmp_path, monkeypatch):
+    picked = tmp_path / "picked"
+    picked.mkdir()
+
+    class Result:
+        returncode = 0
+        stdout = f"{picked}\n"
+        stderr = ""
+
+    monkeypatch.setattr("viewer_server.routes.sys.platform", "darwin")
+    run = monkeypatch.setattr("viewer_server.routes.subprocess.run", lambda *_, **__: Result())
+
+    resp = client.post("/api/folder-picker", json={"title": "选择项目文件夹"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"path": str(picked.resolve())}
+    assert run is None
+
+
+def test_folder_picker_cancel_returns_null(client, monkeypatch):
+    class Result:
+        returncode = 1
+        stdout = ""
+        stderr = "User canceled."
+
+    monkeypatch.setattr("viewer_server.routes.sys.platform", "darwin")
+    monkeypatch.setattr("viewer_server.routes.subprocess.run", lambda *_, **__: Result())
+
+    resp = client.post("/api/folder-picker", json={"title": "选择项目文件夹"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"path": None}
 
 
 # Silence unused import warning when running this file standalone.

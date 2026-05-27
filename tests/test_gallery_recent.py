@@ -57,7 +57,6 @@ def test_respects_limit_param(client, tmp_path):
 
 
 def test_skips_studio_namespace(client, tmp_path):
-    """studio/ 目录的图不进 home gallery (Pass 1.4 Decision: home = 角色作品集)."""
     chars = tmp_path / "characters"
     studio = tmp_path / "studio"
     _make_image(chars / "char-a" / "portrait" / "char.png", mtime_offset=-2)

@@ -44,6 +44,18 @@ def _write_png(path: Path, width: int = 2, height: int = 2) -> None:
     path.write_bytes(body)
 
 
+def _write_jpeg_with_large_metadata(path: Path, width: int = 2048, height: int = 2048) -> None:
+    app = b"\xff\xe1" + struct.pack(">H", 5002) + (b"x" * 5000)
+    sof = (
+        b"\xff\xc0"
+        + struct.pack(">H", 17)
+        + b"\x08"
+        + struct.pack(">HH", height, width)
+        + b"\x03\x01\x11\x00\x02\x11\x00\x03\x11\x00"
+    )
+    path.write_bytes(b"\xff\xd8" + app + sof + b"\xff\xd9")
+
+
 def _add_stale_error(project_root: Path, job_id: str) -> None:
     path = project_root / ".runtime" / "jobs" / f"{job_id}.json"
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -160,4 +172,12 @@ def test_valid_image_rejects_zero_byte(project):
     _write_png(valid)
 
     assert job_runner.is_valid_image(zero) is False
+    assert job_runner.is_valid_image(valid) is True
+
+
+def test_valid_image_accepts_jpeg_with_large_metadata(project):
+    valid = project / "characters" / "holy" / "promo" / "seedream.jpg"
+    _write_jpeg_with_large_metadata(valid)
+
+    assert job_runner.image_dimensions(valid) == (2048, 2048)
     assert job_runner.is_valid_image(valid) is True

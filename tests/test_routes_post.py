@@ -92,6 +92,12 @@ def test_post_config_expands_tilde_and_mkdirs(client, runtime, tmp_path, monkeyp
     assert cfg["image_storage_root"] == resolved
 
 
+def test_get_config_defaults_to_current_data_root(client, runtime):
+    r = client.get("/api/config")
+    assert r.status_code == 200
+    assert r.json()["image_storage_root"] == str(runtime.parent)
+
+
 def test_post_config_rejects_empty(client):
     r = client.post("/api/config", json={"image_storage_root": "   "})
     assert r.status_code == 422
