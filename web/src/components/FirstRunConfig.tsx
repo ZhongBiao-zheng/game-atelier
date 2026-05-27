@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { FolderOpen, FolderEdit, AlertCircle, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { chooseFolder } from '@/api/folders';
+import { setDataRoot } from '@/api/onboarding';
 import { cn } from '@/lib/utils';
 
 interface Props { onSaved: (root: string) => void }
@@ -13,6 +14,7 @@ export function FirstRunConfig({ onSaved }: Props) {
   const [customPath, setCustomPath] = useState('');
   const [defaultPath, setDefaultPath] = useState(DEFAULT_PATH);
   const [submitting, setSubmitting] = useState(false);
+  const [choosing, setChoosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -23,21 +25,29 @@ export function FirstRunConfig({ onSaved }: Props) {
 
   const effectivePath = mode === 'default' ? defaultPath : customPath.trim();
 
+  async function pickCustomPath() {
+    setChoosing(true);
+    setError(null);
+    try {
+      const picked = await chooseFolder('选择项目文件夹', customPath || defaultPath);
+      if (picked) {
+        setCustomPath(picked);
+        setMode('custom');
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setChoosing(false);
+    }
+  }
+
   async function submit() {
     if (!effectivePath) return;
     setSubmitting(true);
     setError(null);
     try {
-      const r = await fetch('/api/config', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_storage_root: effectivePath }),
-      });
-      if (!r.ok) {
-        const data = await r.json().catch(() => ({}));
-        throw new Error(data.detail || `HTTP ${r.status}`);
-      }
-      const saved = await r.json();
-      onSaved(saved.image_storage_root || effectivePath);
+      const saved = await setDataRoot(effectivePath);
+      onSaved(saved.data_root || effectivePath);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -69,23 +79,19 @@ export function FirstRunConfig({ onSaved }: Props) {
 
           <OptionCard
             active={mode === 'custom'}
-            onClick={() => setMode('custom')}
+            onClick={() => { void pickCustomPath(); }}
             icon={<FolderEdit className="size-4" />}
-            title="自定义目录"
+            title="选择项目文件夹"
           >
-            <Input
-              value={customPath}
-              onChange={e => { setCustomPath(e.target.value); setMode('custom'); }}
-              onClick={e => e.stopPropagation()}
-              placeholder="例如 /Users/<you>/Pictures/我的角色资产"
-              className="font-mono text-xs mt-2"
-            />
+            <div className="mt-2 min-w-0 truncate rounded-md border border-input bg-background/35 px-3 py-2 font-mono text-xs text-muted-foreground">
+              {choosing ? '选择中...' : customPath || '点击选择文件夹'}
+            </div>
           </OptionCard>
         </div>
 
         <Button
           onClick={submit}
-          disabled={!effectivePath || submitting}
+          disabled={!effectivePath || submitting || choosing}
           className="w-full"
           size="lg"
         >
@@ -93,7 +99,7 @@ export function FirstRunConfig({ onSaved }: Props) {
         </Button>
 
         <p className="text-xs text-muted-foreground mt-3 text-center">
-          目录不存在会自动创建。<span className="font-mono">~</span> 会展开成你的 home 目录。
+          默认目录不存在会自动创建；自定义目录请从系统文件夹选择器中选择。
         </p>
 
         {error && (

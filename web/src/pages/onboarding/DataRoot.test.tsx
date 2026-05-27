@@ -7,19 +7,23 @@ beforeEach(() => {
 });
 
 describe('DataRootPage', () => {
-  it('posts the entered path on save', async () => {
-    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ data_root: '/tmp/x' }),
-    });
+  it('posts the selected path on save', async () => {
+    (globalThis.fetch as unknown as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ path: '/tmp/x' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data_root: '/tmp/x' }),
+      });
     const onComplete = vi.fn();
     render(<DataRootPage onComplete={onComplete} />);
-    fireEvent.change(screen.getByLabelText(/数据目录路径/), {
-      target: { value: '/tmp/x' },
-    });
+    fireEvent.click(screen.getByText(/选择文件夹/));
+    await waitFor(() => expect(screen.getByLabelText(/数据目录路径/)).toHaveValue('/tmp/x'));
     fireEvent.click(screen.getByText(/保存/));
     await waitFor(() => expect(onComplete).toHaveBeenCalled());
-    expect(globalThis.fetch).toHaveBeenCalledWith(
+    expect(globalThis.fetch).toHaveBeenLastCalledWith(
       '/api/onboarding/data-root',
       expect.objectContaining({
         method: 'POST',

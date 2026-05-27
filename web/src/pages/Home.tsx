@@ -73,7 +73,7 @@ export function Home() {
         <div className="columns-2 sm:columns-3 lg:columns-4 2xl:columns-5 gap-6">
           {state.items.map((item) => (
             <Link
-              key={`${item.character_id}-${item.filename}`}
+              key={`${item.path}-${item.filename}`}
               href={`/character/${item.character_id}`}
               className="mb-6 block break-inside-avoid"
             >

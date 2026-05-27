@@ -4,7 +4,7 @@ import { HomeIcon, Settings, Sparkles, UserRound } from 'lucide-react';
 import { Home } from '@/pages/Home';
 import { Studio } from '@/pages/Studio';
 import { CharacterDetail } from '@/pages/CharacterDetail';
-import { KeysPage } from '@/pages/settings/Keys';
+import { SettingsPage } from '@/pages/settings/Settings';
 
 function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string; isActive: boolean; icon: typeof HomeIcon }) {
   return (
@@ -28,7 +28,7 @@ export function AppShell() {
   const onCharacter = loc.startsWith('/character');
   const onStudio = loc === '/studio';
   const onHome = loc === '/';
-  const onKeys = loc === '/settings/keys';
+  const onSettings = loc.startsWith('/settings');
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -50,11 +50,11 @@ export function AppShell() {
           </nav>
           <div className="flex items-center gap-2">
             <Link
-              href="/settings/keys"
-              aria-label="API Keys 设置"
+              href="/settings"
+              aria-label="设置"
               className={[
                 'inline-flex h-10 w-10 items-center justify-center rounded-full bg-card/35 backdrop-blur-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                onKeys ? 'text-primary ring-1 ring-border/80' : 'text-muted-foreground hover:bg-card/60 hover:text-foreground',
+                onSettings ? 'text-primary ring-1 ring-border/80' : 'text-muted-foreground hover:bg-card/60 hover:text-foreground',
               ].join(' ')}
             >
               <Settings size={18} aria-hidden />
@@ -71,7 +71,8 @@ export function AppShell() {
           <Route path="/character/:id">
             {(params) => <CharacterDetail characterId={params.id} />}
           </Route>
-          <Route path="/settings/keys">{() => <KeysPage />}</Route>
+          <Route path="/settings">{() => <SettingsPage />}</Route>
+          <Route path="/settings/keys">{() => <SettingsPage />}</Route>
           <Route>
             <Redirect to="/" replace />
           </Route>

@@ -57,9 +57,9 @@ describe('AppShell', () => {
     expect(tab.className).not.toContain('shadow-[inset');
   });
 
-  it('Keys icon turns primary on /settings/keys', () => {
-    renderAt('/settings/keys');
-    const link = screen.getByLabelText('API Keys 设置');
+  it('settings icon turns primary on /settings', () => {
+    renderAt('/settings');
+    const link = screen.getByLabelText('设置');
     expect(link.className).toContain('text-primary');
   });
 });

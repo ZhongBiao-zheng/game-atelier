@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
@@ -9,6 +9,9 @@ beforeEach(() => {
   globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
     if (url === '/api/keys') {
       return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);
+    }
+    if (url === '/api/jobs') {
+      return Promise.resolve({ ok: true, json: async () => [] } as any);
     }
     return Promise.resolve({ ok: true, json: async () => ({ items: [] }) } as any);
   }) as any;
@@ -27,6 +30,16 @@ function renderHome() {
   );
 }
 
+function renderNavigableHome() {
+  const location = memoryLocation({ path: '/', record: true });
+  const view = render(
+    <Router hook={location.hook}>
+      <Home />
+    </Router>,
+  );
+  return { ...view, location };
+}
+
 describe('Home', () => {
   it('shows TapNow-style studio prompt on top', async () => {
     renderHome();
@@ -38,6 +51,9 @@ describe('Home', () => {
     globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
       if (url === '/api/keys') {
         return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
       }
       return new Promise(() => {});
     }) as any;
@@ -56,6 +72,9 @@ describe('Home', () => {
     globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
       if (url === '/api/keys') {
         return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
       }
       return Promise.resolve({
         ok: true,
@@ -85,11 +104,141 @@ describe('Home', () => {
       if (url === '/api/keys') {
         return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);
       }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
       return Promise.reject(new Error('boom'));
     }) as any;
     renderHome();
     await waitFor(() => {
       expect(screen.getByText(/暂时拿不到图片/)).toBeInTheDocument();
     });
+  });
+
+  it('opens compact prompt menus downward on the home page', async () => {
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'seedream',
+            keys: [{
+              alias: 'seedream',
+              provider: 'seedream',
+              access_key: 'ark...key',
+              secret_key: null,
+              capabilities: ['portrait'],
+              models: [{ name: 'Doubao', id: 'doubao' }],
+              notes: '',
+              created_at: '2026-05-27T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) } as any);
+    }) as any;
+    renderHome();
+    fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
+    expect(screen.getByRole('listbox', { name: '选择厂商列表' })).toHaveClass('top-full');
+  });
+
+  it('does not show persisted studio generation rounds on the home page', async () => {
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'seedream',
+            keys: [{
+              alias: 'seedream',
+              provider: 'seedream',
+              access_key: 'ark...key',
+              secret_key: null,
+              capabilities: ['portrait'],
+              models: [{ name: 'Doubao', id: 'doubao' }],
+              notes: '',
+              created_at: '2026-05-27T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{
+            job_id: 'job-studio-1',
+            character_id: 'seedream',
+            prompt: '首页不该展示的出图信息',
+            submitted_at: '2026-05-27T01:00:00Z',
+            model: 'doubao',
+            params: {},
+            seed: null,
+            output_paths: ['/tmp/studio/job-studio-1/v1.png'],
+            status: 'done',
+            error: null,
+            kind: 'image',
+            namespace: 'studio',
+            alias: 'seedream',
+            provider: 'seedream',
+          }],
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) } as any);
+    }) as any;
+
+    renderHome();
+
+    await waitFor(() => {
+      expect(globalThis.fetch as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledWith('/api/keys');
+    });
+    expect(screen.queryByRole('img', { name: '首页不该展示的出图信息' })).not.toBeInTheDocument();
+  });
+
+  it('creates a studio job from the home prompt and navigates to studio', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'seedream',
+            keys: [{
+              alias: 'seedream',
+              provider: 'seedream',
+              access_key: 'ark...key',
+              secret_key: null,
+              capabilities: ['portrait'],
+              models: [{ name: 'Doubao', id: 'doubao' }],
+              notes: '',
+              created_at: '2026-05-27T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/studio/jobs') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ job_id: 'job-home-1', status: 'pending', submitted_at: '2026-05-27T01:00:00Z' }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+    const { location } = renderNavigableHome();
+
+    await screen.findByText('火山引擎');
+    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '首页提交跳转' } });
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    await waitFor(() => expect(location.history).toContain('/studio'));
   });
 });
