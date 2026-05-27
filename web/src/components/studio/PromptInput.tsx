@@ -1,5 +1,5 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useState } from 'react';
-import { ArrowUp, Box, ImageIcon, Square, Building2 } from 'lucide-react';
+import { ArrowUp, Box, ImageIcon, Square, Building2, Link2 } from 'lucide-react';
 import type { KeyView } from '@/api/keys';
 
 interface Props {
@@ -85,7 +85,7 @@ export function PromptInput({
             aria-label="选择比例和分辨率"
             onClick={() => setOpenPanel(openPanel === 'size' ? null : 'size')}
           >
-            <Square size={14} aria-hidden /> {ratio} <span className="text-muted-foreground">|</span> 高清 {resolution}
+            <Square size={14} aria-hidden /> {ratio} <span className="text-muted-foreground">|</span> {resolution === '2K' ? '高清 2K' : '超清 4K'}
           </ControlButton>
         </div>
         <button
@@ -149,41 +149,59 @@ export function PromptInput({
         </div>
       )}
       {openPanel === 'size' && (
-        <div className="absolute left-0 sm:left-96 right-0 sm:right-8 top-full z-20 mt-3 rounded-2xl border border-border bg-popover p-8 shadow-2xl space-y-8">
-          <section>
-            <div className="mb-3 text-sm text-muted-foreground">选择比例</div>
-            <div role="listbox" aria-label="选择比例" className="grid grid-cols-9 gap-1 rounded-2xl bg-secondary p-2">
-              {RATIOS.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  role="option"
-                  aria-selected={ratio === item}
-                  onClick={() => onRatioChange?.(item === '智能' ? '1:1' : item)}
-                  className="rounded-lg px-2 py-3 text-center hover:bg-card aria-selected:bg-card"
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-          </section>
-          <section>
-            <div className="mb-3 text-sm text-muted-foreground">选择分辨率</div>
-            <div role="listbox" aria-label="选择分辨率" className="grid grid-cols-2 gap-1 rounded-2xl bg-secondary p-1">
-              {(['2K', '4K'] as const).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  role="option"
-                  aria-selected={resolution === item}
-                  onClick={() => onResolutionChange?.(item)}
-                  className="rounded-lg px-4 py-4 text-lg hover:bg-card aria-selected:bg-card"
-                >
-                  {item === '2K' ? '高清 2K' : '超清 4K ✦'}
-                </button>
-              ))}
-            </div>
-          </section>
+        <div className="absolute left-0 sm:left-96 right-0 sm:right-8 top-full z-20 mt-3 rounded-2xl border border-border bg-popover shadow-2xl">
+          <div className="p-6 space-y-6">
+            <section>
+              <div className="mb-3 text-sm text-muted-foreground">选择比例</div>
+              <div role="listbox" aria-label="选择比例" className="grid grid-cols-9 gap-1 rounded-2xl bg-secondary p-2">
+                {RATIOS.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    role="option"
+                    aria-selected={ratio === item || (item === '智能' && ratio === '1:1')}
+                    onClick={() => onRatioChange?.(item === '智能' ? '1:1' : item)}
+                    className="flex flex-col items-center gap-1.5 rounded-lg px-1 py-3 hover:bg-card aria-selected:bg-card transition-colors"
+                  >
+                    <RatioIcon ratio={item} />
+                    <span className="text-xs">{item}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+            <section>
+              <div className="mb-3 text-sm text-muted-foreground">选择分辨率</div>
+              <div role="listbox" aria-label="选择分辨率" className="grid grid-cols-2 gap-2 rounded-2xl bg-secondary p-2">
+                {(['2K', '4K'] as const).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    role="option"
+                    aria-selected={resolution === item}
+                    onClick={() => onResolutionChange?.(item)}
+                    className="rounded-xl py-4 text-center text-base hover:bg-card aria-selected:bg-card transition-colors"
+                  >
+                    {item === '2K' ? '高清 2K' : '超清 4K'}
+                  </button>
+                ))}
+              </div>
+            </section>
+            <section>
+              <div className="mb-3 text-sm text-muted-foreground">尺寸</div>
+              <div className="flex items-center gap-3">
+                <div className="flex flex-1 items-center gap-3 rounded-xl bg-secondary px-4 py-3">
+                  <span className="text-sm font-medium text-muted-foreground">W</span>
+                  <span className="flex-1 text-center text-sm tabular-nums">{computePixelSize(ratio, resolution).w}</span>
+                </div>
+                <Link2 size={16} className="shrink-0 text-muted-foreground" aria-hidden />
+                <div className="flex flex-1 items-center gap-3 rounded-xl bg-secondary px-4 py-3">
+                  <span className="text-sm font-medium text-muted-foreground">H</span>
+                  <span className="flex-1 text-center text-sm tabular-nums">{computePixelSize(ratio, resolution).h}</span>
+                </div>
+                <span className="shrink-0 text-sm text-muted-foreground">PX</span>
+              </div>
+            </section>
+          </div>
         </div>
       )}
     </div>
@@ -206,4 +224,40 @@ function ControlButton({
       {...props}
     />
   );
+}
+
+function RatioIcon({ ratio }: { ratio: string }) {
+  const box = 20;
+  if (ratio === '智能') {
+    return (
+      <svg width={box} height={box} viewBox={`0 0 ${box} ${box}`} fill="none" stroke="currentColor" strokeWidth="1.5">
+        <rect x="2" y="2" width={box - 4} height={box - 4} rx="2" />
+        <path d="M7 10h6M10 7v6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  const [a, b] = ratio.split(':').map(Number);
+  let w: number, h: number;
+  if (a >= b) {
+    w = box;
+    h = Math.max(Math.round((b / a) * box), 4);
+  } else {
+    h = box;
+    w = Math.max(Math.round((a / b) * box), 4);
+  }
+  const x = (box - w) / 2;
+  const y = (box - h) / 2;
+  return (
+    <svg width={box} height={box} viewBox={`0 0 ${box} ${box}`} fill="none">
+      <rect x={x} y={y} width={w} height={h} rx="2" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function computePixelSize(ratio: string, resolution: '2K' | '4K'): { w: number; h: number } {
+  const base = resolution === '4K' ? 4096 : 2048;
+  if (ratio === '智能' || ratio === '1:1') return { w: base, h: base };
+  const [a, b] = ratio.split(':').map(Number);
+  if (a >= b) return { w: base, h: Math.round((b / a) * base) };
+  return { w: Math.round((a / b) * base), h: base };
 }
