@@ -10,6 +10,7 @@
 - 2026-05-21 blazefist-monkey · lovart_wrapper upload_file 用 curl 子进程代替 requests,绕开服务端 chunked 响应提前关闭导致空 body 的问题 · 关键代码:subprocess.check_output(['curl', '-sS', '-F', 'file=@path', url])
 - 2026-05-21 holy-spirit-priestess · 画师改已出图必须先问修改模式(A 编辑当前图 / B 完全重出 / C 局部参考重出),三种 prompt 写法互斥,混着写会让模型不知道锚定参考图还是按 prompt 重画 · 操作:AskUserQuestion 三选一
 - 2026-05-21 holy-spirit-priestess · A 模式编辑当前图时 prompt 只写差异指令,不重述外观/画风/规格(参考图已承载),引导而非规定,能短就短 · prompt 片段:`以参考图为底图,仅做以下三处改动:1. 武器... 2. 披风纹理... 3. 动作...`
+- 2026-05-25 通用 · job DONE 后必须立即把 vN.png + job_id + 模型 + 尺寸 + subject_image + 已知偏差落到 spec.md 对应小节（出图记录 / 美宣记录 / 三视图记录）；漏记会让下一轮 turn-start 时画师以为没出过，差点盲目重出。runner 应在 status=done 时强制同步 spec，不能只靠 Skill 主动写入。 · 操作经验，无 prompt 片段
 - test entry
 
 ### Promo
@@ -22,3 +23,5 @@
 - 2026-05-22 blazefist-monkey · runner 不自动上传立绘，--source-image 必须显式传立绘；prompt-promo-zh 第五节关于"隐式 subject_image"是理论模型不是实际行为 · prompt 片段：N/A（架构事实）
 
 ### Turnaround
+
+<!-- session-count: 1/5 -->

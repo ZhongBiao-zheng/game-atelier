@@ -40,6 +40,10 @@
 - 2026-05-21 · `job-20260521144659f277f4d6` · GPT Image 2 · `promo/v1.png`（首张美宣，3:2 横版 2016×1344，narrative_beat=深秋午后含野果蹲叶堆；以 portrait/v1.png 作 subject_image；runner 下载失败，curl 兜底成功）
 - 2026-05-22 · `job-20260522082900c0aef5bb` · GPT Image 2 · `promo/v2.png`（冬季雪原 KV，3:2 横版 2016×1344，narrative_beat=雪松林斜坡纵跃下冲；以 portrait/v1.png 作 subject_image；runner 下载失败，curl 兜底成功）
 
+## 三视图记录
+
+- 2026-05-22 · `turnaround/v1.png` · `job-20260522091458dff4d909` · GPT Image 2 · 1536×1024 横版三联（正/侧/背），浅灰底，等高基线对齐 · subject_image：`portrait/v1.png` · runner downloader 失败，curl 兜底从 artifact URL 拉图 · 画师 2026-05-25 复核认定可用，作为正式 v1 三视图 · 已知偏差（不重出，下游建模师按需 cleanup）：① 侧面尾巴略上翘，prompt 写的是"自然平举朝后" ② 背面尾巴蓬开如扫帚，橙红环纹延续不清晰 ③ 正面其实是 3/4 侧身而非严格正脸正胸
+
 ## 美宣记录
 
 - 2026-05-21 · `promo/v1.png` · 3:2 横版（2016×1344）· narrative_beat=深秋午后含野果蹲叶堆 · 决策：平视近景眼睛同高 + 右上林隙金色斑驳逆光 + 右耳粘枫叶为唯一记忆点 + 左侧林深留作文案区 + 翠绿眼瞳作画面唯一冷色锚 · 参考图：`portrait/v1.png`（subject_image）
