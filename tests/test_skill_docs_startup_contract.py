@@ -70,9 +70,16 @@ def test_character_workflow_turn_start_contract_lists_new_fields():
 def test_character_workflow_docs_explain_dev_and_installed_bootstrap():
     text = _read("skills/character-workflow/SKILL.md")
     assert "Dev mode" in text
-    assert "python3 scripts/bootstrap.py --check" in text
+    assert "uv run python scripts/bootstrap.py --check" in text
     assert "Installed Plugin mode" in text
     assert "python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check" in text
+
+
+def test_skill_docs_use_uv_for_dev_bootstrap():
+    for path in SKILL_DOCS:
+        text = _read(path)
+        assert "uv run python scripts/bootstrap.py --check" in text
+        assert "python3 scripts/bootstrap.py --check" not in text
 
 
 def test_character_workflow_docs_include_codex_choice_protocol():

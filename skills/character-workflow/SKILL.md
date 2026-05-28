@@ -41,18 +41,18 @@ triggers:
 每次触发本 Skill，第一步先判断当前模式：
 
 - **Dev mode**：当前目录是仓库根，且存在 `pyproject.toml` 与 `scripts/bootstrap.py`
-  - 运行：`python3 scripts/bootstrap.py --check`
+  - 运行：`uv run python scripts/bootstrap.py --check`
 - **Installed Plugin mode**：不在仓库根，使用已安装插件
   - 运行：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check`
 
-不要使用裸 `python` 命令；macOS 上可能不存在。Codex / Claude Code 都优先使用 `python3`。
+不要使用裸 `python` 命令；macOS 上可能不存在。Dev mode 走 `uv run`，确保能加载项目依赖。
 
 按 status 字段分流：
 
 - `ready` → 进 turn-start，正常工作
 - `needs_data_root` → 用 AskUserQuestion 问数据目录路径，POST `/api/onboarding/data-root`
 - `needs_uv` → 显示 next_action 字段里的安装命令，**不要替用户跑**
-- `needs_venv` → 按当前模式跑 `python3 <bootstrap.py> --ensure-venv`
+- `needs_venv` → 按当前模式跑 `<bootstrap.py> --ensure-venv`；Dev mode 前缀为 `uv run python`，Installed Plugin mode 前缀为 `python3`
 - `needs_first_key` → 启 viewer-server，引导用户在 Web 上加第一个 Key
 - `needs_keys_repair` → 告知用户 `keys.json` 损坏，建议备份后手动编辑或删除重加
 
