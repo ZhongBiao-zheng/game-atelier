@@ -35,7 +35,7 @@ def detect_stage() -> tuple[str, str]:
     chars = _characters_dir()
     if not chars.exists():
         return "A", "characters/ 目录不存在"
-    subs = [p for p in chars.iterdir() if p.is_dir()]
+    subs = [p for p in chars.iterdir() if p.is_dir() and not p.name.startswith(".")]
     if not subs:
         return "B", "characters/ 为空"
 
@@ -79,6 +79,8 @@ def list_recent_chars(limit: int = 10) -> list[dict]:
     out: list[dict] = []
     for sub in sorted(chars.iterdir()):
         if not sub.is_dir():
+            continue
+        if sub.name.startswith("."):
             continue
         spec = sub / "spec.md"
         tagline = ""
@@ -144,6 +146,26 @@ def _read_active_spec(active_id: str | None) -> str | None:
         return p.read_text(encoding="utf-8")
     except OSError:
         return None
+
+
+def _spec_status(spec: str | None) -> str:
+    if spec is None:
+        return "missing"
+    stripped = spec.strip()
+    if not stripped:
+        return "placeholder"
+    placeholder_markers = (
+        "尚无档案",
+        "请在终端 /character-workflow 对话补全",
+    )
+    if any(marker in stripped for marker in placeholder_markers):
+        return "placeholder"
+    meaningful_lines = [
+        line.strip()
+        for line in stripped.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    return "ready" if meaningful_lines else "placeholder"
 
 
 def _active_age_minutes(updated_at: str) -> int | None:
@@ -223,6 +245,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
 
     drafts = process_drafts() if stage == "D" else []
     spec = _read_active_spec(active_id) if stage in ("D", "E") else None
+    spec_status = _spec_status(spec)
     recent = list_recent_chars() if stage in ("C", "D", "E") else []
 
     if stage == "D":
@@ -241,6 +264,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         active_age_minutes=age_min,
         last_job_status=last_status,
         active_id=active_id,
+        spec_status=spec_status,
     )
 
     return {
@@ -257,6 +281,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         "active_id": active_id,
         "active_updated_at": active_updated_at,
         "spec": spec,
+        "spec_status": spec_status,
         "project_id": project_id,
         "project_slug": project_slug,
         "project_name": project_name,

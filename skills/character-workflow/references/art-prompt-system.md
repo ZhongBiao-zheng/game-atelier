@@ -136,8 +136,8 @@ jobs schema 当前只有单 `source_image` 字段（`--source-image <绝对路�
 
 | 图类 | 专项规则文件 |
 |---|---|
-| 立绘 | `skill/character_workflow/references/prompt-zh.md` |
-| 美宣 | `skill/character_promo/references/prompt-promo-zh.md` |
-| 三视图 | `skill/character_turnaround/references/prompt-turnaround-zh.md` |
+| 立绘 | `skills/character-workflow/references/prompt-zh.md` |
+| 美宣 | `skills/character-promo/references/prompt-promo-zh.md` |
+| 三视图 | `skills/character-turnaround/references/prompt-turnaround-zh.md` |
 
 各专项文件继承本文件所有规则，并补充该图类独有的输入协议、段落结构和质量门控。

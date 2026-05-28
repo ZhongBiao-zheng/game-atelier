@@ -29,6 +29,14 @@ def test_stage_b_empty_characters_dir(project):
     assert "空" in reason or "empty" in reason.lower()
 
 
+def test_stage_b_ignores_dot_directories(project):
+    (project / "characters" / ".runtime").mkdir(parents=True)
+    from character_workflow.lib.turn_start import detect_stage
+    stage, reason = detect_stage()
+    assert stage == "B"
+    assert "空" in reason or "empty" in reason.lower()
+
+
 def test_stage_c_active_missing(project):
     (project / "characters" / "holy").mkdir(parents=True)
     (project / "characters" / "holy" / "spec.md").write_text("# 圣灵\n治愈系\n")
@@ -112,6 +120,19 @@ def test_list_recent_chars_no_spec(project):
     from character_workflow.lib.turn_start import list_recent_chars
     result = list_recent_chars()
     assert result == [{"id": "ghost", "tagline": ""}]
+
+
+def test_recent_chars_skips_dot_directories(project):
+    chars = project / "characters"
+    (chars / ".runtime").mkdir(parents=True)
+    (chars / ".runtime" / "spec.md").write_text("# internal\n", encoding="utf-8")
+    (chars / "hero").mkdir(parents=True)
+    (chars / "hero" / "spec.md").write_text("hero tagline\n", encoding="utf-8")
+
+    from character_workflow.lib.turn_start import list_recent_chars
+
+    out = list_recent_chars()
+    assert out == [{"id": "hero", "tagline": "hero tagline"}]
 
 
 def test_list_recent_chars_sorted(project):
@@ -244,6 +265,82 @@ def test_turn_start_stage_d_default_new(project):
     assert r["intent_conflict"] is False
     assert r["active_id"] == "holy"
     assert "圣灵" in r["spec"]
+
+
+def test_turn_start_marks_placeholder_spec(project):
+    chars = project / "characters"
+    (chars / "sun").mkdir(parents=True)
+    (chars / "sun" / "spec.md").write_text(
+        "# 孙尚香\n\n（尚无档案 — 请在终端 /character-workflow 对话补全）\n",
+        encoding="utf-8",
+    )
+    runtime = project / ".runtime"
+    runtime.mkdir()
+    (runtime / "active-character.json").write_text(
+        json.dumps({"active_id": "sun", "updated_at": "2026-05-28T00:00:00+00:00"}),
+        encoding="utf-8",
+    )
+    (runtime / "projects.json").write_text(
+        json.dumps(
+            {
+                "projects": [
+                    {
+                        "id": "p-1",
+                        "slug": "mahjong",
+                        "name": "麻将游戏",
+                        "created_at": "2026-05-28T00:00:00+00:00",
+                    }
+                ],
+                "assignments": {"sun": "p-1"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    from character_workflow.lib.turn_start import turn_start
+
+    out = turn_start(kind="portrait", message="出图")
+    assert out["stage"] == "D"
+    assert out["spec_status"] == "placeholder"
+    assert out["recommend_action"] == "ask"
+    assert "spec 仍是占位档案" in out["recommend_reason"]
+
+
+def test_turn_start_marks_ready_spec(project):
+    chars = project / "characters"
+    (chars / "sun").mkdir(parents=True)
+    (chars / "sun" / "spec.md").write_text(
+        "# 孙尚香\n\n风格档：国风街机麻将角色，红金战袍，半身立绘。\n",
+        encoding="utf-8",
+    )
+    runtime = project / ".runtime"
+    runtime.mkdir()
+    (runtime / "active-character.json").write_text(
+        json.dumps({"active_id": "sun", "updated_at": "2026-05-28T00:00:00+00:00"}),
+        encoding="utf-8",
+    )
+    (runtime / "projects.json").write_text(
+        json.dumps(
+            {
+                "projects": [
+                    {
+                        "id": "p-1",
+                        "slug": "mahjong",
+                        "name": "麻将游戏",
+                        "created_at": "2026-05-28T00:00:00+00:00",
+                    }
+                ],
+                "assignments": {"sun": "p-1"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    from character_workflow.lib.turn_start import turn_start
+
+    out = turn_start(kind="portrait", message="出图")
+    assert out["spec_status"] == "ready"
+    assert out["recommend_action"] == "render_card"
 
 
 def test_turn_start_stage_d_with_drafts(project):

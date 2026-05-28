@@ -208,7 +208,7 @@ def keys_for_turn_start() -> list[dict]:
             "alias": k.alias,
             "provider": k.provider,
             "capabilities": k.capabilities,
-            "models": k.models,
+            "models": [m.model_dump() for m in k.models],
             "notes": k.notes,
             "is_default": k.alias == db.default_alias,
         }

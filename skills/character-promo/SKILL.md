@@ -36,18 +36,17 @@ triggers:
 
 ## 启动自检（bootstrap）
 
-每次触发本 Skill，第一步：
+每次触发本 Skill，第一步先判断当前模式：
 
-```bash
-python ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check
-```
+Dev mode：`python3 scripts/bootstrap.py --check`
+Installed Plugin mode：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check`
 
 按 status 字段分流：
 
 - `ready` → 进 turn-start，正常工作
 - `needs_data_root` → 用 AskUserQuestion 问数据目录路径，POST `/api/onboarding/data-root`
 - `needs_uv` → 显示 next_action 字段里的安装命令，**不要替用户跑**
-- `needs_venv` → 跑 `python <plugin>/scripts/bootstrap.py --ensure-venv`
+- `needs_venv` → 按当前模式跑 `python3 <bootstrap.py> --ensure-venv`
 - `needs_first_key` → 启 viewer-server，引导用户在 Web 上加第一个 Key
 - `needs_keys_repair` → 告知用户 `keys.json` 损坏，建议备份后手动编辑或删除重加
 
@@ -78,11 +77,19 @@ turn-start 返回 `available_keys` 和 `preferred_alias`：
 
 每次调用本 Skill 时，Turn 起始之前先执行：
 
+**Dev mode**：
+
 ```bash
-uv run python skill/viewer_server/server.py start --background
+uv run python src/viewer_server/server.py start --background
 ```
 
-`--background` 模式：已在运行则静默跳过（不重开浏览器）；首次启动则后台起 uvicorn 并自动打开浏览器一次。
+**Installed Plugin mode**：
+
+```bash
+python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m viewer_server.server start --background
+```
+
+`--background` 是 Skill 调用路径必需参数：首次启动非阻塞并打开浏览器，已运行时静默复用。
 
 ## Turn 起始（每次 turn 必做）
 
@@ -110,7 +117,7 @@ uv run python -m character_workflow turn-start --kind promo
 
 五维度问清后，按共享底层 + 美宣专项规则写中文 prompt，落到 `characters/<id>/spec.md` 的"美宣记录"小节。
 
-**共享底层** → `skill/character_workflow/references/art-prompt-system.md`
+**共享底层** → `skills/character-workflow/references/art-prompt-system.md`
 **美宣专项** → `references/prompt-promo-zh.md`（含画幅映射、先光后衣决策顺序、narrative_beat 转动作规则）
 
 ### 修改已出图（三模式协议）
@@ -139,7 +146,7 @@ A 模式时 spec 只更新被改的字段；B 模式可大改 spec；C 模式改
 4. `uv run python -m character_workflow run-job <job_id>` — runner 自动上传参考图、筛有效 artifact、落到 `characters/<id>/promo/vN.png`
 5. 终端 `![v1](绝对路径)` 渲染 — 默认 n=1
 
-完整出图流程 + 失败处理 → `skill/character_workflow/references/lovart-call.md`
+完整出图流程 + 失败处理 → `skills/character-workflow/references/lovart-call.md`
 
 ## 上传图通道
 

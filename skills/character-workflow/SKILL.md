@@ -38,18 +38,21 @@ triggers:
 
 ## 启动自检（bootstrap）
 
-每次触发本 Skill，第一步：
+每次触发本 Skill，第一步先判断当前模式：
 
-```bash
-python ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check
-```
+- **Dev mode**：当前目录是仓库根，且存在 `pyproject.toml` 与 `scripts/bootstrap.py`
+  - 运行：`python3 scripts/bootstrap.py --check`
+- **Installed Plugin mode**：不在仓库根，使用已安装插件
+  - 运行：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check`
+
+不要使用裸 `python` 命令；macOS 上可能不存在。Codex / Claude Code 都优先使用 `python3`。
 
 按 status 字段分流：
 
 - `ready` → 进 turn-start，正常工作
 - `needs_data_root` → 用 AskUserQuestion 问数据目录路径，POST `/api/onboarding/data-root`
 - `needs_uv` → 显示 next_action 字段里的安装命令，**不要替用户跑**
-- `needs_venv` → 跑 `python <plugin>/scripts/bootstrap.py --ensure-venv`
+- `needs_venv` → 按当前模式跑 `python3 <bootstrap.py> --ensure-venv`
 - `needs_first_key` → 启 viewer-server，引导用户在 Web 上加第一个 Key
 - `needs_keys_repair` → 告知用户 `keys.json` 损坏，建议备份后手动编辑或删除重加
 
@@ -70,7 +73,7 @@ turn-start 返回 `available_keys` 和 `preferred_alias`：
 **Installed Plugin 模式**（用户 `claude plugins install` 装到 `~/.claude/plugins/`）走 bootstrap 转发：
 
 ```bash
-python ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m character_workflow <subcmd>
+python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m character_workflow <subcmd>
 ```
 
 bootstrap.py 会读 data_root，把命令转发给 `<data_root>/.venv/python`。判断当前模式：
@@ -112,6 +115,7 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
   "recent_chars":     [{"id": "holy", "tagline": "治愈系祭祀"}],
   "drafts":           [...],
   "spec":             "<markdown>" | null,
+  "spec_status":      "missing" | "placeholder" | "ready",
   "project_id":       "p-..." | null,
   "project_slug":     "pokemon-style-elf-game" | null,
   "project_name":     "宝可梦风格-精灵游戏" | null,
@@ -120,7 +124,9 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
   "lessons_global":      "...",
   "lessons_workspace":   "...",
   "lessons_project":     "...",
-  "lessons_kind":     "portrait"
+  "lessons_kind":     "portrait",
+  "available_keys":   [...],
+  "preferred_alias":  "seedream" | null
 }
 ```
 
@@ -173,6 +179,23 @@ CLI 已经把"该 ask 还是该 render_card"算好了，Skill 端不必重复判
 2. **改 spec** → 进 spec 补全对话
 3. **新建另一个角色** → 走 stage B 流程
 4. **跳过本轮** → 退出 turn
+
+### 用户选择工具协议（Claude Code / Codex）
+
+- **Claude Code**：优先使用 `AskUserQuestion` 展示选择，不要用普通文本冒充用户已经选了。
+- **Codex**：如果 `request_user_input` 工具可用，使用它展示选择弹窗；如果当前模式没有该工具，则用普通回复列编号选项并等待用户回复。
+
+Codex `request_user_input` 限制：
+- 每题只能给 2-3 个显式选项，客户端会自动追加 Other。
+- `header` 不超过 12 字，`id` 用 snake_case。
+- 推荐选项 label 后缀写 `(Recommended)`。
+- 工具调用后必须等待用户选择，不能伪造用户回答，也不能默认替用户继续执行。
+
+因此 Stage D 在 Codex 上使用两级选择：
+1. 第一级问"本轮要继续还是跳过"：继续当前角色（Recommended）/ 新建另一个角色 / 跳过本轮。
+2. 用户选"继续当前角色"后，第二级问"继续方式"：按现 spec 出图 / 改 spec。
+
+如果 `spec_status != "ready"`，不要把"按现 spec 出图"设为推荐项；优先让画师补全 spec。
 
 #### Stage E —— `active_id` 完整但未归属任何项目
 
@@ -329,11 +352,19 @@ uv run python -m character_workflow append-memory \
 
 每次调用本 Skill 时，Turn 起始之前先执行：
 
+**Dev mode**：
+
 ```bash
-uv run python skill/viewer_server/server.py start --background
+uv run python src/viewer_server/server.py start --background
 ```
 
-`--background` 模式：已在运行则静默跳过（不重开浏览器）；首次启动则后台起 uvicorn 并自动打开浏览器一次。详见 `skill/viewer_server/SKILL.md`。
+**Installed Plugin mode**：
+
+```bash
+python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m viewer_server.server start --background
+```
+
+`--background` 是 Skill 调用路径必需参数：首次启动非阻塞并打开浏览器，已运行时静默复用。详见 `skills/viewer-server/SKILL.md`。
 
 ## 何时跳过本 Skill
 

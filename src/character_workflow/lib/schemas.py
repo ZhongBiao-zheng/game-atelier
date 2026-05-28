@@ -183,6 +183,7 @@ class TurnStartResult(BaseModel):
     active_id: str | None
     active_updated_at: str
     spec: str | None
+    spec_status: str = "missing"
     project_id: str | None
     project_slug: str | None
     project_name: str | None

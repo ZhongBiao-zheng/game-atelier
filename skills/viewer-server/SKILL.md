@@ -18,18 +18,17 @@ description: 本地 FastAPI server，给 Web UI 提供文件读写 API + SSE 推
 
 ## 启动自检（bootstrap）
 
-每次触发本 Skill，第一步：
+每次触发本 Skill，第一步先判断当前模式：
 
-```bash
-python ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check
-```
+Dev mode：`python3 scripts/bootstrap.py --check`
+Installed Plugin mode：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check`
 
 按 status 字段分流：
 
 - `ready` → 进 turn-start，正常工作
 - `needs_data_root` → 用 AskUserQuestion 问数据目录路径，POST `/api/onboarding/data-root`
 - `needs_uv` → 显示 next_action 字段里的安装命令，**不要替用户跑**
-- `needs_venv` → 跑 `python <plugin>/scripts/bootstrap.py --ensure-venv`
+- `needs_venv` → 按当前模式跑 `python3 <bootstrap.py> --ensure-venv`
 - `needs_first_key` → 启 viewer-server，引导用户在 Web 上加第一个 Key
 - `needs_keys_repair` → 告知用户 `keys.json` 损坏，建议备份后手动编辑或删除重加
 
@@ -47,9 +46,13 @@ turn-start 返回 `available_keys` 和 `preferred_alias`：
 
 ## 命令
 
-### `python skill/viewer_server/server.py start`
+### `uv run python src/viewer_server/server.py start --background`
 
-启动 server：
+Skill 调用路径必须带 `--background`，否则前台 server 会阻塞当前 turn。
+
+### `uv run python src/viewer_server/server.py start`
+
+手动终端启动 server：
 1. 检查 `.runtime/server.pid` 是否存在
 2. 若进程已死：删除 pid 文件，继续启动
 3. 若进程存活：不重复启动，打印实际端口
@@ -57,11 +60,11 @@ turn-start 返回 `available_keys` 和 `preferred_alias`：
 5. 实际端口写入 `.runtime/server.port`
 6. 监听地址固定 `127.0.0.1`
 
-### `python skill/viewer_server/server.py stop`
+### `uv run python src/viewer_server/server.py stop`
 
 停止 server（读 `.runtime/server.pid` 发 SIGTERM）。
 
-### `python skill/viewer_server/server.py open-browser`
+### `uv run python src/viewer_server/server.py open-browser`
 
 `open http://127.0.0.1:<port>/`（Mac）/ `xdg-open`（Linux）。
 

@@ -70,6 +70,7 @@ def compute_recommend_action(
     active_age_minutes: int | None,
     last_job_status: str | None,
     active_id: str | None = None,
+    spec_status: str = "ready",
 ) -> tuple[str, str]:
     """返回 (action, reason)。action ∈ {render_card, ask, switch, noop}。
 
@@ -88,6 +89,10 @@ def compute_recommend_action(
     target = _detect_switch(message or "", active_id)
     if target:
         return "switch", f"switch 信号：目标 {target!r} ≠ active {active_id!r}"
+
+    # 2.5 placeholder spec —— 不能把空档案当成可出图档案
+    if stage == "D" and spec_status != "ready":
+        return "ask", f"spec 仍是占位档案（{spec_status}），需要先补全角色设定"
 
     # 3. drafts 非空 —— 画师已经写下反馈，render_card 走 revise
     if drafts:
