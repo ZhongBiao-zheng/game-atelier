@@ -324,8 +324,8 @@ describe('Studio', () => {
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     fireEvent.click(screen.getByRole('option', { name: '16:9' }));
-    expect(screen.getByLabelText('输出宽度')).toHaveTextContent('2048');
-    expect(screen.getByLabelText('输出高度')).toHaveTextContent('1152');
+    expect(screen.getByLabelText('输出宽度')).toHaveValue(2048);
+    expect(screen.getByLabelText('输出高度')).toHaveValue(1152);
 
     fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '宽幅海报' } });
     fireEvent.click(screen.getByLabelText('提交生成'));
@@ -374,8 +374,8 @@ describe('Studio', () => {
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     fireEvent.click(screen.getByRole('option', { name: '3:4' }));
-    expect(screen.getByLabelText('输出宽度')).toHaveTextContent('1728');
-    expect(screen.getByLabelText('输出高度')).toHaveTextContent('2304');
+    expect(screen.getByLabelText('输出宽度')).toHaveValue(1728);
+    expect(screen.getByLabelText('输出高度')).toHaveValue(2304);
 
     fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '竖版角色海报' } });
     fireEvent.click(screen.getByLabelText('提交生成'));
@@ -563,7 +563,8 @@ describe('Studio', () => {
 
     expect((screen.getByLabelText('生图 prompt') as HTMLTextAreaElement).value).toContain('一个身披白床单');
     const sizeButton = screen.getByRole('button', { name: '选择比例和分辨率' });
-    expect(sizeButton).toHaveTextContent('4:3');
+    expect(sizeButton).not.toHaveTextContent('4:3');
+    expect(sizeButton).toHaveTextContent('2304');
     expect(sizeButton).toHaveTextContent('高清 2K');
   });
 
@@ -651,5 +652,132 @@ describe('Studio', () => {
     await waitFor(() => {
       expect(screen.queryByText('provider timeout')).not.toBeInTheDocument();
     });
+  });
+
+  it('shows prompt and action buttons on a failed round card', async () => {
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'volc',
+            keys: [{
+              alias: 'volc', provider: 'seedream', access_key: 'ak', secret_key: null,
+              capabilities: [], models: [{ name: '图片 4.7', id: 'doubao-4.7' }],
+              notes: '', created_at: '2026-05-25T00:00:00Z', is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{
+            job_id: 'job-fail-2', character_id: 'volc',
+            prompt: '失败的幻想世界', submitted_at: '2026-05-28T01:00:00Z',
+            model: 'doubao-4.7', alias: 'volc', provider: 'seedream',
+            params: { ratio: '3:4', resolution: '2K', size: '1728x2304' },
+            seed: null, output_paths: [], status: 'failed',
+            error: 'API 调用超时', kind: 'image', namespace: 'studio',
+          }],
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    }) as any;
+
+    renderStudio();
+
+    expect(await screen.findByText('失败的幻想世界')).toBeInTheDocument();
+    expect(screen.getByText('API 调用超时')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重新编辑' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '再次生成' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '删除失败记录' })).toBeInTheDocument();
+  });
+
+  it('adjusts height when width is edited with ratio locked', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'oa',
+            keys: [{
+              alias: 'oa', provider: 'openai', access_key: 'sk', secret_key: null,
+              capabilities: [], models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
+              notes: '', created_at: '2026-05-25T00:00:00Z', is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+    await screen.findByRole('button', { name: /选择比例和分辨率/ });
+    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    fireEvent.click(screen.getByRole('option', { name: '4:3' }));
+
+    expect(screen.getByLabelText('输出宽度')).toHaveValue(2048);
+    expect(screen.getByLabelText('输出高度')).toHaveValue(1536);
+
+    fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '2000' } });
+    expect(screen.getByLabelText('输出高度')).toHaveValue(1500);
+  });
+
+  it('submits custom dimensions when W/H are manually edited', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'oa',
+            keys: [{
+              alias: 'oa', provider: 'openai', access_key: 'sk', secret_key: null,
+              capabilities: [], models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
+              notes: '', created_at: '2026-05-25T00:00:00Z', is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ job_id: 'j1', status: 'pending', submitted_at: '2026-05-25T00:00:00Z' }),
+      } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+    await screen.findByRole('button', { name: /选择比例和分辨率/ });
+    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    fireEvent.click(screen.getByRole('button', { name: '解除比例锁定' }));
+    fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '1920' } });
+    fireEvent.change(screen.getByLabelText('输出高度'), { target: { value: '1080' } });
+
+    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '自定义尺寸测试' } });
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const call = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(call![1]!.body));
+    expect(body.params.size).toBe('1920x1080');
+  });
+
+  it('ControlButton shows pixel dimensions instead of ratio after ratio is selected', async () => {
+    renderStudio();
+    await screen.findByRole('button', { name: /选择比例和分辨率/ });
+    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    fireEvent.click(screen.getByRole('option', { name: '16:9' }));
+
+    const sizeButton = screen.getByRole('button', { name: /选择比例和分辨率/ });
+    expect(sizeButton).not.toHaveTextContent('16:9');
+    expect(sizeButton).toHaveTextContent('高清 2K');
+    expect(sizeButton).toHaveTextContent('2560');
   });
 });

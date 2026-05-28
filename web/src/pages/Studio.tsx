@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 
 import { createStudioJob } from '@/api/studio';
@@ -18,7 +18,11 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [model, setModel] = useState('');
   const [ratio, setRatio] = useState('1:1');
   const [resolution, setResolution] = useState<'2K' | '4K'>('2K');
+  const [customSize, setCustomSize] = useState('');
   const [promptText, setPromptText] = useState('');
+  const handleCustomSizeChange = useCallback((w: number, h: number) => {
+    setCustomSize(`${w}x${h}`);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,7 +73,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const effectiveModel = overrideConfig?.model ?? model;
     const selectedKey = keys.find((item) => item.alias === effectiveAlias);
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
-    const effectiveSize = overrideConfig?.size ?? studioSizeFor(effectiveRatio, effectiveResolution, effectiveProvider);
+    const effectiveSize = overrideConfig?.size ?? (customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveProvider));
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
     const config: RoundConfig = {
       prompt,
@@ -135,6 +139,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
                     jobId: final.job_id,
                     submittedAt: final.submitted_at,
                     reason: final.error ?? '生成完成但未返回图片',
+                    config,
                   }
               : r,
           ),
@@ -143,7 +148,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     } catch (e: any) {
       setRounds((rs) =>
         rs.map((r) =>
-          r === myRound ? { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message } : r,
+          r === myRound ? { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message, config } : r,
         ),
       );
     } finally {
@@ -171,6 +176,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           onModelChange={setModel}
           onRatioChange={setRatio}
           onResolutionChange={setResolution}
+          onCustomSizeChange={handleCustomSizeChange}
           menuDirection="down"
         />
       </div>
@@ -206,6 +212,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           onModelChange={setModel}
           onRatioChange={setRatio}
           onResolutionChange={setResolution}
+          onCustomSizeChange={handleCustomSizeChange}
           menuDirection="up"
         />
       </div>
@@ -272,11 +279,12 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
 }
 
 function hydrateRoundModelName(round: RoundState, keys: KeyView[]): RoundState {
-  if (round.kind === 'failed') return round;
-  const selectedKey = keys.find((item) => item.alias === round.config.alias);
-  const selectedModel = selectedKey?.models.find((item) => item.id === round.config.model);
-  if (!selectedModel?.name || round.config.modelName === selectedModel.name) return round;
-  return { ...round, config: { ...round.config, modelName: selectedModel.name } };
+  const config = round.config;
+  if (!config) return round;
+  const selectedKey = keys.find((item) => item.alias === config.alias);
+  const selectedModel = selectedKey?.models.find((item) => item.id === config.model);
+  if (!selectedModel?.name || config.modelName === selectedModel.name) return round;
+  return { ...round, config: { ...config, modelName: selectedModel.name } };
 }
 
 function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
@@ -300,6 +308,7 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
           jobId: job.job_id,
           submittedAt: job.submitted_at,
           reason: job.error ?? '生成失败',
+          config: configForJob(job, keys),
         }];
       }
       return [{

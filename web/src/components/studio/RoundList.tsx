@@ -1,5 +1,5 @@
 import { type ButtonHTMLAttributes, useState } from 'react';
-import { Download, Trash2 } from 'lucide-react';
+import { AlertTriangle, Download, Trash2 } from 'lucide-react';
 
 import { WaitingCopy } from './WaitingCopy';
 
@@ -18,7 +18,7 @@ export interface RoundConfig {
 export type RoundState =
   | { kind: 'pending'; jobId?: string; startedAt: number; config: RoundConfig }
   | { kind: 'done'; jobId: string; submittedAt: string; imagePaths: string[]; config: RoundConfig }
-  | { kind: 'failed'; jobId?: string; submittedAt: string; reason: string };
+  | { kind: 'failed'; jobId?: string; submittedAt: string; reason: string; config?: RoundConfig };
 
 export function RoundList({
   rounds,
@@ -67,23 +67,12 @@ export function RoundList({
               />
             )}
             {r.kind === 'failed' && (
-              <div className="relative border border-destructive/40 rounded-lg p-4 max-w-sm text-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <p className="text-foreground">生成失败</p>
-                  {r.jobId && onDeleteFailed && (
-                    <button
-                      type="button"
-                      aria-label="删除失败记录"
-                      title="删除失败记录"
-                      onClick={() => { void onDeleteFailed(r.jobId!); }}
-                      className="rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                    >
-                      删除
-                    </button>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">{r.reason}</p>
-              </div>
+              <FailedCard
+                round={r}
+                onDeleteFailed={onDeleteFailed}
+                onReEdit={onReEdit}
+                onRegenerate={onRegenerate}
+              />
             )}
           </div>
         );
@@ -194,5 +183,67 @@ function ActionButton({
       className={`${compact ? 'h-9 w-9 px-0' : 'h-9 w-[94px] px-3'} rounded-xl bg-secondary text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
       {...props}
     />
+  );
+}
+
+function FailedCard({
+  round,
+  onDeleteFailed,
+  onReEdit,
+  onRegenerate,
+}: {
+  round: Extract<RoundState, { kind: 'failed' }>;
+  onDeleteFailed?: (jobId: string) => void | Promise<void>;
+  onReEdit?: (config: RoundConfig) => void;
+  onRegenerate?: (config: RoundConfig) => void | Promise<void>;
+}) {
+  const { config } = round;
+  const meta = config
+    ? [config.modelName ?? config.model, config.size, config.ratio, config.resolution].filter(Boolean)
+    : [];
+
+  return (
+    <section className="space-y-3">
+      {config && (
+        <div className="flex items-start gap-3 text-sm">
+          {config.referenceImages[0] && (
+            <img
+              src={imageSrc(config.referenceImages[0])}
+              alt="参考图"
+              className="h-14 w-14 rounded-md object-cover"
+            />
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="line-clamp-2 text-base leading-7 text-foreground" title={config.prompt}>
+              {config.prompt}
+            </p>
+            {meta.length > 0 && (
+              <p className="mt-1 text-sm text-muted-foreground">{meta.join(' | ')}</p>
+            )}
+          </div>
+        </div>
+      )}
+      <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive/70" aria-hidden />
+        <p className="flex-1 text-muted-foreground">{round.reason}</p>
+        {round.jobId && onDeleteFailed && (
+          <button
+            type="button"
+            aria-label="删除失败记录"
+            title="删除失败记录"
+            onClick={() => { void onDeleteFailed(round.jobId!); }}
+            className="rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            删除
+          </button>
+        )}
+      </div>
+      {config && (
+        <div className="flex items-center gap-2">
+          <ActionButton onClick={() => onReEdit?.(config)}>重新编辑</ActionButton>
+          <ActionButton onClick={() => { void onRegenerate?.(config); }}>再次生成</ActionButton>
+        </div>
+      )}
+    </section>
   );
 }
