@@ -242,6 +242,75 @@ def test_turn_start_stage_c_payload(project):
     assert ids == ["alex", "holy"]
 
 
+def test_turn_start_reports_pending_identity_normalizations(project):
+    chars = project / "characters"
+    char = chars / "char-1779692464"
+    (char / "source").mkdir(parents=True)
+    (char / "portrait").mkdir()
+    (char / "promo").mkdir()
+    (char / "turnaround").mkdir()
+    (char / "spec.md").write_text(
+        "# 孙尚香\n\n（尚无档案 — 请在终端 /character-workflow 对话补全）\n",
+        encoding="utf-8",
+    )
+    (char / "source" / "ref.png").write_bytes(b"png")
+
+    runtime = project / ".runtime"
+    runtime.mkdir(exist_ok=True)
+    (runtime / "active-character.json").write_text(
+        json.dumps(
+            {
+                "active_id": "char-1779692464",
+                "updated_at": "2026-05-28T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (runtime / "projects.json").write_text(
+        json.dumps(
+            {
+                "projects": [
+                    {
+                        "id": "p-1",
+                        "slug": "ma-jiang-you-xi",
+                        "name": "麻将游戏",
+                        "created_at": "2026-05-28T00:00:00+00:00",
+                    }
+                ],
+                "assignments": {"char-1779692464": "p-1"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    from character_workflow.lib.turn_start import turn_start
+
+    out = turn_start(message="/character-workflow")
+
+    assert out["recommend_action"] == "ask"
+    assert "Web 创建的临时角色" in out["recommend_reason"]
+    assert out["pending_identity_normalizations"] == [
+        {
+            "old_id": "char-1779692464",
+            "display_name": "孙尚香",
+            "recommended_id": "sun-shang-xiang",
+            "spec_status": "placeholder",
+            "project_id": "p-1",
+            "project_name": "麻将游戏",
+            "asset_counts": {
+                "source": 1,
+                "portrait": 0,
+                "promo": 0,
+                "turnaround": 0,
+            },
+            "job_count": 0,
+            "has_assets": True,
+            "is_active": True,
+        }
+    ]
+
+
 def test_turn_start_stage_d_default_new(project):
     chars = project / "characters"
     (chars / "holy").mkdir(parents=True)

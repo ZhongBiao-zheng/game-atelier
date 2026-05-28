@@ -103,6 +103,18 @@ def _assign_character(args: argparse.Namespace) -> int:
     return 0
 
 
+def _rename_character_id(args: argparse.Namespace) -> int:
+    from character_workflow.lib.identity import rename_character_id
+
+    try:
+        result = rename_character_id(args.old_id, args.new_id)
+    except (ValueError, FileNotFoundError, FileExistsError) as e:
+        print(f"rename-character-id: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
 def _append_memory(args: argparse.Namespace) -> int:
     """append-memory --scope {project|workspace|global}。
 
@@ -173,6 +185,13 @@ def main(argv: list[str] | None = None) -> int:
     p_ac.add_argument("character_id")
     p_ac.add_argument("--project", default=None)
 
+    p_rename = sub.add_parser(
+        "rename-character-id",
+        help="安全迁移角色目录 ID 并更新 active/projects/jobs 引用",
+    )
+    p_rename.add_argument("old_id")
+    p_rename.add_argument("new_id")
+
     p_memory = sub.add_parser("append-memory", help="原子追加一条经验到三层 MEMORY.md")
     p_memory.add_argument("--kind", required=True, choices=("portrait", "promo", "turnaround"))
     p_memory.add_argument("--line", required=True, help="完整一行 markdown,不带换行")
@@ -233,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
         return _create_project(args)
     if args.cmd == "assign-character":
         return _assign_character(args)
+    if args.cmd == "rename-character-id":
+        return _rename_character_id(args)
     if args.cmd == "append-memory":
         return _append_memory(args)
     if args.cmd == "submit":

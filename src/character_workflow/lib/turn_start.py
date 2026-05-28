@@ -222,6 +222,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         load_worldview,
     )
     from character_workflow.lib.draft_processor import process_drafts
+    from character_workflow.lib.identity import list_pending_identity_normalizations
     from character_workflow.lib.intent import compute_recommend_action
     from character_workflow.lib.projects import read_projects
 
@@ -247,6 +248,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
     spec = _read_active_spec(active_id) if stage in ("D", "E") else None
     spec_status = _spec_status(spec)
     recent = list_recent_chars() if stage in ("C", "D", "E") else []
+    pending_identities = list_pending_identity_normalizations()
 
     if stage == "D":
         intent, signal, conflict = infer_intent(message, drafts, active_id)
@@ -266,6 +268,20 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         active_id=active_id,
         spec_status=spec_status,
     )
+    if pending_identities:
+        action = "ask"
+        active_pending = next((item for item in pending_identities if item.is_active), None)
+        if active_pending:
+            action_reason = (
+                f"检测到当前 active 是 Web 创建的临时角色 {active_pending.old_id} "
+                f"（{active_pending.display_name}），建议先整理为 "
+                f"{active_pending.recommended_id}"
+            )
+        else:
+            action_reason = (
+                f"检测到 {len(pending_identities)} 个 Web 创建的临时角色，"
+                "建议先整理角色身份"
+            )
 
     return {
         "stage": stage,
@@ -282,6 +298,9 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         "active_updated_at": active_updated_at,
         "spec": spec,
         "spec_status": spec_status,
+        "pending_identity_normalizations": [
+            item.model_dump() for item in pending_identities
+        ],
         "project_id": project_id,
         "project_slug": project_slug,
         "project_name": project_name,

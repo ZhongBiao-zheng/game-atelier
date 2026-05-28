@@ -156,6 +156,20 @@ class RecentCharacter(BaseModel):
     tagline: str  # spec.md 首行非空、非标题内容，≤30 字
 
 
+class PendingCharacterIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    old_id: str
+    display_name: str
+    recommended_id: str
+    spec_status: str
+    project_id: str | None = None
+    project_name: str | None = None
+    asset_counts: dict[str, int]
+    job_count: int
+    has_assets: bool
+    is_active: bool = False
+
+
 class RecommendAction(str, Enum):
     # v4.1.0 决策表 —— 把"裸触发 default 默认出图"误推从 LLM 收回。
     RENDER_CARD = "render_card"
@@ -184,6 +198,9 @@ class TurnStartResult(BaseModel):
     active_updated_at: str
     spec: str | None
     spec_status: str = "missing"
+    pending_identity_normalizations: list[PendingCharacterIdentity] = Field(
+        default_factory=list
+    )
     project_id: str | None
     project_slug: str | None
     project_name: str | None

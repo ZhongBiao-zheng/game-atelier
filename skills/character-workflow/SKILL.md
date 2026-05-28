@@ -113,6 +113,20 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
   "intent_signal":    "...",
   "intent_conflict":  false,
   "recent_chars":     [{"id": "holy", "tagline": "治愈系祭祀"}],
+  "pending_identity_normalizations": [
+    {
+      "old_id": "char-1779692464",
+      "display_name": "孙尚香",
+      "recommended_id": "sun-shang-xiang",
+      "spec_status": "placeholder",
+      "project_id": "p-ee7501d26e",
+      "project_name": "麻将游戏",
+      "asset_counts": {"source": 1, "portrait": 2, "promo": 0, "turnaround": 0},
+      "job_count": 2,
+      "has_assets": true,
+      "is_active": true
+    }
+  ],
   "drafts":           [...],
   "spec":             "<markdown>" | null,
   "spec_status":      "missing" | "placeholder" | "ready",
@@ -146,6 +160,27 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 CLI 已经把"该 ask 还是该 render_card"算好了，Skill 端不必重复判断。判定不明确时 CLI 一律给 `ask`：宁可多问，"误问"成本只是画师多打一个数字，"误出图"成本是空跑 job + 占位卡片。
 
 把拼装后的 `worldview` + `lessons` + `spec` 拼成对话前缀（建议走 `lib.prompt_builder.assemble_character_prompt`），它们就是这一轮的专家上下文。
+
+### action = ask 的前置分支：Web 临时角色整理
+
+如果 `pending_identity_normalizations` 非空，优先处理它，先于 Stage C/D/E 的普通选项。
+
+这些角色通常来自 Web UI 批量创建，目录名是 `char-<数字>`，但 `spec.md` 第一行已有画师输入的中文名，且可能已经上传了 `source/`、`portrait/`、`promo/`、`turnaround/` 图片。Skill 必须把它们当成“待整理身份”的角色，而不是把 `char-177...` 当正常角色名展示。
+
+展示列表时必须包含：
+- `old_id -> display_name -> recommended_id`
+- `asset_counts`
+- `job_count`
+- `spec_status`
+- 是否为当前 active
+
+不能静默改名。角色 ID 是文件系统主键，涉及目录、active、project assignments、jobs 和图片路径。只有用户确认后才能调用：
+
+```bash
+uv run python -m character_workflow rename-character-id <old_id> <recommended_id>
+```
+
+整理完成后必须重新调一次 `turn-start`，让 active、spec、recent_chars 和 pending 队列全部刷新。
 
 ### action = ask：按 `stage` 分叉问什么
 
@@ -196,6 +231,24 @@ Codex `request_user_input` 限制：
 2. 用户选"继续当前角色"后，第二级问"继续方式"：按现 spec 出图 / 改 spec。
 
 如果 `spec_status != "ready"`，不要把"按现 spec 出图"设为推荐项；优先让画师补全 spec。
+
+#### Codex：pending_identity_normalizations 两级选择
+
+Codex `request_user_input` 只有 2-3 个显式选项，所以待整理角色存在时使用两级选择：
+
+第一级问“检测到 Web 创建的临时角色，本轮怎么处理？”：
+1. 整理 Web 创建角色（Recommended）
+2. 只处理当前角色
+3. 跳过本轮
+
+如果用户选“整理 Web 创建角色”，第二级问“整理方式”：
+1. 按推荐 slug 批量整理（Recommended）
+2. 逐个确认
+3. 暂不改名，只补设定
+
+如果用户选“只处理当前角色”且当前 active 在 pending 队列里，只展示当前 active 的迁移预览，并等待确认后调用 `rename-character-id`。
+
+Claude Code 可用 `AskUserQuestion` 一次展示批量/逐个/跳过选项，但同样必须等待用户确认，不能静默改名。
 
 #### Stage E —— `active_id` 完整但未归属任何项目
 

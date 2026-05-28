@@ -92,6 +92,15 @@ def test_character_workflow_docs_include_codex_choice_protocol():
     assert "spec_status" in text
 
 
+def test_character_workflow_docs_cover_identity_normalization():
+    text = _read("skills/character-workflow/SKILL.md")
+    assert "pending_identity_normalizations" in text
+    assert "rename-character-id" in text
+    assert "不能静默改名" in text
+    assert "整理 Web 创建角色" in text
+    assert "只处理当前角色" in text
+
+
 def test_spec_protocol_mentions_cross_runtime_choice_tools():
     text = _read("skills/character-workflow/references/spec-protocol.md")
     assert "Claude Code" in text
