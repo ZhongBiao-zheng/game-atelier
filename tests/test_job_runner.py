@@ -10,8 +10,8 @@ import pytest
 from character_workflow.lib import job_runner
 from character_workflow.lib.callers import lovart as lc
 from character_workflow.lib.active_character import write_active
-from character_workflow.lib.jobs import read_job, write_job
-from character_workflow.lib.schemas import AssetSlot, JobStatus
+from character_workflow.lib.jobs import read_job, save_job, write_job
+from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus
 
 
 @pytest.fixture
@@ -163,6 +163,56 @@ def test_run_latest_uses_active_character_kind_and_newest_pending_job(project, m
 
     assert selected.job_id == "promo-002"
     assert captured == ["promo-002"]
+
+
+def test_run_job_routes_custom_t8star_provider_through_dispatch(project, monkeypatch):
+    save_job(Job(
+        job_id="studio-zz-001",
+        character_id="zz-main",
+        prompt="fox",
+        submitted_at="2026-05-28T00:00:00+08:00",
+        model="gpt-image-2-all",
+        params=JobParams(size="2048x2048", n=1),
+        seed=None,
+        output_paths=[],
+        status=JobStatus.PENDING,
+        error=None,
+        asset_slot=AssetSlot.PORTRAIT,
+        kind=JobKind.IMAGE,
+        namespace="studio",
+        alias="zz-main",
+        provider="custom",
+    ))
+
+    captured: dict[str, object] = {}
+
+    def fake_dispatch(*, prompt, model, alias, output_dir, n, size, params):
+        captured.update({
+            "prompt": prompt,
+            "model": model,
+            "alias": alias,
+            "output_dir": Path(output_dir),
+            "n": n,
+            "size": size,
+            "params": params,
+        })
+        out = Path(output_dir) / "v1.png"
+        _write_png(out, width=5, height=4)
+        return [str(out)]
+
+    monkeypatch.setattr(job_runner, "dispatch", fake_dispatch)
+
+    final = job_runner.run_job("studio-zz-001")
+
+    expected = project / "studio" / "studio-zz-001" / "v1.png"
+    assert final.status == JobStatus.DONE
+    assert final.output_paths == [str(expected)]
+    assert expected.exists()
+    assert expected.with_suffix(".md").exists()
+    assert final.params.actual_size == "5x4"
+    assert captured["alias"] == "zz-main"
+    assert captured["model"] == "gpt-image-2-all"
+    assert captured["output_dir"] != expected.parent
 
 
 def test_valid_image_rejects_zero_byte(project):

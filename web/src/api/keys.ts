@@ -12,6 +12,9 @@ export interface KeyView {
   docs_url?: string | null;
   api_key_url?: string | null;
   modalities?: ApiModality[];
+  routing_scope?: 'general' | 'classified';
+  routing_category?: string | null;
+  routing_hints?: string[];
   notes: string;
   created_at: string;
   is_default: boolean;
@@ -29,6 +32,9 @@ export interface KeyCreatePayload {
   docs_url?: string | null;
   api_key_url?: string | null;
   modalities?: ApiModality[];
+  routing_scope?: 'general' | 'classified';
+  routing_category?: string | null;
+  routing_hints?: string[];
   notes?: string;
 }
 

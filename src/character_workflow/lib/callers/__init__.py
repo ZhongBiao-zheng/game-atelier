@@ -14,7 +14,7 @@ from typing import Any
 
 from character_workflow.lib import keys as _keys
 
-from . import lovart, stubs
+from . import lovart, stubs, zhenzhen
 
 # Re-export lovart public surface (compat with old lovart_caller import paths).
 LovartError = lovart.LovartError
@@ -33,11 +33,21 @@ class WrongProviderError(Exception):
     """Raised when a caller is invoked with an alias of the wrong provider."""
 
 
-def _provider_render(provider: str):
+def _is_zhenzhen_custom_key(key: _keys.KeySpec) -> bool:
+    return key.provider == "custom" and (
+        "t8star" in str(key.base_url or "").lower()
+        or "zhenzhen" in str(key.alias or "").lower()
+        or key.routing_category is not None
+        or bool(key.routing_hints)
+    )
+
+
+def _provider_render(key: _keys.KeySpec):
     """Resolve provider name → render function, fresh each call.
 
     Re-read via attribute so monkeypatch on `callers.lovart.render` takes effect.
     """
+    provider = key.provider
     if provider == "lovart":
         return lovart.render
     if provider == "openai":
@@ -49,6 +59,8 @@ def _provider_render(provider: str):
     if provider == "seedream":
         return stubs.seedream_render
     if provider == "custom":
+        if _is_zhenzhen_custom_key(key):
+            return zhenzhen.render
         return stubs.custom_render
     return None
 
@@ -73,7 +85,7 @@ def dispatch(
     key = _keys.find_by_alias(alias)
     if key is None:
         raise NoSuchKeyError(alias)
-    fn = _provider_render(key.provider)
+    fn = _provider_render(key)
     if fn is None:
         raise WrongProviderError(f"unknown provider {key.provider!r}")
     return fn(prompt=prompt, model=model, alias=alias, **kwargs)

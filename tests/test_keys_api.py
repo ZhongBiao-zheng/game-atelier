@@ -86,6 +86,31 @@ def test_create_key_persists_provider_metadata(client):
     assert row["access_key"] != "ark-secret"
 
 
+def test_create_custom_key_accepts_zhenzhen_routing_metadata(client):
+    payload = _make_payload("zz-gpt")
+    payload.update({
+        "provider": "custom",
+        "base_url": "https://ai.t8star.org",
+        "access_key": "zz-secret",
+        "secret_key": None,
+        "routing_scope": "classified",
+        "routing_category": "gpt_image",
+        "routing_hints": ["gpt-image", "gpt_image", "gptimage"],
+        "models": [{"name": "GPT Image 2", "id": "gpt-image-2-all"}],
+        "modalities": ["image"],
+    })
+
+    resp = client.post("/api/keys", json=payload)
+    assert resp.status_code == 201, resp.text
+
+    row = client.get("/api/keys").json()["keys"][0]
+    assert row["provider"] == "custom"
+    assert row["routing_scope"] == "classified"
+    assert row["routing_category"] == "gpt_image"
+    assert row["routing_hints"] == ["gpt-image", "gpt_image", "gptimage"]
+    assert row["access_key"] != "zz-secret"
+
+
 def test_create_key_persists_named_models(client):
     payload = _make_payload("volc")
     payload.update({

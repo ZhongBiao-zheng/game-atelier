@@ -64,6 +64,71 @@ def test_key_spec_persists_provider_metadata(isolated_data_root):
     assert row.notes == "legacy note"
 
 
+def test_custom_key_persists_zhenzhen_routing_metadata(isolated_data_root):
+    spec = keys.KeySpec(
+        alias="zz-general",
+        provider="custom",
+        base_url="https://ai.t8star.org",
+        access_key="zz-secret",
+        secret_key=None,
+        capabilities=["portrait", "promo", "turnaround"],
+        models=[
+            {"name": "GPT Image 2", "id": "gpt-image-2-all"},
+            {"name": "Nano Banana Pro", "id": "nano-banana-pro"},
+        ],
+        routing_scope="general",
+        routing_category=None,
+        routing_hints=[],
+        homepage_url="https://ai.t8star.org",
+        docs_url=None,
+        api_key_url=None,
+        modalities=["image"],
+        notes="",
+        created_at="2026-05-28T00:00:00+08:00",
+    )
+
+    keys.add_key(spec)
+    row = keys.find_by_alias("zz-general")
+
+    assert row is not None
+    assert row.provider == "custom"
+    assert row.routing_scope == "general"
+    assert row.routing_category is None
+    assert row.routing_hints == []
+
+
+def test_read_keys_db_migrates_legacy_zhenzhen_provider(isolated_data_root):
+    data_root.keys_file().parent.mkdir(parents=True, exist_ok=True)
+    data_root.keys_file().write_text(
+        """
+{
+  "version": 1,
+  "default_alias": "zz-general",
+  "keys": [{
+    "alias": "zz-general",
+    "provider": "zhenzhen",
+    "base_url": "https://ai.t8star.org",
+    "access_key": "zz-secret",
+    "secret_key": null,
+    "capabilities": ["portrait"],
+    "models": [],
+    "routing_scope": "general",
+    "routing_category": null,
+    "routing_hints": [],
+    "notes": "",
+    "created_at": "2026-05-28T00:00:00+08:00"
+  }]
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    row = keys.read_keys_db().keys[0]
+
+    assert row.provider == "custom"
+    assert row.base_url == "https://ai.t8star.org"
+
+
 def test_find_by_alias(isolated_data_root):
     _seed({"version": 1, "default_alias": None, "keys": [
         {"alias": "a", "provider": "lovart", "access_key": "x", "secret_key": "y",

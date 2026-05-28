@@ -27,6 +27,8 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
 const providerByValue = (value: string) =>
   PROVIDER_PRESETS.find((preset) => preset.value === value) ?? PROVIDER_PRESETS[0];
 
+const usesNamedAlias = (provider: string) => provider === 'custom';
+
 const fieldClass = 'w-full rounded-2xl border border-input/70 bg-background/35 px-4 py-3 text-sm text-foreground shadow-inner shadow-black/5 placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-primary/50';
 
 interface Props {
@@ -44,6 +46,9 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
   const [homepage, setHomepage] = useState(initial?.homepage_url ?? providerByValue(initial?.provider ?? 'openai').homepageUrl ?? '');
   const [accessKey, setAccessKey] = useState(initial?.access_key ?? '');
   const [models, setModels] = useState<KeyModel[]>(initial?.models?.length ? initial.models : providerByValue(initial?.provider ?? 'openai').defaultModels);
+  const [routingScope, setRoutingScope] = useState<'general' | 'classified'>(initial?.routing_scope ?? 'general');
+  const [routingCategory, setRoutingCategory] = useState(initial?.routing_category ?? 'gpt_image');
+  const [routingHints, setRoutingHints] = useState(initial?.routing_hints?.join(', ') ?? '');
   const [urlTest, setUrlTest] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,10 +56,13 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
   const changeProvider = (nextProvider: string) => {
     const preset = providerByValue(nextProvider);
     setProvider(nextProvider);
-    setAlias(nextProvider === 'custom' ? '' : nextProvider);
+    setAlias(usesNamedAlias(nextProvider) ? '' : nextProvider);
     setBaseUrl(preset.defaultBaseUrl ?? '');
     setHomepage(preset.homepageUrl ?? '');
     setModels(preset.defaultModels);
+    setRoutingScope('general');
+    setRoutingCategory('gpt_image');
+    setRoutingHints('');
     setUrlTest(null);
   };
 
@@ -74,7 +82,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
     try {
       const preset = providerByValue(provider);
       const result = await createKey({
-        alias: provider === 'custom' ? alias.trim() : provider,
+        alias: usesNamedAlias(provider) ? alias.trim() : provider,
         provider,
         base_url: baseUrl.trim() || null,
         access_key: accessKey.trim(),
@@ -87,6 +95,11 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
         docs_url: preset.docsUrl ?? null,
         api_key_url: preset.apiKeyUrl ?? null,
         modalities: preset.modalities,
+        routing_scope: provider === 'custom' ? routingScope : 'general',
+        routing_category: provider === 'custom' && routingScope === 'classified' ? routingCategory : null,
+        routing_hints: provider === 'custom'
+          ? routingHints.split(',').map((hint) => hint.trim()).filter(Boolean)
+          : [],
         notes: '',
       });
       onCreated(result.secret_revealed);
@@ -99,7 +112,8 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
 
   const canSubmit = Boolean(
     accessKey.trim()
-    && (provider !== 'custom' || (alias.trim() && baseUrl.trim()))
+    && (!usesNamedAlias(provider) || alias.trim())
+    && (provider !== 'custom' || baseUrl.trim())
     && !saving,
   );
 
@@ -173,6 +187,52 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
               <p className="mt-2 text-xs text-muted-foreground">
                 请求时会自动拼接 /images/generations；如果你填的是完整路径，也会直接使用。
               </p>
+            </div>
+            <div className="grid gap-4 rounded-2xl border border-border bg-background/25 p-4">
+              <div>
+                <label htmlFor="key-routing-scope" className="block text-sm mb-2 text-muted-foreground">路由范围</label>
+                <select
+                  id="key-routing-scope"
+                  value={routingScope}
+                  onChange={e => setRoutingScope(e.target.value as 'general' | 'classified')}
+                  className={fieldClass}
+                >
+                  <option value="general">通用 Key</option>
+                  <option value="classified">分类专用 Key</option>
+                </select>
+              </div>
+              {routingScope === 'classified' && (
+                <>
+                  <div>
+                    <label htmlFor="key-routing-category" className="block text-sm mb-2 text-muted-foreground">路由类别</label>
+                    <select
+                      id="key-routing-category"
+                      value={routingCategory}
+                      onChange={e => setRoutingCategory(e.target.value)}
+                      className={fieldClass}
+                    >
+                      <option value="gpt_image">GPT Image</option>
+                      <option value="nano_banana">Nano Banana</option>
+                      <option value="mj">Midjourney</option>
+                      <option value="veo">Veo</option>
+                      <option value="grok">Grok</option>
+                      <option value="seedance">Seedance</option>
+                      <option value="suno">Suno</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="key-routing-hints" className="block text-sm mb-2 text-muted-foreground">模型命中词</label>
+                    <input
+                      id="key-routing-hints"
+                      value={routingHints}
+                      onChange={e => setRoutingHints(e.target.value)}
+                      className={fieldClass}
+                      placeholder="例如：gpt-image, gpt_image, gptimage"
+                      autoComplete="off"
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </>
         )}

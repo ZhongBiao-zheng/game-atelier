@@ -265,6 +265,36 @@ describe('KeyForm', () => {
     });
   });
 
+  it('creates a custom classified key with routing metadata', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ secret_revealed: 'zz-secret' }),
+    });
+    globalThis.fetch = fetchMock as any;
+
+    render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
+    fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'custom' } });
+    fireEvent.change(screen.getByLabelText('配置名称'), { target: { value: 'zz-gpt' } });
+    fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'https://ai.t8star.org' } });
+    fireEvent.change(screen.getByLabelText('路由范围'), { target: { value: 'classified' } });
+    fireEvent.change(screen.getByLabelText('路由类别'), { target: { value: 'gpt_image' } });
+    fireEvent.change(screen.getByLabelText('模型命中词'), { target: { value: 'gpt-image, gpt_image, gptimage' } });
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'zz-secret' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({
+      alias: 'zz-gpt',
+      provider: 'custom',
+      base_url: 'https://ai.t8star.org',
+      access_key: 'zz-secret',
+      routing_scope: 'classified',
+      routing_category: 'gpt_image',
+      routing_hints: ['gpt-image', 'gpt_image', 'gptimage'],
+    });
+  });
+
   it('visibly distinguishes model alias from model id', () => {
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
 

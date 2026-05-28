@@ -1,654 +1,349 @@
-# Studio UI Layout Polish Implementation Plan
+# Studio UI Layout Regression Polish Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Polish the Studio prompt controls, generation result layout, and provider/model menus to match the 2026-05-27 visual references.
+**Goal:** Fix the Web Home and Studio UI regressions caused by the Git cleanup: prompt box height/padding, size popover visual specs, selected-trigger popover alignment, generation thumbnail width, and batch action styling.
 
-**Architecture:** Keep this as a focused frontend change. `PromptInput` owns the ratio/resolution/provider/model controls. `Studio` owns selected generation config and job actions. `RoundList` renders one generation batch per job instead of one image per round, so prompt/model/size/resolution/reference images/actions all come from structured job data.
+**Architecture:** Keep this as a surgical frontend-only correction. `PromptInput` owns the shared Home/Studio input, control buttons, and their popovers. `RoundList` owns completed batch thumbnails and action menus. Tests should assert the specific classes/placement that prevent these regressions from coming back.
 
 **Tech Stack:** React 18.3, TypeScript 5.6, Tailwind v4.3, lucide-react, Vitest 2, Testing Library, pnpm.
 
 ---
 
+## Current Context
+
+- `web/src/components/studio/PromptInput.tsx` already has `h-[174px]`, `pt-[14px]`, `px-4`, `pb-4`, but there is no explicit regression test for Home and Studio sharing this exact input shell.
+- The size popover is already close to the requested layout, but it currently uses `w-[59px]` for `1:1`; the new requirement says `56*90`.
+- The size popover currently uses `p-6`, `space-y-6`, `p-2`, `h-10`, and `text-[13px]`; the new requirement says ratio component height `98`, padding `4`, resolution/size component height `36`, padding `2`, font size `14px`.
+- Provider/model/size popovers are positioned with fixed offsets such as `sm:left-40`, `sm:left-64`, `sm:left-96`, which is the root cause of "popup options left aligned instead of corresponding to the selected control button".
+- `RoundList` currently renders result images in a responsive grid without fixed width; the new requirement fixes each thumbnail width to `251.5`.
+- Batch action buttons currently use `h-12`, variable width, and the more menu opens below with `top-full`; the new requirement says `重新编辑` and `再次生成` are `94*36`, `...` is `36*36`, and the menu opens to the right of `...`.
+
 ## Assumptions And Decisions
 
-- Reference images are read from `job.source_image`, `job.params.reference_images`, or `job.params.lovart_attachments` if present. If none exist, hide the reference thumbnail.
-- “当前批次” means one Studio job. A done job may have multiple `output_paths`; render those images together in one row/grid and delete them as one batch.
-- “删除当前批次的结果” should remove each image through the existing `DELETE /api/jobs/{job_id}/image?path=...` endpoint, then remove the batch from UI when all deletes succeed. Do not call `DELETE /api/jobs/{job_id}` for done jobs because that endpoint currently rejects non-failed jobs.
-- “重新编辑” fills the bottom prompt input and restores provider alias, model, ratio, resolution, and size config. It does not auto-submit.
-- “再次生成” submits a new Studio job immediately with the same prompt, alias, model, ratio, resolution, and size config.
-- Keep existing compact Home behavior: Home prompt still submits then navigates to `/studio`; Home should not render generation history.
+- "主页和出图页面" means the compact Home prompt and the non-compact Studio bottom prompt, both rendered by `PromptInput`.
+- "输入框 UI 整体高度改为 174，padding: 14,16,16" maps to Tailwind `h-[174px] pt-[14px] px-4 pb-4`.
+- The reference image `/Users/zhengzhongbiao/Downloads/Snipaste_2026-05-27_13-30-04.png` guides the visual treatment, but the current content order must remain `比例 - 分辨率 - 尺寸`.
+- "1:1 的组件宽高：56*90" wins over the older plan's `59*90`.
+- "分辨率和尺寸每个组件整体高度 36，padding 2，font-size 14px" maps to outer group `h-9 p-0.5` and option/readout `h-8 text-sm` where the outer component totals 36px.
+- Popover alignment should be solved structurally by rendering each popover inside a `relative` wrapper around its own trigger. Avoid fixed `sm:left-*` offsets.
+- Keep existing tests for provider/model behavior and Studio job submission; only update expected classes where the UI spec changed.
 
 ## File Map
 
 | File | Action | Responsibility |
 |---|---|---|
-| `web/src/components/studio/PromptInput.tsx` | Modify | Ratio/resolution/size UI, remove 智能 ratio, provider/model menu dimensions, controlled prompt text support for re-edit |
-| `web/src/components/studio/RoundList.tsx` | Modify | Batch result header, multi-image layout, action buttons, more menu, delete batch |
-| `web/src/pages/Studio.tsx` | Modify | Round data mapping, re-edit/re-generate handlers, controlled prompt state, delete done batch |
-| `web/src/pages/Studio.test.tsx` | Modify | Behavioral tests for controls, batch metadata, re-edit, regenerate, delete |
-| `web/src/pages/Home.test.tsx` | Modify only if needed | Ensure compact prompt still opens menus downward and submits |
+| `web/src/components/studio/PromptInput.tsx` | Modify | Shared prompt shell height/padding, per-trigger popover positioning, size popover dimensions |
+| `web/src/components/studio/RoundList.tsx` | Modify | Fixed result thumbnail width, action button sizes, more-menu right-side placement |
+| `web/src/pages/Studio.test.tsx` | Modify | Regression tests for Studio prompt, size popover, trigger-aligned menus, thumbnails, action buttons |
+| `web/src/pages/Home.test.tsx` | Modify | Regression tests for Home prompt height/padding and trigger-aligned downward menus |
 
 ---
 
-## Task 1: PromptInput Ratio, Resolution, And Size Styling
+## Task 1: Lock PromptInput Height And Padding On Home And Studio
 
 **Files:**
 - Modify: `web/src/components/studio/PromptInput.tsx`
 - Test: `web/src/pages/Studio.test.tsx`
+- Test: `web/src/pages/Home.test.tsx`
 
-- [ ] **Step 1: Add failing tests for the new size panel**
+- [ ] **Step 1: Add a Studio regression test for the prompt shell**
 
-Add these tests inside `describe('Studio', ...)` in `web/src/pages/Studio.test.tsx`:
+In `web/src/pages/Studio.test.tsx`, add this test inside `describe('Studio', ...)`:
 
 ```tsx
-it('renders the size panel without smart ratio and with emphasized 1:1 option', async () => {
+it('uses the 174px prompt shell on the studio page', () => {
   renderStudio();
 
-  fireEvent.click(await screen.findByRole('button', { name: /选择比例和分辨率/ }));
-
-  expect(screen.queryByRole('option', { name: '智能' })).not.toBeInTheDocument();
-  expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('w-[59px]', 'h-[90px]');
-  expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('w-[53.5px]', 'h-[43px]');
-  expect(screen.getByRole('option', { name: /高清 2K/ })).toHaveClass('h-10', 'text-[13px]');
-  expect(screen.getByLabelText('输出宽度')).toHaveClass('h-10', 'text-[13px]');
-  expect(screen.getByLabelText('输出高度')).toHaveClass('h-10', 'text-[13px]');
+  expect(screen.getByTestId('studio-prompt-shell')).toHaveClass(
+    'h-[174px]',
+    'pt-[14px]',
+    'px-4',
+    'pb-4',
+  );
 });
 ```
+
+- [ ] **Step 2: Add a Home regression test for the same prompt shell**
+
+In `web/src/pages/Home.test.tsx`, add this test inside `describe('Home', ...)`:
+
+```tsx
+it('uses the 174px prompt shell on the home page', () => {
+  renderHome();
+
+  expect(screen.getByTestId('studio-prompt-shell')).toHaveClass(
+    'h-[174px]',
+    'pt-[14px]',
+    'px-4',
+    'pb-4',
+  );
+});
+```
+
+- [ ] **Step 3: Run the focused tests to verify they fail**
 
 Run:
 
 ```bash
-cd web && pnpm test Studio
+cd web && pnpm test Studio Home
 ```
 
-Expected: FAIL because `智能` still exists, ratio buttons still use grid sizing, and width/height readouts have no labels/classes.
+Expected: FAIL because `PromptInput` does not expose `data-testid="studio-prompt-shell"` yet.
 
-- [ ] **Step 2: Replace ratio constants**
+- [ ] **Step 4: Add the stable test hook without changing visual behavior**
 
-In `web/src/components/studio/PromptInput.tsx`, replace:
+In `web/src/components/studio/PromptInput.tsx`, update the top-level wrapper from:
 
 ```tsx
-const RATIOS = ['智能', '21:9', '16:9', '3:2', '4:3', '1:1', '3:4', '2:3', '9:16'];
+<div className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl h-[174px] flex flex-col gap-3">
 ```
 
-with:
-
-```tsx
-const RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
-const SIDE_RATIOS = ['4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
-```
-
-- [ ] **Step 3: Replace the ratio listbox markup**
-
-In the `openPanel === 'size'` branch, replace the ratio `div role="listbox"` with:
+to:
 
 ```tsx
 <div
-  role="listbox"
-  aria-label="选择比例"
-  className="flex gap-3 rounded-2xl bg-secondary p-2"
+  data-testid="studio-prompt-shell"
+  className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl h-[174px] flex flex-col gap-3"
 >
-  <button
-    type="button"
-    role="option"
-    aria-selected={ratio === '1:1'}
-    onClick={() => onRatioChange?.('1:1')}
-    className="flex h-[90px] w-[59px] shrink-0 flex-col items-center justify-center gap-2 rounded-xl text-[13px] hover:bg-card aria-selected:bg-card transition-colors"
-  >
-    <RatioIcon ratio="1:1" box={28} />
-    <span>1:1</span>
-  </button>
-  <div className="grid grid-cols-4 gap-1.5">
-    {SIDE_RATIOS.map((item) => (
-      <button
-        key={item}
-        type="button"
-        role="option"
-        aria-selected={ratio === item}
-        onClick={() => onRatioChange?.(item)}
-        className="flex h-[43px] w-[53.5px] flex-col items-center justify-center gap-0.5 rounded-lg text-[13px] hover:bg-card aria-selected:bg-card transition-colors"
-      >
-        <RatioIcon ratio={item} box={18} />
-        <span>{item}</span>
-      </button>
-    ))}
-  </div>
-</div>
 ```
 
-- [ ] **Step 4: Update resolution and size readout classes**
-
-Replace the resolution option button class:
-
-```tsx
-className="rounded-xl py-4 text-center text-base hover:bg-card aria-selected:bg-card transition-colors"
-```
-
-with:
-
-```tsx
-className="h-10 rounded-xl text-center text-[13px] hover:bg-card aria-selected:bg-card transition-colors"
-```
-
-Replace the width/height readouts with labeled 40px components:
-
-```tsx
-<div aria-label="输出宽度" className="flex h-10 flex-1 items-center gap-3 rounded-xl bg-secondary px-4 text-[13px]">
-  <span className="font-medium text-muted-foreground">W</span>
-  <span className="flex-1 text-center tabular-nums">{computePixelSize(ratio, resolution).w}</span>
-</div>
-<Link2 size={16} className="shrink-0 text-muted-foreground" aria-hidden />
-<div aria-label="输出高度" className="flex h-10 flex-1 items-center gap-3 rounded-xl bg-secondary px-4 text-[13px]">
-  <span className="font-medium text-muted-foreground">H</span>
-  <span className="flex-1 text-center tabular-nums">{computePixelSize(ratio, resolution).h}</span>
-</div>
-```
-
-- [ ] **Step 5: Update `RatioIcon` signature**
-
-Replace:
-
-```tsx
-function RatioIcon({ ratio }: { ratio: string }) {
-  const box = 20;
-  if (ratio === '智能') {
-    return (
-      <svg width={box} height={box} viewBox={`0 0 ${box} ${box}`} fill="none" stroke="currentColor" strokeWidth="1.5">
-        <rect x="2" y="2" width={box - 4} height={box - 4} rx="2" />
-        <path d="M7 10h6M10 7v6" strokeLinecap="round" />
-      </svg>
-    );
-  }
-```
-
-with:
-
-```tsx
-function RatioIcon({ ratio, box = 20 }: { ratio: string; box?: number }) {
-```
-
-Keep the remaining aspect-ratio rectangle math unchanged.
-
-- [ ] **Step 6: Verify**
+- [ ] **Step 5: Verify**
 
 Run:
 
 ```bash
-cd web && pnpm test Studio
-```
-
-Expected: PASS. Existing submit test should still post `ratio`, `resolution`, and `size`.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add web/src/components/studio/PromptInput.tsx web/src/pages/Studio.test.tsx
-git commit -m "web: polish studio size controls"
-```
-
----
-
-## Task 2: Provider And Model Menu Dimensions
-
-**Files:**
-- Modify: `web/src/components/studio/PromptInput.tsx`
-- Test: `web/src/pages/Studio.test.tsx`
-
-- [ ] **Step 1: Add failing menu dimension test**
-
-Add:
-
-```tsx
-it('uses fixed width and row height for provider and model menus', async () => {
-  renderStudio();
-
-  fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
-  expect(screen.getByRole('listbox', { name: '选择厂商列表' })).toHaveClass('w-[280px]', 'max-h-[400px]');
-  expect(screen.getByRole('option', { name: /volc/ })).toHaveClass('h-[58px]', 'text-sm');
-
-  fireEvent.click(screen.getByRole('button', { name: /选择模型/ }));
-  expect(screen.getByRole('listbox', { name: '选择模型列表' })).toHaveClass('w-[280px]', 'max-h-[400px]');
-  expect(screen.getByRole('option', { name: /图片 5.0 Lite/ })).toHaveClass('h-[58px]', 'text-sm');
-});
-```
-
-Run:
-
-```bash
-cd web && pnpm test Studio
-```
-
-Expected: FAIL because current menus stretch from `left-*` to `right-*` and use `py-4`.
-
-- [ ] **Step 2: Update provider listbox class**
-
-Replace the provider panel container class with:
-
-```tsx
-className={`absolute left-0 sm:left-40 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-popover p-2 shadow-2xl`}
-```
-
-Replace each provider option class with:
-
-```tsx
-className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary aria-selected:bg-secondary"
-```
-
-Inside the provider option, reduce text sizes:
-
-```tsx
-<Building2 size={20} aria-hidden />
-<span className="min-w-0">
-  <span className="block truncate text-sm font-medium">{providerName(item)}</span>
-  <span className="block truncate text-xs text-muted-foreground">{item.alias} · {item.models.length} models</span>
-</span>
-```
-
-- [ ] **Step 3: Update model listbox class**
-
-Replace the model panel container class with:
-
-```tsx
-className={`absolute left-0 sm:left-64 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-popover p-2 shadow-2xl`}
-```
-
-Replace each model option class with:
-
-```tsx
-className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary aria-selected:bg-secondary"
-```
-
-Inside the model option:
-
-```tsx
-<Box size={22} aria-hidden />
-<span className="min-w-0">
-  <span className="block truncate text-sm font-medium">{item.name}</span>
-  <span className="block truncate text-xs text-muted-foreground">{item.id}</span>
-</span>
-```
-
-- [ ] **Step 4: Verify**
-
-Run:
-
-```bash
-cd web && pnpm test Studio
+cd web && pnpm test Studio Home
 ```
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add web/src/components/studio/PromptInput.tsx web/src/pages/Studio.test.tsx
-git commit -m "web: constrain studio provider model menus"
+git add web/src/components/studio/PromptInput.tsx web/src/pages/Studio.test.tsx web/src/pages/Home.test.tsx
+git commit -m "web: lock prompt input shell sizing"
 ```
 
 ---
 
-## Task 3: Render Done Results As Batches With Metadata And Actions
+## Task 2: Rebuild PromptInput Popover Positioning Around Each Trigger
 
 **Files:**
-- Modify: `web/src/components/studio/RoundList.tsx`
-- Modify: `web/src/pages/Studio.tsx`
+- Modify: `web/src/components/studio/PromptInput.tsx`
 - Test: `web/src/pages/Studio.test.tsx`
+- Test: `web/src/pages/Home.test.tsx`
 
-- [ ] **Step 1: Add failing tests for done batch metadata and actions**
+- [ ] **Step 1: Add Studio tests for selected-trigger alignment**
 
-Add:
+In `web/src/pages/Studio.test.tsx`, add:
 
 ```tsx
-it('renders a completed studio batch with metadata and action buttons', async () => {
+it('anchors prompt popovers to their selected trigger on the studio page', async () => {
+  renderStudio();
+
+  fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
+  expect(screen.getByTestId('provider-control-wrap')).toHaveClass('relative');
+  expect(screen.getByRole('listbox', { name: '选择厂商列表' })).toHaveClass('absolute', 'left-0', 'bottom-full');
+  expect(screen.getByRole('listbox', { name: '选择厂商列表' })).not.toHaveClass('sm:left-40');
+
+  fireEvent.click(screen.getByRole('button', { name: /选择模型/ }));
+  expect(screen.getByTestId('model-control-wrap')).toHaveClass('relative');
+  expect(screen.getByRole('listbox', { name: '选择模型列表' })).toHaveClass('absolute', 'left-0', 'bottom-full');
+  expect(screen.getByRole('listbox', { name: '选择模型列表' })).not.toHaveClass('sm:left-64');
+
+  fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+  expect(screen.getByTestId('size-control-wrap')).toHaveClass('relative');
+  expect(screen.getByTestId('size-popover')).toHaveClass('absolute', 'left-0', 'bottom-full');
+  expect(screen.getByTestId('size-popover')).not.toHaveClass('sm:left-96');
+});
+```
+
+- [ ] **Step 2: Add Home tests for selected-trigger alignment with downward menus**
+
+In `web/src/pages/Home.test.tsx`, add:
+
+```tsx
+it('anchors compact prompt popovers to their selected trigger on the home page', async () => {
   globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
     if (url === '/api/keys') {
       return Promise.resolve({
         ok: true,
         json: async () => ({
-          default_alias: 'volc',
+          default_alias: 'seedream',
           keys: [{
-            alias: 'volc',
+            alias: 'seedream',
             provider: 'seedream',
             access_key: 'ark...key',
             secret_key: null,
             capabilities: ['portrait'],
-            models: [{ name: '图片 4.7', id: 'doubao-seedream-4-5-251128' }],
+            models: [{ name: 'Doubao', id: 'doubao' }],
             notes: '',
-            created_at: '2026-05-25T00:00:00Z',
+            created_at: '2026-05-27T00:00:00Z',
             is_default: true,
           }],
         }),
       } as any);
     }
     if (url === '/api/jobs') {
-      return Promise.resolve({
-        ok: true,
-        json: async () => [{
-          job_id: 'job-studio-1',
-          character_id: 'volc',
-          prompt: '一个身披白床单的幽灵般的身影在上海某城市公园的儿童游乐场玩耍，她戴着太阳镜，没有眼。背景是万圣节夜森。',
-          submitted_at: '2026-05-27T01:00:00Z',
-          model: 'doubao-seedream-4-5-251128',
-          params: {
-            ratio: '4:3',
-            resolution: '2K',
-            size: '2048x1536',
-            reference_images: ['/tmp/ref.png'],
-          },
-          seed: null,
-          output_paths: ['/tmp/studio/job-studio-1/v1.png', '/tmp/studio/job-studio-1/v2.png'],
-          status: 'done',
-          error: null,
-          kind: 'image',
-          namespace: 'studio',
-          alias: 'volc',
-          provider: 'seedream',
-        }],
-      } as any);
+      return Promise.resolve({ ok: true, json: async () => [] } as any);
     }
-    return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    return Promise.resolve({ ok: true, json: async () => ({ items: [] }) } as any);
   }) as any;
 
-  renderStudio();
+  renderHome();
 
-  expect(await screen.findByText(/一个身披白床单/)).toHaveClass('line-clamp-2');
-  expect(screen.getByRole('img', { name: '参考图' })).toHaveAttribute('src', '/api/gallery/image?path=%2Ftmp%2Fref.png');
-  expect(screen.getByText(/图片 4.7/)).toBeInTheDocument();
-  expect(screen.getByText(/4:3/)).toBeInTheDocument();
-  expect(screen.getByText(/2048x1536/)).toBeInTheDocument();
-  expect(screen.getAllByRole('img', { name: /生成结果/ })).toHaveLength(2);
-  expect(screen.getByRole('button', { name: '重新编辑' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '再次生成' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
+  expect(screen.getByRole('listbox', { name: '选择厂商列表' })).toHaveClass('absolute', 'left-0', 'top-full');
+  expect(screen.getByRole('listbox', { name: '选择厂商列表' })).not.toHaveClass('sm:left-40');
+
+  fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+  expect(screen.getByTestId('size-popover')).toHaveClass('absolute', 'left-0', 'top-full');
+  expect(screen.getByTestId('size-popover')).not.toHaveClass('sm:left-96');
 });
 ```
+
+- [ ] **Step 3: Run tests to verify they fail**
 
 Run:
 
 ```bash
-cd web && pnpm test Studio
+cd web && pnpm test Studio Home
 ```
 
-Expected: FAIL because current done rounds render one image only and no metadata/actions.
+Expected: FAIL because the wrappers/test ids do not exist and the popovers still use fixed `sm:left-*` offsets.
 
-- [ ] **Step 2: Replace `RoundState` with batch-capable shape**
+- [ ] **Step 4: Add wrapper helpers in `PromptInput`**
 
-In `web/src/components/studio/RoundList.tsx`, replace `RoundState` with:
+In `web/src/components/studio/PromptInput.tsx`, keep:
 
 ```tsx
-export interface RoundConfig {
-  prompt: string;
-  alias?: string | null;
-  provider?: string | null;
-  model: string;
-  modelName?: string;
-  ratio?: string;
-  resolution?: '2K' | '4K';
-  size?: string;
-  referenceImages: string[];
-}
-
-export type RoundState =
-  | { kind: 'pending'; startedAt: number; config: RoundConfig }
-  | { kind: 'done'; jobId: string; submittedAt: string; imagePaths: string[]; config: RoundConfig }
-  | { kind: 'failed'; jobId?: string; submittedAt: string; reason: string };
+const panelPosition = menuDirection === 'down'
+  ? 'top-full mt-3'
+  : 'bottom-full mb-3';
 ```
 
-Update props:
+Then replace the entire button row's left-side control group:
 
 ```tsx
-export function RoundList({
-  rounds,
-  onDeleteFailed,
-  onReEdit,
-  onRegenerate,
-  onDeleteBatch,
-}: {
-  rounds: RoundState[];
-  onDeleteFailed?: (jobId: string) => void | Promise<void>;
-  onReEdit?: (config: RoundConfig) => void;
-  onRegenerate?: (config: RoundConfig) => void | Promise<void>;
-  onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
-}) {
+<div className="flex flex-wrap gap-2">
+  ...
+</div>
 ```
 
-- [ ] **Step 3: Replace `DoneImage` with `DoneBatch`**
-
-Delete `DoneImage` and add:
+with the exact structure below. This keeps each popover as a child of the selected trigger's wrapper:
 
 ```tsx
-function imageSrc(path: string) {
-  return `/api/gallery/image?path=${encodeURIComponent(path)}`;
-}
+<div className="flex flex-wrap gap-2">
+  <ControlButton active aria-label="图片生成">
+    <ImageIcon size={14} aria-hidden /> 图片生成
+  </ControlButton>
 
-function DoneBatch({
-  round,
-  onReEdit,
-  onRegenerate,
-  onDeleteBatch,
-}: {
-  round: Extract<RoundState, { kind: 'done' }>;
-  onReEdit?: (config: RoundConfig) => void;
-  onRegenerate?: (config: RoundConfig) => void | Promise<void>;
-  onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
-}) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const meta = [
-    round.config.modelName ?? round.config.model,
-    round.config.size,
-    round.config.ratio,
-    round.config.resolution,
-  ].filter(Boolean);
-
-  return (
-    <section className="space-y-3">
-      <div className="flex items-start gap-3 text-sm">
-        {round.config.referenceImages[0] && (
-          <img
-            src={imageSrc(round.config.referenceImages[0])}
-            alt="参考图"
-            className="h-14 w-14 rounded-md object-cover"
-          />
-        )}
-        <div className="min-w-0 flex-1">
-          <p className="line-clamp-2 text-base leading-7 text-foreground" title={round.config.prompt}>
-            {round.config.prompt}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">{meta.join(' | ')}</p>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-4">
-        {round.imagePaths.map((path, index) => (
-          <figure key={path} className="group relative overflow-hidden rounded-md bg-card">
-            <img
-              src={imageSrc(path)}
-              alt={`生成结果 ${index + 1}`}
-              className="h-full w-full object-contain"
-            />
-            <a
-              href={imageSrc(path)}
-              download={path.split('/').pop() || `${round.jobId}-${index + 1}.png`}
-              aria-label={`下载生成结果 ${index + 1}`}
-              title="下载图片"
-              className="absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-white/20 bg-black/70 text-white opacity-0 shadow-lg backdrop-blur-sm transition-opacity hover:bg-black/85 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <Download className="size-4" aria-hidden />
-            </a>
-          </figure>
+  <div data-testid="provider-control-wrap" className="relative">
+    <ControlButton
+      aria-label="选择厂商"
+      onClick={() => setOpenPanel(openPanel === 'provider' ? null : 'provider')}
+      disabled={providers.length === 0}
+    >
+      <Building2 size={14} aria-hidden /> {providerDisplayName}
+    </ControlButton>
+    {openPanel === 'provider' && (
+      <div role="listbox" aria-label="选择厂商列表" className={`absolute left-0 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-popover p-2 shadow-2xl`}>
+        <div className="px-3 py-2 text-sm text-muted-foreground">选择厂商</div>
+        {providers.map((item) => (
+          <button
+            key={item.alias}
+            type="button"
+            role="option"
+            aria-selected={item.alias === provider?.alias}
+            onClick={() => {
+              onProviderChange?.(item.alias);
+              onModelChange?.(item.models[0]?.id ?? '');
+              setOpenPanel(null);
+            }}
+            className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary aria-selected:bg-secondary"
+          >
+            <Building2 size={20} aria-hidden />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">{providerName(item)}</span>
+              <span className="block truncate text-xs text-muted-foreground">{item.alias} · {item.models.length} models</span>
+            </span>
+          </button>
         ))}
       </div>
-      <div className="relative flex items-center gap-2">
-        <ActionButton onClick={() => onReEdit?.(round.config)}>重新编辑</ActionButton>
-        <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
-        <ActionButton aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
-        {menuOpen && (
-          <div className="absolute left-0 top-full z-10 mt-2 w-44 rounded-xl border border-border bg-popover p-1 shadow-xl">
-            <button
-              type="button"
-              className="h-10 w-full rounded-lg px-3 text-left text-sm text-destructive hover:bg-destructive/10"
-              onClick={() => {
-                setMenuOpen(false);
-                void onDeleteBatch?.(round.jobId, round.imagePaths);
-              }}
-            >
-              删除当前批次的结果
-            </button>
-          </div>
-        )}
+    )}
+  </div>
+
+  <div data-testid="model-control-wrap" className="relative">
+    <ControlButton
+      aria-label="选择模型"
+      onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
+      disabled={!provider || models.length === 0}
+    >
+      <Box size={14} aria-hidden /> {selectedModel ? selectedModel.name : '未配置模型'}
+    </ControlButton>
+    {openPanel === 'model' && (
+      <div role="listbox" aria-label="选择模型列表" className={`absolute left-0 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-popover p-2 shadow-2xl`}>
+        <div className="px-3 py-2 text-sm text-muted-foreground">选择模型：{providerDisplayName}</div>
+        {models.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="option"
+            aria-selected={selectedModel?.id === item.id}
+            onClick={() => {
+              onModelChange?.(item.id);
+              setOpenPanel(null);
+            }}
+            className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary aria-selected:bg-secondary"
+          >
+            <Box size={22} aria-hidden />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">{item.name}</span>
+              <span className="block truncate text-xs text-muted-foreground">{item.id}</span>
+            </span>
+          </button>
+        ))}
       </div>
-    </section>
-  );
-}
+    )}
+  </div>
 
-function ActionButton(props: ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button
-      type="button"
-      className="h-12 rounded-xl bg-secondary px-5 text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-      {...props}
-    />
-  );
-}
+  <div data-testid="size-control-wrap" className="relative">
+    <ControlButton
+      aria-label="选择比例和分辨率"
+      onClick={() => setOpenPanel(openPanel === 'size' ? null : 'size')}
+    >
+      <Square size={14} aria-hidden /> {ratio} <span className="text-muted-foreground">|</span> {resolution === '2K' ? '高清 2K' : '超清 4K'}
+    </ControlButton>
+    {openPanel === 'size' && (
+      <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-[304px] max-w-[calc(100vw-32px)] max-h-[70vh] overflow-y-auto rounded-2xl border border-border bg-popover shadow-2xl`}>
+        {/* keep the size panel content here; Task 3 replaces its inner classes */}
+      </div>
+    )}
+  </div>
+</div>
 ```
 
-Also update imports:
+- [ ] **Step 5: Move the existing popover contents, then delete the old sibling popovers**
+
+Move the existing provider, model, and size popover bodies into the wrappers from Step 4.
+
+Delete these old sibling branches after the row:
 
 ```tsx
-import { type ButtonHTMLAttributes, useState } from 'react';
-import { Download } from 'lucide-react';
+{openPanel === 'provider' && (...)}
+{openPanel === 'model' && (...)}
+{openPanel === 'size' && (...)}
 ```
 
-- [ ] **Step 4: Render `DoneBatch` from the list**
-
-Replace:
-
-```tsx
-{r.kind === 'done' && <DoneImage round={r} />}
-```
-
-with:
-
-```tsx
-{r.kind === 'done' && (
-  <DoneBatch
-    round={r}
-    onReEdit={onReEdit}
-    onRegenerate={onRegenerate}
-    onDeleteBatch={onDeleteBatch}
-  />
-)}
-```
-
-Update pending display to use `r.config.prompt` if needed:
-
-```tsx
-{r.kind === 'pending' && <WaitingCopy startedAt={r.startedAt} />}
-```
-
-- [ ] **Step 5: Update `Studio.tsx` round creation and persisted mapping**
-
-Add helper functions:
-
-```tsx
-function referenceImagesFor(job: Job): string[] {
-  const params = job.params ?? {};
-  const refs = [
-    job.source_image,
-    ...(Array.isArray(params.reference_images) ? params.reference_images : []),
-    ...(Array.isArray(params.lovart_attachments) ? params.lovart_attachments : []),
-  ].filter((value): value is string => typeof value === 'string' && value.length > 0);
-  return Array.from(new Set(refs));
-}
-
-function configForJob(job: Job, modelName?: string): RoundConfig {
-  return {
-    prompt: job.prompt,
-    alias: job.alias,
-    provider: job.provider,
-    model: job.model,
-    modelName,
-    ratio: typeof job.params.ratio === 'string' ? job.params.ratio : undefined,
-    resolution: job.params.resolution === '4K' ? '4K' : job.params.resolution === '2K' ? '2K' : undefined,
-    size: typeof job.params.size === 'string' ? job.params.size : undefined,
-    referenceImages: referenceImagesFor(job),
-  };
-}
-```
-
-Import `RoundConfig`:
-
-```tsx
-import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
-```
-
-When creating a pending round in `onSubmit`, replace:
-
-```tsx
-const myRound: RoundState = { kind: 'pending', startedAt, promptPreview: prompt };
-```
-
-with:
-
-```tsx
-const selectedKey = keys.find((item) => item.alias === providerAlias);
-const selectedModel = selectedKey?.models.find((item) => item.id === model);
-const config: RoundConfig = {
-  prompt,
-  alias: providerAlias,
-  provider: selectedKey?.provider,
-  model,
-  modelName: selectedModel?.name,
-  ratio,
-  resolution,
-  size: sizeFor(ratio, resolution),
-  referenceImages: [],
-};
-const myRound: RoundState = { kind: 'pending', startedAt, config };
-```
-
-When converting a done final job, replace `imagePath` and `promptPreview` fields with:
-
-```tsx
-{
-  kind: 'done',
-  jobId: final.job_id,
-  submittedAt: final.submitted_at,
-  imagePaths: final.output_paths,
-  config,
-}
-```
-
-Update `studioJobsToRounds` so a done job returns one round per job:
-
-```tsx
-if (job.status === 'done' && job.output_paths.length > 0) {
-  return [{
-    kind: 'done' as const,
-    jobId: job.job_id,
-    submittedAt: job.submitted_at,
-    imagePaths: job.output_paths,
-    config: configForJob(job),
-  }];
-}
-```
-
-For pending persisted jobs:
-
-```tsx
-return [{
-  kind: 'pending' as const,
-  startedAt: Date.parse(job.submitted_at) || Date.now(),
-  config: configForJob(job),
-}];
-```
+Do not duplicate popovers. Each `openPanel` branch should exist exactly once.
 
 - [ ] **Step 6: Verify**
 
 Run:
 
 ```bash
-cd web && pnpm test Studio
+cd web && pnpm test Studio Home
 ```
 
 Expected: PASS.
@@ -656,255 +351,131 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add web/src/components/studio/RoundList.tsx web/src/pages/Studio.tsx web/src/pages/Studio.test.tsx
-git commit -m "web: render studio results as action batches"
+git add web/src/components/studio/PromptInput.tsx web/src/pages/Studio.test.tsx web/src/pages/Home.test.tsx
+git commit -m "web: align prompt popovers to active controls"
 ```
 
 ---
 
-## Task 4: Re-Edit, Regenerate, And Delete Done Batch
+## Task 3: Apply The Size Popover Visual Spec
 
 **Files:**
 - Modify: `web/src/components/studio/PromptInput.tsx`
-- Modify: `web/src/pages/Studio.tsx`
 - Test: `web/src/pages/Studio.test.tsx`
 
-- [ ] **Step 1: Add controlled prompt support to `PromptInput`**
+- [ ] **Step 1: Update the existing size panel test**
 
-In `Props`, add:
-
-```tsx
-value?: string;
-onValueChange?: (value: string) => void;
-```
-
-Replace:
+In `web/src/pages/Studio.test.tsx`, replace the existing expectations in `renders the size panel without smart ratio and with emphasized 1:1 option` with:
 
 ```tsx
-const [text, setText] = useState('');
+expect(screen.queryByRole('option', { name: '智能' })).not.toBeInTheDocument();
+expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('h-[98px]', 'p-1');
+expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('w-[56px]', 'h-[90px]', 'text-sm');
+expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('w-[53.5px]', 'h-[43px]', 'text-sm');
+expect(screen.getByRole('listbox', { name: '选择分辨率' })).toHaveClass('h-9', 'p-0.5');
+expect(screen.getByRole('option', { name: /高清 2K/ })).toHaveClass('h-8', 'text-sm');
+expect(screen.getByLabelText('输出宽度')).toHaveClass('h-8', 'text-sm');
+expect(screen.getByLabelText('输出高度')).toHaveClass('h-8', 'text-sm');
 ```
 
-with:
+- [ ] **Step 2: Run the focused test to verify it fails**
+
+Run:
+
+```bash
+cd web && pnpm test Studio -- -t "size panel"
+```
+
+Expected: FAIL because the current implementation uses `w-[59px]`, `p-2`, `h-10`, and `text-[13px]`.
+
+- [ ] **Step 3: Replace the size popover inner panel**
+
+In `web/src/components/studio/PromptInput.tsx`, inside `data-testid="size-popover"`, use this exact content:
 
 ```tsx
-const [internalText, setInternalText] = useState('');
-const text = value ?? internalText;
-const setText = onValueChange ?? setInternalText;
+<div className="p-5 space-y-4">
+  <section>
+    <div className="mb-2 text-sm font-semibold text-muted-foreground">比例</div>
+    <div
+      role="listbox"
+      aria-label="选择比例"
+      className="flex h-[98px] gap-2 rounded-2xl bg-secondary p-1"
+    >
+      <button
+        type="button"
+        role="option"
+        aria-selected={ratio === '1:1'}
+        onClick={() => onRatioChange?.('1:1')}
+        className="flex h-[90px] w-[56px] shrink-0 flex-col items-center justify-center gap-2 rounded-xl text-sm hover:bg-card aria-selected:bg-card transition-colors"
+      >
+        <RatioIcon ratio="1:1" box={28} />
+        <span>1:1</span>
+      </button>
+      <div className="grid grid-cols-4 gap-1.5">
+        {SIDE_RATIOS.map((item) => (
+          <button
+            key={item}
+            type="button"
+            role="option"
+            aria-selected={ratio === item}
+            onClick={() => onRatioChange?.(item)}
+            className="flex h-[43px] w-[53.5px] flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-card aria-selected:bg-card transition-colors"
+          >
+            <RatioIcon ratio={item} box={18} />
+            <span>{item}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div className="mb-2 text-sm font-semibold text-muted-foreground">分辨率</div>
+    <div role="listbox" aria-label="选择分辨率" className="grid h-9 grid-cols-2 gap-1 rounded-2xl bg-secondary p-0.5">
+      {(['2K', '4K'] as const).map((item) => (
+        <button
+          key={item}
+          type="button"
+          role="option"
+          aria-selected={resolution === item}
+          onClick={() => onResolutionChange?.(item)}
+          className="h-8 rounded-xl text-center text-sm hover:bg-card aria-selected:bg-card transition-colors"
+        >
+          {item === '2K' ? '高清 2K' : '超清 4K'}
+        </button>
+      ))}
+    </div>
+  </section>
+
+  <section>
+    <div className="mb-2 text-sm font-semibold text-muted-foreground">尺寸</div>
+    <div className="flex h-9 items-center gap-2 rounded-2xl bg-secondary p-0.5">
+      <div aria-label="输出宽度" className="flex h-8 flex-1 items-center gap-2 rounded-xl px-3 text-sm">
+        <span className="font-medium text-muted-foreground">W</span>
+        <span className="flex-1 text-center tabular-nums">{computeStudioPixelSize(ratio, resolution, provider?.provider).w}</span>
+      </div>
+      <Link2 size={15} className="shrink-0 text-muted-foreground" aria-hidden />
+      <div aria-label="输出高度" className="flex h-8 flex-1 items-center gap-2 rounded-xl px-3 text-sm">
+        <span className="font-medium text-muted-foreground">H</span>
+        <span className="flex-1 text-center tabular-nums">{computeStudioPixelSize(ratio, resolution, provider?.provider).h}</span>
+      </div>
+      <span className="shrink-0 pr-3 text-sm text-muted-foreground">PX</span>
+    </div>
+  </section>
+</div>
 ```
 
-Keep existing `onChange={(e) => setText(e.target.value)}` unchanged.
+- [ ] **Step 4: Verify size behavior still submits the displayed pixel size**
 
-- [ ] **Step 2: Add failing tests for actions**
+Run:
 
-Add:
-
-```tsx
-it('re-edits a completed batch into the prompt input and restores controls', async () => {
-  // Reuse the completed job mock from the metadata test.
-  renderStudioWithCompletedBatch();
-
-  fireEvent.click(await screen.findByRole('button', { name: '重新编辑' }));
-
-  expect(screen.getByLabelText('生图 prompt')).toHaveValue(expect.stringContaining('一个身披白床单'));
-  expect(screen.getByRole('button', { name: /4:3/ })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: /高清 2K/ })).toBeInTheDocument();
-});
-
-it('regenerates a completed batch with the same config', async () => {
-  const fetchMock = mockCompletedBatchAndKeys();
-  renderStudio();
-
-  fireEvent.click(await screen.findByRole('button', { name: '再次生成' }));
-
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
-  const studioCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/studio/jobs' && init?.method === 'POST');
-  const body = JSON.parse(String(studioCall![1]!.body));
-  expect(body).toMatchObject({
-    prompt: expect.stringContaining('一个身披白床单'),
-    alias: 'volc',
-    model: 'doubao-seedream-4-5-251128',
-    params: {
-      ratio: '4:3',
-      resolution: '2K',
-      size: '2048x1536',
-    },
-  });
-});
-
-it('deletes every image in a completed batch through image delete endpoints', async () => {
-  const fetchMock = mockCompletedBatchAndKeys();
-  renderStudio();
-
-  fireEvent.click(await screen.findByRole('button', { name: '更多操作' }));
-  fireEvent.click(screen.getByRole('button', { name: '删除当前批次的结果' }));
-
-  await waitFor(() => {
-    expect(fetchMock).toHaveBeenCalledWith('/api/jobs/job-studio-1/image?path=%2Ftmp%2Fstudio%2Fjob-studio-1%2Fv1.png', { method: 'DELETE' });
-    expect(fetchMock).toHaveBeenCalledWith('/api/jobs/job-studio-1/image?path=%2Ftmp%2Fstudio%2Fjob-studio-1%2Fv2.png', { method: 'DELETE' });
-  });
-  await waitFor(() => {
-    expect(screen.queryByRole('img', { name: '生成结果 1' })).not.toBeInTheDocument();
-  });
-});
+```bash
+cd web && pnpm test Studio -- -t "same pixel size"
 ```
 
-Create small test helpers above the tests to avoid duplicating mocks:
+Expected: PASS.
 
-```tsx
-function mockCompletedBatchAndKeys() {
-  const fetchMock = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
-    if (url === '/api/keys') {
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          default_alias: 'volc',
-          keys: [{
-            alias: 'volc',
-            provider: 'seedream',
-            access_key: 'ark...key',
-            secret_key: null,
-            capabilities: ['portrait'],
-            models: [{ name: '图片 4.7', id: 'doubao-seedream-4-5-251128' }],
-            notes: '',
-            created_at: '2026-05-25T00:00:00Z',
-            is_default: true,
-          }],
-        }),
-      } as any);
-    }
-    if (url === '/api/jobs') {
-      return Promise.resolve({
-        ok: true,
-        json: async () => [{
-          job_id: 'job-studio-1',
-          character_id: 'volc',
-          prompt: '一个身披白床单的幽灵般的身影在上海某城市公园的儿童游乐场玩耍',
-          submitted_at: '2026-05-27T01:00:00Z',
-          model: 'doubao-seedream-4-5-251128',
-          params: { ratio: '4:3', resolution: '2K', size: '2048x1536' },
-          seed: null,
-          output_paths: ['/tmp/studio/job-studio-1/v1.png', '/tmp/studio/job-studio-1/v2.png'],
-          status: 'done',
-          error: null,
-          kind: 'image',
-          namespace: 'studio',
-          alias: 'volc',
-          provider: 'seedream',
-        }],
-      } as any);
-    }
-    if (String(url).startsWith('/api/jobs/job-studio-1/image')) {
-      return Promise.resolve({ ok: true, json: async () => ({ ok: true }) } as any);
-    }
-    if (url === '/api/studio/jobs') {
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          job_id: 'job-studio-2',
-          status: 'pending',
-          submitted_at: '2026-05-27T02:00:00Z',
-        }),
-      } as any);
-    }
-    if (url === '/api/jobs/job-studio-2') {
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({
-          job_id: 'job-studio-2',
-          status: 'failed',
-          submitted_at: '2026-05-27T02:00:00Z',
-          output_paths: [],
-          error: 'test stop',
-        }),
-      } as any);
-    }
-    return Promise.resolve({ ok: true, json: async () => ({}) } as any);
-  });
-  globalThis.fetch = fetchMock as any;
-  return fetchMock;
-}
-
-function renderStudioWithCompletedBatch() {
-  mockCompletedBatchAndKeys();
-  return renderStudio();
-}
-```
-
-- [ ] **Step 3: Wire controlled prompt state in `Studio.tsx`**
-
-Add state:
-
-```tsx
-const [promptText, setPromptText] = useState('');
-```
-
-Pass to both `PromptInput` usages:
-
-```tsx
-value={promptText}
-onValueChange={setPromptText}
-```
-
-In `onSubmit`, after `const trimmed = text.trim()` happens inside `PromptInput`, `PromptInput` will clear through `setText('')`. No extra clearing is needed in `Studio`.
-
-- [ ] **Step 4: Add action handlers in `Studio.tsx`**
-
-Add inside `Studio`:
-
-```tsx
-function reEdit(config: RoundConfig) {
-  setPromptText(config.prompt);
-  if (config.alias) setProviderAlias(config.alias);
-  setModel(config.model);
-  if (config.ratio) setRatio(config.ratio);
-  if (config.resolution) setResolution(config.resolution);
-}
-
-async function regenerate(config: RoundConfig) {
-  if (config.alias) setProviderAlias(config.alias);
-  setModel(config.model);
-  if (config.ratio) setRatio(config.ratio);
-  if (config.resolution) setResolution(config.resolution);
-  await onSubmit(config.prompt, config);
-}
-
-async function deleteDoneBatch(jobId: string, imagePaths: string[]) {
-  const responses = await Promise.all(
-    imagePaths.map((path) =>
-      fetch(`/api/jobs/${encodeURIComponent(jobId)}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
-    ),
-  );
-  if (responses.some((resp) => !resp.ok)) return;
-  setRounds((items) => items.filter((item) => item.kind !== 'done' || item.jobId !== jobId));
-}
-```
-
-Change `onSubmit` signature so regeneration can reuse a supplied config:
-
-```tsx
-const onSubmit = async (prompt: string, overrideConfig?: RoundConfig) => {
-  const effectiveRatio = overrideConfig?.ratio ?? ratio;
-  const effectiveResolution = overrideConfig?.resolution ?? resolution;
-  const effectiveAlias = overrideConfig?.alias ?? providerAlias;
-  const effectiveModel = overrideConfig?.model ?? model;
-  const effectiveSize = overrideConfig?.size ?? sizeFor(effectiveRatio, effectiveResolution);
-```
-
-Use `effectiveAlias`, `effectiveModel`, `effectiveRatio`, `effectiveResolution`, and `effectiveSize` in `createStudioJob` and pending config.
-
-Pass handlers to `RoundList`:
-
-```tsx
-<RoundList
-  rounds={rounds}
-  onDeleteFailed={deleteFailedRound}
-  onReEdit={reEdit}
-  onRegenerate={regenerate}
-  onDeleteBatch={deleteDoneBatch}
-/>
-```
-
-- [ ] **Step 5: Verify**
+- [ ] **Step 5: Verify the full Studio suite**
 
 Run:
 
@@ -917,76 +488,313 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add web/src/components/studio/PromptInput.tsx web/src/pages/Studio.tsx web/src/pages/Studio.test.tsx
-git commit -m "web: add studio batch reuse actions"
+git add web/src/components/studio/PromptInput.tsx web/src/pages/Studio.test.tsx
+git commit -m "web: match studio size popover spec"
 ```
 
 ---
 
-## Task 5: Full Regression, Build, And Visual QA
+## Task 4: Fix Completed Batch Thumbnail Width
 
 **Files:**
-- Modify only if tests reveal regressions: `web/src/pages/Home.test.tsx`, `web/src/components/studio/PromptInput.tsx`, `web/src/pages/Studio.tsx`, `web/src/components/studio/RoundList.tsx`
+- Modify: `web/src/components/studio/RoundList.tsx`
+- Test: `web/src/pages/Studio.test.tsx`
 
-- [ ] **Step 1: Run targeted tests**
+- [ ] **Step 1: Add a thumbnail width assertion**
+
+In `web/src/pages/Studio.test.tsx`, inside `renders a completed studio batch with metadata and action buttons`, after:
+
+```tsx
+expect(screen.getAllByRole('img', { name: /生成结果/ })).toHaveLength(2);
+```
+
+add:
+
+```tsx
+expect(screen.getByTestId('studio-result-thumb-1')).toHaveClass('w-[251.5px]');
+expect(screen.getByTestId('studio-result-thumb-2')).toHaveClass('w-[251.5px]');
+```
+
+- [ ] **Step 2: Run the focused test to verify it fails**
+
+Run:
 
 ```bash
-cd web && pnpm test Studio Home
+cd web && pnpm test Studio -- -t "completed studio batch"
+```
+
+Expected: FAIL because the figure elements do not expose test ids and do not have `w-[251.5px]`.
+
+- [ ] **Step 3: Replace the image grid container and figure classes**
+
+In `web/src/components/studio/RoundList.tsx`, replace:
+
+```tsx
+<div className="grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-4">
+  {round.imagePaths.map((path, index) => (
+    <figure key={path} className="group relative overflow-hidden rounded-md bg-card">
+```
+
+with:
+
+```tsx
+<div className="flex flex-wrap gap-1">
+  {round.imagePaths.map((path, index) => (
+    <figure
+      key={path}
+      data-testid={`studio-result-thumb-${index + 1}`}
+      className="group relative w-[251.5px] overflow-hidden rounded-md bg-card"
+    >
+```
+
+Keep the image as:
+
+```tsx
+<img
+  src={imageSrc(path)}
+  alt={`生成结果 ${index + 1}`}
+  className="h-full w-full object-contain"
+/>
+```
+
+- [ ] **Step 4: Verify**
+
+Run:
+
+```bash
+cd web && pnpm test Studio -- -t "completed studio batch"
 ```
 
 Expected: PASS.
 
-- [ ] **Step 2: Run all frontend checks**
+- [ ] **Step 5: Commit**
+
+```bash
+git add web/src/components/studio/RoundList.tsx web/src/pages/Studio.test.tsx
+git commit -m "web: fix studio batch thumbnail width"
+```
+
+---
+
+## Task 5: Fix Batch Action Button Sizes And More Menu Placement
+
+**Files:**
+- Modify: `web/src/components/studio/RoundList.tsx`
+- Test: `web/src/pages/Studio.test.tsx`
+
+- [ ] **Step 1: Add action sizing and right-side menu assertions**
+
+In `web/src/pages/Studio.test.tsx`, add this test inside `describe('Studio', ...)`:
+
+```tsx
+it('uses fixed batch action sizes and opens the more menu to the right', async () => {
+  renderStudioWithCompletedBatch();
+
+  expect(await screen.findByRole('button', { name: '重新编辑' })).toHaveClass('h-9', 'w-[94px]');
+  expect(screen.getByRole('button', { name: '再次生成' })).toHaveClass('h-9', 'w-[94px]');
+  expect(screen.getByRole('button', { name: '更多操作' })).toHaveClass('h-9', 'w-9');
+
+  fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
+
+  expect(screen.getByTestId('studio-more-menu')).toHaveClass('absolute', 'left-full', 'top-0', 'ml-2');
+  expect(screen.getByTestId('studio-more-menu')).not.toHaveClass('top-full');
+});
+```
+
+- [ ] **Step 2: Run the focused test to verify it fails**
+
+Run:
+
+```bash
+cd web && pnpm test Studio -- -t "batch action sizes"
+```
+
+Expected: FAIL because action buttons are `h-12`, the more button does not use `w-9`, and the menu opens below.
+
+- [ ] **Step 3: Update `DoneBatch` action markup**
+
+In `web/src/components/studio/RoundList.tsx`, replace:
+
+```tsx
+<div className="relative flex items-center gap-2">
+  <ActionButton onClick={() => onReEdit?.(round.config)}>重新编辑</ActionButton>
+  <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
+  <ActionButton aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
+  {menuOpen && (
+    <div className="absolute left-0 top-full z-10 mt-2 w-44 rounded-xl border border-border bg-popover p-1 shadow-xl">
+```
+
+with:
+
+```tsx
+<div className="flex items-center gap-2">
+  <ActionButton onClick={() => onReEdit?.(round.config)}>重新编辑</ActionButton>
+  <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
+  <div className="relative">
+    <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
+    {menuOpen && (
+      <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 w-44 rounded-xl border border-border bg-popover p-1 shadow-xl">
+```
+
+Then close the extra wrapper after the menu:
+
+```tsx
+    )}
+  </div>
+</div>
+```
+
+- [ ] **Step 4: Update `ActionButton` to support normal and compact sizes**
+
+Replace:
+
+```tsx
+function ActionButton(props: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      type="button"
+      className="h-12 rounded-xl bg-secondary px-5 text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      {...props}
+    />
+  );
+}
+```
+
+with:
+
+```tsx
+function ActionButton({
+  compact = false,
+  className = '',
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { compact?: boolean }) {
+  return (
+    <button
+      type="button"
+      className={`${compact ? 'h-9 w-9 px-0' : 'h-9 w-[94px] px-3'} rounded-xl bg-secondary text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
+      {...props}
+    />
+  );
+}
+```
+
+- [ ] **Step 5: Verify**
+
+Run:
+
+```bash
+cd web && pnpm test Studio -- -t "batch action sizes"
+```
+
+Expected: PASS.
+
+- [ ] **Step 6: Run the full Studio suite**
+
+Run:
+
+```bash
+cd web && pnpm test Studio
+```
+
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add web/src/components/studio/RoundList.tsx web/src/pages/Studio.test.tsx
+git commit -m "web: polish studio batch actions"
+```
+
+---
+
+## Task 6: Final Verification And Browser QA
+
+**Files:**
+- Modify only if regressions are found: `web/src/components/studio/PromptInput.tsx`, `web/src/components/studio/RoundList.tsx`, `web/src/pages/Studio.test.tsx`, `web/src/pages/Home.test.tsx`
+
+- [ ] **Step 1: Run all frontend tests**
+
+Run:
 
 ```bash
 cd web && pnpm test
+```
+
+Expected: PASS.
+
+- [ ] **Step 2: Run lint**
+
+Run:
+
+```bash
 cd web && pnpm lint
-cd web && pnpm build
 ```
 
-Expected:
-- `pnpm test`: all tests pass. Existing React `act(...)` warning may remain if unchanged from baseline.
-- `pnpm lint`: pass.
-- `pnpm build`: pass.
+Expected: PASS.
 
-- [ ] **Step 3: Manual visual check**
+- [ ] **Step 3: Start the web app**
 
-Start dev server if none is running:
+Run:
 
 ```bash
-cd web && pnpm dev --host 127.0.0.1
+cd web && pnpm dev
 ```
 
-Open `/studio` and verify:
-- Size menu opens upward on Studio and downward on Home.
-- `1:1` ratio button is visually large on the left; other ratios are compact on the right.
-- Resolution and width/height components are 40px tall and 13px text.
-- Provider/model menus are 280px wide, max 400px tall, 58px rows, 14px text, scroll when content exceeds height.
-- Done result header shows reference image only when available, prompt max two lines, model, size, ratio, resolution.
-- Done result footer shows `重新编辑`, `再次生成`, and `...`; the more menu contains only `删除当前批次的结果`.
-- Re-edit fills the bottom prompt and restores model/ratio/resolution without submitting.
-- Regenerate immediately creates a new pending round.
-- Delete batch removes images from the UI after successful image-delete calls.
+Expected: Vite starts and prints a local URL, usually `http://localhost:5173/`.
 
-- [ ] **Step 4: Commit final fixes if any**
+- [ ] **Step 4: Manual browser QA on Home**
+
+Open `/`.
+
+Verify:
+
+- Prompt shell height is 174px.
+- Prompt shell padding visually matches top 14px, horizontal 16px, bottom 16px.
+- Provider, model, and size popovers open downward from their own trigger buttons.
+- Size popover order is `比例 - 分辨率 - 尺寸`.
+- Ratio section is 98px tall with 4px padding.
+- `1:1` is visually tall at 56px by 90px.
+- Other ratio buttons are 53.5px by 43px.
+- Resolution and size components are 36px tall with 2px padding and 14px text.
+
+- [ ] **Step 5: Manual browser QA on Studio**
+
+Open `/studio`.
+
+Verify:
+
+- Bottom prompt shell matches Home dimensions.
+- Provider, model, and size popovers open upward from their own trigger buttons.
+- A completed batch renders each result thumbnail at 251.5px wide.
+- `重新编辑` and `再次生成` are 94px by 36px.
+- `...` is 36px by 36px.
+- Clicking `...` opens the menu to the right of the button.
+
+- [ ] **Step 6: Commit any final fixes**
+
+If Step 4 or Step 5 required changes:
 
 ```bash
-git add web/src/components/studio/PromptInput.tsx web/src/components/studio/RoundList.tsx web/src/pages/Studio.tsx web/src/pages/Studio.test.tsx web/src/pages/Home.test.tsx
+git add web/src/components/studio/PromptInput.tsx web/src/components/studio/RoundList.tsx web/src/pages/Studio.test.tsx web/src/pages/Home.test.tsx
 git commit -m "web: verify studio layout polish"
 ```
 
-Skip this commit if Step 1-3 required no file changes after Task 4.
+If no changes were needed, do not create an empty commit.
 
 ---
 
 ## Self-Review
 
 - Spec coverage:
-  - Requirement 1 covered by Task 1: remove 智能, large left `1:1` at `59x90`, side ratios at `53.5x43`, resolution/size controls `13px` and `40px`.
-  - Requirement 2 covered by Task 3 and Task 4: result metadata, reference image, two-line prompt with `title`, model/size/resolution, re-edit, regenerate, more menu, delete current batch.
-  - Requirement 3 covered by Task 2: provider/model menus at `14px`, `58px` rows, max `400px`, width `280px`.
-- Placeholder scan: no `TBD`, `TODO`, or unresolved implementation placeholders.
+  - Requirement 1 is covered by Task 1.
+  - Requirement 2 is covered by Task 3, while preserving order `比例 - 分辨率 - 尺寸`.
+  - Requirement 3 is covered by Task 4.
+  - Requirement 4 is covered by Task 5.
+  - Requirement 5 is covered by Task 2.
+- Placeholder scan:
+  - No `TBD`, `TODO`, or "implement later" placeholders.
+  - Each code-changing step includes exact code or exact class replacements.
 - Type consistency:
-  - `RoundConfig` is defined in `RoundList.tsx` and imported by `Studio.tsx`.
-  - `RoundState.done.imagePaths` replaces old `imagePath` everywhere.
-  - `PromptInput.value/onValueChange` are optional, so Home compact usage remains compatible.
+  - `compact` is added only to local `ActionButton`.
+  - `data-testid` values used in tests match the planned implementation.
+  - `PromptInput` remains API-compatible with current Home and Studio callers.

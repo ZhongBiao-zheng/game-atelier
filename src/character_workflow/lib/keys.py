@@ -28,6 +28,16 @@ Provider = Literal[
     "custom",
 ]
 Kind = Literal["portrait", "promo", "turnaround"]
+RoutingScope = Literal["general", "classified"]
+RoutingCategory = Literal[
+    "gpt_image",
+    "nano_banana",
+    "mj",
+    "veo",
+    "grok",
+    "seedance",
+    "suno",
+]
 
 
 class ModelSpec(BaseModel):
@@ -47,6 +57,9 @@ class KeySpec(BaseModel):
     docs_url: str | None = None
     api_key_url: str | None = None
     modalities: list[str] = Field(default_factory=list)
+    routing_scope: RoutingScope = "general"
+    routing_category: RoutingCategory | None = None
+    routing_hints: list[str] = Field(default_factory=list)
     notes: str = ""
     created_at: str
 
@@ -87,7 +100,19 @@ def read_keys_db() -> KeysDB:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         raise KeysFileCorruptedError(f"{path}: {e}") from e
+    _migrate_legacy_providers(raw)
     return KeysDB.model_validate(raw)
+
+
+def _migrate_legacy_providers(raw: object) -> None:
+    if not isinstance(raw, dict):
+        return
+    rows = raw.get("keys")
+    if not isinstance(rows, list):
+        return
+    for row in rows:
+        if isinstance(row, dict) and row.get("provider") == "zhenzhen":
+            row["provider"] = "custom"
 
 
 def write_keys_db(db: KeysDB) -> None:
