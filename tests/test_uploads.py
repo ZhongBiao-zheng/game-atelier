@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from skill.viewer_server.server_app import build_app
+from viewer_server.server_app import build_app
 
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
@@ -17,6 +17,7 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
     runtime = tmp_path / ".runtime"
     (runtime / "jobs").mkdir(parents=True)
     (runtime / "uploads").mkdir()
@@ -120,7 +121,7 @@ def test_raw_includes_source_image_in_job_whitelist(client, runtime):
         "job_id": "promo-1", "character_id": "holy", "prompt": "p",
         "submitted_at": "2026-05-19T10:00:00Z", "model": "generate_image_gpt_image_2",
         "params": {"n": 1}, "seed": None, "output_paths": [],
-        "status": "pending", "error": None, "kind": "promo",
+        "status": "pending", "error": None, "asset_slot": "promo",
         "source_image": str(src),
     }))
     r = client.get(f"/api/raw?path={src}&job_id=promo-1")
@@ -145,3 +146,21 @@ def test_upload_path_returned_is_resolvable_via_raw(client, runtime):
     r2 = client.get(f"/api/raw?path={path}")
     assert r2.status_code == 200
     assert r2.content == PNG_MAGIC
+
+
+def test_gallery_upload_creates_done_job_and_file(client, runtime):
+    r = client.post(
+        "/api/characters/holy/gallery/portrait",
+        files={"file": ("portrait.png", io.BytesIO(PNG_MAGIC), "image/png")},
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    path = Path(body["path"])
+    assert path.exists()
+    assert path.parent == Path.cwd() / "characters" / "holy" / "portrait"
+    job_path = runtime / "jobs" / f"{body['job_id']}.json"
+    data = json.loads(job_path.read_text(encoding="utf-8"))
+    assert data["status"] == "done"
+    assert data["asset_slot"] == "portrait"
+    assert data["output_paths"] == [str(path)]

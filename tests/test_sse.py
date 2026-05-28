@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from skill.viewer_server.sse import hub, events as events_endpoint
+from viewer_server.sse import hub, events as events_endpoint
 
 
 @pytest.fixture

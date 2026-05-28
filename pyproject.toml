@@ -8,6 +8,10 @@ dependencies = [
   "watchdog>=5.0",
   "pydantic>=2.9",
   "python-multipart>=0.0.9",
+  "requests>=2.32",
+  "pypinyin>=0.53",
+  "platformdirs>=4",
+  'pywin32>=308; sys_platform == "win32"',
 ]
 
 [dependency-groups]
@@ -25,3 +29,4 @@ target-version = "py311"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from skill.character_workflow.lib.schemas import (
+from character_workflow.lib.schemas import (
     Job, JobStatus, WebEditableJobPatch, SpecPatch, FeedbackPost, ClipboardAttempt,
 )
 
@@ -38,15 +38,16 @@ _ = JobStatus  # silence unused import
 
 
 def test_turn_stage_enum_values():
-    from skill.character_workflow.lib.schemas import TurnStage
+    from character_workflow.lib.schemas import TurnStage
     assert TurnStage.A.value == "A"
     assert TurnStage.B.value == "B"
     assert TurnStage.C.value == "C"
     assert TurnStage.D.value == "D"
+    assert TurnStage.E.value == "E"
 
 
 def test_intent_kind_enum_values():
-    from skill.character_workflow.lib.schemas import IntentKind
+    from character_workflow.lib.schemas import IntentKind
     assert IntentKind.NEW.value == "new"
     assert IntentKind.REVISE.value == "revise"
     assert IntentKind.CREATE.value == "create"
@@ -54,7 +55,7 @@ def test_intent_kind_enum_values():
 
 
 def test_turn_start_result_minimal():
-    from skill.character_workflow.lib.schemas import (
+    from character_workflow.lib.schemas import (
         RecommendAction, TurnStage, TurnStartResult,
     )
     r = TurnStartResult(
@@ -71,8 +72,14 @@ def test_turn_start_result_minimal():
         active_id=None,
         active_updated_at="",
         spec=None,
-        worldview="",
-        lessons="",
+        project_id=None,
+        project_slug=None,
+        project_name=None,
+        worldview_workspace="",
+        worldview_project="",
+        lessons_global="",
+        lessons_workspace="",
+        lessons_project="",
         lessons_kind="portrait",
     )
     assert r.stage == TurnStage.A
@@ -81,12 +88,12 @@ def test_turn_start_result_minimal():
 
 
 def test_turn_start_result_full_stage_d():
-    from skill.character_workflow.lib.schemas import (
+    from character_workflow.lib.schemas import (
         IntentKind, RecentCharacter, RecommendAction, TurnStage, TurnStartResult,
     )
     r = TurnStartResult(
         stage=TurnStage.D,
-        stage_reason="active 存在",
+        stage_reason="active 完整且已归属",
         intent=IntentKind.REVISE,
         intent_signal="drafts_present",
         intent_conflict=False,
@@ -98,8 +105,14 @@ def test_turn_start_result_full_stage_d():
         active_id="holy",
         active_updated_at="2026-05-19T08:00:00+00:00",
         spec="# 圣灵祭祀\n",
-        worldview="光明大陆",
-        lessons="- 2026-05-19 holy",
+        project_id="p-1",
+        project_slug="test-proj",
+        project_name="Test",
+        worldview_workspace="光明大陆",
+        worldview_project="",
+        lessons_global="",
+        lessons_workspace="- 2026-05-19 holy",
+        lessons_project="",
         lessons_kind="portrait",
     )
     assert r.intent == IntentKind.REVISE
@@ -108,8 +121,22 @@ def test_turn_start_result_full_stage_d():
 
 
 def test_recommend_action_enum_values():
-    from skill.character_workflow.lib.schemas import RecommendAction
+    from character_workflow.lib.schemas import RecommendAction
     assert RecommendAction.RENDER_CARD.value == "render_card"
     assert RecommendAction.ASK.value == "ask"
     assert RecommendAction.SWITCH.value == "switch"
     assert RecommendAction.NOOP.value == "noop"
+
+
+def test_project_has_slug_field():
+    from character_workflow.lib.schemas import Project
+    p = Project(id="p-x", slug="my-game", name="名字", created_at="2026-05-21T00:00:00+00:00")
+    assert p.slug == "my-game"
+
+
+def test_project_slug_required():
+    import pytest
+    from pydantic import ValidationError
+    from character_workflow.lib.schemas import Project
+    with pytest.raises(ValidationError):
+        Project(id="p-x", name="名字", created_at="2026-05-21T00:00:00+00:00")

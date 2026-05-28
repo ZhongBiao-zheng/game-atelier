@@ -5,7 +5,7 @@ draft_processor 本身不依赖 characters/，但要确保迁移过程中没人
 """
 import pytest
 
-from skill.character_workflow.lib.draft_processor import process_drafts
+from character_workflow.lib.draft_processor import process_drafts
 
 
 @pytest.fixture
@@ -16,7 +16,7 @@ def runtime(tmp_path, monkeypatch):
     chars = tmp_path / "characters" / "shadow"
     chars.mkdir(parents=True)
     (chars / "spec.md").write_text("# shadow", encoding="utf-8")
-    monkeypatch.setenv("RUNTIME_DIR", str(runtime))
+    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     return runtime
 

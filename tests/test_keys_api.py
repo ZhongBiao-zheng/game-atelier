@@ -1,0 +1,178 @@
+import pytest
+from fastapi.testclient import TestClient
+
+from character_workflow.lib import keys
+from viewer_server.server_app import build_app
+
+
+@pytest.fixture
+def client(isolated_data_root):
+    return TestClient(build_app())
+
+
+def _make_payload(alias: str = "lov") -> dict:
+    return {
+        "alias": alias, "provider": "lovart",
+        "access_key": "ak", "secret_key": "sk",
+        "capabilities": ["portrait"], "models": ["gpt_image_2"],
+        "notes": "test", "created_at": "2026-05-22T00:00:00+08:00",
+    }
+
+
+def test_list_keys_returns_empty_initially(client):
+    resp = client.get("/api/keys")
+    assert resp.status_code == 200
+    assert resp.json() == {"keys": [], "default_alias": None}
+
+
+def test_create_then_list_masks_secrets(client):
+    r1 = client.post("/api/keys", json=_make_payload())
+    assert r1.status_code == 201, r1.text
+    # POST response MUST include the raw secret_revealed exactly once.
+    post_body = r1.json()
+    assert "secret_revealed" in post_body
+    assert post_body["secret_revealed"] == "ak"
+    body = client.get("/api/keys").json()
+    assert len(body["keys"]) == 1
+    k = body["keys"][0]
+    assert k["alias"] == "lov"
+    assert k["access_key"] != "ak"
+    assert k["secret_key"] is None
+    # GET response must NEVER leak the raw secret.
+    for row in body["keys"]:
+        assert "secret_revealed" not in row
+
+
+def test_create_custom_key_persists_base_url_without_leaking_secret(client):
+    payload = _make_payload("volc")
+    payload.update({
+        "provider": "custom",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "access_key": "ark-secret",
+        "secret_key": None,
+    })
+    r1 = client.post("/api/keys", json=payload)
+    assert r1.status_code == 201, r1.text
+
+    row = client.get("/api/keys").json()["keys"][0]
+    assert row["base_url"] == "https://ark.cn-beijing.volces.com/api/v3"
+    assert row["access_key"] != "ark-secret"
+    assert row["secret_key"] is None
+
+
+def test_create_key_persists_provider_metadata(client):
+    payload = _make_payload("seedream-main")
+    payload.update({
+        "provider": "seedream",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "access_key": "ark-secret",
+        "secret_key": None,
+        "homepage_url": "https://www.volcengine.com",
+        "docs_url": "https://www.volcengine.com/docs",
+        "api_key_url": "https://console.volcengine.com/ark",
+        "modalities": ["image"],
+        "notes": "",
+    })
+
+    r1 = client.post("/api/keys", json=payload)
+    assert r1.status_code == 201, r1.text
+
+    row = client.get("/api/keys").json()["keys"][0]
+    assert row["homepage_url"] == "https://www.volcengine.com"
+    assert row["docs_url"] == "https://www.volcengine.com/docs"
+    assert row["api_key_url"] == "https://console.volcengine.com/ark"
+    assert row["modalities"] == ["image"]
+    assert row["notes"] == ""
+    assert row["access_key"] != "ark-secret"
+
+
+def test_create_custom_key_accepts_zhenzhen_routing_metadata(client):
+    payload = _make_payload("zz-gpt")
+    payload.update({
+        "provider": "custom",
+        "base_url": "https://ai.t8star.org",
+        "access_key": "zz-secret",
+        "secret_key": None,
+        "routing_scope": "classified",
+        "routing_category": "gpt_image",
+        "routing_hints": ["gpt-image", "gpt_image", "gptimage"],
+        "models": [{"name": "GPT Image 2", "id": "gpt-image-2-all"}],
+        "modalities": ["image"],
+    })
+
+    resp = client.post("/api/keys", json=payload)
+    assert resp.status_code == 201, resp.text
+
+    row = client.get("/api/keys").json()["keys"][0]
+    assert row["provider"] == "custom"
+    assert row["routing_scope"] == "classified"
+    assert row["routing_category"] == "gpt_image"
+    assert row["routing_hints"] == ["gpt-image", "gpt_image", "gptimage"]
+    assert row["access_key"] != "zz-secret"
+
+
+def test_create_key_persists_named_models(client):
+    payload = _make_payload("volc")
+    payload.update({
+        "provider": "seedream",
+        "access_key": "ark-test",
+        "secret_key": None,
+        "models": [
+            {"name": "图片 5.0 Lite", "id": "doubao-seedream-5-0-260128"},
+            {"name": "图片 4.7", "id": "doubao-seedream-4-5-251128"},
+        ],
+    })
+    r1 = client.post("/api/keys", json=payload)
+    assert r1.status_code == 201, r1.text
+
+    row = client.get("/api/keys").json()["keys"][0]
+    assert row["models"] == [
+        {"name": "图片 5.0 Lite", "id": "doubao-seedream-5-0-260128"},
+        {"name": "图片 4.7", "id": "doubao-seedream-4-5-251128"},
+    ]
+
+
+def test_create_duplicate_alias_409(client):
+    client.post("/api/keys", json=_make_payload())
+    r = client.post("/api/keys", json=_make_payload())
+    assert r.status_code == 409
+
+
+def test_patch_key_updates_notes(client):
+    client.post("/api/keys", json=_make_payload())
+    r = client.patch("/api/keys/lov", json={"notes": "updated"})
+    assert r.status_code == 200
+    found = next(k for k in client.get("/api/keys").json()["keys"] if k["alias"] == "lov")
+    assert found["notes"] == "updated"
+
+
+def test_patch_preserves_secret_when_not_provided(client):
+    client.post("/api/keys", json=_make_payload())
+    client.patch("/api/keys/lov", json={"notes": "x"})
+    k = keys.find_by_alias("lov")
+    assert k.access_key == "ak"
+    assert k.secret_key == "sk"
+
+
+def test_patch_missing_alias_404(client):
+    r = client.patch("/api/keys/missing", json={"notes": "x"})
+    assert r.status_code == 404
+
+
+def test_delete_key(client):
+    client.post("/api/keys", json=_make_payload())
+    r = client.delete("/api/keys/lov")
+    assert r.status_code == 204
+    assert client.get("/api/keys").json()["keys"] == []
+
+
+def test_set_default(client):
+    client.post("/api/keys", json=_make_payload())
+    r = client.post("/api/keys/lov/default")
+    assert r.status_code == 200
+    assert client.get("/api/keys").json()["default_alias"] == "lov"
+
+
+def test_set_default_nonexistent_404(client):
+    r = client.post("/api/keys/missing/default")
+    assert r.status_code == 404

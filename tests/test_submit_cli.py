@@ -17,24 +17,28 @@ import sys
 
 
 def _run(args, cwd, env=None):
-    """直接调 python -m skill.character_workflow，捕获 stdout/stderr/exit。"""
-    cmd = [sys.executable, "-m", "skill.character_workflow", *args]
+    """直接调 python -m character_workflow，捕获 stdout/stderr/exit。"""
+    cmd = [sys.executable, "-m", "character_workflow", *args]
     return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
 
 
 def _make_env(tmp_path, monkeypatch_env=None):
     import os
+    from pathlib import Path
     env = os.environ.copy()
+    env["CHARACTER_WORKFLOW_DATA_ROOT"] = str(tmp_path)
+    # active_character.py still reads RUNTIME_DIR until it is migrated
     env["RUNTIME_DIR"] = str(tmp_path / ".runtime")
-    env["CHARACTERS_DIR"] = str(tmp_path / "characters")
-    env["PROJECT_ROOT"] = str(tmp_path)
+    # Ensure src/ is on PYTHONPATH so subprocesses can find character_workflow
+    src_dir = str(Path(__file__).resolve().parent.parent / "src")
+    env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{env.get('PYTHONPATH', '')}"
     if monkeypatch_env:
         env.update(monkeypatch_env)
     return env
 
 
 def _project_root() -> str:
-    """子进程要在仓库根跑，否则找不到 skill 包。"""
+    """子进程要在仓库根跑，否则找不到包。"""
     from pathlib import Path
     return str(Path(__file__).resolve().parent.parent)
 
@@ -61,7 +65,7 @@ def test_submit_portrait_default_values(tmp_path):
     assert job_path.exists()
     data = json.loads(job_path.read_text(encoding="utf-8"))
     assert data["status"] == "pending_confirm"
-    assert data["kind"] == "portrait"
+    assert data["asset_slot"] == "portrait"
     assert data["character_id"] == "holy"
     assert data["prompt"] == "中文 8 段式 prompt"
     assert data["model"] == "generate_image_gpt_image_2"
@@ -89,8 +93,9 @@ def test_submit_promo_with_source_image(tmp_path):
     data = json.loads(
         (tmp_path / ".runtime" / "jobs" / f"{job_id}.json").read_text(encoding="utf-8")
     )
-    assert data["kind"] == "promo"
+    assert data["asset_slot"] == "promo"
     assert data["source_image"] == str(src)
+    assert data["params"]["reference_images"] == [str(src)]
 
 
 def test_submit_turnaround_kind(tmp_path):
@@ -108,7 +113,7 @@ def test_submit_turnaround_kind(tmp_path):
     data = json.loads(
         (tmp_path / ".runtime" / "jobs" / f"{job_id}.json").read_text(encoding="utf-8")
     )
-    assert data["kind"] == "turnaround"
+    assert data["asset_slot"] == "turnaround"
 
 
 def test_submit_n4_explicit(tmp_path):

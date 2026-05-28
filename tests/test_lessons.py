@@ -1,7 +1,12 @@
-"""Tests for skill.character_workflow.lib.lessons.append_lesson."""
+"""Legacy append_lesson tests — superseded by test_memory_scopes.py."""
 import pytest
 
-from skill.character_workflow.lib import lessons
+pytest.skip(
+    "legacy append_lesson tests — superseded by test_memory_scopes.py",
+    allow_module_level=True,
+)
+
+from character_workflow.lib import lessons  # noqa: E402
 
 
 @pytest.fixture
@@ -43,5 +48,5 @@ def test_append_unknown_kind_raises():
     with pytest.raises(ValueError, match="unknown lessons kind"):
         # Note: we hit the validation in _lessons_path before monkeypatch replaces it.
         # 不走 fixture，因为 monkeypatch 把 _lessons_path 整个替换了，绕过校验。
-        from skill.character_workflow.lib import lessons as raw
+        from character_workflow.lib import lessons as raw
         raw._lessons_path("video")

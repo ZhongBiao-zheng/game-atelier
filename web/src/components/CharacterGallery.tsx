@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, AlertTriangle, Loader2, Upload, ClipboardCopy, Clock } from 'lucide-react';
-import type { Job, JobKind } from '../schema/jobs';
+import { X, AlertTriangle, Loader2, Upload, Clock } from 'lucide-react';
+import type { AssetSlot, Job } from '../schema/jobs';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { FeedbackInput } from './FeedbackInput';
 
 interface Props {
   characterId: string | null;
@@ -14,13 +15,7 @@ interface Props {
 
 type TabKind = 'portrait' | 'promo' | 'turnaround';
 
-const TAB_META: Record<TabKind, {
-  label: string;
-  emptyTitle: string;
-  emptyHint: string;
-  // 控制台标题 / 触发命令前缀；portrait 不显示 launchpad
-  launchpad?: { title: string; command: string };
-}> = {
+const TAB_META: Record<TabKind, { label: string; emptyTitle: string; emptyHint: string }> = {
   portrait: {
     label: '立绘',
     emptyTitle: '等待第一张作品',
@@ -29,14 +24,12 @@ const TAB_META: Record<TabKind, {
   promo: {
     label: '美宣',
     emptyTitle: '等待第一张美宣',
-    emptyHint: '上传源图后复制命令到 CC 触发 /character-promo',
-    launchpad: { title: '美宣出图 · 控制台', command: '/character-promo' },
+    emptyHint: '上传源图后在 CC 触发 /character-promo',
   },
   turnaround: {
     label: '三视图',
     emptyTitle: '等待第一张三视图',
-    emptyHint: '上传源图后复制命令到 CC 触发 /character-turnaround',
-    launchpad: { title: '三视图出图 · 控制台', command: '/character-turnaround' },
+    emptyHint: '上传源图后在 CC 触发 /character-turnaround',
   },
 };
 
@@ -44,6 +37,7 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<TabKind>('portrait');
+  const [uploadSignal, setUploadSignal] = useState(0);
 
   useEffect(() => {
     if (!characterId) return;
@@ -52,17 +46,17 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
       .then(r => r.json() as Promise<Job[]>)
       .then(all => setJobs(all.filter(j => j.character_id === characterId)))
       .finally(() => setLoading(false));
-  }, [characterId, sseSignal]);
+  }, [characterId, sseSignal, uploadSignal]);
 
   if (!characterId) return <EmptyShell title="请在左栏选择角色" subtitle="Atelier · 角色资产工坊" />;
 
   // 旧 job 无 kind 字段时按 PORTRAIT 处理（后端 Pydantic 默认值，前端二次兜底防漂移）
-  const jobKind = (j: Job): JobKind => j.kind ?? 'portrait';
+  const jobKind = (j: Job): AssetSlot => j.asset_slot ?? 'portrait';
   const tabJobs = jobs.filter(j => jobKind(j) === tab);
   const tabCounts: Record<TabKind, number> = {
-    portrait: jobs.filter(j => jobKind(j) === 'portrait').length,
-    promo: jobs.filter(j => jobKind(j) === 'promo').length,
-    turnaround: jobs.filter(j => jobKind(j) === 'turnaround').length,
+    portrait: jobs.filter(j => jobKind(j) === 'portrait').reduce((s, j) => s + j.output_paths.length, 0),
+    promo: jobs.filter(j => jobKind(j) === 'promo').reduce((s, j) => s + j.output_paths.length, 0),
+    turnaround: jobs.filter(j => jobKind(j) === 'turnaround').reduce((s, j) => s + j.output_paths.length, 0),
   };
 
   if (loading && jobs.length === 0) {
@@ -86,11 +80,18 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
     if (!r.ok) { alert(`删除失败：HTTP ${r.status}`); return; }
     setJobs(js => js.map(j => j.job_id === jobId
       ? { ...j, output_paths: j.output_paths.filter(p => p !== path) }
-      : j));
+        : j));
+  }
+
+  async function deleteFailedJob(jobId: string) {
+    if (!window.confirm(`删除这个失败记录？\n${jobId}`)) return;
+    const r = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+    if (!r.ok) { alert(`删除失败：HTTP ${r.status}`); return; }
+    setJobs(js => js.filter(j => j.job_id !== jobId));
   }
 
   const cols = detailMode ? 2 : 3;
-  const gridCols = cols === 2 ? 'grid-cols-2' : 'grid-cols-3';
+  const colClass = cols === 2 ? 'columns-2' : 'columns-3';
   const hasAny = allImages.length > 0 || isRunning || failedJobs.length > 0 || pendingConfirm.length > 0;
 
   return (
@@ -98,15 +99,13 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
       name={characterName} count={allImages.length} rounds={tabJobs.length}
       compact={detailMode} tab={tab} setTab={setTab} tabCounts={tabCounts}
     >
-      {TAB_META[tab].launchpad && (
-        <SkillLaunchpad
-          characterId={characterId}
-          title={TAB_META[tab].launchpad!.title}
-          command={TAB_META[tab].launchpad!.command}
-        />
-      )}
+      <GalleryUpload
+        characterId={characterId}
+        kind={tab}
+        onUploaded={() => setUploadSignal(s => s + 1)}
+      />
 
-      {pendingConfirm.length > 0 && <PendingConfirmBadge jobs={pendingConfirm} />}
+      {pendingConfirm.length > 0 && <PendingConfirmBadge jobs={pendingConfirm} characterId={characterId} />}
 
       {!hasAny && (
         <div className="py-16 text-center">
@@ -120,17 +119,17 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
       )}
 
       {hasAny && (
-        <div className={cn('grid gap-4', gridCols)}>
+        <div className={cn(colClass, 'gap-4')}>
           {allImages.map((img, i) => (
-            <figure key={i} className="group relative aspect-square">
+            <figure key={i} className="group relative mb-4 break-inside-avoid">
               <button
                 onClick={() => onSelectImage(img.path, img.jobId)}
-                className="size-full overflow-hidden rounded-lg border border-border/50 bg-card transition-all duration-200 hover:border-primary/60 hover:shadow-[0_0_0_1px_var(--primary)] cursor-pointer p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                className="w-full block overflow-hidden rounded-lg border border-border/50 bg-card transition-all duration-200 hover:border-primary/60 hover:shadow-[0_0_0_1px_var(--primary)] cursor-pointer p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 <img
                   src={`/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`}
                   alt=""
-                  className="size-full object-cover transition-opacity duration-300 group-hover:opacity-95"
+                  className="w-full h-auto block transition-opacity duration-300 group-hover:opacity-95"
                 />
               </button>
               <figcaption className="pointer-events-none absolute bottom-2 left-2 font-mono text-[10px] tabular-nums tracking-wider text-foreground bg-background/75 backdrop-blur-sm px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
@@ -147,8 +146,17 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
             </figure>
           ))}
 
-          {isRunning && Array.from({ length: 2 }).map((_, i) => <SkeletonCard key={`s${i}`} />)}
-          {failedJobs.map(j => <ErrorCard key={j.job_id} jobId={j.job_id} error={j.error || '未知错误'} />)}
+          {tabJobs.filter(j => j.status === 'pending').flatMap(j =>
+            Array.from({ length: j.params?.n ?? 1 }, (_, i) => <SkeletonCard key={`${j.job_id}-s${i}`} />)
+          )}
+          {failedJobs.map(j => (
+            <ErrorCard
+              key={j.job_id}
+              jobId={j.job_id}
+              error={j.error || '未知错误'}
+              onDelete={deleteFailedJob}
+            />
+          ))}
         </div>
       )}
     </GalleryShell>
@@ -207,8 +215,9 @@ function TabStrip({
             key={t.key}
             onClick={() => setTab(t.key)}
             className={cn(
-              'group relative bg-transparent border-0 p-0 cursor-pointer',
+              'group relative bg-transparent border-0 p-0 cursor-pointer rounded-sm',
               'flex items-baseline gap-1.5 transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
               active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground/80',
             )}
           >
@@ -229,19 +238,12 @@ function TabStrip({
   );
 }
 
-function SkillLaunchpad({
-  characterId, title, command: commandPrefix,
-}: { characterId: string; title: string; command: string }) {
-  const [uploadedPath, setUploadedPath] = useState<string | null>(null);
-  const [uploadedName, setUploadedName] = useState<string | null>(null);
+function GalleryUpload({
+  characterId, kind, onUploaded,
+}: { characterId: string; kind: TabKind; onUploaded: () => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const command = uploadedPath
-    ? `${commandPrefix} ${characterId} --upload ${uploadedPath}`
-    : `${commandPrefix} ${characterId}`;
 
   async function handleFile(file: File) {
     setBusy(true);
@@ -249,14 +251,12 @@ function SkillLaunchpad({
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const r = await fetch('/api/uploads', { method: 'POST', body: fd });
+      const r = await fetch(`/api/characters/${characterId}/gallery/${kind}`, { method: 'POST', body: fd });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        throw new Error(d.detail || `HTTP ${r.status}`);
+        throw new Error((d as { detail?: string }).detail || `HTTP ${r.status}`);
       }
-      const data = await r.json();
-      setUploadedPath(data.path);
-      setUploadedName(data.filename);
+      onUploaded();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -264,76 +264,34 @@ function SkillLaunchpad({
     }
   }
 
-  async function copyCommand() {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard 不可用时退化为提示用户手动复制
-      setError('复制失败，请手动选中命令字符串');
-    }
-  }
-
   return (
-    <div className="mb-6 rounded-lg border border-border/50 bg-card/50 p-5 space-y-4">
-      <div className="flex items-baseline justify-between">
-        <h2 className="font-[var(--font-display)] italic text-lg text-foreground">{title}</h2>
-        <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">
-          web 不直接触发 · 复制命令到 CC
-        </span>
-      </div>
-
-      <div className="space-y-2">
-        <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">源图（可选）</div>
-        <div className="flex items-center gap-3">
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            className="hidden"
-            onChange={e => {
-              const f = e.target.files?.[0];
-              if (f) void handleFile(f);
-              e.target.value = '';
-            }}
-          />
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => inputRef.current?.click()}
-            disabled={busy}
-          >
-            <Upload className="size-3.5" />
-            {busy ? '上传中…' : uploadedPath ? '换一张' : '选择文件'}
-          </Button>
-          {uploadedName && (
-            <div className="min-w-0 text-xs text-muted-foreground">
-              <div className="truncate text-foreground/85">{uploadedName}</div>
-              <div className="truncate font-mono text-[10px] text-muted-foreground/70">{uploadedPath}</div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">触发命令</div>
-        <div className="flex items-center gap-2">
-          <pre className="flex-1 m-0 px-3 py-2 rounded border border-border/50 bg-background font-mono text-xs text-foreground/90 overflow-x-auto whitespace-nowrap">
-            {command}
-          </pre>
-          <Button size="sm" onClick={copyCommand}>
-            <ClipboardCopy className="size-3.5" />
-            {copied ? '已复制' : '复制'}
-          </Button>
-        </div>
-      </div>
-
+    <div className="mb-5 flex items-center gap-3">
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={e => {
+          const f = e.target.files?.[0];
+          if (f) void handleFile(f);
+          e.target.value = '';
+        }}
+      />
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => inputRef.current?.click()}
+        disabled={busy}
+        className="shrink-0"
+      >
+        <Upload className="size-3.5" />
+        {busy ? '上传中…' : '添加图片'}
+      </Button>
       {error && (
-        <div className="text-xs text-destructive flex items-center gap-1.5">
-          <AlertTriangle className="size-3.5" />
+        <span className="text-xs text-destructive flex items-center gap-1">
+          <AlertTriangle className="size-3 shrink-0" />
           {error}
-        </div>
+        </span>
       )}
     </div>
   );
@@ -357,17 +315,17 @@ function EmptyShell({ title, subtitle }: { title: string; subtitle?: string }) {
 }
 
 function Skeleton({ cols }: { cols: number }) {
-  const gridCols = cols === 2 ? 'grid-cols-2' : 'grid-cols-3';
+  const colClass = cols === 2 ? 'columns-2' : 'columns-3';
   return (
-    <div className={cn('grid gap-4', gridCols)}>
-      {Array.from({ length: cols * 2 }).map((_, i) => <SkeletonCard key={i} />)}
+    <div className={cn(colClass, 'gap-4')}>
+      {Array.from({ length: cols }).map((_, i) => <SkeletonCard key={i} />)}
     </div>
   );
 }
 
 function SkeletonCard() {
   return (
-    <div className="relative aspect-square overflow-hidden rounded-lg border border-border/40 bg-card animate-pulse">
+    <div className="relative h-52 mb-4 break-inside-avoid overflow-hidden rounded-lg border border-border/40 bg-card animate-pulse">
       <div className="absolute bottom-3 left-3 flex items-center gap-1.5 text-xs text-[color:var(--status-running)]">
         <Loader2 className="size-3 animate-spin" />
         生成中…
@@ -376,26 +334,71 @@ function SkeletonCard() {
   );
 }
 
-function PendingConfirmBadge({ jobs }: { jobs: Job[] }) {
-  // 决策面是终端，Web 只显示存在感 —— 不放确认/取消按钮，不渲染 prompt / 参数细节
+function PendingConfirmBadge({ jobs, characterId }: { jobs: Job[]; characterId: string }) {
+  const visibleJobs = jobs.slice(0, 2);
+
   return (
-    <div className="mb-6 rounded-md border border-[color:var(--status-running)]/40 bg-[color:var(--status-running)]/[0.06] px-4 py-2.5 flex items-center justify-between gap-3 text-xs">
-      <div className="flex items-center gap-2.5 text-[color:var(--status-running)] min-w-0">
+    <div className="mb-6 rounded-md border border-[color:var(--status-running)]/40 bg-[color:var(--status-running)]/[0.06] px-4 py-4 space-y-3">
+      <div className="flex items-center gap-2.5 text-[color:var(--status-running)]">
         <Clock className="size-3.5 shrink-0" />
         <span className="font-[var(--font-display)] italic text-sm">
           {jobs.length} 个 job 等终端确认
         </span>
       </div>
-      <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/80 shrink-0">
-        去 CC 跟 Claude 说「出图」或「取消」
-      </span>
+      <div className="space-y-2">
+        {visibleJobs.map(job => {
+          const refs = job.params.reference_images?.length
+            ? job.params.reference_images
+            : (job.source_image ? [job.source_image] : []);
+          const command = `uv run python -m skill.character_workflow run-job ${job.job_id}`;
+          return (
+            <div key={job.job_id} className="rounded border border-border/40 bg-background/35 px-3 py-2 text-xs space-y-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-mono text-[10px] text-muted-foreground">{job.job_id}</span>
+                <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground/80">
+                  {job.params.requested_size || job.params.size || '默认'} · {job.params.n ?? 1} 张
+                </span>
+              </div>
+              <div className="max-h-[2.8em] overflow-hidden leading-snug text-foreground/85">
+                {job.prompt}
+              </div>
+              <div className="flex items-start gap-2 text-muted-foreground">
+                <span className="shrink-0 text-[10px] uppercase tracking-[0.16em]">参考图</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[10px]">
+                  {refs.length ? `${refs.length} · ${refs[0]}` : '无'}
+                </span>
+              </div>
+              <pre className="m-0 overflow-x-auto whitespace-nowrap rounded bg-background/60 px-2 py-1 font-mono text-[10px] text-foreground/80">
+                {command}
+              </pre>
+            </div>
+          );
+        })}
+        {jobs.length > visibleJobs.length && (
+          <div className="text-[10px] text-muted-foreground">
+            另有 {jobs.length - visibleJobs.length} 个待确认 job
+          </div>
+        )}
+      </div>
+      <FeedbackInput characterId={characterId} />
     </div>
   );
 }
 
-function ErrorCard({ jobId }: { error: string; jobId: string }) {
+function ErrorCard({ jobId, error, onDelete }: { error: string; jobId: string; onDelete: (jobId: string) => void }) {
   return (
-    <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-center">
+    <div
+      title={error}
+      className="group relative flex h-48 mb-4 break-inside-avoid flex-col items-center justify-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-center"
+    >
+      <button
+        onClick={() => onDelete(jobId)}
+        title="删除这个失败记录"
+        aria-label="删除"
+        className="absolute right-2 top-2 size-7 rounded-full bg-black/70 text-white grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm hover:bg-destructive cursor-pointer border-0"
+      >
+        <X className="size-3.5" />
+      </button>
       <AlertTriangle className="size-7 text-destructive" />
       <div className="text-xs text-destructive font-medium">出图失败</div>
       <button

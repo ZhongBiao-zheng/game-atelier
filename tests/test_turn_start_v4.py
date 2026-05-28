@@ -10,14 +10,12 @@ import pytest
 def project(tmp_path, monkeypatch):
     """搭一个干净的项目根 + .runtime + characters。"""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
-    monkeypatch.setenv("RUNTIME_DIR", str(tmp_path / ".runtime"))
-    monkeypatch.setenv("CHARACTERS_DIR", str(tmp_path / "characters"))
+    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
     return tmp_path
 
 
 def test_stage_a_no_characters_dir(project):
-    from skill.character_workflow.lib.turn_start import detect_stage
+    from character_workflow.lib.turn_start import detect_stage
     stage, reason = detect_stage()
     assert stage == "A"
     assert "characters" in reason
@@ -25,7 +23,7 @@ def test_stage_a_no_characters_dir(project):
 
 def test_stage_b_empty_characters_dir(project):
     (project / "characters").mkdir()
-    from skill.character_workflow.lib.turn_start import detect_stage
+    from character_workflow.lib.turn_start import detect_stage
     stage, reason = detect_stage()
     assert stage == "B"
     assert "空" in reason or "empty" in reason.lower()
@@ -34,7 +32,7 @@ def test_stage_b_empty_characters_dir(project):
 def test_stage_c_active_missing(project):
     (project / "characters" / "holy").mkdir(parents=True)
     (project / "characters" / "holy" / "spec.md").write_text("# 圣灵\n治愈系\n")
-    from skill.character_workflow.lib.turn_start import detect_stage
+    from character_workflow.lib.turn_start import detect_stage
     stage, reason = detect_stage()
     assert stage == "C"
 
@@ -46,7 +44,7 @@ def test_stage_c_active_invalid_id(project):
     (project / ".runtime" / "active-character.json").write_text(
         json.dumps({"active_id": "ghost-not-exists", "updated_at": "2026-05-19T00:00:00+00:00"})
     )
-    from skill.character_workflow.lib.turn_start import detect_stage
+    from character_workflow.lib.turn_start import detect_stage
     stage, _ = detect_stage()
     assert stage == "C"
 
@@ -58,7 +56,7 @@ def test_stage_c_active_spec_missing(project):
     (project / ".runtime" / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
     )
-    from skill.character_workflow.lib.turn_start import detect_stage
+    from character_workflow.lib.turn_start import detect_stage
     stage, _ = detect_stage()
     assert stage == "C"
 
@@ -70,13 +68,19 @@ def test_stage_d_active_ok(project):
     (project / ".runtime" / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
     )
-    from skill.character_workflow.lib.turn_start import detect_stage
+    (project / ".runtime" / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
+    )
+    from character_workflow.lib.turn_start import detect_stage
     stage, _ = detect_stage()
     assert stage == "D"
 
 
 def test_list_recent_chars_empty(project):
-    from skill.character_workflow.lib.turn_start import list_recent_chars
+    from character_workflow.lib.turn_start import list_recent_chars
     assert list_recent_chars() == []
 
 
@@ -84,7 +88,7 @@ def test_list_recent_chars_skips_non_dirs(project):
     chars = project / "characters"
     chars.mkdir()
     (chars / "a-file.txt").write_text("noise")
-    from skill.character_workflow.lib.turn_start import list_recent_chars
+    from character_workflow.lib.turn_start import list_recent_chars
     assert list_recent_chars() == []
 
 
@@ -94,7 +98,7 @@ def test_list_recent_chars_extracts_tagline(project):
     (chars / "holy" / "spec.md").write_text(
         "# 圣灵祭祀\n\n治愈系女性祭祀，金白配色，兜帽低垂遮眼\n## 风格\n..."
     )
-    from skill.character_workflow.lib.turn_start import list_recent_chars
+    from character_workflow.lib.turn_start import list_recent_chars
     result = list_recent_chars()
     assert len(result) == 1
     assert result[0]["id"] == "holy"
@@ -105,7 +109,7 @@ def test_list_recent_chars_extracts_tagline(project):
 def test_list_recent_chars_no_spec(project):
     chars = project / "characters"
     (chars / "ghost").mkdir(parents=True)
-    from skill.character_workflow.lib.turn_start import list_recent_chars
+    from character_workflow.lib.turn_start import list_recent_chars
     result = list_recent_chars()
     assert result == [{"id": "ghost", "tagline": ""}]
 
@@ -115,13 +119,13 @@ def test_list_recent_chars_sorted(project):
     for name in ("zelda", "alex", "mira"):
         (chars / name).mkdir(parents=True)
         (chars / name / "spec.md").write_text(f"# {name}\n短描述-{name}\n")
-    from skill.character_workflow.lib.turn_start import list_recent_chars
+    from character_workflow.lib.turn_start import list_recent_chars
     result = list_recent_chars()
     assert [r["id"] for r in result] == ["alex", "mira", "zelda"]
 
 
 def test_intent_default_no_drafts_no_message():
-    from skill.character_workflow.lib.turn_start import infer_intent
+    from character_workflow.lib.turn_start import infer_intent
     intent, signal, conflict = infer_intent(message=None, drafts=[], active_id="holy")
     assert intent == "new"
     assert signal == "default"
@@ -129,7 +133,7 @@ def test_intent_default_no_drafts_no_message():
 
 
 def test_intent_revise_when_drafts_nonempty():
-    from skill.character_workflow.lib.turn_start import infer_intent
+    from character_workflow.lib.turn_start import infer_intent
     intent, signal, conflict = infer_intent(
         message=None,
         drafts=[{"path": "x.md", "text": "调色"}],
@@ -141,7 +145,7 @@ def test_intent_revise_when_drafts_nonempty():
 
 
 def test_intent_create_when_keyword_in_message():
-    from skill.character_workflow.lib.turn_start import infer_intent
+    from character_workflow.lib.turn_start import infer_intent
     for msg in ("新建一个角色叫光辉骑士", "我想做个新角色", "另一个角色"):
         intent, signal, _ = infer_intent(message=msg, drafts=[], active_id="holy")
         assert intent == "create", f"msg={msg!r}"
@@ -149,7 +153,7 @@ def test_intent_create_when_keyword_in_message():
 
 
 def test_intent_switch_when_slash_command_different_id():
-    from skill.character_workflow.lib.turn_start import infer_intent
+    from character_workflow.lib.turn_start import infer_intent
     intent, signal, _ = infer_intent(
         message="/character-workflow ghost-knight 继续",
         drafts=[],
@@ -161,7 +165,7 @@ def test_intent_switch_when_slash_command_different_id():
 
 def test_intent_switch_same_id_falls_back_to_new():
     """/character-workflow holy 但 active 已经是 holy → 不算 switch。"""
-    from skill.character_workflow.lib.turn_start import infer_intent
+    from character_workflow.lib.turn_start import infer_intent
     intent, signal, _ = infer_intent(
         message="/character-workflow holy",
         drafts=[],
@@ -172,7 +176,7 @@ def test_intent_switch_same_id_falls_back_to_new():
 
 
 def test_intent_conflict_drafts_plus_new_keyword():
-    from skill.character_workflow.lib.turn_start import infer_intent
+    from character_workflow.lib.turn_start import infer_intent
     intent, signal, conflict = infer_intent(
         message="新建一个角色",
         drafts=[{"path": "x.md", "text": "改 holy 的色"}],
@@ -183,7 +187,7 @@ def test_intent_conflict_drafts_plus_new_keyword():
 
 
 def test_turn_start_stage_a_payload(project):
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     r = turn_start(kind="portrait", message=None)
     assert r["stage"] == "A"
     assert r["intent"] is None
@@ -194,7 +198,7 @@ def test_turn_start_stage_a_payload(project):
 
 def test_turn_start_stage_b_payload(project):
     (project / "characters").mkdir()
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     r = turn_start(kind="portrait", message=None)
     assert r["stage"] == "B"
     assert r["intent"] is None
@@ -208,7 +212,7 @@ def test_turn_start_stage_c_payload(project):
     (chars / "holy" / "spec.md").write_text("# 圣灵\n治愈系祭祀\n")
     (chars / "alex").mkdir()
     (chars / "alex" / "spec.md").write_text("# 亚历克斯\n剑士定位\n")
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     r = turn_start(kind="portrait", message=None)
     assert r["stage"] == "C"
     assert r["intent"] is None
@@ -226,7 +230,13 @@ def test_turn_start_stage_d_default_new(project):
     (runtime / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
     )
-    from skill.character_workflow.lib.turn_start import turn_start
+    (runtime / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
+    )
+    from character_workflow.lib.turn_start import turn_start
     r = turn_start(kind="portrait", message=None)
     assert r["stage"] == "D"
     assert r["intent"] == "new"
@@ -245,10 +255,16 @@ def test_turn_start_stage_d_with_drafts(project):
     (runtime / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
     )
+    (runtime / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
+    )
     draft_dir = runtime / "draft"
     draft_dir.mkdir()
     (draft_dir / "holy-2026.md").write_text("color: more golden\n")
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     r = turn_start(kind="portrait", message=None)
     assert r["stage"] == "D"
     assert r["intent"] == "revise"
@@ -264,10 +280,16 @@ def test_turn_start_stage_d_conflict(project):
     (runtime / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
     )
+    (runtime / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
+    )
     draft_dir = runtime / "draft"
     draft_dir.mkdir()
     (draft_dir / "holy-2026.md").write_text("调色\n")
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     r = turn_start(kind="portrait", message="新建一个光辉骑士")
     assert r["stage"] == "D"
     assert r["intent"] is None
@@ -276,15 +298,15 @@ def test_turn_start_stage_d_conflict(project):
 
 def test_turn_start_schema_validates(project):
     """编排器返回的 dict 必须能通过 TurnStartResult Pydantic 校验。"""
-    from skill.character_workflow.lib.schemas import TurnStartResult
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.schemas import TurnStartResult
+    from character_workflow.lib.turn_start import turn_start
     r = turn_start(kind="portrait", message=None)
     parsed = TurnStartResult.model_validate(r)
     assert parsed.stage.value == "A"
 
 
 def test_cli_turn_start_stage_a(project, capsys):
-    from skill.character_workflow.__main__ import main
+    from character_workflow.__main__ import main
     rc = main(["turn-start"])
     assert rc == 0
     out = capsys.readouterr().out
@@ -297,11 +319,18 @@ def test_cli_turn_start_with_message(project, capsys):
     chars = project / "characters"
     (chars / "holy").mkdir(parents=True)
     (chars / "holy" / "spec.md").write_text("# 圣灵\n")
-    (project / ".runtime").mkdir()
-    (project / ".runtime" / "active-character.json").write_text(
+    runtime = project / ".runtime"
+    runtime.mkdir()
+    (runtime / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
     )
-    from skill.character_workflow.__main__ import main
+    (runtime / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
+    )
+    from character_workflow.__main__ import main
     rc = main(["turn-start", "--message", "新建一个光辉骑士"])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -314,11 +343,18 @@ def test_cli_turn_start_no_message_defaults_to_new(project, capsys):
     chars = project / "characters"
     (chars / "holy").mkdir(parents=True)
     (chars / "holy" / "spec.md").write_text("# 圣灵\n")
-    (project / ".runtime").mkdir()
-    (project / ".runtime" / "active-character.json").write_text(
+    runtime = project / ".runtime"
+    runtime.mkdir()
+    (runtime / "active-character.json").write_text(
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
     )
-    from skill.character_workflow.__main__ import main
+    (runtime / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
+    )
+    from character_workflow.__main__ import main
     rc = main(["turn-start"])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)

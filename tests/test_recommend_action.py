@@ -19,14 +19,12 @@ import pytest
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
-    monkeypatch.setenv("RUNTIME_DIR", str(tmp_path / ".runtime"))
-    monkeypatch.setenv("CHARACTERS_DIR", str(tmp_path / "characters"))
+    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
     return tmp_path
 
 
 def test_stage_a_returns_ask(env):
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, reason = compute_recommend_action(
         stage="A", message=None, drafts=[], active_age_minutes=None, last_job_status=None,
     )
@@ -35,7 +33,7 @@ def test_stage_a_returns_ask(env):
 
 
 def test_stage_b_returns_ask(env):
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, _ = compute_recommend_action(
         stage="B", message=None, drafts=[], active_age_minutes=None, last_job_status=None,
     )
@@ -43,7 +41,7 @@ def test_stage_b_returns_ask(env):
 
 
 def test_stage_c_returns_ask(env):
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, _ = compute_recommend_action(
         stage="C", message=None, drafts=[], active_age_minutes=None, last_job_status=None,
     )
@@ -51,7 +49,7 @@ def test_stage_c_returns_ask(env):
 
 
 def test_switch_signal_wins(env):
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, reason = compute_recommend_action(
         stage="D",
         message="/character-workflow another-char 切换",
@@ -65,7 +63,7 @@ def test_switch_signal_wins(env):
 
 
 def test_drafts_non_empty_renders_card(env):
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, reason = compute_recommend_action(
         stage="D", message=None,
         drafts=[{"path": "/tmp/a.md", "content": "再红一点"}],
@@ -76,7 +74,7 @@ def test_drafts_non_empty_renders_card(env):
 
 
 def test_create_keyword_returns_ask(env):
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     for kw in ("新建", "新角色", "另一个角色"):
         action, _ = compute_recommend_action(
             stage="D", message=f"我要{kw}做点东西",
@@ -91,7 +89,7 @@ def test_create_keyword_returns_ask(env):
     "v1", "v2", "v3", "v4",
 ])
 def test_render_verb_whitelist(env, verb):
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, _ = compute_recommend_action(
         stage="D", message=f"帮我{verb}", drafts=[],
         active_age_minutes=1, last_job_status=None,
@@ -100,7 +98,7 @@ def test_render_verb_whitelist(env, verb):
 
 
 def test_render_verb_case_insensitive(env):
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, _ = compute_recommend_action(
         stage="D", message="V2 看下", drafts=[],
         active_age_minutes=1, last_job_status=None,
@@ -110,7 +108,7 @@ def test_render_verb_case_insensitive(env):
 
 def test_default_with_cold_start_asks(env):
     """default signal + active_age > 30 分钟 → ask"""
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, reason = compute_recommend_action(
         stage="D", message=None, drafts=[],
         active_age_minutes=60, last_job_status=None,
@@ -120,7 +118,7 @@ def test_default_with_cold_start_asks(env):
 
 
 def test_default_with_last_done_asks(env):
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, reason = compute_recommend_action(
         stage="D", message=None, drafts=[],
         active_age_minutes=1, last_job_status="done",
@@ -130,7 +128,7 @@ def test_default_with_last_done_asks(env):
 
 
 def test_default_with_last_failed_asks(env):
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, _ = compute_recommend_action(
         stage="D", message=None, drafts=[],
         active_age_minutes=1, last_job_status="failed",
@@ -140,7 +138,7 @@ def test_default_with_last_failed_asks(env):
 
 def test_default_no_signals_asks(env):
     """完全无信号兜底 → ask（不出图，宁可多问）"""
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, _ = compute_recommend_action(
         stage="D", message=None, drafts=[],
         active_age_minutes=1, last_job_status="pending_confirm",
@@ -149,7 +147,7 @@ def test_default_no_signals_asks(env):
 
 
 def test_default_with_empty_message_asks(env):
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, _ = compute_recommend_action(
         stage="D", message="", drafts=[],
         active_age_minutes=1, last_job_status=None,
@@ -159,7 +157,7 @@ def test_default_with_empty_message_asks(env):
 
 def test_switch_to_same_active_falls_through(env):
     """/character-workflow X 但 X 已经是 active → 不算 switch"""
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, _ = compute_recommend_action(
         stage="D", message="/character-workflow current",
         drafts=[], active_age_minutes=1, last_job_status=None,
@@ -171,7 +169,7 @@ def test_switch_to_same_active_falls_through(env):
 
 def test_drafts_short_circuits_create_keyword(env):
     """drafts 非空 比 '新建' 关键词高，因为 drafts 是更具体的信号"""
-    from skill.character_workflow.lib.intent import compute_recommend_action
+    from character_workflow.lib.intent import compute_recommend_action
     action, _ = compute_recommend_action(
         stage="D", message="新建一个",
         drafts=[{"path": "/tmp/a.md", "content": "改红"}],
@@ -182,7 +180,7 @@ def test_drafts_short_circuits_create_keyword(env):
 
 def test_turn_start_includes_recommend_fields(env):
     """turn-start 返回 JSON 必须含 recommend_action / recommend_reason / active_age_minutes。"""
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     result = turn_start("portrait", message=None)
     assert "recommend_action" in result
     assert "recommend_reason" in result
@@ -207,9 +205,31 @@ def test_turn_start_stage_d_age_calc(env):
         json.dumps({"active_id": "holy", "updated_at": past.isoformat()}),
         encoding="utf-8",
     )
+    (env / ".runtime" / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        }),
+        encoding="utf-8",
+    )
 
-    from skill.character_workflow.lib.turn_start import turn_start
+    from character_workflow.lib.turn_start import turn_start
     result = turn_start("portrait", message=None)
     assert result["stage"] == "D"
     assert isinstance(result["active_age_minutes"], int)
     assert 9 <= result["active_age_minutes"] <= 11
+
+
+def test_stage_e_returns_ask_with_未归属_reason():
+    from character_workflow.lib.intent import compute_recommend_action
+    action, reason = compute_recommend_action(
+        stage="E",
+        message="出图",
+        drafts=[],
+        active_age_minutes=5,
+        last_job_status="done",
+        active_id="orphan-char",
+    )
+    assert action == "ask"
+    assert "未归属" in reason
+    assert "前置未齐" not in reason

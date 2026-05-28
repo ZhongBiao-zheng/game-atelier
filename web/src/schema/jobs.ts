@@ -1,6 +1,12 @@
 export type JobStatus = 'pending_confirm' | 'pending' | 'done' | 'failed';
 
-export type JobKind = 'portrait' | 'promo' | 'turnaround';
+// 2026-05-25 重构: 原 JobKind 改名为 AssetSlot
+export type AssetSlot = 'portrait' | 'promo' | 'turnaround';
+
+// 新 JobKind: 媒体类型
+export type JobKind = 'image' | 'video';
+
+export type Namespace = 'character' | 'studio';
 
 export interface JobParams {
   size?: string;
@@ -9,6 +15,12 @@ export interface JobParams {
   vendor?: string;
   n?: number;
   reference_images?: string[];
+  requested_size?: string;
+  actual_size?: string;
+  lovart_attachments?: string[];
+  lovart_thread_id?: string;
+  lovart_final_status?: string;
+  warnings?: string[];
   [key: string]: unknown;
 }
 
@@ -23,9 +35,12 @@ export interface Job {
   output_paths: string[];
   status: JobStatus;
   error: string | null;
-  // Skill 套件扩展（2026-05-19）：旧 json 无字段时后端 Pydantic 默认 portrait。
+  asset_slot?: AssetSlot;
   kind?: JobKind;
+  namespace?: Namespace;
   source_image?: string | null;
+  alias?: string | null;
+  provider?: string | null;
 }
 
 export const WEB_EDITABLE_FIELDS = ['prompt', 'model', 'params', 'seed'] as const;

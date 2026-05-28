@@ -10,6 +10,12 @@ images/
 # Skill 运行时状态（每个画师本地一份）
 .runtime/
 
+# API 密钥与本地配置（绝不进 Git）
+.config/
+
+# viewer-server / Studio 运行时 job 状态
+studio/
+
 # 项目内记忆（个人会话日志，不上线）
 memory/
 
@@ -34,7 +40,7 @@ __pycache__/
 venv/
 
 # 前端构建产物（由 vite build 生成）
-skill/viewer_server/static/
+web/dist/
 
 # tsc -b 的中间产物（与 .tsx 源同目录生成的 .js / .tsbuildinfo）
 web/src/**/*.js
@@ -43,3 +49,4 @@ web/tsconfig.tsbuildinfo
 # pnpm 内部生成
 web/pnpm-workspace.yaml
 
+.gstack/

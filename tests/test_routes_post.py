@@ -4,11 +4,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from skill.viewer_server.server_app import build_app
+from viewer_server.server_app import build_app
 
 
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
     runtime = tmp_path / ".runtime"
     (runtime / "jobs").mkdir(parents=True)
     (runtime / "draft").mkdir()
@@ -89,6 +90,12 @@ def test_post_config_expands_tilde_and_mkdirs(client, runtime, tmp_path, monkeyp
     assert (tmp_path / "my-character-assets").exists()
     cfg = json.loads((runtime / "config.json").read_text())
     assert cfg["image_storage_root"] == resolved
+
+
+def test_get_config_defaults_to_current_data_root(client, runtime):
+    r = client.get("/api/config")
+    assert r.status_code == 200
+    assert r.json()["image_storage_root"] == str(runtime.parent)
 
 
 def test_post_config_rejects_empty(client):
@@ -198,7 +205,7 @@ def test_post_job_confirm_rejects_wrong_status(client, runtime):
     assert r.status_code == 409
 
 
-def test_post_job_cancel_marks_failed(client, runtime):
+def test_post_job_cancel_deletes_job_file(client, runtime):
     (runtime / "jobs" / "j1.json").write_text(json.dumps({
         "job_id": "j1", "character_id": "c", "prompt": "p",
         "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt_image_2",
@@ -207,6 +214,78 @@ def test_post_job_cancel_marks_failed(client, runtime):
     }))
     r = client.post("/api/jobs/j1/cancel")
     assert r.status_code == 200
-    data = json.loads((runtime / "jobs" / "j1.json").read_text())
-    assert data["status"] == "failed"
-    assert "画师取消" in data["error"]
+    assert r.json() == {"ok": True, "job_id": "j1", "deleted": True}
+    assert not (runtime / "jobs" / "j1.json").exists()
+
+
+def test_post_job_cancel_rejects_non_pending_confirm(client, runtime):
+    (runtime / "jobs" / "j1.json").write_text(json.dumps({
+        "job_id": "j1", "character_id": "c", "prompt": "p",
+        "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt_image_2",
+        "params": {}, "seed": None, "output_paths": [],
+        "status": "done", "error": None,
+    }))
+    r = client.post("/api/jobs/j1/cancel")
+    assert r.status_code == 409
+    assert (runtime / "jobs" / "j1.json").exists()
+
+
+def test_delete_failed_job_removes_job_file(client, runtime):
+    (runtime / "jobs" / "j1.json").write_text(json.dumps({
+        "job_id": "j1", "character_id": "c", "prompt": "p",
+        "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt_image_2",
+        "params": {}, "seed": None, "output_paths": [],
+        "status": "failed", "error": "Lovart timeout",
+    }))
+
+    r = client.delete("/api/jobs/j1")
+
+    assert r.status_code == 200, r.text
+    assert not (runtime / "jobs" / "j1.json").exists()
+
+
+def test_delete_failed_job_rejects_done_job(client, runtime):
+    (runtime / "jobs" / "j1.json").write_text(json.dumps({
+        "job_id": "j1", "character_id": "c", "prompt": "p",
+        "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt_image_2",
+        "params": {}, "seed": None, "output_paths": [],
+        "status": "done", "error": None,
+    }))
+
+    r = client.delete("/api/jobs/j1")
+
+    assert r.status_code == 409
+    assert (runtime / "jobs" / "j1.json").exists()
+
+
+def test_create_character_creates_dirs_and_spec(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    r = client.post("/api/characters", json={"name": "烈拳猴"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["name"] == "烈拳猴"
+    char_id = data["id"]
+    assert char_id.startswith("char-")
+    root = tmp_path / "characters" / char_id
+    for d in ("portrait", "promo", "turnaround", "source"):
+        assert (root / d).is_dir(), f"missing {d}/"
+    spec = (root / "spec.md").read_text(encoding="utf-8")
+    assert spec.startswith("# 烈拳猴")
+
+
+def test_create_character_rejects_empty_name(client):
+    r = client.post("/api/characters", json={"name": ""})
+    assert r.status_code == 422
+
+
+def test_create_character_sets_active(client, tmp_path, monkeypatch):
+    import json as _json
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".runtime" / "jobs").mkdir(parents=True, exist_ok=True)
+    r = client.post("/api/characters", json={"name": "测试角色"})
+    assert r.status_code == 200
+    char_id = r.json()["id"]
+    active_file = tmp_path / ".runtime" / "active-character.json"
+    assert active_file.exists()
+    active = _json.loads(active_file.read_text())
+    assert active["active_id"] == char_id

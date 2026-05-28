@@ -3,16 +3,16 @@ import time
 
 import pytest
 
-from skill.character_workflow.lib.draft_processor import process_drafts
+from character_workflow.lib.draft_processor import process_drafts
 
 
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
     runtime = tmp_path / ".runtime"
     (runtime / "draft").mkdir(parents=True)
     (runtime / "processing").mkdir()
     (runtime / "draft-processed").mkdir()
-    monkeypatch.setenv("RUNTIME_DIR", str(runtime))
     return runtime
 
 
