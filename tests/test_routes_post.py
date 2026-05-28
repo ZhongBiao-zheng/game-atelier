@@ -289,3 +289,41 @@ def test_create_character_sets_active(client, tmp_path, monkeypatch):
     assert active_file.exists()
     active = _json.loads(active_file.read_text())
     assert active["active_id"] == char_id
+
+
+def test_delete_character_removes_dir_assignment_and_active(client, tmp_path, monkeypatch):
+    import json as _json
+
+    monkeypatch.chdir(tmp_path)
+    char_dir = tmp_path / "characters" / "shadow"
+    (char_dir / "portrait").mkdir(parents=True, exist_ok=True)
+    (char_dir / "portrait" / "v1.png").write_bytes(b"png")
+    (tmp_path / ".runtime").mkdir(exist_ok=True)
+    (tmp_path / ".runtime" / "active-character.json").write_text(
+        _json.dumps({"active_id": "shadow", "updated_at": "2026-05-18T10:00:00Z"}),
+        encoding="utf-8",
+    )
+    (tmp_path / ".runtime" / "projects.json").write_text(
+        _json.dumps({
+            "projects": [
+                {"id": "p-1", "slug": "test", "name": "测试", "created_at": "2026-05-18T10:00:00Z"}
+            ],
+            "assignments": {"shadow": "p-1", "other": "p-1"},
+        }),
+        encoding="utf-8",
+    )
+
+    r = client.delete("/api/characters/shadow")
+
+    assert r.status_code == 200, r.text
+    assert not char_dir.exists()
+    projects = _json.loads((tmp_path / ".runtime" / "projects.json").read_text(encoding="utf-8"))
+    assert projects["assignments"] == {"other": "p-1"}
+    active = _json.loads((tmp_path / ".runtime" / "active-character.json").read_text(encoding="utf-8"))
+    assert active["active_id"] is None
+
+
+def test_delete_character_404_for_missing_dir(client):
+    r = client.delete("/api/characters/nope")
+
+    assert r.status_code == 404

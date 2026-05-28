@@ -231,6 +231,50 @@ def test_rename_character_id_rewrites_windows_style_paths(isolated_data_root):
     ]
 
 
+def test_rename_character_id_rewrites_relative_paths(isolated_data_root):
+    root = isolated_data_root
+    old_id = "char-1779358169"
+    new_id = "huo-li-hu"
+    old = root / "characters" / old_id
+    old.mkdir(parents=True)
+    (old / "spec.md").write_text("# 火栗狐\n", encoding="utf-8")
+
+    jobs = root / ".runtime" / "jobs"
+    jobs.mkdir(parents=True, exist_ok=True)
+    (jobs / "job-1.json").write_text(
+        json.dumps(
+            {
+                "job_id": "job-1",
+                "character_id": old_id,
+                "prompt": "三视图",
+                "submitted_at": "2026-05-28T00:00:00+00:00",
+                "model": "manual",
+                "params": {"reference_images": [f"characters/{old_id}/portrait/v1.png"]},
+                "seed": None,
+                "output_paths": [f"characters/{old_id}/turnaround/v1.png"],
+                "status": "done",
+                "error": None,
+                "asset_slot": "turnaround",
+                "kind": "image",
+                "namespace": "character",
+                "source_image": f"characters/{old_id}/portrait/v1.png",
+                "alias": None,
+                "provider": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    from character_workflow.lib.identity import rename_character_id
+
+    rename_character_id(old_id, new_id)
+
+    job = json.loads((jobs / "job-1.json").read_text(encoding="utf-8"))
+    assert job["output_paths"] == ["characters/huo-li-hu/turnaround/v1.png"]
+    assert job["source_image"] == "characters/huo-li-hu/portrait/v1.png"
+    assert job["params"]["reference_images"] == ["characters/huo-li-hu/portrait/v1.png"]
+
+
 def test_rename_character_id_cli(isolated_data_root, capsys):
     root = isolated_data_root
     old = root / "characters" / "char-1779692464"

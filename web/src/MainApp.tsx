@@ -60,6 +60,9 @@ function ThreeColumnLayout({ routedCharacterId }: { routedCharacterId?: string }
         sseSignal={sseSignal}
         selectedId={selected?.id}
         onSelect={(id, name) => setSelected({ id, name })}
+        onDelete={(id) => {
+          if (selected?.id === id) setSelected(null);
+        }}
       />
       <CharacterGallery
         characterId={selected?.id ?? null}

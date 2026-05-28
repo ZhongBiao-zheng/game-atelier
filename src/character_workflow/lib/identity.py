@@ -137,6 +137,7 @@ def list_pending_identity_normalizations() -> list[PendingCharacterIdentity]:
 def _replace_path_id(value: str, old_id: str, new_id: str) -> str:
     return (
         value.replace(f"/characters/{old_id}/", f"/characters/{new_id}/")
+        .replace(f"characters/{old_id}/", f"characters/{new_id}/")
         .replace(f"\\characters\\{old_id}\\", f"\\characters\\{new_id}\\")
     )
 

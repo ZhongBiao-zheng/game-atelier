@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import uuid
@@ -340,6 +341,20 @@ def create_character(payload: CharacterCreate) -> CharacterEntry:
     (root / "spec.md").write_text(spec_content, encoding="utf-8")
     write_active(char_id)
     return CharacterEntry(id=char_id, name=name, status="idle", latest_job_id=None)
+
+
+@router.delete("/characters/{character_id}")
+def delete_character(character_id: str) -> dict:
+    chars_dir = (_project_root() / "characters").resolve()
+    target = (chars_dir / character_id).resolve()
+    if not target.is_relative_to(chars_dir) or not target.is_dir():
+        raise HTTPException(404, detail=f"character {character_id} not found")
+
+    shutil.rmtree(target)
+    assign_character(character_id, None)
+    if read_active().active_id == character_id:
+        write_active(None)
+    return {"ok": True, "id": character_id}
 
 
 @router.delete("/jobs/{job_id}/image")

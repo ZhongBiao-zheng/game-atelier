@@ -1,16 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, X, AlertCircle, FolderPlus, UserPlus } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Trash2, X, AlertCircle, FolderPlus, UserPlus } from 'lucide-react';
 import type { CharacterEntry, Project, ProjectsFile } from '../schema/jobs';
 import { useActiveCharacter } from '../hooks/useActiveCharacter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
-interface Props { sseSignal: number; selectedId?: string | null; onSelect: (id: string, name: string) => void }
+interface Props {
+  sseSignal: number;
+  selectedId?: string | null;
+  onSelect: (id: string, name: string) => void;
+  onDelete?: (id: string) => void;
+}
 
 const UNCATEGORIZED = '__uncategorized__';
 
-export function LeftSidebar({ sseSignal, selectedId, onSelect }: Props) {
+export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props) {
   const [characters, setCharacters] = useState<CharacterEntry[]>([]);
   const [projects, setProjects] = useState<ProjectsFile>({ projects: [], assignments: {} });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -179,6 +184,28 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect }: Props) {
       const r = await fetch(`/api/projects/${p.id}`, { method: 'DELETE' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setProjects(await r.json());
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function deleteCharacter(c: CharacterEntry, e: React.MouseEvent) {
+    e.stopPropagation();
+    const ok = window.confirm(
+      `删除角色「${c.name}」？\n角色目录和其中图片会从磁盘删除，不可恢复。`,
+    );
+    if (!ok) return;
+    try {
+      const r = await fetch(`/api/characters/${c.id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setCharacters(cs => cs.filter(item => item.id !== c.id));
+      setProjects(ps => ({
+        ...ps,
+        assignments: Object.fromEntries(
+          Object.entries(ps.assignments).filter(([id]) => id !== c.id),
+        ),
+      }));
+      onDelete?.(c.id);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -369,7 +396,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect }: Props) {
         onDoubleClick={(e) => startCharEdit(c, e)}
         title="双击重命名 · 拖到项目"
         className={cn(
-          'flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors',
+          'group/char flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors',
           isEditing ? 'cursor-text' : 'cursor-pointer',
           isActive
             ? 'bg-primary text-primary-foreground'
@@ -392,6 +419,21 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect }: Props) {
           />
         ) : (
           <span className="flex-1 truncate">{c.name}</span>
+        )}
+        {!isEditing && (
+          <button
+            onClick={(e) => deleteCharacter(c, e)}
+            aria-label={`删除角色 ${c.name}`}
+            title="删除角色（磁盘也会删）"
+            className={cn(
+              'grid place-items-center size-6 rounded bg-transparent border-0 p-0 cursor-pointer opacity-0 transition-opacity group-hover/char:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive',
+              isActive
+                ? 'text-primary-foreground/75 hover:bg-primary-foreground/15 hover:text-primary-foreground'
+                : 'text-muted-foreground hover:bg-destructive/15 hover:text-destructive',
+            )}
+          >
+            <Trash2 className="size-3.5" />
+          </button>
         )}
       </li>
     );
