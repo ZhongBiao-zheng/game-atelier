@@ -1,3 +1,6 @@
-# 董卓
-
-（尚无档案 — 请在终端 /character-workflow 对话补全）
+---
+id: dong-zhuo
+name: 董卓
+project: ma-jiang-you-xi
+created: 2026-05-21
+---

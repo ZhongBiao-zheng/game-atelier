@@ -1,3 +1,6 @@
-# 孙策
-
-（尚无档案 — 请在终端 /character-workflow 对话补全）
+---
+id: sun-ce
+name: 孙策
+project: ma-jiang-you-xi
+created: 2026-05-21
+---

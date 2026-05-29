@@ -1,3 +1,6 @@
-# 孙尚香
-
-（尚无档案 — 请在终端 /character-workflow 对话补全）
+---
+id: sun-shang-xiang
+name: 孙尚香
+project: ma-jiang-you-xi
+created: 2026-05-21
+---

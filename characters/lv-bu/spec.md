@@ -1,3 +1,6 @@
-# 吕布
-
-（尚无档案 — 请在终端 /character-workflow 对话补全）
+---
+id: lv-bu
+name: 吕布
+project: ma-jiang-you-xi
+created: 2026-05-21
+---
