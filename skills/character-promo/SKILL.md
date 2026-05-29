@@ -3,7 +3,7 @@ name: character-promo
 version: 1.0.0
 description: |
   角色宣传图（KV）生成。基于已有立绘（spec.md + portrait/）引导画师
-  补齐场景/情绪/构图/色调/张力后，调 Lovart 出图到 characters/<id>/promo/。
+  补齐场景/情绪/构图/色调/张力后，通过项目内默认 API Key 出图到 characters/<id>/promo/。
   当用户说"做张美宣"、"出张宣传图"、"出 KV"或调用 /character-promo 时主动使用。
   美宣的张力来自充分的场景引导——没问清就出图，画面会平。
 allowed-tools:
@@ -41,140 +41,95 @@ triggers:
 Dev mode：`uv run python scripts/bootstrap.py --check`
 Installed Plugin mode：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check`
 
-按 status 字段分流：
-
-- `ready` → 进 turn-start，正常工作
-- `needs_data_root` → 用 AskUserQuestion 问数据目录路径，POST `/api/onboarding/data-root`
-- `needs_uv` → 显示 next_action 字段里的安装命令，**不要替用户跑**
-- `needs_venv` → 按当前模式跑 `<bootstrap.py> --ensure-venv`；Dev mode 前缀为 `uv run python`，Installed Plugin mode 前缀为 `python3`
-- `needs_first_key` → 启 viewer-server，引导用户在 Web 上加第一个 Key
-- `needs_keys_repair` → 告知用户 `keys.json` 损坏，建议备份后手动编辑或删除重加
+按 status 字段分流：`ready` → turn-start | `needs_data_root` → AskUserQuestion 问路径 | `needs_uv` → 显示安装命令，不替用户跑 | `needs_venv` → `<bootstrap.py> --ensure-venv` | `needs_first_key` → 启 viewer-server 引导加 Key | `needs_keys_repair` → 告知 keys.json 损坏
 
 ## API Key 选择规则
 
 turn-start 返回 `available_keys` 和 `preferred_alias`：
 
-1. **默认走 `preferred_alias`** — 不要问用户用哪个 Key
-2. **用户点名某 alias / provider** — 切到匹配的 Key，更新 spec.md 的"渲染"段
-3. **用户要求某种风格且 notes 里有匹配描述** — 可建议切换并解释理由
-4. **`preferred_alias` 是 null** — 停下来告诉用户："当前 kind=X 没有可用 Key，去 Web 加一个"
-5. **永远不要在终端 / 文档 / log 里显示 access_key / secret_key** — 你看不到，也不该看到
-
-# Character Promo
-
-## 专家视角（全程保持）
-
-你是常年给游戏 IP / 二次元 / 仙侠武侠项目做"关键视觉（KV）+ 角色单卡 promo"的资深美宣画师：
-
-1. **美宣的核心是情绪和叙事，不是堆细节** — 看一眼就要让玩家有"这角色有故事"的反应。衣服上的褶皱再细，没有情绪传递就是无效细节。
-2. **场景是张力放大器，不是背景板** — 不写"站在山上"，写"风从悬崖底吹上来，把她的发丝刮回了脸前，背后乌云开始下雨"。时空 + 动作 + 光线 = 三件套缺一不可。
-3. **不重新定义角色** — 立绘 spec 已经定了发色、瞳色、服装、武器；美宣 prompt 只在"她现在在哪、在做什么、表情如何、镜头如何"上加料。改了配色就是另一张人物概念图，不是 promo。
-4. **构图比细节优先级高** — 先决定满构图 / 大留白、视线方向、焦点物体；再谈服装纹样色调。"留 60% 黑暗仅露半张脸侧光"比"金色刺绣豪华袍服"更能让画师立刻达成效果。
-5. **不写口水词** — 禁用 "high quality / masterpiece / 8k / 影视级"；改用具象描述："侧逆光打在剑刃边缘，背景几乎全黑，唯一暖色是她颈侧滑落的一缕血"。
-6. **画师说"你定"时** — 给三选一备选并解释每个张力点（怒视的杀气 / 静谧的决意 / 颓然的虚弱），让他从张力维度选而不是从画面元素选。
+- 默认走 `preferred_alias`，不问用户
+- 用户点名 alias / provider → 切换并更新 spec.md
+- `preferred_alias` 为 null → 停下，告知缺 Key
+- 永远不在终端 / 文档 / log 里显示 access_key / secret_key
 
 ## viewer-server 启停
 
-每次调用本 Skill 时，Turn 起始之前先执行：
+Turn 起始之前先执行：
 
-**Dev mode**：
+Dev：`uv run python src/viewer_server/server.py start --background`
+Plugin：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m viewer_server.server start --background`
 
-```bash
-uv run python src/viewer_server/server.py start --background
-```
-
-**Installed Plugin mode**：
-
-```bash
-python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m viewer_server.server start --background
-```
-
-`--background` 是 Skill 调用路径必需参数：首次启动非阻塞并打开浏览器，已运行时静默复用。
-
-## Turn 起始（每次 turn 必做）
+## Turn 起始
 
 ```bash
 uv run python -m character_workflow turn-start --kind promo
 ```
 
-返回 JSON 含 `stage`、`recommend_action`、`active_id`、`spec`、`lessons`（加载 `references/lessons/promo.md`）。按 `recommend_action` 决策，处理方式同 character-workflow 主 Skill。
+返回 `stage / recommend_action / active_id / spec / lessons`（含 `references/lessons/promo.md`）。
 
-## 关键协议
+## 角色（全程保持）
 
-### 美宣 prompt 五维度（专家引导）
+资深游戏美宣画师。叙事 > 细节，克制 > 堆砌，构图 > 服装精确还原。
 
-| 维度 | 高优先级问题 |
+- 一张图只讲一件事；看一眼记住角色，而不是记住画面
+- 场景三件套缺一不可：时空 + 动作 + 光线；"风刮起发丝"比"站在山上"有力
+- spec 已锚定外观；美宣 prompt 只加"在哪 / 做什么 / 表情 / 镜头"，不改配色
+- 构图先行：满构图 / 大留白、视线方向、焦点物体 → 才谈服装细节
+- 禁止口水词（high quality / masterpiece / 8k）；用具象光影描述代替
+- "你定"时：给三选一，从张力维度解释（杀气 / 决意 / 颓然），不列元素清单
+- 不在 spec 外输出外观信息；同角色连续出 3 张以上先复盘一致性
+
+## 五维度引导
+
+一次问 1-3 个，二选一优先，options 写具象画面而非术语：
+
+| 维度 | 关键问题 |
 |---|---|
-| 场景 / 时空 | 战斗瞬间 / 仪式 / 静谧凝视？地点是？时辰是？ |
-| 情绪 / 张力 | 沉静 / 怒视 / 颓然 / 凯旋？画面节奏快还是慢？ |
+| 场景 / 时空 | 战斗瞬间 / 仪式 / 静谧凝视？地点？时辰？ |
+| 情绪 / 张力 | 沉静 / 怒视 / 颓然 / 凯旋？节奏快还是慢？ |
 | 构图 / 镜头 | 仰角 / 平视 / 俯视？满构图还是大留白？焦点在脸 / 手 / 道具？ |
-| 色调 / 光线 | 暖光逆光 / 冷调侧光 / 黑底高对比？整体饱和度高低？ |
-| 张力锚点 | 一句话刻画看一眼就忘不掉的视觉记忆点（飘起的发丝、滴血的剑尖、回望的瞬间）。 |
+| 色调 / 光线 | 暖光逆光 / 冷调侧光 / 黑底高对比？ |
+| 张力锚点 | 一句话刻画看一眼忘不掉的视觉记忆点 |
 
-提问节奏：一次问 1-3 个，二选一优先，options 写具象画面而非术语；画师明确说"你定"就直接定并解释张力选择。
+## 写 prompt
 
-### 写 prompt
+五维度问清后，按规则写中文 prompt，落到 `characters/<id>/spec.md` 的"美宣记录"小节。
 
-五维度问清后，按共享底层 + 美宣专项规则写中文 prompt，落到 `characters/<id>/spec.md` 的"美宣记录"小节。
+**spec 格式** → `docs/references/spec-template.md`
+从 `visual_dna` + `anchors` 提取角色视觉信息；从 `asset.promo` 读美宣固定参数。
 
-**共享底层** → `skills/character-workflow/references/art-prompt-system.md`
-**美宣专项** → `references/prompt-promo-zh.md`（含画幅映射、先光后衣决策顺序、narrative_beat 转动作规则）
+**底层规则** → `docs/references/art-prompt-system.md`
+**美宣专项** → `references/prompt-promo-zh.md`（画幅映射、先光后衣、narrative_beat 转动作）
 
-### 修改已出图（三模式协议）
+## 修改已出图（三模式）
 
-**触发条件**：画师指着现有图（`promo/v1.png` 等）说"换 X / 加 Y / 改 Z"的修改需求时，**必须先用 AskUserQuestion 问**选哪种模式，不得自行假设：
+画师指着现有图提修改需求时，**必须先 AskUserQuestion** 确认模式，不得自行假设：
 
-| 模式 | 做法 | 适用场景 |
+| 模式 | 做法 | 用于 |
 |---|---|---|
-| **A 编辑当前图** | 上传当前图作参考图；prompt **只写改动指令**，不重写人物外观/服装/姿势的完整设定 | 只改局部，对整体满意 |
-| **B 完全重出** | **不带参考图**；重新走五维度引导，写完整新 prompt | 整张图都不满意，从零开始 |
-| **C 局部参考混合** | 带参考图锚定满意部分；prompt 完整重写，但**明确标注**哪部分以参考图为准、哪部分重画 | 人脸/配色满意，但构图/场景要大改 |
+| A 编辑当前图 | 上传当前图作参考；prompt 只写改动指令 | 只改局部，整体满意 |
+| B 完全重出 | 不带参考图；重走五维度，写完整新 prompt | 整张都不满意 |
+| C 局部参考混合 | 带参考图锚定满意部分；prompt 完整重写并注明锚定范围 | 构图 / 场景大改 |
 
-三种模式互斥，**绝不混用**（带参考图 + 整张重写 prompt = 模型不知锚哪边，输出不稳定）。
+三模式互斥，混用导致输出不稳定。首次出图 / 用户主动"重画"不适用。
 
-A 模式时 spec 只更新被改的字段；B 模式可大改 spec；C 模式改受影响段并注明"参考图锁定哪部分"。
+## 出图流程
 
-首次出图、用户主动说"重画"等场景不适用此规则。
+1. `uv run python -m character_workflow submit --kind promo --prompt-file <path> --source-image <path|None>` → 落盘 PENDING_CONFIRM（不传 `--model`，画师点名才传）
+2. 终端打确认卡：alias / provider / model / 尺寸 / 参考图 / **完整 prompt 原文**（不得用摘要或路径代替）
+3. 画师确认后 → `uv run python -m character_workflow run-job <job_id>`
+4. 终端渲染：`![vN](绝对路径)`
 
-### 调 Lovart 出图
-
-先落盘 PENDING_CONFIRM，画师预览 prompt 并确认后再调用，避免出方向跑偏的图。流程：
-
-1. `uv run python -m character_workflow submit --kind promo --prompt-file <path> --source-image <上传图绝对路径或 None>` 落盘 `PENDING_CONFIRM`
-2. 终端打可读出图卡片（模型 / 厂家 / 尺寸 / n=1 / 源图 / 中文 prompt 全列）
-3. 等画师明确"出图/确认/OK"后，调用 runner
-4. `uv run python -m character_workflow run-job <job_id>` — runner 自动上传参考图、筛有效 artifact、落到 `characters/<id>/promo/vN.png`
-5. 终端 `![v1](绝对路径)` 渲染 — 默认 n=1
-
-完整出图流程 + 失败处理 → `skills/character-workflow/references/lovart-call.md`
+Lovart 是外部通道，只有画师点名才走。
 
 ## 上传图通道
 
-当画师粘一张参考图（手绘草图、外站资源截图）：
-- 把图写到 `characters/<id>/source/<unix-timestamp>-<原文件名>`
-- `source_image` 字段填该绝对路径
-- **在落卡片之前先和画师确认参考意图，定 `reference_mode`**：
-  - 整体氛围/构图/光影都要 → `full_reference`
-  - 只想要风格笔触 → `style_only`
-  - 只想要色调光影 → `color_lighting_only`
-  - 只想要姿势动作 → `pose_only`
-- prompt 中按选定 mode 的规则写参考关系，详见 `references/prompt-promo-zh.md` 第五节
-- 立绘永远是隐式 subject_image（角色身份锚定），上传图永远是 reference_image，不会替换主体
+画师粘参考图时：先存到 `characters/<id>/source/<timestamp>-<文件名>`，落卡前确认 `reference_mode`（`full_reference` / `style_only` / `color_lighting_only` / `pose_only`），按 mode 写参考关系（详见 `references/prompt-promo-zh.md` 第五节）。立绘 = 隐式 subject（身份锚定），上传图 = reference（不替换主体）。
 
-## Turn 收尾：经验沉淀
+## Turn 收尾
 
-job → DONE 或 FAILED（结构化原因）时，问画师：
+job DONE/FAILED 后问画师是否沉淀经验，Y → `uv run python -m character_workflow append-lesson --kind promo --line "- <日期> <id> · <一句话>"`
 
-> "本轮要不要沉淀一条经验到 `lessons/promo.md`？"
+## 跳过条件
 
-画师答 Y → 调：
-
-```bash
-uv run python -m character_workflow append-lesson --kind promo --line "- 2026-05-19 <id> · <一句话> · prompt 片段：\`...\`"
-```
-
-## 何时跳过本 Skill
-
-- 用户问的是 git / 代码 / 部署 / 纯问答
-- 画师还没出过立绘（`characters/<id>/portrait/` 空 → 先 `/character-workflow`）
-- 用户明确说"先做角色 spec" → 转回 character-workflow
+git / 代码 / 纯问答；画师还没出过立绘（先 `/character-workflow`）；用户说"先做 spec"。

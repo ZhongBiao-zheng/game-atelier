@@ -1,6 +1,6 @@
 ---
 name: character-workflow
-version: 4.1.1
+version: 4.2.0
 description: |
   游戏角色资产工作流。承接画师在 Web UI 上的反馈，通过对话逐项问清
   风格/配色/镜头/道具，然后调 Lovart 出中文 prompt 图。
@@ -29,416 +29,161 @@ triggers:
 
 1. `~/.claude/MEMORY.md` — 全局跨工作区经验
 2. `<data_root>/MEMORY.md` — workspace 级
-3. 如果对话涉及具体角色:
-   - 从 `<data_root>/.runtime/projects.json::assignments` 解析角色所属 project_id
-   - 从 `projects[].slug` 找到 slug
-   - Read `<data_root>/projects/<slug>/MEMORY.md` + `worldview.md`
+3. 如果对话涉及具体角色：从 `<data_root>/.runtime/projects.json::assignments` 解析 project_id → 找 slug → Read `<data_root>/projects/<slug>/MEMORY.md` + `worldview.md`
 
 不读 MEMORY 就写 prompt / 出图 / 改 spec 视为违规。
 
 ## 启动自检（bootstrap）
 
-每次触发本 Skill，第一步先判断当前模式：
+Dev mode：`uv run python scripts/bootstrap.py --check`
+Installed Plugin mode：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check`
 
-- **Dev mode**：当前目录是仓库根，且存在 `pyproject.toml` 与 `scripts/bootstrap.py`
-  - 运行：`uv run python scripts/bootstrap.py --check`
-- **Installed Plugin mode**：不在仓库根，使用已安装插件
-  - 运行：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check`
-
-不要使用裸 `python` 命令；macOS 上可能不存在。Dev mode 走 `uv run`，确保能加载项目依赖。
-
-按 status 字段分流：
-
-- `ready` → 进 turn-start，正常工作
-- `needs_data_root` → 用 AskUserQuestion 问数据目录路径，POST `/api/onboarding/data-root`
-- `needs_uv` → 显示 next_action 字段里的安装命令，**不要替用户跑**
-- `needs_venv` → 按当前模式跑 `<bootstrap.py> --ensure-venv`；Dev mode 前缀为 `uv run python`，Installed Plugin mode 前缀为 `python3`
-- `needs_first_key` → 启 viewer-server，引导用户在 Web 上加第一个 Key
-- `needs_keys_repair` → 告知用户 `keys.json` 损坏，建议备份后手动编辑或删除重加
+按 status 字段分流：`ready` → turn-start | `needs_data_root` → AskUserQuestion 问路径 | `needs_uv` → 显示安装命令，不替用户跑 | `needs_venv` → `<bootstrap.py> --ensure-venv` | `needs_first_key` → 启 viewer-server 引导加 Key | `needs_keys_repair` → 告知 keys.json 损坏
 
 ## API Key 选择规则
 
 turn-start 返回 `available_keys` 和 `preferred_alias`：
 
-1. **默认走 `preferred_alias`** — 不要问用户用哪个 Key
-2. **用户点名某 alias / provider** — 切到匹配的 Key，更新 spec.md 的"渲染"段
-3. **用户要求某种风格且 notes 里有匹配描述** — 可建议切换并解释理由
-4. **`preferred_alias` 是 null** — 停下来告诉用户："当前 kind=X 没有可用 Key，去 Web 加一个"
-5. **永远不要在终端 / 文档 / log 里显示 access_key / secret_key** — 你看不到，也不该看到
+- 默认走 `preferred_alias`，不问用户
+- 用户点名 alias / provider → 切换并更新 spec.md
+- `preferred_alias` 为 null → 停下，告知缺 Key
+- 永远不在终端 / 文档 / log 里显示 access_key / secret_key
 
-## 命令调用方式（installed Plugin vs dev mode）
+## viewer-server 启停
 
-下面所有 `uv run python -m character_workflow ...` 命令在**仓库内 dev 模式**下用。
+Turn 起始之前先执行：
 
-**Installed Plugin 模式**（用户 `claude plugins install` 装到 `~/.claude/plugins/`）走 bootstrap 转发：
+Dev：`uv run python src/viewer_server/server.py start --background`
+Plugin：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m viewer_server.server start --background`
 
-```bash
-python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m character_workflow <subcmd>
-```
+Installed Plugin 模式下所有 `uv run python -m character_workflow ...` 命令改为 `python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m character_workflow <subcmd>`。
 
-bootstrap.py 会读 data_root，把命令转发给 `<data_root>/.venv/python`。判断当前模式：
-- 仓库根有 `pyproject.toml` 且 `CHARACTER_WORKFLOW_DATA_ROOT=$(pwd)` → dev mode，用 uv 命令
-- 否则 → installed mode，用 bootstrap.py --run
-
-# Character Workflow
-
-## 哲学锚
-
-1. **文件系统是唯一 source of truth** —— `characters/<id>/spec.md`、`.runtime/draft/*.md`、`.runtime/jobs/*.json`
-2. **画师的每个动作终态都是文件** —— Web UI 写文件，Skill 读文件
-3. **对话决策、文档归档** —— spec 里不出占位词，缺什么就问什么
-4. **中文 prompt 优先** —— 画师的链路全程中文
-
-## Turn 起始（每次 turn 必做 —— 决策走 `recommend_action`）
-
-每轮开头先调一次 CLI，把画师本轮最近一条消息原文（含 `/character-workflow X` 命令前缀）整段塞进 `--message`：
+## Turn 起始
 
 ```bash
 uv run python -m character_workflow turn-start --message "<画师本轮原文>"
-# 出图 promo/turnaround 时显式加 --kind 切换对应 lessons
+# 出图 promo/turnaround 时加 --kind 切换对应 lessons
 ```
 
-`--message` 要带上，CLI 靠它推断 `recommend_action` 决策。返回 JSON 关键字段（v5）：
+关键返回字段：
 
-```json
-{
-  "stage":            "A" | "B" | "C" | "D" | "E",
-  "stage_reason":     "...",
-  "recommend_action": "ask" | "render_card" | "switch" | "noop",
-  "recommend_reason": "...",
-  "active_id":        "holy",
-  "active_updated_at": "...",
-  "active_age_minutes": 5,
-  "intent":           "new" | "revise" | "create" | "switch" | null,
-  "intent_signal":    "...",
-  "intent_conflict":  false,
-  "recent_chars":     [{"id": "holy", "tagline": "治愈系祭祀"}],
-  "pending_identity_normalizations": [
-    {
-      "old_id": "char-1779692464",
-      "display_name": "孙尚香",
-      "recommended_id": "sun-shang-xiang",
-      "spec_status": "placeholder",
-      "project_id": "p-ee7501d26e",
-      "project_name": "麻将游戏",
-      "asset_counts": {"source": 1, "portrait": 2, "promo": 0, "turnaround": 0},
-      "job_count": 2,
-      "has_assets": true,
-      "is_active": true
-    }
-  ],
-  "drafts":           [...],
-  "spec":             "<markdown>" | null,
-  "spec_status":      "missing" | "placeholder" | "ready",
-  "project_id":       "p-..." | null,
-  "project_slug":     "pokemon-style-elf-game" | null,
-  "project_name":     "宝可梦风格-精灵游戏" | null,
-  "worldview_workspace": "...",
-  "worldview_project":   "...",
-  "lessons_global":      "...",
-  "lessons_workspace":   "...",
-  "lessons_project":     "...",
-  "lessons_kind":     "portrait",
-  "available_keys":   [...],
-  "preferred_alias":  "seedream" | null
-}
-```
-
-**拼装规则（供 prompt_builder 用）**：
-- `worldview` = `worldview_project or worldview_workspace`（项目级覆盖工作区）
-- `lessons` = `lessons_global + "\n" + lessons_workspace + "\n" + lessons_project`（三层字面拼接，不去重）
-
-**只看 `recommend_action`，按它分叉**（`intent` 字段保留 debug 用，不再用于决策）：
-
-| recommend_action | Skill 行为 |
+| 字段 | 含义 |
 |---|---|
-| `ask` | 用 AskUserQuestion 让画师选 —— 具体问什么按 `stage` 分（A/B/C/E 走前置补全，D 走 4 选项） |
-| `render_card` | 终端现编 PENDING_CONFIRM 卡片 → `submit` CLI 落盘 → 等画师明示"出图/确认/OK" |
-| `switch` | `set-active <target>` + **重新调** turn-start |
-| `noop` | 退出 turn，不动 file system（预留，目前不会出现）|
+| `stage` | A/B/C/D/E — 当前流程位置 |
+| `recommend_action` | ask / render_card / switch / noop — 本轮主要决策 |
+| `active_id` / `spec` / `spec_status` | 当前角色和 spec 状态 |
+| `pending_identity_normalizations` | Web 创建的临时角色（`char-<数字>`）待整理队列 |
+| `recent_chars` | id + tagline 列表，Stage C 列选项用 |
+| `available_keys` / `preferred_alias` | Key 选择 |
+| `project_memory` / `lessons_*` | 项目 MEMORY.md 全文（含世界观、项目规则、角色名册、经验） |
 
-CLI 已经把"该 ask 还是该 render_card"算好了，Skill 端不必重复判断。判定不明确时 CLI 一律给 `ask`：宁可多问，"误问"成本只是画师多打一个数字，"误出图"成本是空跑 job + 占位卡片。
+**只看 `recommend_action` 决策**：
 
-把拼装后的 `worldview` + `lessons` + `spec` 拼成对话前缀（建议走 `lib.prompt_builder.assemble_character_prompt`），它们就是这一轮的专家上下文。
+| recommend_action | 行为 |
+|---|---|
+| `ask` | AskUserQuestion —— 按 stage 分叉问什么（见下） |
+| `render_card` | 写 prompt → submit CLI → 卡片 → 等确认 → run-job |
+| `switch` | `set-active <target>` 后重新 turn-start |
+| `noop` | 退出 turn，不动 file system |
 
-### action = ask 的前置分支：Web 临时角色整理
+### pending_identity_normalizations（优先处理）
 
-如果 `pending_identity_normalizations` 非空，优先处理它，先于 Stage C/D/E 的普通选项。
-
-这些角色通常来自 Web UI 批量创建，目录名是 `char-<数字>`，但 `spec.md` 第一行已有画师输入的中文名，且可能已经上传了 `source/`、`portrait/`、`promo/`、`turnaround/` 图片。Skill 必须把它们当成“待整理身份”的角色，而不是把 `char-177...` 当正常角色名展示。
-
-展示列表时必须包含：
-- `old_id -> display_name -> recommended_id`
-- `asset_counts`
-- `job_count`
-- `spec_status`
-- 是否为当前 active
-
-不能静默改名。角色 ID 是文件系统主键，涉及目录、active、project assignments、jobs 和图片路径。只有用户确认后才能调用：
+`pending_identity_normalizations` 非空时，先于 Stage 普通流程处理。展示每条的 `old_id → display_name → recommended_id`、`asset_counts`、`spec_status`。用户确认后调：
 
 ```bash
 uv run python -m character_workflow rename-character-id <old_id> <recommended_id>
 ```
 
-整理完成后必须重新调一次 `turn-start`，让 active、spec、recent_chars 和 pending 队列全部刷新。
+整理完必须重新 turn-start 刷新 active / recent_chars / pending 队列。
 
-### action = ask：按 `stage` 分叉问什么
+### Stage 分叉
 
-#### Stage A —— `characters/` 目录不存在
+**Stage A**（characters/ 目录不存在）：AskUserQuestion 同时问 3 题：项目名 / 一句话世界观（10-30 字）/ 第一个角色名 + 定位。落盘后直接进 render_card，不重新 turn-start。
 
-**用 1 个 AskUserQuestion 同时问 3 题**：
+**Stage B**（有项目但 characters/ 为空）：问 1 题：第一个角色名 + 定位（≤20 字）。
 
-1. **项目名**（默认 git basename，画师可改）
-2. **一句话世界观**（10-30 字）
-3. **第一个角色名 + 一句话定位**
+**Stage C**（无 active character）：列 `recent_chars` 中每个角色的 `id（tagline）`+ 新建 / 跳过。
 
-画师答完后落盘 `worldview.md` / `.runtime/projects.json` / `characters/<id>/spec.md` / `.runtime/active-character.json`。完成后直接进 render_card 流程 —— 不重新 turn-start。
+**Stage D**（4 选项，裸触发 / 冷启动 / 上轮已闭环）：
+1. 按现 spec 出图
+2. 改 spec
+3. 新建另一个角色
+4. 跳过本轮
 
-#### Stage B —— 有项目但 `characters/` 为空
+**Stage E**（active 未归属任何项目）：列已有项目 + 新开项目 + 跳过。画师选归属后 `assign-character <active_id> --project <project_id>` 再 turn-start。
 
-问 1 题：第一个角色名 + 一句话定位（≤20 字）。落盘 spec.md + active-character.json。
+## 写出图 prompt
 
-#### Stage C —— `active-character.json` 缺失/失效
+对话逐项问清：风格档 → 配色 → 镜头 → 视觉锚点。一次问 1-3 个，二选一优先，问清才动笔。
 
-列 N+2 选项（用 `recent_chars` 的 `id` + `tagline` 拼"id（tagline）"显示）：
-- 已有角色 1（tagline 1）
-- 已有角色 2（tagline 2）
-- ...
-- 新建一个角色 → 走 stage B 流程
-- 跳过本轮 → 退出 turn
+**spec 格式** → `docs/references/spec-template.md`
+创建新 spec 时严格按模板 YAML 字段写；`asset.*` 节按需追加，问清才写，不写占位。
 
-#### Stage D —— 4 选项
-
-画师没给明确信号时（裸触发、冷启动、上一轮已闭环），列 4 选项：
-1. **按现 spec 出图** → 走 render_card 流程
-2. **改 spec** → 进 spec 补全对话
-3. **新建另一个角色** → 走 stage B 流程
-4. **跳过本轮** → 退出 turn
-
-### 用户选择工具协议（Claude Code / Codex）
-
-- **Claude Code**：优先使用 `AskUserQuestion` 展示选择，不要用普通文本冒充用户已经选了。
-- **Codex**：如果 `request_user_input` 工具可用，使用它展示选择弹窗；如果当前模式没有该工具，则用普通回复列编号选项并等待用户回复。
-
-Codex `request_user_input` 限制：
-- 每题只能给 2-3 个显式选项，客户端会自动追加 Other。
-- `header` 不超过 12 字，`id` 用 snake_case。
-- 推荐选项 label 后缀写 `(Recommended)`。
-- 工具调用后必须等待用户选择，不能伪造用户回答，也不能默认替用户继续执行。
-
-因此 Stage D 在 Codex 上使用两级选择：
-1. 第一级问"本轮要继续还是跳过"：继续当前角色（Recommended）/ 新建另一个角色 / 跳过本轮。
-2. 用户选"继续当前角色"后，第二级问"继续方式"：按现 spec 出图 / 改 spec。
-
-如果 `spec_status != "ready"`，不要把"按现 spec 出图"设为推荐项；优先让画师补全 spec。
-
-#### Codex：pending_identity_normalizations 两级选择
-
-Codex `request_user_input` 只有 2-3 个显式选项，所以待整理角色存在时使用两级选择：
-
-第一级问“检测到 Web 创建的临时角色，本轮怎么处理？”：
-1. 整理 Web 创建角色（Recommended）
-2. 只处理当前角色
-3. 跳过本轮
-
-如果用户选“整理 Web 创建角色”，第二级问“整理方式”：
-1. 按推荐 slug 批量整理（Recommended）
-2. 逐个确认
-3. 暂不改名，只补设定
-
-如果用户选“只处理当前角色”且当前 active 在 pending 队列里，只展示当前 active 的迁移预览，并等待确认后调用 `rename-character-id`。
-
-Claude Code 可用 `AskUserQuestion` 一次展示批量/逐个/跳过选项，但同样必须等待用户确认，不能静默改名。
-
-#### Stage E —— `active_id` 完整但未归属任何项目
-
-`projects.json::assignments` 里没有 `active_id`。用 1 个 AskUserQuestion 列：
-
-1. 归到 `<最大项目名>`（N 个角色）
-2. 归到 `<次大项目名>`（M 个角色）
-3. 新开项目
-4. 跳过本轮（不归属、不出图）
-
-画师选 1/2 → `uv run python -m character_workflow assign-character <active_id> --project <project_id>` → 重新 turn-start
-画师选 3 → 走 Stage A-like 子流程问"项目名 + 一句话世界观"，调 `create-project --name <name>` → `assign-character` → 重新 turn-start
-画师选 4 → 退出 turn
-
-### action = render_card
-
-按下面"调 Lovart 出图"节流程：写 prompt → submit CLI → 卡片 → 等画师明示 → run-job → DONE 贴图。
-
-### action = switch
-
-`uv run python -m character_workflow set-active <target>`，然后必须重新调一次 turn-start（新 active 才能反映到 spec / drafts / recent_chars）。
-
-## Painter Intent 推断（debug 用，决策看 `recommend_action`）
-
-CLI 仍输出 `intent` / `intent_signal` / `intent_conflict` 字段，但实际决策一律走 `recommend_action`。intent 是底层信号，留给 debug 和向后兼容。
-
-`compute_recommend_action()` 的决策表（在 `lib/intent.py`）：
-1. stage A/B/C → ask
-2. stage D + switch 信号（target ≠ active） → switch
-3. stage D + drafts 非空 → render_card
-4. stage D + 含"新建/新角色/另一个角色" → ask（走 stage B 流程）
-5. stage D + 含出图动词（出图/出一张/再出/v1-v4/...，词表在 `_RENDER_VERBS_LITERAL`） → render_card
-6. stage D + default + active_age > 30 min → ask（冷启动）
-7. stage D + default + last job ∈ {DONE, FAILED} → ask（已闭环）
-8. 其他 → ask（兜底）
-
-加新动词只改 `lib/intent.py` 一处，不要在 SKILL.md 自己做关键词匹配。
-
-## Related Discovery（stage C / D 列角色用）
-
-`recent_chars` 数组提供 `id` + `tagline`：tagline 从 `characters/<id>/spec.md` 首行非空、非标题 markdown 内容截取，≤30 字。stage C 列选项时直接用这两个字段拼"角色 id（tagline）"显示，让画师快速分辨。
-
-## 切换处理对象
-
-```bash
-uv run python -m character_workflow set-active <character-id>
-```
-
-stage D 推断到 `switch` 时 Skill 自动调一次，然后必须重新 turn-start（新 active 才能反映到 spec / drafts / recent_chars）。
-
-## 关键协议
-
-### 新建角色 / 补全 spec
-
-对话逐项问清：风格档 → 配色 → 镜头 → 视觉锚点。一次问 1–3 个，二选一优先。问清才动笔。
-
-**完整协议（含反例）** → `references/spec-protocol.md`
-
-### 写出图 prompt
-
-写 prompt 前先读共享底层规则（spec 锚点协议 / generation_mode / 禁止项 / 输出格式），再按立绘专项规则写。
-
-**共享底层** → `references/art-prompt-system.md`
+**spec 零占位规则** → `references/spec-protocol.md`（不得在 spec 里写 `?` / TBD / 待定）
+**底层规则** → `docs/references/art-prompt-system.md`
 **立绘专项** → `references/prompt-zh.md`
 
-### 修改已出图（三模式协议）
+## 修改已出图（三模式）
 
-**触发条件**：画师指着现有图（`portrait/v1.png` 等）说"换 X / 加 Y / 改 Z"的修改需求时，**必须先用 AskUserQuestion 问**选哪种模式，不得自行假设：
+画师指着现有图提修改需求时，**必须先 AskUserQuestion** 确认模式，不得自行假设：
 
-| 模式 | 做法 | 适用场景 |
+| 模式 | 做法 | 用于 |
 |---|---|---|
-| **A 编辑当前图** | 上传当前图作参考图；prompt **只写改动指令**，不重写人物外观/服装/姿势的完整设定 | 只改局部，对整体满意 |
-| **B 完全重出** | **不带参考图**；重新走 spec 补全对话，写完整新 prompt | 整张图都不满意，从零开始 |
-| **C 局部参考混合** | 带参考图锚定满意部分；prompt 完整重写，但**明确标注**哪部分以参考图为准、哪部分重画 | 人脸/配色满意，但服装/姿势要大改 |
+| A 编辑当前图 | 上传当前图作参考；prompt 只写改动指令 | 只改局部，整体满意 |
+| B 完全重出 | 不带参考图；重走 spec 补全，写完整新 prompt | 整张都不满意 |
+| C 局部参考混合 | 带参考图锚定满意部分；prompt 完整重写并注明锚定范围 | 人脸/配色满意，服装/姿势要大改 |
 
-三种模式互斥，**绝不混用**（带参考图 + 整张重写 prompt = 模型不知锚哪边，输出不稳定）。
+三模式互斥，混用输出不稳定。首次出图 / 用户主动"重画"不适用。
 
-A 模式时 spec 只更新被改的字段；B 模式可大改 spec；C 模式改受影响段并注明"参考图锁定哪部分"。
+### 皮肤 / 换色默认路由
 
-首次出图、用户主动说"重画"等场景不适用此规则。
-
-#### 皮肤 / 换色需求的默认路由
-
-当画师要求"皮肤"、"品质皮肤"、"换装"、"整体换色"、"局部服装样式修改"，且已有默认立绘参考图时，默认视为 **A 编辑当前图**，除非画师明确说"完全重画 / 新造型 / 大改整体服装"。
-
-这类 prompt 必须短：
-- 只写"根据参考图生成某主题皮肤" + 具体改动点 + 背景要求
-- 不重述整套角色档案，不逐项罗列未改动锚点
-- 不写长排除段；只写 1 句必要边界，例如"不改武器、不加特效、不改动作"
-- 推荐 1-3 个自然段，总字数约 120-260 中文字
-
-**短 prompt 模板**：
+已有默认立绘 + 画师要"皮肤/品质皮肤/换装/整体换色" → 默认 A 模式。prompt 只写改动点，不重述整套外观。推荐模板：
 
 ```text
 根据参考图中的角色立绘为参考，生成这个角色的"<皮肤名>"主题角色立绘皮肤。
-将<默认服装/颜色>改为<目标服装/颜色>；<保留或微调的局部>；整体气质<目标气质>。
+将<默认服装/颜色>改为<目标服装/颜色>；<局部变化>；整体气质<目标气质>。
 <局部记忆点>。简约白色背景。不改武器，不加特效，不改动作。
 ```
 
-### 调 Lovart 出图
+正文 1-3 段，约 120-260 中文字。不写长排除段；必要边界合并到最后一句。
 
-先落盘 PENDING_CONFIRM 再调 Lovart，画师可以预览完整 prompt 并随时取消，避免空跑 job。流程：
+## 出图流程
 
-1. 用 `submit` CLI 落盘 `PENDING_CONFIRM`（默认值集中在 CLI 里管理，不要直接调 `jobs.write_job`）：
+1. 写 prompt 到临时文件，落盘 PENDING_CONFIRM：
 
    ```bash
-   cat > /tmp/cw-prompt-$$.md <<'PROMPT'
-   ...中文 prompt...
-   PROMPT
    JOB_ID=$(uv run python -m character_workflow submit \
      --kind portrait --prompt-file /tmp/cw-prompt-$$.md)
-   rm /tmp/cw-prompt-$$.md
    ```
 
-   `--character` 缺省读 `.runtime/active-character.json`；`--n` 默认 1（画师明示对比才传 `--n 4`）；`--source-image <绝对路径>` 给 promo/turnaround 用；stdout 是纯 job_id。
-2. 终端打可读出图卡片（模型/厂家/尺寸/n/参考图/完整中文 prompt 全列）
+   `--n` 默认 1；`--source-image <绝对路径>` 给 promo/turnaround 用；stdout 是纯 job_id。
 
-   **硬规则：确认卡必须直接贴出“本次将要提交给模型的完整 prompt 原文”。**
-   不许只写 prompt 文件路径、不许摘要、不许用 `...` 省略、不许说“同 spec”。
-   画师必须能在确认前完整审读即将出图的 prompt。
-3. 等画师明确说"出图/确认/OK"后，调用 runner：
+2. 终端打确认卡：alias / provider / model / 尺寸 / 参考图 / **完整 prompt 原文**（不得摘要或路径代替）
+3. 等画师明确"出图/确认/OK"后：
 
    ```bash
    uv run python -m character_workflow run-job "$JOB_ID"
-   ```
-
-   用户只说"出图"且没有指定 job 时，调用：
-
-   ```bash
+   # 或用户只说"出图"没有指定 job：
    uv run python -m character_workflow run-latest --kind portrait
    ```
 
-4. runner 负责推进 `PENDING_CONFIRM -> PENDING -> DONE/FAILED`、上传参考图、清空旧 error、筛掉无效 artifact，并把正式产物写到 `characters/<id>/<kind>/vN.png`。
-5. 在终端用 `![v1](绝对路径)` markdown 把每张图打出来（CC 终端直接渲染）。默认 n=1，画师明示"多出几张/对比" 才提到 n=4。
+4. 终端渲染：`![v1](绝对路径)` — 每张一行，末尾提一句"Web 也能看，或直接说要改哪张"
 
-**完整调用流程 + 失败处理** → `references/lovart-call.md`
+失败时：网络/凭证失败 → 问画师重试还是改 prompt；输出路径不可写 → 提醒检查 `image_storage_root`。
 
-### Turn 收尾：经验沉淀（lessons）
+## Turn 收尾：经验沉淀
 
-满足以下任一时触发：
-- 本轮 job → DONE
-- spec 第一次归档（写完 `characters/<id>/spec.md`）
-- 本轮 job → FAILED 且 `error` 是结构化原因（prompt 超长 / 模型拒绝 / 内容审核），不是网络抖动
-
-Skill 主动问画师：
-
-> "本轮要不要沉淀一条经验到 `lessons/portrait.md`？想保留就给我一句话，否则跳过。"
-
-画师答 Y / 给出一句话 → 调：
+job → DONE / spec 首次归档 / job → FAILED（结构化原因）时触发。问画师是否沉淀经验：
 
 ```bash
 uv run python -m character_workflow append-memory \
   --kind portrait \
-  --line "- 2026-05-21 holy-spirit-priestess · 金白配色高识别度 · prompt 片段：\`兜帽低垂遮眼\`" \
+  --line "- YYYY-MM-DD <id> · <一句话> · prompt 片段：\`...\`" \
   --scope project
 ```
 
-`--scope` 默认 project（写到 `projects/<slug>/MEMORY.md`），解析当前 active → assignments → slug。
-未归属时 CLI 返回码 2 + stderr 明确错误，需画师先走 Stage E 或显式 `--scope workspace`。
+`--scope` 默认 project；通用工具行为/协议经验用 workspace；跨工作区成立用 global。
 
-画师明确授权 Skill 自行判断（例如"你自行判断哪些需要沉淀"、"我在测试 Skill 工作模式"）→ 不再追问，直接选 1–2 条能防止下次失败或提升出图质量的可复用经验追加。只沉淀规则，不写流水账。
+## 跳过条件
 
-格式：`- YYYY-MM-DD <id> · <一句话> · prompt 片段：\`...\``。同 turn 多次出图每次都问；画师一次性说"全部不追加"则后续跳过。画师 cancel / 网络抖动 FAILED 不问。
-
-**画师明确授权 Skill 自行判断 scope 时的决策**：
-- 包含具体角色 id / 风格关键词 / 配色 / 类目术语 → `--scope project`
-- 通用工具行为 / prompt 协议 / runner 兜底 → `--scope workspace`
-- 跨工作区都成立的（画师明确说"这是通用规律"）→ `--scope global`
-- 默认 fallback：`--scope project`
-
-## viewer-server 启停
-
-每次调用本 Skill 时，Turn 起始之前先执行：
-
-**Dev mode**：
-
-```bash
-uv run python src/viewer_server/server.py start --background
-```
-
-**Installed Plugin mode**：
-
-```bash
-python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m viewer_server.server start --background
-```
-
-`--background` 是 Skill 调用路径必需参数：首次启动非阻塞并打开浏览器，已运行时静默复用。详见 `skills/viewer-server/SKILL.md`。
-
-## 何时跳过本 Skill
-
-- 用户消息明显是 git / 代码 / 部署 / 纯问答 → 完全跳过 turn-start
-- 用户没明确开始角色工作流且 viewer-server 没开 → 不要主动推角色话题
-- `recommend_action == "ask"` 时画师选"跳过本轮" → 退出 turn，不动 file system
+git / 代码 / 部署 / 纯问答；用户没明确开始工作流且 viewer-server 没开；画师选"跳过本轮"。
