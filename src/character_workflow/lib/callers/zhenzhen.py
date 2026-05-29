@@ -138,6 +138,7 @@ def _submit_standard_image(
         payload = protocols.build_banana_json_payload(
             prompt=prompt,
             model=model,
+            n=n,
             aspect_ratio=params.get("aspect_ratio") or params.get("ratio"),
             image_size=params.get("image_size") or params.get("resolution"),
         )
@@ -150,6 +151,7 @@ def _submit_standard_image(
         fields = protocols.build_banana_json_payload(
             prompt=prompt,
             model=model,
+            n=n,
             aspect_ratio=params.get("aspect_ratio") or params.get("ratio"),
             image_size=params.get("image_size") or params.get("resolution"),
         )

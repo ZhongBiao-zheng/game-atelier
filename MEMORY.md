@@ -24,4 +24,11 @@
 
 ### Turnaround
 
-<!-- session-count: 1/5 -->
+### Studio
+
+- 2026-05-29 通用 · 火山 Seedream 4.5 的尺寸下限是总像素面积 `3686400`，不是单边 `1296px`；`1296x1296` 只有 1,679,616 像素会 400，1:1 最小合法尺寸应抬到 `1920x1920`。前端输入、提交 payload 和后端 caller 都要按面积兜底，避免历史 job / 再次生成绕过 UI。 · 操作经验，无 prompt 片段
+- 2026-05-29 通用 · OpenAI-HK / 类 OpenAI 图像接口可能把图片地址包装成 Markdown 文本，甚至返回 `url](url` 这种半截链接；后端下载前必须清洗 URL，再交给 requests/curl，否则会把脏尾带进 CDN 请求并报 `download image 404`。 · 操作经验，无 prompt 片段
+- 2026-05-29 通用 · 火山 Seedream 兼容 `/images/generations` 即使请求 `n=2` 也可能只返回 1 张，不能把返回数量当作用户意图；caller 需按 `params.n` 校验落盘数量，少于请求数时补发单图请求并续写 `v2/v3...`。 · 操作经验，无 prompt 片段
+- 2026-05-29 通用 · viewer-server 默认服务 `web/dist`，前端源码改完但未重新 build 时，浏览器仍会看到旧 UI；排查“源码已改但 Web 没变”要先看 `web/dist` 时间戳和 bundle 内容，再重建 dist。 · 操作经验，无 prompt 片段
+
+<!-- session-count: 3/5 -->

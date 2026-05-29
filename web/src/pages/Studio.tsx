@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 
-import { createStudioJob } from '@/api/studio';
+import { createStudioJob, getStudioJob, listStudioJobs } from '@/api/studio';
 import { listKeys, type KeyView } from '@/api/keys';
 import { PromptInput } from '@/components/studio/PromptInput';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
-import { studioSizeFor } from '@/lib/studioSize';
+import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForProvider } from '@/lib/studioSize';
 import type { Job } from '@/schema/jobs';
 
 export function Studio({ compact = false }: { compact?: boolean }) {
@@ -18,17 +18,24 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [model, setModel] = useState('');
   const [ratio, setRatio] = useState('1:1');
   const [resolution, setResolution] = useState<'2K' | '4K'>('2K');
+  const [count, setCount] = useState(1);
   const [customSize, setCustomSize] = useState('');
+  const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
   const handleCustomSizeChange = useCallback((w: number, h: number) => {
     setCustomSize(`${w}x${h}`);
   }, []);
 
+  const refreshPersistedJobs = useCallback(async () => {
+    const jobs = await listStudioJobs();
+    setPersistedJobs(jobs);
+    return jobs;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     if (!compact) {
-      fetch('/api/jobs')
-        .then((resp) => (resp.ok ? resp.json() : []))
+      listStudioJobs()
         .then((jobs: Job[]) => {
           if (cancelled) return;
           setPersistedJobs(jobs);
@@ -66,14 +73,28 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     );
   }, [compact, keys, persistedJobs]);
 
+  const hasActivePersistedJob = persistedJobs.some(
+    (job) => job.status === 'pending' || job.status === 'pending_confirm',
+  );
+
+  useEffect(() => {
+    if (compact || !hasActivePersistedJob) return;
+    const id = window.setInterval(() => {
+      void refreshPersistedJobs();
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [compact, hasActivePersistedJob, refreshPersistedJobs]);
+
   const onSubmit = async (prompt: string, overrideConfig?: RoundConfig) => {
     const effectiveRatio = overrideConfig?.ratio ?? ratio;
     const effectiveResolution = overrideConfig?.resolution ?? resolution;
+    const effectiveCount = clampImageCount(overrideConfig?.n ?? count);
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
     const effectiveModel = overrideConfig?.model ?? model;
     const selectedKey = keys.find((item) => item.alias === effectiveAlias);
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
-    const effectiveSize = overrideConfig?.size ?? (customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveProvider));
+    const rawSize = overrideConfig?.size ?? (customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveProvider));
+    const effectiveSize = normalizeStudioSizeForProvider(rawSize, effectiveProvider);
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
     const config: RoundConfig = {
       prompt,
@@ -84,6 +105,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       ratio: effectiveRatio,
       resolution: effectiveResolution,
       size: effectiveSize,
+      n: effectiveCount,
       referenceImages: overrideConfig?.referenceImages ?? [],
     };
 
@@ -98,6 +120,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
             size: effectiveSize,
             ratio: effectiveRatio,
             resolution: effectiveResolution,
+            n: effectiveCount,
           },
         });
         setLocation('/studio');
@@ -107,12 +130,14 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       return;
     }
 
-    setPending(true);
     const startedAt = Date.now();
     const myRound: RoundState = { kind: 'pending', startedAt, config };
     setRounds((rs) => [myRound, ...rs]);
+
+    setPending(true);
+    let job: Job;
     try {
-      const job = await createStudioJob({
+      job = await createStudioJob({
         prompt,
         alias: effectiveAlias ?? undefined,
         model: effectiveModel,
@@ -120,30 +145,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           size: effectiveSize,
           ratio: effectiveRatio,
           resolution: effectiveResolution,
+          n: effectiveCount,
         },
-      });
-      await pollJobUntilTerminal(job.job_id, (final) => {
-        setRounds((rs) =>
-          rs.map((r) =>
-            r === myRound
-              ? final.status === 'done' && final.output_paths.length > 0
-                ? {
-                    kind: 'done',
-                    jobId: final.job_id,
-                    submittedAt: final.submitted_at,
-                    imagePaths: final.output_paths,
-                    config,
-                  }
-                : {
-                    kind: 'failed',
-                    jobId: final.job_id,
-                    submittedAt: final.submitted_at,
-                    reason: final.error ?? '生成完成但未返回图片',
-                    config,
-                  }
-              : r,
-          ),
-        );
       });
     } catch (e: any) {
       setRounds((rs) =>
@@ -151,9 +154,38 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           r === myRound ? { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message, config } : r,
         ),
       );
-    } finally {
       setPending(false);
+      return;
     }
+    setPending(false);
+
+    setPersistedJobs((items) => upsertJob(items, job));
+    setRounds((rs) =>
+      rs.map((r) =>
+        r === myRound
+          ? { ...myRound, jobId: job.job_id, startedAt: Date.parse(job.submitted_at) || startedAt }
+          : r,
+      ),
+    );
+
+    void pollJobUntilTerminal(job.job_id, (final) => {
+      setPersistedJobs((items) => upsertJob(items, final));
+      setRounds((rs) =>
+        rs.map((r) =>
+          r === myRound
+            ? final.status === 'done' && final.output_paths.length > 0
+              ? { kind: 'done', jobId: final.job_id, submittedAt: final.submitted_at, imagePaths: final.output_paths, config }
+              : { kind: 'failed', jobId: final.job_id, submittedAt: final.submitted_at, reason: final.error ?? '生成完成但未返回图片', config }
+            : r,
+        ),
+      );
+    }).catch((e: any) => {
+      setRounds((rs) =>
+        rs.map((r) =>
+          r === myRound ? { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message, config } : r,
+        ),
+      );
+    });
   };
 
   if (compact) {
@@ -172,11 +204,14 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           model={model}
           ratio={ratio}
           resolution={resolution}
+          count={count}
           onProviderChange={setProviderAlias}
           onModelChange={setModel}
           onRatioChange={setRatio}
           onResolutionChange={setResolution}
+          onCountChange={setCount}
           onCustomSizeChange={handleCustomSizeChange}
+          sizeOverride={sizeOverride}
           menuDirection="down"
         />
       </div>
@@ -208,11 +243,14 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           model={model}
           ratio={ratio}
           resolution={resolution}
+          count={count}
           onProviderChange={setProviderAlias}
           onModelChange={setModel}
           onRatioChange={setRatio}
           onResolutionChange={setResolution}
+          onCountChange={setCount}
           onCustomSizeChange={handleCustomSizeChange}
+          sizeOverride={sizeOverride}
           menuDirection="up"
         />
       </div>
@@ -231,6 +269,18 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     setModel(config.model);
     if (config.ratio) setRatio(config.ratio);
     if (config.resolution) setResolution(config.resolution);
+    if (config.n) setCount(clampImageCount(config.n));
+    if (config.size) {
+      const [wStr, hStr] = config.size.split('x');
+      const w = parseInt(wStr, 10);
+      const h = parseInt(hStr, 10);
+      if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
+        const standard = computeStudioPixelSize(config.ratio ?? ratio, config.resolution ?? resolution, config.provider);
+        if (w !== standard.w || h !== standard.h) {
+          setSizeOverride((prev) => ({ key: (prev?.key ?? 0) + 1, w, h }));
+        }
+      }
+    }
   }
 
   async function regenerate(config: RoundConfig) {
@@ -238,6 +288,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     setModel(config.model);
     if (config.ratio) setRatio(config.ratio);
     if (config.resolution) setResolution(config.resolution);
+    if (config.n) setCount(clampImageCount(config.n));
     await onSubmit(config.prompt, config);
   }
 
@@ -274,8 +325,15 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
     ratio: typeof job.params.ratio === 'string' ? job.params.ratio : undefined,
     resolution: job.params.resolution === '4K' ? '4K' : job.params.resolution === '2K' ? '2K' : undefined,
     size: typeof job.params.size === 'string' ? job.params.size : undefined,
+    n: typeof job.params.n === 'number' ? clampImageCount(job.params.n) : undefined,
     referenceImages: referenceImagesFor(job),
   };
+}
+
+function clampImageCount(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : parseInt(String(value ?? 1), 10);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(4, Math.max(1, Math.floor(parsed)));
 }
 
 function hydrateRoundModelName(round: RoundState, keys: KeyView[]): RoundState {
@@ -321,9 +379,9 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
 }
 
 function roundKey(round: RoundState): string | null {
-  if (round.kind === 'done') return `done:${round.jobId}`;
-  if (round.kind === 'failed' && round.jobId) return `failed:${round.jobId}`;
-  if (round.kind === 'pending' && round.jobId) return `pending:${round.jobId}`;
+  if (round.kind === 'done') return round.jobId;
+  if (round.kind === 'failed' && round.jobId) return round.jobId;
+  if (round.kind === 'pending' && round.jobId) return round.jobId;
   return null;
 }
 
@@ -338,17 +396,34 @@ function mergePersistedRounds(current: RoundState[], persisted: RoundState[]): R
 
 async function pollJobUntilTerminal(
   jobId: string,
-  onFinal: (job: { job_id: string; status: string; submitted_at: string; output_paths: string[]; error: string | null }) => void,
+  onFinal: (job: Job) => void,
 ) {
   for (let i = 0; i < 120; i++) {
     await new Promise((r) => setTimeout(r, 2000));
-    const resp = await fetch(`/api/jobs/${jobId}`);
-    if (!resp.ok) continue;
-    const job = await resp.json();
+    const job = await getStudioJob(jobId);
+    if (!job) continue;
     if (job.status === 'done' || job.status === 'failed') {
       onFinal(job);
       return;
     }
   }
-  onFinal({ job_id: jobId, status: 'failed', submitted_at: new Date().toISOString(), output_paths: [], error: 'timeout' });
+  onFinal({
+    job_id: jobId,
+    character_id: '',
+    prompt: '',
+    submitted_at: new Date().toISOString(),
+    model: '',
+    params: {},
+    seed: null,
+    output_paths: [],
+    status: 'failed',
+    error: 'timeout',
+    kind: 'image',
+    namespace: 'studio',
+  });
+}
+
+function upsertJob(items: Job[], next: Job): Job[] {
+  const without = items.filter((item) => item.job_id !== next.job_id);
+  return [next, ...without];
 }

@@ -52,6 +52,7 @@ def test_build_banana_json_payload_for_text_to_image():
     payload = zp.build_banana_json_payload(
         prompt="a penguin",
         model="nano-banana-pro",
+        n=2,
         aspect_ratio="16:9",
         image_size="4K",
     )
@@ -59,6 +60,7 @@ def test_build_banana_json_payload_for_text_to_image():
     assert payload == {
         "prompt": "a penguin",
         "model": "nano-banana-pro",
+        "n": 2,
         "aspect_ratio": "16:9",
         "image_size": "4K",
     }

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { fetchOnboardingStatus, type OnboardingState } from './api/onboarding';
 import { DataRootPage } from './pages/onboarding/DataRoot';
 import { KeysPage } from './pages/settings/Keys';
-import { MinViewportGuard } from '@/components/MinViewportGuard';
 import { AppShell } from '@/components/AppShell';
 
 export function App() {
@@ -40,10 +39,6 @@ export function App() {
     case 'needs_first_key':
     case 'ready':
     default:
-      return (
-        <MinViewportGuard>
-          <AppShell />
-        </MinViewportGuard>
-      );
+      return <AppShell />;
   }
 }

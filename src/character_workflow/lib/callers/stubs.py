@@ -8,7 +8,8 @@ from __future__ import annotations
 
 
 def openai_render(**_kwargs) -> list[str]:
-    raise NotImplementedError("openai provider not yet wired")
+    from character_workflow.lib.callers import openai_image
+    return openai_image.render(**_kwargs)
 
 
 def midjourney_render(**_kwargs) -> list[str]:

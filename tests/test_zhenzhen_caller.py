@@ -60,7 +60,7 @@ def test_render_downloads_sync_b64_image(isolated_data_root, tmp_path, monkeypat
         model="gpt-image-2-all",
         alias="zz",
         output_dir=tmp_path,
-        n=1,
+        n=2,
         params={"aspect_ratio": "1:1", "image_size": "2K", "reference_images": []},
     )
 
@@ -68,6 +68,7 @@ def test_render_downloads_sync_b64_image(isolated_data_root, tmp_path, monkeypat
     assert (tmp_path / "v1.png").read_bytes().startswith(b"\x89PNG")
     assert calls[0][0] == "https://ai.t8star.org/v1/images/edits?async=true"
     assert calls[0][1]["headers"]["Authorization"] == "Bearer zz-secret"
+    assert calls[0][1]["data"]["n"] == "2"
 
 
 def test_render_polls_async_task_and_remembers_alias(isolated_data_root, tmp_path, monkeypatch):
@@ -131,6 +132,7 @@ def test_render_uses_banana_edit_fields_when_refs_exist(isolated_data_root, tmp_
         model="nano-banana-pro",
         alias="zz",
         output_dir=tmp_path,
+        n=3,
         params={"aspect_ratio": "16:9", "image_size": "4K", "reference_images": [str(ref)]},
     )
 
@@ -138,6 +140,7 @@ def test_render_uses_banana_edit_fields_when_refs_exist(isolated_data_root, tmp_
     assert calls[0][1]["data"] == {
         "prompt": "fox",
         "model": "nano-banana-pro",
+        "n": 3,
         "aspect_ratio": "16:9",
         "image_size": "4K",
     }

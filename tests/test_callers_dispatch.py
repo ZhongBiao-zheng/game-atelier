@@ -122,18 +122,34 @@ def test_dispatch_unknown_alias_raises_no_such_key(isolated_keys_db):
         )
 
 
-def test_dispatch_stub_provider_raises_not_implemented(
-    isolated_keys_db, tmp_path,
+def test_dispatch_routes_openai_alias_to_openai_image_render(
+    isolated_keys_db, tmp_path, monkeypatch,
 ):
     _add("oai-1", "openai")
+    captured = {}
 
-    with pytest.raises(NotImplementedError):
-        dispatch(
-            prompt="x",
-            model="dall-e-3",
-            alias="oai-1",
-            output_dir=tmp_path / "out",
-        )
+    def fake_render(*, prompt, model, alias, **kwargs):
+        captured["prompt"] = prompt
+        captured["model"] = model
+        captured["alias"] = alias
+        captured["kwargs"] = kwargs
+        return ["/tmp/openai-v1.png"]
+
+    monkeypatch.setattr(
+        "character_workflow.lib.callers.openai_image.render",
+        fake_render,
+    )
+
+    paths = dispatch(
+        prompt="x",
+        model="gpt-image-2",
+        alias="oai-1",
+        output_dir=tmp_path / "out",
+    )
+
+    assert paths == ["/tmp/openai-v1.png"]
+    assert captured["alias"] == "oai-1"
+    assert captured["model"] == "gpt-image-2"
 
 
 def test_lovart_render_injects_keys_into_env_and_returns_paths(

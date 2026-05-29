@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
@@ -53,6 +53,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -154,11 +155,12 @@ describe('Studio', () => {
     expect(screen.getByLabelText('生图 prompt')).toBeInTheDocument();
   });
 
-  it('uses the 174px prompt shell on the studio page', () => {
+  it('uses the responsive prompt shell on the studio page', () => {
     renderStudio();
 
     expect(screen.getByTestId('studio-prompt-shell')).toHaveClass(
-      'h-[174px]',
+      'min-h-[174px]',
+      'h-auto',
       'pt-[14px]',
       'px-4',
       'pb-4',
@@ -251,6 +253,8 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     fireEvent.click(screen.getByRole('option', { name: '16:9' }));
     fireEvent.click(screen.getByRole('option', { name: /超清 4K/ }));
+    fireEvent.click(screen.getByRole('button', { name: /选择出图数量/ }));
+    fireEvent.click(screen.getByRole('option', { name: '3 张' }));
 
     const textarea = screen.getByLabelText('生图 prompt');
     fireEvent.change(textarea, { target: { value: '广西南宁城市海报' } });
@@ -268,8 +272,31 @@ describe('Studio', () => {
         ratio: '16:9',
         resolution: '4K',
         size: '4096x2304',
+        n: 3,
       },
     });
+  });
+
+  it('renders image count control beside size and submits the selected count', async () => {
+    renderStudio();
+
+    const sizeButton = await screen.findByRole('button', { name: /选择比例和分辨率/ });
+    const countButton = screen.getByRole('button', { name: /选择出图数量/ });
+    expect(sizeButton.parentElement?.nextElementSibling).toBe(countButton.parentElement);
+
+    fireEvent.click(countButton);
+    expect(screen.getByRole('listbox', { name: '选择出图数量列表' })).toHaveClass('absolute');
+    fireEvent.click(screen.getByRole('option', { name: '4 张' }));
+    expect(countButton).toHaveTextContent('4 张');
+
+    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '四张草图' } });
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body.params.n).toBe(4);
   });
 
   it('submits the same pixel size shown in the size panel', async () => {
@@ -385,6 +412,54 @@ describe('Studio', () => {
     const body = JSON.parse(String(studioCall![1]!.body));
     expect(body.params.size).toBe('1728x2304');
     expect(1728 * 2304).toBeGreaterThanOrEqual(3686400);
+  });
+
+  it('normalizes a custom Seedream 1296x1296 request to the minimum valid area', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'volc',
+            keys: [{
+              alias: 'volc',
+              provider: 'seedream',
+              access_key: 'ark...key',
+              secret_key: null,
+              capabilities: ['portrait'],
+              models: [{ name: '图片 5.0 Lite', id: 'doubao-seedream-5-0-260128' }],
+              notes: '',
+              created_at: '2026-05-25T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ job_id: 'j1', status: 'pending', submitted_at: '2026-05-25T00:00:00Z' }),
+      } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+
+    await screen.findByRole('button', { name: /选择比例和分辨率/ });
+    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '1296' } });
+    expect(screen.getByLabelText('输出宽度')).toHaveValue(1920);
+    expect(screen.getByLabelText('输出高度')).toHaveValue(1920);
+
+    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '方形角色头像' } });
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body.params.size).toBe('1920x1920');
   });
 
   it('opens prompt menus upward on the studio page', async () => {
@@ -525,10 +600,144 @@ describe('Studio', () => {
     );
   });
 
+  it('restores a pending studio job after returning to the page', async () => {
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'oa',
+            keys: [{
+              alias: 'oa',
+              provider: 'openai',
+              access_key: 'sk',
+              secret_key: null,
+              capabilities: [],
+              models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
+              notes: '',
+              created_at: '2026-05-25T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{
+            job_id: 'job-pending-1',
+            character_id: 'oa',
+            prompt: '刷新后仍在生成的画面',
+            submitted_at: '2026-05-28T02:00:00Z',
+            model: 'gpt-image-2',
+            params: { ratio: '1:1', resolution: '2K', size: '1024x1024' },
+            seed: null,
+            output_paths: [],
+            status: 'pending',
+            error: null,
+            kind: 'image',
+            namespace: 'studio',
+            alias: 'oa',
+            provider: 'openai',
+          }],
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    }) as any;
+
+    renderStudio();
+
+    expect(await screen.findByText('刷新后仍在生成的画面')).toBeInTheDocument();
+    expect(screen.getByTestId('studio-pending-job-pending-1')).toBeInTheDocument();
+  });
+
+  it('refreshes persisted pending studio jobs until they become done', async () => {
+    let intervalCallback: TimerHandler | undefined;
+    vi.spyOn(window, 'setInterval').mockImplementation((callback: TimerHandler, timeout?: number) => {
+      if (timeout === 2000) intervalCallback = callback;
+      return 1;
+    });
+    vi.spyOn(window, 'clearInterval').mockImplementation(() => {});
+    const firstJobs = [{
+      job_id: 'job-pending-2',
+      character_id: 'oa',
+      prompt: '轮询完成的图',
+      submitted_at: '2026-05-28T02:05:00Z',
+      model: 'gpt-image-2',
+      params: { ratio: '1:1', resolution: '2K', size: '1024x1024' },
+      seed: null,
+      output_paths: [],
+      status: 'pending',
+      error: null,
+      kind: 'image',
+      namespace: 'studio',
+      alias: 'oa',
+      provider: 'openai',
+    }];
+    const secondJobs = [{
+      ...firstJobs[0],
+      status: 'done',
+      output_paths: ['/tmp/studio/job-pending-2/v1.png'],
+    }];
+    let jobsCallCount = 0;
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'oa',
+            keys: [{
+              alias: 'oa',
+              provider: 'openai',
+              access_key: 'sk',
+              secret_key: null,
+              capabilities: [],
+              models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
+              notes: '',
+              created_at: '2026-05-25T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        jobsCallCount += 1;
+        return Promise.resolve({
+          ok: true,
+          json: async () => (jobsCallCount >= 2 ? secondJobs : firstJobs),
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    }) as any;
+
+    renderStudio();
+    expect(await screen.findByTestId('studio-pending-job-pending-2')).toBeInTheDocument();
+
+    await act(async () => {
+      if (typeof intervalCallback === 'function') intervalCallback();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('img', { name: '生成结果 1' })).toHaveAttribute(
+        'src',
+        '/api/gallery/image?path=%2Ftmp%2Fstudio%2Fjob-pending-2%2Fv1.png',
+      );
+    });
+    expect(screen.queryByTestId('studio-pending-job-pending-2')).not.toBeInTheDocument();
+  });
+
+  it('does not render the batch submitted time above studio results', async () => {
+    renderStudioWithCompletedBatch();
+
+    expect(await screen.findByText(/一个身披白床单/)).toBeInTheDocument();
+    expect(screen.queryByText(/1:00:00/)).not.toBeInTheDocument();
+  });
+
   it('renders a completed studio batch with metadata and action buttons', async () => {
     renderStudioWithCompletedBatch();
 
     expect(await screen.findByText(/一个身披白床单/)).toHaveClass('line-clamp-2');
+    expect(screen.getByTestId('studio-round-list')).toHaveClass('max-w-[1024px]');
     expect(screen.getByRole('img', { name: '参考图' })).toHaveAttribute('src', '/api/gallery/image?path=%2Ftmp%2Fref.png');
     await waitFor(() => expect(screen.getAllByText(/图片 4.7/).length).toBeGreaterThan(0));
     expect(screen.getByText(/4:3/)).toBeInTheDocument();

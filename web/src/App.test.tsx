@@ -38,4 +38,32 @@ describe('App onboarding gate', () => {
     });
     expect(screen.queryByText(/还没有 API Key/)).not.toBeInTheDocument();
   });
+
+  it('opens the app shell at 1024px width', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    (globalThis.fetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          status: 'ready',
+          data_root: '/tmp/workflow',
+          uv_path: null,
+          venv_python: null,
+          platform: 'darwin',
+          next_action: 'open_app',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ items: [] }),
+      });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('作品集首页')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Atelier')).toBeInTheDocument();
+    expect(screen.queryByText(/请在桌面浏览器打开/)).not.toBeInTheDocument();
+  });
 });

@@ -5,19 +5,19 @@ SKILL.md 已经写了 6 步主线，这里只补**代码片段**和**失败处�
 ## 前提
 
 - spec 已按 `spec-protocol.md` 问清（无 `?` 占位）
-- prompt 已按 `prompt-zh.md` 写成中文 8 段
+- prompt 已按 `prompt-zh.md` 写成中文；参考图编辑类使用短 prompt，不套完整立绘模板
 - `.runtime/config.json` 里 `image_storage_root` 已配置
 
 ## 代码片段
 
 ### 1. 落盘 PENDING_CONFIRM
 
-prompt 走文件（8 段式中文几百字，作为 shell 参数会被引号/顿号/换行卡）：
+prompt 走文件（中文多行内容作为 shell 参数会被引号/顿号/换行卡）：
 
 ```bash
 # 写到临时文件（PID 后缀避免并发冲突）
 cat > /tmp/cw-prompt-$$.md <<'PROMPT'
-...中文 8 段式 prompt...
+...中文 prompt...
 PROMPT
 
 # submit 子命令是默认值 SSoT —— 不要自己决定 model / n / size

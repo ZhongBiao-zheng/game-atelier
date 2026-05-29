@@ -68,6 +68,18 @@ Dev 模式下 bootstrap 自检直接读环境变量，跳过首启动向导。py
 
 **Web 不能改 job 状态字段**：`WebEditableJobPatch` 白名单只允许 `prompt / model / params / seed`；`status / output_paths / submitted_at / character_id / job_id / error` 是 Skill 独占。
 
+**Job JSON 禁止凭记忆手写**：`.runtime/jobs/*.json` 会被 `/api/jobs` 全量 Pydantic 校验；任意一条 schema 错误都会让前端角色页的 job 列表整体 500，表现为“角色里面没内容”。需要补写 / 回填 job 时，优先用 `src/character_workflow/lib/jobs.py` 的 `Job` / `JobParams` / `save_job()` 生成；若不得不手工改 JSON，改完必须跑：
+
+```bash
+PYTHONPATH=src uv run python - <<'PY'
+from character_workflow.lib.jobs import list_jobs
+print(len(list_jobs()))
+PY
+curl -sS http://127.0.0.1:5174/api/jobs >/dev/null
+```
+
+特别注意：`params.warnings` 是数组，不是字符串；`status` / `kind` / `asset_slot` 等字段必须使用 schema 允许的枚举值。不要让一条人工补档记录拖垮整个前端。
+
 **Schema 双端同步**：`src/character_workflow/lib/schemas.py`（Pydantic）↔ `web/src/schema/jobs.ts`（TS）。改一边必须同步另一边。`docs/api-contract.md` 是契约源。
 
 **出图前必须确认**：Skill 先 `jobs.write_job(...)` 写 `PENDING_CONFIRM` 状态 + 把出图卡片打到终端 → 画师明确说"出图"或 Web 点确认 → 才推进到 `PENDING` 调 Lovart（同步阻塞期间停留在 `PENDING`，无独立 `RUNNING` 状态）。

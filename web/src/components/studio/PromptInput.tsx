@@ -1,7 +1,7 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useState } from 'react';
-import { ArrowUp, Box, ImageIcon, Square, Building2, Link2 } from 'lucide-react';
+import { ArrowUp, Box, ImageIcon, Images, Square, Building2, Link2 } from 'lucide-react';
 import type { KeyView } from '@/api/keys';
-import { computeStudioPixelSize } from '@/lib/studioSize';
+import { computeStudioPixelSize, normalizeStudioPixelSizeForProvider } from '@/lib/studioSize';
 
 interface Props {
   onSubmit: (prompt: string) => void | Promise<void>;
@@ -13,16 +13,19 @@ interface Props {
   model?: string;
   ratio?: string;
   resolution?: '2K' | '4K';
+  count?: number;
   onProviderChange?: (alias: string) => void;
   onModelChange?: (model: string) => void;
   onRatioChange?: (ratio: string) => void;
   onResolutionChange?: (resolution: '2K' | '4K') => void;
+  onCountChange?: (count: number) => void;
   onCustomSizeChange?: (w: number, h: number) => void;
+  /** When set, overrides localW/localH after the ratio/resolution effect; keyed to ensure re-runs. */
+  sizeOverride?: { key: number; w: number; h: number };
   menuDirection?: 'up' | 'down';
 }
 
 const SIDE_RATIOS = ['4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
-const MIN_PX_SEEDREAM = 1296;
 const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   seedream: '火山引擎',
@@ -46,17 +49,20 @@ export function PromptInput({
   model,
   ratio = '1:1',
   resolution = '2K',
+  count = 1,
   onProviderChange,
   onModelChange,
   onRatioChange,
   onResolutionChange,
+  onCountChange,
   onCustomSizeChange,
+  sizeOverride,
   menuDirection = 'up',
 }: Props) {
   const [internalText, setInternalText] = useState('');
   const text = value ?? internalText;
   const setText = onValueChange ?? setInternalText;
-  const [openPanel, setOpenPanel] = useState<'provider' | 'model' | 'size' | null>(null);
+  const [openPanel, setOpenPanel] = useState<'provider' | 'model' | 'size' | 'count' | null>(null);
   const provider = providers.find((item) => item.alias === providerAlias) ?? providers[0];
   const providerDisplayName = providerName(provider);
   const models = provider?.models ?? [];
@@ -69,20 +75,28 @@ export function PromptInput({
   const panelPosition = menuDirection === 'down'
     ? 'top-full mt-3'
     : 'bottom-full mb-3';
-  const minPx = provider?.provider === 'seedream' ? MIN_PX_SEEDREAM : 1;
+  const minPx = 1;
 
   useEffect(() => {
     const { w, h } = computeStudioPixelSize(ratio, resolution, provider?.provider);
-    setLocalW(w);
-    setLocalH(h);
-    onCustomSizeChange?.(w, h);
+    const normalized = normalizeStudioPixelSizeForProvider({ w, h }, provider?.provider);
+    setLocalW(normalized.w);
+    setLocalH(normalized.h);
+    onCustomSizeChange?.(normalized.w, normalized.h);
   }, [ratio, resolution, provider?.provider, onCustomSizeChange]);
+
+  // Runs after the ratio/resolution effect so it wins — used by reEdit to restore custom sizes.
+  useEffect(() => {
+    if (!sizeOverride) return;
+    setLocalW(sizeOverride.w);
+    setLocalH(sizeOverride.h);
+    onCustomSizeChange?.(sizeOverride.w, sizeOverride.h);
+  }, [sizeOverride, onCustomSizeChange]);
 
   const submit = useCallback(() => {
     const trimmed = text.trim();
     if (!trimmed || disabled || !provider || !selectedModel) return;
     onSubmit(trimmed);
-    setText('');
   }, [text, disabled, provider, selectedModel, onSubmit]);
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -95,17 +109,19 @@ export function PromptInput({
   function handleRatioSelect(newRatio: string) {
     onRatioChange?.(newRatio);
     const { w, h } = computeStudioPixelSize(newRatio, resolution, provider?.provider);
-    setLocalW(w);
-    setLocalH(h);
-    onCustomSizeChange?.(w, h);
+    const normalized = normalizeStudioPixelSizeForProvider({ w, h }, provider?.provider);
+    setLocalW(normalized.w);
+    setLocalH(normalized.h);
+    onCustomSizeChange?.(normalized.w, normalized.h);
   }
 
   function handleResolutionSelect(newResolution: '2K' | '4K') {
     onResolutionChange?.(newResolution);
     const { w, h } = computeStudioPixelSize(ratio, newResolution, provider?.provider);
-    setLocalW(w);
-    setLocalH(h);
-    onCustomSizeChange?.(w, h);
+    const normalized = normalizeStudioPixelSizeForProvider({ w, h }, provider?.provider);
+    setLocalW(normalized.w);
+    setLocalH(normalized.h);
+    onCustomSizeChange?.(normalized.w, normalized.h);
   }
 
   function handleWChange(raw: string) {
@@ -114,10 +130,15 @@ export function PromptInput({
     if (sizeLocked) {
       const [a, b] = ratio.split(':').map(Number);
       const newH = a > 0 ? Math.max(minPx, Math.round((newW * b) / a)) : localH;
-      setLocalH(newH);
-      onCustomSizeChange?.(newW, newH);
+      const normalized = normalizeStudioPixelSizeForProvider({ w: newW, h: newH }, provider?.provider);
+      setLocalW(normalized.w);
+      setLocalH(normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h);
     } else {
-      onCustomSizeChange?.(newW, localH);
+      const normalized = normalizeStudioPixelSizeForProvider({ w: newW, h: localH }, provider?.provider);
+      setLocalW(normalized.w);
+      setLocalH(normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h);
     }
   }
 
@@ -127,10 +148,15 @@ export function PromptInput({
     if (sizeLocked) {
       const [a, b] = ratio.split(':').map(Number);
       const newW = b > 0 ? Math.max(minPx, Math.round((newH * a) / b)) : localW;
-      setLocalW(newW);
-      onCustomSizeChange?.(newW, newH);
+      const normalized = normalizeStudioPixelSizeForProvider({ w: newW, h: newH }, provider?.provider);
+      setLocalW(normalized.w);
+      setLocalH(normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h);
     } else {
-      onCustomSizeChange?.(localW, newH);
+      const normalized = normalizeStudioPixelSizeForProvider({ w: localW, h: newH }, provider?.provider);
+      setLocalW(normalized.w);
+      setLocalH(normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h);
     }
   }
 
@@ -139,16 +165,17 @@ export function PromptInput({
     setSizeLocked(next);
     if (next) {
       const { w, h } = computeStudioPixelSize(ratio, resolution, provider?.provider);
-      setLocalW(w);
-      setLocalH(h);
-      onCustomSizeChange?.(w, h);
+      const normalized = normalizeStudioPixelSizeForProvider({ w, h }, provider?.provider);
+      setLocalW(normalized.w);
+      setLocalH(normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h);
     }
   }
 
   return (
     <div
       data-testid="studio-prompt-shell"
-      className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl h-[174px] flex flex-col gap-3"
+      className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl min-h-[174px] h-auto flex flex-col gap-3"
     >
       <textarea
         value={text}
@@ -158,8 +185,8 @@ export function PromptInput({
         className="flex-1 min-h-0 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none rounded-md px-2"
         aria-label="生图 prompt"
       />
-      <div className="flex justify-between items-center gap-4 shrink-0">
-        <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap justify-between items-center gap-3 shrink-0">
+        <div className="flex min-w-0 flex-wrap gap-2">
           <ControlButton active aria-label="图片生成">
             <ImageIcon size={14} aria-hidden /> 图片生成
           </ControlButton>
@@ -334,6 +361,36 @@ export function PromptInput({
               </div>
             )}
           </div>
+
+          <div data-testid="count-control-wrap" className="relative">
+            <ControlButton
+              active={openPanel === 'count'}
+              aria-label="选择出图数量"
+              onClick={() => setOpenPanel(openPanel === 'count' ? null : 'count')}
+            >
+              <Images size={14} aria-hidden /> {count} 张
+            </ControlButton>
+            {openPanel === 'count' && (
+              <div role="listbox" aria-label="选择出图数量列表" className={`absolute left-0 ${panelPosition} z-20 w-[160px] rounded-2xl border border-border bg-secondary p-2 shadow-2xl`}>
+                {[1, 2, 3, 4].map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    role="option"
+                    aria-selected={count === item}
+                    onClick={() => {
+                      onCountChange?.(item);
+                      setOpenPanel(null);
+                    }}
+                    className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm hover:bg-card aria-selected:bg-card"
+                  >
+                    <Images size={16} aria-hidden />
+                    <span>{item} 张</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <button
           type="button"
@@ -358,7 +415,7 @@ function ControlButton({
   return (
     <button
       type="button"
-      className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+      className={`inline-flex min-w-0 max-w-full h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         active
           ? 'border-border bg-secondary text-foreground'
           : 'border-border bg-background/30 text-foreground hover:bg-secondary'
