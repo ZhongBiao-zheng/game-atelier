@@ -60,39 +60,56 @@ def render(
     if not base_url:
         raise OpenAIImageError("custom provider requires base_url")
 
+    requested_size = _normalize_size_for_provider(
+        kwargs.get("size") or kwargs.get("requested_size") or kwargs.get("params", {}).get("size"),
+        key.provider,
+    )
+
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if _is_openai_hk(base_url):
-        data = _post_json(
-            _chat_image_url(base_url),
-            key.access_key,
-            _chat_image_payload(
-                prompt=prompt,
-                model=model,
-                n=n,
-                size=kwargs.get("size")
-                or kwargs.get("requested_size")
-                or kwargs.get("params", {}).get("size"),
-            ),
-            timeout=timeout,
-        )
-        return _write_outputs(data, out_dir)
+        paths: list[str] = []
+        requested = max(1, int(n or 1))
+        for _ in range(requested):
+            data = _post_json(
+                _chat_image_url(base_url),
+                key.access_key,
+                _chat_image_payload(
+                    prompt=prompt,
+                    model=model,
+                    size=requested_size,
+                ),
+                timeout=timeout,
+            )
+            paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
+            if len(paths) >= requested:
+                break
+        return paths[:requested]
 
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "n": max(1, int(n or 1)),
-        "size": kwargs.get("size") or kwargs.get("requested_size") or kwargs.get("params", {}).get("size"),
-        "response_format": "b64_json",
-        "stream": False,
-        "watermark": True,
-    }
-    if n > 1:
-        payload["sequential_image_generation"] = "auto"
-        payload["sequential_image_generation_options"] = {"max_images": n}
-    payload = {k: v for k, v in payload.items() if v is not None}
+    requested = max(1, int(n or 1))
+    payload = _image_generation_payload(
+        model=model,
+        prompt=prompt,
+        size=requested_size,
+        n=requested,
+    )
     data = _post_json(_image_url(base_url), key.access_key, payload, timeout=timeout)
-    return _write_outputs(data, out_dir)
+    paths = _write_outputs(data, out_dir)
+    if key.provider == "seedream":
+        while len(paths) < requested:
+            data = _post_json(
+                _image_url(base_url),
+                key.access_key,
+                _image_generation_payload(
+                    model=model,
+                    prompt=prompt,
+                    size=requested_size,
+                    n=1,
+                ),
+                timeout=timeout,
+            )
+            paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
+    return paths[:requested]
 
 
 def _image_url(base_url: str) -> str:
@@ -101,6 +118,28 @@ def _image_url(base_url: str) -> str:
 
 def _chat_image_url(base_url: str) -> str:
     return f"{_api_root(base_url)}/chat/completions"
+
+
+def _image_generation_payload(
+    *,
+    model: str,
+    prompt: str,
+    size: object,
+    n: int,
+) -> dict:
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "n": n,
+        "size": size,
+        "response_format": "b64_json",
+        "stream": False,
+        "watermark": True,
+    }
+    if n > 1:
+        payload["sequential_image_generation"] = "auto"
+        payload["sequential_image_generation_options"] = {"max_images": n}
+    return {k: v for k, v in payload.items() if v is not None}
 
 
 def _api_root(base_url: str) -> str:
@@ -137,7 +176,7 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float) -> dict
         raise OpenAIImageError(str(e)) from e
 
 
-def _write_outputs(payload: dict, output_dir: Path) -> list[str]:
+def _write_outputs(payload: dict, output_dir: Path, *, start_index: int = 1) -> list[str]:
     if "choices" in payload:
         payload = _chat_payload_to_image_payload(payload)
     items = payload.get("data")
@@ -145,7 +184,7 @@ def _write_outputs(payload: dict, output_dir: Path) -> list[str]:
         raise OpenAIImageError(f"image api response missing data: {payload!r}")
 
     paths: list[str] = []
-    for i, item in enumerate(items, start=1):
+    for i, item in enumerate(items, start=start_index):
         if not isinstance(item, dict):
             continue
         target = output_dir / f"v{i}.png"
@@ -154,7 +193,7 @@ def _write_outputs(payload: dict, output_dir: Path) -> list[str]:
             paths.append(str(target))
             continue
         if isinstance(item.get("url"), str):
-            target.write_bytes(_download_image_url(item["url"]))
+            target.write_bytes(_download_image_url(_clean_image_url(item["url"])))
             paths.append(str(target))
     if not paths:
         raise OpenAIImageError(f"image api returned no downloadable image: {payload!r}")
@@ -171,10 +210,23 @@ def _is_openai_hk(base_url: str) -> bool:
     return "openai-hk.com" in urlsplit(base_url).netloc.lower()
 
 
-def _chat_image_payload(*, prompt: str, model: str, n: int, size: str | None) -> dict:
+def _normalize_size_for_provider(size: object, provider: str) -> object:
+    if provider != "seedream" or not isinstance(size, str):
+        return size
+    match = re.fullmatch(r"(\d+)x(\d+)", size.strip())
+    if not match:
+        return size
+    width = int(match.group(1))
+    height = int(match.group(2))
+    min_pixels = 3_686_400
+    if width * height >= min_pixels:
+        return size
+    scale = (min_pixels / max(1, width * height)) ** 0.5
+    return f"{int(width * scale + 0.999999)}x{int(height * scale + 0.999999)}"
+
+
+def _chat_image_payload(*, prompt: str, model: str, size: str | None) -> dict:
     content = prompt
-    if n > 1:
-        content = f"{content}\n\nGenerate {n} images."
     if size:
         content = f"{content}\n\nImage size: {size}"
     return {
@@ -215,8 +267,9 @@ def _image_items_from_text(text: str) -> list[dict[str, str]]:
     for value in re.findall(r"!\[[^\]]*\]\(([^)]+)\)", text):
         items.append(_image_item_from_value(value))
     for value in re.findall(r"https?://[^\s)\"']+", text):
-        if not any(value == item.get("url") for item in items):
-            items.append({"url": value})
+        url = _clean_image_url(value)
+        if not any(url == item.get("url") for item in items):
+            items.append({"url": url})
     for value in re.findall(r"data:image/[^;\s]+;base64,[A-Za-z0-9+/=\n\r]+", text):
         items.append({"b64_json": value})
     return items
@@ -225,7 +278,17 @@ def _image_items_from_text(text: str) -> list[dict[str, str]]:
 def _image_item_from_value(value: str) -> dict[str, str]:
     if value.startswith("data:image/"):
         return {"b64_json": value}
-    return {"url": value}
+    return {"url": _clean_image_url(value)}
+
+
+def _clean_image_url(value: str) -> str:
+    url = value.strip().strip("<>")
+    if "](" in url:
+        url = url.split("](", 1)[0]
+    match = re.match(r"https?://[^\s\]\)\"'<>]+", url)
+    if match:
+        url = match.group(0)
+    return url.rstrip(".,;")
 
 
 def _download_image_url(url: str) -> bytes:

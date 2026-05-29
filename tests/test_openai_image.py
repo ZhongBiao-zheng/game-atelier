@@ -121,14 +121,121 @@ def test_render_openai_provider_posts_to_image_endpoint_and_writes_data_url(
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
-def test_render_openai_hk_posts_to_chat_completions_and_downloads_markdown_image(
+def test_render_seedream_normalizes_size_to_minimum_pixel_area(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    _add_key(
+        alias="seedream",
+        provider="seedream",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+    )
+    image_bytes = b"\x89PNG\r\n\x1a\nseedream"
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps({
+                "data": [{
+                    "b64_json": "data:image/png;base64,"
+                    + base64.b64encode(image_bytes).decode("ascii"),
+                }],
+            }).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setattr(openai_image.urllib.request, "urlopen", fake_urlopen)
+
+    paths = openai_image.render(
+        prompt="fox",
+        model="doubao-seedream-4-5-251128",
+        alias="seedream",
+        output_dir=tmp_path,
+        n=1,
+        size="1296x1296",
+    )
+
+    assert captured["url"] == "https://ark.cn-beijing.volces.com/api/v3/images/generations"
+    assert captured["payload"]["size"] == "1920x1920"
+    assert Path(paths[0]).read_bytes() == image_bytes
+
+
+def test_render_seedream_backfills_when_api_returns_fewer_images(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    _add_key(
+        alias="seedream",
+        provider="seedream",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+    )
+    images = [b"\x89PNG\r\n\x1a\nseedream-1", b"\x89PNG\r\n\x1a\nseedream-2"]
+    captured: dict[str, object] = {"payloads": []}
+
+    class FakeResponse:
+        def __init__(self, body: bytes):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def read(self) -> bytes:
+            return self.body
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        payload = json.loads(request.data.decode("utf-8"))
+        captured["payloads"].append(payload)
+        index = len(captured["payloads"]) - 1
+        return FakeResponse(json.dumps({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(images[index]).decode("ascii"),
+            }],
+        }).encode("utf-8"))
+
+    monkeypatch.setattr(openai_image.urllib.request, "urlopen", fake_urlopen)
+
+    paths = openai_image.render(
+        prompt="fox",
+        model="doubao-seedream-4-5-251128",
+        alias="seedream",
+        output_dir=tmp_path,
+        n=2,
+        size="2048x2048",
+    )
+
+    assert captured["url"] == "https://ark.cn-beijing.volces.com/api/v3/images/generations"
+    assert [payload["n"] for payload in captured["payloads"]] == [2, 1]
+    assert captured["payloads"][0]["sequential_image_generation"] == "auto"
+    assert [Path(path).name for path in paths] == ["v1.png", "v2.png"]
+    assert Path(paths[0]).read_bytes() == images[0]
+    assert Path(paths[1]).read_bytes() == images[1]
+
+
+def test_render_openai_hk_posts_to_chat_completions_per_requested_image(
     isolated_data_root,
     tmp_path,
     monkeypatch,
 ):
     _add_key(alias="openai-hk", provider="custom", base_url="https://api.openai-hk.com")
-    image_bytes = b"\x89PNG\r\n\x1a\nchat"
-    captured: dict[str, object] = {}
+    first_image = b"\x89PNG\r\n\x1a\nchat-1"
+    second_image = b"\x89PNG\r\n\x1a\nchat-2"
+    captured: dict[str, object] = {"payloads": [], "downloads": []}
 
     class FakeResponse:
         def __init__(self, body: bytes):
@@ -148,20 +255,26 @@ def test_render_openai_hk_posts_to_chat_completions_and_downloads_markdown_image
             raise AssertionError("expected Request for image downloads")
         if request.full_url == "https://api.openai-hk.com/v1/chat/completions":
             captured["url"] = request.full_url
-            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            payload = json.loads(request.data.decode("utf-8"))
+            captured["payloads"].append(payload)
+            index = len(captured["payloads"])
             return FakeResponse(json.dumps({
                 "choices": [{
                     "message": {
-                        "content": "好了：![image](https://cdn.example.com/out.png)",
+                        "content": f"好了：![image](https://cdn.example.com/out-{index}.png)",
                     },
                 }],
             }).encode("utf-8"))
 
     def fake_get(url, headers, timeout, stream):
-        assert url == "https://cdn.example.com/out.png"
+        captured["downloads"].append(url)
         captured["download_user_agent"] = headers.get("User-Agent")
         captured["download_stream"] = stream
-        return FakeDownloadResponse(image_bytes)
+        if url == "https://cdn.example.com/out-1.png":
+            return FakeDownloadResponse(first_image)
+        if url == "https://cdn.example.com/out-2.png":
+            return FakeDownloadResponse(second_image)
+        raise AssertionError(f"unexpected download URL: {url}")
 
     monkeypatch.setattr(openai_image.urllib.request, "urlopen", fake_urlopen)
     monkeypatch.setattr(openai_image.requests, "get", fake_get)
@@ -176,12 +289,64 @@ def test_render_openai_hk_posts_to_chat_completions_and_downloads_markdown_image
     )
 
     assert captured["url"] == "https://api.openai-hk.com/v1/chat/completions"
-    assert captured["payload"]["model"] == "gpt-image-2"
-    assert captured["payload"]["messages"][-1]["content"].startswith("pixel dog")
-    assert "Generate 2 images." in captured["payload"]["messages"][-1]["content"]
-    assert "2048x2048" in captured["payload"]["messages"][-1]["content"]
+    assert [payload["model"] for payload in captured["payloads"]] == [
+        "gpt-image-2",
+        "gpt-image-2",
+    ]
+    assert all(
+        payload["messages"][-1]["content"].startswith("pixel dog")
+        for payload in captured["payloads"]
+    )
+    assert all(
+        "Generate 2 images." not in payload["messages"][-1]["content"]
+        for payload in captured["payloads"]
+    )
+    assert all("2048x2048" in payload["messages"][-1]["content"] for payload in captured["payloads"])
+    assert captured["downloads"] == [
+        "https://cdn.example.com/out-1.png",
+        "https://cdn.example.com/out-2.png",
+    ]
     assert "Mozilla" in captured["download_user_agent"]
     assert captured["download_stream"] is False
+    assert [Path(path).name for path in paths] == ["v1.png", "v2.png"]
+    assert Path(paths[0]).read_bytes() == first_image
+    assert Path(paths[1]).read_bytes() == second_image
+
+
+def test_image_items_from_text_cleans_malformed_markdown_url():
+    dirty = (
+        "![image](https://pro.filesystem.site/cdn/20260529/out.png]"
+        "(https://pro.filesystem.site/cdn/20260529/out.png)"
+    )
+
+    assert openai_image._image_items_from_text(dirty) == [
+        {"url": "https://pro.filesystem.site/cdn/20260529/out.png"},
+    ]
+
+
+def test_write_outputs_cleans_url_before_download(tmp_path, monkeypatch):
+    image_bytes = b"\x89PNG\r\n\x1a\nclean"
+    captured: dict[str, object] = {}
+
+    def fake_get(url, headers, timeout, stream):
+        captured["url"] = url
+        return FakeDownloadResponse(image_bytes)
+
+    monkeypatch.setattr(openai_image.requests, "get", fake_get)
+
+    paths = openai_image._write_outputs(
+        {
+            "data": [{
+                "url": (
+                    "https://pro.filesystem.site/cdn/20260529/out.png]"
+                    "(https://pro.filesystem.site/cdn/20260529/out.png"
+                ),
+            }],
+        },
+        tmp_path,
+    )
+
+    assert captured["url"] == "https://pro.filesystem.site/cdn/20260529/out.png"
     assert Path(paths[0]).read_bytes() == image_bytes
 
 

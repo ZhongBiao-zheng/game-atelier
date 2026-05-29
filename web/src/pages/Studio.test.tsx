@@ -414,6 +414,54 @@ describe('Studio', () => {
     expect(1728 * 2304).toBeGreaterThanOrEqual(3686400);
   });
 
+  it('normalizes a custom Seedream 1296x1296 request to the minimum valid area', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'volc',
+            keys: [{
+              alias: 'volc',
+              provider: 'seedream',
+              access_key: 'ark...key',
+              secret_key: null,
+              capabilities: ['portrait'],
+              models: [{ name: '图片 5.0 Lite', id: 'doubao-seedream-5-0-260128' }],
+              notes: '',
+              created_at: '2026-05-25T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ job_id: 'j1', status: 'pending', submitted_at: '2026-05-25T00:00:00Z' }),
+      } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+
+    await screen.findByRole('button', { name: /选择比例和分辨率/ });
+    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '1296' } });
+    expect(screen.getByLabelText('输出宽度')).toHaveValue(1920);
+    expect(screen.getByLabelText('输出高度')).toHaveValue(1920);
+
+    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '方形角色头像' } });
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body.params.size).toBe('1920x1920');
+  });
+
   it('opens prompt menus upward on the studio page', async () => {
     renderStudio();
     fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
@@ -689,6 +737,7 @@ describe('Studio', () => {
     renderStudioWithCompletedBatch();
 
     expect(await screen.findByText(/一个身披白床单/)).toHaveClass('line-clamp-2');
+    expect(screen.getByTestId('studio-round-list')).toHaveClass('max-w-[1024px]');
     expect(screen.getByRole('img', { name: '参考图' })).toHaveAttribute('src', '/api/gallery/image?path=%2Ftmp%2Fref.png');
     await waitFor(() => expect(screen.getAllByText(/图片 4.7/).length).toBeGreaterThan(0));
     expect(screen.getByText(/4:3/)).toBeInTheDocument();

@@ -5,7 +5,7 @@ import { createStudioJob, getStudioJob, listStudioJobs } from '@/api/studio';
 import { listKeys, type KeyView } from '@/api/keys';
 import { PromptInput } from '@/components/studio/PromptInput';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
-import { studioSizeFor, computeStudioPixelSize } from '@/lib/studioSize';
+import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForProvider } from '@/lib/studioSize';
 import type { Job } from '@/schema/jobs';
 
 export function Studio({ compact = false }: { compact?: boolean }) {
@@ -93,7 +93,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const effectiveModel = overrideConfig?.model ?? model;
     const selectedKey = keys.find((item) => item.alias === effectiveAlias);
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
-    const effectiveSize = overrideConfig?.size ?? (customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveProvider));
+    const rawSize = overrideConfig?.size ?? (customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveProvider));
+    const effectiveSize = normalizeStudioSizeForProvider(rawSize, effectiveProvider);
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
     const config: RoundConfig = {
       prompt,

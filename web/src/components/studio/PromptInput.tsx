@@ -1,7 +1,7 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useState } from 'react';
 import { ArrowUp, Box, ImageIcon, Images, Square, Building2, Link2 } from 'lucide-react';
 import type { KeyView } from '@/api/keys';
-import { computeStudioPixelSize } from '@/lib/studioSize';
+import { computeStudioPixelSize, normalizeStudioPixelSizeForProvider } from '@/lib/studioSize';
 
 interface Props {
   onSubmit: (prompt: string) => void | Promise<void>;
@@ -26,7 +26,6 @@ interface Props {
 }
 
 const SIDE_RATIOS = ['4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
-const MIN_PX_SEEDREAM = 1296;
 const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   seedream: '火山引擎',
@@ -76,13 +75,14 @@ export function PromptInput({
   const panelPosition = menuDirection === 'down'
     ? 'top-full mt-3'
     : 'bottom-full mb-3';
-  const minPx = provider?.provider === 'seedream' ? MIN_PX_SEEDREAM : 1;
+  const minPx = 1;
 
   useEffect(() => {
     const { w, h } = computeStudioPixelSize(ratio, resolution, provider?.provider);
-    setLocalW(w);
-    setLocalH(h);
-    onCustomSizeChange?.(w, h);
+    const normalized = normalizeStudioPixelSizeForProvider({ w, h }, provider?.provider);
+    setLocalW(normalized.w);
+    setLocalH(normalized.h);
+    onCustomSizeChange?.(normalized.w, normalized.h);
   }, [ratio, resolution, provider?.provider, onCustomSizeChange]);
 
   // Runs after the ratio/resolution effect so it wins — used by reEdit to restore custom sizes.
@@ -109,17 +109,19 @@ export function PromptInput({
   function handleRatioSelect(newRatio: string) {
     onRatioChange?.(newRatio);
     const { w, h } = computeStudioPixelSize(newRatio, resolution, provider?.provider);
-    setLocalW(w);
-    setLocalH(h);
-    onCustomSizeChange?.(w, h);
+    const normalized = normalizeStudioPixelSizeForProvider({ w, h }, provider?.provider);
+    setLocalW(normalized.w);
+    setLocalH(normalized.h);
+    onCustomSizeChange?.(normalized.w, normalized.h);
   }
 
   function handleResolutionSelect(newResolution: '2K' | '4K') {
     onResolutionChange?.(newResolution);
     const { w, h } = computeStudioPixelSize(ratio, newResolution, provider?.provider);
-    setLocalW(w);
-    setLocalH(h);
-    onCustomSizeChange?.(w, h);
+    const normalized = normalizeStudioPixelSizeForProvider({ w, h }, provider?.provider);
+    setLocalW(normalized.w);
+    setLocalH(normalized.h);
+    onCustomSizeChange?.(normalized.w, normalized.h);
   }
 
   function handleWChange(raw: string) {
@@ -128,10 +130,15 @@ export function PromptInput({
     if (sizeLocked) {
       const [a, b] = ratio.split(':').map(Number);
       const newH = a > 0 ? Math.max(minPx, Math.round((newW * b) / a)) : localH;
-      setLocalH(newH);
-      onCustomSizeChange?.(newW, newH);
+      const normalized = normalizeStudioPixelSizeForProvider({ w: newW, h: newH }, provider?.provider);
+      setLocalW(normalized.w);
+      setLocalH(normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h);
     } else {
-      onCustomSizeChange?.(newW, localH);
+      const normalized = normalizeStudioPixelSizeForProvider({ w: newW, h: localH }, provider?.provider);
+      setLocalW(normalized.w);
+      setLocalH(normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h);
     }
   }
 
@@ -141,10 +148,15 @@ export function PromptInput({
     if (sizeLocked) {
       const [a, b] = ratio.split(':').map(Number);
       const newW = b > 0 ? Math.max(minPx, Math.round((newH * a) / b)) : localW;
-      setLocalW(newW);
-      onCustomSizeChange?.(newW, newH);
+      const normalized = normalizeStudioPixelSizeForProvider({ w: newW, h: newH }, provider?.provider);
+      setLocalW(normalized.w);
+      setLocalH(normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h);
     } else {
-      onCustomSizeChange?.(localW, newH);
+      const normalized = normalizeStudioPixelSizeForProvider({ w: localW, h: newH }, provider?.provider);
+      setLocalW(normalized.w);
+      setLocalH(normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h);
     }
   }
 
@@ -153,9 +165,10 @@ export function PromptInput({
     setSizeLocked(next);
     if (next) {
       const { w, h } = computeStudioPixelSize(ratio, resolution, provider?.provider);
-      setLocalW(w);
-      setLocalH(h);
-      onCustomSizeChange?.(w, h);
+      const normalized = normalizeStudioPixelSizeForProvider({ w, h }, provider?.provider);
+      setLocalW(normalized.w);
+      setLocalH(normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h);
     }
   }
 

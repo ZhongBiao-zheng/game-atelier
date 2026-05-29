@@ -1,5 +1,7 @@
 type Resolution = '2K' | '4K';
 
+export const SEEDREAM_MIN_PIXELS = 3686400;
+
 const SIZE_TABLE: Record<Resolution, Record<string, { w: number; h: number }>> = {
   '2K': {
     '1:1': { w: 2048, h: 2048 },
@@ -42,4 +44,28 @@ export function computeStudioPixelSize(
 export function studioSizeFor(ratio: string, resolution: Resolution, provider?: string | null) {
   const { w, h } = computeStudioPixelSize(ratio, resolution, provider);
   return `${w}x${h}`;
+}
+
+export function normalizeStudioPixelSizeForProvider(
+  size: { w: number; h: number },
+  provider?: string | null,
+): { w: number; h: number } {
+  if (provider !== 'seedream' || size.w * size.h >= SEEDREAM_MIN_PIXELS) {
+    return size;
+  }
+  const scale = Math.sqrt(SEEDREAM_MIN_PIXELS / Math.max(1, size.w * size.h));
+  return {
+    w: Math.ceil(size.w * scale),
+    h: Math.ceil(size.h * scale),
+  };
+}
+
+export function normalizeStudioSizeForProvider(size: string, provider?: string | null): string {
+  const match = /^(\d+)x(\d+)$/.exec(size.trim());
+  if (!match) return size;
+  const normalized = normalizeStudioPixelSizeForProvider(
+    { w: Number(match[1]), h: Number(match[2]) },
+    provider,
+  );
+  return `${normalized.w}x${normalized.h}`;
 }
