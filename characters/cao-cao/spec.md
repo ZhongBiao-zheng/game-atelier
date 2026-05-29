@@ -33,6 +33,16 @@ created: 2026-05-28
 - size: 1536×1024
 - format: 横版 KV
 
+## asset.turnaround
+- size: 1536×1024
+- view_set: 正面/侧面/背面 + 短剑正面小图（右侧 1/4 区域）
+- pose: 双臂微微下倾 ~15° 的 T-pose，全身含脚底，衣服盖过脚
+- background: 浅灰底色细线网格，头顶线/腰线/脚底线辅助基线
+- downstream_use: 建模
+- coloring_style: 平涂
+- v1: job-20260529100226e049e5b5 · gpt-image-2 · 1536×1024
+- v2: job-2026052910201478a2d4f2 · gpt-image-2 · 1536×1024 · 简化 prompt（参考图模式）+ 去排除段
+
 ## prohibit
 - 写实风格
 - 改变狼形特征（灰蓝狼头、黄色竖瞳不可改变）

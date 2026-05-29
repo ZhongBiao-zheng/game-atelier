@@ -97,6 +97,7 @@ describe('Home', () => {
               asset_slot: 'portrait',
               filename: 'a.png',
               path: 'characters/char-a/portrait/a.png',
+              job_id: 'job-portrait-1',
               mtime: 0,
             },
           ],
@@ -109,6 +110,56 @@ describe('Home', () => {
     });
     const img = container.querySelector('img')!;
     expect(img.getAttribute('src')).toContain('characters%2Fchar-a%2Fportrait%2Fa.png');
+  });
+
+  it('links gallery images to the matching image detail route', async () => {
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          items: [
+            {
+              character_id: 'char-a',
+              asset_slot: 'promo',
+              filename: 'kv.png',
+              path: 'characters/char-a/promo/kv.png',
+              job_id: 'job-promo-1',
+              mtime: 0,
+            },
+          ],
+        }),
+      } as any);
+    }) as any;
+    const { container } = renderHome();
+    await waitFor(() => {
+      expect(container.querySelector('img')).toBeInTheDocument();
+    });
+    expect(container.querySelector('a')?.getAttribute('href')).toBe(
+      '/character/char-a/promo/job-promo-1/characters%2Fchar-a%2Fpromo%2Fkv.png',
+    );
+  });
+
+  it('documents the gallery source as recent character asset files', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+    renderHome();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/gallery/recent?limit=24');
+    });
   });
 
   it('shows ERROR state on fetch failure', async () => {

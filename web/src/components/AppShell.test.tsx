@@ -43,6 +43,56 @@ describe('AppShell', () => {
     expect(tab.className).toContain('bg-[rgba(36,35,33,0.68)]');
   });
 
+  it('routes character image URLs into the image detail pane', async () => {
+    vi.stubGlobal('EventSource', class {
+      addEventListener = vi.fn();
+      close = vi.fn();
+      onerror: (() => void) | null = null;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      if (url === '/api/config') {
+        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-ui-ai-workflow' }) };
+      }
+      if (url === '/api/active-character') {
+        return { ok: true, json: async () => ({ active_id: null, updated_at: '2026-05-29T00:00:00Z' }) };
+      }
+      if (url === '/api/characters') {
+        return { ok: true, json: async () => [{ id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null }] };
+      }
+      if (url === '/api/projects') {
+        return { ok: true, json: async () => ({ projects: [], assignments: {} }) };
+      }
+      if (url === '/api/jobs/job-promo-1') {
+        return {
+          ok: true,
+          json: async () => ({
+            job_id: 'job-promo-1',
+            character_id: 'cao-cao',
+            prompt: '路由详情 prompt',
+            submitted_at: '2026-05-29T00:00:00Z',
+            model: 'gpt-image-2',
+            params: { n: 1 },
+            seed: null,
+            output_paths: ['/tmp/game-ui-ai-workflow/characters/cao-cao/promo/kv.png'],
+            status: 'done',
+            error: null,
+            asset_slot: 'promo',
+            kind: 'image',
+            namespace: 'character',
+          }),
+        };
+      }
+      if (url === '/api/jobs') {
+        return { ok: true, json: async () => [] };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+
+    renderAt('/character/cao-cao/promo/job-promo-1/%2Ftmp%2Fgame-ui-ai-workflow%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png');
+
+    expect(await screen.findByDisplayValue('路由详情 prompt')).toBeInTheDocument();
+  });
+
   it('does not highlight either tab on /', () => {
     renderAt('/');
     expect(screen.getByText('出图').className).not.toContain('bg-[rgba(36,35,33,0.68)]');

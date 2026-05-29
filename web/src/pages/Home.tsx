@@ -74,7 +74,7 @@ export function Home() {
           {state.items.map((item) => (
             <Link
               key={`${item.path}-${item.filename}`}
-              href={`/character/${item.character_id}`}
+              href={galleryItemHref(item)}
               className="mb-6 block break-inside-avoid"
             >
               <img
@@ -89,4 +89,11 @@ export function Home() {
       )}
     </div>
   );
+}
+
+function galleryItemHref(item: GalleryItem): string {
+  if (!item.job_id) {
+    return `/character/${item.character_id}/${item.asset_slot}`;
+  }
+  return `/character/${item.character_id}/${item.asset_slot}/${item.job_id}/${encodeURIComponent(item.path)}`;
 }

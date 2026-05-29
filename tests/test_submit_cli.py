@@ -43,11 +43,42 @@ def _project_root() -> str:
     return str(Path(__file__).resolve().parent.parent)
 
 
+def _write_default_key(tmp_path, *, alias="default", model="gpt-image-2", kind="portrait"):
+    config = tmp_path / ".config"
+    config.mkdir(parents=True, exist_ok=True)
+    (config / "keys.json").write_text(
+        json.dumps({
+            "version": 1,
+            "default_alias": alias,
+            "keys": [{
+                "alias": alias,
+                "provider": "custom",
+                "base_url": "https://api.example.test",
+                "access_key": "ak-test",
+                "secret_key": None,
+                "capabilities": [kind],
+                "models": [{"name": model, "id": model}],
+                "homepage_url": None,
+                "docs_url": None,
+                "api_key_url": None,
+                "modalities": ["image"],
+                "routing_scope": "general",
+                "routing_category": None,
+                "routing_hints": [],
+                "notes": "",
+                "created_at": "2026-05-29T00:00:00+00:00",
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+
 def test_submit_portrait_default_values(tmp_path):
     """portrait + 默认值：落盘 status=PENDING_CONFIRM，kind=portrait，
-    params.n=1，params.size=1024x1536，model=generate_image_gpt_image_2。"""
+    params.n=1，params.size=1024x1536，model 来自默认 API Key。"""
     prompt_file = tmp_path / "p.md"
     prompt_file.write_text("中文 prompt", encoding="utf-8")
+    _write_default_key(tmp_path)
 
     env = _make_env(tmp_path)
     r = _run(
@@ -68,7 +99,10 @@ def test_submit_portrait_default_values(tmp_path):
     assert data["asset_slot"] == "portrait"
     assert data["character_id"] == "holy"
     assert data["prompt"] == "中文 prompt"
-    assert data["model"] == "generate_image_gpt_image_2"
+    assert data["model"] == "gpt-image-2"
+    assert data["alias"] == "default"
+    assert data["provider"] == "custom"
+    assert data["params"]["vendor"] == "default (custom)"
     assert data["params"]["n"] == 1
     assert data["params"]["size"] == "1024x1536"
     assert data["seed"] is None
@@ -81,6 +115,7 @@ def test_submit_promo_with_source_image(tmp_path):
     prompt_file.write_text("promo prompt", encoding="utf-8")
     src = tmp_path / "src.png"
     src.write_bytes(b"fake")
+    _write_default_key(tmp_path, kind="promo")
 
     env = _make_env(tmp_path)
     r = _run(
@@ -101,6 +136,7 @@ def test_submit_promo_with_source_image(tmp_path):
 def test_submit_turnaround_kind(tmp_path):
     prompt_file = tmp_path / "p.md"
     prompt_file.write_text("turnaround prompt", encoding="utf-8")
+    _write_default_key(tmp_path, kind="turnaround")
 
     env = _make_env(tmp_path)
     r = _run(
@@ -119,6 +155,7 @@ def test_submit_turnaround_kind(tmp_path):
 def test_submit_n4_explicit(tmp_path):
     prompt_file = tmp_path / "p.md"
     prompt_file.write_text("multi prompt", encoding="utf-8")
+    _write_default_key(tmp_path)
     env = _make_env(tmp_path)
     r = _run(
         ["submit", "--kind", "portrait", "--character", "holy",
@@ -143,6 +180,7 @@ def test_submit_falls_back_to_active_character(tmp_path):
         json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"}),
         encoding="utf-8",
     )
+    _write_default_key(tmp_path)
 
     env = _make_env(tmp_path)
     r = _run(
@@ -188,6 +226,7 @@ def test_submit_stdout_is_pure_job_id(tmp_path):
     """stdout 一行 job_id，可直接 $(...) 捕获。"""
     prompt_file = tmp_path / "p.md"
     prompt_file.write_text("p", encoding="utf-8")
+    _write_default_key(tmp_path)
     env = _make_env(tmp_path)
     r = _run(
         ["submit", "--kind", "portrait", "--character", "holy",
@@ -205,6 +244,7 @@ def test_submit_stdout_is_pure_job_id(tmp_path):
 def test_submit_size_explicit(tmp_path):
     prompt_file = tmp_path / "p.md"
     prompt_file.write_text("p", encoding="utf-8")
+    _write_default_key(tmp_path)
     env = _make_env(tmp_path)
     r = _run(
         ["submit", "--kind", "portrait", "--character", "holy",
@@ -222,6 +262,7 @@ def test_submit_size_explicit(tmp_path):
 def test_submit_model_explicit(tmp_path):
     prompt_file = tmp_path / "p.md"
     prompt_file.write_text("p", encoding="utf-8")
+    _write_default_key(tmp_path)
     env = _make_env(tmp_path)
     r = _run(
         ["submit", "--kind", "portrait", "--character", "holy",
@@ -234,3 +275,17 @@ def test_submit_model_explicit(tmp_path):
         (tmp_path / ".runtime" / "jobs" / f"{job_id}.json").read_text(encoding="utf-8")
     )
     assert data["model"] == "custom_model"
+
+
+def test_submit_without_default_key_fails(tmp_path):
+    prompt_file = tmp_path / "p.md"
+    prompt_file.write_text("p", encoding="utf-8")
+    env = _make_env(tmp_path)
+    r = _run(
+        ["submit", "--kind", "portrait", "--character", "holy",
+         "--prompt-file", str(prompt_file)],
+        cwd=_project_root(), env=env,
+    )
+    assert r.returncode == 2
+    assert r.stdout.strip() == ""
+    assert "没有可用默认 Key" in r.stderr

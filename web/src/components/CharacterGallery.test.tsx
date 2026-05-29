@@ -45,4 +45,24 @@ describe('CharacterGallery', () => {
     expect(screen.queryByText(/等终端确认/)).not.toBeInTheDocument();
     expect(screen.queryByText('等待确认的青袍谋主')).not.toBeInTheDocument();
   });
+
+  it('opens on the routed asset tab', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => [],
+    })));
+
+    render(
+      <CharacterGallery
+        characterId="cao-cao"
+        characterName="曹操"
+        initialTab="promo"
+        detailMode={false}
+        onSelectImage={vi.fn()}
+        sseSignal={0}
+      />,
+    );
+
+    expect(await screen.findByText('等待第一张美宣')).toBeInTheDocument();
+  });
 });

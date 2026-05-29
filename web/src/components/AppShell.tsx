@@ -68,6 +68,19 @@ export function AppShell() {
           <Route path="/">{() => <Home />}</Route>
           <Route path="/studio">{() => <Studio />}</Route>
           <Route path="/character">{() => <CharacterDetail />}</Route>
+          <Route path="/character/:id/:assetSlot/:jobId/:imagePath">
+            {(params) => (
+              <CharacterDetail
+                characterId={params.id}
+                assetSlot={params.assetSlot}
+                jobId={params.jobId}
+                imagePath={params.imagePath}
+              />
+            )}
+          </Route>
+          <Route path="/character/:id/:assetSlot">
+            {(params) => <CharacterDetail characterId={params.id} assetSlot={params.assetSlot} />}
+          </Route>
           <Route path="/character/:id">
             {(params) => <CharacterDetail characterId={params.id} />}
           </Route>

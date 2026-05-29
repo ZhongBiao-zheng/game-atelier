@@ -37,6 +37,16 @@ class FakeDownloadResponse:
         yield self.content
 
 
+class FakePostResponse:
+    def __init__(self, payload: dict, *, status_code: int = 200):
+        self.payload = payload
+        self.status_code = status_code
+        self.text = json.dumps(payload)
+
+    def json(self):
+        return self.payload
+
+
 def _add_key(*, alias: str, provider: str, base_url: str | None) -> None:
     keys.add_key(KeySpec(
         alias=alias,
@@ -121,6 +131,42 @@ def test_render_openai_provider_posts_to_image_endpoint_and_writes_data_url(
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
+def test_post_json_retries_requests_connection_drop_then_succeeds(monkeypatch):
+    image_bytes = b"\x89PNG\r\n\x1a\nretry"
+    calls = {"n": 0}
+
+    class FakeResponse:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {
+                "data": [{
+                    "b64_json": "data:image/png;base64,"
+                    + base64.b64encode(image_bytes).decode("ascii"),
+                }]
+            }
+
+    def fake_post(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise requests.ConnectionError("Remote end closed connection without response")
+        return FakeResponse()
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    monkeypatch.setattr(openai_image.time, "sleep", lambda _seconds: None)
+
+    data = openai_image._post_json(
+        "https://api.example.test/v1/images/generations",
+        "ak",
+        {"model": "gpt-image-2"},
+        timeout=10,
+    )
+
+    assert calls["n"] == 2
+    assert data["data"][0]["b64_json"].startswith("data:image/png;base64,")
+
+
 def test_render_seedream_normalizes_size_to_minimum_pixel_area(
     isolated_data_root,
     tmp_path,
@@ -134,27 +180,17 @@ def test_render_seedream_normalizes_size_to_minimum_pixel_area(
     image_bytes = b"\x89PNG\r\n\x1a\nseedream"
     captured: dict[str, object] = {}
 
-    class FakeResponse:
-        def __enter__(self):
-            return self
+    def fake_post(url, headers, json, timeout):
+        captured["url"] = url
+        captured["payload"] = json
+        return FakePostResponse({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(image_bytes).decode("ascii"),
+            }],
+        })
 
-        def __exit__(self, *args):
-            return None
-
-        def read(self) -> bytes:
-            return json.dumps({
-                "data": [{
-                    "b64_json": "data:image/png;base64,"
-                    + base64.b64encode(image_bytes).decode("ascii"),
-                }],
-            }).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["payload"] = json.loads(request.data.decode("utf-8"))
-        return FakeResponse()
-
-    monkeypatch.setattr(openai_image.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
 
     paths = openai_image.render(
         prompt="fox",
@@ -183,32 +219,18 @@ def test_render_seedream_backfills_when_api_returns_fewer_images(
     images = [b"\x89PNG\r\n\x1a\nseedream-1", b"\x89PNG\r\n\x1a\nseedream-2"]
     captured: dict[str, object] = {"payloads": []}
 
-    class FakeResponse:
-        def __init__(self, body: bytes):
-            self.body = body
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return None
-
-        def read(self) -> bytes:
-            return self.body
-
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        payload = json.loads(request.data.decode("utf-8"))
-        captured["payloads"].append(payload)
+    def fake_post(url, headers, json, timeout):
+        captured["url"] = url
+        captured["payloads"].append(json)
         index = len(captured["payloads"]) - 1
-        return FakeResponse(json.dumps({
+        return FakePostResponse({
             "data": [{
                 "b64_json": "data:image/png;base64,"
                 + base64.b64encode(images[index]).decode("ascii"),
             }],
-        }).encode("utf-8"))
+        })
 
-    monkeypatch.setattr(openai_image.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
 
     paths = openai_image.render(
         prompt="fox",
@@ -237,34 +259,17 @@ def test_render_openai_hk_posts_to_chat_completions_per_requested_image(
     second_image = b"\x89PNG\r\n\x1a\nchat-2"
     captured: dict[str, object] = {"payloads": [], "downloads": []}
 
-    class FakeResponse:
-        def __init__(self, body: bytes):
-            self.body = body
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return None
-
-        def read(self) -> bytes:
-            return self.body
-
-    def fake_urlopen(request, timeout):
-        if isinstance(request, str):
-            raise AssertionError("expected Request for image downloads")
-        if request.full_url == "https://api.openai-hk.com/v1/chat/completions":
-            captured["url"] = request.full_url
-            payload = json.loads(request.data.decode("utf-8"))
-            captured["payloads"].append(payload)
-            index = len(captured["payloads"])
-            return FakeResponse(json.dumps({
-                "choices": [{
-                    "message": {
-                        "content": f"好了：![image](https://cdn.example.com/out-{index}.png)",
-                    },
-                }],
-            }).encode("utf-8"))
+    def fake_post(url, headers, json, timeout):
+        captured["url"] = url
+        captured["payloads"].append(json)
+        index = len(captured["payloads"])
+        return FakePostResponse({
+            "choices": [{
+                "message": {
+                    "content": f"好了：![image](https://cdn.example.com/out-{index}.png)",
+                },
+            }],
+        })
 
     def fake_get(url, headers, timeout, stream):
         captured["downloads"].append(url)
@@ -276,7 +281,7 @@ def test_render_openai_hk_posts_to_chat_completions_per_requested_image(
             return FakeDownloadResponse(second_image)
         raise AssertionError(f"unexpected download URL: {url}")
 
-    monkeypatch.setattr(openai_image.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
     monkeypatch.setattr(openai_image.requests, "get", fake_get)
 
     paths = openai_image.render(

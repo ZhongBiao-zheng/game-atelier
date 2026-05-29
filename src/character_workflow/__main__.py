@@ -15,6 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from character_workflow.lib import keys
 from character_workflow.lib.active_character import read_active, write_active
 from character_workflow.lib.jobs import write_job
 from character_workflow.lib.job_runner import run_job, run_latest
@@ -54,9 +55,26 @@ def _submit(args: argparse.Namespace) -> int:
         if args.source_image else None
     )
     reference_images = [source_image] if source_image else []
+    alias = keys.preferred_alias_for_kind(args.kind)
+    key = keys.find_by_alias(alias) if alias else None
+    if key is None:
+        print(
+            f"submit: 当前 kind={args.kind} 没有可用默认 Key，去 Web 加一个",
+            file=sys.stderr,
+        )
+        return 2
+    model = args.model
+    if model is None:
+        if not key.models:
+            print(
+                f"submit: 默认 Key {key.alias!r} 没有配置模型，去 Web 补一个 model id",
+                file=sys.stderr,
+            )
+            return 2
+        model = key.models[0].id
 
     params: dict = {
-        "vendor": "OpenAI (via Lovart)",
+        "vendor": f"{key.alias} ({key.provider})",
         "size": args.size,
         "requested_size": args.size,
         "n": args.n,
@@ -67,12 +85,13 @@ def _submit(args: argparse.Namespace) -> int:
         job_id=job_id,
         character_id=char_id,
         prompt=prompt,
-        model=args.model,
+        model=model,
         params=params,
         seed=None,
         status=JobStatus.PENDING_CONFIRM,
         asset_slot=AssetSlot(args.kind),
         source_image=source_image,
+        alias=alias,
     )
     print(job_id)
     return 0
@@ -215,8 +234,8 @@ def main(argv: list[str] | None = None) -> int:
     p_submit.add_argument("--n", type=int, default=1, help="出图数量，默认 1")
     p_submit.add_argument("--size", default="1024x1536", help="出图尺寸，默认 1024x1536")
     p_submit.add_argument(
-        "--model", default="generate_image_gpt_image_2",
-        help="模型 id，默认 generate_image_gpt_image_2",
+        "--model", default=None,
+        help="模型 id；缺省使用当前 kind 的默认 API Key 的第一个模型",
     )
     p_submit.add_argument(
         "--source-image", default=None,

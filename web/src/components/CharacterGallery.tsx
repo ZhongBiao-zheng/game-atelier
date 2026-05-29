@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 interface Props {
   characterId: string | null;
   characterName: string | null;
+  initialTab?: TabKind;
   detailMode: boolean;
   onSelectImage: (path: string, jobId: string) => void;
   sseSignal: number;
@@ -32,11 +33,22 @@ const TAB_META: Record<TabKind, { label: string; emptyTitle: string; emptyHint: 
   },
 };
 
-export function CharacterGallery({ characterId, characterName, detailMode, onSelectImage, sseSignal }: Props) {
+export function CharacterGallery({
+  characterId,
+  characterName,
+  initialTab,
+  detailMode,
+  onSelectImage,
+  sseSignal,
+}: Props) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<TabKind>('portrait');
+  const [tab, setTab] = useState<TabKind>(initialTab ?? 'portrait');
   const [uploadSignal, setUploadSignal] = useState(0);
+
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     if (!characterId) return;

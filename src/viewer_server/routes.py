@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -17,7 +18,8 @@ from fastapi.responses import FileResponse
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
 from character_workflow.lib.jobs import (
-    delete_failed_job, read_job, remove_image_from_job, save_job, update_job_status, write_job,
+    delete_failed_job, list_jobs, read_job, remove_image_from_job, save_job,
+    update_job_status, write_job,
 )
 from character_workflow.lib.schemas import AssetSlot as _AssetSlot
 from character_workflow.lib.projects import (
@@ -39,19 +41,26 @@ class CharacterCreate(BaseModel):
 
 
 def _display_name(spec_path: Path) -> str:
-    """Parse first `# heading` from spec markdown as display name. Fallback to file stem."""
+    """Parse display name from spec.md: YAML frontmatter `name:` first, then `# heading`."""
     try:
-        with spec_path.open("r", encoding="utf-8") as f:
-            for _ in range(20):  # only scan top of file
-                line = f.readline()
-                if not line:
-                    break
-                m = re.match(r"^#\s+(.+?)\s*$", line)
+        text = spec_path.read_text(encoding="utf-8")
+        # YAML frontmatter: ---\n...\nname: <value>\n...\n---
+        if text.startswith("---"):
+            end = text.find("\n---", 3)
+            if end != -1:
+                frontmatter = text[3:end]
+                m = re.search(r"^name:\s*(.+?)\s*$", frontmatter, re.MULTILINE)
                 if m:
                     return m.group(1)
+        # Legacy: first `# heading`
+        for line in text.splitlines()[:20]:
+            m = re.match(r"^#\s+(.+?)\s*$", line)
+            if m:
+                return m.group(1)
     except OSError:
         pass
-    return spec_path.stem
+    # Last resort: parent dir name (character id)
+    return spec_path.parent.name
 
 
 router = APIRouter(prefix="/api")
@@ -126,15 +135,29 @@ def rename_character(character_id: str, payload: dict = Body(...)) -> dict:
     if not p.exists():
         raise HTTPException(404, detail=f"character {character_id} not found")
     text = p.read_text(encoding="utf-8")
-    lines = text.split("\n")
-    # Replace first `# heading`. If none, prepend one.
-    for i, line in enumerate(lines):
-        if re.match(r"^#\s+", line):
-            lines[i] = f"# {new_name}"
-            break
+    # YAML frontmatter: update `name:` field
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            frontmatter = text[3:end]
+            if re.search(r"^name:\s*", frontmatter, re.MULTILINE):
+                new_frontmatter = re.sub(r"^name:\s*.+$", f"name: {new_name}", frontmatter, flags=re.MULTILINE)
+                new_text = "---" + new_frontmatter + text[end:]
+            else:
+                new_frontmatter = frontmatter.rstrip() + f"\nname: {new_name}\n"
+                new_text = "---" + new_frontmatter + text[end:]
+        else:
+            new_text = text
     else:
-        lines = [f"# {new_name}", ""] + lines
-    new_text = "\n".join(lines)
+        # Legacy: replace first `# heading`
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            if re.match(r"^#\s+", line):
+                lines[i] = f"# {new_name}"
+                break
+        else:
+            lines = [f"# {new_name}", ""] + lines
+        new_text = "\n".join(lines)
     tmp = p.with_suffix(".md.tmp")
     tmp.write_text(new_text, encoding="utf-8")
     tmp.replace(p)
@@ -647,11 +670,12 @@ _GALLERY_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
 @router.get("/gallery/recent")
 def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
-    """Return most-recent character images, sorted by mtime desc."""
+    """Return random character images from portrait/promo/turnaround."""
     characters_dir = _project_root() / "characters"
     items: list[dict] = []
     if not characters_dir.exists():
         return {"items": []}
+    job_ids_by_path = _gallery_job_ids_by_path()
     for char_dir in characters_dir.iterdir():
         if not char_dir.is_dir():
             continue
@@ -671,10 +695,32 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                     "asset_slot": slot,
                     "filename": f.name,
                     "path": str(f.relative_to(_project_root())),
+                    "job_id": job_ids_by_path.get(str(f.relative_to(_project_root()))),
                     "mtime": mtime,
                 })
-    items.sort(key=lambda x: x["mtime"], reverse=True)
+    random.shuffle(items)
     return {"items": items[:limit]}
+
+
+def _gallery_job_ids_by_path() -> dict[str, str]:
+    root = _project_root()
+    result: dict[str, str] = {}
+    try:
+        jobs = list_jobs()
+    except Exception:
+        return result
+    for job in jobs:
+        for raw_path in job.output_paths:
+            path = Path(raw_path)
+            absolute = path if path.is_absolute() else root / path
+            try:
+                relative = str(absolute.resolve().relative_to(root))
+            except ValueError:
+                relative = raw_path
+            result.setdefault(raw_path, job.job_id)
+            result.setdefault(str(absolute.resolve()), job.job_id)
+            result.setdefault(relative, job.job_id)
+    return result
 
 
 @router.get("/gallery/image")

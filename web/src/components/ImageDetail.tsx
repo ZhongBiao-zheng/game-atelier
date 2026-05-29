@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Trash2, CheckCircle2, Copy } from 'lucide-react';
+import { ArrowLeft, Trash2, CheckCircle2, Copy, Save } from 'lucide-react';
 import type { Job, WebEditableJobPatch } from '../schema/jobs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +20,7 @@ export function ImageDetail({ jobId, path, onBack }: Props) {
   const [job, setJob] = useState<Job | null>(null);
   const [patch, setPatch] = useState<WebEditableJobPatch>({});
   const [toast, setToast] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetch(`/api/jobs/${jobId}`).then(r => r.json()).then(setJob);
@@ -41,6 +42,25 @@ export function ImageDetail({ jobId, path, onBack }: Props) {
     );
   }
 
+  async function saveChanges() {
+    if (Object.keys(patch).length === 0) return;
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/prompt/${jobId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!r.ok) { setToast(`保存失败：HTTP ${r.status}`); return; }
+      setJob(j => j ? { ...j, ...patch } : j);
+      setPatch({});
+      setToast('已保存');
+      window.setTimeout(() => setToast(null), 2000);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function deleteImage() {
     if (!window.confirm(`删除这张图？\n${path}\n（磁盘文件也会删，不可恢复）`)) return;
     const r = await fetch(`/api/jobs/${jobId}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
@@ -57,6 +77,15 @@ export function ImageDetail({ jobId, path, onBack }: Props) {
         </Button>
         <div className="flex items-center gap-3">
           <Badge variant={statusVariant[job.status] ?? 'secondary'}>{job.status}</Badge>
+          <Button
+            size="sm"
+            onClick={saveChanges}
+            disabled={saving || Object.keys(patch).length === 0}
+            title="保存对 prompt / model / seed 的修改"
+          >
+            <Save className="size-3.5" />
+            {saving ? '保存中…' : '保存'}
+          </Button>
           <Button
             variant="ghost"
             size="sm"

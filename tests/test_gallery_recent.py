@@ -1,4 +1,4 @@
-"""GET /api/gallery/recent: 从所有 character 的 portrait/promo/turnaround 中按 mtime 取最新 N 张."""
+"""GET /api/gallery/recent: 从所有 character 的 portrait/promo/turnaround 中随机取 N 张."""
 from __future__ import annotations
 
 import os
@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from character_workflow.lib.jobs import save_job
+from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
 from viewer_server.server_app import build_app
 
 
@@ -33,18 +35,48 @@ def test_empty_returns_empty_list(client):
     assert resp.json() == {"items": []}
 
 
-def test_returns_images_sorted_by_mtime(client, tmp_path):
+def test_returns_images_in_randomized_order(client, tmp_path, monkeypatch):
+    from viewer_server import routes
+
     chars = tmp_path / "characters"
     _make_image(chars / "char-a" / "portrait" / "old.png", mtime_offset=-100)
     _make_image(chars / "char-b" / "portrait" / "new.png", mtime_offset=-1)
     _make_image(chars / "char-c" / "promo" / "mid.png", mtime_offset=-50)
+    monkeypatch.setattr(
+        routes.random,
+        "shuffle",
+        lambda items: items.sort(key=lambda x: x["character_id"], reverse=True),
+    )
+
     resp = client.get("/api/gallery/recent")
     items = resp.json()["items"]
-    # 时间倒序
-    assert [i["character_id"] for i in items] == ["char-b", "char-c", "char-a"]
+    assert [i["character_id"] for i in items] == ["char-c", "char-b", "char-a"]
     # 每个 item 字段
-    assert items[0]["asset_slot"] == "portrait"
-    assert items[0]["filename"] == "new.png"
+    assert items[0]["asset_slot"] == "promo"
+    assert items[0]["filename"] == "mid.png"
+
+
+def test_includes_matching_job_id_for_detail_route(client, tmp_path):
+    image = tmp_path / "characters" / "char-a" / "promo" / "kv.png"
+    _make_image(image)
+    save_job(Job(
+        job_id="job-promo-1",
+        character_id="char-a",
+        prompt="p",
+        submitted_at="2026-05-29T00:00:00Z",
+        model="m",
+        params=JobParams(),
+        seed=None,
+        output_paths=[str(image.resolve())],
+        status=JobStatus.DONE,
+        error=None,
+        asset_slot=AssetSlot.PROMO,
+    ))
+
+    resp = client.get("/api/gallery/recent")
+
+    assert resp.status_code == 200
+    assert resp.json()["items"][0]["job_id"] == "job-promo-1"
 
 
 def test_respects_limit_param(client, tmp_path):

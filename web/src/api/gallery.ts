@@ -3,6 +3,7 @@ export interface GalleryItem {
   asset_slot: 'portrait' | 'promo' | 'turnaround';
   filename: string;
   path: string;
+  job_id: string | null;
   mtime: number;
 }
 

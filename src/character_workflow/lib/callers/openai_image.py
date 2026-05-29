@@ -9,6 +9,7 @@ import re
 import subprocess
 import urllib.error
 import urllib.request
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -68,6 +69,14 @@ def render(
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if _is_openai_hk(base_url):
+        image_paths: list[str] = []
+        source_image = kwargs.get("source_image") or (kwargs.get("params") or {}).get("source_image")
+        if source_image:
+            image_paths.append(str(source_image))
+        for ref in (kwargs.get("reference_images") or (kwargs.get("params") or {}).get("reference_images") or []):
+            if str(ref) not in image_paths:
+                image_paths.append(str(ref))
+
         paths: list[str] = []
         requested = max(1, int(n or 1))
         for _ in range(requested):
@@ -78,6 +87,7 @@ def render(
                     prompt=prompt,
                     model=model,
                     size=requested_size,
+                    image_paths=image_paths or None,
                 ),
                 timeout=timeout,
             )
@@ -157,13 +167,28 @@ def _api_root(base_url: str) -> str:
 
 
 def _post_json(url: str, api_key: str, payload: dict, *, timeout: float) -> dict:
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    last_error: BaseException | None = None
+    for attempt in range(3):
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            if resp.status_code >= 400:
+                raise OpenAIImageError(f"image api {resp.status_code}: {resp.text[:500]}")
+            return resp.json()
+        except OpenAIImageError:
+            raise
+        except (requests.RequestException, ValueError) as e:
+            last_error = e
+            if attempt < 2:
+                time.sleep(1 + attempt)
+
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
         method="POST",
     )
     try:
@@ -173,7 +198,7 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float) -> dict
         body = e.read().decode("utf-8", errors="replace")
         raise OpenAIImageError(f"image api {e.code}: {body[:500]}") from e
     except Exception as e:
-        raise OpenAIImageError(str(e)) from e
+        raise OpenAIImageError(str(e)) from (last_error or e)
 
 
 def _write_outputs(payload: dict, output_dir: Path, *, start_index: int = 1) -> list[str]:
@@ -225,10 +250,27 @@ def _normalize_size_for_provider(size: object, provider: str) -> object:
     return f"{int(width * scale + 0.999999)}x{int(height * scale + 0.999999)}"
 
 
-def _chat_image_payload(*, prompt: str, model: str, size: str | None) -> dict:
-    content = prompt
+def _chat_image_payload(
+    *,
+    prompt: str,
+    model: str,
+    size: str | None,
+    image_paths: list[str] | None = None,
+) -> dict:
+    text = prompt
     if size:
-        content = f"{content}\n\nImage size: {size}"
+        text = f"{text}\n\nImage size: {size}"
+    if image_paths:
+        content: object = []
+        for p in image_paths:
+            raw = Path(p).read_bytes()
+            b64 = base64.b64encode(raw).decode()
+            ext = Path(p).suffix.lstrip(".").lower() or "png"
+            mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+            content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+        content.append({"type": "text", "text": text})
+    else:
+        content = text
     return {
         "model": model,
         "messages": [{"role": "user", "content": content}],
