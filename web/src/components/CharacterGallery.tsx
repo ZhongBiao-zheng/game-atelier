@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, AlertTriangle, Loader2, Upload, Clock } from 'lucide-react';
+import { X, AlertTriangle, Loader2, Upload } from 'lucide-react';
 import type { AssetSlot, Job } from '../schema/jobs';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { FeedbackInput } from './FeedbackInput';
 
 interface Props {
   characterId: string | null;
@@ -72,7 +71,6 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
   tabJobs.forEach(j => j.output_paths.forEach(p => allImages.push({ path: p, jobId: j.job_id, status: j.status })));
   const failedJobs = tabJobs.filter(j => j.status === 'failed');
   const isRunning = tabJobs.some(j => j.status === 'pending');
-  const pendingConfirm = tabJobs.filter(j => j.status === 'pending_confirm');
 
   async function deleteImage(jobId: string, path: string) {
     if (!window.confirm(`删除这张图？\n${path}\n（磁盘文件也会删，不可恢复）`)) return;
@@ -92,7 +90,7 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
 
   const cols = detailMode ? 2 : 3;
   const colClass = cols === 2 ? 'columns-2' : 'columns-3';
-  const hasAny = allImages.length > 0 || isRunning || failedJobs.length > 0 || pendingConfirm.length > 0;
+  const hasAny = allImages.length > 0 || isRunning || failedJobs.length > 0;
 
   return (
     <GalleryShell
@@ -104,8 +102,6 @@ export function CharacterGallery({ characterId, characterName, detailMode, onSel
         kind={tab}
         onUploaded={() => setUploadSignal(s => s + 1)}
       />
-
-      {pendingConfirm.length > 0 && <PendingConfirmBadge jobs={pendingConfirm} characterId={characterId} />}
 
       {!hasAny && (
         <div className="py-16 text-center">
@@ -330,57 +326,6 @@ function SkeletonCard() {
         <Loader2 className="size-3 animate-spin" />
         生成中…
       </div>
-    </div>
-  );
-}
-
-function PendingConfirmBadge({ jobs, characterId }: { jobs: Job[]; characterId: string }) {
-  const visibleJobs = jobs.slice(0, 2);
-
-  return (
-    <div className="mb-6 rounded-md border border-[color:var(--status-running)]/40 bg-[color:var(--status-running)]/[0.06] px-4 py-4 space-y-3">
-      <div className="flex items-center gap-2.5 text-[color:var(--status-running)]">
-        <Clock className="size-3.5 shrink-0" />
-        <span className="font-[var(--font-display)] italic text-sm">
-          {jobs.length} 个 job 等终端确认
-        </span>
-      </div>
-      <div className="space-y-2">
-        {visibleJobs.map(job => {
-          const refs = job.params.reference_images?.length
-            ? job.params.reference_images
-            : (job.source_image ? [job.source_image] : []);
-          const command = `uv run python -m skill.character_workflow run-job ${job.job_id}`;
-          return (
-            <div key={job.job_id} className="rounded border border-border/40 bg-background/35 px-3 py-2 text-xs space-y-1.5">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-mono text-[10px] text-muted-foreground">{job.job_id}</span>
-                <span className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground/80">
-                  {job.params.requested_size || job.params.size || '默认'} · {job.params.n ?? 1} 张
-                </span>
-              </div>
-              <div className="max-h-[2.8em] overflow-hidden leading-snug text-foreground/85">
-                {job.prompt}
-              </div>
-              <div className="flex items-start gap-2 text-muted-foreground">
-                <span className="shrink-0 text-[10px] uppercase tracking-[0.16em]">参考图</span>
-                <span className="min-w-0 flex-1 truncate font-mono text-[10px]">
-                  {refs.length ? `${refs.length} · ${refs[0]}` : '无'}
-                </span>
-              </div>
-              <pre className="m-0 overflow-x-auto whitespace-nowrap rounded bg-background/60 px-2 py-1 font-mono text-[10px] text-foreground/80">
-                {command}
-              </pre>
-            </div>
-          );
-        })}
-        {jobs.length > visibleJobs.length && (
-          <div className="text-[10px] text-muted-foreground">
-            另有 {jobs.length - visibleJobs.length} 个待确认 job
-          </div>
-        )}
-      </div>
-      <FeedbackInput characterId={characterId} />
     </div>
   );
 }

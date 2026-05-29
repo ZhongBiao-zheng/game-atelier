@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
@@ -53,6 +53,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -154,11 +155,12 @@ describe('Studio', () => {
     expect(screen.getByLabelText('生图 prompt')).toBeInTheDocument();
   });
 
-  it('uses the 174px prompt shell on the studio page', () => {
+  it('uses the responsive prompt shell on the studio page', () => {
     renderStudio();
 
     expect(screen.getByTestId('studio-prompt-shell')).toHaveClass(
-      'h-[174px]',
+      'min-h-[174px]',
+      'h-auto',
       'pt-[14px]',
       'px-4',
       'pb-4',
@@ -523,6 +525,139 @@ describe('Studio', () => {
       'href',
       '/api/gallery/image?path=%2FUsers%2Fme%2Fproject%2Fstudio%2Fjob-studio-1%2Fv1.png',
     );
+  });
+
+  it('restores a pending studio job after returning to the page', async () => {
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'oa',
+            keys: [{
+              alias: 'oa',
+              provider: 'openai',
+              access_key: 'sk',
+              secret_key: null,
+              capabilities: [],
+              models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
+              notes: '',
+              created_at: '2026-05-25T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{
+            job_id: 'job-pending-1',
+            character_id: 'oa',
+            prompt: '刷新后仍在生成的画面',
+            submitted_at: '2026-05-28T02:00:00Z',
+            model: 'gpt-image-2',
+            params: { ratio: '1:1', resolution: '2K', size: '1024x1024' },
+            seed: null,
+            output_paths: [],
+            status: 'pending',
+            error: null,
+            kind: 'image',
+            namespace: 'studio',
+            alias: 'oa',
+            provider: 'openai',
+          }],
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    }) as any;
+
+    renderStudio();
+
+    expect(await screen.findByText('刷新后仍在生成的画面')).toBeInTheDocument();
+    expect(screen.getByTestId('studio-pending-job-pending-1')).toBeInTheDocument();
+  });
+
+  it('refreshes persisted pending studio jobs until they become done', async () => {
+    let intervalCallback: TimerHandler | undefined;
+    vi.spyOn(window, 'setInterval').mockImplementation((callback: TimerHandler, timeout?: number) => {
+      if (timeout === 2000) intervalCallback = callback;
+      return 1;
+    });
+    vi.spyOn(window, 'clearInterval').mockImplementation(() => {});
+    const firstJobs = [{
+      job_id: 'job-pending-2',
+      character_id: 'oa',
+      prompt: '轮询完成的图',
+      submitted_at: '2026-05-28T02:05:00Z',
+      model: 'gpt-image-2',
+      params: { ratio: '1:1', resolution: '2K', size: '1024x1024' },
+      seed: null,
+      output_paths: [],
+      status: 'pending',
+      error: null,
+      kind: 'image',
+      namespace: 'studio',
+      alias: 'oa',
+      provider: 'openai',
+    }];
+    const secondJobs = [{
+      ...firstJobs[0],
+      status: 'done',
+      output_paths: ['/tmp/studio/job-pending-2/v1.png'],
+    }];
+    let jobsCallCount = 0;
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'oa',
+            keys: [{
+              alias: 'oa',
+              provider: 'openai',
+              access_key: 'sk',
+              secret_key: null,
+              capabilities: [],
+              models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
+              notes: '',
+              created_at: '2026-05-25T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        jobsCallCount += 1;
+        return Promise.resolve({
+          ok: true,
+          json: async () => (jobsCallCount >= 2 ? secondJobs : firstJobs),
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    }) as any;
+
+    renderStudio();
+    expect(await screen.findByTestId('studio-pending-job-pending-2')).toBeInTheDocument();
+
+    await act(async () => {
+      if (typeof intervalCallback === 'function') intervalCallback();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('img', { name: '生成结果 1' })).toHaveAttribute(
+        'src',
+        '/api/gallery/image?path=%2Ftmp%2Fstudio%2Fjob-pending-2%2Fv1.png',
+      );
+    });
+    expect(screen.queryByTestId('studio-pending-job-pending-2')).not.toBeInTheDocument();
+  });
+
+  it('does not render the batch submitted time above studio results', async () => {
+    renderStudioWithCompletedBatch();
+
+    expect(await screen.findByText(/一个身披白床单/)).toBeInTheDocument();
+    expect(screen.queryByText(/1:00:00/)).not.toBeInTheDocument();
   });
 
   it('renders a completed studio batch with metadata and action buttons', async () => {

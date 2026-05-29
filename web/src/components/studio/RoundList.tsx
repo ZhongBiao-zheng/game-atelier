@@ -38,25 +38,41 @@ export function RoundList({
     <div className="max-w-3xl mx-auto mt-8 space-y-8">
       {rounds.map((r) => {
         const stableKey =
-          r.kind === 'pending' ? `pending-${r.startedAt}` : `${r.kind}-${r.submittedAt}`;
+          r.kind === 'pending' && r.jobId ? `pending-${r.jobId}` :
+          r.kind === 'pending' ? `pending-${r.startedAt}` :
+          `${r.kind}-${r.submittedAt}`;
         return (
           <div key={stableKey}>
-            <div className="border-t border-border/40 pt-3 mb-3 flex items-baseline gap-3">
-              <span className="text-xs text-muted-foreground font-mono">
-                {r.kind === 'pending'
-                  ? new Date(r.startedAt).toLocaleTimeString()
-                  : new Date(r.submittedAt).toLocaleTimeString()}
-              </span>
-              {r.kind === 'pending' && <WaitingCopy startedAt={r.startedAt} />}
-            </div>
             {r.kind === 'pending' && (
-              <div
-                data-skeleton
-                aria-busy="true"
-                className="aspect-square w-64 bg-card/40 rounded-lg flex items-center justify-center"
-              >
-                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <div className="mb-3">
+                <WaitingCopy startedAt={r.startedAt} />
               </div>
+            )}
+            {r.kind === 'pending' && (
+              <section className="space-y-3">
+                <div className="flex items-start gap-3 text-sm">
+                  {r.config.referenceImages[0] && (
+                    <img
+                      src={imageSrc(r.config.referenceImages[0])}
+                      alt="参考图"
+                      className="h-14 w-14 rounded-md object-cover"
+                    />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2 text-base leading-7 text-foreground" title={r.config.prompt}>
+                      {r.config.prompt}
+                    </p>
+                  </div>
+                </div>
+                <div
+                  data-testid={r.jobId ? `studio-pending-${r.jobId}` : undefined}
+                  data-skeleton
+                  aria-busy="true"
+                  className="aspect-square w-64 bg-card/40 rounded-lg flex items-center justify-center"
+                >
+                  <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                </div>
+              </section>
             )}
             {r.kind === 'done' && (
               <DoneBatch

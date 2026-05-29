@@ -310,9 +310,9 @@ describe('KeyForm', () => {
 
     expect(screen.getByLabelText('API 请求地址')).toHaveAttribute(
       'placeholder',
-      '例如：https://api.example.com/v1 或 https://ark.cn-beijing.volces.com/api/v3',
+      '例如：https://api.openai-hk.com 或 https://ark.cn-beijing.volces.com/api/v3',
     );
-    expect(screen.getByText('请求时会自动拼接 /images/generations；如果你填的是完整路径，也会直接使用。')).toBeInTheDocument();
+    expect(screen.getByText('请求时会自动拼接图片接口；根域名会补 /v1/images/generations，填完整路径也会直接使用。')).toBeInTheDocument();
   });
 
   it('validates the custom API request URL from the test button', () => {

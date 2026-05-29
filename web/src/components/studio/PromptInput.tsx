@@ -148,7 +148,7 @@ export function PromptInput({
   return (
     <div
       data-testid="studio-prompt-shell"
-      className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl h-[174px] flex flex-col gap-3"
+      className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl min-h-[174px] h-auto flex flex-col gap-3"
     >
       <textarea
         value={text}
@@ -158,8 +158,8 @@ export function PromptInput({
         className="flex-1 min-h-0 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none rounded-md px-2"
         aria-label="生图 prompt"
       />
-      <div className="flex justify-between items-center gap-4 shrink-0">
-        <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap justify-between items-center gap-3 shrink-0">
+        <div className="flex min-w-0 flex-wrap gap-2">
           <ControlButton active aria-label="图片生成">
             <ImageIcon size={14} aria-hidden /> 图片生成
           </ControlButton>
@@ -358,7 +358,7 @@ function ControlButton({
   return (
     <button
       type="button"
-      className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+      className={`inline-flex min-w-0 max-w-full h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         active
           ? 'border-border bg-secondary text-foreground'
           : 'border-border bg-background/30 text-foreground hover:bg-secondary'

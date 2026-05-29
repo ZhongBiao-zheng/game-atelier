@@ -207,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
     p_submit.add_argument(
         "--kind", required=True, choices=("portrait", "promo", "turnaround"),
     )
-    p_submit.add_argument("--prompt-file", required=True, help="中文 8 段式 prompt 文件路径")
+    p_submit.add_argument("--prompt-file", required=True, help="中文 prompt 文件路径")
     p_submit.add_argument(
         "--character", default=None,
         help="角色 id；缺省读 .runtime/active-character.json",

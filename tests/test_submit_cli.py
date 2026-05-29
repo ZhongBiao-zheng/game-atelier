@@ -47,7 +47,7 @@ def test_submit_portrait_default_values(tmp_path):
     """portrait + 默认值：落盘 status=PENDING_CONFIRM，kind=portrait，
     params.n=1，params.size=1024x1536，model=generate_image_gpt_image_2。"""
     prompt_file = tmp_path / "p.md"
-    prompt_file.write_text("中文 8 段式 prompt", encoding="utf-8")
+    prompt_file.write_text("中文 prompt", encoding="utf-8")
 
     env = _make_env(tmp_path)
     r = _run(
@@ -67,7 +67,7 @@ def test_submit_portrait_default_values(tmp_path):
     assert data["status"] == "pending_confirm"
     assert data["asset_slot"] == "portrait"
     assert data["character_id"] == "holy"
-    assert data["prompt"] == "中文 8 段式 prompt"
+    assert data["prompt"] == "中文 prompt"
     assert data["model"] == "generate_image_gpt_image_2"
     assert data["params"]["n"] == 1
     assert data["params"]["size"] == "1024x1536"

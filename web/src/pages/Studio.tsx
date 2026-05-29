@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 
-import { createStudioJob } from '@/api/studio';
+import { createStudioJob, getStudioJob, listStudioJobs } from '@/api/studio';
 import { listKeys, type KeyView } from '@/api/keys';
 import { PromptInput } from '@/components/studio/PromptInput';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
@@ -24,11 +24,16 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     setCustomSize(`${w}x${h}`);
   }, []);
 
+  const refreshPersistedJobs = useCallback(async () => {
+    const jobs = await listStudioJobs();
+    setPersistedJobs(jobs);
+    return jobs;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     if (!compact) {
-      fetch('/api/jobs')
-        .then((resp) => (resp.ok ? resp.json() : []))
+      listStudioJobs()
         .then((jobs: Job[]) => {
           if (cancelled) return;
           setPersistedJobs(jobs);
@@ -65,6 +70,18 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       ),
     );
   }, [compact, keys, persistedJobs]);
+
+  const hasActivePersistedJob = persistedJobs.some(
+    (job) => job.status === 'pending' || job.status === 'pending_confirm',
+  );
+
+  useEffect(() => {
+    if (compact || !hasActivePersistedJob) return;
+    const id = window.setInterval(() => {
+      void refreshPersistedJobs();
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [compact, hasActivePersistedJob, refreshPersistedJobs]);
 
   const onSubmit = async (prompt: string, overrideConfig?: RoundConfig) => {
     const effectiveRatio = overrideConfig?.ratio ?? ratio;
@@ -122,7 +139,20 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           resolution: effectiveResolution,
         },
       });
+      setPersistedJobs((items) => upsertJob(items, job));
+      setRounds((rs) =>
+        rs.map((r) =>
+          r === myRound
+            ? {
+                ...myRound,
+                jobId: job.job_id,
+                startedAt: Date.parse(job.submitted_at) || startedAt,
+              }
+            : r,
+        ),
+      );
       await pollJobUntilTerminal(job.job_id, (final) => {
+        setPersistedJobs((items) => upsertJob(items, final));
         setRounds((rs) =>
           rs.map((r) =>
             r === myRound
@@ -321,9 +351,9 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
 }
 
 function roundKey(round: RoundState): string | null {
-  if (round.kind === 'done') return `done:${round.jobId}`;
-  if (round.kind === 'failed' && round.jobId) return `failed:${round.jobId}`;
-  if (round.kind === 'pending' && round.jobId) return `pending:${round.jobId}`;
+  if (round.kind === 'done') return round.jobId;
+  if (round.kind === 'failed' && round.jobId) return round.jobId;
+  if (round.kind === 'pending' && round.jobId) return round.jobId;
   return null;
 }
 
@@ -338,17 +368,34 @@ function mergePersistedRounds(current: RoundState[], persisted: RoundState[]): R
 
 async function pollJobUntilTerminal(
   jobId: string,
-  onFinal: (job: { job_id: string; status: string; submitted_at: string; output_paths: string[]; error: string | null }) => void,
+  onFinal: (job: Job) => void,
 ) {
   for (let i = 0; i < 120; i++) {
     await new Promise((r) => setTimeout(r, 2000));
-    const resp = await fetch(`/api/jobs/${jobId}`);
-    if (!resp.ok) continue;
-    const job = await resp.json();
+    const job = await getStudioJob(jobId);
+    if (!job) continue;
     if (job.status === 'done' || job.status === 'failed') {
       onFinal(job);
       return;
     }
   }
-  onFinal({ job_id: jobId, status: 'failed', submitted_at: new Date().toISOString(), output_paths: [], error: 'timeout' });
+  onFinal({
+    job_id: jobId,
+    character_id: '',
+    prompt: '',
+    submitted_at: new Date().toISOString(),
+    model: '',
+    params: {},
+    seed: null,
+    output_paths: [],
+    status: 'failed',
+    error: 'timeout',
+    kind: 'image',
+    namespace: 'studio',
+  });
+}
+
+function upsertJob(items: Job[], next: Job): Job[] {
+  const without = items.filter((item) => item.job_id !== next.job_id);
+  return [next, ...without];
 }

@@ -3,7 +3,7 @@
 把"专家人设 + 项目世界观 + 历代经验 + 当前角色 spec + 任务模板"这五段
 按固定顺序拼成一段 markdown，喂给 Claude（不是喂给图像模型）。
 
-Claude 读了这段 markdown 之后才动笔写 8 段式中文出图 prompt。
+Claude 读了这段 markdown 之后才动笔写最终中文出图 prompt。
 所以 prompt_builder 不做风格 / 模型相关的渲染逻辑 —— 它只是 section 装配器。
 
 模板里的 `{placeholder}` 走 Python `str.format()` 渲染；缺字段抛 KeyError 并带字段名。

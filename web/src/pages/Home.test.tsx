@@ -47,11 +47,12 @@ describe('Home', () => {
     expect(screen.getByText('作品展示')).toBeInTheDocument();
   });
 
-  it('uses the 174px prompt shell on the home page', () => {
+  it('uses the responsive prompt shell on the home page', () => {
     renderHome();
 
     expect(screen.getByTestId('studio-prompt-shell')).toHaveClass(
-      'h-[174px]',
+      'min-h-[174px]',
+      'h-auto',
       'pt-[14px]',
       'px-4',
       'pb-4',
