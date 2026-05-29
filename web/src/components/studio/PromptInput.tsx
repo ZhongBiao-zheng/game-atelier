@@ -1,5 +1,5 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useState } from 'react';
-import { ArrowUp, Box, ImageIcon, Square, Building2, Link2 } from 'lucide-react';
+import { ArrowUp, Box, ImageIcon, Images, Square, Building2, Link2 } from 'lucide-react';
 import type { KeyView } from '@/api/keys';
 import { computeStudioPixelSize } from '@/lib/studioSize';
 
@@ -13,11 +13,15 @@ interface Props {
   model?: string;
   ratio?: string;
   resolution?: '2K' | '4K';
+  count?: number;
   onProviderChange?: (alias: string) => void;
   onModelChange?: (model: string) => void;
   onRatioChange?: (ratio: string) => void;
   onResolutionChange?: (resolution: '2K' | '4K') => void;
+  onCountChange?: (count: number) => void;
   onCustomSizeChange?: (w: number, h: number) => void;
+  /** When set, overrides localW/localH after the ratio/resolution effect; keyed to ensure re-runs. */
+  sizeOverride?: { key: number; w: number; h: number };
   menuDirection?: 'up' | 'down';
 }
 
@@ -46,17 +50,20 @@ export function PromptInput({
   model,
   ratio = '1:1',
   resolution = '2K',
+  count = 1,
   onProviderChange,
   onModelChange,
   onRatioChange,
   onResolutionChange,
+  onCountChange,
   onCustomSizeChange,
+  sizeOverride,
   menuDirection = 'up',
 }: Props) {
   const [internalText, setInternalText] = useState('');
   const text = value ?? internalText;
   const setText = onValueChange ?? setInternalText;
-  const [openPanel, setOpenPanel] = useState<'provider' | 'model' | 'size' | null>(null);
+  const [openPanel, setOpenPanel] = useState<'provider' | 'model' | 'size' | 'count' | null>(null);
   const provider = providers.find((item) => item.alias === providerAlias) ?? providers[0];
   const providerDisplayName = providerName(provider);
   const models = provider?.models ?? [];
@@ -78,11 +85,18 @@ export function PromptInput({
     onCustomSizeChange?.(w, h);
   }, [ratio, resolution, provider?.provider, onCustomSizeChange]);
 
+  // Runs after the ratio/resolution effect so it wins — used by reEdit to restore custom sizes.
+  useEffect(() => {
+    if (!sizeOverride) return;
+    setLocalW(sizeOverride.w);
+    setLocalH(sizeOverride.h);
+    onCustomSizeChange?.(sizeOverride.w, sizeOverride.h);
+  }, [sizeOverride, onCustomSizeChange]);
+
   const submit = useCallback(() => {
     const trimmed = text.trim();
     if (!trimmed || disabled || !provider || !selectedModel) return;
     onSubmit(trimmed);
-    setText('');
   }, [text, disabled, provider, selectedModel, onSubmit]);
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -331,6 +345,36 @@ export function PromptInput({
                     </div>
                   </section>
                 </div>
+              </div>
+            )}
+          </div>
+
+          <div data-testid="count-control-wrap" className="relative">
+            <ControlButton
+              active={openPanel === 'count'}
+              aria-label="选择出图数量"
+              onClick={() => setOpenPanel(openPanel === 'count' ? null : 'count')}
+            >
+              <Images size={14} aria-hidden /> {count} 张
+            </ControlButton>
+            {openPanel === 'count' && (
+              <div role="listbox" aria-label="选择出图数量列表" className={`absolute left-0 ${panelPosition} z-20 w-[160px] rounded-2xl border border-border bg-secondary p-2 shadow-2xl`}>
+                {[1, 2, 3, 4].map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    role="option"
+                    aria-selected={count === item}
+                    onClick={() => {
+                      onCountChange?.(item);
+                      setOpenPanel(null);
+                    }}
+                    className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm hover:bg-card aria-selected:bg-card"
+                  >
+                    <Images size={16} aria-hidden />
+                    <span>{item} 张</span>
+                  </button>
+                ))}
               </div>
             )}
           </div>

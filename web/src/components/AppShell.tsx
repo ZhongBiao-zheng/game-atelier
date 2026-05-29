@@ -11,10 +11,10 @@ function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string
     <Link
       href={to}
       className={[
-        'h-9 md:h-10 inline-flex shrink-0 items-center gap-1.5 md:gap-2 rounded-full px-3 md:px-5 text-xs md:text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary backdrop-blur-xl',
+        'h-9 md:h-10 inline-flex shrink-0 items-center gap-1.5 md:gap-2 rounded-full border px-3 md:px-5 text-xs md:text-sm font-medium backdrop-blur-2xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
         isActive
-          ? 'bg-card/70 text-foreground ring-1 ring-white/10'
-          : 'text-muted-foreground hover:text-foreground hover:bg-card/30',
+          ? 'border-white/15 bg-[rgba(36,35,33,0.68)] text-foreground [box-shadow:inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(255,255,255,0.05),0_12px_28px_rgba(0,0,0,0.42),0_0_0_1px_rgba(255,255,255,0.04)]'
+          : 'border-white/[0.06] bg-white/[0.03] text-muted-foreground [box-shadow:inset_0_1px_0_rgba(255,255,255,0.06)] hover:border-white/10 hover:bg-white/[0.06] hover:text-foreground',
       ].join(' ')}
     >
       <Icon size={18} aria-hidden />
@@ -33,7 +33,7 @@ export function AppShell() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-30">
-        <div className="mx-auto flex h-14 md:h-20 min-w-0 items-center gap-2 px-3 md:gap-4 md:px-8">
+        <div className="mx-auto grid h-14 min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-3 md:h-20 md:gap-4 md:px-8">
           <Link href="/" className="flex shrink-0 items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
             <span
               className="text-2xl font-normal"
@@ -43,12 +43,12 @@ export function AppShell() {
             </span>
             <span className="text-xs text-muted-foreground">· 工作流</span>
           </Link>
-          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto md:gap-3">
+          <nav className="flex min-w-0 max-w-[calc(100vw-9rem)] items-center justify-center gap-1 overflow-x-auto md:max-w-none md:gap-3">
             <NavTab to="/" label="主页" isActive={onHome} icon={HomeIcon} />
             <NavTab to="/studio" label="出图" isActive={onStudio} icon={Sparkles} />
             <NavTab to="/character" label="工坊" isActive={onCharacter} icon={UserRound} />
           </nav>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex min-w-0 shrink-0 items-center justify-end gap-2">
             <Link
               href="/settings"
               aria-label="设置"

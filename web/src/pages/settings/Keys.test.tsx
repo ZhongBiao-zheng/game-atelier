@@ -43,7 +43,6 @@ describe('KeysPage', () => {
     });
     render(<KeysPage />);
     await waitFor(() => expect(screen.getByText('lov')).toBeInTheDocument());
-    expect(screen.getByText('lovart')).toBeInTheDocument();
     expect(screen.getByText('ak...xx')).toBeInTheDocument();
   });
 
@@ -138,7 +137,7 @@ describe('KeysPage', () => {
     expect(screen.queryByText('sk-created-secret')).not.toBeInTheDocument();
   });
 
-  it('shows key provider metadata and model count on key cards', async () => {
+  it('shows compact key card fields without provider metadata clutter', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -146,6 +145,7 @@ describe('KeysPage', () => {
           ...mockKey,
           alias: 'seedream-main',
           provider: 'seedream',
+          base_url: 'https://ark.cn-beijing.volces.com/api/v3',
           homepage_url: 'https://www.volcengine.com',
           docs_url: 'https://www.volcengine.com/docs',
           modalities: ['image'],
@@ -158,10 +158,68 @@ describe('KeysPage', () => {
     render(<KeysPage />);
 
     await waitFor(() => expect(screen.getByText('seedream-main')).toBeInTheDocument());
-    expect(screen.getByText('image')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '官网' })).toHaveAttribute('href', 'https://www.volcengine.com');
-    expect(screen.getByRole('link', { name: '文档' })).toHaveAttribute('href', 'https://www.volcengine.com/docs');
-    expect(screen.getByText('1 个模型')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'https://www.volcengine.com' })).toHaveAttribute('href', 'https://www.volcengine.com');
+    expect(screen.queryByText('image')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '文档' })).not.toBeInTheDocument();
+    expect(screen.queryByText('1 个模型')).not.toBeInTheDocument();
+  });
+
+  it('falls back to API request URL when homepage is empty', async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        keys: [{
+          ...mockKey,
+          base_url: 'https://api.openai-hk.com',
+          homepage_url: null,
+        }],
+        default_alias: null,
+      }),
+    });
+
+    render(<KeysPage />);
+
+    await waitFor(() => expect(screen.getByRole('link', { name: 'https://api.openai-hk.com' })).toBeInTheDocument());
+  });
+
+  it('opens an edit form and PATCHes key updates without resending an unchanged masked secret', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          keys: [{
+            ...mockKey,
+            alias: 'openai-hk',
+            provider: 'custom',
+            base_url: 'https://api.openai-hk.com',
+            access_key: 'sk-...old',
+            homepage_url: null,
+            models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
+            routing_scope: 'classified',
+            routing_category: 'gpt_image',
+            routing_hints: ['gpt-image'],
+          }],
+          default_alias: null,
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ alias: 'openai-hk' }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ keys: [], default_alias: null }),
+      });
+    globalThis.fetch = fetchMock as any;
+
+    render(<KeysPage />);
+
+    fireEvent.click(await screen.findByLabelText('编辑 openai-hk'));
+    fireEvent.change(screen.getByLabelText('API 请求地址'), { target: { value: 'https://api.openai-hk.com/v1' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/keys/openai-hk', expect.objectContaining({ method: 'PATCH' })));
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body.base_url).toBe('https://api.openai-hk.com/v1');
+    expect(body.access_key).toBeUndefined();
+    expect(await screen.findByText('已更新')).toBeInTheDocument();
   });
 });
 

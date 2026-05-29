@@ -48,3 +48,24 @@
 - Review loop:
   - Reviewer found partial PNG could be returned even when known bytes were missing, unvalidated `206 Content-Range` could misalign resumed bytes, and nested `ChunkedEncodingError(..., IncompleteRead(...))` was under-tested.
   - Fixed all three and re-review returned APPROVED.
+
+## 2026-05-29 11:32
+
+- User reported two frontend regressions:
+  - App top navigation had drifted left, and tab button glow/rounding no longer matched the earlier top-bottom glow style.
+  - API Key cards were too large and showed too much metadata; desired fields are remark name, homepage or API request URL, masked key prefix, delete, set default, and edit.
+- Execution mode: subagent-driven. Explorer reviewed AppShell and Keys components, confirmed existing `PATCH /api/keys/{alias}` supports frontend edit without backend changes.
+- Fixes:
+  - AppShell header now uses a three-column grid so the middle nav stays visually centered while logo/settings remain at the edges.
+  - Active nav tabs use a light vertical shadow instead of lateral/inset glow; pill rounding reduced from `rounded-full` to `rounded-xl`.
+  - Key cards now omit provider, official/docs labels, tags/modalities, model count, and last-used/created timestamps.
+  - Key cards show homepage URL when present, otherwise `base_url`; added edit icon that opens `KeyForm` in PATCH mode.
+  - Edit mode keeps alias/provider immutable and does not resend an unchanged masked secret.
+- Verification:
+  - `pnpm --dir web test -- Keys.test.tsx AppShell.test.tsx` -> 73 passed (Vitest filters matched the full web suite), with existing React `act(...)` warnings.
+  - `pnpm --dir web lint` -> passed.
+  - `pnpm --dir web build` -> passed.
+- Browser smoke:
+  - Vite started at `http://127.0.0.1:5173/`.
+  - gstack browse could navigate once, then repeatedly restarted its server and finally failed with `No available port after 5 attempts in range 10000-60000`, so no reliable screenshot was produced.
+  - Stopped the Vite process started for this check.

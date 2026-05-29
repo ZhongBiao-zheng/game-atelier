@@ -69,6 +69,7 @@ def render(
             _chat_image_payload(
                 prompt=prompt,
                 model=model,
+                n=n,
                 size=kwargs.get("size")
                 or kwargs.get("requested_size")
                 or kwargs.get("params", {}).get("size"),
@@ -80,6 +81,7 @@ def render(
     payload = {
         "model": model,
         "prompt": prompt,
+        "n": max(1, int(n or 1)),
         "size": kwargs.get("size") or kwargs.get("requested_size") or kwargs.get("params", {}).get("size"),
         "response_format": "b64_json",
         "stream": False,
@@ -169,10 +171,12 @@ def _is_openai_hk(base_url: str) -> bool:
     return "openai-hk.com" in urlsplit(base_url).netloc.lower()
 
 
-def _chat_image_payload(*, prompt: str, model: str, size: str | None) -> dict:
+def _chat_image_payload(*, prompt: str, model: str, n: int, size: str | None) -> dict:
     content = prompt
+    if n > 1:
+        content = f"{content}\n\nGenerate {n} images."
     if size:
-        content = f"{prompt}\n\nImage size: {size}"
+        content = f"{content}\n\nImage size: {size}"
     return {
         "model": model,
         "messages": [{"role": "user", "content": content}],

@@ -253,6 +253,8 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     fireEvent.click(screen.getByRole('option', { name: '16:9' }));
     fireEvent.click(screen.getByRole('option', { name: /超清 4K/ }));
+    fireEvent.click(screen.getByRole('button', { name: /选择出图数量/ }));
+    fireEvent.click(screen.getByRole('option', { name: '3 张' }));
 
     const textarea = screen.getByLabelText('生图 prompt');
     fireEvent.change(textarea, { target: { value: '广西南宁城市海报' } });
@@ -270,8 +272,31 @@ describe('Studio', () => {
         ratio: '16:9',
         resolution: '4K',
         size: '4096x2304',
+        n: 3,
       },
     });
+  });
+
+  it('renders image count control beside size and submits the selected count', async () => {
+    renderStudio();
+
+    const sizeButton = await screen.findByRole('button', { name: /选择比例和分辨率/ });
+    const countButton = screen.getByRole('button', { name: /选择出图数量/ });
+    expect(sizeButton.parentElement?.nextElementSibling).toBe(countButton.parentElement);
+
+    fireEvent.click(countButton);
+    expect(screen.getByRole('listbox', { name: '选择出图数量列表' })).toHaveClass('absolute');
+    fireEvent.click(screen.getByRole('option', { name: '4 张' }));
+    expect(countButton).toHaveTextContent('4 张');
+
+    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '四张草图' } });
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body.params.n).toBe(4);
   });
 
   it('submits the same pixel size shown in the size panel', async () => {

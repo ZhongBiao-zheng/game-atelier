@@ -49,6 +49,7 @@ def test_post_studio_job_creates_pending(client):
     assert payload["status"] == "pending"
     assert payload["namespace"] == "studio"
     assert payload["kind"] == "image"
+    assert payload["params"]["n"] == 1
 
 
 def test_post_studio_job_uses_default_alias_when_omitted(client):
@@ -66,6 +67,15 @@ def test_post_studio_job_rejects_video_kind(client):
         "model": "gpt-image-2",
         "params": {},
         "kind": "video",
+    })
+    assert resp.status_code == 422
+
+
+def test_post_studio_job_rejects_out_of_range_image_count(client):
+    resp = client.post("/api/studio/jobs", json={
+        "prompt": "x",
+        "model": "gpt-image-2",
+        "params": {"n": 5},
     })
     assert resp.status_code == 422
 

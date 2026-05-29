@@ -109,11 +109,13 @@ def test_render_openai_provider_posts_to_image_endpoint_and_writes_data_url(
         model="gpt-image-2",
         alias="openai",
         output_dir=tmp_path,
+        n=3,
         size="1024x1024",
     )
 
     assert captured["url"] == "https://api.example.com/v1/images/generations"
     assert captured["payload"]["model"] == "gpt-image-2"
+    assert captured["payload"]["n"] == 3
     assert captured["payload"]["size"] == "1024x1024"
     assert captured["payload"]["response_format"] == "b64_json"
     assert Path(paths[0]).read_bytes() == image_bytes
@@ -169,12 +171,14 @@ def test_render_openai_hk_posts_to_chat_completions_and_downloads_markdown_image
         model="gpt-image-2",
         alias="openai-hk",
         output_dir=tmp_path,
+        n=2,
         size="2048x2048",
     )
 
     assert captured["url"] == "https://api.openai-hk.com/v1/chat/completions"
     assert captured["payload"]["model"] == "gpt-image-2"
     assert captured["payload"]["messages"][-1]["content"].startswith("pixel dog")
+    assert "Generate 2 images." in captured["payload"]["messages"][-1]["content"]
     assert "2048x2048" in captured["payload"]["messages"][-1]["content"]
     assert "Mozilla" in captured["download_user_agent"]
     assert captured["download_stream"] is False

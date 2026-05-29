@@ -12,6 +12,7 @@ export interface RoundConfig {
   ratio?: string;
   resolution?: '2K' | '4K';
   size?: string;
+  n?: number;
   referenceImages: string[];
 }
 
@@ -118,6 +119,7 @@ function DoneBatch({
     round.config.size,
     round.config.ratio,
     round.config.resolution,
+    round.config.n && round.config.n > 1 ? `${round.config.n} 张` : undefined,
   ].filter(Boolean);
 
   return (
@@ -215,7 +217,13 @@ function FailedCard({
 }) {
   const { config } = round;
   const meta = config
-    ? [config.modelName ?? config.model, config.size, config.ratio, config.resolution].filter(Boolean)
+    ? [
+        config.modelName ?? config.model,
+        config.size,
+        config.ratio,
+        config.resolution,
+        config.n && config.n > 1 ? `${config.n} 张` : undefined,
+      ].filter(Boolean)
     : [];
 
   return (

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { createKey, type KeyCreatePayload, type KeyModel } from '@/api/keys';
+import { createKey, patchKey, type KeyCreatePayload, type KeyModel } from '@/api/keys';
 
 type ProviderKind = 'official' | 'third_party' | 'custom';
 type ApiModality = 'image' | 'video' | 'audio' | 'llm';
@@ -37,9 +37,10 @@ interface Props {
   onCreated: (secret: string) => void;
   onCancel: () => void;
   submitLabel?: string;
+  mode?: 'create' | 'edit';
 }
 
-export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }: Props) {
+export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', mode = 'create' }: Props) {
   const [alias, setAlias] = useState(initial?.alias ?? initial?.provider ?? 'openai');
   const [provider, setProvider] = useState(initial?.provider ?? 'openai');
   const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? '');
@@ -52,6 +53,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
   const [urlTest, setUrlTest] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const editing = mode === 'edit';
 
   const changeProvider = (nextProvider: string) => {
     const preset = providerByValue(nextProvider);
@@ -81,7 +83,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
     setError(null);
     try {
       const preset = providerByValue(provider);
-      const result = await createKey({
+      const payload: KeyCreatePayload = {
         alias: usesNamedAlias(provider) ? alias.trim() : provider,
         provider,
         base_url: baseUrl.trim() || null,
@@ -101,8 +103,30 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
           ? routingHints.split(',').map((hint) => hint.trim()).filter(Boolean)
           : [],
         notes: '',
-      });
-      onCreated(result.secret_revealed);
+      };
+      if (editing && initial?.alias) {
+        const patch: Partial<KeyCreatePayload> = {
+          base_url: payload.base_url,
+          access_key: payload.access_key,
+          secret_key: payload.secret_key,
+          capabilities: payload.capabilities,
+          models: payload.models,
+          homepage_url: payload.homepage_url,
+          docs_url: payload.docs_url,
+          api_key_url: payload.api_key_url,
+          modalities: payload.modalities,
+          routing_scope: payload.routing_scope,
+          routing_category: payload.routing_category,
+          routing_hints: payload.routing_hints,
+          notes: payload.notes,
+        };
+        if (!accessKey.trim() || accessKey === initial.access_key) delete patch.access_key;
+        await patchKey(initial.alias, patch);
+        onCreated('');
+      } else {
+        const result = await createKey(payload);
+        onCreated(result.secret_revealed);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -111,7 +135,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
   };
 
   const canSubmit = Boolean(
-    accessKey.trim()
+    (editing || accessKey.trim())
     && (!usesNamedAlias(provider) || alias.trim())
     && (provider !== 'custom' || baseUrl.trim())
     && !saving,
@@ -127,6 +151,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
             value={provider}
             onChange={e => changeProvider(e.target.value)}
             className={fieldClass}
+            disabled={editing}
           >
             {PROVIDER_PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
           </select>
@@ -141,6 +166,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
                 onChange={e => setAlias(e.target.value)}
                 className={fieldClass}
                 placeholder="例如：openrouter-image-main"
+                readOnly={editing}
               />
               <p className="mt-2 text-xs text-muted-foreground">
                 自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。
@@ -244,7 +270,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存' }
             value={accessKey}
             onChange={e => setAccessKey(e.target.value)}
             className={`${fieldClass} font-mono`}
-            placeholder="粘贴 API Key，例如 sk-..."
+            placeholder={editing ? '留空或保持原值表示不修改密钥' : '粘贴 API Key，例如 sk-...'}
             autoComplete="off"
           />
         </div>

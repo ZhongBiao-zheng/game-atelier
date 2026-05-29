@@ -94,6 +94,7 @@ def build_banana_json_payload(
     *,
     prompt: str,
     model: str,
+    n: int,
     aspect_ratio: str | None,
     image_size: str | None,
 ) -> dict[str, Any]:
@@ -102,6 +103,7 @@ def build_banana_json_payload(
     return {
         "prompt": prompt,
         "model": model,
+        "n": max(1, int(n or 1)),
         "aspect_ratio": "1:1" if is_auto else ar,
         "image_size": str(image_size or "2K").upper(),
     }
