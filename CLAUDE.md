@@ -9,7 +9,7 @@
 3. 如果对话涉及具体角色:
    - 从 `.runtime/projects.json::assignments` 解析角色所属 project_id
    - 从 `.runtime/projects.json::projects[].slug` 找到 slug
-   - Read `projects/<slug>/MEMORY.md` + `projects/<slug>/worldview.md`
+   - Read `projects/<slug>/MEMORY.md`
 
 不读 MEMORY 就开始写 prompt / 出图 / 改 spec / 改 Skill 视为违规。
 
