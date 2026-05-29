@@ -218,8 +218,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         load_lessons_global,
         load_lessons_project,
         load_lessons_workspace,
-        load_project_worldview,
-        load_worldview,
+        load_project_memory,
     )
     from character_workflow.lib.draft_processor import process_drafts
     from character_workflow.lib.identity import list_pending_identity_normalizations
@@ -304,8 +303,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         "project_id": project_id,
         "project_slug": project_slug,
         "project_name": project_name,
-        "worldview_workspace": load_worldview(),
-        "worldview_project": load_project_worldview(project_slug),
+        "project_memory": load_project_memory(project_slug),
         "lessons_global": load_lessons_global(kind),
         "lessons_workspace": load_lessons_workspace(kind),
         "lessons_project": load_lessons_project(project_slug, kind),

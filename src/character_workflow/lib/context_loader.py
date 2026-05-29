@@ -192,3 +192,13 @@ def load_project_worldview(slug: str | None) -> str:
     if not path.exists():
         return ""
     return _read_text(path)
+
+
+def load_project_memory(slug: str | None) -> str:
+    """读 projects/<slug>/MEMORY.md 全文，供 turn_start 以 project_memory 字段返回。"""
+    if not slug:
+        return ""
+    path = _project_memory_path(slug)
+    if not path.exists():
+        return ""
+    return _read_text(path)

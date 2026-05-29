@@ -76,10 +76,10 @@ def test_stage_e_lessons_project_empty(stage_e_setup):
     assert result["lessons_project"] == ""
 
 
-def test_stage_e_worldview_project_empty(stage_e_setup):
+def test_stage_e_project_memory_empty(stage_e_setup):
     from character_workflow.lib.turn_start import turn_start
     result = turn_start(kind="portrait", message="出图")
-    assert result["worldview_project"] == ""
+    assert result["project_memory"] == ""
 
 
 def test_stage_d_with_assignment_has_project_slug(stage_e_setup):
@@ -106,4 +106,4 @@ def test_stage_d_with_assignment_has_project_slug(stage_e_setup):
     assert result["project_id"] == "p-1"
     assert result["project_name"] == "Test"
     assert "PROJECT-P" in result["lessons_project"]
-    assert result["worldview_project"] == "PWV"
+    assert "PROJECT-P" in result["project_memory"]

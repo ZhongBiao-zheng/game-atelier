@@ -204,8 +204,7 @@ class TurnStartResult(BaseModel):
     project_id: str | None
     project_slug: str | None
     project_name: str | None
-    worldview_workspace: str
-    worldview_project: str
+    project_memory: str
     lessons_global: str
     lessons_workspace: str
     lessons_project: str
