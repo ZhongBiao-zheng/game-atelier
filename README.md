@@ -1,102 +1,88 @@
 # Game Atelier
 
-游戏角色资产工坊 — Claude Code Plugin + 本地 Web UI，画师可视化管理角色档案与 AI 出图。
+Game Atelier 是给游戏美术和独立游戏团队用的角色资产工作流：Claude Code Skill 负责对话、建档、写 prompt 和提交出图任务，本地 Web UI 负责查看角色、编辑 spec、管理图片与 API Key。
 
 ## 安装
 
-### macOS / Linux
+从 Claude Code 已配置的 marketplace 安装：
 
 ```bash
 claude plugin install game-atelier@claude-community
 ```
 
-首次触发 `/game-atelier:character` 会引导：
-1. 选数据目录（默认 `~/character-workflow/`）
-2. 装 `uv`（如果还没装）
-3. 自动 `uv sync` 装 Python 依赖
-4. 在 Web 上加第一个 API Key
-
-### Windows
-
-```powershell
-claude plugin install game-atelier@claude-community
-```
-
-向导步骤同上。装 `uv` 命令：
-
-```powershell
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-数据目录默认 `C:\Users\<user>\character-workflow\`。
-
-### 开发模式（仓库内）
+如果你拿到的是本地源码包或审核用目录，可以临时加载：
 
 ```bash
-git clone https://github.com/zhengzhongbiao/game-ui-ai-workflow
-cd game-ui-ai-workflow
-make install
-make dev-link
-export CHARACTER_WORKFLOW_DATA_ROOT=$(pwd)
+claude --plugin-dir .
 ```
 
-Dev 模式跳过 onboarding 向导，仓库根直接当 data root。
-
-## 快速开始
-
-### 启动
-
-终端 A — viewer-server：
-```bash
-uv run python src/viewer_server/server.py start
-```
-
-终端 B — 前端（开发模式）：
-```bash
-cd web && pnpm dev
-```
-
-打开浏览器：`http://localhost:5173/`
-
-首次启动会要求选图片存储目录。
-
-### 在 Claude Code 中触发 Skill
-
-安装态命令使用 Plugin namespace：
+安装后使用命名空间命令：
 
 ```text
+/game-atelier:viewer-server
 /game-atelier:character 暗影刺客女
 /game-atelier:promo
 /game-atelier:turnaround
 ```
 
-开发模式通过 `make dev-link` 软链到本仓库时，也可以用短命令：
+## 首次启动
 
-```text
-/character 暗影刺客女
-/promo
-/turnaround
-```
+第一次触发 `/game-atelier:viewer-server` 或 `/game-atelier:character` 时，插件会按顺序检查：
 
-Skill 会读 `characters/<id>/spec.md`、调图像 API 出图、把 jobs 状态写到 `.runtime/jobs/`。
+1. 数据目录：默认 `~/character-workflow/`，Windows 默认 `C:\Users\<user>\character-workflow\`
+2. `uv`：缺失时只显示安装命令，由你手动安装
+3. Python venv：自动在数据目录下创建 `<data_root>/.venv/`
+4. API Key：打开本地 Web UI，引导你在设置页添加第一把图像 API Key
 
-### 工作循环
+数据目录里会保存 `characters/`、`projects/`、`.runtime/`、`.config/keys.json` 和生成图片。卸载插件不会删除这些用户资产。
 
-1. 在 Web 上看图 / 改 spec / 改 prompt / 写反馈
-2. 点保存 → 浏览器自动复制"继续"到剪贴板
-3. 切到 CC 窗口（Cmd+Tab）→ Cmd+V + Enter
-4. Skill 继续下一轮
+## 插件会做什么
+
+- 启动本地 FastAPI viewer-server，只绑定 `127.0.0.1`
+- 在浏览器打开本地 Web UI，用来管理角色、图片、spec 和出图任务
+- 在数据目录创建和更新角色档案、job JSON、运行时状态和 API Key 配置
+- 通过你配置的图像服务 API Key 发起外部出图请求
+- 把生成结果下载到 `<data_root>/characters/<id>/portrait|promo|turnaround/`
+
+API Key 不写入 job patch、turn-start 输出或普通日志；server 日志带 secret redaction filter。
+
+## 工作循环
+
+1. `/game-atelier:viewer-server` 打开 Web UI
+2. `/game-atelier:character 角色名` 创建或继续角色
+3. 在 Web 上查看图片、修改 spec、保存反馈
+4. 回到 Claude Code 继续对话，确认后提交出图
+5. 需要宣传图或三视图时调用 `/game-atelier:promo` 或 `/game-atelier:turnaround`
+
+同一时间只建议打开一个 Web tab。
 
 ## 故障排查
 
-| 现象 | 解决 |
+| 现象 | 处理 |
 |---|---|
-| 端口 5174 被占用 | server 会自动 +1 找空端口，看 `.runtime/server.port` |
-| `server.pid` 残留 | start 命令会自动清理 stale PID |
-| 剪贴板失败 | toast 内显示"手动复制"按钮，点一下即可 |
-| 浏览器不支持 clipboard API | 推荐 Chrome / Edge；Safari 在 HTTPS / localhost 下也可用 |
-| 多 tab 行为异常 | **限制**：同一时间只开一个 tab |
+| `uv` 未安装 | 按插件输出的命令安装后重试 |
+| 端口 5174 被占用 | viewer-server 会自动使用后续空闲端口，端口记录在 `<data_root>/.runtime/server.port` |
+| 旧 `server.pid` 残留 | 启动时会探活并清理 stale PID |
+| Web UI 没打开 | 重新运行 `/game-atelier:viewer-server` |
+| 剪贴板失败 | Web toast 会显示手动复制按钮 |
+| API Key 填错 | 在 Web 设置页更新或删除后重加 |
 
-## 项目结构
+## 本地开发
 
-见 `docs/api-contract.md` 和 `docs/plans/2026-05-15 游戏角色资产工作流-产品形态设计方案-v2.md`。
+仓库开发模式才需要下面这些命令：
+
+```bash
+make install
+make dev-link
+export CHARACTER_WORKFLOW_DATA_ROOT=$(pwd)
+uv run python src/viewer_server/server.py start
+```
+
+发布前检查：
+
+```bash
+cd web && pnpm build
+cd ..
+uv run python scripts/check_plugin.py
+claude plugin validate .
+```

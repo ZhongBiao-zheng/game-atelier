@@ -67,6 +67,15 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 
 关键返回字段：
 
+```json
+{
+  "spec_status": "ready | placeholder | missing",
+  "available_keys": [],
+  "preferred_alias": null,
+  "pending_identity_normalizations": []
+}
+```
+
 | 字段 | 含义 |
 |---|---|
 | `stage` | A/B/C/D/E — 当前流程位置 |
@@ -94,7 +103,13 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 uv run python -m character_workflow rename-character-id <old_id> <recommended_id>
 ```
 
+整理 Web 创建角色时只处理当前角色，不能静默改名，不能批量改无关角色。若用户不同意推荐 id，停下询问新 id。
+
 整理完必须重新 turn-start 刷新 active / recent_chars / pending 队列。
+
+### 跨运行时选择协议
+
+Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先做两级选择：先问大方向，再问细节。不能伪造用户回答，不能把自由文本当成已确认选项；选择会影响 spec_status、角色 id 或出图参数时必须显式确认。
 
 ### Stage 分叉
 

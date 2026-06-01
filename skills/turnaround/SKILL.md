@@ -113,6 +113,8 @@ uv run python -m character_workflow turn-start --kind turnaround
 
 ## 出图流程
 
+默认 `n=1`，画幅固定 1536x1024 横幅。
+
 1. `uv run python -m character_workflow submit --kind turnaround --prompt-file <path> --source-image <path|None>` → 落盘 PENDING_CONFIRM
 2. 终端打确认卡：alias / provider / model / 尺寸 1536×1024 / 参考图 / **完整 prompt 原文**（不得摘要或路径代替）
 3. 画师确认后 → `uv run python -m character_workflow run-job <job_id>`

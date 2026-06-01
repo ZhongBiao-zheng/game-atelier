@@ -117,6 +117,8 @@ uv run python -m character_workflow turn-start --kind promo
 
 ## 出图流程
 
+默认 `n=1`，不沿用立绘旧习惯的多图数量。
+
 1. `uv run python -m character_workflow submit --kind promo --prompt-file <path> --source-image <path|None>` → 落盘 PENDING_CONFIRM（不传 `--model`，画师点名才传）
 2. 终端打确认卡：alias / provider / model / 尺寸 / 参考图 / **完整 prompt 原文**（不得用摘要或路径代替）
 3. 画师确认后 → `uv run python -m character_workflow run-job <job_id>`

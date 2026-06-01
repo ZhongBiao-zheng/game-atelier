@@ -14,6 +14,32 @@ from pathlib import Path
 
 MAX_SIZE_MB = 10
 REQUIRED_TOP_FIELDS = ("name", "version", "description")
+EXCLUDED_TOP_LEVEL = {
+    ".claude",
+    ".config",
+    ".git",
+    ".github",
+    ".gstack",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".runtime",
+    ".venv",
+    "archive",
+    "characters",
+    "memory",
+    "projects",
+    "studio",
+    "tests",
+}
+EXCLUDED_DOC_DIRS = {"plans", "superpowers"}
+EXCLUDED_PARTS = {
+    "__pycache__",
+    "node_modules",
+}
+EXCLUDED_NAMES = {
+    ".DS_Store",
+    "Thumbs.db",
+}
 
 
 def main() -> int:
@@ -59,6 +85,10 @@ def main() -> int:
     if not (repo / "pyproject.toml").exists():
         failures.append("pyproject.toml missing")
 
+    web_dist = repo / "web" / "dist" / "index.html"
+    if not web_dist.exists():
+        failures.append("web/dist/index.html missing; run `cd web && pnpm build` before release")
+
     total = sum(
         f.stat().st_size for f in repo.rglob("*")
         if f.is_file() and not _excluded(repo, f)
@@ -75,11 +105,19 @@ def _excluded(repo: Path, f: Path) -> bool:
         parts = f.relative_to(repo).parts
     except ValueError:
         return True
-    return any(p in (
-        ".git", "node_modules", "__pycache__", ".venv",
-        "characters", ".runtime", "memory", "projects", ".pytest_cache",
-        ".ruff_cache", "dist", "archive", ".DS_Store",
-    ) for p in parts)
+    if not parts:
+        return True
+    if f.name in EXCLUDED_NAMES:
+        return True
+    if parts[0] in EXCLUDED_TOP_LEVEL:
+        return True
+    if any(part in EXCLUDED_PARTS for part in parts):
+        return True
+    if parts[0] == "docs" and len(parts) > 1 and parts[1] in EXCLUDED_DOC_DIRS:
+        return True
+    if parts[0] == "web":
+        return len(parts) > 1 and parts[1] != "dist"
+    return False
 
 
 def _report(failures: list[str]) -> int:
