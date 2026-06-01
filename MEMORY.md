@@ -30,6 +30,7 @@
 ## 开发
 
 - viewer-server 服务 `web/dist`；源码改后必须重 build，浏览器看到旧 UI 先查 dist 时间戳
+- 一键启动 / 后台服务复用不能只信 `server.pid`：PID 活着不等于端口在提供 viewer-server。复用前探活 `/api/config`，端口无响应就清理 `server.pid/server.port` 并重新启动。
 
 ## Spec 格式（2026-05-29 重设计）
 
@@ -38,4 +39,4 @@
 - worldview.md 已废除，内容并入 `projects/<slug>/MEMORY.md`（4 节：世界观/项目规则/角色名册/工作经验）
 - turn-start 返回 `project_memory`（读项目 MEMORY.md 全文），旧 worldview_project/worldview_workspace 已移除
 
-<!-- session-count: 4/5 -->
+<!-- session-count: 0/5 -->
