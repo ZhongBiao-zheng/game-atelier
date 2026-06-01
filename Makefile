@@ -1,8 +1,11 @@
-.PHONY: install dev build test clean dev-link dev-unlink
+.PHONY: install dev studio build test clean dev-link dev-unlink
 
 install:
 	uv sync
 	cd web && pnpm install
+
+studio:
+	@bash scripts/studio.sh
 
 dev:
 	@echo "Start server: uv run python src/viewer_server/server.py start"

@@ -79,13 +79,13 @@ def _spawn_detached(cmd: list[str], *, cwd: str, env: dict[str, str]) -> int:
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
         proc = subprocess.Popen(
             cmd, creationflags=flags,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             cwd=cwd, env=env,
         )
     else:
         proc = subprocess.Popen(
             cmd, start_new_session=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             cwd=cwd, env=env,
         )
     return proc.pid
@@ -129,8 +129,10 @@ def cmd_start(background: bool = False) -> None:
     existing_pid = read_pid(runtime)
     if existing_pid:
         port = read_port(runtime) or DEFAULT_PORT
-        print(f"viewer-server already running (pid={existing_pid}, port={port})")
-        return  # 已在运行 — 跳过重启，也不开浏览器
+        url = f"http://127.0.0.1:{port}/"
+        print(f"工坊已在运行，正在打开浏览器：{url}")
+        cmd_open_browser()
+        return
 
     port = _find_free_port(DEFAULT_PORT)
     write_port(runtime, port)

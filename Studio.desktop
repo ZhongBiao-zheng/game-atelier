@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Character Studio
+Comment=启动角色工坊（构建前端 + 后台服务 + 开浏览器）
+Exec=bash -c 'cd "$(dirname "$(readlink -f "%k")")" && bash scripts/studio.sh; read -rp "按 Enter 关闭..."'
+Terminal=true
+Icon=
+Categories=Graphics;
+StartupNotify=false
