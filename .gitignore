@@ -7,6 +7,10 @@ images/
 *.webp
 *.gif
 
+# 角色数据与项目数据（每个画师本地一份，dev 模式 data root 指向仓库根时产生）
+characters/
+projects/
+
 # Skill 运行时状态（每个画师本地一份）
 .runtime/
 
