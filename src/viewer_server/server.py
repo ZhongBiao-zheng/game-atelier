@@ -7,6 +7,8 @@ import signal
 import socket
 import subprocess
 import sys
+import time
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -118,6 +120,19 @@ def _find_free_port(start: int) -> int:
     raise RuntimeError(f"No free port in range {start}-{start+100}")
 
 
+def _server_responds(port: int) -> bool:
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/config", timeout=0.5):
+            return True
+    except Exception:
+        return False
+
+
+def _clear_server_files(runtime: Path) -> None:
+    (runtime / "server.pid").unlink(missing_ok=True)
+    (runtime / "server.port").unlink(missing_ok=True)
+
+
 def cmd_start(background: bool = False) -> None:
     if not _bootstrap_gate(background):
         sys.exit(1)
@@ -129,17 +144,19 @@ def cmd_start(background: bool = False) -> None:
     existing_pid = read_pid(runtime)
     if existing_pid:
         port = read_port(runtime) or DEFAULT_PORT
-        url = f"http://127.0.0.1:{port}/"
-        print(f"工坊已在运行，正在打开浏览器：{url}")
-        cmd_open_browser()
-        return
+        if _server_responds(port):
+            url = f"http://127.0.0.1:{port}/"
+            print(f"工坊已在运行，正在打开浏览器：{url}")
+            cmd_open_browser()
+            return
+        print(f"检测到旧启动记录但端口未响应，重新启动工坊 (pid={existing_pid}, port={port})")
+        _clear_server_files(runtime)
 
     port = _find_free_port(DEFAULT_PORT)
     write_port(runtime, port)
 
     if background:
         # 后台启动（Skill 调用路径）：非阻塞，只在首次启动时开浏览器
-        import time
         project_root = str(Path(__file__).parent.parent.parent)
         env = os.environ.copy()
         src_path = str(Path(__file__).parent.parent)
