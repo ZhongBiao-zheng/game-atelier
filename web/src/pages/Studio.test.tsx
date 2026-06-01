@@ -493,12 +493,14 @@ describe('Studio', () => {
     fireEvent.click(await screen.findByRole('button', { name: /选择比例和分辨率/ }));
 
     expect(screen.queryByRole('option', { name: '智能' })).not.toBeInTheDocument();
-    expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('grid', 'grid-cols-[56px_1fr]', 'h-[98px]', 'p-1');
+    expect(screen.getByTestId('size-popover')).toHaveClass('w-[320px]', 'p-3', 'ring-1');
+    expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('grid', 'grid-cols-[56px_1fr]', 'h-[98px]', 'w-[296px]', 'p-1');
     expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('h-[90px]', 'w-[56px]', 'text-sm');
-    expect(screen.getByTestId('side-ratio-grid')).toHaveClass('grid-cols-4', 'grid-rows-2');
-    expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('h-[43px]', 'w-[53.5px]', 'text-sm');
+    expect(screen.getByTestId('side-ratio-grid')).toHaveClass('min-w-0', 'grid-cols-4', 'grid-rows-2');
+    expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('h-[43px]', 'w-full', 'text-sm');
     expect(screen.getByRole('listbox', { name: '选择分辨率' })).toHaveClass('h-9', 'p-0.5');
     expect(screen.getByRole('option', { name: /高清 2K/ })).toHaveClass('h-8', 'text-sm');
+    expect(screen.getByLabelText('输出宽度').closest('div')?.parentElement).toHaveClass('w-[296px]');
     expect(screen.getByLabelText('输出宽度')).toHaveClass('text-[12px]', 'tabular-nums');
     expect(screen.getByLabelText('输出高度')).toHaveClass('text-[12px]', 'tabular-nums');
   });

@@ -271,14 +271,14 @@ export function PromptInput({
               <Square size={14} aria-hidden /> {localW}:{localH} <span className="text-muted-foreground">|</span> {resolution === '2K' ? '高清 2K' : '超清 4K'}
             </ControlButton>
             {openPanel === 'size' && (
-              <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-80 max-h-[70vh] overflow-y-auto rounded-2xl border border-border bg-secondary shadow-2xl`}>
-                <div className="p-5 space-y-4">
-                  <section>
+              <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-[320px] max-h-[70vh] overflow-y-auto rounded-2xl bg-secondary p-3 shadow-2xl ring-1 ring-border`}>
+                <div className="space-y-4">
+                  <section className="w-[296px]">
                     <div className="py-1 px-1 text-xs text-muted-foreground">比例</div>
                     <div
                       role="listbox"
                       aria-label="选择比例"
-                      className="grid h-[98px] grid-cols-[56px_1fr] gap-2 rounded-2xl bg-card p-1"
+                      className="grid h-[98px] w-[296px] grid-cols-[56px_1fr] gap-2 rounded-2xl bg-card p-1"
                     >
                       <button
                         type="button"
@@ -290,7 +290,7 @@ export function PromptInput({
                         <RatioIcon ratio="1:1" box={28} />
                         <span>1:1</span>
                       </button>
-                      <div data-testid="side-ratio-grid" className="grid w-[226px] grid-cols-4 grid-rows-2 gap-1">
+                      <div data-testid="side-ratio-grid" className="grid min-w-0 grid-cols-4 grid-rows-2 gap-1">
                         {SIDE_RATIOS.map((item) => (
                           <button
                             key={item}
@@ -298,7 +298,7 @@ export function PromptInput({
                             role="option"
                             aria-selected={ratio === item}
                             onClick={() => handleRatioSelect(item)}
-                            className="flex h-[43px] w-[53.5px] flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                            className="flex h-[43px] w-full flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
                           >
                             <RatioIcon ratio={item} box={18} />
                             <span>{item}</span>
@@ -308,7 +308,7 @@ export function PromptInput({
                     </div>
                   </section>
 
-                  <section>
+                  <section className="w-[296px]">
                     <div className="py-1 px-1 text-xs text-muted-foreground">分辨率</div>
                     <div role="listbox" aria-label="选择分辨率" className="grid h-9 grid-cols-2 gap-1 rounded-2xl bg-card p-0.5">
                       {(['2K', '4K'] as const).map((item) => (
@@ -326,10 +326,10 @@ export function PromptInput({
                     </div>
                   </section>
 
-                  <section>
+                  <section className="w-[296px]">
                     <div className="py-1 px-1 text-xs text-muted-foreground">尺寸</div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex flex-1 items-center h-[34px] rounded-xl bg-card px-4 py-[10px]">
+                    <div className="flex w-[296px] items-center gap-2">
+                      <div className="flex min-w-0 flex-1 items-center h-[34px] rounded-xl bg-card px-4 py-[10px]">
                         <span className="shrink-0 text-[12px] text-muted-foreground">W</span>
                         <input
                           type="number"
@@ -345,11 +345,11 @@ export function PromptInput({
                         aria-label={sizeLocked ? '解除比例锁定' : '锁定比例'}
                         title={sizeLocked ? '解除比例锁定' : '锁定比例'}
                         onClick={handleToggleLock}
-                        className={`shrink-0 rounded transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary ${sizeLocked ? 'text-primary' : 'text-muted-foreground'}`}
+                        className={`grid size-6 shrink-0 place-items-center rounded transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary ${sizeLocked ? 'text-primary' : 'text-muted-foreground'}`}
                       >
                         <Link2 size={15} aria-hidden />
                       </button>
-                      <div className="flex flex-1 items-center h-[34px] rounded-xl bg-card px-4 py-[10px]">
+                      <div className="flex min-w-0 flex-1 items-center h-[34px] rounded-xl bg-card px-4 py-[10px]">
                         <span className="shrink-0 text-[12px] text-muted-foreground">H</span>
                         <input
                           type="number"
