@@ -78,6 +78,8 @@ uv run python -m character_workflow turn-start --kind turnaround
 
 ## 四维度引导
 
+**所有向画师提问都必须用 AskUserQuestion**（出图确认卡除外）。纯文字追问等于没问，画师选项清晰才能继续。
+
 一次问 1-3 个，二选一优先，options 写"工序产出"而非画面元素：
 
 | 维度 | 关键问题 |

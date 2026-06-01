@@ -81,7 +81,7 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 
 | recommend_action | 行为 |
 |---|---|
-| `ask` | AskUserQuestion —— 按 stage 分叉问什么（见下） |
+| `ask` | **必须调用 AskUserQuestion**（带 options）—— 按 stage 分叉问什么（见下） |
 | `render_card` | 写 prompt → submit CLI → 卡片 → 等确认 → run-job |
 | `switch` | `set-active <target>` 后重新 turn-start |
 | `noop` | 退出 turn，不动 file system |
@@ -102,17 +102,26 @@ uv run python -m character_workflow rename-character-id <old_id> <recommended_id
 
 **Stage B**（有项目但 characters/ 为空）：问 1 题：第一个角色名 + 定位（≤20 字）。
 
-**Stage C**（无 active character）：列 `recent_chars` 中每个角色的 `id（tagline）`+ 新建 / 跳过。
+**Stage C**（无 active character）：列 `recent_chars` 中每个角色的 `id（tagline）`+ 新建 / 跳过。用户选定后立即 `set-active <id>` 并重新 turn-start，**不再弹二次确认**，直接进入 Stage D 推断。
 
-**Stage D**（4 选项，裸触发 / 冷启动 / 上轮已闭环）：
-1. 按现 spec 出图
-2. 改 spec
-3. 新建另一个角色
-4. 跳过本轮
+**Stage D**（裸触发 / 冷启动 / 上轮已闭环）：
+
+`recommend_action == ask` 时，**先做资产侦察再提问**，禁止直接展示通用 4 选项：
+
+1. 列出 `<data_root>/characters/<active_id>/` 下各子目录的文件（`portrait/`、`promo/`、`turnaround/`），判断当前已有哪些资产。
+2. 结合 `project_memory` 中的项目规则（如皮肤品质系统、已归档皮肤设计档案）推断最可能的下一步任务。
+3. 直接用有上下文的问题询问，而不是通用菜单。例：
+   - 角色有 portrait/v1.png 且项目有皮肤系统 → "当前项目有绿/蓝/紫/橙四档品质皮肤，要先做董卓的哪档？"
+   - 角色有 portrait 但无 turnaround → "已有立绘，接下来出三视图还是美宣？"
+   - 角色啥都没有 → 按现有流程：问外观设定。
+
+仅在侦察结果完全无法推断时，才退回通用 4 选项（说明为什么无法推断）。
 
 **Stage E**（active 未归属任何项目）：列已有项目 + 新开项目 + 跳过。画师选归属后 `assign-character <active_id> --project <project_id>` 再 turn-start。
 
 ## 写出图 prompt
+
+**所有向画师提问都必须用 AskUserQuestion**（出图确认卡除外）。纯文字追问等于没问，画师选项清晰才能继续。
 
 对话逐项问清：风格档 → 配色 → 镜头 → 视觉锚点。一次问 1-3 个，二选一优先，问清才动笔。
 
