@@ -189,11 +189,28 @@ def ensure_venv() -> int:
     return 0
 
 
+_MEMORY_TEMPLATE = """\
+# game-atelier MEMORY
+
+## 出图通用
+
+## Lovart
+
+## 开发
+
+<!-- session-count: 0/5 -->
+"""
+
+
 def init_data_root(target: Path) -> int:
     """Create the data-root skeleton and write the global config pointer."""
     resolved = target.expanduser().resolve()
     for sub in (".config", ".runtime", "projects", "characters"):
         (resolved / sub).mkdir(parents=True, exist_ok=True)
+
+    memory_file = resolved / "MEMORY.md"
+    if not memory_file.exists():
+        memory_file.write_text(_MEMORY_TEMPLATE, encoding="utf-8")
 
     cfg = global_config_file()
     cfg.parent.mkdir(parents=True, exist_ok=True)

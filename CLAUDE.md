@@ -1,10 +1,15 @@
-# CLAUDE.md
+# CLAUDE.md / AGENTS.md
+
+> 此文件同时服务于 Claude Code 和 Codex。AGENTS.md 是本文件的软链接，两者内容完全一致。
+> 路径差异：Claude Code 使用 `~/.claude/`，Codex 使用 `~/.codex/`。
 
 ## ⚠️ 启动必读 Memory 三层
 
 每次进入本仓库的对话, 你必须先 Read 以下文件 (按顺序), 把内容作为本轮上下文:
 
-1. `~/.claude/MEMORY.md` — 全局跨工作区经验
+1. 全局跨工作区经验：
+   - Claude Code: `~/.claude/MEMORY.md`
+   - Codex: `~/.codex/MEMORY.md`
 2. `MEMORY.md` (仓库根) — 本工作区跨项目通用经验
 3. 如果对话涉及具体角色:
    - 从 `.runtime/projects.json::assignments` 解析角色所属 project_id
@@ -17,7 +22,7 @@
 
 ---
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) and Codex when working with code in this repository.
 
 ## What this project is
 

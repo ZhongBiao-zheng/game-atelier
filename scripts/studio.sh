@@ -3,7 +3,7 @@
 # then auto-opens the browser.
 set -euo pipefail
 
-# Resolve symlinks so this works when called from Studio.command / Studio.desktop
+# Resolve symlinks so this works when called from 一键启动.command / 一键启动.desktop
 _self="${BASH_SOURCE[0]}"
 if command -v realpath &>/dev/null; then
   _self="$(realpath "$_self")"

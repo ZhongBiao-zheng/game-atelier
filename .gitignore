@@ -22,6 +22,8 @@ projects/
 
 # 项目内记忆（个人会话日志，不上线）
 memory/
+MEMORY.md
+worldview.md
 
 # 开发过程文档（设计方案、实施计划、superpowers 日志，仅开发者本地可见）
 docs/plans/
