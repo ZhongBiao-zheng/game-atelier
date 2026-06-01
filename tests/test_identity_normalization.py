@@ -31,7 +31,7 @@ def test_lists_web_created_temp_characters_with_assets(isolated_data_root):
     for sub in ("portrait", "promo", "turnaround", "source"):
         (char / sub).mkdir(parents=True, exist_ok=True)
     (char / "spec.md").write_text(
-        "# 孙尚香\n\n（尚无档案 — 请在终端 /character-workflow 对话补全）\n",
+        "# 孙尚香\n\n（尚无档案 — 请在终端 /game-atelier:character 对话补全）\n",
         encoding="utf-8",
     )
     (char / "source" / "ref.png").write_bytes(b"png")

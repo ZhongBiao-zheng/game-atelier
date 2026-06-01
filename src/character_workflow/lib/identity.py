@@ -44,7 +44,7 @@ def _spec_status(spec: str | None) -> str:
         return "placeholder"
     placeholder_markers = (
         "尚无档案",
-        "请在终端 /character-workflow 对话补全",
+        "请在终端 /game-atelier:character 对话补全",
     )
     if any(marker in stripped for marker in placeholder_markers):
         return "placeholder"

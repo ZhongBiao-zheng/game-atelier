@@ -28,7 +28,7 @@ _RENDER_VERBS_LITERAL = (
 _RENDER_VERSION_RE = re.compile(r"(?<![A-Za-z])v[1-4](?![0-9A-Za-z])", re.IGNORECASE)
 
 _CREATE_KEYWORDS = ("新建", "新角色", "另一个角色")
-_SLASH_CMD_RE = re.compile(r"/character-workflow\s+([\w\-]+)")
+_SLASH_CMD_RE = re.compile(r"/(?:game-atelier:character|character-workflow)\s+([\w\-]+)")
 
 _COLD_START_MINUTES = 30
 

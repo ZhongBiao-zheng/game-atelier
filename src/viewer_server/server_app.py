@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 
 def build_app(dist_dir: Path | None = None) -> FastAPI:
     _install_secret_filter()
-    app = FastAPI(title="game-ui-ai-workflow viewer-server", lifespan=lifespan)
+    app = FastAPI(title="Game Atelier viewer-server", lifespan=lifespan)
     app.include_router(router)
     app.include_router(sse_router)
 

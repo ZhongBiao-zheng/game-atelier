@@ -13,7 +13,7 @@
 
 不读 MEMORY 就开始写 prompt / 出图 / 改 spec / 改 Skill 视为违规。
 
-走 /character-workflow 等 Skill 命令时, Skill 内部已自动加载, 无需重复 Read。
+走 /game-atelier:character 等 Skill 命令时, Skill 内部已自动加载, 无需重复 Read。
 
 ---
 
@@ -21,7 +21,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## What this project is
 
-本仓库是 `game-ui-ai-workflow` **Plugin 源码**。Plugin 通过 `Codex plugins install` 装到用户机器后，安装路径在 `~/.Codex/plugins/game-ui-ai-workflow/`，用户数据在独立的 `<data_root>/`（默认 `~/character-workflow/`，由 `CHARACTER_WORKFLOW_DATA_ROOT` 环境变量覆盖）。
+本仓库是 `game-atelier` **Plugin 源码**。Plugin 通过 `Codex plugins install` 装到用户机器后，安装路径在 `~/.Codex/plugins/game-atelier/`，用户数据在独立的 `<data_root>/`（默认 `~/character-workflow/`，由 `CHARACTER_WORKFLOW_DATA_ROOT` 环境变量覆盖）。
 
 详见 `docs/superpowers/specs/2026-05-22-skill-distribution-design.md` 和 `docs/superpowers/plans/2026-05-22-skill-distribution-impl.md`。
 
@@ -29,7 +29,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 - **viewer-server** (`src/viewer_server/`)：FastAPI，绑死 `127.0.0.1:5174`（被占用自动 +1）。文件读写 + SSE 推送。
 - **web** (`web/`)：Vite + React，dev 在 `5173`，build 落在 `web/dist/`，由 viewer-server 直接挂载。
-- **Skill 套件** (`skills/{character-workflow,character-promo,character-turnaround,viewer-server}/SKILL.md` + `src/character_workflow/` Python lib)：在 CC 里被 `/character-workflow <名>` 等触发，读 `<data_root>/.runtime/draft/`、调 Lovart / OpenAI / ... 出图。
+- **Skill 套件** (`skills/{character,promo,turnaround,viewer-server}/SKILL.md` + `src/character_workflow/` Python lib)：在 CC 里被 `/game-atelier:character <名>` 等触发，读 `<data_root>/.runtime/draft/`、调 Lovart / OpenAI / ... 出图。
 
 ## Dev mode
 
@@ -95,7 +95,7 @@ uv run python src/viewer_server/server.py start     # 终端 A — server
 cd web && pnpm dev                                    # 终端 B — Vite dev
 
 # Skill 软链到 .Codex/skills/（重启 CC 生效）
-make dev-link                                         # 让 /character-workflow 可用
+make dev-link                                         # 让本地 /character 等开发命令可用
 make dev-unlink
 
 # 测试

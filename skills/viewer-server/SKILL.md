@@ -21,7 +21,7 @@ description: 本地 FastAPI server，给 Web UI 提供文件读写 API + SSE 推
 每次触发本 Skill，第一步先判断当前模式：
 
 Dev mode：`uv run python scripts/bootstrap.py --check`
-Installed Plugin mode：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check`
+Installed Plugin mode：`python3 ~/.claude/plugins/game-atelier/scripts/bootstrap.py --check`
 
 按 status 字段分流：
 

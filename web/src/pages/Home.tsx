@@ -62,7 +62,7 @@ export function Home() {
           <p className="mt-3 text-sm text-muted-foreground">
             在终端跑{' '}
             <code className="font-mono text-foreground/80 bg-card px-1.5 py-0.5 rounded">
-              /character-workflow &lt;名字&gt;
+              /game-atelier:character &lt;名字&gt;
             </code>{' '}
             开始第一个角色。
           </p>

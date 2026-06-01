@@ -24,12 +24,12 @@ const TAB_META: Record<TabKind, { label: string; emptyTitle: string; emptyHint: 
   promo: {
     label: '美宣',
     emptyTitle: '等待第一张美宣',
-    emptyHint: '上传源图后在 CC 触发 /character-promo',
+    emptyHint: '上传源图后在 CC 触发 /game-atelier:promo',
   },
   turnaround: {
     label: '三视图',
     emptyTitle: '等待第一张三视图',
-    emptyHint: '上传源图后在 CC 触发 /character-turnaround',
+    emptyHint: '上传源图后在 CC 触发 /game-atelier:turnaround',
   },
 };
 

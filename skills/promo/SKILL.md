@@ -1,10 +1,10 @@
 ---
-name: character-promo
+name: promo
 version: 1.0.0
 description: |
   角色宣传图（KV）生成。基于已有立绘（spec.md + portrait/）引导画师
   补齐场景/情绪/构图/色调/张力后，通过项目内默认 API Key 出图到 characters/<id>/promo/。
-  当用户说"做张美宣"、"出张宣传图"、"出 KV"或调用 /character-promo 时主动使用。
+  当用户说"做张美宣"、"出张宣传图"、"出 KV"或调用 /game-atelier:promo 时主动使用。
   美宣的张力来自充分的场景引导——没问清就出图，画面会平。
 allowed-tools:
   - Bash
@@ -13,7 +13,7 @@ allowed-tools:
   - Edit
   - AskUserQuestion
 triggers:
-  - /character-promo
+  - /game-atelier:promo
   - 做张美宣
   - 出张宣传图
   - 出 KV
@@ -39,7 +39,7 @@ triggers:
 每次触发本 Skill，第一步先判断当前模式：
 
 Dev mode：`uv run python scripts/bootstrap.py --check`
-Installed Plugin mode：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check`
+Installed Plugin mode：`python3 ~/.claude/plugins/game-atelier/scripts/bootstrap.py --check`
 
 按 status 字段分流：`ready` → turn-start | `needs_data_root` → AskUserQuestion 问路径 | `needs_uv` → 显示安装命令，不替用户跑 | `needs_venv` → `<bootstrap.py> --ensure-venv` | `needs_first_key` → 启 viewer-server 引导加 Key | `needs_keys_repair` → 告知 keys.json 损坏
 
@@ -57,7 +57,7 @@ turn-start 返回 `available_keys` 和 `preferred_alias`：
 Turn 起始之前先执行：
 
 Dev：`uv run python src/viewer_server/server.py start --background`
-Plugin：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m viewer_server.server start --background`
+Plugin：`python3 ~/.claude/plugins/game-atelier/scripts/bootstrap.py --run -m viewer_server.server start --background`
 
 ## Turn 起始
 
@@ -134,4 +134,4 @@ job DONE/FAILED 后问画师是否沉淀经验，Y → `uv run python -m charact
 
 ## 跳过条件
 
-git / 代码 / 纯问答；画师还没出过立绘（先 `/character-workflow`）；用户说"先做 spec"。
+git / 代码 / 纯问答；画师还没出过立绘（先 `/game-atelier:character`）；用户说"先做 spec"。

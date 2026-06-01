@@ -1,16 +1,16 @@
-# game-ui-ai-workflow
+# Game Atelier
 
-游戏角色资产工作流 — Claude Code Skill + 本地 Web UI，画师可视化管理角色档案与出图。
+游戏角色资产工坊 — Claude Code Plugin + 本地 Web UI，画师可视化管理角色档案与 AI 出图。
 
 ## 安装
 
 ### macOS / Linux
 
 ```bash
-claude plugins install github:zhengzhongbiao/game-ui-ai-workflow
+claude plugin install game-atelier@claude-community
 ```
 
-首次触发 `/character-workflow` 会引导：
+首次触发 `/game-atelier:character` 会引导：
 1. 选数据目录（默认 `~/character-workflow/`）
 2. 装 `uv`（如果还没装）
 3. 自动 `uv sync` 装 Python 依赖
@@ -19,7 +19,7 @@ claude plugins install github:zhengzhongbiao/game-ui-ai-workflow
 ### Windows
 
 ```powershell
-claude plugins install github:zhengzhongbiao/game-ui-ai-workflow
+claude plugin install game-atelier@claude-community
 ```
 
 向导步骤同上。装 `uv` 命令：
@@ -48,7 +48,7 @@ Dev 模式跳过 onboarding 向导，仓库根直接当 data root。
 
 终端 A — viewer-server：
 ```bash
-uv run python skill/viewer_server/server.py start
+uv run python src/viewer_server/server.py start
 ```
 
 终端 B — 前端（开发模式）：
@@ -62,11 +62,23 @@ cd web && pnpm dev
 
 ### 在 Claude Code 中触发 Skill
 
-```
-/character-workflow 暗影刺客女
+安装态命令使用 Plugin namespace：
+
+```text
+/game-atelier:character 暗影刺客女
+/game-atelier:promo
+/game-atelier:turnaround
 ```
 
-Skill 会读 `characters/<id>.md`、调 Lovart 出图、把 jobs 状态写到 `.runtime/jobs/`。
+开发模式通过 `make dev-link` 软链到本仓库时，也可以用短命令：
+
+```text
+/character 暗影刺客女
+/promo
+/turnaround
+```
+
+Skill 会读 `characters/<id>/spec.md`、调图像 API 出图、把 jobs 状态写到 `.runtime/jobs/`。
 
 ### 工作循环
 

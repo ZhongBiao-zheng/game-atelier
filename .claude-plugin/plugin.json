@@ -1,8 +1,10 @@
 {
-  "name": "game-ui-ai-workflow",
+  "name": "game-atelier",
   "version": "5.0.0",
-  "description": "游戏角色资产工作流 — 画师可视化管理角色档案 + AI 出图",
-  "author": "zhengzhongbiao",
+  "description": "Game Atelier — 游戏角色资产工坊，本地 Web UI + AI 立绘 / KV / 三视图工作流",
+  "author": {
+    "name": "zhengzhongbiao"
+  },
   "homepage": "https://github.com/zhengzhongbiao/game-ui-ai-workflow",
   "skills": "./skills"
 }

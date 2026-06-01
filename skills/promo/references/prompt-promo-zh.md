@@ -27,7 +27,7 @@ consistency_level: `loose`
 
 | 输入项 | 来源 | 缺失时 |
 |---|---|---|
-| spec.md 视觉锚点（全部） | spec.md | 必须先有立绘 spec，否则退回 `/character-workflow` |
+| spec.md 视觉锚点（全部） | spec.md | 必须先有立绘 spec，否则退回 `/game-atelier:character` |
 | `narrative_beat` | 画师要求 | **必填，不允许为空**。"凄美"不是 narrative_beat，"闭眼跪地准备最后一次唤神"才是 |
 | `target_aspect_ratio` | 画师要求 | 必填。见画幅映射表 |
 | `text_zone` | 画师要求 | 默认 `否`。是否预留文案留白区 |

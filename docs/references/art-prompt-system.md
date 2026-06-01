@@ -114,7 +114,7 @@ jobs schema 当前只有单 `source_image` 字段（`--source-image <绝对路�
 | 美宣 | `characters/<id>/portrait/v_latest.png`（必须，保证角色锚定） | reference_image, `full_reference` |
 | 三视图 | `characters/<id>/portrait/v_latest.png`（强制，保证主体不变） | reference_image, `composition_only` |
 
-**美宣 / 三视图的隐式 subject_image 规则**：即使画师没有上传 subject_image，最新立绘也必须作为隐式锚点 —— prompt 第1段必须明确继承 spec 的全部锚点字段（发色/瞳色/服装主色/风格档），等价于"以 spec 描述的角色为 subject_image"。
+**美宣 / 三视图的隐式 subject_image 规则**：即使画师没有上传 subject_image，最新立绘也必须作为隐式锚点。美宣第1段明确继承主体身份；三视图优先按专项规则走参考图简化模式，不展开 spec 全量锚点，只补充视图组合、姿势、基线和逐面结构信息。
 
 ---
 
@@ -147,8 +147,8 @@ jobs schema 当前只有单 `source_image` 字段（`--source-image <绝对路�
 
 | 图类 | 专项规则文件 |
 |---|---|
-| 立绘 | `skills/character-workflow/references/prompt-zh.md` |
-| 美宣 | `skills/character-promo/references/prompt-promo-zh.md` |
-| 三视图 | `skills/character-turnaround/references/prompt-turnaround-zh.md` |
+| 立绘 | `skills/character/references/prompt-zh.md` |
+| 美宣 | `skills/promo/references/prompt-promo-zh.md` |
+| 三视图 | `skills/turnaround/references/prompt-turnaround-zh.md` |
 
 各专项文件继承本文件所有规则，并补充该图类独有的输入协议、段落结构和质量门控。

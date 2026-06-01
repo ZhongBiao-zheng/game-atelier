@@ -1,11 +1,11 @@
 ---
-name: character-workflow
+name: character
 version: 4.2.0
 description: |
   游戏角色资产工作流。承接画师在 Web UI 上的反馈，通过对话逐项问清
   风格/配色/镜头/道具，然后调 Lovart 出中文 prompt 图。
   当用户说"做个角色"、"出张立绘"、"继续角色工作流"或调用
-  /character-workflow 时主动使用。spec 里不出现占位词，
+  /game-atelier:character 时主动使用。spec 里不出现占位词，
   所有缺失信息都通过对话补全，不猜测不假设。
 allowed-tools:
   - Bash
@@ -14,7 +14,7 @@ allowed-tools:
   - Edit
   - AskUserQuestion
 triggers:
-  - /character-workflow
+  - /game-atelier:character
   - 开始角色工作流
   - 做个角色
   - 出张角色立绘
@@ -36,7 +36,7 @@ triggers:
 ## 启动自检（bootstrap）
 
 Dev mode：`uv run python scripts/bootstrap.py --check`
-Installed Plugin mode：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --check`
+Installed Plugin mode：`python3 ~/.claude/plugins/game-atelier/scripts/bootstrap.py --check`
 
 按 status 字段分流：`ready` → turn-start | `needs_data_root` → AskUserQuestion 问路径 | `needs_uv` → 显示安装命令，不替用户跑 | `needs_venv` → `<bootstrap.py> --ensure-venv` | `needs_first_key` → 启 viewer-server 引导加 Key | `needs_keys_repair` → 告知 keys.json 损坏
 
@@ -54,9 +54,9 @@ turn-start 返回 `available_keys` 和 `preferred_alias`：
 Turn 起始之前先执行：
 
 Dev：`uv run python src/viewer_server/server.py start --background`
-Plugin：`python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m viewer_server.server start --background`
+Plugin：`python3 ~/.claude/plugins/game-atelier/scripts/bootstrap.py --run -m viewer_server.server start --background`
 
-Installed Plugin 模式下所有 `uv run python -m character_workflow ...` 命令改为 `python3 ~/.claude/plugins/game-ui-ai-workflow/scripts/bootstrap.py --run -m character_workflow <subcmd>`。
+Installed Plugin 模式下所有 `uv run python -m character_workflow ...` 命令改为 `python3 ~/.claude/plugins/game-atelier/scripts/bootstrap.py --run -m character_workflow <subcmd>`。
 
 ## Turn 起始
 

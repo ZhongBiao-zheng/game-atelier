@@ -1,4 +1,4 @@
-"""Skill #3 character-turnaround 端到端 smoke。
+"""Skill #3 turnaround 端到端 smoke。
 
 Mock lovart_caller.submit_and_wait，验证：
 1. turnaround Job 落盘是 PENDING_CONFIRM + kind=TURNAROUND + source_image 保留
@@ -123,7 +123,7 @@ def test_turnaround_job_does_not_pollute_other_dirs(project):
 
 def test_turnaround_skill_files_exist():
     """Skill #3 的关键文件都得在位，免得 CC 路由进来发现找不到。"""
-    skill_root = Path(__file__).resolve().parent.parent / "skills" / "character-turnaround"
+    skill_root = Path(__file__).resolve().parent.parent / "skills" / "turnaround"
     assert (skill_root / "SKILL.md").exists()
     assert (skill_root / "references" / "personas" / "turnaround-expert.md").exists()
     assert (skill_root / "references" / "prompt-turnaround-zh.md").exists()
@@ -133,7 +133,21 @@ def test_turnaround_skill_md_declares_default_n_one_and_landscape_size():
     """SKILL.md 必须显式声明 n=1 默认 + 1536x1024 横幅，是 turnaround 的关键工程约束。"""
     skill_md = (
         Path(__file__).resolve().parent.parent
-        / "skills" / "character-turnaround" / "SKILL.md"
+        / "skills" / "turnaround" / "SKILL.md"
     ).read_text(encoding="utf-8")
     assert "n=1" in skill_md
     assert "1536" in skill_md and "1024" in skill_md
+
+
+def test_turnaround_prompt_template_prefers_source_image_simplified_mode():
+    """有立绘参考图时，三视图模板应走曹操 v2 式短 prompt，而不是展开全量 spec。"""
+    prompt_doc = (
+        Path(__file__).resolve().parent.parent
+        / "skills" / "turnaround" / "references" / "prompt-turnaround-zh.md"
+    ).read_text(encoding="utf-8")
+
+    assert "曹操 v2" in prompt_doc
+    assert "参考图中的[角色简述]，[风格]" in prompt_doc
+    assert "双臂微微向下倾斜约 15 度的 T-pose" in prompt_doc
+    assert "禁止在第1段展开 spec 全量锚点" in prompt_doc
+    assert "排除：" not in prompt_doc

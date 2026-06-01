@@ -1,4 +1,4 @@
-"""Skill #2 character-promo 端到端 smoke。
+"""Skill #2 promo 端到端 smoke。
 
 Mock lovart_caller.submit_and_wait，验证：
 1. promo Job 落盘是 PENDING_CONFIRM + kind=PROMO + source_image 保留
@@ -118,7 +118,7 @@ def test_promo_job_does_not_pollute_portrait_dir(project, monkeypatch):
 
 def test_promo_skill_files_exist():
     """Skill #2 的关键文件都得在位，免得 CC 路由进来发现找不到。"""
-    skill_root = Path(__file__).resolve().parent.parent / "skills" / "character-promo"
+    skill_root = Path(__file__).resolve().parent.parent / "skills" / "promo"
     assert (skill_root / "SKILL.md").exists()
     assert (skill_root / "references" / "personas" / "promo-expert.md").exists()
     assert (skill_root / "references" / "prompt-promo-zh.md").exists()
@@ -128,6 +128,6 @@ def test_promo_skill_md_declares_default_n_one():
     """SKILL.md 必须显式声明 n=1 默认，避免 character_workflow 旧 'n=4' 习惯漏过来。"""
     skill_md = (
         Path(__file__).resolve().parent.parent
-        / "skills" / "character-promo" / "SKILL.md"
+        / "skills" / "promo" / "SKILL.md"
     ).read_text(encoding="utf-8")
     assert "n=1" in skill_md

@@ -176,7 +176,7 @@ def test_intent_create_when_keyword_in_message():
 def test_intent_switch_when_slash_command_different_id():
     from character_workflow.lib.turn_start import infer_intent
     intent, signal, _ = infer_intent(
-        message="/character-workflow ghost-knight 继续",
+        message="/game-atelier:character ghost-knight 继续",
         drafts=[],
         active_id="holy",
     )
@@ -185,10 +185,10 @@ def test_intent_switch_when_slash_command_different_id():
 
 
 def test_intent_switch_same_id_falls_back_to_new():
-    """/character-workflow holy 但 active 已经是 holy → 不算 switch。"""
+    """/game-atelier:character holy 但 active 已经是 holy → 不算 switch。"""
     from character_workflow.lib.turn_start import infer_intent
     intent, signal, _ = infer_intent(
-        message="/character-workflow holy",
+        message="/game-atelier:character holy",
         drafts=[],
         active_id="holy",
     )
@@ -250,7 +250,7 @@ def test_turn_start_reports_pending_identity_normalizations(project):
     (char / "promo").mkdir()
     (char / "turnaround").mkdir()
     (char / "spec.md").write_text(
-        "# 孙尚香\n\n（尚无档案 — 请在终端 /character-workflow 对话补全）\n",
+        "# 孙尚香\n\n（尚无档案 — 请在终端 /game-atelier:character 对话补全）\n",
         encoding="utf-8",
     )
     (char / "source" / "ref.png").write_bytes(b"png")
@@ -286,7 +286,7 @@ def test_turn_start_reports_pending_identity_normalizations(project):
 
     from character_workflow.lib.turn_start import turn_start
 
-    out = turn_start(message="/character-workflow")
+    out = turn_start(message="/game-atelier:character")
 
     assert out["recommend_action"] == "ask"
     assert "Web 创建的临时角色" in out["recommend_reason"]
@@ -340,7 +340,7 @@ def test_turn_start_marks_placeholder_spec(project):
     chars = project / "characters"
     (chars / "sun").mkdir(parents=True)
     (chars / "sun" / "spec.md").write_text(
-        "# 孙尚香\n\n（尚无档案 — 请在终端 /character-workflow 对话补全）\n",
+        "# 孙尚香\n\n（尚无档案 — 请在终端 /game-atelier:character 对话补全）\n",
         encoding="utf-8",
     )
     runtime = project / ".runtime"

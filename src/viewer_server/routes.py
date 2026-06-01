@@ -282,7 +282,7 @@ _UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10MB
 @router.post("/uploads")
 async def post_upload(file: UploadFile = File(...)) -> dict:
     """画师在 Web 上传源图 → .runtime/uploads/<uuid><ext>。
-    返回的 path 可直接拼到 `/character-promo <id> --upload <path>` 复制命令里，
+    返回的 path 可直接拼到 `/game-atelier:promo <id> --upload <path>` 复制命令里，
     Skill 拿到后将其挪到 characters/<id>/source/。
     """
     raw_name = file.filename or "upload"
@@ -360,7 +360,7 @@ def create_character(payload: CharacterCreate) -> CharacterEntry:
     root = _project_root() / "characters" / char_id
     for sub in ("portrait", "promo", "turnaround", "source"):
         (root / sub).mkdir(parents=True, exist_ok=True)
-    spec_content = f"# {name}\n\n（尚无档案 — 请在终端 /character-workflow 对话补全）\n"
+    spec_content = f"# {name}\n\n（尚无档案 — 请在终端 /game-atelier:character 对话补全）\n"
     (root / "spec.md").write_text(spec_content, encoding="utf-8")
     write_active(char_id)
     return CharacterEntry(id=char_id, name=name, status="idle", latest_job_id=None)

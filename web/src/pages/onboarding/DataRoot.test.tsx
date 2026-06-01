@@ -34,6 +34,6 @@ describe('DataRootPage', () => {
 
   it('shows the platform default as an option', () => {
     render(<DataRootPage onComplete={() => {}} />);
-    expect(screen.getAllByText(/character-workflow/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Game Atelier/)).toBeInTheDocument();
   });
 });

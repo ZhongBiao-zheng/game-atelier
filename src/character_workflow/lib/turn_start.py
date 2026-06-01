@@ -19,7 +19,7 @@ from character_workflow.lib import data_root, keys
 
 # 设计稿 §4.4 关键词清单。本轮写死，后续扩展时再抽到 YAML。
 _NEW_KEYWORDS = ("新建", "新角色", "另一个角色")
-_SLASH_CMD_RE = re.compile(r"/character-workflow\s+([\w\-]+)")
+_SLASH_CMD_RE = re.compile(r"/(?:game-atelier:character|character-workflow)\s+([\w\-]+)")
 
 
 def _runtime_dir() -> Path:
@@ -111,7 +111,7 @@ def infer_intent(
     设计稿 §4.4 规则：
     - drafts 非空 → revise
     - message 含 "新建/新角色/另一个角色" → create
-    - message 含 "/character-workflow <name>" 且 name != active_id → switch
+    - message 含 "/game-atelier:character <name>" 或旧 "/character-workflow <name>" 且 name != active_id → switch
     - 都不匹配 → new（default）
 
     多信号同时命中 → conflict=True, intent=None。
@@ -156,7 +156,7 @@ def _spec_status(spec: str | None) -> str:
         return "placeholder"
     placeholder_markers = (
         "尚无档案",
-        "请在终端 /character-workflow 对话补全",
+        "请在终端 /game-atelier:character 对话补全",
     )
     if any(marker in stripped for marker in placeholder_markers):
         return "placeholder"

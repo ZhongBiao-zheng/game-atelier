@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bootstrap entrypoint for the game-ui-ai-workflow Plugin.
+"""Bootstrap entrypoint for the game-atelier Plugin.
 
 Only stdlib + platformdirs (single pure-Python dep). Runs under system python.
 After venv is built, business logic switches to <data_root>/.venv/python.
@@ -233,7 +233,7 @@ def main() -> int:
     if len(sys.argv) >= 2 and sys.argv[1] == "--run":
         return run_in_venv(sys.argv[2:])
 
-    parser = argparse.ArgumentParser(description="Bootstrap the character-workflow plugin.")
+    parser = argparse.ArgumentParser(description="Bootstrap the game-atelier plugin.")
     parser.add_argument("--check", action="store_true", help="Report current bootstrap state.")
     parser.add_argument(
         "--init-data-root",

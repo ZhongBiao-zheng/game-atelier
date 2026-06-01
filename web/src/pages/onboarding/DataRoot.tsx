@@ -50,7 +50,7 @@ export function DataRootPage({ onComplete }: Props) {
 
   return (
     <div className="max-w-xl mx-auto p-8 space-y-6">
-      <h1 className="text-2xl">第一次使用 character-workflow</h1>
+      <h1 className="text-2xl">第一次使用 Game Atelier</h1>
       <p>你的角色 / 图片 / 项目要存到哪？</p>
       <div className="space-y-2">
         {DEFAULT_PATHS.map(opt => (

@@ -52,7 +52,7 @@ def test_switch_signal_wins(env):
     from character_workflow.lib.intent import compute_recommend_action
     action, reason = compute_recommend_action(
         stage="D",
-        message="/character-workflow another-char 切换",
+        message="/game-atelier:character another-char 切换",
         drafts=[],
         active_age_minutes=1,
         last_job_status=None,
@@ -156,10 +156,10 @@ def test_default_with_empty_message_asks(env):
 
 
 def test_switch_to_same_active_falls_through(env):
-    """/character-workflow X 但 X 已经是 active → 不算 switch"""
+    """/game-atelier:character X 但 X 已经是 active → 不算 switch"""
     from character_workflow.lib.intent import compute_recommend_action
     action, _ = compute_recommend_action(
-        stage="D", message="/character-workflow current",
+        stage="D", message="/game-atelier:character current",
         drafts=[], active_age_minutes=1, last_job_status=None,
         active_id="current",
     )
