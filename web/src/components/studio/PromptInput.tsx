@@ -193,7 +193,7 @@ export function PromptInput({
 
           <div data-testid="provider-control-wrap" className="relative">
             <ControlButton
-              active={openPanel === 'provider'}
+              active={openPanel === 'provider' || Boolean(provider)}
               aria-label="选择厂商"
               onClick={() => setOpenPanel(openPanel === 'provider' ? null : 'provider')}
               disabled={providers.length === 0}
@@ -214,7 +214,7 @@ export function PromptInput({
                       onModelChange?.(item.models[0]?.id ?? '');
                       setOpenPanel(null);
                     }}
-                    className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-card aria-selected:bg-card"
+                    className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-card aria-selected:bg-card aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
                   >
                     <Building2 size={20} aria-hidden />
                     <span className="min-w-0">
@@ -229,7 +229,7 @@ export function PromptInput({
 
           <div data-testid="model-control-wrap" className="relative">
             <ControlButton
-              active={openPanel === 'model'}
+              active={openPanel === 'model' || Boolean(selectedModel)}
               aria-label="选择模型"
               onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
               disabled={!provider || models.length === 0}
@@ -249,7 +249,7 @@ export function PromptInput({
                       onModelChange?.(item.id);
                       setOpenPanel(null);
                     }}
-                    className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-card aria-selected:bg-card"
+                    className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-card aria-selected:bg-card aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
                   >
                     <Box size={22} aria-hidden />
                     <span className="min-w-0">
@@ -264,7 +264,7 @@ export function PromptInput({
 
           <div data-testid="size-control-wrap" className="relative">
             <ControlButton
-              active={openPanel === 'size'}
+              active
               aria-label="选择比例和分辨率"
               onClick={() => setOpenPanel(openPanel === 'size' ? null : 'size')}
             >
@@ -272,7 +272,7 @@ export function PromptInput({
             </ControlButton>
             {openPanel === 'size' && (
               <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-[320px] max-w-[calc(100vw-32px)] max-h-[70vh] overflow-y-auto rounded-2xl border border-border bg-secondary shadow-2xl`}>
-                <div className="p-5 space-y-4">
+                <div className="px-3 py-5 space-y-4">
                   <section>
                     <div className="py-1 px-1 text-xs text-muted-foreground">比例</div>
                     <div
@@ -285,7 +285,7 @@ export function PromptInput({
                         role="option"
                         aria-selected={ratio === '1:1'}
                         onClick={() => handleRatioSelect('1:1')}
-                        className="flex h-[90px] w-[56px] flex-col items-center justify-center gap-2 rounded-xl text-sm hover:bg-secondary aria-selected:bg-secondary transition-colors"
+                        className="flex h-[90px] w-[56px] flex-col items-center justify-center gap-2 rounded-xl text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
                       >
                         <RatioIcon ratio="1:1" box={28} />
                         <span>1:1</span>
@@ -298,7 +298,7 @@ export function PromptInput({
                             role="option"
                             aria-selected={ratio === item}
                             onClick={() => handleRatioSelect(item)}
-                            className="flex h-[43px] w-[53.5px] flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary aria-selected:bg-secondary transition-colors"
+                            className="flex h-[43px] w-[53.5px] flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
                           >
                             <RatioIcon ratio={item} box={18} />
                             <span>{item}</span>
@@ -318,7 +318,7 @@ export function PromptInput({
                           role="option"
                           aria-selected={resolution === item}
                           onClick={() => handleResolutionSelect(item)}
-                          className="h-8 rounded-xl text-center text-sm hover:bg-secondary aria-selected:bg-secondary transition-colors"
+                          className="h-8 rounded-xl text-center text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
                         >
                           {item === '2K' ? '高清 2K' : '超清 4K'}
                         </button>
@@ -328,15 +328,18 @@ export function PromptInput({
 
                   <section>
                     <div className="py-1 px-1 text-xs text-muted-foreground">尺寸</div>
-                    <div className="flex h-9 items-center gap-2 rounded-2xl bg-card p-0.5">
-                      <input
-                        type="number"
-                        aria-label="输出宽度"
-                        value={localW}
-                        min={minPx}
-                        onChange={(e) => handleWChange(e.target.value)}
-                        className="h-8 flex-1 min-w-0 bg-transparent text-center tabular-nums text-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      />
+                    <div className="flex items-center gap-2">
+                      <div className="flex flex-1 items-center h-[34px] rounded-xl bg-card px-4 py-[10px]">
+                        <span className="shrink-0 text-[12px] text-muted-foreground">W</span>
+                        <input
+                          type="number"
+                          aria-label="输出宽度"
+                          value={localW}
+                          min={minPx}
+                          onChange={(e) => handleWChange(e.target.value)}
+                          className="min-w-0 flex-1 bg-transparent text-[12px] tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none py-[7px] pl-2 pr-0"
+                        />
+                      </div>
                       <button
                         type="button"
                         aria-label={sizeLocked ? '解除比例锁定' : '锁定比例'}
@@ -346,15 +349,18 @@ export function PromptInput({
                       >
                         <Link2 size={15} aria-hidden />
                       </button>
-                      <input
-                        type="number"
-                        aria-label="输出高度"
-                        value={localH}
-                        min={minPx}
-                        onChange={(e) => handleHChange(e.target.value)}
-                        className="h-8 flex-1 min-w-0 bg-transparent text-center tabular-nums text-sm focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      />
-                      <span className="shrink-0 pr-3 text-sm text-muted-foreground">PX</span>
+                      <div className="flex flex-1 items-center h-[34px] rounded-xl bg-card px-4 py-[10px]">
+                        <span className="shrink-0 text-[12px] text-muted-foreground">H</span>
+                        <input
+                          type="number"
+                          aria-label="输出高度"
+                          value={localH}
+                          min={minPx}
+                          onChange={(e) => handleHChange(e.target.value)}
+                          className="min-w-0 flex-1 bg-transparent text-[12px] tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none py-[7px] pl-2 pr-0"
+                        />
+                      </div>
+                      <span className="shrink-0 text-[12px] text-muted-foreground">PX</span>
                     </div>
                   </section>
                 </div>
@@ -364,30 +370,36 @@ export function PromptInput({
 
           <div data-testid="count-control-wrap" className="relative">
             <ControlButton
-              active={openPanel === 'count'}
+              active
               aria-label="选择出图数量"
               onClick={() => setOpenPanel(openPanel === 'count' ? null : 'count')}
             >
               <Images size={14} aria-hidden /> {count} 张
             </ControlButton>
             {openPanel === 'count' && (
-              <div role="listbox" aria-label="选择出图数量列表" className={`absolute left-0 ${panelPosition} z-20 w-[160px] rounded-2xl border border-border bg-secondary p-2 shadow-2xl`}>
-                {[1, 2, 3, 4].map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    role="option"
-                    aria-selected={count === item}
-                    onClick={() => {
-                      onCountChange?.(item);
-                      setOpenPanel(null);
-                    }}
-                    className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm hover:bg-card aria-selected:bg-card"
-                  >
-                    <Images size={16} aria-hidden />
-                    <span>{item} 张</span>
-                  </button>
-                ))}
+              <div
+                role="listbox"
+                aria-label="选择出图数量列表"
+                className={`absolute left-0 ${panelPosition} z-20 w-[172px] rounded-2xl border border-border bg-secondary p-3 shadow-2xl`}
+              >
+                <div className="grid grid-cols-4 gap-1 rounded-xl bg-card p-0.5">
+                  {[1, 2, 3, 4].map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      role="option"
+                      aria-selected={count === item}
+                      aria-label={`${item} 张`}
+                      onClick={() => {
+                        onCountChange?.(item);
+                        setOpenPanel(null);
+                      }}
+                      className="h-9 rounded-lg text-center text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>

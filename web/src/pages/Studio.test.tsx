@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
@@ -254,7 +254,7 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('option', { name: '16:9' }));
     fireEvent.click(screen.getByRole('option', { name: /超清 4K/ }));
     fireEvent.click(screen.getByRole('button', { name: /选择出图数量/ }));
-    fireEvent.click(screen.getByRole('option', { name: '3 张' }));
+    fireEvent.click(within(screen.getByRole('listbox', { name: '选择出图数量列表' })).getByRole('option', { name: '3 张' }));
 
     const textarea = screen.getByLabelText('生图 prompt');
     fireEvent.change(textarea, { target: { value: '广西南宁城市海报' } });
@@ -286,7 +286,7 @@ describe('Studio', () => {
 
     fireEvent.click(countButton);
     expect(screen.getByRole('listbox', { name: '选择出图数量列表' })).toHaveClass('absolute');
-    fireEvent.click(screen.getByRole('option', { name: '4 张' }));
+    fireEvent.click(within(screen.getByRole('listbox', { name: '选择出图数量列表' })).getByRole('option', { name: '4 张' }));
     expect(countButton).toHaveTextContent('4 张');
 
     fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '四张草图' } });
@@ -492,6 +492,7 @@ describe('Studio', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /选择比例和分辨率/ }));
 
+    expect(screen.getByTestId('size-popover').firstElementChild).toHaveClass('px-3', 'py-5');
     expect(screen.queryByRole('option', { name: '智能' })).not.toBeInTheDocument();
     expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('grid', 'grid-cols-[56px_1fr]', 'h-[98px]', 'p-1');
     expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('h-[90px]', 'w-[56px]', 'text-sm');
@@ -499,8 +500,8 @@ describe('Studio', () => {
     expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('h-[43px]', 'w-[53.5px]', 'text-sm');
     expect(screen.getByRole('listbox', { name: '选择分辨率' })).toHaveClass('h-9', 'p-0.5');
     expect(screen.getByRole('option', { name: /高清 2K/ })).toHaveClass('h-8', 'text-sm');
-    expect(screen.getByLabelText('输出宽度')).toHaveClass('h-8', 'text-sm');
-    expect(screen.getByLabelText('输出高度')).toHaveClass('h-8', 'text-sm');
+    expect(screen.getByLabelText('输出宽度')).toHaveClass('text-[12px]', 'tabular-nums');
+    expect(screen.getByLabelText('输出高度')).toHaveClass('text-[12px]', 'tabular-nums');
   });
 
   it('highlights prompt control buttons while their popovers are open', async () => {
@@ -517,6 +518,16 @@ describe('Studio', () => {
     const sizeButton = screen.getByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(sizeButton);
     expect(sizeButton).toHaveClass('bg-secondary');
+  });
+
+  it('control buttons show active style by default when values are selected', async () => {
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    expect(screen.getByRole('button', { name: /选择厂商/ })).toHaveClass('bg-secondary');
+    expect(screen.getByRole('button', { name: /选择模型/ })).toHaveClass('bg-secondary');
+    expect(screen.getByRole('button', { name: /选择比例和分辨率/ })).toHaveClass('bg-secondary');
+    expect(screen.getByRole('button', { name: /选择出图数量/ })).toHaveClass('bg-secondary');
   });
 
   it('uses fixed width and row height for provider and model menus', async () => {
