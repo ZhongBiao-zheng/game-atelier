@@ -31,6 +31,12 @@ describe('AppShell', () => {
     expect(screen.getByText('Atelier')).toBeInTheDocument();
   });
 
+  it('hides the brand subtitle until there is room for it', () => {
+    renderAt('/');
+    expect(screen.getByText('· 工作流').className).toContain('hidden');
+    expect(screen.getByText('· 工作流').className).toContain('sm:inline');
+  });
+
   it('highlights 出图 tab on /studio', () => {
     renderAt('/studio');
     const tab = screen.getByText('出图');

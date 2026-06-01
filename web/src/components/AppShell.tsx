@@ -41,7 +41,7 @@ export function AppShell() {
             >
               Atelier
             </span>
-            <span className="text-xs text-muted-foreground">· 工作流</span>
+            <span className="hidden text-xs text-muted-foreground sm:inline">· 工作流</span>
           </Link>
           <nav className="flex min-w-0 max-w-[calc(100vw-9rem)] items-center justify-center gap-1 overflow-x-auto md:max-w-none md:gap-3">
             <NavTab to="/" label="主页" isActive={onHome} icon={HomeIcon} />
