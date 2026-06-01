@@ -23,6 +23,10 @@ projects/
 # 项目内记忆（个人会话日志，不上线）
 memory/
 
+# 开发过程文档（设计方案、实施计划、superpowers 日志，仅开发者本地可见）
+docs/plans/
+docs/superpowers/
+
 # 历史归档（旧设计稿、过时计划、外部 skill 残留等）
 archive/
 
