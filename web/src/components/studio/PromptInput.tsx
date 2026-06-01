@@ -193,7 +193,7 @@ export function PromptInput({
 
           <div data-testid="provider-control-wrap" className="relative">
             <ControlButton
-              active={openPanel === 'provider' || Boolean(provider)}
+              active={openPanel === 'provider'}
               aria-label="选择厂商"
               onClick={() => setOpenPanel(openPanel === 'provider' ? null : 'provider')}
               disabled={providers.length === 0}
@@ -229,7 +229,7 @@ export function PromptInput({
 
           <div data-testid="model-control-wrap" className="relative">
             <ControlButton
-              active={openPanel === 'model' || Boolean(selectedModel)}
+              active={openPanel === 'model'}
               aria-label="选择模型"
               onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
               disabled={!provider || models.length === 0}
@@ -264,15 +264,15 @@ export function PromptInput({
 
           <div data-testid="size-control-wrap" className="relative">
             <ControlButton
-              active
+              active={openPanel === 'size'}
               aria-label="选择比例和分辨率"
               onClick={() => setOpenPanel(openPanel === 'size' ? null : 'size')}
             >
               <Square size={14} aria-hidden /> {localW}:{localH} <span className="text-muted-foreground">|</span> {resolution === '2K' ? '高清 2K' : '超清 4K'}
             </ControlButton>
             {openPanel === 'size' && (
-              <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-[320px] max-w-[calc(100vw-32px)] max-h-[70vh] overflow-y-auto rounded-2xl border border-border bg-secondary shadow-2xl`}>
-                <div className="px-3 py-5 space-y-4">
+              <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-80 max-h-[70vh] overflow-y-auto rounded-2xl border border-border bg-secondary shadow-2xl`}>
+                <div className="p-5 space-y-4">
                   <section>
                     <div className="py-1 px-1 text-xs text-muted-foreground">比例</div>
                     <div
@@ -290,7 +290,7 @@ export function PromptInput({
                         <RatioIcon ratio="1:1" box={28} />
                         <span>1:1</span>
                       </button>
-                      <div data-testid="side-ratio-grid" className="grid grid-cols-4 grid-rows-2 gap-1.5">
+                      <div data-testid="side-ratio-grid" className="grid w-[226px] grid-cols-4 grid-rows-2 gap-1">
                         {SIDE_RATIOS.map((item) => (
                           <button
                             key={item}
@@ -337,7 +337,7 @@ export function PromptInput({
                           value={localW}
                           min={minPx}
                           onChange={(e) => handleWChange(e.target.value)}
-                          className="min-w-0 flex-1 bg-transparent text-[12px] tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none py-[7px] pl-2 pr-0"
+                          className="min-w-0 flex-1 bg-transparent text-[12px] tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pt-[7px] pb-[7px] pl-2 pr-0"
                         />
                       </div>
                       <button
@@ -357,7 +357,7 @@ export function PromptInput({
                           value={localH}
                           min={minPx}
                           onChange={(e) => handleHChange(e.target.value)}
-                          className="min-w-0 flex-1 bg-transparent text-[12px] tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none py-[7px] pl-2 pr-0"
+                          className="min-w-0 flex-1 bg-transparent text-[12px] tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pt-[7px] pb-[7px] pl-2 pr-0"
                         />
                       </div>
                       <span className="shrink-0 text-[12px] text-muted-foreground">PX</span>
@@ -370,36 +370,30 @@ export function PromptInput({
 
           <div data-testid="count-control-wrap" className="relative">
             <ControlButton
-              active
+              active={openPanel === 'count'}
               aria-label="选择出图数量"
               onClick={() => setOpenPanel(openPanel === 'count' ? null : 'count')}
             >
               <Images size={14} aria-hidden /> {count} 张
             </ControlButton>
             {openPanel === 'count' && (
-              <div
-                role="listbox"
-                aria-label="选择出图数量列表"
-                className={`absolute left-0 ${panelPosition} z-20 w-[172px] rounded-2xl border border-border bg-secondary p-3 shadow-2xl`}
-              >
-                <div className="grid grid-cols-4 gap-1 rounded-xl bg-card p-0.5">
-                  {[1, 2, 3, 4].map((item) => (
-                    <button
-                      key={item}
-                      type="button"
-                      role="option"
-                      aria-selected={count === item}
-                      aria-label={`${item} 张`}
-                      onClick={() => {
-                        onCountChange?.(item);
-                        setOpenPanel(null);
-                      }}
-                      className="h-9 rounded-lg text-center text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
-                    >
-                      {item}
-                    </button>
-                  ))}
-                </div>
+              <div role="listbox" aria-label="选择出图数量列表" className={`absolute left-0 ${panelPosition} z-20 flex gap-2 rounded-2xl border border-border bg-secondary p-3 shadow-2xl`}>
+                {[1, 2, 3, 4].map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    role="option"
+                    aria-selected={count === item}
+                    aria-label={String(item)}
+                    onClick={() => {
+                      onCountChange?.(item);
+                      setOpenPanel(null);
+                    }}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-background/30 text-sm font-medium transition-colors hover:bg-card aria-selected:bg-secondary aria-selected:border-primary/60 aria-selected:ring-1 aria-selected:ring-primary/60"
+                  >
+                    {item}
+                  </button>
+                ))}
               </div>
             )}
           </div>

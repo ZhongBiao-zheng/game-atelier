@@ -13,8 +13,8 @@ images/
 # API 密钥与本地配置（绝不进 Git）
 .config/
 
-# viewer-server / Studio 运行时 job 状态
-studio/
+# viewer-server / Studio 运行时 job 状态（只忽略仓库根的 studio/ 目录）
+/studio/
 
 # 项目内记忆（个人会话日志，不上线）
 memory/
