@@ -20,6 +20,8 @@ interface Props {
   onResolutionChange?: (resolution: '2K' | '4K') => void;
   onCountChange?: (count: number) => void;
   onCustomSizeChange?: (w: number, h: number) => void;
+  quality?: 'low' | 'medium' | 'high';
+  onQualityChange?: (quality: 'low' | 'medium' | 'high') => void;
   /** When set, overrides localW/localH after the ratio/resolution effect; keyed to ensure re-runs. */
   sizeOverride?: { key: number; w: number; h: number };
   menuDirection?: 'up' | 'down';
@@ -33,6 +35,19 @@ const PROVIDER_LABELS: Record<string, string> = {
   nano_banana: 'Nano Banana',
   lovart: 'Lovart',
 };
+
+const NANO_BANANA_RATIOS = ['4:3', '3:4', '16:9', '9:16', '2:3', '3:2'] as const;
+type NanoBananaQuality = 'low' | 'medium' | 'high';
+const NANO_BANANA_QUALITY_LABELS: Record<NanoBananaQuality, string> = {
+  low: '低',
+  medium: '中',
+  high: '高',
+};
+
+function isNanoBananaModel(provider?: KeyView, modelId?: string): boolean {
+  if (provider?.provider !== 'nano_banana') return false;
+  return !modelId || modelId.startsWith('nano-banana');
+}
 
 function providerName(provider?: KeyView) {
   if (!provider) return '未配置厂商';
@@ -56,6 +71,8 @@ export function PromptInput({
   onResolutionChange,
   onCountChange,
   onCustomSizeChange,
+  quality = 'medium' as 'low' | 'medium' | 'high',
+  onQualityChange,
   sizeOverride,
   menuDirection = 'up',
 }: Props) {
@@ -83,6 +100,7 @@ export function PromptInput({
   const [localW, setLocalW] = useState(initSize.w);
   const [localH, setLocalH] = useState(initSize.h);
   const [sizeLocked, setSizeLocked] = useState(true);
+  const isNanoBanana = isNanoBananaModel(provider, selectedModel?.id);
   const canSubmit = Boolean(provider && selectedModel && text.trim() && !disabled);
   const panelPosition = menuDirection === 'down'
     ? 'top-full mt-3'
@@ -281,7 +299,11 @@ export function PromptInput({
               aria-label="选择比例和分辨率"
               onClick={() => setOpenPanel(openPanel === 'size' ? null : 'size')}
             >
-              <Square size={14} aria-hidden /> {localW}:{localH} <span className="text-muted-foreground">|</span> {resolution === '2K' ? '高清 2K' : '超清 4K'}
+              <Square size={14} aria-hidden />
+              {isNanoBanana
+                ? <>{ratio} <span className="text-muted-foreground">|</span> {NANO_BANANA_QUALITY_LABELS[quality as NanoBananaQuality] ?? quality}</>
+                : <>{localW}:{localH} <span className="text-muted-foreground">|</span> {resolution === '2K' ? '高清 2K' : '超清 4K'}</>
+              }
             </ControlButton>
             {openPanel === 'size' && (
               <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-[320px] max-h-[70vh] overflow-y-auto rounded-2xl bg-secondary p-3 shadow-2xl ring-1 ring-border`}>
@@ -291,91 +313,136 @@ export function PromptInput({
                     <div
                       role="listbox"
                       aria-label="选择比例"
-                      className="grid h-[98px] w-[296px] grid-cols-[56px_1fr] gap-2 rounded-2xl bg-card p-1"
+                      className="grid rounded-2xl bg-card p-1"
                     >
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={ratio === '1:1'}
-                        onClick={() => handleRatioSelect('1:1')}
-                        className="flex h-[90px] w-[56px] flex-col items-center justify-center gap-2 rounded-xl text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
-                      >
-                        <RatioIcon ratio="1:1" box={28} />
-                        <span>1:1</span>
-                      </button>
-                      <div data-testid="side-ratio-grid" className="grid min-w-0 grid-cols-4 grid-rows-2 gap-1">
-                        {SIDE_RATIOS.map((item) => (
+                      {isNanoBanana ? (
+                        <div className="grid grid-cols-3 gap-1">
+                          {NANO_BANANA_RATIOS.map((item) => (
+                            <button
+                              key={item}
+                              type="button"
+                              role="option"
+                              aria-selected={ratio === item}
+                              onClick={() => handleRatioSelect(item)}
+                              className="flex h-[43px] w-full flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                            >
+                              <RatioIcon ratio={item} box={18} />
+                              <span>{item}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="h-[98px] w-[296px] grid grid-cols-[56px_1fr] gap-2">
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={ratio === '1:1'}
+                            onClick={() => handleRatioSelect('1:1')}
+                            className="flex h-[90px] w-[56px] flex-col items-center justify-center gap-2 rounded-xl text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                          >
+                            <RatioIcon ratio="1:1" box={28} />
+                            <span>1:1</span>
+                          </button>
+                          <div data-testid="side-ratio-grid" className="grid min-w-0 grid-cols-4 grid-rows-2 gap-1">
+                            {SIDE_RATIOS.map((item) => (
+                              <button
+                                key={item}
+                                type="button"
+                                role="option"
+                                aria-selected={ratio === item}
+                                onClick={() => handleRatioSelect(item)}
+                                className="flex h-[43px] w-full flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                              >
+                                <RatioIcon ratio={item} box={18} />
+                                <span>{item}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  {isNanoBanana ? (
+                    <section className="w-[296px]">
+                      <div className="py-1 px-1 text-xs text-muted-foreground">质量</div>
+                      <div role="listbox" aria-label="选择质量" className="grid h-9 grid-cols-3 gap-1 rounded-2xl bg-card p-0.5">
+                        {(['low', 'medium', 'high'] as const).map((item) => (
                           <button
                             key={item}
                             type="button"
                             role="option"
-                            aria-selected={ratio === item}
-                            onClick={() => handleRatioSelect(item)}
-                            className="flex h-[43px] w-full flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                            aria-selected={quality === item}
+                            onClick={() => {
+                              onQualityChange?.(item);
+                              setOpenPanel(null);
+                            }}
+                            className="h-8 rounded-xl text-center text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
                           >
-                            <RatioIcon ratio={item} box={18} />
-                            <span>{item}</span>
+                            {NANO_BANANA_QUALITY_LABELS[item]}
                           </button>
                         ))}
                       </div>
-                    </div>
-                  </section>
+                    </section>
+                  ) : (
+                    <>
+                      <section className="w-[296px]">
+                        <div className="py-1 px-1 text-xs text-muted-foreground">分辨率</div>
+                        <div role="listbox" aria-label="选择分辨率" className="grid h-9 grid-cols-2 gap-1 rounded-2xl bg-card p-0.5">
+                          {(['2K', '4K'] as const).map((item) => (
+                            <button
+                              key={item}
+                              type="button"
+                              role="option"
+                              aria-selected={resolution === item}
+                              onClick={() => handleResolutionSelect(item)}
+                              className="h-8 rounded-xl text-center text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                            >
+                              {item === '2K' ? '高清 2K' : '超清 4K'}
+                            </button>
+                          ))}
+                        </div>
+                      </section>
 
-                  <section className="w-[296px]">
-                    <div className="py-1 px-1 text-xs text-muted-foreground">分辨率</div>
-                    <div role="listbox" aria-label="选择分辨率" className="grid h-9 grid-cols-2 gap-1 rounded-2xl bg-card p-0.5">
-                      {(['2K', '4K'] as const).map((item) => (
-                        <button
-                          key={item}
-                          type="button"
-                          role="option"
-                          aria-selected={resolution === item}
-                          onClick={() => handleResolutionSelect(item)}
-                          className="h-8 rounded-xl text-center text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
-                        >
-                          {item === '2K' ? '高清 2K' : '超清 4K'}
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-
-                  <section className="w-[296px]">
-                    <div className="py-1 px-1 text-xs text-muted-foreground">尺寸</div>
-                    <div className="flex w-[296px] items-center gap-2">
-                      <div className="flex min-w-0 flex-1 items-center h-[34px] rounded-xl bg-card px-4 py-[10px]">
-                        <span className="shrink-0 text-[12px] text-muted-foreground">W</span>
-                        <input
-                          type="number"
-                          aria-label="输出宽度"
-                          value={localW}
-                          min={minPx}
-                          onChange={(e) => handleWChange(e.target.value)}
-                          className="min-w-0 flex-1 bg-transparent text-[12px] tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pt-[7px] pb-[7px] pl-2 pr-0"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        aria-label={sizeLocked ? '解除比例锁定' : '锁定比例'}
-                        title={sizeLocked ? '解除比例锁定' : '锁定比例'}
-                        onClick={handleToggleLock}
-                        className={`grid size-6 shrink-0 place-items-center rounded transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary ${sizeLocked ? 'text-primary' : 'text-muted-foreground'}`}
-                      >
-                        <Link2 size={15} aria-hidden />
-                      </button>
-                      <div className="flex min-w-0 flex-1 items-center h-[34px] rounded-xl bg-card px-4 py-[10px]">
-                        <span className="shrink-0 text-[12px] text-muted-foreground">H</span>
-                        <input
-                          type="number"
-                          aria-label="输出高度"
-                          value={localH}
-                          min={minPx}
-                          onChange={(e) => handleHChange(e.target.value)}
-                          className="min-w-0 flex-1 bg-transparent text-[12px] tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pt-[7px] pb-[7px] pl-2 pr-0"
-                        />
-                      </div>
-                      <span className="shrink-0 text-[12px] text-muted-foreground">PX</span>
-                    </div>
-                  </section>
+                      <section className="w-[296px]">
+                        <div className="py-1 px-1 text-xs text-muted-foreground">尺寸</div>
+                        <div className="flex w-[296px] items-center gap-2">
+                          <div className="flex min-w-0 flex-1 items-center h-[34px] rounded-xl bg-card px-4 py-[10px]">
+                            <span className="shrink-0 text-[12px] text-muted-foreground">W</span>
+                            <input
+                              type="number"
+                              aria-label="输出宽度"
+                              value={localW}
+                              min={minPx}
+                              onChange={(e) => handleWChange(e.target.value)}
+                              className="min-w-0 flex-1 bg-transparent text-[12px] tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pt-[7px] pb-[7px] pl-2 pr-0"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            aria-label={sizeLocked ? '解除比例锁定' : '锁定比例'}
+                            title={sizeLocked ? '解除比例锁定' : '锁定比例'}
+                            onClick={handleToggleLock}
+                            className={`grid size-6 shrink-0 place-items-center rounded transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary ${sizeLocked ? 'text-primary' : 'text-muted-foreground'}`}
+                          >
+                            <Link2 size={15} aria-hidden />
+                          </button>
+                          <div className="flex min-w-0 flex-1 items-center h-[34px] rounded-xl bg-card px-4 py-[10px]">
+                            <span className="shrink-0 text-[12px] text-muted-foreground">H</span>
+                            <input
+                              type="number"
+                              aria-label="输出高度"
+                              value={localH}
+                              min={minPx}
+                              onChange={(e) => handleHChange(e.target.value)}
+                              className="min-w-0 flex-1 bg-transparent text-[12px] tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pt-[7px] pb-[7px] pl-2 pr-0"
+                            />
+                          </div>
+                          <span className="shrink-0 text-[12px] text-muted-foreground">PX</span>
+                        </div>
+                      </section>
+                    </>
+                  )}
                 </div>
               </div>
             )}
