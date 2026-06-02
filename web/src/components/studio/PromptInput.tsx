@@ -233,8 +233,7 @@ export function PromptInput({
         {onReferenceImagesChange && (
           <div
             data-testid="reference-images-panel"
-            className="shrink-0 h-full flex items-center relative"
-            style={{ width: refExpanded ? `${(referenceImages.length + 1) * 62 + 8}px` : '64px', transition: 'width 300ms ease' }}
+            className="shrink-0 w-[64px] h-full flex items-center relative overflow-visible"
             onMouseEnter={() => { if (referenceImages.length > 0) setRefExpanded(true); }}
             onMouseLeave={() => { setRefExpanded(false); setRefHovered(null); }}
           >
@@ -258,18 +257,19 @@ export function PromptInput({
                 <Plus size={18} className="text-muted-foreground" />
               </label>
             ) : (
-              <div className="flex h-full items-center">
+              <>
                 {referenceImages.map((_file, i) => {
                   const hovered = refHovered === i;
                   const stackIdx = referenceImages.length - 1 - i;
                   return (
                     <div
                       key={i}
-                      className="relative shrink-0"
+                      className="absolute top-1/2"
                       style={{
                         zIndex: hovered ? 20 : referenceImages.length - i,
-                        marginLeft: i > 0 ? (refExpanded ? '6px' : '-32px') : 0,
-                        transition: 'margin-left 300ms ease, z-index 0ms',
+                        left: refExpanded ? `${i * 56.5}px` : '0',
+                        marginTop: '-35px',
+                        transition: 'left 300ms ease',
                       }}
                       onMouseEnter={() => setRefHovered(i)}
                       onMouseLeave={() => setRefHovered(null)}
@@ -294,7 +294,9 @@ export function PromptInput({
                         onClick={(e) => { e.stopPropagation(); handleRefRemove(i); }}
                         className="absolute -top-1.5 -right-1.5 z-30 w-[18px] h-[18px] flex items-center justify-center rounded-full bg-card/80 border border-border/40 text-muted-foreground hover:text-foreground hover:bg-card transition-all duration-200"
                         style={{
+                          opacity: hovered ? 1 : 0,
                           transform: hovered ? 'translateY(-6px)' : 'translateY(0)',
+                          pointerEvents: hovered ? 'auto' : 'none',
                         }}
                       >
                         <X size={10} />
@@ -305,14 +307,21 @@ export function PromptInput({
                 {referenceImages.length < 4 && (
                   <label
                     htmlFor={refInputId}
-                    className="shrink-0 flex items-center justify-center rounded-full border border-dashed border-border/60 bg-card/40 cursor-pointer transition-all duration-150 hover:brightness-110 hover:border-primary/50"
-                    style={{ width: 22, height: 22, marginLeft: refExpanded ? '6px' : '-12px', zIndex: 0 }}
+                    className="absolute flex items-center justify-center rounded-full border border-dashed border-border/60 bg-card/40 cursor-pointer transition-all duration-200 hover:brightness-110 hover:border-primary/50"
+                    style={{
+                      width: 22,
+                      height: 22,
+                      zIndex: 30,
+                      top: '50%',
+                      marginTop: 24,
+                      left: refExpanded ? `${(referenceImages.length - 1) * 56.5 + 56.5 - 11}px` : `${56.5 - 11}px`,
+                    }}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Plus size={11} className="text-muted-foreground" />
                   </label>
                 )}
-              </div>
+              </>
             )}
           </div>
         )}
