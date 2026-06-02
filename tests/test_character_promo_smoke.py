@@ -20,7 +20,7 @@ from character_workflow.lib.schemas import AssetSlot, JobStatus
 
 @pytest.fixture
 def project(tmp_path, monkeypatch):
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     runtime = tmp_path / ".runtime"
     (runtime / "jobs").mkdir(parents=True)
     chars = tmp_path / "characters" / "holy"

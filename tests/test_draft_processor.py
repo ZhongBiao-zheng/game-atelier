@@ -8,7 +8,7 @@ from character_workflow.lib.draft_processor import process_drafts
 
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     runtime = tmp_path / ".runtime"
     (runtime / "draft").mkdir(parents=True)
     (runtime / "processing").mkdir()

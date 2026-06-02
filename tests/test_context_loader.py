@@ -11,7 +11,7 @@ from character_workflow.lib import context_loader as cl
 @pytest.fixture
 def project(tmp_path, monkeypatch):
     """切到一个干净的 tmp_path 作为 data root。"""
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     return tmp_path
 

@@ -6,7 +6,7 @@ from character_workflow.lib import projects
 
 @pytest.fixture
 def isolated_project(tmp_path, monkeypatch):
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
@@ -42,7 +42,7 @@ def test_create_project_directory_contains_skeleton(isolated_project):
     p = projects.create_project(name="Hard Mecha")
     project_dir = isolated_project / "projects" / p.slug
     memory_text = (project_dir / "MEMORY.md").read_text(encoding="utf-8")
-    assert "character-workflow" in memory_text
+    assert "game-atelier" in memory_text
     assert "Portrait" in memory_text
     assert "Promo" in memory_text
     assert "Turnaround" in memory_text

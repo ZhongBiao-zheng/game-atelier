@@ -29,14 +29,14 @@ def runtime(tmp_path, monkeypatch):
         "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test", "created_at": "2026-05-19T00:00:00+00:00"}],
         "assignments": {"holy": "p-1"},
     }), encoding="utf-8")
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
 
 def _run_cli(data_root: str) -> dict:
     env = os.environ.copy()
-    env["CHARACTER_WORKFLOW_DATA_ROOT"] = data_root
+    env["GAME_ATELIER_DATA_ROOT"] = data_root
     env["PYTHONPATH"] = f"{REPO_ROOT / 'src'}{os.pathsep}{env.get('PYTHONPATH', '')}"
     out = subprocess.run(
         [sys.executable, "-m", "character_workflow", "turn-start"],

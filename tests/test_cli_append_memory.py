@@ -6,14 +6,14 @@ import pytest
 
 @pytest.fixture
 def cli_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("RUNTIME_DIR", str(tmp_path / ".runtime"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.chdir(tmp_path)
 
     (tmp_path / ".runtime").mkdir()
     (tmp_path / "MEMORY.md").write_text(
-        "# Workspace\n## character-workflow\n### Portrait\n### Promo\n### Turnaround\n",
+        "# Workspace\n## game-atelier\n### Portrait\n### Promo\n### Turnaround\n",
         encoding="utf-8",
     )
     (tmp_path / "home" / ".claude").mkdir(parents=True)
@@ -45,7 +45,7 @@ def test_append_memory_project_scope_with_assignment(cli_env):
     )
     (cli_env / "projects" / "my-game").mkdir(parents=True)
     (cli_env / "projects" / "my-game" / "MEMORY.md").write_text(
-        "# Proj\n## character-workflow\n### Portrait\n### Promo\n### Turnaround\n",
+        "# Proj\n## game-atelier\n### Portrait\n### Promo\n### Turnaround\n",
         encoding="utf-8",
     )
 

@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 def _base_env(data_root: Path) -> dict[str, str]:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
-    env["CHARACTER_WORKFLOW_DATA_ROOT"] = str(data_root)
+    env["GAME_ATELIER_DATA_ROOT"] = str(data_root)
     return env
 
 

@@ -6,22 +6,22 @@ from character_workflow.lib import lessons
 
 @pytest.fixture
 def memory_tree(tmp_path, monkeypatch):
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.chdir(tmp_path)
 
     (tmp_path / "home" / ".claude").mkdir(parents=True)
     (tmp_path / "home" / ".claude" / "MEMORY.md").write_text(
-        "# Global\n## Skills Memory\n### character-workflow\n#### Portrait\n#### Promo\n#### Turnaround\n",
+        "# Global\n## Skills Memory\n### game-atelier\n#### Portrait\n#### Promo\n#### Turnaround\n",
         encoding="utf-8",
     )
     (tmp_path / "MEMORY.md").write_text(
-        "# Workspace\n## character-workflow\n### Portrait\n### Promo\n### Turnaround\n",
+        "# Workspace\n## game-atelier\n### Portrait\n### Promo\n### Turnaround\n",
         encoding="utf-8",
     )
     (tmp_path / "projects" / "my-game").mkdir(parents=True)
     (tmp_path / "projects" / "my-game" / "MEMORY.md").write_text(
-        "# Project\n## character-workflow\n### Portrait\n### Promo\n### Turnaround\n",
+        "# Project\n## game-atelier\n### Portrait\n### Promo\n### Turnaround\n",
         encoding="utf-8",
     )
     return tmp_path
@@ -89,12 +89,12 @@ def test_append_consecutive_lessons_stay_in_order(memory_tree):
 
 def test_append_creates_file_from_scratch(tmp_path, monkeypatch):
     """目标 MEMORY.md 不存在时,append_memory 从零建文件 + headers。"""
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     # 不预先建 MEMORY.md
     lessons.append_memory(kind="portrait", line="- FRESH", scope="workspace")
     text = (tmp_path / "MEMORY.md").read_text(encoding="utf-8")
-    assert "## character-workflow" in text
+    assert "## game-atelier" in text
     assert "### Portrait" in text
     assert "- FRESH" in text
 

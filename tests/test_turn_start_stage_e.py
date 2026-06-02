@@ -6,7 +6,7 @@ import pytest
 
 @pytest.fixture
 def stage_e_setup(tmp_path, monkeypatch):
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.chdir(tmp_path)
 
@@ -28,12 +28,12 @@ def stage_e_setup(tmp_path, monkeypatch):
     )
 
     (tmp_path / "MEMORY.md").write_text(
-        "# Workspace\n## character-workflow\n### Portrait\n- W1\n### Promo\n### Turnaround\n",
+        "# Workspace\n## game-atelier\n### Portrait\n- W1\n### Promo\n### Turnaround\n",
         encoding="utf-8",
     )
     (tmp_path / "home" / ".claude").mkdir(parents=True)
     (tmp_path / "home" / ".claude" / "MEMORY.md").write_text(
-        "# Global\n## Skills Memory\n### character-workflow\n#### Portrait\n- G1\n#### Promo\n#### Turnaround\n",
+        "# Global\n## Skills Memory\n### game-atelier\n#### Portrait\n- G1\n#### Promo\n#### Turnaround\n",
         encoding="utf-8",
     )
     return tmp_path
@@ -94,7 +94,7 @@ def test_stage_d_with_assignment_has_project_slug(stage_e_setup):
     )
     (stage_e_setup / "projects" / "test-slug").mkdir(parents=True)
     (stage_e_setup / "projects" / "test-slug" / "MEMORY.md").write_text(
-        "# Proj\n## character-workflow\n### Portrait\n- PROJECT-P\n### Promo\n### Turnaround\n",
+        "# Proj\n## game-atelier\n### Portrait\n- PROJECT-P\n### Promo\n### Turnaround\n",
         encoding="utf-8",
     )
     (stage_e_setup / "projects" / "test-slug" / "worldview.md").write_text("PWV", encoding="utf-8")

@@ -1,4 +1,4 @@
-"""Smoke test: after migration, key modules read from CHARACTER_WORKFLOW_DATA_ROOT."""
+"""Smoke test: after migration, key modules read from GAME_ATELIER_DATA_ROOT."""
 import json
 
 from character_workflow.lib import data_root

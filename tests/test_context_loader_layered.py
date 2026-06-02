@@ -6,21 +6,21 @@ from character_workflow.lib import context_loader
 
 @pytest.fixture
 def memory_tree(tmp_path, monkeypatch):
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
     (tmp_path / "home" / ".claude").mkdir(parents=True)
     (tmp_path / "home" / ".claude" / "MEMORY.md").write_text(
-        "# Global\n## Skills Memory\n### character-workflow\n#### Portrait\n- GLOBAL-P\n#### Promo\n- GLOBAL-PROMO\n#### Turnaround\n",
+        "# Global\n## Skills Memory\n### game-atelier\n#### Portrait\n- GLOBAL-P\n#### Promo\n- GLOBAL-PROMO\n#### Turnaround\n",
         encoding="utf-8",
     )
     (tmp_path / "MEMORY.md").write_text(
-        "# Workspace\n## character-workflow\n### Portrait\n- WORKSPACE-P\n### Promo\n- WORKSPACE-PROMO\n### Turnaround\n",
+        "# Workspace\n## game-atelier\n### Portrait\n- WORKSPACE-P\n### Promo\n- WORKSPACE-PROMO\n### Turnaround\n",
         encoding="utf-8",
     )
     (tmp_path / "projects" / "my-game").mkdir(parents=True)
     (tmp_path / "projects" / "my-game" / "MEMORY.md").write_text(
-        "# Project\n## character-workflow\n### Portrait\n- PROJECT-P\n### Promo\n### Turnaround\n",
+        "# Project\n## game-atelier\n### Portrait\n- PROJECT-P\n### Promo\n### Turnaround\n",
         encoding="utf-8",
     )
     (tmp_path / "projects" / "my-game" / "worldview.md").write_text(

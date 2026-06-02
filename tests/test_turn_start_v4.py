@@ -10,7 +10,7 @@ import pytest
 def project(tmp_path, monkeypatch):
     """搭一个干净的项目根 + .runtime + characters。"""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     return tmp_path
 
 

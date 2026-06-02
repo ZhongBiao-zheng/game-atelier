@@ -15,7 +15,7 @@ from viewer_server.server_app import build_app
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     chars = tmp_path / "characters"
     chars.mkdir()
     return TestClient(build_app(dist_dir=tmp_path / "dist"))

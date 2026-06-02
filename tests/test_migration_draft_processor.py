@@ -16,7 +16,7 @@ def runtime(tmp_path, monkeypatch):
     chars = tmp_path / "characters" / "shadow"
     chars.mkdir(parents=True)
     (chars / "spec.md").write_text("# shadow", encoding="utf-8")
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     return runtime
 

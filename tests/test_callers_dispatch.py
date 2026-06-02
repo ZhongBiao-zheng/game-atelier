@@ -21,7 +21,7 @@ from character_workflow.lib.keys import KeySpec
 
 @pytest.fixture
 def isolated_keys_db(tmp_path, monkeypatch):
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     (tmp_path / ".runtime").mkdir(parents=True, exist_ok=True)
     return tmp_path
 

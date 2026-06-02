@@ -9,7 +9,7 @@ from character_workflow.lib.active_character import (
 
 @pytest.fixture
 def runtime(tmp_path, monkeypatch):
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     runtime = tmp_path / ".runtime"
     runtime.mkdir()
     monkeypatch.setenv("RUNTIME_DIR", str(runtime))
@@ -40,7 +40,7 @@ def test_overwrite_updates_timestamp(runtime):
 
 def test_write_creates_runtime_dir(tmp_path, monkeypatch):
     fresh = tmp_path / "fresh"
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(fresh))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(fresh))
     write_active("c1")
     assert (fresh / ".runtime" / "active-character.json").exists()
 

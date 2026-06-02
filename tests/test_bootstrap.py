@@ -51,7 +51,7 @@ def test_check_reports_needs_data_root_when_no_config(tmp_path, monkeypatch):
         env_overrides={
             "XDG_CONFIG_HOME": str(tmp_path / "config"),
             "APPDATA": str(tmp_path / "appdata"),
-            "CHARACTER_WORKFLOW_DATA_ROOT": "",
+            "GAME_ATELIER_DATA_ROOT": "",
         },
     )
     assert result.returncode == 0, result.stderr
@@ -65,7 +65,7 @@ def test_check_reports_data_root_when_env_var_set(tmp_path):
     (tmp_path / ".config").mkdir()
     result = run_bootstrap(
         ["--check"],
-        env_overrides={"CHARACTER_WORKFLOW_DATA_ROOT": str(tmp_path)},
+        env_overrides={"GAME_ATELIER_DATA_ROOT": str(tmp_path)},
     )
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout)
@@ -79,7 +79,7 @@ def test_check_needs_uv_when_uv_missing(tmp_path):
     result = run_bootstrap(
         ["--check"],
         env_overrides={
-            "CHARACTER_WORKFLOW_DATA_ROOT": str(tmp_path),
+            "GAME_ATELIER_DATA_ROOT": str(tmp_path),
             "PATH": "",  # so shutil.which("uv") returns None
         },
     )
@@ -94,7 +94,7 @@ def test_check_needs_venv_when_venv_missing(tmp_path):
     (tmp_path / ".config").mkdir()
     result = run_bootstrap(
         ["--check"],
-        env_overrides={"CHARACTER_WORKFLOW_DATA_ROOT": str(tmp_path)},
+        env_overrides={"GAME_ATELIER_DATA_ROOT": str(tmp_path)},
     )
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout)
@@ -109,7 +109,7 @@ def test_check_needs_first_key_when_venv_exists_but_keys_empty(tmp_path):
     _make_fake_venv(tmp_path, hash_matches=True)
     result = run_bootstrap(
         ["--check"],
-        env_overrides={"CHARACTER_WORKFLOW_DATA_ROOT": str(tmp_path)},
+        env_overrides={"GAME_ATELIER_DATA_ROOT": str(tmp_path)},
     )
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout)
@@ -124,7 +124,7 @@ def test_check_needs_keys_repair_when_keys_corrupted(tmp_path):
     (tmp_path / ".config" / "keys.json").write_text("{ not valid json")
     result = run_bootstrap(
         ["--check"],
-        env_overrides={"CHARACTER_WORKFLOW_DATA_ROOT": str(tmp_path)},
+        env_overrides={"GAME_ATELIER_DATA_ROOT": str(tmp_path)},
     )
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout)
@@ -141,7 +141,7 @@ def test_check_returns_ready_when_keys_present(tmp_path):
     )
     result = run_bootstrap(
         ["--check"],
-        env_overrides={"CHARACTER_WORKFLOW_DATA_ROOT": str(tmp_path)},
+        env_overrides={"GAME_ATELIER_DATA_ROOT": str(tmp_path)},
     )
     assert result.returncode == 0, result.stderr
     out = json.loads(result.stdout)
@@ -159,7 +159,7 @@ def test_init_data_root_creates_skeleton(tmp_path):
         env_overrides={
             "XDG_CONFIG_HOME": str(cfg_home),
             "APPDATA": str(cfg_home),
-            "CHARACTER_WORKFLOW_DATA_ROOT": "",
+            "GAME_ATELIER_DATA_ROOT": "",
         },
     )
     assert result.returncode == 0, result.stderr
@@ -204,7 +204,7 @@ def test_ensure_venv_creates_venv_and_writes_hash(tmp_path):
     result = run_bootstrap(
         ["--ensure-venv"],
         env_overrides={
-            "CHARACTER_WORKFLOW_DATA_ROOT": str(data_root),
+            "GAME_ATELIER_DATA_ROOT": str(data_root),
             "PATH": f"{fake_bin}:{os.environ.get('PATH', '')}",
         },
     )
@@ -221,7 +221,7 @@ def test_ensure_venv_fails_without_data_root(tmp_path):
     result = run_bootstrap(
         ["--ensure-venv"],
         env_overrides={
-            "CHARACTER_WORKFLOW_DATA_ROOT": "",
+            "GAME_ATELIER_DATA_ROOT": "",
             "XDG_CONFIG_HOME": str(tmp_path / "config"),
             "APPDATA": str(tmp_path / "appdata"),
         },
@@ -239,7 +239,7 @@ def test_ensure_venv_fails_without_uv(tmp_path):
     result = run_bootstrap(
         ["--ensure-venv"],
         env_overrides={
-            "CHARACTER_WORKFLOW_DATA_ROOT": str(data_root),
+            "GAME_ATELIER_DATA_ROOT": str(data_root),
             "PATH": "",
         },
     )
@@ -256,7 +256,7 @@ def test_init_data_root_writes_global_config(tmp_path):
         env_overrides={
             "XDG_CONFIG_HOME": str(cfg_home),
             "APPDATA": str(cfg_home),
-            "CHARACTER_WORKFLOW_DATA_ROOT": "",
+            "GAME_ATELIER_DATA_ROOT": "",
         },
     )
     assert result.returncode == 0, result.stderr
@@ -274,7 +274,7 @@ def test_run_fails_when_no_data_root(tmp_path):
         env_overrides={
             "XDG_CONFIG_HOME": str(tmp_path / "cfg"),
             "APPDATA": str(tmp_path / "cfg"),
-            "CHARACTER_WORKFLOW_DATA_ROOT": "",
+            "GAME_ATELIER_DATA_ROOT": "",
         },
     )
     assert result.returncode != 0
@@ -287,7 +287,7 @@ def test_run_fails_when_venv_missing(tmp_path):
     (data_root / ".config").mkdir()
     result = run_bootstrap(
         ["--run", "-c", "print('hi')"],
-        env_overrides={"CHARACTER_WORKFLOW_DATA_ROOT": str(data_root)},
+        env_overrides={"GAME_ATELIER_DATA_ROOT": str(data_root)},
     )
     assert result.returncode != 0
     assert "venv not built" in result.stdout
@@ -311,7 +311,7 @@ def test_run_forwards_to_venv_python(tmp_path):
         venv_py.symlink_to(sys.executable)
     result = run_bootstrap(
         ["--run", "-c", "print('forwarded')"],
-        env_overrides={"CHARACTER_WORKFLOW_DATA_ROOT": str(data_root)},
+        env_overrides={"GAME_ATELIER_DATA_ROOT": str(data_root)},
     )
     assert result.returncode == 0, result.stderr
     assert "forwarded" in result.stdout

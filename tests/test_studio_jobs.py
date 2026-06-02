@@ -12,7 +12,7 @@ _FAKE_CREATED_AT = "2026-05-25T00:00:00+00:00"
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     # Write a valid keys.json (KeySpec requires access_key + created_at)
     keys_dir = tmp_path / ".config"
     keys_dir.mkdir()
@@ -83,7 +83,7 @@ def test_post_studio_job_rejects_out_of_range_image_count(client):
 def test_studio_job_writes_to_studio_namespace_path(tmp_path, monkeypatch):
     """studio_output_dir(job_id) returns <data_root>/studio/<job_id>/."""
     from character_workflow.lib.studio_jobs import studio_output_dir
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     out = studio_output_dir("job-test-xyz")
     assert out == tmp_path / "studio" / "job-test-xyz"
 

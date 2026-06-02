@@ -14,7 +14,7 @@ def client(tmp_path, monkeypatch):
     dist.mkdir(parents=True)
     (dist / "index.html").write_text("<html><body>spa</body></html>")
     (dist / "assets").mkdir()  # ensure StaticFiles mount activates
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     app = build_app(dist_dir=dist)
     return TestClient(app)
 

@@ -29,7 +29,7 @@ def test_post_data_root_writes_global_config(client, tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg_home))
     monkeypatch.setenv("APPDATA", str(cfg_home))
     # Clear the data-root override so bootstrap writes to global config
-    monkeypatch.setenv("CHARACTER_WORKFLOW_DATA_ROOT", "")
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", "")
     resp = client.post("/api/onboarding/data-root", json={"path": str(new_root)})
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -37,7 +37,7 @@ def test_post_data_root_writes_global_config(client, tmp_path, monkeypatch):
     assert new_root.exists()
     for sub in (".config", ".runtime", "projects", "characters"):
         assert (new_root / sub).is_dir()
-    assert os.environ["CHARACTER_WORKFLOW_DATA_ROOT"] == str(new_root.resolve())
+    assert os.environ["GAME_ATELIER_DATA_ROOT"] == str(new_root.resolve())
 
 
 def test_post_data_root_validates_payload(client):
