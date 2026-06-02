@@ -6,9 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 
-interface Props { jobId: string; path: string; onBack: () => void }
+interface Props { jobId: string; path: string; onBack: () => void; onLightbox?: (src: string) => void }
 
-export function ImageDetail({ jobId, path, onBack }: Props) {
+export function ImageDetail({ jobId, path, onBack, onLightbox }: Props) {
   const [job, setJob] = useState<Job | null>(null);
   const [patch, setPatch] = useState<WebEditableJobPatch>({});
   const [toast, setToast] = useState<string | null>(null);
@@ -96,7 +96,8 @@ export function ImageDetail({ jobId, path, onBack }: Props) {
             <img
               src={`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`}
               alt="大图"
-              className="max-h-[68vh] max-w-full object-contain rounded-lg shadow-[0_8px_40px_-10px_rgba(0,0,0,0.6)] border border-border/40"
+              onClick={() => onLightbox?.(`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`)}
+              className="max-h-[68vh] max-w-full object-contain rounded-lg shadow-[0_8px_40px_-10px_rgba(0,0,0,0.6)] border border-border/40 cursor-zoom-in"
             />
           </div>
         </div>

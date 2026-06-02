@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { X } from 'lucide-react';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CharacterGallery } from './components/CharacterGallery';
 import { ImageDetail } from './components/ImageDetail';
@@ -40,6 +41,37 @@ export function MainApp({ routedCharacterId, routedAssetSlot, routedImageDetail 
         routedAssetSlot={routedAssetSlot}
         routedImageDetail={routedImageDetail}
       />
+    </div>
+  );
+}
+
+function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <img
+        src={src}
+        alt="大图"
+        className="max-h-[90vh] max-w-[90vw] rounded-lg shadow-2xl object-contain"
+        onClick={e => e.stopPropagation()}
+      />
+      <button
+        type="button"
+        aria-label="关闭"
+        onClick={onClose}
+        className="absolute right-6 top-6 size-10 rounded-full bg-black/60 text-white grid place-items-center hover:bg-black/80 backdrop-blur-sm border-0"
+      >
+        <X className="size-5" />
+      </button>
     </div>
   );
 }
@@ -92,37 +124,42 @@ function ThreeColumnLayout({
     return () => { cancelled = true; };
   }, [selected]);
 
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const detailMode = detailJob !== null;
   return (
-    <div className={cn(
-      'grid h-full',
-      detailMode
-        ? 'grid-cols-[280px_360px_1fr]'
-        : 'grid-cols-[280px_1fr]',
-    )}>
-      <LeftSidebar
-        sseSignal={sseSignal}
-        selectedId={selected?.id}
-        onSelect={(id, name) => setSelected({ id, name })}
-        onDelete={(id) => {
-          if (selected?.id === id) setSelected(null);
-        }}
-      />
-      <CharacterGallery
-        characterId={selected?.id ?? null}
-        characterName={selected?.name ?? null}
-        initialTab={routedAssetSlot}
-        detailMode={detailMode}
-        onSelectImage={(path, jobId) => setDetailJob({ path, jobId })}
-        sseSignal={sseSignal}
-      />
-      {detailJob === null
-        ? null
-        : <ImageDetail
-            jobId={detailJob.jobId}
-            path={detailJob.path}
-            onBack={() => setDetailJob(null)}
-          />}
-    </div>
+    <>
+      <div className={cn(
+        'grid h-full',
+        detailMode
+          ? 'grid-cols-[280px_360px_1fr]'
+          : 'grid-cols-[280px_1fr]',
+      )}>
+        <LeftSidebar
+          sseSignal={sseSignal}
+          selectedId={selected?.id}
+          onSelect={(id, name) => setSelected({ id, name })}
+          onDelete={(id) => {
+            if (selected?.id === id) setSelected(null);
+          }}
+        />
+        <CharacterGallery
+          characterId={selected?.id ?? null}
+          characterName={selected?.name ?? null}
+          initialTab={routedAssetSlot}
+          detailMode={detailMode}
+          onSelectImage={(path, jobId) => setDetailJob({ path, jobId })}
+          sseSignal={sseSignal}
+        />
+        {detailJob === null
+          ? null
+          : <ImageDetail
+              jobId={detailJob.jobId}
+              path={detailJob.path}
+              onBack={() => setDetailJob(null)}
+              onLightbox={setLightboxSrc}
+            />}
+      </div>
+      {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+    </>
   );
 }

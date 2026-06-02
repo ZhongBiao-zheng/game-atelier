@@ -1,4 +1,4 @@
-import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useState } from 'react';
+import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUp, Box, ImageIcon, Images, Square, Building2, Link2 } from 'lucide-react';
 import type { KeyView } from '@/api/keys';
 import { computeStudioPixelSize, normalizeStudioPixelSizeForProvider } from '@/lib/studioSize';
@@ -63,6 +63,18 @@ export function PromptInput({
   const text = value ?? internalText;
   const setText = onValueChange ?? setInternalText;
   const [openPanel, setOpenPanel] = useState<'provider' | 'model' | 'size' | 'count' | null>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!openPanel) return;
+    function handleMouseDown(e: MouseEvent) {
+      if (shellRef.current && !shellRef.current.contains(e.target as Node)) {
+        setOpenPanel(null);
+      }
+    }
+    document.addEventListener('mousedown', handleMouseDown);
+    return () => document.removeEventListener('mousedown', handleMouseDown);
+  }, [openPanel]);
   const provider = providers.find((item) => item.alias === providerAlias) ?? providers[0];
   const providerDisplayName = providerName(provider);
   const models = provider?.models ?? [];
@@ -174,6 +186,7 @@ export function PromptInput({
 
   return (
     <div
+      ref={shellRef}
       data-testid="studio-prompt-shell"
       className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl min-h-[174px] h-auto flex flex-col gap-3"
     >

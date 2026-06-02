@@ -76,9 +76,18 @@ export function RoundList({
                         aria-busy="true"
                         className="aspect-square w-[251.5px] bg-card/40 rounded-lg flex items-center justify-center"
                       >
-                        {i === 0 && <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />}
+                        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                       </div>
                     ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <ActionButton onClick={() => onReEdit?.(r.config)}>重新编辑</ActionButton>
+                    <ActionButton onClick={() => { void onRegenerate?.(r.config); }}>再次生成</ActionButton>
+                    {r.jobId && onDeleteFailed && (
+                      <ActionButton compact aria-label="删除出图记录" title="删除出图记录" onClick={() => { void onDeleteFailed(r.jobId!); }}>
+                        <Trash2 className="size-4" />
+                      </ActionButton>
+                    )}
                   </div>
                 </section>
               )}
