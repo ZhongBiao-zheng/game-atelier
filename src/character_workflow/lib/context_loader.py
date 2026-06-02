@@ -135,7 +135,7 @@ def _extract_kind_section(text: str, kind: str, depth: int) -> str:
     """从 MEMORY.md 文本里抽出指定 kind 的 section 内容。
 
     depth = 3 时找 `### {Kind}`（工作区 / 项目层）
-    depth = 4 时找 `#### {Kind}`（全局层，在 ## Skills Memory > ### character-workflow 下）
+    depth = 4 时找 `#### {Kind}`（全局层，在 ## Skills Memory > ### game-atelier 下）
     遇到同级或更高级别 header 时停止 capture；深度更深的 header 不停。
     """
     if not text:

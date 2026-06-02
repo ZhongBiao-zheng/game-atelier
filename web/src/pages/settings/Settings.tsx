@@ -5,7 +5,7 @@ import { chooseFolder } from '@/api/folders';
 import { fetchOnboardingStatus, setDataRoot } from '@/api/onboarding';
 import { KeysPage } from './Keys';
 
-const DEFAULT_ROOT = '~/character-workflow';
+const DEFAULT_ROOT = '~/game-atelier';
 
 export function SettingsPage() {
   const [dataRoot, setDataRootInput] = useState('');
@@ -46,7 +46,7 @@ export function SettingsPage() {
     setMessage(null);
     setError(null);
     try {
-      const picked = await chooseFolder('选择项目文件夹', dataRoot || DEFAULT_ROOT);
+      const picked = await chooseFolder('选择存放文件夹', dataRoot || DEFAULT_ROOT);
       if (picked) setDataRootInput(picked);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

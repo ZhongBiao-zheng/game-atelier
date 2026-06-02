@@ -1,4 +1,4 @@
-"""character-workflow CLI — v4 turn-start：file system stage + 画师意图推断。
+"""game-atelier CLI — v4 turn-start：file system stage + 画师意图推断。
 
 用法：
   python -m skill.character_workflow turn-start [--kind portrait|promo|turnaround] [--message "..."]
@@ -178,7 +178,7 @@ def _append_memory(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="character-workflow")
+    parser = argparse.ArgumentParser(prog="game-atelier")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_turn = sub.add_parser("turn-start", help="v4: 探 stage + 推 intent + 拉上下文")

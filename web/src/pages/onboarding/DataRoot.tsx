@@ -7,10 +7,10 @@ interface Props {
 }
 
 const DEFAULT_PATHS = [
-  { label: '~/character-workflow/（推荐）', value: '~/character-workflow' },
+  { label: '~/game-atelier/（推荐）', value: '~/game-atelier' },
   {
-    label: '~/Documents/character-workflow/（iCloud / OneDrive 同步）',
-    value: '~/Documents/character-workflow',
+    label: '~/Documents/game-atelier/（iCloud / OneDrive 同步）',
+    value: '~/Documents/game-atelier',
   },
 ];
 
@@ -37,7 +37,7 @@ export function DataRootPage({ onComplete }: Props) {
     setChoosing(true);
     setError(null);
     try {
-      const picked = await chooseFolder('选择项目文件夹', path || DEFAULT_PATHS[0].value);
+      const picked = await chooseFolder('选择存放文件夹', path || DEFAULT_PATHS[0].value);
       if (picked) setPath(picked);
     } catch (e) {
       setError(String(e));

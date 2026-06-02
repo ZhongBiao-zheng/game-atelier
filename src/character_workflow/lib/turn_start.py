@@ -6,7 +6,7 @@
 - infer_intent(message, drafts, active_id) → (intent, signal, conflict)：stage D 意图推断
 - turn_start(kind, message) → dict：编排器，组装 v4 JSON
 
-文件路径全部走 data_root 抽象（CHARACTER_WORKFLOW_DATA_ROOT 环境变量驱动），方便测试 monkeypatch。
+文件路径全部走 data_root 抽象（GAME_ATELIER_DATA_ROOT 环境变量驱动），方便测试 monkeypatch。
 """
 from __future__ import annotations
 

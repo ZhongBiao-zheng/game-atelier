@@ -554,7 +554,7 @@ def set_data_root(payload: _DataRootPayload) -> dict:
         raise HTTPException(500, f"init-data-root failed: {proc.stderr}")
     body = json.loads(proc.stdout)
     if root := body.get("data_root"):
-        os.environ["CHARACTER_WORKFLOW_DATA_ROOT"] = root
+        os.environ["GAME_ATELIER_DATA_ROOT"] = root
     return body
 
 

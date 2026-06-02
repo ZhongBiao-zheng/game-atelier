@@ -6,8 +6,8 @@ from pathlib import Path
 
 import platformdirs
 
-_APP_NAME = "character-workflow"
-_ENV_VAR = "CHARACTER_WORKFLOW_DATA_ROOT"
+_APP_NAME = "game-atelier"
+_ENV_VAR = "GAME_ATELIER_DATA_ROOT"
 
 
 def _global_config_file() -> Path:
@@ -22,7 +22,7 @@ def resolve_data_root() -> Path:
         text = cfg.read_text().strip()
         if text:
             return Path(text).expanduser().resolve()
-    return (Path.home() / _APP_NAME).resolve()
+    return (Path.home() / "game-atelier").resolve()
 
 
 def config_dir() -> Path:

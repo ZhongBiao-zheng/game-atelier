@@ -4,9 +4,9 @@
 单行 `open("a")` 是原子的。
 
 scope:
-- "global"     → ~/.claude/MEMORY.md 下 `## Skills Memory > ### character-workflow > #### {Kind}` section
-- "workspace"  → 仓库根 MEMORY.md 下 `## character-workflow > ### {Kind}` section
-- "project"    → projects/<slug>/MEMORY.md 下 `## character-workflow > ### {Kind}` section
+- "global"     → ~/.claude/MEMORY.md 下 `## Skills Memory > ### game-atelier > #### {Kind}` section
+- "workspace"  → 仓库根 MEMORY.md 下 `## game-atelier > ### {Kind}` section
+- "project"    → projects/<slug>/MEMORY.md 下 `## game-atelier > ### {Kind}` section
 
 不存在的 section header 会被自动建。
 
@@ -57,8 +57,8 @@ def _section_headers(scope: str, kind: str) -> list[str]:
     """返回需要存在的 header 链(从外到内)。"""
     kind_title = _KIND_TITLE[kind]
     if scope == "global":
-        return ["## Skills Memory", "### character-workflow", f"#### {kind_title}"]
-    return ["## character-workflow", f"### {kind_title}"]
+        return ["## Skills Memory", "### game-atelier", f"#### {kind_title}"]
+    return ["## game-atelier", f"### {kind_title}"]
 
 
 def _ensure_section(path: Path, headers: list[str]) -> None:

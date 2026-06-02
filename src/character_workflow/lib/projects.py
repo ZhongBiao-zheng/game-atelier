@@ -51,7 +51,7 @@ def _write(file: ProjectsFile) -> ProjectsFile:
 
 _MEMORY_SKELETON = """# {name} MEMORY (项目级)
 
-## character-workflow
+## game-atelier
 
 ### Portrait
 

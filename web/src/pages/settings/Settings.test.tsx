@@ -27,13 +27,13 @@ beforeEach(() => {
     if (url === '/api/onboarding/data-root') {
       return Promise.resolve({
         ok: true,
-        json: async () => ({ data_root: '/Users/me/character-workflow' }),
+        json: async () => ({ data_root: '/Users/me/game-atelier' }),
       } as Response);
     }
     if (url === '/api/folder-picker') {
       return Promise.resolve({
         ok: true,
-        json: async () => ({ path: '/Users/me/character-workflow' }),
+        json: async () => ({ path: '/Users/me/game-atelier' }),
       } as Response);
     }
     return Promise.resolve({ ok: true, json: async () => ({}) } as Response);
@@ -53,7 +53,7 @@ describe('SettingsPage', () => {
     expect(input).toHaveValue('/Users/me/game-atelier');
 
     fireEvent.click(screen.getByRole('button', { name: /选择文件夹/ }));
-    await waitFor(() => expect(input).toHaveValue('/Users/me/character-workflow'));
+    await waitFor(() => expect(input).toHaveValue('/Users/me/game-atelier'));
     fireEvent.click(screen.getByRole('button', { name: /保存/ }));
 
     await waitFor(() => {
@@ -61,7 +61,7 @@ describe('SettingsPage', () => {
         '/api/onboarding/data-root',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ path: '/Users/me/character-workflow' }),
+          body: JSON.stringify({ path: '/Users/me/game-atelier' }),
         }),
       );
     });

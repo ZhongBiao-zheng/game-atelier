@@ -16,8 +16,8 @@ from pathlib import Path
 
 import platformdirs
 
-APP_NAME = "character-workflow"
-ENV_VAR = "CHARACTER_WORKFLOW_DATA_ROOT"
+APP_NAME = "game-atelier"
+ENV_VAR = "GAME_ATELIER_DATA_ROOT"
 
 # Plugin directory == repo root (this file lives in scripts/).
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
