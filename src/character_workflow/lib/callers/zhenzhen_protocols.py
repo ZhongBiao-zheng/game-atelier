@@ -96,16 +96,19 @@ def build_banana_json_payload(
     model: str,
     n: int,
     aspect_ratio: str | None,
-    image_size: str | None,
+    image_size: str | None = None,  # kept for backward compat signature, ignored
+    quality: str | None = None,
 ) -> dict[str, Any]:
     ar = str(aspect_ratio or "").strip()
     is_auto = not ar or ar in ("Auto", "AUTO", "empty")
+    # nano-banana API expects x-separator format (4x3), internal uses colon (4:3)
+    api_size = "1x1" if is_auto else ar.replace(":", "x")
     return {
         "prompt": prompt,
         "model": model,
         "n": max(1, int(n or 1)),
-        "aspect_ratio": "1:1" if is_auto else ar,
-        "image_size": str(image_size or "2K").upper(),
+        "size": api_size,
+        "quality": quality or "medium",
     }
 
 

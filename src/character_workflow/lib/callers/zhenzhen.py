@@ -141,6 +141,7 @@ def _submit_standard_image(
             n=n,
             aspect_ratio=params.get("aspect_ratio") or params.get("ratio"),
             image_size=params.get("image_size") or params.get("resolution"),
+            quality=params.get("quality"),
         )
         return _post_json_or_form(
             f"{base_url}/v1/images/generations?async=true",
@@ -154,6 +155,7 @@ def _submit_standard_image(
             n=n,
             aspect_ratio=params.get("aspect_ratio") or params.get("ratio"),
             image_size=params.get("image_size") or params.get("resolution"),
+            quality=params.get("quality"),
         )
         files = []
         for ref in refs:

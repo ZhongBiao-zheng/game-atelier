@@ -61,9 +61,53 @@ def test_build_banana_json_payload_for_text_to_image():
         "prompt": "a penguin",
         "model": "nano-banana-pro",
         "n": 2,
-        "aspect_ratio": "16:9",
-        "image_size": "4K",
+        "size": "16x9",
+        "quality": "medium",
     }
+
+
+def test_build_banana_json_payload_includes_quality():
+    from character_workflow.lib.callers.zhenzhen_protocols import build_banana_json_payload
+
+    payload = build_banana_json_payload(
+        prompt="a cat",
+        model="nano-banana",
+        n=1,
+        aspect_ratio="16:9",
+        image_size="2K",
+        quality="low",
+    )
+    assert payload["quality"] == "low"
+
+
+def test_build_banana_json_payload_default_quality_is_medium():
+    from character_workflow.lib.callers.zhenzhen_protocols import build_banana_json_payload
+
+    payload = build_banana_json_payload(
+        prompt="a cat",
+        model="nano-banana",
+        n=1,
+        aspect_ratio="16:9",
+        image_size="2K",
+        quality=None,
+    )
+    assert payload["quality"] == "medium"
+
+
+def test_build_banana_json_payload_uses_size_field():
+    from character_workflow.lib.callers.zhenzhen_protocols import build_banana_json_payload
+
+    payload = build_banana_json_payload(
+        prompt="a cat",
+        model="nano-banana",
+        n=1,
+        aspect_ratio="16:9",
+        image_size="2K",
+        quality=None,
+    )
+    assert "size" in payload
+    assert payload["size"] == "16x9"
+    assert "aspect_ratio" not in payload
 
 
 def test_build_mj_payload_keeps_t8_fields():

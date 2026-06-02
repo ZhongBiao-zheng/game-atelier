@@ -141,8 +141,8 @@ def test_render_uses_banana_edit_fields_when_refs_exist(isolated_data_root, tmp_
         "prompt": "fox",
         "model": "nano-banana-pro",
         "n": 3,
-        "aspect_ratio": "16:9",
-        "image_size": "4K",
+        "size": "16x9",
+        "quality": "medium",
     }
     assert calls[0][1]["files"][0][0] == "image"
 
