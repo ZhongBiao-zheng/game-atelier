@@ -128,8 +128,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
                 setShowForm(true);
               }}
               onDelete={async () => {
-                const confirm = window.prompt(`输入 "${k.alias}" 确认删除`);
-                if (confirm !== k.alias) return;
+                if (!window.confirm(`确认删除 "${k.alias}"？`)) return;
                 await deleteKey(k.alias);
                 void refresh();
               }}
