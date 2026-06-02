@@ -12,9 +12,9 @@
    - Codex: `~/.codex/MEMORY.md`
 2. `MEMORY.md` (仓库根) — 本工作区跨项目通用经验
 3. 如果对话涉及具体角色:
-   - 从 `.runtime/projects.json::assignments` 解析角色所属 project_id
-   - 从 `.runtime/projects.json::projects[].slug` 找到 slug
-   - Read `projects/<slug>/MEMORY.md`
+   - 从 `~/game-atelier/.runtime/projects.json::assignments` 解析角色所属 project_id
+   - 从 `~/game-atelier/.runtime/projects.json::projects[].slug` 找到 slug
+   - Read `~/game-atelier/projects/<slug>/MEMORY.md`
 
 不读 MEMORY 就开始写 prompt / 出图 / 改 spec / 改 Skill 视为违规。
 
@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) and Codex when worki
 
 ## What this project is
 
-本仓库是 `game-atelier` **Plugin 源码**。Plugin 通过 `claude plugin install` 装到用户机器后，安装路径在 `~/.claude/plugins/game-atelier/`，用户数据在独立的 `<data_root>/`（默认 `~/character-workflow/`，由 `CHARACTER_WORKFLOW_DATA_ROOT` 环境变量覆盖）。
+本仓库是 `game-atelier` **Plugin 源码**。Plugin 通过 `claude plugin install` 装到用户机器后，安装路径在 `~/.claude/plugins/game-atelier/`，用户数据在独立的 `<data_root>/`（默认 `~/game-atelier/`，由 `GAME_ATELIER_DATA_ROOT` 环境变量覆盖）。
 
 详见 `docs/superpowers/specs/2026-05-22-skill-distribution-design.md` 和 `docs/superpowers/plans/2026-05-22-skill-distribution-impl.md`。
 
@@ -38,22 +38,20 @@ This file provides guidance to Claude Code (claude.ai/code) and Codex when worki
 
 ## Dev mode
 
-仓库内开发时，把仓库根当 data root：
+开发时数据目录与仓库分离：data root 指向 `~/game-atelier`（平台配置文件 `~/Library/Application Support/game-atelier/data-root`），仓库根**不再**是 data root。
 
 ```bash
-export CHARACTER_WORKFLOW_DATA_ROOT=$(pwd)
 make dev-link              # symlink skills/* → .claude/skills/
 make install               # uv sync + pnpm install
 ```
 
-用 direnv 自动化（推荐）：
+不需要手动设 `GAME_ATELIER_DATA_ROOT`。pytest 用 autouse `isolated_data_root` fixture 给每个测试一个独立 tmp 目录，不污染 `~/game-atelier`。
 
-```sh
-# .envrc
-export CHARACTER_WORKFLOW_DATA_ROOT=$PWD
+若需临时切换到其他 data root（如验证首启向导），可手动：
+
+```bash
+export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 ```
-
-Dev 模式下 bootstrap 自检直接读环境变量，跳过首启动向导。pytest 用 autouse `isolated_data_root` fixture 给每个测试一个独立 tmp 目录，不污染仓库。
 
 ## 核心架构原则
 
