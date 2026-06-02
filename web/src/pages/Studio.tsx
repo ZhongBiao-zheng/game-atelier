@@ -20,6 +20,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [resolution, setResolution] = useState<'2K' | '4K'>('2K');
   const [count, setCount] = useState(1);
   const [customSize, setCustomSize] = useState('');
+  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>('medium');
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
   const handleCustomSizeChange = useCallback((w: number, h: number) => {
@@ -121,6 +122,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
             ratio: effectiveRatio,
             resolution: effectiveResolution,
             n: effectiveCount,
+            // TODO(task5): remove cast once RoundConfig gains quality field
+            quality: (overrideConfig as any)?.quality ?? quality,
           },
         });
         setLocation('/studio');
@@ -146,6 +149,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           ratio: effectiveRatio,
           resolution: effectiveResolution,
           n: effectiveCount,
+          // TODO(task5): remove cast once RoundConfig gains quality field
+          quality: (overrideConfig as any)?.quality ?? quality,
         },
       });
     } catch (e: any) {
@@ -205,11 +210,13 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           ratio={ratio}
           resolution={resolution}
           count={count}
+          quality={quality}
           onProviderChange={setProviderAlias}
           onModelChange={setModel}
           onRatioChange={setRatio}
           onResolutionChange={setResolution}
           onCountChange={setCount}
+          onQualityChange={setQuality}
           onCustomSizeChange={handleCustomSizeChange}
           sizeOverride={sizeOverride}
           menuDirection="down"
@@ -244,11 +251,13 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           ratio={ratio}
           resolution={resolution}
           count={count}
+          quality={quality}
           onProviderChange={setProviderAlias}
           onModelChange={setModel}
           onRatioChange={setRatio}
           onResolutionChange={setResolution}
           onCountChange={setCount}
+          onQualityChange={setQuality}
           onCustomSizeChange={handleCustomSizeChange}
           sizeOverride={sizeOverride}
           menuDirection="up"
