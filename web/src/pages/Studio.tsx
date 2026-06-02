@@ -107,6 +107,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       resolution: effectiveResolution,
       size: effectiveSize,
       n: effectiveCount,
+      quality: overrideConfig?.quality ?? quality,
       referenceImages: overrideConfig?.referenceImages ?? [],
     };
 
@@ -122,8 +123,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
             ratio: effectiveRatio,
             resolution: effectiveResolution,
             n: effectiveCount,
-            // TODO(task5): remove cast once RoundConfig gains quality field
-            quality: (overrideConfig as any)?.quality ?? quality,
+            quality: overrideConfig?.quality ?? quality,
           },
         });
         setLocation('/studio');
@@ -149,8 +149,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           ratio: effectiveRatio,
           resolution: effectiveResolution,
           n: effectiveCount,
-          // TODO(task5): remove cast once RoundConfig gains quality field
-          quality: (overrideConfig as any)?.quality ?? quality,
+          quality: overrideConfig?.quality ?? quality,
         },
       });
     } catch (e: any) {
@@ -279,6 +278,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     if (config.ratio) setRatio(config.ratio);
     if (config.resolution) setResolution(config.resolution);
     if (config.n) setCount(clampImageCount(config.n));
+    if (config.quality) setQuality(config.quality);
     if (config.size) {
       const [wStr, hStr] = config.size.split('x');
       const w = parseInt(wStr, 10);
@@ -335,6 +335,9 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
     resolution: job.params.resolution === '4K' ? '4K' : job.params.resolution === '2K' ? '2K' : undefined,
     size: typeof job.params.size === 'string' ? job.params.size : undefined,
     n: typeof job.params.n === 'number' ? clampImageCount(job.params.n) : undefined,
+    quality: (job.params.quality === 'low' || job.params.quality === 'medium' || job.params.quality === 'high')
+      ? job.params.quality
+      : undefined,
     referenceImages: referenceImagesFor(job),
   };
 }

@@ -11,6 +11,7 @@ export interface RoundConfig {
   modelName?: string;
   ratio?: string;
   resolution?: '2K' | '4K';
+  quality?: 'low' | 'medium' | 'high';
   size?: string;
   n?: number;
   referenceImages: string[];
