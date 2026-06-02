@@ -70,7 +70,7 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
 
   if (!characterId) {
     return (
-      <section className="h-screen border-l border-border/60 bg-card/30 flex flex-col items-center justify-center px-6 text-center">
+      <section className="h-full border-l border-border/60 bg-card/30 flex flex-col items-center justify-center px-6 text-center">
         <p className="font-[var(--font-display)] italic text-xl text-foreground/65 mb-2">
           档案区
         </p>
@@ -82,7 +82,7 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
   const stale = serverContent !== content && !dirty;
 
   return (
-    <section className="h-screen border-l border-border/60 bg-card/30 flex flex-col">
+    <section className="h-full border-l border-border/60 bg-card/30 flex flex-col">
       <header className="flex items-end justify-between px-6 pt-6 pb-4 border-b border-border/40 gap-4">
         <div className="min-w-0 flex-1">
           <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground/70 mb-1">

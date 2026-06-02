@@ -262,14 +262,14 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
 
   if (characters.length === 0 && projects.projects.length === 0) {
     return (
-      <aside className="h-screen border-r border-border/60 bg-card/30 overflow-y-auto flex flex-col">
+      <aside className="h-full border-r border-border/60 bg-card/30 flex flex-col">
         <BrandHeader
           onNewCharacter={startNewCharacter}
           onNewProject={startNewProject}
           creatingCharacter={creatingCharacter}
           creatingProject={creatingProject}
         />
-        <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-4">
+        <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 text-center gap-4">
           <p className="font-[var(--font-display)] italic text-xl text-foreground/70">尚无作品</p>
           <p className="text-xs text-muted-foreground leading-relaxed">
             在终端 Claude Code<br />
@@ -305,7 +305,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
   }
 
   return (
-    <aside className="h-screen border-r border-border/60 bg-card/30 overflow-y-auto flex flex-col">
+    <aside className="h-full border-r border-border/60 bg-card/30 flex flex-col">
       <BrandHeader
         onNewCharacter={startNewCharacter}
         onNewProject={startNewProject}
@@ -313,7 +313,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
         creatingProject={creatingProject}
       />
 
-      <div className="flex-1 px-2 py-3">
+      <div className="flex-1 overflow-y-auto px-2 py-3">
         {creatingCharacter && (
           <div className="mb-2 flex items-center gap-1.5 px-2 py-1">
             <UserPlus className="size-3.5 text-muted-foreground shrink-0" />

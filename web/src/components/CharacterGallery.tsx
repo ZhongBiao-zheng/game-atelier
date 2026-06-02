@@ -178,7 +178,7 @@ function GalleryShell({
   tab: TabKind; setTab: (t: TabKind) => void; tabCounts: Record<TabKind, number>;
 }) {
   return (
-    <main className="flex flex-col h-screen overflow-hidden">
+    <main className="flex flex-col h-full overflow-hidden">
       <header className={cn('border-b border-border/40', compact ? 'px-5 pt-5 pb-3' : 'px-8 pt-8 pb-5')}>
         <div className="flex items-end justify-between gap-4">
           <div className="min-w-0">
@@ -307,7 +307,7 @@ function GalleryUpload({
 
 function EmptyShell({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
-    <main className="flex h-screen flex-col items-center justify-center px-8 text-center">
+    <main className="flex h-full flex-col items-center justify-center px-8 text-center">
       <div className="space-y-3">
         <p className="font-[var(--font-display)] italic text-[40px] leading-[1.1] text-foreground/75">
           {title}

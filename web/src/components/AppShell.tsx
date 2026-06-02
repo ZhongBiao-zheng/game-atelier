@@ -31,8 +31,8 @@ export function AppShell() {
   const onSettings = loc.startsWith('/settings');
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-30">
+    <div className="flex flex-col h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-30 shrink-0">
         <div className="mx-auto grid h-14 min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-3 md:h-20 md:gap-4 md:px-8">
           <Link href="/" className="flex shrink-0 items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
             <span
@@ -63,7 +63,7 @@ export function AppShell() {
         </div>
       </header>
 
-      <main role="main">
+      <main role="main" className="flex-1 min-h-0 overflow-y-auto">
         <Switch>
           <Route path="/">{() => <Home />}</Route>
           <Route path="/studio">{() => <Studio />}</Route>

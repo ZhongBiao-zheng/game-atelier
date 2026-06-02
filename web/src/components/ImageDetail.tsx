@@ -4,17 +4,9 @@ import type { Job, WebEditableJobPatch } from '../schema/jobs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 
 interface Props { jobId: string; path: string; onBack: () => void }
-
-const statusVariant: Record<string, 'secondary' | 'warning' | 'success' | 'destructive'> = {
-  pending: 'secondary',
-  running: 'warning',
-  done: 'success',
-  failed: 'destructive',
-};
 
 export function ImageDetail({ jobId, path, onBack }: Props) {
   const [job, setJob] = useState<Job | null>(null);
@@ -36,7 +28,7 @@ export function ImageDetail({ jobId, path, onBack }: Props) {
 
   if (!job) {
     return (
-      <section className="h-screen border-l border-border/60 bg-background flex items-center justify-center">
+      <section className="h-full border-l border-border/60 bg-background flex items-center justify-center">
         <p className="font-[var(--font-display)] italic text-muted-foreground">加载中…</p>
       </section>
     );
@@ -69,14 +61,13 @@ export function ImageDetail({ jobId, path, onBack }: Props) {
   }
 
   return (
-    <section className="h-screen border-l border-border/60 bg-background flex flex-col overflow-hidden">
+    <section className="h-full border-l border-border/60 bg-background flex flex-col overflow-hidden">
       <header className="flex items-center justify-between px-6 py-4 border-b border-border/40">
         <Button variant="ghost" size="sm" onClick={onBack} aria-label="返回">
           <ArrowLeft className="size-4" />
           返回画廊
         </Button>
         <div className="flex items-center gap-3">
-          <Badge variant={statusVariant[job.status] ?? 'secondary'}>{job.status}</Badge>
           <Button
             size="sm"
             onClick={saveChanges}

@@ -25,7 +25,7 @@ export function MainApp({ routedCharacterId, routedAssetSlot, routedImageDetail 
 
   if (config === null) {
     return (
-      <div className="grid h-screen place-items-center bg-background text-muted-foreground">
+      <div className="grid h-full place-items-center bg-background text-muted-foreground">
         <span className="font-[var(--font-display)] italic text-2xl">读取设置…</span>
       </div>
     );
@@ -34,7 +34,7 @@ export function MainApp({ routedCharacterId, routedAssetSlot, routedImageDetail 
     return <FirstRunConfig onSaved={root => setConfig({ image_storage_root: root })} />;
   }
   return (
-    <div className="h-screen">
+    <div className="h-full">
       <ThreeColumnLayout
         routedCharacterId={routedCharacterId}
         routedAssetSlot={routedAssetSlot}
@@ -95,7 +95,7 @@ function ThreeColumnLayout({
   const detailMode = detailJob !== null;
   return (
     <div className={cn(
-      'grid h-screen',
+      'grid h-full',
       detailMode
         ? 'grid-cols-[280px_360px_1fr]'
         : 'grid-cols-[280px_1fr]',
