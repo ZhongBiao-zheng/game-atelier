@@ -494,7 +494,8 @@ describe('Studio', () => {
 
     expect(screen.queryByRole('option', { name: '智能' })).not.toBeInTheDocument();
     expect(screen.getByTestId('size-popover')).toHaveClass('w-[320px]', 'p-3', 'ring-1');
-    expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('grid', 'grid-cols-[56px_1fr]', 'h-[98px]', 'w-[296px]', 'p-1');
+    expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('grid', 'rounded-2xl', 'bg-card', 'p-1');
+    expect(screen.getByRole('listbox', { name: '选择比例' }).firstElementChild).toHaveClass('h-[98px]', 'w-[296px]', 'grid-cols-[56px_1fr]');
     expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('h-[90px]', 'w-[56px]', 'text-sm');
     expect(screen.getByTestId('side-ratio-grid')).toHaveClass('min-w-0', 'grid-cols-4', 'grid-rows-2');
     expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('h-[43px]', 'w-full', 'text-sm');
