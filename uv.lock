@@ -169,7 +169,7 @@ wheels = [
 ]
 
 [[package]]
-name = "game-ui-ai-workflow"
+name = "game-atelier"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

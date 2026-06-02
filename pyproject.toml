@@ -1,5 +1,5 @@
 [project]
-name = "game-ui-ai-workflow"
+name = "game-atelier"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [

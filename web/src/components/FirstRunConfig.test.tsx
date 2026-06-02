@@ -14,13 +14,13 @@ beforeEach(() => {
     if (url === '/api/folder-picker') {
       return Promise.resolve({
         ok: true,
-        json: async () => ({ path: '/Users/me/game-ui-ai-workflow' }),
+        json: async () => ({ path: '/Users/me/game-atelier' }),
       } as Response);
     }
     if (url === '/api/onboarding/data-root') {
       return Promise.resolve({
         ok: true,
-        json: async () => ({ data_root: '/Users/me/game-ui-ai-workflow' }),
+        json: async () => ({ data_root: '/Users/me/game-atelier' }),
       } as Response);
     }
     return Promise.resolve({ ok: true, json: async () => ({}) } as Response);
@@ -34,7 +34,7 @@ describe('FirstRunConfig', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /选择项目文件夹/ }));
     await waitFor(() => {
-      expect(screen.getByText('/Users/me/game-ui-ai-workflow')).toBeInTheDocument();
+      expect(screen.getByText('/Users/me/game-atelier')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByRole('button', { name: /开始使用/ }));
 
@@ -43,10 +43,10 @@ describe('FirstRunConfig', () => {
         '/api/onboarding/data-root',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ path: '/Users/me/game-ui-ai-workflow' }),
+          body: JSON.stringify({ path: '/Users/me/game-atelier' }),
         }),
       );
     });
-    expect(onSaved).toHaveBeenCalledWith('/Users/me/game-ui-ai-workflow');
+    expect(onSaved).toHaveBeenCalledWith('/Users/me/game-atelier');
   });
 });

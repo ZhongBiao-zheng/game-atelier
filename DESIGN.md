@@ -1,4 +1,4 @@
-# Design System — game-ui-ai-workflow
+# Design System — game-atelier
 
 > 永远先读这份文档再做任何视觉 / UI 决定。
 > 字体、颜色、间距、美学方向都在这里定义。

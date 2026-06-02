@@ -57,7 +57,7 @@ describe('AppShell', () => {
     });
     vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
       if (url === '/api/config') {
-        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-ui-ai-workflow' }) };
+        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-atelier' }) };
       }
       if (url === '/api/active-character') {
         return { ok: true, json: async () => ({ active_id: null, updated_at: '2026-05-29T00:00:00Z' }) };
@@ -79,7 +79,7 @@ describe('AppShell', () => {
             model: 'gpt-image-2',
             params: { n: 1 },
             seed: null,
-            output_paths: ['/tmp/game-ui-ai-workflow/characters/cao-cao/promo/kv.png'],
+            output_paths: ['/tmp/game-atelier/characters/cao-cao/promo/kv.png'],
             status: 'done',
             error: null,
             asset_slot: 'promo',
@@ -94,7 +94,7 @@ describe('AppShell', () => {
       return { ok: true, json: async () => ({}) };
     }));
 
-    renderAt('/character/cao-cao/promo/job-promo-1/%2Ftmp%2Fgame-ui-ai-workflow%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png');
+    renderAt('/character/cao-cao/promo/job-promo-1/%2Ftmp%2Fgame-atelier%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png');
 
     expect(await screen.findByDisplayValue('路由详情 prompt')).toBeInTheDocument();
   });

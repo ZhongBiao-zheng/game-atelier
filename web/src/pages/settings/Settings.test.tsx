@@ -10,7 +10,7 @@ beforeEach(() => {
         ok: true,
         json: async () => ({
           status: 'ready',
-          data_root: '/Users/me/game-ui-ai-workflow',
+          data_root: '/Users/me/game-atelier',
           uv_path: null,
           venv_python: null,
           platform: 'darwin',
@@ -50,7 +50,7 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
 
     const input = await screen.findByLabelText('数据目录');
-    expect(input).toHaveValue('/Users/me/game-ui-ai-workflow');
+    expect(input).toHaveValue('/Users/me/game-atelier');
 
     fireEvent.click(screen.getByRole('button', { name: /选择文件夹/ }));
     await waitFor(() => expect(input).toHaveValue('/Users/me/character-workflow'));
