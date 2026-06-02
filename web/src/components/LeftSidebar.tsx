@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, Trash2, X, AlertCircle, FolderPlus, UserPlus } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Trash2, X, AlertCircle, FolderPlus, UserPlus, GripVertical } from 'lucide-react';
 import type { CharacterEntry, Project, ProjectsFile } from '../schema/jobs';
 import { useActiveCharacter } from '../hooks/useActiveCharacter';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,8 @@ interface Props {
 }
 
 const UNCATEGORIZED = '__uncategorized__';
+const DRAG_PROJECT = 'text/project-id';
+const DRAG_CHAR = 'text/character-id';
 
 export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props) {
   const [characters, setCharacters] = useState<CharacterEntry[]>([]);
@@ -23,6 +25,9 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
   const [draftName, setDraftName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
+  // project folder reorder
+  const [projectDragId, setProjectDragId] = useState<string | null>(null);
+  const [projectDragOver, setProjectDragOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [creatingCharacter, setCreatingCharacter] = useState(false);
@@ -228,14 +233,14 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
   }
 
   function onDragStart(e: React.DragEvent, characterId: string) {
-    e.dataTransfer.setData('text/character-id', characterId);
+    e.dataTransfer.setData(DRAG_CHAR, characterId);
     e.dataTransfer.effectAllowed = 'move';
   }
 
   function onDrop(e: React.DragEvent, target: string) {
     e.preventDefault();
     setDragOver(null);
-    const cid = e.dataTransfer.getData('text/character-id');
+    const cid = e.dataTransfer.getData(DRAG_CHAR);
     if (!cid) return;
     const current = projects.assignments[cid] || UNCATEGORIZED;
     if (current === target) return;
@@ -243,11 +248,53 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
   }
 
   function onDragOver(e: React.DragEvent, target: string) {
-    if (e.dataTransfer.types.includes('text/character-id')) {
+    if (e.dataTransfer.types.includes(DRAG_CHAR)) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       setDragOver(target);
     }
+  }
+
+  function onProjectDragStart(e: React.DragEvent, projectId: string) {
+    e.dataTransfer.setData(DRAG_PROJECT, projectId);
+    e.dataTransfer.effectAllowed = 'move';
+    setProjectDragId(projectId);
+  }
+
+  function onProjectDragOver(e: React.DragEvent, targetId: string, el: HTMLElement) {
+    if (!e.dataTransfer.types.includes(DRAG_PROJECT)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = el.getBoundingClientRect();
+    const pos: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+    setProjectDragOver({ id: targetId, pos });
+  }
+
+  function onProjectDrop(e: React.DragEvent, targetId: string, el: HTMLElement) {
+    e.preventDefault();
+    e.stopPropagation();
+    const dragId = e.dataTransfer.getData(DRAG_PROJECT);
+    setProjectDragId(null);
+    setProjectDragOver(null);
+    if (!dragId || dragId === targetId) return;
+    const rect = el.getBoundingClientRect();
+    const pos: 'before' | 'after' = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+    const list = projects.projects.filter(p => p.id !== dragId);
+    const idx = list.findIndex(p => p.id === targetId);
+    if (idx === -1) return;
+    list.splice(pos === 'before' ? idx : idx + 1, 0, projects.projects.find(p => p.id === dragId)!);
+    setProjects(ps => ({ ...ps, projects: list }));
+    void fetch('/api/projects/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ordered_ids: list.map(p => p.id) }),
+    });
+  }
+
+  function onProjectDragEnd() {
+    setProjectDragId(null);
+    setProjectDragOver(null);
   }
 
   const grouped = new Map<string, CharacterEntry[]>();
@@ -359,6 +406,12 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
             onRenameCommit={commitProjectEdit} onRenameCancel={cancelEdit}
             onDelete={deleteProject} inputRef={inputRef}
             renderChar={c => renderChar(c)}
+            isDragging={projectDragId === p.id}
+            dropIndicator={projectDragOver?.id === p.id ? projectDragOver.pos : null}
+            onProjectDragStart={onProjectDragStart}
+            onProjectDragOver={onProjectDragOver}
+            onProjectDrop={onProjectDrop}
+            onProjectDragEnd={onProjectDragEnd}
           />
         ))}
 
@@ -456,6 +509,12 @@ interface ProjectGroupProps {
   onDelete: (p: Project, e: React.MouseEvent) => void;
   inputRef: React.MutableRefObject<HTMLInputElement | null>;
   renderChar: (c: CharacterEntry) => React.ReactNode;
+  isDragging: boolean;
+  dropIndicator: 'before' | 'after' | null;
+  onProjectDragStart: (e: React.DragEvent, id: string) => void;
+  onProjectDragOver: (e: React.DragEvent, id: string, el: HTMLElement) => void;
+  onProjectDrop: (e: React.DragEvent, id: string, el: HTMLElement) => void;
+  onProjectDragEnd: () => void;
 }
 
 function ProjectGroup({
@@ -463,19 +522,48 @@ function ProjectGroup({
   onDrop, onDragOver, onDragLeave,
   onRenameStart, onRenameChange, onRenameCommit, onRenameCancel,
   onDelete, inputRef, renderChar,
+  isDragging, dropIndicator,
+  onProjectDragStart, onProjectDragOver, onProjectDrop, onProjectDragEnd,
 }: ProjectGroupProps) {
   const [open, setOpen] = useState(true);
+  const sectionRef = useRef<HTMLElement>(null);
   return (
     <section
-      onDrop={e => onDrop(e, project.id)}
-      onDragOver={e => onDragOver(e, project.id)}
+      ref={sectionRef}
+      draggable={!isEditing}
+      onDragStart={e => onProjectDragStart(e, project.id)}
+      onDragEnd={onProjectDragEnd}
+      onDrop={e => {
+        if (e.dataTransfer.types.includes(DRAG_PROJECT) && sectionRef.current) {
+          onProjectDrop(e, project.id, sectionRef.current);
+        } else {
+          onDrop(e, project.id);
+        }
+      }}
+      onDragOver={e => {
+        if (e.dataTransfer.types.includes(DRAG_PROJECT) && sectionRef.current) {
+          onProjectDragOver(e, project.id, sectionRef.current);
+        } else {
+          onDragOver(e, project.id);
+        }
+      }}
       onDragLeave={onDragLeave}
       className={cn(
-        'mb-1.5 rounded-md transition-colors',
-        dragOver && 'bg-primary/5 ring-2 ring-primary/30 ring-inset',
+        'mb-1.5 rounded-md transition-colors relative',
+        dragOver && !isDragging && 'bg-primary/5 ring-2 ring-primary/30 ring-inset',
+        isDragging && 'opacity-40',
+        dropIndicator === 'before' && 'border-t-2 border-primary',
+        dropIndicator === 'after' && 'border-b-2 border-primary',
       )}
     >
       <header className="group/header flex items-center gap-1 px-1.5 py-1 text-xs text-muted-foreground select-none">
+        <span
+          title="拖动排序"
+          className="grid place-items-center size-4 cursor-grab text-muted-foreground/40 hover:text-muted-foreground shrink-0"
+          onMouseDown={e => e.stopPropagation()}
+        >
+          <GripVertical className="size-3" />
+        </span>
         <button
           onClick={() => !isEditing && setOpen(o => !o)}
           aria-label={open ? '收起项目' : '展开项目'}

@@ -24,7 +24,7 @@ from character_workflow.lib.jobs import (
 from character_workflow.lib.schemas import AssetSlot as _AssetSlot
 from character_workflow.lib.projects import (
     assign_character, create_project, delete_project, read_projects,
-    rename_project,
+    rename_project, reorder_projects,
 )
 from pydantic import BaseModel, Field
 from pydantic import field_validator
@@ -411,6 +411,15 @@ def get_projects() -> ProjectsFile:
 def post_project(payload: ProjectCreate) -> ProjectsFile:
     create_project(payload.name)
     return read_projects()
+
+
+class ProjectReorder(BaseModel):
+    ordered_ids: list[str]
+
+
+@router.post("/projects/reorder", response_model=ProjectsFile)
+def post_projects_reorder(payload: ProjectReorder) -> ProjectsFile:
+    return reorder_projects(payload.ordered_ids)
 
 
 @router.post("/projects/{project_id}/rename", response_model=ProjectsFile)

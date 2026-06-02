@@ -92,7 +92,7 @@ def create_project(name: str, slug: str | None = None) -> Project:
         name=name.strip(),
         created_at=datetime.now(timezone.utc).isoformat(),
     )
-    f.projects.append(project)
+    f.projects.insert(0, project)
     _write(f)
 
     project_dir = _projects_root() / final_slug
@@ -126,6 +126,16 @@ def delete_project(project_id: str) -> None:
     f.projects = [p for p in f.projects if p.id != project_id]
     f.assignments = {c: pid for c, pid in f.assignments.items() if pid != project_id}
     _write(f)
+
+
+def reorder_projects(ordered_ids: list[str]) -> ProjectsFile:
+    f = read_projects()
+    id_to_project = {p.id: p for p in f.projects}
+    reordered = [id_to_project[pid] for pid in ordered_ids if pid in id_to_project]
+    extras = [p for p in f.projects if p.id not in set(ordered_ids)]
+    f.projects = reordered + extras
+    _write(f)
+    return f
 
 
 def assign_character(character_id: str, project_id: str | None) -> ProjectsFile:
