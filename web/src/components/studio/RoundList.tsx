@@ -1,5 +1,5 @@
-import { type ButtonHTMLAttributes, useState } from 'react';
-import { AlertTriangle, Download, Trash2 } from 'lucide-react';
+import { type ButtonHTMLAttributes, useEffect, useState } from 'react';
+import { AlertTriangle, Download, Trash2, X } from 'lucide-react';
 
 import { WaitingCopy } from './WaitingCopy';
 
@@ -34,67 +34,77 @@ export function RoundList({
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
 }) {
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   if (rounds.length === 0) return null;
   return (
-    <div data-testid="studio-round-list" className="max-w-[1024px] mx-auto mt-8 space-y-8">
-      {rounds.map((r) => {
-        const stableKey =
-          r.kind === 'pending' && r.jobId ? `pending-${r.jobId}` :
-          r.kind === 'pending' ? `pending-${r.startedAt}` :
-          `${r.kind}-${r.submittedAt}`;
-        return (
-          <div key={stableKey}>
-            {r.kind === 'pending' && (
-              <div className="mb-3">
-                <WaitingCopy startedAt={r.startedAt} />
-              </div>
-            )}
-            {r.kind === 'pending' && (
-              <section className="space-y-3">
-                <div className="flex items-start gap-3 text-sm">
-                  {r.config.referenceImages[0] && (
-                    <img
-                      src={imageSrc(r.config.referenceImages[0])}
-                      alt="参考图"
-                      className="h-14 w-14 rounded-md object-cover"
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="line-clamp-2 text-base leading-7 text-foreground" title={r.config.prompt}>
-                      {r.config.prompt}
-                    </p>
+    <>
+      <div data-testid="studio-round-list" className="max-w-[1024px] mx-auto mt-8 space-y-8">
+        {rounds.map((r) => {
+          const stableKey =
+            r.kind === 'pending' && r.jobId ? `pending-${r.jobId}` :
+            r.kind === 'pending' ? `pending-${r.startedAt}` :
+            `${r.kind}-${r.submittedAt}`;
+          return (
+            <div key={stableKey}>
+              {r.kind === 'pending' && (
+                <div className="mb-3">
+                  <WaitingCopy startedAt={r.startedAt} />
+                </div>
+              )}
+              {r.kind === 'pending' && (
+                <section className="space-y-3">
+                  <div className="flex items-start gap-3 text-sm">
+                    {r.config.referenceImages[0] && (
+                      <img
+                        src={imageSrc(r.config.referenceImages[0])}
+                        alt="参考图"
+                        className="h-14 w-14 rounded-md object-cover"
+                      />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="line-clamp-2 text-base leading-7 text-foreground" title={r.config.prompt}>
+                        {r.config.prompt}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                <div
-                  data-testid={r.jobId ? `studio-pending-${r.jobId}` : undefined}
-                  data-skeleton
-                  aria-busy="true"
-                  className="aspect-square w-64 bg-card/40 rounded-lg flex items-center justify-center"
-                >
-                  <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                </div>
-              </section>
-            )}
-            {r.kind === 'done' && (
-              <DoneBatch
-                round={r}
-                onReEdit={onReEdit}
-                onRegenerate={onRegenerate}
-                onDeleteBatch={onDeleteBatch}
-              />
-            )}
-            {r.kind === 'failed' && (
-              <FailedCard
-                round={r}
-                onDeleteFailed={onDeleteFailed}
-                onReEdit={onReEdit}
-                onRegenerate={onRegenerate}
-              />
-            )}
-          </div>
-        );
-      })}
-    </div>
+                  <div className="flex flex-wrap gap-1">
+                    {Array.from({ length: Math.max(1, r.config.n ?? 1) }, (_, i) => (
+                      <div
+                        key={i}
+                        data-testid={i === 0 && r.jobId ? `studio-pending-${r.jobId}` : undefined}
+                        data-skeleton
+                        aria-busy="true"
+                        className="aspect-square w-[251.5px] bg-card/40 rounded-lg flex items-center justify-center"
+                      >
+                        {i === 0 && <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+              {r.kind === 'done' && (
+                <DoneBatch
+                  round={r}
+                  onReEdit={onReEdit}
+                  onRegenerate={onRegenerate}
+                  onDeleteBatch={onDeleteBatch}
+                  onLightbox={setLightboxSrc}
+                />
+              )}
+              {r.kind === 'failed' && (
+                <FailedCard
+                  round={r}
+                  onDeleteFailed={onDeleteFailed}
+                  onReEdit={onReEdit}
+                  onRegenerate={onRegenerate}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+    </>
   );
 }
 
@@ -107,11 +117,13 @@ function DoneBatch({
   onReEdit,
   onRegenerate,
   onDeleteBatch,
+  onLightbox,
 }: {
   round: Extract<RoundState, { kind: 'done' }>;
   onReEdit?: (config: RoundConfig) => void;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
+  onLightbox?: (src: string) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const meta = [
@@ -144,7 +156,8 @@ function DoneBatch({
           <figure
             key={path}
             data-testid={`studio-result-thumb-${index + 1}`}
-            className="group relative w-[251.5px] overflow-hidden rounded-md bg-card"
+            className="group relative w-[251.5px] overflow-hidden rounded-md bg-card cursor-pointer"
+            onClick={() => onLightbox?.(imageSrc(path))}
           >
             <img
               src={imageSrc(path)}
@@ -201,6 +214,36 @@ function ActionButton({
       className={`${compact ? 'h-9 w-9 px-0' : 'h-9 w-[94px] px-3'} rounded-xl bg-secondary text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
       {...props}
     />
+  );
+}
+
+function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <img
+        src={src}
+        alt="大图"
+        className="max-h-[90vh] max-w-[90vw] rounded-lg shadow-2xl object-contain"
+        onClick={e => e.stopPropagation()}
+      />
+      <button
+        type="button"
+        aria-label="关闭"
+        onClick={onClose}
+        className="absolute right-6 top-6 size-10 rounded-full bg-black/60 text-white grid place-items-center hover:bg-black/80 backdrop-blur-sm border-0"
+      >
+        <X className="size-5" />
+      </button>
+    </div>
   );
 }
 

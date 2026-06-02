@@ -45,6 +45,8 @@ export function CharacterGallery({
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<TabKind>(initialTab ?? 'portrait');
   const [uploadSignal, setUploadSignal] = useState(0);
+  const [colCount, setColCount] = useState(detailMode ? 2 : 3);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialTab) setTab(initialTab);
@@ -73,8 +75,9 @@ export function CharacterGallery({
   if (loading && jobs.length === 0) {
     return (
       <GalleryShell name={characterName} count={0} rounds={0} compact={detailMode}
-        tab={tab} setTab={setTab} tabCounts={tabCounts}>
-        <Skeleton cols={detailMode ? 2 : 3} />
+        tab={tab} setTab={setTab} tabCounts={tabCounts}
+        colCount={colCount} onColCountChange={setColCount}>
+        <Skeleton cols={colCount} />
       </GalleryShell>
     );
   }
@@ -100,14 +103,18 @@ export function CharacterGallery({
     setJobs(js => js.filter(j => j.job_id !== jobId));
   }
 
-  const cols = detailMode ? 2 : 3;
-  const colClass = cols === 2 ? 'columns-2' : 'columns-3';
+  const colClassMap: Record<number, string> = {
+    1: 'columns-1', 2: 'columns-2', 3: 'columns-3', 4: 'columns-4', 5: 'columns-5',
+  };
+  const colClass = colClassMap[colCount] ?? 'columns-3';
   const hasAny = allImages.length > 0 || isRunning || failedJobs.length > 0;
 
   return (
+    <>
     <GalleryShell
       name={characterName} count={allImages.length} rounds={tabJobs.length}
       compact={detailMode} tab={tab} setTab={setTab} tabCounts={tabCounts}
+      colCount={colCount} onColCountChange={setColCount}
     >
       <GalleryUpload
         characterId={characterId}
@@ -131,7 +138,10 @@ export function CharacterGallery({
           {allImages.map((img, i) => (
             <figure key={i} className="group relative mb-4 break-inside-avoid">
               <button
-                onClick={() => onSelectImage(img.path, img.jobId)}
+                onClick={() => {
+                  onSelectImage(img.path, img.jobId);
+                  setLightboxSrc(`/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`);
+                }}
                 className="w-full block overflow-hidden rounded-lg border border-border/50 bg-card transition-all duration-200 hover:border-primary/60 hover:shadow-[0_0_0_1px_var(--primary)] cursor-pointer p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 <img
@@ -168,14 +178,18 @@ export function CharacterGallery({
         </div>
       )}
     </GalleryShell>
+    {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+    </>
   );
 }
 
 function GalleryShell({
   name, count, rounds, children, compact = false, tab, setTab, tabCounts,
+  colCount, onColCountChange,
 }: {
   name: string | null; count: number; rounds: number; children: React.ReactNode; compact?: boolean;
   tab: TabKind; setTab: (t: TabKind) => void; tabCounts: Record<TabKind, number>;
+  colCount: number; onColCountChange: (n: number) => void;
 }) {
   return (
     <main className="flex flex-col h-full overflow-hidden">
@@ -192,13 +206,28 @@ function GalleryShell({
               {name ?? '—'}
             </h1>
           </div>
-          {count > 0 && (
-            <div className={cn('shrink-0 text-right font-mono tabular-nums text-muted-foreground leading-relaxed',
-              compact ? 'text-[10px]' : 'text-xs')}>
-              <div><span className="text-foreground/85">{count}</span> 图</div>
-              <div><span className="text-foreground/85">{rounds}</span> 轮</div>
-            </div>
-          )}
+          <div className={cn('shrink-0 text-right flex flex-col items-end gap-2 font-mono tabular-nums text-muted-foreground leading-relaxed',
+            compact ? 'text-[10px]' : 'text-xs')}>
+            {count > 0 && (
+              <div className="text-right">
+                <div><span className="text-foreground/85">{count}</span> 图</div>
+                <div><span className="text-foreground/85">{rounds}</span> 轮</div>
+              </div>
+            )}
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <span className="text-muted-foreground/60">⊞</span>
+              <input
+                type="range"
+                min={1}
+                max={5}
+                value={colCount}
+                onChange={e => onColCountChange(Number(e.target.value))}
+                className="w-20 accent-primary"
+                aria-label="调整列数"
+              />
+              <span className="text-muted-foreground/60 w-3">{colCount}</span>
+            </label>
+          </div>
         </div>
         <TabStrip tab={tab} setTab={setTab} counts={tabCounts} compact={compact} />
       </header>
@@ -323,10 +352,43 @@ function EmptyShell({ title, subtitle }: { title: string; subtitle?: string }) {
 }
 
 function Skeleton({ cols }: { cols: number }) {
-  const colClass = cols === 2 ? 'columns-2' : 'columns-3';
+  const colClassMap: Record<number, string> = {
+    1: 'columns-1', 2: 'columns-2', 3: 'columns-3', 4: 'columns-4', 5: 'columns-5',
+  };
+  const colClass = colClassMap[cols] ?? 'columns-3';
   return (
     <div className={cn(colClass, 'gap-4')}>
       {Array.from({ length: cols }).map((_, i) => <SkeletonCard key={i} />)}
+    </div>
+  );
+}
+
+function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <img
+        src={src}
+        alt="大图"
+        className="max-h-[90vh] max-w-[90vw] rounded-lg shadow-2xl object-contain"
+        onClick={e => e.stopPropagation()}
+      />
+      <button
+        type="button"
+        aria-label="关闭"
+        onClick={onClose}
+        className="absolute right-6 top-6 size-10 rounded-full bg-black/60 text-white grid place-items-center hover:bg-black/80 backdrop-blur-sm border-0"
+      >
+        <X className="size-5" />
+      </button>
     </div>
   );
 }
