@@ -233,10 +233,10 @@ export function PromptInput({
         {onReferenceImagesChange && (
           <div
             data-testid="reference-images-panel"
-            className="shrink-0 w-[80px] h-full relative group/ref"
-            onClick={() => {
-              if (referenceImages.length > 0) setRefExpanded((v) => !v);
-            }}
+            className="shrink-0 h-full flex items-center relative"
+            style={{ width: refExpanded ? `${(referenceImages.length + 1) * 62 + 8}px` : '64px', transition: 'width 300ms ease' }}
+            onMouseEnter={() => { if (referenceImages.length > 0) setRefExpanded(true); }}
+            onMouseLeave={() => { setRefExpanded(false); setRefHovered(null); }}
           >
             <input
               ref={refFileInputRef}
@@ -251,33 +251,51 @@ export function PromptInput({
             {referenceImages.length === 0 ? (
               <label
                 htmlFor={refInputId}
-                className="flex items-center justify-center w-[64px] h-full cursor-pointer rounded-xl border border-dashed border-border/60 bg-card/40 transition-all duration-200 hover:-translate-y-1 hover:brightness-110 hover:border-primary/50"
-                style={{ transform: 'rotate(-8deg)' }}
+                className="flex items-center justify-center cursor-pointer rounded-xl border border-dashed border-border/60 bg-card/40 transition-all duration-200 hover:-translate-y-1 hover:brightness-110 hover:border-primary/50"
+                style={{ width: 56.5, height: 70, transform: 'rotate(-8deg)' }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <Plus size={18} className="text-muted-foreground" />
               </label>
-            ) : refExpanded ? (
-              <div className="flex h-full items-end gap-1.5">
+            ) : (
+              <div className="flex h-full items-center">
                 {referenceImages.map((_file, i) => {
-                  const selected = refHovered === i;
+                  const hovered = refHovered === i;
+                  const stackIdx = referenceImages.length - 1 - i;
                   return (
-                    <div key={i} className="relative shrink-0" style={{ zIndex: selected ? 10 : referenceImages.length - i }}>
+                    <div
+                      key={i}
+                      className="relative shrink-0"
+                      style={{
+                        zIndex: hovered ? 20 : referenceImages.length - i,
+                        marginLeft: i > 0 ? (refExpanded ? '6px' : '-32px') : 0,
+                        transition: 'margin-left 300ms ease, z-index 0ms',
+                      }}
+                      onMouseEnter={() => setRefHovered(i)}
+                      onMouseLeave={() => setRefHovered(null)}
+                    >
                       <div
-                        className="w-[54px] h-[68px] rounded-lg overflow-hidden border border-border/50 bg-card shadow-md transition-all duration-200 cursor-pointer"
+                        className="rounded-lg overflow-hidden border border-border/50 bg-card shadow-md transition-all duration-200 cursor-pointer"
                         style={{
-                          transform: selected ? 'translateY(-6px)' : 'translateY(0)',
-                          filter: selected ? 'brightness(1.15)' : 'brightness(1)',
+                          width: 56.5,
+                          height: 70,
+                          transform: hovered
+                            ? 'translateY(-6px) scale(1.04)'
+                            : refExpanded
+                              ? 'translateY(0)'
+                              : `translateY(0) rotate(${stackIdx === 0 ? 0 : stackIdx === 1 ? 4 : -3}deg)`,
+                          filter: hovered ? 'brightness(1.15)' : 'brightness(1)',
                         }}
-                        onMouseEnter={() => setRefHovered(i)}
-                        onMouseLeave={() => setRefHovered(null)}
                       >
                         <img src={refPreviews[i]} alt="" className="w-full h-full object-cover" />
                       </div>
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); handleRefRemove(i); }}
-                        className="absolute -top-1.5 -right-1.5 z-20 w-4.5 h-4.5 flex items-center justify-center rounded-full bg-card/80 border border-border/40 text-muted-foreground hover:text-foreground hover:bg-card transition-colors"
+                        className="absolute -top-1.5 -right-1.5 z-30 w-[18px] h-[18px] flex items-center justify-center rounded-full bg-card/80 border border-border/40 text-muted-foreground hover:text-foreground hover:bg-card transition-all duration-200"
+                        style={{
+                          transform: hovered ? 'translateY(-6px)' : 'translateY(0)',
+                        }}
                       >
                         <X size={10} />
                       </button>
@@ -287,38 +305,8 @@ export function PromptInput({
                 {referenceImages.length < 4 && (
                   <label
                     htmlFor={refInputId}
-                    className="shrink-0 w-[42px] h-[52px] flex items-center justify-center rounded-lg border border-dashed border-border/60 bg-card/40 cursor-pointer transition-all duration-150 hover:brightness-110 hover:border-primary/50 self-center"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Plus size={14} className="text-muted-foreground" />
-                  </label>
-                )}
-              </div>
-            ) : (
-              <div
-                className="flex h-full items-end cursor-pointer"
-                onMouseEnter={() => setRefExpanded(true)}
-              >
-                {referenceImages.slice().reverse().map((_file, ri) => {
-                  const i = referenceImages.length - 1 - ri;
-                  return (
-                    <div
-                      key={i}
-                      className="w-[54px] h-[68px] rounded-lg overflow-hidden border border-border/50 bg-card shadow-md transition-all duration-200"
-                      style={{
-                        marginLeft: ri > 0 ? '-32px' : 0,
-                        zIndex: referenceImages.length - ri,
-                        transform: `rotate(${ri === 0 ? 0 : ri === 1 ? 4 : -3}deg)`,
-                      }}
-                    >
-                      <img src={refPreviews[i]} alt="" className="w-full h-full object-cover" />
-                    </div>
-                  );
-                })}
-                {referenceImages.length < 4 && (
-                  <label
-                    htmlFor={refInputId}
-                    className="absolute bottom-0 right-0 w-5 h-5 flex items-center justify-center rounded-full bg-card/80 border border-border/50 cursor-pointer transition-all duration-150 hover:brightness-110 hover:border-primary/50"
+                    className="shrink-0 flex items-center justify-center rounded-full border border-dashed border-border/60 bg-card/40 cursor-pointer transition-all duration-150 hover:brightness-110 hover:border-primary/50"
+                    style={{ width: 22, height: 22, marginLeft: refExpanded ? '6px' : '-12px', zIndex: 0 }}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Plus size={11} className="text-muted-foreground" />
