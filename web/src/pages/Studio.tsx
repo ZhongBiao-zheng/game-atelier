@@ -23,6 +23,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [quality, setQuality] = useState<'low' | 'medium' | 'high'>('medium');
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
+  const [referenceImages, setReferenceImages] = useState<File[]>([]);
   const handleCustomSizeChange = useCallback((w: number, h: number) => {
     setCustomSize(`${w}x${h}`);
   }, []);
@@ -108,7 +109,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       size: effectiveSize,
       n: effectiveCount,
       quality: overrideConfig?.quality ?? quality,
-      referenceImages: overrideConfig?.referenceImages ?? [],
+      referenceImages: overrideConfig?.referenceImages ?? (referenceImages.length > 0 ? referenceImages.map((f) => URL.createObjectURL(f)) : []),
     };
 
     if (compact) {
@@ -219,6 +220,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           onCustomSizeChange={handleCustomSizeChange}
           sizeOverride={sizeOverride}
           menuDirection="down"
+          referenceImages={referenceImages}
+          onReferenceImagesChange={setReferenceImages}
         />
       </div>
     );
@@ -260,6 +263,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           onCustomSizeChange={handleCustomSizeChange}
           sizeOverride={sizeOverride}
           menuDirection="up"
+          referenceImages={referenceImages}
+          onReferenceImagesChange={setReferenceImages}
         />
       </div>
     </div>

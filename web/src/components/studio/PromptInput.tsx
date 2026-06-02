@@ -1,5 +1,5 @@
-import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUp, Box, ImageIcon, Images, Square, Building2, Link2 } from 'lucide-react';
+import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ArrowUp, Box, ImageIcon, Images, Plus, Square, Building2, Link2, X } from 'lucide-react';
 import type { KeyView } from '@/api/keys';
 import { computeStudioPixelSize, normalizeStudioPixelSizeForProvider } from '@/lib/studioSize';
 
@@ -25,6 +25,8 @@ interface Props {
   /** When set, overrides localW/localH after the ratio/resolution effect; keyed to ensure re-runs. */
   sizeOverride?: { key: number; w: number; h: number };
   menuDirection?: 'up' | 'down';
+  referenceImages?: File[];
+  onReferenceImagesChange?: (files: File[]) => void;
 }
 
 const SIDE_RATIOS = ['4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
@@ -75,12 +77,20 @@ export function PromptInput({
   onQualityChange,
   sizeOverride,
   menuDirection = 'up',
+  referenceImages = [],
+  onReferenceImagesChange,
 }: Props) {
   const [internalText, setInternalText] = useState('');
   const text = value ?? internalText;
   const setText = onValueChange ?? setInternalText;
   const [openPanel, setOpenPanel] = useState<'provider' | 'model' | 'size' | 'count' | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  const [refExpanded, setRefExpanded] = useState(false);
+  const [refHovered, setRefHovered] = useState<number | null>(null);
+  const refFileInputRef = useRef<HTMLInputElement>(null);
+  const refInputId = useId();
+  const refPreviews = useMemo(() => referenceImages.map((f) => URL.createObjectURL(f)), [referenceImages]);
+  useEffect(() => () => refPreviews.forEach((u) => URL.revokeObjectURL(u)), [refPreviews]);
 
   useEffect(() => {
     if (!openPanel) return;
@@ -135,6 +145,17 @@ export function PromptInput({
       submit();
     }
   };
+
+  function handleRefAdd(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files;
+    if (!files?.length) return;
+    onReferenceImagesChange?.([...referenceImages, ...Array.from(files)]);
+    e.target.value = '';
+  }
+
+  function handleRefRemove(idx: number) {
+    onReferenceImagesChange?.(referenceImages.filter((_, i) => i !== idx));
+  }
 
   function handleRatioSelect(newRatio: string) {
     onRatioChange?.(newRatio);
@@ -208,14 +229,114 @@ export function PromptInput({
       data-testid="studio-prompt-shell"
       className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl min-h-[174px] h-auto flex flex-col gap-3"
     >
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKey}
-        placeholder="开始一段灵感对话..."
-        className="flex-1 min-h-0 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none rounded-md px-2"
-        aria-label="生图 prompt"
-      />
+      <div className="flex flex-1 min-h-0 gap-2">
+        {onReferenceImagesChange && (
+          <div
+            data-testid="reference-images-panel"
+            className="shrink-0 w-[80px] h-full relative group/ref"
+            onClick={() => {
+              if (referenceImages.length > 0) setRefExpanded((v) => !v);
+            }}
+          >
+            <input
+              ref={refFileInputRef}
+              id={refInputId}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleRefAdd}
+            />
+
+            {referenceImages.length === 0 ? (
+              <label
+                htmlFor={refInputId}
+                className="flex items-center justify-center w-[64px] h-full cursor-pointer rounded-xl border border-dashed border-border/60 bg-card/40 transition-all duration-200 hover:-translate-y-1 hover:brightness-110 hover:border-primary/50"
+                style={{ transform: 'rotate(-8deg)' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Plus size={18} className="text-muted-foreground" />
+              </label>
+            ) : refExpanded ? (
+              <div className="flex h-full items-end gap-1.5">
+                {referenceImages.map((_file, i) => {
+                  const selected = refHovered === i;
+                  return (
+                    <div key={i} className="relative shrink-0" style={{ zIndex: selected ? 10 : referenceImages.length - i }}>
+                      <div
+                        className="w-[54px] h-[68px] rounded-lg overflow-hidden border border-border/50 bg-card shadow-md transition-all duration-200 cursor-pointer"
+                        style={{
+                          transform: selected ? 'translateY(-6px)' : 'translateY(0)',
+                          filter: selected ? 'brightness(1.15)' : 'brightness(1)',
+                        }}
+                        onMouseEnter={() => setRefHovered(i)}
+                        onMouseLeave={() => setRefHovered(null)}
+                      >
+                        <img src={refPreviews[i]} alt="" className="w-full h-full object-cover" />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleRefRemove(i); }}
+                        className="absolute -top-1.5 -right-1.5 z-20 w-4.5 h-4.5 flex items-center justify-center rounded-full bg-card/80 border border-border/40 text-muted-foreground hover:text-foreground hover:bg-card transition-colors"
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {referenceImages.length < 4 && (
+                  <label
+                    htmlFor={refInputId}
+                    className="shrink-0 w-[42px] h-[52px] flex items-center justify-center rounded-lg border border-dashed border-border/60 bg-card/40 cursor-pointer transition-all duration-150 hover:brightness-110 hover:border-primary/50 self-center"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Plus size={14} className="text-muted-foreground" />
+                  </label>
+                )}
+              </div>
+            ) : (
+              <div
+                className="flex h-full items-end cursor-pointer"
+                onMouseEnter={() => setRefExpanded(true)}
+              >
+                {referenceImages.slice().reverse().map((_file, ri) => {
+                  const i = referenceImages.length - 1 - ri;
+                  return (
+                    <div
+                      key={i}
+                      className="w-[54px] h-[68px] rounded-lg overflow-hidden border border-border/50 bg-card shadow-md transition-all duration-200"
+                      style={{
+                        marginLeft: ri > 0 ? '-32px' : 0,
+                        zIndex: referenceImages.length - ri,
+                        transform: `rotate(${ri === 0 ? 0 : ri === 1 ? 4 : -3}deg)`,
+                      }}
+                    >
+                      <img src={refPreviews[i]} alt="" className="w-full h-full object-cover" />
+                    </div>
+                  );
+                })}
+                {referenceImages.length < 4 && (
+                  <label
+                    htmlFor={refInputId}
+                    className="absolute bottom-0 right-0 w-5 h-5 flex items-center justify-center rounded-full bg-card/80 border border-border/50 cursor-pointer transition-all duration-150 hover:brightness-110 hover:border-primary/50"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Plus size={11} className="text-muted-foreground" />
+                  </label>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKey}
+          placeholder="开始一段灵感对话..."
+          className="flex-1 min-h-0 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none rounded-md px-2"
+          aria-label="生图 prompt"
+        />
+      </div>
       <div className="flex flex-wrap justify-between items-center gap-3 shrink-0">
         <div className="flex min-w-0 flex-wrap gap-2">
           <ControlButton active aria-label="图片生成">
