@@ -6,6 +6,7 @@ import { memoryLocation } from 'wouter/memory-location';
 import { Studio } from './Studio';
 
 beforeEach(() => {
+  localStorage.clear();
   globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
     if (url === '/api/keys') {
       return Promise.resolve({
@@ -245,11 +246,8 @@ describe('Studio', () => {
 
     renderStudio();
 
-    await screen.findByRole('button', { name: /选择厂商/ });
-    fireEvent.click(screen.getByRole('button', { name: /选择厂商/ }));
-    fireEvent.click(screen.getByRole('option', { name: /oa/ }));
-    fireEvent.click(screen.getByRole('button', { name: /选择模型/ }));
-    fireEvent.click(screen.getByRole('option', { name: /GPT Image 2/ }));
+    // 默认即 seedream(volc)——standard 族，保留比例 + 2K/4K 分辨率控件。
+    await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     fireEvent.click(screen.getByRole('option', { name: '16:9' }));
     fireEvent.click(screen.getByRole('option', { name: /超清 4K/ }));
@@ -266,8 +264,8 @@ describe('Studio', () => {
     const body = JSON.parse(String(studioCall![1]!.body));
     expect(body).toMatchObject({
       prompt: '广西南宁城市海报',
-      alias: 'oa',
-      model: 'gpt-image-2',
+      alias: 'volc',
+      model: 'doubao-seedream-5-0-260128',
       params: {
         ratio: '16:9',
         resolution: '4K',
@@ -297,6 +295,48 @@ describe('Studio', () => {
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
     const body = JSON.parse(String(studioCall![1]!.body));
     expect(body.params.n).toBe(4);
+  });
+
+  it('restores the saved provider/model/ratio/count selection on mount', async () => {
+    localStorage.setItem(
+      'studio:selection',
+      JSON.stringify({
+        providerAlias: 'oa',
+        model: 'gpt-image-2',
+        ratio: '16:9',
+        resolution: '2K',
+        count: 3,
+        quality: 'medium',
+      }),
+    );
+    renderStudio();
+
+    // 不做任何下拉操作，直接提交 —— 提交载荷应反映恢复后的选择，而非默认 key(volc)。
+    const textarea = await screen.findByLabelText('生图 prompt');
+    fireEvent.change(textarea, { target: { value: '恢复测试' } });
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body.alias).toBe('oa');
+    expect(body.model).toBe('gpt-image-2');
+    expect(body.params.ratio).toBe('16:9');
+    expect(body.params.n).toBe(3);
+  });
+
+  it('persists selection changes to localStorage', async () => {
+    renderStudio();
+
+    fireEvent.click(await screen.findByRole('button', { name: /选择出图数量/ }));
+    fireEvent.click(screen.getByRole('option', { name: '4' }));
+
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem('studio:selection') ?? '{}');
+      expect(saved.count).toBe(4);
+      expect(saved.providerAlias).toBe('volc');
+    });
   });
 
   it('submits the same pixel size shown in the size panel', async () => {
@@ -915,7 +955,7 @@ describe('Studio', () => {
             default_alias: 'oa',
             keys: [{
               alias: 'oa', provider: 'openai', access_key: 'sk', secret_key: null,
-              capabilities: [], models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
+              capabilities: [], models: [{ name: '图片', id: 'std-image' }],
               notes: '', created_at: '2026-05-25T00:00:00Z', is_default: true,
             }],
           }),
@@ -949,7 +989,7 @@ describe('Studio', () => {
             default_alias: 'oa',
             keys: [{
               alias: 'oa', provider: 'openai', access_key: 'sk', secret_key: null,
-              capabilities: [], models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
+              capabilities: [], models: [{ name: '图片', id: 'std-image' }],
               notes: '', created_at: '2026-05-25T00:00:00Z', is_default: true,
             }],
           }),

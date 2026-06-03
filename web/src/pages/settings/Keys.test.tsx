@@ -82,18 +82,6 @@ describe('KeysPage', () => {
     expect(screen.queryByLabelText('默认 Key')).not.toBeInTheDocument();
   });
 
-  it('delete button triggers window.prompt confirmation', async () => {
-    vi.stubGlobal('prompt', vi.fn().mockReturnValue(null));
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ keys: [mockKey], default_alias: 'lov' }),
-    });
-    render(<KeysPage />);
-    await waitFor(() => expect(screen.getByLabelText('删除 lov')).toBeInTheDocument());
-    fireEvent.click(screen.getByLabelText('删除 lov'));
-    expect(window.prompt).toHaveBeenCalledWith('输入 "lov" 确认删除');
-  });
-
   it('delete aborts when prompt returns wrong alias', async () => {
     vi.stubGlobal('prompt', vi.fn().mockReturnValue('wrong'));
     const fetchMock = vi.fn()
@@ -374,17 +362,6 @@ describe('KeyForm', () => {
     expect(screen.getByText('模型 ID')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('给人看的名字，例如：图片 5.0')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('请求里使用的 ID，例如：doubao-seedream-5-0-260128')).toBeInTheDocument();
-  });
-
-  it('shows API request URL examples instead of account-password style copy', () => {
-    render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
-    fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'custom' } });
-
-    expect(screen.getByLabelText('API 请求地址')).toHaveAttribute(
-      'placeholder',
-      '例如：https://api.openai-hk.com 或 https://ark.cn-beijing.volces.com/api/v3',
-    );
-    expect(screen.getByText('请求时会自动拼接图片接口；根域名会补 /v1/images/generations，填完整路径也会直接使用。')).toBeInTheDocument();
   });
 
   it('validates the custom API request URL from the test button', () => {

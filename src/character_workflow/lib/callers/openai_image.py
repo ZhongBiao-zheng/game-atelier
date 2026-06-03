@@ -68,7 +68,13 @@ def render(
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    if _is_openai_hk(base_url):
+
+    is_hk = _is_openai_hk(base_url)
+    requested = max(1, int(n or 1))
+
+    # OpenAI-HK 的非图像模型回退 chat 模式（从 markdown/url 提取图）。
+    # gpt-image / nano-banana 走真正的 images 端点，size 与 quality 才会生效。
+    if is_hk and not _hk_image_model(model):
         image_paths: list[str] = []
         source_image = kwargs.get("source_image") or (kwargs.get("params") or {}).get("source_image")
         if source_image:
@@ -79,7 +85,6 @@ def render(
         image_paths = image_paths[: _max_reference_images(key.provider, model)]
 
         paths: list[str] = []
-        requested = max(1, int(n or 1))
         for _ in range(requested):
             data = _post_json(
                 _chat_image_url(base_url),
@@ -97,31 +102,32 @@ def render(
                 break
         return paths[:requested]
 
-    requested = max(1, int(n or 1))
+    is_seedream = key.provider == "seedream"
+    is_hk_image = is_hk and _hk_image_model(model)
+    # quality 仅对支持它的模型发送：OpenAI / OpenAI-HK 的 gpt-image・nano-banana；
+    # seedream 没有 quality 概念，发了可能被拒。
+    wants_quality = key.provider == "openai" or is_hk_image
+    quality = _quality_param(kwargs) if wants_quality else None
     ref_image = _reference_image_param(kwargs, key.provider, model)
-    payload = _image_generation_payload(
-        model=model,
-        prompt=prompt,
-        size=requested_size,
-        n=requested,
-        image=ref_image,
-    )
-    data = _post_json(_image_url(base_url), key.access_key, payload, timeout=timeout)
+
+    def _gen_payload(num: int) -> dict:
+        return _image_generation_payload(
+            model=model,
+            prompt=prompt,
+            size=requested_size,
+            n=num,
+            image=ref_image,
+            quality=quality,
+            watermark=is_seedream,
+            sequential=is_seedream,
+        )
+
+    data = _post_json(_image_url(base_url), key.access_key, _gen_payload(requested), timeout=timeout)
     paths = _write_outputs(data, out_dir)
-    if key.provider == "seedream":
+    # seedream 与 HK 图像模型：单次可能只回 1 张，循环补足到 requested 张。
+    if is_seedream or is_hk_image:
         while len(paths) < requested:
-            data = _post_json(
-                _image_url(base_url),
-                key.access_key,
-                _image_generation_payload(
-                    model=model,
-                    prompt=prompt,
-                    size=requested_size,
-                    n=1,
-                    image=ref_image,
-                ),
-                timeout=timeout,
-            )
+            data = _post_json(_image_url(base_url), key.access_key, _gen_payload(1), timeout=timeout)
             paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
     return paths[:requested]
 
@@ -141,23 +147,40 @@ def _image_generation_payload(
     size: object,
     n: int,
     image: str | list[str] | None = None,
+    quality: str | None = None,
+    watermark: bool = False,
+    sequential: bool = False,
 ) -> dict:
-    payload = {
+    payload: dict[str, Any] = {
         "model": model,
         "prompt": prompt,
         "n": n,
         "size": size,
         "response_format": "b64_json",
         "stream": False,
-        "watermark": True,
     }
+    if watermark:  # seedream / Ark 专有
+        payload["watermark"] = True
+    if quality:  # gpt-image / nano-banana：low/medium/high/auto
+        payload["quality"] = quality
     # Seedream / Ark 图生图：image 接受 URL 或 base64 data-url，单张为 str、多张为 list。
     if image:
         payload["image"] = image
-    if n > 1:
+    if sequential and n > 1:  # seedream 组图
         payload["sequential_image_generation"] = "auto"
         payload["sequential_image_generation_options"] = {"max_images": n}
     return {k: v for k, v in payload.items() if v is not None}
+
+
+def _hk_image_model(model: str) -> bool:
+    """OpenAI-HK 上走 images 端点（支持 size+quality）的模型族。"""
+    return bool(model) and (model.startswith("gpt-image") or model.startswith("nano-banana"))
+
+
+def _quality_param(kwargs: dict) -> str | None:
+    params = kwargs.get("params") or {}
+    q = kwargs.get("quality") or params.get("quality")
+    return q if q in ("low", "medium", "high", "auto") else None
 
 
 def _max_reference_images(provider: str, model: str) -> int:

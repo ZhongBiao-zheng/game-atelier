@@ -372,7 +372,7 @@ def test_render_seedream_backfills_when_api_returns_fewer_images(
     assert Path(paths[1]).read_bytes() == images[1]
 
 
-def test_render_openai_hk_posts_to_chat_completions_per_requested_image(
+def test_render_openai_hk_non_image_model_falls_back_to_chat_completions(
     isolated_data_root,
     tmp_path,
     monkeypatch,
@@ -409,7 +409,7 @@ def test_render_openai_hk_posts_to_chat_completions_per_requested_image(
 
     paths = openai_image.render(
         prompt="pixel dog",
-        model="gpt-image-2",
+        model="hk-chat-vision",
         alias="openai-hk",
         output_dir=tmp_path,
         n=2,
@@ -418,8 +418,8 @@ def test_render_openai_hk_posts_to_chat_completions_per_requested_image(
 
     assert captured["url"] == "https://api.openai-hk.com/v1/chat/completions"
     assert [payload["model"] for payload in captured["payloads"]] == [
-        "gpt-image-2",
-        "gpt-image-2",
+        "hk-chat-vision",
+        "hk-chat-vision",
     ]
     assert all(
         payload["messages"][-1]["content"].startswith("pixel dog")
@@ -439,6 +439,84 @@ def test_render_openai_hk_posts_to_chat_completions_per_requested_image(
     assert [Path(path).name for path in paths] == ["v1.png", "v2.png"]
     assert Path(paths[0]).read_bytes() == first_image
     assert Path(paths[1]).read_bytes() == second_image
+
+
+def test_render_openai_hk_gpt_image_uses_images_endpoint_with_size_and_quality(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    _add_key(alias="openai-hk", provider="custom", base_url="https://api.openai-hk.com")
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["url"] = url
+        captured["payload"] = json
+        return FakePostResponse({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(b"\x89PNG\r\n\x1a\nhk-gpt").decode("ascii"),
+            }],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+
+    openai_image.render(
+        prompt="city poster",
+        model="gpt-image-2",
+        alias="openai-hk",
+        output_dir=tmp_path,
+        n=1,
+        size="1536x1024",
+        params={"quality": "high"},
+    )
+
+    # gpt-image 不再走 chat，而是真正的 images 端点，且把 size/quality 当真参数发出。
+    assert captured["url"] == "https://api.openai-hk.com/v1/images/generations"
+    payload = captured["payload"]
+    assert payload["size"] == "1536x1024"
+    assert payload["quality"] == "high"
+    assert "watermark" not in payload
+    assert "sequential_image_generation" not in payload
+
+
+def test_render_openai_hk_nano_banana_passes_ratio_size_and_backfills(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    _add_key(alias="openai-hk", provider="custom", base_url="https://api.openai-hk.com")
+    captured: dict[str, object] = {"payloads": []}
+
+    def fake_post(url, headers, json, timeout):
+        captured["url"] = url
+        captured["payloads"].append(json)
+        idx = len(captured["payloads"])
+        return FakePostResponse({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(f"\x89PNG\r\n\x1a\nnano-{idx}".encode()).decode("ascii"),
+            }],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+
+    paths = openai_image.render(
+        prompt="banana cat",
+        model="nano-banana",
+        alias="openai-hk",
+        output_dir=tmp_path,
+        n=3,
+        size="16:9",
+        params={"quality": "low"},
+    )
+
+    # nano-banana：size 是比例字符串原样下发；单次只回 1 张 → 循环补足到 3 张。
+    assert captured["url"] == "https://api.openai-hk.com/v1/images/generations"
+    assert len(captured["payloads"]) == 3
+    assert captured["payloads"][0]["size"] == "16:9"
+    assert captured["payloads"][0]["quality"] == "low"
+    assert len(paths) == 3
 
 
 def test_image_items_from_text_cleans_malformed_markdown_url():

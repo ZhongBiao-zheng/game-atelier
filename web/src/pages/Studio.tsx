@@ -5,22 +5,53 @@ import { createStudioJob, getStudioJob, listStudioJobs, uploadReferenceImage } f
 import { listKeys, type KeyView } from '@/api/keys';
 import { PromptInput } from '@/components/studio/PromptInput';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
-import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForProvider } from '@/lib/studioSize';
+import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
+import { imageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import type { Job, JobParams } from '@/schema/jobs';
+
+const SELECTION_STORAGE_KEY = 'studio:selection';
+
+interface SavedSelection {
+  providerAlias?: string;
+  model?: string;
+  ratio?: string;
+  resolution?: '2K' | '4K';
+  count?: number;
+  quality?: Quality;
+  customSize?: string;
+}
+
+function loadSelection(): SavedSelection {
+  try {
+    const raw = localStorage.getItem(SELECTION_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as SavedSelection) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSelection(sel: SavedSelection): void {
+  try {
+    localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify(sel));
+  } catch {
+    // localStorage 不可用（隐私模式等）时静默跳过，不影响出图。
+  }
+}
 
 export function Studio({ compact = false }: { compact?: boolean }) {
   const [, setLocation] = useLocation();
+  const [saved] = useState(loadSelection);
   const [rounds, setRounds] = useState<RoundState[]>([]);
   const [persistedJobs, setPersistedJobs] = useState<Job[]>([]);
   const [pending, setPending] = useState(false);
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
-  const [ratio, setRatio] = useState('1:1');
-  const [resolution, setResolution] = useState<'2K' | '4K'>('2K');
-  const [count, setCount] = useState(1);
-  const [customSize, setCustomSize] = useState('');
-  const [quality, setQuality] = useState<'low' | 'medium' | 'high'>('medium');
+  const [ratio, setRatio] = useState(saved.ratio ?? '1:1');
+  const [resolution, setResolution] = useState<'2K' | '4K'>(saved.resolution ?? '2K');
+  const [count, setCount] = useState(clampImageCount(saved.count ?? 1));
+  const [customSize, setCustomSize] = useState(saved.customSize ?? '');
+  const [quality, setQuality] = useState<Quality>(saved.quality ?? 'medium');
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
@@ -68,9 +99,26 @@ export function Studio({ compact = false }: { compact?: boolean }) {
         if (cancelled) return;
         const usable = resp.keys.filter((key) => key.models.length > 0);
         setKeys(usable);
-        const selected = usable.find((key) => key.alias === resp.default_alias) ?? usable[0];
+        // 优先恢复上次保存的供应商/模型（校验仍存在），否则回落到默认 key。
+        const savedKey = saved.providerAlias
+          ? usable.find((key) => key.alias === saved.providerAlias)
+          : undefined;
+        const selected = savedKey ?? usable.find((key) => key.alias === resp.default_alias) ?? usable[0];
         setProviderAlias(selected?.alias ?? '');
-        setModel(selected?.models[0]?.id ?? '');
+        const savedModelValid = saved.model && selected?.models.some((m) => m.id === saved.model);
+        setModel(savedModelValid ? saved.model! : selected?.models[0]?.id ?? '');
+        // 恢复手动自定义尺寸：标准尺寸由 ratio/resolution 自动重算，仅当保存值偏离标准时用 sizeOverride 覆盖。
+        if (saved.customSize) {
+          const [wStr, hStr] = saved.customSize.split('x');
+          const w = parseInt(wStr, 10);
+          const h = parseInt(hStr, 10);
+          if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
+            const standard = computeStudioPixelSize(saved.ratio ?? '1:1', saved.resolution ?? '2K', selected?.provider);
+            if (w !== standard.w || h !== standard.h) {
+              setSizeOverride((prev) => ({ key: (prev?.key ?? 0) + 1, w, h }));
+            }
+          }
+        }
       })
       .catch(() => {
         if (!cancelled) setKeys([]);
@@ -79,6 +127,12 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       cancelled = true;
     };
   }, [compact]);
+
+  // 持久化供应商/模型/尺寸/张数等全部选择，切页面再回来时恢复。providerAlias 为空说明 keys 还没加载完，先不写。
+  useEffect(() => {
+    if (!providerAlias) return;
+    saveSelection({ providerAlias, model, ratio, resolution, count, quality, customSize });
+  }, [providerAlias, model, ratio, resolution, count, quality, customSize]);
 
   useEffect(() => {
     if (compact) return;
@@ -110,8 +164,16 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const effectiveModel = overrideConfig?.model ?? model;
     const selectedKey = keys.find((item) => item.alias === effectiveAlias);
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
-    const rawSize = overrideConfig?.size ?? (customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveProvider));
-    const effectiveSize = normalizeStudioSizeForProvider(rawSize, effectiveProvider);
+    const caps = imageControlCaps(effectiveModel);
+    // nano-banana 的 size 是比例字符串（如 16:9）；gpt-image/standard 是归一化后的像素 WxH。
+    const effectiveSize = overrideConfig?.size
+      ?? (caps.sizeKind === 'ratio'
+        ? effectiveRatio
+        : normalizeStudioSizeForModel(
+            customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveProvider),
+            effectiveProvider,
+            effectiveModel,
+          ));
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
 
     setPending(true);
@@ -371,7 +433,8 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
     resolution: job.params.resolution === '4K' ? '4K' : job.params.resolution === '2K' ? '2K' : undefined,
     size: typeof job.params.size === 'string' ? job.params.size : undefined,
     n: typeof job.params.n === 'number' ? clampImageCount(job.params.n) : undefined,
-    quality: (job.params.quality === 'low' || job.params.quality === 'medium' || job.params.quality === 'high')
+    quality: (job.params.quality === 'low' || job.params.quality === 'medium'
+      || job.params.quality === 'high' || job.params.quality === 'auto')
       ? job.params.quality
       : undefined,
     referenceImages: referenceImagesFor(job),

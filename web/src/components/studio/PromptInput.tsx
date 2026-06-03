@@ -1,9 +1,10 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArrowUp, Box, ImageIcon, Images, Plus, Square, Building2, Link2, X } from 'lucide-react';
 import type { KeyView } from '@/api/keys';
-import { computeStudioPixelSize, normalizeStudioPixelSizeForProvider } from '@/lib/studioSize';
+import { computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
 import { providerLabel } from '@/lib/providerLabels';
 import { maxReferenceImages } from '@/lib/referenceLimits';
+import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
 
 interface Props {
   onSubmit: (prompt: string) => void | Promise<void>;
@@ -22,8 +23,8 @@ interface Props {
   onResolutionChange?: (resolution: '2K' | '4K') => void;
   onCountChange?: (count: number) => void;
   onCustomSizeChange?: (w: number, h: number) => void;
-  quality?: 'low' | 'medium' | 'high';
-  onQualityChange?: (quality: 'low' | 'medium' | 'high') => void;
+  quality?: Quality;
+  onQualityChange?: (quality: Quality) => void;
   /** When set, overrides localW/localH after the ratio/resolution effect; keyed to ensure re-runs. */
   sizeOverride?: { key: number; w: number; h: number };
   menuDirection?: 'up' | 'down';
@@ -40,19 +41,6 @@ const COLLAPSE_ANGLES = [8, -4, 22, -8, 8, -4];
 const collapseAngle = (i: number) => COLLAPSE_ANGLES[i % COLLAPSE_ANGLES.length];
 // 展开时两两对称交替：8, -5, 8, -5...
 const expandAngle = (i: number) => (i % 2 === 0 ? 8 : -5);
-
-const NANO_BANANA_RATIOS = ['4:3', '3:4', '16:9', '9:16', '2:3', '3:2'] as const;
-type NanoBananaQuality = 'low' | 'medium' | 'high';
-const NANO_BANANA_QUALITY_LABELS: Record<NanoBananaQuality, string> = {
-  low: '低',
-  medium: '中',
-  high: '高',
-};
-
-function isNanoBananaModel(provider?: KeyView, modelId?: string): boolean {
-  if (provider?.provider !== 'nano_banana') return false;
-  return !modelId || modelId.startsWith('nano-banana');
-}
 
 function providerName(provider?: KeyView) {
   if (!provider) return '未配置厂商';
@@ -76,7 +64,7 @@ export function PromptInput({
   onResolutionChange,
   onCountChange,
   onCustomSizeChange,
-  quality = 'medium' as 'low' | 'medium' | 'high',
+  quality = 'medium' as Quality,
   onQualityChange,
   sizeOverride,
   menuDirection = 'up',
@@ -113,7 +101,7 @@ export function PromptInput({
   const [localW, setLocalW] = useState(initSize.w);
   const [localH, setLocalH] = useState(initSize.h);
   const [sizeLocked, setSizeLocked] = useState(true);
-  const isNanoBanana = isNanoBananaModel(provider, selectedModel?.id);
+  const caps = imageControlCaps(selectedModel?.id);
   const maxRef = maxReferenceImages(provider?.provider, selectedModel?.id);
   const canSubmit = Boolean(provider && selectedModel && text.trim() && !disabled);
   const panelPosition = menuDirection === 'down'
@@ -123,7 +111,7 @@ export function PromptInput({
 
   useEffect(() => {
     const { w, h } = computeStudioPixelSize(ratio, resolution, provider?.provider);
-    const normalized = normalizeStudioPixelSizeForProvider({ w, h }, provider?.provider);
+    const normalized = normalizeStudioPixelSizeForModel({ w, h }, provider?.provider, selectedModel?.id);
     setLocalW(normalized.w);
     setLocalH(normalized.h);
     onCustomSizeChange?.(normalized.w, normalized.h);
@@ -164,7 +152,7 @@ export function PromptInput({
   function handleRatioSelect(newRatio: string) {
     onRatioChange?.(newRatio);
     const { w, h } = computeStudioPixelSize(newRatio, resolution, provider?.provider);
-    const normalized = normalizeStudioPixelSizeForProvider({ w, h }, provider?.provider);
+    const normalized = normalizeStudioPixelSizeForModel({ w, h }, provider?.provider, selectedModel?.id);
     setLocalW(normalized.w);
     setLocalH(normalized.h);
     onCustomSizeChange?.(normalized.w, normalized.h);
@@ -173,7 +161,7 @@ export function PromptInput({
   function handleResolutionSelect(newResolution: '2K' | '4K') {
     onResolutionChange?.(newResolution);
     const { w, h } = computeStudioPixelSize(ratio, newResolution, provider?.provider);
-    const normalized = normalizeStudioPixelSizeForProvider({ w, h }, provider?.provider);
+    const normalized = normalizeStudioPixelSizeForModel({ w, h }, provider?.provider, selectedModel?.id);
     setLocalW(normalized.w);
     setLocalH(normalized.h);
     onCustomSizeChange?.(normalized.w, normalized.h);
@@ -185,12 +173,12 @@ export function PromptInput({
     if (sizeLocked) {
       const [a, b] = ratio.split(':').map(Number);
       const newH = a > 0 ? Math.max(minPx, Math.round((newW * b) / a)) : localH;
-      const normalized = normalizeStudioPixelSizeForProvider({ w: newW, h: newH }, provider?.provider);
+      const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: newH }, provider?.provider, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
       onCustomSizeChange?.(normalized.w, normalized.h);
     } else {
-      const normalized = normalizeStudioPixelSizeForProvider({ w: newW, h: localH }, provider?.provider);
+      const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: localH }, provider?.provider, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
       onCustomSizeChange?.(normalized.w, normalized.h);
@@ -203,12 +191,12 @@ export function PromptInput({
     if (sizeLocked) {
       const [a, b] = ratio.split(':').map(Number);
       const newW = b > 0 ? Math.max(minPx, Math.round((newH * a) / b)) : localW;
-      const normalized = normalizeStudioPixelSizeForProvider({ w: newW, h: newH }, provider?.provider);
+      const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: newH }, provider?.provider, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
       onCustomSizeChange?.(normalized.w, normalized.h);
     } else {
-      const normalized = normalizeStudioPixelSizeForProvider({ w: localW, h: newH }, provider?.provider);
+      const normalized = normalizeStudioPixelSizeForModel({ w: localW, h: newH }, provider?.provider, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
       onCustomSizeChange?.(normalized.w, normalized.h);
@@ -220,7 +208,7 @@ export function PromptInput({
     setSizeLocked(next);
     if (next) {
       const { w, h } = computeStudioPixelSize(ratio, resolution, provider?.provider);
-      const normalized = normalizeStudioPixelSizeForProvider({ w, h }, provider?.provider);
+      const normalized = normalizeStudioPixelSizeForModel({ w, h }, provider?.provider, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
       onCustomSizeChange?.(normalized.w, normalized.h);
@@ -424,10 +412,11 @@ export function PromptInput({
               onClick={() => setOpenPanel(openPanel === 'size' ? null : 'size')}
             >
               <Square size={14} aria-hidden />
-              {isNanoBanana
-                ? <>{ratio} <span className="text-muted-foreground">|</span> {NANO_BANANA_QUALITY_LABELS[quality as NanoBananaQuality] ?? quality}</>
-                : <>{localW}:{localH} <span className="text-muted-foreground">|</span> {resolution === '2K' ? '高清 2K' : '超清 4K'}</>
-              }
+              {caps.showCustomSize ? <>{localW}:{localH}</> : <>{ratio}</>}
+              <span className="text-muted-foreground">|</span>
+              {caps.showResolution
+                ? (resolution === '2K' ? '高清 2K' : '超清 4K')
+                : (caps.qualities ? (QUALITY_LABELS[quality] ?? quality) : null)}
             </ControlButton>
             {openPanel === 'size' && (
               <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-[320px] max-h-[70vh] overflow-y-auto rounded-2xl bg-secondary p-3 shadow-2xl ring-1 ring-border`}>
@@ -439,9 +428,9 @@ export function PromptInput({
                       aria-label="选择比例"
                       className="grid rounded-2xl bg-card p-1"
                     >
-                      {isNanoBanana ? (
-                        <div className="grid grid-cols-3 gap-1">
-                          {NANO_BANANA_RATIOS.map((item) => (
+                      {caps.family !== 'standard' ? (
+                        <div className="grid grid-cols-4 gap-1">
+                          {caps.ratios.map((item) => (
                             <button
                               key={item}
                               type="button"
@@ -487,47 +476,27 @@ export function PromptInput({
                     </div>
                   </section>
 
-                  {isNanoBanana ? (
+                  {caps.showResolution && (
                     <section className="w-[296px]">
-                      <div className="py-1 px-1 text-xs text-muted-foreground">质量</div>
-                      <div role="listbox" aria-label="选择质量" className="grid h-9 grid-cols-3 gap-1 rounded-2xl bg-card p-0.5">
-                        {(['low', 'medium', 'high'] as const).map((item) => (
+                      <div className="py-1 px-1 text-xs text-muted-foreground">分辨率</div>
+                      <div role="listbox" aria-label="选择分辨率" className="grid h-9 grid-cols-2 gap-1 rounded-2xl bg-card p-0.5">
+                        {(['2K', '4K'] as const).map((item) => (
                           <button
                             key={item}
                             type="button"
                             role="option"
-                            aria-selected={quality === item}
-                            onClick={() => {
-                              onQualityChange?.(item);
-                              setOpenPanel(null);
-                            }}
+                            aria-selected={resolution === item}
+                            onClick={() => handleResolutionSelect(item)}
                             className="h-8 rounded-xl text-center text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
                           >
-                            {NANO_BANANA_QUALITY_LABELS[item]}
+                            {item === '2K' ? '高清 2K' : '超清 4K'}
                           </button>
                         ))}
                       </div>
                     </section>
-                  ) : (
-                    <>
-                      <section className="w-[296px]">
-                        <div className="py-1 px-1 text-xs text-muted-foreground">分辨率</div>
-                        <div role="listbox" aria-label="选择分辨率" className="grid h-9 grid-cols-2 gap-1 rounded-2xl bg-card p-0.5">
-                          {(['2K', '4K'] as const).map((item) => (
-                            <button
-                              key={item}
-                              type="button"
-                              role="option"
-                              aria-selected={resolution === item}
-                              onClick={() => handleResolutionSelect(item)}
-                              className="h-8 rounded-xl text-center text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
-                            >
-                              {item === '2K' ? '高清 2K' : '超清 4K'}
-                            </button>
-                          ))}
-                        </div>
-                      </section>
+                  )}
 
+                  {caps.showCustomSize && (
                       <section className="w-[296px]">
                         <div className="py-1 px-1 text-xs text-muted-foreground">尺寸</div>
                         <div className="flex w-[296px] items-center gap-2">
@@ -565,7 +534,33 @@ export function PromptInput({
                           <span className="shrink-0 text-[12px] text-muted-foreground">PX</span>
                         </div>
                       </section>
-                    </>
+                  )}
+
+                  {caps.qualities && (
+                    <section className="w-[296px]">
+                      <div className="py-1 px-1 text-xs text-muted-foreground">质量</div>
+                      <div
+                        role="listbox"
+                        aria-label="选择质量"
+                        className={`grid h-9 ${caps.qualities.length >= 4 ? 'grid-cols-4' : 'grid-cols-3'} gap-1 rounded-2xl bg-card p-0.5`}
+                      >
+                        {caps.qualities.map((item) => (
+                          <button
+                            key={item}
+                            type="button"
+                            role="option"
+                            aria-selected={quality === item}
+                            onClick={() => {
+                              onQualityChange?.(item);
+                              setOpenPanel(null);
+                            }}
+                            className="h-8 rounded-xl text-center text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                          >
+                            {QUALITY_LABELS[item]}
+                          </button>
+                        ))}
+                      </div>
+                    </section>
                   )}
                 </div>
               </div>

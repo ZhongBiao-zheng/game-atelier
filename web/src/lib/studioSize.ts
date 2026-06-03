@@ -69,3 +69,55 @@ export function normalizeStudioSizeForProvider(size: string, provider?: string |
   );
   return `${normalized.w}x${normalized.h}`;
 }
+
+// gpt-image 尺寸约束（OpenAI-HK 文档）：最大边 ≤3840、双边 16 倍数、总像素 65.5万~829万。
+const GPT_MAX_EDGE = 3840;
+const GPT_MIN_PIXELS = 655360;
+const GPT_MAX_PIXELS = 8294400;
+const round16 = (v: number) => Math.max(16, Math.round(v / 16) * 16);
+
+export function normalizeGptImagePixelSize(size: { w: number; h: number }): { w: number; h: number } {
+  let { w, h } = size;
+  const maxEdge = Math.max(w, h);
+  if (maxEdge > GPT_MAX_EDGE) {
+    const s = GPT_MAX_EDGE / maxEdge;
+    w *= s;
+    h *= s;
+  }
+  const px = w * h;
+  if (px > GPT_MAX_PIXELS) {
+    const s = Math.sqrt(GPT_MAX_PIXELS / px);
+    w *= s;
+    h *= s;
+  } else if (px < GPT_MIN_PIXELS) {
+    const s = Math.sqrt(GPT_MIN_PIXELS / px);
+    w *= s;
+    h *= s;
+  }
+  return { w: round16(w), h: round16(h) };
+}
+
+/** 按模型族归一化像素尺寸：gpt-image 走自由像素约束，其余沿用 provider 规则。 */
+export function normalizeStudioPixelSizeForModel(
+  size: { w: number; h: number },
+  provider?: string | null,
+  modelId?: string | null,
+): { w: number; h: number } {
+  if (modelId?.startsWith('gpt-image')) return normalizeGptImagePixelSize(size);
+  return normalizeStudioPixelSizeForProvider(size, provider);
+}
+
+export function normalizeStudioSizeForModel(
+  size: string,
+  provider?: string | null,
+  modelId?: string | null,
+): string {
+  const match = /^(\d+)x(\d+)$/.exec(size.trim());
+  if (!match) return size;
+  const normalized = normalizeStudioPixelSizeForModel(
+    { w: Number(match[1]), h: Number(match[2]) },
+    provider,
+    modelId,
+  );
+  return `${normalized.w}x${normalized.h}`;
+}
