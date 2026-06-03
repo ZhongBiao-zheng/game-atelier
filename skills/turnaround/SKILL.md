@@ -38,7 +38,9 @@ triggers:
 每次触发本 Skill，第一步先 `--check`（先判模式）：
 
 Dev mode：`uv run python scripts/bootstrap.py --check`
-Installed Plugin mode：`python3 ~/.claude/plugins/game-atelier/scripts/bootstrap.py --check`
+Installed Plugin mode：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --check`
+
+> 判断模式：环境变量 `${CLAUDE_PLUGIN_ROOT}` 非空 → Installed Plugin mode（一律用其下的 plugin 命令，绝不用相对路径 `scripts/bootstrap.py`）；为空 → Dev mode。插件实装路径形如 `~/.claude/plugins/cache/<市场>/game-atelier/<版本>/`，绝不能硬编码 `~/.claude/plugins/game-atelier/`。
 
 按 status 分流，**逐项推进到 ready 后才允许启 server / 开窗**：
 
@@ -71,7 +73,7 @@ Installed Plugin mode：`python3 ~/.claude/plugins/game-atelier/scripts/bootstra
 Turn 起始之前先执行：
 
 Dev：`uv run python src/viewer_server/server.py start --background`
-Plugin：`python3 ~/.claude/plugins/game-atelier/scripts/bootstrap.py --run -m viewer_server.server start --background`
+Plugin：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --run -m viewer_server.server start --background`
 
 ## Turn 起始
 

@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) and Codex when worki
 
 ## What this project is
 
-本仓库是 `game-atelier` **Plugin 源码**。Plugin 通过 `claude plugin install` 装到用户机器后，安装路径在 `~/.claude/plugins/game-atelier/`，用户数据在独立的 `<data_root>/`（默认 `~/game-atelier/`，由 `GAME_ATELIER_DATA_ROOT` 环境变量覆盖）。
+本仓库是 `game-atelier` **Plugin 源码**。Plugin 通过 `claude plugin install` 装到用户机器后，实装路径形如 `~/.claude/plugins/cache/<市场>/game-atelier/<版本>/`（**不是** `~/.claude/plugins/game-atelier/`——后者不存在）。Skill 内引用插件自带文件一律走 CC 注入的 `${CLAUDE_PLUGIN_ROOT}`，绝不硬编码 `~/.claude/plugins/<name>/`。用户数据在独立的 `<data_root>/`（默认 `~/game-atelier/`，由 `GAME_ATELIER_DATA_ROOT` 环境变量覆盖）。
 
 详见 `docs/superpowers/specs/2026-05-22-skill-distribution-design.md` 和 `docs/superpowers/plans/2026-05-22-skill-distribution-impl.md`。
 

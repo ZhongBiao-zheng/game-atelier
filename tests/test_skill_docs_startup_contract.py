@@ -32,12 +32,25 @@ def test_skill_docs_use_non_blocking_viewer_server_start_for_skills():
 
 def test_business_skill_docs_explain_installed_viewer_server_start():
     cmd = (
-        "python3 ~/.claude/plugins/game-atelier/scripts/bootstrap.py "
+        'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" '
         "--run -m viewer_server.server start --background"
     )
     for path in BUSINESS_SKILL_DOCS:
         text = _read(path)
         assert cmd in text
+
+
+def test_skill_docs_use_plugin_root_var_not_hardcoded_install_path():
+    """市场实装路径是 ~/.claude/plugins/cache/<市场>/<插件>/<版本>/，
+
+    硬编码 ~/.claude/plugins/game-atelier/ 在真机不存在 → bootstrap 全 404。
+    Skill 必须用 CC 注入的 ${CLAUDE_PLUGIN_ROOT}。
+    """
+    for path in SKILL_DOCS:
+        text = _read(path)
+        # 命令形态的硬编码路径才是 bug；告诫语里作反例提及（后不接 scripts/）放行
+        assert "~/.claude/plugins/game-atelier/scripts/bootstrap.py" not in text, path
+        assert "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" in text, path
 
 
 def test_skill_docs_do_not_use_stale_viewer_server_path():
@@ -72,7 +85,7 @@ def test_character_workflow_docs_explain_dev_and_installed_bootstrap():
     assert "Dev mode" in text
     assert "uv run python scripts/bootstrap.py --check" in text
     assert "Installed Plugin mode" in text
-    assert "python3 ~/.claude/plugins/game-atelier/scripts/bootstrap.py --check" in text
+    assert 'python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --check' in text
 
 
 def test_skill_docs_use_uv_for_dev_bootstrap():
