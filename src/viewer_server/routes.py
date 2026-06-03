@@ -768,7 +768,7 @@ def _run_studio_job_safely(job_id: str) -> None:
     """BackgroundTasks wrapper — runs job_runner.run_job and pins failures to job state.
 
     Lazy import keeps test monkeypatching (`routes._run_studio_job_safely`) effective
-    and avoids importing lovart caller chain at module load.
+    and avoids importing the caller chain at module load.
     """
     from character_workflow.lib.job_runner import run_job
     try:

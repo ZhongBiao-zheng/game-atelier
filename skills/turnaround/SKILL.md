@@ -3,7 +3,7 @@ name: turnaround
 version: 1.1.0
 description: |
   角色三视图生成。基于已有立绘（spec.md + portrait/）引导画师锁定
-  正/侧/背三面比例、表情包、武器拆解，调 Lovart 一次性出横幅三联视图
+  正/侧/背三面比例、表情包、武器拆解，调用图像服务一次性出横幅三联视图
   到 characters/<id>/turnaround/。
   当用户说"做三视图"、"出角色三面"、"出 character sheet"或调用
   /game-atelier:turnaround 时主动使用。三视图的可用性靠精确的比例共识——

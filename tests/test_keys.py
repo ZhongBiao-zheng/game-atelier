@@ -20,7 +20,7 @@ def test_write_and_read_roundtrip(isolated_data_root):
         "default_alias": "lovart-primary",
         "keys": [{
             "alias": "lovart-primary",
-            "provider": "lovart",
+            "provider": "seedream",
             "access_key": "ak_test",
             "secret_key": "sk_test",
             "capabilities": ["portrait", "promo", "turnaround"],
@@ -131,7 +131,7 @@ def test_read_keys_db_migrates_legacy_zhenzhen_provider(isolated_data_root):
 
 def test_find_by_alias(isolated_data_root):
     _seed({"version": 1, "default_alias": None, "keys": [
-        {"alias": "a", "provider": "lovart", "access_key": "x", "secret_key": "y",
+        {"alias": "a", "provider": "seedream", "access_key": "x", "secret_key": "y",
          "capabilities": ["portrait"], "models": [], "notes": "", "created_at": "2026-05-22T00:00:00+08:00"},
     ]})
     k = keys.find_by_alias("a")
@@ -141,7 +141,7 @@ def test_find_by_alias(isolated_data_root):
 
 def test_preferred_alias_returns_default_when_capability_matches(isolated_data_root):
     _seed({"version": 1, "default_alias": "a", "keys": [
-        {"alias": "a", "provider": "lovart", "access_key": "x", "secret_key": "y",
+        {"alias": "a", "provider": "seedream", "access_key": "x", "secret_key": "y",
          "capabilities": ["portrait", "promo"], "models": [], "notes": "", "created_at": "2026-05-22T00:00:00+08:00"},
     ]})
     assert keys.preferred_alias_for_kind("portrait") == "a"
@@ -151,7 +151,7 @@ def test_preferred_alias_skips_default_when_capability_missing(isolated_data_roo
     _seed({"version": 1, "default_alias": "a", "keys": [
         {"alias": "a", "provider": "openai", "access_key": "x", "secret_key": None,
          "capabilities": ["portrait"], "models": [], "notes": "", "created_at": "2026-05-22T00:00:00+08:00"},
-        {"alias": "b", "provider": "lovart", "access_key": "y", "secret_key": "z",
+        {"alias": "b", "provider": "seedream", "access_key": "y", "secret_key": "z",
          "capabilities": ["turnaround"], "models": [], "notes": "", "created_at": "2026-05-22T00:00:00+08:00"},
     ]})
     assert keys.preferred_alias_for_kind("turnaround") == "b"
@@ -167,7 +167,7 @@ def test_preferred_alias_returns_none_when_no_key_matches(isolated_data_root):
 
 def test_add_key_appends(isolated_data_root):
     keys.add_key(keys.KeySpec(
-        alias="x", provider="lovart", access_key="a", secret_key="b",
+        alias="x", provider="seedream", access_key="a", secret_key="b",
         capabilities=["portrait"], models=[], notes="",
         created_at="2026-05-22T00:00:00+08:00",
     ))
@@ -178,7 +178,7 @@ def test_add_key_appends(isolated_data_root):
 
 def test_add_key_rejects_duplicate_alias(isolated_data_root):
     spec = keys.KeySpec(
-        alias="x", provider="lovart", access_key="a", secret_key="b",
+        alias="x", provider="seedream", access_key="a", secret_key="b",
         capabilities=["portrait"], models=[], notes="",
         created_at="2026-05-22T00:00:00+08:00",
     )
@@ -189,7 +189,7 @@ def test_add_key_rejects_duplicate_alias(isolated_data_root):
 
 def test_patch_key_updates_partial(isolated_data_root):
     keys.add_key(keys.KeySpec(
-        alias="x", provider="lovart", access_key="a", secret_key="b",
+        alias="x", provider="seedream", access_key="a", secret_key="b",
         capabilities=["portrait"], models=[], notes="old",
         created_at="2026-05-22T00:00:00+08:00",
     ))
@@ -202,7 +202,7 @@ def test_patch_key_updates_partial(isolated_data_root):
 
 def test_patch_key_secret_preserved_when_not_provided(isolated_data_root):
     keys.add_key(keys.KeySpec(
-        alias="x", provider="lovart", access_key="ak1", secret_key="sk1",
+        alias="x", provider="seedream", access_key="ak1", secret_key="sk1",
         capabilities=["portrait"], models=[], notes="",
         created_at="2026-05-22T00:00:00+08:00",
     ))
@@ -214,7 +214,7 @@ def test_patch_key_secret_preserved_when_not_provided(isolated_data_root):
 
 def test_delete_key_removes(isolated_data_root):
     keys.add_key(keys.KeySpec(
-        alias="x", provider="lovart", access_key="a", secret_key="b",
+        alias="x", provider="seedream", access_key="a", secret_key="b",
         capabilities=["portrait"], models=[], notes="",
         created_at="2026-05-22T00:00:00+08:00",
     ))
@@ -224,7 +224,7 @@ def test_delete_key_removes(isolated_data_root):
 
 def test_delete_key_clears_default_alias_if_deleted(isolated_data_root):
     keys.add_key(keys.KeySpec(
-        alias="x", provider="lovart", access_key="a", secret_key="b",
+        alias="x", provider="seedream", access_key="a", secret_key="b",
         capabilities=["portrait"], models=[], notes="",
         created_at="2026-05-22T00:00:00+08:00",
     ))
@@ -244,7 +244,7 @@ def test_keys_file_chmod_600_on_posix(isolated_data_root):
     if sys.platform == "win32":
         pytest.skip("POSIX-only test")
     keys.add_key(keys.KeySpec(
-        alias="x", provider="lovart", access_key="a", secret_key="b",
+        alias="x", provider="seedream", access_key="a", secret_key="b",
         capabilities=["portrait"], models=[], notes="",
         created_at="2026-05-22T00:00:00+08:00",
     ))

@@ -4,7 +4,6 @@ export const PROVIDER_LABELS: Record<string, string> = {
   seedream: '火山引擎',
   midjourney: 'Midjourney',
   nano_banana: 'Nano Banana',
-  lovart: 'Lovart',
 };
 
 export function providerLabel(provider?: string | null, alias?: string | null): string {

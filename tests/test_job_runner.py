@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from character_workflow.lib import job_runner
-from character_workflow.lib.callers import lovart as lc
 from character_workflow.lib.active_character import write_active
 from character_workflow.lib.jobs import read_job, save_job, write_job
 from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus
@@ -63,7 +62,7 @@ def _add_stale_error(project_root: Path, job_id: str) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def test_run_job_normalizes_refs_clears_error_and_selects_valid_new_artifact(
+def test_run_job_normalizes_refs_clears_error_and_skips_invalid_artifact(
     project, monkeypatch,
 ):
     src = project / "characters" / "holy" / "source" / "ref.png"
@@ -78,41 +77,30 @@ def test_run_job_normalizes_refs_clears_error_and_selects_valid_new_artifact(
         status=JobStatus.PENDING_CONFIRM,
         asset_slot=AssetSlot.PROMO,
         source_image=str(src),
+        alias="oai",
     )
     _add_stale_error(project, "promo-001")
 
     captured: dict[str, object] = {}
 
-    def fake_upload(paths):
-        captured["uploaded"] = paths
-        return ["https://assets.lovart.ai/ref.png"]
-
-    def fake_submit(*, prompt, model, output_dir, n, attachments=None, timeout=600.0):
-        captured["submit"] = {
+    def fake_dispatch(*, prompt, model, alias, output_dir, n, size, params):
+        captured.update({
             "prompt": prompt,
             "model": model,
+            "alias": alias,
             "output_dir": Path(output_dir),
             "n": n,
-            "attachments": attachments,
-        }
-        old = Path(output_dir) / "old.png"
-        old.write_bytes(b"")
-        new = Path(output_dir) / "new.png"
-        _write_png(new, width=3, height=2)
-        return lc.LovartResult(
-            output_paths=[str(old), str(new)],
-            raw_json={
-                "thread_id": "thread-001",
-                "final_status": "timeout",
-                "downloaded": [
-                    {"type": "image", "local_path": str(old), "new": False},
-                    {"type": "image", "local_path": str(new), "new": True},
-                ],
-            },
-        )
+            "size": size,
+            "reference_images": list(params.get("reference_images") or []),
+        })
+        # First artifact is a zero-byte (invalid) file that must be skipped.
+        bad = Path(output_dir) / "bad.png"
+        bad.write_bytes(b"")
+        good = Path(output_dir) / "good.png"
+        _write_png(good, width=3, height=2)
+        return [str(bad), str(good)]
 
-    monkeypatch.setattr(job_runner.lovart_caller, "upload_files", fake_upload)
-    monkeypatch.setattr(job_runner.lovart_caller, "submit_and_wait", fake_submit)
+    monkeypatch.setattr(job_runner, "dispatch", fake_dispatch)
 
     final = job_runner.run_job("promo-001")
 
@@ -123,16 +111,14 @@ def test_run_job_normalizes_refs_clears_error_and_selects_valid_new_artifact(
     assert expected_path.exists()
     assert (expected_path.with_suffix(".md")).exists()
     params = final.params.model_dump()
+    # source_image gets normalized into reference_images and forwarded to dispatch.
     assert params["reference_images"] == [str(src)]
-    assert params["lovart_attachments"] == ["https://assets.lovart.ai/ref.png"]
-    assert params["lovart_thread_id"] == "thread-001"
-    assert params["lovart_final_status"] == "timeout"
+    assert captured["reference_images"] == [str(src)]
     assert params["requested_size"] == "2048x1152"
     assert params["actual_size"] == "3x2"
-    assert "valid artifact selected" in params["warnings"][0]
-    assert captured["uploaded"] == [str(src)]
-    assert captured["submit"]["attachments"] == ["https://assets.lovart.ai/ref.png"]
-    assert captured["submit"]["output_dir"] != expected_path.parent
+    assert captured["alias"] == "oai"
+    assert captured["size"] == "2048x1152"
+    assert captured["output_dir"] != expected_path.parent
     assert read_job("promo-001").output_paths == [str(expected_path)]
 
 

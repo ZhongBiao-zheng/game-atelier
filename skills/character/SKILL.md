@@ -3,7 +3,7 @@ name: character
 version: 4.2.0
 description: |
   游戏角色资产工作流。承接画师在 Web UI 上的反馈，通过对话逐项问清
-  风格/配色/镜头/道具，然后调 Lovart 出中文 prompt 图。
+  风格/配色/镜头/道具，然后调用图像服务出中文 prompt 图。
   当用户说"做个角色"、"出张立绘"、"继续角色工作流"或调用
   /game-atelier:character 时主动使用。spec 里不出现占位词，
   所有缺失信息都通过对话补全，不猜测不假设。

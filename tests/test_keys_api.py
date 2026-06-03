@@ -12,7 +12,7 @@ def client(isolated_data_root):
 
 def _make_payload(alias: str = "lov") -> dict:
     return {
-        "alias": alias, "provider": "lovart",
+        "alias": alias, "provider": "seedream",
         "access_key": "ak", "secret_key": "sk",
         "capabilities": ["portrait"], "models": ["gpt_image_2"],
         "notes": "test", "created_at": "2026-05-22T00:00:00+08:00",

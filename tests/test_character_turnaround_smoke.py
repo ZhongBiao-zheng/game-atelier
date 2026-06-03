@@ -1,21 +1,39 @@
 """Skill #3 turnaround 端到端 smoke。
 
-Mock lovart_caller.submit_and_wait，验证：
+Mock job_runner.dispatch，验证：
 1. turnaround Job 落盘是 PENDING_CONFIRM + kind=TURNAROUND + source_image 保留
-2. 确认推进到 PENDING 后调用 lovart_caller，output_dir 指向 characters/<id>/turnaround/
+2. 确认推进到 PENDING 后经 dispatch 出图，output_dir 指向 characters/<id>/turnaround/
 3. 出图成功落 DONE + output_paths 不污染 portrait/ / promo/
 4. lessons 走 turnaround.md 分卷（context_loader.load_lessons）
 """
+import struct
+import zlib
 from pathlib import Path
 
 import pytest
 
 from character_workflow.lib import context_loader as cl
-from character_workflow.lib.callers import lovart as lc
+from character_workflow.lib import job_runner
 from character_workflow.lib.jobs import (
-    job_output_dir, read_job, update_job_status, write_job,
+    job_output_dir, read_job, write_job,
 )
 from character_workflow.lib.schemas import AssetSlot, JobStatus
+
+
+def _write_png(path: Path, width: int = 2, height: int = 2) -> None:
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data)) + kind + data
+            + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+        )
+
+    raw = b"".join(b"\x00" + b"\xff\xff\xff" * width for _ in range(height))
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
 
 
 @pytest.fixture
@@ -51,49 +69,35 @@ def test_turnaround_full_flow_writes_job_and_image(project, monkeypatch):
     write_job(
         job_id="turn-001", character_id="holy",
         prompt="圣灵祭祀三视图 正/侧/背 横幅", model="generate_image_gpt_image_2",
-        params={"size": "1536x1024", "n": 1, "vendor": "OpenAI (via Lovart)"},
+        params={"size": "1536x1024", "n": 1, "vendor": "OpenAI"},
         seed=None, asset_slot=AssetSlot.TURNAROUND, source_image=str(src),
+        alias="oai",
     )
     j = read_job("turn-001")
     assert j.status == JobStatus.PENDING_CONFIRM
     assert j.asset_slot == AssetSlot.TURNAROUND
     assert j.source_image == str(src)
 
-    # 2. 画师确认 → PENDING
-    update_job_status("turn-001", status=JobStatus.PENDING)
-    assert read_job("turn-001").status == JobStatus.PENDING
-
-    # 3. mock lovart 返回一张横幅图，确认 output_dir 正确
-    out_dir = job_output_dir("holy", AssetSlot.TURNAROUND)
-    expected_path = out_dir / "v1.png"
-
+    # 2. mock dispatch 出图到临时目录，run_job 负责挪进 turnaround/
     captured_output_dir: list[Path] = []
 
-    def fake_submit(*, prompt, model, output_dir, n, reference_images=None, timeout=600.0):
+    def fake_dispatch(*, prompt, model, alias, output_dir, n, size, params):
         captured_output_dir.append(Path(output_dir))
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-        Path(output_dir, "v1.png").write_bytes(b"\x89PNG generated")
-        return lc.LovartResult(output_paths=[str(expected_path)], raw_json={"n": n})
+        _write_png(Path(output_dir) / "gen.png", width=6, height=4)
+        return [str(Path(output_dir) / "gen.png")]
 
-    monkeypatch.setattr(lc, "submit_and_wait", fake_submit)
+    monkeypatch.setattr(job_runner, "dispatch", fake_dispatch)
 
-    j2 = read_job("turn-001")
-    result = lc.submit_and_wait(
-        prompt=j2.prompt, model=j2.model, output_dir=out_dir,
-        n=j2.params.n or 1,
-        reference_images=[j2.source_image] if j2.source_image else None,
-    )
-    assert captured_output_dir[0] == out_dir
-    assert captured_output_dir[0].name == "turnaround"
-    assert "portrait" not in str(captured_output_dir[0])
-    assert "promo" not in str(captured_output_dir[0])
+    # 3. 出图
+    final = job_runner.run_job("turn-001")
 
-    # 4. 写 DONE
-    update_job_status("turn-001", status=JobStatus.DONE, output_paths=result.output_paths)
-    final = read_job("turn-001")
+    out_dir = job_output_dir("holy", AssetSlot.TURNAROUND)
+    expected_path = out_dir / "v1.png"
+    assert captured_output_dir[0] != out_dir
     assert final.status == JobStatus.DONE
     assert final.output_paths == [str(expected_path)]
     assert expected_path.exists(), "image must land under characters/holy/turnaround/"
+    assert expected_path.parent.name == "turnaround"
 
 
 def test_turnaround_context_load_uses_turnaround_lessons_volume(project):

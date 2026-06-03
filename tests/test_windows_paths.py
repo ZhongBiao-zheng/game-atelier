@@ -52,7 +52,7 @@ def test_win_acl_module_is_noop_on_posix(tmp_path):
 def test_keys_file_acl_restricts_to_owner(isolated_data_root):
     from character_workflow.lib import data_root, keys
     keys.add_key(keys.KeySpec(
-        alias="x", provider="lovart", access_key="a", secret_key="b",
+        alias="x", provider="seedream", access_key="a", secret_key="b",
         capabilities=["portrait"], models=[], notes="",
         created_at="2026-05-22T00:00:00+08:00",
     ))

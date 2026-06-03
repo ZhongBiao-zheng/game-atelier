@@ -120,7 +120,7 @@ function imageSrc(path: string) {
   return `/api/gallery/image?path=${encodeURIComponent(path)}`;
 }
 
-// 参考图来自 .runtime/uploads/（走 /api/raw），lovart 附件可能是 http(s) CDN 直链。
+// 参考图来自 .runtime/uploads/（走 /api/raw），也可能是 http(s) CDN 直链。
 function refImageSrc(path: string) {
   return path.startsWith('http') ? path : `/api/raw?path=${encodeURIComponent(path)}`;
 }

@@ -124,8 +124,6 @@ uv run python -m character_workflow turn-start --kind promo
 3. 画师确认后 → `uv run python -m character_workflow run-job <job_id>`
 4. 终端渲染：`![vN](绝对路径)`
 
-Lovart 是外部通道，只有画师点名才走。
-
 ## 上传图通道
 
 画师粘参考图时：先存到 `characters/<id>/source/<timestamp>-<文件名>`，落卡前确认 `reference_mode`（`full_reference` / `style_only` / `color_lighting_only` / `pose_only`），按 mode 写参考关系（详见 `references/prompt-promo-zh.md` 第五节）。立绘 = 隐式 subject（身份锚定），上传图 = reference（不替换主体）。

@@ -6,7 +6,7 @@ import { KeyForm } from './KeyForm';
 
 const mockKey = {
   alias: 'lov',
-  provider: 'lovart',
+  provider: 'openai',
   access_key: 'ak...xx',
   secret_key: null,
   capabilities: ['portrait'],

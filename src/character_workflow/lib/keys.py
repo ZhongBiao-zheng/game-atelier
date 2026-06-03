@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field, field_validator
 from character_workflow.lib import data_root
 
 Provider = Literal[
-    "lovart",
     "openai",
     "midjourney",
     "nano_banana",

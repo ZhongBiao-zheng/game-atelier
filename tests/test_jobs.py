@@ -81,7 +81,7 @@ def test_read_returns_full_job(runtime):
 def test_write_job_fills_alias_from_preferred_when_missing(runtime):
     from character_workflow.lib import keys
     keys.add_key(keys.KeySpec(
-        alias="lov", provider="lovart", access_key="ak", secret_key="sk",
+        alias="lov", provider="seedream", access_key="ak", secret_key="sk",
         capabilities=["portrait"], models=[], notes="",
         created_at="2026-05-22T00:00:00+08:00",
     ))
@@ -90,7 +90,7 @@ def test_write_job_fills_alias_from_preferred_when_missing(runtime):
         model="m", params={}, seed=None,
     )
     assert job.alias == "lov"
-    assert job.provider == "lovart"
+    assert job.provider == "seedream"
 
 
 def test_write_job_alias_null_when_no_key_matches(runtime):
@@ -105,7 +105,7 @@ def test_write_job_alias_null_when_no_key_matches(runtime):
 def test_write_job_explicit_alias_overrides_default(runtime):
     from character_workflow.lib import keys
     keys.add_key(keys.KeySpec(
-        alias="lov", provider="lovart", access_key="ak", secret_key="sk",
+        alias="lov", provider="seedream", access_key="ak", secret_key="sk",
         capabilities=["portrait"], models=[], notes="",
         created_at="2026-05-22T00:00:00+08:00",
     ))

@@ -2,7 +2,7 @@
 
 **游戏角色资产工作流 Plugin，让 Claude Code 成为你的游戏美术助手。**
 
-通过对话描述角色概念，AI 自动整理 spec、生成出图 prompt，提交到 Lovart / GPT Image 等图像服务，结果直接显示在本地 Web 画廊里。
+通过对话描述角色概念，AI 自动整理 spec、生成出图 prompt，提交到你自己配置的图像服务，结果直接显示在本地 Web 画廊里。
 
 ---
 
@@ -24,7 +24,7 @@ claude --plugin-dir .
 
 运行任意 `/game-atelier:*` 命令，插件自动引导完成三步初始化：
 
-1. **数据目录** — 默认 `~/character-workflow/`（可自定义）
+1. **数据目录** — 默认 `~/game-atelier/`（可自定义）
 2. **Python 环境** — 在数据目录内自动创建 `.venv`，无需手动安装依赖
 3. **API Key** — 打开本地 Web UI，在设置页添加图像服务 Key
 
@@ -58,10 +58,10 @@ claude --plugin-dir .
 
 ## 数据目录结构
 
-插件在数据目录（默认 `~/character-workflow/`）中写入：
+插件在数据目录（默认 `~/game-atelier/`）中写入：
 
 ```
-~/character-workflow/
+~/game-atelier/
 ├── characters/<id>/          # 角色档案
 │   ├── spec.md               # 角色定义（可在 Web 编辑）
 │   ├── portrait/             # 立绘图片
@@ -76,13 +76,14 @@ claude --plugin-dir .
 
 ## 支持的图像服务
 
-| Provider | 说明 |
-|---|---|
-| Lovart | 默认推荐，支持风格参考图 |
-| GPT Image 2 | OpenAI 高质量写实风 |
-| Seedream | 字节系模型，中文 prompt 友好 |
+只要是 **OpenAI 兼容格式** 的图像服务，配上 Key 就能用——覆盖了市面上的大多数模型：
 
-在 Web UI 设置页配置 Key，对话时可直接说"用 GPT Image 出这张"切换。
+- **OpenAI 官方**：gpt-image 系列，高质量写实风
+- **火山引擎 / 豆包 Seedream**：字节系模型，中文 prompt 友好
+- **第三方聚合商**：一个 Key 下挂多个模型族（如 gpt-image、nano-banana 等），按 modelId 自动识别能力（尺寸 / 比例 / 质量）
+- **自定义 OpenAI 兼容端点**：填 base URL + Key 即可接入
+
+在 Web UI 设置页配置 Key，对话时可直接说"用某某模型出这张"切换。每个模型族的尺寸、比例、质量控件会按其能力自动适配。
 
 ---
 
@@ -104,9 +105,8 @@ claude --plugin-dir .
 # 安装依赖
 make install
 
-# 链接本地 Skill 到 Claude Code（修改 SKILL.md 立即生效，无需重启）
+# 链接本地 Skill 到 Claude Code（重启 CC 生效）
 make dev-link
-export CHARACTER_WORKFLOW_DATA_ROOT=$(pwd)
 
 # 启动（双终端）
 uv run python src/viewer_server/server.py start    # 后端

@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class JobStatus(str, Enum):
     # PENDING_CONFIRM = Skill 已组装好调用参数、等画师在终端或 Web 点确认。
-    # PENDING = 已确认 & in-flight（Skill 同步调 lovart 期间停在此状态）。
+    # PENDING = 已确认 & in-flight（Skill 同步调图像服务期间停在此状态）。
     PENDING_CONFIRM = "pending_confirm"
     PENDING = "pending"
     DONE = "done"
@@ -42,9 +42,6 @@ class JobParams(BaseModel):
     reference_images: list[str] | None = None
     requested_size: str | None = None
     actual_size: str | None = None
-    lovart_attachments: list[str] | None = None
-    lovart_thread_id: str | None = None
-    lovart_final_status: str | None = None
     warnings: list[str] | None = None
 
 

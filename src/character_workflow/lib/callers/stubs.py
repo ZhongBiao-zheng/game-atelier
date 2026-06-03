@@ -1,4 +1,4 @@
-"""Placeholder render functions for non-lovart providers.
+"""Placeholder render functions for not-yet-wired providers.
 
 Each stub raises NotImplementedError. They exist so dispatch() can route by
 provider name today and we only need to fill in the actual subprocess wiring

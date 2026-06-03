@@ -1,12 +1,9 @@
 """Caller dispatch protocol — route render requests by alias to provider impls.
 
 dispatch(prompt, model, alias, **kwargs) looks up the key by alias, then routes
-to the appropriate provider's `render()` function (lovart for now; others raise
-NotImplementedError until wired up).
-
-Lovart-specific symbols are re-exported here so existing call sites can write
-`from character_workflow.lib.callers import lovart` and access submit_and_wait /
-upload_files / LovartResult etc.
+to the appropriate provider's `render()` function. OpenAI-compatible providers
+(openai / seedream / custom 聚合商) go through openai_image; others raise
+NotImplementedError until wired up.
 """
 from __future__ import annotations
 
@@ -14,15 +11,7 @@ from typing import Any
 
 from character_workflow.lib import keys as _keys
 
-from . import lovart, stubs, zhenzhen
-
-# Re-export lovart public surface (compat with old lovart_caller import paths).
-LovartError = lovart.LovartError
-LovartTimeout = lovart.LovartTimeout
-LovartResult = lovart.LovartResult
-DEFAULT_LOVART_CLI = lovart.DEFAULT_LOVART_CLI
-submit_and_wait = lovart.submit_and_wait
-upload_files = lovart.upload_files
+from . import stubs, zhenzhen
 
 
 class NoSuchKeyError(Exception):
@@ -45,11 +34,9 @@ def _is_zhenzhen_custom_key(key: _keys.KeySpec) -> bool:
 def _provider_render(key: _keys.KeySpec):
     """Resolve provider name → render function, fresh each call.
 
-    Re-read via attribute so monkeypatch on `callers.lovart.render` takes effect.
+    Re-read via attribute so monkeypatch on provider `render` takes effect.
     """
     provider = key.provider
-    if provider == "lovart":
-        return lovart.render
     if provider == "openai":
         return stubs.openai_render
     if provider == "midjourney":
@@ -93,15 +80,7 @@ def dispatch(
 
 __all__ = [
     "dispatch",
-    "lovart",
     "stubs",
     "NoSuchKeyError",
     "WrongProviderError",
-    # Lovart compat re-exports
-    "LovartError",
-    "LovartTimeout",
-    "LovartResult",
-    "DEFAULT_LOVART_CLI",
-    "submit_and_wait",
-    "upload_files",
 ]

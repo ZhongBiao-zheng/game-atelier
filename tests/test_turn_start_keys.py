@@ -4,7 +4,7 @@ from character_workflow.lib.turn_start import turn_start
 
 def _seed_keys() -> None:
     keys.add_key(keys.KeySpec(
-        alias="lov", provider="lovart", access_key="ak", secret_key="sk",
+        alias="lov", provider="seedream", access_key="ak", secret_key="sk",
         capabilities=["portrait", "promo"], models=["gpt_image_2"],
         notes="主力", created_at="2026-05-22T00:00:00+08:00",
     ))

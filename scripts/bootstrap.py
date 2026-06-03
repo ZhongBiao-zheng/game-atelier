@@ -105,7 +105,7 @@ def check() -> dict:
             "uv_path": uv_path,
             "venv_python": str(venv_py),
             "platform": sys.platform,
-            "next_action": "添加第一把 Lovart key（CC 向导问用户）",
+            "next_action": "添加第一把图像服务 key（CC 向导问用户）",
         }
 
     try:
@@ -193,8 +193,6 @@ _MEMORY_TEMPLATE = """\
 # game-atelier MEMORY
 
 ## 出图通用
-
-## Lovart
 
 ## 开发
 

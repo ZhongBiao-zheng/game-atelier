@@ -17,9 +17,6 @@ export interface JobParams {
   reference_images?: string[];
   requested_size?: string;
   actual_size?: string;
-  lovart_attachments?: string[];
-  lovart_thread_id?: string;
-  lovart_final_status?: string;
   warnings?: string[];
   [key: string]: unknown;
 }

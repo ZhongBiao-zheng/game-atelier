@@ -22,7 +22,7 @@ def _path(job_id: str) -> Path:
 
 
 def job_output_dir(character_id: str, kind: AssetSlot, project_root: Path | None = None) -> Path:
-    """按 asset_slot 决定 lovart 输出落到 characters/<id>/<portrait|promo|turnaround>/。"""
+    """按 asset_slot 决定出图输出落到 characters/<id>/<portrait|promo|turnaround>/。"""
     root = project_root if project_root is not None else data_root.resolve_data_root()
     return root / "characters" / character_id / kind.value
 
@@ -71,9 +71,9 @@ def write_job(
     alias: str | None = None,
 ) -> Job:
     """落盘一条 job 文件。默认 PENDING_CONFIRM —— Skill 先写好调用细节，
-    UI 渲染"出图卡片"，画师在终端或 Web 点确认后才推进到 PENDING 调 lovart。
+    UI 渲染"出图卡片"，画师在终端或 Web 点确认后才推进到 PENDING 调图像服务。
 
-    asset_slot 决定 lovart 输出目录（characters/<id>/<slot>/），由 job_output_dir() 计算。
+    asset_slot 决定出图输出目录（characters/<id>/<slot>/），由 job_output_dir() 计算。
     source_image 给 promo / turnaround Skill 传画师上传的参考图绝对路径。
     alias 不传时，按 keys.preferred_alias_for_kind(asset_slot) 自动解析；同步从 keys.json 拿 provider。"""
     if alias is None:

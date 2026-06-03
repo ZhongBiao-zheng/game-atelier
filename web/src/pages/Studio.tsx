@@ -415,7 +415,6 @@ function referenceImagesFor(job: Job): string[] {
   const refs = [
     job.source_image,
     ...(Array.isArray(params.reference_images) ? params.reference_images : []),
-    ...(Array.isArray(params.lovart_attachments) ? params.lovart_attachments : []),
   ].filter((value): value is string => typeof value === 'string' && value.length > 0);
   return Array.from(new Set(refs));
 }
