@@ -5,6 +5,7 @@ import base64
 from collections.abc import Mapping
 from http.client import IncompleteRead
 import json
+import math
 import re
 import subprocess
 import urllib.error
@@ -71,6 +72,11 @@ def render(
 
     is_hk = _is_openai_hk(base_url)
     requested = max(1, int(n or 1))
+
+    # HK gpt-image 只认尺寸表的精确 WxH；表外值（如立绘常用的 1024x1536）会被出成正方形。
+    # snap 到表内最近值，让 skill 立绘 / Studio 两条路径都拿到正确竖图。nano-banana 收比例串，不碰。
+    if is_hk and model.startswith("gpt-image"):
+        requested_size = _snap_hk_gpt_image_size(requested_size)
 
     # OpenAI-HK 的非图像模型回退 chat 模式（从 markdown/url 提取图）。
     # gpt-image / nano-banana 走真正的 images 端点，size 与 quality 才会生效。
@@ -377,6 +383,52 @@ def _decode_b64_image(value: str) -> bytes:
 
 def _is_openai_hk(base_url: str) -> bool:
     return "openai-hk.com" in urlsplit(base_url).netloc.lower()
+
+
+# HK gpt-image 只接受尺寸表里的精确 WxH；表外值（如 1024x1536）会被按总像素出成
+# 正方形（1024×1536=1,572,864 → 1254²）。表来自 openai-hk.com/docs/openai/gpt-image。
+# 注意：这是 HK 专有表，真 OpenAI 的 gpt-image 枚举不同，不要套用；nano-banana 收的是
+# 比例串（9x16），也不走这里。
+_HK_GPT_IMAGE_SIZES: tuple[tuple[int, int], ...] = (
+    (1024, 1024), (2048, 2048), (2880, 2880),  # 1:1
+    (1280, 720), (2048, 1152), (3840, 2160),  # 16:9
+    (720, 1280), (1152, 2048), (2160, 3840),  # 9:16
+    (1040, 832), (2080, 1664), (3200, 2560),  # 5:4
+    (832, 1040), (1664, 2080), (2560, 3200),  # 4:5
+    (1024, 768), (2048, 1536), (3264, 2448),  # 4:3
+    (768, 1024), (1536, 2048), (2448, 3264),  # 3:4
+    (1008, 672), (2064, 1376), (3504, 2336),  # 3:2
+    (672, 1008), (1376, 2064), (2336, 3504),  # 2:3
+    (1344, 576), (2016, 864), (3808, 1632),  # 21:9
+)
+
+
+def _snap_hk_gpt_image_size(size: object) -> object:
+    """把任意 WxH 吸附到 HK gpt-image 支持的精确尺寸：先比例最近、再像素最近。
+
+    HK gpt-image 表外值会被出成正方形，故必须 snap。`auto` 与非 WxH 串原样返回；
+    已在表内的精确值不动。
+    """
+    if not isinstance(size, str):
+        return size
+    s = size.strip()
+    if s.lower() == "auto" or not re.fullmatch(r"\d+x\d+", s):
+        return size
+    rw, rh = (int(v) for v in s.split("x"))
+    if rw <= 0 or rh <= 0:
+        return size
+    if (rw, rh) in _HK_GPT_IMAGE_SIZES:
+        return s
+    req_logratio = math.log(rw / rh)
+    req_logpx = math.log(rw * rh)
+    best = min(
+        _HK_GPT_IMAGE_SIZES,
+        key=lambda wh: (
+            round(abs(math.log(wh[0] / wh[1]) - req_logratio), 6),  # 比例最近（容忍浮点噪声）
+            abs(math.log(wh[0] * wh[1]) - req_logpx),  # 同比例内取像素最近
+        ),
+    )
+    return f"{best[0]}x{best[1]}"
 
 
 def _normalize_size_for_provider(size: object, provider: str) -> object:

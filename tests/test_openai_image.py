@@ -287,7 +287,8 @@ def test_render_openai_hk_gpt_image_with_reference_uses_sync_edits(
     assert "async" not in str(captured["url"])
     assert any(part[0] == "image" for part in captured["files"])
     assert captured["data"]["model"] == "gpt-image-2"
-    assert captured["data"]["size"] == "1024x1536"
+    # 1024x1536 不在 HK 尺寸表 → snap 到表内 2:3（1376x2064）；edits 路径同样 snap。
+    assert captured["data"]["size"] == "1376x2064"
     assert captured["data"]["quality"] == "high"
     assert len(paths) == 1
 
@@ -542,10 +543,68 @@ def test_render_openai_hk_gpt_image_uses_images_endpoint_with_size_and_quality(
     # gpt-image 不再走 chat，而是真正的 images 端点，且把 size/quality 当真参数发出。
     assert captured["url"] == "https://api.openai-hk.com/v1/images/generations"
     payload = captured["payload"]
-    assert payload["size"] == "1536x1024"
+    # 1536x1024 不在 HK 尺寸表 → snap 到表内 3:2（2064x1376）。
+    assert payload["size"] == "2064x1376"
     assert payload["quality"] == "high"
     assert "watermark" not in payload
     assert "sequential_image_generation" not in payload
+
+
+def test_render_openai_hk_gpt_image_snaps_offtable_portrait_to_supported_size(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    """skill 立绘的 1024x1536 不在 HK 尺寸表 → 必须 snap 到表内 2:3（1376x2064），
+
+    否则 HK 把它按总像素出成正方形（1024×1536 → 1254²）。这是用户真机出方图的根因。
+    """
+    _add_key(alias="hk", provider="custom", base_url="https://api.openai-hk.com")
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["payload"] = json
+        return FakePostResponse({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(b"\x89PNG\r\n\x1a\nportrait").decode("ascii"),
+            }],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+
+    openai_image.render(
+        prompt="吕布立绘", model="gpt-image-2", alias="hk",
+        output_dir=tmp_path, n=1, size="1024x1536",
+    )
+    assert captured["payload"]["size"] == "1376x2064"
+
+
+def test_render_openai_hk_gpt_image_keeps_ontable_size_unchanged(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    """表内精确值（Studio 的 1536x2048 3:4 竖图）原样下发，不被 snap 改动。"""
+    _add_key(alias="hk", provider="custom", base_url="https://api.openai-hk.com")
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["payload"] = json
+        return FakePostResponse({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(b"\x89PNG\r\n\x1a\nstudio").decode("ascii"),
+            }],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+
+    openai_image.render(
+        prompt="city", model="gpt-image-2", alias="hk",
+        output_dir=tmp_path, n=1, size="1536x2048",
+    )
+    assert captured["payload"]["size"] == "1536x2048"
 
 
 def test_render_openai_hk_nano_banana_passes_ratio_size_and_backfills(
