@@ -20,6 +20,8 @@ echo 启动工坊...
 uv run python src\viewer_server\server.py start --background
 if errorlevel 1 (
     echo.
-    echo 启动失败，请确认已安装 uv：https://docs.astral.sh/uv/
+    echo 启动失败。请看上方的错误详情判断原因，常见有：
+    echo   - 未安装 uv：https://docs.astral.sh/uv/
+    echo   - 依赖未同步：在本目录先跑  uv sync
     pause
 )
