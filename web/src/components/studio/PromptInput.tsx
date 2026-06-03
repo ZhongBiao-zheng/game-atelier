@@ -38,6 +38,14 @@ const PROVIDER_LABELS: Record<string, string> = {
   lovart: 'Lovart',
 };
 
+const REF_W = 56.5;
+const REF_H = 70;
+// 折叠堆叠时按 index 取的旋转角度（循环），制造层次让用户看到下面的图
+const COLLAPSE_ANGLES = [8, -4, 22, -8, 8, -4];
+const collapseAngle = (i: number) => COLLAPSE_ANGLES[i % COLLAPSE_ANGLES.length];
+// 展开时两两对称交替：8, -5, 8, -5...
+const expandAngle = (i: number) => (i % 2 === 0 ? 8 : -5);
+
 const NANO_BANANA_RATIOS = ['4:3', '3:4', '16:9', '9:16', '2:3', '3:2'] as const;
 type NanoBananaQuality = 'low' | 'medium' | 'high';
 const NANO_BANANA_QUALITY_LABELS: Record<NanoBananaQuality, string> = {
@@ -233,9 +241,8 @@ export function PromptInput({
         {onReferenceImagesChange && (
           <div
             data-testid="reference-images-panel"
-            className="shrink-0 w-[64px] h-full flex items-center relative overflow-visible"
-            onMouseEnter={() => { if (referenceImages.length > 0) setRefExpanded(true); }}
-            onMouseLeave={() => { setRefExpanded(false); setRefHovered(null); }}
+            className="shrink-0 self-stretch relative overflow-visible"
+            style={{ width: REF_W + 14 }}
           >
             <input
               ref={refFileInputRef}
@@ -250,77 +257,80 @@ export function PromptInput({
             {referenceImages.length === 0 ? (
               <label
                 htmlFor={refInputId}
-                className="flex items-center justify-center cursor-pointer rounded-xl border border-dashed border-border/60 bg-card/40 transition-all duration-200 hover:-translate-y-1 hover:brightness-110 hover:border-primary/50"
-                style={{ width: 56.5, height: 70, transform: 'rotate(-8deg)' }}
-                onClick={(e) => e.stopPropagation()}
+                className="absolute top-1/2 left-0 flex items-center justify-center cursor-pointer rounded-xl border border-dashed border-border/60 bg-secondary transition-all duration-200 hover:-translate-y-1 hover:brightness-110 hover:border-primary/50"
+                style={{ width: REF_W, height: REF_H, transform: 'translateY(-50%) rotate(-8deg)' }}
               >
                 <Plus size={18} className="text-muted-foreground" />
               </label>
             ) : (
               <>
-                {referenceImages.map((_file, i) => {
-                  const hovered = refHovered === i;
-                  const stackIdx = referenceImages.length - 1 - i;
-                  return (
-                    <div
-                      key={i}
-                      className="absolute top-1/2"
-                      style={{
-                        zIndex: hovered ? 20 : referenceImages.length - i,
-                        left: refExpanded ? `${i * 56.5}px` : '0',
-                        marginTop: '-35px',
-                        transition: 'left 300ms ease',
-                      }}
-                      onMouseEnter={() => setRefHovered(i)}
-                      onMouseLeave={() => setRefHovered(null)}
-                    >
+                {/* hover 区域覆盖参考图 + 添加按钮：展开只由参考图触发，移动到添加按钮上保持展开，离开整个区域才收起 */}
+                <div
+                  className="absolute inset-y-0 left-0 overflow-visible"
+                  style={{
+                    width: refExpanded
+                      ? `${(referenceImages.length - 1) * REF_W + REF_W + 12}px`
+                      : `${REF_W + 12}px`,
+                    transition: 'width 300ms ease',
+                  }}
+                  onMouseLeave={() => { setRefExpanded(false); setRefHovered(null); }}
+                >
+                  {referenceImages.map((_file, i) => {
+                    const hovered = refHovered === i;
+                    const angle = refExpanded ? expandAngle(i) : collapseAngle(i);
+                    return (
                       <div
-                        className="rounded-lg overflow-hidden border border-border/50 bg-card shadow-md transition-all duration-200 cursor-pointer"
+                        key={i}
+                        className="absolute top-1/2 left-0"
                         style={{
-                          width: 56.5,
-                          height: 70,
-                          transform: hovered
-                            ? 'translateY(-6px) scale(1.04)'
-                            : refExpanded
-                              ? 'translateY(0)'
-                              : `translateY(0) rotate(${stackIdx === 0 ? 0 : stackIdx === 1 ? 4 : -3}deg)`,
-                          filter: hovered ? 'brightness(1.15)' : 'brightness(1)',
+                          width: REF_W,
+                          height: REF_H,
+                          // 展开后右侧压左侧；折叠时保持左侧（首图）在最上
+                          zIndex: hovered ? 40 : (refExpanded ? i : referenceImages.length - i),
+                          left: refExpanded ? `${i * REF_W}px` : '0px',
+                          transform: `translateY(-50%) rotate(${angle}deg)`,
+                          transition: 'left 300ms ease, transform 300ms ease',
                         }}
+                        onMouseEnter={() => { setRefExpanded(true); setRefHovered(i); }}
+                        onMouseLeave={() => setRefHovered(null)}
                       >
-                        <img src={refPreviews[i]} alt="" className="w-full h-full object-cover" />
+                        <div className="w-full h-full rounded-lg overflow-hidden border-[1.5px] border-white bg-card shadow-md">
+                          <img src={refPreviews[i]} alt="" className="w-full h-full object-cover" />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleRefRemove(i); }}
+                          className="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] flex items-center justify-center rounded-full bg-secondary border border-border/60 text-muted-foreground hover:text-foreground transition-colors"
+                          style={{
+                            zIndex: 50,
+                            opacity: hovered ? 1 : 0,
+                            pointerEvents: hovered ? 'auto' : 'none',
+                          }}
+                        >
+                          <X size={10} />
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); handleRefRemove(i); }}
-                        className="absolute -top-1.5 -right-1.5 z-30 w-[18px] h-[18px] flex items-center justify-center rounded-full bg-card/80 border border-border/40 text-muted-foreground hover:text-foreground hover:bg-card transition-all duration-200"
-                        style={{
-                          opacity: hovered ? 1 : 0,
-                          transform: hovered ? 'translateY(-6px)' : 'translateY(0)',
-                          pointerEvents: hovered ? 'auto' : 'none',
-                        }}
-                      >
-                        <X size={10} />
-                      </button>
-                    </div>
-                  );
-                })}
-                {referenceImages.length < 4 && (
-                  <label
-                    htmlFor={refInputId}
-                    className="absolute flex items-center justify-center rounded-full border border-dashed border-border/60 bg-card/40 cursor-pointer transition-all duration-200 hover:brightness-110 hover:border-primary/50"
-                    style={{
-                      width: 22,
-                      height: 22,
-                      zIndex: 30,
-                      top: '50%',
-                      marginTop: 24,
-                      left: refExpanded ? `${(referenceImages.length - 1) * 56.5 + 56.5 - 11}px` : `${56.5 - 11}px`,
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Plus size={11} className="text-muted-foreground" />
-                  </label>
-                )}
+                    );
+                  })}
+                  {referenceImages.length < 4 && (
+                    <label
+                      htmlFor={refInputId}
+                      className="absolute flex items-center justify-center rounded-full border-[0.5px] border-border/70 bg-secondary cursor-pointer text-muted-foreground hover:text-foreground hover:border-primary/60 hover:bg-card transition-colors"
+                      style={{
+                        width: 28,
+                        height: 28,
+                        zIndex: 45,
+                        top: '50%',
+                        marginTop: 15,
+                        left: `${(refExpanded ? (referenceImages.length - 1) * REF_W : 0) + REF_W - 20}px`,
+                        transform: `rotate(${refExpanded ? expandAngle(referenceImages.length - 1) : collapseAngle(referenceImages.length - 1)}deg)`,
+                        transition: 'left 300ms ease, transform 300ms ease',
+                      }}
+                    >
+                      <Plus size={14} />
+                    </label>
+                  )}
+                </div>
               </>
             )}
           </div>
