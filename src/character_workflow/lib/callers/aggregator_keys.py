@@ -43,9 +43,14 @@ def classify_model_hint(model_hint: str) -> str | None:
 
 
 def _is_aggregator(k: keys.KeySpec) -> bool:
-    """custom Key 且带分类路由配置（routing_category / routing_hints）即视为聚合 Key。"""
-    return k.provider == "custom" and (
-        k.routing_category is not None or bool(k.routing_hints)
+    """custom Key 且带分类路由配置（routing_category / routing_hints）即视为聚合 Key。
+
+    例外：OpenAI-HK 是同步 OpenAI 兼容厂商，绝不进异步聚合通道（走 openai_image）。
+    """
+    return (
+        k.provider == "custom"
+        and not keys.is_openai_hk(k.base_url)
+        and (k.routing_category is not None or bool(k.routing_hints))
     )
 
 

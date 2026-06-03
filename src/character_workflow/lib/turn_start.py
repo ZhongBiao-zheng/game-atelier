@@ -303,6 +303,12 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         "project_id": project_id,
         "project_slug": project_slug,
         "project_name": project_name,
+        # 全量项目清单 + 是否已有项目：characters 为空时 SKILL 用它决定
+        # 「先问项目还是直接问角色」。
+        "has_projects": bool(pf.projects),
+        "projects": [
+            {"id": p.id, "name": p.name, "slug": p.slug} for p in pf.projects
+        ],
         "project_memory": load_project_memory(project_slug),
         "lessons_global": load_lessons_global(kind),
         "lessons_workspace": load_lessons_workspace(kind),

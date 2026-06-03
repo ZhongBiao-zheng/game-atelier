@@ -53,6 +53,11 @@ def _pyproject_hash() -> str:
     return hashlib.sha256(pyproject.read_bytes()).hexdigest()
 
 
+def _web_dist_ok() -> bool:
+    """前端构建产物是否随插件就位。缺失 → viewer-server 无前端可挂、开窗 404。"""
+    return (PLUGIN_DIR / "web" / "dist" / "index.html").exists()
+
+
 def _uv_install_instruction() -> str:
     if sys.platform == "win32":
         return "powershell -c \"irm https://astral.sh/uv/install.ps1 | iex\""
@@ -60,6 +65,20 @@ def _uv_install_instruction() -> str:
 
 
 def check() -> dict:
+    # 前端产物缺失先于一切：没有 UI，启了 server 也只会开窗 404。
+    if not _web_dist_ok():
+        return {
+            "status": "needs_web_build",
+            "data_root": None,
+            "uv_path": shutil.which("uv"),
+            "venv_python": None,
+            "platform": sys.platform,
+            "next_action": (
+                "前端未构建（缺 web/dist）。开发模式跑 `make build`；"
+                "插件用户：安装包缺预构建 UI，请重装插件或反馈打包问题——不要在此状态下开窗。"
+            ),
+        }
+
     data_root = resolve_data_root()
     if data_root is None:
         return {

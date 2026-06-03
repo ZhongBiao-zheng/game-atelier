@@ -250,6 +250,74 @@ def test_render_seedream_embeds_reference_images_as_base64_image_field(
     assert image[1].startswith("data:image/jpeg;base64,")
 
 
+def test_render_openai_hk_gpt_image_with_reference_uses_sync_edits(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    """HK gpt-image 带参考图 → 同步 /images/edits（multipart），绝不带 ?async=true。"""
+    _add_key(alias="hk", provider="custom", base_url="https://api.openai-hk.com")
+    ref = tmp_path / "lvbu.png"
+    ref.write_bytes(b"\x89PNG\r\n\x1a\nlvbu")
+    edited = b"\x89PNG\r\n\x1a\nedited"
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, data, files, timeout):
+        captured["url"] = url
+        captured["data"] = data
+        captured["files"] = files
+        return FakePostResponse({
+            "data": [{"b64_json": base64.b64encode(edited).decode("ascii")}],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+
+    paths = openai_image.render(
+        prompt="给吕布换银色战甲",
+        model="gpt-image-2",
+        alias="hk",
+        output_dir=tmp_path,
+        n=1,
+        size="1024x1536",
+        quality="high",
+        source_image=str(ref),
+    )
+
+    assert captured["url"] == "https://api.openai-hk.com/v1/images/edits"
+    assert "async" not in str(captured["url"])
+    assert any(part[0] == "image" for part in captured["files"])
+    assert captured["data"]["model"] == "gpt-image-2"
+    assert captured["data"]["size"] == "1024x1536"
+    assert captured["data"]["quality"] == "high"
+    assert len(paths) == 1
+
+
+def test_render_openai_hk_gpt_image_no_reference_stays_on_generations(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    """无参考图仍走 generations（JSON），不误入 edits。"""
+    _add_key(alias="hk", provider="custom", base_url="https://api.openai-hk.com")
+    img = b"\x89PNG\r\n\x1a\ngen"
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["url"] = url
+        return FakePostResponse({
+            "data": [{"b64_json": base64.b64encode(img).decode("ascii")}],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+
+    paths = openai_image.render(
+        prompt="吕布立绘", model="gpt-image-2", alias="hk",
+        output_dir=tmp_path, n=1, size="1024x1536",
+    )
+    assert captured["url"].endswith("/v1/images/generations")
+    assert len(paths) == 1
+
+
 def test_render_seedream_truncates_reference_images_to_cap(
     isolated_data_root,
     tmp_path,

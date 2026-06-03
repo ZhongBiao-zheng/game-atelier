@@ -75,6 +75,40 @@ def test_dispatch_routes_custom_aggregator_alias_to_aggregator_render(
     assert captured["kwargs"]["output_dir"] == out_dir
 
 
+def test_dispatch_openai_hk_custom_key_routes_to_openai_image_not_aggregator(
+    isolated_keys_db, tmp_path, monkeypatch,
+):
+    """OpenAI-HK 即便配了 routing 也必须走 openai_image 同步通道，不进 aggregator。"""
+    _add(
+        "hk", "custom",
+        base_url="https://api.openai-hk.com/v1",
+        routing_scope="classified", routing_category="gpt_image",
+    )
+    seen = {}
+
+    def fake_openai_render(*, prompt, model, alias, **kwargs):
+        seen["where"] = "openai_image"
+        seen["alias"] = alias
+        return ["/tmp/hk-v1.png"]
+
+    def fake_aggregator_render(*, prompt, model, alias, **kwargs):
+        seen["where"] = "aggregator"
+        return ["/tmp/agg-v1.png"]
+
+    monkeypatch.setattr(
+        "character_workflow.lib.callers.openai_image.render", fake_openai_render
+    )
+    monkeypatch.setattr(
+        "character_workflow.lib.callers.aggregator.render", fake_aggregator_render
+    )
+
+    paths = dispatch(
+        prompt="x", model="gpt-image-2", alias="hk", output_dir=tmp_path / "out"
+    )
+    assert seen["where"] == "openai_image"
+    assert paths == ["/tmp/hk-v1.png"]
+
+
 def test_dispatch_unknown_alias_raises_no_such_key(isolated_keys_db):
     with pytest.raises(NoSuchKeyError, match="missing-alias"):
         dispatch(

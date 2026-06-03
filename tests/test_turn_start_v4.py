@@ -29,6 +29,25 @@ def test_stage_b_empty_characters_dir(project):
     assert "空" in reason or "empty" in reason.lower()
 
 
+def test_turn_start_reports_has_projects(project):
+    """characters 为空时，SKILL 据 has_projects 决定先问项目还是先问角色。"""
+    from character_workflow.lib import projects
+    from character_workflow.lib.turn_start import turn_start
+
+    # 全新：无项目
+    out = turn_start("portrait", None)
+    assert out["has_projects"] is False
+    assert out["projects"] == []
+
+    # 建一个项目后：has_projects True + projects 列出 id/name/slug
+    p = projects.create_project("魔幻三国")
+    out = turn_start("portrait", None)
+    assert out["has_projects"] is True
+    assert [x["id"] for x in out["projects"]] == [p.id]
+    assert out["projects"][0]["name"] == "魔幻三国"
+    assert out["projects"][0]["slug"] == p.slug
+
+
 def test_stage_b_ignores_dot_directories(project):
     (project / "characters" / ".runtime").mkdir(parents=True)
     from character_workflow.lib.turn_start import detect_stage

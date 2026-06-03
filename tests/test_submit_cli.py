@@ -277,6 +277,67 @@ def test_submit_model_explicit(tmp_path):
     assert data["model"] == "custom_model"
 
 
+def _write_two_keys(tmp_path):
+    """default_alias 指向 gpt 这把；另有一把 nano（非默认）。"""
+    config = tmp_path / ".config"
+    config.mkdir(parents=True, exist_ok=True)
+
+    def _key(alias, model):
+        return {
+            "alias": alias, "provider": "custom",
+            "base_url": "https://api.example.test", "access_key": "ak",
+            "secret_key": None, "capabilities": ["portrait"],
+            "models": [{"name": model, "id": model}],
+            "homepage_url": None, "docs_url": None, "api_key_url": None,
+            "modalities": ["image"], "routing_scope": "general",
+            "routing_category": None, "routing_hints": [], "notes": "",
+            "created_at": "2026-05-29T00:00:00+00:00",
+        }
+
+    (config / "keys.json").write_text(
+        json.dumps({
+            "version": 1, "default_alias": "gpt",
+            "keys": [_key("gpt", "gpt-image-2"), _key("nano", "nano-banana-x")],
+        }),
+        encoding="utf-8",
+    )
+
+
+def test_submit_alias_pins_non_default_key(tmp_path):
+    """--alias 能把出图钉到非默认 Key（跨 Key 选模型）。"""
+    prompt_file = tmp_path / "p.md"
+    prompt_file.write_text("p", encoding="utf-8")
+    _write_two_keys(tmp_path)
+    env = _make_env(tmp_path)
+    r = _run(
+        ["submit", "--kind", "portrait", "--character", "holy",
+         "--alias", "nano", "--model", "nano-banana-x",
+         "--prompt-file", str(prompt_file)],
+        cwd=_project_root(), env=env,
+    )
+    assert r.returncode == 0, r.stderr
+    data = json.loads(
+        (tmp_path / ".runtime" / "jobs" / f"{r.stdout.strip()}.json").read_text(encoding="utf-8")
+    )
+    assert data["alias"] == "nano"
+    assert data["model"] == "nano-banana-x"
+    assert "nano" in data["params"]["vendor"]
+
+
+def test_submit_unknown_alias_fails(tmp_path):
+    prompt_file = tmp_path / "p.md"
+    prompt_file.write_text("p", encoding="utf-8")
+    _write_two_keys(tmp_path)
+    env = _make_env(tmp_path)
+    r = _run(
+        ["submit", "--kind", "portrait", "--character", "holy",
+         "--alias", "nope", "--prompt-file", str(prompt_file)],
+        cwd=_project_root(), env=env,
+    )
+    assert r.returncode == 2
+    assert "nope" in r.stderr
+
+
 def test_submit_without_default_key_fails(tmp_path):
     prompt_file = tmp_path / "p.md"
     prompt_file.write_text("p", encoding="utf-8")

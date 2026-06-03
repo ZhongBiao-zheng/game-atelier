@@ -33,21 +33,37 @@ triggers:
 
 不读 MEMORY 就写 prompt / 出图 / 改 spec 视为违规。
 
-## 启动自检（bootstrap）
+## 启动自检（bootstrap）——严格有序，开窗前必须全绿
+
+每次触发本 Skill，第一步先 `--check`（先判模式）：
 
 Dev mode：`uv run python scripts/bootstrap.py --check`
 Installed Plugin mode：`python3 ~/.claude/plugins/game-atelier/scripts/bootstrap.py --check`
 
-按 status 字段分流：`ready` → turn-start | `needs_data_root` → AskUserQuestion 问路径 | `needs_uv` → 显示安装命令，不替用户跑 | `needs_venv` → `<bootstrap.py> --ensure-venv` | `needs_first_key` → 启 viewer-server 引导加 Key | `needs_keys_repair` → 告知 keys.json 损坏
+按 status 分流，**逐项推进到 ready 后才允许启 server / 开窗**：
 
-## API Key 选择规则
+| status | 处理 | 可开窗 |
+|---|---|---|
+| `needs_web_build` | 前端未构建（缺 web/dist）。Dev：跑 `make build` 后重 `--check`；Plugin：告知安装包缺预构建 UI，让用户重装 / 反馈，**停在此不启 server** | ❌ |
+| `needs_data_root` | AskUserQuestion 问路径 → `<bootstrap.py> --init-data-root <path>` → 重 `--check` | ❌ |
+| `needs_uv` | 显示安装命令，不替用户跑；装完重 `--check` | ❌ |
+| `needs_venv` | `<bootstrap.py> --ensure-venv`（自动建依赖）→ 重 `--check` | ❌ |
+| `needs_keys_repair` | 告知 keys.json 损坏，引导修复 | ❌ |
+| `needs_first_key` | dist + venv 已就绪，启 viewer-server + 开窗引导加 Key | ✅ |
+| `ready` | 启 viewer-server，正常 turn-start | ✅ |
 
-turn-start 返回 `available_keys` 和 `preferred_alias`：
+铁律：`needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 状态下**绝不**启动 viewer-server、绝不开浏览器——否则用户开窗只会撞 404 / 接口报错。只有 dist 在、venv 在（`ready` 或 `needs_first_key`）才 start + open-browser。
 
-- 默认走 `preferred_alias`，不问用户
-- 用户点名 alias / provider → 切换并更新 spec.md
-- `preferred_alias` 为 null → 停下，告知缺 Key
-- 永远不在终端 / 文档 / log 里显示 access_key / secret_key
+## 模型 / API Key 选择规则
+
+**按任务挑模型，不是只读默认 Key 的第一个模型** → 完整规则见 `docs/references/model-routing.md`。要点：
+
+- **常规出图（默认）→ GPT Image 2**（id 含 `gpt-image`）：提示词当实习生用，讲清做什么即可。
+- **画风 / 质感 / 细节调整 → nano-banana**（id 含 `nano-banana`）：提示词 SD 词组式，逐条写最小单位效果。
+- 从 `available_keys[].models` 里找目标族的 `id` + 其 `alias` → `submit --alias <alias> --model <model-id>`。
+- 找不到目标族 → 回退 `preferred_alias` 默认模型并说明；`preferred_alias` 为 null → 停下告知缺 Key。
+- 用户点名 alias / provider / 模型 → 照用户，并更新 spec.md。
+- 选定模型会在出图确认卡上显示，过目即确认；永远不显示 access_key / secret_key。
 
 ## viewer-server 启停
 
@@ -113,9 +129,15 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 
 ### Stage 分叉
 
-**Stage A**（characters/ 目录不存在）：AskUserQuestion 同时问 3 题：项目名 / 一句话世界观（10-30 字）/ 第一个角色名 + 定位。落盘后直接进 render_card，不重新 turn-start。
+**Stage A / B（characters/ 为空）**：A 是目录不存在、B 是目录空。新装用户几乎总落在 **B**——因为 bootstrap 的 `--init-data-root` 预建了空的 `characters/`。两者处理一致，**按 turn-start 的 `has_projects` 分流**：
 
-**Stage B**（有项目但 characters/ 为空）：问 1 题：第一个角色名 + 定位（≤20 字）。
+- `has_projects == false`（还没有任何项目）→ **先问项目，再问角色**。角色永远从属于某个项目，不能凭空起一个孤立角色：
+  1. AskUserQuestion 第一题只问项目：「你当下在忙的是什么项目？一句话说说它的定位 / 世界观（10-30 字）」。
+  2. 据回答提炼项目名（拿不准就二次确认）→ `create-project "<项目名>"` 落盘，记下返回的 `id`。
+  3. 再问「第一个角色名 + 定位（≤20 字）」→ 落盘 spec → `assign-character <角色id> --project <项目id>` → 进 render_card。
+- `has_projects == true`（已有项目）→ 看 `projects`：仅 1 个直接归属它；多个先 AskUserQuestion 选归到哪个项目。再问「第一个角色名 + 定位」→ 落盘 → `assign-character` → render_card。
+
+**铁律**：characters 为空时，第一个问题必须是项目（在忙什么、定位），绝不上来就问「创建第一个角色吗」。理解项目后再据项目情况问角色。
 
 **Stage C**（无 active character）：列 `recent_chars` 中每个角色的 `id（tagline）`+ 新建 / 跳过。用户选定后立即 `set-active <id>` 并重新 turn-start，**不再弹二次确认**，直接进入 Stage D 推断。
 
@@ -146,6 +168,7 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 **spec 零占位规则** → `references/spec-protocol.md`（不得在 spec 里写 `?` / TBD / 待定）
 **底层规则** → `docs/references/art-prompt-system.md`
 **立绘专项** → `references/prompt-zh.md`
+**模型选择 + 按模型族写提示词** → `docs/references/model-routing.md`（GPT 实习生式 / nano-banana SD 词组式——**先定模型族再动笔**）
 
 ## 修改已出图（三模式）
 
@@ -177,10 +200,11 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 
    ```bash
    JOB_ID=$(uv run python -m character_workflow submit \
-     --kind portrait --prompt-file /tmp/cw-prompt-$$.md)
+     --kind portrait --alias <选定alias> --model <选定model-id> \
+     --prompt-file /tmp/cw-prompt-$$.md)
    ```
 
-   `--n` 默认 1；`--source-image <绝对路径>` 给 promo/turnaround 用；stdout 是纯 job_id。
+   `--alias` / `--model` 按 `docs/references/model-routing.md` 选定（常规→gpt-image / 风格调整→nano-banana）；缺省回退当前 kind 默认 Key 的首个模型。`--n` 默认 1；`--source-image <绝对路径>` 给 promo/turnaround 用；stdout 是纯 job_id。
 
 2. 终端打确认卡：alias / provider / model / 尺寸 / 参考图 / **完整 prompt 原文**（不得摘要或路径代替）
 3. 等画师明确"出图/确认/OK"后：

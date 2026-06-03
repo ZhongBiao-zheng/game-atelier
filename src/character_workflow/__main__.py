@@ -55,23 +55,24 @@ def _submit(args: argparse.Namespace) -> int:
         if args.source_image else None
     )
     reference_images = [source_image] if source_image else []
-    alias = keys.preferred_alias_for_kind(args.kind)
+    alias = args.alias or keys.preferred_alias_for_kind(args.kind)
     key = keys.find_by_alias(alias) if alias else None
     if key is None:
-        print(
-            f"submit: 当前 kind={args.kind} 没有可用默认 Key，去 Web 加一个",
-            file=sys.stderr,
-        )
+        if args.alias:
+            print(f"submit: alias={args.alias!r} 不存在，去 Web 确认 Key 列表", file=sys.stderr)
+        else:
+            print(f"submit: 当前 kind={args.kind} 没有可用默认 Key，去 Web 加一个", file=sys.stderr)
         return 2
     model = args.model
     if model is None:
         if not key.models:
             print(
-                f"submit: 默认 Key {key.alias!r} 没有配置模型，去 Web 补一个 model id",
+                f"submit: Key {key.alias!r} 没有配置模型，去 Web 补一个 model id",
                 file=sys.stderr,
             )
             return 2
         model = key.models[0].id
+    # 注：--model 允许自由传任意 id（models 列表只是建议，端点支持即可），不强校验。
 
     params: dict = {
         "vendor": f"{key.alias} ({key.provider})",
@@ -234,8 +235,12 @@ def main(argv: list[str] | None = None) -> int:
     p_submit.add_argument("--n", type=int, default=1, help="出图数量，默认 1")
     p_submit.add_argument("--size", default="1024x1536", help="出图尺寸，默认 1024x1536")
     p_submit.add_argument(
+        "--alias", default=None,
+        help="指定 Key alias；缺省用当前 kind 的默认 Key（按任务跨 Key 选模型时配合 --model）",
+    )
+    p_submit.add_argument(
         "--model", default=None,
-        help="模型 id；缺省使用当前 kind 的默认 API Key 的第一个模型",
+        help="模型 id；缺省使用所选 Key 的第一个模型",
     )
     p_submit.add_argument(
         "--source-image", default=None,

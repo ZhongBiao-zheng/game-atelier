@@ -23,9 +23,15 @@ class WrongProviderError(Exception):
 
 
 def _is_aggregator_custom_key(key: _keys.KeySpec) -> bool:
-    """带分类路由配置（routing_category / routing_hints）的 custom Key 走聚合异步通道。"""
-    return key.provider == "custom" and (
-        key.routing_category is not None or bool(key.routing_hints)
+    """带分类路由配置（routing_category / routing_hints）的 custom Key 走聚合异步通道。
+
+    例外：OpenAI-HK 是同步 OpenAI 兼容厂商（不支持 gpt-image-2 的 ?async=true），
+    哪怕配了 routing 也必须回到 openai_image 同步通道。
+    """
+    return (
+        key.provider == "custom"
+        and not _keys.is_openai_hk(key.base_url)
+        and (key.routing_category is not None or bool(key.routing_hints))
     )
 
 

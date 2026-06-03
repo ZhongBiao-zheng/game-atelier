@@ -176,6 +176,15 @@ def set_default_alias(alias: str) -> None:
     write_keys_db(db)
 
 
+def is_openai_hk(base_url: str | None) -> bool:
+    """OpenAI-HK 是同步 OpenAI 兼容厂商，绝不走 aggregator 的异步任务通道。
+
+    即使它的 custom Key 配了 routing_category/hints（仅用于表达「这把 key 挂了
+    gpt-image / nano-banana」），出图也必须走 openai_image 的同步 images 端点。
+    """
+    return bool(base_url) and "openai-hk.com" in base_url.lower()
+
+
 def preferred_alias_for_kind(kind: Kind) -> str | None:
     db = read_keys_db()
     if db.default_alias:

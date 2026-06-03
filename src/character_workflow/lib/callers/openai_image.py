@@ -108,6 +108,28 @@ def render(
     # seedream 没有 quality 概念，发了可能被拒。
     wants_quality = key.provider == "openai" or is_hk_image
     quality = _quality_param(kwargs) if wants_quality else None
+    ref_paths = _collect_ref_paths(kwargs, key.provider, model)
+
+    # OpenAI-HK 图生图：参考图必须走同步 /images/edits（multipart）。
+    # 不用 generations+image（那是 Ark/seedream 的图生图路子，HK gpt-image 不支持），
+    # 更绝不加 ?async=true —— HK 对 gpt-image-2 的 async 组合返回 404。
+    if is_hk_image and ref_paths:
+        paths: list[str] = []
+        for _ in range(requested):
+            data = _post_multipart(
+                _edits_url(base_url),
+                key.access_key,
+                fields=_hk_edits_fields(
+                    model=model, prompt=prompt, size=requested_size, quality=quality, n=1
+                ),
+                files=_ref_file_parts(ref_paths),
+                timeout=timeout,
+            )
+            paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
+            if len(paths) >= requested:
+                break
+        return paths[:requested]
+
     ref_image = _reference_image_param(kwargs, key.provider, model)
 
     def _gen_payload(num: int) -> dict:
@@ -134,6 +156,45 @@ def render(
 
 def _image_url(base_url: str) -> str:
     return f"{_api_root(base_url)}/images/generations"
+
+
+def _edits_url(base_url: str) -> str:
+    return f"{_api_root(base_url)}/images/edits"
+
+
+def _guess_mime(path: str) -> str:
+    ext = Path(path).suffix.lstrip(".").lower() or "png"
+    return "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+
+
+def _ref_file_parts(paths: list[str]) -> list[tuple]:
+    """multipart 文件部件列表；多张参考图重复 `image` 字段名（OpenAI-HK edits 约定）。"""
+    parts: list[tuple] = []
+    for p in paths:
+        parts.append(("image", (Path(p).name, Path(p).read_bytes(), _guess_mime(p))))
+    return parts
+
+
+def _hk_edits_fields(
+    *, model: str, prompt: str, size: object, quality: str | None, n: int = 1
+) -> dict:
+    fields: dict[str, str] = {"model": model, "prompt": prompt, "n": str(max(1, n))}
+    if size:
+        fields["size"] = str(size)
+    if quality:
+        fields["quality"] = quality
+    return fields
+
+
+def _post_multipart(
+    url: str, api_key: str, *, fields: dict, files: list, timeout: float
+) -> dict:
+    # 不手动设 Content-Type，让 requests 生成 multipart boundary。
+    headers = {"Authorization": f"Bearer {api_key}"}
+    resp = requests.post(url, headers=headers, data=fields, files=files, timeout=timeout)
+    if resp.status_code >= 400:
+        raise OpenAIImageError(f"image edits api {resp.status_code}: {resp.text[:500]}")
+    return resp.json()
 
 
 def _chat_image_url(base_url: str) -> str:
@@ -201,14 +262,8 @@ def _max_reference_images(provider: str, model: str) -> int:
     return 4
 
 
-def _reference_image_param(
-    kwargs: dict, provider: str, model: str
-) -> str | list[str] | None:
-    """Collect source_image + reference_images from kwargs/params → base64 data-url(s).
-
-    Truncates to the provider/model reference-image cap. Returns a single str when
-    there's one image, a list for multiple, None for none.
-    """
+def _collect_ref_paths(kwargs: dict, provider: str, model: str) -> list[str]:
+    """source_image + reference_images → 去重 + 按厂商/模型上限截断的本地路径列表。"""
     params = kwargs.get("params") or {}
     paths: list[str] = []
     source_image = kwargs.get("source_image") or params.get("source_image")
@@ -217,8 +272,17 @@ def _reference_image_param(
     for ref in (kwargs.get("reference_images") or params.get("reference_images") or []):
         if str(ref) not in paths:
             paths.append(str(ref))
-    paths = paths[: _max_reference_images(provider, model)]
-    urls = [_image_data_url(p) for p in paths]
+    return paths[: _max_reference_images(provider, model)]
+
+
+def _reference_image_param(
+    kwargs: dict, provider: str, model: str
+) -> str | list[str] | None:
+    """参考图 → base64 data-url(s)，用于 generations 的 `image` 字段（Ark/seedream 图生图）。
+
+    单张返回 str、多张返回 list、无返回 None。
+    """
+    urls = [_image_data_url(p) for p in _collect_ref_paths(kwargs, provider, model)]
     if not urls:
         return None
     return urls[0] if len(urls) == 1 else urls

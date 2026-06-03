@@ -56,3 +56,21 @@ def test_path_traversal_blocked(client):
     assert "spa" in resp.text
     # Sanity: no root/passwd content
     assert "root:" not in resp.text
+
+
+def test_missing_dist_returns_readable_503_not_bare_404(tmp_path, monkeypatch):
+    """web/dist 不存在时，开窗应看到可读提示页 (503)，不是裸 404。"""
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    missing = tmp_path / "no" / "such" / "dist"
+    app = build_app(dist_dir=missing)
+    client = TestClient(app)
+
+    resp = client.get("/")
+    assert resp.status_code == 503
+    assert "Web UI 未构建" in resp.text
+    assert "make build" in resp.text
+
+    # /api/* 仍应是 404，不被提示页吃掉
+    api = client.get("/api/this-does-not-exist")
+    assert api.status_code == 404
+    assert "Web UI 未构建" not in api.text

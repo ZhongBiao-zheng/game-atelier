@@ -134,6 +134,38 @@ def test_check_needs_keys_repair_when_keys_corrupted(tmp_path):
         assert out["status"] in ("needs_keys_repair", "needs_uv")
 
 
+def _load_bootstrap_module():
+    """In-process import of scripts/bootstrap.py so we can monkeypatch PLUGIN_DIR."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("_bootstrap_under_test", BOOTSTRAP)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_check_needs_web_build_when_dist_missing(tmp_path, monkeypatch):
+    """前端产物缺失先于一切：check() 第一位返回 needs_web_build，不启 server。"""
+    mod = _load_bootstrap_module()
+    # PLUGIN_DIR 指向一个没有 web/dist 的临时目录。
+    monkeypatch.setattr(mod, "PLUGIN_DIR", tmp_path)
+    out = mod.check()
+    assert out["status"] == "needs_web_build"
+
+
+def test_check_passes_web_build_when_dist_present(tmp_path, monkeypatch):
+    """web/dist/index.html 存在时不再卡 needs_web_build（继续后续分流）。"""
+    mod = _load_bootstrap_module()
+    (tmp_path / "web" / "dist").mkdir(parents=True)
+    (tmp_path / "web" / "dist" / "index.html").write_text("<html></html>")
+    monkeypatch.setattr(mod, "PLUGIN_DIR", tmp_path)
+    monkeypatch.delenv("GAME_ATELIER_DATA_ROOT", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    out = mod.check()
+    assert out["status"] != "needs_web_build"
+
+
 def test_check_returns_ready_when_keys_present(tmp_path):
     _make_fake_venv(tmp_path, hash_matches=True)
     (tmp_path / ".config" / "keys.json").write_text(

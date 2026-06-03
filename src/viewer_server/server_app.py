@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from character_workflow.lib.secret_filter import SecretRedactionFilter
@@ -63,5 +63,17 @@ def build_app(dist_dir: Path | None = None) -> FastAPI:
             if path and file.is_file():
                 return FileResponse(file)
             return FileResponse(dist_dir / "index.html")
+    else:
+        # 前端未构建：给出可读提示页，而不是裸 404（用户开窗只会看到一行报错）。
+        @app.get("/{path:path}")
+        async def missing_dist(path: str):
+            if path.startswith("api/"):
+                raise HTTPException(status_code=404)
+            return HTMLResponse(
+                "<h1>Web UI 未构建</h1>"
+                "<p>未找到 <code>web/dist</code>。开发模式请运行 "
+                "<code>make build</code>；插件用户请重装插件（安装包应自带预构建 UI）。</p>",
+                status_code=503,
+            )
 
     return app

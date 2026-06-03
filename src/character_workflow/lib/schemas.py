@@ -201,6 +201,9 @@ class TurnStartResult(BaseModel):
     project_id: str | None
     project_slug: str | None
     project_name: str | None
+    # v5.2.0：characters 为空时 SKILL 据此决定先问项目还是直接问角色。
+    has_projects: bool = False
+    projects: list[dict] = Field(default_factory=list)
     project_memory: str
     lessons_global: str
     lessons_workspace: str

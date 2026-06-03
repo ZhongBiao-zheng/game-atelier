@@ -49,8 +49,9 @@ __pycache__/
 .venv/
 venv/
 
-# 前端构建产物（由 vite build 生成）
-web/dist/
+# 前端构建产物（web/dist）随插件分发：市场装走 git，必须带预构建 UI，
+# 否则 viewer-server 无前端可挂、开窗 404。发版前务必 `make build` 再 commit。
+# 故 web/dist/ 不再 ignore（见 docs/plans/2026-06-03-首启bootstrap...）。
 
 # tsc -b 的中间产物（与 .tsx 源同目录生成的 .js / .tsbuildinfo）
 web/src/**/*.js

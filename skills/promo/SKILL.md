@@ -34,23 +34,36 @@ triggers:
 
 不读 MEMORY 就写 prompt / 出图 / 改 spec 视为违规。
 
-## 启动自检（bootstrap）
+## 启动自检（bootstrap）——严格有序，开窗前必须全绿
 
-每次触发本 Skill，第一步先判断当前模式：
+每次触发本 Skill，第一步先 `--check`（先判模式）：
 
 Dev mode：`uv run python scripts/bootstrap.py --check`
 Installed Plugin mode：`python3 ~/.claude/plugins/game-atelier/scripts/bootstrap.py --check`
 
-按 status 字段分流：`ready` → turn-start | `needs_data_root` → AskUserQuestion 问路径 | `needs_uv` → 显示安装命令，不替用户跑 | `needs_venv` → `<bootstrap.py> --ensure-venv` | `needs_first_key` → 启 viewer-server 引导加 Key | `needs_keys_repair` → 告知 keys.json 损坏
+按 status 分流，**逐项推进到 ready 后才允许启 server / 开窗**：
 
-## API Key 选择规则
+| status | 处理 | 可开窗 |
+|---|---|---|
+| `needs_web_build` | 前端未构建（缺 web/dist）。Dev：跑 `make build` 后重 `--check`；Plugin：告知安装包缺预构建 UI，让用户重装 / 反馈，**停在此不启 server** | ❌ |
+| `needs_data_root` | AskUserQuestion 问路径 → `<bootstrap.py> --init-data-root <path>` → 重 `--check` | ❌ |
+| `needs_uv` | 显示安装命令，不替用户跑；装完重 `--check` | ❌ |
+| `needs_venv` | `<bootstrap.py> --ensure-venv`（自动建依赖）→ 重 `--check` | ❌ |
+| `needs_keys_repair` | 告知 keys.json 损坏，引导修复 | ❌ |
+| `needs_first_key` | dist + venv 已就绪，启 viewer-server + 开窗引导加 Key | ✅ |
+| `ready` | 启 viewer-server，正常 turn-start | ✅ |
 
-turn-start 返回 `available_keys` 和 `preferred_alias`：
+铁律：`needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 状态下**绝不**启动 viewer-server、绝不开浏览器——否则用户开窗只会撞 404 / 接口报错。只有 dist 在、venv 在（`ready` 或 `needs_first_key`）才 start + open-browser。
 
-- 默认走 `preferred_alias`，不问用户
-- 用户点名 alias / provider → 切换并更新 spec.md
-- `preferred_alias` 为 null → 停下，告知缺 Key
-- 永远不在终端 / 文档 / log 里显示 access_key / secret_key
+## 模型 / API Key 选择规则
+
+**按任务挑模型** → 完整规则见 `docs/references/model-routing.md`。要点：
+
+- **常规出图（默认）→ GPT Image 2**（id 含 `gpt-image`）：提示词当实习生用，讲清做什么即可。
+- **画风 / 质感 / 细节调整 → nano-banana**（id 含 `nano-banana`）：提示词 SD 词组式，逐条写最小单位效果。
+- 从 `available_keys[].models` 里找目标族的 `id` + 其 `alias` → `submit --alias <alias> --model <model-id>`。
+- 找不到目标族 → 回退 `preferred_alias` 默认模型并说明；为 null → 停下告知缺 Key。
+- 用户点名 alias / provider / 模型 → 照用户，并更新 spec.md。选定模型在确认卡上显示，过目即确认；永不显示 key。
 
 ## viewer-server 启停
 
@@ -102,6 +115,7 @@ uv run python -m character_workflow turn-start --kind promo
 
 **底层规则** → `docs/references/art-prompt-system.md`
 **美宣专项** → `references/prompt-promo-zh.md`（画幅映射、先光后衣、narrative_beat 转动作）
+**模型选择 + 按模型族写提示词** → `docs/references/model-routing.md`（先定模型族再动笔）
 
 ## 修改已出图（三模式）
 
@@ -119,7 +133,7 @@ uv run python -m character_workflow turn-start --kind promo
 
 默认 `n=1`，不沿用立绘旧习惯的多图数量。
 
-1. `uv run python -m character_workflow submit --kind promo --prompt-file <path> --source-image <path|None>` → 落盘 PENDING_CONFIRM（不传 `--model`，画师点名才传）
+1. `uv run python -m character_workflow submit --kind promo --alias <选定alias> --model <选定model-id> --prompt-file <path> --source-image <path|None>` → 落盘 PENDING_CONFIRM（`--alias`/`--model` 按 model-routing 选；缺省回退默认 Key 首模型）
 2. 终端打确认卡：alias / provider / model / 尺寸 / 参考图 / **完整 prompt 原文**（不得用摘要或路径代替）
 3. 画师确认后 → `uv run python -m character_workflow run-job <job_id>`
 4. 终端渲染：`![vN](绝对路径)`
