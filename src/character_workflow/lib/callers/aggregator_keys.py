@@ -1,4 +1,4 @@
-"""Zhenzhen key selection helpers."""
+"""Aggregator key selection helpers."""
 from __future__ import annotations
 
 import time
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from character_workflow.lib import keys
 
 
-class ZhenzhenKeyError(RuntimeError):
+class AggregatorKeyError(RuntimeError):
     pass
 
 
@@ -42,12 +42,10 @@ def classify_model_hint(model_hint: str) -> str | None:
     return None
 
 
-def _is_zhenzhen(k: keys.KeySpec) -> bool:
+def _is_aggregator(k: keys.KeySpec) -> bool:
+    """custom Key 且带分类路由配置（routing_category / routing_hints）即视为聚合 Key。"""
     return k.provider == "custom" and (
-        "t8star" in str(k.base_url or "").lower()
-        or "zhenzhen" in str(k.alias or "").lower()
-        or k.routing_category is not None
-        or bool(k.routing_hints)
+        k.routing_category is not None or bool(k.routing_hints)
     )
 
 
@@ -64,23 +62,23 @@ def _matches_category(k: keys.KeySpec, category: str | None, model_hint: str) ->
 
 def pick_key(*, model_hint: str, alias: str | None = None) -> keys.KeySpec:
     db = keys.read_keys_db()
-    zhenzhen_keys = [k for k in db.keys if _is_zhenzhen(k)]
+    aggregator_keys = [k for k in db.keys if _is_aggregator(k)]
     category = classify_model_hint(model_hint)
     if alias:
-        selected = next((k for k in zhenzhen_keys if k.alias == alias), None)
+        selected = next((k for k in aggregator_keys if k.alias == alias), None)
         if selected is None:
-            raise ZhenzhenKeyError(f"alias {alias!r} 不是可用的自定义 Zhenzhen/T8star Key")
+            raise AggregatorKeyError(f"alias {alias!r} 不是可用的自定义聚合 Key")
         if selected.routing_scope == "classified":
             return selected
         classified = next(
-            (k for k in zhenzhen_keys if _matches_category(k, category, model_hint)),
+            (k for k in aggregator_keys if _matches_category(k, category, model_hint)),
             None,
         )
         if classified:
             return classified
         return selected
 
-    selected = next((k for k in zhenzhen_keys if _matches_category(k, category, model_hint)), None)
+    selected = next((k for k in aggregator_keys if _matches_category(k, category, model_hint)), None)
     if selected:
         return selected
 
@@ -88,7 +86,7 @@ def pick_key(*, model_hint: str, alias: str | None = None) -> keys.KeySpec:
         default = next(
             (
                 k
-                for k in zhenzhen_keys
+                for k in aggregator_keys
                 if k.alias == db.default_alias and k.routing_scope == "general"
             ),
             None,
@@ -96,12 +94,12 @@ def pick_key(*, model_hint: str, alias: str | None = None) -> keys.KeySpec:
         if default:
             return default
 
-    general = next((k for k in zhenzhen_keys if k.routing_scope == "general"), None)
+    general = next((k for k in aggregator_keys if k.routing_scope == "general"), None)
     if general:
         return general
 
     label = category or "图像"
-    raise ZhenzhenKeyError(f"未配置 {label} 专属自定义 Zhenzhen/T8star Key，且通用自定义 Key 也为空")
+    raise AggregatorKeyError(f"未配置 {label} 专属自定义聚合 Key，且通用自定义 Key 也为空")
 
 
 def remember_task_alias(task_id: str, alias: str) -> None:

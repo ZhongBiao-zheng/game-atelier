@@ -151,7 +151,7 @@ def test_run_latest_uses_active_character_kind_and_newest_pending_job(project, m
     assert captured == ["promo-002"]
 
 
-def test_run_job_routes_custom_t8star_provider_through_dispatch(project, monkeypatch):
+def test_run_job_routes_custom_provider_through_dispatch(project, monkeypatch):
     save_job(Job(
         job_id="studio-zz-001",
         character_id="zz-main",

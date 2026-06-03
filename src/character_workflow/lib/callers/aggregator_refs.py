@@ -46,7 +46,7 @@ def ref_to_banana_image(ref: str | None) -> str | None:
     return f"data:{part.content_type};base64,{data}"
 
 
-def upload_ref_to_zhenzhen(ref: str | None, api_key: str, base_url: str) -> str | None:
+def upload_ref_to_aggregator(ref: str | None, api_key: str, base_url: str) -> str | None:
     part = ref_to_file_part(ref)
     if part is None:
         return None

@@ -8,15 +8,34 @@
 
 ## 快速安装
 
+### 方式一：插件市场（推荐，支持 `claude plugin update` 一键更新）
+
 ```bash
-claude plugin install game-atelier@claude-community
+claude plugin marketplace add ZhongBiao-zheng/game-atelier
+claude plugin install game-atelier@atelier
 ```
 
-如果你拿到的是本地源码包，可以临时加载：
+### 方式二：本地源码包（要看 / 改代码，或离线分发）
+
+仓库自带一键安装脚本，自动检测本机已装的代理（Claude Code / Codex），把 Skill 软链过去：
+
+```bash
+# macOS / Linux
+./install.sh
+
+# Windows（PowerShell）
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+脚本会报告每个代理「装好了 / 没检测到跳过」，重启代理后生效。卸载加 `--uninstall`。
+
+也可只在当前会话临时加载（不落地）：
 
 ```bash
 claude --plugin-dir .
 ```
+
+> Windows 同事详细步骤见 [`docs/windows-install-checklist.md`](docs/windows-install-checklist.md)。
 
 ---
 

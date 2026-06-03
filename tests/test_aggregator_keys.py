@@ -1,5 +1,5 @@
 from character_workflow.lib import keys
-from character_workflow.lib.callers import zhenzhen_keys
+from character_workflow.lib.callers import aggregator_keys
 
 
 def _add(
@@ -14,7 +14,7 @@ def _add(
         keys.KeySpec(
             alias=alias,
             provider="custom",
-            base_url="https://ai.t8star.org",
+            base_url="https://api.aggregator.test",
             access_key=access_key,
             secret_key=None,
             capabilities=["portrait", "promo", "turnaround"],
@@ -30,27 +30,27 @@ def _add(
 
 
 def test_classify_model_hint_covers_supported_categories():
-    assert zhenzhen_keys.classify_model_hint("gpt-image-2-all") == "gpt_image"
-    assert zhenzhen_keys.classify_model_hint("nano-banana-pro") == "nano_banana"
-    assert zhenzhen_keys.classify_model_hint("midjourney") == "mj"
-    assert zhenzhen_keys.classify_model_hint("veo3") == "veo"
-    assert zhenzhen_keys.classify_model_hint("grok imagine") == "grok"
-    assert zhenzhen_keys.classify_model_hint("seedance") == "seedance"
-    assert zhenzhen_keys.classify_model_hint("suno chirp") == "suno"
+    assert aggregator_keys.classify_model_hint("gpt-image-2-all") == "gpt_image"
+    assert aggregator_keys.classify_model_hint("nano-banana-pro") == "nano_banana"
+    assert aggregator_keys.classify_model_hint("midjourney") == "mj"
+    assert aggregator_keys.classify_model_hint("veo3") == "veo"
+    assert aggregator_keys.classify_model_hint("grok imagine") == "grok"
+    assert aggregator_keys.classify_model_hint("seedance") == "seedance"
+    assert aggregator_keys.classify_model_hint("suno chirp") == "suno"
 
 
 def test_pick_key_prefers_classified_gpt_key(isolated_data_root):
-    _add("zz-general", scope="general", category=None, access_key="general-key")
+    _add("zz-general", scope="general", category=None, access_key="general-key", routing_hints=["catch-all"])
     _add("zz-gpt", scope="classified", category="gpt_image", access_key="gpt-key")
 
-    picked = zhenzhen_keys.pick_key(model_hint="gpt-image-2-all")
+    picked = aggregator_keys.pick_key(model_hint="gpt-image-2-all")
 
     assert picked.alias == "zz-gpt"
     assert picked.access_key == "gpt-key"
 
 
 def test_pick_key_uses_routing_hints_for_classified_key(isolated_data_root):
-    _add("zz-general", scope="general", category=None, access_key="general-key")
+    _add("zz-general", scope="general", category=None, access_key="general-key", routing_hints=["catch-all"])
     _add(
         "zz-custom-gpt",
         scope="classified",
@@ -59,16 +59,16 @@ def test_pick_key_uses_routing_hints_for_classified_key(isolated_data_root):
         routing_hints=["gpt-image-2-all"],
     )
 
-    picked = zhenzhen_keys.pick_key(model_hint="gpt-image-2-all")
+    picked = aggregator_keys.pick_key(model_hint="gpt-image-2-all")
 
     assert picked.alias == "zz-custom-gpt"
     assert picked.access_key == "hint-key"
 
 
 def test_pick_key_falls_back_to_general_when_classified_missing(isolated_data_root):
-    _add("zz-general", scope="general", category=None, access_key="general-key")
+    _add("zz-general", scope="general", category=None, access_key="general-key", routing_hints=["catch-all"])
 
-    picked = zhenzhen_keys.pick_key(model_hint="nano-banana-pro")
+    picked = aggregator_keys.pick_key(model_hint="nano-banana-pro")
 
     assert picked.alias == "zz-general"
     assert picked.access_key == "general-key"
@@ -77,37 +77,37 @@ def test_pick_key_falls_back_to_general_when_classified_missing(isolated_data_ro
 def test_pick_key_allows_classified_only_without_general(isolated_data_root):
     _add("zz-mj", scope="classified", category="mj", access_key="mj-key")
 
-    picked = zhenzhen_keys.pick_key(model_hint="midjourney")
+    picked = aggregator_keys.pick_key(model_hint="midjourney")
 
     assert picked.alias == "zz-mj"
     assert picked.access_key == "mj-key"
 
 
 def test_pick_key_uses_explicit_general_alias_when_no_classified_match(isolated_data_root):
-    _add("zz-general", scope="general", category=None, access_key="general-key")
+    _add("zz-general", scope="general", category=None, access_key="general-key", routing_hints=["catch-all"])
     _add("zz-gpt", scope="classified", category="gpt_image", access_key="gpt-key")
 
-    picked = zhenzhen_keys.pick_key(model_hint="unknown-model", alias="zz-general")
+    picked = aggregator_keys.pick_key(model_hint="unknown-model", alias="zz-general")
 
     assert picked.alias == "zz-general"
     assert picked.access_key == "general-key"
 
 
 def test_pick_key_upgrades_explicit_general_alias_to_classified_key(isolated_data_root):
-    _add("zz-general", scope="general", category=None, access_key="general-key")
+    _add("zz-general", scope="general", category=None, access_key="general-key", routing_hints=["catch-all"])
     _add("zz-gpt", scope="classified", category="gpt_image", access_key="gpt-key")
 
-    picked = zhenzhen_keys.pick_key(model_hint="gpt-image-2-all", alias="zz-general")
+    picked = aggregator_keys.pick_key(model_hint="gpt-image-2-all", alias="zz-general")
 
     assert picked.alias == "zz-gpt"
     assert picked.access_key == "gpt-key"
 
 
 def test_pick_key_keeps_explicit_classified_alias(isolated_data_root):
-    _add("zz-general", scope="general", category=None, access_key="general-key")
+    _add("zz-general", scope="general", category=None, access_key="general-key", routing_hints=["catch-all"])
     _add("zz-gpt", scope="classified", category="gpt_image", access_key="gpt-key")
 
-    picked = zhenzhen_keys.pick_key(model_hint="nano-banana-pro", alias="zz-gpt")
+    picked = aggregator_keys.pick_key(model_hint="nano-banana-pro", alias="zz-gpt")
 
     assert picked.alias == "zz-gpt"
     assert picked.access_key == "gpt-key"
@@ -115,14 +115,14 @@ def test_pick_key_keeps_explicit_classified_alias(isolated_data_root):
 
 def test_pick_key_raises_clear_error_when_no_key(isolated_data_root):
     try:
-        zhenzhen_keys.pick_key(model_hint="gpt-image-2-all")
-    except zhenzhen_keys.ZhenzhenKeyError as e:
+        aggregator_keys.pick_key(model_hint="gpt-image-2-all")
+    except aggregator_keys.AggregatorKeyError as e:
         assert "未配置" in str(e)
     else:
-        raise AssertionError("expected ZhenzhenKeyError")
+        raise AssertionError("expected AggregatorKeyError")
 
 
 def test_task_alias_memory_roundtrip():
-    zhenzhen_keys.remember_task_alias("task-1", "zz-gpt")
+    aggregator_keys.remember_task_alias("task-1", "zz-gpt")
 
-    assert zhenzhen_keys.recall_task_alias("task-1") == "zz-gpt"
+    assert aggregator_keys.recall_task_alias("task-1") == "zz-gpt"

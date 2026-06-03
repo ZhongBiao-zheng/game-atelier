@@ -86,11 +86,11 @@ def test_create_key_persists_provider_metadata(client):
     assert row["access_key"] != "ark-secret"
 
 
-def test_create_custom_key_accepts_zhenzhen_routing_metadata(client):
+def test_create_custom_key_accepts_aggregator_routing_metadata(client):
     payload = _make_payload("zz-gpt")
     payload.update({
         "provider": "custom",
-        "base_url": "https://ai.t8star.org",
+        "base_url": "https://api.aggregator.test",
         "access_key": "zz-secret",
         "secret_key": None,
         "routing_scope": "classified",

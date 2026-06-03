@@ -7,19 +7,19 @@ from typing import Any
 
 import requests
 
-from character_workflow.lib.callers import zhenzhen_keys, zhenzhen_protocols as protocols
-from character_workflow.lib.callers import zhenzhen_refs
+from character_workflow.lib.callers import aggregator_keys, aggregator_protocols as protocols
+from character_workflow.lib.callers import aggregator_refs
 
 
-DEFAULT_BASE_URL = "https://ai.t8star.org"
-
-
-class ZhenzhenError(RuntimeError):
+class AggregatorError(RuntimeError):
     pass
 
 
 def _base_url(key) -> str:
-    return (key.base_url or DEFAULT_BASE_URL).rstrip("/")
+    url = str(key.base_url or "").rstrip("/")
+    if not url:
+        raise AggregatorError("聚合 Key 缺少 base_url")
+    return url
 
 
 def _download_url(url: str, timeout: float = 180.0):
@@ -39,7 +39,7 @@ def _download_to_output(url: str, output_dir: Path, index: int) -> str:
     try:
         response = _download_url(url)
     except requests.RequestException as e:
-        raise ZhenzhenError(f"下载上游图片失败: {e}") from e
+        raise AggregatorError(f"下载上游图片失败: {e}") from e
     return _write_image_bytes(output_dir, response.content, index)
 
 
@@ -106,9 +106,9 @@ def _post_json_or_form(
     try:
         payload = response.json()
     except Exception as e:
-        raise ZhenzhenError(f"上游响应非 JSON: {text[:300]}") from e
+        raise AggregatorError(f"上游响应非 JSON: {text[:300]}") from e
     if not response.ok:
-        raise ZhenzhenError(_error_message(payload, response.status_code))
+        raise AggregatorError(_error_message(payload, response.status_code))
     return payload
 
 
@@ -159,7 +159,7 @@ def _submit_standard_image(
         )
         files = []
         for ref in refs:
-            part = zhenzhen_refs.ref_to_file_part(ref)
+            part = aggregator_refs.ref_to_file_part(ref)
             if part:
                 files.append(("image", (part.filename, part.data, part.content_type)))
         return _post_json_or_form(
@@ -181,7 +181,7 @@ def _submit_standard_image(
     )
     files = []
     for ref in refs:
-        part = zhenzhen_refs.ref_to_file_part(ref)
+        part = aggregator_refs.ref_to_file_part(ref)
         if part:
             files.append(("image", (part.filename, part.data, part.content_type)))
     if fields.needs_white_placeholder:
@@ -272,7 +272,7 @@ def _submit_fal(
     if refs:
         urls = []
         for ref in refs:
-            uploaded = zhenzhen_refs.upload_ref_to_zhenzhen(ref, api_key=api_key, base_url=base_url)
+            uploaded = aggregator_refs.upload_ref_to_aggregator(ref, api_key=api_key, base_url=base_url)
             if uploaded:
                 urls.append(uploaded)
         if urls:
@@ -295,8 +295,8 @@ def _poll_task(
     for _ in range(max_polls):
         if poll_interval:
             time.sleep(poll_interval)
-        remembered = zhenzhen_keys.recall_task_alias(task_id)
-        key = zhenzhen_keys.pick_key(model_hint="", alias=remembered or alias)
+        remembered = aggregator_keys.recall_task_alias(task_id)
+        key = aggregator_keys.pick_key(model_hint="", alias=remembered or alias)
         response = requests.get(
             f"{_base_url(key)}/v1/images/tasks/{task_id}",
             headers={"Authorization": f"Bearer {key.access_key}"},
@@ -305,20 +305,20 @@ def _poll_task(
         try:
             payload = response.json()
         except Exception as e:
-            raise ZhenzhenError(f"上游响应非 JSON: {response.text[:300]}") from e
+            raise AggregatorError(f"上游响应非 JSON: {response.text[:300]}") from e
         if not response.ok:
-            raise ZhenzhenError(_error_message(payload, response.status_code))
+            raise AggregatorError(_error_message(payload, response.status_code))
         inner = payload.get("data") or {}
         status = str(inner.get("status") or "").lower() if isinstance(inner, dict) else ""
         if status in ("success", "completed", "done"):
             paths = _write_outputs(payload, output_dir)
             if paths:
                 return paths
-            raise ZhenzhenError("任务成功但未返回图片")
+            raise AggregatorError("任务成功但未返回图片")
         if status in ("failure", "failed", "error"):
             reason = inner.get("fail_reason") if isinstance(inner, dict) else None
-            raise ZhenzhenError(str(reason or "任务失败"))
-    raise ZhenzhenError(f"任务轮询超时: {task_id}")
+            raise AggregatorError(str(reason or "任务失败"))
+    raise AggregatorError(f"任务轮询超时: {task_id}")
 
 
 def _poll_mj_task(
@@ -339,9 +339,9 @@ def _poll_mj_task(
         try:
             payload = response.json()
         except Exception as e:
-            raise ZhenzhenError(f"上游响应非 JSON: {response.text[:300]}") from e
+            raise AggregatorError(f"上游响应非 JSON: {response.text[:300]}") from e
         if not response.ok:
-            raise ZhenzhenError(_error_message(payload, response.status_code))
+            raise AggregatorError(_error_message(payload, response.status_code))
         status = str(payload.get("status") or "").lower()
         if status in ("success", "completed", "done"):
             image_url = payload.get("imageUrl") or payload.get("image_url")
@@ -350,10 +350,10 @@ def _poll_mj_task(
             paths = _write_outputs(payload, output_dir)
             if paths:
                 return paths
-            raise ZhenzhenError("MJ 任务成功但未返回图片")
+            raise AggregatorError("MJ 任务成功但未返回图片")
         if status in ("failure", "failed", "error"):
-            raise ZhenzhenError(str(payload.get("fail_reason") or payload.get("description") or "MJ 任务失败"))
-    raise ZhenzhenError(f"MJ 任务轮询超时: {task_id}")
+            raise AggregatorError(str(payload.get("fail_reason") or payload.get("description") or "MJ 任务失败"))
+    raise AggregatorError(f"MJ 任务轮询超时: {task_id}")
 
 
 def _poll_fal_task(
@@ -368,7 +368,7 @@ def _poll_fal_task(
 ) -> list[str]:
     request_id = str(payload.get("request_id") or "")
     if not request_id:
-        raise ZhenzhenError(f"FAL 未返回 request_id: {payload!r}")
+        raise AggregatorError(f"FAL 未返回 request_id: {payload!r}")
     url = _fix_fal_response_url(
         payload.get("response_url"),
         base_url=base_url,
@@ -382,9 +382,9 @@ def _poll_fal_task(
         try:
             data = response.json()
         except Exception as e:
-            raise ZhenzhenError(f"上游响应非 JSON: {response.text[:300]}") from e
+            raise AggregatorError(f"上游响应非 JSON: {response.text[:300]}") from e
         if not response.ok and data.get("status") not in ("IN_QUEUE", "IN_PROGRESS"):
-            raise ZhenzhenError(_error_message(data, response.status_code))
+            raise AggregatorError(_error_message(data, response.status_code))
         images = data.get("images")
         if isinstance(images, list) and images:
             paths = []
@@ -395,8 +395,8 @@ def _poll_fal_task(
                 return paths
         status = str(data.get("status") or "").upper()
         if status in ("FAILED", "CANCELLED"):
-            raise ZhenzhenError(str(data.get("error") or data.get("detail") or f"FAL {status}"))
-    raise ZhenzhenError(f"FAL 任务轮询超时: {request_id}")
+            raise AggregatorError(str(data.get("error") or data.get("detail") or f"FAL {status}"))
+    raise AggregatorError(f"FAL 任务轮询超时: {request_id}")
 
 
 def render(
@@ -412,7 +412,7 @@ def render(
     **_kwargs,
 ) -> list[str]:
     params = dict(params or {})
-    key = zhenzhen_keys.pick_key(model_hint=model, alias=alias)
+    key = aggregator_keys.pick_key(model_hint=model, alias=alias)
     out_dir = Path(output_dir)
     protocol = protocols.detect_image_protocol(model, params.get("param_kind"))
     payload = _submit_standard_image(
@@ -429,8 +429,8 @@ def render(
     if protocol == protocols.ImageProtocol.MJ:
         task_id = _task_id(payload)
         if not task_id:
-            raise ZhenzhenError(f"MJ 未返回 task_id: {payload!r}")
-        zhenzhen_keys.remember_task_alias(task_id, key.alias)
+            raise AggregatorError(f"MJ 未返回 task_id: {payload!r}")
+        aggregator_keys.remember_task_alias(task_id, key.alias)
         return _poll_mj_task(
             task_id=task_id,
             api_key=key.access_key,
@@ -444,7 +444,7 @@ def render(
         endpoint = _fal_endpoint(model, list(params.get("reference_images") or []))
         request_id = _task_id(payload)
         if request_id:
-            zhenzhen_keys.remember_task_alias(request_id, key.alias)
+            aggregator_keys.remember_task_alias(request_id, key.alias)
         return _poll_fal_task(
             payload=payload,
             api_key=key.access_key,
@@ -456,8 +456,8 @@ def render(
         )
     task_id = _task_id(payload)
     if not task_id:
-        raise ZhenzhenError(f"上游未返回图片也未返回 task_id: {payload!r}")
-    zhenzhen_keys.remember_task_alias(task_id, key.alias)
+        raise AggregatorError(f"上游未返回图片也未返回 task_id: {payload!r}")
+    aggregator_keys.remember_task_alias(task_id, key.alias)
     return _poll_task(
         task_id=task_id,
         alias=key.alias,

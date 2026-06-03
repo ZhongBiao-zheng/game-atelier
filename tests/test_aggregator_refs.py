@@ -1,9 +1,9 @@
 import base64
 
-from character_workflow.lib.callers.zhenzhen_refs import (
+from character_workflow.lib.callers.aggregator_refs import (
     ref_to_banana_image,
     ref_to_file_part,
-    upload_ref_to_zhenzhen,
+    upload_ref_to_aggregator,
 )
 
 
@@ -49,7 +49,7 @@ def test_ref_to_banana_image_converts_local_jpg_to_data_url(tmp_path):
     assert data_url == f"data:image/jpeg;base64,{base64.b64encode(JPG_BYTES).decode('ascii')}"
 
 
-def test_upload_ref_to_zhenzhen_posts_file_and_returns_url(monkeypatch, tmp_path):
+def test_upload_ref_to_aggregator_posts_file_and_returns_url(monkeypatch, tmp_path):
     path = tmp_path / "reference.png"
     path.write_bytes(PNG_BYTES)
     captured = {}
@@ -68,12 +68,12 @@ def test_upload_ref_to_zhenzhen_posts_file_and_returns_url(monkeypatch, tmp_path
         captured["timeout"] = timeout
         return Response()
 
-    monkeypatch.setattr("character_workflow.lib.callers.zhenzhen_refs.requests.post", fake_post)
+    monkeypatch.setattr("character_workflow.lib.callers.aggregator_refs.requests.post", fake_post)
 
-    result = upload_ref_to_zhenzhen(str(path), "secret-key", "https://api.zhenzhen.ai/")
+    result = upload_ref_to_aggregator(str(path), "secret-key", "https://api.aggregator.ai/")
 
     assert result == "https://cdn.example.com/reference.png"
-    assert captured["url"] == "https://api.zhenzhen.ai/v1/files"
+    assert captured["url"] == "https://api.aggregator.ai/v1/files"
     assert captured["headers"] == {"Authorization": "Bearer secret-key"}
     assert captured["files"] == {"file": ("reference.png", PNG_BYTES, "image/png")}
     assert captured["timeout"] == 180

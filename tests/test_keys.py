@@ -64,11 +64,11 @@ def test_key_spec_persists_provider_metadata(isolated_data_root):
     assert row.notes == "legacy note"
 
 
-def test_custom_key_persists_zhenzhen_routing_metadata(isolated_data_root):
+def test_custom_key_persists_aggregator_routing_metadata(isolated_data_root):
     spec = keys.KeySpec(
         alias="zz-general",
         provider="custom",
-        base_url="https://ai.t8star.org",
+        base_url="https://api.aggregator.test",
         access_key="zz-secret",
         secret_key=None,
         capabilities=["portrait", "promo", "turnaround"],
@@ -79,7 +79,7 @@ def test_custom_key_persists_zhenzhen_routing_metadata(isolated_data_root):
         routing_scope="general",
         routing_category=None,
         routing_hints=[],
-        homepage_url="https://ai.t8star.org",
+        homepage_url="https://api.aggregator.test",
         docs_url=None,
         api_key_url=None,
         modalities=["image"],
@@ -107,7 +107,7 @@ def test_read_keys_db_migrates_legacy_zhenzhen_provider(isolated_data_root):
   "keys": [{
     "alias": "zz-general",
     "provider": "zhenzhen",
-    "base_url": "https://ai.t8star.org",
+    "base_url": "https://api.aggregator.test",
     "access_key": "zz-secret",
     "secret_key": null,
     "capabilities": ["portrait"],
@@ -126,7 +126,7 @@ def test_read_keys_db_migrates_legacy_zhenzhen_provider(isolated_data_root):
     row = keys.read_keys_db().keys[0]
 
     assert row.provider == "custom"
-    assert row.base_url == "https://ai.t8star.org"
+    assert row.base_url == "https://api.aggregator.test"
 
 
 def test_find_by_alias(isolated_data_root):

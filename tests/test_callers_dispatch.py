@@ -1,7 +1,7 @@
 """Alias-based caller dispatch protocol.
 
 Verifies:
-1. dispatch routes openai / custom(t8star) aliases to the right render fn
+1. dispatch routes openai / custom 聚合 aliases to the right render fn
 2. dispatch("missing") raises NoSuchKeyError
 3. video-only provider keys can be stored without dispatch regression
 """
@@ -42,10 +42,10 @@ def _add(alias: str, provider: str, **overrides) -> KeySpec:
     return spec
 
 
-def test_dispatch_routes_custom_t8star_alias_to_zhenzhen_render(
+def test_dispatch_routes_custom_aggregator_alias_to_aggregator_render(
     isolated_keys_db, tmp_path, monkeypatch,
 ):
-    _add("zz-main", "custom", base_url="https://ai.t8star.org")
+    _add("zz-main", "custom", routing_scope="classified", routing_category="gpt_image")
     captured = {}
 
     def fake_render(*, prompt, model, alias, **kwargs):
@@ -56,7 +56,7 @@ def test_dispatch_routes_custom_t8star_alias_to_zhenzhen_render(
         return ["/tmp/zz-v1.png"]
 
     monkeypatch.setattr(
-        "character_workflow.lib.callers.zhenzhen.render",
+        "character_workflow.lib.callers.aggregator.render",
         fake_render,
     )
 

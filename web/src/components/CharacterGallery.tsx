@@ -351,18 +351,22 @@ function Skeleton({ cols }: { cols: number }) {
   const colClass = colClassMap[cols] ?? 'columns-3';
   return (
     <div className={cn(colClass, 'gap-4')}>
-      {Array.from({ length: cols }).map((_, i) => <SkeletonCard key={i} />)}
+      {Array.from({ length: cols }).map((_, i) => <SkeletonCard key={i} loading />)}
     </div>
   );
 }
 
-function SkeletonCard() {
+// loading=true：画廊正在加载已有内容（中性微光占位，不显示“生成中”，避免误以为在出图）。
+// loading=false：确有 pending job 正在出图，显示“生成中…”。
+function SkeletonCard({ loading = false }: { loading?: boolean }) {
   return (
     <div className="relative h-52 mb-4 break-inside-avoid overflow-hidden rounded-lg border border-border/40 bg-card animate-pulse">
-      <div className="absolute bottom-3 left-3 flex items-center gap-1.5 text-xs text-[color:var(--status-running)]">
-        <Loader2 className="size-3 animate-spin" />
-        生成中…
-      </div>
+      {!loading && (
+        <div className="absolute bottom-3 left-3 flex items-center gap-1.5 text-xs text-[color:var(--status-running)]">
+          <Loader2 className="size-3 animate-spin" />
+          生成中…
+        </div>
+      )}
     </div>
   );
 }

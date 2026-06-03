@@ -1,4 +1,4 @@
-from character_workflow.lib.callers import zhenzhen_protocols as zp
+from character_workflow.lib.callers import aggregator_protocols as zp
 
 
 def test_detect_protocol_gpt_size():
@@ -67,7 +67,7 @@ def test_build_banana_json_payload_for_text_to_image():
 
 
 def test_build_banana_json_payload_includes_quality():
-    from character_workflow.lib.callers.zhenzhen_protocols import build_banana_json_payload
+    from character_workflow.lib.callers.aggregator_protocols import build_banana_json_payload
 
     payload = build_banana_json_payload(
         prompt="a cat",
@@ -81,7 +81,7 @@ def test_build_banana_json_payload_includes_quality():
 
 
 def test_build_banana_json_payload_default_quality_is_medium():
-    from character_workflow.lib.callers.zhenzhen_protocols import build_banana_json_payload
+    from character_workflow.lib.callers.aggregator_protocols import build_banana_json_payload
 
     payload = build_banana_json_payload(
         prompt="a cat",
@@ -95,7 +95,7 @@ def test_build_banana_json_payload_default_quality_is_medium():
 
 
 def test_build_banana_json_payload_uses_size_field():
-    from character_workflow.lib.callers.zhenzhen_protocols import build_banana_json_payload
+    from character_workflow.lib.callers.aggregator_protocols import build_banana_json_payload
 
     payload = build_banana_json_payload(
         prompt="a cat",

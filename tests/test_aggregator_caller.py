@@ -4,7 +4,7 @@ import json
 import requests
 
 from character_workflow.lib import keys
-from character_workflow.lib.callers import zhenzhen
+from character_workflow.lib.callers import aggregator
 
 
 def _add_key(alias: str = "zz") -> None:
@@ -12,14 +12,14 @@ def _add_key(alias: str = "zz") -> None:
         keys.KeySpec(
             alias=alias,
             provider="custom",
-            base_url="https://ai.t8star.org",
+            base_url="https://api.aggregator.test",
             access_key="zz-secret",
             secret_key=None,
             capabilities=["portrait", "promo", "turnaround"],
             models=[{"name": "GPT Image 2", "id": "gpt-image-2-all"}],
             routing_scope="general",
             routing_category=None,
-            routing_hints=[],
+            routing_hints=["image"],
             modalities=["image"],
             notes="",
             created_at="2026-05-28T00:00:00+08:00",
@@ -53,9 +53,9 @@ def test_render_downloads_sync_b64_image(isolated_data_root, tmp_path, monkeypat
         calls.append((url, kwargs))
         return FakeResponse({"data": [{"b64_json": img}]})
 
-    monkeypatch.setattr(zhenzhen.requests, "post", fake_post)
+    monkeypatch.setattr(aggregator.requests, "post", fake_post)
 
-    paths = zhenzhen.render(
+    paths = aggregator.render(
         prompt="fox",
         model="gpt-image-2-all",
         alias="zz",
@@ -66,7 +66,7 @@ def test_render_downloads_sync_b64_image(isolated_data_root, tmp_path, monkeypat
 
     assert len(paths) == 1
     assert (tmp_path / "v1.png").read_bytes().startswith(b"\x89PNG")
-    assert calls[0][0] == "https://ai.t8star.org/v1/images/edits?async=true"
+    assert calls[0][0] == "https://api.aggregator.test/v1/images/edits?async=true"
     assert calls[0][1]["headers"]["Authorization"] == "Bearer zz-secret"
     assert calls[0][1]["data"]["n"] == "2"
 
@@ -93,11 +93,11 @@ def test_render_polls_async_task_and_remembers_alias(isolated_data_root, tmp_pat
     def fake_download(url, timeout=180.0):
         return FakeResponse({}, content=image_bytes)
 
-    monkeypatch.setattr(zhenzhen.requests, "post", fake_post)
-    monkeypatch.setattr(zhenzhen.requests, "get", fake_get)
-    monkeypatch.setattr(zhenzhen, "_download_url", fake_download)
+    monkeypatch.setattr(aggregator.requests, "post", fake_post)
+    monkeypatch.setattr(aggregator.requests, "get", fake_get)
+    monkeypatch.setattr(aggregator, "_download_url", fake_download)
 
-    paths = zhenzhen.render(
+    paths = aggregator.render(
         prompt="fox",
         model="nano-banana-pro",
         alias="zz",
@@ -110,7 +110,7 @@ def test_render_polls_async_task_and_remembers_alias(isolated_data_root, tmp_pat
 
     assert len(paths) == 1
     assert (tmp_path / "v1.png").read_bytes() == image_bytes
-    assert get_calls[0][0] == "https://ai.t8star.org/v1/images/tasks/task-123"
+    assert get_calls[0][0] == "https://api.aggregator.test/v1/images/tasks/task-123"
     assert get_calls[0][1]["headers"]["Authorization"] == "Bearer zz-secret"
 
 
@@ -125,9 +125,9 @@ def test_render_uses_banana_edit_fields_when_refs_exist(isolated_data_root, tmp_
         calls.append((url, kwargs))
         return FakeResponse({"data": [{"b64_json": img}]})
 
-    monkeypatch.setattr(zhenzhen.requests, "post", fake_post)
+    monkeypatch.setattr(aggregator.requests, "post", fake_post)
 
-    zhenzhen.render(
+    aggregator.render(
         prompt="fox",
         model="nano-banana-pro",
         alias="zz",
@@ -136,7 +136,7 @@ def test_render_uses_banana_edit_fields_when_refs_exist(isolated_data_root, tmp_
         params={"aspect_ratio": "16:9", "image_size": "4K", "reference_images": [str(ref)]},
     )
 
-    assert calls[0][0] == "https://ai.t8star.org/v1/images/edits?async=true"
+    assert calls[0][0] == "https://api.aggregator.test/v1/images/edits?async=true"
     assert calls[0][1]["data"] == {
         "prompt": "fox",
         "model": "nano-banana-pro",
@@ -161,11 +161,11 @@ def test_render_routes_mj_protocol(isolated_data_root, tmp_path, monkeypatch):
         get_calls.append((url, kwargs))
         return FakeResponse({"status": "SUCCESS", "imageUrl": "https://cdn.example.com/mj.png"})
 
-    monkeypatch.setattr(zhenzhen.requests, "post", fake_post)
-    monkeypatch.setattr(zhenzhen.requests, "get", fake_get)
-    monkeypatch.setattr(zhenzhen, "_download_url", lambda *args, **kwargs: FakeResponse({}, content=image_bytes))
+    monkeypatch.setattr(aggregator.requests, "post", fake_post)
+    monkeypatch.setattr(aggregator.requests, "get", fake_get)
+    monkeypatch.setattr(aggregator, "_download_url", lambda *args, **kwargs: FakeResponse({}, content=image_bytes))
 
-    paths = zhenzhen.render(
+    paths = aggregator.render(
         prompt="castle",
         model="midjourney",
         alias="zz",
@@ -176,9 +176,9 @@ def test_render_routes_mj_protocol(isolated_data_root, tmp_path, monkeypatch):
     )
 
     assert len(paths) == 1
-    assert post_calls[0][0] == "https://ai.t8star.org/mj-fast/mj/submit/imagine"
+    assert post_calls[0][0] == "https://api.aggregator.test/mj-fast/mj/submit/imagine"
     assert post_calls[0][1]["json"]["ar"] == "16:9"
-    assert get_calls[0][0] == "https://ai.t8star.org/mj-fast/mj/task/mj-task-1/fetch"
+    assert get_calls[0][0] == "https://api.aggregator.test/mj-fast/mj/task/mj-task-1/fetch"
 
 
 def test_render_routes_fal_protocol(isolated_data_root, tmp_path, monkeypatch):
@@ -198,11 +198,11 @@ def test_render_routes_fal_protocol(isolated_data_root, tmp_path, monkeypatch):
         get_calls.append((url, kwargs))
         return FakeResponse({"images": [{"url": "https://cdn.example.com/fal.png"}]})
 
-    monkeypatch.setattr(zhenzhen.requests, "post", fake_post)
-    monkeypatch.setattr(zhenzhen.requests, "get", fake_get)
-    monkeypatch.setattr(zhenzhen, "_download_url", lambda *args, **kwargs: FakeResponse({}, content=image_bytes))
+    monkeypatch.setattr(aggregator.requests, "post", fake_post)
+    monkeypatch.setattr(aggregator.requests, "get", fake_get)
+    monkeypatch.setattr(aggregator, "_download_url", lambda *args, **kwargs: FakeResponse({}, content=image_bytes))
 
-    paths = zhenzhen.render(
+    paths = aggregator.render(
         prompt="fox",
         model="gpt-image-2-fal",
         alias="zz",
@@ -213,12 +213,12 @@ def test_render_routes_fal_protocol(isolated_data_root, tmp_path, monkeypatch):
     )
 
     assert len(paths) == 1
-    assert post_calls[0][0] == "https://ai.t8star.org/fal/openai/gpt-image-2"
+    assert post_calls[0][0] == "https://api.aggregator.test/fal/openai/gpt-image-2"
     assert post_calls[0][1]["json"]["prompt"] == "fox"
-    assert get_calls[0][0] == "https://ai.t8star.org/fal/openai/gpt-image-2/requests/fal-req-1"
+    assert get_calls[0][0] == "https://api.aggregator.test/fal/openai/gpt-image-2/requests/fal-req-1"
 
 
-def test_render_wraps_poll_bad_json_as_zhenzhen_error(isolated_data_root, tmp_path, monkeypatch):
+def test_render_wraps_poll_bad_json_as_aggregator_error(isolated_data_root, tmp_path, monkeypatch):
     _add_key()
 
     class BadJsonResponse(FakeResponse):
@@ -227,11 +227,11 @@ def test_render_wraps_poll_bad_json_as_zhenzhen_error(isolated_data_root, tmp_pa
         def json(self):
             raise ValueError("bad json")
 
-    monkeypatch.setattr(zhenzhen.requests, "post", lambda *args, **kwargs: FakeResponse({"data": "task-123"}))
-    monkeypatch.setattr(zhenzhen.requests, "get", lambda *args, **kwargs: BadJsonResponse({}))
+    monkeypatch.setattr(aggregator.requests, "post", lambda *args, **kwargs: FakeResponse({"data": "task-123"}))
+    monkeypatch.setattr(aggregator.requests, "get", lambda *args, **kwargs: BadJsonResponse({}))
 
     try:
-        zhenzhen.render(
+        aggregator.render(
             prompt="fox",
             model="nano-banana-pro",
             alias="zz",
@@ -240,10 +240,10 @@ def test_render_wraps_poll_bad_json_as_zhenzhen_error(isolated_data_root, tmp_pa
             poll_interval=0,
             max_polls=1,
         )
-    except zhenzhen.ZhenzhenError as e:
+    except aggregator.AggregatorError as e:
         assert "上游响应非 JSON" in str(e)
     else:
-        raise AssertionError("expected ZhenzhenError")
+        raise AssertionError("expected AggregatorError")
 
 
 def test_render_wraps_artifact_download_failure(isolated_data_root, tmp_path, monkeypatch):
@@ -255,18 +255,18 @@ def test_render_wraps_artifact_download_failure(isolated_data_root, tmp_path, mo
     def fake_download(*args, **kwargs):
         raise requests.HTTPError("404")
 
-    monkeypatch.setattr(zhenzhen.requests, "post", fake_post)
-    monkeypatch.setattr(zhenzhen, "_download_url", fake_download)
+    monkeypatch.setattr(aggregator.requests, "post", fake_post)
+    monkeypatch.setattr(aggregator, "_download_url", fake_download)
 
     try:
-        zhenzhen.render(
+        aggregator.render(
             prompt="fox",
             model="gpt-image-2-all",
             alias="zz",
             output_dir=tmp_path,
             params={"reference_images": []},
         )
-    except zhenzhen.ZhenzhenError as e:
+    except aggregator.AggregatorError as e:
         assert "下载上游图片失败" in str(e)
     else:
-        raise AssertionError("expected ZhenzhenError")
+        raise AssertionError("expected AggregatorError")

@@ -11,7 +11,7 @@ from typing import Any
 
 from character_workflow.lib import keys as _keys
 
-from . import stubs, zhenzhen
+from . import stubs, aggregator
 
 
 class NoSuchKeyError(Exception):
@@ -22,12 +22,10 @@ class WrongProviderError(Exception):
     """Raised when a caller is invoked with an alias of the wrong provider."""
 
 
-def _is_zhenzhen_custom_key(key: _keys.KeySpec) -> bool:
+def _is_aggregator_custom_key(key: _keys.KeySpec) -> bool:
+    """带分类路由配置（routing_category / routing_hints）的 custom Key 走聚合异步通道。"""
     return key.provider == "custom" and (
-        "t8star" in str(key.base_url or "").lower()
-        or "zhenzhen" in str(key.alias or "").lower()
-        or key.routing_category is not None
-        or bool(key.routing_hints)
+        key.routing_category is not None or bool(key.routing_hints)
     )
 
 
@@ -46,8 +44,8 @@ def _provider_render(key: _keys.KeySpec):
     if provider == "seedream":
         return stubs.seedream_render
     if provider == "custom":
-        if _is_zhenzhen_custom_key(key):
-            return zhenzhen.render
+        if _is_aggregator_custom_key(key):
+            return aggregator.render
         return stubs.custom_render
     return None
 
