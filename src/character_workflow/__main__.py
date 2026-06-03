@@ -24,6 +24,15 @@ from character_workflow.lib.schemas import AssetSlot, JobStatus
 from character_workflow.lib.turn_start import turn_start
 
 
+def _force_utf8_stdio() -> None:
+    """Windows 控制台默认 GBK；强制 stdout/stderr UTF-8，防大块中文 JSON mojibake / WinError 87。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
+
+
 def _submit(args: argparse.Namespace) -> int:
     """落盘一条 PENDING_CONFIRM job，stdout 输出纯 job_id。
 
@@ -179,6 +188,7 @@ def _append_memory(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_stdio()
     parser = argparse.ArgumentParser(prog="game-atelier")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

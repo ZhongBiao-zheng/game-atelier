@@ -262,7 +262,17 @@ def run_in_venv(forward_args: list[str]) -> int:
     return proc.returncode
 
 
+def _force_utf8_stdio() -> None:
+    """Windows 控制台默认 GBK；强制 stdout/stderr UTF-8，防中文 next_action / JSON mojibake。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
+
+
 def main() -> int:
+    _force_utf8_stdio()
     # Handle --run before argparse so the remaining args pass through unparsed.
     if len(sys.argv) >= 2 and sys.argv[1] == "--run":
         return run_in_venv(sys.argv[2:])

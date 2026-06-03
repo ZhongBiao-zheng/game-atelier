@@ -204,7 +204,17 @@ def cmd_open_browser() -> None:
     print(url)
 
 
+def _force_utf8_stdio() -> None:
+    """Windows 控制台默认 GBK；强制 stdout/stderr UTF-8，防中文输出 mojibake / WinError 87。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
+
+
 if __name__ == "__main__":
+    _force_utf8_stdio()
     if len(sys.argv) < 2:
         print("usage: server.py {start [--background]|stop|open-browser}")
         sys.exit(1)
