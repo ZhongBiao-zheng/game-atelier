@@ -1,4 +1,5 @@
 import { Pencil, Star, Trash2 } from 'lucide-react';
+import { providerLabel } from '@/lib/providerLabels';
 
 export interface KeyRow {
   alias: string;
@@ -29,6 +30,7 @@ interface Props {
 
 export function KeyCard({ row, onSetDefault, onEdit, onDelete }: Props) {
   const linkUrl = row.homepage_url || row.base_url;
+  const vendorName = providerLabel(row.provider, row.alias);
 
   return (
     <div className="w-full max-w-2xl rounded-lg border border-border bg-card p-4">
@@ -38,7 +40,12 @@ export function KeyCard({ row, onSetDefault, onEdit, onDelete }: Props) {
             {row.is_default && (
               <Star size={14} className="fill-primary stroke-primary" aria-label="默认 Key" />
             )}
-            <span className="truncate text-sm font-medium text-foreground">{row.alias}</span>
+            <span className="truncate text-sm font-medium text-foreground">{vendorName}</span>
+            {vendorName !== row.alias && (
+              <span className="shrink-0 truncate rounded bg-secondary px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                {row.alias}
+              </span>
+            )}
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {linkUrl && (

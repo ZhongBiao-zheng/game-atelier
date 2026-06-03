@@ -46,6 +46,20 @@ describe('KeysPage', () => {
     expect(screen.getByText('ak...xx')).toBeInTheDocument();
   });
 
+  it('shows the official vendor name (中文) as the card title for known providers', async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        keys: [{ ...mockKey, alias: 'seedream', provider: 'seedream' }],
+        default_alias: 'seedream',
+      }),
+    });
+    render(<KeysPage />);
+    // provider=seedream → 标题显示官方中文名「火山引擎」，alias 作为小标签保留
+    await waitFor(() => expect(screen.getByText('火山引擎')).toBeInTheDocument());
+    expect(screen.getByText('seedream')).toBeInTheDocument();
+  });
+
   it('renders brass ★ with aria-label for default key', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,

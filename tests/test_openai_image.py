@@ -206,6 +206,129 @@ def test_render_seedream_normalizes_size_to_minimum_pixel_area(
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
+def test_render_seedream_embeds_reference_images_as_base64_image_field(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    _add_key(
+        alias="seedream",
+        provider="seedream",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+    )
+    ref_one = tmp_path / "ref1.png"
+    ref_one.write_bytes(b"\x89PNG\r\n\x1a\nref-one")
+    ref_two = tmp_path / "ref2.jpg"
+    ref_two.write_bytes(b"\xff\xd8\xff\xe0ref-two")
+    image_bytes = b"\x89PNG\r\n\x1a\nseedream-edit"
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["payload"] = json
+        return FakePostResponse({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(image_bytes).decode("ascii"),
+            }],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+
+    openai_image.render(
+        prompt="restyle",
+        model="doubao-seedream-5-0-260128",
+        alias="seedream",
+        output_dir=tmp_path,
+        n=1,
+        size="2048x2048",
+        reference_images=[str(ref_one), str(ref_two)],
+    )
+
+    image = captured["payload"]["image"]
+    assert isinstance(image, list) and len(image) == 2
+    assert image[0].startswith("data:image/png;base64,")
+    assert image[1].startswith("data:image/jpeg;base64,")
+
+
+def test_render_seedream_truncates_reference_images_to_cap(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    _add_key(
+        alias="seedream",
+        provider="seedream",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+    )
+    # 火山引擎 Seedream 图生图上限 10 张；传 12 张应截断到前 10 张。
+    refs = []
+    for i in range(12):
+        ref = tmp_path / f"ref{i}.png"
+        ref.write_bytes(b"\x89PNG\r\n\x1a\n" + str(i).encode())
+        refs.append(str(ref))
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["payload"] = json
+        return FakePostResponse({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(b"\x89PNG\r\n\x1a\nout").decode("ascii"),
+            }],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+
+    openai_image.render(
+        prompt="restyle",
+        model="doubao-seedream-5-0-260128",
+        alias="seedream",
+        output_dir=tmp_path,
+        n=1,
+        size="2048x2048",
+        reference_images=refs,
+    )
+
+    image = captured["payload"]["image"]
+    assert isinstance(image, list) and len(image) == 10
+
+
+def test_render_seedream_omits_image_field_without_references(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    _add_key(
+        alias="seedream",
+        provider="seedream",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+    )
+    image_bytes = b"\x89PNG\r\n\x1a\nno-ref"
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["payload"] = json
+        return FakePostResponse({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(image_bytes).decode("ascii"),
+            }],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+
+    openai_image.render(
+        prompt="fox",
+        model="doubao-seedream-5-0-260128",
+        alias="seedream",
+        output_dir=tmp_path,
+        n=1,
+        size="2048x2048",
+    )
+
+    assert "image" not in captured["payload"]
+
+
 def test_render_seedream_backfills_when_api_returns_fewer_images(
     isolated_data_root,
     tmp_path,

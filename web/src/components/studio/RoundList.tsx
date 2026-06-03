@@ -28,12 +28,14 @@ export function RoundList({
   onReEdit,
   onRegenerate,
   onDeleteBatch,
+  onReuseReferences,
 }: {
   rounds: RoundState[];
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig) => void;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
+  onReuseReferences?: (paths: string[]) => void | Promise<void>;
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   if (rounds.length === 0) return null;
@@ -55,13 +57,7 @@ export function RoundList({
               {r.kind === 'pending' && (
                 <section className="space-y-3">
                   <div className="flex items-start gap-3 text-sm">
-                    {r.config.referenceImages[0] && (
-                      <img
-                        src={imageSrc(r.config.referenceImages[0])}
-                        alt="参考图"
-                        className="h-14 w-14 rounded-md object-cover"
-                      />
-                    )}
+                    <ReferenceStack refs={r.config.referenceImages} onReuse={onReuseReferences} />
                     <div className="min-w-0 flex-1">
                       <p className="line-clamp-2 text-base leading-7 text-foreground" title={r.config.prompt}>
                         {r.config.prompt}
@@ -99,6 +95,7 @@ export function RoundList({
                   onRegenerate={onRegenerate}
                   onDeleteBatch={onDeleteBatch}
                   onLightbox={setLightboxSrc}
+                  onReuseReferences={onReuseReferences}
                 />
               )}
               {r.kind === 'failed' && (
@@ -107,6 +104,7 @@ export function RoundList({
                   onDeleteFailed={onDeleteFailed}
                   onReEdit={onReEdit}
                   onRegenerate={onRegenerate}
+                  onReuseReferences={onReuseReferences}
                 />
               )}
             </div>
@@ -122,18 +120,80 @@ function imageSrc(path: string) {
   return `/api/gallery/image?path=${encodeURIComponent(path)}`;
 }
 
+// 参考图来自 .runtime/uploads/（走 /api/raw），lovart 附件可能是 http(s) CDN 直链。
+function refImageSrc(path: string) {
+  return path.startsWith('http') ? path : `/api/raw?path=${encodeURIComponent(path)}`;
+}
+
+const REF_CARD_W = 46;
+const REF_CARD_H = 58;
+const REF_ROTATIONS = [-6, 5, -4, 7, -5, 4, -3, 6];
+const REF_OVERLAP_REST = 30;
+const REF_OVERLAP_HOVER = 8;
+
+// 出图历史里提示词左侧的参考图堆叠：未 hover 重叠旋转成一叠；hover 时整组散开、每张以中心为轴放大；点击整组复用。
+function ReferenceStack({
+  refs,
+  onReuse,
+}: {
+  refs: string[];
+  onReuse?: (paths: string[]) => void | Promise<void>;
+}) {
+  const [hover, setHover] = useState(false);
+  const [active, setActive] = useState<number | null>(null);
+  if (refs.length === 0) return null;
+  return (
+    <button
+      type="button"
+      data-testid="reference-stack"
+      title="点击复用这组参考图"
+      aria-label="复用这组参考图"
+      onClick={() => { void onReuse?.(refs); }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => { setHover(false); setActive(null); }}
+      className="group relative z-20 flex shrink-0 cursor-pointer items-center border-0 bg-transparent p-0"
+    >
+      {refs.map((src, i) => {
+        const angle = REF_ROTATIONS[i % REF_ROTATIONS.length];
+        const isActive = active === i;
+        const scale = isActive ? 1.18 : hover ? 1.1 : 1;
+        return (
+          <span
+            key={i}
+            onMouseEnter={() => setActive(i)}
+            style={{
+              width: REF_CARD_W,
+              height: REF_CARD_H,
+              marginLeft: i === 0 ? 0 : -(hover ? REF_OVERLAP_HOVER : REF_OVERLAP_REST),
+              zIndex: isActive ? 30 : i,
+              transform: `rotate(${angle}deg) scale(${scale})`,
+              transformOrigin: 'center',
+              transition: 'transform 250ms ease, margin-left 250ms ease',
+            }}
+            className="relative block overflow-hidden rounded-lg border-[1.5px] border-white bg-card shadow-md"
+          >
+            <img src={refImageSrc(src)} alt="参考图" className="h-full w-full object-cover" draggable={false} />
+          </span>
+        );
+      })}
+    </button>
+  );
+}
+
 function DoneBatch({
   round,
   onReEdit,
   onRegenerate,
   onDeleteBatch,
   onLightbox,
+  onReuseReferences,
 }: {
   round: Extract<RoundState, { kind: 'done' }>;
   onReEdit?: (config: RoundConfig) => void;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
   onLightbox?: (src: string) => void;
+  onReuseReferences?: (paths: string[]) => void | Promise<void>;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const meta = [
@@ -147,13 +207,7 @@ function DoneBatch({
   return (
     <section className="space-y-3">
       <div className="flex items-start gap-3 text-sm">
-        {round.config.referenceImages[0] && (
-          <img
-            src={imageSrc(round.config.referenceImages[0])}
-            alt="参考图"
-            className="h-14 w-14 rounded-md object-cover"
-          />
-        )}
+        <ReferenceStack refs={round.config.referenceImages} onReuse={onReuseReferences} />
         <div className="min-w-0 flex-1">
           <p className="line-clamp-2 text-base leading-7 text-foreground" title={round.config.prompt}>
             {round.config.prompt}
@@ -262,11 +316,13 @@ function FailedCard({
   onDeleteFailed,
   onReEdit,
   onRegenerate,
+  onReuseReferences,
 }: {
   round: Extract<RoundState, { kind: 'failed' }>;
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig) => void;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
+  onReuseReferences?: (paths: string[]) => void | Promise<void>;
 }) {
   const { config } = round;
   const meta = config
@@ -283,13 +339,7 @@ function FailedCard({
     <section className="space-y-3">
       {config && (
         <div className="flex items-start gap-3 text-sm">
-          {config.referenceImages[0] && (
-            <img
-              src={imageSrc(config.referenceImages[0])}
-              alt="参考图"
-              className="h-14 w-14 rounded-md object-cover"
-            />
-          )}
+          <ReferenceStack refs={config.referenceImages} onReuse={onReuseReferences} />
           <div className="min-w-0 flex-1">
             <p className="line-clamp-2 text-base leading-7 text-foreground" title={config.prompt}>
               {config.prompt}

@@ -76,6 +76,7 @@ def render(
         for ref in (kwargs.get("reference_images") or (kwargs.get("params") or {}).get("reference_images") or []):
             if str(ref) not in image_paths:
                 image_paths.append(str(ref))
+        image_paths = image_paths[: _max_reference_images(key.provider, model)]
 
         paths: list[str] = []
         requested = max(1, int(n or 1))
@@ -97,11 +98,13 @@ def render(
         return paths[:requested]
 
     requested = max(1, int(n or 1))
+    ref_image = _reference_image_param(kwargs, key.provider, model)
     payload = _image_generation_payload(
         model=model,
         prompt=prompt,
         size=requested_size,
         n=requested,
+        image=ref_image,
     )
     data = _post_json(_image_url(base_url), key.access_key, payload, timeout=timeout)
     paths = _write_outputs(data, out_dir)
@@ -115,6 +118,7 @@ def render(
                     prompt=prompt,
                     size=requested_size,
                     n=1,
+                    image=ref_image,
                 ),
                 timeout=timeout,
             )
@@ -136,6 +140,7 @@ def _image_generation_payload(
     prompt: str,
     size: object,
     n: int,
+    image: str | list[str] | None = None,
 ) -> dict:
     payload = {
         "model": model,
@@ -146,10 +151,62 @@ def _image_generation_payload(
         "stream": False,
         "watermark": True,
     }
+    # Seedream / Ark 图生图：image 接受 URL 或 base64 data-url，单张为 str、多张为 list。
+    if image:
+        payload["image"] = image
     if n > 1:
         payload["sequential_image_generation"] = "auto"
         payload["sequential_image_generation_options"] = {"max_images": n}
     return {k: v for k, v in payload.items() if v is not None}
+
+
+def _max_reference_images(provider: str, model: str) -> int:
+    """每个厂商/模型对参考图（图生图输入）的数量上限；超出按"取前 N 张"截断。
+
+    - seedream（火山引擎）：图生图最多 10 张参考图。
+    - gpt-image（OpenAI / OpenAI-HK）：最多 16 张。
+    - nano-banana：官方建议 ≤2 张效果更佳，放宽到 3。
+    - 其它/未知：保守 4 张。
+    与前端 `web/src/lib/referenceLimits.ts::maxReferenceImages` 保持一致。
+    """
+    if provider == "seedream":
+        return 10
+    if model.startswith("nano-banana"):
+        return 3
+    if provider == "openai" or model.startswith("gpt-image"):
+        return 16
+    return 4
+
+
+def _reference_image_param(
+    kwargs: dict, provider: str, model: str
+) -> str | list[str] | None:
+    """Collect source_image + reference_images from kwargs/params → base64 data-url(s).
+
+    Truncates to the provider/model reference-image cap. Returns a single str when
+    there's one image, a list for multiple, None for none.
+    """
+    params = kwargs.get("params") or {}
+    paths: list[str] = []
+    source_image = kwargs.get("source_image") or params.get("source_image")
+    if source_image:
+        paths.append(str(source_image))
+    for ref in (kwargs.get("reference_images") or params.get("reference_images") or []):
+        if str(ref) not in paths:
+            paths.append(str(ref))
+    paths = paths[: _max_reference_images(provider, model)]
+    urls = [_image_data_url(p) for p in paths]
+    if not urls:
+        return None
+    return urls[0] if len(urls) == 1 else urls
+
+
+def _image_data_url(path: str) -> str:
+    raw = Path(path).read_bytes()
+    b64 = base64.b64encode(raw).decode()
+    ext = Path(path).suffix.lstrip(".").lower() or "png"
+    mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+    return f"data:{mime};base64,{b64}"
 
 
 def _api_root(base_url: str) -> str:
@@ -263,11 +320,7 @@ def _chat_image_payload(
     if image_paths:
         content: object = []
         for p in image_paths:
-            raw = Path(p).read_bytes()
-            b64 = base64.b64encode(raw).decode()
-            ext = Path(p).suffix.lstrip(".").lower() or "png"
-            mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
-            content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            content.append({"type": "image_url", "image_url": {"url": _image_data_url(p)}})
         content.append({"type": "text", "text": text})
     else:
         content = text

@@ -18,6 +18,16 @@ export async function createStudioJob(body: StudioJobCreate): Promise<Job> {
   return resp.json();
 }
 
+/** 上传一张参考图到 .runtime/uploads/，返回服务器绝对路径（写入 job.params.reference_images 用）。 */
+export async function uploadReferenceImage(file: File): Promise<string> {
+  const form = new FormData();
+  form.append('file', file);
+  const resp = await fetch('/api/uploads', { method: 'POST', body: form });
+  if (!resp.ok) throw new Error(`upload failed: ${resp.status}`);
+  const data = (await resp.json()) as { path: string };
+  return data.path;
+}
+
 export async function listStudioJobs(): Promise<Job[]> {
   const resp = await fetch('/api/jobs');
   if (!resp.ok) throw new Error(`studio jobs failed: ${resp.status}`);

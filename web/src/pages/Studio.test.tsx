@@ -741,7 +741,7 @@ describe('Studio', () => {
 
     expect(await screen.findByText(/一个身披白床单/)).toHaveClass('line-clamp-2');
     expect(screen.getByTestId('studio-round-list')).toHaveClass('max-w-[1024px]');
-    expect(screen.getByRole('img', { name: '参考图' })).toHaveAttribute('src', '/api/gallery/image?path=%2Ftmp%2Fref.png');
+    expect(screen.getByRole('img', { name: '参考图' })).toHaveAttribute('src', '/api/raw?path=%2Ftmp%2Fref.png');
     await waitFor(() => expect(screen.getAllByText(/图片 4.7/).length).toBeGreaterThan(0));
     expect(screen.getByText(/4:3/)).toBeInTheDocument();
     expect(screen.getByText(/2304x1728/)).toBeInTheDocument();

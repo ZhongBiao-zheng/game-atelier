@@ -2,6 +2,8 @@ import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, 
 import { ArrowUp, Box, ImageIcon, Images, Plus, Square, Building2, Link2, X } from 'lucide-react';
 import type { KeyView } from '@/api/keys';
 import { computeStudioPixelSize, normalizeStudioPixelSizeForProvider } from '@/lib/studioSize';
+import { providerLabel } from '@/lib/providerLabels';
+import { maxReferenceImages } from '@/lib/referenceLimits';
 
 interface Props {
   onSubmit: (prompt: string) => void | Promise<void>;
@@ -30,13 +32,6 @@ interface Props {
 }
 
 const SIDE_RATIOS = ['4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
-const PROVIDER_LABELS: Record<string, string> = {
-  openai: 'OpenAI',
-  seedream: '火山引擎',
-  midjourney: 'Midjourney',
-  nano_banana: 'Nano Banana',
-  lovart: 'Lovart',
-};
 
 const REF_W = 56.5;
 const REF_H = 70;
@@ -61,7 +56,7 @@ function isNanoBananaModel(provider?: KeyView, modelId?: string): boolean {
 
 function providerName(provider?: KeyView) {
   if (!provider) return '未配置厂商';
-  return PROVIDER_LABELS[provider.provider] ?? provider.alias;
+  return providerLabel(provider.provider, provider.alias);
 }
 
 export function PromptInput({
@@ -119,6 +114,7 @@ export function PromptInput({
   const [localH, setLocalH] = useState(initSize.h);
   const [sizeLocked, setSizeLocked] = useState(true);
   const isNanoBanana = isNanoBananaModel(provider, selectedModel?.id);
+  const maxRef = maxReferenceImages(provider?.provider, selectedModel?.id);
   const canSubmit = Boolean(provider && selectedModel && text.trim() && !disabled);
   const panelPosition = menuDirection === 'down'
     ? 'top-full mt-3'
@@ -157,7 +153,7 @@ export function PromptInput({
   function handleRefAdd(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files?.length) return;
-    onReferenceImagesChange?.([...referenceImages, ...Array.from(files)]);
+    onReferenceImagesChange?.([...referenceImages, ...Array.from(files)].slice(0, maxRef));
     e.target.value = '';
   }
 
@@ -312,7 +308,7 @@ export function PromptInput({
                       </div>
                     );
                   })}
-                  {referenceImages.length < 4 && (
+                  {referenceImages.length < maxRef && (
                     <label
                       htmlFor={refInputId}
                       className="absolute flex items-center justify-center rounded-full border-[0.5px] border-border/70 bg-secondary cursor-pointer text-muted-foreground hover:text-foreground hover:border-primary/60 hover:bg-card transition-colors"

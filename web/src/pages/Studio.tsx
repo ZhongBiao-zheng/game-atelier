@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 
-import { createStudioJob, getStudioJob, listStudioJobs } from '@/api/studio';
+import { createStudioJob, getStudioJob, listStudioJobs, uploadReferenceImage } from '@/api/studio';
 import { listKeys, type KeyView } from '@/api/keys';
 import { PromptInput } from '@/components/studio/PromptInput';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForProvider } from '@/lib/studioSize';
-import type { Job } from '@/schema/jobs';
+import type { Job, JobParams } from '@/schema/jobs';
 
 export function Studio({ compact = false }: { compact?: boolean }) {
   const [, setLocation] = useLocation();
@@ -26,6 +26,21 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
   const handleCustomSizeChange = useCallback((w: number, h: number) => {
     setCustomSize(`${w}x${h}`);
+  }, []);
+
+  // 点击历史记录里的参考图 → 把这批参考图（服务器路径）拉回成 File[]，整组塞进输入框复用出图。
+  const handleReuseReferences = useCallback(async (paths: string[]) => {
+    const files = await Promise.all(
+      paths.map(async (path, i) => {
+        const url = path.startsWith('http') ? path : `/api/raw?path=${encodeURIComponent(path)}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`load reference failed: ${resp.status}`);
+        const blob = await resp.blob();
+        const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+        return new File([blob], `ref-${i + 1}.${ext}`, { type: blob.type || 'image/png' });
+      }),
+    );
+    setReferenceImages(files);
   }, []);
 
   const refreshPersistedJobs = useCallback(async () => {
@@ -98,6 +113,27 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const rawSize = overrideConfig?.size ?? (customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveProvider));
     const effectiveSize = normalizeStudioSizeForProvider(rawSize, effectiveProvider);
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
+
+    setPending(true);
+    // 提交前把参考图 File[] 上传到 .runtime/uploads/，拿到服务器路径写进 params.reference_images。
+    // 再次生成（overrideConfig）携带的已是服务器路径，直接复用。
+    let refPaths: string[];
+    try {
+      refPaths = overrideConfig?.referenceImages
+        ?? (referenceImages.length > 0
+          ? await Promise.all(referenceImages.map(uploadReferenceImage))
+          : []);
+    } catch (e: any) {
+      setPending(false);
+      if (!compact) {
+        setRounds((rs) => [
+          { kind: 'failed', submittedAt: new Date().toISOString(), reason: `参考图上传失败：${e.message}` },
+          ...rs,
+        ]);
+      }
+      return;
+    }
+
     const config: RoundConfig = {
       prompt,
       alias: effectiveAlias,
@@ -109,23 +145,24 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       size: effectiveSize,
       n: effectiveCount,
       quality: overrideConfig?.quality ?? quality,
-      referenceImages: overrideConfig?.referenceImages ?? (referenceImages.length > 0 ? referenceImages.map((f) => URL.createObjectURL(f)) : []),
+      referenceImages: refPaths,
+    };
+    const jobParams: JobParams = {
+      size: effectiveSize,
+      ratio: effectiveRatio,
+      resolution: effectiveResolution,
+      n: effectiveCount,
+      quality: overrideConfig?.quality ?? quality,
+      ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
     };
 
     if (compact) {
-      setPending(true);
       try {
         await createStudioJob({
           prompt,
           alias: effectiveAlias ?? undefined,
           model: effectiveModel,
-          params: {
-            size: effectiveSize,
-            ratio: effectiveRatio,
-            resolution: effectiveResolution,
-            n: effectiveCount,
-            quality: overrideConfig?.quality ?? quality,
-          },
+          params: jobParams,
         });
         setLocation('/studio');
       } finally {
@@ -138,20 +175,13 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const myRound: RoundState = { kind: 'pending', startedAt, config };
     setRounds((rs) => [myRound, ...rs]);
 
-    setPending(true);
     let job: Job;
     try {
       job = await createStudioJob({
         prompt,
         alias: effectiveAlias ?? undefined,
         model: effectiveModel,
-        params: {
-          size: effectiveSize,
-          ratio: effectiveRatio,
-          resolution: effectiveResolution,
-          n: effectiveCount,
-          quality: overrideConfig?.quality ?? quality,
-        },
+        params: jobParams,
       });
     } catch (e: any) {
       setRounds((rs) =>
@@ -239,6 +269,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           onReEdit={reEdit}
           onRegenerate={regenerate}
           onDeleteBatch={deleteDoneBatch}
+          onReuseReferences={handleReuseReferences}
         />
       </div>
       <div className="shrink-0 py-4 border-t border-border/30">
