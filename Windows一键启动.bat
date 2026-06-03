@@ -40,16 +40,21 @@ exit /b 1
 echo uv: !UV!
 echo.
 
-REM ---- 2. 同步 Python 依赖（首次会下载，需联网；uv 缺 Python 会自动拉）----
-echo 正在准备 Python 依赖（首次约 30-60 秒）...
-"!UV!" sync
-if errorlevel 1 (
+REM ---- 2. 仅首次（无 .venv）才装依赖；装好后跳过，以后双击秒进 ----
+REM    uv run 启动时本就会自动校验/补依赖（git pull 改了依赖也会自动补），
+REM    所以这里的显式 sync 只为首次给个友好进度提示。
+if not exist ".venv\" (
+    echo 首次启动：正在准备运行环境（联网下载依赖，约 1-2 分钟，仅此一次）...
+    "!UV!" sync
+    if errorlevel 1 (
+        echo.
+        echo 依赖同步失败。请检查网络后重试。
+        pause
+        exit /b 1
+    )
+    echo 环境准备完成。以后双击本脚本即可直接启动。
     echo.
-    echo 依赖同步失败。请检查网络后重试。
-    pause
-    exit /b 1
 )
-echo.
 
 REM ---- 3. 前端：预构建的 web\dist 已随仓库分发，正常无需构建 ----
 REM    仅当仓库未带 dist（异常）且本机有 Node + pnpm 时兜底构建。
