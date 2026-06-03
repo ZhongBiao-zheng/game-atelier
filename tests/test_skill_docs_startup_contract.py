@@ -53,6 +53,17 @@ def test_skill_docs_use_plugin_root_var_not_hardcoded_install_path():
         assert "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" in text, path
 
 
+def test_skill_docs_warn_windows_python3_store_alias_pitfall():
+    """Windows 的 python3 常是损坏 Store 别名（--version 假装正常，跑脚本 exit 49）。
+
+    SKILL 必须指引 Windows 用 python，否则模型只能瞎试到 python 才通。
+    """
+    for path in SKILL_DOCS:
+        text = _read(path)
+        assert "Windows" in text and "exit 49" in text, path
+        assert "Windows 用 `python`" in text, path
+
+
 def test_skill_docs_do_not_use_stale_viewer_server_path():
     for path in SKILL_DOCS:
         text = _read(path)
