@@ -447,9 +447,21 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
         onDragStart={(e) => onDragStart(e, c.id)}
         onClick={() => !isEditing && onSelect(c.id, c.name)}
         onDoubleClick={(e) => startCharEdit(c, e)}
+        onKeyDown={(e) => {
+          if (isEditing) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onSelect(c.id, c.name);
+          }
+        }}
+        role={isEditing ? undefined : 'button'}
+        tabIndex={isEditing ? undefined : 0}
+        aria-label={isEditing ? undefined : c.name}
+        aria-pressed={isEditing ? undefined : isActive}
         title="双击重命名 · 拖到项目"
         className={cn(
           'group/char flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
           isEditing ? 'cursor-text' : 'cursor-pointer',
           isActive
             ? 'bg-primary text-primary-foreground'
