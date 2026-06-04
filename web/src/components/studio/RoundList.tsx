@@ -1,4 +1,4 @@
-import { type ButtonHTMLAttributes, useEffect, useState } from 'react';
+import { type ButtonHTMLAttributes, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Download, Trash2, X } from 'lucide-react';
 
 import { WaitingCopy } from './WaitingCopy';
@@ -196,6 +196,17 @@ function DoneBatch({
   onReuseReferences?: (paths: string[]) => void | Promise<void>;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuWrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuWrapRef.current && !menuWrapRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
   const meta = [
     round.config.modelName ?? round.config.model,
     round.config.size,
@@ -243,7 +254,7 @@ function DoneBatch({
       <div className="flex items-center gap-2">
         <ActionButton onClick={() => onReEdit?.(round.config)}>重新编辑</ActionButton>
         <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
-        <div className="relative">
+        <div className="relative" ref={menuWrapRef}>
           <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
           {menuOpen && (
             <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 h-11 w-[195px] rounded-xl bg-secondary p-0 shadow-xl">
@@ -275,7 +286,7 @@ function ActionButton({
   return (
     <button
       type="button"
-      className={`${compact ? 'h-9 w-9 px-0' : 'h-9 w-[94px] px-3'} rounded-xl bg-secondary text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
+      className={`inline-flex items-center justify-center ${compact ? 'h-9 w-9 px-0' : 'h-9 w-[94px] px-3'} rounded-xl bg-secondary text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
       {...props}
     />
   );

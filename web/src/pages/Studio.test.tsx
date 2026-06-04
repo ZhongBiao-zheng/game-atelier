@@ -808,6 +808,17 @@ describe('Studio', () => {
     expect(screen.getByTestId('studio-more-menu')).not.toHaveClass('top-full');
   });
 
+  it('closes the more menu when clicking outside it', async () => {
+    renderStudioWithCompletedBatch();
+
+    fireEvent.click(await screen.findByRole('button', { name: '更多操作' }));
+    expect(screen.getByTestId('studio-more-menu')).toBeInTheDocument();
+
+    fireEvent.mouseDown(document.body);
+
+    await waitFor(() => expect(screen.queryByTestId('studio-more-menu')).not.toBeInTheDocument());
+  });
+
   it('re-edits a completed batch into the prompt input and restores controls', async () => {
     renderStudioWithCompletedBatch();
 
