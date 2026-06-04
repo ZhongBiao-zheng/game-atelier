@@ -77,5 +77,52 @@ def test_folder_picker_cancel_returns_null(client, monkeypatch):
     assert resp.json() == {"path": None}
 
 
+def test_folder_picker_windows_returns_selected_path(client, tmp_path, monkeypatch):
+    picked = tmp_path / "win-picked"
+    picked.mkdir()
+    calls = {}
+
+    class Result:
+        returncode = 0
+        stdout = str(picked)
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        calls["kwargs"] = kwargs
+        return Result()
+
+    monkeypatch.setattr("viewer_server.routes.sys.platform", "win32")
+    monkeypatch.setattr("viewer_server.routes.subprocess.run", fake_run)
+
+    resp = client.post("/api/folder-picker", json={"title": "选择项目文件夹"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"path": str(picked.resolve())}
+    # 走 powershell + STA + UTF-8 解码
+    assert calls["cmd"][0] == "powershell"
+    assert "-STA" in calls["cmd"]
+    assert calls["kwargs"].get("encoding") == "utf-8"
+
+
+def test_folder_picker_windows_cancel_returns_null(client, monkeypatch):
+    class Result:
+        returncode = 0
+        stdout = ""  # 取消时不写 stdout
+        stderr = ""
+
+    monkeypatch.setattr("viewer_server.routes.sys.platform", "win32")
+    monkeypatch.setattr("viewer_server.routes.subprocess.run", lambda *_, **__: Result())
+
+    resp = client.post("/api/folder-picker", json={"title": "选择项目文件夹"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"path": None}
+
+
+def test_folder_picker_unsupported_platform_501(client, monkeypatch):
+    monkeypatch.setattr("viewer_server.routes.sys.platform", "linux")
+    resp = client.post("/api/folder-picker", json={"title": "选择项目文件夹"})
+    assert resp.status_code == 501
+
+
 # Silence unused import warning when running this file standalone.
 _ = os

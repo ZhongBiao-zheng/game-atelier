@@ -513,6 +513,57 @@ def _osascript_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def _ps_single_quote(value: str) -> str:
+    """PowerShell 单引号字面量转义：内部 ' 写成 ''。"""
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _pick_folder_macos(payload: "_FolderPickerPayload") -> dict:
+    script = f"choose folder with prompt {_osascript_string(payload.title)}"
+    if payload.initial_path:
+        initial = Path(os.path.expandvars(os.path.expanduser(payload.initial_path)))
+        script += f" default location POSIX file {_osascript_string(str(initial))}"
+    proc = subprocess.run(
+        ["osascript", "-e", f"POSIX path of ({script})"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        if "User canceled" in stderr or "用户已取消" in stderr:
+            return {"path": None}
+        raise HTTPException(500, detail=stderr or "folder picker failed")
+    return {"path": str(Path(proc.stdout.strip()).expanduser().resolve())}
+
+
+def _pick_folder_windows(payload: "_FolderPickerPayload") -> dict:
+    # WinForms FolderBrowserDialog 需 STA 线程；powershell -STA 满足。
+    # 取消时不写任何 stdout → 返回 {"path": None}。
+    lines = [
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+        "Add-Type -AssemblyName System.Windows.Forms | Out-Null",
+        "$dlg = New-Object System.Windows.Forms.FolderBrowserDialog",
+        f"$dlg.Description = {_ps_single_quote(payload.title)}",
+        "$dlg.ShowNewFolderButton = $true",
+    ]
+    if payload.initial_path:
+        initial = Path(os.path.expandvars(os.path.expanduser(payload.initial_path)))
+        lines.append(f"$dlg.SelectedPath = {_ps_single_quote(str(initial))}")
+    lines.append(
+        "if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) "
+        "{ [Console]::Out.Write($dlg.SelectedPath) }"
+    )
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-STA", "-Command", "; ".join(lines)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if proc.returncode != 0:
+        raise HTTPException(500, detail=(proc.stderr or "").strip() or "folder picker failed")
+    selected = (proc.stdout or "").strip()
+    if not selected:
+        return {"path": None}
+    return {"path": str(Path(selected).expanduser().resolve())}
+
+
 def _bootstrap_script() -> Path:
     return Path(__file__).resolve().parents[2] / "scripts" / "bootstrap.py"
 
@@ -532,24 +583,11 @@ def onboarding_status() -> dict:
 @router.post("/folder-picker")
 def folder_picker(payload: _FolderPickerPayload) -> dict:
     """Open a native directory picker and return an absolute local path."""
-    if sys.platform != "darwin":
-        raise HTTPException(501, detail="folder picker is currently supported on macOS only")
-
-    script = f"choose folder with prompt {_osascript_string(payload.title)}"
-    if payload.initial_path:
-        initial = Path(os.path.expandvars(os.path.expanduser(payload.initial_path)))
-        script += f" default location POSIX file {_osascript_string(str(initial))}"
-    proc = subprocess.run(
-        ["osascript", "-e", f"POSIX path of ({script})"],
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        stderr = proc.stderr.strip()
-        if "User canceled" in stderr or "用户已取消" in stderr:
-            return {"path": None}
-        raise HTTPException(500, detail=stderr or "folder picker failed")
-    return {"path": str(Path(proc.stdout.strip()).expanduser().resolve())}
+    if sys.platform == "darwin":
+        return _pick_folder_macos(payload)
+    if sys.platform == "win32":
+        return _pick_folder_windows(payload)
+    raise HTTPException(501, detail="folder picker is currently supported on macOS / Windows only")
 
 
 @router.post("/onboarding/data-root")
