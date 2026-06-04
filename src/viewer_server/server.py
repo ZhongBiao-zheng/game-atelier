@@ -33,12 +33,18 @@ def _bootstrap_gate(background: bool) -> bool:
     needs_venv    → foreground: prompt Y/n; background: auto-install.
     other states  → handled by Web onboarding (data-root, keys); pass through.
     """
+    # 必须显式 encoding="utf-8"：bootstrap.py 输出 UTF-8 JSON，但 Windows 父进程
+    # 默认按 GBK 解码子进程管道，遇中文/特殊字节 reader 线程会抛 UnicodeDecodeError
+    # 致 stdout=None，再 json.loads(None) 崩 TypeError。errors="replace" 再兜一层。
     check = subprocess.run(
         [sys.executable, str(_BOOTSTRAP), "--check"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if check.returncode != 0:
         print(f"bootstrap --check failed: {check.stderr}", file=sys.stderr)
+        return False
+    if not (check.stdout or "").strip():
+        print(f"bootstrap --check 无输出，无法判断依赖状态。stderr: {check.stderr}", file=sys.stderr)
         return False
     state = json.loads(check.stdout)
     status = state.get("status")

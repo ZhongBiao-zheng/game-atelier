@@ -184,7 +184,7 @@ def ensure_venv() -> int:
     env = {**os.environ, "UV_PROJECT_ENVIRONMENT": str(venv)}
     proc = subprocess.run(
         [uv_path, "sync", "--project", str(PLUGIN_DIR)],
-        env=env, capture_output=True, text=True,
+        env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
         print(json.dumps({

@@ -522,7 +522,7 @@ def onboarding_status() -> dict:
     """Proxies `bootstrap.py --check` so Web 不用知道状态机细节。"""
     proc = subprocess.run(
         [sys.executable, str(_bootstrap_script()), "--check"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
         raise HTTPException(500, f"bootstrap --check failed: {proc.stderr}")
@@ -557,7 +557,7 @@ def set_data_root(payload: _DataRootPayload) -> dict:
     """Web 选完目录后落 global config，Skill 下次启动会从 global config 读。"""
     proc = subprocess.run(
         [sys.executable, str(_bootstrap_script()), "--init-data-root", payload.path],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
         raise HTTPException(500, f"init-data-root failed: {proc.stderr}")
