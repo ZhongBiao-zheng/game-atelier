@@ -40,7 +40,7 @@ exit /b 1
 echo uv: !UV!
 echo.
 
-REM ---- 2. 仅首次（无 .venv）才装依赖；装好后跳过，以后双击秒进 ----
+REM ---- 2. 仅首次（无 .venv）才装依赖；装好后跳过 ----
 REM    uv run 启动时本就会自动校验/补依赖（git pull 改了依赖也会自动补），
 REM    所以这里的显式 sync 只为首次给个友好进度提示。
 if not exist ".venv\" (
@@ -52,37 +52,59 @@ if not exist ".venv\" (
         pause
         exit /b 1
     )
-    echo 环境准备完成。以后双击本脚本即可直接启动。
+    echo 环境准备完成。
     echo.
 )
 
-REM ---- 3. 前端：预构建的 web\dist 已随仓库分发，正常无需构建 ----
-REM    仅当仓库未带 dist（异常）且本机有 Node + pnpm 时兜底构建。
-if not exist "web\dist\index.html" (
-    echo 未找到预构建前端 web\dist，尝试本地构建（需 Node + pnpm）...
-    pushd web
-    call pnpm install
-    if errorlevel 1 ( set "BUILD_ERR=1" ) else (
-        call pnpm build
-        set "BUILD_ERR=!errorlevel!"
-    )
-    popd
-    if not "!BUILD_ERR!"=="0" (
-        echo.
-        echo 前端构建失败。请确认已装 Node + pnpm，或重新 `git pull` 获取预构建 web\dist。
-        pause
-        exit /b 1
-    )
-)
+REM ---- 3. 若已在运行则先停掉，保证每次双击都是"重建 + 重启"而非打开旧实例 ----
+echo 停止可能在运行的旧实例...
+"!UV!" run python src\viewer_server\server.py stop
+timeout /t 1 >nul
 
-REM ---- 4. 启动后端（同一进程同时服务前端），后台运行并自动开浏览器 ----
+REM ---- 4. 重新构建前端（有 Node + pnpm 才构建；否则用仓库自带的预构建 dist）----
+where pnpm >nul 2>nul
+if errorlevel 1 goto :no_pnpm
+
+echo 重新构建前端...
+set "BUILD_ERR=0"
+pushd web
+if not exist "node_modules\" (
+    echo 首次构建：安装前端依赖...
+    call pnpm install
+    if errorlevel 1 set "BUILD_ERR=1"
+)
+if "!BUILD_ERR!"=="0" (
+    call pnpm build
+    if errorlevel 1 set "BUILD_ERR=1"
+)
+popd
+if not "!BUILD_ERR!"=="0" (
+    echo.
+    echo 前端构建失败。请确认 Node + pnpm 正常，或 git pull 获取预构建 web\dist 后重试。
+    pause
+    exit /b 1
+)
+goto :build_done
+
+:no_pnpm
+if not exist "web\dist\index.html" (
+    echo 未找到 pnpm，也没有预构建前端 web\dist。
+    echo 请先 git pull 获取预构建 dist，或安装 Node + pnpm 后重试。
+    pause
+    exit /b 1
+)
+echo 未检测到 pnpm，使用仓库自带的预构建前端 web\dist。
+
+:build_done
+echo.
+
+REM ---- 5. 启动后端（同一进程同时服务前端），后台运行并自动开浏览器 ----
 echo 启动工坊（后端 + 前端，本地 127.0.0.1）...
 "!UV!" run python src\viewer_server\server.py start --background
 if errorlevel 1 (
     echo.
-    echo 启动失败。请看上方的错误详情判断原因，常见有：
-    echo   - 网络问题导致依赖未装全：重跑本脚本
-    echo   - 端口被占用：稍后重试，或先关闭旧的工坊进程
+    echo 启动失败。请看上方的错误详情判断原因，常见有网络问题导致依赖未装全（重跑本脚本）
+    echo 或端口被占用（稍后重试，或先关闭旧的工坊进程）。
     pause
     exit /b 1
 )
