@@ -23,10 +23,13 @@ def run_bootstrap(args, env_overrides=None):
     return result
 
 
-def _pyproject_hash() -> str:
-    return hashlib.sha256(
-        (REPO_ROOT / "pyproject.toml").read_bytes()
-    ).hexdigest()
+def _venv_signature() -> str:
+    """镜像 bootstrap._venv_signature：pyproject.toml + PLUGIN_DIR(子进程里 = REPO_ROOT)。"""
+    h = hashlib.sha256()
+    h.update((REPO_ROOT / "pyproject.toml").read_bytes())
+    h.update(b"\n")
+    h.update(str(REPO_ROOT).encode("utf-8"))
+    return h.hexdigest()
 
 
 def _make_fake_venv(data_root: Path, hash_matches: bool = True) -> None:
@@ -40,7 +43,7 @@ def _make_fake_venv(data_root: Path, hash_matches: bool = True) -> None:
     py.chmod(py.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
     (data_root / ".config").mkdir(parents=True, exist_ok=True)
     hash_file = data_root / ".config" / "venv-hash"
-    hash_file.write_text(_pyproject_hash() if hash_matches else "stale-hash")
+    hash_file.write_text(_venv_signature() if hash_matches else "stale-hash")
 
 
 def test_check_reports_needs_data_root_when_no_config(tmp_path, monkeypatch):
@@ -246,7 +249,7 @@ def test_ensure_venv_creates_venv_and_writes_hash(tmp_path):
     assert (data_root / ".venv" / "bin" / "python").exists()
     hash_file = data_root / ".config" / "venv-hash"
     assert hash_file.exists()
-    assert hash_file.read_text().strip() == _pyproject_hash()
+    assert hash_file.read_text().strip() == _venv_signature()
 
 
 def test_ensure_venv_fails_without_data_root(tmp_path):
@@ -360,6 +363,32 @@ def _load_bootstrap():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+def test_venv_signature_changes_with_plugin_dir(tmp_path, monkeypatch):
+    """插件版本目录变化必须让 venv 签名变化，否则 `claude plugin update` 后旧代码照跑。
+
+    复现真机故障：5.1.0 的 pid.py 用裸 os.kill(pid,0)，Windows 上 WinError 87 崩；
+    修复在 5.1.3+。但 pyproject 依赖没变 → 旧签名(只 hash pyproject)不变 → venv 不重建
+    → editable 仍指向 .../5.1.0/src → 装了修复也用不上。签名纳入 PLUGIN_DIR 后必须不同。
+    """
+    mod = _load_bootstrap()
+    same_pyproject = b"[project]\nname = 'x'\nversion = '0.1.0'\n"  # 依赖完全相同
+    v_old = tmp_path / "5.1.0"
+    v_new = tmp_path / "5.1.8"
+    for d in (v_old, v_new):
+        d.mkdir()
+        (d / "pyproject.toml").write_bytes(same_pyproject)
+
+    monkeypatch.setattr(mod, "PLUGIN_DIR", v_old)
+    sig_old = mod._venv_signature()
+    monkeypatch.setattr(mod, "PLUGIN_DIR", v_new)
+    sig_new = mod._venv_signature()
+    assert sig_old != sig_new, "版本目录变了签名却没变 → venv 不重建 → 旧代码照跑"
+
+    # 幂等：同一 PLUGIN_DIR 重复调用必须稳定，否则每次 check 都误判要重建。
+    monkeypatch.setattr(mod, "PLUGIN_DIR", v_old)
+    assert mod._venv_signature() == sig_old
 
 
 def test_user_config_dir_matches_platformdirs_when_present():

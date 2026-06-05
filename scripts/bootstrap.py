@@ -72,9 +72,21 @@ def _venv_hash_file(data_root: Path) -> Path:
     return data_root / ".config" / "venv-hash"
 
 
-def _pyproject_hash() -> str:
-    pyproject = PLUGIN_DIR / "pyproject.toml"
-    return hashlib.sha256(pyproject.read_bytes()).hexdigest()
+def _venv_signature() -> str:
+    """venv 重建信号：必须同时反映依赖(pyproject.toml)和**代码根目录**(PLUGIN_DIR)。
+
+    版本号在 .claude-plugin/plugin.json，不在 pyproject.toml（常年 0.1.0、依赖很少变）；
+    而 `uv sync` 是 editable 安装，把 venv 的 import 绑死在「建它时的版本目录」(.../<ver>/src)。
+    若签名只 hash pyproject，插件更新(.../5.1.0/ → .../5.1.8/)后 hash 不变 → check() 返回
+    ready → venv 不重建 → 旧代码照跑（旧版本目录被插件 GC 后更会直接 ImportError）。
+    把 PLUGIN_DIR 纳入签名：版本目录一变签名就变 → 强制 rebuild 并把 editable 重指向新 /src，
+    `claude plugin update` 才真正生效。dev 软链与 marketplace 互切（PLUGIN_DIR 不同）同理强制重建。
+    """
+    h = hashlib.sha256()
+    h.update((PLUGIN_DIR / "pyproject.toml").read_bytes())
+    h.update(b"\n")
+    h.update(str(PLUGIN_DIR).encode("utf-8"))
+    return h.hexdigest()
 
 
 def _web_dist_ok() -> bool:
@@ -127,7 +139,7 @@ def check() -> dict:
 
     venv_py = _venv_python(data_root)
     hash_file = _venv_hash_file(data_root)
-    expected_hash = _pyproject_hash()
+    expected_hash = _venv_signature()
     venv_hash = hash_file.read_text().strip() if hash_file.exists() else None
 
     if (not venv_py.exists()) or (venv_hash is None) or (venv_hash != expected_hash):
@@ -221,13 +233,13 @@ def ensure_venv() -> int:
 
     hash_file = _venv_hash_file(data_root)
     hash_file.parent.mkdir(parents=True, exist_ok=True)
-    hash_file.write_text(_pyproject_hash())
+    hash_file.write_text(_venv_signature())
 
     print(json.dumps({
         "status": "ok",
         "data_root": str(data_root),
         "venv_python": str(_venv_python(data_root)),
-        "venv_hash": _pyproject_hash(),
+        "venv_hash": _venv_signature(),
     }, ensure_ascii=False))
     return 0
 
