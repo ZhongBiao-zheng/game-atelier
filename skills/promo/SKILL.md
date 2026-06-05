@@ -21,18 +21,16 @@ triggers:
   - 美宣图
 ---
 
-## ⚠️ 启动必读 Memory 三层
+## ⚠️ 启动必读 Memory（两层，均在 data_root，turn-start 自动注入）
 
-每次进入本工作流，必须按顺序 Read：
+game-atelier 的记忆全部锚定 data_root，**与代理工具无关**——不读 `~/.claude` / `~/.codex`。
+turn-start 已把这两层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段：
 
-1. `~/.claude/MEMORY.md` — 全局跨工作区经验
-2. `<data_root>/MEMORY.md` — workspace 级
-3. 如果对话涉及具体角色:
-   - 从 `<data_root>/.runtime/projects.json::assignments` 解析角色所属 project_id
-   - 从 `projects[].slug` 找到 slug
-   - Read `<data_root>/projects/<slug>/MEMORY.md` + `worldview.md`
+1. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用经验）
+2. `lessons_project` / `project_memory` ← `<data_root>/projects/<slug>/MEMORY.md`（按 active 角色归属自动解析 slug）
 
-不读 MEMORY 就写 prompt / 出图 / 改 spec 视为违规。
+代理工具自己的项目记忆（Claude 读 `CLAUDE.md`、Codex 读 `AGENTS.md`）由代理原生加载，不归本工作流管。
+不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规。
 
 ## 启动自检（bootstrap）——严格有序，开窗前必须全绿
 
@@ -40,8 +38,14 @@ triggers:
 
 Dev mode：`uv run python scripts/bootstrap.py --check`
 Installed Plugin mode：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --check`（Windows 用 `python` 代替 `python3`，见下）
+Codex mode：先解析 bootstrap.py 绝对路径（跟随软链反推 repo 根），之后所有命令都用 `$BOOT`，**绝不用 `uv run`**：
 
-> 判断模式：环境变量 `${CLAUDE_PLUGIN_ROOT}` 非空 → Installed Plugin mode（一律用其下的 plugin 命令，绝不用相对路径 `scripts/bootstrap.py`）；为空 → Dev mode。插件实装路径形如 `~/.claude/plugins/cache/<市场>/game-atelier/<版本>/`，绝不能硬编码 `~/.claude/plugins/game-atelier/`。**解释器名**：路径含盘符（`C:\...`）即 Windows → 用 `python`（Windows 的 `python3` 常是损坏的 Microsoft Store 别名：`python3 --version` 假装正常，但 `python3 -c ...` / 跑脚本会异常退出，如 exit 49）；macOS/Linux → 用 `python3`。某解释器跑插件脚本异常退出，立即换另一个名字重试，别反复试同一个。
+```bash
+BOOT=$(python -c "import os;p=os.path.realpath(os.path.expanduser('~/.codex/skills/game-atelier-promo'));print(os.path.join(os.path.dirname(os.path.dirname(p)),'scripts','bootstrap.py'))")
+python "$BOOT" --check
+```
+
+> 判断模式（三选一）：① 环境变量 `${CLAUDE_PLUGIN_ROOT}` 非空 → Installed Plugin mode（Claude，一律用其下的 plugin 命令，绝不用相对路径 `scripts/bootstrap.py`）；② 为空且运行于 **Codex**（`AI_AGENT` 以 `codex` 开头，或本 skill 软链在 `~/.codex/skills/`——Codex 不会设 `${CLAUDE_PLUGIN_ROOT}`）→ **Codex mode**：用上面解析的 `$BOOT`，**per-turn 绝不 `uv run`**（Codex 沙箱外的 uv 缓存会每轮弹权限，这正是要避开的坑）；③ 为空且在仓库内开发 → Dev mode。插件实装路径形如 `~/.claude/plugins/cache/<市场>/game-atelier/<版本>/`，绝不能硬编码 `~/.claude/plugins/game-atelier/`。**解释器名**：路径含盘符（`C:\...`）即 Windows → 用 `python`（Windows 的 `python3` 常是损坏的 Microsoft Store 别名：`python3 --version` 假装正常，但 `python3 -c ...` / 跑脚本会异常退出，如 exit 49）；macOS/Linux → 用 `python3`。某解释器跑插件脚本异常退出，立即换另一个名字重试，别反复试同一个。
 
 按 status 分流，**逐项推进到 ready 后才允许启 server / 开窗**：
 
@@ -72,12 +76,17 @@ Installed Plugin mode：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --
 Turn 起始之前先执行：
 
 Dev：`uv run python src/viewer_server/server.py start --background`
-Plugin：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --run -m viewer_server.server start --background`
+Plugin（Claude）：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --run -m viewer_server.server start --background`
+Codex：`python "$BOOT" --run -m viewer_server.server start --background`
+
+> Installed Plugin / Codex 模式下所有 `uv run python -m character_workflow ...` 改为 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --run ...` / `python "$BOOT" --run ...`（venv python 直跑、零 uv，per-turn 绝不 `uv run`）。环境困惑跑 `... --run -m character_workflow doctor` 自诊断。
 
 ## Turn 起始
 
 ```bash
+# Dev：
 uv run python -m character_workflow turn-start --kind promo
+# Codex / Installed Plugin：python "$BOOT" --run -m character_workflow turn-start --kind promo（绝不 uv run）
 ```
 
 返回 `stage / recommend_action / active_id / spec / lessons`（含 `references/lessons/promo.md`）。

@@ -10,11 +10,6 @@ def memory_tree(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.chdir(tmp_path)
 
-    (tmp_path / "home" / ".claude").mkdir(parents=True)
-    (tmp_path / "home" / ".claude" / "MEMORY.md").write_text(
-        "# Global\n## Skills Memory\n### game-atelier\n#### Portrait\n#### Promo\n#### Turnaround\n",
-        encoding="utf-8",
-    )
     (tmp_path / "MEMORY.md").write_text(
         "# Workspace\n## game-atelier\n### Portrait\n### Promo\n### Turnaround\n",
         encoding="utf-8",
@@ -44,15 +39,10 @@ def test_append_project_portrait(memory_tree):
     assert "- P1" in text
 
 
-def test_append_global_portrait(memory_tree):
-    lessons.append_memory(kind="portrait", line="- G1", scope="global")
-    text = (memory_tree / "home" / ".claude" / "MEMORY.md").read_text(encoding="utf-8")
-    assert "- G1" in text
-    # 落到 #### Portrait section(全局是 depth=4)
-    portrait_idx = text.index("#### Portrait")
-    promo_idx = text.index("#### Promo")
-    g1_idx = text.index("- G1")
-    assert portrait_idx < g1_idx < promo_idx
+def test_append_global_scope_rejected(memory_tree):
+    """global 层已移除：scope='global' 视为未知 scope 报错。"""
+    with pytest.raises(ValueError, match="unknown scope"):
+        lessons.append_memory(kind="portrait", line="- G1", scope="global")
 
 
 def test_append_project_requires_slug(memory_tree):

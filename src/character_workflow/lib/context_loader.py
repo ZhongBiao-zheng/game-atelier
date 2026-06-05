@@ -107,11 +107,6 @@ def load_character_context(character_id: str, kind: str) -> CharacterContext:
 # 三层 lessons + 项目级 worldview（Task 7 新增）
 # ---------------------------------------------------------------------------
 
-def _global_memory_path() -> Path:
-    import os as _os
-    return Path(_os.environ.get("HOME", "~")).expanduser() / ".claude" / "MEMORY.md"
-
-
 def _workspace_memory_path() -> Path:
     return data_root.workspace_memory()
 
@@ -134,8 +129,7 @@ _KIND_HEADERS = {
 def _extract_kind_section(text: str, kind: str, depth: int) -> str:
     """从 MEMORY.md 文本里抽出指定 kind 的 section 内容。
 
-    depth = 3 时找 `### {Kind}`（工作区 / 项目层）
-    depth = 4 时找 `#### {Kind}`（全局层，在 ## Skills Memory > ### game-atelier 下）
+    depth = 3 时找 `### {Kind}`（workspace / project 层，均在 `## game-atelier` 下）。
     遇到同级或更高级别 header 时停止 capture；深度更深的 header 不停。
     """
     if not text:
@@ -158,13 +152,6 @@ def _extract_kind_section(text: str, kind: str, depth: int) -> str:
         if capture:
             out.append(line)
     return "\n".join(out).strip()
-
-
-def load_lessons_global(kind: str) -> str:
-    if kind not in VALID_KINDS:
-        raise ValueError(f"unknown lessons kind: {kind!r}")
-    text = _read_text(_global_memory_path())
-    return _extract_kind_section(text, kind, depth=4)
 
 
 def load_lessons_workspace(kind: str) -> str:

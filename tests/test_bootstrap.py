@@ -347,3 +347,47 @@ def test_run_forwards_to_venv_python(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "forwarded" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# _user_config_dir 无 platformdirs 兜底（Codex 在系统 python 下跑 bootstrap）
+# ---------------------------------------------------------------------------
+import importlib.util  # noqa: E402
+
+
+def _load_bootstrap():
+    spec = importlib.util.spec_from_file_location("ga_bootstrap_test", BOOTSTRAP)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_user_config_dir_matches_platformdirs_when_present():
+    import platformdirs
+    mod = _load_bootstrap()
+    assert mod._user_config_dir() == Path(platformdirs.user_config_dir("game-atelier"))
+
+
+def test_user_config_dir_fallback_windows_doubles_appname(monkeypatch):
+    mod = _load_bootstrap()
+    monkeypatch.setattr(mod, "platformdirs", None)
+    monkeypatch.setattr(mod.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\u\AppData\Local")
+    # appauthor 缺省=appname → 双层 game-atelier/game-atelier
+    assert mod._user_config_dir() == Path(r"C:\Users\u\AppData\Local") / "game-atelier" / "game-atelier"
+
+
+def test_user_config_dir_fallback_macos(monkeypatch):
+    mod = _load_bootstrap()
+    monkeypatch.setattr(mod, "platformdirs", None)
+    monkeypatch.setattr(mod.sys, "platform", "darwin")
+    monkeypatch.setenv("HOME", "/Users/x")
+    assert mod._user_config_dir() == Path("/Users/x") / "Library" / "Application Support" / "game-atelier"
+
+
+def test_user_config_dir_fallback_linux(monkeypatch):
+    mod = _load_bootstrap()
+    monkeypatch.setattr(mod, "platformdirs", None)
+    monkeypatch.setattr(mod.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/home/x/.config")
+    assert mod._user_config_dir() == Path("/home/x/.config") / "game-atelier"

@@ -14,7 +14,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import platformdirs
+try:
+    import platformdirs
+except ModuleNotFoundError:  # 系统 python 常无 platformdirs，degrade 到逐平台兜底
+    platformdirs = None
 
 APP_NAME = "game-atelier"
 ENV_VAR = "GAME_ATELIER_DATA_ROOT"
@@ -23,8 +26,29 @@ ENV_VAR = "GAME_ATELIER_DATA_ROOT"
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 
 
+def _user_config_dir() -> Path:
+    """等价 platformdirs.user_config_dir(APP_NAME)；platformdirs 缺失时逐平台兜底。
+
+    bootstrap 可在系统 python 下跑（Codex 经软链装入、用裸 `python` 跑本脚本时，
+    系统 python 常无 platformdirs）。兜底路径必须与 venv python（有 platformdirs）
+    写 config 的位置逐字节一致，否则读不到已配置的 data-root。对照 platformdirs 4.x：
+      Windows: %LOCALAPPDATA%/<app>/<app>（appauthor 缺省=appname → 双层）
+      macOS:   ~/Library/Application Support/<app>
+      Linux:   $XDG_CONFIG_HOME/<app> 或 ~/.config/<app>
+    """
+    if platformdirs is not None:
+        return Path(platformdirs.user_config_dir(APP_NAME))
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / APP_NAME / APP_NAME
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / APP_NAME
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / APP_NAME
+
+
 def global_config_file() -> Path:
-    return Path(platformdirs.user_config_dir(APP_NAME)) / "data-root"
+    return _user_config_dir() / "data-root"
 
 
 def resolve_data_root() -> Path | None:

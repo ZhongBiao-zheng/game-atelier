@@ -205,7 +205,6 @@ class TurnStartResult(BaseModel):
     has_projects: bool = False
     projects: list[dict] = Field(default_factory=list)
     project_memory: str
-    lessons_global: str
     lessons_workspace: str
     lessons_project: str
     lessons_kind: str

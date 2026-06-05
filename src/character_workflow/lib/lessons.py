@@ -1,12 +1,15 @@
-"""Memory 追加 helper —— 三 scope(global / workspace / project)。
+"""Memory 追加 helper —— 两 scope(workspace / project)，全部锚定 data_root。
 
 §11.7 单画师 + 单进程假设:一条经验 < 4096 字节(PIPE_BUF),
 单行 `open("a")` 是原子的。
 
 scope:
-- "global"     → ~/.claude/MEMORY.md 下 `## Skills Memory > ### game-atelier > #### {Kind}` section
-- "workspace"  → 仓库根 MEMORY.md 下 `## game-atelier > ### {Kind}` section
-- "project"    → projects/<slug>/MEMORY.md 下 `## game-atelier > ### {Kind}` section
+- "workspace"  → <data_root>/MEMORY.md 下 `## game-atelier > ### {Kind}` section（跨项目通用经验）
+- "project"    → <data_root>/projects/<slug>/MEMORY.md 下 `## game-atelier > ### {Kind}` section
+
+设计：game-atelier 的记忆全部待在 data_root，**不再**写入代理工具私人记忆
+（~/.claude/MEMORY.md / ~/.codex/...）。对 Claude / Codex / 其他工具完全无感。
+原 "global" 层（曾写 ~/.claude）已移除，跨项目经验改用 workspace。
 
 不存在的 section header 会被自动建。
 
@@ -22,15 +25,9 @@ from character_workflow.lib import data_root
 
 
 VALID_KINDS = ("portrait", "promo", "turnaround")
-VALID_SCOPES = ("global", "workspace", "project")
+VALID_SCOPES = ("workspace", "project")
 
 _KIND_TITLE = {"portrait": "Portrait", "promo": "Promo", "turnaround": "Turnaround"}
-
-
-def _global_memory_path() -> Path:
-    from pathlib import Path as _Path
-    import os as _os
-    return _Path(_os.environ.get("HOME", "~")).expanduser() / ".claude" / "MEMORY.md"
 
 
 def _workspace_memory_path() -> Path:
@@ -42,8 +39,6 @@ def _project_memory_path(slug: str) -> Path:
 
 
 def _resolve_memory_path(scope: str, project_slug: str | None) -> Path:
-    if scope == "global":
-        return _global_memory_path()
     if scope == "workspace":
         return _workspace_memory_path()
     if scope == "project":
@@ -56,8 +51,6 @@ def _resolve_memory_path(scope: str, project_slug: str | None) -> Path:
 def _section_headers(scope: str, kind: str) -> list[str]:
     """返回需要存在的 header 链(从外到内)。"""
     kind_title = _KIND_TITLE[kind]
-    if scope == "global":
-        return ["## Skills Memory", "### game-atelier", f"#### {kind_title}"]
     return ["## game-atelier", f"### {kind_title}"]
 
 

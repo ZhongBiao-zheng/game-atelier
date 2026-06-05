@@ -31,11 +31,6 @@ def stage_e_setup(tmp_path, monkeypatch):
         "# Workspace\n## game-atelier\n### Portrait\n- W1\n### Promo\n### Turnaround\n",
         encoding="utf-8",
     )
-    (tmp_path / "home" / ".claude").mkdir(parents=True)
-    (tmp_path / "home" / ".claude" / "MEMORY.md").write_text(
-        "# Global\n## Skills Memory\n### game-atelier\n#### Portrait\n- G1\n#### Promo\n#### Turnaround\n",
-        encoding="utf-8",
-    )
     return tmp_path
 
 
@@ -58,10 +53,11 @@ def test_stage_e_recommend_action_is_ask(stage_e_setup):
     assert result["recommend_action"] == "ask"
 
 
-def test_stage_e_lessons_global_loaded(stage_e_setup):
+def test_stage_e_no_lessons_global_field(stage_e_setup):
+    """global 层已移除：turn_start 不再回传 lessons_global 字段。"""
     from character_workflow.lib.turn_start import turn_start
     result = turn_start(kind="portrait", message="出图")
-    assert "G1" in result["lessons_global"]
+    assert "lessons_global" not in result
 
 
 def test_stage_e_lessons_workspace_loaded(stage_e_setup):

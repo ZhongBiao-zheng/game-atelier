@@ -16,7 +16,6 @@ def cli_env(tmp_path, monkeypatch):
         "# Workspace\n## game-atelier\n### Portrait\n### Promo\n### Turnaround\n",
         encoding="utf-8",
     )
-    (tmp_path / "home" / ".claude").mkdir(parents=True)
     return tmp_path
 
 

@@ -145,7 +145,7 @@ def _rename_character_id(args: argparse.Namespace) -> int:
 
 
 def _append_memory(args: argparse.Namespace) -> int:
-    """append-memory --scope {project|workspace|global}。
+    """append-memory --scope {project|workspace}。
 
     project scope 自动解析 active → assignments → slug。
     未归属 → 返回码 2 + stderr 明确错误。
@@ -226,9 +226,12 @@ def main(argv: list[str] | None = None) -> int:
     p_memory.add_argument("--kind", required=True, choices=("portrait", "promo", "turnaround"))
     p_memory.add_argument("--line", required=True, help="完整一行 markdown,不带换行")
     p_memory.add_argument(
-        "--scope", default="project", choices=("global", "workspace", "project"),
-        help="写入层级,默认 project(需要 active 角色已归属)",
+        "--scope", default="project", choices=("workspace", "project"),
+        help="写入层级,默认 project(需要 active 角色已归属);跨项目通用经验用 workspace",
     )
+
+    sub.add_parser("agent-env", help="探测当前 AI 代理运行时(tool/约定文件/家目录),输出 JSON")
+    sub.add_parser("doctor", help="环境自诊断:data_root / CWD / venv / 代理,报问题 + 给建议")
 
     p_submit = sub.add_parser(
         "submit",
@@ -290,6 +293,14 @@ def main(argv: list[str] | None = None) -> int:
         return _rename_character_id(args)
     if args.cmd == "append-memory":
         return _append_memory(args)
+    if args.cmd == "agent-env":
+        from character_workflow.lib.agent_env import as_dict
+        print(json.dumps(as_dict(), ensure_ascii=False))
+        return 0
+    if args.cmd == "doctor":
+        from character_workflow.lib.doctor import diagnose
+        print(json.dumps(diagnose(), ensure_ascii=False, indent=2))
+        return 0
     if args.cmd == "submit":
         return _submit(args)
     if args.cmd == "run-job":

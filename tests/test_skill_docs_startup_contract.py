@@ -125,6 +125,29 @@ def test_character_workflow_docs_cover_identity_normalization():
     assert "只处理当前角色" in text
 
 
+def test_skill_docs_have_codex_mode_without_uv_run():
+    """Codex 不设 ${CLAUDE_PLUGIN_ROOT}，必须有 Codex 分支，且 per-turn 明确禁用 uv run。"""
+    for path in SKILL_DOCS:
+        text = _read(path)
+        assert "Codex mode" in text, path
+        assert "$BOOT" in text, path
+        assert "绝不" in text and "uv run" in text, path
+
+
+def test_business_skill_docs_route_turn_start_through_bootstrap_run():
+    """business 文档的 per-turn turn-start 在 Codex/Plugin 走 bootstrap --run（venv python），不靠 uv run。"""
+    for path in BUSINESS_SKILL_DOCS:
+        text = _read(path)
+        assert "--run -m character_workflow turn-start" in text, path
+
+
+def test_skill_docs_memory_decoupled_from_agent_home():
+    """记忆解耦：SKILL 不再指示读代理私人记忆 ~/.claude/MEMORY.md（global 层已并入 data_root）。"""
+    for path in SKILL_DOCS:
+        text = _read(path)
+        assert "~/.claude/MEMORY.md" not in text, path
+
+
 def test_spec_protocol_mentions_cross_runtime_choice_tools():
     text = _read("skills/character/references/spec-protocol.md")
     assert "Claude Code" in text

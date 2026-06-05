@@ -9,11 +9,6 @@ def memory_tree(tmp_path, monkeypatch):
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
-    (tmp_path / "home" / ".claude").mkdir(parents=True)
-    (tmp_path / "home" / ".claude" / "MEMORY.md").write_text(
-        "# Global\n## Skills Memory\n### game-atelier\n#### Portrait\n- GLOBAL-P\n#### Promo\n- GLOBAL-PROMO\n#### Turnaround\n",
-        encoding="utf-8",
-    )
     (tmp_path / "MEMORY.md").write_text(
         "# Workspace\n## game-atelier\n### Portrait\n- WORKSPACE-P\n### Promo\n- WORKSPACE-PROMO\n### Turnaround\n",
         encoding="utf-8",
@@ -30,15 +25,10 @@ def memory_tree(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_load_lessons_global_portrait(memory_tree):
-    text = context_loader.load_lessons_global("portrait")
-    assert "GLOBAL-P" in text
-    assert "GLOBAL-PROMO" not in text
-
-
 def test_load_lessons_workspace_portrait(memory_tree):
     text = context_loader.load_lessons_workspace("portrait")
     assert "WORKSPACE-P" in text
+    assert "WORKSPACE-PROMO" not in text
 
 
 def test_load_lessons_project_portrait(memory_tree):
