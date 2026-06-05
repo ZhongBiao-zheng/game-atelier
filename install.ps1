@@ -1,4 +1,4 @@
-<#
+﻿<#
   game-atelier 本地安装脚本（Windows / PowerShell）
 
   作用：把本源码包里的 Skill 一键链接到你机器上已安装的 AI 代理（Claude Code / Codex）。
