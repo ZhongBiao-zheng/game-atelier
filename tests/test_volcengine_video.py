@@ -118,3 +118,43 @@ def test_firstlast_roles(seedance_key, tmp_path, monkeypatch):
     parts = posted["body"]["content"]
     assert parts[1]["role"] == "first_frame"
     assert parts[2]["role"] == "last_frame"
+
+
+def test_skips_echoed_input_image(seedance_key, tmp_path, monkeypatch):
+    # i2v：上游成功响应回显输入参考图（扁平 content[].url）+ 真输出视频地址。
+    # 容器优先下钻会先抓到回显图；必须靠图片扩展名过滤挑出真视频。
+    payload = {"data": {
+        "status": "succeeded",
+        "content": [{"type": "image_url", "url": "https://cdn.x/input-ref.png"}],
+        "video_url": "https://cdn.x/output.mp4",
+    }}
+    monkeypatch.setattr(vv.requests, "post", lambda *a, **k: _FakeResp(200, payload))
+    monkeypatch.setattr(vv.requests, "get", lambda *a, **k: _FakeResp(200, {}))
+    picked = {}
+    monkeypatch.setattr(vv, "_download_mp4", lambda url, d, i: (picked.update(url=url) or str(Path(d) / "v1.mp4")))
+
+    out = vv.render_video(prompt="p", model="", alias="ark", output_dir=tmp_path / "o", params={}, poll_interval=0)
+    assert picked["url"] == "https://cdn.x/output.mp4"
+    assert out == [str(tmp_path / "o" / "v1.mp4")]
+
+
+def test_poll_timeout_raises(seedance_key, tmp_path, monkeypatch):
+    monkeypatch.setattr(vv.requests, "post", lambda *a, **k: _FakeResp(200, {"data": {"id": "t"}}))
+    monkeypatch.setattr(vv.requests, "get", lambda *a, **k: _FakeResp(200, {"data": {"status": "running"}}))
+    with pytest.raises(vv.VolcengineVideoError, match="轮询超时"):
+        vv.render_video(prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
+                        params={}, max_polls=2, poll_interval=0)
+
+
+def test_success_without_urls_raises(seedance_key, tmp_path, monkeypatch):
+    monkeypatch.setattr(vv.requests, "post", lambda *a, **k: _FakeResp(200, {"data": {"id": "t"}}))
+    monkeypatch.setattr(vv.requests, "get", lambda *a, **k: _FakeResp(200, {"data": {"status": "succeeded"}}))
+    with pytest.raises(vv.VolcengineVideoError, match="未返回视频地址"):
+        vv.render_video(prompt="p", model="", alias="ark", output_dir=tmp_path / "o", params={}, poll_interval=0)
+
+
+def test_submit_without_url_or_taskid_raises(seedance_key, tmp_path, monkeypatch):
+    monkeypatch.setattr(vv.requests, "post", lambda *a, **k: _FakeResp(200, {"data": {}}))
+    monkeypatch.setattr(vv.requests, "get", lambda *a, **k: _FakeResp(200, {}))
+    with pytest.raises(vv.VolcengineVideoError, match="task id"):
+        vv.render_video(prompt="p", model="", alias="ark", output_dir=tmp_path / "o", params={}, poll_interval=0)

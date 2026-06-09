@@ -100,6 +100,18 @@ def _dedupe(urls: list[str]) -> list[str]:
     return out
 
 
+# 上游成功响应常回显输入参考图（i2v 场景的 image_url）；输出恒为视频，
+# 取下载地址前先滤掉图片扩展名，避免把回显的输入图当成输出视频下载。
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".heif", ".avif")
+
+
+def _pick_video_url(urls: list[str]) -> str | None:
+    """从候选 url 里挑出视频地址：先排除图片扩展名；若全是图片则退回原列表首个。"""
+    non_image = [u for u in urls if not u.split("?", 1)[0].split("#", 1)[0].lower().endswith(_IMAGE_EXTS)]
+    candidates = non_image or urls
+    return candidates[0] if candidates else None
+
+
 def _extract_status(raw: dict[str, Any]) -> str:
     data = raw.get("data") if isinstance(raw.get("data"), dict) else raw
     s = (data.get("status") or data.get("task_status")
@@ -146,8 +158,9 @@ def _poll_video_task(*, base, headers, task_id, output_dir, max_polls, poll_inte
         status = _extract_status(payload)
         urls = _dedupe(_collect_video_urls(payload))
         if status in _SUCCESS or (not status and urls):
-            if urls:
-                return [_download_mp4(urls[0], output_dir, 1)]
+            picked = _pick_video_url(urls)
+            if picked:
+                return [_download_mp4(picked, output_dir, 1)]
             raise VolcengineVideoError("视频任务成功但未返回视频地址")
         if status in _FAILURE:
             raise VolcengineVideoError(_fail_reason(payload))
@@ -198,8 +211,9 @@ def render_video(
     if not resp.ok:
         raise VolcengineVideoError(_err(payload, resp.status_code))
     urls = _dedupe(_collect_video_urls(payload))
-    if urls:
-        return [_download_mp4(urls[0], out_dir, 1)]
+    picked = _pick_video_url(urls)
+    if picked:
+        return [_download_mp4(picked, out_dir, 1)]
     task_id = _extract_task_id(payload)
     if not task_id:
         raise VolcengineVideoError(f"火山视频提交后未返回 task id: {payload!r}")
