@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from character_workflow.lib import data_root
-from character_workflow.lib.callers import dispatch
+from character_workflow.lib.callers import dispatch, dispatch_video
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
     job_output_dir_for,
@@ -103,11 +103,23 @@ def is_valid_image(path: Path) -> bool:
     return image_dimensions(path) is not None
 
 
-def _next_asset_path(output_dir: Path) -> Path:
+def is_valid_video(path: Path) -> bool:
+    if not path.exists() or path.stat().st_size <= 0:
+        return False
+    head = path.read_bytes()[:16]
+    # mp4/mov: "ftyp" box 在偏移 4；webm/mkv: EBML magic 在字节 0
+    if len(head) >= 8 and head[4:8] == b"ftyp":
+        return True
+    if head[:4] == b"\x1aE\xdf\xa3":
+        return True
+    return False
+
+
+def _next_asset_path(output_dir: Path, ext: str = "png") -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     n = 1
     while True:
-        path = output_dir / f"v{n}.png"
+        path = output_dir / f"v{n}.{ext}"
         if not path.exists():
             return path
         n += 1
@@ -137,7 +149,7 @@ def run_job(job_id: str) -> Job:
     if job.status not in allowed_statuses:
         raise JobRunnerError(f"job not in a runnable status (current: {job.status.value})")
     if job.kind == JobKind.VIDEO:
-        raise NotImplementedError("video jobs are not implemented")
+        return _run_video_job(job)
 
     job = _normalize_reference_images(job)
     params = _params(job)
@@ -171,6 +183,52 @@ def run_job(job_id: str) -> Job:
                 first_dims = first_dims or dims
             if first_dims:
                 params["actual_size"] = f"{first_dims[0]}x{first_dims[1]}"
+            job = _save_params(read_job(job.job_id), params)
+            for output_path in output_paths:
+                _write_sidecar(Path(output_path), job, params)
+            return update_job_status(
+                job.job_id,
+                status=JobStatus.DONE,
+                output_paths=output_paths,
+                error=None,
+            )
+    except Exception as e:
+        update_job_status(job.job_id, status=JobStatus.FAILED, error=str(e))
+        if isinstance(e, JobRunnerError):
+            raise
+        raise JobRunnerError(str(e)) from e
+
+
+def _run_video_job(job: Job) -> Job:
+    """视频分支 —— 复用 PENDING→DONE/FAILED 脚手架的形状，但派发/校验/落盘换成视频版。
+
+    不做图片专属的 image_dimensions / actual_size；输出 .mp4 到 job_output_dir_for(job)。
+    """
+    job = _normalize_reference_images(job)
+    params = _params(job)
+    try:
+        if not job.alias:
+            raise JobRunnerError("video job requires an alias to route to a provider")
+        if job.status == JobStatus.PENDING_CONFIRM:
+            update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
+        with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider or 'video'}-") as tmp:
+            paths = dispatch_video(
+                prompt=job.prompt,
+                model=job.model,
+                alias=job.alias,
+                output_dir=Path(tmp),
+                params=params,
+            )
+            valid = [Path(p) for p in paths if is_valid_video(Path(p))]
+            if not valid:
+                raise JobRunnerError(f"{job.provider or job.alias} returned no valid video artifacts")
+
+            output_dir = job_output_dir_for(job)
+            output_paths: list[str] = []
+            for src in valid:
+                target = _next_asset_path(output_dir, ext="mp4")
+                shutil.move(str(src), target)
+                output_paths.append(str(target))
             job = _save_params(read_job(job.job_id), params)
             for output_path in output_paths:
                 _write_sidecar(Path(output_path), job, params)

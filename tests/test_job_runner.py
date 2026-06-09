@@ -217,3 +217,41 @@ def test_valid_image_accepts_jpeg_with_large_metadata(project):
 
     assert job_runner.image_dimensions(valid) == (2048, 2048)
     assert job_runner.is_valid_image(valid) is True
+
+
+def _write_mp4(path: Path) -> None:
+    # mp4 magic: "ftyp" 在偏移 4（不是字节 0）
+    path.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 32)
+
+
+def test_run_job_video_branch_writes_mp4_and_done(project, monkeypatch):
+    from character_workflow.lib.schemas import JobKind
+    write_job(
+        job_id="vid-1", character_id="ark", prompt="a calm sea",
+        model="doubao-seedance-2-0-fast-260128", params={"duration": 5, "frame_mode": "auto"},
+        seed=None, status=JobStatus.PENDING, alias="ark",
+    )
+    # video job 落 studio namespace；用 save_job 直接打 kind/namespace
+    job = read_job("vid-1").model_copy(update={"kind": JobKind.VIDEO, "namespace": "studio"})
+    save_job(job)
+
+    def fake_dispatch_video(*, prompt, model, alias, output_dir, params=None, **kw):
+        out = Path(output_dir) / "v1.mp4"
+        _write_mp4(out)
+        return [str(out)]
+
+    monkeypatch.setattr(job_runner, "dispatch_video", fake_dispatch_video)
+    result = job_runner.run_job("vid-1")
+    assert result.status == JobStatus.DONE
+    assert len(result.output_paths) == 1
+    assert result.output_paths[0].endswith(".mp4")
+    assert Path(result.output_paths[0]).exists()
+
+
+def test_is_valid_video_accepts_mp4_rejects_empty(project, tmp_path):
+    good = tmp_path / "good.mp4"
+    _write_mp4(good)
+    bad = tmp_path / "bad.mp4"
+    bad.write_bytes(b"")
+    assert job_runner.is_valid_video(good) is True
+    assert job_runner.is_valid_video(bad) is False
