@@ -43,6 +43,13 @@ class JobParams(BaseModel):
     requested_size: str | None = None
     actual_size: str | None = None
     warnings: list[str] | None = None
+    # 视频参数（kind=video）—— 做成一等公民以保证双端类型对齐
+    duration: int | None = None            # 秒，1-60
+    resolution: str | None = None          # 480p | 720p | 1080p
+    frame_mode: str | None = None          # auto | first | firstlast
+    generate_audio: bool | None = None
+    reference_videos: list[str] | None = None
+    reference_audios: list[str] | None = None
 
 
 class Job(BaseModel):

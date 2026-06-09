@@ -18,6 +18,13 @@ export interface JobParams {
   requested_size?: string;
   actual_size?: string;
   warnings?: string[];
+  // 视频参数（kind=video）—— 与 schemas.py::JobParams 同步
+  duration?: number;
+  resolution?: string;
+  frame_mode?: 'auto' | 'first' | 'firstlast';
+  generate_audio?: boolean;
+  reference_videos?: string[];
+  reference_audios?: string[];
   [key: string]: unknown;
 }
 

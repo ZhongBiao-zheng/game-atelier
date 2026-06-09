@@ -85,3 +85,21 @@ def test_source_image_persists_to_disk(runtime):
     raw = json.loads((runtime / "jobs" / "j2.json").read_text(encoding="utf-8"))
     assert raw["asset_slot"] == "turnaround"
     assert raw["source_image"] == "/abs/refs/three-view-source.png"
+
+
+def test_jobparams_accepts_video_fields():
+    from character_workflow.lib.schemas import JobParams
+    p = JobParams(
+        duration=5,
+        resolution="720p",
+        frame_mode="firstlast",
+        generate_audio=True,
+        reference_videos=["/abs/clip.mp4"],
+        reference_audios=["/abs/voice.mp3"],
+    )
+    assert p.duration == 5
+    assert p.resolution == "720p"
+    assert p.frame_mode == "firstlast"
+    assert p.generate_audio is True
+    assert p.reference_videos == ["/abs/clip.mp4"]
+    assert p.reference_audios == ["/abs/voice.mp3"]
