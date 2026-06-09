@@ -1116,4 +1116,75 @@ describe('Studio video submission', () => {
       params: expect.objectContaining({ duration: 5, resolution: '720p' }),
     });
   });
+
+  it('submits an i2v video job with a reference image → params.reference_images + frame_mode', async () => {
+    if (!URL.createObjectURL) {
+      (URL as any).createObjectURL = () => 'blob:stub';
+      (URL as any).revokeObjectURL = () => {};
+    }
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'vvolc',
+            keys: [
+              {
+                alias: 'vvolc',
+                provider: 'volcengine_video',
+                access_key: 'ark...vkey',
+                secret_key: null,
+                capabilities: [],
+                modalities: ['video'],
+                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128' }],
+                notes: '',
+                created_at: '2026-05-25T00:00:00Z',
+                is_default: true,
+              },
+            ],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      if (url === '/api/uploads') {
+        return Promise.resolve({ ok: true, json: async () => ({ path: '/uploads/ref-first.png' }) } as any);
+      }
+      if (url === '/api/studio/jobs') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            job_id: 'job-v2', character_id: '', prompt: 'p', submitted_at: new Date().toISOString(),
+            model: 'doubao-seedance-2-0-fast-260128', params: {}, seed: null, output_paths: [],
+            status: 'pending', error: null, kind: 'video', namespace: 'studio',
+          }),
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+
+    // 切到视频生成 → 默认 mode=i2v、frameMode=auto，渲染单个「上传源图」槽。
+    fireEvent.click(await screen.findByRole('button', { name: '切换到视频生成' }));
+
+    // 通过 label htmlFor 拿到 源图 槽的 file input，附一张参考图。
+    const srcLabel = await screen.findByLabelText('上传源图');
+    const inputId = srcLabel.getAttribute('for')!;
+    const srcInput = document.getElementById(inputId) as HTMLInputElement;
+    const refFile = new File(['x'], 'first.png', { type: 'image/png' });
+    fireEvent.change(srcInput, { target: { files: [refFile] } });
+
+    const textarea = screen.getByLabelText('生图 prompt');
+    fireEvent.change(textarea, { target: { value: '一段电影质感的镜头' } });
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body.params.reference_images).toEqual(['/uploads/ref-first.png']);
+    expect(body.params.frame_mode).toBe('auto');
+  });
 });

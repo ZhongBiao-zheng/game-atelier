@@ -391,6 +391,9 @@ export function PromptInput({
           />
         </div>
       )}
+      {isVideo && visibleProviders.length === 0 && (
+        <p className="px-2 text-xs text-muted-foreground">当前没有支持视频的供应商 Key，请先在设置里添加。</p>
+      )}
       <div className="flex flex-wrap justify-between items-center gap-3 shrink-0">
         <div className="flex min-w-0 flex-wrap gap-2">
           <ControlButton

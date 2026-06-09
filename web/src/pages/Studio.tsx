@@ -364,7 +364,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       duration: overrideConfig?.n ?? duration,
       resolution: overrideConfig?.resolution ?? videoResolution,
       ratio: overrideConfig?.ratio ?? videoRatio,
-      frame_mode: frameMode,
+      ...(videoMode === 'i2v' ? { frame_mode: frameMode } : {}),
       ...(generateAudio ? { generate_audio: true } : {}),
       ...(imgPaths.length ? { reference_images: imgPaths } : {}),
       ...(vidPaths.length ? { reference_videos: vidPaths } : {}),

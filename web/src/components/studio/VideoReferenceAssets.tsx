@@ -39,6 +39,7 @@ export function VideoReferenceAssets({
             onPick={(f) => onImagesChange(replaceAt(images, 0, f))}
             onRemove={() => onImagesChange(removeAt(images, 0))} />
           <FixedSlot label="上传末帧" file={images[1]} accept="image/*"
+            disabled={!images[0]} disabledHint="先传首帧"
             onPick={(f) => onImagesChange(replaceAt(images, 1, f))}
             onRemove={() => onImagesChange(removeAt(images, 1))} />
         </>
@@ -91,18 +92,33 @@ const SLOT = 'h-[70px] w-[56px]';
 
 /** 单个固定语义槽（源图/首帧/末帧）。 */
 function FixedSlot({
-  label, file, accept, onPick, onRemove,
+  label, file, accept, onPick, onRemove, disabled, disabledHint,
 }: {
   label: string;
   file: File | undefined;
   accept: string;
   onPick: (file: File) => void;
   onRemove: () => void;
+  disabled?: boolean;
+  disabledHint?: string;
 }) {
   const inputId = useId();
   const preview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
   const caption = label.replace('上传', '');
+
+  // 禁用态：不渲染可用的 input/label，避免在 index 0 为空时写出 index 1 制造稀疏数组空洞。
+  if (disabled && !(file && preview)) {
+    return (
+      <div className="flex flex-col items-center gap-1">
+        <div aria-label={label} aria-disabled="true"
+          className={`flex ${SLOT} cursor-not-allowed items-center justify-center rounded-lg border border-dashed border-border/40 bg-secondary/50 px-1 text-center`}>
+          <span className="text-[10px] leading-tight text-muted-foreground/70">{disabledHint}</span>
+        </div>
+        <span className="text-[11px] text-muted-foreground">{caption}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center gap-1">
