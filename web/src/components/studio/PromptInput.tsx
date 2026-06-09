@@ -1,10 +1,14 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Box, ImageIcon, Images, Plus, Square, Building2, Link2, X } from 'lucide-react';
+import { ArrowUp, Box, ImageIcon, Images, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
 import type { KeyView } from '@/api/keys';
 import { computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
 import { providerLabel } from '@/lib/providerLabels';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
+import { VideoControls } from './VideoControls';
+import { VideoReferenceAssets } from './VideoReferenceAssets';
+import type { VideoControlCaps, VideoFrameMode, VideoMode } from '@/lib/videoControlCaps';
+import type { JobKind } from '@/schema/jobs';
 
 interface Props {
   onSubmit: (prompt: string) => void | Promise<void>;
@@ -30,6 +34,26 @@ interface Props {
   menuDirection?: 'up' | 'down';
   referenceImages?: File[];
   onReferenceImagesChange?: (files: File[]) => void;
+  // --- video mode (optional; only used when kind === 'video') ---
+  kind?: JobKind;
+  onKindChange?: (kind: JobKind) => void;
+  videoMode?: VideoMode;
+  videoCaps?: VideoControlCaps;
+  duration?: number;
+  videoResolution?: string;
+  videoRatio?: string;
+  frameMode?: VideoFrameMode;
+  generateAudio?: boolean;
+  onVideoModeChange?: (mode: VideoMode) => void;
+  onDurationChange?: (duration: number) => void;
+  onVideoResolutionChange?: (resolution: string) => void;
+  onVideoRatioChange?: (ratio: string) => void;
+  onFrameModeChange?: (frameMode: VideoFrameMode) => void;
+  onGenerateAudioChange?: (generateAudio: boolean) => void;
+  referenceVideos?: File[];
+  referenceAudios?: File[];
+  onReferenceVideosChange?: (files: File[]) => void;
+  onReferenceAudiosChange?: (files: File[]) => void;
 }
 
 const SIDE_RATIOS = ['4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
@@ -70,7 +94,27 @@ export function PromptInput({
   menuDirection = 'up',
   referenceImages = [],
   onReferenceImagesChange,
+  kind = 'image',
+  onKindChange,
+  videoMode = 'i2v',
+  videoCaps,
+  duration = 5,
+  videoResolution = '720p',
+  videoRatio = '16:9',
+  frameMode = 'auto',
+  generateAudio = false,
+  onVideoModeChange,
+  onDurationChange,
+  onVideoResolutionChange,
+  onVideoRatioChange,
+  onFrameModeChange,
+  onGenerateAudioChange,
+  referenceVideos = [],
+  referenceAudios = [],
+  onReferenceVideosChange,
+  onReferenceAudiosChange,
 }: Props) {
+  const isVideo = kind === 'video';
   const [internalText, setInternalText] = useState('');
   const text = value ?? internalText;
   const setText = onValueChange ?? setInternalText;
@@ -93,7 +137,11 @@ export function PromptInput({
     document.addEventListener('mousedown', handleMouseDown);
     return () => document.removeEventListener('mousedown', handleMouseDown);
   }, [openPanel]);
-  const provider = providers.find((item) => item.alias === providerAlias) ?? providers[0];
+  // 视频模式只列出声明了 video 能力的 key（per-model modality 尚未建模，先用 key 级 modalities）。
+  const visibleProviders = isVideo
+    ? providers.filter((p) => p.modalities?.includes('video'))
+    : providers;
+  const provider = visibleProviders.find((item) => item.alias === providerAlias) ?? visibleProviders[0];
   const providerDisplayName = providerName(provider);
   const models = provider?.models ?? [];
   const selectedModel = models.find((item) => item.id === model) ?? models[0];
@@ -222,7 +270,7 @@ export function PromptInput({
       className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl min-h-[174px] h-auto flex flex-col gap-3"
     >
       <div className="flex flex-1 min-h-0 gap-2">
-        {onReferenceImagesChange && (
+        {!isVideo && onReferenceImagesChange && (
           <div
             data-testid="reference-images-panel"
             className="shrink-0 self-stretch relative overflow-visible"
@@ -328,10 +376,30 @@ export function PromptInput({
           aria-label="生图 prompt"
         />
       </div>
+      {isVideo && videoCaps && (
+        <div className="px-2">
+          <VideoReferenceAssets
+            caps={videoCaps}
+            mode={videoMode}
+            frameMode={frameMode}
+            images={referenceImages}
+            videos={referenceVideos}
+            audios={referenceAudios}
+            onImagesChange={(f) => onReferenceImagesChange?.(f)}
+            onVideosChange={(f) => onReferenceVideosChange?.(f)}
+            onAudiosChange={(f) => onReferenceAudiosChange?.(f)}
+          />
+        </div>
+      )}
       <div className="flex flex-wrap justify-between items-center gap-3 shrink-0">
         <div className="flex min-w-0 flex-wrap gap-2">
-          <ControlButton active aria-label="图片生成">
-            <ImageIcon size={14} aria-hidden /> 图片生成
+          <ControlButton
+            active
+            aria-label={isVideo ? '切换到图片生成' : '切换到视频生成'}
+            onClick={() => onKindChange?.(isVideo ? 'image' : 'video')}
+          >
+            {isVideo ? <Video size={14} aria-hidden /> : <ImageIcon size={14} aria-hidden />}
+            {isVideo ? '视频生成' : '图片生成'}
           </ControlButton>
 
           <div data-testid="provider-control-wrap" className="relative">
@@ -339,14 +407,14 @@ export function PromptInput({
               active={openPanel === 'provider'}
               aria-label="选择厂商"
               onClick={() => setOpenPanel(openPanel === 'provider' ? null : 'provider')}
-              disabled={providers.length === 0}
+              disabled={visibleProviders.length === 0}
             >
               <Building2 size={14} aria-hidden /> {providerDisplayName}
             </ControlButton>
             {openPanel === 'provider' && (
               <div role="listbox" aria-label="选择厂商列表" className={`absolute left-0 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-secondary p-2 shadow-2xl`}>
                 <div className="px-3 py-2 text-sm text-muted-foreground">选择厂商</div>
-                {providers.map((item) => (
+                {visibleProviders.map((item) => (
                   <button
                     key={item.alias}
                     type="button"
@@ -405,6 +473,8 @@ export function PromptInput({
             )}
           </div>
 
+          {!isVideo && (
+            <>
           <div data-testid="size-control-wrap" className="relative">
             <ControlButton
               active={openPanel === 'size'}
@@ -596,6 +666,26 @@ export function PromptInput({
               </div>
             )}
           </div>
+            </>
+          )}
+          {isVideo && videoCaps && (
+            <VideoControls
+              caps={videoCaps}
+              mode={videoMode}
+              duration={duration}
+              resolution={videoResolution}
+              ratio={videoRatio}
+              frameMode={frameMode}
+              generateAudio={generateAudio}
+              onModeChange={(m) => onVideoModeChange?.(m)}
+              onDurationChange={(d) => onDurationChange?.(d)}
+              onResolutionChange={(r) => onVideoResolutionChange?.(r)}
+              onRatioChange={(r) => onVideoRatioChange?.(r)}
+              onFrameModeChange={(f) => onFrameModeChange?.(f)}
+              onGenerateAudioChange={(g) => onGenerateAudioChange?.(g)}
+              menuDirection={menuDirection}
+            />
+          )}
         </div>
         <button
           type="button"

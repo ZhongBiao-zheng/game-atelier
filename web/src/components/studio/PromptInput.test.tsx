@@ -50,3 +50,71 @@ describe('PromptInput 尺寸面板按模型族渲染', () => {
     cleanup();
   });
 });
+
+// --- video mode ---
+import { videoControlCaps } from '@/lib/videoControlCaps';
+
+const videoKey = {
+  alias: 'ark', provider: 'seedance', base_url: null, access_key: '***', secret_key: null,
+  capabilities: [], models: [{ name: 'Seedance', id: 'doubao-seedance-2-0-fast-260128' }],
+  modalities: ['video'], notes: '', created_at: '', is_default: false,
+};
+
+function renderVideoMode(overrides = {}) {
+  const onModeChange = vi.fn();
+  render(
+    <PromptInput
+      onSubmit={vi.fn()}
+      providers={[videoKey as any]}
+      providerAlias="ark"
+      model="doubao-seedance-2-0-fast-260128"
+      kind="video"
+      onKindChange={vi.fn()}
+      videoMode="i2v"
+      videoCaps={videoControlCaps('doubao-seedance-2-0-fast-260128')}
+      duration={5}
+      videoResolution="720p"
+      videoRatio="16:9"
+      frameMode="auto"
+      generateAudio={false}
+      onVideoModeChange={onModeChange}
+      onDurationChange={vi.fn()}
+      onVideoResolutionChange={vi.fn()}
+      onVideoRatioChange={vi.fn()}
+      onFrameModeChange={vi.fn()}
+      onGenerateAudioChange={vi.fn()}
+      referenceVideos={[]}
+      referenceAudios={[]}
+      onReferenceVideosChange={vi.fn()}
+      onReferenceAudiosChange={vi.fn()}
+      referenceImages={[]}
+      onReferenceImagesChange={vi.fn()}
+      {...overrides}
+    />,
+  );
+  return { onModeChange };
+}
+
+describe('PromptInput video mode', () => {
+  it('renders the video control row (mode selector) in video kind', () => {
+    renderVideoMode();
+    expect(screen.getByLabelText('选择视频模式')).toBeInTheDocument();
+  });
+
+  it('does not render the image size control in video kind', () => {
+    renderVideoMode();
+    expect(screen.queryByLabelText('选择比例和分辨率')).not.toBeInTheDocument();
+  });
+
+  it('renders the video reference asset slot for i2v', () => {
+    renderVideoMode({ videoMode: 'i2v', frameMode: 'auto' });
+    expect(screen.getByLabelText('上传源图')).toBeInTheDocument();
+  });
+
+  it('clicking the kind pill toggles to image', () => {
+    const onKindChange = vi.fn();
+    renderVideoMode({ onKindChange });
+    fireEvent.click(screen.getByLabelText('切换到图片生成'));
+    expect(onKindChange).toHaveBeenCalledWith('image');
+  });
+});
