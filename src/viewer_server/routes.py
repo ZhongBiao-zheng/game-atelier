@@ -828,7 +828,7 @@ def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> di
 
     Skips pending_confirm — UI submit is the explicit user consent.
     Output will be written to <data_root>/studio/<job_id>/ when run.
-    JobKind.VIDEO is not implemented and returns 422.
+    Both IMAGE and VIDEO kinds are accepted; only IMAGE enforces params.n ∈ [1, 4].
 
     The runner is fired via BackgroundTasks so the response returns immediately;
     the UI then polls /api/jobs/<id> to observe status transitions.
