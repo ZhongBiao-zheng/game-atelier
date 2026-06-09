@@ -255,3 +255,21 @@ def test_is_valid_video_accepts_mp4_rejects_empty(project, tmp_path):
     bad.write_bytes(b"")
     assert job_runner.is_valid_video(good) is True
     assert job_runner.is_valid_video(bad) is False
+
+
+def test_run_job_video_branch_marks_failed_on_no_valid_artifacts(project, monkeypatch):
+    from character_workflow.lib.schemas import JobKind
+    write_job(
+        job_id="vid-bad", character_id="ark", prompt="x",
+        model="doubao-seedance-2-0-fast-260128", params={"frame_mode": "auto"},
+        seed=None, status=JobStatus.PENDING, alias="ark",
+    )
+    job = read_job("vid-bad").model_copy(update={"kind": JobKind.VIDEO, "namespace": "studio"})
+    save_job(job)
+
+    # dispatch_video 返回空 → 无有效视频产物 → 必须落 FAILED 并抛 JobRunnerError。
+    monkeypatch.setattr(job_runner, "dispatch_video", lambda **kw: [])
+
+    with pytest.raises(job_runner.JobRunnerError):
+        job_runner.run_job("vid-bad")
+    assert read_job("vid-bad").status == JobStatus.FAILED

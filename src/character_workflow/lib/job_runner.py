@@ -1,4 +1,4 @@
-"""Job runner — turns PENDING_CONFIRM JSON jobs into durable image assets."""
+"""Job runner — turns PENDING_CONFIRM JSON jobs into durable image/video assets."""
 from __future__ import annotations
 
 import shutil
@@ -106,7 +106,8 @@ def is_valid_image(path: Path) -> bool:
 def is_valid_video(path: Path) -> bool:
     if not path.exists() or path.stat().st_size <= 0:
         return False
-    head = path.read_bytes()[:16]
+    with path.open("rb") as fh:
+        head = fh.read(16)
     # mp4/mov: "ftyp" box 在偏移 4；webm/mkv: EBML magic 在字节 0
     if len(head) >= 8 and head[4:8] == b"ftyp":
         return True
@@ -224,6 +225,7 @@ def _run_video_job(job: Job) -> Job:
                 raise JobRunnerError(f"{job.provider or job.alias} returned no valid video artifacts")
 
             output_dir = job_output_dir_for(job)
+            # 视频无图片那种"出 n 张"概念：Seedance 单次返回一个视频，全部有效产物落盘，不设 n-cap。
             output_paths: list[str] = []
             for src in valid:
                 target = _next_asset_path(output_dir, ext="mp4")
