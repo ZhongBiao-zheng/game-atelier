@@ -504,14 +504,26 @@ function mergePersistedRounds(current: RoundState[], persisted: RoundState[]): R
   return [...localOnly, ...persisted];
 }
 
-async function pollJobUntilTerminal(
+export async function pollJobUntilTerminal(
   jobId: string,
   onFinal: (job: Job) => void,
 ) {
-  for (let i = 0; i < 120; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
+  // 媒体类型决定轮询上限：图片 120×2s≈4min；视频跑分钟级 → 220×5s≈18min。
+  // kind 从首次成功拉取的 job 读出（不依赖调用点透传）。
+  let intervalMs = 2000;
+  let maxPolls = 120;
+  let kind: Job['kind'] = 'image';
+  let polls = 0;
+  while (polls < maxPolls) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    polls += 1;
     const job = await getStudioJob(jobId);
     if (!job) continue;
+    if (job.kind === 'video' && kind !== 'video') {
+      kind = 'video';
+      intervalMs = 5000;
+      maxPolls = 220;
+    }
     if (job.status === 'done' || job.status === 'failed') {
       onFinal(job);
       return;
@@ -528,7 +540,7 @@ async function pollJobUntilTerminal(
     output_paths: [],
     status: 'failed',
     error: 'timeout',
-    kind: 'image',
+    kind,
     namespace: 'studio',
   });
 }
