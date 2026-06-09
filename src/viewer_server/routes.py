@@ -275,8 +275,16 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
     return FileResponse(str(target))
 
 
-_UPLOAD_ALLOWED_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
-_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10MB
+_IMAGE_UPLOAD_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+_VIDEO_UPLOAD_EXTS = {".mp4", ".webm", ".mov"}
+_AUDIO_UPLOAD_EXTS = {".mp3", ".wav", ".m4a", ".aac"}
+_UPLOAD_ALLOWED_EXTS = _IMAGE_UPLOAD_EXTS | _VIDEO_UPLOAD_EXTS | _AUDIO_UPLOAD_EXTS
+_IMAGE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10MB — stills
+_MEDIA_UPLOAD_MAX_BYTES = 100 * 1024 * 1024  # 100MB — video/audio reference assets
+
+
+def _upload_max_bytes(ext: str) -> int:
+    return _IMAGE_UPLOAD_MAX_BYTES if ext in _IMAGE_UPLOAD_EXTS else _MEDIA_UPLOAD_MAX_BYTES
 
 
 @router.post("/uploads")
@@ -290,8 +298,9 @@ async def post_upload(file: UploadFile = File(...)) -> dict:
     if ext not in _UPLOAD_ALLOWED_EXTS:
         raise HTTPException(422, detail=f"extension {ext or '(none)'} not allowed")
     body = await file.read()
-    if len(body) > _UPLOAD_MAX_BYTES:
-        raise HTTPException(413, detail=f"file too large: {len(body)} bytes (limit {_UPLOAD_MAX_BYTES})")
+    limit = _upload_max_bytes(ext)
+    if len(body) > limit:
+        raise HTTPException(413, detail=f"file too large: {len(body)} bytes (limit {limit})")
     uploads = _runtime() / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
     name = f"{uuid.uuid4().hex}{ext}"
@@ -315,12 +324,12 @@ async def post_gallery_image(
 
     raw_name = file.filename or "upload"
     ext = Path(raw_name).suffix.lower()
-    if ext not in _UPLOAD_ALLOWED_EXTS:
+    if ext not in _IMAGE_UPLOAD_EXTS:
         raise HTTPException(422, detail=f"extension {ext or '(none)'} not allowed")
 
     body = await file.read()
-    if len(body) > _UPLOAD_MAX_BYTES:
-        raise HTTPException(413, detail=f"file too large: {len(body)} bytes (limit {_UPLOAD_MAX_BYTES})")
+    if len(body) > _IMAGE_UPLOAD_MAX_BYTES:
+        raise HTTPException(413, detail=f"file too large: {len(body)} bytes (limit {_IMAGE_UPLOAD_MAX_BYTES})")
 
     out_dir = _project_root() / "characters" / character_id / kind
     out_dir.mkdir(parents=True, exist_ok=True)

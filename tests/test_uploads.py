@@ -102,6 +102,44 @@ def test_upload_accepts_jpg_webp(client):
         assert r.status_code == 200, f"{ext}: {r.text}"
 
 
+# ── 视频 / 音频上传（Studio video feature）─────────────────────────────
+
+def test_upload_accepts_mp4(client):
+    r = client.post(
+        "/api/uploads",
+        files={"file": ("clip.mp4", io.BytesIO(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 32), "video/mp4")},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["path"].endswith(".mp4")
+
+
+def test_upload_accepts_mp3(client):
+    r = client.post(
+        "/api/uploads",
+        files={"file": ("voice.mp3", io.BytesIO(b"ID3" + b"\x00" * 64), "audio/mpeg")},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["path"].endswith(".mp3")
+
+
+def test_upload_rejects_oversized_video(client):
+    big = b"\x00" * (101 * 1024 * 1024)  # 101 MB > 100 MB video cap
+    r = client.post(
+        "/api/uploads",
+        files={"file": ("huge.mp4", io.BytesIO(big), "video/mp4")},
+    )
+    assert r.status_code == 413
+
+
+def test_upload_image_still_capped_at_10mb(client):
+    big = b"\x00" * (11 * 1024 * 1024)  # 11 MB > 10 MB image cap
+    r = client.post(
+        "/api/uploads",
+        files={"file": ("huge.png", io.BytesIO(big), "image/png")},
+    )
+    assert r.status_code == 413
+
+
 # ── GET /api/raw 扩展 ────────────────────────────────────────────────
 
 def test_raw_allows_runtime_uploads_without_job_id(client, runtime):
