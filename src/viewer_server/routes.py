@@ -833,8 +833,6 @@ def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> di
     The runner is fired via BackgroundTasks so the response returns immediately;
     the UI then polls /api/jobs/<id> to observe status transitions.
     """
-    if body.kind == JobKind.VIDEO:
-        raise HTTPException(status_code=422, detail="video not implemented")
     db = keys.read_keys_db()
     alias = body.alias or db.default_alias
     if not alias:
@@ -843,10 +841,11 @@ def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> di
     if not key_row:
         raise HTTPException(status_code=400, detail=f"unknown alias {alias}")
     params = body.params.model_copy(deep=True)
-    image_count = params.n if params.n is not None else 1
-    if image_count < 1 or image_count > 4:
-        raise HTTPException(status_code=422, detail="params.n must be between 1 and 4")
-    params.n = image_count
+    if body.kind == JobKind.IMAGE:
+        image_count = params.n if params.n is not None else 1
+        if image_count < 1 or image_count > 4:
+            raise HTTPException(status_code=422, detail="params.n must be between 1 and 4")
+        params.n = image_count
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     job_id = f"job-{ts}{uuid.uuid4().hex[:8]}"
@@ -863,7 +862,7 @@ def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> di
         status=JobStatus.PENDING,  # Studio skips pending_confirm (UI submit = explicit consent)
         error=None,
         asset_slot=_AssetSlot.PORTRAIT,  # ignored when namespace="studio"
-        kind=JobKind.IMAGE,
+        kind=body.kind,
         namespace="studio",
         alias=alias,
         provider=key_row.provider,

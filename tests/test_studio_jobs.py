@@ -61,14 +61,30 @@ def test_post_studio_job_uses_default_alias_when_omitted(client):
     assert resp.json()["alias"] == "default"
 
 
-def test_post_studio_job_rejects_video_kind(client):
+def test_post_studio_job_accepts_video_kind(client):
+    resp = client.post("/api/studio/jobs", json={
+        "prompt": "a calm sea, slow pan",
+        "model": "doubao-seedance-2-0-fast-260128",
+        "params": {"duration": 5, "resolution": "720p", "frame_mode": "auto"},
+        "kind": "video",
+    })
+    assert resp.status_code == 201
+    payload = resp.json()
+    assert payload["kind"] == "video"
+    assert payload["namespace"] == "studio"
+    assert payload["status"] == "pending"
+
+
+def test_post_studio_video_job_skips_n_gate(client):
+    # 视频没有"出几张"概念 —— 不应触发 params.n ∈ [1,4] 校验，也不强制塞 n。
     resp = client.post("/api/studio/jobs", json={
         "prompt": "x",
-        "model": "gpt-image-2",
+        "model": "doubao-seedance-2-0-fast-260128",
         "params": {},
         "kind": "video",
     })
-    assert resp.status_code == 422
+    assert resp.status_code == 201
+    assert resp.json()["params"].get("n") is None
 
 
 def test_post_studio_job_rejects_out_of_range_image_count(client):
