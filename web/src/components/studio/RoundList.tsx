@@ -1,10 +1,11 @@
 import { type ButtonHTMLAttributes, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Download, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Download, Film, Trash2, X } from 'lucide-react';
 
 import { WaitingCopy } from './WaitingCopy';
 
 export interface RoundConfig {
   prompt: string;
+  kind?: 'image' | 'video';
   alias?: string | null;
   provider?: string | null;
   model: string;
@@ -120,6 +121,15 @@ function imageSrc(path: string) {
   return `/api/gallery/image?path=${encodeURIComponent(path)}`;
 }
 
+// 视频复用与图片相同的字节端点（output_paths 白名单内）。
+function videoSrc(path: string) {
+  return `/api/gallery/image?path=${encodeURIComponent(path)}`;
+}
+
+function isImagePath(path: string): boolean {
+  return /\.(png|jpe?g|webp|gif|bmp|avif)(\?|#|$)/i.test(path);
+}
+
 // 参考图来自 .runtime/uploads/（走 /api/raw），也可能是 http(s) CDN 直链。
 function refImageSrc(path: string) {
   return path.startsWith('http') ? path : `/api/raw?path=${encodeURIComponent(path)}`;
@@ -172,7 +182,9 @@ function ReferenceStack({
             }}
             className="relative block overflow-hidden rounded-lg border-[1.5px] border-white bg-card shadow-md"
           >
-            <img src={refImageSrc(src)} alt="参考图" className="h-full w-full object-cover" draggable={false} />
+            {isImagePath(src)
+              ? <img src={refImageSrc(src)} alt="参考图" className="h-full w-full object-cover" draggable={false} />
+              : <span className="flex h-full w-full items-center justify-center bg-card text-muted-foreground"><Film className="size-4" /></span>}
           </span>
         );
       })}
@@ -227,29 +239,53 @@ function DoneBatch({
         </div>
       </div>
       <div className="flex flex-wrap gap-1">
-        {round.imagePaths.map((path, index) => (
-          <figure
-            key={path}
-            data-testid={`studio-result-thumb-${index + 1}`}
-            className="group relative w-[251.5px] overflow-hidden rounded-md bg-card cursor-pointer"
-            onClick={() => onLightbox?.(imageSrc(path))}
-          >
-            <img
-              src={imageSrc(path)}
-              alt={`生成结果 ${index + 1}`}
-              className="h-full w-full object-contain"
-            />
-            <a
-              href={imageSrc(path)}
-              download={path.split('/').pop() || `${round.jobId}-${index + 1}.png`}
-              aria-label={`下载生成结果 ${index + 1}`}
-              title="下载图片"
-              className="absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-white/20 bg-black/70 text-white opacity-0 shadow-lg backdrop-blur-sm transition-opacity hover:bg-black/85 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <Download className="size-4" aria-hidden />
-            </a>
-          </figure>
-        ))}
+        {round.config.kind === 'video'
+          ? round.imagePaths.map((path, index) => (
+              <figure
+                key={path}
+                data-testid={`studio-result-video-${index + 1}`}
+                className="group relative w-[420px] max-w-full overflow-hidden rounded-md bg-card"
+              >
+                <video
+                  src={videoSrc(path)}
+                  controls
+                  preload="metadata"
+                  className="h-full w-full rounded-md"
+                />
+                <a
+                  href={videoSrc(path)}
+                  download={path.split('/').pop() || `${round.jobId}-${index + 1}.mp4`}
+                  aria-label={`下载生成视频 ${index + 1}`}
+                  title="下载视频"
+                  className="absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-white/20 bg-black/70 text-white opacity-0 shadow-lg backdrop-blur-sm transition-opacity hover:bg-black/85 group-hover:opacity-100 focus-visible:opacity-100"
+                >
+                  <Download className="size-4" aria-hidden />
+                </a>
+              </figure>
+            ))
+          : round.imagePaths.map((path, index) => (
+              <figure
+                key={path}
+                data-testid={`studio-result-thumb-${index + 1}`}
+                className="group relative w-[251.5px] overflow-hidden rounded-md bg-card cursor-pointer"
+                onClick={() => onLightbox?.(imageSrc(path))}
+              >
+                <img
+                  src={imageSrc(path)}
+                  alt={`生成结果 ${index + 1}`}
+                  className="h-full w-full object-contain"
+                />
+                <a
+                  href={imageSrc(path)}
+                  download={path.split('/').pop() || `${round.jobId}-${index + 1}.png`}
+                  aria-label={`下载生成结果 ${index + 1}`}
+                  title="下载图片"
+                  className="absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-white/20 bg-black/70 text-white opacity-0 shadow-lg backdrop-blur-sm transition-opacity hover:bg-black/85 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <Download className="size-4" aria-hidden />
+                </a>
+              </figure>
+            ))}
       </div>
       <div className="flex items-center gap-2">
         <ActionButton onClick={() => onReEdit?.(round.config)}>重新编辑</ActionButton>
