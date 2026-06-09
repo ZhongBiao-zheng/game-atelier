@@ -7,7 +7,8 @@ import { PromptInput } from '@/components/studio/PromptInput';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
 import { imageControlCaps, type Quality } from '@/lib/imageControlCaps';
-import type { Job, JobParams } from '@/schema/jobs';
+import { videoControlCaps, type VideoFrameMode, type VideoMode } from '@/lib/videoControlCaps';
+import type { Job, JobKind, JobParams } from '@/schema/jobs';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
 
@@ -19,6 +20,13 @@ interface SavedSelection {
   count?: number;
   quality?: Quality;
   customSize?: string;
+  kind?: JobKind;
+  videoMode?: VideoMode;
+  duration?: number;
+  videoResolution?: string;
+  videoRatio?: string;
+  frameMode?: VideoFrameMode;
+  generateAudio?: boolean;
 }
 
 function loadSelection(): SavedSelection {
@@ -55,6 +63,29 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
+  const [kind, setKind] = useState<JobKind>(saved.kind ?? 'image');
+  const [videoMode, setVideoMode] = useState<VideoMode>(saved.videoMode ?? 'i2v');
+  const [duration, setDuration] = useState<number>(saved.duration ?? 5);
+  const [videoResolution, setVideoResolution] = useState<string>(saved.videoResolution ?? '720p');
+  const [videoRatio, setVideoRatio] = useState<string>(saved.videoRatio ?? '16:9');
+  const [frameMode, setFrameMode] = useState<VideoFrameMode>(saved.frameMode ?? 'auto');
+  const [generateAudio, setGenerateAudio] = useState<boolean>(saved.generateAudio ?? false);
+  const [referenceVideos, setReferenceVideos] = useState<File[]>([]);
+  const [referenceAudios, setReferenceAudios] = useState<File[]>([]);
+  const videoCaps = videoControlCaps(model);
+  // 切到视频模式时，若当前 key 不支持 video，自动选中首个 video 能力的 key —— 让 videoCaps 立即正确（否则退化成 STANDARD_CAPS）。
+  useEffect(() => {
+    if (kind !== 'video' || keys.length === 0) return;
+    const cur = keys.find((k) => k.alias === providerAlias);
+    if (cur?.modalities?.includes('video')) return;
+    const v = keys.find((k) => k.modalities?.includes('video'));
+    if (v) {
+      setProviderAlias(v.alias);
+      setModel(v.models[0]?.id ?? '');
+    }
+    // 仅在切到视频模式 / keys 加载时触发；providerAlias 不入依赖，避免用户改回非视频 key 时被反复抢选成死循环。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, keys]);
   const handleCustomSizeChange = useCallback((w: number, h: number) => {
     setCustomSize(`${w}x${h}`);
   }, []);
@@ -131,8 +162,14 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   // 持久化供应商/模型/尺寸/张数等全部选择，切页面再回来时恢复。providerAlias 为空说明 keys 还没加载完，先不写。
   useEffect(() => {
     if (!providerAlias) return;
-    saveSelection({ providerAlias, model, ratio, resolution, count, quality, customSize });
-  }, [providerAlias, model, ratio, resolution, count, quality, customSize]);
+    saveSelection({
+      providerAlias, model, ratio, resolution, count, quality, customSize,
+      kind, videoMode, duration, videoResolution, videoRatio, frameMode, generateAudio,
+    });
+  }, [
+    providerAlias, model, ratio, resolution, count, quality, customSize,
+    kind, videoMode, duration, videoResolution, videoRatio, frameMode, generateAudio,
+  ]);
 
   useEffect(() => {
     if (compact) return;
@@ -157,6 +194,11 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   }, [compact, hasActivePersistedJob, refreshPersistedJobs]);
 
   const onSubmit = async (prompt: string, overrideConfig?: RoundConfig) => {
+    const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
+    if (wantVideo) {
+      await onSubmitVideo(prompt, overrideConfig);
+      return;
+    }
     const effectiveRatio = overrideConfig?.ratio ?? ratio;
     const effectiveResolution = overrideConfig?.resolution ?? resolution;
     const effectiveCount = clampImageCount(overrideConfig?.n ?? count);
@@ -285,6 +327,130 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     });
   };
 
+  const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig) => {
+    // 切到视频后 PromptInput 只是按 modalities 过滤显示，父级 providerAlias/model 不一定已是视频 key——这里收敛。
+    const videoKeys = keys.filter((item) => item.modalities?.includes('video'));
+    const selectedKey =
+      (overrideConfig?.alias ? keys.find((item) => item.alias === overrideConfig.alias) : undefined)
+      ?? videoKeys.find((item) => item.alias === providerAlias)
+      ?? videoKeys[0];
+    const effectiveAlias = overrideConfig?.alias ?? selectedKey?.alias ?? providerAlias;
+    const effectiveModel = overrideConfig?.model ?? selectedKey?.models[0]?.id ?? model;
+    const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
+    const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
+
+    setPending(true);
+    // 视频/音频参考图复用通用文件上传端点（Task 1 已放开 video/audio）。override 携带的已是服务器路径，直接复用。
+    let imgPaths: string[];
+    let vidPaths: string[];
+    let audPaths: string[];
+    try {
+      imgPaths = overrideConfig?.referenceImages
+        ?? (referenceImages.length > 0 ? await Promise.all(referenceImages.map(uploadReferenceImage)) : []);
+      vidPaths = overrideConfig ? [] : (referenceVideos.length > 0 ? await Promise.all(referenceVideos.map(uploadReferenceImage)) : []);
+      audPaths = overrideConfig ? [] : (referenceAudios.length > 0 ? await Promise.all(referenceAudios.map(uploadReferenceImage)) : []);
+    } catch (e: any) {
+      setPending(false);
+      if (!compact) {
+        setRounds((rs) => [
+          { kind: 'failed', submittedAt: new Date().toISOString(), reason: `参考资产上传失败：${e.message}` },
+          ...rs,
+        ]);
+      }
+      return;
+    }
+
+    const videoParams: JobParams = {
+      duration: overrideConfig?.n ?? duration,
+      resolution: overrideConfig?.resolution ?? videoResolution,
+      ratio: overrideConfig?.ratio ?? videoRatio,
+      frame_mode: frameMode,
+      ...(generateAudio ? { generate_audio: true } : {}),
+      ...(imgPaths.length ? { reference_images: imgPaths } : {}),
+      ...(vidPaths.length ? { reference_videos: vidPaths } : {}),
+      ...(audPaths.length ? { reference_audios: audPaths } : {}),
+    };
+
+    const config: RoundConfig = {
+      prompt,
+      kind: 'video',
+      alias: effectiveAlias,
+      provider: effectiveProvider,
+      model: effectiveModel,
+      modelName: selectedModel?.name ?? overrideConfig?.modelName,
+      ratio: overrideConfig?.ratio ?? videoRatio,
+      referenceImages: imgPaths,
+    };
+
+    if (compact) {
+      try {
+        await createStudioJob({
+          prompt,
+          alias: effectiveAlias ?? undefined,
+          model: effectiveModel,
+          params: videoParams,
+          kind: 'video',
+        });
+        setLocation('/studio');
+      } finally {
+        setPending(false);
+      }
+      return;
+    }
+
+    const startedAt = Date.now();
+    const myRound: RoundState = { kind: 'pending', startedAt, config };
+    setRounds((rs) => [myRound, ...rs]);
+
+    let job: Job;
+    try {
+      job = await createStudioJob({
+        prompt,
+        alias: effectiveAlias ?? undefined,
+        model: effectiveModel,
+        params: videoParams,
+        kind: 'video',
+      });
+    } catch (e: any) {
+      setRounds((rs) =>
+        rs.map((r) =>
+          r === myRound ? { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message, config } : r,
+        ),
+      );
+      setPending(false);
+      return;
+    }
+    setPending(false);
+
+    setPersistedJobs((items) => upsertJob(items, job));
+    setRounds((rs) =>
+      rs.map((r) =>
+        r === myRound
+          ? { ...myRound, jobId: job.job_id, startedAt: Date.parse(job.submitted_at) || startedAt }
+          : r,
+      ),
+    );
+
+    void pollJobUntilTerminal(job.job_id, (final) => {
+      setPersistedJobs((items) => upsertJob(items, final));
+      setRounds((rs) =>
+        rs.map((r) =>
+          r === myRound
+            ? final.status === 'done' && final.output_paths.length > 0
+              ? { kind: 'done', jobId: final.job_id, submittedAt: final.submitted_at, imagePaths: final.output_paths, config }
+              : { kind: 'failed', jobId: final.job_id, submittedAt: final.submitted_at, reason: final.error ?? '生成完成但未返回视频', config }
+            : r,
+        ),
+      );
+    }).catch((e: any) => {
+      setRounds((rs) =>
+        rs.map((r) =>
+          r === myRound ? { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message, config } : r,
+        ),
+      );
+    });
+  };
+
   if (compact) {
     return (
       <div className="py-8" aria-label="生图沙箱">
@@ -314,6 +480,25 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           menuDirection="down"
           referenceImages={referenceImages}
           onReferenceImagesChange={setReferenceImages}
+          kind={kind}
+          onKindChange={setKind}
+          videoMode={videoMode}
+          videoCaps={videoCaps}
+          duration={duration}
+          videoResolution={videoResolution}
+          videoRatio={videoRatio}
+          frameMode={frameMode}
+          generateAudio={generateAudio}
+          onVideoModeChange={setVideoMode}
+          onDurationChange={setDuration}
+          onVideoResolutionChange={setVideoResolution}
+          onVideoRatioChange={setVideoRatio}
+          onFrameModeChange={setFrameMode}
+          onGenerateAudioChange={setGenerateAudio}
+          referenceVideos={referenceVideos}
+          referenceAudios={referenceAudios}
+          onReferenceVideosChange={setReferenceVideos}
+          onReferenceAudiosChange={setReferenceAudios}
         />
       </div>
     );
@@ -358,6 +543,25 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           menuDirection="up"
           referenceImages={referenceImages}
           onReferenceImagesChange={setReferenceImages}
+          kind={kind}
+          onKindChange={setKind}
+          videoMode={videoMode}
+          videoCaps={videoCaps}
+          duration={duration}
+          videoResolution={videoResolution}
+          videoRatio={videoRatio}
+          frameMode={frameMode}
+          generateAudio={generateAudio}
+          onVideoModeChange={setVideoMode}
+          onDurationChange={setDuration}
+          onVideoResolutionChange={setVideoResolution}
+          onVideoRatioChange={setVideoRatio}
+          onFrameModeChange={setFrameMode}
+          onGenerateAudioChange={setGenerateAudio}
+          referenceVideos={referenceVideos}
+          referenceAudios={referenceAudios}
+          onReferenceVideosChange={setReferenceVideos}
+          onReferenceAudiosChange={setReferenceAudios}
         />
       </div>
     </div>
@@ -424,6 +628,7 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
   const selectedModel = selectedKey?.models.find((item) => item.id === job.model);
   return {
     prompt: job.prompt,
+    kind: job.kind === 'video' ? 'video' : 'image',
     alias: job.alias,
     provider: job.provider,
     model: job.model,

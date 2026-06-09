@@ -1044,3 +1044,76 @@ describe('Studio', () => {
     expect(sizeButton).toHaveTextContent('2560');
   });
 });
+
+describe('Studio video submission', () => {
+  it('submits a video job with kind=video and video params', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'volc',
+            keys: [
+              {
+                alias: 'volc',
+                provider: 'seedream',
+                access_key: 'ark...key',
+                secret_key: null,
+                capabilities: ['portrait'],
+                modalities: ['image'],
+                models: [{ name: '图片 4.7', id: 'doubao-seedream-4-5-251128' }],
+                notes: '',
+                created_at: '2026-05-25T00:00:00Z',
+                is_default: true,
+              },
+              {
+                alias: 'vvolc',
+                provider: 'volcengine_video',
+                access_key: 'ark...vkey',
+                secret_key: null,
+                capabilities: [],
+                modalities: ['video'],
+                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128' }],
+                notes: '',
+                created_at: '2026-05-25T00:00:00Z',
+                is_default: false,
+              },
+            ],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      if (url === '/api/studio/jobs') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            job_id: 'job-v1', character_id: '', prompt: 'p', submitted_at: new Date().toISOString(),
+            model: 'doubao-seedance-2-0-fast-260128', params: {}, seed: null, output_paths: [],
+            status: 'pending', error: null, kind: 'video', namespace: 'studio',
+          }),
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+
+    // 切到视频生成 → provider 自动收敛到声明了 video 能力的 key（vvolc / seedance 模型）。
+    fireEvent.click(await screen.findByRole('button', { name: '切换到视频生成' }));
+
+    const textarea = screen.getByLabelText('生图 prompt');
+    fireEvent.change(textarea, { target: { value: '一段电影质感的镜头' } });
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body).toMatchObject({
+      kind: 'video',
+      params: expect.objectContaining({ duration: 5, resolution: '720p' }),
+    });
+  });
+});
