@@ -167,3 +167,40 @@ def test_video_provider_keys_can_be_stored_without_dispatch_regression(isolated_
 
     assert keys.find_by_alias("runway-main").modalities == ["video"]
     assert keys.find_by_alias("kling-main").models[0].id == "kling"
+
+
+def test_dispatch_video_routes_seedance(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib import keys as _keys
+    from character_workflow.lib import callers
+    _keys.add_key(_keys.KeySpec(
+        alias="ark", provider="seedance",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        access_key="ark-fake", created_at="2026-06-09T00:00:00+00:00",
+    ))
+    captured = {}
+
+    def fake_render_video(*, prompt, model, alias, output_dir, params=None, **kw):
+        captured.update(prompt=prompt, model=model, alias=alias)
+        return ["/abs/v1.mp4"]
+
+    from character_workflow.lib.callers import volcengine_video
+    monkeypatch.setattr(volcengine_video, "render_video", fake_render_video)
+
+    out = callers.dispatch_video(
+        prompt="sea", model="doubao-seedance-2-0-fast-260128", alias="ark",
+        output_dir=tmp_path, params={"duration": 5},
+    )
+    assert out == ["/abs/v1.mp4"]
+    assert captured["alias"] == "ark"
+
+
+def test_dispatch_video_rejects_unwired_provider(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib import keys as _keys
+    from character_workflow.lib import callers
+    _keys.add_key(_keys.KeySpec(
+        alias="kl", provider="kling", access_key="x", created_at="2026-06-09T00:00:00+00:00",
+    ))
+    with pytest.raises(callers.WrongProviderError):
+        callers.dispatch_video(prompt="p", model="m", alias="kl", output_dir=tmp_path, params={})

@@ -82,8 +82,37 @@ def dispatch(
     return fn(prompt=prompt, model=model, alias=alias, **kwargs)
 
 
+def dispatch_video(
+    *,
+    prompt: str,
+    model: str,
+    alias: str,
+    output_dir: Any,
+    params: dict[str, Any] | None = None,
+    **kwargs: Any,
+) -> list[str]:
+    """视频派发 —— 按 provider 路由到对应视频 caller。
+
+    首发只接 seedance（火山 Ark 直连）；kling/veo/pixverse 等留作后续家族。
+    不复用 dispatch() 的图片 provider 分支（那套是同步图片通道）。
+
+    Returns list[str] of generated .mp4 paths.
+    """
+    key = _keys.find_by_alias(alias)
+    if key is None:
+        raise NoSuchKeyError(alias)
+    if key.provider == "seedance":
+        from . import volcengine_video
+        return volcengine_video.render_video(
+            prompt=prompt, model=model, alias=alias,
+            output_dir=output_dir, params=params, **kwargs,
+        )
+    raise WrongProviderError(f"video provider not wired: {key.provider!r}")
+
+
 __all__ = [
     "dispatch",
+    "dispatch_video",
     "stubs",
     "NoSuchKeyError",
     "WrongProviderError",
