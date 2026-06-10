@@ -131,6 +131,56 @@ describe('CharacterGallery', () => {
     expect(screen.queryByText('可能已中断')).not.toBeInTheDocument();
   });
 
+  it('toggles homepage-gallery hiding from the card top-left button', async () => {
+    const doneJob: Job = {
+      job_id: 'job-done-1',
+      character_id: 'cao-cao',
+      prompt: '完成的立绘',
+      submitted_at: '2026-06-10T02:00:00Z',
+      model: 'gpt-image-2',
+      params: { n: 1 },
+      seed: null,
+      output_paths: ['/root/characters/cao-cao/portrait/v1.png'],
+      status: 'done',
+      error: null,
+      asset_slot: 'portrait',
+      kind: 'image',
+      namespace: 'character',
+    };
+
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url) === '/api/gallery/hidden' && init?.method === 'POST') {
+        return { ok: true, json: async () => ({ paths: ['characters/cao-cao/portrait/v1.png'] }) };
+      }
+      if (String(url) === '/api/gallery/hidden') {
+        return { ok: true, json: async () => ({ paths: [] }) };
+      }
+      return { ok: true, json: async () => [doneJob] };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <CharacterGallery
+        characterId="cao-cao"
+        characterName="曹操"
+        detailMode={false}
+        onSelectImage={vi.fn()}
+        sseSignal={0}
+      />,
+    );
+
+    fireEvent.click(await screen.findByLabelText('隐藏'));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/gallery/hidden', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ path: '/root/characters/cao-cao/portrait/v1.png', hidden: true }),
+      }));
+    });
+    // sidecar 存相对路径、job 给的是绝对路径——后缀比对生效后按钮翻成「恢复展示」常显态。
+    expect(await screen.findByLabelText('恢复展示')).toBeInTheDocument();
+    expect(screen.queryByLabelText('隐藏')).not.toBeInTheDocument();
+  });
+
   it('opens on the routed asset tab', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,

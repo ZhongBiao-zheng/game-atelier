@@ -113,6 +113,51 @@ def test_handles_missing_file_gracefully(client, tmp_path):
     assert any(i["filename"] == "good.png" for i in items)
 
 
+def test_hidden_paths_excluded_from_recent(client, tmp_path):
+    chars = tmp_path / "characters"
+    _make_image(chars / "char-a" / "portrait" / "show.png")
+    _make_image(chars / "char-a" / "portrait" / "hide.png")
+
+    resp = client.post(
+        "/api/gallery/hidden",
+        json={"path": "characters/char-a/portrait/hide.png", "hidden": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["paths"] == ["characters/char-a/portrait/hide.png"]
+
+    items = client.get("/api/gallery/recent").json()["items"]
+    assert [i["filename"] for i in items] == ["show.png"]
+
+
+def test_hidden_accepts_absolute_path_and_unhide(client, tmp_path):
+    """前端从 job.output_paths 拿到的是绝对路径——后端必须归一成相对路径存。"""
+    image = tmp_path / "characters" / "char-a" / "portrait" / "kv.png"
+    _make_image(image)
+
+    resp = client.post("/api/gallery/hidden", json={"path": str(image), "hidden": True})
+    assert resp.json()["paths"] == ["characters/char-a/portrait/kv.png"]
+    assert client.get("/api/gallery/recent").json()["items"] == []
+    assert client.get("/api/gallery/hidden").json()["paths"] == [
+        "characters/char-a/portrait/kv.png"
+    ]
+
+    # 取消隐藏后重新出现在作品展示
+    resp = client.post("/api/gallery/hidden", json={"path": str(image), "hidden": False})
+    assert resp.json()["paths"] == []
+    items = client.get("/api/gallery/recent").json()["items"]
+    assert [i["filename"] for i in items] == ["kv.png"]
+
+
+def test_hidden_sidecar_corrupted_falls_back_empty(client, tmp_path):
+    """sidecar 损坏不挂 recent / hidden 端点，按空清单处理。"""
+    _make_image(tmp_path / "characters" / "char-a" / "portrait" / "x.png")
+    runtime = tmp_path / ".runtime"
+    runtime.mkdir(exist_ok=True)
+    (runtime / "gallery-hidden.json").write_text("not-json", encoding="utf-8")
+    assert client.get("/api/gallery/hidden").json() == {"paths": []}
+    assert len(client.get("/api/gallery/recent").json()["items"]) == 1
+
+
 def test_gallery_image_endpoint_rejects_traversal(client, tmp_path):
     resp = client.get("/api/gallery/image?path=../../../etc/passwd")
     assert resp.status_code == 400

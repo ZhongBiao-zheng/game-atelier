@@ -65,6 +65,7 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 | `.runtime/draft/*.md` | Web（画师反馈） | Skill（draft_processor 消费后挪到 `draft-processed/`）|
 | `.runtime/active-character.json` | 双向 | 双向 |
 | `.runtime/projects.json` | Web (`POST /api/projects`) | Skill / Web |
+| `.runtime/gallery-hidden.json` | Web (`POST /api/gallery/hidden`) | viewer-server（`/api/gallery/recent` 过滤首页作品展示） |
 | `.runtime/server.{pid,port}` | viewer-server CLI | viewer-server CLI |
 | `.config/keys.json` | Skill / Web (`POST /api/keys`) | Skill 通过 `lib/keys.py` 读 |
 | `.config/venv-hash` | `bootstrap.py --ensure-venv` | `bootstrap.py --check` |

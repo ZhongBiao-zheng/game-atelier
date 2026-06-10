@@ -769,6 +769,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     if not characters_dir.exists():
         return {"items": []}
     job_ids_by_path = _gallery_job_ids_by_path()
+    hidden = set(_read_gallery_hidden())
     for char_dir in characters_dir.iterdir():
         if not char_dir.is_dir():
             continue
@@ -779,6 +780,9 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
             for f in slot_dir.iterdir():
                 if f.suffix.lower() not in _GALLERY_EXTS:
                     continue
+                rel = str(f.relative_to(_project_root()))
+                if rel in hidden:
+                    continue  # 画师点过「隐藏」：工坊可见，首页作品展示不出
                 try:
                     mtime = f.stat().st_mtime
                 except OSError:
@@ -787,12 +791,67 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                     "character_id": char_dir.name,
                     "asset_slot": slot,
                     "filename": f.name,
-                    "path": str(f.relative_to(_project_root())),
-                    "job_id": job_ids_by_path.get(str(f.relative_to(_project_root()))),
+                    "path": rel,
+                    "job_id": job_ids_by_path.get(rel),
                     "mtime": mtime,
                 })
     random.shuffle(items)
     return {"items": items[:limit]}
+
+
+def _gallery_hidden_file() -> Path:
+    return _runtime() / "gallery-hidden.json"
+
+
+def _read_gallery_hidden() -> list[str]:
+    p = _gallery_hidden_file()
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    paths = data.get("paths") if isinstance(data, dict) else None
+    if not isinstance(paths, list):
+        return []
+    return [x for x in paths if isinstance(x, str)]
+
+
+def _normalize_gallery_path(raw: str) -> str:
+    """归一为 data_root 相对路径——job.output_paths 是绝对路径、recent 项是相对路径，
+    sidecar 统一存相对形态两边才能对上（与 _gallery_job_ids_by_path 同规）。"""
+    root = _project_root()
+    path = Path(raw)
+    absolute = path if path.is_absolute() else root / path
+    try:
+        return str(absolute.resolve().relative_to(root))
+    except ValueError:
+        return raw
+
+
+class _GalleryHiddenPatch(BaseModel):
+    model_config = {"extra": "forbid"}
+    path: str = Field(min_length=1)
+    hidden: bool
+
+
+@router.get("/gallery/hidden")
+def gallery_hidden() -> dict:
+    return {"paths": _read_gallery_hidden()}
+
+
+@router.post("/gallery/hidden")
+def post_gallery_hidden(patch: _GalleryHiddenPatch) -> dict:
+    target = _normalize_gallery_path(patch.path)
+    paths = [p for p in _read_gallery_hidden() if p != target]
+    if patch.hidden:
+        paths.append(target)
+    out = _gallery_hidden_file()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"paths": paths}, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(out)
+    return {"paths": paths}
 
 
 def _gallery_job_ids_by_path() -> dict[str, str]:

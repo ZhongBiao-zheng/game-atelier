@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Loader2, Upload, X } from 'lucide-react';
+import { AlertTriangle, Eye, EyeOff, Loader2, Upload, X } from 'lucide-react';
 import type { AssetSlot, Job } from '../schema/jobs';
+import { fetchGalleryHidden, isGalleryHidden, setGalleryHidden } from '@/api/gallery';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -56,10 +57,16 @@ export function CharacterGallery({
   const [tab, setTab] = useState<TabKind>(initialTab ?? 'portrait');
   const [uploadSignal, setUploadSignal] = useState(0);
   const [colCount, setColCount] = useState(detailMode ? 2 : 3);
+  // 首页作品展示的隐藏清单（工坊内不受影响，仅作状态标识 + 切换入口）。
+  const [hiddenPaths, setHiddenPaths] = useState<string[]>([]);
 
   useEffect(() => {
     if (initialTab) setTab(initialTab);
   }, [initialTab]);
+
+  useEffect(() => {
+    fetchGalleryHidden().then(setHiddenPaths).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!characterId) return;
@@ -110,6 +117,15 @@ export function CharacterGallery({
     const r = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
     if (!r.ok) { alert(`删除失败：HTTP ${r.status}`); return; }
     setJobs(js => js.filter(j => j.job_id !== jobId));
+  }
+
+  async function toggleHidden(path: string) {
+    const next = !isGalleryHidden(path, hiddenPaths);
+    try {
+      setHiddenPaths(await setGalleryHidden(path, next));
+    } catch {
+      alert('切换展示状态失败，稍后再试');
+    }
   }
 
   async function voidStaleJob(jobId: string) {
@@ -168,6 +184,20 @@ export function CharacterGallery({
               <figcaption className="pointer-events-none absolute bottom-2 left-2 font-mono text-[10px] tabular-nums tracking-wider text-foreground bg-background/75 backdrop-blur-sm px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                 №{String(i + 1).padStart(2, '0')}
               </figcaption>
+              <button
+                onClick={(e) => { e.stopPropagation(); void toggleHidden(img.path); }}
+                title={isGalleryHidden(img.path, hiddenPaths) ? '已从首页作品展示隐藏，点击恢复' : '从首页作品展示隐藏（工坊内仍可见）'}
+                aria-label={isGalleryHidden(img.path, hiddenPaths) ? '恢复展示' : '隐藏'}
+                className={cn(
+                  'absolute left-2 top-2 size-7 rounded-full bg-black/70 text-white grid place-items-center transition-opacity backdrop-blur-sm hover:bg-black/85 cursor-pointer border-0',
+                  // 已隐藏的图常显 EyeOff 作状态标识；未隐藏的悬停才出现，不抢画面。
+                  isGalleryHidden(img.path, hiddenPaths) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                )}
+              >
+                {isGalleryHidden(img.path, hiddenPaths)
+                  ? <EyeOff className="size-3.5" />
+                  : <Eye className="size-3.5" />}
+              </button>
               <button
                 onClick={(e) => { e.stopPropagation(); void deleteImage(img.jobId, img.path); }}
                 title="删除这张图"
