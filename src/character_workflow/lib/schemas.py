@@ -75,6 +75,8 @@ class Job(BaseModel):
     # Phase 3 (2026-05-22): which Key was used. Web 不能改这两个字段。
     alias: str | None = None
     provider: str | None = None
+    # 2026-06-10: retry-job 克隆 failed job 时指回原 job_id；原 job 错误记录保留。
+    retry_of: str | None = None
 
 
 class WebEditableJobPatch(BaseModel):

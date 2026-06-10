@@ -48,6 +48,8 @@ export interface Job {
   source_image?: string | null;
   alias?: string | null;
   provider?: string | null;
+  // 2026-06-10: retry-job 克隆 failed job 时指回原 job_id — 与 schemas.py 同步
+  retry_of?: string | null;
 }
 
 export const WEB_EDITABLE_FIELDS = ['prompt', 'model', 'params', 'seed'] as const;

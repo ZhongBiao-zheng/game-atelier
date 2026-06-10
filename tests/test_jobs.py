@@ -3,7 +3,7 @@ import os
 import pytest
 
 from character_workflow.lib.jobs import (
-    write_job, update_job_status, read_job, list_jobs,
+    write_job, update_job_status, read_job, list_jobs, clone_job_for_retry,
 )
 from character_workflow.lib.schemas import JobStatus
 
@@ -143,6 +143,47 @@ def test_list_jobs_ignores_lock_files(runtime):
     )
     assert (runtime / "jobs" / "ok-1.lock").exists()
     assert [j.job_id for j in list_jobs()] == ["ok-1"]
+
+
+def test_clone_job_for_retry(runtime):
+    """failed job 克隆为新 PENDING_CONFIRM job：参数原样、结果字段清空、retry_of 指回原 job。"""
+    write_job(
+        job_id="job-001", character_id="c1", prompt="p", model="m",
+        params={
+            "size": "1024x1024", "n": 2,
+            "reference_images": ["/tmp/a.png"],
+            "actual_size": "1024x1024", "warnings": ["timeout once"],
+        },
+        seed=7,
+    )
+    update_job_status("job-001", status=JobStatus.FAILED, error="API timeout")
+
+    clone = clone_job_for_retry("job-001")
+
+    assert clone.job_id != "job-001"
+    assert clone.retry_of == "job-001"
+    assert clone.status == JobStatus.PENDING_CONFIRM
+    assert clone.error is None
+    assert clone.output_paths == []
+    assert clone.prompt == "p"
+    assert clone.seed == 7
+    assert clone.params.reference_images == ["/tmp/a.png"]
+    assert clone.params.n == 2
+    assert clone.params.actual_size is None
+    assert clone.params.warnings is None
+    # 原 job 与错误记录原样保留
+    original = read_job("job-001")
+    assert original.status == JobStatus.FAILED
+    assert original.error == "API timeout"
+
+
+def test_clone_job_for_retry_rejects_non_failed(runtime):
+    write_job(
+        job_id="job-002", character_id="c1", prompt="p",
+        model="m", params={}, seed=None,
+    )
+    with pytest.raises(ValueError, match="not failed"):
+        clone_job_for_retry("job-002")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX flock 探测；Windows 走 msvcrt 分支")

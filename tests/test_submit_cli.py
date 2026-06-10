@@ -324,6 +324,143 @@ def test_submit_alias_pins_non_default_key(tmp_path):
     assert "nano" in data["params"]["vendor"]
 
 
+def test_submit_multiple_reference_images(tmp_path):
+    """--reference-image 可重复传多张，全部按序落 params.reference_images，无需手改 JSON。"""
+    prompt_file = tmp_path / "p.md"
+    prompt_file.write_text("p", encoding="utf-8")
+    img_a = tmp_path / "a.png"
+    img_a.write_bytes(b"x")
+    img_b = tmp_path / "b.png"
+    img_b.write_bytes(b"x")
+    _write_default_key(tmp_path)
+    env = _make_env(tmp_path)
+    r = _run(
+        ["submit", "--kind", "portrait", "--character", "holy",
+         "--prompt-file", str(prompt_file),
+         "--reference-image", str(img_a), "--reference-image", str(img_b)],
+        cwd=_project_root(), env=env,
+    )
+    assert r.returncode == 0, r.stderr
+    data = json.loads(
+        (tmp_path / ".runtime" / "jobs" / f"{r.stdout.strip()}.json").read_text(encoding="utf-8")
+    )
+    assert data["params"]["reference_images"] == [str(img_a), str(img_b)]
+    assert data["source_image"] is None
+
+
+def test_submit_source_image_merges_with_reference_images(tmp_path):
+    """--source-image 仍是首张参考图（兼容别名）；与 --reference-image 合并去重。"""
+    prompt_file = tmp_path / "p.md"
+    prompt_file.write_text("p", encoding="utf-8")
+    src = tmp_path / "src.png"
+    src.write_bytes(b"x")
+    img_a = tmp_path / "a.png"
+    img_a.write_bytes(b"x")
+    _write_default_key(tmp_path, kind="promo")
+    env = _make_env(tmp_path)
+    r = _run(
+        ["submit", "--kind", "promo", "--character", "holy",
+         "--prompt-file", str(prompt_file),
+         "--source-image", str(src),
+         "--reference-image", str(img_a), "--reference-image", str(src)],
+        cwd=_project_root(), env=env,
+    )
+    assert r.returncode == 0, r.stderr
+    data = json.loads(
+        (tmp_path / ".runtime" / "jobs" / f"{r.stdout.strip()}.json").read_text(encoding="utf-8")
+    )
+    assert data["source_image"] == str(src)
+    assert data["params"]["reference_images"] == [str(src), str(img_a)]
+
+
+def test_submit_prints_confirmation_card_to_stderr(tmp_path):
+    """确认卡由 CLI 生成打到 stderr（job_id / Key / model / size / 参考图全列表 / prompt 全文），
+    stdout 仍是纯 job_id。"""
+    prompt_file = tmp_path / "p.md"
+    prompt_file.write_text("中文 prompt 全文", encoding="utf-8")
+    img_a = tmp_path / "a.png"
+    img_a.write_bytes(b"x")
+    _write_default_key(tmp_path)
+    env = _make_env(tmp_path)
+    r = _run(
+        ["submit", "--kind", "portrait", "--character", "holy",
+         "--prompt-file", str(prompt_file), "--reference-image", str(img_a)],
+        cwd=_project_root(), env=env,
+    )
+    assert r.returncode == 0, r.stderr
+    job_id = r.stdout.strip()
+    assert re.fullmatch(r"job-\d{14}[0-9a-f]{8}", job_id)  # stdout 契约不破
+    card = r.stderr
+    assert "出图确认卡" in card
+    assert job_id in card
+    assert "default (custom)" in card
+    assert "gpt-image-2" in card
+    assert "1024x1536" in card
+    assert str(img_a) in card
+    assert "中文 prompt 全文" in card
+
+
+def test_retry_job_clones_failed_job(tmp_path, monkeypatch):
+    """retry-job：克隆 failed job → 新 PENDING_CONFIRM + retry_of；原 job 错误记录保留。"""
+    prompt_file = tmp_path / "p.md"
+    prompt_file.write_text("p", encoding="utf-8")
+    _write_default_key(tmp_path)
+    env = _make_env(tmp_path)
+    r = _run(
+        ["submit", "--kind", "portrait", "--character", "holy",
+         "--prompt-file", str(prompt_file)],
+        cwd=_project_root(), env=env,
+    )
+    assert r.returncode == 0, r.stderr
+    job_id = r.stdout.strip()
+
+    # 在本测试进程内把 job 翻成 FAILED（经 lib 写入，不手写 JSON）
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib.jobs import update_job_status
+    from character_workflow.lib.schemas import JobStatus
+    update_job_status(job_id, status=JobStatus.FAILED, error="network down")
+
+    r2 = _run(["retry-job", job_id], cwd=_project_root(), env=env)
+    assert r2.returncode == 0, r2.stderr
+    new_id = r2.stdout.strip()
+    assert re.fullmatch(r"job-\d{14}[0-9a-f]{8}", new_id)
+    assert new_id != job_id
+    assert "出图确认卡" in r2.stderr and job_id in r2.stderr  # 卡上有 retry_of
+
+    jobs_dir = tmp_path / ".runtime" / "jobs"
+    clone = json.loads((jobs_dir / f"{new_id}.json").read_text(encoding="utf-8"))
+    assert clone["retry_of"] == job_id
+    assert clone["status"] == "pending_confirm"
+    assert clone["error"] is None
+    original = json.loads((jobs_dir / f"{job_id}.json").read_text(encoding="utf-8"))
+    assert original["status"] == "failed"
+    assert original["error"] == "network down"
+
+
+def test_retry_job_rejects_non_failed(tmp_path):
+    """非 failed job 不可重试 → exit 2。"""
+    prompt_file = tmp_path / "p.md"
+    prompt_file.write_text("p", encoding="utf-8")
+    _write_default_key(tmp_path)
+    env = _make_env(tmp_path)
+    r = _run(
+        ["submit", "--kind", "portrait", "--character", "holy",
+         "--prompt-file", str(prompt_file)],
+        cwd=_project_root(), env=env,
+    )
+    job_id = r.stdout.strip()
+    r2 = _run(["retry-job", job_id], cwd=_project_root(), env=env)
+    assert r2.returncode == 2
+    assert "not failed" in r2.stderr
+
+
+def test_retry_job_missing_job(tmp_path):
+    env = _make_env(tmp_path)
+    r = _run(["retry-job", "job-nope"], cwd=_project_root(), env=env)
+    assert r.returncode == 2
+    assert "不存在" in r.stderr
+
+
 def test_submit_unknown_alias_fails(tmp_path):
     prompt_file = tmp_path / "p.md"
     prompt_file.write_text("p", encoding="utf-8")

@@ -144,9 +144,9 @@ uv run python -m character_workflow turn-start --kind promo
 
 默认 `n=1`，不沿用立绘旧习惯的多图数量。
 
-1. `uv run python -m character_workflow submit --kind promo --alias <选定alias> --model <选定model-id> --prompt-file <path> --source-image <path|None>` → 落盘 PENDING_CONFIRM（`--alias`/`--model` 按 model-routing 选；缺省回退默认 Key 首模型）
-2. 终端打确认卡：alias / provider / model / 尺寸 / 参考图 / **完整 prompt 原文**（不得用摘要或路径代替）
-3. 画师确认后 → `uv run python -m character_workflow run-job <job_id>`
+1. `uv run python -m character_workflow submit --kind promo --alias <选定alias> --model <选定model-id> --prompt-file <path> [--reference-image <path> ...] [--source-image <path>]` → 落盘 PENDING_CONFIRM（`--alias`/`--model` 按 model-routing 选；缺省回退默认 Key 首模型；`--reference-image` 可重复传多张，`--source-image` 是首张参考图的兼容别名——参考图一律走 CLI 参数，禁止手改 job JSON）
+2. 把 submit 在 stderr 打出的确认卡**原样转发**给画师（job_id / Key / model / 尺寸 / 参考图全列表 / 完整 prompt 原文），不得手写或摘要
+3. 画师确认后 → `uv run python -m character_workflow run-job <job_id>`；失败要重试 → `retry-job <job_id>` 克隆新 job（错误记录保留）再 run-job
 4. 终端渲染：`![vN](绝对路径)`
 
 ## 上传图通道

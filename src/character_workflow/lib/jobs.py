@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -76,6 +77,12 @@ def job_lock(job_id: str) -> Iterator[None]:
                 yield
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+def new_job_id() -> str:
+    """job_id 唯一生成点 —— submit / retry 共用，防止两处格式漂移。"""
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    return f"job-{ts}{secrets.token_hex(4)}"
 
 
 def _write(job: Job) -> Job:
@@ -194,6 +201,30 @@ def delete_failed_job(job_id: str) -> None:
             if p.exists():
                 p.unlink()
         _path(job_id).unlink()
+
+
+def clone_job_for_retry(job_id: str) -> Job:
+    """克隆一条 FAILED job 为新的 PENDING_CONFIRM job 用于重试。
+
+    原 job 与其 error 记录原样保留；新 job 清空结果性字段
+    （output_paths / error / params.actual_size / params.warnings），
+    其余参数原样复制，并以 retry_of 指回原 job。"""
+    src = read_job(job_id)
+    if src.status != JobStatus.FAILED:
+        raise ValueError(
+            f"job {job_id} is {src.status.value}, not failed —— 只有 failed job 可重试"
+        )
+    params = src.params.model_copy(update={"actual_size": None, "warnings": None})
+    clone = src.model_copy(update={
+        "job_id": new_job_id(),
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "params": params,
+        "output_paths": [],
+        "status": JobStatus.PENDING_CONFIRM,
+        "error": None,
+        "retry_of": job_id,
+    })
+    return save_job(clone)
 
 
 def fail_orphan_studio_jobs(error: str = "server restarted, job interrupted") -> list[str]:

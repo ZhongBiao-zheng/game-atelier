@@ -139,6 +139,17 @@ uv run python -m character_workflow rename-character-id <old_id> <recommended_id
 
 Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先做两级选择：先问大方向，再问细节。不能伪造用户回答，不能把自由文本当成已确认选项；选择会影响 spec_status、角色 id 或出图参数时必须显式确认。
 
+**降级（结构化提问工具不可用时）**：如 Codex Default mode 没有 request_user_input，不得用松散文字凑合提问——必须输出固定格式的文本确认卡并就地停止，等画师回复后才能继续：
+
+```text
+【待确认】<问题一句话>
+1. <选项 A> — <一句话说明>
+2. <选项 B> — <一句话说明>
+回复编号，或直接描述你的想法。
+```
+
+输出确认卡后本轮立刻停下：不得替画师选择、不得把沉默当默认、不得继续推进流程。
+
 ### Stage 分叉
 
 **Stage A / B（characters/ 为空）**：A 是目录不存在、B 是目录空。新装用户几乎总落在 **B**——因为 bootstrap 的 `--init-data-root` 预建了空的 `characters/`。两者处理一致，**按 turn-start 的 `has_projects` 分流**：
@@ -216,9 +227,9 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
      --prompt-file /tmp/cw-prompt-$$.md)
    ```
 
-   `--alias` / `--model` 按 `docs/references/model-routing.md` 选定（常规→gpt-image / 风格调整→nano-banana）；缺省回退当前 kind 默认 Key 的首个模型。`--n` 默认 1；`--source-image <绝对路径>` 给 promo/turnaround 用；stdout 是纯 job_id。
+   `--alias` / `--model` 按 `docs/references/model-routing.md` 选定（常规→gpt-image / 风格调整→nano-banana）；缺省回退当前 kind 默认 Key 的首个模型。`--n` 默认 1；`--reference-image <绝对路径>` 可重复传多张参考图（`--source-image` 是首张参考图的兼容别名）——参考图一律走 CLI 参数，**禁止手改 job JSON**。stdout 是纯 job_id，stderr 是 CLI 生成的出图确认卡。
 
-2. 终端打确认卡：alias / provider / model / 尺寸 / 参考图 / **完整 prompt 原文**（不得摘要或路径代替）
+2. 把 submit 在 stderr 打出的确认卡**原样转发**给画师（含 job_id / Key / model / 尺寸 / 参考图全列表 / 完整 prompt 原文），不得手写或摘要确认卡
 3. 等画师明确"出图/确认/OK"后：
 
    ```bash
@@ -229,7 +240,7 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 
 4. 终端渲染：`![v1](绝对路径)` — 每张一行，末尾提一句"Web 也能看，或直接说要改哪张"
 
-失败时：网络/凭证失败 → 问画师重试还是改 prompt；输出路径不可写 → 提醒检查 `image_storage_root`。
+失败时：网络/凭证失败 → 问画师重试还是改 prompt；画师选重试 → `NEW_ID=$(uv run python -m character_workflow retry-job "$JOB_ID")` 克隆原 job（错误记录保留，新 job 带 retry_of）→ `run-job "$NEW_ID"`；输出路径不可写 → 提醒检查 `image_storage_root`。
 
 ## Turn 收尾：经验沉淀
 

@@ -10,17 +10,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import secrets
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from character_workflow.lib import keys
 from character_workflow.lib.active_character import read_active, write_active
-from character_workflow.lib.jobs import write_job
+from character_workflow.lib.jobs import clone_job_for_retry, new_job_id, write_job
 from character_workflow.lib.job_runner import run_job, run_latest
 from character_workflow.lib.lessons import append_lesson
-from character_workflow.lib.schemas import AssetSlot, JobStatus
+from character_workflow.lib.schemas import AssetSlot, Job, JobStatus
 from character_workflow.lib.turn_start import turn_start
 
 
@@ -56,14 +54,17 @@ def _submit(args: argparse.Namespace) -> int:
         return 1
     prompt = prompt_path.read_text(encoding="utf-8")
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    job_id = f"job-{ts}{secrets.token_hex(4)}"
+    job_id = new_job_id()
 
     source_image = (
         str(Path(args.source_image).expanduser().resolve())
         if args.source_image else None
     )
     reference_images = [source_image] if source_image else []
+    for raw in args.reference_image or []:
+        resolved = str(Path(raw).expanduser().resolve())
+        if resolved not in reference_images:
+            reference_images.append(resolved)
     alias = args.alias or keys.preferred_alias_for_kind(args.kind)
     key = keys.find_by_alias(alias) if alias else None
     if key is None:
@@ -91,7 +92,7 @@ def _submit(args: argparse.Namespace) -> int:
         "reference_images": reference_images,
     }
 
-    write_job(
+    job = write_job(
         job_id=job_id,
         character_id=char_id,
         prompt=prompt,
@@ -103,7 +104,44 @@ def _submit(args: argparse.Namespace) -> int:
         source_image=source_image,
         alias=alias,
     )
+    print(_confirmation_card(job), file=sys.stderr)
     print(job_id)
+    return 0
+
+
+def _confirmation_card(job: Job) -> str:
+    """出图确认卡 —— CLI 统一生成（打到 stderr），Skill 原样转发给画师，
+    杜绝 Agent 手写漏字段。stdout 仍是纯 job_id，不破 $() 捕获契约。"""
+    refs = job.params.reference_images or []
+    lines = [
+        "─── 出图确认卡 ───",
+        f"job_id : {job.job_id}",
+        f"Key    : {job.alias} ({job.provider})",
+        f"model  : {job.model}",
+        f"size   : {job.params.size}  n: {job.params.n}",
+    ]
+    if job.retry_of:
+        lines.append(f"retry_of: {job.retry_of}（原 job 错误记录已保留）")
+    lines.append(f"参考图 : {len(refs)} 张")
+    lines.extend(f"  {i}. {p}" for i, p in enumerate(refs, 1))
+    lines.append("prompt :")
+    lines.append(job.prompt.rstrip("\n"))
+    lines.append("─── 画师确认后 run-job ───")
+    return "\n".join(lines)
+
+
+def _retry_job(args: argparse.Namespace) -> int:
+    """克隆 failed job 重试：新 job PENDING_CONFIRM + retry_of，原 job 错误记录保留。"""
+    try:
+        job = clone_job_for_retry(args.job_id)
+    except FileNotFoundError:
+        print(f"retry-job: job {args.job_id} 不存在", file=sys.stderr)
+        return 2
+    except ValueError as e:
+        print(f"retry-job: {e}", file=sys.stderr)
+        return 2
+    print(_confirmation_card(job), file=sys.stderr)
+    print(job.job_id)
     return 0
 
 
@@ -235,7 +273,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p_submit = sub.add_parser(
         "submit",
-        help="落盘 PENDING_CONFIRM job —— 默认值集中点，stdout 输出纯 job_id",
+        help="落盘 PENDING_CONFIRM job —— 默认值集中点，"
+             "stdout 输出纯 job_id，stderr 输出确认卡；支持多张参考图（--reference-image 可重复）",
     )
     p_submit.add_argument(
         "--kind", required=True, choices=("portrait", "promo", "turnaround"),
@@ -257,11 +296,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_submit.add_argument(
         "--source-image", default=None,
-        help="参考源图绝对路径（promo / turnaround 用）",
+        help="首张参考图的兼容别名（promo / turnaround 旧用法，同时写 job.source_image）",
+    )
+    p_submit.add_argument(
+        "--reference-image", action="append", default=None,
+        help="参考图绝对路径，可重复传多张；与 --source-image 合并去重后"
+             "写入 params.reference_images，无需手改 job JSON",
     )
 
     p_run_job = sub.add_parser("run-job", help="确认并执行一个 PENDING_CONFIRM job")
     p_run_job.add_argument("job_id")
+
+    p_retry = sub.add_parser(
+        "retry-job",
+        help="克隆一条 failed job 重试：原 job 错误记录保留，新 job 带 retry_of，"
+             "stdout 输出新 job_id（确认后 run-job <新id>）",
+    )
+    p_retry.add_argument("job_id")
 
     p_run_latest = sub.add_parser(
         "run-latest",
@@ -303,6 +354,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "submit":
         return _submit(args)
+    if args.cmd == "retry-job":
+        return _retry_job(args)
     if args.cmd == "run-job":
         try:
             job = run_job(args.job_id)
