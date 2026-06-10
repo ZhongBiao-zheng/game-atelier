@@ -178,15 +178,12 @@ function toKeyRow(defaultAlias: string | null) {
     provider: string;
     base_url?: string | null;
     access_key: string;
-    models?: { name: string; id: string }[];
+    models?: { name: string; id: string; modality?: 'image' | 'video' | null }[];
     capabilities?: string[];
     homepage_url?: string | null;
     docs_url?: string | null;
     api_key_url?: string | null;
     modalities?: string[];
-    routing_scope?: 'general' | 'classified';
-    routing_category?: string | null;
-    routing_hints?: string[];
     notes?: string;
     is_default?: boolean;
     last_used_at?: string | null;
@@ -202,9 +199,6 @@ function toKeyRow(defaultAlias: string | null) {
     docs_url: k.docs_url ?? null,
     api_key_url: k.api_key_url ?? null,
     modalities: k.modalities ?? [],
-    routing_scope: k.routing_scope ?? 'general',
-    routing_category: k.routing_category ?? null,
-    routing_hints: k.routing_hints ?? [],
     notes: k.notes ?? '',
     is_default: k.alias === defaultAlias,
     last_used_at: k.last_used_at ?? null,
@@ -224,9 +218,6 @@ function toKeyFormInitial(row: KeyRow): Partial<KeyCreatePayload> {
     docs_url: row.docs_url ?? null,
     api_key_url: row.api_key_url ?? null,
     modalities: row.modalities ?? [],
-    routing_scope: row.routing_scope ?? 'general',
-    routing_category: row.routing_category ?? null,
-    routing_hints: row.routing_hints ?? [],
     notes: row.notes ?? '',
   };
 }

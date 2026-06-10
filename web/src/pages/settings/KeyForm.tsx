@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { createKey, patchKey, type KeyCreatePayload, type KeyModel } from '@/api/keys';
+import { createKey, patchKey, modelModality, type KeyCreatePayload, type KeyModel, type ModelModality } from '@/api/keys';
 
 type ProviderKind = 'official' | 'third_party' | 'custom';
 type ApiModality = 'image' | 'video' | 'audio' | 'llm';
@@ -46,10 +46,13 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
   const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? '');
   const [homepage, setHomepage] = useState(initial?.homepage_url ?? providerByValue(initial?.provider ?? 'openai').homepageUrl ?? '');
   const [accessKey, setAccessKey] = useState(initial?.access_key ?? '');
-  const [models, setModels] = useState<KeyModel[]>(initial?.models?.length ? initial.models : providerByValue(initial?.provider ?? 'openai').defaultModels);
-  const [routingScope, setRoutingScope] = useState<'general' | 'classified'>(initial?.routing_scope ?? 'general');
-  const [routingCategory, setRoutingCategory] = useState(initial?.routing_category ?? 'gpt_image');
-  const [routingHints, setRoutingHints] = useState(initial?.routing_hints?.join(', ') ?? '');
+  // 编辑旧 Key 时模型可能没标注分类——载入即用 key 级 modalities 兜底值固化进每行，
+  // 保存后 key 级 modalities 改为由模型标注派生，老 key 的视频可见性不丢。
+  const [models, setModels] = useState<KeyModel[]>(
+    initial?.models?.length
+      ? initial.models.map((m) => ({ ...m, modality: modelModality(m, initial) }))
+      : providerByValue(initial?.provider ?? 'openai').defaultModels,
+  );
   const [urlTest, setUrlTest] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,9 +65,6 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     setBaseUrl(preset.defaultBaseUrl ?? '');
     setHomepage(preset.homepageUrl ?? '');
     setModels(preset.defaultModels);
-    setRoutingScope('general');
-    setRoutingCategory('gpt_image');
-    setRoutingHints('');
     setUrlTest(null);
   };
 
@@ -83,6 +83,14 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     setError(null);
     try {
       const preset = providerByValue(provider);
+      const cleanModels = models
+        .map((model) => ({ name: model.name.trim(), id: model.id.trim(), modality: model.modality ?? 'image' as ModelModality }))
+        .filter((model) => model.name && model.id);
+      // key 级 modalities 由模型标注派生（key 级仅作摘要/兜底），preset 的 llm 等附加能力保留。
+      const derivedModalities = Array.from(new Set([
+        ...preset.modalities.filter((m) => m !== 'image' && m !== 'video'),
+        ...cleanModels.map((m) => m.modality),
+      ]));
       const payload: KeyCreatePayload = {
         alias: usesNamedAlias(provider) ? alias.trim() : provider,
         provider,
@@ -90,18 +98,11 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
         access_key: accessKey.trim(),
         secret_key: null,
         capabilities: ['portrait', 'promo', 'turnaround'],
-        models: models
-          .map((model) => ({ name: model.name.trim(), id: model.id.trim() }))
-          .filter((model) => model.name && model.id),
+        models: cleanModels,
         homepage_url: homepage.trim() || preset.homepageUrl || null,
         docs_url: preset.docsUrl ?? null,
         api_key_url: preset.apiKeyUrl ?? null,
-        modalities: preset.modalities,
-        routing_scope: provider === 'custom' ? routingScope : 'general',
-        routing_category: provider === 'custom' && routingScope === 'classified' ? routingCategory : null,
-        routing_hints: provider === 'custom'
-          ? routingHints.split(',').map((hint) => hint.trim()).filter(Boolean)
-          : [],
+        modalities: derivedModalities,
         notes: '',
       };
       if (editing && initial?.alias) {
@@ -115,9 +116,6 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
           docs_url: payload.docs_url,
           api_key_url: payload.api_key_url,
           modalities: payload.modalities,
-          routing_scope: payload.routing_scope,
-          routing_category: payload.routing_category,
-          routing_hints: payload.routing_hints,
           notes: payload.notes,
         };
         if (!accessKey.trim() || accessKey === initial.access_key) delete patch.access_key;
@@ -214,52 +212,6 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                 请求时会自动拼接图片接口；根域名会补 /v1/images/generations，填完整路径也会直接使用。
               </p>
             </div>
-            <div className="grid gap-4 rounded-2xl border border-border bg-background/25 p-4">
-              <div>
-                <label htmlFor="key-routing-scope" className="block text-sm mb-2 text-muted-foreground">路由范围</label>
-                <select
-                  id="key-routing-scope"
-                  value={routingScope}
-                  onChange={e => setRoutingScope(e.target.value as 'general' | 'classified')}
-                  className={fieldClass}
-                >
-                  <option value="general">通用 Key</option>
-                  <option value="classified">分类专用 Key</option>
-                </select>
-              </div>
-              {routingScope === 'classified' && (
-                <>
-                  <div>
-                    <label htmlFor="key-routing-category" className="block text-sm mb-2 text-muted-foreground">路由类别</label>
-                    <select
-                      id="key-routing-category"
-                      value={routingCategory}
-                      onChange={e => setRoutingCategory(e.target.value)}
-                      className={fieldClass}
-                    >
-                      <option value="gpt_image">GPT Image</option>
-                      <option value="nano_banana">Nano Banana</option>
-                      <option value="mj">Midjourney</option>
-                      <option value="veo">Veo</option>
-                      <option value="grok">Grok</option>
-                      <option value="seedance">Seedance</option>
-                      <option value="suno">Suno</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="key-routing-hints" className="block text-sm mb-2 text-muted-foreground">模型命中词</label>
-                    <input
-                      id="key-routing-hints"
-                      value={routingHints}
-                      onChange={e => setRoutingHints(e.target.value)}
-                      className={fieldClass}
-                      placeholder="例如：gpt-image, gpt_image, gptimage"
-                      autoComplete="off"
-                    />
-                  </div>
-                </>
-              )}
-            </div>
           </>
         )}
         <div>
@@ -285,14 +237,15 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
               添加模型
             </button>
           </div>
-          <div className="grid grid-cols-[1fr_1fr_auto] gap-2 text-xs text-muted-foreground mb-2">
+          <div className="grid grid-cols-[1fr_1fr_auto_auto] gap-2 text-xs text-muted-foreground mb-2">
             <span>模型别名</span>
             <span>模型 ID</span>
+            <span>分类</span>
             <span className="sr-only">操作</span>
           </div>
           <div className="space-y-2">
             {models.map((model, index) => (
-              <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+              <div key={index} className="grid grid-cols-[1fr_1fr_auto_auto] gap-2">
                 <label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</label>
                 <input
                   id={`key-model-name-${index}`}
@@ -311,6 +264,17 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                   className={`${fieldClass} font-mono`}
                   placeholder="请求里使用的 ID，例如：doubao-seedream-5-0-260128"
                 />
+                <label className="sr-only" htmlFor={`key-model-modality-${index}`}>模型分类 {index + 1}</label>
+                <select
+                  id={`key-model-modality-${index}`}
+                  aria-label={`模型分类 ${index + 1}`}
+                  value={model.modality ?? 'image'}
+                  onChange={e => setModels(models.map((m, i) => i === index ? { ...m, modality: e.target.value as ModelModality } : m))}
+                  className={`${fieldClass} w-auto`}
+                >
+                  <option value="image">图片</option>
+                  <option value="video">视频</option>
+                </select>
                 <button
                   type="button"
                   onClick={() => setModels(models.filter((_, i) => i !== index))}

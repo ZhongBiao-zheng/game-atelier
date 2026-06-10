@@ -1,4 +1,5 @@
 export type ApiModality = 'image' | 'video' | 'audio' | 'llm' | string;
+export type ModelModality = 'image' | 'video';
 
 export interface KeyView {
   alias: string;
@@ -12,9 +13,6 @@ export interface KeyView {
   docs_url?: string | null;
   api_key_url?: string | null;
   modalities?: ApiModality[];
-  routing_scope?: 'general' | 'classified';
-  routing_category?: string | null;
-  routing_hints?: string[];
   notes: string;
   created_at: string;
   is_default: boolean;
@@ -32,15 +30,25 @@ export interface KeyCreatePayload {
   docs_url?: string | null;
   api_key_url?: string | null;
   modalities?: ApiModality[];
-  routing_scope?: 'general' | 'classified';
-  routing_category?: string | null;
-  routing_hints?: string[];
   notes?: string;
 }
 
 export interface KeyModel {
   name: string;
   id: string;
+  /** 模型级图片/视频分类；缺省时按 key 级 modalities 兜底（见 modelModality）。 */
+  modality?: ModelModality | null;
+}
+
+/** 模型分类的统一判定：模型级标注优先，未标注按 key 级 modalities 兜底
+ *（仅声明 video 的 key 视为视频模型，其余一律图片）。 */
+export function modelModality(
+  model: Pick<KeyModel, 'modality'> | undefined,
+  key: { modalities?: ApiModality[] } | undefined,
+): ModelModality {
+  if (model?.modality) return model.modality;
+  const km = key?.modalities ?? [];
+  return km.includes('video') && !km.includes('image') ? 'video' : 'image';
 }
 
 export async function listKeys(): Promise<{ keys: KeyView[]; default_alias: string | null }> {

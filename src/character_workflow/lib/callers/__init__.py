@@ -2,7 +2,7 @@
 
 dispatch(prompt, model, alias, **kwargs) looks up the key by alias, then routes
 to the appropriate provider's `render()` function. OpenAI-compatible providers
-(openai / seedream / custom 聚合商) go through openai_image; others raise
+(openai / seedream / custom) go through openai_image; others raise
 NotImplementedError until wired up.
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any
 
 from character_workflow.lib import keys as _keys
 
-from . import stubs, aggregator
+from . import stubs
 
 
 class NoSuchKeyError(Exception):
@@ -20,19 +20,6 @@ class NoSuchKeyError(Exception):
 
 class WrongProviderError(Exception):
     """Raised when a caller is invoked with an alias of the wrong provider."""
-
-
-def _is_aggregator_custom_key(key: _keys.KeySpec) -> bool:
-    """带分类路由配置（routing_category / routing_hints）的 custom Key 走聚合异步通道。
-
-    例外：OpenAI-HK 是同步 OpenAI 兼容厂商（不支持 gpt-image-2 的 ?async=true），
-    哪怕配了 routing 也必须回到 openai_image 同步通道。
-    """
-    return (
-        key.provider == "custom"
-        and not _keys.is_openai_hk(key.base_url)
-        and (key.routing_category is not None or bool(key.routing_hints))
-    )
 
 
 def _provider_render(key: _keys.KeySpec):
@@ -50,8 +37,6 @@ def _provider_render(key: _keys.KeySpec):
     if provider == "seedream":
         return stubs.seedream_render
     if provider == "custom":
-        if _is_aggregator_custom_key(key):
-            return aggregator.render
         return stubs.custom_render
     return None
 

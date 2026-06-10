@@ -27,21 +27,14 @@ Provider = Literal[
     "custom",
 ]
 Kind = Literal["portrait", "promo", "turnaround"]
-RoutingScope = Literal["general", "classified"]
-RoutingCategory = Literal[
-    "gpt_image",
-    "nano_banana",
-    "mj",
-    "veo",
-    "grok",
-    "seedance",
-    "suno",
-]
+ModelModality = Literal["image", "video"]
 
 
 class ModelSpec(BaseModel):
     name: str
     id: str
+    # None = 未标注：消费端按 key 级 modalities 兜底（含 video 且不含 image → video）。
+    modality: ModelModality | None = None
 
 
 class KeySpec(BaseModel):
@@ -56,9 +49,6 @@ class KeySpec(BaseModel):
     docs_url: str | None = None
     api_key_url: str | None = None
     modalities: list[str] = Field(default_factory=list)
-    routing_scope: RoutingScope = "general"
-    routing_category: RoutingCategory | None = None
-    routing_hints: list[str] = Field(default_factory=list)
     notes: str = ""
     created_at: str
 
@@ -177,11 +167,7 @@ def set_default_alias(alias: str) -> None:
 
 
 def is_openai_hk(base_url: str | None) -> bool:
-    """OpenAI-HK 是同步 OpenAI 兼容厂商，绝不走 aggregator 的异步任务通道。
-
-    即使它的 custom Key 配了 routing_category/hints（仅用于表达「这把 key 挂了
-    gpt-image / nano-banana」），出图也必须走 openai_image 的同步 images 端点。
-    """
+    """OpenAI-HK 是同步 OpenAI 兼容厂商，出图走 openai_image 的同步 images 端点。"""
     return bool(base_url) and "openai-hk.com" in base_url.lower()
 
 

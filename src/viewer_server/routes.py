@@ -672,9 +672,6 @@ class _KeyCreatePayload(BaseModel):
     docs_url: str | None = None
     api_key_url: str | None = None
     modalities: list[str] = []
-    routing_scope: keys.RoutingScope = "general"
-    routing_category: keys.RoutingCategory | None = None
-    routing_hints: list[str] = []
     notes: str = ""
     created_at: str | None = None
 
@@ -699,9 +696,6 @@ class _KeyPatchPayload(BaseModel):
     docs_url: str | None = None
     api_key_url: str | None = None
     modalities: list[str] | None = None
-    routing_scope: keys.RoutingScope | None = None
-    routing_category: keys.RoutingCategory | None = None
-    routing_hints: list[str] | None = None
     notes: str | None = None
 
     @field_validator("models", mode="before")
@@ -734,9 +728,6 @@ def create_key(payload: _KeyCreatePayload) -> dict:
             docs_url=payload.docs_url,
             api_key_url=payload.api_key_url,
             modalities=payload.modalities,
-            routing_scope=payload.routing_scope,
-            routing_category=payload.routing_category,
-            routing_hints=payload.routing_hints,
             notes=payload.notes,
             created_at=payload.created_at or datetime.now(timezone.utc).isoformat(),
         )

@@ -1,7 +1,7 @@
 """Alias-based caller dispatch protocol.
 
 Verifies:
-1. dispatch routes openai / custom 聚合 aliases to the right render fn
+1. dispatch routes openai / custom aliases to openai_image render
 2. dispatch("missing") raises NoSuchKeyError
 3. video-only provider keys can be stored without dispatch regression
 """
@@ -32,9 +32,6 @@ def _add(alias: str, provider: str, **overrides) -> KeySpec:
         secret_key=overrides.pop("secret_key", "SK-" + alias),
         capabilities=overrides.pop("capabilities", ["portrait"]),
         models=overrides.pop("models", []),
-        routing_scope=overrides.pop("routing_scope", "general"),
-        routing_category=overrides.pop("routing_category", None),
-        routing_hints=overrides.pop("routing_hints", []),
         notes=overrides.pop("notes", ""),
         created_at=overrides.pop("created_at", "2026-05-22T00:00:00Z"),
     )
@@ -42,48 +39,11 @@ def _add(alias: str, provider: str, **overrides) -> KeySpec:
     return spec
 
 
-def test_dispatch_routes_custom_aggregator_alias_to_aggregator_render(
+def test_dispatch_custom_key_routes_to_openai_image(
     isolated_keys_db, tmp_path, monkeypatch,
 ):
-    _add("zz-main", "custom", routing_scope="classified", routing_category="gpt_image")
-    captured = {}
-
-    def fake_render(*, prompt, model, alias, **kwargs):
-        captured["prompt"] = prompt
-        captured["model"] = model
-        captured["alias"] = alias
-        captured["kwargs"] = kwargs
-        return ["/tmp/zz-v1.png"]
-
-    monkeypatch.setattr(
-        "character_workflow.lib.callers.aggregator.render",
-        fake_render,
-    )
-
-    out_dir = tmp_path / "out"
-    paths = dispatch(
-        prompt="fox",
-        model="gpt-image-2-all",
-        alias="zz-main",
-        output_dir=out_dir,
-    )
-
-    assert paths == ["/tmp/zz-v1.png"]
-    assert captured["alias"] == "zz-main"
-    assert captured["prompt"] == "fox"
-    assert captured["model"] == "gpt-image-2-all"
-    assert captured["kwargs"]["output_dir"] == out_dir
-
-
-def test_dispatch_openai_hk_custom_key_routes_to_openai_image_not_aggregator(
-    isolated_keys_db, tmp_path, monkeypatch,
-):
-    """OpenAI-HK 即便配了 routing 也必须走 openai_image 同步通道，不进 aggregator。"""
-    _add(
-        "hk", "custom",
-        base_url="https://api.openai-hk.com/v1",
-        routing_scope="classified", routing_category="gpt_image",
-    )
+    """custom Key（含 OpenAI-HK）一律走 openai_image 同步通道——聚合异步通道已随分类 API 删除。"""
+    _add("hk", "custom", base_url="https://api.openai-hk.com/v1")
     seen = {}
 
     def fake_openai_render(*, prompt, model, alias, **kwargs):
@@ -91,21 +51,15 @@ def test_dispatch_openai_hk_custom_key_routes_to_openai_image_not_aggregator(
         seen["alias"] = alias
         return ["/tmp/hk-v1.png"]
 
-    def fake_aggregator_render(*, prompt, model, alias, **kwargs):
-        seen["where"] = "aggregator"
-        return ["/tmp/agg-v1.png"]
-
     monkeypatch.setattr(
         "character_workflow.lib.callers.openai_image.render", fake_openai_render
-    )
-    monkeypatch.setattr(
-        "character_workflow.lib.callers.aggregator.render", fake_aggregator_render
     )
 
     paths = dispatch(
         prompt="x", model="gpt-image-2", alias="hk", output_dir=tmp_path / "out"
     )
     assert seen["where"] == "openai_image"
+    assert seen["alias"] == "hk"
     assert paths == ["/tmp/hk-v1.png"]
 
 

@@ -86,18 +86,20 @@ def test_create_key_persists_provider_metadata(client):
     assert row["access_key"] != "ark-secret"
 
 
-def test_create_custom_key_accepts_aggregator_routing_metadata(client):
+def test_create_custom_key_accepts_per_model_modality(client):
+    """「分类 API」已删，改为模型级 modality 标注（image/video，未标注=兜底）。"""
     payload = _make_payload("zz-gpt")
     payload.update({
         "provider": "custom",
         "base_url": "https://api.aggregator.test",
         "access_key": "zz-secret",
         "secret_key": None,
-        "routing_scope": "classified",
-        "routing_category": "gpt_image",
-        "routing_hints": ["gpt-image", "gpt_image", "gptimage"],
-        "models": [{"name": "GPT Image 2", "id": "gpt-image-2-all"}],
-        "modalities": ["image"],
+        "models": [
+            {"name": "GPT Image 2", "id": "gpt-image-2-all", "modality": "image"},
+            {"name": "Sora 2", "id": "sora-2", "modality": "video"},
+            {"name": "Nano Banana Pro", "id": "nano-banana-pro"},
+        ],
+        "modalities": ["image", "video"],
     })
 
     resp = client.post("/api/keys", json=payload)
@@ -105,9 +107,7 @@ def test_create_custom_key_accepts_aggregator_routing_metadata(client):
 
     row = client.get("/api/keys").json()["keys"][0]
     assert row["provider"] == "custom"
-    assert row["routing_scope"] == "classified"
-    assert row["routing_category"] == "gpt_image"
-    assert row["routing_hints"] == ["gpt-image", "gpt_image", "gptimage"]
+    assert [m["modality"] for m in row["models"]] == ["image", "video", None]
     assert row["access_key"] != "zz-secret"
 
 
@@ -127,8 +127,8 @@ def test_create_key_persists_named_models(client):
 
     row = client.get("/api/keys").json()["keys"][0]
     assert row["models"] == [
-        {"name": "图片 5.0 Lite", "id": "doubao-seedream-5-0-260128"},
-        {"name": "图片 4.7", "id": "doubao-seedream-4-5-251128"},
+        {"name": "图片 5.0 Lite", "id": "doubao-seedream-5-0-260128", "modality": None},
+        {"name": "图片 4.7", "id": "doubao-seedream-4-5-251128", "modality": None},
     ]
 
 

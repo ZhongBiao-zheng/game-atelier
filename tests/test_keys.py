@@ -64,7 +64,7 @@ def test_key_spec_persists_provider_metadata(isolated_data_root):
     assert row.notes == "legacy note"
 
 
-def test_custom_key_persists_aggregator_routing_metadata(isolated_data_root):
+def test_custom_key_persists_per_model_modality(isolated_data_root):
     spec = keys.KeySpec(
         alias="zz-general",
         provider="custom",
@@ -73,12 +73,10 @@ def test_custom_key_persists_aggregator_routing_metadata(isolated_data_root):
         secret_key=None,
         capabilities=["portrait", "promo", "turnaround"],
         models=[
-            {"name": "GPT Image 2", "id": "gpt-image-2-all"},
+            {"name": "GPT Image 2", "id": "gpt-image-2-all", "modality": "image"},
+            {"name": "Sora 2", "id": "sora-2", "modality": "video"},
             {"name": "Nano Banana Pro", "id": "nano-banana-pro"},
         ],
-        routing_scope="general",
-        routing_category=None,
-        routing_hints=[],
         homepage_url="https://api.aggregator.test",
         docs_url=None,
         api_key_url=None,
@@ -92,9 +90,23 @@ def test_custom_key_persists_aggregator_routing_metadata(isolated_data_root):
 
     assert row is not None
     assert row.provider == "custom"
-    assert row.routing_scope == "general"
-    assert row.routing_category is None
-    assert row.routing_hints == []
+    # 未标注（None）= 消费端按 key 级 modalities 兜底
+    assert [m.modality for m in row.models] == ["image", "video", None]
+
+
+def test_keyspec_ignores_legacy_routing_fields(isolated_data_root):
+    """「分类 API」已删——旧 keys.json 里的 routing_* 字段静默忽略，不炸解析。"""
+    spec = keys.KeySpec.model_validate({
+        "alias": "old",
+        "provider": "custom",
+        "access_key": "x",
+        "routing_scope": "classified",
+        "routing_category": "gpt_image",
+        "routing_hints": ["gpt-image"],
+        "created_at": "2026-05-28T00:00:00+08:00",
+    })
+    assert spec.alias == "old"
+    assert not hasattr(spec, "routing_scope")
 
 
 def test_read_keys_db_migrates_legacy_zhenzhen_provider(isolated_data_root):

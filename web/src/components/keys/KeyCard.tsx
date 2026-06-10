@@ -7,14 +7,11 @@ export interface KeyRow {
   base_url?: string | null;
   masked_secret: string;
   capabilities?: string[];
-  models?: { name: string; id: string }[];
+  models?: { name: string; id: string; modality?: 'image' | 'video' | null }[];
   homepage_url?: string | null;
   docs_url?: string | null;
   api_key_url?: string | null;
   modalities?: string[];
-  routing_scope?: 'general' | 'classified';
-  routing_category?: string | null;
-  routing_hints?: string[];
   notes?: string;
   is_default: boolean;
   last_used_at?: string | null;
