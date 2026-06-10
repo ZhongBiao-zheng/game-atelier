@@ -1,7 +1,9 @@
+import os
+
 import pytest
 
 from character_workflow.lib.jobs import (
-    write_job, update_job_status, read_job,
+    write_job, update_job_status, read_job, list_jobs,
 )
 from character_workflow.lib.schemas import JobStatus
 
@@ -121,3 +123,40 @@ def test_write_job_explicit_alias_overrides_default(runtime):
     )
     assert job.alias == "oa"
     assert job.provider == "openai"
+
+
+def test_list_jobs_skips_bad_file(runtime):
+    """坏 job 文件跳过，不再让整个 list_jobs 抛异常。"""
+    write_job(
+        job_id="ok-1", character_id="c1", prompt="p",
+        model="m", params={}, seed=None,
+    )
+    (runtime / "jobs" / "corrupt.json").write_text("{half-written")
+    assert [j.job_id for j in list_jobs()] == ["ok-1"]
+
+
+def test_list_jobs_ignores_lock_files(runtime):
+    """job_lock 的 sidecar .lock 文件不算 job。"""
+    write_job(
+        job_id="ok-1", character_id="c1", prompt="p",
+        model="m", params={}, seed=None,
+    )
+    assert (runtime / "jobs" / "ok-1.lock").exists()
+    assert [j.job_id for j in list_jobs()] == ["ok-1"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX flock 探测；Windows 走 msvcrt 分支")
+def test_job_lock_is_exclusive(runtime):
+    """持锁期间第二个 fd 拿不到锁 —— 读改写区间互斥的根。"""
+    import fcntl
+
+    from character_workflow.lib.jobs import job_lock
+
+    with job_lock("j-lock"):
+        with open(runtime / "jobs" / "j-lock.lock", "a+") as f:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    # 释放后能再拿到
+    with open(runtime / "jobs" / "j-lock.lock", "a+") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)

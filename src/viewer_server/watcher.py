@@ -14,16 +14,22 @@ from viewer_server.sse import hub
 
 
 class JobsHandler(FileSystemEventHandler):
+    # jobs 文件全部走 tmp+replace 原子写；inotify（Linux）对 replace 发的是 moved，
+    # mac FSEvents 合并成 modified —— 不补 on_moved 在 Linux 上会整体丢推送。
     def on_modified(self, event: FileSystemEvent) -> None:
-        self._emit(event)
+        self._emit(event.src_path, event.is_directory)
 
     def on_created(self, event: FileSystemEvent) -> None:
-        self._emit(event)
+        self._emit(event.src_path, event.is_directory)
 
-    def _emit(self, event: FileSystemEvent) -> None:
-        if event.is_directory:
+    def on_moved(self, event: FileSystemEvent) -> None:
+        dest = getattr(event, "dest_path", "") or event.src_path
+        self._emit(dest, event.is_directory)
+
+    def _emit(self, raw_path: str, is_dir: bool) -> None:
+        if is_dir:
             return
-        p = Path(event.src_path)
+        p = Path(raw_path)
         if p.suffix != ".json" or p.name.endswith(".tmp"):
             return
         try:
@@ -76,8 +82,19 @@ class ProjectsHandler(FileSystemEventHandler):
 
 
 class ActiveCharacterHandler(FileSystemEventHandler):
+    # 同 JobsHandler：原子写在 Linux 上发 moved；首次写 active 文件是 created。
     def on_modified(self, event: FileSystemEvent) -> None:
-        p = Path(event.src_path)
+        self._emit(event.src_path)
+
+    def on_created(self, event: FileSystemEvent) -> None:
+        self._emit(event.src_path)
+
+    def on_moved(self, event: FileSystemEvent) -> None:
+        dest = getattr(event, "dest_path", "") or event.src_path
+        self._emit(dest)
+
+    def _emit(self, raw_path: str) -> None:
+        p = Path(raw_path)
         if p.name != "active-character.json":
             return
         try:
@@ -116,19 +133,26 @@ def start_watchers() -> Observer:
     observer.schedule(ProjectsHandler(), str(runtime), recursive=False)
 
     chars_dir = project_root / "characters"
-    if chars_dir.exists():
-        # recursive=True: spec.md 现在嵌在 characters/<id>/ 下，FSEvents 不递归看不见。
-        observer.schedule(CharactersHandler(), str(chars_dir), recursive=True)
+    # 启动时目录可能尚不存在（全新安装）——不先建好就 schedule 不上，
+    # 首个角色的 spec-changed / image-added 会一直不广播，直到重启。
+    chars_dir.mkdir(parents=True, exist_ok=True)
+    # recursive=True: spec.md 现在嵌在 characters/<id>/ 下，FSEvents 不递归看不见。
+    observer.schedule(CharactersHandler(), str(chars_dir), recursive=True)
 
     cfg_path = runtime / "config.json"
     if cfg_path.exists():
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
         image_root = cfg.get("image_storage_root", "")
-        if image_root and Path(image_root).exists():
-            observer.schedule(
-                ImagesHandler(lambda p: p.parent.name),
-                image_root, recursive=True,
-            )
+        if image_root:
+            try:
+                Path(image_root).mkdir(parents=True, exist_ok=True)
+                observer.schedule(
+                    ImagesHandler(lambda p: p.parent.name),
+                    image_root, recursive=True,
+                )
+            except OSError:
+                # config 里的路径建不出来（权限/挂载盘掉了）→ 跳过该 watcher，不拦启动。
+                pass
 
     observer.start()
     return observer

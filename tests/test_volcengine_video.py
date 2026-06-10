@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 
@@ -110,14 +111,66 @@ def test_firstlast_roles(seedance_key, tmp_path, monkeypatch):
     monkeypatch.setattr(vv.requests, "post", lambda url, headers=None, json=None, timeout=None: (posted.update(body=json) or _FakeResp(200, {"data": {"video_url": "https://x/v.mp4"}})))
     monkeypatch.setattr(vv.requests, "get", lambda *a, **k: _FakeResp(200, {}))
     monkeypatch.setattr(vv, "_download_mp4", lambda url, d, i: "ok")
+    first = tmp_path / "a.png"
+    first.write_bytes(b"png-a")
+    last = tmp_path / "b.png"
+    last.write_bytes(b"png-b")
     vv.render_video(
         prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
-        params={"frame_mode": "firstlast", "reference_images": ["a.png", "b.png"]},
+        params={"frame_mode": "firstlast", "reference_images": [str(first), str(last)]},
         poll_interval=0,
     )
     parts = posted["body"]["content"]
     assert parts[1]["role"] == "first_frame"
     assert parts[2]["role"] == "last_frame"
+
+
+def test_local_reference_image_inlined_as_data_url(seedance_key, tmp_path, monkeypatch):
+    # Web 上传的参考图是本地绝对路径，Ark 拉不到 —— 提交前必须内联成 base64 data-url。
+    posted = {}
+    monkeypatch.setattr(vv.requests, "post", lambda url, headers=None, json=None, timeout=None: (posted.update(body=json) or _FakeResp(200, {"data": {"video_url": "https://x/v.mp4"}})))
+    monkeypatch.setattr(vv.requests, "get", lambda *a, **k: _FakeResp(200, {}))
+    monkeypatch.setattr(vv, "_download_mp4", lambda url, d, i: "ok")
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(b"fake-png-bytes")
+    vv.render_video(
+        prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
+        params={"reference_images": [str(ref)]}, poll_interval=0,
+    )
+    url = posted["body"]["content"][1]["image_url"]["url"]
+    assert url.startswith("data:image/png;base64,")
+    assert base64.b64decode(url.split(",", 1)[1]) == b"fake-png-bytes"
+
+
+def test_http_reference_image_passthrough(seedance_key, tmp_path, monkeypatch):
+    posted = {}
+    monkeypatch.setattr(vv.requests, "post", lambda url, headers=None, json=None, timeout=None: (posted.update(body=json) or _FakeResp(200, {"data": {"video_url": "https://x/v.mp4"}})))
+    monkeypatch.setattr(vv.requests, "get", lambda *a, **k: _FakeResp(200, {}))
+    monkeypatch.setattr(vv, "_download_mp4", lambda url, d, i: "ok")
+    vv.render_video(
+        prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
+        params={"reference_images": ["https://cdn.x/hosted.png"]}, poll_interval=0,
+    )
+    assert posted["body"]["content"][1]["image_url"]["url"] == "https://cdn.x/hosted.png"
+
+
+def test_missing_reference_image_raises(seedance_key, tmp_path):
+    with pytest.raises(vv.VolcengineVideoError, match="读取参考图失败"):
+        vv.render_video(
+            prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
+            params={"reference_images": [str(tmp_path / "gone.png")]}, poll_interval=0,
+        )
+
+
+def test_local_reference_video_rejected(seedance_key, tmp_path):
+    # 视频/音频参考无法 base64 内联，本地路径必须显式报错而不是静默发废 url。
+    local = tmp_path / "clip.mp4"
+    local.write_bytes(b"mp4")
+    with pytest.raises(vv.VolcengineVideoError, match="参考视频暂不支持本地文件"):
+        vv.render_video(
+            prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
+            params={"reference_videos": [str(local)]}, poll_interval=0,
+        )
 
 
 def test_skips_echoed_input_image(seedance_key, tmp_path, monkeypatch):

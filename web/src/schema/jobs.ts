@@ -18,6 +18,9 @@ export interface JobParams {
   requested_size?: string;
   actual_size?: string;
   warnings?: string[];
+  // 图片参数 —— 与 schemas.py::JobParams 同步（ratio 如 "16:9"；quality: low|medium|high|auto）
+  ratio?: string;
+  quality?: string;
   // 视频参数（kind=video）—— 与 schemas.py::JobParams 同步
   duration?: number;
   resolution?: string;
@@ -71,6 +74,7 @@ export interface ActiveCharacterFile {
 
 export interface Project {
   id: string;
+  slug: string;
   name: string;
   created_at: string;
 }

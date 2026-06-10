@@ -15,6 +15,16 @@ interface Props {
 
 type TabKind = 'portrait' | 'promo' | 'turnaround';
 
+// pending 超过 1 小时仍未翻面 → 出图进程（Skill）大概率已中断（与后端 STALE_PENDING_MINUTES 一致）。
+const STALE_PENDING_MS = 60 * 60 * 1000;
+
+function isStalePending(j: Job): boolean {
+  if (j.status !== 'pending') return false;
+  const t = Date.parse(j.submitted_at);
+  // 解析不了（脏数据）也视同超时，给作废出口。
+  return !Number.isFinite(t) || Date.now() - t > STALE_PENDING_MS;
+}
+
 const TAB_META: Record<TabKind, { label: string; emptyTitle: string; emptyHint: string }> = {
   portrait: {
     label: '立绘',
@@ -102,6 +112,16 @@ export function CharacterGallery({
     setJobs(js => js.filter(j => j.job_id !== jobId));
   }
 
+  async function voidStaleJob(jobId: string) {
+    if (!window.confirm(`作废这个生成任务？\n${jobId}\n（超过 1 小时未完成，出图进程可能已中断）`)) return;
+    const r = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+    if (!r.ok) { alert(`作废失败：HTTP ${r.status}`); return; }
+    // 后端把超时 pending 标成 failed 留痕；本地同步翻面，变成可删除的失败卡。
+    setJobs(js => js.map(j => j.job_id === jobId
+      ? { ...j, status: 'failed' as const, error: '已作废：pending 超时，疑似进程中断' }
+      : j));
+  }
+
   const colClassMap: Record<number, string> = {
     1: 'columns-1', 2: 'columns-2', 3: 'columns-3', 4: 'columns-4', 5: 'columns-5',
   };
@@ -159,9 +179,12 @@ export function CharacterGallery({
             </figure>
           ))}
 
-          {tabJobs.filter(j => j.status === 'pending').flatMap(j =>
+          {tabJobs.filter(j => j.status === 'pending' && !isStalePending(j)).flatMap(j =>
             Array.from({ length: j.params?.n ?? 1 }, (_, i) => <SkeletonCard key={`${j.job_id}-s${i}`} />)
           )}
+          {tabJobs.filter(isStalePending).map(j => (
+            <StalePendingCard key={j.job_id} jobId={j.job_id} onVoid={voidStaleJob} />
+          ))}
           {failedJobs.map(j => (
             <ErrorCard
               key={j.job_id}
@@ -367,6 +390,26 @@ function SkeletonCard({ loading = false }: { loading?: boolean }) {
           生成中…
         </div>
       )}
+    </div>
+  );
+}
+
+// pending 超时（疑似 Skill 进程已死）—— 不再转圈误导“还在生成”，给作废出口。
+function StalePendingCard({ jobId, onVoid }: { jobId: string; onVoid: (jobId: string) => void }) {
+  return (
+    <div
+      data-testid={`stale-pending-${jobId}`}
+      className="relative flex h-48 mb-4 break-inside-avoid flex-col items-center justify-center gap-2 rounded-lg border border-border/60 bg-card p-3 text-center"
+    >
+      <AlertTriangle className="size-7 text-muted-foreground" />
+      <div className="text-xs text-muted-foreground font-medium">可能已中断</div>
+      <p className="text-[10px] text-muted-foreground/70">超过 1 小时未完成，出图进程可能已退出</p>
+      <button
+        onClick={() => onVoid(jobId)}
+        className="text-xs text-primary hover:underline cursor-pointer bg-transparent border-0 p-0"
+      >
+        [作废]
+      </button>
     </div>
   );
 }

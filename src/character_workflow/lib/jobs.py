@@ -1,13 +1,26 @@
-"""jobs/<job_id>.json IO — only Skill writes these files."""
+"""jobs/<job_id>.json IO — Skill 与 viewer-server 双进程共写，互斥靠 job_lock。"""
 from __future__ import annotations
 
 import json
+import logging
+import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+from pydantic import ValidationError
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
+
+
+logger = logging.getLogger(__name__)
 
 
 _UNSET = object()
@@ -38,6 +51,33 @@ def job_output_dir_for(job: "Job") -> Path:
     return job_output_dir(job.character_id, job.asset_slot)
 
 
+@contextmanager
+def job_lock(job_id: str) -> Iterator[None]:
+    """per-job 互斥锁 —— 「读→改→写」必须整段持锁，否则 Skill / viewer-server
+    双进程 read-modify-write 互相覆盖 = last-writer-wins。
+    本模块的写入口已自带锁；模块外直接读改写 job 文件（如 routes.post_prompt）必须显式持有。
+
+    锁加在 sidecar .lock 文件上而非 job 文件本身：原子写走 tmp.replace 换 inode，
+    锁在被换掉的旧 inode 上等于没锁。进程崩溃时 OS 自动释放，不会留死锁。"""
+    lock_path = _runtime_dir() / "jobs" / f"{job_id}.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+", encoding="utf-8") as f:
+        if os.name == "nt":
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
 def _write(job: Job) -> Job:
     p = _path(job.job_id)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -49,7 +89,8 @@ def _write(job: Job) -> Job:
 
 def save_job(job: Job) -> Job:
     """Persist a complete Job model after structured updates."""
-    return _write(job)
+    with job_lock(job.job_id):
+        return _write(job)
 
 
 def list_jobs() -> list[Job]:
@@ -58,7 +99,11 @@ def list_jobs() -> list[Job]:
         return []
     jobs: list[Job] = []
     for p in sorted(jobs_dir.glob("*.json")):
-        jobs.append(Job.model_validate(json.loads(p.read_text(encoding="utf-8"))))
+        # 一条坏文件（半写 / 手改 schema 不符）不能拖垮整个列表 → 跳过并留日志。
+        try:
+            jobs.append(Job.model_validate(json.loads(p.read_text(encoding="utf-8"))))
+        except (OSError, json.JSONDecodeError, ValidationError):
+            logger.warning("skipping bad job file: %s", p.name)
     return jobs
 
 
@@ -98,7 +143,8 @@ def write_job(
         alias=alias,
         provider=provider,
     )
-    return _write(job)
+    with job_lock(job_id):
+        return _write(job)
 
 
 def read_job(job_id: str) -> Job:
@@ -111,37 +157,54 @@ def update_job_status(
     output_paths: list[str] | None = None,
     error: str | None | object = _UNSET,
 ) -> Job:
-    job = read_job(job_id)
-    update: dict[str, Any] = {"status": status}
-    if output_paths is not None:
-        update["output_paths"] = output_paths
-    if error is not _UNSET:
-        update["error"] = error
-    updated = job.model_copy(update=update)
-    return _write(updated)
+    with job_lock(job_id):
+        job = read_job(job_id)
+        update: dict[str, Any] = {"status": status}
+        if output_paths is not None:
+            update["output_paths"] = output_paths
+        if error is not _UNSET:
+            update["error"] = error
+        updated = job.model_copy(update=update)
+        return _write(updated)
 
 
 def remove_image_from_job(job_id: str, image_path: str) -> Job:
     """从 job 的 output_paths 移除一张图，并删除磁盘文件。
     路径不在 output_paths 时抛 ValueError；不存在文件忽略不报错。"""
-    job = read_job(job_id)
-    if image_path not in job.output_paths:
-        raise ValueError(f"image {image_path} not in job {job_id} output_paths")
-    p = Path(image_path)
-    if p.exists():
-        p.unlink()
-    new_paths = [x for x in job.output_paths if x != image_path]
-    updated = job.model_copy(update={"output_paths": new_paths})
-    return _write(updated)
+    with job_lock(job_id):
+        job = read_job(job_id)
+        if image_path not in job.output_paths:
+            raise ValueError(f"image {image_path} not in job {job_id} output_paths")
+        p = Path(image_path)
+        if p.exists():
+            p.unlink()
+        new_paths = [x for x in job.output_paths if x != image_path]
+        updated = job.model_copy(update={"output_paths": new_paths})
+        return _write(updated)
 
 
 def delete_failed_job(job_id: str) -> None:
     """删除 failed job 的元数据；若它意外带 output_paths，也一并清理文件。"""
-    job = read_job(job_id)
-    if job.status != JobStatus.FAILED:
-        raise ValueError(f"job {job_id} is {job.status.value}, not failed")
-    for image_path in job.output_paths:
-        p = Path(image_path)
-        if p.exists():
-            p.unlink()
-    _path(job_id).unlink()
+    with job_lock(job_id):
+        job = read_job(job_id)
+        if job.status != JobStatus.FAILED:
+            raise ValueError(f"job {job_id} is {job.status.value}, not failed")
+        for image_path in job.output_paths:
+            p = Path(image_path)
+            if p.exists():
+                p.unlink()
+        _path(job_id).unlink()
+
+
+def fail_orphan_studio_jobs(error: str = "server restarted, job interrupted") -> list[str]:
+    """viewer-server 启动时回收孤儿 studio job，返回被回收的 job_id 列表。
+
+    studio job 只在 viewer-server 进程内跑（BackgroundTasks 同步阻塞），server
+    启动时还停在 pending 的必然已随上次进程一起死了 —— 直接判 FAILED，零误伤。
+    character job 由独立 Skill 进程跑，不能在这里清（前端按时限提示作废）。"""
+    reclaimed: list[str] = []
+    for job in list_jobs():
+        if job.namespace == "studio" and job.status == JobStatus.PENDING:
+            update_job_status(job.job_id, status=JobStatus.FAILED, error=error)
+            reclaimed.append(job.job_id)
+    return reclaimed

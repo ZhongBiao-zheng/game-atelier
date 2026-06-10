@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import random
 import re
@@ -18,7 +19,7 @@ from fastapi.responses import FileResponse
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
 from character_workflow.lib.jobs import (
-    delete_failed_job, list_jobs, read_job, remove_image_from_job, save_job,
+    delete_failed_job, job_lock, list_jobs, read_job, remove_image_from_job, save_job,
     update_job_status, write_job,
 )
 from character_workflow.lib.schemas import AssetSlot as _AssetSlot
@@ -26,7 +27,7 @@ from character_workflow.lib.projects import (
     assign_character, create_project, delete_project, read_projects,
     rename_project, reorder_projects,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from pydantic import field_validator
 
 from character_workflow.lib.schemas import (
@@ -34,6 +35,9 @@ from character_workflow.lib.schemas import (
     FeedbackPost, Job, JobKind, JobParams, JobStatus, ProjectCreate, ProjectRename,
     ProjectsFile, SpecPatch, WebEditableJobPatch,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class CharacterCreate(BaseModel):
@@ -81,7 +85,11 @@ def get_jobs() -> list[Job]:
         return []
     out: list[Job] = []
     for p in sorted(jobs_dir.glob("*.json")):
-        out.append(Job.model_validate(json.loads(p.read_text(encoding="utf-8"))))
+        # 一条坏文件（半写 / 手改 schema 不符）不能拖垮整个列表 → 跳过并留日志。
+        try:
+            out.append(Job.model_validate(json.loads(p.read_text(encoding="utf-8"))))
+        except (OSError, json.JSONDecodeError, ValidationError):
+            logger.warning("skipping bad job file: %s", p.name)
     return out
 
 
@@ -176,7 +184,11 @@ def get_images(character: str) -> dict:
     paths: list[str] = []
     if jobs_dir.exists():
         for p in jobs_dir.glob("*.json"):
-            data = json.loads(p.read_text(encoding="utf-8"))
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                logger.warning("skipping bad job file: %s", p.name)
+                continue
             if data.get("character_id") == character:
                 paths.extend(data.get("output_paths", []))
     return {"character_id": character, "output_paths": paths}
@@ -206,12 +218,15 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
     p = _runtime() / "jobs" / f"{job_id}.json"
     if not p.exists():
         raise HTTPException(404, detail=f"job {job_id} not found")
-    data = json.loads(p.read_text(encoding="utf-8"))
-    for field, value in patch.model_dump(exclude_unset=True).items():
-        data[field] = value
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(p)
+    # dict 级 patch（保留白名单外字段原样），但读改写区间必须持 per-job 锁，
+    # 防与 Skill 进程的 update_job_status 互相覆盖。
+    with job_lock(job_id):
+        data = json.loads(p.read_text(encoding="utf-8"))
+        for field, value in patch.model_dump(exclude_unset=True).items():
+            data[field] = value
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(p)
     return {"ok": True}
 
 
@@ -255,8 +270,9 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
         except FileNotFoundError as e:
             raise HTTPException(404, detail=f"job {job_id} not found") from e
         whitelist = set(job.output_paths)
-        refs = (job.params.model_dump().get("reference_images") or []) if job.params else []
-        whitelist.update(refs)
+        params = job.params.model_dump() if job.params else {}
+        for field in ("reference_images", "reference_videos", "reference_audios"):
+            whitelist.update(params.get(field) or [])
         if job.source_image:
             whitelist.add(job.source_image)
         if str(target) not in {str(Path(p).resolve()) for p in whitelist}:
@@ -270,7 +286,8 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
         raise HTTPException(403, detail="config missing")
     cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     root = Path(cfg.get("image_storage_root", "")).resolve()
-    if not str(target).startswith(str(root)):
+    # is_relative_to 带分隔符语义：/x/images-evil 不能过 /x/images（与 gallery_image 对齐）。
+    if not target.is_relative_to(root):
         raise HTTPException(403, detail="path outside image_storage_root")
     return FileResponse(str(target))
 
@@ -459,32 +476,61 @@ def post_character_project(character_id: str, payload: CharacterProjectAssign) -
 @router.post("/jobs/{job_id}/confirm")
 def post_job_confirm(job_id: str) -> dict:
     """画师在 Web 端点了"出图"按钮 —— 把 pending_confirm 推到 pending。
-    Skill 自己在终端轮询 / SSE 监听 job-changed，看见 pending 就动手。"""
-    p = _runtime() / "jobs" / f"{job_id}.json"
-    if not p.exists():
-        raise HTTPException(404, detail=f"job {job_id} not found")
-    data = json.loads(p.read_text(encoding="utf-8"))
-    if data.get("status") != JobStatus.PENDING_CONFIRM.value:
-        raise HTTPException(409, detail=f"job not in pending_confirm (current: {data.get('status')})")
-    data["status"] = JobStatus.PENDING.value
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(p)
+    Skill 自己在终端轮询 / SSE 监听 job-changed，看见 pending 就动手。
+    写逻辑收敛到 jobs.update_job_status（带 per-job 锁），不再裸读裸写 json。"""
+    try:
+        job = read_job(job_id)
+    except FileNotFoundError:
+        raise HTTPException(404, detail=f"job {job_id} not found") from None
+    if job.status != JobStatus.PENDING_CONFIRM:
+        raise HTTPException(409, detail=f"job not in pending_confirm (current: {job.status.value})")
+    update_job_status(job_id, status=JobStatus.PENDING)
     return {"ok": True, "job_id": job_id, "status": JobStatus.PENDING.value}
+
+
+# pending 超过这个时限仍未翻面 → 出图进程（Skill）大概率已中断，允许画师作废。
+STALE_PENDING_MINUTES = 60
+
+
+def _pending_age_minutes(job: Job) -> float | None:
+    """submitted_at 距今多少分钟；解析不了（脏数据）返回 None，视同超时可作废。"""
+    try:
+        submitted = datetime.fromisoformat(job.submitted_at)
+    except ValueError:
+        return None
+    if submitted.tzinfo is None:
+        submitted = submitted.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - submitted).total_seconds() / 60
 
 
 @router.post("/jobs/{job_id}/cancel")
 def post_job_cancel(job_id: str) -> dict:
-    """画师不要这版 prompt —— 直接删 json 文件。
-    pending_confirm 从未真出图，留 FAILED 残骸会让 Web 把"作废的 prompt"误显示成"出图失败"。"""
-    p = _runtime() / "jobs" / f"{job_id}.json"
-    if not p.exists():
-        raise HTTPException(404, detail=f"job {job_id} not found")
-    data = json.loads(p.read_text(encoding="utf-8"))
-    if data.get("status") != JobStatus.PENDING_CONFIRM.value:
-        raise HTTPException(409, detail=f"job not in pending_confirm (current: {data.get('status')})")
-    p.unlink()
-    return {"ok": True, "job_id": job_id, "deleted": True}
+    """画师作废一条 job。
+
+    - pending_confirm：从未真出图 —— 直接删 json 文件
+      （留 FAILED 残骸会让 Web 把"作废的 prompt"误显示成"出图失败"）。
+    - pending 且超过 STALE_PENDING_MINUTES：出图进程疑似已死 —— 标 FAILED 留痕。
+      不删文件：万一 Skill 进程还活着并完成出图，update_job_status 仍能落 DONE 覆盖。
+    """
+    try:
+        job = read_job(job_id)
+    except FileNotFoundError:
+        raise HTTPException(404, detail=f"job {job_id} not found") from None
+    if job.status == JobStatus.PENDING_CONFIRM:
+        (_runtime() / "jobs" / f"{job_id}.json").unlink()
+        return {"ok": True, "job_id": job_id, "deleted": True}
+    if job.status == JobStatus.PENDING:
+        age = _pending_age_minutes(job)
+        if age is None or age >= STALE_PENDING_MINUTES:
+            update_job_status(
+                job_id, status=JobStatus.FAILED,
+                error=f"cancelled: pending 超过 {STALE_PENDING_MINUTES} 分钟，疑似进程中断",
+            )
+            return {"ok": True, "job_id": job_id, "status": JobStatus.FAILED.value}
+        raise HTTPException(
+            409, detail=f"job still pending ({age:.0f} min < {STALE_PENDING_MINUTES} min)"
+        )
+    raise HTTPException(409, detail=f"job not cancellable (current: {job.status.value})")
 
 
 @router.post("/config")

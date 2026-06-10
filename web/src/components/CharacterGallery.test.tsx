@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { CharacterGallery } from './CharacterGallery';
 import type { Job } from '../schema/jobs';
@@ -44,6 +44,91 @@ describe('CharacterGallery', () => {
     expect(await screen.findByText('等待第一张作品')).toBeInTheDocument();
     expect(screen.queryByText(/等终端确认/)).not.toBeInTheDocument();
     expect(screen.queryByText('等待确认的青袍谋主')).not.toBeInTheDocument();
+  });
+
+  it('shows a stale-pending card with a void button instead of an endless spinner', async () => {
+    const staleJob: Job = {
+      job_id: 'job-stale-1',
+      character_id: 'cao-cao',
+      prompt: '两小时前卡住的 pending',
+      submitted_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      model: 'gpt-image-2',
+      params: { n: 2 },
+      seed: null,
+      output_paths: [],
+      status: 'pending',
+      error: null,
+      asset_slot: 'portrait',
+      kind: 'image',
+      namespace: 'character',
+    };
+
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url) === '/api/jobs/job-stale-1/cancel' && init?.method === 'POST') {
+        return { ok: true, json: async () => ({ ok: true, job_id: 'job-stale-1', status: 'failed' }) };
+      }
+      return { ok: true, json: async () => [staleJob] };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('confirm', vi.fn(() => true));
+
+    render(
+      <CharacterGallery
+        characterId="cao-cao"
+        characterName="曹操"
+        detailMode={false}
+        onSelectImage={vi.fn()}
+        sseSignal={0}
+      />,
+    );
+
+    // 不再渲染「生成中…」转圈骨架，渲染可作废的中断卡。
+    expect(await screen.findByTestId('stale-pending-job-stale-1')).toBeInTheDocument();
+    expect(screen.getByText('可能已中断')).toBeInTheDocument();
+    expect(screen.queryByText('生成中…')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('[作废]'));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/jobs/job-stale-1/cancel', { method: 'POST' });
+    });
+    // 本地翻面成失败卡，可走既有删除流程。
+    expect(await screen.findByText('出图失败')).toBeInTheDocument();
+    expect(screen.queryByTestId('stale-pending-job-stale-1')).not.toBeInTheDocument();
+  });
+
+  it('keeps the spinner for fresh pending jobs', async () => {
+    const freshJob: Job = {
+      job_id: 'job-fresh-1',
+      character_id: 'cao-cao',
+      prompt: '刚提交的 pending',
+      submitted_at: new Date().toISOString(),
+      model: 'gpt-image-2',
+      params: { n: 1 },
+      seed: null,
+      output_paths: [],
+      status: 'pending',
+      error: null,
+      asset_slot: 'portrait',
+      kind: 'image',
+      namespace: 'character',
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => [freshJob],
+    })));
+
+    render(
+      <CharacterGallery
+        characterId="cao-cao"
+        characterName="曹操"
+        detailMode={false}
+        onSelectImage={vi.fn()}
+        sseSignal={0}
+      />,
+    );
+
+    expect(await screen.findByText('生成中…')).toBeInTheDocument();
+    expect(screen.queryByText('可能已中断')).not.toBeInTheDocument();
   });
 
   it('opens on the routed asset tab', async () => {

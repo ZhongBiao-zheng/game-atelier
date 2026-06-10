@@ -230,6 +230,36 @@ def test_post_job_cancel_rejects_non_pending_confirm(client, runtime):
     assert (runtime / "jobs" / "j1.json").exists()
 
 
+def test_post_job_cancel_stale_pending_marks_failed(client, runtime):
+    """pending 超过 60 分钟（Skill 进程疑似已死）→ 允许作废，标 FAILED 留痕不删文件。"""
+    (runtime / "jobs" / "j1.json").write_text(json.dumps({
+        "job_id": "j1", "character_id": "c", "prompt": "p",
+        "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt_image_2",
+        "params": {}, "seed": None, "output_paths": [],
+        "status": "pending", "error": None,
+    }))
+    r = client.post("/api/jobs/j1/cancel")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "job_id": "j1", "status": "failed"}
+    data = json.loads((runtime / "jobs" / "j1.json").read_text())
+    assert data["status"] == "failed"
+    assert "中断" in data["error"]
+
+
+def test_post_job_cancel_fresh_pending_still_409(client, runtime):
+    """没到时限的 pending 可能真在出图，作废仍被拒。"""
+    from datetime import datetime, timezone
+    (runtime / "jobs" / "j1.json").write_text(json.dumps({
+        "job_id": "j1", "character_id": "c", "prompt": "p",
+        "submitted_at": datetime.now(timezone.utc).isoformat(), "model": "gpt_image_2",
+        "params": {}, "seed": None, "output_paths": [],
+        "status": "pending", "error": None,
+    }))
+    r = client.post("/api/jobs/j1/cancel")
+    assert r.status_code == 409
+    assert json.loads((runtime / "jobs" / "j1.json").read_text())["status"] == "pending"
+
+
 def test_delete_failed_job_removes_job_file(client, runtime):
     (runtime / "jobs" / "j1.json").write_text(json.dumps({
         "job_id": "j1", "character_id": "c", "prompt": "p",

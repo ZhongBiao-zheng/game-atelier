@@ -56,7 +56,28 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
+
+// jsdom 没有 EventSource —— 用可手动触发事件的 stub 测 SSE 定向更新。
+class TestEventSource {
+  static last: TestEventSource | null = null;
+  listeners = new Map<string, Array<(ev: MessageEvent) => void>>();
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor(public url: string) {
+    TestEventSource.last = this;
+  }
+  addEventListener(type: string, cb: (ev: MessageEvent) => void) {
+    const list = this.listeners.get(type) ?? [];
+    list.push(cb);
+    this.listeners.set(type, list);
+  }
+  close() {}
+  emit(type: string, data: unknown) {
+    this.listeners.get(type)?.forEach((cb) => cb({ data: JSON.stringify(data) } as MessageEvent));
+  }
+}
 
 function renderStudio() {
   const { hook } = memoryLocation({ path: '/studio', static: true });
@@ -694,13 +715,9 @@ describe('Studio', () => {
     expect(screen.getByTestId('studio-pending-job-pending-1')).toBeInTheDocument();
   });
 
-  it('refreshes persisted pending studio jobs until they become done', async () => {
-    let intervalCallback: TimerHandler | undefined;
-    vi.spyOn(window, 'setInterval').mockImplementation((callback: TimerHandler, timeout?: number) => {
-      if (timeout === 2000) intervalCallback = callback;
-      return 1;
-    });
-    vi.spyOn(window, 'clearInterval').mockImplementation(() => {});
+  it('flips a pending studio job to done via SSE targeted update (no 2s full polling)', async () => {
+    vi.stubGlobal('EventSource', TestEventSource);
+    TestEventSource.last = null;
     const firstJobs = [{
       job_id: 'job-pending-2',
       character_id: 'oa',
@@ -717,12 +734,11 @@ describe('Studio', () => {
       alias: 'oa',
       provider: 'openai',
     }];
-    const secondJobs = [{
+    const doneJob = {
       ...firstJobs[0],
       status: 'done',
       output_paths: ['/tmp/studio/job-pending-2/v1.png'],
-    }];
-    let jobsCallCount = 0;
+    };
     globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
       if (url === '/api/keys') {
         return Promise.resolve({
@@ -744,20 +760,21 @@ describe('Studio', () => {
         } as any);
       }
       if (url === '/api/jobs') {
-        jobsCallCount += 1;
-        return Promise.resolve({
-          ok: true,
-          json: async () => (jobsCallCount >= 2 ? secondJobs : firstJobs),
-        } as any);
+        return Promise.resolve({ ok: true, json: async () => firstJobs } as any);
+      }
+      // SSE 定向更新：按 job_id 拉单条，而不是全量 refetch。
+      if (url === '/api/jobs/job-pending-2') {
+        return Promise.resolve({ ok: true, json: async () => doneJob } as any);
       }
       return Promise.resolve({ ok: true, json: async () => ({}) } as any);
     }) as any;
 
     renderStudio();
     expect(await screen.findByTestId('studio-pending-job-pending-2')).toBeInTheDocument();
+    expect(TestEventSource.last).not.toBeNull();
 
     await act(async () => {
-      if (typeof intervalCallback === 'function') intervalCallback();
+      TestEventSource.last!.emit('job-changed', { job_id: 'job-pending-2', status: 'done' });
     });
 
     await waitFor(() => {
@@ -1186,5 +1203,138 @@ describe('Studio video submission', () => {
     const body = JSON.parse(String(studioCall![1]!.body));
     expect(body.params.reference_images).toEqual(['/uploads/ref-first.png']);
     expect(body.params.frame_mode).toBe('auto');
+  });
+
+  it('regenerates a video job with the full original params, not the current form state', async () => {
+    // 原 job：10s / 1080p / 9:16 / 首帧 / 带音频 / 三类参考资产 —— 表单默认值全是另一套（5s/720p/16:9/auto）。
+    const fetchMock = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'vvolc',
+            keys: [{
+              alias: 'vvolc',
+              provider: 'volcengine_video',
+              access_key: 'ark...vkey',
+              secret_key: null,
+              capabilities: [],
+              modalities: ['video'],
+              models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128' }],
+              notes: '',
+              created_at: '2026-05-25T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs' && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{
+            job_id: 'job-video-done',
+            character_id: '',
+            prompt: '镜头缓缓推进',
+            submitted_at: '2026-06-09T01:00:00Z',
+            model: 'doubao-seedance-2-0-fast-260128',
+            params: {
+              duration: 10,
+              resolution: '1080p',
+              ratio: '9:16',
+              frame_mode: 'first',
+              generate_audio: true,
+              reference_images: ['/uploads/first.png'],
+              reference_videos: ['https://cdn.x/ref.mp4'],
+              reference_audios: ['https://cdn.x/ref.mp3'],
+            },
+            seed: null,
+            output_paths: ['/tmp/studio/job-video-done/v1.mp4'],
+            status: 'done',
+            error: null,
+            kind: 'video',
+            namespace: 'studio',
+            alias: 'vvolc',
+            provider: 'volcengine_video',
+          }],
+        } as any);
+      }
+      if (url === '/api/studio/jobs') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            job_id: 'job-video-regen', character_id: '', prompt: '镜头缓缓推进',
+            submitted_at: new Date().toISOString(),
+            model: 'doubao-seedance-2-0-fast-260128', params: {}, seed: null, output_paths: [],
+            status: 'pending', error: null, kind: 'video', namespace: 'studio',
+          }),
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+
+    fireEvent.click(await screen.findByRole('button', { name: '再次生成' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body.kind).toBe('video');
+    expect(body.params).toMatchObject({
+      duration: 10,
+      resolution: '1080p',
+      ratio: '9:16',
+      frame_mode: 'first',
+      generate_audio: true,
+      reference_images: ['/uploads/first.png'],
+      reference_videos: ['https://cdn.x/ref.mp4'],
+      reference_audios: ['https://cdn.x/ref.mp3'],
+    });
+    // 没有任何文件需要重新上传 —— 参考资产复用服务器路径。
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/uploads', expect.any(Object));
+  });
+});
+
+describe('Studio compact mode errors', () => {
+  function renderStudioCompact() {
+    const { hook } = memoryLocation({ path: '/', static: true });
+    return render(
+      <Router hook={hook}>
+        <Studio compact />
+      </Router>,
+    );
+  }
+
+  it('shows an inline error when compact submission fails instead of failing silently', async () => {
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'volc',
+            keys: [{
+              alias: 'volc', provider: 'seedream', access_key: 'ak', secret_key: null,
+              capabilities: [], models: [{ name: '图片 4.7', id: 'doubao-seedream-4-5-251128' }],
+              notes: '', created_at: '2026-05-25T00:00:00Z', is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/studio/jobs') {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({}) } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    }) as any;
+
+    renderStudioCompact();
+
+    const textarea = await screen.findByLabelText('生图 prompt');
+    fireEvent.change(textarea, { target: { value: '失败也要有反馈' } });
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('提交失败');
+    expect(alert).toHaveTextContent('500');
   });
 });

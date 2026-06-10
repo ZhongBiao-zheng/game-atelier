@@ -117,10 +117,10 @@ def _migrate_legacy_providers(raw: object) -> None:
 def write_keys_db(db: KeysDB) -> None:
     path = data_root.keys_file()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(db.model_dump(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    # O_CREAT 直接带 0o600 创建，堵住「先 write 后 chmod」首次落盘的 umask 窗口。
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(db.model_dump(), ensure_ascii=False, indent=2))
     _restrict_permissions(path)
 
 

@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from character_workflow.lib.jobs import fail_orphan_studio_jobs
 from character_workflow.lib.secret_filter import SecretRedactionFilter
 from viewer_server.routes import router
 from viewer_server.sse import hub, sse_router
@@ -27,6 +28,13 @@ def _install_secret_filter() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     hub.set_loop(asyncio.get_running_loop())
+    # 孤儿回收：studio job 只在本进程跑，重启时还 pending 的必然已死（一键启动脚本
+    # 每次双击都是 stop→start）。不回收 = Web 永久转圈 + 永久轮询。
+    reclaimed = fail_orphan_studio_jobs()
+    if reclaimed:
+        logging.getLogger(__name__).warning(
+            "reclaimed %d orphan studio job(s): %s", len(reclaimed), ", ".join(reclaimed)
+        )
     observer = start_watchers()
     try:
         yield

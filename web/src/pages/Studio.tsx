@@ -3,6 +3,7 @@ import { useLocation } from 'wouter';
 
 import { createStudioJob, getStudioJob, listStudioJobs, uploadReferenceImage } from '@/api/studio';
 import { listKeys, type KeyView } from '@/api/keys';
+import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { PromptInput } from '@/components/studio/PromptInput';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
@@ -52,6 +53,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [rounds, setRounds] = useState<RoundState[]>([]);
   const [persistedJobs, setPersistedJobs] = useState<Job[]>([]);
   const [pending, setPending] = useState(false);
+  // compact 模式没有 rounds 列表承接失败卡片，提交/上传错误走这条内联文案。
+  const [compactError, setCompactError] = useState<string | null>(null);
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
@@ -110,6 +113,23 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     setPersistedJobs(jobs);
     return jobs;
   }, []);
+
+  // SSE 定向更新：watcher 广播的 {job_id, status} 直接按 job_id 拉单条，
+  // 替代旧的「有活跃 job 时每 2s 全量 refetch + 每次提交各自轮询」三路放大。
+  const handleJobChanged = useCallback((data: JobChangedPayload) => {
+    if (!data.job_id) return;
+    void getStudioJob(data.job_id).then((job) => {
+      // 非 studio job（角色出图）返回 null，忽略。
+      if (job) setPersistedJobs((items) => upsertJob(items, job));
+    });
+  }, []);
+
+  // onConnect 全量刷新兜底：断连期间 / SSE 队列满丢掉的事件靠重连补齐。
+  useSSE({
+    enabled: !compact,
+    onJobChanged: handleJobChanged,
+    onConnect: () => { void refreshPersistedJobs().catch(() => {}); },
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -181,18 +201,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     );
   }, [compact, keys, persistedJobs]);
 
-  const hasActivePersistedJob = persistedJobs.some(
-    (job) => job.status === 'pending' || job.status === 'pending_confirm',
-  );
-
-  useEffect(() => {
-    if (compact || !hasActivePersistedJob) return;
-    const id = window.setInterval(() => {
-      void refreshPersistedJobs();
-    }, 2000);
-    return () => window.clearInterval(id);
-  }, [compact, hasActivePersistedJob, refreshPersistedJobs]);
-
   const onSubmit = async (prompt: string, overrideConfig?: RoundConfig) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
     if (wantVideo) {
@@ -219,6 +227,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
 
     setPending(true);
+    if (compact) setCompactError(null);
     // 提交前把参考图 File[] 上传到 .runtime/uploads/，拿到服务器路径写进 params.reference_images。
     // 再次生成（overrideConfig）携带的已是服务器路径，直接复用。
     let refPaths: string[];
@@ -229,7 +238,9 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           : []);
     } catch (e: any) {
       setPending(false);
-      if (!compact) {
+      if (compact) {
+        setCompactError(`参考图上传失败：${e.message}`);
+      } else {
         setRounds((rs) => [
           { kind: 'failed', submittedAt: new Date().toISOString(), reason: `参考图上传失败：${e.message}` },
           ...rs,
@@ -269,6 +280,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           params: jobParams,
         });
         setLocation('/studio');
+      } catch (e: any) {
+        setCompactError(`提交失败：${e.message}`);
       } finally {
         setPending(false);
       }
@@ -299,6 +312,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     setPending(false);
 
     setPersistedJobs((items) => upsertJob(items, job));
+    // 终态翻面交给 SSE 定向更新（handleJobChanged → persistedJobs → mergePersistedRounds），
+    // 不再每个提交各起一条 2s/5s 轮询。
     setRounds((rs) =>
       rs.map((r) =>
         r === myRound
@@ -306,25 +321,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           : r,
       ),
     );
-
-    void pollJobUntilTerminal(job.job_id, (final) => {
-      setPersistedJobs((items) => upsertJob(items, final));
-      setRounds((rs) =>
-        rs.map((r) =>
-          r === myRound
-            ? final.status === 'done' && final.output_paths.length > 0
-              ? { kind: 'done', jobId: final.job_id, submittedAt: final.submitted_at, imagePaths: final.output_paths, config }
-              : { kind: 'failed', jobId: final.job_id, submittedAt: final.submitted_at, reason: final.error ?? '生成完成但未返回图片', config }
-            : r,
-        ),
-      );
-    }).catch((e: any) => {
-      setRounds((rs) =>
-        rs.map((r) =>
-          r === myRound ? { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message, config } : r,
-        ),
-      );
-    });
   };
 
   const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig) => {
@@ -340,6 +336,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
 
     setPending(true);
+    if (compact) setCompactError(null);
     // 视频/音频参考图复用通用文件上传端点（Task 1 已放开 video/audio）。override 携带的已是服务器路径，直接复用。
     let imgPaths: string[];
     let vidPaths: string[];
@@ -347,11 +344,15 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     try {
       imgPaths = overrideConfig?.referenceImages
         ?? (referenceImages.length > 0 ? await Promise.all(referenceImages.map(uploadReferenceImage)) : []);
-      vidPaths = overrideConfig ? [] : (referenceVideos.length > 0 ? await Promise.all(referenceVideos.map(uploadReferenceImage)) : []);
-      audPaths = overrideConfig ? [] : (referenceAudios.length > 0 ? await Promise.all(referenceAudios.map(uploadReferenceImage)) : []);
+      vidPaths = overrideConfig?.referenceVideos
+        ?? (referenceVideos.length > 0 ? await Promise.all(referenceVideos.map(uploadReferenceImage)) : []);
+      audPaths = overrideConfig?.referenceAudios
+        ?? (referenceAudios.length > 0 ? await Promise.all(referenceAudios.map(uploadReferenceImage)) : []);
     } catch (e: any) {
       setPending(false);
-      if (!compact) {
+      if (compact) {
+        setCompactError(`参考资产上传失败：${e.message}`);
+      } else {
         setRounds((rs) => [
           { kind: 'failed', submittedAt: new Date().toISOString(), reason: `参考资产上传失败：${e.message}` },
           ...rs,
@@ -360,12 +361,21 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       return;
     }
 
+    // 再次生成（overrideConfig）完整还原原 job 的视频参数，而不是回落到当前表单态。
+    const effectiveDuration = overrideConfig?.duration ?? duration;
+    const effectiveResolution = overrideConfig?.videoResolution ?? videoResolution;
+    const effectiveRatio = overrideConfig?.ratio ?? videoRatio;
+    const effectiveFrameMode = overrideConfig
+      ? overrideConfig.frameMode
+      : (videoMode === 'i2v' ? frameMode : undefined);
+    const effectiveGenerateAudio = overrideConfig ? !!overrideConfig.generateAudio : generateAudio;
+
     const videoParams: JobParams = {
-      duration: overrideConfig?.n ?? duration,
-      resolution: overrideConfig?.resolution ?? videoResolution,
-      ratio: overrideConfig?.ratio ?? videoRatio,
-      ...(videoMode === 'i2v' ? { frame_mode: frameMode } : {}),
-      ...(generateAudio ? { generate_audio: true } : {}),
+      duration: effectiveDuration,
+      resolution: effectiveResolution,
+      ratio: effectiveRatio,
+      ...(effectiveFrameMode ? { frame_mode: effectiveFrameMode } : {}),
+      ...(effectiveGenerateAudio ? { generate_audio: true } : {}),
       ...(imgPaths.length ? { reference_images: imgPaths } : {}),
       ...(vidPaths.length ? { reference_videos: vidPaths } : {}),
       ...(audPaths.length ? { reference_audios: audPaths } : {}),
@@ -378,8 +388,14 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       provider: effectiveProvider,
       model: effectiveModel,
       modelName: selectedModel?.name ?? overrideConfig?.modelName,
-      ratio: overrideConfig?.ratio ?? videoRatio,
+      ratio: effectiveRatio,
+      duration: effectiveDuration,
+      videoResolution: effectiveResolution,
+      frameMode: effectiveFrameMode,
+      generateAudio: effectiveGenerateAudio,
       referenceImages: imgPaths,
+      referenceVideos: vidPaths,
+      referenceAudios: audPaths,
     };
 
     if (compact) {
@@ -392,6 +408,9 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           kind: 'video',
         });
         setLocation('/studio');
+      } catch (e: any) {
+        // compact 模式没有 rounds 列表可挂失败卡片，错误必须有内联出口，否则用户只看到"点了没反应"。
+        setCompactError(`提交失败：${e.message}`);
       } finally {
         setPending(false);
       }
@@ -423,6 +442,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     setPending(false);
 
     setPersistedJobs((items) => upsertJob(items, job));
+    // 同 onSubmit：终态翻面走 SSE 定向更新，无 per-job 轮询（视频分钟级，轮询放大更明显）。
     setRounds((rs) =>
       rs.map((r) =>
         r === myRound
@@ -430,25 +450,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           : r,
       ),
     );
-
-    void pollJobUntilTerminal(job.job_id, (final) => {
-      setPersistedJobs((items) => upsertJob(items, final));
-      setRounds((rs) =>
-        rs.map((r) =>
-          r === myRound
-            ? final.status === 'done' && final.output_paths.length > 0
-              ? { kind: 'done', jobId: final.job_id, submittedAt: final.submitted_at, imagePaths: final.output_paths, config }
-              : { kind: 'failed', jobId: final.job_id, submittedAt: final.submitted_at, reason: final.error ?? '生成完成但未返回视频', config }
-            : r,
-        ),
-      );
-    }).catch((e: any) => {
-      setRounds((rs) =>
-        rs.map((r) =>
-          r === myRound ? { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message, config } : r,
-        ),
-      );
-    });
   };
 
   if (compact) {
@@ -500,6 +501,11 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           onReferenceVideosChange={setReferenceVideos}
           onReferenceAudiosChange={setReferenceAudios}
         />
+        {compactError && (
+          <p role="alert" className="mt-3 max-w-[780px] mx-auto text-sm text-destructive">
+            {compactError}
+          </p>
+        )}
       </div>
     );
   }
@@ -597,9 +603,18 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   async function regenerate(config: RoundConfig) {
     if (config.alias) setProviderAlias(config.alias);
     setModel(config.model);
-    if (config.ratio) setRatio(config.ratio);
-    if (config.resolution) setResolution(config.resolution);
-    if (config.n) setCount(clampImageCount(config.n));
+    // 提交本身走 overrideConfig（不依赖表单态）；这里只是把表单同步成原 job 参数，便于继续微调。
+    if (config.kind === 'video') {
+      if (config.ratio) setVideoRatio(config.ratio);
+      if (config.videoResolution) setVideoResolution(config.videoResolution);
+      if (config.duration) setDuration(config.duration);
+      if (config.frameMode) setFrameMode(config.frameMode);
+      setGenerateAudio(!!config.generateAudio);
+    } else {
+      if (config.ratio) setRatio(config.ratio);
+      if (config.resolution) setResolution(config.resolution);
+      if (config.n) setCount(clampImageCount(config.n));
+    }
     await onSubmit(config.prompt, config);
   }
 
@@ -623,12 +638,19 @@ function referenceImagesFor(job: Job): string[] {
   return Array.from(new Set(refs));
 }
 
+function pathList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.length > 0)
+    : [];
+}
+
 function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
   const selectedKey = keys.find((item) => item.alias === job.alias);
   const selectedModel = selectedKey?.models.find((item) => item.id === job.model);
+  const isVideo = job.kind === 'video';
   return {
     prompt: job.prompt,
-    kind: job.kind === 'video' ? 'video' : 'image',
+    kind: isVideo ? 'video' : 'image',
     alias: job.alias,
     provider: job.provider,
     model: job.model,
@@ -642,6 +664,18 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
       ? job.params.quality
       : undefined,
     referenceImages: referenceImagesFor(job),
+    // 视频参数：再次生成时从原 job 还原（resolution 上面只认 2K/4K 图片语义，视频的 720p/1080p 存这里）。
+    // referenceVideos/Audios 给空数组而非 undefined，避免 onSubmitVideo 的 ?? 回落到当前表单文件。
+    ...(isVideo
+      ? {
+          duration: typeof job.params.duration === 'number' ? job.params.duration : undefined,
+          videoResolution: typeof job.params.resolution === 'string' ? job.params.resolution : undefined,
+          frameMode: job.params.frame_mode,
+          generateAudio: job.params.generate_audio === true,
+          referenceVideos: pathList(job.params.reference_videos),
+          referenceAudios: pathList(job.params.reference_audios),
+        }
+      : {}),
   };
 }
 
@@ -707,47 +741,6 @@ function mergePersistedRounds(current: RoundState[], persisted: RoundState[]): R
     return !key || !persistedKeys.has(key);
   });
   return [...localOnly, ...persisted];
-}
-
-export async function pollJobUntilTerminal(
-  jobId: string,
-  onFinal: (job: Job) => void,
-) {
-  // 媒体类型决定轮询上限：图片 120×2s≈4min；视频跑分钟级 → 220×5s≈18min。
-  // kind 从首次成功拉取的 job 读出（不依赖调用点透传）。
-  let intervalMs = 2000;
-  let maxPolls = 120;
-  let kind: Job['kind'] = 'image';
-  let polls = 0;
-  while (polls < maxPolls) {
-    await new Promise((r) => setTimeout(r, intervalMs));
-    polls += 1;
-    const job = await getStudioJob(jobId);
-    if (!job) continue;
-    if (job.kind === 'video' && kind !== 'video') {
-      kind = 'video';
-      intervalMs = 5000;
-      maxPolls = 220;
-    }
-    if (job.status === 'done' || job.status === 'failed') {
-      onFinal(job);
-      return;
-    }
-  }
-  onFinal({
-    job_id: jobId,
-    character_id: '',
-    prompt: '',
-    submitted_at: new Date().toISOString(),
-    model: '',
-    params: {},
-    seed: null,
-    output_paths: [],
-    status: 'failed',
-    error: 'timeout',
-    kind,
-    namespace: 'studio',
-  });
 }
 
 function upsertJob(items: Job[], next: Job): Job[] {

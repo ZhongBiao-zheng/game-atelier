@@ -167,6 +167,33 @@ def test_raw_includes_source_image_in_job_whitelist(client, runtime):
     assert r.content == PNG_MAGIC
 
 
+def test_raw_includes_reference_videos_and_audios_in_job_whitelist(client, runtime):
+    """视频 job 的参考视频/音频带 job_id 取应放行（原白名单只含 reference_images）。"""
+    vid = runtime / "uploads" / "ref.mp4"
+    vid.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    aud = runtime / "uploads" / "ref.mp3"
+    aud.write_bytes(b"ID3\x00")
+    (runtime / "jobs" / "vid-1.json").write_text(json.dumps({
+        "job_id": "vid-1", "character_id": "studio", "prompt": "p",
+        "submitted_at": "2026-06-10T10:00:00Z", "model": "seedance",
+        "params": {"reference_videos": [str(vid)], "reference_audios": [str(aud)]},
+        "seed": None, "output_paths": [], "status": "pending", "error": None,
+        "kind": "video", "namespace": "studio",
+    }))
+    assert client.get(f"/api/raw?path={vid}&job_id=vid-1").status_code == 200
+    assert client.get(f"/api/raw?path={aud}&job_id=vid-1").status_code == 200
+
+
+def test_raw_fallback_rejects_sibling_prefix_dir(client, runtime, tmp_path):
+    """安全回归：/x/downloads-evil 不能过 /x/downloads 的前缀检查（is_relative_to）。"""
+    evil = tmp_path / "downloads-evil"
+    evil.mkdir()
+    leak = evil / "leak.png"
+    leak.write_bytes(PNG_MAGIC)
+    r = client.get(f"/api/raw?path={leak}")
+    assert r.status_code == 403
+
+
 def test_raw_rejects_arbitrary_path_outside_whitelist(client, runtime):
     """安全回归：随手指一个 /etc/passwd 仍然 403。"""
     r = client.get("/api/raw?path=/etc/passwd")

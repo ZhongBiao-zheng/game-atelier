@@ -1,6 +1,8 @@
 import { type ButtonHTMLAttributes, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Download, Film, Trash2, X } from 'lucide-react';
 
+import type { VideoFrameMode } from '@/lib/videoControlCaps';
+
 import { WaitingCopy } from './WaitingCopy';
 
 export interface RoundConfig {
@@ -16,6 +18,13 @@ export interface RoundConfig {
   size?: string;
   n?: number;
   referenceImages: string[];
+  // 视频参数（kind=video）—— 再次生成时按原 job 完整还原；resolution 是图片语义（2K/4K），视频分辨率另存。
+  duration?: number;
+  videoResolution?: string;
+  frameMode?: VideoFrameMode;
+  generateAudio?: boolean;
+  referenceVideos?: string[];
+  referenceAudios?: string[];
 }
 
 export type RoundState =
