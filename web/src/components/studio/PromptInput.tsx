@@ -274,7 +274,9 @@ export function PromptInput({
     <div
       ref={shellRef}
       data-testid="studio-prompt-shell"
-      className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative shadow-2xl shadow-black/20 backdrop-blur-xl min-h-[174px] h-auto flex flex-col gap-3"
+      // backdrop-blur 已让外壳自成 stacking context，z-20 把它（含内部弹窗）整体抬到
+      // 首页作品墙之上；全局梯度：内容卡片 auto < 外壳 20 < sticky 头 30 < lightbox/loading 50。
+      className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative z-20 shadow-2xl shadow-black/20 backdrop-blur-xl min-h-[174px] h-auto flex flex-col gap-3"
     >
       <div className="flex flex-1 min-h-0 gap-2">
         {!isVideo && onReferenceImagesChange && (
