@@ -1118,8 +1118,9 @@ describe('Studio video submission', () => {
 
     renderStudio();
 
-    // 切到视频生成 → provider 自动收敛到声明了 video 能力的 key（vvolc / seedance 模型）。
-    fireEvent.click(await screen.findByRole('button', { name: '切换到视频生成' }));
+    // 切到视频生成（kind 弹窗）→ provider 自动收敛到声明了 video 能力的 key（vvolc / seedance 模型）。
+    fireEvent.click(await screen.findByRole('button', { name: '选择生成模式' }));
+    fireEvent.click(screen.getByRole('option', { name: /视频生成/ }));
 
     const textarea = screen.getByLabelText('生图 prompt');
     fireEvent.change(textarea, { target: { value: '一段电影质感的镜头' } });
@@ -1184,11 +1185,12 @@ describe('Studio video submission', () => {
 
     renderStudio();
 
-    // 切到视频生成 → 默认 mode=i2v、frameMode=auto，渲染单个「上传源图」槽。
-    fireEvent.click(await screen.findByRole('button', { name: '切换到视频生成' }));
+    // 切到视频生成（kind 弹窗）→ 默认生成方式=首尾帧，渲染「上传首帧/尾帧」双槽。
+    fireEvent.click(await screen.findByRole('button', { name: '选择生成模式' }));
+    fireEvent.click(screen.getByRole('option', { name: /视频生成/ }));
 
-    // 通过 label htmlFor 拿到 源图 槽的 file input，附一张参考图。
-    const srcLabel = await screen.findByLabelText('上传源图');
+    // 通过 label htmlFor 拿到 首帧 槽的 file input，附一张参考图。
+    const srcLabel = await screen.findByLabelText('上传首帧');
     const inputId = srcLabel.getAttribute('for')!;
     const srcInput = document.getElementById(inputId) as HTMLInputElement;
     const refFile = new File(['x'], 'first.png', { type: 'image/png' });
@@ -1201,8 +1203,78 @@ describe('Studio video submission', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
     const body = JSON.parse(String(studioCall![1]!.body));
+    // frame_mode 按帧数推导：仅首帧 → first。
     expect(body.params.reference_images).toEqual(['/uploads/ref-first.png']);
-    expect(body.params.frame_mode).toBe('auto');
+    expect(body.params.frame_mode).toBe('first');
+  });
+
+  it('submits a last-frame-only video job → frame_mode last（无首帧门控）', async () => {
+    if (!URL.createObjectURL) {
+      (URL as any).createObjectURL = () => 'blob:stub';
+      (URL as any).revokeObjectURL = () => {};
+    }
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'vvolc',
+            keys: [
+              {
+                alias: 'vvolc',
+                provider: 'volcengine_video',
+                access_key: 'ark...vkey',
+                secret_key: null,
+                capabilities: [],
+                modalities: ['video'],
+                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128' }],
+                notes: '',
+                created_at: '2026-05-25T00:00:00Z',
+                is_default: true,
+              },
+            ],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      if (url === '/api/uploads') {
+        return Promise.resolve({ ok: true, json: async () => ({ path: '/uploads/ref-last.png' }) } as any);
+      }
+      if (url === '/api/studio/jobs') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            job_id: 'job-v3', character_id: '', prompt: 'p', submitted_at: new Date().toISOString(),
+            model: 'doubao-seedance-2-0-fast-260128', params: {}, seed: null, output_paths: [],
+            status: 'pending', error: null, kind: 'video', namespace: 'studio',
+          }),
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+
+    fireEvent.click(await screen.findByRole('button', { name: '选择生成模式' }));
+    fireEvent.click(screen.getByRole('option', { name: /视频生成/ }));
+
+    // 直接传尾帧（首帧留空）—— 槽位无门控。
+    const lastLabel = await screen.findByLabelText('上传尾帧');
+    const inputId = lastLabel.getAttribute('for')!;
+    const lastInput = document.getElementById(inputId) as HTMLInputElement;
+    fireEvent.change(lastInput, { target: { files: [new File(['y'], 'last.png', { type: 'image/png' })] } });
+
+    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '收束到这一帧' } });
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body.params.reference_images).toEqual(['/uploads/ref-last.png']);
+    expect(body.params.frame_mode).toBe('last');
   });
 
   it('regenerates a video job with the full original params, not the current form state', async () => {

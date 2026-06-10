@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 
 import { createStudioJob, getStudioJob, listStudioJobs, uploadReferenceImage } from '@/api/studio';
-import { listKeys, type KeyView } from '@/api/keys';
+import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { PromptInput } from '@/components/studio/PromptInput';
+import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
 import { imageControlCaps, type Quality } from '@/lib/imageControlCaps';
-import { videoControlCaps, type VideoFrameMode, type VideoMode } from '@/lib/videoControlCaps';
+import { videoControlCaps, type VideoMode } from '@/lib/videoControlCaps';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
@@ -26,7 +27,6 @@ interface SavedSelection {
   duration?: number;
   videoResolution?: string;
   videoRatio?: string;
-  frameMode?: VideoFrameMode;
   generateAudio?: boolean;
 }
 
@@ -67,24 +67,27 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [promptText, setPromptText] = useState('');
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
   const [kind, setKind] = useState<JobKind>(saved.kind ?? 'image');
-  const [videoMode, setVideoMode] = useState<VideoMode>(saved.videoMode ?? 'i2v');
+  // 旧版本 videoMode 存过 t2v/i2v/ref/v2v —— 仅 'omni' 原样保留，其余一律回落首尾帧。
+  const [videoMode, setVideoMode] = useState<VideoMode>(saved.videoMode === 'omni' ? 'omni' : 'firstlast');
   const [duration, setDuration] = useState<number>(saved.duration ?? 5);
   const [videoResolution, setVideoResolution] = useState<string>(saved.videoResolution ?? '720p');
   const [videoRatio, setVideoRatio] = useState<string>(saved.videoRatio ?? '16:9');
-  const [frameMode, setFrameMode] = useState<VideoFrameMode>(saved.frameMode ?? 'auto');
   const [generateAudio, setGenerateAudio] = useState<boolean>(saved.generateAudio ?? false);
   const [referenceVideos, setReferenceVideos] = useState<File[]>([]);
   const [referenceAudios, setReferenceAudios] = useState<File[]>([]);
+  // 首尾帧模式的双槽（与 referenceImages 分离：两个槽各自独立可空，仅尾帧也合法）。
+  const [videoFrames, setVideoFrames] = useState<FrameSlots>({ first: null, last: null });
   const videoCaps = videoControlCaps(model);
-  // 切到视频模式时，若当前 key 不支持 video，自动选中首个 video 能力的 key —— 让 videoCaps 立即正确（否则退化成 STANDARD_CAPS）。
+  // 切到视频模式时，若当前 key 没有视频模型，自动选中首个带视频模型的 key —— 让 videoCaps 立即正确（否则退化成 STANDARD_CAPS）。
   useEffect(() => {
     if (kind !== 'video' || keys.length === 0) return;
+    const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
     const cur = keys.find((k) => k.alias === providerAlias);
-    if (cur?.modalities?.includes('video')) return;
-    const v = keys.find((k) => k.modalities?.includes('video'));
+    if (cur && videoModelsOf(cur).length > 0) return;
+    const v = keys.find((k) => videoModelsOf(k).length > 0);
     if (v) {
       setProviderAlias(v.alias);
-      setModel(v.models[0]?.id ?? '');
+      setModel(videoModelsOf(v)[0]?.id ?? '');
     }
     // 仅在切到视频模式 / keys 加载时触发；providerAlias 不入依赖，避免用户改回非视频 key 时被反复抢选成死循环。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -184,11 +187,11 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     if (!providerAlias) return;
     saveSelection({
       providerAlias, model, ratio, resolution, count, quality, customSize,
-      kind, videoMode, duration, videoResolution, videoRatio, frameMode, generateAudio,
+      kind, videoMode, duration, videoResolution, videoRatio, generateAudio,
     });
   }, [
     providerAlias, model, ratio, resolution, count, quality, customSize,
-    kind, videoMode, duration, videoResolution, videoRatio, frameMode, generateAudio,
+    kind, videoMode, duration, videoResolution, videoRatio, generateAudio,
   ]);
 
   useEffect(() => {
@@ -324,14 +327,18 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   };
 
   const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig) => {
-    // 切到视频后 PromptInput 只是按 modalities 过滤显示，父级 providerAlias/model 不一定已是视频 key——这里收敛。
-    const videoKeys = keys.filter((item) => item.modalities?.includes('video'));
+    // 切到视频后 PromptInput 只是按模型分类过滤显示，父级 providerAlias/model 不一定已是视频 key——这里收敛。
+    const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
+    const videoKeys = keys.filter((item) => videoModelsOf(item).length > 0);
     const selectedKey =
       (overrideConfig?.alias ? keys.find((item) => item.alias === overrideConfig.alias) : undefined)
       ?? videoKeys.find((item) => item.alias === providerAlias)
       ?? videoKeys[0];
+    const selectedVideoModels = selectedKey ? videoModelsOf(selectedKey) : [];
     const effectiveAlias = overrideConfig?.alias ?? selectedKey?.alias ?? providerAlias;
-    const effectiveModel = overrideConfig?.model ?? selectedKey?.models[0]?.id ?? model;
+    const effectiveModel = overrideConfig?.model
+      ?? (selectedVideoModels.some((m) => m.id === model) ? model : selectedVideoModels[0]?.id)
+      ?? model;
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
 
@@ -341,9 +348,15 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     let imgPaths: string[];
     let vidPaths: string[];
     let audPaths: string[];
+    // 首尾帧模式上传的是显式双槽（可只有尾帧）；全能参考模式才用 referenceImages 列表。
+    const frameFiles = videoMode === 'firstlast'
+      ? [videoFrames.first, videoFrames.last].filter((f): f is File => f !== null)
+      : null;
     try {
       imgPaths = overrideConfig?.referenceImages
-        ?? (referenceImages.length > 0 ? await Promise.all(referenceImages.map(uploadReferenceImage)) : []);
+        ?? (frameFiles
+          ? await Promise.all(frameFiles.map(uploadReferenceImage))
+          : referenceImages.length > 0 ? await Promise.all(referenceImages.map(uploadReferenceImage)) : []);
       vidPaths = overrideConfig?.referenceVideos
         ?? (referenceVideos.length > 0 ? await Promise.all(referenceVideos.map(uploadReferenceImage)) : []);
       audPaths = overrideConfig?.referenceAudios
@@ -365,9 +378,16 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const effectiveDuration = overrideConfig?.duration ?? duration;
     const effectiveResolution = overrideConfig?.videoResolution ?? videoResolution;
     const effectiveRatio = overrideConfig?.ratio ?? videoRatio;
+    // frame_mode 不再是用户选项：首尾帧模式按双槽推导（双帧→firstlast、仅首→first、仅尾→last、
+    // 全空→省略 = 文生视频）；全能参考模式不发 frame_mode（全部按 reference_image 角色）。
     const effectiveFrameMode = overrideConfig
       ? overrideConfig.frameMode
-      : (videoMode === 'i2v' ? frameMode : undefined);
+      : (videoMode === 'firstlast'
+          ? (videoFrames.first && videoFrames.last ? 'firstlast'
+            : videoFrames.first ? 'first'
+            : videoFrames.last ? 'last'
+            : undefined)
+          : undefined);
     const effectiveGenerateAudio = overrideConfig ? !!overrideConfig.generateAudio : generateAudio;
 
     const videoParams: JobParams = {
@@ -488,18 +508,18 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           duration={duration}
           videoResolution={videoResolution}
           videoRatio={videoRatio}
-          frameMode={frameMode}
           generateAudio={generateAudio}
           onVideoModeChange={setVideoMode}
           onDurationChange={setDuration}
           onVideoResolutionChange={setVideoResolution}
           onVideoRatioChange={setVideoRatio}
-          onFrameModeChange={setFrameMode}
           onGenerateAudioChange={setGenerateAudio}
           referenceVideos={referenceVideos}
           referenceAudios={referenceAudios}
           onReferenceVideosChange={setReferenceVideos}
           onReferenceAudiosChange={setReferenceAudios}
+          videoFrames={videoFrames}
+          onVideoFramesChange={setVideoFrames}
         />
         {compactError && (
           <p role="alert" className="mt-3 max-w-[780px] mx-auto text-sm text-destructive">
@@ -556,18 +576,18 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           duration={duration}
           videoResolution={videoResolution}
           videoRatio={videoRatio}
-          frameMode={frameMode}
           generateAudio={generateAudio}
           onVideoModeChange={setVideoMode}
           onDurationChange={setDuration}
           onVideoResolutionChange={setVideoResolution}
           onVideoRatioChange={setVideoRatio}
-          onFrameModeChange={setFrameMode}
           onGenerateAudioChange={setGenerateAudio}
           referenceVideos={referenceVideos}
           referenceAudios={referenceAudios}
           onReferenceVideosChange={setReferenceVideos}
           onReferenceAudiosChange={setReferenceAudios}
+          videoFrames={videoFrames}
+          onVideoFramesChange={setVideoFrames}
         />
       </div>
     </div>
@@ -608,7 +628,14 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       if (config.ratio) setVideoRatio(config.ratio);
       if (config.videoResolution) setVideoResolution(config.videoResolution);
       if (config.duration) setDuration(config.duration);
-      if (config.frameMode) setFrameMode(config.frameMode);
+      // 旧 job 的 frame_mode 不回填用户态（提交时按帧数推导）；只同步生成方式：
+      // 带视频/音频参考、或参考图没有帧语义（无 frame_mode / auto）→ 全能参考，否则首尾帧。
+      const omniLike = Boolean(
+        config.referenceVideos?.length
+        || config.referenceAudios?.length
+        || (config.referenceImages?.length && (!config.frameMode || config.frameMode === 'auto')),
+      );
+      setVideoMode(omniLike ? 'omni' : 'firstlast');
       setGenerateAudio(!!config.generateAudio);
     } else {
       if (config.ratio) setRatio(config.ratio);

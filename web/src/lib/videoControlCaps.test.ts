@@ -7,7 +7,6 @@ describe('videoControlCaps', () => {
     expect(caps.family).toBe('seedance');
     expect(caps.durations).toEqual([5, 10]);
     expect(caps.resolutions).toContain('720p');
-    expect(caps.frameModes).toEqual(['auto', 'first', 'firstlast']);
     expect(caps.supportsAudio).toBe(true);
     expect(caps.supportsReferenceVideo).toBe(true);
     expect(caps.supportsReferenceAudio).toBe(true);
@@ -20,7 +19,6 @@ describe('videoControlCaps', () => {
   it('falls back to a conservative default for unknown models', () => {
     const caps = videoControlCaps('some-unknown-video-model');
     expect(caps.family).toBe('standard');
-    expect(caps.frameModes).toEqual(['auto']);
     expect(caps.supportsReferenceVideo).toBe(false);
     expect(caps.supportsReferenceAudio).toBe(false);
     expect(caps.supportsAudio).toBe(false);

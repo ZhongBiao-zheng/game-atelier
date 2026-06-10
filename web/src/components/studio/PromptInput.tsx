@@ -1,13 +1,15 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Box, ImageIcon, Images, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
-import type { KeyView } from '@/api/keys';
+import { ArrowUp, Box, Coins, ImageIcon, Images, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
+import { modelModality, type KeyView } from '@/api/keys';
 import { computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
 import { providerLabel } from '@/lib/providerLabels';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
+import { estimateCostYuan, isHkAggregator } from '@/lib/creditCost';
 import { VideoControls } from './VideoControls';
-import { VideoReferenceAssets } from './VideoReferenceAssets';
-import type { VideoControlCaps, VideoFrameMode, VideoMode } from '@/lib/videoControlCaps';
+import { FirstLastFrames, VideoReferenceAssets, type FrameSlots } from './VideoReferenceAssets';
+import { RatioIcon } from './RatioIcon';
+import type { VideoControlCaps, VideoMode } from '@/lib/videoControlCaps';
 import type { JobKind } from '@/schema/jobs';
 
 interface Props {
@@ -42,18 +44,18 @@ interface Props {
   duration?: number;
   videoResolution?: string;
   videoRatio?: string;
-  frameMode?: VideoFrameMode;
   generateAudio?: boolean;
   onVideoModeChange?: (mode: VideoMode) => void;
   onDurationChange?: (duration: number) => void;
   onVideoResolutionChange?: (resolution: string) => void;
   onVideoRatioChange?: (ratio: string) => void;
-  onFrameModeChange?: (frameMode: VideoFrameMode) => void;
   onGenerateAudioChange?: (generateAudio: boolean) => void;
   referenceVideos?: File[];
   referenceAudios?: File[];
   onReferenceVideosChange?: (files: File[]) => void;
   onReferenceAudiosChange?: (files: File[]) => void;
+  videoFrames?: FrameSlots;
+  onVideoFramesChange?: (frames: FrameSlots) => void;
 }
 
 const SIDE_RATIOS = ['4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
@@ -96,29 +98,29 @@ export function PromptInput({
   onReferenceImagesChange,
   kind = 'image',
   onKindChange,
-  videoMode = 'i2v',
+  videoMode = 'firstlast',
   videoCaps,
   duration = 5,
   videoResolution = '720p',
   videoRatio = '16:9',
-  frameMode = 'auto',
   generateAudio = false,
   onVideoModeChange,
   onDurationChange,
   onVideoResolutionChange,
   onVideoRatioChange,
-  onFrameModeChange,
   onGenerateAudioChange,
   referenceVideos = [],
   referenceAudios = [],
   onReferenceVideosChange,
   onReferenceAudiosChange,
+  videoFrames = { first: null, last: null },
+  onVideoFramesChange,
 }: Props) {
   const isVideo = kind === 'video';
   const [internalText, setInternalText] = useState('');
   const text = value ?? internalText;
   const setText = onValueChange ?? setInternalText;
-  const [openPanel, setOpenPanel] = useState<'provider' | 'model' | 'size' | 'count' | null>(null);
+  const [openPanel, setOpenPanel] = useState<'kind' | 'provider' | 'model' | 'size' | 'count' | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const [refExpanded, setRefExpanded] = useState(false);
   const [refHovered, setRefHovered] = useState<number | null>(null);
@@ -137,13 +139,14 @@ export function PromptInput({
     document.addEventListener('mousedown', handleMouseDown);
     return () => document.removeEventListener('mousedown', handleMouseDown);
   }, [openPanel]);
-  // 视频模式只列出声明了 video 能力的 key（per-model modality 尚未建模，先用 key 级 modalities）。
-  const visibleProviders = isVideo
-    ? providers.filter((p) => p.modalities?.includes('video'))
-    : providers;
+  // 厂商/模型列表按当前生成类型过滤：模型级 modality 标注优先，未标注按 key 级 modalities 兜底。
+  const wantedModality = isVideo ? 'video' : 'image';
+  const visibleProviders = providers.filter(
+    (p) => (p.models ?? []).some((m) => modelModality(m, p) === wantedModality),
+  );
   const provider = visibleProviders.find((item) => item.alias === providerAlias) ?? visibleProviders[0];
   const providerDisplayName = providerName(provider);
-  const models = provider?.models ?? [];
+  const models = (provider?.models ?? []).filter((m) => modelModality(m, provider) === wantedModality);
   const selectedModel = models.find((item) => item.id === model) ?? models[0];
   const initSize = computeStudioPixelSize(ratio, resolution, provider?.provider);
   const [localW, setLocalW] = useState(initSize.w);
@@ -152,6 +155,10 @@ export function PromptInput({
   const caps = imageControlCaps(selectedModel?.id);
   const maxRef = maxReferenceImages(provider?.provider, selectedModel?.id);
   const canSubmit = Boolean(provider && selectedModel && text.trim() && !disabled);
+  // 消耗提示只对 OpenAI-HK 聚合商显示（人民币，无单位）；未定价的模型/档位返回 null 即隐藏。
+  const costYuan = isHkAggregator(provider?.base_url)
+    ? estimateCostYuan({ model: selectedModel?.id, quality, n: isVideo ? 1 : count })
+    : null;
   const panelPosition = menuDirection === 'down'
     ? 'top-full mt-3'
     : 'bottom-full mb-3';
@@ -367,6 +374,9 @@ export function PromptInput({
             )}
           </div>
         )}
+        {isVideo && videoMode === 'firstlast' && onVideoFramesChange && (
+          <FirstLastFrames frames={videoFrames} onChange={onVideoFramesChange} />
+        )}
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -376,12 +386,10 @@ export function PromptInput({
           aria-label="生图 prompt"
         />
       </div>
-      {isVideo && videoCaps && (
+      {isVideo && videoCaps && videoMode === 'omni' && (
         <div className="px-2">
           <VideoReferenceAssets
             caps={videoCaps}
-            mode={videoMode}
-            frameMode={frameMode}
             images={referenceImages}
             videos={referenceVideos}
             audios={referenceAudios}
@@ -391,19 +399,42 @@ export function PromptInput({
           />
         </div>
       )}
-      {isVideo && visibleProviders.length === 0 && (
-        <p className="px-2 text-xs text-muted-foreground">当前没有支持视频的供应商 Key，请先在设置里添加。</p>
-      )}
       <div className="flex flex-wrap justify-between items-center gap-3 shrink-0">
         <div className="flex min-w-0 flex-wrap gap-2">
-          <ControlButton
-            active
-            aria-label={isVideo ? '切换到图片生成' : '切换到视频生成'}
-            onClick={() => onKindChange?.(isVideo ? 'image' : 'video')}
-          >
-            {isVideo ? <Video size={14} aria-hidden /> : <ImageIcon size={14} aria-hidden />}
-            {isVideo ? '视频生成' : '图片生成'}
-          </ControlButton>
+          <div data-testid="kind-control-wrap" className="relative">
+            <ControlButton
+              active={openPanel === 'kind'}
+              aria-label="选择生成模式"
+              onClick={() => setOpenPanel(openPanel === 'kind' ? null : 'kind')}
+            >
+              {isVideo ? <Video size={14} aria-hidden /> : <ImageIcon size={14} aria-hidden />}
+              {isVideo ? '视频生成' : '图片生成'}
+            </ControlButton>
+            {openPanel === 'kind' && (
+              <div role="listbox" aria-label="生成模式列表" className={`absolute left-0 ${panelPosition} z-20 w-[200px] rounded-2xl border border-border bg-secondary p-2 shadow-2xl`}>
+                <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
+                {([
+                  { key: 'image', label: '图片生成', icon: <ImageIcon size={18} aria-hidden /> },
+                  { key: 'video', label: '视频生成', icon: <Video size={18} aria-hidden /> },
+                ] as const).map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    role="option"
+                    aria-selected={kind === item.key}
+                    onClick={() => {
+                      onKindChange?.(item.key);
+                      setOpenPanel(null);
+                    }}
+                    className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-card aria-selected:bg-card aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
+                  >
+                    {item.icon}
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <div data-testid="provider-control-wrap" className="relative">
             <ControlButton
@@ -678,28 +709,37 @@ export function PromptInput({
               duration={duration}
               resolution={videoResolution}
               ratio={videoRatio}
-              frameMode={frameMode}
               generateAudio={generateAudio}
               onModeChange={(m) => onVideoModeChange?.(m)}
               onDurationChange={(d) => onDurationChange?.(d)}
               onResolutionChange={(r) => onVideoResolutionChange?.(r)}
               onRatioChange={(r) => onVideoRatioChange?.(r)}
-              onFrameModeChange={(f) => onFrameModeChange?.(f)}
               onGenerateAudioChange={(g) => onGenerateAudioChange?.(g)}
               menuDirection={menuDirection}
             />
           )}
         </div>
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!canSubmit}
-          aria-label="提交生成"
-          title="提交 (⌘↵)"
-          className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background transition-colors"
-        >
-          <ArrowUp size={18} aria-hidden />
-        </button>
+        <div className="flex items-center gap-3">
+          {costYuan !== null && (
+            <span
+              data-testid="credit-cost-hint"
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums"
+            >
+              <Coins size={12} aria-hidden />
+              {costYuan}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={!canSubmit}
+            aria-label="提交生成"
+            title="提交 (⌘↵)"
+            className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background transition-colors"
+          >
+            <ArrowUp size={18} aria-hidden />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -720,24 +760,5 @@ function ControlButton({
       } ${className}`}
       {...props}
     />
-  );
-}
-
-function RatioIcon({ ratio, box = 20 }: { ratio: string; box?: number }) {
-  const [a, b] = ratio.split(':').map(Number);
-  let w: number, h: number;
-  if (a >= b) {
-    w = box;
-    h = Math.max(Math.round((b / a) * box), 4);
-  } else {
-    h = box;
-    w = Math.max(Math.round((a / b) * box), 4);
-  }
-  const x = (box - w) / 2;
-  const y = (box - h) / 2;
-  return (
-    <svg width={box} height={box} viewBox={`0 0 ${box} ${box}`} fill="none">
-      <rect x={x} y={y} width={w} height={h} rx="2" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
   );
 }

@@ -55,6 +55,8 @@ def _frame_role(index: int, frame_mode: str) -> str:
         return "first_frame"
     if mode == "firstlast" and index == 1:
         return "last_frame"
+    if mode == "last" and index == 0:
+        return "last_frame"
     return "reference_image"
 
 

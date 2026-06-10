@@ -125,6 +125,22 @@ def test_firstlast_roles(seedance_key, tmp_path, monkeypatch):
     assert parts[2]["role"] == "last_frame"
 
 
+def test_last_only_role(seedance_key, tmp_path, monkeypatch):
+    # 仅尾帧也是合法提交：frame_mode=last 时第 0 张参考图按 last_frame 角色发送。
+    posted = {}
+    monkeypatch.setattr(vv.requests, "post", lambda url, headers=None, json=None, timeout=None: (posted.update(body=json) or _FakeResp(200, {"data": {"video_url": "https://x/v.mp4"}})))
+    monkeypatch.setattr(vv.requests, "get", lambda *a, **k: _FakeResp(200, {}))
+    monkeypatch.setattr(vv, "_download_mp4", lambda url, d, i: "ok")
+    last = tmp_path / "b.png"
+    last.write_bytes(b"png-b")
+    vv.render_video(
+        prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
+        params={"frame_mode": "last", "reference_images": [str(last)]},
+        poll_interval=0,
+    )
+    assert posted["body"]["content"][1]["role"] == "last_frame"
+
+
 def test_local_reference_image_inlined_as_data_url(seedance_key, tmp_path, monkeypatch):
     # Web 上传的参考图是本地绝对路径，Ark 拉不到 —— 提交前必须内联成 base64 data-url。
     posted = {}

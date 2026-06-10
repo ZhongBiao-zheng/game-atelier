@@ -4,11 +4,15 @@
  * 未知模型走保守默认（只文生 + 单图自动，不开放视频/音频参考）。
  */
 
-/** 视频输入模式（UI 概念，决定开放哪些上传槽）。 */
-export type VideoMode = 't2v' | 'i2v' | 'ref' | 'v2v';
+/** 视频生成方式（UI 概念，决定开放哪些上传槽）。
+ * 文生视频不再是显式选项：首尾帧模式下不传任何帧 = 文生视频。
+ */
+export type VideoMode = 'firstlast' | 'omni';
 
-/** 帧模式 —— 必须与 jobs.ts::JobParams.frame_mode 和 volcengine_video._frame_role 对齐。 */
-export type VideoFrameMode = 'auto' | 'first' | 'firstlast';
+/** 帧模式（wire 值）—— 必须与 jobs.ts::JobParams.frame_mode 和 volcengine_video._frame_role 对齐。
+ * 不再是用户选项：提交时按首尾槽推导（双帧→firstlast、仅首→first、仅尾→last、全空→省略=文生视频）。
+ */
+export type VideoFrameMode = 'auto' | 'first' | 'last' | 'firstlast';
 
 export interface VideoControlCaps {
   family: 'seedance' | 'standard';
@@ -18,8 +22,6 @@ export interface VideoControlCaps {
   resolutions: string[];
   /** 可选画幅比例（传给后端 params.ratio）。 */
   ratios: string[];
-  /** 图生视频支持的帧模式。 */
-  frameModes: VideoFrameMode[];
   /** 是否支持「生成音频」开关（params.generate_audio）。 */
   supportsAudio: boolean;
   /** 是否支持参考视频（params.reference_videos）。 */
@@ -33,7 +35,6 @@ const SEEDANCE_CAPS: VideoControlCaps = {
   durations: [5, 10],
   resolutions: ['480p', '720p', '1080p'],
   ratios: ['16:9', '9:16', '1:1', '4:3', '21:9'],
-  frameModes: ['auto', 'first', 'firstlast'],
   supportsAudio: true,
   supportsReferenceVideo: true,
   supportsReferenceAudio: true,
@@ -44,7 +45,6 @@ const STANDARD_CAPS: VideoControlCaps = {
   durations: [5],
   resolutions: ['720p'],
   ratios: ['16:9', '9:16', '1:1'],
-  frameModes: ['auto'],
   supportsAudio: false,
   supportsReferenceVideo: false,
   supportsReferenceAudio: false,
@@ -56,17 +56,8 @@ export function videoControlCaps(modelId?: string | null): VideoControlCaps {
   return STANDARD_CAPS;
 }
 
-/** 各视频模式的中文标签（VideoControls 模式下拉用）。 */
+/** 各生成方式的中文标签（VideoControls 汇总弹窗用）。 */
 export const VIDEO_MODE_LABELS: Record<VideoMode, string> = {
-  t2v: '文生视频',
-  i2v: '图生视频',
-  ref: '参考生视频',
-  v2v: '视频生视频',
-};
-
-/** 各帧模式的中文标签。 */
-export const FRAME_MODE_LABELS: Record<VideoFrameMode, string> = {
-  auto: '自动',
-  first: '首帧',
   firstlast: '首尾帧',
+  omni: '全能参考',
 };
