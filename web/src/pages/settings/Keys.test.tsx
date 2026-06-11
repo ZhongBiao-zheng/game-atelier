@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 
 import { KeysPage } from './Keys';
 import { KeyForm } from './KeyForm';
@@ -32,7 +32,7 @@ describe('KeysPage', () => {
     });
     render(<KeysPage />);
     await waitFor(() =>
-      expect(screen.getByText(/还没有 API Key/)).toBeInTheDocument(),
+      expect(screen.getByText(/还没有配置供应商/)).toBeInTheDocument(),
     );
   });
 
@@ -60,28 +60,6 @@ describe('KeysPage', () => {
     expect(screen.getByText('seedream')).toBeInTheDocument();
   });
 
-  it('renders brass ★ with aria-label for default key', async () => {
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ keys: [mockKey], default_alias: 'lov' }),
-    });
-    render(<KeysPage />);
-    await waitFor(() =>
-      expect(screen.getByLabelText('默认 Key')).toBeInTheDocument(),
-    );
-  });
-
-  it('non-default key does not show ★', async () => {
-    const nonDefault = { ...mockKey, alias: 'other', is_default: false };
-    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ keys: [nonDefault], default_alias: 'lov' }),
-    });
-    render(<KeysPage />);
-    await waitFor(() => expect(screen.getByText('other')).toBeInTheDocument());
-    expect(screen.queryByLabelText('默认 Key')).not.toBeInTheDocument();
-  });
-
   it('delete aborts when prompt returns wrong alias', async () => {
     vi.stubGlobal('prompt', vi.fn().mockReturnValue('wrong'));
     const fetchMock = vi.fn()
@@ -97,14 +75,14 @@ describe('KeysPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1); // only the initial listKeys
   });
 
-  it('empty state shows + 新建 Key button', async () => {
+  it('empty state shows + 新建供应商 button', async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ keys: [], default_alias: null }),
     });
     render(<KeysPage />);
-    await waitFor(() => expect(screen.getByText(/还没有 API Key/)).toBeInTheDocument());
-    expect(screen.getAllByText('+ 新建 Key').length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getByText(/还没有配置供应商/)).toBeInTheDocument());
+    expect(screen.getAllByText('+ 新建供应商').length).toBeGreaterThan(0);
   });
 
   it('shows success feedback without revealing the created key', async () => {
@@ -115,7 +93,7 @@ describe('KeysPage', () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ secret_revealed: 'sk-created-secret' }),
+        json: async () => ({ alias: 'seedream' }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -128,8 +106,8 @@ describe('KeysPage', () => {
 
     render(<KeysPage />);
 
-    await waitFor(() => expect(screen.getByText(/还没有 API Key/)).toBeInTheDocument());
-    fireEvent.click(screen.getAllByText('+ 新建 Key')[0]);
+    await waitFor(() => expect(screen.getByText(/还没有配置供应商/)).toBeInTheDocument());
+    fireEvent.click(screen.getAllByText('+ 新建供应商')[0]);
     fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'seedream' } });
     fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sk-created-secret' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -238,7 +216,7 @@ describe('KeyForm', () => {
   it('creates an official provider key with only API Key required', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ secret_revealed: 'ark-test' }),
+      json: async () => ({ alias: 'seedream' }),
     });
     globalThis.fetch = fetchMock as any;
     const onCreated = vi.fn();
@@ -262,7 +240,7 @@ describe('KeyForm', () => {
   it('creates a custom provider key with base URL and API Key', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ secret_revealed: 'sk-custom' }),
+      json: async () => ({ alias: 'custom-image' }),
     });
     globalThis.fetch = fetchMock as any;
 
@@ -300,7 +278,7 @@ describe('KeyForm', () => {
   it('creates a third-party image provider with structured metadata', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ secret_revealed: 'ark-test' }),
+      json: async () => ({ alias: 'seedream' }),
     });
     globalThis.fetch = fetchMock as any;
 
@@ -333,7 +311,7 @@ describe('KeyForm', () => {
   it('tags per-model modality on a custom key and derives key-level modalities', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ secret_revealed: 'zz-secret' }),
+      json: async () => ({ alias: 'zz-mixed' }),
     });
     globalThis.fetch = fetchMock as any;
 
@@ -347,7 +325,7 @@ describe('KeyForm', () => {
     fireEvent.click(screen.getByRole('button', { name: '添加模型' }));
     fireEvent.change(screen.getByLabelText('模型名称 2'), { target: { value: 'Sora 2' } });
     fireEvent.change(screen.getByLabelText('模型 ID 2'), { target: { value: 'sora-2' } });
-    fireEvent.change(screen.getByLabelText('模型分类 2'), { target: { value: 'video' } });
+    fireEvent.click(within(screen.getByLabelText('模型分类 2')).getByRole('button', { name: '视频' }));
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -386,7 +364,7 @@ describe('KeyForm', () => {
   it('creates a key with custom model names and ids', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ secret_revealed: 'ark-test' }),
+      json: async () => ({ alias: 'seedream' }),
     });
     globalThis.fetch = fetchMock as any;
 

@@ -27,7 +27,7 @@ export function MainApp({ routedCharacterId, routedAssetSlot, routedImageDetail 
   if (config === null) {
     return (
       <div className="grid h-full place-items-center bg-background text-muted-foreground">
-        <span className="font-[var(--font-display)] italic text-2xl">读取设置…</span>
+        <span className="font-display text-display italic">读取设置…</span>
       </div>
     );
   }
@@ -55,20 +55,20 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
   }, []);
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-glass"
       onClick={onClose}
     >
       <img
         src={src}
         alt="大图"
-        className="max-h-[90vh] max-w-[90vw] rounded-lg shadow-2xl object-contain"
+        className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
         onClick={e => e.stopPropagation()}
       />
       <button
         type="button"
         aria-label="关闭"
         onClick={onClose}
-        className="absolute right-6 top-6 size-10 rounded-full bg-black/60 text-white grid place-items-center hover:bg-black/80 backdrop-blur-sm border-0"
+        className="absolute right-6 top-6 size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-background/90 backdrop-blur-glass border-0"
       >
         <X className="size-5" />
       </button>

@@ -71,7 +71,7 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
   if (!characterId) {
     return (
       <section className="h-full border-l border-border/60 bg-card/30 flex flex-col items-center justify-center px-6 text-center">
-        <p className="font-[var(--font-display)] italic text-xl text-foreground/65 mb-2">
+        <p className="font-display text-display italic text-foreground/65 mb-2">
           档案区
         </p>
         <p className="text-xs text-muted-foreground">选中角色后在此编辑规格</p>
@@ -85,10 +85,10 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
     <section className="h-full border-l border-border/60 bg-card/30 flex flex-col">
       <header className="flex items-end justify-between px-6 pt-6 pb-4 border-b border-border/40 gap-4">
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground/70 mb-1">
+          <div className="text-xs uppercase tracking-label text-muted-foreground/70 mb-1">
             spec · 档案
           </div>
-          <h2 className="font-[var(--font-display)] italic text-2xl tracking-tight truncate text-foreground/95">
+          <h2 className="font-display italic text-display tracking-tight truncate text-foreground/95">
             {characterName ?? '—'}
           </h2>
         </div>
@@ -123,7 +123,7 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
         <Textarea
           value={content}
           onChange={e => { setContent(e.target.value); setDirty(true); }}
-          className="flex-1 resize-none font-mono text-[13px] leading-[1.7] bg-background/40"
+          className="flex-1 resize-none font-mono text-sm leading-[1.7] bg-background/40"
           placeholder="角色规格 markdown…"
           spellCheck={false}
         />

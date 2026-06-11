@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
+import { ChevronsDown } from 'lucide-react';
 
 import { createStudioJob, getStudioJob, listStudioJobs, uploadReferenceImage } from '@/api/studio';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
@@ -9,7 +10,7 @@ import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
 import { imageControlCaps, type Quality } from '@/lib/imageControlCaps';
-import { videoControlCaps, type VideoMode } from '@/lib/videoControlCaps';
+import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
@@ -27,6 +28,8 @@ interface SavedSelection {
   duration?: number;
   videoResolution?: string;
   videoRatio?: string;
+  videoQuality?: VideoQuality;
+  videoCount?: number;
   generateAudio?: boolean;
 }
 
@@ -56,6 +59,28 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   // compact 模式没有 rounds 列表承接失败卡片，提交/上传错误走这条内联文案。
   const [compactError, setCompactError] = useState<string | null>(null);
   const [keys, setKeys] = useState<KeyView[]>([]);
+  // 滚动联动收放：历史区 col-reverse（|scrollTop| 即距底距离），>160 收 / <80 展（滞回防抖）。
+  // shellFocused / clickPinned 是两个展开覆盖：输入焦点期间恒展开；点击收缩壳展开但不回滚，
+  // 再次滚动（dist>160 的 scroll 事件）即取消点击钉住。
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrolledUp, setScrolledUp] = useState(false);
+  const [shellFocused, setShellFocused] = useState(false);
+  const [clickPinned, setClickPinned] = useState(false);
+
+  // 不走 rAF 节流：后台标签页 rAF 会挂起导致联动滞后；setState 同值自动 bail-out，开销可忽略。
+  const handleHistoryScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const dist = Math.abs(el.scrollTop);
+    setScrolledUp((prev) => (prev ? dist > 80 : dist > 160));
+    if (dist > 160 || dist <= 80) setClickPinned(false);
+  };
+
+  // 瞬时跳转（飙哥指定）：回到底部不要从上往下滚的过程。
+  const scrollToBottom = () => scrollRef.current?.scrollTo?.({ top: 0, behavior: 'auto' });
+
+  // state 仍 newest-first（提交逻辑零改动）；视觉上最新一轮要落在底部，渲染前反转。
+  const reversedRounds = useMemo(() => [...rounds].reverse(), [rounds]);
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
   const [ratio, setRatio] = useState(saved.ratio ?? '1:1');
@@ -72,6 +97,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [duration, setDuration] = useState<number>(saved.duration ?? 5);
   const [videoResolution, setVideoResolution] = useState<string>(saved.videoResolution ?? '720p');
   const [videoRatio, setVideoRatio] = useState<string>(saved.videoRatio ?? '16:9');
+  const [videoQuality, setVideoQuality] = useState<VideoQuality>(saved.videoQuality === 'pro' ? 'pro' : 'std');
+  const [videoCount, setVideoCount] = useState<number>(clampImageCount(saved.videoCount ?? 1));
   const [generateAudio, setGenerateAudio] = useState<boolean>(saved.generateAudio ?? false);
   const [referenceVideos, setReferenceVideos] = useState<File[]>([]);
   const [referenceAudios, setReferenceAudios] = useState<File[]>([]);
@@ -92,6 +119,18 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     // 仅在切到视频模式 / keys 加载时触发；providerAlias 不入依赖，避免用户改回非视频 key 时被反复抢选成死循环。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, keys]);
+  // 切换视频模型族时把超出 caps 的选择拉回合法值（如 seedance 21:9 → kling 没有；kling 档位 ↔ seedance 无档位）。
+  useEffect(() => {
+    if (kind !== 'video') return;
+    const caps = videoControlCaps(model);
+    if (!caps.modes.includes(videoMode)) setVideoMode(caps.modes[0]);
+    if (caps.ratios.length > 0 && !caps.ratios.includes(videoRatio)) setVideoRatio(caps.ratios[0]);
+    if (caps.durations.length > 0 && !caps.durations.includes(duration)) setDuration(caps.durations[0]);
+    if (caps.resolutions.length > 0 && !caps.resolutions.includes(videoResolution)) {
+      setVideoResolution(caps.resolutions[0]);
+    }
+    if (caps.qualities && !caps.qualities.includes(videoQuality)) setVideoQuality(caps.qualities[0]);
+  }, [kind, model, videoMode, videoRatio, duration, videoResolution, videoQuality]);
   const handleCustomSizeChange = useCallback((w: number, h: number) => {
     setCustomSize(`${w}x${h}`);
   }, []);
@@ -153,11 +192,11 @@ export function Studio({ compact = false }: { compact?: boolean }) {
         if (cancelled) return;
         const usable = resp.keys.filter((key) => key.models.length > 0);
         setKeys(usable);
-        // 优先恢复上次保存的供应商/模型（校验仍存在），否则回落到默认 key。
+        // 优先恢复上次保存的供应商/模型（校验仍存在），否则回落到第一个可用 key。
         const savedKey = saved.providerAlias
           ? usable.find((key) => key.alias === saved.providerAlias)
           : undefined;
-        const selected = savedKey ?? usable.find((key) => key.alias === resp.default_alias) ?? usable[0];
+        const selected = savedKey ?? usable[0];
         setProviderAlias(selected?.alias ?? '');
         const savedModelValid = saved.model && selected?.models.some((m) => m.id === saved.model);
         setModel(savedModelValid ? saved.model! : selected?.models[0]?.id ?? '');
@@ -187,11 +226,11 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     if (!providerAlias) return;
     saveSelection({
       providerAlias, model, ratio, resolution, count, quality, customSize,
-      kind, videoMode, duration, videoResolution, videoRatio, generateAudio,
+      kind, videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
     });
   }, [
     providerAlias, model, ratio, resolution, count, quality, customSize,
-    kind, videoMode, duration, videoResolution, videoRatio, generateAudio,
+    kind, videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
   ]);
 
   useEffect(() => {
@@ -294,6 +333,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const startedAt = Date.now();
     const myRound: RoundState = { kind: 'pending', startedAt, config };
     setRounds((rs) => [myRound, ...rs]);
+    // 新一轮提交后跳回底部（col-reverse 的底即 0），让用户看到 pending 卡片。
+    scrollToBottom();
 
     let job: Job;
     try {
@@ -341,6 +382,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       ?? model;
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
+    const effectiveCaps = videoControlCaps(effectiveModel);
 
     setPending(true);
     if (compact) setCompactError(null);
@@ -349,8 +391,11 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     let vidPaths: string[];
     let audPaths: string[];
     // 首尾帧模式上传的是显式双槽（可只有尾帧）；全能参考模式才用 referenceImages 列表。
+    // 槽位按 caps.maxFrames 截断：t2v(0) 不传任何帧、i2v(1) 只收首帧——防换模型后残留旧槽文件。
+    const firstFrame = effectiveCaps.maxFrames >= 1 ? videoFrames.first : null;
+    const lastFrame = effectiveCaps.maxFrames >= 2 ? videoFrames.last : null;
     const frameFiles = videoMode === 'firstlast'
-      ? [videoFrames.first, videoFrames.last].filter((f): f is File => f !== null)
+      ? [firstFrame, lastFrame].filter((f): f is File => f !== null)
       : null;
     try {
       imgPaths = overrideConfig?.referenceImages
@@ -376,26 +421,37 @@ export function Studio({ compact = false }: { compact?: boolean }) {
 
     // 再次生成（overrideConfig）完整还原原 job 的视频参数，而不是回落到当前表单态。
     const effectiveDuration = overrideConfig?.duration ?? duration;
-    const effectiveResolution = overrideConfig?.videoResolution ?? videoResolution;
+    // kling 等无分辨率参数的族不发 resolution；override 路径按原 job 是否带过该参数还原。
+    const effectiveResolution = overrideConfig
+      ? overrideConfig.videoResolution
+      : (effectiveCaps.resolutions.length > 0 ? videoResolution : undefined);
     const effectiveRatio = overrideConfig?.ratio ?? videoRatio;
+    // kling 档位（params.mode std/pro）：仅支持档位的族才发。
+    const effectiveQuality = overrideConfig
+      ? overrideConfig.videoQuality
+      : (effectiveCaps.qualities ? videoQuality : undefined);
+    const effectiveCount = clampImageCount(overrideConfig?.n ?? videoCount);
     // frame_mode 不再是用户选项：首尾帧模式按双槽推导（双帧→firstlast、仅首→first、仅尾→last、
     // 全空→省略 = 文生视频）；全能参考模式不发 frame_mode（全部按 reference_image 角色）。
     const effectiveFrameMode = overrideConfig
       ? overrideConfig.frameMode
       : (videoMode === 'firstlast'
-          ? (videoFrames.first && videoFrames.last ? 'firstlast'
-            : videoFrames.first ? 'first'
-            : videoFrames.last ? 'last'
+          ? (firstFrame && lastFrame ? 'firstlast'
+            : firstFrame ? 'first'
+            : lastFrame ? 'last'
             : undefined)
           : undefined);
     const effectiveGenerateAudio = overrideConfig ? !!overrideConfig.generateAudio : generateAudio;
 
+    // duration / ratio 仅在该族确有此参数时写入（happyhorse video-edit 随输入、i2v 比例随首帧）。
     const videoParams: JobParams = {
-      duration: effectiveDuration,
-      resolution: effectiveResolution,
-      ratio: effectiveRatio,
+      ...(effectiveCaps.durations.length > 0 ? { duration: effectiveDuration } : {}),
+      ...(effectiveResolution ? { resolution: effectiveResolution } : {}),
+      ...(effectiveCaps.ratios.length > 0 ? { ratio: effectiveRatio } : {}),
+      n: effectiveCount,
+      ...(effectiveQuality ? { mode: effectiveQuality } : {}),
       ...(effectiveFrameMode ? { frame_mode: effectiveFrameMode } : {}),
-      ...(effectiveGenerateAudio ? { generate_audio: true } : {}),
+      ...(effectiveCaps.supportsAudio && effectiveGenerateAudio ? { generate_audio: true } : {}),
       ...(imgPaths.length ? { reference_images: imgPaths } : {}),
       ...(vidPaths.length ? { reference_videos: vidPaths } : {}),
       ...(audPaths.length ? { reference_audios: audPaths } : {}),
@@ -409,8 +465,10 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       model: effectiveModel,
       modelName: selectedModel?.name ?? overrideConfig?.modelName,
       ratio: effectiveRatio,
+      n: effectiveCount,
       duration: effectiveDuration,
       videoResolution: effectiveResolution,
+      videoQuality: effectiveQuality,
       frameMode: effectiveFrameMode,
       generateAudio: effectiveGenerateAudio,
       referenceImages: imgPaths,
@@ -440,6 +498,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const startedAt = Date.now();
     const myRound: RoundState = { kind: 'pending', startedAt, config };
     setRounds((rs) => [myRound, ...rs]);
+    // 新一轮提交后跳回底部（col-reverse 的底即 0），让用户看到 pending 卡片。
+    scrollToBottom();
 
     let job: Job;
     try {
@@ -475,7 +535,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   if (compact) {
     return (
       <div className="py-8" aria-label="生图沙箱">
-        <h1 className="text-xl sm:text-2xl leading-tight mb-6 sm:mb-8 max-w-[780px] mx-auto font-semibold">
+        <h1 className="font-display text-display leading-tight mb-6 sm:mb-8 max-w-[780px] mx-auto">
           描述你想生成的图片
         </h1>
         <PromptInput
@@ -508,11 +568,15 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           duration={duration}
           videoResolution={videoResolution}
           videoRatio={videoRatio}
+          videoQuality={videoQuality}
+          videoCount={videoCount}
           generateAudio={generateAudio}
           onVideoModeChange={setVideoMode}
           onDurationChange={setDuration}
           onVideoResolutionChange={setVideoResolution}
           onVideoRatioChange={setVideoRatio}
+          onVideoQualityChange={setVideoQuality}
+          onVideoCountChange={setVideoCount}
           onGenerateAudioChange={setGenerateAudio}
           referenceVideos={referenceVideos}
           referenceAudios={referenceAudios}
@@ -532,12 +596,19 @@ export function Studio({ compact = false }: { compact?: boolean }) {
 
   return (
     <div
-      className="h-[calc(100vh-56px)] md:h-[calc(100vh-80px)] flex flex-col overflow-hidden px-3 sm:px-6"
+      className="relative h-[calc(100vh-56px)] md:h-[calc(100vh-80px)] overflow-hidden px-3 sm:px-6"
       aria-label="生图沙箱"
     >
-      <div className="flex-1 min-h-0 overflow-y-auto py-6">
+      {/* col-reverse：浏览器原生钉底，scrollTop 0 即底部；rounds 反转后最新一轮落在视觉底部。
+          pb 预留输入壳展开高度，最后一轮不被浮层压住。 */}
+      <div
+        ref={scrollRef}
+        onScroll={handleHistoryScroll}
+        data-testid="studio-history-scroll"
+        className="flex h-full flex-col-reverse overflow-y-auto pt-6 pb-[210px]"
+      >
         <RoundList
-          rounds={rounds}
+          rounds={reversedRounds}
           onDeleteFailed={deleteFailedRound}
           onReEdit={reEdit}
           onRegenerate={regenerate}
@@ -545,8 +616,24 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           onReuseReferences={handleReuseReferences}
         />
       </div>
-      <div className="shrink-0 py-4 border-t border-border/30">
+      {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
+          pointer-events-auto。 */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-4 px-3 sm:px-6">
+        <div className="relative mx-auto max-w-[780px]">
+          {scrolledUp && (
+            <button
+              type="button"
+              onClick={scrollToBottom}
+              className="pointer-events-auto absolute bottom-full right-0 mb-3 inline-flex h-8 items-center gap-1 rounded-full border border-border bg-glass backdrop-blur-glass px-3 text-xs text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <ChevronsDown size={13} aria-hidden />
+              回到底部
+            </button>
+          )}
         <PromptInput
+          collapsed={scrolledUp && !shellFocused && !clickPinned}
+          onExpandRequest={() => setClickPinned(true)}
+          onShellFocusChange={setShellFocused}
           onSubmit={onSubmit}
           disabled={pending}
           value={promptText}
@@ -576,11 +663,15 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           duration={duration}
           videoResolution={videoResolution}
           videoRatio={videoRatio}
+          videoQuality={videoQuality}
+          videoCount={videoCount}
           generateAudio={generateAudio}
           onVideoModeChange={setVideoMode}
           onDurationChange={setDuration}
           onVideoResolutionChange={setVideoResolution}
           onVideoRatioChange={setVideoRatio}
+          onVideoQualityChange={setVideoQuality}
+          onVideoCountChange={setVideoCount}
           onGenerateAudioChange={setGenerateAudio}
           referenceVideos={referenceVideos}
           referenceAudios={referenceAudios}
@@ -589,6 +680,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           videoFrames={videoFrames}
           onVideoFramesChange={setVideoFrames}
         />
+        </div>
       </div>
     </div>
   );
@@ -628,6 +720,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       if (config.ratio) setVideoRatio(config.ratio);
       if (config.videoResolution) setVideoResolution(config.videoResolution);
       if (config.duration) setDuration(config.duration);
+      if (config.videoQuality) setVideoQuality(config.videoQuality);
+      if (config.n) setVideoCount(clampImageCount(config.n));
       // 旧 job 的 frame_mode 不回填用户态（提交时按帧数推导）；只同步生成方式：
       // 带视频/音频参考、或参考图没有帧语义（无 frame_mode / auto）→ 全能参考，否则首尾帧。
       const omniLike = Boolean(
@@ -697,6 +791,7 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
       ? {
           duration: typeof job.params.duration === 'number' ? job.params.duration : undefined,
           videoResolution: typeof job.params.resolution === 'string' ? job.params.resolution : undefined,
+          videoQuality: (job.params.mode === 'std' || job.params.mode === 'pro') ? job.params.mode : undefined,
           frameMode: job.params.frame_mode,
           generateAudio: job.params.generate_audio === true,
           referenceVideos: pathList(job.params.reference_videos),

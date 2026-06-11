@@ -18,7 +18,7 @@ export function App() {
 
   if (error) {
     return (
-      <div className="grid h-screen place-items-center bg-background p-8 text-red-500">
+      <div className="grid h-screen place-items-center bg-background p-8 text-destructive">
         {error}
       </div>
     );
@@ -26,7 +26,7 @@ export function App() {
   if (!state) {
     return (
       <div className="grid h-screen place-items-center bg-background text-muted-foreground">
-        <span className="font-[var(--font-display)] italic text-2xl">加载中…</span>
+        <span className="font-display text-display italic">加载中…</span>
       </div>
     );
   }

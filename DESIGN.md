@@ -1,8 +1,8 @@
 # Design System — game-atelier
 
 > 永远先读这份文档再做任何视觉 / UI 决定。
-> 字体、颜色、间距、美学方向都在这里定义。
-> 改动需明确同意，QA 模式要标记不符合本文档的代码。
+> 字体、颜色、间距、深度、组件配方都在这里定义。
+> 本文档由 `web/src/test/designDrift.test.ts` 守卫强制执行：硬编码色值、任意值字号、阴影、杂牌圆角/模糊会直接红灯。
 
 ---
 
@@ -15,77 +15,119 @@
 
 ## Aesthetic Direction — "Atelier"（工坊 / 画廊）
 
-- **Direction**: Editorial / Gallery — 暗色画廊为主，serif 点缀
+- **Direction**: Editorial / Gallery — 暖黑画廊为主，serif 点缀
 - **Decoration level**: Minimal —— 排版 + 暖调做活，不堆装饰
-- **Mood**: 安静、温暖、有匠气；让 AI 生成的角色艺术做主角；像 Procreate / ArtStation / 摄影画册，不像 Linear / Notion / SaaS dashboard
-- **Memorable thing**: 一间安静的暖色画廊，每张图都有呼吸的空间
+- **Mood**: 安静、温暖、有匠气；让 AI 生成的角色艺术做主角
+
+**画廊墙三定律**（一切视觉决定的根）：
+
+1. **Chrome 无彩色** —— 导航、面板、按钮、表单全部灰阶（暖中性）；AI 作品是页面上唯一的颜色。
+2. **深度靠玻璃，不靠阴影** —— 层级用毛玻璃 + 发丝边表达；阴影一律禁用。
+3. **作品有呼吸的空间** —— 画布纯平（无渐变、无纹理），留白宽裕，框架隐形。
 
 ## Typography
 
-- **Display / Hero**: **Instrument Serif** — 板块大标题、角色名、空状态主文案；衬线让这个工具显得是"创意软件"而非"通用工具"
-- **Body / UI**: **Geist** — 所有按钮、标签、表单、正文；现代无衬线，可读性极高
-- **Data / Tables**: **Geist** with `tabular-nums` — 数字对齐
-- **Code / Technical**: **JetBrains Mono** — job_id、文件路径、seed、URL、命令片段
-- **Loading**: 通过 `bunny.net` 自托管，避免 Google Fonts CORS（备选 Google Fonts CDN）
+- **Display / Hero**: **Instrument Serif** — 仅用于「唯一大跳跃」：页面 hero、角色名、空状态主文案。配 `text-display`（36px / 400）。serif 是签名，克制才贵。
+- **Body / UI**: **Geist** — 所有按钮、标签、表单、正文、区块标题
+- **Data / Tables**: **Geist** with `tabular-nums`
+- **Code / Technical**: **JetBrains Mono** — job_id、文件路径、seed、URL
+- **Loading**: Google Fonts CDN（tokens.css 顶部 @import）
 
-**Scale**（以 14px 基准）：
+**Scale（四档，守卫强制）**：
+
 | Token | Size | Usage |
 |---|---|---|
-| `text-xs` | 12px | 元数据、tag、状态标签 |
-| `text-sm` | 14px | 主 UI 文本（按钮、标签） |
-| `text-base` | 16px | 正文 |
-| `text-lg` | 18px | 卡片标题 |
-| `text-xl` | 20px | 子板块标题 |
-| `text-2xl` | 24px | 板块标题（serif） |
-| `text-3xl` | 30px | 页面 hero（serif） |
+| `text-xs` | 12px | 元数据、tag、状态标签、小帽标签（**12px 是下限，禁任意值字号**） |
+| `text-sm` | 14px | 主 UI 文本（按钮、标签、正文默认） |
+| `text-base` | 16px | 区块标题（配 `font-medium`）、强调正文 |
+| `text-display` | 36px/44px | 唯一大跳跃：hero / 角色名 / 空状态（配 `font-display`，weight 400） |
+
+- ❌ **禁用** `text-lg` / `text-xl` / `text-2xl` / `text-3xl` / `text-4xl` 与一切 `text-[Npx]` 任意值。
+- 层级不够用？用字重（400/500/600）和颜色（foreground / muted-foreground），不是字号。
+- **小帽标签**：`text-xs uppercase tracking-label text-muted-foreground/70`（`tracking-label` = 0.18em，唯一字距 token）。
 
 **Font-weight 策略**：
-- Geist：400（正文）/ 500（按钮、强调）/ 600（小标题）
+
+- Geist：400（正文）/ 500（按钮、强调、区块标题）/ 600（少量小标题）
 - Instrument Serif：400 only（衬线粗体会失去优雅）
 - JetBrains Mono：400 / 500
 
 ## Color — Warm Atelier Palette
 
-**方法**：restrained — 单一强调色（aged brass / 黄铜）+ 暖中性色
+**方法**：restrained — 单一强调色（aged brass / 黄铜）+ 暖中性灰阶。
+
+**表面阶梯**（暖中性，R≥G≥B；面在上，色更亮）：
 
 | Token | Hex | Usage |
 |---|---|---|
-| `--background` | `#0F0E0D` | 主背景（暖黑，R略>B） |
-| `--foreground` | `#EDEAE3` | 主文本（暖白） |
+| `--background` | `#0F0E0D` | 画布 / 画廊墙 |
 | `--card` | `#1B1917` | 卡片、面板、左栏 |
-| `--card-foreground` | `#EDEAE3` | 卡片内文本 |
-| `--popover` | `#1B1917` | 弹出层 |
-| `--popover-foreground` | `#EDEAE3` | 弹出层文本 |
-| `--primary` | `#D4A574` | 黄铜 —— 主按钮、聚焦、链接、激活态 |
-| `--primary-foreground` | `#1B1917` | 黄铜按钮上的文字（深色） |
-| `--secondary` | `#2A2725` | 次要按钮、hover 背景 |
-| `--secondary-foreground` | `#EDEAE3` | 次要按钮文字 |
-| `--muted` | `#1B1917` | 不重要的区域背景 |
+| `--popover` | `#221F1C` | 弹出层（比 card 抬半级） |
+| `--secondary` / `--accent` | `#2A2725` | hover 背景、次要按钮 |
+
+**玻璃与遮罩**：
+
+| Token | Value | Usage |
+|---|---|---|
+| `--glass` | `rgba(27,25,23,0.66)` | 浮层玻璃底色（配 `backdrop-blur-glass`） |
+| `--scrim` | `rgba(8,7,6,0.62)` | lightbox / 全屏 loading 的背景遮罩 |
+
+**发丝边界**（暖白 alpha，不再用不透明灰）：
+
+| Token | Value | Usage |
+|---|---|---|
+| `--border` | `rgba(237,234,227,0.10)` | 默认边界（卡片、分隔线、浮层描边） |
+| `--input` | `rgba(237,234,227,0.16)` | 输入框边界（略亮，提示可交互） |
+
+**文字与强调**：
+
+| Token | Hex | Usage |
+|---|---|---|
+| `--foreground` | `#EDEAE3` | 主文本（暖白） |
 | `--muted-foreground` | `#94908B` | 元数据、placeholder、辅助文字 |
-| `--accent` | `#2A2725` | hover 高亮 |
-| `--accent-foreground` | `#EDEAE3` | accent 上的文字 |
-| `--destructive` | `#C95C5C` | 删除、错误（暖红，less aggressive than ramp red） |
-| `--destructive-foreground` | `#FFFFFF` | 删除按钮文字 |
-| `--border` | `#2A2725` | 低对比度边框 |
-| `--input` | `#2A2725` | 输入框边框 |
+| `--primary` | `#D4A574` | 黄铜（见使用三限） |
+| `--primary-foreground` | `#1B1917` | 黄铜按钮上的文字 |
+| `--destructive` | `#C95C5C` | 删除、错误（暖红） |
 | `--ring` | `#D4A574` | 聚焦环（黄铜） |
 
-**Status colors**（任务状态语义色，暖调对齐）：
+**黄铜使用三限**（单强调色纪律）：
+
+1. **每屏一处主操作**（primary 按钮 / 确认出图）
+2. **聚焦环**（`ring-2 ring-primary` —— 最独特的视觉签名）
+3. **激活指示**（当前 tab 下划线、选中态小点）
+
+链接、导航激活、普通强调一律用 `text-foreground` + `font-medium`，不用黄铜。黄铜出现越少越值钱。
+
+**Status colors**（任务状态语义色，暖调对齐；12px meta 同字号靠颜色分语义）：
 
 | Token | Hex | Usage |
 |---|---|---|
 | `--status-pending` | `#6B6967` | 等待中 |
 | `--status-running` | `#E5B570` | 进行中（暖琥珀，跟 primary 同族不抢戏） |
-| `--status-done` | `#7FB069` | 完成（鼠尾草绿，比霓虹绿温和） |
+| `--status-done` | `#7FB069` | 完成（鼠尾草绿） |
 | `--status-failed` | `#C95C5C` | 失败（暖红，跟 destructive 一致） |
 
 **对比度验证**（WCAG AA 4.5:1 normal text）：
+
 - `#EDEAE3` on `#0F0E0D` ≈ 16:1 ✓
 - `#94908B` on `#0F0E0D` ≈ 5.5:1 ✓
 - `#D4A574` on `#0F0E0D` ≈ 9:1 ✓
 - `#1B1917` on `#D4A574` ≈ 7:1 ✓（primary 按钮）
 
 **dark mode 策略**：项目无 light mode；dark-first，所有视觉都按暗色调校。
+
+## Elevation — 深度靠玻璃，不靠阴影
+
+- ❌ **`shadow-*` 全禁**（含 `drop-shadow`；`shadow-none` 例外）。暗色画廊里阴影没有用武之地，层级感全部来自玻璃和表面阶梯。
+- **玻璃配方**（浮层 / 悬浮 chrome 唯一写法）：
+
+  ```
+  bg-glass backdrop-blur-glass border border-border
+  ```
+
+  `backdrop-blur-glass` = 28px，是唯一允许的 backdrop-blur 档位（杂牌 sm/md/lg/xl/2xl 守卫红灯）。
+- **遮罩配方**（lightbox / 全屏 loading）：`bg-scrim`（不再 `bg-black/85` 散值）。
+- **z 梯度**（沿用既有层级，不得乱加）：内容 `auto` < 输入壳/弹窗 `z-20` < sticky 头 `z-30` < lightbox / 全屏 loading `z-50`。
 
 ## Spacing
 
@@ -112,14 +154,33 @@
   - 中栏：fluid（gallery）
   - 右栏（可选）：固定 360px（spec form / image detail）
 - **Max content width**: 无硬上限（gallery 需要充满）；详情页内文限 720px
-- **Border radius**（hierarchical）:
+- **Border radius**（面越大角越大；禁 `rounded-[…]` 任意值）:
   | Token | px | 用途 |
   |---|---|---|
-  | `rounded-sm` | 4 | 小标签、tag |
-  | `rounded-md` | 6 | 按钮、输入框 |
-  | `rounded-lg` | 8 | 卡片、图片框、面板（默认） |
-  | `rounded-xl` | 12 | hero 卡片 |
-  | `rounded-full` | 9999 | 删除按钮、avatar |
+  | `rounded-sm` | 6 | 小标签、tag |
+  | `rounded-md` | 10 | 按钮、输入框 |
+  | `rounded-lg` | 16 | 卡片、媒体瓦片、图片框 |
+  | `rounded-xl` | 20 | 浮层：输入壳、popover、dialog |
+  | `rounded-full` | 9999 | 圆形按钮、avatar、pill |
+
+## 组件配方（写组件先查这里）
+
+| 组件 | 配方 |
+|---|---|
+| Primary 按钮 | `bg-primary text-primary-foreground rounded-md hover:bg-primary/90`（每屏一处） |
+| 次要按钮 | `bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80` |
+| Outline 按钮 | `border border-border bg-transparent rounded-md hover:bg-accent` |
+| 卡片 | `bg-card border border-border rounded-lg` |
+| 媒体瓦片 | `rounded-lg overflow-hidden border border-border`（框架隐形，让图说话） |
+| 选项弹窗（输入框控件 popover） | 面板 `bg-card border border-border rounded-xl`（**不透明**——内含可选项时玻璃透底会让选项难辨）；选项轨道 `bg-popover`（比面板亮一档）；选项 chip 默认透明贴轨道、左右贴紧（多行只留 `gap-y-1`），`hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60`。层级铁律：**越靠背景越深**，画布 → 输入壳 → 面板 → 轨道 → 选中/hover 单调变亮 |
+| 玻璃浮层（无选项的悬浮 panel/菜单） | `bg-glass backdrop-blur-glass border border-border rounded-xl` |
+| Studio 输入壳（滚动联动收放） | 浮于历史滚动区上（wrapper `pointer-events-none`，壳 `pointer-events-auto`，两侧视觉与交互都穿透）；`rounded-xl` 收放两态一致（胶囊 `rounded-full` 试装后被否——过圆），展开 `min-h-[174px]`，距底 >160px 收成单行条：控件行 `grid-rows-[0fr] opacity-0` 折叠、textarea 单行、参考堆叠 `scale-80`，全程 `transition 300ms`；点击收缩壳展开但**不回滚**，「回到底部」独立玻璃 pill 出现在壳右上方，点击**瞬时跳底**不播滚动过程 |
+| 玻璃 pill（顶栏 tab） | `bg-glass backdrop-blur-glass border border-border rounded-full` |
+| 遮罩层（lightbox） | `fixed inset-0 z-50 bg-scrim` |
+| 状态徽章 | `text-xs` + `text-[color:var(--status-*)]`（同字号靠颜色分语义） |
+| 输入框 | `border border-input bg-transparent rounded-md focus-visible:ring-1 focus-visible:ring-ring` |
+| 小帽标签 | `text-xs uppercase tracking-label text-muted-foreground/70` |
+| 空状态 | `font-display text-display italic text-foreground/70` + 一行 `text-sm text-muted-foreground` 说明 |
 
 ## Motion
 
@@ -135,21 +196,26 @@
 
 ## 标志性细节（让产品有"自己的脸"）
 
-1. **空状态用 serif** —— "请在左栏选择角色" 这样的空状态文案用 Instrument Serif，瞬间让工具变画廊
+1. **空状态用 serif** —— "请在左栏选择角色" 用 `font-display text-display`，瞬间让工具变画廊
 2. **角色名用 serif** —— 详情页 / 卡片顶部的角色名也用衬线，加深"作品集"质感
-3. **黄铜聚焦环** —— focus state 用 `ring-2 ring-primary`，配合 #D4A574 是这个工具最独特的视觉签名
-4. **图片框无边框（仅 1px border）** —— 让图本身说话，框架尽量隐形
+3. **黄铜聚焦环** —— focus state 用 `ring-2 ring-primary`，最独特的视觉签名
+4. **图片框无边框（仅发丝 border）** —— 让图本身说话，框架尽量隐形
 5. **mono 字体处理 job_id / 路径** —— 技术细节用 mono，跟主 UI 文字形成清晰对比
+6. **玻璃 chrome** —— 悬浮 UI（顶栏 pill、Studio 输入壳）统一 28px 毛玻璃，是工具的"材质签名"；**例外**：含选项的弹窗用不透明 `bg-card`（可读性优先）
 
-## 反 AI Slop 清单（绝不出现在本项目）
+## 反 AI Slop 清单（绝不出现在本项目；标 ⚙ 的由守卫测试强制）
 
 - ❌ 紫色 / 蓝紫渐变（最 SaaS 的 cliché）
 - ❌ 3 列 feature grid + 彩色圆圈图标
 - ❌ 居中一切、统一 bubble border-radius
 - ❌ Inter / Roboto / Arial 作为正文字体
 - ❌ system-ui 作为 display 字体（"我放弃了排版"信号）
-- ❌ 渐变按钮（用纯色）
+- ❌ 渐变按钮 / `bg-gradient` ⚙
 - ❌ "Built for X" 营销文案
+- ❌ `shadow-*` 阴影（深度靠玻璃） ⚙
+- ❌ 任意值字号 `text-[Npx]`、`text-lg` 以上字号档 ⚙
+- ❌ 硬编码色值（hex / 裸 rgba，必须走 token） ⚙
+- ❌ `rounded-[…]` 任意值圆角、杂牌 `backdrop-blur-*` ⚙
 
 ## Decisions Log
 
@@ -159,3 +225,10 @@
 | 2026-05-18 | 用 Instrument Serif 做 display | 内部工具几乎都用 sans-serif，serif 让这个工具显得是"创意软件" |
 | 2026-05-18 | primary 换 #D4A574 黄铜（替换 #3B82F6 蓝） | 通用蓝过于 generic；黄铜暖、独特、暗示"工艺/贵重" |
 | 2026-05-18 | background 由 #0F0F0F 偏到 #0F0E0D 暖黑 | R略大于B，整体气质从"电子屏幕"偏向"画廊空间" |
+| 2026-06-10 | 收编 Tapnow 方法论：画廊墙三定律 / 玻璃替代阴影 / 发丝边 / 表面阶梯 / 字阶压缩 / 圆角层级 | 抄方法论不抄皮肤——前端全 AI 生成导致 13 种字号、28 处无定义阴影；方法论 + 守卫止漂移 |
+| 2026-06-10 | 主色保留黄铜，拒收 Tapnow 青 #1fa2dc | 单强调色的「纪律」学 Tapnow，「色相」是身份；延续 5-18 弃通用蓝决策 |
+| 2026-06-10 | Geist 留任正文，serif 收敛为唯一大跳跃；拒收 Inter | Inter 在反 slop 红线上；serif 从「到处都是」收敛成 36px 单档，签名更贵 |
+| 2026-06-10 | 加 designDrift.test.ts 漂移守卫 | 文档对 AI 是软约束，红灯才是硬约束 |
+| 2026-06-10 | 选项弹窗从玻璃改 `bg-popover` 不透明，选项 chip 用 `bg-secondary/40` 三层分明 | 玻璃透底让弹窗里的选项与背景作品糊在一起（飙哥实测反馈）；玻璃保留给 pill / 输入壳 / lightbox 等无选项浮层 |
+| 2026-06-10 | 弹窗/输入框层级改「越靠背景越深」单调阶梯：面板 `bg-card` → 轨道 `bg-popover` → 选中/hover `secondary`；棋子与底部控件默认透明，比例棋子左右贴紧 | 原来面板(#221F1C)里嵌更深的轨道(#1B1917)、控件(`bg-background/30`)比输入壳还深，两处倒挂（飙哥反馈）；token 值不动，只重排用法 |
+| 2026-06-11 | 出图页历史改从下往上（col-reverse 原生钉底）+ 输入壳浮层化（两侧穿透）+ 滚动联动收放（>160 收 / <80 展，点击展开不回滚，「回到底部」独立 pill）；omni 参考归位 textarea 左侧倾斜堆叠 | 对齐即梦交互（飙哥指定参考）；底栏独占一排挡住历史、omni 资产行与首尾帧/图片参考的左置约定相悖；收缩态展开靠点击/焦点，滚动意图优先于停留状态 |

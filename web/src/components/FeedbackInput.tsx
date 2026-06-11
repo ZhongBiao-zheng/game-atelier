@@ -25,15 +25,15 @@ export function FeedbackInput({ characterId }: Props) {
   return (
     <div className="space-y-2.5">
       <div className="flex items-baseline justify-between">
-        <span className="font-[var(--font-display)] italic text-base text-foreground/90">反馈</span>
-        <span className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground/60">to AI</span>
+        <span className="font-display italic text-base text-foreground/90">反馈</span>
+        <span className="text-xs uppercase tracking-label text-muted-foreground/60">to AI</span>
       </div>
       <Textarea
         value={text}
         onChange={e => setText(e.target.value)}
         placeholder="例如：2 号那张光线再阴一点"
         rows={3}
-        className="resize-none text-[13px]"
+        className="resize-none text-sm"
       />
       <div className="flex justify-end">
         <Button size="sm" onClick={submit} disabled={!text.trim()}>

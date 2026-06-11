@@ -97,7 +97,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox }: Props) {
               src={`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`}
               alt="大图"
               onClick={() => onLightbox?.(`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`)}
-              className="max-h-[68vh] max-w-full object-contain rounded-lg shadow-[0_8px_40px_-10px_rgba(0,0,0,0.6)] border border-border/40 cursor-zoom-in"
+              className="max-h-[68vh] max-w-full object-contain rounded-lg border border-border cursor-zoom-in"
             />
           </div>
         </div>
@@ -109,7 +109,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox }: Props) {
             <Textarea
               value={patch.prompt ?? job.prompt}
               onChange={e => setPatch({ ...patch, prompt: e.target.value })}
-              className="min-h-[200px] font-mono text-[13px] leading-[1.7] resize-y bg-card/50"
+              className="min-h-[200px] font-mono text-sm leading-[1.7] resize-y bg-card/50"
               spellCheck={false}
             />
           </Field>
@@ -119,7 +119,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox }: Props) {
               <Input
                 value={patch.model ?? job.model}
                 onChange={e => setPatch({ ...patch, model: e.target.value })}
-                className="font-mono text-[13px]"
+                className="font-mono text-sm"
               />
             </Field>
 
@@ -127,21 +127,21 @@ export function ImageDetail({ jobId, path, onBack, onLightbox }: Props) {
               <Input
                 value={(patch.seed ?? job.seed ?? '') as string | number}
                 onChange={e => setPatch({ ...patch, seed: e.target.value ? Number(e.target.value) : null })}
-                className="font-mono text-[13px]"
+                className="font-mono text-sm"
               />
             </Field>
           </div>
 
           <Separator className="opacity-50" />
 
-          <dl className="grid grid-cols-[100px_1fr] gap-y-2 gap-x-4 text-[12px] leading-relaxed">
-            <dt className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70 mt-0.5">job_id</dt>
+          <dl className="grid grid-cols-[100px_1fr] gap-y-2 gap-x-4 text-xs leading-relaxed">
+            <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">job_id</dt>
             <dd className="font-mono text-muted-foreground break-all">{job.job_id}</dd>
 
-            <dt className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70 mt-0.5">submitted</dt>
+            <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">submitted</dt>
             <dd className="font-mono text-muted-foreground">{job.submitted_at}</dd>
 
-            <dt className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70 mt-0.5">path</dt>
+            <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">path</dt>
             <dd className="font-mono text-muted-foreground break-all">{path}</dd>
           </dl>
 
@@ -172,9 +172,9 @@ function ImageIdChip({ characterId, path }: { characterId: string; path: string 
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground/70">图片路径</span>
+      <span className="text-xs uppercase tracking-label text-muted-foreground/70">图片路径</span>
       <div className="flex items-center gap-2">
-        <code className="flex-1 min-w-0 font-mono text-[12px] text-foreground/85 bg-card/60 border border-border/40 rounded px-2.5 py-1.5 truncate">
+        <code className="flex-1 min-w-0 font-mono text-xs text-foreground/85 bg-card/60 border border-border rounded-sm px-2.5 py-1.5 truncate">
           {relPath}
         </code>
         <Button size="sm" variant="ghost" onClick={copy} className="shrink-0 px-2">
@@ -193,7 +193,7 @@ function Field({ label, children }: {
 }) {
   return (
     <div className="space-y-2">
-      <span className="font-[var(--font-display)] italic text-lg text-foreground/85 leading-none block">{label}</span>
+      <span className="font-display italic text-base text-foreground/85 leading-none block">{label}</span>
       {children}
     </div>
   );

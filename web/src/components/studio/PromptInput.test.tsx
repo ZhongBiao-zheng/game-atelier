@@ -17,7 +17,6 @@ const hkKey: KeyView = {
   ],
   notes: '',
   created_at: '2026-05-25T00:00:00Z',
-  is_default: true,
 };
 
 function renderWith(model: string) {
@@ -57,7 +56,7 @@ import { videoControlCaps } from '@/lib/videoControlCaps';
 const videoKey = {
   alias: 'ark', provider: 'seedance', base_url: null, access_key: '***', secret_key: null,
   capabilities: [], models: [{ name: 'Seedance', id: 'doubao-seedance-2-0-fast-260128' }],
-  modalities: ['video'], notes: '', created_at: '', is_default: false,
+  modalities: ['video'], notes: '', created_at: '',
 };
 
 function renderVideoMode(overrides = {}) {
@@ -116,9 +115,10 @@ describe('PromptInput video mode', () => {
     cleanup();
   });
 
-  it('renders omni reference asset groups in omni mode', () => {
+  it('renders the omni reference stack entry left of the textarea in omni mode', () => {
     renderVideoMode({ videoMode: 'omni' });
-    expect(screen.getByLabelText('上传参考图')).toBeInTheDocument();
+    expect(screen.getByLabelText('添加参考内容')).toBeInTheDocument();
+    expect(screen.getByTestId('reference-images-panel')).toBeInTheDocument();
     expect(screen.queryByLabelText('上传首帧')).not.toBeInTheDocument();
     cleanup();
   });

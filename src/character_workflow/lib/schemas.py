@@ -49,6 +49,7 @@ class JobParams(BaseModel):
     # 视频参数（kind=video）—— 做成一等公民以保证双端类型对齐
     duration: int | None = None            # 秒，1-60
     resolution: str | None = None          # 480p | 720p | 1080p
+    mode: str | None = None                # kling 生成档位 std | pro（≠ frame_mode）
     frame_mode: str | None = None          # auto | first | last | firstlast
     generate_audio: bool | None = None
     reference_videos: list[str] | None = None

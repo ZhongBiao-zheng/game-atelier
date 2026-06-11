@@ -49,7 +49,8 @@ describe('VideoControls（五合一汇总按钮）', () => {
   });
 
   it('emits onDurationChange / onResolutionChange / onRatioChange from the panel', () => {
-    const props = setup();
+    // 2.0-fast 官方无 1080p，分辨率断言用非 fast 的 seedance-2.0 caps。
+    const props = setup({ caps: videoControlCaps('seedance-2.0') });
     fireEvent.click(screen.getByLabelText('视频生成设置'));
     fireEvent.click(screen.getByRole('option', { name: '10s' }));
     expect(props.onDurationChange).toHaveBeenCalledWith(10);
@@ -57,6 +58,22 @@ describe('VideoControls（五合一汇总按钮）', () => {
     expect(props.onResolutionChange).toHaveBeenCalledWith('1080p');
     fireEvent.click(screen.getByRole('option', { name: /9:16/ }));
     expect(props.onRatioChange).toHaveBeenCalledWith('9:16');
+  });
+
+  it('seedance 2.0 panel exposes the official 4-15s duration range and adaptive ratio', () => {
+    setup({ caps: videoControlCaps('seedance-2.0') });
+    fireEvent.click(screen.getByLabelText('视频生成设置'));
+    expect(screen.getByRole('option', { name: '4s' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '15s' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /自适应/ })).toBeInTheDocument();
+  });
+
+  it('hides ratio/duration sections when the family has no such params (happyhorse video-edit)', () => {
+    setup({ caps: videoControlCaps('happyhorse-1.0-video-edit'), mode: 'omni' as const });
+    fireEvent.click(screen.getByLabelText('视频生成设置'));
+    expect(screen.queryByLabelText('选择比例')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('选择生成时长')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('选择清晰度')).toBeInTheDocument();
   });
 
   it('toggles generate-audio via 开启/关闭', () => {

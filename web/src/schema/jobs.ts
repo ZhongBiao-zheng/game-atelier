@@ -24,6 +24,7 @@ export interface JobParams {
   // 视频参数（kind=video）—— 与 schemas.py::JobParams 同步
   duration?: number;
   resolution?: string;
+  mode?: string; // kling 生成档位 std|pro（≠ frame_mode）
   frame_mode?: 'auto' | 'first' | 'last' | 'firstlast';
   generate_audio?: boolean;
   reference_videos?: string[];

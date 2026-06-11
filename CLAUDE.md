@@ -144,7 +144,7 @@ uv run python -m character_workflow turn-start
 
 ## 反 Slop 红线（来自 DESIGN.md）
 
-紫蓝渐变 / 3 列 feature grid / Inter 正文 / system-ui display / 渐变按钮 / 居中一切 —— 一律拒绝。详见 `DESIGN.md` "反 AI Slop 清单"。
+紫蓝渐变 / 3 列 feature grid / Inter 正文 / system-ui display / 渐变按钮 / 居中一切 —— 一律拒绝。另两条硬纪律：**无阴影**（深度靠玻璃配方 `bg-glass backdrop-blur-glass border border-border`，`shadow-*` 全禁）、**字阶四档**（xs/sm/base/display，禁任意值字号与 `text-lg` 以上档位）。以上由 `web/src/test/designDrift.test.ts` 守卫强制执行。详见 `DESIGN.md` "反 AI Slop 清单" 与 "组件配方"。
 
 ## Skill routing
 

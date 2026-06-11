@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FolderOpen, Save } from 'lucide-react';
+import { FolderOpen } from 'lucide-react';
 
 import { chooseFolder } from '@/api/folders';
 import { fetchOnboardingStatus, setDataRoot } from '@/api/onboarding';
@@ -8,7 +8,8 @@ import { KeysPage } from './Keys';
 const DEFAULT_ROOT = '~/game-atelier';
 
 export function SettingsPage() {
-  const [dataRoot, setDataRootInput] = useState('');
+  const [savedRoot, setSavedRoot] = useState('');
+  const [pendingRoot, setPendingRoot] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [choosing, setChoosing] = useState(false);
@@ -18,20 +19,23 @@ export function SettingsPage() {
 
   useEffect(() => {
     fetchOnboardingStatus()
-      .then((state) => setDataRootInput(state.data_root ?? DEFAULT_ROOT))
+      .then((state) => setSavedRoot(state.data_root ?? DEFAULT_ROOT))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
   }, []);
 
+  const changed = pendingRoot !== null && pendingRoot !== savedRoot;
+  const displayRoot = pendingRoot ?? savedRoot;
+
   async function saveDataRoot() {
-    const next = dataRoot.trim();
-    if (!next) return;
+    if (!changed || !pendingRoot) return;
     setSaving(true);
     setMessage(null);
     setError(null);
     try {
-      const saved = await setDataRoot(next);
-      setDataRootInput(saved.data_root);
+      const saved = await setDataRoot(pendingRoot);
+      setSavedRoot(saved.data_root);
+      setPendingRoot(null);
       setKeysVersion((version) => version + 1);
       setMessage('项目存放地址已更新，API Key 已重新读取新目录。');
     } catch (e) {
@@ -46,8 +50,8 @@ export function SettingsPage() {
     setMessage(null);
     setError(null);
     try {
-      const picked = await chooseFolder('选择存放文件夹', dataRoot || DEFAULT_ROOT);
-      if (picked) setDataRootInput(picked);
+      const picked = await chooseFolder('选择存放文件夹', displayRoot || DEFAULT_ROOT);
+      if (picked) setPendingRoot(picked);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -56,61 +60,79 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="px-6 py-8 max-w-3xl mx-auto space-y-8">
-      <h1
-        className="text-2xl text-foreground"
-        style={{ fontFamily: "'Instrument Serif', serif" }}
-      >
-        设置
-      </h1>
+    <div className="px-6 py-8 max-w-5xl mx-auto">
+      <h1 className="font-display text-display text-foreground">设置</h1>
 
-      <section className="rounded-lg border border-border bg-card/55 p-5 space-y-4">
-        <div className="flex items-center gap-2">
-          <FolderOpen className="size-4 text-muted-foreground" aria-hidden />
-          <h2 className="text-base font-medium text-foreground">项目存放地址</h2>
-        </div>
+      <section className="grid gap-6 py-10 md:grid-cols-[220px_1fr] md:gap-12">
         <div>
-          <label htmlFor="data-root" className="block text-sm mb-2 text-muted-foreground">
-            数据目录
-          </label>
-          <div className="flex gap-2">
-            <input
-              id="data-root"
-              value={dataRoot}
-              readOnly
-              disabled={loading}
-              className="w-full rounded-md border border-input bg-background/40 px-3 py-2 font-mono text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              placeholder="尚未选择项目文件夹"
-            />
+          <h2 className="text-xs uppercase tracking-label text-muted-foreground/70">项目存放</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            角色、项目、历史 job 和 API Key 所在的根目录。
+          </p>
+        </div>
+        <div className="min-w-0 space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <span
+              aria-label="数据目录"
+              className={`min-w-0 break-all font-mono text-sm ${changed ? 'text-primary' : 'text-foreground'}`}
+            >
+              {loading ? '读取中...' : displayRoot || '尚未选择项目文件夹'}
+            </span>
+            {changed && (
+              <span className="text-xs uppercase tracking-label text-muted-foreground/70">未保存</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={pickDataRoot}
               disabled={loading || saving || choosing}
-              className="inline-flex shrink-0 items-center gap-2 rounded-md border border-border bg-background/35 px-3 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <FolderOpen className="size-4" aria-hidden />
-              {choosing ? '选择中...' : '选择文件夹'}
+              {choosing ? '选择中...' : '更换文件夹'}
             </button>
-            <button
-              type="button"
-              onClick={saveDataRoot}
-              disabled={!dataRoot.trim() || loading || saving || choosing}
-              className="inline-flex shrink-0 items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <Save className="size-4" aria-hidden />
-              {saving ? '保存中...' : '保存'}
-            </button>
+            {changed && (
+              <>
+                <button
+                  type="button"
+                  onClick={saveDataRoot}
+                  disabled={saving}
+                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
+                >
+                  {saving ? '保存中...' : '保存'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingRoot(null)}
+                  disabled={saving}
+                  className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  撤销
+                </button>
+              </>
+            )}
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">
-            这里控制角色、项目、历史 job 和 API Key 所在的根目录。
-          </p>
+          {message && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span className="size-1.5 rounded-full bg-[color:var(--status-done)]" aria-hidden />
+              {message}
+            </div>
+          )}
+          {error && <div className="text-sm text-destructive">{error}</div>}
         </div>
-        {message && <div className="text-sm text-emerald-600">{message}</div>}
-        {error && <div className="text-sm text-destructive">{error}</div>}
       </section>
 
-      <section>
-        <KeysPage key={keysVersion} embedded />
+      <section className="grid gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">
+        <div>
+          <h2 className="text-xs uppercase tracking-label text-muted-foreground/70">API 密钥</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            图像 / 视频生成服务的访问凭证，按供应商管理。
+          </p>
+        </div>
+        <div className="min-w-0">
+          <KeysPage key={keysVersion} embedded />
+        </div>
       </section>
     </div>
   );

@@ -27,13 +27,13 @@ beforeEach(() => {
     if (url === '/api/onboarding/data-root') {
       return Promise.resolve({
         ok: true,
-        json: async () => ({ data_root: '/Users/me/game-atelier' }),
+        json: async () => ({ data_root: '/Users/me/new-root' }),
       } as Response);
     }
     if (url === '/api/folder-picker') {
       return Promise.resolve({
         ok: true,
-        json: async () => ({ path: '/Users/me/game-atelier' }),
+        json: async () => ({ path: '/Users/me/new-root' }),
       } as Response);
     }
     return Promise.resolve({ ok: true, json: async () => ({}) } as Response);
@@ -49,11 +49,13 @@ describe('SettingsPage', () => {
   it('shows and updates the project storage data root', async () => {
     render(<SettingsPage />);
 
-    const input = await screen.findByLabelText('数据目录');
-    expect(input).toHaveValue('/Users/me/game-atelier');
+    const path = await screen.findByLabelText('数据目录');
+    expect(path).toHaveTextContent('/Users/me/game-atelier');
+    // 保存按需浮现：路径未变更时不出现
+    expect(screen.queryByRole('button', { name: /保存/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /选择文件夹/ }));
-    await waitFor(() => expect(input).toHaveValue('/Users/me/game-atelier'));
+    fireEvent.click(screen.getByRole('button', { name: /更换文件夹/ }));
+    await waitFor(() => expect(path).toHaveTextContent('/Users/me/new-root'));
     fireEvent.click(screen.getByRole('button', { name: /保存/ }));
 
     await waitFor(() => {
@@ -61,7 +63,7 @@ describe('SettingsPage', () => {
         '/api/onboarding/data-root',
         expect.objectContaining({
           method: 'POST',
-          body: JSON.stringify({ path: '/Users/me/game-atelier' }),
+          body: JSON.stringify({ path: '/Users/me/new-root' }),
         }),
       );
     });

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { KeyCard, type KeyRow } from '@/components/keys/KeyCard';
 import { KeyForm } from './KeyForm';
-import { listKeys, deleteKey, setDefaultKey } from '@/api/keys';
+import { listKeys, deleteKey } from '@/api/keys';
 import type { KeyCreatePayload } from '@/api/keys';
 
 interface Props {
@@ -25,7 +25,7 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
     setError(null);
     try {
       const resp = await listKeys();
-      setKeys(resp.keys.map(toKeyRow(resp.default_alias)));
+      setKeys(resp.keys.map(toKeyRow));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -62,28 +62,30 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
 
   const content = (
     <>
-      <div className="flex justify-between items-baseline mb-6">
-        <h1
-          className={embedded ? 'text-base font-medium text-foreground' : 'text-2xl text-foreground'}
-          style={embedded ? undefined : { fontFamily: "'Instrument Serif', serif" }}
-        >
-          API Keys
-        </h1>
-        {!showForm && (
-          <button
-            type="button"
-            onClick={openCreate}
-            className="text-sm bg-primary text-primary-foreground rounded-md px-3 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
-          >
-            + 新建 Key
-          </button>
+      <div className={`mb-4 flex items-baseline ${embedded ? 'justify-end' : 'justify-between'}`}>
+        {!embedded && (
+          <h1 className="font-display text-display text-foreground">API 密钥</h1>
         )}
+        <button
+          type="button"
+          onClick={openCreate}
+          className="text-sm bg-primary text-primary-foreground rounded-md px-3 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
+        >
+          + 新建供应商
+        </button>
       </div>
 
+      {successMessage && (
+        <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="size-1.5 rounded-full bg-[color:var(--status-done)]" aria-hidden />
+          {successMessage}
+        </div>
+      )}
+
       {loading && (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {[0, 1].map((i) => (
-            <div key={i} data-skeleton className="h-28 w-full max-w-2xl bg-card/40 rounded-lg" />
+            <div key={i} data-skeleton className="h-12 w-full bg-card/40 rounded-lg" />
           ))}
         </div>
       )}
@@ -92,103 +94,76 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
         <div className="text-sm text-destructive">{error}</div>
       )}
 
-      {successMessage && (
-        <div className="mb-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700">
-          {successMessage}
-        </div>
-      )}
-
-      {!loading && !error && keys.length === 0 && !showForm && (
-        <div className="text-center py-16">
-          <p
-            className="text-2xl italic text-foreground"
-            style={{ fontFamily: "'Instrument Serif', serif" }}
-          >
-            还没有 API Key。
-          </p>
-          <button
-            type="button"
-            onClick={openCreate}
-            className="mt-6 text-sm bg-primary text-primary-foreground rounded-md px-4 py-2 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            + 新建 Key
-          </button>
-        </div>
-      )}
-
-      {!loading && !error && keys.length > 0 && (
-        <div className="space-y-3">
-          {keys.map((k) => (
-            <KeyCard
-              key={k.alias}
-              row={k}
-              onSetDefault={async () => { await setDefaultKey(k.alias); void refresh(); }}
-              onEdit={() => {
-                setEditingKey(k);
-                setShowForm(true);
-              }}
-              onDelete={async () => {
-                if (!window.confirm(`确认删除 "${k.alias}"？`)) return;
-                await deleteKey(k.alias);
-                void refresh();
-              }}
-            />
-          ))}
+      {!loading && !error && (
+        <div className="overflow-hidden rounded-lg border border-border">
+          {keys.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+              还没有配置供应商，点「+ 新建供应商」接入第一个图像服务。
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {keys.map((k) => (
+                <KeyCard
+                  key={k.alias}
+                  row={k}
+                  onEdit={() => {
+                    setEditingKey(k);
+                    setShowForm(true);
+                  }}
+                  onDelete={async () => {
+                    if (!window.confirm(`确认删除 "${k.alias}"？`)) return;
+                    await deleteKey(k.alias);
+                    void refresh();
+                  }}
+                />
+              ))}
+            </div>
+          )}
+          <div className="border-t border-border px-4 py-2.5 text-xs text-muted-foreground">
+            密钥仅存本机 <span className="font-mono">&lt;数据目录&gt;/.config/keys.json</span>，不会上传
+          </div>
         </div>
       )}
 
       {showForm && (
-        <div className="mt-6 border border-border rounded-lg p-6">
-          <h2
-            className="text-lg mb-4 text-foreground"
-            style={{ fontFamily: "'Instrument Serif', serif" }}
-          >
-            {editingKey ? '编辑 API Key' : '新增 API Key'}
-          </h2>
-          <KeyForm
-            initial={editingKey ? toKeyFormInitial(editingKey) : undefined}
-            mode={editingKey ? 'edit' : 'create'}
-            onCreated={editingKey ? onUpdated : onCreated}
-            onCancel={closeForm}
-            submitLabel={editingKey ? '保存修改' : mode === 'onboarding' ? '保存并开始工作' : '保存'}
-          />
-        </div>
+        <KeyForm
+          initial={editingKey ? toKeyFormInitial(editingKey) : undefined}
+          mode={editingKey ? 'edit' : 'create'}
+          onCreated={editingKey ? onUpdated : onCreated}
+          onCancel={closeForm}
+          submitLabel={editingKey ? '保存修改' : mode === 'onboarding' ? '保存并开始工作' : '保存'}
+        />
       )}
     </>
   );
 
   if (embedded) {
-    return (
-      <div className="rounded-lg border border-border bg-card/55 p-5">
-        {content}
-      </div>
-    );
+    return content;
   }
 
   return (
-    <div className="px-6 py-8 max-w-2xl mx-auto">
+    <div className="px-6 py-8 max-w-3xl mx-auto">
       {content}
     </div>
   );
 }
 
-function toKeyRow(defaultAlias: string | null) {
-  return (k: {
-    alias: string;
-    provider: string;
-    base_url?: string | null;
-    access_key: string;
-    models?: { name: string; id: string; modality?: 'image' | 'video' | null }[];
-    capabilities?: string[];
-    homepage_url?: string | null;
-    docs_url?: string | null;
-    api_key_url?: string | null;
-    modalities?: string[];
-    notes?: string;
-    is_default?: boolean;
-    last_used_at?: string | null;
-    created_at?: string | null;
-  }): KeyRow => ({
+function toKeyRow(k: {
+  alias: string;
+  provider: string;
+  base_url?: string | null;
+  access_key: string;
+  models?: { name: string; id: string; modality?: 'image' | 'video' | null }[];
+  capabilities?: string[];
+  homepage_url?: string | null;
+  docs_url?: string | null;
+  api_key_url?: string | null;
+  modalities?: string[];
+  notes?: string;
+  last_used_at?: string | null;
+  created_at?: string | null;
+}): KeyRow {
+  return {
     alias: k.alias,
     provider: k.provider,
     base_url: k.base_url ?? null,
@@ -200,10 +175,9 @@ function toKeyRow(defaultAlias: string | null) {
     api_key_url: k.api_key_url ?? null,
     modalities: k.modalities ?? [],
     notes: k.notes ?? '',
-    is_default: k.alias === defaultAlias,
     last_used_at: k.last_used_at ?? null,
     created_at: k.created_at ?? null,
-  });
+  };
 }
 
 function toKeyFormInitial(row: KeyRow): Partial<KeyCreatePayload> {

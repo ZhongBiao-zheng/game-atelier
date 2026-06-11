@@ -28,10 +28,10 @@ def test_list_keys_returns_empty_initially(client):
 def test_create_then_list_masks_secrets(client):
     r1 = client.post("/api/keys", json=_make_payload())
     assert r1.status_code == 201, r1.text
-    # POST response MUST include the raw secret_revealed exactly once.
+    # POST response must NOT echo the secret back（无 Reveal 流程）。
     post_body = r1.json()
-    assert "secret_revealed" in post_body
-    assert post_body["secret_revealed"] == "ak"
+    assert "secret_revealed" not in post_body
+    assert post_body["alias"] == "lov"
     body = client.get("/api/keys").json()
     assert len(body["keys"]) == 1
     k = body["keys"][0]
@@ -166,13 +166,3 @@ def test_delete_key(client):
     assert client.get("/api/keys").json()["keys"] == []
 
 
-def test_set_default(client):
-    client.post("/api/keys", json=_make_payload())
-    r = client.post("/api/keys/lov/default")
-    assert r.status_code == 200
-    assert client.get("/api/keys").json()["default_alias"] == "lov"
-
-
-def test_set_default_nonexistent_404(client):
-    r = client.post("/api/keys/missing/default")
-    assert r.status_code == 404

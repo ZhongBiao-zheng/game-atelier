@@ -60,7 +60,7 @@ export function FirstRunConfig({ onSaved }: Props) {
       <div className="w-full max-w-[560px]">
         <div className="flex items-center gap-3 mb-3">
           <Sparkles className="size-5 text-primary" />
-          <h1 className="font-[var(--font-display)] text-4xl tracking-tight">角色资产工作流</h1>
+          <h1 className="font-display text-display tracking-tight">角色资产工作流</h1>
         </div>
         <p className="text-sm text-muted-foreground mb-10 leading-relaxed">
           选一个目录存放你的出图。可以用默认目录，也可以手动指定。
@@ -139,7 +139,7 @@ function OptionCard({
         <span className={cn('shrink-0', active ? 'text-primary' : 'text-muted-foreground')}>{icon}</span>
         <span className="text-sm font-medium flex-1">{title}</span>
         {badge && (
-          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-primary/15 text-primary uppercase tracking-wider">
+          <span className="text-xs font-medium px-1.5 py-0.5 rounded-sm bg-primary/15 text-primary uppercase tracking-wider">
             {badge}
           </span>
         )}

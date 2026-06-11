@@ -30,7 +30,7 @@ export function Home() {
         </div>
       </section>
 
-      <h2 className="mb-5 text-lg font-semibold text-foreground">作品展示</h2>
+      <h2 className="mb-5 text-base font-medium text-foreground">作品展示</h2>
 
       {state.kind === 'loading' && (
         <div className="columns-2 sm:columns-3 lg:columns-4 2xl:columns-5 gap-6">
@@ -53,10 +53,7 @@ export function Home() {
 
       {state.kind === 'success' && state.items.length === 0 && (
         <div className="text-center py-12">
-          <p
-            className="text-2xl italic text-foreground"
-            style={{ fontFamily: "'Instrument Serif', serif" }}
-          >
+          <p className="font-display text-display italic text-foreground/70">
             工坊还空着。
           </p>
           <p className="mt-3 text-sm text-muted-foreground">
@@ -80,7 +77,7 @@ export function Home() {
               <img
                 src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
                 alt=""
-                className="w-full rounded-lg border border-border/40 hover:border-primary/40 transition-all duration-150 hover:scale-[1.02]"
+                className="w-full rounded-lg border border-border hover:border-input transition-all duration-150 hover:scale-[1.02]"
                 loading="lazy"
               />
             </Link>

@@ -1,9 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { FirstLastFrames, VideoReferenceAssets } from './VideoReferenceAssets';
-import { videoControlCaps } from '@/lib/videoControlCaps';
-
-const seedance = videoControlCaps('doubao-seedance-2-0-fast-260128');
+import { FirstLastFrames } from './VideoReferenceAssets';
 
 beforeAll(() => {
   if (!URL.createObjectURL) {
@@ -64,36 +61,5 @@ describe('FirstLastFrames（首尾帧双 slot）', () => {
     rerender(<FirstLastFrames frames={{ first: firstFile, last: lastFile }} onChange={onChange} />);
     fireEvent.click(screen.getByLabelText('互换首尾帧'));
     expect(onChange).toHaveBeenLastCalledWith({ first: lastFile, last: firstFile });
-  });
-});
-
-describe('VideoReferenceAssets（全能参考资产组）', () => {
-  function setup(overrides = {}) {
-    const props = {
-      caps: seedance,
-      images: [] as File[],
-      videos: [] as File[],
-      audios: [] as File[],
-      onImagesChange: vi.fn(),
-      onVideosChange: vi.fn(),
-      onAudiosChange: vi.fn(),
-      ...overrides,
-    };
-    render(<VideoReferenceAssets {...props} />);
-    return props;
-  }
-
-  it('shows image + video + audio groups for seedance caps', () => {
-    setup();
-    expect(screen.getByLabelText('上传参考图')).toBeInTheDocument();
-    expect(screen.getByLabelText('上传参考视频')).toBeInTheDocument();
-    expect(screen.getByLabelText('上传参考音频')).toBeInTheDocument();
-  });
-
-  it('hides video/audio groups when caps do not support them', () => {
-    setup({ caps: videoControlCaps('unknown-model') });
-    expect(screen.getByLabelText('上传参考图')).toBeInTheDocument();
-    expect(screen.queryByLabelText('上传参考视频')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('上传参考音频')).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Box, Coins, ImageIcon, Images, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
+import { ArrowUp, Box, Coins, Film, ImageIcon, Images, Music, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
 import { modelModality, type KeyView } from '@/api/keys';
 import { computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
 import { providerLabel } from '@/lib/providerLabels';
@@ -7,9 +7,15 @@ import { maxReferenceImages } from '@/lib/referenceLimits';
 import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
 import { estimateCostYuan, isHkAggregator } from '@/lib/creditCost';
 import { VideoControls } from './VideoControls';
-import { FirstLastFrames, VideoReferenceAssets, type FrameSlots } from './VideoReferenceAssets';
+import {
+  FirstLastFrames,
+  MAX_REF_AUDIOS,
+  MAX_REF_IMAGES,
+  MAX_REF_VIDEOS,
+  type FrameSlots,
+} from './VideoReferenceAssets';
 import { RatioIcon } from './RatioIcon';
-import type { VideoControlCaps, VideoMode } from '@/lib/videoControlCaps';
+import type { VideoControlCaps, VideoMode, VideoQuality } from '@/lib/videoControlCaps';
 import type { JobKind } from '@/schema/jobs';
 
 interface Props {
@@ -34,6 +40,12 @@ interface Props {
   /** When set, overrides localW/localH after the ratio/resolution effect; keyed to ensure re-runs. */
   sizeOverride?: { key: number; w: number; h: number };
   menuDirection?: 'up' | 'down';
+  /** Studio 滚动联动：true 时收成单行胶囊（控件行折叠、参考区缩放、rounded-full）。 */
+  collapsed?: boolean;
+  /** 收缩态被点击（用户想输入）——父级应展开但不滚动。 */
+  onExpandRequest?: () => void;
+  /** 焦点进出输入壳；父级用它在输入期间保持展开。 */
+  onShellFocusChange?: (focused: boolean) => void;
   referenceImages?: File[];
   onReferenceImagesChange?: (files: File[]) => void;
   // --- video mode (optional; only used when kind === 'video') ---
@@ -44,11 +56,15 @@ interface Props {
   duration?: number;
   videoResolution?: string;
   videoRatio?: string;
+  videoQuality?: VideoQuality;
+  videoCount?: number;
   generateAudio?: boolean;
   onVideoModeChange?: (mode: VideoMode) => void;
   onDurationChange?: (duration: number) => void;
   onVideoResolutionChange?: (resolution: string) => void;
   onVideoRatioChange?: (ratio: string) => void;
+  onVideoQualityChange?: (quality: VideoQuality) => void;
+  onVideoCountChange?: (count: number) => void;
   onGenerateAudioChange?: (generateAudio: boolean) => void;
   referenceVideos?: File[];
   referenceAudios?: File[];
@@ -94,6 +110,9 @@ export function PromptInput({
   onQualityChange,
   sizeOverride,
   menuDirection = 'up',
+  collapsed = false,
+  onExpandRequest,
+  onShellFocusChange,
   referenceImages = [],
   onReferenceImagesChange,
   kind = 'image',
@@ -103,11 +122,15 @@ export function PromptInput({
   duration = 5,
   videoResolution = '720p',
   videoRatio = '16:9',
+  videoQuality,
+  videoCount = 1,
   generateAudio = false,
   onVideoModeChange,
   onDurationChange,
   onVideoResolutionChange,
   onVideoRatioChange,
+  onVideoQualityChange,
+  onVideoCountChange,
   onGenerateAudioChange,
   referenceVideos = [],
   referenceAudios = [],
@@ -126,8 +149,22 @@ export function PromptInput({
   const [refHovered, setRefHovered] = useState<number | null>(null);
   const refFileInputRef = useRef<HTMLInputElement>(null);
   const refInputId = useId();
-  const refPreviews = useMemo(() => referenceImages.map((f) => URL.createObjectURL(f)), [referenceImages]);
-  useEffect(() => () => refPreviews.forEach((u) => URL.revokeObjectURL(u)), [refPreviews]);
+  const isOmni = isVideo && videoMode === 'omni' && Boolean(videoCaps);
+  // 参考堆叠的数据源：图片模式只有参考图；omni 模式图/视频/音频混排进同一叠扇形。
+  const stackItems = useMemo(() => {
+    const images = referenceImages.map((file) => ({ kind: 'image' as const, file }));
+    if (!isOmni) return images;
+    return [
+      ...images,
+      ...referenceVideos.map((file) => ({ kind: 'video' as const, file })),
+      ...referenceAudios.map((file) => ({ kind: 'audio' as const, file })),
+    ];
+  }, [isOmni, referenceImages, referenceVideos, referenceAudios]);
+  const refPreviews = useMemo(
+    () => stackItems.map((item) => (item.kind === 'image' ? URL.createObjectURL(item.file) : null)),
+    [stackItems],
+  );
+  useEffect(() => () => refPreviews.forEach((u) => { if (u) URL.revokeObjectURL(u); }), [refPreviews]);
 
   useEffect(() => {
     if (!openPanel) return;
@@ -154,10 +191,23 @@ export function PromptInput({
   const [sizeLocked, setSizeLocked] = useState(true);
   const caps = imageControlCaps(selectedModel?.id);
   const maxRef = maxReferenceImages(provider?.provider, selectedModel?.id);
+  // omni 参考上限：按族覆盖（happyhorse video-edit = 5 图 + 1 视频），缺省 9/3/3。
+  const maxRefImgs = videoCaps?.maxRefImages ?? MAX_REF_IMAGES;
+  const maxRefVids = videoCaps?.maxRefVideos ?? MAX_REF_VIDEOS;
+  const stackAccept = isOmni
+    ? ['image/*', videoCaps?.supportsReferenceVideo && 'video/*', videoCaps?.supportsReferenceAudio && 'audio/*']
+        .filter(Boolean)
+        .join(',')
+    : 'image/*';
+  const stackCanAdd = isOmni
+    ? referenceImages.length < maxRefImgs ||
+      (Boolean(videoCaps?.supportsReferenceVideo) && referenceVideos.length < maxRefVids) ||
+      (Boolean(videoCaps?.supportsReferenceAudio) && referenceAudios.length < MAX_REF_AUDIOS)
+    : referenceImages.length < maxRef;
   const canSubmit = Boolean(provider && selectedModel && text.trim() && !disabled);
   // 消耗提示只对 OpenAI-HK 聚合商显示（人民币，无单位）；未定价的模型/档位返回 null 即隐藏。
   const costYuan = isHkAggregator(provider?.base_url)
-    ? estimateCostYuan({ model: selectedModel?.id, quality, n: isVideo ? 1 : count })
+    ? estimateCostYuan({ model: selectedModel?.id, quality, n: isVideo ? videoCount : count })
     : null;
   const panelPosition = menuDirection === 'down'
     ? 'top-full mt-3'
@@ -196,12 +246,41 @@ export function PromptInput({
   function handleRefAdd(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files?.length) return;
-    onReferenceImagesChange?.([...referenceImages, ...Array.from(files)].slice(0, maxRef));
+    if (isOmni) {
+      // 单入口收所有类型：按 MIME 分流进各自数组并执行 9/3/3 上限。
+      const images = [...referenceImages];
+      const videos = [...referenceVideos];
+      const audios = [...referenceAudios];
+      for (const file of Array.from(files)) {
+        if (file.type.startsWith('video/')) {
+          if (videoCaps?.supportsReferenceVideo && videos.length < maxRefVids) videos.push(file);
+        } else if (file.type.startsWith('audio/')) {
+          if (videoCaps?.supportsReferenceAudio && audios.length < MAX_REF_AUDIOS) audios.push(file);
+        } else if (file.type.startsWith('image/')) {
+          if (images.length < maxRefImgs) images.push(file);
+        }
+      }
+      onReferenceImagesChange?.(images);
+      onReferenceVideosChange?.(videos);
+      onReferenceAudiosChange?.(audios);
+    } else {
+      onReferenceImagesChange?.([...referenceImages, ...Array.from(files)].slice(0, maxRef));
+    }
     e.target.value = '';
   }
 
   function handleRefRemove(idx: number) {
-    onReferenceImagesChange?.(referenceImages.filter((_, i) => i !== idx));
+    const item = stackItems[idx];
+    if (!item) return;
+    if (item.kind === 'video') {
+      const j = idx - referenceImages.length;
+      onReferenceVideosChange?.(referenceVideos.filter((_, i) => i !== j));
+    } else if (item.kind === 'audio') {
+      const j = idx - referenceImages.length - referenceVideos.length;
+      onReferenceAudiosChange?.(referenceAudios.filter((_, i) => i !== j));
+    } else {
+      onReferenceImagesChange?.(referenceImages.filter((_, i) => i !== idx));
+    }
   }
 
   function handleRatioSelect(newRatio: string) {
@@ -274,34 +353,44 @@ export function PromptInput({
     <div
       ref={shellRef}
       data-testid="studio-prompt-shell"
+      onClick={collapsed ? () => onExpandRequest?.() : undefined}
+      onFocus={() => onShellFocusChange?.(true)}
+      onBlur={(e) => {
+        if (!shellRef.current?.contains(e.relatedTarget as Node)) onShellFocusChange?.(false);
+      }}
       // backdrop-blur 已让外壳自成 stacking context，z-20 把它（含内部弹窗）整体抬到
       // 首页作品墙之上；全局梯度：内容卡片 auto < 外壳 20 < sticky 头 30 < lightbox/loading 50。
-      className="bg-card/80 rounded-[2rem] border border-input/80 pt-[14px] px-4 pb-4 max-w-[780px] mx-auto relative z-20 shadow-2xl shadow-black/20 backdrop-blur-xl min-h-[174px] h-auto flex flex-col gap-3"
+      // collapsed（Studio 滚动联动）收成单行条；圆角与展开态保持一致。
+      className={`bg-glass rounded-xl border border-input px-4 max-w-[780px] mx-auto relative z-20 backdrop-blur-glass h-auto flex flex-col pointer-events-auto transition-all duration-300 ${
+        collapsed ? 'pt-2 pb-2 gap-0 min-h-0' : 'pt-[14px] pb-4 gap-3 min-h-[174px]'
+      }`}
     >
-      <div className="flex flex-1 min-h-0 gap-2">
-        {!isVideo && onReferenceImagesChange && (
+      <div className={`flex min-h-0 gap-2 transition-[height] duration-300 ${collapsed ? 'h-[60px]' : 'h-[92px]'}`}>
+        {(isOmni || (!isVideo && onReferenceImagesChange)) && (
           <div
             data-testid="reference-images-panel"
-            className="shrink-0 self-stretch relative overflow-visible"
+            className={`shrink-0 self-stretch relative overflow-visible transition-transform duration-300 origin-left ${collapsed ? 'scale-80' : ''}`}
             style={{ width: REF_W + 14 }}
           >
             <input
               ref={refFileInputRef}
               id={refInputId}
               type="file"
-              accept="image/*"
+              accept={stackAccept}
               multiple
               className="hidden"
               onChange={handleRefAdd}
             />
 
-            {referenceImages.length === 0 ? (
+            {stackItems.length === 0 ? (
               <label
                 htmlFor={refInputId}
-                className="absolute top-1/2 left-0 flex items-center justify-center cursor-pointer rounded-xl border border-dashed border-border/60 bg-secondary transition-all duration-200 hover:-translate-y-1 hover:brightness-110 hover:border-primary/50"
+                aria-label={isOmni ? '添加参考内容' : '添加参考图'}
+                className="absolute top-1/2 left-0 flex flex-col items-center justify-center gap-1 cursor-pointer rounded-lg border border-dashed border-border bg-secondary transition-all duration-200 hover:-translate-y-1 hover:brightness-110 hover:border-input"
                 style={{ width: REF_W, height: REF_H, transform: 'translateY(-50%) rotate(-8deg)' }}
               >
                 <Plus size={18} className="text-muted-foreground" />
+                {isOmni && <span className="text-xs leading-none text-muted-foreground">参考内容</span>}
               </label>
             ) : (
               <>
@@ -310,13 +399,13 @@ export function PromptInput({
                   className="absolute inset-y-0 left-0 overflow-visible"
                   style={{
                     width: refExpanded
-                      ? `${(referenceImages.length - 1) * REF_W + REF_W + 12}px`
+                      ? `${(stackItems.length - 1) * REF_W + REF_W + 12}px`
                       : `${REF_W + 12}px`,
                     transition: 'width 300ms ease',
                   }}
                   onMouseLeave={() => { setRefExpanded(false); setRefHovered(null); }}
                 >
-                  {referenceImages.map((_file, i) => {
+                  {stackItems.map((item, i) => {
                     const hovered = refHovered === i;
                     const angle = refExpanded ? expandAngle(i) : collapseAngle(i);
                     return (
@@ -327,7 +416,7 @@ export function PromptInput({
                           width: REF_W,
                           height: REF_H,
                           // 展开后右侧压左侧；折叠时保持左侧（首图）在最上
-                          zIndex: hovered ? 40 : (refExpanded ? i : referenceImages.length - i),
+                          zIndex: hovered ? 40 : (refExpanded ? i : stackItems.length - i),
                           left: refExpanded ? `${i * REF_W}px` : '0px',
                           transform: `translateY(-50%) rotate(${angle}deg)`,
                           transition: 'left 300ms ease, transform 300ms ease',
@@ -335,13 +424,20 @@ export function PromptInput({
                         onMouseEnter={() => { setRefExpanded(true); setRefHovered(i); }}
                         onMouseLeave={() => setRefHovered(null)}
                       >
-                        <div className="w-full h-full rounded-lg overflow-hidden border-[1.5px] border-white bg-card shadow-md">
-                          <img src={refPreviews[i]} alt="" className="w-full h-full object-cover" />
+                        <div className="w-full h-full rounded-lg overflow-hidden border-[1.5px] border-white bg-card">
+                          {item.kind === 'image' ? (
+                            <img src={refPreviews[i] ?? ''} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-muted-foreground">
+                              {item.kind === 'video' ? <Film size={18} aria-hidden /> : <Music size={18} aria-hidden />}
+                              <span className="w-full truncate text-center text-xs">{item.file.name}</span>
+                            </div>
+                          )}
                         </div>
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); handleRefRemove(i); }}
-                          className="absolute -top-1.5 -right-1.5 w-[18px] h-[18px] flex items-center justify-center rounded-full bg-secondary border border-border/60 text-muted-foreground hover:text-foreground transition-colors"
+                          className="absolute -top-1.5 -right-1.5 z-10 w-[18px] h-[18px] flex items-center justify-center rounded-full bg-scrim backdrop-blur-glass border border-border text-foreground/80 hover:bg-destructive hover:text-foreground transition-colors"
                           style={{
                             zIndex: 50,
                             opacity: hovered ? 1 : 0,
@@ -353,18 +449,18 @@ export function PromptInput({
                       </div>
                     );
                   })}
-                  {referenceImages.length < maxRef && (
+                  {stackCanAdd && (
                     <label
                       htmlFor={refInputId}
-                      className="absolute flex items-center justify-center rounded-full border-[0.5px] border-border/70 bg-secondary cursor-pointer text-muted-foreground hover:text-foreground hover:border-primary/60 hover:bg-card transition-colors"
+                      className="absolute flex items-center justify-center rounded-full border-[0.5px] border-border bg-secondary cursor-pointer text-muted-foreground hover:text-foreground hover:border-input hover:bg-card transition-colors"
                       style={{
                         width: 28,
                         height: 28,
                         zIndex: 45,
                         top: '50%',
                         marginTop: 15,
-                        left: `${(refExpanded ? (referenceImages.length - 1) * REF_W : 0) + REF_W - 20}px`,
-                        transform: `rotate(${refExpanded ? expandAngle(referenceImages.length - 1) : collapseAngle(referenceImages.length - 1)}deg)`,
+                        left: `${(refExpanded ? (stackItems.length - 1) * REF_W : 0) + REF_W - 20}px`,
+                        transform: `rotate(${refExpanded ? expandAngle(stackItems.length - 1) : collapseAngle(stackItems.length - 1)}deg)`,
                         transition: 'left 300ms ease, transform 300ms ease',
                       }}
                     >
@@ -376,31 +472,46 @@ export function PromptInput({
             )}
           </div>
         )}
-        {isVideo && videoMode === 'firstlast' && onVideoFramesChange && (
-          <FirstLastFrames frames={videoFrames} onChange={onVideoFramesChange} />
+        {isVideo && videoMode === 'firstlast' && onVideoFramesChange && (videoCaps?.maxFrames ?? 2) > 0 && (
+          <div className={`self-center shrink-0 transition-transform duration-300 origin-left ${collapsed ? 'scale-80' : ''}`}>
+            <FirstLastFrames
+              frames={videoFrames}
+              onChange={onVideoFramesChange}
+              maxFrames={(videoCaps?.maxFrames ?? 2) >= 2 ? 2 : 1}
+            />
+          </div>
         )}
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKey}
           placeholder="开始一段灵感对话..."
-          className="flex-1 min-h-0 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none rounded-md px-2"
+          className={`flex-1 min-h-0 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none rounded-md px-2 transition-[height] duration-300 ${
+            collapsed ? 'h-6 self-center overflow-hidden' : 'h-full'
+          }`}
           aria-label="生图 prompt"
         />
+        {collapsed && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); submit(); }}
+            disabled={!canSubmit}
+            aria-label="提交生成"
+            title="提交 (⌘↵)"
+            className="self-center shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors"
+          >
+            <ArrowUp size={16} aria-hidden />
+          </button>
+        )}
       </div>
-      {isVideo && videoCaps && videoMode === 'omni' && (
-        <div className="px-2">
-          <VideoReferenceAssets
-            caps={videoCaps}
-            images={referenceImages}
-            videos={referenceVideos}
-            audios={referenceAudios}
-            onImagesChange={(f) => onReferenceImagesChange?.(f)}
-            onVideosChange={(f) => onReferenceVideosChange?.(f)}
-            onAudiosChange={(f) => onReferenceAudiosChange?.(f)}
-          />
-        </div>
-      )}
+      {/* 控件行收放：grid-rows 0fr/1fr 让 auto 高度可动画；收缩时才 overflow-hidden，
+          展开态必须可见——弹窗（bottom-full）要溢出这层渲染。 */}
+      <div
+        className={`grid transition-all duration-300 ${
+          collapsed ? 'grid-rows-[0fr] opacity-0 pointer-events-none' : 'grid-rows-[1fr] opacity-100'
+        }`}
+      >
+        <div className={`min-h-0 ${collapsed ? 'overflow-hidden' : ''}`}>
       <div className="flex flex-wrap justify-between items-center gap-3 shrink-0">
         <div className="flex min-w-0 flex-wrap gap-2">
           <div data-testid="kind-control-wrap" className="relative">
@@ -413,7 +524,7 @@ export function PromptInput({
               {isVideo ? '视频生成' : '图片生成'}
             </ControlButton>
             {openPanel === 'kind' && (
-              <div role="listbox" aria-label="生成模式列表" className={`absolute left-0 ${panelPosition} z-20 w-[200px] rounded-2xl border border-border bg-secondary p-2 shadow-2xl`}>
+              <div role="listbox" aria-label="生成模式列表" className={`absolute left-0 ${panelPosition} z-20 w-[200px] rounded-xl border border-border bg-card p-2`}>
                 <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
                 {([
                   { key: 'image', label: '图片生成', icon: <ImageIcon size={18} aria-hidden /> },
@@ -428,7 +539,7 @@ export function PromptInput({
                       onKindChange?.(item.key);
                       setOpenPanel(null);
                     }}
-                    className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-card aria-selected:bg-card aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
+                    className="flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
                   >
                     {item.icon}
                     {item.label}
@@ -448,7 +559,7 @@ export function PromptInput({
               <Building2 size={14} aria-hidden /> {providerDisplayName}
             </ControlButton>
             {openPanel === 'provider' && (
-              <div role="listbox" aria-label="选择厂商列表" className={`absolute left-0 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-secondary p-2 shadow-2xl`}>
+              <div role="listbox" aria-label="选择厂商列表" className={`absolute left-0 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-xl border border-border bg-card p-2`}>
                 <div className="px-3 py-2 text-sm text-muted-foreground">选择厂商</div>
                 {visibleProviders.map((item) => (
                   <button
@@ -461,7 +572,7 @@ export function PromptInput({
                       onModelChange?.(item.models[0]?.id ?? '');
                       setOpenPanel(null);
                     }}
-                    className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-card aria-selected:bg-card aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
+                    className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
                   >
                     <Building2 size={20} aria-hidden />
                     <span className="min-w-0">
@@ -484,7 +595,7 @@ export function PromptInput({
               <Box size={14} aria-hidden /> {selectedModel ? selectedModel.name : '未配置模型'}
             </ControlButton>
             {openPanel === 'model' && (
-              <div role="listbox" aria-label="选择模型列表" className={`absolute left-0 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-2xl border border-border bg-secondary p-2 shadow-2xl`}>
+              <div role="listbox" aria-label="选择模型列表" className={`absolute left-0 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-xl border border-border bg-card p-2`}>
                 <div className="px-3 py-2 text-sm text-muted-foreground">选择模型：{providerDisplayName}</div>
                 {models.map((item) => (
                   <button
@@ -496,7 +607,7 @@ export function PromptInput({
                       onModelChange?.(item.id);
                       setOpenPanel(null);
                     }}
-                    className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-card aria-selected:bg-card aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
+                    className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
                   >
                     <Box size={22} aria-hidden />
                     <span className="min-w-0">
@@ -525,17 +636,17 @@ export function PromptInput({
                 : (caps.qualities ? (QUALITY_LABELS[quality] ?? quality) : null)}
             </ControlButton>
             {openPanel === 'size' && (
-              <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-[320px] max-h-[70vh] overflow-y-auto rounded-2xl bg-secondary p-3 shadow-2xl ring-1 ring-border`}>
+              <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-[320px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3`}>
                 <div className="space-y-4">
                   <section className="w-[296px]">
                     <div className="py-1 px-1 text-xs text-muted-foreground">比例</div>
                     <div
                       role="listbox"
                       aria-label="选择比例"
-                      className="grid rounded-2xl bg-card p-1"
+                      className="grid rounded-lg bg-popover p-1"
                     >
                       {caps.family !== 'standard' ? (
-                        <div className="grid grid-cols-4 gap-1">
+                        <div className="grid grid-cols-4 gap-y-1">
                           {caps.ratios.map((item) => (
                             <button
                               key={item}
@@ -543,7 +654,7 @@ export function PromptInput({
                               role="option"
                               aria-selected={ratio === item}
                               onClick={() => handleRatioSelect(item)}
-                              className="flex h-[43px] w-full flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                              className="flex h-[43px] w-full flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
                             >
                               <RatioIcon ratio={item} box={18} />
                               <span>{item}</span>
@@ -551,18 +662,18 @@ export function PromptInput({
                           ))}
                         </div>
                       ) : (
-                        <div className="h-[98px] w-[296px] grid grid-cols-[56px_1fr] gap-2">
+                        <div className="h-[98px] w-[296px] grid grid-cols-[56px_1fr]">
                           <button
                             type="button"
                             role="option"
                             aria-selected={ratio === '1:1'}
                             onClick={() => handleRatioSelect('1:1')}
-                            className="flex h-[90px] w-[56px] flex-col items-center justify-center gap-2 rounded-xl text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                            className="flex h-[90px] w-[56px] flex-col items-center justify-center gap-2 rounded-lg text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
                           >
                             <RatioIcon ratio="1:1" box={28} />
                             <span>1:1</span>
                           </button>
-                          <div data-testid="side-ratio-grid" className="grid min-w-0 grid-cols-4 grid-rows-2 gap-1">
+                          <div data-testid="side-ratio-grid" className="grid min-w-0 grid-cols-4 grid-rows-2 gap-y-1">
                             {SIDE_RATIOS.map((item) => (
                               <button
                                 key={item}
@@ -570,7 +681,7 @@ export function PromptInput({
                                 role="option"
                                 aria-selected={ratio === item}
                                 onClick={() => handleRatioSelect(item)}
-                                className="flex h-[43px] w-full flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                                className="flex h-[43px] w-full flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
                               >
                                 <RatioIcon ratio={item} box={18} />
                                 <span>{item}</span>
@@ -585,7 +696,7 @@ export function PromptInput({
                   {caps.showResolution && (
                     <section className="w-[296px]">
                       <div className="py-1 px-1 text-xs text-muted-foreground">分辨率</div>
-                      <div role="listbox" aria-label="选择分辨率" className="grid h-9 grid-cols-2 gap-1 rounded-2xl bg-card p-0.5">
+                      <div role="listbox" aria-label="选择分辨率" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
                         {(['2K', '4K'] as const).map((item) => (
                           <button
                             key={item}
@@ -593,7 +704,7 @@ export function PromptInput({
                             role="option"
                             aria-selected={resolution === item}
                             onClick={() => handleResolutionSelect(item)}
-                            className="h-8 rounded-xl text-center text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                            className="h-8 rounded-md text-center text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
                           >
                             {item === '2K' ? '高清 2K' : '超清 4K'}
                           </button>
@@ -606,15 +717,15 @@ export function PromptInput({
                       <section className="w-[296px]">
                         <div className="py-1 px-1 text-xs text-muted-foreground">尺寸</div>
                         <div className="flex w-[296px] items-center gap-2">
-                          <div className="flex min-w-0 flex-1 items-center h-[34px] rounded-xl bg-card px-4 py-[10px]">
-                            <span className="shrink-0 text-[12px] text-muted-foreground">W</span>
+                          <div className="flex min-w-0 flex-1 items-center h-[34px] rounded-md bg-popover px-4 py-[10px]">
+                            <span className="shrink-0 text-xs text-muted-foreground">W</span>
                             <input
                               type="number"
                               aria-label="输出宽度"
                               value={localW}
                               min={minPx}
                               onChange={(e) => handleWChange(e.target.value)}
-                              className="min-w-0 flex-1 bg-transparent text-[12px] tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pt-[7px] pb-[7px] pl-2 pr-0"
+                              className="min-w-0 flex-1 bg-transparent text-xs tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pt-[7px] pb-[7px] pl-2 pr-0"
                             />
                           </div>
                           <button
@@ -626,18 +737,18 @@ export function PromptInput({
                           >
                             <Link2 size={15} aria-hidden />
                           </button>
-                          <div className="flex min-w-0 flex-1 items-center h-[34px] rounded-xl bg-card px-4 py-[10px]">
-                            <span className="shrink-0 text-[12px] text-muted-foreground">H</span>
+                          <div className="flex min-w-0 flex-1 items-center h-[34px] rounded-md bg-popover px-4 py-[10px]">
+                            <span className="shrink-0 text-xs text-muted-foreground">H</span>
                             <input
                               type="number"
                               aria-label="输出高度"
                               value={localH}
                               min={minPx}
                               onChange={(e) => handleHChange(e.target.value)}
-                              className="min-w-0 flex-1 bg-transparent text-[12px] tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pt-[7px] pb-[7px] pl-2 pr-0"
+                              className="min-w-0 flex-1 bg-transparent text-xs tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pt-[7px] pb-[7px] pl-2 pr-0"
                             />
                           </div>
-                          <span className="shrink-0 text-[12px] text-muted-foreground">PX</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">PX</span>
                         </div>
                       </section>
                   )}
@@ -648,7 +759,7 @@ export function PromptInput({
                       <div
                         role="listbox"
                         aria-label="选择质量"
-                        className={`grid h-9 ${caps.qualities.length >= 4 ? 'grid-cols-4' : 'grid-cols-3'} gap-1 rounded-2xl bg-card p-0.5`}
+                        className={`grid h-9 ${caps.qualities.length >= 4 ? 'grid-cols-4' : 'grid-cols-3'} rounded-lg bg-popover p-0.5`}
                       >
                         {caps.qualities.map((item) => (
                           <button
@@ -660,7 +771,7 @@ export function PromptInput({
                               onQualityChange?.(item);
                               setOpenPanel(null);
                             }}
-                            className="h-8 rounded-xl text-center text-sm hover:bg-secondary aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
+                            className="h-8 rounded-md text-center text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
                           >
                             {QUALITY_LABELS[item]}
                           </button>
@@ -682,43 +793,58 @@ export function PromptInput({
               <Images size={14} aria-hidden /> {count} 张
             </ControlButton>
             {openPanel === 'count' && (
-              <div role="listbox" aria-label="选择出图数量列表" className={`absolute left-0 ${panelPosition} z-20 flex gap-2 rounded-2xl border border-border bg-secondary p-3 shadow-2xl`}>
-                {[1, 2, 3, 4].map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    role="option"
-                    aria-selected={count === item}
-                    aria-label={String(item)}
-                    onClick={() => {
-                      onCountChange?.(item);
-                      setOpenPanel(null);
-                    }}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-background/30 text-sm font-medium transition-colors hover:bg-card aria-selected:bg-secondary aria-selected:border-primary/60 aria-selected:ring-1 aria-selected:ring-primary/60"
-                  >
-                    {item}
-                  </button>
-                ))}
+              <div role="listbox" aria-label="选择出图数量列表" className={`absolute left-0 ${panelPosition} z-20 rounded-xl border border-border bg-card p-3`}>
+                <CountOptions
+                  value={count}
+                  onSelect={(item) => {
+                    onCountChange?.(item);
+                    setOpenPanel(null);
+                  }}
+                />
               </div>
             )}
           </div>
             </>
           )}
           {isVideo && videoCaps && (
-            <VideoControls
-              caps={videoCaps}
-              mode={videoMode}
-              duration={duration}
-              resolution={videoResolution}
-              ratio={videoRatio}
-              generateAudio={generateAudio}
-              onModeChange={(m) => onVideoModeChange?.(m)}
-              onDurationChange={(d) => onDurationChange?.(d)}
-              onResolutionChange={(r) => onVideoResolutionChange?.(r)}
-              onRatioChange={(r) => onVideoRatioChange?.(r)}
-              onGenerateAudioChange={(g) => onGenerateAudioChange?.(g)}
-              menuDirection={menuDirection}
-            />
+            <>
+              <VideoControls
+                caps={videoCaps}
+                mode={videoMode}
+                duration={duration}
+                resolution={videoResolution}
+                ratio={videoRatio}
+                quality={videoQuality}
+                generateAudio={generateAudio}
+                onModeChange={(m) => onVideoModeChange?.(m)}
+                onDurationChange={(d) => onDurationChange?.(d)}
+                onResolutionChange={(r) => onVideoResolutionChange?.(r)}
+                onRatioChange={(r) => onVideoRatioChange?.(r)}
+                onQualityChange={(q) => onVideoQualityChange?.(q)}
+                onGenerateAudioChange={(g) => onGenerateAudioChange?.(g)}
+                menuDirection={menuDirection}
+              />
+              <div data-testid="video-count-control-wrap" className="relative">
+                <ControlButton
+                  active={openPanel === 'count'}
+                  aria-label="选择视频生成数量"
+                  onClick={() => setOpenPanel(openPanel === 'count' ? null : 'count')}
+                >
+                  <Images size={14} aria-hidden /> {videoCount} 条
+                </ControlButton>
+                {openPanel === 'count' && (
+                  <div role="listbox" aria-label="选择视频生成数量列表" className={`absolute left-0 ${panelPosition} z-20 rounded-xl border border-border bg-card p-3`}>
+                    <CountOptions
+                      value={videoCount}
+                      onSelect={(item) => {
+                        onVideoCountChange?.(item);
+                        setOpenPanel(null);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
         <div className="flex items-center gap-3">
@@ -743,6 +869,29 @@ export function PromptInput({
           </button>
         </div>
       </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 数量弹窗的 1-4 选项（图片张数 / 视频条数共用同一配方）。 */
+function CountOptions({ value, onSelect }: { value: number; onSelect: (n: number) => void }) {
+  return (
+    <div className="flex rounded-lg bg-popover p-1">
+      {[1, 2, 3, 4].map((item) => (
+        <button
+          key={item}
+          type="button"
+          role="option"
+          aria-selected={value === item}
+          aria-label={String(item)}
+          onClick={() => onSelect(item)}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60"
+        >
+          {item}
+        </button>
+      ))}
     </div>
   );
 }
@@ -755,10 +904,10 @@ function ControlButton({
   return (
     <button
       type="button"
-      className={`inline-flex min-w-0 max-w-full h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+      className={`inline-flex min-w-0 max-w-full h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         active
           ? 'border-border bg-secondary text-foreground'
-          : 'border-border bg-background/30 text-foreground hover:bg-secondary'
+          : 'border-border text-foreground hover:bg-secondary'
       } ${className}`}
       {...props}
     />

@@ -25,6 +25,11 @@ def seedream_render(**_kwargs) -> list[str]:
     return openai_image.render(**_kwargs)
 
 
+def tokendance_render(**_kwargs) -> list[str]:
+    from character_workflow.lib.callers import openai_image
+    return openai_image.render(**_kwargs)
+
+
 def custom_render(**_kwargs) -> list[str]:
     from character_workflow.lib.callers import openai_image
     return openai_image.render(**_kwargs)

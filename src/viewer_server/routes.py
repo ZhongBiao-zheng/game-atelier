@@ -737,8 +737,7 @@ def create_key(payload: _KeyCreatePayload) -> dict:
         keys.add_key(spec)
     except keys.DuplicateAliasError:
         raise HTTPException(409, f"alias '{payload.alias}' already exists") from None
-    # secret_revealed is only emitted once at creation — never on GET/PATCH
-    return {"alias": payload.alias, "secret_revealed": payload.access_key}
+    return {"alias": payload.alias}
 
 
 @router.patch("/keys/{alias}")
@@ -755,6 +754,90 @@ def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
 def delete_key_endpoint(alias: str) -> None:
     keys.delete_key(alias)
     return None
+
+
+class _ModelsPreviewPayload(BaseModel):
+    alias: str | None = None
+    base_url: str | None = None
+    access_key: str | None = None
+
+
+# 模态猜测：supported_protocols（词元跳动等带协议标注的网关）优先；
+# 无协议字段的通用 OpenAI 兼容上游按模型 id 关键词兜底，猜不中归 None（非出图模型）。
+_VIDEO_ID_HINTS = (
+    "video", "seedance", "vidu", "kling", "veo", "sora", "wan",
+    "happyhorse", "pixverse", "runway", "hailuo",
+)
+_IMAGE_ID_HINTS = (
+    "image", "seedream", "dall-e", "dalle", "flux", "banana", "midjourney",
+    "cogview", "imagen", "ideogram", "recraft", "irag",
+)
+
+
+def _guess_model_modality(item: dict) -> str | None:
+    protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
+    if any("image-generations" in p for p in protocols):
+        return "image"
+    if any(h in p for p in protocols for h in ("video", "seedance", "vidu", "happyhorse")):
+        return "video"
+    if protocols:
+        return None
+    mid = str(item.get("id") or "").lower()
+    if any(h in mid for h in _VIDEO_ID_HINTS):
+        return "video"
+    if any(h in mid for h in _IMAGE_ID_HINTS):
+        return "image"
+    return None
+
+
+@router.post("/keys/models-preview")
+def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
+    """代理拉取上游 GET {base}/models 供 Key 表单做模型映射。
+
+    走服务端代理的原因：浏览器直连上游有 CORS；编辑已存 Key 时前端只有掩码密钥，
+    必须由服务端按 alias 取真实密钥。
+    """
+    import requests
+
+    base_url = (payload.base_url or "").strip()
+    access_key = (payload.access_key or "").strip()
+    if payload.alias:
+        stored = keys.find_by_alias(payload.alias)
+        if stored is None:
+            raise HTTPException(404, f"alias '{payload.alias}' not found")
+        base_url = base_url or (stored.base_url or "")
+        access_key = access_key or stored.access_key
+    if not base_url:
+        raise HTTPException(422, "缺少 API 请求地址（base_url）")
+
+    url = base_url.rstrip("/")
+    if not url.endswith("/models"):
+        url = f"{url}/models"
+    headers = {"Authorization": f"Bearer {access_key}"} if access_key else {}
+    try:
+        resp = requests.get(url, headers=headers, timeout=20)
+    except requests.RequestException as e:
+        raise HTTPException(502, f"请求上游失败: {e}") from e
+    if resp.status_code >= 400:
+        raise HTTPException(502, f"上游 {resp.status_code}: {resp.text[:200]}")
+    try:
+        body = resp.json()
+    except ValueError as e:
+        raise HTTPException(502, f"上游响应非 JSON: {resp.text[:200]}") from e
+
+    rows = body.get("data") if isinstance(body, dict) else body
+    if not isinstance(rows, list):
+        raise HTTPException(502, "上游响应缺少模型列表（data）")
+    models = []
+    for item in rows:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        models.append({
+            "id": str(item["id"]),
+            "name": str(item.get("name") or item["id"]),
+            "modality": _guess_model_modality(item),
+        })
+    return {"models": models}
 
 
 _GALLERY_SLOTS = ("portrait", "promo", "turnaround")
@@ -887,15 +970,6 @@ def gallery_image(path: str) -> FileResponse:
     if not target.is_file():
         raise HTTPException(status_code=404)
     return FileResponse(target)
-
-
-@router.post("/keys/{alias}/default")
-def set_default_alias_endpoint(alias: str) -> dict:
-    try:
-        keys.set_default_alias(alias)
-    except keys.NoSuchAliasError:
-        raise HTTPException(404, f"alias '{alias}' not found") from None
-    return {"default_alias": alias}
 
 
 class _StudioJobCreate(BaseModel):

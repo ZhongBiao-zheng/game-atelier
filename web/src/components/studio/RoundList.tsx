@@ -21,6 +21,7 @@ export interface RoundConfig {
   // 视频参数（kind=video）—— 再次生成时按原 job 完整还原；resolution 是图片语义（2K/4K），视频分辨率另存。
   duration?: number;
   videoResolution?: string;
+  videoQuality?: 'std' | 'pro';
   frameMode?: VideoFrameMode;
   generateAudio?: boolean;
   referenceVideos?: string[];
@@ -189,7 +190,7 @@ function ReferenceStack({
               transformOrigin: 'center',
               transition: 'transform 250ms ease, margin-left 250ms ease',
             }}
-            className="relative block overflow-hidden rounded-lg border-[1.5px] border-white bg-card shadow-md"
+            className="relative block overflow-hidden rounded-lg border-[1.5px] border-white bg-card"
           >
             {isImagePath(src)
               ? <img src={refImageSrc(src)} alt="参考图" className="h-full w-full object-cover" draggable={false} />
@@ -266,7 +267,7 @@ function DoneBatch({
                   download={path.split('/').pop() || `${round.jobId}-${index + 1}.mp4`}
                   aria-label={`下载生成视频 ${index + 1}`}
                   title="下载视频"
-                  className="absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-white/20 bg-black/70 text-white opacity-0 shadow-lg backdrop-blur-sm transition-opacity hover:bg-black/85 group-hover:opacity-100 focus-visible:opacity-100"
+                  className="absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100"
                 >
                   <Download className="size-4" aria-hidden />
                 </a>
@@ -289,7 +290,7 @@ function DoneBatch({
                   download={path.split('/').pop() || `${round.jobId}-${index + 1}.png`}
                   aria-label={`下载生成结果 ${index + 1}`}
                   title="下载图片"
-                  className="absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-white/20 bg-black/70 text-white opacity-0 shadow-lg backdrop-blur-sm transition-opacity hover:bg-black/85 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  className="absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <Download className="size-4" aria-hidden />
                 </a>
@@ -302,11 +303,11 @@ function DoneBatch({
         <div className="relative" ref={menuWrapRef}>
           <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
           {menuOpen && (
-            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 h-11 w-[195px] rounded-xl bg-secondary p-0 shadow-xl">
+            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 h-11 w-[195px] rounded-xl bg-glass backdrop-blur-glass border border-border p-0">
               <button
                 type="button"
                 aria-label="删除该批次结果"
-                className="flex h-11 w-full items-center gap-2 rounded-xl px-3 py-[9px] text-left text-[13px] font-medium text-foreground hover:bg-secondary/80"
+                className="flex h-11 w-full items-center gap-2 rounded-xl px-3 py-[9px] text-left text-sm font-medium text-foreground hover:bg-secondary/80"
                 onClick={() => {
                   setMenuOpen(false);
                   void onDeleteBatch?.(round.jobId, round.imagePaths);
@@ -331,7 +332,7 @@ function ActionButton({
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center ${compact ? 'h-9 w-9 px-0' : 'h-9 w-[94px] px-3'} rounded-xl bg-secondary text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
+      className={`inline-flex items-center justify-center ${compact ? 'h-9 w-9 px-0' : 'h-9 w-[94px] px-3'} rounded-md bg-secondary text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
       {...props}
     />
   );
@@ -346,20 +347,20 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-glass"
       onClick={onClose}
     >
       <img
         src={src}
         alt="大图"
-        className="max-h-[90vh] max-w-[90vw] rounded-lg shadow-2xl object-contain"
+        className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
         onClick={e => e.stopPropagation()}
       />
       <button
         type="button"
         aria-label="关闭"
         onClick={onClose}
-        className="absolute right-6 top-6 size-10 rounded-full bg-black/60 text-white grid place-items-center hover:bg-black/80 backdrop-blur-sm border-0"
+        className="absolute right-6 top-6 size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-background/90 backdrop-blur-glass border-0"
       >
         <X className="size-5" />
       </button>

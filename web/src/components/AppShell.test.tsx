@@ -40,13 +40,13 @@ describe('AppShell', () => {
   it('highlights 出图 tab on /studio', () => {
     renderAt('/studio');
     const tab = screen.getByText('出图');
-    expect(tab.className).toContain('bg-[rgba(36,35,33,0.68)]');
+    expect(tab.className).toContain('bg-glass');
   });
 
   it('highlights 工坊 tab on /character/foo', () => {
     renderAt('/character/foo');
     const tab = screen.getByText('工坊');
-    expect(tab.className).toContain('bg-[rgba(36,35,33,0.68)]');
+    expect(tab.className).toContain('bg-glass');
   });
 
   it('routes character image URLs into the image detail pane', async () => {
@@ -101,9 +101,9 @@ describe('AppShell', () => {
 
   it('does not highlight either tab on /', () => {
     renderAt('/');
-    expect(screen.getByText('出图').className).not.toContain('bg-[rgba(36,35,33,0.68)]');
-    expect(screen.getByText('工坊').className).not.toContain('bg-[rgba(36,35,33,0.68)]');
-    expect(screen.getByText('主页').className).toContain('bg-[rgba(36,35,33,0.68)]');
+    expect(screen.getByText('出图').className).not.toContain('bg-glass');
+    expect(screen.getByText('工坊').className).not.toContain('bg-glass');
+    expect(screen.getByText('主页').className).toContain('bg-glass');
   });
 
   it('active tab keeps size and uses liquid glass styling', () => {
@@ -111,8 +111,8 @@ describe('AppShell', () => {
     const tab = screen.getByText('主页');
     expect(tab.className).toContain('h-10');
     expect(tab.className).toContain('rounded-full');
-    expect(tab.className).toContain('backdrop-blur-2xl');
-    expect(tab.className).toContain('[box-shadow:inset_0_1px_0');
+    expect(tab.className).toContain('backdrop-blur-glass');
+    expect(tab.className).toContain('border-input');
   });
 
   it('settings icon turns primary on /settings', () => {

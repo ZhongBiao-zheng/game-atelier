@@ -554,8 +554,8 @@ describe('Studio', () => {
     fireEvent.click(await screen.findByRole('button', { name: /选择比例和分辨率/ }));
 
     expect(screen.queryByRole('option', { name: '智能' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('size-popover')).toHaveClass('w-[320px]', 'p-3', 'ring-1');
-    expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('grid', 'rounded-2xl', 'bg-card', 'p-1');
+    expect(screen.getByTestId('size-popover')).toHaveClass('w-[320px]', 'p-3', 'border', 'bg-card');
+    expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('grid', 'rounded-lg', 'bg-popover', 'p-1');
     expect(screen.getByRole('listbox', { name: '选择比例' }).firstElementChild).toHaveClass('h-[98px]', 'w-[296px]', 'grid-cols-[56px_1fr]');
     expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('h-[90px]', 'w-[56px]', 'text-sm');
     expect(screen.getByTestId('side-ratio-grid')).toHaveClass('min-w-0', 'grid-cols-4', 'grid-rows-2');
@@ -563,8 +563,8 @@ describe('Studio', () => {
     expect(screen.getByRole('listbox', { name: '选择分辨率' })).toHaveClass('h-9', 'p-0.5');
     expect(screen.getByRole('option', { name: /高清 2K/ })).toHaveClass('h-8', 'text-sm');
     expect(screen.getByLabelText('输出宽度').closest('div')?.parentElement).toHaveClass('w-[296px]');
-    expect(screen.getByLabelText('输出宽度')).toHaveClass('text-[12px]', 'tabular-nums');
-    expect(screen.getByLabelText('输出高度')).toHaveClass('text-[12px]', 'tabular-nums');
+    expect(screen.getByLabelText('输出宽度')).toHaveClass('text-xs', 'tabular-nums');
+    expect(screen.getByLabelText('输出高度')).toHaveClass('text-xs', 'tabular-nums');
   });
 
   it('highlights prompt control buttons while their popovers are open', async () => {
@@ -820,8 +820,8 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
 
     expect(screen.getByTestId('studio-more-menu')).toHaveClass('absolute', 'left-full', 'top-0', 'ml-2');
-    expect(screen.getByTestId('studio-more-menu')).toHaveClass('w-[195px]', 'h-11', 'rounded-xl', 'bg-secondary', 'p-0');
-    expect(screen.getByRole('button', { name: '删除该批次结果' })).toHaveClass('h-11', 'px-3', 'py-[9px]', 'text-[13px]');
+    expect(screen.getByTestId('studio-more-menu')).toHaveClass('w-[195px]', 'h-11', 'rounded-xl', 'bg-glass', 'p-0');
+    expect(screen.getByRole('button', { name: '删除该批次结果' })).toHaveClass('h-11', 'px-3', 'py-[9px]', 'text-sm');
     expect(screen.getByTestId('studio-more-menu')).not.toHaveClass('top-full');
   });
 

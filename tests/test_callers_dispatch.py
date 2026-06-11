@@ -158,3 +158,137 @@ def test_dispatch_video_rejects_unwired_provider(tmp_path, monkeypatch):
     ))
     with pytest.raises(callers.WrongProviderError):
         callers.dispatch_video(prompt="p", model="m", alias="kl", output_dir=tmp_path, params={})
+
+
+# ---- happyhorse（阿里百炼 DashScope 协议，经词元跳动网关）----
+
+
+@pytest.fixture
+def tokendance_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    keys.add_key(KeySpec(
+        alias="td", provider="tokendance",
+        base_url="https://tokendance.space/gateway/v1",
+        access_key="td-fake", created_at="2026-06-11T00:00:00+00:00",
+    ))
+    return tmp_path
+
+
+def test_dispatch_video_routes_tokendance_happyhorse(tokendance_key, tmp_path, monkeypatch):
+    from character_workflow.lib import callers
+    from character_workflow.lib.callers import happyhorse_video
+    captured = {}
+
+    def fake_render_video(*, prompt, model, alias, output_dir, params=None, **kw):
+        captured.update(model=model, alias=alias)
+        return ["/abs/v1.mp4"]
+
+    monkeypatch.setattr(happyhorse_video, "render_video", fake_render_video)
+    out = callers.dispatch_video(
+        prompt="p", model="happyhorse-1.0-t2v", alias="td",
+        output_dir=tmp_path, params={},
+    )
+    assert out == ["/abs/v1.mp4"]
+    assert captured["model"] == "happyhorse-1.0-t2v"
+
+
+class _FakeResp:
+    def __init__(self, payload: dict):
+        self.status_code = 200
+        self.ok = True
+        self.text = ""
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def _mock_happyhorse_upstream(monkeypatch, posted: dict):
+    from character_workflow.lib.callers import happyhorse_video as hh
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        posted.update(url=url, headers=headers, body=json)
+        return _FakeResp({"output": {"task_id": "t-1", "task_status": "PENDING"}})
+
+    monkeypatch.setattr(hh.requests, "post", fake_post)
+    monkeypatch.setattr(hh.requests, "get", lambda *a, **k: _FakeResp(
+        {"output": {"task_status": "SUCCEEDED", "video_url": "https://cdn.x/v.mp4"}}
+    ))
+    monkeypatch.setattr(hh, "_download_mp4", lambda url, d, i: str(d / f"v{i}.mp4"))
+    return hh
+
+
+def test_happyhorse_t2v_body_follows_dashscope_contract(tokendance_key, tmp_path, monkeypatch):
+    posted: dict = {}
+    hh = _mock_happyhorse_upstream(monkeypatch, posted)
+    out = hh.render_video(
+        prompt="马奔跑", model="happyhorse-1.0-t2v", alias="td",
+        output_dir=tmp_path / "o",
+        params={"duration": 5, "resolution": "720p", "ratio": "16:9", "seed": 42},
+        poll_interval=0,
+    )
+    assert out == [str(tmp_path / "o" / "v1.mp4")]
+    # 词元跳动网关 URL 改写：剥 /v1 → /alibaba/happyhorse/v1/video-synthesis
+    assert posted["url"] == "https://tokendance.space/gateway/alibaba/happyhorse/v1/video-synthesis"
+    assert posted["headers"]["X-DashScope-Async"] == "enable"
+    body = posted["body"]
+    assert body["model"] == "happyhorse-1.0-t2v"
+    assert body["input"] == {"prompt": "马奔跑"}  # t2v 无 media
+    assert body["parameters"]["resolution"] == "720P"  # 官方要求大写 P
+    assert body["parameters"]["watermark"] is False  # 官方默认 true，必须显式关
+    assert body["parameters"]["ratio"] == "16:9"
+    assert body["parameters"]["duration"] == 5
+    assert body["parameters"]["seed"] == 42
+
+
+def test_happyhorse_i2v_maps_first_frame(tokendance_key, tmp_path, monkeypatch):
+    posted: dict = {}
+    hh = _mock_happyhorse_upstream(monkeypatch, posted)
+    ref = tmp_path / "first.png"
+    ref.write_bytes(b"png-bytes")
+    hh.render_video(
+        prompt="动起来", model="happyhorse-1.0-i2v", alias="td",
+        output_dir=tmp_path / "o",
+        params={"duration": 5, "resolution": "1080P", "ratio": "16:9",
+                "reference_images": [str(ref)], "frame_mode": "first"},
+        poll_interval=0,
+    )
+    media = posted["body"]["input"]["media"]
+    assert len(media) == 1
+    assert media[0]["type"] == "first_frame"
+    assert media[0]["url"].startswith("data:image/png;base64,")
+    # i2v 无 ratio（随首帧）
+    assert "ratio" not in posted["body"]["parameters"]
+
+
+def test_happyhorse_video_edit_drops_duration_and_requires_public_video(
+    tokendance_key, tmp_path, monkeypatch,
+):
+    posted: dict = {}
+    hh = _mock_happyhorse_upstream(monkeypatch, posted)
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(b"png-bytes")
+    hh.render_video(
+        prompt="换成雪景", model="happyhorse-1.0-video-edit", alias="td",
+        output_dir=tmp_path / "o",
+        params={"duration": 5, "ratio": "16:9", "resolution": "720P",
+                "reference_videos": ["https://cdn.x/in.mp4"],
+                "reference_images": [str(ref)]},
+        poll_interval=0,
+    )
+    media = posted["body"]["input"]["media"]
+    assert media[0] == {"type": "video", "url": "https://cdn.x/in.mp4"}
+    assert media[1]["type"] == "reference_image"
+    # edit 无 duration / ratio（随输入视频）
+    assert "duration" not in posted["body"]["parameters"]
+    assert "ratio" not in posted["body"]["parameters"]
+
+    # 输入视频仅公网 URL，本地路径显式报错
+    local = tmp_path / "in.mp4"
+    local.write_bytes(b"mp4")
+    with pytest.raises(hh.HappyHorseVideoError, match="公网"):
+        hh.render_video(
+            prompt="p", model="happyhorse-1.0-video-edit", alias="td",
+            output_dir=tmp_path / "o",
+            params={"reference_videos": [str(local)]}, poll_interval=0,
+        )

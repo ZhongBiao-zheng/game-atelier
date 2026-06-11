@@ -11,10 +11,10 @@ function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string
     <Link
       href={to}
       className={[
-        'h-9 md:h-10 inline-flex shrink-0 items-center gap-1.5 md:gap-2 rounded-full border px-3 md:px-5 text-xs md:text-sm font-medium backdrop-blur-2xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+        'h-9 md:h-10 inline-flex shrink-0 items-center gap-1.5 md:gap-2 rounded-full border px-3 md:px-5 text-xs md:text-sm font-medium backdrop-blur-glass transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
         isActive
-          ? 'border-white/15 bg-[rgba(36,35,33,0.68)] text-foreground [box-shadow:inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(255,255,255,0.05),0_12px_28px_rgba(0,0,0,0.42),0_0_0_1px_rgba(255,255,255,0.04)]'
-          : 'border-white/[0.06] bg-white/[0.03] text-muted-foreground [box-shadow:inset_0_1px_0_rgba(255,255,255,0.06)] hover:border-white/10 hover:bg-white/[0.06] hover:text-foreground',
+          ? 'border-input bg-glass text-foreground'
+          : 'border-transparent bg-card/35 text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
       ].join(' ')}
     >
       <Icon size={18} aria-hidden />
@@ -35,10 +35,7 @@ export function AppShell() {
       <header className="sticky top-0 z-30 shrink-0">
         <div className="mx-auto grid h-14 min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-3 md:h-20 md:gap-4 md:px-8">
           <Link href="/" className="flex shrink-0 items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
-            <span
-              className="text-2xl font-normal"
-              style={{ fontFamily: 'var(--font-display)' }}
-            >
+            <span className="font-display text-2xl font-normal">
               Atelier
             </span>
             <span className="hidden text-xs text-muted-foreground sm:inline">· 工作流</span>
@@ -53,8 +50,8 @@ export function AppShell() {
               href="/settings"
               aria-label="设置"
               className={[
-                'inline-flex h-10 w-10 items-center justify-center rounded-full bg-card/35 backdrop-blur-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                onSettings ? 'text-primary ring-1 ring-border/80' : 'text-muted-foreground hover:bg-card/60 hover:text-foreground',
+                'inline-flex h-10 w-10 items-center justify-center rounded-full bg-glass backdrop-blur-glass transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                onSettings ? 'text-primary ring-1 ring-border' : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
               ].join(' ')}
             >
               <Settings size={18} aria-hidden />

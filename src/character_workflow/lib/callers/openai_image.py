@@ -19,6 +19,7 @@ import requests
 
 DEFAULT_SEEDREAM_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_TOKENDANCE_BASE_URL = "https://tokendance.space/gateway/v1"
 _KNOWN_ENDPOINT_SUFFIXES = (
     "/images/generations",
     "/images/edits",
@@ -48,9 +49,10 @@ def render(
     key = _keys.find_by_alias(alias)
     if key is None:
         raise ValueError(f"alias not found: {alias}")
-    if key.provider not in ("openai", "seedream", "custom"):
+    if key.provider not in ("openai", "seedream", "tokendance", "custom"):
         raise ValueError(
-            f"alias {alias!r} has provider {key.provider!r}, expected openai/seedream/custom"
+            f"alias {alias!r} has provider {key.provider!r}, "
+            "expected openai/seedream/tokendance/custom"
         )
 
     base_url = (key.base_url or "").strip()
@@ -59,6 +61,8 @@ def render(
             base_url = DEFAULT_OPENAI_BASE_URL
         elif key.provider == "seedream":
             base_url = DEFAULT_SEEDREAM_BASE_URL
+        elif key.provider == "tokendance":
+            base_url = DEFAULT_TOKENDANCE_BASE_URL
     if not base_url:
         raise OpenAIImageError("custom provider requires base_url")
 

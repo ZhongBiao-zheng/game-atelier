@@ -158,7 +158,7 @@ export function CharacterGallery({
 
       {!hasAny && (
         <div className="py-16 text-center">
-          <p className="font-[var(--font-display)] italic text-2xl text-foreground/70 mb-2">
+          <p className="font-display text-display italic text-foreground/70 mb-2">
             {TAB_META[tab].emptyTitle}
           </p>
           <p className="text-xs text-muted-foreground">
@@ -173,7 +173,7 @@ export function CharacterGallery({
             <figure key={i} className="group relative mb-4 break-inside-avoid">
               <button
                 onClick={() => onSelectImage(img.path, img.jobId)}
-                className="w-full block overflow-hidden rounded-lg border border-border/50 bg-card transition-all duration-200 hover:border-primary/60 hover:shadow-[0_0_0_1px_var(--primary)] cursor-pointer p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                className="w-full block overflow-hidden rounded-lg border border-border bg-card transition-all duration-200 hover:border-input cursor-pointer p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 <img
                   src={`/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`}
@@ -181,7 +181,7 @@ export function CharacterGallery({
                   className="w-full h-auto block transition-opacity duration-300 group-hover:opacity-95"
                 />
               </button>
-              <figcaption className="pointer-events-none absolute bottom-2 left-2 font-mono text-[10px] tabular-nums tracking-wider text-foreground bg-background/75 backdrop-blur-sm px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
+              <figcaption className="pointer-events-none absolute bottom-2 left-2 font-mono text-xs tabular-nums tracking-wider text-foreground bg-glass backdrop-blur-glass px-2 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity">
                 №{String(i + 1).padStart(2, '0')}
               </figcaption>
               <button
@@ -189,7 +189,7 @@ export function CharacterGallery({
                 title={isGalleryHidden(img.path, hiddenPaths) ? '已从首页作品展示隐藏，点击恢复' : '从首页作品展示隐藏（工坊内仍可见）'}
                 aria-label={isGalleryHidden(img.path, hiddenPaths) ? '恢复展示' : '隐藏'}
                 className={cn(
-                  'absolute left-2 top-2 size-7 rounded-full bg-black/70 text-white grid place-items-center transition-opacity backdrop-blur-sm hover:bg-black/85 cursor-pointer border-0',
+                  'absolute left-2 top-2 size-7 rounded-full bg-scrim text-white grid place-items-center transition-opacity backdrop-blur-glass hover:bg-background/90 cursor-pointer border-0',
                   // 已隐藏的图常显 EyeOff 作状态标识；未隐藏的悬停才出现，不抢画面。
                   isGalleryHidden(img.path, hiddenPaths) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                 )}
@@ -202,7 +202,7 @@ export function CharacterGallery({
                 onClick={(e) => { e.stopPropagation(); void deleteImage(img.jobId, img.path); }}
                 title="删除这张图"
                 aria-label="删除"
-                className="absolute right-2 top-2 size-7 rounded-full bg-black/70 text-white grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm hover:bg-destructive cursor-pointer border-0"
+                className="absolute right-2 top-2 size-7 rounded-full bg-scrim text-white grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-glass hover:bg-destructive cursor-pointer border-0"
               >
                 <X className="size-3.5" />
               </button>
@@ -242,18 +242,17 @@ function GalleryShell({
       <header className={cn('border-b border-border/40', compact ? 'px-5 pt-5 pb-3' : 'px-8 pt-8 pb-5')}>
         <div className="flex items-end justify-between gap-4">
           <div className="min-w-0">
-            <div className={cn('uppercase text-muted-foreground/70 mb-1', compact ? 'text-[9px] tracking-[0.2em]' : 'text-[10px] tracking-[0.22em]')}>
+            <div className="uppercase text-muted-foreground/70 mb-1 text-xs tracking-label">
               gallery · 角色
             </div>
             <h1 className={cn(
-              'font-[var(--font-display)] italic leading-[1.05] tracking-tight text-foreground truncate',
-              compact ? 'text-xl' : 'text-[40px]',
+              'font-display italic leading-[1.05] tracking-tight text-foreground truncate',
+              compact ? 'text-base' : 'text-display',
             )}>
               {name ?? '—'}
             </h1>
           </div>
-          <div className={cn('shrink-0 text-right flex flex-col items-end gap-2 font-mono tabular-nums text-muted-foreground leading-relaxed',
-            compact ? 'text-[10px]' : 'text-xs')}>
+          <div className="shrink-0 text-right flex flex-col items-end gap-2 font-mono tabular-nums text-muted-foreground leading-relaxed text-xs">
             {count > 0 && (
               <div className="text-right">
                 <div><span className="text-foreground/85">{count}</span> 图</div>
@@ -305,10 +304,10 @@ function TabStrip({
             )}
           >
             <span className={cn(
-              'font-[var(--font-display)] italic',
+              'font-display italic',
               compact ? 'text-sm' : 'text-base',
             )}>{t.label}</span>
-            <span className="font-mono tabular-nums text-[10px] text-muted-foreground/70">
+            <span className="font-mono tabular-nums text-xs text-muted-foreground/70">
               {counts[t.key]}
             </span>
             {active && (
@@ -384,11 +383,11 @@ function EmptyShell({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <main className="flex h-full flex-col items-center justify-center px-8 text-center">
       <div className="space-y-3">
-        <p className="font-[var(--font-display)] italic text-[40px] leading-[1.1] text-foreground/75">
+        <p className="font-display text-display italic text-foreground/75">
           {title}
         </p>
         {subtitle && (
-          <p className="text-[10px] uppercase tracking-[0.28em] text-muted-foreground/70">
+          <p className="text-xs uppercase tracking-label text-muted-foreground/70">
             {subtitle}
           </p>
         )}
@@ -433,10 +432,10 @@ function StalePendingCard({ jobId, onVoid }: { jobId: string; onVoid: (jobId: st
     >
       <AlertTriangle className="size-7 text-muted-foreground" />
       <div className="text-xs text-muted-foreground font-medium">可能已中断</div>
-      <p className="text-[10px] text-muted-foreground/70">超过 1 小时未完成，出图进程可能已退出</p>
+      <p className="text-xs text-muted-foreground/70">超过 1 小时未完成，出图进程可能已退出</p>
       <button
         onClick={() => onVoid(jobId)}
-        className="text-xs text-primary hover:underline cursor-pointer bg-transparent border-0 p-0"
+        className="text-xs text-foreground font-medium hover:underline cursor-pointer bg-transparent border-0 p-0"
       >
         [作废]
       </button>
@@ -454,7 +453,7 @@ function ErrorCard({ jobId, error, onDelete }: { error: string; jobId: string; o
         onClick={() => onDelete(jobId)}
         title="删除这个失败记录"
         aria-label="删除"
-        className="absolute right-2 top-2 size-7 rounded-full bg-black/70 text-white grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm hover:bg-destructive cursor-pointer border-0"
+        className="absolute right-2 top-2 size-7 rounded-full bg-scrim text-white grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-glass hover:bg-destructive cursor-pointer border-0"
       >
         <X className="size-3.5" />
       </button>
@@ -462,7 +461,7 @@ function ErrorCard({ jobId, error, onDelete }: { error: string; jobId: string; o
       <div className="text-xs text-destructive font-medium">出图失败</div>
       <button
         onClick={() => alert(`重试 ${jobId}：复制 prompt 后 Cmd+V`)}
-        className="text-xs text-primary hover:underline cursor-pointer bg-transparent border-0 p-0"
+        className="text-xs text-foreground font-medium hover:underline cursor-pointer bg-transparent border-0 p-0"
       >
         [重试]
       </button>

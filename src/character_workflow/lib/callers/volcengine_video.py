@@ -35,6 +35,19 @@ def _base_url(key) -> str:
     return str(getattr(key, "base_url", None) or "").rstrip("/") or DEFAULT_BASE_URL
 
 
+def _tasks_url(base: str) -> str:
+    """视频任务提交/轮询的根 URL。
+
+    词元跳动网关把 Ark 视频任务挂在 {gateway}/ark/v3/generations/tasks（key 里存的
+    base 是 OpenAI 兼容入口 …/gateway/v1，需剥掉 /v1）；Ark 直连维持
+    {base}/contents/generations/tasks。
+    """
+    if "tokendance" in base:
+        root = base[: -len("/v1")] if base.endswith("/v1") else base
+        return f"{root}/ark/v3/generations/tasks"
+    return f"{base}/contents/generations/tasks"
+
+
 def _json(resp) -> dict[str, Any]:
     try:
         return resp.json()
@@ -187,8 +200,9 @@ def _download_mp4(url: str, output_dir: Path, index: int) -> str:
     return str(path)
 
 
-def _poll_video_task(*, base, headers, task_id, output_dir, max_polls, poll_interval) -> list[str]:
-    url = f"{base}/contents/generations/tasks/{task_id}"
+def _poll_video_task(*, tasks_url, headers, task_id, max_polls, poll_interval) -> str:
+    """轮询到任务完成，返回选中的视频下载地址（不负责落盘）。"""
+    url = f"{tasks_url}/{task_id}"
     for _ in range(max_polls):
         if poll_interval:
             time.sleep(poll_interval)
@@ -201,7 +215,7 @@ def _poll_video_task(*, base, headers, task_id, output_dir, max_polls, poll_inte
         if status in _SUCCESS or (not status and urls):
             picked = _pick_video_url(urls)
             if picked:
-                return [_download_mp4(picked, output_dir, 1)]
+                return picked
             raise VolcengineVideoError("视频任务成功但未返回视频地址")
         if status in _FAILURE:
             raise VolcengineVideoError(_fail_reason(payload))
@@ -219,12 +233,12 @@ def render_video(
     poll_interval: float = 5.0,
     **_kwargs,
 ) -> list[str]:
-    """提交一条 Seedance 视频任务，轮询到完成，下 .mp4，返回本地路径 list[str]。"""
+    """提交 n 条 Seedance 视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。"""
     params = dict(params or {})
     key = _keys.find_by_alias(alias) if alias else None
     if key is None:
         raise VolcengineVideoError(f"未找到 Key: {alias}")
-    base = _base_url(key)
+    tasks_url = _tasks_url(_base_url(key))
     headers = {"Authorization": f"Bearer {key.access_key}", "Content-Type": "application/json"}
     content = _build_content(
         prompt,
@@ -247,18 +261,27 @@ def render_video(
         body["generate_audio"] = True
 
     out_dir = Path(output_dir)
-    resp = requests.post(f"{base}/contents/generations/tasks", headers=headers, json=body, timeout=600)
-    payload = _json(resp)
-    if not resp.ok:
-        raise VolcengineVideoError(_err(payload, resp.status_code))
-    urls = _dedupe(_collect_video_urls(payload))
-    picked = _pick_video_url(urls)
-    if picked:
-        return [_download_mp4(picked, out_dir, 1)]
-    task_id = _extract_task_id(payload)
-    if not task_id:
-        raise VolcengineVideoError(f"火山视频提交后未返回 task id: {payload!r}")
-    return _poll_video_task(
-        base=base, headers=headers, task_id=task_id,
-        output_dir=out_dir, max_polls=max_polls, poll_interval=poll_interval,
-    )
+    n = max(1, min(4, int(params.get("n") or 1)))
+    # 先把 n 条任务全部提交（上游并行跑），再逐个轮询取结果。
+    ready_urls: list[str] = []
+    pending_ids: list[str] = []
+    for _ in range(n):
+        resp = requests.post(tasks_url, headers=headers, json=body, timeout=600)
+        payload = _json(resp)
+        if not resp.ok:
+            raise VolcengineVideoError(_err(payload, resp.status_code))
+        urls = _dedupe(_collect_video_urls(payload))
+        picked = _pick_video_url(urls)
+        if picked:
+            ready_urls.append(picked)
+            continue
+        task_id = _extract_task_id(payload)
+        if not task_id:
+            raise VolcengineVideoError(f"火山视频提交后未返回 task id: {payload!r}")
+        pending_ids.append(task_id)
+    for task_id in pending_ids:
+        ready_urls.append(_poll_video_task(
+            tasks_url=tasks_url, headers=headers, task_id=task_id,
+            max_polls=max_polls, poll_interval=poll_interval,
+        ))
+    return [_download_mp4(url, out_dir, i + 1) for i, url in enumerate(ready_urls)]

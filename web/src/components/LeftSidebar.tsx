@@ -317,7 +317,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
           creatingProject={creatingProject}
         />
         <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 text-center gap-4">
-          <p className="font-[var(--font-display)] italic text-xl text-foreground/70">尚无作品</p>
+          <p className="font-display text-display italic text-foreground/70">尚无作品</p>
           <p className="text-xs text-muted-foreground leading-relaxed">
             在终端 Claude Code<br />
             输入"开始角色工作流"开始建档
@@ -607,7 +607,7 @@ function ProjectGroup({
             {project.name}
           </span>
         )}
-        <span className="text-[10px] tabular-nums text-muted-foreground/70 px-1">
+        <span className="text-xs tabular-nums text-muted-foreground/70 px-1">
           {chars.length}
         </span>
         <button
@@ -663,7 +663,7 @@ function StatusBadge({ status, isActive }: { status: CharacterEntry['status']; i
   }
   const colorClass: Record<string, string> = {
     pending: 'bg-[color:var(--status-pending)]',
-    running: 'bg-[color:var(--status-running)] animate-pulse shadow-[0_0_8px_var(--status-running)]',
+    running: 'bg-[color:var(--status-running)] animate-pulse',
     pending_confirm: 'bg-[color:var(--status-running)]',
     done: 'bg-[color:var(--status-done)]',
     failed: 'bg-[color:var(--status-failed)]',

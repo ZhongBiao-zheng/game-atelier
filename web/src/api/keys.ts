@@ -15,7 +15,6 @@ export interface KeyView {
   modalities?: ApiModality[];
   notes: string;
   created_at: string;
-  is_default: boolean;
 }
 
 export interface KeyCreatePayload {
@@ -51,14 +50,13 @@ export function modelModality(
   return km.includes('video') && !km.includes('image') ? 'video' : 'image';
 }
 
-export async function listKeys(): Promise<{ keys: KeyView[]; default_alias: string | null }> {
+export async function listKeys(): Promise<{ keys: KeyView[] }> {
   const r = await fetch('/api/keys');
   if (!r.ok) throw new Error(`listKeys: ${r.status}`);
   return r.json();
 }
 
-/** Returns the raw access_key for one-time reveal. */
-export async function createKey(payload: KeyCreatePayload): Promise<{ secret_revealed: string }> {
+export async function createKey(payload: KeyCreatePayload): Promise<{ alias: string }> {
   const r = await fetch('/api/keys', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -85,7 +83,28 @@ export async function deleteKey(alias: string): Promise<void> {
   if (!r.ok) throw new Error(`deleteKey ${r.status}`);
 }
 
-export async function setDefaultKey(alias: string): Promise<void> {
-  const r = await fetch(`/api/keys/${encodeURIComponent(alias)}/default`, { method: 'POST' });
-  if (!r.ok) throw new Error(`setDefault ${r.status}`);
+/** 上游模型列表条目（/api/keys/models-preview 归一化结果）；modality null = 非出图模型。 */
+export interface RemoteModel {
+  id: string;
+  name: string;
+  modality: ModelModality | null;
+}
+
+export async function previewModels(payload: {
+  alias?: string | null;
+  base_url?: string | null;
+  access_key?: string | null;
+}): Promise<{ models: RemoteModel[] }> {
+  const r = await fetch('/api/keys/models-preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const body = await r.text();
+    let detail = body;
+    try { detail = JSON.parse(body).detail ?? body; } catch { /* keep raw */ }
+    throw new Error(String(detail));
+  }
+  return r.json();
 }

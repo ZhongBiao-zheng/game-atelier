@@ -29,16 +29,30 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-glass: var(--glass);
+  --color-scrim: var(--scrim);
 
   --color-status-pending: var(--status-pending);
   --color-status-running: var(--status-running);
   --color-status-done: var(--status-done);
   --color-status-failed: var(--status-failed);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* 圆角层级：面越大角越大（DESIGN.md Layout） */
+  --radius-sm: 6px;   /* tag、badge */
+  --radius-md: 10px;  /* 按钮、输入框 */
+  --radius-lg: 16px;  /* 卡片、媒体瓦片 */
+  --radius-xl: 20px;  /* 浮层：输入壳、popover、dialog */
+  --radius-2xl: 20px; /* 过渡期与 xl 同值，类名应归一到 xl */
+
+  /* 字阶：xs/sm/base 三档 + 唯一大跳跃（serif 400 专用） */
+  --text-display: 2.25rem;
+  --text-display--line-height: 2.75rem;
+
+  /* 玻璃模糊：唯一允许的 backdrop-blur 档位 */
+  --blur-glass: 28px;
+
+  /* 小帽标签字距 */
+  --tracking-label: 0.18em;
 
   --font-display: "Instrument Serif", ui-serif, Georgia, serif;
   --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
@@ -46,14 +60,14 @@
 }
 
 :root {
-  --radius: 0.5rem;
-
   /* Atelier — warm dark palette (see DESIGN.md) */
+
+  /* 表面阶梯（暖中性，R≥G≥B）：画布 → 卡片 → 弹层 → hover */
   --background: #0F0E0D;
   --foreground: #EDEAE3;
   --card: #1B1917;
   --card-foreground: #EDEAE3;
-  --popover: #1B1917;
+  --popover: #221F1C;
   --popover-foreground: #EDEAE3;
   --primary: #D4A574;
   --primary-foreground: #1B1917;
@@ -65,8 +79,14 @@
   --accent-foreground: #EDEAE3;
   --destructive: #C95C5C;
   --destructive-foreground: #FFFFFF;
-  --border: #2A2725;
-  --input: #2A2725;
+
+  /* 玻璃与遮罩：深度靠玻璃不靠阴影（DESIGN.md Elevation） */
+  --glass: rgba(27, 25, 23, 0.66);
+  --scrim: rgba(8, 7, 6, 0.62);
+
+  /* 发丝边界：暖白 alpha，10% 默认 / 16% 输入框 */
+  --border: rgba(237, 234, 227, 0.10);
+  --input: rgba(237, 234, 227, 0.16);
   --ring: #D4A574;
 
   /* Status colors — warm-aligned semantic palette */
@@ -81,11 +101,8 @@
   html, body, #root { height: 100%; }
   body {
     @apply text-foreground;
+    /* 画廊墙：纯平画布，无渐变 —— 作品是页面唯一的颜色 */
     background-color: var(--background);
-    background-image:
-      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(212, 165, 116, 0.045), transparent 60%),
-      radial-gradient(ellipse 60% 40% at 100% 100%, rgba(212, 165, 116, 0.025), transparent 65%);
-    background-attachment: fixed;
     font-family: var(--font-sans);
     font-size: 14px;
     font-feature-settings: "cv11", "ss01", "ss03";
