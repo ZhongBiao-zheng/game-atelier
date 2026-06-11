@@ -1,5 +1,5 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Box, Coins, Film, ImageIcon, Images, Music, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
+import { ArrowUp, Box, ChevronRight, Coins, Film, ImageIcon, Images, Music, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
 import { modelModality, type KeyView } from '@/api/keys';
 import { computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
 import { providerLabel } from '@/lib/providerLabels';
@@ -15,6 +15,7 @@ import {
   type FrameSlots,
 } from './VideoReferenceAssets';
 import { RatioIcon } from './RatioIcon';
+import { ToolbarPopover } from './ToolbarPopover';
 import type { VideoControlCaps, VideoMode, VideoQuality } from '@/lib/videoControlCaps';
 import type { JobKind } from '@/schema/jobs';
 
@@ -145,6 +146,16 @@ export function PromptInput({
   const setText = onValueChange ?? setInternalText;
   const [openPanel, setOpenPanel] = useState<'kind' | 'provider' | 'model' | 'size' | 'count' | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
+  // 控件 chip 外壳锚点：弹窗 portal 出横滚容器后靠这些 ref 定位。
+  const kindRef = useRef<HTMLDivElement>(null);
+  const providerRef = useRef<HTMLDivElement>(null);
+  const modelRef = useRef<HTMLDivElement>(null);
+  const sizeRef = useRef<HTMLDivElement>(null);
+  const countRef = useRef<HTMLDivElement>(null);
+  // 控件行横滚：track 容器 + 是否还能右滚 + 底栏 hover（决定右缘箭头是否浮现）。
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const [barHovering, setBarHovering] = useState(false);
   const [refExpanded, setRefExpanded] = useState(false);
   const [refHovered, setRefHovered] = useState<number | null>(null);
   const refFileInputRef = useRef<HTMLInputElement>(null);
@@ -166,16 +177,21 @@ export function PromptInput({
   );
   useEffect(() => () => refPreviews.forEach((u) => { if (u) URL.revokeObjectURL(u); }), [refPreviews]);
 
+  // 控件行能否右滚 → 决定右缘渐隐 + 箭头是否出现。内容（厂商/模型/模式）变化都会改 scrollWidth。
+  const updateScroll = useCallback(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 1);
+  }, []);
+
   useEffect(() => {
-    if (!openPanel) return;
-    function handleMouseDown(e: MouseEvent) {
-      if (shellRef.current && !shellRef.current.contains(e.target as Node)) {
-        setOpenPanel(null);
-      }
-    }
-    document.addEventListener('mousedown', handleMouseDown);
-    return () => document.removeEventListener('mousedown', handleMouseDown);
-  }, [openPanel]);
+    updateScroll();
+    const el = trackRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(updateScroll);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [updateScroll, isVideo, videoMode, model, providerAlias, providers, collapsed]);
   // 厂商/模型列表按当前生成类型过滤：模型级 modality 标注优先，未标注按 key 级 modalities 兜底。
   const wantedModality = isVideo ? 'video' : 'image';
   const visibleProviders = providers.filter(
@@ -209,10 +225,14 @@ export function PromptInput({
   const costYuan = isHkAggregator(provider?.base_url)
     ? estimateCostYuan({ model: selectedModel?.id, quality, n: isVideo ? videoCount : count })
     : null;
-  const panelPosition = menuDirection === 'down'
-    ? 'top-full mt-3'
-    : 'bottom-full mb-3';
   const minPx = 1;
+  // 控件行右缘渐隐 + 箭头几何：悬停时为箭头让出 36px 槽位，渐隐带 40px 落在箭头左侧。
+  const SCROLL_ARROW = 36;
+  const SCROLL_FADE = 40;
+  const scrollReserve = barHovering ? SCROLL_ARROW : 0;
+  const scrollBlockWidth = scrollReserve + SCROLL_FADE;
+  const trackMask =
+    `linear-gradient(to right, black calc(100% - ${scrollBlockWidth}px), transparent calc(100% - ${scrollReserve}px))`;
 
   useEffect(() => {
     const { w, h } = computeStudioPixelSize(ratio, resolution, provider?.provider);
@@ -511,10 +531,23 @@ export function PromptInput({
           collapsed ? 'grid-rows-[0fr] opacity-0 pointer-events-none' : 'grid-rows-[1fr] opacity-100'
         }`}
       >
-        <div className={`min-h-0 ${collapsed ? 'overflow-hidden' : ''}`}>
-      <div className="flex flex-wrap justify-between items-center gap-3 shrink-0">
-        <div className="flex min-w-0 flex-wrap gap-2">
-          <div data-testid="kind-control-wrap" className="relative">
+        <div className={`min-h-0 min-w-0 ${collapsed ? 'overflow-hidden' : ''}`}>
+      <div
+        onMouseEnter={() => setBarHovering(true)}
+        onMouseLeave={() => setBarHovering(false)}
+        className="flex items-center gap-3"
+      >
+        {/* 控件行：单排横向滚动，超出宽度的控件向右缘渐隐（mask 逐像素淡到背景），
+            悬停底栏任意处右缘浮现实心箭头胶囊（最顶层），点它或触控板横滑查看被隐控件。
+            弹窗已 portal 出本容器，不受 overflow-x:auto 的纵向裁剪。 */}
+        <div className="relative flex-1 min-w-0">
+          <div
+            ref={trackRef}
+            onScroll={updateScroll}
+            className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            style={canScrollRight ? { maskImage: trackMask, WebkitMaskImage: trackMask } : undefined}
+          >
+          <div ref={kindRef} data-testid="kind-control-wrap" className="relative shrink-0">
             <ControlButton
               active={openPanel === 'kind'}
               aria-label="选择生成模式"
@@ -523,8 +556,15 @@ export function PromptInput({
               {isVideo ? <Video size={14} aria-hidden /> : <ImageIcon size={14} aria-hidden />}
               {isVideo ? '视频生成' : '图片生成'}
             </ControlButton>
-            {openPanel === 'kind' && (
-              <div role="listbox" aria-label="生成模式列表" className={`absolute left-0 ${panelPosition} z-20 w-[200px] rounded-xl border border-border bg-card p-2`}>
+            <ToolbarPopover
+              open={openPanel === 'kind'}
+              onClose={() => setOpenPanel(null)}
+              anchorRef={kindRef}
+              direction={menuDirection}
+              role="listbox"
+              aria-label="生成模式列表"
+              className="w-[200px] rounded-xl border border-border bg-card p-2"
+            >
                 <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
                 {([
                   { key: 'image', label: '图片生成', icon: <ImageIcon size={18} aria-hidden /> },
@@ -545,11 +585,10 @@ export function PromptInput({
                     {item.label}
                   </button>
                 ))}
-              </div>
-            )}
+            </ToolbarPopover>
           </div>
 
-          <div data-testid="provider-control-wrap" className="relative">
+          <div ref={providerRef} data-testid="provider-control-wrap" className="relative shrink-0">
             <ControlButton
               active={openPanel === 'provider'}
               aria-label="选择厂商"
@@ -558,8 +597,15 @@ export function PromptInput({
             >
               <Building2 size={14} aria-hidden /> {providerDisplayName}
             </ControlButton>
-            {openPanel === 'provider' && (
-              <div role="listbox" aria-label="选择厂商列表" className={`absolute left-0 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-xl border border-border bg-card p-2`}>
+            <ToolbarPopover
+              open={openPanel === 'provider'}
+              onClose={() => setOpenPanel(null)}
+              anchorRef={providerRef}
+              direction={menuDirection}
+              role="listbox"
+              aria-label="选择厂商列表"
+              className="w-[280px] max-h-[400px] overflow-y-auto rounded-xl border border-border bg-card p-2"
+            >
                 <div className="px-3 py-2 text-sm text-muted-foreground">选择厂商</div>
                 {visibleProviders.map((item) => (
                   <button
@@ -581,11 +627,10 @@ export function PromptInput({
                     </span>
                   </button>
                 ))}
-              </div>
-            )}
+            </ToolbarPopover>
           </div>
 
-          <div data-testid="model-control-wrap" className="relative">
+          <div ref={modelRef} data-testid="model-control-wrap" className="relative shrink-0">
             <ControlButton
               active={openPanel === 'model'}
               aria-label="选择模型"
@@ -594,8 +639,15 @@ export function PromptInput({
             >
               <Box size={14} aria-hidden /> {selectedModel ? selectedModel.name : '未配置模型'}
             </ControlButton>
-            {openPanel === 'model' && (
-              <div role="listbox" aria-label="选择模型列表" className={`absolute left-0 ${panelPosition} z-20 w-[280px] max-h-[400px] overflow-y-auto rounded-xl border border-border bg-card p-2`}>
+            <ToolbarPopover
+              open={openPanel === 'model'}
+              onClose={() => setOpenPanel(null)}
+              anchorRef={modelRef}
+              direction={menuDirection}
+              role="listbox"
+              aria-label="选择模型列表"
+              className="w-[280px] max-h-[400px] overflow-y-auto rounded-xl border border-border bg-card p-2"
+            >
                 <div className="px-3 py-2 text-sm text-muted-foreground">选择模型：{providerDisplayName}</div>
                 {models.map((item) => (
                   <button
@@ -616,13 +668,12 @@ export function PromptInput({
                     </span>
                   </button>
                 ))}
-              </div>
-            )}
+            </ToolbarPopover>
           </div>
 
           {!isVideo && (
             <>
-          <div data-testid="size-control-wrap" className="relative">
+          <div ref={sizeRef} data-testid="size-control-wrap" className="relative shrink-0">
             <ControlButton
               active={openPanel === 'size'}
               aria-label="选择比例和分辨率"
@@ -635,8 +686,14 @@ export function PromptInput({
                 ? (resolution === '2K' ? '高清 2K' : '超清 4K')
                 : (caps.qualities ? (QUALITY_LABELS[quality] ?? quality) : null)}
             </ControlButton>
-            {openPanel === 'size' && (
-              <div data-testid="size-popover" className={`absolute left-0 ${panelPosition} z-20 w-[320px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3`}>
+            <ToolbarPopover
+              open={openPanel === 'size'}
+              onClose={() => setOpenPanel(null)}
+              anchorRef={sizeRef}
+              direction={menuDirection}
+              data-testid="size-popover"
+              className="w-[320px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3"
+            >
                 <div className="space-y-4">
                   <section className="w-[296px]">
                     <div className="py-1 px-1 text-xs text-muted-foreground">比例</div>
@@ -780,11 +837,10 @@ export function PromptInput({
                     </section>
                   )}
                 </div>
-              </div>
-            )}
+            </ToolbarPopover>
           </div>
 
-          <div data-testid="count-control-wrap" className="relative">
+          <div ref={countRef} data-testid="count-control-wrap" className="relative shrink-0">
             <ControlButton
               active={openPanel === 'count'}
               aria-label="选择出图数量"
@@ -792,8 +848,15 @@ export function PromptInput({
             >
               <Images size={14} aria-hidden /> {count} 张
             </ControlButton>
-            {openPanel === 'count' && (
-              <div role="listbox" aria-label="选择出图数量列表" className={`absolute left-0 ${panelPosition} z-20 rounded-xl border border-border bg-card p-3`}>
+            <ToolbarPopover
+              open={openPanel === 'count'}
+              onClose={() => setOpenPanel(null)}
+              anchorRef={countRef}
+              direction={menuDirection}
+              role="listbox"
+              aria-label="选择出图数量列表"
+              className="rounded-xl border border-border bg-card p-3"
+            >
                 <CountOptions
                   value={count}
                   onSelect={(item) => {
@@ -801,8 +864,7 @@ export function PromptInput({
                     setOpenPanel(null);
                   }}
                 />
-              </div>
-            )}
+            </ToolbarPopover>
           </div>
             </>
           )}
@@ -824,7 +886,7 @@ export function PromptInput({
                 onGenerateAudioChange={(g) => onGenerateAudioChange?.(g)}
                 menuDirection={menuDirection}
               />
-              <div data-testid="video-count-control-wrap" className="relative">
+              <div ref={countRef} data-testid="video-count-control-wrap" className="relative shrink-0">
                 <ControlButton
                   active={openPanel === 'count'}
                   aria-label="选择视频生成数量"
@@ -832,8 +894,15 @@ export function PromptInput({
                 >
                   <Images size={14} aria-hidden /> {videoCount} 条
                 </ControlButton>
-                {openPanel === 'count' && (
-                  <div role="listbox" aria-label="选择视频生成数量列表" className={`absolute left-0 ${panelPosition} z-20 rounded-xl border border-border bg-card p-3`}>
+                <ToolbarPopover
+                  open={openPanel === 'count'}
+                  onClose={() => setOpenPanel(null)}
+                  anchorRef={countRef}
+                  direction={menuDirection}
+                  role="listbox"
+                  aria-label="选择视频生成数量列表"
+                  className="rounded-xl border border-border bg-card p-3"
+                >
                     <CountOptions
                       value={videoCount}
                       onSelect={(item) => {
@@ -841,13 +910,28 @@ export function PromptInput({
                         setOpenPanel(null);
                       }}
                     />
-                  </div>
-                )}
+                </ToolbarPopover>
               </div>
             </>
           )}
+          </div>
+          {/* 渐隐区拦截层：被盖住的控件不可 hover / 点击，必须先滚出来。 */}
+          {canScrollRight && (
+            <div aria-hidden className="absolute right-0 inset-y-0" style={{ width: scrollBlockWidth }} />
+          )}
+          {/* 右缘滚动箭头：实心胶囊、浮在最顶层，悬停底栏任意处即现。 */}
+          <button
+            type="button"
+            aria-label="向右滚动查看更多"
+            onClick={() => trackRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
+            className={`absolute right-0 top-1/2 -translate-y-1/2 inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-secondary text-foreground transition-opacity ${
+              canScrollRight && barHovering ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+            }`}
+          >
+            <ChevronRight size={17} aria-hidden />
+          </button>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           {costYuan !== null && (
             <span
               data-testid="credit-cost-hint"

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { Clapperboard, Volume2, VolumeX } from 'lucide-react';
 import {
   VIDEO_MODE_LABELS,
@@ -9,6 +9,7 @@ import {
   type VideoQuality,
 } from '@/lib/videoControlCaps';
 import { RatioIcon } from './RatioIcon';
+import { ToolbarPopover } from './ToolbarPopover';
 
 interface Props {
   caps: VideoControlCaps;
@@ -49,7 +50,6 @@ export function VideoControls({
 }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const panelPosition = menuDirection === 'down' ? 'top-full mt-3' : 'bottom-full mb-3';
   const effectiveQuality = quality ?? caps.qualities?.[0];
   const summary = [
     VIDEO_MODE_LABELS[mode],
@@ -58,15 +58,6 @@ export function VideoControls({
     caps.qualities && effectiveQuality ? VIDEO_QUALITY_LABELS[effectiveQuality] : null,
     caps.durations.length > 0 ? `${duration}s` : null,
   ].filter(Boolean).join(' · ');
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
 
   return (
     <div ref={wrapRef} className="relative">
@@ -88,12 +79,15 @@ export function VideoControls({
         )}
       </button>
 
-      {open && (
-        <div
-          data-testid="video-settings-popover"
-          className={`absolute left-0 ${panelPosition} z-20 w-[320px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3`}
-        >
-          <div className="space-y-4">
+      <ToolbarPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={wrapRef}
+        direction={menuDirection}
+        data-testid="video-settings-popover"
+        className="w-[320px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3"
+      >
+        <div className="space-y-4">
             {caps.modes.length > 1 && (
               <Section title="生成方式">
                 <div role="listbox" aria-label="选择生成方式" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
@@ -180,8 +174,7 @@ export function VideoControls({
               </Section>
             )}
           </div>
-        </div>
-      )}
+      </ToolbarPopover>
     </div>
   );
 }

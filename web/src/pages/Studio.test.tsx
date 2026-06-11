@@ -304,7 +304,7 @@ describe('Studio', () => {
     expect(sizeButton.parentElement?.nextElementSibling).toBe(countButton.parentElement);
 
     fireEvent.click(countButton);
-    expect(screen.getByRole('listbox', { name: '选择出图数量列表' })).toHaveClass('absolute');
+    expect(screen.getByRole('listbox', { name: '选择出图数量列表' })).toHaveAttribute('data-toolbar-popover');
     fireEvent.click(screen.getByRole('option', { name: '4' }));
     expect(countButton).toHaveTextContent('4 张');
 
@@ -526,7 +526,11 @@ describe('Studio', () => {
   it('opens prompt menus upward on the studio page', async () => {
     renderStudio();
     fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
-    expect(screen.getByRole('listbox', { name: '选择厂商列表' })).toHaveClass('bottom-full');
+    // 弹窗 portal 后定位走 inline fixed：向上弹 = 设 bottom、不设 top。
+    const panel = screen.getByRole('listbox', { name: '选择厂商列表' });
+    expect(panel).toHaveAttribute('data-toolbar-popover');
+    expect(panel.style.bottom).not.toBe('');
+    expect(panel.style.top).toBe('');
   });
 
   it('anchors prompt popovers to their selected trigger on the studio page', async () => {
@@ -534,18 +538,20 @@ describe('Studio', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
     expect(screen.getByTestId('provider-control-wrap')).toHaveClass('relative');
-    expect(screen.getByRole('listbox', { name: '选择厂商列表' })).toHaveClass('absolute', 'left-0', 'bottom-full');
-    expect(screen.getByRole('listbox', { name: '选择厂商列表' })).not.toHaveClass('sm:left-40');
+    const providerPanel = screen.getByRole('listbox', { name: '选择厂商列表' });
+    expect(providerPanel).toHaveAttribute('data-toolbar-popover');
+    expect(providerPanel.style.bottom).not.toBe('');
 
     fireEvent.click(screen.getByRole('button', { name: /选择模型/ }));
     expect(screen.getByTestId('model-control-wrap')).toHaveClass('relative');
-    expect(screen.getByRole('listbox', { name: '选择模型列表' })).toHaveClass('absolute', 'left-0', 'bottom-full');
-    expect(screen.getByRole('listbox', { name: '选择模型列表' })).not.toHaveClass('sm:left-64');
+    const modelPanel = screen.getByRole('listbox', { name: '选择模型列表' });
+    expect(modelPanel).toHaveAttribute('data-toolbar-popover');
+    expect(modelPanel.style.bottom).not.toBe('');
 
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     expect(screen.getByTestId('size-control-wrap')).toHaveClass('relative');
-    expect(screen.getByTestId('size-popover')).toHaveClass('absolute', 'left-0', 'bottom-full');
-    expect(screen.getByTestId('size-popover')).not.toHaveClass('sm:left-96');
+    expect(screen.getByTestId('size-popover')).toHaveAttribute('data-toolbar-popover');
+    expect(screen.getByTestId('size-popover').style.bottom).not.toBe('');
   });
 
   it('renders the size panel without smart ratio and with emphasized 1:1 option', async () => {
