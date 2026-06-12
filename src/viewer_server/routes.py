@@ -109,9 +109,31 @@ def get_spec(character_id: str) -> dict:
     return {"content": p.read_text(encoding="utf-8")}
 
 
+_THUMBNAIL_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def _latest_portrait(char_dir: Path, root: Path) -> str | None:
+    """名册缩略图 = portrait 目录 mtime 最新的图片，返回 data-root 相对路径。
+
+    走文件 mtime 而非 job JSON：画师手动上传的立绘没有 job，也应入选。
+    """
+    portrait = char_dir / "portrait"
+    if not portrait.is_dir():
+        return None
+    best: Path | None = None
+    best_mtime = -1.0
+    for f in portrait.iterdir():
+        if f.is_file() and f.suffix.lower() in _THUMBNAIL_EXTS:
+            mtime = f.stat().st_mtime
+            if mtime > best_mtime:
+                best, best_mtime = f, mtime
+    return str(best.relative_to(root)) if best else None
+
+
 @router.get("/characters", response_model=list[CharacterEntry])
 def get_characters() -> list[CharacterEntry]:
-    chars_dir = _project_root() / "characters"
+    root = _project_root()
+    chars_dir = root / "characters"
     if not chars_dir.exists():
         return []
     out: list[CharacterEntry] = []
@@ -123,6 +145,7 @@ def get_characters() -> list[CharacterEntry]:
             continue
         out.append(CharacterEntry(
             id=d.name, name=_display_name(spec), status="idle", latest_job_id=None,
+            thumbnail=_latest_portrait(d, root),
         ))
     return out
 

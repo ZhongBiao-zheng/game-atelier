@@ -35,7 +35,6 @@ describe('CharacterGallery', () => {
       <CharacterGallery
         characterId="cao-cao"
         characterName="曹操"
-        detailMode={false}
         onSelectImage={vi.fn()}
         sseSignal={0}
       />,
@@ -76,7 +75,6 @@ describe('CharacterGallery', () => {
       <CharacterGallery
         characterId="cao-cao"
         characterName="曹操"
-        detailMode={false}
         onSelectImage={vi.fn()}
         sseSignal={0}
       />,
@@ -121,7 +119,6 @@ describe('CharacterGallery', () => {
       <CharacterGallery
         characterId="cao-cao"
         characterName="曹操"
-        detailMode={false}
         onSelectImage={vi.fn()}
         sseSignal={0}
       />,
@@ -163,7 +160,6 @@ describe('CharacterGallery', () => {
       <CharacterGallery
         characterId="cao-cao"
         characterName="曹操"
-        detailMode={false}
         onSelectImage={vi.fn()}
         sseSignal={0}
       />,
@@ -192,7 +188,6 @@ describe('CharacterGallery', () => {
         characterId="cao-cao"
         characterName="曹操"
         initialTab="promo"
-        detailMode={false}
         onSelectImage={vi.fn()}
         sseSignal={0}
       />,

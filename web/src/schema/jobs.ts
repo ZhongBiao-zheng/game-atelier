@@ -70,6 +70,8 @@ export interface CharacterEntry {
   name: string;
   status: 'idle' | 'running' | 'done' | 'failed';
   latest_job_id: string | null;
+  // 名册缩略图：characters/<id>/portrait/ 最新图的 data-root 相对路径 — 与 schemas.py 同步
+  thumbnail?: string | null;
 }
 
 export interface ActiveCharacterFile {

@@ -1,14 +1,22 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Trash2, CheckCircle2, Copy, Save } from 'lucide-react';
+import { ArrowLeft, Trash2, CheckCircle2, Copy, PanelLeftOpen, Save } from 'lucide-react';
 import type { Job, WebEditableJobPatch } from '../schema/jobs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 
-interface Props { jobId: string; path: string; onBack: () => void; onLightbox?: (src: string) => void }
+interface Props {
+  jobId: string;
+  path: string;
+  onBack: () => void;
+  onLightbox?: (src: string) => void;
+  /** 胶片带已收起：header 最左浮出展开钮 */
+  stripCollapsed?: boolean;
+  onExpandStrip?: () => void;
+}
 
-export function ImageDetail({ jobId, path, onBack, onLightbox }: Props) {
+export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, onExpandStrip }: Props) {
   const [job, setJob] = useState<Job | null>(null);
   const [patch, setPatch] = useState<WebEditableJobPatch>({});
   const [toast, setToast] = useState<string | null>(null);
@@ -28,7 +36,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox }: Props) {
 
   if (!job) {
     return (
-      <section className="h-full border-l border-border/60 bg-background flex items-center justify-center">
+      <section className="h-full bg-background flex items-center justify-center">
         <p className="font-[var(--font-display)] italic text-muted-foreground">加载中…</p>
       </section>
     );
@@ -61,12 +69,24 @@ export function ImageDetail({ jobId, path, onBack, onLightbox }: Props) {
   }
 
   return (
-    <section className="h-full border-l border-border/60 bg-background flex flex-col overflow-hidden">
-      <header className="flex items-center justify-between px-6 py-4 border-b border-border/40">
-        <Button variant="ghost" size="sm" onClick={onBack} aria-label="返回">
-          <ArrowLeft className="size-4" />
-          返回画廊
-        </Button>
+    <section className="h-full bg-background flex flex-col overflow-hidden">
+      <header className="flex items-center justify-between px-6 py-3.5 border-b border-border/40 shrink-0">
+        <div className="flex items-center gap-2">
+          {stripCollapsed && onExpandStrip && (
+            <button
+              onClick={onExpandStrip}
+              aria-label="展开胶片带"
+              title="展开胶片带"
+              className="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-transparent p-0 text-muted-foreground cursor-pointer transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <PanelLeftOpen className="size-3.5" />
+            </button>
+          )}
+          <Button variant="ghost" size="sm" onClick={onBack} aria-label="返回">
+            <ArrowLeft className="size-4" />
+            返回画廊
+          </Button>
+        </div>
         <div className="flex items-center gap-3">
           <Button
             size="sm"
@@ -90,31 +110,30 @@ export function ImageDetail({ jobId, path, onBack, onLightbox }: Props) {
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto">
-        <div className="px-8 pt-8 pb-6 flex items-center justify-center bg-background">
-          <div className="relative inline-block">
-            <img
-              src={`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`}
-              alt="大图"
-              onClick={() => onLightbox?.(`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`)}
-              className="max-h-[68vh] max-w-full object-contain rounded-lg border border-border cursor-zoom-in"
-            />
-          </div>
+      {/* 研究台双栏：图（左，居中）+ 档案（右 384px）——改 prompt 时图不离开视线 */}
+      <div className="flex-1 grid grid-cols-[minmax(0,1fr)_384px] min-h-0">
+        <div className="grid place-items-center overflow-auto p-8">
+          <img
+            src={`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`}
+            alt="大图"
+            onClick={() => onLightbox?.(`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`)}
+            className="max-h-[72vh] max-w-full object-contain rounded-lg border border-border cursor-zoom-in"
+          />
         </div>
 
-        <div className="px-8 pb-8 space-y-6 max-w-[760px] mx-auto w-full">
+        <aside className="border-l border-border overflow-y-auto px-6 py-6 space-y-6 min-w-0">
           <ImageIdChip characterId={job.character_id} path={path} />
 
           <Field label="prompt">
             <Textarea
               value={patch.prompt ?? job.prompt}
               onChange={e => setPatch({ ...patch, prompt: e.target.value })}
-              className="min-h-[200px] font-mono text-sm leading-[1.7] resize-y bg-card/50"
+              className="min-h-[220px] font-mono text-sm leading-[1.7] resize-y bg-card/50"
               spellCheck={false}
             />
           </Field>
 
-          <div className="grid grid-cols-2 gap-5">
+          <div className="grid grid-cols-2 gap-4">
             <Field label="model">
               <Input
                 value={patch.model ?? job.model}
@@ -134,12 +153,12 @@ export function ImageDetail({ jobId, path, onBack, onLightbox }: Props) {
 
           <Separator className="opacity-50" />
 
-          <dl className="grid grid-cols-[100px_1fr] gap-y-2 gap-x-4 text-xs leading-relaxed">
+          <dl className="grid grid-cols-[84px_1fr] gap-y-2 gap-x-3 text-xs leading-relaxed">
             <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">job_id</dt>
             <dd className="font-mono text-muted-foreground break-all">{job.job_id}</dd>
 
             <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">submitted</dt>
-            <dd className="font-mono text-muted-foreground">{job.submitted_at}</dd>
+            <dd className="font-mono text-muted-foreground break-all">{job.submitted_at}</dd>
 
             <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">path</dt>
             <dd className="font-mono text-muted-foreground break-all">{path}</dd>
@@ -151,7 +170,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox }: Props) {
               <span>{toast}</span>
             </div>
           )}
-        </div>
+        </aside>
       </div>
     </section>
   );

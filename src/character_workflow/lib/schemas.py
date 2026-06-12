@@ -112,6 +112,8 @@ class CharacterEntry(BaseModel):
     name: str
     status: str
     latest_job_id: str | None
+    # 名册缩略图：characters/<id>/portrait/ 下最新图片的 data-root 相对路径（无立绘为 None）
+    thumbnail: str | None = None
 
 
 class ActiveCharacterFile(BaseModel):

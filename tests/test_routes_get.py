@@ -91,6 +91,28 @@ def test_get_characters_lists_character_dirs(client):
     # Display name comes from first `# heading`, not directory name.
     by_id = {c["id"]: c for c in entries}
     assert by_id["shadow"]["name"] == "暗影刺客女"
+    # 无立绘 → thumbnail 为 None
+    assert by_id["shadow"]["thumbnail"] is None
+
+
+def test_get_characters_thumbnail_is_latest_portrait(client, isolated_data_root):
+    import os
+
+    portrait = isolated_data_root / "characters" / "shadow" / "portrait"
+    portrait.mkdir(parents=True, exist_ok=True)
+    old = portrait / "v1.png"
+    new = portrait / "v2.png"
+    old.write_bytes(b"old")
+    new.write_bytes(b"new")
+    (portrait / "prompt-v1.md").write_text("not an image")
+    # mtime 决定最新，与文件名无关
+    os.utime(old, (1_000_000_000, 1_000_000_000))
+    os.utime(new, (2_000_000_000, 2_000_000_000))
+
+    r = client.get("/api/characters")
+    assert r.status_code == 200
+    by_id = {c["id"]: c for c in r.json()}
+    assert by_id["shadow"]["thumbnail"] == "characters/shadow/portrait/v2.png"
 
 
 def test_get_home_returns_user_home(client):

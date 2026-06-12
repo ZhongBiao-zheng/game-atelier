@@ -1,13 +1,39 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CharacterGallery } from './components/CharacterGallery';
 import { ImageDetail } from './components/ImageDetail';
+import { Filmstrip } from './components/Filmstrip';
 import { FirstRunConfig } from './components/FirstRunConfig';
+import { ResizableDivider } from './components/ResizableDivider';
 import { useSSE } from './hooks/useSSE';
 import { useActiveCharacter } from './hooks/useActiveCharacter';
-import { cn } from '@/lib/utils';
-import type { AssetSlot, CharacterEntry } from './schema/jobs';
+import type { AssetSlot, CharacterEntry, ProjectsFile } from './schema/jobs';
+
+// 弹性分界线参数（与方案 D 节同步）：名册不可收起（无 snap），胶片带 <64 收起
+const ROSTER = { key: 'workshop:roster-width', def: 264, min: 200, max: 400 };
+const STRIP = { key: 'workshop:strip-width', def: 104, min: 72, max: 320, snap: 64 };
+
+function loadWidth(
+  cfg: { key: string; def: number; min: number; max: number },
+  allowZero = false,
+): number {
+  const stored = window.localStorage.getItem(cfg.key);
+  if (stored === null) return cfg.def;
+  const raw = Number(stored);
+  if (!Number.isFinite(raw)) return cfg.def;
+  if (raw === 0) return allowZero ? 0 : cfg.def;
+  return Math.min(cfg.max, Math.max(cfg.min, raw));
+}
+
+/** 兜底顺序与左栏一致：按项目顺序找第一个有成员的项目取其首个角色，否则未分类首个。 */
+function pickFallbackCharacter(chars: CharacterEntry[], pf: ProjectsFile): CharacterEntry | null {
+  for (const p of pf.projects) {
+    const hit = chars.find(c => pf.assignments[c.id] === p.id);
+    if (hit) return hit;
+  }
+  return chars[0] ?? null;
+}
 
 interface Config { image_storage_root: string }
 
@@ -100,10 +126,22 @@ function ThreeColumnLayout({
     }
   }, [routedCharacterId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 进入工坊：选活跃角色；指针为空或指向已不存在的角色时，兜底第一个项目的第一个角色
   useEffect(() => {
-    if (!routedCharacterId && !selected && activeId) {
-      setSelected({ id: activeId, name: '' });
-    }
+    if (routedCharacterId || selected || activeId === undefined) return;
+    let cancelled = false;
+    Promise.all([
+      fetch('/api/characters').then(r => r.json() as Promise<CharacterEntry[]>),
+      fetch('/api/projects').then(r => r.json() as Promise<ProjectsFile>),
+    ])
+      .then(([chars, pf]) => {
+        if (cancelled) return;
+        const active = activeId ? chars.find(c => c.id === activeId) : undefined;
+        const pick = active ?? pickFallbackCharacter(chars, pf);
+        if (pick) setSelected({ id: pick.id, name: pick.name });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [activeId, routedCharacterId, selected]);
 
   useEffect(() => {
@@ -125,39 +163,110 @@ function ThreeColumnLayout({
   }, [selected]);
 
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  const detailMode = detailJob !== null;
-  return (
-    <>
-      <div className={cn(
-        'grid h-full',
-        detailMode
-          ? 'grid-cols-[280px_360px_1fr]'
-          : 'grid-cols-[280px_1fr]',
-      )}>
-        <LeftSidebar
-          sseSignal={sseSignal}
-          selectedId={selected?.id}
-          onSelect={(id, name) => setSelected({ id, name })}
-          onDelete={(id) => {
-            if (selected?.id === id) setSelected(null);
-          }}
-        />
-        <CharacterGallery
-          characterId={selected?.id ?? null}
-          characterName={selected?.name ?? null}
-          initialTab={routedAssetSlot}
-          detailMode={detailMode}
-          onSelectImage={(path, jobId) => setDetailJob({ path, jobId })}
-          sseSignal={sseSignal}
-        />
-        {detailJob === null
-          ? null
-          : <ImageDetail
+
+  // 弹性面板宽度：名册只 clamp 不收起；胶片带可收起为 0，lastStripW 记恢复宽度
+  const [rosterW, setRosterW] = useState(() => loadWidth(ROSTER));
+  const [stripW, setStripW] = useState(() => loadWidth(STRIP, true));
+  const lastStripW = useRef(stripW > 0 ? stripW : STRIP.def);
+  const [detailSlot, setDetailSlot] = useState<AssetSlot>(routedAssetSlot ?? 'portrait');
+
+  useEffect(() => {
+    if (routedAssetSlot) setDetailSlot(routedAssetSlot);
+  }, [routedAssetSlot]);
+
+  const commitRosterW = useCallback((w: number) => {
+    setRosterW(w);
+    window.localStorage.setItem(ROSTER.key, String(w));
+  }, []);
+  const commitStripW = useCallback((w: number) => {
+    setStripW(w);
+    if (w > 0) lastStripW.current = w;
+    window.localStorage.setItem(STRIP.key, String(w));
+  }, []);
+
+  if (detailJob !== null) {
+    return (
+      <>
+        <div
+          className="relative grid h-full"
+          style={{ gridTemplateColumns: `${stripW}px minmax(0,1fr)` }}
+        >
+          {stripW > 0 && selected && (
+            <Filmstrip
+              characterId={selected.id}
+              assetSlot={detailSlot}
+              currentPath={detailJob.path}
+              onSelect={(path, jobId) => setDetailJob({ path, jobId })}
+              sseSignal={sseSignal}
+            />
+          )}
+          <div className="col-start-2 min-w-0">
+            <ImageDetail
               jobId={detailJob.jobId}
               path={detailJob.path}
               onBack={() => setDetailJob(null)}
               onLightbox={setLightboxSrc}
-            />}
+              stripCollapsed={stripW === 0}
+              onExpandStrip={() => commitStripW(lastStripW.current)}
+            />
+          </div>
+          {stripW > 0 && (
+            <ResizableDivider
+              key="strip-divider"
+              width={stripW}
+              min={STRIP.min}
+              max={STRIP.max}
+              snap={STRIP.snap}
+              // 拖过 snap 阈值 = 立即收起定格：divider 随之卸载，pointerup 不会再来，
+              // 所以收起必须在这里直接 commit（持久化 + 截断本次拖拽）
+              onResize={w => (w === 0 ? commitStripW(0) : setStripW(w))}
+              onCommit={commitStripW}
+              label="调整胶片带宽度"
+            />
+          )}
+        </div>
+        {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div
+        className="relative grid h-full"
+        style={{ gridTemplateColumns: `${rosterW}px minmax(0,1fr)` }}
+      >
+        <div className="col-start-1 min-w-0">
+          <LeftSidebar
+            sseSignal={sseSignal}
+            selectedId={selected?.id}
+            onSelect={(id, name) => setSelected({ id, name })}
+            onDelete={(id) => {
+              if (selected?.id === id) setSelected(null);
+            }}
+          />
+        </div>
+        <div className="col-start-2 min-w-0">
+          <CharacterGallery
+            characterId={selected?.id ?? null}
+            characterName={selected?.name ?? null}
+            initialTab={routedAssetSlot}
+            onSelectImage={(path, jobId, slot) => {
+              if (slot) setDetailSlot(slot);
+              setDetailJob({ path, jobId });
+            }}
+            sseSignal={sseSignal}
+          />
+        </div>
+        <ResizableDivider
+          key="roster-divider"
+          width={rosterW}
+          min={ROSTER.min}
+          max={ROSTER.max}
+          onResize={setRosterW}
+          onCommit={commitRosterW}
+          label="调整名册宽度"
+        />
       </div>
       {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
     </>

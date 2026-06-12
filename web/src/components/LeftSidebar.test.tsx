@@ -9,8 +9,8 @@ beforeEach(() => {
       return {
         ok: true,
         json: async () => [
-          { id: 'shadow', name: '暗影', status: 'idle', latest_job_id: null },
-          { id: 'blaze', name: '烈拳猴', status: 'idle', latest_job_id: null },
+          { id: 'shadow', name: '暗影', status: 'idle', latest_job_id: null, thumbnail: 'characters/shadow/portrait/v2.png' },
+          { id: 'blaze', name: '烈拳猴', status: 'idle', latest_job_id: null, thumbnail: null },
         ],
       };
     }
@@ -52,5 +52,21 @@ describe('LeftSidebar', () => {
     expect(screen.queryByText('暗影')).not.toBeInTheDocument();
     expect(screen.getByText('烈拳猴')).toBeInTheDocument();
     expect(onDelete).toHaveBeenCalledWith('shadow');
+  });
+
+  it('renders roster thumbnails with serif-initial fallback', async () => {
+    render(<LeftSidebar sseSignal={0} selectedId="shadow" onSelect={vi.fn()} />);
+
+    const shadowRow = (await screen.findByText('暗影')).closest('li')!;
+    const img = shadowRow.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute('src')).toBe(
+      `/api/gallery/image?path=${encodeURIComponent('characters/shadow/portrait/v2.png')}`,
+    );
+
+    // 无立绘 → serif 首字母占位块
+    const blazeRow = screen.getByText('烈拳猴').closest('li')!;
+    expect(blazeRow.querySelector('img')).toBeNull();
+    expect(blazeRow.textContent).toContain('烈');
   });
 });

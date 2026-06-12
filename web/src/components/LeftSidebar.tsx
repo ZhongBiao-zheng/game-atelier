@@ -309,7 +309,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
 
   if (characters.length === 0 && projects.projects.length === 0) {
     return (
-      <aside className="h-full border-r border-border/60 bg-card/30 flex flex-col">
+      <aside className="h-full border-r border-border flex flex-col">
         <BrandHeader
           onNewCharacter={startNewCharacter}
           onNewProject={startNewProject}
@@ -352,7 +352,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
   }
 
   return (
-    <aside className="h-full border-r border-border/60 bg-card/30 flex flex-col">
+    <aside className="h-full border-r border-border flex flex-col">
       <BrandHeader
         onNewCharacter={startNewCharacter}
         onNewProject={startNewProject}
@@ -360,7 +360,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
         creatingProject={creatingProject}
       />
 
-      <div className="flex-1 overflow-y-auto px-2 py-3">
+      <div className="flex-1 overflow-y-auto px-2 py-2">
         {creatingCharacter && (
           <div className="mb-2 flex items-center gap-1.5 px-2 py-1">
             <UserPlus className="size-3.5 text-muted-foreground shrink-0" />
@@ -434,6 +434,10 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
           </div>
         )}
       </div>
+
+      <footer className="shrink-0 border-t border-border px-5 py-3 font-mono text-xs tabular-nums text-muted-foreground/60">
+        {characters.length} 角色 · {projects.projects.length} 项目
+      </footer>
     </aside>
   );
 
@@ -460,15 +464,19 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
         aria-pressed={isEditing ? undefined : isActive}
         title="双击重命名 · 拖到项目"
         className={cn(
-          'group/char flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors',
+          'group/char relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-sm transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
           isEditing ? 'cursor-text' : 'cursor-pointer',
           isActive
-            ? 'bg-primary text-primary-foreground'
+            ? 'bg-secondary text-foreground'
             : 'text-foreground/85 hover:bg-accent/50 hover:text-foreground',
         )}
       >
-        <StatusBadge status={c.status} isActive={isActive} />
+        {/* 选中态降铜：整行黄铜 → 2px 竖轨 + 头像铜环（激活指示额度） */}
+        {isActive && (
+          <span aria-hidden className="absolute left-0 inset-y-1.5 w-0.5 rounded-full bg-primary" />
+        )}
+        <CharacterAvatar name={c.name} thumbnail={c.thumbnail} active={isActive} />
         {isEditing ? (
           <Input
             ref={inputRef}
@@ -480,22 +488,18 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
               if (e.key === 'Escape') cancelEdit();
             }}
             onClick={e => e.stopPropagation()}
-            className="h-6 text-xs flex-1 bg-background/20 border-background/30"
+            className="h-6 text-xs flex-1"
           />
         ) : (
           <span className="flex-1 truncate">{c.name}</span>
         )}
+        <StatusBadge status={c.status} />
         {!isEditing && (
           <button
             onClick={(e) => deleteCharacter(c, e)}
             aria-label={`删除角色 ${c.name}`}
             title="删除角色（磁盘也会删）"
-            className={cn(
-              'grid place-items-center size-6 rounded bg-transparent border-0 p-0 cursor-pointer opacity-0 transition-opacity group-hover/char:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive',
-              isActive
-                ? 'text-primary-foreground/75 hover:bg-primary-foreground/15 hover:text-primary-foreground'
-                : 'text-muted-foreground hover:bg-destructive/15 hover:text-destructive',
-            )}
+            className="grid place-items-center size-6 rounded bg-transparent border-0 p-0 cursor-pointer opacity-0 transition-opacity group-hover/char:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
           >
             <Trash2 className="size-3.5" />
           </button>
@@ -503,6 +507,37 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
       </li>
     );
   }
+}
+
+/** 名册缩略图：最新立绘；无立绘回退 serif 首字母占位块。 */
+function CharacterAvatar({ name, thumbnail, active }: {
+  name: string;
+  thumbnail?: string | null;
+  active: boolean;
+}) {
+  if (thumbnail) {
+    return (
+      <img
+        src={`/api/gallery/image?path=${encodeURIComponent(thumbnail)}`}
+        alt=""
+        className={cn(
+          'size-7 shrink-0 rounded-sm border border-border object-cover',
+          active && 'ring-1 ring-primary/60',
+        )}
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'grid size-7 shrink-0 place-items-center rounded-sm border border-border bg-card font-display italic text-sm text-muted-foreground',
+        active && 'ring-1 ring-primary/60',
+      )}
+    >
+      {name.slice(0, 1) || '·'}
+    </span>
+  );
 }
 
 interface ProjectGroupProps {
@@ -568,10 +603,10 @@ function ProjectGroup({
         dropIndicator === 'after' && 'border-b-2 border-primary',
       )}
     >
-      <header className="group/header flex items-center gap-1 px-1.5 py-1 text-xs text-muted-foreground select-none">
+      <header className="group/header flex items-center gap-1 px-1.5 py-1.5 text-xs text-muted-foreground select-none">
         <span
           title="拖动排序"
-          className="grid place-items-center size-4 cursor-grab text-muted-foreground/40 hover:text-muted-foreground shrink-0"
+          className="grid place-items-center size-4 cursor-grab text-muted-foreground/40 hover:text-muted-foreground shrink-0 opacity-0 group-hover/header:opacity-100 transition-opacity"
           onMouseDown={e => e.stopPropagation()}
         >
           <GripVertical className="size-3" />
@@ -602,12 +637,12 @@ function ProjectGroup({
             onClick={() => setOpen(o => !o)}
             onDoubleClick={(e) => onRenameStart(project, e)}
             title="双击重命名"
-            className="flex-1 font-semibold text-foreground cursor-pointer truncate"
+            className="flex-1 uppercase tracking-label text-muted-foreground/70 font-medium cursor-pointer truncate"
           >
             {project.name}
           </span>
         )}
-        <span className="text-xs tabular-nums text-muted-foreground/70 px-1">
+        <span className="font-mono text-xs tabular-nums text-muted-foreground/60 px-1">
           {chars.length}
         </span>
         <button
@@ -648,7 +683,7 @@ function DropZone({ label, active, onDrop, onDragOver, onDragLeave, children }: 
       )}
     >
       {label && (
-        <header className="px-1.5 py-1 text-xs text-muted-foreground select-none">
+        <header className="px-1.5 py-1.5 text-xs uppercase tracking-label text-muted-foreground/70 font-medium select-none">
           {label}
         </header>
       )}
@@ -657,9 +692,9 @@ function DropZone({ label, active, onDrop, onDragOver, onDragLeave, children }: 
   );
 }
 
-function StatusBadge({ status, isActive }: { status: CharacterEntry['status']; isActive: boolean }) {
+function StatusBadge({ status }: { status: CharacterEntry['status'] }) {
   if (status === 'idle') {
-    return <span className={cn('size-2 rounded-full shrink-0 border', isActive ? 'border-primary-foreground/40 bg-transparent' : 'border-muted-foreground/25 bg-transparent')} />;
+    return <span className="size-2 rounded-full shrink-0 border border-muted-foreground/25 bg-transparent" />;
   }
   const colorClass: Record<string, string> = {
     pending: 'bg-[color:var(--status-pending)]',
@@ -682,31 +717,37 @@ function BrandHeader({
   creatingCharacter: boolean;
   creatingProject: boolean;
 }) {
+  const iconBtn = cn(
+    'grid size-7 shrink-0 place-items-center rounded-full border border-border bg-transparent p-0',
+    'text-muted-foreground cursor-pointer transition-colors',
+    'hover:bg-secondary hover:text-foreground',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+    'disabled:opacity-40 disabled:cursor-default',
+  );
   return (
-    <header className="flex items-center justify-between px-5 py-4 border-b border-border/60">
-      <div className="flex items-center gap-1">
-        <Button
-          variant="ghost"
-          size="sm"
+    <header className="flex items-center justify-between px-5 py-4">
+      <span className="text-xs uppercase tracking-label text-muted-foreground/70 select-none">
+        名册 · Roster
+      </span>
+      <div className="flex items-center gap-1.5">
+        <button
           onClick={onNewCharacter}
           disabled={creatingCharacter}
+          aria-label="新建角色"
           title="新建角色"
-          className="h-9 px-3 text-sm"
+          className={iconBtn}
         >
-          <UserPlus className="size-4" />
-          新角色
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
+          <UserPlus className="size-3.5" />
+        </button>
+        <button
           onClick={onNewProject}
           disabled={creatingProject}
+          aria-label="新建项目"
           title="新建项目（用来给角色分类）"
-          className="h-9 px-3 text-sm"
+          className={iconBtn}
         >
-          <FolderPlus className="size-4" />
-          新项目
-        </Button>
+          <FolderPlus className="size-3.5" />
+        </button>
       </div>
     </header>
   );

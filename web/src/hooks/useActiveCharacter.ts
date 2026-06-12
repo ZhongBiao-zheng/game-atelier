@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import type { ActiveCharacterFile } from '../schema/jobs';
 
-export function useActiveCharacter(refreshSignal: number): string | null {
-  const [activeId, setActiveId] = useState<string | null>(null);
+/** undefined = 首次请求未返回；null = 已确认没有活跃角色。 */
+export function useActiveCharacter(refreshSignal: number): string | null | undefined {
+  const [activeId, setActiveId] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;

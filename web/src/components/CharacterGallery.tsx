@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Eye, EyeOff, Loader2, Upload, X } from 'lucide-react';
-import type { AssetSlot, Job } from '../schema/jobs';
+import type { AssetSlot, Job, ProjectsFile } from '../schema/jobs';
 import { fetchGalleryHidden, isGalleryHidden, setGalleryHidden } from '@/api/gallery';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -9,8 +9,7 @@ interface Props {
   characterId: string | null;
   characterName: string | null;
   initialTab?: TabKind;
-  detailMode: boolean;
-  onSelectImage: (path: string, jobId: string) => void;
+  onSelectImage: (path: string, jobId: string, slot: AssetSlot) => void;
   sseSignal: number;
 }
 
@@ -48,7 +47,6 @@ export function CharacterGallery({
   characterId,
   characterName,
   initialTab,
-  detailMode,
   onSelectImage,
   sseSignal,
 }: Props) {
@@ -56,9 +54,11 @@ export function CharacterGallery({
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<TabKind>(initialTab ?? 'portrait');
   const [uploadSignal, setUploadSignal] = useState(0);
-  const [colCount, setColCount] = useState(detailMode ? 2 : 3);
+  const [colCount, setColCount] = useState(3);
   // 首页作品展示的隐藏清单（工坊内不受影响，仅作状态标识 + 切换入口）。
   const [hiddenPaths, setHiddenPaths] = useState<string[]>([]);
+  // 展签小帽：角色所属项目名
+  const [projectName, setProjectName] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialTab) setTab(initialTab);
@@ -67,6 +67,20 @@ export function CharacterGallery({
   useEffect(() => {
     fetchGalleryHidden().then(setHiddenPaths).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!characterId) return;
+    let cancelled = false;
+    fetch('/api/projects')
+      .then(r => r.json() as Promise<ProjectsFile>)
+      .then(pf => {
+        if (cancelled || !pf || !Array.isArray(pf.projects)) return;
+        const pid = pf.assignments?.[characterId];
+        setProjectName(pf.projects.find(p => p.id === pid)?.name ?? null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [characterId, sseSignal]);
 
   useEffect(() => {
     if (!characterId) return;
@@ -90,9 +104,9 @@ export function CharacterGallery({
 
   if (loading && jobs.length === 0) {
     return (
-      <GalleryShell name={characterName} count={0} rounds={0} compact={detailMode}
+      <GalleryShell name={characterName} projectName={projectName} count={0} rounds={0}
         tab={tab} setTab={setTab} tabCounts={tabCounts}
-        colCount={colCount} onColCountChange={setColCount}>
+        colCount={colCount} onColCountChange={setColCount} tools={null}>
         <Skeleton cols={colCount} />
       </GalleryShell>
     );
@@ -146,16 +160,18 @@ export function CharacterGallery({
 
   return (
     <GalleryShell
-      name={characterName} count={allImages.length} rounds={tabJobs.length}
-      compact={detailMode} tab={tab} setTab={setTab} tabCounts={tabCounts}
+      name={characterName} projectName={projectName}
+      count={allImages.length} rounds={tabJobs.length}
+      tab={tab} setTab={setTab} tabCounts={tabCounts}
       colCount={colCount} onColCountChange={setColCount}
+      tools={
+        <GalleryUpload
+          characterId={characterId}
+          kind={tab}
+          onUploaded={() => setUploadSignal(s => s + 1)}
+        />
+      }
     >
-      <GalleryUpload
-        characterId={characterId}
-        kind={tab}
-        onUploaded={() => setUploadSignal(s => s + 1)}
-      />
-
       {!hasAny && (
         <div className="py-16 text-center">
           <p className="font-display text-display italic text-foreground/70 mb-2">
@@ -172,7 +188,7 @@ export function CharacterGallery({
           {allImages.map((img, i) => (
             <figure key={i} className="group relative mb-4 break-inside-avoid">
               <button
-                onClick={() => onSelectImage(img.path, img.jobId)}
+                onClick={() => onSelectImage(img.path, img.jobId, tab)}
                 className="w-full block overflow-hidden rounded-lg border border-border bg-card transition-all duration-200 hover:border-input cursor-pointer p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 <img
@@ -210,7 +226,9 @@ export function CharacterGallery({
           ))}
 
           {tabJobs.filter(j => j.status === 'pending' && !isStalePending(j)).flatMap(j =>
-            Array.from({ length: j.params?.n ?? 1 }, (_, i) => <SkeletonCard key={`${j.job_id}-s${i}`} />)
+            Array.from({ length: j.params?.n ?? 1 }, (_, i) => (
+              <SkeletonCard key={`${j.job_id}-s${i}`} phase={j.progress_phase} />
+            ))
           )}
           {tabJobs.filter(isStalePending).map(j => (
             <StalePendingCard key={j.job_id} jobId={j.job_id} onVoid={voidStaleJob} />
@@ -230,53 +248,44 @@ export function CharacterGallery({
 }
 
 function GalleryShell({
-  name, count, rounds, children, compact = false, tab, setTab, tabCounts,
-  colCount, onColCountChange,
+  name, projectName, count, rounds, children, tab, setTab, tabCounts,
+  colCount, onColCountChange, tools,
 }: {
-  name: string | null; count: number; rounds: number; children: React.ReactNode; compact?: boolean;
+  name: string | null; projectName: string | null; count: number; rounds: number;
+  children: React.ReactNode;
   tab: TabKind; setTab: (t: TabKind) => void; tabCounts: Record<TabKind, number>;
   colCount: number; onColCountChange: (n: number) => void;
+  tools: React.ReactNode;
 }) {
   return (
     <main className="flex flex-col h-full overflow-hidden">
-      <header className={cn('border-b border-border/40', compact ? 'px-5 pt-5 pb-3' : 'px-8 pt-8 pb-5')}>
+      {/* 展签：小帽项目名 → serif 大字角色名 → mono 统计；tab 行收编列数与上传 */}
+      <header className="border-b border-border/40 px-8 pt-8">
         <div className="flex items-end justify-between gap-4">
           <div className="min-w-0">
             <div className="uppercase text-muted-foreground/70 mb-1 text-xs tracking-label">
-              gallery · 角色
+              {projectName ? `${projectName} · Collection` : 'Collection'}
             </div>
-            <h1 className={cn(
-              'font-display italic leading-[1.05] tracking-tight text-foreground truncate',
-              compact ? 'text-base' : 'text-display',
-            )}>
+            <h1 className="font-display italic leading-[1.05] tracking-tight text-foreground truncate text-display">
               {name ?? '—'}
             </h1>
           </div>
-          <div className="shrink-0 text-right flex flex-col items-end gap-2 font-mono tabular-nums text-muted-foreground leading-relaxed text-xs">
-            {count > 0 && (
-              <div className="text-right">
-                <div><span className="text-foreground/85">{count}</span> 图</div>
-                <div><span className="text-foreground/85">{rounds}</span> 轮</div>
-              </div>
-            )}
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <span className="text-muted-foreground/60">⊞</span>
-              <input
-                type="range"
-                min={1}
-                max={5}
-                value={colCount}
-                onChange={e => onColCountChange(Number(e.target.value))}
-                className="w-20 accent-primary"
-                aria-label="调整列数"
-              />
-              <span className="text-muted-foreground/60 w-3">{colCount}</span>
-            </label>
+          {count > 0 && (
+            <div className="shrink-0 font-mono tabular-nums text-xs text-muted-foreground">
+              <span className="text-foreground/85">{count}</span> 图 ·{' '}
+              <span className="text-foreground/85">{rounds}</span> 轮
+            </div>
+          )}
+        </div>
+        <div className="mt-4 flex items-center justify-between gap-4 pb-3.5">
+          <TabStrip tab={tab} setTab={setTab} counts={tabCounts} />
+          <div className="flex items-center gap-4 shrink-0 min-w-0">
+            <ColStepper value={colCount} onChange={onColCountChange} />
+            {tools}
           </div>
         </div>
-        <TabStrip tab={tab} setTab={setTab} counts={tabCounts} compact={compact} />
       </header>
-      <div className={cn('flex-1 overflow-y-auto', compact ? 'px-4 py-4' : 'px-8 py-6')}>
+      <div className="flex-1 overflow-y-auto px-8 py-6">
         {children}
       </div>
     </main>
@@ -284,12 +293,12 @@ function GalleryShell({
 }
 
 function TabStrip({
-  tab, setTab, counts, compact,
-}: { tab: TabKind; setTab: (t: TabKind) => void; counts: Record<TabKind, number>; compact: boolean }) {
+  tab, setTab, counts,
+}: { tab: TabKind; setTab: (t: TabKind) => void; counts: Record<TabKind, number> }) {
   const tabs: { key: TabKind; label: string }[] = (Object.keys(TAB_META) as TabKind[])
     .map(k => ({ key: k, label: TAB_META[k].label }));
   return (
-    <div className={cn('flex items-baseline gap-5 mt-3', compact && 'mt-2')}>
+    <div className="flex items-baseline gap-7">
       {tabs.map(t => {
         const active = tab === t.key;
         return (
@@ -303,19 +312,43 @@ function TabStrip({
               active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground/80',
             )}
           >
-            <span className={cn(
-              'font-display italic',
-              compact ? 'text-sm' : 'text-base',
-            )}>{t.label}</span>
+            <span className="font-display italic text-base">{t.label}</span>
             <span className="font-mono tabular-nums text-xs text-muted-foreground/70">
               {counts[t.key]}
             </span>
+            {/* 下划线贴 tab 行底边（pb-3.5 = 14px） */}
             {active && (
-              <span className="absolute -bottom-[6px] left-0 right-0 h-px bg-primary" />
+              <span className="absolute -bottom-[14px] left-0 right-0 h-px bg-primary" />
             )}
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** 列数点格 stepper：点第 n 格 = n 列（替代 range slider）。 */
+function ColStepper({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  return (
+    <div className="flex items-center gap-1.5" role="group" aria-label="列数">
+      {[1, 2, 3, 4, 5].map(n => (
+        <button
+          key={n}
+          aria-label={`${n} 列`}
+          aria-pressed={n === value}
+          onClick={() => onChange(n)}
+          className={cn(
+            'size-2.5 rounded-full border p-0 cursor-pointer transition-colors',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+            n <= value
+              ? 'border-transparent bg-muted-foreground/55'
+              : 'border-muted-foreground/35 bg-transparent hover:bg-muted-foreground/20',
+          )}
+        />
+      ))}
+      <span className="ml-1 font-mono text-xs tabular-nums text-muted-foreground/60 whitespace-nowrap select-none">
+        {value} 列
+      </span>
     </div>
   );
 }
@@ -347,7 +380,7 @@ function GalleryUpload({
   }
 
   return (
-    <div className="mb-5 flex items-center gap-3">
+    <div className="flex items-center gap-2 min-w-0">
       <input
         ref={inputRef}
         type="file"
@@ -359,6 +392,12 @@ function GalleryUpload({
           e.target.value = '';
         }}
       />
+      {error && (
+        <span className="text-xs text-destructive flex items-center gap-1 min-w-0" title={error}>
+          <AlertTriangle className="size-3 shrink-0" />
+          <span className="truncate max-w-40">{error}</span>
+        </span>
+      )}
       <Button
         size="sm"
         variant="outline"
@@ -369,12 +408,6 @@ function GalleryUpload({
         <Upload className="size-3.5" />
         {busy ? '上传中…' : '添加图片'}
       </Button>
-      {error && (
-        <span className="text-xs text-destructive flex items-center gap-1">
-          <AlertTriangle className="size-3 shrink-0" />
-          {error}
-        </span>
-      )}
     </div>
   );
 }
@@ -409,8 +442,12 @@ function Skeleton({ cols }: { cols: number }) {
 }
 
 // loading=true：画廊正在加载已有内容（中性微光占位，不显示“生成中”，避免误以为在出图）。
-// loading=false：确有 pending job 正在出图，显示“生成中…”。
-function SkeletonCard({ loading = false }: { loading?: boolean }) {
+// loading=false：确有 pending job 正在出图，显示“生成中…”+ 已知进度卡点。
+function SkeletonCard({ loading = false, phase }: {
+  loading?: boolean;
+  phase?: Job['progress_phase'];
+}) {
+  const pct = phase === 'downloading' ? '75%' : phase === 'sent' ? '50%' : null;
   return (
     <div className="relative h-52 mb-4 break-inside-avoid overflow-hidden rounded-lg border border-border/40 bg-card animate-pulse">
       {!loading && (
@@ -418,6 +455,11 @@ function SkeletonCard({ loading = false }: { loading?: boolean }) {
           <Loader2 className="size-3 animate-spin" />
           生成中…
         </div>
+      )}
+      {!loading && pct && (
+        <span className="absolute bottom-3 right-3 font-mono text-xs tabular-nums text-muted-foreground/70">
+          {pct}
+        </span>
       )}
     </div>
   );
