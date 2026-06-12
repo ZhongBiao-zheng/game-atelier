@@ -5,6 +5,12 @@ import { memoryLocation } from 'wouter/memory-location';
 
 import { Home } from './Home';
 
+/** contentEditable prompt 编辑器没有 .value：落 textContent + input 事件等效键入。 */
+function typePrompt(editor: Element, value: string) {
+  editor.textContent = value;
+  fireEvent.input(editor);
+}
+
 beforeEach(() => {
   globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
     if (url === '/api/keys') {
@@ -340,7 +346,7 @@ describe('Home', () => {
     const { location } = renderNavigableHome();
 
     await screen.findByText('火山引擎');
-    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '首页提交跳转' } });
+    typePrompt(screen.getByLabelText('生图 prompt'), '首页提交跳转');
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));

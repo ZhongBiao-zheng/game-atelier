@@ -1,4 +1,5 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowUp, Box, ChevronRight, Coins, Film, ImageIcon, Images, Music, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
 import { modelModality, type KeyView } from '@/api/keys';
 import { computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
@@ -90,6 +91,117 @@ function providerName(provider?: KeyView) {
   return providerLabel(provider.provider, provider.alias);
 }
 
+/** @引用的素材类目标签。契约（seedance 官方 / happyhorse [Image N]）按「类型 + 序号」指代素材。 */
+const MENTION_LABELS = { image: '图', video: '视频', audio: '音频' } as const;
+
+/** 删除素材后重写 prompt 里的 @引用：被删序号的引用移除，更大序号依次前移。 */
+export function renumberMentions(input: string, label: string, removed: number): string {
+  return input.replace(new RegExp(`@${label}(\\d+)`, 'g'), (match, num: string) => {
+    const n = parseInt(num, 10);
+    if (n === removed) return '';
+    if (n > removed) return `@${label}${n - 1}`;
+    return match;
+  });
+}
+
+/** 提交序列化：@图1 → 图1。API 契约靠序号自然语言绑定素材，@ 只是输入框里的交互糖。 */
+export function serializeMentions(prompt: string): string {
+  return prompt.replace(/@(图|视频|音频)(\d+)/g, '$1$2');
+}
+
+// ---- @引用 chip 化：编辑器 DOM 与 prompt 字符串互转 ----
+// 编辑器是 contentEditable（chip 是 contentEditable=false 的原子 span，整删 / hover 预览），
+// 但状态层仍是带 @图N 字面量的纯字符串——重编号 / 序列化逻辑因此完全不变。
+
+const MENTION_TOKEN_RE = /@(图|视频|音频)(\d+)/g;
+
+type ChipMeta = { kind: 'image' | 'video' | 'audio'; thumb: string | null };
+
+/** lucide Film / Music 的内联 SVG：chip 走命令式 DOM 构建，用不了 React 图标组件。 */
+const CHIP_ICON_SVG: Record<'video' | 'audio', string> = {
+  video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></svg>',
+  audio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+};
+
+function decorateChip(span: HTMLSpanElement, label: string, meta: ChipMeta | undefined) {
+  span.textContent = '';
+  const kind = meta?.kind
+    ?? (label.startsWith('视频') ? 'video' : label.startsWith('音频') ? 'audio' : 'image');
+  if (meta?.thumb) {
+    const img = document.createElement('img');
+    img.src = meta.thumb;
+    img.alt = '';
+    img.className = 'h-[18px] w-[18px] rounded-sm object-cover';
+    span.appendChild(img);
+  } else if (kind !== 'image') {
+    const icon = document.createElement('span');
+    icon.className = 'grid h-[18px] w-[18px] place-items-center rounded-sm bg-secondary text-muted-foreground';
+    icon.innerHTML = CHIP_ICON_SVG[kind];
+    span.appendChild(icon);
+  }
+  span.appendChild(document.createTextNode(label));
+}
+
+function buildChipEl(label: string, meta: ChipMeta | undefined): HTMLSpanElement {
+  const span = document.createElement('span');
+  span.setAttribute('data-mention', label);
+  span.contentEditable = 'false';
+  span.className = 'inline-flex select-none items-center gap-1 align-middle text-primary cursor-default';
+  decorateChip(span, label, meta);
+  return span;
+}
+
+/** 编辑器 DOM → prompt 字符串：chip 还原成 @图N 字面量，块级/BR 还原成换行。 */
+export function domToText(root: HTMLElement): string {
+  let out = '';
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.textContent ?? '';
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as HTMLElement;
+    const label = el.getAttribute('data-mention');
+    if (label) {
+      out += `@${label}`;
+      return;
+    }
+    if (el.tagName === 'BR') {
+      out += '\n';
+      return;
+    }
+    // 浏览器偶发把行包进 div/p（粘贴残留等）——按换行还原
+    if ((el.tagName === 'DIV' || el.tagName === 'P') && out && !out.endsWith('\n')) out += '\n';
+    el.childNodes.forEach(walk);
+  };
+  root.childNodes.forEach(walk);
+  return out.replace(/\u00a0/g, ' ');
+}
+
+/** 视频首帧 → 小尺寸 dataURL（chip / 堆叠卡缩略图用）；解码失败返回 null 退回图标。 */
+function captureVideoFrame(url: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.preload = 'auto';
+    video.onloadeddata = () => {
+      try {
+        const w = 96;
+        const h = video.videoWidth ? Math.max(1, Math.round((video.videoHeight / video.videoWidth) * w)) : 54;
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext('2d')?.drawImage(video, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      } catch {
+        resolve(null);
+      }
+    };
+    video.onerror = () => resolve(null);
+    video.src = url;
+  });
+}
+
 export function PromptInput({
   onSubmit,
   disabled,
@@ -160,6 +272,23 @@ export function PromptInput({
   const [refHovered, setRefHovered] = useState<number | null>(null);
   const refFileInputRef = useRef<HTMLInputElement>(null);
   const refInputId = useId();
+  // @引用编辑器：contentEditable DOM 是输入现场，text 字符串是状态层；
+  // lastSynced 区分「用户输入回流」与「外部改写」——只有外部改写才重建 DOM。
+  const editorRef = useRef<HTMLDivElement>(null);
+  const lastSynced = useRef<string | null>(null);
+  const composing = useRef(false);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  // chip hover 预览：标签 + fixed 锚点坐标（portal 到 body，浮在参考内容上方）
+  const [chipHover, setChipHover] = useState<{ label: string; left: number; top: number } | null>(null);
+  // 参考素材瞬时提示（超限被忽略 / 已达上限），数秒自动消失。
+  const [refHint, setRefHint] = useState<string | null>(null);
+  const refHintTimer = useRef<number | undefined>(undefined);
+  const showRefHint = useCallback((msg: string) => {
+    setRefHint(msg);
+    window.clearTimeout(refHintTimer.current);
+    refHintTimer.current = window.setTimeout(() => setRefHint(null), 5000);
+  }, []);
+  useEffect(() => () => window.clearTimeout(refHintTimer.current), []);
   const isOmni = isVideo && videoMode === 'omni' && Boolean(videoCaps);
   // 参考堆叠的数据源：图片模式只有参考图；omni 模式图/视频/音频混排进同一叠扇形。
   const stackItems = useMemo(() => {
@@ -171,11 +300,190 @@ export function PromptInput({
       ...referenceAudios.map((file) => ({ kind: 'audio' as const, file })),
     ];
   }, [isOmni, referenceImages, referenceVideos, referenceAudios]);
-  const refPreviews = useMemo(
-    () => stackItems.map((item) => (item.kind === 'image' ? URL.createObjectURL(item.file) : null)),
-    [stackItems],
-  );
-  useEffect(() => () => refPreviews.forEach((u) => { if (u) URL.revokeObjectURL(u); }), [refPreviews]);
+  // 全类型素材都建 objectURL：图片直接当缩略图，视频喂给抽帧 + hover 预览播放，音频留给预览卡。
+  const mediaUrls = useMemo(() => stackItems.map((item) => URL.createObjectURL(item.file)), [stackItems]);
+  useEffect(() => () => mediaUrls.forEach((u) => URL.revokeObjectURL(u)), [mediaUrls]);
+  // 视频首帧缩略图（异步抽帧，按 objectURL 缓存）；抽不出来退回 Film 图标
+  const [videoThumbs, setVideoThumbs] = useState<Record<string, string>>({});
+  const thumbRequested = useRef(new Set<string>());
+  useEffect(() => {
+    let alive = true;
+    stackItems.forEach((item, i) => {
+      const url = mediaUrls[i];
+      if (item.kind !== 'video' || !url || thumbRequested.current.has(url)) return;
+      thumbRequested.current.add(url);
+      captureVideoFrame(url).then((thumb) => {
+        if (alive && thumb) setVideoThumbs((prev) => ({ ...prev, [url]: thumb }));
+      });
+    });
+    return () => { alive = false; };
+  }, [stackItems, mediaUrls]);
+  const thumbFor = useCallback((i: number) => {
+    const item = stackItems[i];
+    const url = mediaUrls[i];
+    if (!item || !url) return null;
+    if (item.kind === 'image') return url;
+    if (item.kind === 'video') return videoThumbs[url] ?? null;
+    return null;
+  }, [stackItems, mediaUrls, videoThumbs]);
+  // 每个素材的 @引用标签：按类目独立编号（图1、图2、视频1、音频1），与 content[] 顺序一致。
+  const mentionItems = useMemo(() => {
+    const counters = { image: 0, video: 0, audio: 0 };
+    return stackItems.map((item, index) => ({
+      ...item,
+      index,
+      label: `${MENTION_LABELS[item.kind]}${++counters[item.kind]}`,
+    }));
+  }, [stackItems]);
+  // chip 元数据按标签索引；命令式构建路径（renderDom / insertMention）经 ref 取最新值。
+  const chipMeta = useMemo(() => {
+    const map = new Map<string, ChipMeta>();
+    mentionItems.forEach((item) => map.set(item.label, { kind: item.kind, thumb: thumbFor(item.index) }));
+    return map;
+  }, [mentionItems, thumbFor]);
+  const chipMetaRef = useRef(chipMeta);
+  chipMetaRef.current = chipMeta;
+
+  /** prompt 字符串 → 编辑器 DOM：@图N 字面量渲染成原子 chip。仅外部改写时调用。 */
+  const renderDom = useCallback((value: string) => {
+    const root = editorRef.current;
+    if (!root) return;
+    root.textContent = '';
+    let last = 0;
+    for (const m of value.matchAll(MENTION_TOKEN_RE)) {
+      const idx = m.index ?? 0;
+      if (idx > last) root.appendChild(document.createTextNode(value.slice(last, idx)));
+      const label = `${m[1]}${m[2]}`;
+      root.appendChild(buildChipEl(label, chipMetaRef.current.get(label)));
+      last = idx + m[0].length;
+    }
+    if (last < value.length) root.appendChild(document.createTextNode(value.slice(last)));
+  }, []);
+
+  /** 编辑器 DOM → 状态层。输入回流的唯一入口；lastSynced 同步防止 effect 重建 DOM。 */
+  const syncFromDom = useCallback(() => {
+    const root = editorRef.current;
+    if (!root) return;
+    // 内容删空后浏览器残留的 <br> 会挡住 :empty placeholder
+    if (root.childNodes.length === 1 && root.firstChild?.nodeName === 'BR') root.textContent = '';
+    const parsed = domToText(root);
+    lastSynced.current = parsed;
+    setText(parsed);
+  }, [setText]);
+
+  // 外部改写（重编号 / 再次编辑回填 / 提交清空）→ 重建 DOM；光标语义已失效，聚焦时落到末尾。
+  useEffect(() => {
+    if (text === lastSynced.current) return;
+    renderDom(text);
+    lastSynced.current = text;
+    const root = editorRef.current;
+    if (root && document.activeElement === root) {
+      const sel = window.getSelection();
+      if (sel) {
+        const r = document.createRange();
+        r.selectNodeContents(root);
+        r.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    }
+  }, [text, renderDom]);
+
+  // 视频抽帧是异步的：thumb 到位后原地补进已渲染的 chip，不重建 DOM（保光标）。
+  useEffect(() => {
+    const root = editorRef.current;
+    if (!root) return;
+    root.querySelectorAll<HTMLSpanElement>('[data-mention]').forEach((span) => {
+      const label = span.getAttribute('data-mention') ?? '';
+      const meta = chipMeta.get(label);
+      if (meta?.thumb && !span.querySelector('img')) decorateChip(span, label, meta);
+    });
+  }, [chipMeta]);
+
+  /** 光标前一字符是 @ 且有素材 → 弹引用菜单。 */
+  const updateMentionMenu = useCallback(() => {
+    if (stackItems.length === 0) {
+      setMentionOpen(false);
+      return;
+    }
+    const sel = window.getSelection();
+    let open = false;
+    if (sel && sel.rangeCount > 0) {
+      const r = sel.getRangeAt(0);
+      if (r.collapsed && r.startContainer.nodeType === Node.TEXT_NODE) {
+        open = (r.startContainer.textContent ?? '')[r.startOffset - 1] === '@';
+      }
+    }
+    setMentionOpen(open);
+  }, [stackItems.length]);
+
+  /** 在光标处插入纯文本（Enter 换行 / 粘贴去格式共用）。execCommand 保原生撤销栈，jsdom 无则 Range 兜底。 */
+  function insertPlainText(value: string) {
+    const root = editorRef.current;
+    if (!root) return;
+    if (typeof document.execCommand === 'function') {
+      document.execCommand('insertText', false, value);
+      return; // execCommand 触发 input 事件 → onEditorInput 回流
+    }
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const r = sel.getRangeAt(0);
+    r.deleteContents();
+    const node = document.createTextNode(value);
+    r.insertNode(node);
+    r.setStartAfter(node);
+    r.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(r);
+    syncFromDom();
+  }
+
+  function insertMention(label: string) {
+    const root = editorRef.current;
+    if (!root) return;
+    // 先捕获 range 再 focus：focus() 可能把 selection 重置到编辑器起点（jsdom 实测会）
+    const sel = window.getSelection();
+    let range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+    if (range && !root.contains(range.startContainer)) range = null;
+    const chip = buildChipEl(label, chipMetaRef.current.get(label));
+    if (!range) {
+      // 光标不在编辑器内（异常路径）：chip 追加到末尾，光标落到尾部
+      root.appendChild(chip);
+      root.appendChild(document.createTextNode(' '));
+      root.focus();
+      if (sel) {
+        const r = document.createRange();
+        r.selectNodeContents(root);
+        r.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    } else {
+      // 菜单由敲 @ 触发：把触发字符一并替换
+      const n = range.startContainer;
+      if (range.collapsed && n.nodeType === Node.TEXT_NODE && range.startOffset > 0
+          && (n.textContent ?? '')[range.startOffset - 1] === '@') {
+        range.setStart(n, range.startOffset - 1);
+      }
+      root.focus();
+      sel!.removeAllRanges();
+      sel!.addRange(range);
+      if (typeof document.execCommand === 'function') {
+        document.execCommand('insertHTML', false, `${chip.outerHTML}&nbsp;`);
+      } else {
+        range.deleteContents();
+        const space = document.createTextNode(' ');
+        range.insertNode(space);
+        range.insertNode(chip);
+        range.setStartAfter(space);
+        range.collapse(true);
+        sel!.removeAllRanges();
+        sel!.addRange(range);
+      }
+    }
+    setMentionOpen(false);
+    syncFromDom();
+  }
 
   // 控件行能否右滚 → 决定右缘渐隐 + 箭头是否出现。内容（厂商/模型/模式）变化都会改 scrollWidth。
   const updateScroll = useCallback(() => {
@@ -251,39 +559,87 @@ export function PromptInput({
   }, [sizeOverride, onCustomSizeChange]);
 
   const submit = useCallback(() => {
-    const trimmed = text.trim();
+    // @图1 → 图1：API 按序号自然语言绑定素材，@ 不出现在最终 prompt 里。
+    const trimmed = serializeMentions(text).trim();
     if (!trimmed || disabled || !provider || !selectedModel) return;
     onSubmit(trimmed);
   }, [text, disabled, provider, selectedModel, onSubmit]);
 
-  const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape' && mentionOpen) {
+      e.preventDefault();
+      setMentionOpen(false);
+      return;
+    }
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       submit();
+      return;
+    }
+    if (e.key === 'Enter') {
+      // contentEditable 原生 Enter 会包 <div>；统一改插 '\n'（编辑器 pre-wrap 渲染换行）
+      e.preventDefault();
+      insertPlainText('\n');
     }
   };
+
+  function onEditorInput() {
+    if (composing.current) return; // 中文输入法组合期不回流，compositionend 一次性同步
+    syncFromDom();
+    updateMentionMenu();
+  }
+
+  function onEditorPaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    e.preventDefault();
+    insertPlainText(e.clipboardData.getData('text/plain'));
+  }
+
+  // chip hover 预览：事件委托在编辑器上，进出 [data-mention] 时开关
+  function onEditorMouseOver(e: React.MouseEvent<HTMLDivElement>) {
+    const span = (e.target as HTMLElement).closest?.('[data-mention]');
+    if (span && editorRef.current?.contains(span)) {
+      const r = span.getBoundingClientRect();
+      setChipHover({ label: span.getAttribute('data-mention') ?? '', left: r.left + r.width / 2, top: r.top });
+    }
+  }
+
+  function onEditorMouseOut(e: React.MouseEvent<HTMLDivElement>) {
+    if ((e.target as HTMLElement).closest?.('[data-mention]')) setChipHover(null);
+  }
 
   function handleRefAdd(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files;
     if (!files?.length) return;
     if (isOmni) {
-      // 单入口收所有类型：按 MIME 分流进各自数组并执行 9/3/3 上限。
+      // 单入口收所有类型：按 MIME 分流进各自数组并执行 9/3/3 上限；超限不再静默丢弃，按类目提示。
       const images = [...referenceImages];
       const videos = [...referenceVideos];
       const audios = [...referenceAudios];
+      const dropped = { image: 0, video: 0, audio: 0 };
       for (const file of Array.from(files)) {
         if (file.type.startsWith('video/')) {
           if (videoCaps?.supportsReferenceVideo && videos.length < maxRefVids) videos.push(file);
+          else dropped.video++;
         } else if (file.type.startsWith('audio/')) {
           if (videoCaps?.supportsReferenceAudio && audios.length < MAX_REF_AUDIOS) audios.push(file);
+          else dropped.audio++;
         } else if (file.type.startsWith('image/')) {
           if (images.length < maxRefImgs) images.push(file);
+          else dropped.image++;
         }
       }
       onReferenceImagesChange?.(images);
       onReferenceVideosChange?.(videos);
       onReferenceAudiosChange?.(audios);
+      const parts: string[] = [];
+      if (dropped.image) parts.push(`参考图最多 ${maxRefImgs} 张`);
+      if (dropped.video) parts.push(videoCaps?.supportsReferenceVideo ? `参考视频最多 ${maxRefVids} 个` : '当前模型不支持参考视频');
+      if (dropped.audio) parts.push(videoCaps?.supportsReferenceAudio ? `参考音频最多 ${MAX_REF_AUDIOS} 段` : '当前模型不支持参考音频');
+      const droppedTotal = dropped.image + dropped.video + dropped.audio;
+      if (parts.length) showRefHint(`${parts.join('，')}，已忽略 ${droppedTotal} 个文件`);
     } else {
+      const total = referenceImages.length + files.length;
+      if (total > maxRef) showRefHint(`参考图最多 ${maxRef} 张，已忽略 ${total - maxRef} 个文件`);
       onReferenceImagesChange?.([...referenceImages, ...Array.from(files)].slice(0, maxRef));
     }
     e.target.value = '';
@@ -292,15 +648,20 @@ export function PromptInput({
   function handleRefRemove(idx: number) {
     const item = stackItems[idx];
     if (!item) return;
+    let removedNumber = idx + 1;
     if (item.kind === 'video') {
       const j = idx - referenceImages.length;
+      removedNumber = j + 1;
       onReferenceVideosChange?.(referenceVideos.filter((_, i) => i !== j));
     } else if (item.kind === 'audio') {
       const j = idx - referenceImages.length - referenceVideos.length;
+      removedNumber = j + 1;
       onReferenceAudiosChange?.(referenceAudios.filter((_, i) => i !== j));
     } else {
       onReferenceImagesChange?.(referenceImages.filter((_, i) => i !== idx));
     }
+    // prompt 里的 @引用跟着素材删除重编号，避免「图2」悬空指错素材。
+    if (text.includes('@')) setText(renumberMentions(text, MENTION_LABELS[item.kind], removedNumber));
   }
 
   function handleRatioSelect(newRatio: string) {
@@ -444,15 +805,19 @@ export function PromptInput({
                         onMouseEnter={() => { setRefExpanded(true); setRefHovered(i); }}
                         onMouseLeave={() => setRefHovered(null)}
                       >
-                        <div className="w-full h-full rounded-lg overflow-hidden border-[1.5px] border-white bg-card">
-                          {item.kind === 'image' ? (
-                            <img src={refPreviews[i] ?? ''} alt="" className="w-full h-full object-cover" />
+                        <div className="relative w-full h-full rounded-lg overflow-hidden border-[1.5px] border-white bg-card">
+                          {thumbFor(i) ? (
+                            <img src={thumbFor(i)!} alt="" className="w-full h-full object-cover" />
                           ) : (
                             <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-muted-foreground">
                               {item.kind === 'video' ? <Film size={18} aria-hidden /> : <Music size={18} aria-hidden />}
                               <span className="w-full truncate text-center text-xs">{item.file.name}</span>
                             </div>
                           )}
+                          {/* @引用编号徽标：让 prompt 里的「图N」有所指 */}
+                          <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-scrim px-1 text-xs leading-4 text-foreground/90">
+                            {mentionItems[i]?.label}
+                          </span>
                         </div>
                         <button
                           type="button"
@@ -469,24 +834,34 @@ export function PromptInput({
                       </div>
                     );
                   })}
-                  {stackCanAdd && (
-                    <label
-                      htmlFor={refInputId}
-                      className="absolute flex items-center justify-center rounded-full border-[0.5px] border-border bg-secondary cursor-pointer text-muted-foreground hover:text-foreground hover:border-input hover:bg-card transition-colors"
-                      style={{
-                        width: 28,
-                        height: 28,
-                        zIndex: 45,
-                        top: '50%',
-                        marginTop: 15,
-                        left: `${(refExpanded ? (stackItems.length - 1) * REF_W : 0) + REF_W - 20}px`,
-                        transform: `rotate(${refExpanded ? expandAngle(stackItems.length - 1) : collapseAngle(stackItems.length - 1)}deg)`,
-                        transition: 'left 300ms ease, transform 300ms ease',
-                      }}
-                    >
-                      <Plus size={14} />
-                    </label>
-                  )}
+                  <label
+                    htmlFor={stackCanAdd ? refInputId : undefined}
+                    aria-disabled={!stackCanAdd}
+                    onClick={stackCanAdd ? undefined : (e) => {
+                      e.preventDefault();
+                      // 已达上限的入口置灰但保持可点 → 点击解释原因（pointer-events-none 会吞掉 title）。
+                      showRefHint(isOmni
+                        ? `参考素材已达上限，已忽略新文件（图 ${maxRefImgs}${videoCaps?.supportsReferenceVideo ? ` / 视频 ${maxRefVids}` : ''}${videoCaps?.supportsReferenceAudio ? ` / 音频 ${MAX_REF_AUDIOS}` : ''}）`
+                        : `参考图最多 ${maxRef} 张，删除后才能继续添加`);
+                    }}
+                    className={`absolute flex items-center justify-center rounded-full border-[0.5px] border-border bg-secondary transition-colors ${
+                      stackCanAdd
+                        ? 'cursor-pointer text-muted-foreground hover:text-foreground hover:border-input hover:bg-card'
+                        : 'cursor-not-allowed text-muted-foreground opacity-40'
+                    }`}
+                    style={{
+                      width: 28,
+                      height: 28,
+                      zIndex: 45,
+                      top: '50%',
+                      marginTop: 15,
+                      left: `${(refExpanded ? (stackItems.length - 1) * REF_W : 0) + REF_W - 20}px`,
+                      transform: `rotate(${refExpanded ? expandAngle(stackItems.length - 1) : collapseAngle(stackItems.length - 1)}deg)`,
+                      transition: 'left 300ms ease, transform 300ms ease',
+                    }}
+                  >
+                    <Plus size={14} />
+                  </label>
                 </div>
               </>
             )}
@@ -501,16 +876,83 @@ export function PromptInput({
             />
           </div>
         )}
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
+        <div
+          ref={editorRef}
+          contentEditable
+          suppressContentEditableWarning
+          role="textbox"
+          aria-multiline="true"
+          aria-label="生图 prompt"
+          data-placeholder={stackItems.length > 0 ? '开始一段灵感对话，输入 @ 引用参考素材...' : '开始一段灵感对话...'}
+          onInput={onEditorInput}
           onKeyDown={onKey}
-          placeholder="开始一段灵感对话..."
-          className={`flex-1 min-h-0 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none focus:outline-none rounded-md px-2 transition-[height] duration-300 ${
+          onPaste={onEditorPaste}
+          onCompositionStart={() => { composing.current = true; }}
+          onCompositionEnd={() => { composing.current = false; onEditorInput(); }}
+          onMouseOver={onEditorMouseOver}
+          onMouseOut={onEditorMouseOut}
+          className={`flex-1 min-h-0 w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-sm text-foreground focus:outline-none rounded-md px-2 transition-[height] duration-300 empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground ${
             collapsed ? 'h-6 self-center overflow-hidden' : 'h-full'
           }`}
-          aria-label="生图 prompt"
         />
+        {/* chip hover 预览：视频静音循环播放 / 图片放大 / 音频文件卡，浮在 chip 上方 */}
+        {chipHover && (() => {
+          const item = mentionItems.find((m) => m.label === chipHover.label);
+          if (!item) return null;
+          const url = mediaUrls[item.index];
+          return createPortal(
+            <div
+              data-testid="mention-preview"
+              className="fixed z-50 pointer-events-none"
+              style={{ left: chipHover.left, top: chipHover.top - 8, transform: 'translate(-50%, -100%)' }}
+            >
+              {item.kind === 'video' ? (
+                <video src={url} autoPlay muted loop playsInline className="h-[150px] rounded-lg border border-border bg-card" />
+              ) : item.kind === 'image' ? (
+                <img src={url} alt="" className="h-[150px] rounded-lg border border-border object-cover" />
+              ) : (
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground">
+                  <Music size={16} aria-hidden />
+                  <span className="max-w-[200px] truncate">{item.file.name}</span>
+                </div>
+              )}
+            </div>,
+            document.body,
+          );
+        })()}
+        <ToolbarPopover
+          open={mentionOpen && mentionItems.length > 0}
+          onClose={() => setMentionOpen(false)}
+          anchorRef={editorRef}
+          direction={menuDirection}
+          role="listbox"
+          aria-label="引用参考素材"
+          data-testid="mention-popover"
+          className="w-[260px] max-h-[280px] overflow-y-auto rounded-xl border border-border bg-card p-1"
+        >
+          {mentionItems.map((item) => (
+            <button
+              key={item.index}
+              type="button"
+              role="option"
+              aria-selected="false"
+              // 按下不抢编辑器焦点：插入要依赖编辑器里的光标位置（@ 触发字符所在处）
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => insertMention(item.label)}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-secondary/60 transition-colors"
+            >
+              {thumbFor(item.index) ? (
+                <img src={thumbFor(item.index)!} alt="" className="h-8 w-8 shrink-0 rounded-md object-cover" />
+              ) : (
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground">
+                  {item.kind === 'video' ? <Film size={14} aria-hidden /> : <Music size={14} aria-hidden />}
+                </span>
+              )}
+              <span className="shrink-0 font-medium">{item.label}</span>
+              <span className="min-w-0 truncate text-muted-foreground">{item.file.name}</span>
+            </button>
+          ))}
+        </ToolbarPopover>
         {collapsed && (
           <button
             type="button"
@@ -532,6 +974,12 @@ export function PromptInput({
         }`}
       >
         <div className={`min-h-0 min-w-0 ${collapsed ? 'overflow-hidden' : ''}`}>
+      {/* 参考素材瞬时提示（超限被忽略 / 已达上限）。本地视频已由后端经 OSS 中转成直链，无需常驻警示。 */}
+      {refHint && (
+        <div role="status" className="pb-1.5 text-xs text-muted-foreground">
+          {refHint}
+        </div>
+      )}
       <div
         onMouseEnter={() => setBarHovering(true)}
         onMouseLeave={() => setBarHovering(false)}

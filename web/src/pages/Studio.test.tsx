@@ -5,6 +5,12 @@ import { memoryLocation } from 'wouter/memory-location';
 
 import { Studio } from './Studio';
 
+/** contentEditable prompt 编辑器没有 .value：落 textContent + input 事件等效键入。 */
+function typePrompt(editor: Element, value: string) {
+  editor.textContent = value;
+  fireEvent.input(editor);
+}
+
 beforeEach(() => {
   localStorage.clear();
   globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
@@ -205,7 +211,7 @@ describe('Studio', () => {
     renderStudio();
     await screen.findByText('火山引擎');
     const textarea = screen.getByLabelText('生图 prompt');
-    fireEvent.change(textarea, { target: { value: 'test prompt' } });
+    typePrompt(textarea, 'test prompt');
     fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
     await waitFor(() => {
       expect(globalThis.fetch as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
@@ -276,7 +282,7 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('option', { name: '3' }));
 
     const textarea = screen.getByLabelText('生图 prompt');
-    fireEvent.change(textarea, { target: { value: '广西南宁城市海报' } });
+    typePrompt(textarea, '广西南宁城市海报');
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
@@ -308,7 +314,7 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('option', { name: '4' }));
     expect(countButton).toHaveTextContent('4 张');
 
-    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '四张草图' } });
+    typePrompt(screen.getByLabelText('生图 prompt'), '四张草图');
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
@@ -334,7 +340,7 @@ describe('Studio', () => {
 
     // 不做任何下拉操作，直接提交 —— 提交载荷应反映恢复后的选择，而非默认 key(volc)。
     const textarea = await screen.findByLabelText('生图 prompt');
-    fireEvent.change(textarea, { target: { value: '恢复测试' } });
+    typePrompt(textarea, '恢复测试');
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
@@ -415,7 +421,7 @@ describe('Studio', () => {
     expect(screen.getByLabelText('输出宽度')).toHaveValue(2048);
     expect(screen.getByLabelText('输出高度')).toHaveValue(1152);
 
-    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '宽幅海报' } });
+    typePrompt(screen.getByLabelText('生图 prompt'), '宽幅海报');
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
@@ -465,7 +471,7 @@ describe('Studio', () => {
     expect(screen.getByLabelText('输出宽度')).toHaveValue(1728);
     expect(screen.getByLabelText('输出高度')).toHaveValue(2304);
 
-    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '竖版角色海报' } });
+    typePrompt(screen.getByLabelText('生图 prompt'), '竖版角色海报');
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
@@ -514,7 +520,7 @@ describe('Studio', () => {
     expect(screen.getByLabelText('输出宽度')).toHaveValue(1920);
     expect(screen.getByLabelText('输出高度')).toHaveValue(1920);
 
-    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '方形角色头像' } });
+    typePrompt(screen.getByLabelText('生图 prompt'), '方形角色头像');
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
@@ -603,8 +609,8 @@ describe('Studio', () => {
 
   it('Enter without Cmd inserts newline (not submit)', () => {
     renderStudio();
-    const textarea = screen.getByLabelText('生图 prompt') as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: 'line1' } });
+    const textarea = screen.getByLabelText('生图 prompt');
+    typePrompt(textarea, 'line1');
     fireEvent.keyDown(textarea, { key: 'Enter' });
     expect(globalThis.fetch as unknown as ReturnType<typeof vi.fn>).not.toHaveBeenCalledWith(
       '/api/studio/jobs',
@@ -847,7 +853,7 @@ describe('Studio', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '重新编辑' }));
 
-    expect((screen.getByLabelText('生图 prompt') as HTMLTextAreaElement).value).toContain('一个身披白床单');
+    expect(screen.getByLabelText('生图 prompt').textContent).toContain('一个身披白床单');
     const sizeButton = screen.getByRole('button', { name: '选择比例和分辨率' });
     expect(sizeButton).not.toHaveTextContent('4:3');
     expect(sizeButton).toHaveTextContent('2304');
@@ -1046,7 +1052,7 @@ describe('Studio', () => {
     fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '1920' } });
     fireEvent.change(screen.getByLabelText('输出高度'), { target: { value: '1080' } });
 
-    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '自定义尺寸测试' } });
+    typePrompt(screen.getByLabelText('生图 prompt'), '自定义尺寸测试');
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
@@ -1129,7 +1135,7 @@ describe('Studio video submission', () => {
     fireEvent.click(screen.getByRole('option', { name: /视频生成/ }));
 
     const textarea = screen.getByLabelText('生图 prompt');
-    fireEvent.change(textarea, { target: { value: '一段电影质感的镜头' } });
+    typePrompt(textarea, '一段电影质感的镜头');
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
@@ -1203,7 +1209,7 @@ describe('Studio video submission', () => {
     fireEvent.change(srcInput, { target: { files: [refFile] } });
 
     const textarea = screen.getByLabelText('生图 prompt');
-    fireEvent.change(textarea, { target: { value: '一段电影质感的镜头' } });
+    typePrompt(textarea, '一段电影质感的镜头');
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
@@ -1273,7 +1279,7 @@ describe('Studio video submission', () => {
     const lastInput = document.getElementById(inputId) as HTMLInputElement;
     fireEvent.change(lastInput, { target: { files: [new File(['y'], 'last.png', { type: 'image/png' })] } });
 
-    fireEvent.change(screen.getByLabelText('生图 prompt'), { target: { value: '收束到这一帧' } });
+    typePrompt(screen.getByLabelText('生图 prompt'), '收束到这一帧');
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
@@ -1408,7 +1414,7 @@ describe('Studio compact mode errors', () => {
     renderStudioCompact();
 
     const textarea = await screen.findByLabelText('生图 prompt');
-    fireEvent.change(textarea, { target: { value: '失败也要有反馈' } });
+    typePrompt(textarea, '失败也要有反馈');
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     const alert = await screen.findByRole('alert');

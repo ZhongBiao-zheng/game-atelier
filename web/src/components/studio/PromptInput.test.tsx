@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 
-import { PromptInput } from './PromptInput';
+import { PromptInput, domToText, renumberMentions, serializeMentions } from './PromptInput';
 import type { KeyView } from '@/api/keys';
 
 const hkKey: KeyView = {
@@ -169,6 +169,124 @@ describe('PromptInput 模型按分类过滤（模型级 modality 优先，key �
     expect(screen.getByRole('option', { name: /Seedance/ })).toBeInTheDocument();
     cleanup();
   });
+});
+
+describe('PromptInput @引用参考素材', () => {
+  beforeAll(() => {
+    if (!URL.createObjectURL) (URL as any).createObjectURL = () => 'blob:stub';
+    if (!URL.revokeObjectURL) (URL as any).revokeObjectURL = () => {};
+  });
+
+  it('renumberMentions：被删序号的引用移除，更大序号前移，其他类目不动', () => {
+    expect(renumberMentions('@图1 模仿 @图2，音色参考 @音频1', '图', 1)).toBe(' 模仿 @图1，音色参考 @音频1');
+  });
+
+  it('serializeMentions：提交时剥掉 @，序号自然语言保留', () => {
+    expect(serializeMentions('@图1 模仿 @视频2 的动作')).toBe('图1 模仿 视频2 的动作');
+  });
+
+  /** jsdom 没有真实键入：直接落 '@' 文本节点 + 设光标 + 触发 input，等效敲 @。 */
+  function typeAtSign(editor: HTMLElement) {
+    const textNode = document.createTextNode('@');
+    editor.appendChild(textNode);
+    const range = document.createRange();
+    range.setStart(textNode, 1);
+    range.collapse(true);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    fireEvent.input(editor);
+  }
+
+  it('有素材时敲 @ 弹菜单，点选项把 @ 替换成原子 chip 并关闭菜单', () => {
+    const onSubmit = vi.fn();
+    const file = new File(['x'], 'hero.png', { type: 'image/png' });
+    render(
+      <PromptInput onSubmit={onSubmit} providers={[hkKey]} providerAlias="hk" model="gpt-image-2"
+        referenceImages={[file]} onReferenceImagesChange={vi.fn()} />,
+    );
+    const editor = screen.getByLabelText('生图 prompt');
+    typeAtSign(editor);
+    expect(screen.getByTestId('mention-popover')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: /图1/ }));
+    expect(editor.querySelector('[data-mention="图1"]')).not.toBeNull();
+    expect(screen.queryByTestId('mention-popover')).toBeNull();
+    // 触发字符 @ 被 chip 吞掉，提交序列化成纯序号
+    fireEvent.click(screen.getByLabelText('提交生成'));
+    expect(onSubmit).toHaveBeenCalledWith('图1');
+    cleanup();
+  });
+
+  it('没有素材时敲 @ 不弹菜单', () => {
+    render(<PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="gpt-image-2" />);
+    typeAtSign(screen.getByLabelText('生图 prompt'));
+    expect(screen.queryByTestId('mention-popover')).toBeNull();
+    cleanup();
+  });
+
+  it('受控 value 里的 @图N 字面量渲染成 chip，提交时序列化为纯序号', () => {
+    const onSubmit = vi.fn();
+    const file = new File(['x'], 'hero.png', { type: 'image/png' });
+    render(
+      <PromptInput onSubmit={onSubmit} providers={[hkKey]} providerAlias="hk" model="gpt-image-2"
+        value="@图1 在雨中奔跑" onValueChange={vi.fn()}
+        referenceImages={[file]} onReferenceImagesChange={vi.fn()} />,
+    );
+    const editor = screen.getByLabelText('生图 prompt');
+    expect(editor.querySelector('[data-mention="图1"]')).not.toBeNull();
+    fireEvent.click(screen.getByLabelText('提交生成'));
+    expect(onSubmit).toHaveBeenCalledWith('图1 在雨中奔跑');
+    cleanup();
+  });
+
+  it('hover chip 在上方弹出素材预览，移出关闭', () => {
+    const file = new File(['x'], 'hero.png', { type: 'image/png' });
+    render(
+      <PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="gpt-image-2"
+        value="@图1 " onValueChange={vi.fn()}
+        referenceImages={[file]} onReferenceImagesChange={vi.fn()} />,
+    );
+    const chip = screen.getByLabelText('生图 prompt').querySelector('[data-mention="图1"]')!;
+    fireEvent.mouseOver(chip);
+    expect(screen.getByTestId('mention-preview')).toBeInTheDocument();
+    fireEvent.mouseOut(chip);
+    expect(screen.queryByTestId('mention-preview')).toBeNull();
+    cleanup();
+  });
+
+  it('domToText：chip 还原 @字面量，BR 还原换行', () => {
+    const root = document.createElement('div');
+    root.appendChild(document.createTextNode('看'));
+    const chip = document.createElement('span');
+    chip.setAttribute('data-mention', '视频1');
+    chip.textContent = '视频1';
+    root.appendChild(chip);
+    root.appendChild(document.createElement('br'));
+    root.appendChild(document.createTextNode('动作'));
+    expect(domToText(root)).toBe('看@视频1\n动作');
+  });
+});
+
+describe('PromptInput 参考素材超限提示', () => {
+  beforeAll(() => {
+    if (!URL.createObjectURL) (URL as any).createObjectURL = () => 'blob:stub';
+    if (!URL.revokeObjectURL) (URL as any).revokeObjectURL = () => {};
+  });
+
+  it('超出上限的文件被忽略并给出按类目提示（nano-banana 上限 3）', () => {
+    const onChange = vi.fn();
+    const { container } = render(
+      <PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="nano-banana"
+        referenceImages={[]} onReferenceImagesChange={onChange} />,
+    );
+    const input = container.querySelector('input[type=file]')!;
+    const files = [1, 2, 3, 4].map((i) => new File(['x'], `r${i}.png`, { type: 'image/png' }));
+    fireEvent.change(input, { target: { files } });
+    expect(screen.getByRole('status')).toHaveTextContent('参考图最多 3 张，已忽略 1 个文件');
+    expect(onChange).toHaveBeenCalledWith(files.slice(0, 3));
+    cleanup();
+  });
+
 });
 
 describe('PromptInput 消耗提示（仅 OpenAI-HK 聚合商，人民币无单位无汉字）', () => {
