@@ -8,6 +8,39 @@ echo    Game Atelier 一键启动
 echo ============================================
 echo.
 
+REM ---- 0. 启动前检查更新（git 仓库且联网时；更新后重启自带 --skip-update）----
+if /i "%~1"=="--skip-update" goto :update_done
+where git >nul 2>nul
+if errorlevel 1 goto :update_done
+if not exist ".git" goto :update_done
+REM 私有仓库无凭证时禁止 git 弹交互输入，避免双击窗口卡死
+set "GIT_TERMINAL_PROMPT=0"
+git fetch --quiet 2>nul
+if errorlevel 1 (
+    echo 检查更新失败（可能离线），跳过更新直接启动。
+    goto :update_done
+)
+set "BEHIND=0"
+for /f %%c in ('git rev-list --count "HEAD..@{u}" 2^>nul') do set "BEHIND=%%c"
+if "!BEHIND!"=="0" goto :update_done
+if "!BEHIND!"=="" goto :update_done
+echo 检测到新版本（落后 !BEHIND! 个提交）。
+set "UPD=1"
+set /p "UPD=[1] 更新后启动（默认）  [2] 直接启动: "
+if "!UPD!"=="2" goto :update_done
+echo 正在更新（git pull）...
+git pull --ff-only
+if errorlevel 1 (
+    echo 更新失败（本地改动冲突或网络问题），跳过更新直接启动。
+    goto :update_done
+)
+echo 更新完成，正在以新版本重新启动...
+REM .bat 执行中被 git pull 改写会按旧字节偏移读到错乱内容；必须单行重启新脚本后立即退出。
+start "" cmd /c ""%~f0" --skip-update" & exit /b 0
+
+:update_done
+echo.
+
 REM ---- 1. 确保 uv 已安装（本项目唯一硬依赖；uv 会自动管理 Python）----
 set "UV=uv"
 where uv >nul 2>nul

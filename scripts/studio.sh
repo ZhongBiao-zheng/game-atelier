@@ -28,6 +28,32 @@ echo "   Game Atelier 一键启动"
 echo "============================================"
 echo
 
+# ---- 0. 启动前检查更新（git 仓库且联网时；更新后重启自带 --skip-update）----
+# 私有仓库无凭证时禁止 git 弹交互输入，避免双击窗口卡死
+export GIT_TERMINAL_PROMPT=0
+if [ "${1:-}" != "--skip-update" ] && command -v git &>/dev/null && [ -d ".git" ]; then
+  if git fetch --quiet 2>/dev/null; then
+    behind="$(git rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)"
+    if [ -n "$behind" ] && [ "$behind" != "0" ]; then
+      echo "检测到新版本（落后 $behind 个提交）。"
+      read -rp "[1] 更新后启动（默认）  [2] 直接启动: " UPD || true
+      if [ "$UPD" != "2" ]; then
+        echo "正在更新（git pull）..."
+        if git pull --ff-only; then
+          echo "更新完成，正在以新版本重新启动..."
+          # 脚本执行中被 git pull 改写有读错乱风险；exec 从头执行新版本。
+          exec bash "$_self" --skip-update
+        else
+          echo "更新失败（本地改动冲突或网络问题），跳过更新直接启动。"
+        fi
+      fi
+    fi
+  else
+    echo "检查更新失败（可能离线），跳过更新直接启动。"
+  fi
+  echo
+fi
+
 # ---- 1. 确保 uv（本项目唯一硬依赖；GUI 双击时 PATH 常缺 ~/.local/bin，需显式兜底）----
 UV="$(command -v uv 2>/dev/null || true)"
 if [ -z "$UV" ] && [ -x "$HOME/.local/bin/uv" ]; then
