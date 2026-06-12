@@ -810,7 +810,13 @@ describe('Studio', () => {
 
     // chip 化后提示词文本落在 <p line-clamp-2> 内的 span 里，断言上提到段落容器。
     expect((await screen.findByText(/一个身披白床单/)).closest('p')).toHaveClass('line-clamp-2');
-    expect(screen.getByTestId('studio-round-list')).toHaveClass('max-w-[1024px]');
+    expect(screen.getByTestId('studio-round-list')).toHaveClass(
+      'w-full',
+      'min-w-[800px]',
+      'max-w-[1024px]',
+      'mx-auto',
+      'text-left',
+    );
     expect(screen.getByRole('img', { name: '参考素材' })).toHaveAttribute('src', '/api/raw?path=%2Ftmp%2Fref.png');
     await waitFor(() => expect(screen.getAllByText(/图片 4.7/).length).toBeGreaterThan(0));
     expect(screen.getByText(/4:3/)).toBeInTheDocument();

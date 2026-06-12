@@ -61,7 +61,10 @@ export function RoundList({
   if (rounds.length === 0) return null;
   return (
     <>
-      <div data-testid="studio-round-list" className="max-w-[1024px] mx-auto mt-8 space-y-8">
+      <div
+        data-testid="studio-round-list"
+        className="mx-auto mt-8 w-full min-w-[800px] max-w-[1024px] space-y-8 text-left"
+      >
         {rounds.map((r) => {
           const stableKey =
             r.kind === 'pending' && r.jobId ? `pending-${r.jobId}` :
