@@ -868,8 +868,8 @@ export function PromptInput({
           onCompositionEnd={() => { composing.current = false; onEditorInput(); }}
           onMouseOver={onEditorMouseOver}
           onMouseOut={onEditorMouseOut}
-          className={`flex-1 min-h-0 w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-sm text-foreground focus:outline-none rounded-md px-2 transition-[height] duration-300 empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground ${
-            collapsed ? 'h-6 self-center overflow-hidden' : 'h-full'
+          className={`flex-1 min-h-0 w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-sm text-foreground focus:outline-none rounded-md pl-2 transition-[height,padding] duration-300 empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground ${
+            collapsed ? 'h-6 self-center overflow-hidden pr-10' : 'h-full pr-2'
           }`}
         />
         {/* chip hover 预览：视频静音循环播放 / 图片放大 / 音频文件卡，浮在 chip 上方 */}
@@ -930,27 +930,20 @@ export function PromptInput({
             </button>
           ))}
         </ToolbarPopover>
-        {collapsed && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); submit(); }}
-            disabled={!canSubmit}
-            aria-label="提交生成"
-            title="提交 (⌘↵)"
-            className="self-center shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors"
-          >
-            <ArrowUp size={16} aria-hidden />
-          </button>
-        )}
       </div>
-      {/* 控件行收放：grid-rows 0fr/1fr 让 auto 高度可动画；收缩时才 overflow-hidden，
-          展开态必须可见——弹窗（bottom-full）要溢出这层渲染。 */}
+      {/* 控件行收放：grid-rows 0fr/1fr 让 auto 高度可动画；内容层 origin-bottom 向中下缩放 +
+          blur 渐隐，中层常驻 overflow-hidden 把整个过程关在壳内部（弹窗已全部 portal 出壳，不受裁剪）。 */}
       <div
         className={`grid transition-all duration-300 ${
-          collapsed ? 'grid-rows-[0fr] opacity-0 pointer-events-none' : 'grid-rows-[1fr] opacity-100'
+          collapsed ? 'grid-rows-[0fr] pointer-events-none' : 'grid-rows-[1fr]'
         }`}
       >
-        <div className={`min-h-0 min-w-0 ${collapsed ? 'overflow-hidden' : ''}`}>
+        <div className="min-h-0 min-w-0 overflow-hidden">
+          <div
+            className={`origin-bottom transition-all duration-300 ${
+              collapsed ? 'scale-90 translate-y-2 opacity-0 blur-[6px]' : 'scale-100 translate-y-0 opacity-100 blur-none'
+            }`}
+          >
       {/* 参考素材瞬时提示（超限被忽略 / 已达上限）。本地视频已由后端经 OSS 中转成直链，无需常驻警示。 */}
       {refHint && (
         <div role="status" className="pb-1.5 text-xs text-muted-foreground">
@@ -1356,7 +1349,8 @@ export function PromptInput({
             <ChevronRight size={17} aria-hidden />
           </button>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
+        {/* pr-12 给提交按钮让位：按钮已改为绝对定位锚在壳右下角（见 shell 末尾），不再占这一行的 flex 位 */}
+        <div className="flex items-center gap-3 shrink-0 pr-12">
           {costYuan !== null && (
             <span
               data-testid="credit-cost-hint"
@@ -1366,20 +1360,29 @@ export function PromptInput({
               {costYuan}
             </span>
           )}
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!canSubmit}
-            aria-label="提交生成"
-            title="提交 (⌘↵)"
-            className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background transition-colors"
-          >
-            <ArrowUp size={18} aria-hidden />
-          </button>
         </div>
       </div>
+          </div>
         </div>
       </div>
+      {/* 提交按钮：唯一一颗，锚定壳右下角。收/放时壳底边在屏幕上不动，按钮只原位缩放
+          40↔32px，不随状态重新挂载——视觉连续性与参考堆叠 / 编辑器的缩放一致。 */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); submit(); }}
+        disabled={!canSubmit}
+        aria-label="提交生成"
+        title="提交 (⌘↵)"
+        className={`absolute right-4 inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background transition-all duration-300 ${
+          collapsed ? 'bottom-[22px] w-8 h-8' : 'bottom-4 w-10 h-10'
+        }`}
+      >
+        <ArrowUp
+          size={18}
+          aria-hidden
+          className={`transition-transform duration-300 ${collapsed ? 'scale-90' : ''}`}
+        />
+      </button>
     </div>
   );
 }

@@ -66,6 +66,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [scrolledUp, setScrolledUp] = useState(false);
   const [shellFocused, setShellFocused] = useState(false);
   const [clickPinned, setClickPinned] = useState(false);
+  const dockCollapsed = scrolledUp && !shellFocused && !clickPinned;
 
   // 不走 rAF 节流：后台标签页 rAF 会挂起导致联动滞后；setState 同值自动 bail-out，开销可忽略。
   const handleHistoryScroll = () => {
@@ -624,18 +625,24 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           pointer-events-auto。 */}
       <div className="pointer-events-none absolute inset-x-0 bottom-4 px-3 sm:px-6">
         <div className="relative mx-auto max-w-[780px]">
-          {scrolledUp && (
-            <button
-              type="button"
-              onClick={scrollToBottom}
-              className="pointer-events-auto absolute bottom-full right-0 mb-3 inline-flex h-8 items-center gap-1 rounded-full border border-border bg-glass backdrop-blur-glass px-3 text-xs text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <ChevronsDown size={13} aria-hidden />
-              回到底部
-            </button>
-          )}
+          {/* 回到底部：常驻挂载才有进出动画。锚定 bottom-full 让它跟着壳顶升降——
+              壳展开时被顶着上移、同时向右上平移渐隐；收起时反向浮现。 */}
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            tabIndex={dockCollapsed ? 0 : -1}
+            aria-hidden={!dockCollapsed}
+            className={`absolute bottom-full right-0 mb-3 inline-flex h-8 items-center gap-1 rounded-full border border-border bg-glass backdrop-blur-glass px-3 text-xs text-foreground transition-all duration-300 hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+              dockCollapsed
+                ? 'pointer-events-auto opacity-100 translate-x-0 translate-y-0'
+                : 'pointer-events-none opacity-0 translate-x-3 -translate-y-2'
+            }`}
+          >
+            <ChevronsDown size={13} aria-hidden />
+            回到底部
+          </button>
         <PromptInput
-          collapsed={scrolledUp && !shellFocused && !clickPinned}
+          collapsed={dockCollapsed}
           onExpandRequest={() => setClickPinned(true)}
           onShellFocusChange={setShellFocused}
           onSubmit={onSubmit}
