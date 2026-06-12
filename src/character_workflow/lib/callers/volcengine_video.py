@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -260,9 +261,12 @@ def render_video(
     params: dict[str, Any] | None = None,
     max_polls: int = 180,
     poll_interval: float = 5.0,
+    on_phase: Callable[[str], None] | None = None,
     **_kwargs,
 ) -> list[str]:
-    """提交 n 条 Seedance 视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。"""
+    """提交 n 条 Seedance 视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。
+
+    on_phase: 进度卡点回调 —— 全部提交成功后 "sent"、开始下载产物时 "downloading"。"""
     params = dict(params or {})
     key = _keys.find_by_alias(alias) if alias else None
     if key is None:
@@ -286,8 +290,9 @@ def render_video(
         body["ratio"] = str(ratio)
     if params.get("seed") is not None and int(params["seed"]) >= 0:
         body["seed"] = int(params["seed"])
-    if params.get("generate_audio"):
-        body["generate_audio"] = True
+    # 上游默认 true（2.0 系）：关闭必须显式发 false，省略字段≠关闭。
+    if params.get("generate_audio") is not None:
+        body["generate_audio"] = bool(params["generate_audio"])
 
     out_dir = Path(output_dir)
     n = max(1, min(4, int(params.get("n") or 1)))
@@ -308,9 +313,13 @@ def render_video(
         if not task_id:
             raise VolcengineVideoError(f"火山视频提交后未返回 task id: {payload!r}")
         pending_ids.append(task_id)
+    if on_phase:
+        on_phase("sent")
     for task_id in pending_ids:
         ready_urls.append(_poll_video_task(
             tasks_url=tasks_url, headers=headers, task_id=task_id,
             max_polls=max_polls, poll_interval=poll_interval,
         ))
+    if on_phase:
+        on_phase("downloading")
     return [_download_mp4(url, out_dir, i + 1) for i, url in enumerate(ready_urls)]

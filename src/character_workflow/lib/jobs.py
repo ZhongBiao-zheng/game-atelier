@@ -167,12 +167,24 @@ def update_job_status(
     with job_lock(job_id):
         job = read_job(job_id)
         update: dict[str, Any] = {"status": status}
+        # 终态清空进度卡点，避免 retry/回看读到陈旧 phase。
+        if status in (JobStatus.DONE, JobStatus.FAILED):
+            update["progress_phase"] = None
         if output_paths is not None:
             update["output_paths"] = output_paths
         if error is not _UNSET:
             update["error"] = error
         updated = job.model_copy(update=update)
         return _write(updated)
+
+
+def update_job_phase(job_id: str, phase: str) -> Job:
+    """视频 caller 回写进度卡点（sent / downloading）。终态 job 不回写。"""
+    with job_lock(job_id):
+        job = read_job(job_id)
+        if job.status in (JobStatus.DONE, JobStatus.FAILED):
+            return job
+        return _write(job.model_copy(update={"progress_phase": phase}))
 
 
 def remove_image_from_job(job_id: str, image_path: str) -> Job:

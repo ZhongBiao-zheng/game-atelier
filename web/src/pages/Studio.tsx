@@ -147,7 +147,10 @@ export function Studio({ compact = false }: { compact?: boolean }) {
         return new File([blob], `ref-${i + 1}.${ext}`, { type: blob.type || 'image/png' });
       }),
     );
-    setReferenceImages(files);
+    // 堆叠里混着三类素材：按 MIME 分流回填，视频/音频塞进图片参考会在提交时走错角色。
+    setReferenceImages(files.filter((f) => !f.type.startsWith('video/') && !f.type.startsWith('audio/')));
+    setReferenceVideos(files.filter((f) => f.type.startsWith('video/')));
+    setReferenceAudios(files.filter((f) => f.type.startsWith('audio/')));
   }, []);
 
   const refreshPersistedJobs = useCallback(async () => {
@@ -451,7 +454,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       n: effectiveCount,
       ...(effectiveQuality ? { mode: effectiveQuality } : {}),
       ...(effectiveFrameMode ? { frame_mode: effectiveFrameMode } : {}),
-      ...(effectiveCaps.supportsAudio && effectiveGenerateAudio ? { generate_audio: true } : {}),
+      // 上游 generate_audio 默认 true（2.0 系），关闭也必须显式发 false，省略字段≠关闭。
+      ...(effectiveCaps.supportsAudio ? { generate_audio: effectiveGenerateAudio } : {}),
       ...(imgPaths.length ? { reference_images: imgPaths } : {}),
       ...(vidPaths.length ? { reference_videos: vidPaths } : {}),
       ...(audPaths.length ? { reference_audios: audPaths } : {}),
@@ -844,6 +848,7 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
         kind: 'pending' as const,
         jobId: job.job_id,
         startedAt: Date.parse(job.submitted_at) || Date.now(),
+        progressPhase: job.progress_phase ?? null,
         config: configForJob(job, keys),
       }];
     });

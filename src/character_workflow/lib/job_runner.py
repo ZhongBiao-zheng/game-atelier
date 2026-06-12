@@ -15,6 +15,7 @@ from character_workflow.lib.jobs import (
     list_jobs,
     read_job,
     save_job,
+    update_job_phase,
     update_job_status,
 )
 from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
@@ -219,6 +220,8 @@ def _run_video_job(job: Job) -> Job:
                 alias=job.alias,
                 output_dir=Path(tmp),
                 params=params,
+                # 进度卡点回写 job 文件（sent/downloading），watcher SSE 推给前端。
+                on_phase=lambda phase: update_job_phase(job.job_id, phase),
             )
             valid = [Path(p) for p in paths if is_valid_video(Path(p))]
             if not valid:

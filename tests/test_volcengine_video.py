@@ -77,6 +77,40 @@ def test_submit_returns_inline_url(seedance_key, tmp_path, monkeypatch):
     assert posted["body"]["resolution"] == "720p"
 
 
+def test_generate_audio_explicit_passthrough(seedance_key, tmp_path, monkeypatch):
+    """上游 generate_audio 默认 true：关闭必须显式发 false，省略字段≠关闭。"""
+    bodies: list[dict] = []
+    monkeypatch.setattr(
+        vv.requests, "post",
+        lambda url, headers=None, json=None, timeout=None: (
+            bodies.append(json) or _FakeResp(200, {"data": {"video_url": "https://x/v.mp4"}})
+        ),
+    )
+    monkeypatch.setattr(vv, "_download_mp4", lambda url, d, i: "ok")
+    common = dict(prompt="p", model="", alias="ark", output_dir=tmp_path / "o", poll_interval=0)
+    vv.render_video(**common, params={"generate_audio": False})
+    assert bodies[-1]["generate_audio"] is False
+    vv.render_video(**common, params={"generate_audio": True})
+    assert bodies[-1]["generate_audio"] is True
+    vv.render_video(**common, params={})
+    assert "generate_audio" not in bodies[-1]
+
+
+def test_on_phase_called_sent_then_downloading(seedance_key, tmp_path, monkeypatch):
+    monkeypatch.setattr(vv.requests, "post", lambda *a, **k: _FakeResp(200, {"data": {"id": "t1"}}))
+    monkeypatch.setattr(
+        vv.requests, "get",
+        lambda *a, **k: _FakeResp(200, {"data": {"status": "succeeded", "video_url": "https://x/v.mp4"}}),
+    )
+    monkeypatch.setattr(vv, "_download_mp4", lambda url, d, i: "ok")
+    phases: list[str] = []
+    vv.render_video(
+        prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
+        params={}, poll_interval=0, on_phase=phases.append,
+    )
+    assert phases == ["sent", "downloading"]
+
+
 def test_poll_until_succeeded(seedance_key, tmp_path, monkeypatch):
     monkeypatch.setattr(vv.requests, "post", lambda *a, **k: _FakeResp(200, {"data": {"id": "task-1"}}))
 

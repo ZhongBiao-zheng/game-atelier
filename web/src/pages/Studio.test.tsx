@@ -808,9 +808,10 @@ describe('Studio', () => {
   it('renders a completed studio batch with metadata and action buttons', async () => {
     renderStudioWithCompletedBatch();
 
-    expect(await screen.findByText(/一个身披白床单/)).toHaveClass('line-clamp-2');
+    // chip 化后提示词文本落在 <p line-clamp-2> 内的 span 里，断言上提到段落容器。
+    expect((await screen.findByText(/一个身披白床单/)).closest('p')).toHaveClass('line-clamp-2');
     expect(screen.getByTestId('studio-round-list')).toHaveClass('max-w-[1024px]');
-    expect(screen.getByRole('img', { name: '参考图' })).toHaveAttribute('src', '/api/raw?path=%2Ftmp%2Fref.png');
+    expect(screen.getByRole('img', { name: '参考素材' })).toHaveAttribute('src', '/api/raw?path=%2Ftmp%2Fref.png');
     await waitFor(() => expect(screen.getAllByText(/图片 4.7/).length).toBeGreaterThan(0));
     expect(screen.getByText(/4:3/)).toBeInTheDocument();
     expect(screen.getByText(/2304x1728/)).toBeInTheDocument();
@@ -1143,7 +1144,8 @@ describe('Studio video submission', () => {
     const body = JSON.parse(String(studioCall![1]!.body));
     expect(body).toMatchObject({
       kind: 'video',
-      params: expect.objectContaining({ duration: 5, resolution: '720p' }),
+      // 上游 generate_audio 默认 true：音频关闭也必须显式发 false，省略字段≠关闭。
+      params: expect.objectContaining({ duration: 5, resolution: '720p', generate_audio: false }),
     });
   });
 

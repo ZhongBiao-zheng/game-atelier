@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -78,6 +79,9 @@ class Job(BaseModel):
     provider: str | None = None
     # 2026-06-10: retry-job 克隆 failed job 时指回原 job_id；原 job 错误记录保留。
     retry_of: str | None = None
+    # 2026-06-12: 出图进度真实卡点（视频 caller 经 job_runner 回写；Web 不能改）。
+    # sent=任务已全部提交上游；downloading=任务成功、产物下载中。终态时清空。
+    progress_phase: Literal["sent", "downloading"] | None = None
 
 
 class WebEditableJobPatch(BaseModel):

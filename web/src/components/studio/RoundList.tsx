@@ -1,7 +1,9 @@
-import { type ButtonHTMLAttributes, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Download, Film, Trash2, X } from 'lucide-react';
+import { type ButtonHTMLAttributes, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { AlertTriangle, Download, Film, Music, Trash2, X } from 'lucide-react';
 
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
+import { useVideoFrame } from '@/lib/videoFrame';
 
 import { WaitingCopy } from './WaitingCopy';
 
@@ -29,7 +31,14 @@ export interface RoundConfig {
 }
 
 export type RoundState =
-  | { kind: 'pending'; jobId?: string; startedAt: number; config: RoundConfig }
+  | {
+      kind: 'pending';
+      jobId?: string;
+      startedAt: number;
+      // 后端回写的真实进度卡点（sent=已提交上游 / downloading=产物下载中），无 job 或未提交时为空。
+      progressPhase?: 'sent' | 'downloading' | null;
+      config: RoundConfig;
+    }
   | { kind: 'done'; jobId: string; submittedAt: string; imagePaths: string[]; config: RoundConfig }
   | { kind: 'failed'; jobId?: string; submittedAt: string; reason: string; config?: RoundConfig };
 
@@ -68,11 +77,9 @@ export function RoundList({
               {r.kind === 'pending' && (
                 <section className="space-y-3">
                   <div className="flex items-start gap-3 text-sm">
-                    <ReferenceStack refs={r.config.referenceImages} onReuse={onReuseReferences} />
+                    <ReferenceStack refs={allRefs(r.config)} onReuse={onReuseReferences} />
                     <div className="min-w-0 flex-1">
-                      <p className="line-clamp-2 text-base leading-7 text-foreground" title={r.config.prompt}>
-                        {r.config.prompt}
-                      </p>
+                      <MentionPrompt prompt={r.config.prompt} config={r.config} />
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1">
@@ -82,8 +89,9 @@ export function RoundList({
                         data-testid={i === 0 && r.jobId ? `studio-pending-${r.jobId}` : undefined}
                         data-skeleton
                         aria-busy="true"
-                        className="aspect-square w-[251.5px] bg-card/40 rounded-lg flex items-center justify-center"
+                        className="relative aspect-square w-[251.5px] bg-card/40 rounded-lg flex items-center justify-center"
                       >
+                        <ProgressBadge round={r} />
                         <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                       </div>
                     ))}
@@ -127,6 +135,54 @@ export function RoundList({
   );
 }
 
+/** 进度卡点 → 百分比。
+ *
+ * 真实信号：sent=20（任务已提交上游）、downloading=95（产物下载中）、终态时卡片整体切换。
+ * 中段（50/75）按预期时长的时间卡点跳变 —— 上游任务查询不回真实进度（Ark/可灵/HappyHorse
+ * 均只有状态枚举，2026-06-12 查证），只能用预期时间近似。
+ * 图片任务无提交/下载拆分（同步单调用）：纯时间卡点 20→50→75，封顶 90 等 DONE。
+ */
+function progressPercent(opts: {
+  isVideo: boolean;
+  phase: 'sent' | 'downloading' | null | undefined;
+  startedAt: number;
+  durationSec?: number;
+  now: number;
+}): number {
+  const { isVideo, phase, startedAt, durationSec, now } = opts;
+  if (phase === 'downloading') return 95;
+  if (isVideo && !phase) return 0; // 素材准备中（含本地参考视频 OSS 中转），还没提交上游
+  const expectedMs = isVideo ? (90 + (durationSec ?? 5) * 10) * 1000 : 60_000;
+  const elapsed = now - startedAt;
+  if (!isVideo && elapsed >= expectedMs) return 90;
+  if (elapsed >= expectedMs * 0.75) return 75;
+  if (elapsed >= expectedMs * 0.5) return 50;
+  return 20;
+}
+
+function ProgressBadge({ round }: { round: Extract<RoundState, { kind: 'pending' }> }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const percent = progressPercent({
+    isVideo: round.config.kind === 'video',
+    phase: round.progressPhase,
+    startedAt: round.startedAt,
+    durationSec: round.config.duration,
+    now,
+  });
+  return (
+    <span
+      data-testid="progress-badge"
+      className="absolute left-2 top-2 rounded-full bg-scrim px-2.5 py-1 text-xs text-white backdrop-blur-glass"
+    >
+      {percent}% 生成中
+    </span>
+  );
+}
+
 function imageSrc(path: string) {
   return `/api/gallery/image?path=${encodeURIComponent(path)}`;
 }
@@ -140,9 +196,22 @@ function isImagePath(path: string): boolean {
   return /\.(png|jpe?g|webp|gif|bmp|avif)(\?|#|$)/i.test(path);
 }
 
+function isAudioPath(path: string): boolean {
+  return /\.(mp3|wav|m4a|ogg)(\?|#|$)/i.test(path);
+}
+
 // 参考图来自 .runtime/uploads/（走 /api/raw），也可能是 http(s) CDN 直链。
 function refImageSrc(path: string) {
   return path.startsWith('http') ? path : `/api/raw?path=${encodeURIComponent(path)}`;
+}
+
+// 历史参考堆叠合并三类素材（视频 round 常只有视频/音频参考，单看图片会整组消失）。
+function allRefs(config: RoundConfig): string[] {
+  return [
+    ...config.referenceImages,
+    ...(config.referenceVideos ?? []),
+    ...(config.referenceAudios ?? []),
+  ];
 }
 
 const REF_CARD_W = 46;
@@ -166,8 +235,8 @@ function ReferenceStack({
     <button
       type="button"
       data-testid="reference-stack"
-      title="点击复用这组参考图"
-      aria-label="复用这组参考图"
+      title="点击复用这组参考素材"
+      aria-label="复用这组参考素材"
       onClick={() => { void onReuse?.(refs); }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => { setHover(false); setActive(null); }}
@@ -192,13 +261,137 @@ function ReferenceStack({
             }}
             className="relative block overflow-hidden rounded-lg border-[1.5px] border-white bg-card"
           >
-            {isImagePath(src)
-              ? <img src={refImageSrc(src)} alt="参考图" className="h-full w-full object-cover" draggable={false} />
-              : <span className="flex h-full w-full items-center justify-center bg-card text-muted-foreground"><Film className="size-4" /></span>}
+            <RefThumb src={src} />
           </span>
         );
       })}
     </button>
+  );
+}
+
+// ---- 提示词 @引用只读 chip（与输入框 PromptInput 的 chip 同款视觉）----
+
+// 提交链路会把 @视频1 序列化成 视频1（厂商契约要的形态），job 里存的是序列化后的
+// prompt —— 所以这里 @ 可选；误伤靠「只有对应参考素材真实存在才 chip 化」兜底。
+const MENTION_TOKEN_RE = /@?(图|视频|音频)(\d+)/g;
+type MentionKind = 'image' | 'video' | 'audio';
+const MENTION_KIND: Record<string, MentionKind> = { 图: 'image', 视频: 'video', 音频: 'audio' };
+
+function mentionRefPath(config: RoundConfig, kind: MentionKind, n: number): string | null {
+  const list = kind === 'image' ? config.referenceImages
+    : kind === 'video' ? config.referenceVideos
+    : config.referenceAudios;
+  return list?.[n - 1] ?? null;
+}
+
+type MentionHover = { kind: MentionKind; path: string; left: number; top: number };
+
+/** 历史记录里的提示词：@图N/@视频N/@音频N 渲染成缩略图+标签 chip，hover 在上方浮层预览。 */
+function MentionPrompt({ prompt, config }: { prompt: string; config: RoundConfig }) {
+  const [hover, setHover] = useState<MentionHover | null>(null);
+  const parts = useMemo(() => {
+    const out: Array<string | { label: string; kind: MentionKind; path: string }> = [];
+    let last = 0;
+    for (const m of prompt.matchAll(MENTION_TOKEN_RE)) {
+      // 引用的素材不存在 → 当普通文本，不 chip 化（防止正文里碰巧出现"视频1"被误伤）。
+      const path = mentionRefPath(config, MENTION_KIND[m[1]], parseInt(m[2], 10));
+      if (!path) continue;
+      if (m.index! > last) out.push(prompt.slice(last, m.index));
+      out.push({ label: `${m[1]}${m[2]}`, kind: MENTION_KIND[m[1]], path });
+      last = m.index! + m[0].length;
+    }
+    if (last < prompt.length) out.push(prompt.slice(last));
+    return out;
+  }, [prompt, config]);
+
+  return (
+    <>
+      <p className="line-clamp-2 text-base leading-7 text-foreground" title={prompt}>
+        {parts.map((part, i) =>
+          typeof part === 'string' ? (
+            <span key={i}>{part}</span>
+          ) : (
+            <MentionChip key={i} label={part.label} kind={part.kind} path={part.path} onHover={setHover} />
+          ),
+        )}
+      </p>
+      {hover && createPortal(
+        <div
+          data-testid="round-mention-preview"
+          className="fixed z-50 pointer-events-none"
+          style={{ left: hover.left, top: hover.top - 8, transform: 'translate(-50%, -100%)' }}
+        >
+          {hover.kind === 'video' ? (
+            <video
+              src={refImageSrc(hover.path)}
+              autoPlay
+              muted
+              loop
+              playsInline
+              className="h-[150px] rounded-lg border border-border bg-card"
+            />
+          ) : hover.kind === 'image' ? (
+            <img
+              src={refImageSrc(hover.path)}
+              alt=""
+              className="h-[150px] rounded-lg border border-border bg-card object-contain"
+            />
+          ) : (
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
+              <Music className="size-4" aria-hidden />
+              <span className="max-w-[180px] truncate">{hover.path.split('/').pop()}</span>
+            </div>
+          )}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+function MentionChip({ label, kind, path, onHover }: {
+  label: string;
+  kind: MentionKind;
+  path: string;
+  onHover: (h: MentionHover | null) => void;
+}) {
+  const frame = useVideoFrame(kind === 'video' ? refImageSrc(path) : null);
+  const thumb = kind === 'image' ? refImageSrc(path) : frame;
+  return (
+    <span
+      data-mention={label}
+      className="inline-flex select-none items-center gap-1 align-middle text-primary"
+      onMouseEnter={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        onHover({ kind, path, left: r.left + r.width / 2, top: r.top });
+      }}
+      onMouseLeave={() => onHover(null)}
+    >
+      {thumb ? (
+        <img src={thumb} alt="" className="h-[18px] w-[18px] rounded-sm object-cover" />
+      ) : kind !== 'image' ? (
+        <span className="grid h-[18px] w-[18px] place-items-center rounded-sm bg-secondary text-muted-foreground">
+          {kind === 'video' ? <Film className="size-3" aria-hidden /> : <Music className="size-3" aria-hidden />}
+        </span>
+      ) : null}
+      {label}
+    </span>
+  );
+}
+
+// 堆叠卡内容：图片直出、视频抽首帧（失败退回 Film 图标）、音频固定 Music 图标。
+function RefThumb({ src }: { src: string }) {
+  const isImage = isImagePath(src);
+  const isAudio = !isImage && isAudioPath(src);
+  const frame = useVideoFrame(!isImage && !isAudio ? refImageSrc(src) : null);
+  const thumb = isImage ? refImageSrc(src) : frame;
+  if (thumb) {
+    return <img src={thumb} alt="参考素材" className="h-full w-full object-cover" draggable={false} />;
+  }
+  return (
+    <span className="flex h-full w-full items-center justify-center bg-card text-muted-foreground">
+      {isAudio ? <Music className="size-4" /> : <Film className="size-4" />}
+    </span>
   );
 }
 
@@ -240,11 +433,9 @@ function DoneBatch({
   return (
     <section className="space-y-3">
       <div className="flex items-start gap-3 text-sm">
-        <ReferenceStack refs={round.config.referenceImages} onReuse={onReuseReferences} />
+        <ReferenceStack refs={allRefs(round.config)} onReuse={onReuseReferences} />
         <div className="min-w-0 flex-1">
-          <p className="line-clamp-2 text-base leading-7 text-foreground" title={round.config.prompt}>
-            {round.config.prompt}
-          </p>
+          <MentionPrompt prompt={round.config.prompt} config={round.config} />
           <p className="mt-1 text-sm text-muted-foreground">{meta.join(' | ')}</p>
         </div>
       </div>
@@ -396,11 +587,9 @@ function FailedCard({
     <section className="space-y-3">
       {config && (
         <div className="flex items-start gap-3 text-sm">
-          <ReferenceStack refs={config.referenceImages} onReuse={onReuseReferences} />
+          <ReferenceStack refs={allRefs(config)} onReuse={onReuseReferences} />
           <div className="min-w-0 flex-1">
-            <p className="line-clamp-2 text-base leading-7 text-foreground" title={config.prompt}>
-              {config.prompt}
-            </p>
+            <MentionPrompt prompt={config.prompt} config={config} />
             {meta.length > 0 && (
               <p className="mt-1 text-sm text-muted-foreground">{meta.join(' | ')}</p>
             )}

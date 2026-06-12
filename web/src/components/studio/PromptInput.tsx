@@ -7,6 +7,7 @@ import { providerLabel } from '@/lib/providerLabels';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
 import { estimateCostYuan, isHkAggregator } from '@/lib/creditCost';
+import { captureVideoFrame } from '@/lib/videoFrame';
 import { VideoControls } from './VideoControls';
 import {
   FirstLastFrames,
@@ -176,30 +177,6 @@ export function domToText(root: HTMLElement): string {
   };
   root.childNodes.forEach(walk);
   return out.replace(/\u00a0/g, ' ');
-}
-
-/** 视频首帧 → 小尺寸 dataURL（chip / 堆叠卡缩略图用）；解码失败返回 null 退回图标。 */
-function captureVideoFrame(url: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const video = document.createElement('video');
-    video.muted = true;
-    video.preload = 'auto';
-    video.onloadeddata = () => {
-      try {
-        const w = 96;
-        const h = video.videoWidth ? Math.max(1, Math.round((video.videoHeight / video.videoWidth) * w)) : 54;
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        canvas.getContext('2d')?.drawImage(video, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      } catch {
-        resolve(null);
-      }
-    };
-    video.onerror = () => resolve(null);
-    video.src = url;
-  });
 }
 
 export function PromptInput({

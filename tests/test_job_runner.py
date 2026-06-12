@@ -248,6 +248,36 @@ def test_run_job_video_branch_writes_mp4_and_done(project, monkeypatch):
     assert Path(result.output_paths[0]).exists()
 
 
+def test_run_job_video_branch_writes_progress_phases(project, monkeypatch):
+    """caller 的 on_phase 回调要把 sent/downloading 真实卡点写进 job 文件，终态清空。"""
+    from character_workflow.lib.schemas import JobKind
+    write_job(
+        job_id="vid-phase", character_id="ark", prompt="a calm sea",
+        model="doubao-seedance-2-0-fast-260128", params={"frame_mode": "auto"},
+        seed=None, status=JobStatus.PENDING, alias="ark",
+    )
+    job = read_job("vid-phase").model_copy(update={"kind": JobKind.VIDEO, "namespace": "studio"})
+    save_job(job)
+
+    observed: list[str | None] = []
+
+    def fake_dispatch_video(*, prompt, model, alias, output_dir, params=None, on_phase=None, **kw):
+        on_phase("sent")
+        observed.append(read_job("vid-phase").progress_phase)
+        on_phase("downloading")
+        observed.append(read_job("vid-phase").progress_phase)
+        out = Path(output_dir) / "v1.mp4"
+        _write_mp4(out)
+        return [str(out)]
+
+    monkeypatch.setattr(job_runner, "dispatch_video", fake_dispatch_video)
+    result = job_runner.run_job("vid-phase")
+    assert observed == ["sent", "downloading"]
+    # DONE 终态清空进度卡点
+    assert result.status == JobStatus.DONE
+    assert result.progress_phase is None
+
+
 def test_is_valid_video_accepts_mp4_rejects_empty(project, tmp_path):
     good = tmp_path / "good.mp4"
     _write_mp4(good)

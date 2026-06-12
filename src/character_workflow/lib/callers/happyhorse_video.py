@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -221,9 +222,12 @@ def render_video(
     params: dict[str, Any] | None = None,
     max_polls: int = 120,
     poll_interval: float = 15.0,  # 官方建议 15s 轮询（查询 RPS 上限 20）
+    on_phase: Callable[[str], None] | None = None,
     **_kwargs,
 ) -> list[str]:
-    """提交 n 条 HappyHorse 视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。"""
+    """提交 n 条 HappyHorse 视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。
+
+    on_phase: 进度卡点回调 —— 全部提交成功后 "sent"、开始下载产物时 "downloading"。"""
     params = dict(params or {})
     key = _keys.find_by_alias(alias) if alias else None
     if key is None:
@@ -248,6 +252,8 @@ def render_video(
         if not task_id:
             raise HappyHorseVideoError(f"HappyHorse 提交后未返回 task id: {payload!r}")
         task_ids.append(task_id)
+    if on_phase:
+        on_phase("sent")
 
     out_dir = Path(output_dir)
     ready_urls = [
@@ -255,4 +261,6 @@ def render_video(
                    max_polls=max_polls, poll_interval=poll_interval)
         for t in task_ids
     ]
+    if on_phase:
+        on_phase("downloading")
     return [_download_mp4(url, out_dir, i + 1) for i, url in enumerate(ready_urls)]

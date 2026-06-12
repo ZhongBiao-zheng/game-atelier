@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -197,9 +198,12 @@ def render_video(
     params: dict[str, Any] | None = None,
     max_polls: int = 180,
     poll_interval: float = 5.0,
+    on_phase: Callable[[str], None] | None = None,
     **_kwargs,
 ) -> list[str]:
-    """提交 n 条可灵视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。"""
+    """提交 n 条可灵视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。
+
+    on_phase: 进度卡点回调 —— 全部提交成功后 "sent"、开始下载产物时 "downloading"。"""
     params = dict(params or {})
     key = _keys.find_by_alias(alias) if alias else None
     if key is None:
@@ -219,13 +223,19 @@ def render_video(
         if not task_id:
             raise KlingVideoError(f"可灵提交后未返回 task id: {payload!r}")
         task_ids.append(task_id)
+    if on_phase:
+        on_phase("sent")
 
     out_dir = Path(output_dir)
     paths: list[str] = []
+    downloading = False
     for task_id in task_ids:
         for url in _poll_task(
             root=root, headers=headers, act=act, task_id=task_id,
             max_polls=max_polls, poll_interval=poll_interval,
         ):
+            if on_phase and not downloading:
+                downloading = True
+                on_phase("downloading")
             paths.append(_download_mp4(url, out_dir, len(paths) + 1))
     return paths
