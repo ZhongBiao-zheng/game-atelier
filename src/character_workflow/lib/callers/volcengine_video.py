@@ -15,6 +15,7 @@ from typing import Any
 import requests
 
 from character_workflow.lib import keys as _keys
+from character_workflow.lib import oss_upload
 
 DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_MODEL = "doubao-seedance-2-0-fast-260128"
@@ -91,12 +92,40 @@ def _image_payload_url(path_or_url: str) -> str:
     return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
 
 
-def _media_payload_url(path_or_url: str, label: str) -> str:
-    """参考视频/音频只接受 Ark 可拉取的 url：体积太大无法 base64 内联，本地文件显式报错。"""
+def _video_payload_url(path_or_url: str) -> str:
+    """参考视频只接受公网直链：上游显式拒 base64（reference_video must be a web url，
+    2026-06-12 经 TokenDance 网关实测）。本地文件走 OSS 中转换成 presigned 直链。"""
+    s = str(path_or_url).strip()
+    if s.startswith(("http://", "https://")):
+        return s
+    try:
+        return oss_upload.upload_for_url(s)
+    except (oss_upload.OssNotConfiguredError, oss_upload.OssUploadError) as e:
+        raise VolcengineVideoError(str(e)) from e
+
+
+_AUDIO_MIME = {"mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4", "ogg": "audio/ogg"}
+# 官方契约音频单段 ≤15MB；base64 膨胀 ~1.33x 后仍在 64MB 请求体帽内。
+_AUDIO_INLINE_MAX_BYTES = 15 * 1024 * 1024
+
+
+def _audio_payload_url(path_or_url: str) -> str:
+    """本地音频 → base64 data-url；http(s)/data: 直通。
+
+    与视频不同，audio_url 官方支持 base64（2026-06-12 经 TokenDance 网关实测通过）。
+    """
     s = str(path_or_url).strip()
     if s.startswith(("http://", "https://", "data:")):
         return s
-    raise VolcengineVideoError(f"参考{label}暂不支持本地文件（无法内联上传），请改用 http(s) 直链: {s}")
+    try:
+        raw = Path(s).read_bytes()
+    except OSError as e:
+        raise VolcengineVideoError(f"读取参考音频失败: {s}: {e}") from e
+    if len(raw) > _AUDIO_INLINE_MAX_BYTES:
+        raise VolcengineVideoError(f"参考音频超过官方单段 15MB 上限: {s}")
+    ext = Path(s).suffix.lstrip(".").lower()
+    mime = _AUDIO_MIME.get(ext, "audio/mpeg")
+    return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
 
 
 def _build_content(prompt, images, videos, audios, frame_mode) -> list[dict[str, Any]]:
@@ -110,13 +139,13 @@ def _build_content(prompt, images, videos, audios, frame_mode) -> list[dict[str,
     for url in list(videos)[:3]:
         content.append({
             "type": "video_url",
-            "video_url": {"url": _media_payload_url(url, "视频")},
+            "video_url": {"url": _video_payload_url(url)},
             "role": "reference_video",
         })
     for url in list(audios)[:3]:
         content.append({
             "type": "audio_url",
-            "audio_url": {"url": _media_payload_url(url, "音频")},
+            "audio_url": {"url": _audio_payload_url(url)},
             "role": "reference_audio",
         })
     return content

@@ -64,10 +64,20 @@ class KeySpec(BaseModel):
         return value
 
 
+class OssConfig(BaseModel):
+    """对象存储配置（参考视频中转用）。与生成类 Key 分开存：不参与模型选择。"""
+    provider: Literal["aliyun"] = "aliyun"
+    access_key_id: str
+    access_key_secret: str
+    bucket: str
+    endpoint: str  # 如 oss-cn-beijing.aliyuncs.com
+
+
 class KeysDB(BaseModel):
     version: int = 1
     default_alias: str | None = None
     keys: list[KeySpec] = Field(default_factory=list)
+    oss: OssConfig | None = None
 
 
 class DuplicateAliasError(Exception):

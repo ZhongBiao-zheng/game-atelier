@@ -178,14 +178,65 @@ def test_missing_reference_image_raises(seedance_key, tmp_path):
         )
 
 
-def test_local_reference_video_rejected(seedance_key, tmp_path):
-    # 视频/音频参考无法 base64 内联，本地路径必须显式报错而不是静默发废 url。
+def test_local_reference_video_without_oss_config_raises(seedance_key, tmp_path):
+    # 视频参考上游显式拒 base64（must be a web url，2026-06-12 实测）；
+    # 本地路径要走 OSS 中转，未配置 OSS 时必须给出明确报错。
     local = tmp_path / "clip.mp4"
     local.write_bytes(b"mp4")
-    with pytest.raises(vv.VolcengineVideoError, match="参考视频暂不支持本地文件"):
+    with pytest.raises(vv.VolcengineVideoError, match="尚未配置 OSS"):
         vv.render_video(
             prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
             params={"reference_videos": [str(local)]}, poll_interval=0,
+        )
+
+
+def test_local_reference_video_uploaded_via_oss(seedance_key, tmp_path, monkeypatch):
+    # 本地视频 → OSS presigned 直链后再提交，content 里发的是直链而非本地路径。
+    posted = {}
+    monkeypatch.setattr(vv.requests, "post", lambda url, headers=None, json=None, timeout=None: (posted.update(body=json) or _FakeResp(200, {"data": {"video_url": "https://x/v.mp4"}})))
+    monkeypatch.setattr(vv.requests, "get", lambda *a, **k: _FakeResp(200, {}))
+    monkeypatch.setattr(vv, "_download_mp4", lambda url, d, i: "ok")
+    local = tmp_path / "clip.mp4"
+    local.write_bytes(b"mp4")
+    monkeypatch.setattr(
+        vv.oss_upload, "upload_for_url",
+        lambda p: f"https://bucket.oss.example/video-refs/abc.mp4?sig=1&src={Path(p).name}",
+    )
+    vv.render_video(
+        prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
+        params={"reference_videos": [str(local)]}, poll_interval=0,
+    )
+    part = posted["body"]["content"][1]
+    assert part["role"] == "reference_video"
+    assert part["video_url"]["url"].startswith("https://bucket.oss.example/video-refs/abc.mp4")
+
+
+def test_local_reference_audio_inlined_as_data_url(seedance_key, tmp_path, monkeypatch):
+    # 音频与视频不同：audio_url 官方支持 base64（2026-06-12 实测通过），本地文件内联发送。
+    posted = {}
+    monkeypatch.setattr(vv.requests, "post", lambda url, headers=None, json=None, timeout=None: (posted.update(body=json) or _FakeResp(200, {"data": {"video_url": "https://x/v.mp4"}})))
+    monkeypatch.setattr(vv.requests, "get", lambda *a, **k: _FakeResp(200, {}))
+    monkeypatch.setattr(vv, "_download_mp4", lambda url, d, i: "ok")
+    clip = tmp_path / "voice.mp3"
+    clip.write_bytes(b"fake-mp3-bytes")
+    vv.render_video(
+        prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
+        params={"reference_audios": [str(clip)]}, poll_interval=0,
+    )
+    url = posted["body"]["content"][1]["audio_url"]["url"]
+    assert posted["body"]["content"][1]["role"] == "reference_audio"
+    assert url.startswith("data:audio/mpeg;base64,")
+    assert base64.b64decode(url.split(",", 1)[1]) == b"fake-mp3-bytes"
+
+
+def test_oversize_reference_audio_rejected(seedance_key, tmp_path, monkeypatch):
+    monkeypatch.setattr(vv, "_AUDIO_INLINE_MAX_BYTES", 4)
+    clip = tmp_path / "big.mp3"
+    clip.write_bytes(b"12345")
+    with pytest.raises(vv.VolcengineVideoError, match="15MB"):
+        vv.render_video(
+            prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
+            params={"reference_audios": [str(clip)]}, poll_interval=0,
         )
 
 

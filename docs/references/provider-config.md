@@ -254,4 +254,4 @@ TokenDance quickstart 的请求体与阿里官方**不一致**：它写 `input.i
 - TokenDance happyhorse 请求体两套字段（见上），先实测再接。
 - TokenDance `:save` 后缀变体（seedance-2.0:save 等）含义全站无说明。
 - 产物 URL 全员短命：seedance video_url 24h（任务 ID 7 天）、happyhorse task_id/video_url 24h——出片后立即落盘。
-- seedance 参考视频/音频仅 http 直链（`_media_payload_url`），本地文件报错。
+- seedance 参考视频仅公网直链：base64 被上游显式拒（`reference_video must be provided as a web url`，2026-06-12 经 TokenDance 网关实测）；本地参考视频由 `oss_upload.py` 中转阿里云 OSS（私有桶 + presigned 24h GET，配置在 keys.json `oss` 字段，同日真实上传冒烟通过）；参考音频 base64 内联可用（同日实测任务进 running），单段 ≤15MB（`_video_payload_url` / `_audio_payload_url`）。

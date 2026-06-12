@@ -12,6 +12,7 @@ dependencies = [
   "pypinyin>=0.53",
   "platformdirs>=4",
   'pywin32>=308; sys_platform == "win32"',
+  "oss2>=2.19.1",
 ]
 
 [build-system]
