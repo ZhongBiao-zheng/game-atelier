@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
@@ -14,6 +14,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  window.localStorage.removeItem('atelier:theme');
+  document.documentElement.classList.remove('light');
 });
 
 function renderAt(path: string) {
@@ -119,5 +121,25 @@ describe('AppShell', () => {
     renderAt('/settings');
     const link = screen.getByLabelText('设置');
     expect(link.className).toContain('text-primary');
+  });
+
+  it('theme toggle sits left of settings and flips html class + localStorage', () => {
+    // 点击会 flush 微任务，Home 的 gallery fetch 必须给到合法形状（{} 会让 items.length 炸）
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => ({
+      ok: true,
+      json: async () => (String(url).startsWith('/api/gallery/recent') ? { items: [] } : {}),
+    })));
+    renderAt('/');
+    const toggle = screen.getByLabelText('切换到浅色主题');
+    const settings = screen.getByLabelText('设置');
+    expect(toggle.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(document.documentElement.classList.contains('light')).toBe(true);
+    expect(window.localStorage.getItem('atelier:theme')).toBe('light');
+
+    fireEvent.click(screen.getByLabelText('切换到深色主题'));
+    expect(document.documentElement.classList.contains('light')).toBe(false);
+    expect(window.localStorage.getItem('atelier:theme')).toBe('dark');
   });
 });

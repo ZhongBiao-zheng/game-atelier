@@ -1,10 +1,32 @@
+import { useState } from 'react';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
-import { HomeIcon, Settings, Sparkles, UserRound } from 'lucide-react';
+import { HomeIcon, Moon, Settings, Sparkles, Sun, UserRound } from 'lucide-react';
 
 import { Home } from '@/pages/Home';
 import { Studio } from '@/pages/Studio';
 import { CharacterDetail } from '@/pages/CharacterDetail';
 import { SettingsPage } from '@/pages/settings/Settings';
+import { applyTheme, loadTheme, saveTheme, type Theme } from '@/lib/theme';
+
+/** 深浅主题切换：图标显示目的地（暗色显太阳 = 点了去浅色） */
+function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>(loadTheme);
+  const next: Theme = theme === 'dark' ? 'light' : 'dark';
+  return (
+    <button
+      type="button"
+      aria-label={next === 'light' ? '切换到浅色主题' : '切换到深色主题'}
+      onClick={() => {
+        setTheme(next);
+        applyTheme(next);
+        saveTheme(next);
+      }}
+      className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-glass backdrop-blur-glass text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+    >
+      {theme === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
+    </button>
+  );
+}
 
 function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string; isActive: boolean; icon: typeof HomeIcon }) {
   return (
@@ -46,6 +68,7 @@ export function AppShell() {
             <NavTab to="/character" label="工坊" isActive={onCharacter} icon={UserRound} />
           </nav>
           <div className="flex min-w-0 shrink-0 items-center justify-end gap-2">
+            <ThemeToggle />
             <Link
               href="/settings"
               aria-label="设置"

@@ -114,7 +114,24 @@
 - `#D4A574` on `#0F0E0D` ≈ 9:1 ✓
 - `#1B1917` on `#D4A574` ≈ 7:1 ✓（primary 按钮）
 
-**dark mode 策略**：项目无 light mode；dark-first，所有视觉都按暗色调校。
+**主题策略**：dark-first 双主题。暗色是默认与首要调校对象；浅色 = 纯白画廊（clean light），顶栏「设置」左侧按钮切换，`<html class="light">` 触发 token 覆盖，localStorage `atelier:theme` 持久化（无存储 = 暗色）。组件只写语义 token，**禁止** `dark:` / `light:` 变体类——主题差异全部收在 `tokens.css`。
+
+**浅色覆盖值**（仅列被覆盖的 token；阶梯方向与暗色相反 = 画布纯白最亮，表面与 hover 向灰走深）：
+
+| Token | Light | 说明 |
+|---|---|---|
+| `--background` | `#FFFFFF` | 纯白画布 |
+| `--card` / `--popover` | `#FAFAFA` / `#FFFFFF` | 卡片比画布灰半档；弹层回纯白靠发丝边分层 |
+| `--secondary` / `--accent` / `--muted` | `#F0F0F0` / 同 / `#F5F5F5` | hover/选中比卡片再深一档 |
+| `--foreground` / `--muted-foreground` | `#000000` / `#595959` | 纯黑 / 中性灰 |
+| `--primary` / `--ring` | `#8F6234` | 黄铜压深保白底对比 |
+| `--primary-foreground` | `#FFFFFF` | 铜底上的白字 |
+| `--destructive` | `#B04A4A` | 暖红压深 |
+| `--border` / `--input` | `rgba(0,0,0,0.12)` / `0.2` | 发丝边翻转为纯黑 alpha |
+| `--glass` / `--scrim` | `rgba(255,255,255,0.66)` / `rgba(0,0,0,0.45)` | 白玻璃；遮罩仍压暗 |
+| `--status-*` | `#767676` / `#A3742D` / `#4F7C3E` / `#B04A4A` | 中性灰 pending，其余同色相压深 |
+
+浅色对比验证（WCAG AA 4.5:1）：`#000000` on `#FFFFFF` = 21:1 ✓；`#595959` ≈ 7:1 ✓；`#8F6234` ≈ 5.3:1 ✓；`#FFFFFF` on `#8F6234` ≈ 5.3:1 ✓。
 
 ## Elevation — 深度靠玻璃，不靠阴影
 
@@ -150,9 +167,10 @@
 
 - **Approach**: image-first + asymmetric whitespace（画廊式，非 dashboard 式）
 - **Grid**:
-  - 左栏：固定 280px（项目/角色树）
+  - 左栏（名册）：弹性 200–400px，默认 264，拖拽分界线调整、不可收起（`ResizableDivider`，宽度 localStorage 持久化）
   - 中栏：fluid（gallery）
-  - 右栏（可选）：固定 360px（spec form / image detail）
+  - 详情态左栏（胶片带）：弹性 72–320px，默认 104，拖过 64 收起为 0（header 浮出展开钮）
+  - 详情态右栏（档案栏）：固定 384px
 - **Max content width**: 无硬上限（gallery 需要充满）；详情页内文限 720px
 - **Border radius**（面越大角越大；禁 `rounded-[…]` 任意值）:
   | Token | px | 用途 |
@@ -176,6 +194,7 @@
 | 玻璃浮层（无选项的悬浮 panel/菜单） | `bg-glass backdrop-blur-glass border border-border rounded-xl` |
 | Studio 输入壳（滚动联动收放） | 浮于历史滚动区上（wrapper `pointer-events-none`，壳 `pointer-events-auto`，两侧视觉与交互都穿透）；`rounded-xl` 收放两态一致（胶囊 `rounded-full` 试装后被否——过圆），展开 `min-h-[174px]`，距底 >160px 收成单行条：控件行 `grid-rows-[0fr] opacity-0` 折叠、textarea 单行、参考堆叠 `scale-80`，全程 `transition 300ms`；点击收缩壳展开但**不回滚**，「回到底部」独立玻璃 pill 出现在壳右上方，点击**瞬时跳底**不播滚动过程 |
 | 玻璃 pill（顶栏 tab） | `bg-glass backdrop-blur-glass border border-border rounded-full` |
+| 顶栏圆形 icon 钮（主题切换 / 设置） | `h-10 w-10 rounded-full bg-glass backdrop-blur-glass text-muted-foreground hover:bg-secondary/60 hover:text-foreground`，icon 18px |
 | 遮罩层（lightbox） | `fixed inset-0 z-50 bg-scrim` |
 | 状态徽章 | `text-xs` + `text-[color:var(--status-*)]`（同字号靠颜色分语义） |
 | 输入框 | `border border-input bg-transparent rounded-md focus-visible:ring-1 focus-visible:ring-ring` |
@@ -232,3 +251,6 @@
 | 2026-06-10 | 选项弹窗从玻璃改 `bg-popover` 不透明，选项 chip 用 `bg-secondary/40` 三层分明 | 玻璃透底让弹窗里的选项与背景作品糊在一起（飙哥实测反馈）；玻璃保留给 pill / 输入壳 / lightbox 等无选项浮层 |
 | 2026-06-10 | 弹窗/输入框层级改「越靠背景越深」单调阶梯：面板 `bg-card` → 轨道 `bg-popover` → 选中/hover `secondary`；棋子与底部控件默认透明，比例棋子左右贴紧 | 原来面板(#221F1C)里嵌更深的轨道(#1B1917)、控件(`bg-background/30`)比输入壳还深，两处倒挂（飙哥反馈）；token 值不动，只重排用法 |
 | 2026-06-11 | 出图页历史改从下往上（col-reverse 原生钉底）+ 输入壳浮层化（两侧穿透）+ 滚动联动收放（>160 收 / <80 展，点击展开不回滚，「回到底部」独立 pill）；omni 参考归位 textarea 左侧倾斜堆叠 | 对齐即梦交互（飙哥指定参考）；底栏独占一排挡住历史、omni 资产行与首尾帧/图片参考的左置约定相悖；收缩态展开靠点击/焦点，滚动意图优先于停留状态 |
+| 2026-06-12 | Layout 栏宽同步工坊重构现状：名册弹性 200–400（默认 264，不可收起）、胶片带 72–320（默认 104，<64 收起）、档案栏 384px | 工坊改弹性分界线后文档里的固定 280/360 已失实 |
+| 2026-06-12 | 新增浅色主题（飙哥要求），dark-first 不变：`.light` 类覆盖 token，黄铜压深 #8F6234；禁 `dark:`/`light:` 变体类 | 主题差异收在 tokens.css 单点，组件零改动零分叉 |
+| 2026-06-12 | 浅色从初版「暖纸画廊」(#F2EEE6 米色) 改纯白画廊：画布 #FFFFFF、卡片 #FAFAFA、纯黑字、发丝边纯黑 alpha，阶梯方向翻转（表面向灰走深） | 飙哥给参考站配色（bg #fff / card #fafafa / text #000/#404040 / border 黑 alpha），按参考调；品牌黄铜保留不跟参考站青色 |
