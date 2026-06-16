@@ -320,11 +320,17 @@ export function PromptInput({
   }, [mentionItems, thumbFor]);
   const chipMetaRef = useRef(chipMeta);
   chipMetaRef.current = chipMeta;
+  // @引用只属于视频「全能参考」(omni)：图片生成的参考图是朴素图生图，不走 @chip/编号/扇形倾斜。
+  // 用 ref 让 renderDom（[] 依赖、命令式构建）能读到最新模式而不必进依赖数组。
+  const isOmniRef = useRef(isOmni);
+  isOmniRef.current = isOmni;
 
   /** prompt 字符串 → 编辑器 DOM：@图N 字面量渲染成原子 chip。仅外部改写时调用。 */
   const renderDom = useCallback((value: string) => {
     const root = editorRef.current;
     if (!root) return;
+    // 非 omni（图片 / 视频首尾帧）：prompt 是纯文本，@图N 不渲染成 chip。
+    if (!isOmniRef.current) { root.textContent = value; return; }
     root.textContent = '';
     let last = 0;
     for (const m of value.matchAll(MENTION_TOKEN_RE)) {
@@ -379,7 +385,7 @@ export function PromptInput({
 
   /** 光标前一字符是 @ 且有素材 → 弹引用菜单。 */
   const updateMentionMenu = useCallback(() => {
-    if (stackItems.length === 0) {
+    if (!isOmni || stackItems.length === 0) {
       setMentionOpen(false);
       return;
     }
@@ -392,7 +398,7 @@ export function PromptInput({
       }
     }
     setMentionOpen(open);
-  }, [stackItems.length]);
+  }, [isOmni, stackItems.length]);
 
   /** 在光标处插入纯文本（Enter 换行 / 粘贴去格式共用）。execCommand 保原生撤销栈，jsdom 无则 Range 兜底。 */
   function insertPlainText(value: string) {
@@ -765,7 +771,7 @@ export function PromptInput({
                 >
                   {stackItems.map((item, i) => {
                     const hovered = refHovered === i;
-                    const angle = refExpanded ? expandAngle(i) : collapseAngle(i);
+                    const angle = isOmni ? (refExpanded ? expandAngle(i) : collapseAngle(i)) : 0;
                     return (
                       <div
                         key={i}
@@ -791,10 +797,12 @@ export function PromptInput({
                               <span className="w-full truncate text-center text-xs">{item.file.name}</span>
                             </div>
                           )}
-                          {/* @引用编号徽标：让 prompt 里的「图N」有所指 */}
-                          <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-scrim px-1 text-xs leading-4 text-foreground/90">
-                            {mentionItems[i]?.label}
-                          </span>
+                          {/* @引用编号徽标：仅 omni 全能参考需要（图片图生图不走 @引用）。 */}
+                          {isOmni && (
+                            <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-scrim px-1 text-xs leading-4 text-foreground/90">
+                              {mentionItems[i]?.label}
+                            </span>
+                          )}
                         </div>
                         <button
                           type="button"
@@ -833,7 +841,7 @@ export function PromptInput({
                       top: '50%',
                       marginTop: 15,
                       left: `${(refExpanded ? (stackItems.length - 1) * REF_W : 0) + REF_W - 20}px`,
-                      transform: `rotate(${refExpanded ? expandAngle(stackItems.length - 1) : collapseAngle(stackItems.length - 1)}deg)`,
+                      transform: `rotate(${isOmni ? (refExpanded ? expandAngle(stackItems.length - 1) : collapseAngle(stackItems.length - 1)) : 0}deg)`,
                       transition: 'left 300ms ease, transform 300ms ease',
                     }}
                   >
@@ -860,7 +868,7 @@ export function PromptInput({
           role="textbox"
           aria-multiline="true"
           aria-label="生图 prompt"
-          data-placeholder={stackItems.length > 0 ? '开始一段灵感对话，输入 @ 引用参考素材...' : '开始一段灵感对话...'}
+          data-placeholder={isOmni && stackItems.length > 0 ? '开始一段灵感对话，输入 @ 引用参考素材...' : '开始一段灵感对话...'}
           onInput={onEditorInput}
           onKeyDown={onKey}
           onPaste={onEditorPaste}

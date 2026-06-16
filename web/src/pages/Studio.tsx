@@ -84,11 +84,14 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const reversedRounds = useMemo(() => [...rounds].reverse(), [rounds]);
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
-  const [ratio, setRatio] = useState(saved.ratio ?? '1:1');
-  const [resolution, setResolution] = useState<'2K' | '4K'>(saved.resolution ?? '2K');
-  const [count, setCount] = useState(clampImageCount(saved.count ?? 1));
-  const [customSize, setCustomSize] = useState(saved.customSize ?? '');
-  const [quality, setQuality] = useState<Quality>(saved.quality ?? 'medium');
+  // 出图配置每次启动回默认（飙哥指定）：不从 localStorage 回填 ratio/像素/质量/数量，
+  // 每次重启网站都是 1:1 + 默认像素（2K 档算）+ low（仅区分质量的模型显示）+ 1 张。
+  // provider/model 仍按 saved 恢复（见下方 listKeys 后的恢复逻辑），只重置这 4+1 个配置项。
+  const [ratio, setRatio] = useState('1:1');
+  const [resolution, setResolution] = useState<'2K' | '4K'>('2K');
+  const [count, setCount] = useState(1);
+  const [customSize, setCustomSize] = useState('');
+  const [quality, setQuality] = useState<Quality>('low');
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
   const [referenceImages, setReferenceImages] = useState<File[]>([]);

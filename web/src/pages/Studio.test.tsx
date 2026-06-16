@@ -324,7 +324,7 @@ describe('Studio', () => {
     expect(body.params.n).toBe(4);
   });
 
-  it('restores the saved provider/model/ratio/count selection on mount', async () => {
+  it('restores saved provider/model but resets ratio/count to defaults on mount', async () => {
     localStorage.setItem(
       'studio:selection',
       JSON.stringify({
@@ -338,7 +338,8 @@ describe('Studio', () => {
     );
     renderStudio();
 
-    // 不做任何下拉操作，直接提交 —— 提交载荷应反映恢复后的选择，而非默认 key(volc)。
+    // 不做任何下拉操作，直接提交 —— provider/model 仍从 localStorage 恢复，
+    // 但出图配置（ratio/数量/质量）每次启动回默认（飙哥指定），不再回填上次选择。
     const textarea = await screen.findByLabelText('生图 prompt');
     typePrompt(textarea, '恢复测试');
     fireEvent.click(screen.getByLabelText('提交生成'));
@@ -349,8 +350,9 @@ describe('Studio', () => {
     const body = JSON.parse(String(studioCall![1]!.body));
     expect(body.alias).toBe('oa');
     expect(body.model).toBe('gpt-image-2');
-    expect(body.params.ratio).toBe('16:9');
-    expect(body.params.n).toBe(3);
+    // 配置回默认：1:1 / 1 张，而非 localStorage 里的 16:9 / 3
+    expect(body.params.ratio).toBe('1:1');
+    expect(body.params.n).toBe(1);
   });
 
   it('persists selection changes to localStorage', async () => {

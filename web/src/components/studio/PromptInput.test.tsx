@@ -198,13 +198,11 @@ describe('PromptInput @引用参考素材', () => {
     fireEvent.input(editor);
   }
 
-  it('有素材时敲 @ 弹菜单，点选项把 @ 替换成原子 chip 并关闭菜单', () => {
+  // @引用只属于视频「全能参考」(omni)；图片模式是朴素图生图，不走 @chip（见 PromptInput isOmni 门控）。
+  it('omni 模式有素材时敲 @ 弹菜单，点选项把 @ 替换成原子 chip 并关闭菜单', () => {
     const onSubmit = vi.fn();
     const file = new File(['x'], 'hero.png', { type: 'image/png' });
-    render(
-      <PromptInput onSubmit={onSubmit} providers={[hkKey]} providerAlias="hk" model="gpt-image-2"
-        referenceImages={[file]} onReferenceImagesChange={vi.fn()} />,
-    );
+    renderVideoMode({ videoMode: 'omni', referenceImages: [file], onSubmit });
     const editor = screen.getByLabelText('生图 prompt');
     typeAtSign(editor);
     expect(screen.getByTestId('mention-popover')).toBeInTheDocument();
@@ -224,14 +222,13 @@ describe('PromptInput @引用参考素材', () => {
     cleanup();
   });
 
-  it('受控 value 里的 @图N 字面量渲染成 chip，提交时序列化为纯序号', () => {
+  it('omni 受控 value 里的 @图N 字面量渲染成 chip，提交时序列化为纯序号', () => {
     const onSubmit = vi.fn();
     const file = new File(['x'], 'hero.png', { type: 'image/png' });
-    render(
-      <PromptInput onSubmit={onSubmit} providers={[hkKey]} providerAlias="hk" model="gpt-image-2"
-        value="@图1 在雨中奔跑" onValueChange={vi.fn()}
-        referenceImages={[file]} onReferenceImagesChange={vi.fn()} />,
-    );
+    renderVideoMode({
+      videoMode: 'omni', referenceImages: [file], onSubmit,
+      value: '@图1 在雨中奔跑', onValueChange: vi.fn(),
+    });
     const editor = screen.getByLabelText('生图 prompt');
     expect(editor.querySelector('[data-mention="图1"]')).not.toBeNull();
     fireEvent.click(screen.getByLabelText('提交生成'));
@@ -239,13 +236,12 @@ describe('PromptInput @引用参考素材', () => {
     cleanup();
   });
 
-  it('hover chip 在上方弹出素材预览，移出关闭', () => {
+  it('omni hover chip 在上方弹出素材预览，移出关闭', () => {
     const file = new File(['x'], 'hero.png', { type: 'image/png' });
-    render(
-      <PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="gpt-image-2"
-        value="@图1 " onValueChange={vi.fn()}
-        referenceImages={[file]} onReferenceImagesChange={vi.fn()} />,
-    );
+    renderVideoMode({
+      videoMode: 'omni', referenceImages: [file],
+      value: '@图1 ', onValueChange: vi.fn(),
+    });
     const chip = screen.getByLabelText('生图 prompt').querySelector('[data-mention="图1"]')!;
     fireEvent.mouseOver(chip);
     expect(screen.getByTestId('mention-preview')).toBeInTheDocument();
