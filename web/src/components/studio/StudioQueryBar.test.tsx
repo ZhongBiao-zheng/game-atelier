@@ -1,0 +1,37 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+
+import { DEFAULT_HISTORY_FILTERS } from '@/lib/historyFilters';
+import { StudioQueryBar } from './StudioQueryBar';
+
+describe('StudioQueryBar', () => {
+  it('点搜索展开输入框并回传 search', () => {
+    const onChange = vi.fn();
+    render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText('搜索'));
+    fireEvent.change(screen.getByPlaceholderText('搜索提示词…'), { target: { value: 'dragon' } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ search: 'dragon' }));
+  });
+
+  it('生成模式选 Skill 回传 mode=skill，再选清空', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText('生成模式筛选'));
+    fireEvent.click(screen.getByRole('option', { name: /Skill/ }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mode: 'skill' }));
+
+    onChange.mockClear();
+    rerender(<StudioQueryBar filters={{ ...DEFAULT_HISTORY_FILTERS, mode: 'skill' }} onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText('生成模式筛选'));
+    fireEvent.click(screen.getByRole('option', { name: /Skill/ }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mode: null }));
+  });
+
+  it('操作类型选收藏回传 op=favorite', () => {
+    const onChange = vi.fn();
+    render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText('操作类型筛选'));
+    fireEvent.click(screen.getByRole('option', { name: /收藏/ }));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ op: 'favorite' }));
+  });
+});
