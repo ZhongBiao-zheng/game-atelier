@@ -946,17 +946,22 @@ def gallery_hidden() -> dict:
     return {"paths": _read_gallery_hidden()}
 
 
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """唯一临时名 + 原子 replace。并发写各自独占 tmp，消除共享 .json.tmp 被先到者改名后
+    后到者 replace 撞空导致的 500（沿用全仓 sidecar 原子写思路，仅把死写的 .tmp 名改唯一）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
 @router.post("/gallery/hidden")
 def post_gallery_hidden(patch: _GalleryHiddenPatch) -> dict:
     target = _normalize_gallery_path(patch.path)
     paths = [p for p in _read_gallery_hidden() if p != target]
     if patch.hidden:
         paths.append(target)
-    out = _gallery_hidden_file()
-    out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"paths": paths}, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(out)
+    _atomic_write_json(_gallery_hidden_file(), {"paths": paths})
     return {"paths": paths}
 
 
@@ -995,11 +1000,7 @@ def post_gallery_favorites(patch: _GalleryFavoritePatch) -> dict:
     paths = [p for p in _read_gallery_favorites() if p != target]
     if patch.favorite:
         paths.append(target)
-    out = _gallery_favorites_file()
-    out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"paths": paths}, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(out)
+    _atomic_write_json(_gallery_favorites_file(), {"paths": paths})
     return {"paths": paths}
 
 
