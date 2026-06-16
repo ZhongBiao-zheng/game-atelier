@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from character_workflow.lib import data_root
+from character_workflow.lib import net_env
 from character_workflow.lib.callers import dispatch, dispatch_video
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
@@ -23,6 +24,23 @@ from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
 
 class JobRunnerError(RuntimeError):
     pass
+
+
+def _friendly_error(err: BaseException) -> str:
+    """把底层网络异常翻成画师能看懂的中文落进 job.error；其它原样返回。"""
+    low = str(err).lower()
+    if "proxy" in low and ("connect" in low or "proxyerror" in low or "max retries" in low):
+        return (
+            "连不上本机代理（VPN / Clash 等）。这些国产厂商无需翻墙：请在代理工具里"
+            "关闭代理，或把厂商域名加入直连/绕过规则后重试。"
+        )
+    if "timed out" in low or "timeout" in low:
+        return "厂商接口超时未响应：可能是该模型上游过载，请稍后重试或换模型。"
+    if "max retries" in low or "failed to establish" in low or (
+        "connection" in low and ("refused" in low or "aborted" in low)
+    ):
+        return "网络连不上厂商接口：请检查网络 / 代理设置，确认厂商域名可访问后重试。"
+    return str(err)
 
 
 def _project_root() -> Path:
@@ -145,6 +163,8 @@ def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
 
 def run_job(job_id: str) -> Job:
     from character_workflow.lib.schemas import JobKind
+    # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
+    net_env.configure_proxy_bypass()
     job = read_job(job_id)
     # Studio jobs start PENDING (UI submit = consent); character jobs start PENDING_CONFIRM.
     allowed_statuses = (JobStatus.PENDING_CONFIRM, JobStatus.PENDING)
@@ -195,7 +215,7 @@ def run_job(job_id: str) -> Job:
                 error=None,
             )
     except Exception as e:
-        update_job_status(job.job_id, status=JobStatus.FAILED, error=str(e))
+        update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(e))
         if isinstance(e, JobRunnerError):
             raise
         raise JobRunnerError(str(e)) from e
@@ -244,7 +264,7 @@ def _run_video_job(job: Job) -> Job:
                 error=None,
             )
     except Exception as e:
-        update_job_status(job.job_id, status=JobStatus.FAILED, error=str(e))
+        update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(e))
         if isinstance(e, JobRunnerError):
             raise
         raise JobRunnerError(str(e)) from e

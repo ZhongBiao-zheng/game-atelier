@@ -17,6 +17,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
+from character_workflow.lib import net_env
+
 DEFAULT_SEEDREAM_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_TOKENDANCE_BASE_URL = "https://tokendance.space/gateway/v1"
@@ -41,7 +43,7 @@ def render(
     alias: str,
     output_dir: Path | str,
     n: int = 1,
-    timeout: float = 600.0,
+    timeout: float | tuple[float, float] = net_env.DEFAULT_TIMEOUT,
     **kwargs: Any,
 ) -> list[str]:
     from character_workflow.lib import keys as _keys
@@ -197,7 +199,7 @@ def _hk_edits_fields(
 
 
 def _post_multipart(
-    url: str, api_key: str, *, fields: dict, files: list, timeout: float
+    url: str, api_key: str, *, fields: dict, files: list, timeout: float | tuple[float, float]
 ) -> dict:
     # 不手动设 Content-Type，让 requests 生成 multipart boundary。
     headers = {"Authorization": f"Bearer {api_key}"}
@@ -320,7 +322,7 @@ def _api_root(base_url: str) -> str:
     return base.rstrip("/")
 
 
-def _post_json(url: str, api_key: str, payload: dict, *, timeout: float) -> dict:
+def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[float, float]) -> dict:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -345,8 +347,10 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float) -> dict
         headers=headers,
         method="POST",
     )
+    # urllib 只接受单个 float 超时；timeout 是 (连接, 读取) 元组时取读取分量。
+    _urllib_timeout = timeout[1] if isinstance(timeout, (tuple, list)) else timeout
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=_urllib_timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")

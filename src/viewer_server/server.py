@@ -17,6 +17,7 @@ import uvicorn
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from character_workflow.lib import data_root  # noqa: E402
+from character_workflow.lib import net_env  # noqa: E402
 from viewer_server.pid import (  # noqa: E402
     cleanup_stale_pid, read_pid, read_port, write_pid, write_port,
 )
@@ -142,6 +143,9 @@ def _clear_server_files(runtime: Path) -> None:
 def cmd_start(background: bool = False) -> None:
     if not _bootstrap_gate(background):
         sys.exit(1)
+
+    # 国产厂商 host 绕过系统/坏代理（NO_PROXY）：覆盖 Studio 后台出图与 models-preview 等服务端调用。
+    net_env.configure_proxy_bypass()
 
     runtime = data_root.runtime_dir()
     runtime.mkdir(parents=True, exist_ok=True)
