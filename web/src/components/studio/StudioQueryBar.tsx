@@ -20,7 +20,7 @@ const OP_OPTS: { key: 'favorite' | 'hidden'; label: string; icon: ReactNode }[] 
   { key: 'hidden', label: '隐藏', icon: <EyeOff size={18} aria-hidden /> },
 ];
 
-/** 查询面板 chip——复用 PromptInput ControlButton 配方（h-9 rounded-md token 色）。 */
+/** 查询面板 chip——复用 PromptInput ControlButton 配方（h-7 rounded-md token 色）。 */
 function FilterChip({
   active,
   children,
@@ -29,7 +29,7 @@ function FilterChip({
   return (
     <button
       type="button"
-      className={`inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+      className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         active ? 'bg-secondary text-foreground' : 'text-foreground hover:bg-secondary'
       }`}
       {...props}
@@ -64,7 +64,7 @@ export function StudioQueryBar({
   return (
     <div
       data-testid="studio-query-bar"
-      className="pointer-events-auto inline-flex items-center rounded-full border border-input bg-glass px-2 py-1 backdrop-blur-glass"
+      className="pointer-events-auto inline-flex h-9 items-center rounded-full border border-input bg-glass px-1.5 backdrop-blur-glass"
     >
       {searchOpen ? (
         <div className="flex w-80 items-center gap-2 pl-1 pr-2">
@@ -76,7 +76,7 @@ export function StudioQueryBar({
             aria-label="按提示词搜索出图记录"
             onChange={(e) => onChange({ ...filters, search: e.target.value })}
             onBlur={() => { if (!filters.search) setSearchOpen(false); }}
-            className="h-8 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
+            className="h-7 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
           <button
             type="button"
@@ -92,7 +92,7 @@ export function StudioQueryBar({
           type="button"
           aria-label="搜索"
           onClick={() => setSearchOpen(true)}
-          className="grid size-9 place-items-center rounded-full text-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="grid size-8 place-items-center rounded-full text-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <Search size={16} aria-hidden />
         </button>

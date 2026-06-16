@@ -212,9 +212,17 @@ function isAudioPath(path: string): boolean {
   return /\.(mp3|wav|m4a|ogg)(\?|#|$)/i.test(path);
 }
 
-// 参考图来自 .runtime/uploads/（走 /api/raw），也可能是 http(s) CDN 直链。
+// 参考素材三类来源，分流到对应字节端点：
+// - http(s) CDN 直链：原样返回
+// - characters/* 与 studio/* 资产（skill 出图的参考＝角色立绘）：走 /api/gallery/image，
+//   与结果图同端点（/api/raw 不带 job_id 只放行 .runtime/uploads/，角色绝对路径会 403 裂图）
+// - 其余（.runtime/uploads/ 的画师临时上传）：走 /api/raw
 function refImageSrc(path: string) {
-  return path.startsWith('http') ? path : `/api/raw?path=${encodeURIComponent(path)}`;
+  if (path.startsWith('http')) return path;
+  if (/\/(characters|studio)\//.test(path)) {
+    return `/api/gallery/image?path=${encodeURIComponent(path)}`;
+  }
+  return `/api/raw?path=${encodeURIComponent(path)}`;
 }
 
 // 历史参考堆叠合并三类素材（视频 round 常只有视频/音频参考，单看图片会整组消失）。

@@ -625,7 +625,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       aria-label="生图沙箱"
     >
       {/* 查询条：固定顶部覆盖层，不随历史滚动。wrapper 不收事件，条本体 pointer-events-auto。 */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center px-3 pt-4 sm:px-6">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-end px-3 pt-4 sm:px-6">
         <StudioQueryBar filters={historyFilters} onChange={setHistoryFilters} />
       </div>
       {/* col-reverse：浏览器原生钉底，scrollTop 0 即底部；rounds 反转后最新一轮落在视觉底部。
@@ -793,7 +793,19 @@ function referenceImagesFor(job: Job): string[] {
     job.source_image,
     ...(Array.isArray(params.reference_images) ? params.reference_images : []),
   ].filter((value): value is string => typeof value === 'string' && value.length > 0);
-  return Array.from(new Set(refs));
+  // 同一资产可能因 data root 迁移（旧仓 game-ui-ai-workflow → 分离后的 game-atelier）以不同前缀
+  // 重复登记：source_image 存新路径（可渲染）、reference_images 仍是旧仓路径（文件已不在 → 裂图）。
+  // 按尾段（角色/槽位/文件名）去重并保留首个（source_image 在前＝有效路径），消除历史里
+  // 「一张有效 + 一张裂图」的重复缩略图。本地上传走 .runtime/uploads/<uuid> 尾段唯一，不会误并。
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const ref of refs) {
+    const key = ref.startsWith('http') ? ref : ref.split('/').slice(-3).join('/');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ref);
+  }
+  return out;
 }
 
 function pathList(value: unknown): string[] {
