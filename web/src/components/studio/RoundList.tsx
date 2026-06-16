@@ -536,6 +536,9 @@ function DoneBatch({
       <div className="flex items-center gap-2">
         <ActionButton onClick={() => onReEdit?.(round.config)}>重新编辑</ActionButton>
         <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
+        {/* skill 出图（角色立绘/KV/三视图）在出图页只作溯源展示——删除会从磁盘抹掉角色资产，
+            该操作只留在工坊页。这里仅对 studio 自家出图开放「删除该批次结果」。 */}
+        {round.mode !== 'skill' && (
         <div className="relative" ref={menuWrapRef}>
           <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
           {menuOpen && (
@@ -555,6 +558,7 @@ function DoneBatch({
             </div>
           )}
         </div>
+        )}
       </div>
     </section>
   );

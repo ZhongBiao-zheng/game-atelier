@@ -45,6 +45,27 @@ describe('RoundList video', () => {
   });
 });
 
+describe('RoundList skill 出图删除门控', () => {
+  const imageDone = (mode?: 'image' | 'skill'): RoundState => ({
+    kind: 'done',
+    mode,
+    jobId: 'job-img-1',
+    submittedAt: new Date().toISOString(),
+    imagePaths: ['/data/characters/cao-cao/promo/v1.png'],
+    config: { prompt: '立绘', model: 'gpt-image-2', kind: 'image', referenceImages: [] },
+  });
+
+  it('studio 出图保留「更多操作」（含删除该批次）', () => {
+    render(<RoundList rounds={[imageDone('image')]} />);
+    expect(screen.getByLabelText('更多操作')).toBeInTheDocument();
+  });
+
+  it('skill 出图不暴露删除入口（防从出图页抹掉角色磁盘资产）', () => {
+    render(<RoundList rounds={[imageDone('skill')]} />);
+    expect(screen.queryByLabelText('更多操作')).toBeNull();
+  });
+});
+
 describe('RoundList progress badge', () => {
   function pendingRound(over: Record<string, unknown>): RoundState {
     return {
