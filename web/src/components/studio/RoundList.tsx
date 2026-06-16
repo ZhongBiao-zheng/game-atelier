@@ -4,6 +4,7 @@ import { AlertTriangle, Download, Film, Music, Trash2, X } from 'lucide-react';
 
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
 import { useVideoFrame } from '@/lib/videoFrame';
+import type { GenMode } from '@/lib/historyFilters';
 
 import { WaitingCopy } from './WaitingCopy';
 
@@ -33,14 +34,15 @@ export interface RoundConfig {
 export type RoundState =
   | {
       kind: 'pending';
+      mode?: GenMode;
       jobId?: string;
       startedAt: number;
       // 后端回写的真实进度卡点（sent=已提交上游 / downloading=产物下载中），无 job 或未提交时为空。
       progressPhase?: 'sent' | 'downloading' | null;
       config: RoundConfig;
     }
-  | { kind: 'done'; jobId: string; submittedAt: string; imagePaths: string[]; config: RoundConfig }
-  | { kind: 'failed'; jobId?: string; submittedAt: string; reason: string; config?: RoundConfig };
+  | { kind: 'done'; mode?: GenMode; jobId: string; submittedAt: string; imagePaths: string[]; config: RoundConfig }
+  | { kind: 'failed'; mode?: GenMode; jobId?: string; submittedAt: string; reason: string; config?: RoundConfig };
 
 export function RoundList({
   rounds,

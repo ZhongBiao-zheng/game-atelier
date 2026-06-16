@@ -11,6 +11,9 @@ import { RoundList, type RoundConfig, type RoundState } from '@/components/studi
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
 import { imageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
+import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
+import { fetchGalleryHidden } from '@/api/gallery';
+import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
@@ -54,6 +57,11 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [, setLocation] = useLocation();
   const [saved] = useState(loadSelection);
   const [rounds, setRounds] = useState<RoundState[]>([]);
+  // 查询面板筛选 + 收藏/隐藏集（渲染端筛选用，state 仍保留全量轮）。setHistoryFilters/toggleFavorite
+  // 由后续 Phase D/E 的 StudioQueryBar / 结果卡消费，本阶段先不解构以免触发 noUnusedLocals。
+  const [historyFilters] = useState<HistoryFilters>(DEFAULT_HISTORY_FILTERS);
+  const { favorites } = useGalleryFavorites();
+  const [hiddenPaths, setHiddenPaths] = useState<string[]>([]);
   const [persistedJobs, setPersistedJobs] = useState<Job[]>([]);
   const [pending, setPending] = useState(false);
   // compact 模式没有 rounds 列表承接失败卡片，提交/上传错误走这条内联文案。
@@ -80,8 +88,11 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   // 瞬时跳转（飙哥指定）：回到底部不要从上往下滚的过程。
   const scrollToBottom = () => scrollRef.current?.scrollTo?.({ top: 0, behavior: 'auto' });
 
-  // state 仍 newest-first（提交逻辑零改动）；视觉上最新一轮要落在底部，渲染前反转。
-  const reversedRounds = useMemo(() => [...rounds].reverse(), [rounds]);
+  // state 仍 newest-first（提交逻辑零改动）；先按查询面板筛选，再反转使最新一轮落底。
+  const reversedRounds = useMemo(
+    () => [...filterRounds(rounds, historyFilters, favorites, hiddenPaths)].reverse(),
+    [rounds, historyFilters, favorites, hiddenPaths],
+  );
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
   // 出图配置每次启动回默认（飙哥指定）：不从 localStorage 回填 ratio/像素/质量/数量，
@@ -179,6 +190,11 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     onJobChanged: handleJobChanged,
     onConnect: () => { void refreshPersistedJobs().catch(() => {}); },
   });
+
+  // 隐藏集挂载拉取（收藏集由 useGalleryFavorites 内部自拉）；筛选「隐藏」项时 filterRounds 用。
+  useEffect(() => {
+    fetchGalleryHidden().then(setHiddenPaths).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -783,33 +799,35 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
   const selectedKey = keys.find((item) => item.alias === job.alias);
   const selectedModel = selectedKey?.models.find((item) => item.id === job.model);
   const isVideo = job.kind === 'video';
+  // 记录统一后更多 job 流经此处（含 skill 出图 / 乐观提交回包），params 缺省给 {} 兜底，免渲染期崩溃。
+  const p = job.params ?? {};
   return {
-    prompt: job.prompt,
+    prompt: job.prompt ?? '',
     kind: isVideo ? 'video' : 'image',
     alias: job.alias,
     provider: job.provider,
     model: job.model,
     modelName: selectedModel?.name,
-    ratio: typeof job.params.ratio === 'string' ? job.params.ratio : undefined,
-    resolution: job.params.resolution === '4K' ? '4K' : job.params.resolution === '2K' ? '2K' : undefined,
-    size: typeof job.params.size === 'string' ? job.params.size : undefined,
-    n: typeof job.params.n === 'number' ? clampImageCount(job.params.n) : undefined,
-    quality: (job.params.quality === 'low' || job.params.quality === 'medium'
-      || job.params.quality === 'high' || job.params.quality === 'auto')
-      ? job.params.quality
+    ratio: typeof p.ratio === 'string' ? p.ratio : undefined,
+    resolution: p.resolution === '4K' ? '4K' : p.resolution === '2K' ? '2K' : undefined,
+    size: typeof p.size === 'string' ? p.size : undefined,
+    n: typeof p.n === 'number' ? clampImageCount(p.n) : undefined,
+    quality: (p.quality === 'low' || p.quality === 'medium'
+      || p.quality === 'high' || p.quality === 'auto')
+      ? p.quality
       : undefined,
     referenceImages: referenceImagesFor(job),
     // 视频参数：再次生成时从原 job 还原（resolution 上面只认 2K/4K 图片语义，视频的 720p/1080p 存这里）。
     // referenceVideos/Audios 给空数组而非 undefined，避免 onSubmitVideo 的 ?? 回落到当前表单文件。
     ...(isVideo
       ? {
-          duration: typeof job.params.duration === 'number' ? job.params.duration : undefined,
-          videoResolution: typeof job.params.resolution === 'string' ? job.params.resolution : undefined,
-          videoQuality: (job.params.mode === 'std' || job.params.mode === 'pro') ? job.params.mode : undefined,
-          frameMode: job.params.frame_mode,
-          generateAudio: job.params.generate_audio === true,
-          referenceVideos: pathList(job.params.reference_videos),
-          referenceAudios: pathList(job.params.reference_audios),
+          duration: typeof p.duration === 'number' ? p.duration : undefined,
+          videoResolution: typeof p.resolution === 'string' ? p.resolution : undefined,
+          videoQuality: (p.mode === 'std' || p.mode === 'pro') ? p.mode : undefined,
+          frameMode: p.frame_mode,
+          generateAudio: p.generate_audio === true,
+          referenceVideos: pathList(p.reference_videos),
+          referenceAudios: pathList(p.reference_audios),
         }
       : {}),
   };
@@ -832,13 +850,15 @@ function hydrateRoundModelName(round: RoundState, keys: KeyView[]): RoundState {
 
 function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
   return jobs
-    .filter((job) => job.namespace === 'studio')
+    .filter((job) => job.status !== 'pending_confirm')
     .sort((a, b) => Date.parse(b.submitted_at) - Date.parse(a.submitted_at))
     .flatMap((job): RoundState[] => {
+      const mode = deriveGenMode(job);
       if (job.status === 'done') {
         if (job.output_paths.length === 0) return [];
         return [{
           kind: 'done' as const,
+          mode,
           jobId: job.job_id,
           submittedAt: job.submitted_at,
           imagePaths: job.output_paths,
@@ -848,6 +868,7 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
       if (job.status === 'failed') {
         return [{
           kind: 'failed' as const,
+          mode,
           jobId: job.job_id,
           submittedAt: job.submitted_at,
           reason: job.error ?? '生成失败',
@@ -856,6 +877,7 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
       }
       return [{
         kind: 'pending' as const,
+        mode,
         jobId: job.job_id,
         startedAt: Date.parse(job.submitted_at) || Date.now(),
         progressPhase: job.progress_phase ?? null,
