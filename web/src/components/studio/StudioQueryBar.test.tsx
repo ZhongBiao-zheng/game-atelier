@@ -5,6 +5,13 @@ import { DEFAULT_HISTORY_FILTERS } from '@/lib/historyFilters';
 import { StudioQueryBar } from './StudioQueryBar';
 
 describe('StudioQueryBar', () => {
+  it('三个筛选 chip 渲染可见标签（防 FilterChip 吞 children 回归）', () => {
+    render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={vi.fn()} />);
+    expect(screen.getByLabelText('时间筛选')).toHaveTextContent('时间');
+    expect(screen.getByLabelText('生成模式筛选')).toHaveTextContent('生成模式');
+    expect(screen.getByLabelText('操作类型筛选')).toHaveTextContent('操作类型');
+  });
+
   it('点搜索展开输入框并回传 search', () => {
     const onChange = vi.fn();
     render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={onChange} />);

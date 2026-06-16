@@ -33,7 +33,9 @@ function FilterChip({
         active ? 'bg-secondary text-foreground' : 'text-foreground hover:bg-secondary'
       }`}
       {...props}
-    />
+    >
+      {children}
+    </button>
   );
 }
 
