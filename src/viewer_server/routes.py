@@ -960,6 +960,49 @@ def post_gallery_hidden(patch: _GalleryHiddenPatch) -> dict:
     return {"paths": paths}
 
 
+def _gallery_favorites_file() -> Path:
+    return _runtime() / "gallery-favorites.json"
+
+
+def _read_gallery_favorites() -> list[str]:
+    p = _gallery_favorites_file()
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    paths = data.get("paths") if isinstance(data, dict) else None
+    if not isinstance(paths, list):
+        return []
+    return [x for x in paths if isinstance(x, str)]
+
+
+class _GalleryFavoritePatch(BaseModel):
+    model_config = {"extra": "forbid"}
+    path: str = Field(min_length=1)
+    favorite: bool
+
+
+@router.get("/gallery/favorites")
+def gallery_favorites() -> dict:
+    return {"paths": _read_gallery_favorites()}
+
+
+@router.post("/gallery/favorites")
+def post_gallery_favorites(patch: _GalleryFavoritePatch) -> dict:
+    target = _normalize_gallery_path(patch.path)
+    paths = [p for p in _read_gallery_favorites() if p != target]
+    if patch.favorite:
+        paths.append(target)
+    out = _gallery_favorites_file()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"paths": paths}, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(out)
+    return {"paths": paths}
+
+
 def _gallery_job_ids_by_path() -> dict[str, str]:
     root = _project_root()
     result: dict[str, str] = {}

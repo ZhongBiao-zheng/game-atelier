@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Eye, EyeOff, Loader2, Upload, X } from 'lucide-react';
+import { AlertTriangle, Download, Eye, EyeOff, Loader2, Star, Upload, X } from 'lucide-react';
 import type { AssetSlot, Job, ProjectsFile } from '../schema/jobs';
 import { fetchGalleryHidden, isGalleryHidden, setGalleryHidden } from '@/api/gallery';
+import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -57,6 +58,7 @@ export function CharacterGallery({
   const [colCount, setColCount] = useState(3);
   // 首页作品展示的隐藏清单（工坊内不受影响，仅作状态标识 + 切换入口）。
   const [hiddenPaths, setHiddenPaths] = useState<string[]>([]);
+  const { toggleFavorite, isFavorited } = useGalleryFavorites();
   // 展签小帽：角色所属项目名
   const [projectName, setProjectName] = useState<string | null>(null);
 
@@ -185,14 +187,19 @@ export function CharacterGallery({
 
       {hasAny && (
         <div className={cn(colClass, 'gap-4')}>
-          {allImages.map((img, i) => (
+          {allImages.map((img, i) => {
+            const favorited = isFavorited(img.path);
+            const hidden = isGalleryHidden(img.path, hiddenPaths);
+            const rawSrc = `/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`;
+            const btn = 'size-7 rounded-full bg-scrim grid place-items-center transition-opacity backdrop-blur-glass cursor-pointer border-0';
+            return (
             <figure key={i} className="group relative mb-4 break-inside-avoid">
               <button
                 onClick={() => onSelectImage(img.path, img.jobId, tab)}
                 className="w-full block overflow-hidden rounded-lg border border-border bg-card transition-all duration-200 hover:border-input cursor-pointer p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 <img
-                  src={`/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`}
+                  src={rawSrc}
                   alt=""
                   className="w-full h-auto block transition-opacity duration-300 group-hover:opacity-95"
                 />
@@ -200,30 +207,45 @@ export function CharacterGallery({
               <figcaption className="pointer-events-none absolute bottom-2 left-2 font-mono text-xs tabular-nums tracking-wider text-foreground bg-glass backdrop-blur-glass px-2 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity">
                 №{String(i + 1).padStart(2, '0')}
               </figcaption>
-              <button
-                onClick={(e) => { e.stopPropagation(); void toggleHidden(img.path); }}
-                title={isGalleryHidden(img.path, hiddenPaths) ? '已从首页作品展示隐藏，点击恢复' : '从首页作品展示隐藏（工坊内仍可见）'}
-                aria-label={isGalleryHidden(img.path, hiddenPaths) ? '恢复展示' : '隐藏'}
-                className={cn(
-                  'absolute left-2 top-2 size-7 rounded-full bg-scrim text-white grid place-items-center transition-opacity backdrop-blur-glass hover:bg-background/90 cursor-pointer border-0',
-                  // 已隐藏的图常显 EyeOff 作状态标识；未隐藏的悬停才出现，不抢画面。
-                  isGalleryHidden(img.path, hiddenPaths) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-                )}
-              >
-                {isGalleryHidden(img.path, hiddenPaths)
-                  ? <EyeOff className="size-3.5" />
-                  : <Eye className="size-3.5" />}
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); void deleteImage(img.jobId, img.path); }}
-                title="删除这张图"
-                aria-label="删除"
-                className="absolute right-2 top-2 size-7 rounded-full bg-scrim text-white grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-glass hover:bg-destructive cursor-pointer border-0"
-              >
-                <X className="size-3.5" />
-              </button>
+              <div className="absolute right-2 top-2 flex gap-1.5">
+                <button
+                  onClick={(e) => { e.stopPropagation(); void toggleFavorite(img.path); }}
+                  title={favorited ? '取消收藏' : '收藏'}
+                  aria-label={favorited ? '取消收藏' : '收藏'}
+                  className={cn(btn, favorited ? 'text-primary opacity-100 hover:bg-background/90' : 'text-white opacity-0 group-hover:opacity-100 hover:bg-background/90')}
+                >
+                  <Star className="size-3.5" />
+                </button>
+                <a
+                  href={rawSrc}
+                  download={img.path.split('/').pop() || 'image.png'}
+                  onClick={(e) => e.stopPropagation()}
+                  title="下载这张图"
+                  aria-label="下载"
+                  className={cn(btn, 'text-white opacity-0 group-hover:opacity-100 hover:bg-background/90')}
+                >
+                  <Download className="size-3.5" />
+                </a>
+                <button
+                  onClick={(e) => { e.stopPropagation(); void toggleHidden(img.path); }}
+                  title={hidden ? '已从首页作品展示隐藏，点击恢复' : '从首页作品展示隐藏（工坊内仍可见）'}
+                  aria-label={hidden ? '恢复展示' : '隐藏'}
+                  className={cn(btn, hidden ? 'text-white opacity-100 hover:bg-background/90' : 'text-white opacity-0 group-hover:opacity-100 hover:bg-background/90')}
+                >
+                  {hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); void deleteImage(img.jobId, img.path); }}
+                  title="删除这张图"
+                  aria-label="删除"
+                  className={cn(btn, 'text-white opacity-0 group-hover:opacity-100 hover:bg-destructive')}
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
             </figure>
-          ))}
+            );
+          })}
 
           {tabJobs.filter(j => j.status === 'pending' && !isStalePending(j)).flatMap(j =>
             Array.from({ length: j.params?.n ?? 1 }, (_, i) => (

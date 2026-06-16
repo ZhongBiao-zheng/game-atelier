@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Trash2, CheckCircle2, Copy, PanelLeftOpen, Save } from 'lucide-react';
+import { ArrowLeft, Trash2, CheckCircle2, Copy, PanelLeftOpen, Save, Star } from 'lucide-react';
 import type { Job, WebEditableJobPatch } from '../schema/jobs';
+import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -21,6 +22,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
   const [patch, setPatch] = useState<WebEditableJobPatch>({});
   const [toast, setToast] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const { toggleFavorite, isFavorited } = useGalleryFavorites();
 
   useEffect(() => {
     fetch(`/api/jobs/${jobId}`).then(r => r.json()).then(setJob);
@@ -88,6 +90,16 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
           </Button>
         </div>
         <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void toggleFavorite(path)}
+            title={isFavorited(path) ? '取消收藏' : '收藏'}
+            className={isFavorited(path) ? 'text-primary' : undefined}
+          >
+            <Star className="size-3.5" />
+            {isFavorited(path) ? '已收藏' : '收藏'}
+          </Button>
           <Button
             size="sm"
             onClick={saveChanges}

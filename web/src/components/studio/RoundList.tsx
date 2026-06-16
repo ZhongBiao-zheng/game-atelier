@@ -1,9 +1,11 @@
 import { type ButtonHTMLAttributes, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Download, Film, Music, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Download, Film, Music, Star, Trash2, X } from 'lucide-react';
 
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
 import { useVideoFrame } from '@/lib/videoFrame';
+import type { GenMode } from '@/lib/historyFilters';
+import { isGalleryFavorited } from '@/api/gallery';
 
 import { WaitingCopy } from './WaitingCopy';
 
@@ -33,17 +35,20 @@ export interface RoundConfig {
 export type RoundState =
   | {
       kind: 'pending';
+      mode?: GenMode;
       jobId?: string;
       startedAt: number;
       // 后端回写的真实进度卡点（sent=已提交上游 / downloading=产物下载中），无 job 或未提交时为空。
       progressPhase?: 'sent' | 'downloading' | null;
       config: RoundConfig;
     }
-  | { kind: 'done'; jobId: string; submittedAt: string; imagePaths: string[]; config: RoundConfig }
-  | { kind: 'failed'; jobId?: string; submittedAt: string; reason: string; config?: RoundConfig };
+  | { kind: 'done'; mode?: GenMode; jobId: string; submittedAt: string; imagePaths: string[]; config: RoundConfig }
+  | { kind: 'failed'; mode?: GenMode; jobId?: string; submittedAt: string; reason: string; config?: RoundConfig };
 
 export function RoundList({
   rounds,
+  favorites,
+  onToggleFavorite,
   onDeleteFailed,
   onReEdit,
   onRegenerate,
@@ -51,6 +56,8 @@ export function RoundList({
   onReuseReferences,
 }: {
   rounds: RoundState[];
+  favorites?: string[];
+  onToggleFavorite?: (path: string) => void | Promise<void>;
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig) => void;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
@@ -113,6 +120,8 @@ export function RoundList({
               {r.kind === 'done' && (
                 <DoneBatch
                   round={r}
+                  favorites={favorites}
+                  onToggleFavorite={onToggleFavorite}
                   onReEdit={onReEdit}
                   onRegenerate={onRegenerate}
                   onDeleteBatch={onDeleteBatch}
@@ -203,9 +212,17 @@ function isAudioPath(path: string): boolean {
   return /\.(mp3|wav|m4a|ogg)(\?|#|$)/i.test(path);
 }
 
-// 参考图来自 .runtime/uploads/（走 /api/raw），也可能是 http(s) CDN 直链。
+// 参考素材三类来源，分流到对应字节端点：
+// - http(s) CDN 直链：原样返回
+// - characters/* 与 studio/* 资产（skill 出图的参考＝角色立绘）：走 /api/gallery/image，
+//   与结果图同端点（/api/raw 不带 job_id 只放行 .runtime/uploads/，角色绝对路径会 403 裂图）
+// - 其余（.runtime/uploads/ 的画师临时上传）：走 /api/raw
 function refImageSrc(path: string) {
-  return path.startsWith('http') ? path : `/api/raw?path=${encodeURIComponent(path)}`;
+  if (path.startsWith('http')) return path;
+  if (/\/(characters|studio)\//.test(path)) {
+    return `/api/gallery/image?path=${encodeURIComponent(path)}`;
+  }
+  return `/api/raw?path=${encodeURIComponent(path)}`;
 }
 
 // 历史参考堆叠合并三类素材（视频 round 常只有视频/音频参考，单看图片会整组消失）。
@@ -400,6 +417,8 @@ function RefThumb({ src }: { src: string }) {
 
 function DoneBatch({
   round,
+  favorites,
+  onToggleFavorite,
   onReEdit,
   onRegenerate,
   onDeleteBatch,
@@ -407,6 +426,8 @@ function DoneBatch({
   onReuseReferences,
 }: {
   round: Extract<RoundState, { kind: 'done' }>;
+  favorites?: string[];
+  onToggleFavorite?: (path: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig) => void;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
@@ -444,56 +465,88 @@ function DoneBatch({
       </div>
       <div className="flex flex-wrap gap-1">
         {round.config.kind === 'video'
-          ? round.imagePaths.map((path, index) => (
-              <figure
-                key={path}
-                data-testid={`studio-result-video-${index + 1}`}
-                className="group relative w-[420px] max-w-full overflow-hidden rounded-md bg-card"
-              >
-                <video
-                  src={videoSrc(path)}
-                  controls
-                  preload="metadata"
-                  className="h-full w-full rounded-md"
-                />
-                <a
-                  href={videoSrc(path)}
-                  download={path.split('/').pop() || `${round.jobId}-${index + 1}.mp4`}
-                  aria-label={`下载生成视频 ${index + 1}`}
-                  title="下载视频"
-                  className="absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100"
+          ? round.imagePaths.map((path, index) => {
+              const favorited = !!favorites && isGalleryFavorited(path, favorites);
+              return (
+                <figure
+                  key={path}
+                  data-testid={`studio-result-video-${index + 1}`}
+                  className="group relative w-[420px] max-w-full overflow-hidden rounded-md bg-card"
                 >
-                  <Download className="size-4" aria-hidden />
-                </a>
-              </figure>
-            ))
-          : round.imagePaths.map((path, index) => (
-              <figure
-                key={path}
-                data-testid={`studio-result-thumb-${index + 1}`}
-                className="group relative w-[251.5px] overflow-hidden rounded-md bg-card cursor-pointer"
-                onClick={() => onLightbox?.(imageSrc(path))}
-              >
-                <img
-                  src={imageSrc(path)}
-                  alt={`生成结果 ${index + 1}`}
-                  className="h-full w-full object-contain"
-                />
-                <a
-                  href={imageSrc(path)}
-                  download={path.split('/').pop() || `${round.jobId}-${index + 1}.png`}
-                  aria-label={`下载生成结果 ${index + 1}`}
-                  title="下载图片"
-                  className="absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  <video
+                    src={videoSrc(path)}
+                    controls
+                    preload="metadata"
+                    className="h-full w-full rounded-md"
+                  />
+                  <div className="absolute right-2 top-2 flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); void onToggleFavorite?.(path); }}
+                      aria-label={favorited ? '取消收藏' : '收藏'}
+                      title={favorited ? '取消收藏' : '收藏'}
+                      className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${favorited ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
+                    >
+                      <Star className="size-4" aria-hidden />
+                    </button>
+                    <a
+                      href={videoSrc(path)}
+                      download={path.split('/').pop() || `${round.jobId}-${index + 1}.mp4`}
+                      aria-label={`下载生成视频 ${index + 1}`}
+                      title="下载视频"
+                      className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100"
+                    >
+                      <Download className="size-4" aria-hidden />
+                    </a>
+                  </div>
+                </figure>
+              );
+            })
+          : round.imagePaths.map((path, index) => {
+              const favorited = !!favorites && isGalleryFavorited(path, favorites);
+              return (
+                <figure
+                  key={path}
+                  data-testid={`studio-result-thumb-${index + 1}`}
+                  className="group relative w-[251.5px] overflow-hidden rounded-md bg-card cursor-pointer"
+                  onClick={() => onLightbox?.(imageSrc(path))}
                 >
-                  <Download className="size-4" aria-hidden />
-                </a>
-              </figure>
-            ))}
+                  <img
+                    src={imageSrc(path)}
+                    alt={`生成结果 ${index + 1}`}
+                    className="h-full w-full object-contain"
+                  />
+                  <div className="absolute right-2 top-2 flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); void onToggleFavorite?.(path); }}
+                      aria-label={favorited ? '取消收藏' : '收藏'}
+                      title={favorited ? '取消收藏' : '收藏'}
+                      className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${favorited ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
+                    >
+                      <Star className="size-4" aria-hidden />
+                    </button>
+                    <a
+                      href={imageSrc(path)}
+                      download={path.split('/').pop() || `${round.jobId}-${index + 1}.png`}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={`下载生成结果 ${index + 1}`}
+                      title="下载图片"
+                      className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    >
+                      <Download className="size-4" aria-hidden />
+                    </a>
+                  </div>
+                </figure>
+              );
+            })}
       </div>
       <div className="flex items-center gap-2">
         <ActionButton onClick={() => onReEdit?.(round.config)}>重新编辑</ActionButton>
         <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
+        {/* skill 出图（角色立绘/KV/三视图）在出图页只作溯源展示——删除会从磁盘抹掉角色资产，
+            该操作只留在工坊页。这里仅对 studio 自家出图开放「删除该批次结果」。 */}
+        {round.mode !== 'skill' && (
         <div className="relative" ref={menuWrapRef}>
           <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
           {menuOpen && (
@@ -513,6 +566,7 @@ function DoneBatch({
             </div>
           )}
         </div>
+        )}
       </div>
     </section>
   );

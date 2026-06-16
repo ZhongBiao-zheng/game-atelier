@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'wouter';
+import { Star } from 'lucide-react';
 
 import { fetchGalleryRecent, type GalleryItem } from '@/api/gallery';
+import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { Studio } from './Studio';
 
 type State =
@@ -11,6 +13,7 @@ type State =
 
 export function Home() {
   const [state, setState] = useState<State>({ kind: 'loading' });
+  const { toggleFavorite, isFavorited } = useGalleryFavorites();
 
   useEffect(() => {
     let cancel = false;
@@ -68,11 +71,13 @@ export function Home() {
 
       {state.kind === 'success' && state.items.length > 0 && (
         <div className="columns-2 sm:columns-3 lg:columns-4 2xl:columns-5 gap-6">
-          {state.items.map((item) => (
+          {state.items.map((item) => {
+            const favorited = isFavorited(item.path);
+            return (
             <Link
               key={`${item.path}-${item.filename}`}
               href={galleryItemHref(item)}
-              className="mb-6 block break-inside-avoid"
+              className="group relative mb-6 block break-inside-avoid"
             >
               <img
                 src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
@@ -80,8 +85,18 @@ export function Home() {
                 className="w-full rounded-lg border border-border hover:border-input transition-all duration-150 hover:scale-[1.02]"
                 loading="lazy"
               />
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); void toggleFavorite(item.path); }}
+                title={favorited ? '取消收藏' : '收藏'}
+                aria-label={favorited ? '取消收藏' : '收藏'}
+                className={`absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 ${favorited ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100'}`}
+              >
+                <Star className="size-4" aria-hidden />
+              </button>
             </Link>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
