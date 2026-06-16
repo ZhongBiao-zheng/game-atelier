@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from character_workflow.lib import data_root
+from character_workflow.lib.atomic_io import atomic_write_json
 
 
 @dataclass
@@ -38,12 +39,9 @@ def read_active() -> ActiveCharacter:
 
 def write_active(active_id: str | None) -> ActiveCharacter:
     p = _path()
-    p.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "active_id": active_id,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(p)
+    atomic_write_json(p, payload)
     return ActiveCharacter(**payload)

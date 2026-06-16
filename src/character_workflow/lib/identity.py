@@ -7,6 +7,7 @@ from pathlib import Path
 
 from character_workflow.lib import data_root
 from character_workflow.lib import slug as slug_util
+from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.projects import read_projects
 from character_workflow.lib.schemas import PendingCharacterIdentity
@@ -181,9 +182,7 @@ def _rewrite_job_file(path: Path, old_id: str, new_id: str) -> None:
                     changed = True
 
     if changed:
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(path)
+        atomic_write_json(path, data)
 
 
 def rename_character_id(old_id: str, new_id: str) -> dict[str, object]:
@@ -210,12 +209,7 @@ def rename_character_id(old_id: str, new_id: str) -> dict[str, object]:
             active_data = None
         if isinstance(active_data, dict) and active_data.get("active_id") == old_id:
             active_data["active_id"] = new_id
-            tmp = active_path.with_suffix(".json.tmp")
-            tmp.write_text(
-                json.dumps(active_data, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            tmp.replace(active_path)
+            atomic_write_json(active_path, active_data)
 
     projects_path = _runtime_dir() / "projects.json"
     if projects_path.exists():
@@ -229,12 +223,7 @@ def rename_character_id(old_id: str, new_id: str) -> dict[str, object]:
             assignments = projects_data["assignments"]
             if old_id in assignments:
                 assignments[new_id] = assignments.pop(old_id)
-                tmp = projects_path.with_suffix(".json.tmp")
-                tmp.write_text(
-                    json.dumps(projects_data, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-                tmp.replace(projects_path)
+                atomic_write_json(projects_path, projects_data)
 
     jobs_dir = _runtime_dir() / "jobs"
     if jobs_dir.exists():
