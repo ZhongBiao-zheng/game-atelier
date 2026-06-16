@@ -8,6 +8,7 @@ import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { PromptInput } from '@/components/studio/PromptInput';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
+import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
 import { imageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
@@ -57,10 +58,10 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [, setLocation] = useLocation();
   const [saved] = useState(loadSelection);
   const [rounds, setRounds] = useState<RoundState[]>([]);
-  // 查询面板筛选 + 收藏/隐藏集（渲染端筛选用，state 仍保留全量轮）。setHistoryFilters/toggleFavorite
-  // 由后续 Phase D/E 的 StudioQueryBar / 结果卡消费，本阶段先不解构以免触发 noUnusedLocals。
-  const [historyFilters] = useState<HistoryFilters>(DEFAULT_HISTORY_FILTERS);
-  const { favorites } = useGalleryFavorites();
+  // 查询面板筛选 + 收藏/隐藏集（渲染端筛选用，state 仍保留全量轮）。setHistoryFilters 喂 StudioQueryBar，
+  // toggleFavorite 透传到结果卡 ★ 收藏按钮。
+  const [historyFilters, setHistoryFilters] = useState<HistoryFilters>(DEFAULT_HISTORY_FILTERS);
+  const { favorites, toggleFavorite } = useGalleryFavorites();
   const [hiddenPaths, setHiddenPaths] = useState<string[]>([]);
   const [persistedJobs, setPersistedJobs] = useState<Job[]>([]);
   const [pending, setPending] = useState(false);
@@ -623,16 +624,22 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       className="relative h-[calc(100vh-56px)] md:h-[calc(100vh-80px)] overflow-hidden px-3 sm:px-6"
       aria-label="生图沙箱"
     >
+      {/* 查询条：固定顶部覆盖层，不随历史滚动。wrapper 不收事件，条本体 pointer-events-auto。 */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center px-3 pt-4 sm:px-6">
+        <StudioQueryBar filters={historyFilters} onChange={setHistoryFilters} />
+      </div>
       {/* col-reverse：浏览器原生钉底，scrollTop 0 即底部；rounds 反转后最新一轮落在视觉底部。
-          pb 预留输入壳展开高度，最后一轮不被浮层压住。 */}
+          pt 让出查询条空间，pb 预留输入壳展开高度，最后一轮不被浮层压住。 */}
       <div
         ref={scrollRef}
         onScroll={handleHistoryScroll}
         data-testid="studio-history-scroll"
-        className="flex h-full flex-col-reverse overflow-y-auto pt-6 pb-[210px]"
+        className="flex h-full flex-col-reverse overflow-y-auto pt-20 pb-[210px]"
       >
         <RoundList
           rounds={reversedRounds}
+          favorites={favorites}
+          onToggleFavorite={toggleFavorite}
           onDeleteFailed={deleteFailedRound}
           onReEdit={reEdit}
           onRegenerate={regenerate}
