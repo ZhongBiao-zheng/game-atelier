@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from character_workflow.lib import data_root
 from character_workflow.lib import slug as slug_util
+from character_workflow.lib.atomic_io import atomic_write_text
 from character_workflow.lib.schemas import Project, ProjectsFile
 
 
@@ -42,10 +43,7 @@ def read_projects() -> ProjectsFile:
 
 def _write(file: ProjectsFile) -> ProjectsFile:
     p = _path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(file.model_dump_json(indent=2), encoding="utf-8")
-    tmp.replace(p)
+    atomic_write_text(p, file.model_dump_json(indent=2))
     return file
 
 

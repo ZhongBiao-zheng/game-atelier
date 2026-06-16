@@ -18,6 +18,11 @@ from fastapi.responses import FileResponse
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
+from character_workflow.lib.atomic_io import (
+    atomic_write_bytes,
+    atomic_write_json,
+    atomic_write_text,
+)
 from character_workflow.lib.jobs import (
     delete_failed_job, job_lock, list_jobs, read_job, remove_image_from_job, save_job,
     update_job_status, write_job,
@@ -189,9 +194,7 @@ def rename_character(character_id: str, payload: dict = Body(...)) -> dict:
         else:
             lines = [f"# {new_name}", ""] + lines
         new_text = "\n".join(lines)
-    tmp = p.with_suffix(".md.tmp")
-    tmp.write_text(new_text, encoding="utf-8")
-    tmp.replace(p)
+    atomic_write_text(p, new_text)
     return {"ok": True, "id": character_id, "name": new_name}
 
 
@@ -228,10 +231,7 @@ def get_config() -> dict:
 @router.post("/spec/{character_id}")
 def post_spec(character_id: str, patch: SpecPatch) -> dict:
     p = _project_root() / "characters" / character_id / "spec.md"
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".md.tmp")
-    tmp.write_text(patch.content, encoding="utf-8")
-    tmp.replace(p)
+    atomic_write_text(p, patch.content)
     write_active(character_id)
     return {"ok": True, "path": str(p)}
 
@@ -247,9 +247,7 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
         data = json.loads(p.read_text(encoding="utf-8"))
         for field, value in patch.model_dump(exclude_unset=True).items():
             data[field] = value
-        tmp = p.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(p)
+        atomic_write_json(p, data)
     return {"ok": True}
 
 
@@ -262,9 +260,7 @@ def post_feedback(payload: FeedbackPost) -> dict:
     body = payload.text
     if payload.character_id:
         body = f"<!-- character: {payload.character_id} -->\n{body}"
-    tmp = p.with_suffix(".md.tmp")
-    tmp.write_text(body, encoding="utf-8")
-    tmp.replace(p)
+    atomic_write_text(p, body)
     return {"ok": True, "path": str(p)}
 
 
@@ -345,9 +341,7 @@ async def post_upload(file: UploadFile = File(...)) -> dict:
     uploads.mkdir(parents=True, exist_ok=True)
     name = f"{uuid.uuid4().hex}{ext}"
     target = uploads / name
-    tmp = target.with_suffix(ext + ".tmp")
-    tmp.write_bytes(body)
-    tmp.replace(target)
+    atomic_write_bytes(target, body)
     return {"path": str(target.resolve()), "filename": raw_name}
 
 
@@ -381,9 +375,7 @@ async def post_gallery_image(
     while (out_dir / f"v{n}{ext}").exists():
         n += 1
     target = out_dir / f"v{n}{ext}"
-    tmp = target.with_suffix(ext + ".tmp")
-    tmp.write_bytes(body)
-    tmp.replace(target)
+    atomic_write_bytes(target, body)
 
     write_job(
         job_id=job_id,
@@ -571,10 +563,7 @@ def post_config(payload: dict = Body(...)) -> dict:
         raise HTTPException(422, detail=f"目录不可写：{expanded}")
     resolved = str(expanded.resolve())
     cfg_path = _runtime() / "config.json"
-    cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cfg_path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps({"image_storage_root": resolved}, indent=2))
-    tmp.replace(cfg_path)
+    atomic_write_json(cfg_path, {"image_storage_root": resolved})
     return {"ok": True, "image_storage_root": resolved}
 
 
@@ -946,22 +935,13 @@ def gallery_hidden() -> dict:
     return {"paths": _read_gallery_hidden()}
 
 
-def _atomic_write_json(path: Path, data: dict) -> None:
-    """唯一临时名 + 原子 replace。并发写各自独占 tmp，消除共享 .json.tmp 被先到者改名后
-    后到者 replace 撞空导致的 500（沿用全仓 sidecar 原子写思路，仅把死写的 .tmp 名改唯一）。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
-
-
 @router.post("/gallery/hidden")
 def post_gallery_hidden(patch: _GalleryHiddenPatch) -> dict:
     target = _normalize_gallery_path(patch.path)
     paths = [p for p in _read_gallery_hidden() if p != target]
     if patch.hidden:
         paths.append(target)
-    _atomic_write_json(_gallery_hidden_file(), {"paths": paths})
+    atomic_write_json(_gallery_hidden_file(), {"paths": paths})
     return {"paths": paths}
 
 
@@ -1000,7 +980,7 @@ def post_gallery_favorites(patch: _GalleryFavoritePatch) -> dict:
     paths = [p for p in _read_gallery_favorites() if p != target]
     if patch.favorite:
         paths.append(target)
-    _atomic_write_json(_gallery_favorites_file(), {"paths": paths})
+    atomic_write_json(_gallery_favorites_file(), {"paths": paths})
     return {"paths": paths}
 
 

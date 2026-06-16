@@ -13,6 +13,7 @@ from typing import Any, Iterator
 from pydantic import ValidationError
 
 from character_workflow.lib import data_root, keys
+from character_workflow.lib.atomic_io import atomic_write_text
 from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
 
 if os.name == "nt":
@@ -87,10 +88,7 @@ def new_job_id() -> str:
 
 def _write(job: Job) -> Job:
     p = _path(job.job_id)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(job.model_dump_json(indent=2), encoding="utf-8")
-    tmp.replace(p)
+    atomic_write_text(p, job.model_dump_json(indent=2))
     return job
 
 
