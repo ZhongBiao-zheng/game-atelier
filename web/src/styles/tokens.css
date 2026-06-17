@@ -131,6 +131,72 @@
   --status-failed: #B04A4A;
 }
 
+@layer utilities {
+  .bg-dots {
+    background-image: radial-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent) 1px,
+      transparent 1.5px
+    );
+    background-size: 20px 20px;
+  }
+
+  /* 鼠标悬停波点发光 —— 仅亮点，背景不变色，mask 平滑衰减无硬边 */
+  .bg-dots-glow {
+    background-image: radial-gradient(
+      color-mix(in srgb, var(--foreground) 6%, transparent) 1px,
+      transparent 1.5px
+    );
+    background-size: 20px 20px;
+    -webkit-mask-image: radial-gradient(
+      circle 228px at var(--cx, -9999px) var(--cy, -9999px),
+      black 0%,
+      rgba(0, 0, 0, 0.84) 25%,
+      rgba(0, 0, 0, 0.50) 50%,
+      rgba(0, 0, 0, 0.16) 75%,
+      transparent 100%
+    );
+    mask-image: radial-gradient(
+      circle 228px at var(--cx, -9999px) var(--cy, -9999px),
+      black 0%,
+      rgba(0, 0, 0, 0.84) 25%,
+      rgba(0, 0, 0, 0.50) 50%,
+      rgba(0, 0, 0, 0.16) 75%,
+      transparent 100%
+    );
+  }
+
+  /* 导航 tab 选中态：上下内侧发丝高光，模拟光线打在玻璃表面的折射 */
+  .nav-tab-glass {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.07);
+  }
+  :root.light .nav-tab-glass {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.85),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.06);
+  }
+
+  /* Apple 玻璃高光 —— ::before 顶部折射光晕，配合 backdrop-blur-glass + 半透明背景使用 */
+  .glass-specular {
+    position: relative;
+    overflow: hidden;
+  }
+  .glass-specular::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.14) 0%,
+      rgba(255, 255, 255, 0.04) 45%,
+      transparent 75%
+    );
+    pointer-events: none;
+  }
+}
+
 @layer base {
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body, #root { height: 100%; }
