@@ -110,7 +110,7 @@ if command -v pnpm &>/dev/null; then
     cd web || exit 1
     if [ ! -d "node_modules" ]; then
       echo "首次构建：安装前端依赖..."
-      pnpm install && pnpm approve-builds --all || exit 1
+      pnpm install && pnpm approve-builds esbuild || exit 1
     fi
     pnpm build || exit 1
   ) || build_ok=0

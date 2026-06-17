@@ -165,35 +165,22 @@
     );
   }
 
-  /* 导航 tab 选中态：上下内侧发丝高光，模拟光线打在玻璃表面的折射 */
+  /* 导航 tab 选中态：上下发丝高光 —— 用 border 而非 box-shadow，符合 DESIGN.md Elevation 约束 */
   .nav-tab-glass {
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.22),
-      inset 0 -1px 0 rgba(255, 255, 255, 0.07);
+    border-top: 1px solid rgba(237, 234, 227, 0.22);
+    border-bottom: 1px solid rgba(237, 234, 227, 0.07);
   }
   :root.light .nav-tab-glass {
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.85),
-      inset 0 -1px 0 rgba(0, 0, 0, 0.06);
+    border-top: 1px solid rgba(255, 255, 255, 0.85);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   }
 
-  /* Apple 玻璃高光 —— ::before 顶部折射光晕，配合 backdrop-blur-glass + 半透明背景使用 */
+  /* 玻璃顶部高光 —— 发丝边而非渐变，符合 DESIGN.md "无渐变" 约束 */
   .glass-specular {
-    position: relative;
-    overflow: hidden;
+    border-top: 1px solid rgba(237, 234, 227, 0.14);
   }
-  .glass-specular::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.14) 0%,
-      rgba(255, 255, 255, 0.04) 45%,
-      transparent 75%
-    );
-    pointer-events: none;
+  :root.light .glass-specular {
+    border-top: 1px solid rgba(255, 255, 255, 0.22);
   }
 }
 
