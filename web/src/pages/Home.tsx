@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'wouter';
 import { Star } from 'lucide-react';
 
@@ -14,6 +14,19 @@ type State =
 export function Home() {
   const [state, setState] = useState<State>({ kind: 'loading' });
   const { toggleFavorite, isFavorited } = useGalleryFavorites();
+  const glowRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLElement>) => {
+    if (!glowRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    glowRef.current.style.setProperty('--cx', `${e.clientX - rect.left}px`);
+    glowRef.current.style.setProperty('--cy', `${e.clientY - rect.top}px`);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    glowRef.current?.style.setProperty('--cx', '-9999px');
+    glowRef.current?.style.setProperty('--cy', '-9999px');
+  }, []);
 
   useEffect(() => {
     let cancel = false;
@@ -27,8 +40,14 @@ export function Home() {
 
   return (
     <div className="px-8 pb-12" aria-label="作品集首页">
-      <section className="min-h-[520px] flex items-center justify-center">
-        <div className="w-full">
+      <section
+        className="relative min-h-[520px] flex items-center justify-center"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+      >
+        <div aria-hidden className="absolute inset-0 bg-dots pointer-events-none" />
+        <div ref={glowRef} aria-hidden className="absolute inset-0 bg-dots-glow pointer-events-none" />
+        <div className="relative z-10 w-full">
           <Studio compact />
         </div>
       </section>

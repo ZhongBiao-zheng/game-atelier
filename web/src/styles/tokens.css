@@ -131,6 +131,59 @@
   --status-failed: #B04A4A;
 }
 
+@layer utilities {
+  .bg-dots {
+    background-image: radial-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent) 1px,
+      transparent 1.5px
+    );
+    background-size: 20px 20px;
+  }
+
+  /* 鼠标悬停波点发光 —— 仅亮点，背景不变色，mask 平滑衰减无硬边 */
+  .bg-dots-glow {
+    background-image: radial-gradient(
+      color-mix(in srgb, var(--foreground) 6%, transparent) 1px,
+      transparent 1.5px
+    );
+    background-size: 20px 20px;
+    -webkit-mask-image: radial-gradient(
+      circle 228px at var(--cx, -9999px) var(--cy, -9999px),
+      black 0%,
+      rgba(0, 0, 0, 0.84) 25%,
+      rgba(0, 0, 0, 0.50) 50%,
+      rgba(0, 0, 0, 0.16) 75%,
+      transparent 100%
+    );
+    mask-image: radial-gradient(
+      circle 228px at var(--cx, -9999px) var(--cy, -9999px),
+      black 0%,
+      rgba(0, 0, 0, 0.84) 25%,
+      rgba(0, 0, 0, 0.50) 50%,
+      rgba(0, 0, 0, 0.16) 75%,
+      transparent 100%
+    );
+  }
+
+  /* 导航 tab 选中态：上下发丝高光 —— 用 border 而非 box-shadow，符合 DESIGN.md Elevation 约束 */
+  .nav-tab-glass {
+    border-top: 1px solid rgba(237, 234, 227, 0.22);
+    border-bottom: 1px solid rgba(237, 234, 227, 0.07);
+  }
+  :root.light .nav-tab-glass {
+    border-top: 1px solid rgba(255, 255, 255, 0.85);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
+
+  /* 玻璃顶部高光 —— 发丝边而非渐变，符合 DESIGN.md "无渐变" 约束 */
+  .glass-specular {
+    border-top: 1px solid rgba(237, 234, 227, 0.14);
+  }
+  :root.light .glass-specular {
+    border-top: 1px solid rgba(255, 255, 255, 0.22);
+  }
+}
+
 @layer base {
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body, #root { height: 100%; }
