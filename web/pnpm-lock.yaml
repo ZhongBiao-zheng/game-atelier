@@ -26,6 +26,9 @@ importers:
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@18.3.1)
+      masonic:
+        specifier: ^4.1.0
+        version: 4.1.0(react@18.3.1)
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -343,6 +346,18 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@essentials/memoize-one@1.1.0':
+    resolution: {integrity: sha512-HMkuIkKNe0EWSUpZhlaq9+5Yp47YhrMhxLMnXTRnEyE5N4xKLspAvMGjUFdi794VnEF1EcOZFS8rdROeujrgag==}
+
+  '@essentials/one-key-map@1.2.0':
+    resolution: {integrity: sha512-C2H7zHVcsoipDv4VKY5uUcv5ilsK+uEgEj+WeOdN5oz/Qj1/OZIzCdle90gDzj0xnGQrmZ9qDujwD7AkBb5k9A==}
+
+  '@essentials/raf@1.2.0':
+    resolution: {integrity: sha512-AWJvpprE2o7ATMb7HBYMVUVmPJBCt2wZp2rY7d+rAcNSMvzLbDepy9KFeqqrPZh+s9aIpbw1LgmuAW7kuRFgrQ==}
+
+  '@essentials/request-timeout@1.3.0':
+    resolution: {integrity: sha512-lKZPhKScNFnR1MBnk4+sxshk46fpvdN+Uh1LlKWFO5g1ocuz4EcknNIL7tm/rsCAs/+xMWiBTwbDUvm+pDNlXw==}
+
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
 
@@ -418,6 +433,41 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
+
+  '@react-hook/debounce@3.0.0':
+    resolution: {integrity: sha512-ir/kPrSfAzY12Gre0sOHkZ2rkEmM4fS5M5zFxCi4BnCeXh2nvx9Ujd+U4IGpKCuPA+EQD0pg1eK2NGLvfWejag==}
+    peerDependencies:
+      react: '>=16.8'
+
+  '@react-hook/event@1.2.6':
+    resolution: {integrity: sha512-JUL5IluaOdn5w5Afpe/puPa1rj8X6udMlQ9dt4hvMuKmTrBS1Ya6sb4sVgvfe2eU4yDuOfAhik8xhbcCekbg9Q==}
+    peerDependencies:
+      react: '>=16.8'
+
+  '@react-hook/latest@1.0.3':
+    resolution: {integrity: sha512-dy6duzl+JnAZcDbNTfmaP3xHiKtbXYOaz3G51MGVljh548Y8MWzTr+PHLOfvpypEVW9zwvl+VyKjbWKEVbV1Rg==}
+    peerDependencies:
+      react: '>=16.8'
+
+  '@react-hook/passive-layout-effect@1.2.1':
+    resolution: {integrity: sha512-IwEphTD75liO8g+6taS+4oqz+nnroocNfWVHWz7j+N+ZO2vYrc6PV1q7GQhuahL0IOR7JccFTsFKQ/mb6iZWAg==}
+    peerDependencies:
+      react: '>=16.8'
+
+  '@react-hook/throttle@2.2.0':
+    resolution: {integrity: sha512-LJ5eg+yMV8lXtqK3lR+OtOZ2WH/EfWvuiEEu0M3bhR7dZRfTyEJKxH1oK9uyBxiXPtWXiQggWbZirMCXam51tg==}
+    peerDependencies:
+      react: '>=16.8'
+
+  '@react-hook/window-scroll@1.3.0':
+    resolution: {integrity: sha512-LdYnCL22pFI+LTs85Fi2OQHSKWkzIuHFgv8lA+wwuaPxLOEhWR5bzJ21iygUH9X4meeLVRZKEbfpYi3OWWD4GQ==}
+    peerDependencies:
+      react: '>=16.8'
+
+  '@react-hook/window-size@3.1.1':
+    resolution: {integrity: sha512-yWnVS5LKnOUIrEsI44oz3bIIUYqflamPL27n+k/PC//PsX/YeWBky09oPeAoc9As6jSH16Wgo8plI+ECZaHk3g==}
+    peerDependencies:
+      react: '>=16.8'
 
   '@rolldown/pluginutils@1.0.0-beta.27':
     resolution: {integrity: sha512-+d0F4MKMCbeVUJwG96uQ4SgAznZNSq93I3V+9NHA4OpvqG8mRCpGdKmK8l/dl02h2CCDHwW2FqilnTyDcAnqjA==}
@@ -1128,6 +1178,11 @@ packages:
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
+  masonic@4.1.0:
+    resolution: {integrity: sha512-3RNbAG5qLve7qNtGp1UM/u7vI39jO73ZFHDBAg3xl8AVh7A6Ikx7I7mBeC0NY0h1r1jJn2Wqeol1QMa09MQbyQ==}
+    peerDependencies:
+      react: '>=16.8'
+
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
@@ -1193,6 +1248,9 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
+
+  raf-schd@4.0.3:
+    resolution: {integrity: sha512-tQkJl2GRWh83ui2DiPTJz9wEiMN20syf+5oKfB03yYP7ioZcJwsIK8FjrtLwH1m7C7e+Tt2yYBlrOpdT+dyeIQ==}
 
   react-dom@18.3.1:
     resolution: {integrity: sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==}
@@ -1317,6 +1375,9 @@ packages:
   tr46@5.1.1:
     resolution: {integrity: sha512-hdF5ZgjTqgAntKkklYw0R03MG2x/bSzTtkxmIRw/sTNV8YXsCJ1tfLAX23lhxhHJlEf3CRCOCGGWw3vI3GaSPw==}
     engines: {node: '>=18'}
+
+  trie-memoize@1.2.0:
+    resolution: {integrity: sha512-hEDLVEP1FCgaRtt0oZDJdz2lK9uK7WlB7ASswt9U9cqruSNueVigtRGxI97hevKlViqhAcRgNgzuY/m8FCCMcg==}
 
   tw-animate-css@1.4.0:
     resolution: {integrity: sha512-7bziOlRqH0hJx80h/3mbicLW7o8qLsH5+RaLR2t+OHM3D0JlWGODQKQ4cxbK7WlvmUxpcj6Kgu6EKqjrGFe3QQ==}
@@ -1666,6 +1727,16 @@ snapshots:
   '@esbuild/win32-x64@0.21.5':
     optional: true
 
+  '@essentials/memoize-one@1.1.0': {}
+
+  '@essentials/one-key-map@1.2.0': {}
+
+  '@essentials/raf@1.2.0': {}
+
+  '@essentials/request-timeout@1.3.0':
+    dependencies:
+      '@essentials/raf': 1.2.0
+
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
@@ -1726,6 +1797,41 @@ snapshots:
       react: 18.3.1
     optionalDependencies:
       '@types/react': 18.3.28
+
+  '@react-hook/debounce@3.0.0(react@18.3.1)':
+    dependencies:
+      '@react-hook/latest': 1.0.3(react@18.3.1)
+      react: 18.3.1
+
+  '@react-hook/event@1.2.6(react@18.3.1)':
+    dependencies:
+      react: 18.3.1
+
+  '@react-hook/latest@1.0.3(react@18.3.1)':
+    dependencies:
+      react: 18.3.1
+
+  '@react-hook/passive-layout-effect@1.2.1(react@18.3.1)':
+    dependencies:
+      react: 18.3.1
+
+  '@react-hook/throttle@2.2.0(react@18.3.1)':
+    dependencies:
+      '@react-hook/latest': 1.0.3(react@18.3.1)
+      react: 18.3.1
+
+  '@react-hook/window-scroll@1.3.0(react@18.3.1)':
+    dependencies:
+      '@react-hook/event': 1.2.6(react@18.3.1)
+      '@react-hook/throttle': 2.2.0(react@18.3.1)
+      react: 18.3.1
+
+  '@react-hook/window-size@3.1.1(react@18.3.1)':
+    dependencies:
+      '@react-hook/debounce': 3.0.0(react@18.3.1)
+      '@react-hook/event': 1.2.6(react@18.3.1)
+      '@react-hook/throttle': 2.2.0(react@18.3.1)
+      react: 18.3.1
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 
@@ -2350,6 +2456,21 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
+  masonic@4.1.0(react@18.3.1):
+    dependencies:
+      '@essentials/memoize-one': 1.1.0
+      '@essentials/one-key-map': 1.2.0
+      '@essentials/request-timeout': 1.3.0
+      '@react-hook/event': 1.2.6(react@18.3.1)
+      '@react-hook/latest': 1.0.3(react@18.3.1)
+      '@react-hook/passive-layout-effect': 1.2.1(react@18.3.1)
+      '@react-hook/throttle': 2.2.0(react@18.3.1)
+      '@react-hook/window-scroll': 1.3.0(react@18.3.1)
+      '@react-hook/window-size': 3.1.1(react@18.3.1)
+      raf-schd: 4.0.3
+      react: 18.3.1
+      trie-memoize: 1.2.0
+
   math-intrinsics@1.1.0: {}
 
   mime-db@1.52.0: {}
@@ -2397,6 +2518,8 @@ snapshots:
       react-is: 17.0.2
 
   punycode@2.3.1: {}
+
+  raf-schd@4.0.3: {}
 
   react-dom@18.3.1(react@18.3.1):
     dependencies:
@@ -2522,6 +2645,8 @@ snapshots:
   tr46@5.1.1:
     dependencies:
       punycode: 2.3.1
+
+  trie-memoize@1.2.0: {}
 
   tw-animate-css@1.4.0: {}
 

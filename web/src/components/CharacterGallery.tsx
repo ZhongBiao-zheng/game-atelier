@@ -194,14 +194,15 @@ export function CharacterGallery({
             const btn = 'size-7 rounded-full bg-scrim grid place-items-center transition-opacity backdrop-blur-glass cursor-pointer border-0';
             return (
             <figure key={i} className="group relative mb-4 break-inside-avoid">
+              {/* 和首页作品展示一致的卡片结构 */}
               <button
                 onClick={() => onSelectImage(img.path, img.jobId, tab)}
-                className="w-full block overflow-hidden rounded-lg border border-border bg-card transition-all duration-200 hover:border-input cursor-pointer p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                className="w-full group relative overflow-hidden rounded-2xl border border-border/60 transition-all duration-200 hover:border-input hover:scale-[1.02] cursor-pointer p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
                 <img
                   src={rawSrc}
                   alt=""
-                  className="w-full h-auto block transition-opacity duration-300 group-hover:opacity-95"
+                  className="w-full block rounded-xl transition-all duration-300 group-hover:scale-105"
                 />
               </button>
               <figcaption className="pointer-events-none absolute bottom-2 left-2 font-mono text-xs tabular-nums tracking-wider text-foreground bg-glass backdrop-blur-glass px-2 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity">

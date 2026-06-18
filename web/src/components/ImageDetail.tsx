@@ -126,10 +126,14 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
       <div className="flex-1 grid grid-cols-[minmax(0,1fr)_384px] min-h-0">
         <div className="grid place-items-center overflow-auto p-8">
           <img
-            src={`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`}
+            src={`/api/gallery/image?path=${encodeURIComponent(path)}`}
             alt="大图"
-            onClick={() => onLightbox?.(`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`)}
+            onClick={() => onLightbox?.(`/api/gallery/image?path=${encodeURIComponent(path)}`)}
             className="max-h-[72vh] max-w-full object-contain rounded-lg border border-border cursor-zoom-in"
+            onError={(e) => {
+              // 公开接口加载失败时，降级到 raw 接口尝试
+              (e.target as HTMLImageElement).src = `/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`;
+            }}
           />
         </div>
 
