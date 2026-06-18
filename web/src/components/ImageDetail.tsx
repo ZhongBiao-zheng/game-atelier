@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Trash2, CheckCircle2, Copy, PanelLeftOpen, Save, Star } from 'lucide-react';
 import type { Job, WebEditableJobPatch } from '../schema/jobs';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -22,6 +23,14 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
   const [patch, setPatch] = useState<WebEditableJobPatch>({});
   const [toast, setToast] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [dialog, setDialog] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    detail?: string;
+    variant: 'default' | 'destructive';
+    onConfirm: () => void;
+  } | null>(null);
   const { toggleFavorite, isFavorited } = useGalleryFavorites();
 
   useEffect(() => {
@@ -63,11 +72,20 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
     }
   }
 
-  async function deleteImage() {
-    if (!window.confirm(`删除这张图？\n${path}\n（磁盘文件也会删，不可恢复）`)) return;
-    const r = await fetch(`/api/jobs/${jobId}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
-    if (!r.ok) { setToast(`删除失败：HTTP ${r.status}`); return; }
-    onBack();
+  function deleteImage() {
+    setDialog({
+      open: true,
+      title: '删除这张图？',
+      message: '磁盘文件也会被删除，不可恢复',
+      detail: path,
+      variant: 'destructive',
+      onConfirm: async () => {
+        setDialog(null);
+        const r = await fetch(`/api/jobs/${jobId}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+        if (!r.ok) { setToast(`删除失败：HTTP ${r.status}`); return; }
+        onBack();
+      },
+    });
   }
 
   return (
@@ -125,15 +143,31 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
       {/* 研究台双栏：图（左，居中）+ 档案（右 384px）——改 prompt 时图不离开视线 */}
       <div className="flex-1 grid grid-cols-[minmax(0,1fr)_384px] min-h-0">
         <div className="grid place-items-center overflow-auto p-8">
+          {/*
+           * 主端点用 gallery/image（路径根白名单），降级到 raw（job_id 白名单）。
+           *
+           * 动机：/api/gallery/recent 返回相对路径（characters/…/v2.png），
+           * 而 /api/raw 历史上用 Path(path).resolve() 相对 CWD 解析，CWD 是 repo 根，
+           * 解析结果与 job.output_paths 里的绝对路径（data root 下）对不上 → 403/404。
+           * 这是 routes.py 的 bug，已在服务端修复（相对路径改为相对 data root 解析）。
+           * 修复后 raw 主端点也能正常工作；保留 gallery/image 作为主端点是因为它对
+           * 没有关联 job 的手动上传图（如 source 目录）也能提供服务，是更宽松的覆盖。
+           * onError 降级保留作保险，应对 gallery 端点不覆盖的极端路径。
+           */}
           <img
-            src={`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`}
+            src={`/api/gallery/image?path=${encodeURIComponent(path)}`}
             alt="大图"
-            onClick={() => onLightbox?.(`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`)}
+            onClick={() => onLightbox?.(`/api/gallery/image?path=${encodeURIComponent(path)}`)}
             className="max-h-[72vh] max-w-full object-contain rounded-lg border border-border cursor-zoom-in"
+            onError={(e) => {
+              const img = e.target as HTMLImageElement;
+              const fallback = `/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`;
+              if (img.src !== fallback) img.src = fallback;
+            }}
           />
         </div>
 
-        <aside className="border-l border-border overflow-y-auto px-6 py-6 space-y-6 min-w-0">
+        <aside className="border-l border-border overflow-y-auto px-6 py-6 space-y-6 min-w-0" aria-label="图片详情">
           <ImageIdChip characterId={job.character_id} path={path} />
 
           <Field label="prompt">
@@ -184,6 +218,18 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
           )}
         </aside>
       </div>
+
+      {dialog && (
+        <ConfirmDialog
+          open={dialog.open}
+          title={dialog.title}
+          message={dialog.message}
+          detail={dialog.detail}
+          variant={dialog.variant}
+          onConfirm={dialog.onConfirm}
+          onCancel={() => setDialog(null)}
+        />
+      )}
     </section>
   );
 }

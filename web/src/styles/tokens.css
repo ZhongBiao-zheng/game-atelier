@@ -165,22 +165,27 @@
     );
   }
 
-  /* 导航 tab 选中态：上下发丝高光 —— 用 border 而非 box-shadow，符合 DESIGN.md Elevation 约束 */
+  /* 导航 tab 选中态：冰晶玻璃质感 —— 高亮边缘 + 内部通透感 */
   .nav-tab-glass {
     border-top: 1px solid rgba(237, 234, 227, 0.22);
     border-bottom: 1px solid rgba(237, 234, 227, 0.07);
   }
   :root.light .nav-tab-glass {
-    border-top: 1px solid rgba(255, 255, 255, 0.85);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    /* 亮模式：发丝边高对比，白底上也要能看清——深度靠 border alpha 不靠阴影 */
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-top-color: rgba(255, 255, 255, 0.92);
+    border-bottom-color: rgba(0, 0, 0, 0.10);
   }
 
-  /* 玻璃顶部高光 —— 发丝边而非渐变，符合 DESIGN.md "无渐变" 约束 */
+  /* 玻璃顶部高光 —— 按钮的冰晶质感 */
   .glass-specular {
     border-top: 1px solid rgba(237, 234, 227, 0.14);
   }
   :root.light .glass-specular {
-    border-top: 1px solid rgba(255, 255, 255, 0.22);
+    /* 深度靠发丝边 border alpha，不靠阴影 */
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-top-color: rgba(255, 255, 255, 0.90);
+    border-bottom-color: rgba(0, 0, 0, 0.12);
   }
 }
 

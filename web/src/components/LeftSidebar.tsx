@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, Trash2, X, AlertCircle, FolderPlus, UserPlus, GripVertical } from 'lucide-react';
 import type { CharacterEntry, Project, ProjectsFile } from '../schema/jobs';
 import { useActiveCharacter } from '../hooks/useActiveCharacter';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -28,6 +29,14 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
   // project folder reorder
   const [projectDragId, setProjectDragId] = useState<string | null>(null);
   const [projectDragOver, setProjectDragOver] = useState<{ id: string; pos: 'before' | 'after' } | null>(null);
+  // 确认对话框
+  const [dialog, setDialog] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    variant: 'default' | 'destructive';
+    onConfirm: () => void;
+  } | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [creatingCharacter, setCreatingCharacter] = useState(false);
@@ -176,44 +185,55 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
     }
   }
 
-  async function deleteProject(p: Project, e: React.MouseEvent) {
+  function deleteProject(p: Project, e: React.MouseEvent) {
     e.stopPropagation();
     const members = Object.entries(projects.assignments).filter(([, pid]) => pid === p.id).length;
-    const ok = window.confirm(
-      members > 0
-        ? `删除项目「${p.name}」？里面的 ${members} 个角色会回到"未分类"，角色文件不会丢。`
-        : `删除项目「${p.name}」？`,
-    );
-    if (!ok) return;
-    try {
-      const r = await fetch(`/api/projects/${p.id}`, { method: 'DELETE' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setProjects(await r.json());
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    const message = members > 0
+      ? `里面的 ${members} 个角色会回到"未分类"，角色文件不会丢。`
+      : '';
+    setDialog({
+      open: true,
+      title: `删除项目「${p.name}」？`,
+      message,
+      variant: 'destructive',
+      onConfirm: async () => {
+        setDialog(null);
+        try {
+          const r = await fetch(`/api/projects/${p.id}`, { method: 'DELETE' });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          setProjects(await r.json());
+        } catch (e) {
+          setError((e as Error).message);
+        }
+      },
+    });
   }
 
-  async function deleteCharacter(c: CharacterEntry, e: React.MouseEvent) {
+  function deleteCharacter(c: CharacterEntry, e: React.MouseEvent) {
     e.stopPropagation();
-    const ok = window.confirm(
-      `删除角色「${c.name}」？\n角色目录和其中图片会从磁盘删除，不可恢复。`,
-    );
-    if (!ok) return;
-    try {
-      const r = await fetch(`/api/characters/${c.id}`, { method: 'DELETE' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setCharacters(cs => cs.filter(item => item.id !== c.id));
-      setProjects(ps => ({
-        ...ps,
-        assignments: Object.fromEntries(
-          Object.entries(ps.assignments).filter(([id]) => id !== c.id),
-        ),
-      }));
-      onDelete?.(c.id);
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    setDialog({
+      open: true,
+      title: `删除角色「${c.name}」？`,
+      message: '角色目录和其中图片会从磁盘删除，不可恢复。',
+      variant: 'destructive',
+      onConfirm: async () => {
+        setDialog(null);
+        try {
+          const r = await fetch(`/api/characters/${c.id}`, { method: 'DELETE' });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          setCharacters(cs => cs.filter(item => item.id !== c.id));
+          setProjects(ps => ({
+            ...ps,
+            assignments: Object.fromEntries(
+              Object.entries(ps.assignments).filter(([id]) => id !== c.id),
+            ),
+          }));
+          onDelete?.(c.id);
+        } catch (e) {
+          setError((e as Error).message);
+        }
+      },
+    });
   }
 
   async function assignTo(characterId: string, projectId: string | null) {
@@ -352,93 +372,105 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
   }
 
   return (
-    <aside className="h-full border-r border-border flex flex-col">
-      <BrandHeader
-        onNewCharacter={startNewCharacter}
-        onNewProject={startNewProject}
-        creatingCharacter={creatingCharacter}
-        creatingProject={creatingProject}
-      />
+    <>
+      <aside className="h-full border-r border-border flex flex-col">
+        <BrandHeader
+          onNewCharacter={startNewCharacter}
+          onNewProject={startNewProject}
+          creatingCharacter={creatingCharacter}
+          creatingProject={creatingProject}
+        />
 
-      <div className="flex-1 overflow-y-auto px-2 py-2">
-        {creatingCharacter && (
-          <div className="mb-2 flex items-center gap-1.5 px-2 py-1">
-            <UserPlus className="size-3.5 text-muted-foreground shrink-0" />
-            <Input
-              ref={newCharInputRef}
-              value={newCharacterName}
-              onChange={e => setNewCharacterName(e.target.value)}
-              onBlur={commitNewCharacter}
-              onKeyDown={e => {
-                if (e.key === 'Enter') commitNewCharacter();
-                if (e.key === 'Escape') cancelNewCharacter();
-              }}
-              placeholder="角色名（如：烈拳猴）"
-              className="h-7 text-xs"
-            />
-          </div>
-        )}
-        {creatingProject && (
-          <section className="mb-2 flex items-center gap-1.5 px-2 py-1">
-            <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
-            <Input
-              ref={newProjectInputRef}
-              value={newProjectName}
-              onChange={e => setNewProjectName(e.target.value)}
-              onBlur={commitNewProject}
-              onKeyDown={e => {
-                if (e.key === 'Enter') commitNewProject();
-                if (e.key === 'Escape') cancelNewProject();
-              }}
-              placeholder="项目名（如：魔幻 / 武侠）"
-              className="h-7 text-xs"
-            />
-          </section>
-        )}
+        <div className="flex-1 overflow-y-auto px-2 py-2">
+          {creatingCharacter && (
+            <div className="mb-2 flex items-center gap-1.5 px-2 py-1">
+              <UserPlus className="size-3.5 text-muted-foreground shrink-0" />
+              <Input
+                ref={newCharInputRef}
+                value={newCharacterName}
+                onChange={e => setNewCharacterName(e.target.value)}
+                onBlur={commitNewCharacter}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') commitNewCharacter();
+                  if (e.key === 'Escape') cancelNewCharacter();
+                }}
+                placeholder="角色名（如：烈拳猴）"
+                className="h-7 text-xs"
+              />
+            </div>
+          )}
+          {creatingProject && (
+            <section className="mb-2 flex items-center gap-1.5 px-2 py-1">
+              <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
+              <Input
+                ref={newProjectInputRef}
+                value={newProjectName}
+                onChange={e => setNewProjectName(e.target.value)}
+                onBlur={commitNewProject}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') commitNewProject();
+                  if (e.key === 'Escape') cancelNewProject();
+                }}
+                placeholder="项目名（如：魔幻 / 武侠）"
+                className="h-7 text-xs"
+              />
+            </section>
+          )}
 
-        {projects.projects.map(p => (
-          <ProjectGroup
-            key={p.id} project={p} chars={grouped.get(p.id) || []}
-            isEditing={editingProjectId === p.id} draftName={draftName}
-            dragOver={dragOver === p.id} onDrop={onDrop} onDragOver={onDragOver}
+          {projects.projects.map(p => (
+            <ProjectGroup
+              key={p.id} project={p} chars={grouped.get(p.id) || []}
+              isEditing={editingProjectId === p.id} draftName={draftName}
+              dragOver={dragOver === p.id} onDrop={onDrop} onDragOver={onDragOver}
+              onDragLeave={() => setDragOver(null)}
+              onRenameStart={startProjectEdit} onRenameChange={setDraftName}
+              onRenameCommit={commitProjectEdit} onRenameCancel={cancelEdit}
+              onDelete={deleteProject} inputRef={inputRef}
+              renderChar={c => renderChar(c)}
+              isDragging={projectDragId === p.id}
+              dropIndicator={projectDragOver?.id === p.id ? projectDragOver.pos : null}
+              onProjectDragStart={onProjectDragStart}
+              onProjectDragOver={onProjectDragOver}
+              onProjectDrop={onProjectDrop}
+              onProjectDragEnd={onProjectDragEnd}
+            />
+          ))}
+
+          <DropZone
+            label={projects.projects.length > 0 ? '未分类' : null}
+            active={dragOver === UNCATEGORIZED}
+            onDrop={e => onDrop(e, UNCATEGORIZED)}
+            onDragOver={e => onDragOver(e, UNCATEGORIZED)}
             onDragLeave={() => setDragOver(null)}
-            onRenameStart={startProjectEdit} onRenameChange={setDraftName}
-            onRenameCommit={commitProjectEdit} onRenameCancel={cancelEdit}
-            onDelete={deleteProject} inputRef={inputRef}
-            renderChar={c => renderChar(c)}
-            isDragging={projectDragId === p.id}
-            dropIndicator={projectDragOver?.id === p.id ? projectDragOver.pos : null}
-            onProjectDragStart={onProjectDragStart}
-            onProjectDragOver={onProjectDragOver}
-            onProjectDrop={onProjectDrop}
-            onProjectDragEnd={onProjectDragEnd}
-          />
-        ))}
+          >
+            <ul className="list-none m-0 p-0">
+              {(grouped.get(UNCATEGORIZED) || []).map(renderChar)}
+            </ul>
+          </DropZone>
 
-        <DropZone
-          label={projects.projects.length > 0 ? '未分类' : null}
-          active={dragOver === UNCATEGORIZED}
-          onDrop={e => onDrop(e, UNCATEGORIZED)}
-          onDragOver={e => onDragOver(e, UNCATEGORIZED)}
-          onDragLeave={() => setDragOver(null)}
-        >
-          <ul className="list-none m-0 p-0">
-            {(grouped.get(UNCATEGORIZED) || []).map(renderChar)}
-          </ul>
-        </DropZone>
+          {error && (
+            <div className="mt-3 mx-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+              <AlertCircle className="size-3 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
+        </div>
 
-        {error && (
-          <div className="mt-3 mx-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
-            <AlertCircle className="size-3 shrink-0 mt-0.5" />
-            <span>{error}</span>
-          </div>
-        )}
-      </div>
-
-      <footer className="shrink-0 border-t border-border px-5 py-3 font-mono text-xs tabular-nums text-muted-foreground/60">
-        {characters.length} 角色 · {projects.projects.length} 项目
-      </footer>
-    </aside>
+        <footer className="shrink-0 border-t border-border px-5 py-3 font-mono text-xs tabular-nums text-muted-foreground/60">
+          {characters.length} 角色 · {projects.projects.length} 项目
+        </footer>
+      </aside>
+      {dialog && (
+        <ConfirmDialog
+          open={dialog.open}
+          title={dialog.title}
+          message={dialog.message}
+          variant={dialog.variant}
+          onConfirm={dialog.onConfirm}
+          onCancel={() => setDialog(null)}
+        />
+      )}
+    </>
   );
 
   function renderChar(c: CharacterEntry) {

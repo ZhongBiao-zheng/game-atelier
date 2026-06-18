@@ -4,6 +4,7 @@ import type { AssetSlot, Job, ProjectsFile } from '../schema/jobs';
 import { fetchGalleryHidden, isGalleryHidden, setGalleryHidden } from '@/api/gallery';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -61,6 +62,15 @@ export function CharacterGallery({
   const { toggleFavorite, isFavorited } = useGalleryFavorites();
   // 展签小帽：角色所属项目名
   const [projectName, setProjectName] = useState<string | null>(null);
+  // 确认对话框状态
+  const [dialog, setDialog] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    detail?: string;
+    variant: 'default' | 'destructive';
+    onConfirm: () => void;
+  } | null>(null);
 
   useEffect(() => {
     if (initialTab) setTab(initialTab);
@@ -119,20 +129,38 @@ export function CharacterGallery({
   const failedJobs = tabJobs.filter(j => j.status === 'failed');
   const isRunning = tabJobs.some(j => j.status === 'pending');
 
-  async function deleteImage(jobId: string, path: string) {
-    if (!window.confirm(`删除这张图？\n${path}\n（磁盘文件也会删，不可恢复）`)) return;
-    const r = await fetch(`/api/jobs/${jobId}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
-    if (!r.ok) { alert(`删除失败：HTTP ${r.status}`); return; }
-    setJobs(js => js.map(j => j.job_id === jobId
-      ? { ...j, output_paths: j.output_paths.filter(p => p !== path) }
-        : j));
+  function deleteImage(jobId: string, path: string) {
+    setDialog({
+      open: true,
+      title: '删除这张图？',
+      message: '磁盘文件也会被删除，不可恢复',
+      detail: path,
+      variant: 'destructive',
+      onConfirm: async () => {
+        setDialog(null);
+        const r = await fetch(`/api/jobs/${jobId}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+        if (!r.ok) { alert(`删除失败：HTTP ${r.status}`); return; }
+        setJobs(js => js.map(j => j.job_id === jobId
+          ? { ...j, output_paths: j.output_paths.filter(p => p !== path) }
+            : j));
+      },
+    });
   }
 
-  async function deleteFailedJob(jobId: string) {
-    if (!window.confirm(`删除这个失败记录？\n${jobId}`)) return;
-    const r = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
-    if (!r.ok) { alert(`删除失败：HTTP ${r.status}`); return; }
-    setJobs(js => js.filter(j => j.job_id !== jobId));
+  function deleteFailedJob(jobId: string) {
+    setDialog({
+      open: true,
+      title: '删除这个失败记录？',
+      message: '',
+      detail: jobId,
+      variant: 'destructive',
+      onConfirm: async () => {
+        setDialog(null);
+        const r = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+        if (!r.ok) { alert(`删除失败：HTTP ${r.status}`); return; }
+        setJobs(js => js.filter(j => j.job_id !== jobId));
+      },
+    });
   }
 
   async function toggleHidden(path: string) {
@@ -144,14 +172,23 @@ export function CharacterGallery({
     }
   }
 
-  async function voidStaleJob(jobId: string) {
-    if (!window.confirm(`作废这个生成任务？\n${jobId}\n（超过 1 小时未完成，出图进程可能已中断）`)) return;
-    const r = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
-    if (!r.ok) { alert(`作废失败：HTTP ${r.status}`); return; }
-    // 后端把超时 pending 标成 failed 留痕；本地同步翻面，变成可删除的失败卡。
-    setJobs(js => js.map(j => j.job_id === jobId
-      ? { ...j, status: 'failed' as const, error: '已作废：pending 超时，疑似进程中断' }
-      : j));
+  function voidStaleJob(jobId: string) {
+    setDialog({
+      open: true,
+      title: '作废这个生成任务？',
+      message: '超过 1 小时未完成，出图进程可能已中断',
+      detail: jobId,
+      variant: 'destructive',
+      onConfirm: async () => {
+        setDialog(null);
+        const r = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+        if (!r.ok) { alert(`作废失败：HTTP ${r.status}`); return; }
+        // 后端把超时 pending 标成 failed 留痕；本地同步翻面，变成可删除的失败卡。
+        setJobs(js => js.map(j => j.job_id === jobId
+          ? { ...j, status: 'failed' as const, error: '已作废：pending 超时，疑似进程中断' }
+          : j));
+      },
+    });
   }
 
   const colClassMap: Record<number, string> = {
@@ -161,111 +198,125 @@ export function CharacterGallery({
   const hasAny = allImages.length > 0 || isRunning || failedJobs.length > 0;
 
   return (
-    <GalleryShell
-      name={characterName} projectName={projectName}
-      count={allImages.length} rounds={tabJobs.length}
-      tab={tab} setTab={setTab} tabCounts={tabCounts}
-      colCount={colCount} onColCountChange={setColCount}
-      tools={
-        <GalleryUpload
-          characterId={characterId}
-          kind={tab}
-          onUploaded={() => setUploadSignal(s => s + 1)}
+    <>
+      <GalleryShell
+        name={characterName} projectName={projectName}
+        count={allImages.length} rounds={tabJobs.length}
+        tab={tab} setTab={setTab} tabCounts={tabCounts}
+        colCount={colCount} onColCountChange={setColCount}
+        tools={
+          <GalleryUpload
+            characterId={characterId}
+            kind={tab}
+            onUploaded={() => setUploadSignal(s => s + 1)}
+          />
+        }
+      >
+        {!hasAny && (
+          <div className="py-16 text-center">
+            <p className="font-display text-display italic text-foreground/70 mb-2">
+              {TAB_META[tab].emptyTitle}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {TAB_META[tab].emptyHint}
+            </p>
+          </div>
+        )}
+
+        {hasAny && (
+          <div className={cn(colClass, 'gap-4')}>
+            {allImages.map((img, i) => {
+              const favorited = isFavorited(img.path);
+              const hidden = isGalleryHidden(img.path, hiddenPaths);
+              const rawSrc = `/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`;
+              const btn = 'size-7 rounded-full bg-scrim grid place-items-center transition-opacity backdrop-blur-glass cursor-pointer border-0';
+              return (
+              <figure key={i} className="group relative mb-4 break-inside-avoid">
+                {/* 和首页作品展示一致的卡片结构 */}
+                <button
+                  onClick={() => onSelectImage(img.path, img.jobId, tab)}
+                  className="w-full group relative overflow-hidden rounded-2xl border border-border/60 transition-all duration-200 hover:border-input hover:scale-[1.02] cursor-pointer p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  <img
+                    src={rawSrc}
+                    alt=""
+                    className="w-full block rounded-xl transition-all duration-300 group-hover:scale-105"
+                  />
+                </button>
+                <figcaption className="pointer-events-none absolute bottom-2 left-2 font-mono text-xs tabular-nums tracking-wider text-foreground bg-glass backdrop-blur-glass px-2 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                  №{String(i + 1).padStart(2, '0')}
+                </figcaption>
+                <div className="absolute right-2 top-2 flex gap-1.5">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); void toggleFavorite(img.path); }}
+                    title={favorited ? '取消收藏' : '收藏'}
+                    aria-label={favorited ? '取消收藏' : '收藏'}
+                    className={cn(btn, favorited ? 'text-primary opacity-100 hover:bg-background/90' : 'text-white opacity-0 group-hover:opacity-100 hover:bg-background/90')}
+                  >
+                    <Star className="size-3.5" />
+                  </button>
+                  <a
+                    href={rawSrc}
+                    download={img.path.split('/').pop() || 'image.png'}
+                    onClick={(e) => e.stopPropagation()}
+                    title="下载这张图"
+                    aria-label="下载"
+                    className={cn(btn, 'text-white opacity-0 group-hover:opacity-100 hover:bg-background/90')}
+                  >
+                    <Download className="size-3.5" />
+                  </a>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); void toggleHidden(img.path); }}
+                    title={hidden ? '已从首页作品展示隐藏，点击恢复' : '从首页作品展示隐藏（工坊内仍可见）'}
+                    aria-label={hidden ? '恢复展示' : '隐藏'}
+                    className={cn(btn, hidden ? 'text-white opacity-100 hover:bg-background/90' : 'text-white opacity-0 group-hover:opacity-100 hover:bg-background/90')}
+                  >
+                    {hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); void deleteImage(img.jobId, img.path); }}
+                    title="删除这张图"
+                    aria-label="删除"
+                    className={cn(btn, 'text-white opacity-0 group-hover:opacity-100 hover:bg-destructive')}
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              </figure>
+              );
+            })}
+
+            {tabJobs.filter(j => j.status === 'pending' && !isStalePending(j)).flatMap(j =>
+              Array.from({ length: j.params?.n ?? 1 }, (_, i) => (
+                <SkeletonCard key={`${j.job_id}-s${i}`} phase={j.progress_phase} />
+              ))
+            )}
+            {tabJobs.filter(isStalePending).map(j => (
+              <StalePendingCard key={j.job_id} jobId={j.job_id} onVoid={voidStaleJob} />
+            ))}
+            {failedJobs.map(j => (
+              <ErrorCard
+                key={j.job_id}
+                jobId={j.job_id}
+                error={j.error || '未知错误'}
+                onDelete={deleteFailedJob}
+              />
+            ))}
+          </div>
+        )}
+      </GalleryShell>
+      {dialog && (
+        <ConfirmDialog
+          open={dialog.open}
+          title={dialog.title}
+          message={dialog.message}
+          detail={dialog.detail}
+          variant={dialog.variant}
+          onConfirm={dialog.onConfirm}
+          onCancel={() => setDialog(null)}
         />
-      }
-    >
-      {!hasAny && (
-        <div className="py-16 text-center">
-          <p className="font-display text-display italic text-foreground/70 mb-2">
-            {TAB_META[tab].emptyTitle}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {TAB_META[tab].emptyHint}
-          </p>
-        </div>
       )}
-
-      {hasAny && (
-        <div className={cn(colClass, 'gap-4')}>
-          {allImages.map((img, i) => {
-            const favorited = isFavorited(img.path);
-            const hidden = isGalleryHidden(img.path, hiddenPaths);
-            const rawSrc = `/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`;
-            const btn = 'size-7 rounded-full bg-scrim grid place-items-center transition-opacity backdrop-blur-glass cursor-pointer border-0';
-            return (
-            <figure key={i} className="group relative mb-4 break-inside-avoid">
-              <button
-                onClick={() => onSelectImage(img.path, img.jobId, tab)}
-                className="w-full block overflow-hidden rounded-lg border border-border bg-card transition-all duration-200 hover:border-input cursor-pointer p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              >
-                <img
-                  src={rawSrc}
-                  alt=""
-                  className="w-full h-auto block transition-opacity duration-300 group-hover:opacity-95"
-                />
-              </button>
-              <figcaption className="pointer-events-none absolute bottom-2 left-2 font-mono text-xs tabular-nums tracking-wider text-foreground bg-glass backdrop-blur-glass px-2 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity">
-                №{String(i + 1).padStart(2, '0')}
-              </figcaption>
-              <div className="absolute right-2 top-2 flex gap-1.5">
-                <button
-                  onClick={(e) => { e.stopPropagation(); void toggleFavorite(img.path); }}
-                  title={favorited ? '取消收藏' : '收藏'}
-                  aria-label={favorited ? '取消收藏' : '收藏'}
-                  className={cn(btn, favorited ? 'text-primary opacity-100 hover:bg-background/90' : 'text-white opacity-0 group-hover:opacity-100 hover:bg-background/90')}
-                >
-                  <Star className="size-3.5" />
-                </button>
-                <a
-                  href={rawSrc}
-                  download={img.path.split('/').pop() || 'image.png'}
-                  onClick={(e) => e.stopPropagation()}
-                  title="下载这张图"
-                  aria-label="下载"
-                  className={cn(btn, 'text-white opacity-0 group-hover:opacity-100 hover:bg-background/90')}
-                >
-                  <Download className="size-3.5" />
-                </a>
-                <button
-                  onClick={(e) => { e.stopPropagation(); void toggleHidden(img.path); }}
-                  title={hidden ? '已从首页作品展示隐藏，点击恢复' : '从首页作品展示隐藏（工坊内仍可见）'}
-                  aria-label={hidden ? '恢复展示' : '隐藏'}
-                  className={cn(btn, hidden ? 'text-white opacity-100 hover:bg-background/90' : 'text-white opacity-0 group-hover:opacity-100 hover:bg-background/90')}
-                >
-                  {hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); void deleteImage(img.jobId, img.path); }}
-                  title="删除这张图"
-                  aria-label="删除"
-                  className={cn(btn, 'text-white opacity-0 group-hover:opacity-100 hover:bg-destructive')}
-                >
-                  <X className="size-3.5" />
-                </button>
-              </div>
-            </figure>
-            );
-          })}
-
-          {tabJobs.filter(j => j.status === 'pending' && !isStalePending(j)).flatMap(j =>
-            Array.from({ length: j.params?.n ?? 1 }, (_, i) => (
-              <SkeletonCard key={`${j.job_id}-s${i}`} phase={j.progress_phase} />
-            ))
-          )}
-          {tabJobs.filter(isStalePending).map(j => (
-            <StalePendingCard key={j.job_id} jobId={j.job_id} onVoid={voidStaleJob} />
-          ))}
-          {failedJobs.map(j => (
-            <ErrorCard
-              key={j.job_id}
-              jobId={j.job_id}
-              error={j.error || '未知错误'}
-              onDelete={deleteFailedJob}
-            />
-          ))}
-        </div>
-      )}
-    </GalleryShell>
+    </>
   );
 }
 

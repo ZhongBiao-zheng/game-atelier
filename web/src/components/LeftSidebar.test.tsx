@@ -25,7 +25,6 @@ beforeEach(() => {
     }
     return { ok: false, status: 404, json: async () => ({}) };
   }));
-  vi.stubGlobal('confirm', vi.fn(() => true));
 });
 
 afterEach(() => {
@@ -43,9 +42,12 @@ describe('LeftSidebar', () => {
 
     fireEvent.click(within(row!).getByRole('button', { name: '删除角色 暗影' }));
 
-    expect(window.confirm).toHaveBeenCalledWith(
-      '删除角色「暗影」？\n角色目录和其中图片会从磁盘删除，不可恢复。',
-    );
+    // 对话框出现
+    expect(await screen.findByText('删除角色「暗影」？')).toBeInTheDocument();
+
+    // 点击确认
+    fireEvent.click(screen.getByText('确认'));
+
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith('/api/characters/shadow', { method: 'DELETE' });
     });
