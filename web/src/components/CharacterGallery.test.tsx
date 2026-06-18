@@ -69,7 +69,6 @@ describe('CharacterGallery', () => {
       return { ok: true, json: async () => [staleJob] };
     });
     vi.stubGlobal('fetch', fetchMock);
-    vi.stubGlobal('confirm', vi.fn(() => true));
 
     render(
       <CharacterGallery
@@ -86,6 +85,9 @@ describe('CharacterGallery', () => {
     expect(screen.queryByText('生成中…')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText('[作废]'));
+    // 自定义对话框，点击确认按钮
+    await waitFor(() => screen.getByText('确认'));
+    fireEvent.click(screen.getByText('确认'));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/jobs/job-stale-1/cancel', { method: 'POST' });
     });

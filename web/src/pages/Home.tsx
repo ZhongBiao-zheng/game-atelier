@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'wouter';
 import { Star } from 'lucide-react';
-import { Masonry } from 'masonic';
 
 import { fetchGalleryRecent, type GalleryItem } from '@/api/gallery';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
@@ -39,50 +38,36 @@ export function Home() {
     };
   }, []);
 
-  // 瀑布流卡片渲染器（简洁边框 + 投影）
-  const GalleryCard = useCallback(({ data: item }: { data: GalleryItem }) => {
+  const GalleryCard = useCallback(({ item }: { item: GalleryItem }) => {
     const favorited = isFavorited(item.path);
     return (
-      <div className="p-1"> {/* 修复 masonic 裁剪问题 */}
-        <Link href={galleryItemHref(item)} style={{ width: '100%' }}>
-          {/* 简洁边框容器 */}
-          <div className="group relative overflow-hidden rounded-2xl border border-border/60 transition-all duration-500 hover:border-primary/30 hover:translate-y-[-6px] hover:scale-[1.02] hover:shadow-[0_25px_50px_rgba(0,0,0,0.12),0_0_0_1px_rgba(212,165,116,0.08)]">
+      <Link href={galleryItemHref(item)}>
+        <div className="group relative overflow-hidden rounded-2xl border border-border/60 transition-all duration-500 hover:border-primary/30 hover:translate-y-[-6px] hover:scale-[1.02]">
+          {/* hover 态顶部发丝高光，靠 border alpha 而非渐变或阴影 */}
+          <div className="absolute inset-x-0 top-0 h-px bg-border opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
 
-            {/* 顶部内发光（hover 时显示） */}
-            <div className="absolute inset-[-1px] rounded-[inherit] opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none z-10" style={{
-              background: 'linear-gradient(180deg, rgba(212, 165, 116, 0.2), transparent 50%)',
-              padding: '1px',
-              WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-              WebkitMaskComposite: 'xor',
-              maskComposite: 'exclude',
-            }} />
-
-            {/* 图片 + 内边距，PNG 保持完全透明 */}
-            <div className="p-3">
-              <img
-                src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
-                alt=""
-                className="w-full block rounded-xl transition-transform duration-700 group-hover:scale-105"
-                style={{
-                  filter: 'drop-shadow(0 4px 12px rgba(0, 0, 0, 0.08))',
-                }}
-                loading="lazy"
-              />
-            </div>
-
-            {/* 收藏按钮 */}
-            <button
-              type="button"
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); void toggleFavorite(item.path); }}
-              title={favorited ? '取消收藏' : '收藏'}
-              aria-label={favorited ? '取消收藏' : '收藏'}
-              className={`absolute right-4 top-4 grid size-9 place-items-center rounded-full border border-border/50 bg-scrim/80 backdrop-blur transition-all duration-300 hover:bg-background z-10 ${favorited ? 'text-primary opacity-100' : 'text-foreground opacity-0 group-hover:opacity-100'}`}
-            >
-              <Star className="size-4" aria-hidden />
-            </button>
+          {/* 图片 + 内边距，PNG 保持完全透明 */}
+          <div className="p-3">
+            <img
+              src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
+              alt=""
+              className="w-full block rounded-xl transition-transform duration-700 group-hover:scale-105"
+              loading="lazy"
+            />
           </div>
-        </Link>
-      </div>
+
+          {/* 收藏按钮 */}
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); void toggleFavorite(item.path); }}
+            title={favorited ? '取消收藏' : '收藏'}
+            aria-label={favorited ? '取消收藏' : '收藏'}
+            className={`absolute right-4 top-4 grid size-9 place-items-center rounded-full border border-border/50 bg-scrim/80 backdrop-blur transition-all duration-300 hover:bg-background z-10 ${favorited ? 'text-primary opacity-100' : 'text-foreground opacity-0 group-hover:opacity-100'}`}
+          >
+            <Star className="size-4" aria-hidden />
+          </button>
+        </div>
+      </Link>
     );
   }, [isFavorited, toggleFavorite]);
 
@@ -142,16 +127,15 @@ export function Home() {
         </div>
       )}
 
-      {/* ✅ 瀑布流作品展示 - 玻璃质感卡片 */}
+      {/* 瀑布流作品展示：CSS columns 方案，无额外依赖 */}
       {state.kind === 'success' && state.items.length > 0 && (
-        <Masonry
-          items={state.items}
-          columnGutter={24}  // 列间距 24px
-          rowGutter={24}     // 行间距 24px
-          columnWidth={260}  // 最小列宽（放大30%）
-          render={GalleryCard}
-          overscanBy={2}      // 预渲染范围
-        />
+        <div className="columns-2 sm:columns-3 lg:columns-4 2xl:columns-5 gap-6">
+          {state.items.map((item) => (
+            <div key={item.path} className="mb-6 break-inside-avoid">
+              <GalleryCard item={item} />
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

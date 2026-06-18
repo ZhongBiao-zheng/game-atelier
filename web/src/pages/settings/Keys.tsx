@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { KeyCard, type KeyRow } from '@/components/keys/KeyCard';
 import { KeyForm } from './KeyForm';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { listKeys, deleteKey } from '@/api/keys';
 import type { KeyCreatePayload } from '@/api/keys';
 
@@ -19,6 +20,13 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   const [showForm, setShowForm] = useState(mode === 'onboarding');
   const [editingKey, setEditingKey] = useState<KeyRow | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    variant: 'default' | 'destructive';
+    onConfirm: () => void;
+  } | null>(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -110,10 +118,18 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
                     setEditingKey(k);
                     setShowForm(true);
                   }}
-                  onDelete={async () => {
-                    if (!window.confirm(`确认删除 "${k.alias}"？`)) return;
-                    await deleteKey(k.alias);
-                    void refresh();
+                  onDelete={() => {
+                    setDialog({
+                      open: true,
+                      title: '确认删除？',
+                      message: `"${k.alias}" 将被永久删除`,
+                      variant: 'destructive',
+                      onConfirm: async () => {
+                        setDialog(null);
+                        await deleteKey(k.alias);
+                        void refresh();
+                      },
+                    });
                   }}
                 />
               ))}
@@ -138,12 +154,36 @@ export function KeysPage({ mode, onComplete, embedded = false }: Props = {}) {
   );
 
   if (embedded) {
-    return content;
+    return (
+      <>
+        {content}
+        {dialog && (
+          <ConfirmDialog
+            open={dialog.open}
+            title={dialog.title}
+            message={dialog.message}
+            variant={dialog.variant}
+            onConfirm={dialog.onConfirm}
+            onCancel={() => setDialog(null)}
+          />
+        )}
+      </>
+    );
   }
 
   return (
     <div className="px-6 py-8 max-w-3xl mx-auto">
       {content}
+      {dialog && (
+        <ConfirmDialog
+          open={dialog.open}
+          title={dialog.title}
+          message={dialog.message}
+          variant={dialog.variant}
+          onConfirm={dialog.onConfirm}
+          onCancel={() => setDialog(null)}
+        />
+      )}
     </div>
   );
 }

@@ -279,8 +279,13 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
     - `job_id` 在场：以 job.output_paths / params.reference_images / source_image 作为白名单
     - 路径在 .runtime/uploads/ 下：放行（画师刚上传，还没绑到 job 上时的 preview 用）
     - 否则回退到 image_storage_root 前缀检查（兼容老链接）
+
+    相对路径解析基准：data root（_project_root()），而非 CWD。
+    /api/gallery/recent 返回的是相对路径（如 characters/foo/turnaround/v2.png），
+    若用 Path(path).resolve() 会解析到 repo 根，与 job.output_paths 里的绝对路径对不上 → 403/404。
     """
-    target = Path(path).resolve()
+    raw = Path(path)
+    target = (raw if raw.is_absolute() else _project_root() / raw).resolve()
     if not target.exists():
         raise HTTPException(404)
     if job_id is not None:
