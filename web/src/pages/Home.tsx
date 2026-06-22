@@ -30,26 +30,22 @@ export function Home() {
     const favorited = isFavorited(item.path);
     return (
       <Link href={galleryItemHref(item)}>
-        <div className="group relative overflow-hidden rounded-2xl border border-border/60 shell-glow transition-all duration-500 hover:border-primary/30 hover:translate-y-[-6px] hover:scale-[1.02]">
-          {/* 顶部发丝高光由 .shell-glow 的 inset 阴影常驻提供（复刻 tapnow），取代旧 hover-only div */}
+        <div className="group relative overflow-hidden rounded-2xl">
+          {/* Pinterest 式瀑布流：图片直出、无边框无放大，hover 只淡入操作按钮 */}
+          <img
+            src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
+            alt=""
+            className="w-full block"
+            loading="lazy"
+          />
 
-          {/* 图片 + 内边距，PNG 保持完全透明 */}
-          <div className="p-3">
-            <img
-              src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
-              alt=""
-              className="w-full block rounded-xl transition-transform duration-700 group-hover:scale-105"
-              loading="lazy"
-            />
-          </div>
-
-          {/* 收藏按钮 */}
+          {/* 收藏按钮：hover 淡入（已收藏常显），玻璃药丸取代描边框 */}
           <button
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); void toggleFavorite(item.path); }}
             title={favorited ? '取消收藏' : '收藏'}
             aria-label={favorited ? '取消收藏' : '收藏'}
-            className={`absolute right-4 top-4 grid size-9 place-items-center rounded-full border border-border/50 bg-scrim/80 backdrop-blur transition-all duration-300 hover:bg-background z-10 ${favorited ? 'text-primary opacity-100' : 'text-foreground opacity-0 group-hover:opacity-100'}`}
+            className={`absolute right-3 top-3 grid size-9 place-items-center rounded-full bg-scrim/80 backdrop-blur-glass transition-all duration-200 hover:bg-background/90 z-10 ${favorited ? 'text-primary opacity-100' : 'text-foreground opacity-0 group-hover:opacity-100'}`}
           >
             <Star className="size-4" aria-hidden />
           </button>

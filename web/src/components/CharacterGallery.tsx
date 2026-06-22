@@ -236,12 +236,12 @@ export function CharacterGallery({
                 {/* 和首页作品展示一致的卡片结构 */}
                 <button
                   onClick={() => onSelectImage(img.path, img.jobId, tab)}
-                  className="w-full group relative overflow-hidden rounded-2xl border border-border/60 shell-glow transition-all duration-200 hover:border-input hover:scale-[1.02] cursor-pointer p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  className="block w-full overflow-hidden rounded-2xl cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <img
                     src={rawSrc}
                     alt=""
-                    className="w-full block rounded-xl transition-all duration-300 group-hover:scale-105"
+                    className="w-full block"
                   />
                 </button>
                 <figcaption className="pointer-events-none absolute bottom-2 left-2 font-mono text-xs tabular-nums tracking-wider text-foreground bg-glass backdrop-blur-glass px-2 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity">
