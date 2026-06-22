@@ -12,6 +12,7 @@ dev:
 	@echo "Start frontend: cd web && pnpm dev"
 
 build:
+	rm -rf web/dist  # 必须先清：tailwind v4 vite 插件会把旧 dist/* 扫进 content 源，over-existing 构建非幂等，与 CI clean build 不一致
 	cd web && pnpm build
 
 test:
