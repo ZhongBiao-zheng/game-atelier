@@ -173,7 +173,7 @@ uv run python -m character_workflow turn-start --kind promo
 
 ## 上传图通道
 
-画师粘参考图时：先存到 `characters/<id>/source/<timestamp>-<文件名>`，落卡前确认 `reference_mode`（`full_reference` / `style_only` / `color_lighting_only` / `pose_only`），按 mode 写参考关系（详见 `references/prompt-promo-zh.md` 第五节）。立绘 = 隐式 subject（身份锚定），上传图 = reference（不替换主体）。
+画师粘参考图时：先存到 `characters/<id>/source/<timestamp>-<文件名>`，落卡前确认 `reference_mode`（`full_reference` / `style_only` / `color_lighting_only` / `pose_only`），按 mode 写参考关系（详见 `references/prompt-promo-zh.md` 第五节）。立绘 = subject（身份锚定，须由 skill 显式 `--source-image` 传入，runner 不自动补），上传图 = reference（不替换主体）。
 
 ## Turn 收尾
 
