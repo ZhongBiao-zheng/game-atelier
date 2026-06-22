@@ -213,7 +213,7 @@ describe('Home', () => {
     renderHome();
     fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
     // 弹窗 portal 后定位走 inline fixed：向下弹 = 设 top。
-    const panel = screen.getByRole('listbox', { name: '选择厂商列表' });
+    const panel = await screen.findByRole('listbox', { name: '选择厂商列表' });
     expect(panel).toHaveAttribute('data-toolbar-popover');
     expect(panel.style.top).not.toBe('');
   });
@@ -248,13 +248,14 @@ describe('Home', () => {
     renderHome();
 
     fireEvent.click(await screen.findByRole('button', { name: /选择厂商/ }));
-    const providerPanel = screen.getByRole('listbox', { name: '选择厂商列表' });
+    const providerPanel = await screen.findByRole('listbox', { name: '选择厂商列表' });
     expect(providerPanel).toHaveAttribute('data-toolbar-popover');
     expect(providerPanel.style.top).not.toBe('');
 
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
-    expect(screen.getByTestId('size-popover')).toHaveAttribute('data-toolbar-popover');
-    expect(screen.getByTestId('size-popover').style.top).not.toBe('');
+    const sizePanel = await screen.findByTestId('size-popover');
+    expect(sizePanel).toHaveAttribute('data-toolbar-popover');
+    expect(sizePanel.style.top).not.toBe('');
   });
 
   it('does not show persisted studio generation rounds on the home page', async () => {
