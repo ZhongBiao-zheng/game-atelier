@@ -84,7 +84,7 @@ export function AppShell() {
             <span className="hidden text-xs text-muted-foreground sm:inline">· 工作流</span>
           </Link>
           <LayoutGroup>
-            <nav className="flex min-w-0 max-w-[calc(100vw-9rem)] items-center justify-center gap-1 overflow-x-auto md:max-w-none md:gap-3">
+            <nav className="flex min-w-0 max-w-[calc(100vw-9rem)] items-center justify-center gap-1 overflow-x-auto no-scrollbar px-2 md:max-w-none md:gap-3 md:px-3">
               {NAV_TABS.map((t, i) => (
                 <NavTab key={t.to} to={t.to} label={t.label} isActive={activeIndex === i} icon={t.icon} />
               ))}

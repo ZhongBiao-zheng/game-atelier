@@ -144,6 +144,13 @@
 @layer utilities {
   /* 首页波点已迁移到 canvas 组件 HomeDottedBackground.tsx（复刻 tapnow） */
 
+  /* 隐藏滚动条但保留可滚动（窄屏 swipe 兜底）。导航横向容器专用：
+     设计纪律是「导航栏不出现滚动条」，而 overflow-x:auto 会连带把 overflow-y
+     逼成 auto（CSS 规范怪癖），磁吸滑块的微回弹一旦越过紧贴边界就会触发裁剪/滚动条——
+     配合 nav 的端部 px 缓冲一起根治（见 AppShell nav）。 */
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+
   /* tapnow 玻璃卡配方：顶部 0.5px inset 发丝高光 + 一层极淡软投影。
      这是设计身份内唯一放行的阴影（DESIGN.md Elevation）—— 封装在 CSS 工具类、
      不进 tsx 内联，漂移守卫扫不到也无需放开正则（方案 A）。 */
