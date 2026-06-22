@@ -153,10 +153,9 @@
       0 4px 16px 0 var(--scrim-soft);
   }
 
-  /* 导航选中态金属描边环：conic 渐变只显在 1px 边框环上（mask 镂空中心）——复刻 tapnow header */
-  .nav-active-ring {
-    position: relative;
-  }
+  /* 导航选中态金属描边环：conic 渐变只显在 1px 边框环上（mask 镂空中心）——复刻 tapnow header。
+     不强设 position：宿主（滑动药丸）自带 absolute 定位，强加 relative 反而会覆盖它的 absolute
+     （同 layer 同特异性，源序靠后会赢）；absolute 宿主本身就是 ::before 的包含块。 */
   .nav-active-ring::before {
     content: "";
     position: absolute;

@@ -41,14 +41,12 @@ describe('AppShell', () => {
 
   it('highlights 出图 tab on /studio', () => {
     renderAt('/studio');
-    const tab = screen.getByText('出图');
-    expect(tab.className).toContain('bg-glass');
+    expect(screen.getByText('出图')).toHaveAttribute('aria-current', 'page');
   });
 
   it('highlights 工坊 tab on /character/foo', () => {
     renderAt('/character/foo');
-    const tab = screen.getByText('工坊');
-    expect(tab.className).toContain('bg-glass');
+    expect(screen.getByText('工坊')).toHaveAttribute('aria-current', 'page');
   });
 
   it('routes character image URLs into the image detail pane', async () => {
@@ -103,18 +101,22 @@ describe('AppShell', () => {
 
   it('does not highlight either tab on /', () => {
     renderAt('/');
-    expect(screen.getByText('出图').className).not.toContain('bg-glass');
-    expect(screen.getByText('工坊').className).not.toContain('bg-glass');
-    expect(screen.getByText('主页').className).toContain('bg-glass');
+    expect(screen.getByText('出图')).not.toHaveAttribute('aria-current');
+    expect(screen.getByText('工坊')).not.toHaveAttribute('aria-current');
+    expect(screen.getByText('主页')).toHaveAttribute('aria-current', 'page');
   });
 
-  it('active tab keeps size and uses liquid glass styling', () => {
+  it('active tab keeps size; the sliding pill carries the liquid glass', () => {
     renderAt('/');
     const tab = screen.getByText('主页');
     expect(tab.className).toContain('h-10');
     expect(tab.className).toContain('rounded-full');
-    expect(tab.className).toContain('backdrop-blur-glass');
-    expect(tab.className).toContain('border-input');
+    // 玻璃质感移到 magic-move 滑动药丸：active tab 内渲染共享 layoutId 的玻璃元素
+    const pill = screen.getByTestId('nav-active-indicator');
+    expect(pill.className).toContain('bg-glass');
+    expect(pill.className).toContain('backdrop-blur-glass');
+    expect(pill.className).toContain('border-input');
+    expect(pill.className).toContain('nav-active-ring');
   });
 
   it('settings icon turns primary on /settings', () => {
