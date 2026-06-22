@@ -6,8 +6,9 @@ description: |
   正/侧/背三面比例、表情包、武器拆解，调用图像服务一次性出横幅三联视图
   到 characters/<id>/turnaround/。
   当用户说"做三视图"、"出角色三面"、"出 character sheet"或调用
-  /game-atelier:turnaround 时主动使用。三视图的可用性靠精确的比例共识——
-  没确认好就出图，三面对不上下游没法用。
+  /game-atelier:turnaround 时主动使用。无立绘先走 /game-atelier:character 出立绘；
+  触发后先侦察 turnaround/ 已有几张，据此决定首次引导还是改已出图。
+  三视图的可用性靠精确的比例共识——没确认好就出图，三面对不上下游没法用。
 allowed-tools:
   - Bash
   - Read
@@ -174,7 +175,7 @@ uv run python -m character_workflow turn-start --kind turnaround
 
 ## 上传图通道
 
-画师粘参考图时：存到 `characters/<id>/source/<timestamp>-<文件名>`，**三视图 reference_mode 只允许 `composition_only`**（仅参考布局/基线安排），其他 mode 一律拒绝。画师若上传风格参考 → 拒绝："三视图风格已由 spec 锁定，要换风格先回 /game-atelier:character 改 spec"。立绘 `portrait/v_latest.png` 是强制 subject_image，不可被参考图覆盖。
+画师粘参考图时：存到 `characters/<id>/source/<timestamp>-<文件名>`，**三视图 reference_mode 只允许 `composition_only`**（仅参考布局/基线安排），`full_reference` / `style_only` / `color_lighting_only` / `pose_only` 一律拒绝（会让风格/光照/姿势污染 spec 锁定的工程结构）。画师若上传风格参考 → 拒绝："三视图风格已由 spec 锁定，要换风格先回 /game-atelier:character 改 spec"。立绘 `portrait/v_latest.png` 是强制 subject_image，不可被参考图覆盖。
 
 ## Turn 收尾
 

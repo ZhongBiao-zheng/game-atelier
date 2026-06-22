@@ -5,6 +5,8 @@ description: |
   角色宣传图（KV）生成。基于已有立绘（spec.md + portrait/）引导画师
   补齐场景/情绪/构图/色调/张力后，通过项目内默认 API Key 出图到 characters/<id>/promo/。
   当用户说"做张美宣"、"出张宣传图"、"出 KV"或调用 /game-atelier:promo 时主动使用。
+  无立绘先走 /game-atelier:character 出立绘；触发后先侦察 promo/ 已有几张，
+  据此决定首次引导还是改已出图。
   美宣的张力来自充分的场景引导——没问清就出图，画面会平。
 allowed-tools:
   - Bash

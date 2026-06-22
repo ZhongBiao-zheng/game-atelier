@@ -19,7 +19,7 @@ turn-start 返回 `available_keys[].models[{name,id}]`，这是可选池。按�
 3. 出图：`submit --kind <kind> --alias <alias> --model <model-id> --prompt-file ...`。
 4. **找不到目标族** → 回退 `preferred_alias` 的默认模型，并一句话说明（如「未配置 nano-banana，改用默认 gpt-image」）。
 5. `preferred_alias` 为 null 且无任何可用 Key → 停下，告知缺 Key。
-6. 选定的模型会出现在**出图确认卡**上，画师过目即确认——**不必为「选哪个模型」单独发问**，除非任务类型本身模糊（常规 vs 风格调整分不清）才确认。
+6. 选定的模型会出现在**出图确认卡**上，画师过目即确认——**不必为「选哪个模型」单独发问**，除非任务类型本身模糊才确认。判据：**是否针对某一张已出图做调整**——是（改质感 / 换风格 / 修瑕，≈三模式 A/C）走 nano-banana；否（首次出图或整张重画，≈三模式 B）走 gpt-image。
 
 > 永远不在终端 / 文档 / log 里显示 access_key / secret_key。用户点名 alias/provider 时切换并更新 spec.md 记录的模型。
 
