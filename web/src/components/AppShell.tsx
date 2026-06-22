@@ -35,7 +35,7 @@ function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string
       className={[
         'h-9 md:h-10 inline-flex shrink-0 items-center gap-1.5 md:gap-2 rounded-full border px-3 md:px-5 text-xs md:text-sm font-medium backdrop-blur-glass transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
         isActive
-          ? 'border-input bg-glass nav-tab-glass text-foreground'
+          ? 'border-input bg-glass nav-tab-glass nav-active-ring text-foreground'
           : 'border-transparent bg-card/35 text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
       ].join(' ')}
     >

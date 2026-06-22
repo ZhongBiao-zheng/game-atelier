@@ -30,9 +30,8 @@ export function Home() {
     const favorited = isFavorited(item.path);
     return (
       <Link href={galleryItemHref(item)}>
-        <div className="group relative overflow-hidden rounded-2xl border border-border/60 transition-all duration-500 hover:border-primary/30 hover:translate-y-[-6px] hover:scale-[1.02]">
-          {/* hover 态顶部发丝高光，靠 border alpha 而非渐变或阴影 */}
-          <div className="absolute inset-x-0 top-0 h-px bg-border opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+        <div className="group relative overflow-hidden rounded-2xl border border-border/60 shell-glow transition-all duration-500 hover:border-primary/30 hover:translate-y-[-6px] hover:scale-[1.02]">
+          {/* 顶部发丝高光由 .shell-glow 的 inset 阴影常驻提供（复刻 tapnow），取代旧 hover-only div */}
 
           {/* 图片 + 内边距，PNG 保持完全透明 */}
           <div className="p-3">

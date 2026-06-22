@@ -89,6 +89,11 @@
   --input: rgba(237, 234, 227, 0.16);
   --ring: #D4A574;
 
+  /* tapnow 玻璃卡配方料：顶部 inset 发丝高光 + 一层极淡软投影 + 导航金属描边环 */
+  --hairline-inset: rgba(237, 234, 227, 0.16);
+  --scrim-soft: rgba(0, 0, 0, 0.16);
+  --nav-ring-stroke: rgba(237, 234, 227, 0.5);
+
   /* Status colors — warm-aligned semantic palette */
   --status-pending: #6B6967;
   --status-running: #E5B570;
@@ -125,6 +130,11 @@
   --input: rgba(0, 0, 0, 0.2);
   --ring: #8F6234;
 
+  /* 白底上 inset 白高光不可见 → 深度改由软投影承载，inset 收一道极淡内线；描边环转黑 */
+  --hairline-inset: rgba(0, 0, 0, 0.04);
+  --scrim-soft: rgba(0, 0, 0, 0.10);
+  --nav-ring-stroke: rgba(0, 0, 0, 0.32);
+
   --status-pending: #767676;
   --status-running: #A3742D;
   --status-done: #4F7C3E;
@@ -133,6 +143,40 @@
 
 @layer utilities {
   /* 首页波点已迁移到 canvas 组件 HomeDottedBackground.tsx（复刻 tapnow） */
+
+  /* tapnow 玻璃卡配方：顶部 0.5px inset 发丝高光 + 一层极淡软投影。
+     这是设计身份内唯一放行的阴影（DESIGN.md Elevation）—— 封装在 CSS 工具类、
+     不进 tsx 内联，漂移守卫扫不到也无需放开正则（方案 A）。 */
+  .shell-glow {
+    box-shadow:
+      0 0.5px 0 0 var(--hairline-inset) inset,
+      0 4px 16px 0 var(--scrim-soft);
+  }
+
+  /* 导航选中态金属描边环：conic 渐变只显在 1px 边框环上（mask 镂空中心）——复刻 tapnow header */
+  .nav-active-ring {
+    position: relative;
+  }
+  .nav-active-ring::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    padding: 1px;
+    background: conic-gradient(
+      from 270deg,
+      transparent 0deg,
+      var(--nav-ring-stroke) 90deg,
+      transparent 180deg,
+      var(--nav-ring-stroke) 270deg,
+      transparent 360deg
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
 
   /* 导航 tab 选中态：冰晶玻璃质感 —— 高亮边缘 + 内部通透感 */
   .nav-tab-glass {

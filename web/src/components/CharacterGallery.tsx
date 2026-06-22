@@ -236,7 +236,7 @@ export function CharacterGallery({
                 {/* 和首页作品展示一致的卡片结构 */}
                 <button
                   onClick={() => onSelectImage(img.path, img.jobId, tab)}
-                  className="w-full group relative overflow-hidden rounded-2xl border border-border/60 transition-all duration-200 hover:border-input hover:scale-[1.02] cursor-pointer p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  className="w-full group relative overflow-hidden rounded-2xl border border-border/60 shell-glow transition-all duration-200 hover:border-input hover:scale-[1.02] cursor-pointer p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <img
                     src={rawSrc}
