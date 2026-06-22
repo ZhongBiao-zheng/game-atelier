@@ -106,7 +106,8 @@ export function AppShell() {
         </div>
       </header>
 
-      <main role="main" className="flex-1 min-h-0 overflow-y-auto">
+      {/* stable-scroll：本壳是首页/工坊的真·滚动容器，固定滚动槽避免滚动条增删改内宽 → 列宽 → w-full 图高 → 墙高的自激抽搐环（见 scrollbar-gutter-feedback-loop memory）*/}
+      <main role="main" className="flex-1 min-h-0 overflow-y-auto stable-scroll">
         <Switch>
           <Route path="/">{() => <Home />}</Route>
           <Route path="/studio">{() => <Studio />}</Route>
