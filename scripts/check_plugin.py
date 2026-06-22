@@ -56,7 +56,7 @@ def main() -> int:
         return _report(failures)
 
     try:
-        m = json.loads(manifest.read_text())
+        m = json.loads(manifest.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         failures.append(f"plugin.json invalid JSON: {e}")
         return _report(failures)

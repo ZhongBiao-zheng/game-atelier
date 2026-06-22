@@ -132,7 +132,7 @@ def _latest_portrait(char_dir: Path, root: Path) -> str | None:
             mtime = f.stat().st_mtime
             if mtime > best_mtime:
                 best, best_mtime = f, mtime
-    return str(best.relative_to(root)) if best else None
+    return best.relative_to(root).as_posix() if best else None
 
 
 @router.get("/characters", response_model=list[CharacterEntry])
@@ -880,7 +880,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
             for f in slot_dir.iterdir():
                 if f.suffix.lower() not in _GALLERY_EXTS:
                     continue
-                rel = str(f.relative_to(_project_root()))
+                rel = f.relative_to(_project_root()).as_posix()
                 if rel in hidden:
                     continue  # 画师点过「隐藏」：工坊可见，首页作品展示不出
                 try:
@@ -924,7 +924,7 @@ def _normalize_gallery_path(raw: str) -> str:
     path = Path(raw)
     absolute = path if path.is_absolute() else root / path
     try:
-        return str(absolute.resolve().relative_to(root))
+        return absolute.resolve().relative_to(root).as_posix()
     except ValueError:
         return raw
 
@@ -1001,7 +1001,7 @@ def _gallery_job_ids_by_path() -> dict[str, str]:
             path = Path(raw_path)
             absolute = path if path.is_absolute() else root / path
             try:
-                relative = str(absolute.resolve().relative_to(root))
+                relative = absolute.resolve().relative_to(root).as_posix()
             except ValueError:
                 relative = raw_path
             result.setdefault(raw_path, job.job_id)

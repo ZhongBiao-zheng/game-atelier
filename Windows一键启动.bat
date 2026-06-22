@@ -1,6 +1,9 @@
 ﻿@echo off
 chcp 65001 >nul
 setlocal enabledelayedexpansion
+REM Python UTF-8 模式：让本脚本拉起的 server / venv-python / skill CLI 全程按 UTF-8
+REM 读写文件与 stdio，兜住 Windows 默认码页(cp936/cp1252)撞中文内容的编解码崩溃。
+set "PYTHONUTF8=1"
 cd /d "%~dp0"
 
 echo ============================================

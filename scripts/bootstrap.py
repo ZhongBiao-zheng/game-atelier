@@ -56,7 +56,7 @@ def resolve_data_root() -> Path | None:
         return Path(env).expanduser().resolve()
     cfg = global_config_file()
     if cfg.exists():
-        text = cfg.read_text().strip()
+        text = cfg.read_text(encoding="utf-8").strip()
         if text:
             return Path(text).expanduser().resolve()
     return None
@@ -164,7 +164,7 @@ def check() -> dict:
         }
 
     try:
-        payload = json.loads(keys_file.read_text())
+        payload = json.loads(keys_file.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         return {
             "status": "needs_keys_repair",
@@ -267,7 +267,7 @@ def init_data_root(target: Path) -> int:
 
     cfg = global_config_file()
     cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(str(resolved) + "\n")
+    cfg.write_text(str(resolved) + "\n", encoding="utf-8")
 
     print(json.dumps({
         "status": "ok",

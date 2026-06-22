@@ -19,7 +19,7 @@ def resolve_data_root() -> Path:
         return Path(env).expanduser().resolve()
     cfg = _global_config_file()
     if cfg.exists():
-        text = cfg.read_text().strip()
+        text = cfg.read_text(encoding="utf-8").strip()
         if text:
             return Path(text).expanduser().resolve()
     return (Path.home() / "game-atelier").resolve()
@@ -67,4 +67,4 @@ def write_global_config(path: Path) -> None:
     """写全局 data-root 配置文件（用户手动改 data root 时用）。"""
     cfg = _global_config_file()
     cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(str(Path(path).expanduser().resolve()) + "\n")
+    cfg.write_text(str(Path(path).expanduser().resolve()) + "\n", encoding="utf-8")

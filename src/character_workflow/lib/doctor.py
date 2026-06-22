@@ -16,7 +16,7 @@ def _data_root_source() -> tuple[Path, str]:
     if os.environ.get(data_root._ENV_VAR):
         return data_root.resolve_data_root(), "env"
     cfg = data_root._global_config_file()
-    if cfg.exists() and cfg.read_text().strip():
+    if cfg.exists() and cfg.read_text(encoding="utf-8").strip():
         return data_root.resolve_data_root(), "config"
     return data_root.resolve_data_root(), "default"
 
