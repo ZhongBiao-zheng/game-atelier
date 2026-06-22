@@ -20,6 +20,7 @@ consistency_level: `loose`
 4. **不写排除段**：美宣 prompt 默认只写正向画面描述。需要避免的方向用正面描述自然挤掉，不在 prompt 末尾追加"排除："段。
 5. **不要精确坐标**：写"角色顶天立地占据画面右侧"比"角色位于画面 60-75% x 0-100% y 区间"好。引导方向不规定坐标，模型有发挥空间也不会跑偏。
 6. **不堆砌辞藻**：禁用"高质量 / 精细 / 影视级 / 8k / 大师级"；改为具体描述（哪部分高细节、哪部分柔焦留白）。
+7. **默认出无字底图**：标题 / 标语 / logo / 角色名 / 任何成段文案**不写进 prompt**——AI 渲染中文极易糊字 / 乱码，文字一律交本地排版层。`text_zone = 是` 时只在画面**留出**文案空白区（构图层面），prompt 里不写实际文字。例外仅两种：① 画师显式要求、且只是极短英文 / 数字（如 "VOL.1" "S2"）；② 画师明确说"文字也画进图"并在出图确认卡上过目认可。两种例外都要在 spec.md 美宣记录标注。
 
 ---
 
@@ -129,7 +130,7 @@ consistency_level: `loose`
 
 ### 5.1 现状（必读）
 
-当前项目 runner 一次只稳定处理一张参考图。runner（job_runner.py）只把 `params.reference_images` 交给 provider，不会自动加任何隐式图 — 立绘**不**会自动作为隐式 subject_image 加进去。submit CLI 的 `--source-image` 也只接受一张。
+当前项目 runner 一次只稳定处理一张参考图。runner（job_runner.py）只把 skill 显式传入的 `source_image` / `params.reference_images` 交给 provider，不会自动补任何图 —— **要让立绘锚定角色身份，必须由 skill 把 `portrait/v_latest.png` 作为 `--source-image` 显式传入**（见 5.2；权威说明见 `art-prompt-system.md` 三、各图类默认行为）。submit CLI 的 `--source-image` 也只接受一张。
 
 这意味着每次出 promo 时，你必须在"立绘锚定身份"和"画师上传的氛围/姿势/色调参考图"之间做出选择，**只能上传一张**。
 

@@ -71,7 +71,7 @@ consistency_level: `standard`
 | generation_mode | subject_image | reference_image 默认 mode |
 |---|---|---|
 | `first_gen` | 无 | `style_only`（画师上传的参考画派/IP 截图） |
-| `variation` | `portrait/v_latest.png`（隐式，spec 锚点等价） | `style_only` 或 `pose_only` |
+| `variation` | `portrait/v_latest.png`（默认主体，须 skill 显式传 `--source-image`；与 spec 锚点等价） | `style_only` 或 `pose_only` |
 | `refinement` | `portrait/v<n-1>.png`（上一张立绘） | `full_reference`（如果有改风格意图） |
 
 **写 prompt 时的参考图表达**：
@@ -115,6 +115,8 @@ consistency_level: `standard`
 ---
 
 ## 五、排除段模板
+
+> 门控：默认不写排除段（见三的「不写长排除段」）；仅当上版出现具体问题或画师显式要求时才用，能用正向描述约束画面的就不写否定句。
 
 ```
 排除：现代感元素、卡通夸张脸、过曝白化高光、四肢比例变形、低质量线条、复杂杂乱背景细节

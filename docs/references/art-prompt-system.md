@@ -88,14 +88,14 @@ jobs schema 当前只有单 `source_image` 字段(`--source-image <绝对路径>
 
 **各图类默认行为**
 
-| 图类 | 隐式 `subject_image` | 画师上传图默认 mode |
+| 图类 | 默认 `subject_image`(skill 显式传 `--source-image`) | 画师上传图默认 mode |
 |---|---|---|
 | 立绘 first_gen | 无 | `reference_image`, `style_only` |
 | 立绘 variation / refinement | `characters/<id>/portrait/v<n-1>.png` | `reference_image`, `full_reference` |
 | 美宣 | `characters/<id>/portrait/v_latest.png`(必须,锚定角色) | `reference_image`, `full_reference` |
 | 三视图 | `characters/<id>/portrait/v_latest.png`(强制,主体不变) | `reference_image`, `composition_only` |
 
-隐式 `subject_image` 规则:画师没上传 subject 时,最新立绘也作隐式锚点。美宣第 1 段明确继承主体身份;三视图走参考图简化模式,不展开 spec 全量锚点,只补视图组合、姿势、基线和逐面结构信息。
+`subject_image` 不是"隐式自动注入":runner 只把 skill 显式传入的 `source_image` / `reference_images` 转发给 provider,**不会自动去补任何图**。所以美宣 / 三视图要锚定角色,skill 必须主动把最新立绘 `portrait/v_latest.png` 作为 `--source-image` 传入(画师没另传 subject 时也是)。美宣第 1 段明确继承主体身份;三视图走参考图简化模式,不展开 spec 全量锚点,只补视图组合、姿势、基线和逐面结构信息。
 
 ---
 

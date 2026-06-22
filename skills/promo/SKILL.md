@@ -2,10 +2,10 @@
 name: promo
 version: 1.0.0
 description: |
-  角色宣传图（KV）生成。基于已有立绘（spec.md + portrait/）引导画师
-  补齐场景/情绪/构图/色调/张力后，通过项目内默认 API Key 出图到 characters/<id>/promo/。
-  当用户说"做张美宣"、"出张宣传图"、"出 KV"或调用 /game-atelier:promo 时主动使用。
-  美宣的张力来自充分的场景引导——没问清就出图，画面会平。
+  角色宣传图（KV / 海报）生成：基于已有立绘引导画师补齐场景/情绪/构图/色调/张力后出图，
+  也支持改已出的美宣。
+  用户要做美宣、出宣传图 / 海报 / KV，或调用 /game-atelier:promo 时使用；
+  该角色还没有立绘（spec.md + portrait/）则先走 /game-atelier:character。
 allowed-tools:
   - Bash
   - Read
@@ -102,10 +102,24 @@ uv run python -m character_workflow turn-start --kind promo
 - 禁止口水词（high quality / masterpiece / 8k）；用具象光影描述代替
 - "你定"时：给三选一，从张力维度解释（杀气 / 决意 / 颓然），不列元素清单
 - 不在 spec 外输出外观信息；同角色连续出 3 张以上先复盘一致性
+- 默认出**无字底图**：标题 / 标语 / 文案不写进 prompt（AI 画中文易糊乱码），交本地排版层；`text_zone` 只在画面留白、不写实际文字。例外与细则见 `references/prompt-promo-zh.md` 零节第 7 条
 
 ## 五维度引导
 
-**所有向画师提问都必须用 AskUserQuestion**（出图确认卡除外）。纯文字追问等于没问，画师选项清晰才能继续。
+美宣的张力来自充分的场景引导——没问清就出图，画面会平；下面五维度逐项问清再动笔。
+
+**所有向画师提问都必须用 AskUserQuestion**（出图确认卡除外）。纯文字追问等于没问，画师选项清晰才能继续。AskUserQuestion 单次最多 4 个问题、每题最多 4 个选项（工具硬上限）；要问得更多就拆成两级——先问大方向，再问细节。
+
+**降级（结构化提问工具不可用，如 Codex Default mode 无 request_user_input）**：不得用松散文字凑合提问——输出固定格式文本确认卡并就地停下，等画师回复才能继续：
+
+```text
+【待确认】<问题一句话>
+1. <选项 A> — <一句话说明>
+2. <选项 B> — <一句话说明>
+回复编号，或直接描述你的想法。
+```
+
+输出确认卡后本轮立刻停下：不替画师选、不把沉默当默认、不继续推进。
 
 一次问 1-3 个，二选一优先，options 写具象画面而非术语：
 
@@ -142,20 +156,43 @@ uv run python -m character_workflow turn-start --kind promo
 
 ## 出图流程
 
-默认 `n=1`，不沿用立绘旧习惯的多图数量。
+默认单张出图（不沿用立绘的多图习惯）；张数 / 尺寸缺省由 CLI 按 `--kind` 决定，不在此硬写。
 
 1. `uv run python -m character_workflow submit --kind promo --alias <选定alias> --model <选定model-id> --prompt-file <path> [--reference-image <path> ...] [--source-image <path>]` → 落盘 PENDING_CONFIRM（`--alias`/`--model` 按 model-routing 选；缺省回退默认 Key 首模型；`--reference-image` 可重复传多张，`--source-image` 是首张参考图的兼容别名——参考图一律走 CLI 参数，禁止手改 job JSON）
 2. 把 submit 在 stderr 打出的确认卡**原样转发**给画师（job_id / Key / model / 尺寸 / 参考图全列表 / 完整 prompt 原文），不得手写或摘要
-3. 画师确认后 → `uv run python -m character_workflow run-job <job_id>`；失败要重试 → `retry-job <job_id>` 克隆新 job（错误记录保留）再 run-job
-4. 终端渲染：`![vN](绝对路径)`
+3. 判定画师回复：**明确肯定**（出图 / 确认 / OK / 可以 / 行 / 就这样 / 走吧 / 好）→ `uv run python -m character_workflow run-job <job_id>`；**要改**（具体改点）→ 改 prompt 重新 submit 出新确认卡（旧 PENDING_CONFIRM 作废、不复用），不 run-job；**否定 / 犹豫**（再想想 / 先不出 / 算了）→ 停在 PENDING_CONFIRM，不推进、不催；**模糊**（看不出肯定还是想改）→ 不擅自当肯定，用 AskUserQuestion 二选一「直接出图 / 还想改」。绝不把沉默或模糊当默认推进。
+4. 终端渲染：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 `![vN](output_paths[i])`。`output_paths` 为空 / 缺失 = 本次未成图，走失败分支——**不复用上轮 `v_latest`、不在 slot 目录按 mtime 挑文件冒充本次产出**。
+
+失败时：网络 / 凭证失败 → 问画师重试还是改 prompt；选重试 → `retry-job <job_id>` 克隆新 job（错误记录保留、带 retry_of）再 `run-job`；输出路径不可写 → 提醒检查 `image_storage_root`。不盲目重试。
+
+### 收尾验证（render 前逐条过）
+
+① 渲染路径取本次 `output_paths`（见 step4），为空即走失败分支；
+② 对照 spec 三锚点（发色 / 瞳色 / 服装主色）+ 风格档，漂移则**主动点名**告知画师并提议带参考图走 A/C 模式修，不默默放行、不替画师定；
+③ 无糊脸 / 占位脸 / 裂图等崩坏；明显不达标提议 `retry-job` 或 A 模式重出（**重出 / 修图仍走 PENDING_CONFIRM 确认门**）。
 
 ## 上传图通道
 
-画师粘参考图时：先存到 `characters/<id>/source/<timestamp>-<文件名>`，落卡前确认 `reference_mode`（`full_reference` / `style_only` / `color_lighting_only` / `pose_only`），按 mode 写参考关系（详见 `references/prompt-promo-zh.md` 第五节）。立绘 = 隐式 subject（身份锚定），上传图 = reference（不替换主体）。
+画师粘参考图时：先存到 `characters/<id>/source/<timestamp>-<文件名>`，落卡前确认 `reference_mode`（`full_reference` / `style_only` / `color_lighting_only` / `pose_only`），按 mode 写参考关系（详见 `references/prompt-promo-zh.md` 第五节）。立绘 = subject（身份锚定，须由 skill 显式 `--source-image` 传入，runner 不自动补），上传图 = reference（不替换主体）。
 
 ## Turn 收尾
 
 job DONE/FAILED 后问画师是否沉淀经验，Y → `uv run python -m character_workflow append-lesson --kind promo --line "- <日期> <id> · <一句话>"`
+
+## Guardrails
+
+只复述全文已散落的红线，集中一眼看全（不新增约束）：
+
+- `needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 态**绝不**启 viewer-server、绝不开窗。
+- 默认出**无字底图**：标题 / 标语 / logo / 文案不写进 prompt，交本地排版层（例外见 `references/prompt-promo-zh.md` 零节第 7 条）。
+- 美宣要锚定角色身份，须由 skill 把 `portrait/v_latest.png` 显式作 `--source-image` 传入（runner 不自动补图）。
+- 美宣 prompt 只加场景 / 情绪 / 镜头 / 光线，**不改 spec 锚定的配色 / 外观**。
+- 参考图一律走 CLI `--reference-image` / `--source-image`，**禁止手改 job JSON**。
+- 确认卡原样转发 CLI（stderr）全文，不手写、不摘要、不增删字段。
+- 出图链路 submit→PENDING_CONFIRM→画师明确肯定→run-job；**绝不把沉默 / 模糊当默认推进**，模糊用 AskUserQuestion 二选一。
+- 三模式（A 编辑 / B 重出 / C 混合）互斥不混用；重出 / 修图仍过确认门。
+- 所有提问走 AskUserQuestion，单次 ≤4 问、每问 ≤4 选项；工具不可用时走文本确认卡降级。
+- 永远不显示 access_key / secret_key。
 
 ## 跳过条件
 
