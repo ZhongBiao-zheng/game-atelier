@@ -10,8 +10,8 @@ export interface GalleryItem {
 export async function fetchGalleryRecent(limit = 24): Promise<GalleryItem[]> {
   const resp = await fetch(`/api/gallery/recent?limit=${limit}`);
   if (!resp.ok) throw new Error(`gallery fetch failed: ${resp.status}`);
-  const data = (await resp.json()) as { items: GalleryItem[] };
-  return data.items;
+  const data = (await resp.json()) as { items?: GalleryItem[] };
+  return Array.isArray(data.items) ? data.items : [];
 }
 
 /** 首页作品展示的隐藏清单（data_root 相对路径）。工坊里仍正常可见。 */
