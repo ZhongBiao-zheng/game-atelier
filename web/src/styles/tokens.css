@@ -151,6 +151,12 @@
   .no-scrollbar { scrollbar-width: none; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
 
+  /* 永久预留滚动条槽位。本仓全局把滚动条改成占位 10px 的经典条（见下方 @layer base
+     ::-webkit-scrollbar），overflow:auto 容器里滚动条增删会改变内容宽度 ±10px；当列宽随
+     之变、而图片 w-full 高度随列宽等比缩放时，墙高会反向跨过视口临界 → 滚动条增删每帧翻转
+     = 持续抽搐（工坊列数 2-3 列实测）。scrollbar-gutter:stable 让内宽恒定，斩断这条反馈环。 */
+  .stable-scroll { scrollbar-gutter: stable; }
+
   /* tapnow 玻璃卡配方：顶部 0.5px inset 发丝高光 + 一层极淡软投影。
      这是设计身份内唯一放行的阴影（DESIGN.md Elevation）—— 封装在 CSS 工具类、
      不进 tsx 内联，漂移守卫扫不到也无需放开正则（方案 A）。 */

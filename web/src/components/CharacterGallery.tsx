@@ -359,7 +359,7 @@ function GalleryShell({
           </div>
         </div>
       </header>
-      <div className="flex-1 overflow-y-auto px-8 py-6">
+      <div className="flex-1 overflow-y-auto stable-scroll px-8 py-6">
         {children}
       </div>
     </main>
