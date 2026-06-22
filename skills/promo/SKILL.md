@@ -2,12 +2,10 @@
 name: promo
 version: 1.0.0
 description: |
-  角色宣传图（KV）生成。基于已有立绘（spec.md + portrait/）引导画师
-  补齐场景/情绪/构图/色调/张力后，通过项目内默认 API Key 出图到 characters/<id>/promo/。
-  当用户说"做张美宣"、"出张宣传图"、"出 KV"或调用 /game-atelier:promo 时主动使用。
-  无立绘先走 /game-atelier:character 出立绘；触发后先侦察 promo/ 已有几张，
-  据此决定首次引导还是改已出图。
-  美宣的张力来自充分的场景引导——没问清就出图，画面会平。
+  角色宣传图（KV / 海报）生成：基于已有立绘引导画师补齐场景/情绪/构图/色调/张力后出图，
+  也支持改已出的美宣。
+  用户要做美宣、出宣传图 / 海报 / KV，或调用 /game-atelier:promo 时使用；
+  该角色还没有立绘（spec.md + portrait/）则先走 /game-atelier:character。
 allowed-tools:
   - Bash
   - Read
@@ -107,6 +105,8 @@ uv run python -m character_workflow turn-start --kind promo
 - 默认出**无字底图**：标题 / 标语 / 文案不写进 prompt（AI 画中文易糊乱码），交本地排版层；`text_zone` 只在画面留白、不写实际文字。例外与细则见 `references/prompt-promo-zh.md` 零节第 7 条
 
 ## 五维度引导
+
+美宣的张力来自充分的场景引导——没问清就出图，画面会平；下面五维度逐项问清再动笔。
 
 **所有向画师提问都必须用 AskUserQuestion**（出图确认卡除外）。纯文字追问等于没问，画师选项清晰才能继续。AskUserQuestion 单次最多 4 个问题、每题最多 4 个选项（工具硬上限）；要问得更多就拆成两级——先问大方向，再问细节。
 
