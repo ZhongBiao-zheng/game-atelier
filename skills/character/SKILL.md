@@ -181,7 +181,7 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 
 ## 写出图 prompt
 
-**所有向画师提问都必须用 AskUserQuestion**（出图确认卡除外）。纯文字追问等于没问，画师选项清晰才能继续。
+**所有向画师提问都必须用 AskUserQuestion**（出图确认卡除外）。纯文字追问等于没问，画师选项清晰才能继续。AskUserQuestion 单次最多 4 个问题、每题最多 4 个选项（工具硬上限）；要问得更多就拆成两级——先问大方向，再问细节。
 
 对话逐项问清：风格档 → 配色 → 镜头 → 视觉锚点。一次问 1-3 个，二选一优先，问清才动笔。
 
@@ -227,10 +227,15 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
      --prompt-file /tmp/cw-prompt-$$.md)
    ```
 
-   `--alias` / `--model` 按 `docs/references/model-routing.md` 选定（常规→gpt-image / 风格调整→nano-banana）；缺省回退当前 kind 默认 Key 的首个模型。`--n` 默认 1；`--reference-image <绝对路径>` 可重复传多张参考图（`--source-image` 是首张参考图的兼容别名）——参考图一律走 CLI 参数，**禁止手改 job JSON**。stdout 是纯 job_id，stderr 是 CLI 生成的出图确认卡。
+   `--alias` / `--model` 按 `docs/references/model-routing.md` 选定（常规→gpt-image / 风格调整→nano-banana）；缺省回退当前 kind 默认 Key 的首个模型。`--n` / 尺寸等缺省值由 CLI 按 `--kind` 决定，不在此硬写；`--reference-image <绝对路径>` 可重复传多张参考图（`--source-image` 是首张参考图的兼容别名）——参考图一律走 CLI 参数，**禁止手改 job JSON**。stdout 是纯 job_id，stderr 是 CLI 生成的出图确认卡。
 
 2. 把 submit 在 stderr 打出的确认卡**原样转发**给画师（含 job_id / Key / model / 尺寸 / 参考图全列表 / 完整 prompt 原文），不得手写或摘要确认卡
-3. 等画师明确"出图/确认/OK"后：
+3. 判定画师回复（确认卡已转发后），再决定是否 run-job：
+   - **推进** = 任何明确肯定（出图 / 确认 / OK / 可以 / 行 / 就这样 / 走吧 / 好）→ run-job。
+   - **修改** = 画师提出具体改点 → 改 prompt 重新 submit 出新确认卡，**不** run-job（旧 PENDING_CONFIRM 作废，不复用）。
+   - **否定 / 犹豫**（再想想 / 先不出 / 算了）→ 停在 PENDING_CONFIRM，不推进、不催。
+   - **模糊**（看不出是肯定还是想改）→ **不擅自当肯定**，用 AskUserQuestion 二选一确认「直接出图 / 还想改」。
+   绝不把沉默或模糊当默认推进。明确肯定后：
 
    ```bash
    uv run python -m character_workflow run-job "$JOB_ID"
@@ -238,9 +243,15 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
    uv run python -m character_workflow run-latest --kind portrait
    ```
 
-4. 终端渲染：`![v1](绝对路径)` — 每张一行，末尾提一句"Web 也能看，或直接说要改哪张"
+4. 终端渲染：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 `![vN](output_paths[i])`，末尾提一句"Web 也能看，或直接说要改哪张"。`output_paths` 为空 / 缺失 = 本次未成图，走下方失败分支——**不复用上轮 `v_latest`、不在 slot 目录按 mtime 挑文件冒充本次产出**（曾踩过裂图）。
 
 失败时：网络/凭证失败 → 问画师重试还是改 prompt；画师选重试 → `NEW_ID=$(uv run python -m character_workflow retry-job "$JOB_ID")` 克隆原 job（错误记录保留，新 job 带 retry_of）→ `run-job "$NEW_ID"`；输出路径不可写 → 提醒检查 `image_storage_root`。
+
+### 收尾验证（render 前逐条过）
+
+① 渲染路径取本次 `output_paths`（见 step4），为空即走失败分支；
+② 对照 spec 三锚点（发色 / 瞳色 / 服装主色）+ 风格档，发现漂移**主动点名**告知画师「X 锚点偏了」并提议带参考图走 A/C 模式修——不默默放行、不替画师定要不要修；
+③ 无糊脸 / 占位脸 / 裂图等崩坏；明显不达标提议 `retry-job` 或 A 模式重出（**重出 / 修图仍走 PENDING_CONFIRM 确认门**）。
 
 ## Turn 收尾：经验沉淀
 
@@ -254,6 +265,20 @@ uv run python -m character_workflow append-memory \
 ```
 
 `--scope` 默认 project；跨项目通用经验用 workspace（global 层已移除，记忆全部锚定 data_root，与代理工具无关）。
+
+## Guardrails
+
+只复述全文已散落的红线，集中一眼看全（不新增约束）：
+
+- `needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 态**绝不**启 viewer-server、绝不开窗。
+- 参考图一律走 CLI `--reference-image` / `--source-image`，**禁止手改 job JSON**。
+- 确认卡原样转发 CLI（stderr）全文，不手写、不摘要、不增删字段。
+- 出图链路 submit→PENDING_CONFIRM→画师明确肯定→run-job；**绝不把沉默 / 模糊当默认推进**，模糊用 AskUserQuestion 二选一。
+- 三模式（A 编辑 / B 重出 / C 混合）互斥不混用；重出 / 修图仍过确认门。
+- 所有提问走 AskUserQuestion，单次 ≤4 问、每问 ≤4 选项；工具不可用时走文本确认卡降级，不松散凑合。
+- 永远不显示 access_key / secret_key。
+- spec 零占位（不写 `?` / TBD / 待定），缺信息靠对话补，不猜不假设。
+- 锚点（发色 / 瞳色 / 服装主色 / 风格档）未经画师授权不改写。
 
 ## 跳过条件
 
