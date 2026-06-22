@@ -52,9 +52,22 @@ jobs:
         working-directory: web
         run: pnpm lint
 
-      - name: Build web
-        working-directory: web
-        run: pnpm build
+      - name: Build web and verify committed web/dist is current
+        run: |
+          # web/dist 随仓库分发（同事零 node 依赖即可起 viewer-server）。
+          # 这一步既做构建冒烟，又守住"committed dist == 当前源码构建产物"：
+          # 防止 dist 悄悄漏提交（→ 同事一键启动卡死 / plugin 装后 404）或过期。
+          # 必须先 rm 再 build：tailwind v4 vite 插件会把已存在的 dist/* 也扫进
+          # content 源，造成 over-existing 构建非幂等；clean build 才能稳定比对。
+          rm -rf web/dist
+          ( cd web && pnpm build )
+          if [ -n "$(git status --porcelain -- web/dist)" ]; then
+            echo "::error::web/dist 与当前源码构建产物不一致（缺失/过期/未提交）。请本地运行 'make build' 并提交 web/dist/ 后再推。"
+            git status --porcelain -- web/dist
+            git --no-pager diff --stat -- web/dist
+            exit 1
+          fi
+          echo "web/dist 与源码构建一致 OK"
 
       - name: Plugin sanity check
         run: uv run python scripts/check_plugin.py
