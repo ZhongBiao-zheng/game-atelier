@@ -16,6 +16,14 @@ UV_AVAILABLE = shutil.which("uv") is not None
 
 def run_bootstrap(args, env_overrides=None):
     env = {**dict(os.environ), **(env_overrides or {})}
+    # platformdirs 在 Windows 上经 ctypes 查已知文件夹 API 解析 user_config_dir，
+    # 无视 APPDATA / XDG_CONFIG_HOME 这类 env override —— 测试既无法把 config 目录隔离到
+    # tmp，又会把 data-root 配置写进真实用户目录污染后续测试。platformdirs 文档化的
+    # WIN_PD_OVERRIDE_* 逃生舱优先级在 ctypes 之上：把测试设的 APPDATA 镜像进去，
+    # _user_config_dir() 在 Windows 上才会重定向到 tmp（mac/Linux 不读该 env，无副作用）。
+    appdata = (env_overrides or {}).get("APPDATA")
+    if appdata and "WIN_PD_OVERRIDE_LOCAL_APPDATA" not in env:
+        env["WIN_PD_OVERRIDE_LOCAL_APPDATA"] = appdata
     result = subprocess.run(
         [sys.executable, str(BOOTSTRAP), *args],
         capture_output=True, text=True, env=env,
@@ -406,6 +414,11 @@ def test_user_config_dir_fallback_windows_doubles_appname(monkeypatch):
     assert mod._user_config_dir() == Path(r"C:\Users\u\AppData\Local") / "game-atelier" / "game-atelier"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="darwin 兜底分支用 Path.home()，Windows 上 Path.home() 恒为 WindowsPath、"
+    "无视 monkeypatch 的 HOME，该平台路径无法在 Windows 上忠实复现",
+)
 def test_user_config_dir_fallback_macos(monkeypatch):
     mod = _load_bootstrap()
     monkeypatch.setattr(mod, "platformdirs", None)

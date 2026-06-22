@@ -8,7 +8,12 @@ on:
 jobs:
   test-windows:
     runs-on: windows-latest
-    continue-on-error: true   # MVP: allow failure, follow-up: 转必过
+    continue-on-error: true   # 仍非阻塞；本次修复跑绿后再单独翻成必过门
+    env:
+      # Windows 默认 stdio/文件编码非 UTF-8（cp1252/cp936），撞仓库里大量中文内容会
+      # UnicodeDecode/EncodeError。UTF-8 模式让 open()/read_text()/subprocess text 一律 UTF-8，
+      # 与 mac/Linux（默认即 UTF-8）对齐。产品源码已逐处显式 encoding="utf-8"，此处是测试环境归一。
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
