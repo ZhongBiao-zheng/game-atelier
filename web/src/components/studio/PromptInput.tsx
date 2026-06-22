@@ -725,7 +725,7 @@ export function PromptInput({
       // backdrop-blur 已让外壳自成 stacking context，z-20 把它（含内部弹窗）整体抬到
       // 首页作品墙之上；全局梯度：内容卡片 auto < 外壳 20 < sticky 头 30 < lightbox/loading 50。
       // collapsed（Studio 滚动联动）收成单行条；圆角与展开态保持一致。
-      className={`bg-glass rounded-xl border border-input px-4 max-w-[780px] mx-auto relative z-20 backdrop-blur-glass h-auto flex flex-col pointer-events-auto transition-all duration-300 ${
+      className={`bg-glass shell-glow rounded-xl border border-input px-4 max-w-[780px] mx-auto relative z-20 backdrop-blur-glass h-auto flex flex-col pointer-events-auto transition-all duration-300 ${
         collapsed ? 'pt-2 pb-2 gap-0 min-h-0' : 'pt-[14px] pb-4 gap-3 min-h-[174px]'
       }`}
     >

@@ -135,7 +135,8 @@
 
 ## Elevation — 深度靠玻璃，不靠阴影
 
-- ❌ **`shadow-*` 全禁**（含 `drop-shadow`；`shadow-none` 例外）。暗色画廊里阴影没有用武之地，层级感全部来自玻璃和表面阶梯。
+- ❌ **tsx 内联 `shadow-*` 全禁**（含 `drop-shadow`；`shadow-none` 例外）。暗色画廊里大投影没有用武之地，层级感主要来自玻璃和表面阶梯。
+- ✅ **唯一放行的微阴影 = `.shell-glow`**（`tokens.css` 工具类，复刻 tapnow 玻璃卡）：顶部 `0 0.5px 0 inset` 发丝高光 + 一层极淡 `0 4px 16px` 软投影，亮暗各一套 token（`--hairline-inset` / `--scrim-soft`）。封装在 CSS 层、不进 tsx 内联，所以守卫正则无需放开——要微阴影就引 `shell-glow` 类，别在 tsx 写 `shadow-[...]`。输入壳 / 画廊图卡已接入。
 - **玻璃配方**（浮层 / 悬浮 chrome 唯一写法）：
 
   ```

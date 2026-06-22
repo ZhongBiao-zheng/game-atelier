@@ -236,12 +236,12 @@ export function CharacterGallery({
                 {/* 和首页作品展示一致的卡片结构 */}
                 <button
                   onClick={() => onSelectImage(img.path, img.jobId, tab)}
-                  className="w-full group relative overflow-hidden rounded-2xl border border-border/60 transition-all duration-200 hover:border-input hover:scale-[1.02] cursor-pointer p-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  className="block w-full overflow-hidden rounded-2xl cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <img
                     src={rawSrc}
                     alt=""
-                    className="w-full block rounded-xl transition-all duration-300 group-hover:scale-105"
+                    className="w-full block"
                   />
                 </button>
                 <figcaption className="pointer-events-none absolute bottom-2 left-2 font-mono text-xs tabular-nums tracking-wider text-foreground bg-glass backdrop-blur-glass px-2 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity">
@@ -354,12 +354,12 @@ function GalleryShell({
         <div className="mt-4 flex items-center justify-between gap-4 pb-3.5">
           <TabStrip tab={tab} setTab={setTab} counts={tabCounts} />
           <div className="flex items-center gap-4 shrink-0 min-w-0">
-            <ColStepper value={colCount} onChange={onColCountChange} />
+            <ColSlider value={colCount} onChange={onColCountChange} />
             {tools}
           </div>
         </div>
       </header>
-      <div className="flex-1 overflow-y-auto px-8 py-6">
+      <div className="flex-1 overflow-y-auto stable-scroll px-8 py-6">
         {children}
       </div>
     </main>
@@ -401,26 +401,21 @@ function TabStrip({
   );
 }
 
-/** 列数点格 stepper：点第 n 格 = n 列（替代 range slider）。 */
-function ColStepper({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+/** 列数滑块：拖动设 1–5 列（轨/钮样式见 tokens.css 的 .range-cols）。 */
+function ColSlider({ value, onChange }: { value: number; onChange: (n: number) => void }) {
   return (
-    <div className="flex items-center gap-1.5" role="group" aria-label="列数">
-      {[1, 2, 3, 4, 5].map(n => (
-        <button
-          key={n}
-          aria-label={`${n} 列`}
-          aria-pressed={n === value}
-          onClick={() => onChange(n)}
-          className={cn(
-            'size-2.5 rounded-full border p-0 cursor-pointer transition-colors',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-            n <= value
-              ? 'border-transparent bg-muted-foreground/55'
-              : 'border-muted-foreground/35 bg-transparent hover:bg-muted-foreground/20',
-          )}
-        />
-      ))}
-      <span className="ml-1 font-mono text-xs tabular-nums text-muted-foreground/60 whitespace-nowrap select-none">
+    <div className="flex items-center gap-2.5">
+      <input
+        type="range"
+        min={1}
+        max={5}
+        step={1}
+        value={value}
+        onChange={e => onChange(Number(e.target.value))}
+        aria-label="列数"
+        className="range-cols w-20 md:w-24"
+      />
+      <span className="font-mono text-xs tabular-nums text-muted-foreground/60 whitespace-nowrap select-none">
         {value} 列
       </span>
     </div>
