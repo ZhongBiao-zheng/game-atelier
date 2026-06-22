@@ -131,9 +131,9 @@ def test_promo_skill_files_exist():
 
 
 def test_promo_skill_md_declares_default_n_one():
-    """SKILL.md 必须显式声明 n=1 默认，避免 character_workflow 旧 'n=4' 习惯漏过来。"""
+    """SKILL.md 必须显式声明默认单张出图，避免 character_workflow 旧 'n=4' 习惯漏过来。"""
     skill_md = (
         Path(__file__).resolve().parent.parent
         / "skills" / "promo" / "SKILL.md"
     ).read_text(encoding="utf-8")
-    assert "n=1" in skill_md
+    assert "默认单张出图" in skill_md

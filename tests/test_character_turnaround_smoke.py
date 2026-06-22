@@ -134,12 +134,12 @@ def test_turnaround_skill_files_exist():
 
 
 def test_turnaround_skill_md_declares_default_n_one_and_landscape_size():
-    """SKILL.md 必须显式声明 n=1 默认 + 1536x1024 横幅，是 turnaround 的关键工程约束。"""
+    """SKILL.md 必须显式声明默认单张出图 + 1536x1024 横幅，是 turnaround 的关键工程约束。"""
     skill_md = (
         Path(__file__).resolve().parent.parent
         / "skills" / "turnaround" / "SKILL.md"
     ).read_text(encoding="utf-8")
-    assert "n=1" in skill_md
+    assert "默认单张出图" in skill_md
     assert "1536" in skill_md and "1024" in skill_md
 
 
