@@ -100,6 +100,7 @@ export function CharacterGallery({
     fetch(`/api/jobs`)
       .then(r => r.json() as Promise<Job[]>)
       .then(all => setJobs(all.filter(j => j.character_id === characterId)))
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, [characterId, sseSignal, uploadSignal]);
 
