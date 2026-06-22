@@ -132,38 +132,7 @@
 }
 
 @layer utilities {
-  .bg-dots {
-    background-image: radial-gradient(
-      color-mix(in srgb, var(--foreground) 7%, transparent) 1px,
-      transparent 1.5px
-    );
-    background-size: 20px 20px;
-  }
-
-  /* 鼠标悬停波点发光 —— 仅亮点，背景不变色，mask 平滑衰减无硬边 */
-  .bg-dots-glow {
-    background-image: radial-gradient(
-      color-mix(in srgb, var(--foreground) 6%, transparent) 1px,
-      transparent 1.5px
-    );
-    background-size: 20px 20px;
-    -webkit-mask-image: radial-gradient(
-      circle 228px at var(--cx, -9999px) var(--cy, -9999px),
-      black 0%,
-      rgba(0, 0, 0, 0.84) 25%,
-      rgba(0, 0, 0, 0.50) 50%,
-      rgba(0, 0, 0, 0.16) 75%,
-      transparent 100%
-    );
-    mask-image: radial-gradient(
-      circle 228px at var(--cx, -9999px) var(--cy, -9999px),
-      black 0%,
-      rgba(0, 0, 0, 0.84) 25%,
-      rgba(0, 0, 0, 0.50) 50%,
-      rgba(0, 0, 0, 0.16) 75%,
-      transparent 100%
-    );
-  }
+  /* 首页波点已迁移到 canvas 组件 HomeDottedBackground.tsx（复刻 tapnow） */
 
   /* 导航 tab 选中态：冰晶玻璃质感 —— 高亮边缘 + 内部通透感 */
   .nav-tab-glass {
