@@ -292,3 +292,57 @@ def test_happyhorse_video_edit_drops_duration_and_requires_public_video(
             output_dir=tmp_path / "o",
             params={"reference_videos": [str(local)]}, poll_interval=0,
         )
+
+
+def test_dispatch_video_routes_custom_by_explicit_protocol(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib import keys as _keys
+    from character_workflow.lib import callers
+    from character_workflow.lib.callers import kling_video
+    _keys.add_key(_keys.KeySpec(
+        alias="cu", provider="custom", base_url="https://api.example.com/v1",
+        access_key="x", created_at="2026-06-23T00:00:00Z",
+        models=[_keys.ModelSpec(name="My", id="my-vid", modality="video", protocol="kling")],
+    ))
+    captured = {}
+
+    def fake(*, prompt, model, alias, output_dir, params=None, **kw):
+        captured["model"] = model
+        return ["/abs/v1.mp4"]
+
+    monkeypatch.setattr(kling_video, "render_video", fake)
+    out = callers.dispatch_video(
+        prompt="p", model="my-vid", alias="cu", output_dir=tmp_path, params={},
+    )
+    assert out == ["/abs/v1.mp4"]
+    assert captured["model"] == "my-vid"
+
+
+def test_dispatch_video_no_protocol_raises(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib import keys as _keys
+    from character_workflow.lib import callers
+    _keys.add_key(_keys.KeySpec(
+        alias="cu", provider="custom", base_url="https://api.example.com/v1",
+        access_key="x", created_at="2026-06-23T00:00:00Z",
+        models=[_keys.ModelSpec(name="Foo", id="foo-video-1", modality="video")],
+    ))
+    with pytest.raises(callers.WrongProviderError, match="未配置协议"):
+        callers.dispatch_video(
+            prompt="p", model="foo-video-1", alias="cu", output_dir=tmp_path, params={},
+        )
+
+
+def test_dispatch_video_unknown_protocol_raises(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib import keys as _keys
+    from character_workflow.lib import callers
+    _keys.add_key(_keys.KeySpec(
+        alias="cu", provider="custom", base_url="https://api.example.com/v1",
+        access_key="x", created_at="2026-06-23T00:00:00Z",
+        models=[_keys.ModelSpec(name="Z", id="z", modality="video", protocol="bogus")],
+    ))
+    with pytest.raises(callers.WrongProviderError, match="未知视频协议"):
+        callers.dispatch_video(
+            prompt="p", model="z", alias="cu", output_dir=tmp_path, params={},
+        )
