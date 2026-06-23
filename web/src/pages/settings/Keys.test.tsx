@@ -326,13 +326,15 @@ describe('KeyForm', () => {
     fireEvent.change(screen.getByLabelText('模型名称 2'), { target: { value: 'Sora 2' } });
     fireEvent.change(screen.getByLabelText('模型 ID 2'), { target: { value: 'sora-2' } });
     fireEvent.click(within(screen.getByLabelText('模型分类 2')).getByRole('button', { name: '视频' }));
+    // 视频模型必须选协议，否则保存被禁用
+    fireEvent.change(screen.getByLabelText('视频协议 2'), { target: { value: 'seedance' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.models).toEqual([
-      { name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image' },
-      { name: 'Sora 2', id: 'sora-2', modality: 'video' },
+      { name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image', protocol: null },
+      { name: 'Sora 2', id: 'sora-2', modality: 'video', protocol: 'seedance' },
     ]);
     expect(body.modalities).toEqual(['image', 'video']);
     expect(body.routing_scope).toBeUndefined();
@@ -381,8 +383,8 @@ describe('KeyForm', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.models).toEqual([
-      { name: '图片 5.0 Lite', id: 'doubao-seedream-5-0-260128', modality: 'image' },
-      { name: '图片 4.7', id: 'doubao-seedream-4-5-251128', modality: 'image' },
+      { name: '图片 5.0 Lite', id: 'doubao-seedream-5-0-260128', modality: 'image', protocol: null },
+      { name: '图片 4.7', id: 'doubao-seedream-4-5-251128', modality: 'image', protocol: null },
     ]);
   });
 });
