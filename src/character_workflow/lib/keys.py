@@ -104,7 +104,9 @@ def read_keys_db() -> KeysDB:
     except json.JSONDecodeError as e:
         raise KeysFileCorruptedError(f"{path}: {e}") from e
     _migrate_legacy_providers(raw)
-    return KeysDB.model_validate(raw)
+    db = KeysDB.model_validate(raw)
+    _backfill_video_protocols(db)
+    return db
 
 
 def _migrate_legacy_providers(raw: object) -> None:
@@ -116,6 +118,28 @@ def _migrate_legacy_providers(raw: object) -> None:
     for row in rows:
         if isinstance(row, dict) and row.get("provider") == "zhenzhen":
             row["provider"] = "custom"
+
+
+def _is_video_model(spec: "ModelSpec", key: "KeySpec") -> bool:
+    """与前端 web/src/api/keys.ts::modelModality 同义：模型级标注优先，
+    未标注按 key 级 modalities 兜底（仅声明 video 视为视频）。"""
+    if spec.modality:
+        return spec.modality == "video"
+    return "video" in key.modalities and "image" not in key.modalities
+
+
+def _backfill_video_protocols(db: KeysDB) -> None:
+    """读时内存回填：为可解析的视频模型补 protocol（不写盘，下次 write 才落）。
+
+    resolve_protocol 走 lazy import 避免与 callers 包的加载顺序耦合（沿用 callers 既有
+    lazy-import 习惯）；resolve 不命中的视频模型保持 None，由前端守卫拦截 / 用户显式选。
+    """
+    from character_workflow.lib.callers.video_registry import resolve_protocol
+
+    for key in db.keys:
+        for spec in key.models:
+            if spec.protocol is None and _is_video_model(spec, key):
+                spec.protocol = resolve_protocol(key.provider, key.base_url, spec.id)
 
 
 def write_keys_db(db: KeysDB) -> None:
