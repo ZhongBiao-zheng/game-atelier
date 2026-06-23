@@ -262,3 +262,13 @@ def test_keys_file_chmod_600_on_posix(isolated_data_root):
     ))
     mode = oct(data_root.keys_file().stat().st_mode & 0o777)
     assert mode == "0o600"
+
+
+def test_modelspec_protocol_field_roundtrips():
+    from character_workflow.lib.keys import ModelSpec
+    m = ModelSpec(name="可灵", id="kling-v2-6", modality="video", protocol="kling")
+    assert m.protocol == "kling"
+    # 缺省为 None（图片模型 / 旧数据）
+    assert ModelSpec(name="x", id="x").protocol is None
+    # 旧 JSON（无 protocol 键）仍可校验
+    assert ModelSpec.model_validate({"name": "a", "id": "a", "modality": "image"}).protocol is None

@@ -36,6 +36,9 @@ class ModelSpec(BaseModel):
     id: str
     # None = 未标注：消费端按 key 级 modalities 兜底（含 video 且不含 image → video）。
     modality: ModelModality | None = None
+    # 视频协议 id（seedance/kling/dashscope）；图片模型与旧数据为 None。
+    # 读时由 _backfill_video_protocols 对可解析的视频模型回填（见 read_keys_db）。
+    protocol: str | None = None
 
 
 class KeySpec(BaseModel):
