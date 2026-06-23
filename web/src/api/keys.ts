@@ -88,10 +88,12 @@ export interface RemoteModel {
   id: string;
   name: string;
   modality: ModelModality | null;
+  protocol: string | null;
 }
 
 export async function previewModels(payload: {
   alias?: string | null;
+  provider?: string | null;
   base_url?: string | null;
   access_key?: string | null;
 }): Promise<{ models: RemoteModel[] }> {

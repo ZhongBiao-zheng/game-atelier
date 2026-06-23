@@ -775,6 +775,7 @@ def delete_key_endpoint(alias: str) -> None:
 
 class _ModelsPreviewPayload(BaseModel):
     alias: str | None = None
+    provider: str | None = None
     base_url: str | None = None
     access_key: str | None = None
 
@@ -818,12 +819,14 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
 
     base_url = (payload.base_url or "").strip()
     access_key = (payload.access_key or "").strip()
+    preview_provider: str = payload.provider or "custom"
     if payload.alias:
         stored = keys.find_by_alias(payload.alias)
         if stored is None:
             raise HTTPException(404, f"alias '{payload.alias}' not found")
         base_url = base_url or (stored.base_url or "")
         access_key = access_key or stored.access_key
+        preview_provider = stored.provider or payload.provider or "custom"
     if not base_url:
         raise HTTPException(422, "缺少 API 请求地址（base_url）")
 
@@ -845,14 +848,21 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
     rows = body.get("data") if isinstance(body, dict) else body
     if not isinstance(rows, list):
         raise HTTPException(502, "上游响应缺少模型列表（data）")
+
+    from character_workflow.lib.callers.video_registry import resolve_protocol
+
     models = []
     for item in rows:
         if not isinstance(item, dict) or not item.get("id"):
             continue
+        mid = str(item["id"])
+        modality = _guess_model_modality(item)
         models.append({
-            "id": str(item["id"]),
-            "name": str(item.get("name") or item["id"]),
-            "modality": _guess_model_modality(item),
+            "id": mid,
+            "name": str(item.get("name") or mid),
+            "modality": modality,
+            # 视频模型附协议 guess（resolve 不中 → None，KeyForm 强制用户选）。
+            "protocol": resolve_protocol(preview_provider, base_url, mid) if modality == "video" else None,
         })
     return {"models": models}
 
