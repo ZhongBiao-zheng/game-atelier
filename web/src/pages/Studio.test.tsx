@@ -1111,7 +1111,7 @@ describe('Studio video submission', () => {
                 secret_key: null,
                 capabilities: [],
                 modalities: ['video'],
-                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128' }],
+                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128', protocol: 'seedance' }],
                 notes: '',
                 created_at: '2026-05-25T00:00:00Z',
                 is_default: false,
@@ -1176,7 +1176,7 @@ describe('Studio video submission', () => {
                 secret_key: null,
                 capabilities: [],
                 modalities: ['video'],
-                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128' }],
+                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128', protocol: 'seedance' }],
                 notes: '',
                 created_at: '2026-05-25T00:00:00Z',
                 is_default: true,
@@ -1249,7 +1249,7 @@ describe('Studio video submission', () => {
                 secret_key: null,
                 capabilities: [],
                 modalities: ['video'],
-                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128' }],
+                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128', protocol: 'seedance' }],
                 notes: '',
                 created_at: '2026-05-25T00:00:00Z',
                 is_default: true,
@@ -1314,7 +1314,7 @@ describe('Studio video submission', () => {
               secret_key: null,
               capabilities: [],
               modalities: ['video'],
-              models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128' }],
+              models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128', protocol: 'seedance' }],
               notes: '',
               created_at: '2026-05-25T00:00:00Z',
               is_default: true,
@@ -1387,6 +1387,53 @@ describe('Studio video submission', () => {
     });
     // 没有任何文件需要重新上传 —— 参考资产复用服务器路径。
     expect(fetchMock).not.toHaveBeenCalledWith('/api/uploads', expect.any(Object));
+  });
+
+  it('视频模型无协议时阻止提交并提示', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'mine',
+            keys: [
+              {
+                alias: 'mine',
+                provider: 'custom',
+                access_key: 'sk...key',
+                secret_key: null,
+                capabilities: [],
+                modalities: ['video'],
+                // custom 视频模型未指定协议 → /api/keys 回填不命中，protocol 留空。
+                models: [{ name: '我的视频模型', id: 'mystery-video', protocol: null }],
+                notes: '',
+                created_at: '2026-05-25T00:00:00Z',
+                is_default: true,
+              },
+            ],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+
+    // 切到视频生成模式。
+    fireEvent.click(await screen.findByRole('button', { name: '选择生成模式' }));
+    fireEvent.click(screen.getByRole('option', { name: /视频生成/ }));
+
+    const textarea = screen.getByLabelText('生图 prompt');
+    typePrompt(textarea, '一段电影质感的镜头');
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    // 错误文案出现，且从未打到出图端点。
+    expect(await screen.findByText(/未配置协议/)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object));
   });
 });
 

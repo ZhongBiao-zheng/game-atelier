@@ -120,7 +120,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [referenceAudios, setReferenceAudios] = useState<File[]>([]);
   // 首尾帧模式的双槽（与 referenceImages 分离：两个槽各自独立可空，仅尾帧也合法）。
   const [videoFrames, setVideoFrames] = useState<FrameSlots>({ first: null, last: null });
-  const videoCaps = videoControlCaps(model);
+  const selectedModelObj = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
+  const videoCaps = videoControlCaps(model, selectedModelObj?.protocol);
   // 切到视频模式时，若当前 key 没有视频模型，自动选中首个带视频模型的 key —— 让 videoCaps 立即正确（否则退化成 STANDARD_CAPS）。
   useEffect(() => {
     if (kind !== 'video' || keys.length === 0) return;
@@ -138,7 +139,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   // 切换视频模型族时把超出 caps 的选择拉回合法值（如 seedance 21:9 → kling 没有；kling 档位 ↔ seedance 无档位）。
   useEffect(() => {
     if (kind !== 'video') return;
-    const caps = videoControlCaps(model);
+    const selModel = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
+    const caps = videoControlCaps(model, selModel?.protocol);
     if (!caps.modes.includes(videoMode)) setVideoMode(caps.modes[0]);
     if (caps.ratios.length > 0 && !caps.ratios.includes(videoRatio)) setVideoRatio(caps.ratios[0]);
     if (caps.durations.length > 0 && !caps.durations.includes(duration)) setDuration(caps.durations[0]);
@@ -406,7 +408,18 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       ?? model;
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
-    const effectiveCaps = videoControlCaps(effectiveModel);
+    // 诚实守卫：视频模型无可解析协议 = 后端 dispatch_video 必报错，前端直接拦截，不沉到后端 FAILED。
+    // 命名 provider 的视频模型由 /api/keys 读时回填 protocol，能过；只拦用户没指定协议的 custom 视频模型。
+    if (!selectedModel?.protocol) {
+      const msg = '该视频模型未配置协议，请到 设置 → 供应商 里为它选择视频协议';
+      if (compact) setCompactError(msg);
+      else setRounds((rs) => [
+        { kind: 'failed', submittedAt: new Date().toISOString(), reason: msg },
+        ...rs,
+      ]);
+      return;
+    }
+    const effectiveCaps = videoControlCaps(effectiveModel, selectedModel.protocol);
 
     setPending(true);
     if (compact) setCompactError(null);
