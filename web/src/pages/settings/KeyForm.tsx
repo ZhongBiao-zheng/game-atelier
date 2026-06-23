@@ -20,7 +20,7 @@ interface ProviderPreset {
 const PROVIDER_PRESETS: ProviderPreset[] = [
   { value: 'openai', label: 'OpenAI', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://platform.openai.com', docsUrl: 'https://platform.openai.com/docs', apiKeyUrl: 'https://platform.openai.com/api-keys', defaultBaseUrl: 'https://api.openai.com/v1', defaultModels: [{ name: 'GPT Image 1', id: 'gpt-image-1' }] },
   { value: 'seedream', label: '火山引擎', kind: 'official', modalities: ['image'], homepageUrl: 'https://www.volcengine.com', docsUrl: 'https://www.volcengine.com/docs/82379/1399008', apiKeyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModels: [{ name: '图片 5.0', id: 'doubao-seedream-5-0-260128' }] },
-  { value: 'tokendance', label: '词元跳动', kind: 'official', modalities: ['image', 'video'], homepageUrl: 'https://tokendance.space', docsUrl: 'https://tokendance.space/docs/quickstart', apiKeyUrl: 'https://tokendance.space/keys', defaultBaseUrl: 'https://tokendance.space/gateway/v1', defaultModels: [{ name: 'Seedream 5.0 Lite', id: 'seedream-5.0-lite', modality: 'image' }, { name: 'Seedance 2.0', id: 'seedance-2.0', modality: 'video', protocol: 'seedance' }] },
+  { value: 'tokendance', label: '词元跳动', kind: 'official', modalities: ['image', 'video'], homepageUrl: 'https://tokendance.space', docsUrl: 'https://tokendance.space/docs/quickstart', apiKeyUrl: 'https://tokendance.space/keys', defaultBaseUrl: 'https://tokendance.space/gateway/v1', defaultModels: [{ name: 'Seedream 5.0 Lite', id: 'seedream-5.0-lite', modality: 'image' }, { name: 'Seedance 2.0', id: 'seedance-2.0', modality: 'video' }] },
   { value: 'custom', label: '自定义', kind: 'custom', modalities: ['image'], defaultBaseUrl: '', defaultModels: [{ name: '', id: '' }] },
 ];
 
@@ -29,13 +29,6 @@ const KIND_LABELS: Record<ProviderKind, string> = {
   third_party: '第三方',
   custom: '自定义',
 };
-
-// 与后端 callers/video_registry.py::VIDEO_ADAPTERS 的 protocol id 对齐（双端契约）。
-const VIDEO_PROTOCOLS: { id: string; label: string }[] = [
-  { id: 'seedance', label: 'Seedance（火山 / Ark）' },
-  { id: 'kling', label: '可灵 Kling' },
-  { id: 'dashscope', label: 'DashScope（happyhorse）' },
-];
 
 const providerByValue = (value: string) =>
   PROVIDER_PRESETS.find((preset) => preset.value === value) ?? PROVIDER_PRESETS[0];
@@ -130,7 +123,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     const keptIds = new Set(kept.map((m) => m.id.trim()));
     const added = fetched
       .filter((m) => fetchedChecked.has(m.id) && !keptIds.has(m.id))
-      .map((m) => ({ name: m.name, id: m.id, modality: m.modality ?? 'image' as ModelModality, protocol: m.protocol ?? null }));
+      .map((m) => ({ name: m.name, id: m.id, modality: m.modality ?? 'image' as ModelModality }));
     const next = [...kept, ...added];
     setModels(next.length ? next : [{ name: '', id: '' }]);
     setFetched(null);
@@ -151,7 +144,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     setError(null);
     try {
       const cleanModels = models
-        .map((model) => ({ name: model.name.trim(), id: model.id.trim(), modality: model.modality ?? 'image' as ModelModality, protocol: model.protocol ?? null }))
+        .map((model) => ({ name: model.name.trim(), id: model.id.trim(), modality: model.modality ?? 'image' as ModelModality }))
         .filter((model) => model.name && model.id);
       // key 级 modalities 由模型标注派生（key 级仅作摘要/兜底），preset 的 llm 等附加能力保留。
       const derivedModalities = Array.from(new Set([
@@ -198,14 +191,10 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     }
   };
 
-  const videoModelsMissingProtocol = models.some(
-    (m) => m.id.trim() && (m.modality ?? 'image') === 'video' && !m.protocol,
-  );
   const canSubmit = Boolean(
     (editing || accessKey.trim())
     && (!usesNamedAlias(provider) || alias.trim())
     && (provider !== 'custom' || baseUrl.trim())
-    && !videoModelsMissingProtocol
     && !saving,
   );
 
@@ -496,16 +485,15 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                   </div>
                 </div>
                 {fetchError && <div className="mb-2 text-sm text-destructive">{fetchError}</div>}
-                <div className="mb-2 grid grid-cols-[1fr_1fr_auto_auto_auto] gap-2 text-xs text-muted-foreground">
+                <div className="mb-2 grid grid-cols-[1fr_1fr_auto_auto] gap-2 text-xs text-muted-foreground">
                   <span>模型别名</span>
                   <span>模型 ID</span>
                   <span>分类</span>
-                  <span>视频协议</span>
                   <span className="sr-only">操作</span>
                 </div>
                 <div className="space-y-2">
                   {models.map((model, index) => (
-                    <div key={index} className="grid grid-cols-[1fr_1fr_auto_auto_auto] items-center gap-2">
+                    <div key={index} className="grid grid-cols-[1fr_1fr_auto_auto] items-center gap-2">
                       <label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</label>
                       <input
                         id={`key-model-name-${index}`}
@@ -546,19 +534,6 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                           );
                         })}
                       </div>
-                      {(model.modality ?? 'image') === 'video' ? (
-                        <select
-                          aria-label={`视频协议 ${index + 1}`}
-                          value={model.protocol ?? ''}
-                          onChange={(e) => setModels(models.map((m, i) => i === index ? { ...m, protocol: e.target.value || null } : m))}
-                          className={`${fieldClass} max-w-[10rem]`}
-                        >
-                          <option value="">选择协议…</option>
-                          {VIDEO_PROTOCOLS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                        </select>
-                      ) : (
-                        <span aria-hidden />
-                      )}
                       <button
                         type="button"
                         onClick={() => setModels(models.filter((_, i) => i !== index))}

@@ -327,7 +327,7 @@ def test_dispatch_video_no_protocol_raises(tmp_path, monkeypatch):
         access_key="x", created_at="2026-06-23T00:00:00Z",
         models=[_keys.ModelSpec(name="Foo", id="foo-video-1", modality="video")],
     ))
-    with pytest.raises(callers.WrongProviderError, match="未配置协议"):
+    with pytest.raises(callers.WrongProviderError, match="无法识别"):
         callers.dispatch_video(
             prompt="p", model="foo-video-1", alias="cu", output_dir=tmp_path, params={},
         )

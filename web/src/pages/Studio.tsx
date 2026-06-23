@@ -408,18 +408,8 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       ?? model;
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
-    // 诚实守卫：视频模型无可解析协议 = 后端 dispatch_video 必报错，前端直接拦截，不沉到后端 FAILED。
-    // 命名 provider 的视频模型由 /api/keys 读时回填 protocol，能过；只拦用户没指定协议的 custom 视频模型。
-    if (!selectedModel?.protocol) {
-      const msg = '该视频模型未配置协议，请到 设置 → 供应商 里为它选择视频协议';
-      if (compact) setCompactError(msg);
-      else setRounds((rs) => [
-        { kind: 'failed', submittedAt: new Date().toISOString(), reason: msg },
-        ...rs,
-      ]);
-      return;
-    }
-    const effectiveCaps = videoControlCaps(effectiveModel, selectedModel.protocol);
+    // 协议由后端按模型 id/供应商自动判定（read_keys_db 回填）；前端只在已知时用它精化 caps。
+    const effectiveCaps = videoControlCaps(effectiveModel, selectedModel?.protocol);
 
     setPending(true);
     if (compact) setCompactError(null);
