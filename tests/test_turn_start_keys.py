@@ -26,7 +26,7 @@ def test_turn_start_includes_available_keys_without_secrets(isolated_data_root):
         assert "secret_key" not in k
     assert out["preferred_alias"] == "lov"
     assert out["available_keys"][0]["models"] == [
-        {"name": "gpt_image_2", "id": "gpt_image_2", "modality": None}
+        {"name": "gpt_image_2", "id": "gpt_image_2", "modality": None, "protocol": None}
     ]
 
 
