@@ -114,18 +114,21 @@ def render(
                 break
         return paths[:requested]
 
-    is_seedream = key.provider == "seedream"
+    family = image_family(model)
+    # custom 走 family 判定补诚实；命名 provider(openai/seedream/tokendance/HK) 分支不动。
+    custom_img = key.provider == "custom" and family in ("gpt-image", "nano-banana")
+    is_seedream = key.provider == "seedream" or (key.provider == "custom" and family == "seedream")
     is_hk_image = is_hk and _hk_image_model(model)
-    # quality 仅对支持它的模型发送：OpenAI / OpenAI-HK 的 gpt-image・nano-banana；
+    # quality 仅对支持它的模型发送：OpenAI / OpenAI-HK 的 gpt-image・nano-banana / custom 同族；
     # seedream 没有 quality 概念，发了可能被拒。
-    wants_quality = key.provider == "openai" or is_hk_image
+    wants_quality = key.provider == "openai" or is_hk_image or custom_img
     quality = _quality_param(kwargs) if wants_quality else None
     ref_paths = _collect_ref_paths(kwargs, key.provider, model)
 
-    # OpenAI-HK 图生图：参考图必须走同步 /images/edits（multipart）。
-    # 不用 generations+image（那是 Ark/seedream 的图生图路子，HK gpt-image 不支持），
-    # 更绝不加 ?async=true —— HK 对 gpt-image-2 的 async 组合返回 404。
-    if is_hk_image and ref_paths:
+    # 官方图生图：gpt-image/nano-banana 族走同步 /images/edits（multipart）。
+    # HK 一直如此；custom 同族现在也走官方 edits（而非 generations 的 image= 私有字段）。
+    # 不用 generations+image（那是 Ark/seedream 的图生图路子），更绝不加 ?async=true。
+    if (is_hk_image or custom_img) and ref_paths:
         paths: list[str] = []
         for _ in range(requested):
             data = _post_multipart(
@@ -158,8 +161,8 @@ def render(
 
     data = _post_json(_image_url(base_url), key.access_key, _gen_payload(requested), timeout=timeout)
     paths = _write_outputs(data, out_dir)
-    # seedream 与 HK 图像模型：单次可能只回 1 张，循环补足到 requested 张。
-    if is_seedream or is_hk_image:
+    # seedream / gpt-image・nano-banana（含 custom 同族）：单次可能只回 1 张，循环补足。
+    if is_seedream or is_hk_image or custom_img:
         while len(paths) < requested:
             data = _post_json(_image_url(base_url), key.access_key, _gen_payload(1), timeout=timeout)
             paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
@@ -243,6 +246,18 @@ def _image_generation_payload(
         payload["sequential_image_generation"] = "auto"
         payload["sequential_image_generation_options"] = {"max_images": n}
     return {k: v for k, v in payload.items() if v is not None}
+
+
+def image_family(model: str) -> str:
+    """模型族判定（镜像前端 imageControlCaps）：决定 quality/官方 edits/seedream 参数。"""
+    m = (model or "").lower()
+    if m.startswith("gpt-image"):
+        return "gpt-image"
+    if m.startswith("nano-banana"):
+        return "nano-banana"
+    if m.startswith("seedream") or m.startswith("seededit"):
+        return "seedream"
+    return "standard"
 
 
 def _hk_image_model(model: str) -> bool:

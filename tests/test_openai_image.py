@@ -1059,3 +1059,66 @@ def test_download_image_url_falls_through_to_streaming_after_non_streaming_failu
     assert result == image_bytes
     assert calls[0] is False
     assert calls[1] is True
+
+
+def test_image_family_classifies_by_model_prefix():
+    from character_workflow.lib.callers.openai_image import image_family
+    assert image_family("gpt-image-2") == "gpt-image"
+    assert image_family("nano-banana-hd") == "nano-banana"
+    assert image_family("seedream-5.0-lite") == "seedream"
+    assert image_family("seededit-3") == "seedream"
+    assert image_family("foo-image-1") == "standard"
+
+
+def test_custom_gpt_image_sends_quality(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib import keys as _keys
+    from character_workflow.lib.callers import openai_image
+    _keys.add_key(_keys.KeySpec(
+        alias="cu", provider="custom", base_url="https://api.example.com/v1",
+        access_key="x", created_at="2026-06-23T00:00:00Z",
+    ))
+    posted = {}
+    monkeypatch.setattr(openai_image, "_post_json",
+                        lambda url, key, payload, *, timeout: (posted.update(url=url, body=payload),
+                                                               {"data": [{"b64_json": "aGk="}]})[1])
+    openai_image.render(prompt="p", model="gpt-image-2", alias="cu",
+                        output_dir=tmp_path / "o", quality="high")
+    assert posted["url"].endswith("/images/generations")
+    assert posted["body"]["quality"] == "high"  # custom gpt-image 也发 quality
+
+
+def test_custom_gpt_image_reference_uses_official_edits(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib import keys as _keys
+    from character_workflow.lib.callers import openai_image
+    _keys.add_key(_keys.KeySpec(
+        alias="cu", provider="custom", base_url="https://api.example.com/v1",
+        access_key="x", created_at="2026-06-23T00:00:00Z",
+    ))
+    ref = tmp_path / "r.png"
+    ref.write_bytes(b"png")
+    seen = {}
+    monkeypatch.setattr(openai_image, "_post_multipart",
+                        lambda url, key, *, fields, files, timeout: (seen.update(url=url),
+                                                                     {"data": [{"b64_json": "aGk="}]})[1])
+    openai_image.render(prompt="p", model="gpt-image-2", alias="cu",
+                        output_dir=tmp_path / "o", reference_images=[str(ref)])
+    assert seen["url"].endswith("/images/edits")  # custom gpt-image 图生图走官方 multipart edits
+
+
+def test_custom_standard_model_no_quality(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib import keys as _keys
+    from character_workflow.lib.callers import openai_image
+    _keys.add_key(_keys.KeySpec(
+        alias="cu", provider="custom", base_url="https://api.example.com/v1",
+        access_key="x", created_at="2026-06-23T00:00:00Z",
+    ))
+    posted = {}
+    monkeypatch.setattr(openai_image, "_post_json",
+                        lambda url, key, payload, *, timeout: (posted.update(body=payload),
+                                                               {"data": [{"b64_json": "aGk="}]})[1])
+    openai_image.render(prompt="p", model="foo-image-1", alias="cu",
+                        output_dir=tmp_path / "o", quality="high")
+    assert "quality" not in posted["body"]  # standard 族不发 quality
