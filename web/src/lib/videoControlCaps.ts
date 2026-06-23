@@ -155,8 +155,14 @@ function klingCaps(id: string): VideoControlCaps {
   };
 }
 
-export function videoControlCaps(modelId?: string | null): VideoControlCaps {
+export function videoControlCaps(modelId?: string | null, protocol?: string | null): VideoControlCaps {
   const id = (modelId ?? '').toLowerCase();
+  const p = protocol ?? '';
+  // 显式协议优先：custom 模型 id 不含族关键词也能定族；id 仍用于族内分代（seedance 2.0 vs 1.5pro 等）。
+  if (p === 'seedance') return seedanceCaps(id);
+  if (p === 'dashscope') return happyhorseCaps(id);
+  if (p === 'kling') return klingCaps(id);
+  // 无协议 → 退回按 modelId 子串识别（命名 provider 历史调用兼容）。
   if (id.includes('seedance')) return seedanceCaps(id);
   if (id.includes('happyhorse')) return happyhorseCaps(id);
   if (id.startsWith('kling')) return klingCaps(id);
