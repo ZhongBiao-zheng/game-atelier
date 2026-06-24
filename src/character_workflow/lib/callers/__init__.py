@@ -69,6 +69,15 @@ def dispatch(
     return fn(prompt=prompt, model=model, alias=alias, **kwargs)
 
 
+def _effective_protocol(key: _keys.KeySpec, model: str) -> str | None:
+    """优先用模型已存 protocol（迁移回填 / 用户显式选），未注册模型回退到同一启发式。"""
+    from .video_registry import resolve_protocol
+    spec = next((m for m in key.models if m.id == model), None)
+    if spec and spec.protocol:
+        return spec.protocol
+    return resolve_protocol(key.provider, key.base_url, model)
+
+
 def dispatch_video(
     *,
     prompt: str,
@@ -78,50 +87,32 @@ def dispatch_video(
     params: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> list[str]:
-    """视频派发 —— 按 provider 路由到对应视频 caller。
+    """视频派发 —— 按模型协议从注册表路由到对应视频 caller。
 
-    seedance = 火山 Ark 直连；tokendance = 词元跳动网关（seedance 系模型复用
-    volcengine_video，仅任务 URL 不同）；kling* 模型挂在 OpenAI-HK 聚合 key
-    （provider=custom）下，按「模型前缀 + HK base_url」路由到 kling 异步任务通道。
-    veo/pixverse 等留作后续家族。不复用 dispatch() 的图片 provider 分支（那套是同步图片通道）。
+    协议来源：模型已存 protocol（read_keys_db 读时回填，或用户在 KeyForm 显式选）
+    优先；未注册到 key.models 的模型回退 resolve_protocol 计算（同一启发式）。
+    无可解析协议 → 诚实报错指向修复路径，绝不再沉到 caller 才崩。
 
     Returns list[str] of generated .mp4 paths.
     """
+    from .video_registry import VIDEO_ADAPTERS
+
     key = _keys.find_by_alias(alias)
     if key is None:
         raise NoSuchKeyError(alias)
-    if key.provider == "seedance":
-        from . import volcengine_video
-        return volcengine_video.render_video(
-            prompt=prompt, model=model, alias=alias,
-            output_dir=output_dir, params=params, **kwargs,
-        )
-    if key.provider == "tokendance":
-        # 词元跳动网关的 Seedance 协议与 Ark 直连同构（content[] + role），仅 URL 不同
-        # （volcengine_video._tasks_url 按 base 判别）；happyhorse 走 DashScope 协议转发
-        # （happyhorse_video._api_root 同样按 base 判别）；vidu 等其余视频协议未接通。
-        if "seedance" in (model or "").lower():
-            from . import volcengine_video
-            return volcengine_video.render_video(
-                prompt=prompt, model=model, alias=alias,
-                output_dir=output_dir, params=params, **kwargs,
-            )
-        if "happyhorse" in (model or "").lower():
-            from . import happyhorse_video
-            return happyhorse_video.render_video(
-                prompt=prompt, model=model, alias=alias,
-                output_dir=output_dir, params=params, **kwargs,
-            )
+    protocol = _effective_protocol(key, model)
+    if not protocol:
         raise WrongProviderError(
-            f"词元跳动视频暂只支持 seedance / happyhorse 系模型，收到 {model!r}"
+            f"无法识别视频模型 {model!r} 的接口协议（支持 seedance / kling / dashscope 系），"
+            "请确认模型 id 与供应商配置"
         )
-    if (model or "").lower().startswith("kling") and _keys.is_openai_hk(key.base_url):
-        from . import kling_video
-        return kling_video.render_video(
-            prompt=prompt, model=model, alias=alias,
-            output_dir=output_dir, params=params, **kwargs,
-        )
-    raise WrongProviderError(f"video provider not wired: {key.provider!r}")
+    adapter = VIDEO_ADAPTERS.get(protocol)
+    if adapter is None:
+        raise WrongProviderError(f"未知视频协议 {protocol!r}（模型 {model!r}）")
+    return adapter.render(
+        prompt=prompt, model=model, alias=alias,
+        output_dir=output_dir, params=params, **kwargs,
+    )
 
 
 __all__ = [

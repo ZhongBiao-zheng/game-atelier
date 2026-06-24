@@ -262,3 +262,46 @@ def test_keys_file_chmod_600_on_posix(isolated_data_root):
     ))
     mode = oct(data_root.keys_file().stat().st_mode & 0o777)
     assert mode == "0o600"
+
+
+def test_modelspec_protocol_field_roundtrips():
+    from character_workflow.lib.keys import ModelSpec
+    m = ModelSpec(name="可灵", id="kling-v2-6", modality="video", protocol="kling")
+    assert m.protocol == "kling"
+    # 缺省为 None（图片模型 / 旧数据）
+    assert ModelSpec(name="x", id="x").protocol is None
+    # 旧 JSON（无 protocol 键）仍可校验
+    assert ModelSpec.model_validate({"name": "a", "id": "a", "modality": "image"}).protocol is None
+
+
+def test_read_keys_db_backfills_video_protocol(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib import keys
+    keys.add_key(keys.KeySpec(
+        alias="td", provider="tokendance",
+        base_url="https://tokendance.space/gateway/v1",
+        access_key="x", created_at="2026-06-23T00:00:00Z",
+        models=[
+            keys.ModelSpec(name="Seedance", id="doubao-seedance-2-0", modality="video"),
+            keys.ModelSpec(name="HappyHorse", id="happyhorse-1.0-t2v", modality="video"),
+            keys.ModelSpec(name="Seedream", id="seedream-5.0-lite", modality="image"),
+        ],
+    ))
+    db = keys.read_keys_db()
+    by_id = {m.id: m for m in db.keys[0].models}
+    assert by_id["doubao-seedance-2-0"].protocol == "seedance"
+    assert by_id["happyhorse-1.0-t2v"].protocol == "dashscope"
+    # 图片模型不回填
+    assert by_id["seedream-5.0-lite"].protocol is None
+
+
+def test_backfill_skips_unresolvable_custom_video(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib import keys
+    keys.add_key(keys.KeySpec(
+        alias="cu", provider="custom", base_url="https://api.example.com/v1",
+        access_key="x", created_at="2026-06-23T00:00:00Z",
+        models=[keys.ModelSpec(name="Foo", id="foo-video-1", modality="video")],
+    ))
+    db = keys.read_keys_db()
+    assert db.keys[0].models[0].protocol is None  # 无法解析 → 待用户显式选

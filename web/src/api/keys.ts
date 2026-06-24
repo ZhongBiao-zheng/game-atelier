@@ -37,6 +37,8 @@ export interface KeyModel {
   id: string;
   /** 模型级图片/视频分类；缺省时按 key 级 modalities 兜底（见 modelModality）。 */
   modality?: ModelModality | null;
+  /** 视频协议 id（seedance/kling/dashscope）；图片模型 / 不可解析时 null。 */
+  protocol?: string | null;
 }
 
 /** 模型分类的统一判定：模型级标注优先，未标注按 key 级 modalities 兜底
@@ -88,10 +90,12 @@ export interface RemoteModel {
   id: string;
   name: string;
   modality: ModelModality | null;
+  protocol: string | null;
 }
 
 export async function previewModels(payload: {
   alias?: string | null;
+  provider?: string | null;
   base_url?: string | null;
   access_key?: string | null;
 }): Promise<{ models: RemoteModel[] }> {

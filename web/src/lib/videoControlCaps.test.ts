@@ -84,4 +84,16 @@ describe('videoControlCaps', () => {
     expect(videoControlCaps(undefined).family).toBe('standard');
     expect(videoControlCaps(null).family).toBe('standard');
   });
+
+  it('protocol 显式驱动 family（custom 模型 id 不含族关键词也能定族）', () => {
+    expect(videoControlCaps('foo-1', 'seedance').family).toBe('seedance');
+    expect(videoControlCaps('foo-1', 'dashscope').family).toBe('happyhorse');
+    expect(videoControlCaps('foo-1', 'kling').family).toBe('kling');
+  });
+
+  it('无 protocol 时退回按 modelId 子串识别（命名 provider / 历史调用）', () => {
+    expect(videoControlCaps('seedance-2.0').family).toBe('seedance');
+    expect(videoControlCaps('foo-1').family).toBe('standard');
+    expect(videoControlCaps('foo-1', null).family).toBe('standard');
+  });
 });

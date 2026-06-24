@@ -97,6 +97,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
       const keyChanged = accessKey.trim() && accessKey !== initial?.access_key;
       const { models: remote } = await previewModels({
         alias: editing ? initial?.alias ?? null : null,
+        provider: provider || null,
         base_url: fetchModelsBaseUrl || null,
         access_key: !editing || keyChanged ? accessKey.trim() || null : null,
       });

@@ -1111,7 +1111,7 @@ describe('Studio video submission', () => {
                 secret_key: null,
                 capabilities: [],
                 modalities: ['video'],
-                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128' }],
+                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128', protocol: 'seedance' }],
                 notes: '',
                 created_at: '2026-05-25T00:00:00Z',
                 is_default: false,
@@ -1176,7 +1176,7 @@ describe('Studio video submission', () => {
                 secret_key: null,
                 capabilities: [],
                 modalities: ['video'],
-                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128' }],
+                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128', protocol: 'seedance' }],
                 notes: '',
                 created_at: '2026-05-25T00:00:00Z',
                 is_default: true,
@@ -1230,7 +1230,7 @@ describe('Studio video submission', () => {
     expect(body.params.frame_mode).toBe('first');
   });
 
-  it('submits a last-frame-only video job → frame_mode last（无首帧门控）', async () => {
+  it('blocks last-frame-only submission for Seedance（尾帧必须配首帧）', async () => {
     if (!URL.createObjectURL) {
       (URL as any).createObjectURL = () => 'blob:stub';
       (URL as any).revokeObjectURL = () => {};
@@ -1249,7 +1249,7 @@ describe('Studio video submission', () => {
                 secret_key: null,
                 capabilities: [],
                 modalities: ['video'],
-                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128' }],
+                models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128', protocol: 'seedance' }],
                 notes: '',
                 created_at: '2026-05-25T00:00:00Z',
                 is_default: true,
@@ -1283,20 +1283,21 @@ describe('Studio video submission', () => {
     fireEvent.click(await screen.findByRole('button', { name: '选择生成模式' }));
     fireEvent.click(screen.getByRole('option', { name: /视频生成/ }));
 
-    // 直接传尾帧（首帧留空）—— 槽位无门控。
+    // 只填尾帧（首帧留空）—— Seedance 不支持，应被客户端拦下：提示出现 + 提交禁用 + 不发出图请求。
     const lastLabel = await screen.findByLabelText('上传尾帧');
     const inputId = lastLabel.getAttribute('for')!;
     const lastInput = document.getElementById(inputId) as HTMLInputElement;
     fireEvent.change(lastInput, { target: { files: [new File(['y'], 'last.png', { type: 'image/png' })] } });
 
     typePrompt(screen.getByLabelText('生图 prompt'), '收束到这一帧');
-    fireEvent.click(screen.getByLabelText('提交生成'));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
-    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
-    const body = JSON.parse(String(studioCall![1]!.body));
-    expect(body.params.reference_images).toEqual(['/uploads/ref-last.png']);
-    expect(body.params.frame_mode).toBe('last');
+    expect(await screen.findByTestId('frame-block-hint')).toBeInTheDocument();
+    const submitBtn = screen.getByLabelText('提交生成') as HTMLButtonElement;
+    expect(submitBtn).toBeDisabled();
+
+    fireEvent.click(submitBtn);
+    await Promise.resolve();
+    expect(fetchMock).not.toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object));
   });
 
   it('regenerates a video job with the full original params, not the current form state', async () => {
@@ -1314,7 +1315,7 @@ describe('Studio video submission', () => {
               secret_key: null,
               capabilities: [],
               modalities: ['video'],
-              models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128' }],
+              models: [{ name: 'Seedance 2.0 Fast', id: 'doubao-seedance-2-0-fast-260128', protocol: 'seedance' }],
               notes: '',
               created_at: '2026-05-25T00:00:00Z',
               is_default: true,

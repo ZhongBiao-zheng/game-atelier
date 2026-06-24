@@ -127,8 +127,8 @@ def test_create_key_persists_named_models(client):
 
     row = client.get("/api/keys").json()["keys"][0]
     assert row["models"] == [
-        {"name": "图片 5.0 Lite", "id": "doubao-seedream-5-0-260128", "modality": None},
-        {"name": "图片 4.7", "id": "doubao-seedream-4-5-251128", "modality": None},
+        {"name": "图片 5.0 Lite", "id": "doubao-seedream-5-0-260128", "modality": None, "protocol": None},
+        {"name": "图片 4.7", "id": "doubao-seedream-4-5-251128", "modality": None, "protocol": None},
     ]
 
 
@@ -164,5 +164,40 @@ def test_delete_key(client):
     r = client.delete("/api/keys/lov")
     assert r.status_code == 204
     assert client.get("/api/keys").json()["keys"] == []
+
+
+def test_models_preview_attaches_video_protocol_guess(tmp_path, monkeypatch):
+    """视频模型附带 protocol guess；图片模型返回 None。"""
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    client = TestClient(build_app())
+
+    upstream_models = [
+        {"id": "doubao-seedance-2-0"},
+        {"id": "happyhorse-1.0-t2v"},
+        {"id": "gpt-image-2"},
+    ]
+
+    import unittest.mock as mock
+
+    fake_resp = mock.MagicMock()
+    fake_resp.status_code = 200
+    fake_resp.json.return_value = {"data": upstream_models}
+
+    with mock.patch("requests.get", return_value=fake_resp):
+        r = client.post(
+            "/api/keys/models-preview",
+            json={
+                "provider": "tokendance",
+                "base_url": "https://tokendance.space/gateway/v1",
+                "access_key": "x",
+            },
+        )
+
+    assert r.status_code == 200, r.text
+    by_id = {m["id"]: m for m in r.json()["models"]}
+
+    assert by_id["doubao-seedance-2-0"]["protocol"] == "seedance"
+    assert by_id["happyhorse-1.0-t2v"]["protocol"] == "dashscope"
+    assert by_id["gpt-image-2"]["protocol"] is None  # 图片模型 → 无协议
 
 
