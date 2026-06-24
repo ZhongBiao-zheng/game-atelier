@@ -385,4 +385,96 @@ describe('KeyForm', () => {
       { name: '图片 4.7', id: 'doubao-seedream-4-5-251128', modality: 'image' },
     ]);
   });
+
+  it('edit mode hides the provider picker and titles by preset label', () => {
+    render(
+      <KeyForm
+        mode="edit"
+        initial={{ alias: 'seedream', provider: 'seedream', access_key: 'ak...xx', models: [] }}
+        onCreated={() => {}}
+        onCancel={() => {}}
+        submitLabel="保存修改"
+      />,
+    );
+    // 编辑态不渲染供应商选择轨道 / 移动端下拉——避免误导性 hover
+    expect(screen.queryByRole('group', { name: '供应商列表' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('供应商选择')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('编辑 火山引擎');
+  });
+
+  it('edit mode titles a custom provider by its config alias, not OpenAI', () => {
+    render(
+      <KeyForm
+        mode="edit"
+        initial={{ alias: 'my-openrouter', provider: 'custom', base_url: 'https://x.test', access_key: 'sk...zz', models: [] }}
+        onCreated={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('编辑 my-openrouter');
+  });
+
+  it('edit mode locks existing models to a read-only category badge; new rows stay editable', () => {
+    render(
+      <KeyForm
+        mode="edit"
+        initial={{
+          alias: 'zz', provider: 'custom', base_url: 'https://x.test', access_key: 'sk...zz',
+          models: [{ name: 'Sora 2', id: 'sora-2', modality: 'video' }],
+        }}
+        onCreated={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    // 已存模型：分类是只读徽标（无切换按钮），显示「视频」
+    const locked = screen.getByLabelText('模型分类 1');
+    expect(within(locked).queryByRole('button')).not.toBeInTheDocument();
+    expect(within(locked).getByText('视频')).toBeInTheDocument();
+    // 新增行：分类仍可切换（图片/视频两个按钮）——撞 id 也不冻结，因为锁按行而非 id
+    fireEvent.click(screen.getByRole('button', { name: '添加模型' }));
+    const fresh = screen.getByLabelText('模型分类 2');
+    expect(within(fresh).getByRole('button', { name: '图片' })).toBeInTheDocument();
+    expect(within(fresh).getByRole('button', { name: '视频' })).toBeInTheDocument();
+  });
+
+  it('editing an existing model id keeps its category locked (no unlock-by-edit)', () => {
+    render(
+      <KeyForm
+        mode="edit"
+        initial={{
+          alias: 'zz', provider: 'custom', base_url: 'https://x.test', access_key: 'sk...zz',
+          models: [{ name: 'Sora 2', id: 'sora-2', modality: 'video' }],
+        }}
+        onCreated={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('模型 ID 1'), { target: { value: 'sora-2-renamed' } });
+    expect(within(screen.getByLabelText('模型分类 1')).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('edit mode eye toggle reveals the stored plaintext via GET /reveal', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ access_key: 'sk-full-plaintext-revealed' }),
+    });
+    globalThis.fetch = fetchMock as any;
+
+    render(
+      <KeyForm
+        mode="edit"
+        initial={{ alias: 'zz', provider: 'custom', base_url: 'https://x.test', access_key: 'sk...zz', models: [] }}
+        onCreated={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    const input = screen.getByLabelText('API Key') as HTMLInputElement;
+    expect(input.type).toBe('password');
+
+    fireEvent.click(screen.getByRole('button', { name: '显示密钥' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/keys/zz/reveal'));
+    await waitFor(() => expect(input.value).toBe('sk-full-plaintext-revealed'));
+    expect(input.type).toBe('text');
+  });
 });

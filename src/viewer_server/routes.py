@@ -773,6 +773,20 @@ def delete_key_endpoint(alias: str) -> None:
     return None
 
 
+@router.get("/keys/{alias}/reveal")
+def reveal_key_endpoint(alias: str) -> dict:
+    """按需返回某个已存密钥的明文，供编辑表单的「显示密钥」用。
+
+    安全边界：viewer-server 绑 127.0.0.1，仅本机回环可达；密钥本就以明文存于
+    <data_root>/.config/keys.json，向本机持有者回显不扩大暴露面。列表 / 创建
+    接口仍只回掩码——明文只在此处、按显式 alias、按需返回。
+    """
+    spec = keys.find_by_alias(alias)
+    if spec is None:
+        raise HTTPException(404, f"alias '{alias}' not found")
+    return {"access_key": spec.access_key}
+
+
 class _ModelsPreviewPayload(BaseModel):
     alias: str | None = None
     provider: str | None = None

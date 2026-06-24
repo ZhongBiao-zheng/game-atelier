@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { ArrowLeft, X } from 'lucide-react';
-import { createKey, patchKey, modelModality, previewModels, type KeyCreatePayload, type KeyModel, type ModelModality, type RemoteModel } from '@/api/keys';
+import { ArrowLeft, Eye, EyeOff, X } from 'lucide-react';
+import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelModality, type RemoteModel } from '@/api/keys';
 
 type ProviderKind = 'official' | 'third_party' | 'custom';
 type ApiModality = 'image' | 'video' | 'audio' | 'llm';
@@ -41,6 +41,10 @@ const ghostButtonClass = 'rounded-md px-3 py-2 text-sm text-muted-foreground tra
 
 type PickerFilter = 'all' | 'image' | 'video' | 'other';
 
+// 仅前端的行级标记：编辑态「打开表单时已存在的模型」分类锁死为只读，新增行不带此标记。
+// _locked 随 spread 在每次 setModels 中传递，增删行都不会错乱（不依赖 id 值或行下标）。
+type EditableModel = KeyModel & { _locked?: boolean };
+
 interface Props {
   initial?: Partial<KeyCreatePayload>;
   onCreated: () => void;
@@ -57,9 +61,10 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
   const [accessKey, setAccessKey] = useState(initial?.access_key ?? '');
   // 编辑旧 Key 时模型可能没标注分类——载入即用 key 级 modalities 兜底值固化进每行，
   // 保存后 key 级 modalities 改为由模型标注派生，老 key 的视频可见性不丢。
-  const [models, setModels] = useState<KeyModel[]>(
+  // 编辑态打开时已存在的行打 _locked，分类锁死为只读；新增行不带标记，仍可选分类。
+  const [models, setModels] = useState<EditableModel[]>(
     initial?.models?.length
-      ? initial.models.map((m) => ({ ...m, modality: modelModality(m, initial) }))
+      ? initial.models.map((m) => ({ ...m, modality: modelModality(m, initial), _locked: mode === 'edit' }))
       : providerByValue(initial?.provider ?? 'openai').defaultModels,
   );
   const [urlTest, setUrlTest] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
@@ -71,8 +76,13 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [pickerFilter, setPickerFilter] = useState<PickerFilter>('all');
   const [pickerQuery, setPickerQuery] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [revealing, setRevealing] = useState(false);
+  // 编辑态打开时密钥框是掩码（前端只有掩码）；create 态字段值即用户实输的真值。
+  const [keyRevealed, setKeyRevealed] = useState(mode !== 'edit');
   const editing = mode === 'edit';
   const preset = providerByValue(provider);
+  const isLocked = (model: EditableModel) => model._locked === true;
 
   const changeProvider = (nextProvider: string) => {
     if (editing) return;
@@ -137,6 +147,26 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     } catch {
       setUrlTest({ kind: 'error', message: '请输入完整的 HTTP(S) API 请求地址' });
     }
+  };
+
+  const toggleShowKey = async () => {
+    // 编辑态首次「显示」要先向后端取真实密钥（前端只持有掩码）；取到后回填并切明文。
+    if (!showKey && editing && !keyRevealed && initial?.alias) {
+      setRevealing(true);
+      setError(null);
+      try {
+        const { access_key } = await revealKey(initial.alias);
+        setAccessKey(access_key);
+        setKeyRevealed(true);
+        setShowKey(true);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setRevealing(false);
+      }
+      return;
+    }
+    setShowKey((s) => !s);
   };
 
   const submit = async () => {
@@ -327,38 +357,44 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
       ) : (
         /* —— 表单主视图：左轨供应商选项列表（不透明 popover 轨道），右 pane 字段 —— */
         <div
-          className="grid max-h-[86vh] w-[860px] max-w-[92vw] overflow-hidden rounded-xl border border-border bg-card md:grid-cols-[240px_1fr]"
+          className={`grid max-h-[86vh] w-[860px] max-w-[92vw] grid-rows-[minmax(0,1fr)] overflow-hidden rounded-xl border border-border bg-card ${editing ? '' : 'md:grid-cols-[240px_1fr]'}`}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* 左轨在 md 以下隐藏，由 body 顶部的下拉兜底（同一 changeProvider 路径） */}
-          <div className="hidden flex-col gap-1 overflow-y-auto border-r border-border bg-popover p-3 md:flex" role="group" aria-label="供应商列表">
-            <div className="px-3 pb-1 pt-2 text-xs uppercase tracking-label text-muted-foreground/70">供应商</div>
-            {PROVIDER_PRESETS.map((p) => {
-              const selected = provider === p.value;
-              return (
-                <button
-                  key={p.value}
-                  type="button"
-                  onClick={() => changeProvider(p.value)}
-                  disabled={editing && !selected}
-                  aria-pressed={selected}
-                  className={`flex items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40 ${
-                    selected
-                      ? 'bg-secondary text-foreground ring-1 ring-primary/60'
-                      : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
-                  }`}
-                >
-                  <span className="truncate">{p.label}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground/70">{KIND_LABELS[p.kind]}</span>
-                </button>
-              );
-            })}
-          </div>
+          {/* 左轨仅新建态出现——编辑态只聚焦当前供应商，不再渲染选择列表（避免误导性 hover）。
+              左轨在 md 以下隐藏，由 body 顶部的下拉兜底（同一 changeProvider 路径）。 */}
+          {!editing && (
+            <div className="hidden flex-col gap-1 overflow-y-auto border-r border-border bg-popover p-3 md:flex" role="group" aria-label="供应商列表">
+              <div className="px-3 pb-1 pt-2 text-xs uppercase tracking-label text-muted-foreground/70">供应商</div>
+              {PROVIDER_PRESETS.map((p) => {
+                const selected = provider === p.value;
+                return (
+                  <button
+                    key={p.value}
+                    type="button"
+                    onClick={() => changeProvider(p.value)}
+                    aria-pressed={selected}
+                    className={`flex items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                      selected
+                        ? 'bg-secondary text-foreground ring-1 ring-primary/60'
+                        : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+                    }`}
+                  >
+                    <span className="truncate">{p.label}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground/70">{KIND_LABELS[p.kind]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <div className="flex min-h-0 flex-col">
             <div className="flex items-start justify-between gap-4 px-6 pb-4 pt-5">
               <div className="min-w-0 space-y-1">
                 <h2 className="font-display italic text-base text-foreground">
-                  {editing ? '编辑供应商' : '新增供应商'}
+                  {/* 非预设供应商（kling/veo 等后端允许但前端无 preset）回落到 alias，
+                      避免 providerByValue 静默回落 OpenAI 把标题误标成「编辑 OpenAI」。 */}
+                  {editing
+                    ? `编辑 ${usesNamedAlias(provider) ? alias : (PROVIDER_PRESETS.find((p) => p.value === provider)?.label ?? alias)}`
+                    : '新增供应商'}
                 </h2>
                 {linkRow.length > 0 && (
                   <div className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
@@ -380,18 +416,19 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
               </button>
             </div>
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 pb-5">
-              <div className="md:hidden">
-                <label htmlFor="key-provider" className={capLabelClass}>供应商选择</label>
-                <select
-                  id="key-provider"
-                  value={provider}
-                  onChange={(e) => changeProvider(e.target.value)}
-                  className={fieldClass}
-                  disabled={editing}
-                >
-                  {PROVIDER_PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-                </select>
-              </div>
+              {!editing && (
+                <div className="md:hidden">
+                  <label htmlFor="key-provider" className={capLabelClass}>供应商选择</label>
+                  <select
+                    id="key-provider"
+                    value={provider}
+                    onChange={(e) => changeProvider(e.target.value)}
+                    className={fieldClass}
+                  >
+                    {PROVIDER_PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                  </select>
+                </div>
+              )}
               {provider === 'custom' && (
                 <>
                   <div>
@@ -453,15 +490,26 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
               )}
               <div>
                 <label htmlFor="key-access" className={capLabelClass}>API Key</label>
-                <input
-                  id="key-access"
-                  type="password"
-                  value={accessKey}
-                  onChange={(e) => setAccessKey(e.target.value)}
-                  className={`${fieldClass} font-mono`}
-                  placeholder={editing ? '留空或保持原值表示不修改密钥' : '粘贴 API Key，例如 sk-...'}
-                  autoComplete="off"
-                />
+                <div className="relative">
+                  <input
+                    id="key-access"
+                    type={showKey ? 'text' : 'password'}
+                    value={accessKey}
+                    onChange={(e) => { setAccessKey(e.target.value); setKeyRevealed(true); }}
+                    className={`${fieldClass} pr-10 font-mono`}
+                    placeholder={editing ? '留空或保持原值表示不修改密钥' : '粘贴 API Key，例如 sk-...'}
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    onClick={toggleShowKey}
+                    disabled={revealing}
+                    aria-label={showKey ? '隐藏密钥' : '显示密钥'}
+                    className="absolute inset-y-0 right-0 inline-flex w-10 items-center justify-center rounded-r-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    {showKey ? <EyeOff size={16} aria-hidden /> : <Eye size={16} aria-hidden />}
+                  </button>
+                </div>
               </div>
               <div>
                 <div className="mb-2 flex items-center justify-between">
@@ -485,7 +533,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                   </div>
                 </div>
                 {fetchError && <div className="mb-2 text-sm text-destructive">{fetchError}</div>}
-                <div className="mb-2 grid grid-cols-[1fr_1fr_auto_auto] gap-2 text-xs text-muted-foreground">
+                <div className="mb-2 grid grid-cols-[1fr_1fr_6.5rem_auto] gap-2 text-xs text-muted-foreground">
                   <span>模型别名</span>
                   <span>模型 ID</span>
                   <span>分类</span>
@@ -493,7 +541,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                 </div>
                 <div className="space-y-2">
                   {models.map((model, index) => (
-                    <div key={index} className="grid grid-cols-[1fr_1fr_auto_auto] items-center gap-2">
+                    <div key={index} className="grid grid-cols-[1fr_1fr_6.5rem_auto] items-center gap-2">
                       <label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</label>
                       <input
                         id={`key-model-name-${index}`}
@@ -512,28 +560,43 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                         className={`${fieldClass} font-mono`}
                         placeholder="请求里使用的 ID，例如：doubao-seedream-5-0-260128"
                       />
-                      <div
-                        role="group"
-                        aria-label={`模型分类 ${index + 1}`}
-                        className="flex items-center rounded-md border border-border p-0.5"
-                      >
-                        {(['image', 'video'] as const).map((mod) => {
-                          const active = (model.modality ?? 'image') === mod;
-                          return (
-                            <button
-                              key={mod}
-                              type="button"
-                              aria-pressed={active}
-                              onClick={() => setModels(models.map((m, i) => i === index ? { ...m, modality: mod } : m))}
-                              className={`rounded-sm px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                                active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
-                              }`}
-                            >
-                              {mod === 'image' ? '图片' : '视频'}
-                            </button>
-                          );
-                        })}
-                      </div>
+                      {isLocked(model) ? (
+                        /* 已存在的模型分类固化为只读徽标——添加完成后不允许再调分类。 */
+                        <div role="group" aria-label={`模型分类 ${index + 1}`} className="flex items-center">
+                          <span
+                            className={`rounded-full border px-2 py-0.5 text-xs ${
+                              (model.modality ?? 'image') === 'video'
+                                ? 'border-border text-foreground'
+                                : 'border-primary/40 text-primary'
+                            }`}
+                          >
+                            {(model.modality ?? 'image') === 'video' ? '视频' : '图片'}
+                          </span>
+                        </div>
+                      ) : (
+                        <div
+                          role="group"
+                          aria-label={`模型分类 ${index + 1}`}
+                          className="flex items-center rounded-md border border-border p-0.5"
+                        >
+                          {(['image', 'video'] as const).map((mod) => {
+                            const active = (model.modality ?? 'image') === mod;
+                            return (
+                              <button
+                                key={mod}
+                                type="button"
+                                aria-pressed={active}
+                                onClick={() => setModels(models.map((m, i) => i === index ? { ...m, modality: mod } : m))}
+                                className={`rounded-sm px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                                  active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                {mod === 'image' ? '图片' : '视频'}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                       <button
                         type="button"
                         onClick={() => setModels(models.filter((_, i) => i !== index))}
