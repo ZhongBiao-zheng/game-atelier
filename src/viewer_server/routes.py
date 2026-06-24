@@ -861,7 +861,7 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
             "id": mid,
             "name": str(item.get("name") or mid),
             "modality": modality,
-            # 视频模型附协议 guess（resolve 不中 → None，KeyForm 强制用户选）。
+            # 视频模型附协议 guess（resolve 不中 → None，协议留空交后端 dispatch 时判定 / 诚实报错）。
             "protocol": resolve_protocol(preview_provider, base_url, mid) if modality == "video" else None,
         })
     return {"models": models}
