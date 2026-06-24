@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'wouter';
 import { ChevronsDown } from 'lucide-react';
 
 import { createStudioJob, getStudioJob, listStudioJobs, uploadReferenceImage } from '@/api/studio';
@@ -15,6 +14,7 @@ import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/video
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
 import { fetchGalleryHidden } from '@/api/gallery';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
+import { StudioCompact } from './StudioCompact';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
@@ -55,7 +55,10 @@ function saveSelection(sel: SavedSelection): void {
 }
 
 export function Studio({ compact = false }: { compact?: boolean }) {
-  const [, setLocation] = useLocation();
+  return compact ? <StudioCompact /> : <StudioFull />;
+}
+
+function StudioFull() {
   const [saved] = useState(loadSelection);
   const [rounds, setRounds] = useState<RoundState[]>([]);
   // 查询面板筛选 + 收藏/隐藏集（渲染端筛选用，state 仍保留全量轮）。setHistoryFilters 喂 StudioQueryBar，
@@ -65,8 +68,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   const [hiddenPaths, setHiddenPaths] = useState<string[]>([]);
   const [persistedJobs, setPersistedJobs] = useState<Job[]>([]);
   const [pending, setPending] = useState(false);
-  // compact 模式没有 rounds 列表承接失败卡片，提交/上传错误走这条内联文案。
-  const [compactError, setCompactError] = useState<string | null>(null);
   const [keys, setKeys] = useState<KeyView[]>([]);
   // 滚动联动收放：历史区 col-reverse（|scrollTop| 即距底距离），>160 收 / <80 展（滞回防抖）。
   // shellFocused / clickPinned 是两个展开覆盖：输入焦点期间恒展开；点击收缩壳展开但不回滚，
@@ -189,7 +190,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
 
   // onConnect 全量刷新兜底：断连期间 / SSE 队列满丢掉的事件靠重连补齐。
   useSSE({
-    enabled: !compact,
     onJobChanged: handleJobChanged,
     onConnect: () => { void refreshPersistedJobs().catch(() => {}); },
   });
@@ -201,18 +201,16 @@ export function Studio({ compact = false }: { compact?: boolean }) {
 
   useEffect(() => {
     let cancelled = false;
-    if (!compact) {
-      listStudioJobs()
-        .then((jobs: Job[]) => {
-          if (cancelled) return;
-          setPersistedJobs(jobs);
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setPersistedJobs([]);
-          }
-        });
-    }
+    listStudioJobs()
+      .then((jobs: Job[]) => {
+        if (cancelled) return;
+        setPersistedJobs(jobs);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPersistedJobs([]);
+        }
+      });
     listKeys()
       .then((resp) => {
         if (cancelled) return;
@@ -245,7 +243,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     return () => {
       cancelled = true;
     };
-  }, [compact]);
+  }, []);
 
   // 持久化供应商/模型/尺寸/张数等全部选择，切页面再回来时恢复。providerAlias 为空说明 keys 还没加载完，先不写。
   useEffect(() => {
@@ -260,14 +258,13 @@ export function Studio({ compact = false }: { compact?: boolean }) {
   ]);
 
   useEffect(() => {
-    if (compact) return;
     setRounds((items) =>
       mergePersistedRounds(
         items.map((item) => hydrateRoundModelName(item, keys)),
         studioJobsToRounds(persistedJobs, keys),
       ),
     );
-  }, [compact, keys, persistedJobs]);
+  }, [keys, persistedJobs]);
 
   const onSubmit = async (prompt: string, overrideConfig?: RoundConfig) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
@@ -295,7 +292,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
 
     setPending(true);
-    if (compact) setCompactError(null);
     // 提交前把参考图 File[] 上传到 .runtime/uploads/，拿到服务器路径写进 params.reference_images。
     // 再次生成（overrideConfig）携带的已是服务器路径，直接复用。
     let refPaths: string[];
@@ -306,14 +302,10 @@ export function Studio({ compact = false }: { compact?: boolean }) {
           : []);
     } catch (e: any) {
       setPending(false);
-      if (compact) {
-        setCompactError(`参考图上传失败：${e.message}`);
-      } else {
-        setRounds((rs) => [
-          { kind: 'failed', submittedAt: new Date().toISOString(), reason: `参考图上传失败：${e.message}` },
-          ...rs,
-        ]);
-      }
+      setRounds((rs) => [
+        { kind: 'failed', submittedAt: new Date().toISOString(), reason: `参考图上传失败：${e.message}` },
+        ...rs,
+      ]);
       return;
     }
 
@@ -338,23 +330,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       quality: overrideConfig?.quality ?? quality,
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
     };
-
-    if (compact) {
-      try {
-        await createStudioJob({
-          prompt,
-          alias: effectiveAlias ?? undefined,
-          model: effectiveModel,
-          params: jobParams,
-        });
-        setLocation('/studio');
-      } catch (e: any) {
-        setCompactError(`提交失败：${e.message}`);
-      } finally {
-        setPending(false);
-      }
-      return;
-    }
 
     const startedAt = Date.now();
     const myRound: RoundState = { kind: 'pending', startedAt, config };
@@ -412,7 +387,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
     const effectiveCaps = videoControlCaps(effectiveModel, selectedModel?.protocol);
 
     setPending(true);
-    if (compact) setCompactError(null);
     // 视频/音频参考图复用通用文件上传端点（Task 1 已放开 video/audio）。override 携带的已是服务器路径，直接复用。
     let imgPaths: string[];
     let vidPaths: string[];
@@ -435,14 +409,10 @@ export function Studio({ compact = false }: { compact?: boolean }) {
         ?? (referenceAudios.length > 0 ? await Promise.all(referenceAudios.map(uploadReferenceImage)) : []);
     } catch (e: any) {
       setPending(false);
-      if (compact) {
-        setCompactError(`参考资产上传失败：${e.message}`);
-      } else {
-        setRounds((rs) => [
-          { kind: 'failed', submittedAt: new Date().toISOString(), reason: `参考资产上传失败：${e.message}` },
-          ...rs,
-        ]);
-      }
+      setRounds((rs) => [
+        { kind: 'failed', submittedAt: new Date().toISOString(), reason: `参考资产上传失败：${e.message}` },
+        ...rs,
+      ]);
       return;
     }
 
@@ -504,25 +474,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       referenceAudios: audPaths,
     };
 
-    if (compact) {
-      try {
-        await createStudioJob({
-          prompt,
-          alias: effectiveAlias ?? undefined,
-          model: effectiveModel,
-          params: videoParams,
-          kind: 'video',
-        });
-        setLocation('/studio');
-      } catch (e: any) {
-        // compact 模式没有 rounds 列表可挂失败卡片，错误必须有内联出口，否则用户只看到"点了没反应"。
-        setCompactError(`提交失败：${e.message}`);
-      } finally {
-        setPending(false);
-      }
-      return;
-    }
-
     const startedAt = Date.now();
     const myRound: RoundState = { kind: 'pending', startedAt, config };
     setRounds((rs) => [myRound, ...rs]);
@@ -559,68 +510,6 @@ export function Studio({ compact = false }: { compact?: boolean }) {
       ),
     );
   };
-
-  if (compact) {
-    return (
-      <div className="py-8" aria-label="生图沙箱">
-        <h1 className="font-display text-display leading-tight mb-6 sm:mb-8 max-w-[780px] mx-auto">
-          描述你想生成的图片
-        </h1>
-        <PromptInput
-          onSubmit={onSubmit}
-          disabled={pending}
-          value={promptText}
-          onValueChange={setPromptText}
-          providers={keys}
-          providerAlias={providerAlias}
-          model={model}
-          ratio={ratio}
-          resolution={resolution}
-          count={count}
-          quality={quality}
-          onProviderChange={setProviderAlias}
-          onModelChange={setModel}
-          onRatioChange={setRatio}
-          onResolutionChange={setResolution}
-          onCountChange={setCount}
-          onQualityChange={setQuality}
-          onCustomSizeChange={handleCustomSizeChange}
-          sizeOverride={sizeOverride}
-          menuDirection="down"
-          referenceImages={referenceImages}
-          onReferenceImagesChange={setReferenceImages}
-          kind={kind}
-          onKindChange={setKind}
-          videoMode={videoMode}
-          videoCaps={videoCaps}
-          duration={duration}
-          videoResolution={videoResolution}
-          videoRatio={videoRatio}
-          videoQuality={videoQuality}
-          videoCount={videoCount}
-          generateAudio={generateAudio}
-          onVideoModeChange={setVideoMode}
-          onDurationChange={setDuration}
-          onVideoResolutionChange={setVideoResolution}
-          onVideoRatioChange={setVideoRatio}
-          onVideoQualityChange={setVideoQuality}
-          onVideoCountChange={setVideoCount}
-          onGenerateAudioChange={setGenerateAudio}
-          referenceVideos={referenceVideos}
-          referenceAudios={referenceAudios}
-          onReferenceVideosChange={setReferenceVideos}
-          onReferenceAudiosChange={setReferenceAudios}
-          videoFrames={videoFrames}
-          onVideoFramesChange={setVideoFrames}
-        />
-        {compactError && (
-          <p role="alert" className="mt-3 max-w-[780px] mx-auto text-sm text-destructive">
-            {compactError}
-          </p>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div

@@ -511,7 +511,17 @@ export function PromptInput({
       (Boolean(videoCaps?.supportsReferenceVideo) && referenceVideos.length < maxRefVids) ||
       (Boolean(videoCaps?.supportsReferenceAudio) && referenceAudios.length < MAX_REF_AUDIOS)
     : referenceImages.length < maxRef;
-  const canSubmit = Boolean(provider && selectedModel && text.trim() && !disabled);
+  // Seedance（火山 Ark）不支持只给尾帧：last_frame 必须配 first_frame。只填尾帧槽时在客户端
+  // 拦下并禁用生成，不浪费一轮注定被上游拒的 API 往返（其余族 / 模式 / 再次生成路径不受影响）。
+  const lastFrameOnlyBlocked =
+    isVideo &&
+    videoMode === 'firstlast' &&
+    videoCaps?.family === 'seedance' &&
+    (videoCaps?.maxFrames ?? 0) >= 2 &&
+    !videoFrames?.first &&
+    Boolean(videoFrames?.last);
+  const canSubmit =
+    Boolean(provider && selectedModel && text.trim() && !disabled) && !lastFrameOnlyBlocked;
   // 消耗提示只对 OpenAI-HK 聚合商显示（人民币，无单位）；未定价的模型/档位返回 null 即隐藏。
   const costYuan = isHkAggregator(provider?.base_url)
     ? estimateCostYuan({ model: selectedModel?.id, quality, n: isVideo ? videoCount : count })
@@ -544,9 +554,9 @@ export function PromptInput({
   const submit = useCallback(() => {
     // @图1 → 图1：API 按序号自然语言绑定素材，@ 不出现在最终 prompt 里。
     const trimmed = serializeMentions(text).trim();
-    if (!trimmed || disabled || !provider || !selectedModel) return;
+    if (!trimmed || disabled || !provider || !selectedModel || lastFrameOnlyBlocked) return;
     onSubmit(trimmed);
-  }, [text, disabled, provider, selectedModel, onSubmit]);
+  }, [text, disabled, provider, selectedModel, onSubmit, lastFrameOnlyBlocked]);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Escape' && mentionOpen) {
@@ -989,7 +999,7 @@ export function PromptInput({
               direction={menuDirection}
               role="listbox"
               aria-label="生成模式列表"
-              className="w-[200px] rounded-xl border border-border bg-card p-2"
+              className="flex flex-col gap-2 w-[200px] rounded-xl border border-border bg-card p-2"
             >
                 <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
                 {([
@@ -1030,7 +1040,7 @@ export function PromptInput({
               direction={menuDirection}
               role="listbox"
               aria-label="选择厂商列表"
-              className="w-[280px] max-h-[400px] overflow-y-auto rounded-xl border border-border bg-card p-2"
+              className="flex flex-col gap-2 w-[280px] max-h-[400px] overflow-y-auto no-scrollbar rounded-xl border border-border bg-card p-2"
             >
                 <div className="px-3 py-2 text-sm text-muted-foreground">选择厂商</div>
                 {visibleProviders.map((item) => (
@@ -1044,7 +1054,7 @@ export function PromptInput({
                       onModelChange?.(item.models[0]?.id ?? '');
                       setOpenPanel(null);
                     }}
-                    className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
+                    className="flex shrink-0 h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
                   >
                     <Building2 size={20} aria-hidden />
                     <span className="min-w-0">
@@ -1072,7 +1082,7 @@ export function PromptInput({
               direction={menuDirection}
               role="listbox"
               aria-label="选择模型列表"
-              className="w-[280px] max-h-[400px] overflow-y-auto rounded-xl border border-border bg-card p-2"
+              className="flex flex-col gap-2 w-[280px] max-h-[400px] overflow-y-auto no-scrollbar rounded-xl border border-border bg-card p-2"
             >
                 <div className="px-3 py-2 text-sm text-muted-foreground">选择模型：{providerDisplayName}</div>
                 {models.map((item) => (
@@ -1085,7 +1095,7 @@ export function PromptInput({
                       onModelChange?.(item.id);
                       setOpenPanel(null);
                     }}
-                    className="flex h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
+                    className="flex shrink-0 h-[58px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-inset aria-selected:ring-1 aria-selected:ring-primary/50"
                   >
                     <Box size={22} aria-hidden />
                     <span className="min-w-0">
@@ -1359,7 +1369,15 @@ export function PromptInput({
         </div>
         {/* pr-12 给提交按钮让位：按钮已改为绝对定位锚在壳右下角（见 shell 末尾），不再占这一行的 flex 位 */}
         <div className="flex items-center gap-3 shrink-0 pr-12">
-          {costYuan !== null && (
+          {lastFrameOnlyBlocked ? (
+            <span
+              data-testid="frame-block-hint"
+              className="inline-flex items-center gap-1 text-xs text-destructive"
+            >
+              <Film size={12} aria-hidden />
+              需先放首帧
+            </span>
+          ) : costYuan !== null ? (
             <span
               data-testid="credit-cost-hint"
               className="inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums"
@@ -1367,7 +1385,7 @@ export function PromptInput({
               <Coins size={12} aria-hidden />
               {costYuan}
             </span>
-          )}
+          ) : null}
         </div>
       </div>
           </div>
@@ -1380,7 +1398,7 @@ export function PromptInput({
         onClick={(e) => { e.stopPropagation(); submit(); }}
         disabled={!canSubmit}
         aria-label="提交生成"
-        title="提交 (⌘↵)"
+        title={lastFrameOnlyBlocked ? 'Seedance 不支持只给尾帧：请先放首帧，或首尾都放' : '提交 (⌘↵)'}
         className={`absolute right-4 inline-flex items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background transition-all duration-300 ${
           collapsed ? 'bottom-[22px] w-8 h-8' : 'bottom-4 w-10 h-10'
         }`}
