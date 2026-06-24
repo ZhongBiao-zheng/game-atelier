@@ -201,3 +201,22 @@ def test_models_preview_attaches_video_protocol_guess(tmp_path, monkeypatch):
     assert by_id["gpt-image-2"]["protocol"] is None  # 图片模型 → 无协议
 
 
+def test_reveal_returns_stored_plaintext(client):
+    """/reveal 是唯一回明文的接口：返回真实密钥，且与列表里的掩码不同。"""
+    payload = _make_payload("lov")
+    payload["access_key"] = "ak-plaintext-secret"
+    client.post("/api/keys", json=payload)
+
+    masked = client.get("/api/keys").json()["keys"][0]["access_key"]
+    assert masked != "ak-plaintext-secret"  # 列表仍掩码
+
+    r = client.get("/api/keys/lov/reveal")
+    assert r.status_code == 200
+    assert r.json()["access_key"] == "ak-plaintext-secret"
+
+
+def test_reveal_unknown_alias_404(client):
+    r = client.get("/api/keys/does-not-exist/reveal")
+    assert r.status_code == 404
+
+

@@ -85,6 +85,16 @@ export async function deleteKey(alias: string): Promise<void> {
   if (!r.ok) throw new Error(`deleteKey ${r.status}`);
 }
 
+/** 按需取某个已存密钥的明文（编辑表单查看用）；列表/创建接口仍只回掩码。 */
+export async function revealKey(alias: string): Promise<{ access_key: string }> {
+  const r = await fetch(`/api/keys/${encodeURIComponent(alias)}/reveal`);
+  if (!r.ok) {
+    const body = await r.text();
+    throw new Error(`revealKey ${r.status}: ${body}`);
+  }
+  return r.json();
+}
+
 /** 上游模型列表条目（/api/keys/models-preview 归一化结果）；modality null = 非出图模型。 */
 export interface RemoteModel {
   id: string;
