@@ -125,10 +125,12 @@ def render(
     quality = _quality_param(kwargs) if wants_quality else None
     ref_paths = _collect_ref_paths(kwargs, key.provider, model)
 
-    # 官方图生图：gpt-image/nano-banana 族走同步 /images/edits（multipart）。
-    # HK 一直如此；custom 同族现在也走官方 edits（而非 generations 的 image= 私有字段）。
-    # 不用 generations+image（那是 Ark/seedream 的图生图路子），更绝不加 ?async=true。
-    if (is_hk_image or custom_img) and ref_paths:
+    # 图生图端点按族分流：gpt-image 族走官方同步 /images/edits（multipart，OpenAI/HK 实现）。
+    # nano-banana 是 Gemini 多模态，OpenAI-HK / 聚合商对其 /images/edits 一律 403（openresty
+    # 网关层拒未实现路由），必须走 generations 的 image 字段（实测 OpenAI-HK 可用）——
+    # 故 edits 仅限 gpt-image，nano-banana 落到下方 generations+image 兜底。
+    # 不用 generations+image 做 gpt-image（那是 Ark/seedream 路子），更绝不加 ?async=true。
+    if (is_hk_image or custom_img) and family == "gpt-image" and ref_paths:
         paths: list[str] = []
         for _ in range(requested):
             data = _post_multipart(

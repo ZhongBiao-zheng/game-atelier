@@ -293,6 +293,50 @@ def test_render_openai_hk_gpt_image_with_reference_uses_sync_edits(
     assert len(paths) == 1
 
 
+def test_render_openai_hk_nano_banana_with_reference_uses_generations(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    """回归：nano-banana 带参考图走 generations 的 image 字段，绝不进 /images/edits。
+
+    OpenAI-HK / 聚合商对 nano-banana 的 /images/edits 一律 403（openresty 拒未实现路由）；
+    nano-banana 是 Gemini 多模态，图生图实测走 generations+image 可用。仅 gpt-image 走 edits。
+    """
+    _add_key(alias="hk", provider="custom", base_url="https://api.openai-hk.com")
+    ref = tmp_path / "lvbu.png"
+    ref.write_bytes(b"\x89PNG\r\n\x1a\nlvbu")
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers=None, json=None, data=None, files=None, timeout=None):
+        captured["url"] = url
+        captured["json"] = json
+        captured["files"] = files
+        return FakePostResponse({
+            "data": [{"b64_json": base64.b64encode(b"\x89PNG\r\n\x1a\nedited").decode("ascii")}],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+
+    paths = openai_image.render(
+        prompt="给吕布换银色战甲",
+        model="nano-banana-2",
+        alias="hk",
+        output_dir=tmp_path,
+        n=1,
+        size="3:4",
+        quality="high",
+        source_image=str(ref),
+    )
+
+    assert captured["url"] == "https://api.openai-hk.com/v1/images/generations"
+    assert "/images/edits" not in str(captured["url"])
+    assert captured["files"] is None  # JSON 路径，非 multipart edits
+    assert captured["json"]["model"] == "nano-banana-2"
+    assert captured["json"].get("image")  # 参考图作为 image 字段送出
+    assert len(paths) == 1
+
+
 def test_render_openai_hk_gpt_image_no_reference_stays_on_generations(
     isolated_data_root,
     tmp_path,
