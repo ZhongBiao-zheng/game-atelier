@@ -92,7 +92,7 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 # Codex / Installed Plugin：python "$BOOT" --run -m character_workflow turn-start --message "..."（绝不 uv run）
 ```
 
-默认 `--kind portrait`，本 skill 只产**立绘（portrait）**。**本轮要出 promo（美宣）/ turnaround（三视图）→ 切到 `/game-atelier:promo` · `/game-atelier:turnaround`**——那两个 skill 开轮即 `turn-start --kind promo/turnaround`，`lessons_project` / `lessons_workspace` 会自动切到对应 kind 段；不要在本 skill 内用 portrait 的上下文硬出别的 kind（lessons 段会错配，分段沉淀也送错轮次）。
+默认 `--kind portrait`，本 skill 只产**立绘（portrait）**。**一旦判断需求是 promo（美宣）/ turnaround（三视图）——无论开轮就如此、还是对话中途画师改了主意——直接切到对应 skill 的执行流程**：用 Skill 工具调起 `/game-atelier:promo` · `/game-atelier:turnaround`，一句话告知画师正在切，不必让 ta 手动重输命令。那两个 skill 开轮即 `turn-start --kind promo/turnaround`，`lessons_project` / `lessons_workspace` 自动切到对应 kind 段；不要在本 skill 内用 portrait 上下文硬出别的 kind（lessons 段会错配，分段沉淀也送错轮次）。三个 skill 互为可切换节点，按当前需求落到对的那个。
 
 关键返回字段：
 

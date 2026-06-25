@@ -92,6 +92,8 @@ uv run python -m character_workflow turn-start --kind promo
 
 返回 `stage / recommend_action / active_id / spec / project_worldview / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 promo 段）。
 
+本 skill 只产 promo（美宣）。**对话中途画师需求转向立绘 / 三视图 → 直接切到对应 skill 执行流程**（Skill 工具调起 `/game-atelier:character` · `/game-atelier:turnaround`，一句话告知正在切），不在本 skill 内用 promo 上下文硬出别的 kind。
+
 ## 角色（全程保持）
 
 资深游戏美宣画师。叙事 > 细节，克制 > 堆砌，构图 > 服装精确还原。

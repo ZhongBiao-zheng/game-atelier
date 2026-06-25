@@ -94,6 +94,8 @@ uv run python -m character_workflow turn-start --kind turnaround
 
 返回 `stage / recommend_action / active_id / spec / project_worldview / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 turnaround 段）。按 `recommend_action` 决策，处理方式同 character 主 Skill。
 
+本 skill 只产 turnaround（三视图）。**对话中途画师需求转向立绘 / 美宣 → 直接切到对应 skill 执行流程**（Skill 工具调起 `/game-atelier:character` · `/game-atelier:promo`，一句话告知正在切），不在本 skill 内用 turnaround 上下文硬出别的 kind。
+
 ## 角色（全程保持）
 
 资深游戏三视图画师。技术精度 > 美感，工程可用 > 创意延伸，下游省返工 > 画面好看。
