@@ -30,28 +30,34 @@ export function Home() {
   const GalleryCard = useCallback(({ item }: { item: GalleryItem }) => {
     const favorited = isFavorited(item.path);
     return (
-      <Link href={galleryItemHref(item)}>
-        <div className="group relative overflow-hidden rounded-2xl">
-          {/* Pinterest 式瀑布流：图片直出、无边框无放大，hover 只淡入操作按钮 */}
+      // 卡片容器本身非交互：导航链接与喜欢按钮作两个平级交互元素，
+      // 不再用 <a> 套 <button>（非法嵌套交互），喜欢点击也无需 stopPropagation 兜底。
+      <div className="group relative overflow-hidden rounded-2xl">
+        {/* Pinterest 式瀑布流：图片直出、无边框无放大，hover 只淡入操作按钮 */}
+        <Link
+          href={galleryItemHref(item)}
+          aria-label={`查看 ${item.character_id} 的${SLOT_LABEL[item.asset_slot]}`}
+          className="block"
+        >
           <img
             src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
             alt=""
             className="w-full block"
             loading="lazy"
           />
+        </Link>
 
-          {/* 喜欢按钮：hover 淡入（已喜欢常显），玻璃药丸取代描边框 */}
-          <button
-            type="button"
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); void toggleFavorite(item.path); }}
-            title={favorited ? '取消喜欢' : '喜欢'}
-            aria-label={favorited ? '取消喜欢' : '喜欢'}
-            className={`absolute left-3 top-3 grid size-9 place-items-center rounded-full bg-scrim/80 backdrop-blur-glass transition-all duration-200 hover:bg-background/90 z-10 ${favorited ? 'text-primary opacity-100' : 'text-foreground opacity-0 group-hover:opacity-100'}`}
-          >
-            <Heart className={`size-4 ${favorited ? 'fill-current' : ''}`} aria-hidden />
-          </button>
-        </div>
-      </Link>
+        {/* 喜欢按钮：与导航链接平级（不在 <a> 内），hover 淡入（已喜欢常显），玻璃药丸取代描边框 */}
+        <button
+          type="button"
+          onClick={() => void toggleFavorite(item.path)}
+          title={favorited ? '取消喜欢' : '喜欢'}
+          aria-label={favorited ? '取消喜欢' : '喜欢'}
+          className={`absolute left-3 top-3 grid size-9 place-items-center rounded-full bg-scrim/80 backdrop-blur-glass transition-all duration-200 hover:bg-background/90 z-10 ${favorited ? 'text-primary opacity-100' : 'text-foreground opacity-0 group-hover:opacity-100'}`}
+        >
+          <Heart className={`size-4 ${favorited ? 'fill-current' : ''}`} aria-hidden />
+        </button>
+      </div>
     );
   }, [isFavorited, toggleFavorite]);
 
@@ -149,6 +155,13 @@ function useColumnCount(): number {
   }, []);
   return n;
 }
+
+/** 资产槽中文名，用于卡片导航链接的无障碍名（屏幕阅读器读出图片通向哪类资产）。 */
+const SLOT_LABEL: Record<GalleryItem['asset_slot'], string> = {
+  portrait: '立绘',
+  promo: '美宣',
+  turnaround: '三视图',
+};
 
 function galleryItemHref(item: GalleryItem): string {
   if (!item.job_id) {
