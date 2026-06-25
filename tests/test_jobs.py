@@ -126,12 +126,22 @@ def test_write_job_explicit_alias_overrides_default(runtime):
 
 
 def test_list_jobs_skips_bad_file(runtime):
-    """坏 job 文件跳过，不再让整个 list_jobs 抛异常。"""
+    """坏 job 文件跳过，不再让整个 list_jobs 抛异常。
+
+    覆盖两类坏文件：
+    - JSONDecodeError（半写截断）
+    - 合法 JSON 但顶层非 dict（被手改 / 截断成 `[]` 或裸值）——这类若在 _load_job 的
+      `.pop` 阶段抛 Type/AttributeError 会逃逸 except 容错网，让整个 list_jobs / /api/jobs 崩。
+    """
     write_job(
         job_id="ok-1", character_id="c1", prompt="p",
         model="m", params={},
     )
     (runtime / "jobs" / "corrupt.json").write_text("{half-written")
+    (runtime / "jobs" / "corrupt-list.json").write_text("[]")
+    (runtime / "jobs" / "corrupt-str.json").write_text('"oops"')
+    (runtime / "jobs" / "corrupt-num.json").write_text("42")
+    (runtime / "jobs" / "corrupt-null.json").write_text("null")
     assert [j.job_id for j in list_jobs()] == ["ok-1"]
 
 

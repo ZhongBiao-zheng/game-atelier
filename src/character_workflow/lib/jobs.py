@@ -98,9 +98,14 @@ def save_job(job: Job) -> Job:
         return _write(job)
 
 
-def _load_job(data: dict[str, Any]) -> Job:
-    """读盘构造 Job：先剥离已废弃字段（seed），存量 JSON 不触发 extra=forbid。"""
-    data.pop("seed", None)
+def _load_job(data: Any) -> Job:
+    """读盘构造 Job：先剥离已废弃字段（seed），存量 JSON 不触发 extra=forbid。
+
+    非 dict（坏文件被截断 / 手改成 `[]` 或裸值）时跳过 `.pop`，交给 model_validate
+    抛 ValidationError → 上层 except 走「跳过 + 留日志」；绝不在 `.pop` 阶段抛
+    Type/AttributeError 逃逸容错网，否则整个 /api/jobs 列表会 500（角色页全空）。"""
+    if isinstance(data, dict):
+        data.pop("seed", None)
     return Job.model_validate(data)
 
 
