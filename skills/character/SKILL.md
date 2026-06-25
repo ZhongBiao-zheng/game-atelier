@@ -22,13 +22,14 @@ triggers:
   - 角色立绘
 ---
 
-## ⚠️ 启动必读 Memory（两层，均在 data_root，turn-start 自动注入）
+## ⚠️ 启动必读 Memory（均在 data_root，turn-start 自动注入）
 
 game-atelier 的记忆全部锚定 data_root，**与代理工具无关**——不读 `~/.claude` / `~/.codex`。
-turn-start 已把这两层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段：
+turn-start 已把这几层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段（slug 按 active 角色归属自动解析）：
 
-1. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用经验）
-2. `lessons_project` / `project_memory` ← `<data_root>/projects/<slug>/MEMORY.md`（按 active 角色归属自动解析 slug）
+1. `project_worldview` ← `<data_root>/projects/<slug>/worldview.md`（**项目经验/世界观**：定位·调性·用语·项目规则；Web「项目经验」页可编辑，出图前作为项目背景纳入上下文）
+2. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用**出图经验**，按 kind 分段）
+3. `lessons_project` ← `<data_root>/projects/<slug>/MEMORY.md` 的 `### {kind}` 段（项目级**出图经验**，当前 kind）
 
 代理工具自己的项目记忆（Claude 读 `CLAUDE.md`、Codex 读 `AGENTS.md`）由代理原生加载，不归本工作流管。
 不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规。
@@ -111,7 +112,8 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 | `pending_identity_normalizations` | Web 创建的临时角色（`char-<数字>`）待整理队列 |
 | `recent_chars` | id + tagline 列表，Stage C 列选项用 |
 | `available_keys` / `preferred_alias` | Key 选择 |
-| `project_memory` / `lessons_*` | 项目 MEMORY.md 全文（含世界观、项目规则、角色名册、经验） |
+| `project_worldview` | 项目 worldview.md：项目经验/世界观（定位·调性·用语·规则），Web「项目经验」页可编辑 |
+| `lessons_workspace` / `lessons_project` | 出图经验（workspace 通用 / 项目级，各取当前 kind 段；项目级来自 MEMORY.md） |
 
 **只看 `recommend_action` 决策**：
 
@@ -168,7 +170,7 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 `recommend_action == ask` 时，**先做资产侦察再提问**，禁止直接展示通用 4 选项：
 
 1. 列出 `<data_root>/characters/<active_id>/` 下各子目录的文件（`portrait/`、`promo/`、`turnaround/`），判断当前已有哪些资产。
-2. 结合 `project_memory` 中的项目规则（如皮肤品质系统、已归档皮肤设计档案）推断最可能的下一步任务。
+2. 结合 `project_worldview` 中的项目规则（如皮肤品质系统、已归档皮肤设计档案）推断最可能的下一步任务。
 3. 直接用有上下文的问题询问，而不是通用菜单。例：
    - 角色有 portrait/v1.png 且项目有皮肤系统 → "当前项目有绿/蓝/紫/橙四档品质皮肤，要先做董卓的哪档？"
    - 角色有 portrait 但无 turnaround → "已有立绘，接下来出三视图还是美宣？"

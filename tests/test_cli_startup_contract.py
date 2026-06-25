@@ -58,7 +58,7 @@ def test_turn_start_cli_stdout_stays_json_when_context_loader_logs(isolated_data
     assert result.returncode == 0, result.stderr
     assert result.stdout.lstrip().startswith("{")
     payload = json.loads(result.stdout)
-    assert "project_memory" in payload
+    assert "project_worldview" in payload
 
 
 def test_turn_start_cli_serializes_key_models(isolated_data_root):

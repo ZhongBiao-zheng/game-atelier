@@ -222,7 +222,9 @@ class TurnStartResult(BaseModel):
     # v5.2.0：characters 为空时 SKILL 据此决定先问项目还是直接问角色。
     has_projects: bool = False
     projects: list[dict] = Field(default_factory=list)
-    project_memory: str
+    # v5.3.0：项目经验/世界观 ← projects/<slug>/worldview.md（Web「项目经验」页可编辑）。
+    # 项目级出图经验改由 lessons_project（kind 段）承载，不再返回 MEMORY.md 全文。
+    project_worldview: str = ""
     lessons_workspace: str
     lessons_project: str
     lessons_kind: str

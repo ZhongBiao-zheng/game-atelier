@@ -21,13 +21,14 @@ triggers:
   - 角色三面
 ---
 
-## ⚠️ 启动必读 Memory（两层，均在 data_root，turn-start 自动注入）
+## ⚠️ 启动必读 Memory（均在 data_root，turn-start 自动注入）
 
 game-atelier 的记忆全部锚定 data_root，**与代理工具无关**——不读 `~/.claude` / `~/.codex`。
-turn-start 已把这两层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段：
+turn-start 已把这几层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段（slug 按 active 角色归属自动解析）：
 
-1. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用经验）
-2. `lessons_project` / `project_memory` ← `<data_root>/projects/<slug>/MEMORY.md`（按 active 角色归属自动解析 slug）
+1. `project_worldview` ← `<data_root>/projects/<slug>/worldview.md`（**项目经验/世界观**：定位·调性·用语·项目规则；Web「项目经验」页可编辑，出图前作为项目背景纳入上下文）
+2. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用**出图经验**，按 kind 分段）
+3. `lessons_project` ← `<data_root>/projects/<slug>/MEMORY.md` 的 `### {kind}` 段（项目级**出图经验**，当前 kind）
 
 代理工具自己的项目记忆（Claude 读 `CLAUDE.md`、Codex 读 `AGENTS.md`）由代理原生加载，不归本工作流管。
 不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规。

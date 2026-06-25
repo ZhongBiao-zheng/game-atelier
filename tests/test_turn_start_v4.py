@@ -577,3 +577,34 @@ def test_turn_start_pending_distill_nonempty_at_stage_d(project):
     assert out["stage"] == "D"
     assert [x["path"] for x in out["pending_distill"]] == ["characters/holy/portrait/v1.png"]
     assert out["pending_distill"][0]["kind"] == "portrait"
+
+
+def test_turn_start_loads_project_worldview_at_stage_d(project):
+    """stage D 时 turn-start 注入该项目 worldview.md（项目经验/世界观）。"""
+    (project / "characters" / "holy").mkdir(parents=True)
+    (project / "characters" / "holy" / "spec.md").write_text("# 圣灵\n")
+    (project / ".runtime").mkdir()
+    (project / ".runtime" / "active-character.json").write_text(
+        json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
+    )
+    (project / ".runtime" / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test",
+                          "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
+    )
+    wv = project / "projects" / "test-proj" / "worldview.md"
+    wv.parent.mkdir(parents=True)
+    wv.write_text("# 世界观\n暖色调，禁止直呼 IP。", encoding="utf-8")
+    from character_workflow.lib.turn_start import turn_start
+    out = turn_start("portrait", None)
+    assert out["stage"] == "D"
+    assert "暖色调，禁止直呼 IP" in out["project_worldview"]
+
+
+def test_turn_start_project_worldview_empty_when_no_project(project):
+    """非 stage D / 无 worldview → 字段恒在且为空串。"""
+    from character_workflow.lib.turn_start import turn_start
+    out = turn_start("portrait", None)
+    assert out["project_worldview"] == ""

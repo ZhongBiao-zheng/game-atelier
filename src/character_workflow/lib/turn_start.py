@@ -217,7 +217,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
     from character_workflow.lib.context_loader import (
         load_lessons_project,
         load_lessons_workspace,
-        load_project_memory,
+        load_project_worldview,
     )
     from character_workflow.lib import distill
     from character_workflow.lib.draft_processor import process_drafts
@@ -314,7 +314,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         "projects": [
             {"id": p.id, "name": p.name, "slug": p.slug} for p in pf.projects
         ],
-        "project_memory": load_project_memory(project_slug),
+        "project_worldview": load_project_worldview(project_slug),
         "lessons_workspace": load_lessons_workspace(kind),
         "lessons_project": load_lessons_project(project_slug, kind),
         "lessons_kind": kind,
