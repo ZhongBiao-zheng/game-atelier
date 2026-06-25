@@ -69,7 +69,7 @@ def test_promo_full_flow_writes_job_and_image(project, monkeypatch):
         job_id="promo-001", character_id="holy",
         prompt="圣灵祭祀末战前夕 KV", model="generate_image_gpt_image_2",
         params={"size": "1536x864", "n": 1, "vendor": "OpenAI"},
-        seed=None, asset_slot=AssetSlot.PROMO, source_image=str(src),
+        asset_slot=AssetSlot.PROMO, source_image=str(src),
         alias="oai",
     )
     j = read_job("promo-001")
@@ -113,7 +113,7 @@ def test_promo_job_does_not_pollute_portrait_dir(project, monkeypatch):
     write_job(
         job_id="promo-002", character_id="holy",
         prompt="p", model="generate_image_gpt_image_2",
-        params={"n": 1}, seed=None, asset_slot=AssetSlot.PROMO,
+        params={"n": 1}, asset_slot=AssetSlot.PROMO,
     )
     out_dir = job_output_dir("holy", AssetSlot.PROMO)
     portrait_dir = job_output_dir("holy", AssetSlot.PORTRAIT)

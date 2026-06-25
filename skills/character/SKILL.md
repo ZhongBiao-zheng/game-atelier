@@ -22,13 +22,14 @@ triggers:
   - 角色立绘
 ---
 
-## ⚠️ 启动必读 Memory（两层，均在 data_root，turn-start 自动注入）
+## ⚠️ 启动必读 Memory（均在 data_root，turn-start 自动注入）
 
 game-atelier 的记忆全部锚定 data_root，**与代理工具无关**——不读 `~/.claude` / `~/.codex`。
-turn-start 已把这两层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段：
+turn-start 已把这几层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段（slug 按 active 角色归属自动解析）：
 
-1. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用经验）
-2. `lessons_project` / `project_memory` ← `<data_root>/projects/<slug>/MEMORY.md`（按 active 角色归属自动解析 slug）
+1. `project_worldview` ← `<data_root>/projects/<slug>/worldview.md`（**项目经验/世界观**：定位·调性·用语·项目规则；Web「项目经验」页可编辑，出图前作为项目背景纳入上下文）
+2. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用**出图经验**，按 kind 分段）
+3. `lessons_project` ← `<data_root>/projects/<slug>/MEMORY.md` 的 `### {kind}` 段（项目级**出图经验**，当前 kind）
 
 代理工具自己的项目记忆（Claude 读 `CLAUDE.md`、Codex 读 `AGENTS.md`）由代理原生加载，不归本工作流管。
 不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规。
@@ -89,8 +90,9 @@ Installed Plugin 模式下所有 `uv run python -m character_workflow ...` 命�
 # Dev：
 uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 # Codex / Installed Plugin：python "$BOOT" --run -m character_workflow turn-start --message "..."（绝不 uv run）
-# 出图 promo/turnaround 时加 --kind 切换对应 lessons
 ```
+
+默认 `--kind portrait`，本 skill 只产**立绘（portrait）**。**一旦判断需求是 promo（美宣）/ turnaround（三视图）——无论开轮就如此、还是对话中途画师改了主意——直接切到对应 skill 的执行流程**：用 Skill 工具调起 `/game-atelier:promo` · `/game-atelier:turnaround`，一句话告知画师正在切，不必让 ta 手动重输命令。那两个 skill 开轮即 `turn-start --kind promo/turnaround`，`lessons_project` / `lessons_workspace` 自动切到对应 kind 段；不要在本 skill 内用 portrait 上下文硬出别的 kind（lessons 段会错配，分段沉淀也送错轮次）。三个 skill 互为可切换节点，按当前需求落到对的那个。
 
 关键返回字段：
 
@@ -111,7 +113,8 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 | `pending_identity_normalizations` | Web 创建的临时角色（`char-<数字>`）待整理队列 |
 | `recent_chars` | id + tagline 列表，Stage C 列选项用 |
 | `available_keys` / `preferred_alias` | Key 选择 |
-| `project_memory` / `lessons_*` | 项目 MEMORY.md 全文（含世界观、项目规则、角色名册、经验） |
+| `project_worldview` | 项目 worldview.md：项目经验/世界观（定位·调性·用语·规则），Web「项目经验」页可编辑 |
+| `lessons_workspace` / `lessons_project` | 出图经验（workspace 通用 / 项目级，各取当前 kind 段；项目级来自 MEMORY.md） |
 
 **只看 `recommend_action` 决策**：
 
@@ -168,7 +171,7 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 `recommend_action == ask` 时，**先做资产侦察再提问**，禁止直接展示通用 4 选项：
 
 1. 列出 `<data_root>/characters/<active_id>/` 下各子目录的文件（`portrait/`、`promo/`、`turnaround/`），判断当前已有哪些资产。
-2. 结合 `project_memory` 中的项目规则（如皮肤品质系统、已归档皮肤设计档案）推断最可能的下一步任务。
+2. 结合 `project_worldview` 中的项目规则（如皮肤品质系统、已归档皮肤设计档案）推断最可能的下一步任务。
 3. 直接用有上下文的问题询问，而不是通用菜单。例：
    - 角色有 portrait/v1.png 且项目有皮肤系统 → "当前项目有绿/蓝/紫/橙四档品质皮肤，要先做董卓的哪档？"
    - 角色有 portrait 但无 turnaround → "已有立绘，接下来出三视图还是美宣？"
@@ -179,6 +182,8 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 **Stage E**（active 未归属任何项目）：列已有项目 + 新开项目 + 跳过。画师选归属后 `assign-character <active_id> --project <project_id>` 再 turn-start。
 
 ## 写出图 prompt
+
+**应用 turn-start 记忆（必做）**：把 `project_worldview` 的项目定位 / 调性 / 用语 / 规则作背景约束、`lessons_project` / `lessons_workspace`（portrait 段出图经验）作可复用手法与避坑项揉进 prompt——这是启动段那条红线（不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规）的落点，不是开头读一眼就忘。与 spec / 画师本轮指令冲突时后者优先，但要点名冲突。
 
 **所有向画师提问都必须用 AskUserQuestion**（出图确认卡除外）。纯文字追问等于没问，画师选项清晰才能继续。AskUserQuestion 单次最多 4 个问题、每题最多 4 个选项（工具硬上限）；要问得更多就拆成两级——先问大方向，再问细节。
 
@@ -254,18 +259,17 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 ② 对照 spec 三锚点（发色 / 瞳色 / 服装主色）+ 风格档，发现漂移**主动点名**告知画师「X 锚点偏了」并提议带参考图走 A/C 模式修——不默默放行、不替画师定要不要修；
 ③ 无糊脸 / 占位脸 / 裂图等崩坏；明显不达标提议 `retry-job` 或 A 模式重出（**重出 / 修图仍走 PENDING_CONFIRM 确认门**）。
 
-## Turn 收尾：经验沉淀
+## Turn 收尾：经验沉淀（出图经验）
 
-job → DONE / spec 首次归档 / job → FAILED（结构化原因）时触发。问画师是否沉淀经验：
+turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、但还没沉淀过经验的本角色图。
 
-```bash
-uv run python -m character_workflow append-memory \
-  --kind portrait \
-  --line "- YYYY-MM-DD <id> · <一句话> · prompt 片段：\`...\`" \
-  --scope project
-```
-
-`--scope` 默认 project；跨项目通用经验用 workspace（global 层已移除，记忆全部锚定 data_root，与代理工具无关）。
+- **何时问**：`pending_distill` 非空 **且** 画师本轮不在赶活（intent≠revise、非出图确认中）。开口：「这几张你打了高分还没沉淀经验：<列路径/缩略>，要我帮你记吗？」一次说清，不反复唠叨。
+- **画师同意（或「沉第 N 张」）**：看那张图 + 读它的 job（prompt/model/params）+ 评分 → 拟**一条人话经验**（讲清「为什么成功 / 下次怎么复用」），单行，带证据图路径：
+  `- <日期> [<slot>·<评分>★] <人话经验>。证据图 <相对路径>`
+  把这条打成**沉淀确认卡**（复用出图确认卡格式）让画师过目。
+- **画师确认** → 跑 `append-memory --kind <slot> --scope <见下> --line "<上面那条>"`，再跑 `mark-distilled <该图相对路径>`。
+- **画师说「不用沉这张」** → 只跑 `mark-distilled <该图相对路径>`（当忽略，不再提醒）。
+- **scope 决策**：经验含具体角色/风格/配色/类目 → `--scope project`；通用技巧/prompt 协议 → `--scope workspace`。两者都进 MEMORY.md、都 agent-only、都不上 Web。
 
 ## Guardrails
 

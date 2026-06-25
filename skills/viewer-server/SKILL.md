@@ -9,7 +9,8 @@ game-atelier 的记忆全部锚定 data_root，**与代理工具无关**——�
 turn-start 已把这两层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段：
 
 1. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用经验）
-2. `lessons_project` / `project_memory` ← `<data_root>/projects/<slug>/MEMORY.md`（按 active 角色归属自动解析 slug）
+2. `lessons_project` ← `<data_root>/projects/<slug>/MEMORY.md` 的 `### {kind}` 段（出图经验，按 active 角色归属自动解析 slug）
+3. `project_worldview` ← `<data_root>/projects/<slug>/worldview.md`（项目经验/世界观，Web「项目经验」页可编辑）
 
 代理工具自己的项目记忆（Claude 读 `CLAUDE.md`、Codex 读 `AGENTS.md`）由代理原生加载，不归本工作流管。
 不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规。

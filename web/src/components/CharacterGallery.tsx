@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Download, Eye, EyeOff, Loader2, Star, Upload, X } from 'lucide-react';
+import { AlertTriangle, Download, Eye, EyeOff, Heart, Loader2, Upload, X } from 'lucide-react';
 import type { AssetSlot, Job, ProjectsFile } from '../schema/jobs';
 import { fetchGalleryHidden, isGalleryHidden, setGalleryHidden } from '@/api/gallery';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
@@ -250,11 +250,11 @@ export function CharacterGallery({
                 <div className="absolute right-2 top-2 flex gap-1.5">
                   <button
                     onClick={(e) => { e.stopPropagation(); void toggleFavorite(img.path); }}
-                    title={favorited ? '取消收藏' : '收藏'}
-                    aria-label={favorited ? '取消收藏' : '收藏'}
+                    title={favorited ? '取消喜欢' : '喜欢'}
+                    aria-label={favorited ? '取消喜欢' : '喜欢'}
                     className={cn(btn, favorited ? 'text-primary opacity-100 hover:bg-background/90' : 'text-white opacity-0 group-hover:opacity-100 hover:bg-background/90')}
                   >
-                    <Star className="size-3.5" />
+                    <Heart className={cn('size-3.5', favorited && 'fill-current')} />
                   </button>
                   <a
                     href={rawSrc}

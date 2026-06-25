@@ -70,7 +70,7 @@ def test_turnaround_full_flow_writes_job_and_image(project, monkeypatch):
         job_id="turn-001", character_id="holy",
         prompt="圣灵祭祀三视图 正/侧/背 横幅", model="generate_image_gpt_image_2",
         params={"size": "1536x1024", "n": 1, "vendor": "OpenAI"},
-        seed=None, asset_slot=AssetSlot.TURNAROUND, source_image=str(src),
+        asset_slot=AssetSlot.TURNAROUND, source_image=str(src),
         alias="oai",
     )
     j = read_job("turn-001")
@@ -113,7 +113,7 @@ def test_turnaround_job_does_not_pollute_other_dirs(project):
     write_job(
         job_id="turn-002", character_id="holy",
         prompt="p", model="generate_image_gpt_image_2",
-        params={"n": 1}, seed=None, asset_slot=AssetSlot.TURNAROUND,
+        params={"n": 1}, asset_slot=AssetSlot.TURNAROUND,
     )
     out_dir = job_output_dir("holy", AssetSlot.TURNAROUND)
     portrait_dir = job_output_dir("holy", AssetSlot.PORTRAIT)

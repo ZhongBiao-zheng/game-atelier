@@ -34,7 +34,7 @@ def _force_utf8_stdio() -> None:
 def _submit(args: argparse.Namespace) -> int:
     """落盘一条 PENDING_CONFIRM job，stdout 输出纯 job_id。
 
-    集中默认值（model / n / size / seed / status / job_id 格式），
+    集中默认值（model / n / size / status / job_id 格式），
     SKILL.md 调用方不应该再次决定这些值。
     """
     char_id = args.character
@@ -98,7 +98,6 @@ def _submit(args: argparse.Namespace) -> int:
         prompt=prompt,
         model=model,
         params=params,
-        seed=None,
         status=JobStatus.PENDING_CONFIRM,
         asset_slot=AssetSlot(args.kind),
         source_image=source_image,
@@ -225,6 +224,25 @@ def _append_memory(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pending_distill(args: argparse.Namespace) -> int:
+    from character_workflow.lib import distill
+    from character_workflow.lib.active_character import read_active
+
+    character_id = args.character
+    if not character_id:
+        character_id = read_active().active_id
+    pending = distill.pending_for_character(character_id) if character_id else []
+    print(json.dumps({"pending": pending}, ensure_ascii=False))
+    return 0
+
+
+def _mark_distilled(args: argparse.Namespace) -> int:
+    from character_workflow.lib import distill
+    distill.mark_distilled(args.path)
+    print(json.dumps({"ok": True, "path": args.path}, ensure_ascii=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _force_utf8_stdio()
     parser = argparse.ArgumentParser(prog="game-atelier")
@@ -321,6 +339,12 @@ def main(argv: list[str] | None = None) -> int:
     p_run_latest.add_argument("--kind", choices=("portrait", "promo", "turnaround"))
     p_run_latest.add_argument("--character", default=None)
 
+    p_pd = sub.add_parser("pending-distill", help="列出活跃(或指定)角色待沉淀的高分图")
+    p_pd.add_argument("--character", default=None)
+
+    p_md = sub.add_parser("mark-distilled", help="标记某图已沉淀/忽略,不再提醒")
+    p_md.add_argument("path")
+
     args = parser.parse_args(argv)
     if args.cmd == "turn-start":
         print(json.dumps(turn_start(args.kind, args.message), ensure_ascii=False, indent=2))
@@ -375,6 +399,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(json.dumps(job.model_dump(), ensure_ascii=False, indent=2))
         return 0
+    if args.cmd == "pending-distill":
+        return _pending_distill(args)
+    if args.cmd == "mark-distilled":
+        return _mark_distilled(args)
     return 1
 
 

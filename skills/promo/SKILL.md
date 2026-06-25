@@ -21,13 +21,14 @@ triggers:
   - 美宣图
 ---
 
-## ⚠️ 启动必读 Memory（两层，均在 data_root，turn-start 自动注入）
+## ⚠️ 启动必读 Memory（均在 data_root，turn-start 自动注入）
 
 game-atelier 的记忆全部锚定 data_root，**与代理工具无关**——不读 `~/.claude` / `~/.codex`。
-turn-start 已把这两层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段：
+turn-start 已把这几层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段（slug 按 active 角色归属自动解析）：
 
-1. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用经验）
-2. `lessons_project` / `project_memory` ← `<data_root>/projects/<slug>/MEMORY.md`（按 active 角色归属自动解析 slug）
+1. `project_worldview` ← `<data_root>/projects/<slug>/worldview.md`（**项目经验/世界观**：定位·调性·用语·项目规则；Web「项目经验」页可编辑，出图前作为项目背景纳入上下文）
+2. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用**出图经验**，按 kind 分段）
+3. `lessons_project` ← `<data_root>/projects/<slug>/MEMORY.md` 的 `### {kind}` 段（项目级**出图经验**，当前 kind）
 
 代理工具自己的项目记忆（Claude 读 `CLAUDE.md`、Codex 读 `AGENTS.md`）由代理原生加载，不归本工作流管。
 不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规。
@@ -89,7 +90,9 @@ uv run python -m character_workflow turn-start --kind promo
 # Codex / Installed Plugin：python "$BOOT" --run -m character_workflow turn-start --kind promo（绝不 uv run）
 ```
 
-返回 `stage / recommend_action / active_id / spec / lessons`（含 `references/lessons/promo.md`）。
+返回 `stage / recommend_action / active_id / spec / project_worldview / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 promo 段）。
+
+本 skill 只产 promo（美宣）。**对话中途画师需求转向立绘 / 三视图 → 直接切到对应 skill 执行流程**（Skill 工具调起 `/game-atelier:character` · `/game-atelier:turnaround`，一句话告知正在切），不在本 skill 内用 promo 上下文硬出别的 kind。
 
 ## 角色（全程保持）
 
@@ -135,6 +138,8 @@ uv run python -m character_workflow turn-start --kind promo
 
 五维度问清后，按规则写中文 prompt，落到 `characters/<id>/spec.md` 的"美宣记录"小节。
 
+**应用 turn-start 记忆（必做）**：把 `project_worldview` 的项目定位 / 调性 / 用语 / 规则作背景约束、`lessons_project` / `lessons_workspace`（promo 段出图经验）作可复用手法与避坑项揉进 prompt——这是启动段那条红线（不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规）的落点，不是开头读一眼就忘。与 spec / 画师本轮指令冲突时后者优先，但要点名冲突。
+
 **spec 格式** → `docs/references/spec-template.md`
 从 `visual_dna` + `anchors` 提取角色视觉信息；从 `asset.promo` 读美宣固定参数。
 
@@ -175,9 +180,17 @@ uv run python -m character_workflow turn-start --kind promo
 
 画师粘参考图时：先存到 `characters/<id>/source/<timestamp>-<文件名>`，落卡前确认 `reference_mode`（`full_reference` / `style_only` / `color_lighting_only` / `pose_only`），按 mode 写参考关系（详见 `references/prompt-promo-zh.md` 第五节）。立绘 = subject（身份锚定，须由 skill 显式 `--source-image` 传入，runner 不自动补），上传图 = reference（不替换主体）。
 
-## Turn 收尾
+## Turn 收尾：经验沉淀（出图经验）
 
-job DONE/FAILED 后问画师是否沉淀经验，Y → `uv run python -m character_workflow append-lesson --kind promo --line "- <日期> <id> · <一句话>"`
+turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、但还没沉淀过经验的本角色图。
+
+- **何时问**：`pending_distill` 非空 **且** 画师本轮不在赶活（intent≠revise、非出图确认中）。开口：「这几张你打了高分还没沉淀经验：<列路径/缩略>，要我帮你记吗？」一次说清，不反复唠叨。
+- **画师同意（或「沉第 N 张」）**：看那张图 + 读它的 job（prompt/model/params）+ 评分 → 拟**一条人话经验**（讲清「为什么成功 / 下次怎么复用」），单行，带证据图路径：
+  `- <日期> [<slot>·<评分>★] <人话经验>。证据图 <相对路径>`
+  把这条打成**沉淀确认卡**（复用出图确认卡格式）让画师过目。
+- **画师确认** → 跑 `append-memory --kind <slot> --scope <见下> --line "<上面那条>"`，再跑 `mark-distilled <该图相对路径>`。
+- **画师说「不用沉这张」** → 只跑 `mark-distilled <该图相对路径>`（当忽略，不再提醒）。
+- **scope 决策**：经验含具体角色/风格/配色/类目 → `--scope project`；通用技巧/prompt 协议 → `--scope workspace`。两者都进 MEMORY.md、都 agent-only、都不上 Web。
 
 ## Guardrails
 

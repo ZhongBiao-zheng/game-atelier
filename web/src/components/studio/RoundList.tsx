@@ -1,6 +1,6 @@
 import { type ButtonHTMLAttributes, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Download, Film, Music, Star, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Download, Film, Heart, Music, Trash2, X } from 'lucide-react';
 
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
 import { useVideoFrame } from '@/lib/videoFrame';
@@ -483,11 +483,11 @@ function DoneBatch({
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onToggleFavorite?.(path); }}
-                      aria-label={favorited ? '取消收藏' : '收藏'}
-                      title={favorited ? '取消收藏' : '收藏'}
+                      aria-label={favorited ? '取消喜欢' : '喜欢'}
+                      title={favorited ? '取消喜欢' : '喜欢'}
                       className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${favorited ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
                     >
-                      <Star className="size-4" aria-hidden />
+                      <Heart className={`size-4 ${favorited ? 'fill-current' : ''}`} aria-hidden />
                     </button>
                     <a
                       href={videoSrc(path)}
@@ -520,11 +520,11 @@ function DoneBatch({
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onToggleFavorite?.(path); }}
-                      aria-label={favorited ? '取消收藏' : '收藏'}
-                      title={favorited ? '取消收藏' : '收藏'}
+                      aria-label={favorited ? '取消喜欢' : '喜欢'}
+                      title={favorited ? '取消喜欢' : '喜欢'}
                       className={`grid size-8 place-items-center rounded-full border border-border bg-scrim backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${favorited ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
                     >
-                      <Star className="size-4" aria-hidden />
+                      <Heart className={`size-4 ${favorited ? 'fill-current' : ''}`} aria-hidden />
                     </button>
                     <a
                       href={imageSrc(path)}

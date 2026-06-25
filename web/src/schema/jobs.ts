@@ -39,7 +39,6 @@ export interface Job {
   submitted_at: string;
   model: string;
   params: JobParams;
-  seed: number | null;
   output_paths: string[];
   status: JobStatus;
   error: string | null;
@@ -55,14 +54,12 @@ export interface Job {
   progress_phase?: 'sent' | 'downloading' | null;
 }
 
-export const WEB_EDITABLE_FIELDS = ['prompt', 'model', 'params', 'seed'] as const;
+export const WEB_EDITABLE_FIELDS = ['prompt', 'params'] as const;
 export type WebEditableField = (typeof WEB_EDITABLE_FIELDS)[number];
 
 export interface WebEditableJobPatch {
   prompt?: string;
-  model?: string;
   params?: JobParams;
-  seed?: number | null;
 }
 
 export interface CharacterEntry {

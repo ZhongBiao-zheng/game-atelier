@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { Search, ChevronDown, Image as ImageIcon, Video, Wand2, Star, EyeOff, Check, X } from 'lucide-react';
+import { Search, ChevronDown, Image as ImageIcon, Video, Wand2, Heart, EyeOff, Check, X } from 'lucide-react';
 
 import { ToolbarPopover } from './ToolbarPopover';
 import type { GenMode, HistoryFilters, TimeFilter } from '@/lib/historyFilters';
@@ -16,7 +16,7 @@ const MODE_OPTS: { key: GenMode; label: string; icon: ReactNode }[] = [
   { key: 'skill', label: 'Skill', icon: <Wand2 size={18} aria-hidden /> },
 ];
 const OP_OPTS: { key: 'favorite' | 'hidden'; label: string; icon: ReactNode }[] = [
-  { key: 'favorite', label: '收藏', icon: <Star size={18} aria-hidden /> },
+  { key: 'favorite', label: '喜欢', icon: <Heart size={18} aria-hidden /> },
   { key: 'hidden', label: '隐藏', icon: <EyeOff size={18} aria-hidden /> },
 ];
 

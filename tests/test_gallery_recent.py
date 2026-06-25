@@ -66,7 +66,6 @@ def test_includes_matching_job_id_for_detail_route(client, tmp_path):
         submitted_at="2026-05-29T00:00:00Z",
         model="m",
         params=JobParams(),
-        seed=None,
         output_paths=[str(image.resolve())],
         status=JobStatus.DONE,
         error=None,
@@ -156,6 +155,25 @@ def test_hidden_sidecar_corrupted_falls_back_empty(client, tmp_path):
     (runtime / "gallery-hidden.json").write_text("not-json", encoding="utf-8")
     assert client.get("/api/gallery/hidden").json() == {"paths": []}
     assert len(client.get("/api/gallery/recent").json()["items"]) == 1
+
+
+def test_liked_first_then_rating_desc(client, tmp_path, monkeypatch):
+    """首页作品展示排序：喜欢的恒在最前，其余按评分降序；关随机便于断言。"""
+    from viewer_server import routes
+
+    chars = tmp_path / "characters"
+    for name in ("liked-low.png", "unliked-high.png", "unliked-mid.png"):
+        _make_image(chars / "c" / "portrait" / name)
+    monkeypatch.setattr(routes.random, "shuffle", lambda items: None)
+    client.post("/api/gallery/ratings", json={"path": "characters/c/portrait/liked-low.png", "rating": 1.0})
+    client.post("/api/gallery/ratings", json={"path": "characters/c/portrait/unliked-high.png", "rating": 5.0})
+    client.post("/api/gallery/ratings", json={"path": "characters/c/portrait/unliked-mid.png", "rating": 3.0})
+    client.post("/api/gallery/favorites", json={"path": "characters/c/portrait/liked-low.png", "favorite": True})
+
+    items = client.get("/api/gallery/recent").json()["items"]
+    assert [i["filename"] for i in items] == ["liked-low.png", "unliked-high.png", "unliked-mid.png"]
+    assert items[0]["rating"] == 1.0
+    assert items[1]["rating"] == 5.0
 
 
 def test_gallery_image_endpoint_rejects_traversal(client, tmp_path):

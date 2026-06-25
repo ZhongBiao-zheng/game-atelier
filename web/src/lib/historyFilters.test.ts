@@ -7,7 +7,7 @@ import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS } from './historyF
 function job(p: Partial<Job>): Job {
   return {
     job_id: 'j', character_id: 'c', prompt: '', submitted_at: '2026-06-16T00:00:00Z',
-    model: 'm', params: {}, seed: null, output_paths: [], status: 'done',
+    model: 'm', params: {}, output_paths: [], status: 'done',
     error: null, asset_slot: 'portrait', kind: 'image', namespace: 'studio',
     source_image: null, alias: null, provider: null, retry_of: null, progress_phase: null,
     ...p,

@@ -297,7 +297,6 @@ describe('Home', () => {
             submitted_at: '2026-05-27T01:00:00Z',
             model: 'doubao',
             params: {},
-            seed: null,
             output_paths: ['/tmp/studio/job-studio-1/v1.png'],
             status: 'done',
             error: null,

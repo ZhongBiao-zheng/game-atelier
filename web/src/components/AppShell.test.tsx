@@ -78,7 +78,6 @@ describe('AppShell', () => {
             submitted_at: '2026-05-29T00:00:00Z',
             model: 'gpt-image-2',
             params: { n: 1 },
-            seed: null,
             output_paths: ['/tmp/game-atelier/characters/cao-cao/promo/kv.png'],
             status: 'done',
             error: null,

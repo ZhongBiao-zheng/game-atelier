@@ -33,7 +33,6 @@ def test_jobs_module_writes_to_runtime_dir(isolated_data_root):
         prompt="test",
         model="gpt_image_2",
         params={},
-        seed=None,
         status=jobs.JobStatus.PENDING_CONFIRM,
         asset_slot=jobs.AssetSlot.PORTRAIT,
     )

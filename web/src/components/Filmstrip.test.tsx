@@ -15,7 +15,6 @@ const promoJob: Job = {
   submitted_at: '2026-06-12T00:00:00Z',
   model: 'gpt-image-2',
   params: { n: 2 },
-  seed: null,
   output_paths: ['/root/characters/cao-cao/promo/v1.png', '/root/characters/cao-cao/promo/v2.png'],
   status: 'done',
   error: null,

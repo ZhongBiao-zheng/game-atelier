@@ -98,6 +98,17 @@ def save_job(job: Job) -> Job:
         return _write(job)
 
 
+def _load_job(data: Any) -> Job:
+    """读盘构造 Job：先剥离已废弃字段（seed），存量 JSON 不触发 extra=forbid。
+
+    非 dict（坏文件被截断 / 手改成 `[]` 或裸值）时跳过 `.pop`，交给 model_validate
+    抛 ValidationError → 上层 except 走「跳过 + 留日志」；绝不在 `.pop` 阶段抛
+    Type/AttributeError 逃逸容错网，否则整个 /api/jobs 列表会 500（角色页全空）。"""
+    if isinstance(data, dict):
+        data.pop("seed", None)
+    return Job.model_validate(data)
+
+
 def list_jobs() -> list[Job]:
     jobs_dir = _runtime_dir() / "jobs"
     if not jobs_dir.exists():
@@ -106,7 +117,7 @@ def list_jobs() -> list[Job]:
     for p in sorted(jobs_dir.glob("*.json")):
         # 一条坏文件（半写 / 手改 schema 不符）不能拖垮整个列表 → 跳过并留日志。
         try:
-            jobs.append(Job.model_validate(json.loads(p.read_text(encoding="utf-8"))))
+            jobs.append(_load_job(json.loads(p.read_text(encoding="utf-8"))))
         except (OSError, json.JSONDecodeError, ValidationError):
             logger.warning("skipping bad job file: %s", p.name)
     return jobs
@@ -114,7 +125,7 @@ def list_jobs() -> list[Job]:
 
 def write_job(
     *, job_id: str, character_id: str, prompt: str, model: str,
-    params: dict[str, Any], seed: int | None,
+    params: dict[str, Any],
     status: JobStatus = JobStatus.PENDING_CONFIRM,
     asset_slot: AssetSlot = AssetSlot.PORTRAIT,
     source_image: str | None = None,
@@ -139,7 +150,6 @@ def write_job(
         submitted_at=datetime.now(timezone.utc).isoformat(),
         model=model,
         params=JobParams(**params),
-        seed=seed,
         output_paths=[],
         status=status,
         error=None,
@@ -153,8 +163,7 @@ def write_job(
 
 
 def read_job(job_id: str) -> Job:
-    data = json.loads(_path(job_id).read_text(encoding="utf-8"))
-    return Job.model_validate(data)
+    return _load_job(json.loads(_path(job_id).read_text(encoding="utf-8")))
 
 
 def update_job_status(

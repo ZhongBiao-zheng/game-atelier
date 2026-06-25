@@ -27,7 +27,7 @@ def runtime(tmp_path, monkeypatch):
 def test_default_kind_is_portrait(runtime):
     job = write_job(
         job_id="j1", character_id="holy", prompt="p",
-        model="gpt_image_2", params={}, seed=None,
+        model="gpt_image_2", params={},
     )
     assert job.asset_slot == AssetSlot.PORTRAIT
     assert job.source_image is None
@@ -36,7 +36,7 @@ def test_default_kind_is_portrait(runtime):
 def test_kind_round_trip(runtime):
     write_job(
         job_id="j1", character_id="holy", prompt="p",
-        model="gpt_image_2", params={}, seed=None,
+        model="gpt_image_2", params={},
         asset_slot=AssetSlot.PROMO, source_image="/abs/upload.png",
     )
     re_read = read_job("j1")
@@ -68,7 +68,7 @@ def test_job_output_dir_routes_by_kind(tmp_path):
 def test_job_model_accepts_all_three_kinds():
     base_kwargs = dict(
         job_id="x", character_id="c", prompt="p", submitted_at="2026-05-19T10:00:00Z",
-        model="m", params={}, seed=None, output_paths=[],
+        model="m", params={}, output_paths=[],
         status=JobStatus.PENDING_CONFIRM, error=None,
     )
     for k in (AssetSlot.PORTRAIT, AssetSlot.PROMO, AssetSlot.TURNAROUND):
@@ -79,7 +79,7 @@ def test_job_model_accepts_all_three_kinds():
 def test_source_image_persists_to_disk(runtime):
     write_job(
         job_id="j2", character_id="holy", prompt="p",
-        model="gpt_image_2", params={}, seed=None,
+        model="gpt_image_2", params={},
         asset_slot=AssetSlot.TURNAROUND, source_image="/abs/refs/three-view-source.png",
     )
     raw = json.loads((runtime / "jobs" / "j2.json").read_text(encoding="utf-8"))

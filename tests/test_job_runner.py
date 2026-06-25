@@ -73,7 +73,6 @@ def test_run_job_normalizes_refs_clears_error_and_skips_invalid_artifact(
         prompt="圣灵祭祀冒险启程 KV",
         model="generate_image_gpt_image_2",
         params={"size": "2048x1152", "n": 1, "reference_images": []},
-        seed=None,
         status=JobStatus.PENDING_CONFIRM,
         asset_slot=AssetSlot.PROMO,
         source_image=str(src),
@@ -126,15 +125,15 @@ def test_run_latest_uses_active_character_kind_and_newest_pending_job(project, m
     write_active("holy")
     write_job(
         job_id="portrait-001", character_id="holy", prompt="old",
-        model="m", params={}, seed=None, asset_slot=AssetSlot.PORTRAIT,
+        model="m", params={}, asset_slot=AssetSlot.PORTRAIT,
     )
     write_job(
         job_id="promo-001", character_id="holy", prompt="old",
-        model="m", params={}, seed=None, asset_slot=AssetSlot.PROMO,
+        model="m", params={}, asset_slot=AssetSlot.PROMO,
     )
     write_job(
         job_id="promo-002", character_id="holy", prompt="new",
-        model="m", params={}, seed=None, asset_slot=AssetSlot.PROMO,
+        model="m", params={}, asset_slot=AssetSlot.PROMO,
     )
 
     captured: list[str] = []
@@ -159,7 +158,6 @@ def test_run_job_routes_custom_provider_through_dispatch(project, monkeypatch):
         submitted_at="2026-05-28T00:00:00+08:00",
         model="gpt-image-2-all",
         params=JobParams(size="2048x2048", n=1),
-        seed=None,
         output_paths=[],
         status=JobStatus.PENDING,
         error=None,
@@ -229,7 +227,7 @@ def test_run_job_video_branch_writes_mp4_and_done(project, monkeypatch):
     write_job(
         job_id="vid-1", character_id="ark", prompt="a calm sea",
         model="doubao-seedance-2-0-fast-260128", params={"duration": 5, "frame_mode": "auto"},
-        seed=None, status=JobStatus.PENDING, alias="ark",
+        status=JobStatus.PENDING, alias="ark",
     )
     # video job 落 studio namespace；用 save_job 直接打 kind/namespace
     job = read_job("vid-1").model_copy(update={"kind": JobKind.VIDEO, "namespace": "studio"})
@@ -254,7 +252,7 @@ def test_run_job_video_branch_writes_progress_phases(project, monkeypatch):
     write_job(
         job_id="vid-phase", character_id="ark", prompt="a calm sea",
         model="doubao-seedance-2-0-fast-260128", params={"frame_mode": "auto"},
-        seed=None, status=JobStatus.PENDING, alias="ark",
+        status=JobStatus.PENDING, alias="ark",
     )
     job = read_job("vid-phase").model_copy(update={"kind": JobKind.VIDEO, "namespace": "studio"})
     save_job(job)
@@ -292,7 +290,7 @@ def test_run_job_video_branch_marks_failed_on_no_valid_artifacts(project, monkey
     write_job(
         job_id="vid-bad", character_id="ark", prompt="x",
         model="doubao-seedance-2-0-fast-260128", params={"frame_mode": "auto"},
-        seed=None, status=JobStatus.PENDING, alias="ark",
+        status=JobStatus.PENDING, alias="ark",
     )
     job = read_job("vid-bad").model_copy(update={"kind": JobKind.VIDEO, "namespace": "studio"})
     save_job(job)

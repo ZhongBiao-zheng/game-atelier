@@ -12,13 +12,14 @@ interface Props {
   selectedId?: string | null;
   onSelect: (id: string, name: string) => void;
   onDelete?: (id: string) => void;
+  onOpenProject?: (project: Project) => void;
 }
 
 const UNCATEGORIZED = '__uncategorized__';
 const DRAG_PROJECT = 'text/project-id';
 const DRAG_CHAR = 'text/character-id';
 
-export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props) {
+export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenProject }: Props) {
   const [characters, setCharacters] = useState<CharacterEntry[]>([]);
   const [projects, setProjects] = useState<ProjectsFile>({ projects: [], assignments: {} });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -433,6 +434,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete }: Props
               onProjectDragOver={onProjectDragOver}
               onProjectDrop={onProjectDrop}
               onProjectDragEnd={onProjectDragEnd}
+              onOpen={onOpenProject}
             />
           ))}
 
@@ -594,6 +596,7 @@ interface ProjectGroupProps {
   onProjectDragOver: (e: React.DragEvent, id: string, el: HTMLElement) => void;
   onProjectDrop: (e: React.DragEvent, id: string, el: HTMLElement) => void;
   onProjectDragEnd: () => void;
+  onOpen?: (p: Project) => void;
 }
 
 function ProjectGroup({
@@ -603,6 +606,7 @@ function ProjectGroup({
   onDelete, inputRef, renderChar,
   isDragging, dropIndicator,
   onProjectDragStart, onProjectDragOver, onProjectDrop, onProjectDragEnd,
+  onOpen,
 }: ProjectGroupProps) {
   const [open, setOpen] = useState(true);
   const sectionRef = useRef<HTMLElement>(null);
@@ -666,9 +670,9 @@ function ProjectGroup({
           />
         ) : (
           <span
-            onClick={() => setOpen(o => !o)}
+            onClick={() => onOpen?.(project)}
             onDoubleClick={(e) => onRenameStart(project, e)}
-            title="双击重命名"
+            title="点击打开项目经验 · 双击重命名"
             className="flex-1 uppercase tracking-label text-muted-foreground/70 font-medium cursor-pointer truncate"
           >
             {project.name}

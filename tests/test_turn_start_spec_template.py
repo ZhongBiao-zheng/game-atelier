@@ -32,38 +32,16 @@ def _setup_stage_d(project, memory_content: str = "") -> None:
         (project / "projects" / "test-proj" / "MEMORY.md").write_text(memory_content)
 
 
-def test_turn_start_returns_project_memory_field(project):
-    """turn_start must return 'project_memory', not 'worldview_project'."""
-    memory = "# 项目记忆\n\n## 世界观与设计语言\n三国麻将游戏\n"
-    _setup_stage_d(project, memory)
+def test_turn_start_returns_project_worldview_not_project_memory(project):
+    """项目级经验改由 project_worldview（worldview.md）承载；project_memory 已移除。"""
+    _setup_stage_d(project)
 
     from character_workflow.lib.turn_start import turn_start
     result = turn_start("portrait", None)
 
-    assert "project_memory" in result, "'project_memory' key must be present"
-    assert "worldview_project" not in result, "'worldview_project' must be removed"
-
-
-def test_project_memory_reads_full_memory_md(project):
-    """project_memory should contain the full text of project MEMORY.md."""
-    memory = "# 项目记忆\n\n## 世界观与设计语言\n精灵收集游戏\n\n## 项目规则\n品质皮肤系统规则\n"
-    _setup_stage_d(project, memory)
-
-    from character_workflow.lib.turn_start import turn_start
-    result = turn_start("portrait", None)
-
-    assert "精灵收集游戏" in result["project_memory"]
-    assert "品质皮肤系统规则" in result["project_memory"]
-
-
-def test_project_memory_empty_when_no_memory_file(project):
-    """project_memory should be empty string when project MEMORY.md doesn't exist."""
-    _setup_stage_d(project, memory_content="")
-
-    from character_workflow.lib.turn_start import turn_start
-    result = turn_start("portrait", None)
-
-    assert result["project_memory"] == ""
+    assert "project_worldview" in result, "'project_worldview' key must be present"
+    assert "project_memory" not in result, "'project_memory' must be removed"
+    assert "worldview_project" not in result
 
 
 def test_worldview_workspace_removed(project):
