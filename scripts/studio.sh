@@ -112,6 +112,9 @@ if command -v pnpm &>/dev/null; then
       echo "首次构建：安装前端依赖..."
       pnpm install && pnpm approve-builds esbuild || exit 1
     fi
+    # 先清再构建：tailwind v4 vite 插件会把旧 dist/* 扫进 content 源，over-existing
+    # 构建非幂等（CSS 会虚胖、hash 漂移，与 make build / CI clean build 不一致）。同 Makefile build 目标。
+    rm -rf dist
     pnpm build || exit 1
   ) || build_ok=0
   if [ "$build_ok" != "1" ]; then
