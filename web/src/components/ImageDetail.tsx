@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Trash2, CheckCircle2, Copy, PanelLeftOpen, Save, Star } from 'lucide-react';
+import { ArrowLeft, Trash2, CheckCircle2, Copy, PanelLeftOpen, Save } from 'lucide-react';
 import type { Job, WebEditableJobPatch } from '../schema/jobs';
-import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
+import { useGalleryRatings } from '@/hooks/useGalleryRatings';
+import { StarRating } from '@/components/StarRating';
+import { formatBeijingTime } from '@/lib/time';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 
@@ -31,7 +32,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
     variant: 'default' | 'destructive';
     onConfirm: () => void;
   } | null>(null);
-  const { toggleFavorite, isFavorited } = useGalleryFavorites();
+  const { getRating, setRating } = useGalleryRatings();
 
   useEffect(() => {
     fetch(`/api/jobs/${jobId}`).then(r => r.json()).then(setJob);
@@ -109,20 +110,10 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
         </div>
         <div className="flex items-center gap-3">
           <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void toggleFavorite(path)}
-            title={isFavorited(path) ? '取消收藏' : '收藏'}
-            className={isFavorited(path) ? 'text-primary' : undefined}
-          >
-            <Star className="size-3.5" />
-            {isFavorited(path) ? '已收藏' : '收藏'}
-          </Button>
-          <Button
             size="sm"
             onClick={saveChanges}
             disabled={saving || Object.keys(patch).length === 0}
-            title="保存对 prompt / model / seed 的修改"
+            title="保存对提示词的修改"
           >
             <Save className="size-3.5" />
             {saving ? '保存中…' : '保存'}
@@ -179,23 +170,9 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
             />
           </Field>
 
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="model">
-              <Input
-                value={patch.model ?? job.model}
-                onChange={e => setPatch({ ...patch, model: e.target.value })}
-                className="font-mono text-sm"
-              />
-            </Field>
-
-            <Field label="seed">
-              <Input
-                value={(patch.seed ?? job.seed ?? '') as string | number}
-                onChange={e => setPatch({ ...patch, seed: e.target.value ? Number(e.target.value) : null })}
-                className="font-mono text-sm"
-              />
-            </Field>
-          </div>
+          <Field label="你的评分">
+            <StarRating value={getRating(path)} onChange={(v) => void setRating(path, v)} />
+          </Field>
 
           <Separator className="opacity-50" />
 
@@ -203,8 +180,11 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
             <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">job_id</dt>
             <dd className="font-mono text-muted-foreground break-all">{job.job_id}</dd>
 
+            <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">model</dt>
+            <dd className="font-mono text-muted-foreground break-all">{job.model}</dd>
+
             <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">submitted</dt>
-            <dd className="font-mono text-muted-foreground break-all">{job.submitted_at}</dd>
+            <dd className="font-mono text-muted-foreground break-all">{formatBeijingTime(job.submitted_at)}</dd>
 
             <dt className="text-xs uppercase tracking-label text-muted-foreground/70 mt-0.5">path</dt>
             <dd className="font-mono text-muted-foreground break-all">{path}</dd>

@@ -65,7 +65,6 @@ class Job(BaseModel):
     submitted_at: str
     model: str
     params: JobParams
-    seed: int | None
     output_paths: list[str]
     status: JobStatus
     error: str | None
@@ -87,9 +86,7 @@ class Job(BaseModel):
 class WebEditableJobPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     prompt: str | None = None
-    model: str | None = None
     params: JobParams | None = None
-    seed: int | None = None
 
 
 class SpecPatch(BaseModel):
@@ -220,6 +217,8 @@ class TurnStartResult(BaseModel):
     project_id: str | None
     project_slug: str | None
     project_name: str | None
+    # v5.3.0：经验沉淀闭环 —— 待沉淀的高分/喜欢角色图，每条 {path, rating, kind}。
+    pending_distill: list[dict] = Field(default_factory=list)
     # v5.2.0：characters 为空时 SKILL 据此决定先问项目还是直接问角色。
     has_projects: bool = False
     projects: list[dict] = Field(default_factory=list)

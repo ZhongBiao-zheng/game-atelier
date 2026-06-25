@@ -10,7 +10,7 @@ def test_job_status_enum_strict():
         Job(
             job_id="j-1", character_id="c", prompt="p",
             submitted_at="2026-05-18T10:00:00Z", model="gpt-image-2",
-            params={}, seed=None, output_paths=[], status="not-a-status", error=None,
+            params={}, output_paths=[], status="not-a-status", error=None,
         )
 
 

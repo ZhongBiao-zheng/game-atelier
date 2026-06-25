@@ -11,7 +11,7 @@ def _studio_job(job_id: str, status: JobStatus) -> Job:
     return Job(
         job_id=job_id, character_id="alias", prompt="p",
         submitted_at="2026-06-10T10:00:00Z", model="m",
-        params=JobParams(), seed=None, output_paths=[],
+        params=JobParams(), output_paths=[],
         status=status, error=None, kind="video", namespace="studio",
     )
 
@@ -22,7 +22,7 @@ def test_fail_orphan_studio_jobs_only_touches_pending_studio(isolated_data_root)
     # character job 由独立 Skill 进程跑，server 重启不代表它死了 —— 不能动。
     jobs_lib.write_job(
         job_id="char-pending", character_id="c1", prompt="p",
-        model="m", params={}, seed=None, status=JobStatus.PENDING,
+        model="m", params={}, status=JobStatus.PENDING,
     )
 
     reclaimed = jobs_lib.fail_orphan_studio_jobs()

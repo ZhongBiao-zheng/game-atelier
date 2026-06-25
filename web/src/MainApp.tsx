@@ -8,7 +8,8 @@ import { FirstRunConfig } from './components/FirstRunConfig';
 import { ResizableDivider } from './components/ResizableDivider';
 import { useSSE } from './hooks/useSSE';
 import { useActiveCharacter } from './hooks/useActiveCharacter';
-import type { AssetSlot, CharacterEntry, ProjectsFile } from './schema/jobs';
+import type { AssetSlot, CharacterEntry, Project, ProjectsFile } from './schema/jobs';
+import { ProjectPage } from './pages/ProjectPage';
 
 // 弹性分界线参数（与方案 D 节同步）：名册不可收起（无 snap），胶片带 <64 收起
 const ROSTER = { key: 'workshop:roster-width', def: 264, min: 200, max: 400 };
@@ -117,6 +118,7 @@ function ThreeColumnLayout({
   const [detailJob, setDetailJob] = useState<{ path: string; jobId: string } | null>(
     routedImageDetail ?? null,
   );
+  const [openedProject, setOpenedProject] = useState<Project | null>(null);
   const sseSignal = useSSE();
   const activeId = useActiveCharacter(sseSignal);
 
@@ -240,23 +242,28 @@ function ThreeColumnLayout({
           <LeftSidebar
             sseSignal={sseSignal}
             selectedId={selected?.id}
-            onSelect={(id, name) => setSelected({ id, name })}
+            onSelect={(id, name) => { setOpenedProject(null); setSelected({ id, name }); }}
+            onOpenProject={(p) => setOpenedProject(p)}
             onDelete={(id) => {
               if (selected?.id === id) setSelected(null);
             }}
           />
         </div>
         <div className="col-start-2 min-w-0">
-          <CharacterGallery
-            characterId={selected?.id ?? null}
-            characterName={selected?.name ?? null}
-            initialTab={routedAssetSlot}
-            onSelectImage={(path, jobId, slot) => {
-              if (slot) setDetailSlot(slot);
-              setDetailJob({ path, jobId });
-            }}
-            sseSignal={sseSignal}
-          />
+          {openedProject ? (
+            <ProjectPage projectId={openedProject.id} onBack={() => setOpenedProject(null)} />
+          ) : (
+            <CharacterGallery
+              characterId={selected?.id ?? null}
+              characterName={selected?.name ?? null}
+              initialTab={routedAssetSlot}
+              onSelectImage={(path, jobId, slot) => {
+                if (slot) setDetailSlot(slot);
+                setDetailJob({ path, jobId });
+              }}
+              sseSignal={sseSignal}
+            />
+          )}
         </div>
         <ResizableDivider
           key="roster-divider"

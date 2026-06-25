@@ -219,6 +219,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         load_lessons_workspace,
         load_project_memory,
     )
+    from character_workflow.lib import distill
     from character_workflow.lib.draft_processor import process_drafts
     from character_workflow.lib.identity import list_pending_identity_normalizations
     from character_workflow.lib.intent import compute_recommend_action
@@ -281,6 +282,10 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
                 "建议先整理角色身份"
             )
 
+    pending_distill = (
+        distill.pending_for_character(active_id) if stage == "D" and active_id else []
+    )
+
     return {
         "stage": stage,
         "stage_reason": reason,
@@ -302,6 +307,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         "project_id": project_id,
         "project_slug": project_slug,
         "project_name": project_name,
+        "pending_distill": pending_distill,
         # 全量项目清单 + 是否已有项目：characters 为空时 SKILL 用它决定
         # 「先问项目还是直接问角色」。
         "has_projects": bool(pf.projects),

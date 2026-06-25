@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'wouter';
-import { Star } from 'lucide-react';
+import { Heart } from 'lucide-react';
 
 import { fetchGalleryRecent, type GalleryItem } from '@/api/gallery';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
@@ -15,6 +15,7 @@ type State =
 export function Home() {
   const [state, setState] = useState<State>({ kind: 'loading' });
   const { toggleFavorite, isFavorited } = useGalleryFavorites();
+  const colCount = useColumnCount();
 
   useEffect(() => {
     let cancel = false;
@@ -39,15 +40,15 @@ export function Home() {
             loading="lazy"
           />
 
-          {/* 收藏按钮：hover 淡入（已收藏常显），玻璃药丸取代描边框 */}
+          {/* 喜欢按钮：hover 淡入（已喜欢常显），玻璃药丸取代描边框 */}
           <button
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); void toggleFavorite(item.path); }}
-            title={favorited ? '取消收藏' : '收藏'}
-            aria-label={favorited ? '取消收藏' : '收藏'}
-            className={`absolute right-3 top-3 grid size-9 place-items-center rounded-full bg-scrim/80 backdrop-blur-glass transition-all duration-200 hover:bg-background/90 z-10 ${favorited ? 'text-primary opacity-100' : 'text-foreground opacity-0 group-hover:opacity-100'}`}
+            title={favorited ? '取消喜欢' : '喜欢'}
+            aria-label={favorited ? '取消喜欢' : '喜欢'}
+            className={`absolute left-3 top-3 grid size-9 place-items-center rounded-full bg-scrim/80 backdrop-blur-glass transition-all duration-200 hover:bg-background/90 z-10 ${favorited ? 'text-primary opacity-100' : 'text-foreground opacity-0 group-hover:opacity-100'}`}
           >
-            <Star className="size-4" aria-hidden />
+            <Heart className={`size-4 ${favorited ? 'fill-current' : ''}`} aria-hidden />
           </button>
         </div>
       </Link>
@@ -105,18 +106,48 @@ export function Home() {
         </div>
       )}
 
-      {/* 瀑布流作品展示：CSS columns 方案，无额外依赖 */}
+      {/* 瀑布流作品展示：round-robin 分列保证「行优先」阅读序——首横排从左到右就是排名前列
+       *（CSS columns 是列优先，会把高分作品竖着塞进左栏；故改 JS 轮转分列 + flex 竖向堆叠）。 */}
       {state.kind === 'success' && state.items.length > 0 && (
-        <div className="columns-2 sm:columns-3 lg:columns-4 2xl:columns-5 gap-6">
-          {state.items.map((item) => (
-            <div key={item.path} className="mb-6 break-inside-avoid">
-              <GalleryCard item={item} />
+        <div className="flex items-start gap-6">
+          {distributeColumns(state.items, colCount).map((col, ci) => (
+            <div key={ci} className="flex min-w-0 flex-1 flex-col gap-6">
+              {col.map((item) => (
+                <GalleryCard key={item.path} item={item} />
+              ))}
             </div>
           ))}
         </div>
       )}
     </div>
   );
+}
+
+/** 轮转分列：item i → 第 i%n 列。读首行即 items[0..n-1]（排名前列），列内再竖向堆叠保留瀑布流。 */
+function distributeColumns(items: GalleryItem[], n: number): GalleryItem[][] {
+  const cols: GalleryItem[][] = Array.from({ length: n }, () => []);
+  items.forEach((item, i) => cols[i % n].push(item));
+  return cols;
+}
+
+/** 响应式列数，对齐原 columns-* 断点（sm640=3 / lg1024=4 / 2xl1536=5，base=2）。 */
+function columnCountForWidth(w: number): number {
+  if (w >= 1536) return 5;
+  if (w >= 1024) return 4;
+  if (w >= 640) return 3;
+  return 2;
+}
+
+function useColumnCount(): number {
+  const [n, setN] = useState(() =>
+    typeof window === 'undefined' ? 4 : columnCountForWidth(window.innerWidth),
+  );
+  useEffect(() => {
+    const onResize = () => setN(columnCountForWidth(window.innerWidth));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return n;
 }
 
 function galleryItemHref(item: GalleryItem): string {

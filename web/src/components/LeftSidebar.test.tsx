@@ -71,4 +71,36 @@ describe('LeftSidebar', () => {
     expect(blazeRow.querySelector('img')).toBeNull();
     expect(blazeRow.textContent).toContain('烈');
   });
+
+  it('单击项目名触发 onOpenProject、不折叠；点 chevron 仍折叠', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/characters' && !init) {
+        return { ok: true, json: async () => [] };
+      }
+      if (url === '/api/projects' && !init) {
+        return {
+          ok: true,
+          json: async () => ({
+            projects: [{ id: 'p1', slug: 's1', name: '魔幻', created_at: '2026-06-24T00:00:00+00:00' }],
+            assignments: {},
+          }),
+        };
+      }
+      if (url === '/api/active-character') {
+        return { ok: true, json: async () => ({ active_id: null, updated_at: '' }) };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+
+    const onOpenProject = vi.fn();
+    render(<LeftSidebar sseSignal={0} onSelect={vi.fn()} onOpenProject={onOpenProject} />);
+    const nameEl = await screen.findByText('魔幻');
+    fireEvent.click(nameEl);
+    expect(onOpenProject).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1' }));
+
+    // chevron（aria-label 收起项目）仍管折叠，不触发打开
+    onOpenProject.mockClear();
+    fireEvent.click(screen.getByLabelText('收起项目'));
+    expect(onOpenProject).not.toHaveBeenCalled();
+  });
 });

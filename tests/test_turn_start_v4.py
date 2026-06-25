@@ -544,3 +544,36 @@ def test_cli_turn_start_no_message_defaults_to_new(project, capsys):
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["intent"] == "new"
+
+
+def test_turn_start_includes_pending_distill_key(project):
+    from character_workflow.lib.turn_start import turn_start
+    out = turn_start("portrait", None)
+    # 字段恒在；非 stage D（空仓库默认非 D）时为空列表
+    assert "pending_distill" in out
+    assert out["pending_distill"] == []
+
+
+def test_turn_start_pending_distill_nonempty_at_stage_d(project):
+    """stage D + 该角色有高分图 → pending_distill 走真实分支返回非空。"""
+    (project / "characters" / "holy").mkdir(parents=True)
+    (project / "characters" / "holy" / "spec.md").write_text("# 圣灵\n")
+    (project / ".runtime").mkdir()
+    (project / ".runtime" / "active-character.json").write_text(
+        json.dumps({"active_id": "holy", "updated_at": "2026-05-19T00:00:00+00:00"})
+    )
+    (project / ".runtime" / "projects.json").write_text(
+        json.dumps({
+            "projects": [{"id": "p-1", "slug": "test-proj", "name": "Test",
+                          "created_at": "2026-05-19T00:00:00+00:00"}],
+            "assignments": {"holy": "p-1"},
+        })
+    )
+    (project / ".runtime" / "gallery-ratings.json").write_text(
+        json.dumps({"ratings": {"characters/holy/portrait/v1.png": 5}})
+    )
+    from character_workflow.lib.turn_start import turn_start
+    out = turn_start("portrait", None)
+    assert out["stage"] == "D"
+    assert [x["path"] for x in out["pending_distill"]] == ["characters/holy/portrait/v1.png"]
+    assert out["pending_distill"][0]["kind"] == "portrait"

@@ -34,11 +34,11 @@ describe('StudioQueryBar', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mode: null }));
   });
 
-  it('操作类型选收藏回传 op=favorite', () => {
+  it('操作类型选喜欢回传 op=favorite', () => {
     const onChange = vi.fn();
     render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={onChange} />);
     fireEvent.click(screen.getByLabelText('操作类型筛选'));
-    fireEvent.click(screen.getByRole('option', { name: /收藏/ }));
+    fireEvent.click(screen.getByRole('option', { name: /喜欢/ }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ op: 'favorite' }));
   });
 });

@@ -130,7 +130,6 @@ function mockCompletedBatchAndKeys() {
             size: '2304x1728',
             reference_images: ['/tmp/ref.png'],
           },
-          seed: null,
           output_paths: ['/tmp/studio/job-studio-1/v1.png', '/tmp/studio/job-studio-1/v2.png'],
           status: 'done',
           error: null,
@@ -651,7 +650,6 @@ describe('Studio', () => {
             submitted_at: '2026-05-27T01:00:00Z',
             model: 'doubao-seedream-4-5-251128',
             params: {},
-            seed: null,
             output_paths: ['/Users/me/project/studio/job-studio-1/v1.png'],
             status: 'done',
             error: null,
@@ -709,7 +707,6 @@ describe('Studio', () => {
             submitted_at: '2026-05-28T02:00:00Z',
             model: 'gpt-image-2',
             params: { ratio: '1:1', resolution: '2K', size: '1024x1024' },
-            seed: null,
             output_paths: [],
             status: 'pending',
             error: null,
@@ -739,7 +736,6 @@ describe('Studio', () => {
       submitted_at: '2026-05-28T02:05:00Z',
       model: 'gpt-image-2',
       params: { ratio: '1:1', resolution: '2K', size: '1024x1024' },
-      seed: null,
       output_paths: [],
       status: 'pending',
       error: null,
@@ -924,7 +920,6 @@ describe('Studio', () => {
             submitted_at: '2026-05-27T02:00:00Z',
             model: 'doubao',
             params: {},
-            seed: null,
             output_paths: [],
             status: 'failed',
             error: 'provider timeout',
@@ -978,7 +973,7 @@ describe('Studio', () => {
             prompt: '失败的幻想世界', submitted_at: '2026-05-28T01:00:00Z',
             model: 'doubao-4.7', alias: 'volc', provider: 'seedream',
             params: { ratio: '3:4', resolution: '2K', size: '1728x2304' },
-            seed: null, output_paths: [], status: 'failed',
+            output_paths: [], status: 'failed',
             error: 'API 调用超时', kind: 'image', namespace: 'studio',
           }],
         } as any);
@@ -1128,7 +1123,7 @@ describe('Studio video submission', () => {
           ok: true,
           json: async () => ({
             job_id: 'job-v1', character_id: '', prompt: 'p', submitted_at: new Date().toISOString(),
-            model: 'doubao-seedance-2-0-fast-260128', params: {}, seed: null, output_paths: [],
+            model: 'doubao-seedance-2-0-fast-260128', params: {}, output_paths: [],
             status: 'pending', error: null, kind: 'video', namespace: 'studio',
           }),
         } as any);
@@ -1196,7 +1191,7 @@ describe('Studio video submission', () => {
           ok: true,
           json: async () => ({
             job_id: 'job-v2', character_id: '', prompt: 'p', submitted_at: new Date().toISOString(),
-            model: 'doubao-seedance-2-0-fast-260128', params: {}, seed: null, output_paths: [],
+            model: 'doubao-seedance-2-0-fast-260128', params: {}, output_paths: [],
             status: 'pending', error: null, kind: 'video', namespace: 'studio',
           }),
         } as any);
@@ -1269,7 +1264,7 @@ describe('Studio video submission', () => {
           ok: true,
           json: async () => ({
             job_id: 'job-v3', character_id: '', prompt: 'p', submitted_at: new Date().toISOString(),
-            model: 'doubao-seedance-2-0-fast-260128', params: {}, seed: null, output_paths: [],
+            model: 'doubao-seedance-2-0-fast-260128', params: {}, output_paths: [],
             status: 'pending', error: null, kind: 'video', namespace: 'studio',
           }),
         } as any);
@@ -1342,7 +1337,6 @@ describe('Studio video submission', () => {
               reference_videos: ['https://cdn.x/ref.mp4'],
               reference_audios: ['https://cdn.x/ref.mp3'],
             },
-            seed: null,
             output_paths: ['/tmp/studio/job-video-done/v1.mp4'],
             status: 'done',
             error: null,
@@ -1359,7 +1353,7 @@ describe('Studio video submission', () => {
           json: async () => ({
             job_id: 'job-video-regen', character_id: '', prompt: '镜头缓缓推进',
             submitted_at: new Date().toISOString(),
-            model: 'doubao-seedance-2-0-fast-260128', params: {}, seed: null, output_paths: [],
+            model: 'doubao-seedance-2-0-fast-260128', params: {}, output_paths: [],
             status: 'pending', error: null, kind: 'video', namespace: 'studio',
           }),
         } as any);

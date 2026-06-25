@@ -254,18 +254,17 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 ② 对照 spec 三锚点（发色 / 瞳色 / 服装主色）+ 风格档，发现漂移**主动点名**告知画师「X 锚点偏了」并提议带参考图走 A/C 模式修——不默默放行、不替画师定要不要修；
 ③ 无糊脸 / 占位脸 / 裂图等崩坏；明显不达标提议 `retry-job` 或 A 模式重出（**重出 / 修图仍走 PENDING_CONFIRM 确认门**）。
 
-## Turn 收尾：经验沉淀
+## Turn 收尾：经验沉淀（出图经验）
 
-job → DONE / spec 首次归档 / job → FAILED（结构化原因）时触发。问画师是否沉淀经验：
+turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、但还没沉淀过经验的本角色图。
 
-```bash
-uv run python -m character_workflow append-memory \
-  --kind portrait \
-  --line "- YYYY-MM-DD <id> · <一句话> · prompt 片段：\`...\`" \
-  --scope project
-```
-
-`--scope` 默认 project；跨项目通用经验用 workspace（global 层已移除，记忆全部锚定 data_root，与代理工具无关）。
+- **何时问**：`pending_distill` 非空 **且** 画师本轮不在赶活（intent≠revise、非出图确认中）。开口：「这几张你打了高分还没沉淀经验：<列路径/缩略>，要我帮你记吗？」一次说清，不反复唠叨。
+- **画师同意（或「沉第 N 张」）**：看那张图 + 读它的 job（prompt/model/params）+ 评分 → 拟**一条人话经验**（讲清「为什么成功 / 下次怎么复用」），单行，带证据图路径：
+  `- <日期> [<slot>·<评分>★] <人话经验>。证据图 <相对路径>`
+  把这条打成**沉淀确认卡**（复用出图确认卡格式）让画师过目。
+- **画师确认** → 跑 `append-memory --kind <slot> --scope <见下> --line "<上面那条>"`，再跑 `mark-distilled <该图相对路径>`。
+- **画师说「不用沉这张」** → 只跑 `mark-distilled <该图相对路径>`（当忽略，不再提醒）。
+- **scope 决策**：经验含具体角色/风格/配色/类目 → `--scope project`；通用技巧/prompt 协议 → `--scope workspace`。两者都进 MEMORY.md、都 agent-only、都不上 Web。
 
 ## Guardrails
 

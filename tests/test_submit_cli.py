@@ -6,7 +6,7 @@
 - 缺 --character 且 active-character.json 不存在 → exit !=0
 - --prompt-file 指向不存在文件 → exit !=0
 - --character 显式传 / fallback 到 active-character.json
-- 默认值（model / n / size / seed / status / job_id 格式）
+- 默认值（model / n / size / status / job_id 格式）
 """
 from __future__ import annotations
 
@@ -105,7 +105,6 @@ def test_submit_portrait_default_values(tmp_path):
     assert data["params"]["vendor"] == "default (custom)"
     assert data["params"]["n"] == 1
     assert data["params"]["size"] == "1024x1536"
-    assert data["seed"] is None
     assert data["output_paths"] == []
     assert data["source_image"] is None
 

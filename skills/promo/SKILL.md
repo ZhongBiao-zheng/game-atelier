@@ -175,9 +175,17 @@ uv run python -m character_workflow turn-start --kind promo
 
 画师粘参考图时：先存到 `characters/<id>/source/<timestamp>-<文件名>`，落卡前确认 `reference_mode`（`full_reference` / `style_only` / `color_lighting_only` / `pose_only`），按 mode 写参考关系（详见 `references/prompt-promo-zh.md` 第五节）。立绘 = subject（身份锚定，须由 skill 显式 `--source-image` 传入，runner 不自动补），上传图 = reference（不替换主体）。
 
-## Turn 收尾
+## Turn 收尾：经验沉淀（出图经验）
 
-job DONE/FAILED 后问画师是否沉淀经验，Y → `uv run python -m character_workflow append-lesson --kind promo --line "- <日期> <id> · <一句话>"`
+turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、但还没沉淀过经验的本角色图。
+
+- **何时问**：`pending_distill` 非空 **且** 画师本轮不在赶活（intent≠revise、非出图确认中）。开口：「这几张你打了高分还没沉淀经验：<列路径/缩略>，要我帮你记吗？」一次说清，不反复唠叨。
+- **画师同意（或「沉第 N 张」）**：看那张图 + 读它的 job（prompt/model/params）+ 评分 → 拟**一条人话经验**（讲清「为什么成功 / 下次怎么复用」），单行，带证据图路径：
+  `- <日期> [<slot>·<评分>★] <人话经验>。证据图 <相对路径>`
+  把这条打成**沉淀确认卡**（复用出图确认卡格式）让画师过目。
+- **画师确认** → 跑 `append-memory --kind <slot> --scope <见下> --line "<上面那条>"`，再跑 `mark-distilled <该图相对路径>`。
+- **画师说「不用沉这张」** → 只跑 `mark-distilled <该图相对路径>`（当忽略，不再提醒）。
+- **scope 决策**：经验含具体角色/风格/配色/类目 → `--scope project`；通用技巧/prompt 协议 → `--scope workspace`。两者都进 MEMORY.md、都 agent-only、都不上 Web。
 
 ## Guardrails
 

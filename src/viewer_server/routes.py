@@ -24,8 +24,8 @@ from character_workflow.lib.atomic_io import (
     atomic_write_text,
 )
 from character_workflow.lib.jobs import (
-    delete_failed_job, job_lock, list_jobs, read_job, remove_image_from_job, save_job,
-    update_job_status, write_job,
+    _load_job, delete_failed_job, job_lock, list_jobs, read_job, remove_image_from_job,
+    save_job, update_job_status, write_job,
 )
 from character_workflow.lib.schemas import AssetSlot as _AssetSlot
 from character_workflow.lib.projects import (
@@ -92,7 +92,7 @@ def get_jobs() -> list[Job]:
     for p in sorted(jobs_dir.glob("*.json")):
         # 一条坏文件（半写 / 手改 schema 不符）不能拖垮整个列表 → 跳过并留日志。
         try:
-            out.append(Job.model_validate(json.loads(p.read_text(encoding="utf-8"))))
+            out.append(_load_job(json.loads(p.read_text(encoding="utf-8"))))
         except (OSError, json.JSONDecodeError, ValidationError):
             logger.warning("skipping bad job file: %s", p.name)
     return out
@@ -103,7 +103,7 @@ def get_job(job_id: str) -> Job:
     p = _runtime() / "jobs" / f"{job_id}.json"
     if not p.exists():
         raise HTTPException(404, detail=f"job {job_id} not found")
-    return Job.model_validate(json.loads(p.read_text(encoding="utf-8")))
+    return _load_job(json.loads(p.read_text(encoding="utf-8")))
 
 
 @router.get("/spec/{character_id}")
@@ -388,7 +388,6 @@ async def post_gallery_image(
         prompt="手动上传",
         model="manual",
         params={},
-        seed=None,
         asset_slot=_AssetSlot(kind),
     )
     update_job_status(job_id, status=JobStatus.DONE, output_paths=[str(target.resolve())])
@@ -481,6 +480,46 @@ def post_project_rename(project_id: str, payload: ProjectRename) -> ProjectsFile
 def delete_project_route(project_id: str) -> ProjectsFile:
     delete_project(project_id)
     return read_projects()
+
+
+class _ExperiencePatch(BaseModel):
+    model_config = {"extra": "forbid"}
+    project: str = Field(min_length=1)
+    worldview_md: str
+
+
+def _project_worldview_path(slug: str) -> Path:
+    return data_root.projects_dir() / slug / "worldview.md"
+
+
+@router.get("/experience")
+def get_experience(project: str = Query(min_length=1)) -> dict:
+    pf = read_projects()
+    proj = next((p for p in pf.projects if p.id == project), None)
+    if proj is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    wv_path = _project_worldview_path(proj.slug)
+    worldview_md = wv_path.read_text(encoding="utf-8") if wv_path.exists() else ""
+    char_count = sum(1 for pid in pf.assignments.values() if pid == proj.id)
+    return {
+        "project": {
+            "id": proj.id, "slug": proj.slug, "name": proj.name,
+            "created_at": proj.created_at, "character_count": char_count,
+        },
+        "worldview_md": worldview_md,
+    }
+
+
+@router.post("/experience")
+def post_experience(patch: _ExperiencePatch) -> dict:
+    pf = read_projects()
+    proj = next((p for p in pf.projects if p.id == patch.project), None)
+    if proj is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    wv_path = _project_worldview_path(proj.slug)
+    wv_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(wv_path, patch.worldview_md)
+    return {"ok": True}
 
 
 @router.post("/characters/{character_id}/project", response_model=ProjectsFile)
@@ -919,7 +958,13 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                     "job_id": job_ids_by_path.get(rel),
                     "mtime": mtime,
                 })
+    favorites = set(_read_gallery_favorites())
+    ratings = _read_gallery_ratings()
+    for it in items:
+        it["rating"] = ratings.get(it["path"], 0.0)
+    # 先随机，作为「同喜欢状态 + 同分」层内的 tiebreak；再按 (喜欢, 评分) 降序稳定排序。
     random.shuffle(items)
+    items.sort(key=lambda it: (it["path"] in favorites, it["rating"]), reverse=True)
     return {"items": items[:limit]}
 
 
@@ -1011,6 +1056,58 @@ def post_gallery_favorites(patch: _GalleryFavoritePatch) -> dict:
         paths.append(target)
     atomic_write_json(_gallery_favorites_file(), {"paths": paths})
     return {"paths": paths}
+
+
+def _gallery_ratings_file() -> Path:
+    return _runtime() / "gallery-ratings.json"
+
+
+def _read_gallery_ratings() -> dict[str, float]:
+    p = _gallery_ratings_file()
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    ratings = data.get("ratings") if isinstance(data, dict) else None
+    if not isinstance(ratings, dict):
+        return {}
+    out: dict[str, float] = {}
+    for k, v in ratings.items():
+        if isinstance(k, str) and isinstance(v, (int, float)) and 0 < float(v) <= 5:
+            out[k] = float(v)
+    return out
+
+
+class _GalleryRatingPatch(BaseModel):
+    model_config = {"extra": "forbid"}
+    path: str = Field(min_length=1)
+    rating: float = Field(ge=0, le=5)
+
+    @field_validator("rating")
+    @classmethod
+    def _half_step(cls, v: float) -> float:
+        if (v * 2) % 1 != 0:
+            raise ValueError("rating 必须是 0.5 的整数倍")
+        return v
+
+
+@router.get("/gallery/ratings")
+def gallery_ratings() -> dict:
+    return {"ratings": _read_gallery_ratings()}
+
+
+@router.post("/gallery/ratings")
+def post_gallery_ratings(patch: _GalleryRatingPatch) -> dict:
+    target = _normalize_gallery_path(patch.path)
+    ratings = _read_gallery_ratings()
+    if patch.rating == 0:
+        ratings.pop(target, None)
+    else:
+        ratings[target] = patch.rating
+    atomic_write_json(_gallery_ratings_file(), {"ratings": ratings})
+    return {"ratings": ratings}
 
 
 def _gallery_job_ids_by_path() -> dict[str, str]:
@@ -1112,7 +1209,6 @@ def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> di
         submitted_at=datetime.now(timezone.utc).isoformat(),
         model=body.model,
         params=params,
-        seed=None,
         output_paths=[],
         status=JobStatus.PENDING,  # Studio skips pending_confirm (UI submit = explicit consent)
         error=None,

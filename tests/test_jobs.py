@@ -19,7 +19,7 @@ def runtime(tmp_path, monkeypatch):
 def test_write_default_is_pending_confirm(runtime):
     job = write_job(
         job_id="job-001", character_id="c1", prompt="p",
-        model="gpt-image-2", params={"size": "1024x1024"}, seed=42,
+        model="gpt-image-2", params={"size": "1024x1024"},
     )
     assert job.status == JobStatus.PENDING_CONFIRM
     assert (runtime / "jobs" / "job-001.json").exists()
@@ -28,7 +28,7 @@ def test_write_default_is_pending_confirm(runtime):
 def test_write_with_explicit_pending(runtime):
     job = write_job(
         job_id="job-002", character_id="c1", prompt="p",
-        model="gpt-image-2", params={}, seed=None,
+        model="gpt-image-2", params={},
         status=JobStatus.PENDING,
     )
     assert job.status == JobStatus.PENDING
@@ -37,7 +37,7 @@ def test_write_with_explicit_pending(runtime):
 def test_update_status_to_done(runtime):
     write_job(
         job_id="job-001", character_id="c1", prompt="p",
-        model="gpt-image-2", params={}, seed=None,
+        model="gpt-image-2", params={},
     )
     updated = update_job_status(
         "job-001", status=JobStatus.DONE,
@@ -50,7 +50,7 @@ def test_update_status_to_done(runtime):
 def test_update_status_to_failed_records_error(runtime):
     write_job(
         job_id="job-001", character_id="c1", prompt="p",
-        model="gpt-image-2", params={}, seed=None,
+        model="gpt-image-2", params={},
     )
     updated = update_job_status("job-001", status=JobStatus.FAILED, error="API timeout")
     assert updated.status == JobStatus.FAILED
@@ -60,7 +60,7 @@ def test_update_status_to_failed_records_error(runtime):
 def test_update_status_to_done_can_clear_old_error(runtime):
     write_job(
         job_id="job-001", character_id="c1", prompt="p",
-        model="gpt-image-2", params={}, seed=None,
+        model="gpt-image-2", params={},
     )
     update_job_status("job-001", status=JobStatus.FAILED, error="stale timeout")
 
@@ -73,7 +73,7 @@ def test_update_status_to_done_can_clear_old_error(runtime):
 def test_read_returns_full_job(runtime):
     write_job(
         job_id="job-001", character_id="c1", prompt="p",
-        model="gpt-image-2", params={}, seed=None,
+        model="gpt-image-2", params={},
     )
     job = read_job("job-001")
     assert job.job_id == "job-001"
@@ -89,7 +89,7 @@ def test_write_job_fills_alias_from_preferred_when_missing(runtime):
     ))
     job = write_job(
         job_id="job-alias-auto", character_id="c1", prompt="p",
-        model="m", params={}, seed=None,
+        model="m", params={},
     )
     assert job.alias == "lov"
     assert job.provider == "seedream"
@@ -98,7 +98,7 @@ def test_write_job_fills_alias_from_preferred_when_missing(runtime):
 def test_write_job_alias_null_when_no_key_matches(runtime):
     job = write_job(
         job_id="job-alias-none", character_id="c1", prompt="p",
-        model="m", params={}, seed=None,
+        model="m", params={},
     )
     assert job.alias is None
     assert job.provider is None
@@ -119,7 +119,7 @@ def test_write_job_explicit_alias_overrides_default(runtime):
     keys.set_default_alias("lov")
     job = write_job(
         job_id="job-alias-explicit", character_id="c1", prompt="p",
-        model="m", params={}, seed=None, alias="oa",
+        model="m", params={}, alias="oa",
     )
     assert job.alias == "oa"
     assert job.provider == "openai"
@@ -129,7 +129,7 @@ def test_list_jobs_skips_bad_file(runtime):
     """坏 job 文件跳过，不再让整个 list_jobs 抛异常。"""
     write_job(
         job_id="ok-1", character_id="c1", prompt="p",
-        model="m", params={}, seed=None,
+        model="m", params={},
     )
     (runtime / "jobs" / "corrupt.json").write_text("{half-written")
     assert [j.job_id for j in list_jobs()] == ["ok-1"]
@@ -139,7 +139,7 @@ def test_list_jobs_ignores_lock_files(runtime):
     """job_lock 的 sidecar .lock 文件不算 job。"""
     write_job(
         job_id="ok-1", character_id="c1", prompt="p",
-        model="m", params={}, seed=None,
+        model="m", params={},
     )
     assert (runtime / "jobs" / "ok-1.lock").exists()
     assert [j.job_id for j in list_jobs()] == ["ok-1"]
@@ -154,7 +154,6 @@ def test_clone_job_for_retry(runtime):
             "reference_images": ["/tmp/a.png"],
             "actual_size": "1024x1024", "warnings": ["timeout once"],
         },
-        seed=7,
     )
     update_job_status("job-001", status=JobStatus.FAILED, error="API timeout")
 
@@ -166,7 +165,6 @@ def test_clone_job_for_retry(runtime):
     assert clone.error is None
     assert clone.output_paths == []
     assert clone.prompt == "p"
-    assert clone.seed == 7
     assert clone.params.reference_images == ["/tmp/a.png"]
     assert clone.params.n == 2
     assert clone.params.actual_size is None
@@ -180,10 +178,22 @@ def test_clone_job_for_retry(runtime):
 def test_clone_job_for_retry_rejects_non_failed(runtime):
     write_job(
         job_id="job-002", character_id="c1", prompt="p",
-        model="m", params={}, seed=None,
+        model="m", params={},
     )
     with pytest.raises(ValueError, match="not failed"):
         clone_job_for_retry("job-002")
+
+
+def test_list_jobs_tolerates_legacy_seed_field(runtime):
+    """存量 job JSON 带已废弃的 seed 字段，加载时剥离后不能被 extra=forbid 丢弃。"""
+    (runtime / "jobs" / "job-legacy.json").write_text(
+        '{"job_id":"job-legacy","character_id":"c","prompt":"p",'
+        '"submitted_at":"2026-05-29T00:00:00Z","model":"m","params":{},'
+        '"seed":123,"output_paths":[],"status":"done","error":null}',
+        encoding="utf-8",
+    )
+    assert "job-legacy" in [j.job_id for j in list_jobs()]
+    assert read_job("job-legacy").job_id == "job-legacy"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX flock 探测；Windows 走 msvcrt 分支")

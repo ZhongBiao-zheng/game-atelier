@@ -17,7 +17,6 @@ def _make_legacy_job_dict() -> dict:
         "submitted_at": "2026-05-19T10:00:00Z",
         "model": "lovart",
         "params": {"size": "1024x1024"},
-        "seed": None,
         "output_paths": [],
         "status": "done",
         "error": None,
