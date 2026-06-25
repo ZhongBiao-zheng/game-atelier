@@ -92,7 +92,7 @@ uv run python -m character_workflow turn-start --kind turnaround
 # Codex / Installed Plugin：python "$BOOT" --run -m character_workflow turn-start --kind turnaround（绝不 uv run）
 ```
 
-返回 `stage / recommend_action / active_id / spec / lessons`（含 `references/lessons/turnaround.md`）。按 `recommend_action` 决策，处理方式同 character 主 Skill。
+返回 `stage / recommend_action / active_id / spec / project_worldview / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 turnaround 段）。按 `recommend_action` 决策，处理方式同 character 主 Skill。
 
 ## 角色（全程保持）
 
@@ -133,6 +133,8 @@ uv run python -m character_workflow turn-start --kind turnaround
 ## 写 prompt
 
 四维度问清后，按规则写中文 prompt，落到 `characters/<id>/spec.md` 的"三视图记录"小节。
+
+**应用 turn-start 记忆（必做）**：把 `project_worldview` 的项目定位 / 调性 / 用语 / 规则作背景约束、`lessons_project` / `lessons_workspace`（turnaround 段出图经验）作可复用手法与避坑项揉进 prompt——这是启动段那条红线（不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规）的落点，不是开头读一眼就忘。与 spec / 画师本轮指令冲突时后者优先，但要点名冲突。
 
 **spec 格式** → `docs/references/spec-template.md`
 从 `visual_dna` + `anchors` 提取角色视觉信息；从 `asset.turnaround` 读三视图固定参数。

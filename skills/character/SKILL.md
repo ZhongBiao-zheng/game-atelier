@@ -90,8 +90,9 @@ Installed Plugin 模式下所有 `uv run python -m character_workflow ...` 命�
 # Dev：
 uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 # Codex / Installed Plugin：python "$BOOT" --run -m character_workflow turn-start --message "..."（绝不 uv run）
-# 出图 promo/turnaround 时加 --kind 切换对应 lessons
 ```
+
+默认 `--kind portrait`，本 skill 只产**立绘（portrait）**。**本轮要出 promo（美宣）/ turnaround（三视图）→ 切到 `/game-atelier:promo` · `/game-atelier:turnaround`**——那两个 skill 开轮即 `turn-start --kind promo/turnaround`，`lessons_project` / `lessons_workspace` 会自动切到对应 kind 段；不要在本 skill 内用 portrait 的上下文硬出别的 kind（lessons 段会错配，分段沉淀也送错轮次）。
 
 关键返回字段：
 
@@ -181,6 +182,8 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 **Stage E**（active 未归属任何项目）：列已有项目 + 新开项目 + 跳过。画师选归属后 `assign-character <active_id> --project <project_id>` 再 turn-start。
 
 ## 写出图 prompt
+
+**应用 turn-start 记忆（必做）**：把 `project_worldview` 的项目定位 / 调性 / 用语 / 规则作背景约束、`lessons_project` / `lessons_workspace`（portrait 段出图经验）作可复用手法与避坑项揉进 prompt——这是启动段那条红线（不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规）的落点，不是开头读一眼就忘。与 spec / 画师本轮指令冲突时后者优先，但要点名冲突。
 
 **所有向画师提问都必须用 AskUserQuestion**（出图确认卡除外）。纯文字追问等于没问，画师选项清晰才能继续。AskUserQuestion 单次最多 4 个问题、每题最多 4 个选项（工具硬上限）；要问得更多就拆成两级——先问大方向，再问细节。
 
