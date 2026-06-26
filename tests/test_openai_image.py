@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 
+import pytest
 import requests
 
 from character_workflow.lib import keys
@@ -165,6 +166,70 @@ def test_post_json_retries_requests_connection_drop_then_succeeds(monkeypatch):
 
     assert calls["n"] == 2
     assert data["data"][0]["b64_json"].startswith("data:image/png;base64,")
+
+
+class _StatusResponse:
+    """带状态码的假响应：用于驱动 _post_json 的瞬时网关重试分支。"""
+
+    def __init__(self, status_code: int, payload: dict | None = None):
+        self.status_code = status_code
+        self.text = "" if payload is None else json.dumps(payload)
+        self._payload = payload or {}
+
+    def json(self):
+        return self._payload
+
+
+def test_post_json_retries_504_gateway_then_succeeds(monkeypatch):
+    image_bytes = b"\x89PNG\r\n\x1a\nok"
+    ok = {"data": [{"b64_json": base64.b64encode(image_bytes).decode("ascii")}]}
+    calls = {"n": 0}
+
+    def fake_post(*args, **kwargs):
+        calls["n"] += 1
+        # new-api 网关瞬时 504，重试一次即过。
+        return _StatusResponse(504, {"error": {"message": "bad response status code 504"}}) \
+            if calls["n"] == 1 else _StatusResponse(200, ok)
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    monkeypatch.setattr(openai_image.time, "sleep", lambda _s: None)
+
+    data = openai_image._post_json(
+        "https://api.openai-hk.com/v1/images/generations", "ak", {"model": "gpt-image-2"}, timeout=10,
+    )
+    assert calls["n"] == 2
+    assert data == ok
+
+
+def test_post_json_does_not_retry_403(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_post(*args, **kwargs):
+        calls["n"] += 1
+        return _StatusResponse(403, {"error": {"message": "forbidden"}})
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    monkeypatch.setattr(openai_image.time, "sleep", lambda _s: None)
+
+    with pytest.raises(openai_image.OpenAIImageError):
+        openai_image._post_json("https://api.openai-hk.com/v1/images/generations", "ak", {}, timeout=10)
+    assert calls["n"] == 1  # 确定性 4xx 不重试
+
+
+def test_post_json_504_exhausts_retries_and_caps_writes(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_post(*args, **kwargs):
+        calls["n"] += 1
+        return _StatusResponse(504, {"error": {"message": "bad response status code 504"}})
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    monkeypatch.setattr(openai_image.time, "sleep", lambda _s: None)
+
+    with pytest.raises(openai_image.OpenAIImageError):
+        openai_image._post_json("https://api.openai-hk.com/v1/images/generations", "ak", {}, timeout=10)
+    # 持续 504 最多打 3 次写请求（range(3)），不会无限放大成 N 次出图。
+    assert calls["n"] == 3
 
 
 def test_render_seedream_normalizes_size_to_minimum_pixel_area(

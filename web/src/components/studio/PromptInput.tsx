@@ -564,16 +564,18 @@ export function PromptInput({
       setMentionOpen(false);
       return;
     }
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      submit();
-      return;
-    }
-    if (e.key === 'Enter') {
-      // contentEditable 原生 Enter 会包 <div>；统一改插 '\n'（编辑器 pre-wrap 渲染换行）
+    if (e.key !== 'Enter') return;
+    // 输入法组合期（中文候选）按 Enter 是确认候选，既不提交也不换行。
+    if (composing.current || e.nativeEvent.isComposing) return;
+    if (e.shiftKey) {
+      // Shift+Enter 换行：contentEditable 原生 Enter 会包 <div>，统一改插 '\n'（pre-wrap 渲染换行）。
       e.preventDefault();
       insertPlainText('\n');
+      return;
     }
+    // Enter 提交（聊天输入规范）；Cmd/Ctrl+Enter 同样提交，保留旧手感。
+    e.preventDefault();
+    submit();
   };
 
   function onEditorInput() {

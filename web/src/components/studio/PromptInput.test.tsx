@@ -319,3 +319,42 @@ describe('PromptInput 消耗提示（仅 OpenAI-HK 聚合商，人民币无单�
     cleanup();
   });
 });
+
+describe('PromptInput 键盘提交规范（Enter 出图 / Shift+Enter 换行）', () => {
+  function renderForKey() {
+    const onSubmit = vi.fn();
+    render(
+      <PromptInput
+        onSubmit={onSubmit}
+        providers={[hkKey]}
+        providerAlias="hk"
+        model="gpt-image-2"
+        value="画一只猫"
+        onValueChange={vi.fn()}
+      />,
+    );
+    return { onSubmit, editor: screen.getByLabelText('生图 prompt') };
+  }
+
+  it('Enter 直接提交', () => {
+    const { onSubmit, editor } = renderForKey();
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(onSubmit).toHaveBeenCalledWith('画一只猫');
+    cleanup();
+  });
+
+  it('Shift+Enter 换行不提交', () => {
+    const { onSubmit, editor } = renderForKey();
+    fireEvent.keyDown(editor, { key: 'Enter', shiftKey: true });
+    expect(onSubmit).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it('输入法组合期 Enter 不提交（确认候选）', () => {
+    const { onSubmit, editor } = renderForKey();
+    fireEvent.compositionStart(editor);
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(onSubmit).not.toHaveBeenCalled();
+    cleanup();
+  });
+});

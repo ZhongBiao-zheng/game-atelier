@@ -30,6 +30,9 @@ _KNOWN_ENDPOINT_SUFFIXES = (
     "/embeddings",
     "/moderations",
 )
+# 网关瞬时错误：聚合商（OpenAI-HK 的 new-api 等）上游慢/排队时合成 502/503/504 回吐，
+# 重试一次往往就过。仅这三个码进重试；其余 4xx 及 429/500 是确定性/限流错误，当场致命。
+_RETRYABLE_STATUS = frozenset({502, 503, 504})
 
 
 class OpenAIImageError(RuntimeError):
@@ -207,11 +210,19 @@ def _post_multipart(
     url: str, api_key: str, *, fields: dict, files: list, timeout: float | tuple[float, float]
 ) -> dict:
     # 不手动设 Content-Type，让 requests 生成 multipart boundary。
+    # files 字节已在 _ref_file_parts 预读入内存，重试重发同一份 data/files 安全。
     headers = {"Authorization": f"Bearer {api_key}"}
-    resp = requests.post(url, headers=headers, data=fields, files=files, timeout=timeout)
-    if resp.status_code >= 400:
-        raise OpenAIImageError(f"image edits api {resp.status_code}: {resp.text[:500]}")
-    return resp.json()
+    for attempt in range(3):
+        resp = requests.post(url, headers=headers, data=fields, files=files, timeout=timeout)
+        if resp.status_code >= 400:
+            err = OpenAIImageError(f"image edits api {resp.status_code}: {resp.text[:500]}")
+            if resp.status_code in _RETRYABLE_STATUS and attempt < 2:
+                time.sleep(1 + attempt)
+                continue
+            raise err
+        return resp.json()
+    # 循环只会经 return/raise 退出（末轮瞬时码也走 raise）；防御性兜底。
+    raise OpenAIImageError("image edits api: retries exhausted")
 
 
 def _chat_image_url(base_url: str) -> str:
@@ -349,7 +360,13 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
             if resp.status_code >= 400:
-                raise OpenAIImageError(f"image api {resp.status_code}: {resp.text[:500]}")
+                err = OpenAIImageError(f"image api {resp.status_code}: {resp.text[:500]}")
+                # 瞬时网关错误复用网络异常那套退避重试（continue 进下一轮）；其余当场抛。
+                if resp.status_code in _RETRYABLE_STATUS and attempt < 2:
+                    last_error = err
+                    time.sleep(1 + attempt)
+                    continue
+                raise err
             return resp.json()
         except OpenAIImageError:
             raise

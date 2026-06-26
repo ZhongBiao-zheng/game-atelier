@@ -40,6 +40,13 @@ def _friendly_error(err: BaseException) -> str:
         "connection" in low and ("refused" in low or "aborted" in low)
     ):
         return "网络连不上厂商接口：请检查网络 / 代理设置，确认厂商域名可访问后重试。"
+    if "quota" in low or "insufficient" in low or "余额" in low or "额度" in low or "欠费" in low:
+        return f"厂商额度 / 余额不足：请到厂商官网充值或检查账户额度后重试。（原始报错：{err}）"
+    if "gateway" in low or "网关" in low or "bad response status code" in low:
+        return (
+            "厂商网关瞬时超时（已自动重试仍失败）：通常是该模型上游过载或排队，"
+            f"请稍后重试或换模型。（原始报错：{err}）"
+        )
     return str(err)
 
 
