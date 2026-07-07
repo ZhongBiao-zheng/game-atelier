@@ -301,3 +301,49 @@ def test_run_job_video_branch_marks_failed_on_no_valid_artifacts(project, monkey
     with pytest.raises(job_runner.JobRunnerError):
         job_runner.run_job("vid-bad")
     assert read_job("vid-bad").status == JobStatus.FAILED
+
+
+# ---- _friendly_error 报错分类（图生图上传/网关掐断 实测挖出的两类误报修正）----
+
+def test_friendly_error_write_timeout_reads_as_upload_not_upstream():
+    # 实测：connect 超时兜不住 1.6MB 参考图上传 → 上传阶段 write 超时。
+    # 旧版命中通用 timeout 分支报「上游过载」，误导；应识别为上传超时。
+    err = Exception("('Connection aborted.', TimeoutError('The write operation timed out'))")
+    msg = job_runner._friendly_error(err)
+    assert "上传参考图超时" in msg
+    assert "上游过载" not in msg
+
+
+def test_friendly_error_remote_disconnect_reads_as_gateway_not_network():
+    # 实测：上传过后网关等上游出图 ~136s 直接掐连接（RemoteDisconnected）。
+    # 旧版「connection aborted」命中「网络连不上/检查代理」，把人往代理坑带；应识别为网关中途断开。
+    err = Exception(
+        "('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))"
+    )
+    msg = job_runner._friendly_error(err)
+    assert "网关中途断开" in msg
+    assert "网络连不上" not in msg
+    assert "代理" not in msg
+
+
+def test_friendly_error_genuine_connect_failure_still_network():
+    err = Exception(
+        "HTTPSConnectionPool(host='api.openai-hk.com', port=443): Max retries exceeded "
+        "(Caused by NewConnectionError('Failed to establish a new connection: "
+        "[Errno 61] Connection refused'))"
+    )
+    assert "网络连不上厂商接口" in job_runner._friendly_error(err)
+
+
+def test_friendly_error_read_timeout_still_upstream_overload():
+    err = Exception("HTTPSConnectionPool(host='api.openai-hk.com', port=443): Read timed out. (read timeout=180.0)")
+    msg = job_runner._friendly_error(err)
+    assert "厂商接口超时未响应" in msg
+    assert "上传参考图" not in msg  # read 超时 ≠ 上传超时，别串台
+
+
+def test_default_timeout_connect_covers_upload_phase():
+    # 回归守卫：connect 超时兼管请求体上传阶段（urllib3 特性），压回 10s 会让大参考图图生图
+    # 在上传阶段 write 超时。别再改回 10。
+    from character_workflow.lib import net_env
+    assert net_env.DEFAULT_TIMEOUT[0] >= 30

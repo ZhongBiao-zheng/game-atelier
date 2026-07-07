@@ -34,10 +34,28 @@ def _friendly_error(err: BaseException) -> str:
             "连不上本机代理（VPN / Clash 等）。这些国产厂商无需翻墙：请在代理工具里"
             "关闭代理，或把厂商域名加入直连/绕过规则后重试。"
         )
+    # 上传阶段超时：urllib3 用 connect 超时兜请求体上传，参考图偏大 / 上行慢会在传图时 write 超时。
+    if "write operation timed out" in low or ("aborted" in low and "write" in low):
+        return (
+            "上传参考图超时：参考图偏大或上行网络偏慢，未能在时限内传完。"
+            "请压小参考图或换更快的网络后重试。"
+        )
+    # 连接已建立但被远端中途掐断：多是该生成过重 / 上游太慢超出厂商网关等待时限（非本机网络问题）。
+    if (
+        "remote end closed" in low
+        or "remotedisconnected" in low
+        or "connection reset" in low
+        or "reset by peer" in low
+        or "connection aborted" in low
+    ):
+        return (
+            "厂商网关中途断开连接：通常是该生成过重 / 上游太慢，超出了厂商网关的等待时限"
+            "（与本机网络无关）。请换更小的生成规模，或换模型 / 换厂商（如 seedream）重试。"
+        )
     if "timed out" in low or "timeout" in low:
         return "厂商接口超时未响应：可能是该模型上游过载，请稍后重试或换模型。"
     if "max retries" in low or "failed to establish" in low or (
-        "connection" in low and ("refused" in low or "aborted" in low)
+        "connection" in low and "refused" in low
     ):
         return "网络连不上厂商接口：请检查网络 / 代理设置，确认厂商域名可访问后重试。"
     if "quota" in low or "insufficient" in low or "余额" in low or "额度" in low or "欠费" in low:
