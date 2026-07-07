@@ -114,4 +114,5 @@ def test_gallery_data_flow_via_api(client, runtime):
     assert r2.status_code == 200
     jobs = [j for j in r2.json() if j["character_id"] == "shadow"]
     assert len(jobs) == 1
-    assert jobs[0]["output_paths"][0].endswith("/portrait/v1.png")
+    # output_paths 是本机绝对路径，Windows 下用反斜杠——比较前归一成 /，避免 OS 依赖脆断言。
+    assert jobs[0]["output_paths"][0].replace("\\", "/").endswith("/portrait/v1.png")

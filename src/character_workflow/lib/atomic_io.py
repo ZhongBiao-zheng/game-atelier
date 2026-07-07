@@ -7,9 +7,29 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+# Windows 上 os.replace 偶发 PermissionError(WinError 5/32)：Defender 正扫刚写出的
+# tmp，或长驻 viewer-server / watcher 正读目标 job 文件 —— 短暂重试即可越过。不重试时这个
+# 文件改名错误会顶替掉真正的失败原因（如厂商额度耗尽），落进 job.error 误导画师。
+# POSIX 的 replace 原子、不命中此竞态，故仅在 nt 上重试，其它平台行为不变。
+_REPLACE_ATTEMPTS = 10
+_REPLACE_DELAY = 0.05
+
+
+def _replace_with_retry(tmp: Path, path: Path) -> None:
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            if os.name != "nt" or attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_DELAY)
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -17,7 +37,7 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
     tmp = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
     try:
         tmp.write_bytes(data)
-        tmp.replace(path)
+        _replace_with_retry(tmp, path)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise

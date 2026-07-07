@@ -27,9 +27,12 @@ DIRECT_HOST_SUFFIXES: tuple[str, ...] = (
     "aiproxy.vip",
 )
 
-# 厂商 API 调用统一超时：(连接, 读取)。读取放宽到大模型出图常见耗时（实测 gpt-image-2 ~66s），
-# 但远小于旧的 600s —— 挂死的上游能在 ~3min 内快速失败，而不是卡十几分钟。
-DEFAULT_TIMEOUT: tuple[float, float] = (10.0, 180.0)
+# 厂商 API 调用统一超时：(连接, 读取)。
+# 连接分量放到 30s 不只为握手：urllib3 用 connect 超时兜住「请求体上传」阶段（read 超时只管
+# 收响应），图生图要把 1.6MB+ 参考图（gpt-image multipart / seedream base64）传上去，10s 传不完
+# 会在上传阶段抛 "write operation timed out"（实测）。读取 180s 覆盖大模型出图常见耗时
+# （gpt-image-2 ~66s），远小于旧的 600s —— 挂死的上游 ~3min 内快速失败。
+DEFAULT_TIMEOUT: tuple[float, float] = (30.0, 180.0)
 
 
 def configure_proxy_bypass() -> None:
