@@ -80,13 +80,15 @@ def test_post_clipboard_attempt_appends_log(client, runtime):
 
 
 def test_post_config_expands_tilde_and_mkdirs(client, runtime, tmp_path, monkeypatch):
-    # Force HOME to tmp_path so ~ expands somewhere we own
+    # 让 ~ 展开到我们自己的临时目录：POSIX 认 HOME，Windows 的 expanduser 认 USERPROFILE。
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     target = "~/my-character-assets"
     r = client.post("/api/config", json={"image_storage_root": target})
     assert r.status_code == 200, r.json()
     resolved = r.json()["image_storage_root"]
-    assert resolved.endswith("/my-character-assets")
+    # resolved 是 str(Path.resolve())，Windows 下反斜杠——归一成 / 再比。
+    assert resolved.replace("\\", "/").endswith("/my-character-assets")
     assert (tmp_path / "my-character-assets").exists()
     cfg = json.loads((runtime / "config.json").read_text())
     assert cfg["image_storage_root"] == resolved
