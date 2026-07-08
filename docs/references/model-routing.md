@@ -15,7 +15,7 @@ turn-start 返回 `available_keys[].models[{name,id}]`，这是可选池。按�
 挑选步骤：
 
 1. 判断任务类型 → 目标族。
-2. 在 `available_keys` 里找 `id` 命中目标族的 model，记下它的 `alias` + `id`。
+2. 在 `available_keys` 里找 `id` 命中目标族的 model，记下它的 `alias` + `id`。**多个 Key 同族命中时（如多个聚合商都挂 `gpt-image` / `nano-banana`）→ 优先 `preferred_alias`（默认 Key）那个；`preferred_alias` 未命中该族才取第一个命中的。**
 3. 出图：`submit --kind <kind> --alias <alias> --model <model-id> --prompt-file ...`。
 4. **找不到目标族** → 回退 `preferred_alias` 的默认模型，并一句话说明（如「未配置 nano-banana，改用默认 gpt-image」）。
 5. `preferred_alias` 为 null 且无任何可用 Key → 停下，告知缺 Key。

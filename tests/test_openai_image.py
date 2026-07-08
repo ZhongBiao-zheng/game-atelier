@@ -1174,9 +1174,45 @@ def test_image_family_classifies_by_model_prefix():
     from character_workflow.lib.callers.openai_image import image_family
     assert image_family("gpt-image-2") == "gpt-image"
     assert image_family("nano-banana-hd") == "nano-banana"
+    # Tuzi nano 别名（含分辨率后缀）仍归 nano-banana 族。
+    assert image_family("nano-banana-pro-4k") == "nano-banana"
+    assert image_family("nano-banana-2-2k") == "nano-banana"
     assert image_family("seedream-5.0-lite") == "seedream"
     assert image_family("seededit-3") == "seedream"
+    # 子串匹配：Tuzi 的 doubao-seedream-* 也归 seedream 族（不是 startswith）。
+    assert image_family("doubao-seedream-4-5-251128") == "seedream"
     assert image_family("foo-image-1") == "standard"
+
+
+def test_custom_seedream_normalizes_size_to_minimum_pixels(tmp_path, monkeypatch):
+    # Tuzi 的 doubao-seedream 走 custom provider：小尺寸必须被后端归一到 ≥3.6M，
+    # 否则 Tuzi 报 "image size must be at least 3686400 pixels"（实测）。
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    from character_workflow.lib import keys as _keys
+    from character_workflow.lib.callers import openai_image
+    _keys.add_key(_keys.KeySpec(
+        alias="tz", provider="custom", base_url="https://api.tu-zi.com",
+        access_key="x", created_at="2026-07-08T00:00:00Z",
+    ))
+    posted = {}
+    monkeypatch.setattr(openai_image, "_post_json",
+                        lambda url, key, payload, *, timeout: (posted.update(body=payload),
+                                                               {"data": [{"b64_json": "aGk="}]})[1])
+    openai_image.render(prompt="p", model="doubao-seedream-4-5-251128", alias="tz",
+                        output_dir=tmp_path / "o", size="1024x1024")
+    w, h = (int(v) for v in posted["body"]["size"].split("x"))
+    assert w * h >= 3686400, posted["body"]["size"]
+
+
+def test_write_outputs_skips_empty_b64_and_uses_url(tmp_path, monkeypatch):
+    # Tuzi 在 response_format=url 时仍回 b64_json:""，别把空串当图写空文件——落到 url 分支。
+    from character_workflow.lib.callers import openai_image
+    monkeypatch.setattr(openai_image, "_download_image_url", lambda url: b"\x89PNG\r\n\x1a\nDATA")
+    paths = openai_image._write_outputs(
+        {"data": [{"b64_json": "", "url": "https://x/y.png"}]}, tmp_path,
+    )
+    assert len(paths) == 1
+    assert (tmp_path / "v1.png").read_bytes() == b"\x89PNG\r\n\x1a\nDATA"
 
 
 def test_custom_gpt_image_sends_quality(tmp_path, monkeypatch):

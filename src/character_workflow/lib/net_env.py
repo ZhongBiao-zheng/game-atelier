@@ -25,6 +25,7 @@ DIRECT_HOST_SUFFIXES: tuple[str, ...] = (
     "aliyuncs.com",
     "addmao.com",
     "aiproxy.vip",
+    "tu-zi.com",  # 兔子 API（国内聚合商）；实测：未放行时小火箭代理 1082 隧道不通 → ProxyError。
 )
 
 # 厂商 API 调用统一超时：(连接, 读取)。
