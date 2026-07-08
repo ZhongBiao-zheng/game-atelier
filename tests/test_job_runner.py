@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import struct
 import zlib
 from pathlib import Path
@@ -347,3 +348,12 @@ def test_default_timeout_connect_covers_upload_phase():
     # 在上传阶段 write 超时。别再改回 10。
     from character_workflow.lib import net_env
     assert net_env.DEFAULT_TIMEOUT[0] >= 30
+
+
+def test_direct_bypass_covers_tuzi(monkeypatch):
+    # 回归守卫：tu-zi.com 必须在直连白名单——实测未放行时小火箭代理会 ProxyError 掐死 Tuzi 调用。
+    from character_workflow.lib import net_env
+    assert "tu-zi.com" in net_env.DIRECT_HOST_SUFFIXES
+    monkeypatch.setenv("NO_PROXY", "localhost")
+    net_env.configure_proxy_bypass()
+    assert "tu-zi.com" in os.environ["NO_PROXY"]

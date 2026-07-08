@@ -71,9 +71,14 @@ def render(
     if not base_url:
         raise OpenAIImageError("custom provider requires base_url")
 
+    family = image_family(model)
+    # seedream 尺寸归一化对原生 seedream provider 和 custom 聚合商下的 seedream 族（如 Tuzi 的
+    # doubao-seedream-*，实测 1024² 报「must be at least 3686400 pixels」）都要生效——判据都在
+    # is_seedream 里，故先算它再归一化（下方分支复用同一 family / is_seedream，不重算）。
+    is_seedream = key.provider == "seedream" or (key.provider == "custom" and family == "seedream")
     requested_size = _normalize_size_for_provider(
         kwargs.get("size") or kwargs.get("requested_size") or kwargs.get("params", {}).get("size"),
-        key.provider,
+        is_seedream,
     )
 
     out_dir = Path(output_dir)
@@ -117,10 +122,9 @@ def render(
                 break
         return paths[:requested]
 
-    family = image_family(model)
     # custom 走 family 判定补诚实；命名 provider(openai/seedream/tokendance/HK) 分支不动。
+    # family / is_seedream 已在上方（尺寸归一化前）算好，这里不重算。
     custom_img = key.provider == "custom" and family in ("gpt-image", "nano-banana")
-    is_seedream = key.provider == "seedream" or (key.provider == "custom" and family == "seedream")
     is_hk_image = is_hk and _hk_image_model(model)
     # quality 仅对支持它的模型发送：OpenAI / OpenAI-HK 的 gpt-image・nano-banana / custom 同族；
     # seedream 没有 quality 概念，发了可能被拒。
@@ -268,7 +272,8 @@ def image_family(model: str) -> str:
         return "gpt-image"
     if m.startswith("nano-banana"):
         return "nano-banana"
-    if m.startswith("seedream") or m.startswith("seededit"):
+    # 子串匹配（非 startswith）：custom 聚合商常以 doubao-seedream-* 命名 seedream 系（如 Tuzi）。
+    if "seedream" in m or "seededit" in m:
         return "seedream"
     return "standard"
 
@@ -405,8 +410,11 @@ def _write_outputs(payload: dict, output_dir: Path, *, start_index: int = 1) -> 
         if not isinstance(item, dict):
             continue
         target = output_dir / f"v{i}.png"
-        if isinstance(item.get("b64_json"), str):
-            target.write_bytes(_decode_b64_image(item["b64_json"]))
+        b64 = item.get("b64_json")
+        # 空串防御：Tuzi 在 response_format=url 时仍回 b64_json:""，别把空串当图写出空文件——
+        # 落到下面的 url 分支。
+        if isinstance(b64, str) and b64:
+            target.write_bytes(_decode_b64_image(b64))
             paths.append(str(target))
             continue
         if isinstance(item.get("url"), str):
@@ -473,8 +481,11 @@ def _snap_hk_gpt_image_size(size: object) -> object:
     return f"{best[0]}x{best[1]}"
 
 
-def _normalize_size_for_provider(size: object, provider: str) -> object:
-    if provider != "seedream" or not isinstance(size, str):
+def _normalize_size_for_provider(size: object, is_seedream: bool) -> object:
+    # seedream（原生 provider 或 custom 聚合商下的 seedream 族，如 Tuzi 的 doubao-seedream-*）有
+    # 最小像素约束（≥3.6M）：不足就等比放大到阈值，否则 Ark/Tuzi 报「image size must be at least
+    # 3686400 pixels」（实测）。其余族原样返回。
+    if not is_seedream or not isinstance(size, str):
         return size
     match = re.fullmatch(r"(\d+)x(\d+)", size.strip())
     if not match:
