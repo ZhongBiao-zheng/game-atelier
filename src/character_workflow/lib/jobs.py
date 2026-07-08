@@ -174,9 +174,10 @@ def update_job_status(
     with job_lock(job_id):
         job = read_job(job_id)
         update: dict[str, Any] = {"status": status}
-        # 终态清空进度卡点，避免 retry/回看读到陈旧 phase。
+        # 终态清空进度卡点，避免 retry/回看读到陈旧 phase；并盖出图完成时间戳（算耗时/展示生成时间用）。
         if status in (JobStatus.DONE, JobStatus.FAILED):
             update["progress_phase"] = None
+            update["completed_at"] = datetime.now(timezone.utc).isoformat()
         if output_paths is not None:
             update["output_paths"] = output_paths
         if error is not _UNSET:

@@ -6,6 +6,7 @@ import type { VideoFrameMode } from '@/lib/videoControlCaps';
 import { useVideoFrame } from '@/lib/videoFrame';
 import type { GenMode } from '@/lib/historyFilters';
 import { isGalleryFavorited } from '@/api/gallery';
+import { formatBeijingTime } from '@/lib/time';
 
 import { WaitingCopy } from './WaitingCopy';
 
@@ -42,8 +43,18 @@ export type RoundState =
       progressPhase?: 'sent' | 'downloading' | null;
       config: RoundConfig;
     }
-  | { kind: 'done'; mode?: GenMode; jobId: string; submittedAt: string; imagePaths: string[]; config: RoundConfig }
+  | { kind: 'done'; mode?: GenMode; jobId: string; submittedAt: string; completedAt?: string | null; imagePaths: string[]; config: RoundConfig }
   | { kind: 'failed'; mode?: GenMode; jobId?: string; submittedAt: string; reason: string; config?: RoundConfig };
+
+/** 生成中占位框的宽高比：按目标比例（"16:9"）→ 退回尺寸（"1024x1536"）→ 退回 1:1。
+ *  别再固定 aspect-square，否则出竖图/宽图时占位是方框、出图后尺寸跳变。 */
+function aspectStyle(config: RoundConfig): { aspectRatio: string } {
+  const r = config.ratio;
+  if (r && /^\d+\s*:\s*\d+$/.test(r)) return { aspectRatio: r.replace(/\s*:\s*/, ' / ') };
+  const m = config.size?.match(/^(\d+)\s*[x×]\s*(\d+)$/i);
+  if (m) return { aspectRatio: `${m[1]} / ${m[2]}` };
+  return { aspectRatio: '1 / 1' };
+}
 
 export function RoundList({
   rounds,
@@ -99,7 +110,8 @@ export function RoundList({
                         data-testid={i === 0 && r.jobId ? `studio-pending-${r.jobId}` : undefined}
                         data-skeleton
                         aria-busy="true"
-                        className="relative aspect-square w-[251.5px] bg-card/40 rounded-lg flex items-center justify-center"
+                        style={aspectStyle(r.config)}
+                        className="relative w-[251.5px] bg-card/40 rounded-lg flex items-center justify-center"
                       >
                         <ProgressBadge round={r} />
                         <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -446,12 +458,18 @@ function DoneBatch({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [menuOpen]);
+  const elapsedSec =
+    round.completedAt && round.submittedAt
+      ? Math.max(0, Math.round((Date.parse(round.completedAt) - Date.parse(round.submittedAt)) / 1000))
+      : null;
   const meta = [
     round.config.modelName ?? round.config.model,
     round.config.size,
     round.config.ratio,
     round.config.resolution,
     round.config.n && round.config.n > 1 ? `${round.config.n} 张` : undefined,
+    elapsedSec != null ? `耗时 ${elapsedSec}s` : undefined,
+    round.completedAt ? formatBeijingTime(round.completedAt) : undefined,
   ].filter(Boolean);
 
   return (

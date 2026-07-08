@@ -105,6 +105,60 @@ describe('RoundList progress badge', () => {
   });
 });
 
+describe('RoundList done metadata: 耗时 + 生成时间', () => {
+  const timedDone: RoundState = {
+    kind: 'done',
+    jobId: 'job-timed',
+    submittedAt: '2026-07-08T10:00:00+00:00',
+    completedAt: '2026-07-08T10:00:12+00:00', // +12s；北京时间 = UTC+8 → 18:00
+    imagePaths: ['/data/studio/job-timed/v1.png'],
+    config: {
+      prompt: '一张图',
+      model: 'gpt-image-2',
+      kind: 'image',
+      ratio: '16:9',
+      resolution: '2K',
+      referenceImages: [],
+    },
+  };
+
+  it('显示出图耗时（completed_at − submitted_at）与北京时间生成时间', () => {
+    const { container } = render(<RoundList rounds={[timedDone]} />);
+    expect(container.textContent).toContain('耗时 12s');
+    expect(container.textContent).toContain('2026-07-08 18:00');
+  });
+
+  it('旧 job 无 completed_at 时不显示耗时/时间（优雅降级）', () => {
+    const { completedAt: _omit, ...legacy } = timedDone;
+    const { container } = render(<RoundList rounds={[legacy as RoundState]} />);
+    expect(container.textContent).not.toContain('耗时');
+  });
+});
+
+describe('RoundList 生成中占位按目标比例', () => {
+  function pendingWith(config: Record<string, unknown>): RoundState {
+    return {
+      kind: 'pending',
+      jobId: 'job-ph',
+      startedAt: Date.now(),
+      config: { prompt: 'p', model: 'gpt-image-2', kind: 'image', referenceImages: [], ...config },
+    } as RoundState;
+  }
+
+  it('比例 9:16 → 占位框 aspect-ratio 9 / 16（不再固定 1:1 方框）', () => {
+    const { container } = render(<RoundList rounds={[pendingWith({ ratio: '9:16' })]} />);
+    const skel = container.querySelector('[data-skeleton]') as HTMLElement;
+    expect(skel.style.aspectRatio).toBe('9 / 16');
+  });
+
+  it('无比例退回尺寸 1024x1536 → 1024 / 1536；都无退回 1 / 1', () => {
+    const { container: c1 } = render(<RoundList rounds={[pendingWith({ size: '1024x1536' })]} />);
+    expect((c1.querySelector('[data-skeleton]') as HTMLElement).style.aspectRatio).toBe('1024 / 1536');
+    const { container: c2 } = render(<RoundList rounds={[pendingWith({})]} />);
+    expect((c2.querySelector('[data-skeleton]') as HTMLElement).style.aspectRatio).toBe('1 / 1');
+  });
+});
+
 describe('RoundList reference assets', () => {
   it('shows the reference stack for video rounds with only video/audio refs', () => {
     const onlyMedia: RoundState = {

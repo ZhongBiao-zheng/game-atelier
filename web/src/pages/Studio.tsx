@@ -772,6 +772,7 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
           mode,
           jobId: job.job_id,
           submittedAt: job.submitted_at,
+          completedAt: job.completed_at,
           imagePaths: job.output_paths,
           config: configForJob(job, keys),
         }];

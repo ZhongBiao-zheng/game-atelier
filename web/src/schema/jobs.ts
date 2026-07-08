@@ -52,6 +52,8 @@ export interface Job {
   retry_of?: string | null;
   // 2026-06-12: 出图进度真实卡点（视频 caller 回写；Web 只读）— 与 schemas.py 同步
   progress_phase?: 'sent' | 'downloading' | null;
+  // 2026-07-08: 出图完成时间戳（DONE/FAILED 终态回写；Web 只读）— 与 schemas.py 同步
+  completed_at?: string | null;
 }
 
 export const WEB_EDITABLE_FIELDS = ['prompt', 'params'] as const;
