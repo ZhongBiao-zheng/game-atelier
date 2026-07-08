@@ -56,6 +56,12 @@ class SSEHub:
 
 hub = SSEHub()
 
+# 空闲心跳间隔：出图/出视频常空闲 1-2.5min，期间流零字节。缺心跳时中间层（代理把
+# 127.0.0.1 长连接缓冲/半开、系统 TCP 回收、休眠）会静默掐成半开——浏览器不触发
+# onerror 就不重连、不跑 onopen 全量刷新，卡转圈直到手动刷新。发注释行保活 + 让真掉线
+# 变成写失败快速触发重连。
+HEARTBEAT_SECONDS = 15.0
+
 sse_router = APIRouter()
 
 
@@ -66,7 +72,11 @@ async def events() -> StreamingResponse:
         try:
             yield "retry: 3000\n\n"  # browser reconnect interval
             while True:
-                msg = await q.get()
+                try:
+                    msg = await asyncio.wait_for(q.get(), timeout=HEARTBEAT_SECONDS)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"  # SSE 注释：浏览器忽略，仅用于保活/探测半开连接
+                    continue
                 yield msg
         finally:
             hub.unsubscribe(q)
