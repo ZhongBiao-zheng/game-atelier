@@ -128,6 +128,21 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
     expect(container.textContent).toContain('2026-07-08 18:00');
   });
 
+  it('耗时/生成时间与出图参数分行（次行更小更淡，参数行不含耗时）', () => {
+    const { container, getByTestId } = render(<RoundList rounds={[timedDone]} />);
+    const runLine = getByTestId('round-run-meta');
+    expect(runLine.textContent).toContain('耗时 12s');
+    expect(runLine.textContent).toContain('2026-07-08 18:00');
+    expect(runLine.className).toContain('text-xs');
+    // 参数行是另一个元素，不含耗时/时间
+    const specLine = Array.from(container.querySelectorAll('p')).find((p) =>
+      p.textContent?.includes('gpt-image-2'),
+    );
+    expect(specLine).toBeTruthy();
+    expect(specLine).not.toBe(runLine);
+    expect(specLine!.textContent).not.toContain('耗时');
+  });
+
   it('旧 job 无 completed_at 时不显示耗时/时间（优雅降级）', () => {
     const { completedAt: _omit, ...legacy } = timedDone;
     const { container } = render(<RoundList rounds={[legacy as RoundState]} />);

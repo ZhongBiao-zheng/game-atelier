@@ -194,6 +194,18 @@ function StudioFull() {
     onConnect: () => { void refreshPersistedJobs().catch(() => {}); },
   });
 
+  // SSE 兜底轮询：系统代理（Clash/V2Ray 的 TUN/全局模式）会把 127.0.0.1 的流式响应整条缓冲，
+  // 心跳字节也被憋住，浏览器连接看着"正常开着"、永不 onerror、永不重连 —— 出图完成后前端卡
+  // "生成中"直到手刷（普通 GET 不走流式缓冲，所以手刷能出）。#18 砍掉常驻 2s 轮询让 SSE 成
+  // 唯一命脉，放大了这个脆弱点。这里只要还有 pending 轮次就每 4s 全量拉一次（= 自动帮用户手刷），
+  // 出完自动翻面；无 pending 不轮询，保留 #18 的初衷。
+  const hasPendingRound = rounds.some((r) => r.kind === 'pending');
+  useEffect(() => {
+    if (!hasPendingRound) return;
+    const timer = setInterval(() => { void refreshPersistedJobs().catch(() => {}); }, 4000);
+    return () => clearInterval(timer);
+  }, [hasPendingRound, refreshPersistedJobs]);
+
   // 隐藏集挂载拉取（收藏集由 useGalleryFavorites 内部自拉）；筛选「隐藏」项时 filterRounds 用。
   useEffect(() => {
     fetchGalleryHidden().then(setHiddenPaths).catch(() => {});

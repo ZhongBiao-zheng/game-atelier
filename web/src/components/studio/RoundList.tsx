@@ -462,12 +462,16 @@ function DoneBatch({
     round.completedAt && round.submittedAt
       ? Math.max(0, Math.round((Date.parse(round.completedAt) - Date.parse(round.submittedAt)) / 1000))
       : null;
-  const meta = [
+  // 两行分层：出图参数（模型/尺寸/比例/清晰度/张数）是主元信息；耗时 + 生成时间是运行信息，
+  // 降到更小更淡的次行，别和参数挤在一行。
+  const specMeta = [
     round.config.modelName ?? round.config.model,
     round.config.size,
     round.config.ratio,
     round.config.resolution,
     round.config.n && round.config.n > 1 ? `${round.config.n} 张` : undefined,
+  ].filter(Boolean);
+  const runMeta = [
     elapsedSec != null ? `耗时 ${elapsedSec}s` : undefined,
     round.completedAt ? formatBeijingTime(round.completedAt) : undefined,
   ].filter(Boolean);
@@ -478,7 +482,12 @@ function DoneBatch({
         <ReferenceStack refs={allRefs(round.config)} onReuse={onReuseReferences} />
         <div className="min-w-0 flex-1">
           <MentionPrompt prompt={round.config.prompt} config={round.config} />
-          <p className="mt-1 text-sm text-muted-foreground">{meta.join(' | ')}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{specMeta.join(' · ')}</p>
+          {runMeta.length > 0 && (
+            <p data-testid="round-run-meta" className="mt-0.5 text-xs text-muted-foreground/60">
+              {runMeta.join(' · ')}
+            </p>
+          )}
         </div>
       </div>
       <div className="flex flex-wrap gap-1">
