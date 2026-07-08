@@ -796,6 +796,53 @@ describe('Studio', () => {
     expect(screen.queryByTestId('studio-pending-job-pending-2')).not.toBeInTheDocument();
   });
 
+  it('polls /api/jobs while a round is pending and flips it to done without any SSE (Windows 代理缓冲兜底)', async () => {
+    // jsdom 无 EventSource → useSSE 直接 early-return，这里不 stub → 隔离出兜底轮询单独路径：
+    // 证明就算 SSE 完全不通（系统代理把流式响应缓冲死），pending 卡也能靠 4s 轮询自动翻面。
+    vi.useFakeTimers();
+    const pendingJob = {
+      job_id: 'job-poll-1', character_id: 'oa', prompt: '代理缓冲下也要出图',
+      submitted_at: '2026-06-01T02:00:00Z', model: 'gpt-image-2',
+      params: { ratio: '1:1', resolution: '2K', size: '1024x1024' },
+      output_paths: [] as string[], status: 'pending', error: null,
+      kind: 'image', namespace: 'studio', alias: 'oa', provider: 'openai',
+    };
+    let jobs: unknown[] = [pendingJob];
+    const fetchMock = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'oa',
+            keys: [{
+              alias: 'oa', provider: 'openai', access_key: 'sk', secret_key: null,
+              capabilities: [], models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }],
+              notes: '', created_at: '2026-05-25T00:00:00Z', is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') return Promise.resolve({ ok: true, json: async () => jobs } as any);
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByTestId('studio-pending-job-poll-1')).toBeInTheDocument();
+
+    // 后端出图完成（供应商 78s 出好），下一轮轮询应拉到 done 并翻面 —— 全程没有任何 SSE 事件。
+    jobs = [{ ...pendingJob, status: 'done', output_paths: ['/tmp/studio/job-poll-1/v1.png'] }];
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+
+    expect(screen.getByRole('img', { name: '生成结果 1' })).toHaveAttribute(
+      'src', '/api/gallery/image?path=%2Ftmp%2Fstudio%2Fjob-poll-1%2Fv1.png',
+    );
+    expect(screen.queryByTestId('studio-pending-job-poll-1')).not.toBeInTheDocument();
+    const jobsCalls = fetchMock.mock.calls.filter(([u]) => u === '/api/jobs').length;
+    expect(jobsCalls).toBeGreaterThanOrEqual(2); // 首载 + 至少一次轮询
+  });
+
   it('does not render the batch submitted time above studio results', async () => {
     renderStudioWithCompletedBatch();
 
