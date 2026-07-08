@@ -31,9 +31,12 @@ DIRECT_HOST_SUFFIXES: tuple[str, ...] = (
 # 厂商 API 调用统一超时：(连接, 读取)。
 # 连接分量放到 30s 不只为握手：urllib3 用 connect 超时兜住「请求体上传」阶段（read 超时只管
 # 收响应），图生图要把 1.6MB+ 参考图（gpt-image multipart / seedream base64）传上去，10s 传不完
-# 会在上传阶段抛 "write operation timed out"（实测）。读取 180s 覆盖大模型出图常见耗时
-# （gpt-image-2 ~66s），远小于旧的 600s —— 挂死的上游 ~3min 内快速失败。
-DEFAULT_TIMEOUT: tuple[float, float] = (30.0, 180.0)
+# 会在上传阶段抛 "write operation timed out"（实测）。
+# 读取 300s：同步生成端点在出图完成前不吐字节，read 超时即「等首字节最长时间」= 整个生成耗时。
+# 复杂生成（gpt-image 精灵图/精细图）真实可达 ~180s+；读超时若 ≈ 生成耗时（旧 180s）会在响应到达前
+# 假超时 → _post_json 捕获 RequestException 重试 → 再跑一次完整生成 → 墙钟翻倍(实测 180s→350s)且
+# 厂商双计费。300s 给足余量避免假超时重跑，同时挂死的上游仍 5min 内 fail（不回到旧的 600s）。
+DEFAULT_TIMEOUT: tuple[float, float] = (30.0, 300.0)
 
 
 def configure_proxy_bypass() -> None:
