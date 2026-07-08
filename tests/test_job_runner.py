@@ -350,6 +350,14 @@ def test_default_timeout_connect_covers_upload_phase():
     assert net_env.DEFAULT_TIMEOUT[0] >= 30
 
 
+def test_default_timeout_read_has_headroom_over_generation():
+    # 回归守卫：读超时须明显高于真实出图耗时（复杂生成 ~180s+）。若读超时 ≈ 生成耗时（旧 180s），
+    # 首次请求会在响应到达前假超时 → _post_json 重试 → 再跑一次完整生成 → 墙钟翻倍 + 厂商双计费
+    # （实测 180s→350s）。别再压回 180。
+    from character_workflow.lib import net_env
+    assert net_env.DEFAULT_TIMEOUT[1] >= 240
+
+
 def test_direct_bypass_covers_tuzi(monkeypatch):
     # 回归守卫：tu-zi.com 必须在直连白名单——实测未放行时小火箭代理会 ProxyError 掐死 Tuzi 调用。
     from character_workflow.lib import net_env
