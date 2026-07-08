@@ -47,6 +47,16 @@ def test_update_status_to_done(runtime):
     assert updated.output_paths == ["/tmp/a.png", "/tmp/b.png"]
 
 
+def test_update_status_to_done_stamps_completed_at(runtime):
+    # Studio 卡片靠 completed_at 算出图耗时 + 展示生成时间；DONE/FAILED 终态必须盖上，PENDING 不盖。
+    write_job(job_id="job-001", character_id="c1", prompt="p", model="gpt-image-2", params={})
+    assert read_job("job-001").completed_at is None
+    pending = update_job_status("job-001", status=JobStatus.PENDING)
+    assert pending.completed_at is None
+    done = update_job_status("job-001", status=JobStatus.DONE, output_paths=["/tmp/a.png"])
+    assert done.completed_at is not None and done.completed_at.endswith("+00:00")
+
+
 def test_update_status_to_failed_records_error(runtime):
     write_job(
         job_id="job-001", character_id="c1", prompt="p",

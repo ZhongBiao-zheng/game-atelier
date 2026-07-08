@@ -81,6 +81,9 @@ class Job(BaseModel):
     # 2026-06-12: 出图进度真实卡点（视频 caller 经 job_runner 回写；Web 不能改）。
     # sent=任务已全部提交上游；downloading=任务成功、产物下载中。终态时清空。
     progress_phase: Literal["sent", "downloading"] | None = None
+    # 2026-07-08: 出图完成时间戳（update_job_status 在 DONE/FAILED 终态回写；Web 不能改）。
+    # Studio 卡片用它算出图耗时（completed_at − submitted_at）+ 展示生成时间。旧 job 无此字段=None。
+    completed_at: str | None = None
 
 
 class WebEditableJobPatch(BaseModel):
