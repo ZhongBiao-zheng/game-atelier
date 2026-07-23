@@ -1,0 +1,8 @@
+# pnpm 11 起，依赖构建脚本审批 + 运行前校验开关只从此文件读取（.npmrc 仅保留 auth/registry）。
+# esbuild 有 postinstall，须显式放行；否则 strictDepBuilds 默认开启会以 ERR_PNPM_IGNORED_BUILDS
+# 退出，新机器一键启动误报“前端构建失败”。此文件必须入 Git，别放进 .gitignore。
+allowBuilds:
+  esbuild: true
+
+# 保留旧 .npmrc 的 verify-deps-before-run=false：pnpm build 前不再重新校验/回装依赖。
+verifyDepsBeforeRun: false
