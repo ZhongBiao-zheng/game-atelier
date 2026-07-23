@@ -57,7 +57,4 @@ venv/
 web/src/**/*.js
 web/tsconfig.tsbuildinfo
 
-# pnpm 内部生成
-web/pnpm-workspace.yaml
-
 .gstack/

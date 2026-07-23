@@ -110,7 +110,7 @@ if command -v pnpm &>/dev/null; then
     cd web || exit 1
     if [ ! -d "node_modules" ]; then
       echo "首次构建：安装前端依赖..."
-      pnpm install && pnpm approve-builds esbuild || exit 1
+      pnpm install || exit 1
     fi
     # 先清再构建：tailwind v4 vite 插件会把旧 dist/* 扫进 content 源，over-existing
     # 构建非幂等（CSS 会虚胖、hash 漂移，与 make build / CI clean build 不一致）。同 Makefile build 目标。
