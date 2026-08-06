@@ -88,6 +88,7 @@ def test_respects_limit_param(client, tmp_path):
 
 
 def test_skips_studio_namespace(client, tmp_path):
+    """默认（show_studio_on_home=false）不混入 studio 出图。"""
     chars = tmp_path / "characters"
     studio = tmp_path / "studio"
     _make_image(chars / "char-a" / "portrait" / "char.png", mtime_offset=-2)
@@ -96,6 +97,41 @@ def test_skips_studio_namespace(client, tmp_path):
     items = resp.json()["items"]
     assert len(items) == 1
     assert items[0]["character_id"] == "char-a"
+    assert items[0]["source"] == "character"
+
+
+def test_studio_items_included_when_toggle_on(client, tmp_path):
+    """开关开启后 studio 出图混排；无角色归属字段为 None，job_id 兜底目录名。"""
+    _make_image(tmp_path / "characters" / "char-a" / "portrait" / "char.png")
+    _make_image(tmp_path / "studio" / "job-x" / "v1.png")
+    assert client.post("/api/config", json={"show_studio_on_home": True}).status_code == 200
+
+    items = client.get("/api/gallery/recent").json()["items"]
+    assert len(items) == 2
+    studio_item = next(i for i in items if i["source"] == "studio")
+    assert studio_item["character_id"] is None
+    assert studio_item["asset_slot"] is None
+    assert studio_item["path"] == "studio/job-x/v1.png"
+    assert studio_item["job_id"] == "job-x"
+
+
+def test_studio_items_respect_hidden(client, tmp_path):
+    _make_image(tmp_path / "studio" / "job-x" / "v1.png")
+    _make_image(tmp_path / "studio" / "job-x" / "v2.png")
+    client.post("/api/config", json={"show_studio_on_home": True})
+    client.post("/api/gallery/hidden", json={"path": "studio/job-x/v1.png", "hidden": True})
+
+    items = client.get("/api/gallery/recent").json()["items"]
+    assert [i["path"] for i in items] == ["studio/job-x/v2.png"]
+
+
+def test_studio_only_data_root_returns_studio_items(client, tmp_path):
+    """characters/ 目录不存在时开关开启仍能返回 studio 图（早退 bug 回归）。"""
+    (tmp_path / "characters").rmdir()
+    _make_image(tmp_path / "studio" / "job-x" / "v1.png")
+    client.post("/api/config", json={"show_studio_on_home": True})
+    items = client.get("/api/gallery/recent").json()["items"]
+    assert [i["path"] for i in items] == ["studio/job-x/v1.png"]
 
 
 def test_handles_missing_file_gracefully(client, tmp_path):

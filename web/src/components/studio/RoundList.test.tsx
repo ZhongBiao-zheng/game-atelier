@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RoundList, type RoundState } from './RoundList';
 
 const videoDone: RoundState = {
@@ -63,6 +63,42 @@ describe('RoundList skill 出图删除门控', () => {
   it('skill 出图不暴露删除入口（防从出图页抹掉角色磁盘资产）', () => {
     render(<RoundList rounds={[imageDone('skill')]} />);
     expect(screen.queryByLabelText('更多操作')).toBeNull();
+  });
+});
+
+describe('RoundList 单图隐藏', () => {
+  const imageDone: RoundState = {
+    kind: 'done',
+    jobId: 'job-hide-1',
+    submittedAt: new Date().toISOString(),
+    imagePaths: ['/data/studio/job-hide-1/v1.png', '/data/studio/job-hide-1/v2.png'],
+    config: { prompt: '两张图', model: 'gpt-image-2', kind: 'image', referenceImages: [] },
+  };
+
+  it('传了 onToggleHidden 时每张图渲染隐藏按钮，点击回传该图 path', () => {
+    const onToggleHidden = vi.fn();
+    render(<RoundList rounds={[imageDone]} hiddenPaths={[]} onToggleHidden={onToggleHidden} />);
+    const buttons = screen.getAllByLabelText('隐藏（不在首页展示）');
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[1]);
+    expect(onToggleHidden).toHaveBeenCalledWith('/data/studio/job-hide-1/v2.png');
+  });
+
+  it('已隐藏的图显示「取消隐藏」态（后缀比对：sidecar 存相对路径）', () => {
+    render(
+      <RoundList
+        rounds={[imageDone]}
+        hiddenPaths={['studio/job-hide-1/v1.png']}
+        onToggleHidden={() => {}}
+      />,
+    );
+    expect(screen.getAllByLabelText('取消隐藏')).toHaveLength(1);
+    expect(screen.getAllByLabelText('隐藏（不在首页展示）')).toHaveLength(1);
+  });
+
+  it('不传 onToggleHidden 时不渲染隐藏按钮（视频卡也没有）', () => {
+    render(<RoundList rounds={[imageDone, videoDone]} />);
+    expect(screen.queryByLabelText('隐藏（不在首页展示）')).toBeNull();
   });
 });
 

@@ -36,7 +36,7 @@ export function Home() {
         {/* Pinterest 式瀑布流：图片直出、无边框无放大，hover 只淡入操作按钮 */}
         <Link
           href={galleryItemHref(item)}
-          aria-label={`查看 ${item.character_id} 的${SLOT_LABEL[item.asset_slot]}`}
+          aria-label={galleryItemAriaLabel(item)}
           className="block"
         >
           <img
@@ -157,13 +157,24 @@ function useColumnCount(): number {
 }
 
 /** 资产槽中文名，用于卡片导航链接的无障碍名（屏幕阅读器读出图片通向哪类资产）。 */
-const SLOT_LABEL: Record<GalleryItem['asset_slot'], string> = {
+const SLOT_LABEL: Record<'portrait' | 'promo' | 'turnaround', string> = {
   portrait: '立绘',
   promo: '美宣',
   turnaround: '三视图',
 };
 
+function isStudioItem(item: GalleryItem): boolean {
+  return item.source === 'studio' || !item.character_id || !item.asset_slot;
+}
+
+function galleryItemAriaLabel(item: GalleryItem): string {
+  if (isStudioItem(item)) return '查看出图页';
+  return `查看 ${item.character_id} 的${SLOT_LABEL[item.asset_slot!]}`;
+}
+
 function galleryItemHref(item: GalleryItem): string {
+  // Studio 出图无角色归属：点击进出图页（历史列表里能找到该轮）。
+  if (isStudioItem(item)) return '/studio';
   if (!item.job_id) {
     return `/character/${item.character_id}/${item.asset_slot}`;
   }

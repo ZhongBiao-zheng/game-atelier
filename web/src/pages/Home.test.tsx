@@ -151,6 +151,39 @@ describe('Home', () => {
     );
   });
 
+  it('links studio-sourced gallery items to the studio page', async () => {
+    globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({ ok: true, json: async () => ({ keys: [], default_alias: null }) } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          items: [
+            {
+              character_id: null,
+              asset_slot: null,
+              source: 'studio',
+              filename: 'v1.png',
+              path: 'studio/job-x/v1.png',
+              job_id: 'job-x',
+              mtime: 0,
+            },
+          ],
+        }),
+      } as any);
+    }) as any;
+    const { container } = renderHome();
+    await waitFor(() => {
+      expect(container.querySelector('img')).toBeInTheDocument();
+    });
+    const link = screen.getByRole('link', { name: '查看出图页' });
+    expect(link.getAttribute('href')).toBe('/studio');
+  });
+
   it('documents the gallery source as recent character asset files', async () => {
     const fetchMock = vi.fn((url: RequestInfo | URL) => {
       if (url === '/api/keys') {
