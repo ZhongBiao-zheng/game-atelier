@@ -12,8 +12,8 @@ import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } fr
 import { imageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
-import { fetchGalleryHidden } from '@/api/gallery';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
+import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 
@@ -65,7 +65,7 @@ function StudioFull() {
   // toggleFavorite 透传到结果卡 ★ 收藏按钮。
   const [historyFilters, setHistoryFilters] = useState<HistoryFilters>(DEFAULT_HISTORY_FILTERS);
   const { favorites, toggleFavorite } = useGalleryFavorites();
-  const [hiddenPaths, setHiddenPaths] = useState<string[]>([]);
+  const { hiddenPaths, toggleHidden } = useGalleryHidden();
   const [persistedJobs, setPersistedJobs] = useState<Job[]>([]);
   const [pending, setPending] = useState(false);
   const [keys, setKeys] = useState<KeyView[]>([]);
@@ -205,11 +205,6 @@ function StudioFull() {
     const timer = setInterval(() => { void refreshPersistedJobs().catch(() => {}); }, 4000);
     return () => clearInterval(timer);
   }, [hasPendingRound, refreshPersistedJobs]);
-
-  // 隐藏集挂载拉取（收藏集由 useGalleryFavorites 内部自拉）；筛选「隐藏」项时 filterRounds 用。
-  useEffect(() => {
-    fetchGalleryHidden().then(setHiddenPaths).catch(() => {});
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -544,6 +539,8 @@ function StudioFull() {
           rounds={reversedRounds}
           favorites={favorites}
           onToggleFavorite={toggleFavorite}
+          hiddenPaths={hiddenPaths}
+          onToggleHidden={toggleHidden}
           onDeleteFailed={deleteFailedRound}
           onReEdit={reEdit}
           onRegenerate={regenerate}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
 
 import { chooseFolder } from '@/api/folders';
+import { fetchConfig, updateConfig } from '@/api/config';
 import { fetchOnboardingStatus, setDataRoot } from '@/api/onboarding';
 import { KeysPage } from './Keys';
 
@@ -16,13 +17,32 @@ export function SettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [keysVersion, setKeysVersion] = useState(0);
+  // 首页展示 Studio 出图开关（应用级设置，默认关）。乐观切换，失败回滚。
+  const [showStudioOnHome, setShowStudioOnHome] = useState(false);
+  const [togglingStudio, setTogglingStudio] = useState(false);
 
   useEffect(() => {
     fetchOnboardingStatus()
       .then((state) => setSavedRoot(state.data_root ?? DEFAULT_ROOT))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
+    fetchConfig()
+      .then((cfg) => setShowStudioOnHome(cfg.show_studio_on_home))
+      .catch(() => {});
   }, []);
+
+  async function toggleShowStudioOnHome() {
+    const next = !showStudioOnHome;
+    setShowStudioOnHome(next);
+    setTogglingStudio(true);
+    try {
+      await updateConfig({ show_studio_on_home: next });
+    } catch {
+      setShowStudioOnHome(!next);
+    } finally {
+      setTogglingStudio(false);
+    }
+  }
 
   const changed = pendingRoot !== null && pendingRoot !== savedRoot;
   const displayRoot = pendingRoot ?? savedRoot;
@@ -120,6 +140,39 @@ export function SettingsPage() {
             </div>
           )}
           {error && <div className="text-sm text-destructive">{error}</div>}
+        </div>
+      </section>
+
+      <section className="grid gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">
+        <div>
+          <h2 className="text-xs uppercase tracking-label text-muted-foreground/70">首页展示</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            控制首页下方作品展示区的内容来源。
+          </p>
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm text-foreground">展示 Studio 出图</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                开启后，出图页的作品会与角色作品在首页混排；已隐藏的图不展示。
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showStudioOnHome}
+              aria-label="展示 Studio 出图"
+              disabled={togglingStudio}
+              onClick={() => void toggleShowStudioOnHome()}
+              className={`relative h-6 w-11 shrink-0 rounded-full border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50 ${showStudioOnHome ? 'bg-primary' : 'bg-secondary'}`}
+            >
+              <span
+                aria-hidden
+                className={`absolute top-0.5 size-[18px] rounded-full bg-background transition-[left] ${showStudioOnHome ? 'left-[22px]' : 'left-0.5'}`}
+              />
+            </button>
+          </div>
         </div>
       </section>
 

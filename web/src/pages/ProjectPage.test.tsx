@@ -8,9 +8,33 @@ const sample = {
   worldview_md: '暖色调',
 };
 
+const works = [
+  {
+    character_id: 'char-a',
+    character_name: '暗影',
+    asset_slot: 'promo',
+    filename: 'kv.png',
+    path: 'characters/char-a/promo/kv.png',
+    job_id: 'job-promo-1',
+    mtime: 100,
+  },
+  {
+    character_id: 'char-b',
+    character_name: '烈拳猴',
+    asset_slot: 'portrait',
+    filename: 'v1.png',
+    path: 'characters/char-b/portrait/v1.png',
+    job_id: null,
+    mtime: 50,
+  },
+];
+
 beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
+    if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
+      return { ok: true, json: async () => ({ items: works }) } as Response;
+    }
     return { ok: true, json: async () => sample } as Response;
   }));
 });
@@ -35,5 +59,33 @@ describe('ProjectPage', () => {
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith('/api/experience', expect.objectContaining({ method: 'POST' })),
     );
+  });
+
+  it('项目经验下方渲染项目作品区：卡片标角色名、点击进角色大图', async () => {
+    render(<ProjectPage projectId="p1" onBack={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('project-works')).toBeInTheDocument());
+    expect(screen.getByText('项目作品')).toBeInTheDocument();
+
+    const kvLink = screen.getByRole('link', { name: '查看 暗影 的美宣' });
+    expect(kvLink.getAttribute('href')).toBe(
+      '/character/char-a/promo/job-promo-1/characters%2Fchar-a%2Fpromo%2Fkv.png',
+    );
+    // 无 job_id 的图退回资产槽路由
+    expect(screen.getByRole('link', { name: '查看 烈拳猴 的立绘' }).getAttribute('href')).toBe(
+      '/character/char-b/portrait',
+    );
+  });
+
+  it('项目没有作品时不渲染作品区', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
+      if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
+        return { ok: true, json: async () => ({ items: [] }) } as Response;
+      }
+      return { ok: true, json: async () => sample } as Response;
+    }));
+    render(<ProjectPage projectId="p1" onBack={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
+    expect(screen.queryByTestId('project-works')).toBeNull();
   });
 });

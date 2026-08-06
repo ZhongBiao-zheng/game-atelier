@@ -1,6 +1,8 @@
 export interface GalleryItem {
-  character_id: string;
-  asset_slot: 'portrait' | 'promo' | 'turnaround';
+  /** studio 来源的图无角色归属，两字段为 null。 */
+  character_id: string | null;
+  asset_slot: 'portrait' | 'promo' | 'turnaround' | null;
+  source?: 'character' | 'studio';
   filename: string;
   path: string;
   job_id: string | null;
@@ -12,6 +14,24 @@ export async function fetchGalleryRecent(limit = 24): Promise<GalleryItem[]> {
   const resp = await fetch(`/api/gallery/recent?limit=${limit}`);
   if (!resp.ok) throw new Error(`gallery fetch failed: ${resp.status}`);
   const data = (await resp.json()) as { items?: GalleryItem[] };
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+/** 项目作品：该项目名下全部角色三槽的图（已隐藏的不出，最新在前）。 */
+export interface ProjectGalleryItem {
+  character_id: string;
+  character_name: string;
+  asset_slot: 'portrait' | 'promo' | 'turnaround';
+  filename: string;
+  path: string;
+  job_id: string | null;
+  mtime: number;
+}
+
+export async function fetchGalleryProject(projectId: string): Promise<ProjectGalleryItem[]> {
+  const resp = await fetch(`/api/gallery/project?project=${encodeURIComponent(projectId)}`);
+  if (!resp.ok) throw new Error(`project gallery fetch failed: ${resp.status}`);
+  const data = (await resp.json()) as { items?: ProjectGalleryItem[] };
   return Array.isArray(data.items) ? data.items : [];
 }
 

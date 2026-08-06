@@ -1,7 +1,9 @@
 // web/src/pages/ProjectPage.tsx
 import { useEffect, useState } from 'react';
+import { Link } from 'wouter';
 import { ArrowLeft, CheckCircle2, Save } from 'lucide-react';
 import { fetchExperience, saveExperience, type ProjectExperience } from '@/api/experience';
+import { fetchGalleryProject, type ProjectGalleryItem } from '@/api/gallery';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
@@ -11,10 +13,12 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [works, setWorks] = useState<ProjectGalleryItem[]>([]);
 
   useEffect(() => {
     let cancel = false;
     fetchExperience(projectId).then(d => { if (!cancel) { setData(d); setDraft(d.worldview_md); } });
+    fetchGalleryProject(projectId).then(items => { if (!cancel) setWorks(items); }).catch(() => {});
     return () => { cancel = true; };
   }, [projectId]);
 
@@ -86,7 +90,53 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
             <span>{toast}</span>
           </div>
         )}
+
+        {works.length > 0 && (
+          <>
+            <Separator className="opacity-50" />
+            <div className="space-y-3" data-testid="project-works">
+              <h2 className="font-display italic text-base text-foreground/85 leading-none">
+                项目作品
+              </h2>
+              {/* 瀑布流混排（最新在前）：卡上标角色名+资产槽，点击进工坊角色大图。 */}
+              <div className="columns-2 sm:columns-3 gap-4">
+                {works.map(item => (
+                  <Link
+                    key={item.path}
+                    href={workHref(item)}
+                    aria-label={`查看 ${item.character_name} 的${SLOT_LABEL[item.asset_slot]}`}
+                    className="group relative mb-4 block break-inside-avoid overflow-hidden rounded-2xl"
+                  >
+                    <img
+                      src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
+                      alt=""
+                      className="w-full block"
+                      loading="lazy"
+                    />
+                    <span className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-scrim/80 px-3 py-2 text-xs text-white opacity-0 backdrop-blur-glass transition-opacity group-hover:opacity-100">
+                      <span className="truncate">{item.character_name}</span>
+                      <span className="shrink-0 text-white/60">{SLOT_LABEL[item.asset_slot]}</span>
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </section>
   );
+}
+
+const SLOT_LABEL: Record<ProjectGalleryItem['asset_slot'], string> = {
+  portrait: '立绘',
+  promo: '美宣',
+  turnaround: '三视图',
+};
+
+function workHref(item: ProjectGalleryItem): string {
+  if (!item.job_id) {
+    return `/character/${item.character_id}/${item.asset_slot}`;
+  }
+  return `/character/${item.character_id}/${item.asset_slot}/${item.job_id}/${encodeURIComponent(item.path)}`;
 }

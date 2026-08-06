@@ -599,6 +599,30 @@ interface ProjectGroupProps {
   onOpen?: (p: Project) => void;
 }
 
+/** 折叠状态持久化：存「折叠中的项目 id」集合，默认全展开（新项目天然展开）。 */
+const COLLAPSED_PROJECTS_KEY = 'workshop:collapsed-projects';
+
+function loadCollapsedProjects(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_PROJECTS_KEY);
+    const arr = raw ? (JSON.parse(raw) as unknown) : [];
+    return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveCollapsedProject(projectId: string, collapsed: boolean): void {
+  try {
+    const set = loadCollapsedProjects();
+    if (collapsed) set.add(projectId);
+    else set.delete(projectId);
+    localStorage.setItem(COLLAPSED_PROJECTS_KEY, JSON.stringify([...set]));
+  } catch {
+    // localStorage 不可用（隐私模式等）时静默跳过，折叠只在本次会话生效。
+  }
+}
+
 function ProjectGroup({
   project, chars, isEditing, draftName, dragOver,
   onDrop, onDragOver, onDragLeave,
@@ -608,7 +632,13 @@ function ProjectGroup({
   onProjectDragStart, onProjectDragOver, onProjectDrop, onProjectDragEnd,
   onOpen,
 }: ProjectGroupProps) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(() => !loadCollapsedProjects().has(project.id));
+  const toggleOpen = () => {
+    setOpen((o) => {
+      saveCollapsedProject(project.id, o);
+      return !o;
+    });
+  };
   const sectionRef = useRef<HTMLElement>(null);
   return (
     <section
@@ -648,7 +678,7 @@ function ProjectGroup({
           <GripVertical className="size-3" />
         </span>
         <button
-          onClick={() => !isEditing && setOpen(o => !o)}
+          onClick={() => !isEditing && toggleOpen()}
           aria-label={open ? '收起项目' : '展开项目'}
           title={open ? '收起' : '展开'}
           className="grid place-items-center size-4 rounded hover:bg-accent/60 cursor-pointer bg-transparent border-0 p-0 text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"

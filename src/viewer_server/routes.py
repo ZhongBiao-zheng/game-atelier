@@ -220,12 +220,24 @@ def get_images(character: str) -> dict:
     return {"character_id": character, "output_paths": paths}
 
 
-@router.get("/config")
-def get_config() -> dict:
+def _read_config() -> dict:
     p = _runtime() / "config.json"
     if not p.exists():
-        return {"image_storage_root": str(_project_root())}
-    return json.loads(p.read_text(encoding="utf-8"))
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+@router.get("/config")
+def get_config() -> dict:
+    cfg = _read_config()
+    return {
+        "image_storage_root": cfg.get("image_storage_root") or str(_project_root()),
+        "show_studio_on_home": bool(cfg.get("show_studio_on_home", False)),
+    }
 
 
 @router.post("/spec/{character_id}")
@@ -594,21 +606,33 @@ def post_job_cancel(job_id: str) -> dict:
 
 @router.post("/config")
 def post_config(payload: dict = Body(...)) -> dict:
-    raw = (payload.get("image_storage_root") or "").strip()
-    if not raw:
-        raise HTTPException(422, detail="image_storage_root required")
-    # Expand ~ and env vars; resolve to absolute path so future reads are stable.
-    expanded = Path(os.path.expandvars(os.path.expanduser(raw)))
-    try:
-        expanded.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        raise HTTPException(422, detail=f"无法创建目录：{e}") from e
-    if not os.access(expanded, os.W_OK):
-        raise HTTPException(422, detail=f"目录不可写：{expanded}")
-    resolved = str(expanded.resolve())
-    cfg_path = _runtime() / "config.json"
-    atomic_write_json(cfg_path, {"image_storage_root": resolved})
-    return {"ok": True, "image_storage_root": resolved}
+    """合并式补丁：只更新请求里出现的已知键，其余键保留。"""
+    cfg = _read_config()
+    updated = False
+    if "image_storage_root" in payload:
+        raw = (payload.get("image_storage_root") or "").strip()
+        if not raw:
+            raise HTTPException(422, detail="image_storage_root required")
+        # Expand ~ and env vars; resolve to absolute path so future reads are stable.
+        expanded = Path(os.path.expandvars(os.path.expanduser(raw)))
+        try:
+            expanded.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise HTTPException(422, detail=f"无法创建目录：{e}") from e
+        if not os.access(expanded, os.W_OK):
+            raise HTTPException(422, detail=f"目录不可写：{expanded}")
+        cfg["image_storage_root"] = str(expanded.resolve())
+        updated = True
+    if "show_studio_on_home" in payload:
+        value = payload["show_studio_on_home"]
+        if not isinstance(value, bool):
+            raise HTTPException(422, detail="show_studio_on_home must be a boolean")
+        cfg["show_studio_on_home"] = value
+        updated = True
+    if not updated:
+        raise HTTPException(422, detail="no supported config keys in payload")
+    atomic_write_json(_runtime() / "config.json", cfg)
+    return {"ok": True, **cfg}
 
 
 class _DataRootPayload(BaseModel):
@@ -926,36 +950,64 @@ _GALLERY_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 
 @router.get("/gallery/recent")
 def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
-    """Return random character images from portrait/promo/turnaround."""
+    """Return random character images from portrait/promo/turnaround.
+
+    应用设置 show_studio_on_home 开启时，Studio 出图（studio/<job_id>/*）也混排进来。
+    """
     characters_dir = _project_root() / "characters"
     items: list[dict] = []
-    if not characters_dir.exists():
-        return {"items": []}
     job_ids_by_path = _gallery_job_ids_by_path()
     hidden = set(_read_gallery_hidden())
-    for char_dir in characters_dir.iterdir():
-        if not char_dir.is_dir():
-            continue
-        for slot in _GALLERY_SLOTS:
-            slot_dir = char_dir / slot
-            if not slot_dir.is_dir():
+    if characters_dir.exists():
+        for char_dir in characters_dir.iterdir():
+            if not char_dir.is_dir():
                 continue
-            for f in slot_dir.iterdir():
+            for slot in _GALLERY_SLOTS:
+                slot_dir = char_dir / slot
+                if not slot_dir.is_dir():
+                    continue
+                for f in slot_dir.iterdir():
+                    if f.suffix.lower() not in _GALLERY_EXTS:
+                        continue
+                    rel = f.relative_to(_project_root()).as_posix()
+                    if rel in hidden:
+                        continue  # 画师点过「隐藏」：工坊可见，首页作品展示不出
+                    try:
+                        mtime = f.stat().st_mtime
+                    except OSError:
+                        continue  # F3: broken symlink / permissions issue
+                    items.append({
+                        "character_id": char_dir.name,
+                        "asset_slot": slot,
+                        "source": "character",
+                        "filename": f.name,
+                        "path": rel,
+                        "job_id": job_ids_by_path.get(rel),
+                        "mtime": mtime,
+                    })
+    studio_dir = _project_root() / "studio"
+    if bool(_read_config().get("show_studio_on_home", False)) and studio_dir.exists():
+        for job_dir in studio_dir.iterdir():
+            if not job_dir.is_dir():
+                continue
+            for f in job_dir.iterdir():
                 if f.suffix.lower() not in _GALLERY_EXTS:
                     continue
                 rel = f.relative_to(_project_root()).as_posix()
                 if rel in hidden:
-                    continue  # 画师点过「隐藏」：工坊可见，首页作品展示不出
+                    continue
                 try:
                     mtime = f.stat().st_mtime
                 except OSError:
-                    continue  # F3: broken symlink / permissions issue
+                    continue
                 items.append({
-                    "character_id": char_dir.name,
-                    "asset_slot": slot,
+                    "character_id": None,
+                    "asset_slot": None,
+                    "source": "studio",
                     "filename": f.name,
                     "path": rel,
-                    "job_id": job_ids_by_path.get(rel),
+                    # jobs 索引兜底目录名：studio 输出目录名即 job_id。
+                    "job_id": job_ids_by_path.get(rel, job_dir.name),
                     "mtime": mtime,
                 })
     favorites = set(_read_gallery_favorites())
@@ -966,6 +1018,53 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     random.shuffle(items)
     items.sort(key=lambda it: (it["path"] in favorites, it["rating"]), reverse=True)
     return {"items": items[:limit]}
+
+
+@router.get("/gallery/project")
+def gallery_project(project: str = Query(min_length=1)) -> dict:
+    """项目作品：assignments 反查该项目的角色 → 各角色三槽的图。
+
+    已隐藏的不出（与首页作品展示同语义），最新在前。
+    """
+    pf = read_projects()
+    proj = next((p for p in pf.projects if p.id == project), None)
+    if proj is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    member_ids = [cid for cid, pid in pf.assignments.items() if pid == proj.id]
+    hidden = set(_read_gallery_hidden())
+    job_ids_by_path = _gallery_job_ids_by_path()
+    items: list[dict] = []
+    for char_id in member_ids:
+        char_dir = _project_root() / "characters" / char_id
+        if not char_dir.is_dir():
+            continue
+        char_name = _display_name(char_dir / "spec.md")
+        for slot in _GALLERY_SLOTS:
+            slot_dir = char_dir / slot
+            if not slot_dir.is_dir():
+                continue
+            for f in slot_dir.iterdir():
+                if f.suffix.lower() not in _GALLERY_EXTS:
+                    continue
+                rel = f.relative_to(_project_root()).as_posix()
+                if rel in hidden:
+                    continue
+                try:
+                    mtime = f.stat().st_mtime
+                except OSError:
+                    continue
+                items.append({
+                    "character_id": char_id,
+                    "character_name": char_name,
+                    "asset_slot": slot,
+                    "source": "character",
+                    "filename": f.name,
+                    "path": rel,
+                    "job_id": job_ids_by_path.get(rel),
+                    "mtime": mtime,
+                })
+    items.sort(key=lambda it: it["mtime"], reverse=True)
+    return {"items": items}
 
 
 def _gallery_hidden_file() -> Path:
