@@ -45,7 +45,7 @@ export function Filmstrip({ characterId, assetSlot, currentPath, onSelect, sseSi
     .join(' · ');
 
   return (
-    <aside className="col-start-1 flex h-full min-w-0 flex-col gap-2.5 overflow-y-auto border-r border-border px-3 py-4">
+    <aside className="col-start-1 flex h-full min-w-0 flex-col gap-2.5 overflow-y-auto stable-scroll border-r border-border px-3 py-4">
       <div className="whitespace-nowrap text-center text-xs uppercase tracking-label text-muted-foreground/70">
         {SLOT_LABEL[assetSlot]} · {images.length}
       </div>
