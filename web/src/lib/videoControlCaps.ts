@@ -20,7 +20,7 @@ export type VideoFrameMode = 'auto' | 'first' | 'last' | 'firstlast';
 export type VideoQuality = 'std' | 'pro';
 
 export interface VideoControlCaps {
-  family: 'seedance' | 'happyhorse' | 'kling' | 'standard';
+  family: 'seedance' | 'happyhorse' | 'kling' | 'openrouter' | 'standard';
   /** 可用生成方式；只有一种时 VideoControls 隐藏该分区。 */
   modes: VideoMode[];
   /** 可选时长（秒）；空数组 = 该模式无时长参数（如 happyhorse video-edit 随输入），隐藏分区。 */
@@ -120,6 +120,21 @@ function happyhorseCaps(id: string): VideoControlCaps {
   return { ...HAPPYHORSE_BASE, modes: ['firstlast'], ratios: HAPPYHORSE_RATIOS, maxFrames: 0 };
 }
 
+// OpenRouter 视频 API 是统一异步 job，参数档位随底层厂商差异极大（kling 只 720p、
+// veo 到 4K、时长枚举各不同）。duration/resolution 隐藏走厂商默认档，避免把某一家的
+// 枚举错发给另一家（400）；比例只留全厂商交集三档。
+const OPENROUTER_VIDEO_CAPS: VideoControlCaps = {
+  family: 'openrouter',
+  modes: ['firstlast', 'omni'],
+  durations: [],
+  resolutions: [],
+  ratios: ['16:9', '9:16', '1:1'],
+  supportsAudio: true,
+  supportsReferenceVideo: false,
+  supportsReferenceAudio: false,
+  maxFrames: 2,
+};
+
 const STANDARD_CAPS: VideoControlCaps = {
   family: 'standard',
   modes: ['firstlast', 'omni'],
@@ -162,6 +177,7 @@ export function videoControlCaps(modelId?: string | null, protocol?: string | nu
   if (p === 'seedance') return seedanceCaps(id);
   if (p === 'dashscope') return happyhorseCaps(id);
   if (p === 'kling') return klingCaps(id);
+  if (p === 'openrouter') return OPENROUTER_VIDEO_CAPS;
   // 无协议 → 退回按 modelId 子串识别（命名 provider 历史调用兼容）。
   if (id.includes('seedance')) return seedanceCaps(id);
   if (id.includes('happyhorse')) return happyhorseCaps(id);

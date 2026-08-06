@@ -38,6 +38,8 @@ def _provider_render(key: _keys.KeySpec):
         return stubs.seedream_render
     if provider == "tokendance":
         return stubs.tokendance_render
+    if provider == "openrouter":
+        return stubs.openrouter_render
     if provider == "custom":
         return stubs.custom_render
     return None

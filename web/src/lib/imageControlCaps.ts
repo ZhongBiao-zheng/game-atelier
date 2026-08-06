@@ -11,7 +11,7 @@
 export type Quality = 'low' | 'medium' | 'high' | 'auto';
 
 export interface ImageControlCaps {
-  family: 'nano-banana' | 'gpt-image' | 'standard';
+  family: 'nano-banana' | 'gpt-image' | 'openrouter' | 'standard';
   /** 比例枚举（standard 族由 PromptInput 用 1:1 + 侧比例的特殊布局，此处仍给全集）。 */
   ratios: string[];
   /** 是否显示 2K/4K 分辨率切换。 */
@@ -29,7 +29,24 @@ const NANO_BANANA_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '2:3', '3:2'];
 const GPT_IMAGE_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
 const STANDARD_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
 
+// OpenRouter Image API 通用比例（各厂商 clamp 到自己的子集；此集是 4 个精选模型的交集）。
+const OPENROUTER_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
+
 export function imageControlCaps(modelId?: string | null): ImageControlCaps {
+  // OpenRouter 模型 id 是 vendor/model 斜杠 slug（如 openai/gpt-image-2），现有各厂商
+  // id 均无斜杠——含 '/' 即判 openrouter 族。size 走 aspect_ratio 比例语义（分辨率由
+  // 厂商默认档决定），quality 仅 gpt-image 尾段支持。
+  if (modelId?.includes('/')) {
+    const tail = modelId.split('/').pop() ?? '';
+    return {
+      family: 'openrouter',
+      ratios: OPENROUTER_RATIOS,
+      showResolution: false,
+      showCustomSize: false,
+      qualities: tail.startsWith('gpt-image') ? ['low', 'medium', 'high', 'auto'] : null,
+      sizeKind: 'ratio',
+    };
+  }
   if (modelId?.startsWith('nano-banana')) {
     return {
       family: 'nano-banana',

@@ -36,10 +36,16 @@ def _dashscope_render(**kw: Any) -> list[str]:
     return happyhorse_video.render_video(**kw)
 
 
+def _openrouter_render(**kw: Any) -> list[str]:
+    from . import openrouter_video
+    return openrouter_video.render_video(**kw)
+
+
 VIDEO_ADAPTERS: dict[str, VideoAdapter] = {
     "seedance": VideoAdapter("seedance", "Seedance(火山 / Ark)", _seedance_render),
     "kling": VideoAdapter("kling", "可灵 Kling", _kling_render),
     "dashscope": VideoAdapter("dashscope", "DashScope(happyhorse / 阿里百炼)", _dashscope_render),
+    "openrouter": VideoAdapter("openrouter", "OpenRouter", _openrouter_render),
 }
 
 
@@ -51,6 +57,9 @@ def resolve_protocol(provider: str, base_url: str | None, model: str) -> str | N
     m = (model or "").lower()
     if provider == "seedance":
         return "seedance"
+    # OpenRouter 全部视频模型走同一异步 job API，与模型无关。
+    if provider == "openrouter":
+        return "openrouter"
     if provider == "tokendance":
         if "seedance" in m:
             return "seedance"
