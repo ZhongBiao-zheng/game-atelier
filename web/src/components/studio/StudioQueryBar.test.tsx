@@ -28,10 +28,17 @@ describe('StudioQueryBar', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mode: 'skill' }));
 
     onChange.mockClear();
+    // 选项点选后面板保持展开（外点才关），直接再点同一选项即可清空
     rerender(<StudioQueryBar filters={{ ...DEFAULT_HISTORY_FILTERS, mode: 'skill' }} onChange={onChange} />);
-    fireEvent.click(screen.getByLabelText('生成模式筛选'));
     fireEvent.click(screen.getByRole('option', { name: /Skill/ }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mode: null }));
+  });
+
+  it('点选选项后面板保持展开', () => {
+    render(<StudioQueryBar filters={DEFAULT_HISTORY_FILTERS} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText('时间筛选'));
+    fireEvent.click(screen.getByRole('option', { name: '最近一周' }));
+    expect(screen.getByRole('listbox', { name: '时间筛选列表' })).toBeInTheDocument();
   });
 
   it('操作类型选喜欢回传 op=favorite', () => {

@@ -91,47 +91,49 @@ export function SettingsPage() {
           </p>
         </div>
         <div className="min-w-0 space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <span
-              aria-label="数据目录"
-              className={`min-w-0 break-all font-mono text-sm ${changed ? 'text-primary' : 'text-foreground'}`}
-            >
-              {loading ? '读取中...' : displayRoot || '尚未选择项目文件夹'}
-            </span>
-            {changed && (
-              <span className="text-xs uppercase tracking-label text-muted-foreground/70">未保存</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={pickDataRoot}
-              disabled={loading || saving || choosing}
-              className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <FolderOpen className="size-4" aria-hidden />
-              {choosing ? '选择中...' : '更换文件夹'}
-            </button>
-            {changed && (
-              <>
-                <button
-                  type="button"
-                  onClick={saveDataRoot}
-                  disabled={saving}
-                  className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
-                >
-                  {saving ? '保存中...' : '保存'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPendingRoot(null)}
-                  disabled={saving}
-                  className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                >
-                  撤销
-                </button>
-              </>
-            )}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <span
+                aria-label="数据目录"
+                className={`min-w-0 break-all font-mono text-sm ${changed ? 'text-primary' : 'text-foreground'}`}
+              >
+                {loading ? '读取中...' : displayRoot || '尚未选择项目文件夹'}
+              </span>
+              {changed && (
+                <span className="text-xs uppercase tracking-label text-muted-foreground/70">未保存</span>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={pickDataRoot}
+                disabled={loading || saving || choosing}
+                className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                <FolderOpen className="size-4" aria-hidden />
+                {choosing ? '选择中...' : '更换文件夹'}
+              </button>
+              {changed && (
+                <>
+                  <button
+                    type="button"
+                    onClick={saveDataRoot}
+                    disabled={saving}
+                    className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ring-offset-2 ring-offset-background"
+                  >
+                    {saving ? '保存中...' : '保存'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingRoot(null)}
+                    disabled={saving}
+                    className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    撤销
+                  </button>
+                </>
+              )}
+            </div>
           </div>
           {message && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
