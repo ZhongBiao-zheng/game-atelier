@@ -57,7 +57,7 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
         </Button>
       </header>
 
-      <div className="flex-1 overflow-y-auto stable-scroll px-8 py-6 space-y-6 max-w-3xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto stable-scroll px-8 py-6 space-y-6 w-full">
         <div>
           <h1 className="font-display text-display italic text-foreground">{data.project.name}</h1>
           <dl className="mt-3 grid grid-cols-[84px_1fr] gap-y-1.5 gap-x-3 text-xs">
@@ -99,7 +99,9 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
                 项目作品
               </h2>
               {/* 瀑布流混排（最新在前）：卡上标角色名+资产槽，点击进工坊角色大图。 */}
-              <div className="columns-2 sm:columns-3 gap-4">
+              {/* 自适应列数：column-width 模式——卡宽恒 ~14rem（对齐旧 max-w-3xl 三列时的卡宽），
+                  容器多宽放多少列，宽度不够自动减列 */}
+              <div className="columns-[14rem] gap-4">
                 {works.map(item => (
                   <Link
                     key={item.path}
