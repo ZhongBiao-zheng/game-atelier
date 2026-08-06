@@ -57,7 +57,7 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
         </Button>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6 max-w-3xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto stable-scroll px-8 py-6 space-y-6 max-w-3xl mx-auto w-full">
         <div>
           <h1 className="font-display text-display italic text-foreground">{data.project.name}</h1>
           <dl className="mt-3 grid grid-cols-[84px_1fr] gap-y-1.5 gap-x-3 text-xs">

@@ -190,7 +190,9 @@ function ThreeColumnLayout({
     return (
       <>
         <div
-          className="relative grid h-full"
+          // grid-rows minmax(0,1fr)：行高钉死为视口高，内容溢出由各栏内部滚动消化，
+          // 否则隐式行按内容撑高、滚动落到外层 AppShell main（头部/侧栏跟着滚走）
+          className="relative grid h-full grid-rows-[minmax(0,1fr)]"
           style={{ gridTemplateColumns: `${stripW}px minmax(0,1fr)` }}
         >
           {stripW > 0 && selected && (
@@ -202,7 +204,7 @@ function ThreeColumnLayout({
               sseSignal={sseSignal}
             />
           )}
-          <div className="col-start-2 min-w-0">
+          <div className="col-start-2 min-w-0 min-h-0">
             <ImageDetail
               jobId={detailJob.jobId}
               path={detailJob.path}
@@ -235,10 +237,11 @@ function ThreeColumnLayout({
   return (
     <>
       <div
-        className="relative grid h-full"
+        // 同上：行高钉死，名册/画廊各自内滚，头部与侧栏保持固定
+        className="relative grid h-full grid-rows-[minmax(0,1fr)]"
         style={{ gridTemplateColumns: `${rosterW}px minmax(0,1fr)` }}
       >
-        <div className="col-start-1 min-w-0">
+        <div className="col-start-1 min-w-0 min-h-0">
           <LeftSidebar
             sseSignal={sseSignal}
             selectedId={selected?.id}
@@ -249,7 +252,7 @@ function ThreeColumnLayout({
             }}
           />
         </div>
-        <div className="col-start-2 min-w-0">
+        <div className="col-start-2 min-w-0 min-h-0">
           {openedProject ? (
             <ProjectPage projectId={openedProject.id} onBack={() => setOpenedProject(null)} />
           ) : (

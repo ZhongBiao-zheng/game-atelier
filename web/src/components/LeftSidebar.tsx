@@ -382,7 +382,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenP
           creatingProject={creatingProject}
         />
 
-        <div className="flex-1 overflow-y-auto px-2 py-2">
+        <div className="flex-1 overflow-y-auto stable-scroll px-2 py-2">
           {creatingCharacter && (
             <div className="mb-2 flex items-center gap-1.5 px-2 py-1">
               <UserPlus className="size-3.5 text-muted-foreground shrink-0" />
