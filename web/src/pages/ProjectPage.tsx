@@ -99,8 +99,9 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
                 项目作品
               </h2>
               {/* 瀑布流混排（最新在前）：卡上标角色名+资产槽，点击进工坊角色大图。 */}
-              {/* 自适应列数：断点对齐首页作品墙 */}
-              <div className="columns-2 sm:columns-3 lg:columns-4 2xl:columns-5 gap-4">
+              {/* 自适应列数：column-width 模式——卡宽恒 ~14rem（对齐旧 max-w-3xl 三列时的卡宽），
+                  容器多宽放多少列，宽度不够自动减列 */}
+              <div className="columns-[14rem] gap-4">
                 {works.map(item => (
                   <Link
                     key={item.path}
