@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Search, ChevronDown, Image as ImageIcon, Video, Wand2, Heart, EyeOff, Check, X } from 'lucide-react';
 
 import { ToolbarPopover } from './ToolbarPopover';
@@ -52,9 +52,14 @@ export function StudioQueryBar({
 }) {
   const [openPanel, setOpenPanel] = useState<'time' | 'mode' | 'op' | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const timeRef = useRef<HTMLDivElement>(null);
   const modeRef = useRef<HTMLDivElement>(null);
   const opRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
 
   const toggle = (panel: 'time' | 'mode' | 'op') => setOpenPanel((p) => (p === panel ? null : panel));
   const panelCls = 'w-60 rounded-xl border border-border bg-card p-2';
@@ -66,37 +71,44 @@ export function StudioQueryBar({
       data-testid="studio-query-bar"
       className="pointer-events-auto inline-flex h-9 items-center rounded-full border border-input bg-glass px-1.5 backdrop-blur-glass"
     >
-      {searchOpen ? (
-        <div className="flex w-80 items-center gap-2 pl-1 pr-2">
-          <Search size={16} aria-hidden className="shrink-0 text-muted-foreground" />
-          <input
-            autoFocus
-            value={filters.search}
-            placeholder="搜索提示词…"
-            aria-label="按提示词搜索出图记录"
-            onChange={(e) => onChange({ ...filters, search: e.target.value })}
-            onBlur={() => { if (!filters.search) setSearchOpen(false); }}
-            className="h-7 w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-          />
-          <button
-            type="button"
-            aria-label="关闭搜索"
-            onClick={() => { onChange({ ...filters, search: '' }); setSearchOpen(false); }}
-            className="grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-secondary"
-          >
-            <X size={14} aria-hidden />
-          </button>
-        </div>
-      ) : (
+      {/* 搜索区常驻挂载，靠宽度过渡做展开/收起滑动动画（条件渲染会瞬间跳变）。 */}
+      <div
+        className={`flex items-center overflow-hidden transition-[width] duration-300 ease-out ${
+          searchOpen ? 'w-80 pr-2' : 'w-8'
+        }`}
+      >
         <button
           type="button"
           aria-label="搜索"
-          onClick={() => setSearchOpen(true)}
-          className="grid size-8 place-items-center rounded-full text-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          onClick={() => (searchOpen ? searchInputRef.current?.focus() : setSearchOpen(true))}
+          className="grid size-8 shrink-0 place-items-center rounded-full text-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <Search size={16} aria-hidden />
         </button>
-      )}
+        <input
+          ref={searchInputRef}
+          value={filters.search}
+          placeholder="搜索提示词…"
+          aria-label="按提示词搜索出图记录"
+          tabIndex={searchOpen ? 0 : -1}
+          onChange={(e) => onChange({ ...filters, search: e.target.value })}
+          onBlur={() => { if (!filters.search) setSearchOpen(false); }}
+          className={`h-7 min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none transition-opacity duration-200 ${
+            searchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+          }`}
+        />
+        <button
+          type="button"
+          aria-label="关闭搜索"
+          tabIndex={searchOpen ? 0 : -1}
+          onClick={() => { onChange({ ...filters, search: '' }); setSearchOpen(false); }}
+          className={`grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-secondary transition-opacity duration-200 ${
+            searchOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+          }`}
+        >
+          <X size={14} aria-hidden />
+        </button>
+      </div>
 
       <Divider />
       <div ref={timeRef} className="relative">
@@ -106,7 +118,7 @@ export function StudioQueryBar({
         <ToolbarPopover open={openPanel === 'time'} onClose={() => setOpenPanel(null)} anchorRef={timeRef} direction="down" role="listbox" aria-label="时间筛选列表" className={panelCls}>
           {TIME_OPTS.map((o) => (
             <button key={o.key} type="button" role="option" aria-selected={filters.time === o.key} className={optionCls}
-              onClick={() => { onChange({ ...filters, time: o.key }); setOpenPanel(null); }}>
+              onClick={() => onChange({ ...filters, time: o.key })}>
               <span>{o.label}</span>
               {filters.time === o.key && <Check size={16} aria-hidden className="text-primary" />}
             </button>
@@ -125,7 +137,7 @@ export function StudioQueryBar({
             const active = filters.mode === o.key;
             return (
               <button key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
-                onClick={() => { onChange({ ...filters, mode: active ? null : o.key }); setOpenPanel(null); }}>
+                onClick={() => onChange({ ...filters, mode: active ? null : o.key })}>
                 <span className="flex items-center gap-3">{o.icon}{o.label}</span>
                 {active && <Check size={16} aria-hidden className="text-primary" />}
               </button>
@@ -145,7 +157,7 @@ export function StudioQueryBar({
             const active = filters.op === o.key;
             return (
               <button key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
-                onClick={() => { onChange({ ...filters, op: active ? null : o.key }); setOpenPanel(null); }}>
+                onClick={() => onChange({ ...filters, op: active ? null : o.key })}>
                 <span className="flex items-center gap-3">{o.icon}{o.label}</span>
                 {active && <Check size={16} aria-hidden className="text-primary" />}
               </button>

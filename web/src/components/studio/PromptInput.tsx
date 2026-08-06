@@ -766,7 +766,6 @@ export function PromptInput({
                 style={{ width: REF_W, height: REF_H, transform: 'translateY(-50%) rotate(-8deg)' }}
               >
                 <Plus size={18} className="text-muted-foreground" />
-                {isOmni && <span className="text-xs leading-none text-muted-foreground">参考内容</span>}
               </label>
             ) : (
               <>
