@@ -7,8 +7,8 @@ from character_workflow.lib.callers.video_registry import (
 )
 
 
-def test_registry_has_three_protocols_with_labels():
-    assert set(VIDEO_ADAPTERS) == {"seedance", "kling", "dashscope"}
+def test_registry_has_four_protocols_with_labels():
+    assert set(VIDEO_ADAPTERS) == {"seedance", "kling", "dashscope", "openrouter"}
     for pid, adapter in VIDEO_ADAPTERS.items():
         assert adapter.protocol == pid
         assert adapter.label  # 非空友好名
@@ -27,3 +27,5 @@ def test_resolve_protocol_matches_existing_routing_rules():
     assert resolve_protocol("custom", "https://api.openai-hk.com/v1", "gpt-image-2") is None
     # 任意纯自定义端点 → None（须用户显式选协议）
     assert resolve_protocol("custom", "https://api.example.com/v1", "foo-video-1") is None
+    # openrouter 全模型走同一异步 job 协议
+    assert resolve_protocol("openrouter", "https://openrouter.ai/api/v1", "google/veo-3.1") == "openrouter"

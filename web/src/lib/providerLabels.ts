@@ -3,6 +3,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   seedream: '火山引擎',
   tokendance: '词元跳动',
+  openrouter: 'OpenRouter',
 };
 
 export function providerLabel(provider?: string | null, alias?: string | null): string {

@@ -25,6 +25,7 @@ Provider = Literal[
     "veo",
     "seedance",
     "tokendance",
+    "openrouter",
     "custom",
 ]
 Kind = Literal["portrait", "promo", "turnaround"]
