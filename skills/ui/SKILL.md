@@ -76,6 +76,8 @@ triggers:
 1. Read `style.md`：无此文件 → 先按 style-template 问清基础节（style/palette/taboo）再补 `ui.*`；已有 → 只补 `ui.*` 节。
 2. 从 interaction.md 全局交互原则 + gdd 世界观推导初稿，AskUserQuestion 逐项确认（字体气质 / 圆角描边材质 / 组件状态表现）。
 3. 画师确认后落盘；修改 approved 的 style.md 必须先经画师确认。
+4. 改 approved 的 style.md 前先跑 `stale-report`（A3）：向画师列出项目下会被标记过时的
+   定稿（角色三 slot + screen），确认后再动；改后 Web 定稿图出「风格已变更」角标。
 
 ## 每步固定输出（七件套）
 

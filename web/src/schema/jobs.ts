@@ -79,11 +79,15 @@ export interface CharacterEntry {
   thumbnail?: string | null;
 }
 
-// A2（2026-08-10）定稿 — 与 schemas.py::CanonicalEntry/CanonicalFile 同步
+// A2（2026-08-10）定稿 — 与 schemas.py::CanonicalStatusEntry/CanonicalStatusFile 同步
+// spec_stale/style_stale 是 A3 的服务端计算态（存储指纹 vs 当前指纹），不落盘。
 export interface CanonicalEntry {
   path: string; // data-root 相对路径
   set_at: string;
   spec_fingerprint?: string;
+  style_fingerprint?: string;
+  spec_stale?: boolean;
+  style_stale?: boolean;
 }
 
 export interface CanonicalFile {
@@ -92,11 +96,13 @@ export interface CanonicalFile {
   turnaround: CanonicalEntry | null;
 }
 
-// B3（2026-08-10）screen 定稿 — 与 schemas.py::ScreenCanonicalEntry/ScreenCanonicalFile 同步
+// B3（2026-08-10）screen 定稿 — 与 schemas.py::ScreenCanonicalStatusEntry/File 同步
 export interface ScreenCanonicalEntry {
   path: string; // data-root 相对路径
   set_at: string;
   style_variant?: string;
+  style_fingerprint?: string;
+  style_stale?: boolean; // A3 服务端计算态
 }
 
 export interface ScreenCanonicalFile {

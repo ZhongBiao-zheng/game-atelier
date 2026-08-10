@@ -131,7 +131,8 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
                   </p>
                   <div className="flex gap-4 overflow-x-auto pb-2">
                     {imgs.map(img => {
-                      const canonical = isCanonicalPath(img.path, screenCanonical.screens[screenId]);
+                      const canonicalEntry = screenCanonical.screens[screenId];
+                      const canonical = isCanonicalPath(img.path, canonicalEntry);
                       return (
                         <figure key={img.path} className="w-56 shrink-0 space-y-1.5">
                           <div className="group relative overflow-hidden rounded-2xl">
@@ -150,9 +151,13 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
                               />
                             </a>
                             {canonical && (
-                              <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 rounded-sm bg-glass backdrop-blur-glass px-2 py-0.5 text-xs text-primary">
+                              <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1.5 rounded-sm bg-glass backdrop-blur-glass px-2 py-0.5 text-xs text-primary">
                                 <BadgeCheck className="size-3.5" />
                                 定稿
+                                {/* A3：定稿后 style.md 又改过 → 提示过时；重新定稿刷新指纹即消 */}
+                                {canonicalEntry?.style_stale && (
+                                  <span className="text-destructive">风格已变更</span>
+                                )}
                               </span>
                             )}
                             <button

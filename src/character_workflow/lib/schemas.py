@@ -157,10 +157,12 @@ class CharacterProjectAssign(BaseModel):
 class CanonicalEntry(BaseModel):
     # A2（2026-08-10）：单 slot 定稿记录。path 为 data-root 相对路径。
     # spec_fingerprint = 写入时 spec.md visual_dna+anchors 内容 hash（A3 stale 检测用）。
+    # style_fingerprint = 写入时所属项目 style.md 内容 hash（A3；未归属项目 → ""）。
     model_config = ConfigDict(extra="forbid")
     path: str
     set_at: str
     spec_fingerprint: str = ""
+    style_fingerprint: str = ""
 
 
 class CanonicalFile(BaseModel):
@@ -169,6 +171,20 @@ class CanonicalFile(BaseModel):
     portrait: CanonicalEntry | None = None
     promo: CanonicalEntry | None = None
     turnaround: CanonicalEntry | None = None
+
+
+class CanonicalStatusEntry(CanonicalEntry):
+    # A3：API 响应用的计算态 —— 存储指纹 vs 当前指纹比对结果，不落盘。
+    # 存储指纹为 ""（旧数据 / 无 spec / 未归属项目）时无从比对，按不 stale 处理。
+    spec_stale: bool = False
+    style_stale: bool = False
+
+
+class CanonicalStatusFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    portrait: CanonicalStatusEntry | None = None
+    promo: CanonicalStatusEntry | None = None
+    turnaround: CanonicalStatusEntry | None = None
 
 
 class CanonicalSet(BaseModel):
@@ -180,16 +196,28 @@ class CanonicalSet(BaseModel):
 
 class ScreenCanonicalEntry(BaseModel):
     # B3（2026-08-10）：单个 screen 的定稿记录。path 为 data-root 相对路径。
+    # style_fingerprint = 写入时项目 style.md 内容 hash（A3 stale 检测用）。
     model_config = ConfigDict(extra="forbid")
     path: str
     set_at: str
     style_variant: str = ""
+    style_fingerprint: str = ""
 
 
 class ScreenCanonicalFile(BaseModel):
     # projects/<slug>/screens/canonical.json —— 每个 screen-id 至多一张定稿。
     model_config = ConfigDict(extra="forbid")
     screens: dict[str, ScreenCanonicalEntry] = Field(default_factory=dict)
+
+
+class ScreenCanonicalStatusEntry(ScreenCanonicalEntry):
+    # A3：API 响应用的计算态，不落盘。存储指纹为 "" 时按不 stale 处理。
+    style_stale: bool = False
+
+
+class ScreenCanonicalStatusFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    screens: dict[str, ScreenCanonicalStatusEntry] = Field(default_factory=dict)
 
 
 class ScreenCanonicalSet(BaseModel):

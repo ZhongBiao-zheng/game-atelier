@@ -203,6 +203,11 @@ uv run python -m character_workflow set-canonical --kind portrait --path <该图
 
 每 slot 至多一张，设新图自动顶掉旧定稿；Web 角色页图卡也能设 / 取消（BadgeCheck 按钮）。promo / turnaround 出图默认引用定稿立绘作 subject。不得未经画师确认擅自定稿。
 
+**stale 传播（A3）**：定稿写入时盖 spec 指纹（visual_dna + anchors）与项目 style.md 指纹。
+**改锚点（visual_dna / anchors）或项目 style.md 前**，先读该角色 `canonical.json`（或跑
+`stale-report` 看全库）——有定稿就向画师列出「这些定稿会被标记过时」，经确认再改。
+改后 Web 图卡出「spec 已变更 / 风格已变更」角标；按新 spec 重出图并重新定稿即消。
+
 ## 写出图 prompt
 
 **应用 turn-start 记忆（必做）**：把 `project_worldview` 的项目定位 / 调性 / 用语 / 规则作背景约束、`lessons_project` / `lessons_workspace`（portrait 段出图经验）作可复用手法与避坑项揉进 prompt——这是启动段那条红线（不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规）的落点，不是开头读一眼就忘。与 spec / 画师本轮指令冲突时后者优先，但要点名冲突。

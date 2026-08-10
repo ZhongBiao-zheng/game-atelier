@@ -252,7 +252,8 @@ export function CharacterGallery({
             {allImages.map((img, i) => {
               const favorited = isFavorited(img.path);
               const hidden = isGalleryHidden(img.path, hiddenPaths);
-              const canonical = isCanonicalPath(img.path, canonicalFile?.[tab]);
+              const canonicalEntry = canonicalFile?.[tab];
+              const canonical = isCanonicalPath(img.path, canonicalEntry);
               const rawSrc = `/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`;
               const btn = 'size-7 rounded-full bg-scrim grid place-items-center transition-opacity backdrop-blur-glass cursor-pointer border-0';
               return (
@@ -272,9 +273,16 @@ export function CharacterGallery({
                   №{String(i + 1).padStart(2, '0')}
                 </figcaption>
                 {canonical && (
-                  <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 rounded-sm bg-glass backdrop-blur-glass px-2 py-0.5 text-xs text-primary">
+                  <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1.5 rounded-sm bg-glass backdrop-blur-glass px-2 py-0.5 text-xs text-primary">
                     <BadgeCheck className="size-3.5" />
                     定稿
+                    {/* A3：定稿后 spec 锚点 / 项目风格契约又改过 → 提示过时，重出图重定稿即消 */}
+                    {canonicalEntry?.spec_stale && (
+                      <span className="text-destructive">spec 已变更</span>
+                    )}
+                    {canonicalEntry?.style_stale && (
+                      <span className="text-destructive">风格已变更</span>
+                    )}
                   </span>
                 )}
                 <div className="absolute right-2 top-2 flex gap-1.5">

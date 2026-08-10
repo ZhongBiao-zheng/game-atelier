@@ -244,6 +244,55 @@ describe('CharacterGallery', () => {
     expect(screen.queryByText('定稿')).not.toBeInTheDocument();
   });
 
+  it('shows stale badges when spec or style changed after canonical (A3)', async () => {
+    const doneJob: Job = {
+      job_id: 'job-done-1',
+      character_id: 'cao-cao',
+      prompt: '完成的立绘',
+      submitted_at: '2026-06-10T02:00:00Z',
+      model: 'gpt-image-2',
+      params: { n: 1 },
+      output_paths: ['/root/characters/cao-cao/portrait/v1.png'],
+      status: 'done',
+      error: null,
+      asset_slot: 'portrait',
+      kind: 'image',
+      namespace: 'character',
+    };
+    const staleCanonical = {
+      portrait: {
+        path: 'characters/cao-cao/portrait/v1.png',
+        set_at: '2026-08-10T00:00:00Z',
+        spec_stale: true,
+        style_stale: true,
+      },
+      promo: null,
+      turnaround: null,
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url) === '/api/characters/cao-cao/canonical') {
+        return { ok: true, json: async () => staleCanonical };
+      }
+      if (String(url) === '/api/gallery/hidden') {
+        return { ok: true, json: async () => ({ paths: [] }) };
+      }
+      return { ok: true, json: async () => [doneJob] };
+    }));
+
+    render(
+      <CharacterGallery
+        characterId="cao-cao"
+        characterName="曹操"
+        onSelectImage={vi.fn()}
+        sseSignal={0}
+      />,
+    );
+
+    expect(await screen.findByText('定稿')).toBeInTheDocument();
+    expect(await screen.findByText('spec 已变更')).toBeInTheDocument();
+    expect(await screen.findByText('风格已变更')).toBeInTheDocument();
+  });
+
   it('opens on the routed asset tab', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,

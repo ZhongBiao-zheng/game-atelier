@@ -36,10 +36,11 @@ from pydantic import BaseModel, Field, ValidationError
 from pydantic import field_validator
 
 from character_workflow.lib.schemas import (
-    ActiveCharacterFile, CanonicalFile, CanonicalSet, CharacterEntry,
+    ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterProjectAssign, ClipboardAttempt,
     FeedbackPost, Job, JobKind, JobParams, JobStatus, ProjectCreate, ProjectRename,
-    ProjectsFile, ScreenCanonicalFile, ScreenCanonicalSet, SpecPatch, WebEditableJobPatch,
+    ProjectsFile, ScreenCanonicalSet, ScreenCanonicalStatusFile,
+    SpecPatch, WebEditableJobPatch,
 )
 
 
@@ -241,43 +242,48 @@ def get_config() -> dict:
     }
 
 
-@router.get("/characters/{character_id}/canonical", response_model=CanonicalFile)
-def get_canonical(character_id: str) -> CanonicalFile:
-    from character_workflow.lib import canonical
-    return canonical.read_canonical(character_id)
+@router.get("/characters/{character_id}/canonical", response_model=CanonicalStatusFile)
+def get_canonical(character_id: str) -> CanonicalStatusFile:
+    """定稿表 + A3 stale 标记（spec_stale / style_stale 为指纹比对计算态，不落盘）。"""
+    from character_workflow.lib import stale
+    return stale.character_canonical_status(character_id)
 
 
-@router.post("/characters/{character_id}/canonical", response_model=CanonicalFile)
-def post_canonical(character_id: str, payload: CanonicalSet) -> CanonicalFile:
+@router.post("/characters/{character_id}/canonical", response_model=CanonicalStatusFile)
+def post_canonical(character_id: str, payload: CanonicalSet) -> CanonicalStatusFile:
     """设为 / 取消定稿（A2）。path=None 取消该 slot 定稿。"""
-    from character_workflow.lib import canonical
-    if payload.path is None:
-        return canonical.clear_canonical(character_id, payload.slot)
+    from character_workflow.lib import canonical, stale
     try:
-        return canonical.set_canonical(character_id, payload.slot, payload.path)
+        if payload.path is None:
+            canonical.clear_canonical(character_id, payload.slot)
+        else:
+            canonical.set_canonical(character_id, payload.slot, payload.path)
     except FileNotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
+    return stale.character_canonical_status(character_id)
 
 
-@router.get("/projects/{project_id}/screens/canonical", response_model=ScreenCanonicalFile)
-def get_screen_canonical(project_id: str) -> ScreenCanonicalFile:
-    from character_workflow.lib import ui_jobs
+@router.get("/projects/{project_id}/screens/canonical", response_model=ScreenCanonicalStatusFile)
+def get_screen_canonical(project_id: str) -> ScreenCanonicalStatusFile:
+    from character_workflow.lib import stale
     try:
-        return ui_jobs.read_screen_canonical(project_id)
+        return stale.screen_canonical_status(project_id)
     except KeyError:
         raise HTTPException(404, detail="project not found")
 
 
-@router.post("/projects/{project_id}/screens/canonical", response_model=ScreenCanonicalFile)
-def post_screen_canonical(project_id: str, payload: ScreenCanonicalSet) -> ScreenCanonicalFile:
+@router.post("/projects/{project_id}/screens/canonical", response_model=ScreenCanonicalStatusFile)
+def post_screen_canonical(project_id: str, payload: ScreenCanonicalSet) -> ScreenCanonicalStatusFile:
     """选定 / 取消某 screen 的风格定稿（B3）。path=None 取消。style_variant 从 job 反查，不用前端报。"""
-    from character_workflow.lib import ui_jobs
+    from character_workflow.lib import stale, ui_jobs
     try:
         if payload.path is None:
-            return ui_jobs.clear_screen_canonical(project_id, payload.screen_id)
-        return ui_jobs.set_screen_canonical(project_id, payload.screen_id, payload.path)
+            ui_jobs.clear_screen_canonical(project_id, payload.screen_id)
+        else:
+            ui_jobs.set_screen_canonical(project_id, payload.screen_id, payload.path)
+        return stale.screen_canonical_status(project_id)
     except KeyError:
         raise HTTPException(404, detail="project not found")
     except FileNotFoundError as e:

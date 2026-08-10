@@ -180,4 +180,35 @@ describe('ProjectPage', () => {
     await waitFor(() => expect(posted).toHaveLength(2));
     expect(posted[1]).toEqual({ screen_id: 'home', path: null });
   });
+
+  it('定稿后 style.md 变更 → 定稿角标带「风格已变更」(A3)', async () => {
+    const staleCanonical = {
+      screens: {
+        home: {
+          path: 'projects/pokemon/screens/home/v2.png',
+          set_at: 'x',
+          style_variant: '厚涂写实',
+          style_stale: true,
+        },
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
+      if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
+        return { ok: true, json: async () => ({ items: works }) } as Response;
+      }
+      if (typeof url === 'string' && url.startsWith('/api/gallery/screens')) {
+        return { ok: true, json: async () => ({ items: screenItems }) } as Response;
+      }
+      if (typeof url === 'string' && url.includes('/screens/canonical')) {
+        return { ok: true, json: async () => staleCanonical } as Response;
+      }
+      return { ok: true, json: async () => sample } as Response;
+    }));
+
+    render(<ProjectPage projectId="p1" onBack={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('project-screens')).toBeInTheDocument());
+    expect(await screen.findByText('定稿')).toBeInTheDocument();
+    expect(await screen.findByText('风格已变更')).toBeInTheDocument();
+  });
 });

@@ -419,6 +419,11 @@ def main(argv: list[str] | None = None) -> int:
         help="数据自检:job JSON 逐条校验 / 资产存在性 / 文档零占位 / canonical / 画廊 sidecar;"
              "有 error 退出码 1",
     )
+    sub.add_parser(
+        "stale-report",
+        help="A3:列出 spec/style.md 变更后过时的定稿(角色 + screen),输出 JSON;"
+             "改锚点/style.md 前必跑",
+    )
 
     p_submit = sub.add_parser(
         "submit",
@@ -560,6 +565,10 @@ def main(argv: list[str] | None = None) -> int:
         report = validate_data()
         print(format_report(report))
         return 1 if report.errors else 0
+    if args.cmd == "stale-report":
+        from character_workflow.lib.stale import stale_report
+        print(json.dumps(stale_report(), ensure_ascii=False, indent=2))
+        return 0
     if args.cmd == "submit":
         return _submit(args)
     if args.cmd == "submit-screen":
