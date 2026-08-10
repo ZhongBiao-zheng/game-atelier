@@ -3,7 +3,12 @@ import { useEffect, useState } from 'react';
 import { Link } from 'wouter';
 import { ArrowLeft, CheckCircle2, Save } from 'lucide-react';
 import { fetchExperience, saveExperience, type ProjectExperience } from '@/api/experience';
-import { fetchGalleryProject, type ProjectGalleryItem } from '@/api/gallery';
+import {
+  fetchGalleryProject,
+  fetchGalleryScreens,
+  type ProjectGalleryItem,
+  type ProjectScreenItem,
+} from '@/api/gallery';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
@@ -14,11 +19,13 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [works, setWorks] = useState<ProjectGalleryItem[]>([]);
+  const [screens, setScreens] = useState<ProjectScreenItem[]>([]);
 
   useEffect(() => {
     let cancel = false;
     fetchExperience(projectId).then(d => { if (!cancel) { setData(d); setDraft(d.worldview_md); } });
     fetchGalleryProject(projectId).then(items => { if (!cancel) setWorks(items); }).catch(() => {});
+    fetchGalleryScreens(projectId).then(items => { if (!cancel) setScreens(items); }).catch(() => {});
     return () => { cancel = true; };
   }, [projectId]);
 
@@ -91,6 +98,48 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
           </div>
         )}
 
+        {screens.length > 0 && (
+          <>
+            <Separator className="opacity-50" />
+            <div className="space-y-5" data-testid="project-screens">
+              <h2 className="font-display italic text-base text-foreground/85 leading-none">
+                页面
+              </h2>
+              {/* B2: UI 页面资产归项目 —— 按 screen-id 分组，组内版本最新在前 */}
+              {groupScreens(screens).map(([screenId, imgs]) => (
+                <div key={screenId} className="space-y-2">
+                  <p className="font-mono text-xs uppercase tracking-label text-muted-foreground">
+                    {screenId}
+                    <span className="ml-2 text-muted-foreground/60">{imgs.length} 版</span>
+                  </p>
+                  <div className="columns-[14rem] gap-4">
+                    {imgs.map(img => (
+                      <a
+                        key={img.path}
+                        href={`/api/gallery/image?path=${encodeURIComponent(img.path)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={`查看页面 ${screenId} 的 ${img.filename}`}
+                        className="group relative mb-4 block break-inside-avoid overflow-hidden rounded-2xl"
+                      >
+                        <img
+                          src={`/api/gallery/image?path=${encodeURIComponent(img.path)}`}
+                          alt=""
+                          className="w-full block"
+                          loading="lazy"
+                        />
+                        <span className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-scrim/80 px-3 py-2 text-xs text-white opacity-0 backdrop-blur-glass transition-opacity group-hover:opacity-100">
+                          <span className="truncate">{img.filename}</span>
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
         {works.length > 0 && (
           <>
             <Separator className="opacity-50" />
@@ -128,6 +177,20 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
       </div>
     </section>
   );
+}
+
+/** 按 screen_id 分组；items 已由后端最新在前排好，组序取各组最新图的先后。 */
+function groupScreens(items: ProjectScreenItem[]): Array<[string, ProjectScreenItem[]]> {
+  const order: string[] = [];
+  const groups = new Map<string, ProjectScreenItem[]>();
+  for (const item of items) {
+    if (!groups.has(item.screen_id)) {
+      groups.set(item.screen_id, []);
+      order.push(item.screen_id);
+    }
+    groups.get(item.screen_id)!.push(item);
+  }
+  return order.map(id => [id, groups.get(id)!]);
 }
 
 const SLOT_LABEL: Record<ProjectGalleryItem['asset_slot'], string> = {
