@@ -41,6 +41,9 @@ export interface ProjectScreenItem {
   filename: string;
   path: string;
   job_id: string | null;
+  /** B3 风格候选来源关系（无标签的普通版本为 null）。 */
+  style_variant: string | null;
+  base_version: string | null;
   mtime: number;
 }
 

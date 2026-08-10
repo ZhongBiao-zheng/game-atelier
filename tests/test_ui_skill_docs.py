@@ -69,8 +69,19 @@ def test_ui_page_skill_gates_and_submit_chain():
     # brief 模板引用 + 产物归项目
     assert "screen-brief-template.md" in text
     assert "projects/<slug>/screens/" in text
-    # 风格切换（B3）未上线，如实告知
-    assert "未上线" in text
+
+
+def test_ui_page_style_switch_mode():
+    """B3：风格切换模式必须锁结构、记来源关系、定稿后回写 style.md ui.*。"""
+    text = _read("skills/ui-page/SKILL.md")
+    assert "风格切换模式" in text
+    assert "--style-variant" in text and "--base-version" in text
+    assert "set-screen-canonical" in text
+    # 真正的产出是契约回写，不是候选图本身
+    assert "ui.typography" in text and "approved" in text
+    # 结构锁定 + 旧候选保留是硬纪律
+    assert "结构锁定" in text or "结构不变" in text
+    assert "保留不删" in text
 
 
 def test_seven_field_closing_block_in_all_workflow_skills():

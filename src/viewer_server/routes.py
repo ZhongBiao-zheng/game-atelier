@@ -39,7 +39,7 @@ from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalFile, CanonicalSet, CharacterEntry,
     CharacterProjectAssign, ClipboardAttempt,
     FeedbackPost, Job, JobKind, JobParams, JobStatus, ProjectCreate, ProjectRename,
-    ProjectsFile, SpecPatch, WebEditableJobPatch,
+    ProjectsFile, ScreenCanonicalFile, ScreenCanonicalSet, SpecPatch, WebEditableJobPatch,
 )
 
 
@@ -255,6 +255,31 @@ def post_canonical(character_id: str, payload: CanonicalSet) -> CanonicalFile:
         return canonical.clear_canonical(character_id, payload.slot)
     try:
         return canonical.set_canonical(character_id, payload.slot, payload.path)
+    except FileNotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+
+
+@router.get("/projects/{project_id}/screens/canonical", response_model=ScreenCanonicalFile)
+def get_screen_canonical(project_id: str) -> ScreenCanonicalFile:
+    from character_workflow.lib import ui_jobs
+    try:
+        return ui_jobs.read_screen_canonical(project_id)
+    except KeyError:
+        raise HTTPException(404, detail="project not found")
+
+
+@router.post("/projects/{project_id}/screens/canonical", response_model=ScreenCanonicalFile)
+def post_screen_canonical(project_id: str, payload: ScreenCanonicalSet) -> ScreenCanonicalFile:
+    """选定 / 取消某 screen 的风格定稿（B3）。path=None 取消。style_variant 从 job 反查，不用前端报。"""
+    from character_workflow.lib import ui_jobs
+    try:
+        if payload.path is None:
+            return ui_jobs.clear_screen_canonical(project_id, payload.screen_id)
+        return ui_jobs.set_screen_canonical(project_id, payload.screen_id, payload.path)
+    except KeyError:
+        raise HTTPException(404, detail="project not found")
     except FileNotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValueError as e:
@@ -1100,6 +1125,8 @@ def gallery_screens(project: str = Query(min_length=1)) -> dict:
         raise HTTPException(status_code=404, detail="project not found")
     screens_dir = data_root.projects_dir() / proj.slug / "screens"
     job_ids_by_path = _gallery_job_ids_by_path()
+    # B3：风格候选的来源关系存在 job.params，前端并排对比按 style_variant 分列。
+    jobs_by_id = {j.job_id: j for j in list_jobs()}
     items: list[dict] = []
     if screens_dir.is_dir():
         for screen_dir in screens_dir.iterdir():
@@ -1113,11 +1140,15 @@ def gallery_screens(project: str = Query(min_length=1)) -> dict:
                 except OSError:
                     continue
                 rel = f.relative_to(_project_root()).as_posix()
+                job_id = job_ids_by_path.get(rel)
+                job = jobs_by_id.get(job_id) if job_id else None
                 items.append({
                     "screen_id": screen_dir.name,
                     "filename": f.name,
                     "path": rel,
-                    "job_id": job_ids_by_path.get(rel),
+                    "job_id": job_id,
+                    "style_variant": job.params.style_variant if job else None,
+                    "base_version": job.params.base_version if job else None,
                     "mtime": mtime,
                 })
     items.sort(key=lambda it: it["mtime"], reverse=True)

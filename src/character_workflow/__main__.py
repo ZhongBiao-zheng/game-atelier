@@ -156,6 +156,11 @@ def _submit_screen(args: argparse.Namespace) -> int:
         "n": args.n,
         "reference_images": reference_images,
     }
+    # B3 风格切换：结构锁定、只换风格时记来源关系，供 Web 并排对比与定稿溯源。
+    if args.style_variant:
+        params["style_variant"] = args.style_variant
+    if args.base_version:
+        params["base_version"] = args.base_version
 
     job = write_job(
         job_id=new_job_id(),
@@ -186,7 +191,11 @@ def _confirmation_card(job: Job) -> str:
         f"size   : {job.params.size}  n: {job.params.n}",
     ]
     if job.screen_id:
-        lines.insert(2, f"screen : {job.screen_id}（UI 页面 job，产物归项目）")
+        label = f"screen : {job.screen_id}（UI 页面 job，产物归项目）"
+        if job.params.style_variant:
+            base = f" ← {job.params.base_version}" if job.params.base_version else ""
+            label += f"\n风格   : {job.params.style_variant}{base}"
+        lines.insert(2, label)
     if job.retry_of:
         lines.append(f"retry_of: {job.retry_of}（原 job 错误记录已保留）")
     lines.append(f"参考图 : {len(refs)} 张")
@@ -337,6 +346,29 @@ def _set_canonical(args: argparse.Namespace) -> int:
     return 0
 
 
+def _set_screen_canonical(args: argparse.Namespace) -> int:
+    from character_workflow.lib import ui_jobs
+
+    try:
+        project = ui_jobs.resolve_project(args.project)
+        ui_jobs.validate_screen_id(args.screen)
+        if args.clear:
+            file = ui_jobs.clear_screen_canonical(project.id, args.screen)
+        else:
+            if not args.path:
+                print(json.dumps({"error": "--path required unless --clear"}, ensure_ascii=False))
+                return 1
+            file = ui_jobs.set_screen_canonical(project.id, args.screen, args.path)
+    except (KeyError, FileNotFoundError, ValueError) as e:
+        print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        return 1
+    print(json.dumps(
+        {"project_id": project.id, "slug": project.slug, **file.model_dump()},
+        ensure_ascii=False, indent=2,
+    ))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _force_utf8_stdio()
     parser = argparse.ArgumentParser(prog="game-atelier")
@@ -432,6 +464,23 @@ def main(argv: list[str] | None = None) -> int:
         "--reference-image", action="append", default=None,
         help="参考图绝对路径，可重复传多张（如基准页图做风格参照）",
     )
+    p_ss.add_argument(
+        "--style-variant", default=None,
+        help="B3 风格候选标签（如「厚涂写实」）；结构锁定只换风格时传，落 params 供并排对比",
+    )
+    p_ss.add_argument(
+        "--base-version", default=None,
+        help="B3 结构所本的基准页文件名（如 v1.png），落 params 记来源关系",
+    )
+
+    p_sc = sub.add_parser(
+        "set-screen-canonical",
+        help="B3: 标记/取消某 screen 的定稿图（画师选定风格后调用；--clear 取消）",
+    )
+    p_sc.add_argument("--project", required=True, help="项目 id 或 slug")
+    p_sc.add_argument("--screen", required=True, help="screen-id")
+    p_sc.add_argument("--path", default=None, help="定稿图路径（绝对或 data-root 相对）")
+    p_sc.add_argument("--clear", action="store_true", help="取消该 screen 定稿")
 
     p_run_job = sub.add_parser("run-job", help="确认并执行一个 PENDING_CONFIRM job")
     p_run_job.add_argument("job_id")
@@ -505,6 +554,8 @@ def main(argv: list[str] | None = None) -> int:
         return _submit(args)
     if args.cmd == "submit-screen":
         return _submit_screen(args)
+    if args.cmd == "set-screen-canonical":
+        return _set_screen_canonical(args)
     if args.cmd == "retry-job":
         return _retry_job(args)
     if args.cmd == "run-job":

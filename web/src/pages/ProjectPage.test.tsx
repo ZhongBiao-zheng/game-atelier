@@ -30,10 +30,12 @@ const works = [
 ];
 
 const screenItems = [
-  { screen_id: 'home', filename: 'v2.png', path: 'projects/pokemon/screens/home/v2.png', job_id: 'job-ui-2', mtime: 200 },
-  { screen_id: 'home', filename: 'v1.png', path: 'projects/pokemon/screens/home/v1.png', job_id: null, mtime: 150 },
-  { screen_id: 'battle', filename: 'v1.png', path: 'projects/pokemon/screens/battle/v1.png', job_id: null, mtime: 120 },
+  { screen_id: 'home', filename: 'v2.png', path: 'projects/pokemon/screens/home/v2.png', job_id: 'job-ui-2', style_variant: '厚涂写实', base_version: 'v1.png', mtime: 200 },
+  { screen_id: 'home', filename: 'v1.png', path: 'projects/pokemon/screens/home/v1.png', job_id: null, style_variant: null, base_version: null, mtime: 150 },
+  { screen_id: 'battle', filename: 'v1.png', path: 'projects/pokemon/screens/battle/v1.png', job_id: null, style_variant: null, base_version: null, mtime: 120 },
 ];
+
+const emptyScreenCanonical = { screens: {} };
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -43,6 +45,9 @@ beforeEach(() => {
     }
     if (typeof url === 'string' && url.startsWith('/api/gallery/screens')) {
       return { ok: true, json: async () => ({ items: screenItems }) } as Response;
+    }
+    if (typeof url === 'string' && url.includes('/screens/canonical')) {
+      return { ok: true, json: async () => emptyScreenCanonical } as Response;
     }
     return { ok: true, json: async () => sample } as Response;
   }));
@@ -121,10 +126,58 @@ describe('ProjectPage', () => {
       if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
         return { ok: true, json: async () => ({ items: works }) } as Response;
       }
+      if (typeof url === 'string' && url.includes('/screens/canonical')) {
+        return { ok: true, json: async () => emptyScreenCanonical } as Response;
+      }
       return { ok: true, json: async () => sample } as Response;
     }));
     render(<ProjectPage projectId="p1" onBack={vi.fn()} />);
     await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
     expect(screen.queryByTestId('project-screens')).toBeNull();
+  });
+
+  it('风格候选标风格名与来源版本，普通版本退回文件名', async () => {
+    render(<ProjectPage projectId="p1" onBack={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('project-screens')).toBeInTheDocument());
+    expect(screen.getByText('厚涂写实')).toBeInTheDocument();
+    expect(screen.getByText('← v1.png')).toBeInTheDocument();
+    // 无风格标签的版本仍用文件名（home/v1.png 与 battle/v1.png 各一）
+    expect(screen.getAllByText('v1.png')).toHaveLength(2);
+  });
+
+  it('点定稿按钮 POST screen canonical，再点取消传 null', async () => {
+    const canonicalAfterSet = {
+      screens: { home: { path: 'projects/pokemon/screens/home/v2.png', set_at: 'x', style_variant: '厚涂写实' } },
+    };
+    let posted: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST' && typeof url === 'string' && url.includes('/screens/canonical')) {
+        const body = JSON.parse(String(init.body));
+        posted.push(body);
+        return { ok: true, json: async () => (body.path ? canonicalAfterSet : emptyScreenCanonical) } as Response;
+      }
+      if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
+      if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
+        return { ok: true, json: async () => ({ items: works }) } as Response;
+      }
+      if (typeof url === 'string' && url.startsWith('/api/gallery/screens')) {
+        return { ok: true, json: async () => ({ items: screenItems }) } as Response;
+      }
+      if (typeof url === 'string' && url.includes('/screens/canonical')) {
+        return { ok: true, json: async () => emptyScreenCanonical } as Response;
+      }
+      return { ok: true, json: async () => sample } as Response;
+    }));
+
+    render(<ProjectPage projectId="p1" onBack={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('project-screens')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '设为定稿 v2.png' }));
+    await waitFor(() => expect(screen.getByText('定稿')).toBeInTheDocument());
+    expect(posted[0]).toEqual({ screen_id: 'home', path: 'projects/pokemon/screens/home/v2.png' });
+
+    fireEvent.click(screen.getByRole('button', { name: '取消定稿 v2.png' }));
+    await waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[1]).toEqual({ screen_id: 'home', path: null });
   });
 });

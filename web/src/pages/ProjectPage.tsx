@@ -1,7 +1,7 @@
 // web/src/pages/ProjectPage.tsx
 import { useEffect, useState } from 'react';
 import { Link } from 'wouter';
-import { ArrowLeft, CheckCircle2, Save } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, CheckCircle2, Save } from 'lucide-react';
 import { fetchExperience, saveExperience, type ProjectExperience } from '@/api/experience';
 import {
   fetchGalleryProject,
@@ -9,9 +9,12 @@ import {
   type ProjectGalleryItem,
   type ProjectScreenItem,
 } from '@/api/gallery';
+import { fetchScreenCanonical, isCanonicalPath, setScreenCanonical } from '@/api/canonical';
+import type { ScreenCanonicalFile } from '@/schema/jobs';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 
 export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: () => void }) {
   const [data, setData] = useState<ProjectExperience | null>(null);
@@ -20,14 +23,27 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
   const [toast, setToast] = useState<string | null>(null);
   const [works, setWorks] = useState<ProjectGalleryItem[]>([]);
   const [screens, setScreens] = useState<ProjectScreenItem[]>([]);
+  const [screenCanonical, setScreenCanonicalFile] = useState<ScreenCanonicalFile>({ screens: {} });
 
   useEffect(() => {
     let cancel = false;
     fetchExperience(projectId).then(d => { if (!cancel) { setData(d); setDraft(d.worldview_md); } });
     fetchGalleryProject(projectId).then(items => { if (!cancel) setWorks(items); }).catch(() => {});
     fetchGalleryScreens(projectId).then(items => { if (!cancel) setScreens(items); }).catch(() => {});
+    fetchScreenCanonical(projectId).then(f => { if (!cancel) setScreenCanonicalFile(f); }).catch(() => {});
     return () => { cancel = true; };
   }, [projectId]);
+
+  async function toggleScreenCanonical(screenId: string, path: string) {
+    const current = screenCanonical.screens[screenId];
+    const next = isCanonicalPath(path, current) ? null : path;
+    try {
+      setScreenCanonicalFile(await setScreenCanonical(projectId, screenId, next));
+    } catch {
+      setToast('切换定稿失败，稍后再试');
+      window.setTimeout(() => setToast(null), 2000);
+    }
+  }
 
   if (!data || draft === null) {
     return (
@@ -105,34 +121,67 @@ export function ProjectPage({ projectId, onBack }: { projectId: string; onBack: 
               <h2 className="font-display italic text-base text-foreground/85 leading-none">
                 页面
               </h2>
-              {/* B2: UI 页面资产归项目 —— 按 screen-id 分组，组内版本最新在前 */}
+              {/* B2/B3: UI 页面资产归项目 —— 按 screen-id 分组；组内候选横向并排，
+                  便于结构相同、只换风格的候选直接比对（最新在前，旧候选不删） */}
               {groupScreens(screens).map(([screenId, imgs]) => (
                 <div key={screenId} className="space-y-2">
                   <p className="font-mono text-xs uppercase tracking-label text-muted-foreground">
                     {screenId}
                     <span className="ml-2 text-muted-foreground/60">{imgs.length} 版</span>
                   </p>
-                  <div className="columns-[14rem] gap-4">
-                    {imgs.map(img => (
-                      <a
-                        key={img.path}
-                        href={`/api/gallery/image?path=${encodeURIComponent(img.path)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={`查看页面 ${screenId} 的 ${img.filename}`}
-                        className="group relative mb-4 block break-inside-avoid overflow-hidden rounded-2xl"
-                      >
-                        <img
-                          src={`/api/gallery/image?path=${encodeURIComponent(img.path)}`}
-                          alt=""
-                          className="w-full block"
-                          loading="lazy"
-                        />
-                        <span className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-scrim/80 px-3 py-2 text-xs text-white opacity-0 backdrop-blur-glass transition-opacity group-hover:opacity-100">
-                          <span className="truncate">{img.filename}</span>
-                        </span>
-                      </a>
-                    ))}
+                  <div className="flex gap-4 overflow-x-auto pb-2">
+                    {imgs.map(img => {
+                      const canonical = isCanonicalPath(img.path, screenCanonical.screens[screenId]);
+                      return (
+                        <figure key={img.path} className="w-56 shrink-0 space-y-1.5">
+                          <div className="group relative overflow-hidden rounded-2xl">
+                            <a
+                              href={`/api/gallery/image?path=${encodeURIComponent(img.path)}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              aria-label={`查看页面 ${screenId} 的 ${img.filename}`}
+                              className="block"
+                            >
+                              <img
+                                src={`/api/gallery/image?path=${encodeURIComponent(img.path)}`}
+                                alt=""
+                                className="w-full block"
+                                loading="lazy"
+                              />
+                            </a>
+                            {canonical && (
+                              <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 rounded-sm bg-glass backdrop-blur-glass px-2 py-0.5 text-xs text-primary">
+                                <BadgeCheck className="size-3.5" />
+                                定稿
+                              </span>
+                            )}
+                            <button
+                              onClick={() => void toggleScreenCanonical(screenId, img.path)}
+                              title={canonical ? '取消定稿' : '设为定稿（后续延展页以它为风格基准）'}
+                              aria-label={canonical ? `取消定稿 ${img.filename}` : `设为定稿 ${img.filename}`}
+                              className={cn(
+                                'absolute right-2 top-2 grid size-7 place-items-center rounded-full bg-scrim/70 backdrop-blur-glass transition-opacity hover:bg-background/90',
+                                canonical
+                                  ? 'text-primary opacity-100'
+                                  : 'text-white opacity-0 group-hover:opacity-100',
+                              )}
+                            >
+                              <BadgeCheck className="size-3.5" />
+                            </button>
+                          </div>
+                          <figcaption className="flex items-baseline gap-2 px-0.5">
+                            <span className="truncate text-xs text-foreground/85">
+                              {img.style_variant || img.filename}
+                            </span>
+                            {img.base_version && (
+                              <span className="shrink-0 font-mono text-xs text-muted-foreground/60">
+                                ← {img.base_version}
+                              </span>
+                            )}
+                          </figcaption>
+                        </figure>
+                      );
+                    })}
                   </div>
                 </div>
               ))}

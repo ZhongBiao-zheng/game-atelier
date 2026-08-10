@@ -37,7 +37,7 @@ triggers:
 | 策划文档 / PRD / 交互逻辑 / 生图前需求 | Skill 工具调起 `ui-anchor` |
 | UI 视觉规范 / 统一风格 / 色板字体圆角 | 本总控引导写 `style.md` 的 `ui.*` 节（见「UI 规范阶段」） |
 | 单页生成 / 基准页 / 页面生图 | Skill 工具调起 `ui-page`（门禁：三锚 approved 或 waiver + style.md 存在） |
-| 风格切换 / 风格候选对比 | `ui-page` 风格切换模式（**未上线**，B3 批次交付） |
+| 风格切换 / 风格候选对比 | `ui-page` 风格切换模式（结构锁定出候选 → 画师定稿 → 回写 style.md `ui.*`） |
 | 页面清单 / 屏幕地图 / 批量延展 | `ui-screens`（**未上线**，B4 批次交付） |
 | 角色立绘 / 美宣 / 三视图 | `character` / `promo` / `turnaround`（角色管线，不归本总控编排） |
 
@@ -58,7 +58,7 @@ triggers:
 | 1 | 策划锚（ui-anchor） | `design/{gdd,prd,interaction}.md` | 无 |
 | 2 | UI 规范（本总控引导） | `style.md` 增补 `ui.*` 节 | 三锚文档 approved（或 `design/waiver.md` 在案） |
 | 3 | 基准页（ui-page） | `screens/<id>/v1.png` | 同上 + style.md 存在 |
-| 4 | 风格定稿（ui-page 风格切换，未上线） | 候选对比 + screens canonical | 基准页结构经画师确认 |
+| 4 | 风格定稿（ui-page 风格切换） | 候选对比 + screens canonical + style.md `ui.*` approved | 基准页结构经画师确认 |
 | 5 | 页面延展（ui-screens，未上线） | `screens/screen-map.md` | 风格已定稿（style.md `ui.*` approved） |
 | 6 | 逐页生成（ui-page，范围门禁待 B4） | `screens/<id>/vN.png` | screen-map 范围经画师批准 |
 
@@ -97,7 +97,7 @@ triggers:
 
 - 总控不生产资产；产物只出自阶段技能或 UI 规范引导流程。
 - 门禁必停：批准点等画师明确表态，沉默 / 模糊不当批准。
-- 未上线阶段（ui-page 风格切换 / ui-screens）如实告知，不伪造产物、不用 Studio 自由出图冒充流程产物。
+- 未上线阶段（ui-screens 页面延展）如实告知，不伪造产物、不用 Studio 自由出图冒充流程产物。
 - 项目事实落文件系统（design/ / style.md / screens/），不留在对话里。
 - 修改任何 approved 文档（锚文档 / style.md）必须先经画师确认。
 - 所有提问走 AskUserQuestion；工具不可用降级文本确认卡（协议同 character skill）。

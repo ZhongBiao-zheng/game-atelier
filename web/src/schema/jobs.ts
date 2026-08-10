@@ -29,6 +29,9 @@ export interface JobParams {
   generate_audio?: boolean;
   reference_videos?: string[];
   reference_audios?: string[];
+  // B3 UI 页面风格候选来源关系 —— 与 schemas.py::JobParams 同步
+  style_variant?: string;
+  base_version?: string;
   [key: string]: unknown;
 }
 
@@ -87,6 +90,17 @@ export interface CanonicalFile {
   portrait: CanonicalEntry | null;
   promo: CanonicalEntry | null;
   turnaround: CanonicalEntry | null;
+}
+
+// B3（2026-08-10）screen 定稿 — 与 schemas.py::ScreenCanonicalEntry/ScreenCanonicalFile 同步
+export interface ScreenCanonicalEntry {
+  path: string; // data-root 相对路径
+  set_at: string;
+  style_variant?: string;
+}
+
+export interface ScreenCanonicalFile {
+  screens: Record<string, ScreenCanonicalEntry>;
 }
 
 export interface ActiveCharacterFile {
