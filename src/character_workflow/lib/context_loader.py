@@ -179,3 +179,29 @@ def load_project_worldview(slug: str | None) -> str:
     if not path.exists():
         return ""
     return _read_text(path)
+
+
+def _project_style_path(slug: str) -> Path:
+    return data_root.projects_dir() / slug / "style.md"
+
+
+def load_project_style(slug: str | None) -> str:
+    """项目风格契约 ← projects/<slug>/style.md（A1，2026-08-10）。
+
+    全文返回（含 frontmatter status 字段，skill 需要据此判断 draft/approved）。
+    不存在 / 无归属 → ""。
+    """
+    if not slug:
+        return ""
+    path = _project_style_path(slug)
+    if not path.exists():
+        return ""
+    text = _read_text(path)
+    n = len(text)
+    if n > WORLDVIEW_SOFT_LIMIT_CHARS:
+        print(
+            f"[context_loader] WARN style.md {n} chars exceeds soft limit "
+            f"{WORLDVIEW_SOFT_LIMIT_CHARS} — prompt 会变胖，考虑收敛契约",
+            file=sys.stderr,
+        )
+    return text

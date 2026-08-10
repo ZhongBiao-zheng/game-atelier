@@ -146,6 +146,30 @@ class CharacterProjectAssign(BaseModel):
     project_id: str | None = None  # None = 取消归属
 
 
+class CanonicalEntry(BaseModel):
+    # A2（2026-08-10）：单 slot 定稿记录。path 为 data-root 相对路径。
+    # spec_fingerprint = 写入时 spec.md visual_dna+anchors 内容 hash（A3 stale 检测用）。
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    set_at: str
+    spec_fingerprint: str = ""
+
+
+class CanonicalFile(BaseModel):
+    # characters/<id>/canonical.json —— 每 slot 至多一张定稿。
+    model_config = ConfigDict(extra="forbid")
+    portrait: CanonicalEntry | None = None
+    promo: CanonicalEntry | None = None
+    turnaround: CanonicalEntry | None = None
+
+
+class CanonicalSet(BaseModel):
+    # POST /api/characters/{id}/canonical 请求体。path=None 表示取消该 slot 定稿。
+    model_config = ConfigDict(extra="forbid")
+    slot: AssetSlot
+    path: str | None = None
+
+
 class TurnStage(str, Enum):
     # turn-start v4/v5：file system 探测结果
     # A = characters/ 不存在；B = 空 characters/；C = active 缺失/失效
@@ -234,3 +258,7 @@ class TurnStartResult(BaseModel):
     # v5.1.0 (Phase 3): Key 选择协议 — AI 决策时读这两个字段。
     available_keys: list[dict] = Field(default_factory=list)
     preferred_alias: str | None = None
+    # v5.4.0 (A1): 项目风格契约全文 ← projects/<slug>/style.md（无归属 / 无契约 → ""）。
+    project_style: str = ""
+    # v5.4.0 (A2): active 角色定稿 ← characters/<id>/canonical.json（promo/turnaround 选参考图用）。
+    canonical: dict = Field(default_factory=dict)

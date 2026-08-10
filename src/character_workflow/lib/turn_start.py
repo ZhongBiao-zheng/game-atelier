@@ -214,9 +214,11 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
     返回 dict（JSON 序列化用）；调用方需要时可用 TurnStartResult.model_validate 校验。
     """
     from character_workflow.lib.active_character import read_active
+    from character_workflow.lib.canonical import read_canonical
     from character_workflow.lib.context_loader import (
         load_lessons_project,
         load_lessons_workspace,
+        load_project_style,
         load_project_worldview,
     )
     from character_workflow.lib import distill
@@ -315,6 +317,11 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
             {"id": p.id, "name": p.name, "slug": p.slug} for p in pf.projects
         ],
         "project_worldview": load_project_worldview(project_slug),
+        # A1：项目风格契约全文（含 frontmatter status）；A2：active 角色定稿表。
+        "project_style": load_project_style(project_slug),
+        "canonical": (
+            read_canonical(active_id).model_dump() if active_id else {}
+        ),
         "lessons_workspace": load_lessons_workspace(kind),
         "lessons_project": load_lessons_project(project_slug, kind),
         "lessons_kind": kind,
