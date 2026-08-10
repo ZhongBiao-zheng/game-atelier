@@ -73,6 +73,19 @@ export interface CharacterEntry {
   thumbnail?: string | null;
 }
 
+// A2（2026-08-10）定稿 — 与 schemas.py::CanonicalEntry/CanonicalFile 同步
+export interface CanonicalEntry {
+  path: string; // data-root 相对路径
+  set_at: string;
+  spec_fingerprint?: string;
+}
+
+export interface CanonicalFile {
+  portrait: CanonicalEntry | null;
+  promo: CanonicalEntry | null;
+  turnaround: CanonicalEntry | null;
+}
+
 export interface ActiveCharacterFile {
   active_id: string | null;
   updated_at: string;

@@ -243,6 +243,32 @@ def _mark_distilled(args: argparse.Namespace) -> int:
     return 0
 
 
+def _set_canonical(args: argparse.Namespace) -> int:
+    from character_workflow.lib import canonical
+    from character_workflow.lib.schemas import AssetSlot
+
+    character_id = args.character or read_active().active_id
+    if not character_id:
+        print(json.dumps({"error": "no active character"}, ensure_ascii=False))
+        return 1
+    slot = AssetSlot(args.kind)
+    if args.clear:
+        file = canonical.clear_canonical(character_id, slot)
+    else:
+        if not args.path:
+            print(json.dumps({"error": "--path required unless --clear"}, ensure_ascii=False))
+            return 1
+        try:
+            file = canonical.set_canonical(character_id, slot, args.path)
+        except (FileNotFoundError, ValueError) as e:
+            print(json.dumps({"error": str(e)}, ensure_ascii=False))
+            return 1
+    print(json.dumps(
+        {"character_id": character_id, **file.model_dump()}, ensure_ascii=False, indent=2,
+    ))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _force_utf8_stdio()
     parser = argparse.ArgumentParser(prog="game-atelier")
@@ -345,10 +371,24 @@ def main(argv: list[str] | None = None) -> int:
     p_md = sub.add_parser("mark-distilled", help="标记某图已沉淀/忽略,不再提醒")
     p_md.add_argument("path")
 
+    p_canon = sub.add_parser(
+        "set-canonical",
+        help="标记/取消角色某 slot 的定稿图（画师确认后调用；--clear 取消）",
+    )
+    p_canon.add_argument("--kind", required=True, choices=("portrait", "promo", "turnaround"))
+    p_canon.add_argument("--path", default=None, help="定稿图路径（绝对或 data-root 相对）")
+    p_canon.add_argument("--clear", action="store_true", help="取消该 slot 定稿")
+    p_canon.add_argument(
+        "--character", default=None,
+        help="角色 id；缺省读 .runtime/active-character.json",
+    )
+
     args = parser.parse_args(argv)
     if args.cmd == "turn-start":
         print(json.dumps(turn_start(args.kind, args.message), ensure_ascii=False, indent=2))
         return 0
+    if args.cmd == "set-canonical":
+        return _set_canonical(args)
     if args.cmd == "set-active":
         result = write_active(args.character_id or None)
         print(json.dumps(

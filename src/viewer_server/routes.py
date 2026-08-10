@@ -36,7 +36,8 @@ from pydantic import BaseModel, Field, ValidationError
 from pydantic import field_validator
 
 from character_workflow.lib.schemas import (
-    ActiveCharacterFile, CharacterEntry, CharacterProjectAssign, ClipboardAttempt,
+    ActiveCharacterFile, CanonicalFile, CanonicalSet, CharacterEntry,
+    CharacterProjectAssign, ClipboardAttempt,
     FeedbackPost, Job, JobKind, JobParams, JobStatus, ProjectCreate, ProjectRename,
     ProjectsFile, SpecPatch, WebEditableJobPatch,
 )
@@ -238,6 +239,26 @@ def get_config() -> dict:
         "image_storage_root": cfg.get("image_storage_root") or str(_project_root()),
         "show_studio_on_home": bool(cfg.get("show_studio_on_home", False)),
     }
+
+
+@router.get("/characters/{character_id}/canonical", response_model=CanonicalFile)
+def get_canonical(character_id: str) -> CanonicalFile:
+    from character_workflow.lib import canonical
+    return canonical.read_canonical(character_id)
+
+
+@router.post("/characters/{character_id}/canonical", response_model=CanonicalFile)
+def post_canonical(character_id: str, payload: CanonicalSet) -> CanonicalFile:
+    """设为 / 取消定稿（A2）。path=None 取消该 slot 定稿。"""
+    from character_workflow.lib import canonical
+    if payload.path is None:
+        return canonical.clear_canonical(character_id, payload.slot)
+    try:
+        return canonical.set_canonical(character_id, payload.slot, payload.path)
+    except FileNotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
 
 
 @router.post("/spec/{character_id}")

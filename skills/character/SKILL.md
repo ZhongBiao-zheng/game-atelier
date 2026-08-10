@@ -1,6 +1,6 @@
 ---
 name: character
-version: 4.2.0
+version: 4.3.0
 description: |
   游戏角色立绘工作流：承接画师反馈，通过对话问清风格/配色/镜头/道具后出图，
   并支持对已出立绘改皮肤、换色、重画。
@@ -28,8 +28,9 @@ game-atelier 的记忆全部锚定 data_root，**与代理工具无关**——�
 turn-start 已把这几层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段（slug 按 active 角色归属自动解析）：
 
 1. `project_worldview` ← `<data_root>/projects/<slug>/worldview.md`（**项目经验/世界观**：定位·调性·用语·项目规则；Web「项目经验」页可编辑，出图前作为项目背景纳入上下文）
-2. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用**出图经验**，按 kind 分段）
-3. `lessons_project` ← `<data_root>/projects/<slug>/MEMORY.md` 的 `### {kind}` 段（项目级**出图经验**，当前 kind）
+2. `project_style` ← `<data_root>/projects/<slug>/style.md`（**项目风格契约**：画风工艺·色板语义·镜头·背景·禁止项，全项目角色共用；用法见「项目风格契约」节）
+3. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用**出图经验**，按 kind 分段）
+4. `lessons_project` ← `<data_root>/projects/<slug>/MEMORY.md` 的 `### {kind}` 段（项目级**出图经验**，当前 kind）
 
 代理工具自己的项目记忆（Claude 读 `CLAUDE.md`、Codex 读 `AGENTS.md`）由代理原生加载，不归本工作流管。
 不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规。
@@ -114,6 +115,8 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 | `recent_chars` | id + tagline 列表，Stage C 列选项用 |
 | `available_keys` / `preferred_alias` | Key 选择 |
 | `project_worldview` | 项目 worldview.md：项目经验/世界观（定位·调性·用语·规则），Web「项目经验」页可编辑 |
+| `project_style` | 项目风格契约 style.md 全文（含 frontmatter status）；"" = 项目还没有契约 |
+| `canonical` | active 角色定稿表（每 slot 至多一张 `{path, set_at, spec_fingerprint}`） |
 | `lessons_workspace` / `lessons_project` | 出图经验（workspace 通用 / 项目级，各取当前 kind 段；项目级来自 MEMORY.md） |
 
 **只看 `recommend_action` 决策**：
@@ -181,13 +184,32 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 
 **Stage E**（active 未归属任何项目）：列已有项目 + 新开项目 + 跳过。画师选归属后 `assign-character <active_id> --project <project_id>` 再 turn-start。
 
+## 项目风格契约（style.md）
+
+`project_style` 是项目级视觉语言的单一事实源，专治同项目多角色连续生图的风格漂移。
+
+- **有契约（`project_style` 非空）**：新角色**跳过风格档 / 项目级配色 / 镜头 / 背景的提问**，直接把契约的 `style` / `palette` / `camera` / `background` / `taboo` 字段注入 spec 与 prompt；对话只问角色个体差异（身份、外观锚点、个体配色在色板内的取用）。画师本轮明确要求偏离契约时照画师，并点名"此处偏离项目契约"。
+- **无契约（"" 且项目已归属）**：首个角色照常问清风格档 / 配色 / 镜头，出图闭环后**主动提议**把这些回答沉淀成 `projects/<slug>/style.md`（格式 → `docs/references/style-template.md`，零占位纪律同 spec）；画师确认内容后用 Write 落盘，`status: draft` 起步，画师说"就按这个来"再改 `approved`。
+- **修改 approved 契约必须先经画师确认**——项目下所有角色的一致性都锚在这份文件上，不得静默改写；确认后同步更新 `updated` 日期。
+
+## 定稿（canonical）
+
+画师明确说某张图"定稿 / 就用这张"时，AskUserQuestion 确认后写入：
+
+```bash
+uv run python -m character_workflow set-canonical --kind portrait --path <该图路径>
+# 取消：... set-canonical --kind portrait --clear
+```
+
+每 slot 至多一张，设新图自动顶掉旧定稿；Web 角色页图卡也能设 / 取消（BadgeCheck 按钮）。promo / turnaround 出图默认引用定稿立绘作 subject。不得未经画师确认擅自定稿。
+
 ## 写出图 prompt
 
 **应用 turn-start 记忆（必做）**：把 `project_worldview` 的项目定位 / 调性 / 用语 / 规则作背景约束、`lessons_project` / `lessons_workspace`（portrait 段出图经验）作可复用手法与避坑项揉进 prompt——这是启动段那条红线（不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规）的落点，不是开头读一眼就忘。与 spec / 画师本轮指令冲突时后者优先，但要点名冲突。
 
 **所有向画师提问都必须用 AskUserQuestion**（出图确认卡除外）。纯文字追问等于没问，画师选项清晰才能继续。AskUserQuestion 单次最多 4 个问题、每题最多 4 个选项（工具硬上限）；要问得更多就拆成两级——先问大方向，再问细节。
 
-对话逐项问清：风格档 → 配色 → 镜头 → 视觉锚点。一次问 1-3 个，二选一优先，问清才动笔。
+对话逐项问清：风格档 → 配色 → 镜头 → 视觉锚点。一次问 1-3 个，二选一优先，问清才动笔。`project_style` 非空时风格档 / 项目级配色 / 镜头 / 背景直接取契约不再问（见「项目风格契约」节），只问角色个体差异。
 
 **spec 格式** → `docs/references/spec-template.md`
 创建新 spec 时严格按模板 YAML 字段写；`asset.*` 节按需追加，问清才写，不写占位。
@@ -284,6 +306,8 @@ turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、
 - 永远不显示 access_key / secret_key。
 - spec 零占位（不写 `?` / TBD / 待定），缺信息靠对话补，不猜不假设。
 - 锚点（发色 / 瞳色 / 服装主色 / 风格档）未经画师授权不改写。
+- `project_style` 非空时新角色不再重复问风格档，prompt 注入契约字段；修改 approved 契约必须先经画师确认。
+- 定稿（set-canonical）必须经画师明确确认，不得擅自标记。
 
 ## 跳过条件
 
