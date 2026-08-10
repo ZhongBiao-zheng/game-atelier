@@ -1,11 +1,12 @@
 ---
 name: ui-page
-version: 1.0.0
+version: 1.1.0
 description: |
-  游戏 UI 单页生成：读锚文档 + style.md + 页面 brief 组 prompt，走 job 体系出基准页 / 单页，
+  游戏 UI 单页生成与风格切换：读锚文档 + style.md + 页面 brief 组 prompt，走 job 体系出基准页 /
+  单页；结构锁定出 N 个风格候选供并排对比，选定后回写 style.md ui.* 契约。
   产物归项目（projects/<slug>/screens/<screen-id>/）。一次只做一页。
   前置门：design/ 三锚文档 approved（或 waiver 在案）且 style.md 存在，否则不生图。
-  用户要生成 UI 页面 / 基准页 / 界面图，或调用 /game-atelier:ui-page 时使用。
+  用户要生成 UI 页面 / 基准页 / 界面图 / 换风格出候选，或调用 /game-atelier:ui-page 时使用。
 allowed-tools:
   - Bash
   - Read
@@ -17,6 +18,7 @@ triggers:
   - 生成 UI 页面
   - 出基准页
   - 生成界面图
+  - 换风格出候选
 ---
 
 ## 定位
@@ -26,7 +28,7 @@ triggers:
 产物走完整 job 体系（确认卡 / 失败重试 / 5xx 重试 / 直连白名单全部复用），落
 `projects/<slug>/screens/<screen-id>/vN.png`，Web 项目页「页面」区可见。
 
-**风格切换模式未上线**（B3 批次交付）：被要求出多风格候选对比时如实告知，不硬出。
+两种模式：**基准页模式**（默认，验结构）与**风格切换模式**（结构锁定、只换风格出候选，见下节）。
 
 ## 运行模式（CLI 前缀判断）
 
@@ -83,6 +85,55 @@ stdout 是纯 job_id，stderr 是确认卡——**原样转发确认卡给画师
 画师明确说「出图」→ `run-job <job_id>`。产物落 `projects/<slug>/screens/<screen-id>/vN.png`，
 提示画师在 Web 项目页「页面」区查看。失败 → 把 job.error 的中文原因给画师，经确认后 `retry-job <job_id>`。
 
+## 风格切换模式（B3）
+
+基准页结构经画师确认后才进入本模式——**结构不变、只换风格**，出 N 个候选并排对比，选定的那个成为
+项目风格基准。
+
+### 1. 锁结构
+
+Read 该 screen 的 brief，**一字不改**；候选之间只有风格描述不同，布局分区 / 组件 / 状态全部沿用。
+brief 缺失 → 先回基准页模式补 brief，不凭空开候选。
+
+### 2. 问风格方向
+
+AskUserQuestion 让画师给 2-4 个风格方向（如「厚涂写实 / 扁平卡通 / 像素复古」）；画师说不清时，
+按 gdd 定位 + worldview 调性提三个候选方向请他选，不擅自决定。
+
+### 3. 每候选一条 job
+
+逐个提交，每条独立 job，来源关系落盘：
+
+```bash
+uv run python -m character_workflow submit-screen \
+  --project <slug> --screen <screen-id> --prompt-file <tmp-候选N.txt> \
+  --style-variant "<风格方向>" --base-version <基准页文件名，如 v1.png> \
+  --reference-image <基准页图绝对路径>
+```
+
+确认卡逐条转发给画师；**全部候选可一次性确认后连续 run-job**，但每条失败各自报错、各自重试。
+旧候选一律保留不删——版本对比历史是后续经验沉淀的素材。
+
+### 4. 画师选定 → 定稿
+
+Web 项目页「页面」区并排对比后，画师点「定稿」即写入项目级 canonical；也可由 skill 代写：
+
+```bash
+uv run python -m character_workflow set-screen-canonical \
+  --project <slug> --screen <screen-id> --path <选定图路径>
+```
+
+风格标签由后端从 job 反查，不用重复报。
+
+### 5. 回写 style.md `ui.*`（本模式的真正产出）
+
+把选定候选的风格拆成**可执行描述**（下次生成能照着复现的话，不是「好看」这种评价），写进
+`style.md` 的 `ui.typography` / `ui.geometry` / `ui.states` 三节（格式见
+`${CLAUDE_PLUGIN_ROOT}/docs/references/style-template.md`），经画师确认后把 `status` 置 `approved`
+并刷新 `updated`。从此所有延展页 prompt 注入这份契约，风格漂移有守卫。
+
+未回写就宣称「风格已定」= 违规：契约不落文件，下一页照样漂。
+
 ## Turn 收尾报告（七件套）
 
 每轮有实质产物（brief 落盘 / job 提交 / 出图完成）时，以固定七件套收尾：
@@ -104,7 +155,9 @@ stdout 是纯 job_id，stderr 是确认卡——**原样转发确认卡给画师
 - 一次只做一页；不批量延展（那是 ui-screens，B4）。
 - brief 是结构事实源：结构改动写 brief，prompt 快照只存 job JSON，不三份存储。
 - 修改 approved 的 prd / interaction（补页面 / 改状态名）必须先经画师确认。
-- 风格切换 / 多候选对比未上线（B3），如实告知，不用多次单页生成冒充。
+- 风格候选必须结构锁定：改了 brief 的不是候选，是新基准页。
+- 定稿由画师选，skill 不代选；旧候选保留不删。
+- 风格选定后必须回写 style.md `ui.*` 并置 approved，否则不得宣称风格已定。
 - 所有提问走 AskUserQuestion；工具不可用降级文本确认卡（协议同 character skill）。
 
 ## 跳过条件

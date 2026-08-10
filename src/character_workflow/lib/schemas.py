@@ -55,6 +55,10 @@ class JobParams(BaseModel):
     generate_audio: bool | None = None
     reference_videos: list[str] | None = None
     reference_audios: list[str] | None = None
+    # 2026-08-10 (B3): UI 页面风格候选 —— 结构锁定、只换风格时记来源关系。
+    # style_variant = 画师给的风格方向标签；base_version = 结构所本的基准页文件名（如 v1.png）。
+    style_variant: str | None = None
+    base_version: str | None = None
 
 
 class Job(BaseModel):
@@ -171,6 +175,27 @@ class CanonicalSet(BaseModel):
     # POST /api/characters/{id}/canonical 请求体。path=None 表示取消该 slot 定稿。
     model_config = ConfigDict(extra="forbid")
     slot: AssetSlot
+    path: str | None = None
+
+
+class ScreenCanonicalEntry(BaseModel):
+    # B3（2026-08-10）：单个 screen 的定稿记录。path 为 data-root 相对路径。
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    set_at: str
+    style_variant: str = ""
+
+
+class ScreenCanonicalFile(BaseModel):
+    # projects/<slug>/screens/canonical.json —— 每个 screen-id 至多一张定稿。
+    model_config = ConfigDict(extra="forbid")
+    screens: dict[str, ScreenCanonicalEntry] = Field(default_factory=dict)
+
+
+class ScreenCanonicalSet(BaseModel):
+    # POST /api/projects/{id}/screens/canonical 请求体。path=None 表示取消该 screen 定稿。
+    model_config = ConfigDict(extra="forbid")
+    screen_id: str
     path: str | None = None
 
 
