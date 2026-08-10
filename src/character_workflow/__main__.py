@@ -414,6 +414,11 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("agent-env", help="探测当前 AI 代理运行时(tool/约定文件/家目录),输出 JSON")
     sub.add_parser("doctor", help="环境自诊断:data_root / CWD / venv / 代理,报问题 + 给建议")
+    sub.add_parser(
+        "validate-data",
+        help="数据自检:job JSON 逐条校验 / 资产存在性 / 文档零占位 / canonical / 画廊 sidecar;"
+             "有 error 退出码 1",
+    )
 
     p_submit = sub.add_parser(
         "submit",
@@ -550,6 +555,11 @@ def main(argv: list[str] | None = None) -> int:
         from character_workflow.lib.doctor import diagnose
         print(json.dumps(diagnose(), ensure_ascii=False, indent=2))
         return 0
+    if args.cmd == "validate-data":
+        from character_workflow.lib.validate_data import format_report, validate_data
+        report = validate_data()
+        print(format_report(report))
+        return 1 if report.errors else 0
     if args.cmd == "submit":
         return _submit(args)
     if args.cmd == "submit-screen":
