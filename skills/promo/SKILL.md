@@ -1,6 +1,6 @@
 ---
 name: promo
-version: 1.0.0
+version: 1.1.0
 description: |
   角色宣传图（KV / 海报）生成：基于已有立绘引导画师补齐场景/情绪/构图/色调/张力后出图，
   也支持改已出的美宣。
@@ -90,7 +90,9 @@ uv run python -m character_workflow turn-start --kind promo
 # Codex / Installed Plugin：python "$BOOT" --run -m character_workflow turn-start --kind promo（绝不 uv run）
 ```
 
-返回 `stage / recommend_action / active_id / spec / project_worldview / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 promo 段）。
+返回 `stage / recommend_action / active_id / spec / project_worldview / project_style / canonical / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 promo 段；`project_style` 为项目风格契约全文，非空时其 `style` / `palette` / `taboo` 字段一并作 prompt 约束）。
+
+**subject 图选择（身份锚定）**：优先取 `canonical.portrait.path`（画师标的定稿立绘）作 `--source-image`；`canonical.portrait` 为 null 时回退 `portrait/v_latest.png`，并在转发确认卡时**加一句注明**"该角色暂无定稿立绘，本次以最新立绘 vN 作参考"。画师说某张美宣"定稿"时（经 AskUserQuestion 确认）跑 `set-canonical --kind promo --path <路径>` 写入。
 
 本 skill 只产 promo（美宣）。**对话中途画师需求转向立绘 / 三视图 → 直接切到对应 skill 执行流程**（Skill 工具调起 `/game-atelier:character` · `/game-atelier:turnaround`，一句话告知正在切），不在本 skill 内用 promo 上下文硬出别的 kind。
 
@@ -198,7 +200,7 @@ turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、
 
 - `needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 态**绝不**启 viewer-server、绝不开窗。
 - 默认出**无字底图**：标题 / 标语 / logo / 文案不写进 prompt，交本地排版层（例外见 `references/prompt-promo-zh.md` 零节第 7 条）。
-- 美宣要锚定角色身份，须由 skill 把 `portrait/v_latest.png` 显式作 `--source-image` 传入（runner 不自动补图）。
+- 美宣要锚定角色身份，须由 skill 显式传 `--source-image`（runner 不自动补图）：优先 `canonical.portrait`（定稿立绘），无定稿回退 `portrait/v_latest.png` 并在确认卡转发时注明回退。
 - 美宣 prompt 只加场景 / 情绪 / 镜头 / 光线，**不改 spec 锚定的配色 / 外观**。
 - 参考图一律走 CLI `--reference-image` / `--source-image`，**禁止手改 job JSON**。
 - 确认卡原样转发 CLI（stderr）全文，不手写、不摘要、不增删字段。

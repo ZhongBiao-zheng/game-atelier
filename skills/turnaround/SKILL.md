@@ -1,6 +1,6 @@
 ---
 name: turnaround
-version: 1.1.0
+version: 1.2.0
 description: |
   角色三视图 / character sheet 生成：基于已有立绘引导画师锁定正/侧/背三面比例、表情、武器拆解，
   一次性出横版三联视图，也支持改已出的三视图。
@@ -92,7 +92,9 @@ uv run python -m character_workflow turn-start --kind turnaround
 # Codex / Installed Plugin：python "$BOOT" --run -m character_workflow turn-start --kind turnaround（绝不 uv run）
 ```
 
-返回 `stage / recommend_action / active_id / spec / project_worldview / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 turnaround 段）。按 `recommend_action` 决策，处理方式同 character 主 Skill。
+返回 `stage / recommend_action / active_id / spec / project_worldview / project_style / canonical / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 turnaround 段）。按 `recommend_action` 决策，处理方式同 character 主 Skill。
+
+**subject 图选择（身份锚定）**：优先取 `canonical.portrait.path`（画师标的定稿立绘）作 subject_image；`canonical.portrait` 为 null 时回退 `portrait/v_latest.png`，并在转发确认卡时**加一句注明**"该角色暂无定稿立绘，本次以最新立绘 vN 作参考"。画师说某张三视图"定稿"时（经 AskUserQuestion 确认）跑 `set-canonical --kind turnaround --path <路径>` 写入。
 
 本 skill 只产 turnaround（三视图）。**对话中途画师需求转向立绘 / 美宣 → 直接切到对应 skill 执行流程**（Skill 工具调起 `/game-atelier:character` · `/game-atelier:promo`，一句话告知正在切），不在本 skill 内用 turnaround 上下文硬出别的 kind。
 
@@ -177,7 +179,7 @@ uv run python -m character_workflow turn-start --kind turnaround
 
 ## 上传图通道
 
-画师粘参考图时：存到 `characters/<id>/source/<timestamp>-<文件名>`，**三视图 reference_mode 只允许 `composition_only`**（仅参考布局/基线安排），`full_reference` / `style_only` / `color_lighting_only` / `pose_only` 一律拒绝（会让风格/光照/姿势污染 spec 锁定的工程结构）。画师若上传风格参考 → 拒绝："三视图风格已由 spec 锁定，要换风格先回 /game-atelier:character 改 spec"。立绘 `portrait/v_latest.png` 是强制 subject_image，不可被参考图覆盖。
+画师粘参考图时：存到 `characters/<id>/source/<timestamp>-<文件名>`，**三视图 reference_mode 只允许 `composition_only`**（仅参考布局/基线安排），`full_reference` / `style_only` / `color_lighting_only` / `pose_only` 一律拒绝（会让风格/光照/姿势污染 spec 锁定的工程结构）。画师若上传风格参考 → 拒绝："三视图风格已由 spec 锁定，要换风格先回 /game-atelier:character 改 spec"。立绘（canonical 定稿优先，无则 `portrait/v_latest.png`）是强制 subject_image，不可被参考图覆盖。
 
 ## Turn 收尾：经验沉淀（出图经验）
 
@@ -197,7 +199,7 @@ turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、
 
 - `needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 态**绝不**启 viewer-server、绝不开窗。
 - 三视图参考图 reference_mode **只允许 `composition_only`**；`full_reference` / `style_only` / `color_lighting_only` / `pose_only` 一律拒绝——它们会让风格 / 光照 / 姿势污染受 spec 锁定的工程结构。
-- 立绘 `portrait/v_latest.png` 是强制 subject_image，不可被参考图覆盖。
+- 立绘是强制 subject_image，不可被参考图覆盖：优先 `canonical.portrait`（定稿立绘），无定稿回退 `portrait/v_latest.png` 并在确认卡转发时注明回退。
 - spec 锚点（发色 / 瞳色 / 服装 / 武器 / 风格档）100% 继承，三视图只补"另外两面"，不顺手微调。
 - 参考图一律走 CLI `--reference-image` / `--source-image`，**禁止手改 job JSON**。
 - 确认卡原样转发 CLI（stderr）全文，不手写、不摘要、不增删字段。

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Download, Eye, EyeOff, Heart, Loader2, Upload, X } from 'lucide-react';
-import type { AssetSlot, Job, ProjectsFile } from '../schema/jobs';
+import { AlertTriangle, BadgeCheck, Download, Eye, EyeOff, Heart, Loader2, Upload, X } from 'lucide-react';
+import type { AssetSlot, CanonicalFile, Job, ProjectsFile } from '../schema/jobs';
+import { fetchCanonical, isCanonicalPath, setCanonical } from '@/api/canonical';
 import { fetchGalleryHidden, isGalleryHidden, setGalleryHidden } from '@/api/gallery';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { Button } from '@/components/ui/button';
@@ -59,6 +60,8 @@ export function CharacterGallery({
   const [colCount, setColCount] = useState(3);
   // 首页作品展示的隐藏清单（工坊内不受影响，仅作状态标识 + 切换入口）。
   const [hiddenPaths, setHiddenPaths] = useState<string[]>([]);
+  // 定稿表（A2）：每 slot 至多一张；promo/turnaround 出图默认引用定稿立绘。
+  const [canonicalFile, setCanonicalFile] = useState<CanonicalFile | null>(null);
   const { toggleFavorite, isFavorited } = useGalleryFavorites();
   // 展签小帽：角色所属项目名
   const [projectName, setProjectName] = useState<string | null>(null);
@@ -79,6 +82,15 @@ export function CharacterGallery({
   useEffect(() => {
     fetchGalleryHidden().then(setHiddenPaths).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!characterId) return;
+    let cancelled = false;
+    fetchCanonical(characterId)
+      .then(cf => { if (!cancelled) setCanonicalFile(cf); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [characterId, sseSignal]);
 
   useEffect(() => {
     if (!characterId) return;
@@ -164,6 +176,17 @@ export function CharacterGallery({
     });
   }
 
+  async function toggleCanonical(path: string) {
+    if (!characterId) return;
+    const current = canonicalFile?.[tab] ?? null;
+    const next = isCanonicalPath(path, current) ? null : path;
+    try {
+      setCanonicalFile(await setCanonical(characterId, tab, next));
+    } catch {
+      alert('切换定稿状态失败，稍后再试');
+    }
+  }
+
   async function toggleHidden(path: string) {
     const next = !isGalleryHidden(path, hiddenPaths);
     try {
@@ -229,6 +252,7 @@ export function CharacterGallery({
             {allImages.map((img, i) => {
               const favorited = isFavorited(img.path);
               const hidden = isGalleryHidden(img.path, hiddenPaths);
+              const canonical = isCanonicalPath(img.path, canonicalFile?.[tab]);
               const rawSrc = `/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`;
               const btn = 'size-7 rounded-full bg-scrim grid place-items-center transition-opacity backdrop-blur-glass cursor-pointer border-0';
               return (
@@ -247,7 +271,21 @@ export function CharacterGallery({
                 <figcaption className="pointer-events-none absolute bottom-2 left-2 font-mono text-xs tabular-nums tracking-wider text-foreground bg-glass backdrop-blur-glass px-2 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity">
                   №{String(i + 1).padStart(2, '0')}
                 </figcaption>
+                {canonical && (
+                  <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 rounded-sm bg-glass backdrop-blur-glass px-2 py-0.5 text-xs text-primary">
+                    <BadgeCheck className="size-3.5" />
+                    定稿
+                  </span>
+                )}
                 <div className="absolute right-2 top-2 flex gap-1.5">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); void toggleCanonical(img.path); }}
+                    title={canonical ? '取消定稿' : '设为定稿（promo/三视图默认引用定稿立绘）'}
+                    aria-label={canonical ? '取消定稿' : '设为定稿'}
+                    className={cn(btn, canonical ? 'text-primary opacity-100 hover:bg-background/90' : 'text-white opacity-0 group-hover:opacity-100 hover:bg-background/90')}
+                  >
+                    <BadgeCheck className="size-3.5" />
+                  </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); void toggleFavorite(img.path); }}
                     title={favorited ? '取消喜欢' : '喜欢'}
