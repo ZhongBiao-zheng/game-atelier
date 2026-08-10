@@ -45,6 +45,8 @@ def test_ui_anchor_skill_references_all_templates_and_gate():
 def test_ui_orchestrator_routes_and_gates():
     text = _read("skills/ui/SKILL.md")
     assert "ui-anchor" in text
+    # B4 后 ui-screens 已上线，路由表直接调起
+    assert "ui-screens" in text and "未上线，B4" not in text
     # UI 规范写 style.md ui.* 节，不另立平行契约
     assert "ui.*" in text and "style.md" in text
     # 未上线阶段必须如实告知，不伪造
@@ -84,11 +86,61 @@ def test_ui_page_style_switch_mode():
     assert "保留不删" in text
 
 
+def test_screen_taxonomy_reference_exists():
+    """B4：玩家旅程审计表——8 步旅程 + 分类池 + 优先级三档 + 宁缺毋滥。"""
+    text = _read("docs/references/screen-taxonomy.md")
+    assert "玩家旅程 8 步审计" in text
+    assert "must-have" in text and "genre-specific" in text and "optional" in text
+    # 按项目适配选择是硬原则，防默认全量堆页
+    assert "不要默认全量加入" in text
+
+
+def test_screen_map_template_exists_with_contract():
+    """B4：screen-map 模板——清单表 + 每页契约与 brief 对齐 + prd 为上游。"""
+    text = _read("docs/references/screen-map-template.md")
+    assert "status: draft | approved" in text
+    # 清单表六列
+    for col in ("screen-id", "优先级", "状态", "依赖"):
+        assert col in text
+    # 每页契约节名与字段（与 screen-brief 对齐，ui-page 直接取用）
+    assert "## screen.<screen-id>" in text
+    for field in ("purpose", "布局分区", "组件", "状态"):
+        assert field in text
+    # 开发字段裁剪 + prd 上游一致性
+    assert "data_needs" in text and "不写" in text
+    assert "以 prd 为准" in text
+
+
+def test_ui_screens_skill_gates_and_flow():
+    """B4：ui-screens——双门禁、画师批范围、只产 map 不生图、prd 回写。"""
+    text = _read("skills/ui-screens/SKILL.md")
+    # 双门禁：三锚 approved/waiver + 风格已定稿
+    assert "approved" in text and "waiver" in text
+    assert "ui.*" in text and "style.md" in text
+    # 审计 → 批范围 → 写 map → 交棒 ui-page
+    assert "screen-taxonomy.md" in text
+    assert "screen-map-template.md" in text
+    assert "screen-map.md" in text
+    assert "ui-page" in text
+    # 范围由画师批 + 新增页先回写 prd + 不生图
+    assert "画师批" in text
+    assert "回写 prd" in text
+    assert "不生图" in text
+
+
+def test_ui_page_reads_screen_map():
+    """B4：ui-page 定 screen-id 与写 brief 时优先取 screen-map 契约基础。"""
+    text = _read("skills/ui-page/SKILL.md")
+    assert "screen-map.md" in text
+    assert "## screen.<id>" in text or "screen.<id>" in text
+
+
 def test_seven_field_closing_block_in_all_workflow_skills():
     for path in (
         "skills/ui/SKILL.md",
         "skills/ui-anchor/SKILL.md",
         "skills/ui-page/SKILL.md",
+        "skills/ui-screens/SKILL.md",
         "skills/character/SKILL.md",
         "skills/promo/SKILL.md",
         "skills/turnaround/SKILL.md",
@@ -99,7 +151,12 @@ def test_seven_field_closing_block_in_all_workflow_skills():
 
 
 def test_ui_skills_use_plugin_root_var_not_hardcoded_path():
-    for path in ("skills/ui/SKILL.md", "skills/ui-anchor/SKILL.md", "skills/ui-page/SKILL.md"):
+    for path in (
+        "skills/ui/SKILL.md",
+        "skills/ui-anchor/SKILL.md",
+        "skills/ui-page/SKILL.md",
+        "skills/ui-screens/SKILL.md",
+    ):
         text = _read(path)
         assert "~/.claude/plugins/game-atelier/" not in text, path
         assert "${CLAUDE_PLUGIN_ROOT}" in text, path

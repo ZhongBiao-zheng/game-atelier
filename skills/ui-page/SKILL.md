@@ -1,6 +1,6 @@
 ---
 name: ui-page
-version: 1.1.0
+version: 1.2.0
 description: |
   游戏 UI 单页生成与风格切换：读锚文档 + style.md + 页面 brief 组 prompt，走 job 体系出基准页 /
   单页；结构锁定出 N 个风格候选供并排对比，选定后回写 style.md ui.* 契约。
@@ -54,15 +54,19 @@ Read `projects/<slug>/design/{gdd,prd,interaction}.md` 与 `projects/<slug>/styl
 
 ### 3. 定 screen-id
 
-从 prd「页面范围」表取 `screen-id`（画师点名哪页做哪页；没点名时推荐 must-have 的第一个未生成页，
-基准页通常是 `home`）。画师点名的 id 不在表里 → 先确认是否补进 prd（改 approved 文档须画师确认），不擅自造页。
+`projects/<slug>/screens/screen-map.md` 存在且 approved → 从其页面清单表取 `screen-id`
+（按依赖与优先级推荐下一个 `planned` 页）；否则从 prd「页面范围」表取。
+画师点名哪页做哪页；没点名时推荐 must-have 的第一个未生成页，基准页通常是 `home`。
+画师点名的 id 不在表里 → 先确认是否补进 prd / screen-map（改 approved 文档须画师确认），不擅自造页。
 
 ### 4. 写 / 更新 brief
 
 Read `projects/<slug>/screens/<screen-id>.md`：
 
-- 不存在 → 按 `${CLAUDE_PLUGIN_ROOT}/docs/references/screen-brief-template.md` 从 prd（覆盖需求）+
-  interaction（`## screen.<id>` 节的流程与状态）推初稿，AskUserQuestion 确认布局分区与反向限制后 Write 落盘。
+- 不存在 → 按 `${CLAUDE_PLUGIN_ROOT}/docs/references/screen-brief-template.md` 推初稿：
+  screen-map 有 `## screen.<id>` 节时**以它为基础**（purpose / 布局分区 / 组件 / 状态直接取用，
+  只补反向限制等缺项）；没有 map 时从 prd（覆盖需求）+ interaction（`## screen.<id>` 节的流程与状态）推。
+  AskUserQuestion 确认布局分区与反向限制后 Write 落盘。
 - 已存在 → 只在画师要求结构改动时更新；生成参数（尺寸 / 模型 / 风格词）不写进 brief。
 - 状态名沿用 interaction.md 契约；零占位。
 
@@ -84,6 +88,7 @@ stdout 是纯 job_id，stderr 是确认卡——**原样转发确认卡给画师
 
 画师明确说「出图」→ `run-job <job_id>`。产物落 `projects/<slug>/screens/<screen-id>/vN.png`，
 提示画师在 Web 项目页「页面」区查看。失败 → 把 job.error 的中文原因给画师，经确认后 `retry-job <job_id>`。
+screen-map 存在时，把该页清单表状态推进为 `generated`（定稿后推进为 `canonical`）。
 
 ## 风格切换模式（B3）
 
