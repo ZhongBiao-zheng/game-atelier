@@ -71,8 +71,12 @@ class Job(BaseModel):
     # 2026-05-25 重构：原 kind 拆成 asset_slot + kind + namespace。
     asset_slot: AssetSlot = AssetSlot.PORTRAIT
     kind: JobKind = JobKind.IMAGE
-    namespace: str = "character"  # "character" | "studio"
+    namespace: str = "character"  # "character" | "studio" | "ui"
     source_image: str | None = None  # promo/turnaround 用，绝对路径
+    # 2026-08-10 (B2): UI 页面 job（namespace="ui"）—— 资产归项目不归角色。
+    # 两字段决定输出目录 projects/<slug>/screens/<screen_id>/；Web 不能改。
+    project_id: str | None = None
+    screen_id: str | None = None
     # Phase 3 (2026-05-22): which Key was used. Web 不能改这两个字段。
     alias: str | None = None
     provider: str | None = None

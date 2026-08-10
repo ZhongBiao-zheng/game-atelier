@@ -108,6 +108,72 @@ def _submit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _submit_screen(args: argparse.Namespace) -> int:
+    """B2: 落盘一条 UI 页面 job（namespace='ui'），stdout 输出纯 job_id。
+
+    输出归项目不归角色：run-job 后产物落 projects/<slug>/screens/<screen-id>/vN.png。
+    """
+    from character_workflow.lib import ui_jobs
+
+    try:
+        project = ui_jobs.resolve_project(args.project)
+        ui_jobs.validate_screen_id(args.screen)
+    except (KeyError, ValueError) as e:
+        print(f"submit-screen: {e}", file=sys.stderr)
+        return 1
+
+    prompt_path = Path(args.prompt_file)
+    if not prompt_path.exists():
+        print(f"submit-screen: --prompt-file {args.prompt_file} 不存在", file=sys.stderr)
+        return 1
+    prompt = prompt_path.read_text(encoding="utf-8")
+
+    reference_images: list[str] = []
+    for raw in args.reference_image or []:
+        resolved = str(Path(raw).expanduser().resolve())
+        if resolved not in reference_images:
+            reference_images.append(resolved)
+    # UI 页面出的是图 —— 沿用图片能力（portrait capability）的默认 Key。
+    alias = args.alias or keys.preferred_alias_for_kind("portrait")
+    key = keys.find_by_alias(alias) if alias else None
+    if key is None:
+        if args.alias:
+            print(f"submit-screen: alias={args.alias!r} 不存在，去 Web 确认 Key 列表", file=sys.stderr)
+        else:
+            print("submit-screen: 没有可用的图片默认 Key，去 Web 加一个", file=sys.stderr)
+        return 2
+    model = args.model
+    if model is None:
+        if not key.models:
+            print(f"submit-screen: Key {key.alias!r} 没有配置模型，去 Web 补一个 model id", file=sys.stderr)
+            return 2
+        model = key.models[0].id
+
+    params: dict = {
+        "vendor": f"{key.alias} ({key.provider})",
+        "size": args.size,
+        "requested_size": args.size,
+        "n": args.n,
+        "reference_images": reference_images,
+    }
+
+    job = write_job(
+        job_id=new_job_id(),
+        character_id="",  # namespace="ui" 时无角色归属；runner 按 project_id/screen_id 落盘
+        prompt=prompt,
+        model=model,
+        params=params,
+        status=JobStatus.PENDING_CONFIRM,
+        alias=alias,
+        namespace="ui",
+        project_id=project.id,
+        screen_id=args.screen,
+    )
+    print(_confirmation_card(job), file=sys.stderr)
+    print(job.job_id)
+    return 0
+
+
 def _confirmation_card(job: Job) -> str:
     """出图确认卡 —— CLI 统一生成（打到 stderr），Skill 原样转发给画师，
     杜绝 Agent 手写漏字段。stdout 仍是纯 job_id，不破 $() 捕获契约。"""
@@ -119,6 +185,8 @@ def _confirmation_card(job: Job) -> str:
         f"model  : {job.model}",
         f"size   : {job.params.size}  n: {job.params.n}",
     ]
+    if job.screen_id:
+        lines.insert(2, f"screen : {job.screen_id}（UI 页面 job，产物归项目）")
     if job.retry_of:
         lines.append(f"retry_of: {job.retry_of}（原 job 错误记录已保留）")
     lines.append(f"参考图 : {len(refs)} 张")
@@ -348,6 +416,23 @@ def main(argv: list[str] | None = None) -> int:
              "写入 params.reference_images，无需手改 job JSON",
     )
 
+    p_ss = sub.add_parser(
+        "submit-screen",
+        help="B2: 落盘 UI 页面 job（namespace='ui'）——产物归项目 projects/<slug>/screens/<screen-id>/；"
+             "stdout 输出纯 job_id，stderr 输出确认卡",
+    )
+    p_ss.add_argument("--project", required=True, help="项目 id 或 slug")
+    p_ss.add_argument("--screen", required=True, help="screen-id（小写字母/数字/连字符）")
+    p_ss.add_argument("--prompt-file", required=True, help="中文 prompt 文件路径")
+    p_ss.add_argument("--n", type=int, default=1, help="出图数量，默认 1")
+    p_ss.add_argument("--size", default="1536x1024", help="出图尺寸，UI 页面默认横幅 1536x1024")
+    p_ss.add_argument("--alias", default=None, help="指定 Key alias；缺省用图片默认 Key")
+    p_ss.add_argument("--model", default=None, help="模型 id；缺省使用所选 Key 的第一个模型")
+    p_ss.add_argument(
+        "--reference-image", action="append", default=None,
+        help="参考图绝对路径，可重复传多张（如基准页图做风格参照）",
+    )
+
     p_run_job = sub.add_parser("run-job", help="确认并执行一个 PENDING_CONFIRM job")
     p_run_job.add_argument("job_id")
 
@@ -418,6 +503,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "submit":
         return _submit(args)
+    if args.cmd == "submit-screen":
+        return _submit_screen(args)
     if args.cmd == "retry-job":
         return _retry_job(args)
     if args.cmd == "run-job":

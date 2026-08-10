@@ -50,6 +50,9 @@ def job_output_dir_for(job: "Job") -> Path:
     if job.namespace == "studio":
         from character_workflow.lib.studio_jobs import studio_output_dir
         return studio_output_dir(job.job_id)
+    if job.namespace == "ui":
+        from character_workflow.lib.ui_jobs import screen_output_dir
+        return screen_output_dir(job.project_id, job.screen_id)
     return job_output_dir(job.character_id, job.asset_slot)
 
 
@@ -130,6 +133,9 @@ def write_job(
     asset_slot: AssetSlot = AssetSlot.PORTRAIT,
     source_image: str | None = None,
     alias: str | None = None,
+    namespace: str = "character",
+    project_id: str | None = None,
+    screen_id: str | None = None,
 ) -> Job:
     """落盘一条 job 文件。默认 PENDING_CONFIRM —— Skill 先写好调用细节，
     UI 渲染"出图卡片"，画师在终端或 Web 点确认后才推进到 PENDING 调图像服务。
@@ -154,6 +160,9 @@ def write_job(
         status=status,
         error=None,
         asset_slot=asset_slot,
+        namespace=namespace,
+        project_id=project_id,
+        screen_id=screen_id,
         source_image=source_image,
         alias=alias,
         provider=provider,

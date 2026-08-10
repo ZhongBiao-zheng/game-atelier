@@ -35,6 +35,22 @@ export async function fetchGalleryProject(projectId: string): Promise<ProjectGal
   return Array.isArray(data.items) ? data.items : [];
 }
 
+/** 项目 UI 页面图（B2）：projects/<slug>/screens/<screen-id>/ 下的版本图，最新在前。 */
+export interface ProjectScreenItem {
+  screen_id: string;
+  filename: string;
+  path: string;
+  job_id: string | null;
+  mtime: number;
+}
+
+export async function fetchGalleryScreens(projectId: string): Promise<ProjectScreenItem[]> {
+  const resp = await fetch(`/api/gallery/screens?project=${encodeURIComponent(projectId)}`);
+  if (!resp.ok) throw new Error(`project screens fetch failed: ${resp.status}`);
+  const data = (await resp.json()) as { items?: ProjectScreenItem[] };
+  return Array.isArray(data.items) ? data.items : [];
+}
+
 /** 首页作品展示的隐藏清单（data_root 相对路径）。工坊里仍正常可见。 */
 export async function fetchGalleryHidden(): Promise<string[]> {
   const resp = await fetch('/api/gallery/hidden');

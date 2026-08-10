@@ -6,7 +6,7 @@ export type AssetSlot = 'portrait' | 'promo' | 'turnaround';
 // 新 JobKind: 媒体类型
 export type JobKind = 'image' | 'video';
 
-export type Namespace = 'character' | 'studio';
+export type Namespace = 'character' | 'studio' | 'ui';
 
 export interface JobParams {
   size?: string;
@@ -54,6 +54,9 @@ export interface Job {
   progress_phase?: 'sent' | 'downloading' | null;
   // 2026-07-08: 出图完成时间戳（DONE/FAILED 终态回写；Web 只读）— 与 schemas.py 同步
   completed_at?: string | null;
+  // 2026-08-10 (B2): UI 页面 job（namespace='ui'）归项目不归角色；Web 只读 — 与 schemas.py 同步
+  project_id?: string | null;
+  screen_id?: string | null;
 }
 
 export const WEB_EDITABLE_FIELDS = ['prompt', 'params'] as const;

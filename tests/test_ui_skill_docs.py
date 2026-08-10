@@ -53,10 +53,31 @@ def test_ui_orchestrator_routes_and_gates():
     assert "approved" in text
 
 
+def test_screen_brief_template_exists_with_frontmatter():
+    text = _read("docs/references/screen-brief-template.md")
+    assert "project: <project-slug>" in text
+    assert "screen: <screen-id>" in text
+    assert "反向限制" in text
+
+
+def test_ui_page_skill_gates_and_submit_chain():
+    text = _read("skills/ui-page/SKILL.md")
+    # 正式门禁：三锚 approved（或 waiver）+ style.md 存在，不过不生图
+    assert "approved" in text and "waiver" in text and "style.md" in text
+    # 走 job 体系：submit-screen 提交 + run-job 确认执行
+    assert "submit-screen" in text and "run-job" in text
+    # brief 模板引用 + 产物归项目
+    assert "screen-brief-template.md" in text
+    assert "projects/<slug>/screens/" in text
+    # 风格切换（B3）未上线，如实告知
+    assert "未上线" in text
+
+
 def test_seven_field_closing_block_in_all_workflow_skills():
     for path in (
         "skills/ui/SKILL.md",
         "skills/ui-anchor/SKILL.md",
+        "skills/ui-page/SKILL.md",
         "skills/character/SKILL.md",
         "skills/promo/SKILL.md",
         "skills/turnaround/SKILL.md",
@@ -67,7 +88,7 @@ def test_seven_field_closing_block_in_all_workflow_skills():
 
 
 def test_ui_skills_use_plugin_root_var_not_hardcoded_path():
-    for path in ("skills/ui/SKILL.md", "skills/ui-anchor/SKILL.md"):
+    for path in ("skills/ui/SKILL.md", "skills/ui-anchor/SKILL.md", "skills/ui-page/SKILL.md"):
         text = _read(path)
         assert "~/.claude/plugins/game-atelier/" not in text, path
         assert "${CLAUDE_PLUGIN_ROOT}" in text, path

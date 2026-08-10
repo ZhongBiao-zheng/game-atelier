@@ -29,11 +29,20 @@ const works = [
   },
 ];
 
+const screenItems = [
+  { screen_id: 'home', filename: 'v2.png', path: 'projects/pokemon/screens/home/v2.png', job_id: 'job-ui-2', mtime: 200 },
+  { screen_id: 'home', filename: 'v1.png', path: 'projects/pokemon/screens/home/v1.png', job_id: null, mtime: 150 },
+  { screen_id: 'battle', filename: 'v1.png', path: 'projects/pokemon/screens/battle/v1.png', job_id: null, mtime: 120 },
+];
+
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
     if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
       return { ok: true, json: async () => ({ items: works }) } as Response;
+    }
+    if (typeof url === 'string' && url.startsWith('/api/gallery/screens')) {
+      return { ok: true, json: async () => ({ items: screenItems }) } as Response;
     }
     return { ok: true, json: async () => sample } as Response;
   }));
@@ -87,5 +96,35 @@ describe('ProjectPage', () => {
     render(<ProjectPage projectId="p1" onBack={vi.fn()} />);
     await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
     expect(screen.queryByTestId('project-works')).toBeNull();
+  });
+
+  it('渲染「页面」区：按 screen-id 分组、组内列出版本图', async () => {
+    render(<ProjectPage projectId="p1" onBack={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('project-screens')).toBeInTheDocument());
+    expect(screen.getByText('页面')).toBeInTheDocument();
+    // 两个分组标题（home 在前 —— 后端最新在前，组序跟最新图）
+    expect(screen.getByText('home')).toBeInTheDocument();
+    expect(screen.getByText('battle')).toBeInTheDocument();
+    // home 组两版
+    expect(screen.getByRole('link', { name: '查看页面 home 的 v2.png' }).getAttribute('href')).toBe(
+      '/api/gallery/image?path=projects%2Fpokemon%2Fscreens%2Fhome%2Fv2.png',
+    );
+    expect(screen.getByRole('link', { name: '查看页面 home 的 v1.png' })).toBeInTheDocument();
+  });
+
+  it('项目没有页面图时不渲染「页面」区', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
+      if (typeof url === 'string' && url.startsWith('/api/gallery/screens')) {
+        return { ok: true, json: async () => ({ items: [] }) } as Response;
+      }
+      if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
+        return { ok: true, json: async () => ({ items: works }) } as Response;
+      }
+      return { ok: true, json: async () => sample } as Response;
+    }));
+    render(<ProjectPage projectId="p1" onBack={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
+    expect(screen.queryByTestId('project-screens')).toBeNull();
   });
 });

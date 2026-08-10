@@ -1088,6 +1088,42 @@ def gallery_project(project: str = Query(min_length=1)) -> dict:
     return {"items": items}
 
 
+@router.get("/gallery/screens")
+def gallery_screens(project: str = Query(min_length=1)) -> dict:
+    """B2 项目页「页面」区：projects/<slug>/screens/<screen-id>/ 下的 UI 页面图。
+
+    扁平 items（前端按 screen_id 分组），组内/组间都最新在前。
+    """
+    pf = read_projects()
+    proj = next((p for p in pf.projects if p.id == project), None)
+    if proj is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    screens_dir = data_root.projects_dir() / proj.slug / "screens"
+    job_ids_by_path = _gallery_job_ids_by_path()
+    items: list[dict] = []
+    if screens_dir.is_dir():
+        for screen_dir in screens_dir.iterdir():
+            if not screen_dir.is_dir():
+                continue
+            for f in screen_dir.iterdir():
+                if f.suffix.lower() not in _GALLERY_EXTS:
+                    continue
+                try:
+                    mtime = f.stat().st_mtime
+                except OSError:
+                    continue
+                rel = f.relative_to(_project_root()).as_posix()
+                items.append({
+                    "screen_id": screen_dir.name,
+                    "filename": f.name,
+                    "path": rel,
+                    "job_id": job_ids_by_path.get(rel),
+                    "mtime": mtime,
+                })
+    items.sort(key=lambda it: it["mtime"], reverse=True)
+    return {"items": items}
+
+
 def _gallery_hidden_file() -> Path:
     return _runtime() / "gallery-hidden.json"
 
@@ -1253,12 +1289,23 @@ def _gallery_job_ids_by_path() -> dict[str, str]:
 
 @router.get("/gallery/image")
 def gallery_image(path: str) -> FileResponse:
-    """Serve image files under characters/* OR studio/*. Rejects path traversal."""
+    """Serve image files under characters/*, studio/* or projects/*/screens/*. Rejects traversal."""
     root = _project_root()
     target = (root / path).resolve()
     characters_dir = (root / "characters").resolve()
     studio_dir = (root / "studio").resolve()
-    if not (target.is_relative_to(characters_dir) or target.is_relative_to(studio_dir)):
+    projects_root = data_root.projects_dir().resolve()
+    # projects 分支只放行 screens 子树（projects/ 下还有 style.md / design/ 等文档，不该经此外读）。
+    in_screens = (
+        target.is_relative_to(projects_root)
+        and len(target.relative_to(projects_root).parts) >= 3
+        and target.relative_to(projects_root).parts[1] == "screens"
+    )
+    if not (
+        target.is_relative_to(characters_dir)
+        or target.is_relative_to(studio_dir)
+        or in_screens
+    ):
         raise HTTPException(status_code=400, detail="path outside allowed roots")
     if not target.is_file():
         raise HTTPException(status_code=404)

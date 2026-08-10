@@ -183,6 +183,8 @@ def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
         f"- actual_size: {params.get('actual_size') or ''}",
         f"- model: {job.model}",
     ]
+    if job.screen_id:
+        lines.insert(3, f"- screen_id: {job.screen_id}")
     path.with_suffix(".md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
