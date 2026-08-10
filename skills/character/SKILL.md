@@ -1,6 +1,6 @@
 ---
 name: character
-version: 4.3.0
+version: 4.4.0
 description: |
   游戏角色立绘工作流：承接画师反馈，通过对话问清风格/配色/镜头/道具后出图，
   并支持对已出立绘改皮肤、换色、重画。
@@ -292,6 +292,20 @@ turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、
 - **画师确认** → 跑 `append-memory --kind <slot> --scope <见下> --line "<上面那条>"`，再跑 `mark-distilled <该图相对路径>`。
 - **画师说「不用沉这张」** → 只跑 `mark-distilled <该图相对路径>`（当忽略，不再提醒）。
 - **scope 决策**：经验含具体角色/风格/配色/类目 → `--scope project`；通用技巧/prompt 协议 → `--scope workspace`。两者都进 MEMORY.md、都 agent-only、都不上 Web。
+
+## Turn 收尾报告（七件套，与 /game-atelier:ui 总控对齐）
+
+本轮有实质产物（出图完成 / spec 落盘 / 定稿变更）时，在渲染图之后以固定七件套收尾；纯对话轮不用：
+
+```text
+当前步骤：
+完成状态：
+本步产物：
+需要你检查：
+可选操作：
+进入下一步的条件：
+下一步可直接说的话：
+```
 
 ## Guardrails
 
