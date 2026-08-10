@@ -135,6 +135,16 @@ def test_ui_page_reads_screen_map():
     assert "## screen.<id>" in text or "screen.<id>" in text
 
 
+def test_stale_propagation_discipline_in_skills():
+    """A3：改锚点 / style.md 前列受影响定稿并确认；style.md 回写后刷新指纹。"""
+    char = _read("skills/character/SKILL.md")
+    assert "stale-report" in char and "spec 已变更" in char
+    ui_page = _read("skills/ui-page/SKILL.md")
+    assert "stale-report" in ui_page and "刷新指纹" in ui_page
+    ui = _read("skills/ui/SKILL.md")
+    assert "stale-report" in ui and "风格已变更" in ui
+
+
 def test_seven_field_closing_block_in_all_workflow_skills():
     for path in (
         "skills/ui/SKILL.md",

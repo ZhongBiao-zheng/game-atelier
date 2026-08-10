@@ -95,10 +95,13 @@ def _normalize_rel_path(character_id: str, slot: AssetSlot, path: str) -> str:
 
 
 def set_canonical(character_id: str, slot: AssetSlot, path: str) -> CanonicalFile:
+    from character_workflow.lib.stale import style_fingerprint_for_character
+
     entry = CanonicalEntry(
         path=_normalize_rel_path(character_id, slot, path),
         set_at=datetime.now(timezone.utc).isoformat(),
         spec_fingerprint=spec_fingerprint(character_id),
+        style_fingerprint=style_fingerprint_for_character(character_id),
     )
     file = read_canonical(character_id)
     setattr(file, slot.value, entry)

@@ -139,6 +139,11 @@ uv run python -m character_workflow set-screen-canonical \
 
 未回写就宣称「风格已定」= 违规：契约不落文件，下一页照样漂。
 
+回写会改 style.md → 刚设的定稿指纹随即过时（A3）。回写完成后**重跑一次
+`set-screen-canonical`（同 path）刷新指纹**，别让这张「定义新风格的图」自己挂着
+「风格已变更」角标。反过来，之后再改 style.md 前，先跑 `stale-report` 向画师列出
+项目下会过时的定稿（角色 + screen），经确认再动。
+
 ## Turn 收尾报告（七件套）
 
 每轮有实质产物（brief 落盘 / job 提交 / 出图完成）时，以固定七件套收尾：

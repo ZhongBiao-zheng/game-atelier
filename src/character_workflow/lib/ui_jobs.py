@@ -110,12 +110,16 @@ def variant_of_path(rel_or_abs_path: str) -> str:
 def set_screen_canonical(
     project_id: str, screen_id: str, path: str, style_variant: str | None = None,
 ) -> ScreenCanonicalFile:
+    from character_workflow.lib.stale import style_fingerprint_for_slug
+
     rel = _normalize_screen_path(project_id, screen_id, path)
     entry = ScreenCanonicalEntry(
         path=rel,
         set_at=datetime.now(timezone.utc).isoformat(),
         # 省略时从 job 反查，画师不用重复报已经记在 job 里的风格标签。
         style_variant=style_variant if style_variant is not None else variant_of_path(rel),
+        # A3：盖当前 style.md 指纹；style.md 回写后重跑本命令即可刷新（自愈）。
+        style_fingerprint=style_fingerprint_for_slug(project_slug(project_id)),
     )
     file = read_screen_canonical(project_id)
     file.screens[screen_id] = entry
