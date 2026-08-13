@@ -14,6 +14,7 @@
  * （后端 openrouter_image 会把 params.resolution 当 API 参数发出去，控件藏了还写就是静默计费）。
  */
 import { imageFamily, type ImageFamily } from '@/lib/modelFamily';
+import { availableResolutions, type Resolution } from '@/lib/studioSize';
 
 export type Quality = 'low' | 'medium' | 'high' | 'auto';
 
@@ -23,6 +24,9 @@ export interface ImageControlCaps {
   ratios: string[];
   /** 是否显示 2K/4K 分辨率切换。 */
   showResolution: boolean;
+  /** 该模型真正可选的分辨率档位（按模型上限裁）；showResolution=false 时为空数组。
+   *  seedream-5.0-pro 只回 ['2K'] —— 4K 档任意一挡都超它 4624220 的上限，给了就是给一个必错的选项。 */
+  resolutions: Resolution[];
   /** 是否显示手动 W/H 自定义尺寸。 */
   showCustomSize: boolean;
   /** 质量选项；null 表示该族不暴露质量控件（也不该写进 job params）。 */
@@ -39,7 +43,8 @@ const STANDARD_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:
 // OpenRouter Image API 通用比例（各厂商 clamp 到自己的子集；此集是 4 个精选模型的交集）。
 const OPENROUTER_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
 
-const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family'>> = {
+// resolutions 不在这张表里：它按【模型】的像素上限裁，不是族属性（同族的 pro 与 lite 就不一样）。
+const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'resolutions'>> = {
   'nano-banana': {
     ratios: NANO_BANANA_RATIOS,
     showResolution: false,
@@ -83,12 +88,17 @@ export function imageControlCaps(
       family,
       ratios: OPENROUTER_RATIOS,
       showResolution: false,
+      resolutions: [],
       showCustomSize: false,
       qualities: base.qualities,
       sizeKind: 'ratio',
     };
   }
-  return { family, ...base };
+  return {
+    family,
+    ...base,
+    resolutions: base.showResolution ? availableResolutions(modelId) : [],
+  };
 }
 
 export const QUALITY_LABELS: Record<Quality, string> = {

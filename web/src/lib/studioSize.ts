@@ -7,7 +7,7 @@
  */
 import { imageFamily, normalizedModelId } from '@/lib/modelFamily';
 
-type Resolution = '2K' | '4K';
+export type Resolution = '2K' | '4K';
 
 // seedream 族像素下限（低于此值上游会拒或自动放大）。默认 3686400；
 // 分档 key 按归一 id（尾段 + lower + `_`/`.` 归一为 `-`）做子串匹配 ——
@@ -73,12 +73,36 @@ const SIZE_TABLE: Record<Resolution, Record<string, { w: number; h: number }>> =
   },
 };
 
+/** 等比缩放到恰好不超过 target 像素（向下取整：多一个像素就越界）。 */
+function fitToPixels(size: { w: number; h: number }, target: number): { w: number; h: number } {
+  const scale = Math.sqrt(target / Math.max(1, size.w * size.h));
+  return { w: Math.max(1, Math.floor(size.w * scale)), h: Math.max(1, Math.floor(size.h * scale)) };
+}
+
+/** 该模型可选的分辨率档位。
+ *
+ * 4K 表里**每一挡**都超过模型上限时只留 2K —— seedream-5.0-pro 的上限是 4624220，而 4K 档
+ * 最小的一挡 4096x2304 就有 9437184 像素，选了必被上游拒。与其让画师选一个必然报错的档位，
+ * 不如不给这个选项（2026-08-14 画师侧现象）。判据取自 familyMaxPixels，加新模型不用改这里。 */
+export function availableResolutions(modelId?: string | null): Resolution[] {
+  const max = familyMaxPixels(modelId);
+  if (max === null) return ['2K', '4K'];
+  const anyReachable = Object.values(SIZE_TABLE['4K']).some((s) => s.w * s.h <= max);
+  return anyReachable ? ['2K', '4K'] : ['2K'];
+}
+
 export function computeStudioPixelSize(
   ratio: string,
   resolution: Resolution,
   modelId?: string | null,
 ): { w: number; h: number } {
   if (imageFamily(modelId) === 'seedream') {
+    // 只剩 2K 一档的模型：把这一档撑满模型上限。标准 2K 表只用掉 pro 4194304/4624220 的额度，
+    // 照搬等于白丢约 10% 像素 —— 既然 4K 够不着，唯一的档位就该给到模型的天花板。
+    // （此处不管传进来的 resolution 是哪档：状态里可能还留着切模型前选的 4K。）
+    if (availableResolutions(modelId).length === 1) {
+      return fitToPixels(SIZE_TABLE['2K'][ratio] ?? SIZE_TABLE['2K']['1:1'], familyMaxPixels(modelId)!);
+    }
     return SIZE_TABLE[resolution][ratio] ?? SIZE_TABLE[resolution]['1:1'];
   }
   const base = resolution === '4K' ? 4096 : 2048;
