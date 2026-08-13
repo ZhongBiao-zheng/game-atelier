@@ -8,7 +8,6 @@ OpenAI-chat 式 content[] 数组带 role。提交 POST /contents/generations/tas
 from __future__ import annotations
 
 import base64
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -17,6 +16,7 @@ import requests
 
 from character_workflow.lib import keys as _keys
 from character_workflow.lib import oss_upload
+from character_workflow.lib.callers import video_poll
 
 DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_MODEL = "doubao-seedance-2-0-fast-260128"
@@ -152,6 +152,23 @@ def _build_content(prompt, images, videos, audios, frame_mode) -> list[dict[str,
     return content
 
 
+_PAYLOAD_URL_KEYS = ("image_url", "video_url", "audio_url")
+
+
+def _sent_urls(content: list[dict[str, Any]]) -> set[str]:
+    """本次请求实际发出去的公网 URL —— 收结果时要把它们从候选里剔掉。
+
+    data: 内联的参考图不用管（不是 http，回显也不会被当成下载地址）；有杀伤力的是
+    参考视频和 OSS 预签名直链：它们本身就是合法 .mp4。
+    """
+    return video_poll.sent_url_set([
+        part[k]["url"]
+        for part in content
+        for k in _PAYLOAD_URL_KEYS
+        if isinstance(part.get(k), dict) and isinstance(part[k].get("url"), str)
+    ])
+
+
 def _collect_video_urls(value, out: list[str] | None = None) -> list[str]:
     if out is None:
         out = []
@@ -185,15 +202,27 @@ def _dedupe(urls: list[str]) -> list[str]:
 
 
 # 上游成功响应常回显输入参考图（i2v 场景的 image_url）；输出恒为视频，
-# 取下载地址前先滤掉图片扩展名，避免把回显的输入图当成输出视频下载。
+# 扩展名过滤只是第二道网——真正拦得住的是 sent 排除集，见下。
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".heic", ".heif", ".avif")
 
 
-def _pick_video_url(urls: list[str]) -> str | None:
-    """从候选 url 里挑出视频地址：先排除图片扩展名；若全是图片则退回原列表首个。"""
-    non_image = [u for u in urls if not u.split("?", 1)[0].split("#", 1)[0].lower().endswith(_IMAGE_EXTS)]
-    candidates = non_image or urls
-    return candidates[0] if candidates else None
+def _pick_video_url(urls: list[str], sent: set[str] | None = None) -> str | None:
+    """从候选 url 里挑出真·输出视频地址。
+
+    _CONTAINER_KEYS 里的 "content" 正是请求体里那个数组的键名，所以下钻时回显的输入
+    会排在真输出前面被先抓到。光靠扩展名过滤挡不住视频参考场景：参考视频按契约必须是
+    公网直链（见 _video_payload_url），剥掉 query 后就是 .mp4，过得了图片过滤——
+    结果是 job 标 DONE、产物是用户自己的输入原片、全程零报错。所以先按「本次发出去的
+    URL」硬排除，再走扩展名过滤兜底。
+
+    排干净后没有候选就返回 None：让调用方按「成功但没拿到产物」报错，
+    绝不退回原列表首个（那正好是回显的输入）。
+    """
+    fresh = [u for u in urls if not video_poll.is_echoed_input(u, sent)]
+    return next(
+        (u for u in fresh if not video_poll.strip_query(u).lower().endswith(_IMAGE_EXTS)),
+        None,
+    )
 
 
 def _extract_status(raw: dict[str, Any]) -> str:
@@ -218,37 +247,54 @@ def _fail_reason(payload: dict[str, Any]) -> str:
     return str(data.get("message") or _err(payload, 0) or "火山视频任务失败")
 
 
-def _download_mp4(url: str, output_dir: Path, index: int) -> str:
+def _download_mp4(url: str, output_dir: Path, index: int, *, task_ref: str = "") -> str:
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
         resp = requests.get(url, timeout=600)
         resp.raise_for_status()
     except requests.RequestException as e:
-        raise VolcengineVideoError(f"下载上游视频失败: {e}") from e
+        # 走到这里任务已经跑完并计费了，只是产物没拉下来：带上 task_id 和源地址，
+        # 让人工能去控制台把片子取回来，而不是重新出一遍。
+        raise VolcengineVideoError(
+            video_poll.with_task_ref(f"下载上游视频失败（源地址 {url}）: {e}", task_ref)
+        ) from e
     path = output_dir / f"v{index}.mp4"
     path.write_bytes(resp.content)
     return str(path)
 
 
-def _poll_video_task(*, tasks_url, headers, task_id, max_polls, poll_interval) -> str:
-    """轮询到任务完成，返回选中的视频下载地址（不负责落盘）。"""
+def _poll_video_task(*, tasks_url, headers, task_id, max_polls, poll_interval, sent_urls) -> str:
+    """轮询到任务完成，返回选中的视频下载地址（不负责落盘）。
+
+    网络抖动 / 5xx 由 video_poll 吞掉重试（不扣 max_polls），这里只解读上游给出的
+    终态；一切在此处失败的路径都已经有一个在跑的计费任务，报错必须带 task_id。
+    """
     url = f"{tasks_url}/{task_id}"
-    for _ in range(max_polls):
-        if poll_interval:
-            time.sleep(poll_interval)
-        resp = requests.get(url, headers=headers, timeout=180)
+    for resp in video_poll.poll_responses(
+        url=url, headers=headers, timeout=180, max_polls=max_polls,
+        poll_interval=poll_interval, task_ref=task_id, error_cls=VolcengineVideoError,
+    ):
         payload = _json(resp)
         if not resp.ok:
-            raise VolcengineVideoError(_err(payload, resp.status_code))
+            raise VolcengineVideoError(
+                video_poll.with_task_ref(_err(payload, resp.status_code), task_id)
+            )
         status = _extract_status(payload)
-        urls = _dedupe(_collect_video_urls(payload))
-        if status in _SUCCESS or (not status and urls):
-            picked = _pick_video_url(urls)
+        picked = _pick_video_url(_dedupe(_collect_video_urls(payload)), sent_urls)
+        if status in _SUCCESS:
             if picked:
                 return picked
-            raise VolcengineVideoError("视频任务成功但未返回视频地址")
+            raise VolcengineVideoError(
+                video_poll.with_task_ref("视频任务成功但未返回视频地址", task_id)
+            )
+        # 无 status 的响应只有在挑出「真输出」时才算完成：只回显了输入 URL 说明还没出片，
+        # 继续等，不能拿输入原片交差。
+        if not status and picked:
+            return picked
         if status in _FAILURE:
-            raise VolcengineVideoError(_fail_reason(payload))
+            raise VolcengineVideoError(
+                video_poll.with_task_ref(_fail_reason(payload), task_id)
+            )
     raise VolcengineVideoError(f"视频任务轮询超时: {task_id}")
 
 
@@ -296,18 +342,24 @@ def render_video(
 
     out_dir = Path(output_dir)
     n = max(1, min(4, int(params.get("n") or 1)))
+    sent_urls = _sent_urls(content)
     # 先把 n 条任务全部提交（上游并行跑），再逐个轮询取结果。
-    ready_urls: list[str] = []
+    # ready: (下载地址, task_id)——task_id 只为报错留痕，内联直出的那条没有。
+    ready: list[tuple[str, str]] = []
     pending_ids: list[str] = []
     for _ in range(n):
         resp = requests.post(tasks_url, headers=headers, json=body, timeout=600)
         payload = _json(resp)
         if not resp.ok:
             raise VolcengineVideoError(_err(payload, resp.status_code))
-        urls = _dedupe(_collect_video_urls(payload))
-        picked = _pick_video_url(urls)
-        if picked:
-            ready_urls.append(picked)
+        status = _extract_status(payload)
+        if status in _FAILURE:
+            raise VolcengineVideoError(_fail_reason(payload))
+        # 提交响应里的 URL 更不能盲信：这里连 status 门都没有，回显的输入原片会被
+        # 当成「同步直出」直接下载。只有在没被判失败、且挑出的不是回显输入时才认。
+        picked = _pick_video_url(_dedupe(_collect_video_urls(payload)), sent_urls)
+        if picked and (not status or status in _SUCCESS):
+            ready.append((picked, ""))
             continue
         task_id = _extract_task_id(payload)
         if not task_id:
@@ -316,10 +368,13 @@ def render_video(
     if on_phase:
         on_phase("sent")
     for task_id in pending_ids:
-        ready_urls.append(_poll_video_task(
+        ready.append((_poll_video_task(
             tasks_url=tasks_url, headers=headers, task_id=task_id,
-            max_polls=max_polls, poll_interval=poll_interval,
-        ))
+            max_polls=max_polls, poll_interval=poll_interval, sent_urls=sent_urls,
+        ), task_id))
     if on_phase:
         on_phase("downloading")
-    return [_download_mp4(url, out_dir, i + 1) for i, url in enumerate(ready_urls)]
+    return [
+        _download_mp4(url, out_dir, i + 1, task_ref=task_id)
+        for i, (url, task_id) in enumerate(ready)
+    ]

@@ -12,7 +12,6 @@ unsigned_urls[0]（即 {base}/videos/{id}/content）带鉴权拉字节落 .mp4�
 from __future__ import annotations
 
 import base64
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -20,6 +19,7 @@ from typing import Any
 import requests
 
 from character_workflow.lib import keys as _keys
+from character_workflow.lib.callers import video_poll
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -99,33 +99,56 @@ def _build_body(prompt: str, model: str, params: dict[str, Any]) -> dict[str, An
     return body
 
 
-def _poll_job(*, polling_url: str, headers: dict, max_polls: int, poll_interval: float) -> str:
-    for _ in range(max_polls):
-        if poll_interval:
-            time.sleep(poll_interval)
-        resp = requests.get(polling_url, headers=headers, timeout=180)
+def _poll_job(
+    *, polling_url: str, headers: dict, max_polls: int, poll_interval: float,
+    task_ref: str = "",
+) -> str:
+    """轮询到终态返回下载地址。
+
+    网络抖动 / 5xx 交给 video_poll 吞掉重试（不扣 max_polls）；终态只认 body 里的 status。
+    此处失败一律带 job id —— OpenRouter 的产物挂在 {base}/videos/{id}/content，
+    有 id 就还能手动取回。
+    """
+    ref = task_ref or polling_url
+    for resp in video_poll.poll_responses(
+        url=polling_url, headers=headers, timeout=180, max_polls=max_polls,
+        poll_interval=poll_interval, task_ref=ref, error_cls=OpenRouterVideoError,
+    ):
         payload = _json(resp)
         if not resp.ok:
-            raise OpenRouterVideoError(_err(payload, resp.status_code))
+            raise OpenRouterVideoError(
+                video_poll.with_task_ref(_err(payload, resp.status_code), ref)
+            )
         status = str(payload.get("status") or "").lower()
         if status == "completed":
+            # unsigned_urls 是上游明确的产物位置，不刮整个 payload：输入参考图走
+            # input_references / frame_images，回显进不了这里。
             urls = payload.get("unsigned_urls")
             if isinstance(urls, list) and urls and isinstance(urls[0], str):
                 return urls[0]
-            raise OpenRouterVideoError("视频任务成功但未返回下载地址")
+            raise OpenRouterVideoError(
+                video_poll.with_task_ref("视频任务成功但未返回下载地址", ref)
+            )
         if status in _TERMINAL_FAILURE:
-            raise OpenRouterVideoError(_err(payload, resp.status_code))
-    raise OpenRouterVideoError(f"视频任务轮询超时: {polling_url}")
+            raise OpenRouterVideoError(
+                video_poll.with_task_ref(_err(payload, resp.status_code), ref)
+            )
+    raise OpenRouterVideoError(f"视频任务轮询超时: {ref}")
 
 
-def _download_mp4(url: str, headers: dict, output_dir: Path, index: int) -> str:
+def _download_mp4(
+    url: str, headers: dict, output_dir: Path, index: int, *, task_ref: str = ""
+) -> str:
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
         # unsigned_urls 指向 {base}/videos/{id}/content，仍需 Bearer 鉴权。
         resp = requests.get(url, headers=headers, timeout=600)
         resp.raise_for_status()
     except requests.RequestException as e:
-        raise OpenRouterVideoError(f"下载上游视频失败: {e}") from e
+        # 任务已跑完并计费，只是产物没拉下来 —— 带上 job id 和源地址供人工找回。
+        raise OpenRouterVideoError(
+            video_poll.with_task_ref(f"下载上游视频失败（源地址 {url}）: {e}", task_ref)
+        ) from e
     path = output_dir / f"v{index}.mp4"
     path.write_bytes(resp.content)
     return str(path)
@@ -158,28 +181,32 @@ def render_video(
     body = _build_body(prompt, model, params)
 
     n = max(1, min(4, int(params.get("n") or 1)))
-    polling_urls: list[str] = []
+    # (polling_url, job id)——id 是报错时唯一能拿去找回产物的标识，单独留着。
+    jobs: list[tuple[str, str]] = []
     for _ in range(n):
         resp = requests.post(f"{base}/videos", headers=headers, json=body, timeout=600)
         payload = _json(resp)
         if not resp.ok:
             raise OpenRouterVideoError(_err(payload, resp.status_code))
-        polling_url = payload.get("polling_url") or (
-            f"{base}/videos/{payload['id']}" if payload.get("id") else None
-        )
+        job_id = str(payload.get("id") or "")
+        polling_url = payload.get("polling_url") or (f"{base}/videos/{job_id}" if job_id else None)
         if not polling_url:
             raise OpenRouterVideoError(f"OpenRouter 提交后未返回 job id: {payload!r}")
-        polling_urls.append(str(polling_url))
+        jobs.append((str(polling_url), job_id))
     if on_phase:
         on_phase("sent")
 
     out_dir = Path(output_dir)
     ready_urls = [
         _poll_job(
-            polling_url=u, headers=headers, max_polls=max_polls, poll_interval=poll_interval
+            polling_url=u, headers=headers, max_polls=max_polls,
+            poll_interval=poll_interval, task_ref=job_id,
         )
-        for u in polling_urls
+        for u, job_id in jobs
     ]
     if on_phase:
         on_phase("downloading")
-    return [_download_mp4(url, headers, out_dir, i + 1) for i, url in enumerate(ready_urls)]
+    return [
+        _download_mp4(url, headers, out_dir, i + 1, task_ref=jobs[i][1])
+        for i, url in enumerate(ready_urls)
+    ]

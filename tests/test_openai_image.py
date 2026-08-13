@@ -92,32 +92,19 @@ def test_render_openai_provider_posts_to_image_endpoint_and_writes_data_url(
     image_bytes = b"\x89PNG\r\n\x1a\nfake"
     captured: dict[str, object] = {}
 
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return None
-
-        def read(self) -> bytes:
-            return json.dumps({
-                "data": [{
-                    "b64_json": "data:image/png;base64,"
-                    + base64.b64encode(image_bytes).decode("ascii"),
-                }],
-            }).encode("utf-8")
-
-    calls = {"n": 0}
-
-    def fake_urlopen(request, timeout):
+    def fake_post(url, headers, json, timeout):
         # setdefault 只留首次：单次只回 1 张时补足循环会再发 n=1 的请求（预期行为）。
-        calls["n"] += 1
-        captured.setdefault("url", request.full_url)
+        captured.setdefault("url", url)
         captured.setdefault("timeout", timeout)
-        captured.setdefault("payload", json.loads(request.data.decode("utf-8")))
-        return FakeResponse()
+        captured.setdefault("payload", json)
+        return FakePostResponse({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(image_bytes).decode("ascii"),
+            }],
+        })
 
-    monkeypatch.setattr(openai_image.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
 
     paths = openai_image.render(
         prompt="fox",
@@ -136,7 +123,8 @@ def test_render_openai_provider_posts_to_image_endpoint_and_writes_data_url(
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
-def test_post_json_retries_requests_connection_drop_then_succeeds(monkeypatch):
+def test_post_json_retries_only_pre_flight_failures(monkeypatch):
+    """连接**建立阶段**的失败没送达上游，重试安全。"""
     image_bytes = b"\x89PNG\r\n\x1a\nretry"
     calls = {"n": 0}
 
@@ -155,7 +143,7 @@ def test_post_json_retries_requests_connection_drop_then_succeeds(monkeypatch):
     def fake_post(*args, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
-            raise requests.ConnectionError("Remote end closed connection without response")
+            raise requests.ConnectionError("Failed to establish a new connection: refused")
         return FakeResponse()
 
     monkeypatch.setattr(openai_image.requests, "post", fake_post)
@@ -170,6 +158,56 @@ def test_post_json_retries_requests_connection_drop_then_succeeds(monkeypatch):
 
     assert calls["n"] == 2
     assert data["data"][0]["b64_json"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.parametrize("error", [
+    requests.ReadTimeout("Read timed out"),
+    requests.ConnectionError(
+        "('Connection aborted.', RemoteDisconnected('Remote end closed connection'))"
+    ),
+    requests.ConnectionError("Connection reset by peer"),
+])
+def test_post_json_never_retries_after_request_reached_upstream(error, monkeypatch):
+    """请求已送达 = 上游可能正在出图：重试就是再买一次。
+
+    同步出图端点在图出完前一个字节都不吐，所以读超时几乎必然是「还在跑」而不是「没跑」。
+    实测记录：读超时 180s 时 HK 复杂生成假超时 → 重试 → 墙钟翻倍 + 厂商双计费。
+    """
+    calls = {"n": 0}
+
+    def fake_post(*args, **kwargs):
+        calls["n"] += 1
+        raise error
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    monkeypatch.setattr(openai_image.time, "sleep", lambda _s: None)
+
+    with pytest.raises(openai_image.OpenAIImageError):
+        openai_image._post_json("https://x/v1/images/generations", "ak", {}, timeout=10)
+    assert calls["n"] == 1
+
+
+def test_post_json_does_not_retry_non_json_200(monkeypatch):
+    """200 但响应体不是 JSON：这次调用已经在上游执行过，重试只会重复计费。"""
+    calls = {"n": 0}
+
+    class BadBody:
+        status_code = 200
+        text = "<html>gateway</html>"
+
+        def json(self):
+            raise ValueError("Expecting value: line 1 column 1")
+
+    def fake_post(*args, **kwargs):
+        calls["n"] += 1
+        return BadBody()
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    monkeypatch.setattr(openai_image.time, "sleep", lambda _s: None)
+
+    with pytest.raises(openai_image.OpenAIImageError):
+        openai_image._post_json("https://x/v1/images/generations", "ak", {}, timeout=10)
+    assert calls["n"] == 1
 
 
 class _StatusResponse:

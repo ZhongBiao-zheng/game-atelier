@@ -214,7 +214,7 @@ def _mock_happyhorse_upstream(monkeypatch, posted: dict):
     monkeypatch.setattr(hh.requests, "get", lambda *a, **k: _FakeResp(
         {"output": {"task_status": "SUCCEEDED", "video_url": "https://cdn.x/v.mp4"}}
     ))
-    monkeypatch.setattr(hh, "_download_mp4", lambda url, d, i: str(d / f"v{i}.mp4"))
+    monkeypatch.setattr(hh, "_download_mp4", lambda url, d, i, **kw: str(d / f"v{i}.mp4"))
     return hh
 
 

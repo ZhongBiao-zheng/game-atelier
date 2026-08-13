@@ -4,12 +4,9 @@ from __future__ import annotations
 import base64
 from collections.abc import Mapping
 from http.client import IncompleteRead
-import json
 import math
 import re
 import subprocess
-import urllib.error
-import urllib.request
 import time
 from pathlib import Path
 from typing import Any
@@ -487,7 +484,6 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    last_error: BaseException | None = None
     for attempt in range(3):
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
@@ -495,34 +491,46 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[
                 err = OpenAIImageError(f"image api {resp.status_code}: {resp.text[:500]}")
                 # 瞬时网关错误复用网络异常那套退避重试（continue 进下一轮）；其余当场抛。
                 if _is_retryable(resp.status_code, resp.text) and attempt < 2:
-                    last_error = err
                     time.sleep(1 + attempt)
                     continue
                 raise err
             return resp.json()
         except OpenAIImageError:
             raise
-        except (requests.RequestException, ValueError) as e:
-            last_error = e
-            if attempt < 2:
-                time.sleep(1 + attempt)
+        except ValueError as e:
+            # 拿到了 200 但响应体不是 JSON：这次调用**已经在上游执行过**（多半也计过费），
+            # 重试只会再跑一次完整生成。当场致命，把原文交给上层翻译。
+            raise OpenAIImageError(f"image api 响应非 JSON: {e}") from e
+        except requests.RequestException as e:
+            if not _is_pre_flight_failure(e) or attempt >= 2:
+                raise OpenAIImageError(str(e)) from e
+            time.sleep(1 + attempt)
+    # 循环只经 return / raise 退出（末轮走上面的 raise）；防御性兜底。
+    raise OpenAIImageError("image api: retries exhausted")
 
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
-    # urllib 只接受单个 float 超时；timeout 是 (连接, 读取) 元组时取读取分量。
-    _urllib_timeout = timeout[1] if isinstance(timeout, (tuple, list)) else timeout
-    try:
-        with urllib.request.urlopen(req, timeout=_urllib_timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        raise OpenAIImageError(f"image api {e.code}: {body[:500]}") from e
-    except Exception as e:
-        raise OpenAIImageError(str(e)) from (last_error or e)
+
+def _is_pre_flight_failure(error: BaseException) -> bool:
+    """请求是否**没能送达上游** —— 只有这类失败重试才不会重复计费。
+
+    同步出图端点在图出完之前一个字节都不吐，所以「读超时」几乎必然意味着上游正在真跑：
+    重试等于再买一次。实测记录（memory: image-upload-timeout-and-gateway-drop）：读超时
+    180s 时 HK 复杂生成假超时 → 重试 → 墙钟 180s 翻到 350s + 厂商双计费。同理，连接建立
+    之后被掐（RemoteDisconnected / reset）也说明请求已经发出去了。
+
+    只有连接**建立阶段**的失败（连接超时、DNS、拒绝连接）能安全重试。
+    """
+    if isinstance(error, requests.ConnectTimeout):  # 必须排在 ConnectionError 之前
+        return True
+    if isinstance(error, requests.ReadTimeout):
+        return False
+    if isinstance(error, requests.ConnectionError):
+        # ConnectionError 同时涵盖「连不上」与「连上后被掐」，只能按报文区分。
+        dropped = (
+            "remote end closed", "remotedisconnected", "connection reset",
+            "reset by peer", "connection aborted", "broken pipe",
+        )
+        return not any(marker in str(error).lower() for marker in dropped)
+    return False
 
 
 def _write_outputs(payload: dict, output_dir: Path, *, start_index: int = 1) -> list[str]:
