@@ -937,6 +937,14 @@ def _guess_model_modality(item: dict) -> str | None:
     return None
 
 
+def _url_host(url: str) -> str:
+    """取 URL 的 host（含端口）用于同源比对；解析不出就返回原串以免两个空值相等。"""
+    from urllib.parse import urlsplit
+
+    netloc = urlsplit((url or "").strip()).netloc.lower()
+    return netloc or (url or "").strip().lower()
+
+
 def _image_protocol(item: dict) -> str | None:
     """图片模型的调用协议 —— 直接取上游协议标注，别猜。
 
@@ -972,8 +980,20 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         stored = keys.find_by_alias(payload.alias)
         if stored is None:
             raise HTTPException(404, f"alias '{payload.alias}' not found")
-        base_url = base_url or (stored.base_url or "")
-        access_key = access_key or stored.access_key
+        if access_key:
+            # 调用方自带密钥（新建 / 编辑时改过密钥）→ 地址随它，泄露面止于它自己的密钥。
+            base_url = base_url or (stored.base_url or "")
+        else:
+            # 要用存储的**明文**密钥，就只能打存储的那个 host：否则等于让调用方指定「把密钥
+            # 发到哪」。viewer-server 没有 TrustedHost / CSRF 防线，DNS rebinding 下本机页面
+            # 就能触发。换 host 属于换供应商，本来就该重新填密钥。同 host 换路径照常放行。
+            stored_base = stored.base_url or ""
+            if base_url and _url_host(base_url) != _url_host(stored_base):
+                raise HTTPException(
+                    400, "服务地址换了域名，请先填写该地址对应的密钥再拉取模型列表"
+                )
+            base_url = base_url or stored_base
+            access_key = stored.access_key
         preview_provider = stored.provider or payload.provider or "custom"
     if not base_url:
         raise HTTPException(422, "缺少 API 请求地址（base_url）")

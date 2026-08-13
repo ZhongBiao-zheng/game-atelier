@@ -492,12 +492,13 @@ export function PromptInput({
   const providerDisplayName = providerName(provider);
   const models = (provider?.models ?? []).filter((m) => modelModality(m, provider) === wantedModality);
   const selectedModel = models.find((item) => item.id === model) ?? models[0];
-  const initSize = computeStudioPixelSize(ratio, resolution, provider?.provider);
+  const initSize = computeStudioPixelSize(ratio, resolution, selectedModel?.id);
   const [localW, setLocalW] = useState(initSize.w);
   const [localH, setLocalH] = useState(initSize.h);
   const [sizeLocked, setSizeLocked] = useState(true);
-  const caps = imageControlCaps(selectedModel?.id);
-  const maxRef = maxReferenceImages(provider?.provider, selectedModel?.id);
+  // 能力四项按模型族判（provider 只决定端点/协议，openrouter 另外改 size 语义）。
+  const caps = imageControlCaps(selectedModel?.id, provider?.provider);
+  const maxRef = maxReferenceImages(selectedModel?.id);
   // omni 参考上限：按族覆盖（happyhorse video-edit = 5 图 + 1 视频），缺省 9/3/3。
   const maxRefImgs = videoCaps?.maxRefImages ?? MAX_REF_IMAGES;
   const maxRefVids = videoCaps?.maxRefVideos ?? MAX_REF_VIDEOS;
@@ -536,12 +537,23 @@ export function PromptInput({
     `linear-gradient(to right, black calc(100% - ${scrollBlockWidth}px), transparent calc(100% - ${scrollReserve}px))`;
 
   useEffect(() => {
-    const { w, h } = computeStudioPixelSize(ratio, resolution, provider?.provider);
-    const normalized = normalizeStudioPixelSizeForModel({ w, h }, provider?.provider, selectedModel?.id);
+    const { w, h } = computeStudioPixelSize(ratio, resolution, selectedModel?.id);
+    const normalized = normalizeStudioPixelSizeForModel({ w, h }, selectedModel?.id);
     setLocalW(normalized.w);
     setLocalH(normalized.h);
     onCustomSizeChange?.(normalized.w, normalized.h);
-  }, [ratio, resolution, provider?.provider, onCustomSizeChange]);
+  }, [ratio, resolution, selectedModel?.id, onCustomSizeChange]);
+
+  // 参考图数量不变式：永远 ≤ 当前模型族上限。切换模型（16 张的 gpt-image → 3 张的 nano-banana）
+  // 或整组复用历史参考图都可能撑爆上限 —— 旧行为是界面上 chip 全在、后端只发前 N 张（静默丢弃）。
+  // 这里当场裁掉并提示裁了几张，用户看到的堆叠就是真正会发出去的那几张。
+  const refImagesLimit = isVideo ? (isOmni ? maxRefImgs : null) : maxRef;
+  useEffect(() => {
+    if (refImagesLimit === null || referenceImages.length <= refImagesLimit) return;
+    const dropped = referenceImages.length - refImagesLimit;
+    onReferenceImagesChange?.(referenceImages.slice(0, refImagesLimit));
+    showRefHint(`参考图最多 ${refImagesLimit} 张，已移除超出的 ${dropped} 张`);
+  }, [refImagesLimit, referenceImages, onReferenceImagesChange, showRefHint]);
 
   // Runs after the ratio/resolution effect so it wins — used by reEdit to restore custom sizes.
   useEffect(() => {
@@ -661,8 +673,8 @@ export function PromptInput({
 
   function handleRatioSelect(newRatio: string) {
     onRatioChange?.(newRatio);
-    const { w, h } = computeStudioPixelSize(newRatio, resolution, provider?.provider);
-    const normalized = normalizeStudioPixelSizeForModel({ w, h }, provider?.provider, selectedModel?.id);
+    const { w, h } = computeStudioPixelSize(newRatio, resolution, selectedModel?.id);
+    const normalized = normalizeStudioPixelSizeForModel({ w, h }, selectedModel?.id);
     setLocalW(normalized.w);
     setLocalH(normalized.h);
     onCustomSizeChange?.(normalized.w, normalized.h);
@@ -670,8 +682,8 @@ export function PromptInput({
 
   function handleResolutionSelect(newResolution: '2K' | '4K') {
     onResolutionChange?.(newResolution);
-    const { w, h } = computeStudioPixelSize(ratio, newResolution, provider?.provider);
-    const normalized = normalizeStudioPixelSizeForModel({ w, h }, provider?.provider, selectedModel?.id);
+    const { w, h } = computeStudioPixelSize(ratio, newResolution, selectedModel?.id);
+    const normalized = normalizeStudioPixelSizeForModel({ w, h }, selectedModel?.id);
     setLocalW(normalized.w);
     setLocalH(normalized.h);
     onCustomSizeChange?.(normalized.w, normalized.h);
@@ -683,12 +695,12 @@ export function PromptInput({
     if (sizeLocked) {
       const [a, b] = ratio.split(':').map(Number);
       const newH = a > 0 ? Math.max(minPx, Math.round((newW * b) / a)) : localH;
-      const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: newH }, provider?.provider, selectedModel?.id);
+      const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: newH }, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
       onCustomSizeChange?.(normalized.w, normalized.h);
     } else {
-      const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: localH }, provider?.provider, selectedModel?.id);
+      const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: localH }, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
       onCustomSizeChange?.(normalized.w, normalized.h);
@@ -701,12 +713,12 @@ export function PromptInput({
     if (sizeLocked) {
       const [a, b] = ratio.split(':').map(Number);
       const newW = b > 0 ? Math.max(minPx, Math.round((newH * a) / b)) : localW;
-      const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: newH }, provider?.provider, selectedModel?.id);
+      const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: newH }, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
       onCustomSizeChange?.(normalized.w, normalized.h);
     } else {
-      const normalized = normalizeStudioPixelSizeForModel({ w: localW, h: newH }, provider?.provider, selectedModel?.id);
+      const normalized = normalizeStudioPixelSizeForModel({ w: localW, h: newH }, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
       onCustomSizeChange?.(normalized.w, normalized.h);
@@ -717,8 +729,8 @@ export function PromptInput({
     const next = !sizeLocked;
     setSizeLocked(next);
     if (next) {
-      const { w, h } = computeStudioPixelSize(ratio, resolution, provider?.provider);
-      const normalized = normalizeStudioPixelSizeForModel({ w, h }, provider?.provider, selectedModel?.id);
+      const { w, h } = computeStudioPixelSize(ratio, resolution, selectedModel?.id);
+      const normalized = normalizeStudioPixelSizeForModel({ w, h }, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
       onCustomSizeChange?.(normalized.w, normalized.h);
@@ -1139,7 +1151,9 @@ export function PromptInput({
                       aria-label="选择比例"
                       className="grid rounded-lg bg-popover p-1"
                     >
-                      {caps.family !== 'standard' ? (
+                      {/* 强调 1:1 的双栏布局属于「比例 + 2K/4K 分辨率」的像素族（seedream / standard）；
+                          只发比例串的族（nano-banana / gpt-image / 走 OpenRouter 的一切）用紧凑四列网格。 */}
+                      {!caps.showResolution ? (
                         <div className="grid grid-cols-4 gap-y-1">
                           {caps.ratios.map((item) => (
                             <button

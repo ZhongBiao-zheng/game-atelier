@@ -301,6 +301,53 @@ describe('Studio', () => {
     });
   });
 
+  // 隐藏的控件不能写进 params：后端 openrouter_image 会把 params.resolution 原样当 API 参数发出去，
+  // 在别的 key 上选过 4K 就会被带过来按 4K 计费。同理 quality —— 只有真有该档位的族才发。
+  it('openrouter 图片只发比例 size，不带 resolution / quality', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'or',
+            keys: [
+              {
+                alias: 'or',
+                provider: 'openrouter',
+                access_key: 'sk-or...key',
+                secret_key: null,
+                capabilities: ['portrait'],
+                models: [{ name: 'Gemini 3 Pro Image', id: 'google/gemini-3-pro-image' }],
+                notes: '',
+                created_at: '2026-05-25T00:00:00Z',
+                is_default: true,
+              },
+            ],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ job_id: 'j-or', status: 'pending', submitted_at: '2026-05-25T00:00:00Z' }),
+      } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+    typePrompt(await screen.findByLabelText('生图 prompt'), '一张风景');
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body.params.size).toBe('1:1'); // OpenRouter 收 aspect_ratio 比例串，不是像素
+    expect(body.params).not.toHaveProperty('resolution');
+    expect(body.params).not.toHaveProperty('quality');
+  });
+
   it('renders image count control beside size and submits the selected count', async () => {
     renderStudio();
 

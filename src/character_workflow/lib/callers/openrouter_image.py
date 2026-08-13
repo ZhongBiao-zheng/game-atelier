@@ -89,7 +89,7 @@ def _image_payload(*, prompt: str, model: str, n: int, kwargs: dict) -> dict:
     if _is_gpt_image(model) and quality in ("low", "medium", "high", "auto"):
         payload["quality"] = quality
 
-    refs = _reference_urls(kwargs, params)
+    refs = _reference_urls(kwargs, params, model)
     if refs:
         payload["input_references"] = [
             {"type": "image_url", "image_url": {"url": u}} for u in refs
@@ -102,7 +102,14 @@ def _is_gpt_image(model: str) -> bool:
     return (model or "").lower().rsplit("/", 1)[-1].startswith("gpt-image")
 
 
-def _reference_urls(kwargs: dict, params: dict) -> list[str]:
+def _reference_urls(kwargs: dict, params: dict, model: str = "") -> list[str]:
+    """参考图 → payload URL 列表，按模型族上限截断。
+
+    此前这里完全不截断、全量 base64 内联，而 openai_image 那条路会截 —— 同一个模型走
+    OpenRouter 和走直连能发的张数不一样。上限与 openai_image 共用同一张族表。
+    """
+    from .openai_image import _max_reference_images, _warn
+
     paths: list[str] = []
     source_image = kwargs.get("source_image") or params.get("source_image")
     if source_image:
@@ -110,7 +117,10 @@ def _reference_urls(kwargs: dict, params: dict) -> list[str]:
     for ref in (kwargs.get("reference_images") or params.get("reference_images") or []):
         if str(ref) not in paths:
             paths.append(str(ref))
-    return [_as_payload_url(p) for p in paths]
+    limit = _max_reference_images("openrouter", model)
+    if len(paths) > limit:
+        _warn(kwargs, f"参考图超过该模型上限，只发送了前 {limit} 张（共 {len(paths)} 张）")
+    return [_as_payload_url(p) for p in paths[:limit]]
 
 
 def _as_payload_url(path_or_url: str) -> str:

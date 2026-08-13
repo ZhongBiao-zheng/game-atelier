@@ -283,6 +283,24 @@ describe('PromptInput 参考素材超限提示', () => {
     cleanup();
   });
 
+  // 上限按模型族走：换模型（gpt-image 16 → nano-banana 3）后已在堆叠里的参考图必须当场裁掉，
+  // 否则界面上 chip 全在、后端只发前 3 张（静默丢弃）。
+  it('切换到上限更低的模型时裁掉超出的参考图并提示', () => {
+    const onChange = vi.fn();
+    const files = [1, 2, 3, 4, 5].map((i) => new File(['x'], `r${i}.png`, { type: 'image/png' }));
+    const { rerender } = render(
+      <PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="gpt-image-2"
+        referenceImages={files} onReferenceImagesChange={onChange} />,
+    );
+    expect(onChange).not.toHaveBeenCalled(); // gpt-image 上限 16，5 张不动
+    rerender(
+      <PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="nano-banana"
+        referenceImages={files} onReferenceImagesChange={onChange} />,
+    );
+    expect(onChange).toHaveBeenCalledWith(files.slice(0, 3));
+    expect(screen.getByRole('status')).toHaveTextContent('参考图最多 3 张，已移除超出的 2 张');
+    cleanup();
+  });
 });
 
 describe('PromptInput 消耗提示（仅 OpenAI-HK 聚合商，人民币无单位无汉字）', () => {

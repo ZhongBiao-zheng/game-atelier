@@ -42,6 +42,33 @@ class OpenAIImageError(RuntimeError):
     pass
 
 
+def _warn(kwargs: dict, message: str) -> None:
+    """把「后端改写了什么」写回 job.params.warnings —— 这些改写此前一律是静默的。
+
+    params dict 由 job_runner 传入、并在 dispatch 返回后整体落盘（run_job → _save_params），
+    所以就地 append 即可。Skill 直调 render（没有 params）时静默跳过。
+    """
+    params = kwargs.get("params")
+    if not isinstance(params, dict):
+        return
+    warnings = params.get("warnings")
+    if not isinstance(warnings, list):
+        warnings = []
+        params["warnings"] = warnings
+    if message not in warnings:  # 补足循环会重复调用，去重
+        warnings.append(message)
+
+
+# 不支持 Ark 组图参数的模型：实测 seedream-5.0-pro 收到 sequential_image_generation 直接 400。
+# 这是**模型**属性，与 provider 无关 —— 火山直连、Tuzi、词元跳动上的同一模型都拒。
+_NO_SEQUENTIAL_MODELS = ("seedream-5-0-pro",)
+
+
+def _supports_sequential(model: str) -> bool:
+    m = normalized_model_id(model)
+    return not any(bad in m for bad in _NO_SEQUENTIAL_MODELS)
+
+
 def render(
     *,
     prompt: str,
@@ -82,11 +109,12 @@ def render(
     # Ark 专有参数（watermark / 组图）维持原判据：只对直连火山和 custom 聚合商下的 seedream
     # 发。词元跳动网关这两项的默认值没实测过，不在修协议路由时顺手改它的出图外观。
     sends_ark_params = key.provider == "seedream" or (key.provider == "custom" and is_seedream)
-    requested_size = _normalize_size_for_provider(
-        kwargs.get("size") or kwargs.get("requested_size") or kwargs.get("params", {}).get("size"),
-        is_seedream,
-        model,
+    raw_size = (
+        kwargs.get("size") or kwargs.get("requested_size") or kwargs.get("params", {}).get("size")
     )
+    requested_size = _normalize_size_for_provider(raw_size, is_seedream, model)
+    if requested_size != raw_size:
+        _warn(kwargs, f"尺寸已放大到该模型的像素下限：{raw_size} → {requested_size}")
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -96,8 +124,11 @@ def render(
 
     # HK gpt-image 只认尺寸表的精确 WxH；表外值（如立绘常用的 1024x1536）会被出成正方形。
     # snap 到表内最近值，让 skill 立绘 / Studio 两条路径都拿到正确竖图。nano-banana 收比例串，不碰。
-    if is_hk and model.startswith("gpt-image"):
-        requested_size = _snap_hk_gpt_image_size(requested_size)
+    if is_hk and family == "gpt-image":
+        snapped = _snap_hk_gpt_image_size(requested_size)
+        if snapped != requested_size:
+            _warn(kwargs, f"尺寸已吸附到 OpenAI-HK 支持的档位：{requested_size} → {snapped}")
+        requested_size = snapped
 
     # OpenAI-HK 的非图像模型回退 chat 模式（从 markdown/url 提取图）。
     # gpt-image / nano-banana 走真正的 images 端点，size 与 quality 才会生效。
@@ -133,9 +164,10 @@ def render(
     # family / is_seedream 已在上方（尺寸归一化前）算好，这里不重算。
     custom_img = key.provider == "custom" and family in ("gpt-image", "nano-banana")
     is_hk_image = is_hk and _hk_image_model(model)
-    # quality 仅对支持它的模型发送：OpenAI / OpenAI-HK 的 gpt-image・nano-banana / custom 同族；
-    # seedream 没有 quality 概念，发了可能被拒。
-    wants_quality = key.provider == "openai" or is_hk_image or custom_img
+    # quality 按**族**判，与前端 imageControlCaps 同一判据（旧版按 provider：词元跳动上的
+    # gpt-image 界面给四档、后端静默丢弃；provider=openai 下的 dall-e 反过来会被塞进
+    # gpt-image 的 low/high 词表，而 DALL·E 只认 standard|hd）。
+    wants_quality = family in ("gpt-image", "nano-banana")
     quality = _quality_param(kwargs) if wants_quality else None
     ref_paths = _collect_ref_paths(kwargs, key.provider, model)
 
@@ -177,17 +209,20 @@ def render(
             image=ref_image,
             quality=quality,
             watermark=sends_ark_params,
-            sequential=sends_ark_params,
+            sequential=sends_ark_params and _supports_sequential(model),
         )
 
     data = _post_json(generations_url, key.access_key, _gen_payload(requested), timeout=timeout)
     paths = _write_outputs(data, out_dir)
-    # seedream / gpt-image・nano-banana（含 custom 同族）/ ark 协议：单次可能只回 1 张，循环补足。
-    # ark 上 seedream-5.0-pro 不支持 sequential_image_generation，多张只能靠这里逐张补。
-    if is_seedream or is_hk_image or custom_img or is_ark_image:
-        while len(paths) < requested:
-            data = _post_json(generations_url, key.access_key, _gen_payload(1), timeout=timeout)
-            paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
+    # 补足循环无条件开：终止条件本来就是「已拿到几张」，一次回够就不会进来。旧版按
+    # provider/族开关，standard 族聚合商（Tuzi 等）忽略 n 只回 1 张时会静默少图。
+    while len(paths) < requested:
+        data = _post_json(generations_url, key.access_key, _gen_payload(1), timeout=timeout)
+        before = len(paths)
+        paths.extend(_write_outputs(data, out_dir, start_index=before + 1))
+        if len(paths) == before:  # 一张都没多出来：厂商给不了更多，别空转
+            _warn(kwargs, f"厂商只返回了 {len(paths)} 张图（请求 {requested} 张）")
+            break
     return paths[:requested]
 
 
@@ -200,10 +235,20 @@ def resolve_image_protocol(provider: str, base_url: str | None, model: str) -> s
 
     词元跳动的 seedream 系原生挂在 Ark 协议下，其中 seedream-5.0-pro **只有**
     `ark:image-generations`——打 OpenAI 兼容入口会被网关判 503「模型下无可用端点」。
+
+    判据同时看 provider 名与 base_url 的 host：把词元跳动配成 provider=custom（UI 完全
+    允许）时，只看 provider 名会漏判，又回到那个 503。
     """
-    if provider == "tokendance" and image_family(model) == "seedream":
+    if (provider == "tokendance" or _is_tokendance_gateway(base_url)) and (
+        image_family(model) == "seedream"
+    ):
         return "ark"
     return None
+
+
+def _is_tokendance_gateway(base_url: str | None) -> bool:
+    """按 host 判词元跳动网关 —— 比 `"tokendance" in base` 精确（路径里出现不算）。"""
+    return "tokendance" in urlsplit((base_url or "").strip()).netloc.lower()
 
 
 def _effective_image_protocol(key, model: str) -> str | None:
@@ -230,7 +275,7 @@ def _ark_image_url(base_url: str) -> str:
     本身就是 Ark 根，端点与 OpenAI 兼容路径同形。
     """
     base = base_url.rstrip("/")
-    if "tokendance" in base:
+    if _is_tokendance_gateway(base):
         root = base[: -len("/v1")] if base.endswith("/v1") else base
         return f"{root}/ark/v3/images/generations"
     return _image_url(base_url)
@@ -327,22 +372,38 @@ def _image_generation_payload(
     return {k: v for k, v in payload.items() if v is not None}
 
 
+def normalized_model_id(model: str) -> str:
+    """能力判定前的 id 归一 —— 与前端 `web/src/lib/modelFamily.ts` 逐字对齐。
+
+    取最后一个 '/' 之后的尾段（聚合商的 `openai/gpt-image-2` 这类 slug）→ lower()
+    → '_' 与 '.' 都归一为 '-'（`nano_banana_pro` / `seedream-5.0-pro` 两种写法都要命中）。
+    """
+    return (model or "").rsplit("/", 1)[-1].lower().replace("_", "-").replace(".", "-")
+
+
 def image_family(model: str) -> str:
-    """模型族判定（镜像前端 imageControlCaps）：决定 quality/官方 edits/seedream 参数。"""
-    m = (model or "").lower()
-    if m.startswith("gpt-image"):
+    """模型族判定 —— 能力矩阵的唯一判据（参考图上限 / quality / 尺寸下限都按它走）。
+
+    规则与前端共用，由 tests/fixtures/capability-matrix.json 锁死。
+    provider 不参与族判定：同一个模型走直连还是走聚合商，能力是一样的。
+    """
+    m = normalized_model_id(model)
+    if "gpt-image" in m:
         return "gpt-image"
-    if m.startswith("nano-banana"):
+    if "nano-banana" in m:
         return "nano-banana"
-    # 子串匹配（非 startswith）：custom 聚合商常以 doubao-seedream-* 命名 seedream 系（如 Tuzi）。
     if "seedream" in m or "seededit" in m:
         return "seedream"
     return "standard"
 
 
 def _hk_image_model(model: str) -> bool:
-    """OpenAI-HK 上走 images 端点（支持 size+quality）的模型族。"""
-    return bool(model) and (model.startswith("gpt-image") or model.startswith("nano-banana"))
+    """OpenAI-HK 上走 images 端点（支持 size+quality）的模型族。
+
+    走 image_family 而非裸 startswith：大小写、下划线、斜杠 slug 都归一后再判，
+    否则 `GPT-Image-2` 会掉进下面的 chat/completions 兜底路径。
+    """
+    return image_family(model) in ("gpt-image", "nano-banana")
 
 
 def _quality_param(kwargs: dict) -> str | None:
@@ -352,20 +413,21 @@ def _quality_param(kwargs: dict) -> str | None:
 
 
 def _max_reference_images(provider: str, model: str) -> int:
-    """每个厂商/模型对参考图（图生图输入）的数量上限；超出按"取前 N 张"截断。
+    """参考图（图生图输入）数量上限 —— 按**模型族**判，不按 provider。
 
-    - seedream（火山引擎）：图生图最多 10 张参考图。
-    - gpt-image（OpenAI / OpenAI-HK）：最多 16 张。
-    - nano-banana：官方建议 ≤2 张效果更佳，放宽到 3。
-    - 其它/未知：保守 4 张。
-    与前端 `web/src/lib/referenceLimits.ts::maxReferenceImages` 保持一致。
+    - seedream：10（旧代码只认 provider=="seedream"，Tuzi / 词元跳动下的同一模型被砍到 4）
+    - gpt-image：16   - nano-banana：3（官方建议 ≤2，放宽到 3）   - 其余：保守 4
+
+    provider 参数保留只为签名兼容调用点；判据已完全交给 image_family。
+    与前端 `web/src/lib/referenceLimits.ts` 同表，由 capability-matrix.json 锁死。
     """
-    if provider == "seedream":
+    family = image_family(model)
+    if family == "seedream":
         return 10
-    if model.startswith("nano-banana"):
-        return 3
-    if provider == "openai" or model.startswith("gpt-image"):
+    if family == "gpt-image":
         return 16
+    if family == "nano-banana":
+        return 3
     return 4
 
 
@@ -379,7 +441,10 @@ def _collect_ref_paths(kwargs: dict, provider: str, model: str) -> list[str]:
     for ref in (kwargs.get("reference_images") or params.get("reference_images") or []):
         if str(ref) not in paths:
             paths.append(str(ref))
-    return paths[: _max_reference_images(provider, model)]
+    limit = _max_reference_images(provider, model)
+    if len(paths) > limit:
+        _warn(kwargs, f"参考图超过该模型上限，只发送了前 {limit} 张（共 {len(paths)} 张）")
+    return paths[:limit]
 
 
 def _reference_image_param(
@@ -550,8 +615,7 @@ def _min_pixels_for_seedream(model: str) -> int:
     都被拒，报 must be at least 3686400 pixels）。
     921600：词元跳动的 seedream-5.0-pro（960² 通过，实测 88s 出图）。
     """
-    m = (model or "").lower()
-    if "seedream-5.0-pro" in m or "seedream-5-0-pro" in m:
+    if "seedream-5-0-pro" in normalized_model_id(model):
         return 921_600
     return 3_686_400
 

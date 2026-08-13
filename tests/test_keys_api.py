@@ -262,3 +262,70 @@ def test_reveal_unknown_alias_404(client):
     assert r.status_code == 404
 
 
+
+
+# --- models-preview 的密钥外发边界 ---
+
+def _stub_models_get(monkeypatch_ctx, seen: dict):
+    import unittest.mock as mock
+
+    fake = mock.MagicMock()
+    fake.status_code = 200
+    fake.json.return_value = {"data": [{"id": "m1"}]}
+
+    def _get(url, headers=None, timeout=None):
+        seen["url"] = url
+        seen["auth"] = (headers or {}).get("Authorization", "")
+        return fake
+
+    return mock.patch("requests.get", side_effect=_get)
+
+
+def _make_key(client, alias="td", base_url="https://tokendance.space/gateway/v1"):
+    r = client.post("/api/keys", json={
+        "alias": alias, "provider": "tokendance", "base_url": base_url,
+        "access_key": "secret-stored-key", "capabilities": [],
+    })
+    assert r.status_code in (200, 201), r.text
+
+
+def test_models_preview_refuses_stored_key_to_a_different_host(tmp_path, monkeypatch):
+    """存储的是明文密钥：不许调用方指定把它发去哪个域名（DNS rebinding 可从本机页面触发）。"""
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    client = TestClient(build_app())
+    _make_key(client)
+    seen: dict = {}
+    with _stub_models_get(monkeypatch, seen):
+        r = client.post("/api/keys/models-preview",
+                        json={"alias": "td", "base_url": "https://attacker.tld/v1"})
+    assert r.status_code == 400
+    assert "密钥" in r.json()["detail"]
+    assert seen == {}  # 一个出站请求都没发
+
+
+def test_models_preview_allows_same_host_path_change_with_stored_key(tmp_path, monkeypatch):
+    """同 host 换路径是正常编辑行为，照常用存储密钥。"""
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    client = TestClient(build_app())
+    _make_key(client)
+    seen: dict = {}
+    with _stub_models_get(monkeypatch, seen):
+        r = client.post("/api/keys/models-preview",
+                        json={"alias": "td", "base_url": "https://tokendance.space/gateway/v2"})
+    assert r.status_code == 200, r.text
+    assert seen["url"] == "https://tokendance.space/gateway/v2/models"
+    assert seen["auth"] == "Bearer secret-stored-key"
+
+
+def test_models_preview_allows_any_host_when_caller_brings_its_own_key(tmp_path, monkeypatch):
+    """自带密钥时地址随它——泄露面止于调用方自己刚输入的密钥。"""
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    client = TestClient(build_app())
+    _make_key(client)
+    seen: dict = {}
+    with _stub_models_get(monkeypatch, seen):
+        r = client.post("/api/keys/models-preview", json={
+            "alias": "td", "base_url": "https://other.example/v1", "access_key": "caller-key",
+        })
+    assert r.status_code == 200, r.text
+    assert seen["auth"] == "Bearer caller-key"

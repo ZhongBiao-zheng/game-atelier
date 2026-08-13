@@ -1,6 +1,6 @@
 import { type ButtonHTMLAttributes, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Download, Eye, EyeOff, Film, Heart, Music, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Download, Eye, EyeOff, Film, Heart, Info, Music, Trash2, X } from 'lucide-react';
 
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
 import { useVideoFrame } from '@/lib/videoFrame';
@@ -23,6 +23,8 @@ export interface RoundConfig {
   size?: string;
   n?: number;
   referenceImages: string[];
+  // 后端在跑 job 时回写的静默改写提示（尺寸被归一化 / 参考图被截断…）；只读展示，前端不产生。
+  warnings?: string[];
   // 视频参数（kind=video）—— 再次生成时按原 job 完整还原；resolution 是图片语义（2K/4K），视频分辨率另存。
   duration?: number;
   videoResolution?: string;
@@ -497,6 +499,17 @@ function DoneBatch({
             <p data-testid="round-run-meta" className="mt-0.5 text-xs text-muted-foreground/60">
               {runMeta.join(' · ')}
             </p>
+          )}
+          {/* 后端回写的静默改写提示（尺寸归一化 / 参考图截断）——是提示不是错误，走 muted 灰不用暖红。 */}
+          {(round.config.warnings?.length ?? 0) > 0 && (
+            <ul data-testid="round-warnings" className="mt-1.5 space-y-1">
+              {round.config.warnings!.map((warning, i) => (
+                <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                  <Info className="mt-px size-3 shrink-0" aria-hidden />
+                  <span>{warning}</span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </div>

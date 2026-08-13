@@ -61,15 +61,21 @@
 - **最小像素下限是模型属性，与协议路径无关**（两条路径实测同一下限）：`seedream-5.0-lite` / `doubao-seedream-4-5` 要 3686400，`seedream-5.0-pro` 只要 921600。见 `openai_image._min_pixels_for_seedream`。
 - watermark / `sequential_image_generation` 只对火山直连与 custom 聚合商下的 seedream 发；**pro 明确拒收 sequential**（400），词元跳动网关的默认值未实测，故不发。
 
-### 图像三族参数表
+### 图像四族参数表
 
-按**模型族（id 前缀）**判断，不按 provider——HK 一个 key 下挂多族。前端 `imageControlCaps.ts`，后端 `openai_image.py`。
+按**模型族**判断，不按 provider——HK 一个 key 下挂多族，同一个模型走直连还是走聚合商能力一样。
+族判定：取最后一个 `/` 之后的尾段 → lower() → `_` 归一为 `-` → 子串匹配（覆盖 `openai/gpt-image-2` 这类 slug、`GPT-Image-2` 大小写、`nano_banana_pro` 下划线）。
 
-| 族 | id 前缀 | size 语义 | 比例 | 质量 | 分辨率切换 | 参考图上限 |
-|---|---|---|---|---|---|---|
-| nano-banana | `nano-banana` | 比例字符串 | 1:1 4:3 3:4 16:9 9:16 2:3 3:2 | low/medium/high | 无 | 3（官方建议 ≤2） |
-| gpt-image | `gpt-image` | 像素 WxH | 八档含 21:9 | 四档含 auto | 无 | 16 |
-| standard（seedream 等） | 其余 | 像素 WxH | 八档含 21:9 | 无 | 2K/4K | seedream 10，未知 4 |
+| 族 | id 子串 | size 语义 | 比例 | 质量 | 分辨率切换 | 参考图上限 | 最小像素 |
+|---|---|---|---|---|---|---|---|
+| nano-banana | `nano-banana` | 比例字符串 | 1:1 4:3 3:4 16:9 9:16 2:3 3:2 | low/medium/high | 无 | 3（官方建议 ≤2） | — |
+| gpt-image | `gpt-image` | 像素 WxH | 八档含 21:9 | 四档含 auto | 无 | 16 | — |
+| seedream | `seedream` / `seededit` | 像素 WxH | 八档含 21:9 | 无 | 2K/4K | 10 | pro 921600、其余 3686400 |
+| standard | 其余 | 像素 WxH | 八档含 21:9 | 无 | 2K/4K | 4 | — |
+
+**真值源是 `tests/fixtures/capability-matrix.json`** —— Python 与 vitest 各自实现、共同对着它断言。改任一端的判据前先改那张表，两端测试会同时挡住漂移。2026-08-13 之前这四项在前后端各判各的（前端按 provider 判 seedream 尺寸、后端按 provider 判 quality 与参考图上限），后果是大量静默改写：Tuzi 下的 seedream 参考图被砍到 4 张、词元跳动上选的 quality 被后端丢弃。
+
+后端做过的改写（尺寸放大 / HK 档位吸附 / 参考图截断 / 出图张数不足）一律写进 `params.warnings`，由图卡展示——不再静默。
 
 ### OpenAI-HK 价目（积分，10000 积分 = 1 元）
 
