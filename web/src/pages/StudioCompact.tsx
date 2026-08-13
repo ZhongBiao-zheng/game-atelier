@@ -90,13 +90,14 @@ export function StudioCompact() {
         const selected = savedKey ?? usable[0];
         setProviderAlias(selected?.alias ?? '');
         const savedModelValid = saved.model && selected?.models.some((m) => m.id === saved.model);
-        setModel(savedModelValid ? saved.model! : selected?.models[0]?.id ?? '');
+        const nextModel = savedModelValid ? saved.model! : selected?.models[0]?.id ?? '';
+        setModel(nextModel);
         if (saved.customSize) {
           const [wStr, hStr] = saved.customSize.split('x');
           const w = parseInt(wStr, 10);
           const h = parseInt(hStr, 10);
           if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
-            const standard = computeStudioPixelSize(saved.ratio ?? '1:1', saved.resolution ?? '2K', selected?.provider);
+            const standard = computeStudioPixelSize(saved.ratio ?? '1:1', saved.resolution ?? '2K', nextModel);
             if (w !== standard.w || h !== standard.h) {
               setSizeOverride((prev) => ({ key: (prev?.key ?? 0) + 1, w, h }));
             }
@@ -165,15 +166,17 @@ export function StudioCompact() {
     const effectiveModel = overrideConfig?.model ?? model;
     const selectedKey = keys.find((item) => item.alias === effectiveAlias);
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
-    const caps = imageControlCaps(effectiveModel);
+    // 与 Studio.onSubmit 同一套判据：能力按模型族，provider 只在 openrouter 上改 size 语义。
+    const caps = imageControlCaps(effectiveModel, effectiveProvider);
     const effectiveSize = overrideConfig?.size
       ?? (caps.sizeKind === 'ratio'
         ? effectiveRatio
         : normalizeStudioSizeForModel(
-            customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveProvider),
-            effectiveProvider,
+            customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveModel),
             effectiveModel,
           ));
+    const rawQuality = overrideConfig?.quality ?? quality;
+    const effectiveQuality = caps.qualities?.includes(rawQuality) ? rawQuality : undefined;
 
     setPending(true);
     setCompactError(null);
@@ -189,12 +192,13 @@ export function StudioCompact() {
       return;
     }
 
+    // 控件隐藏的参数不写进 params（同 Studio.onSubmit）：openrouter 会把 resolution 当 API 参数发。
     const jobParams: JobParams = {
       size: effectiveSize,
-      ratio: effectiveRatio,
-      resolution: effectiveResolution,
+      ...(caps.ratios.length > 0 ? { ratio: effectiveRatio } : {}),
+      ...(caps.showResolution ? { resolution: effectiveResolution } : {}),
       n: effectiveCount,
-      quality: overrideConfig?.quality ?? quality,
+      ...(effectiveQuality ? { quality: effectiveQuality } : {}),
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
     };
 

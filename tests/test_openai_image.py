@@ -92,28 +92,19 @@ def test_render_openai_provider_posts_to_image_endpoint_and_writes_data_url(
     image_bytes = b"\x89PNG\r\n\x1a\nfake"
     captured: dict[str, object] = {}
 
-    class FakeResponse:
-        def __enter__(self):
-            return self
+    def fake_post(url, headers, json, timeout):
+        # setdefault 只留首次：单次只回 1 张时补足循环会再发 n=1 的请求（预期行为）。
+        captured.setdefault("url", url)
+        captured.setdefault("timeout", timeout)
+        captured.setdefault("payload", json)
+        return FakePostResponse({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(image_bytes).decode("ascii"),
+            }],
+        })
 
-        def __exit__(self, *args):
-            return None
-
-        def read(self) -> bytes:
-            return json.dumps({
-                "data": [{
-                    "b64_json": "data:image/png;base64,"
-                    + base64.b64encode(image_bytes).decode("ascii"),
-                }],
-            }).encode("utf-8")
-
-    def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["timeout"] = timeout
-        captured["payload"] = json.loads(request.data.decode("utf-8"))
-        return FakeResponse()
-
-    monkeypatch.setattr(openai_image.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
 
     paths = openai_image.render(
         prompt="fox",
@@ -132,7 +123,8 @@ def test_render_openai_provider_posts_to_image_endpoint_and_writes_data_url(
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
-def test_post_json_retries_requests_connection_drop_then_succeeds(monkeypatch):
+def test_post_json_retries_only_pre_flight_failures(monkeypatch):
+    """连接**建立阶段**的失败没送达上游，重试安全。"""
     image_bytes = b"\x89PNG\r\n\x1a\nretry"
     calls = {"n": 0}
 
@@ -151,7 +143,7 @@ def test_post_json_retries_requests_connection_drop_then_succeeds(monkeypatch):
     def fake_post(*args, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
-            raise requests.ConnectionError("Remote end closed connection without response")
+            raise requests.ConnectionError("Failed to establish a new connection: refused")
         return FakeResponse()
 
     monkeypatch.setattr(openai_image.requests, "post", fake_post)
@@ -166,6 +158,56 @@ def test_post_json_retries_requests_connection_drop_then_succeeds(monkeypatch):
 
     assert calls["n"] == 2
     assert data["data"][0]["b64_json"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.parametrize("error", [
+    requests.ReadTimeout("Read timed out"),
+    requests.ConnectionError(
+        "('Connection aborted.', RemoteDisconnected('Remote end closed connection'))"
+    ),
+    requests.ConnectionError("Connection reset by peer"),
+])
+def test_post_json_never_retries_after_request_reached_upstream(error, monkeypatch):
+    """请求已送达 = 上游可能正在出图：重试就是再买一次。
+
+    同步出图端点在图出完前一个字节都不吐，所以读超时几乎必然是「还在跑」而不是「没跑」。
+    实测记录：读超时 180s 时 HK 复杂生成假超时 → 重试 → 墙钟翻倍 + 厂商双计费。
+    """
+    calls = {"n": 0}
+
+    def fake_post(*args, **kwargs):
+        calls["n"] += 1
+        raise error
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    monkeypatch.setattr(openai_image.time, "sleep", lambda _s: None)
+
+    with pytest.raises(openai_image.OpenAIImageError):
+        openai_image._post_json("https://x/v1/images/generations", "ak", {}, timeout=10)
+    assert calls["n"] == 1
+
+
+def test_post_json_does_not_retry_non_json_200(monkeypatch):
+    """200 但响应体不是 JSON：这次调用已经在上游执行过，重试只会重复计费。"""
+    calls = {"n": 0}
+
+    class BadBody:
+        status_code = 200
+        text = "<html>gateway</html>"
+
+        def json(self):
+            raise ValueError("Expecting value: line 1 column 1")
+
+    def fake_post(*args, **kwargs):
+        calls["n"] += 1
+        return BadBody()
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    monkeypatch.setattr(openai_image.time, "sleep", lambda _s: None)
+
+    with pytest.raises(openai_image.OpenAIImageError):
+        openai_image._post_json("https://x/v1/images/generations", "ak", {}, timeout=10)
+    assert calls["n"] == 1
 
 
 class _StatusResponse:
@@ -1450,3 +1492,110 @@ def test_render_tokendance_does_not_send_ark_only_params(
 
     assert "watermark" not in seen
     assert "sequential_image_generation" not in seen
+
+
+# --- 能力矩阵：与前端共读同一张真值表（tests/fixtures/capability-matrix.json）---
+
+def _capability_cases():
+    import json as _json
+    from pathlib import Path as _Path
+    fixture = _Path(__file__).parent / "fixtures" / "capability-matrix.json"
+    return _json.loads(fixture.read_text(encoding="utf-8"))["cases"]
+
+
+@pytest.mark.parametrize("case", _capability_cases(), ids=lambda c: f"{c['provider']}:{c['model']}")
+def test_capability_matrix_matches_shared_fixture(case):
+    """四项能力判据一律按模型族走，provider 不参与。改实现前先改 fixture。"""
+    model, provider = case["model"], case["provider"]
+    family = openai_image.image_family(model)
+    assert family == case["family"], f"{model} 族判定"
+    assert openai_image._max_reference_images(provider, model) == case["max_reference_images"]
+    assert (family in ("gpt-image", "nano-banana")) == case["supports_quality"]
+    if case["min_pixels"] is None:
+        assert family != "seedream"
+    else:
+        assert openai_image._min_pixels_for_seedream(model) == case["min_pixels"]
+
+
+def test_seedream_reference_limit_no_longer_depends_on_provider():
+    """回归：旧版按 provider 判，Tuzi / 词元跳动下的 seedream 被砍到 4 张。"""
+    for provider in ("seedream", "custom", "tokendance", "openrouter"):
+        assert openai_image._max_reference_images(provider, "doubao-seedream-4-5-251128") == 10
+
+
+def test_tokendance_gateway_detected_by_host_not_provider_name():
+    """把词元跳动配成 provider=custom 也要能路由到 Ark 端点，否则复发 503。"""
+    base = "https://tokendance.space/gateway/v1"
+    assert openai_image.resolve_image_protocol("custom", base, "seedream-5.0-pro") == "ark"
+    # 路径里出现 tokendance 不算（旧版是裸子串匹配）
+    assert openai_image.resolve_image_protocol(
+        "custom", "https://api.example.com/tokendance/v1", "seedream-5.0-pro"
+    ) is None
+
+
+def test_sequential_is_a_model_property_not_a_provider_one():
+    """seedream-5.0-pro 拒收 sequential —— 火山直连 / Tuzi 上的同一模型也不能发。"""
+    assert openai_image._supports_sequential("doubao-seedream-4-5-251128") is True
+    assert openai_image._supports_sequential("seedream-5.0-pro") is False
+    assert openai_image._supports_sequential("bytedance-seed/seedream-5.0-pro") is False
+
+
+def test_render_direct_seedream_pro_omits_sequential(isolated_data_root, tmp_path, monkeypatch):
+    """火山直连 + pro + n=2：旧版会发 sequential_image_generation → 上游 400。"""
+    keys.add_key(KeySpec(
+        alias="ark", provider="seedream", base_url="https://ark.cn-beijing.volces.com/api/v3",
+        access_key="x", capabilities=["portrait"],
+        models=[{"name": "pro", "id": "seedream-5.0-pro"}], created_at="2026-08-13T00:00:00Z",
+    ))
+    seen: list[dict] = []
+
+    def fake_post(url, headers, json, timeout):
+        seen.append(json)
+        return FakePostResponse({"data": [{"b64_json": "aGk="}]})
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    openai_image.render(prompt="p", model="seedream-5.0-pro", alias="ark",
+                        output_dir=tmp_path, n=2, size="1024x1536")
+    assert all("sequential_image_generation" not in body for body in seen)
+    assert seen[0]["watermark"] is True  # Ark 直连的 watermark 不受影响
+    assert len(seen) == 2  # 补足循环补第二张
+
+
+def test_render_writes_warnings_for_silent_rewrites(isolated_data_root, tmp_path, monkeypatch):
+    """尺寸归一 / 参考图截断此前完全静默 —— 现在要回传到 params.warnings。"""
+    keys.add_key(KeySpec(
+        alias="td-w", provider="tokendance", base_url="https://tokendance.space/gateway/v1",
+        access_key="x", capabilities=["portrait"],
+        models=[{"name": "lite", "id": "seedream-5.0-lite"}], created_at="2026-08-13T00:00:00Z",
+    ))
+    refs = []
+    for i in range(12):
+        p = tmp_path / f"r{i}.png"
+        p.write_bytes(b"\x89PNG\r\n\x1a\n")
+        refs.append(str(p))
+    params: dict = {"size": "1024x1024", "reference_images": refs}
+    monkeypatch.setattr(openai_image.requests, "post",
+                        lambda url, headers, json, timeout: FakePostResponse({"data": [{"b64_json": "aGk="}]}))
+
+    openai_image.render(prompt="p", model="seedream-5.0-lite", alias="td-w",
+                        output_dir=tmp_path / "out", n=1, size="1024x1024", params=params)
+
+    warnings = params["warnings"]
+    assert any("像素下限" in w for w in warnings)
+    assert any("参考图" in w and "10" in w for w in warnings)
+
+
+def test_model_id_normalization_matches_frontend():
+    """两端归一必须一致（前端 web/src/lib/modelFamily.ts 同规则）：尾段 + lower + _ . → -。
+
+    分叉的后果是同一个模型在界面和后端拿到不同的像素下限，又变成静默改写。
+    """
+    for mid in (
+        "seedream-5.0-pro", "seedream-5-0-pro", "doubao-seedream-5-0-pro-260128",
+        "bytedance-seed/seedream-5.0-pro", "SEEDREAM_5_0_PRO",
+    ):
+        assert openai_image._min_pixels_for_seedream(mid) == 921_600, mid
+        assert openai_image._supports_sequential(mid) is False, mid
+    for mid in ("seedream-5.0-lite", "doubao-seedream-4-5-251128"):
+        assert openai_image._min_pixels_for_seedream(mid) == 3_686_400, mid
+        assert openai_image._supports_sequential(mid) is True, mid

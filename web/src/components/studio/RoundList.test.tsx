@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { RoundList, type RoundState } from './RoundList';
 
@@ -63,6 +63,30 @@ describe('RoundList skill 出图删除门控', () => {
   it('skill 出图不暴露删除入口（防从出图页抹掉角色磁盘资产）', () => {
     render(<RoundList rounds={[imageDone('skill')]} />);
     expect(screen.queryByLabelText('更多操作')).toBeNull();
+  });
+});
+
+describe('RoundList 静默改写提示（params.warnings）', () => {
+  const withWarnings = (warnings?: string[]): RoundState => ({
+    kind: 'done',
+    jobId: 'job-warn-1',
+    submittedAt: new Date().toISOString(),
+    imagePaths: ['/data/studio/job-warn-1/v1.png'],
+    config: { prompt: '一张图', model: 'doubao-seedream-4-5-251128', kind: 'image', referenceImages: [], warnings },
+  });
+
+  it('后端回写的提示逐条展示', () => {
+    render(<RoundList rounds={[withWarnings(['尺寸 2048x1152 已归一化为 2560x1440', '参考图超过上限，只发了前 10 张'])]} />);
+    expect(screen.getByTestId('round-warnings').children).toHaveLength(2);
+    expect(screen.getByText('尺寸 2048x1152 已归一化为 2560x1440')).toBeInTheDocument();
+  });
+
+  it('没有提示时不占位', () => {
+    render(<RoundList rounds={[withWarnings([])]} />);
+    expect(screen.queryByTestId('round-warnings')).toBeNull();
+    cleanup();
+    render(<RoundList rounds={[withWarnings(undefined)]} />);
+    expect(screen.queryByTestId('round-warnings')).toBeNull();
   });
 });
 

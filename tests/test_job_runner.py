@@ -388,3 +388,39 @@ def test_friendly_error_pixel_floor_tells_user_to_enlarge():
     msg = job_runner._friendly_error(err)
     assert "像素下限" in msg
     assert "尺寸调大" in msg
+
+
+def test_friendly_error_timeout_warns_about_probable_billing():
+    """读超时 = 上游多半仍在出图且已计费；旧文案「稍后重试」等于引导再买一次。"""
+    err = Exception("HTTPSConnectionPool(host='api.tu-zi.com', port=443): Read timed out.")
+    msg = job_runner._friendly_error(err)
+    assert "已经计费" in msg
+    assert "确认" in msg
+
+
+def test_friendly_error_no_image_response_is_not_a_network_problem():
+    """实测 HK nano-banana-hd：跑满 28s 回 NO_IMAGE，有响应没图。"""
+    err = Exception(
+        "image api returned no downloadable image: {'data': [{'revised_prompt': 'NO_IMAGE'}]}"
+    )
+    msg = job_runner._friendly_error(err)
+    assert "没有图片" in msg
+    assert "内容审核" in msg
+
+
+def test_friendly_error_never_swallows_task_id():
+    """视频侧把 task_id 挂在报错里（产物已计费、要靠它人工找回）。
+
+    翻译分支一旦整条替换，这个标识就没了 —— 而厂商原文里恰好常含 timeout / quota
+    这类会命中翻译表的词。原文必须始终保留。
+    """
+    err = Exception(
+        "seedance 任务轮询放弃 task_id=cgt-2026-abc123：connection reset by peer"
+    )
+    msg = job_runner._friendly_error(err)
+    assert "cgt-2026-abc123" in msg
+
+
+def test_friendly_error_passes_unknown_errors_through():
+    err = Exception("something nobody has a translation for")
+    assert job_runner._friendly_error(err) == "something nobody has a translation for"

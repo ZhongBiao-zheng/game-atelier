@@ -167,6 +167,8 @@ function StudioFull() {
       }),
     );
     // 堆叠里混着三类素材：按 MIME 分流回填，视频/音频塞进图片参考会在提交时走错角色。
+    // 超出当前模型族参考图上限的部分由 PromptInput 的「参考图数量不变式」effect 当场裁掉并提示
+    // （裁剪与提示收在一处：那里才知道 image / omni 两套上限，也才有提示 UI）。
     setReferenceImages(files.filter((f) => !f.type.startsWith('video/') && !f.type.startsWith('audio/')));
     setReferenceVideos(files.filter((f) => f.type.startsWith('video/')));
     setReferenceAudios(files.filter((f) => f.type.startsWith('audio/')));
@@ -230,14 +232,15 @@ function StudioFull() {
         const selected = savedKey ?? usable[0];
         setProviderAlias(selected?.alias ?? '');
         const savedModelValid = saved.model && selected?.models.some((m) => m.id === saved.model);
-        setModel(savedModelValid ? saved.model! : selected?.models[0]?.id ?? '');
+        const nextModel = savedModelValid ? saved.model! : selected?.models[0]?.id ?? '';
+        setModel(nextModel);
         // 恢复手动自定义尺寸：标准尺寸由 ratio/resolution 自动重算，仅当保存值偏离标准时用 sizeOverride 覆盖。
         if (saved.customSize) {
           const [wStr, hStr] = saved.customSize.split('x');
           const w = parseInt(wStr, 10);
           const h = parseInt(hStr, 10);
           if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
-            const standard = computeStudioPixelSize(saved.ratio ?? '1:1', saved.resolution ?? '2K', selected?.provider);
+            const standard = computeStudioPixelSize(saved.ratio ?? '1:1', saved.resolution ?? '2K', nextModel);
             if (w !== standard.w || h !== standard.h) {
               setSizeOverride((prev) => ({ key: (prev?.key ?? 0) + 1, w, h }));
             }
@@ -286,16 +289,19 @@ function StudioFull() {
     const effectiveModel = overrideConfig?.model ?? model;
     const selectedKey = keys.find((item) => item.alias === effectiveAlias);
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
-    const caps = imageControlCaps(effectiveModel);
-    // nano-banana 的 size 是比例字符串（如 16:9）；gpt-image/standard 是归一化后的像素 WxH。
+    // 能力按模型族判；provider 只在 openrouter 上改 size 语义（比例串而非像素）。
+    const caps = imageControlCaps(effectiveModel, effectiveProvider);
+    // nano-banana / openrouter 的 size 是比例字符串（如 16:9）；其余是归一化后的像素 WxH。
     const effectiveSize = overrideConfig?.size
       ?? (caps.sizeKind === 'ratio'
         ? effectiveRatio
         : normalizeStudioSizeForModel(
-            customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveProvider),
-            effectiveProvider,
+            customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveModel),
             effectiveModel,
           ));
+    // 质量档位只在该族真有时才发：seedream / dall-e 不认 low|high，nano-banana 不认 auto。
+    const rawQuality = overrideConfig?.quality ?? quality;
+    const effectiveQuality = caps.qualities?.includes(rawQuality) ? rawQuality : undefined;
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
 
     setPending(true);
@@ -323,18 +329,20 @@ function StudioFull() {
       model: effectiveModel,
       modelName: selectedModel?.name ?? overrideConfig?.modelName,
       ratio: effectiveRatio,
-      resolution: effectiveResolution,
+      resolution: caps.showResolution ? effectiveResolution : undefined,
       size: effectiveSize,
       n: effectiveCount,
-      quality: overrideConfig?.quality ?? quality,
+      quality: effectiveQuality,
       referenceImages: refPaths,
     };
+    // 控件隐藏的参数一律不写进 params（与视频侧同写法）：后端 openrouter_image 会把
+    // params.resolution 原样当 API 参数发出去，在别的 key 上选过 4K 就会被带过来按 4K 计费。
     const jobParams: JobParams = {
       size: effectiveSize,
-      ratio: effectiveRatio,
-      resolution: effectiveResolution,
+      ...(caps.ratios.length > 0 ? { ratio: effectiveRatio } : {}),
+      ...(caps.showResolution ? { resolution: effectiveResolution } : {}),
       n: effectiveCount,
-      quality: overrideConfig?.quality ?? quality,
+      ...(effectiveQuality ? { quality: effectiveQuality } : {}),
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
     };
 
@@ -642,7 +650,7 @@ function StudioFull() {
       const w = parseInt(wStr, 10);
       const h = parseInt(hStr, 10);
       if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
-        const standard = computeStudioPixelSize(config.ratio ?? ratio, config.resolution ?? resolution, config.provider);
+        const standard = computeStudioPixelSize(config.ratio ?? ratio, config.resolution ?? resolution, config.model);
         if (w !== standard.w || h !== standard.h) {
           setSizeOverride((prev) => ({ key: (prev?.key ?? 0) + 1, w, h }));
         }
@@ -709,7 +717,7 @@ function referenceImagesFor(job: Job): string[] {
   return out;
 }
 
-function pathList(value: unknown): string[] {
+function stringList(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string' && item.length > 0)
     : [];
@@ -737,6 +745,8 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
       ? p.quality
       : undefined,
     referenceImages: referenceImagesFor(job),
+    // 后端跑 job 时回写的静默改写提示（尺寸归一化 / 参考图截断）——两端 schema 早有此字段。
+    warnings: stringList(p.warnings),
     // 视频参数：再次生成时从原 job 还原（resolution 上面只认 2K/4K 图片语义，视频的 720p/1080p 存这里）。
     // referenceVideos/Audios 给空数组而非 undefined，避免 onSubmitVideo 的 ?? 回落到当前表单文件。
     ...(isVideo
@@ -746,8 +756,8 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
           videoQuality: (p.mode === 'std' || p.mode === 'pro') ? p.mode : undefined,
           frameMode: p.frame_mode,
           generateAudio: p.generate_audio === true,
-          referenceVideos: pathList(p.reference_videos),
-          referenceAudios: pathList(p.reference_audios),
+          referenceVideos: stringList(p.reference_videos),
+          referenceAudios: stringList(p.reference_audios),
         }
       : {}),
   };

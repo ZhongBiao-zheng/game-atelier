@@ -27,8 +27,19 @@ class JobRunnerError(RuntimeError):
 
 
 def _friendly_error(err: BaseException) -> str:
-    """把底层网络异常翻成画师能看懂的中文落进 job.error；其它原样返回。"""
-    low = str(err).lower()
+    """把底层报错翻成画师能看懂的中文落进 job.error。
+
+    **永远保留原始报错**：视频侧会把 task_id 挂在报错里（产物已计费、要靠它人工找回），
+    整条替换会把这类关键标识一起冲掉。所以分支只负责给中文提示，原文由这里统一附加。
+    """
+    hint = _error_hint(str(err).lower())
+    if hint is None:
+        return str(err)
+    return f"{hint}（原始报错：{err}）"
+
+
+def _error_hint(low: str) -> str | None:
+    """按报文特征给中文提示；认不出返回 None（调用方原样透出）。"""
     if "proxy" in low and ("connect" in low or "proxyerror" in low or "max retries" in low):
         return (
             "连不上本机代理（VPN / Clash 等）。这些国产厂商无需翻墙：请在代理工具里"
@@ -40,6 +51,23 @@ def _friendly_error(err: BaseException) -> str:
             "上传参考图超时：参考图偏大或上行网络偏慢，未能在时限内传完。"
             "请压小参考图或换更快的网络后重试。"
         )
+    # 确定性错误排在网络类之前：它们重试无用，被翻成「稍后重试」会让画师白等。
+    if "no_endpoints_available" in low or "无可用端点" in low:
+        return (
+            "该模型在厂商网关下没有可用端点：通常是账号未开通这个模型，或它不支持当前"
+            "调用协议。请到厂商控制台确认已开通，或在设置页重新拉一次模型列表后换用同族其他模型。"
+        )
+    # 实测 OpenAI-HK 的 nano-banana-hd：请求不合它意时不报错，跑满 28s 回
+    # {"data":[{"revised_prompt":"NO_IMAGE"}]}——有响应、没图，还很可能已计费。
+    if "no downloadable image" in low or "response missing data" in low or "no_image" in low:
+        return (
+            "厂商返回了响应但里面没有图片：常见原因是提示词被内容审核拦下，或该模型对这次"
+            "请求只回了文字。请调整提示词后重试，或换模型。"
+        )
+    if "must be at least" in low and "pixel" in low:
+        return "出图尺寸低于该模型的像素下限：请把尺寸调大（或换用同族里下限更低的模型）后重试。"
+    if "quota" in low or "insufficient" in low or "余额" in low or "额度" in low or "欠费" in low:
+        return "厂商额度 / 余额不足：请到厂商官网充值或检查账户额度后重试。"
     # 连接已建立但被远端中途掐断：多是该生成过重 / 上游太慢超出厂商网关等待时限（非本机网络问题）。
     if (
         "remote end closed" in low
@@ -53,32 +81,22 @@ def _friendly_error(err: BaseException) -> str:
             "（与本机网络无关）。请换更小的生成规模，或换模型 / 换厂商（如 seedream）重试。"
         )
     if "timed out" in low or "timeout" in low:
-        return "厂商接口超时未响应：可能是该模型上游过载，请稍后重试或换模型。"
+        # 同步出图端点在图出完之前一个字节都不吐，所以读超时几乎必然意味着上游仍在生成、
+        # 并且这次调用**已经计费**。别引导画师无脑重试（那是再买一次），先去后台确认。
+        return (
+            "厂商接口超时未响应：这类超时通常意味着上游仍在出图、且这次调用已经计费。"
+            "重试前先到厂商后台确认这一单是否已经出图，避免重复付费；确认没出再重试或换模型。"
+        )
     if "max retries" in low or "failed to establish" in low or (
         "connection" in low and "refused" in low
     ):
         return "网络连不上厂商接口：请检查网络 / 代理设置，确认厂商域名可访问后重试。"
-    # 网关按协议挂端点，「无可用端点」= 该模型在这把 key 下压根没有可调的端点。必须排在
-    # 下面的「网关瞬时超时」之前：它是确定性错误，重试无用，翻成瞬时问题会误导画师干等。
-    if "no_endpoints_available" in low or "无可用端点" in low:
-        return (
-            "该模型在厂商网关下没有可用端点：通常是账号未开通这个模型，或它不支持当前"
-            "调用协议。请到厂商控制台确认已开通，或在设置页重新拉一次模型列表后换用"
-            f"同族其他模型。（原始报错：{err}）"
-        )
-    if "must be at least" in low and "pixel" in low:
-        return (
-            "出图尺寸低于该模型的像素下限：请把尺寸调大（或换用同族里下限更低的模型）后重试。"
-            f"（原始报错：{err}）"
-        )
-    if "quota" in low or "insufficient" in low or "余额" in low or "额度" in low or "欠费" in low:
-        return f"厂商额度 / 余额不足：请到厂商官网充值或检查账户额度后重试。（原始报错：{err}）"
     if "gateway" in low or "网关" in low or "bad response status code" in low:
         return (
             "厂商网关瞬时超时（已自动重试仍失败）：通常是该模型上游过载或排队，"
-            f"请稍后重试或换模型。（原始报错：{err}）"
+            "请稍后重试或换模型。"
         )
-    return str(err)
+    return None
 
 
 def _project_root() -> Path:

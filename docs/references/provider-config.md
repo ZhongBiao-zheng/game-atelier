@@ -1,6 +1,6 @@
 # API Key / 厂商配置参考
 
-> 配置 key、设计出图/出视频参数、排错时只看这份。汇总自官方文档与实测，2026-06-11。
+> 配置 key、设计出图/出视频参数、排错时只看这份。汇总自官方文档与实测，2026-06-11 起持续更新（最近一次 2026-08-13）。
 > Skill 按任务挑模型、按模型族写提示词 → [model-routing.md](model-routing.md)。
 
 ## 配置在哪
@@ -10,6 +10,34 @@
 - 配置入口：设置页 →「+ 新建供应商」；拉模型列表 `POST /api/keys/models-preview`。
 - 手改 JSON 后必验：`curl -sS http://127.0.0.1:5174/api/keys >/dev/null`，任何 schema 错都会 500。
 
+### models-preview 契约（前后端唯一形状来源）
+
+请求：`{ alias?, provider?, base_url?, access_key?, include_all? }`。
+**安全边界**：传了 `alias` 而不带 `access_key` 时会取出存储的**明文密钥**，所以此时请求体里的
+`base_url` 只允许与存储值同 host（换域名要自带密钥）——否则等于让调用方指定「把密钥发到哪」。
+
+响应：`{ models: [{ id, name, modality, category, protocol }], total, excluded }`
+
+| 字段 | 取值 | 含义 |
+|---|---|---|
+| `category` | `image` / `video` / `unknown` / `excluded` | 分类结果。`excluded` 只在 `include_all: true` 时出现在 `models` 里 |
+| `modality` | `image` / `video` / `null` | 只有前两类给值；`unknown` 一律 `null`，由画师在 picker 里显式二选一（**不再静默兜底成 image**）|
+| `protocol` | 见上方各厂契约 / `null` | 视频=seedance·kling·dashscope·openrouter；图片=ark·openai |
+| `total` / `excluded` | 数字 | 上游去重后的总数 / 被判「明确非视觉」而未返回的条数，前端据此显示「上游 78 个 · 已过滤 61 个」+ 逃生舱 |
+
+**默认 `/models` 不一定是全集**：OpenRouter 把视频模型排除在外，必须额外拉
+`?output_modalities=video`（`routes.py::_extra_model_list_urls`，拉不到时降级为只有图片模型，
+不让整个功能报错）。接新上游时别把「默认端点里没有」当成「这个平台没有」——先按 host 试专用列表。
+
+分类是四级瀑布（`routes.py::_classify_model`）：协议标注判视觉 → 协议**全部**是非视觉动词才判
+`excluded` → 读 `architecture.output_modalities`（OpenRouter 的权威字段）→ id 关键词（**词边界**
+匹配，裸子串会把 `inkling` 判成 kling 视频、`wanx` 判成视频）→ `unknown`。
+
+**认不出一律 `unknown` 留着，绝不丢**：协议词汇是各厂自造的（实测同一份词元跳动数据里就有
+`zai:layout-parsing` / `bocha:web-search` / `unifuncs:web-reader`），词表永远追不完，「认不出就
+丢」会让某个网关的模型列表整片消失且用户看不出原因。实测:词元跳动 78 → 排除 61 / 图 2 / 视频 15
+（17 个视觉模型逐条核对无误伤）；OpenRouter 409 → 排除 398 / 图 11。
+
 ## 当前已接厂商
 
 | alias | provider | base_url | 已挂模型 | 状态 |
@@ -17,6 +45,8 @@
 | `seedream` | seedream | `https://ark.cn-beijing.volces.com/api/v3` | doubao-seedream-5-0 / 4-5 | 图生图实测通 |
 | `OpenAI-HK` | custom | `https://api.openai-hk.com` | gpt-image-2、nano-banana / -2 / -hd | 实测通；kling caller 已写、模型未挂 key |
 | `tokendance` | tokendance | `https://tokendance.space/gateway/v1` | seedream-5.0-lite / -pro（图）、seedance-2.0 系 + happyhorse 系（视频） | 2026-08-13 出图实测通（pro 走 Ark 端点，960² 约 88s）|
+| `Tuzi` | custom | `https://api.tu-zi.com` | gpt-image-2、doubao-seedream-4-5、nano-banana-pro / -2 系 | **当前 default_alias** —— Skill 不指定 alias 时默认走这把。出图实测通；注意它对畸形请求**不快速失败**（实测缺 prompt / 不存在的模型 id 都挂满读超时不返回，服务本身是活的：`GET /v1/models` 2s 回 474 个模型）|
+| `OpenRouter` | openrouter | `https://openrouter.ai/api/v1` | gpt-image-2、seedream-4.5、gemini-3-pro-image、flux.2-pro（图）+ veo / sora / seedance / kling（视频，手填）| 实测通。契约与国内聚合商不同族，见 [openrouter-pricing.md](openrouter-pricing.md)：专用 `/images`（回 b64_json）+ 异步 `/videos` job；**视频模型不在默认 `/models` 里**（实测 409 条一个都没有），要用 `?output_modalities=video` 或 `/videos/models` 才列得出来（23 个：veo / sora / kling / seedance / hailuo / runway / wan / happyhorse…）——models-preview 已自动合并拉取 |
 
 密钥获取：火山 `console.volcengine.com/ark`、词元跳动 `tokendance.space/keys`、HK `open-hk.com` 控制台。
 
@@ -43,8 +73,11 @@
 ### OpenAI-HK 聚合（provider=custom，base 含 `openai-hk.com`）
 
 - `keys.is_openai_hk()` 强制走同步通道——对 gpt-image 发 `?async=true` 会 404。
-- 无参考图 `POST /v1/images/generations`；有参考图 `POST /v1/images/edits`（multipart，重复 `image` 文件部件）。单次恒回 1 张，n>1 靠 backfill 补发。
-- gpt-image：`size` = 像素 WxH（双边 16 倍数、最大边 3840、宽高比 ≤3:1）；`quality` low/medium/high/auto。
+- 无参考图 `POST /v1/images/generations`。有参考图**按族分流**：
+  - `gpt-image` 族 → `POST /v1/images/edits`（multipart，重复 `image` 文件部件）
+  - `nano-banana` 族 → 仍走 `generations`，参考图放 `image` 字段。它是 Gemini 多模态，聚合商对其 `/images/edits` 一律 **403**（openresty 网关层拒未实现路由），别按 gpt-image 那条路设计。
+- 单次恒回 1 张，n>1 靠补足循环逐张补发。
+- gpt-image：`quality` low/medium/high/auto。`size` 官方约束是「双边 16 倍数、最大边 3840、宽高比 ≤3:1」，但 **HK 只认一张 30 项的固定尺寸表**，表外值会被出成正方形 —— caller 会把任意 WxH **吸附**到表内最近值（先比例最近、再像素最近，见 `openai_image._snap_hk_gpt_image_size`），吸附结果写进 `params.warnings`。所以同一个 `gpt-image-2` 在 HK key 上会被 snap、在 Tuzi key 上原样发送。
 - nano-banana：`size` = 比例字符串原样发（`"16:9"`）；`quality` low/medium/high。
 
 ### 词元跳动图片（provider=tokendance）
@@ -61,15 +94,21 @@
 - **最小像素下限是模型属性，与协议路径无关**（两条路径实测同一下限）：`seedream-5.0-lite` / `doubao-seedream-4-5` 要 3686400，`seedream-5.0-pro` 只要 921600。见 `openai_image._min_pixels_for_seedream`。
 - watermark / `sequential_image_generation` 只对火山直连与 custom 聚合商下的 seedream 发；**pro 明确拒收 sequential**（400），词元跳动网关的默认值未实测，故不发。
 
-### 图像三族参数表
+### 图像四族参数表
 
-按**模型族（id 前缀）**判断，不按 provider——HK 一个 key 下挂多族。前端 `imageControlCaps.ts`，后端 `openai_image.py`。
+按**模型族**判断，不按 provider——HK 一个 key 下挂多族，同一个模型走直连还是走聚合商能力一样。
+族判定：取最后一个 `/` 之后的尾段 → lower() → `_` 归一为 `-` → 子串匹配（覆盖 `openai/gpt-image-2` 这类 slug、`GPT-Image-2` 大小写、`nano_banana_pro` 下划线）。
 
-| 族 | id 前缀 | size 语义 | 比例 | 质量 | 分辨率切换 | 参考图上限 |
-|---|---|---|---|---|---|---|
-| nano-banana | `nano-banana` | 比例字符串 | 1:1 4:3 3:4 16:9 9:16 2:3 3:2 | low/medium/high | 无 | 3（官方建议 ≤2） |
-| gpt-image | `gpt-image` | 像素 WxH | 八档含 21:9 | 四档含 auto | 无 | 16 |
-| standard（seedream 等） | 其余 | 像素 WxH | 八档含 21:9 | 无 | 2K/4K | seedream 10，未知 4 |
+| 族 | id 子串 | size 语义 | 比例 | 质量 | 分辨率切换 | 参考图上限 | 最小像素 |
+|---|---|---|---|---|---|---|---|
+| nano-banana | `nano-banana` | 比例字符串 | 1:1 4:3 3:4 16:9 9:16 2:3 3:2 | low/medium/high | 无 | 3（官方建议 ≤2） | — |
+| gpt-image | `gpt-image` | 像素 WxH | 八档含 21:9 | 四档含 auto | 无 | 16 | — |
+| seedream | `seedream` / `seededit` | 像素 WxH | 八档含 21:9 | 无 | 2K/4K | 10 | pro 921600、其余 3686400 |
+| standard | 其余 | 像素 WxH | 八档含 21:9 | 无 | 2K/4K | 4 | — |
+
+**真值源是 `tests/fixtures/capability-matrix.json`** —— Python 与 vitest 各自实现、共同对着它断言。改任一端的判据前先改那张表，两端测试会同时挡住漂移。2026-08-13 之前这四项在前后端各判各的（前端按 provider 判 seedream 尺寸、后端按 provider 判 quality 与参考图上限），后果是大量静默改写：Tuzi 下的 seedream 参考图被砍到 4 张、词元跳动上选的 quality 被后端丢弃。
+
+后端做过的改写（尺寸放大 / HK 档位吸附 / 参考图截断 / 出图张数不足）一律写进 `params.warnings`，由图卡展示——不再静默。
 
 ### OpenAI-HK 价目（积分，10000 积分 = 1 元）
 
@@ -171,7 +210,7 @@ token 估算 `(输入视频秒+输出秒)×宽×高×24/1024`，准确以 `usage
 
 ## 视频契约 — HappyHorse（阿里百炼 / TokenDance 转发）
 
-契约源 `help.aliyun.com/zh/model-studio/happyhorse-api-reference`。**当前 dispatch_video 未接通，调用报 WrongProviderError**。
+契约源 `help.aliyun.com/zh/model-studio/happyhorse-api-reference`。**已接通**：`video_registry` 的 `dashscope` 适配器 → `happyhorse_video.render_video`，四模式全实现，`tokendance` key 下已挂 4 个模型。
 
 | 操作 | 百炼直连 | TokenDance 转发 |
 |---|---|---|
@@ -225,15 +264,29 @@ TokenDance quickstart 的请求体与阿里官方**不一致**：它写 `input.i
 
 ## 路由现状
 
+**视频早已不按 provider 路由，改成按协议走注册表**（`callers/__init__.py::dispatch_video` →
+`_effective_protocol` → `video_registry.VIDEO_ADAPTERS`）。协议值存在 `ModelSpec.protocol` 里
+（models-preview 从上游解析，旧 key 由 `keys._backfill_model_protocols` 读时回填），解析不出
+→ `WrongProviderError`，不再有「按 provider 名分流」这回事。
+
 ```
-图片 dispatch：provider openai/seedream/tokendance/custom → openai_image.render
-  base 含 openai-hk → 强制同步通道（gpt-image 发 ?async=true 会 404）
-视频 dispatch_video：
-  provider seedance                    → volcengine_video（Ark 直连）
-  provider tokendance + id 含 seedance → volcengine_video（任务 URL 改写）
-  id 前缀 kling + HK base              → kling_video
-  其余（happyhorse / vidu）            → WrongProviderError
+图片 dispatch：
+  provider openrouter                      → openrouter_image.render（专用 /images，回 b64_json）
+  provider openai/seedream/tokendance/custom → openai_image.render
+    protocol == "ark"（词元跳动的 seedream 系）→ {gateway}/ark/v3/images/generations
+    base 含 openai-hk                        → 强制同步通道（gpt-image 发 ?async=true 会 404）
+    HK 上的非 gpt-image / nano-banana 族      → 回落 /chat/completions 抽图
+
+视频 dispatch_video：按 ModelSpec.protocol 查 VIDEO_ADAPTERS，四个协议
+  seedance   → volcengine_video   （Ark 直连 / 词元跳动改写任务 URL）
+  dashscope  → happyhorse_video   （阿里百炼 / 词元跳动转发）
+  kling      → kling_video        （HK 聚合，挂站点根）
+  openrouter → openrouter_video   （异步 /videos job）
+  protocol 为 None → WrongProviderError「无法识别视频模型的接口协议」
 ```
+
+注意:上游模型列表里能拉到、但 `resolve_protocol` 认不出协议的视频模型（如词元跳动的
+`kling-3.0` / `minimax-h3`）目前仍可被勾选保存，要到真出图时才报错。
 
 帧语义（前端→caller）：双帧 = firstlast、仅首 = first、仅尾 = last、全空 = 文生视频；多余图片作 `reference_image`。
 
@@ -243,23 +296,25 @@ TokenDance quickstart 的请求体与阿里官方**不一致**：它写 `input.i
 
 | 维度 | 官方 | 当前实装 |
 |---|---|---|
-| seedance duration | 2.0 支持 4-15 任意整数秒 + `-1` 智能 | 仅 5/10 两档（`videoControlCaps.ts`） |
-| seedance ratio | 七档含 3:4、adaptive | 五档，缺 3:4 / adaptive |
-| seedance 参考素材上限 | 图 1-9、视频 ≤3、音频 ≤3 | 未按官方上限校验 |
+| seedance duration | 2.0 支持 4-15 任意整数秒 + `-1` 智能 | **已实装**全档（`videoControlCaps.ts` durationRange：2.0 4-15 / 1.5pro 4-12 / 1.0pro 2-12）；`-1` 智能未实装 |
+| seedance ratio | 七档含 3:4、adaptive | **已实装**七档（1.0pro 按代际过滤 adaptive）|
+| seedance 参考素材上限 | 图 1-9、视频 ≤3、音频 ≤3 | **已按上限截断**（caller 图 [:9] / 视频 [:3] / 音频 [:3]，前端同值）|
 | seedance frames / callback_url / return_last_frame / service_tier / priority / tools | 有 | 未实装 |
 | seedance 视频编辑 / 延长（2.0） | 参考素材 + 提示词表达 | 无入口 |
-| happyhorse 四模式（t2v/i2v/r2v/video-edit） | 有 | dispatch_video 未接通 |
-| kling | — | caller 已写，模型未挂 HK key |
+| happyhorse 四模式（t2v/i2v/r2v/video-edit） | 有 | **已接通**四模式；`parameters.audio_setting`（edit 保留原声）未实装；video-edit 的输入视频只收公网直链、**没有 OSS 中转兜底**（seedance 那条有），前端却放行本地上传 → 该模型从 UI 走必失败 |
+| kling | — | caller 已写，模型未挂 HK key；UI 从不给 kling 开「全能参考」（能力总览表里那格是官方能力，不是实装）|
 
 改前端控件 → `videoControlCaps.ts` + 对应 caller + `dispatch_video` 路由分支；改图像参考图上限 → `referenceLimits.ts` ↔ `openai_image._max_reference_images` 两端同步；改完验证 `cd web && pnpm lint && pnpm test`、`.venv/bin/python -m pytest`、`make build` + 重启 server。
 
 ## 已知坑
 
-- HK 上游 `GET /models` 404，模型只能手填；TokenDance / Ark 的 `/models` 可拉。
-- HK `/images/edits` multipart 未真机实测。
-- kling-video-o1 omni 端点 image 字段命名待验证。
-- TokenDance key 待充值；模型单价全部挂登录后台（`/portal/api/models/{slug}` 匿名 401）。
-- TokenDance happyhorse 请求体两套字段（见上），先实测再接。
+- HK 上游 `GET /models` 404，模型只能手填；TokenDance / Ark / Tuzi / OpenRouter 的 `/models` 可拉。
+- HK `nano-banana-hd` 对不合它意的请求**不报错**：实测缺 prompt 时跑满 28s 回 `{"data":[{"revised_prompt":"NO_IMAGE"}]}`（有响应、没图，很可能已计费）。`_friendly_error` 已把这类翻成中文。
+- Tuzi 对畸形请求**挂起不返回**（缺 prompt / 不存在的模型 id 实测都挂满读超时），而它是当前 default_alias；读超时不再重试后单次失败最长 = 读超时 300s。
+- HK `/images/edits` multipart 已实测可用（仅 gpt-image 族；nano-banana 走 generations，其 edits 被 403）。
+- kling-video-o1 omni 端点 image 字段命名待验证；caller 目前对 o1 也会发 `mode: std`（官方只给 t2v/i2v 描述了 mode），越界的 duration / ratio 未在 caller 侧 clamp，Skill 直写 job JSON 时会把非法值发到上游。
+- TokenDance key 已充值并出图实测通（2026-08-13）；模型单价全部挂登录后台（`/portal/api/models/{slug}` 匿名 401）。
+- TokenDance happyhorse 请求体两套字段（网关 quickstart 写 `input.img_url` + `parameters.size`，阿里官方写 `input.media[]` + `parameters.resolution`）——caller 按**官方**实现，网关实际吃哪套仍未验；已知提交阶段不校验参数(先回 200 + task_id，参数错要轮询才看到 FAILED，实测未计费)。
 - TokenDance `:save` 后缀变体（seedance-2.0:save 等）含义全站无说明。
 - 产物 URL 全员短命：seedance video_url 24h（任务 ID 7 天）、happyhorse task_id/video_url 24h——出片后立即落盘。
 - seedance 参考视频仅公网直链：base64 被上游显式拒（`reference_video must be provided as a web url`，2026-06-12 经 TokenDance 网关实测）；本地参考视频由 `oss_upload.py` 中转阿里云 OSS（私有桶 + presigned 24h GET，配置在 keys.json `oss` 字段，同日真实上传冒烟通过）；参考音频 base64 内联可用（同日实测任务进 running），单段 ≤15MB（`_video_payload_url` / `_audio_payload_url`）。

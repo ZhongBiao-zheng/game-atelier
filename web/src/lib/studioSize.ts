@@ -1,7 +1,37 @@
+/** Studio 尺寸计算 —— 比例 + 2K/4K 档位 → 像素，以及按模型族的像素归一。
+ *
+ * 判据是**模型族**不是 provider（唯一真值表 tests/fixtures/capability-matrix.json）：
+ * 旧代码按 `provider === 'seedream'` 选尺寸表，同一个 doubao-seedream 挂在 Tuzi / 词元跳动
+ * （provider=custom/tokendance）下就掉进通用算法，界面显示 2048×1152、后端按像素下限改写成
+ * 2560×1440 —— 静默改写。改成按族之后界面显示的就是真正会出的尺寸。
+ */
+import { imageFamily, normalizedModelId } from '@/lib/modelFamily';
+
 type Resolution = '2K' | '4K';
 
-export const SEEDREAM_MIN_PIXELS = 3686400;
+// seedream 族像素下限（低于此值上游会拒或自动放大）。默认 3686400；
+// 分档 key 按归一 id（尾段 + lower + `_`/`.` 归一为 `-`）做子串匹配 ——
+// 同一个模型在不同网关下有 `seedream-5.0-pro` / `doubao-seedream-5-0-pro-xxx` 两种写法。
+const SEEDREAM_MIN_PIXELS_DEFAULT = 3686400;
+const SEEDREAM_MIN_PIXELS_BY_MODEL: Array<[string, number]> = [
+  // 实测下限只要 921600，套默认值会让用户白付 4 倍像素。
+  ['seedream-5-0-pro', 921600],
+];
 
+/** 该模型的最小像素下限；null = 该族不做最小像素归一。
+ *
+ * gpt-image 返回 null：它不是「单一下限」而是一整套约束（最大边 / 双边 16 倍数 / 上下限像素），
+ * 走 `normalizeGptImagePixelSize`。 */
+export function familyMinPixels(modelId?: string | null): number | null {
+  if (imageFamily(modelId) !== 'seedream') return null;
+  const id = normalizedModelId(modelId).replace(/\./g, '-');
+  for (const [key, px] of SEEDREAM_MIN_PIXELS_BY_MODEL) {
+    if (id.includes(key)) return px;
+  }
+  return SEEDREAM_MIN_PIXELS_DEFAULT;
+}
+
+// seedream 族的 2K/4K 标准档（火山官方尺寸表，已满足默认像素下限）。
 const SIZE_TABLE: Record<Resolution, Record<string, { w: number; h: number }>> = {
   '2K': {
     '1:1': { w: 2048, h: 2048 },
@@ -28,9 +58,9 @@ const SIZE_TABLE: Record<Resolution, Record<string, { w: number; h: number }>> =
 export function computeStudioPixelSize(
   ratio: string,
   resolution: Resolution,
-  provider?: string | null,
+  modelId?: string | null,
 ): { w: number; h: number } {
-  if (provider === 'seedream') {
+  if (imageFamily(modelId) === 'seedream') {
     return SIZE_TABLE[resolution][ratio] ?? SIZE_TABLE[resolution]['1:1'];
   }
   const base = resolution === '4K' ? 4096 : 2048;
@@ -41,33 +71,9 @@ export function computeStudioPixelSize(
   return { w: Math.round((a / b) * base), h: base };
 }
 
-export function studioSizeFor(ratio: string, resolution: Resolution, provider?: string | null) {
-  const { w, h } = computeStudioPixelSize(ratio, resolution, provider);
+export function studioSizeFor(ratio: string, resolution: Resolution, modelId?: string | null) {
+  const { w, h } = computeStudioPixelSize(ratio, resolution, modelId);
   return `${w}x${h}`;
-}
-
-export function normalizeStudioPixelSizeForProvider(
-  size: { w: number; h: number },
-  provider?: string | null,
-): { w: number; h: number } {
-  if (provider !== 'seedream' || size.w * size.h >= SEEDREAM_MIN_PIXELS) {
-    return size;
-  }
-  const scale = Math.sqrt(SEEDREAM_MIN_PIXELS / Math.max(1, size.w * size.h));
-  return {
-    w: Math.ceil(size.w * scale),
-    h: Math.ceil(size.h * scale),
-  };
-}
-
-export function normalizeStudioSizeForProvider(size: string, provider?: string | null): string {
-  const match = /^(\d+)x(\d+)$/.exec(size.trim());
-  if (!match) return size;
-  const normalized = normalizeStudioPixelSizeForProvider(
-    { w: Number(match[1]), h: Number(match[2]) },
-    provider,
-  );
-  return `${normalized.w}x${normalized.h}`;
 }
 
 // gpt-image 尺寸约束（OpenAI-HK 文档）：最大边 ≤3840、双边 16 倍数、总像素 65.5万~829万。
@@ -97,26 +103,26 @@ export function normalizeGptImagePixelSize(size: { w: number; h: number }): { w:
   return { w: round16(w), h: round16(h) };
 }
 
-/** 按模型族归一化像素尺寸：gpt-image 走自由像素约束，其余沿用 provider 规则。 */
+/** 按模型族归一化像素尺寸：gpt-image 走自由像素约束，seedream 走最小像素下限，其余原样。 */
 export function normalizeStudioPixelSizeForModel(
   size: { w: number; h: number },
-  provider?: string | null,
   modelId?: string | null,
 ): { w: number; h: number } {
-  if (modelId?.startsWith('gpt-image')) return normalizeGptImagePixelSize(size);
-  return normalizeStudioPixelSizeForProvider(size, provider);
+  if (imageFamily(modelId) === 'gpt-image') return normalizeGptImagePixelSize(size);
+  const minPixels = familyMinPixels(modelId);
+  if (minPixels === null || size.w * size.h >= minPixels) return size;
+  const scale = Math.sqrt(minPixels / Math.max(1, size.w * size.h));
+  return {
+    w: Math.ceil(size.w * scale),
+    h: Math.ceil(size.h * scale),
+  };
 }
 
-export function normalizeStudioSizeForModel(
-  size: string,
-  provider?: string | null,
-  modelId?: string | null,
-): string {
+export function normalizeStudioSizeForModel(size: string, modelId?: string | null): string {
   const match = /^(\d+)x(\d+)$/.exec(size.trim());
   if (!match) return size;
   const normalized = normalizeStudioPixelSizeForModel(
     { w: Number(match[1]), h: Number(match[2]) },
-    provider,
     modelId,
   );
   return `${normalized.w}x${normalized.h}`;

@@ -19,7 +19,6 @@ TokenDance 网关 quickstart 的请求体字段与阿里官方不一致（img_ur
 from __future__ import annotations
 
 import base64
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -27,6 +26,7 @@ from typing import Any
 import requests
 
 from character_workflow.lib import keys as _keys
+from character_workflow.lib.callers import video_poll
 
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/api/v1"
 
@@ -172,44 +172,75 @@ def _extract_status(payload: dict[str, Any]) -> str:
     return str(s).strip().upper()
 
 
-def _extract_video_url(payload: dict[str, Any]) -> str | None:
+_OUTPUT_URL_KEYS = ("video_url", "videoUrl", "url")
+
+
+def _extract_video_url(payload: dict[str, Any], sent: set[str] | None = None) -> str | None:
+    """只认 output 下的产物位置，再按「本次发出去的 URL」排除回显。
+
+    原先还会兜底扫 payload 顶层的 url —— video-edit 模式发出去的输入视频按契约必须是
+    公网直链，一旦上游把它回显到顶层就会被当成产物下载：is_valid_video 当然过得了
+    （它本来就是合法 mp4），job 标 DONE，交付的是用户自己的输入原片，全程零报错。
+    DashScope 契约把产物固定放在 output 下，顶层兜底除了制造这个坑没有别的用处。
+    """
     out = _output(payload)
-    for src in (out, out.get("results") if isinstance(out.get("results"), dict) else {}, payload):
-        v = src.get("video_url") or src.get("videoUrl") or src.get("url")
-        if isinstance(v, str) and v.startswith("http"):
-            return v
+    results = out.get("results")
+    sources: list[dict[str, Any]] = [out]
+    if isinstance(results, dict):
+        sources.append(results)
+    elif isinstance(results, list):
+        sources.extend(item for item in results if isinstance(item, dict))
+    for src in sources:
+        for k in _OUTPUT_URL_KEYS:
+            v = src.get(k)
+            if isinstance(v, str) and v.startswith("http") and not video_poll.is_echoed_input(v, sent):
+                return v
     return None
 
 
-def _download_mp4(url: str, output_dir: Path, index: int) -> str:
+def _download_mp4(url: str, output_dir: Path, index: int, *, task_ref: str = "") -> str:
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
         resp = requests.get(url, timeout=600)
         resp.raise_for_status()
     except requests.RequestException as e:
-        raise HappyHorseVideoError(f"下载上游视频失败: {e}") from e
+        # 任务已跑完并计费，只是产物没拉下来 —— 带上 task_id 和源地址供人工找回。
+        raise HappyHorseVideoError(
+            video_poll.with_task_ref(f"下载上游视频失败（源地址 {url}）: {e}", task_ref)
+        ) from e
     path = output_dir / f"v{index}.mp4"
     path.write_bytes(resp.content)
     return str(path)
 
 
-def _poll_task(*, base, headers, task_id, max_polls, poll_interval) -> str:
+def _poll_task(*, base, headers, task_id, max_polls, poll_interval, sent_urls=None) -> str:
+    """轮询到终态返回产物地址。
+
+    网络抖动 / 5xx 交给 video_poll 吞掉重试（不扣 max_polls）；终态只认 output.task_status。
+    此处失败一律带 task_id —— 但注意 task_id 仅 24h 有效，过期后 UNKNOWN 就再也查不回来。
+    """
     url = _task_url(base, task_id)
-    for _ in range(max_polls):
-        if poll_interval:
-            time.sleep(poll_interval)
-        resp = requests.get(url, headers=headers, timeout=180)
+    for resp in video_poll.poll_responses(
+        url=url, headers=headers, timeout=180, max_polls=max_polls,
+        poll_interval=poll_interval, task_ref=task_id, error_cls=HappyHorseVideoError,
+    ):
         payload = _json(resp)
         if not resp.ok:
-            raise HappyHorseVideoError(_err(payload, resp.status_code))
+            raise HappyHorseVideoError(
+                video_poll.with_task_ref(_err(payload, resp.status_code), task_id)
+            )
         status = _extract_status(payload)
         if status in _SUCCESS:
-            picked = _extract_video_url(payload)
+            picked = _extract_video_url(payload, sent_urls)
             if picked:
                 return picked
-            raise HappyHorseVideoError("视频任务成功但未返回视频地址")
+            raise HappyHorseVideoError(
+                video_poll.with_task_ref("视频任务成功但未返回视频地址", task_id)
+            )
         if status in _FAILURE:
-            raise HappyHorseVideoError(_err(payload, resp.status_code))
+            raise HappyHorseVideoError(
+                video_poll.with_task_ref(_err(payload, resp.status_code), task_id)
+            )
     raise HappyHorseVideoError(f"视频任务轮询超时: {task_id}")
 
 
@@ -239,6 +270,10 @@ def render_video(
         "X-DashScope-Async": "enable",  # 缺了直接报错（官方硬要求）
     }
     body = _build_body(prompt, model, params)
+    # video-edit 的输入视频只能是公网直链，最容易被回显成「产物」；参考图若也是直链一并排除。
+    sent_urls = video_poll.sent_url_set([
+        str(m.get("url") or "") for m in (body.get("input", {}).get("media") or [])
+    ])
     submit_url = _synthesis_url(base)
 
     n = max(1, min(4, int(params.get("n") or 1)))
@@ -258,9 +293,12 @@ def render_video(
     out_dir = Path(output_dir)
     ready_urls = [
         _poll_task(base=base, headers=headers, task_id=t,
-                   max_polls=max_polls, poll_interval=poll_interval)
+                   max_polls=max_polls, poll_interval=poll_interval, sent_urls=sent_urls)
         for t in task_ids
     ]
     if on_phase:
         on_phase("downloading")
-    return [_download_mp4(url, out_dir, i + 1) for i, url in enumerate(ready_urls)]
+    return [
+        _download_mp4(url, out_dir, i + 1, task_ref=task_ids[i])
+        for i, url in enumerate(ready_urls)
+    ]

@@ -6,8 +6,10 @@ from pathlib import Path
 
 import pytest
 
+import requests
+
 from character_workflow.lib import keys
-from character_workflow.lib.callers import dispatch, openrouter_image, openrouter_video
+from character_workflow.lib.callers import dispatch, openrouter_image, openrouter_video, video_poll
 from character_workflow.lib.keys import KeySpec
 
 _PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 16
@@ -183,3 +185,101 @@ def test_video_render_failed_status_raises(openrouter_key, tmp_path, monkeypatch
             prompt="p", model="openai/sora-2-pro", alias="OpenRouter",
             output_dir=tmp_path / "vid", params={}, poll_interval=0,
         )
+
+
+class _VidResp:
+    def __init__(self, payload=None, content=b"MP4", status_code=200):
+        self._payload = payload or {}
+        self.content = content
+        self.status_code = status_code
+
+    @property
+    def ok(self):
+        return self.status_code < 400
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if not self.ok:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+_DONE = {"status": "completed", "unsigned_urls": ["https://openrouter.ai/api/v1/videos/j/content"]}
+
+
+def _submit_ok(*a, **k):
+    return _VidResp({"id": "job-77", "polling_url": "https://openrouter.ai/api/v1/videos/job-77"})
+
+
+def _render_video(tmp_path, **kw):
+    return openrouter_video.render_video(
+        prompt="p", model="google/veo-3.1", alias="OpenRouter",
+        output_dir=tmp_path / "vid", params={}, poll_interval=0, **kw,
+    )
+
+
+def test_video_poll_recovers_from_transient_network_error(openrouter_key, tmp_path, monkeypatch):
+    # 轮询窗口 30 分钟（120×15s），期间一次代理切节点不该把已计费的 job 判死。
+    monkeypatch.setattr(openrouter_video.requests, "post", _submit_ok)
+    calls = {"n": 0}
+
+    def fake_get(url, headers=None, timeout=None):
+        if url.endswith("/content"):
+            return _VidResp()
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise requests.ConnectionError("Connection reset by peer")
+        return _VidResp(_DONE)
+
+    monkeypatch.setattr(openrouter_video.requests, "get", fake_get)
+    # max_polls=1：抖动若吃预算就会当场超时。
+    assert _render_video(tmp_path, max_polls=1)
+    assert calls["n"] == 3
+
+
+def test_video_poll_transient_5xx_is_not_task_failure(openrouter_key, tmp_path, monkeypatch):
+    monkeypatch.setattr(openrouter_video.requests, "post", _submit_ok)
+    seq = [_VidResp({"error": "upstream"}, status_code=503), _VidResp(_DONE)]
+
+    def fake_get(url, headers=None, timeout=None):
+        return _VidResp() if url.endswith("/content") else seq.pop(0)
+
+    monkeypatch.setattr(openrouter_video.requests, "get", fake_get)
+    assert _render_video(tmp_path, max_polls=1)
+
+
+def test_video_abandon_after_consecutive_failures_names_job_id(openrouter_key, tmp_path, monkeypatch):
+    # 放弃可以，但必须交出 job id：产物挂在 {base}/videos/{id}/content，有 id 才能手动取回。
+    monkeypatch.setattr(video_poll, "_TRANSIENT_WINDOW_SECONDS", 3.0)
+    monkeypatch.setattr(openrouter_video.requests, "post", _submit_ok)
+
+    def always_down(url, headers=None, timeout=None):
+        raise requests.ConnectionError("dns failure")
+
+    monkeypatch.setattr(openrouter_video.requests, "get", always_down)
+    with pytest.raises(openrouter_video.OpenRouterVideoError, match="job-77"):
+        _render_video(tmp_path)
+
+
+def test_video_failure_timeout_and_download_carry_job_id(openrouter_key, tmp_path, monkeypatch):
+    monkeypatch.setattr(openrouter_video.requests, "post", _submit_ok)
+
+    monkeypatch.setattr(openrouter_video.requests, "get",
+                        lambda url, **k: _VidResp({"status": "failed", "error": "nsfw"}))
+    with pytest.raises(openrouter_video.OpenRouterVideoError, match="job-77"):
+        _render_video(tmp_path)
+
+    monkeypatch.setattr(openrouter_video.requests, "get",
+                        lambda url, **k: _VidResp({"status": "in_progress"}))
+    with pytest.raises(openrouter_video.OpenRouterVideoError, match="job-77"):
+        _render_video(tmp_path, max_polls=2)
+
+    def fail_download(url, headers=None, timeout=None):
+        if url.endswith("/content"):
+            raise requests.ConnectionError("reset")
+        return _VidResp(_DONE)
+
+    monkeypatch.setattr(openrouter_video.requests, "get", fail_download)
+    with pytest.raises(openrouter_video.OpenRouterVideoError, match="job-77"):
+        _render_video(tmp_path)

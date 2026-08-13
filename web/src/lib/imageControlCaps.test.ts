@@ -22,11 +22,18 @@ describe('imageControlCaps', () => {
     expect(c.sizeKind).toBe('pixels');
   });
 
-  it('seedream/默认: 分辨率 + 自定义尺寸，无质量', () => {
+  it('seedream: 分辨率 + 自定义尺寸，无质量', () => {
     const c = imageControlCaps('doubao-seedream-5-0-260128');
-    expect(c.family).toBe('standard');
+    expect(c.family).toBe('seedream');
     expect(c.showResolution).toBe(true);
     expect(c.showCustomSize).toBe(true);
+    expect(c.qualities).toBeNull();
+  });
+
+  it('未知模型回落 standard: 与 seedream 同控件，但不做最小像素归一', () => {
+    const c = imageControlCaps('black-forest-labs/flux.2-pro');
+    expect(c.family).toBe('standard');
+    expect(c.showResolution).toBe(true);
     expect(c.qualities).toBeNull();
   });
 });
@@ -44,10 +51,19 @@ describe('normalizeGptImagePixelSize', () => {
   });
 
   it('normalizeStudioPixelSizeForModel 对 gpt-image 走 /16 归一', () => {
-    expect(normalizeStudioPixelSizeForModel({ w: 1000, h: 1000 }, 'custom', 'gpt-image-2'))
+    expect(normalizeStudioPixelSizeForModel({ w: 1000, h: 1000 }, 'gpt-image-2'))
       .toEqual({ w: 1008, h: 1008 });
-    // 非 gpt 模型不强制 /16
-    expect(normalizeStudioPixelSizeForModel({ w: 1000, h: 1000 }, 'openai', 'some-model'))
+    // standard 族不归一（既不 /16 也无像素下限）
+    expect(normalizeStudioPixelSizeForModel({ w: 1000, h: 1000 }, 'some-model'))
       .toEqual({ w: 1000, h: 1000 });
+  });
+
+  it('seedream 按模型分档抬到像素下限：pro 921600、其余 3686400', () => {
+    // 2048×1152（16:9 通用算法）低于默认下限 → 抬到 ≥3686400，避免后端静默改写
+    const lite = normalizeStudioPixelSizeForModel({ w: 2048, h: 1152 }, 'seedream-5.0-lite');
+    expect(lite.w * lite.h).toBeGreaterThanOrEqual(3686400);
+    // pro 下限只有 921600，2048×1152 已经够 → 原样，不白付 4 倍像素
+    expect(normalizeStudioPixelSizeForModel({ w: 2048, h: 1152 }, 'seedream-5.0-pro'))
+      .toEqual({ w: 2048, h: 1152 });
   });
 });

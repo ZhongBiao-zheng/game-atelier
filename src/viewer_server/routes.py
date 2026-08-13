@@ -12,6 +12,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -907,34 +908,127 @@ class _ModelsPreviewPayload(BaseModel):
     provider: str | None = None
     base_url: str | None = None
     access_key: str | None = None
+    # 逃生舱：连明确判定为非视觉的模型也一并返回（deny 词表判过头时用）。
+    include_all: bool = False
 
 
-# 模态猜测：supported_protocols（词元跳动等带协议标注的网关）优先；
-# 无协议字段的通用 OpenAI 兼容上游按模型 id 关键词兜底，猜不中归 None（非出图模型）。
+# 模型分类：image / video / unknown / excluded。
+#
+# excluded 是**唯一**授权丢弃的类别，条件很窄：上游明确标注了协议、且每一条协议都是非视觉。
+# 判不出来一律 unknown 留在列表里让画师自己确认 —— 协议词汇是各厂自造的（同一份词元跳动
+# 数据里就有 zai:layout-parsing / bocha:web-search / unifuncs:web-reader），词表永远追不完，
+# 「认不出就丢」会让某个网关的模型列表整片消失且用户看不出原因。
 _VIDEO_ID_HINTS = (
-    "video", "seedance", "vidu", "kling", "veo", "sora", "wan",
+    "video", "seedance", "vidu", "kling", "veo", "sora",
     "happyhorse", "pixverse", "runway", "hailuo",
 )
 _IMAGE_ID_HINTS = (
-    "image", "seedream", "dall-e", "dalle", "flux", "banana", "midjourney",
-    "cogview", "imagen", "ideogram", "recraft", "irag",
+    "image", "seedream", "seededit", "dall-e", "dalle", "flux", "banana", "midjourney",
+    "cogview", "imagen", "ideogram", "recraft", "irag", "kolors", "hidream",
+)
+# 协议动词（冒号后半段）判视觉；seedance:generations 这类动词无信息量，靠厂商前缀兜。
+_PROTOCOL_IMAGE_HINTS = (
+    "image-generations", "image-generation", "images", "image-edits", "images-edits",
+    "image2image", "t2i", "text2image",
+)
+_PROTOCOL_VIDEO_HINTS = (
+    "video", "seedance", "vidu", "happyhorse", "t2v", "i2v", "r2v",
+    "text2video", "image2video",
+)
+# 明确非视觉的协议动词：全部命中才判 excluded。
+_PROTOCOL_NON_VISUAL_HINTS = (
+    "chat-completions", "completions", "responses", "messages", "embeddings", "rerank",
+    "moderations", "t2a", "tts", "asr", "speech", "audio", "transcriptions", "translations",
+    "voice_clone", "web-search", "web-reader", "search", "layout-parsing", "ocr",
 )
 
 
-def _guess_model_modality(item: dict) -> str | None:
+def _id_hits(mid: str, hints: tuple[str, ...]) -> bool:
+    """id 关键词按**词边界**匹配 —— 裸子串会把 `inkling`（纯文本）判成 kling 视频、
+    把 `wanx`（通义万相，图像）判成视频。前后不许紧邻字母数字。"""
+    return any(re.search(rf"(?<![a-z0-9]){re.escape(h)}(?![a-z0-9])", mid) for h in hints)
+
+
+def _classify_model(item: dict) -> str:
+    """返回 image / video / unknown / excluded —— 只有 excluded 会被过滤掉。"""
     protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
-    if any("image-generations" in p for p in protocols):
+    if any(h in p for p in protocols for h in _PROTOCOL_IMAGE_HINTS):
         return "image"
-    if any(h in p for p in protocols for h in ("video", "seedance", "vidu", "happyhorse")):
+    if any(h in p for p in protocols for h in _PROTOCOL_VIDEO_HINTS):
         return "video"
-    if protocols:
-        return None
+    # 每一条协议都是非视觉才排除；混合标注（含一条看不懂的）保守留下。
+    if protocols and all(
+        any(h in p for h in _PROTOCOL_NON_VISUAL_HINTS) for p in protocols
+    ):
+        return "excluded"
+
+    # OpenRouter 等不给 supported_protocols，但给 architecture.output_modalities —— 这是
+    # 权威字段，必须排在 id 猜测之前（实测它能修好 openrouter/auto、干掉 inkling 假阳性）。
+    arch = item.get("architecture")
+    out = {str(m).lower() for m in (arch or {}).get("output_modalities") or []} if isinstance(arch, dict) else set()
+    if "video" in out:
+        return "video"
+    if "image" in out:
+        return "image"
+    if out and not (out & {"image", "video"}):
+        # 上游明说输出里没有图也没有视频（纯文本 / 纯音频）——它自己声明的，可以信。
+        return "excluded"
+
     mid = str(item.get("id") or "").lower()
-    if any(h in mid for h in _VIDEO_ID_HINTS):
+    if _id_hits(mid, _VIDEO_ID_HINTS):
         return "video"
-    if any(h in mid for h in _IMAGE_ID_HINTS):
+    if _id_hits(mid, _IMAGE_ID_HINTS):
         return "image"
-    return None
+    return "unknown"
+
+
+def _guess_model_modality(item: dict) -> str | None:
+    """分类结果里只有 image / video 能当 modality；unknown 交给画师标，excluded 不入列表。"""
+    category = _classify_model(item)
+    return category if category in ("image", "video") else None
+
+
+def _fetch_model_rows(url: str, headers: dict) -> list:
+    """拉一次上游模型列表并归一成 list；任何一步失败都抛 502 带上游原文。"""
+    import requests
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=20)
+    except requests.RequestException as e:
+        raise HTTPException(502, f"请求上游失败: {e}") from e
+    if resp.status_code >= 400:
+        raise HTTPException(502, f"上游 {resp.status_code}: {resp.text[:200]}")
+    try:
+        body = resp.json()
+    except ValueError as e:
+        raise HTTPException(502, f"上游响应非 JSON: {resp.text[:200]}") from e
+    rows = body.get("data") if isinstance(body, dict) else body
+    if not isinstance(rows, list):
+        raise HTTPException(502, "上游响应缺少模型列表（data）")
+    return rows
+
+
+def _extra_model_list_urls(models_url: str, provider: str) -> list[str]:
+    """默认 /models 之外还需要拉的列表 URL。
+
+    OpenRouter 实测（2026-08-13）：`GET /api/v1/models` 返回 409 条，里面**一个视频模型
+    都没有**；23 个视频模型（veo / sora / kling / seedance / hailuo / runway…）只在
+    `?output_modalities=video` 或 `/videos/models` 下列出。不额外拉这一次，OpenRouter key
+    的用户在设置页永远拉不到视频模型、只能手填 id —— keys.json 里那几个就是这么来的。
+
+    别把「默认端点里没有」当成「这个平台没有」：先按 host 试专用列表，再下结论。
+    """
+    host = urlsplit(models_url).netloc.lower()
+    if "openrouter.ai" in host or provider == "openrouter":
+        sep = "&" if "?" in models_url else "?"
+        return [f"{models_url}{sep}output_modalities=video"]
+    return []
+
+
+def _url_host(url: str) -> str:
+    """取 URL 的 host（含端口）用于同源比对；解析不出就返回原串以免两个空值相等。"""
+    netloc = urlsplit((url or "").strip()).netloc.lower()
+    return netloc or (url or "").strip().lower()
 
 
 def _image_protocol(item: dict) -> str | None:
@@ -972,8 +1066,20 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         stored = keys.find_by_alias(payload.alias)
         if stored is None:
             raise HTTPException(404, f"alias '{payload.alias}' not found")
-        base_url = base_url or (stored.base_url or "")
-        access_key = access_key or stored.access_key
+        if access_key:
+            # 调用方自带密钥（新建 / 编辑时改过密钥）→ 地址随它，泄露面止于它自己的密钥。
+            base_url = base_url or (stored.base_url or "")
+        else:
+            # 要用存储的**明文**密钥，就只能打存储的那个 host：否则等于让调用方指定「把密钥
+            # 发到哪」。viewer-server 没有 TrustedHost / CSRF 防线，DNS rebinding 下本机页面
+            # 就能触发。换 host 属于换供应商，本来就该重新填密钥。同 host 换路径照常放行。
+            stored_base = stored.base_url or ""
+            if base_url and _url_host(base_url) != _url_host(stored_base):
+                raise HTTPException(
+                    400, "服务地址换了域名，请先填写该地址对应的密钥再拉取模型列表"
+                )
+            base_url = base_url or stored_base
+            access_key = stored.access_key
         preview_provider = stored.provider or payload.provider or "custom"
     if not base_url:
         raise HTTPException(422, "缺少 API 请求地址（base_url）")
@@ -982,29 +1088,37 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
     if not url.endswith("/models"):
         url = f"{url}/models"
     headers = {"Authorization": f"Bearer {access_key}"} if access_key else {}
-    try:
-        resp = requests.get(url, headers=headers, timeout=20)
-    except requests.RequestException as e:
-        raise HTTPException(502, f"请求上游失败: {e}") from e
-    if resp.status_code >= 400:
-        raise HTTPException(502, f"上游 {resp.status_code}: {resp.text[:200]}")
-    try:
-        body = resp.json()
-    except ValueError as e:
-        raise HTTPException(502, f"上游响应非 JSON: {resp.text[:200]}") from e
-
-    rows = body.get("data") if isinstance(body, dict) else body
-    if not isinstance(rows, list):
-        raise HTTPException(502, "上游响应缺少模型列表（data）")
+    rows = _fetch_model_rows(url, headers)
+    # 有些上游把视频模型排除在默认 /models 之外，必须额外拉一次才看得见（见下方函数注释）。
+    # 额外列表拉不到不该让主列表失败：降级成「只有图片模型」，而不是整个功能报错。
+    for extra_url in _extra_model_list_urls(url, preview_provider):
+        try:
+            rows = rows + _fetch_model_rows(extra_url, headers)
+        except (HTTPException, requests.RequestException):
+            pass
 
     from character_workflow.lib.callers.video_registry import resolve_protocol
 
     models = []
+    seen_ids: set[str] = set()
+    excluded = 0
+    total = 0
     for item in rows:
         if not isinstance(item, dict) or not item.get("id"):
             continue
         mid = str(item["id"])
-        modality = _guess_model_modality(item)
+        if mid in seen_ids:  # 聚合商常给同一模型挂多个别名条目
+            continue
+        seen_ids.add(mid)
+        total += 1
+        category = _classify_model(item)
+        # 明确的非视觉模型不入列表：一把词元跳动 key 上游有 78 个模型，其中 61 个是对话 /
+        # 语音 / 搜索类，全塞进选择器只会淹掉那 17 个真正能出图出片的。include_all 是逃生舱：
+        # deny 词表哪天判过头了，画师能自己看到全量，不至于变成死路。
+        if category == "excluded" and not payload.include_all:
+            excluded += 1
+            continue
+        modality = category if category in ("image", "video") else None
         # 视频：协议 guess（resolve 不中 → None，交后端 dispatch 时判定 / 诚实报错）。
         # 图片：直接读上游协议标注（决定走 Ark 原生端点还是 OpenAI 兼容入口）。
         if modality == "video":
@@ -1017,9 +1131,11 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
             "id": mid,
             "name": str(item.get("name") or mid),
             "modality": modality,
+            # unknown 与 excluded 都要能被前端区分：前者是「需要你确认」，不是「其他垃圾」。
+            "category": category,
             "protocol": protocol,
         })
-    return {"models": models}
+    return {"models": models, "total": total, "excluded": excluded}
 
 
 _GALLERY_SLOTS = ("portrait", "promo", "turnaround")

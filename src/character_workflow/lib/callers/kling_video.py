@@ -15,7 +15,6 @@ succeed 后取 data.task_result.videos[].url，拉字节落 .mp4。
 from __future__ import annotations
 
 import base64
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -24,6 +23,7 @@ from urllib.parse import urlsplit
 import requests
 
 from character_workflow.lib import keys as _keys
+from character_workflow.lib.callers import video_poll
 
 _SUCCESS = {"SUCCEED", "SUCCEEDED", "SUCCESS"}
 _FAILURE = {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REJECTED"}
@@ -143,24 +143,34 @@ def _extract_task_id(payload: dict[str, Any]) -> str:
     return str(v) if v else ""
 
 
-def _video_urls(payload: dict[str, Any]) -> list[str]:
+def _video_urls(payload: dict[str, Any], sent: set[str] | None = None) -> list[str]:
+    """只认 data.task_result.videos[].url —— 上游明确的输出位置。
+
+    这里不做「刮整个 payload」：可灵的输入图走 image / image_tail 字段，回显也进不了
+    task_result.videos[]。sent 排除集仍然保留一道，防止上游把 http 输入图塞进输出数组。
+    """
     result = _data(payload).get("task_result")
     videos = result.get("videos") if isinstance(result, dict) else None
     urls: list[str] = []
     for item in videos or []:
         url = item.get("url") if isinstance(item, dict) else None
         if isinstance(url, str) and url.startswith("http"):
+            if video_poll.is_echoed_input(url, sent):
+                continue
             urls.append(url)
     return urls
 
 
-def _download_mp4(url: str, output_dir: Path, index: int) -> str:
+def _download_mp4(url: str, output_dir: Path, index: int, *, task_ref: str = "") -> str:
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
         resp = requests.get(url, timeout=600)
         resp.raise_for_status()
     except requests.RequestException as e:
-        raise KlingVideoError(f"下载上游视频失败: {e}") from e
+        # 任务已跑完并计费，只是产物没拉下来 —— 带上 task_id 和源地址供人工找回。
+        raise KlingVideoError(
+            video_poll.with_task_ref(f"下载上游视频失败（源地址 {url}）: {e}", task_ref)
+        ) from e
     path = output_dir / f"v{index}.mp4"
     path.write_bytes(resp.content)
     return str(path)
@@ -168,24 +178,35 @@ def _download_mp4(url: str, output_dir: Path, index: int) -> str:
 
 def _poll_task(
     *, root: str, headers: dict[str, str], act: str, task_id: str,
-    max_polls: int, poll_interval: float,
+    max_polls: int, poll_interval: float, sent_urls: set[str] | None = None,
 ) -> list[str]:
+    """轮询到终态，返回输出视频地址列表。
+
+    网络抖动 / 5xx 交给 video_poll 吞掉重试（不扣 max_polls）；这里只解读 task_status。
+    此处所有失败路径都对应一个已提交、已计费的任务，报错一律带 task_id。
+    """
     url = f"{root}/kling/v1/videos/{act}/{task_id}"
-    for _ in range(max_polls):
-        if poll_interval:
-            time.sleep(poll_interval)
-        resp = requests.get(url, headers=headers, timeout=180)
+    for resp in video_poll.poll_responses(
+        url=url, headers=headers, timeout=180, max_polls=max_polls,
+        poll_interval=poll_interval, task_ref=task_id, error_cls=KlingVideoError,
+    ):
         payload = _json(resp)
         if not resp.ok:
-            raise KlingVideoError(_err(payload, resp.status_code))
+            raise KlingVideoError(
+                video_poll.with_task_ref(_err(payload, resp.status_code), task_id)
+            )
         status = str(_data(payload).get("task_status") or "").strip().upper()
         if status in _SUCCESS:
-            urls = _video_urls(payload)
+            urls = _video_urls(payload, sent_urls)
             if urls:
                 return urls
-            raise KlingVideoError("可灵任务成功但未返回视频地址")
+            raise KlingVideoError(
+                video_poll.with_task_ref("可灵任务成功但未返回视频地址", task_id)
+            )
         if status in _FAILURE:
-            raise KlingVideoError(_err(payload, resp.status_code))
+            raise KlingVideoError(
+                video_poll.with_task_ref(_err(payload, resp.status_code), task_id)
+            )
     raise KlingVideoError(f"可灵任务轮询超时: {task_id}")
 
 
@@ -211,6 +232,10 @@ def render_video(
     root = _api_root(key)
     headers = {"Authorization": f"Bearer {key.access_key}", "Content-Type": "application/json"}
     act, body = _act_and_body(prompt, model, params)
+    # image / image_tail 可能是公网直链（本地文件已被编成裸 base64，不进排除集）。
+    sent_urls = video_poll.sent_url_set([
+        str(body[k]) for k in ("image", "image_tail") if isinstance(body.get(k), str)
+    ])
     n = max(1, min(4, int(params.get("n") or 1)))
 
     task_ids: list[str] = []
@@ -232,10 +257,10 @@ def render_video(
     for task_id in task_ids:
         for url in _poll_task(
             root=root, headers=headers, act=act, task_id=task_id,
-            max_polls=max_polls, poll_interval=poll_interval,
+            max_polls=max_polls, poll_interval=poll_interval, sent_urls=sent_urls,
         ):
             if on_phase and not downloading:
                 downloading = True
                 on_phase("downloading")
-            paths.append(_download_mp4(url, out_dir, len(paths) + 1))
+            paths.append(_download_mp4(url, out_dir, len(paths) + 1, task_ref=task_id))
     return paths

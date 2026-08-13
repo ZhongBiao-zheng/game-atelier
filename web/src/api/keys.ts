@@ -95,12 +95,27 @@ export async function revealKey(alias: string): Promise<{ access_key: string }> 
   return r.json();
 }
 
-/** 上游模型列表条目（/api/keys/models-preview 归一化结果）；modality null = 非出图模型。 */
+/** 上游模型分类（后端 _classify_model 的四级瀑布结果）：
+ * - `image` / `video`：能直接当 modality 用
+ * - `unknown`：认不出（协议词汇各厂自造，词表追不完）——**不等于垃圾**，要画师自己确认
+ * - `excluded`：明确非视觉（对话 / 语音 / 搜索），默认不返回，只在 include_all 逃生舱下出现 */
+export type ModelCategory = 'image' | 'video' | 'unknown' | 'excluded';
+
+/** 上游模型列表条目（/api/keys/models-preview 归一化结果）；modality null = 分类未定（见 category）。 */
 export interface RemoteModel {
   id: string;
   name: string;
   modality: ModelModality | null;
+  category: ModelCategory;
   protocol: string | null;
+}
+
+export interface ModelsPreview {
+  models: RemoteModel[];
+  /** 上游去重后的模型总数（含被过滤掉的那些）。 */
+  total: number;
+  /** 判定为「明确非视觉」而未返回的条数；include_all 下恒为 0（全部都返回了）。 */
+  excluded: number;
 }
 
 export async function previewModels(payload: {
@@ -108,7 +123,9 @@ export async function previewModels(payload: {
   provider?: string | null;
   base_url?: string | null;
   access_key?: string | null;
-}): Promise<{ models: RemoteModel[] }> {
+  /** 逃生舱：连明确非视觉的模型也一并返回（deny 词表判过头时让画师自己绕过去）。 */
+  include_all?: boolean;
+}): Promise<ModelsPreview> {
   const r = await fetch('/api/keys/models-preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
