@@ -33,6 +33,9 @@ _KNOWN_ENDPOINT_SUFFIXES = (
 # 网关瞬时错误：聚合商（OpenAI-HK 的 new-api 等）上游慢/排队时合成 502/503/504 回吐，
 # 重试一次往往就过。仅这三个码进重试；其余 4xx 及 429/500 是确定性/限流错误，当场致命。
 _RETRYABLE_STATUS = frozenset({502, 503, 504})
+# 落在瞬时码里但确定性的错误：网关明说「该模型下无可用端点」（模型未开通 / 不支持当前协议），
+# 重试多少次都是同一个答案，白等三轮退避。命中即当场致命。
+_FATAL_BODY_MARKERS = ("no_endpoints_available", "无可用端点")
 
 
 class OpenAIImageError(RuntimeError):
@@ -72,13 +75,17 @@ def render(
         raise OpenAIImageError("custom provider requires base_url")
 
     family = image_family(model)
-    # seedream 尺寸归一化对原生 seedream provider 和 custom 聚合商下的 seedream 族（如 Tuzi 的
-    # doubao-seedream-*，实测 1024² 报「must be at least 3686400 pixels」）都要生效——判据都在
-    # is_seedream 里，故先算它再归一化（下方分支复用同一 family / is_seedream，不重算）。
-    is_seedream = key.provider == "seedream" or (key.provider == "custom" and family == "seedream")
+    # 尺寸下限是模型属性，与 provider / 网关无关（实测：同一把词元跳动 key 下 5.0-lite 要
+    # 3686400 像素、5.0-pro 只要 921600，两条协议路径给出的下限一模一样）。所以归一化按
+    # 模型族判，火山直连 / Tuzi / 词元跳动下的 seedream 一视同仁。
+    is_seedream = family == "seedream"
+    # Ark 专有参数（watermark / 组图）维持原判据：只对直连火山和 custom 聚合商下的 seedream
+    # 发。词元跳动网关这两项的默认值没实测过，不在修协议路由时顺手改它的出图外观。
+    sends_ark_params = key.provider == "seedream" or (key.provider == "custom" and is_seedream)
     requested_size = _normalize_size_for_provider(
         kwargs.get("size") or kwargs.get("requested_size") or kwargs.get("params", {}).get("size"),
         is_seedream,
+        model,
     )
 
     out_dir = Path(output_dir)
@@ -156,6 +163,11 @@ def render(
 
     ref_image = _reference_image_param(kwargs, key.provider, model)
 
+    # 网关按协议挂端点：同一网关下不同模型支持的协议不同，打错入口会被判「无可用端点」。
+    # 只有 ark 需要换 URL，其余（None / openai）走默认 OpenAI 兼容入口。
+    is_ark_image = _effective_image_protocol(key, model) == "ark"
+    generations_url = _ark_image_url(base_url) if is_ark_image else _image_url(base_url)
+
     def _gen_payload(num: int) -> dict:
         return _image_generation_payload(
             model=model,
@@ -164,22 +176,64 @@ def render(
             n=num,
             image=ref_image,
             quality=quality,
-            watermark=is_seedream,
-            sequential=is_seedream,
+            watermark=sends_ark_params,
+            sequential=sends_ark_params,
         )
 
-    data = _post_json(_image_url(base_url), key.access_key, _gen_payload(requested), timeout=timeout)
+    data = _post_json(generations_url, key.access_key, _gen_payload(requested), timeout=timeout)
     paths = _write_outputs(data, out_dir)
-    # seedream / gpt-image・nano-banana（含 custom 同族）：单次可能只回 1 张，循环补足。
-    if is_seedream or is_hk_image or custom_img:
+    # seedream / gpt-image・nano-banana（含 custom 同族）/ ark 协议：单次可能只回 1 张，循环补足。
+    # ark 上 seedream-5.0-pro 不支持 sequential_image_generation，多张只能靠这里逐张补。
+    if is_seedream or is_hk_image or custom_img or is_ark_image:
         while len(paths) < requested:
-            data = _post_json(_image_url(base_url), key.access_key, _gen_payload(1), timeout=timeout)
+            data = _post_json(generations_url, key.access_key, _gen_payload(1), timeout=timeout)
             paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
     return paths[:requested]
 
 
+def resolve_image_protocol(provider: str, base_url: str | None, model: str) -> str | None:
+    """图片调用协议启发式 —— 返回 "ark" / "openai" / None（None = 走默认 OpenAI 兼容入口）。
+
+    权威来源是网关 `GET /models` 的 `supported_protocols`（models-preview 解析后存进
+    ModelSpec.protocol）；这里只兜底两种情况：旧 key 没存过 protocol、用户手填了不在
+    models[] 里的模型 id。
+
+    词元跳动的 seedream 系原生挂在 Ark 协议下，其中 seedream-5.0-pro **只有**
+    `ark:image-generations`——打 OpenAI 兼容入口会被网关判 503「模型下无可用端点」。
+    """
+    if provider == "tokendance" and image_family(model) == "seedream":
+        return "ark"
+    return None
+
+
+def _effective_image_protocol(key, model: str) -> str | None:
+    """模型已存 protocol 优先（models-preview 从上游协议表解析），未注册模型回退启发式。
+
+    形状对齐视频侧 callers._effective_protocol。视频协议值（seedance/kling/…）落到
+    图片路径也不会误伤：调用方只认 "ark"。
+    """
+    spec = next((m for m in key.models if m.id == model), None)
+    if spec and spec.protocol:
+        return spec.protocol
+    return resolve_image_protocol(key.provider, key.base_url, model)
+
+
 def _image_url(base_url: str) -> str:
     return f"{_api_root(base_url)}/images/generations"
+
+
+def _ark_image_url(base_url: str) -> str:
+    """Ark 原生协议的图片端点。
+
+    词元跳动网关把 Ark 挂在 {gateway}/ark/v3（key 里存的 base 是 OpenAI 兼容入口
+    …/gateway/v1，需剥掉 /v1），与 volcengine_video._tasks_url 同构；火山直连的 base
+    本身就是 Ark 根，端点与 OpenAI 兼容路径同形。
+    """
+    base = base_url.rstrip("/")
+    if "tokendance" in base:
+        root = base[: -len("/v1")] if base.endswith("/v1") else base
+        return f"{root}/ark/v3/images/generations"
+    return _image_url(base_url)
 
 
 def _edits_url(base_url: str) -> str:
@@ -220,13 +274,21 @@ def _post_multipart(
         resp = requests.post(url, headers=headers, data=fields, files=files, timeout=timeout)
         if resp.status_code >= 400:
             err = OpenAIImageError(f"image edits api {resp.status_code}: {resp.text[:500]}")
-            if resp.status_code in _RETRYABLE_STATUS and attempt < 2:
+            if _is_retryable(resp.status_code, resp.text) and attempt < 2:
                 time.sleep(1 + attempt)
                 continue
             raise err
         return resp.json()
     # 循环只会经 return/raise 退出（末轮瞬时码也走 raise）；防御性兜底。
     raise OpenAIImageError("image edits api: retries exhausted")
+
+
+def _is_retryable(status_code: int, body: str) -> bool:
+    """瞬时码里剔掉确定性错误：网关明说「无可用端点」时重试三轮也只是同一个答案。"""
+    if status_code not in _RETRYABLE_STATUS:
+        return False
+    low = (body or "").lower()
+    return not any(marker in low for marker in _FATAL_BODY_MARKERS)
 
 
 def _chat_image_url(base_url: str) -> str:
@@ -367,7 +429,7 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[
             if resp.status_code >= 400:
                 err = OpenAIImageError(f"image api {resp.status_code}: {resp.text[:500]}")
                 # 瞬时网关错误复用网络异常那套退避重试（continue 进下一轮）；其余当场抛。
-                if resp.status_code in _RETRYABLE_STATUS and attempt < 2:
+                if _is_retryable(resp.status_code, resp.text) and attempt < 2:
                     last_error = err
                     time.sleep(1 + attempt)
                     continue
@@ -481,10 +543,22 @@ def _snap_hk_gpt_image_size(size: object) -> object:
     return f"{best[0]}x{best[1]}"
 
 
-def _normalize_size_for_provider(size: object, is_seedream: bool) -> object:
-    # seedream（原生 provider 或 custom 聚合商下的 seedream 族，如 Tuzi 的 doubao-seedream-*）有
-    # 最小像素约束（≥3.6M）：不足就等比放大到阈值，否则 Ark/Tuzi 报「image size must be at least
-    # 3686400 pixels」（实测）。其余族原样返回。
+def _min_pixels_for_seedream(model: str) -> int:
+    """seedream 族的最小像素约束 —— 实测值表，按模型 id 子串取。
+
+    3686400：Tuzi 的 doubao-seedream-4-5、词元跳动的 seedream-5.0-lite（1024² 与 960²
+    都被拒，报 must be at least 3686400 pixels）。
+    921600：词元跳动的 seedream-5.0-pro（960² 通过，实测 88s 出图）。
+    """
+    m = (model or "").lower()
+    if "seedream-5.0-pro" in m or "seedream-5-0-pro" in m:
+        return 921_600
+    return 3_686_400
+
+
+def _normalize_size_for_provider(size: object, is_seedream: bool, model: str = "") -> object:
+    # seedream 族有最小像素约束：不足就等比放大到该模型的阈值，否则厂商报「image size must
+    # be at least N pixels」（实测）。其余族原样返回。
     if not is_seedream or not isinstance(size, str):
         return size
     match = re.fullmatch(r"(\d+)x(\d+)", size.strip())
@@ -492,7 +566,7 @@ def _normalize_size_for_provider(size: object, is_seedream: bool) -> object:
         return size
     width = int(match.group(1))
     height = int(match.group(2))
-    min_pixels = 3_686_400
+    min_pixels = _min_pixels_for_seedream(model)
     if width * height >= min_pixels:
         return size
     scale = (min_pixels / max(1, width * height)) ** 0.5

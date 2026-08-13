@@ -937,6 +937,25 @@ def _guess_model_modality(item: dict) -> str | None:
     return None
 
 
+def _image_protocol(item: dict) -> str | None:
+    """图片模型的调用协议 —— 直接取上游协议标注，别猜。
+
+    网关按协议挂端点：词元跳动的 seedream-5.0-pro 只声明 `ark:image-generations`，
+    打 OpenAI 兼容入口会被判 503「无可用端点」。声明了 openai 的一律走默认入口
+    （兼容层更通用）；只声明 ark 的必须走 Ark 原生端点；没有协议字段的上游返回
+    None，由 caller 端启发式兜底。
+    """
+    protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
+    image_protocols = [p for p in protocols if "image-generations" in p]
+    if not image_protocols:
+        return None
+    if any(p.startswith("openai") for p in image_protocols):
+        return "openai"
+    if any(p.startswith("ark") for p in image_protocols):
+        return "ark"
+    return None
+
+
 @router.post("/keys/models-preview")
 def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
     """代理拉取上游 GET {base}/models 供 Key 表单做模型映射。
@@ -986,12 +1005,19 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
             continue
         mid = str(item["id"])
         modality = _guess_model_modality(item)
+        # 视频：协议 guess（resolve 不中 → None，交后端 dispatch 时判定 / 诚实报错）。
+        # 图片：直接读上游协议标注（决定走 Ark 原生端点还是 OpenAI 兼容入口）。
+        if modality == "video":
+            protocol = resolve_protocol(preview_provider, base_url, mid)
+        elif modality == "image":
+            protocol = _image_protocol(item)
+        else:
+            protocol = None
         models.append({
             "id": mid,
             "name": str(item.get("name") or mid),
             "modality": modality,
-            # 视频模型附协议 guess（resolve 不中 → None，协议留空交后端 dispatch 时判定 / 诚实报错）。
-            "protocol": resolve_protocol(preview_provider, base_url, mid) if modality == "video" else None,
+            "protocol": protocol,
         })
     return {"models": models}
 

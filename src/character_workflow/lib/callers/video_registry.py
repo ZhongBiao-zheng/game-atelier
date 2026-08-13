@@ -3,7 +3,7 @@
 每个协议 = 一个 VideoAdapter(protocol id + 友好名 + render 调用)。render 经薄
 lazy wrapper 转发到现有 *_video.render_video，避免导入本模块即拉起 requests 重依赖。
 
-resolve_protocol 是唯一启发式来源：迁移回填(keys._backfill_video_protocols)、
+resolve_protocol 是唯一启发式来源：迁移回填(keys._backfill_model_protocols)、
 KeyForm guess(models-preview)、dispatch 兜底(callers.dispatch_video)三处共用。
 """
 from __future__ import annotations

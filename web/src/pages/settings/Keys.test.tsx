@@ -330,9 +330,10 @@ describe('KeyForm', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    // protocol 随模型一起提交（手填行没有上游标注 → null，由后端按启发式兜底）
     expect(body.models).toEqual([
-      { name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image' },
-      { name: 'Sora 2', id: 'sora-2', modality: 'video' },
+      { name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image', protocol: null },
+      { name: 'Sora 2', id: 'sora-2', modality: 'video', protocol: null },
     ]);
     expect(body.modalities).toEqual(['image', 'video']);
     expect(body.routing_scope).toBeUndefined();
@@ -381,8 +382,8 @@ describe('KeyForm', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.models).toEqual([
-      { name: '图片 5.0 Lite', id: 'doubao-seedream-5-0-260128', modality: 'image' },
-      { name: '图片 4.7', id: 'doubao-seedream-4-5-251128', modality: 'image' },
+      { name: '图片 5.0 Lite', id: 'doubao-seedream-5-0-260128', modality: 'image', protocol: null },
+      { name: '图片 4.7', id: 'doubao-seedream-4-5-251128', modality: 'image', protocol: null },
     ]);
   });
 

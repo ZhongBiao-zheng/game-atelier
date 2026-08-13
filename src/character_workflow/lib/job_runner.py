@@ -58,6 +58,19 @@ def _friendly_error(err: BaseException) -> str:
         "connection" in low and "refused" in low
     ):
         return "网络连不上厂商接口：请检查网络 / 代理设置，确认厂商域名可访问后重试。"
+    # 网关按协议挂端点，「无可用端点」= 该模型在这把 key 下压根没有可调的端点。必须排在
+    # 下面的「网关瞬时超时」之前：它是确定性错误，重试无用，翻成瞬时问题会误导画师干等。
+    if "no_endpoints_available" in low or "无可用端点" in low:
+        return (
+            "该模型在厂商网关下没有可用端点：通常是账号未开通这个模型，或它不支持当前"
+            "调用协议。请到厂商控制台确认已开通，或在设置页重新拉一次模型列表后换用"
+            f"同族其他模型。（原始报错：{err}）"
+        )
+    if "must be at least" in low and "pixel" in low:
+        return (
+            "出图尺寸低于该模型的像素下限：请把尺寸调大（或换用同族里下限更低的模型）后重试。"
+            f"（原始报错：{err}）"
+        )
     if "quota" in low or "insufficient" in low or "余额" in low or "额度" in low or "欠费" in low:
         return f"厂商额度 / 余额不足：请到厂商官网充值或检查账户额度后重试。（原始报错：{err}）"
     if "gateway" in low or "网关" in low or "bad response status code" in low:

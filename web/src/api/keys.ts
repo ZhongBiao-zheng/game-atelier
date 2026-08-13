@@ -37,7 +37,7 @@ export interface KeyModel {
   id: string;
   /** 模型级图片/视频分类；缺省时按 key 级 modalities 兜底（见 modelModality）。 */
   modality?: ModelModality | null;
-  /** 视频协议 id（seedance/kling/dashscope）；图片模型 / 不可解析时 null。 */
+  /** 调用协议 id —— 视频 seedance/kling/dashscope、图片 ark/openai；不可解析时 null。 */
   protocol?: string | null;
 }
 
