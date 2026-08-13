@@ -1267,3 +1267,186 @@ def test_custom_standard_model_no_quality(tmp_path, monkeypatch):
     openai_image.render(prompt="p", model="foo-image-1", alias="cu",
                         output_dir=tmp_path / "o", quality="high")
     assert "quality" not in posted["body"]  # standard 族不发 quality
+
+
+# --- 词元跳动 Ark 图片协议（网关按协议挂端点，打错入口报 503 无可用端点） ---
+
+def _add_tokendance_key(alias: str, models: list[dict]) -> None:
+    keys.add_key(KeySpec(
+        alias=alias,
+        provider="tokendance",
+        base_url="https://tokendance.space/gateway/v1",
+        access_key="test-key",
+        capabilities=["portrait"],
+        models=models,
+        created_at="2026-08-13T00:00:00Z",
+    ))
+
+
+def test_ark_image_url_rewrites_tokendance_gateway_and_leaves_ark_direct_alone():
+    assert (
+        openai_image._ark_image_url("https://tokendance.space/gateway/v1")
+        == "https://tokendance.space/gateway/ark/v3/images/generations"
+    )
+    # 火山直连的 base 本身就是 Ark 根，端点与 OpenAI 兼容路径同形。
+    assert (
+        openai_image._ark_image_url("https://ark.cn-beijing.volces.com/api/v3")
+        == "https://ark.cn-beijing.volces.com/api/v3/images/generations"
+    )
+
+
+def test_resolve_image_protocol_routes_tokendance_seedream_to_ark():
+    assert openai_image.resolve_image_protocol("tokendance", None, "seedream-5.0-pro") == "ark"
+    assert openai_image.resolve_image_protocol("tokendance", None, "seedance-2.0") is None
+    assert openai_image.resolve_image_protocol("custom", None, "doubao-seedream-4-5") is None
+
+
+def test_render_tokendance_seedream_posts_to_ark_endpoint(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    """seedream-5.0-pro 只声明 ark:image-generations，打 /v1 会被网关判 503 无可用端点。"""
+    _add_tokendance_key("td", [{"name": "Seedream 5.0 Pro", "id": "seedream-5.0-pro"}])
+    image_bytes = b"\x89PNG\r\n\x1a\npro"
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["url"] = url
+        return FakePostResponse({
+            "data": [{
+                "b64_json": "data:image/png;base64,"
+                + base64.b64encode(image_bytes).decode("ascii"),
+            }],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    paths = openai_image.render(
+        prompt="fox", model="seedream-5.0-pro", alias="td",
+        output_dir=tmp_path, n=1, size="1024x1536",
+    )
+
+    assert captured["url"] == "https://tokendance.space/gateway/ark/v3/images/generations"
+    assert Path(paths[0]).read_bytes() == image_bytes
+
+
+def test_render_tokendance_honors_stored_openai_protocol(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    """存下来的上游协议标注是权威值，压过 provider+族启发式。"""
+    _add_tokendance_key(
+        "td-lite",
+        [{"name": "Seedream 5.0 lite", "id": "seedream-5.0-lite", "protocol": "openai"}],
+    )
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["url"] = url
+        return FakePostResponse({"data": [{"b64_json": "aGk="}]})
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    openai_image.render(
+        prompt="fox", model="seedream-5.0-lite", alias="td-lite",
+        output_dir=tmp_path, n=1, size="1024x1536",
+    )
+
+    assert captured["url"] == "https://tokendance.space/gateway/v1/images/generations"
+
+
+def test_no_endpoints_available_503_is_fatal_and_not_retried(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_post(url, headers, json, timeout):
+        calls["n"] += 1
+        return FakePostResponse(
+            {"error": {"message": "模型 'x' 下无可用端点", "code": "no_endpoints_available"}},
+            status_code=503,
+        )
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    monkeypatch.setattr(openai_image.time, "sleep", lambda _s: None)
+    with pytest.raises(openai_image.OpenAIImageError) as excinfo:
+        openai_image._post_json("https://x/v1/images/generations", "k", {}, timeout=1)
+
+    assert calls["n"] == 1  # 确定性错误：一次就抛，不空烧三轮退避
+    assert "no_endpoints_available" in str(excinfo.value)
+
+
+def test_plain_503_still_retries(monkeypatch):
+    """回归保护：网关瞬时 503（无 no_endpoints_available 标记）仍走三轮重试。"""
+    calls = {"n": 0}
+
+    def fake_post(url, headers, json, timeout):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return FakePostResponse({"error": "upstream busy"}, status_code=503)
+        return FakePostResponse({"data": [{"b64_json": "aGk="}]})
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    monkeypatch.setattr(openai_image.time, "sleep", lambda _s: None)
+    data = openai_image._post_json("https://x/v1/images/generations", "k", {}, timeout=1)
+
+    assert calls["n"] == 3
+    assert data["data"][0]["b64_json"] == "aGk="
+
+
+def test_seedream_min_pixels_differ_per_model():
+    """实测：同一把词元跳动 key 下 lite 要 3686400、pro 只要 921600。"""
+    assert openai_image._min_pixels_for_seedream("seedream-5.0-lite") == 3_686_400
+    assert openai_image._min_pixels_for_seedream("doubao-seedream-4-5-251128") == 3_686_400
+    assert openai_image._min_pixels_for_seedream("seedream-5.0-pro") == 921_600
+
+
+def test_render_tokendance_lite_normalizes_size_but_pro_keeps_it(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    """尺寸归一按模型下限：lite 的 1024x1536 要放大，pro 的同尺寸已达标不动。"""
+    _add_tokendance_key("td2", [
+        {"name": "lite", "id": "seedream-5.0-lite"},
+        {"name": "pro", "id": "seedream-5.0-pro"},
+    ])
+    seen: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        seen[json["model"]] = json["size"]
+        return FakePostResponse({"data": [{"b64_json": "aGk="}]})
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    for model in ("seedream-5.0-lite", "seedream-5.0-pro"):
+        openai_image.render(
+            prompt="fox", model=model, alias="td2",
+            output_dir=tmp_path / model, n=1, size="1024x1536",
+        )
+
+    assert seen["seedream-5.0-lite"] == "1568x2352"  # 1.57M → 放大过 3686400
+    assert seen["seedream-5.0-pro"] == "1024x1536"  # 1.57M 已高于 921600，原样发
+
+
+def test_render_tokendance_does_not_send_ark_only_params(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    """watermark / 组图是 Ark 专有参数，词元跳动网关默认值未实测 → 修协议路由时不顺手改它。
+
+    seedream-5.0-pro 实测明确拒收 sequential_image_generation。
+    """
+    _add_tokendance_key("td3", [{"name": "pro", "id": "seedream-5.0-pro"}])
+    seen: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        seen.update(json)
+        return FakePostResponse({"data": [{"b64_json": "aGk="}]})
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    openai_image.render(
+        prompt="fox", model="seedream-5.0-pro", alias="td3",
+        output_dir=tmp_path, n=2, size="1024x1536",
+    )
+
+    assert "watermark" not in seen
+    assert "sequential_image_generation" not in seen

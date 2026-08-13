@@ -198,7 +198,49 @@ def test_models_preview_attaches_video_protocol_guess(tmp_path, monkeypatch):
 
     assert by_id["doubao-seedance-2-0"]["protocol"] == "seedance"
     assert by_id["happyhorse-1.0-t2v"]["protocol"] == "dashscope"
-    assert by_id["gpt-image-2"]["protocol"] is None  # 图片模型 → 无协议
+    assert by_id["gpt-image-2"]["protocol"] is None  # 上游没标协议 → 留空，caller 端兜底
+
+
+def test_models_preview_reads_image_protocol_from_upstream_annotation(tmp_path, monkeypatch):
+    """图片协议直接取上游标注：只声明 ark 的必须走 Ark 端点，否则网关判 503 无可用端点。"""
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    client = TestClient(build_app())
+
+    upstream_models = [
+        # 只有 ark 图片协议（词元跳动 seedream-5.0-pro 的真实标注）
+        {"id": "seedream-5.0-pro", "supported_protocols": ["ark:image-generations"]},
+        # 双协议 → 走更通用的 OpenAI 兼容入口
+        {
+            "id": "seedream-5.0-lite",
+            "supported_protocols": ["ark:image-generations", "openai:image-generations"],
+        },
+        # 非出图模型 → 不分类也不给协议
+        {"id": "some-chat", "supported_protocols": ["openai:chat-completions"]},
+    ]
+
+    import unittest.mock as mock
+
+    fake_resp = mock.MagicMock()
+    fake_resp.status_code = 200
+    fake_resp.json.return_value = {"data": upstream_models}
+
+    with mock.patch("requests.get", return_value=fake_resp):
+        r = client.post(
+            "/api/keys/models-preview",
+            json={
+                "provider": "tokendance",
+                "base_url": "https://tokendance.space/gateway/v1",
+                "access_key": "x",
+            },
+        )
+
+    assert r.status_code == 200, r.text
+    by_id = {m["id"]: m for m in r.json()["models"]}
+
+    assert by_id["seedream-5.0-pro"]["protocol"] == "ark"
+    assert by_id["seedream-5.0-lite"]["protocol"] == "openai"
+    assert by_id["some-chat"]["modality"] is None
+    assert by_id["some-chat"]["protocol"] is None
 
 
 def test_reveal_returns_stored_plaintext(client):

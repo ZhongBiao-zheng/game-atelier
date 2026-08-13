@@ -16,7 +16,7 @@
 |---|---|---|---|---|
 | `seedream` | seedream | `https://ark.cn-beijing.volces.com/api/v3` | doubao-seedream-5-0 / 4-5 | 图生图实测通 |
 | `OpenAI-HK` | custom | `https://api.openai-hk.com` | gpt-image-2、nano-banana / -2 / -hd | 实测通；kling caller 已写、模型未挂 key |
-| `tokendance` | tokendance | `https://tokendance.space/gateway/v1` | seedream-5.0-lite（图）、seedance-2.0 系 + happyhorse 系（视频） | key 未充值待实测 |
+| `tokendance` | tokendance | `https://tokendance.space/gateway/v1` | seedream-5.0-lite / -pro（图）、seedance-2.0 系 + happyhorse 系（视频） | 2026-08-13 出图实测通（pro 走 Ark 端点，960² 约 88s）|
 
 密钥获取：火山 `console.volcengine.com/ark`、词元跳动 `tokendance.space/keys`、HK `open-hk.com` 控制台。
 
@@ -49,9 +49,17 @@
 
 ### 词元跳动图片（provider=tokendance）
 
-- OpenAI 兼容入口 `/gateway/v1`，走 `openai_image` 同步通道（standard 族控件）。
-- `GET /gateway/v1/models` 免鉴权，返回 `data[]` 含 `supported_protocols[]`（models-preview 模态判定依据）。
-- 对 Ark 系协议参数透传。
+- `GET /gateway/v1/models` 免鉴权，返回 `data[]` 含 `supported_protocols[]`——既是 models-preview 的模态判定依据，**也是图片调用协议的判定依据**。
+- **网关按协议挂端点，打错入口报 503 `no_endpoints_available`**（「模型 X 下无可用端点」）。协议标注决定端点：
+
+  | 模型 | supported_protocols | 走哪个端点 |
+  |---|---|---|
+  | `seedream-5.0-lite` | `ark:` + `openai:image-generations` | `/gateway/v1/images/generations` |
+  | `seedream-5.0-pro` | **仅** `ark:image-generations` | `/gateway/ark/v3/images/generations` |
+
+  2026-08-13 实测：全网关 78 个模型里 pro 是唯一「只有 ark 图片协议」的。协议随模型存进 `ModelSpec.protocol`（models-preview 解析），旧 key 由 `keys._backfill_model_protocols` 读时回填；caller 端 `openai_image._effective_image_protocol` 取值，只有 `"ark"` 换 URL。
+- **最小像素下限是模型属性，与协议路径无关**（两条路径实测同一下限）：`seedream-5.0-lite` / `doubao-seedream-4-5` 要 3686400，`seedream-5.0-pro` 只要 921600。见 `openai_image._min_pixels_for_seedream`。
+- watermark / `sequential_image_generation` 只对火山直连与 custom 聚合商下的 seedream 发；**pro 明确拒收 sequential**（400），词元跳动网关的默认值未实测，故不发。
 
 ### 图像三族参数表
 

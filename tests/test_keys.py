@@ -274,7 +274,7 @@ def test_modelspec_protocol_field_roundtrips():
     assert ModelSpec.model_validate({"name": "a", "id": "a", "modality": "image"}).protocol is None
 
 
-def test_read_keys_db_backfills_video_protocol(tmp_path, monkeypatch):
+def test_read_keys_db_backfills_model_protocols(tmp_path, monkeypatch):
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     from character_workflow.lib import keys
     keys.add_key(keys.KeySpec(
@@ -291,8 +291,9 @@ def test_read_keys_db_backfills_video_protocol(tmp_path, monkeypatch):
     by_id = {m.id: m for m in db.keys[0].models}
     assert by_id["doubao-seedance-2-0"].protocol == "seedance"
     assert by_id["happyhorse-1.0-t2v"].protocol == "dashscope"
-    # 图片模型不回填
-    assert by_id["seedream-5.0-lite"].protocol is None
+    # 图片模型同样回填：词元跳动的 seedream 系原生挂在 Ark 协议下，旧 key（存的时候
+    # models-preview 还没解析协议）靠这里自愈，不必让用户回设置页重拉模型列表。
+    assert by_id["seedream-5.0-lite"].protocol == "ark"
 
 
 def test_backfill_skips_unresolvable_custom_video(tmp_path, monkeypatch):

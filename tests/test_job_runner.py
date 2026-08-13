@@ -365,3 +365,26 @@ def test_direct_bypass_covers_tuzi(monkeypatch):
     monkeypatch.setenv("NO_PROXY", "localhost")
     net_env.configure_proxy_bypass()
     assert "tu-zi.com" in os.environ["NO_PROXY"]
+
+
+def test_friendly_error_no_endpoints_reads_as_model_not_enabled_not_transient():
+    # 实测（词元跳动 seedream-5.0-pro 打 OpenAI 兼容入口）：503 但错误体是确定性的
+    # no_endpoints_available。旧版落到「网关瞬时超时…请稍后重试」，让画师白等。
+    err = Exception(
+        'image api 503: {"error":{"message":"模型 \'seedream-5.0-pro\' 下无可用端点",'
+        '"code":"no_endpoints_available"}}'
+    )
+    msg = job_runner._friendly_error(err)
+    assert "没有可用端点" in msg
+    assert "未开通" in msg
+    assert "瞬时" not in msg
+
+
+def test_friendly_error_pixel_floor_tells_user_to_enlarge():
+    err = Exception(
+        'image api 400: {"error":{"message":"The parameter `size` specified in the request '
+        'is not valid: image size must be at least 3686400 pixels."}}'
+    )
+    msg = job_runner._friendly_error(err)
+    assert "像素下限" in msg
+    assert "尺寸调大" in msg

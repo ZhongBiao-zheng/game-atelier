@@ -20,7 +20,7 @@ interface ProviderPreset {
 const PROVIDER_PRESETS: ProviderPreset[] = [
   { value: 'openai', label: 'OpenAI', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://platform.openai.com', docsUrl: 'https://platform.openai.com/docs', apiKeyUrl: 'https://platform.openai.com/api-keys', defaultBaseUrl: 'https://api.openai.com/v1', defaultModels: [{ name: 'GPT Image 1', id: 'gpt-image-1' }] },
   { value: 'seedream', label: '火山引擎', kind: 'official', modalities: ['image'], homepageUrl: 'https://www.volcengine.com', docsUrl: 'https://www.volcengine.com/docs/82379/1399008', apiKeyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModels: [{ name: '图片 5.0', id: 'doubao-seedream-5-0-260128' }] },
-  { value: 'tokendance', label: '词元跳动', kind: 'official', modalities: ['image', 'video'], homepageUrl: 'https://tokendance.space', docsUrl: 'https://tokendance.space/docs/quickstart', apiKeyUrl: 'https://tokendance.space/keys', defaultBaseUrl: 'https://tokendance.space/gateway/v1', defaultModels: [{ name: 'Seedream 5.0 Lite', id: 'seedream-5.0-lite', modality: 'image' }, { name: 'Seedance 2.0', id: 'seedance-2.0', modality: 'video' }] },
+  { value: 'tokendance', label: '词元跳动', kind: 'official', modalities: ['image', 'video'], homepageUrl: 'https://tokendance.space', docsUrl: 'https://tokendance.space/docs/quickstart', apiKeyUrl: 'https://tokendance.space/keys', defaultBaseUrl: 'https://tokendance.space/gateway/v1', defaultModels: [{ name: 'Seedream 5.0 Lite', id: 'seedream-5.0-lite', modality: 'image', protocol: 'openai' }, { name: 'Seedream 5.0 Pro', id: 'seedream-5.0-pro', modality: 'image', protocol: 'ark' }, { name: 'Seedance 2.0', id: 'seedance-2.0', modality: 'video', protocol: 'seedance' }] },
   { value: 'openrouter', label: 'OpenRouter', kind: 'official', modalities: ['image', 'video'], homepageUrl: 'https://openrouter.ai', docsUrl: 'https://openrouter.ai/docs/quickstart', apiKeyUrl: 'https://openrouter.ai/settings/keys', defaultBaseUrl: 'https://openrouter.ai/api/v1', defaultModels: [{ name: 'GPT Image 2', id: 'openai/gpt-image-2', modality: 'image' }, { name: 'Google: Veo 3.1', id: 'google/veo-3.1', modality: 'video' }] },
   { value: 'custom', label: '自定义', kind: 'custom', modalities: ['image'], defaultBaseUrl: '', defaultModels: [{ name: '', id: '' }] },
 ];
@@ -134,7 +134,9 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     const keptIds = new Set(kept.map((m) => m.id.trim()));
     const added = fetched
       .filter((m) => fetchedChecked.has(m.id) && !keptIds.has(m.id))
-      .map((m) => ({ name: m.name, id: m.id, modality: m.modality ?? 'image' as ModelModality }));
+      // protocol 必须随模型一起存：它是上游协议标注的解析结果（图片 ark/openai、视频
+      // seedance/kling/…），丢了就得靠 caller 端启发式猜端点。
+      .map((m) => ({ name: m.name, id: m.id, modality: m.modality ?? 'image' as ModelModality, protocol: m.protocol }));
     const next = [...kept, ...added];
     setModels(next.length ? next : [{ name: '', id: '' }]);
     setFetched(null);
@@ -175,7 +177,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     setError(null);
     try {
       const cleanModels = models
-        .map((model) => ({ name: model.name.trim(), id: model.id.trim(), modality: model.modality ?? 'image' as ModelModality }))
+        .map((model) => ({ name: model.name.trim(), id: model.id.trim(), modality: model.modality ?? 'image' as ModelModality, protocol: model.protocol ?? null }))
         .filter((model) => model.name && model.id);
       // key 级 modalities 由模型标注派生（key 级仅作摘要/兜底），preset 的 llm 等附加能力保留。
       const derivedModalities = Array.from(new Set([

@@ -37,8 +37,9 @@ class ModelSpec(BaseModel):
     id: str
     # None = 未标注：消费端按 key 级 modalities 兜底（含 video 且不含 image → video）。
     modality: ModelModality | None = None
-    # 视频协议 id（seedance/kling/dashscope）；图片模型与旧数据为 None。
-    # 读时由 _backfill_video_protocols 对可解析的视频模型回填（见 read_keys_db）。
+    # 调用协议 id —— 视频：seedance/kling/dashscope/openrouter；图片：ark/openai。
+    # 权威值来自上游 /models 的协议标注（models-preview 解析后随模型一起存）；旧数据为
+    # None，读时由 _backfill_model_protocols 按启发式回填（见 read_keys_db）。
     protocol: str | None = None
 
 
@@ -106,7 +107,7 @@ def read_keys_db() -> KeysDB:
         raise KeysFileCorruptedError(f"{path}: {e}") from e
     _migrate_legacy_providers(raw)
     db = KeysDB.model_validate(raw)
-    _backfill_video_protocols(db)
+    _backfill_model_protocols(db)
     return db
 
 
@@ -129,18 +130,24 @@ def _is_video_model(spec: "ModelSpec", key: "KeySpec") -> bool:
     return "video" in key.modalities and "image" not in key.modalities
 
 
-def _backfill_video_protocols(db: KeysDB) -> None:
-    """读时内存回填：为可解析的视频模型补 protocol（不写盘，下次 write 才落）。
+def _backfill_model_protocols(db: KeysDB) -> None:
+    """读时内存回填：为可解析的模型补 protocol（不写盘，下次 write 才落）。
 
-    resolve_protocol 走 lazy import 避免与 callers 包的加载顺序耦合（沿用 callers 既有
-    lazy-import 习惯）；resolve 不命中的视频模型保持 None，由前端守卫拦截 / 用户显式选。
+    视频走 video_registry.resolve_protocol，图片走 openai_image.resolve_image_protocol；
+    两者都 lazy import，避免与 callers 包的加载顺序耦合（沿用 callers 既有习惯）。解析
+    不命中保持 None——视频由前端守卫拦截 / 用户显式选，图片则表示走默认 OpenAI 兼容入口。
     """
+    from character_workflow.lib.callers.openai_image import resolve_image_protocol
     from character_workflow.lib.callers.video_registry import resolve_protocol
 
     for key in db.keys:
         for spec in key.models:
-            if spec.protocol is None and _is_video_model(spec, key):
+            if spec.protocol is not None:
+                continue
+            if _is_video_model(spec, key):
                 spec.protocol = resolve_protocol(key.provider, key.base_url, spec.id)
+            else:
+                spec.protocol = resolve_image_protocol(key.provider, key.base_url, spec.id)
 
 
 def write_keys_db(db: KeysDB) -> None:
