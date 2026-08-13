@@ -93,3 +93,5 @@ cd game-atelier; git pull
 ## 一句话给同事
 
 > 装好 Claude Code 和 uv → `claude plugin marketplace add ZhongBiao-zheng/game-atelier` → `claude plugin install game-atelier@atelier` → 在 Claude 里跑 `/game-atelier:viewer-server` 按向导加 Key → 开干。我发新版你就 `claude plugin update game-atelier@atelier`，你的角色和图都不受影响。
+
+> 记得把配好的 keys.json 单独发给同事，让他们放到 ~/game-atelier/.config/keys.json；或

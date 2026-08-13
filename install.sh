@@ -55,7 +55,7 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
-echo "=== game-atelier 本地安装（源码：$REPO_ROOT）==="
+echo "=== game-atelier 本地安装（源码：${REPO_ROOT}）==="
 
 # --- Claude Code ---
 if [ -d "$HOME/.claude" ]; then
@@ -86,6 +86,8 @@ if [ "${#installed[@]}" -gt 0 ]; then
 else
   echo "  （没有检测到任何代理，未安装任何东西）"
 fi
-for s in "${skipped[@]}"; do echo "  – 跳过：$s"; done
+if [ "${#skipped[@]}" -gt 0 ]; then
+  for s in "${skipped[@]}"; do echo "  – 跳过：$s"; done
+fi
 echo
 echo "重启代理后生效。首次触发 /game-atelier:* 会自动初始化数据目录与依赖。"

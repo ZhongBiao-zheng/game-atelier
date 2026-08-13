@@ -88,6 +88,16 @@ curl -sS http://127.0.0.1:5174/api/jobs >/dev/null
 
 **出图前必须确认**：Skill 先 `jobs.write_job(...)` 写 `PENDING_CONFIRM` 状态 + 把出图卡片打到终端 → 画师明确说"出图"或 Web 点确认 → 才推进到 `PENDING` 调 Lovart（同步阻塞期间停留在 `PENDING`，无独立 `RUNNING` 状态）。
 
+**Job 落盘并发安全**：`jobs.py` 所有「读→改→写」走 `job_lock`（per-job sidecar 文件锁，Skill / viewer-server 双进程互斥）+ `atomic_io`（唯一 tmp + `os.replace`，Windows 上对 access denied 重试）。模块外直接改 job 文件必须显式持锁。
+
+## 厂商调用层（出图 / 出视频）
+
+所有外部模型调用收在 `src/character_workflow/lib/callers/`，由 `dispatch`（图片）/ `dispatch_video`（视频，经 `video_registry` 按 protocol 路由）分派；`job_runner.run_job` 是唯一入口，把 `PENDING` job 跑成 DONE/FAILED 资产。三个非显性约束：
+
+- **国产厂商必须直连**：`net_env.configure_proxy_bypass()` 在出图进程入口（job_runner / server）把 openai-hk / volces / tokendance 等 host 加进 `NO_PROXY`。漏了 → 本机坏代理（Clash/VPN）把请求拖死或 ProxyError，表现为「图卡住 + 零计费」。
+- **聚合商瞬时 5xx 重试**：`openai_image._post_json` / `_post_multipart` 对 502/503/504（new-api 网关上游超时）走 `range(3)` 退避重试；4xx/429/500 当场致命。底层网络/厂商错误经 `job_runner._friendly_error` 翻成中文落 `job.error`。
+- **改后端 lib 必须重启 server**：viewer-server 长驻会缓存旧模块。报「X object has no attribute Y」但 pytest 全绿时，第一反应是重启 server，别翻代码。
+
 ## 常用命令
 
 ```bash
