@@ -8,6 +8,7 @@
 - 唯一存储 `<data_root>/.config/keys.json`（默认 `~/game-atelier/.config/keys.json`），Web 与 Skill 经 `lib/keys.py` 读同一份，`.config/` 始终 gitignore。
 - 字段：`alias`（唯一标识）/ `provider`（路由依据）/ `base_url` / `access_key` / `capabilities`（portrait/promo/turnaround）/ `models[]`（`{name, id, modality}`，modality 决定 Studio 图/视频模式可见性）。
 - 配置入口：设置页 →「+ 新建供应商」；拉模型列表 `POST /api/keys/models-preview`。
+- 手改 JSON 后必验：`curl -sS http://127.0.0.1:5174/api/keys >/dev/null`，任何 schema 错都会 500。
 
 ### models-preview 契约（前后端唯一形状来源）
 
@@ -24,6 +25,10 @@
 | `protocol` | 见上方各厂契约 / `null` | 视频=seedance·kling·dashscope·openrouter；图片=ark·openai |
 | `total` / `excluded` | 数字 | 上游去重后的总数 / 被判「明确非视觉」而未返回的条数，前端据此显示「上游 78 个 · 已过滤 61 个」+ 逃生舱 |
 
+**默认 `/models` 不一定是全集**：OpenRouter 把视频模型排除在外，必须额外拉
+`?output_modalities=video`（`routes.py::_extra_model_list_urls`，拉不到时降级为只有图片模型，
+不让整个功能报错）。接新上游时别把「默认端点里没有」当成「这个平台没有」——先按 host 试专用列表。
+
 分类是四级瀑布（`routes.py::_classify_model`）：协议标注判视觉 → 协议**全部**是非视觉动词才判
 `excluded` → 读 `architecture.output_modalities`（OpenRouter 的权威字段）→ id 关键词（**词边界**
 匹配，裸子串会把 `inkling` 判成 kling 视频、`wanx` 判成视频）→ `unknown`。
@@ -32,7 +37,6 @@
 `zai:layout-parsing` / `bocha:web-search` / `unifuncs:web-reader`），词表永远追不完，「认不出就
 丢」会让某个网关的模型列表整片消失且用户看不出原因。实测:词元跳动 78 → 排除 61 / 图 2 / 视频 15
 （17 个视觉模型逐条核对无误伤）；OpenRouter 409 → 排除 398 / 图 11。
-- 手改 JSON 后必验：`curl -sS http://127.0.0.1:5174/api/keys >/dev/null`，任何 schema 错都会 500。
 
 ## 当前已接厂商
 
@@ -42,7 +46,7 @@
 | `OpenAI-HK` | custom | `https://api.openai-hk.com` | gpt-image-2、nano-banana / -2 / -hd | 实测通；kling caller 已写、模型未挂 key |
 | `tokendance` | tokendance | `https://tokendance.space/gateway/v1` | seedream-5.0-lite / -pro（图）、seedance-2.0 系 + happyhorse 系（视频） | 2026-08-13 出图实测通（pro 走 Ark 端点，960² 约 88s）|
 | `Tuzi` | custom | `https://api.tu-zi.com` | gpt-image-2、doubao-seedream-4-5、nano-banana-pro / -2 系 | **当前 default_alias** —— Skill 不指定 alias 时默认走这把。出图实测通；注意它对畸形请求**不快速失败**（实测缺 prompt / 不存在的模型 id 都挂满读超时不返回，服务本身是活的：`GET /v1/models` 2s 回 474 个模型）|
-| `OpenRouter` | openrouter | `https://openrouter.ai/api/v1` | gpt-image-2、seedream-4.5、gemini-3-pro-image、flux.2-pro（图）+ veo / sora / seedance / kling（视频，手填）| 实测通。契约与国内聚合商不同族，见 [openrouter-pricing.md](openrouter-pricing.md)：专用 `/images`（回 b64_json）+ 异步 `/videos` job；`/models` 里**没有视频模型**，视频侧只能手填 |
+| `OpenRouter` | openrouter | `https://openrouter.ai/api/v1` | gpt-image-2、seedream-4.5、gemini-3-pro-image、flux.2-pro（图）+ veo / sora / seedance / kling（视频，手填）| 实测通。契约与国内聚合商不同族，见 [openrouter-pricing.md](openrouter-pricing.md)：专用 `/images`（回 b64_json）+ 异步 `/videos` job；**视频模型不在默认 `/models` 里**（实测 409 条一个都没有），要用 `?output_modalities=video` 或 `/videos/models` 才列得出来（23 个：veo / sora / kling / seedance / hailuo / runway / wan / happyhorse…）——models-preview 已自动合并拉取 |
 
 密钥获取：火山 `console.volcengine.com/ark`、词元跳动 `tokendance.space/keys`、HK `open-hk.com` 控制台。
 

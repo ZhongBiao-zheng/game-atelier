@@ -12,6 +12,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -987,10 +988,45 @@ def _guess_model_modality(item: dict) -> str | None:
     return category if category in ("image", "video") else None
 
 
+def _fetch_model_rows(url: str, headers: dict) -> list:
+    """拉一次上游模型列表并归一成 list；任何一步失败都抛 502 带上游原文。"""
+    import requests
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=20)
+    except requests.RequestException as e:
+        raise HTTPException(502, f"请求上游失败: {e}") from e
+    if resp.status_code >= 400:
+        raise HTTPException(502, f"上游 {resp.status_code}: {resp.text[:200]}")
+    try:
+        body = resp.json()
+    except ValueError as e:
+        raise HTTPException(502, f"上游响应非 JSON: {resp.text[:200]}") from e
+    rows = body.get("data") if isinstance(body, dict) else body
+    if not isinstance(rows, list):
+        raise HTTPException(502, "上游响应缺少模型列表（data）")
+    return rows
+
+
+def _extra_model_list_urls(models_url: str, provider: str) -> list[str]:
+    """默认 /models 之外还需要拉的列表 URL。
+
+    OpenRouter 实测（2026-08-13）：`GET /api/v1/models` 返回 409 条，里面**一个视频模型
+    都没有**；23 个视频模型（veo / sora / kling / seedance / hailuo / runway…）只在
+    `?output_modalities=video` 或 `/videos/models` 下列出。不额外拉这一次，OpenRouter key
+    的用户在设置页永远拉不到视频模型、只能手填 id —— keys.json 里那几个就是这么来的。
+
+    别把「默认端点里没有」当成「这个平台没有」：先按 host 试专用列表，再下结论。
+    """
+    host = urlsplit(models_url).netloc.lower()
+    if "openrouter.ai" in host or provider == "openrouter":
+        sep = "&" if "?" in models_url else "?"
+        return [f"{models_url}{sep}output_modalities=video"]
+    return []
+
+
 def _url_host(url: str) -> str:
     """取 URL 的 host（含端口）用于同源比对；解析不出就返回原串以免两个空值相等。"""
-    from urllib.parse import urlsplit
-
     netloc = urlsplit((url or "").strip()).netloc.lower()
     return netloc or (url or "").strip().lower()
 
@@ -1052,20 +1088,14 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
     if not url.endswith("/models"):
         url = f"{url}/models"
     headers = {"Authorization": f"Bearer {access_key}"} if access_key else {}
-    try:
-        resp = requests.get(url, headers=headers, timeout=20)
-    except requests.RequestException as e:
-        raise HTTPException(502, f"请求上游失败: {e}") from e
-    if resp.status_code >= 400:
-        raise HTTPException(502, f"上游 {resp.status_code}: {resp.text[:200]}")
-    try:
-        body = resp.json()
-    except ValueError as e:
-        raise HTTPException(502, f"上游响应非 JSON: {resp.text[:200]}") from e
-
-    rows = body.get("data") if isinstance(body, dict) else body
-    if not isinstance(rows, list):
-        raise HTTPException(502, "上游响应缺少模型列表（data）")
+    rows = _fetch_model_rows(url, headers)
+    # 有些上游把视频模型排除在默认 /models 之外，必须额外拉一次才看得见（见下方函数注释）。
+    # 额外列表拉不到不该让主列表失败：降级成「只有图片模型」，而不是整个功能报错。
+    for extra_url in _extra_model_list_urls(url, preview_provider):
+        try:
+            rows = rows + _fetch_model_rows(extra_url, headers)
+        except (HTTPException, requests.RequestException):
+            pass
 
     from character_workflow.lib.callers.video_registry import resolve_protocol
 

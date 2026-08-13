@@ -438,3 +438,80 @@ def test_models_preview_dedupes_upstream_ids(tmp_path, monkeypatch):
     body = _preview_with_upstream(client, rows).json()
     assert [m["id"] for m in body["models"]] == ["seedream-5.0-pro"]
     assert body["total"] == 1
+
+
+def test_models_preview_pulls_openrouter_video_list_separately(tmp_path, monkeypatch):
+    """OpenRouter 的视频模型不在默认 /models 里 —— 不额外拉一次，用户永远只能手填 id。
+
+    实测 2026-08-13：`GET /api/v1/models` 409 条里一个视频模型都没有，23 个 veo / sora /
+    kling / seedance 只在 `?output_modalities=video` 下列出。
+    """
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    client = TestClient(build_app())
+    import unittest.mock as mock
+
+    def fake_get(url, headers=None, timeout=None):
+        resp = mock.MagicMock()
+        resp.status_code = 200
+        if "output_modalities=video" in url:
+            resp.json.return_value = {"data": [
+                {"id": "google/veo-3.1", "architecture": {"output_modalities": ["video"]}},
+            ]}
+        else:
+            resp.json.return_value = {"data": [
+                {"id": "openai/gpt-image-2", "architecture": {"output_modalities": ["image"]}},
+                {"id": "some/chat", "architecture": {"output_modalities": ["text"]}},
+            ]}
+        return resp
+
+    with mock.patch("requests.get", side_effect=fake_get):
+        r = client.post("/api/keys/models-preview", json={
+            "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1",
+            "access_key": "x",
+        })
+
+    body = r.json()
+    by_id = {m["id"]: m for m in body["models"]}
+    assert "google/veo-3.1" in by_id, "视频模型必须被合并进来"
+    assert by_id["google/veo-3.1"]["modality"] == "video"
+    assert by_id["google/veo-3.1"]["protocol"] == "openrouter"  # 可路由，不是留空
+    assert body["total"] == 3  # 两个列表合并后的去重总数
+    assert body["excluded"] == 1
+
+
+def test_models_preview_survives_missing_extra_video_list(tmp_path, monkeypatch):
+    """额外列表拉不到时降级成「只有图片模型」，不能让整个功能报错。"""
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    client = TestClient(build_app())
+    import unittest.mock as mock
+
+    def fake_get(url, headers=None, timeout=None):
+        resp = mock.MagicMock()
+        if "output_modalities=video" in url:
+            resp.status_code = 500
+            resp.text = "boom"
+            return resp
+        resp.status_code = 200
+        resp.json.return_value = {"data": [
+            {"id": "openai/gpt-image-2", "architecture": {"output_modalities": ["image"]}},
+        ]}
+        return resp
+
+    with mock.patch("requests.get", side_effect=fake_get):
+        r = client.post("/api/keys/models-preview", json={
+            "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1",
+            "access_key": "x",
+        })
+
+    assert r.status_code == 200, r.text
+    assert [m["id"] for m in r.json()["models"]] == ["openai/gpt-image-2"]
+
+
+def test_extra_model_list_urls_only_for_openrouter():
+    from viewer_server.routes import _extra_model_list_urls
+    assert _extra_model_list_urls("https://openrouter.ai/api/v1/models", "openrouter") == [
+        "https://openrouter.ai/api/v1/models?output_modalities=video"
+    ]
+    # host 判定优先，配成 custom 也认
+    assert _extra_model_list_urls("https://openrouter.ai/api/v1/models", "custom")
+    assert _extra_model_list_urls("https://tokendance.space/gateway/v1/models", "tokendance") == []
