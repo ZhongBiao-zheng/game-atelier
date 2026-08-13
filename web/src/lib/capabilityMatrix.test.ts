@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { imageControlCaps } from './imageControlCaps';
 import { imageFamily, type ImageFamily } from './modelFamily';
 import { maxReferenceImages } from './referenceLimits';
-import { familyMinPixels } from './studioSize';
+import { familyMaxPixels, familyMinPixels, normalizeStudioPixelSizeForModel } from './studioSize';
 
 interface MatrixCase {
   why: string;
@@ -24,6 +24,7 @@ interface MatrixCase {
   max_reference_images: number;
   supports_quality: boolean;
   min_pixels: number | null;
+  max_pixels: number | null;
 }
 
 const FIXTURE = `${import.meta.dirname}/../../../tests/fixtures/capability-matrix.json`;
@@ -42,8 +43,39 @@ describe('能力矩阵（capability-matrix.json 是唯一真值表）', () => {
       expect(maxReferenceImages(c.model)).toBe(c.max_reference_images);
       expect(caps.qualities !== null).toBe(c.supports_quality);
       expect(familyMinPixels(c.model)).toBe(c.min_pixels);
+      expect(familyMaxPixels(c.model)).toBe(c.max_pixels);
     });
   }
+
+  // 上限这一侧是 2026-08-14 的真 bug：Studio 4K 档给 seedream-5.0-pro 发 4096x2304
+  // （9437184 像素），是它 4624220 上限的两倍，上游当场 400。
+  for (const c of CASES.filter((x) => x.min_pixels !== null)) {
+    it(`${c.model} — 任何输入尺寸归一后都落在 [${c.min_pixels}, ${c.max_pixels}]`, () => {
+      for (const raw of [
+        { w: 960, h: 960 },
+        { w: 2048, h: 2048 },
+        { w: 2560, h: 1440 },
+        { w: 4096, h: 2304 },
+        { w: 4096, h: 4096 },
+        { w: 8192, h: 8192 },
+      ]) {
+        const out = normalizeStudioPixelSizeForModel(raw, c.model);
+        const px = out.w * out.h;
+        expect(px, `${raw.w}x${raw.h} → ${out.w}x${out.h}`).toBeGreaterThanOrEqual(c.min_pixels!);
+        expect(px, `${raw.w}x${raw.h} → ${out.w}x${out.h}`).toBeLessThanOrEqual(c.max_pixels!);
+      }
+    });
+  }
+
+  it('上限是模型属性：同一网关同一把 key，pro 要钳、lite 原样通过', () => {
+    const fourK = { w: 4096, h: 2304 };
+    expect(normalizeStudioPixelSizeForModel(fourK, 'seedream-5.0-lite')).toEqual(fourK);
+    expect(normalizeStudioPixelSizeForModel(fourK, 'doubao-seedream-4-5-251128')).toEqual(fourK);
+    const clamped = normalizeStudioPixelSizeForModel(fourK, 'seedream-5.0-pro');
+    expect(clamped).not.toEqual(fourK);
+    expect(clamped.w * clamped.h).toBeLessThanOrEqual(4624220);
+    expect(Math.abs(clamped.w / clamped.h - 16 / 9)).toBeLessThan(0.01); // 比例要保住
+  });
 
   it('provider 不参与族判定：同一模型换 provider 四项判据完全一致', () => {
     const byModel = new Map<string, MatrixCase[]>();

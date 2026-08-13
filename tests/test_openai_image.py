@@ -1515,6 +1515,40 @@ def test_capability_matrix_matches_shared_fixture(case):
         assert family != "seedream"
     else:
         assert openai_image._min_pixels_for_seedream(model) == case["min_pixels"]
+    if case["max_pixels"] is None:
+        assert family != "seedream"
+    else:
+        assert openai_image._max_pixels_for_seedream(model) == case["max_pixels"]
+
+
+@pytest.mark.parametrize("case", _capability_cases(), ids=lambda c: f"{c['provider']}:{c['model']}")
+def test_seedream_size_normalized_into_pixel_range(case):
+    """任何 seedream 模型、任何输入尺寸，归一化后都必须落在 [下限, 上限] 内。
+
+    上限这一侧是 2026-08-14 的真 bug：Studio 4K 档发给 seedream-5.0-pro 的
+    4096x2304 有 9437184 像素，是它 4624220 上限的两倍，上游当场 400。
+    """
+    if case["min_pixels"] is None:
+        return
+    lo, hi = case["min_pixels"], case["max_pixels"]
+    # 覆盖 Studio 的 2K/4K 标准档 + 一个远低于下限、一个远高于上限的极端值。
+    for raw in ("960x960", "2048x2048", "2560x1440", "4096x2304", "4096x4096", "8192x8192"):
+        out = openai_image._normalize_size_for_provider(raw, True, case["model"])
+        px = openai_image._size_pixels(out)
+        assert lo <= px <= hi, f"{case['model']} {raw} → {out}（{px} 像素）越界 [{lo}, {hi}]"
+
+
+def test_seedream_pro_4k_is_clamped_but_lite_is_not():
+    """回归：上限是模型属性 —— 同一网关同一把 key，pro 要钳、lite 原样通过。"""
+    fourk = "4096x2304"
+    assert openai_image._normalize_size_for_provider(fourk, True, "seedream-5.0-lite") == fourk
+    assert openai_image._normalize_size_for_provider(fourk, True, "doubao-seedream-4-5-251128") == fourk
+    clamped = openai_image._normalize_size_for_provider(fourk, True, "seedream-5.0-pro")
+    assert clamped != fourk
+    assert openai_image._size_pixels(clamped) <= 4_624_220
+    # 比例要保住：4096/2304 = 16:9，钳完仍应接近 16:9。
+    w, h = (int(v) for v in str(clamped).split("x"))
+    assert abs(w / h - 16 / 9) < 0.01
 
 
 def test_seedream_reference_limit_no_longer_depends_on_provider():

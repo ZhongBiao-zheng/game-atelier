@@ -18,6 +18,14 @@ const SEEDREAM_MIN_PIXELS_BY_MODEL: Array<[string, number]> = [
   ['seedream-5-0-pro', 921600],
 ];
 
+// seedream 族像素上限（高于此值上游直接 400 `image area must be at most N pixels`）。
+// 默认 16777216 = 4096²，4K 档全部够得着；分档 key 与下限表同样按归一 id 子串匹配。
+const SEEDREAM_MAX_PIXELS_DEFAULT = 16777216;
+const SEEDREAM_MAX_PIXELS_BY_MODEL: Array<[string, number]> = [
+  // 实测上限只有 4624220，不到别人三分之一 —— 4K 档最小的一挡 4096x2304 就是它的两倍。
+  ['seedream-5-0-pro', 4624220],
+];
+
 /** 该模型的最小像素下限；null = 该族不做最小像素归一。
  *
  * gpt-image 返回 null：它不是「单一下限」而是一整套约束（最大边 / 双边 16 倍数 / 上下限像素），
@@ -29,6 +37,16 @@ export function familyMinPixels(modelId?: string | null): number | null {
     if (id.includes(key)) return px;
   }
   return SEEDREAM_MIN_PIXELS_DEFAULT;
+}
+
+/** 该模型的最大像素上限；null = 该族不做最大像素归一（gpt-image 同样走自己那套）。 */
+export function familyMaxPixels(modelId?: string | null): number | null {
+  if (imageFamily(modelId) !== 'seedream') return null;
+  const id = normalizedModelId(modelId).replace(/\./g, '-');
+  for (const [key, px] of SEEDREAM_MAX_PIXELS_BY_MODEL) {
+    if (id.includes(key)) return px;
+  }
+  return SEEDREAM_MAX_PIXELS_DEFAULT;
 }
 
 // seedream 族的 2K/4K 标准档（火山官方尺寸表，已满足默认像素下限）。
@@ -103,19 +121,29 @@ export function normalizeGptImagePixelSize(size: { w: number; h: number }): { w:
   return { w: round16(w), h: round16(h) };
 }
 
-/** 按模型族归一化像素尺寸：gpt-image 走自由像素约束，seedream 走最小像素下限，其余原样。 */
+/** 按模型族归一化像素尺寸：gpt-image 走自由像素约束，seedream 钳进 [下限, 上限]，其余原样。
+ *
+ * seedream 的约束是双向的 —— 界面上选 4K 而模型上限只有 4624220 时，不钳制就会带着一个必被
+ * 上游拒绝的尺寸提交（画师侧现象：选 4K 出图报 400）。这里钳完，输入框显示的就是真正会出的尺寸。 */
 export function normalizeStudioPixelSizeForModel(
   size: { w: number; h: number },
   modelId?: string | null,
 ): { w: number; h: number } {
   if (imageFamily(modelId) === 'gpt-image') return normalizeGptImagePixelSize(size);
+  const pixels = Math.max(1, size.w * size.h);
   const minPixels = familyMinPixels(modelId);
-  if (minPixels === null || size.w * size.h >= minPixels) return size;
-  const scale = Math.sqrt(minPixels / Math.max(1, size.w * size.h));
-  return {
-    w: Math.ceil(size.w * scale),
-    h: Math.ceil(size.h * scale),
-  };
+  if (minPixels !== null && pixels < minPixels) {
+    // 向上取整：放大后仍差一个像素会被继续判为不足。
+    const scale = Math.sqrt(minPixels / pixels);
+    return { w: Math.ceil(size.w * scale), h: Math.ceil(size.h * scale) };
+  }
+  const maxPixels = familyMaxPixels(modelId);
+  if (maxPixels !== null && pixels > maxPixels) {
+    // 向下取整：缩小后多一个像素就仍然越界。
+    const scale = Math.sqrt(maxPixels / pixels);
+    return { w: Math.max(1, Math.floor(size.w * scale)), h: Math.max(1, Math.floor(size.h * scale)) };
+  }
+  return size;
 }
 
 export function normalizeStudioSizeForModel(size: string, modelId?: string | null): string {
