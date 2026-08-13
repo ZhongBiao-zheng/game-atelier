@@ -2,7 +2,7 @@ import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, 
 import { createPortal } from 'react-dom';
 import { ArrowUp, Box, ChevronRight, Coins, Film, ImageIcon, Images, Music, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
 import { modelModality, type KeyView } from '@/api/keys';
-import { computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
+import { availableResolutions, computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
 import { providerLabel } from '@/lib/providerLabels';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
@@ -543,6 +543,16 @@ export function PromptInput({
     setLocalH(normalized.h);
     onCustomSizeChange?.(normalized.w, normalized.h);
   }, [ratio, resolution, selectedModel?.id, onCustomSizeChange]);
+
+  // 分辨率不变式：状态里的档位永远在当前模型能选的集合里。从 lite 切到 seedream-5.0-pro
+  // （4K 够不着、按钮不再渲染）时若不回落，chip 会继续显示「超清 4K」而面板里无一项选中，
+  // 而且这个 4K 会跟着 saveSelection 落进本地存档、下次进来照样对不上。
+  useEffect(() => {
+    if (!caps.showResolution) return;
+    const allowed = availableResolutions(selectedModel?.id);
+    if (allowed.length === 0 || allowed.includes(resolution)) return;
+    onResolutionChange?.(allowed[0]);
+  }, [caps.showResolution, selectedModel?.id, resolution, onResolutionChange]);
 
   // 参考图数量不变式：永远 ≤ 当前模型族上限。切换模型（16 张的 gpt-image → 3 张的 nano-banana）
   // 或整组复用历史参考图都可能撑爆上限 —— 旧行为是界面上 chip 全在、后端只发前 N 张（静默丢弃）。
@@ -1204,8 +1214,14 @@ export function PromptInput({
                   {caps.showResolution && (
                     <section className="w-[296px]">
                       <div className="py-1 px-1 text-xs text-muted-foreground">分辨率</div>
-                      <div role="listbox" aria-label="选择分辨率" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
-                        {(['2K', '4K'] as const).map((item) => (
+                      <div
+                        role="listbox"
+                        aria-label="选择分辨率"
+                        className={`grid h-9 rounded-lg bg-popover p-0.5 ${
+                          caps.resolutions.length > 1 ? 'grid-cols-2' : 'grid-cols-1'
+                        }`}
+                      >
+                        {caps.resolutions.map((item) => (
                           <button
                             key={item}
                             type="button"

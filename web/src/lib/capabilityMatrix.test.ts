@@ -14,7 +14,13 @@ import { describe, expect, it } from 'vitest';
 import { imageControlCaps } from './imageControlCaps';
 import { imageFamily, type ImageFamily } from './modelFamily';
 import { maxReferenceImages } from './referenceLimits';
-import { familyMinPixels } from './studioSize';
+import {
+  availableResolutions,
+  computeStudioPixelSize,
+  familyMaxPixels,
+  familyMinPixels,
+  normalizeStudioPixelSizeForModel,
+} from './studioSize';
 
 interface MatrixCase {
   why: string;
@@ -24,6 +30,7 @@ interface MatrixCase {
   max_reference_images: number;
   supports_quality: boolean;
   min_pixels: number | null;
+  max_pixels: number | null;
 }
 
 const FIXTURE = `${import.meta.dirname}/../../../tests/fixtures/capability-matrix.json`;
@@ -42,8 +49,39 @@ describe('能力矩阵（capability-matrix.json 是唯一真值表）', () => {
       expect(maxReferenceImages(c.model)).toBe(c.max_reference_images);
       expect(caps.qualities !== null).toBe(c.supports_quality);
       expect(familyMinPixels(c.model)).toBe(c.min_pixels);
+      expect(familyMaxPixels(c.model)).toBe(c.max_pixels);
     });
   }
+
+  // 上限这一侧是 2026-08-14 的真 bug：Studio 4K 档给 seedream-5.0-pro 发 4096x2304
+  // （9437184 像素），是它 4624220 上限的两倍，上游当场 400。
+  for (const c of CASES.filter((x) => x.min_pixels !== null)) {
+    it(`${c.model} — 任何输入尺寸归一后都落在 [${c.min_pixels}, ${c.max_pixels}]`, () => {
+      for (const raw of [
+        { w: 960, h: 960 },
+        { w: 2048, h: 2048 },
+        { w: 2560, h: 1440 },
+        { w: 4096, h: 2304 },
+        { w: 4096, h: 4096 },
+        { w: 8192, h: 8192 },
+      ]) {
+        const out = normalizeStudioPixelSizeForModel(raw, c.model);
+        const px = out.w * out.h;
+        expect(px, `${raw.w}x${raw.h} → ${out.w}x${out.h}`).toBeGreaterThanOrEqual(c.min_pixels!);
+        expect(px, `${raw.w}x${raw.h} → ${out.w}x${out.h}`).toBeLessThanOrEqual(c.max_pixels!);
+      }
+    });
+  }
+
+  it('上限是模型属性：同一网关同一把 key，pro 要钳、lite 原样通过', () => {
+    const fourK = { w: 4096, h: 2304 };
+    expect(normalizeStudioPixelSizeForModel(fourK, 'seedream-5.0-lite')).toEqual(fourK);
+    expect(normalizeStudioPixelSizeForModel(fourK, 'doubao-seedream-4-5-251128')).toEqual(fourK);
+    const clamped = normalizeStudioPixelSizeForModel(fourK, 'seedream-5.0-pro');
+    expect(clamped).not.toEqual(fourK);
+    expect(clamped.w * clamped.h).toBeLessThanOrEqual(4624220);
+    expect(Math.abs(clamped.w / clamped.h - 16 / 9)).toBeLessThan(0.01); // 比例要保住
+  });
 
   it('provider 不参与族判定：同一模型换 provider 四项判据完全一致', () => {
     const byModel = new Map<string, MatrixCase[]>();
@@ -71,5 +109,60 @@ describe('能力矩阵（capability-matrix.json 是唯一真值表）', () => {
     expect(routed.sizeKind).toBe('ratio');
     expect(routed.showResolution).toBe(false);
     expect(routed.showCustomSize).toBe(false);
+  });
+});
+
+// 2026-08-14：pro 的上限 4624220 够不着 4K 档任意一挡。与其让画师选一个必然 400 的档位，
+// 不如不给这个选项；而唯一剩下的 2K 档要撑满上限，否则标准 2K 表只用掉 90.7% 的额度。
+describe('分辨率档位按模型上限裁', () => {
+  const RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
+  const PRO_MAX = 4624220;
+  // lite 的上限是 16777216（=4096²），4K 表原样通过，拿它当「标准表」的取值口。
+  const std = (ratio: string, res: '2K' | '4K') => computeStudioPixelSize(ratio, res, 'seedream-5.0-lite');
+
+  for (const c of CASES.filter((x) => x.max_pixels !== null)) {
+    it(`${c.model} — 可选档位与 4K 可达性一致`, () => {
+      const anyFits = RATIOS.some((r) => {
+        const s = std(r, '4K');
+        return s.w * s.h <= c.max_pixels!;
+      });
+      expect(availableResolutions(c.model)).toEqual(anyFits ? ['2K', '4K'] : ['2K']);
+    });
+  }
+
+  it('非 seedream 族不受影响（上限为 null → 两档都在）', () => {
+    expect(availableResolutions('dall-e-3')).toEqual(['2K', '4K']);
+    expect(availableResolutions(undefined)).toEqual(['2K', '4K']);
+  });
+
+  it('只剩 2K 的模型：这一档撑满上限、不越界、比例不变', () => {
+    for (const r of RATIOS) {
+      const s = computeStudioPixelSize(r, '2K', 'seedream-5.0-pro');
+      const px = s.w * s.h;
+      expect(px, `${r} → ${s.w}x${s.h}`).toBeLessThanOrEqual(PRO_MAX);
+      // 真撑满了：照搬标准 2K 表只有 4194304/4624220 = 90.7%，达不到 99%。
+      expect(px, `${r} → ${s.w}x${s.h}`).toBeGreaterThan(PRO_MAX * 0.99);
+      const ref = std(r, '2K');
+      expect(Math.abs(s.w / s.h - ref.w / ref.h), `${r} 比例`).toBeLessThan(0.01);
+    }
+  });
+
+  it('状态里残留 4K 也不会越界：pro 无视传入档位', () => {
+    // 从 lite 切到 pro 时 resolution 状态可能还是 4K，纠偏 effect 落地前会先渲染一帧。
+    expect(computeStudioPixelSize('16:9', '4K', 'seedream-5.0-pro'))
+      .toEqual(computeStudioPixelSize('16:9', '2K', 'seedream-5.0-pro'));
+  });
+
+  it('lite / 4-5 的 4K 档一个像素都不动', () => {
+    expect(std('16:9', '4K')).toEqual({ w: 4096, h: 2304 });
+    expect(computeStudioPixelSize('1:1', '4K', 'doubao-seedream-4-5-251128')).toEqual({ w: 4096, h: 4096 });
+  });
+
+  it('caps.resolutions 跟着模型走，不跟着族走', () => {
+    expect(imageControlCaps('seedream-5.0-pro', 'tokendance').resolutions).toEqual(['2K']);
+    expect(imageControlCaps('seedream-5.0-lite', 'tokendance').resolutions).toEqual(['2K', '4K']);
+    // 不显示分辨率控件的族给空数组，PromptInput 的纠偏 effect 靠 showResolution 提前 return。
+    expect(imageControlCaps('gpt-image-2', 'openai').resolutions).toEqual([]);
+    expect(imageControlCaps('openai/gpt-image-2', 'openrouter').resolutions).toEqual([]);
   });
 });

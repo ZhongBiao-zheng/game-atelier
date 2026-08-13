@@ -111,7 +111,9 @@ def render(
     )
     requested_size = _normalize_size_for_provider(raw_size, is_seedream, model)
     if requested_size != raw_size:
-        _warn(kwargs, f"尺寸已放大到该模型的像素下限：{raw_size} → {requested_size}")
+        grew = _size_pixels(requested_size) > _size_pixels(raw_size)
+        edge = "放大到该模型的像素下限" if grew else "缩小到该模型的像素上限"
+        _warn(kwargs, f"尺寸已{edge}：{raw_size} → {requested_size}")
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -628,9 +630,28 @@ def _min_pixels_for_seedream(model: str) -> int:
     return 3_686_400
 
 
+def _max_pixels_for_seedream(model: str) -> int:
+    """seedream 族的最大像素约束 —— 与下限对称，同样是模型属性、同样按实测值表取。
+
+    16777216（=4096²）：doubao-seedream-4-5（火山直连 / Tuzi）、词元跳动 seedream-5.0-lite。
+    4624220：词元跳动 seedream-5.0-pro —— 不到别人的三分之一。Studio 的 4K 档最小的一挡
+    4096x2304 就有 9437184 像素，是它上限的两倍，所以选 4K 必报
+    `image area must be at most 4624220 pixels`（2026-08-14 实测，画师侧现象就是这条）。
+    """
+    if "seedream-5-0-pro" in normalized_model_id(model):
+        return 4_624_220
+    return 16_777_216
+
+
+def _size_pixels(size: object) -> int:
+    match = re.fullmatch(r"(\d+)x(\d+)", str(size).strip()) if size is not None else None
+    return int(match.group(1)) * int(match.group(2)) if match else 0
+
+
 def _normalize_size_for_provider(size: object, is_seedream: bool, model: str = "") -> object:
-    # seedream 族有最小像素约束：不足就等比放大到该模型的阈值，否则厂商报「image size must
-    # be at least N pixels」（实测）。其余族原样返回。
+    # seedream 族的像素约束是**双向**的：低于下限厂商报「must be at least N pixels」，高于
+    # 上限报「must be at most N pixels」，两条都在参数校验阶段直接 400。等比缩放到区间内，
+    # 其余族原样返回。
     if not is_seedream or not isinstance(size, str):
         return size
     match = re.fullmatch(r"(\d+)x(\d+)", size.strip())
@@ -638,11 +659,18 @@ def _normalize_size_for_provider(size: object, is_seedream: bool, model: str = "
         return size
     width = int(match.group(1))
     height = int(match.group(2))
+    pixels = max(1, width * height)
     min_pixels = _min_pixels_for_seedream(model)
-    if width * height >= min_pixels:
-        return size
-    scale = (min_pixels / max(1, width * height)) ** 0.5
-    return f"{int(width * scale + 0.999999)}x{int(height * scale + 0.999999)}"
+    max_pixels = _max_pixels_for_seedream(model)
+    if pixels < min_pixels:
+        # 向上取整：放大后仍差一个像素会被继续判为不足。
+        scale = (min_pixels / pixels) ** 0.5
+        return f"{int(width * scale + 0.999999)}x{int(height * scale + 0.999999)}"
+    if pixels > max_pixels:
+        # 向下取整：缩小后多一个像素就仍然越界。
+        scale = (max_pixels / pixels) ** 0.5
+        return f"{max(1, int(width * scale))}x{max(1, int(height * scale))}"
+    return size
 
 
 def _chat_image_payload(

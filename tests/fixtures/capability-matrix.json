@@ -5,88 +5,107 @@
     "按 modelId 前缀判族；后端按子串判族、按 provider 判 quality 与参考图上限），导致大量静默改写。",
     "四项判据一律按【模型族】走，provider 只决定端点与协议，不再参与能力判定。",
     "族判定规则：取 modelId 最后一个 '/' 之后的尾段 → lower() → '_' 归一为 '-' → 子串匹配。",
+    "min_pixels / max_pixels 都是【实测值】，来源是对上游打的参数校验探针（故意发越界尺寸，",
+    "厂商在生成前拒绝并把阈值写进报错文案，不计费）。2026-08-14 实测：5.0-pro 的上限只有",
+    "4624220，不到别人的三分之一，Studio 的 4K 档全部越界 —— 上限和下限一样是模型属性。",
     "改任一端的实现前先改这张表，两端测试会同时把你挡住。"
   ],
   "cases": [
     {
       "why": "OpenAI 直连的 gpt-image",
       "model": "gpt-image-2", "provider": "openai",
-      "family": "gpt-image", "max_reference_images": 16, "supports_quality": true, "min_pixels": null
+      "family": "gpt-image", "max_reference_images": 16, "supports_quality": true,
+      "min_pixels": null, "max_pixels": null
     },
     {
       "why": "同一个模型经 OpenAI-HK 聚合，能力不该变",
       "model": "gpt-image-2", "provider": "custom",
-      "family": "gpt-image", "max_reference_images": 16, "supports_quality": true, "min_pixels": null
+      "family": "gpt-image", "max_reference_images": 16, "supports_quality": true,
+      "min_pixels": null, "max_pixels": null
     },
     {
       "why": "OpenRouter 斜杠 slug：取尾段判族，能力与直连一致",
       "model": "openai/gpt-image-2", "provider": "openrouter",
-      "family": "gpt-image", "max_reference_images": 16, "supports_quality": true, "min_pixels": null
+      "family": "gpt-image", "max_reference_images": 16, "supports_quality": true,
+      "min_pixels": null, "max_pixels": null
     },
     {
       "why": "大小写不该改变族判定（旧 _hk_image_model 是裸 startswith，会漏）",
       "model": "GPT-Image-2", "provider": "custom",
-      "family": "gpt-image", "max_reference_images": 16, "supports_quality": true, "min_pixels": null
+      "family": "gpt-image", "max_reference_images": 16, "supports_quality": true,
+      "min_pixels": null, "max_pixels": null
     },
     {
       "why": "nano-banana 族：官方建议 ≤2，放宽到 3",
       "model": "nano-banana", "provider": "custom",
-      "family": "nano-banana", "max_reference_images": 3, "supports_quality": true, "min_pixels": null
+      "family": "nano-banana", "max_reference_images": 3, "supports_quality": true,
+      "min_pixels": null, "max_pixels": null
     },
     {
       "why": "Tuzi 的 nano-banana-pro 变体仍是同族",
       "model": "nano-banana-pro-4k", "provider": "custom",
-      "family": "nano-banana", "max_reference_images": 3, "supports_quality": true, "min_pixels": null
+      "family": "nano-banana", "max_reference_images": 3, "supports_quality": true,
+      "min_pixels": null, "max_pixels": null
     },
     {
       "why": "下划线写法（model-routing.md 给 Skill 的判据认它）不该判成 standard",
       "model": "nano_banana_pro", "provider": "custom",
-      "family": "nano-banana", "max_reference_images": 3, "supports_quality": true, "min_pixels": null
+      "family": "nano-banana", "max_reference_images": 3, "supports_quality": true,
+      "min_pixels": null, "max_pixels": null
     },
     {
-      "why": "火山直连 seedream：10 张参考图，无 quality 概念",
+      "why": "火山直连 seedream：10 张参考图，无 quality 概念；上限实测 4096²",
       "model": "doubao-seedream-4-5-251128", "provider": "seedream",
-      "family": "seedream", "max_reference_images": 10, "supports_quality": false, "min_pixels": 3686400
+      "family": "seedream", "max_reference_images": 10, "supports_quality": false,
+      "min_pixels": 3686400, "max_pixels": 16777216
     },
     {
       "why": "同一模型经 Tuzi 聚合：旧代码按 provider 判只给 4 张，砍掉 60% 能力",
       "model": "doubao-seedream-4-5-251128", "provider": "custom",
-      "family": "seedream", "max_reference_images": 10, "supports_quality": false, "min_pixels": 3686400
+      "family": "seedream", "max_reference_images": 10, "supports_quality": false,
+      "min_pixels": 3686400, "max_pixels": 16777216
     },
     {
-      "why": "词元跳动的 lite：实测像素下限 3686400",
+      "why": "词元跳动的 lite：实测下限 3686400、上限 16777216（4K 档全部够得着）",
       "model": "seedream-5.0-lite", "provider": "tokendance",
-      "family": "seedream", "max_reference_images": 10, "supports_quality": false, "min_pixels": 3686400
+      "family": "seedream", "max_reference_images": 10, "supports_quality": false,
+      "min_pixels": 3686400, "max_pixels": 16777216
     },
     {
-      "why": "同网关的 pro：实测下限只要 921600，套 3686400 会让用户白付 4 倍像素",
+      "why": "同网关的 pro 两头都是异类：下限只要 921600，上限只有 4624220 —— Studio 4K 档最小的一挡 9437184 是它的两倍，不钳制必 400",
       "model": "seedream-5.0-pro", "provider": "tokendance",
-      "family": "seedream", "max_reference_images": 10, "supports_quality": false, "min_pixels": 921600
+      "family": "seedream", "max_reference_images": 10, "supports_quality": false,
+      "min_pixels": 921600, "max_pixels": 4624220
     },
     {
       "why": "OpenRouter 的 seedream slug",
       "model": "bytedance-seed/seedream-4.5", "provider": "openrouter",
-      "family": "seedream", "max_reference_images": 10, "supports_quality": false, "min_pixels": 3686400
+      "family": "seedream", "max_reference_images": 10, "supports_quality": false,
+      "min_pixels": 3686400, "max_pixels": 16777216
     },
     {
       "why": "seededit 图生图：image_family 早就认它，但 _IMAGE_ID_HINTS 不认（会被模型列表误杀）",
       "model": "doubao-seededit-3-0-i2i", "provider": "seedream",
-      "family": "seedream", "max_reference_images": 10, "supports_quality": false, "min_pixels": 3686400
+      "family": "seedream", "max_reference_images": 10, "supports_quality": false,
+      "min_pixels": 3686400, "max_pixels": 16777216
     },
     {
       "why": "Gemini 系在 OpenRouter 的 id 里没有 nano-banana 字样，判 standard 是诚实的",
       "model": "google/gemini-3-pro-image", "provider": "openrouter",
-      "family": "standard", "max_reference_images": 4, "supports_quality": false, "min_pixels": null
+      "family": "standard", "max_reference_images": 4, "supports_quality": false,
+      "min_pixels": null, "max_pixels": null
     },
     {
       "why": "未知 standard 族：保守 4 张、不发 quality、不做尺寸归一",
       "model": "black-forest-labs/flux.2-pro", "provider": "openrouter",
-      "family": "standard", "max_reference_images": 4, "supports_quality": false, "min_pixels": null
+      "family": "standard", "max_reference_images": 4, "supports_quality": false,
+      "min_pixels": null, "max_pixels": null
     },
     {
       "why": "dall-e 走 OpenAI 直连：旧代码按 provider 给 quality，会把 low/high 发给只认 standard|hd 的 DALL·E",
       "model": "dall-e-3", "provider": "openai",
-      "family": "standard", "max_reference_images": 4, "supports_quality": false, "min_pixels": null
+      "family": "standard", "max_reference_images": 4, "supports_quality": false,
+      "min_pixels": null, "max_pixels": null
     }
   ]
 }
