@@ -239,8 +239,9 @@ def test_models_preview_reads_image_protocol_from_upstream_annotation(tmp_path, 
 
     assert by_id["seedream-5.0-pro"]["protocol"] == "ark"
     assert by_id["seedream-5.0-lite"]["protocol"] == "openai"
-    assert by_id["some-chat"]["modality"] is None
-    assert by_id["some-chat"]["protocol"] is None
+    # 纯 chat 协议的模型明确非视觉 → 不入列表（只计进 excluded）
+    assert "some-chat" not in by_id
+    assert r.json()["excluded"] == 1
 
 
 def test_reveal_returns_stored_plaintext(client):
@@ -329,3 +330,111 @@ def test_models_preview_allows_any_host_when_caller_brings_its_own_key(tmp_path,
         })
     assert r.status_code == 200, r.text
     assert seen["auth"] == "Bearer caller-key"
+
+
+# --- 模型列表分类：只丢明确的非视觉模型 ---
+
+def test_classify_model_uses_protocol_annotation():
+    from viewer_server.routes import _classify_model
+    assert _classify_model({"id": "a", "supported_protocols": ["ark:image-generations"]}) == "image"
+    assert _classify_model({"id": "b", "supported_protocols": ["seedance:generations"]}) == "video"
+    assert _classify_model({"id": "c", "supported_protocols": ["openai:chat-completions"]}) == "excluded"
+    assert _classify_model({
+        "id": "d", "supported_protocols": ["openai:chat-completions", "anthropic:messages"],
+    }) == "excluded"
+    # 混合标注里有一条看不懂的 → 保守留下，绝不丢
+    assert _classify_model({
+        "id": "e", "supported_protocols": ["openai:chat-completions", "acme:mystery-thing"],
+    }) == "unknown"
+
+
+def test_classify_model_does_not_short_circuit_on_unknown_protocols():
+    """旧版 `if protocols: return None` 会让协议词表不认识的网关整片判空。
+
+    协议词汇是各厂自造的（实测同一份数据里就有 zai:layout-parsing / bocha:web-search），
+    认不出来必须落到 id 关键词兜底，而不是早退。
+    """
+    from viewer_server.routes import _classify_model
+    item = {"id": "acme-seedream-x", "supported_protocols": ["acme:brand-new-verb"]}
+    assert _classify_model(item) == "image"
+
+
+def test_classify_model_reads_output_modalities_before_guessing_id():
+    """OpenRouter 409 个模型全都没有 supported_protocols，但都有这个权威字段。"""
+    from viewer_server.routes import _classify_model
+    assert _classify_model({
+        "id": "openrouter/auto", "architecture": {"output_modalities": ["text", "image"]},
+    }) == "image"
+    assert _classify_model({
+        "id": "thinkingmachines/inkling", "architecture": {"output_modalities": ["text"]},
+    }) == "excluded"
+    # 纯音频也排除：上游自己声明了输出里没有图和视频
+    assert _classify_model({
+        "id": "google/lyria-3-pro", "architecture": {"output_modalities": ["audio"]},
+    }) == "excluded"
+
+
+def test_id_keyword_match_respects_word_boundaries():
+    """裸子串会把 inkling 判成 kling 视频、把 wanx（通义万相，图像）判成视频。"""
+    from viewer_server.routes import _classify_model
+    assert _classify_model({"id": "thinkingmachines/inkling"}) == "unknown"
+    assert _classify_model({"id": "kwaivgi/kling-v3.0-std"}) == "video"
+    assert _classify_model({"id": "wanx-v1"}) == "unknown"
+    # seededit 是真图生图模型，image_family 早就认它，此前 _IMAGE_ID_HINTS 漏了
+    assert _classify_model({"id": "doubao-seededit-3-0-i2i"}) == "image"
+
+
+def _preview_with_upstream(client, rows, **payload):
+    import unittest.mock as mock
+    fake = mock.MagicMock()
+    fake.status_code = 200
+    fake.json.return_value = {"data": rows}
+    with mock.patch("requests.get", return_value=fake):
+        return client.post("/api/keys/models-preview", json={
+            "provider": "tokendance", "base_url": "https://tokendance.space/gateway/v1",
+            "access_key": "x", **payload,
+        })
+
+
+def test_models_preview_filters_non_visual_and_reports_counts(tmp_path, monkeypatch):
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    client = TestClient(build_app())
+    rows = [
+        {"id": "seedream-5.0-pro", "supported_protocols": ["ark:image-generations"]},
+        {"id": "seedance-2.0", "supported_protocols": ["seedance:generations"]},
+        {"id": "glm-4.7", "supported_protocols": ["openai:chat-completions"]},
+        {"id": "text-embed", "supported_protocols": ["openai:embeddings"]},
+        {"id": "mystery-model"},
+    ]
+    body = _preview_with_upstream(client, rows).json()
+    ids = [m["id"] for m in body["models"]]
+
+    assert "glm-4.7" not in ids and "text-embed" not in ids
+    assert body["excluded"] == 2
+    assert body["total"] == 5
+    # unknown 留在列表里，标成 category=unknown 让画师自己确认（不是「其他垃圾」）
+    assert [m["category"] for m in body["models"] if m["id"] == "mystery-model"] == ["unknown"]
+    assert [m["modality"] for m in body["models"] if m["id"] == "mystery-model"] == [None]
+
+
+def test_models_preview_include_all_is_the_escape_hatch(tmp_path, monkeypatch):
+    """deny 词表判过头时，画师要能自己看到全量，不能变成死路。"""
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    client = TestClient(build_app())
+    rows = [{"id": "glm-4.7", "supported_protocols": ["openai:chat-completions"]}]
+    body = _preview_with_upstream(client, rows, include_all=True).json()
+    assert [m["id"] for m in body["models"]] == ["glm-4.7"]
+    assert body["excluded"] == 0
+
+
+def test_models_preview_dedupes_upstream_ids(tmp_path, monkeypatch):
+    """聚合商常给同一模型挂多个别名条目，重复 id 会让前端 key 冲突。"""
+    monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
+    client = TestClient(build_app())
+    rows = [
+        {"id": "seedream-5.0-pro", "supported_protocols": ["ark:image-generations"]},
+        {"id": "seedream-5.0-pro", "supported_protocols": ["ark:image-generations"]},
+    ]
+    body = _preview_with_upstream(client, rows).json()
+    assert [m["id"] for m in body["models"]] == ["seedream-5.0-pro"]
+    assert body["total"] == 1

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArrowLeft, Eye, EyeOff, X } from 'lucide-react';
-import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelModality, type RemoteModel } from '@/api/keys';
+import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
 
 type ProviderKind = 'official' | 'third_party' | 'custom';
 type ApiModality = 'image' | 'video' | 'audio' | 'llm';
@@ -39,8 +39,18 @@ const usesNamedAlias = (provider: string) => provider === 'custom';
 const fieldClass = 'w-full rounded-md border border-input bg-background/35 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-primary/50';
 const capLabelClass = 'block text-xs uppercase tracking-label text-muted-foreground/70 mb-2';
 const ghostButtonClass = 'rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+// 次要文本操作（全选 / 清空 / 显示全部）：不占黄铜，也不做成方块按钮抢主操作的戏。
+const textActionClass = 'rounded-sm text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:opacity-40 disabled:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
-type PickerFilter = 'all' | 'image' | 'video' | 'other';
+type PickerFilter = 'all' | ModelCategory;
+
+// 「未识别」不是「其他垃圾」——上游协议词汇各厂自造、词表追不完，认不出的条目要画师自己确认。
+const CATEGORY_LABELS: Record<ModelCategory, string> = {
+  image: '图片',
+  video: '视频',
+  unknown: '未识别',
+  excluded: '非视觉',
+};
 
 // 仅前端的行级标记：编辑态「打开表单时已存在的模型」分类锁死为只读，新增行不带此标记。
 // _locked 随 spread 在每次 setModels 中传递，增删行都不会错乱（不依赖 id 值或行下标）。
@@ -71,8 +81,11 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
   const [urlTest, setUrlTest] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fetched, setFetched] = useState<RemoteModel[] | null>(null);
+  // preview 存整份响应（models + total + excluded），头部才能诚实说清「上游多少、过滤了多少」。
+  const [preview, setPreview] = useState<(ModelsPreview & { includeAll: boolean }) | null>(null);
   const [fetchedChecked, setFetchedChecked] = useState<Set<string>>(new Set());
+  // 上游没判出分类的行（unknown / excluded）在 picker 里的显式二选一结果，按模型 id 存。
+  const [modalityPick, setModalityPick] = useState<Record<string, ModelModality>>({});
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [pickerFilter, setPickerFilter] = useState<PickerFilter>('all');
@@ -94,31 +107,43 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     setHomepage(nextPreset.homepageUrl ?? '');
     setModels(nextPreset.defaultModels);
     setUrlTest(null);
-    setFetched(null);
+    setPreview(null);
+    setModalityPick({});
     setFetchError(null);
   };
 
   // 模型映射：服务端代理拉上游 /models（CORS + 编辑态前端只有掩码密钥，见 models-preview）。
   const fetchModelsBaseUrl = baseUrl.trim() || providerByValue(provider).defaultBaseUrl || '';
-  const fetchModels = async () => {
+  /** includeAll = 逃生舱重拉：把后端判定「明确非视觉」的条目也一并列出来。 */
+  const fetchModels = async (includeAll = false) => {
     setFetching(true);
     setFetchError(null);
     try {
       // 编辑态密钥框是掩码回显，未改动就不当真实密钥发，改由服务端按 alias 取存储密钥。
       const keyChanged = accessKey.trim() && accessKey !== initial?.access_key;
-      const { models: remote } = await previewModels({
+      const remote = await previewModels({
         alias: editing ? initial?.alias ?? null : null,
         provider: provider || null,
         base_url: fetchModelsBaseUrl || null,
         access_key: !editing || keyChanged ? accessKey.trim() || null : null,
+        include_all: includeAll,
       });
-      const order = (m: RemoteModel) => (m.modality === 'image' ? 0 : m.modality === 'video' ? 1 : 2);
-      const sorted = [...remote].sort((a, b) => order(a) - order(b));
+      const order = (m: RemoteModel) => ['image', 'video', 'unknown', 'excluded'].indexOf(m.category);
+      const sorted = [...remote.models].sort((a, b) => order(a) - order(b));
       const enabledIds = new Set(models.map((m) => m.id.trim()).filter(Boolean));
+      // 逃生舱重拉发生在 picker 内部：已勾选的和已指定的分类都要留着，否则「看一眼全量」
+      // 的代价是把刚点完的十几个勾全清掉。首次打开（preview 为 null）只按已启用模型预勾。
+      const carried = preview ? [...fetchedChecked] : [];
+      const enabledPicks = Object.fromEntries(
+        models.filter((m) => m.id.trim() && m.modality).map((m) => [m.id.trim(), m.modality as ModelModality]),
+      );
       setPickerFilter('all');
       setPickerQuery('');
-      setFetched(sorted);
-      setFetchedChecked(new Set(sorted.filter((m) => enabledIds.has(m.id)).map((m) => m.id)));
+      setPreview({ ...remote, models: sorted, includeAll });
+      setFetchedChecked(new Set(
+        sorted.filter((m) => enabledIds.has(m.id) || carried.includes(m.id)).map((m) => m.id),
+      ));
+      setModalityPick({ ...enabledPicks, ...(preview ? modalityPick : {}) });
     } catch (e) {
       setFetchError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -126,20 +151,40 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     }
   };
 
+  /** 上游没判出分类的行必须由画师明确二选一——静默按图片处理会让一个聊天模型以图片模型
+   *  身份进 Studio 图片下拉，出图时把它的 id 发给 /images/generations。 */
+  const resolvedModality = (m: RemoteModel): ModelModality | null => m.modality ?? modalityPick[m.id] ?? null;
+  const unresolvedChecked = (preview?.models ?? []).filter((m) => fetchedChecked.has(m.id) && !resolvedModality(m));
+
   /** 勾选状态同步回模型行：新勾的加入、列表内被取消勾选的移除、手填且不在列表的不动。 */
   const applyFetchedSelection = () => {
-    if (!fetched) return;
-    const fetchedIds = new Set(fetched.map((m) => m.id));
-    const kept = models.filter((m) => !fetchedIds.has(m.id.trim()) || fetchedChecked.has(m.id.trim()));
+    if (!preview || unresolvedChecked.length) return; // 按钮已禁用，这里是双保险
+    const upstream = new Map(preview.models.map((m) => [m.id, m]));
+    const kept = models
+      .filter((m) => !upstream.has(m.id.trim()) || fetchedChecked.has(m.id.trim()))
+      .map((m) => {
+        const hit = upstream.get(m.id.trim());
+        if (!hit) return m;
+        return {
+          ...m,
+          // 「重拉一次列表来修协议」必须真的有效：protocol 是纯机器字段（表单里没有输入口），
+          // 命中上游就用上游值覆盖，否则存错 / 存空的行永远修不回来。
+          protocol: hit.protocol,
+          // name 有输入框、可能被改成自己的叫法，只在空着或还等于 id 时补上游名。
+          name: !m.name.trim() || m.name.trim() === m.id.trim() ? hit.name : m.name,
+          // 分类归表单管（编辑态已存行是只读徽标）；只有未识别行的显式二选一才回写。
+          modality: !m._locked && !hit.modality && modalityPick[hit.id] ? modalityPick[hit.id] : m.modality,
+        };
+      });
     const keptIds = new Set(kept.map((m) => m.id.trim()));
-    const added = fetched
+    const added = preview.models
       .filter((m) => fetchedChecked.has(m.id) && !keptIds.has(m.id))
       // protocol 必须随模型一起存：它是上游协议标注的解析结果（图片 ark/openai、视频
       // seedance/kling/…），丢了就得靠 caller 端启发式猜端点。
-      .map((m) => ({ name: m.name, id: m.id, modality: m.modality ?? 'image' as ModelModality, protocol: m.protocol }));
+      .map((m) => ({ name: m.name, id: m.id, modality: resolvedModality(m) as ModelModality, protocol: m.protocol }));
     const next = [...kept, ...added];
     setModels(next.length ? next : [{ name: '', id: '' }]);
-    setFetched(null);
+    setPreview(null);
   };
 
   const testBaseUrl = () => {
@@ -231,22 +276,27 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     && !saving,
   );
 
-  const pickerCounts = (filter: PickerFilter) => {
-    if (!fetched) return 0;
-    if (filter === 'all') return fetched.length;
-    if (filter === 'other') return fetched.filter((m) => !m.modality).length;
-    return fetched.filter((m) => m.modality === filter).length;
-  };
-
-  const pickerVisible = (fetched ?? []).filter((m) => {
-    if (pickerFilter === 'image' || pickerFilter === 'video') {
-      if (m.modality !== pickerFilter) return false;
-    } else if (pickerFilter === 'other' && m.modality) {
-      return false;
-    }
+  // chip 计数与列表同源：都先过搜索词。否则搜 "seedream" 后列表只剩 2 行、chip 还写着「全部 78」。
+  const pickerSearched = (preview?.models ?? []).filter((m) => {
     const q = pickerQuery.trim().toLowerCase();
     return !q || m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q);
   });
+  const pickerCounts = (filter: PickerFilter) =>
+    filter === 'all' ? pickerSearched.length : pickerSearched.filter((m) => m.category === filter).length;
+  const pickerVisible = pickerFilter === 'all'
+    ? pickerSearched
+    : pickerSearched.filter((m) => m.category === pickerFilter);
+  // 「非视觉」chip 只在逃生舱把它们拉进来时才出现，平时不给这一档噪音。
+  const pickerFilters: PickerFilter[] = [
+    'all', 'image', 'video', 'unknown',
+    ...((preview?.models ?? []).some((m) => m.category === 'excluded') ? (['excluded'] as const) : []),
+  ];
+
+  const selectAllVisible = () => {
+    const next = new Set(fetchedChecked);
+    pickerVisible.forEach((m) => next.add(m.id));
+    setFetchedChecked(next);
+  };
 
   const linkRow = [
     preset.homepageUrl ? { label: '官网', url: preset.homepageUrl } : null,
@@ -262,7 +312,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
       className="fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-glass p-4"
       onClick={() => { if (!saving) onCancel(); }}
     >
-      {fetched ? (
+      {preview ? (
         /* —— 模型选择子视图：独占整个弹窗，列表拿全高，brass 只有「启用所选」一处 —— */
         <div
           className="flex h-[min(640px,86vh)] w-[860px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-border bg-card"
@@ -271,17 +321,36 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
           <div className="space-y-3 px-6 pb-3 pt-5">
             <button
               type="button"
-              onClick={() => setFetched(null)}
+              onClick={() => setPreview(null)}
               className="inline-flex items-center gap-1.5 rounded-md py-1 pr-2 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <ArrowLeft size={14} aria-hidden />
               返回表单
             </button>
             <div className="truncate font-mono text-xs text-muted-foreground">
-              GET {fetchModelsBaseUrl}/models · {fetched.length} 个模型
+              GET {fetchModelsBaseUrl}/models · 上游 {preview.total} 个
             </div>
+            {/* 过滤情况诚实上墙 + 逃生舱：deny 词表哪天判过头，画师能自己看到全量。
+                一条都没过滤（且没在全量态）时这段是纯噪音，不渲染。 */}
+            {(preview.excluded > 0 || preview.includeAll) && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <span>
+                  {preview.includeAll
+                    ? '已显示全部，含非图像 / 视频模型'
+                    : `已过滤 ${preview.excluded} 个非图像 / 视频模型`}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => fetchModels(!preview.includeAll)}
+                  disabled={fetching}
+                  className={textActionClass}
+                >
+                  {fetching ? '获取中...' : preview.includeAll ? '只看图像 / 视频' : '显示全部'}
+                </button>
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2">
-              {(['all', 'image', 'video', 'other'] as const).map((f) => (
+              {pickerFilters.map((f) => (
                 <button
                   key={f}
                   type="button"
@@ -292,7 +361,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                       : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
                   }`}
                 >
-                  {f === 'all' ? '全部' : f === 'image' ? '图片' : f === 'video' ? '视频' : '其他'} {pickerCounts(f)}
+                  {f === 'all' ? '全部' : CATEGORY_LABELS[f]} {pickerCounts(f)}
                 </button>
               ))}
               <input
@@ -306,51 +375,100 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
           </div>
           <div className="min-h-0 flex-1 space-y-1 overflow-y-auto border-t border-border px-3 py-2">
             {pickerVisible.map((m) => (
-              <label
+              <div
                 key={m.id}
-                className={`flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 ${
+                className={`flex items-center gap-3 rounded-md px-2 py-1.5 ${
                   fetchedChecked.has(m.id) ? 'bg-secondary/40' : 'hover:bg-secondary/60'
                 }`}
               >
-                <input
-                  type="checkbox"
-                  checked={fetchedChecked.has(m.id)}
-                  onChange={(e) => {
-                    const next = new Set(fetchedChecked);
-                    if (e.target.checked) next.add(m.id); else next.delete(m.id);
-                    setFetchedChecked(next);
-                  }}
-                  className="shrink-0 accent-primary"
-                />
-                <span className="min-w-0 truncate text-sm text-foreground">{m.name}</span>
-                <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{m.id}</span>
-                <span
-                  className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${
-                    m.modality === 'image'
-                      ? 'border-primary/40 text-primary'
-                      : m.modality === 'video'
-                        ? 'border-border text-foreground'
-                        : 'border-border text-muted-foreground'
-                  }`}
-                >
-                  {m.modality === 'image' ? '图片' : m.modality === 'video' ? '视频' : '其他'}
-                </span>
-              </label>
+                {/* label 只包住勾选区——分类二选一是按钮，被 label 激活行为顺带切勾选就乱了。 */}
+                <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={fetchedChecked.has(m.id)}
+                    onChange={(e) => {
+                      const next = new Set(fetchedChecked);
+                      if (e.target.checked) next.add(m.id); else next.delete(m.id);
+                      setFetchedChecked(next);
+                    }}
+                    className="shrink-0 accent-primary"
+                  />
+                  <span className="min-w-0 truncate text-sm text-foreground">{m.name}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{m.id}</span>
+                </label>
+                {m.modality ? (
+                  <span
+                    className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${
+                      m.modality === 'image' ? 'border-primary/40 text-primary' : 'border-border text-foreground'
+                    }`}
+                  >
+                    {CATEGORY_LABELS[m.modality]}
+                  </span>
+                ) : (
+                  /* 上游认不出分类的行：就地二选一，不给「默认图片」这种静默兜底的机会。 */
+                  <div role="group" aria-label={`分类 ${m.id}`} className="flex shrink-0 items-center gap-2">
+                    <span className="text-xs text-muted-foreground">{CATEGORY_LABELS[m.category]}</span>
+                    <div className="flex items-center rounded-md border border-border p-0.5">
+                      {(['image', 'video'] as const).map((mod) => {
+                        const active = modalityPick[m.id] === mod;
+                        return (
+                          <button
+                            key={mod}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => setModalityPick({ ...modalityPick, [m.id]: mod })}
+                            className={`rounded-sm px-2 py-0.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                              active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                          >
+                            {mod === 'image' ? '图片' : '视频'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
             ))}
             {pickerVisible.length === 0 && (
               <div className="px-2 py-8 text-center text-sm text-muted-foreground">没有匹配的模型</div>
             )}
           </div>
-          <div className="flex items-center justify-between border-t border-border px-6 py-3">
-            <span className="text-xs text-muted-foreground">已选 {fetchedChecked.size} 个模型</span>
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setFetched(null)} className={ghostButtonClass}>
+          <div className="flex items-center justify-between gap-4 border-t border-border px-6 py-3">
+            {/* 78 条里挑 15 个视频要点 15 次 checkbox——批量入口跟「已选」计数放一起。 */}
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="text-xs text-muted-foreground">已选 {fetchedChecked.size} 个模型</span>
+              <button
+                type="button"
+                onClick={selectAllVisible}
+                disabled={pickerVisible.length === 0}
+                className={textActionClass}
+              >
+                全选当前 {pickerVisible.length} 个
+              </button>
+              <button
+                type="button"
+                onClick={() => setFetchedChecked(new Set())}
+                disabled={fetchedChecked.size === 0}
+                className={textActionClass}
+              >
+                清空选择
+              </button>
+              {unresolvedChecked.length > 0 && (
+                <span className="text-xs text-destructive">
+                  {unresolvedChecked.length} 个未识别模型待指定分类
+                </span>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button type="button" onClick={() => setPreview(null)} className={ghostButtonClass}>
                 取消
               </button>
               <button
                 type="button"
                 onClick={applyFetchedSelection}
-                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                disabled={unresolvedChecked.length > 0}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 启用所选（{fetchedChecked.size}）
               </button>
@@ -520,7 +638,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                   <div className="flex gap-1">
                     <button
                       type="button"
-                      onClick={fetchModels}
+                      onClick={() => fetchModels()}
                       disabled={!fetchModelsBaseUrl || fetching}
                       className={ghostButtonClass}
                     >
