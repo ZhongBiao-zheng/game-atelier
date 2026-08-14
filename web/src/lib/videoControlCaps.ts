@@ -45,9 +45,10 @@ export interface VideoControlCaps {
 }
 
 // Seedance 官方档位（provider-config.md「视频契约 — Seedance」）：
-// duration 任意整数秒 2.0=[4,15] / 1.5pro=[4,12] / 1.0pro=[2,12]；
-// ratio 七档含 adaptive（adaptive 全场景仅 2.0/1.5pro）；2.0-fast 无 1080p；
-// 全能参考（图1-9+视频≤3+音频≤3）与音画同生仅 2.0 系；1.0pro 无音频。
+// duration 任意整数秒 2.5=[4,30] / 2.0 系=[4,15] / 1.5pro=[4,12] / 1.0pro=[2,12]；
+// resolution 2.0=480p/720p/1080p/4k、2.0-fast 与 2.0-mini 与 2.5 只到 720p；
+// ratio 七档含 adaptive（adaptive 全场景仅 2.0/1.5pro）；
+// 全能参考 2.0 系=图≤9+视频≤3+音频≤3、2.5=图≤30+视频≤10+音频≤10；音画同生仅 2.x/1.5pro。
 const SEEDANCE_RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'];
 
 function durationRange(min: number, max: number): number[] {
@@ -70,17 +71,32 @@ function seedanceCaps(id: string): VideoControlCaps {
       maxFrames: 2,
     };
   }
-  // 2.0 系（含 2.0-fast 与未知 seedance 变体）
+  // 2.x 系。档位**按变体分**，旧版只看 id.includes('fast') 一个开关，结果 2.5 与 mini 都被
+  // 当成满配 2.0：界面给出 1080p，而官方两者都只到 720p，选了就是上游 400。
+  const is25 = id.includes('2-5') || id.includes('2.5');
+  const isMini = id.includes('mini');
+  const isFast = id.includes('fast');
+  const is20 = id.includes('2-0') || id.includes('2.0');
+  // `:save` 是词元跳动网关自建的后缀，官方无此概念、能力未知 —— 按未知变体保守处理。
+  const isSave = id.includes(':save');
+  const resolutions =
+    is25 || isMini || isFast
+      ? ['480p', '720p'] // 官方：2.5「暂不支持 1080p 和 4k」；fast / mini 同样只到 720p
+      : is20 && !isSave
+        ? ['480p', '720p', '1080p', '4k'] // 4k 全系仅 2.0 支持（10bit）
+        : ['480p', '720p', '1080p']; // 未知变体：不给 4k
   return {
     family: 'seedance',
     modes: ['firstlast', 'omni'],
-    durations: durationRange(4, 15),
-    resolutions: id.includes('fast') ? ['480p', '720p'] : ['480p', '720p', '1080p'],
+    durations: is25 ? durationRange(4, 30) : durationRange(4, 15), // 2.5 是唯一到 30s 的
+    resolutions,
     ratios: SEEDANCE_RATIOS,
     supportsAudio: true,
     supportsReferenceVideo: true,
     supportsReferenceAudio: true,
     maxFrames: 2,
+    // 2.5 的全能参考矩阵比 2.0 系宽得多（官方 图30 / 视频10 / 音频10）。
+    ...(is25 ? { maxRefImages: 30, maxRefVideos: 10 } : {}),
   };
 }
 

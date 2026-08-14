@@ -56,7 +56,8 @@
 
 | 模型族 | 文生 | 图生首帧 | 首尾帧 | 全能参考 | 视频编辑/延长 | 音频 |
 |---|---|---|---|---|---|---|
-| Seedance 2.0 / 2.0-fast | ✓ | ✓ | ✓ | ✓ 图1-9 + 视频0-3 + 音频0-3 | ✓（参考素材+提示词表达，无独立端点） | ✓ 音画同生 |
+| Seedance 2.0 / 2.0-fast / 2.0-mini | ✓ | ✓ | ✓ | ✓ 图1-9 + 视频0-3 + 音频0-3 | ✓（参考素材+提示词表达，无独立端点） | ✓ 音画同生 |
+| Seedance 2.5 | ✓ | ✓ | ✓ | ✓ **图1-30 + 视频0-10 + 音频0-10** | ✓ | ✓ 音画同生 |
 | Seedance 1.5 pro | ✓ | ✓ | ✓ | — | — | ✓ |
 | Seedance 1.0 pro | ✓ | ✓ | ✓ | — | — | — |
 | HappyHorse 1.0 | ✓ t2v | ✓ i2v（仅首帧，无尾帧） | — | ✓ r2v 图1-9 | ✓ video-edit 视频1 + 图0-5 | 仅 edit 可保留原声 |
@@ -67,7 +68,7 @@
 ### 火山 Ark 直连（provider=seedream）
 
 - `POST {base}/images/generations`，Bearer `ark-…` key，同步返回。
-- 发送：`size`（WxH 像素）、`watermark: true`、n>1 时 `sequential_image_generation: auto`；**不发 quality**（发了可能被拒）。
+- 发送：`size`（WxH 像素）、`watermark: false`、`output_format: "png"`、n>1 时 `sequential_image_generation: auto`；**不发 quality**（发了可能被拒）。
 - 图生图 `image` 字段：URL 或 base64 data-url，单张 str、多张 list，上限 10。
 
 ### OpenAI-HK 聚合（provider=custom，base 含 `openai-hk.com`）
@@ -92,7 +93,8 @@
 
   2026-08-13 实测：全网关 78 个模型里 pro 是唯一「只有 ark 图片协议」的。协议随模型存进 `ModelSpec.protocol`（models-preview 解析），旧 key 由 `keys._backfill_model_protocols` 读时回填；caller 端 `openai_image._effective_image_protocol` 取值，只有 `"ark"` 换 URL。
 - **最小像素下限是模型属性，与协议路径无关**（两条路径实测同一下限）：`seedream-5.0-lite` / `doubao-seedream-4-5` 要 3686400，`seedream-5.0-pro` 只要 921600。见 `openai_image._min_pixels_for_seedream`。
-- watermark / `sequential_image_generation` 只对火山直连与 custom 聚合商下的 seedream 发；**pro 明确拒收 sequential**（400），词元跳动网关的默认值未实测，故不发。
+- `sequential_image_generation` 只对火山直连与 custom 聚合商下的 seedream 发；**pro 明确拒收它**（400）。
+- `watermark` / `output_format` 相反：按**模型族**发，覆盖所有 seedream 路径（含词元跳动）。**省略都不是安全默认** —— Ark 的 `watermark` 默认 true、`output_format` 默认 jpeg。2026-08-14 实证：词元跳动那条路我们从没发过 watermark，产物右下角照样有「AI 生成」；26 张历史产物里 11 张扩展名是 .png 而内容是 JPEG。
 
 ### 图像四族参数表
 
@@ -149,9 +151,9 @@
 
 | 参数 | 取值 | 默认 | 备注 |
 |---|---|---|---|
-| `resolution` | `480p` / `720p` / `1080p` | 2.0/1.5pro `720p`；1.0pro `1080p` | 2.0-fast 无 1080p |
+| `resolution` | `480p` / `720p` / `1080p` / `4k` | 2.x/1.5pro `720p`；1.0pro `1080p` | **4k 仅 2.0**；2.0-fast / 2.0-mini / 2.5 只到 720p |
 | `ratio` | `16:9` `4:3` `1:1` `3:4` `9:16` `21:9` `adaptive` | 2.0/1.5pro `adaptive`；其余文生 `16:9`、图生 `adaptive` | adaptive 全场景仅 2.0/1.5pro |
-| `duration` | 整数秒：2.0 [4,15]；1.5pro [4,12]；1.0pro [2,12]；`-1`=智能选时长（仅 2.0/1.5pro） | 5 | 与 frames 二选一，frames 优先 |
+| `duration` | 整数秒：**2.5 [4,30]**；2.0 系 [4,15]；1.5pro [4,12]；1.0pro [2,12]；`-1`=智能选时长 | 5（2.5 为 -1） | 与 frames 二选一，frames 优先 |
 | `frames` | [29,289] 且满足 25+4n | — | 小数秒专用；2.0/1.5pro 不支持 |
 | `seed` | [-1, 2^32-1] | -1 随机 | 同 seed 近似、不保证一致 |
 | `generate_audio` | bool | **true** | 仅 2.0 系列、1.5pro；单声道；对话放双引号内 |
@@ -298,7 +300,7 @@ TokenDance quickstart 的请求体与阿里官方**不一致**：它写 `input.i
 |---|---|---|
 | seedance duration | 2.0 支持 4-15 任意整数秒 + `-1` 智能 | **已实装**全档（`videoControlCaps.ts` durationRange：2.0 4-15 / 1.5pro 4-12 / 1.0pro 2-12）；`-1` 智能未实装 |
 | seedance ratio | 七档含 3:4、adaptive | **已实装**七档（1.0pro 按代际过滤 adaptive）|
-| seedance 参考素材上限 | 图 1-9、视频 ≤3、音频 ≤3 | **已按上限截断**（caller 图 [:9] / 视频 [:3] / 音频 [:3]，前端同值）|
+| seedance 参考素材上限 | 2.0 系 图1-9/视频≤3/音频≤3；**2.5 图1-30/视频≤10/音频≤10** | **已按模型截断**（`volcengine_video._reference_limits`，前端 `videoControlCaps` 同值）|
 | seedance frames / callback_url / return_last_frame / service_tier / priority / tools | 有 | 未实装 |
 | seedance 视频编辑 / 延长（2.0） | 参考素材 + 提示词表达 | 无入口 |
 | happyhorse 四模式（t2v/i2v/r2v/video-edit） | 有 | **已接通**四模式；`parameters.audio_setting`（edit 保留原声）未实装；video-edit 的输入视频只收公网直链、**没有 OSS 中转兜底**（seedance 那条有），前端却放行本地上传 → 该模型从 UI 走必失败 |

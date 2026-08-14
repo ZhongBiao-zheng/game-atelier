@@ -516,3 +516,35 @@ def test_oss_presigned_reference_video_is_excluded(seedance_key, tmp_path, monke
     vv.render_video(prompt="p", model="", alias="ark", output_dir=tmp_path / "o",
                     params={"reference_videos": [str(local)]}, poll_interval=0)
     assert picked["url"] == "https://cdn.x/real-output.mp4"
+
+
+def test_reference_limits_are_per_generation_not_family_wide():
+    """参考素材上限按代际取 —— 旧版全族硬截 9/3/3，把 2.5 的参考矩阵砍掉三分之二。
+
+    官方：2.0 系（含 fast / mini）图9/视频3/音频3；2.5 图30/视频10/音频10。
+    """
+    assert vv._reference_limits("doubao-seedance-2-0-260128") == (9, 3, 3)
+    assert vv._reference_limits("seedance-2.0-fast") == (9, 3, 3)
+    assert vv._reference_limits("seedance-2.0-mini") == (9, 3, 3)
+    assert vv._reference_limits("seedance-2.5") == (30, 10, 10)
+    assert vv._reference_limits("doubao-seedance-2-5-260628") == (30, 10, 10)
+    assert vv._reference_limits("") == (9, 3, 3)  # 未知模型走保守值
+
+
+def test_seedance_25_keeps_more_than_nine_reference_images(seedance_key, tmp_path, monkeypatch):
+    """2.5 传 12 张参考图应当全发出去；旧版会在第 9 张截断。"""
+    urls = [f"https://cdn.x/ref{i}.png" for i in range(12)]
+    seen: dict = {}
+    monkeypatch.setattr(vv.requests, "post",
+                        lambda url, **kw: (seen.update(kw.get("json") or {})
+                                           or _FakeResp(200, {"data": {"id": "t-1"}})))
+    monkeypatch.setattr(vv.requests, "get", lambda *a, **k: _FakeResp(200, {"data": {
+        "status": "succeeded", "video_url": "https://cdn.x/out.mp4",
+    }}))
+    monkeypatch.setattr(vv, "_download_mp4", lambda url, d, i, **kw: "ok")
+
+    vv.render_video(prompt="p", model="seedance-2.5", alias="ark", output_dir=tmp_path / "o",
+                    params={"reference_images": urls, "frame_mode": "auto"}, poll_interval=0)
+
+    images = [c for c in seen["content"] if c.get("type") == "image_url"]
+    assert len(images) == 12

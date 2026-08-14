@@ -103,8 +103,9 @@ def render(
     # 3686400 像素、5.0-pro 只要 921600，两条协议路径给出的下限一模一样）。所以归一化按
     # 模型族判，火山直连 / Tuzi / 词元跳动下的 seedream 一视同仁。
     is_seedream = family == "seedream"
-    # Ark 专有参数（watermark / 组图）维持原判据：只对直连火山和 custom 聚合商下的 seedream
-    # 发。词元跳动网关这两项的默认值没实测过，不在修协议路由时顺手改它的出图外观。
+    # 组图（sequential）仍按老判据：只对直连火山和 custom 聚合商下的 seedream 发。
+    # 注意它与下面的 watermark / output_format 不同步 —— 那两个是**出图外观**，必须按模型族
+    # 覆盖所有 seedream 路径（含词元跳动），见 _image_generation_payload 里的实测注释。
     sends_ark_params = key.provider == "seedream" or (key.provider == "custom" and is_seedream)
     raw_size = (
         kwargs.get("size") or kwargs.get("requested_size") or kwargs.get("params", {}).get("size")
@@ -207,7 +208,7 @@ def render(
             n=num,
             image=ref_image,
             quality=quality,
-            watermark=sends_ark_params,
+            seedream=is_seedream,
             sequential=sends_ark_params and _supports_sequential(model),
         )
 
@@ -347,7 +348,7 @@ def _image_generation_payload(
     n: int,
     image: str | list[str] | None = None,
     quality: str | None = None,
-    watermark: bool = False,
+    seedream: bool = False,
     sequential: bool = False,
 ) -> dict:
     payload: dict[str, Any] = {
@@ -358,8 +359,14 @@ def _image_generation_payload(
         "response_format": "b64_json",
         "stream": False,
     }
-    if watermark:  # seedream / Ark 专有
-        payload["watermark"] = True
+    if seedream:  # Ark 专有的两个出图外观参数，**省略都不是安全默认**
+        # watermark：Ark 默认 true。实测反证 —— 词元跳动那条路我们从来没发过这个参数，
+        # 出来的图右下角照样有「AI 生成」；火山直连/Tuzi 那条路旧版还主动发 true。两条路
+        # 的历史产物一张不落全带水印。要不带水印只能显式 false。
+        payload["watermark"] = False
+        # output_format：Ark 默认 jpeg，而我们把产物一律存成 .png —— 实测 26 张历史产物里
+        # 11 张实际是 JPEG，既名实不符又白挨一道有损压缩。立绘要无损，显式要 png。
+        payload["output_format"] = "png"
     if quality:  # gpt-image / nano-banana：low/medium/high/auto
         payload["quality"] = quality
     # Seedream / Ark 图生图：image 接受 URL 或 base64 data-url，单张为 str、多张为 list。

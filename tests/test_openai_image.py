@@ -1473,9 +1473,11 @@ def test_render_tokendance_does_not_send_ark_only_params(
     tmp_path,
     monkeypatch,
 ):
-    """watermark / 组图是 Ark 专有参数，词元跳动网关默认值未实测 → 修协议路由时不顺手改它。
+    """组图是按 provider 判的 Ark 专有参数，词元跳动这条路不发；出图外观参数则必须发。
 
     seedream-5.0-pro 实测明确拒收 sequential_image_generation。
+    watermark / output_format 与它相反 —— 省略都不是安全默认（实测：这条路我们从没发过
+    watermark，出来的图右下角照样有「AI 生成」；产物也是 JPEG），所以按模型族一律显式发。
     """
     _add_tokendance_key("td3", [{"name": "pro", "id": "seedream-5.0-pro"}])
     seen: dict[str, object] = {}
@@ -1490,8 +1492,66 @@ def test_render_tokendance_does_not_send_ark_only_params(
         output_dir=tmp_path, n=2, size="1024x1536",
     )
 
-    assert "watermark" not in seen
+    assert seen["watermark"] is False
+    assert seen["output_format"] == "png"
     assert "sequential_image_generation" not in seen
+
+
+@pytest.mark.parametrize(
+    "provider,base_url,model",
+    [
+        ("seedream", "https://ark.cn-beijing.volces.com/api/v3", "doubao-seedream-4-5-251128"),
+        ("tokendance", "https://tokendance.space/gateway/v1", "seedream-5.0-pro"),
+        ("custom", "https://api.tu-zi.com", "doubao-seedream-4-5-251128"),
+    ],
+)
+def test_every_seedream_route_disables_watermark_and_asks_png(
+    provider, base_url, model, isolated_data_root, tmp_path, monkeypatch,
+):
+    """出图外观按【模型族】判，覆盖所有 seedream 路径 —— provider 不参与。
+
+    2026-08-14 实证：三条路的历史产物一张不落全带右下角「AI 生成」水印，其中词元跳动那条
+    我们**从没发过 watermark 参数** —— 证明 Ark 默认就是 true，省略不是安全默认。
+    """
+    keys.add_key(KeySpec(
+        alias="k", provider=provider, base_url=base_url, access_key="x",
+        capabilities=["portrait"], models=[{"name": "m", "id": model}],
+        created_at="2026-08-14T00:00:00Z",
+    ))
+    seen: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        seen.update(json)
+        return FakePostResponse({"data": [{"b64_json": "aGk="}]})
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    openai_image.render(prompt="fox", model=model, alias="k", output_dir=tmp_path, size="2048x2048")
+
+    assert seen["watermark"] is False, f"{provider} 这条路没关水印"
+    assert seen["output_format"] == "png", f"{provider} 这条路没要 png"
+
+
+def test_non_seedream_models_never_get_ark_appearance_params(
+    isolated_data_root, tmp_path, monkeypatch,
+):
+    """watermark / output_format 是 Ark 专有：发给 gpt-image 这类模型是噪声，不能顺手带上。"""
+    keys.add_key(KeySpec(
+        alias="hk", provider="custom", base_url="https://api.openai-hk.com", access_key="x",
+        capabilities=["portrait"], models=[{"name": "g", "id": "gpt-image-2"}],
+        created_at="2026-08-14T00:00:00Z",
+    ))
+    seen: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        seen.update(json)
+        return FakePostResponse({"data": [{"b64_json": "aGk="}]})
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    openai_image.render(prompt="fox", model="gpt-image-2", alias="hk",
+                        output_dir=tmp_path, size="1024x1024")
+
+    assert "watermark" not in seen
+    assert "output_format" not in seen
 
 
 # --- 能力矩阵：与前端共读同一张真值表（tests/fixtures/capability-matrix.json）---
@@ -1591,7 +1651,8 @@ def test_render_direct_seedream_pro_omits_sequential(isolated_data_root, tmp_pat
     openai_image.render(prompt="p", model="seedream-5.0-pro", alias="ark",
                         output_dir=tmp_path, n=2, size="1024x1536")
     assert all("sequential_image_generation" not in body for body in seen)
-    assert seen[0]["watermark"] is True  # Ark 直连的 watermark 不受影响
+    assert seen[0]["watermark"] is False  # 出图外观：一律显式关水印
+    assert seen[0]["output_format"] == "png"
     assert len(seen) == 2  # 补足循环补第二张
 
 
