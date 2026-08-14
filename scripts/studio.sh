@@ -171,9 +171,28 @@ if command -v pnpm &>/dev/null; then
   build_ok=1
   (
     cd web || exit 1
-    if [ ! -d "node_modules" ]; then
-      echo "首次构建：安装前端依赖..."
+    # 依赖清单变了必须补装。旧逻辑只在 node_modules 不存在时装一次，git pull 改了
+    # package.json / lockfile 之后照旧拿旧依赖构建 —— 要么构建失败、要么行为对不上，
+    # 而脚本一声不吭（第 0 步那类静默失败的同族问题）。
+    # 印记文件放在 node_modules 里：rm -rf node_modules 时一起消失，不留过期状态。
+    deps_stamp="node_modules/.deps-stamp"
+    need_install=0
+    if [ ! -d "node_modules" ] || [ ! -f "$deps_stamp" ]; then
+      need_install=1
+    else
+      for f in package.json pnpm-lock.yaml pnpm-workspace.yaml; do
+        if [ -f "$f" ] && [ "$f" -nt "$deps_stamp" ]; then
+          echo "检测到前端依赖清单变化（$f），补装依赖..."
+          need_install=1
+          break
+        fi
+      done
+    fi
+    if [ "$need_install" = "1" ]; then
+      [ -d "node_modules" ] || echo "首次构建：安装前端依赖..."
       pnpm install || exit 1
+      # 印记写在 install 之后：pnpm 自己可能重写 lockfile，先写会立刻过期。
+      : > "$deps_stamp"
     fi
     # 先清再构建：tailwind v4 vite 插件会把旧 dist/* 扫进 content 源，over-existing
     # 构建非幂等（CSS 会虚胖、hash 漂移，与 make build / CI clean build 不一致）。同 Makefile build 目标。
