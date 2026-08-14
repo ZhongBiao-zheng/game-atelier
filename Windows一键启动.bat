@@ -174,11 +174,31 @@ if errorlevel 1 goto :no_pnpm
 echo 重新构建前端...
 set "BUILD_ERR=0"
 pushd web
-if not exist "node_modules\" (
-    echo 首次构建：安装前端依赖...
-    call pnpm install
-    if errorlevel 1 set "BUILD_ERR=1"
+REM 依赖清单变了必须补装。旧逻辑只在 node_modules 不存在时装一次，git pull 改了
+REM package.json / lockfile 之后照旧拿旧依赖构建 —— 要么构建失败、要么行为对不上，
+REM 而脚本一声不吭（第 0 步那类静默失败的同族问题）。
+REM 印记文件放在 node_modules 里：删掉 node_modules 时一起消失，不留过期状态。
+set "NEED_INSTALL=0"
+if not exist "node_modules\" set "NEED_INSTALL=1"
+if not exist "node_modules\.deps-stamp" set "NEED_INSTALL=1"
+if "!NEED_INSTALL!"=="1" goto :deps_install
+REM 时间戳比较交给 powershell（Windows 自带）。它若缺失，errorlevel 非 0 会退化成
+REM "每次都装"，慢但不会错 —— 这个方向的失败是安全的。
+powershell -NoProfile -Command "$s=(Get-Item 'node_modules\.deps-stamp').LastWriteTime; $c=0; foreach($f in 'package.json','pnpm-lock.yaml','pnpm-workspace.yaml'){ if((Test-Path $f) -and ((Get-Item $f).LastWriteTime -gt $s)){ $c=1 } }; exit $c"
+if errorlevel 1 (
+    echo 检测到前端依赖清单变化，补装依赖...
+    set "NEED_INSTALL=1"
 )
+if "!NEED_INSTALL!"=="0" goto :deps_ready
+
+:deps_install
+if not exist "node_modules\" echo 首次构建：安装前端依赖...
+call pnpm install
+if errorlevel 1 set "BUILD_ERR=1"
+REM 印记写在 install 之后：pnpm 自己可能重写 lockfile，先写会立刻过期。
+if "!BUILD_ERR!"=="0" type nul > "node_modules\.deps-stamp"
+
+:deps_ready
 if "!BUILD_ERR!"=="0" (
     call pnpm build
     if errorlevel 1 set "BUILD_ERR=1"
