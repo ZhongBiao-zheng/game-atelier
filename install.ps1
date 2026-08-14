@@ -23,7 +23,17 @@ param([switch]$Uninstall)
 $ErrorActionPreference = "Stop"
 $RepoRoot   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginName = "game-atelier"
-$Skills     = @("character", "promo", "turnaround", "viewer-server")
+# 从 skills\ 现场枚举，不写死：写死的列表会随新增 skill 静默过期，
+# 症状是 Codex 那边"装了但少几个命令"，而安装脚本一句提示都没有。
+$Skills     = @(Get-ChildItem -Path (Join-Path $RepoRoot "skills") -Directory -ErrorAction SilentlyContinue |
+                Where-Object { Test-Path (Join-Path $_.FullName "SKILL.md") } |
+                ForEach-Object { $_.Name })
+if ($Skills.Count -eq 0) {
+  # 不用 Write-Error：本文件顶上 $ErrorActionPreference = "Stop"，它会抛异常刷一屏调用栈，
+  # 双击运行的人只看到红字看不懂。这里要的是一句人话加干净退出。
+  Write-Host "未在 $RepoRoot\skills\ 下找到任何 SKILL.md，仓库不完整？" -ForegroundColor Red
+  exit 1
+}
 
 $ClaudeLink = Join-Path $HOME ".claude\skills\$PluginName"
 $CodexDir   = Join-Path $HOME ".codex\skills"

@@ -29,27 +29,90 @@ echo "============================================"
 echo
 
 # ---- 0. 启动前检查更新（git 仓库且联网时；更新后重启自带 --skip-update）----
+# 这一段的每条失败路径都必须出声。旧版本有三条静默分支（没装 git / 不是 git 仓库 /
+# 当前分支没有上游），跳过时一个字都不打印，用户看到的只是"一键更新没用"，无从下手。
 # 私有仓库无凭证时禁止 git 弹交互输入，避免双击窗口卡死
 export GIT_TERMINAL_PROMPT=0
-if [ "${1:-}" != "--skip-update" ] && command -v git &>/dev/null && [ -d ".git" ]; then
-  if git fetch --quiet 2>/dev/null; then
-    behind="$(git rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)"
-    if [ -n "$behind" ] && [ "$behind" != "0" ]; then
-      echo "检测到新版本（落后 $behind 个提交）。"
-      read -rp "[1] 更新后启动（默认）  [2] 直接启动: " UPD || true
-      if [ "$UPD" != "2" ]; then
-        echo "正在更新（git pull）..."
-        if git pull --ff-only; then
-          echo "更新完成，正在以新版本重新启动..."
-          # 脚本执行中被 git pull 改写有读错乱风险；exec 从头执行新版本。
-          exec bash "$_self" --skip-update
-        else
-          echo "更新失败（本地改动冲突或网络问题），跳过更新直接启动。"
+
+# git pull 失败时把挡路的东西打出来，而不是笼统说一句"本地改动冲突或网络问题"。
+report_pull_failure() {
+  echo
+  echo "[更新] 更新失败。挡住更新的本地改动如下："
+  git status --short
+  echo
+  echo "       本地有提交还没推 - 先 git push"
+  echo "       本地改动不要了   - git checkout -- 文件名"
+  echo "       跳过更新，直接启动。"
+}
+
+if [ "${1:-}" = "--skip-update" ]; then
+  :
+elif ! command -v git &>/dev/null; then
+  echo "[更新] 未检测到 git，无法自动更新。装了 git 再运行即可：https://git-scm.com/"
+  echo
+elif [ ! -d ".git" ]; then
+  echo "[更新] 当前目录不是 git 仓库（多半是下载的 ZIP），无法自动更新。"
+  echo "       请改用：git clone https://github.com/ZhongBiao-zheng/game-atelier.git"
+  echo
+else
+  # 先把"我现在是哪一版"打出来：后面无论更新成功、失败还是跳过，用户都有参照物。
+  curbr="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+  echo "[更新] 当前：分支 $curbr / 版本 $(git describe --tags --always 2>/dev/null || echo '?')"
+
+  if ! git fetch --quiet 2>/dev/null; then
+    echo "[更新] 检查更新失败（网络不通或没有仓库访问权限），跳过更新直接启动。"
+  else
+    # web/dist 是入库的构建产物，而本脚本第 4 步每次启动都 rm -rf 后重建 —— 不先还原，
+    # git pull --ff-only 会被"本地改动会被覆盖"挡住。丢弃安全：第 4 步会重新构建，
+    # 没有 pnpm 时也刚好回到仓库自带的预构建版本。
+    git checkout -- web/dist 2>/dev/null || true
+    git clean -qfd web/dist 2>/dev/null || true
+
+    # 上游缺失是最隐蔽的一条：@{u} 解析不出来时，旧版本 behind 落到 `|| echo 0`，
+    # 与"已是最新"走同一条路径，静默跳过。必须显式判、显式说。
+    if ! upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"; then
+      echo
+      echo "[更新] 无法自动更新：当前分支 $curbr 没有跟踪任何远程分支。"
+      if ! git show-ref --verify --quiet refs/remotes/origin/main; then
+        echo "       远程也找不到 origin/main，请检查：git remote -v"
+      elif [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        echo "       工作区有未提交改动，不自动切换。处理完后手动执行："
+        echo "           git switch main"
+        echo "           git pull --ff-only"
+      else
+        echo "       主线分支是 main，切过去就能恢复自动更新（已推送的提交不会丢）。"
+        read -rp "[1] 切到 main 并更新（默认）  [2] 保持现状直接启动: " SW || true
+        if [ "$SW" != "2" ]; then
+          if ! git switch main; then
+            echo "       切换失败，请手动执行：git switch main"
+          elif ! git pull --ff-only; then
+            report_pull_failure
+          else
+            echo "已切到 main 并更新完成，正在以新版本重新启动..."
+            exec bash "$_self" --skip-update
+          fi
+        fi
+      fi
+    else
+      behind="$(git rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)"
+      [ -n "$behind" ] || behind=0
+      if [ "$behind" = "0" ]; then
+        echo "[更新] 已是最新（跟踪 $upstream）。"
+      else
+        echo "检测到新版本（落后 $behind 个提交）。"
+        read -rp "[1] 更新后启动（默认）  [2] 直接启动: " UPD || true
+        if [ "$UPD" != "2" ]; then
+          echo "正在更新（git pull）..."
+          if git pull --ff-only; then
+            echo "更新完成，正在以新版本重新启动..."
+            # 脚本执行中被 git pull 改写有读错乱风险；exec 从头执行新版本。
+            exec bash "$_self" --skip-update
+          else
+            report_pull_failure
+          fi
         fi
       fi
     fi
-  else
-    echo "检查更新失败（可能离线），跳过更新直接启动。"
   fi
   echo
 fi

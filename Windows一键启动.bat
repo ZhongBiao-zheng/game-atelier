@@ -12,33 +12,103 @@ echo ============================================
 echo.
 
 REM ---- 0. 启动前检查更新（git 仓库且联网时；更新后重启自带 --skip-update）----
+REM 这一段的每条失败路径都必须出声。旧版本有三条静默分支（没装 git / 不是 git 仓库 /
+REM 当前分支没有上游），跳过时一个字都不打印，用户看到的只是"一键更新没用"，无从下手。
 if /i "%~1"=="--skip-update" goto :update_done
 where git >nul 2>nul
-if errorlevel 1 goto :update_done
-if not exist ".git" goto :update_done
-REM 私有仓库无凭证时禁止 git 弹交互输入，避免双击窗口卡死
-set "GIT_TERMINAL_PROMPT=0"
-git fetch --quiet 2>nul
 if errorlevel 1 (
-    echo 检查更新失败（可能离线），跳过更新直接启动。
+    echo [更新] 未检测到 git，无法自动更新。装了 git 再双击即可：https://git-scm.com/
     goto :update_done
 )
+if not exist ".git" (
+    echo [更新] 当前目录不是 git 仓库（多半是下载的 ZIP），无法自动更新。
+    echo        请改用：git clone https://github.com/ZhongBiao-zheng/game-atelier.git
+    goto :update_done
+)
+REM 私有仓库无凭证时禁止 git 弹交互输入，避免双击窗口卡死
+set "GIT_TERMINAL_PROMPT=0"
+
+REM 先把"我现在是哪一版"打出来：后面无论更新成功、失败还是跳过，用户都有参照物。
+set "CURBR=?"
+set "NOWVER=?"
+for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "CURBR=%%b"
+for /f "delims=" %%v in ('git describe --tags --always 2^>nul') do set "NOWVER=%%v"
+echo [更新] 当前：分支 !CURBR! / 版本 !NOWVER!
+
+git fetch --quiet 2>nul
+if errorlevel 1 (
+    echo [更新] 检查更新失败（网络不通或没有仓库访问权限），跳过更新直接启动。
+    goto :update_done
+)
+
+REM web/dist 是入库的构建产物，而本脚本第 4 步每次启动都重建它 —— 不先还原，
+REM git pull --ff-only 会被"本地改动会被覆盖"挡住。丢弃安全：第 4 步会重新构建，
+REM 没有 pnpm 时也刚好回到仓库自带的预构建版本。
+git checkout -- web/dist 2>nul
+git clean -qfd web/dist 2>nul
+
+REM 上游缺失是最隐蔽的一条：@{u} 解析不出来时，旧版本 BEHIND 停在 0，
+REM 与"已是最新"走同一条路径，静默跳过。必须显式判、显式说。
+set "UPSTREAM="
+for /f "delims=" %%u in ('git rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2^>nul') do set "UPSTREAM=%%u"
+if not defined UPSTREAM goto :no_upstream
+
 set "BEHIND=0"
 for /f %%c in ('git rev-list --count "HEAD..@{u}" 2^>nul') do set "BEHIND=%%c"
-if "!BEHIND!"=="0" goto :update_done
-if "!BEHIND!"=="" goto :update_done
+if "!BEHIND!"=="" set "BEHIND=0"
+if "!BEHIND!"=="0" (
+    echo [更新] 已是最新（跟踪 !UPSTREAM!）。
+    goto :update_done
+)
 echo 检测到新版本（落后 !BEHIND! 个提交）。
 set "UPD=1"
 set /p "UPD=[1] 更新后启动（默认）  [2] 直接启动: "
 if "!UPD!"=="2" goto :update_done
 echo 正在更新（git pull）...
 git pull --ff-only
-if errorlevel 1 (
-    echo 更新失败（本地改动冲突或网络问题），跳过更新直接启动。
-    goto :update_done
-)
+if errorlevel 1 goto :pull_failed
 echo 更新完成，正在以新版本重新启动...
 REM .bat 执行中被 git pull 改写会按旧字节偏移读到错乱内容；必须单行重启新脚本后立即退出。
+start "" cmd /c ""%~f0" --skip-update" & exit /b 0
+
+:pull_failed
+echo.
+echo [更新] 更新失败。挡住更新的本地改动如下：
+git status --short
+echo.
+echo        本地有提交还没推 - 先 git push
+echo        本地改动不要了   - git checkout -- 文件名
+echo        跳过更新，直接启动。
+goto :update_done
+
+:no_upstream
+echo.
+echo [更新] 无法自动更新：当前分支 !CURBR! 没有跟踪任何远程分支。
+git show-ref --verify --quiet refs/remotes/origin/main
+if errorlevel 1 (
+    echo        远程也找不到 origin/main，请检查：git remote -v
+    goto :update_done
+)
+set "DIRTY="
+for /f "delims=" %%d in ('git status --porcelain 2^>nul') do set "DIRTY=1"
+if defined DIRTY (
+    echo        工作区有未提交改动，不自动切换。处理完后手动执行：
+    echo            git switch main
+    echo            git pull --ff-only
+    goto :update_done
+)
+echo        主线分支是 main，切过去就能恢复自动更新（已推送的提交不会丢）。
+set "SW=1"
+set /p "SW=[1] 切到 main 并更新（默认）  [2] 保持现状直接启动: "
+if "!SW!"=="2" goto :update_done
+git switch main
+if errorlevel 1 (
+    echo        切换失败，请手动执行：git switch main
+    goto :update_done
+)
+git pull --ff-only
+if errorlevel 1 goto :pull_failed
+echo 已切到 main 并更新完成，正在以新版本重新启动...
 start "" cmd /c ""%~f0" --skip-update" & exit /b 0
 
 :update_done
