@@ -129,21 +129,34 @@ def _audio_payload_url(path_or_url: str) -> str:
     return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
 
 
-def _build_content(prompt, images, videos, audios, frame_mode) -> list[dict[str, Any]]:
+def _reference_limits(model: str) -> tuple[int, int, int]:
+    """（图片, 视频, 音频）参考素材上限 —— 按模型代际取，不是全族一个数。
+
+    2.0 系（含 fast / mini）：9 / 3 / 3。
+    2.5：30 / 10 / 10 —— 旧版全族硬截 9/3/3，2.5 的参考矩阵被砍掉三分之二。
+    """
+    normalized = (model or "").lower().replace(".", "-")
+    if "seedance-2-5" in normalized:
+        return 30, 10, 10
+    return 9, 3, 3
+
+
+def _build_content(prompt, images, videos, audios, frame_mode, model="") -> list[dict[str, Any]]:
+    max_images, max_videos, max_audios = _reference_limits(model)
     content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-    for i, url in enumerate(list(images)[:9]):
+    for i, url in enumerate(list(images)[:max_images]):
         content.append({
             "type": "image_url",
             "image_url": {"url": _image_payload_url(url)},
             "role": _frame_role(i, frame_mode),
         })
-    for url in list(videos)[:3]:
+    for url in list(videos)[:max_videos]:
         content.append({
             "type": "video_url",
             "video_url": {"url": _video_payload_url(url)},
             "role": "reference_video",
         })
-    for url in list(audios)[:3]:
+    for url in list(audios)[:max_audios]:
         content.append({
             "type": "audio_url",
             "audio_url": {"url": _audio_payload_url(url)},
@@ -325,6 +338,7 @@ def render_video(
         params.get("reference_videos") or [],
         params.get("reference_audios") or [],
         params.get("frame_mode") or "auto",
+        model or DEFAULT_MODEL,
     )
     body: dict[str, Any] = {"model": model or DEFAULT_MODEL, "content": content}
     if params.get("duration") is not None:

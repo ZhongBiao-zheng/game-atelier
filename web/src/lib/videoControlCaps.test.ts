@@ -26,6 +26,38 @@ describe('videoControlCaps', () => {
     expect(caps.supportsReferenceVideo).toBe(true);
   });
 
+
+  // 2026-08-14 审计：旧版判据只有 id.includes('fast') 一个开关，2.5 与 mini 都被当成满配
+  // 2.0，界面给出官方并不支持的 1080p —— 选了就是上游 400。
+  it('seedance 2.5 只到 720p，但时长到 30s、参考矩阵放宽', () => {
+    const caps = videoControlCaps('seedance-2.5');
+    expect(caps.resolutions).toEqual(['480p', '720p']);
+    expect(caps.resolutions).not.toContain('1080p');
+    expect(caps.durations[0]).toBe(4);
+    expect(caps.durations[caps.durations.length - 1]).toBe(30);
+    expect(caps.maxRefImages).toBe(30);
+    expect(caps.maxRefVideos).toBe(10);
+  });
+
+  it('seedance 2.0-mini 只到 720p（旧版按「不含 fast」给了 1080p）', () => {
+    const caps = videoControlCaps('seedance-2.0-mini');
+    expect(caps.resolutions).toEqual(['480p', '720p']);
+    expect(caps.durations[caps.durations.length - 1]).toBe(15);
+  });
+
+  it('seedance 2.0 有 4k —— 官方全系只有它支持', () => {
+    expect(videoControlCaps('seedance-2.0').resolutions).toEqual(['480p', '720p', '1080p', '4k']);
+    expect(videoControlCaps('doubao-seedance-2-0-260128').resolutions).toContain('4k');
+    // fast / mini 不给 4k
+    expect(videoControlCaps('seedance-2.0-fast').resolutions).not.toContain('4k');
+    expect(videoControlCaps('seedance-2.0-mini').resolutions).not.toContain('4k');
+  });
+
+  it('能力未知的变体不给 4k：:save 是网关自建后缀、官方无此概念', () => {
+    expect(videoControlCaps('seedance-2.0:save').resolutions).not.toContain('4k');
+    expect(videoControlCaps('seedance-lite').resolutions).not.toContain('4k');
+  });
+
   it('seedance 1.5pro/1.0pro are firstlast-only with their own duration ranges', () => {
     const pro15 = videoControlCaps('doubao-seedance-1-5-pro-260428');
     expect(pro15.modes).toEqual(['firstlast']);
