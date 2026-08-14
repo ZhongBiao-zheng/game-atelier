@@ -478,6 +478,115 @@ describe('Studio', () => {
     expect(body.params.size).toBe('2048x1152');
   });
 
+  // 2026-08-14 画师侧现象：打开工作室，模型是 seedream-5.0-pro，尺寸面板显示 2048×2048，
+  // 点一下比例才跳回正确的 2150×2150 —— 期间出的图真按 2048² 出，白丢约 10% 像素。
+  // 根因不是渲染时机，是「用值反推意图」：旧代码拿存档尺寸和**当前**标准尺寸比，不等就当
+  // 用户手动改过。PR #40 把 pro 的 2K 从 2048² 撑到上限 2150² 之后，历史存档里那个曾经
+  // 标准的 2048² 就被追认成手动选择。改成存 customSizeManual 标记，只认用户亲手改的。
+  function mockProKeys() {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'td',
+            keys: [
+              {
+                alias: 'td',
+                provider: 'tokendance',
+                access_key: 'sk...key',
+                secret_key: null,
+                capabilities: ['portrait'],
+                models: [{ name: 'Seedream 5.0 Pro', id: 'seedream-5.0-pro' }],
+                notes: '',
+                created_at: '2026-08-14T00:00:00Z',
+                is_default: true,
+              },
+            ],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') return Promise.resolve({ ok: true, json: async () => [] } as any);
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ job_id: 'j1', status: 'pending', submitted_at: '2026-08-14T00:00:00Z' }),
+      } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+    return fetchMock;
+  }
+
+  function saveProSelection(extra: Record<string, unknown>) {
+    localStorage.setItem(
+      'studio:selection',
+      JSON.stringify({
+        providerAlias: 'td',
+        model: 'seedream-5.0-pro',
+        ratio: '1:1',
+        resolution: '2K',
+        customSize: '2048x2048',
+        ...extra,
+      }),
+    );
+  }
+
+  it('ignores a stale auto-computed size in storage and shows the model standard on mount', async () => {
+    mockProKeys();
+    saveProSelection({}); // 无 customSizeManual：旧版本存档 / 自动算出来的尺寸
+
+    renderStudio();
+
+    // 关键：**不做任何点击改动**，只打开面板读数。修之前这里是 2048。
+    await screen.findByRole('button', { name: /选择比例和分辨率/ });
+    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    await waitFor(() => expect(screen.getByLabelText('输出宽度')).toHaveValue(2150));
+    expect(screen.getByLabelText('输出高度')).toHaveValue(2150);
+  });
+
+  it('submits the model standard size, not the stale stored one, without any interaction', async () => {
+    const fetchMock = mockProKeys();
+    saveProSelection({});
+
+    renderStudio();
+
+    typePrompt(await screen.findByLabelText('生图 prompt'), '开箱即用');
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const call = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(call![1]!.body));
+    expect(body.params.size).toBe('2150x2150');
+  });
+
+  it('still restores a size the user actually typed', async () => {
+    mockProKeys();
+    saveProSelection({ customSizeManual: true });
+
+    renderStudio();
+
+    await screen.findByRole('button', { name: /选择比例和分辨率/ });
+    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    await waitFor(() => expect(screen.getByLabelText('输出宽度')).toHaveValue(2048));
+    expect(screen.getByLabelText('输出高度')).toHaveValue(2048);
+  });
+
+  it('clamps a manually stored size that exceeds the current model cap', async () => {
+    mockProKeys();
+    // 4096x2304 = 9437184 像素，是 pro 上限 4624220 的两倍：换模型后原样套用必被上游拒。
+    saveProSelection({ customSize: '4096x2304', customSizeManual: true });
+
+    renderStudio();
+
+    await screen.findByRole('button', { name: /选择比例和分辨率/ });
+    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    await waitFor(() => {
+      const w = (screen.getByLabelText('输出宽度') as HTMLInputElement).valueAsNumber;
+      const h = (screen.getByLabelText('输出高度') as HTMLInputElement).valueAsNumber;
+      expect(w * h).toBeLessThanOrEqual(4624220);
+      expect(w).toBeGreaterThan(h); // 仍是横构图，只是等比缩到上限内
+    });
+  });
+
   it('submits the valid Seedream 2K 3:4 size instead of the too-small 1536x2048 request', async () => {
     const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
       if (url === '/api/keys') {
