@@ -27,6 +27,8 @@ interface SavedSelection {
   count?: number;
   quality?: Quality;
   customSize?: string;
+  /** 尺寸是用户亲手改的，不是自动算出来的。缺失按 false。 */
+  customSizeManual?: boolean;
   kind?: JobKind;
   videoMode?: VideoMode;
   duration?: number;
@@ -104,6 +106,7 @@ function StudioFull() {
   const [resolution, setResolution] = useState<'2K' | '4K'>('2K');
   const [count, setCount] = useState(1);
   const [customSize, setCustomSize] = useState('');
+  const [customSizeManual, setCustomSizeManual] = useState(false);
   const [quality, setQuality] = useState<Quality>('low');
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
@@ -150,8 +153,11 @@ function StudioFull() {
     }
     if (caps.qualities && !caps.qualities.includes(videoQuality)) setVideoQuality(caps.qualities[0]);
   }, [kind, model, videoMode, videoRatio, duration, videoResolution, videoQuality]);
-  const handleCustomSizeChange = useCallback((w: number, h: number) => {
+  // manual 由 PromptInput 给：只有亲手改宽高输入框才是 true，切比例/档位/模型的
+  // 自动重算是 false。存进 saveSelection 后，下次恢复不必再靠比对数值去猜意图。
+  const handleCustomSizeChange = useCallback((w: number, h: number, manual?: boolean) => {
     setCustomSize(`${w}x${h}`);
+    setCustomSizeManual(Boolean(manual));
   }, []);
 
   // 点击历史记录里的参考图 → 把这批参考图（服务器路径）拉回成 File[]，整组塞进输入框复用出图。
@@ -235,15 +241,18 @@ function StudioFull() {
         const nextModel = savedModelValid ? saved.model! : selected?.models[0]?.id ?? '';
         setModel(nextModel);
         // 恢复手动自定义尺寸：标准尺寸由 ratio/resolution 自动重算，仅当保存值偏离标准时用 sizeOverride 覆盖。
-        if (saved.customSize) {
+        // 只恢复用户**亲手改过**的尺寸，凭存档里的 customSizeManual 标记判断。
+        // 旧代码拿存档值和「当前」标准尺寸比，不等就当手动覆盖 —— 标准尺寸公式一改
+        // （PR #40 把 pro 的 2K 从 2048² 撑到上限 2150²），历史存档里那个曾经标准的
+        // 2048² 就被追认成手动选择：打开就显示 2048×2048，点一下比例才跳回 2150×2150，
+        // 期间出的图真按 2048² 出，白丢约 10% 像素。缺标记的旧存档按「非手动」处理，
+        // 回落到标准尺寸 —— 这个方向错了只是丢一次自定义值，反过来错则天天出小图。
+        if (saved.customSizeManual && saved.customSize) {
           const [wStr, hStr] = saved.customSize.split('x');
           const w = parseInt(wStr, 10);
           const h = parseInt(hStr, 10);
           if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
-            const standard = computeStudioPixelSize(saved.ratio ?? '1:1', saved.resolution ?? '2K', nextModel);
-            if (w !== standard.w || h !== standard.h) {
-              setSizeOverride((prev) => ({ key: (prev?.key ?? 0) + 1, w, h }));
-            }
+            setSizeOverride((prev) => ({ key: (prev?.key ?? 0) + 1, w, h }));
           }
         }
       })
@@ -259,11 +268,11 @@ function StudioFull() {
   useEffect(() => {
     if (!providerAlias) return;
     saveSelection({
-      providerAlias, model, ratio, resolution, count, quality, customSize,
+      providerAlias, model, ratio, resolution, count, quality, customSize, customSizeManual,
       kind, videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
     });
   }, [
-    providerAlias, model, ratio, resolution, count, quality, customSize,
+    providerAlias, model, ratio, resolution, count, quality, customSize, customSizeManual,
     kind, videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
   ]);
 

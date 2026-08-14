@@ -37,7 +37,11 @@ interface Props {
   onRatioChange?: (ratio: string) => void;
   onResolutionChange?: (resolution: '2K' | '4K') => void;
   onCountChange?: (count: number) => void;
-  onCustomSizeChange?: (w: number, h: number) => void;
+  /** manual=true 只在用户亲手改宽高输入框（或恢复一个亲手改过的存档值）时传。
+   * 自动重算（切比例/档位/模型）一律不传 —— 上层据此判断「这是不是用户的选择」，
+   * 绝不能再靠「值是否等于当前标准尺寸」去反推：标准尺寸的公式一改，
+   * 历史存档里那个曾经标准的值就会被追认成手动选择（2026-08-14 画师侧现象）。 */
+  onCustomSizeChange?: (w: number, h: number, manual?: boolean) => void;
   quality?: Quality;
   onQualityChange?: (quality: Quality) => void;
   /** When set, overrides localW/localH after the ratio/resolution effect; keyed to ensure re-runs. */
@@ -566,12 +570,18 @@ export function PromptInput({
   }, [refImagesLimit, referenceImages, onReferenceImagesChange, showRefHint]);
 
   // Runs after the ratio/resolution effect so it wins — used by reEdit to restore custom sizes.
+  // 覆盖值同样要过模型归一：存档/历史轮次里的尺寸可能来自上限更高的模型，原样套到
+  // seedream-5.0-pro 这种低上限模型上就是一个必被上游拒的尺寸。
   useEffect(() => {
     if (!sizeOverride) return;
-    setLocalW(sizeOverride.w);
-    setLocalH(sizeOverride.h);
-    onCustomSizeChange?.(sizeOverride.w, sizeOverride.h);
-  }, [sizeOverride, onCustomSizeChange]);
+    const normalized = normalizeStudioPixelSizeForModel(
+      { w: sizeOverride.w, h: sizeOverride.h },
+      selectedModel?.id,
+    );
+    setLocalW(normalized.w);
+    setLocalH(normalized.h);
+    onCustomSizeChange?.(normalized.w, normalized.h, true);
+  }, [sizeOverride, selectedModel?.id, onCustomSizeChange]);
 
   const submit = useCallback(() => {
     // @图1 → 图1：API 按序号自然语言绑定素材，@ 不出现在最终 prompt 里。
@@ -708,12 +718,12 @@ export function PromptInput({
       const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: newH }, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
-      onCustomSizeChange?.(normalized.w, normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h, true);
     } else {
       const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: localH }, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
-      onCustomSizeChange?.(normalized.w, normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h, true);
     }
   }
 
@@ -726,12 +736,12 @@ export function PromptInput({
       const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: newH }, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
-      onCustomSizeChange?.(normalized.w, normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h, true);
     } else {
       const normalized = normalizeStudioPixelSizeForModel({ w: localW, h: newH }, selectedModel?.id);
       setLocalW(normalized.w);
       setLocalH(normalized.h);
-      onCustomSizeChange?.(normalized.w, normalized.h);
+      onCustomSizeChange?.(normalized.w, normalized.h, true);
     }
   }
 
