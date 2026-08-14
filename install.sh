@@ -20,7 +20,20 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_NAME="game-atelier"
-SKILLS=(character promo turnaround viewer-server)
+# 从 skills/ 现场枚举，不写死：写死的列表会随新增 skill 静默过期，
+# 症状是 Codex 那边"装了但少几个命令"，而安装脚本一句提示都没有。
+SKILLS=()
+for _d in "$REPO_ROOT"/skills/*/; do
+  # 用显式 if 而非 `[ -f ] && ...`：后者在 set -e 下条件为假时整条语句返回非零，
+  # 遇到 skills/ 里任何一个没有 SKILL.md 的目录就会把安装脚本整个中断。
+  if [ -f "$_d/SKILL.md" ]; then
+    SKILLS+=("$(basename "$_d")")
+  fi
+done
+if [ ${#SKILLS[@]} -eq 0 ]; then
+  echo "未在 $REPO_ROOT/skills/ 下找到任何 SKILL.md，仓库不完整？" >&2
+  exit 1
+fi
 
 CLAUDE_LINK="$HOME/.claude/skills/$PLUGIN_NAME"
 CODEX_DIR="$HOME/.codex/skills"
