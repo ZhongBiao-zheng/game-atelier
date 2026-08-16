@@ -1,6 +1,6 @@
 ---
 name: promo
-version: 1.2.0
+version: 1.3.0
 description: |
   角色宣传图（KV / 海报）生成：基于已有立绘引导画师补齐场景/情绪/构图/色调/张力后出图，
   也支持改已出的美宣。
@@ -61,6 +61,14 @@ python "$BOOT" --check
 | `ready` | 启 viewer-server，正常 turn-start | ✅ |
 
 铁律：`needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 状态下**绝不**启动 viewer-server、绝不开浏览器——否则用户开窗只会撞 404 / 接口报错。只有 dist 在、venv 在（`ready` 或 `needs_first_key`）才 start + open-browser。
+
+## 插件更新提醒（--check 顺路返回，不阻断流程）
+
+`--check` 输出带 `update` 字段。仅当 `update_available` 为 true 且 `dismissed` 为 false 时提醒一次：用 AskUserQuestion 问「插件有新版 v<latest>（当前 v<current>），要更新吗？」（选项：现在更新 / 这次跳过）。其余情况（字段为 null / 无更新 / 已跳过）只字不提，直接往下走。
+
+- **现在更新**：Installed Plugin mode → 跑 `claude plugin update game-atelier`；Dev / Codex mode（git clone）→ 在仓库根跑 `git checkout -- web/dist && git pull --ff-only`（dist 是入库构建产物，先还原防挡 pull）。完成后告知用户：新版下次会话（重启 CC / 重进 skill）生效，本轮继续按当前版本工作。
+- **这次跳过**：跑 `<bootstrap.py> --dismiss-update`（前缀按当前模式，同 `--check`），同一版本之后不再问；出更高版本再提。
+- 更新失败（网络 / 权限）：报错原样告知，继续本轮工作，不反复重试。
 
 ## 模型 / API Key 选择规则
 
@@ -168,7 +176,11 @@ uv run python -m character_workflow turn-start --kind promo
 1. `uv run python -m character_workflow submit --kind promo --alias <选定alias> --model <选定model-id> --prompt-file <path> [--reference-image <path> ...] [--source-image <path>]` → 落盘 PENDING_CONFIRM（`--alias`/`--model` 按 model-routing 选；缺省回退默认 Key 首模型；`--reference-image` 可重复传多张，`--source-image` 是首张参考图的兼容别名——参考图一律走 CLI 参数，禁止手改 job JSON）
 2. 把 submit 在 stderr 打出的确认卡**原样转发**给画师（job_id / Key / model / 尺寸 / 参考图全列表 / 完整 prompt 原文），不得手写或摘要
 3. 判定画师回复：**明确肯定**（出图 / 确认 / OK / 可以 / 行 / 就这样 / 走吧 / 好）→ `uv run python -m character_workflow run-job <job_id>`；**要改**（具体改点）→ 改 prompt 重新 submit 出新确认卡（旧 PENDING_CONFIRM 作废、不复用），不 run-job；**否定 / 犹豫**（再想想 / 先不出 / 算了）→ 停在 PENDING_CONFIRM，不推进、不催；**模糊**（看不出肯定还是想改）→ 不擅自当肯定，用 AskUserQuestion 二选一「直接出图 / 还想改」。绝不把沉默或模糊当默认推进。
-4. 终端渲染：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 `![vN](output_paths[i])`。`output_paths` 为空 / 缺失 = 本次未成图，走失败分支——**不复用上轮 `v_latest`、不在 slot 目录按 mtime 挑文件冒充本次产出**。
+4. 渲染成品给画师：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 Markdown 图片。图片地址按**渲染通道**选（**完整规则 + 判断方法 + 降级顺序见 `docs/references/image-presentation.md`**）：
+   - **终端内联图像**（iTerm2 / kitty 等终端里的 Claude Code / Codex CLI）→ 本地绝对路径 `![vN](output_paths[i])`；
+   - **HTML 渲染能访问本地文件**（`file://` 页面或应用自行注入本地资源）→ 本地绝对路径可行；
+   - **HTML 渲染不能访问本地文件**（`http://` 页面，如 DeepSeek Harness GUI）→ **本地路径会裂图**，优先转 viewer-server `/api/raw` HTTP URL：`http://127.0.0.1:<port>/api/raw?path=<data-root相对路径>&job_id=<job_id>`（带本次 job_id 白名单鉴权；端口读 `.runtime/server.port`，别写死 5174）；**项目没有后端 / server 不可用时用 base64 data URI**（`data:image/png;base64,...`，零依赖，任何 HTML 渲染都显示，大图先压小）。
+   `output_paths` 为空 / 缺失 = 本次未成图，走失败分支——**不复用上轮 `v_latest`、不在 slot 目录按 mtime 挑文件冒充本次产出**。
 
 失败时：网络 / 凭证失败 → 问画师重试还是改 prompt；选重试 → `retry-job <job_id>` 克隆新 job（错误记录保留、带 retry_of）再 `run-job`；输出路径不可写 → 提醒检查 `image_storage_root`。不盲目重试。
 

@@ -12,6 +12,8 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+import urllib.request
 from pathlib import Path
 
 try:
@@ -87,6 +89,111 @@ def _venv_signature() -> str:
     h.update(b"\n")
     h.update(str(PLUGIN_DIR).encode("utf-8"))
     return h.hexdigest()
+
+
+# ---------- 版本更新检查 ----------
+# 最新版取 GitHub main 上的 plugin.json（本仓惯例：版本 bump 随 PR 合入 main，main 即最新发布）。
+LATEST_VERSION_URL = (
+    "https://raw.githubusercontent.com/ZhongBiao-zheng/game-atelier"
+    "/main/.claude-plugin/plugin.json"
+)
+UPDATE_CACHE_TTL_OK = 24 * 3600  # 拉取成功后 24h 内不再联网
+UPDATE_CACHE_TTL_FAIL = 3600  # 拉取失败 1h 内不重试，避免断网时每次 --check 都等超时
+UPDATE_FETCH_TIMEOUT = 3  # 秒；检查是顺路的，绝不为它拖慢 skill 启动
+
+
+def _update_cache_file() -> Path:
+    # 放 config dir 而非 data_root：data_root 未配置（首启向导前）也要能缓存
+    return _user_config_dir() / "update-check.json"
+
+
+def _current_version() -> str | None:
+    try:
+        payload = json.loads(
+            (PLUGIN_DIR / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+        )
+        return payload.get("version") or None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _version_tuple(v: str) -> tuple[int, ...]:
+    return tuple(int(p) for p in v.split("."))
+
+
+def _fetch_latest_version() -> str | None:
+    try:
+        with urllib.request.urlopen(LATEST_VERSION_URL, timeout=UPDATE_FETCH_TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        return payload.get("version") or None
+    except Exception:  # 网络/代理/解析任何失败都静默——更新检查绝不阻断工作流
+        return None
+
+
+def _read_update_cache() -> dict:
+    try:
+        data = json.loads(_update_cache_file().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_update_cache(cache: dict) -> None:
+    try:
+        f = _update_cache_file()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def update_info() -> dict | None:
+    """--check 顺路的更新检查。返回 None = 当前版本未知（异常安装），不提更新。
+
+    dismissed=True 表示用户对 latest 这个版本明确说过"这次不更新"（--dismiss-update），
+    SKILL.md 据此闭嘴；出了更高版本 dismissed 自动失效。
+    """
+    # 测试/CI 关网禁写：既不联网也不碰真实用户 config 目录
+    if os.environ.get("GAME_ATELIER_NO_UPDATE_CHECK"):
+        return None
+
+    current = _current_version()
+    if current is None:
+        return None
+
+    cache = _read_update_cache()
+    now = time.time()
+    checked_at = cache.get("checked_at", 0)
+    latest = cache.get("latest")
+    ttl = UPDATE_CACHE_TTL_OK if latest else UPDATE_CACHE_TTL_FAIL
+
+    if not isinstance(checked_at, (int, float)) or now - checked_at >= ttl:
+        latest = _fetch_latest_version()
+        cache.update({"checked_at": now, "latest": latest})
+        _write_update_cache(cache)
+
+    info = {"current": current, "latest": latest, "update_available": False, "dismissed": False}
+    if not latest:
+        return info
+    try:
+        info["update_available"] = _version_tuple(latest) > _version_tuple(current)
+    except ValueError:
+        return info
+    info["dismissed"] = info["update_available"] and cache.get("dismissed") == latest
+    return info
+
+
+def dismiss_update() -> int:
+    """记录"用户拒绝更新到 latest"。同版本不再问，新版本再提。"""
+    cache = _read_update_cache()
+    latest = cache.get("latest")
+    if not latest:
+        print(json.dumps({"status": "noop", "reason": "无已知的最新版本可忽略"}, ensure_ascii=False))
+        return 0
+    cache["dismissed"] = latest
+    _write_update_cache(cache)
+    print(json.dumps({"status": "ok", "dismissed": latest}, ensure_ascii=False))
+    return 0
 
 
 def _web_dist_ok() -> bool:
@@ -326,6 +433,11 @@ def main() -> int:
         help="Run `uv sync` into <data_root>/.venv and write venv-hash.",
     )
     parser.add_argument(
+        "--dismiss-update",
+        action="store_true",
+        help="Record that the user declined updating to the latest known version.",
+    )
+    parser.add_argument(
         "--run",
         action="store_true",
         help="Forward remaining args to <data_root>/.venv/python (handled before argparse).",
@@ -333,8 +445,13 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.check:
-        print(json.dumps(check(), ensure_ascii=False))
+        result = check()
+        result["update"] = update_info()
+        print(json.dumps(result, ensure_ascii=False))
         return 0
+
+    if args.dismiss_update:
+        return dismiss_update()
 
     if args.init_data_root:
         return init_data_root(Path(args.init_data_root))

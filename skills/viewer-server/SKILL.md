@@ -39,6 +39,14 @@ python "$BOOT" --check
 - `needs_first_key` → 启 viewer-server，引导用户在 Web 上加第一个 Key
 - `needs_keys_repair` → 告知用户 `keys.json` 损坏，建议备份后手动编辑或删除重加
 
+## 插件更新提醒（--check 顺路返回，不阻断流程）
+
+`--check` 输出带 `update` 字段。仅当 `update_available` 为 true 且 `dismissed` 为 false 时提醒一次：用 AskUserQuestion 问「插件有新版 v<latest>（当前 v<current>），要更新吗？」（选项：现在更新 / 这次跳过）。其余情况（字段为 null / 无更新 / 已跳过）只字不提，直接往下走。
+
+- **现在更新**：Installed Plugin mode → 跑 `claude plugin update game-atelier`；Dev / Codex mode（git clone）→ 在仓库根跑 `git checkout -- web/dist && git pull --ff-only`（dist 是入库构建产物，先还原防挡 pull）。完成后告知用户：新版下次会话（重启 CC / 重进 skill）生效，本轮继续按当前版本工作。
+- **这次跳过**：跑 `<bootstrap.py> --dismiss-update`（前缀按当前模式，同 `--check`），同一版本之后不再问；出更高版本再提。
+- 更新失败（网络 / 权限）：报错原样告知，继续本轮工作，不反复重试。
+
 ## API Key 选择规则
 
 turn-start 返回 `available_keys` 和 `preferred_alias`：
@@ -74,6 +82,20 @@ Skill 调用路径必须带 `--background`，否则前台 server 会阻塞当前
 ### `uv run python src/viewer_server/server.py open-browser`
 
 `open http://127.0.0.1:<port>/`（Mac）/ `xdg-open`（Linux）。
+
+## 图片呈现（/api/raw）
+
+`GET /api/raw?path=<相对路径>&job_id=<job_id>` 是**把本地图片以 HTTP 呈现给画师**的通道之一：
+用于「HTML 渲染且不能访问本地文件」（`http://` 页面，如 DeepSeek Harness GUI / 远程网页）的场景。
+完整规则见 `docs/references/image-presentation.md`（三渲染通道：终端内联图像 / HTML 可访问本地 /
+HTML 不可访问本地——本接口只服务第三种有后端的情况；无后端时用 base64 data URI 兜底），要点：
+
+- 相对路径基准 = data root（如 `characters/<id>/portrait/v2.png`），不是 CWD。
+- **必须带 job_id**：以该 job 的 `output_paths` / `reference_images` / `source_image` 作白名单，
+  对不上 → 403。这是 job 白名单鉴权，别绕。
+- 端口读 `.runtime/server.port`（默认 5174，被占用 +1），别写死。
+- `read_image` 工具（agent 自己看图）与 `/api/raw`（呈现给画师）是两回事：模型不支持图片输入时
+  `read_image` 会报错，属正常，不代表出图失败；呈现画师永远走 Markdown 图片 + 可加载地址。
 
 ## 单 tab 约束
 

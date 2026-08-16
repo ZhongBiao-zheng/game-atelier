@@ -1,6 +1,6 @@
 ---
 name: character
-version: 4.4.0
+version: 4.5.0
 description: |
   游戏角色立绘工作流：承接画师反馈，通过对话问清风格/配色/镜头/道具后出图，
   并支持对已出立绘改皮肤、换色、重画。
@@ -63,6 +63,14 @@ python "$BOOT" --check
 | `ready` | 启 viewer-server，正常 turn-start | ✅ |
 
 铁律：`needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 状态下**绝不**启动 viewer-server、绝不开浏览器——否则用户开窗只会撞 404 / 接口报错。只有 dist 在、venv 在（`ready` 或 `needs_first_key`）才 start + open-browser。
+
+## 插件更新提醒（--check 顺路返回，不阻断流程）
+
+`--check` 输出带 `update` 字段。仅当 `update_available` 为 true 且 `dismissed` 为 false 时提醒一次：用 AskUserQuestion 问「插件有新版 v<latest>（当前 v<current>），要更新吗？」（选项：现在更新 / 这次跳过）。其余情况（字段为 null / 无更新 / 已跳过）只字不提，直接往下走。
+
+- **现在更新**：Installed Plugin mode → 跑 `claude plugin update game-atelier`；Dev / Codex mode（git clone）→ 在仓库根跑 `git checkout -- web/dist && git pull --ff-only`（dist 是入库构建产物，先还原防挡 pull）。完成后告知用户：新版下次会话（重启 CC / 重进 skill）生效，本轮继续按当前版本工作。
+- **这次跳过**：跑 `<bootstrap.py> --dismiss-update`（前缀按当前模式，同 `--check`），同一版本之后不再问；出更高版本再提。
+- 更新失败（网络 / 权限）：报错原样告知，继续本轮工作，不反复重试。
 
 ## 模型 / API Key 选择规则
 
@@ -276,7 +284,11 @@ uv run python -m character_workflow set-canonical --kind portrait --path <该图
    uv run python -m character_workflow run-latest --kind portrait
    ```
 
-4. 终端渲染：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 `![vN](output_paths[i])`，末尾提一句"Web 也能看，或直接说要改哪张"。`output_paths` 为空 / 缺失 = 本次未成图，走下方失败分支——**不复用上轮 `v_latest`、不在 slot 目录按 mtime 挑文件冒充本次产出**（曾踩过裂图）。
+4. 渲染成品给画师：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 Markdown 图片，末尾提一句"Web 也能看，或直接说要改哪张"。图片地址按**渲染通道**选（**完整规则 + 判断方法 + 降级顺序见 `docs/references/image-presentation.md`**）：
+   - **终端内联图像**（iTerm2 / kitty 等终端里的 Claude Code / Codex CLI）→ 本地绝对路径 `![vN](output_paths[i])`；
+   - **HTML 渲染能访问本地文件**（`file://` 页面或应用自行注入本地资源）→ 本地绝对路径可行；
+   - **HTML 渲染不能访问本地文件**（`http://` 页面，如 DeepSeek Harness GUI）→ **本地路径会裂图**，优先转 viewer-server `/api/raw` HTTP URL：`http://127.0.0.1:<port>/api/raw?path=<data-root相对路径>&job_id=<job_id>`（带本次 job_id 白名单鉴权；端口读 `.runtime/server.port`，别写死 5174）；**项目没有后端 / server 不可用时用 base64 data URI**（`data:image/png;base64,...`，零依赖，任何 HTML 渲染都显示，大图先压小）。
+   `output_paths` 为空 / 缺失 = 本次未成图，走下方失败分支——**不复用上轮 `v_latest`、不在 slot 目录按 mtime 挑文件冒充本次产出**（曾踩过裂图）。
 
 失败时：网络/凭证失败 → 问画师重试还是改 prompt；画师选重试 → `NEW_ID=$(uv run python -m character_workflow retry-job "$JOB_ID")` 克隆原 job（错误记录保留，新 job 带 retry_of）→ `run-job "$NEW_ID"`；输出路径不可写 → 提醒检查 `image_storage_root`。
 
