@@ -75,6 +75,20 @@ Skill 调用路径必须带 `--background`，否则前台 server 会阻塞当前
 
 `open http://127.0.0.1:<port>/`（Mac）/ `xdg-open`（Linux）。
 
+## 图片呈现（/api/raw）
+
+`GET /api/raw?path=<相对路径>&job_id=<job_id>` 是**把本地图片以 HTTP 呈现给画师**的通道之一：
+用于「HTML 渲染且不能访问本地文件」（`http://` 页面，如 DeepSeek Harness GUI / 远程网页）的场景。
+完整规则见 `docs/references/image-presentation.md`（三渲染通道：终端内联图像 / HTML 可访问本地 /
+HTML 不可访问本地——本接口只服务第三种有后端的情况；无后端时用 base64 data URI 兜底），要点：
+
+- 相对路径基准 = data root（如 `characters/<id>/portrait/v2.png`），不是 CWD。
+- **必须带 job_id**：以该 job 的 `output_paths` / `reference_images` / `source_image` 作白名单，
+  对不上 → 403。这是 job 白名单鉴权，别绕。
+- 端口读 `.runtime/server.port`（默认 5174，被占用 +1），别写死。
+- `read_image` 工具（agent 自己看图）与 `/api/raw`（呈现给画师）是两回事：模型不支持图片输入时
+  `read_image` 会报错，属正常，不代表出图失败；呈现画师永远走 Markdown 图片 + 可加载地址。
+
 ## 单 tab 约束
 
 同一时间只支持一个浏览器 tab 操作。多 tab 行为未定义（v2.3 Outside Voice #4 限制）。
