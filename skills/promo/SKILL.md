@@ -1,6 +1,6 @@
 ---
 name: promo
-version: 1.2.0
+version: 1.3.0
 description: |
   角色宣传图（KV / 海报）生成：基于已有立绘引导画师补齐场景/情绪/构图/色调/张力后出图，
   也支持改已出的美宣。
@@ -61,6 +61,14 @@ python "$BOOT" --check
 | `ready` | 启 viewer-server，正常 turn-start | ✅ |
 
 铁律：`needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 状态下**绝不**启动 viewer-server、绝不开浏览器——否则用户开窗只会撞 404 / 接口报错。只有 dist 在、venv 在（`ready` 或 `needs_first_key`）才 start + open-browser。
+
+## 插件更新提醒（--check 顺路返回，不阻断流程）
+
+`--check` 输出带 `update` 字段。仅当 `update_available` 为 true 且 `dismissed` 为 false 时提醒一次：用 AskUserQuestion 问「插件有新版 v<latest>（当前 v<current>），要更新吗？」（选项：现在更新 / 这次跳过）。其余情况（字段为 null / 无更新 / 已跳过）只字不提，直接往下走。
+
+- **现在更新**：Installed Plugin mode → 跑 `claude plugin update game-atelier`；Dev / Codex mode（git clone）→ 在仓库根跑 `git checkout -- web/dist && git pull --ff-only`（dist 是入库构建产物，先还原防挡 pull）。完成后告知用户：新版下次会话（重启 CC / 重进 skill）生效，本轮继续按当前版本工作。
+- **这次跳过**：跑 `<bootstrap.py> --dismiss-update`（前缀按当前模式，同 `--check`），同一版本之后不再问；出更高版本再提。
+- 更新失败（网络 / 权限）：报错原样告知，继续本轮工作，不反复重试。
 
 ## 模型 / API Key 选择规则
 
