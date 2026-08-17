@@ -47,8 +47,9 @@ _TERMINAL_FAILURE = "FAILURE"
 _UPSTREAM_MESSAGES = {
     "insert_midjourney_task_failed": (
         "上游没能接下这个任务：Midjourney 渠道正忙或暂时不可用。这与 prompt 内容和参数无关"
-        "（同一条 prompt 在渠道空闲时可以受理），稍后重试即可；反复失败就去供应商控制台"
-        "看该分组的渠道状态。"
+        "（同一条 prompt 在渠道空闲时可以受理）。注意这类被拒的请求在聚合商侧仍可能按调用"
+        "计费（2026-08-17 在 Tuzi 实测：每次被拒都有一条消费记录、无退款），所以不要反复重试"
+        "碰运气 —— 先去供应商控制台看该分组的渠道状态。"
     ),
     "prompt_is_required": "Midjourney 需要非空 prompt",
     "task_no_found": "上游查不到这个任务（任务 ID 可能已过期）",
