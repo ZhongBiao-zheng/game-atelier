@@ -10,7 +10,9 @@ import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
-import { imageControlCaps, type Quality } from '@/lib/imageControlCaps';
+import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
+import { imageFamily } from '@/lib/modelFamily';
+import { MJ_DEFAULTS, mjParamsFromJob, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
@@ -109,6 +111,8 @@ function StudioFull() {
   const [customSize, setCustomSize] = useState('');
   const [customSizeManual, setCustomSizeManual] = useState(false);
   const [quality, setQuality] = useState<Quality>('low');
+  // MJ 参数不进 localStorage —— 与 ratio/像素/质量/数量 同一政策：出图配置每次启动回默认。
+  const [mjParams, setMjParams] = useState<MjParams>(MJ_DEFAULTS);
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
@@ -326,21 +330,27 @@ function StudioFull() {
     }
     const effectiveRatio = overrideConfig?.ratio ?? ratio;
     const effectiveResolution = overrideConfig?.resolution ?? resolution;
-    const effectiveCount = clampImageCount(overrideConfig?.n ?? count);
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
     const effectiveModel = overrideConfig?.model ?? model;
     const selectedKey = keys.find((item) => item.alias === effectiveAlias);
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
     // 能力按模型族判；provider 只在 openrouter 上改 size 语义（比例串而非像素）。
     const caps = imageControlCaps(effectiveModel, effectiveProvider);
+    // MJ 一次 imagine 固定回 4 张方案，张数不由画师定（见 MJ_IMAGES_PER_TASK）。
+    const effectiveCount = caps.family === 'midjourney'
+      ? MJ_IMAGES_PER_TASK
+      : clampImageCount(overrideConfig?.n ?? count);
     // nano-banana / openrouter 的 size 是比例字符串（如 16:9）；其余是归一化后的像素 WxH。
+    // MJ（sizeKind='none'）一个尺寸参数都不发：比例由渠道锁定在 1:1，写了也只是自欺。
     const effectiveSize = overrideConfig?.size
-      ?? (caps.sizeKind === 'ratio'
-        ? effectiveRatio
-        : normalizeStudioSizeForModel(
-            customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveModel),
-            effectiveModel,
-          ));
+      ?? (caps.sizeKind === 'none'
+        ? undefined
+        : caps.sizeKind === 'ratio'
+          ? effectiveRatio
+          : normalizeStudioSizeForModel(
+              customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveModel),
+              effectiveModel,
+            ));
     // 质量档位只在该族真有时才发：seedream / dall-e 不认 low|high，nano-banana 不认 auto。
     const rawQuality = overrideConfig?.quality ?? quality;
     const effectiveQuality = caps.qualities?.includes(rawQuality) ? rawQuality : undefined;
@@ -376,16 +386,23 @@ function StudioFull() {
       n: effectiveCount,
       quality: effectiveQuality,
       referenceImages: refPaths,
+      ...(caps.family === 'midjourney'
+        ? { mjParams: overrideConfig?.mjParams ?? mjParams }
+        : {}),
     };
     // 控件隐藏的参数一律不写进 params（与视频侧同写法）：后端 openrouter_image 会把
     // params.resolution 原样当 API 参数发出去，在别的 key 上选过 4K 就会被带过来按 4K 计费。
     const jobParams: JobParams = {
-      size: effectiveSize,
+      ...(effectiveSize ? { size: effectiveSize } : {}),
       ...(caps.ratios.length > 0 ? { ratio: effectiveRatio } : {}),
       ...(caps.showResolution ? { resolution: effectiveResolution } : {}),
       n: effectiveCount,
       ...(effectiveQuality ? { quality: effectiveQuality } : {}),
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
+      // MJ 的一切控制都在 prompt flag 里，由后端 mj_image 拼接；这里只发结构化值。
+      ...(caps.family === 'midjourney'
+        ? mjParamsToJob(overrideConfig?.mjParams ?? mjParams)
+        : {}),
     };
 
     const startedAt = Date.now();
@@ -643,6 +660,8 @@ function StudioFull() {
           resolution={resolution}
           count={count}
           quality={quality}
+          mjParams={mjParams}
+          onMjParamsChange={(patch) => setMjParams((prev) => ({ ...prev, ...patch }))}
           onProviderChange={setProviderAlias}
           onModelChange={setModel}
           onRatioChange={setRatio}
@@ -697,6 +716,7 @@ function StudioFull() {
     if (config.resolution) setResolution(config.resolution);
     if (config.n) setCount(clampImageCount(config.n));
     if (config.quality) setQuality(config.quality);
+    if (config.mjParams) setMjParams(config.mjParams);
     if (config.size) {
       const [wStr, hStr] = config.size.split('x');
       const w = parseInt(wStr, 10);
@@ -733,6 +753,7 @@ function StudioFull() {
       if (config.ratio) setRatio(config.ratio);
       if (config.resolution) setResolution(config.resolution);
       if (config.n) setCount(clampImageCount(config.n));
+      if (config.mjParams) setMjParams(config.mjParams);
     }
     await onSubmit(config.prompt, config);
   }
@@ -815,6 +836,8 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
     referenceImages: referenceImagesFor(job),
     // 后端跑 job 时回写的静默改写提示（尺寸归一化 / 参考图截断）——两端 schema 早有此字段。
     warnings: stringList(p.warnings),
+    // MJ 参数从 job 还原：编辑导入 / 再次生成不带上就等于拿默认值重出一张不一样的图。
+    ...(imageFamily(job.model) === 'midjourney' ? { mjParams: mjParamsFromJob(p) } : {}),
     // 视频参数：再次生成时从原 job 还原（resolution 上面只认 2K/4K 图片语义，视频的 720p/1080p 存这里）。
     // referenceVideos/Audios 给空数组而非 undefined，避免 onSubmitVideo 的 ?? 回落到当前表单文件。
     ...(isVideo

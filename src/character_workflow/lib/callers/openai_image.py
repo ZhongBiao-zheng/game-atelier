@@ -394,6 +394,10 @@ def image_family(model: str) -> str:
     provider 不参与族判定：同一个模型走直连还是走聚合商，能力是一样的。
     """
     m = normalized_model_id(model)
+    # MJ 走任务代理协议（异步 submit + 轮询），控件形态与其余族完全不同：无尺寸、无质量，
+    # 比例/版本/stylize 由渠道锁定。模型 id 形如 mj_fast_imagine / mj_relax_upscale。
+    if m.startswith("mj-") or "midjourney" in m or m.startswith("niji"):
+        return "midjourney"
     if "gpt-image" in m:
         return "gpt-image"
     if "nano-banana" in m:

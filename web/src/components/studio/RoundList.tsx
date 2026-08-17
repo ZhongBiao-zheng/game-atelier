@@ -2,6 +2,7 @@ import { type ButtonHTMLAttributes, useEffect, useMemo, useRef, useState } from 
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Trash2, X } from 'lucide-react';
 
+import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
 import { useVideoFrame } from '@/lib/videoFrame';
 import type { GenMode } from '@/lib/historyFilters';
@@ -23,6 +24,9 @@ export interface RoundConfig {
   size?: string;
   n?: number;
   referenceImages: string[];
+  /** MJ 专属参数（family=midjourney）——「编辑导入 / 再次生成」靠它还原画师当时的选择，
+   *  否则会拿默认值静默重出一张不一样的图。 */
+  mjParams?: MjParams;
   // 后端在跑 job 时回写的静默改写提示（尺寸被归一化 / 参考图被截断…）；只读展示，前端不产生。
   warnings?: string[];
   // 视频参数（kind=video）—— 再次生成时按原 job 完整还原；resolution 是图片语义（2K/4K），视频分辨率另存。

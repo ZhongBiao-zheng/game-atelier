@@ -5,7 +5,14 @@ import { modelModality, type KeyView } from '@/api/keys';
 import { availableResolutions, computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
 import { providerLabel } from '@/lib/providerLabels';
 import { maxReferenceImages } from '@/lib/referenceLimits';
-import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
+import {
+  imageControlCaps,
+  MJ_IMAGES_PER_TASK,
+  QUALITY_LABELS,
+  type Quality,
+} from '@/lib/imageControlCaps';
+import { MJ_DEFAULTS, type MjParams } from '@/lib/mjParams';
+import { MjControls } from './MjControls';
 import { estimateCostYuan, isHkAggregator } from '@/lib/creditCost';
 import { captureVideoFrame } from '@/lib/videoFrame';
 import { VideoControls } from './VideoControls';
@@ -44,6 +51,9 @@ interface Props {
   onCustomSizeChange?: (w: number, h: number, manual?: boolean) => void;
   quality?: Quality;
   onQualityChange?: (quality: Quality) => void;
+  /** Midjourney 专属参数（family=midjourney 时才渲染面板）。 */
+  mjParams?: MjParams;
+  onMjParamsChange?: (patch: Partial<MjParams>) => void;
   /** When set, overrides localW/localH after the ratio/resolution effect; keyed to ensure re-runs. */
   sizeOverride?: { key: number; w: number; h: number };
   menuDirection?: 'up' | 'down';
@@ -201,6 +211,8 @@ export function PromptInput({
   onCountChange,
   onCustomSizeChange,
   quality = 'medium' as Quality,
+  mjParams = MJ_DEFAULTS,
+  onMjParamsChange,
   onQualityChange,
   sizeOverride,
   menuDirection = 'up',
@@ -502,6 +514,8 @@ export function PromptInput({
   const [sizeLocked, setSizeLocked] = useState(true);
   // 能力四项按模型族判（provider 只决定端点/协议，openrouter 另外改 size 语义）。
   const caps = imageControlCaps(selectedModel?.id, provider?.provider);
+  // MJ 的比例/版本/stylize 由渠道固定注入，张数也固定 4 —— 这些控件不能装作可选。
+  const isMj = caps.family === 'midjourney';
   const maxRef = maxReferenceImages(selectedModel?.id);
   // omni 参考上限：按族覆盖（happyhorse video-edit = 5 图 + 1 视频），缺省 9/3/3。
   const maxRefImgs = videoCaps?.maxRefImages ?? MAX_REF_IMAGES;
@@ -1150,10 +1164,16 @@ export function PromptInput({
             >
               <Square size={14} aria-hidden />
               {caps.showCustomSize ? <>{localW}:{localH}</> : <>{ratio}</>}
-              <span className="text-muted-foreground">|</span>
-              {caps.showResolution
-                ? (resolution === '2K' ? '高清 2K' : '超清 4K')
-                : (caps.qualities ? (QUALITY_LABELS[quality] ?? quality) : null)}
+              {/* MJ 既无分辨率档也无质量档（都是 prompt flag），第二段没有内容，
+                  连分隔符一起省掉，否则按钮上挂一根光秃秃的竖线。 */}
+              {!isMj && (
+                <>
+                  <span className="text-muted-foreground">|</span>
+                  {caps.showResolution
+                    ? (resolution === '2K' ? '高清 2K' : '超清 4K')
+                    : (caps.qualities ? (QUALITY_LABELS[quality] ?? quality) : null)}
+                </>
+              )}
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'size'}
@@ -1166,6 +1186,11 @@ export function PromptInput({
                 <div className="space-y-4">
                   <section className="w-[296px]">
                     <div className="py-1 px-1 text-xs text-muted-foreground">比例</div>
+                    {isMj && (
+                      <p data-testid="mj-size-note" className="px-1 pb-2 text-xs text-muted-foreground">
+                        Midjourney 按比例出图（拼成 --ar），像素边长由它自己定，没有分辨率档。
+                      </p>
+                    )}
                     <div
                       role="listbox"
                       aria-label="选择比例"
@@ -1317,13 +1342,22 @@ export function PromptInput({
             </ToolbarPopover>
           </div>
 
+          {isMj && (
+            <MjControls
+              value={mjParams}
+              onChange={(patch) => onMjParamsChange?.(patch)}
+              hasReferenceImages={referenceImages.length > 0}
+              menuDirection={menuDirection}
+            />
+          )}
+
           <div ref={countRef} data-testid="count-control-wrap" className="relative shrink-0">
             <ControlButton
               active={openPanel === 'count'}
               aria-label="选择出图数量"
               onClick={() => setOpenPanel(openPanel === 'count' ? null : 'count')}
             >
-              <Images size={14} aria-hidden /> {count} 张
+              <Images size={14} aria-hidden /> {isMj ? MJ_IMAGES_PER_TASK : count} 张
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'count'}
@@ -1334,13 +1368,19 @@ export function PromptInput({
               aria-label="选择出图数量列表"
               className="rounded-xl border border-border bg-card p-3"
             >
-                <CountOptions
-                  value={count}
-                  onSelect={(item) => {
-                    onCountChange?.(item);
-                    setOpenPanel(null);
-                  }}
-                />
+                {isMj ? (
+                  <p data-testid="mj-count-note" className="max-w-[220px] text-xs text-muted-foreground">
+                    Midjourney 一次出 4 张方案（上游已切成 4 张单图），张数不可调。
+                  </p>
+                ) : (
+                  <CountOptions
+                    value={count}
+                    onSelect={(item) => {
+                      onCountChange?.(item);
+                      setOpenPanel(null);
+                    }}
+                  />
+                )}
             </ToolbarPopover>
           </div>
             </>

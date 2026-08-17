@@ -7,6 +7,7 @@
  * - seedream（含 seededit）：图生图最多 10 张参考图。
  * - gpt-image（走 /v1/images/edits）：最多 16 张。
  * - nano-banana：官方建议「参考图片不超过 2 张效果更佳」，放宽到 3。
+ * - midjourney：垫图走 base64Array，上游未给明确上限，取保守 4。
  * - standard（未知族）：保守上限 4。
  */
 import { imageFamily } from '@/lib/modelFamily';
@@ -15,6 +16,7 @@ const FAMILY_LIMITS = {
   seedream: 10,
   'gpt-image': 16,
   'nano-banana': 3,
+  midjourney: 4,
   standard: 4,
 } as const;
 

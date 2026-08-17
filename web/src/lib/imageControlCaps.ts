@@ -31,8 +31,9 @@ export interface ImageControlCaps {
   showCustomSize: boolean;
   /** 质量选项；null 表示该族不暴露质量控件（也不该写进 job params）。 */
   qualities: Quality[] | null;
-  /** size 传给后端的语义：'ratio' = 传比例字符串(如 16:9)；'pixels' = 传 WxH。 */
-  sizeKind: 'ratio' | 'pixels';
+  /** size 传给后端的语义：'ratio' = 传比例字符串(如 16:9)；'pixels' = 传 WxH；
+   *  'none' = 该族不接受任何尺寸参数，控件与 params 都不该出现尺寸（MJ：比例由渠道锁定）。 */
+  sizeKind: 'ratio' | 'pixels' | 'none';
 }
 
 // 文档未列 1:1，但实测 nano-banana 支持（size="1:1" → 1024×1024）。
@@ -65,6 +66,17 @@ const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'resolu
     showCustomSize: true,
     qualities: null,
     sizeKind: 'pixels',
+  },
+  // MJ 任务代理协议：body 里没有 size / quality 字段，一切控制都在 prompt 尾部的 flag 里。
+  // 比例照常可选（params.ratio 由后端拼成 --ar），但**没有像素尺寸**这回事 —— 输出边长由
+  // MJ 自己定（实测 1024²），所以 sizeKind='none'：不发 size、不给分辨率档、不给自定义像素。
+  // 质量也不是 quality 参数而是 --stylize / --q 一类 flag，走 MJ 专属控件而不是通用质量档。
+  midjourney: {
+    ratios: STANDARD_RATIOS,
+    showResolution: false,
+    showCustomSize: false,
+    qualities: null,
+    sizeKind: 'none',
   },
   standard: {
     ratios: STANDARD_RATIOS,
@@ -100,6 +112,10 @@ export function imageControlCaps(
     resolutions: base.showResolution ? availableResolutions(modelId) : [],
   };
 }
+
+/** MJ 一次 imagine 回的方案数：上游把 2048² 四宫格切成 4 张 1024² 单图，一并落盘。
+ *  张数不由画师定 —— 传小于 4 的 n 会让 job_runner 按 n 裁掉已经计费的图。 */
+export const MJ_IMAGES_PER_TASK = 4;
 
 export const QUALITY_LABELS: Record<Quality, string> = {
   low: '低',

@@ -7,7 +7,8 @@ import { PromptInput } from '@/components/studio/PromptInput';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import type { RoundConfig } from '@/components/studio/RoundList';
 import { normalizeStudioSizeForModel, studioSizeFor } from '@/lib/studioSize';
-import { imageControlCaps, type Quality } from '@/lib/imageControlCaps';
+import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
+import { MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import type { JobKind, JobParams } from '@/schema/jobs';
 
@@ -63,6 +64,8 @@ export function StudioCompact() {
   const [customSize, setCustomSize] = useState('');
   const [customSizeManual, setCustomSizeManual] = useState(false);
   const [quality, setQuality] = useState<Quality>('low');
+  // 与 StudioFull 同一政策：MJ 参数不进 localStorage，每次启动回默认。
+  const [mjParams, setMjParams] = useState<MjParams>(MJ_DEFAULTS);
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
@@ -170,20 +173,26 @@ export function StudioCompact() {
     }
     const effectiveRatio = overrideConfig?.ratio ?? ratio;
     const effectiveResolution = overrideConfig?.resolution ?? resolution;
-    const effectiveCount = clampImageCount(overrideConfig?.n ?? count);
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
     const effectiveModel = overrideConfig?.model ?? model;
     const selectedKey = keys.find((item) => item.alias === effectiveAlias);
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
     // 与 Studio.onSubmit 同一套判据：能力按模型族，provider 只在 openrouter 上改 size 语义。
     const caps = imageControlCaps(effectiveModel, effectiveProvider);
+    // MJ 一次 imagine 固定回 4 张方案（同 Studio.onSubmit）。
+    const effectiveCount = caps.family === 'midjourney'
+      ? MJ_IMAGES_PER_TASK
+      : clampImageCount(overrideConfig?.n ?? count);
+    // MJ（sizeKind='none'）不发任何尺寸参数：比例由渠道锁定在 1:1。
     const effectiveSize = overrideConfig?.size
-      ?? (caps.sizeKind === 'ratio'
-        ? effectiveRatio
-        : normalizeStudioSizeForModel(
-            customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveModel),
-            effectiveModel,
-          ));
+      ?? (caps.sizeKind === 'none'
+        ? undefined
+        : caps.sizeKind === 'ratio'
+          ? effectiveRatio
+          : normalizeStudioSizeForModel(
+              customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveModel),
+              effectiveModel,
+            ));
     const rawQuality = overrideConfig?.quality ?? quality;
     const effectiveQuality = caps.qualities?.includes(rawQuality) ? rawQuality : undefined;
 
@@ -203,12 +212,16 @@ export function StudioCompact() {
 
     // 控件隐藏的参数不写进 params（同 Studio.onSubmit）：openrouter 会把 resolution 当 API 参数发。
     const jobParams: JobParams = {
-      size: effectiveSize,
+      ...(effectiveSize ? { size: effectiveSize } : {}),
       ...(caps.ratios.length > 0 ? { ratio: effectiveRatio } : {}),
       ...(caps.showResolution ? { resolution: effectiveResolution } : {}),
       n: effectiveCount,
       ...(effectiveQuality ? { quality: effectiveQuality } : {}),
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
+      // MJ 的控制全在 prompt flag 里，由后端 mj_image 拼接（同 StudioFull）。
+      ...(caps.family === 'midjourney'
+        ? mjParamsToJob(overrideConfig?.mjParams ?? mjParams)
+        : {}),
     };
 
     try {
@@ -331,6 +344,8 @@ export function StudioCompact() {
         resolution={resolution}
         count={count}
         quality={quality}
+        mjParams={mjParams}
+        onMjParamsChange={(patch) => setMjParams((prev) => ({ ...prev, ...patch }))}
         onProviderChange={setProviderAlias}
         onModelChange={setModel}
         onRatioChange={setRatio}

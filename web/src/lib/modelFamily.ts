@@ -9,7 +9,7 @@
  * **provider 不参与族判定**：同一个 gpt-image-2 走 OpenAI 直连还是过聚合商，能力是一样的；
  * provider 只决定端点与协议（如 OpenRouter 的 size 语义是比例串，那是传输层的事，不是族）。
  */
-export type ImageFamily = 'gpt-image' | 'nano-banana' | 'seedream' | 'standard';
+export type ImageFamily = 'gpt-image' | 'nano-banana' | 'seedream' | 'midjourney' | 'standard';
 
 /** 族判定用的 id 归一：尾段 + lower + `_`→`-`。 */
 export function normalizedModelId(modelId?: string | null): string {
@@ -18,6 +18,9 @@ export function normalizedModelId(modelId?: string | null): string {
 
 export function imageFamily(modelId?: string | null): ImageFamily {
   const id = normalizedModelId(modelId);
+  // MJ 走任务代理协议（异步 submit + 轮询），控件形态与其余族完全不同：无尺寸、无质量，
+  // 比例/版本/stylize 由渠道锁定。模型 id 形如 mj_fast_imagine / mj_relax_upscale。
+  if (id.startsWith('mj-') || id.includes('midjourney') || id.startsWith('niji')) return 'midjourney';
   if (id.includes('gpt-image')) return 'gpt-image';
   if (id.includes('nano-banana')) return 'nano-banana';
   // seededit（图生图）与 seedream 同族：同一套尺寸下限与 10 张参考图上限。

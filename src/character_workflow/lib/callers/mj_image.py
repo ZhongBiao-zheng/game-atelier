@@ -1,0 +1,301 @@
+"""Midjourney 任务代理协议（midjourney-proxy 兼容）图片 caller。
+
+POST /mj/submit/imagine 拿 result 任务 ID → GET /mj/task/{id}/fetch 轮询 status →
+SUCCESS 后取 imageUrls[].url，拉字节落 .png。鉴权 Authorization: Bearer <key>。
+契约来源：https://api.tu-zi.com/docs/api/midjourney + apifox OpenAPI（343646946e0 / 343646941e0）。
+
+与其他图片 caller 的三处结构性差异（都是 2026-08-17 对 Tuzi MJ 分组实测得来）：
+
+1. **异步**。这是唯一走「提交 + 轮询」的图片协议，所以复用视频侧的 video_poll 轮询外壳
+   （传输层失败不吃 max_polls 预算、报错必带 task_id），而不是 openai_image 的同步 POST。
+   实测 FAST 档 37s 出图，窗口按 RELAX 档留到 6 分钟。
+
+2. **一次出 4 张**。fetch 的 imageUrls 是 4 张独立 1024² 单图（上游已从 2048² 四宫格切好），
+   imageUrl 则是那张四宫格。落盘只取 4 张单图 —— 四宫格与它们内容重复。
+   因此前端对该族把张数锁 4：job_runner 会按 params.n 裁产物，n<4 会白扔已计费的图。
+
+3. **参数走 prompt 尾部 flag**，body 里没有 size / quality 之类的字段。上游会解析并重组
+   这些 flag，用户没给的补默认值（实测 finalPrompt: `<prompt> --ar 1:1 --v 7 --stylize 100
+   --fast`），用户给了的归一化后合并（`--chaos 10` → `--c 10`）。所以比例、版本、风格化
+   都从结构化 params 拼成 flag，而不是当 API 参数发。
+
+一条排障笔记：提交阶段的 `insert_midjourney_task_failed`（HTTP 400）说的是「上游插不进这个
+任务」，与 prompt 内容无关 —— 2026-08-17 实测同一条 prompt 在渠道空闲时受理、在渠道忙时被拒，
+连不带任何 flag 的最短 prompt 也一样。所以不要据此推断某个参数非法；_friendly_error 里按
+这个语义翻译。
+"""
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
+
+import requests
+
+from character_workflow.lib import keys as _keys
+from character_workflow.lib.callers import video_poll
+
+# 提交受理码：1=成功，21=任务已存在（同 prompt 被兼容层归并），22=排队中。
+_ACCEPTED_CODES = {1, 21, 22}
+
+_TERMINAL_SUCCESS = "SUCCESS"
+_TERMINAL_FAILURE = "FAILURE"
+
+# 上游错误码 → 中文。翻译的价值不在于「变成中文」，而在于把误导性的措辞纠正过来：
+# insert_midjourney_task_failed 字面像参数错，实际是渠道侧接不下任务（见模块 docstring）。
+_UPSTREAM_MESSAGES = {
+    "insert_midjourney_task_failed": (
+        "上游没能接下这个任务：Midjourney 渠道正忙或暂时不可用。这与 prompt 内容和参数无关"
+        "（同一条 prompt 在渠道空闲时可以受理），稍后重试即可；反复失败就去供应商控制台"
+        "看该分组的渠道状态。"
+    ),
+    "prompt_is_required": "Midjourney 需要非空 prompt",
+    "task_no_found": "上游查不到这个任务（任务 ID 可能已过期）",
+}
+
+
+class MidjourneyError(RuntimeError):
+    pass
+
+
+def _api_root(key) -> str:
+    """MJ 通道挂在站点根（/mj/...），而 key 的 base_url 可能带 OpenAI 兼容后缀（/v1），
+    所以只取 scheme://host。与 kling_video._api_root 同构。"""
+    raw = str(getattr(key, "base_url", None) or "")
+    parts = urlsplit(raw)
+    if not parts.scheme or not parts.netloc:
+        raise MidjourneyError(f"无效的 base_url: {raw!r}")
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def _json(resp) -> dict[str, Any]:
+    try:
+        payload = resp.json()
+    except Exception as e:  # noqa: BLE001
+        raise MidjourneyError(f"上游响应非 JSON: {getattr(resp, 'text', '')[:300]}") from e
+    return payload if isinstance(payload, dict) else {}
+
+
+def _err(payload: dict[str, Any], status_code: int) -> str:
+    raw = str(
+        payload.get("description")
+        or payload.get("failReason")
+        or payload.get("message")
+        or f"Midjourney 上游 HTTP {status_code}"
+    ).strip()
+    return _UPSTREAM_MESSAGES.get(raw, raw)
+
+
+# 结构化参数 → flag 名 → 取值类型。MJ 的 body 没有 size / quality 字段，一切控制都在
+# prompt 尾部的 flag 里；上游会把它们归一化后与自己的默认值合并（实测 --chaos 10 → --c 10）。
+# 比例复用通用 ratio 字段（值形如 "16:9"），不另立 mj_ar —— 同一个语义不开两个字段。
+# niji 走 botType 而不是 --niji flag：botType 是 body 的一等字段，语义更明确。
+_FLAG_SPECS: tuple[tuple[str, str, Any], ...] = (
+    ("ratio", "ar", str),
+    ("mj_version", "v", str),
+    ("mj_stylize", "stylize", int),
+    ("mj_chaos", "chaos", int),
+    ("mj_weird", "weird", int),
+    ("mj_seed", "seed", int),
+    ("mj_no", "no", str),
+    ("mj_iw", "iw", float),
+)
+
+
+def _append_flags(prompt: str, params: dict[str, Any]) -> str:
+    """把结构化 MJ 参数拼成 flag 追加到 prompt 尾部。
+
+    在 caller 拼而不在前端拼：job.prompt 保持画师原文，换到别的模型时不残留 MJ flag。
+    """
+    parts = [prompt.strip()]
+    for key, flag, cast in _FLAG_SPECS:
+        value = params.get(key)
+        if value is None or value == "":
+            continue
+        parts.append(f"--{flag} {cast(value)}")
+    if params.get("mj_tile"):
+        parts.append("--tile")  # 无值开关
+    return " ".join(parts)
+
+
+def _submit_body(prompt: str, params: dict[str, Any]) -> dict[str, Any]:
+    """只发拿到值的字段。
+
+    botType / accountFilter 在本渠道尚无实测结论，所以默认不发 —— 不传等于走上游默认
+    预设（实测可用），凭猜发反而可能整条链路 400。前端确认可用后再从 params 传进来。
+    """
+    body: dict[str, Any] = {"prompt": prompt}
+    bot_type = str(params.get("bot_type") or "").strip().upper()
+    if bot_type:
+        body["botType"] = bot_type
+    mode = str(params.get("mode") or "").strip().upper()
+    if mode:
+        body["accountFilter"] = {"modes": [mode]}
+    refs = [str(r) for r in (params.get("reference_images") or []) if r]
+    if refs:
+        body["base64Array"] = [_ref_payload(r) for r in refs]
+    return body
+
+
+def _ref_payload(path_or_url: str) -> str:
+    """垫图字段收 base64 数组。公网直链按上游文档的建议留在 prompt 里，不进 base64Array。"""
+    import base64
+    import mimetypes
+
+    s = str(path_or_url).strip()
+    if s.startswith("data:"):
+        return s
+    try:
+        raw = Path(s).read_bytes()
+    except OSError as e:
+        raise MidjourneyError(f"读取垫图失败: {s}: {e}") from e
+    mime = mimetypes.guess_type(s)[0] or "image/png"
+    return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
+
+
+def _publish_actual_n(params_in: dict[str, Any] | None, wanted: int, actual: int) -> None:
+    """把「上游一次出 4 张」回写进 job 的 params。
+
+    job_runner 按 params.n 裁产物：skill 侧默认 n=1，不回写就会丢掉 3 张已经计费的图。
+    同时留一条 warning —— 后端改写必须有回传通道，否则画师看到的张数与实际不符也无从得知。
+    """
+    if params_in is None or actual == wanted:
+        return
+    params_in["n"] = actual
+    warnings = params_in.setdefault("warnings", [])
+    if isinstance(warnings, list):
+        warnings.append(f"Midjourney 一次出 {actual} 张方案（请求 {wanted} 张），已全部保留")
+
+
+def _extract_task_id(payload: dict[str, Any]) -> str:
+    # spec 把 result 标成 integer，实际返回字符串数字（1786973745670123），统一按 str 用。
+    v = payload.get("result")
+    return str(v).strip() if v not in (None, "") else ""
+
+
+def _image_urls(payload: dict[str, Any]) -> list[str]:
+    """只取 imageUrls[].url 的 4 张单图；imageUrl（四宫格拼图）与它们内容重复，不落盘。"""
+    urls: list[str] = []
+    for item in payload.get("imageUrls") or []:
+        url = item.get("url") if isinstance(item, dict) else item
+        if isinstance(url, str) and url.startswith("http"):
+            urls.append(url)
+    if urls:
+        return urls
+    # 兜底：某些动作（upscale 等）只回单图，没有 imageUrls 数组。
+    single = payload.get("imageUrl")
+    return [single] if isinstance(single, str) and single.startswith("http") else []
+
+
+def _download_png(url: str, output_dir: Path, index: int, *, task_ref: str = "") -> str:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        resp = requests.get(url, timeout=300)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        # 任务已跑完并计费，只是产物没拉下来 —— 带上 task_id 和源地址供人工找回。
+        raise MidjourneyError(
+            video_poll.with_task_ref(f"下载 Midjourney 产物失败（源地址 {url}）: {e}", task_ref)
+        ) from e
+    path = output_dir / f"mj{index}.png"
+    path.write_bytes(resp.content)
+    return str(path)
+
+
+def _poll_task(
+    *, root: str, headers: dict[str, str], task_id: str,
+    max_polls: int, poll_interval: float,
+) -> list[str]:
+    """轮询到终态，返回产物地址列表。
+
+    网络抖动 / 5xx 交给 video_poll 吞掉重试（不扣 max_polls）；这里只解读 body 里的 status。
+    此处所有失败路径都对应一个已提交、已计费的任务，报错一律带 task_id。
+    """
+    url = f"{root}/mj/task/{task_id}/fetch"
+    for resp in video_poll.poll_responses(
+        url=url, headers=headers, timeout=60, max_polls=max_polls,
+        poll_interval=poll_interval, task_ref=task_id, error_cls=MidjourneyError,
+    ):
+        payload = _json(resp)
+        if not resp.ok:
+            raise MidjourneyError(
+                video_poll.with_task_ref(_err(payload, resp.status_code), task_id)
+            )
+        status = str(payload.get("status") or "").strip().upper()
+        if status == _TERMINAL_SUCCESS:
+            urls = _image_urls(payload)
+            if urls:
+                return urls
+            raise MidjourneyError(
+                video_poll.with_task_ref("Midjourney 任务成功但未返回图片地址", task_id)
+            )
+        if status == _TERMINAL_FAILURE:
+            raise MidjourneyError(
+                video_poll.with_task_ref(_err(payload, resp.status_code), task_id)
+            )
+    raise MidjourneyError(f"Midjourney 任务轮询超时: {task_id}")
+
+
+def render(
+    *,
+    prompt: str,
+    model: str,
+    alias: str | None,
+    output_dir: Path | str,
+    n: int = 4,
+    params: dict[str, Any] | None = None,
+    max_polls: int = 120,
+    poll_interval: float = 3.0,
+    on_phase: Callable[[str], None] | None = None,
+    **_kwargs,
+) -> list[str]:
+    """提交 imagine 任务并轮询取图，返回本地 .png 路径 list[str]。
+
+    n 是**要几张图**，不是提交几次：一次 imagine 回 4 张，所以按 ceil(n/4) 次提交，
+    多出来的图照常落盘交给 job_runner 按 params.n 裁（少提交一次比少拿几张更省钱）。
+    on_phase: 进度卡点回调 —— 全部提交成功后 "sent"、开始下载产物时 "downloading"。
+    """
+    # 保留外部原 dict 的引用：job_runner 把它存回 job 文件，实际张数要能回写过去。
+    params_in = params if isinstance(params, dict) else None
+    params = dict(params or {})
+    if not (prompt or "").strip():
+        raise MidjourneyError("Midjourney 需要非空 prompt")
+    key = _keys.find_by_alias(alias) if alias else None
+    if key is None:
+        raise MidjourneyError(f"未找到 Key: {alias}")
+    root = _api_root(key)
+    headers = {"Authorization": f"Bearer {key.access_key}", "Content-Type": "application/json"}
+    body = _submit_body(_append_flags(prompt, params), params)
+
+    wanted = max(1, int(n or 1))
+    submissions = -(-wanted // 4)  # ceil：一次 imagine 出 4 张
+
+    task_ids: list[str] = []
+    for _ in range(submissions):
+        resp = requests.post(f"{root}/mj/submit/imagine", headers=headers, json=body, timeout=120)
+        payload = _json(resp)
+        code = payload.get("code")
+        if not resp.ok or code not in _ACCEPTED_CODES:
+            raise MidjourneyError(_err(payload, resp.status_code))
+        task_id = _extract_task_id(payload)
+        if not task_id:
+            raise MidjourneyError(f"Midjourney 提交后未返回任务 ID: {payload!r}")
+        task_ids.append(task_id)
+    if on_phase:
+        on_phase("sent")
+
+    out_dir = Path(output_dir)
+    paths: list[str] = []
+    downloading = False
+    for task_id in task_ids:
+        for url in _poll_task(
+            root=root, headers=headers, task_id=task_id,
+            max_polls=max_polls, poll_interval=poll_interval,
+        ):
+            if on_phase and not downloading:
+                downloading = True
+                on_phase("downloading")
+            paths.append(_download_png(url, out_dir, len(paths) + 1, task_ref=task_id))
+    _publish_actual_n(params_in, wanted, len(paths))
+    return paths
