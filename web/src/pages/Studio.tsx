@@ -176,34 +176,41 @@ function StudioFull() {
 
   // 图卡左下角「编辑」→ 把这张生成结果取回成 File，追加进输入框参考图继续图生图。
   // 追加而非替换：用户可能连点几张凑一组参考；超上限由 PromptInput 的数量不变式裁掉并提示。
+  // 成功后钉住展开输入壳：从深链/滚动上来时壳是收起的，不展开的话 chip 落进收起条里看不见，
+  // 用户以为没导入成功。失败（老 job 输出文件已不在等）给提示，不再静默。
+  const [editRefError, setEditRefError] = useState<string | null>(null);
   const handleEditAsReference = useCallback(async (path: string) => {
-    const file = await fetchAssetAsFile(path, path.split('/').pop()?.replace(/\.[^.]+$/, '') || 'edit-ref');
-    setReferenceImages((prev) => [...prev, file]);
+    try {
+      const file = await fetchAssetAsFile(path, path.split('/').pop()?.replace(/\.[^.]+$/, '') || 'edit-ref');
+      setReferenceImages((prev) => [...prev, file]);
+      setEditRefError(null);
+      setClickPinned(true);
+    } catch {
+      setEditRefError('参考图导入失败：这张图的源文件取不到（可能已被移动或删除）');
+      setTimeout(() => setEditRefError(null), 5000);
+    }
   }, []);
 
-  // 首页作品深链（/studio?job=<id>）：目标轮出现在历史里后滚动定位 + 短暂高亮，一次性消费。
+  // 首页作品深链（/studio?job=<id>）：目标轮出现在历史里后滚动定位（居中），一次性消费。
   const search = useSearch();
   const targetJobId = useMemo(() => new URLSearchParams(search).get('job'), [search]);
-  const [focusJobId, setFocusJobId] = useState<string | null>(null);
   const focusConsumedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!targetJobId || focusConsumedRef.current === targetJobId) return;
     const found = rounds.some((r) => r.jobId === targetJobId);
     if (!found) return;
     focusConsumedRef.current = targetJobId;
-    setFocusJobId(targetJobId);
     const scrollToRound = () => {
       document
         .querySelector(`[data-round-job="${CSS.escape(targetJobId)}"]`)
         ?.scrollIntoView({ block: 'center' });
     };
     // 图片异步加载会把布局往下推，定位后再补两次纠偏。
-    scrollToRound();
     // 不返回 cleanup：deps 里的 rounds 随 SSE/轮询频繁变化，effect 重跑会把上一轮的
-    // 一次性定时器掐掉，高亮永远清不掉。定时器是幂等一次性动作，放着跑完即可。
+    // 一次性定时器掐掉。定时器是幂等一次性动作，放着跑完即可。
+    scrollToRound();
     setTimeout(scrollToRound, 600);
     setTimeout(scrollToRound, 1600);
-    setTimeout(() => setFocusJobId(null), 3200);
   }, [rounds, targetJobId]);
 
   const refreshPersistedJobs = useCallback(async () => {
@@ -590,13 +597,21 @@ function StudioFull() {
           onDeleteBatch={deleteDoneBatch}
           onReuseReferences={handleReuseReferences}
           onEditAsReference={handleEditAsReference}
-          focusJobId={focusJobId}
         />
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
           pointer-events-auto。 */}
       <div className="pointer-events-none absolute inset-x-0 bottom-4 px-3 sm:px-6">
         <div className="relative mx-auto max-w-[780px]">
+          {/* 图卡编辑导入失败提示：贴输入壳顶浮现，5s 自动消失。 */}
+          {editRefError && (
+            <p
+              role="alert"
+              className="pointer-events-none absolute bottom-full left-0 mb-3 rounded-full border border-destructive/30 bg-scrim px-3 py-1.5 text-xs text-destructive backdrop-blur-glass"
+            >
+              {editRefError}
+            </p>
+          )}
           {/* 回到底部：常驻挂载才有进出动画。锚定 bottom-full 让它跟着壳顶升降——
               壳展开时被顶着上移、同时向右上平移渐隐；收起时反向浮现。 */}
           <button
