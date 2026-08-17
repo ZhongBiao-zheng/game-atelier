@@ -147,6 +147,7 @@ def test_stale_propagation_discipline_in_skills():
 
 def test_seven_field_closing_block_in_all_workflow_skills():
     for path in (
+        "skills/game-atelier/SKILL.md",
         "skills/ui/SKILL.md",
         "skills/ui-anchor/SKILL.md",
         "skills/ui-page/SKILL.md",

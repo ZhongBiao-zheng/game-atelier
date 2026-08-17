@@ -55,14 +55,27 @@ claude --plugin-dir .
 
 | 命令 | 用途 |
 |---|---|
+| `/game-atelier:game-atelier` | **工坊总控**：诊断当前进度 + 路由到下面的技能。不确定下一步做什么就用它 |
 | `/game-atelier:viewer-server` | 启动本地 Web UI，查看角色画廊 |
 | `/game-atelier:character <角色名>` | 创建或继续某个角色的工作流 |
 | `/game-atelier:promo` | 给当前角色出宣传图（海报 / KV） |
 | `/game-atelier:turnaround` | 给当前角色出三视图 |
+| `/game-atelier:ui` | UI 设计总控：策划锚 → 视觉规范 → 页面 → 风格定稿 → 延展 |
+| `/game-atelier:ui-anchor` | 写策划三锚文档（gdd / prd / interaction） |
+| `/game-atelier:ui-page` | 生成 UI 单页 / 出风格候选 |
+| `/game-atelier:ui-screens` | 审计玩家旅程，产出页面清单（screen-map） |
 
 ---
 
 ## 典型工作循环
+
+不确定从哪开始：
+
+```
+/game-atelier:game-atelier   → 诊断进度，给一句「建议下一步」+ 可直接复制的话
+```
+
+已经知道要做什么：
 
 ```
 1. /game-atelier:viewer-server     → 打开 Web 画廊
