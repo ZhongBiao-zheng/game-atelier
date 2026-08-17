@@ -70,7 +70,6 @@ export function RoundList({
   onDeleteBatch,
   onReuseReferences,
   onEditAsReference,
-  focusJobId,
 }: {
   rounds: RoundState[];
   favorites?: string[];
@@ -83,8 +82,6 @@ export function RoundList({
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
   onReuseReferences?: (paths: string[]) => void | Promise<void>;
   onEditAsReference?: (path: string) => void | Promise<void>;
-  /** 首页作品深链定位的目标轮：滚动到位后短暂高亮该轮。 */
-  focusJobId?: string | null;
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   if (rounds.length === 0) return null;
@@ -99,14 +96,9 @@ export function RoundList({
             r.kind === 'pending' && r.jobId ? `pending-${r.jobId}` :
             r.kind === 'pending' ? `pending-${r.startedAt}` :
             `${r.kind}-${r.submittedAt}`;
-          const jobId = r.jobId ?? null;
-          const focused = Boolean(jobId && focusJobId && jobId === focusJobId);
           return (
-            <div
-              key={stableKey}
-              data-round-job={jobId ?? undefined}
-              className={focused ? 'rounded-xl ring-2 ring-primary/60 p-2 -m-2 transition-all duration-500' : undefined}
-            >
+            // data-round-job：首页作品深链（/studio?job=）滚动定位的锚点。
+            <div key={stableKey} data-round-job={r.jobId ?? undefined}>
               {r.kind === 'pending' && (
                 <div className="mb-3">
                   <WaitingCopy startedAt={r.startedAt} />

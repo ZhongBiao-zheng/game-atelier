@@ -153,7 +153,7 @@ describe('RoundList 图卡编辑（导入为参考图）', () => {
   });
 });
 
-describe('RoundList 深链定位高亮', () => {
+describe('RoundList 深链定位锚点', () => {
   const imageDone: RoundState = {
     kind: 'done',
     jobId: 'job-focus-1',
@@ -162,15 +162,8 @@ describe('RoundList 深链定位高亮', () => {
     config: { prompt: '定位这轮', model: 'gpt-image-2', kind: 'image', referenceImages: [] },
   };
 
-  it('每轮带 data-round-job 锚点；focusJobId 命中的轮渲染高亮环', () => {
-    const { container } = render(<RoundList rounds={[imageDone]} focusJobId="job-focus-1" />);
-    const anchor = container.querySelector('[data-round-job="job-focus-1"]');
-    expect(anchor).not.toBeNull();
-    expect(anchor!.className).toContain('ring-primary');
-  });
-
-  it('focusJobId 不命中时无高亮环', () => {
-    const { container } = render(<RoundList rounds={[imageDone]} focusJobId="job-other" />);
+  it('每轮带 data-round-job 锚点，且不渲染高亮环（高亮会推移布局，已砍）', () => {
+    const { container } = render(<RoundList rounds={[imageDone]} />);
     const anchor = container.querySelector('[data-round-job="job-focus-1"]');
     expect(anchor).not.toBeNull();
     expect(anchor!.className ?? '').not.toContain('ring-primary');

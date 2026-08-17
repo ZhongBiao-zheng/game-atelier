@@ -1632,7 +1632,7 @@ describe('Studio compact mode errors', () => {
 });
 
 describe('Studio 首页深链定位（?job=）', () => {
-  it('目标轮加载后 scrollIntoView 定位并高亮该轮', async () => {
+  it('目标轮加载后 scrollIntoView 定位（无高亮环，避免推移布局）', async () => {
     mockCompletedBatchAndKeys();
     // jsdom 不实现 scrollIntoView，补个 spy 断言定位动作真的发生。
     const scrollSpy = vi.fn();
@@ -1647,10 +1647,10 @@ describe('Studio 首页深链定位（?job=）', () => {
       expect(container.querySelector('[data-round-job="job-studio-1"]')).not.toBeNull();
     });
     await waitFor(() => expect(scrollSpy).toHaveBeenCalled());
-    expect(container.querySelector('[data-round-job="job-studio-1"]')!.className).toContain('ring-primary');
+    expect(container.querySelector('[data-round-job="job-studio-1"]')!.className).not.toContain('ring-primary');
   });
 
-  it('无 ?job= 参数时不定位不高亮', async () => {
+  it('无 ?job= 参数时不定位', async () => {
     mockCompletedBatchAndKeys();
     const scrollSpy = vi.fn();
     (Element.prototype as any).scrollIntoView = scrollSpy;
@@ -1659,6 +1659,52 @@ describe('Studio 首页深链定位（?job=）', () => {
       expect(container.querySelector('[data-round-job="job-studio-1"]')).not.toBeNull();
     });
     expect(scrollSpy).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-round-job="job-studio-1"]')!.className).not.toContain('ring-primary');
+  });
+});
+
+describe('Studio 图卡编辑导入参考图', () => {
+  it('点编辑取图成功：参考图追加进输入框（缩略图出现）', async () => {
+    const inner = mockCompletedBatchAndKeys();
+    // 编辑取图走 /api/gallery/image → blob；其余请求回落通用 mock
+    const fetchMock = vi.fn(((url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).startsWith('/api/gallery/image')) {
+        return Promise.resolve({
+          ok: true,
+          blob: async () => new Blob(['fake-png'], { type: 'image/png' }),
+        } as any);
+      }
+      return (inner as any)(url, init);
+    }) as any);
+    globalThis.fetch = fetchMock as any;
+    (globalThis.URL as any).createObjectURL ??= vi.fn(() => 'blob:test');
+    (globalThis.URL as any).revokeObjectURL ??= vi.fn();
+
+    renderStudio();
+    const editBtns = await screen.findAllByTitle('编辑（导入为参考图）');
+    fireEvent.click(editBtns[0]);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/gallery/image?path='),
+      );
+    });
+    // 追加成功且无失败提示
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+  });
+
+  it('取图失败（源文件不在）：浮出失败提示而非静默', async () => {
+    const inner = mockCompletedBatchAndKeys();
+    const fetchMock = vi.fn(((url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).startsWith('/api/gallery/image')) {
+        return Promise.resolve({ ok: false, status: 403 } as any);
+      }
+      return (inner as any)(url, init);
+    }) as any);
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+    const editBtns = await screen.findAllByTitle('编辑（导入为参考图）');
+    fireEvent.click(editBtns[0]);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('参考图导入失败');
   });
 });
