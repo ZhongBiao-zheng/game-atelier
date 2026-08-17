@@ -173,8 +173,10 @@ function galleryItemAriaLabel(item: GalleryItem): string {
 }
 
 function galleryItemHref(item: GalleryItem): string {
-  // Studio 出图无角色归属：点击进出图页（历史列表里能找到该轮）。
-  if (isStudioItem(item)) return '/studio';
+  // Studio 出图无角色归属：带 job_id 深链进出图页，历史列表滚动定位到该轮并高亮。
+  if (isStudioItem(item)) {
+    return item.job_id ? `/studio?job=${encodeURIComponent(item.job_id)}` : '/studio';
+  }
   if (!item.job_id) {
     return `/character/${item.character_id}/${item.asset_slot}`;
   }

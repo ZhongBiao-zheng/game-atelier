@@ -1,6 +1,6 @@
 import { type ButtonHTMLAttributes, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Download, Eye, EyeOff, Film, Heart, Info, Music, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Trash2, X } from 'lucide-react';
 
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
 import { useVideoFrame } from '@/lib/videoFrame';
@@ -69,6 +69,8 @@ export function RoundList({
   onRegenerate,
   onDeleteBatch,
   onReuseReferences,
+  onEditAsReference,
+  focusJobId,
 }: {
   rounds: RoundState[];
   favorites?: string[];
@@ -80,6 +82,9 @@ export function RoundList({
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
   onReuseReferences?: (paths: string[]) => void | Promise<void>;
+  onEditAsReference?: (path: string) => void | Promise<void>;
+  /** 首页作品深链定位的目标轮：滚动到位后短暂高亮该轮。 */
+  focusJobId?: string | null;
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   if (rounds.length === 0) return null;
@@ -94,8 +99,14 @@ export function RoundList({
             r.kind === 'pending' && r.jobId ? `pending-${r.jobId}` :
             r.kind === 'pending' ? `pending-${r.startedAt}` :
             `${r.kind}-${r.submittedAt}`;
+          const jobId = r.jobId ?? null;
+          const focused = Boolean(jobId && focusJobId && jobId === focusJobId);
           return (
-            <div key={stableKey}>
+            <div
+              key={stableKey}
+              data-round-job={jobId ?? undefined}
+              className={focused ? 'rounded-xl ring-2 ring-primary/60 p-2 -m-2 transition-all duration-500' : undefined}
+            >
               {r.kind === 'pending' && (
                 <div className="mb-3">
                   <WaitingCopy startedAt={r.startedAt} />
@@ -147,6 +158,7 @@ export function RoundList({
                   onDeleteBatch={onDeleteBatch}
                   onLightbox={setLightboxSrc}
                   onReuseReferences={onReuseReferences}
+                  onEditAsReference={onEditAsReference}
                 />
               )}
               {r.kind === 'failed' && (
@@ -446,6 +458,7 @@ function DoneBatch({
   onDeleteBatch,
   onLightbox,
   onReuseReferences,
+  onEditAsReference,
 }: {
   round: Extract<RoundState, { kind: 'done' }>;
   favorites?: string[];
@@ -457,6 +470,7 @@ function DoneBatch({
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
   onLightbox?: (src: string) => void;
   onReuseReferences?: (paths: string[]) => void | Promise<void>;
+  onEditAsReference?: (path: string) => void | Promise<void>;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
@@ -599,6 +613,18 @@ function DoneBatch({
                       <Download className="size-4" aria-hidden />
                     </a>
                   </div>
+                  {/* 左下角编辑：把这张图导入下方输入框作参考图，继续图生图微调。 */}
+                  {onEditAsReference && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); void onEditAsReference(path); }}
+                      aria-label={`编辑生成结果 ${index + 1}（导入为参考图）`}
+                      title="编辑（导入为参考图）"
+                      className="absolute bottom-2 left-2 grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    >
+                      <Pencil className="size-4" aria-hidden />
+                    </button>
+                  )}
                 </figure>
               );
             })}

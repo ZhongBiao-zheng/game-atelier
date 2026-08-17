@@ -1630,3 +1630,35 @@ describe('Studio compact mode errors', () => {
     expect(alert).toHaveTextContent('500');
   });
 });
+
+describe('Studio 首页深链定位（?job=）', () => {
+  it('目标轮加载后 scrollIntoView 定位并高亮该轮', async () => {
+    mockCompletedBatchAndKeys();
+    // jsdom 不实现 scrollIntoView，补个 spy 断言定位动作真的发生。
+    const scrollSpy = vi.fn();
+    (Element.prototype as any).scrollIntoView = scrollSpy;
+    const { hook, searchHook } = memoryLocation({ path: '/studio?job=job-studio-1', static: true });
+    const { container } = render(
+      <Router hook={hook} searchHook={searchHook}>
+        <Studio />
+      </Router>,
+    );
+    await waitFor(() => {
+      expect(container.querySelector('[data-round-job="job-studio-1"]')).not.toBeNull();
+    });
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalled());
+    expect(container.querySelector('[data-round-job="job-studio-1"]')!.className).toContain('ring-primary');
+  });
+
+  it('无 ?job= 参数时不定位不高亮', async () => {
+    mockCompletedBatchAndKeys();
+    const scrollSpy = vi.fn();
+    (Element.prototype as any).scrollIntoView = scrollSpy;
+    const { container } = renderStudio();
+    await waitFor(() => {
+      expect(container.querySelector('[data-round-job="job-studio-1"]')).not.toBeNull();
+    });
+    expect(scrollSpy).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-round-job="job-studio-1"]')!.className).not.toContain('ring-primary');
+  });
+});

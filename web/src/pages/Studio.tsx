@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearch } from 'wouter';
 import { ChevronsDown } from 'lucide-react';
 
 import { createStudioJob, getStudioJob, listStudioJobs, uploadReferenceImage } from '@/api/studio';
@@ -163,14 +164,7 @@ function StudioFull() {
   // 点击历史记录里的参考图 → 把这批参考图（服务器路径）拉回成 File[]，整组塞进输入框复用出图。
   const handleReuseReferences = useCallback(async (paths: string[]) => {
     const files = await Promise.all(
-      paths.map(async (path, i) => {
-        const url = path.startsWith('http') ? path : `/api/raw?path=${encodeURIComponent(path)}`;
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`load reference failed: ${resp.status}`);
-        const blob = await resp.blob();
-        const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
-        return new File([blob], `ref-${i + 1}.${ext}`, { type: blob.type || 'image/png' });
-      }),
+      paths.map((path, i) => fetchAssetAsFile(path, `ref-${i + 1}`)),
     );
     // 堆叠里混着三类素材：按 MIME 分流回填，视频/音频塞进图片参考会在提交时走错角色。
     // 超出当前模型族参考图上限的部分由 PromptInput 的「参考图数量不变式」effect 当场裁掉并提示
@@ -179,6 +173,38 @@ function StudioFull() {
     setReferenceVideos(files.filter((f) => f.type.startsWith('video/')));
     setReferenceAudios(files.filter((f) => f.type.startsWith('audio/')));
   }, []);
+
+  // 图卡左下角「编辑」→ 把这张生成结果取回成 File，追加进输入框参考图继续图生图。
+  // 追加而非替换：用户可能连点几张凑一组参考；超上限由 PromptInput 的数量不变式裁掉并提示。
+  const handleEditAsReference = useCallback(async (path: string) => {
+    const file = await fetchAssetAsFile(path, path.split('/').pop()?.replace(/\.[^.]+$/, '') || 'edit-ref');
+    setReferenceImages((prev) => [...prev, file]);
+  }, []);
+
+  // 首页作品深链（/studio?job=<id>）：目标轮出现在历史里后滚动定位 + 短暂高亮，一次性消费。
+  const search = useSearch();
+  const targetJobId = useMemo(() => new URLSearchParams(search).get('job'), [search]);
+  const [focusJobId, setFocusJobId] = useState<string | null>(null);
+  const focusConsumedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!targetJobId || focusConsumedRef.current === targetJobId) return;
+    const found = rounds.some((r) => r.jobId === targetJobId);
+    if (!found) return;
+    focusConsumedRef.current = targetJobId;
+    setFocusJobId(targetJobId);
+    const scrollToRound = () => {
+      document
+        .querySelector(`[data-round-job="${CSS.escape(targetJobId)}"]`)
+        ?.scrollIntoView({ block: 'center' });
+    };
+    // 图片异步加载会把布局往下推，定位后再补两次纠偏。
+    scrollToRound();
+    // 不返回 cleanup：deps 里的 rounds 随 SSE/轮询频繁变化，effect 重跑会把上一轮的
+    // 一次性定时器掐掉，高亮永远清不掉。定时器是幂等一次性动作，放着跑完即可。
+    setTimeout(scrollToRound, 600);
+    setTimeout(scrollToRound, 1600);
+    setTimeout(() => setFocusJobId(null), 3200);
+  }, [rounds, targetJobId]);
 
   const refreshPersistedJobs = useCallback(async () => {
     const jobs = await listStudioJobs();
@@ -563,6 +589,8 @@ function StudioFull() {
           onRegenerate={regenerate}
           onDeleteBatch={deleteDoneBatch}
           onReuseReferences={handleReuseReferences}
+          onEditAsReference={handleEditAsReference}
+          focusJobId={focusJobId}
         />
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
@@ -703,6 +731,22 @@ function StudioFull() {
     if (responses.some((resp) => !resp.ok)) return;
     setRounds((items) => items.filter((item) => item.kind !== 'done' || item.jobId !== jobId));
   }
+}
+
+// 服务器资产路径 → File。三类来源分流字节端点（与 RoundList 的 refImageSrc 同规则）：
+// http(s) 直链原样取；characters/studio 资产走 /api/gallery/image（/api/raw 不带 job_id
+// 只放行 .runtime/uploads/，角色/出图产物会 403）；其余临时上传走 /api/raw。
+async function fetchAssetAsFile(path: string, baseName: string): Promise<File> {
+  const url = path.startsWith('http')
+    ? path
+    : /\/(characters|studio)\//.test(path) || /^(characters|studio)\//.test(path)
+      ? `/api/gallery/image?path=${encodeURIComponent(path)}`
+      : `/api/raw?path=${encodeURIComponent(path)}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`load reference failed: ${resp.status}`);
+  const blob = await resp.blob();
+  const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+  return new File([blob], `${baseName}.${ext}`, { type: blob.type || 'image/png' });
 }
 
 function referenceImagesFor(job: Job): string[] {
