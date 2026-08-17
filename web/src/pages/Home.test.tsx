@@ -181,7 +181,7 @@ describe('Home', () => {
       expect(container.querySelector('img')).toBeInTheDocument();
     });
     const link = screen.getByRole('link', { name: '查看出图页' });
-    expect(link.getAttribute('href')).toBe('/studio');
+    expect(link.getAttribute('href')).toBe('/studio?job=job-x');
   });
 
   it('documents the gallery source as recent character asset files', async () => {

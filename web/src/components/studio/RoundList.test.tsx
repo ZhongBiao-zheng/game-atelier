@@ -126,6 +126,57 @@ describe('RoundList 单图隐藏', () => {
   });
 });
 
+describe('RoundList 图卡编辑（导入为参考图）', () => {
+  const imageDone: RoundState = {
+    kind: 'done',
+    jobId: 'job-edit-1',
+    submittedAt: new Date().toISOString(),
+    imagePaths: ['/data/studio/job-edit-1/v1.png', '/data/studio/job-edit-1/v2.png'],
+    config: { prompt: '两张图', model: 'gpt-image-2', kind: 'image', referenceImages: [] },
+  };
+
+  it('传了 onEditAsReference 时每张图渲染编辑按钮，点击回传该图 path', () => {
+    const onEditAsReference = vi.fn();
+    render(<RoundList rounds={[imageDone]} onEditAsReference={onEditAsReference} />);
+    const buttons = screen.getAllByTitle('编辑（导入为参考图）');
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[1]);
+    expect(onEditAsReference).toHaveBeenCalledWith('/data/studio/job-edit-1/v2.png');
+  });
+
+  it('不传 onEditAsReference 时不渲染编辑按钮（视频卡也没有）', () => {
+    render(<RoundList rounds={[imageDone, videoDone]} onEditAsReference={undefined} />);
+    expect(screen.queryByTitle('编辑（导入为参考图）')).toBeNull();
+    cleanup();
+    render(<RoundList rounds={[videoDone]} onEditAsReference={vi.fn()} />);
+    expect(screen.queryByTitle('编辑（导入为参考图）')).toBeNull();
+  });
+});
+
+describe('RoundList 深链定位高亮', () => {
+  const imageDone: RoundState = {
+    kind: 'done',
+    jobId: 'job-focus-1',
+    submittedAt: new Date().toISOString(),
+    imagePaths: ['/data/studio/job-focus-1/v1.png'],
+    config: { prompt: '定位这轮', model: 'gpt-image-2', kind: 'image', referenceImages: [] },
+  };
+
+  it('每轮带 data-round-job 锚点；focusJobId 命中的轮渲染高亮环', () => {
+    const { container } = render(<RoundList rounds={[imageDone]} focusJobId="job-focus-1" />);
+    const anchor = container.querySelector('[data-round-job="job-focus-1"]');
+    expect(anchor).not.toBeNull();
+    expect(anchor!.className).toContain('ring-primary');
+  });
+
+  it('focusJobId 不命中时无高亮环', () => {
+    const { container } = render(<RoundList rounds={[imageDone]} focusJobId="job-other" />);
+    const anchor = container.querySelector('[data-round-job="job-focus-1"]');
+    expect(anchor).not.toBeNull();
+    expect(anchor!.className ?? '').not.toContain('ring-primary');
+  });
+});
+
 describe('RoundList progress badge', () => {
   function pendingRound(over: Record<string, unknown>): RoundState {
     return {
