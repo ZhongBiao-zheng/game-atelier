@@ -90,10 +90,9 @@ def _err(payload: dict[str, Any], status_code: int) -> str:
 # 结构化参数 → flag 名 → 取值类型。MJ 的 body 没有 size / quality 字段，一切控制都在
 # prompt 尾部的 flag 里；上游会把它们归一化后与自己的默认值合并（实测 --chaos 10 → --c 10）。
 # 比例复用通用 ratio 字段（值形如 "16:9"），不另立 mj_ar —— 同一个语义不开两个字段。
-# niji 走 botType 而不是 --niji flag：botType 是 body 的一等字段，语义更明确。
+# 版本不在这张表里：flag 名随 botType 变，见 _version_flag。
 _FLAG_SPECS: tuple[tuple[str, str, Any], ...] = (
     ("ratio", "ar", str),
-    ("mj_version", "v", str),
     ("mj_stylize", "stylize", int),
     ("mj_chaos", "chaos", int),
     ("mj_weird", "weird", int),
@@ -103,12 +102,29 @@ _FLAG_SPECS: tuple[tuple[str, str, Any], ...] = (
 )
 
 
+def _version_flag(params: dict[str, Any]) -> str | None:
+    """版本 flag —— niji 与 Midjourney 是两套体系，flag 名和版本号都不通用。
+
+    Midjourney: `--v 7` / `6.1` / `6`；niji: `--niji 6` / `5`。
+    拿 niji 的版本号去发 `--v`（或反过来）等于发一个不存在的组合，所以 flag 名必须
+    跟着 botType 走，前端的版本档位也按同一判据切换。
+    """
+    version = str(params.get("mj_version") or "").strip()
+    if not version:
+        return None
+    niji = str(params.get("bot_type") or "").strip().upper() == "NIJI_JOURNEY"
+    return f"--niji {version}" if niji else f"--v {version}"
+
+
 def _append_flags(prompt: str, params: dict[str, Any]) -> str:
     """把结构化 MJ 参数拼成 flag 追加到 prompt 尾部。
 
     在 caller 拼而不在前端拼：job.prompt 保持画师原文，换到别的模型时不残留 MJ flag。
     """
     parts = [prompt.strip()]
+    version_flag = _version_flag(params)
+    if version_flag:
+        parts.append(version_flag)
     for key, flag, cast in _FLAG_SPECS:
         value = params.get(key)
         if value is None or value == "":

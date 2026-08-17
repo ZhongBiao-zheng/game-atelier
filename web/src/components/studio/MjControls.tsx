@@ -7,9 +7,10 @@ import {
   MJ_IW_STEPS,
   MJ_MODES,
   MJ_STYLIZE_STEPS,
-  MJ_VERSIONS,
   MJ_WEIRD_STEPS,
   mjSummary,
+  normalizeVersion,
+  versionsFor,
   type MjParams,
 } from '@/lib/mjParams';
 import { ToolbarPopover } from './ToolbarPopover';
@@ -66,7 +67,12 @@ export function MjControls({
                 <SegmentButton
                   key={item.value}
                   selected={value.botType === item.value}
-                  onClick={() => onChange({ botType: item.value })}
+                  // 切模型要一起纠版本：两套体系的版本号不通用（--v 7 vs --niji 6），
+                  // 留着旧值等于发一个不存在的组合。
+                  onClick={() => onChange({
+                    botType: item.value,
+                    version: normalizeVersion(item.value, value.version),
+                  })}
                 >
                   {item.label}
                 </SegmentButton>
@@ -74,11 +80,14 @@ export function MjControls({
             </div>
           </Section>
 
-          <Section title="版本">
+          <Section
+            title="版本"
+            hint={value.botType === 'NIJI_JOURNEY' ? 'niji 自己的版本号，与 Midjourney 不通用' : undefined}
+          >
             <div role="listbox" aria-label="选择版本" className="grid h-9 grid-cols-3 rounded-lg bg-popover p-0.5">
-              {MJ_VERSIONS.map((item) => (
+              {versionsFor(value.botType).map((item) => (
                 <SegmentButton key={item} selected={value.version === item} onClick={() => onChange({ version: item })}>
-                  v{item}
+                  {value.botType === 'NIJI_JOURNEY' ? `niji ${item}` : `v${item}`}
                 </SegmentButton>
               ))}
             </div>

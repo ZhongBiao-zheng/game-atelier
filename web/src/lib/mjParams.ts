@@ -52,7 +52,21 @@ export const MJ_MODES: { value: MjMode; label: string }[] = [
   { value: 'TURBO', label: '极速' },
 ];
 
+// niji 与 Midjourney 是两套版本体系，flag 名和版本号都不通用（--v 7 vs --niji 6）。
+// 后端 mj_image._version_flag 按 bot_type 决定 flag 名，这里按同一判据给档位。
 export const MJ_VERSIONS = ['7', '6.1', '6'];
+export const NIJI_VERSIONS = ['6', '5'];
+
+export function versionsFor(botType: MjBotType): string[] {
+  return botType === 'NIJI_JOURNEY' ? NIJI_VERSIONS : MJ_VERSIONS;
+}
+
+/** 切换模型时把版本纠到新体系里的合法值（原值合法就留着）。 */
+export function normalizeVersion(botType: MjBotType, version: string): string {
+  const allowed = versionsFor(botType);
+  return allowed.includes(version) ? version : allowed[0];
+}
+
 export const MJ_STYLIZE_STEPS = [0, 100, 250, 500, 750, 1000];
 export const MJ_CHAOS_STEPS = [0, 10, 25, 50, 100];
 export const MJ_WEIRD_STEPS = [0, 250, 1000, 3000];
@@ -86,10 +100,12 @@ export function mjParamsFromJob(params: Record<string, unknown> | undefined): Mj
   const p = params ?? {};
   const num = (v: unknown, fallback: number): number =>
     typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+  const botType: MjBotType = p.bot_type === 'NIJI_JOURNEY' ? 'NIJI_JOURNEY' : 'MID_JOURNEY';
   return {
-    botType: p.bot_type === 'NIJI_JOURNEY' ? 'NIJI_JOURNEY' : 'MID_JOURNEY',
+    botType,
     mode: p.mode === 'RELAX' || p.mode === 'TURBO' ? p.mode : 'FAST',
-    version: typeof p.mj_version === 'string' && p.mj_version ? p.mj_version : MJ_DEFAULTS.version,
+    // 版本要按 botType 纠：旧 job 可能存着另一套体系的版本号（如 niji job 存了 7）。
+    version: normalizeVersion(botType, typeof p.mj_version === 'string' ? p.mj_version : ''),
     stylize: num(p.mj_stylize, MJ_DEFAULTS.stylize),
     chaos: num(p.mj_chaos, MJ_DEFAULTS.chaos),
     weird: num(p.mj_weird, MJ_DEFAULTS.weird),

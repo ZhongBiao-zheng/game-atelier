@@ -164,6 +164,26 @@ def test_flags_appended_from_structured_params(mj_key, tmp_path, monkeypatch):
     assert sent.startswith("a knight"), "画师原文必须在前"
 
 
+def test_version_flag_follows_bot_type(mj_key, tmp_path, monkeypatch):
+    """niji 与 Midjourney 是两套版本体系：--v 7 vs --niji 6，flag 名不能混。"""
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+
+    _render(tmp_path, n=4, params={"mj_version": "7"})
+    assert "--v 7" in posted[-1]["body"]["prompt"]
+    assert "--niji" not in posted[-1]["body"]["prompt"]
+
+    _render(tmp_path, n=4, params={"mj_version": "6", "bot_type": "NIJI_JOURNEY"})
+    assert "--niji 6" in posted[-1]["body"]["prompt"]
+    assert "--v 6" not in posted[-1]["body"]["prompt"]
+
+
+def test_no_version_flag_when_unset(mj_key, tmp_path, monkeypatch):
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    _render(tmp_path, n=4, params={"bot_type": "NIJI_JOURNEY"})
+    prompt = posted[0]["body"]["prompt"]
+    assert "--v" not in prompt and "--niji" not in prompt
+
+
 def test_absent_params_send_no_flags(mj_key, tmp_path, monkeypatch):
     posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
     _render(tmp_path, n=4)
