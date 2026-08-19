@@ -17,7 +17,7 @@ describe('mjParamsToJob', () => {
     expect(out).toMatchObject({
       bot_type: 'MID_JOURNEY',
       mode: 'FAST',
-      mj_version: '7',
+      mj_version: '8.2',
       mj_stylize: 100,
       mj_chaos: 0,
       mj_weird: 0,
@@ -61,8 +61,7 @@ describe('mjParamsFromJob', () => {
     const original: MjParams = {
       botType: 'NIJI_JOURNEY',
       mode: 'TURBO',
-      version: '6', // niji 体系的合法版本；填 6.1（MJ 的）会被纠正，那是另一条用例在管
-
+      version: '7', // niji 体系的合法版本；填 MJ 的版本号会被纠正，那是另一条用例在管
       stylize: 750,
       chaos: 25,
       weird: 1000,
@@ -97,33 +96,34 @@ describe('mjParamsFromJob', () => {
 
 describe('版本体系随模型切换', () => {
   it('两套版本档位不通用', () => {
-    expect(versionsFor('MID_JOURNEY')).toEqual(['7', '6.1', '6']);
-    expect(versionsFor('NIJI_JOURNEY')).toEqual(['6', '5']);
+    expect(versionsFor('MID_JOURNEY')).toEqual(['8.2', '8.1', '8']);
+    expect(versionsFor('NIJI_JOURNEY')).toEqual(['7']);
   });
 
   it('切到 niji 时把不合法的版本纠到 niji 的首档', () => {
     // 留着 7 会让后端拼出 `--niji 7` —— 一个不存在的组合。
-    expect(normalizeVersion('NIJI_JOURNEY', '7')).toBe('6');
-    expect(normalizeVersion('NIJI_JOURNEY', '5')).toBe('5');
-    expect(normalizeVersion('MID_JOURNEY', '5')).toBe('7');
-    expect(normalizeVersion('MID_JOURNEY', '6.1')).toBe('6.1');
+    expect(normalizeVersion('NIJI_JOURNEY', '8.2')).toBe('7');
+    expect(normalizeVersion('NIJI_JOURNEY', '7')).toBe('7');
+    expect(normalizeVersion('MID_JOURNEY', '7')).toBe('8.2');
+    expect(normalizeVersion('MID_JOURNEY', '8.1')).toBe('8.1');
   });
 
   it('从 job 还原时也按 botType 纠版本（旧 job 可能存着另一套的版本号）', () => {
-    const restored = mjParamsFromJob({ bot_type: 'NIJI_JOURNEY', mj_version: '7' });
-    expect(restored.version).toBe('6');
+    const restored = mjParamsFromJob({ bot_type: 'NIJI_JOURNEY', mj_version: '8.2' });
+    expect(restored.version).toBe('7');
   });
 });
 
 describe('mjSummary', () => {
   it('默认态只显示模型版本 / 速度档 / 风格化', () => {
-    expect(mjSummary(MJ_DEFAULTS)).toBe('v7 · 快速 · s100');
+    expect(mjSummary(MJ_DEFAULTS)).toBe('v8.2 · 快速 · s100');
   });
 
   it('niji 与非零的 chaos / weird / tile 才出现在摘要里', () => {
     const s = mjSummary({
       ...MJ_DEFAULTS,
       botType: 'NIJI_JOURNEY',
+      version: '7',
       mode: 'RELAX',
       chaos: 10,
       weird: 250,

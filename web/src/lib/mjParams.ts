@@ -29,7 +29,7 @@ export interface MjParams {
 export const MJ_DEFAULTS: MjParams = {
   botType: 'MID_JOURNEY',
   mode: 'FAST',
-  version: '7',
+  version: '8.2',
   stylize: 100,
   chaos: 0,
   weird: 0,
@@ -54,8 +54,8 @@ export const MJ_MODES: { value: MjMode; label: string }[] = [
 
 // niji 与 Midjourney 是两套版本体系，flag 名和版本号都不通用（--v 7 vs --niji 6）。
 // 后端 mj_image._version_flag 按 bot_type 决定 flag 名，这里按同一判据给档位。
-export const MJ_VERSIONS = ['7', '6.1', '6'];
-export const NIJI_VERSIONS = ['6', '5'];
+export const MJ_VERSIONS = ['8.2', '8.1', '8'];
+export const NIJI_VERSIONS = ['7'];
 
 export function versionsFor(botType: MjBotType): string[] {
   return botType === 'NIJI_JOURNEY' ? NIJI_VERSIONS : MJ_VERSIONS;
