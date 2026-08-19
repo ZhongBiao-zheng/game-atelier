@@ -181,22 +181,61 @@ function StudioFull() {
     setReferenceAudios(files.filter((f) => f.type.startsWith('audio/')));
   }, []);
 
-  // 图卡左下角「编辑」→ 把这张生成结果取回成 File，追加进输入框参考图继续图生图。
-  // 追加而非替换：用户可能连点几张凑一组参考；超上限由 PromptInput 的数量不变式裁掉并提示。
-  // 成功后钉住展开输入壳：从深链/滚动上来时壳是收起的，不展开的话 chip 落进收起条里看不见，
-  // 用户以为没导入成功。失败（老 job 输出文件已不在等）给提示，不再静默。
-  const [editRefError, setEditRefError] = useState<string | null>(null);
+  // 图卡左下角「编辑」→ 把这张生成结果取回成 File，塞进「当前模式下真正会被提交的那个槽位」。
+  // 一律塞 referenceImages 是错的：MJ 和视频首尾帧模式下通用参考图栏位是隐藏的，
+  // 图导进去既看不见、提交时也走不到（MJ 只发 mjRefs.image，首尾帧只发 videoFrames）。
+  //   视频 · 全能参考 → 参考素材堆叠（多张）
+  //   视频 · 首尾帧   → 首帧槽（单槽，已有图则替换）
+  //   图片 · MJ       → 垫图「图片」槽（单槽，已有图则替换）
+  //   图片 · 其余     → 常规参考图堆叠（多张；同一张图只留一份）
+  // 一进来就钉住展开输入壳：从深链/滚动上来时壳是收起的，不展开的话图落进收起条里看不见，
+  // 用户以为没导入成功。展开本身就是「重复导入」那条分支的反馈（图已经在槽位上）；
+  // 失败与替换仍出文案提示。
+  const [editRefHint, setEditRefHint] = useState<{ text: string; tone: 'error' | 'info' } | null>(null);
+  const editRefHintTimer = useRef<number | undefined>(undefined);
+  const showEditRefHint = useCallback((text: string, tone: 'error' | 'info') => {
+    setEditRefHint({ text, tone });
+    window.clearTimeout(editRefHintTimer.current);
+    editRefHintTimer.current = window.setTimeout(() => setEditRefHint(null), 5000);
+  }, []);
+  useEffect(() => () => window.clearTimeout(editRefHintTimer.current), []);
+  // 每个导入的 File 记住它的来源路径 —— 去重判据是 File 身份而不是文件名：
+  // 不同 job 的输出常同名（v1.png / v2.png）。删掉后 File 不在数组里，同一张图可以再导。
+  const editRefSource = useRef(new WeakMap<File, string>());
   const handleEditAsReference = useCallback(async (path: string) => {
+    const target: 'stack' | 'frame' | 'mj' = kind === 'video'
+      ? (videoMode === 'omni' ? 'stack' : 'frame')
+      : imageFamily(model) === 'midjourney' ? 'mj' : 'stack';
+    setClickPinned(true);
+    if (target === 'frame' && (videoCaps?.maxFrames ?? 2) < 1) {
+      showEditRefHint('当前视频模型不吃首帧参考图（纯文生视频）', 'info');
+      return;
+    }
+    const sourceOf = (f: File | null) => (f ? editRefSource.current.get(f) : undefined);
+    const occupant = target === 'frame' ? videoFrames.first : target === 'mj' ? mjRefs.image : null;
+    const slotName = target === 'frame' ? '首帧' : target === 'mj' ? 'MJ 垫图' : '参考图';
+    const already = target === 'stack'
+      ? referenceImages.some((f) => sourceOf(f) === path)
+      : sourceOf(occupant) === path;
+    // 已经导过同一张：静默不叠第二份。这里不提示是有意的（飙哥指定，保持简约）——
+    // 展开的输入壳里那张图就在槽位上，用户看得见，不是「点了没反应」那类静默失败。
+    if (already) return;
     try {
       const file = await fetchAssetAsFile(path, path.split('/').pop()?.replace(/\.[^.]+$/, '') || 'edit-ref');
-      setReferenceImages((prev) => [...prev, file]);
-      setEditRefError(null);
-      setClickPinned(true);
+      editRefSource.current.set(file, path);
+      if (target === 'frame') {
+        setVideoFrames((prev) => ({ ...prev, first: file }));
+      } else if (target === 'mj') {
+        setMjRefs((prev) => ({ ...prev, image: file }));
+      } else {
+        setReferenceImages((prev) => [...prev, file]);
+      }
+      if (occupant) showEditRefHint(`已替换${slotName}`, 'info');
+      else setEditRefHint(null);
     } catch {
-      setEditRefError('参考图导入失败：这张图的源文件取不到（可能已被移动或删除）');
-      setTimeout(() => setEditRefError(null), 5000);
+      showEditRefHint('参考图导入失败：这张图的源文件取不到（可能已被移动或删除）', 'error');
     }
-  }, []);
+  }, [kind, videoMode, model, videoCaps?.maxFrames, videoFrames.first, mjRefs.image, referenceImages, showEditRefHint]);
 
   // 首页作品深链（/studio?job=<id>）：目标轮出现在历史里后滚动定位（居中），一次性消费。
   const search = useSearch();
@@ -644,13 +683,17 @@ function StudioFull() {
           pointer-events-auto。 */}
       <div className="pointer-events-none absolute inset-x-0 bottom-4 px-3 sm:px-6">
         <div className="relative mx-auto max-w-[780px]">
-          {/* 图卡编辑导入失败提示：贴输入壳顶浮现，5s 自动消失。 */}
-          {editRefError && (
+          {/* 图卡编辑导入反馈：贴输入壳顶浮现，5s 自动消失。失败标红，其余（已导过 / 已替换）中性色。 */}
+          {editRefHint && (
             <p
               role="alert"
-              className="pointer-events-none absolute bottom-full left-0 mb-3 rounded-full border border-destructive/30 bg-scrim px-3 py-1.5 text-xs text-destructive backdrop-blur-glass"
+              className={`pointer-events-none absolute bottom-full left-0 mb-3 rounded-full border bg-scrim px-3 py-1.5 text-xs backdrop-blur-glass ${
+                editRefHint.tone === 'error'
+                  ? 'border-destructive/30 text-destructive'
+                  : 'border-border text-foreground'
+              }`}
             >
-              {editRefError}
+              {editRefHint.text}
             </p>
           )}
           {/* 回到底部：常驻挂载才有进出动画。锚定 bottom-full 让它跟着壳顶升降——

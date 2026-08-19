@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CharacterGallery } from './components/CharacterGallery';
 import { ImageDetail } from './components/ImageDetail';
+import { Lightbox } from './components/Lightbox';
 import { Filmstrip } from './components/Filmstrip';
 import { FirstRunConfig } from './components/FirstRunConfig';
 import { ResizableDivider } from './components/ResizableDivider';
@@ -68,37 +68,6 @@ export function MainApp({ routedCharacterId, routedAssetSlot, routedImageDetail 
         routedAssetSlot={routedAssetSlot}
         routedImageDetail={routedImageDetail}
       />
-    </div>
-  );
-}
-
-function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current(); };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-glass"
-      onClick={onClose}
-    >
-      <img
-        src={src}
-        alt="大图"
-        className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
-        onClick={e => e.stopPropagation()}
-      />
-      <button
-        type="button"
-        aria-label="关闭"
-        onClick={onClose}
-        className="absolute right-6 top-6 size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-background/90 backdrop-blur-glass border-0"
-      >
-        <X className="size-5" />
-      </button>
     </div>
   );
 }

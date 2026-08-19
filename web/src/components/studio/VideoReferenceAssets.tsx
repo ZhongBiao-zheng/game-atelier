@@ -1,5 +1,7 @@
-import { useEffect, useId, useMemo } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { ArrowLeftRight, Plus, X } from 'lucide-react';
+
+import { Lightbox } from '../Lightbox';
 
 export const MAX_REF_IMAGES = 9;
 export const MAX_REF_VIDEOS = 3;
@@ -55,7 +57,8 @@ const SLOT = 'h-[70px] w-[56px]';
 
 /** 单个固定语义槽：语义标注在空槽内 Plus 图标下方。
  *  tilt 给了才倾斜 8°（首尾帧的视觉语言）；MJ 的参考槽不倾斜。
- *  caption 缺省时从 label 去掉「上传」推导。 */
+ *  caption 缺省时从 label 去掉「上传」推导。
+ *  已放图的槽：hover 微微放大、点击开大图（与出图历史的参考堆叠同款手感）。 */
 export function FixedSlot({
   label, file, accept, tilt, caption: captionProp, disabled, disabledHint, onPick, onRemove,
 }: {
@@ -71,6 +74,7 @@ export function FixedSlot({
   onRemove: () => void;
 }) {
   const inputId = useId();
+  const [zoomed, setZoomed] = useState(false);
   const preview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
   const caption = captionProp ?? label.replace('上传', '');
@@ -79,14 +83,16 @@ export function FixedSlot({
   if (file && preview) {
     return (
       // 删除钮必须在 overflow-hidden 圆角框外层，否则左上突出的部分会被圆角裁掉。
-      <div className={`relative ${SLOT} ${rotate}`}>
-        <div className="h-full w-full overflow-hidden rounded-lg border-[1.5px] border-white bg-card">
+      <div className={`relative ${SLOT} ${rotate} transition-transform duration-200 hover:scale-[1.12]`}>
+        <button type="button" aria-label={`查看${caption}大图`} onClick={() => setZoomed(true)}
+          className="block h-full w-full cursor-zoom-in overflow-hidden rounded-lg border-[1.5px] border-white bg-card p-0">
           <img src={preview} alt={caption} className="h-full w-full object-cover" />
-        </div>
+        </button>
         <button type="button" aria-label={`移除${caption}`} onClick={onRemove}
           className="absolute -right-1.5 -top-1.5 z-10 grid h-[18px] w-[18px] place-items-center rounded-full bg-scrim backdrop-blur-glass border border-border text-foreground/80 hover:bg-destructive hover:text-foreground transition-colors">
           <X size={10} />
         </button>
+        {zoomed && <Lightbox src={preview} onClose={() => setZoomed(false)} />}
       </div>
     );
   }

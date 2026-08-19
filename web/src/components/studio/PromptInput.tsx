@@ -24,6 +24,7 @@ import {
   MAX_REF_VIDEOS,
   type FrameSlots,
 } from './VideoReferenceAssets';
+import { Lightbox } from '../Lightbox';
 import { RatioIcon } from './RatioIcon';
 import { ToolbarPopover } from './ToolbarPopover';
 import type { VideoControlCaps, VideoMode, VideoQuality } from '@/lib/videoControlCaps';
@@ -104,6 +105,8 @@ const COLLAPSE_ANGLES = [8, -4, 22, -8, 8, -4];
 const collapseAngle = (i: number) => COLLAPSE_ANGLES[i % COLLAPSE_ANGLES.length];
 // 展开时两两对称交替：8, -5, 8, -5...
 const expandAngle = (i: number) => (i % 2 === 0 ? 8 : -5);
+// hover 单张时的放大倍率，与出图历史的参考堆叠同款手感（那边 1.1 / 1.18）。
+const REF_HOVER_SCALE = 1.12;
 
 function providerName(provider?: KeyView) {
   if (!provider) return '未配置厂商';
@@ -269,6 +272,9 @@ export function PromptInput({
   const [barHovering, setBarHovering] = useState(false);
   const [refExpanded, setRefExpanded] = useState(false);
   const [refHovered, setRefHovered] = useState<number | null>(null);
+  // 参考图槽位的大图层（堆叠里的图片素材点开）。Lightbox 自带 portal：壳上的
+  // backdrop-filter 会给 fixed 后代造 containing block，挂在壳内的 fixed 会缩进壳里。
+  const [slotLightbox, setSlotLightbox] = useState<string | null>(null);
   const refFileInputRef = useRef<HTMLInputElement>(null);
   const refInputId = useId();
   // @引用编辑器：contentEditable DOM 是输入现场，text 字符串是状态层；
@@ -834,7 +840,10 @@ export function PromptInput({
                 >
                   {stackItems.map((item, i) => {
                     const hovered = refHovered === i;
-                    const angle = isOmni ? (refExpanded ? expandAngle(i) : collapseAngle(i)) : 0;
+                    // 倾斜扇形回到图片参考（2026-08-20 飙哥指定）：与 omni 同一套公式，
+                    // 只有 @编号徽标 / @引用仍是 omni 专属。
+                    const angle = refExpanded ? expandAngle(i) : collapseAngle(i);
+                    const thumb = thumbFor(i);
                     return (
                       <div
                         key={i}
@@ -845,15 +854,27 @@ export function PromptInput({
                           // 展开后右侧压左侧；折叠时保持左侧（首图）在最上
                           zIndex: hovered ? 40 : (refExpanded ? i : stackItems.length - i),
                           left: refExpanded ? `${i * REF_W}px` : '0px',
-                          transform: `translateY(-50%) rotate(${angle}deg)`,
+                          transform: `translateY(-50%) rotate(${angle}deg) scale(${hovered ? REF_HOVER_SCALE : 1})`,
                           transition: 'left 300ms ease, transform 300ms ease',
                         }}
                         onMouseEnter={() => { setRefExpanded(true); setRefHovered(i); }}
                         onMouseLeave={() => setRefHovered(null)}
                       >
-                        <div className="relative w-full h-full rounded-lg overflow-hidden border-[1.5px] border-white bg-card">
-                          {thumbFor(i) ? (
-                            <img src={thumbFor(i)!} alt="" className="w-full h-full object-cover" />
+                        {/* 图片素材点开大图；视频/音频没有大图形态（omni 的 chip hover 预览负责播放）。 */}
+                        <div
+                          role={item.kind === 'image' ? 'button' : undefined}
+                          tabIndex={item.kind === 'image' ? 0 : undefined}
+                          aria-label={item.kind === 'image' ? '查看参考图大图' : undefined}
+                          onClick={item.kind === 'image' && thumb ? () => setSlotLightbox(thumb) : undefined}
+                          onKeyDown={item.kind === 'image' && thumb
+                            ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSlotLightbox(thumb); } }
+                            : undefined}
+                          className={`relative w-full h-full rounded-lg overflow-hidden border-[1.5px] border-white bg-card ${
+                            item.kind === 'image' ? 'cursor-zoom-in' : ''
+                          }`}
+                        >
+                          {thumb ? (
+                            <img src={thumb} alt="" className="w-full h-full object-cover" />
                           ) : (
                             <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-muted-foreground">
                               {item.kind === 'video' ? <Film size={18} aria-hidden /> : <Music size={18} aria-hidden />}
@@ -904,7 +925,7 @@ export function PromptInput({
                       top: '50%',
                       marginTop: 15,
                       left: `${(refExpanded ? (stackItems.length - 1) * REF_W : 0) + REF_W - 20}px`,
-                      transform: `rotate(${isOmni ? (refExpanded ? expandAngle(stackItems.length - 1) : collapseAngle(stackItems.length - 1)) : 0}deg)`,
+                      transform: `rotate(${refExpanded ? expandAngle(stackItems.length - 1) : collapseAngle(stackItems.length - 1)}deg)`,
                       transition: 'left 300ms ease, transform 300ms ease',
                     }}
                   >
@@ -1510,6 +1531,7 @@ export function PromptInput({
           className={`transition-transform duration-300 ${collapsed ? 'scale-90' : ''}`}
         />
       </button>
+      {slotLightbox && <Lightbox src={slotLightbox} onClose={() => setSlotLightbox(null)} />}
     </div>
   );
 }
