@@ -2,6 +2,7 @@ import { type ButtonHTMLAttributes, useEffect, useMemo, useRef, useState } from 
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Trash2, X } from 'lucide-react';
 
+import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
 import { useVideoFrame } from '@/lib/videoFrame';
 import type { GenMode } from '@/lib/historyFilters';
@@ -23,6 +24,15 @@ export interface RoundConfig {
   size?: string;
   n?: number;
   referenceImages: string[];
+  /** MJ 专属参数（family=midjourney）——「编辑导入 / 再次生成」靠它还原画师当时的选择，
+   *  否则会拿默认值静默重出一张不一样的图。 */
+  mjParams?: MjParams;
+  /** 后端回写的真实 flag 串（如 "--ar 4:3 --v 8.2 --chaos 10"）。MJ 的参数全在 flag 里，
+   *  不摊开显示的话画师从卡片上看不出这张是按什么参数出的。只读。 */
+  mjFlags?: string;
+  /** MJ 三个语义参考图的服务器路径（风格 / 角色 / Omni）——「再次生成」按原图复用，
+   *  不带上就等于静默丢掉参考图重出一张。 */
+  mjRefPaths?: { sref?: string; cref?: string; oref?: string };
   // 后端在跑 job 时回写的静默改写提示（尺寸被归一化 / 参考图被截断…）；只读展示，前端不产生。
   warnings?: string[];
   // 视频参数（kind=video）—— 再次生成时按原 job 完整还原；resolution 是图片语义（2K/4K），视频分辨率另存。
@@ -500,7 +510,14 @@ function DoneBatch({
         <ReferenceStack refs={allRefs(round.config)} onReuse={onReuseReferences} />
         <div className="min-w-0 flex-1">
           <MentionPrompt prompt={round.config.prompt} config={round.config} />
-          <p className="mt-1 text-sm text-muted-foreground">{specMeta.join(' · ')}</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {specMeta.join(' · ')}
+            {round.config.mjFlags && (
+              <span data-testid="round-mj-flags" className="ml-2 text-muted-foreground/60">
+                {round.config.mjFlags}
+              </span>
+            )}
+          </p>
           {runMeta.length > 0 && (
             <p data-testid="round-run-meta" className="mt-0.5 text-xs text-muted-foreground/60">
               {runMeta.join(' · ')}

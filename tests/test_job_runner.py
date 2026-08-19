@@ -83,7 +83,7 @@ def test_run_job_normalizes_refs_clears_error_and_skips_invalid_artifact(
 
     captured: dict[str, object] = {}
 
-    def fake_dispatch(*, prompt, model, alias, output_dir, n, size, params):
+    def fake_dispatch(*, prompt, model, alias, output_dir, n, size, params, **kw):
         captured.update({
             "prompt": prompt,
             "model": model,
@@ -171,7 +171,7 @@ def test_run_job_routes_custom_provider_through_dispatch(project, monkeypatch):
 
     captured: dict[str, object] = {}
 
-    def fake_dispatch(*, prompt, model, alias, output_dir, n, size, params):
+    def fake_dispatch(*, prompt, model, alias, output_dir, n, size, params, **kw):
         captured.update({
             "prompt": prompt,
             "model": model,

@@ -53,22 +53,28 @@ export function FirstLastFrames({
 
 const SLOT = 'h-[70px] w-[56px]';
 
-/** 单个固定语义槽（首帧/尾帧）：语义标注在空槽内 Plus 图标下方，整槽按 tilt 倾斜 8°。 */
-function FixedSlot({
-  label, file, accept, tilt, onPick, onRemove,
+/** 单个固定语义槽：语义标注在空槽内 Plus 图标下方。
+ *  tilt 给了才倾斜 8°（首尾帧的视觉语言）；MJ 的参考槽不倾斜。
+ *  caption 缺省时从 label 去掉「上传」推导。 */
+export function FixedSlot({
+  label, file, accept, tilt, caption: captionProp, disabled, disabledHint, onPick, onRemove,
 }: {
   label: string;
   file: File | null;
   accept: string;
-  tilt: 'left' | 'right';
+  tilt?: 'left' | 'right';
+  caption?: string;
+  /** 该语义在当前模型/版本下不可用：空槽变灰不可点，已有的图仍可移除。 */
+  disabled?: boolean;
+  disabledHint?: string;
   onPick: (file: File) => void;
   onRemove: () => void;
 }) {
   const inputId = useId();
   const preview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
-  const caption = label.replace('上传', '');
-  const rotate = tilt === 'left' ? '-rotate-[8deg]' : 'rotate-[8deg]';
+  const caption = captionProp ?? label.replace('上传', '');
+  const rotate = tilt === 'left' ? '-rotate-[8deg]' : tilt === 'right' ? 'rotate-[8deg]' : '';
 
   if (file && preview) {
     return (
@@ -89,8 +95,16 @@ function FixedSlot({
     <>
       <input id={inputId} type="file" accept={accept} className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ''; }} />
-      <label htmlFor={inputId} aria-label={label}
-        className={`flex ${SLOT} ${rotate} cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary transition-all hover:-translate-y-0.5 hover:border-input`}>
+      <label
+        htmlFor={disabled ? undefined : inputId}
+        aria-label={label}
+        aria-disabled={disabled || undefined}
+        title={disabled ? disabledHint : undefined}
+        className={`flex ${SLOT} ${rotate} flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary transition-all ${
+          disabled
+            ? 'cursor-not-allowed opacity-40'
+            : 'cursor-pointer hover:-translate-y-0.5 hover:border-input'
+        }`}>
         <Plus size={16} className="text-muted-foreground" />
         <span className="text-xs leading-none text-muted-foreground">{caption}</span>
       </label>

@@ -59,6 +59,30 @@ class JobParams(BaseModel):
     # style_variant = 画师给的风格方向标签；base_version = 结构所本的基准页文件名（如 v1.png）。
     style_variant: str | None = None
     base_version: str | None = None
+    # Midjourney 专属（family=midjourney）—— 与 web/src/schema/jobs.ts::JobParams 同步。
+    # MJ 的 body 没有 size / quality 字段，一切控制都在 prompt 尾部的 flag 里，由 mj_image
+    # caller 拼接：prompt 保持画师原文，换模型时不残留 flag。比例复用上面的 ratio 字段
+    # （拼成 --ar），速度档复用 mode（MJ: FAST|RELAX|TURBO，与 kling 的 std|pro 各读各的，
+    # 一个 job 只属于一个模型）。
+    bot_type: str | None = None       # MID_JOURNEY | NIJI_JOURNEY（niji 走 botType 不走 flag）
+    mj_version: str | None = None     # --v 7 / 6.1
+    mj_stylize: int | None = None     # --stylize 0-1000
+    mj_chaos: int | None = None       # --chaos 0-100
+    mj_weird: int | None = None       # --weird 0-3000
+    mj_seed: int | None = None        # --seed
+    mj_no: str | None = None          # --no 排除词，逗号分隔
+    mj_tile: bool | None = None       # --tile 无缝平铺
+    mj_iw: float | None = None        # --iw 垫图权重 0-3
+    # 三种参考图：值是本地路径或公网 URL（caller 会把本地文件经 OSS 转成直链再拼 flag）。
+    # 垫图不在这里 —— 它走 reference_images → body 的 base64Array。
+    mj_sref: str | None = None        # --sref 风格参考
+    mj_sw: int | None = None          # --sw 0-1000
+    mj_cref: str | None = None        # --cref 角色参考
+    mj_cw: int | None = None          # --cw 0-100
+    mj_oref: str | None = None        # --oref Omni Reference
+    mj_ow: int | None = None          # --ow 0-1000
+    # caller 回写：本次真实拼出的 flag 串（如 "--ar 16:9 --v 8.2 --chaos 10"），Web 只读展示
+    mj_flags: str | None = None
 
 
 class Job(BaseModel):

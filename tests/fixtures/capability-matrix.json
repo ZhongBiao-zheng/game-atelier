@@ -106,6 +106,24 @@
       "model": "dall-e-3", "provider": "openai",
       "family": "standard", "max_reference_images": 4, "supports_quality": false,
       "min_pixels": null, "max_pixels": null
+    },
+    {
+      "why": "MJ 任务代理协议：body 无 size/quality 字段，一切控制都在 prompt 尾部 flag（比例拼成 --ar），像素边长由 MJ 自己定（实测 1024²），所以不给分辨率档也不给质量档",
+      "model": "mj_fast_imagine", "provider": "custom",
+      "family": "midjourney", "max_reference_images": 4, "supports_quality": false,
+      "min_pixels": null, "max_pixels": null
+    },
+    {
+      "why": "速度档编码在模型 id 里（fast/relax/turbo），能力不因档位变化",
+      "model": "mj_relax_imagine", "provider": "custom",
+      "family": "midjourney", "max_reference_images": 4, "supports_quality": false,
+      "min_pixels": null, "max_pixels": null
+    },
+    {
+      "why": "同一 MJ 模型换 provider（专属分组 key 可配成 provider=midjourney）能力不变",
+      "model": "mj_fast_imagine", "provider": "midjourney",
+      "family": "midjourney", "max_reference_images": 4, "supports_quality": false,
+      "min_pixels": null, "max_pixels": null
     }
   ]
 }

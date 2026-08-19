@@ -13,7 +13,8 @@ def openai_render(**_kwargs) -> list[str]:
 
 
 def midjourney_render(**_kwargs) -> list[str]:
-    raise NotImplementedError("midjourney provider not yet wired")
+    from character_workflow.lib.callers import mj_image
+    return mj_image.render(**_kwargs)
 
 
 def nano_banana_render(**_kwargs) -> list[str]:

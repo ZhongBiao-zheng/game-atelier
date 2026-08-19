@@ -22,11 +22,16 @@ class WrongProviderError(Exception):
     """Raised when a caller is invoked with an alias of the wrong provider."""
 
 
-def _provider_render(key: _keys.KeySpec):
+def _provider_render(key: _keys.KeySpec, model: str = ""):
     """Resolve provider name → render function, fresh each call.
 
     Re-read via attribute so monkeypatch on provider `render` takes effect.
     """
+    # MJ 走任务代理协议（异步 submit + 轮询），判据挂模型族不挂 provider：Tuzi 这类聚合商
+    # provider=custom，只按 provider 判会落到 openai_image 的同步 images 端点，打错入口。
+    from character_workflow.lib.callers.openai_image import image_family
+    if model and image_family(model) == "midjourney":
+        return stubs.midjourney_render
     provider = key.provider
     if provider == "openai":
         return stubs.openai_render
@@ -65,7 +70,7 @@ def dispatch(
     key = _keys.find_by_alias(alias)
     if key is None:
         raise NoSuchKeyError(alias)
-    fn = _provider_render(key)
+    fn = _provider_render(key, model)
     if fn is None:
         raise WrongProviderError(f"unknown provider {key.provider!r}")
     return fn(prompt=prompt, model=model, alias=alias, **kwargs)

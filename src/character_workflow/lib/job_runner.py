@@ -248,6 +248,9 @@ def run_job(job_id: str) -> Job:
                 n=params.get("n") or 1,
                 size=params.get("size"),
                 params=params,
+                # MJ 是唯一异步图片协议（submit + 轮询，FAST 档 ~40s、RELAX 可到几分钟），
+                # 进度卡点回写让前端不必干等。同步 caller 收下即忽略（都吃 **kwargs）。
+                on_phase=lambda phase: update_job_phase(job.job_id, phase),
             )
             selected = [(Path(p), dims) for p in paths if (dims := image_dimensions(Path(p)))]
             if not selected:

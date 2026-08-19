@@ -81,7 +81,7 @@ def test_turnaround_full_flow_writes_job_and_image(project, monkeypatch):
     # 2. mock dispatch 出图到临时目录，run_job 负责挪进 turnaround/
     captured_output_dir: list[Path] = []
 
-    def fake_dispatch(*, prompt, model, alias, output_dir, n, size, params):
+    def fake_dispatch(*, prompt, model, alias, output_dir, n, size, params, **kw):
         captured_output_dir.append(Path(output_dir))
         _write_png(Path(output_dir) / "gen.png", width=6, height=4)
         return [str(Path(output_dir) / "gen.png")]
