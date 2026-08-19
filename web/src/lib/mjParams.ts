@@ -46,9 +46,9 @@ export const MJ_BOT_TYPES: { value: MjBotType; label: string }[] = [
 
 // 速度档在这个协议里是 body 的 accountFilter.modes，不是 flag —— 但对画师是同一类选择，
 // 所以放在同一个面板里。
+// RELAX 档在本渠道选了就报错（2026-08-19 实测），不给这个必错的选项。
 export const MJ_MODES: { value: MjMode; label: string }[] = [
   { value: 'FAST', label: '快速' },
-  { value: 'RELAX', label: '慢速' },
   { value: 'TURBO', label: '极速' },
 ];
 

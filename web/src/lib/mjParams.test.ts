@@ -124,11 +124,11 @@ describe('mjSummary', () => {
       ...MJ_DEFAULTS,
       botType: 'NIJI_JOURNEY',
       version: '7',
-      mode: 'RELAX',
+      mode: 'TURBO',
       chaos: 10,
       weird: 250,
       tile: true,
     });
-    expect(s).toBe('niji 7 · 慢速 · s100 · c10 · w250 · 平铺');
+    expect(s).toBe('niji 7 · 极速 · s100 · c10 · w250 · 平铺');
   });
 });

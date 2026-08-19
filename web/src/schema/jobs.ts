@@ -45,6 +45,8 @@ export interface JobParams {
   mj_no?: string; // --no 排除词，逗号分隔
   mj_tile?: boolean; // --tile 无缝平铺
   mj_iw?: number; // --iw 垫图权重 0-3
+  /** caller 回写：本次真实拼出的 flag 串。只读展示，前端不产生。 */
+  mj_flags?: string;
   [key: string]: unknown;
 }
 

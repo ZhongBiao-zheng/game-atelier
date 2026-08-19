@@ -283,7 +283,13 @@ def render(
         raise MidjourneyError(f"未找到 Key: {alias}")
     root = _api_root(key)
     headers = {"Authorization": f"Bearer {key.access_key}", "Content-Type": "application/json"}
-    body = _submit_body(_append_flags(prompt, params), params)
+    final_prompt = _append_flags(prompt, params)
+    # 把真实发出的 flag 串回写给 job，出图卡片直接展示它 —— 展示「实际发了什么」而不是
+    # 让前端照 params 再拼一遍（两处拼接必然漂移）。
+    flags = final_prompt[len(prompt.strip()):].strip()
+    if params_in is not None and flags:
+        params_in["mj_flags"] = flags
+    body = _submit_body(final_prompt, params)
 
     wanted = max(1, int(n or 1))
     submissions = -(-wanted // 4)  # ceil：一次 imagine 出 4 张

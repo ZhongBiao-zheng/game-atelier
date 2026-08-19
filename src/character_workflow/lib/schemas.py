@@ -73,6 +73,8 @@ class JobParams(BaseModel):
     mj_no: str | None = None          # --no 排除词，逗号分隔
     mj_tile: bool | None = None       # --tile 无缝平铺
     mj_iw: float | None = None        # --iw 垫图权重 0-3
+    # caller 回写：本次真实拼出的 flag 串（如 "--ar 16:9 --v 8.2 --chaos 10"），Web 只读展示
+    mj_flags: str | None = None
 
 
 class Job(BaseModel):

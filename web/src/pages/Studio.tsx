@@ -837,7 +837,12 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
     // 后端跑 job 时回写的静默改写提示（尺寸归一化 / 参考图截断）——两端 schema 早有此字段。
     warnings: stringList(p.warnings),
     // MJ 参数从 job 还原：编辑导入 / 再次生成不带上就等于拿默认值重出一张不一样的图。
-    ...(imageFamily(job.model) === 'midjourney' ? { mjParams: mjParamsFromJob(p) } : {}),
+    ...(imageFamily(job.model) === 'midjourney'
+      ? {
+          mjParams: mjParamsFromJob(p),
+          mjFlags: typeof p.mj_flags === 'string' ? p.mj_flags : undefined,
+        }
+      : {}),
     // 视频参数：再次生成时从原 job 还原（resolution 上面只认 2K/4K 图片语义，视频的 720p/1080p 存这里）。
     // referenceVideos/Audios 给空数组而非 undefined，避免 onSubmitVideo 的 ?? 回落到当前表单文件。
     ...(isVideo
