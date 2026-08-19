@@ -131,12 +131,27 @@ def _public_url(path_or_url: str) -> str:
     return oss_upload.upload_for_public_url(s)
 
 
-def _ref_flags(params: dict[str, Any]) -> list[str]:
+# --cref（角色参考）只在 v6 / niji 6 支持，v7 之后由 --oref 接手。2026-08-19 实测：
+# 在 v8.2 下带 --cref 会让整个任务 FAILURE（[invalid_parameter] prompt 格式错误），
+# 去掉即成功。所以按版本过滤，而不是把一张必然失败的图发出去白付一次钱。
+_CREF_VERSIONS = {"6", "6.0"}
+
+
+def _cref_supported(params: dict[str, Any]) -> bool:
+    return str(params.get("mj_version") or "").strip() in _CREF_VERSIONS
+
+
+def _ref_flags(params: dict[str, Any], params_in: dict[str, Any] | None = None) -> list[str]:
     """把 sref / cref / oref 及各自权重拼成 flag 片段。"""
     out: list[str] = []
     for path_key, flag, weight_key, weight_flag in _REF_FLAG_SPECS:
         ref = params.get(path_key)
         if not ref:
+            continue
+        if flag == "cref" and not _cref_supported(params):
+            version = str(params.get("mj_version") or "?")
+            _warn(params_in, f"角色参考（--cref）只在 v6 / niji 6 支持，当前是 v{version}，"
+                             "本次已忽略这张角色参考图；要用角色参考请把版本切到 v6。")
             continue
         out.append(f"--{flag} {_public_url(str(ref))}")
         weight = params.get(weight_key)
@@ -159,7 +174,8 @@ def _version_flag(params: dict[str, Any]) -> str | None:
     return f"--niji {version}" if niji else f"--v {version}"
 
 
-def _append_flags(prompt: str, params: dict[str, Any]) -> str:
+def _append_flags(prompt: str, params: dict[str, Any],
+                  params_in: dict[str, Any] | None = None) -> str:
     """把结构化 MJ 参数拼成 flag 追加到 prompt 尾部。
 
     在 caller 拼而不在前端拼：job.prompt 保持画师原文，换到别的模型时不残留 MJ flag。
@@ -173,7 +189,7 @@ def _append_flags(prompt: str, params: dict[str, Any]) -> str:
         if value is None or value == "":
             continue
         parts.append(f"--{flag} {cast(value)}")
-    parts.extend(_ref_flags(params))
+    parts.extend(_ref_flags(params, params_in))
     if params.get("mj_tile"):
         parts.append("--tile")  # 无值开关
     return " ".join(parts)
@@ -214,6 +230,15 @@ def _ref_payload(path_or_url: str) -> str:
     return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
 
 
+def _warn(params_in: dict[str, Any] | None, message: str) -> None:
+    """后端的静默改写必须有回传通道 —— 卡片会把 warnings 摊给画师看。"""
+    if params_in is None:
+        return
+    warnings = params_in.setdefault("warnings", [])
+    if isinstance(warnings, list) and message not in warnings:
+        warnings.append(message)
+
+
 def _publish_actual_n(params_in: dict[str, Any] | None, wanted: int, actual: int) -> None:
     """把「上游一次出 4 张」回写进 job 的 params。
 
@@ -223,9 +248,7 @@ def _publish_actual_n(params_in: dict[str, Any] | None, wanted: int, actual: int
     if params_in is None or actual == wanted:
         return
     params_in["n"] = actual
-    warnings = params_in.setdefault("warnings", [])
-    if isinstance(warnings, list):
-        warnings.append(f"Midjourney 一次出 {actual} 张方案（请求 {wanted} 张），已全部保留")
+    _warn(params_in, f"Midjourney 一次出 {actual} 张方案（请求 {wanted} 张），已全部保留")
 
 
 def _extract_task_id(payload: dict[str, Any]) -> str:
@@ -326,7 +349,7 @@ def render(
         raise MidjourneyError(f"未找到 Key: {alias}")
     root = _api_root(key)
     headers = {"Authorization": f"Bearer {key.access_key}", "Content-Type": "application/json"}
-    final_prompt = _append_flags(prompt, params)
+    final_prompt = _append_flags(prompt, params, params_in)
     # 把真实发出的 flag 串回写给 job，出图卡片直接展示它 —— 展示「实际发了什么」而不是
     # 让前端照 params 再拼一遍（两处拼接必然漂移）。
     flags = final_prompt[len(prompt.strip()):].strip()

@@ -73,6 +73,13 @@ export function normalizeVersion(botType: MjBotType, version: string): string {
   return allowed.includes(version) ? version : allowed[0];
 }
 
+/** --cref（角色参考）只在 v6 / niji 6 支持，v7 之后由 --oref 接手。
+ *  2026-08-19 实测：v8.2 下带 --cref 整个任务 FAILURE。判据与后端
+ *  mj_image._CREF_VERSIONS 一致 —— 后端仍会兜底摘掉并回传 warning，这里只是提前拦住。 */
+export function crefSupported(version: string): boolean {
+  return version === '6';
+}
+
 export const MJ_STYLIZE_STEPS = [0, 100, 250, 500, 750, 1000];
 export const MJ_CHAOS_STEPS = [0, 10, 25, 50, 100];
 export const MJ_WEIRD_STEPS = [0, 250, 1000, 3000];

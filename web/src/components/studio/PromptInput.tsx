@@ -11,7 +11,7 @@ import {
   QUALITY_LABELS,
   type Quality,
 } from '@/lib/imageControlCaps';
-import { MJ_DEFAULTS, type MjParams } from '@/lib/mjParams';
+import { crefSupported, MJ_DEFAULTS, type MjParams } from '@/lib/mjParams';
 import { MjControls } from './MjControls';
 import { EMPTY_MJ_REFS, MjReferenceSlots, type MjRefSlots } from './MjReferenceSlots';
 import { estimateCostYuan, isHkAggregator } from '@/lib/creditCost';
@@ -917,7 +917,11 @@ export function PromptInput({
         )}
         {isMj && onMjRefsChange && (
           <div className={`self-center shrink-0 transition-transform duration-300 origin-left ${collapsed ? 'scale-80' : ''}`}>
-            <MjReferenceSlots refs={mjRefs} onChange={onMjRefsChange} />
+            <MjReferenceSlots
+              refs={mjRefs}
+              onChange={onMjRefsChange}
+              crefEnabled={crefSupported(mjParams.version)}
+            />
           </div>
         )}
         {isVideo && videoMode === 'firstlast' && onVideoFramesChange && (videoCaps?.maxFrames ?? 2) > 0 && (

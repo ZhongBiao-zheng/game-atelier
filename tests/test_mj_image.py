@@ -272,6 +272,7 @@ def test_reference_flags_go_through_oss(mj_key, tmp_path, monkeypatch):
     )
 
     _render(tmp_path, n=4, params={
+        "mj_version": "6",  # cref 只在 v6 / niji 6 支持
         "mj_sref": "/local/style.png", "mj_sw": 300,
         "mj_cref": "/local/char.png", "mj_cw": 60,
         "mj_oref": "/local/omni.png", "mj_ow": 200,
@@ -303,7 +304,7 @@ def test_reference_weight_omitted_when_unset(mj_key, tmp_path, monkeypatch):
         "character_workflow.lib.oss_upload.upload_for_public_url",
         lambda path: "https://oss.example/x.png",
     )
-    _render(tmp_path, n=4, params={"mj_cref": "/local/c.png"})
+    _render(tmp_path, n=4, params={"mj_cref": "/local/c.png", "mj_version": "6"})
     sent = posted[0]["body"]["prompt"]
     assert "--cref https://oss.example/x.png" in sent
     assert "--cw" not in sent
@@ -315,3 +316,36 @@ def test_mj_flags_written_back_for_card(mj_key, tmp_path, monkeypatch):
     params: dict = {"n": 4, "ratio": "16:9", "mj_version": "8.2", "mj_chaos": 10}
     _render(tmp_path, n=4, params=params)
     assert params["mj_flags"] == "--v 8.2 --ar 16:9 --chaos 10"
+
+
+def test_cref_dropped_on_unsupported_version_with_warning(mj_key, tmp_path, monkeypatch):
+    """--cref 只在 v6 / niji 6 支持。v8.2 下带它整个任务会 FAILURE（2026-08-19 实测），
+    所以提交前就摘掉，并把「忽略了这张图」回传给画师 —— 否则等于白付一次钱还不知道为什么。"""
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    monkeypatch.setattr(
+        "character_workflow.lib.oss_upload.upload_for_public_url",
+        lambda path: "https://oss.example/x.png",
+    )
+    params: dict = {"n": 4, "mj_version": "8.2", "mj_cref": "/local/c.png", "mj_cw": 50}
+
+    _render(tmp_path, n=4, params=params)
+
+    sent = posted[0]["body"]["prompt"]
+    assert "--cref" not in sent
+    assert "--cw" not in sent
+    assert any("角色参考" in w and "v6" in w for w in params["warnings"])
+
+
+def test_sref_and_oref_survive_on_v8(mj_key, tmp_path, monkeypatch):
+    """风格参考与 Omni 不受版本守卫影响（实测 --sref 在 v8.2 正常出图）。"""
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    monkeypatch.setattr(
+        "character_workflow.lib.oss_upload.upload_for_public_url",
+        lambda path: f"https://oss.example/{Path(path).name}",
+    )
+    _render(tmp_path, n=4, params={
+        "mj_version": "8.2", "mj_sref": "/local/s.png", "mj_oref": "/local/o.png",
+    })
+    sent = posted[0]["body"]["prompt"]
+    assert "--sref https://oss.example/s.png" in sent
+    assert "--oref https://oss.example/o.png" in sent

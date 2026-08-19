@@ -24,26 +24,36 @@ const SLOTS: { key: keyof MjRefSlots; label: string; caption: string }[] = [
   { key: 'oref', label: '上传 Omni 参考图', caption: 'Omni' },
 ];
 
+const CREF_HINT = '角色参考只在 v6 / niji 6 支持，v7 之后由 Omni 接手；把版本切到 v6 才能用';
+
 export function MjReferenceSlots({
   refs,
   onChange,
+  crefEnabled = true,
 }: {
   refs: MjRefSlots;
   onChange: (refs: MjRefSlots) => void;
+  /** 当前版本是否支持 --cref。false 时角色槽变灰，避免放进去一张会被后端摘掉的图。 */
+  crefEnabled?: boolean;
 }) {
   return (
     <div className="flex items-center gap-1.5 self-center shrink-0">
-      {SLOTS.map(({ key, label, caption }) => (
-        <FixedSlot
-          key={key}
-          label={label}
-          caption={caption}
-          file={refs[key]}
-          accept="image/*"
-          onPick={(f) => onChange({ ...refs, [key]: f })}
-          onRemove={() => onChange({ ...refs, [key]: null })}
-        />
-      ))}
+      {SLOTS.map(({ key, label, caption }) => {
+        const off = key === 'cref' && !crefEnabled;
+        return (
+          <FixedSlot
+            key={key}
+            label={label}
+            caption={caption}
+            file={refs[key]}
+            accept="image/*"
+            disabled={off}
+            disabledHint={off ? CREF_HINT : undefined}
+            onPick={(f) => onChange({ ...refs, [key]: f })}
+            onRemove={() => onChange({ ...refs, [key]: null })}
+          />
+        );
+      })}
     </div>
   );
 }

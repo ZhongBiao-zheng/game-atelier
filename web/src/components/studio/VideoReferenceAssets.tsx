@@ -57,13 +57,16 @@ const SLOT = 'h-[70px] w-[56px]';
  *  tilt 给了才倾斜 8°（首尾帧的视觉语言）；MJ 的参考槽不倾斜。
  *  caption 缺省时从 label 去掉「上传」推导。 */
 export function FixedSlot({
-  label, file, accept, tilt, caption: captionProp, onPick, onRemove,
+  label, file, accept, tilt, caption: captionProp, disabled, disabledHint, onPick, onRemove,
 }: {
   label: string;
   file: File | null;
   accept: string;
   tilt?: 'left' | 'right';
   caption?: string;
+  /** 该语义在当前模型/版本下不可用：空槽变灰不可点，已有的图仍可移除。 */
+  disabled?: boolean;
+  disabledHint?: string;
   onPick: (file: File) => void;
   onRemove: () => void;
 }) {
@@ -92,8 +95,16 @@ export function FixedSlot({
     <>
       <input id={inputId} type="file" accept={accept} className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(f); e.target.value = ''; }} />
-      <label htmlFor={inputId} aria-label={label}
-        className={`flex ${SLOT} ${rotate} cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary transition-all hover:-translate-y-0.5 hover:border-input`}>
+      <label
+        htmlFor={disabled ? undefined : inputId}
+        aria-label={label}
+        aria-disabled={disabled || undefined}
+        title={disabled ? disabledHint : undefined}
+        className={`flex ${SLOT} ${rotate} flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-secondary transition-all ${
+          disabled
+            ? 'cursor-not-allowed opacity-40'
+            : 'cursor-pointer hover:-translate-y-0.5 hover:border-input'
+        }`}>
         <Plus size={16} className="text-muted-foreground" />
         <span className="text-xs leading-none text-muted-foreground">{caption}</span>
       </label>
