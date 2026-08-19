@@ -131,14 +131,23 @@ def _public_url(path_or_url: str) -> str:
     return oss_upload.upload_for_public_url(s)
 
 
-# --cref（角色参考）只在 v6 / niji 6 支持，v7 之后由 --oref 接手。2026-08-19 实测：
-# 在 v8.2 下带 --cref 会让整个任务 FAILURE（[invalid_parameter] prompt 格式错误），
-# 去掉即成功。所以按版本过滤，而不是把一张必然失败的图发出去白付一次钱。
-_CREF_VERSIONS = {"6", "6.0"}
+# 角色类参考图的版本支持 —— 全部 2026-08-19 单变量实测（单独用、不带 sref）：
+#   --cref: v6 ✓ SUCCESS    v8.2 ✗ FAILURE
+#   --oref: v7 ✓ SUCCESS    v8.2 ✗ FAILURE
+# 即 v8.2 这两个都还没接上（风格参考 --sref 在 v8.2 正常）。带上去不是被忽略，而是让
+# 整个任务 FAILURE（[invalid_parameter] prompt 格式错误）—— 白付一次钱，所以提交前摘掉。
+_REF_VERSION_SUPPORT: dict[str, set[str]] = {
+    "cref": {"6", "6.0"},
+    "oref": {"7", "7.0"},
+}
+_REF_SLOT_LABELS = {"cref": "角色参考", "oref": "Omni 参考"}
 
 
-def _cref_supported(params: dict[str, Any]) -> bool:
-    return str(params.get("mj_version") or "").strip() in _CREF_VERSIONS
+def _ref_flag_supported(flag: str, params: dict[str, Any]) -> bool:
+    allowed = _REF_VERSION_SUPPORT.get(flag)
+    if allowed is None:
+        return True
+    return str(params.get("mj_version") or "").strip() in allowed
 
 
 def _ref_flags(params: dict[str, Any], params_in: dict[str, Any] | None = None) -> list[str]:
@@ -148,10 +157,11 @@ def _ref_flags(params: dict[str, Any], params_in: dict[str, Any] | None = None) 
         ref = params.get(path_key)
         if not ref:
             continue
-        if flag == "cref" and not _cref_supported(params):
+        if not _ref_flag_supported(flag, params):
             version = str(params.get("mj_version") or "?")
-            _warn(params_in, f"角色参考（--cref）只在 v6 / niji 6 支持，当前是 v{version}，"
-                             "本次已忽略这张角色参考图；要用角色参考请把版本切到 v6。")
+            ok = "/".join(f"v{v}" for v in sorted(_REF_VERSION_SUPPORT[flag]) if "." not in v)
+            _warn(params_in, f"{_REF_SLOT_LABELS[flag]}（--{flag}）只在 {ok} 支持，"
+                             f"当前是 v{version}，本次已忽略这张图；要用它请把版本切到 {ok}。")
             continue
         out.append(f"--{flag} {_public_url(str(ref))}")
         weight = params.get(weight_key)

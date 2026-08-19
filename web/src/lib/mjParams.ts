@@ -73,11 +73,18 @@ export function normalizeVersion(botType: MjBotType, version: string): string {
   return allowed.includes(version) ? version : allowed[0];
 }
 
-/** --cref（角色参考）只在 v6 / niji 6 支持，v7 之后由 --oref 接手。
- *  2026-08-19 实测：v8.2 下带 --cref 整个任务 FAILURE。判据与后端
- *  mj_image._CREF_VERSIONS 一致 —— 后端仍会兜底摘掉并回传 warning，这里只是提前拦住。 */
-export function crefSupported(version: string): boolean {
-  return version === '6';
+/** 角色类参考图的版本支持，全部 2026-08-19 单变量实测：
+ *    --cref 角色：v6 ✓ / v8.2 ✗      --oref Omni：v7 ✓ / v8.2 ✗
+ *  v8.2 这两个都还没接上（风格参考在 v8.2 正常）。判据与后端
+ *  mj_image._REF_VERSION_SUPPORT 一致 —— 后端是权威（会摘掉并回传 warning），
+ *  这里只是提前把槽位置灰，省掉一次必然失败的调用。 */
+export const REF_SLOT_VERSIONS: Record<'cref' | 'oref', string[]> = {
+  cref: ['6'],
+  oref: ['7'],
+};
+
+export function refSlotSupported(slot: 'cref' | 'oref', version: string): boolean {
+  return REF_SLOT_VERSIONS[slot].includes(version);
 }
 
 export const MJ_STYLIZE_STEPS = [0, 100, 250, 500, 750, 1000];

@@ -11,7 +11,7 @@ import {
   QUALITY_LABELS,
   type Quality,
 } from '@/lib/imageControlCaps';
-import { crefSupported, MJ_DEFAULTS, type MjParams } from '@/lib/mjParams';
+import { MJ_DEFAULTS, type MjParams } from '@/lib/mjParams';
 import { MjControls } from './MjControls';
 import { EMPTY_MJ_REFS, MjReferenceSlots, type MjRefSlots } from './MjReferenceSlots';
 import { estimateCostYuan, isHkAggregator } from '@/lib/creditCost';
@@ -920,7 +920,7 @@ export function PromptInput({
             <MjReferenceSlots
               refs={mjRefs}
               onChange={onMjRefsChange}
-              crefEnabled={crefSupported(mjParams.version)}
+              version={mjParams.version}
             />
           </div>
         )}

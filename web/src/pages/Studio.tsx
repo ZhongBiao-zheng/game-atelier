@@ -731,6 +731,10 @@ function StudioFull() {
   async function deleteFailedRound(jobId: string) {
     const resp = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
     if (!resp.ok) return;
+    // rounds 是渲染态，persistedJobs 是它的数据源之一：只清 rounds 的话，下一次 SSE 推送
+    // 或轮询触发上面那个 mergePersistedRounds 的 effect，这条记录就被合并回来了
+    // （后端其实已经删掉，刷新页面才看得出来）。两处一起清。
+    setPersistedJobs((jobs) => jobs.filter((j) => j.job_id !== jobId));
     setRounds((items) => items.filter((item) => item.kind !== 'failed' || item.jobId !== jobId));
   }
 

@@ -1,3 +1,4 @@
+import { refSlotSupported } from '@/lib/mjParams';
 import { FixedSlot } from './VideoReferenceAssets';
 
 /** MJ 的四个语义参考槽：图片（垫图 Image Prompt）/ 风格 / 角色 / Omni。
@@ -24,22 +25,27 @@ const SLOTS: { key: keyof MjRefSlots; label: string; caption: string }[] = [
   { key: 'oref', label: '上传 Omni 参考图', caption: 'Omni' },
 ];
 
-const CREF_HINT = '角色参考只在 v6 / niji 6 支持，v7 之后由 Omni 接手；把版本切到 v6 才能用';
+// 实测：cref 只在 v6 可用、oref 只在 v7 可用，v8.2 两个都会让任务直接失败。
+const HINTS: Record<'cref' | 'oref', string> = {
+  cref: '角色参考只在 v6 可用（v8.2 会让任务失败）；把版本切到 v6 才能用',
+  oref: 'Omni 参考只在 v7 可用（v8.2 会让任务失败）；把版本切到 v7 才能用',
+};
 
 export function MjReferenceSlots({
   refs,
   onChange,
-  crefEnabled = true,
+  version,
 }: {
   refs: MjRefSlots;
   onChange: (refs: MjRefSlots) => void;
-  /** 当前版本是否支持 --cref。false 时角色槽变灰，避免放进去一张会被后端摘掉的图。 */
-  crefEnabled?: boolean;
+  /** 当前 MJ 版本 —— 角色/Omni 槽按它决定可用性，免得放进一张必然失败的图。 */
+  version: string;
 }) {
   return (
     <div className="flex items-center gap-1.5 self-center shrink-0">
       {SLOTS.map(({ key, label, caption }) => {
-        const off = key === 'cref' && !crefEnabled;
+        const gated = key === 'cref' || key === 'oref';
+        const off = gated && !refSlotSupported(key, version);
         return (
           <FixedSlot
             key={key}
@@ -48,7 +54,7 @@ export function MjReferenceSlots({
             file={refs[key]}
             accept="image/*"
             disabled={off}
-            disabledHint={off ? CREF_HINT : undefined}
+            disabledHint={off ? HINTS[key as 'cref' | 'oref'] : undefined}
             onPick={(f) => onChange({ ...refs, [key]: f })}
             onRemove={() => onChange({ ...refs, [key]: null })}
           />
