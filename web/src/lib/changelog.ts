@@ -31,6 +31,20 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.19.0',
+    date: '2026-08-20',
+    headline: '参考图槽位顺手了',
+    changes: [
+      {
+        kind: 'fix',
+        text: '图卡左下角的「编辑」现在按当前模式送图：常规参考图进参考堆叠，Midjourney 进垫图槽，视频首尾帧进首帧，全能参考进参考素材 —— 以前在后三种模式下导进去是看不见也发不出去的',
+      },
+      { kind: 'fix', text: '同一张图连点「编辑」不再叠出好几份' },
+      { kind: 'feat', text: '输入框左侧的参考图和首尾帧、Midjourney 四个槽，点一下就看大图' },
+      { kind: 'feat', text: '参考图 hover 会微微放大，多张时左右交替倾斜成扇形' },
+    ],
+  },
+  {
     version: '5.18.0',
     date: '2026-08-19',
     headline: '出图台接入 Midjourney',

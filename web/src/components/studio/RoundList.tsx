@@ -1,6 +1,6 @@
 import { type ButtonHTMLAttributes, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Trash2 } from 'lucide-react';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -9,6 +9,7 @@ import type { GenMode } from '@/lib/historyFilters';
 import { isGalleryFavorited, isGalleryHidden } from '@/api/gallery';
 import { formatBeijingTime } from '@/lib/time';
 
+import { Lightbox } from '../Lightbox';
 import { WaitingCopy } from './WaitingCopy';
 
 export interface RoundConfig {
@@ -680,36 +681,6 @@ function ActionButton({
       className={`inline-flex items-center justify-center ${compact ? 'h-9 w-9 px-0' : 'h-9 w-[94px] px-3'} rounded-md bg-secondary text-sm font-medium text-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${className}`}
       {...props}
     />
-  );
-}
-
-function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim backdrop-blur-glass"
-      onClick={onClose}
-    >
-      <img
-        src={src}
-        alt="大图"
-        className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
-        onClick={e => e.stopPropagation()}
-      />
-      <button
-        type="button"
-        aria-label="关闭"
-        onClick={onClose}
-        className="absolute right-6 top-6 size-10 rounded-full bg-scrim text-white grid place-items-center hover:bg-background/90 backdrop-blur-glass border-0"
-      >
-        <X className="size-5" />
-      </button>
-    </div>
   );
 }
 
