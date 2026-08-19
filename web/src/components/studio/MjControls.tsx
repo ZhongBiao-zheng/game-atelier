@@ -84,13 +84,18 @@ export function MjControls({
             title="版本"
             hint={value.botType === 'NIJI_JOURNEY' ? 'niji 自己的版本号，与 Midjourney 不通用' : undefined}
           >
-            <div role="listbox" aria-label="选择版本" className="grid h-9 grid-cols-3 rounded-lg bg-popover p-0.5">
+            <select
+              aria-label="选择版本"
+              value={value.version}
+              onChange={(e) => onChange({ version: e.target.value })}
+              className="h-9 w-full rounded-lg border border-input bg-popover px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary/60"
+            >
               {versionsFor(value.botType).map((item) => (
-                <SegmentButton key={item} selected={value.version === item} onClick={() => onChange({ version: item })}>
+                <option key={item} value={item}>
                   {value.botType === 'NIJI_JOURNEY' ? `niji ${item}` : `v${item}`}
-                </SegmentButton>
+                </option>
               ))}
-            </div>
+            </select>
           </Section>
 
           <Section title="速度档">

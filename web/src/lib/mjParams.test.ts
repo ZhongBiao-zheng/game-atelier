@@ -96,20 +96,20 @@ describe('mjParamsFromJob', () => {
 
 describe('版本体系随模型切换', () => {
   it('两套版本档位不通用', () => {
-    expect(versionsFor('MID_JOURNEY')).toEqual(['8.2', '8.1', '8']);
-    expect(versionsFor('NIJI_JOURNEY')).toEqual(['7']);
+    expect(versionsFor('MID_JOURNEY')).toEqual(['8.2', '8.1', '8', '7', '6.1', '6']);
+    expect(versionsFor('NIJI_JOURNEY')).toEqual(['7', '6', '5']);
   });
 
   it('切到 niji 时把不合法的版本纠到 niji 的首档', () => {
     // 留着 7 会让后端拼出 `--niji 7` —— 一个不存在的组合。
-    expect(normalizeVersion('NIJI_JOURNEY', '8.2')).toBe('7');
-    expect(normalizeVersion('NIJI_JOURNEY', '7')).toBe('7');
-    expect(normalizeVersion('MID_JOURNEY', '7')).toBe('8.2');
+    expect(normalizeVersion('NIJI_JOURNEY', '6.1')).toBe('7'); // 6.1 只有 MJ 有
+    expect(normalizeVersion('NIJI_JOURNEY', '6')).toBe('6');   // 6 两边都有，留着
+    expect(normalizeVersion('MID_JOURNEY', '5')).toBe('8.2');  // 5 只有 niji 有
     expect(normalizeVersion('MID_JOURNEY', '8.1')).toBe('8.1');
   });
 
   it('从 job 还原时也按 botType 纠版本（旧 job 可能存着另一套的版本号）', () => {
-    const restored = mjParamsFromJob({ bot_type: 'NIJI_JOURNEY', mj_version: '8.2' });
+    const restored = mjParamsFromJob({ bot_type: 'NIJI_JOURNEY', mj_version: '6.1' });
     expect(restored.version).toBe('7');
   });
 });
