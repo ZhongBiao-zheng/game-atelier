@@ -30,6 +30,9 @@ export interface RoundConfig {
   /** 后端回写的真实 flag 串（如 "--ar 4:3 --v 8.2 --chaos 10"）。MJ 的参数全在 flag 里，
    *  不摊开显示的话画师从卡片上看不出这张是按什么参数出的。只读。 */
   mjFlags?: string;
+  /** MJ 三个语义参考图的服务器路径（风格 / 角色 / Omni）——「再次生成」按原图复用，
+   *  不带上就等于静默丢掉参考图重出一张。 */
+  mjRefPaths?: { sref?: string; cref?: string; oref?: string };
   // 后端在跑 job 时回写的静默改写提示（尺寸被归一化 / 参考图被截断…）；只读展示，前端不产生。
   warnings?: string[];
   // 视频参数（kind=video）—— 再次生成时按原 job 完整还原；resolution 是图片语义（2K/4K），视频分辨率另存。

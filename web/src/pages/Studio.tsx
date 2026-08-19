@@ -7,6 +7,7 @@ import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { PromptInput } from '@/components/studio/PromptInput';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
+import { EMPTY_MJ_REFS, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
@@ -113,6 +114,8 @@ function StudioFull() {
   const [quality, setQuality] = useState<Quality>('low');
   // MJ 参数不进 localStorage —— 与 ratio/像素/质量/数量 同一政策：出图配置每次启动回默认。
   const [mjParams, setMjParams] = useState<MjParams>(MJ_DEFAULTS);
+  // MJ 的三个语义参考槽（风格 / 角色 / Omni）；垫图仍走 referenceImages。
+  const [mjRefs, setMjRefs] = useState<MjRefSlots>(EMPTY_MJ_REFS);
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
@@ -360,11 +363,23 @@ function StudioFull() {
     // 提交前把参考图 File[] 上传到 .runtime/uploads/，拿到服务器路径写进 params.reference_images。
     // 再次生成（overrideConfig）携带的已是服务器路径，直接复用。
     let refPaths: string[];
+    let mjRefPaths: { sref?: string; cref?: string; oref?: string } = {};
     try {
       refPaths = overrideConfig?.referenceImages
         ?? (referenceImages.length > 0
           ? await Promise.all(referenceImages.map(uploadReferenceImage))
           : []);
+      // sref/cref/oref 只吃公网 URL，后端会把这里的服务器路径经 OSS 转直链。
+      // 再次生成时 overrideConfig 里已是路径，直接复用，不重新上传。
+      if (caps.family === 'midjourney') {
+        mjRefPaths = overrideConfig?.mjRefPaths ?? Object.fromEntries(
+          await Promise.all(
+            (['sref', 'cref', 'oref'] as const)
+              .filter((slot) => mjRefs[slot])
+              .map(async (slot) => [slot, await uploadReferenceImage(mjRefs[slot]!)] as const),
+          ),
+        );
+      }
     } catch (e: any) {
       setPending(false);
       setRounds((rs) => [
@@ -387,7 +402,7 @@ function StudioFull() {
       quality: effectiveQuality,
       referenceImages: refPaths,
       ...(caps.family === 'midjourney'
-        ? { mjParams: overrideConfig?.mjParams ?? mjParams }
+        ? { mjParams: overrideConfig?.mjParams ?? mjParams, mjRefPaths }
         : {}),
     };
     // 控件隐藏的参数一律不写进 params（与视频侧同写法）：后端 openrouter_image 会把
@@ -401,7 +416,12 @@ function StudioFull() {
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
       // MJ 的一切控制都在 prompt flag 里，由后端 mj_image 拼接；这里只发结构化值。
       ...(caps.family === 'midjourney'
-        ? mjParamsToJob(overrideConfig?.mjParams ?? mjParams)
+        ? {
+            ...mjParamsToJob(overrideConfig?.mjParams ?? mjParams),
+            ...(mjRefPaths.sref ? { mj_sref: mjRefPaths.sref } : {}),
+            ...(mjRefPaths.cref ? { mj_cref: mjRefPaths.cref } : {}),
+            ...(mjRefPaths.oref ? { mj_oref: mjRefPaths.oref } : {}),
+          }
         : {}),
     };
 
@@ -662,6 +682,8 @@ function StudioFull() {
           quality={quality}
           mjParams={mjParams}
           onMjParamsChange={(patch) => setMjParams((prev) => ({ ...prev, ...patch }))}
+          mjRefs={mjRefs}
+          onMjRefsChange={setMjRefs}
           onProviderChange={setProviderAlias}
           onModelChange={setModel}
           onRatioChange={setRatio}
@@ -841,6 +863,11 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
       ? {
           mjParams: mjParamsFromJob(p),
           mjFlags: typeof p.mj_flags === 'string' ? p.mj_flags : undefined,
+          mjRefPaths: {
+            sref: typeof p.mj_sref === 'string' ? p.mj_sref : undefined,
+            cref: typeof p.mj_cref === 'string' ? p.mj_cref : undefined,
+            oref: typeof p.mj_oref === 'string' ? p.mj_oref : undefined,
+          },
         }
       : {}),
     // 视频参数：再次生成时从原 job 还原（resolution 上面只认 2K/4K 图片语义，视频的 720p/1080p 存这里）。

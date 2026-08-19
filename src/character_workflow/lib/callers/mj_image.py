@@ -103,6 +103,41 @@ _FLAG_SPECS: tuple[tuple[str, str, Any], ...] = (
 )
 
 
+# 三种「参考图 flag」：(路径字段, flag 名, 权重字段, 权重 flag 名)。
+# 值必须是**公网图片 URL** —— MJ 的 sref/cref/oref 不吃 base64（垫图才吃，走 body 的
+# base64Array）。本地文件经 OSS 中转拿直链；MJ 自己的上传通道 /mj/submit/upload-discord-images
+# 在 Tuzi 主 key 上无渠道（503 mj_upload），所以走本仓视频侧同一条 OSS 路。
+_REF_FLAG_SPECS: tuple[tuple[str, str, str, str], ...] = (
+    ("mj_sref", "sref", "mj_sw", "sw"),  # 风格参考 Style Reference，--sw 0-1000
+    ("mj_cref", "cref", "mj_cw", "cw"),  # 角色参考 Character Reference，--cw 0-100
+    ("mj_oref", "oref", "mj_ow", "ow"),  # Omni Reference，--ow 0-1000
+)
+
+
+def _public_url(path_or_url: str) -> str:
+    """本地文件 → OSS presigned 直链；已经是 http(s) 的原样返回。"""
+    s = str(path_or_url).strip()
+    if s.startswith(("http://", "https://")):
+        return s
+    from character_workflow.lib import oss_upload
+
+    return oss_upload.upload_for_url(s)
+
+
+def _ref_flags(params: dict[str, Any]) -> list[str]:
+    """把 sref / cref / oref 及各自权重拼成 flag 片段。"""
+    out: list[str] = []
+    for path_key, flag, weight_key, weight_flag in _REF_FLAG_SPECS:
+        ref = params.get(path_key)
+        if not ref:
+            continue
+        out.append(f"--{flag} {_public_url(str(ref))}")
+        weight = params.get(weight_key)
+        if weight is not None:
+            out.append(f"--{weight_flag} {int(weight)}")
+    return out
+
+
 def _version_flag(params: dict[str, Any]) -> str | None:
     """版本 flag —— niji 与 Midjourney 是两套体系，flag 名和版本号都不通用。
 
@@ -131,6 +166,7 @@ def _append_flags(prompt: str, params: dict[str, Any]) -> str:
         if value is None or value == "":
             continue
         parts.append(f"--{flag} {cast(value)}")
+    parts.extend(_ref_flags(params))
     if params.get("mj_tile"):
         parts.append("--tile")  # 无值开关
     return " ".join(parts)

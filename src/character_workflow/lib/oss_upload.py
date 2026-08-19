@@ -46,12 +46,12 @@ def upload_for_url(path_str: str | Path) -> str:
     cfg = _keys.read_keys_db().oss
     if cfg is None:
         raise OssNotConfiguredError(
-            "参考视频是本地文件，需要对象存储中转，但尚未配置 OSS。"
+            "参考素材是本地文件，需要对象存储中转，但尚未配置 OSS。"
             "请在 .config/keys.json 的 oss 字段配置阿里云 AccessKey/bucket/endpoint。"
         )
     path = Path(path_str)
     if not path.is_file():
-        raise OssUploadError(f"参考视频文件不存在: {path_str}")
+        raise OssUploadError(f"参考素材文件不存在: {path_str}")
     key = _object_key(path)
     bucket = _bucket(cfg)
     try:
@@ -59,4 +59,4 @@ def upload_for_url(path_str: str | Path) -> str:
             bucket.put_object_from_file(key, str(path))
         return bucket.sign_url("GET", key, _PRESIGN_EXPIRES_SECONDS, slash_safe=True)
     except Exception as e:  # noqa: BLE001 — oss2 异常族杂，统一翻译成本项目错误类型
-        raise OssUploadError(f"OSS 上传参考视频失败: {e}") from e
+        raise OssUploadError(f"OSS 上传参考素材失败: {e}") from e

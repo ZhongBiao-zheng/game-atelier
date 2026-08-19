@@ -259,3 +259,57 @@ def test_on_phase_reports_sent_then_downloading(mj_key, tmp_path, monkeypatch):
     phases: list[str] = []
     _render(tmp_path, n=4, on_phase=phases.append)
     assert phases == ["sent", "downloading"]
+
+def test_reference_flags_go_through_oss(mj_key, tmp_path, monkeypatch):
+    """sref/cref/oref 只吃公网 URL —— 本地路径必须先经 OSS 转直链再拼 flag。"""
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    uploaded: list[str] = []
+    monkeypatch.setattr(
+        "character_workflow.lib.oss_upload.upload_for_url",
+        lambda path: uploaded.append(str(path)) or f"https://oss.example/{Path(path).name}",
+    )
+
+    _render(tmp_path, n=4, params={
+        "mj_sref": "/local/style.png", "mj_sw": 300,
+        "mj_cref": "/local/char.png", "mj_cw": 60,
+        "mj_oref": "/local/omni.png", "mj_ow": 200,
+    })
+
+    sent = posted[0]["body"]["prompt"]
+    assert "--sref https://oss.example/style.png --sw 300" in sent
+    assert "--cref https://oss.example/char.png --cw 60" in sent
+    assert "--oref https://oss.example/omni.png --ow 200" in sent
+    assert uploaded == ["/local/style.png", "/local/char.png", "/local/omni.png"]
+
+
+def test_reference_urls_skip_oss(mj_key, tmp_path, monkeypatch):
+    """已经是公网直链的参考图不该再上传一遍。"""
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+
+    def _boom(path):
+        raise AssertionError(f"不该为 http 直链调 OSS: {path}")
+
+    monkeypatch.setattr("character_workflow.lib.oss_upload.upload_for_url", _boom)
+
+    _render(tmp_path, n=4, params={"mj_sref": "https://cdn.example/a.png"})
+    assert "--sref https://cdn.example/a.png" in posted[0]["body"]["prompt"]
+
+
+def test_reference_weight_omitted_when_unset(mj_key, tmp_path, monkeypatch):
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    monkeypatch.setattr(
+        "character_workflow.lib.oss_upload.upload_for_url",
+        lambda path: "https://oss.example/x.png",
+    )
+    _render(tmp_path, n=4, params={"mj_cref": "/local/c.png"})
+    sent = posted[0]["body"]["prompt"]
+    assert "--cref https://oss.example/x.png" in sent
+    assert "--cw" not in sent
+
+
+def test_mj_flags_written_back_for_card(mj_key, tmp_path, monkeypatch):
+    """卡片展示的是「实际发出去的」flag 串，所以由 caller 回写而不是前端再拼一遍。"""
+    _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    params: dict = {"n": 4, "ratio": "16:9", "mj_version": "8.2", "mj_chaos": 10}
+    _render(tmp_path, n=4, params=params)
+    assert params["mj_flags"] == "--v 8.2 --ar 16:9 --chaos 10"

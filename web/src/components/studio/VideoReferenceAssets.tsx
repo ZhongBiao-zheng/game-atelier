@@ -53,22 +53,25 @@ export function FirstLastFrames({
 
 const SLOT = 'h-[70px] w-[56px]';
 
-/** 单个固定语义槽（首帧/尾帧）：语义标注在空槽内 Plus 图标下方，整槽按 tilt 倾斜 8°。 */
-function FixedSlot({
-  label, file, accept, tilt, onPick, onRemove,
+/** 单个固定语义槽：语义标注在空槽内 Plus 图标下方。
+ *  tilt 给了才倾斜 8°（首尾帧的视觉语言）；MJ 的参考槽不倾斜。
+ *  caption 缺省时从 label 去掉「上传」推导。 */
+export function FixedSlot({
+  label, file, accept, tilt, caption: captionProp, onPick, onRemove,
 }: {
   label: string;
   file: File | null;
   accept: string;
-  tilt: 'left' | 'right';
+  tilt?: 'left' | 'right';
+  caption?: string;
   onPick: (file: File) => void;
   onRemove: () => void;
 }) {
   const inputId = useId();
   const preview = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
-  const caption = label.replace('上传', '');
-  const rotate = tilt === 'left' ? '-rotate-[8deg]' : 'rotate-[8deg]';
+  const caption = captionProp ?? label.replace('上传', '');
+  const rotate = tilt === 'left' ? '-rotate-[8deg]' : tilt === 'right' ? 'rotate-[8deg]' : '';
 
   if (file && preview) {
     return (

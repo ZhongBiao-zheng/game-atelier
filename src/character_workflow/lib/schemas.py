@@ -73,6 +73,14 @@ class JobParams(BaseModel):
     mj_no: str | None = None          # --no 排除词，逗号分隔
     mj_tile: bool | None = None       # --tile 无缝平铺
     mj_iw: float | None = None        # --iw 垫图权重 0-3
+    # 三种参考图：值是本地路径或公网 URL（caller 会把本地文件经 OSS 转成直链再拼 flag）。
+    # 垫图不在这里 —— 它走 reference_images → body 的 base64Array。
+    mj_sref: str | None = None        # --sref 风格参考
+    mj_sw: int | None = None          # --sw 0-1000
+    mj_cref: str | None = None        # --cref 角色参考
+    mj_cw: int | None = None          # --cw 0-100
+    mj_oref: str | None = None        # --oref Omni Reference
+    mj_ow: int | None = None          # --ow 0-1000
     # caller 回写：本次真实拼出的 flag 串（如 "--ar 16:9 --v 8.2 --chaos 10"），Web 只读展示
     mj_flags: str | None = None
 
