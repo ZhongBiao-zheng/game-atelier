@@ -22,8 +22,11 @@ export interface MjParams {
   seed: string;
   no: string;
   tile: boolean;
-  /** null = 不发。垫图权重只在有参考图时有意义。 */
+  /** null = 不发（走上游默认权重）。这四个权重只在对应参考图槽上传了图时才有意义。 */
   iw: number | null;
+  sw: number | null;
+  cw: number | null;
+  ow: number | null;
 }
 
 export const MJ_DEFAULTS: MjParams = {
@@ -37,6 +40,9 @@ export const MJ_DEFAULTS: MjParams = {
   no: '',
   tile: false,
   iw: null,
+  sw: null,
+  cw: null,
+  ow: null,
 };
 
 export const MJ_BOT_TYPES: { value: MjBotType; label: string }[] = [
@@ -71,6 +77,10 @@ export const MJ_STYLIZE_STEPS = [0, 100, 250, 500, 750, 1000];
 export const MJ_CHAOS_STEPS = [0, 10, 25, 50, 100];
 export const MJ_WEIRD_STEPS = [0, 250, 1000, 3000];
 export const MJ_IW_STEPS = [0.5, 1, 2, 3];
+// 参考图权重档位。范围来自 MJ 文档：--sw / --ow 0-1000，--cw 0-100。
+export const MJ_SW_STEPS = [0, 100, 250, 500, 1000];
+export const MJ_CW_STEPS = [0, 25, 50, 100];
+export const MJ_OW_STEPS = [0, 100, 250, 500, 1000];
 
 /** 面板状态 → job params（键名与 schemas.py::JobParams 的 mj_* 字段一一对应）。
  *
@@ -92,6 +102,9 @@ export function mjParamsToJob(p: MjParams): Record<string, unknown> {
   if (p.no.trim()) out.mj_no = p.no.trim();
   if (p.tile) out.mj_tile = true;
   if (p.iw !== null) out.mj_iw = p.iw;
+  if (p.sw !== null) out.mj_sw = p.sw;
+  if (p.cw !== null) out.mj_cw = p.cw;
+  if (p.ow !== null) out.mj_ow = p.ow;
   return out;
 }
 
@@ -113,6 +126,9 @@ export function mjParamsFromJob(params: Record<string, unknown> | undefined): Mj
     no: typeof p.mj_no === 'string' ? p.mj_no : '',
     tile: p.mj_tile === true,
     iw: typeof p.mj_iw === 'number' ? p.mj_iw : null,
+    sw: typeof p.mj_sw === 'number' ? p.mj_sw : null,
+    cw: typeof p.mj_cw === 'number' ? p.mj_cw : null,
+    ow: typeof p.mj_ow === 'number' ? p.mj_ow : null,
   };
 }
 

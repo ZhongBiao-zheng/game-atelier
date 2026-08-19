@@ -1,17 +1,28 @@
 import { FixedSlot } from './VideoReferenceAssets';
 
-/** MJ 的三个语义参考槽。垫图（Image Prompt）不在这里 —— 它走通用参考图栏位 → base64Array。
+/** MJ 的四个语义参考槽：图片（垫图 Image Prompt）/ 风格 / 角色 / Omni。
  *
- * 这三种只吃公网图片 URL，所以提交时先上传到服务器、由后端经 OSS 转成直链再拼 flag：
- * --sref（风格）/ --cref（角色）/ --oref（Omni Reference）。
+ * 四槽统一样式、都不倾斜（倾斜是首尾帧的视觉语言）。MJ 时通用参考图栏位让位给这里，
+ * 避免同一件事两个入口。
+ *
+ * 传法不同：图片走 body 的 base64Array（吃 base64）；后三种是 prompt flag
+ * （--sref / --cref / --oref），只吃公网 URL，由后端经 OSS 中转。
  */
 export interface MjRefSlots {
+  image: File | null;
   sref: File | null;
   cref: File | null;
   oref: File | null;
 }
 
-export const EMPTY_MJ_REFS: MjRefSlots = { sref: null, cref: null, oref: null };
+export const EMPTY_MJ_REFS: MjRefSlots = { image: null, sref: null, cref: null, oref: null };
+
+const SLOTS: { key: keyof MjRefSlots; label: string; caption: string }[] = [
+  { key: 'image', label: '上传垫图', caption: '图片' },
+  { key: 'sref', label: '上传风格参考图', caption: '风格' },
+  { key: 'cref', label: '上传角色参考图', caption: '角色' },
+  { key: 'oref', label: '上传 Omni 参考图', caption: 'Omni' },
+];
 
 export function MjReferenceSlots({
   refs,
@@ -22,21 +33,17 @@ export function MjReferenceSlots({
 }) {
   return (
     <div className="flex items-center gap-1.5 self-center shrink-0">
-      <FixedSlot
-        label="上传风格参考图" caption="风格" file={refs.sref} accept="image/*"
-        onPick={(f) => onChange({ ...refs, sref: f })}
-        onRemove={() => onChange({ ...refs, sref: null })}
-      />
-      <FixedSlot
-        label="上传角色参考图" caption="角色" file={refs.cref} accept="image/*"
-        onPick={(f) => onChange({ ...refs, cref: f })}
-        onRemove={() => onChange({ ...refs, cref: null })}
-      />
-      <FixedSlot
-        label="上传 Omni 参考图" caption="Omni" file={refs.oref} accept="image/*"
-        onPick={(f) => onChange({ ...refs, oref: f })}
-        onRemove={() => onChange({ ...refs, oref: null })}
-      />
+      {SLOTS.map(({ key, label, caption }) => (
+        <FixedSlot
+          key={key}
+          label={label}
+          caption={caption}
+          file={refs[key]}
+          accept="image/*"
+          onPick={(f) => onChange({ ...refs, [key]: f })}
+          onRemove={() => onChange({ ...refs, [key]: null })}
+        />
+      ))}
     </div>
   );
 }

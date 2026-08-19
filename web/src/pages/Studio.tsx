@@ -369,6 +369,10 @@ function StudioFull() {
         ?? (referenceImages.length > 0
           ? await Promise.all(referenceImages.map(uploadReferenceImage))
           : []);
+      // MJ 的垫图走「图片」槽（通用参考图栏位在 MJ 下隐藏），仍落 reference_images → base64Array。
+      if (caps.family === 'midjourney' && !overrideConfig?.referenceImages && mjRefs.image) {
+        refPaths = [await uploadReferenceImage(mjRefs.image)];
+      }
       // sref/cref/oref 只吃公网 URL，后端会把这里的服务器路径经 OSS 转直链。
       // 再次生成时 overrideConfig 里已是路径，直接复用，不重新上传。
       if (caps.family === 'midjourney') {

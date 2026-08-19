@@ -794,7 +794,7 @@ export function PromptInput({
       }`}
     >
       <div className={`flex min-h-0 gap-2 transition-[height] duration-300 ${collapsed ? 'h-[60px]' : 'h-[92px]'}`}>
-        {(isOmni || (!isVideo && onReferenceImagesChange)) && (
+        {!isMj && (isOmni || (!isVideo && onReferenceImagesChange)) && (
           <div
             data-testid="reference-images-panel"
             className={`shrink-0 self-stretch relative overflow-visible transition-transform duration-300 origin-left ${collapsed ? 'scale-80' : ''}`}
@@ -1357,7 +1357,12 @@ export function PromptInput({
             <MjControls
               value={mjParams}
               onChange={(patch) => onMjParamsChange?.(patch)}
-              hasReferenceImages={referenceImages.length > 0}
+              filledRefs={{
+                image: Boolean(mjRefs.image),
+                sref: Boolean(mjRefs.sref),
+                cref: Boolean(mjRefs.cref),
+                oref: Boolean(mjRefs.oref),
+              }}
               menuDirection={menuDirection}
             />
           )}

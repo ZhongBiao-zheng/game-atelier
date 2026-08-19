@@ -69,6 +69,9 @@ describe('mjParamsFromJob', () => {
       no: 'blur',
       tile: true,
       iw: 2,
+      sw: 250,
+      cw: 50,
+      ow: 500,
     };
     expect(mjParamsFromJob(mjParamsToJob(original))).toEqual(original);
   });

@@ -9,6 +9,7 @@ import type { RoundConfig } from '@/components/studio/RoundList';
 import { normalizeStudioSizeForModel, studioSizeFor } from '@/lib/studioSize';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
+import { EMPTY_MJ_REFS, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import type { JobKind, JobParams } from '@/schema/jobs';
 
@@ -66,6 +67,7 @@ export function StudioCompact() {
   const [quality, setQuality] = useState<Quality>('low');
   // 与 StudioFull 同一政策：MJ 参数不进 localStorage，每次启动回默认。
   const [mjParams, setMjParams] = useState<MjParams>(MJ_DEFAULTS);
+  const [mjRefs, setMjRefs] = useState<MjRefSlots>(EMPTY_MJ_REFS);
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
@@ -199,11 +201,25 @@ export function StudioCompact() {
     setPending(true);
     setCompactError(null);
     let refPaths: string[];
+    let mjRefPaths: { sref?: string; cref?: string; oref?: string } = {};
     try {
       refPaths = overrideConfig?.referenceImages
         ?? (referenceImages.length > 0
           ? await Promise.all(referenceImages.map(uploadReferenceImage))
           : []);
+      // 与 StudioFull 同一套：MJ 的垫图走「图片」槽，另三种参考图各自上传拿服务器路径。
+      if (caps.family === 'midjourney' && !overrideConfig?.referenceImages && mjRefs.image) {
+        refPaths = [await uploadReferenceImage(mjRefs.image)];
+      }
+      if (caps.family === 'midjourney') {
+        mjRefPaths = overrideConfig?.mjRefPaths ?? Object.fromEntries(
+          await Promise.all(
+            (['sref', 'cref', 'oref'] as const)
+              .filter((slot) => mjRefs[slot])
+              .map(async (slot) => [slot, await uploadReferenceImage(mjRefs[slot]!)] as const),
+          ),
+        );
+      }
     } catch (e: any) {
       setPending(false);
       setCompactError(`参考图上传失败：${e.message}`);
@@ -220,7 +236,12 @@ export function StudioCompact() {
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
       // MJ 的控制全在 prompt flag 里，由后端 mj_image 拼接（同 StudioFull）。
       ...(caps.family === 'midjourney'
-        ? mjParamsToJob(overrideConfig?.mjParams ?? mjParams)
+        ? {
+            ...mjParamsToJob(overrideConfig?.mjParams ?? mjParams),
+            ...(mjRefPaths.sref ? { mj_sref: mjRefPaths.sref } : {}),
+            ...(mjRefPaths.cref ? { mj_cref: mjRefPaths.cref } : {}),
+            ...(mjRefPaths.oref ? { mj_oref: mjRefPaths.oref } : {}),
+          }
         : {}),
     };
 
@@ -346,6 +367,8 @@ export function StudioCompact() {
         quality={quality}
         mjParams={mjParams}
         onMjParamsChange={(patch) => setMjParams((prev) => ({ ...prev, ...patch }))}
+        mjRefs={mjRefs}
+        onMjRefsChange={setMjRefs}
         onProviderChange={setProviderAlias}
         onModelChange={setModel}
         onRatioChange={setRatio}

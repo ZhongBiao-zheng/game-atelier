@@ -5,8 +5,11 @@ import {
   MJ_BOT_TYPES,
   MJ_CHAOS_STEPS,
   MJ_IW_STEPS,
+  MJ_CW_STEPS,
   MJ_MODES,
+  MJ_OW_STEPS,
   MJ_STYLIZE_STEPS,
+  MJ_SW_STEPS,
   MJ_WEIRD_STEPS,
   mjSummary,
   normalizeVersion,
@@ -18,8 +21,8 @@ import { ToolbarPopover } from './ToolbarPopover';
 interface Props {
   value: MjParams;
   onChange: (patch: Partial<MjParams>) => void;
-  /** 有参考图时才显示垫图权重 —— 没有垫图的 --iw 对 MJ 无意义。 */
-  hasReferenceImages?: boolean;
+  /** 哪几个参考槽有图 —— 权重控件只在对应槽上传后出现（没有图的权重毫无意义）。 */
+  filledRefs?: { image?: boolean; sref?: boolean; cref?: boolean; oref?: boolean };
   menuDirection?: 'up' | 'down';
 }
 
@@ -31,7 +34,7 @@ interface Props {
 export function MjControls({
   value,
   onChange,
-  hasReferenceImages = false,
+  filledRefs = {},
   menuDirection = 'up',
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -118,6 +121,58 @@ export function MjControls({
             </div>
           </Section>
 
+          {filledRefs.image && (
+            <Section title="垫图权重 iw" hint="图片槽那张对结果的影响强度">
+              <div role="listbox" aria-label="选择垫图权重" className="grid h-9 grid-cols-5 rounded-lg bg-popover p-0.5">
+                <SegmentButton selected={value.iw === null} onClick={() => onChange({ iw: null })}>默认</SegmentButton>
+                {MJ_IW_STEPS.map((item) => (
+                  <SegmentButton key={item} selected={value.iw === item} onClick={() => onChange({ iw: item })}>
+                    {item}
+                  </SegmentButton>
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {filledRefs.sref && (
+            <Section title="风格权重 sw" hint="风格参考图的影响强度（0-1000）">
+              <div role="listbox" aria-label="选择风格权重" className="grid h-9 grid-cols-6 rounded-lg bg-popover p-0.5">
+                <SegmentButton selected={value.sw === null} onClick={() => onChange({ sw: null })}>默认</SegmentButton>
+                {MJ_SW_STEPS.map((item) => (
+                  <SegmentButton key={item} selected={value.sw === item} onClick={() => onChange({ sw: item })}>
+                    {item}
+                  </SegmentButton>
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {filledRefs.cref && (
+            <Section title="角色权重 cw" hint="角色参考图的影响强度（0-100）">
+              <div role="listbox" aria-label="选择角色权重" className="grid h-9 grid-cols-5 rounded-lg bg-popover p-0.5">
+                <SegmentButton selected={value.cw === null} onClick={() => onChange({ cw: null })}>默认</SegmentButton>
+                {MJ_CW_STEPS.map((item) => (
+                  <SegmentButton key={item} selected={value.cw === item} onClick={() => onChange({ cw: item })}>
+                    {item}
+                  </SegmentButton>
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {filledRefs.oref && (
+            <Section title="Omni 权重 ow" hint="Omni 参考图的影响强度（0-1000）">
+              <div role="listbox" aria-label="选择 Omni 权重" className="grid h-9 grid-cols-6 rounded-lg bg-popover p-0.5">
+                <SegmentButton selected={value.ow === null} onClick={() => onChange({ ow: null })}>默认</SegmentButton>
+                {MJ_OW_STEPS.map((item) => (
+                  <SegmentButton key={item} selected={value.ow === item} onClick={() => onChange({ ow: item })}>
+                    {item}
+                  </SegmentButton>
+                ))}
+              </div>
+            </Section>
+          )}
+
           <Section title="混乱度 chaos" hint="越高，四张方案之间差异越大">
             <div role="listbox" aria-label="选择混乱度" className="grid grid-cols-5 gap-0.5 rounded-lg bg-popover p-0.5">
               {MJ_CHAOS_STEPS.map((item) => (
@@ -167,19 +222,6 @@ export function MjControls({
               <SegmentButton selected={!value.tile} onClick={() => onChange({ tile: false })}>关闭</SegmentButton>
             </div>
           </Section>
-
-          {hasReferenceImages && (
-            <Section title="垫图权重 iw" hint="参考图对结果的影响强度">
-              <div role="listbox" aria-label="选择垫图权重" className="grid h-9 grid-cols-5 rounded-lg bg-popover p-0.5">
-                <SegmentButton selected={value.iw === null} onClick={() => onChange({ iw: null })}>默认</SegmentButton>
-                {MJ_IW_STEPS.map((item) => (
-                  <SegmentButton key={item} selected={value.iw === item} onClick={() => onChange({ iw: item })}>
-                    {item}
-                  </SegmentButton>
-                ))}
-              </div>
-            </Section>
-          )}
         </div>
       </ToolbarPopover>
     </div>
