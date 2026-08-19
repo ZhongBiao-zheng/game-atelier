@@ -261,11 +261,13 @@ def test_on_phase_reports_sent_then_downloading(mj_key, tmp_path, monkeypatch):
     assert phases == ["sent", "downloading"]
 
 def test_reference_flags_go_through_oss(mj_key, tmp_path, monkeypatch):
-    """sref/cref/oref 只吃公网 URL —— 本地路径必须先经 OSS 转直链再拼 flag。"""
+    """sref/cref/oref 只吃公网 URL —— 本地路径必须先经 OSS 转**无签名**直链再拼 flag。
+
+    presigned 那串 ?OSSAccessKeyId=...&Signature=... 会被 MJ 判 prompt 格式错误。"""
     posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
     uploaded: list[str] = []
     monkeypatch.setattr(
-        "character_workflow.lib.oss_upload.upload_for_url",
+        "character_workflow.lib.oss_upload.upload_for_public_url",
         lambda path: uploaded.append(str(path)) or f"https://oss.example/{Path(path).name}",
     )
 
@@ -289,7 +291,7 @@ def test_reference_urls_skip_oss(mj_key, tmp_path, monkeypatch):
     def _boom(path):
         raise AssertionError(f"不该为 http 直链调 OSS: {path}")
 
-    monkeypatch.setattr("character_workflow.lib.oss_upload.upload_for_url", _boom)
+    monkeypatch.setattr("character_workflow.lib.oss_upload.upload_for_public_url", _boom)
 
     _render(tmp_path, n=4, params={"mj_sref": "https://cdn.example/a.png"})
     assert "--sref https://cdn.example/a.png" in posted[0]["body"]["prompt"]
@@ -298,7 +300,7 @@ def test_reference_urls_skip_oss(mj_key, tmp_path, monkeypatch):
 def test_reference_weight_omitted_when_unset(mj_key, tmp_path, monkeypatch):
     posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
     monkeypatch.setattr(
-        "character_workflow.lib.oss_upload.upload_for_url",
+        "character_workflow.lib.oss_upload.upload_for_public_url",
         lambda path: "https://oss.example/x.png",
     )
     _render(tmp_path, n=4, params={"mj_cref": "/local/c.png"})

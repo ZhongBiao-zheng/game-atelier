@@ -79,9 +79,12 @@ def _json(resp) -> dict[str, Any]:
 
 
 def _err(payload: dict[str, Any], status_code: int) -> str:
+    # failReason 必须排在 description 前面：轮询响应里的 description 恒为提交时那句
+    # "Submit Success"，按 description 优先会把真正的失败原因（在 failReason 里）整条挡住，
+    # 报出一个「错误消息是 Submit Success」的荒诞结果（2026-08-19 实测踩到）。
     raw = str(
-        payload.get("description")
-        or payload.get("failReason")
+        payload.get("failReason")
+        or payload.get("description")
         or payload.get("message")
         or f"Midjourney 上游 HTTP {status_code}"
     ).strip()
@@ -115,13 +118,17 @@ _REF_FLAG_SPECS: tuple[tuple[str, str, str, str], ...] = (
 
 
 def _public_url(path_or_url: str) -> str:
-    """本地文件 → OSS presigned 直链；已经是 http(s) 的原样返回。"""
+    """本地文件 → OSS 公开读直链；已经是 http(s) 的原样返回。
+
+    必须是**无签名**的干净 URL：MJ 要求以图片扩展名结尾，presigned 那串 query 会被它
+    判成 prompt 格式错误（见 oss_upload.upload_for_public_url 的说明）。
+    """
     s = str(path_or_url).strip()
     if s.startswith(("http://", "https://")):
         return s
     from character_workflow.lib import oss_upload
 
-    return oss_upload.upload_for_url(s)
+    return oss_upload.upload_for_public_url(s)
 
 
 def _ref_flags(params: dict[str, Any]) -> list[str]:
