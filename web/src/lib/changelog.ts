@@ -1,0 +1,131 @@
+/** 版本更新日志 —— 顶栏「更新」入口的数据源。
+ *
+ * 为什么放前端常量而不是后端接口：更新日志是随代码一起发布的静态内容，跟版本同生命周期。
+ * 走接口就要多一份运行时数据、多一条失败路径，而它永远不会在运行期变化。
+ *
+ * **发版时怎么加**：在数组**开头**插一条（新版在前），version 与 `.claude-plugin/plugin.json`
+ * 的 version 保持一致 —— 两处真值必然漂移，所以 changelog.test.ts 里有一条断言把它们钉死，
+ * 忘了同步会红。文案写给画师看：说这版能做什么，不是 commit message。
+ */
+export type ChangeKind = 'feat' | 'fix';
+
+export interface ChangelogChange {
+  kind: ChangeKind;
+  text: string;
+}
+
+export interface ChangelogEntry {
+  version: string;
+  /** YYYY-MM-DD */
+  date: string;
+  /** 一句话概括这版的主题，显示在版本号下方。 */
+  headline: string;
+  changes: ChangelogChange[];
+}
+
+export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
+  feat: '新增',
+  fix: '修复',
+};
+
+/** 新版在前。第一条的 version 即当前版本。 */
+export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '5.18.0',
+    date: '2026-08-19',
+    headline: '出图台接入 Midjourney',
+    changes: [
+      { kind: 'feat', text: '模型里多了 Midjourney，一次出四张，四张都会入库' },
+      {
+        kind: 'feat',
+        text: '全套参数面板：版本（v8.2 / v8.1 / v8 / v7 / v6.1 / v6 与 niji 7 / 6 / 5）、速度、风格化、混乱度、怪异度、种子、排除词、平铺',
+      },
+      {
+        kind: 'feat',
+        text: '四种参考图分槽：图片（垫图）、风格、角色、Omni，各自带权重控件，只在该槽有图时出现',
+      },
+      { kind: 'feat', text: '出图记录会显示这次实际用的参数串，方便复现和对照' },
+      { kind: 'fix', text: '当前版本不支持的参考图槽会直接置灰，不再等到出图失败才知道' },
+    ],
+  },
+  {
+    version: '5.17.0',
+    date: '2026-08-17',
+    headline: '一个入口进所有工作流',
+    changes: [
+      {
+        kind: 'feat',
+        text: '新增总控命令 /game-atelier:game-atelier，说想做什么就会带到对应的工作流',
+      },
+    ],
+  },
+  {
+    version: '5.16.0',
+    date: '2026-08-17',
+    headline: '出图记录能直接复用',
+    changes: [
+      { kind: 'feat', text: '图卡上可以把这次的提示词和参考图一键导入输入框，改了再出' },
+      { kind: 'feat', text: '首页作品点进去会定位到它所在的那条出图记录' },
+      { kind: 'fix', text: '导入后输入壳会自动展开，不用手动点开才看得见' },
+    ],
+  },
+  {
+    version: '5.15.0',
+    date: '2026-08-16',
+    headline: '插件有新版会主动提醒',
+    changes: [{ kind: 'feat', text: '用 skill 时顺路检查插件新版本，有更新会提示' }],
+  },
+  {
+    version: '5.14.0',
+    date: '2026-08-14',
+    headline: '启动与尺寸记忆的一批修复',
+    changes: [
+      { kind: 'fix', text: '尺寸按上次记录的选择恢复，不再因为默认值变了被改掉' },
+      { kind: 'fix', text: '依赖清单变化时自动补装前端依赖，不用手动跑安装' },
+      { kind: 'fix', text: '更新检查失败时会明确报出来，不再静默跳过' },
+    ],
+  },
+];
+
+export const CURRENT_VERSION = CHANGELOG[0].version;
+
+/** 展示顺序固定「先新增、后修复」，不按录入顺序 —— 画师先关心多了什么能力。 */
+const KIND_ORDER: ChangeKind[] = ['feat', 'fix'];
+
+/** 把一版的改动按类型归堆。
+ *
+ * 版式上这一步是关键：不分组的话「新增」标签会在同一版里重复四五次，正文左缘被标签顶得
+ * 参差不齐；归堆后标签只出现一次，下面的条目共用一条左缘，一眼看得出这版加了几件事。
+ */
+export function groupChanges(changes: ChangelogChange[]): [ChangeKind, ChangelogChange[]][] {
+  return KIND_ORDER.map(
+    (kind) => [kind, changes.filter((c) => c.kind === kind)] as [ChangeKind, ChangelogChange[]],
+  ).filter(([, list]) => list.length > 0);
+}
+
+const SEEN_KEY = 'atelier:changelog-seen';
+
+export function loadSeenVersion(): string | null {
+  try {
+    return window.localStorage.getItem(SEEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveSeenVersion(version: string): void {
+  try {
+    window.localStorage.setItem(SEEN_KEY, version);
+  } catch {
+    // 隐私模式 / 存储写满：读不到就是每次都当已读，不该因此让顶栏崩掉
+  }
+}
+
+/** 是否有没读过的更新。
+ *
+ * 首次使用（没有任何记录）**不算未读** —— 新用户不该一进来就被历史更新日志拦住，
+ * 调用方会静默把当前版本写成已读。只有「读过旧版本、之后升级了」才提示。
+ */
+export function hasUnreadChangelog(seen: string | null): boolean {
+  return seen !== null && seen !== CURRENT_VERSION;
+}

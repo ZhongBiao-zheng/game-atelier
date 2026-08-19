@@ -3,6 +3,7 @@ import { LayoutGroup, motion } from 'motion/react';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
 import { HomeIcon, Moon, Settings, Sparkles, Sun, UserRound } from 'lucide-react';
 
+import { ChangelogButton } from '@/components/ChangelogButton';
 import { Home } from '@/pages/Home';
 import { Studio } from '@/pages/Studio';
 import { CharacterDetail } from '@/pages/CharacterDetail';
@@ -91,6 +92,7 @@ export function AppShell() {
             </nav>
           </LayoutGroup>
           <div className="flex min-w-0 shrink-0 items-center justify-end gap-2">
+            <ChangelogButton />
             <ThemeToggle />
             <Link
               href="/settings"

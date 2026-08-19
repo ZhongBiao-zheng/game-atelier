@@ -15,6 +15,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   window.localStorage.removeItem('atelier:theme');
+  window.localStorage.removeItem('atelier:changelog-seen');
   document.documentElement.classList.remove('light');
 });
 
