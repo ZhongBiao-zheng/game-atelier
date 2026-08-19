@@ -2,6 +2,7 @@ import {
   createPortal,
 } from 'react-dom';
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -17,6 +18,9 @@ interface Props {
   anchorRef: RefObject<HTMLElement | null>;
   /** 向上弹（bottom-full）还是向下弹（top-full）。 */
   direction?: 'up' | 'down';
+  /** 面板与锚点的横向对齐：start = 左边缘对齐（默认），end = 右边缘对齐。
+   *  靠屏幕右侧的锚点（顶栏图标钮）必须用 end，否则宽面板会溢出视口。 */
+  align?: 'start' | 'end';
   /** 面板视觉类（宽度 / 圆角 / 背景 / 内边距），不含定位类。 */
   className?: string;
   role?: string;
@@ -39,24 +43,43 @@ export function ToolbarPopover({
   onClose,
   anchorRef,
   direction = 'up',
+  align = 'start',
   className = '',
   children,
   ...rest
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
+  const [pos, setPos] = useState<{
+    left?: number;
+    right?: number;
+    top?: number;
+    bottom?: number;
+  } | null>(null);
+  /** 是否已经用「面板渲染后的实测宽度」摆过一次（每次开合重置）。 */
+  const measured = useRef(false);
+
+  const place = useCallback(() => {
+    const a = anchorRef.current;
+    if (!a) return;
+    const r = a.getBoundingClientRect();
+    // 贴锚点，但两侧都夹在视口内：窄屏下宽面板贴锚点右缘会把左边缘顶出屏幕外
+    // （375px 视口实测 left=-104）。宽度要等面板渲染出来才量得到，所以首帧按锚点摆，
+    // 面板落地后由下面那个 layout effect 带着实测宽度再摆一次。
+    const w = panelRef.current?.offsetWidth ?? 0;
+    const clamp = (v: number) => Math.max(GAP, Math.min(v, window.innerWidth - w - GAP));
+    const x =
+      align === 'end' ? { right: clamp(window.innerWidth - r.right) } : { left: clamp(r.left) };
+    setPos(
+      direction === 'down'
+        ? { ...x, top: r.bottom + GAP }
+        : { ...x, bottom: window.innerHeight - r.top + GAP },
+    );
+  }, [align,anchorRef, direction]);
 
   useLayoutEffect(() => {
-    if (!open) return;
-    function place() {
-      const a = anchorRef.current;
-      if (!a) return;
-      const r = a.getBoundingClientRect();
-      if (direction === 'down') {
-        setPos({ left: r.left, top: r.bottom + GAP });
-      } else {
-        setPos({ left: r.left, bottom: window.innerHeight - r.top + GAP });
-      }
+    if (!open) {
+      measured.current = false;
+      return;
     }
     place();
     window.addEventListener('scroll', place, true);
@@ -65,7 +88,15 @@ export function ToolbarPopover({
       window.removeEventListener('scroll', place, true);
       window.removeEventListener('resize', place);
     };
-  }, [open, direction, anchorRef]);
+  }, [open, place]);
+
+  // 二次定位走 layout effect 而不是 rAF：标签页在后台时 rAF 被节流，面板会卡在首帧
+  // 那个没夹紧的位置（本仓在 framer-motion 上踩过同一个节流坑）。
+  useLayoutEffect(() => {
+    if (!open || pos === null || measured.current || !panelRef.current) return;
+    measured.current = true;
+    place();
+  }, [open, pos, place]);
 
   useEffect(() => {
     if (!open) return;
@@ -84,7 +115,14 @@ export function ToolbarPopover({
     <div
       ref={panelRef}
       data-toolbar-popover=""
-      style={{ position: 'fixed', left: pos.left, top: pos.top, bottom: pos.bottom, zIndex: 50 }}
+      style={{
+        position: 'fixed',
+        left: pos.left,
+        right: pos.right,
+        top: pos.top,
+        bottom: pos.bottom,
+        zIndex: 50,
+      }}
       className={className}
       {...rest}
     >

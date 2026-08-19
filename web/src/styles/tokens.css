@@ -157,6 +157,37 @@
      = 持续抽搐（工坊列数 2-3 列实测）。scrollbar-gutter:stable 让内宽恒定，斩断这条反馈环。 */
   .stable-scroll { scrollbar-gutter: stable; }
 
+  /* 浮层进入：从触发器方向轻微下沉 + 淡入。与 ConfirmDialog 的 dialogIn 同一动效语言
+     （150ms ease-out），但走工具类而不是 tsx 内联 style，浮层各处能共用。
+     reduced-motion 下整条关掉——动效只是空间提示，不携带信息。 */
+  @keyframes popoverIn {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .popover-in {
+    animation: popoverIn 150ms ease-out;
+    transform-origin: top center;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .popover-in {
+      animation: none;
+    }
+  }
+
+  /* 可滚动区底部渐隐：明示「下面还有内容」。硬切边缘在暗底上尤其像内容被截断。
+     用 mask 而不是渐变遮罩层——DESIGN.md 禁 bg-gradient，且遮罩层会挡住滚动条。
+     滚到底时调用方摘掉这个类，否则最后一行会一直半透明。 */
+  .scroll-fade-b {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+  }
+
   /* tapnow 玻璃卡配方：顶部 0.5px inset 发丝高光 + 一层极淡软投影。
      这是设计身份内唯一放行的阴影（DESIGN.md Elevation）—— 封装在 CSS 工具类、
      不进 tsx 内联，漂移守卫扫不到也无需放开正则（方案 A）。 */
