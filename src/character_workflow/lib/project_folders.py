@@ -8,14 +8,13 @@ from uuid import uuid4
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_text
 from character_workflow.lib.jobs import job_lock
-from character_workflow.lib.projects import read_projects
+from character_workflow.lib.projects import read_projects, resolve_project
 from character_workflow.lib.schemas import (
     Project,
     ProjectFolder,
     ProjectFolderItem,
     ProjectFoldersFile,
 )
-from character_workflow.lib.ui_jobs import resolve_project
 
 
 def _path(project: Project) -> Path:
@@ -157,14 +156,29 @@ def _validate_asset(project: Project, item: ProjectFolderItem) -> None:
             assignments.get(item.asset_id) == project.id
             and (data_root.characters_dir() / item.asset_id).is_dir()
         )
-    elif item.kind == "ui_screen":
-        screens_root = data_root.projects_dir() / project.slug / "screens"
+    elif item.kind in ("ui_scheme", "ui_screen"):
+        from character_workflow.lib.ui_schemes import read_schemes, scheme_screens_dir
+
+        schemes = read_schemes(project.id)
+        if item.kind == "ui_scheme":
+            exists = any(scheme.id == item.asset_id for scheme in schemes.schemes)
+            if not exists:
+                raise ValueError(f"资产 {item.asset_id} 不存在或不属于这个项目")
+            return
+        scheme = next(
+            (candidate for candidate in schemes.schemes if candidate.id == item.scheme_id),
+            None,
+        )
+        if scheme is None:
+            raise ValueError(f"UI 方案 {item.scheme_id} 不存在或不属于这个项目")
+        screens_root = scheme_screens_dir(project, scheme.id)
         directory_ids = {
             path.name for path in screens_root.iterdir() if path.is_dir()
         } if screens_root.is_dir() else set()
         from character_workflow.lib.workspace_summary import project_workspace_summary
         planned_ids = {
-            screen.screen_id for screen in project_workspace_summary(project.id).ui.screen_items
+            screen.screen_id
+            for screen in project_workspace_summary(project.id, scheme.id).ui.screen_items
         }
         exists = item.asset_id in directory_ids | planned_ids
     else:

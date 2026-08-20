@@ -77,16 +77,26 @@ describe('AppShell', () => {
           ok: true,
           json: async () => ({ folders: [{
             id: 'folder-summer', name: '夏日版本', note: '', created_at: '',
-            items: [{ kind: 'ui_screen', asset_id: 'home' }],
+            items: [{ kind: 'ui_screen', asset_id: 'home', scheme_id: 'v1' }],
           }] }),
         };
       }
-      if (path === '/api/projects/p1/workspaces') {
+      if (path === '/api/projects/p1/ui-schemes') {
+        return {
+          ok: true,
+          json: async () => ({
+            default_scheme_id: 'v1',
+            schemes: [{ id: 'v1', name: 'V1', created_at: '' }],
+          }),
+        };
+      }
+      if (path.startsWith('/api/projects/p1/workspaces')) {
         return {
           ok: true,
           json: async () => ({
             project_id: 'p1', art: { characters: 0, canonical: 0, stale: 0 },
             ui: {
+              scheme_id: 'v1',
               anchors: {}, anchors_approved: 0, style_status: 'missing', has_ui_style: false,
               screen_map_status: 'draft', screens: 1, versions: 0, canonical: 0, stale: 0,
               screen_items: [{ screen_id: 'home', name: '主界面', category: '', priority: '', status: 'planned', dependency: '', purpose: '', brief_summary: '' }],
@@ -99,13 +109,16 @@ describe('AppShell', () => {
       if (path === '/api/projects/p1/videos') {
         return { ok: true, json: async () => ({ productions: [] }) };
       }
+      if (path === '/api/gallery/screens?project=p1&scheme=v1') {
+        return { ok: true, json: async () => ({ items: [] }) };
+      }
       return { ok: true, json: async () => ({}) };
     }));
 
     renderAt('/workshop/p1/folders/folder-summer/ui');
 
     expect(await screen.findByDisplayValue('夏日版本')).toBeInTheDocument();
-    expect(screen.getByText('主界面')).toBeInTheDocument();
+    expect(screen.getByText('V1 · 主界面')).toBeInTheDocument();
     const breadcrumbs = screen.getByRole('navigation', { name: '面包屑' });
     expect(within(breadcrumbs).getByText('文件夹')).toBeInTheDocument();
     expect(within(breadcrumbs).getByText('夏日版本')).toHaveAttribute('aria-current', 'page');
@@ -319,13 +332,23 @@ describe('AppShell', () => {
           }),
         };
       }
-      if (url === '/api/projects/p1/workspaces') {
+      if (url === '/api/projects/p1/ui-schemes') {
+        return {
+          ok: true,
+          json: async () => ({
+            default_scheme_id: 'v1',
+            schemes: [{ id: 'v1', name: 'V1', created_at: '' }],
+          }),
+        };
+      }
+      if (String(url).startsWith('/api/projects/p1/workspaces')) {
         return {
           ok: true,
           json: async () => ({
             project_id: 'p1',
             art: { characters: 1, canonical: 0, stale: 0 },
             ui: {
+              scheme_id: 'v1',
               anchors: { gdd: 'missing', prd: 'missing', interaction: 'missing' },
               anchors_approved: 0,
               style_status: 'missing',
@@ -343,10 +366,10 @@ describe('AppShell', () => {
           }),
         };
       }
-      if (url === '/api/gallery/screens?project=p1') {
+      if (url === '/api/gallery/screens?project=p1&scheme=v1') {
         return { ok: true, json: async () => ({ items: [] }) };
       }
-      if (url === '/api/projects/p1/screens/canonical') {
+      if (url === '/api/projects/p1/ui-schemes/v1/screens/canonical') {
         return { ok: true, json: async () => ({ screens: {} }) };
       }
       return { ok: true, json: async () => ({}) };
@@ -362,7 +385,7 @@ describe('AppShell', () => {
 
     expect(await screen.findByRole('navigation', { name: '项目工作区' })).toBeInTheDocument();
     fireEvent.click(within(screen.getByRole('navigation', { name: '项目工作区' })).getByRole('link', { name: /UI/ }));
-    await waitFor(() => expect(location.history.at(-1)).toBe('/workshop/p1/ui'));
+    await waitFor(() => expect(location.history.at(-1)).toBe('/workshop/p1/ui/v1'));
 
     // 浏览器 Back 会把 URL 恢复到上一项；页面只依赖 URL，因此对象与工作区同时恢复。
     act(() => location.navigate(artPath));

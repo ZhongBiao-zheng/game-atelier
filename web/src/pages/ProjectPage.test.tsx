@@ -1,5 +1,5 @@
 // web/src/pages/ProjectPage.test.tsx
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectPage } from './ProjectPage';
 
@@ -30,9 +30,9 @@ const works = [
 ];
 
 const screenItems = [
-  { screen_id: 'home', filename: 'v2.png', path: 'projects/pokemon/screens/home/v2.png', job_id: 'job-ui-2', style_variant: '厚涂写实', base_version: 'v1.png', model: 'gpt-image-2', provider: 'openai', prompt: '主界面提示词', mtime: 200 },
-  { screen_id: 'home', filename: 'v1.png', path: 'projects/pokemon/screens/home/v1.png', job_id: null, style_variant: null, base_version: null, model: null, provider: null, prompt: null, mtime: 150 },
-  { screen_id: 'battle', filename: 'v1.png', path: 'projects/pokemon/screens/battle/v1.png', job_id: null, style_variant: null, base_version: null, model: null, provider: null, prompt: null, mtime: 120 },
+  { screen_id: 'home', filename: 'v2.png', path: 'projects/pokemon/ui/v1/screens/home/v2.png', job_id: 'job-ui-2', style_variant: '厚涂写实', base_version: 'v1.png', model: 'gpt-image-2', provider: 'openai', prompt: '主界面提示词', mtime: 200 },
+  { screen_id: 'home', filename: 'v1.png', path: 'projects/pokemon/ui/v1/screens/home/v1.png', job_id: null, style_variant: null, base_version: null, model: null, provider: null, prompt: null, mtime: 150 },
+  { screen_id: 'battle', filename: 'v1.png', path: 'projects/pokemon/ui/v1/screens/battle/v1.png', job_id: null, style_variant: null, base_version: null, model: null, provider: null, prompt: null, mtime: 120 },
 ];
 
 const emptyScreenCanonical = { screens: {} };
@@ -40,6 +40,7 @@ const workspaceSummary = {
   project_id: 'p1',
   art: { characters: 3, canonical: 2, stale: 0 },
   ui: {
+    scheme_id: 'v1',
     anchors: { gdd: 'approved', prd: 'approved', interaction: 'approved' },
     anchors_approved: 3,
     style_status: 'approved',
@@ -67,6 +68,7 @@ const workspaceSummary = {
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
     if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
     if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
       return { ok: true, json: async () => ({ items: works }) } as Response;
@@ -124,6 +126,7 @@ describe('ProjectPage', () => {
 
   it('项目没有作品时不渲染作品区', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
       if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
       if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
         return { ok: true, json: async () => ({ items: [] }) } as Response;
@@ -136,20 +139,20 @@ describe('ProjectPage', () => {
   });
 
   it('UI 总览按 screen-map 展示页面地图并链接详情', async () => {
-    render(<ProjectPage projectId="p1" workspace="ui" />);
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
     await waitFor(() => expect(screen.getByRole('region', { name: '页面地图' })).toBeInTheDocument());
     expect(screen.getByRole('link', { name: /主界面/ })).toHaveAttribute(
-      'href', '/workshop/p1/ui/screens/home',
+      'href', '/workshop/p1/ui/v1/screens/home',
     );
     expect(screen.getAllByText('待定稿')).toHaveLength(2);
     expect(screen.queryByText('待设计')).not.toBeInTheDocument();
   });
 
   it('页面详情按 screen-id 列出版本图', async () => {
-    render(<ProjectPage projectId="p1" workspace="ui" screenId="home" />);
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" screenId="home" />);
     await waitFor(() => expect(screen.getByTestId('project-screens')).toBeInTheDocument());
     expect(screen.getByRole('link', { name: '查看页面 home 的 v2.png' }).getAttribute('href')).toBe(
-      '/api/gallery/image?path=projects%2Fpokemon%2Fscreens%2Fhome%2Fv2.png',
+      '/api/gallery/image?path=projects%2Fpokemon%2Fui%2Fv1%2Fscreens%2Fhome%2Fv2.png',
     );
     expect(screen.getByRole('link', { name: '查看页面 home 的 v1.png' })).toBeInTheDocument();
     expect(screen.getByText('让玩家查看全部核心功能入口')).toBeInTheDocument();
@@ -159,6 +162,7 @@ describe('ProjectPage', () => {
 
   it('项目没有页面图时不渲染「页面」区', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
       if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
       if (typeof url === 'string' && url.startsWith('/api/gallery/screens')) {
         return { ok: true, json: async () => ({ items: [] }) } as Response;
@@ -171,13 +175,13 @@ describe('ProjectPage', () => {
       }
       return { ok: true, json: async () => sample } as Response;
     }));
-    render(<ProjectPage projectId="p1" workspace="ui" />);
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
     await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
     expect(screen.queryByTestId('project-screens')).toBeNull();
   });
 
   it('风格候选标风格名与来源版本，普通版本退回文件名', async () => {
-    render(<ProjectPage projectId="p1" workspace="ui" screenId="home" />);
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" screenId="home" />);
     await waitFor(() => expect(screen.getByTestId('project-screens')).toBeInTheDocument());
     expect(screen.getByText('厚涂写实')).toBeInTheDocument();
     expect(screen.getByText('← v1.png')).toBeInTheDocument();
@@ -186,11 +190,12 @@ describe('ProjectPage', () => {
 
   it('点定稿按钮 POST screen canonical，再点取消传 null', async () => {
     const canonicalAfterSet = {
-      screens: { home: { path: 'projects/pokemon/screens/home/v2.png', set_at: 'x', style_variant: '厚涂写实' } },
+      screens: { home: { path: 'projects/pokemon/ui/v1/screens/home/v2.png', set_at: 'x', style_variant: '厚涂写实' } },
     };
     let posted: unknown[] = [];
     let workspaceReads = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
       if (init?.method === 'POST' && typeof url === 'string' && url.includes('/screens/canonical')) {
         const body = JSON.parse(String(init.body));
         posted.push(body);
@@ -213,12 +218,12 @@ describe('ProjectPage', () => {
       return { ok: true, json: async () => sample } as Response;
     }));
 
-    render(<ProjectPage projectId="p1" workspace="ui" screenId="home" />);
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" screenId="home" />);
     await waitFor(() => expect(screen.getByTestId('project-screens')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: '设为定稿 v2.png' }));
     await waitFor(() => expect(screen.getByText('定稿')).toBeInTheDocument());
-    expect(posted[0]).toEqual({ screen_id: 'home', path: 'projects/pokemon/screens/home/v2.png' });
+    expect(posted[0]).toEqual({ screen_id: 'home', path: 'projects/pokemon/ui/v1/screens/home/v2.png' });
     await waitFor(() => expect(workspaceReads).toBeGreaterThanOrEqual(2));
 
     fireEvent.click(screen.getByRole('button', { name: '取消定稿 v2.png' }));
@@ -230,7 +235,7 @@ describe('ProjectPage', () => {
     const staleCanonical = {
       screens: {
         home: {
-          path: 'projects/pokemon/screens/home/v2.png',
+          path: 'projects/pokemon/ui/v1/screens/home/v2.png',
           set_at: 'x',
           style_variant: '厚涂写实',
           style_stale: true,
@@ -238,6 +243,7 @@ describe('ProjectPage', () => {
       },
     };
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
       if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
       if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
         return { ok: true, json: async () => ({ items: works }) } as Response;
@@ -251,7 +257,7 @@ describe('ProjectPage', () => {
       return { ok: true, json: async () => sample } as Response;
     }));
 
-    render(<ProjectPage projectId="p1" workspace="ui" screenId="home" />);
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" screenId="home" />);
     await waitFor(() => expect(screen.getByTestId('project-screens')).toBeInTheDocument());
     expect(await screen.findByText('定稿')).toBeInTheDocument();
     expect(await screen.findByText('风格已变更')).toBeInTheDocument();
@@ -260,7 +266,7 @@ describe('ProjectPage', () => {
   });
 
   it('内容页不再重复渲染项目壳导航和返回按钮', async () => {
-    render(<ProjectPage projectId="p1" workspace="ui" />);
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
     await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
     expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
     expect(screen.queryByText('返回工坊')).not.toBeInTheDocument();
@@ -285,13 +291,16 @@ describe('ProjectPage', () => {
   });
 
   it('UI 工作区显示文件系统推导出的唯一下一步', async () => {
-    render(<ProjectPage projectId="p1" workspace="ui" />);
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
     expect(await screen.findByText('下一步：完成风格定稿')).toBeInTheDocument();
     expect(screen.getByText('/game-atelier:ui-page')).toBeInTheDocument();
   });
 
   it('screen-map 只有规划页时不把基准页标为完成', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) {
+        return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
+      }
       if (url.includes('/workspaces')) {
         return {
           ok: true,
@@ -305,7 +314,7 @@ describe('ProjectPage', () => {
       if (url.includes('/screens/canonical')) return { ok: true, json: async () => emptyScreenCanonical } as Response;
       return { ok: true, json: async () => sample } as Response;
     }));
-    render(<ProjectPage projectId="p1" workspace="ui" />);
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
 
     const baseStep = await screen.findByText('3. 基准页');
     expect(baseStep.parentElement).toHaveTextContent('未开始');
@@ -314,6 +323,9 @@ describe('ProjectPage', () => {
 
   it('全部页面定稿后把逐页生成标为完成', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) {
+        return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
+      }
       if (url.includes('/workspaces')) {
         return {
           ok: true,
@@ -334,15 +346,141 @@ describe('ProjectPage', () => {
       if (url.includes('/screens/canonical')) return { ok: true, json: async () => emptyScreenCanonical } as Response;
       return { ok: true, json: async () => sample } as Response;
     }));
-    render(<ProjectPage projectId="p1" workspace="ui" />);
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
 
     const generateStep = await screen.findByText('6. 逐页生成');
     expect(generateStep.parentElement).toHaveTextContent('已完成');
     expect(screen.getByText('下一步：复核 UI 页面交付')).toBeInTheDocument();
   });
 
+  it('可从当前方案复制风格、页面地图和指定页面创建新方案', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/ui-schemes') && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            default_scheme_id: 'v1',
+            schemes: [
+              { id: 'v1', name: 'V1', created_at: '' },
+              { id: 'v2', name: '夏日 V2', created_at: '' },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) {
+        return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
+      }
+      if (url.includes('/gallery/screens')) return { ok: true, json: async () => ({ items: screenItems }) } as Response;
+      if (url.includes('/screens/canonical')) return { ok: true, json: async () => emptyScreenCanonical } as Response;
+      if (url.includes('/workspaces')) return { ok: true, json: async () => workspaceSummary } as Response;
+      return { ok: true, json: async () => sample } as Response;
+    }));
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '新建方案' }));
+    const form = screen.getByRole('form', { name: '新建 UI 方案' });
+    fireEvent.change(screen.getByLabelText('方案名称'), { target: { value: '夏日 V2' } });
+    fireEvent.click(within(form).getByLabelText('主界面'));
+    fireEvent.click(screen.getByRole('button', { name: '创建并打开' }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/projects/p1/ui-schemes',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          name: '夏日 V2',
+          source_scheme_id: 'v1',
+          copy_style: true,
+          copy_screen_map: true,
+          screen_ids: ['home'],
+        }),
+      }),
+    ));
+    expect(form).not.toBeInTheDocument();
+  });
+
+  it('可把当前方案设为默认且不删除其他方案', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/ui-schemes/default') && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            default_scheme_id: 'v2',
+            schemes: [
+              { id: 'v1', name: 'V1', created_at: '' },
+              { id: 'v2', name: '夏日 V2', created_at: '' },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) {
+        return {
+          ok: true,
+          json: async () => ({
+            default_scheme_id: 'v1',
+            schemes: [
+              { id: 'v1', name: 'V1', created_at: '' },
+              { id: 'v2', name: '夏日 V2', created_at: '' },
+            ],
+          }),
+        } as Response;
+      }
+      if (url.includes('/gallery/screens')) return { ok: true, json: async () => ({ items: [] }) } as Response;
+      if (url.includes('/screens/canonical')) return { ok: true, json: async () => emptyScreenCanonical } as Response;
+      if (url.includes('/workspaces')) {
+        return {
+          ok: true,
+          json: async () => ({ ...workspaceSummary, ui: { ...workspaceSummary.ui, scheme_id: 'v2' } }),
+        } as Response;
+      }
+      return { ok: true, json: async () => sample } as Response;
+    }));
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v2" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '设为默认' }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/projects/p1/ui-schemes/default',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ scheme_id: 'v2' }),
+      }),
+    ));
+    expect(screen.getByRole('link', { name: /V1/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /夏日 V2.*默认/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '设为默认' })).not.toBeInTheDocument();
+  });
+
+  it('没有 screen-map 时仍可选择复制图库里的既有页面', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) {
+        return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
+      }
+      if (url.includes('/gallery/screens')) {
+        return { ok: true, json: async () => ({ items: [screenItems[0]] }) } as Response;
+      }
+      if (url.includes('/screens/canonical')) return { ok: true, json: async () => emptyScreenCanonical } as Response;
+      if (url.includes('/workspaces')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ...workspaceSummary,
+            ui: { ...workspaceSummary.ui, screen_items: [] },
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => sample } as Response;
+    }));
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '新建方案' }));
+
+    expect(screen.getByRole('checkbox', { name: 'home' })).toBeInTheDocument();
+  });
+
   it('视频工作区按企划和镜头展示版本，并可选用', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
       if (init?.method === 'POST' && url.includes('/selected')) {
         return { ok: true, json: async () => ({ shots: { 'shot-01': 'projects/pokemon/videos/pv/shots/shot-01/v1.mp4' } }) } as Response;
       }
@@ -456,6 +594,7 @@ describe('ProjectPage', () => {
 
   it('视频选版失败时提示错误并恢复按钮', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
       if (init?.method === 'POST' && url.includes('/selected')) throw new Error('offline');
       if (url.includes('/videos')) {
         return {

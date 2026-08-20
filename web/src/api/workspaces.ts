@@ -21,6 +21,7 @@ export interface ProjectWorkspaceSummary {
     stale: number;
   };
   ui: {
+    scheme_id: string;
     anchors: Record<'gdd' | 'prd' | 'interaction', WorkflowDocumentStatus>;
     anchors_approved: number;
     style_status: WorkflowDocumentStatus;
@@ -43,9 +44,13 @@ export interface ProjectWorkspaceSummary {
   };
 }
 
-export async function fetchProjectWorkspaces(projectId: string): Promise<ProjectWorkspaceSummary> {
+export async function fetchProjectWorkspaces(
+  projectId: string,
+  uiSchemeId?: string,
+): Promise<ProjectWorkspaceSummary> {
+  const query = uiSchemeId ? `?ui_scheme=${encodeURIComponent(uiSchemeId)}` : '';
   const data = await requestJson<unknown>(
-    `/api/projects/${encodeURIComponent(projectId)}/workspaces`,
+    `/api/projects/${encodeURIComponent(projectId)}/workspaces${query}`,
     '读取项目工作流进度',
   );
   if (!isWorkspaceSummary(data)) throw new Error('项目工作流进度格式不正确');

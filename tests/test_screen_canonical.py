@@ -34,7 +34,7 @@ def project():
 
 @pytest.fixture
 def screen_images(isolated_data_root, project):
-    d = isolated_data_root / "projects" / "mohuan" / "screens" / "home"
+    d = isolated_data_root / "projects" / "mohuan" / "ui" / "v1" / "screens" / "home"
     d.mkdir(parents=True)
     for name in ("v1.png", "v2.png", "v3.png"):
         (d / name).write_bytes(b"\x89PNG\r\n\x1a\n")
@@ -44,47 +44,47 @@ def screen_images(isolated_data_root, project):
 # ---------- lib ----------
 
 def test_set_and_read_screen_canonical(project, screen_images):
-    file = ui_jobs.set_screen_canonical(project.id, "home", str(screen_images / "v2.png"))
-    assert file.screens["home"].path == "projects/mohuan/screens/home/v2.png"
-    assert ui_jobs.read_screen_canonical(project.id).screens["home"].path.endswith("v2.png")
+    file = ui_jobs.set_screen_canonical(project.id, "v1", "home", str(screen_images / "v2.png"))
+    assert file.screens["home"].path == "projects/mohuan/ui/v1/screens/home/v2.png"
+    assert ui_jobs.read_screen_canonical(project.id, "v1").screens["home"].path.endswith("v2.png")
 
 
 def test_set_screen_canonical_accepts_relative_path(project, screen_images):
     file = ui_jobs.set_screen_canonical(
-        project.id, "home", "projects/mohuan/screens/home/v1.png",
+        project.id, "v1", "home", "projects/mohuan/ui/v1/screens/home/v1.png",
     )
-    assert file.screens["home"].path == "projects/mohuan/screens/home/v1.png"
+    assert file.screens["home"].path == "projects/mohuan/ui/v1/screens/home/v1.png"
 
 
 def test_set_screen_canonical_replaces_previous(project, screen_images):
-    ui_jobs.set_screen_canonical(project.id, "home", str(screen_images / "v1.png"))
-    file = ui_jobs.set_screen_canonical(project.id, "home", str(screen_images / "v3.png"))
+    ui_jobs.set_screen_canonical(project.id, "v1", "home", str(screen_images / "v1.png"))
+    file = ui_jobs.set_screen_canonical(project.id, "v1", "home", str(screen_images / "v3.png"))
     assert file.screens["home"].path.endswith("v3.png")
     assert len(file.screens) == 1
 
 
 def test_set_screen_canonical_rejects_other_screen_dir(isolated_data_root, project, screen_images):
-    other = isolated_data_root / "projects" / "mohuan" / "screens" / "battle"
+    other = isolated_data_root / "projects" / "mohuan" / "ui" / "v1" / "screens" / "battle"
     other.mkdir(parents=True)
     (other / "v1.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     with pytest.raises(ValueError):
-        ui_jobs.set_screen_canonical(project.id, "home", str(other / "v1.png"))
+        ui_jobs.set_screen_canonical(project.id, "v1", "home", str(other / "v1.png"))
 
 
 def test_set_screen_canonical_rejects_missing_file(project, screen_images):
     with pytest.raises(FileNotFoundError):
-        ui_jobs.set_screen_canonical(project.id, "home", str(screen_images / "nope.png"))
+        ui_jobs.set_screen_canonical(project.id, "v1", "home", str(screen_images / "nope.png"))
 
 
 def test_clear_screen_canonical(project, screen_images):
-    ui_jobs.set_screen_canonical(project.id, "home", str(screen_images / "v1.png"))
-    file = ui_jobs.clear_screen_canonical(project.id, "home")
+    ui_jobs.set_screen_canonical(project.id, "v1", "home", str(screen_images / "v1.png"))
+    file = ui_jobs.clear_screen_canonical(project.id, "v1", "home")
     assert "home" not in file.screens
 
 
 def test_corrupt_canonical_degrades_to_empty(project, screen_images):
     (screen_images.parent / "canonical.json").write_text("{ broken", encoding="utf-8")
-    assert ui_jobs.read_screen_canonical(project.id).screens == {}
+    assert ui_jobs.read_screen_canonical(project.id, "v1").screens == {}
 
 
 def test_style_variant_auto_resolved_from_job(project, screen_images):
@@ -92,15 +92,15 @@ def test_style_variant_auto_resolved_from_job(project, screen_images):
     job = jobs.write_job(
         job_id="job-ui-v2", character_id="", prompt="p", model="m",
         params={"style_variant": "厚涂写实", "base_version": "v1.png"},
-        namespace="ui", project_id=project.id, screen_id="home", alias=None,
+        namespace="ui", project_id=project.id, ui_scheme_id="v1", screen_id="home", alias=None,
     )
     jobs.save_job(job.model_copy(update={"output_paths": [str(screen_images / "v2.png")]}))
-    file = ui_jobs.set_screen_canonical(project.id, "home", str(screen_images / "v2.png"))
+    file = ui_jobs.set_screen_canonical(project.id, "v1", "home", str(screen_images / "v2.png"))
     assert file.screens["home"].style_variant == "厚涂写实"
 
 
 def test_style_variant_empty_when_no_job_matches(project, screen_images):
-    file = ui_jobs.set_screen_canonical(project.id, "home", str(screen_images / "v1.png"))
+    file = ui_jobs.set_screen_canonical(project.id, "v1", "home", str(screen_images / "v1.png"))
     assert file.screens["home"].style_variant == ""
 
 
@@ -148,30 +148,30 @@ def client(isolated_data_root):
 
 def test_screen_canonical_api_roundtrip(client, project, screen_images):
     r = client.post(
-        f"/api/projects/{project.id}/screens/canonical",
-        json={"screen_id": "home", "path": "projects/mohuan/screens/home/v2.png"},
+        f"/api/projects/{project.id}/ui-schemes/v1/screens/canonical",
+        json={"screen_id": "home", "path": "projects/mohuan/ui/v1/screens/home/v2.png"},
     )
     assert r.status_code == 200
-    assert r.json()["screens"]["home"]["path"] == "projects/mohuan/screens/home/v2.png"
+    assert r.json()["screens"]["home"]["path"] == "projects/mohuan/ui/v1/screens/home/v2.png"
 
-    assert client.get(f"/api/projects/{project.id}/screens/canonical").json()["screens"]["home"]
+    assert client.get(f"/api/projects/{project.id}/ui-schemes/v1/screens/canonical").json()["screens"]["home"]
 
     cleared = client.post(
-        f"/api/projects/{project.id}/screens/canonical",
+        f"/api/projects/{project.id}/ui-schemes/v1/screens/canonical",
         json={"screen_id": "home", "path": None},
     )
     assert cleared.json()["screens"] == {}
 
 
 def test_screen_canonical_api_errors(client, project, screen_images):
-    assert client.get("/api/projects/p-nope/screens/canonical").status_code == 404
+    assert client.get("/api/projects/p-nope/ui-schemes/v1/screens/canonical").status_code == 404
     missing = client.post(
-        f"/api/projects/{project.id}/screens/canonical",
-        json={"screen_id": "home", "path": "projects/mohuan/screens/home/nope.png"},
+        f"/api/projects/{project.id}/ui-schemes/v1/screens/canonical",
+        json={"screen_id": "home", "path": "projects/mohuan/ui/v1/screens/home/nope.png"},
     )
     assert missing.status_code == 404
     outside = client.post(
-        f"/api/projects/{project.id}/screens/canonical",
+        f"/api/projects/{project.id}/ui-schemes/v1/screens/canonical",
         json={"screen_id": "home", "path": "characters/x/portrait/v1.png"},
     )
     assert outside.status_code in (400, 404)
@@ -181,10 +181,10 @@ def test_gallery_screens_exposes_variant_metadata(client, project, screen_images
     job = jobs.write_job(
         job_id="job-ui-var", character_id="", prompt="p", model="m",
         params={"style_variant": "扁平卡通", "base_version": "v1.png"},
-        namespace="ui", project_id=project.id, screen_id="home", alias=None,
+        namespace="ui", project_id=project.id, ui_scheme_id="v1", screen_id="home", alias=None,
     )
     jobs.save_job(job.model_copy(update={"output_paths": [str(screen_images / "v2.png")]}))
-    items = client.get(f"/api/gallery/screens?project={project.id}").json()["items"]
+    items = client.get(f"/api/gallery/screens?project={project.id}&scheme=v1").json()["items"]
     tagged = next(i for i in items if i["filename"] == "v2.png")
     assert tagged["style_variant"] == "扁平卡通"
     assert tagged["base_version"] == "v1.png"

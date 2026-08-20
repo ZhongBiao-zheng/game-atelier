@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Save } from 'lucide-react';
+import { useLocation } from 'wouter';
 
 import { fetchExperience, saveExperience, type ProjectExperience } from '@/api/experience';
 import {
@@ -9,6 +10,12 @@ import {
   type ProjectScreenItem,
 } from '@/api/gallery';
 import { fetchScreenCanonical } from '@/api/canonical';
+import {
+  createUiScheme,
+  fetchUiSchemes,
+  setDefaultUiScheme,
+  type UiSchemesFile,
+} from '@/api/uiSchemes';
 import { fetchProjectWorkspaces, type ProjectWorkspaceSummary } from '@/api/workspaces';
 import {
   fetchProjectVideos,
@@ -20,6 +27,7 @@ import { ArtWorkspace } from '@/components/workshop/ArtWorkspace';
 import { OverviewWorkspace } from '@/components/workshop/OverviewWorkspace';
 import type { WorkshopWorkspace } from '@/components/workshop/ProjectWorkspaceNav';
 import { UiWorkspace } from '@/components/workshop/UiWorkspace';
+import { UiSchemeBar } from '@/components/workshop/UiSchemeBar';
 import { VideoWorkspace } from '@/components/workshop/VideoWorkspace';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -29,22 +37,26 @@ export type { WorkshopWorkspace } from '@/components/workshop/ProjectWorkspaceNa
 export function ProjectPage({
   projectId,
   workspace = 'overview',
+  uiSchemeId,
   screenId,
   productionId,
   shotId,
 }: {
   projectId: string;
   workspace?: WorkshopWorkspace;
+  uiSchemeId?: string;
   screenId?: string;
   productionId?: string;
   shotId?: string;
 }) {
+  const [, setLocation] = useLocation();
   const [data, setData] = useState<ProjectExperience | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
   const [works, setWorks] = useState<ProjectGalleryItem[]>([]);
   const [screens, setScreens] = useState<ProjectScreenItem[]>([]);
   const [canonicalFile, setCanonicalFile] = useState<ScreenCanonicalFile>({ screens: {} });
+  const [schemesFile, setSchemesFile] = useState<UiSchemesFile | null>(null);
   const [productions, setProductions] = useState<ProjectVideoProduction[]>([]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -65,12 +77,32 @@ export function ProjectPage({
   useEffect(() => {
     setSummary(null);
     if (workspace !== 'overview' && workspace !== 'ui') return;
+    if (workspace === 'ui' && !uiSchemeId) return;
     let cancelled = false;
-    fetchProjectWorkspaces(projectId)
+    fetchProjectWorkspaces(projectId, workspace === 'ui' ? uiSchemeId : undefined)
       .then(value => { if (!cancelled) setSummary(value); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [projectId, workspace]);
+  }, [projectId, workspace, uiSchemeId]);
+
+  useEffect(() => {
+    if (workspace !== 'ui') return;
+    let cancelled = false;
+    setSchemesFile(null);
+    fetchUiSchemes(projectId).then(file => {
+      if (cancelled) return;
+      if (!Array.isArray(file.schemes) || file.schemes.length === 0 || !file.default_scheme_id) return;
+      setSchemesFile(file);
+      const exists = uiSchemeId && file.schemes.some(item => item.id === uiSchemeId);
+      if (!exists) {
+        setLocation(
+          `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(file.default_scheme_id)}`,
+          { replace: true },
+        );
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [projectId, setLocation, uiSchemeId, workspace]);
 
   useEffect(() => {
     if (workspace !== 'art') return;
@@ -83,13 +115,13 @@ export function ProjectPage({
   }, [projectId, workspace]);
 
   useEffect(() => {
-    if (workspace !== 'ui') return;
+    if (workspace !== 'ui' || !uiSchemeId) return;
     let cancelled = false;
     setScreens([]);
     setCanonicalFile({ screens: {} });
     Promise.all([
-      fetchGalleryScreens(projectId),
-      fetchScreenCanonical(projectId),
+      fetchGalleryScreens(projectId, uiSchemeId),
+      fetchScreenCanonical(projectId, uiSchemeId),
     ]).then(([screenItems, canonical]) => {
       if (!cancelled) {
         setScreens(screenItems);
@@ -97,7 +129,7 @@ export function ProjectPage({
       }
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [projectId, workspace]);
+  }, [projectId, uiSchemeId, workspace]);
 
   useEffect(() => {
     if (workspace !== 'video') return;
@@ -165,20 +197,38 @@ export function ProjectPage({
           <OverviewWorkspace data={data} draft={draft} summary={summary} onDraftChange={setDraft} />
         )}
         {workspace === 'art' && <ArtWorkspace projectId={projectId} works={works} />}
-        {workspace === 'ui' && (
-          <UiWorkspace
-            projectId={projectId}
-            screenId={screenId}
-            summary={summary?.ui ?? null}
-            screens={screens}
-            canonicalFile={canonicalFile}
-            onCanonicalChange={(file) => {
-              setCanonicalFile(file);
-              void fetchProjectWorkspaces(projectId)
-                .then(setSummary)
-                .catch(() => {});
-            }}
-          />
+        {workspace === 'ui' && uiSchemeId && schemesFile && (
+          <div className="space-y-6">
+            <UiSchemeBar
+              projectId={projectId}
+              currentSchemeId={uiSchemeId}
+              schemesFile={schemesFile}
+              screens={uiCopyCandidates(summary?.ui.screen_items ?? [], screens)}
+              onCreate={async (payload) => {
+                const file = await createUiScheme(projectId, payload);
+                setSchemesFile(file);
+                const created = file.schemes.at(-1)!;
+                setLocation(`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(created.id)}`);
+              }}
+              onSetDefault={async (schemeId) => {
+                setSchemesFile(await setDefaultUiScheme(projectId, schemeId));
+              }}
+            />
+            <UiWorkspace
+              projectId={projectId}
+              schemeId={uiSchemeId}
+              screenId={screenId}
+              summary={summary?.ui ?? null}
+              screens={screens}
+              canonicalFile={canonicalFile}
+              onCanonicalChange={(file) => {
+                setCanonicalFile(file);
+                void fetchProjectWorkspaces(projectId, uiSchemeId)
+                  .then(setSummary)
+                  .catch(() => {});
+              }}
+            />
+          </div>
         )}
         {workspace === 'video' && (
           <VideoWorkspace
@@ -195,4 +245,17 @@ export function ProjectPage({
       </div>
     </section>
   );
+}
+
+function uiCopyCandidates(
+  planned: Array<{ screen_id: string; name: string }>,
+  versions: ProjectScreenItem[],
+): Array<{ screen_id: string; name: string }> {
+  const result = new Map(planned.map(item => [item.screen_id, item]));
+  for (const version of versions) {
+    if (!result.has(version.screen_id)) {
+      result.set(version.screen_id, { screen_id: version.screen_id, name: version.screen_id });
+    }
+  }
+  return [...result.values()];
 }

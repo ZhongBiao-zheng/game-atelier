@@ -145,6 +145,21 @@ def test_style_and_anchor_docs_scanned(isolated_data_root):
     assert report.checked["docs"] == 2
 
 
+def test_validate_data_does_not_migrate_legacy_ui_layout(isolated_data_root):
+    projects.create_project("魔幻", slug="mohuan")
+    root = isolated_data_root / "projects/mohuan"
+    import shutil
+    shutil.rmtree(root / "ui")
+    legacy = root / "screens/home/v1.png"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"png")
+
+    validate_data()
+
+    assert legacy.is_file()
+    assert not (root / "ui/schemes.json").exists()
+
+
 def test_normal_question_in_prose_not_flagged(isolated_data_root):
     spec = isolated_data_root / "characters" / "hero" / "spec.md"
     spec.parent.mkdir(parents=True)
@@ -171,10 +186,10 @@ def test_character_canonical_broken_link(isolated_data_root):
 
 def test_screen_canonical_broken_link(isolated_data_root):
     proj = projects.create_project("魔幻", slug="mohuan")
-    d = isolated_data_root / "projects" / "mohuan" / "screens" / "home"
+    d = isolated_data_root / "projects" / "mohuan" / "ui" / "v1" / "screens" / "home"
     d.mkdir(parents=True)
     (d / "v1.png").write_bytes(b"\x89PNG\r\n\x1a\n")
-    ui_jobs.set_screen_canonical(proj.id, "home", str(d / "v1.png"))
+    ui_jobs.set_screen_canonical(proj.id, "v1", "home", str(d / "v1.png"))
     (d / "v1.png").unlink()
 
     report = validate_data()

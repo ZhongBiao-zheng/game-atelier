@@ -35,6 +35,7 @@ interface Config { image_storage_root: string }
 interface MainAppProps {
   routedProjectId?: string;
   routedWorkspace?: WorkshopWorkspace;
+  routedUiSchemeId?: string;
   routedScreenId?: string;
   routedProductionId?: string;
   routedShotId?: string;
@@ -48,6 +49,7 @@ interface MainAppProps {
 export function MainApp({
   routedProjectId,
   routedWorkspace,
+  routedUiSchemeId,
   routedScreenId,
   routedProductionId,
   routedShotId,
@@ -78,6 +80,7 @@ export function MainApp({
       <ThreeColumnLayout
         routedProjectId={routedProjectId}
         routedWorkspace={routedWorkspace}
+        routedUiSchemeId={routedUiSchemeId}
         routedScreenId={routedScreenId}
         routedProductionId={routedProductionId}
         routedShotId={routedShotId}
@@ -94,6 +97,7 @@ export function MainApp({
 function ThreeColumnLayout({
   routedProjectId,
   routedWorkspace,
+  routedUiSchemeId,
   routedScreenId,
   routedProductionId,
   routedShotId,
@@ -105,6 +109,7 @@ function ThreeColumnLayout({
 }: {
   routedProjectId?: string;
   routedWorkspace?: WorkshopWorkspace;
+  routedUiSchemeId?: string;
   routedScreenId?: string;
   routedProductionId?: string;
   routedShotId?: string;
@@ -288,6 +293,7 @@ function ThreeColumnLayout({
     <ProjectPage
       projectId={openedProject.id}
       workspace={workspace}
+      uiSchemeId={routedUiSchemeId}
       screenId={routedScreenId}
       productionId={routedProductionId}
       shotId={routedShotId}

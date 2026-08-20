@@ -42,24 +42,24 @@ def test_validate_screen_id_rejects_traversal_and_uppercase():
 
 
 def test_screen_output_dir_lands_in_project_screens(isolated_data_root, project):
-    out = ui_jobs.screen_output_dir(project.id, "home")
-    assert out == isolated_data_root / "projects" / "mohuan" / "screens" / "home"
+    out = ui_jobs.screen_output_dir(project.id, "v1", "home")
+    assert out == isolated_data_root / "projects" / "mohuan" / "ui" / "v1" / "screens" / "home"
 
 
 def test_screen_output_dir_requires_both_fields(project):
     with pytest.raises(ValueError):
-        ui_jobs.screen_output_dir(project.id, None)
+        ui_jobs.screen_output_dir(project.id, "v1", None)
     with pytest.raises(ValueError):
-        ui_jobs.screen_output_dir(None, "home")
+        ui_jobs.screen_output_dir(None, "v1", "home")
     with pytest.raises(KeyError):
-        ui_jobs.screen_output_dir("p-nope", "home")
+        ui_jobs.screen_output_dir("p-nope", "v1", "home")
 
 
 def test_resolve_project_accepts_id_or_slug(project):
-    assert ui_jobs.resolve_project(project.id).id == project.id
-    assert ui_jobs.resolve_project("mohuan").id == project.id
+    assert projects.resolve_project(project.id).id == project.id
+    assert projects.resolve_project("mohuan").id == project.id
     with pytest.raises(KeyError):
-        ui_jobs.resolve_project("nope")
+        projects.resolve_project("nope")
 
 
 # ---------- write_job + 输出目录派发 ----------
@@ -67,13 +67,13 @@ def test_resolve_project_accepts_id_or_slug(project):
 def test_write_job_ui_namespace_roundtrip(project):
     job = jobs.write_job(
         job_id="job-ui-1", character_id="", prompt="p", model="m", params={},
-        namespace="ui", project_id=project.id, screen_id="home", alias=None,
+        namespace="ui", project_id=project.id, ui_scheme_id="v1", screen_id="home", alias=None,
     )
     loaded = jobs.read_job("job-ui-1")
     assert loaded.namespace == "ui"
     assert loaded.project_id == project.id
     assert loaded.screen_id == "home"
-    assert jobs.job_output_dir_for(job).as_posix().endswith("projects/mohuan/screens/home")
+    assert jobs.job_output_dir_for(job).as_posix().endswith("projects/mohuan/ui/v1/screens/home")
 
 
 # ---------- submit-screen CLI ----------
@@ -128,7 +128,7 @@ def client(isolated_data_root):
 def test_api_jobs_accepts_ui_job(client, project):
     jobs.write_job(
         job_id="job-ui-2", character_id="", prompt="p", model="m", params={},
-        namespace="ui", project_id=project.id, screen_id="home", alias=None,
+        namespace="ui", project_id=project.id, ui_scheme_id="v1", screen_id="home", alias=None,
     )
     r = client.get("/api/jobs")
     assert r.status_code == 200
@@ -137,31 +137,31 @@ def test_api_jobs_accepts_ui_job(client, project):
 
 
 def test_gallery_screens_lists_by_screen(client, isolated_data_root, project):
-    d = isolated_data_root / "projects" / "mohuan" / "screens"
+    d = isolated_data_root / "projects" / "mohuan" / "ui" / "v1" / "screens"
     (d / "home").mkdir(parents=True)
     (d / "home" / "v1.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (d / "home" / "v1.md").write_text("sidecar", encoding="utf-8")
     (d / "battle").mkdir()
     (d / "battle" / "v1.png").write_bytes(b"\x89PNG\r\n\x1a\n")
-    r = client.get(f"/api/gallery/screens?project={project.id}")
+    r = client.get(f"/api/gallery/screens?project={project.id}&scheme=v1")
     assert r.status_code == 200
     items = r.json()["items"]
     assert {(i["screen_id"], i["filename"]) for i in items} == {
         ("home", "v1.png"), ("battle", "v1.png"),
     }
-    assert all(i["path"].startswith("projects/mohuan/screens/") for i in items)
+    assert all(i["path"].startswith("projects/mohuan/ui/v1/screens/") for i in items)
 
 
 def test_gallery_screens_404_unknown_project(client):
-    assert client.get("/api/gallery/screens?project=nope").status_code == 404
+    assert client.get("/api/gallery/screens?project=nope&scheme=v1").status_code == 404
 
 
 def test_gallery_image_serves_screens_but_not_project_docs(client, isolated_data_root, project):
     d = isolated_data_root / "projects" / "mohuan"
-    (d / "screens" / "home").mkdir(parents=True)
-    (d / "screens" / "home" / "v1.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (d / "ui" / "v1" / "screens" / "home").mkdir(parents=True)
+    (d / "ui" / "v1" / "screens" / "home" / "v1.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (d / "style.md").write_text("secret", encoding="utf-8")
-    ok = client.get("/api/gallery/image?path=projects/mohuan/screens/home/v1.png")
+    ok = client.get("/api/gallery/image?path=projects/mohuan/ui/v1/screens/home/v1.png")
     assert ok.status_code == 200
     bad = client.get("/api/gallery/image?path=projects/mohuan/style.md")
     assert bad.status_code == 400
@@ -170,7 +170,7 @@ def test_gallery_image_serves_screens_but_not_project_docs(client, isolated_data
 def test_job_json_dump_keeps_new_fields(project):
     job = jobs.write_job(
         job_id="job-ui-3", character_id="", prompt="p", model="m", params={},
-        namespace="ui", project_id=project.id, screen_id="inventory", alias=None,
+        namespace="ui", project_id=project.id, ui_scheme_id="v1", screen_id="inventory", alias=None,
     )
     dumped = json.loads(job.model_dump_json())
     assert dumped["project_id"] == project.id

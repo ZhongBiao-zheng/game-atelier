@@ -22,16 +22,32 @@ from character_workflow.lib.schemas import (
 )
 
 
-def _hash_file(p: Path) -> str:
+def _read_hashable_text(p: Path) -> str:
     if not p.exists():
         return ""
     try:
         text = p.read_text(encoding="utf-8-sig")
     except OSError:
         return ""
-    if not text.strip():
+    return text if text.strip() else ""
+
+
+def _hash_file(p: Path) -> str:
+    text = _read_hashable_text(p)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12] if text else ""
+
+
+def _hash_files(paths: list[Path]) -> str:
+    parts = [_read_hashable_text(path).encode("utf-8") for path in paths]
+    if not any(parts):
         return ""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    payload = b"".join(len(part).to_bytes(8, "big") + part for part in parts)
+    return hashlib.sha256(payload).hexdigest()[:12]
+
+
+def style_fingerprint_for_files(project_style: Path, scheme_style: Path) -> str:
+    """Combined UI style fingerprint shared by live canonical writes and one-time upgrades."""
+    return _hash_files([project_style, scheme_style])
 
 
 def style_fingerprint_for_slug(slug: str) -> str:
@@ -49,6 +65,15 @@ def style_fingerprint_for_character(character_id: str) -> str:
         if p.id == project_id:
             return style_fingerprint_for_slug(p.slug)
     return ""
+
+
+def style_fingerprint_for_ui_scheme(project_id: str, scheme_id: str) -> str:
+    """Hash the shared project baseline and this scheme's own UI style as one contract."""
+    from character_workflow.lib.ui_schemes import resolve_scheme, scheme_style_path
+
+    project, scheme = resolve_scheme(project_id, scheme_id)
+    project_style = data_root.projects_dir() / project.slug / "style.md"
+    return style_fingerprint_for_files(project_style, scheme_style_path(project, scheme.id))
 
 
 def _is_stale(stored: str, current: str) -> bool:
@@ -73,13 +98,12 @@ def character_canonical_status(character_id: str) -> CanonicalStatusFile:
     return status
 
 
-def screen_canonical_status(project_id: str) -> ScreenCanonicalStatusFile:
+def screen_canonical_status(project_id: str, scheme_id: str) -> ScreenCanonicalStatusFile:
     """项目 screen 定稿表 + style stale 标记。project 不存在时抛 KeyError（与读函数同口径）。"""
-    from character_workflow.lib.ui_jobs import project_slug, read_screen_canonical
+    from character_workflow.lib.ui_jobs import read_screen_canonical
 
-    slug = project_slug(project_id)
-    current_style = style_fingerprint_for_slug(slug)
-    file = read_screen_canonical(project_id)
+    current_style = style_fingerprint_for_ui_scheme(project_id, scheme_id)
+    file = read_screen_canonical(project_id, scheme_id)
     return ScreenCanonicalStatusFile(screens={
         screen_id: ScreenCanonicalStatusEntry(
             **entry.model_dump(),
@@ -112,16 +136,22 @@ def stale_report() -> dict:
             }
             if hits:
                 out["characters"][cid] = hits
+    from character_workflow.lib.ui_schemes import read_existing_schemes, scheme_screens_dir
+
     for p in projects.read_projects().projects:
-        cfile = data_root.projects_dir() / p.slug / "screens" / "canonical.json"
-        if not cfile.exists():
+        schemes = read_existing_schemes(p.id)
+        if schemes is None:
             continue
-        status = screen_canonical_status(p.id)
-        hits = {
-            screen_id: {"path": e.path, "style_stale": True}
-            for screen_id, e in status.screens.items()
-            if e.style_stale
-        }
-        if hits:
-            out["screens"][p.slug] = hits
+        for scheme in schemes.schemes:
+            cfile = scheme_screens_dir(p, scheme.id) / "canonical.json"
+            if not cfile.exists():
+                continue
+            status = screen_canonical_status(p.id, scheme.id)
+            hits = {
+                screen_id: {"path": e.path, "style_stale": True}
+                for screen_id, e in status.screens.items()
+                if e.style_stale
+            }
+            if hits:
+                out["screens"].setdefault(p.slug, {})[scheme.id] = hits
     return out

@@ -17,6 +17,7 @@ import {
 import { fetchGalleryScreens, type ProjectScreenItem } from '@/api/gallery';
 import { fetchProjectVideos, type ProjectVideoProduction } from '@/api/videos';
 import { fetchProjectWorkspaces, type ProjectWorkspaceSummary } from '@/api/workspaces';
+import { fetchUiSchemes, type UiScheme } from '@/api/uiSchemes';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { CreateVariantForm } from '@/components/workshop/CreateVariantForm';
 import { Button } from '@/components/ui/button';
@@ -33,12 +34,14 @@ export type ProjectFolderView = WorkshopWorkspace;
 
 const KIND_VIEW: Record<ProjectFolderItemKind, ProjectFolderView> = {
   character: 'art',
+  ui_scheme: 'ui',
   ui_screen: 'ui',
   video_production: 'video',
 };
 
 const KIND_LABEL: Record<ProjectFolderItemKind, string> = {
   character: '角色',
+  ui_scheme: 'UI 方案',
   ui_screen: 'UI 页面',
   video_production: '视频企划',
 };
@@ -46,6 +49,12 @@ const KIND_LABEL: Record<ProjectFolderItemKind, string> = {
 interface ResolvedAsset extends ProjectFolderItem {
   label: string;
   href: string;
+}
+
+interface SchemeAssets {
+  scheme: UiScheme;
+  summary: ProjectWorkspaceSummary;
+  screens: ProjectScreenItem[];
 }
 
 export function ProjectFolderPage({
@@ -63,8 +72,7 @@ export function ProjectFolderPage({
   const [file, setFile] = useState<ProjectFoldersFile | null>(null);
   const [characters, setCharacters] = useState<CharacterEntry[]>([]);
   const [projectCharacterIds, setProjectCharacterIds] = useState<Set<string>>(new Set());
-  const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
-  const [screenVersions, setScreenVersions] = useState<ProjectScreenItem[]>([]);
+  const [schemeAssets, setSchemeAssets] = useState<SchemeAssets[]>([]);
   const [productions, setProductions] = useState<ProjectVideoProduction[]>([]);
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
@@ -76,35 +84,39 @@ export function ProjectFolderPage({
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
+    void (async () => {
+      try {
+        const schemesFile = await fetchUiSchemes(projectId);
+        const perScheme = await Promise.all(schemesFile.schemes.map(async scheme => ({
+          scheme,
+          summary: await fetchProjectWorkspaces(projectId, scheme.id),
+          screens: await fetchGalleryScreens(projectId, scheme.id),
+        })));
+        const [
+          foldersFile,
+          characterItems,
+          projectsFile,
+          videoItems,
+        ] = await Promise.all([
       fetchProjectFolders(projectId),
       fetch('/api/characters').then(response => response.json() as Promise<CharacterEntry[]>),
       fetch('/api/projects').then(response => response.json() as Promise<ProjectsFile>),
-      fetchProjectWorkspaces(projectId),
-      fetchGalleryScreens(projectId),
       fetchProjectVideos(projectId),
-    ]).then(([
-      foldersFile,
-      characterItems,
-      projectsFile,
-      workspace,
-      screenItems,
-      videoItems,
-    ]) => {
-      if (cancelled) return;
-      setFile(foldersFile);
-      setCharacters(characterItems);
-      setProjectCharacterIds(new Set(
-        Object.entries(projectsFile.assignments)
-          .filter(([, ownerId]) => ownerId === projectId)
-          .map(([characterId]) => characterId),
-      ));
-      setSummary(workspace);
-      setScreenVersions(screenItems);
-      setProductions(videoItems);
-    }).catch(errorValue => {
-      if (!cancelled) setError((errorValue as Error).message);
-    });
+        ]);
+        if (cancelled) return;
+        setFile(foldersFile);
+        setCharacters(characterItems);
+        setProjectCharacterIds(new Set(
+          Object.entries(projectsFile.assignments)
+            .filter(([, ownerId]) => ownerId === projectId)
+            .map(([characterId]) => characterId),
+        ));
+        setSchemeAssets(perScheme);
+        setProductions(videoItems);
+      } catch (errorValue) {
+        if (!cancelled) setError((errorValue as Error).message);
+      }
+    })();
     return () => { cancelled = true; };
   }, [projectId]);
 
@@ -115,11 +127,11 @@ export function ProjectFolderPage({
     onFolderChange(folder);
   }, [folder?.id, folder?.name, folder?.note, onFolderChange]);
 
-  const assets = useMemo(() => resolveAssets(projectId, folder, characters, summary, productions), [
+  const assets = useMemo(() => resolveAssets(projectId, folder, characters, schemeAssets, productions), [
     projectId,
     folder,
     characters,
-    summary,
+    schemeAssets,
     productions,
   ]);
   const visibleAssets = view === 'overview'
@@ -128,18 +140,18 @@ export function ProjectFolderPage({
   const candidates = useMemo(() => allCandidates(
     projectId,
     characters.filter(character => projectCharacterIds.has(character.id)),
-    summary,
-    screenVersions,
+    schemeAssets,
     productions,
   ), [
     projectId,
     characters,
     projectCharacterIds,
-    summary,
-    screenVersions,
+    schemeAssets,
     productions,
   ]).filter(candidate => !folder?.items.some(item => (
-    item.kind === candidate.kind && item.asset_id === candidate.asset_id
+    item.kind === candidate.kind
+      && item.asset_id === candidate.asset_id
+      && item.scheme_id === candidate.scheme_id
   )));
   const visibleCandidates = view === 'overview'
     ? candidates
@@ -267,7 +279,7 @@ export function ProjectFolderPage({
           {visibleAssets.length > 0 ? (
             <ul className="m-0 grid list-none gap-2 p-0 md:grid-cols-2">
               {visibleAssets.map(asset => (
-                <li key={`${asset.kind}:${asset.asset_id}`} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                <li key={`${asset.kind}:${asset.scheme_id ?? ''}:${asset.asset_id}`} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
                   <AssetIcon kind={asset.kind} />
                   <Link href={asset.href} className="min-w-0 flex-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                     <span className="block text-xs text-muted-foreground">{KIND_LABEL[asset.kind]}</span>
@@ -327,7 +339,7 @@ export function ProjectFolderPage({
             </div>
             <ul className="m-0 grid list-none gap-2 p-0 md:grid-cols-2">
               {visibleCandidates.map(candidate => (
-                <li key={`${candidate.kind}:${candidate.asset_id}`} className="flex items-center gap-3 rounded-lg border border-border/70 px-3 py-2">
+                <li key={`${candidate.kind}:${candidate.scheme_id ?? ''}:${candidate.asset_id}`} className="flex items-center gap-3 rounded-lg border border-border/70 px-3 py-2">
                   <AssetIcon kind={candidate.kind} />
                   <span className="min-w-0 flex-1 truncate text-sm">{candidate.label}</span>
                   {candidate.kind === 'character' && !characters.find(item => item.id === candidate.asset_id)?.variant && (
@@ -347,7 +359,11 @@ export function ProjectFolderPage({
                     variant="outline"
                     size="sm"
                     aria-label={`添加${KIND_LABEL[candidate.kind]} ${candidate.label}`}
-                    onClick={() => { void add({ kind: candidate.kind, asset_id: candidate.asset_id }); }}
+                    onClick={() => { void add({
+                      kind: candidate.kind,
+                      asset_id: candidate.asset_id,
+                      scheme_id: candidate.scheme_id,
+                    }); }}
                   >
                     <Plus aria-hidden />
                     加入
@@ -377,7 +393,7 @@ export function ProjectFolderPage({
 function AssetIcon({ kind }: { kind: ProjectFolderItemKind }) {
   const className = 'size-4 shrink-0 text-muted-foreground';
   if (kind === 'character') return <Images className={className} aria-hidden />;
-  if (kind === 'ui_screen') return <PanelsTopLeft className={className} aria-hidden />;
+  if (kind === 'ui_scheme' || kind === 'ui_screen') return <PanelsTopLeft className={className} aria-hidden />;
   return <Film className={className} aria-hidden />;
 }
 
@@ -385,12 +401,15 @@ function resolveAssets(
   projectId: string,
   folder: ProjectFolder | null,
   characters: CharacterEntry[],
-  summary: ProjectWorkspaceSummary | null,
+  schemeAssets: SchemeAssets[],
   productions: ProjectVideoProduction[],
 ): ResolvedAsset[] {
   if (!folder) return [];
   const characterNames = new Map(characters.map(item => [item.id, item.name]));
-  const screenNames = new Map(summary?.ui.screen_items.map(item => [item.screen_id, item.name]) ?? []);
+  const schemeNames = new Map(schemeAssets.map(item => [item.scheme.id, item.scheme.name]));
+  const screenNames = new Map(schemeAssets.flatMap(({ scheme, summary }) => (
+    summary.ui.screen_items.map(item => [`${scheme.id}:${item.screen_id}`, item.name] as const)
+  )));
   const productionNames = new Map(productions.map(item => [item.production_id, item.title]));
   return folder.items.map(item => {
     if (item.kind === 'character') return {
@@ -400,8 +419,13 @@ function resolveAssets(
     };
     if (item.kind === 'ui_screen') return {
       ...item,
-      label: screenNames.get(item.asset_id) ?? item.asset_id,
-      href: `/workshop/${encodeURIComponent(projectId)}/ui/screens/${encodeURIComponent(item.asset_id)}`,
+      label: `${schemeNames.get(item.scheme_id ?? '') ?? item.scheme_id} · ${screenNames.get(`${item.scheme_id}:${item.asset_id}`) ?? item.asset_id}`,
+      href: `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(item.scheme_id ?? '')}/screens/${encodeURIComponent(item.asset_id)}`,
+    };
+    if (item.kind === 'ui_scheme') return {
+      ...item,
+      label: schemeNames.get(item.asset_id) ?? item.asset_id,
+      href: `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(item.asset_id)}`,
     };
     return {
       ...item,
@@ -414,14 +438,23 @@ function resolveAssets(
 function allCandidates(
   projectId: string,
   characters: CharacterEntry[],
-  summary: ProjectWorkspaceSummary | null,
-  screenVersions: ProjectScreenItem[],
+  schemeAssets: SchemeAssets[],
   productions: ProjectVideoProduction[],
 ): ResolvedAsset[] {
-  const screenIds = new Set([
-    ...(summary?.ui.screen_items.map(item => item.screen_id) ?? []),
-    ...screenVersions.map(item => item.screen_id),
-  ]);
+  const uiItems = schemeAssets.flatMap(({ scheme, summary, screens }) => {
+    const screenIds = new Set([
+      ...summary.ui.screen_items.map(item => item.screen_id),
+      ...screens.map(item => item.screen_id),
+    ]);
+    return [
+      { kind: 'ui_scheme' as const, asset_id: scheme.id },
+      ...[...screenIds].map(screenId => ({
+        kind: 'ui_screen' as const,
+        asset_id: screenId,
+        scheme_id: scheme.id,
+      })),
+    ];
+  });
   return resolveAssets(projectId, {
     id: 'candidates',
     name: '',
@@ -429,8 +462,8 @@ function allCandidates(
     created_at: '',
     items: [
       ...characters.map(item => ({ kind: 'character' as const, asset_id: item.id })),
-      ...[...screenIds].map(screenId => ({ kind: 'ui_screen' as const, asset_id: screenId })),
+      ...uiItems,
       ...productions.map(item => ({ kind: 'video_production' as const, asset_id: item.production_id })),
     ],
-  }, characters, summary, productions);
+  }, characters, schemeAssets, productions);
 }

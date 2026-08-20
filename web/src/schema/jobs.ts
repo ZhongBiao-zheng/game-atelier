@@ -81,6 +81,7 @@ export interface Job {
   completed_at?: string | null;
   // 2026-08-10 (B2): UI 页面 job（namespace='ui'）归项目不归角色；Web 只读 — 与 schemas.py 同步
   project_id?: string | null;
+  ui_scheme_id?: string | null;
   screen_id?: string | null;
   // 项目视频 job（namespace='video'）归企划与镜头；Web 只读 — 与 schemas.py 同步
   production_id?: string | null;

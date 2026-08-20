@@ -102,20 +102,27 @@ def parse_screen_map(path: Path) -> list[UiScreenSummary]:
     return rows
 
 
-def project_workspace_summary(project_id: str) -> ProjectWorkspaceSummary:
+def project_workspace_summary(
+    project_id: str,
+    ui_scheme_id: str | None = None,
+) -> ProjectWorkspaceSummary:
     projects_file = read_projects()
     project = next((item for item in projects_file.projects if item.id == project_id), None)
     if project is None:
         raise KeyError(f"project not found: {project_id!r}")
 
+    from character_workflow.lib.ui_schemes import resolve_scheme, scheme_dir
+
     project_dir = data_root.projects_dir() / project.slug
+    _, ui_scheme = resolve_scheme(project_id, ui_scheme_id)
+    ui_dir = scheme_dir(project, ui_scheme.id)
     design_dir = project_dir / "design"
-    screens_dir = project_dir / "screens"
+    screens_dir = ui_dir / "screens"
     anchors = {
         name: document_status(design_dir / f"{name}.md")
         for name in ("gdd", "prd", "interaction")
     }
-    style_path = project_dir / "style.md"
+    style_path = ui_dir / "style.md"
     style_status = document_status(style_path)
     try:
         style_text = style_path.read_text(encoding="utf-8-sig") if style_path.is_file() else ""
@@ -130,7 +137,7 @@ def project_workspace_summary(project_id: str) -> ProjectWorkspaceSummary:
         for path in directory.iterdir()
         if path.is_file() and path.suffix.lower() in UI_IMAGE_EXTENSIONS
     )
-    screen_canonical = stale.screen_canonical_status(project_id)
+    screen_canonical = stale.screen_canonical_status(project_id, ui_scheme.id)
     canonical_count = len(screen_canonical.screens)
     stale_count = sum(1 for entry in screen_canonical.screens.values() if entry.style_stale)
     anchors_approved = sum(1 for status in anchors.values() if status == "approved")
@@ -186,6 +193,7 @@ def project_workspace_summary(project_id: str) -> ProjectWorkspaceSummary:
             stale=art_stale,
         ),
         ui=UiWorkspaceSummary(
+            scheme_id=ui_scheme.id,
             anchors=anchors,
             anchors_approved=anchors_approved,
             style_status=style_status,

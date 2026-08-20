@@ -66,7 +66,8 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 | `.runtime/active-character.json` | 双向 | 双向 |
 | `.runtime/projects.json` | Web (`POST /api/projects`) | Skill / Web |
 | `.runtime/gallery-hidden.json` | Web (`POST /api/gallery/hidden`) | viewer-server（`/api/gallery/recent` 过滤首页作品展示） |
-| `projects/<slug>/design/`、`style.md`、`screens/` | UI Skill / Web 定稿 | UI Skill / Web 工坊 UI 工作区 |
+| `projects/<slug>/design/`、根 `style.md` | UI Skill / 角色 Skill | 项目共享策划锚与视觉基线 |
+| `projects/<slug>/ui/<scheme>/{style.md,screens/}` | UI Skill / Web 定稿 | UI Skill / Web 工坊 UI 方案 |
 | `projects/<slug>/videos/<production>/` | Video Skill / job_runner / Web 选版 | Video Skill / Web 工坊视频工作区 |
 | `.runtime/server.{pid,port}` | viewer-server CLI | viewer-server CLI |
 | `.config/keys.json` | Skill / Web (`POST /api/keys`) | Skill 通过 `lib/keys.py` 读 |

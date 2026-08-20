@@ -59,6 +59,7 @@ from character_workflow.lib.schemas import (
     ProjectFoldersFile, ProjectFolderUpdate, ProjectVideosResponse, ProjectWorkspaceSummary,
     ProjectsFile,
     ScreenCanonicalSet, ScreenCanonicalStatusFile, SpecPatch, VideoSelectedResponse,
+    UiSchemeCreate, UiSchemeDefaultSet, UiSchemesFile,
     WebEditableJobPatch,
 )
 
@@ -267,25 +268,35 @@ def post_canonical(character_id: str, payload: CanonicalSet) -> CanonicalStatusF
     return stale.character_canonical_status(character_id)
 
 
-@router.get("/projects/{project_id}/screens/canonical", response_model=ScreenCanonicalStatusFile)
-def get_screen_canonical(project_id: str) -> ScreenCanonicalStatusFile:
+@router.get(
+    "/projects/{project_id}/ui-schemes/{scheme_id}/screens/canonical",
+    response_model=ScreenCanonicalStatusFile,
+)
+def get_screen_canonical(project_id: str, scheme_id: str) -> ScreenCanonicalStatusFile:
     from character_workflow.lib import stale
     try:
-        return stale.screen_canonical_status(project_id)
+        return stale.screen_canonical_status(project_id, scheme_id)
     except KeyError:
         raise HTTPException(404, detail="找不到这个项目（可能已被删除）")
 
 
-@router.post("/projects/{project_id}/screens/canonical", response_model=ScreenCanonicalStatusFile)
-def post_screen_canonical(project_id: str, payload: ScreenCanonicalSet) -> ScreenCanonicalStatusFile:
+@router.post(
+    "/projects/{project_id}/ui-schemes/{scheme_id}/screens/canonical",
+    response_model=ScreenCanonicalStatusFile,
+)
+def post_screen_canonical(
+    project_id: str,
+    scheme_id: str,
+    payload: ScreenCanonicalSet,
+) -> ScreenCanonicalStatusFile:
     """选定 / 取消某 screen 的风格定稿（B3）。path=None 取消。style_variant 从 job 反查，不用前端报。"""
     from character_workflow.lib import stale, ui_jobs
     try:
         if payload.path is None:
-            ui_jobs.clear_screen_canonical(project_id, payload.screen_id)
+            ui_jobs.clear_screen_canonical(project_id, scheme_id, payload.screen_id)
         else:
-            ui_jobs.set_screen_canonical(project_id, payload.screen_id, payload.path)
-        return stale.screen_canonical_status(project_id)
+            ui_jobs.set_screen_canonical(project_id, scheme_id, payload.screen_id, payload.path)
+        return stale.screen_canonical_status(project_id, scheme_id)
     except KeyError:
         raise HTTPException(404, detail="找不到这个项目（可能已被删除）")
     except FileNotFoundError as e:
@@ -706,22 +717,55 @@ def delete_project_folder_item(
     folder_id: str,
     kind: ProjectFolderItemKind = Query(),
     asset_id: str = Query(min_length=1),
+    scheme_id: str | None = Query(default=None),
 ) -> ProjectFoldersFile:
     try:
         return remove_folder_item(
             project_id,
             folder_id,
-            ProjectFolderItem(kind=kind, asset_id=asset_id),
+            ProjectFolderItem(kind=kind, asset_id=asset_id, scheme_id=scheme_id),
         )
     except KeyError:
         raise HTTPException(status_code=404, detail="找不到这个项目或文件夹") from None
 
 
+@router.get("/projects/{project_id}/ui-schemes", response_model=UiSchemesFile)
+def get_ui_schemes(project_id: str) -> UiSchemesFile:
+    from character_workflow.lib.ui_schemes import read_schemes
+    try:
+        return read_schemes(project_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.post("/projects/{project_id}/ui-schemes", response_model=UiSchemesFile)
+def post_ui_scheme(project_id: str, payload: UiSchemeCreate) -> UiSchemesFile:
+    from character_workflow.lib.ui_schemes import create_scheme
+    try:
+        return create_scheme(project_id, payload)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/projects/{project_id}/ui-schemes/default", response_model=UiSchemesFile)
+def post_ui_scheme_default(project_id: str, payload: UiSchemeDefaultSet) -> UiSchemesFile:
+    from character_workflow.lib.ui_schemes import set_default
+    try:
+        return set_default(project_id, payload.scheme_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
 @router.get("/projects/{project_id}/workspaces", response_model=ProjectWorkspaceSummary)
-def get_project_workspaces(project_id: str) -> ProjectWorkspaceSummary:
+def get_project_workspaces(
+    project_id: str,
+    ui_scheme: str | None = Query(default=None),
+) -> ProjectWorkspaceSummary:
     from character_workflow.lib.workspace_summary import project_workspace_summary
     try:
-        return project_workspace_summary(project_id)
+        return project_workspace_summary(project_id, ui_scheme)
     except KeyError:
         raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
 
@@ -1552,8 +1596,11 @@ def gallery_project(project: str = Query(min_length=1)) -> dict:
 
 
 @router.get("/gallery/screens")
-def gallery_screens(project: str = Query(min_length=1)) -> dict:
-    """B2 项目页「页面」区：projects/<slug>/screens/<screen-id>/ 下的 UI 页面图。
+def gallery_screens(
+    project: str = Query(min_length=1),
+    scheme: str = Query(min_length=1),
+) -> dict:
+    """项目 UI 方案下的页面版本图。
 
     扁平 items（前端按 screen_id 分组），组内/组间都最新在前。
     """
@@ -1561,7 +1608,12 @@ def gallery_screens(project: str = Query(min_length=1)) -> dict:
     proj = next((p for p in pf.projects if p.id == project), None)
     if proj is None:
         raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）")
-    screens_dir = data_root.projects_dir() / proj.slug / "screens"
+    from character_workflow.lib.ui_schemes import resolve_scheme, scheme_screens_dir
+    try:
+        _, ui_scheme = resolve_scheme(project, scheme)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    screens_dir = scheme_screens_dir(proj, ui_scheme.id)
     job_ids_by_path = _gallery_job_ids_by_path()
     # B3：风格候选的来源关系存在 job.params，前端并排对比按 style_variant 分列。
     jobs_by_id = {j.job_id: j for j in list_jobs()}
@@ -1761,17 +1813,18 @@ def _gallery_job_ids_by_path() -> dict[str, str]:
 
 @router.get("/gallery/image")
 def gallery_image(path: str) -> FileResponse:
-    """Serve image files under characters/*, studio/* or projects/*/screens/*. Rejects traversal."""
+    """Serve gallery media from the explicit asset roots. Reject traversal."""
     root = _project_root()
     target = (root / path).resolve()
     characters_dir = (root / "characters").resolve()
     studio_dir = (root / "studio").resolve()
     projects_root = data_root.projects_dir().resolve()
-    # projects 分支只放行 screens / videos 资产子树（style.md / design 文档不得经此外读）。
+    # projects 分支只放行 ui/<scheme>/screens 与 videos 资产（style/design 文档不可读）。
     project_parts = target.relative_to(projects_root).parts if target.is_relative_to(projects_root) else ()
     in_project_assets = (
-        len(project_parts) >= 3
-        and project_parts[1] == "screens"
+        len(project_parts) >= 5
+        and project_parts[1] == "ui"
+        and project_parts[3] == "screens"
     ) or (
         len(project_parts) >= 5
         and project_parts[1] == "videos"

@@ -1,10 +1,11 @@
 import { requestJson } from './http';
 
-export type ProjectFolderItemKind = 'character' | 'ui_screen' | 'video_production';
+export type ProjectFolderItemKind = 'character' | 'ui_scheme' | 'ui_screen' | 'video_production';
 
 export interface ProjectFolderItem {
   kind: ProjectFolderItemKind;
   asset_id: string;
+  scheme_id?: string | null;
 }
 
 export interface ProjectFolder {
@@ -114,6 +115,7 @@ export function removeProjectFolderItem(
   item: ProjectFolderItem,
 ): Promise<ProjectFoldersFile> {
   const query = new URLSearchParams({ kind: item.kind, asset_id: item.asset_id });
+  if (item.scheme_id) query.set('scheme_id', item.scheme_id);
   return requestJson(
     `${base(projectId)}/${encodeURIComponent(folderId)}/items?${query}`,
     '从文件夹移除',

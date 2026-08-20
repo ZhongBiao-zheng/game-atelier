@@ -154,12 +154,22 @@ export function AppShell() {
               />
             )}
           </Route>
-          <Route path="/workshop/:projectId/ui/screens/:screenId">
+          <Route path="/workshop/:projectId/ui/:schemeId/screens/:screenId">
             {(params) => (
               <CharacterDetail
                 projectId={params.projectId}
                 workspace="ui"
+                uiSchemeId={params.schemeId}
                 screenId={params.screenId}
+              />
+            )}
+          </Route>
+          <Route path="/workshop/:projectId/ui/:schemeId">
+            {(params) => (
+              <CharacterDetail
+                projectId={params.projectId}
+                workspace="ui"
+                uiSchemeId={params.schemeId}
               />
             )}
           </Route>

@@ -40,7 +40,7 @@ export async function fetchGalleryProject(projectId: string): Promise<ProjectGal
   return Array.isArray(data.items) ? data.items : [];
 }
 
-/** 项目 UI 页面图（B2）：projects/<slug>/screens/<screen-id>/ 下的版本图，最新在前。 */
+/** 项目 UI 页面图：projects/<slug>/ui/<scheme-id>/screens/<screen-id>/ 下的版本图，最新在前。 */
 export interface ProjectScreenItem {
   screen_id: string;
   filename: string;
@@ -55,9 +55,12 @@ export interface ProjectScreenItem {
   mtime: number;
 }
 
-export async function fetchGalleryScreens(projectId: string): Promise<ProjectScreenItem[]> {
+export async function fetchGalleryScreens(
+  projectId: string,
+  schemeId: string,
+): Promise<ProjectScreenItem[]> {
   const data = await requestJson<{ items?: ProjectScreenItem[] }>(
-    `/api/gallery/screens?project=${encodeURIComponent(projectId)}`,
+    `/api/gallery/screens?project=${encodeURIComponent(projectId)}&scheme=${encodeURIComponent(schemeId)}`,
     '读取项目页面图',
   );
   return Array.isArray(data.items) ? data.items : [];

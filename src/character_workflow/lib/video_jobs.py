@@ -10,7 +10,7 @@ from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_text
 from character_workflow.lib.jobs import job_lock, list_jobs
 from character_workflow.lib.schemas import ProjectVideoBrief, ProjectVideoProduction, ProjectVideoShot
-from character_workflow.lib.ui_jobs import resolve_project
+from character_workflow.lib.projects import resolve_project
 
 
 VIDEO_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")

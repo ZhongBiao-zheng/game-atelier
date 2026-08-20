@@ -1,9 +1,9 @@
 ---
 name: ui-screens
-version: 1.0.0
+version: 1.1.0
 description: |
   游戏 UI 页面延展：读锚三文档，按玩家旅程 8 步审计推带优先级的页面清单，
-  画师批准范围后写 screens/screen-map.md（清单表 + 每页契约）。
+  画师批准范围后写当前 UI 方案的 screens/screen-map.md（清单表 + 每页契约）。
   本 skill 只产 screen-map，不生图——逐页生成交给 ui-page 从 map 取契约基础。
   前置门：三锚文档 approved（或 waiver）+ style.md ui.* approved（风格已定稿）。
   用户要页面清单 / 屏幕地图 / 批量延展页面 / 审计缺页，或调用 /game-atelier:ui-screens 时使用。
@@ -24,7 +24,7 @@ triggers:
 ## 定位
 
 从玩法和玩家旅程**推导**页面清单，不默认堆满所有常见系统——宁缺毋滥。产物是
-`projects/<slug>/screens/screen-map.md`（页面清单表 + 每页一节契约），它是项目页面全景的
+`projects/<slug>/ui/<scheme>/screens/screen-map.md`（页面清单表 + 每页一节契约），它是当前方案页面全景的
 事实源；单页结构细化仍归各页 brief（`ui-page` 从 map 的对应节取基础）。本 skill 不生图。
 
 ## 运行模式（CLI 前缀判断）
@@ -39,14 +39,15 @@ triggers:
 ### 1. 定项目
 
 `turn-start` 取 `has_projects` / `projects` / active 归属项目（同 ui-anchor 协议）；
-多项目用 AskUserQuestion 选定，拿到 `project_slug`。
+多项目用 AskUserQuestion 选定，拿到 `project_slug`。随后 Read `ui/schemes.json`：点名方案就用
+点名项，否则用 `default_scheme_id`，并向画师明示当前方案。
 
 ### 2. 门禁检查（硬门，不过不延展）
 
-Read `projects/<slug>/design/{gdd,prd,interaction}.md` 与 `projects/<slug>/style.md`：
+Read 共享 `design/{gdd,prd,interaction}.md`、项目根 style.md 基线与当前方案 style.md：
 
 - 三锚文档任一缺失或 `status` 非 `approved`，且无 `design/waiver.md` → **停**，指回 `ui-anchor`。
-- `style.md` 缺失、无 `ui.*` 节、或 `status` 非 `approved` → **停**，指回 `ui-page` 风格切换模式
+- 当前方案 style.md 缺失、无 `ui.*` 节、或 `status` 非 `approved` → **停**，指回 `ui-page` 风格切换模式
   先定稿风格——风格未定就批量延展，每一页都会漂。
 - 凭 waiver 放行时，向画师明示「本次凭 waiver 跳过策划门禁」。
 
@@ -71,7 +72,7 @@ AskUserQuestion 把清单交画师批：表格列出 id / 名称 / 优先级 / �
 ### 5. 写 screen-map
 
 按 `${CLAUDE_PLUGIN_ROOT}/docs/references/screen-map-template.md` Write
-`projects/<slug>/screens/screen-map.md`：
+`projects/<slug>/ui/<scheme>/screens/screen-map.md`：
 
 - 页面清单表：id / 名称 / 分类 / 优先级 / 状态（初始 `planned`，已出图的页如实标）/ 依赖。
 - 每页一节 `## screen.<id>` 契约：purpose / 玩家旅程 / 布局分区 / 组件 / 状态——

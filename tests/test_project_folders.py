@@ -30,10 +30,10 @@ def _folder_assets(isolated_data_root: Path):
 
     project_root = isolated_data_root / "projects" / project.slug
     screen_id = "home"
-    screen_dir = project_root / "screens" / screen_id
+    screen_dir = project_root / "ui" / "v1" / "screens" / screen_id
     screen_dir.mkdir(parents=True)
     (screen_dir / "v1.png").write_bytes(b"image")
-    (project_root / "screens" / "screen-map.md").write_text(
+    (project_root / "ui" / "v1" / "screens" / "screen-map.md").write_text(
         "| screen-id | 名称 | 分类 | 优先级 | 状态 | 依赖 |\n"
         "|---|---|---|---|---|---|\n"
         "| home | 主界面 | core | must-have | planned | |\n",
@@ -49,6 +49,7 @@ def test_project_folder_models_forbid_unknown_fields():
     assert ProjectFolderItem(kind="character", asset_id="cao-cao").model_dump() == {
         "kind": "character",
         "asset_id": "cao-cao",
+        "scheme_id": None,
     }
     with pytest.raises(ValueError):
         ProjectFolderItem(kind="character", asset_id="cao-cao", label="副本名")
@@ -114,7 +115,7 @@ def test_folder_accepts_mixed_assets_and_same_asset_in_multiple_folders(
 
     for item in (
         {"kind": "character", "asset_id": character_id},
-        {"kind": "ui_screen", "asset_id": screen_id},
+        {"kind": "ui_screen", "asset_id": screen_id, "scheme_id": "v1"},
         {"kind": "video_production", "asset_id": production_id},
     ):
         _post(client, f"/api/projects/{project.id}/folders/{folder_a['id']}/items", item)
@@ -127,12 +128,12 @@ def test_folder_accepts_mixed_assets_and_same_asset_in_multiple_folders(
     folders = client.get(f"/api/projects/{project.id}/folders").json()["folders"]
     by_id = {folder["id"]: folder for folder in folders}
     assert by_id[folder_a["id"]]["items"] == [
-        {"kind": "character", "asset_id": character_id},
-        {"kind": "ui_screen", "asset_id": screen_id},
-        {"kind": "video_production", "asset_id": production_id},
+        {"kind": "character", "asset_id": character_id, "scheme_id": None},
+        {"kind": "ui_screen", "asset_id": screen_id, "scheme_id": "v1"},
+        {"kind": "video_production", "asset_id": production_id, "scheme_id": None},
     ]
     assert by_id[folder_b["id"]]["items"] == [
-        {"kind": "character", "asset_id": character_id},
+        {"kind": "character", "asset_id": character_id, "scheme_id": None},
     ]
 
 
@@ -149,7 +150,7 @@ def test_remove_item_and_delete_folder_preserve_assets(client, isolated_data_roo
     folder = _post(client, f"/api/projects/{project.id}/folders", {"name": "交付整理"})["folders"][0]
     for item in (
         {"kind": "character", "asset_id": character_id},
-        {"kind": "ui_screen", "asset_id": screen_id},
+        {"kind": "ui_screen", "asset_id": screen_id, "scheme_id": "v1"},
         {"kind": "video_production", "asset_id": production_id},
     ):
         _post(client, f"/api/projects/{project.id}/folders/{folder['id']}/items", item)

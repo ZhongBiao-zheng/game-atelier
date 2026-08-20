@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 
 export function UiWorkspace({
   projectId,
+  schemeId,
   screenId,
   summary,
   screens,
@@ -17,6 +18,7 @@ export function UiWorkspace({
   onCanonicalChange,
 }: {
   projectId: string;
+  schemeId: string;
   screenId?: string;
   summary: ProjectWorkspaceSummary['ui'] | null;
   screens: ProjectScreenItem[];
@@ -34,6 +36,7 @@ export function UiWorkspace({
     try {
       onCanonicalChange(await setScreenCanonical(
         projectId,
+        schemeId,
         id,
         isCanonicalPath(path, entry) ? null : path,
       ));
@@ -51,6 +54,7 @@ export function UiWorkspace({
       {screenId ? (
         <ScreenDetail
           projectId={projectId}
+          schemeId={schemeId}
           screenId={screenId}
           item={current}
           images={currentImages}
@@ -61,6 +65,7 @@ export function UiWorkspace({
       ) : (
         <ScreenMap
           projectId={projectId}
+          schemeId={schemeId}
           items={summary?.screen_items ?? []}
           groups={groups}
           canonicalFile={canonicalFile}
@@ -165,11 +170,13 @@ function workflowSteps(summary: ProjectWorkspaceSummary['ui'] | null, hasScreens
 
 function ScreenMap({
   projectId,
+  schemeId,
   items,
   groups,
   canonicalFile,
 }: {
   projectId: string;
+  schemeId: string;
   items: UiScreenSummary[];
   groups: Array<[string, ProjectScreenItem[]]>;
   canonicalFile: ScreenCanonicalFile;
@@ -196,7 +203,7 @@ function ScreenMap({
         {rows.map(item => (
           <Link
             key={item.screen_id}
-            href={`/workshop/${encodeURIComponent(projectId)}/ui/screens/${encodeURIComponent(item.screen_id)}`}
+            href={`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(schemeId)}/screens/${encodeURIComponent(item.screen_id)}`}
             className="grid gap-2 px-4 py-3 transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:grid-cols-[minmax(140px,0.7fr)_minmax(180px,1fr)_auto] sm:items-center"
           >
             <div>
@@ -220,6 +227,7 @@ function ScreenMap({
 
 function ScreenDetail({
   projectId,
+  schemeId,
   screenId,
   item,
   images,
@@ -228,6 +236,7 @@ function ScreenDetail({
   onToggleCanonical,
 }: {
   projectId: string;
+  schemeId: string;
   screenId: string;
   item?: UiScreenSummary;
   images: ProjectScreenItem[];
@@ -238,7 +247,7 @@ function ScreenDetail({
   return (
     <section className="space-y-5" data-testid="project-screens">
       <div className="space-y-2">
-        <Link href={`/workshop/${encodeURIComponent(projectId)}/ui`} className="text-xs text-muted-foreground hover:text-foreground">
+        <Link href={`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(schemeId)}`} className="text-xs text-muted-foreground hover:text-foreground">
           UI / 页面地图
         </Link>
         <div className="flex flex-wrap items-baseline justify-between gap-3">

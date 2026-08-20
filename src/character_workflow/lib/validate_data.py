@@ -141,15 +141,23 @@ def _doc_files(root: Path) -> list[Path]:
             pdir / "design" / "gdd.md",
             pdir / "design" / "prd.md",
             pdir / "design" / "interaction.md",
-            pdir / "screens" / "screen-map.md",
         ):
             if candidate.exists():
                 docs.append(candidate)
-        screens = pdir / "screens"
-        if screens.exists():
-            docs.extend(
-                sorted(p for p in screens.glob("*.md") if p.name != "screen-map.md")
-            )
+        from character_workflow.lib.ui_schemes import read_existing_schemes, scheme_dir
+        schemes = read_existing_schemes(proj.id)
+        if schemes is None:
+            continue
+        for scheme in schemes.schemes:
+            ui_dir = scheme_dir(proj, scheme.id)
+            for candidate in (ui_dir / "style.md", ui_dir / "screens" / "screen-map.md"):
+                if candidate.exists():
+                    docs.append(candidate)
+            screens = ui_dir / "screens"
+            if screens.exists():
+                docs.extend(
+                    sorted(p for p in screens.glob("*.md") if p.name != "screen-map.md")
+                )
     return docs
 
 
@@ -193,23 +201,33 @@ def _check_character_canonical(report: Report, root: Path) -> int:
 
 def _check_screen_canonical(report: Report, root: Path) -> int:
     count = 0
+    from character_workflow.lib.ui_schemes import read_existing_schemes, scheme_screens_dir
     for proj in _known_projects():
-        cfile = data_root.projects_dir() / proj.slug / "screens" / "canonical.json"
-        if not cfile.exists():
+        schemes = read_existing_schemes(proj.id)
+        if schemes is None:
             continue
-        count += 1
-        rel = _rel(cfile, root)
-        try:
-            file = ScreenCanonicalFile.model_validate(
-                json.loads(cfile.read_text(encoding="utf-8"))
-            )
-        except (OSError, json.JSONDecodeError, ValidationError) as e:
-            _err(report, "canonical", rel, f"结构非法: {e}")
-            continue
-        for screen_id, entry in file.screens.items():
-            abs_p = root / entry.path
-            if not abs_p.is_file():
-                _err(report, "canonical", rel, f"screen {screen_id} 定稿引用不存在: {entry.path}")
+        for scheme in schemes.schemes:
+            cfile = scheme_screens_dir(proj, scheme.id) / "canonical.json"
+            if not cfile.exists():
+                continue
+            count += 1
+            rel = _rel(cfile, root)
+            try:
+                file = ScreenCanonicalFile.model_validate(
+                    json.loads(cfile.read_text(encoding="utf-8"))
+                )
+            except (OSError, json.JSONDecodeError, ValidationError) as e:
+                _err(report, "canonical", rel, f"结构非法: {e}")
+                continue
+            for screen_id, entry in file.screens.items():
+                abs_p = root / entry.path
+                if not abs_p.is_file():
+                    _err(
+                        report,
+                        "canonical",
+                        rel,
+                        f"screen {screen_id} 定稿引用不存在: {entry.path}",
+                    )
     return count
 
 

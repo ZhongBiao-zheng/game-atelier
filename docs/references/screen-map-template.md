@@ -1,6 +1,6 @@
 # Screen Map 模板（项目页面清单 + 每页契约）
 
-> 所有 `projects/<slug>/screens/screen-map.md` 遵循此格式。
+> 所有 `projects/<slug>/ui/<scheme-id>/screens/screen-map.md` 遵循此格式。
 > screen-map 是**项目页面全景**的事实源：清单表管范围与优先级，每页一节契约管结构基础——
 > `ui-page` 写单页 brief 时从对应 `## screen.<id>` 节取基础，不凭空推。
 > 上游是 prd 的「页面范围」表：screen-map 必须承接 prd 全部页面；旅程审计推出的新页面

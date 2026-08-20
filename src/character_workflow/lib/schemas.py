@@ -104,9 +104,10 @@ class Job(BaseModel):
     kind: JobKind = JobKind.IMAGE
     namespace: Namespace = "character"
     source_image: str | None = None  # promo/turnaround 用，绝对路径
-    # 2026-08-10 (B2): UI 页面 job（namespace="ui"）—— 资产归项目不归角色。
-    # 两字段决定输出目录 projects/<slug>/screens/<screen_id>/；Web 不能改。
+    # UI 页面 job（namespace="ui"）—— 资产归项目中的明确方案，不归角色。
+    # 三字段决定输出目录 projects/<slug>/ui/<scheme_id>/screens/<screen_id>/；Web 不能改。
     project_id: str | None = None
+    ui_scheme_id: str | None = None
     screen_id: str | None = None
     # 项目视频 job（namespace="video"）—— 产物归项目企划下的单个镜头。
     production_id: str | None = None
@@ -126,12 +127,12 @@ class Job(BaseModel):
     @model_validator(mode="after")
     def validate_namespace_ownership(self) -> "Job":
         if self.namespace == "ui":
-            if not self.project_id or not self.screen_id:
-                raise ValueError("ui job requires project_id and screen_id")
+            if not self.project_id or not self.ui_scheme_id or not self.screen_id:
+                raise ValueError("ui job requires project_id, ui_scheme_id and screen_id")
             if self.kind is not JobKind.IMAGE:
                 raise ValueError("ui job must use kind=image")
-        elif self.screen_id is not None:
-            raise ValueError("screen_id is only valid for namespace=ui")
+        elif self.ui_scheme_id is not None or self.screen_id is not None:
+            raise ValueError("ui_scheme_id and screen_id are only valid for namespace=ui")
 
         if self.namespace == "video":
             if not self.project_id or not self.production_id or not self.shot_id:
@@ -169,6 +170,7 @@ class UiScreenSummary(BaseModel):
 
 
 class UiWorkspaceSummary(BaseModel):
+    scheme_id: str
     anchors: dict[str, str]
     anchors_approved: int
     style_status: str
@@ -315,7 +317,7 @@ class ProjectsFile(BaseModel):
     assignments: dict[str, str] = {}  # character_id → project_id
 
 
-ProjectFolderItemKind = Literal["character", "ui_screen", "video_production"]
+ProjectFolderItemKind = Literal["character", "ui_scheme", "ui_screen", "video_production"]
 ProjectFolderName = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=60),
@@ -326,6 +328,56 @@ class ProjectFolderItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: ProjectFolderItemKind
     asset_id: str = Field(min_length=1)
+    scheme_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_ui_identity(self) -> "ProjectFolderItem":
+        if self.kind == "ui_screen" and not self.scheme_id:
+            raise ValueError("ui_screen folder item requires scheme_id")
+        if self.kind != "ui_screen" and self.scheme_id is not None:
+            raise ValueError("scheme_id is only valid for ui_screen folder items")
+        return self
+
+
+UiSchemeName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=60),
+]
+
+
+class UiScheme(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    name: UiSchemeName
+    created_at: str
+
+
+class UiSchemesFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    default_scheme_id: str
+    schemes: list[UiScheme]
+
+
+class UiSchemeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: UiSchemeName
+    source_scheme_id: str | None = None
+    copy_style: bool = False
+    copy_screen_map: bool = False
+    screen_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def copy_requires_source(self) -> "UiSchemeCreate":
+        if (self.copy_style or self.copy_screen_map or self.screen_ids) and not self.source_scheme_id:
+            raise ValueError("copy options require source_scheme_id")
+        if len(self.screen_ids) != len(set(self.screen_ids)):
+            raise ValueError("screen_ids must not contain duplicates")
+        return self
+
+
+class UiSchemeDefaultSet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scheme_id: str = Field(min_length=1)
 
 
 class ProjectFolder(BaseModel):
@@ -419,7 +471,7 @@ class CanonicalSet(BaseModel):
 
 class ScreenCanonicalEntry(BaseModel):
     # B3（2026-08-10）：单个 screen 的定稿记录。path 为 data-root 相对路径。
-    # style_fingerprint = 写入时项目 style.md 内容 hash（A3 stale 检测用）。
+    # style_fingerprint = 写入时项目基线 + UI 方案 style.md 的组合 hash。
     model_config = ConfigDict(extra="forbid")
     path: str
     set_at: str
@@ -428,7 +480,7 @@ class ScreenCanonicalEntry(BaseModel):
 
 
 class ScreenCanonicalFile(BaseModel):
-    # projects/<slug>/screens/canonical.json —— 每个 screen-id 至多一张定稿。
+    # projects/<slug>/ui/<scheme>/screens/canonical.json —— 每页至多一张定稿。
     model_config = ConfigDict(extra="forbid")
     screens: dict[str, ScreenCanonicalEntry] = Field(default_factory=dict)
 
@@ -444,7 +496,7 @@ class ScreenCanonicalStatusFile(BaseModel):
 
 
 class ScreenCanonicalSet(BaseModel):
-    # POST /api/projects/{id}/screens/canonical 请求体。path=None 表示取消该 screen 定稿。
+    # 方案 canonical 端点请求体。path=None 表示取消该 screen 定稿。
     model_config = ConfigDict(extra="forbid")
     screen_id: str
     path: str | None = None

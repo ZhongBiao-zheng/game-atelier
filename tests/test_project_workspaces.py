@@ -24,12 +24,12 @@ def test_workspace_summary_is_derived_from_project_files(client, isolated_data_r
     for name in ("gdd", "prd", "interaction"):
         _write(root / "design" / f"{name}.md", "---\nstatus: approved\n---\n")
     _write(
-        root / "style.md",
+        root / "ui" / "v1" / "style.md",
         "---\nstatus: approved\n---\n\n## ui.typography\n- body: Geist\n",
     )
-    _write(root / "screens" / "screen-map.md", "---\nstatus: approved\n---\n")
-    _write(root / "screens" / "home" / "v1.png", "image")
-    _write(root / "screens" / "home" / "v2.png", "image")
+    _write(root / "ui" / "v1" / "screens" / "screen-map.md", "---\nstatus: approved\n---\n")
+    _write(root / "ui" / "v1" / "screens" / "home" / "v1.png", "image")
+    _write(root / "ui" / "v1" / "screens" / "home" / "v2.png", "image")
 
     response = client.get(f"/api/projects/{project.id}/workspaces")
 
@@ -37,6 +37,7 @@ def test_workspace_summary_is_derived_from_project_files(client, isolated_data_r
     data = response.json()
     assert data["art"]["characters"] == 1
     assert data["ui"] == {
+        "scheme_id": "v1",
         "anchors": {"gdd": "approved", "prd": "approved", "interaction": "approved"},
         "anchors_approved": 3,
         "style_status": "approved",
@@ -69,18 +70,18 @@ def test_workspace_summary_reports_completed_ui_scope(client, isolated_data_root
     root = isolated_data_root / "projects" / project.slug
     for name in ("gdd", "prd", "interaction"):
         _write(root / "design" / f"{name}.md", "---\nstatus: approved\n---\n")
-    _write(root / "style.md", "---\nstatus: approved\n---\n\n## ui.color\n")
+    _write(root / "ui" / "v1" / "style.md", "---\nstatus: approved\n---\n\n## ui.color\n")
     _write(
-        root / "screens" / "screen-map.md",
+        root / "ui" / "v1" / "screens" / "screen-map.md",
         "---\nstatus: approved\n---\n\n"
         "| screen-id | 名称 | 分类 | 优先级 | 状态 | 依赖 |\n"
         "|---|---|---|---|---|---|\n"
         "| home | 主界面 | core | must-have | canonical | |\n",
     )
-    image = root / "screens" / "home" / "v1.png"
+    image = root / "ui" / "v1" / "screens" / "home" / "v1.png"
     _write(image, "image")
     selected = client.post(
-        f"/api/projects/{project.id}/screens/canonical",
+        f"/api/projects/{project.id}/ui-schemes/v1/screens/canonical",
         json={"screen_id": "home", "path": image.relative_to(isolated_data_root).as_posix()},
     )
 
@@ -93,7 +94,7 @@ def test_workspace_summary_reports_completed_ui_scope(client, isolated_data_root
 
 def test_workspace_summary_reads_screen_map_contract(client, isolated_data_root):
     project = create_project("三国")
-    screen_map = isolated_data_root / "projects" / project.slug / "screens" / "screen-map.md"
+    screen_map = isolated_data_root / "projects" / project.slug / "ui" / "v1" / "screens" / "screen-map.md"
     _write(
         screen_map,
         "---\nstatus: approved\n---\n\n"

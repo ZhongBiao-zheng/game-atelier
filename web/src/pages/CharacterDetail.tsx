@@ -18,6 +18,7 @@ function decodeRoutePath(value: string): string {
 export function CharacterDetail({
   projectId,
   workspace,
+  uiSchemeId,
   screenId,
   productionId,
   shotId,
@@ -30,6 +31,7 @@ export function CharacterDetail({
 }: {
   projectId?: string;
   workspace?: WorkshopWorkspace;
+  uiSchemeId?: string;
   screenId?: string;
   productionId?: string;
   shotId?: string;
@@ -44,6 +46,7 @@ export function CharacterDetail({
     <MainApp
       routedProjectId={projectId}
       routedWorkspace={workspace}
+      routedUiSchemeId={uiSchemeId}
       routedScreenId={screenId}
       routedProductionId={productionId}
       routedShotId={shotId}

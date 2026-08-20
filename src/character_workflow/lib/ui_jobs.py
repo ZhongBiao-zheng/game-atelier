@@ -1,6 +1,6 @@
-"""UI 页面 job helpers —— namespace='ui'，资产归项目：projects/<slug>/screens/<screen-id>/。
+"""UI 页面 job helpers —— 资产归项目方案：projects/<slug>/ui/<scheme>/screens/<screen>/。
 
-B3 起同时承载 screen 级定稿（projects/<slug>/screens/canonical.json）：风格候选选定后
+B3 起同时承载方案内 screen 级定稿（ui/<scheme>/screens/canonical.json）：风格候选选定后
 指向那一张，后续延展页与 style.md 回写都以它为准。
 """
 from __future__ import annotations
@@ -10,10 +10,9 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from character_workflow.lib import data_root, projects
+from character_workflow.lib import data_root, ui_schemes
 from character_workflow.lib.atomic_io import atomic_write_text
 from character_workflow.lib.schemas import (
-    Project,
     ScreenCanonicalEntry,
     ScreenCanonicalFile,
 )
@@ -28,42 +27,30 @@ def validate_screen_id(screen_id: str) -> str:
     return screen_id
 
 
-def resolve_project(ref: str) -> Project:
-    """按 id 或 slug 找项目 —— CLI 面向画师用 slug，job JSON 存 id。"""
-    f = projects.read_projects()
-    for p in f.projects:
-        if p.id == ref or p.slug == ref:
-            return p
-    raise KeyError(f"project not found: {ref!r}")
+def screens_dir(project_id: str, scheme_id: str) -> Path:
+    project, scheme = ui_schemes.resolve_scheme(project_id, scheme_id)
+    return ui_schemes.scheme_screens_dir(project, scheme.id)
 
 
-def project_slug(project_id: str) -> str:
-    f = projects.read_projects()
-    for p in f.projects:
-        if p.id == project_id:
-            return p.slug
-    raise KeyError(f"project not found: {project_id!r}")
-
-
-def screens_dir(slug: str) -> Path:
-    return data_root.projects_dir() / slug / "screens"
-
-
-def screen_output_dir(project_id: str | None, screen_id: str | None) -> Path:
-    if not project_id or not screen_id:
-        raise ValueError("ui job requires project_id and screen_id")
+def screen_output_dir(
+    project_id: str | None,
+    scheme_id: str | None,
+    screen_id: str | None,
+) -> Path:
+    if not project_id or not scheme_id or not screen_id:
+        raise ValueError("ui job requires project_id, ui_scheme_id and screen_id")
     validate_screen_id(screen_id)
-    return screens_dir(project_slug(project_id)) / screen_id
+    return screens_dir(project_id, scheme_id) / screen_id
 
 
 # ---------- screen 定稿（B3） ----------
 
-def _canonical_path(slug: str) -> Path:
-    return screens_dir(slug) / "canonical.json"
+def _canonical_path(project_id: str, scheme_id: str) -> Path:
+    return screens_dir(project_id, scheme_id) / "canonical.json"
 
 
-def read_screen_canonical(project_id: str) -> ScreenCanonicalFile:
-    p = _canonical_path(project_slug(project_id))
+def read_screen_canonical(project_id: str, scheme_id: str) -> ScreenCanonicalFile:
+    p = _canonical_path(project_id, scheme_id)
     if not p.exists():
         return ScreenCanonicalFile()
     try:
@@ -73,17 +60,21 @@ def read_screen_canonical(project_id: str) -> ScreenCanonicalFile:
         return ScreenCanonicalFile()
 
 
-def _write_screen_canonical(project_id: str, file: ScreenCanonicalFile) -> ScreenCanonicalFile:
-    atomic_write_text(_canonical_path(project_slug(project_id)), file.model_dump_json(indent=2))
+def _write_screen_canonical(
+    project_id: str,
+    scheme_id: str,
+    file: ScreenCanonicalFile,
+) -> ScreenCanonicalFile:
+    atomic_write_text(_canonical_path(project_id, scheme_id), file.model_dump_json(indent=2))
     return file
 
 
-def _normalize_screen_path(project_id: str, screen_id: str, path: str) -> str:
+def _normalize_screen_path(project_id: str, scheme_id: str, screen_id: str, path: str) -> str:
     """绝对 / data-root 相对路径都接受；校验存在且在该 screen 自己的目录下，返回相对路径。"""
     root = data_root.resolve_data_root().resolve()
     p = Path(path)
     abs_p = (p if p.is_absolute() else root / p).resolve()
-    target_dir = screen_output_dir(project_id, screen_id).resolve()
+    target_dir = screen_output_dir(project_id, scheme_id, screen_id).resolve()
     if not abs_p.is_file():
         raise FileNotFoundError(f"screen canonical target not found: {abs_p}")
     if abs_p.parent != target_dir:
@@ -108,25 +99,29 @@ def variant_of_path(rel_or_abs_path: str) -> str:
 
 
 def set_screen_canonical(
-    project_id: str, screen_id: str, path: str, style_variant: str | None = None,
+    project_id: str,
+    scheme_id: str,
+    screen_id: str,
+    path: str,
+    style_variant: str | None = None,
 ) -> ScreenCanonicalFile:
-    from character_workflow.lib.stale import style_fingerprint_for_slug
+    from character_workflow.lib.stale import style_fingerprint_for_ui_scheme
 
-    rel = _normalize_screen_path(project_id, screen_id, path)
+    rel = _normalize_screen_path(project_id, scheme_id, screen_id, path)
     entry = ScreenCanonicalEntry(
         path=rel,
         set_at=datetime.now(timezone.utc).isoformat(),
         # 省略时从 job 反查，画师不用重复报已经记在 job 里的风格标签。
         style_variant=style_variant if style_variant is not None else variant_of_path(rel),
         # A3：盖当前 style.md 指纹；style.md 回写后重跑本命令即可刷新（自愈）。
-        style_fingerprint=style_fingerprint_for_slug(project_slug(project_id)),
+        style_fingerprint=style_fingerprint_for_ui_scheme(project_id, scheme_id),
     )
-    file = read_screen_canonical(project_id)
+    file = read_screen_canonical(project_id, scheme_id)
     file.screens[screen_id] = entry
-    return _write_screen_canonical(project_id, file)
+    return _write_screen_canonical(project_id, scheme_id, file)
 
 
-def clear_screen_canonical(project_id: str, screen_id: str) -> ScreenCanonicalFile:
-    file = read_screen_canonical(project_id)
+def clear_screen_canonical(project_id: str, scheme_id: str, screen_id: str) -> ScreenCanonicalFile:
+    file = read_screen_canonical(project_id, scheme_id)
     file.screens.pop(screen_id, None)
-    return _write_screen_canonical(project_id, file)
+    return _write_screen_canonical(project_id, scheme_id, file)

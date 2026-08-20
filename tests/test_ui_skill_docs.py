@@ -47,7 +47,7 @@ def test_ui_orchestrator_routes_and_gates():
     assert "ui-anchor" in text
     # B4 后 ui-screens 已上线，路由表直接调起
     assert "ui-screens" in text and "未上线，B4" not in text
-    # UI 规范写 style.md ui.* 节，不另立平行契约
+    # UI 规范写当前方案 style.md 的 ui.* 节
     assert "ui.*" in text and "style.md" in text
     # 未上线阶段必须如实告知，不伪造
     assert "未上线" in text
@@ -70,7 +70,7 @@ def test_ui_page_skill_gates_and_submit_chain():
     assert "submit-screen" in text and "run-job" in text
     # brief 模板引用 + 产物归项目
     assert "screen-brief-template.md" in text
-    assert "projects/<slug>/screens/" in text
+    assert "projects/<slug>/ui/<scheme-id>/screens/" in text
 
 
 def test_ui_page_style_switch_mode():

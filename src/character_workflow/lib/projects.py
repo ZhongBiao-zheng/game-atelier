@@ -41,6 +41,14 @@ def read_projects() -> ProjectsFile:
     return ProjectsFile.model_validate(json.loads(p.read_text(encoding="utf-8")))
 
 
+def resolve_project(ref: str) -> Project:
+    """Resolve a project by its stored id or user-facing slug."""
+    for project in read_projects().projects:
+        if project.id == ref or project.slug == ref:
+            return project
+    raise KeyError(f"project not found: {ref!r}")
+
+
 def _write(file: ProjectsFile) -> ProjectsFile:
     p = _path()
     atomic_write_text(p, file.model_dump_json(indent=2))
@@ -105,6 +113,9 @@ def create_project(name: str, slug: str | None = None) -> Project:
         worldview_path.write_text(
             _WORLDVIEW_SKELETON.format(name=name.strip()), encoding="utf-8"
         )
+
+    from character_workflow.lib.ui_schemes import initialize_project
+    initialize_project(project)
 
     return project
 

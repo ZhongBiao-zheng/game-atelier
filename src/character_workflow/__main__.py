@@ -112,12 +112,14 @@ def _submit(args: argparse.Namespace) -> int:
 def _submit_screen(args: argparse.Namespace) -> int:
     """B2: 落盘一条 UI 页面 job（namespace='ui'），stdout 输出纯 job_id。
 
-    输出归项目不归角色：run-job 后产物落 projects/<slug>/screens/<screen-id>/vN.png。
+    输出归项目方案不归角色：run-job 后产物落 ui/<scheme>/screens/<screen-id>/vN.png。
     """
     from character_workflow.lib import ui_jobs
 
     try:
-        project = ui_jobs.resolve_project(args.project)
+        from character_workflow.lib.ui_schemes import resolve_scheme
+
+        project, scheme = resolve_scheme(args.project, args.scheme)
         ui_jobs.validate_screen_id(args.screen)
     except (KeyError, ValueError) as e:
         print(f"submit-screen: {e}", file=sys.stderr)
@@ -173,6 +175,7 @@ def _submit_screen(args: argparse.Namespace) -> int:
         alias=alias,
         namespace="ui",
         project_id=project.id,
+        ui_scheme_id=scheme.id,
         screen_id=args.screen,
     )
     print(_confirmation_card(job), file=sys.stderr)
@@ -511,20 +514,22 @@ def _set_screen_canonical(args: argparse.Namespace) -> int:
     from character_workflow.lib import ui_jobs
 
     try:
-        project = ui_jobs.resolve_project(args.project)
+        from character_workflow.lib.ui_schemes import resolve_scheme
+
+        project, scheme = resolve_scheme(args.project, args.scheme)
         ui_jobs.validate_screen_id(args.screen)
         if args.clear:
-            file = ui_jobs.clear_screen_canonical(project.id, args.screen)
+            file = ui_jobs.clear_screen_canonical(project.id, scheme.id, args.screen)
         else:
             if not args.path:
                 print(json.dumps({"error": "--path required unless --clear"}, ensure_ascii=False))
                 return 1
-            file = ui_jobs.set_screen_canonical(project.id, args.screen, args.path)
+            file = ui_jobs.set_screen_canonical(project.id, scheme.id, args.screen, args.path)
     except (KeyError, FileNotFoundError, ValueError) as e:
         print(json.dumps({"error": str(e)}, ensure_ascii=False))
         return 1
     print(json.dumps(
-        {"project_id": project.id, "slug": project.slug, **file.model_dump()},
+        {"project_id": project.id, "slug": project.slug, "scheme_id": scheme.id, **file.model_dump()},
         ensure_ascii=False, indent=2,
     ))
     return 0
@@ -632,10 +637,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p_ss = sub.add_parser(
         "submit-screen",
-        help="B2: 落盘 UI 页面 job（namespace='ui'）——产物归项目 projects/<slug>/screens/<screen-id>/；"
+        help="落盘 UI 页面 job（namespace='ui'）——产物归项目的明确 UI 方案；"
              "stdout 输出纯 job_id，stderr 输出确认卡",
     )
     p_ss.add_argument("--project", required=True, help="项目 id 或 slug")
+    p_ss.add_argument("--scheme", default=None, help="UI 方案 id；缺省使用项目默认方案")
     p_ss.add_argument("--screen", required=True, help="screen-id（小写字母/数字/连字符）")
     p_ss.add_argument("--prompt-file", required=True, help="中文 prompt 文件路径")
     p_ss.add_argument("--n", type=int, default=1, help="出图数量，默认 1")
@@ -660,6 +666,7 @@ def main(argv: list[str] | None = None) -> int:
         help="B3: 标记/取消某 screen 的定稿图（画师选定风格后调用；--clear 取消）",
     )
     p_sc.add_argument("--project", required=True, help="项目 id 或 slug")
+    p_sc.add_argument("--scheme", default=None, help="UI 方案 id；缺省使用项目默认方案")
     p_sc.add_argument("--screen", required=True, help="screen-id")
     p_sc.add_argument("--path", default=None, help="定稿图路径（绝对或 data-root 相对）")
     p_sc.add_argument("--clear", action="store_true", help="取消该 screen 定稿")

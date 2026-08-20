@@ -31,6 +31,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.25.0',
+    date: '2026-08-20',
+    headline: '同一个项目可以并存多套 UI 方案了',
+    changes: [
+      { kind: 'feat', text: 'UI 工作区可以并存 V1、V2 等多套方案；每套方案独立保存风格说明、页面地图、页面版本和定稿' },
+      { kind: 'feat', text: '新建方案时可以从当前方案复制风格、页面地图和指定页面，复制后两套方案继续独立演进' },
+      { kind: 'feat', text: '可以切换默认打开的 UI 方案，也能把整套方案或方案内的具体页面整理进个人文件夹' },
+    ],
+  },
+  {
     version: '5.24.0',
     date: '2026-08-20',
     headline: '角色皮肤有自己的完整工作流了',

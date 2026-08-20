@@ -1,6 +1,6 @@
 ---
 name: game-atelier
-version: 1.2.0
+version: 1.3.0
 description: |
   game-atelier 工坊总控：先诊断当前进度（环境 / 项目 / 角色资产 / UI / 视频管线），
   再路由到对应管线技能，编排跨管线顺序与人工门禁。
@@ -54,8 +54,9 @@ triggers:
 | 风格契约 | turn-start `project_style` | 有基础节 / 未建立 |
 | 角色资产 | turn-start `recent_chars` / `spec_status` / `canonical` | 角色数、active 角色、各 slot 有无定稿 |
 | UI 锚文档 | Read `projects/<slug>/design/{gdd,prd,interaction}.md` frontmatter `status` | 几份存在、各自 status 字面值、有无 `design/waiver.md` |
-| UI 规范 | Read `projects/<slug>/style.md` 有无 `ui.*` 节 | 未建立 / 有节及其 status |
-| 页面地图 | Read `projects/<slug>/screens/screen-map.md` frontmatter `status` | 未建立 / status 字面值 + 页面数 |
+| UI 方案 | Read `projects/<slug>/ui/schemes.json` | 方案数、默认方案 |
+| UI 规范 | Read 默认方案 `ui/<scheme>/style.md` | 未建立 / status |
+| 页面地图 | Read 默认方案 `ui/<scheme>/screens/screen-map.md` | 未建立 / status + 页面数 |
 | 视频企划 | Read `projects/<slug>/videos/*/{brief.md,shot-map.md,selected.json}` | 企划数、镜头数、已选版镜头数 |
 
 诊断完固定输出**进度卡**（总控独有产物，不与七件套混用）：
@@ -97,7 +98,8 @@ UI：  锚文档 <x/3 approved> · UI 规范 <未建立/draft/approved> · 页�
                                                    └ 视频管线（video：企划 → 镜头表 → 单镜头 → 选版）
 ```
 
-角色排在 UI 之前的理由：`style.md` 基础节（画风工艺 / 色板语义 / 禁止项）由角色管线首次建立，UI 的 `ui.*` 节从中派生。反向也能走（先 UI），此时 `ui` 总控会要求先补基础节。两条管线共用**同一份** `style.md`，不另立平行契约。
+角色排在 UI 之前的理由：项目根 `style.md` 基线通常由角色管线先建立；每套 UI 方案的
+`ui/<scheme>/style.md` 从这份基线派生并独立迭代。反向也能走（先 UI），此时 `ui` 总控先补项目基线。
 
 这是**建议顺序，不是强制**。画师点名单阶段时不强迫走完整流程。
 

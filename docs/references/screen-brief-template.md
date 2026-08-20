@@ -1,6 +1,6 @@
 # Screen Brief 模板（单页结构事实源）
 
-> 所有 `projects/<slug>/screens/<screen-id>.md` 遵循此格式。
+> 所有 `projects/<slug>/ui/<scheme-id>/screens/<screen-id>.md` 遵循此格式。
 > brief 是页面**结构**的事实源；prompt 是一次生成的快照（存 job JSON）——两者分离，
 > 结构改动改 brief，生成参数不回写 brief。
 > 禁止占位词；没问清的字段整行省略。

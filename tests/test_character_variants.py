@@ -92,6 +92,7 @@ def test_create_variant_from_folder_owns_independent_asset(
     assert read_project_folders(project.id).folders[0].items[0].model_dump() == {
         "kind": "character",
         "asset_id": variant_id,
+        "scheme_id": None,
     }
 
 
