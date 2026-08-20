@@ -1,6 +1,6 @@
 ---
 name: game-atelier
-version: 1.0.0
+version: 1.1.0
 description: |
   game-atelier 工坊总控：先诊断当前进度（环境 / 项目 / 角色资产 / UI 管线），
   再路由到对应管线技能，编排跨管线顺序与人工门禁。
@@ -75,8 +75,8 @@ UI：  锚文档 <x/3 approved> · UI 规范 <未建立/draft/approved> · 页�
 | 请求 | 去处 |
 |---|---|
 | 立绘 / 新角色 / 改立绘 / 换皮肤 | Skill 工具调起 `character` |
-| 美宣 / 宣传图 / 海报 / KV | Skill 工具调起 `promo`（前置：该角色已有 spec.md + portrait/） |
-| 三视图 / 角色三面 / 设定集 | Skill 工具调起 `turnaround`（前置同上） |
+| 美宣 / 宣传图 / 海报 / KV | Skill 工具调起 `promo`（前置：有 spec.md，且每个出镜角色有 portrait / turnaround / 用户上传身份图之一） |
+| 三视图 / 角色三面 / 设定集 | Skill 工具调起 `turnaround`（前置：完整 spec.md + portrait/，以该子技能门禁为准） |
 | 游戏 UI 任一阶段（策划锚 / UI 规范 / 页面生成 / 风格切换 / 页面延展） | Skill 工具调起 `ui`（UI 总控，内部再分派到 ui-anchor / ui-page / ui-screens） |
 | 开窗看图 / 起 server / 加 API Key / Web 界面 | Skill 工具调起 `viewer-server` |
 | 新建项目 / 定项目定位 | 本总控处理（问一句定位 → `create-project "<项目名>"`） |
@@ -88,9 +88,9 @@ UI：  锚文档 <x/3 approved> · UI 规范 <未建立/draft/approved> · 页�
 ## 建议链路
 
 ```text
-建项目 → 角色立绘（首次立起 style.md 基础节）→ ┬ 美宣（promo）
-                                                ├ 三视图（turnaround）
-                                                └ UI 管线（ui 总控：锚 → 规范 → 基准页 → 风格定稿 → 延展 → 逐页）
+建项目 → 角色身份锚（立绘 / 三视图 / 用户上传图）→ ┬ 美宣（promo）
+                                                   ├ 三视图（turnaround）
+                                                   └ UI 管线（ui 总控：锚 → 规范 → 基准页 → 风格定稿 → 延展 → 逐页）
 ```
 
 角色排在 UI 之前的理由：`style.md` 基础节（画风工艺 / 色板语义 / 禁止项）由角色管线首次建立，UI 的 `ui.*` 节从中派生。反向也能走（先 UI），此时 `ui` 总控会要求先补基础节。两条管线共用**同一份** `style.md`，不另立平行契约。
@@ -103,7 +103,7 @@ UI：  锚文档 <x/3 approved> · UI 规范 <未建立/draft/approved> · 页�
 
 1. 环境非 `ready` / `needs_first_key` → 不进任何生图路由。
 2. 无项目 → 先建项目再往下（资产无归属会落进 Stage E 兜底）。
-3. promo / turnaround 前该角色无立绘（无 spec.md 或 portrait/ 空）→ 指回 `character`，不让画师白跑一趟。
+3. promo 前缺 spec.md，或任一出镜角色既无 portrait / turnaround 又无用户上传身份图 → 指回 `character` 补资料；**不能因为没有立绘就拦截已有三视图或用户参考图的美宣**。turnaround 仍按其子技能的完整 spec + 立绘门禁执行。
 4. UI 生图前三锚文档未 approved 且无 waiver → 交给 `ui` 总控（其内部指向 `ui-anchor`），不越级调 `ui-page`。
 5. 门禁必停：批准点等画师明确表态，沉默 / 模糊 / 「你觉得行就行」都不当批准。
 

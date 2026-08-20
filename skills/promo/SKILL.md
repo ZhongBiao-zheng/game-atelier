@@ -1,11 +1,11 @@
 ---
 name: promo
-version: 1.3.0
+version: 1.4.0
 description: |
-  角色宣传图（KV / 海报）生成：基于已有立绘引导画师补齐场景/情绪/构图/色调/张力后出图，
+  角色宣传图（KV / 海报）生成：基于立绘、三视图或用户上传参考图锚定角色，补齐场景/情绪/构图/色调/张力后出图，
   也支持改已出的美宣。
   用户要做美宣、出宣传图 / 海报 / KV，或调用 /game-atelier:promo 时使用；
-  该角色还没有立绘（spec.md + portrait/）则先走 /game-atelier:character。
+  有 spec.md 且每个出镜角色至少有一张身份参考图即可，不要求必须已有立绘。
 allowed-tools:
   - Bash
   - Read
@@ -100,7 +100,7 @@ uv run python -m character_workflow turn-start --kind promo
 
 返回 `stage / recommend_action / active_id / spec / project_worldview / project_style / canonical / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 promo 段；`project_style` 为项目风格契约全文，非空时其 `style` / `palette` / `taboo` 字段一并作 prompt 约束）。
 
-**subject 图选择（身份锚定）**：优先取 `canonical.portrait.path`（画师标的定稿立绘）作 `--source-image`；`canonical.portrait` 为 null 时回退 `portrait/v_latest.png`，并在转发确认卡时**加一句注明**"该角色暂无定稿立绘，本次以最新立绘 vN 作参考"。画师说某张美宣"定稿"时（经 AskUserQuestion 确认）跑 `set-canonical --kind promo --path <路径>` 写入。
+**身份参考图选择**：为每个出镜角色建立参考图清单，优先级依次为 `canonical.portrait.path`、最新 `portrait/`、`canonical.turnaround.path`、最新 `turnaround/`、用户上传参考图；缺立绘不阻断。默认每个角色至少选一张，必要时为同一角色追加互补视角。没有任何身份图才停下请用户上传或先走角色资产流程。画师说某张美宣"定稿"时（经 AskUserQuestion 确认）跑 `set-canonical --kind promo --path <路径>` 写入。
 
 本 skill 只产 promo（美宣）。**对话中途画师需求转向立绘 / 三视图 → 直接切到对应 skill 执行流程**（Skill 工具调起 `/game-atelier:character` · `/game-atelier:turnaround`，一句话告知正在切），不在本 skill 内用 promo 上下文硬出别的 kind。
 
@@ -157,6 +157,10 @@ uv run python -m character_workflow turn-start --kind promo
 **美宣专项** → `references/prompt-promo-zh.md`（画幅映射、先光后衣、narrative_beat 转动作）
 **模型选择 + 按模型族写提示词** → `docs/references/model-routing.md`（先定模型族再动笔）
 
+### 参考图清单（写 prompt 前必做）
+
+逐张查看实际图片，按最终 `--reference-image` 参数顺序列清单。Prompt 对**每张参考图**都写“序号 + 简短可见描述 + 用途”；角色图与场景参考图同样处理，不能只写“图一 / 图二”。多角色默认每个出镜角色各上传一张身份锚图，场景 / 风格 / 构图图可在其后追加。完整契约见 `art-prompt-system.md` 第三节。
+
 ## 修改已出图（三模式）
 
 画师指着现有图提修改需求时，**必须先 AskUserQuestion** 确认模式，不得自行假设：
@@ -173,7 +177,7 @@ uv run python -m character_workflow turn-start --kind promo
 
 默认单张出图（不沿用立绘的多图习惯）；张数 / 尺寸缺省由 CLI 按 `--kind` 决定，不在此硬写。
 
-1. `uv run python -m character_workflow submit --kind promo --alias <选定alias> --model <选定model-id> --prompt-file <path> [--reference-image <path> ...] [--source-image <path>]` → 落盘 PENDING_CONFIRM（`--alias`/`--model` 按 model-routing 选；缺省回退默认 Key 首模型；`--reference-image` 可重复传多张，`--source-image` 是首张参考图的兼容别名——参考图一律走 CLI 参数，禁止手改 job JSON）
+1. `uv run python -m character_workflow submit --kind promo --alias <选定alias> --model <选定model-id> --prompt-file <path> --reference-image <角色A图> --reference-image <角色B图> [--reference-image <场景图> ...]` → 落盘 PENDING_CONFIRM（`--alias`/`--model` 按 model-routing 选；缺省回退默认 Key 首模型；`--reference-image` 可重复传多张，顺序须与 prompt 的参考图清单一致；`--source-image` 仅作首张图兼容别名。禁止手改 job JSON）
 2. 把 submit 在 stderr 打出的确认卡**原样转发**给画师（job_id / Key / model / 尺寸 / 参考图全列表 / 完整 prompt 原文），不得手写或摘要
 3. 判定画师回复：**明确肯定**（出图 / 确认 / OK / 可以 / 行 / 就这样 / 走吧 / 好）→ `uv run python -m character_workflow run-job <job_id>`；**要改**（具体改点）→ 改 prompt 重新 submit 出新确认卡（旧 PENDING_CONFIRM 作废、不复用），不 run-job；**否定 / 犹豫**（再想想 / 先不出 / 算了）→ 停在 PENDING_CONFIRM，不推进、不催；**模糊**（看不出肯定还是想改）→ 不擅自当肯定，用 AskUserQuestion 二选一「直接出图 / 还想改」。绝不把沉默或模糊当默认推进。
 4. 渲染成品给画师：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 Markdown 图片。图片地址按**渲染通道**选（**完整规则 + 判断方法 + 降级顺序见 `docs/references/image-presentation.md`**）：
@@ -192,7 +196,7 @@ uv run python -m character_workflow turn-start --kind promo
 
 ## 上传图通道
 
-画师粘参考图时：先存到 `characters/<id>/source/<timestamp>-<文件名>`，落卡前确认 `reference_mode`（`full_reference` / `style_only` / `color_lighting_only` / `pose_only`），按 mode 写参考关系（详见 `references/prompt-promo-zh.md` 第五节）。立绘 = subject（身份锚定，须由 skill 显式 `--source-image` 传入，runner 不自动补），上传图 = reference（不替换主体）。
+画师粘一张或多张参考图时，逐张查看并分类：角色身份图用 `import-reference --character <id> --slot portrait|turnaround --path <图>` 同时备份到 `source/` 和对应资产槽；纯场景 / 风格 / 构图图只存 `characters/<id>/source/`。落卡前为每张图确认用途与 `reference_mode`（`full_reference` / `style_only` / `color_lighting_only` / `pose_only`），全部通过可重复的 `--reference-image` 分别上传，并在 prompt 里写对应的简短可见描述。导入参考图**不自动定稿**。
 
 ## Turn 收尾：经验沉淀（出图经验）
 
@@ -226,9 +230,9 @@ turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、
 
 - `needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 态**绝不**启 viewer-server、绝不开窗。
 - 默认出**无字底图**：标题 / 标语 / logo / 文案不写进 prompt，交本地排版层（例外见 `references/prompt-promo-zh.md` 零节第 7 条）。
-- 美宣要锚定角色身份，须由 skill 显式传 `--source-image`（runner 不自动补图）：优先 `canonical.portrait`（定稿立绘），无定稿回退 `portrait/v_latest.png` 并在确认卡转发时注明回退。
+- 美宣每个出镜角色都要有身份锚；可来自 portrait、turnaround 或用户上传参考图，不把“必须有立绘”当门禁。
 - 美宣 prompt 只加场景 / 情绪 / 镜头 / 光线，**不改 spec 锚定的配色 / 外观**。
-- 参考图一律走 CLI `--reference-image` / `--source-image`，**禁止手改 job JSON**。
+- 每张实际上传图都要进入参考图清单，带简短可见描述与用途；按清单顺序重复传 `--reference-image`，**禁止手改 job JSON**。
 - 确认卡原样转发 CLI（stderr）全文，不手写、不摘要、不增删字段。
 - 出图链路 submit→PENDING_CONFIRM→画师明确肯定→run-job；**绝不把沉默 / 模糊当默认推进**，模糊用 AskUserQuestion 二选一。
 - 三模式（A 编辑 / B 重出 / C 混合）互斥不混用；重出 / 修图仍过确认门。
@@ -237,4 +241,4 @@ turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、
 
 ## 跳过条件
 
-git / 代码 / 纯问答；画师还没出过立绘（先 `/game-atelier:character`）；用户说"先做 spec"。
+git / 代码 / 纯问答；角色缺 spec.md，或某个出镜角色既无 portrait / turnaround 也没有用户上传身份参考图；用户说"先做 spec"。
