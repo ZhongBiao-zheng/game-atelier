@@ -375,11 +375,14 @@ def _create_project(args: argparse.Namespace) -> int:
 
 
 def _assign_character(args: argparse.Namespace) -> int:
-    from character_workflow.lib.projects import assign_character
+    from character_workflow.lib.character_variants import assign_character_family
     try:
-        assign_character(args.character_id, args.project)
+        assign_character_family(args.character_id, args.project)
     except KeyError as e:
         print(f"assign-character: 项目不存在: {e}", file=sys.stderr)
+        return 2
+    except ValueError as e:
+        print(f"assign-character: {e}", file=sys.stderr)
         return 2
     print(json.dumps(
         {"character_id": args.character_id, "project_id": args.project, "ok": True},

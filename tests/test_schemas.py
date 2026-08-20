@@ -21,7 +21,9 @@ def test_web_editable_patch_rejects_unknown_field():
 
 def test_feedback_post_rejects_empty():
     with pytest.raises(ValidationError):
-        FeedbackPost(text="")
+        FeedbackPost(text="", character_id="shadow")
+    with pytest.raises(ValidationError):
+        FeedbackPost(text="valid")
 
 
 def test_clipboard_attempt_success_field_required():

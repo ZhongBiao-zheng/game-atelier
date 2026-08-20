@@ -45,10 +45,17 @@ def assemble_character_prompt(
         sections.append(f"# 专家人设\n\n{persona.strip()}")
     if ctx["worldview"].strip():
         sections.append(f"# 项目世界观\n\n{ctx['worldview'].strip()}")
+    if ctx["project_style"].strip():
+        sections.append(f"# 项目风格\n\n{ctx['project_style'].strip()}")
     if ctx["lessons"].strip():
         sections.append(f"# 历代经验\n\n{ctx['lessons'].strip()}")
+    if ctx["parent_identity_anchor"].strip():
+        sections.append(f"# 母角色身份锚\n\n{ctx['parent_identity_anchor'].strip()}")
+    if ctx["variant_difference"].strip():
+        sections.append(f"# 皮肤差异\n\n{ctx['variant_difference'].strip()}")
     if ctx["spec"].strip():
         sections.append(f"# 当前角色 spec ({ctx['character_id']})\n\n{ctx['spec'].strip()}")
+    sections.append(f"# 当前槽位\n\n{ctx['asset_slot']}")
     if task.strip():
         sections.append(f"# 任务\n\n{task.strip()}")
     return "\n\n".join(sections) + "\n"

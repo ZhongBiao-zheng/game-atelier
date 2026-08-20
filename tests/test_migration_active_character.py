@@ -67,7 +67,9 @@ def test_turn_start_returns_none_spec_when_dir_missing(runtime):
 
 def test_turn_start_drafts_still_work(runtime):
     """迁移不应破坏 draft 处理。"""
-    (runtime / ".runtime" / "draft" / "20260519-100000.md").write_text("反馈一", encoding="utf-8")
+    (runtime / ".runtime" / "draft" / "20260519-100000.md").write_text(
+        "<!-- character: holy -->\n反馈一", encoding="utf-8"
+    )
     result = _run_cli(str(runtime))
     assert len(result["drafts"]) == 1
     assert "反馈一" in result["drafts"][0]["content"]

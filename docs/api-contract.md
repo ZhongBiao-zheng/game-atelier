@@ -11,6 +11,7 @@
 | Job / JobParams | `lib/schemas.py` | `web/src/schema/jobs.ts` | 无 —— 靠人 |
 | Key / ModelSpec | `lib/keys.py` | `web/src/api/keys.ts` | 无 —— 靠人 |
 | ProjectFolder / ProjectFolderItem | `lib/schemas.py` | `web/src/api/projectFolders.ts` | `tests/test_project_folders.py` + `ProjectFolderPage.test.tsx` |
+| CharacterVariant / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_variants.py` + `LeftSidebar.test.tsx` + `ProjectFolderPage.test.tsx` |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
 | 视频控件能力 | 各 `*_video.py` | `lib/videoControlCaps.ts` | 无 —— 靠人 |
 
@@ -38,11 +39,14 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 
 **Web 独占写**（Skill 不碰）
 `POST /spec/{id}` `POST /prompt/{job_id}` `POST /feedback` `POST /uploads` `POST /studio/jobs`
-`POST /characters` `POST /characters/{id}/rename` `POST /characters/{id}/gallery/{kind}` `POST /characters/{id}/project`
+`POST /characters` `POST /characters/{id}/variants` `POST /characters/{id}/rename` `POST /characters/{id}/gallery/{kind}` `POST /characters/{id}/project`
 `POST /projects` `/projects/reorder` `/projects/{id}/rename` `DELETE /projects/{id}`
 `POST /projects/{id}/folders` `/projects/{id}/folders/reorder` `/projects/{id}/folders/{folder_id}`
 `DELETE /projects/{id}/folders/{folder_id}`
 `POST /projects/{id}/folders/{folder_id}/items` `DELETE /projects/{id}/folders/{folder_id}/items`
+
+`POST /feedback` 必须携带 `{ text, character_id }`；turn-start 只消费当前 active 角色的反馈，
+其他角色的反馈继续留在待处理目录。
 `POST /keys` `PATCH /keys/{alias}` `DELETE /keys/{alias}` `POST /keys/models-preview`
 `POST /config` `POST /gallery/{hidden,favorites,ratings}` `POST /onboarding/data-root` `POST /folder-picker`
 `POST /clipboard-attempt` `DELETE /characters/{id}`
@@ -58,6 +62,41 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /characters/{id}/canonical` `GET /projects/{id}/screens/canonical`
 `GET /projects/{id}/workspaces` `GET /projects/{id}/videos`
 `GET /projects/{id}/folders`
+
+### 角色变体契约
+
+角色皮肤是项目资产库中的独立角色资产，目录、Spec、三类出图、Job、反馈、定稿与母角色完全
+隔离。母子关系只落在皮肤目录的 `characters/<variant_id>/variant.json`：
+
+```ts
+type CharacterVariant = {
+  parent_character_id: string;
+  difference: string;
+  created_at: string;
+};
+
+type CharacterEntry = {
+  id: string;
+  name: string;
+  status: string;
+  latest_job_id: string | null;
+  thumbnail?: string | null;
+  variant: CharacterVariant | null;
+};
+```
+
+`POST /characters/{parent_id}/variants` 请求为
+`{ name: string, difference: string, folder_id?: string }`。母角色必须已归属项目；皮肤自动继承该
+项目归属。传 `folder_id` 时，服务端同时把新皮肤作为 `kind='character'` 引用加入当前项目文件夹，
+但资产本体仍只存在于资产库。响应为新皮肤的 `CharacterEntry`。
+
+`turn-start` 对皮肤额外返回 `variant`，其中包含母角色 id / 显示名、母角色身份锚、皮肤差异、
+当前资产槽位和母角色定稿表；`project_style` 仍是项目风格真源。出图必须组合
+`project_style + variant.parent_identity_anchor + variant.difference + variant.asset_slot`，Job 的
+`character_id` 始终写皮肤 id。
+
+皮肤与母角色必须保持相同项目归属：皮肤不能单独更换项目；移动母角色时所有直接皮肤一起移动，
+并移除旧项目文件夹中的这些引用，避免跨项目悬空关系。
 
 ### 项目文件夹契约
 

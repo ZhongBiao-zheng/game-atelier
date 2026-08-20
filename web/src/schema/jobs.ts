@@ -102,6 +102,13 @@ export interface CharacterEntry {
   latest_job_id: string | null;
   // 名册缩略图：characters/<id>/portrait/ 最新图的 data-root 相对路径 — 与 schemas.py 同步
   thumbnail?: string | null;
+  variant: CharacterVariant | null;
+}
+
+export interface CharacterVariant {
+  parent_character_id: string;
+  difference: string;
+  created_at: string;
 }
 
 // A2（2026-08-10）定稿 — 与 schemas.py::CanonicalStatusEntry/CanonicalStatusFile 同步

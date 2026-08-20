@@ -244,13 +244,30 @@ class SpecPatch(BaseModel):
 
 class FeedbackPost(BaseModel):
     text: str = Field(min_length=1)
-    character_id: str | None = None
+    character_id: str = Field(min_length=1, pattern=r"^[^\r\n]+$")
 
 
 class ClipboardAttempt(BaseModel):
     ts: str
     success: bool
     reason: str | None = None
+
+
+CharacterName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=80, pattern=r"^[^\r\n]+$"),
+]
+CharacterVariantDifference = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=1000),
+]
+
+
+class CharacterVariant(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    parent_character_id: str = Field(min_length=1)
+    difference: CharacterVariantDifference
+    created_at: str
 
 
 class CharacterEntry(BaseModel):
@@ -260,6 +277,24 @@ class CharacterEntry(BaseModel):
     latest_job_id: str | None
     # 名册缩略图：characters/<id>/portrait/ 下最新图片的 data-root 相对路径（无立绘为 None）
     thumbnail: str | None = None
+    variant: CharacterVariant | None
+
+
+class CharacterVariantCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: CharacterName
+    difference: CharacterVariantDifference
+    folder_id: str | None = None
+
+
+class CharacterVariantContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    parent_character_id: str
+    parent_name: str
+    parent_identity_anchor: str
+    difference: str
+    asset_slot: str
+    parent_canonical: dict
 
 
 class ActiveCharacterFile(BaseModel):
@@ -505,5 +540,6 @@ class TurnStartResult(BaseModel):
     preferred_alias: str | None = None
     # v5.4.0 (A1): 项目风格契约全文 ← projects/<slug>/style.md（无归属 / 无契约 → ""）。
     project_style: str = ""
+    variant: CharacterVariantContext | None = None
     # v5.4.0 (A2): active 角色定稿 ← characters/<id>/canonical.json（promo/turnaround 选参考图用）。
     canonical: dict = Field(default_factory=dict)

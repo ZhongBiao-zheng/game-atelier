@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Film, Folder, Images, PanelsTopLeft, Plus, Save, Trash2, X } from 'lucide-react';
+import { Film, Folder, Images, Layers2, PanelsTopLeft, Plus, Save, Trash2, X } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
 
 import {
@@ -18,6 +18,7 @@ import { fetchGalleryScreens, type ProjectScreenItem } from '@/api/gallery';
 import { fetchProjectVideos, type ProjectVideoProduction } from '@/api/videos';
 import { fetchProjectWorkspaces, type ProjectWorkspaceSummary } from '@/api/workspaces';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { CreateVariantForm } from '@/components/workshop/CreateVariantForm';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -69,6 +70,7 @@ export function ProjectFolderPage({
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [variantParentId, setVariantParentId] = useState<string | null>(null);
 
   const folder = file?.folders.find(candidate => candidate.id === folderId) ?? null;
 
@@ -142,6 +144,7 @@ export function ProjectFolderPage({
   const visibleCandidates = view === 'overview'
     ? candidates
     : candidates.filter(candidate => KIND_VIEW[candidate.kind] === view);
+  const variantParent = characters.find(character => character.id === variantParentId) ?? null;
 
   function accept(next: ProjectFoldersFile) {
     setFile(next);
@@ -270,6 +273,18 @@ export function ProjectFolderPage({
                     <span className="block text-xs text-muted-foreground">{KIND_LABEL[asset.kind]}</span>
                     <span className="block truncate text-sm font-medium text-foreground">{asset.label}</span>
                   </Link>
+                  {asset.kind === 'character' && !characters.find(item => item.id === asset.asset_id)?.variant && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`为 ${asset.label} 新建皮肤`}
+                      onClick={() => setVariantParentId(asset.asset_id)}
+                    >
+                      <Layers2 aria-hidden />
+                      建皮肤
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="ghost"
@@ -290,6 +305,20 @@ export function ProjectFolderPage({
           )}
         </section>
 
+        {variantParent && (
+          <CreateVariantForm
+            parent={variantParent}
+            folderId={folder.id}
+            onCancel={() => setVariantParentId(null)}
+            onCreated={(entry) => {
+              notifyProjectFoldersChanged(projectId);
+              setLocation(
+                `/workshop/${encodeURIComponent(projectId)}/art/characters/${encodeURIComponent(entry.id)}`,
+              );
+            }}
+          />
+        )}
+
         {visibleCandidates.length > 0 && (
           <section aria-labelledby="folder-add-heading" className="space-y-3 border-t border-border/50 pt-5">
             <div>
@@ -301,6 +330,18 @@ export function ProjectFolderPage({
                 <li key={`${candidate.kind}:${candidate.asset_id}`} className="flex items-center gap-3 rounded-lg border border-border/70 px-3 py-2">
                   <AssetIcon kind={candidate.kind} />
                   <span className="min-w-0 flex-1 truncate text-sm">{candidate.label}</span>
+                  {candidate.kind === 'character' && !characters.find(item => item.id === candidate.asset_id)?.variant && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`为 ${candidate.label} 新建皮肤`}
+                      onClick={() => setVariantParentId(candidate.asset_id)}
+                    >
+                      <Layers2 aria-hidden />
+                      建皮肤
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="outline"

@@ -31,6 +31,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.24.0',
+    date: '2026-08-20',
+    headline: '角色皮肤有自己的完整工作流了',
+    changes: [
+      { kind: 'feat', text: '可以从资产库或个人文件夹为母角色新建皮肤；皮肤会显示在母角色下方，也能同时整理进多个文件夹' },
+      { kind: 'feat', text: '每个皮肤独立拥有立绘、美宣、三视图、定稿、反馈和出图历史，同时继承项目画风与母角色身份锚' },
+      { kind: 'feat', text: '皮肤详情会显示母角色关系；角色或皮肤改名、删除时，文件夹引用和母子关系会同步维护' },
+    ],
+  },
+  {
     version: '5.23.0',
     date: '2026-08-20',
     headline: '项目内容可以按自己的方式整理了',

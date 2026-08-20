@@ -19,6 +19,15 @@ from fastapi.responses import FileResponse
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
+from character_workflow.lib.character_variants import (
+    assign_character_family,
+    character_display_name,
+    child_variant_ids,
+    create_character_variant,
+    initialize_character_directory,
+    new_temporary_character_id,
+    read_character_variant,
+)
 from character_workflow.lib.atomic_io import (
     atomic_write_bytes,
     atomic_write_json,
@@ -36,13 +45,14 @@ from character_workflow.lib.projects import (
 )
 from character_workflow.lib.project_folders import (
     add_folder_item, create_folder, delete_folder, read_project_folders,
-    remove_folder_item, reorder_folders, update_folder,
+    remove_character_references, remove_folder_item, reorder_folders, update_folder,
 )
 from pydantic import BaseModel, Field, ValidationError
 from pydantic import field_validator
 
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
+    CharacterVariantCreate,
     CharacterProjectAssign, ClipboardAttempt,
     FeedbackPost, Job, JobKind, JobParams, JobStatus, ProjectCreate, ProjectRename,
     ProjectFolderCreate, ProjectFolderItem, ProjectFolderItemKind, ProjectFolderReorder,
@@ -58,29 +68,6 @@ logger = logging.getLogger(__name__)
 
 class CharacterCreate(BaseModel):
     name: str
-
-
-def _display_name(spec_path: Path) -> str:
-    """Parse display name from spec.md: YAML frontmatter `name:` first, then `# heading`."""
-    try:
-        text = spec_path.read_text(encoding="utf-8")
-        # YAML frontmatter: ---\n...\nname: <value>\n...\n---
-        if text.startswith("---"):
-            end = text.find("\n---", 3)
-            if end != -1:
-                frontmatter = text[3:end]
-                m = re.search(r"^name:\s*(.+?)\s*$", frontmatter, re.MULTILINE)
-                if m:
-                    return m.group(1)
-        # Legacy: first `# heading`
-        for line in text.splitlines()[:20]:
-            m = re.match(r"^#\s+(.+?)\s*$", line)
-            if m:
-                return m.group(1)
-    except OSError:
-        pass
-    # Last resort: parent dir name (character id)
-    return spec_path.parent.name
 
 
 router = APIRouter(prefix="/api")
@@ -160,8 +147,9 @@ def get_characters() -> list[CharacterEntry]:
         if not spec.exists():
             continue
         out.append(CharacterEntry(
-            id=d.name, name=_display_name(spec), status="idle", latest_job_id=None,
+            id=d.name, name=character_display_name(d.name), status="idle", latest_job_id=None,
             thumbnail=_latest_portrait(d, root),
+            variant=read_character_variant(d.name),
         ))
     return out
 
@@ -335,9 +323,7 @@ def post_feedback(payload: FeedbackPost) -> dict:
     draft_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
     p = draft_dir / f"{ts}.md"
-    body = payload.text
-    if payload.character_id:
-        body = f"<!-- character: {payload.character_id} -->\n{body}"
+    body = f"<!-- character: {payload.character_id} -->\n{payload.text}"
     atomic_write_text(p, body)
     return {"ok": True, "path": str(p)}
 
@@ -519,18 +505,78 @@ async def post_gallery_image(
 
 @router.post("/characters", response_model=CharacterEntry)
 def create_character(payload: CharacterCreate) -> CharacterEntry:
-    import time as _time
     name = payload.name.strip()
     if not name:
         raise HTTPException(422, detail="角色名不能为空")
-    char_id = f"char-{int(_time.time())}"
-    root = _project_root() / "characters" / char_id
-    for sub in ("portrait", "promo", "turnaround", "source"):
-        (root / sub).mkdir(parents=True, exist_ok=True)
+    char_id = new_temporary_character_id()
     spec_content = f"# {name}\n\n（尚无档案 — 请在终端 /game-atelier:character 对话补全）\n"
-    (root / "spec.md").write_text(spec_content, encoding="utf-8")
+    initialize_character_directory(char_id, spec_content)
     write_active(char_id)
-    return CharacterEntry(id=char_id, name=name, status="idle", latest_job_id=None)
+    return CharacterEntry(
+        id=char_id, name=name, status="idle", latest_job_id=None, variant=None,
+    )
+
+
+@router.post("/characters/{parent_character_id}/variants", response_model=CharacterEntry)
+def post_character_variant(
+    parent_character_id: str,
+    payload: CharacterVariantCreate,
+) -> CharacterEntry:
+    parent_dir = data_root.characters_dir() / parent_character_id
+    if not (parent_dir / "spec.md").is_file():
+        raise HTTPException(404, detail=f"找不到母角色 {parent_character_id}")
+    projects = read_projects()
+    project_id = projects.assignments.get(parent_character_id)
+    if project_id is None:
+        raise HTTPException(400, detail="母角色必须先归属项目，才能创建皮肤")
+    if payload.folder_id is not None:
+        try:
+            folders = read_project_folders(project_id)
+        except KeyError as error:
+            raise HTTPException(404, detail=f"找不到母角色所属项目 {project_id}") from error
+        if not any(folder.id == payload.folder_id for folder in folders.folders):
+            raise HTTPException(404, detail=f"找不到当前项目文件夹 {payload.folder_id}")
+    try:
+        variant_id, variant = create_character_variant(
+            parent_character_id,
+            payload.name,
+            payload.difference,
+        )
+    except FileNotFoundError as error:
+        raise HTTPException(404, detail=f"找不到母角色 {parent_character_id}") from error
+    except ValueError as error:
+        raise HTTPException(400, detail=str(error)) from error
+    try:
+        if payload.folder_id is not None:
+            add_folder_item(
+                project_id,
+                payload.folder_id,
+                ProjectFolderItem(kind="character", asset_id=variant_id),
+            )
+        write_active(variant_id)
+    except Exception:
+        if payload.folder_id is not None:
+            try:
+                remove_folder_item(
+                    project_id,
+                    payload.folder_id,
+                    ProjectFolderItem(kind="character", asset_id=variant_id),
+                )
+            except Exception:
+                logger.warning("回滚皮肤文件夹引用失败: %s", variant_id, exc_info=True)
+        try:
+            assign_character(variant_id, None)
+        except Exception:
+            logger.warning("回滚皮肤项目归属失败: %s", variant_id, exc_info=True)
+        shutil.rmtree(data_root.characters_dir() / variant_id, ignore_errors=True)
+        raise
+    return CharacterEntry(
+        id=variant_id,
+        name=payload.name,
+        status="idle",
+        latest_job_id=None,
+        variant=variant,
+    )
 
 
 @router.delete("/characters/{character_id}")
@@ -539,8 +585,15 @@ def delete_character(character_id: str) -> dict:
     target = (chars_dir / character_id).resolve()
     if not target.is_relative_to(chars_dir) or not target.is_dir():
         raise HTTPException(404, detail=f"找不到角色 {character_id}（目录不存在，可能已被删除）")
+    children = child_variant_ids(character_id)
+    if children:
+        raise HTTPException(
+            409,
+            detail=f"这个母角色还有 {len(children)} 个皮肤，请先处理皮肤再删除母角色",
+        )
 
     shutil.rmtree(target)
+    remove_character_references(character_id)
     assign_character(character_id, None)
     if read_active().active_id == character_id:
         write_active(None)
@@ -781,12 +834,14 @@ def post_experience(patch: _ExperiencePatch) -> dict:
 
 @router.post("/characters/{character_id}/project", response_model=ProjectsFile)
 def post_character_project(character_id: str, payload: CharacterProjectAssign) -> ProjectsFile:
-    if payload.project_id is not None:
-        try:
-            return assign_character(character_id, payload.project_id)
-        except KeyError as e:
-            raise HTTPException(404, detail=f"找不到项目 {payload.project_id}（可能已被删除）") from e
-    return assign_character(character_id, None)
+    try:
+        return assign_character_family(character_id, payload.project_id)
+    except KeyError as e:
+        raise HTTPException(
+            404, detail=f"找不到项目 {payload.project_id}（可能已被删除）"
+        ) from e
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e)) from e
 
 
 # job 状态 → 中文（报错里给画师看，别把 pending_confirm 这种内部枚举原样丢出去）
@@ -1467,7 +1522,7 @@ def gallery_project(project: str = Query(min_length=1)) -> dict:
         char_dir = _project_root() / "characters" / char_id
         if not char_dir.is_dir():
             continue
-        char_name = _display_name(char_dir / "spec.md")
+        char_name = character_display_name(char_id)
         for slot in _GALLERY_SLOTS:
             slot_dir = char_dir / slot
             if not slot_dir.is_dir():

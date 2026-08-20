@@ -43,6 +43,14 @@ function response(data: unknown): Response {
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const path = String(url);
+    if (path === '/api/characters/cao-cao/variants' && init?.method === 'POST') {
+      return response({
+        id: 'cao-cao-summer', name: '曹操·夏日', status: 'idle', latest_job_id: null,
+        variant: {
+          parent_character_id: 'cao-cao', difference: '白色短袍', created_at: '',
+        },
+      });
+    }
     if (init?.method) return response(folders);
     if (path === '/api/projects/p1/folders') return response(folders);
     if (path === '/api/characters') return response([
@@ -144,5 +152,33 @@ describe('ProjectFolderPage', () => {
     expect(screen.getByText('只删除文件夹和整理关系，不会删除资产或历史。')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
     await waitFor(() => expect(location.history.at(-1)).toBe('/workshop/p1/overview'));
+  });
+
+  it('从文件夹母角色创建皮肤时自动带当前文件夹并进入皮肤详情', async () => {
+    const { location } = renderPage('art');
+    fireEvent.click(await screen.findByRole('button', { name: '为 曹操 新建皮肤' }));
+    const form = screen.getByRole('form', { name: '为 曹操 新建皮肤' });
+    fireEvent.change(within(form).getByLabelText('皮肤名称（必填）'), {
+      target: { value: '曹操·夏日' },
+    });
+    fireEvent.change(within(form).getByLabelText('相对母角色的差异（必填）'), {
+      target: { value: '白色短袍' },
+    });
+    fireEvent.click(within(form).getByRole('button', { name: '创建皮肤' }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/characters/cao-cao/variants',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          name: '曹操·夏日',
+          difference: '白色短袍',
+          folder_id: 'folder-summer',
+        }),
+      }),
+    ));
+    await waitFor(() => expect(location.history.at(-1)).toBe(
+      '/workshop/p1/art/characters/cao-cao-summer',
+    ));
   });
 });

@@ -201,4 +201,65 @@ describe('LeftSidebar', () => {
       }),
     ));
   });
+
+  it('从资产库母角色创建皮肤后进入同项目完整角色路径', async () => {
+    const project = { id: 'p1', slug: 's1', name: '魔幻', created_at: '' };
+    const parent = {
+      id: 'shadow', name: '暗影', status: 'idle', latest_job_id: null, variant: null,
+    };
+    const created = {
+      id: 'char-variant', name: '暗影·夏日', status: 'idle', latest_job_id: null,
+      variant: {
+        parent_character_id: 'shadow', difference: '白色短袍', created_at: '2026-08-20T00:00:00Z',
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/characters' && !init) {
+        return { ok: true, json: async () => [parent] };
+      }
+      if (url === '/api/projects' && !init) {
+        return {
+          ok: true,
+          json: async () => ({ projects: [project], assignments: { shadow: 'p1' } }),
+        };
+      }
+      if (url === '/api/projects/p1/folders' && !init) {
+        return { ok: true, json: async () => ({ folders: [] }) };
+      }
+      if (url === '/api/characters/shadow/variants' && init?.method === 'POST') {
+        return { ok: true, status: 200, json: async () => created };
+      }
+      return { ok: false, status: 404, text: async () => '', json: async () => ({}) };
+    }));
+    const onSelect = vi.fn();
+    render(
+      <LeftSidebar
+        sseSignal={0}
+        activeProjectId="p1"
+        workspace="art"
+        selectedId="shadow"
+        onSelect={onSelect}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '为 暗影 新建皮肤' }));
+    const form = screen.getByRole('form', { name: '为 暗影 新建皮肤' });
+    fireEvent.change(within(form).getByLabelText('皮肤名称（必填）'), {
+      target: { value: '暗影·夏日' },
+    });
+    fireEvent.change(within(form).getByLabelText('相对母角色的差异（必填）'), {
+      target: { value: '白色短袍' },
+    });
+    fireEvent.click(within(form).getByRole('button', { name: '创建皮肤' }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/characters/shadow/variants',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ name: '暗影·夏日', difference: '白色短袍' }),
+      }),
+    ));
+    expect(onSelect).toHaveBeenCalledWith('char-variant', '暗影·夏日', 'p1');
+    expect(await screen.findByText('皮肤')).toBeInTheDocument();
+  });
 });

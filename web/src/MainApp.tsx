@@ -342,8 +342,8 @@ function ThreeColumnLayout({
               activeProjectId={openedProject?.id ?? null}
               workspace={workspace}
               currentFolderId={routedFolderId}
-              onSelect={(id, name) => {
-                const projectId = projectsFile?.assignments[id];
+              onSelect={(id, name, projectIdOverride) => {
+                const projectId = projectIdOverride ?? projectsFile?.assignments[id];
                 const project = projectsFile?.projects.find(p => p.id === projectId) ?? null;
                 setCharacterName(name);
                 closeMobileRoster();

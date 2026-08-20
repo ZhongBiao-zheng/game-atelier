@@ -63,7 +63,10 @@ def test_post_prompt_rejects_status_field(client, runtime):
 
 
 def test_post_feedback_writes_draft(client, runtime):
-    r = client.post("/api/feedback", json={"text": "2 号那张光线再阴一点"})
+    r = client.post(
+        "/api/feedback",
+        json={"text": "2 号那张光线再阴一点", "character_id": "shadow"},
+    )
     assert r.status_code == 200
     drafts = list((runtime / "draft").glob("*.md"))
     assert len(drafts) == 1

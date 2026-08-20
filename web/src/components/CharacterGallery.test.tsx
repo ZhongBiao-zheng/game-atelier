@@ -311,4 +311,91 @@ describe('CharacterGallery', () => {
 
     expect(await screen.findByText('等待第一张美宣')).toBeInTheDocument();
   });
+
+  it('shows the parent relationship while retaining all three asset tabs', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      const path = String(url);
+      if (path === '/api/projects') return {
+        ok: true,
+        json: async () => ({
+          projects: [{ id: 'p1', slug: 'one', name: '麻将游戏', created_at: '' }],
+          assignments: { 'cao-cao': 'p1', 'cao-cao-summer': 'p1' },
+        }),
+      };
+      if (path === '/api/characters') return {
+        ok: true,
+        json: async () => [
+          { id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null, variant: null },
+          {
+            id: 'cao-cao-summer', name: '曹操·夏日', status: 'idle', latest_job_id: null,
+            variant: { parent_character_id: 'cao-cao', difference: '白色短袍', created_at: '' },
+          },
+        ],
+      };
+      if (path === '/api/gallery/hidden') return {
+        ok: true, json: async () => ({ paths: [] }),
+      };
+      if (path === '/api/characters/cao-cao-summer/canonical') return {
+        ok: true,
+        json: async () => ({ portrait: null, promo: null, turnaround: null }),
+      };
+      return { ok: true, json: async () => [] };
+    }));
+
+    render(
+      <CharacterGallery
+        characterId="cao-cao-summer"
+        characterName="曹操·夏日"
+        onSelectImage={vi.fn()}
+        sseSignal={0}
+      />,
+    );
+
+    const parent = await screen.findByRole('link', { name: '曹操' });
+    expect(parent).toHaveAttribute('href', '/workshop/p1/art/characters/cao-cao');
+    expect(screen.getByText('立绘')).toBeInTheDocument();
+    expect(screen.getByText('美宣')).toBeInTheDocument();
+    expect(screen.getByText('三视图')).toBeInTheDocument();
+  });
+
+  it('keeps the parent relationship visible after project deletion', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      const path = String(url);
+      if (path === '/api/projects') return {
+        ok: true,
+        json: async () => ({ projects: [], assignments: {} }),
+      };
+      if (path === '/api/characters') return {
+        ok: true,
+        json: async () => [
+          { id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null, variant: null },
+          {
+            id: 'cao-cao-summer', name: '曹操·夏日', status: 'idle', latest_job_id: null,
+            variant: { parent_character_id: 'cao-cao', difference: '白色短袍', created_at: '' },
+          },
+        ],
+      };
+      if (path === '/api/gallery/hidden') return {
+        ok: true, json: async () => ({ paths: [] }),
+      };
+      if (path === '/api/characters/cao-cao-summer/canonical') return {
+        ok: true,
+        json: async () => ({ portrait: null, promo: null, turnaround: null }),
+      };
+      return { ok: true, json: async () => [] };
+    }));
+
+    render(
+      <CharacterGallery
+        characterId="cao-cao-summer"
+        characterName="曹操·夏日"
+        onSelectImage={vi.fn()}
+        sseSignal={0}
+      />,
+    );
+
+    expect(await screen.findByRole('link', { name: '曹操' })).toHaveAttribute(
+      'href', '/workshop/unassigned/characters/cao-cao',
+    );
+  });
 });

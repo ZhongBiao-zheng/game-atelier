@@ -7,7 +7,7 @@ from pathlib import Path
 
 from character_workflow.lib import data_root
 from character_workflow.lib import slug as slug_util
-from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_json, atomic_write_text
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.projects import read_projects
 from character_workflow.lib.schemas import PendingCharacterIdentity
@@ -185,6 +185,24 @@ def _rewrite_job_file(path: Path, old_id: str, new_id: str) -> None:
         atomic_write_json(path, data)
 
 
+def _rewrite_pending_draft_character_id(old_id: str, new_id: str) -> None:
+    draft_dir = _runtime_dir() / "draft"
+    if not draft_dir.is_dir():
+        return
+    old_marker = f"<!-- character: {old_id} -->"
+    new_marker = f"<!-- character: {new_id} -->"
+    for path in draft_dir.glob("*.md"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        lines = text.splitlines(keepends=True)
+        if not lines or lines[0].rstrip("\r\n") != old_marker:
+            continue
+        line_ending = lines[0][len(lines[0].rstrip("\r\n")):]
+        atomic_write_text(path, new_marker + line_ending + "".join(lines[1:]))
+
+
 def rename_character_id(old_id: str, new_id: str) -> dict[str, object]:
     if not old_id or not new_id:
         raise ValueError("old_id and new_id are required")
@@ -200,6 +218,11 @@ def rename_character_id(old_id: str, new_id: str) -> dict[str, object]:
         raise FileExistsError(new_id)
 
     old_dir.rename(new_dir)
+
+    from character_workflow.lib.character_variants import replace_parent_reference
+    from character_workflow.lib.project_folders import replace_character_reference
+
+    replace_parent_reference(old_id, new_id)
 
     active_path = _runtime_dir() / "active-character.json"
     if active_path.exists():
@@ -229,5 +252,8 @@ def rename_character_id(old_id: str, new_id: str) -> dict[str, object]:
     if jobs_dir.exists():
         for job_path in jobs_dir.glob("*.json"):
             _rewrite_job_file(job_path, old_id, new_id)
+
+    _rewrite_pending_draft_character_id(old_id, new_id)
+    replace_character_reference(old_id, new_id)
 
     return {"old_id": old_id, "new_id": new_id, "ok": True}

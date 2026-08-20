@@ -100,9 +100,11 @@ uv run python -m character_workflow turn-start --kind turnaround
 # Codex / Installed Plugin：python "$BOOT" --run -m character_workflow turn-start --kind turnaround（绝不 uv run）
 ```
 
-返回 `stage / recommend_action / active_id / spec / project_worldview / project_style / canonical / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 turnaround 段）。按 `recommend_action` 决策，处理方式同 character 主 Skill。
+返回 `stage / recommend_action / active_id / spec / project_worldview / project_style / variant / canonical / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 turnaround 段）。按 `recommend_action` 决策，处理方式同 character 主 Skill。
 
 **subject 图选择（身份锚定）**：优先取 `canonical.portrait.path`（画师标的定稿立绘）作 subject_image；`canonical.portrait` 为 null 时回退 `portrait/v_latest.png`，并在转发确认卡时**加一句注明**"该角色暂无定稿立绘，本次以最新立绘 vN 作参考"。画师说某张三视图"定稿"时（经 AskUserQuestion 确认）跑 `set-canonical --kind turnaround --path <路径>` 写入。
+
+**角色皮肤**：`variant` 非 null 时，三视图的 spec、job、定稿与反馈仍全部属于当前 `active_id`。优先用皮肤自己的 `canonical.portrait.path`；皮肤尚无立绘时才回退 `variant.parent_canonical.portrait.path`，并把 `variant.difference` 作为必须在正 / 侧 / 背三面一致落实的结构差异，禁止被母角色旧服装覆盖。
 
 本 skill 只产 turnaround（三视图）。**对话中途画师需求转向立绘 / 美宣 → 直接切到对应 skill 执行流程**（Skill 工具调起 `/game-atelier:character` · `/game-atelier:promo`，一句话告知正在切），不在本 skill 内用 turnaround 上下文硬出别的 kind。
 

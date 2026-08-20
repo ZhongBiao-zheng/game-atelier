@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   ChevronDown,
   FolderPlus,
   GripVertical,
+  Layers2,
   Plus,
   Trash2,
   UserPlus,
@@ -11,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { CharacterEntry, Project, ProjectsFile } from '../schema/jobs';
 import { ProjectNavigation } from '@/components/workshop/ProjectNavigation';
+import { CreateVariantForm } from '@/components/workshop/CreateVariantForm';
 import { SidebarDropZone } from '@/components/workshop/SidebarDropZone';
 import type { WorkshopWorkspace } from '@/components/workshop/workspaces';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -22,7 +24,7 @@ import { apiError, clip } from '@/api/http';
 interface Props {
   sseSignal: number;
   selectedId?: string | null;
-  onSelect: (id: string, name: string) => void;
+  onSelect: (id: string, name: string, projectId?: string) => void;
   onDelete?: (id: string) => void;
   onOpenProject?: (project: Project) => void;
   activeProjectId?: string | null;
@@ -67,6 +69,7 @@ export function LeftSidebar({
   const [creatingProject, setCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [creatingCharacter, setCreatingCharacter] = useState(false);
+  const [variantParentId, setVariantParentId] = useState<string | null>(null);
   const [newCharacterName, setNewCharacterName] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
   const newProjectInputRef = useRef<HTMLInputElement | null>(null);
@@ -441,7 +444,7 @@ export function LeftSidebar({
             <ProjectNavigation
               project={activeProject}
               workspace={workspace}
-              characters={grouped.get(activeProject.id) || []}
+              characters={arrangeCharacterVariants(grouped.get(activeProject.id) || [])}
               dragOver={dragOver === activeProject.id}
               onDrop={e => onDrop(e, activeProject.id)}
               onDragOver={e => onDragOver(e, activeProject.id)}
@@ -521,69 +524,131 @@ export function LeftSidebar({
   function renderChar(c: CharacterEntry) {
     const isActive = c.id === selectedId;
     const isEditing = c.id === editingId;
+    const projectId = projects.assignments[c.id];
     return (
-      <li
-        key={c.id}
-        draggable={!isEditing}
-        onDragStart={(e) => onDragStart(e, c.id)}
-        onClick={() => !isEditing && onSelect(c.id, c.name)}
-        onDoubleClick={(e) => startCharEdit(c, e)}
-        onKeyDown={(e) => {
-          if (isEditing) return;
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            onSelect(c.id, c.name);
-          }
-        }}
-        role={isEditing ? undefined : 'button'}
-        tabIndex={isEditing ? undefined : 0}
-        aria-label={isEditing ? undefined : c.name}
-        aria-pressed={isEditing ? undefined : isActive}
-        title="双击重命名 · 拖到项目"
-        className={cn(
-          'group/char relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-sm transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-          isEditing ? 'cursor-text' : 'cursor-pointer',
-          isActive
-            ? 'bg-secondary text-foreground'
-            : 'text-foreground/85 hover:bg-accent/50 hover:text-foreground',
+      <Fragment key={c.id}>
+        <li
+          draggable={!isEditing && !c.variant}
+          onDragStart={(e) => onDragStart(e, c.id)}
+          onClick={() => !isEditing && onSelect(c.id, c.name)}
+          onDoubleClick={(e) => startCharEdit(c, e)}
+          onKeyDown={(e) => {
+            if (isEditing) return;
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onSelect(c.id, c.name);
+            }
+          }}
+          role={isEditing ? undefined : 'button'}
+          tabIndex={isEditing ? undefined : 0}
+          aria-label={isEditing ? undefined : c.name}
+          aria-pressed={isEditing ? undefined : isActive}
+          title={c.variant ? "双击重命名 · 跟随母角色归属项目" : "双击重命名 · 拖到项目"}
+          className={cn(
+            'group/char relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-sm transition-colors',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+            isEditing ? 'cursor-text' : 'cursor-pointer',
+            isActive
+              ? 'bg-secondary text-foreground'
+              : 'text-foreground/85 hover:bg-accent/50 hover:text-foreground',
+            c.variant && 'ml-4',
+          )}
+        >
+          {/* 选中态降铜：整行黄铜 → 2px 竖轨 + 头像铜环（激活指示额度） */}
+          {isActive && (
+            <span aria-hidden className="absolute left-0 inset-y-1.5 w-0.5 rounded-full bg-primary" />
+          )}
+          <CharacterAvatar name={c.name} thumbnail={c.thumbnail} active={isActive} />
+          {isEditing ? (
+            <Input
+              ref={inputRef}
+              value={draftName}
+              onChange={e => setDraftName(e.target.value)}
+              onBlur={commitCharEdit}
+              onKeyDown={e => {
+                if (e.key === 'Enter') commitCharEdit();
+                if (e.key === 'Escape') cancelEdit();
+              }}
+              onClick={e => e.stopPropagation()}
+              className="h-6 text-xs flex-1"
+            />
+          ) : (
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">{c.name}</span>
+              {c.variant && <span className="block text-xs text-muted-foreground">皮肤</span>}
+            </span>
+          )}
+          <StatusBadge status={c.status} />
+          {!isEditing && (
+            <div className={cn(
+              'flex items-center transition-opacity group-hover/char:opacity-100 group-focus-within/char:opacity-100',
+              isActive ? 'opacity-100' : 'opacity-0',
+            )}>
+              {!c.variant && projectId && (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setVariantParentId(current => current === c.id ? null : c.id);
+                  }}
+                  aria-label={`为 ${c.name} 新建皮肤`}
+                  aria-expanded={variantParentId === c.id}
+                  title="新建角色皮肤"
+                  className="grid size-6 place-items-center rounded border-0 bg-transparent p-0 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <Layers2 className="size-3.5" aria-hidden />
+                </button>
+              )}
+              <button
+                onClick={(e) => deleteCharacter(c, e)}
+                aria-label={`删除角色 ${c.name}`}
+                title="删除角色（磁盘也会删）"
+                className="grid place-items-center size-6 rounded bg-transparent border-0 p-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            </div>
+          )}
+        </li>
+        {variantParentId === c.id && projectId && (
+          <li className="ml-4 py-2">
+            <CreateVariantForm
+              parent={c}
+              onCancel={() => setVariantParentId(null)}
+              onCreated={(entry) => {
+                setCharacters(current => [...current, entry]);
+                setProjects(current => ({
+                  ...current,
+                  assignments: { ...current.assignments, [entry.id]: projectId },
+                }));
+                setVariantParentId(null);
+                onSelect(entry.id, entry.name, projectId);
+              }}
+            />
+          </li>
         )}
-      >
-        {/* 选中态降铜：整行黄铜 → 2px 竖轨 + 头像铜环（激活指示额度） */}
-        {isActive && (
-          <span aria-hidden className="absolute left-0 inset-y-1.5 w-0.5 rounded-full bg-primary" />
-        )}
-        <CharacterAvatar name={c.name} thumbnail={c.thumbnail} active={isActive} />
-        {isEditing ? (
-          <Input
-            ref={inputRef}
-            value={draftName}
-            onChange={e => setDraftName(e.target.value)}
-            onBlur={commitCharEdit}
-            onKeyDown={e => {
-              if (e.key === 'Enter') commitCharEdit();
-              if (e.key === 'Escape') cancelEdit();
-            }}
-            onClick={e => e.stopPropagation()}
-            className="h-6 text-xs flex-1"
-          />
-        ) : (
-          <span className="flex-1 truncate">{c.name}</span>
-        )}
-        <StatusBadge status={c.status} />
-        {!isEditing && (
-          <button
-            onClick={(e) => deleteCharacter(c, e)}
-            aria-label={`删除角色 ${c.name}`}
-            title="删除角色（磁盘也会删）"
-            className="grid place-items-center size-6 rounded bg-transparent border-0 p-0 cursor-pointer opacity-0 transition-opacity group-hover/char:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
-          >
-            <Trash2 className="size-3.5" />
-          </button>
-        )}
-      </li>
+      </Fragment>
     );
   }
+}
+
+function arrangeCharacterVariants(characters: CharacterEntry[]): CharacterEntry[] {
+  const children = new Map<string, CharacterEntry[]>();
+  for (const character of characters) {
+    const parentId = character.variant?.parent_character_id;
+    if (!parentId) continue;
+    children.set(parentId, [...(children.get(parentId) ?? []), character]);
+  }
+  const arranged: CharacterEntry[] = [];
+  const included = new Set<string>();
+  for (const character of characters) {
+    if (character.variant) continue;
+    arranged.push(character, ...(children.get(character.id) ?? []));
+    included.add(character.id);
+    for (const child of children.get(character.id) ?? []) included.add(child.id);
+  }
+  arranged.push(...characters.filter(character => !included.has(character.id)));
+  return arranged;
 }
 
 /** 名册缩略图：最新立绘；无立绘回退 serif 首字母占位块。 */

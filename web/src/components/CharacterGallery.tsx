@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, BadgeCheck, Download, Eye, EyeOff, Heart, Loader2, Upload, X } from 'lucide-react';
-import type { AssetSlot, CanonicalFile, Job, ProjectsFile } from '../schema/jobs';
+import type {
+  AssetSlot,
+  CanonicalFile,
+  CharacterEntry,
+  Job,
+  ProjectsFile,
+} from '../schema/jobs';
 import { fetchCanonical, isCanonicalPath, setCanonical } from '@/api/canonical';
 import { fetchGalleryHidden, isGalleryHidden, setGalleryHidden } from '@/api/gallery';
 import { apiError, clip } from '@/api/http';
@@ -8,6 +14,7 @@ import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { cn } from '@/lib/utils';
+import { Link } from 'wouter';
 
 interface Props {
   characterId: string | null;
@@ -66,6 +73,11 @@ export function CharacterGallery({
   const { toggleFavorite, isFavorited } = useGalleryFavorites();
   // 展签小帽：角色所属项目名
   const [projectName, setProjectName] = useState<string | null>(null);
+  const [variantRelation, setVariantRelation] = useState<{
+    parentId: string;
+    parentName: string;
+    projectId: string | null;
+  } | null>(null);
   // 确认对话框状态
   const [dialog, setDialog] = useState<{
     open: boolean;
@@ -85,6 +97,8 @@ export function CharacterGallery({
   }, []);
 
   useEffect(() => {
+    setProjectName(null);
+    setVariantRelation(null);
     if (!characterId) return;
     let cancelled = false;
     fetchCanonical(characterId)
@@ -96,12 +110,22 @@ export function CharacterGallery({
   useEffect(() => {
     if (!characterId) return;
     let cancelled = false;
-    fetch('/api/projects')
-      .then(r => r.json() as Promise<ProjectsFile>)
-      .then(pf => {
+    Promise.all([
+      fetch('/api/projects').then(r => r.json() as Promise<ProjectsFile>),
+      fetch('/api/characters').then(r => r.json() as Promise<CharacterEntry[]>),
+    ])
+      .then(([pf, characters]) => {
         if (cancelled || !pf || !Array.isArray(pf.projects)) return;
         const pid = pf.assignments?.[characterId];
         setProjectName(pf.projects.find(p => p.id === pid)?.name ?? null);
+        const current = characters.find(character => character.id === characterId);
+        const parentId = current?.variant?.parent_character_id;
+        const parent = characters.find(character => character.id === parentId);
+        setVariantRelation(parentId ? {
+          parentId,
+          parentName: parent?.name ?? parentId,
+          projectId: pf.assignments?.[parentId] ?? null,
+        } : null);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -130,7 +154,7 @@ export function CharacterGallery({
 
   if (loading && jobs.length === 0) {
     return (
-      <GalleryShell name={characterName} projectName={projectName} count={0} rounds={0}
+      <GalleryShell name={characterName} projectName={projectName} variantRelation={variantRelation} count={0} rounds={0}
         tab={tab} setTab={setTab} tabCounts={tabCounts}
         colCount={colCount} onColCountChange={setColCount} tools={null}>
         <Skeleton cols={colCount} />
@@ -225,7 +249,7 @@ export function CharacterGallery({
   return (
     <>
       <GalleryShell
-        name={characterName} projectName={projectName}
+        name={characterName} projectName={projectName} variantRelation={variantRelation}
         count={allImages.length} rounds={tabJobs.length}
         tab={tab} setTab={setTab} tabCounts={tabCounts}
         colCount={colCount} onColCountChange={setColCount}
@@ -369,10 +393,11 @@ export function CharacterGallery({
 }
 
 function GalleryShell({
-  name, projectName, count, rounds, children, tab, setTab, tabCounts,
+  name, projectName, variantRelation, count, rounds, children, tab, setTab, tabCounts,
   colCount, onColCountChange, tools,
 }: {
   name: string | null; projectName: string | null; count: number; rounds: number;
+  variantRelation: { parentId: string; parentName: string; projectId: string | null } | null;
   children: React.ReactNode;
   tab: TabKind; setTab: (t: TabKind) => void; tabCounts: Record<TabKind, number>;
   colCount: number; onColCountChange: (n: number) => void;
@@ -390,6 +415,19 @@ function GalleryShell({
             <h1 className="font-display italic leading-[1.05] tracking-tight text-foreground truncate text-display">
               {name ?? '—'}
             </h1>
+            {variantRelation && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                角色皮肤 · 母角色{' '}
+                <Link
+                  href={variantRelation.projectId
+                    ? `/workshop/${encodeURIComponent(variantRelation.projectId)}/art/characters/${encodeURIComponent(variantRelation.parentId)}`
+                    : `/workshop/unassigned/characters/${encodeURIComponent(variantRelation.parentId)}`}
+                  className="rounded-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  {variantRelation.parentName}
+                </Link>
+              </p>
+            )}
           </div>
           {count > 0 && (
             <div className="shrink-0 font-mono tabular-nums text-xs text-muted-foreground">

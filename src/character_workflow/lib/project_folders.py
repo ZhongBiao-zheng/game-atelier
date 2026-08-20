@@ -112,6 +112,37 @@ def remove_folder_item(
         return _write(project, folders)
 
 
+def replace_character_reference(old_id: str, new_id: str) -> None:
+    for project in read_projects().projects:
+        with job_lock(f"project-folders-{project.id}"):
+            folders = _read(project)
+            changed = False
+            for folder in folders.folders:
+                for item in folder.items:
+                    if item.kind == "character" and item.asset_id == old_id:
+                        item.asset_id = new_id
+                        changed = True
+            if changed:
+                _write(project, folders)
+
+
+def remove_character_references(character_id: str) -> None:
+    for project in read_projects().projects:
+        with job_lock(f"project-folders-{project.id}"):
+            folders = _read(project)
+            changed = False
+            for folder in folders.folders:
+                kept = [
+                    item for item in folder.items
+                    if not (item.kind == "character" and item.asset_id == character_id)
+                ]
+                if len(kept) != len(folder.items):
+                    folder.items = kept
+                    changed = True
+            if changed:
+                _write(project, folders)
+
+
 def _find_folder(folders: ProjectFoldersFile, folder_id: str) -> ProjectFolder:
     folder = next((candidate for candidate in folders.folders if candidate.id == folder_id), None)
     if folder is None:

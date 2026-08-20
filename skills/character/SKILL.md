@@ -110,6 +110,7 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
   "spec_status": "ready | placeholder | missing",
   "available_keys": [],
   "preferred_alias": null,
+  "variant": null,
   "pending_identity_normalizations": []
 }
 ```
@@ -124,6 +125,7 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 | `available_keys` / `preferred_alias` | Key 选择 |
 | `project_worldview` | 项目 worldview.md：项目经验/世界观（定位·调性·用语·规则），Web「项目经验」页可编辑 |
 | `project_style` | 项目风格契约 style.md 全文（含 frontmatter status）；"" = 项目还没有契约 |
+| `variant` | 角色皮肤关系；普通角色为 null，皮肤包含母角色身份锚、差异、当前槽位和母角色定稿 |
 | `canonical` | active 角色定稿表（每 slot 至多一张 `{path, set_at, spec_fingerprint}`） |
 | `lessons_workspace` / `lessons_project` | 出图经验（workspace 通用 / 项目级，各取当前 kind 段；项目级来自 MEMORY.md） |
 
@@ -261,9 +263,19 @@ uv run python -m character_workflow set-canonical --kind portrait --path <该图
 
 三种模式产出都是新 vN、原图保留——A 模式编辑当前图也出新 vN，不原地改 v1（引擎 `_next_asset_path` 不覆盖既有文件）；渲染时新旧版可一并列出。
 
-### 皮肤 / 换色默认路由
+### 角色皮肤（独立完整流程）
 
-已有默认立绘 + 画师要"皮肤/品质皮肤/换装/整体换色" → 默认 A 模式。prompt 只写改动点，不重述整套外观。推荐模板：
+`turn-start.variant` 非 null 时，当前 active 是一个独立皮肤资产，不是母角色的一次临时修改：
+
+- 身份由 `variant.parent_identity_anchor` 锚定，变化只取 `variant.difference`；项目画风继续服从 `project_style`。
+- 当前皮肤拥有自己的 spec、立绘、美宣、三视图、定稿、反馈和历史。所有 submit / set-canonical / spec 写入都只使用 `active_id`，禁止改母角色目录或把 job 记到母角色。
+- 首张皮肤立绘优先把 `variant.parent_canonical.portrait.path` 作为第一张参考图；为空时取母角色最新立绘。prompt 只写皮肤差异与明确保留项，不重述或改写母角色身份。
+- 皮肤已经有自己的定稿立绘后，后续美宣 / 三视图只引用皮肤自己的 `canonical.portrait.path`；母角色图只作为缺少皮肤立绘时的起步参考。
+- 不允许从皮肤继续创建下一层皮肤；新主题始终回到母角色建立一个并列皮肤。
+
+### 普通角色的临时换色 / 改图
+
+只有当当前角色不是独立皮肤、且画师明确只要一次性修改现有图时，才走 A 模式。若要形成可继续做美宣和三视图的长期皮肤，应先在 Web「新建皮肤」。临时改图的 prompt 只写改动点，不重述整套外观：
 
 ```text
 根据参考图中的角色立绘为参考，生成这个角色的"<皮肤名>"主题角色立绘皮肤。

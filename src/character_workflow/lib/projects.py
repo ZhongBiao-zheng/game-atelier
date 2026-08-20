@@ -136,13 +136,19 @@ def reorder_projects(ordered_ids: list[str]) -> ProjectsFile:
     return f
 
 
-def assign_character(character_id: str, project_id: str | None) -> ProjectsFile:
+def assign_characters(character_ids: list[str], project_id: str | None) -> ProjectsFile:
     f = read_projects()
     if project_id is None:
-        f.assignments.pop(character_id, None)
+        for character_id in character_ids:
+            f.assignments.pop(character_id, None)
     else:
         if not any(p.id == project_id for p in f.projects):
             raise KeyError(project_id)
-        f.assignments[character_id] = project_id
+        for character_id in character_ids:
+            f.assignments[character_id] = project_id
     _write(f)
     return f
+
+
+def assign_character(character_id: str, project_id: str | None) -> ProjectsFile:
+    return assign_characters([character_id], project_id)
