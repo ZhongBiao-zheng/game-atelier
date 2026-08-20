@@ -8,6 +8,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
+import { apiError } from '@/api/http';
 
 interface Props {
   jobId: string;
@@ -63,7 +64,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       });
-      if (!r.ok) { setToast(`保存失败：HTTP ${r.status}`); return; }
+      if (!r.ok) { setToast((await apiError(r, '保存提示词改动')).message); return; }
       setJob(j => j ? { ...j, ...patch } : j);
       setPatch({});
       setToast('已保存');
@@ -83,7 +84,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
       onConfirm: async () => {
         setDialog(null);
         const r = await fetch(`/api/jobs/${jobId}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
-        if (!r.ok) { setToast(`删除失败：HTTP ${r.status}`); return; }
+        if (!r.ok) { setToast((await apiError(r, '删除这张图')).message); return; }
         onBack();
       },
     });

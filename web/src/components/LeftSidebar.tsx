@@ -6,6 +6,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { apiError, clip } from '@/api/http';
 
 interface Props {
   sseSignal: number;
@@ -91,10 +92,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenP
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
       });
-      if (!r.ok) {
-        const data = await r.json().catch(() => ({}));
-        throw new Error(data.detail || `HTTP ${r.status}`);
-      }
+      if (!r.ok) throw await apiError(r, `把角色改名为「${clip(name)}」`);
       setCharacters(cs => cs.map(c => c.id === editingId ? { ...c, name } : c));
       cancelEdit();
     } catch (e) {
@@ -113,10 +111,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenP
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
       });
-      if (!r.ok) {
-        const data = await r.json().catch(() => ({}));
-        throw new Error(data.detail || `HTTP ${r.status}`);
-      }
+      if (!r.ok) throw await apiError(r, `把项目改名为「${clip(name)}」`);
       const updated = await r.json();
       setProjects(updated);
       cancelEdit();
@@ -161,7 +156,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenP
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw await apiError(r, `新建角色「${clip(name)}」`);
       const entry = await r.json() as { id: string; name: string };
       cancelNewCharacter();
       onSelect(entry.id, entry.name);
@@ -178,7 +173,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenP
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw await apiError(r, `新建项目「${clip(name)}」`);
       setProjects(await r.json());
       cancelNewProject();
     } catch (e) {
@@ -201,7 +196,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenP
         setDialog(null);
         try {
           const r = await fetch(`/api/projects/${p.id}`, { method: 'DELETE' });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          if (!r.ok) throw await apiError(r, `删除项目「${p.name}」`);
           setProjects(await r.json());
         } catch (e) {
           setError((e as Error).message);
@@ -221,7 +216,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenP
         setDialog(null);
         try {
           const r = await fetch(`/api/characters/${c.id}`, { method: 'DELETE' });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          if (!r.ok) throw await apiError(r, `删除角色「${c.name}」`);
           setCharacters(cs => cs.filter(item => item.id !== c.id));
           setProjects(ps => ({
             ...ps,
@@ -243,10 +238,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenP
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: projectId }),
       });
-      if (!r.ok) {
-        const data = await r.json().catch(() => ({}));
-        throw new Error(data.detail || `HTTP ${r.status}`);
-      }
+      if (!r.ok) throw await apiError(r, projectId ? '把角色移进项目' : '把角色移出项目');
       setProjects(await r.json());
     } catch (e) {
       setError((e as Error).message);
@@ -450,13 +442,19 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenP
             </ul>
           </DropZone>
 
-          {error && (
-            <div className="mt-3 mx-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
-              <AlertCircle className="size-3 shrink-0 mt-0.5" />
-              <span>{error}</span>
-            </div>
-          )}
         </div>
+
+        {/* 报错挂在滚动列表外面：以前贴在列表末尾，24 个角色的名册里它落在 1600px 处，
+            画师改名失败只看到「没反应」（实测 inView=false）。放这里恒在视野内。 */}
+        {error && (
+          <div
+            role="alert"
+            className="shrink-0 mx-2 mb-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive"
+          >
+            <AlertCircle className="size-3 shrink-0 mt-0.5" />
+            <span>{error}</span>
+          </div>
+        )}
 
         <footer className="shrink-0 border-t border-border px-5 py-3 font-mono text-xs tabular-nums text-muted-foreground/60">
           {characters.length} 角色 · {projects.projects.length} 项目

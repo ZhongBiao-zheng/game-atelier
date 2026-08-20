@@ -222,7 +222,7 @@ export function StudioCompact() {
       }
     } catch (e: any) {
       setPending(false);
-      setCompactError(`参考图上传失败：${e.message}`);
+      setCompactError(e.message);
       return;
     }
 
@@ -254,7 +254,7 @@ export function StudioCompact() {
       });
       setLocation('/studio');
     } catch (e: any) {
-      setCompactError(`提交失败：${e.message}`);
+      setCompactError(e.message);
     } finally {
       setPending(false);
     }
@@ -296,7 +296,7 @@ export function StudioCompact() {
         ?? (referenceAudios.length > 0 ? await Promise.all(referenceAudios.map(uploadReferenceImage)) : []);
     } catch (e: any) {
       setPending(false);
-      setCompactError(`参考资产上传失败：${e.message}`);
+      setCompactError(e.message);
       return;
     }
 
@@ -342,7 +342,7 @@ export function StudioCompact() {
       });
       setLocation('/studio');
     } catch (e: any) {
-      setCompactError(`提交失败：${e.message}`);
+      setCompactError(e.message);
     } finally {
       setPending(false);
     }

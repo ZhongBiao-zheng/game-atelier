@@ -24,6 +24,7 @@ from character_workflow.lib.atomic_io import (
     atomic_write_json,
     atomic_write_text,
 )
+from character_workflow.lib.job_runner import image_dimensions_from_bytes
 from character_workflow.lib.jobs import (
     _load_job, delete_failed_job, job_lock, list_jobs, read_job, remove_image_from_job,
     save_job, update_job_status, write_job,
@@ -105,7 +106,7 @@ def get_jobs() -> list[Job]:
 def get_job(job_id: str) -> Job:
     p = _runtime() / "jobs" / f"{job_id}.json"
     if not p.exists():
-        raise HTTPException(404, detail=f"job {job_id} not found")
+        raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）")
     return _load_job(json.loads(p.read_text(encoding="utf-8")))
 
 
@@ -113,7 +114,7 @@ def get_job(job_id: str) -> Job:
 def get_spec(character_id: str) -> dict:
     p = _project_root() / "characters" / character_id / "spec.md"
     if not p.exists():
-        raise HTTPException(404, detail=f"spec {character_id} not found")
+        raise HTTPException(404, detail=f"找不到角色 {character_id} 的 spec.md（可能已被删除）")
     return {"content": p.read_text(encoding="utf-8")}
 
 
@@ -167,12 +168,17 @@ def get_home() -> dict:
 def rename_character(character_id: str, payload: dict = Body(...)) -> dict:
     new_name = (payload.get("name") or "").strip()
     if not new_name:
-        raise HTTPException(422, detail="name required")
+        raise HTTPException(422, detail="名字不能为空")
     if "\n" in new_name or len(new_name) > 80:
-        raise HTTPException(422, detail="name too long or contains newline")
+        raise HTTPException(
+            422, detail=f"名字不合法：不能换行、且不超过 80 字（当前 {len(new_name)} 字）"
+        )
     p = _project_root() / "characters" / character_id / "spec.md"
     if not p.exists():
-        raise HTTPException(404, detail=f"character {character_id} not found")
+        raise HTTPException(
+            404,
+            detail=f"找不到角色 {character_id}（characters/{character_id}/spec.md 不存在，可能已被删除）",
+        )
     text = p.read_text(encoding="utf-8")
     # YAML frontmatter: update `name:` field
     if text.startswith("---"):
@@ -272,7 +278,7 @@ def get_screen_canonical(project_id: str) -> ScreenCanonicalStatusFile:
     try:
         return stale.screen_canonical_status(project_id)
     except KeyError:
-        raise HTTPException(404, detail="project not found")
+        raise HTTPException(404, detail="找不到这个项目（可能已被删除）")
 
 
 @router.post("/projects/{project_id}/screens/canonical", response_model=ScreenCanonicalStatusFile)
@@ -286,7 +292,7 @@ def post_screen_canonical(project_id: str, payload: ScreenCanonicalSet) -> Scree
             ui_jobs.set_screen_canonical(project_id, payload.screen_id, payload.path)
         return stale.screen_canonical_status(project_id)
     except KeyError:
-        raise HTTPException(404, detail="project not found")
+        raise HTTPException(404, detail="找不到这个项目（可能已被删除）")
     except FileNotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValueError as e:
@@ -305,7 +311,7 @@ def post_spec(character_id: str, patch: SpecPatch) -> dict:
 def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
     p = _runtime() / "jobs" / f"{job_id}.json"
     if not p.exists():
-        raise HTTPException(404, detail=f"job {job_id} not found")
+        raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）")
     # dict 级 patch（保留白名单外字段原样），但读改写区间必须持 per-job 锁，
     # 防与 Skill 进程的 update_job_status 互相覆盖。
     with job_lock(job_id):
@@ -357,7 +363,7 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
         try:
             job = read_job(job_id)
         except FileNotFoundError as e:
-            raise HTTPException(404, detail=f"job {job_id} not found") from e
+            raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from e
         whitelist = set(job.output_paths)
         params = job.params.model_dump() if job.params else {}
         for field in ("reference_images", "reference_videos", "reference_audios"):
@@ -365,19 +371,21 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
         if job.source_image:
             whitelist.add(job.source_image)
         if str(target) not in {str(Path(p).resolve()) for p in whitelist}:
-            raise HTTPException(403, detail="path not in job whitelist")
+            raise HTTPException(403, detail="读图被拒：这个路径不在该 job 登记的产物列表里")
         return FileResponse(str(target))
     uploads_dir = (_runtime() / "uploads").resolve()
     if str(target).startswith(str(uploads_dir) + os.sep):
         return FileResponse(str(target))
     cfg_path = _runtime() / "config.json"
     if not cfg_path.exists():
-        raise HTTPException(403, detail="config missing")
+        raise HTTPException(
+            403, detail="读图被拒：.runtime/config.json 不存在，无法确认这张图在允许的目录里"
+        )
     cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     root = Path(cfg.get("image_storage_root", "")).resolve()
     # is_relative_to 带分隔符语义：/x/images-evil 不能过 /x/images（与 gallery_image 对齐）。
     if not target.is_relative_to(root):
-        raise HTTPException(403, detail="path outside image_storage_root")
+        raise HTTPException(403, detail="读图被拒：这个路径在图片存储根目录之外")
     return FileResponse(str(target))
 
 
@@ -393,6 +401,32 @@ def _upload_max_bytes(ext: str) -> int:
     return _IMAGE_UPLOAD_MAX_BYTES if ext in _IMAGE_UPLOAD_EXTS else _MEDIA_UPLOAD_MAX_BYTES
 
 
+def _mb(num_bytes: int) -> str:
+    mb = num_bytes / 1024 / 1024
+    return f"{mb:.0f}MB" if abs(mb - round(mb)) < 0.05 else f"{mb:.1f}MB"
+
+
+def _ext_reject_detail(raw_name: str, ext: str, allowed: set[str]) -> str:
+    """报错要能自证：说清是哪个文件、它的后缀是什么、这里到底收什么。"""
+    shown = ext or "（没有扩展名）"
+    return (
+        f"「{raw_name}」的格式不支持：{shown} 不在允许的类型里。"
+        f"这里只收 {'/'.join(sorted(e.lstrip('.') for e in allowed))}。"
+        "请另存 / 转换成允许的格式后再上传。"
+    )
+
+
+def _size_reject_detail(raw_name: str, body: bytes, limit: int) -> str:
+    """体积超限的报错带上像素尺寸：超限的图十有八九是长边过万的原图，
+    只报「10MB 超了」画师不知道该压缩质量还是缩尺寸。"""
+    dims = image_dimensions_from_bytes(body)
+    pixels = f"，{dims[0]}×{dims[1]} 像素" if dims else ""
+    return (
+        f"「{raw_name}」太大：{_mb(len(body))}{pixels}，超过上限 {_mb(limit)}。"
+        "请把图压缩、或把长边缩小后再上传（参考图不需要原图那么大）。"
+    )
+
+
 @router.post("/uploads")
 async def post_upload(file: UploadFile = File(...)) -> dict:
     """画师在 Web 上传源图 → .runtime/uploads/<uuid><ext>。
@@ -402,11 +436,11 @@ async def post_upload(file: UploadFile = File(...)) -> dict:
     raw_name = file.filename or "upload"
     ext = Path(raw_name).suffix.lower()
     if ext not in _UPLOAD_ALLOWED_EXTS:
-        raise HTTPException(422, detail=f"extension {ext or '(none)'} not allowed")
+        raise HTTPException(422, detail=_ext_reject_detail(raw_name, ext, _UPLOAD_ALLOWED_EXTS))
     body = await file.read()
     limit = _upload_max_bytes(ext)
     if len(body) > limit:
-        raise HTTPException(413, detail=f"file too large: {len(body)} bytes (limit {limit})")
+        raise HTTPException(413, detail=_size_reject_detail(raw_name, body, limit))
     uploads = _runtime() / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
     name = f"{uuid.uuid4().hex}{ext}"
@@ -424,16 +458,21 @@ async def post_gallery_image(
     """直接上传图片到角色图廊，落盘到 characters/<id>/<kind>/，并创建 done 状态 job。"""
     valid_kinds = {k.value for k in _AssetSlot}
     if kind not in valid_kinds:
-        raise HTTPException(422, detail=f"kind must be one of {sorted(valid_kinds)}")
+        raise HTTPException(
+            422,
+            detail=f"图廊槽位「{kind}」不存在：只能是 {'/'.join(sorted(valid_kinds))}",
+        )
 
     raw_name = file.filename or "upload"
     ext = Path(raw_name).suffix.lower()
     if ext not in _IMAGE_UPLOAD_EXTS:
-        raise HTTPException(422, detail=f"extension {ext or '(none)'} not allowed")
+        raise HTTPException(422, detail=_ext_reject_detail(raw_name, ext, _IMAGE_UPLOAD_EXTS))
 
     body = await file.read()
     if len(body) > _IMAGE_UPLOAD_MAX_BYTES:
-        raise HTTPException(413, detail=f"file too large: {len(body)} bytes (limit {_IMAGE_UPLOAD_MAX_BYTES})")
+        raise HTTPException(
+            413, detail=_size_reject_detail(raw_name, body, _IMAGE_UPLOAD_MAX_BYTES)
+        )
 
     out_dir = _project_root() / "characters" / character_id / kind
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -465,7 +504,7 @@ def create_character(payload: CharacterCreate) -> CharacterEntry:
     import time as _time
     name = payload.name.strip()
     if not name:
-        raise HTTPException(422, detail="name required")
+        raise HTTPException(422, detail="角色名不能为空")
     char_id = f"char-{int(_time.time())}"
     root = _project_root() / "characters" / char_id
     for sub in ("portrait", "promo", "turnaround", "source"):
@@ -481,7 +520,7 @@ def delete_character(character_id: str) -> dict:
     chars_dir = (_project_root() / "characters").resolve()
     target = (chars_dir / character_id).resolve()
     if not target.is_relative_to(chars_dir) or not target.is_dir():
-        raise HTTPException(404, detail=f"character {character_id} not found")
+        raise HTTPException(404, detail=f"找不到角色 {character_id}（目录不存在，可能已被删除）")
 
     shutil.rmtree(target)
     assign_character(character_id, None)
@@ -495,9 +534,9 @@ def delete_job_image(job_id: str, path: str) -> dict:
     try:
         remove_image_from_job(job_id, path)
     except FileNotFoundError as e:
-        raise HTTPException(404, detail=f"job {job_id} not found") from e
+        raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from e
     except ValueError as e:
-        raise HTTPException(404, detail=str(e)) from e
+        raise HTTPException(404, detail=f"这张图不在该记录里：{e}") from e
     return {"ok": True}
 
 
@@ -506,9 +545,9 @@ def delete_job(job_id: str) -> dict:
     try:
         delete_failed_job(job_id)
     except FileNotFoundError as e:
-        raise HTTPException(404, detail=f"job {job_id} not found") from e
+        raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from e
     except ValueError as e:
-        raise HTTPException(409, detail=str(e)) from e
+        raise HTTPException(409, detail=f"这条记录不能删：{e}") from e
     return {"ok": True}
 
 
@@ -537,7 +576,7 @@ def post_project_rename(project_id: str, payload: ProjectRename) -> ProjectsFile
     try:
         rename_project(project_id, payload.name)
     except KeyError as e:
-        raise HTTPException(404, detail=f"project {project_id} not found") from e
+        raise HTTPException(404, detail=f"找不到项目 {project_id}（可能已被删除）") from e
     return read_projects()
 
 
@@ -562,7 +601,7 @@ def get_experience(project: str = Query(min_length=1)) -> dict:
     pf = read_projects()
     proj = next((p for p in pf.projects if p.id == project), None)
     if proj is None:
-        raise HTTPException(status_code=404, detail="project not found")
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）")
     wv_path = _project_worldview_path(proj.slug)
     worldview_md = wv_path.read_text(encoding="utf-8") if wv_path.exists() else ""
     char_count = sum(1 for pid in pf.assignments.values() if pid == proj.id)
@@ -580,7 +619,7 @@ def post_experience(patch: _ExperiencePatch) -> dict:
     pf = read_projects()
     proj = next((p for p in pf.projects if p.id == patch.project), None)
     if proj is None:
-        raise HTTPException(status_code=404, detail="project not found")
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）")
     wv_path = _project_worldview_path(proj.slug)
     wv_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(wv_path, patch.worldview_md)
@@ -593,8 +632,21 @@ def post_character_project(character_id: str, payload: CharacterProjectAssign) -
         try:
             return assign_character(character_id, payload.project_id)
         except KeyError as e:
-            raise HTTPException(404, detail=f"project {payload.project_id} not found") from e
+            raise HTTPException(404, detail=f"找不到项目 {payload.project_id}（可能已被删除）") from e
     return assign_character(character_id, None)
+
+
+# job 状态 → 中文（报错里给画师看，别把 pending_confirm 这种内部枚举原样丢出去）
+_STATUS_CN = {
+    "pending_confirm": "等待确认出图",
+    "pending": "正在出图",
+    "done": "已完成",
+    "failed": "已失败",
+}
+
+
+def _status_cn(status: str) -> str:
+    return _STATUS_CN.get(status, status)
 
 
 @router.post("/jobs/{job_id}/confirm")
@@ -605,9 +657,15 @@ def post_job_confirm(job_id: str) -> dict:
     try:
         job = read_job(job_id)
     except FileNotFoundError:
-        raise HTTPException(404, detail=f"job {job_id} not found") from None
+        raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from None
     if job.status != JobStatus.PENDING_CONFIRM:
-        raise HTTPException(409, detail=f"job not in pending_confirm (current: {job.status.value})")
+        raise HTTPException(
+            409,
+            detail=(
+                "这条记录不在「等待确认出图」状态，确认按钮对它无效"
+                f"（当前状态：{_status_cn(job.status.value)}）"
+            ),
+        )
     update_job_status(job_id, status=JobStatus.PENDING)
     return {"ok": True, "job_id": job_id, "status": JobStatus.PENDING.value}
 
@@ -639,7 +697,7 @@ def post_job_cancel(job_id: str) -> dict:
     try:
         job = read_job(job_id)
     except FileNotFoundError:
-        raise HTTPException(404, detail=f"job {job_id} not found") from None
+        raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from None
     if job.status == JobStatus.PENDING_CONFIRM:
         (_runtime() / "jobs" / f"{job_id}.json").unlink()
         return {"ok": True, "job_id": job_id, "deleted": True}
@@ -652,9 +710,19 @@ def post_job_cancel(job_id: str) -> dict:
             )
             return {"ok": True, "job_id": job_id, "status": JobStatus.FAILED.value}
         raise HTTPException(
-            409, detail=f"job still pending ({age:.0f} min < {STALE_PENDING_MINUTES} min)"
+            409,
+            detail=(
+                f"这一单还在出图中（已等 {age:.0f} 分钟），不到 {STALE_PENDING_MINUTES} 分钟不能作废"
+                " —— 过早作废会让真出完的图找不回来。请再等等，或到厂商后台确认。"
+            ),
         )
-    raise HTTPException(409, detail=f"job not cancellable (current: {job.status.value})")
+    raise HTTPException(
+        409,
+        detail=(
+            f"这条记录不能作废（当前状态：{_status_cn(job.status.value)}，"
+            "只有出图中 / 等待确认的能作废）"
+        ),
+    )
 
 
 @router.post("/config")
@@ -665,7 +733,7 @@ def post_config(payload: dict = Body(...)) -> dict:
     if "image_storage_root" in payload:
         raw = (payload.get("image_storage_root") or "").strip()
         if not raw:
-            raise HTTPException(422, detail="image_storage_root required")
+            raise HTTPException(422, detail="图片存储目录不能为空")
         # Expand ~ and env vars; resolve to absolute path so future reads are stable.
         expanded = Path(os.path.expandvars(os.path.expanduser(raw)))
         try:
@@ -679,11 +747,13 @@ def post_config(payload: dict = Body(...)) -> dict:
     if "show_studio_on_home" in payload:
         value = payload["show_studio_on_home"]
         if not isinstance(value, bool):
-            raise HTTPException(422, detail="show_studio_on_home must be a boolean")
+            raise HTTPException(422, detail="show_studio_on_home 必须是布尔值（true / false）")
         cfg["show_studio_on_home"] = value
         updated = True
     if not updated:
-        raise HTTPException(422, detail="no supported config keys in payload")
+        raise HTTPException(
+            422, detail="没有可识别的设置项：只接受 image_storage_root / show_studio_on_home"
+        )
     atomic_write_json(_runtime() / "config.json", cfg)
     return {"ok": True, **cfg}
 
@@ -719,7 +789,9 @@ def _pick_folder_macos(payload: "_FolderPickerPayload") -> dict:
         stderr = (proc.stderr or "").strip()
         if "User canceled" in stderr or "用户已取消" in stderr:
             return {"path": None}
-        raise HTTPException(500, detail=stderr or "folder picker failed")
+        raise HTTPException(
+            500, detail=f"打不开系统文件夹选择器：{stderr or '子进程没有给出原因'}"
+        )
     return {"path": str(Path(proc.stdout.strip()).expanduser().resolve())}
 
 
@@ -745,7 +817,10 @@ def _pick_folder_windows(payload: "_FolderPickerPayload") -> dict:
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
-        raise HTTPException(500, detail=(proc.stderr or "").strip() or "folder picker failed")
+        raise HTTPException(
+            500,
+            detail=f"打不开系统文件夹选择器：{(proc.stderr or '').strip() or '子进程没有给出原因'}",
+        )
     selected = (proc.stdout or "").strip()
     if not selected:
         return {"path": None}
@@ -764,7 +839,7 @@ def onboarding_status() -> dict:
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
-        raise HTTPException(500, f"bootstrap --check failed: {proc.stderr}")
+        raise HTTPException(500, f"检查 Python 运行环境失败（bootstrap --check）：{proc.stderr}")
     return json.loads(proc.stdout)
 
 
@@ -775,7 +850,9 @@ def folder_picker(payload: _FolderPickerPayload) -> dict:
         return _pick_folder_macos(payload)
     if sys.platform == "win32":
         return _pick_folder_windows(payload)
-    raise HTTPException(501, detail="folder picker is currently supported on macOS / Windows only")
+    raise HTTPException(
+        501, detail="文件夹选择器目前只支持 macOS / Windows；其他系统请手动粘贴路径"
+    )
 
 
 @router.post("/onboarding/data-root")
@@ -786,7 +863,7 @@ def set_data_root(payload: _DataRootPayload) -> dict:
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
-        raise HTTPException(500, f"init-data-root failed: {proc.stderr}")
+        raise HTTPException(500, f"初始化数据目录失败（init-data-root）：{proc.stderr}")
     body = json.loads(proc.stdout)
     if root := body.get("data_root"):
         os.environ["GAME_ATELIER_DATA_ROOT"] = root
@@ -869,7 +946,9 @@ def create_key(payload: _KeyCreatePayload) -> dict:
     try:
         keys.add_key(spec)
     except keys.DuplicateAliasError:
-        raise HTTPException(409, f"alias '{payload.alias}' already exists") from None
+        raise HTTPException(
+            409, f"别名「{payload.alias}」已经存在：换个别名，或直接改那条已有的密钥"
+        ) from None
     return {"alias": payload.alias}
 
 
@@ -879,7 +958,7 @@ def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
     try:
         keys.patch_key(alias, patch_data)
     except keys.NoSuchAliasError:
-        raise HTTPException(404, f"alias '{alias}' not found") from None
+        raise HTTPException(404, f"找不到别名「{alias}」的密钥（可能已被删除）") from None
     return {"alias": alias}
 
 
@@ -899,7 +978,7 @@ def reveal_key_endpoint(alias: str) -> dict:
     """
     spec = keys.find_by_alias(alias)
     if spec is None:
-        raise HTTPException(404, f"alias '{alias}' not found")
+        raise HTTPException(404, f"找不到别名「{alias}」的密钥（可能已被删除）")
     return {"access_key": spec.access_key}
 
 
@@ -1065,7 +1144,7 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
     if payload.alias:
         stored = keys.find_by_alias(payload.alias)
         if stored is None:
-            raise HTTPException(404, f"alias '{payload.alias}' not found")
+            raise HTTPException(404, f"找不到别名「{payload.alias}」的密钥（可能已被删除）")
         if access_key:
             # 调用方自带密钥（新建 / 编辑时改过密钥）→ 地址随它，泄露面止于它自己的密钥。
             base_url = base_url or (stored.base_url or "")
@@ -1223,7 +1302,7 @@ def gallery_project(project: str = Query(min_length=1)) -> dict:
     pf = read_projects()
     proj = next((p for p in pf.projects if p.id == project), None)
     if proj is None:
-        raise HTTPException(status_code=404, detail="project not found")
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）")
     member_ids = [cid for cid, pid in pf.assignments.items() if pid == proj.id]
     hidden = set(_read_gallery_hidden())
     job_ids_by_path = _gallery_job_ids_by_path()
@@ -1270,7 +1349,7 @@ def gallery_screens(project: str = Query(min_length=1)) -> dict:
     pf = read_projects()
     proj = next((p for p in pf.projects if p.id == project), None)
     if proj is None:
-        raise HTTPException(status_code=404, detail="project not found")
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）")
     screens_dir = data_root.projects_dir() / proj.slug / "screens"
     job_ids_by_path = _gallery_job_ids_by_path()
     # B3：风格候选的来源关系存在 job.params，前端并排对比按 style_variant 分列。

@@ -1,3 +1,4 @@
+import { request, requestJson } from './http';
 export type ApiModality = 'image' | 'video' | 'audio' | 'llm' | string;
 export type ModelModality = 'image' | 'video';
 
@@ -53,46 +54,35 @@ export function modelModality(
 }
 
 export async function listKeys(): Promise<{ keys: KeyView[] }> {
-  const r = await fetch('/api/keys');
-  if (!r.ok) throw new Error(`listKeys: ${r.status}`);
-  return r.json();
+  return requestJson<{ keys: KeyView[] }>('/api/keys', '读取密钥列表');
 }
 
 export async function createKey(payload: KeyCreatePayload): Promise<{ alias: string }> {
-  const r = await fetch('/api/keys', {
+  return requestJson<{ alias: string }>('/api/keys', `新增密钥「${payload.alias}」`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!r.ok) {
-    const body = await r.text();
-    throw new Error(`createKey ${r.status}: ${body}`);
-  }
-  return r.json();
 }
 
 export async function patchKey(alias: string, patch: Partial<KeyCreatePayload>): Promise<void> {
-  const r = await fetch(`/api/keys/${encodeURIComponent(alias)}`, {
+  await request(`/api/keys/${encodeURIComponent(alias)}`, `修改密钥「${alias}」`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   });
-  if (!r.ok) throw new Error(`patchKey ${r.status}`);
 }
 
 export async function deleteKey(alias: string): Promise<void> {
-  const r = await fetch(`/api/keys/${encodeURIComponent(alias)}`, { method: 'DELETE' });
-  if (!r.ok) throw new Error(`deleteKey ${r.status}`);
+  await request(`/api/keys/${encodeURIComponent(alias)}`, `删除密钥「${alias}」`, { method: 'DELETE' });
 }
 
 /** 按需取某个已存密钥的明文（编辑表单查看用）；列表/创建接口仍只回掩码。 */
 export async function revealKey(alias: string): Promise<{ access_key: string }> {
-  const r = await fetch(`/api/keys/${encodeURIComponent(alias)}/reveal`);
-  if (!r.ok) {
-    const body = await r.text();
-    throw new Error(`revealKey ${r.status}: ${body}`);
-  }
-  return r.json();
+  return requestJson<{ access_key: string }>(
+    `/api/keys/${encodeURIComponent(alias)}/reveal`,
+    `查看密钥「${alias}」明文`,
+  );
 }
 
 /** 上游模型分类（后端 _classify_model 的四级瀑布结果）：
@@ -126,16 +116,10 @@ export async function previewModels(payload: {
   /** 逃生舱：连明确非视觉的模型也一并返回（deny 词表判过头时让画师自己绕过去）。 */
   include_all?: boolean;
 }): Promise<ModelsPreview> {
-  const r = await fetch('/api/keys/models-preview', {
+  // 这条报错直接贴在密钥表单里给画师看，detail 已是中文（routes.py 的 502/422 分支）。
+  return requestJson<ModelsPreview>('/api/keys/models-preview', '拉取模型列表', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!r.ok) {
-    const body = await r.text();
-    let detail = body;
-    try { detail = JSON.parse(body).detail ?? body; } catch { /* keep raw */ }
-    throw new Error(String(detail));
-  }
-  return r.json();
 }

@@ -1626,7 +1626,8 @@ describe('Studio compact mode errors', () => {
     fireEvent.click(screen.getByLabelText('提交生成'));
 
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('提交失败');
+    // 报错要说清是哪一步失败 + 状态码（英文 `studio job failed: 500` 那种对画师没用）
+    expect(alert).toHaveTextContent('创建出图任务失败');
     expect(alert).toHaveTextContent('500');
   });
 });
@@ -1691,7 +1692,7 @@ describe('Studio 图卡编辑导入参考图', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
   });
 
-  it('取图失败（源文件不在）：浮出失败提示而非静默', async () => {
+  it('取图失败（源文件不在）：不弹提示、也不留半张参考图（飙哥指定：这条链路全程静默）', async () => {
     const inner = mockCompletedBatchAndKeys();
     const fetchMock = vi.fn(((url: RequestInfo | URL, init?: RequestInit) => {
       if (String(url).startsWith('/api/gallery/image')) {
@@ -1704,7 +1705,11 @@ describe('Studio 图卡编辑导入参考图', () => {
     renderStudio();
     const editBtns = await screen.findAllByTitle('编辑（导入为参考图）');
     fireEvent.click(editBtns[0]);
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('参考图导入失败');
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/gallery/image?path='));
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+    // 空参考图槽还在（没有塞进半个坏文件）
+    expect(screen.getByLabelText('添加参考图')).toBeInTheDocument();
   });
 });

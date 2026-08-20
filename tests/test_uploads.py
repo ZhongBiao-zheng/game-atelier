@@ -64,7 +64,10 @@ def test_upload_rejects_unknown_extension(client):
         files={"file": ("malware.exe", io.BytesIO(b"MZ\x90"), "application/octet-stream")},
     )
     assert r.status_code == 422
-    assert "extension" in r.json()["detail"].lower()
+    # 报错要能自证：说清是哪个文件、什么格式不收、这里到底收什么（画师看的是中文界面）
+    detail = r.json()["detail"]
+    assert "malware.exe" in detail and ".exe" in detail
+    assert "格式不支持" in detail and "png" in detail
 
 
 def test_upload_rejects_oversized_file(client):
@@ -75,7 +78,9 @@ def test_upload_rejects_oversized_file(client):
         files={"file": ("huge.png", io.BytesIO(big), "image/png")},
     )
     assert r.status_code == 413
-    assert "too large" in r.json()["detail"].lower()
+    detail = r.json()["detail"]
+    assert "huge.png" in detail and "太大" in detail
+    assert "11MB" in detail and "10MB" in detail
 
 
 def test_upload_filename_uniqueness(client, runtime):

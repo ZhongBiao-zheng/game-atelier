@@ -31,6 +31,20 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.20.0',
+    date: '2026-08-20',
+    headline: '报错说人话',
+    changes: [
+      {
+        kind: 'fix',
+        text: '出错时不再只给一句英文加状态码：现在会说清是哪一步失败、到底哪里不合规。比如参考图传不上去，会告诉你「这张图 11MB、12000×8000 像素，超过上限 10MB，请压缩或缩小长边」',
+      },
+      { kind: 'fix', text: '参考图被厂商拒收、尺寸不合规这两类出图失败，也翻成中文并给出该怎么改' },
+      { kind: 'fix', text: '左侧名册的报错以前落在长列表末尾、屏幕上看不见（改名失败只像是没反应），现在固定在名册下方' },
+      { kind: 'fix', text: '图卡「编辑」导入参考图不再弹任何提示条，槽位本身就是反馈' },
+    ],
+  },
+  {
     version: '5.19.0',
     date: '2026-08-20',
     headline: '参考图槽位顺手了',

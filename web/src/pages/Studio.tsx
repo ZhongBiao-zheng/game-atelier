@@ -3,6 +3,7 @@ import { useSearch } from 'wouter';
 import { ChevronsDown } from 'lucide-react';
 
 import { createStudioJob, getStudioJob, listStudioJobs, uploadReferenceImage } from '@/api/studio';
+import { apiError } from '@/api/http';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { PromptInput } from '@/components/studio/PromptInput';
@@ -189,16 +190,8 @@ function StudioFull() {
   //   图片 · MJ       → 垫图「图片」槽（单槽，已有图则替换）
   //   图片 · 其余     → 常规参考图堆叠（多张；同一张图只留一份）
   // 一进来就钉住展开输入壳：从深链/滚动上来时壳是收起的，不展开的话图落进收起条里看不见，
-  // 用户以为没导入成功。展开本身就是「重复导入」那条分支的反馈（图已经在槽位上）；
-  // 失败与替换仍出文案提示。
-  const [editRefHint, setEditRefHint] = useState<{ text: string; tone: 'error' | 'info' } | null>(null);
-  const editRefHintTimer = useRef<number | undefined>(undefined);
-  const showEditRefHint = useCallback((text: string, tone: 'error' | 'info') => {
-    setEditRefHint({ text, tone });
-    window.clearTimeout(editRefHintTimer.current);
-    editRefHintTimer.current = window.setTimeout(() => setEditRefHint(null), 5000);
-  }, []);
-  useEffect(() => () => window.clearTimeout(editRefHintTimer.current), []);
+  // 用户以为没导入成功。这条链路全程不弹提示（飙哥指定，保持简约）——重复导入、替换、
+  // 取图失败一律静默，槽位本身就是唯一反馈；失败只落 console 供排查。
   // 每个导入的 File 记住它的来源路径 —— 去重判据是 File 身份而不是文件名：
   // 不同 job 的输出常同名（v1.png / v2.png）。删掉后 File 不在数组里，同一张图可以再导。
   const editRefSource = useRef(new WeakMap<File, string>());
@@ -207,18 +200,13 @@ function StudioFull() {
       ? (videoMode === 'omni' ? 'stack' : 'frame')
       : imageFamily(model) === 'midjourney' ? 'mj' : 'stack';
     setClickPinned(true);
-    if (target === 'frame' && (videoCaps?.maxFrames ?? 2) < 1) {
-      showEditRefHint('当前视频模型不吃首帧参考图（纯文生视频）', 'info');
-      return;
-    }
+    // 纯文生视频（maxFrames=0）没有首帧槽，导进去提交时也读不到 —— 不做无效写入。
+    if (target === 'frame' && (videoCaps?.maxFrames ?? 2) < 1) return;
     const sourceOf = (f: File | null) => (f ? editRefSource.current.get(f) : undefined);
-    const occupant = target === 'frame' ? videoFrames.first : target === 'mj' ? mjRefs.image : null;
-    const slotName = target === 'frame' ? '首帧' : target === 'mj' ? 'MJ 垫图' : '参考图';
     const already = target === 'stack'
       ? referenceImages.some((f) => sourceOf(f) === path)
-      : sourceOf(occupant) === path;
-    // 已经导过同一张：静默不叠第二份。这里不提示是有意的（飙哥指定，保持简约）——
-    // 展开的输入壳里那张图就在槽位上，用户看得见，不是「点了没反应」那类静默失败。
+      : sourceOf(target === 'frame' ? videoFrames.first : mjRefs.image) === path;
+    // 已经导过同一张：不叠第二份。
     if (already) return;
     try {
       const file = await fetchAssetAsFile(path, path.split('/').pop()?.replace(/\.[^.]+$/, '') || 'edit-ref');
@@ -230,12 +218,10 @@ function StudioFull() {
       } else {
         setReferenceImages((prev) => [...prev, file]);
       }
-      if (occupant) showEditRefHint(`已替换${slotName}`, 'info');
-      else setEditRefHint(null);
-    } catch {
-      showEditRefHint('参考图导入失败：这张图的源文件取不到（可能已被移动或删除）', 'error');
+    } catch (e) {
+      console.warn('[studio] 参考图导入失败（源文件取不到）', path, e);
     }
-  }, [kind, videoMode, model, videoCaps?.maxFrames, videoFrames.first, mjRefs.image, referenceImages, showEditRefHint]);
+  }, [kind, videoMode, model, videoCaps?.maxFrames, videoFrames.first, mjRefs.image, referenceImages]);
 
   // 首页作品深链（/studio?job=<id>）：目标轮出现在历史里后滚动定位（居中），一次性消费。
   const search = useSearch();
@@ -426,7 +412,7 @@ function StudioFull() {
     } catch (e: any) {
       setPending(false);
       setRounds((rs) => [
-        { kind: 'failed', submittedAt: new Date().toISOString(), reason: `参考图上传失败：${e.message}` },
+        { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message },
         ...rs,
       ]);
       return;
@@ -547,7 +533,7 @@ function StudioFull() {
     } catch (e: any) {
       setPending(false);
       setRounds((rs) => [
-        { kind: 'failed', submittedAt: new Date().toISOString(), reason: `参考资产上传失败：${e.message}` },
+        { kind: 'failed', submittedAt: new Date().toISOString(), reason: e.message },
         ...rs,
       ]);
       return;
@@ -683,19 +669,6 @@ function StudioFull() {
           pointer-events-auto。 */}
       <div className="pointer-events-none absolute inset-x-0 bottom-4 px-3 sm:px-6">
         <div className="relative mx-auto max-w-[780px]">
-          {/* 图卡编辑导入反馈：贴输入壳顶浮现，5s 自动消失。失败标红，其余（已导过 / 已替换）中性色。 */}
-          {editRefHint && (
-            <p
-              role="alert"
-              className={`pointer-events-none absolute bottom-full left-0 mb-3 rounded-full border bg-scrim px-3 py-1.5 text-xs backdrop-blur-glass ${
-                editRefHint.tone === 'error'
-                  ? 'border-destructive/30 text-destructive'
-                  : 'border-border text-foreground'
-              }`}
-            >
-              {editRefHint.text}
-            </p>
-          )}
           {/* 回到底部：常驻挂载才有进出动画。锚定 bottom-full 让它跟着壳顶升降——
               壳展开时被顶着上移、同时向右上平移渐隐；收起时反向浮现。 */}
           <button
@@ -773,7 +746,8 @@ function StudioFull() {
 
   async function deleteFailedRound(jobId: string) {
     const resp = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
-    if (!resp.ok) return;
+    // 删不掉要说话：静默 return 的话画师点了删除、记录还在，只能当成界面卡了。
+    if (!resp.ok) { alert((await apiError(resp, '删除这条失败记录')).message); return; }
     // rounds 是渲染态，persistedJobs 是它的数据源之一：只清 rounds 的话，下一次 SSE 推送
     // 或轮询触发上面那个 mergePersistedRounds 的 effect，这条记录就被合并回来了
     // （后端其实已经删掉，刷新页面才看得出来）。两处一起清。
@@ -837,7 +811,8 @@ function StudioFull() {
         fetch(`/api/jobs/${encodeURIComponent(jobId)}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
       ),
     );
-    if (responses.some((resp) => !resp.ok)) return;
+    const failed = responses.find((resp) => !resp.ok);
+    if (failed) { alert((await apiError(failed, '删除这批结果')).message); return; }
     setRounds((items) => items.filter((item) => item.kind !== 'done' || item.jobId !== jobId));
   }
 }
@@ -852,7 +827,7 @@ async function fetchAssetAsFile(path: string, baseName: string): Promise<File> {
       ? `/api/gallery/image?path=${encodeURIComponent(path)}`
       : `/api/raw?path=${encodeURIComponent(path)}`;
   const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`load reference failed: ${resp.status}`);
+  if (!resp.ok) throw await apiError(resp, `取回参考图（${path}）`);
   const blob = await resp.blob();
   const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
   return new File([blob], `${baseName}.${ext}`, { type: blob.type || 'image/png' });
