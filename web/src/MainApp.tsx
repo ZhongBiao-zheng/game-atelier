@@ -13,6 +13,7 @@ import { ProjectPage, type WorkshopWorkspace } from './pages/ProjectPage';
 import { WorkshopShell } from './components/workshop/WorkshopShell';
 import { cn } from '@/lib/utils';
 import { ProjectFolderPage, type ProjectFolderView } from '@/pages/ProjectFolderPage';
+import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
 
 // 弹性分界线参数（与方案 D 节同步）：名册不可收起（无 snap），胶片带 <64 收起
 const ROSTER = { key: 'workshop:roster-width', def: 264, min: 200, max: 400 };
@@ -120,6 +121,7 @@ function ThreeColumnLayout({
   routedFolderView?: ProjectFolderView;
 }) {
   const [, setLocation] = useLocation();
+  const returnContext = useWorkshopReturn();
   const [characterName, setCharacterName] = useState('');
   const [projectsFile, setProjectsFile] = useState<ProjectsFile | null>(null);
   const [mobileRosterOpen, setMobileRosterOpen] = useState(false);
@@ -149,12 +151,12 @@ function ThreeColumnLayout({
           const actualProjectId = pf.assignments[routedCharacterId];
           const ownerExists = pf.projects.some(project => project.id === actualProjectId);
           setLocation(
-            characterWorkshopPath(
+            withWorkshopReturn(characterWorkshopPath(
               ownerExists ? actualProjectId : undefined,
               routedCharacterId,
               routedAssetSlot,
               routedImageDetail,
-            ),
+            ), returnContext),
             { replace: true },
           );
           return;
@@ -167,6 +169,7 @@ function ThreeColumnLayout({
     routedCharacterId,
     routedImageDetail,
     routedProjectId,
+    returnContext,
     setLocation,
     sseSignal,
   ]);
@@ -225,12 +228,12 @@ function ThreeColumnLayout({
 
   function openImage(path: string, jobId: string, slot?: AssetSlot) {
     if (!selected) return;
-    setLocation(characterWorkshopPath(
+    setLocation(withWorkshopReturn(characterWorkshopPath(
       openedProject?.id,
       selected.id,
       slot ?? detailSlot,
       { path, jobId },
-    ));
+    ), returnContext));
   }
 
   const projectContent = openedProject && routedFolderId ? (
@@ -258,11 +261,11 @@ function ThreeColumnLayout({
         <ImageDetail
           jobId={routedImageDetail.jobId}
           path={routedImageDetail.path}
-          onBack={() => setLocation(characterWorkshopPath(
+          onBack={() => setLocation(withWorkshopReturn(characterWorkshopPath(
             openedProject?.id,
             selected.id,
             detailSlot,
-          ))}
+          ), returnContext))}
           onLightbox={setLightboxSrc}
           stripCollapsed={stripW === 0}
           onExpandStrip={() => commitStripW(lastStripW.current)}

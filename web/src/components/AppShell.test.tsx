@@ -238,7 +238,7 @@ describe('AppShell', () => {
 
     const encodedPath = '%2Ftmp%2Fgame-atelier%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png';
     const location = memoryLocation({
-      path: `/workshop/p1/art/characters/cao-cao/promo/job-promo-1/${encodedPath}`,
+      path: `/workshop/p1/art/characters/cao-cao/promo/job-promo-1/${encodedPath}?fromFolder=summer&fromView=art`,
       static: false,
       record: true,
     });
@@ -249,7 +249,7 @@ describe('AppShell', () => {
     );
 
     await waitFor(() => expect(location.history.at(-1)).toBe(
-      `/workshop/p2/art/characters/cao-cao/promo/job-promo-1/${encodedPath}`,
+      `/workshop/p2/art/characters/cao-cao/promo/job-promo-1/${encodedPath}?fromFolder=summer&fromView=art`,
     ));
     expect(location.history).toHaveLength(1);
   });

@@ -56,9 +56,11 @@ from character_workflow.lib.schemas import (
     CharacterProjectAssign, ClipboardAttempt,
     FeedbackPost, Job, JobKind, JobParams, JobStatus, ProjectCreate, ProjectRename,
     ProjectFolderCreate, ProjectFolderItem, ProjectFolderItemKind, ProjectFolderReorder,
-    ProjectFoldersFile, ProjectFolderUpdate, ProjectVideosResponse, ProjectWorkspaceSummary,
+    ProjectFoldersFile, ProjectFolderUpdate, ProjectVideoReferencesResponse,
+    ProjectVideosResponse, ProjectWorkspaceSummary,
     ProjectsFile,
     ScreenCanonicalSet, ScreenCanonicalStatusFile, SpecPatch, VideoSelectedResponse,
+    VideoShotReferencesResponse, VideoShotReferencesSet,
     UiSchemeCreate, UiSchemeDefaultSet, UiSchemesFile,
     WebEditableJobPatch,
 )
@@ -777,6 +779,40 @@ def get_project_videos(project_id: str) -> ProjectVideosResponse:
         return ProjectVideosResponse(productions=list_productions(project_id))
     except KeyError:
         raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.get(
+    "/projects/{project_id}/video-references",
+    response_model=ProjectVideoReferencesResponse,
+)
+def get_project_video_references(project_id: str) -> ProjectVideoReferencesResponse:
+    from character_workflow.lib.video_jobs import list_reference_candidates
+    try:
+        return ProjectVideoReferencesResponse(candidates=list_reference_candidates(project_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.post(
+    "/projects/{project_id}/videos/{production_id}/shots/{shot_id}/references",
+    response_model=VideoShotReferencesResponse,
+)
+def post_project_video_references(
+    project_id: str,
+    production_id: str,
+    shot_id: str,
+    payload: VideoShotReferencesSet,
+) -> VideoShotReferencesResponse:
+    from character_workflow.lib.video_jobs import set_shot_references
+    try:
+        paths = set_shot_references(project_id, production_id, shot_id, payload.paths)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return VideoShotReferencesResponse(paths=paths)
 
 
 class _VideoSelectedSet(BaseModel):

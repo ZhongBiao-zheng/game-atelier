@@ -7,6 +7,7 @@ import type { ProjectScreenItem } from '@/api/gallery';
 import type { ProjectWorkspaceSummary, UiScreenSummary } from '@/api/workspaces';
 import type { ScreenCanonicalFile } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
+import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
 
 export function UiWorkspace({
   projectId,
@@ -181,6 +182,7 @@ function ScreenMap({
   groups: Array<[string, ProjectScreenItem[]]>;
   canonicalFile: ScreenCanonicalFile;
 }) {
+  const returnContext = useWorkshopReturn();
   const rows = items.length > 0
     ? items
     : groups.map(([screenId, images]) => ({
@@ -203,7 +205,7 @@ function ScreenMap({
         {rows.map(item => (
           <Link
             key={item.screen_id}
-            href={`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(schemeId)}/screens/${encodeURIComponent(item.screen_id)}`}
+            href={withWorkshopReturn(`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(schemeId)}/screens/${encodeURIComponent(item.screen_id)}`, returnContext)}
             className="grid gap-2 px-4 py-3 transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:grid-cols-[minmax(140px,0.7fr)_minmax(180px,1fr)_auto] sm:items-center"
           >
             <div>
@@ -244,10 +246,11 @@ function ScreenDetail({
   effectiveStatus: string;
   onToggleCanonical: (screenId: string, path: string) => Promise<void>;
 }) {
+  const returnContext = useWorkshopReturn();
   return (
     <section className="space-y-5" data-testid="project-screens">
       <div className="space-y-2">
-        <Link href={`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(schemeId)}`} className="text-xs text-muted-foreground hover:text-foreground">
+        <Link href={withWorkshopReturn(`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(schemeId)}`, returnContext)} className="text-xs text-muted-foreground hover:text-foreground">
           UI / 页面地图
         </Link>
         <div className="flex flex-wrap items-baseline justify-between gap-3">

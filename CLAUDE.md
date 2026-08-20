@@ -143,7 +143,7 @@ uv run python src/viewer_server/server.py open-browser
 ## 安全 / 部署约束
 
 - viewer-server **必须绑 `127.0.0.1`**，绝不 `0.0.0.0`（共享 WiFi attack surface）。
-- `/api/raw` 图片读取用 job_id 白名单（只能读 `output_paths` 里登记过的文件）。
+- `/api/raw` 媒体读取用 job_id 白名单（只读 `output_paths`、`params` 三组参考素材、MJ 三组参考素材与 `source_image` 中登记的路径）。
 - 同一时间只支持一个 Web tab（多 tab 行为未定义）。
 
 ## Turn 起始（Skill 每次必做）

@@ -1,6 +1,6 @@
 ---
 name: video
-version: 1.0.0
+version: 1.1.0
 description: |
   游戏项目视频工作流：建立视频企划 brief 与镜头表，按单镜头生成、迭代并选定版本。
   产物归项目 projects/<slug>/videos/<production-id>/，适用于宣传片、角色展示、玩法演示、
@@ -73,6 +73,10 @@ create-video-production \
 
 一次只处理一个镜头。读项目 worldview、style、企划 brief、shot-map 对应镜头和引用定稿，写临时 prompt，运行：
 
+画师如果已在 Web 镜头详情里选择角色、皮肤或 UI 定稿，不要再手工重复拼 `--reference-image`；
+`submit-video-shot` 会读取该镜头的 `references.json` 草稿，并把当时的实际文件路径复制进新 Job。
+命令行 `--reference-image` 只用于补充 Web 候选之外的临时参考，重复路径会自动去重。
+
 ```bash
 submit-video-shot \
   --project <project-id-or-slug> \
@@ -121,4 +125,5 @@ set-video-selected \
 - 企划 id / shot id 只用小写字母、数字、连字符。
 - 镜头范围和生成确认都是人工门禁，一次只推进一步。
 - 引用角色或 UI 时优先 canonical；定稿 stale 必须提示。
+- Web 里的参考选择是下一次生成草稿；镜头详情按新到旧展示全部 Job 的 Prompt、参数和参考素材，切换 canonical 不回写旧 Job。
 - 不在没有真实需求时扩成时间线编辑器。

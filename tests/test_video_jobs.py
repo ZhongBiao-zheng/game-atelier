@@ -4,13 +4,24 @@ import pytest
 from fastapi.testclient import TestClient
 
 from character_workflow.__main__ import main
-from character_workflow.lib import keys
+from character_workflow.lib import canonical, keys, ui_schemes
 from character_workflow.lib.jobs import job_output_dir_for, read_job, save_job
-from character_workflow.lib.projects import create_project
-from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
+from character_workflow.lib.projects import assign_character, create_project
+from character_workflow.lib.schemas import (
+    AssetSlot,
+    Job,
+    JobKind,
+    JobParams,
+    JobStatus,
+    UiSchemeCreate,
+)
+from character_workflow.lib.ui_jobs import set_screen_canonical
 from character_workflow.lib.video_jobs import (
     create_production,
+    list_reference_candidates,
     list_productions,
+    read_shot_references,
+    set_shot_references,
     set_selected,
     shot_output_dir,
 )
@@ -42,6 +53,101 @@ def _seed_video_key() -> None:
             "created_at": "2026-08-20T00:00:00+08:00",
         }],
     }))
+
+
+def _seed_project_reference_assets(isolated_data_root: Path):
+    project = create_project("三国", slug="sanguo")
+    for character_id, name in (("cao-cao", "曹操"), ("cao-cao-summer", "曹操·夏日")):
+        character_root = isolated_data_root / "characters" / character_id
+        portrait = character_root / "portrait" / "v1.png"
+        portrait.parent.mkdir(parents=True)
+        portrait.write_bytes(b"png")
+        (character_root / "spec.md").write_text(f"# {name}\n", encoding="utf-8")
+        assign_character(character_id, project.id)
+        canonical.set_canonical(character_id, AssetSlot.PORTRAIT, str(portrait))
+    (isolated_data_root / "characters" / "cao-cao-summer" / "variant.json").write_text(
+        '{"parent_character_id":"cao-cao","difference":"夏日皮肤","created_at":"2026-08-20T00:00:00Z"}',
+        encoding="utf-8",
+    )
+    ui_schemes.create_scheme(project.id, UiSchemeCreate(name="V2"))
+    ui_screen = isolated_data_root / "projects" / project.slug / "ui" / "v2" / "screens" / "home" / "v1.png"
+    ui_screen.parent.mkdir(parents=True)
+    ui_screen.write_bytes(b"png")
+    set_screen_canonical(project.id, "v2", "home", str(ui_screen))
+    production = create_production(project.id, "launch-pv", "上线宣传片")
+    (production / "shot-map.md").write_text(
+        "| shot-id | 用途 | 时长 | 状态 |\n"
+        "|---|---|---:|---|\n"
+        "| shot-01 | 夏日版本亮相 | 5s | planned |\n",
+        encoding="utf-8",
+    )
+    return project
+
+
+def test_project_video_reference_candidates_include_character_variant_and_ui_canonical(
+    isolated_data_root: Path,
+):
+    project = _seed_project_reference_assets(isolated_data_root)
+
+    candidates = list_reference_candidates(project.id)
+
+    assert [(item.kind, item.label, item.path) for item in candidates] == [
+        ("character", "曹操 · 立绘", "characters/cao-cao/portrait/v1.png"),
+        ("character_variant", "曹操·夏日 · 立绘", "characters/cao-cao-summer/portrait/v1.png"),
+        ("ui_screen", "V2 · home", "projects/sanguo/ui/v2/screens/home/v1.png"),
+    ]
+
+
+def test_shot_reference_selection_is_validated_and_persisted(isolated_data_root: Path):
+    project = _seed_project_reference_assets(isolated_data_root)
+    selected = [
+        "characters/cao-cao-summer/portrait/v1.png",
+        "projects/sanguo/ui/v2/screens/home/v1.png",
+    ]
+
+    assert set_shot_references(project.id, "launch-pv", "shot-01", selected) == selected
+    assert read_shot_references(project.id, "launch-pv", "shot-01") == selected
+
+    with pytest.raises(ValueError, match="project canonical"):
+        set_shot_references(project.id, "launch-pv", "shot-01", ["/tmp/not-owned.png"])
+    with pytest.raises(FileNotFoundError, match="video shot not found"):
+        set_shot_references(project.id, "launch-pv", "missing-shot", [])
+
+
+def test_submit_video_shot_copies_saved_reference_paths_into_immutable_job_snapshot(
+    isolated_data_root: Path,
+    tmp_path: Path,
+    capsys,
+):
+    project = _seed_project_reference_assets(isolated_data_root)
+    _seed_video_key()
+    selected = [
+        "characters/cao-cao-summer/portrait/v1.png",
+        "projects/sanguo/ui/v2/screens/home/v1.png",
+    ]
+    set_shot_references(project.id, "launch-pv", "shot-01", selected)
+    prompt = tmp_path / "shot.txt"
+    prompt.write_text("夏日皮肤角色穿过新版主界面", encoding="utf-8")
+
+    assert main([
+        "submit-video-shot",
+        "--project", project.id,
+        "--production", "launch-pv",
+        "--shot", "shot-01",
+        "--prompt-file", str(prompt),
+    ]) == 0
+    job = read_job(capsys.readouterr().out.strip())
+
+    assert job.params.reference_images == [
+        str((isolated_data_root / path).resolve()) for path in selected
+    ]
+
+    replacement = isolated_data_root / "characters" / "cao-cao-summer" / "portrait" / "v2.png"
+    replacement.write_bytes(b"png-v2")
+    canonical.set_canonical("cao-cao-summer", AssetSlot.PORTRAIT, str(replacement))
+    assert read_job(job.job_id).params.reference_images == [
+        str((isolated_data_root / path).resolve()) for path in selected
+    ]
 
 
 def test_create_production_writes_brief_and_shot_map(isolated_data_root: Path):
@@ -79,7 +185,11 @@ def test_video_job_output_dir_is_project_shot(isolated_data_root: Path):
     )
 
 
-def test_video_cli_creates_production_and_pending_shot_job(tmp_path: Path, capsys):
+def test_video_cli_creates_production_and_pending_shot_job(
+    isolated_data_root: Path,
+    tmp_path: Path,
+    capsys,
+):
     project = create_project("三国", slug="sanguo")
     _seed_video_key()
 
@@ -91,6 +201,15 @@ def test_video_cli_creates_production_and_pending_shot_job(tmp_path: Path, capsy
         "--type", "promo",
     ]) == 0
     capsys.readouterr()
+    production = (
+        isolated_data_root / "projects" / project.slug / "videos" / "launch-pv"
+    )
+    (production / "shot-map.md").write_text(
+        "| shot-id | 用途 | 时长 | 状态 |\n"
+        "|---|---|---:|---|\n"
+        "| shot-01 | 角色亮相 | 5s | planned |\n",
+        encoding="utf-8",
+    )
 
     prompt = tmp_path / "shot-01.txt"
     prompt.write_text("角色转身，镜头缓慢推进", encoding="utf-8")
@@ -138,11 +257,8 @@ def test_list_and_select_shot_versions(isolated_data_root: Path):
         "status": "generated",
         "versions": [expected],
         "selected": expected,
-        "prompt": "",
-        "model": "",
-        "reference_images": [],
-        "reference_videos": [],
-        "reference_audios": [],
+        "planned_reference_images": [],
+        "history": [],
     }
     assert productions[0].exports == []
 
@@ -179,6 +295,22 @@ def test_list_includes_planned_shots_before_generation(isolated_data_root: Path)
         production_id="launch-pv",
         shot_id="shot-01",
     ))
+    save_job(Job(
+        job_id="job-video-older",
+        character_id="",
+        prompt="角色从旧界面走入镜头",
+        submitted_at="2026-08-19T00:00:00Z",
+        model="seedance-2.0",
+        params=JobParams(duration=5, resolution="1080p", ratio="16:9"),
+        output_paths=[],
+        status=JobStatus.DONE,
+        error=None,
+        kind=JobKind.VIDEO,
+        namespace="video",
+        project_id=project.id,
+        production_id="launch-pv",
+        shot_id="shot-01",
+    ))
 
     production = list_productions(project.id)[0]
     shot = production.shots[0]
@@ -187,9 +319,12 @@ def test_list_includes_planned_shots_before_generation(isolated_data_root: Path)
     assert shot.purpose == "角色亮相"
     assert shot.duration == "3s"
     assert shot.versions == []
-    assert shot.prompt == "角色转身，镜头缓慢推进"
-    assert shot.model == "seedance-2.5-pro"
-    assert shot.reference_images == ["characters/hero/portrait/v1.png"]
+    assert [record.job_id for record in shot.history] == [
+        "job-video-metadata", "job-video-older",
+    ]
+    assert shot.history[0].prompt == "角色转身，镜头缓慢推进"
+    assert shot.history[0].params.reference_images == ["characters/hero/portrait/v1.png"]
+    assert shot.history[1].params.model_dump()["resolution"] == "1080p"
     assert production.brief.model_dump() == {
         "goal": "角色上线亮相",
         "platform": "B站",
@@ -204,6 +339,27 @@ def test_video_ids_reject_path_traversal(isolated_data_root: Path):
 
     with pytest.raises(ValueError):
         create_production(project.id, "../escape", "坏企划")
+
+
+def test_submit_video_shot_rejects_unknown_shot(
+    isolated_data_root: Path,
+    tmp_path: Path,
+    capsys,
+):
+    project = create_project("三国")
+    create_production(project.id, "launch-pv", "上线宣传片")
+    _seed_video_key()
+    prompt = tmp_path / "shot.txt"
+    prompt.write_text("镜头推进", encoding="utf-8")
+
+    assert main([
+        "submit-video-shot",
+        "--project", project.id,
+        "--production", "launch-pv",
+        "--shot", "shot-404",
+        "--prompt-file", str(prompt),
+    ]) == 1
+    assert "video shot not found: shot-404" in capsys.readouterr().err
 
 
 def test_video_namespace_requires_complete_ownership():
@@ -241,6 +397,26 @@ def test_video_api_lists_productions_and_selects_version(client, isolated_data_r
     assert selected.json() == {"shots": {"shot-01": relative}}
     assert listed.status_code == 200
     assert listed.json()["productions"][0]["shots"][0]["selected"] == relative
+
+
+def test_video_api_lists_project_references_and_updates_shot_draft(client, isolated_data_root: Path):
+    project = _seed_project_reference_assets(isolated_data_root)
+    selected = ["characters/cao-cao-summer/portrait/v1.png"]
+
+    candidates = client.get(f"/api/projects/{project.id}/video-references")
+    updated = client.post(
+        f"/api/projects/{project.id}/videos/launch-pv/shots/shot-01/references",
+        json={"paths": selected},
+    )
+    listed = client.get(f"/api/projects/{project.id}/videos")
+
+    assert candidates.status_code == 200
+    assert {item["kind"] for item in candidates.json()["candidates"]} == {
+        "character", "character_variant", "ui_screen",
+    }
+    assert updated.status_code == 200
+    assert updated.json() == {"paths": selected}
+    assert listed.json()["productions"][0]["shots"][0]["planned_reference_images"] == selected
 
 
 def test_video_api_does_not_create_missing_production_on_clear(client, isolated_data_root: Path):

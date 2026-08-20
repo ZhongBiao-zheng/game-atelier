@@ -14,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-from character_workflow.lib import keys
+from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
 from character_workflow.lib.jobs import clone_job_for_retry, new_job_id, write_job
 from character_workflow.lib.job_runner import run_job, run_latest
@@ -235,16 +235,18 @@ def _resolved_paths(values: list[str] | None) -> list[str]:
     return resolved
 
 
+def _merge_paths(*groups: list[str]) -> list[str]:
+    return list(dict.fromkeys(path for group in groups for path in group))
+
+
 def _submit_video_shot(args: argparse.Namespace) -> int:
     from character_workflow.lib import video_jobs
     try:
         project = video_jobs.resolve_project(args.project)
         root = video_jobs.production_dir(project.id, args.production)
-        video_jobs.validate_id(args.shot, "shot_id")
-        if not (root / "brief.md").is_file():
-            raise ValueError(f"video production not found: {args.production}")
+        video_jobs.require_shot(root, args.production, args.shot)
         key, model = _video_key(args.alias, args.model)
-    except (KeyError, ValueError) as e:
+    except (KeyError, FileNotFoundError, ValueError) as e:
         print(f"submit-video-shot: {e}", file=sys.stderr)
         return 1
     prompt_path = Path(args.prompt_file)
@@ -259,16 +261,25 @@ def _submit_video_shot(args: argparse.Namespace) -> int:
         print("submit-video-shot: prompt 不能为空", file=sys.stderr)
         return 1
     try:
+        saved_references = _resolved_paths([
+            str(data_root.resolve_data_root() / path)
+            for path in video_jobs.read_shot_references(
+                project.id, args.production, args.shot
+            )
+        ])
         params = {
             "vendor": f"{key.alias} ({key.provider})",
             "duration": args.duration,
             "resolution": args.resolution,
             "ratio": args.ratio,
-            "reference_images": _resolved_paths(args.reference_image),
+            "reference_images": _merge_paths(
+                saved_references,
+                _resolved_paths(args.reference_image),
+            ),
             "reference_videos": _resolved_paths(args.reference_video),
             "reference_audios": _resolved_paths(args.reference_audio),
         }
-    except ValueError as e:
+    except (FileNotFoundError, ValueError) as e:
         print(f"submit-video-shot: {e}", file=sys.stderr)
         return 1
     job = write_job(

@@ -200,6 +200,16 @@ class ProjectWorkspaceSummary(BaseModel):
     video: VideoWorkspaceSummary
 
 
+class ProjectVideoJobRecord(BaseModel):
+    job_id: str
+    submitted_at: str
+    completed_at: str | None = None
+    status: JobStatus
+    prompt: str
+    model: str
+    params: JobParams
+
+
 class ProjectVideoShot(BaseModel):
     shot_id: str
     purpose: str = ""
@@ -207,11 +217,8 @@ class ProjectVideoShot(BaseModel):
     status: str = "planned"
     versions: list[str]
     selected: str | None = None
-    prompt: str = ""
-    model: str = ""
-    reference_images: list[str] = Field(default_factory=list)
-    reference_videos: list[str] = Field(default_factory=list)
-    reference_audios: list[str] = Field(default_factory=list)
+    planned_reference_images: list[str] = Field(default_factory=list)
+    history: list[ProjectVideoJobRecord] = Field(default_factory=list)
 
 
 class ProjectVideoBrief(BaseModel):
@@ -234,6 +241,44 @@ class ProjectVideoProduction(BaseModel):
 
 class ProjectVideosResponse(BaseModel):
     productions: list[ProjectVideoProduction]
+
+
+VideoReferenceKind = Literal["character", "character_variant", "ui_screen"]
+
+
+class ProjectVideoReferenceCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: VideoReferenceKind
+    asset_id: str
+    label: str
+    detail: str
+    path: str
+    scheme_id: str | None = None
+    stale: bool = False
+
+
+class ProjectVideoReferencesResponse(BaseModel):
+    candidates: list[ProjectVideoReferenceCandidate]
+
+
+class VideoShotReferencesSet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    paths: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def paths_are_unique(self) -> "VideoShotReferencesSet":
+        if len(self.paths) != len(set(self.paths)):
+            raise ValueError("paths must not contain duplicates")
+        return self
+
+
+class VideoShotReferencesResponse(BaseModel):
+    paths: list[str]
+
+
+class VideoReferencesFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    shots: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class VideoSelectedResponse(BaseModel):

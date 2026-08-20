@@ -9,6 +9,10 @@ import {
   getWorkspaceDescriptor,
   type WorkshopWorkspace,
 } from '@/components/workshop/workspaces';
+import {
+  useWorkshopReturn,
+  workshopFolderPath,
+} from '@/lib/workshopReturn';
 
 export function WorkshopShell({
   project,
@@ -23,6 +27,7 @@ export function WorkshopShell({
   sectionLabel?: string;
   children: React.ReactNode;
 }) {
+  const returnContext = useWorkshopReturn();
   return (
     <section className="flex h-full min-h-0 flex-col bg-background">
       <header className="shrink-0 border-b border-border/40 px-4 py-3 md:px-6">
@@ -61,7 +66,15 @@ export function WorkshopShell({
         </nav>
 
         {project && (
-          <div className="mt-3 min-w-0">
+          <div className="mt-3 flex min-w-0 items-center gap-3">
+            {returnContext && (
+              <Link
+                href={workshopFolderPath(project.id, returnContext)}
+                className="shrink-0 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                返回文件夹
+              </Link>
+            )}
             <ProjectWorkspaceNav projectId={project.id} workspace={workspace} />
           </div>
         )}

@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { withWorkshopReturn } from '@/lib/workshopReturn';
 import type { CharacterEntry, ProjectsFile } from '@/schema/jobs';
 import {
   WORKSPACE_DESCRIPTORS,
@@ -127,8 +128,17 @@ export function ProjectFolderPage({
     onFolderChange(folder);
   }, [folder?.id, folder?.name, folder?.note, onFolderChange]);
 
-  const assets = useMemo(() => resolveAssets(projectId, folder, characters, schemeAssets, productions), [
+  const assets = useMemo(() => resolveAssets(
     projectId,
+    folder,
+    characters,
+    schemeAssets,
+    productions,
+    { folderId, view },
+  ), [
+    projectId,
+    folderId,
+    view,
     folder,
     characters,
     schemeAssets,
@@ -325,7 +335,10 @@ export function ProjectFolderPage({
             onCreated={(entry) => {
               notifyProjectFoldersChanged(projectId);
               setLocation(
-                `/workshop/${encodeURIComponent(projectId)}/art/characters/${encodeURIComponent(entry.id)}`,
+                withWorkshopReturn(
+                  `/workshop/${encodeURIComponent(projectId)}/art/characters/${encodeURIComponent(entry.id)}`,
+                  { folderId: folder.id, view },
+                ),
               );
             }}
           />
@@ -403,6 +416,7 @@ function resolveAssets(
   characters: CharacterEntry[],
   schemeAssets: SchemeAssets[],
   productions: ProjectVideoProduction[],
+  returnContext: { folderId: string; view: ProjectFolderView } | null = null,
 ): ResolvedAsset[] {
   if (!folder) return [];
   const characterNames = new Map(characters.map(item => [item.id, item.name]));
@@ -415,22 +429,34 @@ function resolveAssets(
     if (item.kind === 'character') return {
       ...item,
       label: characterNames.get(item.asset_id) ?? item.asset_id,
-      href: `/workshop/${encodeURIComponent(projectId)}/art/characters/${encodeURIComponent(item.asset_id)}`,
+      href: withWorkshopReturn(
+        `/workshop/${encodeURIComponent(projectId)}/art/characters/${encodeURIComponent(item.asset_id)}`,
+        returnContext,
+      ),
     };
     if (item.kind === 'ui_screen') return {
       ...item,
       label: `${schemeNames.get(item.scheme_id ?? '') ?? item.scheme_id} · ${screenNames.get(`${item.scheme_id}:${item.asset_id}`) ?? item.asset_id}`,
-      href: `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(item.scheme_id ?? '')}/screens/${encodeURIComponent(item.asset_id)}`,
+      href: withWorkshopReturn(
+        `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(item.scheme_id ?? '')}/screens/${encodeURIComponent(item.asset_id)}`,
+        returnContext,
+      ),
     };
     if (item.kind === 'ui_scheme') return {
       ...item,
       label: schemeNames.get(item.asset_id) ?? item.asset_id,
-      href: `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(item.asset_id)}`,
+      href: withWorkshopReturn(
+        `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(item.asset_id)}`,
+        returnContext,
+      ),
     };
     return {
       ...item,
       label: productionNames.get(item.asset_id) ?? item.asset_id,
-      href: `/workshop/${encodeURIComponent(projectId)}/video/${encodeURIComponent(item.asset_id)}`,
+      href: withWorkshopReturn(
+        `/workshop/${encodeURIComponent(projectId)}/video/${encodeURIComponent(item.asset_id)}`,
+        returnContext,
+      ),
     };
   });
 }

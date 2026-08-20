@@ -31,6 +31,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.26.0',
+    date: '2026-08-20',
+    headline: '视频镜头可以直接引用项目定稿了',
+    changes: [
+      { kind: 'feat', text: '视频镜头页可以直接浏览并选择项目里的角色、皮肤和 UI 页面定稿，下一次生成自动带上这些参考素材' },
+      { kind: 'feat', text: '每次视频生成都会把实际参考路径写进 Job 历史；之后改选定稿，旧镜头记录仍保持当时使用的版本' },
+      { kind: 'fix', text: '从个人文件夹进入角色、UI 或视频后会保留返回入口，继续查看镜头和页面也不会丢失原文件夹上下文' },
+    ],
+  },
+  {
     version: '5.25.0',
     date: '2026-08-20',
     headline: '同一个项目可以并存多套 UI 方案了',

@@ -26,6 +26,7 @@ from character_workflow.lib.schemas import (
     Job,
     JobStatus,
     ScreenCanonicalFile,
+    VideoReferencesFile,
 )
 
 # 与 spec-template / style-template 的「禁止占位词」纪律对齐。
@@ -237,6 +238,47 @@ def _check_canonicals(report: Report, root: Path) -> None:
     report.checked["canonicals"] = n
 
 
+def _check_video_references(report: Report, root: Path) -> None:
+    from character_workflow.lib.video_jobs import is_project_reference_path, require_shot
+
+    count = 0
+    for project in _known_projects():
+        videos = data_root.projects_dir() / project.slug / "videos"
+        if not videos.is_dir():
+            continue
+        for path in sorted(videos.glob("*/references.json")):
+            count += 1
+            rel = _rel(path, root)
+            try:
+                file = VideoReferencesFile.model_validate_json(path.read_text(encoding="utf-8"))
+            except (OSError, ValidationError) as error:
+                _err(report, "reference", rel, f"结构非法: {error}")
+                continue
+            for shot_id, paths in file.shots.items():
+                try:
+                    require_shot(path.parent, path.parent.name, shot_id)
+                except (FileNotFoundError, ValueError) as error:
+                    _err(report, "reference", rel, str(error))
+                if len(paths) != len(set(paths)):
+                    _err(report, "reference", rel, f"shot {shot_id} 参考素材存在重复路径")
+                for reference in paths:
+                    if not is_project_reference_path(project.id, reference):
+                        _err(
+                            report,
+                            "reference",
+                            rel,
+                            f"shot {shot_id} 参考素材不属于当前项目: {reference}",
+                        )
+                    elif not (root / reference).is_file():
+                        _err(
+                            report,
+                            "reference",
+                            rel,
+                            f"shot {shot_id} 参考素材不存在: {reference}",
+                        )
+    report.checked["video_references"] = count
+
+
 # ---------- ⑤ 画廊 sidecar 断链 ----------
 
 def _check_sidecars(report: Report, root: Path) -> None:
@@ -287,6 +329,7 @@ def validate_data() -> Report:
     _check_jobs(report, root)
     _check_placeholders(report, root)
     _check_canonicals(report, root)
+    _check_video_references(report, root)
     _check_sidecars(report, root)
     return report
 

@@ -104,6 +104,14 @@ describe('ProjectFolderPage', () => {
     expect(await screen.findByText('曹操')).toBeInTheDocument();
     expect(screen.getByText('V1 · 主界面')).toBeInTheDocument();
     expect(screen.getByText('上线宣传片')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '角色 曹操' })).toHaveAttribute(
+      'href',
+      '/workshop/p1/art/characters/cao-cao?fromFolder=folder-summer&fromView=overview',
+    );
+    expect(screen.getByRole('link', { name: '视频企划 上线宣传片' })).toHaveAttribute(
+      'href',
+      '/workshop/p1/video/launch-pv?fromFolder=folder-summer&fromView=overview',
+    );
     const filters = screen.getByRole('navigation', { name: '文件夹视图' });
     expect(within(filters).getByRole('link', { name: '美术' })).toHaveAttribute(
       'href', '/workshop/p1/folders/folder-summer/art',
@@ -182,7 +190,7 @@ describe('ProjectFolderPage', () => {
       }),
     ));
     await waitFor(() => expect(location.history.at(-1)).toBe(
-      '/workshop/p1/art/characters/cao-cao-summer',
+      '/workshop/p1/art/characters/cao-cao-summer?fromFolder=folder-summer&fromView=art',
     ));
   });
 });

@@ -18,8 +18,11 @@ import {
 } from '@/api/uiSchemes';
 import { fetchProjectWorkspaces, type ProjectWorkspaceSummary } from '@/api/workspaces';
 import {
+  fetchProjectVideoReferences,
   fetchProjectVideos,
   setProjectVideoSelected,
+  setProjectVideoReferences,
+  type ProjectVideoReferenceCandidate,
   type ProjectVideoProduction,
 } from '@/api/videos';
 import type { ScreenCanonicalFile } from '@/schema/jobs';
@@ -31,6 +34,7 @@ import { UiSchemeBar } from '@/components/workshop/UiSchemeBar';
 import { VideoWorkspace } from '@/components/workshop/VideoWorkspace';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
 
 export type { WorkshopWorkspace } from '@/components/workshop/ProjectWorkspaceNav';
 
@@ -50,6 +54,7 @@ export function ProjectPage({
   shotId?: string;
 }) {
   const [, setLocation] = useLocation();
+  const returnContext = useWorkshopReturn();
   const [data, setData] = useState<ProjectExperience | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
@@ -58,6 +63,7 @@ export function ProjectPage({
   const [canonicalFile, setCanonicalFile] = useState<ScreenCanonicalFile>({ screens: {} });
   const [schemesFile, setSchemesFile] = useState<UiSchemesFile | null>(null);
   const [productions, setProductions] = useState<ProjectVideoProduction[]>([]);
+  const [videoReferences, setVideoReferences] = useState<ProjectVideoReferenceCandidate[]>([]);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -96,13 +102,16 @@ export function ProjectPage({
       const exists = uiSchemeId && file.schemes.some(item => item.id === uiSchemeId);
       if (!exists) {
         setLocation(
-          `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(file.default_scheme_id)}`,
+          withWorkshopReturn(
+            `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(file.default_scheme_id)}`,
+            returnContext,
+          ),
           { replace: true },
         );
       }
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [projectId, setLocation, uiSchemeId, workspace]);
+  }, [projectId, returnContext, setLocation, uiSchemeId, workspace]);
 
   useEffect(() => {
     if (workspace !== 'art') return;
@@ -135,8 +144,17 @@ export function ProjectPage({
     if (workspace !== 'video') return;
     let cancelled = false;
     setProductions([]);
-    fetchProjectVideos(projectId)
-      .then(value => { if (!cancelled) setProductions(value); })
+    setVideoReferences([]);
+    Promise.all([
+      fetchProjectVideos(projectId),
+      fetchProjectVideoReferences(projectId),
+    ])
+      .then(([videoItems, references]) => {
+        if (!cancelled) {
+          setProductions(videoItems);
+          setVideoReferences(references);
+        }
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [projectId, workspace]);
@@ -208,7 +226,10 @@ export function ProjectPage({
                 const file = await createUiScheme(projectId, payload);
                 setSchemesFile(file);
                 const created = file.schemes.at(-1)!;
-                setLocation(`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(created.id)}`);
+                setLocation(withWorkshopReturn(
+                  `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(created.id)}`,
+                  returnContext,
+                ));
               }}
               onSetDefault={async (schemeId) => {
                 setSchemesFile(await setDefaultUiScheme(projectId, schemeId));
@@ -236,8 +257,18 @@ export function ProjectPage({
             productionId={productionId}
             shotId={shotId}
             productions={productions}
+            referenceCandidates={videoReferences}
             onSelected={async (targetProductionId, targetShotId, path) => {
               await setProjectVideoSelected(projectId, targetProductionId, targetShotId, path);
+              setProductions(await fetchProjectVideos(projectId));
+            }}
+            onReferences={async (targetProductionId, targetShotId, paths) => {
+              await setProjectVideoReferences(
+                projectId,
+                targetProductionId,
+                targetShotId,
+                paths,
+              );
               setProductions(await fetchProjectVideos(projectId));
             }}
           />

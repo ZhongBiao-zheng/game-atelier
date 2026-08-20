@@ -9,8 +9,16 @@ from pathlib import Path
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_text
 from character_workflow.lib.jobs import job_lock, list_jobs
-from character_workflow.lib.schemas import ProjectVideoBrief, ProjectVideoProduction, ProjectVideoShot
-from character_workflow.lib.projects import resolve_project
+from character_workflow.lib.schemas import (
+    AssetSlot,
+    ProjectVideoBrief,
+    ProjectVideoJobRecord,
+    ProjectVideoProduction,
+    ProjectVideoReferenceCandidate,
+    ProjectVideoShot,
+    VideoReferencesFile,
+)
+from character_workflow.lib.projects import read_projects, resolve_project
 
 
 VIDEO_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -125,6 +133,167 @@ def _selected_path(root: Path) -> Path:
     return root / "selected.json"
 
 
+def _references_path(root: Path) -> Path:
+    return root / "references.json"
+
+
+def _read_reference_file(root: Path) -> dict[str, list[str]]:
+    path = _references_path(root)
+    if not path.is_file():
+        return {}
+    return VideoReferencesFile.model_validate_json(
+        path.read_text(encoding="utf-8")
+    ).shots
+
+
+def read_shot_references(project_id: str, production_id: str, shot_id: str) -> list[str]:
+    root = production_dir(project_id, production_id)
+    require_shot(root, production_id, shot_id)
+    return _read_reference_file(root).get(shot_id, [])
+
+
+def _existing_relative_path(path: str) -> Path | None:
+    root = data_root.resolve_data_root().resolve()
+    candidate = (root / path).resolve()
+    if candidate.is_file() and root in candidate.parents:
+        return candidate
+    return None
+
+
+def is_project_reference_path(project_id: str, path: str) -> bool:
+    """Return whether a persisted relative reference belongs to this project.
+
+    Historical versions do not need to remain canonical, but they must remain inside an
+    assigned character asset tree or this project's UI screen tree.
+    """
+    relative = Path(path)
+    if relative.is_absolute() or relative.as_posix() != path or ".." in relative.parts:
+        return False
+    project = resolve_project(project_id)
+    parts = relative.parts
+    if relative.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+        return False
+    if len(parts) >= 4 and parts[0] == "characters":
+        return (
+            parts[2] in {slot.value for slot in AssetSlot}
+            and read_projects().assignments.get(parts[1]) == project.id
+        )
+    return (
+        len(parts) >= 6
+        and parts[0] == "projects"
+        and parts[1] == project.slug
+        and parts[2] == "ui"
+        and parts[4] == "screens"
+    )
+
+
+def require_shot(root: Path, production_id: str, shot_id: str) -> None:
+    if not (root / "brief.md").is_file():
+        raise FileNotFoundError(f"video production not found: {production_id}")
+    validate_id(shot_id, "shot_id")
+    planned_ids = {row["shot-id"] for row in _shot_map(root / "shot-map.md")}
+    if shot_id not in planned_ids and not (root / "shots" / shot_id).is_dir():
+        raise FileNotFoundError(f"video shot not found: {shot_id}")
+
+
+def list_reference_candidates(project_id: str) -> list[ProjectVideoReferenceCandidate]:
+    from character_workflow.lib.canonical import read_canonical
+    from character_workflow.lib.character_variants import (
+        character_display_name,
+        read_character_variant,
+    )
+    from character_workflow.lib.stale import (
+        character_canonical_status,
+        screen_canonical_status,
+    )
+    from character_workflow.lib.ui_schemes import read_schemes
+
+    project = resolve_project(project_id)
+    assignments = read_projects().assignments
+    candidates: list[ProjectVideoReferenceCandidate] = []
+    slot_labels = {
+        AssetSlot.PORTRAIT: "立绘",
+        AssetSlot.PROMO: "美宣",
+        AssetSlot.TURNAROUND: "三视图",
+    }
+    character_ids = sorted(
+        character_id for character_id, owner_id in assignments.items() if owner_id == project.id
+    )
+    for character_id in character_ids:
+        variant = read_character_variant(character_id)
+        status = character_canonical_status(character_id)
+        canonical = read_canonical(character_id)
+        for slot in AssetSlot:
+            entry = getattr(canonical, slot.value)
+            if (
+                entry is None
+                or not is_project_reference_path(project.id, entry.path)
+                or _existing_relative_path(entry.path) is None
+            ):
+                continue
+            stale_entry = getattr(status, slot.value)
+            candidates.append(ProjectVideoReferenceCandidate(
+                kind="character_variant" if variant else "character",
+                asset_id=character_id,
+                label=f"{character_display_name(character_id)} · {slot_labels[slot]}",
+                detail="角色皮肤定稿" if variant else "角色定稿",
+                path=entry.path,
+                stale=bool(
+                    stale_entry and (stale_entry.spec_stale or stale_entry.style_stale)
+                ),
+            ))
+
+    for scheme in read_schemes(project.id).schemes:
+        status = screen_canonical_status(project.id, scheme.id)
+        for screen_id, entry in sorted(status.screens.items()):
+            if (
+                not is_project_reference_path(project.id, entry.path)
+                or _existing_relative_path(entry.path) is None
+            ):
+                continue
+            candidates.append(ProjectVideoReferenceCandidate(
+                kind="ui_screen",
+                asset_id=screen_id,
+                scheme_id=scheme.id,
+                label=f"{scheme.name} · {screen_id}",
+                detail="UI 页面定稿",
+                path=entry.path,
+                stale=entry.style_stale,
+            ))
+    return candidates
+
+
+def set_shot_references(
+    project_id: str,
+    production_id: str,
+    shot_id: str,
+    paths: list[str],
+) -> list[str]:
+    root = production_dir(project_id, production_id)
+    require_shot(root, production_id, shot_id)
+    with job_lock(f"video-references-{project_id}-{production_id}"):
+        shots = _read_reference_file(root)
+        allowed = {item.path for item in list_reference_candidates(project_id)}
+        allowed.update(
+            path
+            for path in shots.get(shot_id, [])
+            if is_project_reference_path(project_id, path)
+            and _existing_relative_path(path) is not None
+        )
+        invalid = next((path for path in paths if path not in allowed), None)
+        if invalid is not None:
+            raise ValueError(f"video reference must be a project canonical: {invalid}")
+        if paths:
+            shots[shot_id] = list(paths)
+        else:
+            shots.pop(shot_id, None)
+        atomic_write_text(
+            _references_path(root),
+            json.dumps({"shots": shots}, ensure_ascii=False, indent=2),
+        )
+    return list(paths)
+
+
 def read_selected(root: Path) -> dict[str, str]:
     path = _selected_path(root)
     if not path.is_file():
@@ -193,8 +362,8 @@ def _brief(path: Path) -> ProjectVideoBrief:
     )
 
 
-def _latest_shot_jobs(jobs, project_id: str, production_id: str):
-    latest = {}
+def _shot_job_history(jobs, project_id: str, production_id: str):
+    history = {}
     for job in jobs:
         if (
             job.namespace == "video"
@@ -202,20 +371,20 @@ def _latest_shot_jobs(jobs, project_id: str, production_id: str):
             and job.production_id == production_id
             and job.shot_id
         ):
-            latest.setdefault(job.shot_id, job)
-    return latest
+            history.setdefault(job.shot_id, []).append(job)
+    return history
 
 
-def _shot_metadata(job) -> dict:
-    if job is None:
-        return {}
-    return {
-        "prompt": job.prompt,
-        "model": job.model,
-        "reference_images": job.params.reference_images or [],
-        "reference_videos": job.params.reference_videos or [],
-        "reference_audios": job.params.reference_audios or [],
-    }
+def _job_record(job) -> ProjectVideoJobRecord:
+    return ProjectVideoJobRecord(
+        job_id=job.job_id,
+        submitted_at=job.submitted_at,
+        completed_at=job.completed_at,
+        status=job.status,
+        prompt=job.prompt,
+        model=job.model,
+        params=job.params,
+    )
 
 
 def _shot_map(path: Path) -> list[dict[str, str]]:
@@ -259,7 +428,7 @@ def list_productions(project_id: str) -> list[ProjectVideoProduction]:
         reverse=True,
     ):
         selected = read_selected(directory)
-        latest_jobs = _latest_shot_jobs(jobs, project.id, directory.name)
+        job_history = _shot_job_history(jobs, project.id, directory.name)
         exports_dir = directory / "exports"
         exports = sorted(
             (
@@ -295,7 +464,10 @@ def list_productions(project_id: str) -> list[ProjectVideoProduction]:
                 status=row.get("状态", "planned"),
                 versions=generated.get(shot_id, []),
                 selected=selected.get(shot_id),
-                **_shot_metadata(latest_jobs.get(shot_id)),
+                planned_reference_images=read_shot_references(
+                    project.id, directory.name, shot_id
+                ),
+                history=[_job_record(job) for job in job_history.get(shot_id, [])],
             ))
         for shot_id, versions in generated.items():
             if shot_id not in planned_ids:
@@ -304,7 +476,10 @@ def list_productions(project_id: str) -> list[ProjectVideoProduction]:
                     status="generated",
                     versions=versions,
                     selected=selected.get(shot_id),
-                    **_shot_metadata(latest_jobs.get(shot_id)),
+                    planned_reference_images=read_shot_references(
+                        project.id, directory.name, shot_id
+                    ),
+                    history=[_job_record(job) for job in job_history.get(shot_id, [])],
                 ))
         productions.append(ProjectVideoProduction(
             production_id=directory.name,

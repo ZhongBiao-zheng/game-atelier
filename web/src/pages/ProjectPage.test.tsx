@@ -481,6 +481,23 @@ describe('ProjectPage', () => {
   it('视频工作区按企划和镜头展示版本，并可选用', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
+      if (url.endsWith('/video-references')) {
+        return { ok: true, json: async () => ({ candidates: [
+          {
+            kind: 'character_variant', asset_id: 'hero-summer', scheme_id: null,
+            label: '曹操·夏日 · 立绘', detail: '角色皮肤定稿',
+            path: 'characters/hero-summer/portrait/v2.png', stale: false,
+          },
+          {
+            kind: 'ui_screen', asset_id: 'home', scheme_id: 'v2',
+            label: 'V2 · home', detail: 'UI 页面定稿',
+            path: 'projects/pokemon/ui/v2/screens/home/v3.png', stale: true,
+          },
+        ] }) } as Response;
+      }
+      if (init?.method === 'POST' && url.includes('/references')) {
+        return { ok: true, json: async () => ({ paths: ['characters/hero-summer/portrait/v2.png'] }) } as Response;
+      }
       if (init?.method === 'POST' && url.includes('/selected')) {
         return { ok: true, json: async () => ({ shots: { 'shot-01': 'projects/pokemon/videos/pv/shots/shot-01/v1.mp4' } }) } as Response;
       }
@@ -501,11 +518,23 @@ describe('ProjectPage', () => {
                 status: 'generated',
                 versions: ['projects/pokemon/videos/pv/shots/shot-01/v1.mp4'],
                 selected: null,
-                prompt: '角色转身，镜头推进',
-                model: 'seedance-2.5-pro',
-                reference_images: ['characters/hero/portrait/v1.png'],
-                reference_videos: [],
-                reference_audios: [],
+                planned_reference_images: [],
+                history: [
+                  {
+                    job_id: 'job-video-1', submitted_at: '2026-08-20T10:00:00Z',
+                    completed_at: null, status: 'done', prompt: '角色转身，镜头推进',
+                    model: 'seedance-2.5-pro',
+                    params: {
+                      duration: 5, resolution: '1080p', ratio: '16:9',
+                      reference_images: ['characters/hero/portrait/v1.png'],
+                    },
+                  },
+                  {
+                    job_id: 'job-video-0', submitted_at: '2026-08-19T10:00:00Z',
+                    completed_at: null, status: 'done', prompt: '旧版镜头',
+                    model: 'seedance-2.0', params: { duration: 3 },
+                  },
+                ],
               }],
               exports: [],
             }],
@@ -531,7 +560,24 @@ describe('ProjectPage', () => {
     expect(screen.getByText('shot-01')).toBeInTheDocument();
     expect(screen.getByText(/seedance-2\.5-pro/)).toBeInTheDocument();
     expect(screen.getByText('角色转身，镜头推进')).toBeInTheDocument();
+    expect(screen.getByText(/seedance-2\.0/)).toBeInTheDocument();
+    expect(screen.getByText('旧版镜头')).toBeInTheDocument();
+    expect(screen.getByText('1080p')).toBeInTheDocument();
     expect(screen.getByText('v1.png')).toBeInTheDocument();
+    expect(screen.getByAltText('v1.png')).toHaveAttribute(
+      'src',
+      '/api/raw?job_id=job-video-1&path=characters%2Fhero%2Fportrait%2Fv1.png',
+    );
+    expect(screen.getByRole('button', { name: '选择参考 曹操·夏日 · 立绘' })).toBeInTheDocument();
+    expect(screen.getByText('定稿已过时')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '选择参考 曹操·夏日 · 立绘' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/projects/p1/videos/pv/shots/shot-01/references',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ paths: ['characters/hero-summer/portrait/v2.png'] }),
+      }),
+    ));
     fireEvent.click(screen.getByRole('button', { name: '选用 shot-01 v1.mp4' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
       '/api/projects/p1/videos/pv/shots/shot-01/selected',
@@ -606,7 +652,7 @@ describe('ProjectPage', () => {
               shots: [{
                 shot_id: 'shot-01', purpose: '亮相', duration: '3s', status: 'generated',
                 versions: ['projects/pokemon/videos/pv/shots/shot-01/v1.mp4'], selected: null,
-                prompt: '', model: '', reference_images: [], reference_videos: [], reference_audios: [],
+                planned_reference_images: [], history: [],
               }],
               exports: [],
             }],

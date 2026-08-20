@@ -172,14 +172,28 @@ type ProjectFoldersFile = { folders: ProjectFolder[] };
 `GET /projects/{id}/videos` 返回 `{ productions: ProjectVideoProduction[] }`。每个 production
 含 `production_id / title / type / status / brief / exports` 与 `shots`；`brief` 明确返回
 `goal / platform / ratio / duration / sound`。每个 shot 含
-`shot_id / purpose / duration / status / versions / selected / prompt / model` 以及三组
-`reference_images / reference_videos / reference_audios`。`POST .../selected` 请求为
+`shot_id / purpose / duration / status / versions / selected / planned_reference_images / history`。
+`history` 按新到旧保存每次 Job 的 `job_id / submitted_at / completed_at / status / prompt / model / params`，
+其中 `params` 包含当次实际时长、分辨率、画幅与三组参考素材。`planned_reference_images` 是下一次生成草稿，
+不得与历史混用。`POST .../selected` 请求为
 `{ path: string | null }`（禁止额外字段），响应为 `{ shots: Record<string, string> }`；path 必须是
 该镜头目录中实际存在的 `.mp4`。
 
+`GET /projects/{id}/video-references` 返回当前项目可用的角色、角色皮肤和所有 UI 方案页面定稿：
+`{ candidates: Array<{ kind, asset_id, scheme_id, label, detail, path, stale }> }`。只返回真实存在的
+canonical 文件；`stale` 只提示人工判断，不自动替换。
+
+`POST /projects/{id}/videos/{production}/shots/{shot}/references` 请求为
+`{ paths: string[] }`（禁止重复和额外字段），只接受该项目当前 canonical 或该镜头已保存的明确版本，
+响应为 `{ paths: string[] }`。草稿落 `projects/<slug>/videos/<production>/references.json`；
+`submit-video-shot` 创建 Job 时把这些路径复制进 `params.reference_images`。因此后续切换 canonical
+只改变候选，不会改写历史 Job。
+
 ### 几个要当心的
 
-`GET /raw` 与 `GET /gallery/image`：路径不能随便给，`/raw` 走 job_id 白名单（只读 `output_paths` 里登记过的文件），`gallery/image` 只放行 characters、projects screens、projects videos 的 `shots/` / `exports/` 资产以及 studio 子树；项目 brief / shot-map 不对外暴露。加新产物目录要同步放行。
+`GET /raw` 与 `GET /gallery/image`：路径不能随便给，`/raw` 走 job_id 白名单，只读该 Job 的
+`output_paths`、`params.reference_{images,videos,audios}`、MJ 三组参考素材与 `source_image`；
+`gallery/image` 只放行 characters、projects screens、projects videos 的 `shots/` / `exports/` 资产以及 studio 子树；项目 brief / shot-map 不对外暴露。加新产物目录要同步放行。
 
 `GET /keys/{alias}/reveal`：唯一回明文密钥的接口。按显式 alias、按需返回；列表接口一律掩码。
 

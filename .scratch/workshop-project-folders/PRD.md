@@ -1,6 +1,6 @@
 # PRD：个人工坊资产库与项目文件夹
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## 目标
 
@@ -51,3 +51,5 @@ Status: ready-for-agent
 - `docs/adr/0002-project-assets-and-folders.md`
 
 ## Comments
+
+- 2026-08-20：01–05 全部实现完成并进入人工验收；最终 Ticket05 全量验证为后端 933 passed / 3 skipped、前端 355 passed。
