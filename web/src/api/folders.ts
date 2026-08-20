@@ -1,13 +1,9 @@
+import { requestJson } from './http';
 export async function chooseFolder(title: string, initialPath?: string): Promise<string | null> {
-  const r = await fetch('/api/folder-picker', {
+  const data = await requestJson<{ path?: string | null }>('/api/folder-picker', '打开文件夹选择器', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, initial_path: initialPath || null }),
   });
-  if (!r.ok) {
-    const body = await r.text();
-    throw new Error(`choose folder failed ${r.status}: ${body}`);
-  }
-  const data = await r.json();
   return data.path ?? null;
 }

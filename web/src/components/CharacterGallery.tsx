@@ -3,6 +3,7 @@ import { AlertTriangle, BadgeCheck, Download, Eye, EyeOff, Heart, Loader2, Uploa
 import type { AssetSlot, CanonicalFile, Job, ProjectsFile } from '../schema/jobs';
 import { fetchCanonical, isCanonicalPath, setCanonical } from '@/api/canonical';
 import { fetchGalleryHidden, isGalleryHidden, setGalleryHidden } from '@/api/gallery';
+import { apiError, clip } from '@/api/http';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -152,7 +153,7 @@ export function CharacterGallery({
       onConfirm: async () => {
         setDialog(null);
         const r = await fetch(`/api/jobs/${jobId}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
-        if (!r.ok) { alert(`删除失败：HTTP ${r.status}`); return; }
+        if (!r.ok) { alert((await apiError(r, '删除这张图')).message); return; }
         setJobs(js => js.map(j => j.job_id === jobId
           ? { ...j, output_paths: j.output_paths.filter(p => p !== path) }
             : j));
@@ -170,7 +171,7 @@ export function CharacterGallery({
       onConfirm: async () => {
         setDialog(null);
         const r = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
-        if (!r.ok) { alert(`删除失败：HTTP ${r.status}`); return; }
+        if (!r.ok) { alert((await apiError(r, '删除失败记录')).message); return; }
         setJobs(js => js.filter(j => j.job_id !== jobId));
       },
     });
@@ -182,8 +183,8 @@ export function CharacterGallery({
     const next = isCanonicalPath(path, current) ? null : path;
     try {
       setCanonicalFile(await setCanonical(characterId, tab, next));
-    } catch {
-      alert('切换定稿状态失败，稍后再试');
+    } catch (e) {
+      alert((e as Error).message);
     }
   }
 
@@ -191,8 +192,8 @@ export function CharacterGallery({
     const next = !isGalleryHidden(path, hiddenPaths);
     try {
       setHiddenPaths(await setGalleryHidden(path, next));
-    } catch {
-      alert('切换展示状态失败，稍后再试');
+    } catch (e) {
+      alert((e as Error).message);
     }
   }
 
@@ -206,7 +207,7 @@ export function CharacterGallery({
       onConfirm: async () => {
         setDialog(null);
         const r = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
-        if (!r.ok) { alert(`作废失败：HTTP ${r.status}`); return; }
+        if (!r.ok) { alert((await apiError(r, '作废这个任务')).message); return; }
         // 后端把超时 pending 标成 failed 留痕；本地同步翻面，变成可删除的失败卡。
         setJobs(js => js.map(j => j.job_id === jobId
           ? { ...j, status: 'failed' as const, error: '已作废：pending 超时，疑似进程中断' }
@@ -482,10 +483,7 @@ function GalleryUpload({
       const fd = new FormData();
       fd.append('file', file);
       const r = await fetch(`/api/characters/${characterId}/gallery/${kind}`, { method: 'POST', body: fd });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error((d as { detail?: string }).detail || `HTTP ${r.status}`);
-      }
+      if (!r.ok) throw await apiError(r, `上传「${clip(file.name)}」到图廊`);
       onUploaded();
     } catch (e) {
       setError((e as Error).message);

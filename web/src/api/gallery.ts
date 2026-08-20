@@ -1,3 +1,4 @@
+import { requestJson } from './http';
 export interface GalleryItem {
   /** studio 来源的图无角色归属，两字段为 null。 */
   character_id: string | null;
@@ -11,9 +12,10 @@ export interface GalleryItem {
 }
 
 export async function fetchGalleryRecent(limit = 24): Promise<GalleryItem[]> {
-  const resp = await fetch(`/api/gallery/recent?limit=${limit}`);
-  if (!resp.ok) throw new Error(`gallery fetch failed: ${resp.status}`);
-  const data = (await resp.json()) as { items?: GalleryItem[] };
+  const data = await requestJson<{ items?: GalleryItem[] }>(
+    `/api/gallery/recent?limit=${limit}`,
+    '读取最近作品',
+  );
   return Array.isArray(data.items) ? data.items : [];
 }
 
@@ -29,9 +31,10 @@ export interface ProjectGalleryItem {
 }
 
 export async function fetchGalleryProject(projectId: string): Promise<ProjectGalleryItem[]> {
-  const resp = await fetch(`/api/gallery/project?project=${encodeURIComponent(projectId)}`);
-  if (!resp.ok) throw new Error(`project gallery fetch failed: ${resp.status}`);
-  const data = (await resp.json()) as { items?: ProjectGalleryItem[] };
+  const data = await requestJson<{ items?: ProjectGalleryItem[] }>(
+    `/api/gallery/project?project=${encodeURIComponent(projectId)}`,
+    '读取项目作品',
+  );
   return Array.isArray(data.items) ? data.items : [];
 }
 
@@ -48,28 +51,29 @@ export interface ProjectScreenItem {
 }
 
 export async function fetchGalleryScreens(projectId: string): Promise<ProjectScreenItem[]> {
-  const resp = await fetch(`/api/gallery/screens?project=${encodeURIComponent(projectId)}`);
-  if (!resp.ok) throw new Error(`project screens fetch failed: ${resp.status}`);
-  const data = (await resp.json()) as { items?: ProjectScreenItem[] };
+  const data = await requestJson<{ items?: ProjectScreenItem[] }>(
+    `/api/gallery/screens?project=${encodeURIComponent(projectId)}`,
+    '读取项目页面图',
+  );
   return Array.isArray(data.items) ? data.items : [];
 }
 
 /** 首页作品展示的隐藏清单（data_root 相对路径）。工坊里仍正常可见。 */
 export async function fetchGalleryHidden(): Promise<string[]> {
-  const resp = await fetch('/api/gallery/hidden');
-  if (!resp.ok) throw new Error(`gallery hidden fetch failed: ${resp.status}`);
-  const data = (await resp.json()) as { paths?: unknown };
+  const data = await requestJson<{ paths?: unknown }>('/api/gallery/hidden', '读取隐藏清单');
   return Array.isArray(data.paths) ? data.paths.filter((p): p is string => typeof p === 'string') : [];
 }
 
 export async function setGalleryHidden(path: string, hidden: boolean): Promise<string[]> {
-  const resp = await fetch('/api/gallery/hidden', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, hidden }),
-  });
-  if (!resp.ok) throw new Error(`gallery hidden update failed: ${resp.status}`);
-  const data = (await resp.json()) as { paths: string[] };
+  const data = await requestJson<{ paths: string[] }>(
+    '/api/gallery/hidden',
+    hidden ? '隐藏这张图' : '取消隐藏',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, hidden }),
+    },
+  );
   return data.paths;
 }
 
@@ -80,20 +84,20 @@ export function isGalleryHidden(path: string, hiddenPaths: string[]): boolean {
 
 /** 收藏清单（data_root 相对路径）。仅作标记 + 筛选，不影响首页作品展示。 */
 export async function fetchGalleryFavorites(): Promise<string[]> {
-  const resp = await fetch('/api/gallery/favorites');
-  if (!resp.ok) throw new Error(`gallery favorites fetch failed: ${resp.status}`);
-  const data = (await resp.json()) as { paths?: unknown };
+  const data = await requestJson<{ paths?: unknown }>('/api/gallery/favorites', '读取收藏清单');
   return Array.isArray(data.paths) ? data.paths.filter((p): p is string => typeof p === 'string') : [];
 }
 
 export async function setGalleryFavorite(path: string, favorite: boolean): Promise<string[]> {
-  const resp = await fetch('/api/gallery/favorites', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, favorite }),
-  });
-  if (!resp.ok) throw new Error(`gallery favorite update failed: ${resp.status}`);
-  const data = (await resp.json()) as { paths: string[] };
+  const data = await requestJson<{ paths: string[] }>(
+    '/api/gallery/favorites',
+    favorite ? '收藏这张图' : '取消收藏',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, favorite }),
+    },
+  );
   return data.paths;
 }
 
@@ -104,20 +108,20 @@ export function isGalleryFavorited(path: string, favoritePaths: string[]): boole
 
 /** 评分清单（data_root 相对路径 → 0.5~5.0）。驱动首页高分优先排序 + 详情页展示。 */
 export async function fetchGalleryRatings(): Promise<Record<string, number>> {
-  const resp = await fetch('/api/gallery/ratings');
-  if (!resp.ok) throw new Error(`gallery ratings fetch failed: ${resp.status}`);
-  const data = (await resp.json()) as { ratings?: unknown };
+  const data = await requestJson<{ ratings?: unknown }>('/api/gallery/ratings', '读取评分');
   return isRatingMap(data.ratings) ? data.ratings : {};
 }
 
 export async function setGalleryRating(path: string, rating: number): Promise<Record<string, number>> {
-  const resp = await fetch('/api/gallery/ratings', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path, rating }),
-  });
-  if (!resp.ok) throw new Error(`gallery rating update failed: ${resp.status}`);
-  const data = (await resp.json()) as { ratings: Record<string, number> };
+  const data = await requestJson<{ ratings: Record<string, number> }>(
+    '/api/gallery/ratings',
+    '保存评分',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, rating }),
+    },
+  );
   return data.ratings;
 }
 

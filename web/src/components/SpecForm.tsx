@@ -4,6 +4,7 @@ import { useClipboard } from '../hooks/useClipboard';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { apiError } from '@/api/http';
 
 interface Props { characterId: string | null; characterName: string | null; sseSignal: number }
 
@@ -47,7 +48,7 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content }),
     });
-    if (!r.ok) { setToast({ kind: 'warn', msg: '保存失败' }); return; }
+    if (!r.ok) { setToast({ kind: 'warn', msg: (await apiError(r, '保存角色 spec')).message }); return; }
     setServerContent(content);
     setDirty(false);
     if (triggerClipboard) {
@@ -61,7 +62,7 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
   async function refresh() {
     if (!characterId) return;
     const r = await fetch(`/api/spec/${characterId}`);
-    if (!r.ok) { setToast({ kind: 'warn', msg: '刷新失败' }); return; }
+    if (!r.ok) { setToast({ kind: 'warn', msg: (await apiError(r, '刷新角色 spec')).message }); return; }
     const d = await r.json();
     setServerContent(d.content);
     setContent(d.content);

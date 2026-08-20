@@ -66,6 +66,26 @@ def _error_hint(low: str) -> str | None:
         )
     if "must be at least" in low and "pixel" in low:
         return "出图尺寸低于该模型的像素下限：请把尺寸调大（或换用同族里下限更低的模型）后重试。"
+    # 参考图过大被厂商当场拒收（413 / entity too large / image too large）。与「上传超时」分开：
+    # 那条是没传完，这条是传到了但对方不收 —— 处置动作不同（压缩尺寸而不是换网络）。
+    if (
+        "payload too large" in low
+        or "request entity too large" in low
+        or "image too large" in low
+        or "file too large" in low
+        or ("too large" in low and ("image" in low or "payload" in low or "body" in low))
+    ):
+        return (
+            "参考图太大被厂商拒收：请把参考图压缩、或把长边缩小（一般 2000 像素以内足够）后重试。"
+        )
+    # 尺寸/分辨率不合规（上限、必须为 N 的倍数、比例不支持等）—— 确定性错误，重试无用。
+    if ("resolution" in low or "dimension" in low or "image size" in low or "width" in low) and (
+        "invalid" in low or "not support" in low or "unsupported" in low or "exceed" in low
+    ):
+        return (
+            "参考图或出图尺寸不被该模型接受（超出上限 / 比例或边长不合规）："
+            "请缩小参考图、或换一个尺寸后重试。原始报文里有厂商给的具体限制。"
+        )
     if "quota" in low or "insufficient" in low or "余额" in low or "额度" in low or "欠费" in low:
         return "厂商额度 / 余额不足：请到厂商官网充值或检查账户额度后重试。"
     # 连接已建立但被远端中途掐断：多是该生成过重 / 上游太慢超出厂商网关等待时限（非本机网络问题）。
@@ -163,15 +183,23 @@ def _webp_dimensions(data: bytes) -> tuple[int, int] | None:
     return None
 
 
-def image_dimensions(path: Path) -> tuple[int, int] | None:
-    if not path.exists() or path.stat().st_size <= 0:
-        return None
-    data = path.read_bytes()[:262144]
+def image_dimensions_from_bytes(data: bytes) -> tuple[int, int] | None:
+    """裸字节 → (宽, 高)，认不出返回 None。只读文件头，不引 Pillow。
+
+    上传接口用它把「这张图多少像素」写进报错里（画师看到体积超限时，往往真正的原因是
+    这张图有一万多像素宽）—— 那里只有内存里的 bytes，没有落盘路径。
+    """
     for parser in (_png_dimensions, _jpeg_dimensions, _webp_dimensions):
-        dims = parser(data)
+        dims = parser(data[:262144])
         if dims and dims[0] > 0 and dims[1] > 0:
             return dims
     return None
+
+
+def image_dimensions(path: Path) -> tuple[int, int] | None:
+    if not path.exists() or path.stat().st_size <= 0:
+        return None
+    return image_dimensions_from_bytes(path.read_bytes()[:262144])
 
 
 def is_valid_image(path: Path) -> bool:
