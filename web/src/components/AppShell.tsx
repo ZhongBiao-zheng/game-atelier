@@ -12,6 +12,11 @@ import { applyTheme, loadTheme, saveTheme, type Theme } from '@/lib/theme';
 import {
   isWorkshopWorkspace,
 } from '@/components/workshop/workspaces';
+import type { ProjectFolderView } from '@/pages/ProjectFolderPage';
+
+function isProjectFolderView(value?: string): value is ProjectFolderView {
+  return value === 'overview' || value === 'art' || value === 'ui' || value === 'video';
+}
 
 /** 深浅主题切换：图标显示目的地（暗色显太阳 = 点了去浅色） */
 function ThemeToggle() {
@@ -160,6 +165,23 @@ export function AppShell() {
                 projectId={params.projectId}
                 workspace="ui"
                 screenId={params.screenId}
+              />
+            )}
+          </Route>
+          <Route path="/workshop/:projectId/folders/:folderId/:folderView">
+            {(params) => (
+              <CharacterDetail
+                projectId={params.projectId}
+                folderId={params.folderId}
+                folderView={isProjectFolderView(params.folderView) ? params.folderView : 'overview'}
+              />
+            )}
+          </Route>
+          <Route path="/workshop/:projectId/folders/:folderId">
+            {(params) => (
+              <Redirect
+                to={`/workshop/${encodeURIComponent(params.projectId)}/folders/${encodeURIComponent(params.folderId)}/overview`}
+                replace
               />
             )}
           </Route>

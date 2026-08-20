@@ -1,4 +1,4 @@
-import { Folder, LibraryBig } from 'lucide-react';
+import { LibraryBig } from 'lucide-react';
 import { Link } from 'wouter';
 
 import type { CharacterEntry, Project } from '@/schema/jobs';
@@ -8,6 +8,7 @@ import {
   type WorkshopWorkspace,
 } from '@/components/workshop/workspaces';
 import { SidebarDropZone } from '@/components/workshop/SidebarDropZone';
+import { ProjectFoldersNavigation } from '@/components/workshop/ProjectFoldersNavigation';
 
 export function ProjectNavigation({
   project,
@@ -19,6 +20,7 @@ export function ProjectNavigation({
   onDragLeave,
   onNavigate,
   renderCharacter,
+  currentFolderId,
 }: {
   project: Project;
   workspace: WorkshopWorkspace;
@@ -29,6 +31,7 @@ export function ProjectNavigation({
   onDragLeave: () => void;
   onNavigate?: () => void;
   renderCharacter: (character: CharacterEntry) => React.ReactNode;
+  currentFolderId?: string;
 }) {
   const projectBase = `/workshop/${encodeURIComponent(project.id)}`;
   const overview = getWorkspaceDescriptor('overview');
@@ -56,15 +59,13 @@ export function ProjectNavigation({
           current={workspace === overview.id}
           onNavigate={onNavigate}
         />
-        <div
-          aria-disabled="true"
-          className="flex h-10 items-center gap-2 rounded-md px-2.5 text-sm text-muted-foreground/65"
-        >
-          <Folder className="size-4" aria-hidden />
-          <span className="flex-1">文件夹</span>
-          <span className="text-xs">待接入</span>
-        </div>
       </div>
+
+      <ProjectFoldersNavigation
+        projectId={project.id}
+        currentFolderId={currentFolderId}
+        onNavigate={onNavigate}
+      />
 
       <section aria-labelledby="asset-library-heading" className="space-y-1">
         <h2

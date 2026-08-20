@@ -51,6 +51,69 @@ describe('AppShell', () => {
     expect(screen.getByText('工坊')).toHaveAttribute('aria-current', 'page');
   });
 
+  it('restores a folder filter deep link inside the stable project shell', async () => {
+    vi.stubGlobal('EventSource', class {
+      addEventListener = vi.fn();
+      close = vi.fn();
+      onerror: (() => void) | null = null;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      const path = String(url);
+      if (path === '/api/config') {
+        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-atelier' }) };
+      }
+      if (path === '/api/projects') {
+        return {
+          ok: true,
+          json: async () => ({
+            projects: [{ id: 'p1', slug: 'one', name: '项目一', created_at: '' }],
+            assignments: {},
+          }),
+        };
+      }
+      if (path === '/api/characters') return { ok: true, json: async () => [] };
+      if (path === '/api/projects/p1/folders') {
+        return {
+          ok: true,
+          json: async () => ({ folders: [{
+            id: 'folder-summer', name: '夏日版本', note: '', created_at: '',
+            items: [{ kind: 'ui_screen', asset_id: 'home' }],
+          }] }),
+        };
+      }
+      if (path === '/api/projects/p1/workspaces') {
+        return {
+          ok: true,
+          json: async () => ({
+            project_id: 'p1', art: { characters: 0, canonical: 0, stale: 0 },
+            ui: {
+              anchors: {}, anchors_approved: 0, style_status: 'missing', has_ui_style: false,
+              screen_map_status: 'draft', screens: 1, versions: 0, canonical: 0, stale: 0,
+              screen_items: [{ screen_id: 'home', name: '主界面', category: '', priority: '', status: 'planned', dependency: '', purpose: '', brief_summary: '' }],
+              next_action: '', next_command: '',
+            },
+            video: { productions: 0, shots: 0, selected_shots: 0, exports: 0, next_action: '' },
+          }),
+        };
+      }
+      if (path === '/api/projects/p1/videos') {
+        return { ok: true, json: async () => ({ productions: [] }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+
+    renderAt('/workshop/p1/folders/folder-summer/ui');
+
+    expect(await screen.findByDisplayValue('夏日版本')).toBeInTheDocument();
+    expect(screen.getByText('主界面')).toBeInTheDocument();
+    const breadcrumbs = screen.getByRole('navigation', { name: '面包屑' });
+    expect(within(breadcrumbs).getByText('文件夹')).toBeInTheDocument();
+    expect(within(breadcrumbs).getByText('夏日版本')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: '夏日版本' })).toHaveAttribute('aria-current', 'page');
+    expect(within(screen.getByRole('navigation', { name: '文件夹视图' })).getByRole('link', { name: 'UI' }))
+      .toHaveAttribute('aria-current', 'page');
+  });
+
   it('keeps the project shell on an image deep link and returns through the URL', async () => {
     vi.stubGlobal('EventSource', class {
       addEventListener = vi.fn();

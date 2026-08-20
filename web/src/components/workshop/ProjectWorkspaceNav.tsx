@@ -13,7 +13,7 @@ export function ProjectWorkspaceNav({
   workspace,
 }: {
   projectId: string;
-  workspace: WorkshopWorkspace;
+  workspace?: WorkshopWorkspace;
 }) {
   return (
     <nav aria-label="项目工作区" className="flex max-w-full gap-1 overflow-x-auto rounded-full border border-border bg-glass p-1 backdrop-blur-glass">

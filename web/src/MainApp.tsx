@@ -12,6 +12,7 @@ import type { AssetSlot, CharacterEntry, ProjectsFile } from './schema/jobs';
 import { ProjectPage, type WorkshopWorkspace } from './pages/ProjectPage';
 import { WorkshopShell } from './components/workshop/WorkshopShell';
 import { cn } from '@/lib/utils';
+import { ProjectFolderPage, type ProjectFolderView } from '@/pages/ProjectFolderPage';
 
 // 弹性分界线参数（与方案 D 节同步）：名册不可收起（无 snap），胶片带 <64 收起
 const ROSTER = { key: 'workshop:roster-width', def: 264, min: 200, max: 400 };
@@ -40,6 +41,8 @@ interface MainAppProps {
   routedCharacterId?: string;
   routedAssetSlot?: AssetSlot;
   routedImageDetail?: { path: string; jobId: string };
+  routedFolderId?: string;
+  routedFolderView?: ProjectFolderView;
 }
 
 export function MainApp({
@@ -51,6 +54,8 @@ export function MainApp({
   routedCharacterId,
   routedAssetSlot,
   routedImageDetail,
+  routedFolderId,
+  routedFolderView,
 }: MainAppProps = {}) {
   const [config, setConfig] = useState<Config | null>(null);
 
@@ -79,6 +84,8 @@ export function MainApp({
         routedCharacterId={routedCharacterId}
         routedAssetSlot={routedAssetSlot}
         routedImageDetail={routedImageDetail}
+        routedFolderId={routedFolderId}
+        routedFolderView={routedFolderView}
       />
     </div>
   );
@@ -93,6 +100,8 @@ function ThreeColumnLayout({
   routedCharacterId,
   routedAssetSlot,
   routedImageDetail,
+  routedFolderId,
+  routedFolderView,
 }: {
   routedProjectId?: string;
   routedWorkspace?: WorkshopWorkspace;
@@ -102,11 +111,14 @@ function ThreeColumnLayout({
   routedCharacterId?: string;
   routedAssetSlot?: AssetSlot;
   routedImageDetail?: { path: string; jobId: string };
+  routedFolderId?: string;
+  routedFolderView?: ProjectFolderView;
 }) {
   const [, setLocation] = useLocation();
   const [characterName, setCharacterName] = useState('');
   const [projectsFile, setProjectsFile] = useState<ProjectsFile | null>(null);
   const [mobileRosterOpen, setMobileRosterOpen] = useState(false);
+  const [folderLabel, setFolderLabel] = useState<string | null>(null);
   const mobileRosterTriggerRef = useRef<HTMLButtonElement>(null);
   const mobileRosterCloseRef = useRef<HTMLButtonElement>(null);
   const sseSignal = useSSE();
@@ -178,6 +190,13 @@ function ThreeColumnLayout({
   const [stripW, setStripW] = useState(() => loadWidth(STRIP, true));
   const lastStripW = useRef(stripW > 0 ? stripW : STRIP.def);
   const detailSlot = routedAssetSlot ?? 'portrait';
+  const handleFolderChange = useCallback((folder: { name: string } | null) => {
+    setFolderLabel(folder?.name ?? null);
+  }, []);
+
+  useEffect(() => {
+    setFolderLabel(null);
+  }, [routedFolderId]);
 
   const commitRosterW = useCallback((w: number) => {
     setRosterW(w);
@@ -209,7 +228,14 @@ function ThreeColumnLayout({
     ));
   }
 
-  const projectContent = routedImageDetail && selected ? (
+  const projectContent = openedProject && routedFolderId ? (
+    <ProjectFolderPage
+      projectId={openedProject.id}
+      folderId={routedFolderId}
+      view={routedFolderView ?? 'overview'}
+      onFolderChange={handleFolderChange}
+    />
+  ) : routedImageDetail && selected ? (
     <div
       className="relative grid h-full grid-rows-[minmax(0,1fr)]"
       style={{ gridTemplateColumns: `${stripW}px minmax(0,1fr)` }}
@@ -315,6 +341,7 @@ function ThreeColumnLayout({
               selectedId={selected?.id}
               activeProjectId={openedProject?.id ?? null}
               workspace={workspace}
+              currentFolderId={routedFolderId}
               onSelect={(id, name) => {
                 const projectId = projectsFile?.assignments[id];
                 const project = projectsFile?.projects.find(p => p.id === projectId) ?? null;
@@ -353,8 +380,9 @@ function ThreeColumnLayout({
             {projectContent ? (
               <WorkshopShell
                 project={openedProject}
-                workspace={workspace}
-                objectLabel={shellObjectLabel}
+                workspace={routedFolderId ? undefined : workspace}
+                sectionLabel={routedFolderId ? '文件夹' : undefined}
+                objectLabel={routedFolderId ? folderLabel : shellObjectLabel}
               >
                 {projectContent}
               </WorkshopShell>

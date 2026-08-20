@@ -14,11 +14,13 @@ export function WorkshopShell({
   project,
   workspace,
   objectLabel,
+  sectionLabel,
   children,
 }: {
   project?: Project | null;
-  workspace: WorkshopWorkspace;
+  workspace?: WorkshopWorkspace;
   objectLabel?: string | null;
+  sectionLabel?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -42,7 +44,7 @@ export function WorkshopShell({
               </Link>
               <ChevronRight className="size-3 shrink-0 text-muted-foreground/50" aria-hidden />
               <span className="shrink-0" aria-current={objectLabel ? undefined : 'page'}>
-                {getWorkspaceDescriptor(workspace).label}
+                {sectionLabel ?? (workspace ? getWorkspaceDescriptor(workspace).label : '文件夹')}
               </span>
             </>
           ) : (

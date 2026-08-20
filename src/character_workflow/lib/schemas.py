@@ -280,6 +280,46 @@ class ProjectsFile(BaseModel):
     assignments: dict[str, str] = {}  # character_id → project_id
 
 
+ProjectFolderItemKind = Literal["character", "ui_screen", "video_production"]
+
+
+class ProjectFolderItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: ProjectFolderItemKind
+    asset_id: str = Field(min_length=1)
+
+
+class ProjectFolder(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    name: str
+    note: str = ""
+    created_at: str
+    items: list[ProjectFolderItem] = Field(default_factory=list)
+
+
+class ProjectFoldersFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    folders: list[ProjectFolder] = Field(default_factory=list)
+
+
+class ProjectFolderCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=60)
+    note: str = Field(default="", max_length=240)
+
+
+class ProjectFolderUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=60)
+    note: str = Field(max_length=240)
+
+
+class ProjectFolderReorder(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ordered_ids: list[str]
+
+
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=60)
 

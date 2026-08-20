@@ -28,6 +28,7 @@ interface Props {
   activeProjectId?: string | null;
   workspace?: WorkshopWorkspace;
   onNavigate?: () => void;
+  currentFolderId?: string;
 }
 
 const UNCATEGORIZED = '__uncategorized__';
@@ -43,6 +44,7 @@ export function LeftSidebar({
   activeProjectId = null,
   workspace = 'overview',
   onNavigate,
+  currentFolderId,
 }: Props) {
   const [characters, setCharacters] = useState<CharacterEntry[]>([]);
   const [projects, setProjects] = useState<ProjectsFile>({ projects: [], assignments: {} });
@@ -446,6 +448,7 @@ export function LeftSidebar({
               onDragLeave={() => setDragOver(null)}
               onNavigate={onNavigate}
               renderCharacter={renderChar}
+              currentFolderId={currentFolderId}
             />
           ) : (
             <>

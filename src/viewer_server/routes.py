@@ -34,6 +34,10 @@ from character_workflow.lib.projects import (
     assign_character, create_project, delete_project, read_projects,
     rename_project, reorder_projects,
 )
+from character_workflow.lib.project_folders import (
+    add_folder_item, create_folder, delete_folder, read_project_folders,
+    remove_folder_item, reorder_folders, update_folder,
+)
 from pydantic import BaseModel, Field, ValidationError
 from pydantic import field_validator
 
@@ -41,7 +45,9 @@ from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterProjectAssign, ClipboardAttempt,
     FeedbackPost, Job, JobKind, JobParams, JobStatus, ProjectCreate, ProjectRename,
-    ProjectVideosResponse, ProjectWorkspaceSummary, ProjectsFile,
+    ProjectFolderCreate, ProjectFolderItem, ProjectFolderItemKind, ProjectFolderReorder,
+    ProjectFoldersFile, ProjectFolderUpdate, ProjectVideosResponse, ProjectWorkspaceSummary,
+    ProjectsFile,
     ScreenCanonicalSet, ScreenCanonicalStatusFile, SpecPatch, VideoSelectedResponse,
     WebEditableJobPatch,
 )
@@ -566,6 +572,96 @@ def delete_job(job_id: str) -> dict:
 @router.get("/projects", response_model=ProjectsFile)
 def get_projects() -> ProjectsFile:
     return read_projects()
+
+
+@router.get("/projects/{project_id}/folders", response_model=ProjectFoldersFile)
+def get_project_folders(project_id: str) -> ProjectFoldersFile:
+    try:
+        return read_project_folders(project_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.post("/projects/{project_id}/folders", response_model=ProjectFoldersFile)
+def post_project_folder(project_id: str, payload: ProjectFolderCreate) -> ProjectFoldersFile:
+    try:
+        return create_folder(project_id, payload.name, payload.note)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.post("/projects/{project_id}/folders/reorder", response_model=ProjectFoldersFile)
+def post_project_folders_reorder(
+    project_id: str,
+    payload: ProjectFolderReorder,
+) -> ProjectFoldersFile:
+    try:
+        return reorder_folders(project_id, payload.ordered_ids)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.post(
+    "/projects/{project_id}/folders/{folder_id}",
+    response_model=ProjectFoldersFile,
+)
+def post_project_folder_update(
+    project_id: str,
+    folder_id: str,
+    payload: ProjectFolderUpdate,
+) -> ProjectFoldersFile:
+    try:
+        return update_folder(project_id, folder_id, payload.name, payload.note)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个文件夹") from None
+
+
+@router.delete(
+    "/projects/{project_id}/folders/{folder_id}",
+    response_model=ProjectFoldersFile,
+)
+def delete_project_folder(project_id: str, folder_id: str) -> ProjectFoldersFile:
+    try:
+        return delete_folder(project_id, folder_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个文件夹") from None
+
+
+@router.post(
+    "/projects/{project_id}/folders/{folder_id}/items",
+    response_model=ProjectFoldersFile,
+)
+def post_project_folder_item(
+    project_id: str,
+    folder_id: str,
+    payload: ProjectFolderItem,
+) -> ProjectFoldersFile:
+    try:
+        return add_folder_item(project_id, folder_id, payload)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目或文件夹") from None
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.delete(
+    "/projects/{project_id}/folders/{folder_id}/items",
+    response_model=ProjectFoldersFile,
+)
+def delete_project_folder_item(
+    project_id: str,
+    folder_id: str,
+    kind: ProjectFolderItemKind = Query(),
+    asset_id: str = Query(min_length=1),
+) -> ProjectFoldersFile:
+    try:
+        return remove_folder_item(
+            project_id,
+            folder_id,
+            ProjectFolderItem(kind=kind, asset_id=asset_id),
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目或文件夹") from None
 
 
 @router.get("/projects/{project_id}/workspaces", response_model=ProjectWorkspaceSummary)

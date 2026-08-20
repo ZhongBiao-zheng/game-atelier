@@ -10,6 +10,7 @@
 |---|---|---|---|
 | Job / JobParams | `lib/schemas.py` | `web/src/schema/jobs.ts` | 无 —— 靠人 |
 | Key / ModelSpec | `lib/keys.py` | `web/src/api/keys.ts` | 无 —— 靠人 |
+| ProjectFolder / ProjectFolderItem | `lib/schemas.py` | `web/src/api/projectFolders.ts` | `tests/test_project_folders.py` + `ProjectFolderPage.test.tsx` |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
 | 视频控件能力 | 各 `*_video.py` | `lib/videoControlCaps.ts` | 无 —— 靠人 |
 
@@ -39,6 +40,9 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /spec/{id}` `POST /prompt/{job_id}` `POST /feedback` `POST /uploads` `POST /studio/jobs`
 `POST /characters` `POST /characters/{id}/rename` `POST /characters/{id}/gallery/{kind}` `POST /characters/{id}/project`
 `POST /projects` `/projects/reorder` `/projects/{id}/rename` `DELETE /projects/{id}`
+`POST /projects/{id}/folders` `/projects/{id}/folders/reorder` `/projects/{id}/folders/{folder_id}`
+`DELETE /projects/{id}/folders/{folder_id}`
+`POST /projects/{id}/folders/{folder_id}/items` `DELETE /projects/{id}/folders/{folder_id}/items`
 `POST /keys` `PATCH /keys/{alias}` `DELETE /keys/{alias}` `POST /keys/models-preview`
 `POST /config` `POST /gallery/{hidden,favorites,ratings}` `POST /onboarding/data-root` `POST /folder-picker`
 `POST /clipboard-attempt` `DELETE /characters/{id}`
@@ -53,6 +57,35 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /gallery/{recent,project,screens,hidden,favorites,ratings,image}` `GET /raw`
 `GET /characters/{id}/canonical` `GET /projects/{id}/screens/canonical`
 `GET /projects/{id}/workspaces` `GET /projects/{id}/videos`
+`GET /projects/{id}/folders`
+
+### 项目文件夹契约
+
+项目文件夹只保存个人整理关系，落在 `projects/<slug>/folders.json`；资产本体、历史和归属仍由
+角色目录、UI 页面目录与视频企划目录负责。文件夹删除或移除成员不得删除任何资产文件。
+
+```ts
+type ProjectFolderItem = {
+  kind: 'character' | 'ui_screen' | 'video_production';
+  asset_id: string;
+};
+
+type ProjectFolder = {
+  id: string;
+  name: string;
+  note: string;
+  created_at: string;
+  items: ProjectFolderItem[];
+};
+
+type ProjectFoldersFile = { folders: ProjectFolder[] };
+```
+
+`folders` 数组顺序就是用户排序，`items` 按加入顺序展示。同一引用在单个文件夹内去重，但可同时
+出现在多个文件夹；美术/UI/视频视图只按 `kind` 过滤，不改变资产归属。所有写操作均返回完整的
+`ProjectFoldersFile`：新建请求 `{ name, note? }`，更新请求 `{ name, note }`，排序请求
+`{ ordered_ids }`，加入成员请求为 `ProjectFolderItem`；移除成员通过查询参数 `kind` 和
+`asset_id` 指定。加入时服务端必须验证资产确实属于该项目。
 
 ### 项目工作区响应
 

@@ -122,6 +122,12 @@ describe('LeftSidebar', () => {
       if (url === '/api/active-character') {
         return { ok: true, json: async () => ({ active_id: null, updated_at: '' }) };
       }
+      if (url === '/api/projects/p1/folders' && !init) {
+        return {
+          ok: true,
+          json: async () => ({ folders: [{ id: 'folder-summer', name: '夏日版本', note: '', created_at: '', items: [] }] }),
+        };
+      }
       return { ok: false, status: 404, json: async () => ({}) };
     });
     vi.stubGlobal('fetch', projectFetch);
@@ -132,6 +138,10 @@ describe('LeftSidebar', () => {
     const nav = await screen.findByRole('navigation', { name: '魔幻 项目导航' });
     expect(within(nav).getByRole('link', { name: '项目首页' })).toHaveAttribute('aria-current', 'page');
     expect(within(nav).getByText('文件夹')).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: '夏日版本' })).toHaveAttribute(
+      'href', '/workshop/p1/folders/folder-summer/overview',
+    );
+    expect(within(nav).getByRole('button', { name: '新建文件夹' })).toBeInTheDocument();
     expect(within(nav).getByText('资产库')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '暗影' })).not.toBeInTheDocument();
     overview.unmount();
@@ -139,5 +149,56 @@ describe('LeftSidebar', () => {
     render(<LeftSidebar sseSignal={0} activeProjectId="p1" workspace="art" onSelect={vi.fn()} />);
     expect(await screen.findByText('角色名册')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '暗影' })).toBeInTheDocument();
+  });
+
+  it('可在项目册新建文件夹并调整顺序', async () => {
+    const project = { id: 'p1', slug: 's1', name: '魔幻', created_at: '' };
+    const initial = {
+      folders: [
+        { id: 'folder-a', name: '版本 A', note: '', created_at: '', items: [] },
+        { id: 'folder-b', name: '版本 B', note: '', created_at: '', items: [] },
+      ],
+    };
+    let current = initial;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/characters' && !init) return { ok: true, json: async () => [] };
+      if (url === '/api/projects' && !init) {
+        return { ok: true, json: async () => ({ projects: [project], assignments: {} }) };
+      }
+      if (url === '/api/projects/p1/folders' && !init) {
+        return { ok: true, json: async () => current };
+      }
+      if (url === '/api/projects/p1/folders' && init?.method === 'POST') {
+        current = { folders: [{ id: 'folder-new', name: '夏日版本', note: '', created_at: '', items: [] }, ...initial.folders] };
+        return { ok: true, json: async () => current };
+      }
+      if (url === '/api/projects/p1/folders/reorder' && init?.method === 'POST') {
+        const ids = JSON.parse(String(init.body)).ordered_ids as string[];
+        current = {
+          folders: ids.map(id => current.folders.find(folder => folder.id === id)!),
+        };
+        return { ok: true, json: async () => current };
+      }
+      return { ok: false, status: 404, text: async () => '', json: async () => ({}) };
+    }));
+
+    render(<LeftSidebar sseSignal={0} activeProjectId="p1" onSelect={vi.fn()} />);
+    await screen.findByRole('link', { name: '版本 A' });
+    fireEvent.click(screen.getByRole('button', { name: '新建文件夹' }));
+    fireEvent.change(screen.getByLabelText('新文件夹名称'), { target: { value: '夏日版本' } });
+    fireEvent.keyDown(screen.getByLabelText('新文件夹名称'), { key: 'Enter' });
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/projects/p1/folders',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: '夏日版本', note: '' }) }),
+    ));
+
+    fireEvent.click(screen.getByRole('button', { name: '上移文件夹 版本 B' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/projects/p1/folders/reorder',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ ordered_ids: ['folder-new', 'folder-b', 'folder-a'] }),
+      }),
+    ));
   });
 });
