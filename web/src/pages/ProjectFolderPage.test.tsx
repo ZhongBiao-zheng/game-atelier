@@ -54,6 +54,11 @@ beforeEach(() => {
       assignments: { 'cao-cao': 'p1', 'sun-quan': 'p1' },
     });
     if (path === '/api/projects/p1/workspaces') return response(workspace);
+    if (path === '/api/gallery/screens?project=p1') return response({ items: [{
+      screen_id: 'inventory', filename: 'v1.png', path: 'projects/one/screens/inventory/v1.png',
+      job_id: null, style_variant: null, base_version: null, model: null, provider: null,
+      prompt: null, mtime: 1,
+    }] });
     if (path === '/api/projects/p1/videos') return response(videos);
     return response({});
   }));
@@ -101,6 +106,8 @@ describe('ProjectFolderPage', () => {
     expect(await screen.findByText('主界面')).toBeInTheDocument();
     expect(screen.queryByText('曹操')).not.toBeInTheDocument();
     expect(screen.queryByText('上线宣传片')).not.toBeInTheDocument();
+    expect(screen.queryByText('孙权')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '添加UI 页面 inventory' })).toBeInTheDocument();
   });
 
   it('保存名称与备注，并可从当前项目资产中添加引用', async () => {

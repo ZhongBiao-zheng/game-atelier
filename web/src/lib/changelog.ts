@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.23.0',
+    date: '2026-08-20',
+    headline: '项目内容可以按自己的方式整理了',
+    changes: [
+      { kind: 'feat', text: '项目内可以新建个人文件夹，把角色、UI 页面和视频企划混合整理在一起；同一资产也能同时放进多个文件夹' },
+      { kind: 'feat', text: '文件夹支持改名、备注、排序和概览/美术/UI/视频过滤；移除内容或删除文件夹都不会删除原资产和历史' },
+    ],
+  },
+  {
     version: '5.22.0',
     date: '2026-08-20',
     headline: '一个游戏，一座完整工坊',

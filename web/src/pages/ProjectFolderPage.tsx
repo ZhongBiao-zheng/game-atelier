@@ -14,6 +14,7 @@ import {
   type ProjectFolderItemKind,
   type ProjectFoldersFile,
 } from '@/api/projectFolders';
+import { fetchGalleryScreens, type ProjectScreenItem } from '@/api/gallery';
 import { fetchProjectVideos, type ProjectVideoProduction } from '@/api/videos';
 import { fetchProjectWorkspaces, type ProjectWorkspaceSummary } from '@/api/workspaces';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
@@ -22,15 +23,12 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import type { CharacterEntry, ProjectsFile } from '@/schema/jobs';
+import {
+  WORKSPACE_DESCRIPTORS,
+  type WorkshopWorkspace,
+} from '@/components/workshop/workspaces';
 
-export type ProjectFolderView = 'overview' | 'art' | 'ui' | 'video';
-
-const VIEWS: { id: ProjectFolderView; label: string }[] = [
-  { id: 'overview', label: '概览' },
-  { id: 'art', label: '美术' },
-  { id: 'ui', label: 'UI' },
-  { id: 'video', label: '视频' },
-];
+export type ProjectFolderView = WorkshopWorkspace;
 
 const KIND_VIEW: Record<ProjectFolderItemKind, ProjectFolderView> = {
   character: 'art',
@@ -65,6 +63,7 @@ export function ProjectFolderPage({
   const [characters, setCharacters] = useState<CharacterEntry[]>([]);
   const [projectCharacterIds, setProjectCharacterIds] = useState<Set<string>>(new Set());
   const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
+  const [screenVersions, setScreenVersions] = useState<ProjectScreenItem[]>([]);
   const [productions, setProductions] = useState<ProjectVideoProduction[]>([]);
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
@@ -80,8 +79,16 @@ export function ProjectFolderPage({
       fetch('/api/characters').then(response => response.json() as Promise<CharacterEntry[]>),
       fetch('/api/projects').then(response => response.json() as Promise<ProjectsFile>),
       fetchProjectWorkspaces(projectId),
+      fetchGalleryScreens(projectId),
       fetchProjectVideos(projectId),
-    ]).then(([foldersFile, characterItems, projectsFile, workspace, videoItems]) => {
+    ]).then(([
+      foldersFile,
+      characterItems,
+      projectsFile,
+      workspace,
+      screenItems,
+      videoItems,
+    ]) => {
       if (cancelled) return;
       setFile(foldersFile);
       setCharacters(characterItems);
@@ -91,6 +98,7 @@ export function ProjectFolderPage({
           .map(([characterId]) => characterId),
       ));
       setSummary(workspace);
+      setScreenVersions(screenItems);
       setProductions(videoItems);
     }).catch(errorValue => {
       if (!cancelled) setError((errorValue as Error).message);
@@ -119,16 +127,21 @@ export function ProjectFolderPage({
     projectId,
     characters.filter(character => projectCharacterIds.has(character.id)),
     summary,
+    screenVersions,
     productions,
   ), [
     projectId,
     characters,
     projectCharacterIds,
     summary,
+    screenVersions,
     productions,
   ]).filter(candidate => !folder?.items.some(item => (
     item.kind === candidate.kind && item.asset_id === candidate.asset_id
   )));
+  const visibleCandidates = view === 'overview'
+    ? candidates
+    : candidates.filter(candidate => KIND_VIEW[candidate.kind] === view);
 
   function accept(next: ProjectFoldersFile) {
     setFile(next);
@@ -225,7 +238,7 @@ export function ProjectFolderPage({
           </div>
 
           <nav aria-label="文件夹视图" className="flex gap-1 overflow-x-auto">
-            {VIEWS.map(item => (
+            {WORKSPACE_DESCRIPTORS.map(item => (
               <Link
                 key={item.id}
                 href={`/workshop/${encodeURIComponent(projectId)}/folders/${encodeURIComponent(folder.id)}/${item.id}`}
@@ -251,7 +264,7 @@ export function ProjectFolderPage({
           {visibleAssets.length > 0 ? (
             <ul className="m-0 grid list-none gap-2 p-0 md:grid-cols-2">
               {visibleAssets.map(asset => (
-                <li key={`${asset.kind}:${asset.asset_id}`} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3">
+                <li key={`${asset.kind}:${asset.asset_id}`} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
                   <AssetIcon kind={asset.kind} />
                   <Link href={asset.href} className="min-w-0 flex-1 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                     <span className="block text-xs text-muted-foreground">{KIND_LABEL[asset.kind]}</span>
@@ -271,20 +284,20 @@ export function ProjectFolderPage({
               ))}
             </ul>
           ) : (
-            <p className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+            <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
               这个视图还没有内容。资产仍留在项目资产库中。
             </p>
           )}
         </section>
 
-        {candidates.length > 0 && (
+        {visibleCandidates.length > 0 && (
           <section aria-labelledby="folder-add-heading" className="space-y-3 border-t border-border/50 pt-5">
             <div>
               <h2 id="folder-add-heading" className="text-base font-medium text-foreground">从项目资产加入</h2>
               <p className="mt-1 text-xs text-muted-foreground">这里只增加引用，不复制或移动资产。</p>
             </div>
             <ul className="m-0 grid list-none gap-2 p-0 md:grid-cols-2">
-              {candidates.map(candidate => (
+              {visibleCandidates.map(candidate => (
                 <li key={`${candidate.kind}:${candidate.asset_id}`} className="flex items-center gap-3 rounded-lg border border-border/70 px-3 py-2">
                   <AssetIcon kind={candidate.kind} />
                   <span className="min-w-0 flex-1 truncate text-sm">{candidate.label}</span>
@@ -361,8 +374,13 @@ function allCandidates(
   projectId: string,
   characters: CharacterEntry[],
   summary: ProjectWorkspaceSummary | null,
+  screenVersions: ProjectScreenItem[],
   productions: ProjectVideoProduction[],
 ): ResolvedAsset[] {
+  const screenIds = new Set([
+    ...(summary?.ui.screen_items.map(item => item.screen_id) ?? []),
+    ...screenVersions.map(item => item.screen_id),
+  ]);
   return resolveAssets(projectId, {
     id: 'candidates',
     name: '',
@@ -370,7 +388,7 @@ function allCandidates(
     created_at: '',
     items: [
       ...characters.map(item => ({ kind: 'character' as const, asset_id: item.id })),
-      ...(summary?.ui.screen_items.map(item => ({ kind: 'ui_screen' as const, asset_id: item.screen_id })) ?? []),
+      ...[...screenIds].map(screenId => ({ kind: 'ui_screen' as const, asset_id: screenId })),
       ...productions.map(item => ({ kind: 'video_production' as const, asset_id: item.production_id })),
     ],
   }, characters, summary, productions);

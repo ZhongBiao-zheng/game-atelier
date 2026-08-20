@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from character_workflow.lib.projects import assign_character, create_project
-from character_workflow.lib.schemas import ProjectFolderItem
+from character_workflow.lib.schemas import ProjectFolderCreate, ProjectFolderItem
 from character_workflow.lib.video_jobs import create_production
 from viewer_server.server_app import build_app
 
@@ -52,6 +52,8 @@ def test_project_folder_models_forbid_unknown_fields():
     }
     with pytest.raises(ValueError):
         ProjectFolderItem(kind="character", asset_id="cao-cao", label="副本名")
+    with pytest.raises(ValueError):
+        ProjectFolderCreate(name="   ")
 
 
 def test_folder_crud_and_order_use_atomic_project_file(client, isolated_data_root, monkeypatch):
@@ -85,6 +87,11 @@ def test_folder_crud_and_order_use_atomic_project_file(client, isolated_data_roo
         "ordered_ids": [first["id"], second["id"]],
     })
     assert [item["id"] for item in reordered["folders"]] == [first["id"], second["id"]]
+
+    duplicate_order = client.post(f"/api/projects/{project.id}/folders/reorder", json={
+        "ordered_ids": [first["id"], first["id"], second["id"]],
+    })
+    assert duplicate_order.status_code == 422
 
     deleted = client.delete(f"/api/projects/{project.id}/folders/{second['id']}")
     assert deleted.status_code == 200
@@ -174,4 +181,3 @@ def test_folder_rejects_unknown_and_cross_project_assets(client, isolated_data_r
 
     missing = client.get("/api/projects/missing/folders")
     assert missing.status_code == 404
-

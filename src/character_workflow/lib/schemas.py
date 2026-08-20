@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
 class JobStatus(str, Enum):
@@ -281,6 +281,10 @@ class ProjectsFile(BaseModel):
 
 
 ProjectFolderItemKind = Literal["character", "ui_screen", "video_production"]
+ProjectFolderName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=60),
+]
 
 
 class ProjectFolderItem(BaseModel):
@@ -305,19 +309,25 @@ class ProjectFoldersFile(BaseModel):
 
 class ProjectFolderCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: str = Field(min_length=1, max_length=60)
+    name: ProjectFolderName
     note: str = Field(default="", max_length=240)
 
 
 class ProjectFolderUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: str = Field(min_length=1, max_length=60)
+    name: ProjectFolderName
     note: str = Field(max_length=240)
 
 
 class ProjectFolderReorder(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ordered_ids: list[str]
+
+    @model_validator(mode="after")
+    def ordered_ids_are_unique(self) -> "ProjectFolderReorder":
+        if len(self.ordered_ids) != len(set(self.ordered_ids)):
+            raise ValueError("ordered_ids must not contain duplicates")
+        return self
 
 
 class ProjectCreate(BaseModel):
