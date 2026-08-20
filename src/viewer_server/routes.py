@@ -366,11 +366,22 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
             raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from e
         whitelist = set(job.output_paths)
         params = job.params.model_dump() if job.params else {}
-        for field in ("reference_images", "reference_videos", "reference_audios"):
-            whitelist.update(params.get(field) or [])
+        for field in (
+            "reference_images", "reference_videos", "reference_audios",
+            "mj_sref", "mj_cref", "mj_oref",
+        ):
+            value = params.get(field)
+            if isinstance(value, str):
+                whitelist.add(value)
+            elif isinstance(value, list):
+                whitelist.update(item for item in value if isinstance(item, str))
         if job.source_image:
             whitelist.add(job.source_image)
-        if str(target) not in {str(Path(p).resolve()) for p in whitelist}:
+        normalized_whitelist = {
+            str((Path(p) if Path(p).is_absolute() else _project_root() / p).resolve())
+            for p in whitelist
+        }
+        if str(target) not in normalized_whitelist:
             raise HTTPException(403, detail="读图被拒：这个路径不在该 job 登记的产物列表里")
         return FileResponse(str(target))
     uploads_dir = (_runtime() / "uploads").resolve()

@@ -1018,7 +1018,10 @@ describe('Studio', () => {
       'mx-auto',
       'text-left',
     );
-    expect(screen.getByRole('img', { name: '参考素材' })).toHaveAttribute('src', '/api/raw?path=%2Ftmp%2Fref.png');
+    expect(screen.getByRole('img', { name: '参考素材' })).toHaveAttribute(
+      'src',
+      '/api/raw?path=%2Ftmp%2Fref.png&job_id=job-studio-1',
+    );
     await waitFor(() => expect(screen.getAllByText(/图片 4.7/).length).toBeGreaterThan(0));
     expect(screen.getByText(/4:3/)).toBeInTheDocument();
     expect(screen.getByText(/2304x1728/)).toBeInTheDocument();

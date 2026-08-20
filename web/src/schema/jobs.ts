@@ -46,11 +46,11 @@ export interface JobParams {
   mj_tile?: boolean; // --tile 无缝平铺
   mj_iw?: number; // --iw 垫图权重 0-3
   // 三种参考图：本地路径或公网 URL（后端把本地文件经 OSS 转直链）。垫图走 reference_images。
-  mj_sref?: string; // --sref 风格参考
+  mj_sref?: string[]; // --sref 风格参考
   mj_sw?: number; // --sw 0-1000
-  mj_cref?: string; // --cref 角色参考
+  mj_cref?: string[]; // --cref 角色参考
   mj_cw?: number; // --cw 0-100
-  mj_oref?: string; // --oref Omni Reference
+  mj_oref?: string[]; // --oref Omni Reference
   mj_ow?: number; // --ow 0-1000
   /** caller 回写：本次真实拼出的 flag 串。只读展示，前端不产生。 */
   mj_flags?: string;

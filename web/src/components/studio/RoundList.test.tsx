@@ -316,4 +316,36 @@ describe('RoundList reference assets', () => {
     fireEvent.mouseLeave(chip);
     expect(document.body.querySelector('[data-testid="round-mention-preview"]')).toBeNull();
   });
+
+  it('MJ 历史把四类参考图并入缩略图堆叠，并从文字参数中移除参考 URL', () => {
+    const round: RoundState = {
+      kind: 'done',
+      jobId: 'job-mj-refs',
+      submittedAt: new Date().toISOString(),
+      imagePaths: ['/data/studio/job-mj-refs/v1.png'],
+      config: {
+        prompt: '东方庭院',
+        model: 'mj_fast_imagine',
+        kind: 'image',
+        referenceImages: ['/other-game/characters/hero.png'],
+        mjRefPaths: {
+          sref: ['/runtime/uploads/style-a.png', 'https://cdn.example/style-b.png'],
+          cref: ['/runtime/uploads/character.png'],
+        },
+        mjFlags: '--v 6 --sref https://oss.example/style-a.png https://oss.example/style-b.png --sw 300 --cref https://oss.example/character.png --cw 60 --chaos 10',
+      },
+    };
+
+    const onReuseReferences = vi.fn();
+    render(<RoundList rounds={[round]} onReuseReferences={onReuseReferences} />);
+    const stack = screen.getByTestId('reference-stack');
+    expect(stack.children).toHaveLength(4);
+    expect(stack.querySelector('img')?.getAttribute('src')).toContain('job_id=job-mj-refs');
+    expect(stack.querySelector('img')?.getAttribute('src')).toContain('/api/raw');
+    fireEvent.click(stack);
+    expect(onReuseReferences).toHaveBeenCalledWith(round.config, 'job-mj-refs');
+    expect(screen.getByTestId('round-mj-flags')).toHaveTextContent('--v 6 --chaos 10');
+    expect(screen.getByTestId('round-mj-flags')).not.toHaveTextContent('oss.example');
+    expect(screen.getByTestId('round-mj-flags')).not.toHaveTextContent('--sref');
+  });
 });

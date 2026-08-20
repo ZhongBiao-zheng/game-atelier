@@ -189,6 +189,45 @@ def test_raw_includes_reference_videos_and_audios_in_job_whitelist(client, runti
     assert client.get(f"/api/raw?path={aud}&job_id=vid-1").status_code == 200
 
 
+def test_raw_allows_external_mj_references_only_through_job_whitelist(
+    client, runtime, tmp_path,
+):
+    """其他项目的本地图片只有被 MJ job 明确登记后才能在历史卡片显示。"""
+    external = tmp_path / "other-project" / "style.png"
+    external.parent.mkdir()
+    external.write_bytes(PNG_MAGIC)
+    (runtime / "jobs" / "mj-1.json").write_text(json.dumps({
+        "job_id": "mj-1", "character_id": "studio", "prompt": "p",
+        "submitted_at": "2026-08-20T10:00:00Z", "model": "mj_imagine",
+        "params": {"mj_sref": [str(external)]},
+        "seed": None, "output_paths": [], "status": "pending", "error": None,
+        "kind": "image", "namespace": "studio",
+    }))
+
+    assert client.get(f"/api/raw?path={external}").status_code == 403
+    response = client.get(f"/api/raw?path={external}&job_id=mj-1")
+    assert response.status_code == 200
+    assert response.content == PNG_MAGIC
+
+
+def test_raw_resolves_relative_job_references_from_data_root(client, runtime, tmp_path):
+    relative = Path("characters/hero/portrait/ref.png")
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True)
+    target.write_bytes(PNG_MAGIC)
+    (runtime / "jobs" / "relative-ref.json").write_text(json.dumps({
+        "job_id": "relative-ref", "character_id": "hero", "prompt": "p",
+        "submitted_at": "2026-08-20T10:00:00Z", "model": "mj_imagine",
+        "params": {"mj_sref": [str(relative)]},
+        "seed": None, "output_paths": [], "status": "pending", "error": None,
+        "kind": "image", "namespace": "studio",
+    }))
+
+    response = client.get(f"/api/raw?path={relative}&job_id=relative-ref")
+    assert response.status_code == 200
+    assert response.content == PNG_MAGIC
+
+
 def test_raw_fallback_rejects_sibling_prefix_dir(client, runtime, tmp_path):
     """安全回归：/x/downloads-evil 不能过 /x/downloads 的前缀检查（is_relative_to）。"""
     evil = tmp_path / "downloads-evil"

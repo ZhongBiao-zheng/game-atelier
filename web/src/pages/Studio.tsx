@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearch } from 'wouter';
 import { ChevronsDown } from 'lucide-react';
 
-import { createStudioJob, getStudioJob, listStudioJobs, uploadReferenceImage } from '@/api/studio';
+import { createStudioJob, getStudioJob, listStudioJobs, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
 import { apiError } from '@/api/http';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { PromptInput } from '@/components/studio/PromptInput';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
-import { EMPTY_MJ_REFS, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
+import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
@@ -83,6 +83,7 @@ function StudioFull() {
   const [scrolledUp, setScrolledUp] = useState(false);
   const [shellFocused, setShellFocused] = useState(false);
   const [clickPinned, setClickPinned] = useState(false);
+  const [reuseLimitNotice, setReuseLimitNotice] = useState(false);
   const dockCollapsed = scrolledUp && !shellFocused && !clickPinned;
 
   // 不走 rAF 节流：后台标签页 rAF 会挂起导致联动滞后；setState 同值自动 bail-out，开销可忽略。
@@ -115,7 +116,7 @@ function StudioFull() {
   const [quality, setQuality] = useState<Quality>('low');
   // MJ 参数不进 localStorage —— 与 ratio/像素/质量/数量 同一政策：出图配置每次启动回默认。
   const [mjParams, setMjParams] = useState<MjParams>(MJ_DEFAULTS);
-  // MJ 的三个语义参考槽（风格 / 角色 / Omni）；垫图仍走 referenceImages。
+  // MJ 四个语义参考组；每组允许多图，垫图最终仍落 reference_images。
   const [mjRefs, setMjRefs] = useState<MjRefSlots>(EMPTY_MJ_REFS);
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
@@ -170,24 +171,38 @@ function StudioFull() {
   }, []);
 
   // 点击历史记录里的参考图 → 把这批参考图（服务器路径）拉回成 File[]，整组塞进输入框复用出图。
-  const handleReuseReferences = useCallback(async (paths: string[]) => {
-    const files = await Promise.all(
-      paths.map((path, i) => fetchAssetAsFile(path, `ref-${i + 1}`)),
+  const handleReuseReferences = useCallback(async (config: RoundConfig, jobId?: string) => {
+    const fetchGroup = (paths: string[], prefix: string) => Promise.all(
+      paths.map((path, i) => fetchAssetAsFile(path, `${prefix}-${i + 1}`, jobId)),
     );
-    // 堆叠里混着三类素材：按 MIME 分流回填，视频/音频塞进图片参考会在提交时走错角色。
-    // 超出当前模型族参考图上限的部分由 PromptInput 的「参考图数量不变式」effect 当场裁掉并提示
-    // （裁剪与提示收在一处：那里才知道 image / omni 两套上限，也才有提示 UI）。
-    setReferenceImages(files.filter((f) => !f.type.startsWith('video/') && !f.type.startsWith('audio/')));
-    setReferenceVideos(files.filter((f) => f.type.startsWith('video/')));
-    setReferenceAudios(files.filter((f) => f.type.startsWith('audio/')));
-  }, []);
+    const [images, videos, audios, sref, cref, oref] = await Promise.all([
+      fetchGroup(config.referenceImages, 'ref'),
+      fetchGroup(config.referenceVideos ?? [], 'video-ref'),
+      fetchGroup(config.referenceAudios ?? [], 'audio-ref'),
+      fetchGroup(config.mjRefPaths?.sref ?? [], 'style-ref'),
+      fetchGroup(config.mjRefPaths?.cref ?? [], 'character-ref'),
+      fetchGroup(config.mjRefPaths?.oref ?? [], 'omni-ref'),
+    ]);
+    const routed = routeReusedImageFiles(model, config.model, { image: images, sref, cref, oref });
+    setReferenceImages(routed.referenceImages);
+    setReferenceVideos(videos);
+    setReferenceAudios(audios);
+    setMjRefs(routed.mjRefs);
+    setReuseLimitNotice(routed.droppedCount > 0);
+  }, [model]);
+
+  useEffect(() => {
+    if (!reuseLimitNotice) return;
+    const timer = window.setTimeout(() => setReuseLimitNotice(false), 2400);
+    return () => window.clearTimeout(timer);
+  }, [reuseLimitNotice]);
 
   // 图卡左下角「编辑」→ 把这张生成结果取回成 File，塞进「当前模式下真正会被提交的那个槽位」。
   // 一律塞 referenceImages 是错的：MJ 和视频首尾帧模式下通用参考图栏位是隐藏的，
   // 图导进去既看不见、提交时也走不到（MJ 只发 mjRefs.image，首尾帧只发 videoFrames）。
   //   视频 · 全能参考 → 参考素材堆叠（多张）
   //   视频 · 首尾帧   → 首帧槽（单槽，已有图则替换）
-  //   图片 · MJ       → 垫图「图片」槽（单槽，已有图则替换）
+  //   图片 · MJ       → 垫图「图片」组（多图，去重追加）
   //   图片 · 其余     → 常规参考图堆叠（多张；同一张图只留一份）
   // 一进来就钉住展开输入壳：从深链/滚动上来时壳是收起的，不展开的话图落进收起条里看不见，
   // 用户以为没导入成功。这条链路全程不弹提示（飙哥指定，保持简约）——重复导入、替换、
@@ -205,7 +220,9 @@ function StudioFull() {
     const sourceOf = (f: File | null) => (f ? editRefSource.current.get(f) : undefined);
     const already = target === 'stack'
       ? referenceImages.some((f) => sourceOf(f) === path)
-      : sourceOf(target === 'frame' ? videoFrames.first : mjRefs.image) === path;
+      : target === 'frame'
+        ? sourceOf(videoFrames.first) === path
+        : mjRefs.image.some((f) => sourceOf(f) === path);
     // 已经导过同一张：不叠第二份。
     if (already) return;
     try {
@@ -214,7 +231,7 @@ function StudioFull() {
       if (target === 'frame') {
         setVideoFrames((prev) => ({ ...prev, first: file }));
       } else if (target === 'mj') {
-        setMjRefs((prev) => ({ ...prev, image: file }));
+        setMjRefs((prev) => ({ ...prev, image: [...prev.image, file] }));
       } else {
         setReferenceImages((prev) => [...prev, file]);
       }
@@ -388,27 +405,13 @@ function StudioFull() {
     // 提交前把参考图 File[] 上传到 .runtime/uploads/，拿到服务器路径写进 params.reference_images。
     // 再次生成（overrideConfig）携带的已是服务器路径，直接复用。
     let refPaths: string[];
-    let mjRefPaths: { sref?: string; cref?: string; oref?: string } = {};
+    let mjRefPaths: { sref?: string[]; cref?: string[]; oref?: string[] } = {};
     try {
-      refPaths = overrideConfig?.referenceImages
-        ?? (referenceImages.length > 0
-          ? await Promise.all(referenceImages.map(uploadReferenceImage))
-          : []);
-      // MJ 的垫图走「图片」槽（通用参考图栏位在 MJ 下隐藏），仍落 reference_images → base64Array。
-      if (caps.family === 'midjourney' && !overrideConfig?.referenceImages && mjRefs.image) {
-        refPaths = [await uploadReferenceImage(mjRefs.image)];
-      }
-      // sref/cref/oref 只吃公网 URL，后端会把这里的服务器路径经 OSS 转直链。
-      // 再次生成时 overrideConfig 里已是路径，直接复用，不重新上传。
-      if (caps.family === 'midjourney') {
-        mjRefPaths = overrideConfig?.mjRefPaths ?? Object.fromEntries(
-          await Promise.all(
-            (['sref', 'cref', 'oref'] as const)
-              .filter((slot) => mjRefs[slot])
-              .map(async (slot) => [slot, await uploadReferenceImage(mjRefs[slot]!)] as const),
-          ),
-        );
-      }
+      ({ referenceImages: refPaths, mjRefPaths } = await resolveImageReferencePaths({
+        midjourney: caps.family === 'midjourney', referenceImages, mjRefs,
+        overrideReferenceImages: overrideConfig?.referenceImages,
+        overrideMjRefPaths: overrideConfig?.mjRefPaths,
+      }));
     } catch (e: any) {
       setPending(false);
       setRounds((rs) => [
@@ -685,6 +688,14 @@ function StudioFull() {
             <ChevronsDown size={13} aria-hidden />
             回到底部
           </button>
+        {reuseLimitNotice && (
+          <span
+            role="status"
+            className="absolute bottom-full left-0 mb-2 rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
+          >
+            历史参考图超过 MJ 每槽 4 张，已保留前 4 张
+          </span>
+        )}
         <PromptInput
           collapsed={dockCollapsed}
           onExpandRequest={() => setClickPinned(true)}
@@ -820,12 +831,14 @@ function StudioFull() {
 // 服务器资产路径 → File。三类来源分流字节端点（与 RoundList 的 refImageSrc 同规则）：
 // http(s) 直链原样取；characters/studio 资产走 /api/gallery/image（/api/raw 不带 job_id
 // 只放行 .runtime/uploads/，角色/出图产物会 403）；其余临时上传走 /api/raw。
-async function fetchAssetAsFile(path: string, baseName: string): Promise<File> {
+async function fetchAssetAsFile(path: string, baseName: string, jobId?: string): Promise<File> {
   const url = path.startsWith('http')
     ? path
-    : /\/(characters|studio)\//.test(path) || /^(characters|studio)\//.test(path)
-      ? `/api/gallery/image?path=${encodeURIComponent(path)}`
-      : `/api/raw?path=${encodeURIComponent(path)}`;
+    : jobId
+      ? `/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`
+      : /^(characters|studio)\//.test(path) || /\/(characters|studio)\//.test(path)
+        ? `/api/gallery/image?path=${encodeURIComponent(path)}`
+        : `/api/raw?path=${encodeURIComponent(path)}`;
   const resp = await fetch(url);
   if (!resp.ok) throw await apiError(resp, `取回参考图（${path}）`);
   const blob = await resp.blob();
@@ -890,9 +903,9 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
           mjParams: mjParamsFromJob(p),
           mjFlags: typeof p.mj_flags === 'string' ? p.mj_flags : undefined,
           mjRefPaths: {
-            sref: typeof p.mj_sref === 'string' ? p.mj_sref : undefined,
-            cref: typeof p.mj_cref === 'string' ? p.mj_cref : undefined,
-            oref: typeof p.mj_oref === 'string' ? p.mj_oref : undefined,
+            sref: stringList(p.mj_sref),
+            cref: stringList(p.mj_cref),
+            oref: stringList(p.mj_oref),
           },
         }
       : {}),

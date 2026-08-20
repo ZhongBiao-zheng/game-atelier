@@ -1383,10 +1383,10 @@ export function PromptInput({
               value={mjParams}
               onChange={(patch) => onMjParamsChange?.(patch)}
               filledRefs={{
-                image: Boolean(mjRefs.image),
-                sref: Boolean(mjRefs.sref),
-                cref: Boolean(mjRefs.cref),
-                oref: Boolean(mjRefs.oref),
+                image: mjRefs.image.length > 0,
+                sref: mjRefs.sref.length > 0,
+                cref: mjRefs.cref.length > 0,
+                oref: mjRefs.oref.length > 0,
               }}
               menuDirection={menuDirection}
             />

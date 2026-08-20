@@ -31,6 +31,44 @@ export async function uploadReferenceImage(file: File): Promise<string> {
   return data.path;
 }
 
+export interface MjReferenceFiles {
+  image: File[];
+  sref: File[];
+  cref: File[];
+  oref: File[];
+}
+
+export interface MjReferencePaths {
+  sref?: string[];
+  cref?: string[];
+  oref?: string[];
+}
+
+/** 完整版与紧凑版共用的 MJ 四组上传规则，避免任一入口漏传某个语义槽。 */
+export async function resolveImageReferencePaths({
+  midjourney, referenceImages, mjRefs, overrideReferenceImages, overrideMjRefPaths,
+}: {
+  midjourney: boolean;
+  referenceImages: File[];
+  mjRefs: MjReferenceFiles;
+  overrideReferenceImages?: string[];
+  overrideMjRefPaths?: MjReferencePaths;
+}): Promise<{ referenceImages: string[]; mjRefPaths: MjReferencePaths }> {
+  const paths = overrideReferenceImages
+    ?? await Promise.all((midjourney ? mjRefs.image : referenceImages).map(uploadReferenceImage));
+  let mjRefPaths: MjReferencePaths = {};
+  if (midjourney) {
+    mjRefPaths = overrideMjRefPaths ?? Object.fromEntries(
+      await Promise.all(
+        (['sref', 'cref', 'oref'] as const)
+          .filter((slot) => mjRefs[slot].length > 0)
+          .map(async (slot) => [slot, await Promise.all(mjRefs[slot].map(uploadReferenceImage))] as const),
+      ),
+    );
+  }
+  return { referenceImages: paths, mjRefPaths };
+}
+
 export async function listStudioJobs(): Promise<Job[]> {
   // 记录统一：Studio 历史现展示全部出图（studio + skill 角色出图），按 status 过滤在前端 filterRounds 里做。
   return requestJson<Job[]>('/api/jobs', '读取出图记录');

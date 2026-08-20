@@ -141,6 +141,7 @@ _REF_VERSION_SUPPORT: dict[str, set[str]] = {
     "oref": {"7", "7.0"},
 }
 _REF_SLOT_LABELS = {"cref": "角色参考", "oref": "Omni 参考"}
+_MAX_REFS_PER_SLOT = 4
 
 
 def _ref_flag_supported(flag: str, params: dict[str, Any]) -> bool:
@@ -154,16 +155,21 @@ def _ref_flags(params: dict[str, Any], params_in: dict[str, Any] | None = None) 
     """把 sref / cref / oref 及各自权重拼成 flag 片段。"""
     out: list[str] = []
     for path_key, flag, weight_key, weight_flag in _REF_FLAG_SPECS:
-        ref = params.get(path_key)
-        if not ref:
+        raw_refs = params.get(path_key)
+        refs = [str(ref) for ref in raw_refs if ref] if isinstance(raw_refs, list) else []
+        if not refs:
             continue
+        if len(refs) > _MAX_REFS_PER_SLOT:
+            _warn(params_in, f"--{flag} 最多 {_MAX_REFS_PER_SLOT} 张，本次仅使用前 {_MAX_REFS_PER_SLOT} 张")
+            refs = refs[:_MAX_REFS_PER_SLOT]
         if not _ref_flag_supported(flag, params):
             version = str(params.get("mj_version") or "?")
             ok = "/".join(f"v{v}" for v in sorted(_REF_VERSION_SUPPORT[flag]) if "." not in v)
             _warn(params_in, f"{_REF_SLOT_LABELS[flag]}（--{flag}）只在 {ok} 支持，"
-                             f"当前是 v{version}，本次已忽略这张图；要用它请把版本切到 {ok}。")
+                             f"当前是 v{version}，本次已忽略这组图；要用它请把版本切到 {ok}。")
             continue
-        out.append(f"--{flag} {_public_url(str(ref))}")
+        urls = " ".join(_public_url(ref) for ref in refs)
+        out.append(f"--{flag} {urls}")
         weight = params.get(weight_key)
         if weight is not None:
             out.append(f"--{weight_flag} {int(weight)}")
@@ -205,7 +211,7 @@ def _append_flags(prompt: str, params: dict[str, Any],
     return " ".join(parts)
 
 
-def _submit_body(prompt: str, params: dict[str, Any]) -> dict[str, Any]:
+def _submit_body(prompt: str, params: dict[str, Any], params_in: dict[str, Any] | None = None) -> dict[str, Any]:
     """只发拿到值的字段。
 
     botType / accountFilter 在本渠道尚无实测结论，所以默认不发 —— 不传等于走上游默认
@@ -219,6 +225,9 @@ def _submit_body(prompt: str, params: dict[str, Any]) -> dict[str, Any]:
     if mode:
         body["accountFilter"] = {"modes": [mode]}
     refs = [str(r) for r in (params.get("reference_images") or []) if r]
+    if len(refs) > _MAX_REFS_PER_SLOT:
+        _warn(params_in, f"Midjourney 垫图最多 {_MAX_REFS_PER_SLOT} 张，本次仅使用前 {_MAX_REFS_PER_SLOT} 张")
+        refs = refs[:_MAX_REFS_PER_SLOT]
     if refs:
         body["base64Array"] = [_ref_payload(r) for r in refs]
     return body
@@ -365,7 +374,7 @@ def render(
     flags = final_prompt[len(prompt.strip()):].strip()
     if params_in is not None and flags:
         params_in["mj_flags"] = flags
-    body = _submit_body(final_prompt, params)
+    body = _submit_body(final_prompt, params, params_in)
 
     wanted = max(1, int(n or 1))
     submissions = -(-wanted // 4)  # ceil：一次 imagine 出 4 张

@@ -27,6 +27,8 @@
 
 `JobParams` = `extra="allow"`（加字段不会被上游拒），但**双端仍要同步声明**，否则 TS 那边拿不到类型。后端独占写入的三个：`actual_size`、`warnings`、`requested_size` —— 前端只读不写。
 
+Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每组最多 4 张），分别归属风格、角色、Omni 语义槽；垫图仍写入通用的 `reference_images`。Web 创建 job，caller 只负责把本地路径转公网 URL 并拼接对应 flag。
+
 `namespace` 决定产物落哪：`character` → `characters/<id>/<slot>/`，`studio` → `studio/<job_id>/`，`ui` → `projects/<slug>/screens/<screen_id>/`。`kind` 是媒体轴（image/video），`run_job` 靠它派发，别拿它表达归属。
 
 ## 端点
