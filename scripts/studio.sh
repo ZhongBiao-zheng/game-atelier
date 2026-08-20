@@ -45,6 +45,15 @@ report_pull_failure() {
   echo "       跳过更新，直接启动。"
 }
 
+# Codex 按 Skill 目录逐个链接；仓库新增 Skill 后，仅 git pull 不会自动出现新命令。
+# --sync 只更新已经由本仓库安装过的链接，不会把 marketplace 用户切成本地安装。
+sync_local_skills() {
+  if [ -f "$PROJECT_ROOT/install.sh" ]; then
+    bash "$PROJECT_ROOT/install.sh" --sync ||
+      echo "[更新] Skill 自动同步失败；可稍后手动运行 ./install.sh。"
+  fi
+}
+
 if [ "${1:-}" = "--skip-update" ]; then
   :
 elif ! command -v git &>/dev/null; then
@@ -116,6 +125,8 @@ else
   fi
   echo
 fi
+
+sync_local_skills
 
 # ---- 1. 确保 uv（本项目唯一硬依赖；GUI 双击时 PATH 常缺 ~/.local/bin，需显式兜底）----
 UV="$(command -v uv 2>/dev/null || true)"

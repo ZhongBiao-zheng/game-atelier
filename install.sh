@@ -10,7 +10,8 @@
 # 只在检测到对应代理（存在 ~/.claude 或 ~/.codex 目录）时才安装，没装的会明确提示跳过。
 #
 # 用法：
-#   ./install.sh            # 安装（软链）
+#   ./install.sh              # 安装 / 同步（软链）
+#   ./install.sh --sync       # 只同步已存在的本地安装（给自动更新流程用）
 #   ./install.sh --uninstall  # 卸载（仅移除本脚本建立的软链）
 #
 # 注：首次运行任意 /game-atelier:* 命令时，插件会自动在数据目录创建 .venv 并装依赖，
@@ -40,24 +41,64 @@ CODEX_DIR="$HOME/.codex/skills"
 
 installed=()
 skipped=()
+warnings=()
+SYNC_ONLY=0
+
+case "${1:-}" in
+  "") ;;
+  --sync) SYNC_ONLY=1 ;;
+  --uninstall) ;;
+  *) echo "未知参数：$1（支持 --sync / --uninstall）" >&2; exit 2 ;;
+esac
 
 is_our_link() {  # $1 = path; true 当它是指向本仓库的软链
-  [ -L "$1" ] && [[ "$(readlink "$1")" == "$REPO_ROOT"* ]]
+  [ -L "$1" ] || return 1
+  target="$(readlink "$1")"
+  [ "$target" = "$REPO_ROOT" ] || [[ "$target" == "$REPO_ROOT/"* ]]
 }
 
 do_link() {  # $1 = 源, $2 = 目标
-  if [ -e "$2" ] && [ ! -L "$2" ]; then
-    echo "  ⚠ 目标已存在且不是软链，跳过（避免覆盖）：$2"
+  if { [ -e "$2" ] || [ -L "$2" ]; } && ! is_our_link "$2"; then
+    echo "  ⚠ 目标已存在且不属于本仓库，跳过（避免覆盖）：$2"
     return 1
   fi
   ln -sfn "$1" "$2"
 }
 
+has_codex_install() {
+  for t in "$CODEX_DIR/$PLUGIN_NAME-"*; do
+    is_our_link "$t" && return 0
+  done
+  return 1
+}
+
+prune_stale_codex_links() {
+  for t in "$CODEX_DIR/$PLUGIN_NAME-"*; do
+    is_our_link "$t" || continue
+    s="${t##*/$PLUGIN_NAME-}"
+    if [ ! -f "$REPO_ROOT/skills/$s/SKILL.md" ]; then
+      rm -f "$t"
+      echo "  ✓ 移除已退役 Skill 链接：$t"
+    fi
+  done
+}
+
+warn_duplicate_codex_skills() {
+  for candidate in "$CODEX_DIR"/*; do
+    [ -f "$candidate/SKILL.md" ] || continue
+    candidate_name="$(sed -n 's/^name:[[:space:]]*//p' "$candidate/SKILL.md" | head -1)"
+    [ -f "$REPO_ROOT/skills/$candidate_name/SKILL.md" ] || continue
+    expected="$CODEX_DIR/$PLUGIN_NAME-$candidate_name"
+    if [ "$candidate" != "$expected" ]; then
+      warnings+=("Codex Skill '$candidate_name' 重复注册：${candidate}（保留但请检查其管理来源）")
+    fi
+  done
+}
+
 uninstall() {
   echo "=== 卸载 game-atelier 本地软链 ==="
   if is_our_link "$CLAUDE_LINK"; then rm -f "$CLAUDE_LINK"; echo "  ✓ 移除 $CLAUDE_LINK"; fi
-  for s in "${SKILLS[@]}"; do
-    t="$CODEX_DIR/$PLUGIN_NAME-$s"
+  for t in "$CODEX_DIR/$PLUGIN_NAME-"*; do
     if is_our_link "$t"; then rm -f "$t"; echo "  ✓ 移除 $t"; fi
   done
   echo "完成。"
@@ -68,28 +109,42 @@ if [ "${1:-}" = "--uninstall" ]; then
   exit 0
 fi
 
-echo "=== game-atelier 本地安装（源码：${REPO_ROOT}）==="
+if [ "$SYNC_ONLY" = 1 ]; then
+  echo "=== game-atelier 本地同步（源码：${REPO_ROOT}）==="
+else
+  echo "=== game-atelier 本地安装（源码：${REPO_ROOT}）==="
+fi
 
 # --- Claude Code ---
-if [ -d "$HOME/.claude" ]; then
+if [ -d "$HOME/.claude" ] && { [ "$SYNC_ONLY" = 0 ] || is_our_link "$CLAUDE_LINK"; }; then
   mkdir -p "$HOME/.claude/skills"
   if do_link "$REPO_ROOT" "$CLAUDE_LINK"; then
     installed+=("Claude Code  → $CLAUDE_LINK  (命令：/game-atelier:character 等)")
   fi
 else
-  skipped+=("Claude Code（未检测到 ~/.claude）")
+  if [ "$SYNC_ONLY" = 1 ]; then
+    skipped+=("Claude Code（未发现本仓库的本地安装）")
+  else
+    skipped+=("Claude Code（未检测到 ~/.claude）")
+  fi
 fi
 
 # --- Codex ---
-if [ -d "$HOME/.codex" ]; then
+if [ -d "$HOME/.codex" ] && { [ "$SYNC_ONLY" = 0 ] || has_codex_install; }; then
   mkdir -p "$CODEX_DIR"
+  prune_stale_codex_links
   codex_ok=1
   for s in "${SKILLS[@]}"; do
     do_link "$REPO_ROOT/skills/$s" "$CODEX_DIR/$PLUGIN_NAME-$s" || codex_ok=0
   done
+  warn_duplicate_codex_skills
   [ "$codex_ok" = 1 ] && installed+=("Codex        → $CODEX_DIR/$PLUGIN_NAME-{${SKILLS[*]// /,}}")
 else
-  skipped+=("Codex（未检测到 ~/.codex）")
+  if [ "$SYNC_ONLY" = 1 ]; then
+    skipped+=("Codex（未发现本仓库的本地安装）")
+  else
+    skipped+=("Codex（未检测到 ~/.codex）")
+  fi
 fi
 
 echo
@@ -101,6 +156,9 @@ else
 fi
 if [ "${#skipped[@]}" -gt 0 ]; then
   for s in "${skipped[@]}"; do echo "  – 跳过：$s"; done
+fi
+if [ "${#warnings[@]}" -gt 0 ]; then
+  for warning in "${warnings[@]}"; do echo "  ⚠ $warning"; done
 fi
 echo
 echo "重启代理后生效。首次触发 /game-atelier:* 会自动初始化数据目录与依赖。"

@@ -67,10 +67,12 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 **软链权限说明**：脚本优先建符号链接（需「开发者模式」或管理员），失败会自动回退到**目录联接（Junction）**——普通权限即可，对目录最稳，一般不用额外设置。
 
-**更新**：路 B 直接 `git pull` 即可（软链指向仓库，拉完就是最新）。
+**更新**：已有 Skill 的内容会随 `git pull` 立即更新；如果新版新增或删除了 Skill，还需要重新同步链接。一键启动器会自动同步，手动更新则执行：
 
 ```powershell
-cd game-atelier; git pull
+cd game-atelier
+git pull
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Sync
 ```
 
 卸载软链：`powershell -ExecutionPolicy Bypass -File .\install.ps1 -Uninstall`

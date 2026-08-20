@@ -27,7 +27,7 @@ claude plugin install game-atelier@atelier
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-脚本会报告每个代理「装好了 / 没检测到跳过」，重启代理后生效。卸载加 `--uninstall`。
+脚本会报告每个代理「装好了 / 没检测到跳过」，重启代理后生效。以后更新源码后请再运行一次安装脚本；一键启动器会自动执行这一步。卸载加 `--uninstall`。
 
 也可只在当前会话临时加载（不落地）：
 

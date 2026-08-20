@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.20.1',
+    date: '2026-08-20',
+    headline: 'Codex 的 Skill 会跟着更新补齐',
+    changes: [
+      { kind: 'fix', text: '源码更新新增或删除 Skill 时，一键启动会自动同步 Codex 命令，不用再手动补装' },
+      { kind: 'fix', text: '同步会保护其他工具管理的同名 Skill，只提示冲突，不覆盖或误删' },
+    ],
+  },
+  {
     version: '5.20.0',
     date: '2026-08-20',
     headline: '报错说人话',
