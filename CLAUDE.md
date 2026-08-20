@@ -175,3 +175,17 @@ Key routing rules:
 - Ship/deploy/PR → invoke /ship or /land-and-deploy
 - Save progress → invoke /context-save
 - Resume context → invoke /context-restore
+
+## Agent skills
+
+### Issue tracker
+
+任务使用本地 Markdown，存放在 `.scratch/<feature>/`；代码改动通过 GitHub PR 提交。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+使用默认的 `needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+采用单一领域上下文：根目录 `CONTEXT.md` + `docs/adr/`。详见 `docs/agents/domain.md`。

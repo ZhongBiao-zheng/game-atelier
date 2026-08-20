@@ -9,7 +9,9 @@ import { Studio } from '@/pages/Studio';
 import { CharacterDetail } from '@/pages/CharacterDetail';
 import { SettingsPage } from '@/pages/settings/Settings';
 import { applyTheme, loadTheme, saveTheme, type Theme } from '@/lib/theme';
-import type { WorkshopWorkspace } from '@/pages/ProjectPage';
+import {
+  isWorkshopWorkspace,
+} from '@/components/workshop/workspaces';
 
 /** 深浅主题切换：图标显示目的地（暗色显太阳 = 点了去浅色） */
 function ThemeToggle() {
@@ -36,10 +38,6 @@ const NAV_TABS: { to: string; label: string; icon: typeof HomeIcon }[] = [
   { to: '/studio', label: '创作台', icon: Sparkles },
   { to: '/workshop', label: '工坊', icon: LibraryBig },
 ];
-
-function isWorkshopWorkspace(value?: string): value is WorkshopWorkspace {
-  return value === 'overview' || value === 'art' || value === 'ui' || value === 'video';
-}
 
 function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string; isActive: boolean; icon: typeof HomeIcon }) {
   return (

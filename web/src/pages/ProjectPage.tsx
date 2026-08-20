@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, CheckCircle2, Save } from 'lucide-react';
+import { CheckCircle2, Save } from 'lucide-react';
 
 import { fetchExperience, saveExperience, type ProjectExperience } from '@/api/experience';
 import {
@@ -18,17 +18,13 @@ import {
 import type { ScreenCanonicalFile } from '@/schema/jobs';
 import { ArtWorkspace } from '@/components/workshop/ArtWorkspace';
 import { OverviewWorkspace } from '@/components/workshop/OverviewWorkspace';
-import {
-  ProjectWorkspaceNav,
-  type WorkshopWorkspace,
-} from '@/components/workshop/ProjectWorkspaceNav';
+import type { WorkshopWorkspace } from '@/components/workshop/ProjectWorkspaceNav';
 import { UiWorkspace } from '@/components/workshop/UiWorkspace';
 import { VideoWorkspace } from '@/components/workshop/VideoWorkspace';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 
 export type { WorkshopWorkspace } from '@/components/workshop/ProjectWorkspaceNav';
-export { ProjectWorkspaceNav } from '@/components/workshop/ProjectWorkspaceNav';
 
 export function ProjectPage({
   projectId,
@@ -36,14 +32,12 @@ export function ProjectPage({
   screenId,
   productionId,
   shotId,
-  onBack,
 }: {
   projectId: string;
   workspace?: WorkshopWorkspace;
   screenId?: string;
   productionId?: string;
   shotId?: string;
-  onBack: () => void;
 }) {
   const [data, setData] = useState<ProjectExperience | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
@@ -139,29 +133,23 @@ export function ProjectPage({
 
   return (
     <section className="flex h-full flex-col overflow-hidden bg-background">
-      <header className="flex shrink-0 items-center justify-between border-b border-border/40 px-4 py-3.5 md:px-6">
-        <Button variant="ghost" size="sm" onClick={onBack} aria-label="返回">
-          <ArrowLeft className="size-4" />
-          返回工坊
-        </Button>
-        {workspace === 'overview' && (
-          <Button size="sm" onClick={save} disabled={saving || !dirty} title="保存项目经验">
-            <Save className="size-3.5" />
-            {saving ? '保存中…' : '保存'}
-          </Button>
-        )}
-      </header>
-
       <div className="stable-scroll flex-1 space-y-6 overflow-y-auto px-4 py-5 md:px-8 md:py-6">
         <div className="space-y-5">
-          <h1 className="font-display text-display italic text-foreground">{data.project.name}</h1>
+          <div className="flex items-start justify-between gap-4">
+            <h1 className="font-display text-display italic text-foreground">{data.project.name}</h1>
+            {workspace === 'overview' && (
+              <Button size="sm" onClick={save} disabled={saving || !dirty} title="保存项目经验">
+                <Save className="size-3.5" />
+                {saving ? '保存中…' : '保存'}
+              </Button>
+            )}
+          </div>
           <dl className="grid grid-cols-[84px_1fr] gap-x-3 gap-y-1.5 text-xs">
             <dt className="uppercase tracking-label text-muted-foreground/70">slug</dt>
             <dd className="font-mono text-muted-foreground">{data.project.slug}</dd>
             <dt className="uppercase tracking-label text-muted-foreground/70">角色数</dt>
             <dd className="font-mono text-muted-foreground">{data.project.character_count}</dd>
           </dl>
-          <ProjectWorkspaceNav projectId={projectId} workspace={workspace} />
         </div>
 
         <Separator className="opacity-50" />

@@ -1,7 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, Trash2, X, AlertCircle, FolderPlus, UserPlus, GripVertical } from 'lucide-react';
+import {
+  AlertCircle,
+  ChevronDown,
+  FolderPlus,
+  GripVertical,
+  Plus,
+  Trash2,
+  UserPlus,
+  X,
+} from 'lucide-react';
 import type { CharacterEntry, Project, ProjectsFile } from '../schema/jobs';
-import { useActiveCharacter } from '../hooks/useActiveCharacter';
+import { ProjectNavigation } from '@/components/workshop/ProjectNavigation';
+import { SidebarDropZone } from '@/components/workshop/SidebarDropZone';
+import type { WorkshopWorkspace } from '@/components/workshop/workspaces';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,8 +25,9 @@ interface Props {
   onSelect: (id: string, name: string) => void;
   onDelete?: (id: string) => void;
   onOpenProject?: (project: Project) => void;
-  showCharacters?: boolean;
   activeProjectId?: string | null;
+  workspace?: WorkshopWorkspace;
+  onNavigate?: () => void;
 }
 
 const UNCATEGORIZED = '__uncategorized__';
@@ -28,8 +40,9 @@ export function LeftSidebar({
   onSelect,
   onDelete,
   onOpenProject,
-  showCharacters = true,
   activeProjectId = null,
+  workspace = 'overview',
+  onNavigate,
 }: Props) {
   const [characters, setCharacters] = useState<CharacterEntry[]>([]);
   const [projects, setProjects] = useState<ProjectsFile>({ projects: [], assignments: {} });
@@ -53,7 +66,6 @@ export function LeftSidebar({
   const [newProjectName, setNewProjectName] = useState('');
   const [creatingCharacter, setCreatingCharacter] = useState(false);
   const [newCharacterName, setNewCharacterName] = useState('');
-  const activeId = useActiveCharacter(sseSignal);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const newProjectInputRef = useRef<HTMLInputElement | null>(null);
   const newCharInputRef = useRef<HTMLInputElement | null>(null);
@@ -329,6 +341,9 @@ export function LeftSidebar({
       : UNCATEGORIZED;
     grouped.get(key)!.push(c);
   }
+  const activeProject = activeProjectId
+    ? projects.projects.find(project => project.id === activeProjectId) ?? null
+    : null;
 
   if (characters.length === 0 && projects.projects.length === 0) {
     return (
@@ -420,39 +435,53 @@ export function LeftSidebar({
             </section>
           )}
 
-          {projects.projects.map(p => (
-            <ProjectGroup
-              key={p.id} project={p} chars={grouped.get(p.id) || []}
-              showChildren={showCharacters && (!activeProjectId || activeProjectId === p.id)}
-              isEditing={editingProjectId === p.id} draftName={draftName}
-              dragOver={dragOver === p.id} onDrop={onDrop} onDragOver={onDragOver}
+          {activeProject ? (
+            <ProjectNavigation
+              project={activeProject}
+              workspace={workspace}
+              characters={grouped.get(activeProject.id) || []}
+              dragOver={dragOver === activeProject.id}
+              onDrop={e => onDrop(e, activeProject.id)}
+              onDragOver={e => onDragOver(e, activeProject.id)}
               onDragLeave={() => setDragOver(null)}
-              onRenameStart={startProjectEdit} onRenameChange={setDraftName}
-              onRenameCommit={commitProjectEdit} onRenameCancel={cancelEdit}
-              onDelete={deleteProject} inputRef={inputRef}
-              renderChar={c => renderChar(c)}
-              isDragging={projectDragId === p.id}
-              dropIndicator={projectDragOver?.id === p.id ? projectDragOver.pos : null}
-              onProjectDragStart={onProjectDragStart}
-              onProjectDragOver={onProjectDragOver}
-              onProjectDrop={onProjectDrop}
-              onProjectDragEnd={onProjectDragEnd}
-              onOpen={onOpenProject}
+              onNavigate={onNavigate}
+              renderCharacter={renderChar}
             />
-          ))}
+          ) : (
+            <>
+              <nav aria-label="项目列表">
+                {projects.projects.map(p => (
+                  <ProjectGroup
+                    key={p.id} project={p} chars={grouped.get(p.id) || []}
+                    isEditing={editingProjectId === p.id} draftName={draftName}
+                    dragOver={dragOver === p.id} onDrop={onDrop} onDragOver={onDragOver}
+                    onDragLeave={() => setDragOver(null)}
+                    onRenameStart={startProjectEdit} onRenameChange={setDraftName}
+                    onRenameCommit={commitProjectEdit} onRenameCancel={cancelEdit}
+                    onDelete={deleteProject} inputRef={inputRef}
+                    isDragging={projectDragId === p.id}
+                    dropIndicator={projectDragOver?.id === p.id ? projectDragOver.pos : null}
+                    onProjectDragStart={onProjectDragStart}
+                    onProjectDragOver={onProjectDragOver}
+                    onProjectDrop={onProjectDrop}
+                    onProjectDragEnd={onProjectDragEnd}
+                    onOpen={onOpenProject}
+                  />
+                ))}
+              </nav>
 
-          {showCharacters && !activeProjectId && (
-            <DropZone
-              label={projects.projects.length > 0 ? '未分类' : null}
-              active={dragOver === UNCATEGORIZED}
-              onDrop={e => onDrop(e, UNCATEGORIZED)}
-              onDragOver={e => onDragOver(e, UNCATEGORIZED)}
-              onDragLeave={() => setDragOver(null)}
-            >
-              <ul className="list-none m-0 p-0">
-                {(grouped.get(UNCATEGORIZED) || []).map(renderChar)}
-              </ul>
-            </DropZone>
+              <SidebarDropZone
+                label="未归档角色"
+                active={dragOver === UNCATEGORIZED}
+                onDrop={e => onDrop(e, UNCATEGORIZED)}
+                onDragOver={e => onDragOver(e, UNCATEGORIZED)}
+                onDragLeave={() => setDragOver(null)}
+              >
+                <ul className="m-0 list-none p-0">
+                  {(grouped.get(UNCATEGORIZED) || []).map(renderChar)}
+                </ul>
+              </SidebarDropZone>
+            </>
           )}
 
         </div>
@@ -487,7 +516,7 @@ export function LeftSidebar({
   );
 
   function renderChar(c: CharacterEntry) {
-    const isActive = c.id === (selectedId ?? activeId);
+    const isActive = c.id === selectedId;
     const isEditing = c.id === editingId;
     return (
       <li
@@ -600,7 +629,6 @@ interface ProjectGroupProps {
   onRenameCancel: () => void;
   onDelete: (p: Project, e: React.MouseEvent) => void;
   inputRef: React.MutableRefObject<HTMLInputElement | null>;
-  renderChar: (c: CharacterEntry) => React.ReactNode;
   isDragging: boolean;
   dropIndicator: 'before' | 'after' | null;
   onProjectDragStart: (e: React.DragEvent, id: string) => void;
@@ -608,49 +636,17 @@ interface ProjectGroupProps {
   onProjectDrop: (e: React.DragEvent, id: string, el: HTMLElement) => void;
   onProjectDragEnd: () => void;
   onOpen?: (p: Project) => void;
-  showChildren: boolean;
-}
-
-/** 折叠状态持久化：存「折叠中的项目 id」集合，默认全展开（新项目天然展开）。 */
-const COLLAPSED_PROJECTS_KEY = 'workshop:collapsed-projects';
-
-function loadCollapsedProjects(): Set<string> {
-  try {
-    const raw = localStorage.getItem(COLLAPSED_PROJECTS_KEY);
-    const arr = raw ? (JSON.parse(raw) as unknown) : [];
-    return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveCollapsedProject(projectId: string, collapsed: boolean): void {
-  try {
-    const set = loadCollapsedProjects();
-    if (collapsed) set.add(projectId);
-    else set.delete(projectId);
-    localStorage.setItem(COLLAPSED_PROJECTS_KEY, JSON.stringify([...set]));
-  } catch {
-    // localStorage 不可用（隐私模式等）时静默跳过，折叠只在本次会话生效。
-  }
 }
 
 function ProjectGroup({
   project, chars, isEditing, draftName, dragOver,
   onDrop, onDragOver, onDragLeave,
   onRenameStart, onRenameChange, onRenameCommit, onRenameCancel,
-  onDelete, inputRef, renderChar,
+  onDelete, inputRef,
   isDragging, dropIndicator,
   onProjectDragStart, onProjectDragOver, onProjectDrop, onProjectDragEnd,
-  onOpen, showChildren,
+  onOpen,
 }: ProjectGroupProps) {
-  const [open, setOpen] = useState(() => !loadCollapsedProjects().has(project.id));
-  const toggleOpen = () => {
-    setOpen((o) => {
-      saveCollapsedProject(project.id, o);
-      return !o;
-    });
-  };
   const sectionRef = useRef<HTMLElement>(null);
   return (
     <section
@@ -689,16 +685,7 @@ function ProjectGroup({
         >
           <GripVertical className="size-3" />
         </span>
-        {showChildren ? (
-          <button
-            onClick={() => !isEditing && toggleOpen()}
-            aria-label={open ? '收起项目' : '展开项目'}
-            title={open ? '收起' : '展开'}
-            className="grid place-items-center size-4 rounded hover:bg-accent/60 cursor-pointer bg-transparent border-0 p-0 text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-          </button>
-        ) : <span className="size-4" aria-hidden />}
+        <span className="size-4" aria-hidden />
         {isEditing ? (
           <Input
             ref={inputRef}
@@ -713,14 +700,15 @@ function ProjectGroup({
             className="h-6 text-xs flex-1"
           />
         ) : (
-          <span
+          <button
+            type="button"
             onClick={() => onOpen?.(project)}
             onDoubleClick={(e) => onRenameStart(project, e)}
             title="点击打开项目经验 · 双击重命名"
-            className="flex-1 uppercase tracking-label text-muted-foreground/70 font-medium cursor-pointer truncate"
+            className="min-w-0 flex-1 cursor-pointer truncate border-0 bg-transparent p-0 text-left font-medium uppercase tracking-label text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             {project.name}
-          </span>
+          </button>
         )}
         <span className="font-mono text-xs tabular-nums text-muted-foreground/60 px-1">
           {chars.length}
@@ -734,40 +722,6 @@ function ProjectGroup({
           <X className="size-3" />
         </button>
       </header>
-      {showChildren && open && (
-        <ul className="list-none m-0 p-0 pl-2">
-          {chars.length > 0
-            ? chars.map(renderChar)
-            : <li className="px-2.5 py-1.5 text-xs text-muted-foreground/70 italic">空 —— 把角色拖进来</li>}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function DropZone({ label, active, onDrop, onDragOver, onDragLeave, children }: {
-  label: string | null; active: boolean;
-  onDrop: (e: React.DragEvent) => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDragLeave: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      onDrop={onDrop}
-      onDragOver={onDragOver}
-      onDragLeave={onDragLeave}
-      className={cn(
-        'rounded-md transition-colors',
-        active && 'bg-primary/5 ring-2 ring-primary/30 ring-inset',
-      )}
-    >
-      {label && (
-        <header className="px-1.5 py-1.5 text-xs uppercase tracking-label text-muted-foreground/70 font-medium select-none">
-          {label}
-        </header>
-      )}
-      {children}
     </section>
   );
 }

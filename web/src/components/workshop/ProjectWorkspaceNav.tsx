@@ -1,20 +1,12 @@
-import { Film, Images, LayoutDashboard, PanelsTopLeft } from 'lucide-react';
 import { Link } from 'wouter';
 
 import { cn } from '@/lib/utils';
+import {
+  WORKSPACE_DESCRIPTORS,
+  type WorkshopWorkspace,
+} from '@/components/workshop/workspaces';
 
-export type WorkshopWorkspace = 'overview' | 'art' | 'ui' | 'video';
-
-const WORKSPACES = [
-  { id: 'overview', label: '概览', icon: LayoutDashboard },
-  { id: 'art', label: '美术', icon: Images },
-  { id: 'ui', label: 'UI', icon: PanelsTopLeft },
-  { id: 'video', label: '视频', icon: Film },
-] satisfies Array<{
-  id: WorkshopWorkspace;
-  label: string;
-  icon: typeof LayoutDashboard;
-}>;
+export type { WorkshopWorkspace } from '@/components/workshop/workspaces';
 
 export function ProjectWorkspaceNav({
   projectId,
@@ -25,7 +17,7 @@ export function ProjectWorkspaceNav({
 }) {
   return (
     <nav aria-label="项目工作区" className="flex max-w-full gap-1 overflow-x-auto rounded-full border border-border bg-glass p-1 backdrop-blur-glass">
-      {WORKSPACES.map(({ id, label, icon: Icon }) => (
+      {WORKSPACE_DESCRIPTORS.map(({ id, label, icon: Icon }) => (
         <Link
           key={id}
           href={`/workshop/${encodeURIComponent(projectId)}/${id}`}

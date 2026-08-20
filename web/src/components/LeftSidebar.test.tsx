@@ -72,7 +72,7 @@ describe('LeftSidebar', () => {
     expect(blazeRow.textContent).toContain('烈');
   });
 
-  it('单击项目名触发 onOpenProject、不折叠；点 chevron 仍折叠', async () => {
+  it('项目目录只切项目，不在根层级展开角色树', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/characters' && !init) {
         return { ok: true, json: async () => [] };
@@ -97,24 +97,25 @@ describe('LeftSidebar', () => {
     const nameEl = await screen.findByText('魔幻');
     fireEvent.click(nameEl);
     expect(onOpenProject).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1' }));
-
-    // chevron（aria-label 收起项目）仍管折叠，不触发打开
-    onOpenProject.mockClear();
-    fireEvent.click(screen.getByLabelText('收起项目'));
-    expect(onOpenProject).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('收起项目')).not.toBeInTheDocument();
   });
 
-  it('项目折叠状态持久化：重挂载后仍折叠，展开后清除', async () => {
+  it('项目内稳定显示首页、文件夹和资产库，角色名册只在美术视图出现', async () => {
     const projectFetch = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/characters' && !init) {
-        return { ok: true, json: async () => [] };
+        return {
+          ok: true,
+          json: async () => [
+            { id: 'shadow', name: '暗影', status: 'idle', latest_job_id: null },
+          ],
+        };
       }
       if (url === '/api/projects' && !init) {
         return {
           ok: true,
           json: async () => ({
             projects: [{ id: 'p1', slug: 's1', name: '魔幻', created_at: '2026-06-24T00:00:00+00:00' }],
-            assignments: {},
+            assignments: { shadow: 'p1' },
           }),
         };
       }
@@ -125,20 +126,18 @@ describe('LeftSidebar', () => {
     });
     vi.stubGlobal('fetch', projectFetch);
 
-    const first = render(<LeftSidebar sseSignal={0} onSelect={vi.fn()} />);
-    fireEvent.click(await screen.findByLabelText('收起项目'));
-    expect(JSON.parse(localStorage.getItem('workshop:collapsed-projects')!)).toEqual(['p1']);
-    first.unmount();
+    const overview = render(
+      <LeftSidebar sseSignal={0} activeProjectId="p1" workspace="overview" onSelect={vi.fn()} />,
+    );
+    const nav = await screen.findByRole('navigation', { name: '魔幻 项目导航' });
+    expect(within(nav).getByRole('link', { name: '项目首页' })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByText('文件夹')).toBeInTheDocument();
+    expect(within(nav).getByText('资产库')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '暗影' })).not.toBeInTheDocument();
+    overview.unmount();
 
-    // 重挂载（= 切页面再回来）：恢复折叠态
-    const second = render(<LeftSidebar sseSignal={0} onSelect={vi.fn()} />);
-    const expand = await screen.findByLabelText('展开项目');
-    fireEvent.click(expand);
-    expect(JSON.parse(localStorage.getItem('workshop:collapsed-projects')!)).toEqual([]);
-    second.unmount();
-
-    // 再重挂载：回到展开
-    render(<LeftSidebar sseSignal={0} onSelect={vi.fn()} />);
-    expect(await screen.findByLabelText('收起项目')).toBeInTheDocument();
+    render(<LeftSidebar sseSignal={0} activeProjectId="p1" workspace="art" onSelect={vi.fn()} />);
+    expect(await screen.findByText('角色名册')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '暗影' })).toBeInTheDocument();
   });
 });

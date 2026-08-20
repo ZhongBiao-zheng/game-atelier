@@ -87,14 +87,14 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('ProjectPage', () => {
   it('渲染项目信息 + 可编辑 worldview', async () => {
-    render(<ProjectPage projectId="p1" workspace="overview" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="overview" />);
     await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
     expect(screen.getByText('3', { selector: 'dd' })).toBeInTheDocument();
     expect((screen.getByLabelText('项目经验 / 世界观') as HTMLTextAreaElement).value).toBe('暖色调');
   });
 
   it('无改动时保存禁用，改动后可保存并 POST', async () => {
-    render(<ProjectPage projectId="p1" workspace="overview" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="overview" />);
     await waitFor(() => screen.getByLabelText('项目经验 / 世界观'));
     const save = screen.getByRole('button', { name: '保存' });
     expect(save).toBeDisabled();
@@ -107,7 +107,7 @@ describe('ProjectPage', () => {
   });
 
   it('项目经验下方渲染项目作品区：卡片标角色名、点击进角色大图', async () => {
-    render(<ProjectPage projectId="p1" workspace="art" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="art" />);
     await waitFor(() => expect(screen.getByTestId('project-works')).toBeInTheDocument());
     expect(screen.getByText('全部美术作品')).toBeInTheDocument();
 
@@ -130,13 +130,13 @@ describe('ProjectPage', () => {
       }
       return { ok: true, json: async () => sample } as Response;
     }));
-    render(<ProjectPage projectId="p1" workspace="art" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="art" />);
     await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
     expect(screen.queryByTestId('project-works')).toBeNull();
   });
 
   it('UI 总览按 screen-map 展示页面地图并链接详情', async () => {
-    render(<ProjectPage projectId="p1" workspace="ui" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="ui" />);
     await waitFor(() => expect(screen.getByRole('region', { name: '页面地图' })).toBeInTheDocument());
     expect(screen.getByRole('link', { name: /主界面/ })).toHaveAttribute(
       'href', '/workshop/p1/ui/screens/home',
@@ -146,7 +146,7 @@ describe('ProjectPage', () => {
   });
 
   it('页面详情按 screen-id 列出版本图', async () => {
-    render(<ProjectPage projectId="p1" workspace="ui" screenId="home" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="ui" screenId="home" />);
     await waitFor(() => expect(screen.getByTestId('project-screens')).toBeInTheDocument());
     expect(screen.getByRole('link', { name: '查看页面 home 的 v2.png' }).getAttribute('href')).toBe(
       '/api/gallery/image?path=projects%2Fpokemon%2Fscreens%2Fhome%2Fv2.png',
@@ -171,13 +171,13 @@ describe('ProjectPage', () => {
       }
       return { ok: true, json: async () => sample } as Response;
     }));
-    render(<ProjectPage projectId="p1" workspace="ui" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="ui" />);
     await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
     expect(screen.queryByTestId('project-screens')).toBeNull();
   });
 
   it('风格候选标风格名与来源版本，普通版本退回文件名', async () => {
-    render(<ProjectPage projectId="p1" workspace="ui" screenId="home" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="ui" screenId="home" />);
     await waitFor(() => expect(screen.getByTestId('project-screens')).toBeInTheDocument());
     expect(screen.getByText('厚涂写实')).toBeInTheDocument();
     expect(screen.getByText('← v1.png')).toBeInTheDocument();
@@ -213,7 +213,7 @@ describe('ProjectPage', () => {
       return { ok: true, json: async () => sample } as Response;
     }));
 
-    render(<ProjectPage projectId="p1" workspace="ui" screenId="home" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="ui" screenId="home" />);
     await waitFor(() => expect(screen.getByTestId('project-screens')).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: '设为定稿 v2.png' }));
@@ -251,7 +251,7 @@ describe('ProjectPage', () => {
       return { ok: true, json: async () => sample } as Response;
     }));
 
-    render(<ProjectPage projectId="p1" workspace="ui" screenId="home" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="ui" screenId="home" />);
     await waitFor(() => expect(screen.getByTestId('project-screens')).toBeInTheDocument());
     expect(await screen.findByText('定稿')).toBeInTheDocument();
     expect(await screen.findByText('风格已变更')).toBeInTheDocument();
@@ -259,17 +259,15 @@ describe('ProjectPage', () => {
     expect(screen.getByText(/当前 style\.md 已变更/)).toBeInTheDocument();
   });
 
-  it('四个工作区入口常驻，当前工作区有 page 语义', async () => {
-    render(<ProjectPage projectId="p1" workspace="ui" onBack={vi.fn()} />);
+  it('内容页不再重复渲染项目壳导航和返回按钮', async () => {
+    render(<ProjectPage projectId="p1" workspace="ui" />);
     await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
-    expect(screen.getByRole('link', { name: '概览' })).not.toHaveAttribute('aria-current');
-    expect(screen.getByRole('link', { name: '美术' })).not.toHaveAttribute('aria-current');
-    expect(screen.getByRole('link', { name: 'UI' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: '视频' })).not.toHaveAttribute('aria-current');
+    expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
+    expect(screen.queryByText('返回工坊')).not.toBeInTheDocument();
   });
 
   it('概览不再混排完整美术与 UI 版本墙', async () => {
-    render(<ProjectPage projectId="p1" workspace="overview" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="overview" />);
     await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
     expect(screen.queryByTestId('project-works')).toBeNull();
     expect(screen.queryByTestId('project-screens')).toBeNull();
@@ -279,7 +277,7 @@ describe('ProjectPage', () => {
   });
 
   it('视频工作区空状态给出视频 Skill 与自由试验入口', async () => {
-    render(<ProjectPage projectId="p1" workspace="video" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="video" />);
     expect(await screen.findByText('这个项目还没有视频企划')).toBeInTheDocument();
     expect(screen.getByText('/game-atelier:video')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '去创作台试验视频' })).toHaveAttribute('href', '/studio');
@@ -287,7 +285,7 @@ describe('ProjectPage', () => {
   });
 
   it('UI 工作区显示文件系统推导出的唯一下一步', async () => {
-    render(<ProjectPage projectId="p1" workspace="ui" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="ui" />);
     expect(await screen.findByText('下一步：完成风格定稿')).toBeInTheDocument();
     expect(screen.getByText('/game-atelier:ui-page')).toBeInTheDocument();
   });
@@ -307,7 +305,7 @@ describe('ProjectPage', () => {
       if (url.includes('/screens/canonical')) return { ok: true, json: async () => emptyScreenCanonical } as Response;
       return { ok: true, json: async () => sample } as Response;
     }));
-    render(<ProjectPage projectId="p1" workspace="ui" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="ui" />);
 
     const baseStep = await screen.findByText('3. 基准页');
     expect(baseStep.parentElement).toHaveTextContent('未开始');
@@ -336,7 +334,7 @@ describe('ProjectPage', () => {
       if (url.includes('/screens/canonical')) return { ok: true, json: async () => emptyScreenCanonical } as Response;
       return { ok: true, json: async () => sample } as Response;
     }));
-    render(<ProjectPage projectId="p1" workspace="ui" onBack={vi.fn()} />);
+    render(<ProjectPage projectId="p1" workspace="ui" />);
 
     const generateStep = await screen.findByText('6. 逐页生成');
     expect(generateStep.parentElement).toHaveTextContent('已完成');
@@ -388,7 +386,6 @@ describe('ProjectPage', () => {
         workspace="video"
         productionId="pv"
         shotId="shot-01"
-        onBack={vi.fn()}
       />,
     );
 
@@ -443,7 +440,6 @@ describe('ProjectPage', () => {
         projectId="p1"
         workspace="video"
         productionId="pv"
-        onBack={vi.fn()}
       />,
     );
 
@@ -481,7 +477,7 @@ describe('ProjectPage', () => {
       return { ok: true, json: async () => sample } as Response;
     }));
     render(
-      <ProjectPage projectId="p1" workspace="video" productionId="pv" shotId="shot-01" onBack={vi.fn()} />,
+      <ProjectPage projectId="p1" workspace="video" productionId="pv" shotId="shot-01" />,
     );
 
     const button = await screen.findByRole('button', { name: '选用 shot-01 v1.mp4' });
