@@ -110,6 +110,7 @@ describe('AppShell', () => {
     expect(within(breadcrumbs).getByText('文件夹')).toBeInTheDocument();
     expect(within(breadcrumbs).getByText('夏日版本')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: '夏日版本' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: '项目首页' })).not.toHaveAttribute('aria-current');
     expect(within(screen.getByRole('navigation', { name: '文件夹视图' })).getByRole('link', { name: 'UI' }))
       .toHaveAttribute('aria-current', 'page');
   });

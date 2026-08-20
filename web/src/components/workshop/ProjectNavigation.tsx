@@ -38,6 +38,7 @@ export function ProjectNavigation({
   const art = getWorkspaceDescriptor('art');
   const ui = getWorkspaceDescriptor('ui');
   const video = getWorkspaceDescriptor('video');
+  const currentWorkspace = currentFolderId ? null : workspace;
 
   return (
     <nav aria-label={`${project.name} 项目导航`} className="space-y-3">
@@ -56,7 +57,7 @@ export function ProjectNavigation({
         <ProjectSideLink
           projectBase={projectBase}
           descriptor={overview}
-          current={workspace === overview.id}
+          current={currentWorkspace === overview.id}
           onNavigate={onNavigate}
         />
       </div>
@@ -78,7 +79,7 @@ export function ProjectNavigation({
         <ProjectSideLink
           projectBase={projectBase}
           descriptor={art}
-          current={workspace === art.id}
+          current={currentWorkspace === art.id}
           onNavigate={onNavigate}
         />
         {workspace === 'art' && (
@@ -97,13 +98,13 @@ export function ProjectNavigation({
         <ProjectSideLink
           projectBase={projectBase}
           descriptor={ui}
-          current={workspace === ui.id}
+          current={currentWorkspace === ui.id}
           onNavigate={onNavigate}
         />
         <ProjectSideLink
           projectBase={projectBase}
           descriptor={video}
-          current={workspace === video.id}
+          current={currentWorkspace === video.id}
           onNavigate={onNavigate}
         />
       </section>
