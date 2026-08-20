@@ -87,7 +87,7 @@ def main() -> int:
 
     web_dist = repo / "web" / "dist" / "index.html"
     if not web_dist.exists():
-        failures.append("web/dist/index.html missing; run `cd web && pnpm build` before release")
+        failures.append("web/dist/index.html missing; run `make build` before release")
 
     total = sum(
         f.stat().st_size for f in repo.rglob("*")
