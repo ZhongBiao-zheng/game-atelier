@@ -31,6 +31,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.22.0',
+    date: '2026-08-20',
+    headline: '一个游戏，一座完整工坊',
+    changes: [
+      { kind: 'feat', text: '工坊按游戏项目组织，项目内固定提供概览、美术、UI、视频四个工作区；原「出图」改名为「创作台」，自由试验与正式资产边界更清楚' },
+      { kind: 'feat', text: 'UI 工作区会从策划锚、视觉规范、页面地图与定稿文件推导真实进度，并只提示当前唯一下一步' },
+      { kind: 'feat', text: '新增项目视频企划与单镜头工作流：可建立 brief 和镜头表、生成镜头版本，并在视频工作区选用版本' },
+    ],
+  },
+  {
     version: '5.21.1',
     date: '2026-08-20',
     headline: '一键启动不再把更新弄脏',

@@ -6,7 +6,7 @@ export type AssetSlot = 'portrait' | 'promo' | 'turnaround';
 // 新 JobKind: 媒体类型
 export type JobKind = 'image' | 'video';
 
-export type Namespace = 'character' | 'studio' | 'ui';
+export type Namespace = 'character' | 'studio' | 'ui' | 'video';
 
 export interface JobParams {
   size?: string;
@@ -82,6 +82,9 @@ export interface Job {
   // 2026-08-10 (B2): UI 页面 job（namespace='ui'）归项目不归角色；Web 只读 — 与 schemas.py 同步
   project_id?: string | null;
   screen_id?: string | null;
+  // 项目视频 job（namespace='video'）归企划与镜头；Web 只读 — 与 schemas.py 同步
+  production_id?: string | null;
+  shot_id?: string | null;
 }
 
 export const WEB_EDITABLE_FIELDS = ['prompt', 'params'] as const;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
@@ -40,13 +40,13 @@ describe('AppShell', () => {
     expect(screen.getByText('· 工作流').className).toContain('sm:inline');
   });
 
-  it('highlights 出图 tab on /studio', () => {
+  it('highlights 创作台 tab on /studio', () => {
     renderAt('/studio');
-    expect(screen.getByText('出图')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByText('创作台')).toHaveAttribute('aria-current', 'page');
   });
 
-  it('highlights 工坊 tab on /character/foo', () => {
-    renderAt('/character/foo');
+  it('highlights 工坊 tab on /workshop/p1/ui', () => {
+    renderAt('/workshop/p1/ui');
     expect(screen.getByText('工坊')).toHaveAttribute('aria-current', 'page');
   });
 
@@ -94,14 +94,64 @@ describe('AppShell', () => {
       return { ok: true, json: async () => ({}) };
     }));
 
-    renderAt('/character/cao-cao/promo/job-promo-1/%2Ftmp%2Fgame-atelier%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png');
+    renderAt('/workshop/p1/art/characters/cao-cao/promo/job-promo-1/%2Ftmp%2Fgame-atelier%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png');
 
     expect(await screen.findByDisplayValue('路由详情 prompt')).toBeInTheDocument();
   });
 
+  it('redirects a character deep link to its owning project', async () => {
+    vi.stubGlobal('EventSource', class {
+      addEventListener = vi.fn();
+      close = vi.fn();
+      onerror: (() => void) | null = null;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      if (url === '/api/config') {
+        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-atelier' }) };
+      }
+      if (url === '/api/active-character') {
+        return { ok: true, json: async () => ({ active_id: null }) };
+      }
+      if (url === '/api/characters') {
+        return { ok: true, json: async () => [{ id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null }] };
+      }
+      if (url === '/api/projects') {
+        return {
+          ok: true,
+          json: async () => ({
+            projects: [
+              { id: 'p1', slug: 'one', name: '项目一', created_at: '2026-08-20T00:00:00Z' },
+              { id: 'p2', slug: 'two', name: '项目二', created_at: '2026-08-20T00:00:00Z' },
+            ],
+            assignments: { 'cao-cao': 'p2' },
+          }),
+        };
+      }
+      if (url === '/api/jobs') return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => ({}) };
+    }));
+
+    const encodedPath = '%2Ftmp%2Fgame-atelier%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png';
+    const location = memoryLocation({
+      path: `/workshop/p1/art/characters/cao-cao/promo/job-promo-1/${encodedPath}`,
+      static: false,
+      record: true,
+    });
+    render(
+      <Router hook={location.hook}>
+        <AppShell />
+      </Router>,
+    );
+
+    await waitFor(() => expect(location.history.at(-1)).toBe(
+      `/workshop/p2/art/characters/cao-cao/promo/job-promo-1/${encodedPath}`,
+    ));
+    expect(location.history).toHaveLength(1);
+  });
+
   it('does not highlight either tab on /', () => {
     renderAt('/');
-    expect(screen.getByText('出图')).not.toHaveAttribute('aria-current');
+    expect(screen.getByText('创作台')).not.toHaveAttribute('aria-current');
     expect(screen.getByText('工坊')).not.toHaveAttribute('aria-current');
     expect(screen.getByText('主页')).toHaveAttribute('aria-current', 'page');
   });

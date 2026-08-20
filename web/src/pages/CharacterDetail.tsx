@@ -1,5 +1,6 @@
 import { MainApp } from '@/MainApp';
 import type { AssetSlot } from '@/schema/jobs';
+import type { WorkshopWorkspace } from '@/pages/ProjectPage';
 
 function isAssetSlot(value?: string): value is AssetSlot {
   return value === 'portrait' || value === 'promo' || value === 'turnaround';
@@ -14,11 +15,21 @@ function decodeRoutePath(value: string): string {
 }
 
 export function CharacterDetail({
+  projectId,
+  workspace,
+  screenId,
+  productionId,
+  shotId,
   characterId,
   assetSlot,
   jobId,
   imagePath,
 }: {
+  projectId?: string;
+  workspace?: WorkshopWorkspace;
+  screenId?: string;
+  productionId?: string;
+  shotId?: string;
   characterId?: string;
   assetSlot?: string;
   jobId?: string;
@@ -26,6 +37,11 @@ export function CharacterDetail({
 } = {}) {
   return (
     <MainApp
+      routedProjectId={projectId}
+      routedWorkspace={workspace}
+      routedScreenId={screenId}
+      routedProductionId={productionId}
+      routedShotId={shotId}
       routedCharacterId={characterId}
       routedAssetSlot={isAssetSlot(assetSlot) ? assetSlot : undefined}
       routedImageDetail={jobId && imagePath ? { jobId, path: decodeRoutePath(imagePath) } : undefined}

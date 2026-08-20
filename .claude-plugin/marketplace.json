@@ -3,12 +3,12 @@
   "owner": {
     "name": "zhengzhongbiao"
   },
-  "description": "Game Atelier 插件市场 —— 游戏角色资产工坊（立绘 / KV / 三视图）",
+  "description": "Game Atelier 插件市场 —— 游戏项目资产工坊（美术 / 游戏 UI / 视频）",
   "plugins": [
     {
       "name": "game-atelier",
       "source": "./",
-      "description": "Game Atelier — 游戏角色资产工坊，本地 Web UI + AI 立绘 / KV / 三视图工作流",
+      "description": "Game Atelier — 游戏项目资产工坊，本地 Web UI + AI 美术 / 游戏 UI / 视频工作流",
       "homepage": "https://github.com/ZhongBiao-zheng/game-atelier"
     }
   ]

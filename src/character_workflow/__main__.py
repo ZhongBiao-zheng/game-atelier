@@ -19,7 +19,7 @@ from character_workflow.lib.active_character import read_active, write_active
 from character_workflow.lib.jobs import clone_job_for_retry, new_job_id, write_job
 from character_workflow.lib.job_runner import run_job, run_latest
 from character_workflow.lib.lessons import append_lesson
-from character_workflow.lib.schemas import AssetSlot, Job, JobStatus
+from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobStatus
 from character_workflow.lib.turn_start import turn_start
 
 
@@ -180,6 +180,133 @@ def _submit_screen(args: argparse.Namespace) -> int:
     return 0
 
 
+def _create_video_production(args: argparse.Namespace) -> int:
+    from character_workflow.lib.video_jobs import create_production
+    try:
+        root = create_production(args.project, args.production, args.title, args.type)
+    except (KeyError, ValueError) as e:
+        print(f"create-video-production: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps({"ok": True, "path": str(root)}, ensure_ascii=False))
+    return 0
+
+
+def _video_key(alias: str | None, model: str | None):
+    db = keys.read_keys_db()
+
+    def is_video_model(key, item) -> bool:
+        return item.modality == "video" or (
+            item.modality is None
+            and "video" in key.modalities
+            and "image" not in key.modalities
+        )
+
+    candidates = [key for key in db.keys if any(is_video_model(key, item) for item in key.models)]
+    if alias:
+        key = next((item for item in db.keys if item.alias == alias), None)
+        if key is None:
+            raise ValueError(f"alias={alias!r} 不存在")
+    else:
+        key = next((item for item in candidates if item.alias == db.default_alias), None)
+        key = key or (candidates[0] if candidates else None)
+    if key is None:
+        raise ValueError("没有配置可用的视频 Key / 模型")
+    if model:
+        requested = next((item for item in key.models if item.id == model), None)
+        if requested is None or not is_video_model(key, requested):
+            raise ValueError(f"Key {key.alias!r} 下没有视频模型 {model!r}")
+        return key, requested.id
+    video_model = next((item for item in key.models if is_video_model(key, item)), None)
+    if video_model is None:
+        raise ValueError(f"Key {key.alias!r} 没有视频模型")
+    return key, video_model.id
+
+
+def _resolved_paths(values: list[str] | None) -> list[str]:
+    resolved: list[str] = []
+    for raw in values or []:
+        path = Path(raw).expanduser().resolve()
+        if not path.is_file():
+            raise ValueError(f"参考素材不存在或不是文件: {raw}")
+        resolved.append(str(path))
+    return resolved
+
+
+def _submit_video_shot(args: argparse.Namespace) -> int:
+    from character_workflow.lib import video_jobs
+    try:
+        project = video_jobs.resolve_project(args.project)
+        root = video_jobs.production_dir(project.id, args.production)
+        video_jobs.validate_id(args.shot, "shot_id")
+        if not (root / "brief.md").is_file():
+            raise ValueError(f"video production not found: {args.production}")
+        key, model = _video_key(args.alias, args.model)
+    except (KeyError, ValueError) as e:
+        print(f"submit-video-shot: {e}", file=sys.stderr)
+        return 1
+    prompt_path = Path(args.prompt_file)
+    if not prompt_path.is_file():
+        print(f"submit-video-shot: --prompt-file {args.prompt_file} 不存在", file=sys.stderr)
+        return 1
+    if not 1 <= args.duration <= 60:
+        print("submit-video-shot: --duration 必须在 1–60 秒之间", file=sys.stderr)
+        return 1
+    prompt = prompt_path.read_text(encoding="utf-8").strip()
+    if not prompt:
+        print("submit-video-shot: prompt 不能为空", file=sys.stderr)
+        return 1
+    try:
+        params = {
+            "vendor": f"{key.alias} ({key.provider})",
+            "duration": args.duration,
+            "resolution": args.resolution,
+            "ratio": args.ratio,
+            "reference_images": _resolved_paths(args.reference_image),
+            "reference_videos": _resolved_paths(args.reference_video),
+            "reference_audios": _resolved_paths(args.reference_audio),
+        }
+    except ValueError as e:
+        print(f"submit-video-shot: {e}", file=sys.stderr)
+        return 1
+    job = write_job(
+        job_id=new_job_id(),
+        character_id="",
+        prompt=prompt,
+        model=model,
+        params=params,
+        status=JobStatus.PENDING_CONFIRM,
+        alias=key.alias,
+        namespace="video",
+        project_id=project.id,
+        production_id=args.production,
+        shot_id=args.shot,
+        kind=JobKind.VIDEO,
+    )
+    print(_confirmation_card(job), file=sys.stderr)
+    print(job.job_id)
+    return 0
+
+
+def _set_video_selected(args: argparse.Namespace) -> int:
+    from character_workflow.lib.video_jobs import resolve_project, set_selected
+    if not args.clear and not args.path:
+        print("set-video-selected: --path 与 --clear 必须二选一", file=sys.stderr)
+        return 1
+    try:
+        project = resolve_project(args.project)
+        selected = set_selected(
+            project.id,
+            args.production,
+            args.shot,
+            None if args.clear else args.path,
+        )
+    except (KeyError, FileNotFoundError, ValueError) as e:
+        print(f"set-video-selected: {e}", file=sys.stderr)
+        return 1
+    print(json.dumps({"shots": selected}, ensure_ascii=False))
+    return 0
+
+
 def _confirmation_card(job: Job) -> str:
     """出图确认卡 —— CLI 统一生成（打到 stderr），Skill 原样转发给画师，
     杜绝 Agent 手写漏字段。stdout 仍是纯 job_id，不破 $() 捕获契约。"""
@@ -189,18 +316,32 @@ def _confirmation_card(job: Job) -> str:
         f"job_id : {job.job_id}",
         f"Key    : {job.alias} ({job.provider})",
         f"model  : {job.model}",
-        f"size   : {job.params.size}  n: {job.params.n}",
     ]
+    if job.kind is JobKind.VIDEO:
+        lines.append(
+            f"参数   : {job.params.duration}s · {job.params.resolution} · {job.params.ratio}"
+        )
+    else:
+        lines.append(f"size   : {job.params.size}  n: {job.params.n}")
     if job.screen_id:
         label = f"screen : {job.screen_id}（UI 页面 job，产物归项目）"
         if job.params.style_variant:
             base = f" ← {job.params.base_version}" if job.params.base_version else ""
             label += f"\n风格   : {job.params.style_variant}{base}"
         lines.insert(2, label)
+    if job.production_id and job.shot_id:
+        lines.insert(2, f"镜头   : {job.production_id} / {job.shot_id}（项目视频 job）")
     if job.retry_of:
         lines.append(f"retry_of: {job.retry_of}（原 job 错误记录已保留）")
     lines.append(f"参考图 : {len(refs)} 张")
     lines.extend(f"  {i}. {p}" for i, p in enumerate(refs, 1))
+    if job.kind is JobKind.VIDEO:
+        video_refs = job.params.reference_videos or []
+        audio_refs = job.params.reference_audios or []
+        lines.append(f"参考视频: {len(video_refs)} 个")
+        lines.extend(f"  {i}. {p}" for i, p in enumerate(video_refs, 1))
+        lines.append(f"参考音频: {len(audio_refs)} 个")
+        lines.extend(f"  {i}. {p}" for i, p in enumerate(audio_refs, 1))
     lines.append("prompt :")
     lines.append(job.prompt.rstrip("\n"))
     lines.append("─── 画师确认后 run-job ───")
@@ -520,6 +661,44 @@ def main(argv: list[str] | None = None) -> int:
     p_sc.add_argument("--path", default=None, help="定稿图路径（绝对或 data-root 相对）")
     p_sc.add_argument("--clear", action="store_true", help="取消该 screen 定稿")
 
+    p_vp = sub.add_parser(
+        "create-video-production",
+        help="建立项目视频企划（brief.md + shot-map.md）",
+    )
+    p_vp.add_argument("--project", required=True, help="项目 id 或 slug")
+    p_vp.add_argument("--production", required=True, help="企划 id（小写字母/数字/连字符）")
+    p_vp.add_argument("--title", required=True, help="企划显示名")
+    p_vp.add_argument(
+        "--type",
+        choices=("promo", "character", "gameplay", "cutscene", "social", "custom"),
+        default="custom",
+        help="视频企划类型",
+    )
+
+    p_vs = sub.add_parser(
+        "submit-video-shot",
+        help="提交项目视频单镜头 job（namespace='video'，产物归企划/镜头）",
+    )
+    p_vs.add_argument("--project", required=True, help="项目 id 或 slug")
+    p_vs.add_argument("--production", required=True, help="企划 id")
+    p_vs.add_argument("--shot", required=True, help="镜头 id")
+    p_vs.add_argument("--prompt-file", required=True, help="视频 prompt 文件")
+    p_vs.add_argument("--alias", default=None, help="视频 Key alias；缺省选首个视频 Key")
+    p_vs.add_argument("--model", default=None, help="视频模型 id；缺省选 Key 下首个视频模型")
+    p_vs.add_argument("--duration", type=int, default=5, help="目标时长（秒）")
+    p_vs.add_argument("--resolution", default="720p", help="分辨率档位")
+    p_vs.add_argument("--ratio", default="16:9", help="画幅比例")
+    p_vs.add_argument("--reference-image", action="append", default=None)
+    p_vs.add_argument("--reference-video", action="append", default=None)
+    p_vs.add_argument("--reference-audio", action="append", default=None)
+
+    p_vc = sub.add_parser("set-video-selected", help="选定/取消项目视频镜头版本")
+    p_vc.add_argument("--project", required=True, help="项目 id 或 slug")
+    p_vc.add_argument("--production", required=True, help="企划 id")
+    p_vc.add_argument("--shot", required=True, help="镜头 id")
+    p_vc.add_argument("--path", default=None, help="要选定的 mp4 路径")
+    p_vc.add_argument("--clear", action="store_true", help="取消选定")
+
     p_run_job = sub.add_parser("run-job", help="确认并执行一个 PENDING_CONFIRM job")
     p_run_job.add_argument("job_id")
 
@@ -605,6 +784,12 @@ def main(argv: list[str] | None = None) -> int:
         return _submit_screen(args)
     if args.cmd == "set-screen-canonical":
         return _set_screen_canonical(args)
+    if args.cmd == "create-video-production":
+        return _create_video_production(args)
+    if args.cmd == "submit-video-shot":
+        return _submit_video_shot(args)
+    if args.cmd == "set-video-selected":
+        return _set_video_selected(args)
     if args.cmd == "retry-job":
         return _retry_job(args)
     if args.cmd == "run-job":

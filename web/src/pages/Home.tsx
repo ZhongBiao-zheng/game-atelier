@@ -177,8 +177,13 @@ function galleryItemHref(item: GalleryItem): string {
   if (isStudioItem(item)) {
     return item.job_id ? `/studio?job=${encodeURIComponent(item.job_id)}` : '/studio';
   }
+  if (!item.character_id || !item.asset_slot) return '/workshop';
   if (!item.job_id) {
-    return `/character/${item.character_id}/${item.asset_slot}`;
+    return item.project_id
+      ? `/workshop/${encodeURIComponent(item.project_id)}/art/characters/${encodeURIComponent(item.character_id)}/${item.asset_slot}`
+      : `/workshop/unassigned/characters/${encodeURIComponent(item.character_id)}/${item.asset_slot}`;
   }
-  return `/character/${item.character_id}/${item.asset_slot}/${item.job_id}/${encodeURIComponent(item.path)}`;
+  return item.project_id
+    ? `/workshop/${encodeURIComponent(item.project_id)}/art/characters/${encodeURIComponent(item.character_id)}/${item.asset_slot}/${encodeURIComponent(item.job_id)}/${encodeURIComponent(item.path)}`
+    : `/workshop/unassigned/characters/${encodeURIComponent(item.character_id)}/${item.asset_slot}/${encodeURIComponent(item.job_id)}/${encodeURIComponent(item.path)}`;
 }

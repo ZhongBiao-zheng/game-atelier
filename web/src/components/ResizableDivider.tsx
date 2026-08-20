@@ -13,6 +13,7 @@ interface Props {
   /** 松手定格（持久化时机） */
   onCommit: (w: number) => void;
   label: string;
+  className?: string;
 }
 
 /**
@@ -20,7 +21,7 @@ interface Props {
  * 宿主容器必须 relative + grid，且两栏显式钉 grid-column——
  * 左面板收起时若脱离 grid 流，自动放置会把右栏挪进 0px 列（效果稿踩过的坑）。
  */
-export function ResizableDivider({ width, min, max, snap, onResize, onCommit, label }: Props) {
+export function ResizableDivider({ width, min, max, snap, onResize, onCommit, label, className }: Props) {
   const [dragging, setDragging] = useState(false);
   const widthRef = useRef(width);
   widthRef.current = width;
@@ -43,7 +44,10 @@ export function ResizableDivider({ width, min, max, snap, onResize, onCommit, la
       aria-label={label}
       title="拖拽调整布局"
       style={{ left: width }}
-      className="group absolute inset-y-0 z-20 w-2.5 -translate-x-1/2 cursor-col-resize touch-none"
+      className={cn(
+        'group absolute inset-y-0 z-20 w-2.5 -translate-x-1/2 cursor-col-resize touch-none',
+        className,
+      )}
       onPointerDown={e => {
         setDragging(true);
         e.currentTarget.setPointerCapture(e.pointerId);

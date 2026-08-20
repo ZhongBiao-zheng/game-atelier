@@ -2,6 +2,8 @@ import { requestJson } from './http';
 export interface GalleryItem {
   /** studio 来源的图无角色归属，两字段为 null。 */
   character_id: string | null;
+  /** 角色所属游戏项目；Studio 或未分类角色为 null。 */
+  project_id?: string | null;
   asset_slot: 'portrait' | 'promo' | 'turnaround' | null;
   source?: 'character' | 'studio';
   filename: string;
@@ -47,6 +49,9 @@ export interface ProjectScreenItem {
   /** B3 风格候选来源关系（无标签的普通版本为 null）。 */
   style_variant: string | null;
   base_version: string | null;
+  model: string | null;
+  provider: string | null;
+  prompt: string | null;
   mtime: number;
 }
 

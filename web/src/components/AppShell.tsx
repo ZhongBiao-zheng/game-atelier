@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { LayoutGroup, motion } from 'motion/react';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
-import { HomeIcon, Moon, Settings, Sparkles, Sun, UserRound } from 'lucide-react';
+import { HomeIcon, LibraryBig, Moon, Settings, Sparkles, Sun } from 'lucide-react';
 
 import { ChangelogButton } from '@/components/ChangelogButton';
 import { Home } from '@/pages/Home';
@@ -9,6 +9,7 @@ import { Studio } from '@/pages/Studio';
 import { CharacterDetail } from '@/pages/CharacterDetail';
 import { SettingsPage } from '@/pages/settings/Settings';
 import { applyTheme, loadTheme, saveTheme, type Theme } from '@/lib/theme';
+import type { WorkshopWorkspace } from '@/pages/ProjectPage';
 
 /** 深浅主题切换：图标显示目的地（暗色显太阳 = 点了去浅色） */
 function ThemeToggle() {
@@ -32,9 +33,13 @@ function ThemeToggle() {
 
 const NAV_TABS: { to: string; label: string; icon: typeof HomeIcon }[] = [
   { to: '/', label: '主页', icon: HomeIcon },
-  { to: '/studio', label: '出图', icon: Sparkles },
-  { to: '/character', label: '工坊', icon: UserRound },
+  { to: '/studio', label: '创作台', icon: Sparkles },
+  { to: '/workshop', label: '工坊', icon: LibraryBig },
 ];
+
+function isWorkshopWorkspace(value?: string): value is WorkshopWorkspace {
+  return value === 'overview' || value === 'art' || value === 'ui' || value === 'video';
+}
 
 function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string; isActive: boolean; icon: typeof HomeIcon }) {
   return (
@@ -68,11 +73,11 @@ function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string
 
 export function AppShell() {
   const [loc] = useLocation();
-  const onCharacter = loc.startsWith('/character');
+  const onWorkshop = loc.startsWith('/workshop');
   const onStudio = loc === '/studio';
   const onHome = loc === '/';
   const onSettings = loc.startsWith('/settings');
-  const activeIndex = onHome ? 0 : onStudio ? 1 : onCharacter ? 2 : -1;
+  const activeIndex = onHome ? 0 : onStudio ? 1 : onWorkshop ? 2 : -1;
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
@@ -113,10 +118,10 @@ export function AppShell() {
         <Switch>
           <Route path="/">{() => <Home />}</Route>
           <Route path="/studio">{() => <Studio />}</Route>
-          <Route path="/character">{() => <CharacterDetail />}</Route>
-          <Route path="/character/:id/:assetSlot/:jobId/:imagePath">
+          <Route path="/workshop/unassigned/characters/:id/:assetSlot/:jobId/:imagePath">
             {(params) => (
               <CharacterDetail
+                workspace="art"
                 characterId={params.id}
                 assetSlot={params.assetSlot}
                 jobId={params.jobId}
@@ -124,12 +129,81 @@ export function AppShell() {
               />
             )}
           </Route>
-          <Route path="/character/:id/:assetSlot">
-            {(params) => <CharacterDetail characterId={params.id} assetSlot={params.assetSlot} />}
+          <Route path="/workshop/unassigned/characters/:id/:assetSlot">
+            {(params) => (
+              <CharacterDetail workspace="art" characterId={params.id} assetSlot={params.assetSlot} />
+            )}
           </Route>
-          <Route path="/character/:id">
-            {(params) => <CharacterDetail characterId={params.id} />}
+          <Route path="/workshop/unassigned/characters/:id">
+            {(params) => <CharacterDetail workspace="art" characterId={params.id} />}
           </Route>
+          <Route path="/workshop/:projectId/video/:productionId/shots/:shotId">
+            {(params) => (
+              <CharacterDetail
+                projectId={params.projectId}
+                workspace="video"
+                productionId={params.productionId}
+                shotId={params.shotId}
+              />
+            )}
+          </Route>
+          <Route path="/workshop/:projectId/video/:productionId">
+            {(params) => (
+              <CharacterDetail
+                projectId={params.projectId}
+                workspace="video"
+                productionId={params.productionId}
+              />
+            )}
+          </Route>
+          <Route path="/workshop/:projectId/ui/screens/:screenId">
+            {(params) => (
+              <CharacterDetail
+                projectId={params.projectId}
+                workspace="ui"
+                screenId={params.screenId}
+              />
+            )}
+          </Route>
+          <Route path="/workshop/:projectId/art/characters/:id/:assetSlot/:jobId/:imagePath">
+            {(params) => (
+              <CharacterDetail
+                projectId={params.projectId}
+                workspace="art"
+                characterId={params.id}
+                assetSlot={params.assetSlot}
+                jobId={params.jobId}
+                imagePath={params.imagePath}
+              />
+            )}
+          </Route>
+          <Route path="/workshop/:projectId/art/characters/:id/:assetSlot">
+            {(params) => (
+              <CharacterDetail
+                projectId={params.projectId}
+                workspace="art"
+                characterId={params.id}
+                assetSlot={params.assetSlot}
+              />
+            )}
+          </Route>
+          <Route path="/workshop/:projectId/art/characters/:id">
+            {(params) => (
+              <CharacterDetail projectId={params.projectId} workspace="art" characterId={params.id} />
+            )}
+          </Route>
+          <Route path="/workshop/:projectId/:workspace">
+            {(params) => (
+              <CharacterDetail
+                projectId={params.projectId}
+                workspace={isWorkshopWorkspace(params.workspace) ? params.workspace : 'overview'}
+              />
+            )}
+          </Route>
+          <Route path="/workshop/:projectId">
+            {(params) => <Redirect to={`/workshop/${encodeURIComponent(params.projectId)}/overview`} replace />}
+          </Route>
+          <Route path="/workshop">{() => <CharacterDetail />}</Route>
           <Route path="/settings">{() => <SettingsPage />}</Route>
           <Route path="/settings/keys">{() => <SettingsPage />}</Route>
           <Route>

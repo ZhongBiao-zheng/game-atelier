@@ -6,7 +6,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class JobStatus(str, Enum):
@@ -27,9 +27,12 @@ class AssetSlot(str, Enum):
 
 
 class JobKind(str, Enum):
-    # 媒体类型 — 与 AssetSlot 解耦。VIDEO 占位，runner 抛 NotImplementedError。
+    # 媒体类型 — 与 AssetSlot / namespace 解耦；runner 依此分派图片或视频 caller。
     IMAGE = "image"
     VIDEO = "video"
+
+
+Namespace = Literal["character", "studio", "ui", "video"]
 
 
 class JobParams(BaseModel):
@@ -99,12 +102,15 @@ class Job(BaseModel):
     # 2026-05-25 重构：原 kind 拆成 asset_slot + kind + namespace。
     asset_slot: AssetSlot = AssetSlot.PORTRAIT
     kind: JobKind = JobKind.IMAGE
-    namespace: str = "character"  # "character" | "studio" | "ui"
+    namespace: Namespace = "character"
     source_image: str | None = None  # promo/turnaround 用，绝对路径
     # 2026-08-10 (B2): UI 页面 job（namespace="ui"）—— 资产归项目不归角色。
     # 两字段决定输出目录 projects/<slug>/screens/<screen_id>/；Web 不能改。
     project_id: str | None = None
     screen_id: str | None = None
+    # 项目视频 job（namespace="video"）—— 产物归项目企划下的单个镜头。
+    production_id: str | None = None
+    shot_id: str | None = None
     # Phase 3 (2026-05-22): which Key was used. Web 不能改这两个字段。
     alias: str | None = None
     provider: str | None = None
@@ -117,11 +123,119 @@ class Job(BaseModel):
     # Studio 卡片用它算出图耗时（completed_at − submitted_at）+ 展示生成时间。旧 job 无此字段=None。
     completed_at: str | None = None
 
+    @model_validator(mode="after")
+    def validate_namespace_ownership(self) -> "Job":
+        if self.namespace == "ui":
+            if not self.project_id or not self.screen_id:
+                raise ValueError("ui job requires project_id and screen_id")
+            if self.kind is not JobKind.IMAGE:
+                raise ValueError("ui job must use kind=image")
+        elif self.screen_id is not None:
+            raise ValueError("screen_id is only valid for namespace=ui")
+
+        if self.namespace == "video":
+            if not self.project_id or not self.production_id or not self.shot_id:
+                raise ValueError(
+                    "video job requires project_id, production_id and shot_id"
+                )
+            if self.kind is not JobKind.VIDEO:
+                raise ValueError("video namespace must use kind=video")
+        elif self.production_id is not None or self.shot_id is not None:
+            raise ValueError("production_id and shot_id are only valid for namespace=video")
+        return self
+
 
 class WebEditableJobPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     prompt: str | None = None
     params: JobParams | None = None
+
+
+class ArtWorkspaceSummary(BaseModel):
+    characters: int
+    canonical: int
+    stale: int
+
+
+class UiScreenSummary(BaseModel):
+    screen_id: str
+    name: str
+    category: str
+    priority: str
+    status: str
+    dependency: str
+    purpose: str = ""
+    brief_summary: str = ""
+
+
+class UiWorkspaceSummary(BaseModel):
+    anchors: dict[str, str]
+    anchors_approved: int
+    style_status: str
+    has_ui_style: bool
+    screen_map_status: str
+    screens: int
+    versions: int
+    canonical: int
+    stale: int
+    screen_items: list[UiScreenSummary]
+    next_action: str
+    next_command: str
+
+
+class VideoWorkspaceSummary(BaseModel):
+    productions: int
+    shots: int
+    selected_shots: int
+    exports: int
+    next_action: str
+
+
+class ProjectWorkspaceSummary(BaseModel):
+    project_id: str
+    art: ArtWorkspaceSummary
+    ui: UiWorkspaceSummary
+    video: VideoWorkspaceSummary
+
+
+class ProjectVideoShot(BaseModel):
+    shot_id: str
+    purpose: str = ""
+    duration: str = ""
+    status: str = "planned"
+    versions: list[str]
+    selected: str | None = None
+    prompt: str = ""
+    model: str = ""
+    reference_images: list[str] = Field(default_factory=list)
+    reference_videos: list[str] = Field(default_factory=list)
+    reference_audios: list[str] = Field(default_factory=list)
+
+
+class ProjectVideoBrief(BaseModel):
+    goal: str = ""
+    platform: str = ""
+    ratio: str = ""
+    duration: str = ""
+    sound: str = ""
+
+
+class ProjectVideoProduction(BaseModel):
+    production_id: str
+    title: str
+    type: str
+    status: str
+    brief: ProjectVideoBrief
+    shots: list[ProjectVideoShot]
+    exports: list[str]
+
+
+class ProjectVideosResponse(BaseModel):
+    productions: list[ProjectVideoProduction]
+
+
+class VideoSelectedResponse(BaseModel):
+    shots: dict[str, str]
 
 
 class SpecPatch(BaseModel):

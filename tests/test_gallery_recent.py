@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from character_workflow.lib.jobs import save_job
+from character_workflow.lib.projects import assign_character, create_project
 from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
 from viewer_server.server_app import build_app
 
@@ -76,6 +77,16 @@ def test_includes_matching_job_id_for_detail_route(client, tmp_path):
 
     assert resp.status_code == 200
     assert resp.json()["items"][0]["job_id"] == "job-promo-1"
+
+
+def test_includes_character_project_id_for_workshop_route(client, tmp_path):
+    _make_image(tmp_path / "characters" / "char-a" / "portrait" / "v1.png")
+    project = create_project("三国")
+    assign_character("char-a", project.id)
+
+    item = client.get("/api/gallery/recent").json()["items"][0]
+
+    assert item["project_id"] == project.id
 
 
 def test_respects_limit_param(client, tmp_path):

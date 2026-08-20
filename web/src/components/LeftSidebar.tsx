@@ -14,13 +14,23 @@ interface Props {
   onSelect: (id: string, name: string) => void;
   onDelete?: (id: string) => void;
   onOpenProject?: (project: Project) => void;
+  showCharacters?: boolean;
+  activeProjectId?: string | null;
 }
 
 const UNCATEGORIZED = '__uncategorized__';
 const DRAG_PROJECT = 'text/project-id';
 const DRAG_CHAR = 'text/character-id';
 
-export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenProject }: Props) {
+export function LeftSidebar({
+  sseSignal,
+  selectedId,
+  onSelect,
+  onDelete,
+  onOpenProject,
+  showCharacters = true,
+  activeProjectId = null,
+}: Props) {
   const [characters, setCharacters] = useState<CharacterEntry[]>([]);
   const [projects, setProjects] = useState<ProjectsFile>({ projects: [], assignments: {} });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -413,6 +423,7 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenP
           {projects.projects.map(p => (
             <ProjectGroup
               key={p.id} project={p} chars={grouped.get(p.id) || []}
+              showChildren={showCharacters && (!activeProjectId || activeProjectId === p.id)}
               isEditing={editingProjectId === p.id} draftName={draftName}
               dragOver={dragOver === p.id} onDrop={onDrop} onDragOver={onDragOver}
               onDragLeave={() => setDragOver(null)}
@@ -430,17 +441,19 @@ export function LeftSidebar({ sseSignal, selectedId, onSelect, onDelete, onOpenP
             />
           ))}
 
-          <DropZone
-            label={projects.projects.length > 0 ? '未分类' : null}
-            active={dragOver === UNCATEGORIZED}
-            onDrop={e => onDrop(e, UNCATEGORIZED)}
-            onDragOver={e => onDragOver(e, UNCATEGORIZED)}
-            onDragLeave={() => setDragOver(null)}
-          >
-            <ul className="list-none m-0 p-0">
-              {(grouped.get(UNCATEGORIZED) || []).map(renderChar)}
-            </ul>
-          </DropZone>
+          {showCharacters && !activeProjectId && (
+            <DropZone
+              label={projects.projects.length > 0 ? '未分类' : null}
+              active={dragOver === UNCATEGORIZED}
+              onDrop={e => onDrop(e, UNCATEGORIZED)}
+              onDragOver={e => onDragOver(e, UNCATEGORIZED)}
+              onDragLeave={() => setDragOver(null)}
+            >
+              <ul className="list-none m-0 p-0">
+                {(grouped.get(UNCATEGORIZED) || []).map(renderChar)}
+              </ul>
+            </DropZone>
+          )}
 
         </div>
 
@@ -595,6 +608,7 @@ interface ProjectGroupProps {
   onProjectDrop: (e: React.DragEvent, id: string, el: HTMLElement) => void;
   onProjectDragEnd: () => void;
   onOpen?: (p: Project) => void;
+  showChildren: boolean;
 }
 
 /** 折叠状态持久化：存「折叠中的项目 id」集合，默认全展开（新项目天然展开）。 */
@@ -628,7 +642,7 @@ function ProjectGroup({
   onDelete, inputRef, renderChar,
   isDragging, dropIndicator,
   onProjectDragStart, onProjectDragOver, onProjectDrop, onProjectDragEnd,
-  onOpen,
+  onOpen, showChildren,
 }: ProjectGroupProps) {
   const [open, setOpen] = useState(() => !loadCollapsedProjects().has(project.id));
   const toggleOpen = () => {
@@ -675,14 +689,16 @@ function ProjectGroup({
         >
           <GripVertical className="size-3" />
         </span>
-        <button
-          onClick={() => !isEditing && toggleOpen()}
-          aria-label={open ? '收起项目' : '展开项目'}
-          title={open ? '收起' : '展开'}
-          className="grid place-items-center size-4 rounded hover:bg-accent/60 cursor-pointer bg-transparent border-0 p-0 text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-        </button>
+        {showChildren ? (
+          <button
+            onClick={() => !isEditing && toggleOpen()}
+            aria-label={open ? '收起项目' : '展开项目'}
+            title={open ? '收起' : '展开'}
+            className="grid place-items-center size-4 rounded hover:bg-accent/60 cursor-pointer bg-transparent border-0 p-0 text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          </button>
+        ) : <span className="size-4" aria-hidden />}
         {isEditing ? (
           <Input
             ref={inputRef}
@@ -718,7 +734,7 @@ function ProjectGroup({
           <X className="size-3" />
         </button>
       </header>
-      {open && (
+      {showChildren && open && (
         <ul className="list-none m-0 p-0 pl-2">
           {chars.length > 0
             ? chars.map(renderChar)

@@ -1,7 +1,7 @@
 {
   "name": "game-atelier",
-  "version": "5.21.1",
-  "description": "Game Atelier — 游戏角色资产工坊，本地 Web UI + AI 立绘 / KV / 三视图工作流",
+  "version": "5.22.0",
+  "description": "Game Atelier — 游戏项目资产工坊，本地 Web UI + AI 美术 / 游戏 UI / 视频工作流",
   "author": {
     "name": "zhengzhongbiao"
   },

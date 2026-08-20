@@ -41,8 +41,9 @@ from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterProjectAssign, ClipboardAttempt,
     FeedbackPost, Job, JobKind, JobParams, JobStatus, ProjectCreate, ProjectRename,
-    ProjectsFile, ScreenCanonicalSet, ScreenCanonicalStatusFile,
-    SpecPatch, WebEditableJobPatch,
+    ProjectVideosResponse, ProjectWorkspaceSummary, ProjectsFile,
+    ScreenCanonicalSet, ScreenCanonicalStatusFile, SpecPatch, VideoSelectedResponse,
+    WebEditableJobPatch,
 )
 
 
@@ -565,6 +566,51 @@ def delete_job(job_id: str) -> dict:
 @router.get("/projects", response_model=ProjectsFile)
 def get_projects() -> ProjectsFile:
     return read_projects()
+
+
+@router.get("/projects/{project_id}/workspaces", response_model=ProjectWorkspaceSummary)
+def get_project_workspaces(project_id: str) -> ProjectWorkspaceSummary:
+    from character_workflow.lib.workspace_summary import project_workspace_summary
+    try:
+        return project_workspace_summary(project_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.get("/projects/{project_id}/videos", response_model=ProjectVideosResponse)
+def get_project_videos(project_id: str) -> ProjectVideosResponse:
+    from character_workflow.lib.video_jobs import list_productions
+    try:
+        return ProjectVideosResponse(productions=list_productions(project_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+class _VideoSelectedSet(BaseModel):
+    model_config = {"extra": "forbid"}
+    path: str | None = None
+
+
+@router.post(
+    "/projects/{project_id}/videos/{production_id}/shots/{shot_id}/selected",
+    response_model=VideoSelectedResponse,
+)
+def post_project_video_selected(
+    project_id: str,
+    production_id: str,
+    shot_id: str,
+    payload: _VideoSelectedSet,
+) -> VideoSelectedResponse:
+    from character_workflow.lib.video_jobs import set_selected
+    try:
+        selected = set_selected(project_id, production_id, shot_id, payload.path)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return VideoSelectedResponse(shots=selected)
 
 
 @router.post("/projects", response_model=ProjectsFile)
@@ -1240,6 +1286,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     """
     characters_dir = _project_root() / "characters"
     items: list[dict] = []
+    project_assignments = read_projects().assignments
     job_ids_by_path = _gallery_job_ids_by_path()
     hidden = set(_read_gallery_hidden())
     if characters_dir.exists():
@@ -1262,6 +1309,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                         continue  # F3: broken symlink / permissions issue
                     items.append({
                         "character_id": char_dir.name,
+                        "project_id": project_assignments.get(char_dir.name),
                         "asset_slot": slot,
                         "source": "character",
                         "filename": f.name,
@@ -1286,6 +1334,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                     continue
                 items.append({
                     "character_id": None,
+                    "project_id": None,
                     "asset_slot": None,
                     "source": "studio",
                     "filename": f.name,
@@ -1387,6 +1436,9 @@ def gallery_screens(project: str = Query(min_length=1)) -> dict:
                     "job_id": job_id,
                     "style_variant": job.params.style_variant if job else None,
                     "base_version": job.params.base_version if job else None,
+                    "model": job.model if job else None,
+                    "provider": job.provider if job else None,
+                    "prompt": job.prompt if job else None,
                     "mtime": mtime,
                 })
     items.sort(key=lambda it: it["mtime"], reverse=True)
@@ -1564,16 +1616,21 @@ def gallery_image(path: str) -> FileResponse:
     characters_dir = (root / "characters").resolve()
     studio_dir = (root / "studio").resolve()
     projects_root = data_root.projects_dir().resolve()
-    # projects 分支只放行 screens 子树（projects/ 下还有 style.md / design/ 等文档，不该经此外读）。
-    in_screens = (
-        target.is_relative_to(projects_root)
-        and len(target.relative_to(projects_root).parts) >= 3
-        and target.relative_to(projects_root).parts[1] == "screens"
+    # projects 分支只放行 screens / videos 资产子树（style.md / design 文档不得经此外读）。
+    project_parts = target.relative_to(projects_root).parts if target.is_relative_to(projects_root) else ()
+    in_project_assets = (
+        len(project_parts) >= 3
+        and project_parts[1] == "screens"
+    ) or (
+        len(project_parts) >= 5
+        and project_parts[1] == "videos"
+        and project_parts[3] in {"shots", "exports"}
+        and target.suffix.lower() == ".mp4"
     )
     if not (
         target.is_relative_to(characters_dir)
         or target.is_relative_to(studio_dir)
-        or in_screens
+        or in_project_assets
     ):
         raise HTTPException(status_code=400, detail="path outside allowed roots")
     if not target.is_file():
