@@ -1,6 +1,6 @@
 ---
 name: character
-version: 4.5.0
+version: 4.6.0
 description: |
   游戏角色立绘工作流：承接画师反馈，通过对话问清风格/配色/镜头/道具后出图，
   并支持对已出立绘改皮肤、换色、重画。
@@ -175,6 +175,17 @@ Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先
 
 **铁律**：characters 为空时，第一个问题必须是项目（在忙什么、定位），绝不上来就问「创建第一个角色吗」。理解项目后再据项目情况问角色。
 
+### 新角色已有素材：先归档，再继续
+
+用户在建项目 / 建角色时已经上传参考图，不能只把它当头像或临时上下文。角色目录和 spec 建立后，逐张查看并按画面内容分类：标准角色立绘 / 全身单面图归 `portrait`，正侧背联排或设定表归 `turnaround`；看不清类型时先问用户，不能猜。然后逐张执行：
+
+```bash
+uv run python -m character_workflow import-reference --character <角色id> --slot portrait --path <图片路径>
+uv run python -m character_workflow import-reference --character <角色id> --slot turnaround --path <图片路径>
+```
+
+命令会把原图按内容哈希备份到 `characters/<id>/source/`，同时登记到 `portrait/` 或 `turnaround/`，重复执行幂等。导入只代表“已有参考素材”，**不自动定稿**、不写 `canonical.json`；定稿仍要等画师明确确认后走 `set-canonical`。
+
 **Stage C**（无 active character）：列 `recent_chars` 中每个角色的 `id（tagline）`+ 新建 / 跳过。用户选定后立即 `set-active <id>` 并重新 turn-start，**不再弹二次确认**，直接进入 Stage D 推断。
 
 **Stage D**（裸触发 / 冷启动 / 上轮已闭环）：
@@ -231,6 +242,10 @@ uv run python -m character_workflow set-canonical --kind portrait --path <该图
 **底层规则** → `docs/references/art-prompt-system.md`
 **立绘专项** → `references/prompt-zh.md`
 **模型选择 + 按模型族写提示词** → `docs/references/model-routing.md`（GPT 实习生式 / nano-banana SD 词组式——**先定模型族再动笔**）
+
+### 参考图清单
+
+有一张或多张参考图时，逐张看图并按最终 CLI 顺序写入 prompt：每张都要有“序号 + 简短可见描述 + 用途”。角色、场景、风格、姿势参考都遵守，不能只说“图一 / 图二”。提交时按相同顺序重复传 `--reference-image`；完整契约见 `art-prompt-system.md` 第三节。
 
 ## 修改已出图（三模式）
 

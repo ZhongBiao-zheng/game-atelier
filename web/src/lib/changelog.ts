@@ -31,6 +31,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.21.0',
+    date: '2026-08-20',
+    headline: '多角色参考图不再互相认错',
+    changes: [
+      { kind: 'feat', text: '立绘、美宣、三视图都能一次带多张参考图；多角色默认每个角色各带一张，场景和构图参考还能继续追加' },
+      { kind: 'fix', text: '提示词会按上传顺序给每张图补一句外观或场景描述，不再只说「图一、图二」让模型自己猜' },
+      { kind: 'feat', text: '新建角色时上传的现成立绘或三视图会同时备份进素材库和对应图廊，不再只拿来当头像' },
+      { kind: 'feat', text: '没有立绘也能做美宣：三视图或临时上传的角色参考图都可以作为身份锚' },
+    ],
+  },
+  {
     version: '5.20.1',
     date: '2026-08-20',
     headline: 'Codex 的 Skill 会跟着更新补齐',

@@ -4,6 +4,7 @@
   python -m skill.character_workflow turn-start [--kind portrait|promo|turnaround] [--message "..."]
   python -m skill.character_workflow set-active <id>
   python -m skill.character_workflow append-lesson --kind portrait --line "...经验..."
+  python -m skill.character_workflow import-reference --character <id> --slot portrait --path <image>
   python -m skill.character_workflow submit --kind portrait --prompt-file <path> [--character <id>]
 """
 from __future__ import annotations
@@ -246,6 +247,22 @@ def _assign_character(args: argparse.Namespace) -> int:
     return 0
 
 
+def _import_reference(args: argparse.Namespace) -> int:
+    from character_workflow.lib.asset_import import import_reference
+
+    try:
+        result = import_reference(
+            character_id=args.character,
+            source_path=args.path,
+            slot=AssetSlot(args.slot),
+        )
+    except (FileNotFoundError, ValueError) as e:
+        print(f"import-reference: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
 def _rename_character_id(args: argparse.Namespace) -> int:
     from character_workflow.lib.identity import rename_character_id
 
@@ -396,6 +413,17 @@ def main(argv: list[str] | None = None) -> int:
     p_ac = sub.add_parser("assign-character", help="把角色归属到项目;省略 --project 等于取消归属")
     p_ac.add_argument("character_id")
     p_ac.add_argument("--project", default=None)
+
+    p_import = sub.add_parser(
+        "import-reference",
+        help="把已有参考图备份到 source/ 并登记到 portrait/ 或 turnaround/；不自动定稿",
+    )
+    p_import.add_argument("--character", required=True, help="目标角色 id")
+    p_import.add_argument(
+        "--slot", required=True, choices=("portrait", "turnaround"),
+        help="按图片实际类型登记：角色立绘或三视图",
+    )
+    p_import.add_argument("--path", required=True, help="待导入图片路径")
 
     p_rename = sub.add_parser(
         "rename-character-id",
@@ -548,6 +576,8 @@ def main(argv: list[str] | None = None) -> int:
         return _create_project(args)
     if args.cmd == "assign-character":
         return _assign_character(args)
+    if args.cmd == "import-reference":
+        return _import_reference(args)
     if args.cmd == "rename-character-id":
         return _rename_character_id(args)
     if args.cmd == "append-memory":

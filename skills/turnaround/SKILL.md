@@ -1,6 +1,6 @@
 ---
 name: turnaround
-version: 1.4.0
+version: 1.5.0
 description: |
   角色三视图 / character sheet 生成：基于已有立绘引导画师锁定正/侧/背三面比例、表情、武器拆解，
   一次性出横版三联视图，也支持改已出的三视图。
@@ -155,6 +155,10 @@ uv run python -m character_workflow turn-start --kind turnaround
 **三视图专项** → `references/prompt-turnaround-zh.md`（downstream_use 映射、严格禁止项、多面可见信息拆解）
 **模型选择 + 按模型族写提示词** → `docs/references/model-routing.md`（先定模型族再动笔）
 
+### 参考图清单
+
+逐张查看身份图与布局参考，按最终 CLI 顺序给**每张参考图**写“序号 + 简短可见描述 + 用途”。即使第一张是默认立绘，也要描述角色一眼可见的颜色、轮廓、材质或标志物；布局图要描述三联排布 / 基线等可见结构。提交时按相同顺序重复传 `--reference-image`，不能只写“图一 / 图二”。
+
 ## 修改已出图（三模式）
 
 画师指着现有图提修改需求时，**必须先 AskUserQuestion** 确认模式，不得自行假设：
@@ -191,7 +195,7 @@ uv run python -m character_workflow turn-start --kind turnaround
 
 ## 上传图通道
 
-画师粘参考图时：存到 `characters/<id>/source/<timestamp>-<文件名>`，**三视图 reference_mode 只允许 `composition_only`**（仅参考布局/基线安排），`full_reference` / `style_only` / `color_lighting_only` / `pose_only` 一律拒绝（会让风格/光照/姿势污染 spec 锁定的工程结构）。画师若上传风格参考 → 拒绝："三视图风格已由 spec 锁定，要换风格先回 /game-atelier:character 改 spec"。立绘（canonical 定稿优先，无则 `portrait/v_latest.png`）是强制 subject_image，不可被参考图覆盖。
+画师粘一张或多张参考图时：逐张存到 `characters/<id>/source/`，**三视图 reference_mode 只允许 `composition_only`**（仅参考布局/基线安排），`full_reference` / `style_only` / `color_lighting_only` / `pose_only` 一律拒绝（会让风格/光照/姿势污染 spec 锁定的工程结构）。画师若上传风格参考 → 拒绝："三视图风格已由 spec 锁定，要换风格先回 /game-atelier:character 改 spec"。立绘（canonical 定稿优先，无则 `portrait/v_latest.png`）是强制 subject_image，不可被参考图覆盖；所有实际上传图仍须逐张写进参考图清单并分别传 `--reference-image`。
 
 ## Turn 收尾：经验沉淀（出图经验）
 

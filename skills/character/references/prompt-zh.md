@@ -64,7 +64,7 @@ consistency_level: `standard`
 
 ---
 
-## 三、参考图处理（继承 art-prompt-system 第五节）
+## 三、参考图处理（继承 art-prompt-system 第三节）
 
 立绘的参考图配置因 generation_mode 而异：
 
@@ -75,6 +75,7 @@ consistency_level: `standard`
 | `refinement` | `portrait/v<n-1>.png`（上一张立绘） | `full_reference`（如果有改风格意图） |
 
 **写 prompt 时的参考图表达**：
+- 先按 CLI 上传顺序建立参考图清单；每张都写序号、1～3 个可见特征和用途。角色图、风格图、姿势图一视同仁，不能只写“图一 / 图二”。
 - first_gen 且画师有上传参考画派截图 → 在第4段（风格）补一句："参考上传图的整体笔触、材质感和影调（style_only），不复制其中的人物身份与服装。"
 - refinement 模式 → 在第1段后补一句："以上一张立绘（路径 portrait/v<n-1>.png）作为主体保留图，外观、服装、配色、比例严格继承。"
 - 立绘禁止 `composition_only` 单独使用（立绘构图是标准正面直立，没必要参考别人）
