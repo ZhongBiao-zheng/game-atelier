@@ -41,11 +41,11 @@ if errorlevel 1 (
     goto :update_done
 )
 
-REM web/dist 是入库的构建产物，而本脚本第 4 步每次启动都重建它 —— 不先还原，
-REM git pull --ff-only 会被"本地改动会被覆盖"挡住。丢弃安全：第 4 步会重新构建，
-REM 没有 pnpm 时也刚好回到仓库自带的预构建版本。
-git checkout -- web/dist 2>nul
-git clean -qfd web/dist 2>nul
+REM 旧版启动器可能曾在 web/dist 留下本地构建结果，先只还原这份可再生发布产物，
+REM 避免 git pull --ff-only 被“本地改动会被覆盖”挡住；其他本地改动完全不碰。
+git restore --source=HEAD --staged --worktree -- web/dist 2>nul
+if errorlevel 1 git checkout HEAD -- web/dist 2>nul
+git clean -qfd -- web/dist 2>nul
 
 REM 上游缺失是最隐蔽的一条：@{u} 解析不出来时，旧版本 BEHIND 停在 0，
 REM 与"已是最新"走同一条路径，静默跳过。必须显式判、显式说。
@@ -170,66 +170,19 @@ if not exist ".venv\" (
     echo.
 )
 
-REM ---- 3. 若已在运行则先停掉，保证每次双击都是"重建 + 重启"而非打开旧实例 ----
+REM ---- 3. 若已在运行则先停掉，保证每次双击都是"重启"而非打开旧实例 ----
 echo 停止可能在运行的旧实例...
 "!UV!" run python src\viewer_server\server.py stop
 timeout /t 1 >nul
 
-REM ---- 4. 重新构建前端（有 Node + pnpm 才构建；否则用仓库自带的预构建 dist）----
-where pnpm >nul 2>nul
-if errorlevel 1 goto :no_pnpm
-
-echo 重新构建前端...
-set "BUILD_ERR=0"
-pushd web
-REM 依赖清单变了必须补装。旧逻辑只在 node_modules 不存在时装一次，git pull 改了
-REM package.json / lockfile 之后照旧拿旧依赖构建 —— 要么构建失败、要么行为对不上，
-REM 而脚本一声不吭（第 0 步那类静默失败的同族问题）。
-REM 印记文件放在 node_modules 里：删掉 node_modules 时一起消失，不留过期状态。
-set "NEED_INSTALL=0"
-if not exist "node_modules\" set "NEED_INSTALL=1"
-if not exist "node_modules\.deps-stamp" set "NEED_INSTALL=1"
-if "!NEED_INSTALL!"=="1" goto :deps_install
-REM 时间戳比较交给 powershell（Windows 自带）。它若缺失，errorlevel 非 0 会退化成
-REM "每次都装"，慢但不会错 —— 这个方向的失败是安全的。
-powershell -NoProfile -Command "$s=(Get-Item 'node_modules\.deps-stamp').LastWriteTime; $c=0; foreach($f in 'package.json','pnpm-lock.yaml','pnpm-workspace.yaml'){ if((Test-Path $f) -and ((Get-Item $f).LastWriteTime -gt $s)){ $c=1 } }; exit $c"
-if errorlevel 1 (
-    echo 检测到前端依赖清单变化，补装依赖...
-    set "NEED_INSTALL=1"
-)
-if "!NEED_INSTALL!"=="0" goto :deps_ready
-
-:deps_install
-if not exist "node_modules\" echo 首次构建：安装前端依赖...
-call pnpm install
-if errorlevel 1 set "BUILD_ERR=1"
-REM 印记写在 install 之后：pnpm 自己可能重写 lockfile，先写会立刻过期。
-if "!BUILD_ERR!"=="0" type nul > "node_modules\.deps-stamp"
-
-:deps_ready
-if "!BUILD_ERR!"=="0" (
-    call pnpm build
-    if errorlevel 1 set "BUILD_ERR=1"
-)
-popd
-if not "!BUILD_ERR!"=="0" (
-    echo.
-    echo 前端构建失败。请确认 Node + pnpm 正常，或 git pull 获取预构建 web\dist 后重试。
-    pause
-    exit /b 1
-)
-goto :build_done
-
-:no_pnpm
+REM ---- 4. 使用仓库自带的预构建前端（启动过程绝不改写 Git 跟踪的 web\dist）----
 if not exist "web\dist\index.html" (
-    echo 未找到 pnpm，也没有预构建前端 web\dist。
-    echo 请先 git pull 获取预构建 dist，或安装 Node + pnpm 后重试。
+    echo 前端发布文件 web\dist 缺失，无法启动。
+    echo 请双击「Windows一键修复.bat」。
     pause
     exit /b 1
 )
-echo 未检测到 pnpm，使用仓库自带的预构建前端 web\dist。
-
-:build_done
+echo 前端发布文件正常（使用仓库自带 web\dist，无需 Node / pnpm）。
 echo.
 
 REM ---- 5. 启动后端（同一进程同时服务前端），后台运行并自动开浏览器 ----

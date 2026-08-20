@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 一键启动（macOS Mac一键启动.command / Linux Linux一键启动.desktop 共用）。
-# 与 Windows一键启动.bat 行为对齐：确保 uv → 首次装依赖 → 停旧实例 → 重建前端 → 后台启服务+开浏览器。
+# 与 Windows一键启动.bat 行为对齐：确保 uv → 首次装依赖 → 停旧实例 → 校验预构建前端 → 后台启服务+开浏览器。
 #
 # 刻意不使用 `set -e`：改为像 .bat 那样逐步检查 + 出错时 pause（保持窗口不闪退），
 # 否则 Finder/文件管理器双击时若某步失败，窗口会瞬间关闭，用户只看到“没启动”而看不到原因。
@@ -71,11 +71,12 @@ else
   if ! git fetch --quiet 2>/dev/null; then
     echo "[更新] 检查更新失败（网络不通或没有仓库访问权限），跳过更新直接启动。"
   else
-    # web/dist 是入库的构建产物，而本脚本第 4 步每次启动都 rm -rf 后重建 —— 不先还原，
-    # git pull --ff-only 会被"本地改动会被覆盖"挡住。丢弃安全：第 4 步会重新构建，
-    # 没有 pnpm 时也刚好回到仓库自带的预构建版本。
-    git checkout -- web/dist 2>/dev/null || true
-    git clean -qfd web/dist 2>/dev/null || true
+    # 旧版启动器可能曾在 web/dist 留下本地构建结果，先只还原这份可再生发布产物，
+    # 避免 git pull --ff-only 被“本地改动会被覆盖”挡住；其他本地改动完全不碰。
+    if ! git restore --source=HEAD --staged --worktree -- web/dist 2>/dev/null; then
+      git checkout HEAD -- web/dist 2>/dev/null || true
+    fi
+    git clean -qfd -- web/dist 2>/dev/null || true
 
     # 上游缺失是最隐蔽的一条：@{u} 解析不出来时，旧版本 behind 落到 `|| echo 0`，
     # 与"已是最新"走同一条路径，静默跳过。必须显式判、显式说。
@@ -171,58 +172,18 @@ if [ ! -d ".venv" ]; then
   echo
 fi
 
-# ---- 3. 若已在运行则先停掉，保证每次双击都是“重建 + 重启”而非打开旧实例 ----
+# ---- 3. 若已在运行则先停掉，保证每次双击都是“重启”而非打开旧实例 ----
 echo "停止可能在运行的旧实例..."
 "$UV" run python src/viewer_server/server.py stop || true
 sleep 1
 
-# ---- 4. 重新构建前端（有 pnpm 才构建；否则用仓库自带的预构建 dist）----
-if command -v pnpm &>/dev/null; then
-  echo "重新构建前端..."
-  build_ok=1
-  (
-    cd web || exit 1
-    # 依赖清单变了必须补装。旧逻辑只在 node_modules 不存在时装一次，git pull 改了
-    # package.json / lockfile 之后照旧拿旧依赖构建 —— 要么构建失败、要么行为对不上，
-    # 而脚本一声不吭（第 0 步那类静默失败的同族问题）。
-    # 印记文件放在 node_modules 里：rm -rf node_modules 时一起消失，不留过期状态。
-    deps_stamp="node_modules/.deps-stamp"
-    need_install=0
-    if [ ! -d "node_modules" ] || [ ! -f "$deps_stamp" ]; then
-      need_install=1
-    else
-      for f in package.json pnpm-lock.yaml pnpm-workspace.yaml; do
-        if [ -f "$f" ] && [ "$f" -nt "$deps_stamp" ]; then
-          echo "检测到前端依赖清单变化（$f），补装依赖..."
-          need_install=1
-          break
-        fi
-      done
-    fi
-    if [ "$need_install" = "1" ]; then
-      [ -d "node_modules" ] || echo "首次构建：安装前端依赖..."
-      pnpm install || exit 1
-      # 印记写在 install 之后：pnpm 自己可能重写 lockfile，先写会立刻过期。
-      : > "$deps_stamp"
-    fi
-    # 先清再构建：tailwind v4 vite 插件会把旧 dist/* 扫进 content 源，over-existing
-    # 构建非幂等（CSS 会虚胖、hash 漂移，与 make build / CI clean build 不一致）。同 Makefile build 目标。
-    rm -rf dist
-    pnpm build || exit 1
-  ) || build_ok=0
-  if [ "$build_ok" != "1" ]; then
-    echo
-    echo "前端构建失败。请确认 Node + pnpm 正常，或 git pull 获取预构建 web/dist 后重试。"
-    pause_exit 1
-  fi
-else
-  if [ ! -f "web/dist/index.html" ]; then
-    echo "未找到 pnpm，也没有预构建前端 web/dist。"
-    echo "请先 git pull 获取预构建 dist，或安装 Node + pnpm 后重试。"
-    pause_exit 1
-  fi
-  echo "未检测到 pnpm，使用仓库自带的预构建前端 web/dist。"
+# ---- 4. 使用仓库自带的预构建前端（启动过程绝不改写 Git 跟踪的 web/dist）----
+if [ ! -f "web/dist/index.html" ]; then
+  echo "前端发布文件 web/dist 缺失，无法启动。"
+  echo "请双击「Mac一键修复.command」，或运行：bash scripts/repair-update.sh"
+  pause_exit 1
 fi
+echo "前端发布文件正常（使用仓库自带 web/dist，无需 Node / pnpm）。"
 echo
 
 # ---- 5. 启动后端（同一进程同时服务前端），后台运行并自动开浏览器 ----

@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.21.1',
+    date: '2026-08-20',
+    headline: '一键启动不再把更新弄脏',
+    changes: [
+      { kind: 'fix', text: 'Mac 和 Windows 一键启动直接使用随项目发布的 Web 界面，不再要求 Node / pnpm，也不会在每次启动时重写 web/dist' },
+      { kind: 'feat', text: '新增 Mac / Windows 一键修复：自动诊断并只还原 web/dist，再安全更新；角色资产、配置和其他本地改动都不会被清理' },
+    ],
+  },
+  {
     version: '5.21.0',
     date: '2026-08-20',
     headline: '多角色参考图不再互相认错',

@@ -128,6 +128,23 @@ claude --plugin-dir .
 | Web UI 没打开 | 重新运行 `/game-atelier:viewer-server` |
 | API Key 填错 | 在 Web 设置页更新或删除后重新添加 |
 | 旧 server.pid 残留 | 启动时自动探活并清理 |
+| 更新被 `web/dist` 本地改动挡住 | 双击 `Mac一键修复.command` 或 `Windows一键修复.bat` |
+
+### 一键更新 / 修复
+
+源码版仓库会保留一份已经构建好的 `web/dist`，因此新下载或 `git clone` 的用户不需要安装 Node / pnpm；一键启动只读取这份发布文件，不会在启动时重新构建或改写它。
+
+如果旧版一键启动曾经留下 `web/dist` 改动，直接双击对应系统的“一键修复”脚本。脚本会先自检，只还原可再生成的 `web/dist`，再执行 fast-forward 更新；角色资产、配置和其他源码改动都不会被清理。
+
+也可以在项目根目录手动执行同样的安全恢复：
+
+```bash
+git restore --source=HEAD --staged --worktree -- web/dist
+git clean -fd -- web/dist
+git pull --ff-only
+```
+
+旧版 Git 没有 `git restore` 时，第一行改用 `git checkout HEAD -- web/dist`。ZIP 下载版不含 Git 历史，不能原地更新；请重新下载最新版，已有角色资产仍保存在独立的数据目录中。
 
 ---
 
@@ -147,9 +164,9 @@ cd web && pnpm dev                                  # 前端
 # 测试
 make test
 
-# 发布前检查
-cd web && pnpm build
-cd .. && uv run python scripts/check_plugin.py
+# 发布前检查（干净构建并刷新入库的 web/dist）
+make build
+uv run python scripts/check_plugin.py
 claude plugin validate .
 ```
 
