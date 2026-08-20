@@ -407,7 +407,7 @@ function ThreeColumnLayout({
           max={ROSTER.max}
           onResize={setRosterW}
           onCommit={commitRosterW}
-          label="调整名册宽度"
+          label="调整项目栏宽度"
           className="hidden min-[769px]:block"
         />
       </div>
@@ -423,7 +423,7 @@ function WorkshopLanding() {
         <p className="text-xs uppercase tracking-label text-muted-foreground">项目目录</p>
         <h1 className="font-display text-display italic text-foreground">全部项目</h1>
         <p className="text-sm leading-relaxed text-muted-foreground">
-          从左侧进入一个项目；未归档的角色也会留在这里，随时可以继续制作或归入项目。
+          从左侧进入一个项目，在资产库中继续制作角色、UI 与视频内容。
         </p>
       </div>
     </section>

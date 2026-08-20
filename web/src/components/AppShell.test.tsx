@@ -195,7 +195,8 @@ describe('AppShell', () => {
     expect(within(breadcrumbs).getByRole('link', { name: '项目一' })).toHaveAttribute(
       'href', '/workshop/p1/overview',
     );
-    expect(screen.getByRole('navigation', { name: '项目工作区' })).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '角色与皮肤' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByText('返回工坊')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '返回' }));
@@ -383,14 +384,13 @@ describe('AppShell', () => {
       </Router>,
     );
 
-    expect(await screen.findByRole('navigation', { name: '项目工作区' })).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole('navigation', { name: '项目工作区' })).getByRole('link', { name: /UI/ }));
+    fireEvent.click(await screen.findByRole('link', { name: 'UI 方案与页面' }));
     await waitFor(() => expect(location.history.at(-1)).toBe('/workshop/p1/ui/v1'));
 
     // 浏览器 Back 会把 URL 恢复到上一项；页面只依赖 URL，因此对象与工作区同时恢复。
     act(() => location.navigate(artPath));
     await waitFor(() => expect(
-      within(screen.getByRole('navigation', { name: '项目工作区' })).getByRole('link', { name: /美术/ }),
+      screen.getByRole('link', { name: '角色与皮肤' }),
     ).toHaveAttribute('aria-current', 'page'));
     expect(within(screen.getByRole('navigation', { name: '面包屑' })).getByText('曹操')).toBeInTheDocument();
 
@@ -400,7 +400,8 @@ describe('AppShell', () => {
         <AppShell />
       </Router>,
     );
-    expect(await screen.findByRole('navigation', { name: '项目工作区' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '角色与皮肤' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
     expect(within(screen.getByRole('navigation', { name: '面包屑' })).getByText('曹操')).toBeInTheDocument();
   });
 

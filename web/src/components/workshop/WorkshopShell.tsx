@@ -3,9 +3,6 @@ import { Link } from 'wouter';
 
 import type { Project } from '@/schema/jobs';
 import {
-  ProjectWorkspaceNav,
-} from '@/components/workshop/ProjectWorkspaceNav';
-import {
   getWorkspaceDescriptor,
   type WorkshopWorkspace,
 } from '@/components/workshop/workspaces';
@@ -53,7 +50,7 @@ export function WorkshopShell({
               </span>
             </>
           ) : (
-            <span className="shrink-0" aria-current={objectLabel ? undefined : 'page'}>未分类角色</span>
+            <span className="shrink-0" aria-current={objectLabel ? undefined : 'page'}>角色资产</span>
           )}
           {objectLabel && (
             <>
@@ -65,18 +62,13 @@ export function WorkshopShell({
           )}
         </nav>
 
-        {project && (
-          <div className="mt-3 flex min-w-0 items-center gap-3">
-            {returnContext && (
-              <Link
-                href={workshopFolderPath(project.id, returnContext)}
-                className="shrink-0 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
-                返回文件夹
-              </Link>
-            )}
-            <ProjectWorkspaceNav projectId={project.id} workspace={workspace} />
-          </div>
+        {project && returnContext && (
+          <Link
+            href={workshopFolderPath(project.id, returnContext)}
+            className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            返回文件夹
+          </Link>
         )}
       </header>
 

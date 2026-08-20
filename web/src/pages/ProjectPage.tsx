@@ -28,7 +28,7 @@ import {
 import type { ScreenCanonicalFile } from '@/schema/jobs';
 import { ArtWorkspace } from '@/components/workshop/ArtWorkspace';
 import { OverviewWorkspace } from '@/components/workshop/OverviewWorkspace';
-import type { WorkshopWorkspace } from '@/components/workshop/ProjectWorkspaceNav';
+import type { WorkshopWorkspace } from '@/components/workshop/workspaces';
 import { UiWorkspace } from '@/components/workshop/UiWorkspace';
 import { UiSchemeBar } from '@/components/workshop/UiSchemeBar';
 import { VideoWorkspace } from '@/components/workshop/VideoWorkspace';
@@ -36,7 +36,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
 
-export type { WorkshopWorkspace } from '@/components/workshop/ProjectWorkspaceNav';
+export type { WorkshopWorkspace } from '@/components/workshop/workspaces';
 
 export function ProjectPage({
   projectId,

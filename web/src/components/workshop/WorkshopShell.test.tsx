@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { WorkshopShell } from './WorkshopShell';
 
 describe('WorkshopShell', () => {
-  it('从文件夹进入资产后保留显式返回路径，工作区切换也不丢上下文', () => {
+  it('从文件夹进入资产后保留返回路径且不重复显示工作区标签栏', () => {
     const location = memoryLocation({
       path: '/workshop/p1/video/pv?fromFolder=folder-summer&fromView=overview',
       static: false,
@@ -25,8 +25,6 @@ describe('WorkshopShell', () => {
     expect(screen.getByRole('link', { name: '返回文件夹' })).toHaveAttribute(
       'href', '/workshop/p1/folders/folder-summer/overview',
     );
-    expect(screen.getByRole('link', { name: 'UI' })).toHaveAttribute(
-      'href', '/workshop/p1/ui?fromFolder=folder-summer&fromView=overview',
-    );
+    expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
   });
 });

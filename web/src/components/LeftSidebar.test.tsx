@@ -15,7 +15,16 @@ beforeEach(() => {
       };
     }
     if (url === '/api/projects' && !init) {
-      return { ok: true, json: async () => ({ projects: [], assignments: {} }) };
+      return {
+        ok: true,
+        json: async () => ({
+          projects: [{ id: 'p1', slug: 'one', name: '项目一', created_at: '' }],
+          assignments: { shadow: 'p1', blaze: 'p1' },
+        }),
+      };
+    }
+    if (url === '/api/projects/p1/folders' && !init) {
+      return { ok: true, json: async () => ({ folders: [] }) };
     }
     if (url === '/api/active-character') {
       return { ok: true, json: async () => ({ active_id: 'shadow', updated_at: '' }) };
@@ -34,7 +43,7 @@ afterEach(() => {
 describe('LeftSidebar', () => {
   it('deletes a character from the right edge of its row after confirmation', async () => {
     const onDelete = vi.fn();
-    render(<LeftSidebar sseSignal={0} selectedId="shadow" onSelect={vi.fn()} onDelete={onDelete} />);
+    render(<LeftSidebar sseSignal={0} selectedId="shadow" activeProjectId="p1" workspace="art" onSelect={vi.fn()} onDelete={onDelete} />);
 
     const name = await screen.findByText('暗影');
     const row = name.closest('li');
@@ -57,7 +66,7 @@ describe('LeftSidebar', () => {
   });
 
   it('renders roster thumbnails with serif-initial fallback', async () => {
-    render(<LeftSidebar sseSignal={0} selectedId="shadow" onSelect={vi.fn()} />);
+    render(<LeftSidebar sseSignal={0} selectedId="shadow" activeProjectId="p1" workspace="art" onSelect={vi.fn()} />);
 
     const shadowRow = (await screen.findByText('暗影')).closest('li')!;
     const img = shadowRow.querySelector('img');
@@ -70,6 +79,9 @@ describe('LeftSidebar', () => {
     const blazeRow = screen.getByText('烈拳猴').closest('li')!;
     expect(blazeRow.querySelector('img')).toBeNull();
     expect(blazeRow.textContent).toContain('烈');
+    expect(screen.queryByText('名册 · Roster')).not.toBeInTheDocument();
+    expect(screen.queryByText('2 角色 · 1 项目')).not.toBeInTheDocument();
+    expect(screen.queryByText('未归档角色')).not.toBeInTheDocument();
   });
 
   it('项目目录只切项目，不在根层级展开角色树', async () => {

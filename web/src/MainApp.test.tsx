@@ -40,6 +40,8 @@ describe('MainApp', () => {
     render(<MainApp />);
 
     expect(await screen.findByRole('heading', { name: '全部项目' })).toBeInTheDocument();
+    expect(screen.getByText('从左侧进入一个项目，在资产库中继续制作角色、UI 与视频内容。')).toBeInTheDocument();
+    expect(screen.queryByText(/未归档|未分类/)).not.toBeInTheDocument();
     expect(screen.queryByText('请在左栏选择角色')).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith('/api/jobs');
   });
@@ -109,7 +111,7 @@ describe('MainApp', () => {
     expect(screen.getByText('返回画廊')).toBeInTheDocument();
   });
 
-  it('keeps project workspaces visible inside a routed art character', async () => {
+  it('uses the project sidebar as the only workspace navigation', async () => {
     class TestEventSource {
       addEventListener = vi.fn();
       close = vi.fn();
@@ -151,12 +153,10 @@ describe('MainApp', () => {
       />,
     );
 
-    const nav = await screen.findByRole('navigation', { name: '项目工作区' });
-    expect(nav).toHaveTextContent('概览');
-    expect(nav).toHaveTextContent('美术');
-    expect(nav).toHaveTextContent('UI');
-    expect(nav).toHaveTextContent('视频');
-    expect(screen.getByRole('link', { name: /美术/ })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('link', { name: '角色与皮肤' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'UI 方案与页面' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '视频企划' })).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
   });
 
   it('opens and closes the mobile project roster with focus return', async () => {

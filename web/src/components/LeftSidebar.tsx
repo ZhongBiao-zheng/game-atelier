@@ -13,7 +13,6 @@ import {
 import type { CharacterEntry, Project, ProjectsFile } from '../schema/jobs';
 import { ProjectNavigation } from '@/components/workshop/ProjectNavigation';
 import { CreateVariantForm } from '@/components/workshop/CreateVariantForm';
-import { SidebarDropZone } from '@/components/workshop/SidebarDropZone';
 import type { WorkshopWorkspace } from '@/components/workshop/workspaces';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
@@ -33,7 +32,6 @@ interface Props {
   currentFolderId?: string;
 }
 
-const UNCATEGORIZED = '__uncategorized__';
 const DRAG_PROJECT = 'text/project-id';
 const DRAG_CHAR = 'text/character-id';
 
@@ -212,7 +210,7 @@ export function LeftSidebar({
     e.stopPropagation();
     const members = Object.entries(projects.assignments).filter(([, pid]) => pid === p.id).length;
     const message = members > 0
-      ? `里面的 ${members} 个角色会回到"未分类"，角色文件不会丢。`
+      ? `不会删除角色文件；其中 ${members} 个角色需要重新归入项目后才会显示在资产库。`
       : '';
     setDialog({
       open: true,
@@ -259,13 +257,13 @@ export function LeftSidebar({
     });
   }
 
-  async function assignTo(characterId: string, projectId: string | null) {
+  async function assignTo(characterId: string, projectId: string) {
     try {
       const r = await fetch(`/api/characters/${characterId}/project`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: projectId }),
       });
-      if (!r.ok) throw await apiError(r, projectId ? '把角色移进项目' : '把角色移出项目');
+      if (!r.ok) throw await apiError(r, '把角色移进项目');
       setProjects(await r.json());
     } catch (e) {
       setError((e as Error).message);
@@ -282,9 +280,9 @@ export function LeftSidebar({
     setDragOver(null);
     const cid = e.dataTransfer.getData(DRAG_CHAR);
     if (!cid) return;
-    const current = projects.assignments[cid] || UNCATEGORIZED;
+    const current = projects.assignments[cid];
     if (current === target) return;
-    void assignTo(cid, target === UNCATEGORIZED ? null : target);
+    void assignTo(cid, target);
   }
 
   function onDragOver(e: React.DragEvent, target: string) {
@@ -339,12 +337,9 @@ export function LeftSidebar({
 
   const grouped = new Map<string, CharacterEntry[]>();
   for (const p of projects.projects) grouped.set(p.id, []);
-  grouped.set(UNCATEGORIZED, []);
   for (const c of characters) {
-    const key = projects.assignments[c.id] && grouped.has(projects.assignments[c.id])
-      ? projects.assignments[c.id]
-      : UNCATEGORIZED;
-    grouped.get(key)!.push(c);
+    const projectId = projects.assignments[c.id];
+    if (projectId && grouped.has(projectId)) grouped.get(projectId)!.push(c);
   }
   const activeProject = activeProjectId
     ? projects.projects.find(project => project.id === activeProjectId) ?? null
@@ -454,40 +449,26 @@ export function LeftSidebar({
               currentFolderId={currentFolderId}
             />
           ) : (
-            <>
-              <nav aria-label="项目列表">
-                {projects.projects.map(p => (
-                  <ProjectGroup
-                    key={p.id} project={p} chars={grouped.get(p.id) || []}
-                    isEditing={editingProjectId === p.id} draftName={draftName}
-                    dragOver={dragOver === p.id} onDrop={onDrop} onDragOver={onDragOver}
-                    onDragLeave={() => setDragOver(null)}
-                    onRenameStart={startProjectEdit} onRenameChange={setDraftName}
-                    onRenameCommit={commitProjectEdit} onRenameCancel={cancelEdit}
-                    onDelete={deleteProject} inputRef={inputRef}
-                    isDragging={projectDragId === p.id}
-                    dropIndicator={projectDragOver?.id === p.id ? projectDragOver.pos : null}
-                    onProjectDragStart={onProjectDragStart}
-                    onProjectDragOver={onProjectDragOver}
-                    onProjectDrop={onProjectDrop}
-                    onProjectDragEnd={onProjectDragEnd}
-                    onOpen={onOpenProject}
-                  />
-                ))}
-              </nav>
-
-              <SidebarDropZone
-                label="未归档角色"
-                active={dragOver === UNCATEGORIZED}
-                onDrop={e => onDrop(e, UNCATEGORIZED)}
-                onDragOver={e => onDragOver(e, UNCATEGORIZED)}
-                onDragLeave={() => setDragOver(null)}
-              >
-                <ul className="m-0 list-none p-0">
-                  {(grouped.get(UNCATEGORIZED) || []).map(renderChar)}
-                </ul>
-              </SidebarDropZone>
-            </>
+            <nav aria-label="项目列表">
+              {projects.projects.map(p => (
+                <ProjectGroup
+                  key={p.id} project={p} chars={grouped.get(p.id) || []}
+                  isEditing={editingProjectId === p.id} draftName={draftName}
+                  dragOver={dragOver === p.id} onDrop={onDrop} onDragOver={onDragOver}
+                  onDragLeave={() => setDragOver(null)}
+                  onRenameStart={startProjectEdit} onRenameChange={setDraftName}
+                  onRenameCommit={commitProjectEdit} onRenameCancel={cancelEdit}
+                  onDelete={deleteProject} inputRef={inputRef}
+                  isDragging={projectDragId === p.id}
+                  dropIndicator={projectDragOver?.id === p.id ? projectDragOver.pos : null}
+                  onProjectDragStart={onProjectDragStart}
+                  onProjectDragOver={onProjectDragOver}
+                  onProjectDrop={onProjectDrop}
+                  onProjectDragEnd={onProjectDragEnd}
+                  onOpen={onOpenProject}
+                />
+              ))}
+            </nav>
           )}
 
         </div>
@@ -504,9 +485,6 @@ export function LeftSidebar({
           </div>
         )}
 
-        <footer className="shrink-0 border-t border-border px-5 py-3 font-mono text-xs tabular-nums text-muted-foreground/60">
-          {characters.length} 角色 · {projects.projects.length} 项目
-        </footer>
       </aside>
       {dialog && (
         <ConfirmDialog
@@ -827,10 +805,7 @@ function BrandHeader({
     'disabled:opacity-40 disabled:cursor-default',
   );
   return (
-    <header className="flex items-center justify-between px-5 py-4">
-      <span className="text-xs uppercase tracking-label text-muted-foreground/70 select-none">
-        名册 · Roster
-      </span>
+    <header className="flex items-center justify-end px-5 py-4">
       <div className="flex items-center gap-1.5">
         <button
           onClick={onNewCharacter}
