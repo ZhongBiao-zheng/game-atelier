@@ -62,7 +62,8 @@ export function ProjectPage({
   const [screens, setScreens] = useState<ProjectScreenItem[]>([]);
   const [canonicalFile, setCanonicalFile] = useState<ScreenCanonicalFile>({ screens: {} });
   const [schemesFile, setSchemesFile] = useState<UiSchemesFile | null>(null);
-  const [productions, setProductions] = useState<ProjectVideoProduction[]>([]);
+  const [productions, setProductions] = useState<ProjectVideoProduction[] | null>(null);
+  const [videoLoadError, setVideoLoadError] = useState<string | null>(null);
   const [videoReferences, setVideoReferences] = useState<ProjectVideoReferenceCandidate[]>([]);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -146,7 +147,8 @@ export function ProjectPage({
   useEffect(() => {
     if (workspace !== 'video') return;
     let cancelled = false;
-    setProductions([]);
+    setProductions(null);
+    setVideoLoadError(null);
     setVideoReferences([]);
     Promise.all([
       fetchProjectVideos(projectId),
@@ -158,7 +160,9 @@ export function ProjectPage({
           setVideoReferences(references);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setVideoLoadError('无法读取当前项目的视频企划，请刷新页面重试。');
+      });
     return () => { cancelled = true; };
   }, [projectId, workspace]);
 
@@ -300,6 +304,7 @@ export function ProjectPage({
             productionId={productionId}
             shotId={shotId}
             productions={productions}
+            loadError={videoLoadError}
             referenceCandidates={videoReferences}
             onSelected={async (targetProductionId, targetShotId, path) => {
               await setProjectVideoSelected(projectId, targetProductionId, targetShotId, path);

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Film } from 'lucide-react';
+import { Check, Copy, Film } from 'lucide-react';
 import { Link } from 'wouter';
 
 import type {
@@ -11,6 +11,8 @@ import type {
 import { cn } from '@/lib/utils';
 import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
+import { useClipboard } from '@/hooks/useClipboard';
+import { Button } from '@/components/ui/button';
 import { GalleryVisibilityButton } from './GalleryVisibilityButton';
 
 export function VideoWorkspace({
@@ -18,6 +20,7 @@ export function VideoWorkspace({
   productionId,
   shotId,
   productions,
+  loadError,
   referenceCandidates,
   onSelected,
   onReferences,
@@ -25,11 +28,14 @@ export function VideoWorkspace({
   projectId: string;
   productionId?: string;
   shotId?: string;
-  productions: ProjectVideoProduction[];
+  productions: ProjectVideoProduction[] | null;
+  loadError: string | null;
   referenceCandidates: ProjectVideoReferenceCandidate[];
   onSelected: (productionId: string, shotId: string, path: string | null) => Promise<void>;
   onReferences: (productionId: string, shotId: string, paths: string[]) => Promise<void>;
 }) {
+  if (loadError) return <VideoLoadError message={loadError} />;
+  if (productions === null) return <VideoLoading />;
   if (productions.length === 0) return <VideoEmpty />;
   const current = productionId
     ? productions.find(production => production.production_id === productionId)
@@ -51,6 +57,31 @@ export function VideoWorkspace({
     />
   ) : (
     <ProductionDetail projectId={projectId} production={current} />
+  );
+}
+
+function VideoLoadError({ message }: { message: string }) {
+  return (
+    <section
+      role="alert"
+      className="grid min-h-[360px] place-items-center rounded-lg border border-border bg-card/30 px-6 text-center"
+    >
+      <div className="space-y-2">
+        <p className="text-base font-medium text-foreground">视频企划读取失败</p>
+        <p className="text-sm text-destructive">{message}</p>
+      </div>
+    </section>
+  );
+}
+
+function VideoLoading() {
+  return (
+    <section
+      role="status"
+      className="grid min-h-[360px] place-items-center rounded-lg border border-border bg-card/30 px-6 text-center"
+    >
+      <p className="text-sm text-muted-foreground">正在读取视频企划…</p>
+    </section>
   );
 }
 
@@ -487,20 +518,46 @@ function ExportList({
 }
 
 function VideoEmpty() {
+  const copyToClipboard = useClipboard();
+  const [copyState, setCopyState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
+  const command = '/game-atelier:video';
+
+  async function copyCommand() {
+    setCopyState('copying');
+    const result = await copyToClipboard(command);
+    setCopyState(result.success ? 'copied' : 'error');
+  }
+
   return (
     <section className="grid min-h-[360px] place-items-center rounded-lg border border-border bg-card/30 px-6 text-center">
-      <div className="max-w-lg space-y-4">
+      <div className="w-full max-w-lg space-y-5">
         <Film className="mx-auto size-8 text-muted-foreground" aria-hidden />
         <div className="space-y-2">
           <h2 className="font-display text-display italic text-foreground/70">这个项目还没有视频企划</h2>
-          <p className="text-sm text-muted-foreground">用视频总控建立 brief 与镜头表，生成结果会按企划和镜头归档在这里。</p>
+          <p className="text-sm text-muted-foreground">
+            复制指令并回到对话发送，视频总控会为这个项目建立 Brief 与镜头表。
+          </p>
         </div>
-        <div className="flex flex-wrap justify-center gap-2">
-          <code className="inline-flex rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground">/game-atelier:video</code>
-          <Link href="/studio" className="inline-flex h-9 items-center rounded-md border border-border px-4 text-sm font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-            去创作台试验视频
-          </Link>
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <code className="flex min-h-11 select-all items-center overflow-x-auto rounded-md border border-border bg-background px-3 text-left font-mono text-xs text-foreground">
+            {command}
+          </code>
+          <Button
+            type="button"
+            disabled={copyState === 'copying'}
+            onClick={() => void copyCommand()}
+            className="min-h-11"
+          >
+            {copyState === 'copied' ? <Check aria-hidden /> : <Copy aria-hidden />}
+            {copyState === 'copying' ? '复制中…' : copyState === 'copied' ? '已复制' : '复制新建企划指令'}
+          </Button>
         </div>
+        {copyState === 'copied' && (
+          <p role="status" className="text-xs text-[color:var(--status-done)]">已复制，回到对话粘贴并发送即可。</p>
+        )}
+        {copyState === 'error' && (
+          <p role="status" className="text-xs text-destructive">复制失败，请手动选择上方指令。</p>
+        )}
       </div>
     </section>
   );

@@ -1,5 +1,5 @@
 // web/src/pages/ProjectPage.test.tsx
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectPage } from './ProjectPage';
 
@@ -362,12 +362,88 @@ describe('ProjectPage', () => {
     expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/videos'));
   });
 
-  it('视频工作区空状态给出视频 Skill 与自由试验入口', async () => {
+  it('视频工作区空状态复制新建企划指令，不再导向自由试验', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
     render(<ProjectPage projectId="p1" workspace="video" />);
     expect(await screen.findByText('这个项目还没有视频企划')).toBeInTheDocument();
     expect(screen.getByText('/game-atelier:video')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '去创作台试验视频' })).toHaveAttribute('href', '/studio');
+    expect(screen.queryByRole('link', { name: '去创作台试验视频' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '复制新建企划指令' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('/game-atelier:video'));
+    expect(await screen.findByText('已复制，回到对话粘贴并发送即可。')).toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalledWith('/api/projects/p1/workspaces');
+  });
+
+  it('视频企划读取完成前不显示新建空状态', async () => {
+    let resolveVideos!: (response: Response) => void;
+    const videosResponse = new Promise<Response>((resolve) => {
+      resolveVideos = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/videos')) return videosResponse;
+      if (url.endsWith('/video-references')) {
+        return { ok: true, json: async () => ({ candidates: [] }) } as Response;
+      }
+      return { ok: true, json: async () => sample } as Response;
+    }));
+
+    render(<ProjectPage projectId="p1" workspace="video" />);
+
+    expect(await screen.findByText('正在读取视频企划…')).toBeInTheDocument();
+    expect(screen.queryByText('这个项目还没有视频企划')).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveVideos({
+        ok: true,
+        json: async () => ({
+          productions: [{
+            production_id: 'pv',
+            title: '上线宣传片',
+            type: 'promo',
+            status: 'draft',
+            brief: { goal: '', platform: '', ratio: '', duration: '', sound: '' },
+            shots: [],
+            exports: [],
+          }],
+        }),
+      } as Response);
+      await videosResponse;
+    });
+
+    expect(await screen.findByText('上线宣传片')).toBeInTheDocument();
+    expect(screen.queryByText('这个项目还没有视频企划')).not.toBeInTheDocument();
+  });
+
+  it('视频企划读取失败时显示错误，不误显示新建空状态', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/videos')) throw new Error('offline');
+      if (url.endsWith('/video-references')) {
+        return { ok: true, json: async () => ({ candidates: [] }) } as Response;
+      }
+      return { ok: true, json: async () => sample } as Response;
+    }));
+
+    render(<ProjectPage projectId="p1" workspace="video" />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('视频企划读取失败');
+    expect(screen.getByText('无法读取当前项目的视频企划，请刷新页面重试。')).toBeInTheDocument();
+    expect(screen.queryByText('这个项目还没有视频企划')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '复制新建企划指令' })).not.toBeInTheDocument();
+  });
+
+  it('视频企划指令复制失败时保留手动复制入口', async () => {
+    vi.stubGlobal('navigator', {
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error('blocked')) },
+    });
+    render(<ProjectPage projectId="p1" workspace="video" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '复制新建企划指令' }));
+
+    expect(await screen.findByText('复制失败，请手动选择上方指令。')).toBeInTheDocument();
+    expect(screen.getByText('/game-atelier:video')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '复制新建企划指令' })).toBeEnabled();
   });
 
   it('UI 工作区显示文件系统推导出的唯一下一步', async () => {
