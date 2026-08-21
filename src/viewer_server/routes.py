@@ -41,7 +41,15 @@ from character_workflow.lib.jobs import (
 from character_workflow.lib.schemas import AssetSlot as _AssetSlot
 from character_workflow.lib.projects import (
     assign_character, create_project, delete_project, read_projects,
-    rename_project, reorder_projects,
+    rename_project, reorder_projects, resolve_project, touch_project,
+)
+from character_workflow.lib.project_gallery import (
+    gallery_job_ids_by_path,
+    project_gallery,
+    project_gallery_media,
+    project_id_for_media_path,
+    project_index,
+    read_gallery_hidden,
 )
 from character_workflow.lib.project_folders import (
     add_folder_item, create_folder, delete_folder, read_project_folders,
@@ -54,7 +62,8 @@ from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterVariantCreate,
     CharacterProjectAssign, ClipboardAttempt,
-    FeedbackPost, Job, JobKind, JobParams, JobStatus, ProjectCreate, ProjectRename,
+    FeedbackPost, GalleryMedia, Job, JobKind, JobParams, JobStatus, ProjectCreate,
+    ProjectRename, ProjectGalleryResponse, ProjectIndexResponse,
     ProjectFolderCreate, ProjectFolderItem, ProjectFolderItemKind, ProjectFolderReorder,
     ProjectFoldersFile, ProjectFolderUpdate, ProjectVideoReferencesResponse,
     ProjectVideosResponse, ProjectWorkspaceSummary,
@@ -71,6 +80,7 @@ logger = logging.getLogger(__name__)
 
 class CharacterCreate(BaseModel):
     name: str
+    project_id: str | None = None
 
 
 router = APIRouter(prefix="/api")
@@ -521,10 +531,26 @@ def create_character(payload: CharacterCreate) -> CharacterEntry:
     name = payload.name.strip()
     if not name:
         raise HTTPException(422, detail="角色名不能为空")
+    if payload.project_id is not None:
+        try:
+            resolve_project(payload.project_id)
+        except KeyError as error:
+            raise HTTPException(404, detail="找不到当前项目（可能已被删除）") from error
     char_id = new_temporary_character_id()
     spec_content = f"# {name}\n\n（尚无档案 — 请在终端 /game-atelier:character 对话补全）\n"
     initialize_character_directory(char_id, spec_content)
-    write_active(char_id)
+    try:
+        if payload.project_id is not None:
+            assign_character(char_id, payload.project_id)
+        write_active(char_id)
+    except Exception:
+        if payload.project_id is not None:
+            try:
+                assign_character(char_id, None)
+            except Exception:
+                logger.warning("回滚新角色项目归属失败: %s", char_id, exc_info=True)
+        shutil.rmtree(data_root.characters_dir() / char_id, ignore_errors=True)
+        raise
     return CharacterEntry(
         id=char_id, name=name, status="idle", latest_job_id=None, variant=None,
     )
@@ -846,6 +872,37 @@ def post_project_video_selected(
 def post_project(payload: ProjectCreate) -> ProjectsFile:
     create_project(payload.name)
     return read_projects()
+
+
+@router.get("/projects/index", response_model=ProjectIndexResponse)
+def get_project_index() -> ProjectIndexResponse:
+    return project_index()
+
+
+@router.get("/projects/{project_id}/gallery/media", response_model=GalleryMedia)
+def get_project_gallery_media(
+    project_id: str,
+    path: str = Query(min_length=1),
+) -> GalleryMedia:
+    try:
+        return project_gallery_media(project_id, path)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="找不到这个项目作品") from error
+
+
+@router.get("/projects/{project_id}/gallery", response_model=ProjectGalleryResponse)
+def get_project_gallery(
+    project_id: str,
+    category: str = Query(default="all"),
+    limit: int = Query(default=40, ge=1, le=100),
+    cursor: str | None = None,
+) -> ProjectGalleryResponse:
+    try:
+        return project_gallery(project_id, category=category, limit=limit, cursor=cursor)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 class ProjectReorder(BaseModel):
@@ -1584,53 +1641,6 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     return {"items": items[:limit]}
 
 
-@router.get("/gallery/project")
-def gallery_project(project: str = Query(min_length=1)) -> dict:
-    """项目作品：assignments 反查该项目的角色 → 各角色三槽的图。
-
-    已隐藏的不出（与首页作品展示同语义），最新在前。
-    """
-    pf = read_projects()
-    proj = next((p for p in pf.projects if p.id == project), None)
-    if proj is None:
-        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）")
-    member_ids = [cid for cid, pid in pf.assignments.items() if pid == proj.id]
-    hidden = set(_read_gallery_hidden())
-    job_ids_by_path = _gallery_job_ids_by_path()
-    items: list[dict] = []
-    for char_id in member_ids:
-        char_dir = _project_root() / "characters" / char_id
-        if not char_dir.is_dir():
-            continue
-        char_name = character_display_name(char_id)
-        for slot in _GALLERY_SLOTS:
-            slot_dir = char_dir / slot
-            if not slot_dir.is_dir():
-                continue
-            for f in slot_dir.iterdir():
-                if f.suffix.lower() not in _GALLERY_EXTS:
-                    continue
-                rel = f.relative_to(_project_root()).as_posix()
-                if rel in hidden:
-                    continue
-                try:
-                    mtime = f.stat().st_mtime
-                except OSError:
-                    continue
-                items.append({
-                    "character_id": char_id,
-                    "character_name": char_name,
-                    "asset_slot": slot,
-                    "source": "character",
-                    "filename": f.name,
-                    "path": rel,
-                    "job_id": job_ids_by_path.get(rel),
-                    "mtime": mtime,
-                })
-    items.sort(key=lambda it: it["mtime"], reverse=True)
-    return {"items": items}
-
-
 @router.get("/gallery/screens")
 def gallery_screens(
     project: str = Query(min_length=1),
@@ -1689,17 +1699,7 @@ def _gallery_hidden_file() -> Path:
 
 
 def _read_gallery_hidden() -> list[str]:
-    p = _gallery_hidden_file()
-    if not p.exists():
-        return []
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-    paths = data.get("paths") if isinstance(data, dict) else None
-    if not isinstance(paths, list):
-        return []
-    return [x for x in paths if isinstance(x, str)]
+    return read_gallery_hidden()
 
 
 def _normalize_gallery_path(raw: str) -> str:
@@ -1732,6 +1732,9 @@ def post_gallery_hidden(patch: _GalleryHiddenPatch) -> dict:
     if patch.hidden:
         paths.append(target)
     atomic_write_json(_gallery_hidden_file(), {"paths": paths})
+    project_id = project_id_for_media_path(target)
+    if project_id is not None:
+        touch_project(project_id)
     return {"paths": paths}
 
 
@@ -1827,24 +1830,7 @@ def post_gallery_ratings(patch: _GalleryRatingPatch) -> dict:
 
 
 def _gallery_job_ids_by_path() -> dict[str, str]:
-    root = _project_root()
-    result: dict[str, str] = {}
-    try:
-        jobs = list_jobs()
-    except Exception:
-        return result
-    for job in jobs:
-        for raw_path in job.output_paths:
-            path = Path(raw_path)
-            absolute = path if path.is_absolute() else root / path
-            try:
-                relative = absolute.resolve().relative_to(root).as_posix()
-            except ValueError:
-                relative = raw_path
-            result.setdefault(raw_path, job.job_id)
-            result.setdefault(str(absolute.resolve()), job.job_id)
-            result.setdefault(relative, job.job_id)
-    return result
+    return gallery_job_ids_by_path()
 
 
 @router.get("/gallery/image")

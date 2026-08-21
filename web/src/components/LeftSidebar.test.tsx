@@ -84,7 +84,56 @@ describe('LeftSidebar', () => {
     expect(screen.queryByText('未归档角色')).not.toBeInTheDocument();
   });
 
-  it('项目目录只切项目，不在根层级展开角色树', async () => {
+  it('在当前项目内一次创建并归属角色', async () => {
+    const created = {
+      id: 'char-summer', name: '夏日角色', status: 'idle', latest_job_id: null, variant: null,
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/characters' && !init) return { ok: true, json: async () => [] };
+      if (url === '/api/projects' && !init) {
+        return {
+          ok: true,
+          json: async () => ({
+            projects: [{ id: 'p1', slug: 'one', name: '项目一', created_at: '' }],
+            assignments: {},
+          }),
+        };
+      }
+      if (url === '/api/projects/p1/folders' && !init) {
+        return { ok: true, json: async () => ({ folders: [] }) };
+      }
+      if (url === '/api/characters' && init?.method === 'POST') {
+        return { ok: true, json: async () => created };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const onSelect = vi.fn();
+    render(
+      <LeftSidebar
+        sseSignal={0}
+        activeProjectId="p1"
+        workspace="art"
+        onSelect={onSelect}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '新建角色' }));
+    fireEvent.change(screen.getByLabelText('新角色名称'), { target: { value: '夏日角色' } });
+    fireEvent.keyDown(screen.getByLabelText('新角色名称'), { key: 'Enter' });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/characters',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ name: '夏日角色', project_id: 'p1' }),
+      }),
+    ));
+    expect(await screen.findByRole('button', { name: '夏日角色' })).toBeInTheDocument();
+    expect(onSelect).toHaveBeenCalledWith('char-summer', '夏日角色', 'p1');
+  });
+
+  it('项目内通过顶部切换器切项目，不展开其他项目的角色树', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/characters' && !init) {
         return { ok: true, json: async () => [] };
@@ -93,7 +142,10 @@ describe('LeftSidebar', () => {
         return {
           ok: true,
           json: async () => ({
-            projects: [{ id: 'p1', slug: 's1', name: '魔幻', created_at: '2026-06-24T00:00:00+00:00' }],
+            projects: [
+              { id: 'p1', slug: 's1', name: '魔幻', created_at: '2026-06-24T00:00:00+00:00' },
+              { id: 'p2', slug: 's2', name: '科幻', created_at: '2026-06-25T00:00:00+00:00' },
+            ],
             assignments: {},
           }),
         };
@@ -104,12 +156,22 @@ describe('LeftSidebar', () => {
       return { ok: false, status: 404, json: async () => ({}) };
     }));
 
-    const onOpenProject = vi.fn();
-    render(<LeftSidebar sseSignal={0} onSelect={vi.fn()} onOpenProject={onOpenProject} />);
-    const nameEl = await screen.findByText('魔幻');
-    fireEvent.click(nameEl);
-    expect(onOpenProject).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1' }));
-    expect(screen.queryByLabelText('收起项目')).not.toBeInTheDocument();
+    render(
+      <LeftSidebar
+        sseSignal={0}
+        activeProjectId="p1"
+        onSelect={vi.fn()}
+      />,
+    );
+    fireEvent.keyDown(
+      await screen.findByRole('button', { name: '切换项目，当前为 魔幻' }),
+      { key: 'Enter' },
+    );
+    expect(await screen.findByRole('menuitem', { name: /科幻/ })).toHaveAttribute(
+      'href',
+      '/workshop/p2/overview',
+    );
+    expect(screen.queryByRole('button', { name: '暗影' })).not.toBeInTheDocument();
   });
 
   it('项目内稳定显示首页、文件夹和资产库，角色名册只在美术视图出现', async () => {
@@ -159,7 +221,7 @@ describe('LeftSidebar', () => {
     overview.unmount();
 
     render(<LeftSidebar sseSignal={0} activeProjectId="p1" workspace="art" onSelect={vi.fn()} />);
-    expect(await screen.findByText('角色名册')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '新建角色' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '暗影' })).toBeInTheDocument();
   });
 

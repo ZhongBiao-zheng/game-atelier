@@ -6,12 +6,13 @@
   "assignments": {"shadow": "p-..."}
 }
 
-assignments 里没有的角色 → 未归属（在 UI 上落到"未分类"分组）。
+assignments 里没有的角色不进入工坊项目导航；项目内创建角色时必须同步写入归属。
 项目删除时连带清理 assignments 里指向它的条目。
 """
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -126,6 +127,7 @@ def rename_project(project_id: str, name: str) -> Project:
         if p.id == project_id:
             p.name = name.strip()
             _write(f)
+            touch_project(p.id)
             return p
     raise KeyError(project_id)
 
@@ -149,6 +151,11 @@ def reorder_projects(ordered_ids: list[str]) -> ProjectsFile:
 
 def assign_characters(character_ids: list[str], project_id: str | None) -> ProjectsFile:
     f = read_projects()
+    previous_project_ids = {
+        owner_id
+        for character_id in character_ids
+        if (owner_id := f.assignments.get(character_id)) is not None
+    }
     if project_id is None:
         for character_id in character_ids:
             f.assignments.pop(character_id, None)
@@ -158,8 +165,18 @@ def assign_characters(character_ids: list[str], project_id: str | None) -> Proje
         for character_id in character_ids:
             f.assignments[character_id] = project_id
     _write(f)
+    for affected_project_id in previous_project_ids | ({project_id} if project_id else set()):
+        touch_project(affected_project_id)
     return f
 
 
 def assign_character(character_id: str, project_id: str | None) -> ProjectsFile:
     return assign_characters([character_id], project_id)
+
+
+def touch_project(project_id: str) -> None:
+    """Mark metadata-only changes without introducing a second activity ledger."""
+    project = resolve_project(project_id)
+    project_dir = _projects_root() / project.slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+    os.utime(project_dir, None)

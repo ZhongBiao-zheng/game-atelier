@@ -10,22 +10,22 @@ const sample = {
 
 const works = [
   {
-    character_id: 'char-a',
-    character_name: '暗影',
-    asset_slot: 'promo',
-    filename: 'kv.png',
     path: 'characters/char-a/promo/kv.png',
+    media_type: 'image',
+    produced_at: '2026-08-21T08:00:00Z',
+    title: '暗影',
+    detail: '美宣',
     job_id: 'job-promo-1',
-    mtime: 100,
+    target: { kind: 'art', character_id: 'char-a', asset_slot: 'promo' },
   },
   {
-    character_id: 'char-b',
-    character_name: '烈拳猴',
-    asset_slot: 'portrait',
-    filename: 'v1.png',
     path: 'characters/char-b/portrait/v1.png',
+    media_type: 'image',
+    produced_at: '2026-08-21T07:00:00Z',
+    title: '烈拳猴',
+    detail: '立绘',
     job_id: null,
-    mtime: 50,
+    target: { kind: 'art', character_id: 'char-b', asset_slot: 'portrait' },
   },
 ];
 
@@ -70,8 +70,8 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
     if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
-    if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
-      return { ok: true, json: async () => ({ items: works }) } as Response;
+    if (typeof url === 'string' && url.startsWith('/api/projects/p1/gallery')) {
+      return { ok: true, json: async () => ({ items: works, next_cursor: null }) } as Response;
     }
     if (typeof url === 'string' && url.startsWith('/api/gallery/screens')) {
       return { ok: true, json: async () => ({ items: screenItems }) } as Response;
@@ -88,24 +88,46 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('ProjectPage', () => {
-  it('渲染项目信息 + 可编辑 worldview', async () => {
+  it('项目经验默认阅读，点编辑才出现输入框', async () => {
     render(<ProjectPage projectId="p1" workspace="overview" />);
     await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
-    expect(screen.getByText('3', { selector: 'dd' })).toBeInTheDocument();
-    expect((screen.getByLabelText('项目经验 / 世界观') as HTMLTextAreaElement).value).toBe('暖色调');
+    expect(screen.getByText('暖色调')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '项目经验 / 世界观' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    expect((screen.getByRole('textbox', { name: '项目经验 / 世界观' }) as HTMLTextAreaElement).value).toBe('暖色调');
   });
 
   it('无改动时保存禁用，改动后可保存并 POST', async () => {
     render(<ProjectPage projectId="p1" workspace="overview" />);
-    await waitFor(() => screen.getByLabelText('项目经验 / 世界观'));
+    await waitFor(() => screen.getByRole('button', { name: '编辑' }));
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
     const save = screen.getByRole('button', { name: '保存' });
     expect(save).toBeDisabled();
-    fireEvent.change(screen.getByLabelText('项目经验 / 世界观'), { target: { value: '暖色调，避免 IP' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '项目经验 / 世界观' }), { target: { value: '暖色调，避免 IP' } });
     expect(save).not.toBeDisabled();
     fireEvent.click(save);
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith('/api/experience', expect.objectContaining({ method: 'POST' })),
     );
+  });
+
+  it('编辑未保存时阻止浏览器后退离开项目', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const forward = vi.spyOn(window.history, 'forward').mockImplementation(() => {});
+    window.history.replaceState({}, '', '/workshop/p1/overview');
+    render(<ProjectPage projectId="p1" workspace="overview" />);
+    await waitFor(() => screen.getByRole('button', { name: '编辑' }));
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '项目经验 / 世界观' }), {
+      target: { value: '尚未保存的新世界观' },
+    });
+
+    window.history.pushState({}, '', '/workshop');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+
+    expect(confirm).toHaveBeenCalledWith('项目经验尚未保存，确定离开吗？');
+    expect(forward).toHaveBeenCalledOnce();
+    window.history.replaceState({}, '', '/');
   });
 
   it('项目经验下方渲染项目作品区：卡片标角色名、点击进角色大图', async () => {
@@ -128,8 +150,8 @@ describe('ProjectPage', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
       if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
-      if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
-        return { ok: true, json: async () => ({ items: [] }) } as Response;
+      if (typeof url === 'string' && url.startsWith('/api/projects/p1/gallery')) {
+        return { ok: true, json: async () => ({ items: [], next_cursor: null }) } as Response;
       }
       return { ok: true, json: async () => sample } as Response;
     }));
@@ -167,8 +189,8 @@ describe('ProjectPage', () => {
       if (typeof url === 'string' && url.startsWith('/api/gallery/screens')) {
         return { ok: true, json: async () => ({ items: [] }) } as Response;
       }
-      if (typeof url === 'string' && url.startsWith('/api/gallery/project')) {
-        return { ok: true, json: async () => ({ items: works }) } as Response;
+      if (typeof url === 'string' && url.startsWith('/api/projects/p1/gallery')) {
+        return { ok: true, json: async () => ({ items: works, next_cursor: null }) } as Response;
       }
       if (typeof url === 'string' && url.includes('/screens/canonical')) {
         return { ok: true, json: async () => emptyScreenCanonical } as Response;

@@ -13,10 +13,10 @@ import { ProjectPage, type WorkshopWorkspace } from './pages/ProjectPage';
 import { WorkshopShell } from './components/workshop/WorkshopShell';
 import { cn } from '@/lib/utils';
 import { ProjectFolderPage, type ProjectFolderView } from '@/pages/ProjectFolderPage';
+import { ProjectIndexPage } from '@/pages/ProjectIndexPage';
 import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
 
-// 弹性分界线参数（与方案 D 节同步）：名册不可收起（无 snap），胶片带 <64 收起
-const ROSTER = { key: 'workshop:roster-width', def: 264, min: 200, max: 400 };
+const SIDEBAR = { key: 'workshop:sidebar-width', def: 264, min: 200, max: 400 };
 const STRIP = { key: 'workshop:strip-width', def: 104, min: 72, max: 320, snap: 64 };
 
 function loadWidth(
@@ -124,10 +124,10 @@ function ThreeColumnLayout({
   const returnContext = useWorkshopReturn();
   const [characterName, setCharacterName] = useState('');
   const [projectsFile, setProjectsFile] = useState<ProjectsFile | null>(null);
-  const [mobileRosterOpen, setMobileRosterOpen] = useState(false);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [folderLabel, setFolderLabel] = useState<string | null>(null);
-  const mobileRosterTriggerRef = useRef<HTMLButtonElement>(null);
-  const mobileRosterCloseRef = useRef<HTMLButtonElement>(null);
+  const mobileNavigationTriggerRef = useRef<HTMLButtonElement>(null);
+  const mobileNavigationCloseRef = useRef<HTMLButtonElement>(null);
   const sseSignal = useSSE();
   const workspace = routedWorkspace ?? 'overview';
   const openedProject = routedProjectId
@@ -193,8 +193,7 @@ function ThreeColumnLayout({
 
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
-  // 弹性面板宽度：名册只 clamp 不收起；胶片带可收起为 0，lastStripW 记恢复宽度
-  const [rosterW, setRosterW] = useState(() => loadWidth(ROSTER));
+  const [sidebarW, setSidebarW] = useState(() => loadWidth(SIDEBAR));
   const [stripW, setStripW] = useState(() => loadWidth(STRIP, true));
   const lastStripW = useRef(stripW > 0 ? stripW : STRIP.def);
   const detailSlot = routedAssetSlot ?? 'portrait';
@@ -206,9 +205,9 @@ function ThreeColumnLayout({
     setFolderLabel(null);
   }, [routedFolderId]);
 
-  const commitRosterW = useCallback((w: number) => {
-    setRosterW(w);
-    window.localStorage.setItem(ROSTER.key, String(w));
+  const commitSidebarW = useCallback((w: number) => {
+    setSidebarW(w);
+    window.localStorage.setItem(SIDEBAR.key, String(w));
   }, []);
   const commitStripW = useCallback((w: number) => {
     setStripW(w);
@@ -216,14 +215,14 @@ function ThreeColumnLayout({
     window.localStorage.setItem(STRIP.key, String(w));
   }, []);
 
-  function openMobileRoster() {
-    setMobileRosterOpen(true);
-    window.requestAnimationFrame(() => mobileRosterCloseRef.current?.focus());
+  function openMobileNavigation() {
+    setMobileNavigationOpen(true);
+    window.requestAnimationFrame(() => mobileNavigationCloseRef.current?.focus());
   }
 
-  function closeMobileRoster() {
-    setMobileRosterOpen(false);
-    window.requestAnimationFrame(() => mobileRosterTriggerRef.current?.focus());
+  function closeMobileNavigation() {
+    setMobileNavigationOpen(false);
+    window.requestAnimationFrame(() => mobileNavigationTriggerRef.current?.focus());
   }
 
   function openImage(path: string, jobId: string, slot?: AssetSlot) {
@@ -315,30 +314,57 @@ function ThreeColumnLayout({
     || (routedShotId ? `镜头 ${routedShotId}` : null)
     || (routedProductionId ? `视频企划 ${routedProductionId}` : null);
 
+  if (!routedProjectId && !routedCharacterId) {
+    return (
+      <ProjectIndexPage
+        onOpenProject={projectId => setLocation(`/workshop/${encodeURIComponent(projectId)}/overview`)}
+      />
+    );
+  }
+
+  if (projectsFile && routedProjectId && !openedProject) {
+    return (
+      <section className="grid h-full place-items-center bg-background px-6 text-center">
+        <div className="max-w-md space-y-3">
+          <p className="text-xs uppercase tracking-label text-muted-foreground">项目不存在</p>
+          <h1 className="font-display text-display italic text-foreground">找不到这个项目</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            项目可能已经删除，或当前链接使用了失效的项目编号。
+          </p>
+          <a
+            href="/workshop"
+            className="inline-flex h-10 items-center rounded-md border border-border px-4 text-sm font-medium text-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            返回全部项目
+          </a>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <>
       <div
-        // 同上：行高钉死，名册/画廊各自内滚，头部与侧栏保持固定
-        className="relative grid h-full grid-cols-1 grid-rows-[minmax(0,1fr)] min-[769px]:grid-cols-[var(--roster-width)_minmax(0,1fr)]"
-        style={{ '--roster-width': `${rosterW}px` } as CSSProperties}
+        className="relative grid h-full grid-cols-1 grid-rows-[minmax(0,1fr)] min-[769px]:grid-cols-[var(--sidebar-width)_minmax(0,1fr)]"
+        style={{ '--sidebar-width': `${sidebarW}px` } as CSSProperties}
       >
-        {mobileRosterOpen && (
+        {mobileNavigationOpen && (
           <button
             type="button"
-            aria-label="关闭项目册"
-            onClick={closeMobileRoster}
+            aria-label="关闭项目导航"
+            onClick={closeMobileNavigation}
             className="fixed inset-0 z-40 bg-scrim/70 min-[769px]:hidden"
           />
         )}
         <div className={cn(
           'fixed inset-y-0 left-0 z-50 w-[min(86vw,320px)] min-w-0 min-h-0 bg-background transition-transform duration-200 min-[769px]:static min-[769px]:z-auto min-[769px]:w-auto min-[769px]:translate-x-0',
-          mobileRosterOpen ? 'translate-x-0' : '-translate-x-full',
+          mobileNavigationOpen ? 'translate-x-0' : '-translate-x-full',
         )}>
           <div className="flex h-10 items-center justify-end border-b border-border px-2 min-[769px]:hidden">
             <button
-              ref={mobileRosterCloseRef}
+              ref={mobileNavigationCloseRef}
               type="button"
-              onClick={closeMobileRoster}
+              onClick={closeMobileNavigation}
               className="rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               关闭
@@ -355,18 +381,14 @@ function ThreeColumnLayout({
                 const projectId = projectIdOverride ?? projectsFile?.assignments[id];
                 const project = projectsFile?.projects.find(p => p.id === projectId) ?? null;
                 setCharacterName(name);
-                closeMobileRoster();
+                closeMobileNavigation();
                 if (project) {
                   setLocation(`/workshop/${encodeURIComponent(project.id)}/art/characters/${encodeURIComponent(id)}`);
                 } else {
                   setLocation(`/workshop/unassigned/characters/${encodeURIComponent(id)}`);
                 }
               }}
-              onOpenProject={(p) => {
-                closeMobileRoster();
-                setLocation(`/workshop/${encodeURIComponent(p.id)}/overview`);
-              }}
-              onNavigate={closeMobileRoster}
+              onNavigate={closeMobileNavigation}
               onDelete={(id) => {
                 if (selected?.id === id) setLocation('/workshop');
               }}
@@ -376,13 +398,13 @@ function ThreeColumnLayout({
         <div className="col-start-1 flex min-h-0 min-w-0 flex-col min-[769px]:col-start-2">
           <div className="shrink-0 border-b border-border/40 px-3 py-2 min-[769px]:hidden">
             <button
-              ref={mobileRosterTriggerRef}
+              ref={mobileNavigationTriggerRef}
               type="button"
-              onClick={openMobileRoster}
-              aria-expanded={mobileRosterOpen}
+              onClick={openMobileNavigation}
+              aria-expanded={mobileNavigationOpen}
               className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
-              打开项目册
+              打开项目导航
             </button>
           </div>
           <div className="min-h-0 flex-1">
@@ -395,38 +417,22 @@ function ThreeColumnLayout({
               >
                 {projectContent}
               </WorkshopShell>
-            ) : (
-              <WorkshopLanding />
-            )}
+            ) : null}
           </div>
         </div>
         <ResizableDivider
-          key="roster-divider"
-          width={rosterW}
-          min={ROSTER.min}
-          max={ROSTER.max}
-          onResize={setRosterW}
-          onCommit={commitRosterW}
+          key="sidebar-divider"
+          width={sidebarW}
+          min={SIDEBAR.min}
+          max={SIDEBAR.max}
+          onResize={setSidebarW}
+          onCommit={commitSidebarW}
           label="调整项目栏宽度"
           className="hidden min-[769px]:block"
         />
       </div>
       {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
     </>
-  );
-}
-
-function WorkshopLanding() {
-  return (
-    <section className="grid h-full place-items-center bg-background px-6 text-center">
-      <div className="max-w-md space-y-3">
-        <p className="text-xs uppercase tracking-label text-muted-foreground">项目目录</p>
-        <h1 className="font-display text-display italic text-foreground">全部项目</h1>
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          从左侧进入一个项目，在资产库中继续制作角色、UI 与视频内容。
-        </p>
-      </div>
-    </section>
   );
 }
 

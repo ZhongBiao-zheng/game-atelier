@@ -31,6 +31,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.27.0',
+    date: '2026-08-21',
+    headline: '工坊从项目卡片进入，首页集中展示全部作品',
+    changes: [
+      { kind: 'feat', text: '工坊首页改为项目卡片墙，自动用最近四张未隐藏图片拼成项目封面；新建、重命名和删除项目都在卡片墙完成' },
+      { kind: 'feat', text: '进入项目后，左侧先切换项目，再浏览项目首页、个人文件夹和美术、UI、视频资产，不再重复显示一排工作区按钮' },
+      { kind: 'feat', text: '项目首页恢复世界观阅读态，并新增跨美术、UI、视频的项目画廊，可筛选、连续预览、隐藏作品并进入真实资产详情' },
+      { kind: 'fix', text: '项目世界观未保存时，切换项目、点击链接或浏览器后退都会先提醒；失效项目链接也能明确返回全部项目' },
+    ],
+  },
+  {
     version: '5.26.0',
     date: '2026-08-20',
     headline: '视频镜头可以直接引用项目定稿了',

@@ -12,6 +12,7 @@
 | Key / ModelSpec | `lib/keys.py` | `web/src/api/keys.ts` | 无 —— 靠人 |
 | ProjectFolder / ProjectFolderItem | `lib/schemas.py` | `web/src/api/projectFolders.ts` | `tests/test_project_folders.py` + `ProjectFolderPage.test.tsx` |
 | CharacterVariant / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_variants.py` + `LeftSidebar.test.tsx` + `ProjectFolderPage.test.tsx` |
+| ProjectIndexItem / GalleryMedia | `lib/schemas.py` | `web/src/api/gallery.ts` | `tests/test_gallery_project.py` + `ProjectIndexPage.test.tsx` + `ProjectPage.test.tsx` |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
 | 视频控件能力 | 各 `*_video.py` | `lib/videoControlCaps.ts` | 无 —— 靠人 |
 
@@ -46,6 +47,10 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /projects/{id}/folders/{folder_id}/items` `DELETE /projects/{id}/folders/{folder_id}/items`
 `POST /projects/{id}/ui-schemes` `/projects/{id}/ui-schemes/default`
 
+项目内新建角色时，`POST /characters` 请求为
+`{ name: string, project_id: string }`，角色目录创建与项目归属在同一次请求内完成；
+不带 `project_id` 仅供项目外工作流建立临时角色。
+
 `POST /feedback` 必须携带 `{ text, character_id }`；turn-start 只消费当前 active 角色的反馈，
 其他角色的反馈继续留在待处理目录。
 `POST /keys` `PATCH /keys/{alias}` `DELETE /keys/{alias}` `POST /keys/models-preview`
@@ -59,7 +64,9 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 
 **只读**
 `GET /jobs` `/jobs/{id}` `/spec/{id}` `/characters` `/active-character` `/images` `/config` `/projects` `/experience` `/keys` `/onboarding/status` `/home`
-`GET /gallery/{recent,project,screens,hidden,favorites,ratings,image}` `GET /raw`
+`GET /gallery/{recent,screens,hidden,favorites,ratings,image}` `GET /raw`
+`GET /projects/index` `GET /projects/{id}/gallery?category={all,art,ui,video}&limit=&cursor=`
+`GET /projects/{id}/gallery/media?path=`
 `GET /characters/{id}/canonical` `GET /projects/{id}/ui-schemes/{scheme_id}/screens/canonical`
 `GET /projects/{id}/workspaces?ui_scheme={scheme_id}` `GET /projects/{id}/videos`
 `GET /projects/{id}/ui-schemes`
@@ -168,6 +175,46 @@ type ProjectFoldersFile = { folders: ProjectFolder[] };
   };
 }
 ```
+
+### 项目索引与项目画廊
+
+`GET /projects/index` 是项目卡片墙的派生读取模型：
+
+```ts
+type ProjectIndexItem = {
+  project: Project;
+  cover_paths: string[]; // 0..4 张最新未隐藏图片，视频不参与
+  activity_at: string;   // 项目目录与已归属角色资产树的最新 mtime
+};
+```
+
+项目重命名、角色归属和作品隐藏这类不直接改项目内容文件的写操作会触碰对应项目目录；不另存
+`updated_at`。`GET /projects/{id}/gallery` 从文件系统实时聚合全部未隐藏成品版本，使用
+`category=all|art|ui|video` 过滤，按 `produced_at` 倒序并以 opaque cursor 渐进读取。
+`GET /projects/{id}/gallery/media?path=` 只读取同一派生集合中的单个作品，用于通过首页 URL 的
+`?media=` 查询恢复预览；已隐藏、失败或不属于该项目的路径统一返回 404。
+
+```ts
+type GalleryMedia = {
+  path: string;
+  media_type: 'image' | 'video';
+  produced_at: string;
+  title: string;
+  detail: string;
+  job_id: string | null;
+  target:
+    | { kind: 'art'; character_id: string; asset_slot: AssetSlot }
+    | { kind: 'ui'; scheme_id: string; screen_id: string }
+    | {
+        kind: 'video'; production_id: string; shot_id: string | null;
+        output_kind: 'shot' | 'export';
+      };
+};
+```
+
+美术只扫描项目角色三类成品槽，UI 只扫描所有方案的 screen 版本目录，视频只扫描镜头版本与 exports。
+参考图、source、上传暂存、策划文档和失败 Job 不进入画廊。旧 `/gallery/project` 已删除；美术工作区
+使用统一画廊的 `category=art`，`/gallery/screens` 仍服务 UI 制作页的版本元数据。
 
 `GET /projects/{id}/videos` 返回 `{ productions: ProjectVideoProduction[] }`。每个 production
 含 `production_id / title / type / status / brief / exports` 与 `shots`；`brief` 明确返回

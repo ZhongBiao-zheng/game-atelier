@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Save } from 'lucide-react';
+import { CheckCircle2 } from 'lucide-react';
 import { useLocation } from 'wouter';
 
 import { fetchExperience, saveExperience, type ProjectExperience } from '@/api/experience';
 import {
-  fetchGalleryProject,
   fetchGalleryScreens,
-  type ProjectGalleryItem,
+  fetchProjectGallery,
+  type ProjectGalleryMedia,
   type ProjectScreenItem,
 } from '@/api/gallery';
 import { fetchScreenCanonical } from '@/api/canonical';
@@ -32,7 +32,7 @@ import type { WorkshopWorkspace } from '@/components/workshop/workspaces';
 import { UiWorkspace } from '@/components/workshop/UiWorkspace';
 import { UiSchemeBar } from '@/components/workshop/UiSchemeBar';
 import { VideoWorkspace } from '@/components/workshop/VideoWorkspace';
-import { Button } from '@/components/ui/button';
+import { ProjectGallery } from '@/components/workshop/ProjectGallery';
 import { Separator } from '@/components/ui/separator';
 import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
 
@@ -58,19 +58,23 @@ export function ProjectPage({
   const [data, setData] = useState<ProjectExperience | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
-  const [works, setWorks] = useState<ProjectGalleryItem[]>([]);
+  const [works, setWorks] = useState<ProjectGalleryMedia[]>([]);
   const [screens, setScreens] = useState<ProjectScreenItem[]>([]);
   const [canonicalFile, setCanonicalFile] = useState<ScreenCanonicalFile>({ screens: {} });
   const [schemesFile, setSchemesFile] = useState<UiSchemesFile | null>(null);
   const [productions, setProductions] = useState<ProjectVideoProduction[]>([]);
   const [videoReferences, setVideoReferences] = useState<ProjectVideoReferenceCandidate[]>([]);
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setData(null);
     setDraft(null);
+    setEditing(false);
+    setSaveError(null);
     fetchExperience(projectId).then(value => {
       if (!cancelled) {
         setData(value);
@@ -82,10 +86,9 @@ export function ProjectPage({
 
   useEffect(() => {
     setSummary(null);
-    if (workspace !== 'overview' && workspace !== 'ui') return;
-    if (workspace === 'ui' && !uiSchemeId) return;
+    if (workspace !== 'ui' || !uiSchemeId) return;
     let cancelled = false;
-    fetchProjectWorkspaces(projectId, workspace === 'ui' ? uiSchemeId : undefined)
+    fetchProjectWorkspaces(projectId, uiSchemeId)
       .then(value => { if (!cancelled) setSummary(value); })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -117,8 +120,8 @@ export function ProjectPage({
     if (workspace !== 'art') return;
     let cancelled = false;
     setWorks([]);
-    fetchGalleryProject(projectId)
-      .then(value => { if (!cancelled) setWorks(value); })
+    fetchProjectGallery(projectId, 'art')
+      .then(value => { if (!cancelled) setWorks(value.items); })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [projectId, workspace]);
@@ -159,6 +162,37 @@ export function ProjectPage({
     return () => { cancelled = true; };
   }, [projectId, workspace]);
 
+  const dirty = data !== null && draft !== null && draft !== data.worldview_md;
+
+  useEffect(() => {
+    if (!editing || !dirty) return;
+    const currentPath = window.location.pathname;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const warnOnLink = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target.closest('a[href]') : null;
+      if (!target || window.confirm('项目经验尚未保存，确定离开吗？')) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const warnOnHistoryNavigation = () => {
+      if (window.location.pathname === currentPath) return;
+      if (!window.confirm('项目经验尚未保存，确定离开吗？')) {
+        window.history.forward();
+      }
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    window.addEventListener('popstate', warnOnHistoryNavigation);
+    document.addEventListener('click', warnOnLink, true);
+    return () => {
+      window.removeEventListener('beforeunload', warnBeforeUnload);
+      window.removeEventListener('popstate', warnOnHistoryNavigation);
+      document.removeEventListener('click', warnOnLink, true);
+    };
+  }, [dirty, editing]);
+
   if (!data || draft === null) {
     return (
       <section className="grid h-full place-items-center bg-background">
@@ -167,15 +201,17 @@ export function ProjectPage({
     );
   }
 
-  const dirty = draft !== data.worldview_md;
-
   async function save() {
     setSaving(true);
+    setSaveError(null);
     try {
       await saveExperience(projectId, draft!);
       setData(value => value ? { ...value, worldview_md: draft! } : value);
+      setEditing(false);
       setToast('已保存');
       window.setTimeout(() => setToast(null), 2000);
+    } catch (error) {
+      setSaveError((error as Error).message);
     } finally {
       setSaving(false);
     }
@@ -185,21 +221,10 @@ export function ProjectPage({
     <section className="flex h-full flex-col overflow-hidden bg-background">
       <div className="stable-scroll flex-1 space-y-6 overflow-y-auto px-4 py-5 md:px-8 md:py-6">
         <div className="space-y-5">
-          <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <p className="text-xs uppercase tracking-label text-muted-foreground">项目首页</p>
             <h1 className="font-display text-display italic text-foreground">{data.project.name}</h1>
-            {workspace === 'overview' && (
-              <Button size="sm" onClick={save} disabled={saving || !dirty} title="保存项目经验">
-                <Save className="size-3.5" />
-                {saving ? '保存中…' : '保存'}
-              </Button>
-            )}
           </div>
-          <dl className="grid grid-cols-[84px_1fr] gap-x-3 gap-y-1.5 text-xs">
-            <dt className="uppercase tracking-label text-muted-foreground/70">slug</dt>
-            <dd className="font-mono text-muted-foreground">{data.project.slug}</dd>
-            <dt className="uppercase tracking-label text-muted-foreground/70">角色数</dt>
-            <dd className="font-mono text-muted-foreground">{data.project.character_count}</dd>
-          </dl>
         </div>
 
         <Separator className="opacity-50" />
@@ -212,7 +237,25 @@ export function ProjectPage({
         )}
 
         {workspace === 'overview' && (
-          <OverviewWorkspace data={data} draft={draft} summary={summary} onDraftChange={setDraft} />
+          <div className="space-y-8">
+            <OverviewWorkspace
+              draft={draft}
+              editing={editing}
+              dirty={dirty}
+              saving={saving}
+              error={saveError}
+              onDraftChange={setDraft}
+              onEdit={() => setEditing(true)}
+              onCancel={() => {
+                setDraft(data.worldview_md);
+                setSaveError(null);
+                setEditing(false);
+              }}
+              onSave={() => void save()}
+            />
+            <Separator className="opacity-50" />
+            <ProjectGallery projectId={projectId} />
+          </div>
         )}
         {workspace === 'art' && <ArtWorkspace projectId={projectId} works={works} />}
         {workspace === 'ui' && uiSchemeId && schemesFile && (

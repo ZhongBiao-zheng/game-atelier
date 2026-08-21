@@ -356,6 +356,63 @@ class Project(BaseModel):
     created_at: str
 
 
+class GalleryArtTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["art"] = "art"
+    character_id: str
+    asset_slot: AssetSlot
+
+
+class GalleryUiTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["ui"] = "ui"
+    scheme_id: str
+    screen_id: str
+
+
+class GalleryVideoTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["video"] = "video"
+    production_id: str
+    shot_id: str | None = None
+    output_kind: Literal["shot", "export"]
+
+
+GalleryTarget = Annotated[
+    GalleryArtTarget | GalleryUiTarget | GalleryVideoTarget,
+    Field(discriminator="kind"),
+]
+
+
+class GalleryMedia(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    media_type: Literal["image", "video"]
+    produced_at: str
+    title: str
+    detail: str
+    job_id: str | None = None
+    target: GalleryTarget
+
+
+class ProjectGalleryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[GalleryMedia]
+    next_cursor: str | None = None
+
+
+class ProjectIndexItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project: Project
+    cover_paths: list[str]
+    activity_at: str
+
+
+class ProjectIndexResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[ProjectIndexItem]
+
+
 class ProjectsFile(BaseModel):
     # 项目列表 + 角色 → 项目 的归属表。未归属的角色直接不在 assignments 里。
     projects: list[Project] = []
