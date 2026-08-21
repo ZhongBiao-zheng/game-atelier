@@ -36,6 +36,25 @@ const screenItems = [
 ];
 
 const emptyScreenCanonical = { screens: {} };
+
+function createGalleryHiddenHandler(initialPaths: string[], failOnWrite?: number) {
+  let hiddenPaths = initialPaths;
+  let writes = 0;
+  return async (url: string, init?: RequestInit): Promise<Response | null> => {
+    if (url === '/api/gallery/hidden' && init?.method === 'POST') {
+      writes += 1;
+      if (writes === failOnWrite) throw new Error('offline');
+      const body = JSON.parse(String(init.body)) as { path: string; hidden: boolean };
+      hiddenPaths = body.hidden ? [body.path] : [];
+      return { ok: true, json: async () => ({ paths: hiddenPaths }) } as Response;
+    }
+    if (url === '/api/gallery/hidden') {
+      return { ok: true, json: async () => ({ paths: hiddenPaths }) } as Response;
+    }
+    return null;
+  };
+}
+
 const workspaceSummary = {
   project_id: 'p1',
   art: { characters: 3, canonical: 2, stale: 0 },
@@ -180,6 +199,45 @@ describe('ProjectPage', () => {
     expect(screen.getByText('让玩家查看全部核心功能入口')).toBeInTheDocument();
     expect(screen.getByText('openai · gpt-image-2')).toBeInTheDocument();
     expect(screen.getByText('主界面提示词')).toBeInTheDocument();
+  });
+
+  it('UI 页面版本可从资产详情恢复到项目画廊，并在失败时保留当前状态', async () => {
+    const target = 'projects/pokemon/ui/v1/screens/home/v2.png';
+    const galleryHiddenResponse = createGalleryHiddenHandler([target], 2);
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const galleryResponse = await galleryHiddenResponse(url, init);
+      if (galleryResponse) return galleryResponse;
+      if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) {
+        return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
+      }
+      if (url.startsWith('/api/gallery/screens')) {
+        return { ok: true, json: async () => ({ items: screenItems }) } as Response;
+      }
+      if (url.includes('/screens/canonical')) {
+        return { ok: true, json: async () => emptyScreenCanonical } as Response;
+      }
+      if (url.includes('/workspaces')) {
+        return { ok: true, json: async () => workspaceSummary } as Response;
+      }
+      return { ok: true, json: async () => sample } as Response;
+    }));
+
+    render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" screenId="home" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '恢复展示 v2.png' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/gallery/hidden',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ path: target, hidden: false }),
+      }),
+    ));
+    const hideButton = await screen.findByRole('button', { name: '从项目画廊隐藏 v2.png' });
+
+    fireEvent.click(hideButton);
+    expect(await screen.findByText('更新项目画廊展示状态失败，请稍后再试。')).toBeInTheDocument();
+    expect(hideButton).not.toBeDisabled();
+    expect(screen.queryByRole('button', { name: '恢复展示 v2.png' })).not.toBeInTheDocument();
   });
 
   it('项目没有页面图时不渲染「页面」区', async () => {
@@ -501,7 +559,11 @@ describe('ProjectPage', () => {
   });
 
   it('视频工作区按企划和镜头展示版本，并可选用', async () => {
+    const videoPath = 'projects/pokemon/videos/pv/shots/shot-01/v1.mp4';
+    const galleryHiddenResponse = createGalleryHiddenHandler([videoPath]);
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const galleryResponse = await galleryHiddenResponse(url, init);
+      if (galleryResponse) return galleryResponse;
     if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
       if (url.endsWith('/video-references')) {
         return { ok: true, json: async () => ({ candidates: [
@@ -538,7 +600,7 @@ describe('ProjectPage', () => {
                 purpose: '角色亮相',
                 duration: '3s',
                 status: 'generated',
-                versions: ['projects/pokemon/videos/pv/shots/shot-01/v1.mp4'],
+                versions: [videoPath],
                 selected: null,
                 planned_reference_images: [],
                 history: [
@@ -592,6 +654,15 @@ describe('ProjectPage', () => {
     );
     expect(screen.getByRole('button', { name: '选择参考 曹操·夏日 · 立绘' })).toBeInTheDocument();
     expect(screen.getByText('定稿已过时')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: '恢复展示 v1.mp4' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/gallery/hidden',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ path: videoPath, hidden: false }),
+      }),
+    ));
+    expect(await screen.findByRole('button', { name: '从项目画廊隐藏 v1.mp4' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '选择参考 曹操·夏日 · 立绘' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
       '/api/projects/p1/videos/pv/shots/shot-01/references',
@@ -605,6 +676,43 @@ describe('ProjectPage', () => {
       '/api/projects/p1/videos/pv/shots/shot-01/selected',
       expect.objectContaining({ method: 'POST' }),
     ));
+  });
+
+  it('视频成片可从企划详情恢复到项目画廊', async () => {
+    const exportPath = 'projects/pokemon/videos/pv/exports/final.mp4';
+    const galleryHiddenResponse = createGalleryHiddenHandler([exportPath]);
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const galleryResponse = await galleryHiddenResponse(url, init);
+      if (galleryResponse) return galleryResponse;
+      if (url.includes('/videos')) {
+        return {
+          ok: true,
+          json: async () => ({
+            productions: [{
+              production_id: 'pv', title: '上线宣传片', type: 'promo', status: 'done',
+              brief: { goal: '亮相', platform: 'B站', ratio: '16:9', duration: '30s', sound: '音乐' },
+              shots: [], exports: [exportPath],
+            }],
+          }),
+        } as Response;
+      }
+      if (url.includes('/workspaces')) {
+        return { ok: true, json: async () => workspaceSummary } as Response;
+      }
+      return { ok: true, json: async () => sample } as Response;
+    }));
+
+    render(<ProjectPage projectId="p1" workspace="video" productionId="pv" />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '恢复展示 final.mp4' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/gallery/hidden',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ path: exportPath, hidden: false }),
+      }),
+    ));
+    expect(await screen.findByRole('button', { name: '从项目画廊隐藏 final.mp4' })).toBeInTheDocument();
   });
 
   it('视频企划详情按镜头表顺序展示尚未生成的镜头', async () => {

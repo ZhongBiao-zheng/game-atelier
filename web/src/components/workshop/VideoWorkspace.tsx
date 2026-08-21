@@ -10,6 +10,8 @@ import type {
 } from '@/api/videos';
 import { cn } from '@/lib/utils';
 import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
+import { useGalleryHidden } from '@/hooks/useGalleryHidden';
+import { GalleryVisibilityButton } from './GalleryVisibilityButton';
 
 export function VideoWorkspace({
   projectId,
@@ -91,6 +93,7 @@ function ProductionDetail({ projectId, production }: {
   production: ProjectVideoProduction;
 }) {
   const returnContext = useWorkshopReturn();
+  const galleryVisibility = useGalleryHidden();
   return (
     <section className="space-y-6" data-testid="project-videos">
       <div className="space-y-2">
@@ -131,7 +134,12 @@ function ProductionDetail({ projectId, production }: {
           <p className="rounded-lg border border-border bg-card/30 px-4 py-8 text-center text-sm text-muted-foreground">镜头表尚未填写。</p>
         )}
       </div>
-      {production.exports.length > 0 && <ExportList paths={production.exports} />}
+      {galleryVisibility.error && (
+        <p role="status" className="text-xs text-destructive">{galleryVisibility.error}</p>
+      )}
+      {production.exports.length > 0 && (
+        <ExportList paths={production.exports} galleryVisibility={galleryVisibility} />
+      )}
     </section>
   );
 }
@@ -152,6 +160,7 @@ function ShotDetail({
   onReferences: (productionId: string, shotId: string, paths: string[]) => Promise<void>;
 }) {
   const returnContext = useWorkshopReturn();
+  const galleryVisibility = useGalleryHidden();
   const [selecting, setSelecting] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [savingReferences, setSavingReferences] = useState(false);
@@ -206,6 +215,9 @@ function ShotDetail({
       />
       <JobHistory records={shot.history} />
       {selectionError && <p role="status" className="text-xs text-destructive">{selectionError}</p>}
+      {galleryVisibility.error && (
+        <p role="status" className="text-xs text-destructive">{galleryVisibility.error}</p>
+      )}
       {shot.versions.length > 0 ? (
         <div className="flex gap-4 overflow-x-auto pb-2">
           {shot.versions.map(path => {
@@ -218,20 +230,29 @@ function ShotDetail({
                   preload="metadata"
                   className="aspect-video w-full rounded-lg border border-border bg-background object-cover"
                 />
-                <figcaption className="flex items-center justify-between gap-2">
-                  <span className="truncate font-mono text-xs text-muted-foreground">{filename(path)}</span>
-                  <button
-                    type="button"
-                    onClick={() => void selectVersion(path, selected)}
-                    disabled={selecting !== null}
-                    aria-label={selected ? `取消选用 ${shot.shot_id} ${filename(path)}` : `选用 ${shot.shot_id} ${filename(path)}`}
-                    className={cn(
-                      'shrink-0 rounded-md border px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                      selected ? 'border-primary/60 text-primary' : 'border-border text-muted-foreground hover:bg-secondary hover:text-foreground',
-                    )}
-                  >
-                    {selecting === path ? '处理中…' : selected ? '已选用' : '选用'}
-                  </button>
+                <figcaption className="space-y-2">
+                  <span className="block truncate font-mono text-xs text-muted-foreground">{filename(path)}</span>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void selectVersion(path, selected)}
+                      disabled={selecting !== null}
+                      aria-label={selected ? `取消选用 ${shot.shot_id} ${filename(path)}` : `选用 ${shot.shot_id} ${filename(path)}`}
+                      className={cn(
+                        'min-h-11 shrink-0 rounded-md border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                        selected ? 'border-primary/60 text-primary' : 'border-border text-muted-foreground hover:bg-secondary hover:text-foreground',
+                      )}
+                    >
+                      {selecting === path ? '处理中…' : selected ? '已选用' : '选用'}
+                    </button>
+                    <GalleryVisibilityButton
+                      filename={filename(path)}
+                      hidden={galleryVisibility.isHidden(path)}
+                      loading={!galleryVisibility.loaded || galleryVisibility.updatingPath !== null}
+                      updating={galleryVisibility.updatingPath === path}
+                      onToggle={() => void galleryVisibility.toggleHidden(path)}
+                    />
+                  </div>
                 </figcaption>
               </figure>
             );
@@ -429,19 +450,36 @@ function formatDate(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN');
 }
 
-function ExportList({ paths }: { paths: string[] }) {
+function ExportList({
+  paths,
+  galleryVisibility,
+}: {
+  paths: string[];
+  galleryVisibility: ReturnType<typeof useGalleryHidden>;
+}) {
   return (
     <section className="space-y-3 border-t border-border pt-4">
       <p className="text-xs uppercase tracking-label text-muted-foreground/70">成片</p>
       <div className="flex gap-3 overflow-x-auto pb-1">
         {paths.map(path => (
-          <video
-            key={path}
-            src={`/api/gallery/image?path=${encodeURIComponent(path)}`}
-            controls
-            preload="metadata"
-            className="aspect-video w-72 shrink-0 rounded-lg border border-border bg-background object-cover"
-          />
+          <figure key={path} className="w-72 shrink-0 space-y-2">
+            <video
+              src={`/api/gallery/image?path=${encodeURIComponent(path)}`}
+              controls
+              preload="metadata"
+              className="aspect-video w-full rounded-lg border border-border bg-background object-cover"
+            />
+            <figcaption className="flex flex-wrap items-center justify-between gap-2">
+              <span className="truncate font-mono text-xs text-muted-foreground">{filename(path)}</span>
+              <GalleryVisibilityButton
+                filename={filename(path)}
+                hidden={galleryVisibility.isHidden(path)}
+                loading={!galleryVisibility.loaded || galleryVisibility.updatingPath !== null}
+                updating={galleryVisibility.updatingPath === path}
+                onToggle={() => void galleryVisibility.toggleHidden(path)}
+              />
+            </figcaption>
+          </figure>
         ))}
       </div>
     </section>

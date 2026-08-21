@@ -8,6 +8,8 @@ import type { ProjectWorkspaceSummary, UiScreenSummary } from '@/api/workspaces'
 import type { ScreenCanonicalFile } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
 import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
+import { useGalleryHidden } from '@/hooks/useGalleryHidden';
+import { GalleryVisibilityButton } from './GalleryVisibilityButton';
 
 export function UiWorkspace({
   projectId,
@@ -247,6 +249,7 @@ function ScreenDetail({
   onToggleCanonical: (screenId: string, path: string) => Promise<void>;
 }) {
   const returnContext = useWorkshopReturn();
+  const galleryVisibility = useGalleryHidden();
   return (
     <section className="space-y-5" data-testid="project-screens">
       <div className="space-y-2">
@@ -272,6 +275,9 @@ function ScreenDetail({
           </p>
         )}
       </div>
+      {galleryVisibility.error && (
+        <p role="status" className="text-xs text-destructive">{galleryVisibility.error}</p>
+      )}
       {images.length > 0 ? (
         <div className="flex gap-4 overflow-x-auto pb-2">
           {images.map(image => {
@@ -312,9 +318,18 @@ function ScreenDetail({
                     <BadgeCheck className="size-3.5" />
                   </button>
                 </div>
-                <figcaption className="flex items-baseline gap-2 px-0.5 text-xs">
-                  <span className="truncate text-foreground/85">{image.style_variant || image.filename}</span>
-                  {image.base_version && <span className="shrink-0 font-mono text-muted-foreground/60">← {image.base_version}</span>}
+                <figcaption className="space-y-2 px-0.5 text-xs">
+                  <div className="flex items-baseline gap-2">
+                    <span className="truncate text-foreground/85">{image.style_variant || image.filename}</span>
+                    {image.base_version && <span className="shrink-0 font-mono text-muted-foreground/60">← {image.base_version}</span>}
+                  </div>
+                  <GalleryVisibilityButton
+                    filename={image.filename}
+                    hidden={galleryVisibility.isHidden(image.path)}
+                    loading={!galleryVisibility.loaded || galleryVisibility.updatingPath !== null}
+                    updating={galleryVisibility.updatingPath === image.path}
+                    onToggle={() => void galleryVisibility.toggleHidden(image.path)}
+                  />
                 </figcaption>
                 {(image.model || image.provider) && (
                   <p className="truncate font-mono text-xs text-muted-foreground">
