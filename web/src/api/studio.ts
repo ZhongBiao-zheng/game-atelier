@@ -9,6 +9,65 @@ export interface StudioJobCreate {
   kind?: JobKind;
 }
 
+export type StudioArchiveTarget =
+  | {
+      kind: 'character';
+      character_id: string; asset_slot: 'portrait' | 'promo' | 'turnaround';
+    }
+  | {
+      kind: 'ui';
+      ui_scheme_id: string; screen_id: string;
+    }
+  | {
+      kind: 'video';
+      production_id: string; shot_id: string;
+    };
+
+export type StudioArchiveTargetOption = StudioArchiveTarget & {
+  label: string;
+  detail: string;
+};
+
+export function studioArchiveTarget(option: StudioArchiveTargetOption): StudioArchiveTarget {
+  if (option.kind === 'character') {
+    return {
+      kind: option.kind,
+      character_id: option.character_id,
+      asset_slot: option.asset_slot,
+    };
+  }
+  if (option.kind === 'ui') {
+    return { kind: option.kind, ui_scheme_id: option.ui_scheme_id, screen_id: option.screen_id };
+  }
+  return { kind: option.kind, production_id: option.production_id, shot_id: option.shot_id };
+}
+
+export async function fetchStudioArchiveTargets(
+  projectId: string,
+  mediaKind: JobKind,
+): Promise<StudioArchiveTargetOption[]> {
+  const data = await requestJson<{ targets: StudioArchiveTargetOption[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/studio-archive-targets?media_kind=${encodeURIComponent(mediaKind)}`,
+    '读取项目归档位置',
+  );
+  return data.targets;
+}
+
+export async function archiveStudioOutput(
+  jobId: string,
+  payload: { source_path: string; project_id: string; target: StudioArchiveTarget },
+): Promise<{ job: Job; path: string }> {
+  return requestJson<{ job: Job; path: string }>(
+    `/api/studio/jobs/${encodeURIComponent(jobId)}/archive`,
+    '归档创作台产物',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export async function createStudioJob(body: StudioJobCreate): Promise<Job> {
   return requestJson<Job>('/api/studio/jobs', '创建出图任务', {
     method: 'POST',

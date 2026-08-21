@@ -32,6 +32,9 @@ export interface JobParams {
   // B3 UI 页面风格候选来源关系 —— 与 schemas.py::JobParams 同步
   style_variant?: string;
   base_version?: string;
+  // Studio 单产物归档到项目资产后的来源快照 —— 与 schemas.py::JobParams 同步
+  archived_from_job_id?: string;
+  archived_from_path?: string;
   // Midjourney 专属（family=midjourney）—— 与 schemas.py::JobParams 同步。
   // MJ 的 body 没有 size / quality 字段，一切控制都在 prompt 尾部的 flag 里，由 caller 拼接：
   // prompt 保持画师原文，换模型时不残留。比例复用上面的 ratio 字段（拼成 --ar），

@@ -62,6 +62,9 @@ class JobParams(BaseModel):
     # style_variant = 画师给的风格方向标签；base_version = 结构所本的基准页文件名（如 v1.png）。
     style_variant: str | None = None
     base_version: str | None = None
+    # Studio 单产物归档到项目资产时，记录不可变来源；新 Job 仍保留原 prompt / 模型 / 参数。
+    archived_from_job_id: str | None = None
+    archived_from_path: str | None = None
     # Midjourney 专属（family=midjourney）—— 与 web/src/schema/jobs.ts::JobParams 同步。
     # MJ 的 body 没有 size / quality 字段，一切控制都在 prompt 尾部的 flag 里，由 mj_image
     # caller 拼接：prompt 保持画师原文，换模型时不残留 flag。比例复用上面的 ratio 字段

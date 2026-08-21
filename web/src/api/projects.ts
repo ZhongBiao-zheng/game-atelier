@@ -1,6 +1,10 @@
 import { requestJson } from '@/api/http';
 import type { ProjectsFile } from '@/schema/jobs';
 
+export function fetchProjects(): Promise<ProjectsFile> {
+  return requestJson<ProjectsFile>('/api/projects', '读取项目');
+}
+
 export function createProject(name: string): Promise<ProjectsFile> {
   return requestJson<ProjectsFile>('/api/projects', `新建项目「${name}」`, {
     method: 'POST',

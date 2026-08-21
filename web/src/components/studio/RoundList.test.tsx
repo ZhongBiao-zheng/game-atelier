@@ -66,6 +66,46 @@ describe('RoundList skill 出图删除门控', () => {
   });
 });
 
+describe('RoundList 归档到项目', () => {
+  const imageDone: RoundState = {
+    kind: 'done',
+    mode: 'image',
+    jobId: 'job-archive-image',
+    submittedAt: '2026-08-21T10:00:00Z',
+    imagePaths: ['/data/studio/job-archive-image/v1.png'],
+    config: { prompt: '立绘', model: 'gpt-image-2', kind: 'image', referenceImages: [] },
+  };
+
+  it('每个 Studio 图片和视频产物都能明确发起归档', () => {
+    const onArchive = vi.fn();
+    render(<RoundList rounds={[imageDone, videoDone]} onArchive={onArchive} />);
+
+    fireEvent.click(screen.getByLabelText('归档生成结果 1 到项目'));
+    expect(onArchive).toHaveBeenCalledWith(
+      'job-archive-image',
+      '/data/studio/job-archive-image/v1.png',
+      'image',
+    );
+
+    fireEvent.click(screen.getByLabelText('归档生成视频 1 到项目'));
+    expect(onArchive).toHaveBeenCalledWith(
+      'job-vid-1',
+      '/data/studio/job-vid-1/v1.mp4',
+      'video',
+    );
+  });
+
+  it('Skill 正式资产不重复显示归档入口', () => {
+    render(
+      <RoundList
+        rounds={[{ ...imageDone, mode: 'skill' }]}
+        onArchive={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText('归档生成结果 1 到项目')).not.toBeInTheDocument();
+  });
+});
+
 describe('RoundList 静默改写提示（params.warnings）', () => {
   const withWarnings = (warnings?: string[]): RoundState => ({
     kind: 'done',

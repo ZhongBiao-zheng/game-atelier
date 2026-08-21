@@ -13,6 +13,7 @@
 | ProjectFolder / ProjectFolderItem | `lib/schemas.py` | `web/src/api/projectFolders.ts` | `tests/test_project_folders.py` + `ProjectFolderPage.test.tsx` |
 | CharacterVariant / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_variants.py` + `LeftSidebar.test.tsx` + `ProjectFolderPage.test.tsx` |
 | ProjectIndexItem / GalleryMedia | `lib/schemas.py` | `web/src/api/gallery.ts` | `tests/test_gallery_project.py` + `ProjectIndexPage.test.tsx` + `ProjectPage.test.tsx` |
+| StudioArchiveTarget | `lib/studio_archive.py` | `web/src/api/studio.ts` | `tests/test_studio_archive.py` + `StudioArchiveDialog.test.tsx` |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
 | 视频控件能力 | 各 `*_video.py` | `lib/videoControlCaps.ts` | 无 —— 靠人 |
 
@@ -26,7 +27,7 @@
 - 产物：`output_paths`
 - 归属：`character_id` `project_id` `ui_scheme_id` `screen_id` `production_id` `shot_id` `namespace` `asset_slot` `kind`
 - 路由：`alias` `provider` `model` —— 换模型只能新建 job（`POST /studio/jobs`），不能改已有的
-- 血缘：`retry_of` `source_image`
+- 血缘：`retry_of` `source_image`；创作台归档血缘写在 `params.archived_from_job_id / archived_from_path`
 
 `JobParams` = `extra="allow"`（加字段不会被上游拒），但**双端仍要同步声明**，否则 TS 那边拿不到类型。后端独占写入的三个：`actual_size`、`warnings`、`requested_size` —— 前端只读不写。
 
@@ -57,6 +58,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /config` `POST /gallery/{hidden,favorites,ratings}` `POST /onboarding/data-root` `POST /folder-picker`
 `POST /clipboard-attempt` `DELETE /characters/{id}`
 `POST /jobs/{id}/{confirm,cancel}` `DELETE /jobs/{id}` `DELETE /jobs/{id}/image`
+`POST /studio/jobs/{id}/archive`
 
 **双向**
 `POST /characters/{id}/canonical` `POST /projects/{id}/ui-schemes/{scheme_id}/screens/canonical` `POST /experience`
@@ -71,6 +73,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /projects/{id}/workspaces?ui_scheme={scheme_id}` `GET /projects/{id}/videos`
 `GET /projects/{id}/ui-schemes`
 `GET /projects/{id}/folders`
+`GET /projects/{id}/studio-archive-targets?media_kind={image,video}`
 
 ### 角色变体契约
 
@@ -215,6 +218,29 @@ type GalleryMedia = {
 美术只扫描项目角色三类成品槽，UI 只扫描所有方案的 screen 版本目录，视频只扫描镜头版本与 exports。
 参考图、source、上传暂存、策划文档和失败 Job 不进入画廊。旧 `/gallery/project` 已删除；美术工作区
 使用统一画廊的 `category=art`，`/gallery/screens` 仍服务 UI 制作页的版本元数据。
+
+### 创作台归档契约
+
+`GET /projects/{id}/studio-archive-targets?media_kind=image|video` 返回
+`{ targets: StudioArchiveTargetOption[] }`。图片目标包含该项目的角色三类资产槽，以及所有 UI 方案中已规划
+或已有版本的页面；视频目标只包含该项目所有正式企划的镜头。响应中的 `label / detail` 只用于展示，
+POST 时不得回传：
+
+```ts
+type StudioArchiveTarget =
+  | { kind: 'character'; character_id: string; asset_slot: AssetSlot }
+  | { kind: 'ui'; ui_scheme_id: string; screen_id: string }
+  | { kind: 'video'; production_id: string; shot_id: string };
+
+type StudioArchiveTargetOption = StudioArchiveTarget & { label: string; detail: string };
+```
+
+`POST /studio/jobs/{id}/archive` 请求为
+`{ source_path: string; project_id: string; target: StudioArchiveTarget }`。来源必须是该 Studio DONE Job
+的 `output_paths` 成员；图片只能进入角色或 UI，视频只能进入镜头；目标必须真实属于所选项目。
+服务端在目标目录复制为下一个 `vN`，不移动或改写源文件，并用完整 Job schema 新建一个正式 DONE Job。
+新 Job 保留来源的 prompt、模型与生成参数，归属改为目标资产，且在 params 写入
+`archived_from_job_id / archived_from_path`。响应为 `{ job, path }`；重复归档只会继续递增版本，绝不覆盖。
 
 `GET /projects/{id}/videos` 返回 `{ productions: ProjectVideoProduction[] }`。每个 production
 含 `production_id / title / type / status / brief / exports` 与 `shots`；`brief` 明确返回

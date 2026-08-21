@@ -9,6 +9,7 @@ from typing import Any
 
 from character_workflow.lib import data_root
 from character_workflow.lib import net_env
+from character_workflow.lib.asset_versions import asset_output_lock, next_asset_path
 from character_workflow.lib.callers import dispatch, dispatch_video
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
@@ -219,16 +220,6 @@ def is_valid_video(path: Path) -> bool:
     return False
 
 
-def _next_asset_path(output_dir: Path, ext: str = "png") -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    n = 1
-    while True:
-        path = output_dir / f"v{n}.{ext}"
-        if not path.exists():
-            return path
-        n += 1
-
-
 def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
     created_at = datetime.now(timezone.utc).isoformat()
     lines = [
@@ -287,11 +278,12 @@ def run_job(job_id: str) -> Job:
             output_dir = job_output_dir_for(job)
             output_paths: list[str] = []
             first_dims: tuple[int, int] | None = None
-            for src, dims in selected[: max(1, int(params.get("n") or 1))]:
-                target = _next_asset_path(output_dir)
-                shutil.move(str(src), target)
-                output_paths.append(str(target))
-                first_dims = first_dims or dims
+            with asset_output_lock(output_dir):
+                for src, dims in selected[: max(1, int(params.get("n") or 1))]:
+                    target = next_asset_path(output_dir, "png")
+                    shutil.move(str(src), target)
+                    output_paths.append(str(target))
+                    first_dims = first_dims or dims
             if first_dims:
                 params["actual_size"] = f"{first_dims[0]}x{first_dims[1]}"
             job = _save_params(read_job(job.job_id), params)
@@ -339,10 +331,11 @@ def _run_video_job(job: Job) -> Job:
             output_dir = job_output_dir_for(job)
             # 视频无图片那种"出 n 张"概念：Seedance 单次返回一个视频，全部有效产物落盘，不设 n-cap。
             output_paths: list[str] = []
-            for src in valid:
-                target = _next_asset_path(output_dir, ext="mp4")
-                shutil.move(str(src), target)
-                output_paths.append(str(target))
+            with asset_output_lock(output_dir):
+                for src in valid:
+                    target = next_asset_path(output_dir, "mp4")
+                    shutil.move(str(src), target)
+                    output_paths.append(str(target))
             job = _save_params(read_job(job.job_id), params)
             for output_path in output_paths:
                 _write_sidecar(Path(output_path), job, params)

@@ -31,6 +31,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.28.0',
+    date: '2026-08-22',
+    headline: '自由试验可以归入项目资产了',
+    changes: [
+      { kind: 'feat', text: '创作台完成的单张图片或视频可以归档到明确的角色槽位、UI 页面或视频镜头；原文件保留，项目资产自动建立新版本' },
+    ],
+  },
+  {
     version: '5.27.0',
     date: '2026-08-21',
     headline: '工坊从项目卡片进入，首页集中展示全部作品',

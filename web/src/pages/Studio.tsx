@@ -11,6 +11,7 @@ import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
+import { StudioArchiveDialog, type StudioArchiveRequest } from '@/components/studio/StudioArchiveDialog';
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { imageFamily } from '@/lib/modelFamily';
@@ -84,6 +85,7 @@ function StudioFull() {
   const [shellFocused, setShellFocused] = useState(false);
   const [clickPinned, setClickPinned] = useState(false);
   const [reuseLimitNotice, setReuseLimitNotice] = useState(false);
+  const [archiveRequest, setArchiveRequest] = useState<StudioArchiveRequest | null>(null);
   const dockCollapsed = scrolledUp && !shellFocused && !clickPinned;
 
   // 不走 rAF 节流：后台标签页 rAF 会挂起导致联动滞后；setState 同值自动 bail-out，开销可忽略。
@@ -666,6 +668,7 @@ function StudioFull() {
           onDeleteBatch={deleteDoneBatch}
           onReuseReferences={handleReuseReferences}
           onEditAsReference={handleEditAsReference}
+          onArchive={(jobId, path, mediaKind) => setArchiveRequest({ jobId, path, mediaKind })}
         />
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
@@ -752,6 +755,7 @@ function StudioFull() {
         />
         </div>
       </div>
+      <StudioArchiveDialog request={archiveRequest} onClose={() => setArchiveRequest(null)} />
     </div>
   );
 

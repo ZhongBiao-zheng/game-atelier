@@ -1,6 +1,6 @@
 import { type ButtonHTMLAttributes, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Download, Eye, EyeOff, Film, Heart, Info, Music, Pencil, Trash2 } from 'lucide-react';
+import { AlertTriangle, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Trash2 } from 'lucide-react';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -81,6 +81,7 @@ export function RoundList({
   onDeleteBatch,
   onReuseReferences,
   onEditAsReference,
+  onArchive,
 }: {
   rounds: RoundState[];
   favorites?: string[];
@@ -93,6 +94,7 @@ export function RoundList({
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onEditAsReference?: (path: string) => void | Promise<void>;
+  onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   if (rounds.length === 0) return null;
@@ -162,6 +164,7 @@ export function RoundList({
                   onLightbox={setLightboxSrc}
                   onReuseReferences={onReuseReferences}
                   onEditAsReference={onEditAsReference}
+                  onArchive={onArchive}
                 />
               )}
               {r.kind === 'failed' && (
@@ -498,6 +501,7 @@ function DoneBatch({
   onLightbox,
   onReuseReferences,
   onEditAsReference,
+  onArchive,
 }: {
   round: Extract<RoundState, { kind: 'done' }>;
   favorites?: string[];
@@ -510,6 +514,7 @@ function DoneBatch({
   onLightbox?: (src: string) => void;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onEditAsReference?: (path: string) => void | Promise<void>;
+  onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
@@ -591,6 +596,17 @@ function DoneBatch({
                     className="h-full w-full rounded-md"
                   />
                   <div className="absolute right-2 top-2 flex gap-1.5">
+                    {round.mode !== 'skill' && onArchive && (
+                      <button
+                        type="button"
+                        onClick={() => onArchive(round.jobId, path, 'video')}
+                        aria-label={`归档生成视频 ${index + 1} 到项目`}
+                        title="归档到项目"
+                        className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      >
+                        <FolderInput className="size-4" aria-hidden />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onToggleFavorite?.(path); }}
@@ -629,6 +645,20 @@ function DoneBatch({
                     className="h-full w-full object-contain"
                   />
                   <div className="absolute right-2 top-2 flex gap-1.5">
+                    {round.mode !== 'skill' && onArchive && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onArchive(round.jobId, path, 'image');
+                        }}
+                        aria-label={`归档生成结果 ${index + 1} 到项目`}
+                        title="归档到项目"
+                        className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      >
+                        <FolderInput className="size-4" aria-hidden />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); void onToggleFavorite?.(path); }}

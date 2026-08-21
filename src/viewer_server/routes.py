@@ -12,6 +12,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Query, UploadFile
@@ -1871,6 +1872,73 @@ class _StudioJobCreate(BaseModel):
     params: JobParams
     alias: str | None = None
     kind: JobKind = JobKind.IMAGE
+
+
+class _CharacterArchiveTarget(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["character"]
+    character_id: str = Field(min_length=1)
+    asset_slot: _AssetSlot
+
+
+class _UiArchiveTarget(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["ui"]
+    ui_scheme_id: str = Field(min_length=1)
+    screen_id: str = Field(min_length=1)
+
+
+class _VideoArchiveTarget(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["video"]
+    production_id: str = Field(min_length=1)
+    shot_id: str = Field(min_length=1)
+
+
+_StudioArchiveTarget = Annotated[
+    _CharacterArchiveTarget | _UiArchiveTarget | _VideoArchiveTarget,
+    Field(discriminator="kind"),
+]
+
+
+class _StudioArchiveRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    source_path: str = Field(min_length=1)
+    project_id: str = Field(min_length=1)
+    target: _StudioArchiveTarget
+
+
+@router.get("/projects/{project_id}/studio-archive-targets")
+def get_studio_archive_targets(
+    project_id: str,
+    media_kind: JobKind = Query(),
+) -> dict:
+    from character_workflow.lib.studio_archive import list_archive_targets
+
+    try:
+        return {"targets": list_archive_targets(project_id, media_kind)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.post("/studio/jobs/{job_id}/archive", status_code=201)
+def post_studio_archive(job_id: str, body: _StudioArchiveRequest) -> dict:
+    from character_workflow.lib.studio_archive import archive_studio_output
+
+    try:
+        job = archive_studio_output(
+            job_id,
+            body.source_path,
+            body.project_id,
+            body.target.model_dump(mode="json"),
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"job": job.model_dump(mode="json"), "path": job.output_paths[0]}
 
 
 def _run_studio_job_safely(job_id: str) -> None:
