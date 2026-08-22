@@ -76,14 +76,15 @@ describe('LeftSidebar', () => {
 
     const nav = await screen.findByRole('navigation', { name: '项目一 项目导航' });
     expect(within(nav).getAllByRole('button', { name: /^角色 \d+$/ })).toHaveLength(5);
-    expect(within(nav).getByRole('button', { name: 'UI' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'UI' })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: '视频' })).toBeInTheDocument();
   });
 
   it('角色整行点击切换展开状态，不再显示独立展开按钮', async () => {
     render(<LeftSidebar sseSignal={0} activeProjectId="p1" workspace="overview" onSelect={vi.fn()} />);
 
-    const roleToggle = await screen.findByRole('button', { name: '角色' });
+    const roleToggle = await screen.findByRole('link', { name: '角色' });
+    expect(roleToggle).toHaveAttribute('href', '/workshop/p1/art');
     expect(roleToggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('button', { name: '展开角色' })).not.toBeInTheDocument();
 
@@ -120,7 +121,8 @@ describe('LeftSidebar', () => {
     }));
     render(<LeftSidebar sseSignal={0} activeProjectId="p1" workspace="overview" onSelect={vi.fn()} />);
 
-    const uiToggle = await screen.findByRole('button', { name: 'UI' });
+    const uiToggle = await screen.findByRole('link', { name: 'UI' });
+    await waitFor(() => expect(uiToggle).toHaveAttribute('href', '/workshop/p1/ui/v1'));
     expect(uiToggle).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(uiToggle);
     expect(uiToggle).toHaveAttribute('aria-expanded', 'true');

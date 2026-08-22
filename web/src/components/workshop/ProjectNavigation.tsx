@@ -60,6 +60,7 @@ export function ProjectNavigation({
   const [query, setQuery] = useState('');
   const [recentIds, setRecentIds] = useState<string[]>(() => readRecent(recentKey));
   const [uiSchemes, setUiSchemes] = useState<UiSchemesFile | null>(null);
+  const uiSchemeId = selectedUiSchemeId ?? uiSchemes?.default_scheme_id ?? 'v1';
 
   useEffect(() => {
     setQuery('');
@@ -117,11 +118,13 @@ export function ProjectNavigation({
           资产库
         </h2>
         <div className="flex items-center gap-1">
-          <ProjectSideToggle
+          <ProjectSideDisclosureLink
             descriptor={art}
             current={currentWorkspace === art.id}
             expanded={charactersExpanded}
             onToggle={toggleCharacters}
+            href={`${projectBase}/art`}
+            onNavigate={onNavigate}
             className="min-w-0 flex-1"
           />
           {workspace === 'art' && (
@@ -162,18 +165,19 @@ export function ProjectNavigation({
             </Link>
           </div>
         )}
-        <ProjectSideToggle
+        <ProjectSideDisclosureLink
           descriptor={ui}
           current={currentWorkspace === ui.id}
           expanded={uiExpanded}
           onToggle={toggleUi}
+          href={`${projectBase}/ui/${encodeURIComponent(uiSchemeId)}`}
+          onNavigate={onNavigate}
         />
         {uiExpanded && (
           <ul className="m-0 list-none space-y-0.5 pl-4 pr-0 pt-1">
             {uiSchemes?.schemes.map(scheme => {
               const isDefault = scheme.id === uiSchemes.default_scheme_id;
-              const isCurrent = currentWorkspace === 'ui'
-                && (selectedUiSchemeId ?? uiSchemes.default_scheme_id) === scheme.id;
+              const isCurrent = currentWorkspace === 'ui' && uiSchemeId === scheme.id;
               return (
                 <li key={scheme.id}>
                   <Link
@@ -232,24 +236,32 @@ function readDisclosure(key: string, fallback: boolean) {
   return stored === null ? fallback : stored === 'true';
 }
 
-function ProjectSideToggle({
+function ProjectSideDisclosureLink({
   descriptor,
   current,
   expanded,
   onToggle,
+  href,
+  onNavigate,
   className,
 }: {
   descriptor: ReturnType<typeof getWorkspaceDescriptor>;
   current: boolean;
   expanded: boolean;
   onToggle: () => void;
+  href: string;
+  onNavigate?: () => void;
   className?: string;
 }) {
   const Icon = descriptor.icon;
   return (
-    <button
-      type="button"
-      onClick={onToggle}
+    <Link
+      href={href}
+      onClick={() => {
+        onToggle();
+        onNavigate?.();
+      }}
+      aria-current={current ? 'page' : undefined}
       aria-expanded={expanded}
       className={cn(
         'flex h-10 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
@@ -261,7 +273,7 @@ function ProjectSideToggle({
     >
       <Icon className="size-4 shrink-0" aria-hidden />
       <span className="min-w-0 whitespace-normal break-words">{descriptor.sidebarLabel}</span>
-    </button>
+    </Link>
   );
 }
 
