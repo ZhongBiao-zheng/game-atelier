@@ -621,8 +621,9 @@ describe('ProjectPage', () => {
         body: JSON.stringify({ scheme_id: 'v2' }),
       }),
     ));
-    expect(screen.getByRole('link', { name: /V1/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /夏日 V2.*默认/ })).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: '切换 UI 方案' })).not.toBeInTheDocument();
+    expect(screen.getByText('夏日 V2')).toBeInTheDocument();
+    expect(screen.getByText('默认')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '设为默认' })).not.toBeInTheDocument();
   });
 

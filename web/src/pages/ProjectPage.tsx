@@ -255,7 +255,6 @@ export function ProjectPage({
         {workspace === 'ui' && uiSchemeId && schemesFile && (
           <div className="space-y-6">
             <UiSchemeBar
-              projectId={projectId}
               currentSchemeId={uiSchemeId}
               schemesFile={schemesFile}
               screens={uiCopyCandidates(summary?.ui.screen_items ?? [], screens)}

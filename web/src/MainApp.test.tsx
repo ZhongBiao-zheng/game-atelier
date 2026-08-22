@@ -166,8 +166,9 @@ describe('MainApp', () => {
       />,
     );
 
-    expect(await screen.findByRole('link', { name: '角色' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'UI' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '角色' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('link', { name: '查看全部角色' })).toHaveAttribute('href', '/workshop/p1/art');
+    expect(screen.getByRole('button', { name: 'UI' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('link', { name: '视频' })).toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
   });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, ChevronDown, ChevronsUpDown, LibraryBig, Plus, Search } from 'lucide-react';
+import { Check, ChevronsUpDown, LibraryBig, Plus, Search } from 'lucide-react';
 import { Link } from 'wouter';
 
 import type { CharacterEntry, Project } from '@/schema/jobs';
@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { fetchUiSchemes, type UiSchemesFile } from '@/api/uiSchemes';
 import {
   getWorkspaceDescriptor,
   type WorkshopWorkspace,
@@ -25,6 +26,8 @@ export function ProjectNavigation({
   workspace,
   characters,
   selectedCharacterId,
+  selectedUiSchemeId,
+  refreshSignal,
   onNavigate,
   onNewCharacter,
   renderCharacter,
@@ -34,6 +37,8 @@ export function ProjectNavigation({
   workspace: WorkshopWorkspace;
   characters: CharacterEntry[];
   selectedCharacterId?: string | null;
+  selectedUiSchemeId?: string | null;
+  refreshSignal?: number;
   onNavigate?: () => void;
   onNewCharacter: () => void;
   renderCharacter: (character: CharacterEntry) => React.ReactNode;
@@ -44,21 +49,30 @@ export function ProjectNavigation({
   const ui = getWorkspaceDescriptor('ui');
   const video = getWorkspaceDescriptor('video');
   const currentWorkspace = workspace;
-  const expandedKey = `workshop:characters-expanded:${project.id}`;
+  const charactersExpandedKey = `workshop:characters-expanded:${project.id}`;
+  const uiExpandedKey = `workshop:ui-expanded:${project.id}`;
   const recentKey = `workshop:recent-characters:${project.id}`;
-  const [expanded, setExpanded] = useState(() => {
-    const stored = window.localStorage.getItem(expandedKey);
-    return stored === null ? workspace === 'art' : stored === 'true';
-  });
+  const [charactersExpanded, toggleCharacters] = usePersistentDisclosure(
+    charactersExpandedKey,
+    workspace === 'art',
+  );
+  const [uiExpanded, toggleUi] = usePersistentDisclosure(uiExpandedKey, workspace === 'ui');
   const [query, setQuery] = useState('');
   const [recentIds, setRecentIds] = useState<string[]>(() => readRecent(recentKey));
+  const [uiSchemes, setUiSchemes] = useState<UiSchemesFile | null>(null);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(expandedKey);
-    setExpanded(stored === null ? workspace === 'art' : stored === 'true');
     setQuery('');
     setRecentIds(readRecent(recentKey));
-  }, [expandedKey, recentKey, workspace]);
+  }, [recentKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchUiSchemes(project.id)
+      .then(value => { if (!cancelled) setUiSchemes(value); })
+      .catch(() => { if (!cancelled) setUiSchemes(null); });
+    return () => { cancelled = true; };
+  }, [project.id, refreshSignal]);
 
   useEffect(() => {
     if (!selectedCharacterId || !characters.some(item => item.id === selectedCharacterId)) return;
@@ -78,14 +92,6 @@ export function ProjectNavigation({
       .filter((item): item is CharacterEntry => Boolean(item))
       .slice(0, 5);
   }, [characters, query, recentIds]);
-
-  function toggleCharacters() {
-    setExpanded(value => {
-      const next = !value;
-      window.localStorage.setItem(expandedKey, String(next));
-      return next;
-    });
-  }
 
   return (
     <nav aria-label={`${project.name} 项目导航`} className="space-y-4">
@@ -111,24 +117,13 @@ export function ProjectNavigation({
           资产库
         </h2>
         <div className="flex items-center gap-1">
-          <ProjectSideLink
-            projectBase={projectBase}
+          <ProjectSideToggle
             descriptor={art}
             current={currentWorkspace === art.id}
-            onNavigate={onNavigate}
+            expanded={charactersExpanded}
+            onToggle={toggleCharacters}
             className="min-w-0 flex-1"
           />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={toggleCharacters}
-            aria-label={expanded ? '收起角色' : '展开角色'}
-            aria-expanded={expanded}
-            className="size-10 shrink-0"
-          >
-            <ChevronDown className={cn('size-4 transition-transform', !expanded && '-rotate-90')} aria-hidden />
-          </Button>
           {workspace === 'art' && (
             <Button
               type="button"
@@ -143,7 +138,7 @@ export function ProjectNavigation({
             </Button>
           )}
         </div>
-        {expanded && (
+        {charactersExpanded && (
           <div className="space-y-2 pl-2">
             <label className="relative block">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
@@ -167,12 +162,42 @@ export function ProjectNavigation({
             </Link>
           </div>
         )}
-        <ProjectSideLink
-          projectBase={projectBase}
+        <ProjectSideToggle
           descriptor={ui}
           current={currentWorkspace === ui.id}
-          onNavigate={onNavigate}
+          expanded={uiExpanded}
+          onToggle={toggleUi}
         />
+        {uiExpanded && (
+          <ul className="m-0 list-none space-y-0.5 pl-4 pr-0 pt-1">
+            {uiSchemes?.schemes.map(scheme => {
+              const isDefault = scheme.id === uiSchemes.default_scheme_id;
+              const isCurrent = currentWorkspace === 'ui'
+                && (selectedUiSchemeId ?? uiSchemes.default_scheme_id) === scheme.id;
+              return (
+                <li key={scheme.id}>
+                  <Link
+                    href={`${projectBase}/ui/${encodeURIComponent(scheme.id)}`}
+                    onClick={onNavigate}
+                    aria-current={isCurrent ? 'page' : undefined}
+                    className={cn(
+                      'flex min-h-9 items-center justify-between gap-2 rounded-md px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                      isCurrent
+                        ? 'bg-secondary text-foreground'
+                        : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                    )}
+                  >
+                    <span className="min-w-0 truncate">{scheme.name}</span>
+                    {isDefault && <span className="shrink-0 text-xs text-primary">默认</span>}
+                  </Link>
+                </li>
+              );
+            })}
+            {uiSchemes && uiSchemes.schemes.length === 0 && (
+              <li className="px-2.5 py-2 text-xs text-muted-foreground">暂无 UI 方案</li>
+            )}
+          </ul>
+        )}
         <ProjectSideLink
           projectBase={projectBase}
           descriptor={video}
@@ -181,6 +206,62 @@ export function ProjectNavigation({
         />
       </section>
     </nav>
+  );
+}
+
+function usePersistentDisclosure(key: string, defaultExpanded: boolean) {
+  const [expanded, setExpanded] = useState(() => readDisclosure(key, defaultExpanded));
+
+  useEffect(() => {
+    setExpanded(readDisclosure(key, defaultExpanded));
+  }, [defaultExpanded, key]);
+
+  function toggle() {
+    setExpanded(value => {
+      const next = !value;
+      window.localStorage.setItem(key, String(next));
+      return next;
+    });
+  }
+
+  return [expanded, toggle] as const;
+}
+
+function readDisclosure(key: string, fallback: boolean) {
+  const stored = window.localStorage.getItem(key);
+  return stored === null ? fallback : stored === 'true';
+}
+
+function ProjectSideToggle({
+  descriptor,
+  current,
+  expanded,
+  onToggle,
+  className,
+}: {
+  descriptor: ReturnType<typeof getWorkspaceDescriptor>;
+  current: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  className?: string;
+}) {
+  const Icon = descriptor.icon;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      className={cn(
+        'flex h-10 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+        current
+          ? 'bg-secondary text-foreground'
+          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+        className,
+      )}
+    >
+      <Icon className="size-4 shrink-0" aria-hidden />
+      <span className="min-w-0 whitespace-normal break-words">{descriptor.sidebarLabel}</span>
+    </button>
   );
 }
 

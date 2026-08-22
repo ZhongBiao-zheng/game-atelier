@@ -348,6 +348,7 @@ function ThreeColumnLayout({
               selectedId={selected?.id}
               activeProjectId={openedProject?.id ?? null}
               workspace={workspace}
+              selectedUiSchemeId={routedUiSchemeId}
               onSelect={(id, name, projectIdOverride) => {
                 const projectId = projectIdOverride ?? projectsFile?.assignments[id];
                 const project = projectsFile?.projects.find(p => p.id === projectId) ?? null;

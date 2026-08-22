@@ -27,6 +27,15 @@ beforeEach(() => {
     if (url === '/api/active-character') {
       return { ok: true, json: async () => ({ active_id: 'shadow', updated_at: '' }) };
     }
+    if (url === '/api/projects/p1/ui-schemes') {
+      return {
+        ok: true,
+        json: async () => ({
+          default_scheme_id: 'v1',
+          schemes: [{ id: 'v1', name: 'V1', created_at: '' }],
+        }),
+      };
+    }
     if (url === '/api/characters/shadow' && init?.method === 'DELETE') {
       return { ok: true, json: async () => ({ ok: true }) };
     }
@@ -67,8 +76,63 @@ describe('LeftSidebar', () => {
 
     const nav = await screen.findByRole('navigation', { name: '项目一 项目导航' });
     expect(within(nav).getAllByRole('button', { name: /^角色 \d+$/ })).toHaveLength(5);
-    expect(within(nav).getByRole('link', { name: 'UI' })).toBeInTheDocument();
+    expect(within(nav).getByRole('button', { name: 'UI' })).toBeInTheDocument();
     expect(within(nav).getByRole('link', { name: '视频' })).toBeInTheDocument();
+  });
+
+  it('角色整行点击切换展开状态，不再显示独立展开按钮', async () => {
+    render(<LeftSidebar sseSignal={0} activeProjectId="p1" workspace="overview" onSelect={vi.fn()} />);
+
+    const roleToggle = await screen.findByRole('button', { name: '角色' });
+    expect(roleToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: '展开角色' })).not.toBeInTheDocument();
+
+    fireEvent.click(roleToggle);
+    expect(roleToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('搜索侧栏角色')).toBeInTheDocument();
+
+    fireEvent.click(roleToggle);
+    expect(roleToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('搜索侧栏角色')).not.toBeInTheDocument();
+  });
+
+  it('UI 整行点击展开各版本方案，再次点击收起', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/characters') return { ok: true, json: async () => [] };
+      if (url === '/api/projects') return {
+        ok: true,
+        json: async () => ({
+          projects: [{ id: 'p1', slug: 'one', name: '项目一', created_at: '' }],
+          assignments: {},
+        }),
+      };
+      if (url === '/api/projects/p1/ui-schemes') return {
+        ok: true,
+        json: async () => ({
+          default_scheme_id: 'v1',
+          schemes: [
+            { id: 'v1', name: 'V1', created_at: '' },
+            { id: 'v2', name: '寒锋 V2', created_at: '' },
+          ],
+        }),
+      };
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+    render(<LeftSidebar sseSignal={0} activeProjectId="p1" workspace="overview" onSelect={vi.fn()} />);
+
+    const uiToggle = await screen.findByRole('button', { name: 'UI' });
+    expect(uiToggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(uiToggle);
+    expect(uiToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(await screen.findByRole('link', { name: /V1.*默认/ })).toHaveAttribute(
+      'href', '/workshop/p1/ui/v1',
+    );
+    expect(screen.getByRole('link', { name: '寒锋 V2' })).toHaveAttribute(
+      'href', '/workshop/p1/ui/v2',
+    );
+
+    fireEvent.click(uiToggle);
+    expect(screen.queryByRole('link', { name: '寒锋 V2' })).not.toBeInTheDocument();
   });
 
   it('deletes a character from the right edge of its row after confirmation', async () => {

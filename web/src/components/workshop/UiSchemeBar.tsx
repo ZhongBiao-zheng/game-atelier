@@ -1,21 +1,17 @@
 import { useState } from 'react';
 import { Check, Plus, Star } from 'lucide-react';
-import { Link } from 'wouter';
 
 import type { UiSchemeCreate, UiSchemesFile } from '@/api/uiSchemes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
 
 export function UiSchemeBar({
-  projectId,
   currentSchemeId,
   schemesFile,
   screens,
   onCreate,
   onSetDefault,
 }: {
-  projectId: string;
   currentSchemeId: string;
   schemesFile: UiSchemesFile;
   screens: Array<{ screen_id: string; name: string }>;
@@ -71,30 +67,16 @@ export function UiSchemeBar({
   }
 
   return (
-    <section aria-label="UI 方案" className="space-y-3 rounded-lg border border-border bg-card/30 p-4">
+    <section aria-label="UI 方案操作" className="space-y-3 rounded-lg border border-border bg-card/30 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2 overflow-x-auto" role="navigation" aria-label="切换 UI 方案">
-          {schemesFile.schemes.map(scheme => (
-            <Link
-              key={scheme.id}
-              href={`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(scheme.id)}`}
-              aria-current={scheme.id === currentSchemeId ? 'page' : undefined}
-              className={cn(
-                'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                scheme.id === currentSchemeId
-                  ? 'border-border bg-secondary font-medium text-foreground'
-                  : 'border-border text-muted-foreground hover:bg-secondary hover:text-foreground',
-              )}
-            >
-              {scheme.name}
-              {scheme.id === schemesFile.default_scheme_id && (
-                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                  <span className="size-1.5 rounded-full bg-primary" aria-hidden />
-                  默认
-                </span>
-              )}
-            </Link>
-          ))}
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground">当前方案</p>
+          <p className="mt-1 flex items-center gap-2 text-sm font-medium text-foreground">
+            <span className="truncate">{current?.name ?? currentSchemeId}</span>
+            {current?.id === schemesFile.default_scheme_id && (
+              <span className="shrink-0 text-xs font-normal text-primary">默认</span>
+            )}
+          </p>
         </div>
         <div className="flex shrink-0 gap-2">
           {current && current.id !== schemesFile.default_scheme_id && (

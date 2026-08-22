@@ -18,6 +18,7 @@ interface Props {
   onDelete?: (id: string) => void;
   activeProjectId?: string | null;
   workspace?: WorkshopWorkspace;
+  selectedUiSchemeId?: string | null;
   onNavigate?: () => void;
 }
 
@@ -28,6 +29,7 @@ export function LeftSidebar({
   onDelete,
   activeProjectId = null,
   workspace = 'overview',
+  selectedUiSchemeId,
   onNavigate,
 }: Props) {
   const [characters, setCharacters] = useState<CharacterEntry[]>([]);
@@ -200,6 +202,8 @@ export function LeftSidebar({
             workspace={workspace}
             characters={projectCharacters}
             selectedCharacterId={selectedId}
+            selectedUiSchemeId={selectedUiSchemeId}
+            refreshSignal={sseSignal}
             onNavigate={onNavigate}
             onNewCharacter={startNewCharacter}
             renderCharacter={renderCharacter}
