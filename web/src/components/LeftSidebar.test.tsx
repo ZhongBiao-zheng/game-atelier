@@ -159,7 +159,8 @@ describe('LeftSidebar', () => {
     await waitFor(() => expect(uiToggle).toHaveAttribute('href', '/workshop/p1/ui'));
     fireEvent.click(uiToggle);
 
-    expect(await screen.findByText('暂无 UI 方案')).toBeInTheDocument();
+    expect(uiToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('暂无 UI 方案')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /V1/ })).not.toBeInTheDocument();
   });
 

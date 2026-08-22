@@ -61,6 +61,7 @@ export function ProjectNavigation({
   const [recentIds, setRecentIds] = useState<string[]>(() => readRecent(recentKey));
   const [uiSchemes, setUiSchemes] = useState<UiSchemesFile | null>(null);
   const visibleSchemes = Array.isArray(uiSchemes?.schemes) ? uiSchemes.schemes : [];
+  const hasVisibleUiSchemes = visibleSchemes.length > 0;
   const navigationScheme = visibleSchemes.find(
     scheme => scheme.id === uiSchemes?.default_scheme_id,
   ) ?? visibleSchemes[0];
@@ -175,12 +176,12 @@ export function ProjectNavigation({
         <ProjectSideDisclosureLink
           descriptor={ui}
           current={currentWorkspace === ui.id}
-          expanded={uiExpanded}
-          onToggle={toggleUi}
+          expanded={hasVisibleUiSchemes && uiExpanded}
+          onToggle={() => { if (hasVisibleUiSchemes) toggleUi(); }}
           href={uiHref}
           onNavigate={onNavigate}
         />
-        {uiExpanded && (
+        {hasVisibleUiSchemes && uiExpanded && (
           <ul className="m-0 list-none space-y-0.5 pl-4 pr-0 pt-1">
             {visibleSchemes.map(scheme => {
               const isDefault = scheme.id === uiSchemes?.default_scheme_id;
@@ -204,9 +205,6 @@ export function ProjectNavigation({
                 </li>
               );
             })}
-            {uiSchemes && visibleSchemes.length === 0 && (
-              <li className="px-2.5 py-2 text-xs text-muted-foreground">暂无 UI 方案</li>
-            )}
           </ul>
         )}
         <ProjectSideLink
