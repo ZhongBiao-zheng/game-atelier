@@ -9,6 +9,71 @@ afterEach(() => {
 });
 
 describe('CharacterGallery', () => {
+  it('在三视图后接入角色关联的 UI 和视频页签', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      const path = String(url);
+      if (path === '/api/projects/p1/characters/cao-cao/workspace') return {
+        ok: true,
+        json: async () => ({
+          character: { id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null },
+          assets: [],
+          recent_media: [],
+          related: [
+            {
+              target: { kind: 'ui', scheme_id: 'v1', screen_id: 'home' },
+              title: '首页', detail: 'V1 · UI 页面', source: 'auto', featured_path: null, count: 1, media: [],
+            },
+            {
+              target: { kind: 'video', production_id: 'trailer' },
+              title: '角色预告', detail: '视频企划', source: 'manual', featured_path: null, count: 0, media: [],
+            },
+          ],
+        }),
+      };
+      if (path === '/api/projects') return {
+        ok: true,
+        json: async () => ({
+          projects: [{ id: 'p1', slug: 'one', name: '买牌三国', created_at: '' }],
+          assignments: { 'cao-cao': 'p1' },
+        }),
+      };
+      if (path === '/api/characters') return {
+        ok: true,
+        json: async () => [{ id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null }],
+      };
+      if (path === '/api/gallery/hidden') return { ok: true, json: async () => ({ paths: [] }) };
+      if (path === '/api/characters/cao-cao/canonical') return {
+        ok: true,
+        json: async () => ({ portrait: null, promo: null, turnaround: null }),
+      };
+      return { ok: true, json: async () => [] };
+    }));
+
+    render(
+      <CharacterGallery
+        projectId="p1"
+        characterId="cao-cao"
+        characterName="曹操"
+        onSelectImage={vi.fn()}
+        sseSignal={0}
+      />,
+    );
+
+    const tabs = await screen.findAllByRole('button', { name: /立绘|美宣|三视图|UI|视频/ });
+    expect(tabs.map(tab => tab.textContent)).toEqual(['立绘0', '美宣0', '三视图0', 'UI1', '视频1']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'UI 1' }));
+    expect(screen.queryByRole('slider', { name: '列数' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: /首页/ })).toHaveAttribute(
+      'href', '/workshop/p1/ui/v1/screens/home',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '视频 1' }));
+    expect(await screen.findByRole('link', { name: /角色预告/ })).toHaveAttribute(
+      'href', '/workshop/p1/video/trailer',
+    );
+  });
+
   it('does not show pending_confirm jobs as terminal confirmation cards', async () => {
     const pendingConfirmJob: Job = {
       job_id: 'job-waiting-confirm',

@@ -124,6 +124,55 @@ describe('MainApp', () => {
     expect(screen.getByText('返回画廊')).toBeInTheDocument();
   });
 
+  it('具体角色基础路由直接进入五页签作品画廊', async () => {
+    vi.stubGlobal('EventSource', class {
+      addEventListener = vi.fn();
+      close = vi.fn();
+      onerror: (() => void) | null = null;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      const path = String(url);
+      if (path === '/api/config') return {
+        ok: true, json: async () => ({ image_storage_root: '/tmp/game-atelier' }),
+      };
+      if (path === '/api/projects') return {
+        ok: true,
+        json: async () => ({
+          projects: [{ id: 'p1', slug: 'one', name: '买牌三国', created_at: '' }],
+          assignments: { 'cao-cao': 'p1' },
+        }),
+      };
+      if (path === '/api/characters') return {
+        ok: true,
+        json: async () => [{ id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null }],
+      };
+      if (path === '/api/projects/p1/characters/cao-cao/workspace') return {
+        ok: true,
+        json: async () => ({
+          character: { id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null },
+          assets: [], related: [], recent_media: [],
+        }),
+      };
+      if (path === '/api/gallery/hidden') return { ok: true, json: async () => ({ paths: [] }) };
+      if (path === '/api/characters/cao-cao/canonical') return {
+        ok: true, json: async () => ({ portrait: null, promo: null, turnaround: null }),
+      };
+      if (path === '/api/projects/p1/ui-schemes') return {
+        ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [] }),
+      };
+      return { ok: true, json: async () => [] };
+    }) as any);
+
+    render(
+      <MainApp routedProjectId="p1" routedWorkspace="art" routedCharacterId="cao-cao" />,
+    );
+
+    expect(await screen.findByRole('heading', { name: '曹操' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'UI 0' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '视频 0' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '角色资产地图' })).not.toBeInTheDocument();
+  });
+
   it('uses the project sidebar as the only workspace navigation', async () => {
     class TestEventSource {
       addEventListener = vi.fn();
