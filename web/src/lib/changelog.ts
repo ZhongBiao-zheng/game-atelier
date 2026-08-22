@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.30.1',
+    date: '2026-08-22',
+    headline: '重新编辑会带回完整参考内容',
+    changes: [
+      { kind: 'fix', text: '视频记录中的 @图片引用恢复为全能参考缩略图标签，与创作输入框保持一致' },
+      { kind: 'fix', text: '点击重新编辑会同时恢复提示词、生成参数以及图片、视频、音频参考，不再只传提示词' },
+    ],
+  },
+  {
     version: '5.30.0',
     date: '2026-08-22',
     headline: '多镜头短片现在一次生成完整成片',

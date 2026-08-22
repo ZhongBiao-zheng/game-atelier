@@ -8,6 +8,12 @@ import { useVideoFrame } from '@/lib/videoFrame';
 import type { GenMode } from '@/lib/historyFilters';
 import { isGalleryFavorited, isGalleryHidden } from '@/api/gallery';
 import { formatBeijingTime } from '@/lib/time';
+import {
+  canonicalMentionLabel,
+  createMentionTokenRegex,
+  mentionKindFromToken,
+  type MentionKind,
+} from '@/lib/mentionTokens';
 
 import { Lightbox } from '../Lightbox';
 import { WaitingCopy } from './WaitingCopy';
@@ -89,7 +95,7 @@ export function RoundList({
   hiddenPaths?: string[];
   onToggleHidden?: (path: string) => void | Promise<void>;
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
-  onReEdit?: (config: RoundConfig) => void;
+  onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
@@ -122,7 +128,7 @@ export function RoundList({
                   <div className="flex items-start gap-3 text-sm">
                     <ReferenceStack config={r.config} jobId={r.jobId} onReuse={onReuseReferences} />
                     <div className="min-w-0 flex-1">
-                      <MentionPrompt prompt={r.config.prompt} config={r.config} />
+                      <MentionPrompt prompt={r.config.prompt} config={r.config} jobId={r.jobId} />
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1">
@@ -141,7 +147,7 @@ export function RoundList({
                     ))}
                   </div>
                   <div className="flex items-center gap-2">
-                    <ActionButton onClick={() => onReEdit?.(r.config)}>重新编辑</ActionButton>
+                    <ActionButton onClick={() => { void onReEdit?.(r.config, r.jobId); }}>重新编辑</ActionButton>
                     <ActionButton onClick={() => { void onRegenerate?.(r.config); }}>再次生成</ActionButton>
                     {r.jobId && onDeleteFailed && (
                       <ActionButton compact aria-label="删除出图记录" title="删除出图记录" onClick={() => { void onDeleteFailed(r.jobId!); }}>
@@ -367,10 +373,6 @@ function ReferenceStack({
 
 // 提交链路会把 @视频1 序列化成 视频1（厂商契约要的形态），job 里存的是序列化后的
 // prompt —— 所以这里 @ 可选；误伤靠「只有对应参考素材真实存在才 chip 化」兜底。
-const MENTION_TOKEN_RE = /@?(图|视频|音频)(\d+)/g;
-type MentionKind = 'image' | 'video' | 'audio';
-const MENTION_KIND: Record<string, MentionKind> = { 图: 'image', 视频: 'video', 音频: 'audio' };
-
 function mentionRefPath(config: RoundConfig, kind: MentionKind, n: number): string | null {
   const list = kind === 'image' ? config.referenceImages
     : kind === 'video' ? config.referenceVideos
@@ -380,18 +382,19 @@ function mentionRefPath(config: RoundConfig, kind: MentionKind, n: number): stri
 
 type MentionHover = { kind: MentionKind; path: string; left: number; top: number };
 
-/** 历史记录里的提示词：@图N/@视频N/@音频N 渲染成缩略图+标签 chip，hover 在上方浮层预览。 */
-function MentionPrompt({ prompt, config }: { prompt: string; config: RoundConfig }) {
+/** 历史记录里的提示词：@图片N/@图N/@视频N/@音频N 渲染成同款 chip。 */
+function MentionPrompt({ prompt, config, jobId }: { prompt: string; config: RoundConfig; jobId?: string }) {
   const [hover, setHover] = useState<MentionHover | null>(null);
   const parts = useMemo(() => {
     const out: Array<string | { label: string; kind: MentionKind; path: string }> = [];
     let last = 0;
-    for (const m of prompt.matchAll(MENTION_TOKEN_RE)) {
+    for (const m of prompt.matchAll(createMentionTokenRegex(true))) {
       // 引用的素材不存在 → 当普通文本，不 chip 化（防止正文里碰巧出现"视频1"被误伤）。
-      const path = mentionRefPath(config, MENTION_KIND[m[1]], parseInt(m[2], 10));
+      const kind = mentionKindFromToken(m[1]);
+      const path = mentionRefPath(config, kind, parseInt(m[2], 10));
       if (!path) continue;
       if (m.index! > last) out.push(prompt.slice(last, m.index));
-      out.push({ label: `${m[1]}${m[2]}`, kind: MENTION_KIND[m[1]], path });
+      out.push({ label: canonicalMentionLabel(m[1], m[2]), kind, path });
       last = m.index! + m[0].length;
     }
     if (last < prompt.length) out.push(prompt.slice(last));
@@ -405,7 +408,7 @@ function MentionPrompt({ prompt, config }: { prompt: string; config: RoundConfig
           typeof part === 'string' ? (
             <span key={i}>{part}</span>
           ) : (
-            <MentionChip key={i} label={part.label} kind={part.kind} path={part.path} onHover={setHover} />
+            <MentionChip key={i} label={part.label} kind={part.kind} path={part.path} jobId={jobId} onHover={setHover} />
           ),
         )}
       </p>
@@ -417,7 +420,7 @@ function MentionPrompt({ prompt, config }: { prompt: string; config: RoundConfig
         >
           {hover.kind === 'video' ? (
             <video
-              src={refImageSrc(hover.path)}
+              src={refImageSrc(hover.path, jobId)}
               autoPlay
               muted
               loop
@@ -426,7 +429,7 @@ function MentionPrompt({ prompt, config }: { prompt: string; config: RoundConfig
             />
           ) : hover.kind === 'image' ? (
             <img
-              src={refImageSrc(hover.path)}
+              src={refImageSrc(hover.path, jobId)}
               alt=""
               className="h-[150px] rounded-lg border border-border bg-card object-contain"
             />
@@ -443,14 +446,15 @@ function MentionPrompt({ prompt, config }: { prompt: string; config: RoundConfig
   );
 }
 
-function MentionChip({ label, kind, path, onHover }: {
+function MentionChip({ label, kind, path, jobId, onHover }: {
   label: string;
   kind: MentionKind;
   path: string;
+  jobId?: string;
   onHover: (h: MentionHover | null) => void;
 }) {
-  const frame = useVideoFrame(kind === 'video' ? refImageSrc(path) : null);
-  const thumb = kind === 'image' ? refImageSrc(path) : frame;
+  const frame = useVideoFrame(kind === 'video' ? refImageSrc(path, jobId) : null);
+  const thumb = kind === 'image' ? refImageSrc(path, jobId) : frame;
   return (
     <span
       data-mention={label}
@@ -508,7 +512,7 @@ function DoneBatch({
   onToggleFavorite?: (path: string) => void | Promise<void>;
   hiddenPaths?: string[];
   onToggleHidden?: (path: string) => void | Promise<void>;
-  onReEdit?: (config: RoundConfig) => void;
+  onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
   onLightbox?: (src: string) => void;
@@ -552,7 +556,7 @@ function DoneBatch({
       <div className="flex items-start gap-3 text-sm">
         <ReferenceStack config={round.config} jobId={round.jobId} onReuse={onReuseReferences} />
         <div className="min-w-0 flex-1">
-          <MentionPrompt prompt={round.config.prompt} config={round.config} />
+          <MentionPrompt prompt={round.config.prompt} config={round.config} jobId={round.jobId} />
           <p className="mt-1 text-sm text-muted-foreground">
             {specMeta.join(' · ')}
             {shownMjFlags && (
@@ -707,7 +711,7 @@ function DoneBatch({
             })}
       </div>
       <div className="flex items-center gap-2">
-        <ActionButton onClick={() => onReEdit?.(round.config)}>重新编辑</ActionButton>
+        <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
         <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
         {/* skill 出图（角色立绘/KV/三视图）在出图页只作溯源展示——删除会从磁盘抹掉角色资产，
             该操作只留在工坊页。这里仅对 studio 自家出图开放「删除该批次结果」。 */}
@@ -760,7 +764,7 @@ function FailedCard({
 }: {
   round: Extract<RoundState, { kind: 'failed' }>;
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
-  onReEdit?: (config: RoundConfig) => void;
+  onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
 }) {
@@ -781,7 +785,7 @@ function FailedCard({
         <div className="flex items-start gap-3 text-sm">
           <ReferenceStack config={config} jobId={round.jobId} onReuse={onReuseReferences} />
           <div className="min-w-0 flex-1">
-            <MentionPrompt prompt={config.prompt} config={config} />
+            <MentionPrompt prompt={config.prompt} config={config} jobId={round.jobId} />
             {meta.length > 0 && (
               <p className="mt-1 text-sm text-muted-foreground">{meta.join(' | ')}</p>
             )}
@@ -805,7 +809,7 @@ function FailedCard({
       </div>
       {config && (
         <div className="flex items-center gap-2">
-          <ActionButton onClick={() => onReEdit?.(config)}>重新编辑</ActionButton>
+          <ActionButton onClick={() => { void onReEdit?.(config, round.jobId); }}>重新编辑</ActionButton>
           <ActionButton onClick={() => { void onRegenerate?.(config); }}>再次生成</ActionButton>
         </div>
       )}

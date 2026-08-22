@@ -136,6 +136,8 @@ function StudioFull() {
   const [referenceAudios, setReferenceAudios] = useState<File[]>([]);
   // 首尾帧模式的双槽（与 referenceImages 分离：两个槽各自独立可空，仅尾帧也合法）。
   const [videoFrames, setVideoFrames] = useState<FrameSlots>({ first: null, last: null });
+  // 重新编辑会异步拉取历史参考素材；只允许最后一次点击的结果回填，避免慢请求覆盖新选择。
+  const reEditSequence = useRef(0);
   const selectedModelObj = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
   const videoCaps = videoControlCaps(model, selectedModelObj?.protocol);
   // 切到视频模式时，若当前 key 没有视频模型，自动选中首个带视频模型的 key —— 让 videoCaps 立即正确（否则退化成 STANDARD_CAPS）。
@@ -174,17 +176,7 @@ function StudioFull() {
 
   // 点击历史记录里的参考图 → 把这批参考图（服务器路径）拉回成 File[]，整组塞进输入框复用出图。
   const handleReuseReferences = useCallback(async (config: RoundConfig, jobId?: string) => {
-    const fetchGroup = (paths: string[], prefix: string) => Promise.all(
-      paths.map((path, i) => fetchAssetAsFile(path, `${prefix}-${i + 1}`, jobId)),
-    );
-    const [images, videos, audios, sref, cref, oref] = await Promise.all([
-      fetchGroup(config.referenceImages, 'ref'),
-      fetchGroup(config.referenceVideos ?? [], 'video-ref'),
-      fetchGroup(config.referenceAudios ?? [], 'audio-ref'),
-      fetchGroup(config.mjRefPaths?.sref ?? [], 'style-ref'),
-      fetchGroup(config.mjRefPaths?.cref ?? [], 'character-ref'),
-      fetchGroup(config.mjRefPaths?.oref ?? [], 'omni-ref'),
-    ]);
+    const { images, videos, audios, sref, cref, oref } = await fetchRoundReferences(config, jobId);
     const routed = routeReusedImageFiles(model, config.model, { image: images, sref, cref, oref });
     setReferenceImages(routed.referenceImages);
     setReferenceVideos(videos);
@@ -770,25 +762,76 @@ function StudioFull() {
     setRounds((items) => items.filter((item) => item.kind !== 'failed' || item.jobId !== jobId));
   }
 
-  function reEdit(config: RoundConfig) {
-    setPromptText(config.prompt);
-    if (config.alias) setProviderAlias(config.alias);
-    setModel(config.model);
-    if (config.ratio) setRatio(config.ratio);
-    if (config.resolution) setResolution(config.resolution);
-    if (config.n) setCount(clampImageCount(config.n));
-    if (config.quality) setQuality(config.quality);
-    if (config.mjParams) setMjParams(config.mjParams);
-    if (config.size) {
-      const [wStr, hStr] = config.size.split('x');
-      const w = parseInt(wStr, 10);
-      const h = parseInt(hStr, 10);
-      if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
-        const standard = computeStudioPixelSize(config.ratio ?? ratio, config.resolution ?? resolution, config.model);
-        if (w !== standard.w || h !== standard.h) {
-          setSizeOverride((prev) => ({ key: (prev?.key ?? 0) + 1, w, h }));
+  async function reEdit(config: RoundConfig, jobId?: string) {
+    const requestSequence = ++reEditSequence.current;
+    const targetKind = config.kind ?? 'image';
+    setClickPinned(true);
+    try {
+      const refs = await fetchRoundReferences(config, jobId);
+      if (requestSequence !== reEditSequence.current) return;
+
+      // 素材全部取回后再一次性替换编辑器快照；任何素材失败都保留用户当前编辑内容。
+      setKind(targetKind);
+      if (config.alias) setProviderAlias(config.alias);
+      setModel(config.model);
+      if (targetKind === 'video') {
+        if (config.ratio) setVideoRatio(config.ratio);
+        if (config.videoResolution) setVideoResolution(config.videoResolution);
+        if (config.duration) setDuration(config.duration);
+        if (config.videoQuality) setVideoQuality(config.videoQuality);
+        if (config.n) setVideoCount(clampImageCount(config.n));
+        setVideoMode(isOmniVideoConfig(config) ? 'omni' : 'firstlast');
+        setGenerateAudio(!!config.generateAudio);
+      } else {
+        if (config.ratio) setRatio(config.ratio);
+        if (config.resolution) setResolution(config.resolution);
+        if (config.n) setCount(clampImageCount(config.n));
+        if (config.quality) setQuality(config.quality);
+        if (config.mjParams) setMjParams(config.mjParams);
+        if (config.size) {
+          const [wStr, hStr] = config.size.split('x');
+          const w = parseInt(wStr, 10);
+          const h = parseInt(hStr, 10);
+          if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
+            const standard = computeStudioPixelSize(config.ratio ?? ratio, config.resolution ?? resolution, config.model);
+            if (w !== standard.w || h !== standard.h) {
+              setSizeOverride((prev) => ({ key: (prev?.key ?? 0) + 1, w, h }));
+            }
+          }
         }
       }
+
+      setReferenceImages([]);
+      setReferenceVideos([]);
+      setReferenceAudios([]);
+      setVideoFrames({ first: null, last: null });
+      setMjRefs(EMPTY_MJ_REFS);
+      if (targetKind === 'video') {
+        if (isOmniVideoConfig(config)) {
+          setReferenceImages(refs.images);
+          setReferenceVideos(refs.videos);
+          setReferenceAudios(refs.audios);
+        } else if (config.frameMode === 'last') {
+          setVideoFrames({ first: null, last: refs.images[0] ?? null });
+        } else {
+          setVideoFrames({ first: refs.images[0] ?? null, last: refs.images[1] ?? null });
+        }
+      } else {
+        const routed = routeReusedImageFiles(config.model, config.model, {
+          image: refs.images,
+          sref: refs.sref,
+          cref: refs.cref,
+          oref: refs.oref,
+        });
+        setReferenceImages(routed.referenceImages);
+        setMjRefs(routed.mjRefs);
+        setReuseLimitNotice(routed.droppedCount > 0);
+      }
+      // 模式与素材已同步排入同一批状态更新，Prompt 里的 @图片N 会直接生成带缩略图的 chip。
+      setPromptText(config.prompt);
+    } catch (error) {
+      if (requestSequence !== reEditSequence.current) return;
+      alert(error instanceof Error ? error.message : '参考素材恢复失败');
     }
   }
 
@@ -804,12 +847,7 @@ function StudioFull() {
       if (config.n) setVideoCount(clampImageCount(config.n));
       // 旧 job 的 frame_mode 不回填用户态（提交时按帧数推导）；只同步生成方式：
       // 带视频/音频参考、或参考图没有帧语义（无 frame_mode / auto）→ 全能参考，否则首尾帧。
-      const omniLike = Boolean(
-        config.referenceVideos?.length
-        || config.referenceAudios?.length
-        || (config.referenceImages?.length && (!config.frameMode || config.frameMode === 'auto')),
-      );
-      setVideoMode(omniLike ? 'omni' : 'firstlast');
+      setVideoMode(isOmniVideoConfig(config) ? 'omni' : 'firstlast');
       setGenerateAudio(!!config.generateAudio);
     } else {
       if (config.ratio) setRatio(config.ratio);
@@ -848,6 +886,29 @@ async function fetchAssetAsFile(path: string, baseName: string, jobId?: string):
   const blob = await resp.blob();
   const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
   return new File([blob], `${baseName}.${ext}`, { type: blob.type || 'image/png' });
+}
+
+async function fetchRoundReferences(config: RoundConfig, jobId?: string) {
+  const fetchGroup = (paths: string[], prefix: string) => Promise.all(
+    paths.map((path, i) => fetchAssetAsFile(path, `${prefix}-${i + 1}`, jobId)),
+  );
+  const [images, videos, audios, sref, cref, oref] = await Promise.all([
+    fetchGroup(config.referenceImages, 'ref'),
+    fetchGroup(config.referenceVideos ?? [], 'video-ref'),
+    fetchGroup(config.referenceAudios ?? [], 'audio-ref'),
+    fetchGroup(config.mjRefPaths?.sref ?? [], 'style-ref'),
+    fetchGroup(config.mjRefPaths?.cref ?? [], 'character-ref'),
+    fetchGroup(config.mjRefPaths?.oref ?? [], 'omni-ref'),
+  ]);
+  return { images, videos, audios, sref, cref, oref };
+}
+
+function isOmniVideoConfig(config: RoundConfig): boolean {
+  return Boolean(
+    config.referenceVideos?.length
+    || config.referenceAudios?.length
+    || (config.referenceImages.length && (!config.frameMode || config.frameMode === 'auto'))
+  );
 }
 
 function referenceImagesFor(job: Job): string[] {

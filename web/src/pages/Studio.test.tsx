@@ -13,6 +13,8 @@ function typePrompt(editor: Element, value: string) {
 
 beforeEach(() => {
   localStorage.clear();
+  (globalThis.URL as any).createObjectURL ??= vi.fn(() => 'blob:test');
+  (globalThis.URL as any).revokeObjectURL ??= vi.fn();
   globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
     if (url === '/api/keys') {
       return Promise.resolve({
@@ -142,6 +144,12 @@ function mockCompletedBatchAndKeys() {
     }
     if (String(url).startsWith('/api/jobs/job-studio-1/image')) {
       return Promise.resolve({ ok: true, json: async () => ({ ok: true }) } as any);
+    }
+    if (String(url).startsWith('/api/raw')) {
+      return Promise.resolve({
+        ok: true,
+        blob: async () => new Blob(['reference'], { type: 'image/png' }),
+      } as any);
     }
     if (url === '/api/studio/jobs') {
       return Promise.resolve({
@@ -1064,11 +1072,35 @@ describe('Studio', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '重新编辑' }));
 
-    expect(screen.getByLabelText('生图 prompt').textContent).toContain('一个身披白床单');
+    await waitFor(() => {
+      expect(screen.getByLabelText('生图 prompt').textContent).toContain('一个身披白床单');
+    });
+    expect(screen.getByTestId('reference-images-panel').querySelector('img')).not.toBeNull();
     const sizeButton = screen.getByRole('button', { name: '选择比例和分辨率' });
     expect(sizeButton).not.toHaveTextContent('4:3');
     expect(sizeButton).toHaveTextContent('2304');
     expect(sizeButton).toHaveTextContent('高清 2K');
+  });
+
+  it('keeps the current editor snapshot when a re-edit reference cannot be restored', async () => {
+    const fetchMock = mockCompletedBatchAndKeys();
+    const defaultFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).startsWith('/api/raw')) {
+        return Promise.resolve(new Response('', { status: 403 }));
+      }
+      return defaultFetch(url, init);
+    });
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    renderStudio();
+
+    const editor = screen.getByLabelText('生图 prompt');
+    typePrompt(editor, '保留当前编辑内容');
+    fireEvent.click(await screen.findByRole('button', { name: '重新编辑' }));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('HTTP 403')));
+    expect(editor.textContent).toContain('保留当前编辑内容');
+    expect(editor.textContent).not.toContain('一个身披白床单');
   });
 
   it('regenerates a completed batch with the same config', async () => {
@@ -1588,6 +1620,71 @@ describe('Studio video submission', () => {
     });
     // 没有任何文件需要重新上传 —— 参考资产复用服务器路径。
     expect(fetchMock).not.toHaveBeenCalledWith('/api/uploads', expect.any(Object));
+  });
+
+  it('re-edits a video job with its prompt and every omni reference asset', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'tokendance',
+            keys: [{
+              alias: 'tokendance', provider: 'tokendance', access_key: 'key', secret_key: null,
+              capabilities: [], modalities: ['video'],
+              models: [{ name: 'Seedance 2.0 Mini', id: 'seedance-2.0-mini', protocol: 'seedance' }],
+              notes: '', created_at: '2026-08-22T00:00:00Z', is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs' && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => [{
+            job_id: 'job-video-edit', character_id: '',
+            prompt: '曹操@图片1 参考@视频1，配合@音频1。',
+            submitted_at: '2026-08-22T14:35:52Z', model: 'seedance-2.0-mini',
+            params: {
+              duration: 15, resolution: '720p', ratio: '9:16',
+              reference_images: ['/characters/cao-cao/portrait/v1.png'],
+              reference_videos: ['https://cdn.example/reference.mp4'],
+              reference_audios: ['/runtime/uploads/reference.mp3'],
+            },
+            output_paths: ['/projects/ma-jiang-you-xi/videos/triple-win-chaos/versions/v1.mp4'],
+            status: 'done', error: null, kind: 'video', namespace: 'video',
+            alias: 'tokendance', provider: 'tokendance', project_id: 'p-975dcbf4f3',
+            production_id: 'triple-win-chaos',
+          }],
+        } as any);
+      }
+      if (href.startsWith('/api/raw') || href.startsWith('https://cdn.example/')) {
+        const type = href.includes('.mp4') ? 'video/mp4' : href.includes('.mp3') ? 'audio/mpeg' : 'image/png';
+        return Promise.resolve({
+          ok: true,
+          blob: async () => new Blob(['reference'], { type }),
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+    fireEvent.click(await screen.findByRole('button', { name: '重新编辑' }));
+
+    const editor = screen.getByLabelText('生图 prompt');
+    await waitFor(() => {
+      expect(editor.querySelector('[data-mention="图1"]')).not.toBeNull();
+      expect(editor.querySelector('[data-mention="视频1"]')).not.toBeNull();
+      expect(editor.querySelector('[data-mention="音频1"]')).not.toBeNull();
+    });
+    const panel = screen.getByTestId('reference-images-panel');
+    expect(panel.textContent).toContain('图1');
+    expect(panel.textContent).toContain('视频1');
+    expect(panel.textContent).toContain('音频1');
+    expect(fetchMock.mock.calls.filter(([calledUrl]) => String(calledUrl).startsWith('/api/raw'))).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledWith('https://cdn.example/reference.mp4');
   });
 });
 

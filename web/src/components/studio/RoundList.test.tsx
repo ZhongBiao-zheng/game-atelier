@@ -336,6 +336,21 @@ describe('RoundList reference assets', () => {
     expect(container.textContent).toContain('视频1');
   });
 
+  it('renders skill prompt @图片N aliases with the same omni reference chip', () => {
+    const round: RoundState = {
+      ...videoWithRefs,
+      config: {
+        ...videoWithRefs.config,
+        prompt: '曹操@图片1 推出一张牌',
+      },
+    };
+    const { container } = render(<RoundList rounds={[round]} />);
+    const chip = container.querySelector('[data-mention="图1"]');
+    expect(chip).not.toBeNull();
+    expect(chip?.querySelector('img')?.getAttribute('src')).toContain('job_id=job-vid-2');
+    expect(container.textContent).not.toContain('@图片1');
+  });
+
   it('keeps tokens without a matching reference as plain text (no chip)', () => {
     const noRefs: RoundState = {
       ...videoWithRefs,
