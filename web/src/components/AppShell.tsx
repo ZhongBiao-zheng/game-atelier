@@ -173,6 +173,14 @@ export function AppShell() {
               />
             )}
           </Route>
+          <Route path="/workshop/:projectId/ui">
+            {(params) => (
+              <CharacterDetail
+                projectId={params.projectId}
+                workspace="ui"
+              />
+            )}
+          </Route>
           <Route path="/workshop/:projectId/art/characters/:id/:assetSlot/:jobId/:imagePath">
             {(params) => (
               <CharacterDetail

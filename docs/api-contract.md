@@ -118,12 +118,14 @@ type CharacterEntry = {
 但不复制 canonical；两套方案之后独立写 `style.md / screens / canonical.json`。viewer-server 启动时
 显式执行一次旧项目升级：把旧 `screens/` 移到 `ui/v1/screens/`，把根 `style.md` 的 `ui.*` 章节
 移入 V1，并经完整 Job 模型校验修正 Job 与 canonical。正常读取只接受新路径，不做迁移或 fallback。
+`GET /projects/{id}/ui-schemes?visible_only=true` 仅返回包含实际 UI 文档、页面或作品的方案，供侧栏
+隐藏初始化产生的空 V1；不带参数时仍返回完整方案文件，供 UI 工作流使用。
 
 ### 角色索引、工作台与关联
 
 `GET /projects/{id}/characters/index` 返回项目角色卡片的派生数据：每个条目包含完整
-`CharacterEntry`、最多四张最近作品 `cover_paths` 与 `activity_at`。它只从项目归属、角色目录和
-项目画廊聚合，不落独立索引文件。
+`CharacterEntry`、单张角色封面 `cover_path` 与 `activity_at`。封面优先使用定稿立绘；未定稿时
+使用最早的立绘。它只从项目归属和角色目录聚合，不落独立索引文件。
 
 `GET /projects/{id}/characters/{character_id}/workspace` 返回角色视角的资产聚合：
 

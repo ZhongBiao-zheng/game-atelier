@@ -14,12 +14,12 @@ describe('CharacterIndex', () => {
           items: [
             {
               character: { id: 'zhaoyun', name: '赵云', status: 'idle', latest_job_id: null, derivative: null },
-              cover_paths: ['characters/zhaoyun/portrait/v1.png'],
+              cover_path: 'characters/zhaoyun/portrait/v1.png',
               activity_at: '2026-08-22T00:00:00Z',
             },
             {
               character: { id: 'guanyu', name: '关羽', status: 'idle', latest_job_id: null, derivative: null },
-              cover_paths: [],
+              cover_path: null,
               activity_at: '2026-08-21T00:00:00Z',
             },
           ],
@@ -31,7 +31,13 @@ describe('CharacterIndex', () => {
     render(<CharacterIndex projectId="p1" onOpenCharacter={vi.fn()} />);
 
     expect(await screen.findByRole('button', { name: '新建角色' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '打开角色 赵云' })).toBeInTheDocument();
+    const zhaoyun = screen.getByRole('button', { name: '打开角色 赵云' });
+    expect(zhaoyun).toBeInTheDocument();
+    expect(zhaoyun.querySelectorAll('img')).toHaveLength(1);
+    expect(zhaoyun.querySelector('img')).toHaveAttribute(
+      'src',
+      `/api/gallery/image?path=${encodeURIComponent('characters/zhaoyun/portrait/v1.png')}`,
+    );
     fireEvent.change(screen.getByLabelText('搜索角色'), { target: { value: '关' } });
     expect(screen.queryByRole('button', { name: '打开角色 赵云' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '打开角色 关羽' })).toBeInTheDocument();
@@ -66,7 +72,7 @@ describe('CharacterIndex', () => {
         json: async () => ({
           items: [{
             character: { id: 'zhaoyun', name: '赵云', status: 'idle', latest_job_id: null, derivative: null },
-            cover_paths: [],
+            cover_path: null,
             activity_at: '2026-08-22T00:00:00Z',
           }],
         }),

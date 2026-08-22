@@ -28,7 +28,7 @@ export type { CharacterAssociationItem, CharacterAssociationTarget } from '@/sch
 
 export interface CharacterIndexItem {
   character: CharacterEntry;
-  cover_paths: string[];
+  cover_path: string | null;
   activity_at: string;
 }
 

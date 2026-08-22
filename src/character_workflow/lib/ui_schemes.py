@@ -21,6 +21,8 @@ UI_SECTION_RE = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 FRONTMATTER_RE = re.compile(r"\A---[ \t]*\n.*?\n---[ \t]*(?:\n|\Z)", re.DOTALL)
+EMPTY_SCHEME_BODY = "## ui\n- baseline: 继承项目视觉基线"
+UI_MEDIA_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 def ui_root(project: Project) -> Path:
@@ -126,6 +128,15 @@ def read_schemes(project_ref: str) -> UiSchemesFile:
     return _read(resolve_project(project_ref))
 
 
+def read_visible_schemes(project_ref: str) -> UiSchemesFile:
+    """Return only schemes that contain authored UI material."""
+    project = resolve_project(project_ref)
+    file = _read(project)
+    return file.model_copy(update={
+        "schemes": [scheme for scheme in file.schemes if _scheme_has_content(project, scheme.id)],
+    })
+
+
 def read_existing_schemes(project_ref: str) -> UiSchemesFile | None:
     """Pure probe used by diagnostics that must never upgrade user data."""
     project = resolve_project(project_ref)
@@ -208,6 +219,29 @@ def _scheme_from_file(file: UiSchemesFile, scheme_id: str) -> UiScheme:
     return scheme
 
 
+def _scheme_has_content(project: Project, scheme_id: str) -> bool:
+    root = scheme_dir(project, scheme_id)
+    screens = root / "screens"
+    if screens.is_dir():
+        for path in screens.rglob("*"):
+            if not path.is_file() or path.stat().st_size == 0:
+                continue
+            if path.suffix.lower() in UI_MEDIA_EXTENSIONS:
+                return True
+            if path.suffix.lower() == ".md" and path.read_text(encoding="utf-8-sig").strip():
+                return True
+    style = root / "style.md"
+    if not style.is_file():
+        return False
+    text = style.read_text(encoding="utf-8-sig")
+    body = FRONTMATTER_RE.sub("", text).strip()
+    return bool(body) and _normalize_markdown(body) != _normalize_markdown(EMPTY_SCHEME_BODY)
+
+
+def _normalize_markdown(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
 def _rewrite_moved_canonical(
     screens: Path,
     slug: str,
@@ -238,7 +272,7 @@ def _migrate_legacy_style(project_root: Path, target: Path) -> None:
     sections = [match.group(0).strip() for match in UI_SECTION_RE.finditer(text)]
     frontmatter = FRONTMATTER_RE.match(text)
     scheme_parts = [frontmatter.group(0).strip()] if frontmatter else []
-    scheme_parts.extend(sections or ["## ui\n- baseline: 继承项目视觉基线"])
+    scheme_parts.extend(sections or [EMPTY_SCHEME_BODY])
     atomic_write_text(target_style, "\n\n".join(scheme_parts).rstrip() + "\n")
 
     if sections:

@@ -44,23 +44,18 @@ def _ui_screen(root: Path, project: dict, screen_id: str = "home") -> Path:
     return screen
 
 
-def test_character_index_groups_four_latest_character_images(client, tmp_path):
+def test_character_index_uses_canonical_portrait_or_first_portrait(client, tmp_path):
     project = _project(client)
     character = _character(client, project["id"])
-    for index in range(5):
-        _media(tmp_path / f"characters/{character['id']}/portrait/{index}.png", index)
+    for version, offset in [(1, 50), (2, 40), (3, 30), (4, 20), (5, 10)]:
+        _media(tmp_path / f"characters/{character['id']}/portrait/v{version}.png", offset)
 
     response = client.get(f"/api/projects/{project['id']}/characters/index")
 
     assert response.status_code == 200
     item = response.json()["items"][0]
     assert item["character"]["id"] == character["id"]
-    assert item["cover_paths"] == [
-        f"characters/{character['id']}/portrait/4.png",
-        f"characters/{character['id']}/portrait/3.png",
-        f"characters/{character['id']}/portrait/2.png",
-        f"characters/{character['id']}/portrait/1.png",
-    ]
+    assert item["cover_path"] == f"characters/{character['id']}/portrait/v1.png"
 
     workspace = client.get(
         f"/api/projects/{project['id']}/characters/{character['id']}/workspace"
@@ -69,23 +64,27 @@ def test_character_index_groups_four_latest_character_images(client, tmp_path):
     assert portrait["count"] == 5
     assert len(portrait["media"]) == 1
 
-    canonical_path = f"characters/{character['id']}/portrait/0.png"
+    canonical_path = f"characters/{character['id']}/portrait/v4.png"
     set_response = client.post(
         f"/api/characters/{character['id']}/canonical",
         json={"slot": "portrait", "path": canonical_path},
     )
     assert set_response.status_code == 200
+    index_after_canonical = client.get(
+        f"/api/projects/{project['id']}/characters/index"
+    ).json()["items"][0]
+    assert index_after_canonical["cover_path"] == canonical_path
     workspace = client.get(
         f"/api/projects/{project['id']}/characters/{character['id']}/workspace"
     ).json()
     portrait = next(item for item in workspace["assets"] if item["slot"] == "portrait")
     assert [item["path"] for item in portrait["media"]] == [
-        f"characters/{character['id']}/portrait/4.png",
+        f"characters/{character['id']}/portrait/v1.png",
         canonical_path,
     ]
     assert [item["path"] for item in workspace["recent_media"][:2]] == [
         canonical_path,
-        f"characters/{character['id']}/portrait/4.png",
+        f"characters/{character['id']}/portrait/v1.png",
     ]
 
 

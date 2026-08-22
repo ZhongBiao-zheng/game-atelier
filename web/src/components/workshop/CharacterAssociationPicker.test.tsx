@@ -12,7 +12,7 @@ describe('CharacterAssociationPicker', () => {
       if (path === '/api/projects/p1/characters/index') return { ok: true, json: async () => ({
         items: [{
           character: { id: 'zhaoyun', name: '赵云', status: 'idle', latest_job_id: null, derivative: null },
-          cover_paths: [], activity_at: '2026-08-22T00:00:00Z',
+          cover_path: null, activity_at: '2026-08-22T00:00:00Z',
         }],
       }) };
       if (path === '/api/projects/p1/character-associations' && init?.method === 'PUT') return {

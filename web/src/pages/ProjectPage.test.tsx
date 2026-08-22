@@ -33,12 +33,12 @@ const characterIndex = {
   items: [
     {
       character: { id: 'char-a', name: '暗影', status: 'idle', latest_job_id: 'job-promo-1', derivative: null },
-      cover_paths: ['characters/char-a/promo/kv.png'],
+      cover_path: 'characters/char-a/portrait/v1.png',
       activity_at: '2026-08-21T08:00:00Z',
     },
     {
       character: { id: 'char-b', name: '烈拳猴', status: 'idle', latest_job_id: null, derivative: null },
-      cover_paths: ['characters/char-b/portrait/v1.png'],
+      cover_path: 'characters/char-b/portrait/v1.png',
       activity_at: '2026-08-21T07:00:00Z',
     },
   ],
@@ -193,6 +193,61 @@ describe('ProjectPage', () => {
     expect(await screen.findByRole('heading', { name: '全部角色' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新建角色' })).toBeInTheDocument();
     expect(screen.queryByText('宝可梦风格')).not.toBeInTheDocument();
+  });
+
+  it('没有可见 UI 方案时展示独立空状态且不跳转到 V1', async () => {
+    const replaceState = vi.spyOn(window.history, 'replaceState');
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/ui-schemes?visible_only=true')) {
+        return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [] }) } as Response;
+      }
+      if (url.endsWith('/ui-schemes')) {
+        return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
+      }
+      return { ok: true, json: async () => sample } as Response;
+    }));
+
+    render(<ProjectPage projectId="p1" workspace="ui" />);
+
+    expect(await screen.findByText('暂无 UI 方案')).toBeInTheDocument();
+    expect(replaceState).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      '/workshop/p1/ui/v1',
+    );
+  });
+
+  it('裸 UI 入口在存在可见方案时跳转到真实内容', async () => {
+    window.history.replaceState({}, '', '/workshop/p1/ui');
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/ui-schemes?visible_only=true')) {
+        return {
+          ok: true,
+          json: async () => ({
+            default_scheme_id: 'v1',
+            schemes: [{ id: 'v2', name: '寒锋 V2', created_at: '' }],
+          }),
+        } as Response;
+      }
+      if (url.endsWith('/ui-schemes')) {
+        return {
+          ok: true,
+          json: async () => ({
+            default_scheme_id: 'v1',
+            schemes: [
+              { id: 'v1', name: 'V1', created_at: '' },
+              { id: 'v2', name: '寒锋 V2', created_at: '' },
+            ],
+          }),
+        } as Response;
+      }
+      return { ok: true, json: async () => sample } as Response;
+    }));
+
+    render(<ProjectPage projectId="p1" workspace="ui" />);
+
+    await waitFor(() => expect(window.location.pathname).toBe('/workshop/p1/ui/v2'));
+    window.history.replaceState({}, '', '/');
   });
 
   it('UI 总览按 screen-map 展示页面地图并链接详情', async () => {

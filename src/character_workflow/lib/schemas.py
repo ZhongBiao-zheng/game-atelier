@@ -402,7 +402,7 @@ class CharacterWorkspaceResponse(BaseModel):
 class CharacterIndexItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     character: CharacterEntry
-    cover_paths: list[str]
+    cover_path: str | None
     activity_at: str
 
 

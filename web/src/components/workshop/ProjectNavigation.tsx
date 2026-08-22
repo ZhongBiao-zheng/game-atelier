@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import { fetchUiSchemes, type UiSchemesFile } from '@/api/uiSchemes';
+import { fetchVisibleUiSchemes, type UiSchemesFile } from '@/api/uiSchemes';
 import {
   getWorkspaceDescriptor,
   type WorkshopWorkspace,
@@ -60,7 +60,14 @@ export function ProjectNavigation({
   const [query, setQuery] = useState('');
   const [recentIds, setRecentIds] = useState<string[]>(() => readRecent(recentKey));
   const [uiSchemes, setUiSchemes] = useState<UiSchemesFile | null>(null);
-  const uiSchemeId = selectedUiSchemeId ?? uiSchemes?.default_scheme_id ?? 'v1';
+  const visibleSchemes = Array.isArray(uiSchemes?.schemes) ? uiSchemes.schemes : [];
+  const navigationScheme = visibleSchemes.find(
+    scheme => scheme.id === uiSchemes?.default_scheme_id,
+  ) ?? visibleSchemes[0];
+  const uiSchemeId = selectedUiSchemeId ?? navigationScheme?.id;
+  const uiHref = uiSchemeId
+    ? `${projectBase}/ui/${encodeURIComponent(uiSchemeId)}`
+    : `${projectBase}/ui`;
 
   useEffect(() => {
     setQuery('');
@@ -69,7 +76,7 @@ export function ProjectNavigation({
 
   useEffect(() => {
     let cancelled = false;
-    fetchUiSchemes(project.id)
+    fetchVisibleUiSchemes(project.id)
       .then(value => { if (!cancelled) setUiSchemes(value); })
       .catch(() => { if (!cancelled) setUiSchemes(null); });
     return () => { cancelled = true; };
@@ -170,13 +177,13 @@ export function ProjectNavigation({
           current={currentWorkspace === ui.id}
           expanded={uiExpanded}
           onToggle={toggleUi}
-          href={`${projectBase}/ui/${encodeURIComponent(uiSchemeId)}`}
+          href={uiHref}
           onNavigate={onNavigate}
         />
         {uiExpanded && (
           <ul className="m-0 list-none space-y-0.5 pl-4 pr-0 pt-1">
-            {uiSchemes?.schemes.map(scheme => {
-              const isDefault = scheme.id === uiSchemes.default_scheme_id;
+            {visibleSchemes.map(scheme => {
+              const isDefault = scheme.id === uiSchemes?.default_scheme_id;
               const isCurrent = currentWorkspace === 'ui' && uiSchemeId === scheme.id;
               return (
                 <li key={scheme.id}>
@@ -197,7 +204,7 @@ export function ProjectNavigation({
                 </li>
               );
             })}
-            {uiSchemes && uiSchemes.schemes.length === 0 && (
+            {uiSchemes && visibleSchemes.length === 0 && (
               <li className="px-2.5 py-2 text-xs text-muted-foreground">暂无 UI 方案</li>
             )}
           </ul>

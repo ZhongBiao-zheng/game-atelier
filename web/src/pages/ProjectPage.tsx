@@ -11,6 +11,7 @@ import { fetchScreenCanonical } from '@/api/canonical';
 import {
   createUiScheme,
   fetchUiSchemes,
+  fetchVisibleUiSchemes,
   setDefaultUiScheme,
   type UiSchemesFile,
 } from '@/api/uiSchemes';
@@ -94,10 +95,26 @@ export function ProjectPage({
     if (workspace !== 'ui') return;
     let cancelled = false;
     setSchemesFile(null);
-    fetchUiSchemes(projectId).then(file => {
+    Promise.all([
+      fetchUiSchemes(projectId),
+      uiSchemeId ? Promise.resolve(null) : fetchVisibleUiSchemes(projectId),
+    ]).then(([file, visibleFile]) => {
       if (cancelled) return;
       if (!Array.isArray(file.schemes) || file.schemes.length === 0 || !file.default_scheme_id) return;
       setSchemesFile(file);
+      if (!uiSchemeId) {
+        const visibleSchemes = Array.isArray(visibleFile?.schemes) ? visibleFile.schemes : [];
+        const target = visibleSchemes.find(
+          item => item.id === visibleFile?.default_scheme_id,
+        ) ?? visibleSchemes[0];
+        if (target) {
+          setLocation(
+            `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(target.id)}`,
+            { replace: true },
+          );
+        }
+        return;
+      }
       const exists = uiSchemeId && file.schemes.some(item => item.id === uiSchemeId);
       if (!exists) {
         setLocation(
@@ -282,6 +299,14 @@ export function ProjectPage({
                   .catch(() => {});
               }}
             />
+          </div>
+        )}
+        {workspace === 'ui' && !uiSchemeId && schemesFile && (
+          <div className="rounded-lg border border-border px-5 py-8">
+            <p className="font-display text-display italic text-foreground">暂无 UI 方案</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              完成 UI 规范或生成页面后，方案会显示在这里。
+            </p>
           </div>
         )}
         {workspace === 'video' && (

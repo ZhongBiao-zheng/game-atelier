@@ -20,6 +20,36 @@ def test_new_project_starts_with_v1(isolated_data_root):
     assert (isolated_data_root / "projects/mohuan/ui/v1/screens").is_dir()
 
 
+def test_sidebar_scheme_list_hides_empty_scaffold(isolated_data_root):
+    project = projects.create_project("魔幻", slug="mohuan")
+
+    client = TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    empty = client.get(f"/api/projects/{project.id}/ui-schemes?visible_only=true")
+
+    assert empty.status_code == 200
+    assert empty.json()["schemes"] == []
+
+    screens = isolated_data_root / "projects/mohuan/ui/v1/screens"
+    (screens / ".DS_Store").write_bytes(b"finder metadata")
+    (screens / "canonical.json").write_text("{}", encoding="utf-8")
+    (screens / "screen-map.md").write_text("  \n", encoding="utf-8")
+    placeholder = isolated_data_root / "projects/mohuan/ui/v1/style.md"
+    placeholder.write_text(
+        "---\nstatus: draft\n---\n\n## ui\n\n- baseline:   继承项目视觉基线\n",
+        encoding="utf-8",
+    )
+
+    still_empty = client.get(f"/api/projects/{project.id}/ui-schemes?visible_only=true")
+    assert still_empty.json()["schemes"] == []
+
+    style = isolated_data_root / "projects/mohuan/ui/v1/style.md"
+    style.write_text("## ui\n- direction: 冷峻战争界面\n", encoding="utf-8")
+
+    visible = client.get(f"/api/projects/{project.id}/ui-schemes?visible_only=true")
+
+    assert [item["id"] for item in visible.json()["schemes"]] == ["v1"]
+
+
 def test_legacy_ui_is_moved_to_v1_and_references_are_rewritten(isolated_data_root):
     project = projects.create_project("魔幻", slug="mohuan")
     # Simulate a pre-scheme project by removing the new empty UI root.

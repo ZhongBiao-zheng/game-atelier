@@ -738,10 +738,13 @@ def get_projects() -> ProjectsFile:
 
 
 @router.get("/projects/{project_id}/ui-schemes", response_model=UiSchemesFile)
-def get_ui_schemes(project_id: str) -> UiSchemesFile:
-    from character_workflow.lib.ui_schemes import read_schemes
+def get_ui_schemes(
+    project_id: str,
+    visible_only: bool = Query(default=False),
+) -> UiSchemesFile:
+    from character_workflow.lib.ui_schemes import read_schemes, read_visible_schemes
     try:
-        return read_schemes(project_id)
+        return read_visible_schemes(project_id) if visible_only else read_schemes(project_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
 

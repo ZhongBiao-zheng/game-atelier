@@ -27,7 +27,7 @@ beforeEach(() => {
     if (url === '/api/active-character') {
       return { ok: true, json: async () => ({ active_id: 'shadow', updated_at: '' }) };
     }
-    if (url === '/api/projects/p1/ui-schemes') {
+    if (url === '/api/projects/p1/ui-schemes?visible_only=true') {
       return {
         ok: true,
         json: async () => ({
@@ -107,7 +107,7 @@ describe('LeftSidebar', () => {
           assignments: {},
         }),
       };
-      if (url === '/api/projects/p1/ui-schemes') return {
+      if (url === '/api/projects/p1/ui-schemes?visible_only=true') return {
         ok: true,
         json: async () => ({
           default_scheme_id: 'v1',
@@ -135,6 +135,32 @@ describe('LeftSidebar', () => {
 
     fireEvent.click(uiToggle);
     expect(screen.queryByRole('link', { name: '寒锋 V2' })).not.toBeInTheDocument();
+  });
+
+  it('没有实际 UI 内容时不展示 V1 子方案', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/characters') return { ok: true, json: async () => [] };
+      if (url === '/api/projects') return {
+        ok: true,
+        json: async () => ({
+          projects: [{ id: 'p1', slug: 'one', name: '项目一', created_at: '' }],
+          assignments: {},
+        }),
+      };
+      if (url === '/api/projects/p1/ui-schemes?visible_only=true') return {
+        ok: true,
+        json: async () => ({ default_scheme_id: 'v1', schemes: [] }),
+      };
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+    render(<LeftSidebar sseSignal={0} activeProjectId="p1" workspace="overview" onSelect={vi.fn()} />);
+
+    const uiToggle = await screen.findByRole('link', { name: 'UI' });
+    await waitFor(() => expect(uiToggle).toHaveAttribute('href', '/workshop/p1/ui'));
+    fireEvent.click(uiToggle);
+
+    expect(await screen.findByText('暂无 UI 方案')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /V1/ })).not.toBeInTheDocument();
   });
 
   it('deletes a character from the right edge of its row after confirmation', async () => {

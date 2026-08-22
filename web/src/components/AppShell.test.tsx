@@ -256,7 +256,7 @@ describe('AppShell', () => {
           }),
         };
       }
-      if (url === '/api/projects/p1/ui-schemes') {
+      if (url === '/api/projects/p1/ui-schemes' || url === '/api/projects/p1/ui-schemes?visible_only=true') {
         return {
           ok: true,
           json: async () => ({

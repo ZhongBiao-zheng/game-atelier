@@ -27,6 +27,10 @@ export function fetchUiSchemes(projectId: string): Promise<UiSchemesFile> {
   return requestJson<UiSchemesFile>(base(projectId), '读取 UI 方案');
 }
 
+export function fetchVisibleUiSchemes(projectId: string): Promise<UiSchemesFile> {
+  return requestJson<UiSchemesFile>(`${base(projectId)}?visible_only=true`, '读取 UI 方案');
+}
+
 export function createUiScheme(
   projectId: string,
   payload: UiSchemeCreate,

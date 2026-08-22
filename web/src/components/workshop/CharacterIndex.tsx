@@ -234,18 +234,15 @@ function CharacterCard({
         aria-label={`打开角色 ${item.character.name}`}
         className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
-        <span className="grid h-48 grid-cols-2 grid-rows-2 gap-px bg-border">
-        {item.cover_paths.length > 0 ? item.cover_paths.map((path, index) => (
+        <span className="block h-48 bg-border">
+        {item.cover_path ? (
           <img
-            key={path}
-            src={`/api/gallery/image?path=${encodeURIComponent(path)}`}
+            src={`/api/gallery/image?path=${encodeURIComponent(item.cover_path)}`}
             alt=""
-            className={item.cover_paths.length === 1 && index === 0
-              ? 'col-span-2 row-span-2 h-full w-full object-cover'
-              : 'h-full w-full object-cover'}
+            className="h-full w-full object-cover"
           />
-        )) : (
-          <span className="col-span-2 row-span-2 grid place-items-center bg-card text-muted-foreground">
+        ) : (
+          <span className="grid h-full place-items-center bg-card text-muted-foreground">
             <UserRound className="size-7" aria-hidden />
           </span>
         )}

@@ -1,6 +1,7 @@
 """Character index, workspace aggregates, and manual cross-asset associations."""
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,6 +36,7 @@ from character_workflow.lib.workspace_summary import project_workspace_summary
 
 
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+_ASSET_VERSION_RE = re.compile(r"^v([1-9][0-9]*)$", re.IGNORECASE)
 
 
 def _association_path(project_id: str) -> Path:
@@ -76,26 +78,52 @@ def set_manual_association(
 def character_index(project_id: str) -> CharacterIndexResponse:
     project = resolve_project(project_id)
     assignments = read_projects().assignments
-    media = project_gallery_items(project.id, "art")
-    by_character: dict[str, list[GalleryMedia]] = {}
-    for item in media:
-        if item.target.kind == "art":
-            by_character.setdefault(item.target.character_id, []).append(item)
 
     items: list[CharacterIndexItem] = []
     for character_id, owner_id in assignments.items():
         if owner_id != project.id:
             continue
         entry = _character_entry(character_id)
-        character_media = by_character.get(character_id, [])
         activity = _character_activity(character_id, project.created_at)
         items.append(CharacterIndexItem(
             character=entry,
-            cover_paths=[item.path for item in character_media[:4]],
+            cover_path=_character_cover_path(character_id),
             activity_at=datetime.fromtimestamp(activity, timezone.utc).isoformat(),
         ))
     items.sort(key=lambda item: item.activity_at, reverse=True)
     return CharacterIndexResponse(items=items)
+
+
+def _character_cover_path(character_id: str) -> str | None:
+    root = data_root.resolve_data_root().resolve()
+    portrait = data_root.characters_dir() / character_id / AssetSlot.PORTRAIT.value
+    canonical = stale.character_canonical_status(character_id).portrait
+    if canonical:
+        canonical_path = Path(canonical.path)
+        absolute = canonical_path if canonical_path.is_absolute() else root / canonical_path
+        if absolute.is_file() and absolute.suffix.lower() in _IMAGE_EXTENSIONS:
+            try:
+                return absolute.resolve().relative_to(root).as_posix()
+            except ValueError:
+                pass
+    if not portrait.is_dir():
+        return None
+    images = [
+        path for path in portrait.iterdir()
+        if path.is_file() and path.suffix.lower() in _IMAGE_EXTENSIONS
+    ]
+    if not images:
+        return None
+    first = min(images, key=_portrait_version_order)
+    return first.resolve().relative_to(root).as_posix()
+
+
+def _portrait_version_order(path: Path) -> tuple[int, int, str]:
+    """Keep the first portrait stable across copies and filesystem restores."""
+    match = _ASSET_VERSION_RE.fullmatch(path.stem)
+    if match:
+        return 0, int(match.group(1)), path.name.casefold()
+    return 1, 0, path.name.casefold()
 
 
 def character_workspace(project_id: str, character_id: str) -> CharacterWorkspaceResponse:
