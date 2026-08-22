@@ -98,9 +98,11 @@ uv run python -m character_workflow turn-start --kind promo
 # Codex / Installed Plugin：python "$BOOT" --run -m character_workflow turn-start --kind promo（绝不 uv run）
 ```
 
-返回 `stage / recommend_action / active_id / spec / project_worldview / project_style / canonical / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 promo 段；`project_style` 为项目风格契约全文，非空时其 `style` / `palette` / `taboo` 字段一并作 prompt 约束）。
+返回 `stage / recommend_action / active_id / spec / project_worldview / project_style / derivative / canonical / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 promo 段；`project_style` 为项目风格契约全文，非空时其 `style` / `palette` / `taboo` 字段一并作 prompt 约束）。
 
 **身份参考图选择**：为每个出镜角色建立参考图清单，优先级依次为 `canonical.portrait.path`、最新 `portrait/`、`canonical.turnaround.path`、最新 `turnaround/`、用户上传参考图；缺立绘不阻断。默认每个角色至少选一张，必要时为同一角色追加互补视角。没有任何身份图才停下请用户上传或先走角色资产流程。画师说某张美宣"定稿"时（经 AskUserQuestion 确认）跑 `set-canonical --kind promo --path <路径>` 写入。
+
+**角色衍生**：`derivative` 非 null 时，仍只读写当前 `active_id` 的美宣、定稿、反馈和 job。优先引用当前衍生自己的定稿立绘；尚无立绘时按 `derivative.source_paths` 顺序使用创建时冻结的来源图，并结合当前 spec 表达本次延伸目标。
 
 本 skill 只产 promo（美宣）。**对话中途画师需求转向立绘 / 三视图 → 直接切到对应 skill 执行流程**（Skill 工具调起 `/game-atelier:character` · `/game-atelier:turnaround`，一句话告知正在切），不在本 skill 内用 promo 上下文硬出别的 kind。
 

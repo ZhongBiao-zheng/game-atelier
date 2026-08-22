@@ -274,8 +274,8 @@ def test_reference_flags_go_through_oss(mj_key, tmp_path, monkeypatch):
     # v6：sref 与 cref 可用，oref 不可用（它只在 v7）——被摘掉的那张不该白传一遍 OSS。
     _render(tmp_path, n=4, params={
         "mj_version": "6",
-        "mj_sref": "/local/style.png", "mj_sw": 300,
-        "mj_cref": "/local/char.png", "mj_cw": 60,
+        "mj_sref": ["/local/style.png"], "mj_sw": 300,
+        "mj_cref": ["/local/char.png"], "mj_cw": 60,
     })
 
     sent = posted[0]["body"]["prompt"]
@@ -292,7 +292,7 @@ def test_unsupported_ref_is_not_uploaded(mj_key, tmp_path, monkeypatch):
         "character_workflow.lib.oss_upload.upload_for_public_url",
         lambda path: uploaded.append(str(path)) or "https://oss.example/x.png",
     )
-    _render(tmp_path, n=4, params={"mj_version": "8.2", "mj_oref": "/local/omni.png"})
+    _render(tmp_path, n=4, params={"mj_version": "8.2", "mj_oref": ["/local/omni.png"]})
     assert uploaded == []
 
 
@@ -305,8 +305,45 @@ def test_reference_urls_skip_oss(mj_key, tmp_path, monkeypatch):
 
     monkeypatch.setattr("character_workflow.lib.oss_upload.upload_for_public_url", _boom)
 
-    _render(tmp_path, n=4, params={"mj_sref": "https://cdn.example/a.png"})
+    _render(tmp_path, n=4, params={"mj_sref": ["https://cdn.example/a.png"]})
     assert "--sref https://cdn.example/a.png" in posted[0]["body"]["prompt"]
+
+
+def test_multiple_reference_urls_share_one_semantic_flag(mj_key, tmp_path, monkeypatch):
+    """同一语义槽的多张图要跟在同一个 flag 后，且逐张完成本地→公网转换。"""
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    monkeypatch.setattr(
+        "character_workflow.lib.oss_upload.upload_for_public_url",
+        lambda path: f"https://oss.example/{Path(path).name}",
+    )
+
+    _render(tmp_path, n=4, params={
+        "mj_version": "8.2",
+        "mj_sref": ["/local/a.png", "/local/b.png"],
+        "mj_sw": 300,
+    })
+
+    sent = posted[0]["body"]["prompt"]
+    assert "--sref https://oss.example/a.png https://oss.example/b.png --sw 300" in sent
+
+
+def test_reference_groups_are_capped_at_four(mj_key, tmp_path, monkeypatch):
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    monkeypatch.setattr(
+        "character_workflow.lib.oss_upload.upload_for_public_url",
+        lambda path: f"https://oss.example/{Path(path).name}",
+    )
+    refs = [str(tmp_path / f"{index}.png") for index in range(5)]
+    for ref in refs:
+        Path(ref).write_bytes(b"PNG")
+    params: dict = {"mj_sref": refs, "reference_images": refs}
+
+    _render(tmp_path, n=4, params=params)
+
+    body = posted[0]["body"]
+    assert "https://oss.example/4.png" not in body["prompt"]
+    assert len(body["base64Array"]) == 4
+    assert len(params["warnings"]) == 2
 
 
 def test_reference_weight_omitted_when_unset(mj_key, tmp_path, monkeypatch):
@@ -315,7 +352,7 @@ def test_reference_weight_omitted_when_unset(mj_key, tmp_path, monkeypatch):
         "character_workflow.lib.oss_upload.upload_for_public_url",
         lambda path: "https://oss.example/x.png",
     )
-    _render(tmp_path, n=4, params={"mj_cref": "/local/c.png", "mj_version": "6"})
+    _render(tmp_path, n=4, params={"mj_cref": ["/local/c.png"], "mj_version": "6"})
     sent = posted[0]["body"]["prompt"]
     assert "--cref https://oss.example/x.png" in sent
     assert "--cw" not in sent
@@ -337,7 +374,7 @@ def test_cref_dropped_on_unsupported_version_with_warning(mj_key, tmp_path, monk
         "character_workflow.lib.oss_upload.upload_for_public_url",
         lambda path: "https://oss.example/x.png",
     )
-    params: dict = {"n": 4, "mj_version": "8.2", "mj_cref": "/local/c.png", "mj_cw": 50}
+    params: dict = {"n": 4, "mj_version": "8.2", "mj_cref": ["/local/c.png"], "mj_cw": 50}
 
     _render(tmp_path, n=4, params=params)
 
@@ -354,7 +391,9 @@ def test_only_sref_survives_on_v8(mj_key, tmp_path, monkeypatch):
         "character_workflow.lib.oss_upload.upload_for_public_url",
         lambda path: f"https://oss.example/{Path(path).name}",
     )
-    params: dict = {"mj_version": "8.2", "mj_sref": "/local/s.png", "mj_oref": "/local/o.png"}
+    params: dict = {
+        "mj_version": "8.2", "mj_sref": ["/local/s.png"], "mj_oref": ["/local/o.png"]
+    }
     _render(tmp_path, n=4, params=params)
     sent = posted[0]["body"]["prompt"]
     assert "--sref https://oss.example/s.png" in sent
@@ -369,7 +408,10 @@ def test_oref_survives_on_v7(mj_key, tmp_path, monkeypatch):
         "character_workflow.lib.oss_upload.upload_for_public_url",
         lambda path: "https://oss.example/o.png",
     )
-    _render(tmp_path, n=4, params={"mj_version": "7", "mj_oref": "/local/o.png", "mj_ow": 200})
+    _render(
+        tmp_path, n=4,
+        params={"mj_version": "7", "mj_oref": ["/local/o.png"], "mj_ow": 200},
+    )
     sent = posted[0]["body"]["prompt"]
     assert "--oref https://oss.example/o.png" in sent
     assert "--ow 200" in sent

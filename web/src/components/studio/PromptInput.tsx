@@ -29,6 +29,11 @@ import { RatioIcon } from './RatioIcon';
 import { ToolbarPopover } from './ToolbarPopover';
 import type { VideoControlCaps, VideoMode, VideoQuality } from '@/lib/videoControlCaps';
 import type { JobKind } from '@/schema/jobs';
+import {
+  canonicalMentionLabel,
+  createMentionTokenRegex,
+  mentionTokenPatternForLabel,
+} from '@/lib/mentionTokens';
 
 interface Props {
   onSubmit: (prompt: string) => void | Promise<void>;
@@ -118,7 +123,8 @@ const MENTION_LABELS = { image: '图', video: '视频', audio: '音频' } as con
 
 /** 删除素材后重写 prompt 里的 @引用：被删序号的引用移除，更大序号依次前移。 */
 export function renumberMentions(input: string, label: string, removed: number): string {
-  return input.replace(new RegExp(`@${label}(\\d+)`, 'g'), (match, num: string) => {
+  const token = mentionTokenPatternForLabel(label);
+  return input.replace(new RegExp(`@${token}(\\d+)`, 'g'), (match, num: string) => {
     const n = parseInt(num, 10);
     if (n === removed) return '';
     if (n > removed) return `@${label}${n - 1}`;
@@ -128,14 +134,14 @@ export function renumberMentions(input: string, label: string, removed: number):
 
 /** 提交序列化：@图1 → 图1。API 契约靠序号自然语言绑定素材，@ 只是输入框里的交互糖。 */
 export function serializeMentions(prompt: string): string {
-  return prompt.replace(/@(图|视频|音频)(\d+)/g, '$1$2');
+  return prompt.replace(createMentionTokenRegex(), (_match, kind: string, n: string) => (
+    canonicalMentionLabel(kind, n)
+  ));
 }
 
 // ---- @引用 chip 化：编辑器 DOM 与 prompt 字符串互转 ----
 // 编辑器是 contentEditable（chip 是 contentEditable=false 的原子 span，整删 / hover 预览），
 // 但状态层仍是带 @图N 字面量的纯字符串——重编号 / 序列化逻辑因此完全不变。
-
-const MENTION_TOKEN_RE = /@(图|视频|音频)(\d+)/g;
 
 type ChipMeta = { kind: 'image' | 'video' | 'audio'; thumb: string | null };
 
@@ -361,10 +367,10 @@ export function PromptInput({
     if (!isOmniRef.current) { root.textContent = value; return; }
     root.textContent = '';
     let last = 0;
-    for (const m of value.matchAll(MENTION_TOKEN_RE)) {
+    for (const m of value.matchAll(createMentionTokenRegex())) {
       const idx = m.index ?? 0;
       if (idx > last) root.appendChild(document.createTextNode(value.slice(last, idx)));
-      const label = `${m[1]}${m[2]}`;
+      const label = canonicalMentionLabel(m[1], m[2]);
       root.appendChild(buildChipEl(label, chipMetaRef.current.get(label)));
       last = idx + m[0].length;
     }
@@ -1383,10 +1389,10 @@ export function PromptInput({
               value={mjParams}
               onChange={(patch) => onMjParamsChange?.(patch)}
               filledRefs={{
-                image: Boolean(mjRefs.image),
-                sref: Boolean(mjRefs.sref),
-                cref: Boolean(mjRefs.cref),
-                oref: Boolean(mjRefs.oref),
+                image: mjRefs.image.length > 0,
+                sref: mjRefs.sref.length > 0,
+                cref: mjRefs.cref.length > 0,
+                oref: mjRefs.oref.length > 0,
               }}
               menuDirection={menuDirection}
             />

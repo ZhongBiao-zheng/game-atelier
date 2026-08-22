@@ -221,6 +221,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         load_project_style,
         load_project_worldview,
     )
+    from character_workflow.lib.character_derivatives import read_character_derivative
     from character_workflow.lib import distill
     from character_workflow.lib.draft_processor import process_drafts
     from character_workflow.lib.identity import list_pending_identity_normalizations
@@ -245,7 +246,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
                 project_slug = proj.slug
                 project_name = proj.name
 
-    drafts = process_drafts() if stage == "D" else []
+    drafts = process_drafts(active_id) if stage == "D" and active_id else []
     spec = _read_active_spec(active_id) if stage in ("D", "E") else None
     spec_status = _spec_status(spec)
     recent = list_recent_chars() if stage in ("C", "D", "E") else []
@@ -287,6 +288,15 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
     pending_distill = (
         distill.pending_for_character(active_id) if stage == "D" and active_id else []
     )
+    derivative = read_character_derivative(active_id) if active_id else None
+    derivative_context = None
+    if derivative is not None:
+        derivative_context = {
+            "source_character_id": derivative.source_character_id,
+            "source_character_name": derivative.source_character_name,
+            "source_paths": derivative.source_paths,
+            "asset_slot": kind,
+        }
 
     return {
         "stage": stage,
@@ -319,6 +329,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         "project_worldview": load_project_worldview(project_slug),
         # A1：项目风格契约全文（含 frontmatter status）；A2：active 角色定稿表。
         "project_style": load_project_style(project_slug),
+        "derivative": derivative_context,
         "canonical": (
             read_canonical(active_id).model_dump() if active_id else {}
         ),

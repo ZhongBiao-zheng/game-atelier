@@ -1,7 +1,10 @@
 import { requestJson } from './http';
+import type { AssetSlot, Project } from '@/schema/jobs';
 export interface GalleryItem {
   /** studio 来源的图无角色归属，两字段为 null。 */
   character_id: string | null;
+  /** 角色所属游戏项目；Studio 或未分类角色为 null。 */
+  project_id?: string | null;
   asset_slot: 'portrait' | 'promo' | 'turnaround' | null;
   source?: 'character' | 'studio';
   filename: string;
@@ -19,26 +22,71 @@ export async function fetchGalleryRecent(limit = 24): Promise<GalleryItem[]> {
   return Array.isArray(data.items) ? data.items : [];
 }
 
-/** 项目作品：该项目名下全部角色三槽的图（已隐藏的不出，最新在前）。 */
-export interface ProjectGalleryItem {
-  character_id: string;
-  character_name: string;
-  asset_slot: 'portrait' | 'promo' | 'turnaround';
-  filename: string;
+export type ProjectGalleryCategory = 'all' | 'art' | 'ui' | 'video';
+
+export type ProjectGalleryTarget =
+  | { kind: 'art'; character_id: string; asset_slot: AssetSlot }
+  | { kind: 'ui'; scheme_id: string; screen_id: string }
+  | {
+    kind: 'video';
+    production_id: string;
+    output_kind: 'version';
+  };
+
+export interface ProjectGalleryMedia {
   path: string;
+  media_type: 'image' | 'video';
+  produced_at: string;
+  title: string;
+  detail: string;
   job_id: string | null;
-  mtime: number;
+  target: ProjectGalleryTarget;
 }
 
-export async function fetchGalleryProject(projectId: string): Promise<ProjectGalleryItem[]> {
-  const data = await requestJson<{ items?: ProjectGalleryItem[] }>(
-    `/api/gallery/project?project=${encodeURIComponent(projectId)}`,
+export interface ProjectGalleryPage {
+  items: ProjectGalleryMedia[];
+  next_cursor: string | null;
+}
+
+export async function fetchProjectGallery(
+  projectId: string,
+  category: ProjectGalleryCategory = 'all',
+  cursor?: string | null,
+  limit = 40,
+): Promise<ProjectGalleryPage> {
+  const query = new URLSearchParams({ category, limit: String(limit) });
+  if (cursor) query.set('cursor', cursor);
+  return requestJson<ProjectGalleryPage>(
+    `/api/projects/${encodeURIComponent(projectId)}/gallery?${query}`,
+    '读取项目画廊',
+  );
+}
+
+export async function fetchProjectGalleryMedia(
+  projectId: string,
+  path: string,
+): Promise<ProjectGalleryMedia> {
+  return requestJson<ProjectGalleryMedia>(
+    `/api/projects/${encodeURIComponent(projectId)}/gallery/media?path=${encodeURIComponent(path)}`,
     '读取项目作品',
+  );
+}
+
+export interface ProjectIndexItem {
+  project: Project;
+  cover_paths: string[];
+  activity_at: string;
+}
+
+export async function fetchProjectIndex(): Promise<ProjectIndexItem[]> {
+  const data = await requestJson<{ items?: ProjectIndexItem[] }>(
+    '/api/projects/index',
+    '读取项目目录',
   );
   return Array.isArray(data.items) ? data.items : [];
 }
 
-/** 项目 UI 页面图（B2）：projects/<slug>/screens/<screen-id>/ 下的版本图，最新在前。 */
+/** 项目 UI 页面图：projects/<slug>/ui/<scheme-id>/screens/<screen-id>/ 下的版本图，最新在前。 */
 export interface ProjectScreenItem {
   screen_id: string;
   filename: string;
@@ -47,18 +95,24 @@ export interface ProjectScreenItem {
   /** B3 风格候选来源关系（无标签的普通版本为 null）。 */
   style_variant: string | null;
   base_version: string | null;
+  model: string | null;
+  provider: string | null;
+  prompt: string | null;
   mtime: number;
 }
 
-export async function fetchGalleryScreens(projectId: string): Promise<ProjectScreenItem[]> {
+export async function fetchGalleryScreens(
+  projectId: string,
+  schemeId: string,
+): Promise<ProjectScreenItem[]> {
   const data = await requestJson<{ items?: ProjectScreenItem[] }>(
-    `/api/gallery/screens?project=${encodeURIComponent(projectId)}`,
+    `/api/gallery/screens?project=${encodeURIComponent(projectId)}&scheme=${encodeURIComponent(schemeId)}`,
     '读取项目页面图',
   );
   return Array.isArray(data.items) ? data.items : [];
 }
 
-/** 首页作品展示的隐藏清单（data_root 相对路径）。工坊里仍正常可见。 */
+/** 画廊类界面的隐藏清单（data_root 相对路径）；不删除资产文件或历史。 */
 export async function fetchGalleryHidden(): Promise<string[]> {
   const data = await requestJson<{ paths?: unknown }>('/api/gallery/hidden', '读取隐藏清单');
   return Array.isArray(data.paths) ? data.paths.filter((p): p is string => typeof p === 'string') : [];

@@ -1,0 +1,361 @@
+import { useState } from 'react';
+import { BadgeCheck, PanelsTopLeft } from 'lucide-react';
+import { Link } from 'wouter';
+
+import { isCanonicalPath, setScreenCanonical } from '@/api/canonical';
+import type { ProjectScreenItem } from '@/api/gallery';
+import type { ProjectWorkspaceSummary, UiScreenSummary } from '@/api/workspaces';
+import type { ScreenCanonicalFile } from '@/schema/jobs';
+import { cn } from '@/lib/utils';
+import { useGalleryHidden } from '@/hooks/useGalleryHidden';
+import { GalleryVisibilityButton } from './GalleryVisibilityButton';
+import { CharacterAssociationPicker } from './CharacterAssociationPicker';
+
+export function UiWorkspace({
+  projectId,
+  schemeId,
+  screenId,
+  summary,
+  screens,
+  canonicalFile,
+  onCanonicalChange,
+}: {
+  projectId: string;
+  schemeId: string;
+  screenId?: string;
+  summary: ProjectWorkspaceSummary['ui'] | null;
+  screens: ProjectScreenItem[];
+  canonicalFile: ScreenCanonicalFile;
+  onCanonicalChange: (file: ScreenCanonicalFile) => void;
+}) {
+  const [message, setMessage] = useState<string | null>(null);
+  const groups = groupScreens(screens);
+  const currentImages = screenId ? groups.find(([id]) => id === screenId)?.[1] ?? [] : [];
+  const current = summary?.screen_items.find(item => item.screen_id === screenId);
+  const currentCanonical = screenId ? canonicalFile.screens[screenId] : undefined;
+
+  async function toggleCanonical(id: string, path: string) {
+    const entry = canonicalFile.screens[id];
+    try {
+      onCanonicalChange(await setScreenCanonical(
+        projectId,
+        schemeId,
+        id,
+        isCanonicalPath(path, entry) ? null : path,
+      ));
+    } catch {
+      setMessage('切换定稿失败，稍后再试');
+    }
+  }
+
+  if (!summary && screens.length === 0) return <UiEmpty />;
+
+  return (
+    <div className="space-y-6">
+      {!screenId && (
+        <UiWorksGallery
+          projectId={projectId}
+          schemeId={schemeId}
+          groups={groups}
+          canonicalFile={canonicalFile}
+        />
+      )}
+      {message && <p role="status" className="text-xs text-destructive">{message}</p>}
+      {screenId ? (
+        <ScreenDetail
+          projectId={projectId}
+          schemeId={schemeId}
+          screenId={screenId}
+          item={current}
+          images={currentImages}
+          canonicalFile={canonicalFile}
+          effectiveStatus={effectiveScreenStatus(current?.status, currentImages, currentCanonical)}
+          onToggleCanonical={toggleCanonical}
+        />
+      ) : (
+        <ScreenMap
+          projectId={projectId}
+          schemeId={schemeId}
+          items={summary?.screen_items ?? []}
+          groups={groups}
+          canonicalFile={canonicalFile}
+        />
+      )}
+    </div>
+  );
+}
+
+function UiWorksGallery({
+  projectId,
+  schemeId,
+  groups,
+  canonicalFile,
+}: {
+  projectId: string;
+  schemeId: string;
+  groups: Array<[string, ProjectScreenItem[]]>;
+  canonicalFile: ScreenCanonicalFile;
+}) {
+  const items = groups
+    .map(([screenId, images]) => {
+      const canonical = canonicalFile.screens[screenId]?.path;
+      const image = images.find(item => item.path === canonical) ?? images[0];
+      return image ? { screenId, image, canonical: image.path === canonical } : null;
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .sort((a, b) => b.image.mtime - a.image.mtime);
+  if (items.length === 0) return null;
+  return (
+    <section className="space-y-3" aria-label="UI 作品">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-base font-medium text-foreground/85">作品</h2>
+        <span className="font-mono text-xs text-muted-foreground">定稿与最近版本</span>
+      </div>
+      <div className="flex gap-4 overflow-x-auto pb-2">
+        {items.map(({ screenId, image, canonical }) => (
+          <Link
+            key={screenId}
+            href={`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(schemeId)}/screens/${encodeURIComponent(screenId)}`}
+            aria-label={`查看 UI 页面 ${screenId}`}
+            className="group w-52 shrink-0 space-y-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <span className="relative block overflow-hidden rounded-lg border border-border bg-card">
+              <img src={`/api/gallery/image?path=${encodeURIComponent(image.path)}`} alt="" className="aspect-[9/16] w-full object-cover transition-transform group-hover:scale-[1.02]" />
+              {canonical && <span className="absolute left-2 top-2 rounded-sm bg-glass px-2 py-1 text-xs text-primary backdrop-blur-glass">定稿</span>}
+            </span>
+            <span className="block truncate text-sm text-foreground">{screenId}</span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ScreenMap({
+  projectId,
+  schemeId,
+  items,
+  groups,
+  canonicalFile,
+}: {
+  projectId: string;
+  schemeId: string;
+  items: UiScreenSummary[];
+  groups: Array<[string, ProjectScreenItem[]]>;
+  canonicalFile: ScreenCanonicalFile;
+}) {
+  const rows = items.length > 0
+    ? items
+    : groups.map(([screenId, images]) => ({
+        screen_id: screenId,
+        name: screenId,
+        category: '',
+        priority: '',
+        status: images.length > 0 ? 'generated' : 'planned',
+        dependency: '',
+        purpose: '',
+      }));
+  if (rows.length === 0) return <UiEmpty />;
+  return (
+    <section className="space-y-3" aria-label="页面地图">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-base font-medium text-foreground/85">页面地图</h2>
+        <span className="font-mono text-xs text-muted-foreground">{rows.length} 页</span>
+      </div>
+      <div className="divide-y divide-border rounded-lg border border-border bg-card/30">
+        {rows.map(item => (
+          <Link
+            key={item.screen_id}
+            href={`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(schemeId)}/screens/${encodeURIComponent(item.screen_id)}`}
+            className="grid gap-2 px-4 py-3 transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:grid-cols-[minmax(140px,0.7fr)_minmax(180px,1fr)_auto] sm:items-center"
+          >
+            <div>
+              <p className="text-sm font-medium text-foreground">{item.name || item.screen_id}</p>
+              <p className="mt-1 font-mono text-xs text-muted-foreground">{item.screen_id}</p>
+            </div>
+            <p className="text-xs text-muted-foreground">{item.purpose || item.category || '尚未填写页面目的'}</p>
+            <span className="text-xs text-muted-foreground">
+              {screenStatusLabel(effectiveScreenStatus(
+                item.status,
+                groups.find(([id]) => id === item.screen_id)?.[1] ?? [],
+                canonicalFile.screens[item.screen_id],
+              ))}
+            </span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ScreenDetail({
+  projectId,
+  schemeId,
+  screenId,
+  item,
+  images,
+  canonicalFile,
+  effectiveStatus,
+  onToggleCanonical,
+}: {
+  projectId: string;
+  schemeId: string;
+  screenId: string;
+  item?: UiScreenSummary;
+  images: ProjectScreenItem[];
+  canonicalFile: ScreenCanonicalFile;
+  effectiveStatus: string;
+  onToggleCanonical: (screenId: string, path: string) => Promise<void>;
+}) {
+  const galleryVisibility = useGalleryHidden();
+  return (
+    <section className="space-y-5" data-testid="project-screens">
+      <div className="space-y-2">
+        <Link href={`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(schemeId)}`} className="text-xs text-muted-foreground hover:text-foreground">
+          UI / 页面地图
+        </Link>
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <div>
+            <h2 className="font-display text-display italic text-foreground">{item?.name || screenId}</h2>
+            <p className="mt-1 font-mono text-xs text-muted-foreground">{screenId}</p>
+          </div>
+          <span className="text-xs text-muted-foreground">{screenStatusLabel(effectiveStatus)}</span>
+        </div>
+        {item?.purpose && <p className="text-sm text-muted-foreground">{item.purpose}</p>}
+        {item?.brief_summary && (
+          <p className="rounded-md border-l-2 border-primary/50 bg-card/30 px-3 py-2 text-sm text-muted-foreground">
+            {item.brief_summary}
+          </p>
+        )}
+        {canonicalFile.screens[screenId]?.style_stale && (
+          <p className="text-xs text-destructive">
+            过时原因：当前 style.md 已变更，这个定稿仍基于旧风格指纹。
+          </p>
+        )}
+      </div>
+      <CharacterAssociationPicker
+        projectId={projectId}
+        target={{ kind: 'ui', scheme_id: schemeId, screen_id: screenId }}
+      />
+      {galleryVisibility.error && (
+        <p role="status" className="text-xs text-destructive">{galleryVisibility.error}</p>
+      )}
+      {images.length > 0 ? (
+        <div className="flex gap-4 overflow-x-auto pb-2">
+          {images.map(image => {
+            const entry = canonicalFile.screens[screenId];
+            const canonical = isCanonicalPath(image.path, entry);
+            return (
+              <figure key={image.path} className="w-64 shrink-0 space-y-2">
+                <div className="group relative overflow-hidden rounded-2xl">
+                  <a
+                    href={`/api/gallery/image?path=${encodeURIComponent(image.path)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`查看页面 ${screenId} 的 ${image.filename}`}
+                    className="block"
+                  >
+                    <img
+                      src={`/api/gallery/image?path=${encodeURIComponent(image.path)}`}
+                      alt=""
+                      className="block w-full"
+                      loading="lazy"
+                    />
+                  </a>
+                  {canonical && (
+                    <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1.5 rounded-sm bg-glass px-2 py-0.5 text-xs text-primary backdrop-blur-glass">
+                      <BadgeCheck className="size-3.5" />定稿
+                      {entry?.style_stale && <span className="text-destructive">风格已变更</span>}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void onToggleCanonical(screenId, image.path)}
+                    aria-label={canonical ? `取消定稿 ${image.filename}` : `设为定稿 ${image.filename}`}
+                    className={cn(
+                      'absolute right-2 top-2 grid size-7 place-items-center rounded-full bg-scrim/70 backdrop-blur-glass transition-opacity hover:bg-background/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                      canonical ? 'text-primary opacity-100' : 'text-white opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+                    )}
+                  >
+                    <BadgeCheck className="size-3.5" />
+                  </button>
+                </div>
+                <figcaption className="space-y-2 px-0.5 text-xs">
+                  <div className="flex items-baseline gap-2">
+                    <span className="truncate text-foreground/85">{image.style_variant || image.filename}</span>
+                    {image.base_version && <span className="shrink-0 font-mono text-muted-foreground/60">← {image.base_version}</span>}
+                  </div>
+                  <GalleryVisibilityButton
+                    filename={image.filename}
+                    hidden={galleryVisibility.isHidden(image.path)}
+                    loading={!galleryVisibility.loaded || galleryVisibility.updatingPath !== null}
+                    updating={galleryVisibility.updatingPath === image.path}
+                    onToggle={() => void galleryVisibility.toggleHidden(image.path)}
+                  />
+                </figcaption>
+                {(image.model || image.provider) && (
+                  <p className="truncate font-mono text-xs text-muted-foreground">
+                    {[image.provider, image.model].filter(Boolean).join(' · ')}
+                  </p>
+                )}
+                {image.prompt && (
+                  <details className="text-xs text-muted-foreground">
+                    <summary className="cursor-pointer text-foreground/75">查看生成提示词</summary>
+                    <p className="mt-2 whitespace-pre-wrap leading-relaxed">{image.prompt}</p>
+                  </details>
+                )}
+              </figure>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="grid min-h-[240px] place-items-center rounded-lg border border-border bg-card/30 text-center">
+          <p className="text-sm text-muted-foreground">这个页面尚未生成版本。</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function UiEmpty() {
+  return (
+    <section className="grid min-h-[320px] place-items-center rounded-lg border border-border bg-card/30 px-6 text-center">
+      <div className="max-w-lg space-y-4">
+        <PanelsTopLeft className="mx-auto size-8 text-muted-foreground" aria-hidden />
+        <div className="space-y-2">
+          <h2 className="font-display text-display italic text-foreground/70">这个项目还没有 UI 设计锚</h2>
+          <p className="text-sm text-muted-foreground">先用 UI 总控确定 GDD、PRD 与交互文档，再开始页面生成。</p>
+        </div>
+        <code className="inline-flex rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground">/game-atelier:ui</code>
+      </div>
+    </section>
+  );
+}
+
+function groupScreens(items: ProjectScreenItem[]): Array<[string, ProjectScreenItem[]]> {
+  const order: string[] = [];
+  const groups = new Map<string, ProjectScreenItem[]>();
+  for (const item of items) {
+    if (!groups.has(item.screen_id)) {
+      groups.set(item.screen_id, []);
+      order.push(item.screen_id);
+    }
+    groups.get(item.screen_id)!.push(item);
+  }
+  return order.map(id => [id, groups.get(id)!]);
+}
+
+function screenStatusLabel(status: string): string {
+  return ({ planned: '待设计', generated: '待定稿', canonical: '已定稿', stale: '已过时' } as Record<string, string>)[status] ?? status;
+}
+
+function effectiveScreenStatus(
+  plannedStatus: string | undefined,
+  images: ProjectScreenItem[],
+  canonical: ScreenCanonicalFile['screens'][string] | undefined,
+): string {
+  if (canonical?.style_stale) return 'stale';
+  if (canonical) return 'canonical';
+  if (images.length > 0) return 'generated';
+  return plannedStatus ?? 'planned';
+}

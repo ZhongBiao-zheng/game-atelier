@@ -63,7 +63,10 @@ def test_post_prompt_rejects_status_field(client, runtime):
 
 
 def test_post_feedback_writes_draft(client, runtime):
-    r = client.post("/api/feedback", json={"text": "2 号那张光线再阴一点"})
+    r = client.post(
+        "/api/feedback",
+        json={"text": "2 号那张光线再阴一点", "character_id": "shadow"},
+    )
     assert r.status_code == 200
     drafts = list((runtime / "draft").glob("*.md"))
     assert len(drafts) == 1
@@ -357,6 +360,31 @@ def test_create_character_sets_active(client, tmp_path, monkeypatch):
     assert active_file.exists()
     active = _json.loads(active_file.read_text())
     assert active["active_id"] == char_id
+
+
+def test_create_character_can_assign_current_project_atomically(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    project = client.post("/api/projects", json={"name": "夏日项目"}).json()["projects"][0]
+
+    response = client.post(
+        "/api/characters",
+        json={"name": "夏日角色", "project_id": project["id"]},
+    )
+
+    assert response.status_code == 200
+    character_id = response.json()["id"]
+    projects = client.get("/api/projects").json()
+    assert projects["assignments"][character_id] == project["id"]
+
+
+def test_create_character_rejects_missing_project_without_leaving_character(client, tmp_path):
+    response = client.post(
+        "/api/characters",
+        json={"name": "孤立角色", "project_id": "missing"},
+    )
+
+    assert response.status_code == 404
+    assert list((tmp_path / "characters").glob("char-*")) == []
 
 
 def test_delete_character_removes_dir_assignment_and_active(client, tmp_path, monkeypatch):

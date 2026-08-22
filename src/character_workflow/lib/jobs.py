@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.atomic_io import atomic_write_text
-from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
+from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus, Namespace
 
 if os.name == "nt":
     import msvcrt
@@ -52,7 +52,10 @@ def job_output_dir_for(job: "Job") -> Path:
         return studio_output_dir(job.job_id)
     if job.namespace == "ui":
         from character_workflow.lib.ui_jobs import screen_output_dir
-        return screen_output_dir(job.project_id, job.screen_id)
+        return screen_output_dir(job.project_id, job.ui_scheme_id, job.screen_id)
+    if job.namespace == "video":
+        from character_workflow.lib.video_jobs import production_output_dir
+        return production_output_dir(job.project_id, job.production_id)
     return job_output_dir(job.character_id, job.asset_slot)
 
 
@@ -101,6 +104,41 @@ def save_job(job: Job) -> Job:
         return _write(job)
 
 
+def migrate_ui_job_to_scheme(
+    job_id: str,
+    project_id: str,
+    scheme_id: str,
+    old_path_prefix: str,
+    new_path_prefix: str,
+) -> Job | None:
+    """One-time structured upgrade for a pre-scheme UI job.
+
+    The raw document cannot validate until ``ui_scheme_id`` is added, so this upgrade lives beside
+    the normal Job IO, holds the same per-job lock, validates the complete model, then persists it.
+    """
+    with job_lock(job_id):
+        path = _path(job_id)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("namespace") != "ui" or data.get("project_id") != project_id:
+            return None
+        data["ui_scheme_id"] = scheme_id
+        data["output_paths"] = [
+            _replace_path_prefix(value, old_path_prefix, new_path_prefix)
+            if isinstance(value, str) else value
+            for value in data.get("output_paths", [])
+        ]
+        return _write(_load_job(data))
+
+
+def _replace_path_prefix(value: str, old_prefix: str, new_prefix: str) -> str:
+    """Rewrite stored relative or absolute paths regardless of their platform separator."""
+    rewritten = value.replace(old_prefix, new_prefix)
+    return rewritten.replace(
+        old_prefix.replace("/", "\\"),
+        new_prefix.replace("/", "\\"),
+    )
+
+
 def _load_job(data: Any) -> Job:
     """读盘构造 Job：先剥离已废弃字段（seed），存量 JSON 不触发 extra=forbid。
 
@@ -133,9 +171,12 @@ def write_job(
     asset_slot: AssetSlot = AssetSlot.PORTRAIT,
     source_image: str | None = None,
     alias: str | None = None,
-    namespace: str = "character",
+    namespace: Namespace = "character",
     project_id: str | None = None,
+    ui_scheme_id: str | None = None,
     screen_id: str | None = None,
+    production_id: str | None = None,
+    kind: JobKind = JobKind.IMAGE,
 ) -> Job:
     """落盘一条 job 文件。默认 PENDING_CONFIRM —— Skill 先写好调用细节，
     UI 渲染"出图卡片"，画师在终端或 Web 点确认后才推进到 PENDING 调图像服务。
@@ -162,7 +203,10 @@ def write_job(
         asset_slot=asset_slot,
         namespace=namespace,
         project_id=project_id,
+        ui_scheme_id=ui_scheme_id,
         screen_id=screen_id,
+        production_id=production_id,
+        kind=kind,
         source_image=source_image,
         alias=alias,
         provider=provider,

@@ -27,9 +27,12 @@ export async function setCanonical(
 }
 
 /** 项目 screen 定稿表（B3）。canonical.json 缺失时后端返回 {screens: {}}。 */
-export async function fetchScreenCanonical(projectId: string): Promise<ScreenCanonicalFile> {
+export async function fetchScreenCanonical(
+  projectId: string,
+  schemeId: string,
+): Promise<ScreenCanonicalFile> {
   return requestJson<ScreenCanonicalFile>(
-    `/api/projects/${encodeURIComponent(projectId)}/screens/canonical`,
+    `/api/projects/${encodeURIComponent(projectId)}/ui-schemes/${encodeURIComponent(schemeId)}/screens/canonical`,
     '读取页面定稿表',
   );
 }
@@ -37,11 +40,12 @@ export async function fetchScreenCanonical(projectId: string): Promise<ScreenCan
 /** path=null 取消该 screen 定稿；风格标签由后端从 job 反查，不用前端报。 */
 export async function setScreenCanonical(
   projectId: string,
+  schemeId: string,
   screenId: string,
   path: string | null,
 ): Promise<ScreenCanonicalFile> {
   return requestJson<ScreenCanonicalFile>(
-    `/api/projects/${encodeURIComponent(projectId)}/screens/canonical`,
+    `/api/projects/${encodeURIComponent(projectId)}/ui-schemes/${encodeURIComponent(schemeId)}/screens/canonical`,
     path === null ? '取消页面定稿' : '设为页面定稿',
     {
       method: 'POST',

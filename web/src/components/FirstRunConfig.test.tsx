@@ -32,7 +32,7 @@ describe('FirstRunConfig', () => {
     const onSaved = vi.fn();
     render(<FirstRunConfig onSaved={onSaved} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /选择项目文件夹/ }));
+    fireEvent.click(screen.getByRole('button', { name: /选择数据目录/ }));
     await waitFor(() => {
       expect(screen.getByText('/Users/me/game-atelier')).toBeInTheDocument();
     });

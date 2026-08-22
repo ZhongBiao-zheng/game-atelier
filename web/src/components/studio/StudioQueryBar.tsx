@@ -131,13 +131,18 @@ export function StudioQueryBar({
         <FilterChip active={openPanel === 'mode'} aria-label="生成模式筛选" onClick={() => toggle('mode')}>
           生成模式 <ChevronDown size={14} aria-hidden className="text-muted-foreground" />
         </FilterChip>
-        <ToolbarPopover open={openPanel === 'mode'} onClose={() => setOpenPanel(null)} anchorRef={modeRef} direction="down" role="listbox" aria-label="生成模式列表" className={panelCls}>
+        <ToolbarPopover open={openPanel === 'mode'} onClose={() => setOpenPanel(null)} anchorRef={modeRef} direction="down" role="listbox" aria-label="生成模式列表" aria-multiselectable="true" className={panelCls}>
           <div className="px-3 py-2 text-sm text-muted-foreground">生成模式</div>
           {MODE_OPTS.map((o) => {
-            const active = filters.mode === o.key;
+            const active = filters.modes.includes(o.key);
             return (
               <button key={o.key} type="button" role="option" aria-selected={active} className={optionCls}
-                onClick={() => onChange({ ...filters, mode: active ? null : o.key })}>
+                onClick={() => onChange({
+                  ...filters,
+                  modes: active
+                    ? filters.modes.filter((mode) => mode !== o.key)
+                    : [...filters.modes, o.key],
+                })}>
                 <span className="flex items-center gap-3">{o.icon}{o.label}</span>
                 {active && <Check size={16} aria-hidden className="text-primary" />}
               </button>

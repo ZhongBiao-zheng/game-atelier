@@ -29,7 +29,7 @@ export function FirstRunConfig({ onSaved }: Props) {
     setChoosing(true);
     setError(null);
     try {
-      const picked = await chooseFolder('选择项目文件夹', customPath || defaultPath);
+      const picked = await chooseFolder('选择数据目录', customPath || defaultPath);
       if (picked) {
         setCustomPath(picked);
         setMode('custom');
@@ -81,7 +81,7 @@ export function FirstRunConfig({ onSaved }: Props) {
             active={mode === 'custom'}
             onClick={() => { void pickCustomPath(); }}
             icon={<FolderEdit className="size-4" />}
-            title="选择项目文件夹"
+            title="选择数据目录"
           >
             <div className="mt-2 min-w-0 truncate rounded-md border border-input bg-background/35 px-3 py-2 font-mono text-xs text-muted-foreground">
               {choosing ? '选择中...' : customPath || '点击选择文件夹'}

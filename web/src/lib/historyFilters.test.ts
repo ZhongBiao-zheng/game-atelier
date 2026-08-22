@@ -15,9 +15,22 @@ function job(p: Partial<Job>): Job {
 }
 
 describe('deriveGenMode', () => {
-  it('character namespace → skill（不分图视频）', () => {
+  it('非 studio namespace → skill（不分资产类型）', () => {
     expect(deriveGenMode(job({ namespace: 'character', kind: 'image' }))).toBe('skill');
-    expect(deriveGenMode(job({ namespace: 'character', kind: 'video' }))).toBe('skill');
+    expect(deriveGenMode(job({ namespace: 'ui', kind: 'image' }))).toBe('skill');
+    expect(deriveGenMode(job({ namespace: 'video', kind: 'video' }))).toBe('skill');
+  });
+  it('Studio 归档副本沿用原媒体模式，不冒充 Skill 产物', () => {
+    expect(deriveGenMode(job({
+      namespace: 'character',
+      kind: 'image',
+      params: { archived_from_job_id: 'studio-image' },
+    }))).toBe('image');
+    expect(deriveGenMode(job({
+      namespace: 'video',
+      kind: 'video',
+      params: { archived_from_job_id: 'studio-video' },
+    }))).toBe('video');
   });
   it('studio video → video', () => {
     expect(deriveGenMode(job({ namespace: 'studio', kind: 'video' }))).toBe('video');
@@ -49,9 +62,19 @@ describe('filterRounds', () => {
     expect(filterRounds(rounds, { ...DEFAULT_HISTORY_FILTERS, search: 'dragon' }, favs, hidden)).toHaveLength(1);
     expect(filterRounds(rounds, { ...DEFAULT_HISTORY_FILTERS, search: 'cat' }, favs, hidden)).toHaveLength(0);
   });
-  it('mode 按 round.mode 过滤', () => {
-    const rounds = [doneRound({ mode: 'skill' }), doneRound({ jobId: 'k', mode: 'video' })];
-    expect(filterRounds(rounds, { ...DEFAULT_HISTORY_FILTERS, mode: 'skill' }, favs, hidden)).toHaveLength(1);
+  it('modes 用 OR 语义保留所有已选生成模式', () => {
+    const rounds = [
+      doneRound({ jobId: 'i', mode: 'image' }),
+      doneRound({ jobId: 'v', mode: 'video' }),
+      doneRound({ jobId: 's', mode: 'skill' }),
+    ];
+    const out = filterRounds(
+      rounds,
+      { ...DEFAULT_HISTORY_FILTERS, modes: ['image', 'video'] },
+      favs,
+      hidden,
+    );
+    expect(out.map((round) => round.mode)).toEqual(['image', 'video']);
   });
   it('op=favorite 只留含收藏图的轮', () => {
     const rounds = [doneRound({ imagePaths: ['studio/j/v1.png'] }), doneRound({ jobId: 'k', imagePaths: ['studio/x/v1.png'] })];

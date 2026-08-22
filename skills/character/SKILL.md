@@ -110,6 +110,7 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
   "spec_status": "ready | placeholder | missing",
   "available_keys": [],
   "preferred_alias": null,
+  "derivative": null,
   "pending_identity_normalizations": []
 }
 ```
@@ -124,6 +125,7 @@ uv run python -m character_workflow turn-start --message "<画师本轮原文>"
 | `available_keys` / `preferred_alias` | Key 选择 |
 | `project_worldview` | 项目 worldview.md：项目经验/世界观（定位·调性·用语·规则），Web「项目经验」页可编辑 |
 | `project_style` | 项目风格契约 style.md 全文（含 frontmatter status）；"" = 项目还没有契约 |
+| `derivative` | 角色衍生来源；普通角色为 null，衍生角色包含来源角色快照、冻结参考图和当前槽位 |
 | `canonical` | active 角色定稿表（每 slot 至多一张 `{path, set_at, spec_fingerprint}`） |
 | `lessons_workspace` / `lessons_project` | 出图经验（workspace 通用 / 项目级，各取当前 kind 段；项目级来自 MEMORY.md） |
 
@@ -261,9 +263,19 @@ uv run python -m character_workflow set-canonical --kind portrait --path <该图
 
 三种模式产出都是新 vN、原图保留——A 模式编辑当前图也出新 vN，不原地改 v1（引擎 `_next_asset_path` 不覆盖既有文件）；渲染时新旧版可一并列出。
 
-### 皮肤 / 换色默认路由
+### 角色衍生（独立完整流程）
 
-已有默认立绘 + 画师要"皮肤/品质皮肤/换装/整体换色" → 默认 A 模式。prompt 只写改动点，不重述整套外观。推荐模板：
+`turn-start.derivative` 非 null 时，当前 active 是一个平级角色资产，不是来源角色的一次临时修改：
+
+- 创建时的来源图已复制冻结在 `derivative.source_paths`；它们只作为首轮补全 spec / 立绘的参考，不形成持续继承关系。
+- 当前衍生拥有自己的 spec、立绘、美宣、三视图、定稿、反馈和历史。所有 submit / set-canonical / spec 写入都只使用 `active_id`。
+- 首张立绘优先按 `derivative.source_paths` 的顺序传参考图；prompt 根据用户目标说明延伸方向，不凭空补来源差异说明。
+- 当前衍生有自己的 `canonical.portrait.path` 后，后续美宣 / 三视图优先只引用自己的定稿立绘。
+- 衍生可以独立移动、删除，也可以继续作为另一个衍生的来源；不得把来源 id 当作归属或删除约束。
+
+### 普通角色的临时换色 / 改图
+
+画师明确只要一次性修改现有图时走 A 模式；若要形成可继续做美宣和三视图的长期资产，应先在 Web「创建衍生」。临时改图的 prompt 只写改动点，不重述整套外观：
 
 ```text
 根据参考图中的角色立绘为参考，生成这个角色的"<皮肤名>"主题角色立绘皮肤。

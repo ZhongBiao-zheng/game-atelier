@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, BadgeCheck, Download, Eye, EyeOff, Heart, Loader2, Upload, X } from 'lucide-react';
-import type { AssetSlot, CanonicalFile, Job, ProjectsFile } from '../schema/jobs';
+import { AlertTriangle, BadgeCheck, Download, Eye, EyeOff, Film, Heart, Loader2, PanelsTopLeft, Upload, X } from 'lucide-react';
+import type {
+  AssetSlot,
+  CanonicalFile,
+  CharacterEntry,
+  Job,
+  ProjectsFile,
+} from '../schema/jobs';
 import { fetchCanonical, isCanonicalPath, setCanonical } from '@/api/canonical';
 import { fetchGalleryHidden, isGalleryHidden, setGalleryHidden } from '@/api/gallery';
 import { apiError, clip } from '@/api/http';
@@ -8,8 +14,14 @@ import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { cn } from '@/lib/utils';
+import { Link } from 'wouter';
+import {
+  fetchCharacterWorkspace,
+  type CharacterRelatedObject,
+} from '@/api/characters';
 
 interface Props {
+  projectId?: string;
   characterId: string | null;
   characterName: string | null;
   initialTab?: TabKind;
@@ -17,7 +29,7 @@ interface Props {
   sseSignal: number;
 }
 
-type TabKind = 'portrait' | 'promo' | 'turnaround';
+type TabKind = AssetSlot | 'ui' | 'video';
 
 // pending 超过 1 小时仍未翻面 → 出图进程（Skill）大概率已中断（与后端 STALE_PENDING_MINUTES 一致）。
 const STALE_PENDING_MS = 60 * 60 * 1000;
@@ -45,9 +57,20 @@ const TAB_META: Record<TabKind, { label: string; emptyTitle: string; emptyHint: 
     emptyTitle: '等待第一张三视图',
     emptyHint: '上传源图后在 CC 触发 /game-atelier:turnaround',
   },
+  ui: {
+    label: 'UI',
+    emptyTitle: '暂无关联 UI',
+    emptyHint: '在 UI 页面关联该角色后，作品会出现在这里',
+  },
+  video: {
+    label: '视频',
+    emptyTitle: '暂无关联视频',
+    emptyHint: '在视频企划关联该角色后，作品会出现在这里',
+  },
 };
 
 export function CharacterGallery({
+  projectId,
   characterId,
   characterName,
   initialTab,
@@ -55,6 +78,7 @@ export function CharacterGallery({
   sseSignal,
 }: Props) {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [related, setRelated] = useState<CharacterRelatedObject[]>([]);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<TabKind>(initialTab ?? 'portrait');
   const [uploadSignal, setUploadSignal] = useState(0);
@@ -66,6 +90,12 @@ export function CharacterGallery({
   const { toggleFavorite, isFavorited } = useGalleryFavorites();
   // 展签小帽：角色所属项目名
   const [projectName, setProjectName] = useState<string | null>(null);
+  const [derivativeRelation, setDerivativeRelation] = useState<{
+    sourceId: string;
+    sourceName: string;
+    projectId: string | null;
+    sourceExists: boolean;
+  } | null>(null);
   // 确认对话框状态
   const [dialog, setDialog] = useState<{
     open: boolean;
@@ -77,14 +107,16 @@ export function CharacterGallery({
   } | null>(null);
 
   useEffect(() => {
-    if (initialTab) setTab(initialTab);
-  }, [initialTab]);
+    setTab(initialTab ?? 'portrait');
+  }, [characterId, initialTab]);
 
   useEffect(() => {
     fetchGalleryHidden().then(setHiddenPaths).catch(() => {});
   }, []);
 
   useEffect(() => {
+    setProjectName(null);
+    setDerivativeRelation(null);
     if (!characterId) return;
     let cancelled = false;
     fetchCanonical(characterId)
@@ -96,12 +128,25 @@ export function CharacterGallery({
   useEffect(() => {
     if (!characterId) return;
     let cancelled = false;
-    fetch('/api/projects')
-      .then(r => r.json() as Promise<ProjectsFile>)
-      .then(pf => {
+    Promise.all([
+      fetch('/api/projects').then(r => r.json() as Promise<ProjectsFile>),
+      fetch('/api/characters').then(r => r.json() as Promise<CharacterEntry[]>),
+    ])
+      .then(([pf, characters]) => {
         if (cancelled || !pf || !Array.isArray(pf.projects)) return;
         const pid = pf.assignments?.[characterId];
         setProjectName(pf.projects.find(p => p.id === pid)?.name ?? null);
+        const current = characters.find(character => character.id === characterId);
+        const derivative = current?.derivative;
+        const sourceCharacter = characters.find(character => (
+          character.id === derivative?.source_character_id
+        ));
+        setDerivativeRelation(derivative ? {
+          sourceId: derivative.source_character_id,
+          sourceName: derivative.source_character_name,
+          projectId: sourceCharacter ? pf.assignments?.[sourceCharacter.id] ?? null : null,
+          sourceExists: Boolean(sourceCharacter),
+        } : null);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -117,20 +162,37 @@ export function CharacterGallery({
       .finally(() => setLoading(false));
   }, [characterId, sseSignal, uploadSignal]);
 
+  useEffect(() => {
+    setRelated([]);
+    if (!projectId || !characterId) return;
+    let cancelled = false;
+    fetchCharacterWorkspace(projectId, characterId)
+      .then(value => {
+        if (!cancelled && Array.isArray(value.related)) setRelated(value.related);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [characterId, projectId, sseSignal]);
+
   if (!characterId) return <EmptyShell title="请在左栏选择角色" subtitle="Atelier · 角色资产工坊" />;
 
   // 旧 job 无 kind 字段时按 PORTRAIT 处理（后端 Pydantic 默认值，前端二次兜底防漂移）
   const jobKind = (j: Job): AssetSlot => j.asset_slot ?? 'portrait';
-  const tabJobs = jobs.filter(j => jobKind(j) === tab);
+  const assetTab = isAssetTab(tab);
+  const tabJobs = assetTab ? jobs.filter(j => jobKind(j) === tab) : [];
+  const relatedItems = related.filter(item => item.target.kind === tab);
   const tabCounts: Record<TabKind, number> = {
     portrait: jobs.filter(j => jobKind(j) === 'portrait').reduce((s, j) => s + j.output_paths.length, 0),
     promo: jobs.filter(j => jobKind(j) === 'promo').reduce((s, j) => s + j.output_paths.length, 0),
     turnaround: jobs.filter(j => jobKind(j) === 'turnaround').reduce((s, j) => s + j.output_paths.length, 0),
+    ui: related.filter(item => item.target.kind === 'ui').length,
+    video: related.filter(item => item.target.kind === 'video').length,
   };
 
   if (loading && jobs.length === 0) {
     return (
-      <GalleryShell name={characterName} projectName={projectName} count={0} rounds={0}
+      <GalleryShell name={characterName} projectName={projectName} derivativeRelation={derivativeRelation} count={0} rounds={0}
+        imageStats={assetTab}
         tab={tab} setTab={setTab} tabCounts={tabCounts}
         colCount={colCount} onColCountChange={setColCount} tools={null}>
         <Skeleton cols={colCount} />
@@ -178,7 +240,7 @@ export function CharacterGallery({
   }
 
   async function toggleCanonical(path: string) {
-    if (!characterId) return;
+    if (!characterId || !isAssetTab(tab)) return;
     const current = canonicalFile?.[tab] ?? null;
     const next = isCanonicalPath(path, current) ? null : path;
     try {
@@ -225,19 +287,25 @@ export function CharacterGallery({
   return (
     <>
       <GalleryShell
-        name={characterName} projectName={projectName}
-        count={allImages.length} rounds={tabJobs.length}
+        name={characterName} projectName={projectName} derivativeRelation={derivativeRelation}
+        count={assetTab ? allImages.length : relatedItems.length}
+        rounds={assetTab ? tabJobs.length : 0}
+        imageStats={assetTab}
         tab={tab} setTab={setTab} tabCounts={tabCounts}
         colCount={colCount} onColCountChange={setColCount}
-        tools={
+        tools={assetTab ? (
           <GalleryUpload
             characterId={characterId}
             kind={tab}
             onUploaded={() => setUploadSignal(s => s + 1)}
           />
-        }
+        ) : null}
       >
-        {!hasAny && (
+        {!assetTab && (
+          <RelatedWorks projectId={projectId} items={relatedItems} kind={tab} />
+        )}
+
+        {assetTab && !hasAny && (
           <div className="py-16 text-center">
             <p className="font-display text-display italic text-foreground/70 mb-2">
               {TAB_META[tab].emptyTitle}
@@ -248,7 +316,7 @@ export function CharacterGallery({
           </div>
         )}
 
-        {hasAny && (
+        {assetTab && hasAny && (
           <div className={cn(colClass, 'gap-4')}>
             {allImages.map((img, i) => {
               const favorited = isFavorited(img.path);
@@ -369,14 +437,21 @@ export function CharacterGallery({
 }
 
 function GalleryShell({
-  name, projectName, count, rounds, children, tab, setTab, tabCounts,
-  colCount, onColCountChange, tools,
+  name, projectName, derivativeRelation, count, rounds, children, tab, setTab, tabCounts,
+  colCount, onColCountChange, tools, imageStats,
 }: {
   name: string | null; projectName: string | null; count: number; rounds: number;
+  derivativeRelation: {
+    sourceId: string;
+    sourceName: string;
+    projectId: string | null;
+    sourceExists: boolean;
+  } | null;
   children: React.ReactNode;
   tab: TabKind; setTab: (t: TabKind) => void; tabCounts: Record<TabKind, number>;
   colCount: number; onColCountChange: (n: number) => void;
   tools: React.ReactNode;
+  imageStats: boolean;
 }) {
   return (
     <main className="flex flex-col h-full overflow-hidden">
@@ -390,8 +465,25 @@ function GalleryShell({
             <h1 className="font-display italic leading-[1.05] tracking-tight text-foreground truncate text-display">
               {name ?? '—'}
             </h1>
+            {derivativeRelation && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                角色衍生 · 来源{' '}
+                {derivativeRelation.sourceExists ? (
+                  <Link
+                    href={derivativeRelation.projectId
+                      ? `/workshop/${encodeURIComponent(derivativeRelation.projectId)}/art/characters/${encodeURIComponent(derivativeRelation.sourceId)}`
+                      : `/workshop/unassigned/characters/${encodeURIComponent(derivativeRelation.sourceId)}`}
+                    className="rounded-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    {derivativeRelation.sourceName}
+                  </Link>
+                ) : (
+                  <span className="text-foreground/80">{derivativeRelation.sourceName}</span>
+                )}
+              </p>
+            )}
           </div>
-          {count > 0 && (
+          {imageStats && count > 0 && (
             <div className="shrink-0 font-mono tabular-nums text-xs text-muted-foreground">
               <span className="text-foreground/85">{count}</span> 图 ·{' '}
               <span className="text-foreground/85">{rounds}</span> 轮
@@ -401,7 +493,7 @@ function GalleryShell({
         <div className="mt-4 flex items-center justify-between gap-4 pb-3.5">
           <TabStrip tab={tab} setTab={setTab} counts={tabCounts} />
           <div className="flex items-center gap-4 shrink-0 min-w-0">
-            <ColSlider value={colCount} onChange={onColCountChange} />
+            {imageStats && <ColSlider value={colCount} onChange={onColCountChange} />}
             {tools}
           </div>
         </div>
@@ -411,6 +503,100 @@ function GalleryShell({
       </div>
     </main>
   );
+}
+
+function isAssetTab(tab: TabKind): tab is AssetSlot {
+  return tab === 'portrait' || tab === 'promo' || tab === 'turnaround';
+}
+
+function RelatedWorks({
+  projectId,
+  items,
+  kind,
+}: {
+  projectId?: string;
+  items: CharacterRelatedObject[];
+  kind: 'ui' | 'video';
+}) {
+  if (!projectId || items.length === 0) {
+    return (
+      <div className="py-16 text-center">
+        <p className="mb-2 font-display text-display italic text-foreground/70">
+          {TAB_META[kind].emptyTitle}
+        </p>
+        <p className="text-sm text-muted-foreground">{TAB_META[kind].emptyHint}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {items.map(item => (
+        <RelatedWorkCard key={relatedKey(item)} projectId={projectId} item={item} />
+      ))}
+    </div>
+  );
+}
+
+function RelatedWorkCard({
+  projectId,
+  item,
+}: {
+  projectId: string;
+  item: CharacterRelatedObject;
+}) {
+  const href = relatedHref(projectId, item);
+  const Icon = item.target.kind === 'ui' ? PanelsTopLeft : Film;
+  const mediaType = item.media.find(media => media.path === item.featured_path)?.media_type
+    ?? item.media[0]?.media_type;
+
+  return (
+    <Link
+      href={href}
+      className="group overflow-hidden rounded-lg border border-border bg-card/30 transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+    >
+      {item.featured_path && (
+        mediaType === 'video' ? (
+          <video
+            src={`/api/gallery/image?path=${encodeURIComponent(item.featured_path)}`}
+            muted
+            preload="metadata"
+            className="aspect-video w-full border-b border-border bg-background object-cover"
+          />
+        ) : (
+          <img
+            src={`/api/gallery/image?path=${encodeURIComponent(item.featured_path)}`}
+            alt=""
+            className="aspect-video w-full border-b border-border bg-background object-cover"
+          />
+        )
+      )}
+      <span className="flex items-start gap-3 p-4">
+        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-foreground">{item.title}</span>
+          <span className="mt-1 block text-xs text-muted-foreground">{item.detail}</span>
+          <span className="mt-2 block text-xs text-muted-foreground/70">
+            {item.source === 'auto' ? '自动关联' : item.source === 'both' ? '自动 + 手动' : '手动关联'}
+          </span>
+        </span>
+      </span>
+    </Link>
+  );
+}
+
+function relatedKey(item: CharacterRelatedObject): string {
+  return item.target.kind === 'ui'
+    ? `ui:${item.target.scheme_id}:${item.target.screen_id}`
+    : `video:${item.target.production_id}`;
+}
+
+function relatedHref(projectId: string, item: CharacterRelatedObject): string {
+  const project = encodeURIComponent(projectId);
+  if (item.target.kind === 'ui') {
+    return `/workshop/${project}/ui/${encodeURIComponent(item.target.scheme_id)}/screens/${encodeURIComponent(item.target.screen_id)}`;
+  }
+  return `/workshop/${project}/video/${encodeURIComponent(item.target.production_id)}`;
 }
 
 function TabStrip({
@@ -471,7 +657,7 @@ function ColSlider({ value, onChange }: { value: number; onChange: (n: number) =
 
 function GalleryUpload({
   characterId, kind, onUploaded,
-}: { characterId: string; kind: TabKind; onUploaded: () => void }) {
+}: { characterId: string; kind: AssetSlot; onUploaded: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -42,7 +42,13 @@ def _issues(report, category: str):
 def test_empty_data_root_is_clean(isolated_data_root):
     report = validate_data()
     assert report.issues == []
-    assert report.checked == {"jobs": 0, "docs": 0, "canonicals": 0, "sidecars": 0}
+    assert report.checked == {
+        "jobs": 0,
+        "docs": 0,
+        "canonicals": 0,
+        "video_references": 0,
+        "sidecars": 0,
+    }
     assert "0 errors, 0 warnings" in format_report(report)
 
 
@@ -145,6 +151,21 @@ def test_style_and_anchor_docs_scanned(isolated_data_root):
     assert report.checked["docs"] == 2
 
 
+def test_validate_data_does_not_migrate_legacy_ui_layout(isolated_data_root):
+    projects.create_project("魔幻", slug="mohuan")
+    root = isolated_data_root / "projects/mohuan"
+    import shutil
+    shutil.rmtree(root / "ui")
+    legacy = root / "screens/home/v1.png"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"png")
+
+    validate_data()
+
+    assert legacy.is_file()
+    assert not (root / "ui/schemes.json").exists()
+
+
 def test_normal_question_in_prose_not_flagged(isolated_data_root):
     spec = isolated_data_root / "characters" / "hero" / "spec.md"
     spec.parent.mkdir(parents=True)
@@ -171,10 +192,10 @@ def test_character_canonical_broken_link(isolated_data_root):
 
 def test_screen_canonical_broken_link(isolated_data_root):
     proj = projects.create_project("魔幻", slug="mohuan")
-    d = isolated_data_root / "projects" / "mohuan" / "screens" / "home"
+    d = isolated_data_root / "projects" / "mohuan" / "ui" / "v1" / "screens" / "home"
     d.mkdir(parents=True)
     (d / "v1.png").write_bytes(b"\x89PNG\r\n\x1a\n")
-    ui_jobs.set_screen_canonical(proj.id, "home", str(d / "v1.png"))
+    ui_jobs.set_screen_canonical(proj.id, "v1", "home", str(d / "v1.png"))
     (d / "v1.png").unlink()
 
     report = validate_data()
@@ -190,6 +211,62 @@ def test_corrupt_canonical_json_is_error(isolated_data_root):
     cfile.write_text("{broken", encoding="utf-8")
     report = validate_data()
     assert any(i.category == "canonical" and "结构非法" in i.detail for i in report.errors)
+
+
+def test_missing_video_reference_is_error(isolated_data_root):
+    project = projects.create_project("视频项目", slug="video-project")
+    projects.assign_character("missing", project.id)
+    references = (
+        isolated_data_root
+        / "projects"
+        / project.slug
+        / "videos"
+        / "launch-pv"
+        / "references.json"
+    )
+    references.parent.mkdir(parents=True)
+    (references.parent / "brief.md").write_text("# 宣传片\n", encoding="utf-8")
+    (references.parent / "prompt.md").write_text("镜头1：亮相。", encoding="utf-8")
+    references.write_text(
+        '{"paths":["characters/missing/portrait/v1.png"]}',
+        encoding="utf-8",
+    )
+
+    report = validate_data()
+
+    assert any(
+        issue.category == "reference" and "参考素材不存在" in issue.detail
+        for issue in report.errors
+    )
+
+
+def test_video_reference_validation_rejects_foreign_and_duplicate_paths(
+    isolated_data_root,
+):
+    project = projects.create_project("视频项目", slug="video-project")
+    other = projects.create_project("其他项目", slug="other-project")
+    projects.assign_character("hero", project.id)
+    projects.assign_character("outsider", other.id)
+    for character_id in ("hero", "outsider"):
+        image = isolated_data_root / "characters" / character_id / "portrait" / "v1.png"
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"png")
+    production = isolated_data_root / "projects/video-project/videos/launch-pv"
+    production.mkdir(parents=True)
+    (production / "brief.md").write_text("# 宣传片\n", encoding="utf-8")
+    (production / "prompt.md").write_text("镜头1：亮相。", encoding="utf-8")
+    local = "characters/hero/portrait/v1.png"
+    (production / "references.json").write_text(json.dumps({"paths": [
+        local,
+        local,
+        "characters/outsider/portrait/v1.png",
+        str(isolated_data_root / local),
+    ]}), encoding="utf-8")
+
+    details = [issue.detail for issue in _issues(validate_data(), "reference")]
+
+    assert any("重复路径" in detail for detail in details)
+    assert sum("不属于当前项目" in detail for detail in details) == 2
 
 
 # ---------- ⑤ 画廊 sidecar ----------

@@ -9,11 +9,22 @@ from pathlib import Path
 from character_workflow.lib import data_root
 
 
+_CHARACTER_PREFIX = "<!-- character: "
+
+
 def _runtime_dir() -> Path:
     return data_root.runtime_dir()
 
 
-def process_drafts() -> list[dict[str, str]]:
+def _belongs_to_character(path: Path, character_id: str) -> bool:
+    try:
+        first_line = path.read_text(encoding="utf-8").splitlines()[0]
+    except (OSError, IndexError):
+        return False
+    return first_line == f"{_CHARACTER_PREFIX}{character_id} -->"
+
+
+def process_drafts(character_id: str) -> list[dict[str, str]]:
     runtime = _runtime_dir()
     draft_dir = runtime / "draft"
     processing_dir = runtime / "processing"
@@ -24,6 +35,8 @@ def process_drafts() -> list[dict[str, str]]:
     batch_ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     snapshot: list[Path] = []
     for src in sorted(draft_dir.glob("*.md")):
+        if not _belongs_to_character(src, character_id):
+            continue
         dst = processing_dir / f"{batch_ts}-{src.name}"
         try:
             src.rename(dst)

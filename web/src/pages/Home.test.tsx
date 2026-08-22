@@ -100,6 +100,7 @@ describe('Home', () => {
           items: [
             {
               character_id: 'char-a',
+              project_id: 'p1',
               asset_slot: 'portrait',
               filename: 'a.png',
               path: 'characters/char-a/portrait/a.png',
@@ -132,11 +133,21 @@ describe('Home', () => {
           items: [
             {
               character_id: 'char-a',
+              project_id: 'p1',
               asset_slot: 'promo',
               filename: 'kv.png',
               path: 'characters/char-a/promo/kv.png',
               job_id: 'job-promo-1',
               mtime: 0,
+            },
+            {
+              character_id: 'char-b',
+              project_id: null,
+              asset_slot: 'portrait',
+              filename: 'portrait.png',
+              path: 'characters/char-b/portrait/portrait.png',
+              job_id: 'job-portrait-2',
+              mtime: 1,
             },
           ],
         }),
@@ -146,8 +157,12 @@ describe('Home', () => {
     await waitFor(() => {
       expect(container.querySelector('img')).toBeInTheDocument();
     });
-    expect(container.querySelector('a')?.getAttribute('href')).toBe(
-      '/character/char-a/promo/job-promo-1/characters%2Fchar-a%2Fpromo%2Fkv.png',
+    const hrefs = [...container.querySelectorAll('a')].map(link => link.getAttribute('href'));
+    expect(hrefs).toContain(
+      '/workshop/p1/art/characters/char-a/promo/job-promo-1/characters%2Fchar-a%2Fpromo%2Fkv.png',
+    );
+    expect(hrefs).toContain(
+      '/workshop/unassigned/characters/char-b/portrait/job-portrait-2/characters%2Fchar-b%2Fportrait%2Fportrait.png',
     );
   });
 

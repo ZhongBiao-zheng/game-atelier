@@ -9,6 +9,65 @@ export interface StudioJobCreate {
   kind?: JobKind;
 }
 
+export type StudioArchiveTarget =
+  | {
+      kind: 'character';
+      character_id: string; asset_slot: 'portrait' | 'promo' | 'turnaround';
+    }
+  | {
+      kind: 'ui';
+      ui_scheme_id: string; screen_id: string;
+    }
+  | {
+      kind: 'video';
+      production_id: string;
+    };
+
+export type StudioArchiveTargetOption = StudioArchiveTarget & {
+  label: string;
+  detail: string;
+};
+
+export function studioArchiveTarget(option: StudioArchiveTargetOption): StudioArchiveTarget {
+  if (option.kind === 'character') {
+    return {
+      kind: option.kind,
+      character_id: option.character_id,
+      asset_slot: option.asset_slot,
+    };
+  }
+  if (option.kind === 'ui') {
+    return { kind: option.kind, ui_scheme_id: option.ui_scheme_id, screen_id: option.screen_id };
+  }
+  return { kind: option.kind, production_id: option.production_id };
+}
+
+export async function fetchStudioArchiveTargets(
+  projectId: string,
+  mediaKind: JobKind,
+): Promise<StudioArchiveTargetOption[]> {
+  const data = await requestJson<{ targets: StudioArchiveTargetOption[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/studio-archive-targets?media_kind=${encodeURIComponent(mediaKind)}`,
+    '读取项目归档位置',
+  );
+  return data.targets;
+}
+
+export async function archiveStudioOutput(
+  jobId: string,
+  payload: { source_path: string; project_id: string; target: StudioArchiveTarget },
+): Promise<{ job: Job; path: string }> {
+  return requestJson<{ job: Job; path: string }>(
+    `/api/studio/jobs/${encodeURIComponent(jobId)}/archive`,
+    '归档创作台产物',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export async function createStudioJob(body: StudioJobCreate): Promise<Job> {
   return requestJson<Job>('/api/studio/jobs', '创建出图任务', {
     method: 'POST',
@@ -29,6 +88,44 @@ export async function uploadReferenceImage(file: File): Promise<string> {
     body: form,
   });
   return data.path;
+}
+
+export interface MjReferenceFiles {
+  image: File[];
+  sref: File[];
+  cref: File[];
+  oref: File[];
+}
+
+export interface MjReferencePaths {
+  sref?: string[];
+  cref?: string[];
+  oref?: string[];
+}
+
+/** 完整版与紧凑版共用的 MJ 四组上传规则，避免任一入口漏传某个语义槽。 */
+export async function resolveImageReferencePaths({
+  midjourney, referenceImages, mjRefs, overrideReferenceImages, overrideMjRefPaths,
+}: {
+  midjourney: boolean;
+  referenceImages: File[];
+  mjRefs: MjReferenceFiles;
+  overrideReferenceImages?: string[];
+  overrideMjRefPaths?: MjReferencePaths;
+}): Promise<{ referenceImages: string[]; mjRefPaths: MjReferencePaths }> {
+  const paths = overrideReferenceImages
+    ?? await Promise.all((midjourney ? mjRefs.image : referenceImages).map(uploadReferenceImage));
+  let mjRefPaths: MjReferencePaths = {};
+  if (midjourney) {
+    mjRefPaths = overrideMjRefPaths ?? Object.fromEntries(
+      await Promise.all(
+        (['sref', 'cref', 'oref'] as const)
+          .filter((slot) => mjRefs[slot].length > 0)
+          .map(async (slot) => [slot, await Promise.all(mjRefs[slot].map(uploadReferenceImage))] as const),
+      ),
+    );
+  }
+  return { referenceImages: paths, mjRefPaths };
 }
 
 export async function listStudioJobs(): Promise<Job[]> {

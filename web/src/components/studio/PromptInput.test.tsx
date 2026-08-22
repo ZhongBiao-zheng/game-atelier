@@ -183,6 +183,7 @@ describe('PromptInput @引用参考素材', () => {
 
   it('serializeMentions：提交时剥掉 @，序号自然语言保留', () => {
     expect(serializeMentions('@图1 模仿 @视频2 的动作')).toBe('图1 模仿 视频2 的动作');
+    expect(serializeMentions('@图片1 保持角色身份')).toBe('图1 保持角色身份');
   });
 
   /** jsdom 没有真实键入：直接落 '@' 文本节点 + 设光标 + 触发 input，等效敲 @。 */

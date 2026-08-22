@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 
-import { createStudioJob, uploadReferenceImage } from '@/api/studio';
+import { createStudioJob, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { PromptInput } from '@/components/studio/PromptInput';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
@@ -201,25 +201,13 @@ export function StudioCompact() {
     setPending(true);
     setCompactError(null);
     let refPaths: string[];
-    let mjRefPaths: { sref?: string; cref?: string; oref?: string } = {};
+    let mjRefPaths: { sref?: string[]; cref?: string[]; oref?: string[] } = {};
     try {
-      refPaths = overrideConfig?.referenceImages
-        ?? (referenceImages.length > 0
-          ? await Promise.all(referenceImages.map(uploadReferenceImage))
-          : []);
-      // 与 StudioFull 同一套：MJ 的垫图走「图片」槽，另三种参考图各自上传拿服务器路径。
-      if (caps.family === 'midjourney' && !overrideConfig?.referenceImages && mjRefs.image) {
-        refPaths = [await uploadReferenceImage(mjRefs.image)];
-      }
-      if (caps.family === 'midjourney') {
-        mjRefPaths = overrideConfig?.mjRefPaths ?? Object.fromEntries(
-          await Promise.all(
-            (['sref', 'cref', 'oref'] as const)
-              .filter((slot) => mjRefs[slot])
-              .map(async (slot) => [slot, await uploadReferenceImage(mjRefs[slot]!)] as const),
-          ),
-        );
-      }
+      ({ referenceImages: refPaths, mjRefPaths } = await resolveImageReferencePaths({
+        midjourney: caps.family === 'midjourney', referenceImages, mjRefs,
+        overrideReferenceImages: overrideConfig?.referenceImages,
+        overrideMjRefPaths: overrideConfig?.mjRefPaths,
+      }));
     } catch (e: any) {
       setPending(false);
       setCompactError(e.message);

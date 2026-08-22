@@ -1,0 +1,19 @@
+{
+  "recommended_threshold": 0.35,
+  "should_trigger": [
+    {"text": "给麻将项目生成一支完整营销视频", "family": "project_video"},
+    {"text": "用 Shot 1 到 Shot 6 写一条 Seedance 完整视频提示词", "family": "multi_shot_prompt"},
+    {"text": "为这个游戏做角色宣传片并选定最终视频版本", "family": "project_video"},
+    {"text": "优化项目里的视频提示词，然后生成完整成片", "family": "prompt_generation"}
+  ],
+  "should_not_trigger": [
+    {"text": "帮我设计一张游戏首页 UI", "family": "ui_design"},
+    {"text": "给赵云画一张角色立绘", "family": "character_art"},
+    {"text": "解释 Seedance 报错是什么意思", "family": "diagnosis_only"},
+    {"text": "我只想在创作台随便试一段无项目视频", "family": "free_studio"}
+  ],
+  "near_neighbor": [
+    {"text": "把六个已经生成的视频片段剪辑拼接成长片", "family": "timeline_editing"},
+    {"text": "只分析这个营销视频为什么传播效果好", "family": "analysis_only"}
+  ]
+}

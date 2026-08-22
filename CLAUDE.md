@@ -66,6 +66,9 @@ export GAME_ATELIER_DATA_ROOT=/tmp/test-data-root
 | `.runtime/active-character.json` | 双向 | 双向 |
 | `.runtime/projects.json` | Web (`POST /api/projects`) | Skill / Web |
 | `.runtime/gallery-hidden.json` | Web (`POST /api/gallery/hidden`) | viewer-server（`/api/gallery/recent` 过滤首页作品展示） |
+| `projects/<slug>/design/`、根 `style.md` | UI Skill / 角色 Skill | 项目共享策划锚与视觉基线 |
+| `projects/<slug>/ui/<scheme>/{style.md,screens/}` | UI Skill / Web 定稿 | UI Skill / Web 工坊 UI 方案 |
+| `projects/<slug>/videos/<production>/` | Video Skill / job_runner / Web 选版 | Video Skill / Web 工坊视频工作区 |
 | `.runtime/server.{pid,port}` | viewer-server CLI | viewer-server CLI |
 | `.config/keys.json` | Skill / Web (`POST /api/keys`) | Skill 通过 `lib/keys.py` 读 |
 | `.config/venv-hash` | `bootstrap.py --ensure-venv` | `bootstrap.py --check` |
@@ -140,7 +143,7 @@ uv run python src/viewer_server/server.py open-browser
 ## 安全 / 部署约束
 
 - viewer-server **必须绑 `127.0.0.1`**，绝不 `0.0.0.0`（共享 WiFi attack surface）。
-- `/api/raw` 图片读取用 job_id 白名单（只能读 `output_paths` 里登记过的文件）。
+- `/api/raw` 媒体读取用 job_id 白名单（只读 `output_paths`、`params` 三组参考素材、MJ 三组参考素材与 `source_image` 中登记的路径）。
 - 同一时间只支持一个 Web tab（多 tab 行为未定义）。
 
 ## Turn 起始（Skill 每次必做）
@@ -173,3 +176,17 @@ Key routing rules:
 - Ship/deploy/PR → invoke /ship or /land-and-deploy
 - Save progress → invoke /context-save
 - Resume context → invoke /context-restore
+
+## Agent skills
+
+### Issue tracker
+
+任务使用本地 Markdown，存放在 `.scratch/<feature>/`；代码改动通过 GitHub PR 提交。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+使用默认的 `needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+采用单一领域上下文：根目录 `CONTEXT.md` + `docs/adr/`。详见 `docs/agents/domain.md`。

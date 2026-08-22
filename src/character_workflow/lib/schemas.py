@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
 class JobStatus(str, Enum):
@@ -27,9 +27,12 @@ class AssetSlot(str, Enum):
 
 
 class JobKind(str, Enum):
-    # 媒体类型 — 与 AssetSlot 解耦。VIDEO 占位，runner 抛 NotImplementedError。
+    # 媒体类型 — 与 AssetSlot / namespace 解耦；runner 依此分派图片或视频 caller。
     IMAGE = "image"
     VIDEO = "video"
+
+
+Namespace = Literal["character", "studio", "ui", "video"]
 
 
 class JobParams(BaseModel):
@@ -59,6 +62,9 @@ class JobParams(BaseModel):
     # style_variant = 画师给的风格方向标签；base_version = 结构所本的基准页文件名（如 v1.png）。
     style_variant: str | None = None
     base_version: str | None = None
+    # Studio 单产物归档到项目资产时，记录不可变来源；新 Job 仍保留原 prompt / 模型 / 参数。
+    archived_from_job_id: str | None = None
+    archived_from_path: str | None = None
     # Midjourney 专属（family=midjourney）—— 与 web/src/schema/jobs.ts::JobParams 同步。
     # MJ 的 body 没有 size / quality 字段，一切控制都在 prompt 尾部的 flag 里，由 mj_image
     # caller 拼接：prompt 保持画师原文，换模型时不残留 flag。比例复用上面的 ratio 字段
@@ -75,11 +81,11 @@ class JobParams(BaseModel):
     mj_iw: float | None = None        # --iw 垫图权重 0-3
     # 三种参考图：值是本地路径或公网 URL（caller 会把本地文件经 OSS 转成直链再拼 flag）。
     # 垫图不在这里 —— 它走 reference_images → body 的 base64Array。
-    mj_sref: str | None = None        # --sref 风格参考
+    mj_sref: list[str] | None = None  # --sref 风格参考
     mj_sw: int | None = None          # --sw 0-1000
-    mj_cref: str | None = None        # --cref 角色参考
+    mj_cref: list[str] | None = None  # --cref 角色参考
     mj_cw: int | None = None          # --cw 0-100
-    mj_oref: str | None = None        # --oref Omni Reference
+    mj_oref: list[str] | None = None  # --oref Omni Reference
     mj_ow: int | None = None          # --ow 0-1000
     # caller 回写：本次真实拼出的 flag 串（如 "--ar 16:9 --v 8.2 --chaos 10"），Web 只读展示
     mj_flags: str | None = None
@@ -99,12 +105,15 @@ class Job(BaseModel):
     # 2026-05-25 重构：原 kind 拆成 asset_slot + kind + namespace。
     asset_slot: AssetSlot = AssetSlot.PORTRAIT
     kind: JobKind = JobKind.IMAGE
-    namespace: str = "character"  # "character" | "studio" | "ui"
+    namespace: Namespace = "character"
     source_image: str | None = None  # promo/turnaround 用，绝对路径
-    # 2026-08-10 (B2): UI 页面 job（namespace="ui"）—— 资产归项目不归角色。
-    # 两字段决定输出目录 projects/<slug>/screens/<screen_id>/；Web 不能改。
+    # UI 页面 job（namespace="ui"）—— 资产归项目中的明确方案，不归角色。
+    # 三字段决定输出目录 projects/<slug>/ui/<scheme_id>/screens/<screen_id>/；Web 不能改。
     project_id: str | None = None
+    ui_scheme_id: str | None = None
     screen_id: str | None = None
+    # 项目视频 job（namespace="video"）—— 一次 job 产出一支完整企划视频。
+    production_id: str | None = None
     # Phase 3 (2026-05-22): which Key was used. Web 不能改这两个字段。
     alias: str | None = None
     provider: str | None = None
@@ -117,11 +126,154 @@ class Job(BaseModel):
     # Studio 卡片用它算出图耗时（completed_at − submitted_at）+ 展示生成时间。旧 job 无此字段=None。
     completed_at: str | None = None
 
+    @model_validator(mode="after")
+    def validate_namespace_ownership(self) -> "Job":
+        if self.namespace == "ui":
+            if not self.project_id or not self.ui_scheme_id or not self.screen_id:
+                raise ValueError("ui job requires project_id, ui_scheme_id and screen_id")
+            if self.kind is not JobKind.IMAGE:
+                raise ValueError("ui job must use kind=image")
+        elif self.ui_scheme_id is not None or self.screen_id is not None:
+            raise ValueError("ui_scheme_id and screen_id are only valid for namespace=ui")
+
+        if self.namespace == "video":
+            if not self.project_id or not self.production_id:
+                raise ValueError("video job requires project_id and production_id")
+            if self.kind is not JobKind.VIDEO:
+                raise ValueError("video namespace must use kind=video")
+        elif self.production_id is not None:
+            raise ValueError("production_id is only valid for namespace=video")
+        return self
+
 
 class WebEditableJobPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     prompt: str | None = None
     params: JobParams | None = None
+
+
+class ArtWorkspaceSummary(BaseModel):
+    characters: int
+    canonical: int
+    stale: int
+
+
+class UiScreenSummary(BaseModel):
+    screen_id: str
+    name: str
+    category: str
+    priority: str
+    status: str
+    dependency: str
+    purpose: str = ""
+    brief_summary: str = ""
+
+
+class UiWorkspaceSummary(BaseModel):
+    scheme_id: str
+    anchors: dict[str, str]
+    anchors_approved: int
+    style_status: str
+    has_ui_style: bool
+    screen_map_status: str
+    screens: int
+    versions: int
+    canonical: int
+    stale: int
+    screen_items: list[UiScreenSummary]
+    next_action: str
+    next_command: str
+
+
+class VideoWorkspaceSummary(BaseModel):
+    productions: int
+    versions: int
+    selected: int
+    next_action: str
+
+
+class ProjectWorkspaceSummary(BaseModel):
+    project_id: str
+    art: ArtWorkspaceSummary
+    ui: UiWorkspaceSummary
+    video: VideoWorkspaceSummary
+
+
+class ProjectVideoJobRecord(BaseModel):
+    job_id: str
+    submitted_at: str
+    completed_at: str | None = None
+    status: JobStatus
+    prompt: str
+    model: str
+    params: JobParams
+
+
+class ProjectVideoBrief(BaseModel):
+    goal: str = ""
+    platform: str = ""
+    ratio: str = ""
+    duration: str = ""
+    sound: str = ""
+
+
+class ProjectVideoProduction(BaseModel):
+    production_id: str
+    title: str
+    type: str
+    status: str
+    brief: ProjectVideoBrief
+    prompt: str = ""
+    versions: list[str]
+    selected: str | None = None
+    planned_reference_images: list[str] = Field(default_factory=list)
+    history: list[ProjectVideoJobRecord] = Field(default_factory=list)
+
+
+class ProjectVideosResponse(BaseModel):
+    productions: list[ProjectVideoProduction]
+
+
+VideoReferenceKind = Literal["character", "ui_screen"]
+
+
+class ProjectVideoReferenceCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: VideoReferenceKind
+    asset_id: str
+    label: str
+    detail: str
+    path: str
+    scheme_id: str | None = None
+    stale: bool = False
+
+
+class ProjectVideoReferencesResponse(BaseModel):
+    candidates: list[ProjectVideoReferenceCandidate]
+
+
+class VideoReferencesSet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    paths: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def paths_are_unique(self) -> "VideoReferencesSet":
+        if len(self.paths) != len(set(self.paths)):
+            raise ValueError("paths must not contain duplicates")
+        return self
+
+
+class VideoReferencesResponse(BaseModel):
+    paths: list[str]
+
+
+class VideoReferencesFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    paths: list[str] = Field(default_factory=list)
+
+
+class VideoSelectedResponse(BaseModel):
+    path: str | None = None
 
 
 class SpecPatch(BaseModel):
@@ -130,13 +282,25 @@ class SpecPatch(BaseModel):
 
 class FeedbackPost(BaseModel):
     text: str = Field(min_length=1)
-    character_id: str | None = None
+    character_id: str = Field(min_length=1, pattern=r"^[^\r\n]+$")
 
 
 class ClipboardAttempt(BaseModel):
     ts: str
     success: bool
     reason: str | None = None
+
+
+CharacterName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=80, pattern=r"^[^\r\n]+$"),
+]
+class CharacterDerivative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_character_id: str = Field(min_length=1)
+    source_character_name: str = Field(min_length=1)
+    source_paths: list[str] = Field(default_factory=list)
+    created_at: str
 
 
 class CharacterEntry(BaseModel):
@@ -146,6 +310,107 @@ class CharacterEntry(BaseModel):
     latest_job_id: str | None
     # 名册缩略图：characters/<id>/portrait/ 下最新图片的 data-root 相对路径（无立绘为 None）
     thumbnail: str | None = None
+    derivative: CharacterDerivative | None
+
+
+class CharacterAssociationUiTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["ui"] = "ui"
+    scheme_id: str
+    screen_id: str
+
+
+class CharacterAssociationVideoTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["video"] = "video"
+    production_id: str
+
+
+CharacterAssociationTarget = Annotated[
+    CharacterAssociationUiTarget | CharacterAssociationVideoTarget,
+    Field(discriminator="kind"),
+]
+
+
+class CharacterAssociationItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    character_id: str
+    target: CharacterAssociationTarget
+
+
+class CharacterAssociationsFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[CharacterAssociationItem] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def items_are_unique(self) -> "CharacterAssociationsFile":
+        keys = [
+            (item.character_id, item.target.model_dump_json())
+            for item in self.items
+        ]
+        if len(keys) != len(set(keys)):
+            raise ValueError("character associations must not contain duplicates")
+        return self
+
+
+class CharacterAssociationPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    character_id: str
+    target: CharacterAssociationTarget
+    associated: bool
+
+
+class CharacterAssetGroup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    slot: AssetSlot
+    count: int
+    canonical: CanonicalStatusEntry | None = None
+    media: list[GalleryMedia] = Field(default_factory=list)
+
+
+class CharacterRelatedObject(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target: CharacterAssociationTarget
+    title: str
+    detail: str
+    source: Literal["auto", "manual", "both"]
+    featured_path: str | None = None
+    count: int
+    media: list[GalleryMedia] = Field(default_factory=list)
+
+
+class CharacterWorkspaceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    character: CharacterEntry
+    assets: list[CharacterAssetGroup]
+    related: list[CharacterRelatedObject]
+    recent_media: list[GalleryMedia]
+
+
+class CharacterIndexItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    character: CharacterEntry
+    cover_path: str | None
+    activity_at: str
+
+
+class CharacterIndexResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[CharacterIndexItem]
+
+
+class CharacterDerivativeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: CharacterName
+    source_paths: list[str] = Field(default_factory=list, max_length=40)
+
+
+class CharacterDerivativeContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_character_id: str
+    source_character_name: str
+    source_paths: list[str]
+    asset_slot: str
 
 
 class ActiveCharacterFile(BaseModel):
@@ -160,10 +425,107 @@ class Project(BaseModel):
     created_at: str
 
 
+class GalleryArtTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["art"] = "art"
+    character_id: str
+    asset_slot: AssetSlot
+
+
+class GalleryUiTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["ui"] = "ui"
+    scheme_id: str
+    screen_id: str
+
+
+class GalleryVideoTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["video"] = "video"
+    production_id: str
+    output_kind: Literal["version"] = "version"
+
+
+GalleryTarget = Annotated[
+    GalleryArtTarget | GalleryUiTarget | GalleryVideoTarget,
+    Field(discriminator="kind"),
+]
+
+
+class GalleryMedia(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    media_type: Literal["image", "video"]
+    produced_at: str
+    title: str
+    detail: str
+    job_id: str | None = None
+    target: GalleryTarget
+
+
+class ProjectGalleryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[GalleryMedia]
+    next_cursor: str | None = None
+
+
+class ProjectIndexItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project: Project
+    cover_paths: list[str]
+    activity_at: str
+
+
+class ProjectIndexResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[ProjectIndexItem]
+
+
 class ProjectsFile(BaseModel):
     # 项目列表 + 角色 → 项目 的归属表。未归属的角色直接不在 assignments 里。
     projects: list[Project] = []
     assignments: dict[str, str] = {}  # character_id → project_id
+
+
+UiSchemeName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=60),
+]
+
+
+class UiScheme(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    name: UiSchemeName
+    created_at: str
+
+
+class UiSchemesFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    default_scheme_id: str
+    schemes: list[UiScheme]
+
+
+class UiSchemeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: UiSchemeName
+    source_scheme_id: str | None = None
+    copy_style: bool = False
+    copy_screen_map: bool = False
+    screen_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def copy_requires_source(self) -> "UiSchemeCreate":
+        if (self.copy_style or self.copy_screen_map or self.screen_ids) and not self.source_scheme_id:
+            raise ValueError("copy options require source_scheme_id")
+        if len(self.screen_ids) != len(set(self.screen_ids)):
+            raise ValueError("screen_ids must not contain duplicates")
+        return self
+
+
+class UiSchemeDefaultSet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scheme_id: str = Field(min_length=1)
 
 
 class ProjectCreate(BaseModel):
@@ -220,7 +582,7 @@ class CanonicalSet(BaseModel):
 
 class ScreenCanonicalEntry(BaseModel):
     # B3（2026-08-10）：单个 screen 的定稿记录。path 为 data-root 相对路径。
-    # style_fingerprint = 写入时项目 style.md 内容 hash（A3 stale 检测用）。
+    # style_fingerprint = 写入时项目基线 + UI 方案 style.md 的组合 hash。
     model_config = ConfigDict(extra="forbid")
     path: str
     set_at: str
@@ -229,7 +591,7 @@ class ScreenCanonicalEntry(BaseModel):
 
 
 class ScreenCanonicalFile(BaseModel):
-    # projects/<slug>/screens/canonical.json —— 每个 screen-id 至多一张定稿。
+    # projects/<slug>/ui/<scheme>/screens/canonical.json —— 每页至多一张定稿。
     model_config = ConfigDict(extra="forbid")
     screens: dict[str, ScreenCanonicalEntry] = Field(default_factory=dict)
 
@@ -245,7 +607,7 @@ class ScreenCanonicalStatusFile(BaseModel):
 
 
 class ScreenCanonicalSet(BaseModel):
-    # POST /api/projects/{id}/screens/canonical 请求体。path=None 表示取消该 screen 定稿。
+    # 方案 canonical 端点请求体。path=None 表示取消该 screen 定稿。
     model_config = ConfigDict(extra="forbid")
     screen_id: str
     path: str | None = None
@@ -341,5 +703,6 @@ class TurnStartResult(BaseModel):
     preferred_alias: str | None = None
     # v5.4.0 (A1): 项目风格契约全文 ← projects/<slug>/style.md（无归属 / 无契约 → ""）。
     project_style: str = ""
+    derivative: CharacterDerivativeContext | None = None
     # v5.4.0 (A2): active 角色定稿 ← characters/<id>/canonical.json（promo/turnaround 选参考图用）。
     canonical: dict = Field(default_factory=dict)

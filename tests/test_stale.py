@@ -34,9 +34,10 @@ def hero(isolated_data_root):
 
 @pytest.fixture
 def screen_home(isolated_data_root, hero):
-    d = isolated_data_root / "projects" / "mohuan" / "screens" / "home"
+    d = isolated_data_root / "projects" / "mohuan" / "ui" / "v1" / "screens" / "home"
     d.mkdir(parents=True)
     (d / "v1.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    (d.parent.parent / "style.md").write_text(STYLE_V1, encoding="utf-8")
     return d
 
 
@@ -117,24 +118,24 @@ def test_legacy_empty_fingerprint_not_stale(isolated_data_root, hero):
 # ---------- screen 定稿 stale ----------
 
 def test_screen_canonical_style_stale_and_heal(isolated_data_root, hero, screen_home):
-    ui_jobs.set_screen_canonical(hero.id, "home", str(screen_home / "v1.png"))
-    assert stale.screen_canonical_status(hero.id).screens["home"].style_stale is False
+    ui_jobs.set_screen_canonical(hero.id, "v1", "home", str(screen_home / "v1.png"))
+    assert stale.screen_canonical_status(hero.id, "v1").screens["home"].style_stale is False
 
-    (isolated_data_root / "projects" / "mohuan" / "style.md").write_text(
+    (isolated_data_root / "projects" / "mohuan" / "ui" / "v1" / "style.md").write_text(
         STYLE_V2, encoding="utf-8",
     )
-    assert stale.screen_canonical_status(hero.id).screens["home"].style_stale is True
+    assert stale.screen_canonical_status(hero.id, "v1").screens["home"].style_stale is True
 
     # B3 回写 style.md 后重跑 set-screen-canonical 刷新指纹 → 自愈
-    ui_jobs.set_screen_canonical(hero.id, "home", str(screen_home / "v1.png"))
-    assert stale.screen_canonical_status(hero.id).screens["home"].style_stale is False
+    ui_jobs.set_screen_canonical(hero.id, "v1", "home", str(screen_home / "v1.png"))
+    assert stale.screen_canonical_status(hero.id, "v1").screens["home"].style_stale is False
 
 
 # ---------- stale-report ----------
 
 def test_stale_report_lists_only_stale(isolated_data_root, hero, screen_home):
     canonical.set_canonical("hero", AssetSlot.PORTRAIT, "characters/hero/portrait/v1.png")
-    ui_jobs.set_screen_canonical(hero.id, "home", str(screen_home / "v1.png"))
+    ui_jobs.set_screen_canonical(hero.id, "v1", "home", str(screen_home / "v1.png"))
     assert stale.stale_report() == {"characters": {}, "screens": {}}
 
     (isolated_data_root / "characters" / "hero" / "spec.md").write_text(SPEC_V2, encoding="utf-8")
@@ -145,9 +146,12 @@ def test_stale_report_lists_only_stale(isolated_data_root, hero, screen_home):
     (isolated_data_root / "projects" / "mohuan" / "style.md").write_text(
         STYLE_V2, encoding="utf-8",
     )
+    (isolated_data_root / "projects" / "mohuan" / "ui" / "v1" / "style.md").write_text(
+        STYLE_V2, encoding="utf-8",
+    )
     report = stale.stale_report()
     assert report["characters"]["hero"]["portrait"]["style_stale"] is True
-    assert report["screens"]["mohuan"]["home"]["style_stale"] is True
+    assert report["screens"]["mohuan"]["v1"]["home"]["style_stale"] is True
 
 
 def test_cli_stale_report(isolated_data_root, hero, capsys):
@@ -184,10 +188,10 @@ def test_api_post_canonical_returns_fresh_status(isolated_data_root, hero):
 
 
 def test_api_screen_canonical_carries_style_stale(isolated_data_root, hero, screen_home):
-    ui_jobs.set_screen_canonical(hero.id, "home", str(screen_home / "v1.png"))
-    (isolated_data_root / "projects" / "mohuan" / "style.md").write_text(
+    ui_jobs.set_screen_canonical(hero.id, "v1", "home", str(screen_home / "v1.png"))
+    (isolated_data_root / "projects" / "mohuan" / "ui" / "v1" / "style.md").write_text(
         STYLE_V2, encoding="utf-8",
     )
     client = TestClient(build_app())
-    body = client.get(f"/api/projects/{hero.id}/screens/canonical").json()
+    body = client.get(f"/api/projects/{hero.id}/ui-schemes/v1/screens/canonical").json()
     assert body["screens"]["home"]["style_stale"] is True

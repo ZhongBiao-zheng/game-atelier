@@ -8,14 +8,14 @@ export type TimeFilter = 'all' | '1w' | '1m' | '3m';
 export interface HistoryFilters {
   search: string;
   time: TimeFilter;
-  mode: GenMode | null;
+  modes: GenMode[];
   op: 'favorite' | 'hidden' | null;
 }
 
 export const DEFAULT_HISTORY_FILTERS: HistoryFilters = {
   search: '',
   time: 'all',
-  mode: null,
+  modes: [],
   op: null,
 };
 
@@ -26,9 +26,10 @@ const TIME_WINDOWS: Record<Exclude<TimeFilter, 'all'>, number> = {
   '3m': 90 * DAY,
 };
 
-/** 来源优先、三档互斥：skill = 角色命名空间（不分图视频）；否则按媒体分图/视频。 */
+/** 来源优先、三档互斥：正式工作流原生产物归 Skill；Studio 直出及其归档副本按媒体分类。 */
 export function deriveGenMode(job: Job): GenMode {
-  if (job.namespace === 'character') return 'skill';
+  const archivedFromStudio = typeof job.params?.archived_from_job_id === 'string';
+  if (job.namespace !== 'studio' && !archivedFromStudio) return 'skill';
   if (job.kind === 'video') return 'video';
   return 'image';
 }
@@ -48,9 +49,9 @@ export function filterRounds(
       const t = r.kind === 'pending' ? r.startedAt : Date.parse(r.submittedAt);
       if (!Number.isFinite(t) || t < now - TIME_WINDOWS[filters.time]) return false;
     }
-    if (filters.mode) {
+    if (filters.modes.length > 0) {
       const mode: GenMode = r.mode ?? (r.config?.kind === 'video' ? 'video' : 'image');
-      if (mode !== filters.mode) return false;
+      if (!filters.modes.includes(mode)) return false;
     }
     if (filters.op) {
       const paths = r.kind === 'done' ? r.imagePaths : [];

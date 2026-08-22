@@ -12,6 +12,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Query, UploadFile
@@ -19,6 +20,13 @@ from fastapi.responses import FileResponse
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
+from character_workflow.lib.character_derivatives import (
+    character_display_name,
+    create_character_derivative,
+    initialize_character_directory,
+    new_temporary_character_id,
+    read_character_derivative,
+)
 from character_workflow.lib.atomic_io import (
     atomic_write_bytes,
     atomic_write_json,
@@ -32,17 +40,34 @@ from character_workflow.lib.jobs import (
 from character_workflow.lib.schemas import AssetSlot as _AssetSlot
 from character_workflow.lib.projects import (
     assign_character, create_project, delete_project, read_projects,
-    rename_project, reorder_projects,
+    rename_project, reorder_projects, resolve_project, touch_project,
+)
+from character_workflow.lib.project_gallery import (
+    gallery_job_ids_by_path,
+    project_gallery,
+    project_gallery_media,
+    project_id_for_media_path,
+    project_index,
+    read_gallery_hidden,
 )
 from pydantic import BaseModel, Field, ValidationError
 from pydantic import field_validator
 
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
+    CharacterAssociationPatch, CharacterAssociationsFile,
+    CharacterIndexResponse, CharacterWorkspaceResponse,
+    CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
-    FeedbackPost, Job, JobKind, JobParams, JobStatus, ProjectCreate, ProjectRename,
-    ProjectsFile, ScreenCanonicalSet, ScreenCanonicalStatusFile,
-    SpecPatch, WebEditableJobPatch,
+    FeedbackPost, GalleryMedia, Job, JobKind, JobParams, JobStatus, ProjectCreate,
+    ProjectRename, ProjectGalleryResponse, ProjectIndexResponse,
+    ProjectVideoProduction, ProjectVideoReferencesResponse,
+    ProjectVideosResponse, ProjectWorkspaceSummary,
+    ProjectsFile,
+    ScreenCanonicalSet, ScreenCanonicalStatusFile, SpecPatch, VideoSelectedResponse,
+    VideoReferencesResponse, VideoReferencesSet,
+    UiSchemeCreate, UiSchemeDefaultSet, UiSchemesFile,
+    WebEditableJobPatch,
 )
 
 
@@ -51,29 +76,7 @@ logger = logging.getLogger(__name__)
 
 class CharacterCreate(BaseModel):
     name: str
-
-
-def _display_name(spec_path: Path) -> str:
-    """Parse display name from spec.md: YAML frontmatter `name:` first, then `# heading`."""
-    try:
-        text = spec_path.read_text(encoding="utf-8")
-        # YAML frontmatter: ---\n...\nname: <value>\n...\n---
-        if text.startswith("---"):
-            end = text.find("\n---", 3)
-            if end != -1:
-                frontmatter = text[3:end]
-                m = re.search(r"^name:\s*(.+?)\s*$", frontmatter, re.MULTILINE)
-                if m:
-                    return m.group(1)
-        # Legacy: first `# heading`
-        for line in text.splitlines()[:20]:
-            m = re.match(r"^#\s+(.+?)\s*$", line)
-            if m:
-                return m.group(1)
-    except OSError:
-        pass
-    # Last resort: parent dir name (character id)
-    return spec_path.parent.name
+    project_id: str | None = None
 
 
 router = APIRouter(prefix="/api")
@@ -153,10 +156,69 @@ def get_characters() -> list[CharacterEntry]:
         if not spec.exists():
             continue
         out.append(CharacterEntry(
-            id=d.name, name=_display_name(spec), status="idle", latest_job_id=None,
+            id=d.name, name=character_display_name(d.name), status="idle", latest_job_id=None,
             thumbnail=_latest_portrait(d, root),
+            derivative=read_character_derivative(d.name),
         ))
     return out
+
+
+@router.get(
+    "/projects/{project_id}/characters/index",
+    response_model=CharacterIndexResponse,
+)
+def get_character_index(project_id: str) -> CharacterIndexResponse:
+    from character_workflow.lib.character_workspace import character_index
+    try:
+        return character_index(project_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.get(
+    "/projects/{project_id}/characters/{character_id}/workspace",
+    response_model=CharacterWorkspaceResponse,
+)
+def get_character_workspace(
+    project_id: str,
+    character_id: str,
+) -> CharacterWorkspaceResponse:
+    from character_workflow.lib.character_workspace import character_workspace
+    try:
+        return character_workspace(project_id, character_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个角色或项目") from None
+    except ValueError as error:
+        raise HTTPException(400, detail=str(error)) from error
+
+
+@router.put(
+    "/projects/{project_id}/character-associations",
+    response_model=CharacterAssociationsFile,
+)
+def put_character_association(
+    project_id: str,
+    payload: CharacterAssociationPatch,
+) -> CharacterAssociationsFile:
+    from character_workflow.lib.character_workspace import set_manual_association
+    try:
+        return set_manual_association(project_id, payload)
+    except KeyError as error:
+        raise HTTPException(404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(400, detail=str(error)) from error
+
+
+@router.get(
+    "/projects/{project_id}/character-associations",
+    response_model=CharacterAssociationsFile,
+)
+def get_character_associations(project_id: str) -> CharacterAssociationsFile:
+    from character_workflow.lib.character_workspace import read_associations
+    try:
+        return read_associations(project_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个项目（可能已被删除）") from None
 
 
 @router.get("/home")
@@ -272,25 +334,35 @@ def post_canonical(character_id: str, payload: CanonicalSet) -> CanonicalStatusF
     return stale.character_canonical_status(character_id)
 
 
-@router.get("/projects/{project_id}/screens/canonical", response_model=ScreenCanonicalStatusFile)
-def get_screen_canonical(project_id: str) -> ScreenCanonicalStatusFile:
+@router.get(
+    "/projects/{project_id}/ui-schemes/{scheme_id}/screens/canonical",
+    response_model=ScreenCanonicalStatusFile,
+)
+def get_screen_canonical(project_id: str, scheme_id: str) -> ScreenCanonicalStatusFile:
     from character_workflow.lib import stale
     try:
-        return stale.screen_canonical_status(project_id)
+        return stale.screen_canonical_status(project_id, scheme_id)
     except KeyError:
         raise HTTPException(404, detail="找不到这个项目（可能已被删除）")
 
 
-@router.post("/projects/{project_id}/screens/canonical", response_model=ScreenCanonicalStatusFile)
-def post_screen_canonical(project_id: str, payload: ScreenCanonicalSet) -> ScreenCanonicalStatusFile:
+@router.post(
+    "/projects/{project_id}/ui-schemes/{scheme_id}/screens/canonical",
+    response_model=ScreenCanonicalStatusFile,
+)
+def post_screen_canonical(
+    project_id: str,
+    scheme_id: str,
+    payload: ScreenCanonicalSet,
+) -> ScreenCanonicalStatusFile:
     """选定 / 取消某 screen 的风格定稿（B3）。path=None 取消。style_variant 从 job 反查，不用前端报。"""
     from character_workflow.lib import stale, ui_jobs
     try:
         if payload.path is None:
-            ui_jobs.clear_screen_canonical(project_id, payload.screen_id)
+            ui_jobs.clear_screen_canonical(project_id, scheme_id, payload.screen_id)
         else:
-            ui_jobs.set_screen_canonical(project_id, payload.screen_id, payload.path)
-        return stale.screen_canonical_status(project_id)
+            ui_jobs.set_screen_canonical(project_id, scheme_id, payload.screen_id, payload.path)
+        return stale.screen_canonical_status(project_id, scheme_id)
     except KeyError:
         raise HTTPException(404, detail="找不到这个项目（可能已被删除）")
     except FileNotFoundError as e:
@@ -328,9 +400,7 @@ def post_feedback(payload: FeedbackPost) -> dict:
     draft_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
     p = draft_dir / f"{ts}.md"
-    body = payload.text
-    if payload.character_id:
-        body = f"<!-- character: {payload.character_id} -->\n{body}"
+    body = f"<!-- character: {payload.character_id} -->\n{payload.text}"
     atomic_write_text(p, body)
     return {"ok": True, "path": str(p)}
 
@@ -366,11 +436,22 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
             raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from e
         whitelist = set(job.output_paths)
         params = job.params.model_dump() if job.params else {}
-        for field in ("reference_images", "reference_videos", "reference_audios"):
-            whitelist.update(params.get(field) or [])
+        for field in (
+            "reference_images", "reference_videos", "reference_audios",
+            "mj_sref", "mj_cref", "mj_oref",
+        ):
+            value = params.get(field)
+            if isinstance(value, str):
+                whitelist.add(value)
+            elif isinstance(value, list):
+                whitelist.update(item for item in value if isinstance(item, str))
         if job.source_image:
             whitelist.add(job.source_image)
-        if str(target) not in {str(Path(p).resolve()) for p in whitelist}:
+        normalized_whitelist = {
+            str((Path(p) if Path(p).is_absolute() else _project_root() / p).resolve())
+            for p in whitelist
+        }
+        if str(target) not in normalized_whitelist:
             raise HTTPException(403, detail="读图被拒：这个路径不在该 job 登记的产物列表里")
         return FileResponse(str(target))
     uploads_dir = (_runtime() / "uploads").resolve()
@@ -501,18 +582,119 @@ async def post_gallery_image(
 
 @router.post("/characters", response_model=CharacterEntry)
 def create_character(payload: CharacterCreate) -> CharacterEntry:
-    import time as _time
     name = payload.name.strip()
     if not name:
         raise HTTPException(422, detail="角色名不能为空")
-    char_id = f"char-{int(_time.time())}"
-    root = _project_root() / "characters" / char_id
-    for sub in ("portrait", "promo", "turnaround", "source"):
-        (root / sub).mkdir(parents=True, exist_ok=True)
+    if payload.project_id is not None:
+        try:
+            resolve_project(payload.project_id)
+        except KeyError as error:
+            raise HTTPException(404, detail="找不到当前项目（可能已被删除）") from error
+    char_id = new_temporary_character_id()
     spec_content = f"# {name}\n\n（尚无档案 — 请在终端 /game-atelier:character 对话补全）\n"
-    (root / "spec.md").write_text(spec_content, encoding="utf-8")
-    write_active(char_id)
-    return CharacterEntry(id=char_id, name=name, status="idle", latest_job_id=None)
+    initialize_character_directory(char_id, spec_content)
+    try:
+        if payload.project_id is not None:
+            assign_character(char_id, payload.project_id)
+        write_active(char_id)
+    except Exception:
+        if payload.project_id is not None:
+            try:
+                assign_character(char_id, None)
+            except Exception:
+                logger.warning("回滚新角色项目归属失败: %s", char_id, exc_info=True)
+        shutil.rmtree(data_root.characters_dir() / char_id, ignore_errors=True)
+        raise
+    return CharacterEntry(
+        id=char_id, name=name, status="idle", latest_job_id=None, derivative=None,
+    )
+
+
+def _resolve_derivative_sources(
+    source_character_id: str,
+    project_id: str,
+    requested_paths: list[str],
+) -> list[Path]:
+    from character_workflow.lib.canonical import read_canonical
+
+    root = data_root.resolve_data_root().resolve()
+    uploads = data_root.runtime_dir().resolve() / "uploads"
+    canonical = read_canonical(source_character_id)
+    raw_paths = [
+        (entry.path, False)
+        for entry in (canonical.portrait, canonical.promo, canonical.turnaround)
+        if entry is not None
+    ]
+    raw_paths.extend((path, True) for path in requested_paths)
+
+    resolved: list[Path] = []
+    seen: set[Path] = set()
+    for raw_path, required in raw_paths:
+        candidate = Path(raw_path)
+        absolute = (candidate if candidate.is_absolute() else root / candidate).resolve()
+        if absolute in seen:
+            continue
+        if not absolute.is_file() and not required:
+            continue
+        if not absolute.is_file() or absolute.suffix.lower() not in _IMAGE_UPLOAD_EXTS:
+            raise ValueError(f"找不到可用的衍生来源图片：{raw_path}")
+        if absolute.is_relative_to(uploads):
+            pass
+        else:
+            try:
+                relative = absolute.relative_to(root).as_posix()
+            except ValueError as error:
+                raise ValueError("衍生来源必须来自当前项目或本次上传") from error
+            if project_id_for_media_path(relative) != project_id:
+                raise ValueError("衍生来源必须来自当前项目或本次上传")
+        seen.add(absolute)
+        resolved.append(absolute)
+    return resolved
+
+
+@router.post("/characters/{source_character_id}/derivatives", response_model=CharacterEntry)
+def post_character_derivative(
+    source_character_id: str,
+    payload: CharacterDerivativeCreate,
+) -> CharacterEntry:
+    source_dir = data_root.characters_dir() / source_character_id
+    if not (source_dir / "spec.md").is_file():
+        raise HTTPException(404, detail=f"找不到来源角色 {source_character_id}")
+    projects = read_projects()
+    project_id = projects.assignments.get(source_character_id)
+    if project_id is None:
+        raise HTTPException(400, detail="来源角色必须先归属项目，才能创建衍生")
+    try:
+        source_paths = _resolve_derivative_sources(
+            source_character_id,
+            project_id,
+            payload.source_paths,
+        )
+        derivative_id, derivative = create_character_derivative(
+            source_character_id,
+            payload.name,
+            source_paths,
+        )
+    except FileNotFoundError as error:
+        raise HTTPException(404, detail=f"找不到来源角色 {source_character_id}") from error
+    except ValueError as error:
+        raise HTTPException(400, detail=str(error)) from error
+    try:
+        write_active(derivative_id)
+    except Exception:
+        try:
+            assign_character(derivative_id, None)
+        except Exception:
+            logger.warning("回滚角色衍生项目归属失败: %s", derivative_id, exc_info=True)
+        shutil.rmtree(data_root.characters_dir() / derivative_id, ignore_errors=True)
+        raise
+    return CharacterEntry(
+        id=derivative_id,
+        name=payload.name,
+        status="idle",
+        latest_job_id=None,
+        derivative=derivative,
+    )
 
 
 @router.delete("/characters/{character_id}")
@@ -521,7 +703,6 @@ def delete_character(character_id: str) -> dict:
     target = (chars_dir / character_id).resolve()
     if not target.is_relative_to(chars_dir) or not target.is_dir():
         raise HTTPException(404, detail=f"找不到角色 {character_id}（目录不存在，可能已被删除）")
-
     shutil.rmtree(target)
     assign_character(character_id, None)
     if read_active().active_id == character_id:
@@ -556,10 +737,169 @@ def get_projects() -> ProjectsFile:
     return read_projects()
 
 
+@router.get("/projects/{project_id}/ui-schemes", response_model=UiSchemesFile)
+def get_ui_schemes(
+    project_id: str,
+    visible_only: bool = Query(default=False),
+) -> UiSchemesFile:
+    from character_workflow.lib.ui_schemes import read_schemes, read_visible_schemes
+    try:
+        return read_visible_schemes(project_id) if visible_only else read_schemes(project_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.post("/projects/{project_id}/ui-schemes", response_model=UiSchemesFile)
+def post_ui_scheme(project_id: str, payload: UiSchemeCreate) -> UiSchemesFile:
+    from character_workflow.lib.ui_schemes import create_scheme
+    try:
+        return create_scheme(project_id, payload)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/projects/{project_id}/ui-schemes/default", response_model=UiSchemesFile)
+def post_ui_scheme_default(project_id: str, payload: UiSchemeDefaultSet) -> UiSchemesFile:
+    from character_workflow.lib.ui_schemes import set_default
+    try:
+        return set_default(project_id, payload.scheme_id)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/projects/{project_id}/workspaces", response_model=ProjectWorkspaceSummary)
+def get_project_workspaces(
+    project_id: str,
+    ui_scheme: str | None = Query(default=None),
+) -> ProjectWorkspaceSummary:
+    from character_workflow.lib.workspace_summary import project_workspace_summary
+    try:
+        return project_workspace_summary(project_id, ui_scheme)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.get("/projects/{project_id}/videos", response_model=ProjectVideosResponse)
+def get_project_videos(project_id: str) -> ProjectVideosResponse:
+    from character_workflow.lib.video_jobs import list_productions
+    try:
+        return ProjectVideosResponse(productions=list_productions(project_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.get(
+    "/projects/{project_id}/videos/{production_id}",
+    response_model=ProjectVideoProduction,
+)
+def get_project_video(project_id: str, production_id: str) -> ProjectVideoProduction:
+    from character_workflow.lib.video_jobs import get_production
+    try:
+        return get_production(project_id, production_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.get(
+    "/projects/{project_id}/video-references",
+    response_model=ProjectVideoReferencesResponse,
+)
+def get_project_video_references(project_id: str) -> ProjectVideoReferencesResponse:
+    from character_workflow.lib.video_jobs import list_reference_candidates
+    try:
+        return ProjectVideoReferencesResponse(candidates=list_reference_candidates(project_id))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.post(
+    "/projects/{project_id}/videos/{production_id}/references",
+    response_model=VideoReferencesResponse,
+)
+def post_project_video_references(
+    project_id: str,
+    production_id: str,
+    payload: VideoReferencesSet,
+) -> VideoReferencesResponse:
+    from character_workflow.lib.video_jobs import set_references
+    try:
+        paths = set_references(project_id, production_id, payload.paths)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return VideoReferencesResponse(paths=paths)
+
+
+class _VideoSelectedSet(BaseModel):
+    model_config = {"extra": "forbid"}
+    path: str | None = None
+
+
+@router.post(
+    "/projects/{project_id}/videos/{production_id}/selected",
+    response_model=VideoSelectedResponse,
+)
+def post_project_video_selected(
+    project_id: str,
+    production_id: str,
+    payload: _VideoSelectedSet,
+) -> VideoSelectedResponse:
+    from character_workflow.lib.video_jobs import set_selected
+    try:
+        selected = set_selected(project_id, production_id, payload.path)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return VideoSelectedResponse(path=selected)
+
+
 @router.post("/projects", response_model=ProjectsFile)
 def post_project(payload: ProjectCreate) -> ProjectsFile:
     create_project(payload.name)
     return read_projects()
+
+
+@router.get("/projects/index", response_model=ProjectIndexResponse)
+def get_project_index() -> ProjectIndexResponse:
+    return project_index()
+
+
+@router.get("/projects/{project_id}/gallery/media", response_model=GalleryMedia)
+def get_project_gallery_media(
+    project_id: str,
+    path: str = Query(min_length=1),
+) -> GalleryMedia:
+    try:
+        return project_gallery_media(project_id, path)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="找不到这个项目作品") from error
+
+
+@router.get("/projects/{project_id}/gallery", response_model=ProjectGalleryResponse)
+def get_project_gallery(
+    project_id: str,
+    category: str = Query(default="all"),
+    limit: int = Query(default=40, ge=1, le=100),
+    cursor: str | None = None,
+) -> ProjectGalleryResponse:
+    try:
+        return project_gallery(project_id, category=category, limit=limit, cursor=cursor)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 class ProjectReorder(BaseModel):
@@ -628,12 +968,12 @@ def post_experience(patch: _ExperiencePatch) -> dict:
 
 @router.post("/characters/{character_id}/project", response_model=ProjectsFile)
 def post_character_project(character_id: str, payload: CharacterProjectAssign) -> ProjectsFile:
-    if payload.project_id is not None:
-        try:
-            return assign_character(character_id, payload.project_id)
-        except KeyError as e:
-            raise HTTPException(404, detail=f"找不到项目 {payload.project_id}（可能已被删除）") from e
-    return assign_character(character_id, None)
+    try:
+        return assign_character(character_id, payload.project_id)
+    except KeyError as e:
+        raise HTTPException(
+            404, detail=f"找不到项目 {payload.project_id}（可能已被删除）"
+        ) from e
 
 
 # job 状态 → 中文（报错里给画师看，别把 pending_confirm 这种内部枚举原样丢出去）
@@ -763,7 +1103,7 @@ class _DataRootPayload(BaseModel):
 
 
 class _FolderPickerPayload(BaseModel):
-    title: str = "选择项目文件夹"
+    title: str = "选择数据目录"
     initial_path: str | None = None
 
 
@@ -1229,6 +1569,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     """
     characters_dir = _project_root() / "characters"
     items: list[dict] = []
+    project_assignments = read_projects().assignments
     job_ids_by_path = _gallery_job_ids_by_path()
     hidden = set(_read_gallery_hidden())
     if characters_dir.exists():
@@ -1251,6 +1592,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                         continue  # F3: broken symlink / permissions issue
                     items.append({
                         "character_id": char_dir.name,
+                        "project_id": project_assignments.get(char_dir.name),
                         "asset_slot": slot,
                         "source": "character",
                         "filename": f.name,
@@ -1275,6 +1617,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                     continue
                 items.append({
                     "character_id": None,
+                    "project_id": None,
                     "asset_slot": None,
                     "source": "studio",
                     "filename": f.name,
@@ -1293,56 +1636,12 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     return {"items": items[:limit]}
 
 
-@router.get("/gallery/project")
-def gallery_project(project: str = Query(min_length=1)) -> dict:
-    """项目作品：assignments 反查该项目的角色 → 各角色三槽的图。
-
-    已隐藏的不出（与首页作品展示同语义），最新在前。
-    """
-    pf = read_projects()
-    proj = next((p for p in pf.projects if p.id == project), None)
-    if proj is None:
-        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）")
-    member_ids = [cid for cid, pid in pf.assignments.items() if pid == proj.id]
-    hidden = set(_read_gallery_hidden())
-    job_ids_by_path = _gallery_job_ids_by_path()
-    items: list[dict] = []
-    for char_id in member_ids:
-        char_dir = _project_root() / "characters" / char_id
-        if not char_dir.is_dir():
-            continue
-        char_name = _display_name(char_dir / "spec.md")
-        for slot in _GALLERY_SLOTS:
-            slot_dir = char_dir / slot
-            if not slot_dir.is_dir():
-                continue
-            for f in slot_dir.iterdir():
-                if f.suffix.lower() not in _GALLERY_EXTS:
-                    continue
-                rel = f.relative_to(_project_root()).as_posix()
-                if rel in hidden:
-                    continue
-                try:
-                    mtime = f.stat().st_mtime
-                except OSError:
-                    continue
-                items.append({
-                    "character_id": char_id,
-                    "character_name": char_name,
-                    "asset_slot": slot,
-                    "source": "character",
-                    "filename": f.name,
-                    "path": rel,
-                    "job_id": job_ids_by_path.get(rel),
-                    "mtime": mtime,
-                })
-    items.sort(key=lambda it: it["mtime"], reverse=True)
-    return {"items": items}
-
-
 @router.get("/gallery/screens")
-def gallery_screens(project: str = Query(min_length=1)) -> dict:
-    """B2 项目页「页面」区：projects/<slug>/screens/<screen-id>/ 下的 UI 页面图。
+def gallery_screens(
+    project: str = Query(min_length=1),
+    scheme: str = Query(min_length=1),
+) -> dict:
+    """项目 UI 方案下的页面版本图。
 
     扁平 items（前端按 screen_id 分组），组内/组间都最新在前。
     """
@@ -1350,7 +1649,12 @@ def gallery_screens(project: str = Query(min_length=1)) -> dict:
     proj = next((p for p in pf.projects if p.id == project), None)
     if proj is None:
         raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）")
-    screens_dir = data_root.projects_dir() / proj.slug / "screens"
+    from character_workflow.lib.ui_schemes import resolve_scheme, scheme_screens_dir
+    try:
+        _, ui_scheme = resolve_scheme(project, scheme)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    screens_dir = scheme_screens_dir(proj, ui_scheme.id)
     job_ids_by_path = _gallery_job_ids_by_path()
     # B3：风格候选的来源关系存在 job.params，前端并排对比按 style_variant 分列。
     jobs_by_id = {j.job_id: j for j in list_jobs()}
@@ -1376,6 +1680,9 @@ def gallery_screens(project: str = Query(min_length=1)) -> dict:
                     "job_id": job_id,
                     "style_variant": job.params.style_variant if job else None,
                     "base_version": job.params.base_version if job else None,
+                    "model": job.model if job else None,
+                    "provider": job.provider if job else None,
+                    "prompt": job.prompt if job else None,
                     "mtime": mtime,
                 })
     items.sort(key=lambda it: it["mtime"], reverse=True)
@@ -1387,17 +1694,7 @@ def _gallery_hidden_file() -> Path:
 
 
 def _read_gallery_hidden() -> list[str]:
-    p = _gallery_hidden_file()
-    if not p.exists():
-        return []
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-    paths = data.get("paths") if isinstance(data, dict) else None
-    if not isinstance(paths, list):
-        return []
-    return [x for x in paths if isinstance(x, str)]
+    return read_gallery_hidden()
 
 
 def _normalize_gallery_path(raw: str) -> str:
@@ -1430,6 +1727,9 @@ def post_gallery_hidden(patch: _GalleryHiddenPatch) -> dict:
     if patch.hidden:
         paths.append(target)
     atomic_write_json(_gallery_hidden_file(), {"paths": paths})
+    project_id = project_id_for_media_path(target)
+    if project_id is not None:
+        touch_project(project_id)
     return {"paths": paths}
 
 
@@ -1525,44 +1825,33 @@ def post_gallery_ratings(patch: _GalleryRatingPatch) -> dict:
 
 
 def _gallery_job_ids_by_path() -> dict[str, str]:
-    root = _project_root()
-    result: dict[str, str] = {}
-    try:
-        jobs = list_jobs()
-    except Exception:
-        return result
-    for job in jobs:
-        for raw_path in job.output_paths:
-            path = Path(raw_path)
-            absolute = path if path.is_absolute() else root / path
-            try:
-                relative = absolute.resolve().relative_to(root).as_posix()
-            except ValueError:
-                relative = raw_path
-            result.setdefault(raw_path, job.job_id)
-            result.setdefault(str(absolute.resolve()), job.job_id)
-            result.setdefault(relative, job.job_id)
-    return result
+    return gallery_job_ids_by_path()
 
 
 @router.get("/gallery/image")
 def gallery_image(path: str) -> FileResponse:
-    """Serve image files under characters/*, studio/* or projects/*/screens/*. Rejects traversal."""
+    """Serve gallery media from the explicit asset roots. Reject traversal."""
     root = _project_root()
     target = (root / path).resolve()
     characters_dir = (root / "characters").resolve()
     studio_dir = (root / "studio").resolve()
     projects_root = data_root.projects_dir().resolve()
-    # projects 分支只放行 screens 子树（projects/ 下还有 style.md / design/ 等文档，不该经此外读）。
-    in_screens = (
-        target.is_relative_to(projects_root)
-        and len(target.relative_to(projects_root).parts) >= 3
-        and target.relative_to(projects_root).parts[1] == "screens"
+    # projects 分支只放行 ui/<scheme>/screens 与 videos 资产（style/design 文档不可读）。
+    project_parts = target.relative_to(projects_root).parts if target.is_relative_to(projects_root) else ()
+    in_project_assets = (
+        len(project_parts) >= 5
+        and project_parts[1] == "ui"
+        and project_parts[3] == "screens"
+    ) or (
+        len(project_parts) >= 5
+        and project_parts[1] == "videos"
+        and project_parts[3] == "versions"
+        and target.suffix.lower() == ".mp4"
     )
     if not (
         target.is_relative_to(characters_dir)
         or target.is_relative_to(studio_dir)
-        or in_screens
+        or in_project_assets
     ):
         raise HTTPException(status_code=400, detail="path outside allowed roots")
     if not target.is_file():
@@ -1577,6 +1866,72 @@ class _StudioJobCreate(BaseModel):
     params: JobParams
     alias: str | None = None
     kind: JobKind = JobKind.IMAGE
+
+
+class _CharacterArchiveTarget(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["character"]
+    character_id: str = Field(min_length=1)
+    asset_slot: _AssetSlot
+
+
+class _UiArchiveTarget(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["ui"]
+    ui_scheme_id: str = Field(min_length=1)
+    screen_id: str = Field(min_length=1)
+
+
+class _VideoArchiveTarget(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal["video"]
+    production_id: str = Field(min_length=1)
+
+
+_StudioArchiveTarget = Annotated[
+    _CharacterArchiveTarget | _UiArchiveTarget | _VideoArchiveTarget,
+    Field(discriminator="kind"),
+]
+
+
+class _StudioArchiveRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    source_path: str = Field(min_length=1)
+    project_id: str = Field(min_length=1)
+    target: _StudioArchiveTarget
+
+
+@router.get("/projects/{project_id}/studio-archive-targets")
+def get_studio_archive_targets(
+    project_id: str,
+    media_kind: JobKind = Query(),
+) -> dict:
+    from character_workflow.lib.studio_archive import list_archive_targets
+
+    try:
+        return {"targets": list_archive_targets(project_id, media_kind)}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.post("/studio/jobs/{job_id}/archive", status_code=201)
+def post_studio_archive(job_id: str, body: _StudioArchiveRequest) -> dict:
+    from character_workflow.lib.studio_archive import archive_studio_output
+
+    try:
+        job = archive_studio_output(
+            job_id,
+            body.source_path,
+            body.project_id,
+            body.target.model_dump(mode="json"),
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"job": job.model_dump(mode="json"), "path": job.output_paths[0]}
 
 
 def _run_studio_job_safely(job_id: str) -> None:

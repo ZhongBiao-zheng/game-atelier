@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
@@ -17,6 +17,7 @@ afterEach(() => {
   window.localStorage.removeItem('atelier:theme');
   window.localStorage.removeItem('atelier:changelog-seen');
   document.documentElement.classList.remove('light');
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
 });
 
 function renderAt(path: string) {
@@ -40,17 +41,17 @@ describe('AppShell', () => {
     expect(screen.getByText('· 工作流').className).toContain('sm:inline');
   });
 
-  it('highlights 出图 tab on /studio', () => {
+  it('highlights 创作台 tab on /studio', () => {
     renderAt('/studio');
-    expect(screen.getByText('出图')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByText('创作台')).toHaveAttribute('aria-current', 'page');
   });
 
-  it('highlights 工坊 tab on /character/foo', () => {
-    renderAt('/character/foo');
+  it('highlights 工坊 tab on /workshop/p1/ui', () => {
+    renderAt('/workshop/p1/ui');
     expect(screen.getByText('工坊')).toHaveAttribute('aria-current', 'page');
   });
 
-  it('routes character image URLs into the image detail pane', async () => {
+  it('keeps the project shell on an image deep link and returns through the URL', async () => {
     vi.stubGlobal('EventSource', class {
       addEventListener = vi.fn();
       close = vi.fn();
@@ -67,7 +68,13 @@ describe('AppShell', () => {
         return { ok: true, json: async () => [{ id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null }] };
       }
       if (url === '/api/projects') {
-        return { ok: true, json: async () => ({ projects: [], assignments: {} }) };
+        return {
+          ok: true,
+          json: async () => ({
+            projects: [{ id: 'p1', slug: 'one', name: '项目一', created_at: '2026-08-20T00:00:00Z' }],
+            assignments: { 'cao-cao': 'p1' },
+          }),
+        };
       }
       if (url === '/api/jobs/job-promo-1') {
         return {
@@ -94,14 +101,242 @@ describe('AppShell', () => {
       return { ok: true, json: async () => ({}) };
     }));
 
-    renderAt('/character/cao-cao/promo/job-promo-1/%2Ftmp%2Fgame-atelier%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png');
+    const location = memoryLocation({
+      path: '/workshop/p1/art/characters/cao-cao/promo/job-promo-1/%2Ftmp%2Fgame-atelier%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png',
+      static: false,
+      record: true,
+    });
+    render(
+      <Router hook={location.hook}>
+        <AppShell />
+      </Router>,
+    );
 
     expect(await screen.findByDisplayValue('路由详情 prompt')).toBeInTheDocument();
+    const breadcrumbs = screen.getByRole('navigation', { name: '面包屑' });
+    expect(within(breadcrumbs).getByRole('link', { name: '全部项目' })).toHaveAttribute('href', '/workshop');
+    expect(within(breadcrumbs).getByRole('link', { name: '项目一' })).toHaveAttribute(
+      'href', '/workshop/p1/overview',
+    );
+    expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '角色' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.queryByText('返回工坊')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+    await waitFor(() => expect(location.history.at(-1)).toBe(
+      '/workshop/p1/art/characters/cao-cao/promo',
+    ));
+  });
+
+  it('redirects a character deep link to its owning project', async () => {
+    vi.stubGlobal('EventSource', class {
+      addEventListener = vi.fn();
+      close = vi.fn();
+      onerror: (() => void) | null = null;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      if (url === '/api/config') {
+        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-atelier' }) };
+      }
+      if (url === '/api/active-character') {
+        return { ok: true, json: async () => ({ active_id: null }) };
+      }
+      if (url === '/api/characters') {
+        return { ok: true, json: async () => [{ id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null }] };
+      }
+      if (url === '/api/projects') {
+        return {
+          ok: true,
+          json: async () => ({
+            projects: [
+              { id: 'p1', slug: 'one', name: '项目一', created_at: '2026-08-20T00:00:00Z' },
+              { id: 'p2', slug: 'two', name: '项目二', created_at: '2026-08-20T00:00:00Z' },
+            ],
+            assignments: { 'cao-cao': 'p2' },
+          }),
+        };
+      }
+      if (url === '/api/jobs') return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => ({}) };
+    }));
+
+    const encodedPath = '%2Ftmp%2Fgame-atelier%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png';
+    const location = memoryLocation({
+      path: `/workshop/p1/art/characters/cao-cao/promo/job-promo-1/${encodedPath}?fromFolder=summer&fromView=art`,
+      static: false,
+      record: true,
+    });
+    render(
+      <Router hook={location.hook}>
+        <AppShell />
+      </Router>,
+    );
+
+    await waitFor(() => expect(location.history.at(-1)).toBe(
+      `/workshop/p2/art/characters/cao-cao/promo/job-promo-1/${encodedPath}`,
+    ));
+    expect(location.history).toHaveLength(1);
+  });
+
+  it('redirects an unassigned image deep link to the character owning project', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    vi.stubGlobal('EventSource', class {
+      addEventListener = vi.fn();
+      close = vi.fn();
+      onerror: (() => void) | null = null;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      if (url === '/api/config') {
+        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-atelier' }) };
+      }
+      if (url === '/api/characters') {
+        return { ok: true, json: async () => [{ id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null }] };
+      }
+      if (url === '/api/projects') {
+        return {
+          ok: true,
+          json: async () => ({
+            projects: [{ id: 'p2', slug: 'two', name: '项目二', created_at: '2026-08-20T00:00:00Z' }],
+            assignments: { 'cao-cao': 'p2' },
+          }),
+        };
+      }
+      if (url === '/api/jobs') return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => ({}) };
+    }));
+
+    const encodedPath = '%2Ftmp%2Fgame-atelier%2Fcharacters%2Fcao-cao%2Fpromo%2Fkv.png';
+    const location = memoryLocation({
+      path: `/workshop/unassigned/characters/cao-cao/promo/job-promo-1/${encodedPath}`,
+      static: false,
+      record: true,
+    });
+    render(
+      <Router hook={location.hook}>
+        <AppShell />
+      </Router>,
+    );
+
+    await waitFor(() => expect(location.history.at(-1)).toBe(
+      `/workshop/p2/art/characters/cao-cao/promo/job-promo-1/${encodedPath}`,
+    ));
+    expect(location.history).toHaveLength(1);
+  });
+
+  it('restores the project route from mobile workspace history and a fresh mount', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    vi.stubGlobal('EventSource', class {
+      addEventListener = vi.fn();
+      close = vi.fn();
+      onerror: (() => void) | null = null;
+    });
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
+      if (url === '/api/config') {
+        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-atelier' }) };
+      }
+      if (url === '/api/characters') {
+        return { ok: true, json: async () => [{ id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null }] };
+      }
+      if (url === '/api/projects') {
+        return {
+          ok: true,
+          json: async () => ({
+            projects: [{ id: 'p1', slug: 'one', name: '项目一', created_at: '2026-08-20T00:00:00Z' }],
+            assignments: { 'cao-cao': 'p1' },
+          }),
+        };
+      }
+      if (url === '/api/jobs') return { ok: true, json: async () => [] };
+      if (url === '/api/experience?project=p1') {
+        return {
+          ok: true,
+          json: async () => ({
+            project: { id: 'p1', slug: 'one', name: '项目一', created_at: '2026-08-20T00:00:00Z', character_count: 1 },
+            worldview_md: '',
+          }),
+        };
+      }
+      if (url === '/api/projects/p1/ui-schemes' || url === '/api/projects/p1/ui-schemes?visible_only=true') {
+        return {
+          ok: true,
+          json: async () => ({
+            default_scheme_id: 'v1',
+            schemes: [{ id: 'v1', name: 'V1', created_at: '' }],
+          }),
+        };
+      }
+      if (String(url).startsWith('/api/projects/p1/workspaces')) {
+        return {
+          ok: true,
+          json: async () => ({
+            project_id: 'p1',
+            art: { characters: 1, canonical: 0, stale: 0 },
+            ui: {
+              scheme_id: 'v1',
+              anchors: { gdd: 'missing', prd: 'missing', interaction: 'missing' },
+              anchors_approved: 0,
+              style_status: 'missing',
+              has_ui_style: false,
+              screen_map_status: 'missing',
+              screens: 0,
+              versions: 0,
+              canonical: 0,
+              stale: 0,
+              screen_items: [],
+              next_action: '建立 UI 锚点',
+              next_command: '/game-atelier:ui',
+            },
+            video: { productions: 0, versions: 0, selected: 0, next_action: '建立视频企划' },
+          }),
+        };
+      }
+      if (url === '/api/gallery/screens?project=p1&scheme=v1') {
+        return { ok: true, json: async () => ({ items: [] }) };
+      }
+      if (url === '/api/projects/p1/ui-schemes/v1/screens/canonical') {
+        return { ok: true, json: async () => ({ screens: {} }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+
+    const artPath = '/workshop/p1/art/characters/cao-cao/promo';
+    const location = memoryLocation({ path: artPath, static: false, record: true });
+    const view = render(
+      <Router hook={location.hook}>
+        <AppShell />
+      </Router>,
+    );
+
+    fireEvent.click(await screen.findByRole('link', { name: 'UI' }));
+    await waitFor(() => expect(location.history.at(-1)).toBe('/workshop/p1/ui/v1'));
+    const activeUiLink = await screen.findByRole('link', { name: 'UI' });
+    expect(activeUiLink).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(activeUiLink);
+    expect(activeUiLink).toHaveAttribute('aria-expanded', 'false');
+    expect(location.history.at(-1)).toBe('/workshop/p1/ui/v1');
+    expect(screen.getByRole('link', { name: 'UI' })).toHaveAttribute('aria-current', 'page');
+
+    // 浏览器 Back 会把 URL 恢复到上一项；页面只依赖 URL，因此对象与工作区同时恢复。
+    act(() => location.navigate(artPath));
+    await waitFor(() => expect(
+      screen.getByRole('link', { name: '角色' }),
+    ).toHaveAttribute('aria-expanded', 'true'));
+    expect(within(screen.getByRole('navigation', { name: '面包屑' })).getByText('曹操')).toBeInTheDocument();
+
+    view.unmount();
+    render(
+      <Router hook={memoryLocation({ path: artPath, static: true }).hook}>
+        <AppShell />
+      </Router>,
+    );
+    expect(await screen.findByRole('link', { name: '角色' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: '面包屑' })).getByText('曹操')).toBeInTheDocument();
   });
 
   it('does not highlight either tab on /', () => {
     renderAt('/');
-    expect(screen.getByText('出图')).not.toHaveAttribute('aria-current');
+    expect(screen.getByText('创作台')).not.toHaveAttribute('aria-current');
     expect(screen.getByText('工坊')).not.toHaveAttribute('aria-current');
     expect(screen.getByText('主页')).toHaveAttribute('aria-current', 'page');
   });

@@ -28,6 +28,14 @@ def _install_secret_filter() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     hub.set_loop(asyncio.get_running_loop())
+    # 插件升级入口：旧项目只在 server 启动阶段一次性改成 V1；正常 GET/Skill 读路径不做迁移。
+    from character_workflow.lib.ui_schemes import migrate_legacy_projects
+
+    migrated = migrate_legacy_projects()
+    if migrated:
+        logging.getLogger(__name__).info(
+            "migrated %d project(s) to UI schemes: %s", len(migrated), ", ".join(migrated)
+        )
     # 孤儿回收：studio job 只在本进程跑，重启时还 pending 的必然已死（一键启动脚本
     # 每次双击都是 stop→start）。不回收 = Web 永久转圈 + 永久轮询。
     reclaimed = fail_orphan_studio_jobs()

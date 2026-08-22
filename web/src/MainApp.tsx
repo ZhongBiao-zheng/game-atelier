@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation } from 'wouter';
 import { LeftSidebar } from './components/LeftSidebar';
 import { CharacterGallery } from './components/CharacterGallery';
 import { ImageDetail } from './components/ImageDetail';
@@ -7,12 +8,13 @@ import { Filmstrip } from './components/Filmstrip';
 import { FirstRunConfig } from './components/FirstRunConfig';
 import { ResizableDivider } from './components/ResizableDivider';
 import { useSSE } from './hooks/useSSE';
-import { useActiveCharacter } from './hooks/useActiveCharacter';
-import type { AssetSlot, CharacterEntry, Project, ProjectsFile } from './schema/jobs';
-import { ProjectPage } from './pages/ProjectPage';
+import type { AssetSlot, CharacterEntry, ProjectsFile } from './schema/jobs';
+import { ProjectPage, type WorkshopWorkspace } from './pages/ProjectPage';
+import { WorkshopShell } from './components/workshop/WorkshopShell';
+import { cn } from '@/lib/utils';
+import { ProjectIndexPage } from '@/pages/ProjectIndexPage';
 
-// 弹性分界线参数（与方案 D 节同步）：名册不可收起（无 snap），胶片带 <64 收起
-const ROSTER = { key: 'workshop:roster-width', def: 264, min: 200, max: 400 };
+const SIDEBAR = { key: 'workshop:sidebar-width', def: 264, min: 200, max: 400 };
 const STRIP = { key: 'workshop:strip-width', def: 104, min: 72, max: 320, snap: 64 };
 
 function loadWidth(
@@ -27,24 +29,29 @@ function loadWidth(
   return Math.min(cfg.max, Math.max(cfg.min, raw));
 }
 
-/** 兜底顺序与左栏一致：按项目顺序找第一个有成员的项目取其首个角色，否则未分类首个。 */
-function pickFallbackCharacter(chars: CharacterEntry[], pf: ProjectsFile): CharacterEntry | null {
-  for (const p of pf.projects) {
-    const hit = chars.find(c => pf.assignments[c.id] === p.id);
-    if (hit) return hit;
-  }
-  return chars[0] ?? null;
-}
-
 interface Config { image_storage_root: string }
 
 interface MainAppProps {
+  routedProjectId?: string;
+  routedWorkspace?: WorkshopWorkspace;
+  routedUiSchemeId?: string;
+  routedScreenId?: string;
+  routedProductionId?: string;
   routedCharacterId?: string;
   routedAssetSlot?: AssetSlot;
   routedImageDetail?: { path: string; jobId: string };
 }
 
-export function MainApp({ routedCharacterId, routedAssetSlot, routedImageDetail }: MainAppProps = {}) {
+export function MainApp({
+  routedProjectId,
+  routedWorkspace,
+  routedUiSchemeId,
+  routedScreenId,
+  routedProductionId,
+  routedCharacterId,
+  routedAssetSlot,
+  routedImageDetail,
+}: MainAppProps = {}) {
   const [config, setConfig] = useState<Config | null>(null);
 
   useEffect(() => {
@@ -64,6 +71,11 @@ export function MainApp({ routedCharacterId, routedAssetSlot, routedImageDetail 
   return (
     <div className="h-full">
       <ThreeColumnLayout
+        routedProjectId={routedProjectId}
+        routedWorkspace={routedWorkspace}
+        routedUiSchemeId={routedUiSchemeId}
+        routedScreenId={routedScreenId}
+        routedProductionId={routedProductionId}
         routedCharacterId={routedCharacterId}
         routedAssetSlot={routedAssetSlot}
         routedImageDetail={routedImageDetail}
@@ -73,81 +85,98 @@ export function MainApp({ routedCharacterId, routedAssetSlot, routedImageDetail 
 }
 
 function ThreeColumnLayout({
+  routedProjectId,
+  routedWorkspace,
+  routedUiSchemeId,
+  routedScreenId,
+  routedProductionId,
   routedCharacterId,
   routedAssetSlot,
   routedImageDetail,
 }: {
+  routedProjectId?: string;
+  routedWorkspace?: WorkshopWorkspace;
+  routedUiSchemeId?: string;
+  routedScreenId?: string;
+  routedProductionId?: string;
   routedCharacterId?: string;
   routedAssetSlot?: AssetSlot;
   routedImageDetail?: { path: string; jobId: string };
 }) {
-  const [selected, setSelected] = useState<{ id: string; name: string } | null>(
-    routedCharacterId ? { id: routedCharacterId, name: '' } : null,
-  );
-  const [detailJob, setDetailJob] = useState<{ path: string; jobId: string } | null>(
-    routedImageDetail ?? null,
-  );
-  const [openedProject, setOpenedProject] = useState<Project | null>(null);
+  const [, setLocation] = useLocation();
+  const [characterName, setCharacterName] = useState('');
+  const [projectsFile, setProjectsFile] = useState<ProjectsFile | null>(null);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
+  const mobileNavigationTriggerRef = useRef<HTMLButtonElement>(null);
+  const mobileNavigationCloseRef = useRef<HTMLButtonElement>(null);
   const sseSignal = useSSE();
-  const activeId = useActiveCharacter(sseSignal);
+  const workspace = routedWorkspace ?? 'overview';
+  const openedProject = routedProjectId
+    ? projectsFile?.projects.find(project => project.id === routedProjectId) ?? null
+    : null;
+  const selected = routedCharacterId
+    ? { id: routedCharacterId, name: characterName }
+    : null;
 
   useEffect(() => {
-    if (routedCharacterId && routedCharacterId !== selected?.id) {
-      setSelected({ id: routedCharacterId, name: '' });
-    }
-  }, [routedCharacterId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 进入工坊：选活跃角色；指针为空或指向已不存在的角色时，兜底第一个项目的第一个角色
-  useEffect(() => {
-    if (routedCharacterId || selected || activeId === undefined) return;
     let cancelled = false;
-    Promise.all([
-      fetch('/api/characters').then(r => r.json() as Promise<CharacterEntry[]>),
-      fetch('/api/projects').then(r => r.json() as Promise<ProjectsFile>),
-    ])
-      .then(([chars, pf]) => {
+    fetch('/api/projects')
+      .then(r => r.json() as Promise<ProjectsFile>)
+      .then(pf => {
         if (cancelled) return;
-        const active = activeId ? chars.find(c => c.id === activeId) : undefined;
-        const pick = active ?? pickFallbackCharacter(chars, pf);
-        if (pick) setSelected({ id: pick.id, name: pick.name });
+        setProjectsFile(pf);
+        if (
+          routedCharacterId
+          && pf.assignments[routedCharacterId] !== routedProjectId
+        ) {
+          const actualProjectId = pf.assignments[routedCharacterId];
+          const ownerExists = pf.projects.some(project => project.id === actualProjectId);
+          setLocation(characterWorkshopPath(
+            ownerExists ? actualProjectId : undefined,
+            routedCharacterId,
+            routedAssetSlot,
+            routedImageDetail,
+          ), { replace: true });
+          return;
+        }
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [activeId, routedCharacterId, selected]);
+  }, [
+    routedAssetSlot,
+    routedCharacterId,
+    routedImageDetail,
+    routedProjectId,
+    setLocation,
+    sseSignal,
+  ]);
 
   useEffect(() => {
-    setDetailJob(routedImageDetail ?? null);
-  }, [routedImageDetail?.jobId, routedImageDetail?.path]);
-
-  useEffect(() => {
-    if (!selected || selected.name) return;
+    if (!routedCharacterId) {
+      setCharacterName('');
+      return;
+    }
     let cancelled = false;
     fetch('/api/characters')
       .then(r => r.json() as Promise<CharacterEntry[]>)
       .then(chars => {
         if (cancelled) return;
-        const match = chars.find(c => c.id === selected.id);
-        if (match) setSelected({ id: match.id, name: match.name });
+        const match = chars.find(c => c.id === routedCharacterId);
+        setCharacterName(match?.name ?? routedCharacterId);
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [selected]);
+  }, [routedCharacterId, sseSignal]);
 
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
-  // 弹性面板宽度：名册只 clamp 不收起；胶片带可收起为 0，lastStripW 记恢复宽度
-  const [rosterW, setRosterW] = useState(() => loadWidth(ROSTER));
+  const [sidebarW, setSidebarW] = useState(() => loadWidth(SIDEBAR));
   const [stripW, setStripW] = useState(() => loadWidth(STRIP, true));
   const lastStripW = useRef(stripW > 0 ? stripW : STRIP.def);
-  const [detailSlot, setDetailSlot] = useState<AssetSlot>(routedAssetSlot ?? 'portrait');
-
-  useEffect(() => {
-    if (routedAssetSlot) setDetailSlot(routedAssetSlot);
-  }, [routedAssetSlot]);
-
-  const commitRosterW = useCallback((w: number) => {
-    setRosterW(w);
-    window.localStorage.setItem(ROSTER.key, String(w));
+  const detailSlot = routedAssetSlot ?? 'portrait';
+  const commitSidebarW = useCallback((w: number) => {
+    setSidebarW(w);
+    window.localStorage.setItem(SIDEBAR.key, String(w));
   }, []);
   const commitStripW = useCallback((w: number) => {
     setStripW(w);
@@ -155,99 +184,230 @@ function ThreeColumnLayout({
     window.localStorage.setItem(STRIP.key, String(w));
   }, []);
 
-  if (detailJob !== null) {
+  function openMobileNavigation() {
+    setMobileNavigationOpen(true);
+    window.requestAnimationFrame(() => mobileNavigationCloseRef.current?.focus());
+  }
+
+  function closeMobileNavigation() {
+    setMobileNavigationOpen(false);
+    window.requestAnimationFrame(() => mobileNavigationTriggerRef.current?.focus());
+  }
+
+  function openImage(path: string, jobId: string, slot?: AssetSlot) {
+    if (!selected) return;
+    setLocation(characterWorkshopPath(
+      openedProject?.id,
+      selected.id,
+      slot ?? detailSlot,
+      { path, jobId },
+    ));
+  }
+
+  const projectContent = routedImageDetail && selected ? (
+    <div
+      className="relative grid h-full grid-rows-[minmax(0,1fr)]"
+      style={{ gridTemplateColumns: `${stripW}px minmax(0,1fr)` }}
+    >
+      {stripW > 0 && (
+        <Filmstrip
+          characterId={selected.id}
+          assetSlot={detailSlot}
+          currentPath={routedImageDetail.path}
+          onSelect={(path, jobId) => openImage(path, jobId, detailSlot)}
+          sseSignal={sseSignal}
+        />
+      )}
+      <div className="col-start-2 min-h-0 min-w-0">
+        <ImageDetail
+          jobId={routedImageDetail.jobId}
+          path={routedImageDetail.path}
+          onBack={() => setLocation(characterWorkshopPath(
+            openedProject?.id,
+            selected.id,
+            detailSlot,
+          ))}
+          onLightbox={setLightboxSrc}
+          stripCollapsed={stripW === 0}
+          onExpandStrip={() => commitStripW(lastStripW.current)}
+        />
+      </div>
+      {stripW > 0 && (
+        <ResizableDivider
+          key="strip-divider"
+          width={stripW}
+          min={STRIP.min}
+          max={STRIP.max}
+          snap={STRIP.snap}
+          onResize={w => (w === 0 ? commitStripW(0) : setStripW(w))}
+          onCommit={commitStripW}
+          label="调整胶片带宽度"
+        />
+      )}
+    </div>
+  ) : openedProject && workspace === 'art' && selected ? (
+    <CharacterGallery
+      projectId={openedProject.id}
+      characterId={selected.id}
+      characterName={selected.name}
+      initialTab={routedAssetSlot}
+      onSelectImage={openImage}
+      sseSignal={sseSignal}
+    />
+  ) : openedProject ? (
+    <ProjectPage
+      projectId={openedProject.id}
+      workspace={workspace}
+      uiSchemeId={routedUiSchemeId}
+      screenId={routedScreenId}
+      productionId={routedProductionId}
+    />
+  ) : selected ? (
+    <CharacterGallery
+      characterId={selected.id}
+      characterName={selected.name}
+      initialTab={routedAssetSlot}
+      onSelectImage={openImage}
+      sseSignal={sseSignal}
+    />
+  ) : null;
+  const shellObjectLabel = selected?.name
+    || (routedScreenId ? `页面 ${routedScreenId}` : null)
+    || (routedProductionId ? `视频企划 ${routedProductionId}` : null);
+
+  if (!routedProjectId && !routedCharacterId) {
     return (
-      <>
-        <div
-          // grid-rows minmax(0,1fr)：行高钉死为视口高，内容溢出由各栏内部滚动消化，
-          // 否则隐式行按内容撑高、滚动落到外层 AppShell main（头部/侧栏跟着滚走）
-          className="relative grid h-full grid-rows-[minmax(0,1fr)]"
-          style={{ gridTemplateColumns: `${stripW}px minmax(0,1fr)` }}
-        >
-          {stripW > 0 && selected && (
-            <Filmstrip
-              characterId={selected.id}
-              assetSlot={detailSlot}
-              currentPath={detailJob.path}
-              onSelect={(path, jobId) => setDetailJob({ path, jobId })}
-              sseSignal={sseSignal}
-            />
-          )}
-          <div className="col-start-2 min-w-0 min-h-0">
-            <ImageDetail
-              jobId={detailJob.jobId}
-              path={detailJob.path}
-              onBack={() => setDetailJob(null)}
-              onLightbox={setLightboxSrc}
-              stripCollapsed={stripW === 0}
-              onExpandStrip={() => commitStripW(lastStripW.current)}
-            />
-          </div>
-          {stripW > 0 && (
-            <ResizableDivider
-              key="strip-divider"
-              width={stripW}
-              min={STRIP.min}
-              max={STRIP.max}
-              snap={STRIP.snap}
-              // 拖过 snap 阈值 = 立即收起定格：divider 随之卸载，pointerup 不会再来，
-              // 所以收起必须在这里直接 commit（持久化 + 截断本次拖拽）
-              onResize={w => (w === 0 ? commitStripW(0) : setStripW(w))}
-              onCommit={commitStripW}
-              label="调整胶片带宽度"
-            />
-          )}
+      <ProjectIndexPage
+        onOpenProject={projectId => setLocation(`/workshop/${encodeURIComponent(projectId)}/overview`)}
+      />
+    );
+  }
+
+  if (projectsFile && routedProjectId && !openedProject) {
+    return (
+      <section className="grid h-full place-items-center bg-background px-6 text-center">
+        <div className="max-w-md space-y-3">
+          <p className="text-xs uppercase tracking-label text-muted-foreground">项目不存在</p>
+          <h1 className="font-display text-display italic text-foreground">找不到这个项目</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            项目可能已经删除，或当前链接使用了失效的项目编号。
+          </p>
+          <a
+            href="/workshop"
+            className="inline-flex h-10 items-center rounded-md border border-border px-4 text-sm font-medium text-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            返回全部项目
+          </a>
         </div>
-        {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
-      </>
+      </section>
     );
   }
 
   return (
     <>
       <div
-        // 同上：行高钉死，名册/画廊各自内滚，头部与侧栏保持固定
-        className="relative grid h-full grid-rows-[minmax(0,1fr)]"
-        style={{ gridTemplateColumns: `${rosterW}px minmax(0,1fr)` }}
+        className="relative grid h-full grid-cols-1 grid-rows-[minmax(0,1fr)] min-[769px]:grid-cols-[var(--sidebar-width)_minmax(0,1fr)]"
+        style={{ '--sidebar-width': `${sidebarW}px` } as CSSProperties}
       >
-        <div className="col-start-1 min-w-0 min-h-0">
-          <LeftSidebar
-            sseSignal={sseSignal}
-            selectedId={selected?.id}
-            onSelect={(id, name) => { setOpenedProject(null); setSelected({ id, name }); }}
-            onOpenProject={(p) => setOpenedProject(p)}
-            onDelete={(id) => {
-              if (selected?.id === id) setSelected(null);
-            }}
+        {mobileNavigationOpen && (
+          <button
+            type="button"
+            aria-label="关闭项目导航"
+            onClick={closeMobileNavigation}
+            className="fixed inset-0 z-40 bg-scrim/70 min-[769px]:hidden"
           />
-        </div>
-        <div className="col-start-2 min-w-0 min-h-0">
-          {openedProject ? (
-            <ProjectPage projectId={openedProject.id} onBack={() => setOpenedProject(null)} />
-          ) : (
-            <CharacterGallery
-              characterId={selected?.id ?? null}
-              characterName={selected?.name ?? null}
-              initialTab={routedAssetSlot}
-              onSelectImage={(path, jobId, slot) => {
-                if (slot) setDetailSlot(slot);
-                setDetailJob({ path, jobId });
-              }}
+        )}
+        <div className={cn(
+          'fixed inset-y-0 left-0 z-50 w-[min(86vw,320px)] min-w-0 min-h-0 bg-background transition-transform duration-200 min-[769px]:static min-[769px]:z-auto min-[769px]:w-auto min-[769px]:translate-x-0',
+          mobileNavigationOpen ? 'translate-x-0' : '-translate-x-full',
+        )}>
+          <div className="flex h-10 items-center justify-end border-b border-border px-2 min-[769px]:hidden">
+            <button
+              ref={mobileNavigationCloseRef}
+              type="button"
+              onClick={closeMobileNavigation}
+              className="rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              关闭
+            </button>
+          </div>
+          <div className="h-[calc(100%-2.5rem)] min-[769px]:h-full">
+            <LeftSidebar
               sseSignal={sseSignal}
+              selectedId={selected?.id}
+              activeProjectId={openedProject?.id ?? null}
+              workspace={workspace}
+              selectedUiSchemeId={routedUiSchemeId}
+              onSelect={(id, name, projectIdOverride) => {
+                const projectId = projectIdOverride ?? projectsFile?.assignments[id];
+                const project = projectsFile?.projects.find(p => p.id === projectId) ?? null;
+                setCharacterName(name);
+                closeMobileNavigation();
+                if (project) {
+                  setLocation(`/workshop/${encodeURIComponent(project.id)}/art/characters/${encodeURIComponent(id)}`);
+                } else {
+                  setLocation(`/workshop/unassigned/characters/${encodeURIComponent(id)}`);
+                }
+              }}
+              onNavigate={closeMobileNavigation}
+              onDelete={(id) => {
+                if (selected?.id === id) setLocation('/workshop');
+              }}
             />
-          )}
+          </div>
+        </div>
+        <div className="col-start-1 flex min-h-0 min-w-0 flex-col min-[769px]:col-start-2">
+          <div className="shrink-0 border-b border-border/40 px-3 py-2 min-[769px]:hidden">
+            <button
+              ref={mobileNavigationTriggerRef}
+              type="button"
+              onClick={openMobileNavigation}
+              aria-expanded={mobileNavigationOpen}
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              打开项目导航
+            </button>
+          </div>
+          <div className="min-h-0 flex-1">
+            {projectContent ? (
+              <WorkshopShell
+                project={openedProject}
+                workspace={workspace}
+                objectLabel={shellObjectLabel}
+              >
+                {projectContent}
+              </WorkshopShell>
+            ) : null}
+          </div>
         </div>
         <ResizableDivider
-          key="roster-divider"
-          width={rosterW}
-          min={ROSTER.min}
-          max={ROSTER.max}
-          onResize={setRosterW}
-          onCommit={commitRosterW}
-          label="调整名册宽度"
+          key="sidebar-divider"
+          width={sidebarW}
+          min={SIDEBAR.min}
+          max={SIDEBAR.max}
+          onResize={setSidebarW}
+          onCommit={commitSidebarW}
+          label="调整项目栏宽度"
+          className="hidden min-[769px]:block"
         />
       </div>
       {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
     </>
   );
+}
+
+function characterWorkshopPath(
+  projectId: string | undefined,
+  characterId: string,
+  assetSlot?: AssetSlot,
+  imageDetail?: { path: string; jobId: string },
+): string {
+  const owner = projectId
+    ? `${encodeURIComponent(projectId)}/art`
+    : 'unassigned';
+  const base = `/workshop/${owner}/characters/${encodeURIComponent(characterId)}`;
+  if (!assetSlot) return base;
+  const slotPath = `${base}/${assetSlot}`;
+  if (!imageDetail) return slotPath;
+  return `${slotPath}/${encodeURIComponent(imageDetail.jobId)}/${encodeURIComponent(imageDetail.path)}`;
 }

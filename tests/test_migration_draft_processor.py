@@ -22,13 +22,17 @@ def runtime(tmp_path, monkeypatch):
 
 
 def test_process_drafts_works_with_nested_characters_dir(runtime):
-    (runtime / "draft" / "20260519-100000.md").write_text("光线再阴一点", encoding="utf-8")
-    (runtime / "draft" / "20260519-100001.md").write_text("披风颜色调暗", encoding="utf-8")
-    result = process_drafts()
+    (runtime / "draft" / "20260519-100000.md").write_text(
+        "<!-- character: shadow -->\n光线再阴一点", encoding="utf-8"
+    )
+    (runtime / "draft" / "20260519-100001.md").write_text(
+        "<!-- character: shadow -->\n披风颜色调暗", encoding="utf-8"
+    )
+    result = process_drafts("shadow")
     assert len(result) == 2
     contents = [r["content"] for r in result]
-    assert "光线再阴一点" in contents
-    assert "披风颜色调暗" in contents
+    assert any("光线再阴一点" in content for content in contents)
+    assert any("披风颜色调暗" in content for content in contents)
     # 处理完原始 draft/ 应为空，processed/ 收齐
     assert not list((runtime / "draft").glob("*.md"))
     assert len(list((runtime / "draft-processed").glob("*.md"))) == 2
@@ -38,7 +42,9 @@ def test_process_drafts_does_not_touch_characters_dir(runtime):
     """draft 处理后角色目录里的 spec.md 不应被改动 / 删除。"""
     spec = runtime.parent / "characters" / "shadow" / "spec.md"
     before = spec.read_text(encoding="utf-8")
-    (runtime / "draft" / "feedback.md").write_text("any", encoding="utf-8")
-    process_drafts()
+    (runtime / "draft" / "feedback.md").write_text(
+        "<!-- character: shadow -->\nany", encoding="utf-8"
+    )
+    process_drafts("shadow")
     assert spec.exists()
     assert spec.read_text(encoding="utf-8") == before

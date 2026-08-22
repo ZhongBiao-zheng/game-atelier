@@ -1,7 +1,7 @@
 # Project Style Contract 模板
 
 > 所有 `projects/<slug>/style.md` 必须遵循此格式。
-> style.md 是**项目级风格契约**：定死全项目视觉语言，所有角色 / 页面的 prompt 从这里注入字段，
+> 根 style.md 是**项目级视觉基线**：定死所有资产共享的视觉语言，角色与各 UI 方案都会注入，
 > 专治连续生图的风格漂移。角色个体差异写各自 spec.md，不写在这里。
 > 与 spec 同纪律：agent 读的机器可读文档；禁止占位词（?、TBD、待定）；没问清的字段整行省略。
 
@@ -67,9 +67,11 @@ updated: YYYY-MM-DD
 - <禁止项>
 ```
 
-### ui.*（UI 赛道启用后追加，B 赛道用）
+### ui.*（写入具体 UI 方案）
 
-游戏 UI 设计工作流启用后在同文件追加，不另立平行契约文件：
+UI 专属规则不写进项目根文件，而是写入
+`projects/<slug>/ui/<scheme-id>/style.md`。该文件复用相同 frontmatter，并只承载当前方案的 UI
+差异；生成 prompt 按“项目根基线 → 方案 style”组合：
 
 ```markdown
 ## ui.typography

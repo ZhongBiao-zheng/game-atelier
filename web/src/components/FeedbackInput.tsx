@@ -12,7 +12,7 @@ export function FeedbackInput({ characterId }: Props) {
   const copyToClipboard = useClipboard();
 
   async function submit() {
-    if (!text.trim()) return;
+    if (!characterId || !text.trim()) return;
     await fetch('/api/feedback', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, character_id: characterId }),
@@ -36,7 +36,7 @@ export function FeedbackInput({ characterId }: Props) {
         className="resize-none text-sm"
       />
       <div className="flex justify-end">
-        <Button size="sm" onClick={submit} disabled={!text.trim()}>
+        <Button size="sm" onClick={submit} disabled={!characterId || !text.trim()}>
           <Send className="size-3.5" />
           提交
         </Button>

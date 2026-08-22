@@ -26,6 +26,7 @@ from character_workflow.lib.schemas import (
     Job,
     JobStatus,
     ScreenCanonicalFile,
+    VideoReferencesFile,
 )
 
 # 与 spec-template / style-template 的「禁止占位词」纪律对齐。
@@ -141,15 +142,23 @@ def _doc_files(root: Path) -> list[Path]:
             pdir / "design" / "gdd.md",
             pdir / "design" / "prd.md",
             pdir / "design" / "interaction.md",
-            pdir / "screens" / "screen-map.md",
         ):
             if candidate.exists():
                 docs.append(candidate)
-        screens = pdir / "screens"
-        if screens.exists():
-            docs.extend(
-                sorted(p for p in screens.glob("*.md") if p.name != "screen-map.md")
-            )
+        from character_workflow.lib.ui_schemes import read_existing_schemes, scheme_dir
+        schemes = read_existing_schemes(proj.id)
+        if schemes is None:
+            continue
+        for scheme in schemes.schemes:
+            ui_dir = scheme_dir(proj, scheme.id)
+            for candidate in (ui_dir / "style.md", ui_dir / "screens" / "screen-map.md"):
+                if candidate.exists():
+                    docs.append(candidate)
+            screens = ui_dir / "screens"
+            if screens.exists():
+                docs.extend(
+                    sorted(p for p in screens.glob("*.md") if p.name != "screen-map.md")
+                )
     return docs
 
 
@@ -193,23 +202,33 @@ def _check_character_canonical(report: Report, root: Path) -> int:
 
 def _check_screen_canonical(report: Report, root: Path) -> int:
     count = 0
+    from character_workflow.lib.ui_schemes import read_existing_schemes, scheme_screens_dir
     for proj in _known_projects():
-        cfile = data_root.projects_dir() / proj.slug / "screens" / "canonical.json"
-        if not cfile.exists():
+        schemes = read_existing_schemes(proj.id)
+        if schemes is None:
             continue
-        count += 1
-        rel = _rel(cfile, root)
-        try:
-            file = ScreenCanonicalFile.model_validate(
-                json.loads(cfile.read_text(encoding="utf-8"))
-            )
-        except (OSError, json.JSONDecodeError, ValidationError) as e:
-            _err(report, "canonical", rel, f"结构非法: {e}")
-            continue
-        for screen_id, entry in file.screens.items():
-            abs_p = root / entry.path
-            if not abs_p.is_file():
-                _err(report, "canonical", rel, f"screen {screen_id} 定稿引用不存在: {entry.path}")
+        for scheme in schemes.schemes:
+            cfile = scheme_screens_dir(proj, scheme.id) / "canonical.json"
+            if not cfile.exists():
+                continue
+            count += 1
+            rel = _rel(cfile, root)
+            try:
+                file = ScreenCanonicalFile.model_validate(
+                    json.loads(cfile.read_text(encoding="utf-8"))
+                )
+            except (OSError, json.JSONDecodeError, ValidationError) as e:
+                _err(report, "canonical", rel, f"结构非法: {e}")
+                continue
+            for screen_id, entry in file.screens.items():
+                abs_p = root / entry.path
+                if not abs_p.is_file():
+                    _err(
+                        report,
+                        "canonical",
+                        rel,
+                        f"screen {screen_id} 定稿引用不存在: {entry.path}",
+                    )
     return count
 
 
@@ -217,6 +236,36 @@ def _check_canonicals(report: Report, root: Path) -> None:
     n = _check_character_canonical(report, root)
     n += _check_screen_canonical(report, root)
     report.checked["canonicals"] = n
+
+
+def _check_video_references(report: Report, root: Path) -> None:
+    from character_workflow.lib.video_jobs import is_project_reference_path, require_production
+
+    count = 0
+    for project in _known_projects():
+        videos = data_root.projects_dir() / project.slug / "videos"
+        if not videos.is_dir():
+            continue
+        for path in sorted(videos.glob("*/references.json")):
+            count += 1
+            rel = _rel(path, root)
+            try:
+                file = VideoReferencesFile.model_validate_json(path.read_text(encoding="utf-8"))
+            except (OSError, ValidationError) as error:
+                _err(report, "reference", rel, f"结构非法: {error}")
+                continue
+            try:
+                require_production(path.parent, path.parent.name)
+            except FileNotFoundError as error:
+                _err(report, "reference", rel, str(error))
+            if len(file.paths) != len(set(file.paths)):
+                _err(report, "reference", rel, "视频参考素材存在重复路径")
+            for reference in file.paths:
+                if not is_project_reference_path(project.id, reference):
+                    _err(report, "reference", rel, f"参考素材不属于当前项目: {reference}")
+                elif not (root / reference).is_file():
+                    _err(report, "reference", rel, f"参考素材不存在: {reference}")
+    report.checked["video_references"] = count
 
 
 # ---------- ⑤ 画廊 sidecar 断链 ----------
@@ -269,6 +318,7 @@ def validate_data() -> Report:
     _check_jobs(report, root)
     _check_placeholders(report, root)
     _check_canonicals(report, root)
+    _check_video_references(report, root)
     _check_sidecars(report, root)
     return report
 

@@ -66,6 +66,46 @@ describe('RoundList skill 出图删除门控', () => {
   });
 });
 
+describe('RoundList 归档到项目', () => {
+  const imageDone: RoundState = {
+    kind: 'done',
+    mode: 'image',
+    jobId: 'job-archive-image',
+    submittedAt: '2026-08-21T10:00:00Z',
+    imagePaths: ['/data/studio/job-archive-image/v1.png'],
+    config: { prompt: '立绘', model: 'gpt-image-2', kind: 'image', referenceImages: [] },
+  };
+
+  it('每个 Studio 图片和视频产物都能明确发起归档', () => {
+    const onArchive = vi.fn();
+    render(<RoundList rounds={[imageDone, videoDone]} onArchive={onArchive} />);
+
+    fireEvent.click(screen.getByLabelText('归档生成结果 1 到项目'));
+    expect(onArchive).toHaveBeenCalledWith(
+      'job-archive-image',
+      '/data/studio/job-archive-image/v1.png',
+      'image',
+    );
+
+    fireEvent.click(screen.getByLabelText('归档生成视频 1 到项目'));
+    expect(onArchive).toHaveBeenCalledWith(
+      'job-vid-1',
+      '/data/studio/job-vid-1/v1.mp4',
+      'video',
+    );
+  });
+
+  it('Skill 正式资产不重复显示归档入口', () => {
+    render(
+      <RoundList
+        rounds={[{ ...imageDone, mode: 'skill' }]}
+        onArchive={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText('归档生成结果 1 到项目')).not.toBeInTheDocument();
+  });
+});
+
 describe('RoundList 静默改写提示（params.warnings）', () => {
   const withWarnings = (warnings?: string[]): RoundState => ({
     kind: 'done',
@@ -296,6 +336,21 @@ describe('RoundList reference assets', () => {
     expect(container.textContent).toContain('视频1');
   });
 
+  it('renders skill prompt @图片N aliases with the same omni reference chip', () => {
+    const round: RoundState = {
+      ...videoWithRefs,
+      config: {
+        ...videoWithRefs.config,
+        prompt: '曹操@图片1 推出一张牌',
+      },
+    };
+    const { container } = render(<RoundList rounds={[round]} />);
+    const chip = container.querySelector('[data-mention="图1"]');
+    expect(chip).not.toBeNull();
+    expect(chip?.querySelector('img')?.getAttribute('src')).toContain('job_id=job-vid-2');
+    expect(container.textContent).not.toContain('@图片1');
+  });
+
   it('keeps tokens without a matching reference as plain text (no chip)', () => {
     const noRefs: RoundState = {
       ...videoWithRefs,
@@ -315,5 +370,37 @@ describe('RoundList reference assets', () => {
     expect(preview!.querySelector('video')).not.toBeNull();
     fireEvent.mouseLeave(chip);
     expect(document.body.querySelector('[data-testid="round-mention-preview"]')).toBeNull();
+  });
+
+  it('MJ 历史把四类参考图并入缩略图堆叠，并从文字参数中移除参考 URL', () => {
+    const round: RoundState = {
+      kind: 'done',
+      jobId: 'job-mj-refs',
+      submittedAt: new Date().toISOString(),
+      imagePaths: ['/data/studio/job-mj-refs/v1.png'],
+      config: {
+        prompt: '东方庭院',
+        model: 'mj_fast_imagine',
+        kind: 'image',
+        referenceImages: ['/other-game/characters/hero.png'],
+        mjRefPaths: {
+          sref: ['/runtime/uploads/style-a.png', 'https://cdn.example/style-b.png'],
+          cref: ['/runtime/uploads/character.png'],
+        },
+        mjFlags: '--v 6 --sref https://oss.example/style-a.png https://oss.example/style-b.png --sw 300 --cref https://oss.example/character.png --cw 60 --chaos 10',
+      },
+    };
+
+    const onReuseReferences = vi.fn();
+    render(<RoundList rounds={[round]} onReuseReferences={onReuseReferences} />);
+    const stack = screen.getByTestId('reference-stack');
+    expect(stack.children).toHaveLength(4);
+    expect(stack.querySelector('img')?.getAttribute('src')).toContain('job_id=job-mj-refs');
+    expect(stack.querySelector('img')?.getAttribute('src')).toContain('/api/raw');
+    fireEvent.click(stack);
+    expect(onReuseReferences).toHaveBeenCalledWith(round.config, 'job-mj-refs');
+    expect(screen.getByTestId('round-mj-flags')).toHaveTextContent('--v 6 --chaos 10');
+    expect(screen.getByTestId('round-mj-flags')).not.toHaveTextContent('oss.example');
+    expect(screen.getByTestId('round-mj-flags')).not.toHaveTextContent('--sref');
   });
 });

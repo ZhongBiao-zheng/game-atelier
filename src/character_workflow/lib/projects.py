@@ -6,12 +6,13 @@
   "assignments": {"shadow": "p-..."}
 }
 
-assignments 里没有的角色 → 未归属（在 UI 上落到"未分类"分组）。
+assignments 里没有的角色不进入工坊项目导航；项目内创建角色时必须同步写入归属。
 项目删除时连带清理 assignments 里指向它的条目。
 """
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -39,6 +40,14 @@ def read_projects() -> ProjectsFile:
     if not p.exists():
         return ProjectsFile()
     return ProjectsFile.model_validate(json.loads(p.read_text(encoding="utf-8")))
+
+
+def resolve_project(ref: str) -> Project:
+    """Resolve a project by its stored id or user-facing slug."""
+    for project in read_projects().projects:
+        if project.id == ref or project.slug == ref:
+            return project
+    raise KeyError(f"project not found: {ref!r}")
 
 
 def _write(file: ProjectsFile) -> ProjectsFile:
@@ -106,6 +115,9 @@ def create_project(name: str, slug: str | None = None) -> Project:
             _WORLDVIEW_SKELETON.format(name=name.strip()), encoding="utf-8"
         )
 
+    from character_workflow.lib.ui_schemes import initialize_project
+    initialize_project(project)
+
     return project
 
 
@@ -115,6 +127,7 @@ def rename_project(project_id: str, name: str) -> Project:
         if p.id == project_id:
             p.name = name.strip()
             _write(f)
+            touch_project(p.id)
             return p
     raise KeyError(project_id)
 
@@ -136,13 +149,34 @@ def reorder_projects(ordered_ids: list[str]) -> ProjectsFile:
     return f
 
 
-def assign_character(character_id: str, project_id: str | None) -> ProjectsFile:
+def assign_characters(character_ids: list[str], project_id: str | None) -> ProjectsFile:
     f = read_projects()
+    previous_project_ids = {
+        owner_id
+        for character_id in character_ids
+        if (owner_id := f.assignments.get(character_id)) is not None
+    }
     if project_id is None:
-        f.assignments.pop(character_id, None)
+        for character_id in character_ids:
+            f.assignments.pop(character_id, None)
     else:
         if not any(p.id == project_id for p in f.projects):
             raise KeyError(project_id)
-        f.assignments[character_id] = project_id
+        for character_id in character_ids:
+            f.assignments[character_id] = project_id
     _write(f)
+    for affected_project_id in previous_project_ids | ({project_id} if project_id else set()):
+        touch_project(affected_project_id)
     return f
+
+
+def assign_character(character_id: str, project_id: str | None) -> ProjectsFile:
+    return assign_characters([character_id], project_id)
+
+
+def touch_project(project_id: str) -> None:
+    """Mark metadata-only changes without introducing a second activity ledger."""
+    project = resolve_project(project_id)
+    project_dir = _projects_root() / project.slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+    os.utime(project_dir, None)

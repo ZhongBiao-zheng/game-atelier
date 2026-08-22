@@ -448,7 +448,9 @@ def test_turn_start_stage_d_with_drafts(project):
     )
     draft_dir = runtime / "draft"
     draft_dir.mkdir()
-    (draft_dir / "holy-2026.md").write_text("color: more golden\n")
+    (draft_dir / "holy-2026.md").write_text(
+        "<!-- character: holy -->\ncolor: more golden\n"
+    )
     from character_workflow.lib.turn_start import turn_start
     r = turn_start(kind="portrait", message=None)
     assert r["stage"] == "D"
@@ -473,7 +475,9 @@ def test_turn_start_stage_d_conflict(project):
     )
     draft_dir = runtime / "draft"
     draft_dir.mkdir()
-    (draft_dir / "holy-2026.md").write_text("调色\n")
+    (draft_dir / "holy-2026.md").write_text(
+        "<!-- character: holy -->\n调色\n"
+    )
     from character_workflow.lib.turn_start import turn_start
     r = turn_start(kind="portrait", message="新建一个光辉骑士")
     assert r["stage"] == "D"

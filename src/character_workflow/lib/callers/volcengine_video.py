@@ -17,6 +17,7 @@ import requests
 from character_workflow.lib import keys as _keys
 from character_workflow.lib import oss_upload
 from character_workflow.lib.callers import video_poll
+from character_workflow.lib.video_caps import seedance_limits
 
 DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_MODEL = "doubao-seedance-2-0-fast-260128"
@@ -129,34 +130,22 @@ def _audio_payload_url(path_or_url: str) -> str:
     return f"data:{mime};base64,{base64.b64encode(raw).decode()}"
 
 
-def _reference_limits(model: str) -> tuple[int, int, int]:
-    """（图片, 视频, 音频）参考素材上限 —— 按模型代际取，不是全族一个数。
-
-    2.0 系（含 fast / mini）：9 / 3 / 3。
-    2.5：30 / 10 / 10 —— 旧版全族硬截 9/3/3，2.5 的参考矩阵被砍掉三分之二。
-    """
-    normalized = (model or "").lower().replace(".", "-")
-    if "seedance-2-5" in normalized:
-        return 30, 10, 10
-    return 9, 3, 3
-
-
 def _build_content(prompt, images, videos, audios, frame_mode, model="") -> list[dict[str, Any]]:
-    max_images, max_videos, max_audios = _reference_limits(model)
+    limits = seedance_limits(model)
     content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-    for i, url in enumerate(list(images)[:max_images]):
+    for i, url in enumerate(list(images)[:limits.max_images]):
         content.append({
             "type": "image_url",
             "image_url": {"url": _image_payload_url(url)},
             "role": _frame_role(i, frame_mode),
         })
-    for url in list(videos)[:max_videos]:
+    for url in list(videos)[:limits.max_videos]:
         content.append({
             "type": "video_url",
             "video_url": {"url": _video_payload_url(url)},
             "role": "reference_video",
         })
-    for url in list(audios)[:max_audios]:
+    for url in list(audios)[:limits.max_audios]:
         content.append({
             "type": "audio_url",
             "audio_url": {"url": _audio_payload_url(url)},

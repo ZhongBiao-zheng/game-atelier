@@ -97,7 +97,7 @@ export function SettingsPage() {
                 aria-label="数据目录"
                 className={`min-w-0 break-all font-mono text-sm ${changed ? 'text-primary' : 'text-foreground'}`}
               >
-                {loading ? '读取中...' : displayRoot || '尚未选择项目文件夹'}
+                {loading ? '读取中...' : displayRoot || '尚未选择数据目录'}
               </span>
               {changed && (
                 <span className="text-xs uppercase tracking-label text-muted-foreground/70">未保存</span>
