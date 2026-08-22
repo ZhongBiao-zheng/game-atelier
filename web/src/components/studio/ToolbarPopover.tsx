@@ -25,6 +25,7 @@ interface Props {
   className?: string;
   role?: string;
   'aria-label'?: string;
+  'aria-multiselectable'?: boolean | 'true' | 'false';
   'data-testid'?: string;
   children: ReactNode;
 }

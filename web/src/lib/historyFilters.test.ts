@@ -49,9 +49,19 @@ describe('filterRounds', () => {
     expect(filterRounds(rounds, { ...DEFAULT_HISTORY_FILTERS, search: 'dragon' }, favs, hidden)).toHaveLength(1);
     expect(filterRounds(rounds, { ...DEFAULT_HISTORY_FILTERS, search: 'cat' }, favs, hidden)).toHaveLength(0);
   });
-  it('mode 按 round.mode 过滤', () => {
-    const rounds = [doneRound({ mode: 'skill' }), doneRound({ jobId: 'k', mode: 'video' })];
-    expect(filterRounds(rounds, { ...DEFAULT_HISTORY_FILTERS, mode: 'skill' }, favs, hidden)).toHaveLength(1);
+  it('modes 用 OR 语义保留所有已选生成模式', () => {
+    const rounds = [
+      doneRound({ jobId: 'i', mode: 'image' }),
+      doneRound({ jobId: 'v', mode: 'video' }),
+      doneRound({ jobId: 's', mode: 'skill' }),
+    ];
+    const out = filterRounds(
+      rounds,
+      { ...DEFAULT_HISTORY_FILTERS, modes: ['image', 'video'] },
+      favs,
+      hidden,
+    );
+    expect(out.map((round) => round.mode)).toEqual(['image', 'video']);
   });
   it('op=favorite 只留含收藏图的轮', () => {
     const rounds = [doneRound({ imagePaths: ['studio/j/v1.png'] }), doneRound({ jobId: 'k', imagePaths: ['studio/x/v1.png'] })];

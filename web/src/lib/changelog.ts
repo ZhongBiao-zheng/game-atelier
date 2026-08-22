@@ -31,6 +31,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.30.2',
+    date: '2026-08-22',
+    headline: '生成模式筛选支持自由组合',
+    changes: [
+      { kind: 'fix', text: '图片、视频与 Skill 可以同时加选；再次点击只取消当前模式，其他已选项保持不变' },
+    ],
+  },
+  {
     version: '5.30.1',
     date: '2026-08-22',
     headline: '重新编辑会带回完整参考内容',

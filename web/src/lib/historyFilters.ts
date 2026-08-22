@@ -8,14 +8,14 @@ export type TimeFilter = 'all' | '1w' | '1m' | '3m';
 export interface HistoryFilters {
   search: string;
   time: TimeFilter;
-  mode: GenMode | null;
+  modes: GenMode[];
   op: 'favorite' | 'hidden' | null;
 }
 
 export const DEFAULT_HISTORY_FILTERS: HistoryFilters = {
   search: '',
   time: 'all',
-  mode: null,
+  modes: [],
   op: null,
 };
 
@@ -48,9 +48,9 @@ export function filterRounds(
       const t = r.kind === 'pending' ? r.startedAt : Date.parse(r.submittedAt);
       if (!Number.isFinite(t) || t < now - TIME_WINDOWS[filters.time]) return false;
     }
-    if (filters.mode) {
+    if (filters.modes.length > 0) {
       const mode: GenMode = r.mode ?? (r.config?.kind === 'video' ? 'video' : 'image');
-      if (mode !== filters.mode) return false;
+      if (!filters.modes.includes(mode)) return false;
     }
     if (filters.op) {
       const paths = r.kind === 'done' ? r.imagePaths : [];
