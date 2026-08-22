@@ -111,6 +111,10 @@ describe('ProjectPage', () => {
     render(<ProjectPage projectId="p1" workspace="overview" />);
     await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
     expect(screen.getByText('暖色调')).toBeInTheDocument();
+    const readingPanel = screen.getByRole('article', { name: '项目经验 / 世界观内容' });
+    expect(readingPanel.className).toContain('max-h-72');
+    expect(readingPanel.className).toContain('overflow-y-auto');
+    expect(readingPanel).toHaveAttribute('tabindex', '0');
     expect(screen.queryByRole('textbox', { name: '项目经验 / 世界观' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '编辑' }));
     expect((screen.getByRole('textbox', { name: '项目经验 / 世界观' }) as HTMLTextAreaElement).value).toBe('暖色调');
@@ -644,8 +648,8 @@ describe('ProjectPage', () => {
       if (url.endsWith('/video-references')) {
         return { ok: true, json: async () => ({ candidates: [
           {
-            kind: 'character_variant', asset_id: 'hero-summer', scheme_id: null,
-            label: '曹操·夏日 · 立绘', detail: '角色皮肤定稿',
+            kind: 'character', asset_id: 'hero-summer', scheme_id: null,
+            label: '曹操·夏日 · 立绘', detail: '角色衍生定稿',
             path: 'characters/hero-summer/portrait/v2.png', stale: false,
           },
           {

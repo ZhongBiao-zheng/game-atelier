@@ -10,8 +10,7 @@
 |---|---|---|---|
 | Job / JobParams | `lib/schemas.py` | `web/src/schema/jobs.ts` | 无 —— 靠人 |
 | Key / ModelSpec | `lib/keys.py` | `web/src/api/keys.ts` | 无 —— 靠人 |
-| ProjectFolder / ProjectFolderItem | `lib/schemas.py` | `web/src/api/projectFolders.ts` | `tests/test_project_folders.py` + `ProjectFolderPage.test.tsx` |
-| CharacterVariant / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_variants.py` + `LeftSidebar.test.tsx` + `ProjectFolderPage.test.tsx` |
+| CharacterDerivative / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_derivatives.py` + `LeftSidebar.test.tsx` |
 | ProjectIndexItem / GalleryMedia | `lib/schemas.py` | `web/src/api/gallery.ts` | `tests/test_gallery_project.py` + `ProjectIndexPage.test.tsx` + `ProjectPage.test.tsx` |
 | StudioArchiveTarget | `lib/studio_archive.py` | `web/src/api/studio.ts` | `tests/test_studio_archive.py` + `StudioArchiveDialog.test.tsx` |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
@@ -41,11 +40,8 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 
 **Web 独占写**（Skill 不碰）
 `POST /spec/{id}` `POST /prompt/{job_id}` `POST /feedback` `POST /uploads` `POST /studio/jobs`
-`POST /characters` `POST /characters/{id}/variants` `POST /characters/{id}/rename` `POST /characters/{id}/gallery/{kind}` `POST /characters/{id}/project`
+`POST /characters` `POST /characters/{id}/derivatives` `POST /characters/{id}/rename` `POST /characters/{id}/gallery/{kind}` `POST /characters/{id}/project`
 `POST /projects` `/projects/reorder` `/projects/{id}/rename` `DELETE /projects/{id}`
-`POST /projects/{id}/folders` `/projects/{id}/folders/reorder` `/projects/{id}/folders/{folder_id}`
-`DELETE /projects/{id}/folders/{folder_id}`
-`POST /projects/{id}/folders/{folder_id}/items` `DELETE /projects/{id}/folders/{folder_id}/items`
 `POST /projects/{id}/ui-schemes` `/projects/{id}/ui-schemes/default`
 
 项目内新建角色时，`POST /characters` 请求为
@@ -72,18 +68,18 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /characters/{id}/canonical` `GET /projects/{id}/ui-schemes/{scheme_id}/screens/canonical`
 `GET /projects/{id}/workspaces?ui_scheme={scheme_id}` `GET /projects/{id}/videos`
 `GET /projects/{id}/ui-schemes`
-`GET /projects/{id}/folders`
 `GET /projects/{id}/studio-archive-targets?media_kind={image,video}`
 
-### 角色变体契约
+### 角色衍生契约
 
-角色皮肤是项目资产库中的独立角色资产，目录、Spec、三类出图、Job、反馈、定稿与母角色完全
-隔离。母子关系只落在皮肤目录的 `characters/<variant_id>/variant.json`：
+角色衍生是项目资产库中的平级角色资产，目录、Spec、三类出图、Job、反馈与定稿均独立。它只保存
+创建时的来源快照，不形成父子树或归属依赖。关系落在 `characters/<derivative_id>/derivative.json`：
 
 ```ts
-type CharacterVariant = {
-  parent_character_id: string;
-  difference: string;
+type CharacterDerivative = {
+  source_character_id: string;
+  source_character_name: string;
+  source_paths: string[];
   created_at: string;
 };
 
@@ -93,52 +89,18 @@ type CharacterEntry = {
   status: string;
   latest_job_id: string | null;
   thumbnail?: string | null;
-  variant: CharacterVariant | null;
+  derivative: CharacterDerivative | null;
 };
 ```
 
-`POST /characters/{parent_id}/variants` 请求为
-`{ name: string, difference: string, folder_id?: string }`。母角色必须已归属项目；皮肤自动继承该
-项目归属。传 `folder_id` 时，服务端同时把新皮肤作为 `kind='character'` 引用加入当前项目文件夹，
-但资产本体仍只存在于资产库。响应为新皮肤的 `CharacterEntry`。
+`POST /characters/{source_id}/derivatives` 请求为 `{ name: string, source_paths: string[] }`。
+来源角色必须已归属项目；服务端自动加入来源角色三类 canonical 图片，并接受同项目画廊图片或
+`.runtime/uploads/` 本次上传图片。所有来源图会复制到新角色 `source/`，`source_paths` 只记录复制后的
+相对路径。新角色初始继承来源角色当时的项目归属，之后可独立移动、删除或继续作为新衍生的来源；
+来源角色改名或删除不会改写快照。
 
-`turn-start` 对皮肤额外返回 `variant`，其中包含母角色 id / 显示名、母角色身份锚、皮肤差异、
-当前资产槽位和母角色定稿表；`project_style` 仍是项目风格真源。出图必须组合
-`project_style + variant.parent_identity_anchor + variant.difference + variant.asset_slot`，Job 的
-`character_id` 始终写皮肤 id。
-
-皮肤与母角色必须保持相同项目归属：皮肤不能单独更换项目；移动母角色时所有直接皮肤一起移动，
-并移除旧项目文件夹中的这些引用，避免跨项目悬空关系。
-
-### 项目文件夹契约
-
-项目文件夹只保存个人整理关系，落在 `projects/<slug>/folders.json`；资产本体、历史和归属仍由
-角色目录、UI 页面目录与视频企划目录负责。文件夹删除或移除成员不得删除任何资产文件。
-
-```ts
-type ProjectFolderItem = {
-  kind: 'character' | 'ui_scheme' | 'ui_screen' | 'video_production';
-  asset_id: string;
-  scheme_id?: string | null;
-};
-
-type ProjectFolder = {
-  id: string;
-  name: string;
-  note: string;
-  created_at: string;
-  items: ProjectFolderItem[];
-};
-
-type ProjectFoldersFile = { folders: ProjectFolder[] };
-```
-
-`folders` 数组顺序就是用户排序，`items` 按加入顺序展示。同一引用在单个文件夹内去重，但可同时
-出现在多个文件夹；`ui_screen` 必须带 `scheme_id`，`ui_scheme` 的 `asset_id` 就是方案 id；
-美术/UI/视频视图只按 `kind` 过滤，不改变资产归属。所有写操作均返回完整的
-`ProjectFoldersFile`：新建请求 `{ name, note? }`，更新请求 `{ name, note }`，排序请求
-`{ ordered_ids }`，加入成员请求为 `ProjectFolderItem`；移除成员通过查询参数 `kind` 和
-`asset_id` 指定，`ui_screen` 还必须带 `scheme_id`。加入时服务端必须验证资产确实属于该项目。
+`turn-start` 对衍生角色额外返回 `derivative`，包含来源角色 id / 创建时显示名、冻结后的来源路径与
+当前资产槽位；`project_style` 仍是项目风格真源，Job 的 `character_id` 始终写当前衍生角色 id。
 
 ### UI 方案契约
 
@@ -150,7 +112,7 @@ type ProjectFoldersFile = { folders: ProjectFolder[] };
 `{ name, source_scheme_id, copy_style, copy_screen_map, screen_ids }`。复制的页面版本成为新方案起点，
 但不复制 canonical；两套方案之后独立写 `style.md / screens / canonical.json`。viewer-server 启动时
 显式执行一次旧项目升级：把旧 `screens/` 移到 `ui/v1/screens/`，把根 `style.md` 的 `ui.*` 章节
-移入 V1，并经完整 Job 模型校验修正 Job、canonical 和文件夹引用。正常读取只接受新路径，不做迁移或 fallback。
+移入 V1，并经完整 Job 模型校验修正 Job 与 canonical。正常读取只接受新路径，不做迁移或 fallback。
 
 ### 项目工作区响应
 
@@ -252,7 +214,7 @@ type StudioArchiveTargetOption = StudioArchiveTarget & { label: string; detail: 
 `{ path: string | null }`（禁止额外字段），响应为 `{ shots: Record<string, string> }`；path 必须是
 该镜头目录中实际存在的 `.mp4`。
 
-`GET /projects/{id}/video-references` 返回当前项目可用的角色、角色皮肤和所有 UI 方案页面定稿：
+`GET /projects/{id}/video-references` 返回当前项目可用的角色（含角色衍生）和所有 UI 方案页面定稿：
 `{ candidates: Array<{ kind, asset_id, scheme_id, label, detail, path, stale }> }`。只返回真实存在的
 canonical 文件；`stale` 只提示人工判断，不自动替换。
 

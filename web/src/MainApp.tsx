@@ -12,9 +12,7 @@ import type { AssetSlot, CharacterEntry, ProjectsFile } from './schema/jobs';
 import { ProjectPage, type WorkshopWorkspace } from './pages/ProjectPage';
 import { WorkshopShell } from './components/workshop/WorkshopShell';
 import { cn } from '@/lib/utils';
-import { ProjectFolderPage, type ProjectFolderView } from '@/pages/ProjectFolderPage';
 import { ProjectIndexPage } from '@/pages/ProjectIndexPage';
-import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
 
 const SIDEBAR = { key: 'workshop:sidebar-width', def: 264, min: 200, max: 400 };
 const STRIP = { key: 'workshop:strip-width', def: 104, min: 72, max: 320, snap: 64 };
@@ -43,8 +41,6 @@ interface MainAppProps {
   routedCharacterId?: string;
   routedAssetSlot?: AssetSlot;
   routedImageDetail?: { path: string; jobId: string };
-  routedFolderId?: string;
-  routedFolderView?: ProjectFolderView;
 }
 
 export function MainApp({
@@ -57,8 +53,6 @@ export function MainApp({
   routedCharacterId,
   routedAssetSlot,
   routedImageDetail,
-  routedFolderId,
-  routedFolderView,
 }: MainAppProps = {}) {
   const [config, setConfig] = useState<Config | null>(null);
 
@@ -88,8 +82,6 @@ export function MainApp({
         routedCharacterId={routedCharacterId}
         routedAssetSlot={routedAssetSlot}
         routedImageDetail={routedImageDetail}
-        routedFolderId={routedFolderId}
-        routedFolderView={routedFolderView}
       />
     </div>
   );
@@ -105,8 +97,6 @@ function ThreeColumnLayout({
   routedCharacterId,
   routedAssetSlot,
   routedImageDetail,
-  routedFolderId,
-  routedFolderView,
 }: {
   routedProjectId?: string;
   routedWorkspace?: WorkshopWorkspace;
@@ -117,15 +107,11 @@ function ThreeColumnLayout({
   routedCharacterId?: string;
   routedAssetSlot?: AssetSlot;
   routedImageDetail?: { path: string; jobId: string };
-  routedFolderId?: string;
-  routedFolderView?: ProjectFolderView;
 }) {
   const [, setLocation] = useLocation();
-  const returnContext = useWorkshopReturn();
   const [characterName, setCharacterName] = useState('');
   const [projectsFile, setProjectsFile] = useState<ProjectsFile | null>(null);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
-  const [folderLabel, setFolderLabel] = useState<string | null>(null);
   const mobileNavigationTriggerRef = useRef<HTMLButtonElement>(null);
   const mobileNavigationCloseRef = useRef<HTMLButtonElement>(null);
   const sseSignal = useSSE();
@@ -150,15 +136,12 @@ function ThreeColumnLayout({
         ) {
           const actualProjectId = pf.assignments[routedCharacterId];
           const ownerExists = pf.projects.some(project => project.id === actualProjectId);
-          setLocation(
-            withWorkshopReturn(characterWorkshopPath(
-              ownerExists ? actualProjectId : undefined,
-              routedCharacterId,
-              routedAssetSlot,
-              routedImageDetail,
-            ), returnContext),
-            { replace: true },
-          );
+          setLocation(characterWorkshopPath(
+            ownerExists ? actualProjectId : undefined,
+            routedCharacterId,
+            routedAssetSlot,
+            routedImageDetail,
+          ), { replace: true });
           return;
         }
       })
@@ -169,7 +152,6 @@ function ThreeColumnLayout({
     routedCharacterId,
     routedImageDetail,
     routedProjectId,
-    returnContext,
     setLocation,
     sseSignal,
   ]);
@@ -197,14 +179,6 @@ function ThreeColumnLayout({
   const [stripW, setStripW] = useState(() => loadWidth(STRIP, true));
   const lastStripW = useRef(stripW > 0 ? stripW : STRIP.def);
   const detailSlot = routedAssetSlot ?? 'portrait';
-  const handleFolderChange = useCallback((folder: { name: string } | null) => {
-    setFolderLabel(folder?.name ?? null);
-  }, []);
-
-  useEffect(() => {
-    setFolderLabel(null);
-  }, [routedFolderId]);
-
   const commitSidebarW = useCallback((w: number) => {
     setSidebarW(w);
     window.localStorage.setItem(SIDEBAR.key, String(w));
@@ -227,22 +201,15 @@ function ThreeColumnLayout({
 
   function openImage(path: string, jobId: string, slot?: AssetSlot) {
     if (!selected) return;
-    setLocation(withWorkshopReturn(characterWorkshopPath(
+    setLocation(characterWorkshopPath(
       openedProject?.id,
       selected.id,
       slot ?? detailSlot,
       { path, jobId },
-    ), returnContext));
+    ));
   }
 
-  const projectContent = openedProject && routedFolderId ? (
-    <ProjectFolderPage
-      projectId={openedProject.id}
-      folderId={routedFolderId}
-      view={routedFolderView ?? 'overview'}
-      onFolderChange={handleFolderChange}
-    />
-  ) : routedImageDetail && selected ? (
+  const projectContent = routedImageDetail && selected ? (
     <div
       className="relative grid h-full grid-rows-[minmax(0,1fr)]"
       style={{ gridTemplateColumns: `${stripW}px minmax(0,1fr)` }}
@@ -260,11 +227,11 @@ function ThreeColumnLayout({
         <ImageDetail
           jobId={routedImageDetail.jobId}
           path={routedImageDetail.path}
-          onBack={() => setLocation(withWorkshopReturn(characterWorkshopPath(
+          onBack={() => setLocation(characterWorkshopPath(
             openedProject?.id,
             selected.id,
             detailSlot,
-          ), returnContext))}
+          ))}
           onLightbox={setLightboxSrc}
           stripCollapsed={stripW === 0}
           onExpandStrip={() => commitStripW(lastStripW.current)}
@@ -376,7 +343,6 @@ function ThreeColumnLayout({
               selectedId={selected?.id}
               activeProjectId={openedProject?.id ?? null}
               workspace={workspace}
-              currentFolderId={routedFolderId}
               onSelect={(id, name, projectIdOverride) => {
                 const projectId = projectIdOverride ?? projectsFile?.assignments[id];
                 const project = projectsFile?.projects.find(p => p.id === projectId) ?? null;
@@ -411,9 +377,8 @@ function ThreeColumnLayout({
             {projectContent ? (
               <WorkshopShell
                 project={openedProject}
-                workspace={routedFolderId ? undefined : workspace}
-                sectionLabel={routedFolderId ? '文件夹' : undefined}
-                objectLabel={routedFolderId ? folderLabel : shellObjectLabel}
+                workspace={workspace}
+                objectLabel={shellObjectLabel}
               >
                 {projectContent}
               </WorkshopShell>

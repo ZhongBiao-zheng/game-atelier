@@ -221,11 +221,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         load_project_style,
         load_project_worldview,
     )
-    from character_workflow.lib.character_variants import (
-        character_display_name,
-        parent_identity_anchor,
-        read_character_variant,
-    )
+    from character_workflow.lib.character_derivatives import read_character_derivative
     from character_workflow.lib import distill
     from character_workflow.lib.draft_processor import process_drafts
     from character_workflow.lib.identity import list_pending_identity_normalizations
@@ -292,16 +288,14 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
     pending_distill = (
         distill.pending_for_character(active_id) if stage == "D" and active_id else []
     )
-    variant = read_character_variant(active_id) if active_id else None
-    variant_context = None
-    if variant is not None:
-        variant_context = {
-            "parent_character_id": variant.parent_character_id,
-            "parent_name": character_display_name(variant.parent_character_id),
-            "parent_identity_anchor": parent_identity_anchor(variant.parent_character_id),
-            "difference": variant.difference,
+    derivative = read_character_derivative(active_id) if active_id else None
+    derivative_context = None
+    if derivative is not None:
+        derivative_context = {
+            "source_character_id": derivative.source_character_id,
+            "source_character_name": derivative.source_character_name,
+            "source_paths": derivative.source_paths,
             "asset_slot": kind,
-            "parent_canonical": read_canonical(variant.parent_character_id).model_dump(),
         }
 
     return {
@@ -335,7 +329,7 @@ def turn_start(kind: str = "portrait", message: str | None = None) -> dict:
         "project_worldview": load_project_worldview(project_slug),
         # A1：项目风格契约全文（含 frontmatter status）；A2：active 角色定稿表。
         "project_style": load_project_style(project_slug),
-        "variant": variant_context,
+        "derivative": derivative_context,
         "canonical": (
             read_canonical(active_id).model_dump() if active_id else {}
         ),

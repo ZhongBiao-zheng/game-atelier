@@ -6,10 +6,6 @@ import {
   getWorkspaceDescriptor,
   type WorkshopWorkspace,
 } from '@/components/workshop/workspaces';
-import {
-  useWorkshopReturn,
-  workshopFolderPath,
-} from '@/lib/workshopReturn';
 
 export function WorkshopShell({
   project,
@@ -24,7 +20,6 @@ export function WorkshopShell({
   sectionLabel?: string;
   children: React.ReactNode;
 }) {
-  const returnContext = useWorkshopReturn();
   return (
     <section className="flex h-full min-h-0 flex-col bg-background">
       <header className="shrink-0 border-b border-border/40 px-4 py-3 md:px-6">
@@ -46,7 +41,7 @@ export function WorkshopShell({
               </Link>
               <ChevronRight className="size-3 shrink-0 text-muted-foreground/50" aria-hidden />
               <span className="shrink-0" aria-current={objectLabel ? undefined : 'page'}>
-                {sectionLabel ?? (workspace ? getWorkspaceDescriptor(workspace).label : '文件夹')}
+                {sectionLabel ?? (workspace ? getWorkspaceDescriptor(workspace).label : '项目')}
               </span>
             </>
           ) : (
@@ -61,15 +56,6 @@ export function WorkshopShell({
             </>
           )}
         </nav>
-
-        {project && returnContext && (
-          <Link
-            href={workshopFolderPath(project.id, returnContext)}
-            className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            返回文件夹
-          </Link>
-        )}
       </header>
 
       <div className="min-h-0 flex-1">{children}</div>

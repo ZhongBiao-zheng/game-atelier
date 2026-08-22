@@ -268,3 +268,16 @@ def test_empty_project_index_has_no_cover(client):
     assert item["project"]["id"] == project["id"]
     assert item["cover_paths"] == []
     assert item["activity_at"]
+
+
+def test_legacy_folders_file_is_ignored_by_project_activity(client, tmp_path):
+    project = _create_project(client)
+    legacy = tmp_path / "projects" / project["slug"] / "folders.json"
+    legacy.write_text('{"folders":[]}', encoding="utf-8")
+    first = client.get("/api/projects/index").json()["items"][0]["activity_at"]
+
+    time.sleep(0.01)
+    legacy.write_text('{"folders":[{"id":"legacy"}]}', encoding="utf-8")
+
+    second = client.get("/api/projects/index").json()["items"][0]["activity_at"]
+    assert second == first

@@ -198,9 +198,9 @@ def require_shot(root: Path, production_id: str, shot_id: str) -> None:
 
 def list_reference_candidates(project_id: str) -> list[ProjectVideoReferenceCandidate]:
     from character_workflow.lib.canonical import read_canonical
-    from character_workflow.lib.character_variants import (
+    from character_workflow.lib.character_derivatives import (
         character_display_name,
-        read_character_variant,
+        read_character_derivative,
     )
     from character_workflow.lib.stale import (
         character_canonical_status,
@@ -220,7 +220,7 @@ def list_reference_candidates(project_id: str) -> list[ProjectVideoReferenceCand
         character_id for character_id, owner_id in assignments.items() if owner_id == project.id
     )
     for character_id in character_ids:
-        variant = read_character_variant(character_id)
+        derivative = read_character_derivative(character_id)
         status = character_canonical_status(character_id)
         canonical = read_canonical(character_id)
         for slot in AssetSlot:
@@ -233,10 +233,10 @@ def list_reference_candidates(project_id: str) -> list[ProjectVideoReferenceCand
                 continue
             stale_entry = getattr(status, slot.value)
             candidates.append(ProjectVideoReferenceCandidate(
-                kind="character_variant" if variant else "character",
+                kind="character",
                 asset_id=character_id,
                 label=f"{character_display_name(character_id)} · {slot_labels[slot]}",
-                detail="角色皮肤定稿" if variant else "角色定稿",
+                detail="角色衍生定稿" if derivative else "角色定稿",
                 path=entry.path,
                 stale=bool(
                     stale_entry and (stale_entry.spec_stale or stale_entry.style_stale)

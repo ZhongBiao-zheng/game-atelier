@@ -65,8 +65,9 @@ def _seed_project_reference_assets(isolated_data_root: Path):
         (character_root / "spec.md").write_text(f"# {name}\n", encoding="utf-8")
         assign_character(character_id, project.id)
         canonical.set_canonical(character_id, AssetSlot.PORTRAIT, str(portrait))
-    (isolated_data_root / "characters" / "cao-cao-summer" / "variant.json").write_text(
-        '{"parent_character_id":"cao-cao","difference":"夏日皮肤","created_at":"2026-08-20T00:00:00Z"}',
+    (isolated_data_root / "characters" / "cao-cao-summer" / "derivative.json").write_text(
+        '{"source_character_id":"cao-cao","source_character_name":"曹操",'
+        '"source_paths":[],"created_at":"2026-08-20T00:00:00Z"}',
         encoding="utf-8",
     )
     ui_schemes.create_scheme(project.id, UiSchemeCreate(name="V2"))
@@ -84,7 +85,7 @@ def _seed_project_reference_assets(isolated_data_root: Path):
     return project
 
 
-def test_project_video_reference_candidates_include_character_variant_and_ui_canonical(
+def test_project_video_reference_candidates_include_character_derivative_and_ui_canonical(
     isolated_data_root: Path,
 ):
     project = _seed_project_reference_assets(isolated_data_root)
@@ -93,7 +94,7 @@ def test_project_video_reference_candidates_include_character_variant_and_ui_can
 
     assert [(item.kind, item.label, item.path) for item in candidates] == [
         ("character", "曹操 · 立绘", "characters/cao-cao/portrait/v1.png"),
-        ("character_variant", "曹操·夏日 · 立绘", "characters/cao-cao-summer/portrait/v1.png"),
+        ("character", "曹操·夏日 · 立绘", "characters/cao-cao-summer/portrait/v1.png"),
         ("ui_screen", "V2 · home", "projects/sanguo/ui/v2/screens/home/v1.png"),
     ]
 
@@ -412,7 +413,7 @@ def test_video_api_lists_project_references_and_updates_shot_draft(client, isola
 
     assert candidates.status_code == 200
     assert {item["kind"] for item in candidates.json()["candidates"]} == {
-        "character", "character_variant", "ui_screen",
+        "character", "ui_screen",
     }
     assert updated.status_code == 200
     assert updated.json() == {"paths": selected}

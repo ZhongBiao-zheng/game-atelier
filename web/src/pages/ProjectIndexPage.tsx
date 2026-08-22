@@ -113,7 +113,7 @@ export function ProjectIndexPage({
           <p className="text-xs uppercase tracking-label text-muted-foreground">项目目录</p>
           <h1 className="font-display text-display italic text-foreground">全部项目</h1>
           <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            每个项目保存自己的世界观、文件夹与美术、UI、视频资产。
+            每个项目保存自己的世界观与角色、UI、视频资产。
           </p>
         </header>
 

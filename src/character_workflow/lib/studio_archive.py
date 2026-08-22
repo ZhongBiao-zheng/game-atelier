@@ -10,7 +10,7 @@ from typing import Any
 
 from character_workflow.lib import data_root
 from character_workflow.lib.asset_versions import asset_output_lock, next_asset_path
-from character_workflow.lib.character_variants import character_display_name
+from character_workflow.lib.character_derivatives import character_display_name
 from character_workflow.lib.jobs import new_job_id, read_job, save_job
 from character_workflow.lib.projects import read_projects, resolve_project
 from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus

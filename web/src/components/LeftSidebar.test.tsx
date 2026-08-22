@@ -23,9 +23,6 @@ beforeEach(() => {
         }),
       };
     }
-    if (url === '/api/projects/p1/folders' && !init) {
-      return { ok: true, json: async () => ({ folders: [] }) };
-    }
     if (url === '/api/active-character') {
       return { ok: true, json: async () => ({ active_id: 'shadow', updated_at: '' }) };
     }
@@ -86,7 +83,7 @@ describe('LeftSidebar', () => {
 
   it('在当前项目内一次创建并归属角色', async () => {
     const created = {
-      id: 'char-summer', name: '夏日角色', status: 'idle', latest_job_id: null, variant: null,
+      id: 'char-summer', name: '夏日角色', status: 'idle', latest_job_id: null, derivative: null,
     };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/characters' && !init) return { ok: true, json: async () => [] };
@@ -98,9 +95,6 @@ describe('LeftSidebar', () => {
             assignments: {},
           }),
         };
-      }
-      if (url === '/api/projects/p1/folders' && !init) {
-        return { ok: true, json: async () => ({ folders: [] }) };
       }
       if (url === '/api/characters' && init?.method === 'POST') {
         return { ok: true, json: async () => created };
@@ -174,7 +168,7 @@ describe('LeftSidebar', () => {
     expect(screen.queryByRole('button', { name: '暗影' })).not.toBeInTheDocument();
   });
 
-  it('项目内稳定显示首页、文件夹和资产库，角色名册只在美术视图出现', async () => {
+  it('项目内稳定显示首页和资产库，角色列表只在角色视图出现', async () => {
     const projectFetch = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/characters' && !init) {
         return {
@@ -196,12 +190,6 @@ describe('LeftSidebar', () => {
       if (url === '/api/active-character') {
         return { ok: true, json: async () => ({ active_id: null, updated_at: '' }) };
       }
-      if (url === '/api/projects/p1/folders' && !init) {
-        return {
-          ok: true,
-          json: async () => ({ folders: [{ id: 'folder-summer', name: '夏日版本', note: '', created_at: '', items: [] }] }),
-        };
-      }
       return { ok: false, status: 404, json: async () => ({}) };
     });
     vi.stubGlobal('fetch', projectFetch);
@@ -211,11 +199,8 @@ describe('LeftSidebar', () => {
     );
     const nav = await screen.findByRole('navigation', { name: '魔幻 项目导航' });
     expect(within(nav).getByRole('link', { name: '项目首页' })).toHaveAttribute('aria-current', 'page');
-    expect(within(nav).getByText('文件夹')).toBeInTheDocument();
-    expect(within(nav).getByRole('link', { name: '夏日版本' })).toHaveAttribute(
-      'href', '/workshop/p1/folders/folder-summer/overview',
-    );
-    expect(within(nav).getByRole('button', { name: '新建文件夹' })).toBeInTheDocument();
+    expect(within(nav).queryByText('文件夹')).not.toBeInTheDocument();
+    expect(within(nav).queryByRole('button', { name: '新建文件夹' })).not.toBeInTheDocument();
     expect(within(nav).getByText('资产库')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '暗影' })).not.toBeInTheDocument();
     overview.unmount();
@@ -225,66 +210,16 @@ describe('LeftSidebar', () => {
     expect(screen.getByRole('button', { name: '暗影' })).toBeInTheDocument();
   });
 
-  it('可在项目册新建文件夹并调整顺序', async () => {
-    const project = { id: 'p1', slug: 's1', name: '魔幻', created_at: '' };
-    const initial = {
-      folders: [
-        { id: 'folder-a', name: '版本 A', note: '', created_at: '', items: [] },
-        { id: 'folder-b', name: '版本 B', note: '', created_at: '', items: [] },
-      ],
-    };
-    let current = initial;
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/characters' && !init) return { ok: true, json: async () => [] };
-      if (url === '/api/projects' && !init) {
-        return { ok: true, json: async () => ({ projects: [project], assignments: {} }) };
-      }
-      if (url === '/api/projects/p1/folders' && !init) {
-        return { ok: true, json: async () => current };
-      }
-      if (url === '/api/projects/p1/folders' && init?.method === 'POST') {
-        current = { folders: [{ id: 'folder-new', name: '夏日版本', note: '', created_at: '', items: [] }, ...initial.folders] };
-        return { ok: true, json: async () => current };
-      }
-      if (url === '/api/projects/p1/folders/reorder' && init?.method === 'POST') {
-        const ids = JSON.parse(String(init.body)).ordered_ids as string[];
-        current = {
-          folders: ids.map(id => current.folders.find(folder => folder.id === id)!),
-        };
-        return { ok: true, json: async () => current };
-      }
-      return { ok: false, status: 404, text: async () => '', json: async () => ({}) };
-    }));
-
-    render(<LeftSidebar sseSignal={0} activeProjectId="p1" onSelect={vi.fn()} />);
-    await screen.findByRole('link', { name: '版本 A' });
-    fireEvent.click(screen.getByRole('button', { name: '新建文件夹' }));
-    fireEvent.change(screen.getByLabelText('新文件夹名称'), { target: { value: '夏日版本' } });
-    fireEvent.keyDown(screen.getByLabelText('新文件夹名称'), { key: 'Enter' });
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
-      '/api/projects/p1/folders',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: '夏日版本', note: '' }) }),
-    ));
-
-    fireEvent.click(screen.getByRole('button', { name: '上移文件夹 版本 B' }));
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
-      '/api/projects/p1/folders/reorder',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ ordered_ids: ['folder-new', 'folder-b', 'folder-a'] }),
-      }),
-    ));
-  });
-
-  it('从资产库母角色创建皮肤后进入同项目完整角色路径', async () => {
+  it('从角色创建平级衍生后进入同项目角色路径', async () => {
     const project = { id: 'p1', slug: 's1', name: '魔幻', created_at: '' };
     const parent = {
-      id: 'shadow', name: '暗影', status: 'idle', latest_job_id: null, variant: null,
+      id: 'shadow', name: '暗影', status: 'idle', latest_job_id: null, derivative: null,
     };
     const created = {
-      id: 'char-variant', name: '暗影·夏日', status: 'idle', latest_job_id: null,
-      variant: {
-        parent_character_id: 'shadow', difference: '白色短袍', created_at: '2026-08-20T00:00:00Z',
+      id: 'char-derivative', name: '暗影·夏日', status: 'idle', latest_job_id: null,
+      derivative: {
+        source_character_id: 'shadow', source_character_name: '暗影', source_paths: [],
+        created_at: '2026-08-20T00:00:00Z',
       },
     };
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -297,10 +232,10 @@ describe('LeftSidebar', () => {
           json: async () => ({ projects: [project], assignments: { shadow: 'p1' } }),
         };
       }
-      if (url === '/api/projects/p1/folders' && !init) {
-        return { ok: true, json: async () => ({ folders: [] }) };
+      if (url === '/api/projects/p1/gallery?category=all&limit=40' && !init) {
+        return { ok: true, json: async () => ({ items: [], next_cursor: null }) };
       }
-      if (url === '/api/characters/shadow/variants' && init?.method === 'POST') {
+      if (url === '/api/characters/shadow/derivatives' && init?.method === 'POST') {
         return { ok: true, status: 200, json: async () => created };
       }
       return { ok: false, status: 404, text: async () => '', json: async () => ({}) };
@@ -316,24 +251,21 @@ describe('LeftSidebar', () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: '为 暗影 新建皮肤' }));
-    const form = screen.getByRole('form', { name: '为 暗影 新建皮肤' });
-    fireEvent.change(within(form).getByLabelText('皮肤名称（必填）'), {
+    fireEvent.click(await screen.findByRole('button', { name: '为 暗影 创建衍生' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('衍生名称'), {
       target: { value: '暗影·夏日' },
     });
-    fireEvent.change(within(form).getByLabelText('相对母角色的差异（必填）'), {
-      target: { value: '白色短袍' },
-    });
-    fireEvent.click(within(form).getByRole('button', { name: '创建皮肤' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '创建衍生' }));
 
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
-      '/api/characters/shadow/variants',
+      '/api/characters/shadow/derivatives',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ name: '暗影·夏日', difference: '白色短袍' }),
+        body: JSON.stringify({ name: '暗影·夏日', source_paths: [] }),
       }),
     ));
-    expect(onSelect).toHaveBeenCalledWith('char-variant', '暗影·夏日', 'p1');
-    expect(await screen.findByText('皮肤')).toBeInTheDocument();
+    expect(onSelect).toHaveBeenCalledWith('char-derivative', '暗影·夏日', 'p1');
+    expect(await screen.findByRole('button', { name: '暗影·夏日' })).toBeInTheDocument();
   });
 });

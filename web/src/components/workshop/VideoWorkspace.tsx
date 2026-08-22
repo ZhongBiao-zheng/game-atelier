@@ -9,7 +9,6 @@ import type {
   ProjectVideoShot,
 } from '@/api/videos';
 import { cn } from '@/lib/utils';
-import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { useClipboard } from '@/hooks/useClipboard';
 import { Button } from '@/components/ui/button';
@@ -89,7 +88,6 @@ function ProductionList({ projectId, productions }: {
   projectId: string;
   productions: ProjectVideoProduction[];
 }) {
-  const returnContext = useWorkshopReturn();
   return (
     <section className="space-y-4" data-testid="project-videos">
       <div>
@@ -102,7 +100,7 @@ function ProductionList({ projectId, productions }: {
           return (
             <Link
               key={production.production_id}
-              href={withWorkshopReturn(`/workshop/${encodeURIComponent(projectId)}/video/${encodeURIComponent(production.production_id)}`, returnContext)}
+              href={`/workshop/${encodeURIComponent(projectId)}/video/${encodeURIComponent(production.production_id)}`}
               className="grid gap-2 px-4 py-4 transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:grid-cols-[minmax(160px,0.8fr)_minmax(180px,1fr)_auto] sm:items-center"
             >
               <div>
@@ -123,12 +121,11 @@ function ProductionDetail({ projectId, production }: {
   projectId: string;
   production: ProjectVideoProduction;
 }) {
-  const returnContext = useWorkshopReturn();
   const galleryVisibility = useGalleryHidden();
   return (
     <section className="space-y-6" data-testid="project-videos">
       <div className="space-y-2">
-        <Link href={withWorkshopReturn(`/workshop/${encodeURIComponent(projectId)}/video`, returnContext)} className="text-xs text-muted-foreground hover:text-foreground">
+        <Link href={`/workshop/${encodeURIComponent(projectId)}/video`} className="text-xs text-muted-foreground hover:text-foreground">
           视频 / 企划列表
         </Link>
         <h2 className="font-display text-display italic text-foreground">{production.title}</h2>
@@ -145,7 +142,7 @@ function ProductionDetail({ projectId, production }: {
             {production.shots.map((shot, index) => (
               <li key={shot.shot_id}>
                 <Link
-                  href={withWorkshopReturn(`/workshop/${encodeURIComponent(projectId)}/video/${encodeURIComponent(production.production_id)}/shots/${encodeURIComponent(shot.shot_id)}`, returnContext)}
+                  href={`/workshop/${encodeURIComponent(projectId)}/video/${encodeURIComponent(production.production_id)}/shots/${encodeURIComponent(shot.shot_id)}`}
                   className="grid gap-2 px-4 py-3 transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:grid-cols-[48px_minmax(140px,0.7fr)_minmax(180px,1fr)_auto] sm:items-center"
                 >
                   <span className="font-mono text-xs text-muted-foreground">{String(index + 1).padStart(2, '0')}</span>
@@ -190,7 +187,6 @@ function ShotDetail({
   onSelected: (productionId: string, shotId: string, path: string | null) => Promise<void>;
   onReferences: (productionId: string, shotId: string, paths: string[]) => Promise<void>;
 }) {
-  const returnContext = useWorkshopReturn();
   const galleryVisibility = useGalleryHidden();
   const [selecting, setSelecting] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
@@ -227,7 +223,7 @@ function ShotDetail({
   return (
     <section className="space-y-5" data-testid="project-videos">
       <div className="space-y-2">
-        <Link href={withWorkshopReturn(`/workshop/${encodeURIComponent(projectId)}/video/${encodeURIComponent(production.production_id)}`, returnContext)} className="text-xs text-muted-foreground hover:text-foreground">
+        <Link href={`/workshop/${encodeURIComponent(projectId)}/video/${encodeURIComponent(production.production_id)}`} className="text-xs text-muted-foreground hover:text-foreground">
           视频 / {production.title} / 镜头板
         </Link>
         <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -327,7 +323,7 @@ function ReferenceSelector({
     <section className="space-y-3 rounded-lg border border-border bg-card/30 p-4" aria-label="镜头参考素材">
       <div>
         <h3 className="text-base font-medium text-foreground">下一次生成的参考素材</h3>
-        <p className="mt-1 text-xs text-muted-foreground">直接选择项目里的角色、皮肤和 UI 页面定稿。生成时会把实际路径写入 Job 历史。</p>
+        <p className="mt-1 text-xs text-muted-foreground">直接选择项目里的角色、角色衍生和 UI 页面定稿。生成时会把实际路径写入 Job 历史。</p>
       </div>
       {visibleCandidates.length > 0 ? (
         <div className="flex gap-3 overflow-x-auto pb-1">

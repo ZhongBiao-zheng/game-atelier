@@ -6,9 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { WorkshopShell } from './WorkshopShell';
 
 describe('WorkshopShell', () => {
-  it('从文件夹进入资产后保留返回路径且不重复显示工作区标签栏', () => {
+  it('只显示稳定面包屑，不重复显示工作区标签栏', () => {
     const location = memoryLocation({
-      path: '/workshop/p1/video/pv?fromFolder=folder-summer&fromView=overview',
+      path: '/workshop/p1/video/pv',
       static: false,
     });
     render(
@@ -22,9 +22,8 @@ describe('WorkshopShell', () => {
       </Router>,
     );
 
-    expect(screen.getByRole('link', { name: '返回文件夹' })).toHaveAttribute(
-      'href', '/workshop/p1/folders/folder-summer/overview',
-    );
+    expect(screen.getByRole('link', { name: '项目一' })).toHaveAttribute('href', '/workshop/p1/overview');
+    expect(screen.getByText('视频')).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
   });
 });

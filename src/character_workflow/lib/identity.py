@@ -219,11 +219,6 @@ def rename_character_id(old_id: str, new_id: str) -> dict[str, object]:
 
     old_dir.rename(new_dir)
 
-    from character_workflow.lib.character_variants import replace_parent_reference
-    from character_workflow.lib.project_folders import replace_character_reference
-
-    replace_parent_reference(old_id, new_id)
-
     active_path = _runtime_dir() / "active-character.json"
     if active_path.exists():
         try:
@@ -254,6 +249,5 @@ def rename_character_id(old_id: str, new_id: str) -> dict[str, object]:
             _rewrite_job_file(job_path, old_id, new_id)
 
     _rewrite_pending_draft_character_id(old_id, new_id)
-    replace_character_reference(old_id, new_id)
 
     return {"old_id": old_id, "new_id": new_id, "ok": True}

@@ -16,7 +16,6 @@ import {
   getWorkspaceDescriptor,
   type WorkshopWorkspace,
 } from '@/components/workshop/workspaces';
-import { ProjectFoldersNavigation } from '@/components/workshop/ProjectFoldersNavigation';
 
 export function ProjectNavigation({
   project,
@@ -26,7 +25,6 @@ export function ProjectNavigation({
   onNavigate,
   onNewCharacter,
   renderCharacter,
-  currentFolderId,
 }: {
   project: Project;
   projects: Project[];
@@ -35,14 +33,13 @@ export function ProjectNavigation({
   onNavigate?: () => void;
   onNewCharacter: () => void;
   renderCharacter: (character: CharacterEntry) => React.ReactNode;
-  currentFolderId?: string;
 }) {
   const projectBase = `/workshop/${encodeURIComponent(project.id)}`;
   const overview = getWorkspaceDescriptor('overview');
   const art = getWorkspaceDescriptor('art');
   const ui = getWorkspaceDescriptor('ui');
   const video = getWorkspaceDescriptor('video');
-  const currentWorkspace = currentFolderId ? null : workspace;
+  const currentWorkspace = workspace;
 
   return (
     <nav aria-label={`${project.name} 项目导航`} className="space-y-4">
@@ -56,12 +53,6 @@ export function ProjectNavigation({
         projectBase={projectBase}
         descriptor={overview}
         current={currentWorkspace === overview.id}
-        onNavigate={onNavigate}
-      />
-
-      <ProjectFoldersNavigation
-        projectId={project.id}
-        currentFolderId={currentFolderId}
         onNavigate={onNavigate}
       />
 

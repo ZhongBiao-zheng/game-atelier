@@ -1,10 +1,10 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Layers2, LibraryBig, Trash2, UserPlus } from 'lucide-react';
 import { Link } from 'wouter';
 
 import { apiError, clip } from '@/api/http';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { CreateVariantForm } from '@/components/workshop/CreateVariantForm';
+import { CreateDerivativeDialog } from '@/components/workshop/CreateDerivativeDialog';
 import { ProjectNavigation } from '@/components/workshop/ProjectNavigation';
 import type { WorkshopWorkspace } from '@/components/workshop/workspaces';
 import { Input } from '@/components/ui/input';
@@ -19,7 +19,6 @@ interface Props {
   activeProjectId?: string | null;
   workspace?: WorkshopWorkspace;
   onNavigate?: () => void;
-  currentFolderId?: string;
 }
 
 export function LeftSidebar({
@@ -30,7 +29,6 @@ export function LeftSidebar({
   activeProjectId = null,
   workspace = 'overview',
   onNavigate,
-  currentFolderId,
 }: Props) {
   const [characters, setCharacters] = useState<CharacterEntry[]>([]);
   const [projects, setProjects] = useState<ProjectsFile>({ projects: [], assignments: {} });
@@ -38,11 +36,12 @@ export function LeftSidebar({
   const [draftName, setDraftName] = useState('');
   const [creatingCharacter, setCreatingCharacter] = useState(false);
   const [newCharacterName, setNewCharacterName] = useState('');
-  const [variantParentId, setVariantParentId] = useState<string | null>(null);
+  const [derivativeSource, setDerivativeSource] = useState<CharacterEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CharacterEntry | null>(null);
   const editInputRef = useRef<HTMLInputElement | null>(null);
   const newCharacterInputRef = useRef<HTMLInputElement | null>(null);
+  const derivativeTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     fetch('/api/characters').then(response => response.json()).then(setCharacters);
@@ -61,9 +60,7 @@ export function LeftSidebar({
     ? projects.projects.find(project => project.id === activeProjectId) ?? null
     : null;
   const projectCharacters = activeProject
-    ? arrangeCharacterVariants(characters.filter(
-      character => projects.assignments[character.id] === activeProject.id,
-    ))
+    ? characters.filter(character => projects.assignments[character.id] === activeProject.id)
     : [];
 
   function startCharacterEdit(character: CharacterEntry, event: React.MouseEvent) {
@@ -205,7 +202,6 @@ export function LeftSidebar({
             onNavigate={onNavigate}
             onNewCharacter={startNewCharacter}
             renderCharacter={renderCharacter}
-            currentFolderId={currentFolderId}
           />
         </div>
 
@@ -225,6 +221,25 @@ export function LeftSidebar({
         onConfirm={() => void confirmDelete()}
         onCancel={() => setDeleteTarget(null)}
       />
+      <CreateDerivativeDialog
+        source={derivativeSource}
+        projectId={activeProject.id}
+        open={derivativeSource !== null}
+        onOpenChange={open => {
+          if (open) return;
+          setDerivativeSource(null);
+          window.requestAnimationFrame(() => derivativeTriggerRef.current?.focus());
+        }}
+        onCreated={entry => {
+          setCharacters(current => [...current, entry]);
+          setProjects(current => ({
+            ...current,
+            assignments: { ...current.assignments, [entry.id]: activeProject.id },
+          }));
+          setDerivativeSource(null);
+          onSelect(entry.id, entry.name, activeProject.id);
+        }}
+      />
     </>
   );
 
@@ -233,27 +248,26 @@ export function LeftSidebar({
     const isEditing = character.id === editingId;
     const projectId = projects.assignments[character.id];
     return (
-      <Fragment key={character.id}>
         <li
-          onClick={() => !isEditing && onSelect(character.id, character.name)}
+          key={character.id}
+          onClick={() => !isEditing && onSelect(character.id, character.name, projectId)}
           onDoubleClick={event => startCharacterEdit(character, event)}
           onKeyDown={event => {
             if (isEditing) return;
             if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault();
-              onSelect(character.id, character.name);
+              onSelect(character.id, character.name, projectId);
             }
           }}
           role={isEditing ? undefined : 'button'}
           tabIndex={isEditing ? undefined : 0}
           aria-label={isEditing ? undefined : character.name}
           aria-pressed={isEditing ? undefined : isActive}
-          title={character.variant ? '双击重命名 · 跟随母角色归属项目' : '双击重命名'}
+          title="双击重命名"
           className={cn(
             'group/character relative flex min-h-10 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
             isEditing ? 'cursor-text' : 'cursor-pointer',
             isActive ? 'bg-secondary text-foreground' : 'text-foreground/85 hover:bg-accent/50',
-            character.variant && 'ml-4',
           )}
         >
           {isActive && <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary" />}
@@ -272,10 +286,7 @@ export function LeftSidebar({
               className="h-7 min-w-0 flex-1 text-xs"
             />
           ) : (
-            <span className="min-w-0 flex-1">
-              <span className="block truncate">{character.name}</span>
-              {character.variant && <span className="block text-xs text-muted-foreground">皮肤</span>}
-            </span>
+            <span className="min-w-0 flex-1 truncate">{character.name}</span>
           )}
           <StatusBadge status={character.status} />
           {!isEditing && (
@@ -283,15 +294,15 @@ export function LeftSidebar({
               'flex items-center transition-opacity group-hover/character:opacity-100 group-focus-within/character:opacity-100',
               isActive ? 'opacity-100' : 'opacity-0',
             )}>
-              {!character.variant && projectId && (
+              {projectId && (
                 <button
                   type="button"
                   onClick={event => {
                     event.stopPropagation();
-                    setVariantParentId(current => current === character.id ? null : character.id);
+                    derivativeTriggerRef.current = event.currentTarget;
+                    setDerivativeSource(character);
                   }}
-                  aria-label={`为 ${character.name} 新建皮肤`}
-                  aria-expanded={variantParentId === character.id}
+                  aria-label={`为 ${character.name} 创建衍生`}
                   className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <Layers2 className="size-4" aria-hidden />
@@ -311,44 +322,8 @@ export function LeftSidebar({
             </div>
           )}
         </li>
-        {variantParentId === character.id && projectId && (
-          <li className="ml-4 py-2">
-            <CreateVariantForm
-              parent={character}
-              onCancel={() => setVariantParentId(null)}
-              onCreated={entry => {
-                setCharacters(current => [...current, entry]);
-                setProjects(current => ({
-                  ...current,
-                  assignments: { ...current.assignments, [entry.id]: projectId },
-                }));
-                setVariantParentId(null);
-                onSelect(entry.id, entry.name, projectId);
-              }}
-            />
-          </li>
-        )}
-      </Fragment>
     );
   }
-}
-
-function arrangeCharacterVariants(characters: CharacterEntry[]): CharacterEntry[] {
-  const children = new Map<string, CharacterEntry[]>();
-  for (const character of characters) {
-    const parentId = character.variant?.parent_character_id;
-    if (parentId) children.set(parentId, [...(children.get(parentId) ?? []), character]);
-  }
-  const arranged: CharacterEntry[] = [];
-  const included = new Set<string>();
-  for (const character of characters) {
-    if (character.variant) continue;
-    arranged.push(character, ...(children.get(character.id) ?? []));
-    included.add(character.id);
-    for (const child of children.get(character.id) ?? []) included.add(child.id);
-  }
-  arranged.push(...characters.filter(character => !included.has(character.id)));
-  return arranged;
 }
 
 function CharacterAvatar({ name, thumbnail, active }: {

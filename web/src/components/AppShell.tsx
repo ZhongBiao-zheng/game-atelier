@@ -173,23 +173,6 @@ export function AppShell() {
               />
             )}
           </Route>
-          <Route path="/workshop/:projectId/folders/:folderId/:folderView">
-            {(params) => (
-              <CharacterDetail
-                projectId={params.projectId}
-                folderId={params.folderId}
-                folderView={isWorkshopWorkspace(params.folderView) ? params.folderView : 'overview'}
-              />
-            )}
-          </Route>
-          <Route path="/workshop/:projectId/folders/:folderId">
-            {(params) => (
-              <Redirect
-                to={`/workshop/${encodeURIComponent(params.projectId)}/folders/${encodeURIComponent(params.folderId)}/overview`}
-                replace
-              />
-            )}
-          </Route>
           <Route path="/workshop/:projectId/art/characters/:id/:assetSlot/:jobId/:imagePath">
             {(params) => (
               <CharacterDetail

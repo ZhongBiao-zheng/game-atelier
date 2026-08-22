@@ -20,14 +20,12 @@ from fastapi.responses import FileResponse
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
-from character_workflow.lib.character_variants import (
-    assign_character_family,
+from character_workflow.lib.character_derivatives import (
     character_display_name,
-    child_variant_ids,
-    create_character_variant,
+    create_character_derivative,
     initialize_character_directory,
     new_temporary_character_id,
-    read_character_variant,
+    read_character_derivative,
 )
 from character_workflow.lib.atomic_io import (
     atomic_write_bytes,
@@ -52,21 +50,16 @@ from character_workflow.lib.project_gallery import (
     project_index,
     read_gallery_hidden,
 )
-from character_workflow.lib.project_folders import (
-    add_folder_item, create_folder, delete_folder, read_project_folders,
-    remove_character_references, remove_folder_item, reorder_folders, update_folder,
-)
 from pydantic import BaseModel, Field, ValidationError
 from pydantic import field_validator
 
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
-    CharacterVariantCreate,
+    CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
     FeedbackPost, GalleryMedia, Job, JobKind, JobParams, JobStatus, ProjectCreate,
     ProjectRename, ProjectGalleryResponse, ProjectIndexResponse,
-    ProjectFolderCreate, ProjectFolderItem, ProjectFolderItemKind, ProjectFolderReorder,
-    ProjectFoldersFile, ProjectFolderUpdate, ProjectVideoReferencesResponse,
+    ProjectVideoReferencesResponse,
     ProjectVideosResponse, ProjectWorkspaceSummary,
     ProjectsFile,
     ScreenCanonicalSet, ScreenCanonicalStatusFile, SpecPatch, VideoSelectedResponse,
@@ -163,7 +156,7 @@ def get_characters() -> list[CharacterEntry]:
         out.append(CharacterEntry(
             id=d.name, name=character_display_name(d.name), status="idle", latest_job_id=None,
             thumbnail=_latest_portrait(d, root),
-            variant=read_character_variant(d.name),
+            derivative=read_character_derivative(d.name),
         ))
     return out
 
@@ -553,69 +546,94 @@ def create_character(payload: CharacterCreate) -> CharacterEntry:
         shutil.rmtree(data_root.characters_dir() / char_id, ignore_errors=True)
         raise
     return CharacterEntry(
-        id=char_id, name=name, status="idle", latest_job_id=None, variant=None,
+        id=char_id, name=name, status="idle", latest_job_id=None, derivative=None,
     )
 
 
-@router.post("/characters/{parent_character_id}/variants", response_model=CharacterEntry)
-def post_character_variant(
-    parent_character_id: str,
-    payload: CharacterVariantCreate,
+def _resolve_derivative_sources(
+    source_character_id: str,
+    project_id: str,
+    requested_paths: list[str],
+) -> list[Path]:
+    from character_workflow.lib.canonical import read_canonical
+
+    root = data_root.resolve_data_root().resolve()
+    uploads = data_root.runtime_dir().resolve() / "uploads"
+    canonical = read_canonical(source_character_id)
+    raw_paths = [
+        (entry.path, False)
+        for entry in (canonical.portrait, canonical.promo, canonical.turnaround)
+        if entry is not None
+    ]
+    raw_paths.extend((path, True) for path in requested_paths)
+
+    resolved: list[Path] = []
+    seen: set[Path] = set()
+    for raw_path, required in raw_paths:
+        candidate = Path(raw_path)
+        absolute = (candidate if candidate.is_absolute() else root / candidate).resolve()
+        if absolute in seen:
+            continue
+        if not absolute.is_file() and not required:
+            continue
+        if not absolute.is_file() or absolute.suffix.lower() not in _IMAGE_UPLOAD_EXTS:
+            raise ValueError(f"找不到可用的衍生来源图片：{raw_path}")
+        if absolute.is_relative_to(uploads):
+            pass
+        else:
+            try:
+                relative = absolute.relative_to(root).as_posix()
+            except ValueError as error:
+                raise ValueError("衍生来源必须来自当前项目或本次上传") from error
+            if project_id_for_media_path(relative) != project_id:
+                raise ValueError("衍生来源必须来自当前项目或本次上传")
+        seen.add(absolute)
+        resolved.append(absolute)
+    return resolved
+
+
+@router.post("/characters/{source_character_id}/derivatives", response_model=CharacterEntry)
+def post_character_derivative(
+    source_character_id: str,
+    payload: CharacterDerivativeCreate,
 ) -> CharacterEntry:
-    parent_dir = data_root.characters_dir() / parent_character_id
-    if not (parent_dir / "spec.md").is_file():
-        raise HTTPException(404, detail=f"找不到母角色 {parent_character_id}")
+    source_dir = data_root.characters_dir() / source_character_id
+    if not (source_dir / "spec.md").is_file():
+        raise HTTPException(404, detail=f"找不到来源角色 {source_character_id}")
     projects = read_projects()
-    project_id = projects.assignments.get(parent_character_id)
+    project_id = projects.assignments.get(source_character_id)
     if project_id is None:
-        raise HTTPException(400, detail="母角色必须先归属项目，才能创建皮肤")
-    if payload.folder_id is not None:
-        try:
-            folders = read_project_folders(project_id)
-        except KeyError as error:
-            raise HTTPException(404, detail=f"找不到母角色所属项目 {project_id}") from error
-        if not any(folder.id == payload.folder_id for folder in folders.folders):
-            raise HTTPException(404, detail=f"找不到当前项目文件夹 {payload.folder_id}")
+        raise HTTPException(400, detail="来源角色必须先归属项目，才能创建衍生")
     try:
-        variant_id, variant = create_character_variant(
-            parent_character_id,
+        source_paths = _resolve_derivative_sources(
+            source_character_id,
+            project_id,
+            payload.source_paths,
+        )
+        derivative_id, derivative = create_character_derivative(
+            source_character_id,
             payload.name,
-            payload.difference,
+            source_paths,
         )
     except FileNotFoundError as error:
-        raise HTTPException(404, detail=f"找不到母角色 {parent_character_id}") from error
+        raise HTTPException(404, detail=f"找不到来源角色 {source_character_id}") from error
     except ValueError as error:
         raise HTTPException(400, detail=str(error)) from error
     try:
-        if payload.folder_id is not None:
-            add_folder_item(
-                project_id,
-                payload.folder_id,
-                ProjectFolderItem(kind="character", asset_id=variant_id),
-            )
-        write_active(variant_id)
+        write_active(derivative_id)
     except Exception:
-        if payload.folder_id is not None:
-            try:
-                remove_folder_item(
-                    project_id,
-                    payload.folder_id,
-                    ProjectFolderItem(kind="character", asset_id=variant_id),
-                )
-            except Exception:
-                logger.warning("回滚皮肤文件夹引用失败: %s", variant_id, exc_info=True)
         try:
-            assign_character(variant_id, None)
+            assign_character(derivative_id, None)
         except Exception:
-            logger.warning("回滚皮肤项目归属失败: %s", variant_id, exc_info=True)
-        shutil.rmtree(data_root.characters_dir() / variant_id, ignore_errors=True)
+            logger.warning("回滚角色衍生项目归属失败: %s", derivative_id, exc_info=True)
+        shutil.rmtree(data_root.characters_dir() / derivative_id, ignore_errors=True)
         raise
     return CharacterEntry(
-        id=variant_id,
+        id=derivative_id,
         name=payload.name,
         status="idle",
         latest_job_id=None,
-        variant=variant,
+        derivative=derivative,
     )
 
 
@@ -625,15 +643,7 @@ def delete_character(character_id: str) -> dict:
     target = (chars_dir / character_id).resolve()
     if not target.is_relative_to(chars_dir) or not target.is_dir():
         raise HTTPException(404, detail=f"找不到角色 {character_id}（目录不存在，可能已被删除）")
-    children = child_variant_ids(character_id)
-    if children:
-        raise HTTPException(
-            409,
-            detail=f"这个母角色还有 {len(children)} 个皮肤，请先处理皮肤再删除母角色",
-        )
-
     shutil.rmtree(target)
-    remove_character_references(character_id)
     assign_character(character_id, None)
     if read_active().active_id == character_id:
         write_active(None)
@@ -665,97 +675,6 @@ def delete_job(job_id: str) -> dict:
 @router.get("/projects", response_model=ProjectsFile)
 def get_projects() -> ProjectsFile:
     return read_projects()
-
-
-@router.get("/projects/{project_id}/folders", response_model=ProjectFoldersFile)
-def get_project_folders(project_id: str) -> ProjectFoldersFile:
-    try:
-        return read_project_folders(project_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
-
-
-@router.post("/projects/{project_id}/folders", response_model=ProjectFoldersFile)
-def post_project_folder(project_id: str, payload: ProjectFolderCreate) -> ProjectFoldersFile:
-    try:
-        return create_folder(project_id, payload.name, payload.note)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
-
-
-@router.post("/projects/{project_id}/folders/reorder", response_model=ProjectFoldersFile)
-def post_project_folders_reorder(
-    project_id: str,
-    payload: ProjectFolderReorder,
-) -> ProjectFoldersFile:
-    try:
-        return reorder_folders(project_id, payload.ordered_ids)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
-
-
-@router.post(
-    "/projects/{project_id}/folders/{folder_id}",
-    response_model=ProjectFoldersFile,
-)
-def post_project_folder_update(
-    project_id: str,
-    folder_id: str,
-    payload: ProjectFolderUpdate,
-) -> ProjectFoldersFile:
-    try:
-        return update_folder(project_id, folder_id, payload.name, payload.note)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="找不到这个文件夹") from None
-
-
-@router.delete(
-    "/projects/{project_id}/folders/{folder_id}",
-    response_model=ProjectFoldersFile,
-)
-def delete_project_folder(project_id: str, folder_id: str) -> ProjectFoldersFile:
-    try:
-        return delete_folder(project_id, folder_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="找不到这个文件夹") from None
-
-
-@router.post(
-    "/projects/{project_id}/folders/{folder_id}/items",
-    response_model=ProjectFoldersFile,
-)
-def post_project_folder_item(
-    project_id: str,
-    folder_id: str,
-    payload: ProjectFolderItem,
-) -> ProjectFoldersFile:
-    try:
-        return add_folder_item(project_id, folder_id, payload)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="找不到这个项目或文件夹") from None
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-
-
-@router.delete(
-    "/projects/{project_id}/folders/{folder_id}/items",
-    response_model=ProjectFoldersFile,
-)
-def delete_project_folder_item(
-    project_id: str,
-    folder_id: str,
-    kind: ProjectFolderItemKind = Query(),
-    asset_id: str = Query(min_length=1),
-    scheme_id: str | None = Query(default=None),
-) -> ProjectFoldersFile:
-    try:
-        return remove_folder_item(
-            project_id,
-            folder_id,
-            ProjectFolderItem(kind=kind, asset_id=asset_id, scheme_id=scheme_id),
-        )
-    except KeyError:
-        raise HTTPException(status_code=404, detail="找不到这个项目或文件夹") from None
 
 
 @router.get("/projects/{project_id}/ui-schemes", response_model=UiSchemesFile)
@@ -973,13 +892,11 @@ def post_experience(patch: _ExperiencePatch) -> dict:
 @router.post("/characters/{character_id}/project", response_model=ProjectsFile)
 def post_character_project(character_id: str, payload: CharacterProjectAssign) -> ProjectsFile:
     try:
-        return assign_character_family(character_id, payload.project_id)
+        return assign_character(character_id, payload.project_id)
     except KeyError as e:
         raise HTTPException(
             404, detail=f"找不到项目 {payload.project_id}（可能已被删除）"
         ) from e
-    except ValueError as e:
-        raise HTTPException(400, detail=str(e)) from e
 
 
 # job 状态 → 中文（报错里给画师看，别把 pending_confirm 这种内部枚举原样丢出去）
@@ -1109,7 +1026,7 @@ class _DataRootPayload(BaseModel):
 
 
 class _FolderPickerPayload(BaseModel):
-    title: str = "选择项目文件夹"
+    title: str = "选择数据目录"
     initial_path: str | None = None
 
 

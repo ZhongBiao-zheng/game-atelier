@@ -34,7 +34,6 @@ import { UiSchemeBar } from '@/components/workshop/UiSchemeBar';
 import { VideoWorkspace } from '@/components/workshop/VideoWorkspace';
 import { ProjectGallery } from '@/components/workshop/ProjectGallery';
 import { Separator } from '@/components/ui/separator';
-import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
 
 export type { WorkshopWorkspace } from '@/components/workshop/workspaces';
 
@@ -54,7 +53,6 @@ export function ProjectPage({
   shotId?: string;
 }) {
   const [, setLocation] = useLocation();
-  const returnContext = useWorkshopReturn();
   const [data, setData] = useState<ProjectExperience | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
@@ -106,16 +104,13 @@ export function ProjectPage({
       const exists = uiSchemeId && file.schemes.some(item => item.id === uiSchemeId);
       if (!exists) {
         setLocation(
-          withWorkshopReturn(
-            `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(file.default_scheme_id)}`,
-            returnContext,
-          ),
+          `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(file.default_scheme_id)}`,
           { replace: true },
         );
       }
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [projectId, returnContext, setLocation, uiSchemeId, workspace]);
+  }, [projectId, setLocation, uiSchemeId, workspace]);
 
   useEffect(() => {
     if (workspace !== 'art') return;
@@ -273,10 +268,7 @@ export function ProjectPage({
                 const file = await createUiScheme(projectId, payload);
                 setSchemesFile(file);
                 const created = file.schemes.at(-1)!;
-                setLocation(withWorkshopReturn(
-                  `/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(created.id)}`,
-                  returnContext,
-                ));
+                setLocation(`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(created.id)}`);
               }}
               onSetDefault={async (schemeId) => {
                 setSchemesFile(await setDefaultUiScheme(projectId, schemeId));

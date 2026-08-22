@@ -6,7 +6,6 @@ import type { UiSchemeCreate, UiSchemesFile } from '@/api/uiSchemes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { useWorkshopReturn, withWorkshopReturn } from '@/lib/workshopReturn';
 
 export function UiSchemeBar({
   projectId,
@@ -23,7 +22,6 @@ export function UiSchemeBar({
   onCreate: (payload: UiSchemeCreate) => Promise<void>;
   onSetDefault: (schemeId: string) => Promise<void>;
 }) {
-  const returnContext = useWorkshopReturn();
   const current = schemesFile.schemes.find(item => item.id === currentSchemeId);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState(`V${schemesFile.schemes.length + 1}`);
@@ -79,7 +77,7 @@ export function UiSchemeBar({
           {schemesFile.schemes.map(scheme => (
             <Link
               key={scheme.id}
-              href={withWorkshopReturn(`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(scheme.id)}`, returnContext)}
+              href={`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(scheme.id)}`}
               aria-current={scheme.id === currentSchemeId ? 'page' : undefined}
               className={cn(
                 'inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',

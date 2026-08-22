@@ -100,7 +100,6 @@ def migrate_legacy_project(project_ref: str) -> UiSchemesFile:
             migrated_style_fingerprint,
         )
         _rewrite_ui_jobs(project)
-        _rewrite_folder_items(project, project_root)
 
         file = UiSchemesFile(
             default_scheme_id="v1",
@@ -265,22 +264,6 @@ def _rewrite_ui_jobs(project: Project) -> None:
             )
         except (OSError, json.JSONDecodeError, ValueError):
             continue
-
-
-def _rewrite_folder_items(project: Project, project_root: Path) -> None:
-    path = project_root / "folders.json"
-    if not path.is_file():
-        return
-    with job_lock(f"project-folders-{project.id}"):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        changed = False
-        for folder in data.get("folders", []):
-            for item in folder.get("items", []):
-                if item.get("kind") == "ui_screen" and not item.get("scheme_id"):
-                    item["scheme_id"] = "v1"
-                    changed = True
-        if changed:
-            atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
 
 
 def _move_path(raw: str, slug: str) -> str:

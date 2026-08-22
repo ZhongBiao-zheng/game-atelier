@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from character_workflow.lib import data_root
-from character_workflow.lib.character_variants import character_display_name
+from character_workflow.lib.character_derivatives import character_display_name
 from character_workflow.lib.jobs import list_jobs
 from character_workflow.lib.projects import read_projects, resolve_project
 from character_workflow.lib.schemas import (
@@ -203,7 +203,11 @@ def project_activity_mtime(project_id: str) -> float:
         fallback = datetime.fromisoformat(project.created_at).timestamp()
     except ValueError:
         fallback = 0.0
-    latest = _tree_mtime(data_root.projects_dir() / project.slug, fallback)
+    latest = _tree_mtime(
+        data_root.projects_dir() / project.slug,
+        fallback,
+        ignored_names={"folders.json"},
+    )
     assignments = read_projects().assignments
     assigned_characters = {
         character_id
@@ -412,10 +416,15 @@ def _decode_cursor(cursor: str) -> tuple[float, str]:
         raise ValueError("invalid gallery cursor") from error
 
 
-def _tree_mtime(root: Path, fallback: float) -> float:
+def _tree_mtime(
+    root: Path,
+    fallback: float,
+    ignored_names: set[str] | None = None,
+) -> float:
     if not root.exists():
         return fallback
     latest = fallback
+    ignored = ignored_names or set()
     for directory, _, filenames in os.walk(root):
         directory_path = Path(directory)
         try:
@@ -423,6 +432,8 @@ def _tree_mtime(root: Path, fallback: float) -> float:
         except OSError:
             continue
         for filename in filenames:
+            if filename in ignored:
+                continue
             try:
                 latest = max(latest, (directory_path / filename).stat().st_mtime)
             except OSError:

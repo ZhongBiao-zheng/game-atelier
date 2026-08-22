@@ -31,6 +31,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.29.0',
+    date: '2026-08-22',
+    headline: '工坊层级更直接，角色延伸不再被皮肤概念限制',
+    changes: [
+      { kind: 'fix', text: '删除没有实际作用的项目文件夹；项目首页、角色、UI、视频成为唯一稳定导航' },
+      { kind: 'feat', text: '角色可以创建平级「衍生」：自动带上当前定稿，还能选择项目作品或上传本地图片；来源会复制冻结，之后可独立制作和管理' },
+      { kind: 'fix', text: '项目经验 / 世界观阅读区限制默认高度并支持内部滚动，进入首页能更快看到作品画廊' },
+    ],
+  },
+  {
     version: '5.28.0',
     date: '2026-08-22',
     headline: '自由试验可以归入项目资产了',

@@ -73,7 +73,7 @@ create-video-production \
 
 一次只处理一个镜头。读项目 worldview、style、企划 brief、shot-map 对应镜头和引用定稿，写临时 prompt，运行：
 
-画师如果已在 Web 镜头详情里选择角色、皮肤或 UI 定稿，不要再手工重复拼 `--reference-image`；
+画师如果已在 Web 镜头详情里选择角色、角色衍生或 UI 定稿，不要再手工重复拼 `--reference-image`；
 `submit-video-shot` 会读取该镜头的 `references.json` 草稿，并把当时的实际文件路径复制进新 Job。
 命令行 `--reference-image` 只用于补充 Web 候选之外的临时参考，重复路径会自动去重。
 

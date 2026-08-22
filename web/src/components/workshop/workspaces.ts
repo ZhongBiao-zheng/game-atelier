@@ -12,19 +12,19 @@ export const WORKSPACE_DESCRIPTORS = [
   {
     id: 'art',
     label: '美术',
-    sidebarLabel: '角色与皮肤',
+    sidebarLabel: '角色',
     icon: Images,
   },
   {
     id: 'ui',
     label: 'UI',
-    sidebarLabel: 'UI 方案与页面',
+    sidebarLabel: 'UI',
     icon: PanelsTopLeft,
   },
   {
     id: 'video',
     label: '视频',
-    sidebarLabel: '视频企划',
+    sidebarLabel: '视频',
     icon: Film,
   },
 ] satisfies Array<{

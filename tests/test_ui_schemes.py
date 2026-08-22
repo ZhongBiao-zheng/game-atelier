@@ -6,8 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from character_workflow.lib import jobs, projects, stale, ui_jobs, ui_schemes
-from character_workflow.lib.schemas import ProjectFolderItem, UiSchemeCreate
-from character_workflow.lib.project_folders import add_folder_item, create_folder
+from character_workflow.lib.schemas import UiSchemeCreate
 from viewer_server.server_app import build_app
 
 
@@ -56,13 +55,6 @@ def test_legacy_ui_is_moved_to_v1_and_references_are_rewritten(isolated_data_roo
         "production_id": None, "shot_id": None, "alias": None, "provider": None,
         "retry_of": None, "progress_phase": None, "completed_at": None,
     }), encoding="utf-8")
-    (root / "folders.json").write_text(json.dumps({
-        "folders": [{
-            "id": "folder-ui", "name": "UI", "note": "", "created_at": "",
-            "items": [{"kind": "ui_screen", "asset_id": "home"}],
-        }],
-    }), encoding="utf-8")
-
     with pytest.raises(FileNotFoundError):
         ui_schemes.read_schemes(project.id)
 
@@ -87,8 +79,6 @@ def test_legacy_ui_is_moved_to_v1_and_references_are_rewritten(isolated_data_roo
         project.id, "v1",
     )
     assert stale.screen_canonical_status(project.id, "v1").screens["home"].style_stale is False
-    folder_data = json.loads((root / "folders.json").read_text(encoding="utf-8"))
-    assert folder_data["folders"][0]["items"][0]["scheme_id"] == "v1"
 
 
 def test_server_startup_runs_explicit_legacy_upgrade(isolated_data_root):
@@ -151,27 +141,11 @@ def test_v2_can_copy_selected_material_then_diverge(isolated_data_root):
     assert (source / "screens/home/v1.png").read_bytes() == b"v1"
 
 
-def test_default_switch_and_folder_references_are_scheme_aware(isolated_data_root):
+def test_default_switch_is_scheme_aware(isolated_data_root):
     project = projects.create_project("魔幻", slug="mohuan")
     ui_schemes.create_scheme(project.id, UiSchemeCreate(name="V2"))
-    target = isolated_data_root / "projects/mohuan/ui/v2/screens/home"
-    target.mkdir(parents=True)
-    create_folder(project.id, "V2 组件")
-    folders = ui_schemes.set_default(project.id, "v2")
-    assert folders.default_scheme_id == "v2"
-
-    created = create_folder(project.id, "引用")
-    actual_folder_id = created.folders[0].id
-    add_folder_item(project.id, actual_folder_id, ProjectFolderItem(
-        kind="ui_scheme", asset_id="v2",
-    ))
-    result = add_folder_item(project.id, actual_folder_id, ProjectFolderItem(
-        kind="ui_screen", asset_id="home", scheme_id="v2",
-    ))
-    assert [(item.kind, item.asset_id, item.scheme_id) for item in result.folders[0].items] == [
-        ("ui_scheme", "v2", None),
-        ("ui_screen", "home", "v2"),
-    ]
+    schemes = ui_schemes.set_default(project.id, "v2")
+    assert schemes.default_scheme_id == "v2"
 
 
 def test_scheme_canonical_and_stale_state_are_independent(isolated_data_root):

@@ -106,12 +106,13 @@ export interface CharacterEntry {
   latest_job_id: string | null;
   // 名册缩略图：characters/<id>/portrait/ 最新图的 data-root 相对路径 — 与 schemas.py 同步
   thumbnail?: string | null;
-  variant: CharacterVariant | null;
+  derivative: CharacterDerivative | null;
 }
 
-export interface CharacterVariant {
-  parent_character_id: string;
-  difference: string;
+export interface CharacterDerivative {
+  source_character_id: string;
+  source_character_name: string;
+  source_paths: string[];
   created_at: string;
 }
 

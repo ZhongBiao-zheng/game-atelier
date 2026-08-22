@@ -31,8 +31,7 @@ class CharacterContext(TypedDict):
     spec: str
     character_id: str
     project_style: str
-    parent_identity_anchor: str
-    variant_difference: str
+    derivative_source_paths: list[str]
     asset_slot: str
 
 
@@ -99,26 +98,20 @@ def load_spec(character_id: str) -> str:
 
 def load_character_context(character_id: str, kind: str) -> CharacterContext:
     """组合接口：一次拉齐三段上下文。spec 不存在抛 FileNotFoundError。"""
-    from character_workflow.lib.character_variants import (
-        parent_identity_anchor,
-        read_character_variant,
-    )
+    from character_workflow.lib.character_derivatives import read_character_derivative
     from character_workflow.lib.projects import read_projects
 
     projects = read_projects()
     project_id = projects.assignments.get(character_id)
     project = next((item for item in projects.projects if item.id == project_id), None)
-    variant = read_character_variant(character_id)
+    derivative = read_character_derivative(character_id)
     return CharacterContext(
         worldview=load_worldview(),
         lessons=load_lessons(kind),
         spec=load_spec(character_id),
         character_id=character_id,
         project_style=load_project_style(project.slug if project else None),
-        parent_identity_anchor=(
-            parent_identity_anchor(variant.parent_character_id) if variant else ""
-        ),
-        variant_difference=variant.difference if variant else "",
+        derivative_source_paths=derivative.source_paths if derivative else [],
         asset_slot=kind,
     )
 

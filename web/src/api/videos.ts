@@ -23,7 +23,7 @@ export interface ProjectVideoShot {
 }
 
 export interface ProjectVideoReferenceCandidate {
-  kind: 'character' | 'character_variant' | 'ui_screen';
+  kind: 'character' | 'ui_screen';
   asset_id: string;
   scheme_id: string | null;
   label: string;

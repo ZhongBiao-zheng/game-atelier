@@ -1,23 +1,18 @@
 import { requestJson } from './http';
 import type { CharacterEntry } from '@/schema/jobs';
 
-export function createCharacterVariant(
-  parentCharacterId: string,
+export function createCharacterDerivative(
+  sourceCharacterId: string,
   name: string,
-  difference: string,
-  folderId?: string,
+  sourcePaths: string[],
 ): Promise<CharacterEntry> {
   return requestJson(
-    `/api/characters/${encodeURIComponent(parentCharacterId)}/variants`,
-    '新建角色皮肤',
+    `/api/characters/${encodeURIComponent(sourceCharacterId)}/derivatives`,
+    '新建角色衍生',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        difference,
-        ...(folderId ? { folder_id: folderId } : {}),
-      }),
+      body: JSON.stringify({ name, source_paths: sourcePaths }),
     },
   );
 }

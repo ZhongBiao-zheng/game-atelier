@@ -51,83 +51,6 @@ describe('AppShell', () => {
     expect(screen.getByText('工坊')).toHaveAttribute('aria-current', 'page');
   });
 
-  it('restores a folder filter deep link inside the stable project shell', async () => {
-    vi.stubGlobal('EventSource', class {
-      addEventListener = vi.fn();
-      close = vi.fn();
-      onerror: (() => void) | null = null;
-    });
-    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
-      const path = String(url);
-      if (path === '/api/config') {
-        return { ok: true, json: async () => ({ image_storage_root: '/tmp/game-atelier' }) };
-      }
-      if (path === '/api/projects') {
-        return {
-          ok: true,
-          json: async () => ({
-            projects: [{ id: 'p1', slug: 'one', name: '项目一', created_at: '' }],
-            assignments: {},
-          }),
-        };
-      }
-      if (path === '/api/characters') return { ok: true, json: async () => [] };
-      if (path === '/api/projects/p1/folders') {
-        return {
-          ok: true,
-          json: async () => ({ folders: [{
-            id: 'folder-summer', name: '夏日版本', note: '', created_at: '',
-            items: [{ kind: 'ui_screen', asset_id: 'home', scheme_id: 'v1' }],
-          }] }),
-        };
-      }
-      if (path === '/api/projects/p1/ui-schemes') {
-        return {
-          ok: true,
-          json: async () => ({
-            default_scheme_id: 'v1',
-            schemes: [{ id: 'v1', name: 'V1', created_at: '' }],
-          }),
-        };
-      }
-      if (path.startsWith('/api/projects/p1/workspaces')) {
-        return {
-          ok: true,
-          json: async () => ({
-            project_id: 'p1', art: { characters: 0, canonical: 0, stale: 0 },
-            ui: {
-              scheme_id: 'v1',
-              anchors: {}, anchors_approved: 0, style_status: 'missing', has_ui_style: false,
-              screen_map_status: 'draft', screens: 1, versions: 0, canonical: 0, stale: 0,
-              screen_items: [{ screen_id: 'home', name: '主界面', category: '', priority: '', status: 'planned', dependency: '', purpose: '', brief_summary: '' }],
-              next_action: '', next_command: '',
-            },
-            video: { productions: 0, shots: 0, selected_shots: 0, exports: 0, next_action: '' },
-          }),
-        };
-      }
-      if (path === '/api/projects/p1/videos') {
-        return { ok: true, json: async () => ({ productions: [] }) };
-      }
-      if (path === '/api/gallery/screens?project=p1&scheme=v1') {
-        return { ok: true, json: async () => ({ items: [] }) };
-      }
-      return { ok: true, json: async () => ({}) };
-    }));
-
-    renderAt('/workshop/p1/folders/folder-summer/ui');
-
-    expect(await screen.findByDisplayValue('夏日版本')).toBeInTheDocument();
-    expect(screen.getByText('V1 · 主界面')).toBeInTheDocument();
-    const breadcrumbs = screen.getByRole('navigation', { name: '面包屑' });
-    expect(within(breadcrumbs).getByText('文件夹')).toBeInTheDocument();
-    expect(within(breadcrumbs).getByText('夏日版本')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: '夏日版本' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: '项目首页' })).not.toHaveAttribute('aria-current');
-    expect(within(screen.getByRole('navigation', { name: '文件夹视图' })).getByRole('link', { name: 'UI' }))
-      .toHaveAttribute('aria-current', 'page');
-  });
-
   it('keeps the project shell on an image deep link and returns through the URL', async () => {
     vi.stubGlobal('EventSource', class {
       addEventListener = vi.fn();
@@ -196,7 +119,7 @@ describe('AppShell', () => {
       'href', '/workshop/p1/overview',
     );
     expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '角色与皮肤' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: '角色' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByText('返回工坊')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '返回' }));
@@ -250,7 +173,7 @@ describe('AppShell', () => {
     );
 
     await waitFor(() => expect(location.history.at(-1)).toBe(
-      `/workshop/p2/art/characters/cao-cao/promo/job-promo-1/${encodedPath}?fromFolder=summer&fromView=art`,
+      `/workshop/p2/art/characters/cao-cao/promo/job-promo-1/${encodedPath}`,
     ));
     expect(location.history).toHaveLength(1);
   });
@@ -384,13 +307,13 @@ describe('AppShell', () => {
       </Router>,
     );
 
-    fireEvent.click(await screen.findByRole('link', { name: 'UI 方案与页面' }));
+    fireEvent.click(await screen.findByRole('link', { name: 'UI' }));
     await waitFor(() => expect(location.history.at(-1)).toBe('/workshop/p1/ui/v1'));
 
     // 浏览器 Back 会把 URL 恢复到上一项；页面只依赖 URL，因此对象与工作区同时恢复。
     act(() => location.navigate(artPath));
     await waitFor(() => expect(
-      screen.getByRole('link', { name: '角色与皮肤' }),
+      screen.getByRole('link', { name: '角色' }),
     ).toHaveAttribute('aria-current', 'page'));
     expect(within(screen.getByRole('navigation', { name: '面包屑' })).getByText('曹操')).toBeInTheDocument();
 
@@ -400,7 +323,7 @@ describe('AppShell', () => {
         <AppShell />
       </Router>,
     );
-    expect(await screen.findByRole('link', { name: '角色与皮肤' })).toHaveAttribute('aria-current', 'page');
+    expect(await screen.findByRole('link', { name: '角色' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
     expect(within(screen.getByRole('navigation', { name: '面包屑' })).getByText('曹操')).toBeInTheDocument();
   });

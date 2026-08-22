@@ -46,7 +46,7 @@ describe('MainApp', () => {
     render(<MainApp />);
 
     expect(await screen.findByRole('heading', { name: '全部项目' })).toBeInTheDocument();
-    expect(screen.getByText('每个项目保存自己的世界观、文件夹与美术、UI、视频资产。')).toBeInTheDocument();
+    expect(screen.getByText('每个项目保存自己的世界观与角色、UI、视频资产。')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '打开项目导航' })).not.toBeInTheDocument();
     expect(screen.queryByText(/未归档|未分类/)).not.toBeInTheDocument();
     expect(screen.queryByText('请在左栏选择角色')).not.toBeInTheDocument();
@@ -166,9 +166,9 @@ describe('MainApp', () => {
       />,
     );
 
-    expect(await screen.findByRole('link', { name: '角色与皮肤' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'UI 方案与页面' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '视频企划' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: '角色' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'UI' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '视频' })).toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
   });
 
@@ -292,7 +292,7 @@ describe('MainApp', () => {
     fireEvent.click(await screen.findByRole('button', { name: '打开项目导航' }));
     const nav = await screen.findByRole('navigation', { name: '三国 项目导航' });
     expect(nav).toHaveTextContent('项目首页');
-    expect(nav).toHaveTextContent('文件夹');
+    expect(nav).not.toHaveTextContent('文件夹');
     expect(nav).toHaveTextContent('资产库');
     expect(screen.getByRole('button', { name: '曹操', hidden: true })).toBeInTheDocument();
   });

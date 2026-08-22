@@ -37,8 +37,7 @@ def test_assemble_character_prompt_all_sections():
         "spec": "# 圣灵\n金白",
         "character_id": "holy",
         "project_style": "暖色厚涂",
-        "parent_identity_anchor": "",
-        "variant_difference": "",
+        "derivative_source_paths": [],
         "asset_slot": "portrait",
     }
     out = assemble_character_prompt(ctx, persona="角色档案专家", task="补完 spec")
@@ -60,8 +59,7 @@ def test_assemble_skips_empty_sections():
         "spec": "# 圣灵",
         "character_id": "holy",
         "project_style": "",
-        "parent_identity_anchor": "",
-        "variant_difference": "",
+        "derivative_source_paths": [],
         "asset_slot": "portrait",
     }
     out = assemble_character_prompt(ctx, persona="", task="任务")
@@ -73,20 +71,23 @@ def test_assemble_skips_empty_sections():
     assert "# 任务" in out
 
 
-def test_assemble_variant_context_precedes_child_spec():
+def test_assemble_derivative_sources_precede_current_spec():
     ctx: CharacterContext = {
         "worldview": "",
         "lessons": "",
         "spec": "# 曹操·夏日\n白色短袍",
         "character_id": "cao-cao-summer",
         "project_style": "半写实国风",
-        "parent_identity_anchor": "黑狐耳、金瞳",
-        "variant_difference": "白色短袍",
+        "derivative_source_paths": [
+            "characters/cao-cao-summer/source/source-1.png",
+            "characters/cao-cao-summer/source/source-2.jpg",
+        ],
         "asset_slot": "promo",
     }
 
     out = assemble_character_prompt(ctx, persona="", task="生成美宣")
 
-    parts = ["项目风格", "母角色身份锚", "皮肤差异", "当前角色 spec", "当前槽位", "任务"]
+    parts = ["项目风格", "角色衍生参考素材", "当前角色 spec", "当前槽位", "任务"]
     assert [out.index(part) for part in parts] == sorted(out.index(part) for part in parts)
+    assert "source-1.png" in out and "source-2.jpg" in out
     assert "promo" in out

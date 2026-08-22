@@ -73,10 +73,11 @@ export function CharacterGallery({
   const { toggleFavorite, isFavorited } = useGalleryFavorites();
   // 展签小帽：角色所属项目名
   const [projectName, setProjectName] = useState<string | null>(null);
-  const [variantRelation, setVariantRelation] = useState<{
-    parentId: string;
-    parentName: string;
+  const [derivativeRelation, setDerivativeRelation] = useState<{
+    sourceId: string;
+    sourceName: string;
     projectId: string | null;
+    sourceExists: boolean;
   } | null>(null);
   // 确认对话框状态
   const [dialog, setDialog] = useState<{
@@ -98,7 +99,7 @@ export function CharacterGallery({
 
   useEffect(() => {
     setProjectName(null);
-    setVariantRelation(null);
+    setDerivativeRelation(null);
     if (!characterId) return;
     let cancelled = false;
     fetchCanonical(characterId)
@@ -119,12 +120,15 @@ export function CharacterGallery({
         const pid = pf.assignments?.[characterId];
         setProjectName(pf.projects.find(p => p.id === pid)?.name ?? null);
         const current = characters.find(character => character.id === characterId);
-        const parentId = current?.variant?.parent_character_id;
-        const parent = characters.find(character => character.id === parentId);
-        setVariantRelation(parentId ? {
-          parentId,
-          parentName: parent?.name ?? parentId,
-          projectId: pf.assignments?.[parentId] ?? null,
+        const derivative = current?.derivative;
+        const sourceCharacter = characters.find(character => (
+          character.id === derivative?.source_character_id
+        ));
+        setDerivativeRelation(derivative ? {
+          sourceId: derivative.source_character_id,
+          sourceName: derivative.source_character_name,
+          projectId: sourceCharacter ? pf.assignments?.[sourceCharacter.id] ?? null : null,
+          sourceExists: Boolean(sourceCharacter),
         } : null);
       })
       .catch(() => {});
@@ -154,7 +158,7 @@ export function CharacterGallery({
 
   if (loading && jobs.length === 0) {
     return (
-      <GalleryShell name={characterName} projectName={projectName} variantRelation={variantRelation} count={0} rounds={0}
+      <GalleryShell name={characterName} projectName={projectName} derivativeRelation={derivativeRelation} count={0} rounds={0}
         tab={tab} setTab={setTab} tabCounts={tabCounts}
         colCount={colCount} onColCountChange={setColCount} tools={null}>
         <Skeleton cols={colCount} />
@@ -249,7 +253,7 @@ export function CharacterGallery({
   return (
     <>
       <GalleryShell
-        name={characterName} projectName={projectName} variantRelation={variantRelation}
+        name={characterName} projectName={projectName} derivativeRelation={derivativeRelation}
         count={allImages.length} rounds={tabJobs.length}
         tab={tab} setTab={setTab} tabCounts={tabCounts}
         colCount={colCount} onColCountChange={setColCount}
@@ -393,11 +397,16 @@ export function CharacterGallery({
 }
 
 function GalleryShell({
-  name, projectName, variantRelation, count, rounds, children, tab, setTab, tabCounts,
+  name, projectName, derivativeRelation, count, rounds, children, tab, setTab, tabCounts,
   colCount, onColCountChange, tools,
 }: {
   name: string | null; projectName: string | null; count: number; rounds: number;
-  variantRelation: { parentId: string; parentName: string; projectId: string | null } | null;
+  derivativeRelation: {
+    sourceId: string;
+    sourceName: string;
+    projectId: string | null;
+    sourceExists: boolean;
+  } | null;
   children: React.ReactNode;
   tab: TabKind; setTab: (t: TabKind) => void; tabCounts: Record<TabKind, number>;
   colCount: number; onColCountChange: (n: number) => void;
@@ -415,17 +424,21 @@ function GalleryShell({
             <h1 className="font-display italic leading-[1.05] tracking-tight text-foreground truncate text-display">
               {name ?? '—'}
             </h1>
-            {variantRelation && (
+            {derivativeRelation && (
               <p className="mt-2 text-xs text-muted-foreground">
-                角色皮肤 · 母角色{' '}
-                <Link
-                  href={variantRelation.projectId
-                    ? `/workshop/${encodeURIComponent(variantRelation.projectId)}/art/characters/${encodeURIComponent(variantRelation.parentId)}`
-                    : `/workshop/unassigned/characters/${encodeURIComponent(variantRelation.parentId)}`}
-                  className="rounded-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                >
-                  {variantRelation.parentName}
-                </Link>
+                角色衍生 · 来源{' '}
+                {derivativeRelation.sourceExists ? (
+                  <Link
+                    href={derivativeRelation.projectId
+                      ? `/workshop/${encodeURIComponent(derivativeRelation.projectId)}/art/characters/${encodeURIComponent(derivativeRelation.sourceId)}`
+                      : `/workshop/unassigned/characters/${encodeURIComponent(derivativeRelation.sourceId)}`}
+                    className="rounded-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    {derivativeRelation.sourceName}
+                  </Link>
+                ) : (
+                  <span className="text-foreground/80">{derivativeRelation.sourceName}</span>
+                )}
               </p>
             )}
           </div>

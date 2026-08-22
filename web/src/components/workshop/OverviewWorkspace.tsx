@@ -65,7 +65,11 @@ export function OverviewWorkspace({
           </div>
         </div>
       ) : draft.trim() ? (
-        <article className="rounded-lg border border-border bg-card/25 px-5 py-5 text-sm leading-relaxed text-foreground/90 md:px-7 md:py-6">
+        <article
+          aria-label="项目经验 / 世界观内容"
+          tabIndex={0}
+          className="stable-scroll max-h-72 overflow-y-auto rounded-lg border border-border bg-card/25 px-5 py-5 text-sm leading-relaxed text-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary md:px-7 md:py-6"
+        >
           <ReactMarkdown
             components={{
               h1: ({ node: _node, ...props }) => <h3 className="mb-4 text-base font-medium text-foreground" {...props} />,

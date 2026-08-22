@@ -246,7 +246,7 @@ class ProjectVideosResponse(BaseModel):
     productions: list[ProjectVideoProduction]
 
 
-VideoReferenceKind = Literal["character", "character_variant", "ui_screen"]
+VideoReferenceKind = Literal["character", "ui_screen"]
 
 
 class ProjectVideoReferenceCandidate(BaseModel):
@@ -307,16 +307,11 @@ CharacterName = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=80, pattern=r"^[^\r\n]+$"),
 ]
-CharacterVariantDifference = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=1000),
-]
-
-
-class CharacterVariant(BaseModel):
+class CharacterDerivative(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    parent_character_id: str = Field(min_length=1)
-    difference: CharacterVariantDifference
+    source_character_id: str = Field(min_length=1)
+    source_character_name: str = Field(min_length=1)
+    source_paths: list[str] = Field(default_factory=list)
     created_at: str
 
 
@@ -327,24 +322,21 @@ class CharacterEntry(BaseModel):
     latest_job_id: str | None
     # 名册缩略图：characters/<id>/portrait/ 下最新图片的 data-root 相对路径（无立绘为 None）
     thumbnail: str | None = None
-    variant: CharacterVariant | None
+    derivative: CharacterDerivative | None
 
 
-class CharacterVariantCreate(BaseModel):
+class CharacterDerivativeCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: CharacterName
-    difference: CharacterVariantDifference
-    folder_id: str | None = None
+    source_paths: list[str] = Field(default_factory=list, max_length=40)
 
 
-class CharacterVariantContext(BaseModel):
+class CharacterDerivativeContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    parent_character_id: str
-    parent_name: str
-    parent_identity_anchor: str
-    difference: str
+    source_character_id: str
+    source_character_name: str
+    source_paths: list[str]
     asset_slot: str
-    parent_canonical: dict
 
 
 class ActiveCharacterFile(BaseModel):
@@ -422,28 +414,6 @@ class ProjectsFile(BaseModel):
     assignments: dict[str, str] = {}  # character_id → project_id
 
 
-ProjectFolderItemKind = Literal["character", "ui_scheme", "ui_screen", "video_production"]
-ProjectFolderName = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=60),
-]
-
-
-class ProjectFolderItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: ProjectFolderItemKind
-    asset_id: str = Field(min_length=1)
-    scheme_id: str | None = None
-
-    @model_validator(mode="after")
-    def validate_ui_identity(self) -> "ProjectFolderItem":
-        if self.kind == "ui_screen" and not self.scheme_id:
-            raise ValueError("ui_screen folder item requires scheme_id")
-        if self.kind != "ui_screen" and self.scheme_id is not None:
-            raise ValueError("scheme_id is only valid for ui_screen folder items")
-        return self
-
-
 UiSchemeName = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=60),
@@ -483,43 +453,6 @@ class UiSchemeCreate(BaseModel):
 class UiSchemeDefaultSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
     scheme_id: str = Field(min_length=1)
-
-
-class ProjectFolder(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str
-    name: str
-    note: str = ""
-    created_at: str
-    items: list[ProjectFolderItem] = Field(default_factory=list)
-
-
-class ProjectFoldersFile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    folders: list[ProjectFolder] = Field(default_factory=list)
-
-
-class ProjectFolderCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    name: ProjectFolderName
-    note: str = Field(default="", max_length=240)
-
-
-class ProjectFolderUpdate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    name: ProjectFolderName
-    note: str = Field(max_length=240)
-
-
-class ProjectFolderReorder(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    ordered_ids: list[str]
-
-    @model_validator(mode="after")
-    def ordered_ids_are_unique(self) -> "ProjectFolderReorder":
-        if len(self.ordered_ids) != len(set(self.ordered_ids)):
-            raise ValueError("ordered_ids must not contain duplicates")
-        return self
 
 
 class ProjectCreate(BaseModel):
@@ -697,6 +630,6 @@ class TurnStartResult(BaseModel):
     preferred_alias: str | None = None
     # v5.4.0 (A1): 项目风格契约全文 ← projects/<slug>/style.md（无归属 / 无契约 → ""）。
     project_style: str = ""
-    variant: CharacterVariantContext | None = None
+    derivative: CharacterDerivativeContext | None = None
     # v5.4.0 (A2): active 角色定稿 ← characters/<id>/canonical.json（promo/turnaround 选参考图用）。
     canonical: dict = Field(default_factory=dict)

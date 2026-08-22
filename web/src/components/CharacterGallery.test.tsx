@@ -312,7 +312,7 @@ describe('CharacterGallery', () => {
     expect(await screen.findByText('等待第一张美宣')).toBeInTheDocument();
   });
 
-  it('shows the parent relationship while retaining all three asset tabs', async () => {
+  it('shows the derivative source while retaining all three asset tabs', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
       const path = String(url);
       if (path === '/api/projects') return {
@@ -325,10 +325,13 @@ describe('CharacterGallery', () => {
       if (path === '/api/characters') return {
         ok: true,
         json: async () => [
-          { id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null, variant: null },
+          { id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null, derivative: null },
           {
             id: 'cao-cao-summer', name: '曹操·夏日', status: 'idle', latest_job_id: null,
-            variant: { parent_character_id: 'cao-cao', difference: '白色短袍', created_at: '' },
+            derivative: {
+              source_character_id: 'cao-cao', source_character_name: '曹操', source_paths: [],
+              created_at: '',
+            },
           },
         ],
       };
@@ -351,14 +354,15 @@ describe('CharacterGallery', () => {
       />,
     );
 
-    const parent = await screen.findByRole('link', { name: '曹操' });
-    expect(parent).toHaveAttribute('href', '/workshop/p1/art/characters/cao-cao');
+    const source = await screen.findByRole('link', { name: '曹操' });
+    expect(source).toHaveAttribute('href', '/workshop/p1/art/characters/cao-cao');
+    expect(screen.getByText(/角色衍生 · 来源/)).toBeInTheDocument();
     expect(screen.getByText('立绘')).toBeInTheDocument();
     expect(screen.getByText('美宣')).toBeInTheDocument();
     expect(screen.getByText('三视图')).toBeInTheDocument();
   });
 
-  it('keeps the parent relationship visible after project deletion', async () => {
+  it('keeps the derivative source visible after project deletion', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL) => {
       const path = String(url);
       if (path === '/api/projects') return {
@@ -368,10 +372,13 @@ describe('CharacterGallery', () => {
       if (path === '/api/characters') return {
         ok: true,
         json: async () => [
-          { id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null, variant: null },
+          { id: 'cao-cao', name: '曹操', status: 'idle', latest_job_id: null, derivative: null },
           {
             id: 'cao-cao-summer', name: '曹操·夏日', status: 'idle', latest_job_id: null,
-            variant: { parent_character_id: 'cao-cao', difference: '白色短袍', created_at: '' },
+            derivative: {
+              source_character_id: 'cao-cao', source_character_name: '曹操', source_paths: [],
+              created_at: '',
+            },
           },
         ],
       };
