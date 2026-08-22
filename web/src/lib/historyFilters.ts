@@ -26,9 +26,10 @@ const TIME_WINDOWS: Record<Exclude<TimeFilter, 'all'>, number> = {
   '3m': 90 * DAY,
 };
 
-/** 来源优先、三档互斥：skill = 角色命名空间（不分图视频）；否则按媒体分图/视频。 */
+/** 来源优先、三档互斥：正式工作流原生产物归 Skill；Studio 直出及其归档副本按媒体分类。 */
 export function deriveGenMode(job: Job): GenMode {
-  if (job.namespace === 'character') return 'skill';
+  const archivedFromStudio = typeof job.params?.archived_from_job_id === 'string';
+  if (job.namespace !== 'studio' && !archivedFromStudio) return 'skill';
   if (job.kind === 'video') return 'video';
   return 'image';
 }
