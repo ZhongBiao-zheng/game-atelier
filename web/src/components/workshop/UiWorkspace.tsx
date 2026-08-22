@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BadgeCheck, Check, Copy, PanelsTopLeft } from 'lucide-react';
+import { BadgeCheck, PanelsTopLeft } from 'lucide-react';
 import { Link } from 'wouter';
 
 import { isCanonicalPath, setScreenCanonical } from '@/api/canonical';
@@ -9,6 +9,7 @@ import type { ScreenCanonicalFile } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { GalleryVisibilityButton } from './GalleryVisibilityButton';
+import { CharacterAssociationPicker } from './CharacterAssociationPicker';
 
 export function UiWorkspace({
   projectId,
@@ -51,7 +52,14 @@ export function UiWorkspace({
 
   return (
     <div className="space-y-6">
-      <UiWorkflowStrip summary={summary} hasScreens={screens.length > 0} />
+      {!screenId && (
+        <UiWorksGallery
+          projectId={projectId}
+          schemeId={schemeId}
+          groups={groups}
+          canonicalFile={canonicalFile}
+        />
+      )}
       {message && <p role="status" className="text-xs text-destructive">{message}</p>}
       {screenId ? (
         <ScreenDetail
@@ -77,97 +85,50 @@ export function UiWorkspace({
   );
 }
 
-function UiWorkflowStrip({
-  summary,
-  hasScreens,
+function UiWorksGallery({
+  projectId,
+  schemeId,
+  groups,
+  canonicalFile,
 }: {
-  summary: ProjectWorkspaceSummary['ui'] | null;
-  hasScreens: boolean;
+  projectId: string;
+  schemeId: string;
+  groups: Array<[string, ProjectScreenItem[]]>;
+  canonicalFile: ScreenCanonicalFile;
 }) {
-  const steps = workflowSteps(summary, hasScreens);
-  const [copied, setCopied] = useState(false);
-  const command = summary?.next_command ?? '/game-atelier:ui';
-  async function copyCommand() {
-    await navigator.clipboard.writeText(command);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
-  }
+  const items = groups
+    .map(([screenId, images]) => {
+      const canonical = canonicalFile.screens[screenId]?.path;
+      const image = images.find(item => item.path === canonical) ?? images[0];
+      return image ? { screenId, image, canonical: image.path === canonical } : null;
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .sort((a, b) => b.image.mtime - a.image.mtime);
+  if (items.length === 0) return null;
   return (
-    <section aria-label="UI 工作流" className="space-y-4 rounded-lg border border-border bg-card/30 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-label text-muted-foreground/70">UI Workflow</p>
-          <h2 className="mt-2 text-base font-medium text-foreground">
-            下一步：{summary?.next_action ?? (hasScreens ? '继续完善页面工作流' : '建立 UI 策划锚')}
-          </h2>
-        </div>
-        <button
-          type="button"
-          onClick={() => void copyCommand()}
-          className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-3 text-xs text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          {copied ? '已复制' : command}
-        </button>
+    <section className="space-y-3" aria-label="UI 作品">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-base font-medium text-foreground/85">作品</h2>
+        <span className="font-mono text-xs text-muted-foreground">定稿与最近版本</span>
       </div>
-      <ol className="flex max-w-full gap-2 overflow-x-auto pb-1">
-        {steps.map((step, index) => (
-          <li key={step.label} className="shrink-0 rounded-md border border-border bg-background/30 px-3 py-2">
-            <p className="text-xs text-foreground">{index + 1}. {step.label}</p>
-            <p className={cn(
-              'mt-1 text-xs',
-              step.state === '已完成' ? 'text-primary' :
-                step.state === '已过时' ? 'text-destructive' : 'text-muted-foreground',
-            )}>
-              {step.state}
-            </p>
-          </li>
+      <div className="flex gap-4 overflow-x-auto pb-2">
+        {items.map(({ screenId, image, canonical }) => (
+          <Link
+            key={screenId}
+            href={`/workshop/${encodeURIComponent(projectId)}/ui/${encodeURIComponent(schemeId)}/screens/${encodeURIComponent(screenId)}`}
+            aria-label={`查看 UI 页面 ${screenId}`}
+            className="group w-52 shrink-0 space-y-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <span className="relative block overflow-hidden rounded-lg border border-border bg-card">
+              <img src={`/api/gallery/image?path=${encodeURIComponent(image.path)}`} alt="" className="aspect-[9/16] w-full object-cover transition-transform group-hover:scale-[1.02]" />
+              {canonical && <span className="absolute left-2 top-2 rounded-sm bg-glass px-2 py-1 text-xs text-primary backdrop-blur-glass">定稿</span>}
+            </span>
+            <span className="block truncate text-sm text-foreground">{screenId}</span>
+          </Link>
         ))}
-      </ol>
+      </div>
     </section>
   );
-}
-
-function workflowSteps(summary: ProjectWorkspaceSummary['ui'] | null, hasScreens: boolean) {
-  if (!summary) {
-    return [
-      { label: '策划锚', state: hasScreens ? '已完成' : '未开始' },
-      { label: 'UI 规范', state: hasScreens ? '已完成' : '未开始' },
-      { label: '基准页', state: hasScreens ? '已完成' : '未开始' },
-      { label: '风格定稿', state: '未开始' },
-      { label: '页面地图', state: '未开始' },
-      { label: '逐页生成', state: hasScreens ? '进行中' : '未开始' },
-    ];
-  }
-  const anchorValues = Object.values(summary.anchors);
-  const anchorState = summary.anchors_approved === 3
-    ? '已完成'
-    : anchorValues.every(value => value === 'missing') ? '未开始' : '草稿';
-  const styleState = summary.style_status === 'approved' && summary.has_ui_style
-    ? '已完成'
-    : summary.style_status === 'missing' ? '未开始' : '草稿';
-  const canonicalState = summary.stale > 0
-    ? '已过时'
-    : summary.canonical > 0 ? '已完成' : '未开始';
-  return [
-    { label: '策划锚', state: anchorState },
-    { label: 'UI 规范', state: styleState },
-    { label: '基准页', state: summary.versions > 0 ? '已完成' : '未开始' },
-    { label: '风格定稿', state: canonicalState },
-    {
-      label: '页面地图',
-      state: summary.screen_map_status === 'approved'
-        ? '已完成' : summary.screen_map_status === 'missing' ? '未开始' : '草稿',
-    },
-    {
-      label: '逐页生成',
-      state: summary.screens > 0
-        && summary.canonical >= summary.screens
-        && summary.stale === 0
-        ? '已完成'
-        : summary.versions > 0 ? '进行中' : '未开始',
-    },
-  ];
 }
 
 function ScreenMap({
@@ -272,6 +233,10 @@ function ScreenDetail({
           </p>
         )}
       </div>
+      <CharacterAssociationPicker
+        projectId={projectId}
+        target={{ kind: 'ui', scheme_id: schemeId, screen_id: screenId }}
+      />
       {galleryVisibility.error && (
         <p role="status" className="text-xs text-destructive">{galleryVisibility.error}</p>
       )}

@@ -1,8 +1,10 @@
-import { Check, ChevronsUpDown, LibraryBig, Plus } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Check, ChevronDown, ChevronsUpDown, LibraryBig, Plus, Search } from 'lucide-react';
 import { Link } from 'wouter';
 
 import type { CharacterEntry, Project } from '@/schema/jobs';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +24,7 @@ export function ProjectNavigation({
   projects,
   workspace,
   characters,
+  selectedCharacterId,
   onNavigate,
   onNewCharacter,
   renderCharacter,
@@ -30,6 +33,7 @@ export function ProjectNavigation({
   projects: Project[];
   workspace: WorkshopWorkspace;
   characters: CharacterEntry[];
+  selectedCharacterId?: string | null;
   onNavigate?: () => void;
   onNewCharacter: () => void;
   renderCharacter: (character: CharacterEntry) => React.ReactNode;
@@ -40,6 +44,48 @@ export function ProjectNavigation({
   const ui = getWorkspaceDescriptor('ui');
   const video = getWorkspaceDescriptor('video');
   const currentWorkspace = workspace;
+  const expandedKey = `workshop:characters-expanded:${project.id}`;
+  const recentKey = `workshop:recent-characters:${project.id}`;
+  const [expanded, setExpanded] = useState(() => {
+    const stored = window.localStorage.getItem(expandedKey);
+    return stored === null ? workspace === 'art' : stored === 'true';
+  });
+  const [query, setQuery] = useState('');
+  const [recentIds, setRecentIds] = useState<string[]>(() => readRecent(recentKey));
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(expandedKey);
+    setExpanded(stored === null ? workspace === 'art' : stored === 'true');
+    setQuery('');
+    setRecentIds(readRecent(recentKey));
+  }, [expandedKey, recentKey, workspace]);
+
+  useEffect(() => {
+    if (!selectedCharacterId || !characters.some(item => item.id === selectedCharacterId)) return;
+    setRecentIds(current => {
+      const next = [selectedCharacterId, ...current.filter(id => id !== selectedCharacterId)].slice(0, 20);
+      window.localStorage.setItem(recentKey, JSON.stringify(next));
+      return next;
+    });
+  }, [characters, recentKey, selectedCharacterId]);
+
+  const visibleCharacters = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    if (needle) return characters.filter(item => item.name.toLocaleLowerCase().includes(needle));
+    const byId = new Map(characters.map(item => [item.id, item]));
+    return recentIds
+      .map(id => byId.get(id))
+      .filter((item): item is CharacterEntry => Boolean(item))
+      .slice(0, 5);
+  }, [characters, query, recentIds]);
+
+  function toggleCharacters() {
+    setExpanded(value => {
+      const next = !value;
+      window.localStorage.setItem(expandedKey, String(next));
+      return next;
+    });
+  }
 
   return (
     <nav aria-label={`${project.name} 项目导航`} className="space-y-4">
@@ -72,6 +118,17 @@ export function ProjectNavigation({
             onNavigate={onNavigate}
             className="min-w-0 flex-1"
           />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={toggleCharacters}
+            aria-label={expanded ? '收起角色' : '展开角色'}
+            aria-expanded={expanded}
+            className="size-10 shrink-0"
+          >
+            <ChevronDown className={cn('size-4 transition-transform', !expanded && '-rotate-90')} aria-hidden />
+          </Button>
           {workspace === 'art' && (
             <Button
               type="button"
@@ -86,10 +143,29 @@ export function ProjectNavigation({
             </Button>
           )}
         </div>
-        {workspace === 'art' && (
-          <ul className="m-0 list-none space-y-0.5 p-0 pl-2">
-            {characters.map(renderCharacter)}
-          </ul>
+        {expanded && (
+          <div className="space-y-2 pl-2">
+            <label className="relative block">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <Input
+                value={query}
+                onChange={event => setQuery(event.target.value)}
+                aria-label="搜索侧栏角色"
+                placeholder="搜索角色"
+                className="h-8 pl-8 text-xs"
+              />
+            </label>
+            <ul className="m-0 list-none space-y-0.5 p-0">
+              {visibleCharacters.map(renderCharacter)}
+            </ul>
+            <Link
+              href={`${projectBase}/art`}
+              onClick={onNavigate}
+              className="block rounded-md px-2 py-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              查看全部角色
+            </Link>
+          </div>
         )}
         <ProjectSideLink
           projectBase={projectBase}
@@ -106,6 +182,15 @@ export function ProjectNavigation({
       </section>
     </nav>
   );
+}
+
+function readRecent(key: string): string[] {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(key) ?? '[]');
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 function ProjectSwitcher({

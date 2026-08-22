@@ -199,6 +199,7 @@ export function LeftSidebar({
             projects={projects.projects}
             workspace={workspace}
             characters={projectCharacters}
+            selectedCharacterId={selectedId}
             onNavigate={onNavigate}
             onNewCharacter={startNewCharacter}
             renderCharacter={renderCharacter}

@@ -325,6 +325,92 @@ class CharacterEntry(BaseModel):
     derivative: CharacterDerivative | None
 
 
+class CharacterAssociationUiTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["ui"] = "ui"
+    scheme_id: str
+    screen_id: str
+
+
+class CharacterAssociationVideoTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["video"] = "video"
+    production_id: str
+
+
+CharacterAssociationTarget = Annotated[
+    CharacterAssociationUiTarget | CharacterAssociationVideoTarget,
+    Field(discriminator="kind"),
+]
+
+
+class CharacterAssociationItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    character_id: str
+    target: CharacterAssociationTarget
+
+
+class CharacterAssociationsFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[CharacterAssociationItem] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def items_are_unique(self) -> "CharacterAssociationsFile":
+        keys = [
+            (item.character_id, item.target.model_dump_json())
+            for item in self.items
+        ]
+        if len(keys) != len(set(keys)):
+            raise ValueError("character associations must not contain duplicates")
+        return self
+
+
+class CharacterAssociationPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    character_id: str
+    target: CharacterAssociationTarget
+    associated: bool
+
+
+class CharacterAssetGroup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    slot: AssetSlot
+    count: int
+    canonical: CanonicalStatusEntry | None = None
+    media: list[GalleryMedia] = Field(default_factory=list)
+
+
+class CharacterRelatedObject(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target: CharacterAssociationTarget
+    title: str
+    detail: str
+    source: Literal["auto", "manual", "both"]
+    featured_path: str | None = None
+    count: int
+    media: list[GalleryMedia] = Field(default_factory=list)
+
+
+class CharacterWorkspaceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    character: CharacterEntry
+    assets: list[CharacterAssetGroup]
+    related: list[CharacterRelatedObject]
+    recent_media: list[GalleryMedia]
+
+
+class CharacterIndexItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    character: CharacterEntry
+    cover_paths: list[str]
+    activity_at: str
+
+
+class CharacterIndexResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[CharacterIndexItem]
+
+
 class CharacterDerivativeCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: CharacterName

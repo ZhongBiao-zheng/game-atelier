@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { LeftSidebar } from './LeftSidebar';
 
 beforeEach(() => {
+  window.localStorage.clear();
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/characters' && !init) {
       return {
@@ -38,6 +39,38 @@ afterEach(() => {
 });
 
 describe('LeftSidebar', () => {
+  it('一百个角色时只显示五个最近角色，UI 和视频入口保持可见', async () => {
+    const characters = Array.from({ length: 100 }, (_, index) => ({
+      id: `char-${index}`,
+      name: `角色 ${index}`,
+      status: 'idle',
+      latest_job_id: null,
+      derivative: null,
+    }));
+    window.localStorage.setItem(
+      'workshop:recent-characters:p1',
+      JSON.stringify(characters.slice(0, 20).map(character => character.id)),
+    );
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/characters') return { ok: true, json: async () => characters };
+      if (url === '/api/projects') return {
+        ok: true,
+        json: async () => ({
+          projects: [{ id: 'p1', slug: 'one', name: '项目一', created_at: '' }],
+          assignments: Object.fromEntries(characters.map(character => [character.id, 'p1'])),
+        }),
+      };
+      return { ok: false, status: 404, json: async () => ({}) };
+    }));
+
+    render(<LeftSidebar sseSignal={0} activeProjectId="p1" workspace="art" onSelect={vi.fn()} />);
+
+    const nav = await screen.findByRole('navigation', { name: '项目一 项目导航' });
+    expect(within(nav).getAllByRole('button', { name: /^角色 \d+$/ })).toHaveLength(5);
+    expect(within(nav).getByRole('link', { name: 'UI' })).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: '视频' })).toBeInTheDocument();
+  });
+
   it('deletes a character from the right edge of its row after confirmation', async () => {
     const onDelete = vi.fn();
     render(<LeftSidebar sseSignal={0} selectedId="shadow" activeProjectId="p1" workspace="art" onSelect={vi.fn()} onDelete={onDelete} />);
@@ -58,7 +91,7 @@ describe('LeftSidebar', () => {
       expect(globalThis.fetch).toHaveBeenCalledWith('/api/characters/shadow', { method: 'DELETE' });
     });
     expect(screen.queryByText('暗影')).not.toBeInTheDocument();
-    expect(screen.getByText('烈拳猴')).toBeInTheDocument();
+    expect(screen.queryByText('烈拳猴')).not.toBeInTheDocument();
     expect(onDelete).toHaveBeenCalledWith('shadow');
   });
 
@@ -73,6 +106,7 @@ describe('LeftSidebar', () => {
     );
 
     // 无立绘 → serif 首字母占位块
+    fireEvent.change(screen.getByLabelText('搜索侧栏角色'), { target: { value: '烈拳猴' } });
     const blazeRow = screen.getByText('烈拳猴').closest('li')!;
     expect(blazeRow.querySelector('img')).toBeNull();
     expect(blazeRow.textContent).toContain('烈');
@@ -123,6 +157,7 @@ describe('LeftSidebar', () => {
         body: JSON.stringify({ name: '夏日角色', project_id: 'p1' }),
       }),
     ));
+    fireEvent.change(screen.getByLabelText('搜索侧栏角色'), { target: { value: '夏日角色' } });
     expect(await screen.findByRole('button', { name: '夏日角色' })).toBeInTheDocument();
     expect(onSelect).toHaveBeenCalledWith('char-summer', '夏日角色', 'p1');
   });
@@ -207,6 +242,7 @@ describe('LeftSidebar', () => {
 
     render(<LeftSidebar sseSignal={0} activeProjectId="p1" workspace="art" onSelect={vi.fn()} />);
     expect(await screen.findByRole('button', { name: '新建角色' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('搜索侧栏角色'), { target: { value: '暗影' } });
     expect(screen.getByRole('button', { name: '暗影' })).toBeInTheDocument();
   });
 
@@ -266,6 +302,7 @@ describe('LeftSidebar', () => {
       }),
     ));
     expect(onSelect).toHaveBeenCalledWith('char-derivative', '暗影·夏日', 'p1');
+    fireEvent.change(screen.getByLabelText('搜索侧栏角色'), { target: { value: '暗影·夏日' } });
     expect(await screen.findByRole('button', { name: '暗影·夏日' })).toBeInTheDocument();
   });
 });

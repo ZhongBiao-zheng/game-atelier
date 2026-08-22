@@ -55,6 +55,8 @@ from pydantic import field_validator
 
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
+    CharacterAssociationPatch, CharacterAssociationsFile,
+    CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
     FeedbackPost, GalleryMedia, Job, JobKind, JobParams, JobStatus, ProjectCreate,
@@ -159,6 +161,64 @@ def get_characters() -> list[CharacterEntry]:
             derivative=read_character_derivative(d.name),
         ))
     return out
+
+
+@router.get(
+    "/projects/{project_id}/characters/index",
+    response_model=CharacterIndexResponse,
+)
+def get_character_index(project_id: str) -> CharacterIndexResponse:
+    from character_workflow.lib.character_workspace import character_index
+    try:
+        return character_index(project_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个项目（可能已被删除）") from None
+
+
+@router.get(
+    "/projects/{project_id}/characters/{character_id}/workspace",
+    response_model=CharacterWorkspaceResponse,
+)
+def get_character_workspace(
+    project_id: str,
+    character_id: str,
+) -> CharacterWorkspaceResponse:
+    from character_workflow.lib.character_workspace import character_workspace
+    try:
+        return character_workspace(project_id, character_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个角色或项目") from None
+    except ValueError as error:
+        raise HTTPException(400, detail=str(error)) from error
+
+
+@router.put(
+    "/projects/{project_id}/character-associations",
+    response_model=CharacterAssociationsFile,
+)
+def put_character_association(
+    project_id: str,
+    payload: CharacterAssociationPatch,
+) -> CharacterAssociationsFile:
+    from character_workflow.lib.character_workspace import set_manual_association
+    try:
+        return set_manual_association(project_id, payload)
+    except KeyError as error:
+        raise HTTPException(404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(400, detail=str(error)) from error
+
+
+@router.get(
+    "/projects/{project_id}/character-associations",
+    response_model=CharacterAssociationsFile,
+)
+def get_character_associations(project_id: str) -> CharacterAssociationsFile:
+    from character_workflow.lib.character_workspace import read_associations
+    try:
+        return read_associations(project_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个项目（可能已被删除）") from None
 
 
 @router.get("/home")

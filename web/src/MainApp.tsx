@@ -13,6 +13,7 @@ import { ProjectPage, type WorkshopWorkspace } from './pages/ProjectPage';
 import { WorkshopShell } from './components/workshop/WorkshopShell';
 import { cn } from '@/lib/utils';
 import { ProjectIndexPage } from '@/pages/ProjectIndexPage';
+import { CharacterWorkspace } from '@/components/workshop/CharacterWorkspace';
 
 const SIDEBAR = { key: 'workshop:sidebar-width', def: 264, min: 200, max: 400 };
 const STRIP = { key: 'workshop:strip-width', def: 104, min: 72, max: 320, snap: 64 };
@@ -251,13 +252,17 @@ function ThreeColumnLayout({
       )}
     </div>
   ) : openedProject && workspace === 'art' && selected ? (
-    <CharacterGallery
-      characterId={selected.id}
-      characterName={selected.name}
-      initialTab={routedAssetSlot}
-      onSelectImage={openImage}
-      sseSignal={sseSignal}
-    />
+    routedAssetSlot ? (
+      <CharacterGallery
+        characterId={selected.id}
+        characterName={selected.name}
+        initialTab={routedAssetSlot}
+        onSelectImage={openImage}
+        sseSignal={sseSignal}
+      />
+    ) : (
+      <CharacterWorkspace projectId={openedProject.id} characterId={selected.id} />
+    )
   ) : openedProject ? (
     <ProjectPage
       projectId={openedProject.id}

@@ -11,6 +11,8 @@
 | Job / JobParams | `lib/schemas.py` | `web/src/schema/jobs.ts` | 无 —— 靠人 |
 | Key / ModelSpec | `lib/keys.py` | `web/src/api/keys.ts` | 无 —— 靠人 |
 | CharacterDerivative / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_derivatives.py` + `LeftSidebar.test.tsx` |
+| CharacterAssociationTarget / CharacterAssociationItem | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_workspace.py` + `CharacterAssociationPicker.test.tsx` |
+| CharacterWorkspaceResponse / CharacterIndexResponse | `lib/schemas.py` | `web/src/api/characters.ts` | `tests/test_character_workspace.py` + `CharacterWorkspace.test.tsx` + `CharacterIndex.test.tsx` |
 | ProjectIndexItem / GalleryMedia | `lib/schemas.py` | `web/src/api/gallery.ts` | `tests/test_gallery_project.py` + `ProjectIndexPage.test.tsx` + `ProjectPage.test.tsx` |
 | StudioArchiveTarget | `lib/studio_archive.py` | `web/src/api/studio.ts` | `tests/test_studio_archive.py` + `StudioArchiveDialog.test.tsx` |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
@@ -43,6 +45,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /characters` `POST /characters/{id}/derivatives` `POST /characters/{id}/rename` `POST /characters/{id}/gallery/{kind}` `POST /characters/{id}/project`
 `POST /projects` `/projects/reorder` `/projects/{id}/rename` `DELETE /projects/{id}`
 `POST /projects/{id}/ui-schemes` `/projects/{id}/ui-schemes/default`
+`PUT /projects/{id}/character-associations`
 
 项目内新建角色时，`POST /characters` 请求为
 `{ name: string, project_id: string }`，角色目录创建与项目归属在同一次请求内完成；
@@ -68,6 +71,8 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /characters/{id}/canonical` `GET /projects/{id}/ui-schemes/{scheme_id}/screens/canonical`
 `GET /projects/{id}/workspaces?ui_scheme={scheme_id}` `GET /projects/{id}/videos`
 `GET /projects/{id}/ui-schemes`
+`GET /projects/{id}/characters/index` `/projects/{id}/characters/{character_id}/workspace`
+`GET /projects/{id}/character-associations`
 `GET /projects/{id}/studio-archive-targets?media_kind={image,video}`
 
 ### 角色衍生契约
@@ -113,6 +118,43 @@ type CharacterEntry = {
 但不复制 canonical；两套方案之后独立写 `style.md / screens / canonical.json`。viewer-server 启动时
 显式执行一次旧项目升级：把旧 `screens/` 移到 `ui/v1/screens/`，把根 `style.md` 的 `ui.*` 章节
 移入 V1，并经完整 Job 模型校验修正 Job 与 canonical。正常读取只接受新路径，不做迁移或 fallback。
+
+### 角色索引、工作台与关联
+
+`GET /projects/{id}/characters/index` 返回项目角色卡片的派生数据：每个条目包含完整
+`CharacterEntry`、最多四张最近作品 `cover_paths` 与 `activity_at`。它只从项目归属、角色目录和
+项目画廊聚合，不落独立索引文件。
+
+`GET /projects/{id}/characters/{character_id}/workspace` 返回角色视角的资产聚合：
+
+```ts
+type CharacterWorkspace = {
+  character: CharacterEntry;
+  assets: Array<{
+    slot: 'portrait' | 'promo' | 'turnaround';
+    count: number;
+    canonical: CanonicalEntry | null;
+    media: GalleryMedia[];
+  }>;
+  related: Array<{
+    target:
+      | { kind: 'ui'; scheme_id: string; screen_id: string }
+      | { kind: 'video'; production_id: string };
+    title: string;
+    detail: string;
+    source: 'auto' | 'manual' | 'both';
+    featured_path: string | null;
+    count: number;
+    media: GalleryMedia[];
+  }>;
+  recent_media: GalleryMedia[];
+};
+```
+
+自动关联只认 Job 与视频镜头中明确登记的角色素材路径，不解析 prompt。手动关联落在
+`projects/<slug>/character-associations.json`；`PUT /projects/{id}/character-associations` 请求为
+`{ character_id, target, associated }`。角色和 UI 页面 / 视频企划必须属于同一项目，移除手动关联
+不会删除自动关联或任何作品文件。
 
 ### 项目工作区响应
 

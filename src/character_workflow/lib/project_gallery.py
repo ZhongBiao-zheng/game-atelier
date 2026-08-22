@@ -180,6 +180,22 @@ def project_gallery_media(project_id: str, path: str) -> GalleryMedia:
     return match
 
 
+def project_gallery_items(project_id: str, category: str = "all") -> list[GalleryMedia]:
+    """Return the complete derived media set for internal aggregate read models."""
+    if category not in GALLERY_CATEGORIES:
+        raise ValueError(f"unknown gallery category: {category}")
+    project = resolve_project(project_id)
+    records = _project_records(
+        project.id,
+        category,
+        set(read_gallery_hidden()),
+        gallery_job_ids_by_path(done_only=True),
+        gallery_failed_paths(),
+    )
+    records.sort(key=_sort_key)
+    return [record.media for record in records]
+
+
 def _project_records(
     project_id: str,
     category: str,

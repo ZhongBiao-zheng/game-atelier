@@ -5,8 +5,6 @@ import { useLocation } from 'wouter';
 import { fetchExperience, saveExperience, type ProjectExperience } from '@/api/experience';
 import {
   fetchGalleryScreens,
-  fetchProjectGallery,
-  type ProjectGalleryMedia,
   type ProjectScreenItem,
 } from '@/api/gallery';
 import { fetchScreenCanonical } from '@/api/canonical';
@@ -26,7 +24,7 @@ import {
   type ProjectVideoProduction,
 } from '@/api/videos';
 import type { ScreenCanonicalFile } from '@/schema/jobs';
-import { ArtWorkspace } from '@/components/workshop/ArtWorkspace';
+import { CharacterIndex } from '@/components/workshop/CharacterIndex';
 import { OverviewWorkspace } from '@/components/workshop/OverviewWorkspace';
 import type { WorkshopWorkspace } from '@/components/workshop/workspaces';
 import { UiWorkspace } from '@/components/workshop/UiWorkspace';
@@ -56,7 +54,6 @@ export function ProjectPage({
   const [data, setData] = useState<ProjectExperience | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
   const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
-  const [works, setWorks] = useState<ProjectGalleryMedia[]>([]);
   const [screens, setScreens] = useState<ProjectScreenItem[]>([]);
   const [canonicalFile, setCanonicalFile] = useState<ScreenCanonicalFile>({ screens: {} });
   const [schemesFile, setSchemesFile] = useState<UiSchemesFile | null>(null);
@@ -111,16 +108,6 @@ export function ProjectPage({
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [projectId, setLocation, uiSchemeId, workspace]);
-
-  useEffect(() => {
-    if (workspace !== 'art') return;
-    let cancelled = false;
-    setWorks([]);
-    fetchProjectGallery(projectId, 'art')
-      .then(value => { if (!cancelled) setWorks(value.items); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [projectId, workspace]);
 
   useEffect(() => {
     if (workspace !== 'ui' || !uiSchemeId) return;
@@ -219,14 +206,17 @@ export function ProjectPage({
   return (
     <section className="flex h-full flex-col overflow-hidden bg-background">
       <div className="stable-scroll flex-1 space-y-6 overflow-y-auto px-4 py-5 md:px-8 md:py-6">
-        <div className="space-y-5">
-          <div className="space-y-1">
-            <p className="text-xs uppercase tracking-label text-muted-foreground">项目首页</p>
-            <h1 className="font-display text-display italic text-foreground">{data.project.name}</h1>
-          </div>
-        </div>
-
-        <Separator className="opacity-50" />
+        {workspace === 'overview' && (
+          <>
+            <div className="space-y-5">
+              <div className="space-y-1">
+                <p className="text-xs uppercase tracking-label text-muted-foreground">项目首页</p>
+                <h1 className="font-display text-display italic text-foreground">{data.project.name}</h1>
+              </div>
+            </div>
+            <Separator className="opacity-50" />
+          </>
+        )}
 
         {toast && (
           <div role="status" className="flex items-center gap-2 rounded-md border border-[color:var(--status-done)]/30 bg-[color:var(--status-done)]/15 px-3 py-2 text-xs text-[color:var(--status-done)]">
@@ -256,7 +246,12 @@ export function ProjectPage({
             <ProjectGallery projectId={projectId} />
           </div>
         )}
-        {workspace === 'art' && <ArtWorkspace projectId={projectId} works={works} />}
+        {workspace === 'art' && (
+          <CharacterIndex
+            projectId={projectId}
+            onOpenCharacter={(id) => setLocation(`/workshop/${encodeURIComponent(projectId)}/art/characters/${encodeURIComponent(id)}`)}
+          />
+        )}
         {workspace === 'ui' && uiSchemeId && schemesFile && (
           <div className="space-y-6">
             <UiSchemeBar

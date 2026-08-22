@@ -13,6 +13,7 @@ import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { useClipboard } from '@/hooks/useClipboard';
 import { Button } from '@/components/ui/button';
 import { GalleryVisibilityButton } from './GalleryVisibilityButton';
+import { CharacterAssociationPicker } from './CharacterAssociationPicker';
 
 export function VideoWorkspace({
   projectId,
@@ -132,6 +133,10 @@ function ProductionDetail({ projectId, production }: {
         <p className="font-mono text-xs text-muted-foreground">{production.production_id} · {production.type} · {production.status}</p>
         <BriefSummary production={production} />
       </div>
+      <CharacterAssociationPicker
+        projectId={projectId}
+        target={{ kind: 'video', production_id: production.production_id }}
+      />
       <div className="space-y-3">
         <div className="flex items-baseline justify-between gap-3">
           <h3 className="text-base font-medium text-foreground">镜头板</h3>

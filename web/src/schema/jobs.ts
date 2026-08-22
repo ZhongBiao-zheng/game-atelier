@@ -116,6 +116,16 @@ export interface CharacterDerivative {
   created_at: string;
 }
 
+// 角色工作台关联真源 — 与 schemas.py::CharacterAssociationTarget 同步。
+export type CharacterAssociationTarget =
+  | { kind: 'ui'; scheme_id: string; screen_id: string }
+  | { kind: 'video'; production_id: string };
+
+export interface CharacterAssociationItem {
+  character_id: string;
+  target: CharacterAssociationTarget;
+}
+
 // A2（2026-08-10）定稿 — 与 schemas.py::CanonicalStatusEntry/CanonicalStatusFile 同步
 // spec_stale/style_stale 是 A3 的服务端计算态（存储指纹 vs 当前指纹），不落盘。
 export interface CanonicalEntry {

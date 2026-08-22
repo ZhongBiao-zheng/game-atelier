@@ -29,6 +29,21 @@ const works = [
   },
 ];
 
+const characterIndex = {
+  items: [
+    {
+      character: { id: 'char-a', name: '暗影', status: 'idle', latest_job_id: 'job-promo-1', derivative: null },
+      cover_paths: ['characters/char-a/promo/kv.png'],
+      activity_at: '2026-08-21T08:00:00Z',
+    },
+    {
+      character: { id: 'char-b', name: '烈拳猴', status: 'idle', latest_job_id: null, derivative: null },
+      cover_paths: ['characters/char-b/portrait/v1.png'],
+      activity_at: '2026-08-21T07:00:00Z',
+    },
+  ],
+};
+
 const screenItems = [
   { screen_id: 'home', filename: 'v2.png', path: 'projects/pokemon/ui/v1/screens/home/v2.png', job_id: 'job-ui-2', style_variant: '厚涂写实', base_version: 'v1.png', model: 'gpt-image-2', provider: 'openai', prompt: '主界面提示词', mtime: 200 },
   { screen_id: 'home', filename: 'v1.png', path: 'projects/pokemon/ui/v1/screens/home/v1.png', job_id: null, style_variant: null, base_version: null, model: null, provider: null, prompt: null, mtime: 150 },
@@ -89,6 +104,9 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
     if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
+    if (typeof url === 'string' && url === '/api/projects/p1/characters/index') {
+      return { ok: true, json: async () => characterIndex } as Response;
+    }
     if (typeof url === 'string' && url.startsWith('/api/projects/p1/gallery')) {
       return { ok: true, json: async () => ({ items: works, next_cursor: null }) } as Response;
     }
@@ -153,34 +171,28 @@ describe('ProjectPage', () => {
     window.history.replaceState({}, '', '/');
   });
 
-  it('项目经验下方渲染项目作品区：卡片标角色名、点击进角色大图', async () => {
+  it('美术工作区渲染角色索引，角色卡进入角色工作台', async () => {
     render(<ProjectPage projectId="p1" workspace="art" />);
-    await waitFor(() => expect(screen.getByTestId('project-works')).toBeInTheDocument());
-    expect(screen.getByText('全部美术作品')).toBeInTheDocument();
-
-    const kvLink = screen.getByRole('link', { name: '查看 暗影 的美宣' });
-    expect(kvLink.getAttribute('href')).toBe(
-      '/workshop/p1/art/characters/char-a/promo/job-promo-1/characters%2Fchar-a%2Fpromo%2Fkv.png',
-    );
-    // 无 job_id 的图退回资产槽路由
-    expect(screen.getByRole('link', { name: '查看 烈拳猴 的立绘' }).getAttribute('href')).toBe(
-      '/workshop/p1/art/characters/char-b/portrait',
-    );
+    await waitFor(() => expect(screen.getByRole('heading', { name: '全部角色' })).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '打开角色 暗影' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '打开角色 烈拳猴' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '新建角色' })).toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalledWith('/api/projects/p1/workspaces');
   });
 
-  it('项目没有作品时不渲染作品区', async () => {
+  it('项目没有角色时仍显示可操作的角色索引空状态', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
       if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
-      if (typeof url === 'string' && url.startsWith('/api/projects/p1/gallery')) {
-        return { ok: true, json: async () => ({ items: [], next_cursor: null }) } as Response;
+      if (typeof url === 'string' && url === '/api/projects/p1/characters/index') {
+        return { ok: true, json: async () => ({ items: [] }) } as Response;
       }
       return { ok: true, json: async () => sample } as Response;
     }));
     render(<ProjectPage projectId="p1" workspace="art" />);
-    await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
-    expect(screen.queryByTestId('project-works')).toBeNull();
+    expect(await screen.findByRole('heading', { name: '全部角色' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '新建角色' })).toBeInTheDocument();
+    expect(screen.queryByText('宝可梦风格')).not.toBeInTheDocument();
   });
 
   it('UI 总览按 screen-map 展示页面地图并链接详情', async () => {
@@ -260,7 +272,7 @@ describe('ProjectPage', () => {
       return { ok: true, json: async () => sample } as Response;
     }));
     render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
-    await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('这个项目还没有 UI 设计锚')).toBeInTheDocument());
     expect(screen.queryByTestId('project-screens')).toBeNull();
   });
 
@@ -351,7 +363,8 @@ describe('ProjectPage', () => {
 
   it('内容页不再重复渲染项目壳导航和返回按钮', async () => {
     render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
-    await waitFor(() => expect(screen.getByText('宝可梦风格')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('页面地图')).toBeInTheDocument());
+    expect(screen.queryByText('宝可梦风格')).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: '项目工作区' })).not.toBeInTheDocument();
     expect(screen.queryByText('返回工坊')).not.toBeInTheDocument();
   });
@@ -450,13 +463,15 @@ describe('ProjectPage', () => {
     expect(screen.getByRole('button', { name: '复制新建企划指令' })).toBeEnabled();
   });
 
-  it('UI 工作区显示文件系统推导出的唯一下一步', async () => {
+  it('UI 工作区展示作品与页面地图，不再展示命令式工作流', async () => {
     render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
-    expect(await screen.findByText('下一步：完成风格定稿')).toBeInTheDocument();
-    expect(screen.getByText('/game-atelier:ui-page')).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'UI 作品' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '页面地图' })).toBeInTheDocument();
+    expect(screen.queryByText('下一步：完成风格定稿')).not.toBeInTheDocument();
+    expect(screen.queryByText('/game-atelier:ui-page')).not.toBeInTheDocument();
   });
 
-  it('screen-map 只有规划页时不把基准页标为完成', async () => {
+  it('screen-map 只有规划页时展示待设计状态且没有作品区', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) {
         return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
@@ -476,12 +491,12 @@ describe('ProjectPage', () => {
     }));
     render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
 
-    const baseStep = await screen.findByText('3. 基准页');
-    expect(baseStep.parentElement).toHaveTextContent('未开始');
+    expect(await screen.findByRole('region', { name: '页面地图' })).toBeInTheDocument();
     expect(screen.getAllByText('待设计')).toHaveLength(1);
+    expect(screen.queryByRole('region', { name: 'UI 作品' })).not.toBeInTheDocument();
   });
 
-  it('全部页面定稿后把逐页生成标为完成', async () => {
+  it('全部页面定稿后仍以作品与页面地图呈现，不显示工作流状态', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) {
         return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
@@ -508,9 +523,9 @@ describe('ProjectPage', () => {
     }));
     render(<ProjectPage projectId="p1" workspace="ui" uiSchemeId="v1" />);
 
-    const generateStep = await screen.findByText('6. 逐页生成');
-    expect(generateStep.parentElement).toHaveTextContent('已完成');
-    expect(screen.getByText('下一步：复核 UI 页面交付')).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: 'UI 作品' })).toBeInTheDocument();
+    expect(screen.queryByText('6. 逐页生成')).not.toBeInTheDocument();
+    expect(screen.queryByText('下一步：复核 UI 页面交付')).not.toBeInTheDocument();
   });
 
   it('可从当前方案复制风格、页面地图和指定页面创建新方案', async () => {
