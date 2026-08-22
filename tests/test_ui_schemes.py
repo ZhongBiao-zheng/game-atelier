@@ -82,7 +82,7 @@ def test_legacy_ui_is_moved_to_v1_and_references_are_rewritten(isolated_data_roo
         "output_paths": [str(image), windows_image], "status": "done", "error": None,
         "asset_slot": "portrait", "kind": "image", "namespace": "ui",
         "source_image": None, "project_id": project.id, "screen_id": "home",
-        "production_id": None, "shot_id": None, "alias": None, "provider": None,
+        "production_id": None, "alias": None, "provider": None,
         "retry_of": None, "progress_phase": None, "completed_at": None,
     }), encoding="utf-8")
     with pytest.raises(FileNotFoundError):

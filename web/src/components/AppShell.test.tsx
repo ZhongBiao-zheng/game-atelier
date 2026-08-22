@@ -286,7 +286,7 @@ describe('AppShell', () => {
               next_action: '建立 UI 锚点',
               next_command: '/game-atelier:ui',
             },
-            video: { productions: 0, shots: 0, selected_shots: 0, exports: 0, next_action: '建立视频企划' },
+            video: { productions: 0, versions: 0, selected: 0, next_action: '建立视频企划' },
           }),
         };
       }

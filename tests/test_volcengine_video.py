@@ -523,12 +523,12 @@ def test_reference_limits_are_per_generation_not_family_wide():
 
     官方：2.0 系（含 fast / mini）图9/视频3/音频3；2.5 图30/视频10/音频10。
     """
-    assert vv._reference_limits("doubao-seedance-2-0-260128") == (9, 3, 3)
-    assert vv._reference_limits("seedance-2.0-fast") == (9, 3, 3)
-    assert vv._reference_limits("seedance-2.0-mini") == (9, 3, 3)
-    assert vv._reference_limits("seedance-2.5") == (30, 10, 10)
-    assert vv._reference_limits("doubao-seedance-2-5-260628") == (30, 10, 10)
-    assert vv._reference_limits("") == (9, 3, 3)  # 未知模型走保守值
+    assert vv.seedance_limits("doubao-seedance-2-0-260128").max_images == 9
+    assert vv.seedance_limits("seedance-2.0-fast").max_videos == 3
+    assert vv.seedance_limits("seedance-2.0-mini").max_audios == 3
+    assert vv.seedance_limits("seedance-2.5").max_images == 30
+    assert vv.seedance_limits("doubao-seedance-2-5-260628").max_videos == 10
+    assert vv.seedance_limits("").max_images == 9  # 未知模型走保守值
 
 
 def test_seedance_25_keeps_more_than_nine_reference_images(seedance_key, tmp_path, monkeypatch):

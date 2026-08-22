@@ -331,26 +331,7 @@ def _video_records(
     records: list[_MediaRecord] = []
     root = data_root.resolve_data_root()
     for production in list_productions(project_id):
-        for shot in production.shots:
-            for relative in shot.versions:
-                if relative in hidden or relative in failed:
-                    continue
-                path = root / relative
-                if path.suffix.lower() not in VIDEO_EXTENSIONS or not path.is_file():
-                    continue
-                records.append(_record(
-                    path,
-                    media_type="video",
-                    title=production.title,
-                    detail=f"镜头 {shot.shot_id}",
-                    job_id=job_ids.get(relative),
-                    target=GalleryVideoTarget(
-                        production_id=production.production_id,
-                        shot_id=shot.shot_id,
-                        output_kind="shot",
-                    ),
-                ))
-        for relative in production.exports:
+        for relative in production.versions:
             if relative in hidden or relative in failed:
                 continue
             path = root / relative
@@ -360,11 +341,10 @@ def _video_records(
                 path,
                 media_type="video",
                 title=production.title,
-                detail="成片",
+                detail="完整视频",
                 job_id=job_ids.get(relative),
                 target=GalleryVideoTarget(
                     production_id=production.production_id,
-                    output_kind="export",
                 ),
             ))
     return records

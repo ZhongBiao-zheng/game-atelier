@@ -37,9 +37,8 @@ export interface ProjectWorkspaceSummary {
   };
   video: {
     productions: number;
-    shots: number;
-    selected_shots: number;
-    exports: number;
+    versions: number;
+    selected: number;
     next_action: string;
   };
 }

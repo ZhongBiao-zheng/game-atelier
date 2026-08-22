@@ -93,9 +93,8 @@ const workspaceSummary = {
   },
   video: {
     productions: 0,
-    shots: 0,
-    selected_shots: 0,
-    exports: 0,
+    versions: 0,
+    selected: 0,
     next_action: '建立第一个视频企划',
   },
 };
@@ -476,8 +475,8 @@ describe('ProjectPage', () => {
             type: 'promo',
             status: 'draft',
             brief: { goal: '', platform: '', ratio: '', duration: '', sound: '' },
-            shots: [],
-            exports: [],
+            prompt: '', versions: [], selected: null,
+            planned_reference_images: [], history: [],
           }],
         }),
       } as Response);
@@ -709,8 +708,8 @@ describe('ProjectPage', () => {
     expect(screen.getByRole('checkbox', { name: 'home' })).toBeInTheDocument();
   });
 
-  it('视频工作区按企划和镜头展示版本，并可选用', async () => {
-    const videoPath = 'projects/pokemon/videos/pv/shots/shot-01/v1.mp4';
+  it('视频工作区按企划展示完整提示词、历史和整片版本', async () => {
+    const videoPath = 'projects/pokemon/videos/pv/versions/v1.mp4';
     const galleryHiddenResponse = createGalleryHiddenHandler([videoPath]);
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       const galleryResponse = await galleryHiddenResponse(url, init);
@@ -734,7 +733,7 @@ describe('ProjectPage', () => {
         return { ok: true, json: async () => ({ paths: ['characters/hero-summer/portrait/v2.png'] }) } as Response;
       }
       if (init?.method === 'POST' && url.includes('/selected')) {
-        return { ok: true, json: async () => ({ shots: { 'shot-01': 'projects/pokemon/videos/pv/shots/shot-01/v1.mp4' } }) } as Response;
+        return { ok: true, json: async () => ({ path: videoPath }) } as Response;
       }
       if (url.includes('/videos')) {
         return {
@@ -746,15 +745,11 @@ describe('ProjectPage', () => {
               type: 'promo',
               status: 'draft',
               brief: { goal: '角色上线亮相', platform: 'B站', ratio: '16:9', duration: '30s', sound: '音乐驱动' },
-              shots: [{
-                shot_id: 'shot-01',
-                purpose: '角色亮相',
-                duration: '3s',
-                status: 'generated',
-                versions: [videoPath],
-                selected: null,
-                planned_reference_images: [],
-                history: [
+              prompt: '主体：曹操@图片1\n镜头1：角色转身。\n镜头2：镜头推进。',
+              versions: [videoPath],
+              selected: null,
+              planned_reference_images: [],
+              history: [
                   {
                     job_id: 'job-video-1', submitted_at: '2026-08-20T10:00:00Z',
                     completed_at: null, status: 'done', prompt: '角色转身，镜头推进',
@@ -769,9 +764,7 @@ describe('ProjectPage', () => {
                     completed_at: null, status: 'done', prompt: '旧版镜头',
                     model: 'seedance-2.0', params: { duration: 3 },
                   },
-                ],
-              }],
-              exports: [],
+              ],
             }],
           }),
         } as Response;
@@ -787,12 +780,11 @@ describe('ProjectPage', () => {
         projectId="p1"
         workspace="video"
         productionId="pv"
-        shotId="shot-01"
       />,
     );
 
-    expect(await screen.findByRole('link', { name: /上线宣传片/ })).toBeInTheDocument();
-    expect(screen.getByText('shot-01')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '上线宣传片' })).toBeInTheDocument();
+    expect(screen.getByText(/主体：曹操@图片1/)).toBeInTheDocument();
     expect(screen.getByText(/seedance-2\.5-pro/)).toBeInTheDocument();
     expect(screen.getByText('角色转身，镜头推进')).toBeInTheDocument();
     expect(screen.getByText(/seedance-2\.0/)).toBeInTheDocument();
@@ -816,21 +808,21 @@ describe('ProjectPage', () => {
     expect(await screen.findByRole('button', { name: '从项目画廊隐藏 v1.mp4' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '选择参考 曹操·夏日 · 立绘' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
-      '/api/projects/p1/videos/pv/shots/shot-01/references',
+      '/api/projects/p1/videos/pv/references',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ paths: ['characters/hero-summer/portrait/v2.png'] }),
       }),
     ));
-    fireEvent.click(screen.getByRole('button', { name: '选用 shot-01 v1.mp4' }));
+    fireEvent.click(screen.getByRole('button', { name: '定稿 v1.mp4' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
-      '/api/projects/p1/videos/pv/shots/shot-01/selected',
+      '/api/projects/p1/videos/pv/selected',
       expect.objectContaining({ method: 'POST' }),
     ));
   });
 
-  it('视频成片可从企划详情恢复到项目画廊', async () => {
-    const exportPath = 'projects/pokemon/videos/pv/exports/final.mp4';
+  it('完整视频版本可从企划详情恢复到项目画廊', async () => {
+    const exportPath = 'projects/pokemon/videos/pv/versions/final.mp4';
     const galleryHiddenResponse = createGalleryHiddenHandler([exportPath]);
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       const galleryResponse = await galleryHiddenResponse(url, init);
@@ -842,7 +834,8 @@ describe('ProjectPage', () => {
             productions: [{
               production_id: 'pv', title: '上线宣传片', type: 'promo', status: 'done',
               brief: { goal: '亮相', platform: 'B站', ratio: '16:9', duration: '30s', sound: '音乐' },
-              shots: [], exports: [exportPath],
+              prompt: '镜头1：角色亮相。', versions: [exportPath], selected: exportPath,
+              planned_reference_images: [], history: [],
             }],
           }),
         } as Response;
@@ -866,7 +859,7 @@ describe('ProjectPage', () => {
     expect(await screen.findByRole('button', { name: '从项目画廊隐藏 final.mp4' })).toBeInTheDocument();
   });
 
-  it('视频企划详情按镜头表顺序展示尚未生成的镜头', async () => {
+  it('视频企划详情展示一份完整多镜头提示词', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.includes('/videos')) {
         return {
@@ -878,20 +871,8 @@ describe('ProjectPage', () => {
               type: 'promo',
               status: 'draft',
               brief: { goal: '角色上线亮相', platform: '抖音', ratio: '9:16', duration: '15s', sound: '保留技能音效' },
-              shots: [{
-                shot_id: 'shot-02',
-                purpose: '展示核心技能',
-                duration: '5s',
-                status: 'planned',
-                versions: [],
-                selected: null,
-                prompt: '',
-                model: '',
-                reference_images: [],
-                reference_videos: [],
-                reference_audios: [],
-              }],
-              exports: [],
+              prompt: '镜头1：角色亮相。\n镜头2：展示核心技能。',
+              versions: [], selected: null, planned_reference_images: [], history: [],
             }],
           }),
         } as Response;
@@ -908,11 +889,9 @@ describe('ProjectPage', () => {
       />,
     );
 
-    expect(await screen.findByText('镜头板')).toBeInTheDocument();
-    expect(screen.getByText('shot-02')).toBeInTheDocument();
-    expect(screen.getByText('展示核心技能')).toBeInTheDocument();
-    expect(screen.getByText('5s')).toBeInTheDocument();
-    expect(screen.getByText('planned')).toBeInTheDocument();
+    expect(await screen.findByText('完整生成提示词')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '复制生成指令' })).toBeEnabled();
+    expect(screen.getByText(/镜头1：角色亮相/)).toBeInTheDocument();
     expect(screen.getByText('抖音')).toBeInTheDocument();
     expect(screen.getByText('9:16')).toBeInTheDocument();
     expect(screen.getByText('15s')).toBeInTheDocument();
@@ -930,12 +909,9 @@ describe('ProjectPage', () => {
             productions: [{
               production_id: 'pv', title: '上线宣传片', type: 'promo', status: 'draft',
               brief: { goal: '亮相', platform: '', ratio: '', duration: '', sound: '' },
-              shots: [{
-                shot_id: 'shot-01', purpose: '亮相', duration: '3s', status: 'generated',
-                versions: ['projects/pokemon/videos/pv/shots/shot-01/v1.mp4'], selected: null,
-                planned_reference_images: [], history: [],
-              }],
-              exports: [],
+              prompt: '镜头1：亮相。',
+              versions: ['projects/pokemon/videos/pv/versions/v1.mp4'], selected: null,
+              planned_reference_images: [], history: [],
             }],
           }),
         } as Response;
@@ -943,10 +919,10 @@ describe('ProjectPage', () => {
       return { ok: true, json: async () => sample } as Response;
     }));
     render(
-      <ProjectPage projectId="p1" workspace="video" productionId="pv" shotId="shot-01" />,
+      <ProjectPage projectId="p1" workspace="video" productionId="pv" />,
     );
 
-    const button = await screen.findByRole('button', { name: '选用 shot-01 v1.mp4' });
+    const button = await screen.findByRole('button', { name: '定稿 v1.mp4' });
     fireEvent.click(button);
     expect(await screen.findByText('选版失败，请稍后再试。')).toBeInTheDocument();
     expect(button).not.toBeDisabled();

@@ -61,11 +61,11 @@ from character_workflow.lib.schemas import (
     CharacterProjectAssign, ClipboardAttempt,
     FeedbackPost, GalleryMedia, Job, JobKind, JobParams, JobStatus, ProjectCreate,
     ProjectRename, ProjectGalleryResponse, ProjectIndexResponse,
-    ProjectVideoReferencesResponse,
+    ProjectVideoProduction, ProjectVideoReferencesResponse,
     ProjectVideosResponse, ProjectWorkspaceSummary,
     ProjectsFile,
     ScreenCanonicalSet, ScreenCanonicalStatusFile, SpecPatch, VideoSelectedResponse,
-    VideoShotReferencesResponse, VideoShotReferencesSet,
+    VideoReferencesResponse, VideoReferencesSet,
     UiSchemeCreate, UiSchemeDefaultSet, UiSchemesFile,
     WebEditableJobPatch,
 )
@@ -791,6 +791,22 @@ def get_project_videos(project_id: str) -> ProjectVideosResponse:
 
 
 @router.get(
+    "/projects/{project_id}/videos/{production_id}",
+    response_model=ProjectVideoProduction,
+)
+def get_project_video(project_id: str, production_id: str) -> ProjectVideoProduction:
+    from character_workflow.lib.video_jobs import get_production
+    try:
+        return get_production(project_id, production_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.get(
     "/projects/{project_id}/video-references",
     response_model=ProjectVideoReferencesResponse,
 )
@@ -803,25 +819,24 @@ def get_project_video_references(project_id: str) -> ProjectVideoReferencesRespo
 
 
 @router.post(
-    "/projects/{project_id}/videos/{production_id}/shots/{shot_id}/references",
-    response_model=VideoShotReferencesResponse,
+    "/projects/{project_id}/videos/{production_id}/references",
+    response_model=VideoReferencesResponse,
 )
 def post_project_video_references(
     project_id: str,
     production_id: str,
-    shot_id: str,
-    payload: VideoShotReferencesSet,
-) -> VideoShotReferencesResponse:
-    from character_workflow.lib.video_jobs import set_shot_references
+    payload: VideoReferencesSet,
+) -> VideoReferencesResponse:
+    from character_workflow.lib.video_jobs import set_references
     try:
-        paths = set_shot_references(project_id, production_id, shot_id, payload.paths)
+        paths = set_references(project_id, production_id, payload.paths)
     except KeyError:
         raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    return VideoShotReferencesResponse(paths=paths)
+    return VideoReferencesResponse(paths=paths)
 
 
 class _VideoSelectedSet(BaseModel):
@@ -830,25 +845,24 @@ class _VideoSelectedSet(BaseModel):
 
 
 @router.post(
-    "/projects/{project_id}/videos/{production_id}/shots/{shot_id}/selected",
+    "/projects/{project_id}/videos/{production_id}/selected",
     response_model=VideoSelectedResponse,
 )
 def post_project_video_selected(
     project_id: str,
     production_id: str,
-    shot_id: str,
     payload: _VideoSelectedSet,
 ) -> VideoSelectedResponse:
     from character_workflow.lib.video_jobs import set_selected
     try:
-        selected = set_selected(project_id, production_id, shot_id, payload.path)
+        selected = set_selected(project_id, production_id, payload.path)
     except KeyError:
         raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）") from None
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return VideoSelectedResponse(shots=selected)
+    return VideoSelectedResponse(path=selected)
 
 
 @router.post("/projects", response_model=ProjectsFile)
@@ -1831,7 +1845,7 @@ def gallery_image(path: str) -> FileResponse:
     ) or (
         len(project_parts) >= 5
         and project_parts[1] == "videos"
-        and project_parts[3] in {"shots", "exports"}
+        and project_parts[3] == "versions"
         and target.suffix.lower() == ".mp4"
     )
     if not (
@@ -1872,7 +1886,6 @@ class _VideoArchiveTarget(BaseModel):
     model_config = {"extra": "forbid"}
     kind: Literal["video"]
     production_id: str = Field(min_length=1)
-    shot_id: str = Field(min_length=1)
 
 
 _StudioArchiveTarget = Annotated[

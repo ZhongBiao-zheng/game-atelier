@@ -20,7 +20,7 @@ export type StudioArchiveTarget =
     }
   | {
       kind: 'video';
-      production_id: string; shot_id: string;
+      production_id: string;
     };
 
 export type StudioArchiveTargetOption = StudioArchiveTarget & {
@@ -39,7 +39,7 @@ export function studioArchiveTarget(option: StudioArchiveTargetOption): StudioAr
   if (option.kind === 'ui') {
     return { kind: option.kind, ui_scheme_id: option.ui_scheme_id, screen_id: option.screen_id };
   }
-  return { kind: option.kind, production_id: option.production_id, shot_id: option.shot_id };
+  return { kind: option.kind, production_id: option.production_id };
 }
 
 export async function fetchStudioArchiveTargets(

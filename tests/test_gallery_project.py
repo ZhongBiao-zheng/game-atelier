@@ -54,16 +54,19 @@ def test_project_gallery_combines_art_ui_and_video_outputs(client, tmp_path):
         offset=-30,
     )
     _make_media(
-        tmp_path / f"projects/{project['slug']}/videos/trailer/shots/s01/shot.mp4",
+        tmp_path / f"projects/{project['slug']}/videos/trailer/versions/shot.mp4",
         offset=-20,
     )
     _make_media(
-        tmp_path / f"projects/{project['slug']}/videos/trailer/exports/final.mp4",
+        tmp_path / f"projects/{project['slug']}/videos/trailer/versions/final.mp4",
         offset=-10,
     )
     (tmp_path / f"projects/{project['slug']}/videos/trailer/brief.md").write_text(
         "---\ntitle: 预告片\ntype: promo\n---\n",
         encoding="utf-8",
+    )
+    (tmp_path / f"projects/{project['slug']}/videos/trailer/prompt.md").write_text(
+        "镜头1：预告片亮相。", encoding="utf-8",
     )
 
     items = _gallery(client, project_id)["items"]
@@ -72,8 +75,7 @@ def test_project_gallery_combines_art_ui_and_video_outputs(client, tmp_path):
     assert items[0]["target"] == {
         "kind": "video",
         "production_id": "trailer",
-        "shot_id": None,
-        "output_kind": "export",
+        "output_kind": "version",
     }
     assert items[1]["media_type"] == "video"
     assert items[2]["target"]["screen_id"] == "home"
@@ -188,7 +190,7 @@ def test_project_index_uses_latest_four_unhidden_images_and_no_video(client, tmp
             offset=index - 20,
         )
     _make_media(
-        tmp_path / f"projects/{project['slug']}/videos/trailer/shots/s01/newest.mp4",
+        tmp_path / f"projects/{project['slug']}/videos/trailer/versions/newest.mp4",
         offset=100,
     )
     client.post(
@@ -215,8 +217,9 @@ def test_project_index_cover_is_not_limited_by_newer_videos(client, tmp_path):
     production = tmp_path / f"projects/{project['slug']}/videos/trailer"
     (production / "brief.md").parent.mkdir(parents=True, exist_ok=True)
     (production / "brief.md").write_text("---\ntitle: 预告片\n---\n", encoding="utf-8")
+    (production / "prompt.md").write_text("镜头1：预告片。", encoding="utf-8")
     for index in range(101):
-        _make_media(production / f"shots/{index:03d}/v1.mp4", offset=index + 100)
+        _make_media(production / f"versions/v{index + 1}.mp4", offset=index + 100)
     for index in range(4):
         _make_media(tmp_path / f"characters/hero/portrait/{index}.png", offset=index)
 

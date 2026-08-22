@@ -1,0 +1,27 @@
+interface:
+  display_name: "Game Atelier Video"
+  short_description: "用一份多镜头 Prompt 一次生成并管理一支完整项目视频。"
+  default_prompt: "Use $game-atelier:video to create one complete project video from a single multi-shot prompt, then compare and select whole-video versions."
+compatibility:
+  canonical_format: "agent-skills"
+  adapter_targets:
+    - "openai"
+    - "claude"
+    - "generic"
+  activation:
+    mode: "manual"
+    paths:
+      - "SKILL.md"
+      - "references/prompt-contract.md"
+      - "evals/evals.json"
+  execution:
+    context: "inline"
+    shell: "bash"
+  trust:
+    source_tier: "local"
+    remote_inline_execution: "forbid"
+    remote_metadata_policy: "allow-metadata-only"
+  degradation:
+    openai: "metadata-adapter"
+    claude: "neutral-source-plus-adapter"
+    generic: "neutral-source"

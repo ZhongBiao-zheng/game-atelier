@@ -54,8 +54,8 @@ def job_output_dir_for(job: "Job") -> Path:
         from character_workflow.lib.ui_jobs import screen_output_dir
         return screen_output_dir(job.project_id, job.ui_scheme_id, job.screen_id)
     if job.namespace == "video":
-        from character_workflow.lib.video_jobs import shot_output_dir
-        return shot_output_dir(job.project_id, job.production_id, job.shot_id)
+        from character_workflow.lib.video_jobs import production_output_dir
+        return production_output_dir(job.project_id, job.production_id)
     return job_output_dir(job.character_id, job.asset_slot)
 
 
@@ -176,7 +176,6 @@ def write_job(
     ui_scheme_id: str | None = None,
     screen_id: str | None = None,
     production_id: str | None = None,
-    shot_id: str | None = None,
     kind: JobKind = JobKind.IMAGE,
 ) -> Job:
     """落盘一条 job 文件。默认 PENDING_CONFIRM —— Skill 先写好调用细节，
@@ -207,7 +206,6 @@ def write_job(
         ui_scheme_id=ui_scheme_id,
         screen_id=screen_id,
         production_id=production_id,
-        shot_id=shot_id,
         kind=kind,
         source_image=source_image,
         alias=alias,

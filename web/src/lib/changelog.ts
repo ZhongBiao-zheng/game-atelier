@@ -31,6 +31,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.30.0',
+    date: '2026-08-22',
+    headline: '多镜头短片现在一次生成完整成片',
+    changes: [
+      { kind: 'feat', text: '视频企划改为一份完整提示词对应一次生成；镜头 1—6 只负责描述成片内部节奏，不再拆成六个任务' },
+      { kind: 'feat', text: '视频工作区直接管理完整提示词、企划级参考素材、成片版本与最终定稿，删掉逐镜头页面和导出层级' },
+      { kind: 'fix', text: 'Seedance 2.0 与 2.5 分别校验时长和参考素材上限；音乐、对白与音效按具体任务决定，不再默认禁止背景音乐' },
+    ],
+  },
+  {
     version: '5.29.0',
     date: '2026-08-22',
     headline: '工坊层级更直接，角色延伸不再被皮肤概念限制',

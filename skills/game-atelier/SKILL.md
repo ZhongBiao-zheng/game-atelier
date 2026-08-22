@@ -57,7 +57,7 @@ triggers:
 | UI 方案 | Read `projects/<slug>/ui/schemes.json` | 方案数、默认方案 |
 | UI 规范 | Read 默认方案 `ui/<scheme>/style.md` | 未建立 / status |
 | 页面地图 | Read 默认方案 `ui/<scheme>/screens/screen-map.md` | 未建立 / status + 页面数 |
-| 视频企划 | Read `projects/<slug>/videos/*/{brief.md,shot-map.md,selected.json}` | 企划数、镜头数、已选版镜头数 |
+| 视频企划 | Read `projects/<slug>/videos/*/{brief.md,prompt.md,selected.json}` | 企划数、完整视频版本数、已定稿企划数 |
 
 诊断完固定输出**进度卡**（总控独有产物，不与七件套混用）：
 
@@ -66,7 +66,7 @@ triggers:
 环境：<ready ｜ 缺 xxx>
 角色：<N 个 ｜ active=<名>>  立绘 <有/无> · 美宣 <有/无> · 三视图 <有/无>
 UI：  锚文档 <x/3 approved> · UI 规范 <未建立/draft/approved> · 页面 <N 张>
-视频：企划 <N 个> · 镜头 <N 个> · 已选版 <N 个>
+视频：企划 <N 个> · 完整版本 <N 个> · 已定稿 <N 个>
 建议下一步：<一句话，只给一个>
 你可以直接说：<1-3 条可复制原话>
 ```
@@ -81,7 +81,7 @@ UI：  锚文档 <x/3 approved> · UI 规范 <未建立/draft/approved> · 页�
 | 美宣 / 宣传图 / 海报 / KV | Skill 工具调起 `promo`（前置：有 spec.md，且每个出镜角色有 portrait / turnaround / 用户上传身份图之一） |
 | 三视图 / 角色三面 / 设定集 | Skill 工具调起 `turnaround`（前置：完整 spec.md + portrait/，以该子技能门禁为准） |
 | 游戏 UI 任一阶段（策划锚 / UI 规范 / 页面生成 / 风格切换 / 页面延展） | Skill 工具调起 `ui`（UI 总控，内部再分派到 ui-anchor / ui-page / ui-screens） |
-| 项目视频（企划 / 镜头表 / 正式镜头生成 / 选版） | Skill 工具调起 `video`；无项目自由试验才去 Web 创作台 |
+| 项目视频（企划 / 完整多镜头 Prompt / 整片生成 / 选版） | Skill 工具调起 `video`；无项目自由试验才去 Web 创作台 |
 | 开窗看图 / 起 server / 加 API Key / Web 界面 | Skill 工具调起 `viewer-server` |
 | 新建项目 / 定项目定位 | 本总控处理（问一句定位 → `create-project "<项目名>"`） |
 | 世界观 / 项目经验 | 指向 Web「项目经验」页（写 `projects/<slug>/worldview.md`），总控不代笔 |
@@ -95,7 +95,7 @@ UI：  锚文档 <x/3 approved> · UI 规范 <未建立/draft/approved> · 页�
 建项目 → 角色身份锚（立绘 / 三视图 / 用户上传图）→ ┬ 美宣（promo）
                                                    ├ 三视图（turnaround）
                                                    ├ UI 管线（ui 总控：锚 → 规范 → 基准页 → 风格定稿 → 延展 → 逐页）
-                                                   └ 视频管线（video：企划 → 镜头表 → 单镜头 → 选版）
+                                                   └ 视频管线（video：企划 → 完整 Prompt → 一次成片 → 整片选版）
 ```
 
 角色排在 UI 之前的理由：项目根 `style.md` 基线通常由角色管线先建立；每套 UI 方案的

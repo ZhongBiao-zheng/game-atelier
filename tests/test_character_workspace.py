@@ -98,7 +98,8 @@ def test_workspace_derives_ui_and_video_associations_from_reference_paths(client
     video_root = tmp_path / f"projects/{project['slug']}/videos/trailer"
     (video_root / "brief.md").parent.mkdir(parents=True, exist_ok=True)
     (video_root / "brief.md").write_text("---\ntitle: 赵云预告\n---\n", encoding="utf-8")
-    video_output = video_root / "shots/s01/v1.mp4"
+    (video_root / "prompt.md").write_text("镜头1：赵云亮相。", encoding="utf-8")
+    video_output = video_root / "versions/v1.mp4"
     _media(video_output)
 
     ui_job = write_job(
@@ -126,7 +127,6 @@ def test_workspace_derives_ui_and_video_associations_from_reference_paths(client
         namespace="video",
         project_id=project["id"],
         production_id="trailer",
-        shot_id="s01",
         kind=JobKind.VIDEO,
     )
     update_job_status(

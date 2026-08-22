@@ -6,7 +6,6 @@ import type {
   ProjectVideoJobRecord,
   ProjectVideoProduction,
   ProjectVideoReferenceCandidate,
-  ProjectVideoShot,
 } from '@/api/videos';
 import { cn } from '@/lib/utils';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
@@ -18,7 +17,6 @@ import { CharacterAssociationPicker } from './CharacterAssociationPicker';
 export function VideoWorkspace({
   projectId,
   productionId,
-  shotId,
   productions,
   loadError,
   referenceCandidates,
@@ -27,12 +25,11 @@ export function VideoWorkspace({
 }: {
   projectId: string;
   productionId?: string;
-  shotId?: string;
   productions: ProjectVideoProduction[] | null;
   loadError: string | null;
   referenceCandidates: ProjectVideoReferenceCandidate[];
-  onSelected: (productionId: string, shotId: string, path: string | null) => Promise<void>;
-  onReferences: (productionId: string, shotId: string, paths: string[]) => Promise<void>;
+  onSelected: (productionId: string, path: string | null) => Promise<void>;
+  onReferences: (productionId: string, paths: string[]) => Promise<void>;
 }) {
   if (loadError) return <VideoLoadError message={loadError} />;
   if (productions === null) return <VideoLoading />;
@@ -44,19 +41,14 @@ export function VideoWorkspace({
     return <p className="text-sm text-muted-foreground">找不到视频企划 {productionId}。</p>;
   }
   if (!current) return <ProductionList projectId={projectId} productions={productions} />;
-  const shot = shotId ? current.shots.find(item => item.shot_id === shotId) : undefined;
-  if (shotId && !shot) return <p className="text-sm text-muted-foreground">找不到镜头 {shotId}。</p>;
-  return shot ? (
-    <ShotDetail
+  return (
+    <ProductionDetail
       projectId={projectId}
       production={current}
-      shot={shot}
       referenceCandidates={referenceCandidates}
       onSelected={onSelected}
       onReferences={onReferences}
     />
-  ) : (
-    <ProductionDetail projectId={projectId} production={current} />
   );
 }
 
@@ -96,33 +88,73 @@ function ProductionList({ projectId, productions }: {
         <h2 className="mt-2 font-display text-display italic text-foreground">视频企划</h2>
       </div>
       <div className="divide-y divide-border rounded-lg border border-border bg-card/30">
-        {productions.map(production => {
-          const selected = production.shots.filter(shot => shot.selected).length;
-          return (
-            <Link
-              key={production.production_id}
-              href={`/workshop/${encodeURIComponent(projectId)}/video/${encodeURIComponent(production.production_id)}`}
-              className="grid gap-2 px-4 py-4 transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:grid-cols-[minmax(160px,0.8fr)_minmax(180px,1fr)_auto] sm:items-center"
-            >
-              <div>
-                <p className="text-base font-medium text-foreground">{production.title}</p>
-                <p className="mt-1 font-mono text-xs text-muted-foreground">{production.production_id} · {production.type}</p>
-              </div>
-              <p className="text-xs text-muted-foreground">{production.brief.goal || '尚未填写企划目标'}</p>
-              <span className="font-mono text-xs text-muted-foreground">{selected}/{production.shots.length} 镜头选版</span>
-            </Link>
-          );
-        })}
+        {productions.map(production => (
+          <Link
+            key={production.production_id}
+            href={`/workshop/${encodeURIComponent(projectId)}/video/${encodeURIComponent(production.production_id)}`}
+            className="grid gap-2 px-4 py-4 transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:grid-cols-[minmax(160px,0.8fr)_minmax(180px,1fr)_auto] sm:items-center"
+          >
+            <div>
+              <p className="text-base font-medium text-foreground">{production.title}</p>
+              <p className="mt-1 font-mono text-xs text-muted-foreground">{production.production_id} · {production.type}</p>
+            </div>
+            <p className="text-xs text-muted-foreground">{production.brief.goal || '尚未填写企划目标'}</p>
+            <span className={cn('text-xs', production.selected ? 'text-primary' : 'text-muted-foreground')}>
+              {productionState(production)}
+            </span>
+          </Link>
+        ))}
       </div>
     </section>
   );
 }
 
-function ProductionDetail({ projectId, production }: {
+function ProductionDetail({
+  projectId,
+  production,
+  referenceCandidates,
+  onSelected,
+  onReferences,
+}: {
   projectId: string;
   production: ProjectVideoProduction;
+  referenceCandidates: ProjectVideoReferenceCandidate[];
+  onSelected: (productionId: string, path: string | null) => Promise<void>;
+  onReferences: (productionId: string, paths: string[]) => Promise<void>;
 }) {
   const galleryVisibility = useGalleryHidden();
+  const [selecting, setSelecting] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [savingReferences, setSavingReferences] = useState(false);
+
+  async function selectVersion(path: string, selected: boolean) {
+    setSelecting(path);
+    setSelectionError(null);
+    try {
+      await onSelected(production.production_id, selected ? null : path);
+    } catch {
+      setSelectionError('选版失败，请稍后再试。');
+    } finally {
+      setSelecting(null);
+    }
+  }
+
+  async function toggleReference(path: string) {
+    const selected = production.planned_reference_images ?? [];
+    const next = selected.includes(path)
+      ? selected.filter(item => item !== path)
+      : [...selected, path];
+    setSavingReferences(true);
+    setSelectionError(null);
+    try {
+      await onReferences(production.production_id, next);
+    } catch {
+      setSelectionError('保存参考素材失败，请稍后再试。');
+    } finally {
+      setSavingReferences(false);
+    }
+  }
+
   return (
     <section className="space-y-6" data-testid="project-videos">
       <div className="space-y-2">
@@ -137,163 +169,126 @@ function ProductionDetail({ projectId, production }: {
         projectId={projectId}
         target={{ kind: 'video', production_id: production.production_id }}
       />
-      <div className="space-y-3">
-        <div className="flex items-baseline justify-between gap-3">
-          <h3 className="text-base font-medium text-foreground">镜头板</h3>
-          <span className="font-mono text-xs text-muted-foreground">{production.shots.length} 镜头</span>
-        </div>
-        {production.shots.length > 0 ? (
-          <ol className="divide-y divide-border rounded-lg border border-border bg-card/30">
-            {production.shots.map((shot, index) => (
-              <li key={shot.shot_id}>
-                <Link
-                  href={`/workshop/${encodeURIComponent(projectId)}/video/${encodeURIComponent(production.production_id)}/shots/${encodeURIComponent(shot.shot_id)}`}
-                  className="grid gap-2 px-4 py-3 transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:grid-cols-[48px_minmax(140px,0.7fr)_minmax(180px,1fr)_auto] sm:items-center"
-                >
-                  <span className="font-mono text-xs text-muted-foreground">{String(index + 1).padStart(2, '0')}</span>
-                  <div>
-                    <p className="font-mono text-sm text-foreground">{shot.shot_id}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{shot.duration || '时长未定'}</p>
-                  </div>
-                  <p className="text-xs text-muted-foreground">{shot.purpose || '尚未填写镜头用途'}</p>
-                  <span className={cn('text-xs', shot.selected ? 'text-primary' : 'text-muted-foreground')}>
-                    {shot.selected ? '已选版' : shot.versions.length ? '待选版' : shot.status}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="rounded-lg border border-border bg-card/30 px-4 py-8 text-center text-sm text-muted-foreground">镜头表尚未填写。</p>
-        )}
-      </div>
+      <PromptCard prompt={production.prompt} />
+      <GenerationCommand production={production} />
+      <ReferenceSelector
+        candidates={referenceCandidates}
+        selectedPaths={production.planned_reference_images ?? []}
+        disabled={savingReferences}
+        onToggle={(path) => { void toggleReference(path); }}
+      />
+      <JobHistory records={production.history} />
+      {selectionError && <p role="status" className="text-xs text-destructive">{selectionError}</p>}
       {galleryVisibility.error && (
         <p role="status" className="text-xs text-destructive">{galleryVisibility.error}</p>
       )}
-      {production.exports.length > 0 && (
-        <ExportList paths={production.exports} galleryVisibility={galleryVisibility} />
+      {production.versions.length > 0 ? (
+        <section className="space-y-3" aria-label="完整视频版本">
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 className="text-base font-medium text-foreground">完整视频版本</h3>
+            <span className="font-mono text-xs text-muted-foreground">{production.versions.length} 个版本</span>
+          </div>
+          <div className="flex gap-4 overflow-x-auto pb-2">
+            {production.versions.map(path => {
+              const selected = production.selected === path;
+              return (
+                <figure key={path} className="w-72 shrink-0 space-y-2">
+                  <video
+                    src={`/api/gallery/image?path=${encodeURIComponent(path)}`}
+                    controls
+                    preload="metadata"
+                    className="aspect-video w-full rounded-lg border border-border bg-background object-cover"
+                  />
+                  <figcaption className="space-y-2">
+                    <span className="block truncate font-mono text-xs text-muted-foreground">{filename(path)}</span>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void selectVersion(path, selected)}
+                        disabled={selecting !== null}
+                        aria-label={selected ? `取消定稿 ${filename(path)}` : `定稿 ${filename(path)}`}
+                        className={cn(
+                          'min-h-11 shrink-0 rounded-md border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                          selected ? 'border-primary/60 text-primary' : 'border-border text-muted-foreground hover:bg-secondary hover:text-foreground',
+                        )}
+                      >
+                        {selecting === path ? '处理中…' : selected ? '已定稿' : '设为定稿'}
+                      </button>
+                      <GalleryVisibilityButton
+                        filename={filename(path)}
+                        hidden={galleryVisibility.isHidden(path)}
+                        loading={!galleryVisibility.loaded || galleryVisibility.updatingPath !== null}
+                        updating={galleryVisibility.updatingPath === path}
+                        onToggle={() => void galleryVisibility.toggleHidden(path)}
+                      />
+                    </div>
+                  </figcaption>
+                </figure>
+              );
+            })}
+          </div>
+        </section>
+      ) : (
+        <div className="grid min-h-[240px] place-items-center rounded-lg border border-border bg-card/30 text-center">
+          <p className="text-sm text-muted-foreground">这个企划还没有生成完整视频版本。</p>
+        </div>
       )}
     </section>
   );
 }
 
-function ShotDetail({
-  projectId,
-  production,
-  shot,
-  referenceCandidates,
-  onSelected,
-  onReferences,
-}: {
-  projectId: string;
-  production: ProjectVideoProduction;
-  shot: ProjectVideoShot;
-  referenceCandidates: ProjectVideoReferenceCandidate[];
-  onSelected: (productionId: string, shotId: string, path: string | null) => Promise<void>;
-  onReferences: (productionId: string, shotId: string, paths: string[]) => Promise<void>;
-}) {
-  const galleryVisibility = useGalleryHidden();
-  const [selecting, setSelecting] = useState<string | null>(null);
-  const [selectionError, setSelectionError] = useState<string | null>(null);
-  const [savingReferences, setSavingReferences] = useState(false);
+function productionState(production: ProjectVideoProduction): string {
+  if (!production.prompt.trim()) return '待编写';
+  if (production.selected) return '已定稿';
+  if (production.history.some(record => record.status === 'pending')) return '生成中';
+  if (production.versions.length > 0) return `${production.versions.length} 个版本 · 待选版`;
+  return '待生成';
+}
 
-  async function selectVersion(path: string, selected: boolean) {
-    setSelecting(path);
-    setSelectionError(null);
-    try {
-      await onSelected(production.production_id, shot.shot_id, selected ? null : path);
-    } catch {
-      setSelectionError('选版失败，请稍后再试。');
-    } finally {
-      setSelecting(null);
-    }
-  }
+function GenerationCommand({ production }: { production: ProjectVideoProduction }) {
+  const copyToClipboard = useClipboard();
+  const [copyState, setCopyState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
+  const command = `/game-atelier:video 继续企划「${production.title}」，按当前完整提示词生成一支完整视频`;
 
-  async function toggleReference(path: string) {
-    const selected = shot.planned_reference_images ?? [];
-    const next = selected.includes(path)
-      ? selected.filter(item => item !== path)
-      : [...selected, path];
-    setSavingReferences(true);
-    setSelectionError(null);
-    try {
-      await onReferences(production.production_id, shot.shot_id, next);
-    } catch {
-      setSelectionError('保存参考素材失败，请稍后再试。');
-    } finally {
-      setSavingReferences(false);
-    }
+  async function copyCommand() {
+    setCopyState('copying');
+    const result = await copyToClipboard(command);
+    setCopyState(result.success ? 'copied' : 'error');
   }
 
   return (
-    <section className="space-y-5" data-testid="project-videos">
-      <div className="space-y-2">
-        <Link href={`/workshop/${encodeURIComponent(projectId)}/video/${encodeURIComponent(production.production_id)}`} className="text-xs text-muted-foreground hover:text-foreground">
-          视频 / {production.title} / 镜头板
-        </Link>
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <div>
-            <h2 className="font-display text-display italic text-foreground">{shot.shot_id}</h2>
-            {shot.purpose && <p className="mt-2 text-sm text-muted-foreground">{shot.purpose}</p>}
-          </div>
-          <span className="text-xs text-muted-foreground">{shot.duration || '时长未定'} · {shot.status}</span>
-        </div>
+    <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card/30 p-4">
+      <div>
+        <h3 className="text-base font-medium text-foreground">一次生成完整视频</h3>
+        <p className="mt-1 text-xs text-muted-foreground">复制指令回到对话确认；不会拆成逐镜头任务。</p>
       </div>
-      <ReferenceSelector
-        candidates={referenceCandidates}
-        selectedPaths={shot.planned_reference_images ?? []}
-        disabled={savingReferences}
-        onToggle={(path) => { void toggleReference(path); }}
-      />
-      <JobHistory records={shot.history} />
-      {selectionError && <p role="status" className="text-xs text-destructive">{selectionError}</p>}
-      {galleryVisibility.error && (
-        <p role="status" className="text-xs text-destructive">{galleryVisibility.error}</p>
+      <Button
+        type="button"
+        disabled={!production.prompt.trim() || copyState === 'copying'}
+        onClick={() => void copyCommand()}
+        className="min-h-11"
+      >
+        {copyState === 'copied' ? <Check aria-hidden /> : <Copy aria-hidden />}
+        {copyState === 'copying' ? '复制中…' : copyState === 'copied' ? '已复制' : '复制生成指令'}
+      </Button>
+      {copyState === 'error' && (
+        <p role="status" className="w-full text-xs text-destructive">复制失败，请稍后重试。</p>
       )}
-      {shot.versions.length > 0 ? (
-        <div className="flex gap-4 overflow-x-auto pb-2">
-          {shot.versions.map(path => {
-            const selected = shot.selected === path;
-            return (
-              <figure key={path} className="w-72 shrink-0 space-y-2">
-                <video
-                  src={`/api/gallery/image?path=${encodeURIComponent(path)}`}
-                  controls
-                  preload="metadata"
-                  className="aspect-video w-full rounded-lg border border-border bg-background object-cover"
-                />
-                <figcaption className="space-y-2">
-                  <span className="block truncate font-mono text-xs text-muted-foreground">{filename(path)}</span>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void selectVersion(path, selected)}
-                      disabled={selecting !== null}
-                      aria-label={selected ? `取消选用 ${shot.shot_id} ${filename(path)}` : `选用 ${shot.shot_id} ${filename(path)}`}
-                      className={cn(
-                        'min-h-11 shrink-0 rounded-md border px-3 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                        selected ? 'border-primary/60 text-primary' : 'border-border text-muted-foreground hover:bg-secondary hover:text-foreground',
-                      )}
-                    >
-                      {selecting === path ? '处理中…' : selected ? '已选用' : '选用'}
-                    </button>
-                    <GalleryVisibilityButton
-                      filename={filename(path)}
-                      hidden={galleryVisibility.isHidden(path)}
-                      loading={!galleryVisibility.loaded || galleryVisibility.updatingPath !== null}
-                      updating={galleryVisibility.updatingPath === path}
-                      onToggle={() => void galleryVisibility.toggleHidden(path)}
-                    />
-                  </div>
-                </figcaption>
-              </figure>
-            );
-          })}
-        </div>
+    </section>
+  );
+}
+
+function PromptCard({ prompt }: { prompt: string }) {
+  return (
+    <section className="space-y-3 rounded-lg border border-border bg-card/30 p-4">
+      <div>
+        <h3 className="text-base font-medium text-foreground">完整生成提示词</h3>
+        <p className="mt-1 text-xs text-muted-foreground">镜头 1–N 属于同一份提示词；每次提交生成一支完整视频。</p>
+      </div>
+      {prompt ? (
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/85">{prompt}</p>
       ) : (
-        <div className="grid min-h-[240px] place-items-center rounded-lg border border-border bg-card/30 text-center">
-          <p className="text-sm text-muted-foreground">这个镜头尚未生成版本。</p>
-        </div>
+        <p className="text-sm text-muted-foreground">提示词尚未填写。</p>
       )}
     </section>
   );
@@ -325,10 +320,10 @@ function ReferenceSelector({
       })),
   ];
   return (
-    <section className="space-y-3 rounded-lg border border-border bg-card/30 p-4" aria-label="镜头参考素材">
+    <section className="space-y-3 rounded-lg border border-border bg-card/30 p-4" aria-label="视频参考素材">
       <div>
-        <h3 className="text-base font-medium text-foreground">下一次生成的参考素材</h3>
-        <p className="mt-1 text-xs text-muted-foreground">直接选择项目里的角色、角色衍生和 UI 页面定稿。生成时会把实际路径写入 Job 历史。</p>
+        <h3 className="text-base font-medium text-foreground">下一次完整生成的参考素材</h3>
+        <p className="mt-1 text-xs text-muted-foreground">这些素材属于整个视频企划，提交时会一起写入一个 Job。</p>
       </div>
       {visibleCandidates.length > 0 ? (
         <div className="flex gap-3 overflow-x-auto pb-1">
@@ -402,7 +397,7 @@ function JobHistory({ records }: { records: ProjectVideoJobRecord[] }) {
   if (records.length === 0) return null;
   return (
     <section className="space-y-3 rounded-lg border border-border bg-card/30 p-4">
-      <h3 className="text-base font-medium text-foreground">生成历史</h3>
+      <h3 className="text-base font-medium text-foreground">完整视频生成历史</h3>
       <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
         {records.map(record => (
           <article key={record.job_id} className="space-y-3 p-4">
@@ -414,7 +409,7 @@ function JobHistory({ records }: { records: ProjectVideoJobRecord[] }) {
             </div>
             {record.prompt && (
               <div className="space-y-1.5">
-                <p className="text-xs text-foreground/75">生成提示词</p>
+                <p className="text-xs text-foreground/75">本次完整提示词</p>
                 <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">{record.prompt}</p>
               </div>
             )}
@@ -482,42 +477,6 @@ function formatDate(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN');
 }
 
-function ExportList({
-  paths,
-  galleryVisibility,
-}: {
-  paths: string[];
-  galleryVisibility: ReturnType<typeof useGalleryHidden>;
-}) {
-  return (
-    <section className="space-y-3 border-t border-border pt-4">
-      <p className="text-xs uppercase tracking-label text-muted-foreground/70">成片</p>
-      <div className="flex gap-3 overflow-x-auto pb-1">
-        {paths.map(path => (
-          <figure key={path} className="w-72 shrink-0 space-y-2">
-            <video
-              src={`/api/gallery/image?path=${encodeURIComponent(path)}`}
-              controls
-              preload="metadata"
-              className="aspect-video w-full rounded-lg border border-border bg-background object-cover"
-            />
-            <figcaption className="flex flex-wrap items-center justify-between gap-2">
-              <span className="truncate font-mono text-xs text-muted-foreground">{filename(path)}</span>
-              <GalleryVisibilityButton
-                filename={filename(path)}
-                hidden={galleryVisibility.isHidden(path)}
-                loading={!galleryVisibility.loaded || galleryVisibility.updatingPath !== null}
-                updating={galleryVisibility.updatingPath === path}
-                onToggle={() => void galleryVisibility.toggleHidden(path)}
-              />
-            </figcaption>
-          </figure>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function VideoEmpty() {
   const copyToClipboard = useClipboard();
   const [copyState, setCopyState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
@@ -536,7 +495,7 @@ function VideoEmpty() {
         <div className="space-y-2">
           <h2 className="font-display text-display italic text-foreground/70">这个项目还没有视频企划</h2>
           <p className="text-sm text-muted-foreground">
-            复制指令并回到对话发送，视频总控会为这个项目建立 Brief 与镜头表。
+            复制指令并回到对话发送，视频总控会建立 Brief 和一份完整多镜头提示词。
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">

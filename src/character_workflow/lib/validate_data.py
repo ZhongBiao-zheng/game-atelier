@@ -239,7 +239,7 @@ def _check_canonicals(report: Report, root: Path) -> None:
 
 
 def _check_video_references(report: Report, root: Path) -> None:
-    from character_workflow.lib.video_jobs import is_project_reference_path, require_shot
+    from character_workflow.lib.video_jobs import is_project_reference_path, require_production
 
     count = 0
     for project in _known_projects():
@@ -254,28 +254,17 @@ def _check_video_references(report: Report, root: Path) -> None:
             except (OSError, ValidationError) as error:
                 _err(report, "reference", rel, f"结构非法: {error}")
                 continue
-            for shot_id, paths in file.shots.items():
-                try:
-                    require_shot(path.parent, path.parent.name, shot_id)
-                except (FileNotFoundError, ValueError) as error:
-                    _err(report, "reference", rel, str(error))
-                if len(paths) != len(set(paths)):
-                    _err(report, "reference", rel, f"shot {shot_id} 参考素材存在重复路径")
-                for reference in paths:
-                    if not is_project_reference_path(project.id, reference):
-                        _err(
-                            report,
-                            "reference",
-                            rel,
-                            f"shot {shot_id} 参考素材不属于当前项目: {reference}",
-                        )
-                    elif not (root / reference).is_file():
-                        _err(
-                            report,
-                            "reference",
-                            rel,
-                            f"shot {shot_id} 参考素材不存在: {reference}",
-                        )
+            try:
+                require_production(path.parent, path.parent.name)
+            except FileNotFoundError as error:
+                _err(report, "reference", rel, str(error))
+            if len(file.paths) != len(set(file.paths)):
+                _err(report, "reference", rel, "视频参考素材存在重复路径")
+            for reference in file.paths:
+                if not is_project_reference_path(project.id, reference):
+                    _err(report, "reference", rel, f"参考素材不属于当前项目: {reference}")
+                elif not (root / reference).is_file():
+                    _err(report, "reference", rel, f"参考素材不存在: {reference}")
     report.checked["video_references"] = count
 
 

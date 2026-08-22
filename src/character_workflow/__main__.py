@@ -239,33 +239,31 @@ def _merge_paths(*groups: list[str]) -> list[str]:
     return list(dict.fromkeys(path for group in groups for path in group))
 
 
-def _submit_video_shot(args: argparse.Namespace) -> int:
+def _submit_video_production(args: argparse.Namespace) -> int:
     from character_workflow.lib import video_jobs
     try:
         project = video_jobs.resolve_project(args.project)
         root = video_jobs.production_dir(project.id, args.production)
-        video_jobs.require_shot(root, args.production, args.shot)
+        video_jobs.require_production(root, args.production)
         key, model = _video_key(args.alias, args.model)
     except (KeyError, FileNotFoundError, ValueError) as e:
-        print(f"submit-video-shot: {e}", file=sys.stderr)
+        print(f"submit-video-production: {e}", file=sys.stderr)
         return 1
-    prompt_path = Path(args.prompt_file)
+    prompt_path = Path(args.prompt_file) if args.prompt_file else root / "prompt.md"
     if not prompt_path.is_file():
-        print(f"submit-video-shot: --prompt-file {args.prompt_file} 不存在", file=sys.stderr)
+        print(f"submit-video-production: prompt 文件 {prompt_path} 不存在", file=sys.stderr)
         return 1
     if not 1 <= args.duration <= 60:
-        print("submit-video-shot: --duration 必须在 1–60 秒之间", file=sys.stderr)
+        print("submit-video-production: --duration 必须在 1–60 秒之间", file=sys.stderr)
         return 1
     prompt = prompt_path.read_text(encoding="utf-8").strip()
     if not prompt:
-        print("submit-video-shot: prompt 不能为空", file=sys.stderr)
+        print("submit-video-production: prompt 不能为空", file=sys.stderr)
         return 1
     try:
         saved_references = _resolved_paths([
             str(data_root.resolve_data_root() / path)
-            for path in video_jobs.read_shot_references(
-                project.id, args.production, args.shot
-            )
+            for path in video_jobs.read_references(project.id, args.production)
         ])
         params = {
             "vendor": f"{key.alias} ({key.provider})",
@@ -279,8 +277,10 @@ def _submit_video_shot(args: argparse.Namespace) -> int:
             "reference_videos": _resolved_paths(args.reference_video),
             "reference_audios": _resolved_paths(args.reference_audio),
         }
+        from character_workflow.lib.video_caps import validate_seedance_request
+        validate_seedance_request(model, params, prompt)
     except (FileNotFoundError, ValueError) as e:
-        print(f"submit-video-shot: {e}", file=sys.stderr)
+        print(f"submit-video-production: {e}", file=sys.stderr)
         return 1
     job = write_job(
         job_id=new_job_id(),
@@ -293,7 +293,6 @@ def _submit_video_shot(args: argparse.Namespace) -> int:
         namespace="video",
         project_id=project.id,
         production_id=args.production,
-        shot_id=args.shot,
         kind=JobKind.VIDEO,
     )
     print(_confirmation_card(job), file=sys.stderr)
@@ -311,13 +310,12 @@ def _set_video_selected(args: argparse.Namespace) -> int:
         selected = set_selected(
             project.id,
             args.production,
-            args.shot,
             None if args.clear else args.path,
         )
     except (KeyError, FileNotFoundError, ValueError) as e:
         print(f"set-video-selected: {e}", file=sys.stderr)
         return 1
-    print(json.dumps({"shots": selected}, ensure_ascii=False))
+    print(json.dumps({"path": selected}, ensure_ascii=False))
     return 0
 
 
@@ -343,8 +341,8 @@ def _confirmation_card(job: Job) -> str:
             base = f" ← {job.params.base_version}" if job.params.base_version else ""
             label += f"\n风格   : {job.params.style_variant}{base}"
         lines.insert(2, label)
-    if job.production_id and job.shot_id:
-        lines.insert(2, f"镜头   : {job.production_id} / {job.shot_id}（项目视频 job）")
+    if job.production_id:
+        lines.insert(2, f"企划   : {job.production_id}（项目完整视频 job）")
     if job.retry_of:
         lines.append(f"retry_of: {job.retry_of}（原 job 错误记录已保留）")
     lines.append(f"参考图 : {len(refs)} 张")
@@ -681,7 +679,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_vp = sub.add_parser(
         "create-video-production",
-        help="建立项目视频企划（brief.md + shot-map.md）",
+        help="建立项目视频企划（brief.md + prompt.md）",
     )
     p_vp.add_argument("--project", required=True, help="项目 id 或 slug")
     p_vp.add_argument("--production", required=True, help="企划 id（小写字母/数字/连字符）")
@@ -694,13 +692,12 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     p_vs = sub.add_parser(
-        "submit-video-shot",
-        help="提交项目视频单镜头 job（namespace='video'，产物归企划/镜头）",
+        "submit-video-production",
+        help="提交项目完整视频 job（namespace='video'，产物归企划）",
     )
     p_vs.add_argument("--project", required=True, help="项目 id 或 slug")
     p_vs.add_argument("--production", required=True, help="企划 id")
-    p_vs.add_argument("--shot", required=True, help="镜头 id")
-    p_vs.add_argument("--prompt-file", required=True, help="视频 prompt 文件")
+    p_vs.add_argument("--prompt-file", default=None, help="视频 prompt 文件；缺省读企划 prompt.md")
     p_vs.add_argument("--alias", default=None, help="视频 Key alias；缺省选首个视频 Key")
     p_vs.add_argument("--model", default=None, help="视频模型 id；缺省选 Key 下首个视频模型")
     p_vs.add_argument("--duration", type=int, default=5, help="目标时长（秒）")
@@ -710,10 +707,9 @@ def main(argv: list[str] | None = None) -> int:
     p_vs.add_argument("--reference-video", action="append", default=None)
     p_vs.add_argument("--reference-audio", action="append", default=None)
 
-    p_vc = sub.add_parser("set-video-selected", help="选定/取消项目视频镜头版本")
+    p_vc = sub.add_parser("set-video-selected", help="选定/取消项目完整视频版本")
     p_vc.add_argument("--project", required=True, help="项目 id 或 slug")
     p_vc.add_argument("--production", required=True, help="企划 id")
-    p_vc.add_argument("--shot", required=True, help="镜头 id")
     p_vc.add_argument("--path", default=None, help="要选定的 mp4 路径")
     p_vc.add_argument("--clear", action="store_true", help="取消选定")
 
@@ -804,8 +800,8 @@ def main(argv: list[str] | None = None) -> int:
         return _set_screen_canonical(args)
     if args.cmd == "create-video-production":
         return _create_video_production(args)
-    if args.cmd == "submit-video-shot":
-        return _submit_video_shot(args)
+    if args.cmd == "submit-video-production":
+        return _submit_video_production(args)
     if args.cmd == "set-video-selected":
         return _set_video_selected(args)
     if args.cmd == "retry-job":

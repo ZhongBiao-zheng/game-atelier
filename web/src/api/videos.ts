@@ -11,17 +11,6 @@ export interface ProjectVideoJobRecord {
   params: JobParams;
 }
 
-export interface ProjectVideoShot {
-  shot_id: string;
-  purpose: string;
-  duration: string;
-  status: string;
-  versions: string[];
-  selected: string | null;
-  planned_reference_images: string[];
-  history: ProjectVideoJobRecord[];
-}
-
 export interface ProjectVideoReferenceCandidate {
   kind: 'character' | 'ui_screen';
   asset_id: string;
@@ -44,8 +33,11 @@ export interface ProjectVideoProduction {
     duration: string;
     sound: string;
   };
-  shots: ProjectVideoShot[];
-  exports: string[];
+  prompt: string;
+  versions: string[];
+  selected: string | null;
+  planned_reference_images: string[];
+  history: ProjectVideoJobRecord[];
 }
 
 export async function fetchProjectVideos(projectId: string): Promise<ProjectVideoProduction[]> {
@@ -71,12 +63,11 @@ export async function fetchProjectVideoReferences(
 export async function setProjectVideoReferences(
   projectId: string,
   productionId: string,
-  shotId: string,
   paths: string[],
 ): Promise<string[]> {
   const data = await requestJson<{ paths: string[] }>(
-    `/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(productionId)}/shots/${encodeURIComponent(shotId)}/references`,
-    '保存镜头参考素材',
+    `/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(productionId)}/references`,
+    '保存视频参考素材',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -89,17 +80,16 @@ export async function setProjectVideoReferences(
 export async function setProjectVideoSelected(
   projectId: string,
   productionId: string,
-  shotId: string,
   path: string | null,
-): Promise<Record<string, string>> {
-  const data = await requestJson<{ shots: Record<string, string> }>(
-    `/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(productionId)}/shots/${encodeURIComponent(shotId)}/selected`,
-    path ? '选定镜头版本' : '取消镜头选定',
+): Promise<string | null> {
+  const data = await requestJson<{ path: string | null }>(
+    `/api/projects/${encodeURIComponent(projectId)}/videos/${encodeURIComponent(productionId)}/selected`,
+    path ? '选定视频版本' : '取消视频选定',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path }),
     },
   );
-  return data.shots;
+  return data.path;
 }

@@ -42,14 +42,12 @@ export function ProjectPage({
   uiSchemeId,
   screenId,
   productionId,
-  shotId,
 }: {
   projectId: string;
   workspace?: WorkshopWorkspace;
   uiSchemeId?: string;
   screenId?: string;
   productionId?: string;
-  shotId?: string;
 }) {
   const [, setLocation] = useLocation();
   const [data, setData] = useState<ProjectExperience | null>(null);
@@ -313,19 +311,17 @@ export function ProjectPage({
           <VideoWorkspace
             projectId={projectId}
             productionId={productionId}
-            shotId={shotId}
             productions={productions}
             loadError={videoLoadError}
             referenceCandidates={videoReferences}
-            onSelected={async (targetProductionId, targetShotId, path) => {
-              await setProjectVideoSelected(projectId, targetProductionId, targetShotId, path);
+            onSelected={async (targetProductionId, path) => {
+              await setProjectVideoSelected(projectId, targetProductionId, path);
               setProductions(await fetchProjectVideos(projectId));
             }}
-            onReferences={async (targetProductionId, targetShotId, paths) => {
+            onReferences={async (targetProductionId, paths) => {
               await setProjectVideoReferences(
                 projectId,
                 targetProductionId,
-                targetShotId,
                 paths,
               );
               setProductions(await fetchProjectVideos(projectId));

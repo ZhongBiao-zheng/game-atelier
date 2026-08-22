@@ -30,8 +30,7 @@ export type ProjectGalleryTarget =
   | {
     kind: 'video';
     production_id: string;
-    shot_id: string | null;
-    output_kind: 'shot' | 'export';
+    output_kind: 'version';
   };
 
 export interface ProjectGalleryMedia {

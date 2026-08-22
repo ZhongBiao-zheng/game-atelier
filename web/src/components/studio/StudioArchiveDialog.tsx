@@ -32,13 +32,13 @@ const selectClass = 'min-h-11 w-full rounded-md border border-input bg-backgroun
 function targetKey(target: StudioArchiveTargetOption): string {
   if (target.kind === 'character') return `character:${target.character_id}:${target.asset_slot}`;
   if (target.kind === 'ui') return `ui:${target.ui_scheme_id}:${target.screen_id}`;
-  return `video:${target.production_id}:${target.shot_id}`;
+  return `video:${target.production_id}`;
 }
 
 const kindLabels: Record<StudioArchiveTargetOption['kind'], string> = {
   character: '角色资产',
   ui: 'UI 页面',
-  video: '视频镜头',
+  video: '视频企划',
 };
 
 export function StudioArchiveDialog({

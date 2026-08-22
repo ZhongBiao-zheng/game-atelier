@@ -1,0 +1,39 @@
+{
+  "fallback_positive_concepts": ["project_video", "video_prompt", "complete_generation"],
+  "positive_concepts": {
+    "project_video": {
+      "weight": 0.4,
+      "phrases": ["项目视频", "营销视频", "宣传片", "游戏视频", "character promo video"]
+    },
+    "video_prompt": {
+      "weight": 0.3,
+      "phrases": ["视频提示词", "seedance", "shot 1", "镜头1", "镜头 1"]
+    },
+    "complete_generation": {
+      "weight": 0.3,
+      "phrases": ["完整视频", "完整成片", "生成成片", "最终视频版本", "一次生成"]
+    }
+  },
+  "negative_concepts": {
+    "timeline_editing": {
+      "weight": 0.8,
+      "exclusive": true,
+      "phrases": ["剪辑拼接", "时间线剪辑", "视频片段"]
+    },
+    "other_asset": {
+      "weight": 0.8,
+      "exclusive": true,
+      "phrases": ["角色立绘", "游戏首页 ui", "设计 ui"]
+    },
+    "diagnosis_only": {
+      "weight": 0.8,
+      "exclusive": true,
+      "phrases": ["解释", "报错是什么意思", "只分析"]
+    },
+    "free_studio": {
+      "weight": 0.8,
+      "exclusive": true,
+      "phrases": ["创作台随便试", "无项目视频"]
+    }
+  }
+}

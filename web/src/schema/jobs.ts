@@ -86,9 +86,8 @@ export interface Job {
   project_id?: string | null;
   ui_scheme_id?: string | null;
   screen_id?: string | null;
-  // 项目视频 job（namespace='video'）归企划与镜头；Web 只读 — 与 schemas.py 同步
+  // 项目视频 job（namespace='video'）归完整企划；Web 只读 — 与 schemas.py 同步
   production_id?: string | null;
-  shot_id?: string | null;
 }
 
 export const WEB_EDITABLE_FIELDS = ['prompt', 'params'] as const;

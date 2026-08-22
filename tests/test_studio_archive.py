@@ -31,12 +31,7 @@ def _seed_project(root: Path):
     )
 
     production = create_production(project.id, "launch-pv", "上线宣传片", "promo")
-    (production / "shot-map.md").write_text(
-        "| shot-id | 用途 | 时长 | 状态 |\n"
-        "|---|---|---:|---|\n"
-        "| shot-01 | 角色亮相 | 3s | planned |\n",
-        encoding="utf-8",
-    )
+    (production / "prompt.md").write_text("镜头1：角色亮相。", encoding="utf-8")
     return project
 
 
@@ -92,7 +87,7 @@ def test_archive_targets_follow_media_kind_and_project_ownership(client, isolate
         ("ui", "V1 · 主界面"),
     ]
     assert [(item["kind"], item["label"]) for item in video.json()["targets"]] == [
-        ("video", "上线宣传片 · shot-01"),
+        ("video", "上线宣传片"),
     ]
 
 
@@ -149,10 +144,9 @@ def test_archive_uses_next_version_and_rejects_wrong_source_or_media(
     wrong_media = _archive(client, "studio-image", project.id, source, {
         "kind": "video",
         "production_id": "launch-pv",
-        "shot_id": "shot-01",
     })
     assert wrong_media.status_code == 400
-    assert "图片不能归档到视频镜头" in wrong_media.json()["detail"]
+    assert "图片不能归档到视频企划" in wrong_media.json()["detail"]
 
 
 def test_archive_rejects_done_studio_job_whose_output_is_outside_own_directory(
@@ -188,23 +182,21 @@ def test_archive_rejects_done_studio_job_whose_output_is_outside_own_directory(
     assert "不在自己的输出目录" in response.json()["detail"]
 
 
-def test_archive_video_copies_to_project_shot(client, isolated_data_root):
+def test_archive_video_copies_to_project_versions(client, isolated_data_root):
     project = _seed_project(isolated_data_root)
     source = _seed_studio_job(isolated_data_root, job_id="studio-video", kind=JobKind.VIDEO)
 
     response = _archive(client, "studio-video", project.id, source, {
         "kind": "video",
         "production_id": "launch-pv",
-        "shot_id": "shot-01",
     })
 
     assert response.status_code == 201, response.text
-    target = isolated_data_root / "projects/sanguo/videos/launch-pv/shots/shot-01/v1.mp4"
+    target = isolated_data_root / "projects/sanguo/videos/launch-pv/versions/v1.mp4"
     assert target.read_bytes() == b"studio-output"
     archived = read_job(response.json()["job"]["job_id"])
     assert archived.namespace == "video"
     assert archived.project_id == project.id
     assert archived.production_id == "launch-pv"
-    assert archived.shot_id == "shot-01"
     assert archived.kind is JobKind.VIDEO
     assert archived.character_id == ""

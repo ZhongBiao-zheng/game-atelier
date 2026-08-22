@@ -135,16 +135,6 @@ export function AppShell() {
           <Route path="/workshop/unassigned/characters/:id">
             {(params) => <CharacterDetail workspace="art" characterId={params.id} />}
           </Route>
-          <Route path="/workshop/:projectId/video/:productionId/shots/:shotId">
-            {(params) => (
-              <CharacterDetail
-                projectId={params.projectId}
-                workspace="video"
-                productionId={params.productionId}
-                shotId={params.shotId}
-              />
-            )}
-          </Route>
           <Route path="/workshop/:projectId/video/:productionId">
             {(params) => (
               <CharacterDetail

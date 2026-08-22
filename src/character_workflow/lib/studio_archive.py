@@ -16,7 +16,11 @@ from character_workflow.lib.projects import read_projects, resolve_project
 from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus
 from character_workflow.lib.ui_jobs import screen_output_dir
 from character_workflow.lib.ui_schemes import read_schemes, scheme_screens_dir
-from character_workflow.lib.video_jobs import list_productions, require_shot, shot_output_dir
+from character_workflow.lib.video_jobs import (
+    list_productions,
+    production_output_dir,
+    require_production,
+)
 from character_workflow.lib.workspace_summary import project_workspace_summary
 
 
@@ -35,13 +39,11 @@ def list_archive_targets(project_id: str, media_kind: JobKind) -> list[dict[str,
         return [
             {
                 "kind": "video",
-                "label": f"{production.title} · {shot.shot_id}",
-                "detail": shot.purpose or "视频镜头",
+                "label": production.title,
+                "detail": "完整视频企划",
                 "production_id": production.production_id,
-                "shot_id": shot.shot_id,
             }
             for production in list_productions(project.id)
-            for shot in production.shots
         ]
 
     targets: list[dict[str, Any]] = []
@@ -150,7 +152,6 @@ def _resolve_target(
                 "ui_scheme_id": None,
                 "screen_id": None,
                 "production_id": None,
-                "shot_id": None,
             },
         )
     if kind == "ui":
@@ -168,19 +169,17 @@ def _resolve_target(
                 "ui_scheme_id": scheme_id,
                 "screen_id": screen_id,
                 "production_id": None,
-                "shot_id": None,
             },
         )
     if media_kind is not JobKind.VIDEO:
-        raise ValueError("图片不能归档到视频镜头")
+        raise ValueError("图片不能归档到视频企划")
     production_id = target["production_id"]
-    shot_id = target["shot_id"]
     from character_workflow.lib.video_jobs import production_dir
 
     production = production_dir(project_id, production_id)
-    require_shot(production, production_id, shot_id)
+    require_production(production, production_id)
     return (
-        shot_output_dir(project_id, production_id, shot_id),
+        production_output_dir(project_id, production_id),
         {
             "namespace": "video",
             "character_id": "",
@@ -188,7 +187,6 @@ def _resolve_target(
             "ui_scheme_id": None,
             "screen_id": None,
             "production_id": production_id,
-            "shot_id": shot_id,
         },
     )
 

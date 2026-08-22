@@ -37,7 +37,6 @@ interface MainAppProps {
   routedUiSchemeId?: string;
   routedScreenId?: string;
   routedProductionId?: string;
-  routedShotId?: string;
   routedCharacterId?: string;
   routedAssetSlot?: AssetSlot;
   routedImageDetail?: { path: string; jobId: string };
@@ -49,7 +48,6 @@ export function MainApp({
   routedUiSchemeId,
   routedScreenId,
   routedProductionId,
-  routedShotId,
   routedCharacterId,
   routedAssetSlot,
   routedImageDetail,
@@ -78,7 +76,6 @@ export function MainApp({
         routedUiSchemeId={routedUiSchemeId}
         routedScreenId={routedScreenId}
         routedProductionId={routedProductionId}
-        routedShotId={routedShotId}
         routedCharacterId={routedCharacterId}
         routedAssetSlot={routedAssetSlot}
         routedImageDetail={routedImageDetail}
@@ -93,7 +90,6 @@ function ThreeColumnLayout({
   routedUiSchemeId,
   routedScreenId,
   routedProductionId,
-  routedShotId,
   routedCharacterId,
   routedAssetSlot,
   routedImageDetail,
@@ -103,7 +99,6 @@ function ThreeColumnLayout({
   routedUiSchemeId?: string;
   routedScreenId?: string;
   routedProductionId?: string;
-  routedShotId?: string;
   routedCharacterId?: string;
   routedAssetSlot?: AssetSlot;
   routedImageDetail?: { path: string; jobId: string };
@@ -266,7 +261,6 @@ function ThreeColumnLayout({
       uiSchemeId={routedUiSchemeId}
       screenId={routedScreenId}
       productionId={routedProductionId}
-      shotId={routedShotId}
     />
   ) : selected ? (
     <CharacterGallery
@@ -279,7 +273,6 @@ function ThreeColumnLayout({
   ) : null;
   const shellObjectLabel = selected?.name
     || (routedScreenId ? `页面 ${routedScreenId}` : null)
-    || (routedShotId ? `镜头 ${routedShotId}` : null)
     || (routedProductionId ? `视频企划 ${routedProductionId}` : null);
 
   if (!routedProjectId && !routedCharacterId) {

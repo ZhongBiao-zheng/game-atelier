@@ -112,9 +112,8 @@ class Job(BaseModel):
     project_id: str | None = None
     ui_scheme_id: str | None = None
     screen_id: str | None = None
-    # 项目视频 job（namespace="video"）—— 产物归项目企划下的单个镜头。
+    # 项目视频 job（namespace="video"）—— 一次 job 产出一支完整企划视频。
     production_id: str | None = None
-    shot_id: str | None = None
     # Phase 3 (2026-05-22): which Key was used. Web 不能改这两个字段。
     alias: str | None = None
     provider: str | None = None
@@ -138,14 +137,12 @@ class Job(BaseModel):
             raise ValueError("ui_scheme_id and screen_id are only valid for namespace=ui")
 
         if self.namespace == "video":
-            if not self.project_id or not self.production_id or not self.shot_id:
-                raise ValueError(
-                    "video job requires project_id, production_id and shot_id"
-                )
+            if not self.project_id or not self.production_id:
+                raise ValueError("video job requires project_id and production_id")
             if self.kind is not JobKind.VIDEO:
                 raise ValueError("video namespace must use kind=video")
-        elif self.production_id is not None or self.shot_id is not None:
-            raise ValueError("production_id and shot_id are only valid for namespace=video")
+        elif self.production_id is not None:
+            raise ValueError("production_id is only valid for namespace=video")
         return self
 
 
@@ -190,9 +187,8 @@ class UiWorkspaceSummary(BaseModel):
 
 class VideoWorkspaceSummary(BaseModel):
     productions: int
-    shots: int
-    selected_shots: int
-    exports: int
+    versions: int
+    selected: int
     next_action: str
 
 
@@ -213,17 +209,6 @@ class ProjectVideoJobRecord(BaseModel):
     params: JobParams
 
 
-class ProjectVideoShot(BaseModel):
-    shot_id: str
-    purpose: str = ""
-    duration: str = ""
-    status: str = "planned"
-    versions: list[str]
-    selected: str | None = None
-    planned_reference_images: list[str] = Field(default_factory=list)
-    history: list[ProjectVideoJobRecord] = Field(default_factory=list)
-
-
 class ProjectVideoBrief(BaseModel):
     goal: str = ""
     platform: str = ""
@@ -238,8 +223,11 @@ class ProjectVideoProduction(BaseModel):
     type: str
     status: str
     brief: ProjectVideoBrief
-    shots: list[ProjectVideoShot]
-    exports: list[str]
+    prompt: str = ""
+    versions: list[str]
+    selected: str | None = None
+    planned_reference_images: list[str] = Field(default_factory=list)
+    history: list[ProjectVideoJobRecord] = Field(default_factory=list)
 
 
 class ProjectVideosResponse(BaseModel):
@@ -264,28 +252,28 @@ class ProjectVideoReferencesResponse(BaseModel):
     candidates: list[ProjectVideoReferenceCandidate]
 
 
-class VideoShotReferencesSet(BaseModel):
+class VideoReferencesSet(BaseModel):
     model_config = ConfigDict(extra="forbid")
     paths: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def paths_are_unique(self) -> "VideoShotReferencesSet":
+    def paths_are_unique(self) -> "VideoReferencesSet":
         if len(self.paths) != len(set(self.paths)):
             raise ValueError("paths must not contain duplicates")
         return self
 
 
-class VideoShotReferencesResponse(BaseModel):
+class VideoReferencesResponse(BaseModel):
     paths: list[str]
 
 
 class VideoReferencesFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    shots: dict[str, list[str]] = Field(default_factory=dict)
+    paths: list[str] = Field(default_factory=list)
 
 
 class VideoSelectedResponse(BaseModel):
-    shots: dict[str, str]
+    path: str | None = None
 
 
 class SpecPatch(BaseModel):
@@ -455,8 +443,7 @@ class GalleryVideoTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["video"] = "video"
     production_id: str
-    shot_id: str | None = None
-    output_kind: Literal["shot", "export"]
+    output_kind: Literal["version"] = "version"
 
 
 GalleryTarget = Annotated[

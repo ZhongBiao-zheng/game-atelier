@@ -1,12 +1,12 @@
 """Character index, workspace aggregates, and manual cross-asset associations."""
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 from character_workflow.lib import data_root, stale
 from character_workflow.lib.atomic_io import atomic_write_text
+from character_workflow.lib.asset_versions import first_image_version
 from character_workflow.lib.character_derivatives import (
     character_display_name,
     read_character_derivative,
@@ -36,7 +36,6 @@ from character_workflow.lib.workspace_summary import project_workspace_summary
 
 
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
-_ASSET_VERSION_RE = re.compile(r"^v([1-9][0-9]*)$", re.IGNORECASE)
 
 
 def _association_path(project_id: str) -> Path:
@@ -106,24 +105,7 @@ def _character_cover_path(character_id: str) -> str | None:
                 return absolute.resolve().relative_to(root).as_posix()
             except ValueError:
                 pass
-    if not portrait.is_dir():
-        return None
-    images = [
-        path for path in portrait.iterdir()
-        if path.is_file() and path.suffix.lower() in _IMAGE_EXTENSIONS
-    ]
-    if not images:
-        return None
-    first = min(images, key=_portrait_version_order)
-    return first.resolve().relative_to(root).as_posix()
-
-
-def _portrait_version_order(path: Path) -> tuple[int, int, str]:
-    """Keep the first portrait stable across copies and filesystem restores."""
-    match = _ASSET_VERSION_RE.fullmatch(path.stem)
-    if match:
-        return 0, int(match.group(1)), path.name.casefold()
-    return 1, 0, path.name.casefold()
+    return first_image_version(portrait, root)
 
 
 def character_workspace(project_id: str, character_id: str) -> CharacterWorkspaceResponse:
@@ -272,10 +254,7 @@ def _automatic_targets(
             target = CharacterAssociationVideoTarget(production_id=job.production_id)
             result[_target_key(target)] = target
     for production in list_productions(project_id):
-        if any(
-            _paths_reference_character(shot.planned_reference_images, character_id)
-            for shot in production.shots
-        ):
+        if _paths_reference_character(production.planned_reference_images, character_id):
             target = CharacterAssociationVideoTarget(production_id=production.production_id)
             result[_target_key(target)] = target
     return result
@@ -374,9 +353,7 @@ def _media_matches_target(item: GalleryMedia, target: CharacterAssociationTarget
 
 def _video_featured_path(production, media: list[GalleryMedia]) -> str | None:
     if production:
-        candidates = [*production.exports, *(
-            shot.selected for shot in production.shots if shot.selected
-        )]
+        candidates = [production.selected] if production.selected else []
         candidate_set = set(candidates)
         newest = next((item.path for item in media if item.path in candidate_set), None)
         if newest:

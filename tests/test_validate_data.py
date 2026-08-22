@@ -225,8 +225,10 @@ def test_missing_video_reference_is_error(isolated_data_root):
         / "references.json"
     )
     references.parent.mkdir(parents=True)
+    (references.parent / "brief.md").write_text("# 宣传片\n", encoding="utf-8")
+    (references.parent / "prompt.md").write_text("镜头1：亮相。", encoding="utf-8")
     references.write_text(
-        '{"shots":{"shot-01":["characters/missing/portrait/v1.png"]}}',
+        '{"paths":["characters/missing/portrait/v1.png"]}',
         encoding="utf-8",
     )
 
@@ -238,7 +240,7 @@ def test_missing_video_reference_is_error(isolated_data_root):
     )
 
 
-def test_video_reference_validation_rejects_foreign_duplicate_and_unknown_shot(
+def test_video_reference_validation_rejects_foreign_and_duplicate_paths(
     isolated_data_root,
 ):
     project = projects.create_project("视频项目", slug="video-project")
@@ -252,28 +254,19 @@ def test_video_reference_validation_rejects_foreign_duplicate_and_unknown_shot(
     production = isolated_data_root / "projects/video-project/videos/launch-pv"
     production.mkdir(parents=True)
     (production / "brief.md").write_text("# 宣传片\n", encoding="utf-8")
-    (production / "shot-map.md").write_text(
-        "| shot-id | 用途 | 时长 | 状态 |\n"
-        "|---|---|---:|---|\n"
-        "| shot-01 | 亮相 | 3s | planned |\n",
-        encoding="utf-8",
-    )
+    (production / "prompt.md").write_text("镜头1：亮相。", encoding="utf-8")
     local = "characters/hero/portrait/v1.png"
-    (production / "references.json").write_text(json.dumps({"shots": {
-        "shot-01": [
-            local,
-            local,
-            "characters/outsider/portrait/v1.png",
-            str(isolated_data_root / local),
-        ],
-        "missing-shot": [local],
-    }}), encoding="utf-8")
+    (production / "references.json").write_text(json.dumps({"paths": [
+        local,
+        local,
+        "characters/outsider/portrait/v1.png",
+        str(isolated_data_root / local),
+    ]}), encoding="utf-8")
 
     details = [issue.detail for issue in _issues(validate_data(), "reference")]
 
     assert any("重复路径" in detail for detail in details)
     assert sum("不属于当前项目" in detail for detail in details) == 2
-    assert any("video shot not found: missing-shot" in detail for detail in details)
 
 
 # ---------- ⑤ 画廊 sidecar ----------

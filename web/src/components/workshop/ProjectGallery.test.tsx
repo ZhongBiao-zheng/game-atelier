@@ -16,14 +16,14 @@ const art = {
 };
 
 const video = {
-  path: 'projects/demo/videos/trailer/shots/01/v1.mp4',
+  path: 'projects/demo/videos/trailer/versions/v1.mp4',
   media_type: 'video',
   produced_at: '2026-08-21T07:00:00Z',
   title: '首支预告片',
-  detail: '镜头 01',
+  detail: '完整视频',
   job_id: 'job-2',
   target: {
-    kind: 'video', production_id: 'trailer', shot_id: '01', output_kind: 'shot',
+    kind: 'video', production_id: 'trailer', output_kind: 'version',
   },
 };
 
@@ -58,7 +58,7 @@ describe('ProjectGallery', () => {
 
     expect(await screen.findByRole('button', { name: '预览英雄，美宣' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
-    expect(await screen.findByRole('button', { name: '预览首支预告片，镜头 01' })).toBeVisible();
+    expect(await screen.findByRole('button', { name: '预览首支预告片，完整视频' })).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: 'UI' }));
     expect(await screen.findByText('还没有可展示的作品')).toBeVisible();

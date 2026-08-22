@@ -26,7 +26,7 @@
 
 - 状态机：`status` `error` `submitted_at` `completed_at` `progress_phase`
 - 产物：`output_paths`
-- 归属：`character_id` `project_id` `ui_scheme_id` `screen_id` `production_id` `shot_id` `namespace` `asset_slot` `kind`
+- 归属：`character_id` `project_id` `ui_scheme_id` `screen_id` `production_id` `namespace` `asset_slot` `kind`
 - 路由：`alias` `provider` `model` —— 换模型只能新建 job（`POST /studio/jobs`），不能改已有的
 - 血缘：`retry_of` `source_image`；创作台归档血缘写在 `params.archived_from_job_id / archived_from_path`
 
@@ -34,7 +34,7 @@
 
 Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每组最多 4 张），分别归属风格、角色、Omni 语义槽；垫图仍写入通用的 `reference_images`。Web 创建 job，caller 只负责把本地路径转公网 URL 并拼接对应 flag。
 
-`namespace` 决定产物落哪：`character` → `characters/<id>/<slot>/`，`studio` → `studio/<job_id>/`，`ui` → `projects/<slug>/ui/<ui_scheme_id>/screens/<screen_id>/`，`video` → `projects/<slug>/videos/<production_id>/shots/<shot_id>/`。UI job 必须同时带 `project_id / ui_scheme_id / screen_id`；项目视频 job 必须同时带 `project_id / production_id / shot_id`。`kind` 是媒体轴（image/video），别拿它表达归属。
+`namespace` 决定产物落哪：`character` → `characters/<id>/<slot>/`，`studio` → `studio/<job_id>/`，`ui` → `projects/<slug>/ui/<ui_scheme_id>/screens/<screen_id>/`，`video` → `projects/<slug>/videos/<production_id>/versions/`。UI job 必须同时带 `project_id / ui_scheme_id / screen_id`；项目视频 job 必须同时带 `project_id / production_id`。Prompt 内的镜头段落不参与资产归属。`kind` 是媒体轴（image/video），别拿它表达归属。
 
 ## 端点
 
@@ -61,7 +61,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 
 **双向**
 `POST /characters/{id}/canonical` `POST /projects/{id}/ui-schemes/{scheme_id}/screens/canonical` `POST /experience`
-`POST /projects/{id}/videos/{production_id}/shots/{shot_id}/selected`
+`POST /projects/{id}/videos/{production_id}/selected`
 
 **只读**
 `GET /jobs` `/jobs/{id}` `/spec/{id}` `/characters` `/active-character` `/images` `/config` `/projects` `/experience` `/keys` `/onboarding/status` `/home`
@@ -153,7 +153,7 @@ type CharacterWorkspace = {
 };
 ```
 
-自动关联只认 Job 与视频镜头中明确登记的角色素材路径，不解析 prompt。手动关联落在
+自动关联只认 Job 与视频企划中明确登记的角色素材路径，不解析 prompt。手动关联落在
 `projects/<slug>/character-associations.json`；`PUT /projects/{id}/character-associations` 请求为
 `{ character_id, target, associated }`。角色和 UI 页面 / 视频企划必须属于同一项目，移除手动关联
 不会删除自动关联或任何作品文件。
@@ -179,8 +179,7 @@ type CharacterWorkspace = {
     next_action: string; next_command: string;
   };
   video: {
-    productions: number; shots: number; selected_shots: number;
-    exports: number; next_action: string;
+    productions: number; versions: number; selected: number; next_action: string;
   };
 }
 ```
@@ -215,13 +214,12 @@ type GalleryMedia = {
     | { kind: 'art'; character_id: string; asset_slot: AssetSlot }
     | { kind: 'ui'; scheme_id: string; screen_id: string }
     | {
-        kind: 'video'; production_id: string; shot_id: string | null;
-        output_kind: 'shot' | 'export';
+        kind: 'video'; production_id: string; output_kind: 'version';
       };
 };
 ```
 
-美术只扫描项目角色三类成品槽，UI 只扫描所有方案的 screen 版本目录，视频只扫描镜头版本与 exports。
+美术只扫描项目角色三类成品槽，UI 只扫描所有方案的 screen 版本目录，视频只扫描企划的完整版本。
 参考图、source、上传暂存、策划文档和失败 Job 不进入画廊。旧 `/gallery/project` 已删除；美术工作区
 使用统一画廊的 `category=art`，`/gallery/screens` 仍服务 UI 制作页的版本元数据。
 
@@ -229,50 +227,52 @@ type GalleryMedia = {
 
 `GET /projects/{id}/studio-archive-targets?media_kind=image|video` 返回
 `{ targets: StudioArchiveTargetOption[] }`。图片目标包含该项目的角色三类资产槽，以及所有 UI 方案中已规划
-或已有版本的页面；视频目标只包含该项目所有正式企划的镜头。响应中的 `label / detail` 只用于展示，
+或已有版本的页面；视频目标只包含该项目所有正式企划。响应中的 `label / detail` 只用于展示，
 POST 时不得回传：
 
 ```ts
 type StudioArchiveTarget =
   | { kind: 'character'; character_id: string; asset_slot: AssetSlot }
   | { kind: 'ui'; ui_scheme_id: string; screen_id: string }
-  | { kind: 'video'; production_id: string; shot_id: string };
+  | { kind: 'video'; production_id: string };
 
 type StudioArchiveTargetOption = StudioArchiveTarget & { label: string; detail: string };
 ```
 
 `POST /studio/jobs/{id}/archive` 请求为
 `{ source_path: string; project_id: string; target: StudioArchiveTarget }`。来源必须是该 Studio DONE Job
-的 `output_paths` 成员；图片只能进入角色或 UI，视频只能进入镜头；目标必须真实属于所选项目。
+的 `output_paths` 成员；图片只能进入角色或 UI，视频只能进入完整视频企划；目标必须真实属于所选项目。
 服务端在目标目录复制为下一个 `vN`，不移动或改写源文件，并用完整 Job schema 新建一个正式 DONE Job。
 新 Job 保留来源的 prompt、模型与生成参数，归属改为目标资产，且在 params 写入
 `archived_from_job_id / archived_from_path`。响应为 `{ job, path }`；重复归档只会继续递增版本，绝不覆盖。
 
-`GET /projects/{id}/videos` 返回 `{ productions: ProjectVideoProduction[] }`。每个 production
-含 `production_id / title / type / status / brief / exports` 与 `shots`；`brief` 明确返回
-`goal / platform / ratio / duration / sound`。每个 shot 含
-`shot_id / purpose / duration / status / versions / selected / planned_reference_images / history`。
+`GET /projects/{id}/videos` 返回 `{ productions: ProjectVideoProduction[] }`；
+`GET /projects/{id}/videos/{production}` 返回单个企划。每个 production
+含 `production_id / title / type / status / brief / prompt / versions / selected / planned_reference_images / history`；
+`brief` 明确返回 `goal / platform / ratio / duration / sound`。`prompt` 是一次提交的完整多镜头提示词；
+`versions` 中每个文件都是一支完整视频。
 `history` 按新到旧保存每次 Job 的 `job_id / submitted_at / completed_at / status / prompt / model / params`，
 其中 `params` 包含当次实际时长、分辨率、画幅与三组参考素材。`planned_reference_images` 是下一次生成草稿，
 不得与历史混用。`POST .../selected` 请求为
-`{ path: string | null }`（禁止额外字段），响应为 `{ shots: Record<string, string> }`；path 必须是
-该镜头目录中实际存在的 `.mp4`。
+`{ path: string | null }`（禁止额外字段），响应为 `{ path: string | null }`；path 必须是
+该企划 `versions/` 中实际存在的 `.mp4`。
 
 `GET /projects/{id}/video-references` 返回当前项目可用的角色（含角色衍生）和所有 UI 方案页面定稿：
 `{ candidates: Array<{ kind, asset_id, scheme_id, label, detail, path, stale }> }`。只返回真实存在的
-canonical 文件；`stale` 只提示人工判断，不自动替换。
+canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚未定稿”。`stale` 只提示人工判断，
+不自动替换。
 
-`POST /projects/{id}/videos/{production}/shots/{shot}/references` 请求为
-`{ paths: string[] }`（禁止重复和额外字段），只接受该项目当前 canonical 或该镜头已保存的明确版本，
+`POST /projects/{id}/videos/{production}/references` 请求为
+`{ paths: string[] }`（禁止重复和额外字段），只接受该项目当前候选素材或该企划已保存的明确版本，
 响应为 `{ paths: string[] }`。草稿落 `projects/<slug>/videos/<production>/references.json`；
-`submit-video-shot` 创建 Job 时把这些路径复制进 `params.reference_images`。因此后续切换 canonical
+`submit-video-production` 创建一个完整视频 Job 时把这些路径复制进 `params.reference_images`。因此后续切换 canonical
 只改变候选，不会改写历史 Job。
 
 ### 几个要当心的
 
 `GET /raw` 与 `GET /gallery/image`：路径不能随便给，`/raw` 走 job_id 白名单，只读该 Job 的
 `output_paths`、`params.reference_{images,videos,audios}`、MJ 三组参考素材与 `source_image`；
-`gallery/image` 只放行 characters、projects screens、projects videos 的 `shots/` / `exports/` 资产以及 studio 子树；项目 brief / shot-map 不对外暴露。加新产物目录要同步放行。
+`gallery/image` 只放行 characters、projects screens、projects videos 的 `versions/` 资产以及 studio 子树；项目 brief / prompt 不对外暴露。加新产物目录要同步放行。
 
 `GET /keys/{alias}/reveal`：唯一回明文密钥的接口。按显式 alias、按需返回；列表接口一律掩码。
 

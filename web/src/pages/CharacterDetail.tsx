@@ -20,7 +20,6 @@ export function CharacterDetail({
   uiSchemeId,
   screenId,
   productionId,
-  shotId,
   characterId,
   assetSlot,
   jobId,
@@ -31,7 +30,6 @@ export function CharacterDetail({
   uiSchemeId?: string;
   screenId?: string;
   productionId?: string;
-  shotId?: string;
   characterId?: string;
   assetSlot?: string;
   jobId?: string;
@@ -44,7 +42,6 @@ export function CharacterDetail({
       routedUiSchemeId={uiSchemeId}
       routedScreenId={screenId}
       routedProductionId={productionId}
-      routedShotId={shotId}
       routedCharacterId={characterId}
       routedAssetSlot={isAssetSlot(assetSlot) ? assetSlot : undefined}
       routedImageDetail={jobId && imagePath ? { jobId, path: decodeRoutePath(imagePath) } : undefined}

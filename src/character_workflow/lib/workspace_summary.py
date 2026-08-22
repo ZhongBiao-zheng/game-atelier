@@ -181,9 +181,8 @@ def project_workspace_summary(
                 art_stale += 1
 
     productions = list_productions(project_id)
-    video_shots = sum(len(item.shots) for item in productions)
-    selected_shots = sum(1 for item in productions for shot in item.shots if shot.selected)
-    exports = sum(len(item.exports) for item in productions)
+    video_versions = sum(len(item.versions) for item in productions)
+    selected_videos = sum(1 for item in productions if item.selected)
 
     return ProjectWorkspaceSummary(
         project_id=project_id,
@@ -209,9 +208,8 @@ def project_workspace_summary(
         ),
         video=VideoWorkspaceSummary(
             productions=len(productions),
-            shots=video_shots,
-            selected_shots=selected_shots,
-            exports=exports,
+            versions=video_versions,
+            selected=selected_videos,
             next_action="建立第一个视频企划" if not productions else "继续视频企划",
         ),
     )

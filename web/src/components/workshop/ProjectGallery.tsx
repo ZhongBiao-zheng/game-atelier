@@ -336,10 +336,7 @@ function assetHref(projectId: string, item: ProjectGalleryMedia): string {
   if (item.target.kind === 'ui') {
     return `/workshop/${project}/ui/${encodeURIComponent(item.target.scheme_id)}/screens/${encodeURIComponent(item.target.screen_id)}`;
   }
-  const production = `/workshop/${project}/video/${encodeURIComponent(item.target.production_id)}`;
-  return item.target.shot_id
-    ? `${production}/shots/${encodeURIComponent(item.target.shot_id)}`
-    : production;
+  return `/workshop/${project}/video/${encodeURIComponent(item.target.production_id)}`;
 }
 
 function formatDate(value: string): string {

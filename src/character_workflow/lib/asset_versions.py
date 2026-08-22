@@ -1,4 +1,4 @@
-"""正式资产目录的版本号分配与跨进程互斥。"""
+"""Formal asset version allocation, locking, and stable display ordering."""
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +10,8 @@ from typing import Iterator
 from character_workflow.lib.jobs import job_lock
 
 
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+_VERSION_RE = re.compile(r"^v([1-9][0-9]*)$", re.IGNORECASE)
 _VERSION_FILE = re.compile(r"^v(?P<number>[1-9]\d*)\.[A-Za-z0-9]+$")
 
 
@@ -33,3 +35,22 @@ def next_asset_path(output_dir: Path, extension: str) -> Path:
         if path.is_file() and (match := _VERSION_FILE.fullmatch(path.name))
     ]
     return output_dir / f"v{max(versions, default=0) + 1}.{suffix}"
+
+
+def first_image_version(directory: Path, root: Path) -> str | None:
+    if not directory.is_dir():
+        return None
+    images = [
+        path for path in directory.iterdir()
+        if path.is_file() and path.suffix.lower() in _IMAGE_EXTENSIONS
+    ]
+    if not images:
+        return None
+
+    def order(path: Path) -> tuple[int, int, str]:
+        match = _VERSION_RE.fullmatch(path.stem)
+        return (0, int(match.group(1)), path.name.casefold()) if match else (
+            1, 0, path.name.casefold()
+        )
+
+    return min(images, key=order).resolve().relative_to(root.resolve()).as_posix()

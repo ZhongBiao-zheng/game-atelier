@@ -62,7 +62,8 @@ def test_workspace_summary_recommends_only_the_first_missing_gate(client):
     assert data["ui"]["next_action"] == "建立并批准 UI 策划锚"
     assert data["ui"]["next_command"] == "/game-atelier:ui-anchor"
     assert data["video"]["productions"] == 0
-    assert data["video"]["exports"] == 0
+    assert data["video"]["versions"] == 0
+    assert data["video"]["selected"] == 0
 
 
 def test_workspace_summary_reports_completed_ui_scope(client, isolated_data_root):
