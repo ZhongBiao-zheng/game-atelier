@@ -13,7 +13,6 @@ import {
 } from '@xyflow/react';
 import {
   ArrowLeft,
-  Check,
   ChevronDown,
   FileAudio,
   FileImage,
@@ -58,7 +57,10 @@ import {
 import { useSSE } from '@/hooks/useSSE';
 import type { CanvasDocument, CanvasGenerationNode, CanvasNode } from '@/schema/canvas';
 import type { Job, JobKind } from '@/schema/jobs';
-import { buildCanvasGenerationRequest } from './canvasEditorModel';
+import {
+  buildCanvasGenerationRequest,
+  normalizeCanvasImageParams,
+} from './canvasEditorModel';
 
 export function CanvasEditor(props: {
   projectId: string;
@@ -86,7 +88,6 @@ function CanvasEditorInner({
   const [jobs, setJobs] = useState<Map<string, Job>>(new Map());
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [referenceIds, setReferenceIds] = useState<Set<string>>(new Set());
   const [addOpen, setAddOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +124,6 @@ function CanvasEditorInner({
     setError(null);
     setDocument(null);
     setSelectedId(null);
-    setReferenceIds(new Set());
     history.current = { past: [], future: [] };
     Promise.all([
       listCanvasProjects(),
@@ -311,7 +311,7 @@ function CanvasEditorInner({
           model,
           alias: key?.alias,
           params: kind === 'image'
-            ? { n: 1, ratio: '1:1', quality: 'auto' }
+            ? normalizeCanvasImageParams(model, key?.provider, { n: 1, ratio: '1:1' })
             : { duration: 5, ratio: '16:9', resolution: '720p', generate_audio: true },
         },
         job_ids: [],
@@ -341,24 +341,28 @@ function CanvasEditorInner({
     }
   }
 
-  function updateSelected(updater: (node: CanvasNode) => CanvasNode) {
-    if (!selectedId) return;
+  function updateNode(nodeId: string, updater: (node: CanvasNode) => CanvasNode) {
     commit(current => ({
       ...current,
-      nodes: current.nodes.map(node => node.id === selectedId ? updater(node) : node),
+      nodes: current.nodes.map(node => node.id === nodeId ? updater(node) : node),
     }));
   }
 
-  function deleteSelected() {
-    if (!selectedId) return;
-    const deletingId = selectedId;
+  function updateSelected(updater: (node: CanvasNode) => CanvasNode) {
+    if (selectedId) updateNode(selectedId, updater);
+  }
+
+  function deleteNode(deletingId: string) {
     commit(current => ({
       ...current,
       nodes: current.nodes.filter(node => node.id !== deletingId),
       connections: current.connections.filter(edge => edge.source_node_id !== deletingId && edge.target_node_id !== deletingId),
     }), true);
-    setSelectedId(null);
-    setReferenceIds(ids => { const next = new Set(ids); next.delete(deletingId); return next; });
+    setSelectedId(current => current === deletingId ? null : current);
+  }
+
+  function deleteSelected() {
+    if (selectedId) deleteNode(selectedId);
   }
 
   function recordHistorySnapshot() {
@@ -388,33 +392,22 @@ function CanvasEditorInner({
   }
 
   async function generate(node: CanvasGenerationNode) {
-    const connectedIds = document?.connections
-      .filter(edge => edge.target_node_id === node.id)
-      .map(edge => edge.source_node_id) ?? [];
-    const requestedIds = referenceIds.size ? [...referenceIds] : connectedIds;
-    const sources = (document?.nodes ?? []).filter(candidate => requestedIds.includes(candidate.id) && candidate.id !== node.id);
-    const request = buildCanvasGenerationRequest(node, sources, jobs);
-    if (!request.body.prompt) {
-      setError('请先填写生成提示词，或连接一个有内容的文本节点。');
+    const provider = keys.find(key => key.alias === node.data.draft.alias)?.provider;
+    const request = buildCanvasGenerationRequest(node, provider);
+    if (!request.prompt) {
+      setError('请先填写生成提示词。');
       return;
     }
-    if (!request.body.model) {
+    if (!request.model) {
       setError('当前没有可用模型，请先到设置中配置密钥和模型。');
       return;
     }
     setGeneratingId(node.id);
     setError(null);
     try {
-      const job = await createCanvasJob(projectId, request.body);
+      const job = await createCanvasJob(projectId, request);
       setJobs(current => new Map(current).set(job.job_id, job));
       commit(current => {
-        const retained = current.connections.filter(edge => edge.target_node_id !== node.id);
-        const provenance = request.sourceNodeIds.map(sourceId => ({
-          id: makeId('edge'),
-          kind: 'provenance' as const,
-          source_node_id: sourceId,
-          target_node_id: node.id,
-        }));
         return {
           ...current,
           nodes: current.nodes.map(candidate => candidate.id === node.id && candidate.type === 'generation'
@@ -428,10 +421,8 @@ function CanvasEditorInner({
               },
             }
             : candidate),
-          connections: [...retained, ...provenance],
         };
       }, true);
-      setReferenceIds(new Set());
     } catch (generationError) {
       setError((generationError as Error).message);
     } finally {
@@ -439,18 +430,17 @@ function CanvasEditorInner({
     }
   }
 
-  const contextValue = useMemo<CanvasNodeContextValue>(() => ({
+  const contextValue: CanvasNodeContextValue = {
     projectId,
     jobs,
-    referenceIds,
-    selectedId,
+    keys,
+    generatingId,
     selectNode: setSelectedId,
-    toggleReference: id => setReferenceIds(current => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    }),
-  }), [jobs, projectId, referenceIds, selectedId]);
+    updateNode,
+    recordHistory: recordHistorySnapshot,
+    deleteNode,
+    generate: node => void generate(node),
+  };
 
   if (loading) return <EditorMessage icon={<LoaderCircle className="size-5 animate-spin" />} text="正在展开画布…" />;
   if (!document) return <EditorMessage text={error || '画布读取失败'} action={<Button onClick={onBack}>返回项目列表</Button>} />;
@@ -546,26 +536,12 @@ function CanvasEditorInner({
           />
         </div>
 
-        {referenceIds.size > 0 && (
-          <div className="absolute bottom-4 left-1/2 z-20 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-primary/30 bg-glass px-4 py-2 text-xs text-foreground backdrop-blur-glass shell-glow">
-            <Check className="size-4 text-primary" aria-hidden="true" />
-            已选择 {referenceIds.size} 个参考节点；选择生成节点后点击生成
-            <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setReferenceIds(new Set())}>清空</button>
-          </div>
-        )}
-
-        {selectedNode && (
+        {selectedNode && selectedNode.type !== 'generation' && (
           <CanvasInspector
             node={selectedNode}
-            jobs={jobs}
-            keys={keys}
-            generating={generatingId === selectedNode.id}
-            referenced={referenceIds.has(selectedNode.id)}
             updateNode={updateSelected}
             recordHistory={recordHistorySnapshot}
-            toggleReference={() => contextValue.toggleReference(selectedNode.id)}
             deleteNode={deleteSelected}
-            generate={generate}
             projectId={projectId}
           />
         )}

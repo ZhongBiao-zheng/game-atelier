@@ -15,19 +15,26 @@ import type { Job } from '@/schema/jobs';
 vi.mock('@xyflow/react', () => {
   return {
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    ReactFlow: ({ children, nodes, onlyRenderVisibleElements, onNodeClick, onMoveEnd }: {
+    ReactFlow: ({ children, nodes, nodeTypes, onlyRenderVisibleElements, onNodeClick, onMoveEnd }: {
       children: React.ReactNode;
-      nodes: Array<{ id: string }>;
+      nodes: Array<{ id: string; selected?: boolean; data: unknown }>;
+      nodeTypes?: Record<string, React.ComponentType<Record<string, unknown>>>;
       onlyRenderVisibleElements?: boolean;
       onNodeClick?: (event: React.MouseEvent, node: { id: string }) => void;
       onMoveEnd?: (event: unknown, viewport: { x: number; y: number; zoom: number }) => void;
-    }) => (
-      <div data-testid="react-flow" data-node-count={nodes.length} data-visible-only={onlyRenderVisibleElements}>
-        {nodes.map(node => <button type="button" key={node.id} aria-label={`flow-node-${node.id}`} onClick={event => onNodeClick?.(event, node)} />)}
-        <button type="button" aria-label="simulate viewport change" onClick={() => onMoveEnd?.({}, { x: 120, y: -40, zoom: 0.7 })} />
-        {children}
-      </div>
-    ),
+    }) => {
+      const CanvasNode = nodeTypes?.canvasNode;
+      return (
+        <div data-testid="react-flow" data-node-count={nodes.length} data-visible-only={onlyRenderVisibleElements}>
+          {nodes.map(node => <button type="button" key={node.id} aria-label={`flow-node-${node.id}`} onClick={event => onNodeClick?.(event, node)} />)}
+          {CanvasNode && nodes.filter(node => node.selected).map(node => (
+            <CanvasNode key={`view-${node.id}`} id={node.id} data={node.data} selected={true} />
+          ))}
+          <button type="button" aria-label="simulate viewport change" onClick={() => onMoveEnd?.({}, { x: 120, y: -40, zoom: 0.7 })} />
+          {children}
+        </div>
+      );
+    },
     Background: () => null,
     Controls: () => <div data-testid="flow-controls" />,
     MiniMap: () => <div data-testid="flow-minimap" />,
@@ -145,6 +152,13 @@ it('undoes a text field edit as one session snapshot', async () => {
 });
 
 it('creates one canvas job from an explicit image node', async () => {
+  vi.mocked(listKeys).mockResolvedValue({
+    keys: [{
+      alias: 'main', provider: 'openai', base_url: 'https://api.openai-hk.com/v1', access_key: '***', secret_key: null,
+      capabilities: [], modalities: ['image'], notes: '', created_at: '2026-08-23T00:00:00Z',
+      models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' }],
+    }],
+  });
   vi.mocked(createCanvasJob).mockResolvedValue({
     job_id: 'job-one', character_id: 'main', prompt: '电影感雨夜列车',
     submitted_at: '2026-08-23T00:00:00Z', model: 'gpt-image-2', params: { n: 1 },
@@ -156,6 +170,11 @@ it('creates one canvas job from an explicit image node', async () => {
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: '添加节点' }));
   fireEvent.click(screen.getByRole('button', { name: '图片生成' }));
+
+  expect(screen.getByLabelText('图片生成设置')).toBeInTheDocument();
+  expect(screen.queryByText('节点设置')).not.toBeInTheDocument();
+  expect(screen.queryByText(/设为参考|已参考/)).not.toBeInTheDocument();
+  expect(screen.getByText('约 ¥0.06')).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('提示词'), { target: { value: '电影感雨夜列车' } });
   fireEvent.click(screen.getByRole('button', { name: '开始生成' }));
 
@@ -187,7 +206,7 @@ it('hands 150 media nodes to visible-area rendering without changing the persist
   expect(await screen.findByTestId('react-flow')).toHaveAttribute('data-node-count', '150');
   expect(screen.getByTestId('react-flow')).toHaveAttribute('data-visible-only', 'true');
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-resource-149' }));
-  expect(screen.getAllByText('149.png')).toHaveLength(2);
+  expect(screen.getAllByText('149.png')).toHaveLength(3);
   fireEvent.click(screen.getByRole('button', { name: 'simulate viewport change' }));
   await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
     viewport: { x: 120, y: -40, zoom: 0.7 },
