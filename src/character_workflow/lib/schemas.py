@@ -3,10 +3,11 @@
 """
 from __future__ import annotations
 
+import json
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, model_validator
 
 
 class JobStatus(str, Enum):
@@ -91,6 +92,57 @@ class JobParams(BaseModel):
     mj_flags: str | None = None
 
 
+class CanvasActor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["user", "agent", "plugin"]
+    actor_id: str | None = None
+
+
+class CanvasSnapshotInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    order: int = Field(ge=0)
+    source: Literal["implicit_self", "input_connection"]
+    node_id: str
+    version_id: str
+    kind: Literal["text", "image", "video", "audio"]
+
+
+class CanvasGenerationSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    snapshot_version: Literal[1] = 1
+    surface_node_id: str
+    result_node_id: str
+    mode: Literal["text", "image", "video", "audio"]
+    final_prompt: str
+    input_policy: Literal["all_connected", "mentions_only"]
+    model: str
+    provider: str
+    alias: str | None = None
+    normalized_params: dict[str, Any]
+    inputs: list[CanvasSnapshotInput]
+    mask_version_id: str | None = None
+    submitted_at: str
+    submitted_by: CanvasActor
+    request_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class CanvasResultCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    candidate_id: str
+    index: int = Field(ge=0)
+    status: Literal["pending", "succeeded", "failed", "canceled"]
+    version_id: str | None = None
+    error: str | None = None
+
+
+class CanvasJobContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    run_id: str
+    snapshot: CanvasGenerationSnapshot
+    result_node_id: str
+    candidates: list[CanvasResultCandidate]
+
+
 class Job(BaseModel):
     model_config = ConfigDict(extra="forbid")
     job_id: str
@@ -116,6 +168,7 @@ class Job(BaseModel):
     production_id: str | None = None
     # 人工画布 job（namespace="canvas"）—— 归独立画布项目，不属于 Studio/工坊/Skill。
     canvas_project_id: str | None = None
+    canvas_run: CanvasJobContext | None = None
     # Phase 3 (2026-05-22): which Key was used. Web 不能改这两个字段。
     alias: str | None = None
     provider: str | None = None
@@ -147,10 +200,10 @@ class Job(BaseModel):
             raise ValueError("production_id is only valid for namespace=video")
 
         if self.namespace == "canvas":
-            if not self.canvas_project_id:
-                raise ValueError("canvas job requires canvas_project_id")
-        elif self.canvas_project_id is not None:
-            raise ValueError("canvas_project_id is only valid for namespace=canvas")
+            if not self.canvas_project_id or self.canvas_run is None:
+                raise ValueError("canvas job requires canvas_project_id and canvas_run")
+        elif self.canvas_project_id is not None or self.canvas_run is not None:
+            raise ValueError("canvas_project_id and canvas_run are only valid for namespace=canvas")
         return self
 
 
@@ -179,90 +232,331 @@ class CanvasViewport(BaseModel):
     zoom: float = Field(default=1, gt=0.05, le=4)
 
 
-class CanvasTextData(BaseModel):
+class CanvasSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    title: str | None = Field(default=None, max_length=120)
-    text: str = Field(default="", max_length=40_000)
-
-
-class CanvasResourceData(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    media_kind: Literal["image", "video", "audio"]
-    path: str = Field(min_length=1)
-    filename: str = Field(min_length=1, max_length=255)
+    background: Literal["lines", "dots", "grid", "none"] = "none"
+    show_image_info: bool = True
 
 
 class CanvasGenerationDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    mode: Literal["text", "image", "video", "audio"]
     prompt: str = Field(default="", max_length=40_000)
+    input_policy: Literal["all_connected", "mentions_only"] = "all_connected"
     model: str = Field(default="", max_length=200)
     alias: str | None = Field(default=None, max_length=120)
     params: JobParams = Field(default_factory=JobParams)
+    updated_at: str
 
 
-class CanvasGenerationData(BaseModel):
+def _draft_with_default_policy(value: object, policy: str) -> object:
+    if isinstance(value, dict) and "input_policy" not in value:
+        return {**value, "input_policy": policy}
+    if isinstance(value, CanvasGenerationDraft) and "input_policy" not in value.model_fields_set:
+        return value.model_copy(update={"input_policy": policy})
+    return value
+
+
+class CanvasContentNodeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    media_kind: Literal["image", "video"]
+    current_version_id: str | None = None
+    generation_draft: CanvasGenerationDraft | None = None
+    active_run_id: str | None = None
+
+
+class CanvasMediaDisplay(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    fit: Literal["contain", "cover"] = "contain"
+    free_resize: bool = False
+
+
+class CanvasMediaNodeData(CanvasContentNodeData):
+    display: CanvasMediaDisplay = Field(default_factory=CanvasMediaDisplay)
+
+
+class CanvasConfigNodeData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     draft: CanvasGenerationDraft
-    job_ids: list[str] = Field(default_factory=list)
-    active_job_id: str | None = None
-    selected_output_index: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_input_policy(cls, value: object) -> object:
+        if isinstance(value, dict) and "draft" in value:
+            return {**value, "draft": _draft_with_default_policy(value["draft"], "mentions_only")}
+        return value
+
+
+class CanvasGroupNodeData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    member_node_ids: list[str] = Field(default_factory=list)
+
+
+class CanvasPluginNodeData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    plugin_id: str = Field(min_length=1, max_length=120)
+    node_type: str = Field(min_length=1, max_length=120)
+    plugin_version: str = Field(min_length=1, max_length=80)
+    data_schema_version: int = Field(ge=1)
+    payload: JsonValue
+    generation_draft: CanvasGenerationDraft | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_input_policy(cls, value: object) -> object:
+        if isinstance(value, dict) and value.get("generation_draft") is not None:
+            return {
+                **value,
+                "generation_draft": _draft_with_default_policy(
+                    value["generation_draft"], "mentions_only"
+                ),
+            }
+        return value
 
     @model_validator(mode="after")
-    def validate_active_job(self) -> "CanvasGenerationData":
-        if self.active_job_id is not None and self.active_job_id not in self.job_ids:
-            raise ValueError("active_job_id must appear in job_ids")
+    def validate_payload_size(self) -> "CanvasPluginNodeData":
+        encoded = json.dumps(
+            self.payload, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+        if len(encoded) > 256 * 1024:
+            raise ValueError("canvas plugin payload exceeds 256 KiB")
         return self
 
 
-class CanvasTextNode(BaseModel):
+class CanvasNodeBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=120)
+    position: CanvasPoint
+    size: CanvasSize | None = None
+    z_index: int = Field(default=0, ge=-10_000, le=10_000)
+
+
+class CanvasTextNode(CanvasNodeBase):
     type: Literal["text"]
-    position: CanvasPoint
-    size: CanvasSize | None = None
-    data: CanvasTextData
+    data: CanvasContentNodeData
 
 
-class CanvasResourceNode(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str = Field(min_length=1, max_length=120)
-    type: Literal["resource"]
-    position: CanvasPoint
-    size: CanvasSize | None = None
-    data: CanvasResourceData
+class CanvasImageNode(CanvasNodeBase):
+    type: Literal["image"]
+    data: CanvasMediaNodeData
 
 
-class CanvasGenerationNode(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str = Field(min_length=1, max_length=120)
-    type: Literal["generation"]
-    position: CanvasPoint
-    size: CanvasSize | None = None
-    data: CanvasGenerationData
+class CanvasVideoNode(CanvasNodeBase):
+    type: Literal["video"]
+    data: CanvasMediaNodeData
+
+
+class CanvasAudioNode(CanvasNodeBase):
+    type: Literal["audio"]
+    data: CanvasContentNodeData
+
+
+class CanvasConfigNode(CanvasNodeBase):
+    type: Literal["config"]
+    data: CanvasConfigNodeData
+
+
+class CanvasGroupNode(CanvasNodeBase):
+    type: Literal["group"]
+    data: CanvasGroupNodeData
+
+
+class CanvasPluginNode(CanvasNodeBase):
+    type: Literal["plugin"]
+    data: CanvasPluginNodeData
 
 
 CanvasNode = Annotated[
-    CanvasTextNode | CanvasResourceNode | CanvasGenerationNode,
+    CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode
+    | CanvasConfigNode | CanvasGroupNode | CanvasPluginNode,
     Field(discriminator="type"),
 ]
 
 
-class ProvenanceConnection(BaseModel):
+class CanvasInputConnection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=160)
-    kind: Literal["provenance"]
+    role: Literal["input"]
     source_node_id: str = Field(min_length=1)
     target_node_id: str = Field(min_length=1)
 
 
+class CanvasGenerationRunOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["generation_run"]
+    run_id: str = Field(min_length=1, max_length=160)
+
+
+class CanvasLocalToolConnectionOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["local_tool"]
+    operation_id: str = Field(min_length=1, max_length=160)
+
+
+CanvasDerivationOrigin = Annotated[
+    CanvasGenerationRunOrigin | CanvasLocalToolConnectionOrigin,
+    Field(discriminator="kind"),
+]
+
+
+class CanvasDerivationConnection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=160)
+    role: Literal["derivation"]
+    source_node_id: str = Field(min_length=1)
+    target_node_id: str = Field(min_length=1)
+    origin: CanvasDerivationOrigin
+
+
+CanvasConnection = Annotated[
+    CanvasInputConnection | CanvasDerivationConnection,
+    Field(discriminator="role"),
+]
+
+
+class CanvasUserEditOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["user_edit"]
+
+
+class CanvasUploadOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["upload"]
+    upload_id: str
+
+
+class CanvasUserMaskOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["user_mask"]
+    source_version_id: str
+
+
+class CanvasJobOutputOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["job_output"]
+    job_id: str
+    candidate_id: str
+
+
+class CanvasImportOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["import"]
+    package_id: str
+
+
+class CanvasNormalizedRect(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+
+class CanvasCropOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["crop"]
+    rect: CanvasNormalizedRect
+
+
+class CanvasSplitOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["split"]
+    horizontal_lines: list[float]
+    vertical_lines: list[float]
+    row: int = Field(ge=0)
+    column: int = Field(ge=0)
+
+
+class CanvasUpscaleOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["upscale"]
+    target_long_edge: int = Field(gt=0, le=4096)
+    algorithm: Literal["nearest", "bilinear", "lanczos"]
+
+
+CanvasLocalToolOperation = Annotated[
+    CanvasCropOperation | CanvasSplitOperation | CanvasUpscaleOperation,
+    Field(discriminator="kind"),
+]
+
+
+class CanvasLocalToolOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["local_tool"]
+    operation_id: str
+    source_version_id: str
+    operation: CanvasLocalToolOperation
+
+
+CanvasContentOrigin = Annotated[
+    CanvasUserEditOrigin | CanvasUploadOrigin | CanvasUserMaskOrigin | CanvasJobOutputOrigin
+    | CanvasLocalToolOrigin | CanvasImportOrigin,
+    Field(discriminator="kind"),
+]
+
+
+class CanvasContentVersionBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version_id: str = Field(min_length=1, max_length=160)
+    created_at: str
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    origin: CanvasContentOrigin
+
+
+class CanvasTextVersion(CanvasContentVersionBase):
+    kind: Literal["text"]
+    text: str = Field(max_length=40_000)
+
+
+class CanvasMediaVersion(CanvasContentVersionBase):
+    kind: Literal["image", "video", "audio"]
+    path: str = Field(min_length=1)
+    mime_type: str = Field(min_length=1, max_length=120)
+    bytes: int = Field(ge=0)
+    width: int | None = Field(default=None, gt=0)
+    height: int | None = Field(default=None, gt=0)
+    duration_ms: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_owned_relative_path(self) -> "CanvasMediaVersion":
+        if "\\" in self.path or self.path.startswith("/"):
+            raise ValueError("canvas media path must be project-relative")
+        parts = self.path.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            raise ValueError("canvas media path must be normalized")
+        if parts[0] not in {"uploads", "derived", "outputs"}:
+            raise ValueError("canvas media path is outside owned project directories")
+        if self.origin.kind == "upload" and (
+            parts[0] != "uploads" or parts[-1].rsplit(".", 1)[0] != self.origin.upload_id
+        ):
+            raise ValueError("canvas upload path does not match its origin")
+        if self.origin.kind == "local_tool" and (
+            len(parts) < 3 or parts[0] != "derived" or parts[1] != self.origin.operation_id
+        ):
+            raise ValueError("canvas derived path does not match its operation")
+        if self.origin.kind == "job_output" and (
+            len(parts) < 3 or parts[0] != "outputs" or parts[1] != self.origin.job_id
+        ):
+            raise ValueError("canvas output path does not match its job")
+        return self
+
+
+CanvasContentVersion = Annotated[
+    CanvasTextVersion | CanvasMediaVersion,
+    Field(discriminator="kind"),
+]
+
+
 class CanvasDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     project_id: str = Field(min_length=1)
+    revision: int = Field(default=0, ge=0)
     viewport: CanvasViewport = Field(default_factory=CanvasViewport)
-    nodes: list[CanvasNode] = Field(default_factory=list)
-    connections: list[ProvenanceConnection] = Field(default_factory=list)
+    settings: CanvasSettings = Field(default_factory=CanvasSettings)
+    nodes: list[CanvasNode] = Field(default_factory=list, max_length=10_000)
+    connections: list[CanvasConnection] = Field(default_factory=list, max_length=20_000)
+    content_versions: dict[str, CanvasContentVersion] = Field(default_factory=dict)
     updated_at: str
 
     @model_validator(mode="after")
@@ -273,19 +567,52 @@ class CanvasDocument(BaseModel):
         edge_ids = [edge.id for edge in self.connections]
         if len(edge_ids) != len(set(edge_ids)):
             raise ValueError("canvas connection ids must be unique")
+        edge_endpoints = [
+            (edge.role, edge.source_node_id, edge.target_node_id)
+            for edge in self.connections
+        ]
+        if len(edge_endpoints) != len(set(edge_endpoints)):
+            raise ValueError("canvas connections cannot duplicate role and endpoints")
         nodes_by_id = {node.id: node for node in self.nodes}
+        for version_id, version in self.content_versions.items():
+            if version_id != version.version_id:
+                raise ValueError("canvas content version key must match version_id")
+        group_members: set[str] = set()
+        for node in self.nodes:
+            if node.type in {"text", "image", "video", "audio"}:
+                version_id = node.data.current_version_id
+                if version_id is not None:
+                    version = self.content_versions.get(version_id)
+                    if version is None or version.kind != node.type:
+                        raise ValueError("canvas content node references an incompatible version")
+            if node.type == "group":
+                for member_id in node.data.member_node_ids:
+                    member = nodes_by_id.get(member_id)
+                    if member is None or member.type == "group" or member_id in group_members:
+                        raise ValueError("canvas group membership is invalid")
+                    group_members.add(member_id)
         for edge in self.connections:
             if edge.source_node_id not in nodes_by_id or edge.target_node_id not in nodes_by_id:
                 raise ValueError("canvas connection references a missing node")
             if edge.source_node_id == edge.target_node_id:
                 raise ValueError("canvas connection cannot target itself")
-            if nodes_by_id[edge.target_node_id].type != "generation":
-                raise ValueError("provenance connections must target a generation node")
+            source = nodes_by_id[edge.source_node_id]
+            target = nodes_by_id[edge.target_node_id]
+            if source.type == "group" or target.type == "group":
+                raise ValueError("canvas group nodes cannot be connection endpoints")
+            if edge.role == "input":
+                if source.type in {"config", "plugin"}:
+                    raise ValueError("canvas input source cannot provide content")
+                if target.type == "plugin":
+                    raise ValueError("canvas plugin connections require a verified capability manifest")
+        if len(self.model_dump_json().encode("utf-8")) > 25 * 1024 * 1024:
+            raise ValueError("canvas document exceeds 25 MiB")
         return self
 
 
 class CanvasProject(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[2] = 2
     project_id: str
     name: CanvasProjectName
     created_at: str
@@ -294,8 +621,7 @@ class CanvasProject(BaseModel):
 
 class CanvasProjectCover(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    path: str
-    job_id: str | None = None
+    version_id: str
 
 
 class CanvasProjectSummary(CanvasProject):
@@ -319,9 +645,55 @@ class CanvasProjectRename(BaseModel):
 
 class CanvasUploadResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    path: str
+    version: CanvasMediaVersion
     filename: str
-    media_kind: Literal["image", "video", "audio"]
+    document: CanvasDocument
+
+
+SidecarItem = TypeVar("SidecarItem")
+
+
+class RevisionedSidecar(BaseModel, Generic[SidecarItem]):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1] = 1
+    revision: int = Field(default=0, ge=0)
+    updated_at: str
+    items: list[SidecarItem] = Field(default_factory=list)
+
+
+class CanvasLibraryAsset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset_id: str = Field(min_length=1, max_length=160)
+    version_id: str = Field(min_length=1, max_length=160)
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list)
+
+
+class CanvasPrompt(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    prompt_id: str = Field(min_length=1, max_length=160)
+    title: str = Field(min_length=1, max_length=120)
+    content: str = Field(max_length=40_000)
+    tags: list[str] = Field(default_factory=list)
+    source: Literal["local", "public"]
+
+
+class CanvasPluginState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: int = Field(ge=1)
+    revision: int = Field(default=0, ge=0)
+    plugin_id: str = Field(min_length=1, max_length=120)
+    plugin_version: str = Field(min_length=1, max_length=80)
+    data: JsonValue
+
+    @model_validator(mode="after")
+    def validate_data_size(self) -> "CanvasPluginState":
+        encoded = json.dumps(
+            self.data, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+        if len(encoded) > 1024 * 1024:
+            raise ValueError("canvas plugin state exceeds 1 MiB")
+        return self
 
 
 class WebEditableJobPatch(BaseModel):

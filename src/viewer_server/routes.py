@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, BackgroundTasks, Body, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, Response
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
@@ -390,6 +390,8 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
     # 防与 Skill 进程的 update_job_status 互相覆盖。
     with job_lock(job_id):
         data = json.loads(p.read_text(encoding="utf-8"))
+        if data.get("namespace") == "canvas":
+            raise HTTPException(403, detail="Canvas Job 的快照和参数不能通过通用编辑接口修改")
         for field, value in patch.model_dump(exclude_unset=True).items():
             data[field] = value
         atomic_write_json(p, data)
@@ -1933,10 +1935,12 @@ def patch_canvas_project(project_id: str, payload: CanvasProjectRename) -> Canva
 
 
 @router.get("/canvas/projects/{project_id}/document", response_model=CanvasDocument)
-def get_canvas_document(project_id: str) -> CanvasDocument:
+def get_canvas_document(project_id: str, response: Response) -> CanvasDocument:
     from character_workflow.lib.canvas_projects import read_canvas_document
     try:
-        return read_canvas_document(project_id)
+        document = read_canvas_document(project_id)
+        response.headers["ETag"] = f'"{document.revision}"'
+        return document
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
     except ValueError as error:
@@ -1944,12 +1948,33 @@ def get_canvas_document(project_id: str) -> CanvasDocument:
 
 
 @router.put("/canvas/projects/{project_id}/document", response_model=CanvasDocument)
-def put_canvas_document(project_id: str, payload: CanvasDocument) -> CanvasDocument:
+def put_canvas_document(
+    project_id: str,
+    payload: CanvasDocument,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> CanvasDocument:
     from character_workflow.lib.canvas_projects import save_canvas_document
+    if if_match is None:
+        raise HTTPException(428, detail="保存画布必须携带 If-Match revision")
     try:
-        return save_canvas_document(project_id, payload)
+        expected_revision = int(if_match.strip().strip('"'))
+    except ValueError:
+        raise HTTPException(422, detail="If-Match 必须是画布 revision") from None
+    try:
+        document = save_canvas_document(project_id, payload, expected_revision)
+        response.headers["ETag"] = f'"{document.revision}"'
+        return document
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    except RuntimeError as error:
+        if str(error).startswith("revision_conflict:"):
+            current_revision = int(str(error).split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }) from None
+        raise
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
 
@@ -1959,7 +1984,11 @@ def put_canvas_document(project_id: str, payload: CanvasDocument) -> CanvasDocum
     response_model=CanvasUploadResponse,
     status_code=201,
 )
-async def post_canvas_upload(project_id: str, file: UploadFile = File(...)) -> CanvasUploadResponse:
+async def post_canvas_upload(
+    project_id: str,
+    file: UploadFile = File(...),
+    expected_revision: int = Form(...),
+) -> CanvasUploadResponse:
     from character_workflow.lib.canvas_projects import save_canvas_upload
     raw_name = file.filename or "upload"
     ext = Path(raw_name).suffix.lower()
@@ -1969,72 +1998,42 @@ async def post_canvas_upload(project_id: str, file: UploadFile = File(...)) -> C
     limit = _upload_max_bytes(ext)
     if len(body) > limit:
         raise HTTPException(413, detail=_size_reject_detail(raw_name, body, limit))
-    try:
-        path, filename = save_canvas_upload(project_id, raw_name, ext, body)
-    except KeyError:
-        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
     media_kind: Literal["image", "video", "audio"] = (
         "image" if ext in _IMAGE_UPLOAD_EXTS else "video" if ext in _VIDEO_UPLOAD_EXTS else "audio"
     )
-    return CanvasUploadResponse(path=path, filename=filename, media_kind=media_kind)
+    try:
+        version, document, filename = save_canvas_upload(
+            project_id, raw_name, ext, body, media_kind, expected_revision
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    except RuntimeError as error:
+        if str(error).startswith("revision_conflict:"):
+            current_revision = int(str(error).split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }) from None
+        raise
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    return CanvasUploadResponse(version=version, filename=filename, document=document)
 
 
-@router.get("/canvas/projects/{project_id}/media")
+@router.get("/canvas/projects/{project_id}/content/{version_id}")
 def get_canvas_media(
     project_id: str,
-    path: str = Query(min_length=1),
-    job_id: str | None = None,
+    version_id: str,
 ) -> FileResponse:
     from character_workflow.lib.canvas_projects import resolve_canvas_media
     try:
-        return FileResponse(resolve_canvas_media(project_id, path, job_id))
+        return FileResponse(resolve_canvas_media(project_id, version_id))
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
     except FileNotFoundError:
         raise HTTPException(404, detail="找不到这个画布媒体文件") from None
     except PermissionError as error:
         raise HTTPException(403, detail=str(error)) from error
-
-
-@router.post("/canvas/projects/{project_id}/jobs", response_model=Job, status_code=201)
-def post_canvas_job(
-    project_id: str,
-    body: _StudioJobCreate,
-    background: BackgroundTasks,
-) -> Job:
-    from character_workflow.lib.canvas_projects import (
-        read_canvas_project,
-        validate_canvas_reference_paths,
-    )
-    try:
-        read_canvas_project(project_id)
-    except KeyError:
-        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
-    reference_paths = [
-        path
-        for group in (
-            body.params.reference_images,
-            body.params.reference_videos,
-            body.params.reference_audios,
-            body.params.mj_sref,
-            body.params.mj_cref,
-            body.params.mj_oref,
-        )
-        for path in (group or [])
-    ]
-    source_image = body.params.model_dump().get("source_image")
-    if source_image is not None:
-        if not isinstance(source_image, str) or not source_image:
-            raise HTTPException(422, detail="params.source_image must be a non-empty path")
-        reference_paths.append(source_image)
-    try:
-        validate_canvas_reference_paths(project_id, reference_paths)
-    except PermissionError as error:
-        raise HTTPException(422, detail=str(error)) from error
-    job = _create_user_job(body, namespace="canvas", canvas_project_id=project_id)
-    from viewer_server import routes as _self
-    background.add_task(_self._run_studio_job_safely, job.job_id)
-    return job
 
 
 @router.get("/canvas/projects/{project_id}/jobs", response_model=list[Job])

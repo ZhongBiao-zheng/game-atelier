@@ -1,6 +1,6 @@
 # Canvas 图片与媒体工具等价实现方案
 
-Status: ready-for-human
+Status: ready-for-agent
 
 ## 推荐结论
 

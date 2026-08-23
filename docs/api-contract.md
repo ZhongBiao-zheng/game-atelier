@@ -15,7 +15,7 @@
 | CharacterWorkspaceResponse / CharacterIndexResponse | `lib/schemas.py` | `web/src/api/characters.ts` | `tests/test_character_workspace.py` + `CharacterWorkspace.test.tsx` + `CharacterIndex.test.tsx` |
 | ProjectIndexItem / GalleryMedia | `lib/schemas.py` | `web/src/api/gallery.ts` | `tests/test_gallery_project.py` + `ProjectIndexPage.test.tsx` + `ProjectPage.test.tsx` |
 | StudioArchiveTarget | `lib/studio_archive.py` | `web/src/api/studio.ts` | `tests/test_studio_archive.py` + `StudioArchiveDialog.test.tsx` |
-| CanvasProject / CanvasDocument | `lib/schemas.py` | `web/src/schema/canvas.ts` | `tests/test_canvas_projects.py` + `CanvasEditor.test.tsx` |
+| CanvasProject / CanvasDocument / CanvasJobContext | `lib/schemas.py` | `web/src/schema/canvas.ts` + `schema/jobs.ts` | `tests/test_canvas_projects.py` + `CanvasEditor.test.tsx` |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
 | 视频控件能力 | 各 `*_video.py` | `lib/videoControlCaps.ts` | 无 —— 靠人 |
 
@@ -60,7 +60,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /jobs/{id}/{confirm,cancel}` `DELETE /jobs/{id}` `DELETE /jobs/{id}/image`
 `POST /studio/jobs/{id}/archive`
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
-`POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/jobs`
+`POST /canvas/projects/{id}/uploads`
 
 **双向**
 `POST /characters/{id}/canonical` `POST /projects/{id}/ui-schemes/{scheme_id}/screens/canonical` `POST /experience`
@@ -78,19 +78,28 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /projects/{id}/character-associations`
 `GET /projects/{id}/studio-archive-targets?media_kind={image,video}`
 `GET /canvas/projects` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
-`GET /canvas/projects/{id}/media?path=&job_id=`
+`GET /canvas/projects/{id}/content/{version_id}`
 
 ### 人工画布契约
 
 画布是 Web 用户人工创建、人工编排的独立创作空间，Skill 不创建项目、不填充节点，也不推进整张图。
-文件系统真源为 `canvases/<id>/project.json` 与 `canvas.json`；资源放 `uploads/`，生成产物按 job 放
-`outputs/<job_id>/`。`CanvasDocument` 保存 viewport、文本/资源/生成节点，以及只能指向生成节点的
-`provenance` 连接；连接表达某次手动生成使用过哪些显式来源，不是可自动执行的工作流。
+文件系统真源为 schema v2 `canvases/<id>/project.json` 与 revision 化 `canvas.json`；资源字节放
+`uploads/`，确定性工具产物放 `derived/<operation_id>/`，生成产物按 job 放 `outputs/<job_id>/`。
+`CanvasDocument` 保存 viewport/settings、七类稳定节点、两类连接与不可变 `content_versions`。运行时只接受
+`schema_version: 2`，不包含 v1 union、fallback 或 converter。
+媒体 Content Version 的 `path` 始终相对当前画布项目目录；资产库与提示词使用 revision 化 sidecar，插件
+私有状态使用带 plugin id/version 的独立 envelope，不把这些业务对象塞回热路径 `canvas.json`。
 
-生成节点的 `job_ids` 保留每轮生成历史，`active_job_id` 指向当前一轮，`selected_output_index` 只在该轮
-多个候选中选一个展示结果。Web 点击单个节点的生成按钮时创建 `namespace=canvas` Job，并把对应来源
-路径写入 `JobParams.reference_images / reference_videos / reference_audios`；文本来源以可见段落追加到
-prompt。画布只能读取本项目 `uploads/` 或本项目 Canvas Job 登记过的 `output_paths`。
+`Input Connection` 是当前可编辑输入资格，不触发下游；`Derivation Connection` 只由生成提交或受控本地
+媒体命令创建。真实生成输入冻结在 Canvas Job 的 `canvas_run.snapshot`，节点不保存 `job_ids` 或候选数组。
+普通 `PUT document` 必须携带 `If-Match: <revision>`：服务端项目锁内校验后 revision + 1；冲突返回 409，
+不做自动合并。Web PUT 只能新增 `user_edit` 文本版本，不能写媒体版本、修改既有版本或伪造派生连接。
+
+上传接口使用 multipart `file + expected_revision`，服务端登记不可变媒体 Content Version 并返回更新后的
+Document；扩展名只作入口白名单，文件类型、MIME、摘要、大小和图片尺寸均由服务端字节重算，伪扩展上传
+直接拒绝。`canvas.json` 最大 25 MiB，单项目最多 10,000 节点 / 20,000 连接，单插件节点 payload 最大
+256 KiB。媒体读取只收 `version_id`，不接受裸 path/job_id。Canvas Job 禁止通过通用 `/prompt/{job_id}`
+修改快照、prompt 或参数。生成 Run、retry 与完成落盘事务在下一纵切接入，旧 `POST .../jobs` 已删除。
 
 ### 角色衍生契约
 

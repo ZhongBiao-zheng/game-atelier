@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import secrets
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -16,10 +15,7 @@ from character_workflow.lib import data_root, keys
 from character_workflow.lib.atomic_io import atomic_write_text
 from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus, Namespace
 
-if os.name == "nt":
-    import msvcrt
-else:
-    import fcntl
+from character_workflow.lib.file_lock import file_lock
 
 
 logger = logging.getLogger(__name__)
@@ -70,23 +66,8 @@ def job_lock(job_id: str) -> Iterator[None]:
 
     锁加在 sidecar .lock 文件上而非 job 文件本身：原子写走 tmp.replace 换 inode，
     锁在被换掉的旧 inode 上等于没锁。进程崩溃时 OS 自动释放，不会留死锁。"""
-    lock_path = _runtime_dir() / "jobs" / f"{job_id}.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(lock_path, "a+", encoding="utf-8") as f:
-        if os.name == "nt":
-            f.seek(0)
-            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
-            try:
-                yield
-            finally:
-                f.seek(0)
-                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    with file_lock(_runtime_dir() / "jobs" / f"{job_id}.lock"):
+        yield
 
 
 def new_job_id() -> str:

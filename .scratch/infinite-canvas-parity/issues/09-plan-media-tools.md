@@ -2,7 +2,7 @@
 
 Type: wayfinder:research
 
-Status: ready-for-human
+Status: ready-for-agent
 
 Blocked by: 04-map-generation-capabilities, 05-resolve-project-assets-prompts-sync, 08-prototype-parity-interactions
 
@@ -34,6 +34,7 @@ Blocked by: 04-map-generation-capabilities, 05-resolve-project-assets-prompts-sy
 
 ## Comments
 
+- 2026-08-23：用户要求继续开发，确认方案 A；ADR-0013 已接受。
 - 本票只完成架构与实施门，不把媒体工具继续堆在待删除的 Canvas v1 resource/path 上。
 - 方案确认前不改写 `CONTEXT.md`、已接受 ADR 或 ready-for-agent 的 Domain/Schema；所需 schema 修订已在
   完整方案中列为确认后的同一 Foundation change set。

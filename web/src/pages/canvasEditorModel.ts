@@ -4,36 +4,7 @@ import {
   studioSizeFor,
   type Resolution,
 } from '@/lib/studioSize';
-import type { CanvasGenerationNode } from '@/schema/canvas';
-import type { JobKind, JobParams } from '@/schema/jobs';
-
-interface CanvasJobBody {
-  prompt: string;
-  model: string;
-  params: JobParams;
-  alias?: string;
-  kind: JobKind;
-}
-
-export function buildCanvasGenerationRequest(
-  target: CanvasGenerationNode,
-  provider?: string | null,
-): CanvasJobBody {
-  const params: JobParams = target.data.media_kind === 'image'
-    ? normalizeCanvasImageParams(target.data.draft.model, provider, target.data.draft.params)
-    : { ...target.data.draft.params };
-  delete params.reference_images;
-  delete params.reference_videos;
-  delete params.reference_audios;
-
-  return {
-    prompt: target.data.draft.prompt.trim(),
-    model: target.data.draft.model,
-    params,
-    alias: target.data.draft.alias || undefined,
-    kind: target.data.media_kind,
-  };
-}
+import type { JobParams } from '@/schema/jobs';
 
 export function normalizeCanvasImageParams(
   model: string,

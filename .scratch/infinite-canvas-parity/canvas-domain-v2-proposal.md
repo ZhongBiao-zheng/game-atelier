@@ -74,11 +74,12 @@ Draft 自动保存但不是历史；提交后的任何编辑都不能改写已�
 
 ### Derivation Connection
 
-从本次 Generation Surface 指向结果 Content Node 的派生关系。提交时随着结果占位节点一起创建；
-它只用于可视追溯和布局，删除边不会删除 Job、Snapshot、内容版本或结果节点。
+从本次 Generation Surface 或确定性本地工具的源 Content Node 指向结果 Content Node 的派生关系。
+它只用于可视追溯和布局，删除边不会删除 Job、Snapshot、内容版本、工具来源或结果节点。
 
-只有生成提交路径能创建带 Run 关联的 Derivation Connection。用户、Agent 和插件不能伪造历史；
-它们只能通过统一校验器创建 Input Connection。
+只有生成提交路径能创建带 Run 关联的 Derivation Connection；只有受控本地媒体命令能创建带
+operation 关联的 Derivation Connection。用户、Agent 和插件不能伪造历史；它们只能通过统一校验器
+创建 Input Connection。
 
 ### Resolved Input
 
@@ -100,7 +101,8 @@ Draft 自动保存但不是历史；提交后的任何编辑都不能改写已�
 
 1. Input Connection 和 Derivation Connection 都有方向；禁止 self-loop 和同 role 的重复 source-target。
 2. Group Node 没有端口，也不能成为任何连接端点。
-3. Config Node 只有用户可见的输入端口；它的 derivation 出边由提交路径创建，不允许手工伪造。
+3. Config Node 只有用户可见的输入端口；Derivation Connection 由生成提交或受控本地工具命令创建，
+   不允许手工伪造。
 4. Text/Image/Video/Audio 和声明 resource capability 的 Plugin Node 可以成为 Input source。
 5. Text/Image/Video/Audio/Config 和声明 generation capability 的 Plugin Node 可以成为 Input target。
 6. Config→Config 的 Input Connection 禁止；其他节点组合先允许连接，提交时再按模型 capability 检查。
@@ -228,7 +230,7 @@ submitted → succeeded
 ### S6：Agent 声称某节点由另一节点生成
 
 Agent 可以画一条 Input Connection，但不能伪造 Derivation Connection 或 Snapshot。真实派生只能来自一次
-已提交的 Canvas Generation Run。
+已提交的 Canvas Generation Run 或受控本地媒体命令。
 
 ## 备选方案
 
@@ -253,7 +255,7 @@ Agent 可以画一条 Input Connection，但不能伪造 Derivation Connection �
 - `Content Node`：承载当前文本或媒体版本的稳定画布节点；空/有内容是状态，不是不同节点类型。
 - `Generation Config Node`：只承载可编辑生成草稿和输入候选的节点，不拥有生成结果。
 - `Input Connection`：当前可编辑的输入资格关系，不代表已经使用，也不触发下游。
-- `Derivation Connection`：生成表面与结果节点之间的可视派生关系，不是历史真源。
+- `Derivation Connection`：生成表面或确定性本地工具源节点与结果节点之间的可视派生关系，不是历史真源。
 - `Generation Draft`：尚未提交、可以继续编辑的创作意图。
 - `Resolved Input`：提交前从草稿、连接和显式引用解析出的临时输入集合。
 - `Generation Snapshot`：提交时冻结的实际 prompt、模型、参数和内容版本，是历史输入唯一真源。

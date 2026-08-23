@@ -18,6 +18,6 @@ Canvas 的可编辑连接不能同时充当历史来源真源。Canvas Domain v2
 ## Consequences
 
 - v2 落地时直接删除 v1 `generation` 节点类型与旧分支，只保留内容节点模型。
-- 用户、Agent 与插件只能通过同一校验器创建 Input Connection；Derivation Connection 和 Snapshot
-  只能由生成提交路径创建。
+- 用户、Agent 与插件只能通过同一校验器创建 Input Connection；生成提交路径创建带 Run 来源的
+  Derivation Connection 与 Snapshot，受控本地媒体命令只创建带 operation 来源的 Derivation Connection。
 - Job/快照引用的内容版本必须在节点删除或替换后继续可读，物理保留策略由后续数据与资产决策确定。

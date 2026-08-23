@@ -60,6 +60,43 @@ export interface JobParams {
   [key: string]: unknown;
 }
 
+export interface CanvasGenerationSnapshot {
+  snapshot_version: 1;
+  surface_node_id: string;
+  result_node_id: string;
+  mode: 'text' | 'image' | 'video' | 'audio';
+  final_prompt: string;
+  input_policy: 'all_connected' | 'mentions_only';
+  model: string;
+  provider: string;
+  alias: string | null;
+  normalized_params: Record<string, unknown>;
+  inputs: Array<{
+    order: number;
+    source: 'implicit_self' | 'input_connection';
+    node_id: string;
+    version_id: string;
+    kind: 'text' | 'image' | 'video' | 'audio';
+  }>;
+  mask_version_id: string | null;
+  submitted_at: string;
+  submitted_by: { kind: 'user' | 'agent' | 'plugin'; actor_id: string | null };
+  request_fingerprint: string;
+}
+
+export interface CanvasJobContext {
+  run_id: string;
+  snapshot: CanvasGenerationSnapshot;
+  result_node_id: string;
+  candidates: Array<{
+    candidate_id: string;
+    index: number;
+    status: 'pending' | 'succeeded' | 'failed' | 'canceled';
+    version_id: string | null;
+    error: string | null;
+  }>;
+}
+
 export interface Job {
   job_id: string;
   character_id: string;
@@ -90,6 +127,7 @@ export interface Job {
   production_id?: string | null;
   // 人工画布 job（namespace='canvas'）归独立画布项目；Web 只读。
   canvas_project_id?: string | null;
+  canvas_run?: CanvasJobContext | null;
 }
 
 export const WEB_EDITABLE_FIELDS = ['prompt', 'params'] as const;

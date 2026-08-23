@@ -1,5 +1,5 @@
 import { requestJson } from './http';
-import type { Job, JobKind, JobParams } from '@/schema/jobs';
+import type { Job } from '@/schema/jobs';
 import type {
   CanvasDocument,
   CanvasProject,
@@ -44,15 +44,20 @@ export function saveCanvasDocument(projectId: string, document: CanvasDocument):
     '保存画布',
     {
       method: 'PUT',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'If-Match': String(document.revision) },
       body: JSON.stringify(document),
     },
   );
 }
 
-export async function uploadCanvasMedia(projectId: string, file: File): Promise<CanvasUpload> {
+export async function uploadCanvasMedia(
+  projectId: string,
+  file: File,
+  expectedRevision: number,
+): Promise<CanvasUpload> {
   const form = new FormData();
   form.append('file', file);
+  form.append('expected_revision', String(expectedRevision));
   return requestJson<CanvasUpload>(
     `/api/canvas/projects/${encodeURIComponent(projectId)}/uploads`,
     '上传画布资源',
@@ -62,22 +67,9 @@ export async function uploadCanvasMedia(projectId: string, file: File): Promise<
 
 export function canvasMediaUrl(
   projectId: string,
-  source: { path: string; job_id?: string | null },
+  versionId: string,
 ): string {
-  const query = new URLSearchParams({ path: source.path });
-  if (source.job_id) query.set('job_id', source.job_id);
-  return `/api/canvas/projects/${encodeURIComponent(projectId)}/media?${query.toString()}`;
-}
-
-export function createCanvasJob(
-  projectId: string,
-  body: { prompt: string; model: string; params: JobParams; alias?: string; kind?: JobKind },
-): Promise<Job> {
-  return requestJson<Job>(`/api/canvas/projects/${encodeURIComponent(projectId)}/jobs`, '创建画布生成任务', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  return `/api/canvas/projects/${encodeURIComponent(projectId)}/content/${encodeURIComponent(versionId)}`;
 }
 
 export function listCanvasJobs(projectId: string): Promise<Job[]> {

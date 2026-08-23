@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Canvas 确定性媒体工具在服务端执行

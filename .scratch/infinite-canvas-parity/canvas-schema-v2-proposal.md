@@ -42,6 +42,7 @@ canvases/<project_id>/
 ├── canvas.json                        # CanvasDocument；交互热路径
 ├── uploads/<blob_id>.<ext>            # 用户上传的不可变 blob
 ├── outputs/<job_id>/...               # Job Runner 产物
+├── derived/<operation_id>/...         # 确定性本地媒体工具产物
 ├── library/
 │   ├── assets.json                    # 显式收藏/标签，不拥有 blob
 │   └── prompts.json                   # 项目提示词库
@@ -54,8 +55,8 @@ canvases/<project_id>/
 
 约束：
 
-- `canvas.json` 内的 `content_versions` 保存文本正文和媒体元数据；媒体字节仍只在 `uploads/` 或
-  `outputs/`。
+- `canvas.json` 内的 `content_versions` 保存文本正文和媒体元数据；媒体字节仍只在 `uploads/`、
+  `outputs/` 或 `derived/`。
 - `.runtime/transactions/` 不是第二真源。事务完成即删除；启动/首次访问时只用于完成或回滚一次中断写入。
 - 缩略图、波形和局部预览属于可重建缓存，不进入导出真源。
 - WebDAV 和项目包消费同一份规范文件集合，不从浏览器状态另造导出格式。
@@ -188,13 +189,20 @@ interface CanvasMediaVersion extends CanvasContentVersionBase {
 type CanvasContentOrigin =
   | { kind: 'user_edit' }
   | { kind: 'upload'; upload_id: string }
+  | { kind: 'user_mask'; source_version_id: string }
   | { kind: 'job_output'; job_id: string; candidate_id: string }
-  | { kind: 'local_tool'; operation_id: string }
+  | CanvasLocalToolOrigin
   | { kind: 'import'; package_id: string };
+
+type CanvasLocalToolOrigin =
+  | { kind: 'local_tool'; operation_id: string; source_version_id: string; operation: { kind: 'crop'; rect: NormalizedRect } }
+  | { kind: 'local_tool'; operation_id: string; source_version_id: string; operation: { kind: 'split'; horizontal_lines: number[]; vertical_lines: number[]; row: number; column: number } }
+  | { kind: 'local_tool'; operation_id: string; source_version_id: string; operation: { kind: 'upscale'; target_long_edge: number; algorithm: 'nearest' | 'bilinear' | 'lanczos' } };
 ```
 
 Content Version 一旦出现，其 JSON 内容不得修改；任何替换都创建新 ID。媒体 `path` 必须落在
-`canvases/<project_id>/uploads/` 或 `outputs/<owned_job_id>/`，且文件摘要、大小与 MIME 重新由服务端
+`canvases/<project_id>/uploads/`、`canvases/<project_id>/derived/<operation_id>/` 或
+`canvases/<project_id>/outputs/<owned_job_id>/`，且文件摘要、大小与 MIME 重新由服务端
 计算，客户端声明只作提示。普通文档保存不得删除或改写既有版本，也不得创建媒体版本；上传、Job、
 本地媒体工具和导入命令由服务端创建媒体版本。Web 只可提交 `user_edit` 文本版本，服务端重算摘要并
 校验 ID。物理 GC 只能由第 05 关定义的服务端命令执行。
@@ -233,13 +241,16 @@ interface CanvasDerivationConnection {
   role: 'derivation';
   source_node_id: string;
   target_node_id: string;
-  run_id: string;
+  origin:
+    | { kind: 'generation_run'; run_id: string }
+    | { kind: 'local_tool'; operation_id: string };
 }
 ```
 
 文档 validator 实施第 02 关全部端点、重复边、自环、Config→Config、Group 和一层 membership 不变量。
-Derivation 的 `run_id/surface/result` 必须与一个本项目 Canvas Job 一致；普通文档 PUT 不能新造
-Derivation，它只能由生成提交命令写入。
+`generation_run` Derivation Connection 的 `run_id/surface/result` 必须与一个本项目 Canvas Job 一致；
+`local_tool` Derivation Connection 必须匹配目标 Content Version 的 immutable origin、operation_id 和源
+version。普通文档 PUT 不能新造 Derivation Connection；它只能由生成提交或受控本地媒体命令写入。
 
 ### Canvas Job / Generation Snapshot
 
@@ -266,6 +277,7 @@ interface CanvasGenerationSnapshot {
   alias: string | null;
   normalized_params: JsonValue;
   inputs: CanvasSnapshotInput[];
+  mask_version_id: string | null;
   submitted_at: string;
   submitted_by: CanvasActor;
   request_fingerprint: string;               // canonical JSON SHA-256
