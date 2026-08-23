@@ -1,4 +1,4 @@
-import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
+import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
 import {
   ArrowUp,
   FileAudio,
@@ -53,11 +53,19 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   return (
     <div
       className={cn(
-        'canvas-node-shell group relative overflow-visible',
-        node.type === 'text' ? 'w-64' : 'w-80',
+        'canvas-node-shell group relative h-full w-full overflow-visible',
       )}
       data-selected={selected ? 'true' : 'false'}
     >
+      <NodeResizer
+        isVisible={selected}
+        minWidth={node.type === 'text' ? 220 : 240}
+        minHeight={node.type === 'text' ? 120 : 150}
+        color="var(--primary)"
+        handleClassName="canvas-node-resize-handle"
+        lineClassName="canvas-node-resize-line"
+        onResizeStart={context.recordHistory}
+      />
       <header className="absolute bottom-full left-1 right-1 flex items-center justify-between gap-2 pb-2 text-xs text-muted-foreground">
         <span className="flex min-w-0 items-center gap-1.5 truncate">
           {node.type === 'text' ? <Type className="size-3.5 shrink-0" /> : node.type === 'resource' ? mediaIcon(node.data.media_kind) : node.data.media_kind === 'image' ? <Sparkles className="size-3.5 shrink-0" /> : <Video className="size-3.5 shrink-0" />}
@@ -79,13 +87,25 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         </span>
       </header>
       <article
+        role="button"
+        tabIndex={0}
+        aria-label={`选择节点 ${nodeTitle(node)}`}
         className={cn(
-          'relative overflow-hidden rounded-lg border bg-card/95 text-foreground transition-colors shell-glow',
+          'relative h-full overflow-hidden rounded-lg border bg-card/95 text-foreground transition-colors shell-glow',
           selected ? 'border-primary' : 'border-border',
         )}
-        onClick={() => context.selectNode(node.id)}
+        onClick={event => {
+          event.stopPropagation();
+          context.selectNode(node.id);
+        }}
+        onKeyDown={event => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          event.stopPropagation();
+          context.selectNode(node.id);
+        }}
       >
-        <div className={cn('bg-secondary/20', node.type === 'text' ? 'min-h-32' : 'min-h-44')}>
+        <div className={cn('h-full bg-secondary/20', node.type === 'text' ? 'min-h-32' : 'min-h-44')}>
           {node.type === 'text' && (
             <p className="line-clamp-5 whitespace-pre-wrap p-3 text-sm leading-relaxed text-foreground">
               {node.data.text || '选择节点后输入文本…'}
@@ -102,14 +122,16 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           )}
         </div>
       </article>
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="canvas-node-handle"
-        aria-label="连接到此节点"
-      >
-        <span className="canvas-node-handle-dot"><Plus aria-hidden="true" /></span>
-      </Handle>
+      {node.type === 'generation' && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="canvas-node-handle"
+          aria-label="连接到此节点"
+        >
+          <span className="canvas-node-handle-dot"><Plus aria-hidden="true" /></span>
+        </Handle>
+      )}
       <Handle
         type="source"
         position={Position.Right}
@@ -427,9 +449,9 @@ export function AddMenuButton({ icon, title, description, onClick }: { icon: Rea
 }
 
 export function MediaPreview({ kind, src, compact = false }: { kind: 'image' | 'video' | 'audio'; src: string; compact?: boolean }) {
-  if (kind === 'image') return <img src={src} alt="" loading="lazy" draggable={false} className={cn('w-full object-cover', compact ? 'max-h-44 rounded-lg' : 'h-44')} />;
-  if (kind === 'video') return <video src={src} controls={compact} muted={!compact} preload="metadata" playsInline className={cn('w-full object-cover', compact ? 'max-h-44 rounded-lg' : 'h-44')} />;
-  return <div className="grid min-h-24 place-items-center gap-2 p-4 text-muted-foreground"><FileAudio className="size-7" /><audio src={src} controls className="nodrag w-full" /></div>;
+  if (kind === 'image') return <img src={src} alt="" loading="lazy" draggable={false} className={cn('w-full object-cover', compact ? 'max-h-44 rounded-lg' : 'h-full min-h-44')} />;
+  if (kind === 'video') return <video src={src} controls={compact} muted={!compact} preload="metadata" playsInline className={cn('w-full object-cover', compact ? 'max-h-44 rounded-lg' : 'h-full min-h-44')} />;
+  return <div className="grid h-full min-h-24 place-items-center gap-2 p-4 text-muted-foreground"><FileAudio className="size-7" /><audio src={src} controls={compact} preload="metadata" className={cn('nodrag w-full', !compact && 'hidden')} /></div>;
 }
 
 export function JobState({ status }: { status: Job['status'] }) {

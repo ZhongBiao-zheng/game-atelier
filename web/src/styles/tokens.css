@@ -372,6 +372,16 @@
     border-color: var(--primary);
     color: var(--primary);
   }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-line {
+    border-color: color-mix(in srgb, var(--primary) 72%, transparent);
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-handle {
+    width: 0.55rem;
+    height: 0.55rem;
+    border: 1px solid var(--background);
+    border-radius: 999px;
+    background: var(--primary);
+  }
   .canvas-flow .react-flow__edge-path {
     stroke-width: 1.5;
   }

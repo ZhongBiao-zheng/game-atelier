@@ -10,8 +10,10 @@ import {
   type Connection,
   type EdgeChange,
   type NodeChange,
-  type ReactFlowInstance,
+  type OnConnectEnd,
   type Viewport,
+  type XYPosition,
+  useReactFlow,
 } from '@xyflow/react';
 import {
   ArrowLeft,
@@ -19,7 +21,9 @@ import {
   FileAudio,
   FileImage,
   FileVideo,
+  Grid2X2,
   LoaderCircle,
+  Maximize2,
   MousePointer2,
   Plus,
   Redo2,
@@ -64,6 +68,13 @@ import {
   normalizeCanvasImageParams,
 } from './canvasEditorModel';
 
+interface CreateMenuState {
+  screen: XYPosition;
+  flow: XYPosition;
+  sourceId?: string;
+  sourceHandle?: 'source' | 'target';
+}
+
 export function CanvasEditor(props: {
   projectId: string;
   onBack: () => void;
@@ -92,11 +103,12 @@ function CanvasEditorInner({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(() => new Set());
   const [addOpen, setAddOpen] = useState(false);
+  const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null);
+  const [background, setBackground] = useState<BackgroundVariant | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [generatingId, setGeneratingId] = useState<string | null>(null);
-  const [flow, setFlow] = useState<ReactFlowInstance<FlowNode> | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const dirtyVersion = useRef(0);
   const [dirtySignal, setDirtySignal] = useState(0);
@@ -104,6 +116,7 @@ function CanvasEditorInner({
   const saveQueued = useRef<CanvasDocument | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
+  const { screenToFlowPosition, fitView } = useReactFlow<FlowNode>();
 
   const refreshJobs = useCallback(async () => {
     try {
@@ -128,6 +141,7 @@ function CanvasEditorInner({
     setDocument(null);
     setSelectedId(null);
     setSelectedConnectionIds(new Set());
+    setCreateMenu(null);
     history.current = { past: [], future: [] };
     Promise.all([
       listCanvasProjects(),
@@ -152,6 +166,7 @@ function CanvasEditorInner({
     function handleEscape(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
       setAddOpen(false);
+      setCreateMenu(null);
       setSelectedId(null);
     }
     window.addEventListener('keydown', handleEscape);
@@ -239,8 +254,10 @@ function CanvasEditorInner({
     id: node.id,
     type: 'canvasNode',
     position: node.position,
-    width: node.size?.width,
-    height: node.size?.height,
+    style: {
+      width: node.size?.width ?? (node.type === 'text' ? 256 : 320),
+      height: node.size?.height ?? (node.type === 'text' ? 144 : 176),
+    },
     selected: node.id === selectedId,
     data: { domain: node },
   })), [document?.nodes, selectedId]);
@@ -249,6 +266,7 @@ function CanvasEditorInner({
     id: connection.id,
     source: connection.source_node_id,
     target: connection.target_node_id,
+    type: 'smoothstep',
     className: 'canvas-provenance-edge',
     selected: selectedConnectionIds.has(connection.id),
     selectable: true,
@@ -263,7 +281,9 @@ function CanvasEditorInner({
       else if (nextSelected === change.id) nextSelected = null;
     }
     setSelectedId(nextSelected);
-    const graphChanges = changes.filter(change => change.type === 'position' || change.type === 'remove');
+    const graphChanges = changes.filter(change => (
+      change.type === 'position' || change.type === 'dimensions' || change.type === 'remove'
+    ));
     if (!graphChanges.length) return;
     commit(current => {
       let nodes = [...current.nodes];
@@ -271,6 +291,11 @@ function CanvasEditorInner({
       for (const change of graphChanges) {
         if (change.type === 'position' && change.position) {
           nodes = nodes.map(node => node.id === change.id ? { ...node, position: change.position! } : node);
+        }
+        if (change.type === 'dimensions' && change.dimensions) {
+          nodes = nodes.map(node => node.id === change.id
+            ? { ...node, size: { width: change.dimensions!.width, height: change.dimensions!.height } }
+            : node);
         }
         if (change.type === 'remove') {
           nodes = nodes.filter(node => node.id !== change.id);
@@ -285,6 +310,11 @@ function CanvasEditorInner({
 
   const onConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return;
+    const targetNode = latestDocument.current?.nodes.find(node => node.id === connection.target);
+    if (targetNode?.type !== 'generation') {
+      setError('当前画布仅支持把连接接入生成节点。');
+      return;
+    }
     commit(current => {
       const exists = current.connections.some(edge => (
         edge.source_node_id === connection.source && edge.target_node_id === connection.target
@@ -301,6 +331,26 @@ function CanvasEditorInner({
       };
     }, true);
   }, [commit]);
+
+  const onConnectEnd = useCallback<OnConnectEnd>((event, state) => {
+    if (state.isValid || !state.fromNode) return;
+    const fromDomainNode = latestDocument.current?.nodes.find(node => node.id === state.fromNode?.id);
+    if (state.fromHandle?.type === 'target' && fromDomainNode?.type !== 'generation') return;
+    const pointer = pointerPosition(event);
+    if (!pointer) return;
+    const menuWidth = 240;
+    const menuHeight = 344;
+    setAddOpen(false);
+    setCreateMenu({
+      screen: {
+        x: Math.max(12, Math.min(pointer.x, window.innerWidth - menuWidth - 12)),
+        y: Math.max(12, Math.min(pointer.y, window.innerHeight - menuHeight - 12)),
+      },
+      flow: screenToFlowPosition(pointer),
+      sourceId: state.fromNode.id,
+      sourceHandle: state.fromHandle?.type ?? 'source',
+    });
+  }, [screenToFlowPosition]);
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     setSelectedConnectionIds(current => {
@@ -355,31 +405,49 @@ function CanvasEditorInner({
   const projectName = projects.find(project => project.project_id === projectId)?.name ?? '画布项目';
 
   function defaultPosition() {
-    if (!flow) return { x: 260 + (document?.nodes.length ?? 0) * 24, y: 180 };
-    return flow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    return screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
   }
 
-  function addTextNode() {
+  function appendNode(node: CanvasNode, menu: CreateMenuState | null) {
+    commit(current => {
+      const connections = [...current.connections];
+      if (menu?.sourceId) {
+        const sourceNodeId = menu.sourceHandle === 'target' ? node.id : menu.sourceId;
+        const targetNodeId = menu.sourceHandle === 'target' ? menu.sourceId : node.id;
+        connections.push({
+          id: makeId('connection'),
+          kind: 'provenance',
+          source_node_id: sourceNodeId,
+          target_node_id: targetNodeId,
+        });
+      }
+      return { ...current, nodes: [...current.nodes, node], connections };
+    }, true);
+    setSelectedConnectionIds(new Set());
+    setSelectedId(node.id);
+    setAddOpen(false);
+    setCreateMenu(null);
+  }
+
+  function addTextNode(menu: CreateMenuState | null = createMenu) {
     const id = makeId('text');
     const node: CanvasNode = {
       id,
       type: 'text',
-      position: defaultPosition(),
+      position: menu?.flow ?? defaultPosition(),
       data: { title: '文本', text: '' },
     };
-    commit(current => ({ ...current, nodes: [...current.nodes, node] }), true);
-    setSelectedId(id);
-    setAddOpen(false);
+    appendNode(node, menu);
   }
 
-  function addGenerationNode(kind: JobKind) {
+  function addGenerationNode(kind: JobKind, menu: CreateMenuState | null = createMenu) {
     const key = firstKeyForKind(keys, kind);
     const model = key?.models.find(item => modelModality(item, key) === kind)?.id ?? '';
     const id = makeId(kind);
     const node: CanvasGenerationNode = {
       id,
       type: 'generation',
-      position: defaultPosition(),
+      position: menu?.flow ?? defaultPosition(),
       data: {
         media_kind: kind,
         draft: {
@@ -393,12 +461,11 @@ function CanvasEditorInner({
         job_ids: [],
       },
     };
-    commit(current => ({ ...current, nodes: [...current.nodes, node] }), true);
-    setSelectedId(id);
-    setAddOpen(false);
+    appendNode(node, menu);
   }
 
   async function handleUpload(file: File) {
+    const menu = createMenu;
     setAddOpen(false);
     setError(null);
     try {
@@ -407,11 +474,10 @@ function CanvasEditorInner({
       const node: CanvasNode = {
         id,
         type: 'resource',
-        position: defaultPosition(),
+        position: menu?.flow ?? defaultPosition(),
         data: uploaded,
       };
-      commit(current => ({ ...current, nodes: [...current.nodes, node] }), true);
-      setSelectedId(id);
+      appendNode(node, menu);
     } catch (uploadError) {
       setError((uploadError as Error).message);
     }
@@ -538,8 +604,8 @@ function CanvasEditorInner({
           nodes={flowNodes}
           edges={flowEdges}
           nodeTypes={canvasNodeTypes}
-          onInit={setFlow}
           onConnect={onConnect}
+          onConnectEnd={onConnectEnd}
           onEdgesChange={onEdgesChange}
           onNodesChange={onNodesChange}
           onNodeClick={(_, node) => {
@@ -548,6 +614,7 @@ function CanvasEditorInner({
           }}
           onNodeDragStart={recordHistorySnapshot}
           onPaneClick={() => {
+            setCreateMenu(null);
             setSelectedConnectionIds(new Set());
             setSelectedId(null);
           }}
@@ -559,7 +626,7 @@ function CanvasEditorInner({
           onlyRenderVisibleElements
           className="canvas-flow"
         >
-          <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
+          {background && <Background variant={background} gap={22} size={1} />}
           <Controls position="bottom-left" showInteractive={false} />
           <MiniMap
             position="bottom-left"
@@ -599,22 +666,46 @@ function CanvasEditorInner({
 
         <div className="absolute left-3 top-1/2 z-20 -translate-y-1/2 md:left-4">
           <div className="relative flex flex-col items-center gap-1 rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
-            <ToolButton label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} onClick={() => setAddOpen(value => !value)}>
+            <ToolButton label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} onClick={() => {
+              setCreateMenu(null);
+              setAddOpen(value => !value);
+            }}>
               {addOpen ? <X /> : <Plus />}
             </ToolButton>
-            <ToolButton label="选择工具" active={!addOpen} onClick={() => setAddOpen(false)}><MousePointer2 /></ToolButton>
+            <ToolButton label="选择工具" active={!addOpen && !createMenu} onClick={() => {
+              setAddOpen(false);
+              setCreateMenu(null);
+            }}><MousePointer2 /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
             <ToolButton label="撤销" disabled={history.current.past.length === 0} onClick={undo}><Undo2 /></ToolButton>
             <ToolButton label="重做" disabled={history.current.future.length === 0} onClick={redo}><Redo2 /></ToolButton>
+            <div className="my-1 h-px w-7 bg-border" />
+            <ToolButton
+              label="切换画布背景"
+              active={background !== null}
+              onClick={() => setBackground(current => (
+                current === null
+                  ? BackgroundVariant.Dots
+                  : current === BackgroundVariant.Dots
+                    ? BackgroundVariant.Lines
+                    : null
+              ))}
+            >
+              <Grid2X2 />
+            </ToolButton>
+            <ToolButton label="适应全部节点" onClick={() => void fitView({ duration: 250, padding: 0.12 })}><Maximize2 /></ToolButton>
           </div>
           {addOpen && (
             <div className="popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>
-              <AddMenuButton icon={<Type />} title="文本" description="脚本、提示词与备注" onClick={addTextNode} />
-              <AddMenuButton icon={<FileImage />} title="图片生成" onClick={() => addGenerationNode('image')} />
-              <AddMenuButton icon={<FileVideo />} title="视频生成" onClick={() => addGenerationNode('video')} />
-              <AddMenuButton icon={<FileAudio />} title="音频素材" description="上传一段声音或音乐" onClick={() => uploadRef.current?.click()} />
-              <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={() => uploadRef.current?.click()} />
+              <CanvasCreateMenuItems
+                allowResources
+                showAudioShortcut
+                onAddText={() => addTextNode(null)}
+                onAddImage={() => addGenerationNode('image', null)}
+                onAddVideo={() => addGenerationNode('video', null)}
+                onUpload={() => uploadRef.current?.click()}
+              />
             </div>
           )}
           <input
@@ -629,6 +720,33 @@ function CanvasEditorInner({
             }}
           />
         </div>
+
+        {createMenu && (
+          <div
+            aria-label="连接创建节点"
+            className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow"
+            style={{ left: createMenu.screen.x, top: createMenu.screen.y }}
+          >
+            <div className="flex items-center justify-between px-2 pb-2 pt-1">
+              <p className="text-xs uppercase tracking-label text-muted-foreground">创建并连接</p>
+              <button
+                type="button"
+                aria-label="关闭连接创建菜单"
+                onClick={() => setCreateMenu(null)}
+                className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <CanvasCreateMenuItems
+              allowResources={createMenu.sourceHandle === 'target'}
+              onAddText={() => addTextNode(createMenu)}
+              onAddImage={() => addGenerationNode('image', createMenu)}
+              onAddVideo={() => addGenerationNode('video', createMenu)}
+              onUpload={() => uploadRef.current?.click()}
+            />
+          </div>
+        )}
 
         {selectedNode && selectedNode.type !== 'generation' && (
           <CanvasInspector
@@ -651,9 +769,43 @@ function CanvasEditorInner({
   );
 }
 
+function CanvasCreateMenuItems({
+  allowResources,
+  showAudioShortcut = false,
+  onAddText,
+  onAddImage,
+  onAddVideo,
+  onUpload,
+}: {
+  allowResources: boolean;
+  showAudioShortcut?: boolean;
+  onAddText: () => void;
+  onAddImage: () => void;
+  onAddVideo: () => void;
+  onUpload: () => void;
+}) {
+  return (
+    <>
+      {allowResources && <AddMenuButton icon={<Type />} title="文本" description="脚本、提示词与备注" onClick={onAddText} />}
+      <AddMenuButton icon={<FileImage />} title="图片生成" onClick={onAddImage} />
+      <AddMenuButton icon={<FileVideo />} title="视频生成" onClick={onAddVideo} />
+      {allowResources && showAudioShortcut && (
+        <AddMenuButton icon={<FileAudio />} title="音频素材" description="上传一段声音或音乐" onClick={onUpload} />
+      )}
+      {allowResources && <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
+    </>
+  );
+}
+
 
 function firstKeyForKind(keys: KeyView[], kind: JobKind) {
   return keys.find(key => key.models.some(model => modelModality(model, key) === kind));
+}
+
+function pointerPosition(event: MouseEvent | TouchEvent): XYPosition | null {
+  if ('clientX' in event) return { x: event.clientX, y: event.clientY };
+  const touch = event.changedTouches[0];
+  return touch ? { x: touch.clientX, y: touch.clientY } : null;
 }
 
 function makeId(prefix: string) {

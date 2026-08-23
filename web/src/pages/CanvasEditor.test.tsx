@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 import { CanvasEditor } from './CanvasEditor';
@@ -15,14 +15,16 @@ import type { Job } from '@/schema/jobs';
 vi.mock('@xyflow/react', () => {
   return {
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, onConnect, onEdgesChange, onNodeClick, onMoveEnd }: {
+    ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onMoveEnd }: {
       children: React.ReactNode;
       edges: Array<{ id: string; selected?: boolean }>;
       nodes: Array<{ id: string; selected?: boolean; data: unknown }>;
       nodeTypes?: Record<string, React.ComponentType<Record<string, unknown>>>;
       onlyRenderVisibleElements?: boolean;
       onConnect?: (connection: { source: string; target: string }) => void;
+      onConnectEnd?: (event: MouseEvent, state: { isValid: boolean; fromNode: { id: string }; fromHandle: { type: 'source' | 'target' } }) => void;
       onEdgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean }>) => void;
+      onNodesChange?: (changes: Array<{ id: string; type: 'dimensions'; dimensions: { width: number; height: number } }>) => void;
       onNodeClick?: (event: React.MouseEvent, node: { id: string }) => void;
       onMoveEnd?: (event: unknown, viewport: { x: number; y: number; zoom: number }) => void;
     }) => {
@@ -40,6 +42,35 @@ vi.mock('@xyflow/react', () => {
               onClick={() => onConnect?.({ source: nodes[0].id, target: nodes[1].id })}
             />
           )}
+          {nodes.length > 0 && (
+            <>
+              <button
+                type="button"
+                aria-label="simulate blank connection"
+                onClick={() => onConnectEnd?.(
+                  new MouseEvent('mouseup', { clientX: 480, clientY: 320 }),
+                  { isValid: false, fromNode: { id: nodes[0].id }, fromHandle: { type: 'source' } },
+                )}
+              />
+              <button
+                type="button"
+                aria-label="simulate blank target connection"
+                onClick={() => onConnectEnd?.(
+                  new MouseEvent('mouseup', { clientX: 520, clientY: 360 }),
+                  { isValid: false, fromNode: { id: nodes[0].id }, fromHandle: { type: 'target' } },
+                )}
+              />
+              <button
+                type="button"
+                aria-label="simulate node resize"
+                onClick={() => onNodesChange?.([{
+                  id: nodes[0].id,
+                  type: 'dimensions',
+                  dimensions: { width: 420, height: 260 },
+                }])}
+              />
+            </>
+          )}
           {edges.length > 0 && (
             <button
               type="button"
@@ -53,14 +84,19 @@ vi.mock('@xyflow/react', () => {
         </div>
       );
     },
-    Background: () => null,
+    useReactFlow: () => ({
+      screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
+      fitView: vi.fn(),
+    }),
+    Background: ({ variant }: { variant: string }) => <div data-testid="flow-background" data-variant={variant} />,
     Controls: () => <div data-testid="flow-controls" />,
     MiniMap: () => <div data-testid="flow-minimap" />,
+    NodeResizer: ({ isVisible }: { isVisible: boolean }) => isVisible ? <div data-testid="node-resizer" /> : null,
     Handle: ({ type, children, ...props }: { type: 'source' | 'target'; children?: React.ReactNode; 'aria-label'?: string }) => (
       <button type="button" aria-label={props['aria-label'] ?? type}>{children}</button>
     ),
     Position: { Left: 'left', Right: 'right' },
-    BackgroundVariant: { Dots: 'dots' },
+    BackgroundVariant: { Dots: 'dots', Lines: 'lines' },
   };
 });
 
@@ -217,7 +253,10 @@ it('creates and persists a directional connection between canvas nodes', async (
     ...document,
     nodes: [
       { id: 'source-one', type: 'text', position: { x: 0, y: 0 }, data: { title: '前置', text: '' } },
-      { id: 'target-one', type: 'text', position: { x: 320, y: 0 }, data: { title: '后置', text: '' } },
+      {
+        id: 'target-one', type: 'generation', position: { x: 320, y: 0 },
+        data: { media_kind: 'image', draft: { prompt: '', model: '', params: { n: 1, ratio: '1:1' } }, job_ids: [] },
+      },
     ],
   });
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
@@ -232,6 +271,97 @@ it('creates and persists a directional connection between canvas nodes', async (
       target_node_id: 'target-one',
     })],
   })));
+});
+
+it('creates a node and directional connection when a handle is dragged to blank canvas', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue({
+    ...document,
+    nodes: [
+      { id: 'source-one', type: 'text', position: { x: 0, y: 0 }, data: { title: '前置', text: '' } },
+    ],
+  });
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: 'simulate blank connection' }));
+  const menu = screen.getByLabelText('连接创建节点');
+  expect(within(menu).queryByRole('button', { name: /文本/ })).not.toBeInTheDocument();
+  expect(within(menu).queryByRole('button', { name: /上传素材/ })).not.toBeInTheDocument();
+  fireEvent.click(within(menu).getByRole('button', { name: '图片生成' }));
+
+  await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
+    nodes: expect.arrayContaining([
+      expect.objectContaining({ id: 'source-one' }),
+      expect.objectContaining({ type: 'generation', position: { x: 480, y: 320 } }),
+    ]),
+    connections: [expect.objectContaining({
+      kind: 'provenance',
+      source_node_id: 'source-one',
+      target_node_id: expect.stringMatching(/^image-/),
+    })],
+  })));
+});
+
+it('creates a resource-capable source node when a target handle is dragged to blank canvas', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue({
+    ...document,
+    nodes: [{
+      id: 'target-one', type: 'generation', position: { x: 0, y: 0 },
+      data: { media_kind: 'image', draft: { prompt: '', model: '', params: { n: 1, ratio: '1:1' } }, job_ids: [] },
+    }],
+  });
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: 'simulate blank target connection' }));
+  const menu = screen.getByLabelText('连接创建节点');
+  fireEvent.click(within(menu).getByRole('button', { name: /文本/ }));
+
+  await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
+    nodes: expect.arrayContaining([
+      expect.objectContaining({ id: 'target-one' }),
+      expect.objectContaining({ type: 'text', position: { x: 520, y: 360 } }),
+    ]),
+    connections: [expect.objectContaining({
+      kind: 'provenance',
+      source_node_id: expect.stringMatching(/^text-/),
+      target_node_id: 'target-one',
+    })],
+  })));
+});
+
+it('persists resized node dimensions and exposes Atelier resize chrome', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue({
+    ...document,
+    nodes: [
+      { id: 'resizable-one', type: 'text', position: { x: 0, y: 0 }, data: { title: '可缩放', text: '' } },
+    ],
+  });
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-resizable-one' }));
+  expect(screen.getByTestId('node-resizer')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '连接到此节点' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '从此节点连接' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'simulate node resize' }));
+
+  await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
+    nodes: [expect.objectContaining({ size: { width: 420, height: 260 } })],
+  })));
+});
+
+it('cycles the canvas background from blank to dots to lines to blank', async () => {
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  expect(screen.queryByTestId('flow-background')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '切换画布背景' }));
+  expect(screen.getByTestId('flow-background')).toHaveAttribute('data-variant', 'dots');
+  fireEvent.click(screen.getByRole('button', { name: '切换画布背景' }));
+  expect(screen.getByTestId('flow-background')).toHaveAttribute('data-variant', 'lines');
+  fireEvent.click(screen.getByRole('button', { name: '切换画布背景' }));
+  expect(screen.queryByTestId('flow-background')).not.toBeInTheDocument();
 });
 
 it('selects and deletes a persisted connection without deleting its nodes', async () => {
