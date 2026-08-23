@@ -5,6 +5,7 @@ import {
   FileImage,
   FileVideo,
   LoaderCircle,
+  Plus,
   Sparkles,
   Trash2,
   Type,
@@ -50,43 +51,79 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     : undefined;
 
   return (
-    <article
+    <div
       className={cn(
-        'group relative overflow-hidden rounded-lg border bg-card/95 text-foreground transition-[width,border-color] shell-glow',
-        node.type === 'generation' && selected ? 'w-96' : 'w-64',
-        selected ? 'border-primary' : 'border-border',
+        'canvas-node-shell group relative overflow-visible',
+        node.type === 'text' ? 'w-64' : 'w-80',
       )}
-      onClick={() => context.selectNode(node.id)}
+      data-selected={selected ? 'true' : 'false'}
     >
-      {node.type === 'generation' && <Handle type="target" position={Position.Left} isConnectable={false} />}
-      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
-        <span className="flex items-center gap-1.5">
-          {node.type === 'text' ? <Type className="size-3.5" /> : node.type === 'resource' ? mediaIcon(node.data.media_kind) : node.data.media_kind === 'image' ? <Sparkles className="size-3.5" /> : <Video className="size-3.5" />}
-          {node.type === 'text' ? node.data.title || '文本' : node.type === 'resource' ? node.data.filename : node.data.media_kind === 'image' ? '图片生成' : '视频生成'}
+      <header className="absolute bottom-full left-1 right-1 flex items-center justify-between gap-2 pb-2 text-xs text-muted-foreground">
+        <span className="flex min-w-0 items-center gap-1.5 truncate">
+          {node.type === 'text' ? <Type className="size-3.5 shrink-0" /> : node.type === 'resource' ? mediaIcon(node.data.media_kind) : node.data.media_kind === 'image' ? <Sparkles className="size-3.5 shrink-0" /> : <Video className="size-3.5 shrink-0" />}
+          <span className="truncate">{nodeTitle(node)}</span>
         </span>
-        {node.type === 'generation' && activeJob && <JobState status={activeJob.status} />}
+        <span className="flex shrink-0 items-center gap-1">
+          {node.type === 'generation' && activeJob && <JobState status={activeJob.status} />}
+          <button
+            type="button"
+            aria-label="删除节点"
+            className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-hover:opacity-100"
+            onClick={event => {
+              event.stopPropagation();
+              context.deleteNode(node.id);
+            }}
+          >
+            <Trash2 className="size-3.5" aria-hidden="true" />
+          </button>
+        </span>
       </header>
-      <div className="min-h-32 bg-secondary/20">
-        {node.type === 'text' && (
-          <p className="line-clamp-5 whitespace-pre-wrap p-3 text-sm leading-relaxed text-foreground">
-            {node.data.text || '选择节点后输入文本…'}
-          </p>
+      <article
+        className={cn(
+          'relative overflow-hidden rounded-lg border bg-card/95 text-foreground transition-colors shell-glow',
+          selected ? 'border-primary' : 'border-border',
         )}
-        {node.type === 'resource' && <MediaPreview kind={node.data.media_kind} src={canvasMediaUrl(context.projectId, node.data)} />}
-        {node.type === 'generation' && selectedOutput && (
-          <MediaPreview kind={node.data.media_kind} src={canvasMediaUrl(context.projectId, { path: selectedOutput, job_id: activeJob?.job_id })} />
-        )}
-        {node.type === 'generation' && !selectedOutput && (
-          <div className="grid min-h-32 place-items-center px-4 text-center text-xs text-muted-foreground">
-            {activeJob?.status === 'failed' ? activeJob.error || '生成失败' : activeJob?.status === 'pending' ? '正在生成…' : '选择节点，填写提示词后生成'}
-          </div>
-        )}
-      </div>
+        onClick={() => context.selectNode(node.id)}
+      >
+        <div className={cn('bg-secondary/20', node.type === 'text' ? 'min-h-32' : 'min-h-44')}>
+          {node.type === 'text' && (
+            <p className="line-clamp-5 whitespace-pre-wrap p-3 text-sm leading-relaxed text-foreground">
+              {node.data.text || '选择节点后输入文本…'}
+            </p>
+          )}
+          {node.type === 'resource' && <MediaPreview kind={node.data.media_kind} src={canvasMediaUrl(context.projectId, node.data)} />}
+          {node.type === 'generation' && selectedOutput && (
+            <MediaPreview kind={node.data.media_kind} src={canvasMediaUrl(context.projectId, { path: selectedOutput, job_id: activeJob?.job_id })} />
+          )}
+          {node.type === 'generation' && !selectedOutput && (
+            <div className="grid min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
+              {activeJob?.status === 'failed' ? activeJob.error || '生成失败' : activeJob?.status === 'pending' ? '正在生成…' : '选择节点，填写提示词后生成'}
+            </div>
+          )}
+        </div>
+      </article>
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="canvas-node-handle"
+        aria-label="连接到此节点"
+      >
+        <span className="canvas-node-handle-dot"><Plus aria-hidden="true" /></span>
+      </Handle>
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="canvas-node-handle"
+        aria-label="从此节点连接"
+      >
+        <span className="canvas-node-handle-dot"><Plus aria-hidden="true" /></span>
+      </Handle>
       {node.type === 'generation' && selected && (
-        <GenerationComposer node={node} activeJob={activeJob} context={context} />
+        <div className="absolute left-1/2 top-full z-20 w-[38rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 pt-6">
+          <GenerationComposer node={node} activeJob={activeJob} context={context} />
+        </div>
       )}
-      <Handle type="source" position={Position.Right} isConnectable={false} />
-    </article>
+    </div>
   );
 }
 
@@ -109,14 +146,14 @@ function GenerationComposer({
   const imageCaps = node.data.media_kind === 'image'
     ? imageControlCaps(node.data.draft.model, selectedKey?.provider)
     : null;
-  const imageCount = imageCaps?.family === 'midjourney'
+  const billableOutputCount = imageCaps?.family === 'midjourney'
     ? MJ_IMAGES_PER_TASK
-    : Number(node.data.draft.params.n ?? 1);
+    : 1;
   const estimatedCost = node.data.media_kind === 'image' && isHkAggregator(selectedKey?.base_url)
     ? estimateCostYuan({
       model: node.data.draft.model,
       quality: node.data.draft.params.quality as Quality | undefined,
-      n: imageCount,
+      n: billableOutputCount,
     })
     : null;
   const updateNode = (updater: (current: CanvasNode) => CanvasNode) => context.updateNode(node.id, updater);
@@ -125,7 +162,8 @@ function GenerationComposer({
   return (
     <section
       aria-label={`${node.data.media_kind === 'image' ? '图片' : '视频'}生成设置`}
-      className="nodrag nowheel border-t border-border bg-popover p-3"
+      data-floating-node-panel="true"
+      className="nodrag nowheel rounded-xl border border-border bg-glass p-4 backdrop-blur-glass shell-glow"
       onClick={event => event.stopPropagation()}
       onKeyDown={event => event.stopPropagation()}
     >
@@ -138,7 +176,7 @@ function GenerationComposer({
           onChange={event => updateNode(current => current.type === 'generation'
             ? { ...current, data: { ...current.data, draft: { ...current.data.draft, prompt: event.target.value } } }
             : current)}
-          className="min-h-24 w-full resize-none bg-transparent px-1 py-2 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
+          className="min-h-28 w-full resize-none bg-transparent px-1 py-2 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
           placeholder={node.data.media_kind === 'image' ? '描述任何你想要生成的内容' : '描述镜头运动与画面变化'}
         />
       </label>
@@ -228,19 +266,7 @@ function GenerationComposer({
             {imageCaps.qualities.map(value => <option key={value}>{value}</option>)}
           </select>
         )}
-        {node.data.media_kind === 'image' ? (
-          <select
-            aria-label="数量"
-            value={imageCount}
-            disabled={imageCaps?.family === 'midjourney'}
-            onFocus={context.recordHistory}
-            onChange={event => updateGenerationParam(updateNode, 'n', Number(event.target.value))}
-            className="h-9 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
-          >
-            {(imageCaps?.family === 'midjourney' ? [MJ_IMAGES_PER_TASK] : [1, 2, 3, 4])
-              .map(value => <option key={value} value={value}>{value}×</option>)}
-          </select>
-        ) : (
+        {node.data.media_kind === 'video' && (
           <select
             aria-label="时长"
             value={Number(node.data.draft.params.duration ?? 5)}
@@ -311,12 +337,6 @@ function GenerationComposer({
           ))}
         </div>
       )}
-
-      <div className="mt-2 flex justify-end border-t border-border/70 pt-2">
-        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => context.deleteNode(node.id)}>
-          <Trash2 aria-hidden="true" />删除节点
-        </Button>
-      </div>
     </section>
   );
 }
@@ -407,8 +427,8 @@ export function AddMenuButton({ icon, title, description, onClick }: { icon: Rea
 }
 
 export function MediaPreview({ kind, src, compact = false }: { kind: 'image' | 'video' | 'audio'; src: string; compact?: boolean }) {
-  if (kind === 'image') return <img src={src} alt="" loading="lazy" draggable={false} className={cn('w-full object-cover', compact ? 'max-h-44 rounded-lg' : 'h-40')} />;
-  if (kind === 'video') return <video src={src} controls={compact} muted={!compact} preload="metadata" playsInline className={cn('w-full object-cover', compact ? 'max-h-44 rounded-lg' : 'h-40')} />;
+  if (kind === 'image') return <img src={src} alt="" loading="lazy" draggable={false} className={cn('w-full object-cover', compact ? 'max-h-44 rounded-lg' : 'h-44')} />;
+  if (kind === 'video') return <video src={src} controls={compact} muted={!compact} preload="metadata" playsInline className={cn('w-full object-cover', compact ? 'max-h-44 rounded-lg' : 'h-44')} />;
   return <div className="grid min-h-24 place-items-center gap-2 p-4 text-muted-foreground"><FileAudio className="size-7" /><audio src={src} controls className="nodrag w-full" /></div>;
 }
 

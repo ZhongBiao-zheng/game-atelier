@@ -15,11 +15,14 @@ import type { Job } from '@/schema/jobs';
 vi.mock('@xyflow/react', () => {
   return {
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    ReactFlow: ({ children, nodes, nodeTypes, onlyRenderVisibleElements, onNodeClick, onMoveEnd }: {
+    ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, onConnect, onEdgesChange, onNodeClick, onMoveEnd }: {
       children: React.ReactNode;
+      edges: Array<{ id: string; selected?: boolean }>;
       nodes: Array<{ id: string; selected?: boolean; data: unknown }>;
       nodeTypes?: Record<string, React.ComponentType<Record<string, unknown>>>;
       onlyRenderVisibleElements?: boolean;
+      onConnect?: (connection: { source: string; target: string }) => void;
+      onEdgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean }>) => void;
       onNodeClick?: (event: React.MouseEvent, node: { id: string }) => void;
       onMoveEnd?: (event: unknown, viewport: { x: number; y: number; zoom: number }) => void;
     }) => {
@@ -30,6 +33,21 @@ vi.mock('@xyflow/react', () => {
           {CanvasNode && nodes.filter(node => node.selected).map(node => (
             <CanvasNode key={`view-${node.id}`} id={node.id} data={node.data} selected={true} />
           ))}
+          {nodes.length > 1 && (
+            <button
+              type="button"
+              aria-label="simulate node connection"
+              onClick={() => onConnect?.({ source: nodes[0].id, target: nodes[1].id })}
+            />
+          )}
+          {edges.length > 0 && (
+            <button
+              type="button"
+              aria-label="simulate edge selection"
+              data-edge-selected={edges[0].selected}
+              onClick={() => onEdgesChange?.([{ id: edges[0].id, type: 'select', selected: true }])}
+            />
+          )}
           <button type="button" aria-label="simulate viewport change" onClick={() => onMoveEnd?.({}, { x: 120, y: -40, zoom: 0.7 })} />
           {children}
         </div>
@@ -38,7 +56,9 @@ vi.mock('@xyflow/react', () => {
     Background: () => null,
     Controls: () => <div data-testid="flow-controls" />,
     MiniMap: () => <div data-testid="flow-minimap" />,
-    Handle: () => null,
+    Handle: ({ type, children, ...props }: { type: 'source' | 'target'; children?: React.ReactNode; 'aria-label'?: string }) => (
+      <button type="button" aria-label={props['aria-label'] ?? type}>{children}</button>
+    ),
     Position: { Left: 'left', Right: 'right' },
     BackgroundVariant: { Dots: 'dots' },
   };
@@ -171,9 +191,15 @@ it('creates one canvas job from an explicit image node', async () => {
   fireEvent.click(screen.getByRole('button', { name: '添加节点' }));
   fireEvent.click(screen.getByRole('button', { name: '图片生成' }));
 
-  expect(screen.getByLabelText('图片生成设置')).toBeInTheDocument();
+  const composer = screen.getByLabelText('图片生成设置');
+  expect(composer).toHaveAttribute('data-floating-node-panel', 'true');
+  expect(composer.closest('article')).toBeNull();
   expect(screen.queryByText('节点设置')).not.toBeInTheDocument();
   expect(screen.queryByText(/设为参考|已参考/)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('数量')).not.toBeInTheDocument();
+  expect(screen.queryByText(/\d+×/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '连接到此节点' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '从此节点连接' })).toBeInTheDocument();
   expect(screen.getByText('约 ¥0.06')).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('提示词'), { target: { value: '电影感雨夜列车' } });
   fireEvent.click(screen.getByRole('button', { name: '开始生成' }));
@@ -183,6 +209,52 @@ it('creates one canvas job from an explicit image node', async () => {
     model: 'gpt-image-2',
     alias: 'main',
     kind: 'image',
+  })));
+});
+
+it('creates and persists a directional connection between canvas nodes', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue({
+    ...document,
+    nodes: [
+      { id: 'source-one', type: 'text', position: { x: 0, y: 0 }, data: { title: '前置', text: '' } },
+      { id: 'target-one', type: 'text', position: { x: 320, y: 0 }, data: { title: '后置', text: '' } },
+    ],
+  });
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: 'simulate node connection' }));
+
+  await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
+    connections: [expect.objectContaining({
+      kind: 'provenance',
+      source_node_id: 'source-one',
+      target_node_id: 'target-one',
+    })],
+  })));
+});
+
+it('selects and deletes a persisted connection without deleting its nodes', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue({
+    ...document,
+    nodes: [
+      { id: 'source-one', type: 'text', position: { x: 0, y: 0 }, data: { title: '前置', text: '' } },
+      { id: 'target-one', type: 'text', position: { x: 320, y: 0 }, data: { title: '后置', text: '' } },
+    ],
+    connections: [{
+      id: 'connection-one', kind: 'provenance', source_node_id: 'source-one', target_node_id: 'target-one',
+    }],
+  });
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: 'simulate edge selection' }));
+  expect(screen.getByRole('button', { name: 'simulate edge selection' })).toHaveAttribute('data-edge-selected', 'true');
+  fireEvent.keyDown(window, { key: 'Delete' });
+
+  await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
+    nodes: expect.arrayContaining([expect.objectContaining({ id: 'source-one' }), expect.objectContaining({ id: 'target-one' })]),
+    connections: [],
   })));
 });
 

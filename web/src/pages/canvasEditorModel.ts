@@ -52,10 +52,9 @@ export function normalizeCanvasImageParams(
   } = current;
   const currentRatio = String(current.ratio ?? '');
   const ratio = caps.ratios.includes(currentRatio) ? currentRatio : caps.ratios[0];
-  const requestedCount = Number(current.n ?? 1);
   const n = caps.family === 'midjourney'
     ? MJ_IMAGES_PER_TASK
-    : Math.min(4, Math.max(1, Number.isFinite(requestedCount) ? requestedCount : 1));
+    : 1;
   const params: JobParams = { ...retained, n, ratio };
 
   if (caps.showResolution && caps.resolutions.length) {

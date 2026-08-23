@@ -7,6 +7,8 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
+  type Connection,
+  type EdgeChange,
   type NodeChange,
   type ReactFlowInstance,
   type Viewport,
@@ -88,6 +90,7 @@ function CanvasEditorInner({
   const [jobs, setJobs] = useState<Map<string, Job>>(new Map());
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(() => new Set());
   const [addOpen, setAddOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -124,6 +127,7 @@ function CanvasEditorInner({
     setError(null);
     setDocument(null);
     setSelectedId(null);
+    setSelectedConnectionIds(new Set());
     history.current = { past: [], future: [] };
     Promise.all([
       listCanvasProjects(),
@@ -245,14 +249,18 @@ function CanvasEditorInner({
     id: connection.id,
     source: connection.source_node_id,
     target: connection.target_node_id,
-    type: 'smoothstep',
     className: 'canvas-provenance-edge',
-  })), [document?.connections]);
+    selected: selectedConnectionIds.has(connection.id),
+    selectable: true,
+    deletable: true,
+  })), [document?.connections, selectedConnectionIds]);
 
   const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
     let nextSelected = selectedId;
     for (const change of changes) {
-      if (change.type === 'select' && change.selected) nextSelected = change.id;
+      if (change.type !== 'select') continue;
+      if (change.selected) nextSelected = change.id;
+      else if (nextSelected === change.id) nextSelected = null;
     }
     setSelectedId(nextSelected);
     const graphChanges = changes.filter(change => change.type === 'position' || change.type === 'remove');
@@ -274,6 +282,74 @@ function CanvasEditorInner({
     }, graphChanges.some(change => change.type === 'remove'));
     setSelectedId(nextSelected);
   }, [commit, selectedId]);
+
+  const onConnect = useCallback((connection: Connection) => {
+    if (!connection.source || !connection.target || connection.source === connection.target) return;
+    commit(current => {
+      const exists = current.connections.some(edge => (
+        edge.source_node_id === connection.source && edge.target_node_id === connection.target
+      ));
+      if (exists) return current;
+      return {
+        ...current,
+        connections: [...current.connections, {
+          id: makeId('connection'),
+          kind: 'provenance',
+          source_node_id: connection.source!,
+          target_node_id: connection.target!,
+        }],
+      };
+    }, true);
+  }, [commit]);
+
+  const onEdgesChange = useCallback((changes: EdgeChange[]) => {
+    setSelectedConnectionIds(current => {
+      const next = new Set(current);
+      for (const change of changes) {
+        if (change.type === 'select') {
+          if (change.selected) next.add(change.id);
+          else next.delete(change.id);
+        }
+        if (change.type === 'remove') next.delete(change.id);
+      }
+      return next;
+    });
+    const removedIds = new Set(changes.filter(change => change.type === 'remove').map(change => change.id));
+    if (!removedIds.size) return;
+    commit(current => ({
+      ...current,
+      connections: current.connections.filter(edge => !removedIds.has(edge.id)),
+    }), true);
+  }, [commit]);
+
+  useEffect(() => {
+    function handleDelete(event: KeyboardEvent) {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target instanceof HTMLSelectElement
+        || (target instanceof HTMLElement && target.isContentEditable)
+      ) return;
+      if (!selectedId && selectedConnectionIds.size === 0) return;
+      event.preventDefault();
+      const deletingNodeIds = selectedId ? new Set([selectedId]) : new Set<string>();
+      commit(current => ({
+        ...current,
+        nodes: current.nodes.filter(node => !deletingNodeIds.has(node.id)),
+        connections: current.connections.filter(edge => (
+          !selectedConnectionIds.has(edge.id)
+          && !deletingNodeIds.has(edge.source_node_id)
+          && !deletingNodeIds.has(edge.target_node_id)
+        )),
+      }), true);
+      setSelectedId(null);
+      setSelectedConnectionIds(new Set());
+    }
+    window.addEventListener('keydown', handleDelete);
+    return () => window.removeEventListener('keydown', handleDelete);
+  }, [commit, selectedConnectionIds, selectedId]);
 
   const selectedNode = document?.nodes.find(node => node.id === selectedId) ?? null;
   const projectName = projects.find(project => project.project_id === projectId)?.name ?? '画布项目';
@@ -359,6 +435,13 @@ function CanvasEditorInner({
       connections: current.connections.filter(edge => edge.source_node_id !== deletingId && edge.target_node_id !== deletingId),
     }), true);
     setSelectedId(current => current === deletingId ? null : current);
+    setSelectedConnectionIds(current => {
+      if (!document) return current;
+      const attachedIds = new Set(document.connections
+        .filter(edge => edge.source_node_id === deletingId || edge.target_node_id === deletingId)
+        .map(edge => edge.id));
+      return new Set([...current].filter(id => !attachedIds.has(id)));
+    });
   }
 
   function deleteSelected() {
@@ -435,7 +518,10 @@ function CanvasEditorInner({
     jobs,
     keys,
     generatingId,
-    selectNode: setSelectedId,
+    selectNode: id => {
+      setSelectedConnectionIds(new Set());
+      setSelectedId(id);
+    },
     updateNode,
     recordHistory: recordHistorySnapshot,
     deleteNode,
@@ -453,15 +539,23 @@ function CanvasEditorInner({
           edges={flowEdges}
           nodeTypes={canvasNodeTypes}
           onInit={setFlow}
+          onConnect={onConnect}
+          onEdgesChange={onEdgesChange}
           onNodesChange={onNodesChange}
-          onNodeClick={(_, node) => setSelectedId(node.id)}
+          onNodeClick={(_, node) => {
+            setSelectedConnectionIds(new Set());
+            setSelectedId(node.id);
+          }}
           onNodeDragStart={recordHistorySnapshot}
-          onPaneClick={() => setSelectedId(null)}
+          onPaneClick={() => {
+            setSelectedConnectionIds(new Set());
+            setSelectedId(null);
+          }}
           onMoveEnd={(_, viewport: Viewport) => commit(current => ({ ...current, viewport }))}
           defaultViewport={document.viewport}
           minZoom={0.08}
           maxZoom={2.5}
-          deleteKeyCode={['Backspace', 'Delete']}
+          deleteKeyCode={null}
           onlyRenderVisibleElements
           className="canvas-flow"
         >
