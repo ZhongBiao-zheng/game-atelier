@@ -41,6 +41,11 @@ Blocked by: 02-resolve-canvas-domain-v2
 - 2026-08-23：用户要求继续开发，确认方案 A；ADR-0008 已接受。
 - 2026-08-23：Foundation 纵切已完成 Python/TS v2 schema、revision/ETag/lock、immutable version、
   version-id media、上传原子登记和 Web 节点适配；生成 Run/transaction 尚待下一纵切。
+- 2026-08-23：Generation Run/transaction 纵切已接通图片/视频：服务端解析 Draft/连接/版本并冻结
+  Snapshot，prepared journal 原子提交 Job+Document，Runner 结果再事务化登记 candidate、Content Version
+  与结果节点；文本/音频 caller、retry/cancel/partial 仍归第 04 关。
+- 2026-08-23：Run 收口补齐 project→job 固定锁序、双指令 revision 合并、模型输入 capability、`@` 顺序、
+  启动/同进程 crash recovery 与无自动重试孤儿回收；两轮只读审查 P1/P2 清零。
 - 用户既有约束禁止未经同意改写测试脚本；本轮不更新 v1 fixtures，API smoke 与生产构建另行记录。
 - 不引入 converter、兼容 union、fallback、备份恢复命令或长期 v1 fixture。
 - v2 实现必须在一个提交内同步删除 Python/TypeScript v1 类型、旧 API 字段与旧前端分支。

@@ -60,7 +60,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /jobs/{id}/{confirm,cancel}` `DELETE /jobs/{id}` `DELETE /jobs/{id}/image`
 `POST /studio/jobs/{id}/archive`
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
-`POST /canvas/projects/{id}/uploads`
+`POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/runs`
 
 **双向**
 `POST /characters/{id}/canonical` `POST /projects/{id}/ui-schemes/{scheme_id}/screens/canonical` `POST /experience`
@@ -99,7 +99,15 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 Document；扩展名只作入口白名单，文件类型、MIME、摘要、大小和图片尺寸均由服务端字节重算，伪扩展上传
 直接拒绝。`canvas.json` 最大 25 MiB，单项目最多 10,000 节点 / 20,000 连接，单插件节点 payload 最大
 256 KiB。媒体读取只收 `version_id`，不接受裸 path/job_id。Canvas Job 禁止通过通用 `/prompt/{job_id}`
-修改快照、prompt 或参数。生成 Run、retry 与完成落盘事务在下一纵切接入，旧 `POST .../jobs` 已删除。
+修改快照、prompt 或参数。`POST /canvas/projects/{id}/runs` 只接受
+`surface_node_id / expected_revision / requested_count`；服务端从已保存 Draft、连接与 Content Version
+解析真实输入，冻结 `canvas_run.snapshot`，并用项目内短事务原子提交 Job、结果节点与 Derivation Connection。
+当前可执行纵切开放现有 Job Runner 已支持的图片/视频；文本、音频在对应 caller 落地前由服务端明确拒绝，
+不提供假入口。连接输入会先按 Prompt 内 `@[node:id]` 的出现顺序冻结，再补未提及连接，并在冻结前按
+模型/协议校验媒体类型和数量。Runner 完成后再次通过短事务登记输出 Content Version、candidate 状态与
+结果节点当前版本；prepared 事务在下次项目访问或命令前完成/丢弃，不能从节点当前内容重造 Snapshot。
+服务启动时先恢复全部项目事务，再回收孤儿 Job；残留 submit journal 恢复后明确标记失败且不自动重试，
+避免无人领取或重复扣费。旧 `POST .../jobs` 已删除。
 
 ### 角色衍生契约
 

@@ -160,7 +160,7 @@ def rename_canvas_project(project_id: str, name: str) -> CanvasProject:
         return updated
 
 
-def read_canvas_document(project_id: str) -> CanvasDocument:
+def _read_canvas_document_unlocked(project_id: str) -> CanvasDocument:
     path = _document_path(project_id)
     if not path.exists():
         raise ValueError("canvas document is missing")
@@ -168,6 +168,18 @@ def read_canvas_document(project_id: str) -> CanvasDocument:
     if document.project_id != project_id:
         raise ValueError("canvas document project_id does not match its directory")
     return document
+
+
+def _recover_canvas_transactions_unlocked(project_id: str) -> None:
+    from character_workflow.lib.canvas_runs import recover_canvas_transactions_unlocked
+
+    recover_canvas_transactions_unlocked(project_id)
+
+
+def read_canvas_document(project_id: str) -> CanvasDocument:
+    with file_lock(_canvas_lock_path(project_id)):
+        _recover_canvas_transactions_unlocked(project_id)
+        return _read_canvas_document_unlocked(project_id)
 
 
 def _normalized_web_document(
@@ -219,8 +231,9 @@ def save_canvas_document(
     expected_revision: int,
 ) -> CanvasDocument:
     with file_lock(_canvas_lock_path(project_id)):
+        _recover_canvas_transactions_unlocked(project_id)
         project = read_canvas_project(project_id)
-        current = read_canvas_document(project_id)
+        current = _read_canvas_document_unlocked(project_id)
         if expected_revision != document.revision:
             raise ValueError("If-Match must equal the submitted document revision")
         timestamp = _now()
@@ -246,8 +259,9 @@ def save_canvas_upload(
     expected_revision: int,
 ) -> tuple[CanvasMediaVersion, CanvasDocument, str]:
     with file_lock(_canvas_lock_path(project_id)):
+        _recover_canvas_transactions_unlocked(project_id)
         project = read_canvas_project(project_id)
-        current = read_canvas_document(project_id)
+        current = _read_canvas_document_unlocked(project_id)
         if current.revision != expected_revision:
             raise RuntimeError(f"revision_conflict:{current.revision}")
         upload_id = secrets.token_hex(16)

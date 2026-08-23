@@ -57,7 +57,7 @@ from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
     CanvasDocument, CanvasProject, CanvasProjectCreate, CanvasProjectList,
-    CanvasProjectRename, CanvasUploadResponse,
+    CanvasProjectRename, CanvasRunCreate, CanvasRunResponse, CanvasUploadResponse,
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
@@ -1875,10 +1875,9 @@ class _StudioJobCreate(BaseModel):
 def _create_user_job(
     body: _StudioJobCreate,
     *,
-    namespace: Literal["studio", "canvas"],
-    canvas_project_id: str | None = None,
+    namespace: Literal["studio"],
 ) -> Job:
-    """Build and persist a Web-confirmed Studio/Canvas job through one shared path."""
+    """Build and persist one Web-confirmed Studio job."""
     db = keys.read_keys_db()
     alias = body.alias or db.default_alias
     if not alias:
@@ -1906,7 +1905,6 @@ def _create_user_job(
         asset_slot=_AssetSlot.PORTRAIT,
         kind=body.kind,
         namespace=namespace,
-        canvas_project_id=canvas_project_id,
         alias=alias,
         provider=key_row.provider,
     )
@@ -2038,17 +2036,65 @@ def get_canvas_media(
 
 @router.get("/canvas/projects/{project_id}/jobs", response_model=list[Job])
 def get_canvas_jobs(project_id: str) -> list[Job]:
+    from character_workflow.lib.canvas_runs import reconcile_canvas_jobs
     from character_workflow.lib.canvas_projects import read_canvas_project
     from character_workflow.lib.jobs import list_jobs
     try:
         read_canvas_project(project_id)
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    reconcile_canvas_jobs(project_id=project_id)
     return [
         job
         for job in list_jobs()
         if job.namespace == "canvas" and job.canvas_project_id == project_id
     ]
+
+
+def _run_canvas_job_safely(job_id: str) -> None:
+    from character_workflow.lib.canvas_runs import run_canvas_job
+
+    try:
+        run_canvas_job(job_id)
+    except Exception:  # noqa: BLE001
+        # run_canvas_job persists both the friendly Job failure and failed candidates.
+        logger.warning("canvas run failed: %s", job_id)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+def post_canvas_run(
+    project_id: str,
+    payload: CanvasRunCreate,
+    background: BackgroundTasks,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import submit_canvas_run
+
+    try:
+        job, document = submit_canvas_run(
+            project_id,
+            payload.surface_node_id,
+            payload.expected_revision,
+            payload.requested_count,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或生成节点") from None
+    except RuntimeError as error:
+        if str(error).startswith("revision_conflict:"):
+            current_revision = int(str(error).split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }) from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
 
 
 class _CharacterArchiveTarget(BaseModel):

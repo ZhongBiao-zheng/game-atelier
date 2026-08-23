@@ -4,6 +4,7 @@ import type {
   CanvasDocument,
   CanvasProject,
   CanvasProjectSummary,
+  CanvasRun,
   CanvasUpload,
 } from '@/schema/canvas';
 
@@ -76,5 +77,26 @@ export function listCanvasJobs(projectId: string): Promise<Job[]> {
   return requestJson<Job[]>(
     `/api/canvas/projects/${encodeURIComponent(projectId)}/jobs`,
     '读取画布生成任务',
+  );
+}
+
+export function submitCanvasRun(
+  projectId: string,
+  surfaceNodeId: string,
+  expectedRevision: number,
+  requestedCount: number,
+): Promise<CanvasRun> {
+  return requestJson<CanvasRun>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs`,
+    '提交画布生成',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        surface_node_id: surfaceNodeId,
+        expected_revision: expectedRevision,
+        requested_count: requestedCount,
+      }),
+    },
   );
 }

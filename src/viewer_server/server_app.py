@@ -107,6 +107,18 @@ async def lifespan(app: FastAPI):
         logging.getLogger(__name__).warning(
             "reclaimed %d orphan studio job(s): %s", len(reclaimed), ", ".join(reclaimed)
         )
+    from character_workflow.lib.canvas_projects import list_canvas_projects
+    from character_workflow.lib.canvas_runs import reconcile_canvas_jobs, recover_canvas_transactions
+
+    canvas_projects = list_canvas_projects()
+    for project in canvas_projects:
+        recover_canvas_transactions(project.project_id)
+
+    reconciled = reconcile_canvas_jobs(fail_pending=True)
+    if reconciled:
+        logging.getLogger(__name__).warning(
+            "reconciled %d canvas job(s): %s", len(reconciled), ", ".join(reconciled)
+        )
     observer = start_watchers()
     try:
         yield

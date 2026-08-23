@@ -422,6 +422,18 @@ def _quality_param(kwargs: dict) -> str | None:
     return q if q in ("low", "medium", "high", "auto") else None
 
 
+def max_reference_images(model: str) -> int:
+    """Return the image-reference limit shared by submission and provider callers."""
+    family = image_family(model)
+    if family == "seedream":
+        return 10
+    if family == "gpt-image":
+        return 16
+    if family == "nano-banana":
+        return 3
+    return 4
+
+
 def _max_reference_images(provider: str, model: str) -> int:
     """参考图（图生图输入）数量上限 —— 按**模型族**判，不按 provider。
 
@@ -431,14 +443,7 @@ def _max_reference_images(provider: str, model: str) -> int:
     provider 参数保留只为签名兼容调用点；判据已完全交给 image_family。
     与前端 `web/src/lib/referenceLimits.ts` 同表，由 capability-matrix.json 锁死。
     """
-    family = image_family(model)
-    if family == "seedream":
-        return 10
-    if family == "gpt-image":
-        return 16
-    if family == "nano-banana":
-        return 3
-    return 4
+    return max_reference_images(model)
 
 
 def _collect_ref_paths(kwargs: dict, provider: str, model: str) -> list[str]:

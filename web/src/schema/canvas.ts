@@ -1,4 +1,4 @@
-import type { JobParams } from './jobs';
+import type { Job, JobParams } from './jobs';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -171,6 +171,11 @@ export interface CanvasProjectSummary extends CanvasProject {
 export interface CanvasUpload {
   version: CanvasMediaVersion;
   filename: string;
+  document: CanvasDocument;
+}
+
+export interface CanvasRun {
+  job: Job;
   document: CanvasDocument;
 }
 

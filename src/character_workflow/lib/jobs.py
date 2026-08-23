@@ -88,6 +88,15 @@ def save_job(job: Job) -> Job:
         return _write(job)
 
 
+def write_job_under_lock(job: Job) -> Job:
+    """Persist a Job while the caller holds ``job_lock(job.job_id)``.
+
+    Cross-file transactions use this narrow primitive so their full read-modify-write sequence can
+    follow the fixed project-lock → job-lock order without recursively acquiring the sidecar lock.
+    """
+    return _write(job)
+
+
 def migrate_ui_job_to_scheme(
     job_id: str,
     project_id: str,

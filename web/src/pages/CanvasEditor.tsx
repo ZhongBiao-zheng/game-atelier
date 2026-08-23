@@ -37,8 +37,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   getCanvasDocument,
+  listCanvasJobs,
   listCanvasProjects,
   saveCanvasDocument,
+  submitCanvasRun,
   uploadCanvasMedia,
 } from '@/api/canvas';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
@@ -59,7 +61,7 @@ import type {
   CanvasNode,
   CanvasTextVersion,
 } from '@/schema/canvas';
-import type { JobKind } from '@/schema/jobs';
+import type { Job, JobKind } from '@/schema/jobs';
 import { normalizeCanvasImageParams } from './canvasEditorModel';
 
 interface CreateMenuState {
@@ -89,6 +91,8 @@ function CanvasEditorInner({
   const [document, setDocument] = useState<CanvasDocument | null>(null);
   const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [submittingNodeIds, setSubmittingNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(() => new Set());
   const [addOpen, setAddOpen] = useState(false);
@@ -102,8 +106,10 @@ function CanvasEditorInner({
   const serverRevision = useRef(0);
   const saveInFlight = useRef<Promise<void> | null>(null);
   const saveQueued = useRef<CanvasDocument | null>(null);
+  const runSubmissionInFlight = useRef(false);
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
+  const syncedTerminalRuns = useRef(new Set<string>());
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
   const { screenToFlowPosition, fitView } = useReactFlow<FlowNode>();
 
@@ -114,19 +120,23 @@ function CanvasEditorInner({
     setDocument(null);
     setSelectedNodeIds(new Set());
     setSelectedConnectionIds(new Set());
+    setSubmittingNodeIds(new Set());
     setCreateMenu(null);
     history.current = { past: [], future: [] };
     pendingTextVersions.current.clear();
+    syncedTerminalRuns.current.clear();
     dirtyVersion.current = 0;
     setDirtySignal(0);
     serverRevision.current = 0;
-    Promise.all([listCanvasProjects(), getCanvasDocument(projectId), listKeys()])
-      .then(([projectRows, canvasDocument, keyRows]) => {
+    runSubmissionInFlight.current = false;
+    Promise.all([listCanvasProjects(), getCanvasDocument(projectId), listKeys(), listCanvasJobs(projectId)])
+      .then(([projectRows, canvasDocument, keyRows, canvasJobs]) => {
         if (cancelled) return;
         setProjects(projectRows);
         setDocument(canvasDocument);
         serverRevision.current = canvasDocument.revision;
         setKeys(keyRows.keys);
+        setJobs(canvasJobs);
       })
       .catch(loadError => {
         if (!cancelled) setError((loadError as Error).message);
@@ -136,6 +146,134 @@ function CanvasEditorInner({
       });
     return () => { cancelled = true; };
   }, [projectId]);
+
+  const mergeRunDocument = useCallback((remote: CanvasDocument) => {
+    serverRevision.current = Math.max(serverRevision.current, remote.revision);
+    setDocument(current => {
+      if (!current || remote.revision <= current.revision) return current;
+      const remoteNodes = new Map(remote.nodes.map(node => [node.id, node]));
+      const nodeIds = new Set(current.nodes.map(node => node.id));
+      const nodes = current.nodes.map(node => {
+        const serverNode = remoteNodes.get(node.id);
+        if (!serverNode || !isContentNode(node) || !isContentNode(serverNode)) return node;
+        if (!node.data.active_run_id || node.data.active_run_id !== serverNode.data.active_run_id) return node;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            current_version_id: serverNode.data.current_version_id,
+          },
+        } as CanvasContentNode;
+      });
+      const connectionIds = new Set(current.connections.map(connection => connection.id));
+      const serverDerivations = remote.connections.filter(connection => (
+        connection.role === 'derivation'
+        && !connectionIds.has(connection.id)
+        && nodeIds.has(connection.source_node_id)
+        && nodeIds.has(connection.target_node_id)
+      ));
+      const merged: CanvasDocument = {
+        ...current,
+        revision: remote.revision,
+        updated_at: remote.updated_at,
+        nodes,
+        connections: [...current.connections, ...serverDerivations],
+        content_versions: { ...remote.content_versions, ...current.content_versions },
+      };
+      if (saveQueued.current) saveQueued.current = merged;
+      return merged;
+    });
+  }, []);
+
+  const mergeSubmittedRunDocument = useCallback((
+    remote: CanvasDocument,
+    job: Job,
+    dirtyAtSubmission: number,
+  ) => {
+    serverRevision.current = Math.max(serverRevision.current, remote.revision);
+    const context = job.canvas_run;
+    const current = latestDocument.current;
+    if (!current || !context) {
+      setDocument(remote);
+      return;
+    }
+    const remoteNodes = new Map(remote.nodes.map(node => [node.id, node]));
+    const remoteResult = remoteNodes.get(context.result_node_id);
+    const hasResult = current.nodes.some(node => node.id === context.result_node_id);
+    const resultReusesSurface = context.result_node_id === context.snapshot.surface_node_id;
+    const nodes = current.nodes.map(node => {
+      if (node.id !== context.result_node_id || !isContentNode(node)) return node;
+      if (!remoteResult || !isContentNode(remoteResult)) return node;
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          active_run_id: remoteResult.data.active_run_id,
+          current_version_id: remoteResult.data.current_version_id,
+        },
+      } as CanvasContentNode;
+    });
+    if (!hasResult && remoteResult && !resultReusesSurface) nodes.push(remoteResult);
+    const mergedNodeIds = new Set(nodes.map(node => node.id));
+    const connectionIds = new Set(current.connections.map(connection => connection.id));
+    const runConnections = remote.connections.filter(connection => (
+      connection.role === 'derivation'
+      && connection.origin.kind === 'generation_run'
+      && connection.origin.run_id === context.run_id
+      && !connectionIds.has(connection.id)
+      && mergedNodeIds.has(connection.source_node_id)
+      && mergedNodeIds.has(connection.target_node_id)
+    ));
+    const merged: CanvasDocument = {
+      ...current,
+      revision: remote.revision,
+      updated_at: remote.updated_at,
+      nodes,
+      connections: [...current.connections, ...runConnections],
+      content_versions: { ...remote.content_versions, ...current.content_versions },
+    };
+    if (saveQueued.current || dirtyVersion.current > dirtyAtSubmission) {
+      saveQueued.current = merged;
+    }
+    setDocument(merged);
+  }, []);
+
+  const hasRunningJobs = jobs.some(job => (
+    job.namespace === 'canvas'
+    && (job.status === 'pending' || job.status === 'pending_confirm')
+  ));
+
+  useEffect(() => {
+    if (!hasRunningJobs) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const canvasJobs = await listCanvasJobs(projectId);
+        if (cancelled) return;
+        const completedRuns = canvasJobs.filter(job => (
+          job.canvas_run
+          && job.status !== 'pending'
+          && job.status !== 'pending_confirm'
+          && !syncedTerminalRuns.current.has(job.canvas_run.run_id)
+        ));
+        if (completedRuns.length) {
+          const remote = await getCanvasDocument(projectId);
+          if (cancelled) return;
+          mergeRunDocument(remote);
+          for (const job of completedRuns) syncedTerminalRuns.current.add(job.canvas_run!.run_id);
+        }
+        setJobs(canvasJobs);
+      } catch (pollError) {
+        if (!cancelled) setError((pollError as Error).message);
+      }
+    };
+    const timer = window.setInterval(() => void poll(), 1200);
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [hasRunningJobs, mergeRunDocument, projectId]);
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
@@ -154,6 +292,7 @@ function CanvasEditorInner({
     : null;
 
   const flushSave = useCallback(function drainSaveQueue(): Promise<void> {
+    if (runSubmissionInFlight.current) return Promise.resolve();
     if (saveInFlight.current) {
       return saveInFlight.current.then(() => saveQueued.current ? drainSaveQueue() : undefined);
     }
@@ -172,17 +311,18 @@ function CanvasEditorInner({
             revision: serverRevision.current,
           });
           failedSnapshot = null;
-          serverRevision.current = saved.revision;
+          const authoritativeRevision = Math.max(serverRevision.current, saved.revision);
+          serverRevision.current = authoritativeRevision;
           const queued = saveQueued.current as CanvasDocument | null;
           if (queued) {
-            saveQueued.current = { ...queued, revision: saved.revision };
+            saveQueued.current = { ...queued, revision: authoritativeRevision };
           }
           setDocument(current => {
             if (!current) return current;
-            if (current === snapshot) return saved;
+            if (current === snapshot && saved.revision === authoritativeRevision) return saved;
             return {
               ...current,
-              revision: saved.revision,
+              revision: Math.max(current.revision, authoritativeRevision),
               content_versions: { ...saved.content_versions, ...current.content_versions },
             };
           });
@@ -547,6 +687,50 @@ function CanvasEditorInner({
     });
   }
 
+  async function submitRun(nodeId: string) {
+    if (runSubmissionInFlight.current) {
+      setError('另一项生成正在提交，请稍后再试。');
+      return;
+    }
+    setSubmittingNodeIds(current => new Set(current).add(nodeId));
+    setError(null);
+    try {
+      if (!await persistNow()) return;
+      const current = latestDocument.current;
+      const node = current?.nodes.find(candidate => candidate.id === nodeId);
+      const draft = node ? generationDraftForNode(node) : null;
+      if (!current || !node || !draft) throw new Error('当前节点没有可提交的生成设置');
+      const requestedCount = draft.mode === 'image'
+        ? Math.max(1, Math.min(4, Number(draft.params.n ?? 1)))
+        : 1;
+      const dirtyAtSubmission = dirtyVersion.current;
+      runSubmissionInFlight.current = true;
+      const run = await submitCanvasRun(
+        projectId,
+        nodeId,
+        serverRevision.current,
+        requestedCount,
+      );
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      setJobs(currentJobs => [
+        ...currentJobs.filter(job => job.job_id !== run.job.job_id),
+        run.job,
+      ]);
+      const resultId = run.job.canvas_run?.result_node_id;
+      if (resultId) setSelectedNodeIds(new Set([resultId]));
+    } catch (submitError) {
+      setError((submitError as Error).message);
+    } finally {
+      runSubmissionInFlight.current = false;
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+      setSubmittingNodeIds(current => {
+        const next = new Set(current);
+        next.delete(nodeId);
+        return next;
+      });
+    }
+  }
+
   function recordHistorySnapshot() {
     const snapshot = latestDocument.current;
     if (!snapshot || history.current.past.at(-1) === snapshot) return;
@@ -592,7 +776,12 @@ function CanvasEditorInner({
     projectId,
     contentVersions: document?.content_versions ?? {},
     keys,
+    jobsByRunId: new Map(
+      jobs.flatMap(job => job.canvas_run ? [[job.canvas_run.run_id, job] as const] : []),
+    ),
+    submittingNodeIds,
     selectNode: selectOnlyNode,
+    submitRun,
     updateNode,
     updateText,
     recordHistory: recordHistorySnapshot,
@@ -732,6 +921,12 @@ function pointerPosition(event: MouseEvent | TouchEvent): XYPosition | null {
 
 function isContentNode(node: CanvasNode): node is CanvasContentNode {
   return node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio';
+}
+
+function generationDraftForNode(node: CanvasNode) {
+  if (node.type === 'config') return node.data.draft;
+  if ('generation_draft' in node.data) return node.data.generation_draft;
+  return null;
 }
 
 function providesContent(node: CanvasNode) {

@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
-import { FileAudio, FileImage, FileVideo, Plus, Sparkles, Trash2, Type } from 'lucide-react';
+import { FileAudio, FileImage, FileVideo, LoaderCircle, Plus, Sparkles, Trash2, Type } from 'lucide-react';
 import { createContext, memo, useContext } from 'react';
 
 import { canvasMediaUrl } from '@/api/canvas';
@@ -13,6 +13,7 @@ import type {
   CanvasGenerationDraft,
   CanvasNode,
 } from '@/schema/canvas';
+import type { Job } from '@/schema/jobs';
 import { normalizeCanvasImageParams } from '@/pages/canvasEditorModel';
 
 export type FlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
@@ -21,7 +22,10 @@ export interface CanvasNodeContextValue {
   projectId: string;
   contentVersions: Readonly<Record<string, CanvasContentVersion>>;
   keys: KeyView[];
+  jobsByRunId: ReadonlyMap<string, Job>;
+  submittingNodeIds: ReadonlySet<string>;
   selectNode: (id: string) => void;
+  submitRun: (id: string) => Promise<void>;
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
   updateText: (id: string, text: string) => void;
   recordHistory: () => void;
@@ -136,6 +140,10 @@ function GenerationComposer({
   const selectedKey = context.keys.find(key => key.alias === draft.alias);
   const models = (selectedKey?.models ?? []).filter(model => modelModality(model, selectedKey) === draft.mode);
   const imageCaps = draft.mode === 'image' ? imageControlCaps(draft.model, selectedKey?.provider) : null;
+  const runId = activeRunId(node);
+  const activeJob = runId ? context.jobsByRunId.get(runId) : undefined;
+  const submitting = context.submittingNodeIds.has(node.id);
+  const running = activeJob?.status === 'pending' || activeJob?.status === 'pending_confirm';
 
   function updateDraft(updater: (current: CanvasGenerationDraft) => CanvasGenerationDraft) {
     context.updateNode(node.id, current => withGenerationDraft(current, updater(generationDraft(current)!)));
@@ -213,7 +221,21 @@ function GenerationComposer({
             {(imageCaps?.ratios ?? ['1:1', '16:9', '9:16', '4:3', '3:4']).map(value => <option key={value}>{value}</option>)}
           </select>
         )}
-        <span className="ml-auto text-xs text-muted-foreground">配置已保存</span>
+        <span className="max-w-52 truncate text-xs text-muted-foreground" title={runStatus(activeJob)}>
+          {runStatus(activeJob)}
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          className="ml-auto"
+          disabled={submitting || running || !draft.prompt.trim() || !draft.alias || !draft.model}
+          onClick={() => void context.submitRun(node.id)}
+        >
+          {submitting || running
+            ? <LoaderCircle className="animate-spin" aria-hidden="true" />
+            : <Sparkles aria-hidden="true" />}
+          {submitting ? '提交中…' : running ? '生成中…' : activeJob ? '再次生成' : '开始生成'}
+        </Button>
       </div>
     </section>
   );
@@ -304,6 +326,20 @@ function withGenerationDraft(node: CanvasNode, draft: CanvasGenerationDraft): Ca
   if (node.type === 'audio') return { ...node, data: { ...node.data, generation_draft: draft } };
   if (node.type === 'plugin') return { ...node, data: { ...node.data, generation_draft: draft } };
   return node;
+}
+
+function activeRunId(node: CanvasNode): string | null {
+  if (node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio') {
+    return node.data.active_run_id;
+  }
+  return null;
+}
+
+function runStatus(job: Job | undefined): string {
+  if (!job) return '配置已保存';
+  if (job.status === 'pending' || job.status === 'pending_confirm') return '结果会自动回到节点';
+  if (job.status === 'done') return '生成完成';
+  return job.error || '生成失败';
 }
 
 function acceptsInput(node: CanvasNode) {
