@@ -7,6 +7,7 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   type Connection,
   type EdgeChange,
   type NodeChange,
@@ -88,7 +89,7 @@ function CanvasEditorInner({
   const [document, setDocument] = useState<CanvasDocument | null>(null);
   const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(() => new Set());
   const [addOpen, setAddOpen] = useState(false);
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null);
@@ -111,7 +112,7 @@ function CanvasEditorInner({
     setLoading(true);
     setError(null);
     setDocument(null);
-    setSelectedId(null);
+    setSelectedNodeIds(new Set());
     setSelectedConnectionIds(new Set());
     setCreateMenu(null);
     history.current = { past: [], future: [] };
@@ -141,13 +142,16 @@ function CanvasEditorInner({
       if (event.key !== 'Escape') return;
       setAddOpen(false);
       setCreateMenu(null);
-      setSelectedId(null);
+      setSelectedNodeIds(new Set());
     }
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
   }, []);
 
   latestDocument.current = document;
+  const selectedId = selectedNodeIds.size === 1
+    ? selectedNodeIds.values().next().value ?? null
+    : null;
 
   const flushSave = useCallback(function drainSaveQueue(): Promise<void> {
     if (saveInFlight.current) {
@@ -243,9 +247,9 @@ function CanvasEditorInner({
       height: node.size?.height ?? (node.type === 'text' ? 144 : 176),
       zIndex: node.z_index,
     },
-    selected: node.id === selectedId,
+    selected: selectedNodeIds.has(node.id),
     data: { domain: node },
-  })), [document?.nodes, selectedId]);
+  })), [document?.nodes, selectedNodeIds]);
 
   const flowEdges = useMemo(() => (document?.connections ?? []).map(connection => ({
     id: connection.id,
@@ -259,11 +263,18 @@ function CanvasEditorInner({
   })), [document?.connections, selectedConnectionIds]);
 
   const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
-    let nextSelected = selectedId;
-    for (const change of changes) {
-      if (change.type === 'select') nextSelected = change.selected ? change.id : nextSelected === change.id ? null : nextSelected;
+    const selectionChanges = changes.filter(change => change.type === 'select' || change.type === 'remove');
+    if (selectionChanges.length) {
+      setSelectedNodeIds(current => {
+        const next = new Set(current);
+        for (const change of selectionChanges) {
+          if (change.type === 'select') change.selected ? next.add(change.id) : next.delete(change.id);
+          if (change.type === 'remove') next.delete(change.id);
+        }
+        if (next.size === current.size && [...next].every(id => current.has(id))) return current;
+        return next;
+      });
     }
-    setSelectedId(nextSelected);
     const graphChanges = changes.filter(change => change.type === 'position' || change.type === 'remove');
     if (!graphChanges.length) return;
     commit(current => {
@@ -278,7 +289,7 @@ function CanvasEditorInner({
       }
       return { ...current, nodes, connections };
     }, graphChanges.some(change => change.type === 'remove'));
-  }, [commit, selectedId]);
+  }, [commit]);
 
   const onConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return;
@@ -336,20 +347,20 @@ function CanvasEditorInner({
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
       const target = event.target;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) return;
-      if (!selectedId && selectedConnectionIds.size === 0) return;
+      if (selectedNodeIds.size === 0 && selectedConnectionIds.size === 0) return;
       event.preventDefault();
-      const nodeIds = selectedId ? new Set([selectedId]) : new Set<string>();
+      const nodeIds = selectedNodeIds;
       commit(current => ({
         ...current,
         nodes: current.nodes.filter(node => !nodeIds.has(node.id)),
         connections: current.connections.filter(edge => !selectedConnectionIds.has(edge.id) && !nodeIds.has(edge.source_node_id) && !nodeIds.has(edge.target_node_id)),
       }), true);
-      setSelectedId(null);
+      setSelectedNodeIds(new Set());
       setSelectedConnectionIds(new Set());
     }
     window.addEventListener('keydown', handleDelete);
     return () => window.removeEventListener('keydown', handleDelete);
-  }, [commit, selectedConnectionIds, selectedId]);
+  }, [commit, selectedConnectionIds, selectedNodeIds]);
 
   const selectedNode = document?.nodes.find(node => node.id === selectedId) ?? null;
   const selectedContentNode = selectedNode && isContentNode(selectedNode) ? selectedNode : null;
@@ -380,7 +391,7 @@ function CanvasEditorInner({
       commit(apply, true);
     }
     setSelectedConnectionIds(new Set());
-    setSelectedId(node.id);
+    setSelectedNodeIds(new Set([node.id]));
     setAddOpen(false);
     setCreateMenu(null);
   }
@@ -528,7 +539,12 @@ function CanvasEditorInner({
       nodes: current.nodes.filter(node => node.id !== nodeId),
       connections: current.connections.filter(edge => edge.source_node_id !== nodeId && edge.target_node_id !== nodeId),
     }), true);
-    setSelectedId(current => current === nodeId ? null : current);
+    setSelectedNodeIds(current => {
+      if (!current.has(nodeId)) return current;
+      const next = new Set(current);
+      next.delete(nodeId);
+      return next;
+    });
   }
 
   function recordHistorySnapshot() {
@@ -567,14 +583,16 @@ function CanvasEditorInner({
     setDirtySignal(dirtyVersion.current);
   }
 
+  const selectOnlyNode = useCallback((id: string) => {
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([id]));
+  }, []);
+
   const contextValue: CanvasNodeContextValue = {
     projectId,
     contentVersions: document?.content_versions ?? {},
     keys,
-    selectNode: id => {
-      setSelectedConnectionIds(new Set());
-      setSelectedId(id);
-    },
+    selectNode: selectOnlyNode,
     updateNode,
     updateText,
     recordHistory: recordHistorySnapshot,
@@ -597,20 +615,23 @@ function CanvasEditorInner({
           onConnectEnd={onConnectEnd}
           onEdgesChange={onEdgesChange}
           onNodesChange={onNodesChange}
-          onNodeClick={(_, node) => {
-            setSelectedConnectionIds(new Set());
-            setSelectedId(node.id);
-          }}
+          onNodeClick={(_, node) => selectOnlyNode(node.id)}
           onNodeDragStart={recordHistorySnapshot}
           onPaneClick={() => {
             setCreateMenu(null);
             setSelectedConnectionIds(new Set());
-            setSelectedId(null);
+            setSelectedNodeIds(new Set());
           }}
           onMoveEnd={(_, viewport: Viewport) => commit(current => ({ ...current, viewport }))}
           defaultViewport={document.viewport}
           minZoom={0.08}
           maxZoom={2.5}
+          zoomOnScroll={false}
+          zoomOnPinch
+          panOnScroll
+          panOnDrag={false}
+          selectionOnDrag
+          selectionMode={SelectionMode.Partial}
           deleteKeyCode={null}
           onlyRenderVisibleElements
           className="canvas-flow"
