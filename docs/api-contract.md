@@ -15,6 +15,7 @@
 | CharacterWorkspaceResponse / CharacterIndexResponse | `lib/schemas.py` | `web/src/api/characters.ts` | `tests/test_character_workspace.py` + `CharacterWorkspace.test.tsx` + `CharacterIndex.test.tsx` |
 | ProjectIndexItem / GalleryMedia | `lib/schemas.py` | `web/src/api/gallery.ts` | `tests/test_gallery_project.py` + `ProjectIndexPage.test.tsx` + `ProjectPage.test.tsx` |
 | StudioArchiveTarget | `lib/studio_archive.py` | `web/src/api/studio.ts` | `tests/test_studio_archive.py` + `StudioArchiveDialog.test.tsx` |
+| CanvasProject / CanvasDocument | `lib/schemas.py` | `web/src/schema/canvas.ts` | `tests/test_canvas_projects.py` + `CanvasEditor.test.tsx` |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
 | 视频控件能力 | 各 `*_video.py` | `lib/videoControlCaps.ts` | 无 —— 靠人 |
 
@@ -26,7 +27,7 @@
 
 - 状态机：`status` `error` `submitted_at` `completed_at` `progress_phase`
 - 产物：`output_paths`
-- 归属：`character_id` `project_id` `ui_scheme_id` `screen_id` `production_id` `namespace` `asset_slot` `kind`
+- 归属：`character_id` `project_id` `ui_scheme_id` `screen_id` `production_id` `canvas_project_id` `namespace` `asset_slot` `kind`
 - 路由：`alias` `provider` `model` —— 换模型只能新建 job（`POST /studio/jobs`），不能改已有的
 - 血缘：`retry_of` `source_image`；创作台归档血缘写在 `params.archived_from_job_id / archived_from_path`
 
@@ -34,7 +35,7 @@
 
 Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每组最多 4 张），分别归属风格、角色、Omni 语义槽；垫图仍写入通用的 `reference_images`。Web 创建 job，caller 只负责把本地路径转公网 URL 并拼接对应 flag。
 
-`namespace` 决定产物落哪：`character` → `characters/<id>/<slot>/`，`studio` → `studio/<job_id>/`，`ui` → `projects/<slug>/ui/<ui_scheme_id>/screens/<screen_id>/`，`video` → `projects/<slug>/videos/<production_id>/versions/`。UI job 必须同时带 `project_id / ui_scheme_id / screen_id`；项目视频 job 必须同时带 `project_id / production_id`。Prompt 内的镜头段落不参与资产归属。`kind` 是媒体轴（image/video），别拿它表达归属。
+`namespace` 决定产物落哪：`character` → `characters/<id>/<slot>/`，`studio` → `studio/<job_id>/`，`ui` → `projects/<slug>/ui/<ui_scheme_id>/screens/<screen_id>/`，`video` → `projects/<slug>/videos/<production_id>/versions/`，`canvas` → `canvases/<canvas_project_id>/outputs/<job_id>/`。UI job 必须同时带 `project_id / ui_scheme_id / screen_id`；项目视频 job 必须同时带 `project_id / production_id`；画布 job 必须带 `canvas_project_id`。Prompt 内的镜头段落不参与资产归属。`kind` 是媒体轴（image/video），别拿它表达归属。
 
 ## 端点
 
@@ -58,6 +59,8 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /clipboard-attempt` `DELETE /characters/{id}`
 `POST /jobs/{id}/{confirm,cancel}` `DELETE /jobs/{id}` `DELETE /jobs/{id}/image`
 `POST /studio/jobs/{id}/archive`
+`POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
+`POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/jobs`
 
 **双向**
 `POST /characters/{id}/canonical` `POST /projects/{id}/ui-schemes/{scheme_id}/screens/canonical` `POST /experience`
@@ -74,6 +77,20 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /projects/{id}/characters/index` `/projects/{id}/characters/{character_id}/workspace`
 `GET /projects/{id}/character-associations`
 `GET /projects/{id}/studio-archive-targets?media_kind={image,video}`
+`GET /canvas/projects` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
+`GET /canvas/projects/{id}/media?path=&job_id=`
+
+### 人工画布契约
+
+画布是 Web 用户人工创建、人工编排的独立创作空间，Skill 不创建项目、不填充节点，也不推进整张图。
+文件系统真源为 `canvases/<id>/project.json` 与 `canvas.json`；资源放 `uploads/`，生成产物按 job 放
+`outputs/<job_id>/`。`CanvasDocument` 保存 viewport、文本/资源/生成节点，以及只能指向生成节点的
+`provenance` 连接；连接表达某次手动生成使用过哪些显式来源，不是可自动执行的工作流。
+
+生成节点的 `job_ids` 保留每轮生成历史，`active_job_id` 指向当前一轮，`selected_output_index` 只在该轮
+多个候选中选一个展示结果。Web 点击单个节点的生成按钮时创建 `namespace=canvas` Job，并把对应来源
+路径写入 `JobParams.reference_images / reference_videos / reference_audios`；文本来源以可见段落追加到
+prompt。画布只能读取本项目 `uploads/` 或本项目 Canvas Job 登记过的 `output_paths`。
 
 ### 角色衍生契约
 

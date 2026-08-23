@@ -51,6 +51,10 @@ def characters_dir() -> Path:
     return resolve_data_root() / "characters"
 
 
+def canvases_dir() -> Path:
+    return resolve_data_root() / "canvases"
+
+
 def workspace_memory() -> Path:
     return resolve_data_root() / "MEMORY.md"
 

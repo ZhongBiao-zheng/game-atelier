@@ -35,7 +35,7 @@ from character_workflow.lib.atomic_io import (
 from character_workflow.lib.job_runner import image_dimensions_from_bytes
 from character_workflow.lib.jobs import (
     _load_job, delete_failed_job, job_lock, list_jobs, read_job, remove_image_from_job,
-    save_job, update_job_status, write_job,
+    new_job_id, save_job, update_job_status, write_job,
 )
 from character_workflow.lib.schemas import AssetSlot as _AssetSlot
 from character_workflow.lib.projects import (
@@ -56,6 +56,8 @@ from pydantic import field_validator
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
+    CanvasDocument, CanvasProject, CanvasProjectCreate, CanvasProjectList,
+    CanvasProjectRename, CanvasUploadResponse,
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
@@ -1868,6 +1870,188 @@ class _StudioJobCreate(BaseModel):
     kind: JobKind = JobKind.IMAGE
 
 
+def _create_user_job(
+    body: _StudioJobCreate,
+    *,
+    namespace: Literal["studio", "canvas"],
+    canvas_project_id: str | None = None,
+) -> Job:
+    """Build and persist a Web-confirmed Studio/Canvas job through one shared path."""
+    db = keys.read_keys_db()
+    alias = body.alias or db.default_alias
+    if not alias:
+        raise HTTPException(status_code=400, detail="no default key configured")
+    key_row = next((k for k in db.keys if k.alias == alias), None)
+    if not key_row:
+        raise HTTPException(status_code=400, detail=f"unknown alias {alias}")
+    params = body.params.model_copy(deep=True)
+    if body.kind == JobKind.IMAGE:
+        image_count = params.n if params.n is not None else 1
+        if image_count < 1 or image_count > 4:
+            raise HTTPException(status_code=422, detail="params.n must be between 1 and 4")
+        params.n = image_count
+
+    job = Job(
+        job_id=new_job_id(),
+        character_id=alias,
+        prompt=body.prompt,
+        submitted_at=datetime.now(timezone.utc).isoformat(),
+        model=body.model,
+        params=params,
+        output_paths=[],
+        status=JobStatus.PENDING,
+        error=None,
+        asset_slot=_AssetSlot.PORTRAIT,
+        kind=body.kind,
+        namespace=namespace,
+        canvas_project_id=canvas_project_id,
+        alias=alias,
+        provider=key_row.provider,
+    )
+    return save_job(job)
+
+
+@router.get("/canvas/projects", response_model=CanvasProjectList)
+def get_canvas_projects() -> CanvasProjectList:
+    from character_workflow.lib.canvas_projects import list_canvas_projects
+    return CanvasProjectList(projects=list_canvas_projects())
+
+
+@router.post("/canvas/projects", response_model=CanvasProject, status_code=201)
+def post_canvas_project(payload: CanvasProjectCreate) -> CanvasProject:
+    from character_workflow.lib.canvas_projects import create_canvas_project
+    return create_canvas_project(payload.name)
+
+
+@router.patch("/canvas/projects/{project_id}", response_model=CanvasProject)
+def patch_canvas_project(project_id: str, payload: CanvasProjectRename) -> CanvasProject:
+    from character_workflow.lib.canvas_projects import rename_canvas_project
+    try:
+        return rename_canvas_project(project_id, payload.name)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+
+
+@router.get("/canvas/projects/{project_id}/document", response_model=CanvasDocument)
+def get_canvas_document(project_id: str) -> CanvasDocument:
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    try:
+        return read_canvas_document(project_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    except ValueError as error:
+        raise HTTPException(409, detail=str(error)) from error
+
+
+@router.put("/canvas/projects/{project_id}/document", response_model=CanvasDocument)
+def put_canvas_document(project_id: str, payload: CanvasDocument) -> CanvasDocument:
+    from character_workflow.lib.canvas_projects import save_canvas_document
+    try:
+        return save_canvas_document(project_id, payload)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+
+
+@router.post(
+    "/canvas/projects/{project_id}/uploads",
+    response_model=CanvasUploadResponse,
+    status_code=201,
+)
+async def post_canvas_upload(project_id: str, file: UploadFile = File(...)) -> CanvasUploadResponse:
+    from character_workflow.lib.canvas_projects import save_canvas_upload
+    raw_name = file.filename or "upload"
+    ext = Path(raw_name).suffix.lower()
+    if ext not in _UPLOAD_ALLOWED_EXTS:
+        raise HTTPException(422, detail=_ext_reject_detail(raw_name, ext, _UPLOAD_ALLOWED_EXTS))
+    body = await file.read()
+    limit = _upload_max_bytes(ext)
+    if len(body) > limit:
+        raise HTTPException(413, detail=_size_reject_detail(raw_name, body, limit))
+    try:
+        path, filename = save_canvas_upload(project_id, raw_name, ext, body)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    media_kind: Literal["image", "video", "audio"] = (
+        "image" if ext in _IMAGE_UPLOAD_EXTS else "video" if ext in _VIDEO_UPLOAD_EXTS else "audio"
+    )
+    return CanvasUploadResponse(path=path, filename=filename, media_kind=media_kind)
+
+
+@router.get("/canvas/projects/{project_id}/media")
+def get_canvas_media(
+    project_id: str,
+    path: str = Query(min_length=1),
+    job_id: str | None = None,
+) -> FileResponse:
+    from character_workflow.lib.canvas_projects import resolve_canvas_media
+    try:
+        return FileResponse(resolve_canvas_media(project_id, path, job_id))
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    except FileNotFoundError:
+        raise HTTPException(404, detail="找不到这个画布媒体文件") from None
+    except PermissionError as error:
+        raise HTTPException(403, detail=str(error)) from error
+
+
+@router.post("/canvas/projects/{project_id}/jobs", response_model=Job, status_code=201)
+def post_canvas_job(
+    project_id: str,
+    body: _StudioJobCreate,
+    background: BackgroundTasks,
+) -> Job:
+    from character_workflow.lib.canvas_projects import (
+        read_canvas_project,
+        validate_canvas_reference_paths,
+    )
+    try:
+        read_canvas_project(project_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    reference_paths = [
+        path
+        for group in (
+            body.params.reference_images,
+            body.params.reference_videos,
+            body.params.reference_audios,
+            body.params.mj_sref,
+            body.params.mj_cref,
+            body.params.mj_oref,
+        )
+        for path in (group or [])
+    ]
+    source_image = body.params.model_dump().get("source_image")
+    if source_image is not None:
+        if not isinstance(source_image, str) or not source_image:
+            raise HTTPException(422, detail="params.source_image must be a non-empty path")
+        reference_paths.append(source_image)
+    try:
+        validate_canvas_reference_paths(project_id, reference_paths)
+    except PermissionError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    job = _create_user_job(body, namespace="canvas", canvas_project_id=project_id)
+    from viewer_server import routes as _self
+    background.add_task(_self._run_studio_job_safely, job.job_id)
+    return job
+
+
+@router.get("/canvas/projects/{project_id}/jobs", response_model=list[Job])
+def get_canvas_jobs(project_id: str) -> list[Job]:
+    from character_workflow.lib.canvas_projects import read_canvas_project
+    from character_workflow.lib.jobs import list_jobs
+    try:
+        read_canvas_project(project_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    return [
+        job
+        for job in list_jobs()
+        if job.namespace == "canvas" and job.canvas_project_id == project_id
+    ]
+
+
 class _CharacterArchiveTarget(BaseModel):
     model_config = {"extra": "forbid"}
     kind: Literal["character"]
@@ -1965,40 +2149,7 @@ def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> di
     The runner is fired via BackgroundTasks so the response returns immediately;
     the UI then polls /api/jobs/<id> to observe status transitions.
     """
-    db = keys.read_keys_db()
-    alias = body.alias or db.default_alias
-    if not alias:
-        raise HTTPException(status_code=400, detail="no default key configured")
-    key_row = next((k for k in db.keys if k.alias == alias), None)
-    if not key_row:
-        raise HTTPException(status_code=400, detail=f"unknown alias {alias}")
-    params = body.params.model_copy(deep=True)
-    if body.kind == JobKind.IMAGE:
-        image_count = params.n if params.n is not None else 1
-        if image_count < 1 or image_count > 4:
-            raise HTTPException(status_code=422, detail="params.n must be between 1 and 4")
-        params.n = image_count
-
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    job_id = f"job-{ts}{uuid.uuid4().hex[:8]}"
-
-    job = Job(
-        job_id=job_id,
-        character_id=alias,  # placeholder for non-null invariant; runner reads namespace
-        prompt=body.prompt,
-        submitted_at=datetime.now(timezone.utc).isoformat(),
-        model=body.model,
-        params=params,
-        output_paths=[],
-        status=JobStatus.PENDING,  # Studio skips pending_confirm (UI submit = explicit consent)
-        error=None,
-        asset_slot=_AssetSlot.PORTRAIT,  # ignored when namespace="studio"
-        kind=body.kind,
-        namespace="studio",
-        alias=alias,
-        provider=key_row.provider,
-    )
-    save_job(job)
+    job = _create_user_job(body, namespace="studio")
     # Dispatch through module-level symbol so tests can monkeypatch routes._run_studio_job_safely.
     from viewer_server import routes as _self
     background.add_task(_self._run_studio_job_safely, job.job_id)

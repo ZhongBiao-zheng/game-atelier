@@ -6,7 +6,7 @@ export type AssetSlot = 'portrait' | 'promo' | 'turnaround';
 // 新 JobKind: 媒体类型
 export type JobKind = 'image' | 'video';
 
-export type Namespace = 'character' | 'studio' | 'ui' | 'video';
+export type Namespace = 'character' | 'studio' | 'ui' | 'video' | 'canvas';
 
 export interface JobParams {
   size?: string;
@@ -88,6 +88,8 @@ export interface Job {
   screen_id?: string | null;
   // 项目视频 job（namespace='video'）归完整企划；Web 只读 — 与 schemas.py 同步
   production_id?: string | null;
+  // 人工画布 job（namespace='canvas'）归独立画布项目；Web 只读。
+  canvas_project_id?: string | null;
 }
 
 export const WEB_EDITABLE_FIELDS = ['prompt', 'params'] as const;

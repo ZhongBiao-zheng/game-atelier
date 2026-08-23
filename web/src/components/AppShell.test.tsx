@@ -46,6 +46,14 @@ describe('AppShell', () => {
     expect(screen.getByText('创作台')).toHaveAttribute('aria-current', 'page');
   });
 
+  it('places 画布 between 创作台 and 工坊 and highlights it on /canvas', () => {
+    renderAt('/canvas');
+    const nav = screen.getByRole('navigation');
+    const labels = within(nav).getAllByRole('link').map(link => link.textContent);
+    expect(labels).toEqual(['主页', '创作台', '画布', '工坊']);
+    expect(screen.getByText('画布')).toHaveAttribute('aria-current', 'page');
+  });
+
   it('highlights 工坊 tab on /workshop/p1/ui', () => {
     renderAt('/workshop/p1/ui');
     expect(screen.getByText('工坊')).toHaveAttribute('aria-current', 'page');

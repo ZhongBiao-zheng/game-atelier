@@ -32,7 +32,7 @@ class JobKind(str, Enum):
     VIDEO = "video"
 
 
-Namespace = Literal["character", "studio", "ui", "video"]
+Namespace = Literal["character", "studio", "ui", "video", "canvas"]
 
 
 class JobParams(BaseModel):
@@ -114,6 +114,8 @@ class Job(BaseModel):
     screen_id: str | None = None
     # 项目视频 job（namespace="video"）—— 一次 job 产出一支完整企划视频。
     production_id: str | None = None
+    # 人工画布 job（namespace="canvas"）—— 归独立画布项目，不属于 Studio/工坊/Skill。
+    canvas_project_id: str | None = None
     # Phase 3 (2026-05-22): which Key was used. Web 不能改这两个字段。
     alias: str | None = None
     provider: str | None = None
@@ -143,7 +145,183 @@ class Job(BaseModel):
                 raise ValueError("video namespace must use kind=video")
         elif self.production_id is not None:
             raise ValueError("production_id is only valid for namespace=video")
+
+        if self.namespace == "canvas":
+            if not self.canvas_project_id:
+                raise ValueError("canvas job requires canvas_project_id")
+        elif self.canvas_project_id is not None:
+            raise ValueError("canvas_project_id is only valid for namespace=canvas")
         return self
+
+
+CanvasProjectName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=80, pattern=r"^[^\r\n]+$"),
+]
+
+
+class CanvasPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    x: float
+    y: float
+
+
+class CanvasSize(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    width: float = Field(gt=0, le=4000)
+    height: float = Field(gt=0, le=4000)
+
+
+class CanvasViewport(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    x: float = 0
+    y: float = 0
+    zoom: float = Field(default=1, gt=0.05, le=4)
+
+
+class CanvasTextData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str | None = Field(default=None, max_length=120)
+    text: str = Field(default="", max_length=40_000)
+
+
+class CanvasResourceData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    media_kind: Literal["image", "video", "audio"]
+    path: str = Field(min_length=1)
+    filename: str = Field(min_length=1, max_length=255)
+
+
+class CanvasGenerationDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    prompt: str = Field(default="", max_length=40_000)
+    model: str = Field(default="", max_length=200)
+    alias: str | None = Field(default=None, max_length=120)
+    params: JobParams = Field(default_factory=JobParams)
+
+
+class CanvasGenerationData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    media_kind: Literal["image", "video"]
+    draft: CanvasGenerationDraft
+    job_ids: list[str] = Field(default_factory=list)
+    active_job_id: str | None = None
+    selected_output_index: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_active_job(self) -> "CanvasGenerationData":
+        if self.active_job_id is not None and self.active_job_id not in self.job_ids:
+            raise ValueError("active_job_id must appear in job_ids")
+        return self
+
+
+class CanvasTextNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=120)
+    type: Literal["text"]
+    position: CanvasPoint
+    size: CanvasSize | None = None
+    data: CanvasTextData
+
+
+class CanvasResourceNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=120)
+    type: Literal["resource"]
+    position: CanvasPoint
+    size: CanvasSize | None = None
+    data: CanvasResourceData
+
+
+class CanvasGenerationNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=120)
+    type: Literal["generation"]
+    position: CanvasPoint
+    size: CanvasSize | None = None
+    data: CanvasGenerationData
+
+
+CanvasNode = Annotated[
+    CanvasTextNode | CanvasResourceNode | CanvasGenerationNode,
+    Field(discriminator="type"),
+]
+
+
+class ProvenanceConnection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=160)
+    kind: Literal["provenance"]
+    source_node_id: str = Field(min_length=1)
+    target_node_id: str = Field(min_length=1)
+
+
+class CanvasDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1] = 1
+    project_id: str = Field(min_length=1)
+    viewport: CanvasViewport = Field(default_factory=CanvasViewport)
+    nodes: list[CanvasNode] = Field(default_factory=list)
+    connections: list[ProvenanceConnection] = Field(default_factory=list)
+    updated_at: str
+
+    @model_validator(mode="after")
+    def validate_graph_references(self) -> "CanvasDocument":
+        node_ids = [node.id for node in self.nodes]
+        if len(node_ids) != len(set(node_ids)):
+            raise ValueError("canvas node ids must be unique")
+        edge_ids = [edge.id for edge in self.connections]
+        if len(edge_ids) != len(set(edge_ids)):
+            raise ValueError("canvas connection ids must be unique")
+        nodes_by_id = {node.id: node for node in self.nodes}
+        for edge in self.connections:
+            if edge.source_node_id not in nodes_by_id or edge.target_node_id not in nodes_by_id:
+                raise ValueError("canvas connection references a missing node")
+            if edge.source_node_id == edge.target_node_id:
+                raise ValueError("canvas connection cannot target itself")
+            if nodes_by_id[edge.target_node_id].type != "generation":
+                raise ValueError("provenance connections must target a generation node")
+        return self
+
+
+class CanvasProject(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_id: str
+    name: CanvasProjectName
+    created_at: str
+    updated_at: str
+
+
+class CanvasProjectCover(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    job_id: str | None = None
+
+
+class CanvasProjectSummary(CanvasProject):
+    cover: CanvasProjectCover | None = None
+
+
+class CanvasProjectList(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    projects: list[CanvasProjectSummary]
+
+
+class CanvasProjectCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: CanvasProjectName = "未命名画布"
+
+
+class CanvasProjectRename(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: CanvasProjectName
+
+
+class CanvasUploadResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    filename: str
+    media_kind: Literal["image", "video", "audio"]
 
 
 class WebEditableJobPatch(BaseModel):
