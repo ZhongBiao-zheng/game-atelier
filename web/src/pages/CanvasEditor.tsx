@@ -87,10 +87,10 @@ import {
   ToolButton,
   canvasNodeTypes,
   copyablePromptForNode,
-  isReversePromptJob,
   type CanvasNodeContextValue,
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
+import { isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
 import {
   CanvasMaskEditDialog,
   type CanvasMaskEditSubmission,

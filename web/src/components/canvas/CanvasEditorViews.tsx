@@ -7,6 +7,13 @@ import { modelModality, type KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
 import type { CanvasMediaTool } from '@/components/canvas/CanvasMediaOperationDialog';
+import {
+  CanvasNodeRunBadge,
+  CanvasNodeRunLiveRegion,
+  CanvasNodeRunOverlay,
+  canvasNodeRunState,
+  isReversePromptJob,
+} from '@/components/canvas/CanvasNodeRunStatus';
 import { formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
 import { orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import {
@@ -200,10 +207,9 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const compactMediaTools = (node.size?.width ?? 320) < 480;
   const replacingMedia = context.mediaReplaceBusyNodeIds.has(node.id);
   const submittingNode = context.submittingNodeIds.has(node.id);
-  const nodeRunId = activeRunId(node);
-  const nodeJob = nodeRunId ? context.jobsByRunId.get(nodeRunId) : undefined;
+  const nodeRunState = canvasNodeRunState(node, context.jobsByRunId);
+  const nodeJob = nodeRunState.job;
   const reversePromptJob = nodeJob && isReversePromptJob(nodeJob) ? nodeJob : undefined;
-  const reversePromptRunning = reversePromptJob?.status === 'pending' || reversePromptJob?.status === 'pending_confirm';
   const reversePromptSucceeded = reversePromptJob?.canvas_run?.candidates.some(candidate => candidate.status === 'succeeded') ?? false;
 
   function beginTitleEditing() {
@@ -306,6 +312,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
             </button>
           )}
         </span>
+        <CanvasNodeRunBadge state={nodeRunState} />
       </header>
       <NodeToolbar
         isVisible={selected || toolbarActive || toolbarOverlayOpen}
@@ -333,6 +340,26 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           onClick={event => event.stopPropagation()}
           onKeyDown={handleToolbarKeyDown}
         >
+          {nodeRunState.status === 'error' && nodeJob?.canvas_run && (
+            <MediaToolButton
+              label={nodeRunState.reversePrompt ? '按原设置重试反推提示词' : `按原设置重试 ${node.title}`}
+              disabled={submittingNode}
+              onClick={() => void context.retryRun(node.id, nodeJob.canvas_run!.run_id, 'original')}
+            >
+              {submittingNode ? <LoaderCircle /> : <RotateCcw />}
+            </MediaToolButton>
+          )}
+          {nodeRunState.status === 'loading' && nodeJob?.canvas_run && (
+            <MediaToolButton
+              label={nodeRunState.reversePrompt
+                ? nodeJob.cancel_requested_at ? '正在停止反推提示词' : '停止反推提示词'
+                : nodeJob.cancel_requested_at ? `正在停止 ${node.title}` : `停止 ${node.title} 的生成`}
+              disabled={Boolean(nodeJob.cancel_requested_at)}
+              onClick={() => void context.cancelRun(nodeJob.canvas_run!.run_id)}
+            >
+              {nodeJob.cancel_requested_at ? <LoaderCircle /> : <Square />}
+            </MediaToolButton>
+          )}
           {node.type === 'image' && content?.kind === 'image' ? (
             <>
               <ImageNodeToolbar
@@ -344,24 +371,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
                 context={context}
                 onOverlayOpenChange={updateToolbarOverlayOpen}
               />
-              {reversePromptJob && reversePromptRunning && (
-                <MediaToolButton
-                  label="停止反推提示词"
-                  disabled={Boolean(reversePromptJob.cancel_requested_at)}
-                  onClick={() => void context.cancelRun(reversePromptJob.canvas_run!.run_id)}
-                >
-                  {reversePromptJob.cancel_requested_at ? <LoaderCircle className="animate-spin" /> : <Square />}
-                </MediaToolButton>
-              )}
-              {reversePromptJob && !reversePromptRunning && !reversePromptSucceeded && (
-                <MediaToolButton
-                  label="按原设置重试反推提示词"
-                  disabled={submittingNode}
-                  onClick={() => void context.retryRun(node.id, reversePromptJob.canvas_run!.run_id, 'original')}
-                >
-                  {submittingNode ? <LoaderCircle className="animate-spin" /> : <RotateCcw />}
-                </MediaToolButton>
-              )}
               {reversePromptJob && reversePromptSucceeded && !context.reversePromptConfiguredNodeIds.has(node.id) && (
                 <MediaToolButton
                   label="从反推文本创建图片配置"
@@ -386,10 +395,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
       </NodeToolbar>
       <article
         data-canvas-node-id={node.id}
+        data-canvas-node-status={nodeRunState.status}
         role="button"
         tabIndex={0}
-        aria-busy={replacingMedia}
-        aria-label={`选择节点 ${node.title}`}
+        aria-busy={replacingMedia || nodeRunState.status === 'loading'}
+        aria-label={`选择节点 ${node.title}，${nodeRunState.label}`}
         className={cn(
           'relative h-full overflow-hidden rounded-lg border bg-card/95 text-foreground transition-colors shell-glow',
           selected ? 'border-primary' : 'border-border',
@@ -420,10 +430,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
             <p className="line-clamp-5 whitespace-pre-wrap p-3 text-sm leading-relaxed text-foreground">
               {content?.kind === 'text' && content.text
                 ? content.text
-                : reversePromptRunning
-                  ? '正在分析图片并整理提示词…'
-                  : reversePromptJob?.status === 'failed'
-                    ? reversePromptJob.error || '反推提示词失败，可从节点工具栏重试'
                 : draft ? '选择节点，填写下方生成设置' : '选择节点后输入文本…'}
             </p>
           )}
@@ -442,6 +448,14 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           )}
         </div>
       </article>
+      <CanvasNodeRunLiveRegion state={nodeRunState} />
+      <CanvasNodeRunOverlay
+        node={node}
+        state={nodeRunState}
+        hasContent={Boolean(content)}
+        submitting={submittingNode}
+        onRetry={(nodeId, runId) => void context.retryRun(nodeId, runId, 'original')}
+      />
       {canvasNodeAcceptsInput(node) && (
         <Handle type="target" position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
           <span className="canvas-node-handle-dot" aria-hidden="true" />
@@ -1527,11 +1541,6 @@ function activeRunId(node: CanvasNode): string | null {
     return node.data.active_run_id;
   }
   return null;
-}
-
-export function isReversePromptJob(job: Job): boolean {
-  return job.canvas_run?.snapshot.normalized_params.preset_id === 'canvas.reverse_prompt'
-    && job.canvas_run.snapshot.normalized_params.preset_version === 1;
 }
 
 function runStatus(job: Job | undefined): string {

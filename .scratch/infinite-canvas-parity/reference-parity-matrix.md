@@ -96,8 +96,8 @@ Status: ready-for-human
 | C11 | 配置节点之间禁止连接 | 运行时文案 `configConnection` | same | full |
 | C12 | 节点 hover 工具条跟随节点 | `canvas-node-hover-toolbar.tsx` | same structure + Atelier styling | full |
 | C13 | 节点信息/JSON 双视图 | `CanvasNodeInfoModal` | same | full |
-| C14 | 错误节点工具条重试 | `canRetry` / `onRetry` | adapted：重试生成快照 | partial |
-| C15 | 节点状态 idle/loading/success/error | `CanvasNodeStatus` | adapted：映射 Job 状态 | partial |
+| C14 | 错误节点工具条重试 | `canRetry` / `onRetry` | adapted：validated result Job 按不可变快照重试，见 issue 30 | full |
+| C15 | 节点状态 idle/loading/success/error | `CanvasNodeStatus` | adapted：由 validated result Job 派生且保留旧内容，见 issue 30 | full |
 | C16 | 侧栏按名称/正文/提示词搜索和按类型筛选节点 | `CanvasNodesTab` | same | full |
 | C17 | 侧栏点击节点定位/选中，图片可单独预览 | `CanvasNodesTab`、`pending-test` | adapted：React Flow fitView | full |
 
