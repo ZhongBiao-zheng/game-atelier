@@ -87,8 +87,8 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
       <div className="w-full px-4 py-8 sm:px-6 md:px-10 md:py-12">
         <header className="mb-8 space-y-2">
           <p className="text-xs uppercase tracking-label text-muted-foreground">人工创作空间</p>
-          <h1 className="font-display text-display italic text-foreground">画布项目</h1>
-          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          <h1 className="text-balance font-display text-display italic text-foreground">画布项目</h1>
+          <p className="max-w-2xl text-pretty text-sm leading-relaxed text-muted-foreground">
             从空白空间开始，手动放置文本、素材与生成节点。
           </p>
         </header>
@@ -103,6 +103,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
         )}
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4" aria-busy={loading}>
+          {loading && <span role="status" className="sr-only">正在加载画布项目</span>}
           <button
             type="button"
             aria-label="新建项目"
@@ -149,12 +150,13 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
                   autoFocus
                   value={editor.name}
                   aria-invalid={Boolean(editorError)}
+                  aria-describedby={editorError ? 'canvas-project-name-error' : undefined}
                   onChange={event => {
                     const name = event.target.value;
                     setEditor(current => current.open ? { ...current, name } : current);
                   }}
                 />
-                {editorError && <p role="alert" className="text-xs text-destructive">{editorError}</p>}
+                {editorError && <p id="canvas-project-name-error" role="alert" className="text-xs text-destructive">{editorError}</p>}
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" disabled={saving} onClick={() => setEditor({ open: false })}>取消</Button>
@@ -201,8 +203,8 @@ function CanvasProjectCard({
           </div>
         )}
         <div className="min-h-24 space-y-1 p-4 pr-14">
-          <h2 className="text-base font-medium text-foreground">{project.name}</h2>
-          <p className="text-sm text-muted-foreground">{formatActivity(project.updated_at)}</p>
+          <h2 className="truncate text-base font-medium text-foreground">{project.name}</h2>
+          <p className="tabular-nums text-sm text-muted-foreground">{formatActivity(project.updated_at)}</p>
         </div>
       </button>
       <DropdownMenu>

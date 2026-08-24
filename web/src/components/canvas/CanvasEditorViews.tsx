@@ -1,6 +1,6 @@
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, FileAudio, FileImage, FileVideo, LoaderCircle, Plus, RotateCcw, Sparkles, Square, Trash2, Type } from 'lucide-react';
-import { createContext, memo, useContext } from 'react';
+import { Check, Eye, FileAudio, FileImage, FileVideo, LoaderCircle, Plus, RotateCcw, Sparkles, Square, Trash2, Type } from 'lucide-react';
+import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasMediaUrl } from '@/api/canvas';
 import { modelModality, type KeyView } from '@/api/keys';
@@ -26,6 +26,7 @@ export interface CanvasNodeContextValue {
   jobsByResultNodeId: ReadonlyMap<string, Job[]>;
   submittingNodeIds: ReadonlySet<string>;
   selectNode: (id: string) => void;
+  previewContent: (id: string, title: string) => void;
   selectCandidate: (id: string, versionId: string) => void;
   submitRun: (id: string) => Promise<void>;
   retryRun: (id: string, runId: string, mode: 'original' | 'current', candidateId?: string) => Promise<void>;
@@ -65,19 +66,35 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           {nodeIcon(node)}
           <span className="truncate">{node.title}</span>
         </span>
-        <button
-          type="button"
-          aria-label="删除节点"
-          className="nodrag grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-hover:opacity-100"
-          onClick={event => {
-            event.stopPropagation();
-            context.deleteNode(node.id);
-          }}
-        >
-          <Trash2 className="size-3.5" aria-hidden="true" />
-        </button>
+        <span className="flex shrink-0 items-center gap-1">
+          {content && (
+            <button
+              type="button"
+              aria-label={`预览 ${node.title}`}
+              className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100"
+              onClick={event => {
+                event.stopPropagation();
+                context.previewContent(content.version_id, node.title);
+              }}
+            >
+              <Eye className="size-3.5" aria-hidden="true" />
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="删除节点"
+            className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100"
+            onClick={event => {
+              event.stopPropagation();
+              context.deleteNode(node.id);
+            }}
+          >
+            <Trash2 className="size-3.5" aria-hidden="true" />
+          </button>
+        </span>
       </header>
       <article
+        data-canvas-node-id={node.id}
         role="button"
         tabIndex={0}
         aria-label={`选择节点 ${node.title}`}
@@ -88,6 +105,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         onClick={event => {
           event.stopPropagation();
           context.selectNode(node.id);
+        }}
+        onDoubleClick={event => {
+          if (!content) return;
+          event.stopPropagation();
+          context.previewContent(content.version_id, node.title);
         }}
         onKeyDown={event => {
           if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -125,22 +147,24 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         </Handle>
       )}
       {selected && draft && (
-        <div className="absolute left-1/2 top-full z-20 w-[38rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 pt-6">
-          <GenerationComposer node={node} draft={draft} context={context} />
+        <div className="absolute left-1/2 top-full z-20 hidden w-[38rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 pt-6 md:block">
+          <CanvasGenerationComposer node={node} draft={draft} context={context} />
         </div>
       )}
     </div>
   );
 }
 
-function GenerationComposer({
+export function CanvasGenerationComposer({
   node,
   draft,
   context,
+  embedded = false,
 }: {
   node: CanvasNode;
   draft: CanvasGenerationDraft;
   context: CanvasNodeContextValue;
+  embedded?: boolean;
 }) {
   const availableKeys = context.keys.filter(key => key.models.some(model => modelModality(model, key) === draft.mode));
   const selectedKey = context.keys.find(key => key.alias === draft.alias);
@@ -159,7 +183,10 @@ function GenerationComposer({
     <section
       aria-label={`${{ text: '文本', image: '图片', video: '视频', audio: '音频' }[draft.mode]}生成设置`}
       data-floating-node-panel="true"
-      className="nodrag nowheel rounded-xl border border-border bg-glass p-4 backdrop-blur-glass shell-glow"
+      className={cn(
+        'nodrag nowheel',
+        embedded ? 'canvas-mobile-generation' : 'rounded-xl border border-border bg-glass p-4 backdrop-blur-glass shell-glow',
+      )}
       onClick={event => event.stopPropagation()}
       onKeyDown={event => event.stopPropagation()}
     >
@@ -479,6 +506,8 @@ export function CanvasInspector({
   deleteNode,
   projectId,
   contentVersions,
+  mobileGeneration,
+  onPreview,
 }: {
   node: CanvasContentNode;
   updateNode: (updater: (node: CanvasNode) => CanvasNode) => void;
@@ -487,13 +516,20 @@ export function CanvasInspector({
   deleteNode: () => void;
   projectId: string;
   contentVersions: Readonly<Record<string, CanvasContentVersion>>;
+  mobileGeneration?: React.ReactNode;
+  onPreview?: () => void;
 }) {
   const content = contentForNode(node, contentVersions);
   return (
-    <aside className="absolute inset-x-3 bottom-3 z-20 rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow md:bottom-auto md:left-auto md:right-4 md:top-20 md:w-72">
+    <aside className="canvas-inspector-panel absolute inset-x-3 bottom-3 z-20 rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow md:bottom-auto md:left-auto md:right-4 md:top-20 md:w-72">
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="truncate text-sm font-medium">{node.title}</p>
-        <Button variant="ghost" size="icon" aria-label="删除选中节点" onClick={deleteNode}><Trash2 /></Button>
+        <div className="flex shrink-0 items-center gap-1">
+          {content && onPreview && (
+            <Button variant="ghost" size="icon" aria-label={`预览 ${node.title}`} onClick={onPreview}><Eye /></Button>
+          )}
+          <Button variant="ghost" size="icon" aria-label="删除选中节点" onClick={deleteNode}><Trash2 /></Button>
+        </div>
       </div>
       <input
         aria-label="节点标题"
@@ -515,6 +551,11 @@ export function CanvasInspector({
       {content && content.kind !== 'text' && (
         <MediaPreview kind={content.kind} src={canvasMediaUrl(projectId, content.version_id)} compact />
       )}
+      {mobileGeneration && (
+        <div className="mt-3 border-t border-border/70 pt-3 md:hidden">
+          {mobileGeneration}
+        </div>
+      )}
     </aside>
   );
 }
@@ -523,18 +564,21 @@ export function EditorMessage({ text, icon, action }: { text: string; icon?: Rea
   return <div className="grid h-full place-items-center"><div className="flex items-center gap-2 text-sm text-muted-foreground">{icon}{text}{action}</div></div>;
 }
 
-export function ToolButton({ label, active, disabled, onClick, children }: {
+export function ToolButton({ label, active, disabled, onClick, children, buttonRef, expanded, controlsId }: {
   label: string;
   active?: boolean;
   disabled?: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  buttonRef?: Ref<HTMLButtonElement>;
+  expanded?: boolean;
+  controlsId?: string;
 }) {
-  return <button type="button" title={label} aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick} className={cn('grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-30', active && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground')}>{children}</button>;
+  return <button ref={buttonRef} type="button" title={label} aria-label={label} aria-pressed={active} aria-expanded={expanded} aria-controls={controlsId} aria-haspopup={controlsId ? 'menu' : undefined} disabled={disabled} onClick={onClick} className={cn('grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-30', active && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground')}>{children}</button>;
 }
 
 export function AddMenuButton({ icon, title, description, onClick }: { icon: React.ReactNode; title: string; description?: string; onClick: () => void }) {
-  return <button type="button" onClick={onClick} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><span className="grid size-9 shrink-0 place-items-center rounded-md bg-secondary text-muted-foreground">{icon}</span><span className="min-w-0"><span className="block text-sm font-medium">{title}</span>{description && <span className="block truncate text-xs text-muted-foreground">{description}</span>}</span></button>;
+  return <button type="button" role="menuitem" onClick={onClick} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><span className="grid size-9 shrink-0 place-items-center rounded-md bg-secondary text-muted-foreground">{icon}</span><span className="min-w-0"><span className="block text-sm font-medium">{title}</span>{description && <span className="block truncate text-xs text-muted-foreground">{description}</span>}</span></button>;
 }
 
 function contentForNode(node: CanvasNode, versions: Readonly<Record<string, CanvasContentVersion>>) {
@@ -593,9 +637,43 @@ function nodeIcon(node: CanvasNode) {
 }
 
 function MediaPreview({ kind, src, compact = false }: { kind: 'image' | 'video' | 'audio'; src: string; compact?: boolean }) {
-  if (kind === 'image') return <img src={src} alt="" loading="lazy" className={cn('size-full object-contain', compact && 'max-h-48 rounded-md')} />;
-  if (kind === 'video') return <video src={src} controls={compact} muted={!compact} preload="metadata" className={cn('size-full object-contain', compact && 'max-h-48 rounded-md')} />;
-  return <div className="grid size-full place-items-center p-3"><audio src={src} controls className="w-full" /></div>;
+  const { mediaRef, resolvedSrc } = useLazyMedia(src);
+  if (kind === 'image') return <img src={src} alt="" loading="lazy" decoding="async" className={cn('size-full object-contain', compact && 'max-h-48 rounded-md')} />;
+  if (kind === 'video') return <video ref={mediaRef} src={resolvedSrc} controls={compact} muted={!compact} playsInline preload={resolvedSrc ? 'metadata' : 'none'} className={cn('size-full object-contain', compact && 'max-h-48 rounded-md')} />;
+  if (!compact) return <div ref={mediaRef} className="grid size-full place-items-center gap-2 p-3 text-xs text-muted-foreground"><FileAudio className="size-8" aria-hidden="true" /><span>音频素材</span></div>;
+  return <div ref={mediaRef} className="grid size-full place-items-center p-3"><audio src={resolvedSrc} controls preload={resolvedSrc ? 'metadata' : 'none'} className="w-full" /></div>;
 }
 
-export const canvasNodeTypes = { canvasNode: memo(CanvasNodeCard) };
+function useLazyMedia(src: string) {
+  const mediaElement = useRef<HTMLElement | null>(null);
+  const [resolvedSrc, setResolvedSrc] = useState('');
+  const mediaRef = useCallback((element: HTMLElement | null) => {
+    mediaElement.current = element;
+  }, []);
+
+  useEffect(() => {
+    const element = mediaElement.current;
+    if (!element) return;
+    setResolvedSrc('');
+    if (!('IntersectionObserver' in window)) {
+      setResolvedSrc(src);
+      return;
+    }
+    const observer = new IntersectionObserver(entries => {
+      if (!entries.some(entry => entry.isIntersecting)) return;
+      setResolvedSrc(src);
+      observer.disconnect();
+    }, { rootMargin: '240px' });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [src]);
+
+  return { mediaRef, resolvedSrc };
+}
+
+export const canvasNodeTypes = {
+  canvasNode: memo(CanvasNodeCard, (previous, next) => (
+    previous.selected === next.selected
+    && previous.data.domain === next.data.domain
+  )),
+};

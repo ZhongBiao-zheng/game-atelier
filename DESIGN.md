@@ -201,7 +201,7 @@
 | 输入框 | `border border-input bg-transparent rounded-md focus-visible:ring-1 focus-visible:ring-ring` |
 | 小帽标签 | `text-xs uppercase tracking-label text-muted-foreground/70` |
 | 空状态 | `font-display text-display italic text-foreground/70` + 一行 `text-sm text-muted-foreground` 说明 |
-| 无限画布 chrome | React Flow 只占平面层；项目切换、工具条、MiniMap 与节点设置统一使用 `bg-glass backdrop-blur-glass border border-border`，节点本体用 `bg-card border-border rounded-lg`；移动端节点设置降为底部面板 |
+| 无限画布 chrome | React Flow 只占平面层；项目切换、工具条、MiniMap 与节点设置统一使用 `bg-glass backdrop-blur-glass border border-border`，节点本体用 `bg-card border-border rounded-lg`。375px 下节点检查器与生成设置合并为带 safe-area 的底部面板，768px 起生成设置恢复为跟随节点的独立浮层；MiniMap 与缩放 Controls 不占手机底部空间。触控板双指平移、捏合缩放，鼠标左键拖框选择；触屏单指平移、双指缩放。菜单打开后焦点进入首项，Esc 逐层关闭并回到触发器或画布。媒体双击或预览按钮进入有焦点陷阱的 Dialog。节点列表必须启用可见区域渲染、稳定对象 memo，图片原生 lazy，视频/音频接近视区后才绑定 `src` |
 
 ## Motion
 

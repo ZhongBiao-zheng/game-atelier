@@ -303,6 +303,26 @@
     outline-offset: -1px;
   }
 
+  .canvas-editor-top {
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+    padding-right: max(0.5rem, env(safe-area-inset-right));
+    padding-left: max(0.5rem, env(safe-area-inset-left));
+  }
+  .canvas-tool-rail {
+    left: max(0.75rem, env(safe-area-inset-left));
+  }
+  .canvas-inspector-panel {
+    right: max(0.75rem, env(safe-area-inset-right));
+    left: calc(4.5rem + env(safe-area-inset-left));
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    max-height: min(70dvh, 42rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .canvas-mobile-generation {
+    min-width: 0;
+  }
+
   .canvas-flow {
     --xy-background-color: var(--background);
     --xy-background-pattern-dots-color: color-mix(in srgb, var(--foreground) 16%, transparent);
@@ -322,6 +342,9 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: none;
+  }
+  .canvas-flow .react-flow__controls.canvas-controls {
+    display: none;
   }
   .canvas-flow .react-flow__controls-button {
     width: 2.25rem;
@@ -350,6 +373,7 @@
     transition: opacity 160ms ease;
   }
   .canvas-flow .canvas-node-shell:hover .canvas-node-handle,
+  .canvas-flow .canvas-node-shell:focus-within .canvas-node-handle,
   .canvas-flow .canvas-node-shell[data-selected="true"] .canvas-node-handle {
     opacity: 1;
   }
@@ -387,6 +411,36 @@
   }
   .canvas-flow .react-flow__edge.selected .react-flow__edge-path {
     stroke-width: 2;
+  }
+
+  @media (min-width: 40rem) {
+    .canvas-editor-top {
+      padding-top: max(0.75rem, env(safe-area-inset-top));
+      padding-right: max(0.75rem, env(safe-area-inset-right));
+      padding-left: max(0.75rem, env(safe-area-inset-left));
+    }
+  }
+  @media (min-width: 48rem) {
+    .canvas-editor-top {
+      padding-top: max(1rem, env(safe-area-inset-top));
+      padding-right: max(1rem, env(safe-area-inset-right));
+      padding-left: max(1rem, env(safe-area-inset-left));
+    }
+    .canvas-inspector-panel {
+      right: 1rem;
+      left: auto;
+      bottom: auto;
+      max-height: calc(100dvh - 6rem);
+    }
+    .canvas-flow .react-flow__controls.canvas-controls {
+      display: flex;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .canvas-flow .react-flow__handle.canvas-node-handle,
+    .canvas-flow .canvas-node-handle-dot {
+      transition: none;
+    }
   }
 }
 

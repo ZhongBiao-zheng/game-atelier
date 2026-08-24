@@ -37,6 +37,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   cancelCanvasRun,
+  canvasMediaUrl,
   getCanvasDocument,
   listCanvasJobs,
   listCanvasProjects,
@@ -48,6 +49,7 @@ import {
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import {
   AddMenuButton,
+  CanvasGenerationComposer,
   CanvasInspector,
   CanvasNodeContext,
   EditorMessage,
@@ -57,7 +59,15 @@ import {
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import type {
+  CanvasContentVersion,
   CanvasContentNode,
   CanvasDocument,
   CanvasNode,
@@ -72,6 +82,13 @@ interface CreateMenuState {
   sourceId?: string;
   sourceHandle?: 'source' | 'target';
 }
+
+interface PreviewState {
+  title: string;
+  version: CanvasContentVersion;
+}
+
+const CANVAS_MOUSE_PAN_BUTTONS: number[] = [];
 
 export function CanvasEditor(props: {
   projectId: string;
@@ -102,7 +119,13 @@ function CanvasEditorInner({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
+  const [preview, setPreview] = useState<PreviewState | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
+  const editorRegionRef = useRef<HTMLElement>(null);
+  const addTriggerRef = useRef<HTMLButtonElement>(null);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const createMenuRef = useRef<HTMLDivElement>(null);
+  const flowNodeCache = useRef(new Map<string, { node: CanvasNode; selected: boolean; flowNode: FlowNode }>());
   const dirtyVersion = useRef(0);
   const [dirtySignal, setDirtySignal] = useState(0);
   const serverRevision = useRef(0);
@@ -123,7 +146,10 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set());
     setSelectedConnectionIds(new Set());
     setSubmittingNodeIds(new Set());
+    setAddOpen(false);
     setCreateMenu(null);
+    setPreview(null);
+    flowNodeCache.current.clear();
     history.current = { past: [], future: [] };
     pendingTextVersions.current.clear();
     syncedTerminalRuns.current.clear();
@@ -280,13 +306,39 @@ function CanvasEditorInner({
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
-      setAddOpen(false);
-      setCreateMenu(null);
-      setSelectedNodeIds(new Set());
+      if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
+      if (addOpen) {
+        event.preventDefault();
+        setAddOpen(false);
+        requestAnimationFrame(() => addTriggerRef.current?.focus());
+        return;
+      }
+      if (createMenu) {
+        event.preventDefault();
+        setCreateMenu(null);
+        requestAnimationFrame(() => editorRegionRef.current?.focus());
+        return;
+      }
+      if (selectedNodeIds.size || selectedConnectionIds.size) {
+        event.preventDefault();
+        setSelectedNodeIds(new Set());
+        setSelectedConnectionIds(new Set());
+        requestAnimationFrame(() => editorRegionRef.current?.focus());
+      }
     }
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, []);
+  }, [addOpen, createMenu, selectedConnectionIds.size, selectedNodeIds.size]);
+
+  useEffect(() => {
+    if (!addOpen) return;
+    requestAnimationFrame(() => addMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
+  }, [addOpen]);
+
+  useEffect(() => {
+    if (!createMenu) return;
+    requestAnimationFrame(() => createMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
+  }, [createMenu]);
 
   latestDocument.current = document;
   const selectedId = selectedNodeIds.size === 1
@@ -380,18 +432,33 @@ function CanvasEditorInner({
     setDirtySignal(dirtyVersion.current);
   }, []);
 
-  const flowNodes = useMemo<FlowNode[]>(() => (document?.nodes ?? []).map(node => ({
-    id: node.id,
-    type: 'canvasNode',
-    position: node.position,
-    style: {
-      width: node.size?.width ?? (node.type === 'text' ? 256 : 320),
-      height: node.size?.height ?? (node.type === 'text' ? 144 : 176),
-      zIndex: node.z_index,
-    },
-    selected: selectedNodeIds.has(node.id),
-    data: { domain: node },
-  })), [document?.nodes, selectedNodeIds]);
+  const flowNodes = useMemo<FlowNode[]>(() => {
+    const activeIds = new Set<string>();
+    const next = (document?.nodes ?? []).map(node => {
+      activeIds.add(node.id);
+      const selected = selectedNodeIds.has(node.id);
+      const cached = flowNodeCache.current.get(node.id);
+      if (cached?.node === node && cached.selected === selected) return cached.flowNode;
+      const flowNode: FlowNode = {
+        id: node.id,
+        type: 'canvasNode',
+        position: node.position,
+        style: {
+          width: node.size?.width ?? (node.type === 'text' ? 256 : 320),
+          height: node.size?.height ?? (node.type === 'text' ? 144 : 176),
+          zIndex: node.z_index,
+        },
+        selected,
+        data: { domain: node },
+      };
+      flowNodeCache.current.set(node.id, { node, selected, flowNode });
+      return flowNode;
+    });
+    for (const id of flowNodeCache.current.keys()) {
+      if (!activeIds.has(id)) flowNodeCache.current.delete(id);
+    }
+    return next;
+  }, [document?.nodes, selectedNodeIds]);
 
   const flowEdges = useMemo(() => (document?.connections ?? []).map(connection => ({
     id: connection.id,
@@ -487,8 +554,7 @@ function CanvasEditorInner({
   useEffect(() => {
     function handleDelete(event: KeyboardEvent) {
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
-      const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) return;
+      if (isInteractiveTarget(event.target)) return;
       if (selectedNodeIds.size === 0 && selectedConnectionIds.size === 0) return;
       event.preventDefault();
       const nodeIds = selectedNodeIds;
@@ -499,6 +565,7 @@ function CanvasEditorInner({
       }), true);
       setSelectedNodeIds(new Set());
       setSelectedConnectionIds(new Set());
+      requestAnimationFrame(() => editorRegionRef.current?.focus());
     }
     window.addEventListener('keydown', handleDelete);
     return () => window.removeEventListener('keydown', handleDelete);
@@ -506,6 +573,7 @@ function CanvasEditorInner({
 
   const selectedNode = document?.nodes.find(node => node.id === selectedId) ?? null;
   const selectedContentNode = selectedNode && isContentNode(selectedNode) ? selectedNode : null;
+  const selectedDraft = selectedNode ? generationDraftForNode(selectedNode) : null;
   const projectName = projects.find(project => project.project_id === projectId)?.name ?? '画布项目';
 
   function defaultPosition() {
@@ -536,6 +604,9 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set([node.id]));
     setAddOpen(false);
     setCreateMenu(null);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      documentQueryNode(node.id)?.focus();
+    }));
   }
 
   function addTextNode(menu: CreateMenuState | null = createMenu) {
@@ -632,11 +703,11 @@ function CanvasEditorInner({
     }
   }
 
-  function updateNode(nodeId: string, updater: (node: CanvasNode) => CanvasNode) {
+  const updateNode = useCallback((nodeId: string, updater: (node: CanvasNode) => CanvasNode) => {
     commit(current => ({ ...current, nodes: current.nodes.map(node => node.id === nodeId ? updater(node) : node) }));
-  }
+  }, [commit]);
 
-  function updateText(nodeId: string, text: string) {
+  const updateText = useCallback((nodeId: string, text: string) => {
     commit(current => {
       const node = current.nodes.find(candidate => candidate.id === nodeId);
       if (!node || node.type !== 'text') return current;
@@ -664,9 +735,9 @@ function CanvasEditorInner({
           : candidate),
       };
     });
-  }
+  }, [commit]);
 
-  function deleteNode(nodeId: string) {
+  const deleteNode = useCallback((nodeId: string) => {
     commit(current => ({
       ...current,
       nodes: current.nodes.filter(node => node.id !== nodeId),
@@ -678,9 +749,10 @@ function CanvasEditorInner({
       next.delete(nodeId);
       return next;
     });
-  }
+    requestAnimationFrame(() => editorRegionRef.current?.focus());
+  }, [commit]);
 
-  async function submitRun(nodeId: string) {
+  const submitRun = useCallback(async (nodeId: string) => {
     if (runSubmissionInFlight.current) {
       setError('另一项生成正在提交，请稍后再试。');
       return;
@@ -722,14 +794,14 @@ function CanvasEditorInner({
         return next;
       });
     }
-  }
+  }, [flushSave, mergeSubmittedRunDocument, persistNow, projectId]);
 
-  async function retryRun(
+  const retryRun = useCallback(async (
     nodeId: string,
     runId: string,
     mode: 'original' | 'current',
     candidateId?: string,
-  ) {
+  ) => {
     if (runSubmissionInFlight.current) {
       setError('另一项生成正在提交，请稍后再试。');
       return;
@@ -765,9 +837,9 @@ function CanvasEditorInner({
         return next;
       });
     }
-  }
+  }, [flushSave, mergeSubmittedRunDocument, persistNow, projectId]);
 
-  async function cancelRun(runId: string) {
+  const cancelRun = useCallback(async (runId: string) => {
     setError(null);
     try {
       const updated = await cancelCanvasRun(projectId, runId);
@@ -778,17 +850,17 @@ function CanvasEditorInner({
     } catch (cancelError) {
       setError((cancelError as Error).message);
     }
-  }
+  }, [projectId]);
 
-  function recordHistorySnapshot() {
+  const recordHistorySnapshot = useCallback(() => {
     const snapshot = latestDocument.current;
     if (!snapshot || history.current.past.at(-1) === snapshot) return;
     history.current.past.push(snapshot);
     history.current.past = history.current.past.slice(-50);
     history.current.future = [];
-  }
+  }, []);
 
-  function undo() {
+  const undo = useCallback(() => {
     const previous = history.current.past.pop();
     if (!previous || !document) return;
     history.current.future.push(document);
@@ -800,9 +872,9 @@ function CanvasEditorInner({
     });
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
-  }
+  }, [document]);
 
-  function redo() {
+  const redo = useCallback(() => {
     const next = history.current.future.pop();
     if (!next || !document) return;
     history.current.past.push(document);
@@ -814,14 +886,26 @@ function CanvasEditorInner({
     });
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
-  }
+  }, [document]);
+
+  useEffect(() => {
+    function handleHistoryShortcut(event: KeyboardEvent) {
+      if ((!event.metaKey && !event.ctrlKey) || event.key.toLowerCase() !== 'z') return;
+      if (isInteractiveTarget(event.target)) return;
+      event.preventDefault();
+      if (event.shiftKey) redo();
+      else undo();
+    }
+    window.addEventListener('keydown', handleHistoryShortcut);
+    return () => window.removeEventListener('keydown', handleHistoryShortcut);
+  }, [redo, undo]);
 
   const selectOnlyNode = useCallback((id: string) => {
     setSelectedConnectionIds(new Set());
     setSelectedNodeIds(new Set([id]));
   }, []);
 
-  function selectCandidate(nodeId: string, versionId: string) {
+  const selectCandidate = useCallback((nodeId: string, versionId: string) => {
     recordHistorySnapshot();
     updateNode(nodeId, current => {
       if (!isContentNode(current)) return current;
@@ -830,30 +914,39 @@ function CanvasEditorInner({
         data: { ...current.data, current_version_id: versionId },
       } as CanvasContentNode;
     });
-  }
+  }, [recordHistorySnapshot, updateNode]);
 
-  const jobsByResultNodeId = new Map<string, Job[]>();
-  for (const job of jobs) {
-    const resultNodeId = job.canvas_run?.result_node_id;
-    if (!resultNodeId) continue;
-    const history = jobsByResultNodeId.get(resultNodeId) ?? [];
-    history.push(job);
-    jobsByResultNodeId.set(resultNodeId, history);
-  }
-  for (const history of jobsByResultNodeId.values()) {
-    history.sort((a, b) => a.submitted_at.localeCompare(b.submitted_at));
-  }
+  const jobsByRunId = useMemo(() => new Map(
+    jobs.flatMap(job => job.canvas_run ? [[job.canvas_run.run_id, job] as const] : []),
+  ), [jobs]);
+  const jobsByResultNodeId = useMemo(() => {
+    const grouped = new Map<string, Job[]>();
+    for (const job of jobs) {
+      const resultNodeId = job.canvas_run?.result_node_id;
+      if (!resultNodeId) continue;
+      const runHistory = grouped.get(resultNodeId) ?? [];
+      runHistory.push(job);
+      grouped.set(resultNodeId, runHistory);
+    }
+    for (const runHistory of grouped.values()) {
+      runHistory.sort((a, b) => a.submitted_at.localeCompare(b.submitted_at));
+    }
+    return grouped;
+  }, [jobs]);
+  const previewContent = useCallback((versionId: string, title: string) => {
+    const version = latestDocument.current?.content_versions[versionId];
+    if (version) setPreview({ title, version });
+  }, []);
 
-  const contextValue: CanvasNodeContextValue = {
+  const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     projectId,
     contentVersions: document?.content_versions ?? {},
     keys,
-    jobsByRunId: new Map(
-      jobs.flatMap(job => job.canvas_run ? [[job.canvas_run.run_id, job] as const] : []),
-    ),
+    jobsByRunId,
     jobsByResultNodeId,
     submittingNodeIds,
     selectNode: selectOnlyNode,
+    previewContent,
     selectCandidate,
     submitRun,
     retryRun,
@@ -862,7 +955,24 @@ function CanvasEditorInner({
     updateText,
     recordHistory: recordHistorySnapshot,
     deleteNode,
-  };
+  }), [
+    cancelRun,
+    deleteNode,
+    document?.content_versions,
+    jobsByResultNodeId,
+    jobsByRunId,
+    keys,
+    previewContent,
+    projectId,
+    recordHistorySnapshot,
+    retryRun,
+    selectCandidate,
+    selectOnlyNode,
+    submitRun,
+    submittingNodeIds,
+    updateNode,
+    updateText,
+  ]);
 
   if (loading) return <EditorMessage icon={<LoaderCircle className="size-5 animate-spin" />} text="正在展开画布…" />;
   if (!document) return <EditorMessage text={error || '画布读取失败'} action={<Button onClick={onBack}>返回项目列表</Button>} />;
@@ -871,7 +981,7 @@ function CanvasEditorInner({
 
   return (
     <CanvasNodeContext.Provider value={contextValue}>
-      <section className="relative h-full min-h-0 overflow-hidden bg-background" aria-label={`画布编辑器 ${projectName}`}>
+      <section ref={editorRegionRef} tabIndex={-1} className="relative h-full min-h-0 overflow-hidden bg-background outline-none" aria-label={`画布编辑器 ${projectName}`}>
         <ReactFlow<FlowNode>
           nodes={flowNodes}
           edges={flowEdges}
@@ -894,7 +1004,7 @@ function CanvasEditorInner({
           zoomOnScroll={false}
           zoomOnPinch
           panOnScroll
-          panOnDrag={false}
+          panOnDrag={CANVAS_MOUSE_PAN_BUTTONS}
           selectionOnDrag
           selectionMode={SelectionMode.Partial}
           deleteKeyCode={null}
@@ -902,40 +1012,40 @@ function CanvasEditorInner({
           className="canvas-flow"
         >
           {background && <Background variant={background} gap={22} size={1} />}
-          <Controls position="bottom-left" showInteractive={false} />
+          <Controls position="bottom-left" showInteractive={false} className="canvas-controls hidden sm:flex" />
           <MiniMap position="bottom-left" className="canvas-minimap hidden sm:block" pannable zoomable nodeColor="var(--primary)" maskColor="var(--scrim)" />
         </ReactFlow>
 
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 p-3 md:p-4">
+        <div className="canvas-editor-top pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-2 p-2 sm:gap-3 sm:p-3 md:p-4">
           <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
             <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="返回画布项目列表" onClick={() => void persistNow().then(saved => { if (saved) onBack(); })}><ArrowLeft /></Button>
             <div className="h-6 w-px bg-border" />
             <label className="relative min-w-0">
               <span className="sr-only">切换画布项目</span>
-              <select value={projectId} onChange={event => void persistNow().then(saved => { if (saved) onSwitchProject(event.target.value); })} className="h-9 max-w-52 appearance-none truncate rounded-md bg-transparent pl-2 pr-8 text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary">
+              <select value={projectId} onChange={event => void persistNow().then(saved => { if (saved) onSwitchProject(event.target.value); })} className="h-9 max-w-28 appearance-none truncate rounded-md bg-transparent pl-2 pr-8 text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary sm:max-w-52">
                 {projects.map(project => <option key={project.project_id} value={project.project_id}>{project.name}</option>)}
               </select>
               <ChevronDown className="pointer-events-none absolute right-2 top-2.5 size-4 text-muted-foreground" />
             </label>
           </div>
-          <div className="pointer-events-auto rounded-full border border-border bg-glass px-3 py-2 text-xs text-muted-foreground backdrop-blur-glass shell-glow">
+          <div aria-live="polite" className="pointer-events-auto max-w-24 truncate rounded-full border border-border bg-glass px-3 py-2 text-xs text-muted-foreground backdrop-blur-glass shell-glow sm:max-w-none">
             {saveState === 'saving' ? '保存中…' : saveState === 'error' ? '保存冲突，内容已保留' : `已保存 · v${document.revision}`}
           </div>
         </div>
 
-        <div className="absolute left-3 top-1/2 z-20 -translate-y-1/2 md:left-4">
+        <div className="canvas-tool-rail absolute left-3 top-1/2 z-20 -translate-y-1/2 md:left-4">
           <div className="relative flex flex-col items-center gap-1 rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
-            <ToolButton label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} onClick={() => { setCreateMenu(null); setAddOpen(value => !value); }}>{addOpen ? <X /> : <Plus />}</ToolButton>
+            <ToolButton buttonRef={addTriggerRef} label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} expanded={addOpen} controlsId="canvas-add-menu" onClick={() => { setCreateMenu(null); setAddOpen(value => !value); }}>{addOpen ? <X /> : <Plus />}</ToolButton>
             <ToolButton label="选择工具" active={!addOpen && !createMenu} onClick={() => { setAddOpen(false); setCreateMenu(null); }}><MousePointer2 /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
             <ToolButton label="撤销" disabled={history.current.past.length === 0} onClick={undo}><Undo2 /></ToolButton>
             <ToolButton label="重做" disabled={history.current.future.length === 0} onClick={redo}><Redo2 /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
             <ToolButton label="切换画布背景" active={document.settings.background !== 'none'} onClick={() => commit(current => ({ ...current, settings: { ...current.settings, background: nextBackground(current.settings.background) } }), true)}><Grid2X2 /></ToolButton>
-            <ToolButton label="适应全部节点" onClick={() => void fitView({ duration: 250, padding: 0.12 })}><Maximize2 /></ToolButton>
+            <ToolButton label="适应全部节点" onClick={() => void fitView({ duration: 150, padding: 0.12 })}><Maximize2 /></ToolButton>
           </div>
           {addOpen && (
-            <div className="popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
+            <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>
               <CanvasCreateMenuItems allowResources onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onUpload={() => uploadRef.current?.click()} />
             </div>
@@ -944,8 +1054,8 @@ function CanvasEditorInner({
         </div>
 
         {createMenu && (
-          <div aria-label="连接创建节点" className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenu.screen.x, top: createMenu.screen.y }}>
-            <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs uppercase tracking-label text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => setCreateMenu(null)} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"><X className="size-4" /></button></div>
+          <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenu.screen.x, top: createMenu.screen.y }}>
+            <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs uppercase tracking-label text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></button></div>
             <CanvasCreateMenuItems allowResources={createMenu.sourceHandle === 'target'} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onUpload={() => uploadRef.current?.click()} />
           </div>
         )}
@@ -959,10 +1069,33 @@ function CanvasEditorInner({
             deleteNode={() => deleteNode(selectedContentNode.id)}
             projectId={projectId}
             contentVersions={document.content_versions}
+            onPreview={selectedContentNode.data.current_version_id
+              ? () => previewContent(selectedContentNode.data.current_version_id!, selectedContentNode.title)
+              : undefined}
+            mobileGeneration={selectedDraft ? (
+              <CanvasGenerationComposer
+                embedded
+                node={selectedContentNode}
+                draft={selectedDraft}
+                context={contextValue}
+              />
+            ) : null}
           />
         )}
 
         {error && <div role="alert" className="absolute right-3 top-20 z-30 flex max-w-sm items-start gap-2 rounded-lg border border-destructive/30 bg-popover px-3 py-2 text-sm text-destructive shell-glow md:right-4"><span className="flex-1">{error}</span><button type="button" aria-label="关闭错误提示" onClick={() => setError(null)}><X className="size-4" /></button></div>}
+
+        <Dialog open={Boolean(preview)} onOpenChange={open => { if (!open) setPreview(null); }}>
+          {preview && (
+            <DialogContent className="max-h-[90dvh] max-w-4xl overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{preview.title}</DialogTitle>
+                <DialogDescription>画布内容预览</DialogDescription>
+              </DialogHeader>
+              <CanvasPreview projectId={projectId} preview={preview} />
+            </DialogContent>
+          )}
+        </Dialog>
       </section>
     </CanvasNodeContext.Provider>
   );
@@ -985,6 +1118,21 @@ function CanvasCreateMenuItems({ allowResources, onAddText, onAddImage, onAddVid
   </>;
 }
 
+function CanvasPreview({ projectId, preview }: { projectId: string; preview: PreviewState }) {
+  const { version } = preview;
+  if (version.kind === 'text') {
+    return <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{version.text || '暂无文本内容'}</p>;
+  }
+  const src = canvasMediaUrl(projectId, version.version_id);
+  if (version.kind === 'image') {
+    return <img src={src} alt={preview.title} decoding="async" className="max-h-[72dvh] w-full rounded-lg object-contain" />;
+  }
+  if (version.kind === 'video') {
+    return <video src={src} controls playsInline preload="metadata" className="max-h-[72dvh] w-full rounded-lg object-contain" />;
+  }
+  return <audio src={src} controls preload="metadata" className="w-full" />;
+}
+
 function firstKeyForKind(keys: KeyView[], kind: JobKind) {
   return keys.find(key => key.models.some(model => modelModality(model, key) === kind));
 }
@@ -993,6 +1141,26 @@ function pointerPosition(event: MouseEvent | TouchEvent): XYPosition | null {
   if ('clientX' in event) return { x: event.clientX, y: event.clientY };
   const touch = event.changedTouches[0];
   return touch ? { x: touch.clientX, y: touch.clientY } : null;
+}
+
+function isInteractiveTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest('input, textarea, select, button, a, [contenteditable="true"], [role="dialog"]'));
+}
+
+function handleMenuNavigation(event: React.KeyboardEvent<HTMLDivElement>) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+  if (!items.length) return;
+  event.preventDefault();
+  const current = items.indexOf(window.document.activeElement as HTMLButtonElement);
+  if (event.key === 'Home') items[0]?.focus();
+  else if (event.key === 'End') items.at(-1)?.focus();
+  else if (event.key === 'ArrowDown') items[(current + 1 + items.length) % items.length]?.focus();
+  else items[(current - 1 + items.length) % items.length]?.focus();
+}
+
+function documentQueryNode(nodeId: string) {
+  return window.document.querySelector<HTMLElement>(`[data-canvas-node-id="${CSS.escape(nodeId)}"]`);
 }
 
 function isContentNode(node: CanvasNode): node is CanvasContentNode {
