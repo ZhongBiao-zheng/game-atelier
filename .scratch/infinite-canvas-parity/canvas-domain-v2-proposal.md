@@ -115,8 +115,10 @@ operation 关联的 Derivation Connection。用户、Agent 和插件不能伪造
 
 为复刻参考项目两种 composer 行为，Generation Draft 明确记录 selection policy：
 
-- 普通 Text/Image/Video/Audio Node 默认 `all_connected`：自身已有内容作为 implicit self input，
-  再加入全部直接 incoming Input Connection；`@` 只控制 prompt 中的称呼与顺序。
+- 普通 Text/Image/Video/Audio Node 默认 `all_connected`：自身已有且与当前生成协议兼容的内容作为
+  implicit self input，再加入全部直接 incoming Input Connection；`@` 只控制 prompt 中的称呼与顺序。
+  已有视频的派生编辑沿用单一 source video 契约，不开放其它 mention；OpenAI-compatible speech 不把
+  当前音频作为输入。其它不兼容连接不得静默忽略，提交时由 capability 校验明确拒绝。
 - Generation Config Node 默认 `mentions_only`：incoming Input Connection 只建立候选池，只有 prompt 中
   实际出现的 `@[node:<id>]` 被纳入 Resolved Input；没有 token 时不偷偷加入任何候选。
 - Plugin Generation Surface 必须在 manifest 中选择一种 policy，默认 `mentions_only`。

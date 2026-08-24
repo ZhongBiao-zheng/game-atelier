@@ -45,6 +45,7 @@ const node: CanvasNode = {
 function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNodeContextValue {
   return {
     projectId: 'canvas-test',
+    mentionReferencesByNodeId: new Map(),
     contentVersions: {},
     keys: [],
     jobsByRunId: new Map(),
@@ -296,6 +297,68 @@ it.each(generationNodes)('uses the shared independent panel for $title', (genera
     </CanvasNodeContext.Provider>,
   );
   expect(screen.getByRole('region', { name: label })).toHaveAttribute('data-floating-node-panel', 'true');
+});
+
+it('renders connected references as chips and blocks a draft after that reference disconnects', () => {
+  const imageKey = {
+    alias: 'image-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
+    models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' as const, protocol: 'openai-image' }],
+  };
+  const source: CanvasNode = {
+    id: 'image-source', title: '雨夜列车', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
+    data: {
+      current_version_id: 'version-source', generation_draft: null, active_run_id: null,
+      display: { fit: 'contain', free_resize: false },
+    },
+  };
+  const configuredNode: CanvasNode = {
+    ...node,
+    data: {
+      draft: {
+        ...draft,
+        prompt: '沿用 @[node:image-source] 的构图',
+        alias: imageKey.alias,
+        model: imageKey.models[0].id,
+      },
+    },
+  };
+  const version = {
+    version_id: 'version-source', kind: 'image' as const, path: 'uploads/source.png',
+    mime_type: 'image/png', bytes: 12, created_at: '2026-08-25T00:00:00Z',
+    sha256: 'a'.repeat(64), origin: { kind: 'upload' as const, upload_id: 'source' },
+  };
+  const connected = nodeContext({
+    mentionReferencesByNodeId: new Map([[configuredNode.id, [{
+      nodeId: source.id,
+      versionId: version.version_id,
+      kind: 'image',
+      label: '图片1',
+      title: source.title,
+      previewUrl: '/api/canvas/projects/canvas-test/media/version-source',
+    }]]]),
+    contentVersions: { [version.version_id]: version },
+    keys: [imageKey],
+  });
+  const { rerender } = render(
+    <CanvasNodeContext.Provider value={connected}>
+      <CanvasMobileGenerationPanel node={configuredNode} draft={configuredNode.data.draft} context={connected} />
+    </CanvasNodeContext.Provider>,
+  );
+
+  expect(screen.getByLabelText('引用图片：雨夜列车')).toHaveTextContent('图片1');
+  expect(screen.getByText('输入 @ 引用已连接内容 · 1 项可用')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '开始生成' })).toBeEnabled();
+
+  const disconnected = nodeContext({ ...connected, mentionReferencesByNodeId: new Map() });
+  rerender(
+    <CanvasNodeContext.Provider value={disconnected}>
+      <CanvasMobileGenerationPanel node={configuredNode} draft={configuredNode.data.draft} context={disconnected} />
+    </CanvasNodeContext.Provider>,
+  );
+  expect(screen.getByRole('alert')).toHaveTextContent('1 个引用已断开');
+  expect(screen.getByLabelText('引用已断开：image-source')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '开始生成' })).toBeDisabled();
 });
 
 it('opens video controls from the node generation panel', () => {

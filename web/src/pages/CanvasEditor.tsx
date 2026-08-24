@@ -152,6 +152,7 @@ import type {
 } from '@/schema/canvas';
 import type { Job, JobKind } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
+import { buildCanvasMentionReferences } from '@/lib/canvasMentions';
 import {
   canvasConnectionCreationCapabilities,
   canCreateCanvasInputConnection,
@@ -207,6 +208,30 @@ interface MediaReplaceTarget {
 interface ViewportSyncToken {
   projectId: string;
   viewport: Viewport;
+}
+
+function canvasMentionGraphSignature(document: CanvasDocument | null): string {
+  if (!document) return '';
+  return JSON.stringify({
+    nodes: document.nodes.map(node => {
+      if (node.type === 'config') {
+        return [node.id, node.title, node.type, null, node.data.draft.mode];
+      }
+      if (node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio') {
+        return [
+          node.id,
+          node.title,
+          node.type,
+          node.data.current_version_id,
+          node.data.generation_draft?.mode ?? null,
+        ];
+      }
+      return [node.id, node.title, node.type];
+    }),
+    inputConnections: document.connections
+      .filter(connection => connection.role === 'input')
+      .map(connection => [connection.id, connection.source_node_id, connection.target_node_id]),
+  });
 }
 
 interface CanvasClipboardPayload {
@@ -2461,8 +2486,27 @@ function CanvasEditorInner({
     }
   }, [announceToolNotice, canvasUiPreferences.revision]);
 
+  const mentionGraphSignature = canvasMentionGraphSignature(document);
+  const mentionDocumentRef = useRef(document);
+  mentionDocumentRef.current = document;
+  const mentionReferencesByNodeId = useMemo(() => {
+    const current = mentionDocumentRef.current;
+    if (!current) return new Map();
+    return new Map(current.nodes.map(node => [
+      node.id,
+      buildCanvasMentionReferences(
+        projectId,
+        node,
+        current.nodes,
+        current.connections,
+        current.content_versions,
+      ),
+    ]));
+  }, [mentionGraphSignature, projectId]);
+
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     projectId,
+    mentionReferencesByNodeId,
     contentVersions: document?.content_versions ?? {},
     keys,
     jobsByRunId,
@@ -2521,6 +2565,7 @@ function CanvasEditorInner({
     libraryBusy,
     mediaReplaceBusyNodeIds,
     mediaReplaceError,
+    mentionReferencesByNodeId,
     narrowViewport,
     openAngle,
     openMaskEdit,

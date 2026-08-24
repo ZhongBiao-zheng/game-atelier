@@ -148,7 +148,12 @@ OpenAI-compatible `chat/completions` 或 `responses`，后者支持 `reasoning_e
 Draft 选择且冻结/请求时省略；音频只接受 OpenAI-compatible `audio/speech`，冻结并发送白名单内的
 voice/format、0.25–4 的 speed 与去除首尾空白后的非空 instructions。模型配置的 protocol 不匹配时明确
 拒绝，不做伪兼容。连接输入会先按 Prompt 内 `@[node:id]` 的出现顺序冻结，再补未提及连接，并在冻结前按
-模型/协议校验媒体类型和数量。Runner 完成后再次通过短事务登记输出 Content Version、candidate 状态与
+模型/协议校验媒体类型和数量。`@` 菜单只枚举当前 surface 的直接 incoming `Input Connection` 且已有
+同模态 Content Version 的文本、图片、视频和音频；Draft 永远保存稳定 node token，不保存“图片1”等
+显示标签或 Version/path。断开连接后的 token 保留为 missing，Web 阻止提交且服务端再次拒绝，不能降级成
+普通文本。冻结后服务端按 Snapshot 实际输入顺序分别为文本、图片、视频、音频从 1 编号，重复 token 复用
+同一编号；final prompt 的标签与 `reference_images/reference_videos/reference_audios` 各自数组顺序一致，
+隐式自身输入也参与编号。Runner 完成后再次通过短事务登记输出 Content Version、candidate 状态与
 结果节点当前版本。批量候选逐个校验：全部成功为 `done`，部分成功为 `partial`，全部失败为 `failed`，
 停止且没有有效产物为 `canceled`；部分失败不会抹掉已经成功的 Content Version。
 `POST .../runs/{run_id}/retry` 明确区分 `original` 与 `current`：前者校验并复用原 Snapshot 的精确

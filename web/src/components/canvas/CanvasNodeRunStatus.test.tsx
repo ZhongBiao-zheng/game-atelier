@@ -158,6 +158,7 @@ function canvasJob(status: JobStatus, overrides: Partial<Job> = {}, resultNodeId
 function nodeContext(job: Job): CanvasNodeContextValue {
   return {
     projectId: 'canvas-test',
+    mentionReferencesByNodeId: new Map(),
     contentVersions: {},
     keys: [],
     jobsByRunId: new Map([['run-1', job]]),

@@ -71,6 +71,7 @@ const nodes: CanvasNode[] = [
 function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNodeContextValue {
   return {
     projectId: 'canvas-test',
+    mentionReferencesByNodeId: new Map(),
     contentVersions: {},
     keys: [],
     jobsByRunId: new Map(),

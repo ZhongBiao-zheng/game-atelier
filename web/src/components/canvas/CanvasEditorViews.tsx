@@ -13,6 +13,7 @@ import {
   CanvasTextSettings,
   type CanvasModelChoice,
 } from '@/components/canvas/CanvasGenerationControls';
+import { CanvasPromptInput } from '@/components/canvas/CanvasPromptInput';
 import type { CanvasMediaTool } from '@/components/canvas/CanvasMediaOperationDialog';
 import {
   CanvasNodeRunBadge,
@@ -37,6 +38,10 @@ import {
 import { imageControlCaps } from '@/lib/imageControlCaps';
 import { VideoControls } from '@/components/studio/VideoControls';
 import { cn } from '@/lib/utils';
+import {
+  missingCanvasMentionIds,
+  type CanvasMentionReference,
+} from '@/lib/canvasMentions';
 import type {
   CanvasContentNode,
   CanvasContentVersion,
@@ -73,6 +78,7 @@ export interface CanvasGenerationPanelContextValue {
 
 export interface CanvasNodeContextValue {
   projectId: string;
+  mentionReferencesByNodeId: ReadonlyMap<string, readonly CanvasMentionReference[]>;
   contentVersions: Readonly<Record<string, CanvasContentVersion>>;
   keys: KeyView[];
   jobsByRunId: ReadonlyMap<string, Job>;
@@ -995,6 +1001,9 @@ export function CanvasGenerationComposer({
   const submitting = context.submittingNodeIds.has(node.id);
   const running = nodeRunState.status === 'loading';
   const modeLabel = { text: '文本', image: '图片', video: '视频', audio: '音频' }[draft.mode];
+  const mentionReferences = context.mentionReferencesByNodeId.get(node.id) ?? [];
+  const missingMentionIds = missingCanvasMentionIds(draft.prompt, mentionReferences);
+  const hasMissingMentions = missingMentionIds.length > 0;
 
   function updateDraft(updater: (current: CanvasGenerationDraft) => CanvasGenerationDraft) {
     context.updateNode(node.id, current => withGenerationDraft(current, updater(generationDraft(current)!)));
@@ -1039,19 +1048,37 @@ export function CanvasGenerationComposer({
           </Button>
         )}
       </div>
-      <textarea
-        aria-label="提示词"
-        rows={4}
+      <CanvasPromptInput
         value={draft.prompt}
+        references={mentionReferences}
         onFocus={context.recordHistory}
-        onChange={event => updateDraft(current => ({ ...current, prompt: event.target.value, updated_at: new Date().toISOString() }))}
-        className="min-h-28 w-full resize-none rounded-md bg-transparent px-3 py-3 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+        onChange={prompt => updateDraft(current => ({ ...current, prompt, updated_at: new Date().toISOString() }))}
+        onPreviewReference={reference => context.previewContent(
+          reference.versionId,
+          reference.title,
+          reference.nodeId,
+        )}
         placeholder={draft.mode === 'video'
-          ? '描述镜头运动与画面变化'
+          ? '描述镜头运动与画面变化，输入 @ 引用已连接内容'
           : draft.mode === 'audio'
-            ? '输入需要朗读的文本'
-            : draft.mode === 'text' ? '描述要创作的文案、脚本或内容' : '描述任何你想要生成的内容'}
+            ? '输入需要朗读的文本，输入 @ 引用已连接内容'
+            : draft.mode === 'text'
+              ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
+              : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
+      <p
+        role={hasMissingMentions ? 'alert' : undefined}
+        className={cn(
+          'min-h-5 px-3 pt-1 text-xs',
+          hasMissingMentions ? 'text-destructive' : 'text-muted-foreground',
+        )}
+      >
+        {hasMissingMentions
+          ? `${missingMentionIds.length} 个引用已断开，请重新连接或删除引用。`
+          : mentionReferences.length
+            ? `输入 @ 引用已连接内容 · ${mentionReferences.length} 项可用`
+            : '连接文本、图片、视频或音频后，可输入 @ 引用。'}
+      </p>
       <CandidateHistory
         nodeId={node.id}
         primaryVersionId={node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio'
@@ -1211,7 +1238,7 @@ export function CanvasGenerationComposer({
             <Button
               type="button"
               size="sm"
-              disabled={submitting || !draft.prompt.trim() || !draft.alias || !selectedModel}
+              disabled={submitting || hasMissingMentions || !draft.prompt.trim() || !draft.alias || !selectedModel}
               onClick={() => void context.retryRun(node.id, runId, 'current')}
             >
               {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
@@ -1224,7 +1251,7 @@ export function CanvasGenerationComposer({
             type="button"
             size="sm"
             className="ml-auto"
-            disabled={submitting || !draft.prompt.trim() || !draft.alias || !selectedModel}
+            disabled={submitting || hasMissingMentions || !draft.prompt.trim() || !draft.alias || !selectedModel}
             onClick={() => void context.submitRun(node.id)}
           >
             {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}

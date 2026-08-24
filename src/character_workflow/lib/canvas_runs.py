@@ -581,21 +581,44 @@ def _render_final_prompt(
 ) -> str:
     prompt = draft.prompt.strip()
     appended_text: list[str] = []
+    media_labels: list[str] = []
+    kind_counts = {"text": 0, "image": 0, "video": 0, "audio": 0}
+    # Draft tokens are stable node IDs. Labels are rebuilt only after the current graph and
+    # concrete versions have been frozen, so reconnecting or reordering cannot misaddress media.
     for item in inputs:
         version = document.content_versions[item.version_id]
+        kind_counts[version.kind] += 1
+        label = _input_label(version.kind, kind_counts[version.kind])
         marker = f"@[node:{item.node_id}]"
         if version.kind == "text":
             if marker in prompt:
-                prompt = prompt.replace(marker, version.text)
-            elif item.source == "input_connection":
-                appended_text.append(version.text)
-        elif marker in prompt:
-            prompt = prompt.replace(marker, f"[{version.kind} reference {item.order + 1}]")
+                prompt = prompt.replace(marker, f"【{label}】")
+                appended_text.append(f"【{label}】\n{version.text}")
+            else:
+                appended_text.append(f"【{label}】\n{version.text}")
+        else:
+            media_labels.append(label)
+            if marker in prompt:
+                prompt = prompt.replace(marker, label)
+    if media_labels:
+        prompt = (
+            f"参考素材编号：{'、'.join(media_labels)}。请按这些编号理解提示词中的引用。"
+            f"\n\n{prompt}"
+        )
     if appended_text:
         prompt = f"{prompt}\n\n参考文本：\n" + "\n\n".join(appended_text)
     if not prompt.strip():
         raise ValueError("生成提示词不能为空")
     return prompt
+
+
+def _input_label(kind: str, index: int) -> str:
+    return {
+        "text": "文本",
+        "image": "图片",
+        "video": "视频",
+        "audio": "音频",
+    }[kind] + str(index)
 
 
 def _input_paths(
