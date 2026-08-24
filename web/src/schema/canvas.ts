@@ -9,6 +9,7 @@ export interface CanvasViewport { x: number; y: number; zoom: number }
 export interface CanvasSettings {
   background: 'lines' | 'dots' | 'none';
   show_image_info: boolean;
+  show_minimap: boolean;
 }
 
 export type CanvasImageQuickToolId =

@@ -72,7 +72,7 @@ Status: ready-for-human
 | B14 | 双击空白打开节点创建菜单 | `NodeCreateMenu` | same | full |
 | B15 | 从连接柄拖到空白打开“带连接创建”菜单 | `ConnectionCreateMenu` | adapted：React Flow `onConnectEnd` | full |
 | B16 | 右键节点复制/删除；右键边删除 | `canvas-context-menu.tsx` | same | full |
-| B17 | 小地图显示/隐藏和点击导航 | `canvas-mini-map.tsx` | adapted：React Flow MiniMap | partial |
+| B17 | 小地图显示/隐藏和点击导航 | `canvas-mini-map.tsx` | adapted：React Flow MiniMap；Document 设置显隐，拖拽/滚轮/点击导航，见 issue 22 | full |
 | B18 | 点/线/空白三种背景 | `canvas-toolbar.tsx`；`menu-画布外观.png` | adapted：Atelier 背景 token | full |
 | B19 | 浅色/深色主题 | `canvas-theme.ts`、外观菜单 | adapted：遵循 Atelier 暖暗色，浅色保留可用 | partial |
 | B20 | 图片尺寸/信息显示开关 | `showImageInfo`、外观菜单 | same | full |

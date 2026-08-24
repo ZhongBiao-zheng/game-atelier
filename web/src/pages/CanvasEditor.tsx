@@ -29,6 +29,7 @@ import {
   Info,
   Library,
   LoaderCircle,
+  MapPinned,
   Maximize2,
   MousePointer2,
   Plus,
@@ -264,7 +265,7 @@ function CanvasEditorInner({
   const syncedTerminalRuns = useRef(new Set<string>());
   const reversePromptConfigAttempts = useRef(new Set<string>());
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
-  const { screenToFlowPosition, fitView } = useReactFlow<FlowNode>();
+  const { screenToFlowPosition, fitView, getZoom, setCenter } = useReactFlow<FlowNode>();
   const acceptAssets = useCallback((value: RevisionedSidecar<CanvasLibraryAsset>) => {
     setAssets(current => !current || value.revision >= current.revision ? value : current);
   }, []);
@@ -2081,7 +2082,21 @@ function CanvasEditorInner({
         >
           {background && <Background variant={background} gap={22} size={1} />}
           <Controls position="bottom-left" showInteractive={false} className="canvas-controls hidden sm:flex" />
-          <MiniMap position="bottom-left" className="canvas-minimap hidden sm:block" pannable zoomable nodeColor="var(--primary)" maskColor="var(--scrim)" />
+          {document.settings.show_minimap && (
+            <MiniMap
+              position="bottom-left"
+              className="canvas-minimap hidden sm:block"
+              pannable
+              zoomable
+              ariaLabel="画布小地图"
+              nodeColor="var(--primary)"
+              maskColor="var(--scrim)"
+              onClick={(event, position) => {
+                event.stopPropagation();
+                void setCenter(position.x, position.y, { zoom: getZoom(), duration: 150 });
+              }}
+            />
+          )}
         </ReactFlow>
 
         <div className="canvas-editor-top pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-2 p-2 sm:gap-3 sm:p-3 md:p-4">
@@ -2159,6 +2174,16 @@ function CanvasEditorInner({
                   }), true)}
                 >
                   <Info className="size-4" aria-hidden="true" />显示图片信息
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={document.settings.show_minimap}
+                  className="gap-2"
+                  onCheckedChange={checked => commit(current => ({
+                    ...current,
+                    settings: { ...current.settings, show_minimap: checked },
+                  }), true)}
+                >
+                  <MapPinned className="size-4" aria-hidden="true" />显示小地图
                 </DropdownMenuCheckboxItem>
               </DropdownMenuContent>
             </DropdownMenu>

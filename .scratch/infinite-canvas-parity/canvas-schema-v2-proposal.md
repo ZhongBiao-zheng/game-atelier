@@ -98,6 +98,7 @@ interface CanvasDocument {
 interface CanvasSettings {
   background: 'lines' | 'dots' | 'none';
   show_image_info: boolean;
+  show_minimap: boolean;
 }
 ```
 
