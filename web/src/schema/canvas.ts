@@ -11,6 +11,33 @@ export interface CanvasSettings {
   show_image_info: boolean;
 }
 
+export type CanvasImageQuickToolId =
+  | 'info'
+  | 'delete'
+  | 'saveAsset'
+  | 'download'
+  | 'copyPrompt'
+  | 'reversePrompt'
+  | 'replace'
+  | 'resize'
+  | 'maskEdit'
+  | 'crop'
+  | 'split'
+  | 'upscale'
+  | 'angle';
+
+export interface CanvasImageToolbarPreferences {
+  tool_ids: CanvasImageQuickToolId[];
+  show_labels: boolean;
+}
+
+export interface CanvasUiPreferences {
+  schema_version: 1;
+  revision: number;
+  image_toolbar: CanvasImageToolbarPreferences;
+  updated_at: string | null;
+}
+
 export interface CanvasGenerationDraft {
   mode: 'text' | 'image' | 'video' | 'audio';
   prompt: string;

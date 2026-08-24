@@ -67,6 +67,10 @@ def keys_file() -> Path:
     return config_dir() / "keys.json"
 
 
+def canvas_ui_file() -> Path:
+    return config_dir() / "canvas-ui.json"
+
+
 def write_global_config(path: Path) -> None:
     """写全局 data-root 配置文件（用户手动改 data root 时用）。"""
     cfg = _global_config_file()

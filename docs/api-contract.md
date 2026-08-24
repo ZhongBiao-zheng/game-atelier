@@ -16,6 +16,7 @@
 | ProjectIndexItem / GalleryMedia | `lib/schemas.py` | `web/src/api/gallery.ts` | `tests/test_gallery_project.py` + `ProjectIndexPage.test.tsx` + `ProjectPage.test.tsx` |
 | StudioArchiveTarget | `lib/studio_archive.py` | `web/src/api/studio.ts` | `tests/test_studio_archive.py` + `StudioArchiveDialog.test.tsx` |
 | CanvasProject / CanvasDocument / CanvasJobContext | `lib/schemas.py` | `web/src/schema/canvas.ts` + `schema/jobs.ts` | `tests/test_canvas_projects.py` + `CanvasEditor.test.tsx` |
+| CanvasUiPreferences | `lib/schemas.py` | `web/src/schema/canvas.ts` | issue 20 隔离 API/文件/浏览器契约核对（旧测试只读，不改） |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
 | 视频控件能力 | 各 `*_video.py` | `lib/videoControlCaps.ts` | 无 —— 靠人 |
 
@@ -65,6 +66,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
 `POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
 `DELETE /canvas/projects/{id}` `POST /canvas/trash/{trash_id}/restore`
+`PUT /canvas/ui-preferences`
 
 **双向**
 `POST /characters/{id}/canonical` `POST /projects/{id}/ui-schemes/{scheme_id}/screens/canonical` `POST /experience`
@@ -85,7 +87,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /canvas/projects/{id}/versions/{version_id}/media`
 `GET /canvas/projects/{id}/versions/{version_id}/download`
 `GET /canvas/projects/{id}/library/assets` `/canvas/projects/{id}/library/prompts`
-`GET /canvas/trash`
+`GET /canvas/trash` `GET /canvas/ui-preferences`
 
 ### 人工画布契约
 
@@ -106,6 +108,13 @@ Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径�
 不会进入 `canvas.json`。预览媒体仍只通过已登记 `version_id` 读取，不从节点或 Job 拼接裸路径。
 媒体 Content Version 的 `path` 始终相对当前画布项目目录；资产库与提示词使用 revision 化 sidecar，插件
 私有状态使用带 plugin id/version 的独立 envelope，不把这些业务对象塞回热路径 `canvas.json`。
+
+图片节点快捷工具偏好是工作区应用级状态，文件真源为 `.config/canvas-ui.json`，不属于任何画布项目。
+`GET /api/canvas/ui-preferences` 在文件不存在时返回 revision 0 的默认值且不制造文件；损坏或不符合严格
+schema 的文件返回 409，原字节保持不变。`PUT /api/canvas/ui-preferences` 请求为
+`{ expected_revision, image_toolbar: { tool_ids, show_labels } }`：工具 ID 必须来自固定枚举，不允许重复，
+允许空清单；服务端在独立文件锁内校验 revision 并原子替换，冲突返回当前 revision。该偏好跨项目生效，
+但不进入 `CanvasDocument`、undo/redo、项目包 manifest/zip 或插件私有状态。
 
 `Input Connection` 是当前可编辑输入资格，不触发下游；`Derivation Connection` 只由生成提交或受控本地
 媒体命令创建。真实生成输入冻结在 Canvas Job 的 `canvas_run.snapshot`，节点不保存 `job_ids` 或候选数组。

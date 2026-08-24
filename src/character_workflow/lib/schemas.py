@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Generic, Literal, TypeVar
 
@@ -266,6 +267,49 @@ class CanvasSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     background: Literal["lines", "dots", "grid", "none"] = "none"
     show_image_info: bool = True
+
+
+CanvasImageQuickToolId = Literal[
+    "info",
+    "delete",
+    "saveAsset",
+    "download",
+    "copyPrompt",
+    "reversePrompt",
+    "replace",
+    "resize",
+    "maskEdit",
+    "crop",
+    "split",
+    "upscale",
+    "angle",
+]
+
+
+class CanvasImageToolbarPreferences(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    tool_ids: list[CanvasImageQuickToolId]
+    show_labels: bool = False
+
+    @model_validator(mode="after")
+    def unique_tools(self) -> "CanvasImageToolbarPreferences":
+        if len(self.tool_ids) != len(set(self.tool_ids)):
+            raise ValueError("图片快捷工具不能重复")
+        return self
+
+
+class CanvasUiPreferences(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    schema_version: Literal[1] = 1
+    revision: int = Field(default=0, ge=0)
+    image_toolbar: CanvasImageToolbarPreferences
+    updated_at: datetime | None = None
+
+
+class CanvasUiPreferencesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_revision: int = Field(ge=0)
+    image_toolbar: CanvasImageToolbarPreferences
 
 
 class CanvasGenerationDraft(BaseModel):

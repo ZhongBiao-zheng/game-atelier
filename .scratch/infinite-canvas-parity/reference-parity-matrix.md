@@ -145,7 +145,7 @@ Status: ready-for-human
 | E09 | 本地放大到目标长边 | `canvas-node-upscale-dialog.tsx` | adapted：浏览器/服务端算子待票 09 决定 | full |
 | E10 | 多角度生成 | `CanvasNodeAngleDialog` + `generateAngleNode` | adapted：图片生成 Job | full |
 | E11 | 大图查看和图片详情 | preview modal/info modal | same | partial |
-| E12 | 自定义图片节点快捷工具与是否显示文字 | toolbar settings + localStorage | adapted：保存为用户偏好 | full |
+| E12 | 自定义图片节点快捷工具与是否显示文字 | toolbar settings + localStorage | adapted：应用级 `.config/canvas-ui.json`，revision/原子写，见 issue 20 | full |
 | E13 | AI 超分入口 | `project.tsx` 只显示“暂未实现” | excluded：不是已交付功能；若要做是产品新增 | n/a |
 | E14 | 视频编辑 prompt 入口 | hover toolbar `isVideo -> edit` | adapted：视频派生 Job | full |
 

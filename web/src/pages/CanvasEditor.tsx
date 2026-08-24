@@ -67,6 +67,7 @@ import {
   updateCanvasPrompt,
   uploadCanvasMedia,
 } from '@/api/canvas';
+import { getCanvasUiPreferences, saveCanvasUiPreferences } from '@/api/canvasUi';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import {
   AddMenuButton,
@@ -93,6 +94,7 @@ import {
   CanvasMediaOperationDialog,
   type CanvasMediaTool,
 } from '@/components/canvas/CanvasMediaOperationDialog';
+import { DEFAULT_CANVAS_UI_PREFERENCES } from '@/components/canvas/canvasImageToolbar';
 import {
   CANVAS_LIBRARY_DRAG_TYPE,
   CanvasLibraryPanel,
@@ -111,12 +113,14 @@ import type {
   CanvasContentVersion,
   CanvasContentNode,
   CanvasDocument,
+  CanvasImageToolbarPreferences,
   CanvasLibraryAsset,
   CanvasMediaOperation,
   CanvasMediaVersion,
   CanvasNode,
   CanvasPrompt,
   CanvasTextVersion,
+  CanvasUiPreferences,
   RevisionedSidecar,
 } from '@/schema/canvas';
 import type { Job, JobKind } from '@/schema/jobs';
@@ -190,6 +194,8 @@ function CanvasEditorInner({
   const [jobs, setJobs] = useState<Job[]>([]);
   const [assets, setAssets] = useState<RevisionedSidecar<CanvasLibraryAsset> | null>(null);
   const [prompts, setPrompts] = useState<RevisionedSidecar<CanvasPrompt> | null>(null);
+  const [canvasUiPreferences, setCanvasUiPreferences] = useState<CanvasUiPreferences>(DEFAULT_CANVAS_UI_PREFERENCES);
+  const [canvasUiPreferencesError, setCanvasUiPreferencesError] = useState<string | null>(null);
   const [libraryMode, setLibraryMode] = useState<CanvasLibraryMode | null>(null);
   const [libraryFocusAssetId, setLibraryFocusAssetId] = useState<string | null>(null);
   const [libraryBusy, setLibraryBusy] = useState(false);
@@ -237,6 +243,7 @@ function CanvasEditorInner({
   const libraryInsertCommand = useRef<Promise<void> | null>(null);
   const mediaOperationInFlight = useRef(false);
   const documentCommandInFlight = useRef(false);
+  const canvasUiPreferencesSaveInFlight = useRef(false);
   const toolNoticeTimer = useRef<number | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
@@ -266,6 +273,8 @@ function CanvasEditorInner({
     setLibraryError(null);
     setAssets(null);
     setPrompts(null);
+    setCanvasUiPreferences(DEFAULT_CANVAS_UI_PREFERENCES);
+    setCanvasUiPreferencesError(null);
     setPreview(null);
     setMediaOperation(null);
     setMediaOperationBusy(false);
@@ -291,6 +300,14 @@ function CanvasEditorInner({
     serverRevision.current = 0;
     runSubmissionInFlight.current = false;
     documentCommandInFlight.current = false;
+    canvasUiPreferencesSaveInFlight.current = false;
+    void getCanvasUiPreferences()
+      .then(value => {
+        if (!cancelled) setCanvasUiPreferences(value);
+      })
+      .catch(preferencesError => {
+        if (!cancelled) setCanvasUiPreferencesError((preferencesError as Error).message);
+      });
     Promise.all([
       listCanvasProjects(),
       getCanvasDocument(projectId),
@@ -1889,6 +1906,34 @@ function CanvasEditorInner({
     }
   }, [announceToolNotice, flushSave, mediaOperation, persistNow, projectId]);
 
+  const persistImageToolbarPreferences = useCallback(async (
+    value: CanvasImageToolbarPreferences,
+  ) => {
+    if (canvasUiPreferencesSaveInFlight.current) {
+      throw new Error('另一项画布界面设置正在保存，请稍后重试。');
+    }
+    canvasUiPreferencesSaveInFlight.current = true;
+    try {
+      const saved = await saveCanvasUiPreferences(canvasUiPreferences.revision, value);
+      setCanvasUiPreferences(saved);
+      setCanvasUiPreferencesError(null);
+      announceToolNotice('图片快捷工具已更新');
+    } catch (saveError) {
+      let message = (saveError as Error).message;
+      try {
+        const latest = await getCanvasUiPreferences();
+        setCanvasUiPreferences(latest);
+        message = `${message} 已重新载入当前设置，请确认后再保存。`;
+      } catch {
+        // 保留浏览器中最后一次成功读取的偏好，避免网络错误伪装成保存成功。
+      }
+      setCanvasUiPreferencesError(message);
+      throw new Error(message);
+    } finally {
+      canvasUiPreferencesSaveInFlight.current = false;
+    }
+  }, [announceToolNotice, canvasUiPreferences.revision]);
+
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     projectId,
     contentVersions: document?.content_versions ?? {},
@@ -1898,6 +1943,8 @@ function CanvasEditorInner({
     submittingNodeIds,
     mediaReplaceBusyNodeIds,
     mediaReplaceError,
+    canvasUiPreferences,
+    canvasUiPreferencesError,
     libraryBusy,
     selectNode: selectOnlyNode,
     previewContent,
@@ -1919,10 +1966,13 @@ function CanvasEditorInner({
     openMaskEdit,
     openAngle,
     editVideo,
+    saveImageToolbarPreferences: persistImageToolbarPreferences,
     deleteNode,
   }), [
     assets?.revision,
     cancelRun,
+    canvasUiPreferences,
+    canvasUiPreferencesError,
     copyPrompt,
     deleteNode,
     document?.content_versions,
@@ -1937,6 +1987,7 @@ function CanvasEditorInner({
     openMaskEdit,
     openMediaOperation,
     previewContent,
+    persistImageToolbarPreferences,
     projectId,
     recordHistorySnapshot,
     recoverReversePromptConfig,

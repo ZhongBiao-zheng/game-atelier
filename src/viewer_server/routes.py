@@ -66,7 +66,7 @@ from character_workflow.lib.schemas import (
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
     CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
     CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse, CanvasRunRetry,
-    CanvasUploadResponse, RevisionedSidecar,
+    CanvasUiPreferences, CanvasUiPreferencesUpdate, CanvasUploadResponse, RevisionedSidecar,
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
@@ -2036,6 +2036,36 @@ def get_canvas_projects() -> CanvasProjectList:
     from character_workflow.lib.canvas_projects import list_canvas_projects
     recover_canvas_package_transactions()
     return CanvasProjectList(projects=list_canvas_projects())
+
+
+@router.get("/canvas/ui-preferences", response_model=CanvasUiPreferences)
+def get_canvas_ui_preferences() -> CanvasUiPreferences:
+    from character_workflow.lib.canvas_ui import (
+        CanvasUiPreferencesError,
+        read_canvas_ui_preferences,
+    )
+    try:
+        return read_canvas_ui_preferences()
+    except CanvasUiPreferencesError as error:
+        raise HTTPException(409, detail=str(error)) from error
+
+
+@router.put("/canvas/ui-preferences", response_model=CanvasUiPreferences)
+def put_canvas_ui_preferences(payload: CanvasUiPreferencesUpdate) -> CanvasUiPreferences:
+    from character_workflow.lib.canvas_ui import (
+        CanvasUiPreferencesError,
+        CanvasUiRevisionConflict,
+        save_canvas_ui_preferences,
+    )
+    try:
+        return save_canvas_ui_preferences(payload)
+    except CanvasUiRevisionConflict as error:
+        raise HTTPException(409, detail={
+            "code": "revision_conflict",
+            "current_revision": error.current_revision,
+        }) from error
+    except CanvasUiPreferencesError as error:
+        raise HTTPException(409, detail=str(error)) from error
 
 
 @router.post("/canvas/projects", response_model=CanvasProject, status_code=201)
