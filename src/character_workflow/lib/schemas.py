@@ -16,7 +16,9 @@ class JobStatus(str, Enum):
     PENDING_CONFIRM = "pending_confirm"
     PENDING = "pending"
     DONE = "done"
+    PARTIAL = "partial"
     FAILED = "failed"
+    CANCELED = "canceled"
 
 
 class AssetSlot(str, Enum):
@@ -133,6 +135,7 @@ class CanvasResultCandidate(BaseModel):
     status: Literal["pending", "succeeded", "failed", "canceled"]
     version_id: str | None = None
     error: str | None = None
+    replaces_candidate_id: str | None = None
 
 
 class CanvasJobContext(BaseModel):
@@ -180,6 +183,10 @@ class Job(BaseModel):
     # 2026-07-08: 出图完成时间戳（update_job_status 在 DONE/FAILED 终态回写；Web 不能改）。
     # Studio 卡片用它算出图耗时（completed_at − submitted_at）+ 展示生成时间。旧 job 无此字段=None。
     completed_at: str | None = None
+    # Canvas Run lifecycle only: the runner claims a queued Job before the provider call, while a
+    # stop request remains truthful even when a synchronous upstream request cannot be interrupted.
+    runner_started_at: str | None = None
+    cancel_requested_at: str | None = None
 
     @model_validator(mode="after")
     def validate_namespace_ownership(self) -> "Job":
@@ -204,6 +211,12 @@ class Job(BaseModel):
                 raise ValueError("canvas job requires canvas_project_id and canvas_run")
         elif self.canvas_project_id is not None or self.canvas_run is not None:
             raise ValueError("canvas_project_id and canvas_run are only valid for namespace=canvas")
+        if self.namespace != "canvas" and (
+            self.runner_started_at is not None or self.cancel_requested_at is not None
+        ):
+            raise ValueError(
+                "runner_started_at and cancel_requested_at are only valid for namespace=canvas"
+            )
         return self
 
 
@@ -661,6 +674,13 @@ class CanvasRunResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     job: Job
     document: CanvasDocument
+
+
+class CanvasRunRetry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["original", "current"]
+    expected_revision: int = Field(ge=0)
+    candidate_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
 SidecarItem = TypeVar("SidecarItem")

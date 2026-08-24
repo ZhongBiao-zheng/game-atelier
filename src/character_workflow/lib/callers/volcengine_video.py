@@ -265,7 +265,9 @@ def _download_mp4(url: str, output_dir: Path, index: int, *, task_ref: str = "")
     return str(path)
 
 
-def _poll_video_task(*, tasks_url, headers, task_id, max_polls, poll_interval, sent_urls) -> str:
+def _poll_video_task(
+    *, tasks_url, headers, task_id, max_polls, poll_interval, sent_urls, should_cancel=None
+) -> str:
     """轮询到任务完成，返回选中的视频下载地址（不负责落盘）。
 
     网络抖动 / 5xx 由 video_poll 吞掉重试（不扣 max_polls），这里只解读上游给出的
@@ -275,6 +277,7 @@ def _poll_video_task(*, tasks_url, headers, task_id, max_polls, poll_interval, s
     for resp in video_poll.poll_responses(
         url=url, headers=headers, timeout=180, max_polls=max_polls,
         poll_interval=poll_interval, task_ref=task_id, error_cls=VolcengineVideoError,
+        should_cancel=should_cancel,
     ):
         payload = _json(resp)
         if not resp.ok:
@@ -310,6 +313,7 @@ def render_video(
     max_polls: int = 180,
     poll_interval: float = 5.0,
     on_phase: Callable[[str], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
     **_kwargs,
 ) -> list[str]:
     """提交 n 条 Seedance 视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。
@@ -374,6 +378,7 @@ def render_video(
         ready.append((_poll_video_task(
             tasks_url=tasks_url, headers=headers, task_id=task_id,
             max_polls=max_polls, poll_interval=poll_interval, sent_urls=sent_urls,
+            should_cancel=should_cancel,
         ), task_id))
     if on_phase:
         on_phase("downloading")

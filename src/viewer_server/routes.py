@@ -57,7 +57,8 @@ from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
     CanvasDocument, CanvasProject, CanvasProjectCreate, CanvasProjectList,
-    CanvasProjectRename, CanvasRunCreate, CanvasRunResponse, CanvasUploadResponse,
+    CanvasProjectRename, CanvasRunCreate, CanvasRunResponse, CanvasRunRetry,
+    CanvasUploadResponse,
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
@@ -985,7 +986,9 @@ _STATUS_CN = {
     "pending_confirm": "等待确认出图",
     "pending": "正在出图",
     "done": "已完成",
+    "partial": "部分完成",
     "failed": "已失败",
+    "canceled": "已停止",
 }
 
 
@@ -2052,10 +2055,10 @@ def get_canvas_jobs(project_id: str) -> list[Job]:
 
 
 def _run_canvas_job_safely(job_id: str) -> None:
-    from character_workflow.lib.canvas_runs import run_canvas_job
+    from character_workflow.lib.canvas_runs import run_canvas_job_scheduled
 
     try:
-        run_canvas_job(job_id)
+        run_canvas_job_scheduled(job_id)
     except Exception:  # noqa: BLE001
         # run_canvas_job persists both the friendly Job failure and failed candidates.
         logger.warning("canvas run failed: %s", job_id)
@@ -2095,6 +2098,67 @@ def post_canvas_run(
     from viewer_server import routes as _self
     background.add_task(_self._run_canvas_job_safely, job.job_id)
     return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/{run_id}/retry",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+def post_canvas_run_retry(
+    project_id: str,
+    run_id: str,
+    payload: CanvasRunRetry,
+    background: BackgroundTasks,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import retry_canvas_run
+
+    try:
+        job, document = retry_canvas_run(
+            project_id,
+            run_id,
+            payload.mode,
+            payload.expected_revision,
+            payload.candidate_id,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个生成记录或候选结果") from None
+    except RuntimeError as error:
+        detail = str(error)
+        if detail.startswith("revision_conflict:"):
+            current_revision = int(detail.split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }) from None
+        messages = {
+            "run_not_terminal": "当前生成尚未结束，不能重试",
+            "result_node_missing": "原结果节点已被删除，不能在原位置重试",
+            "snapshot_input_missing": "原生成使用的输入版本已经不存在",
+            "snapshot_input_changed": "原生成使用的输入文件已经变化",
+            "snapshot_model_missing": "原生成使用的密钥或模型已经不可用",
+        }
+        raise HTTPException(409, detail=messages.get(detail, detail)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/{run_id}/cancel",
+    response_model=Job,
+)
+def post_canvas_run_cancel(project_id: str, run_id: str) -> Job:
+    from character_workflow.lib.canvas_runs import request_canvas_run_cancel
+
+    try:
+        return request_canvas_run_cancel(project_id, run_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布生成记录") from None
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
 
 
 class _CharacterArchiveTarget(BaseModel):
@@ -2179,7 +2243,12 @@ def _run_studio_job_safely(job_id: str) -> None:
             job = read_job(job_id)
         except FileNotFoundError:
             return
-        if job.status != JobStatus.DONE and job.status != JobStatus.FAILED:
+        if job.status not in {
+            JobStatus.DONE,
+            JobStatus.PARTIAL,
+            JobStatus.FAILED,
+            JobStatus.CANCELED,
+        }:
             update_job_status(job_id, status=JobStatus.FAILED, error=str(e))
 
 

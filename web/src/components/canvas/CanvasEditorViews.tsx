@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
-import { FileAudio, FileImage, FileVideo, LoaderCircle, Plus, Sparkles, Trash2, Type } from 'lucide-react';
+import { Check, FileAudio, FileImage, FileVideo, LoaderCircle, Plus, RotateCcw, Sparkles, Square, Trash2, Type } from 'lucide-react';
 import { createContext, memo, useContext } from 'react';
 
 import { canvasMediaUrl } from '@/api/canvas';
@@ -23,9 +23,13 @@ export interface CanvasNodeContextValue {
   contentVersions: Readonly<Record<string, CanvasContentVersion>>;
   keys: KeyView[];
   jobsByRunId: ReadonlyMap<string, Job>;
+  jobsByResultNodeId: ReadonlyMap<string, Job[]>;
   submittingNodeIds: ReadonlySet<string>;
   selectNode: (id: string) => void;
+  selectCandidate: (id: string, versionId: string) => void;
   submitRun: (id: string) => Promise<void>;
+  retryRun: (id: string, runId: string, mode: 'original' | 'current', candidateId?: string) => Promise<void>;
+  cancelRun: (runId: string) => Promise<void>;
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
   updateText: (id: string, text: string) => void;
   recordHistory: () => void;
@@ -166,6 +170,14 @@ function GenerationComposer({
         className="min-h-28 w-full resize-none bg-transparent px-1 py-2 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
         placeholder={draft.mode === 'video' ? '描述镜头运动与画面变化' : '描述任何你想要生成的内容'}
       />
+      <CandidateHistory
+        nodeId={node.id}
+        primaryVersionId={node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio'
+          ? node.data.current_version_id : null}
+        context={context}
+        running={Boolean(running)}
+        submitting={submitting}
+      />
       <div className="flex flex-wrap items-center gap-1.5 border-t border-border/70 pt-2">
         <select
           aria-label="密钥"
@@ -224,20 +236,185 @@ function GenerationComposer({
         <span className="max-w-52 truncate text-xs text-muted-foreground" title={runStatus(activeJob)}>
           {runStatus(activeJob)}
         </span>
-        <Button
-          type="button"
-          size="sm"
-          className="ml-auto"
-          disabled={submitting || running || !draft.prompt.trim() || !draft.alias || !draft.model}
-          onClick={() => void context.submitRun(node.id)}
-        >
-          {submitting || running
-            ? <LoaderCircle className="animate-spin" aria-hidden="true" />
-            : <Sparkles aria-hidden="true" />}
-          {submitting ? '提交中…' : running ? '生成中…' : activeJob ? '再次生成' : '开始生成'}
-        </Button>
+        {running && activeJob && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="ml-auto"
+            disabled={Boolean(activeJob.cancel_requested_at)}
+            onClick={() => void context.cancelRun(activeJob.canvas_run!.run_id)}
+          >
+            {activeJob.cancel_requested_at ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Square aria-hidden="true" />}
+            {activeJob.cancel_requested_at ? '正在停止…' : '停止'}
+          </Button>
+        )}
+        {!running && activeJob && runId && (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="ml-auto"
+              disabled={submitting}
+              onClick={() => void context.retryRun(node.id, runId, 'original')}
+            >
+              <RotateCcw aria-hidden="true" />
+              原设置重试
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={submitting || !draft.prompt.trim() || !draft.alias || !draft.model}
+              onClick={() => void context.retryRun(node.id, runId, 'current')}
+            >
+              {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+              {submitting ? '提交中…' : '当前设置再生成'}
+            </Button>
+          </>
+        )}
+        {!running && !activeJob && (
+          <Button
+            type="button"
+            size="sm"
+            className="ml-auto"
+            disabled={submitting || !draft.prompt.trim() || !draft.alias || !draft.model}
+            onClick={() => void context.submitRun(node.id)}
+          >
+            {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+            {submitting ? '提交中…' : '开始生成'}
+          </Button>
+        )}
       </div>
     </section>
+  );
+}
+
+type CandidateEntry = {
+  job: Job;
+  candidate: NonNullable<Job['canvas_run']>['candidates'][number];
+};
+
+function CandidateHistory({
+  nodeId,
+  primaryVersionId,
+  context,
+  running,
+  submitting,
+}: {
+  nodeId: string;
+  primaryVersionId: string | null;
+  context: CanvasNodeContextValue;
+  running: boolean;
+  submitting: boolean;
+}) {
+  const entries: CandidateEntry[] = (context.jobsByResultNodeId.get(nodeId) ?? []).flatMap(job => (
+    job.canvas_run?.candidates.map(candidate => ({ job, candidate })) ?? []
+  ));
+  if (!entries.length) return null;
+  const currentByIndex = new Map<number, CandidateEntry>();
+  for (const entry of entries) currentByIndex.set(entry.candidate.index, entry);
+  const current = [...currentByIndex.values()].sort((a, b) => a.candidate.index - b.candidate.index);
+  const currentIds = new Set(current.map(entry => entry.candidate.candidate_id));
+  const history = entries.filter(entry => !currentIds.has(entry.candidate.candidate_id)).reverse();
+
+  return (
+    <div className="border-t border-border/70 py-3">
+      <CandidateGrid
+        label="当前候选结果"
+        entries={current}
+        context={context}
+        nodeId={nodeId}
+        primaryVersionId={primaryVersionId}
+        retryDisabled={running || submitting}
+      />
+      {history.length > 0 && (
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer select-none py-1">历史候选 · {history.length}</summary>
+          <CandidateGrid
+            label="历史候选结果"
+            entries={history}
+            context={context}
+            nodeId={nodeId}
+            primaryVersionId={primaryVersionId}
+            retryDisabled={running || submitting}
+          />
+        </details>
+      )}
+    </div>
+  );
+}
+
+function CandidateGrid({
+  label,
+  entries,
+  context,
+  nodeId,
+  primaryVersionId,
+  retryDisabled,
+}: {
+  label: string;
+  entries: CandidateEntry[];
+  context: CanvasNodeContextValue;
+  nodeId: string;
+  primaryVersionId: string | null;
+  retryDisabled: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={label}>
+      {entries.map(({ job, candidate }) => {
+        const version = candidate.version_id ? context.contentVersions[candidate.version_id] : undefined;
+        return (
+          <div
+            key={candidate.candidate_id}
+            className={cn(
+              'relative min-h-20 overflow-hidden rounded-md border bg-secondary/30',
+              candidate.version_id === primaryVersionId ? 'border-primary' : 'border-border',
+            )}
+          >
+            {version && version.kind !== 'text'
+              ? <MediaPreview kind={version.kind} src={canvasMediaUrl(context.projectId, version.version_id)} />
+              : (
+                <div className="grid min-h-20 place-items-center px-2 text-center text-xs text-muted-foreground">
+                  {candidate.status === 'pending'
+                    ? <LoaderCircle className="animate-spin" aria-label="候选生成中" />
+                    : candidate.status === 'canceled' ? candidate.error || '已停止' : candidate.error || '结果待同步'}
+                </div>
+              )}
+            <span className="absolute left-1.5 top-1.5 rounded bg-background/80 px-1.5 py-0.5 text-xs text-muted-foreground">
+              {candidate.index + 1}
+            </span>
+            {!retryDisabled && candidate.version_id && candidate.version_id !== primaryVersionId && (
+              <button
+                type="button"
+                aria-label={`将候选 ${candidate.index + 1} 设为主结果`}
+                title="设为主结果"
+                className="absolute bottom-1.5 left-1.5 grid size-7 place-items-center rounded-full border border-border bg-background/90 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                onClick={() => context.selectCandidate(nodeId, candidate.version_id!)}
+              >
+                <Check className="size-3.5" aria-hidden="true" />
+              </button>
+            )}
+            {!retryDisabled && job.canvas_run && (
+              <button
+                type="button"
+                aria-label={`重试候选 ${candidate.index + 1}`}
+                title="按原设置重试这个候选"
+                className="absolute bottom-1.5 right-1.5 grid size-7 place-items-center rounded-full border border-border bg-background/90 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                onClick={() => void context.retryRun(
+                  nodeId,
+                  job.canvas_run!.run_id,
+                  'original',
+                  candidate.candidate_id,
+                )}
+              >
+                <RotateCcw className="size-3.5" aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -337,8 +514,12 @@ function activeRunId(node: CanvasNode): string | null {
 
 function runStatus(job: Job | undefined): string {
   if (!job) return '配置已保存';
-  if (job.status === 'pending' || job.status === 'pending_confirm') return '结果会自动回到节点';
+  if (job.status === 'pending' || job.status === 'pending_confirm') {
+    return job.cancel_requested_at ? '已请求停止，上游可能仍在执行' : '结果会自动回到节点';
+  }
   if (job.status === 'done') return '生成完成';
+  if (job.status === 'partial') return '部分结果完成';
+  if (job.status === 'canceled') return job.error ? `已停止 · ${job.error}` : '已停止';
   return job.error || '生成失败';
 }
 

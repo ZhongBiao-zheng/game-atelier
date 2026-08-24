@@ -179,6 +179,7 @@ def _download_mp4(url: str, output_dir: Path, index: int, *, task_ref: str = "")
 def _poll_task(
     *, root: str, headers: dict[str, str], act: str, task_id: str,
     max_polls: int, poll_interval: float, sent_urls: set[str] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> list[str]:
     """轮询到终态，返回输出视频地址列表。
 
@@ -189,6 +190,7 @@ def _poll_task(
     for resp in video_poll.poll_responses(
         url=url, headers=headers, timeout=180, max_polls=max_polls,
         poll_interval=poll_interval, task_ref=task_id, error_cls=KlingVideoError,
+        should_cancel=should_cancel,
     ):
         payload = _json(resp)
         if not resp.ok:
@@ -220,6 +222,7 @@ def render_video(
     max_polls: int = 180,
     poll_interval: float = 5.0,
     on_phase: Callable[[str], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
     **_kwargs,
 ) -> list[str]:
     """提交 n 条可灵视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。
@@ -258,6 +261,7 @@ def render_video(
         for url in _poll_task(
             root=root, headers=headers, act=act, task_id=task_id,
             max_polls=max_polls, poll_interval=poll_interval, sent_urls=sent_urls,
+            should_cancel=should_cancel,
         ):
             if on_phase and not downloading:
                 downloading = True

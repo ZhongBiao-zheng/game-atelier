@@ -223,7 +223,12 @@ def update_job_status(
         job = read_job(job_id)
         update: dict[str, Any] = {"status": status}
         # 终态清空进度卡点，避免 retry/回看读到陈旧 phase；并盖出图完成时间戳（算耗时/展示生成时间用）。
-        if status in (JobStatus.DONE, JobStatus.FAILED):
+        if status in (
+            JobStatus.DONE,
+            JobStatus.PARTIAL,
+            JobStatus.FAILED,
+            JobStatus.CANCELED,
+        ):
             update["progress_phase"] = None
             update["completed_at"] = datetime.now(timezone.utc).isoformat()
         if output_paths is not None:
@@ -238,7 +243,12 @@ def update_job_phase(job_id: str, phase: str) -> Job:
     """视频 caller 回写进度卡点（sent / downloading）。终态 job 不回写。"""
     with job_lock(job_id):
         job = read_job(job_id)
-        if job.status in (JobStatus.DONE, JobStatus.FAILED):
+        if job.status in (
+            JobStatus.DONE,
+            JobStatus.PARTIAL,
+            JobStatus.FAILED,
+            JobStatus.CANCELED,
+        ):
             return job
         return _write(job.model_copy(update={"progress_phase": phase}))
 

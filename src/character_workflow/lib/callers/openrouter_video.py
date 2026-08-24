@@ -101,7 +101,7 @@ def _build_body(prompt: str, model: str, params: dict[str, Any]) -> dict[str, An
 
 def _poll_job(
     *, polling_url: str, headers: dict, max_polls: int, poll_interval: float,
-    task_ref: str = "",
+    task_ref: str = "", should_cancel: Callable[[], bool] | None = None,
 ) -> str:
     """轮询到终态返回下载地址。
 
@@ -113,6 +113,7 @@ def _poll_job(
     for resp in video_poll.poll_responses(
         url=polling_url, headers=headers, timeout=180, max_polls=max_polls,
         poll_interval=poll_interval, task_ref=ref, error_cls=OpenRouterVideoError,
+        should_cancel=should_cancel,
     ):
         payload = _json(resp)
         if not resp.ok:
@@ -164,6 +165,7 @@ def render_video(
     max_polls: int = 120,
     poll_interval: float = 15.0,
     on_phase: Callable[[str], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
     **_kwargs,
 ) -> list[str]:
     """提交 n 条 OpenRouter 视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。
@@ -201,6 +203,7 @@ def render_video(
         _poll_job(
             polling_url=u, headers=headers, max_polls=max_polls,
             poll_interval=poll_interval, task_ref=job_id,
+            should_cancel=should_cancel,
         )
         for u, job_id in jobs
     ]

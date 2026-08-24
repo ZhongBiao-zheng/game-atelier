@@ -100,3 +100,33 @@ export function submitCanvasRun(
     },
   );
 }
+
+export function retryCanvasRun(
+  projectId: string,
+  runId: string,
+  mode: 'original' | 'current',
+  expectedRevision: number,
+  candidateId?: string,
+): Promise<CanvasRun> {
+  return requestJson<CanvasRun>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/retry`,
+    mode === 'original' ? '按原设置重试' : '按当前设置再次生成',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        mode,
+        expected_revision: expectedRevision,
+        ...(candidateId ? { candidate_id: candidateId } : {}),
+      }),
+    },
+  );
+}
+
+export function cancelCanvasRun(projectId: string, runId: string): Promise<Job> {
+  return requestJson<Job>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/cancel`,
+    '停止画布生成',
+    { method: 'POST' },
+  );
+}

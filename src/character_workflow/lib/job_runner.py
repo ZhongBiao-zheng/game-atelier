@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,16 @@ from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
 
 class JobRunnerError(RuntimeError):
     pass
+
+
+def _cancel_checker(job: Job) -> Callable[[], bool] | None:
+    if job.namespace != "canvas":
+        return None
+
+    def should_cancel() -> bool:
+        return read_job(job.job_id).cancel_requested_at is not None
+
+    return should_cancel
 
 
 def _friendly_error(err: BaseException) -> str:
@@ -243,6 +254,13 @@ def run_job(job_id: str) -> Job:
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
     net_env.configure_proxy_bypass()
     job = read_job(job_id)
+    should_cancel = _cancel_checker(job)
+
+    def on_phase(phase: str) -> None:
+        if should_cancel is not None and should_cancel():
+            raise JobRunnerError("Canvas Run 已请求停止")
+        update_job_phase(job.job_id, phase)
+
     # Studio jobs start PENDING (UI submit = consent); character jobs start PENDING_CONFIRM.
     allowed_statuses = (JobStatus.PENDING_CONFIRM, JobStatus.PENDING)
     if job.status not in allowed_statuses:
@@ -259,6 +277,12 @@ def run_job(job_id: str) -> Job:
         if job.status == JobStatus.PENDING_CONFIRM:
             update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
         with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider or 'image'}-") as tmp:
+            dispatch_kwargs: dict[str, Any] = {}
+            if should_cancel is not None:
+                from character_workflow.lib.callers.openai_image import image_family
+
+                if image_family(job.model) == "midjourney":
+                    dispatch_kwargs["should_cancel"] = should_cancel
             paths = dispatch(
                 prompt=job.prompt,
                 model=job.model,
@@ -269,7 +293,8 @@ def run_job(job_id: str) -> Job:
                 params=params,
                 # MJ 是唯一异步图片协议（submit + 轮询，FAST 档 ~40s、RELAX 可到几分钟），
                 # 进度卡点回写让前端不必干等。同步 caller 收下即忽略（都吃 **kwargs）。
-                on_phase=lambda phase: update_job_phase(job.job_id, phase),
+                on_phase=on_phase,
+                **dispatch_kwargs,
             )
             selected = [(Path(p), dims) for p in paths if (dims := image_dimensions(Path(p)))]
             if not selected:
@@ -309,6 +334,13 @@ def _run_video_job(job: Job) -> Job:
     """
     job = _normalize_reference_images(job)
     params = _params(job)
+    should_cancel = _cancel_checker(job)
+
+    def on_phase(phase: str) -> None:
+        if should_cancel is not None and should_cancel():
+            raise JobRunnerError("Canvas Run 已请求停止")
+        update_job_phase(job.job_id, phase)
+
     try:
         if not job.alias:
             raise JobRunnerError("video job requires an alias to route to a provider")
@@ -322,7 +354,8 @@ def _run_video_job(job: Job) -> Job:
                 output_dir=Path(tmp),
                 params=params,
                 # 进度卡点回写 job 文件（sent/downloading），watcher SSE 推给前端。
-                on_phase=lambda phase: update_job_phase(job.job_id, phase),
+                on_phase=on_phase,
+                should_cancel=should_cancel,
             )
             valid = [Path(p) for p in paths if is_valid_video(Path(p))]
             if not valid:

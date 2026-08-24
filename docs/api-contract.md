@@ -61,6 +61,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /studio/jobs/{id}/archive`
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/runs`
+`POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
 
 **双向**
 `POST /characters/{id}/canonical` `POST /projects/{id}/ui-schemes/{scheme_id}/screens/canonical` `POST /experience`
@@ -105,9 +106,18 @@ Document；扩展名只作入口白名单，文件类型、MIME、摘要、大�
 当前可执行纵切开放现有 Job Runner 已支持的图片/视频；文本、音频在对应 caller 落地前由服务端明确拒绝，
 不提供假入口。连接输入会先按 Prompt 内 `@[node:id]` 的出现顺序冻结，再补未提及连接，并在冻结前按
 模型/协议校验媒体类型和数量。Runner 完成后再次通过短事务登记输出 Content Version、candidate 状态与
-结果节点当前版本；prepared 事务在下次项目访问或命令前完成/丢弃，不能从节点当前内容重造 Snapshot。
-服务启动时先恢复全部项目事务，再回收孤儿 Job；残留 submit journal 恢复后明确标记失败且不自动重试，
-避免无人领取或重复扣费。旧 `POST .../jobs` 已删除。
+结果节点当前版本。批量候选逐个校验：全部成功为 `done`，部分成功为 `partial`，全部失败为 `failed`，
+停止且没有有效产物为 `canceled`；部分失败不会抹掉已经成功的 Content Version。
+`POST .../runs/{run_id}/retry` 明确区分 `original` 与 `current`：前者校验并复用原 Snapshot 的精确
+version/hash/model，允许用 `candidate_id` 单独补跑并记录 `replaces_candidate_id`；后者从结果节点当前
+Draft/连接重新解析并冻结新 Snapshot。两者都创建新 Job/Run，不覆盖旧记录。
+`POST .../runs/{run_id}/cancel` 只持久化幂等 `cancel_requested_at`。Runner 尚未认领时不调用厂商并落为
+`canceled`；同步厂商请求已发出时不伪装即时中断，UI 明示上游可能继续执行，有效返回仍登记，未返回候选
+才标记 canceled。prepared 事务在下次项目访问或命令前完成/丢弃，不能从节点当前内容重造 Snapshot。
+服务启动时先恢复全部项目事务，再核对孤儿 Job：`runner_started_at` 为空的持久任务尚未调用厂商，可安全
+重新领取；已经领取但仍无终态的请求状态未知，明确标记失败且不自动重试，避免重复扣费。视频与
+Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程内调度上限为全局 4 个、同一密钥别名
+2 个、视频 1 个；HTTP 后台任务与重启恢复共用同一组门控。旧 `POST .../jobs` 已删除。
 
 ### 角色衍生契约
 

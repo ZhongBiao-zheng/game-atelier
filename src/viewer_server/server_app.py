@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from character_workflow.lib.jobs import fail_orphan_studio_jobs
+from character_workflow.lib.jobs import fail_orphan_studio_jobs, read_job
 from character_workflow.lib.secret_filter import SecretRedactionFilter
 from viewer_server.routes import router
 from viewer_server.sse import hub, sse_router
@@ -108,21 +108,46 @@ async def lifespan(app: FastAPI):
             "reclaimed %d orphan studio job(s): %s", len(reclaimed), ", ".join(reclaimed)
         )
     from character_workflow.lib.canvas_projects import list_canvas_projects
-    from character_workflow.lib.canvas_runs import reconcile_canvas_jobs, recover_canvas_transactions
+    from character_workflow.lib.canvas_runs import (
+        reconcile_canvas_jobs,
+        recover_canvas_transactions,
+        run_canvas_job_scheduled,
+    )
 
     canvas_projects = list_canvas_projects()
     for project in canvas_projects:
         recover_canvas_transactions(project.project_id)
 
     reconciled = reconcile_canvas_jobs(fail_pending=True)
+    resumable = [
+        job_id for job_id in reconciled
+        if (
+            (job := read_job(job_id)).status.value in {"pending", "pending_confirm"}
+            and job.runner_started_at is None
+        )
+    ]
     if reconciled:
         logging.getLogger(__name__).warning(
             "reconciled %d canvas job(s): %s", len(reconciled), ", ".join(reconciled)
         )
     observer = start_watchers()
+    resume_tasks: set[asyncio.Task[None]] = set()
+
+    async def resume_canvas_job(job_id: str) -> None:
+        try:
+            await asyncio.to_thread(run_canvas_job_scheduled, job_id)
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).warning("resumed canvas run failed: %s", job_id)
+
+    for job_id in resumable:
+        task = asyncio.create_task(resume_canvas_job(job_id))
+        resume_tasks.add(task)
+        task.add_done_callback(resume_tasks.discard)
     try:
         yield
     finally:
+        for task in resume_tasks:
+            task.cancel()
         observer.stop()
         observer.join(timeout=2)
 

@@ -36,9 +36,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  cancelCanvasRun,
   getCanvasDocument,
   listCanvasJobs,
   listCanvasProjects,
+  retryCanvasRun,
   saveCanvasDocument,
   submitCanvasRun,
   uploadCanvasMedia,
@@ -731,6 +733,62 @@ function CanvasEditorInner({
     }
   }
 
+  async function retryRun(
+    nodeId: string,
+    runId: string,
+    mode: 'original' | 'current',
+    candidateId?: string,
+  ) {
+    if (runSubmissionInFlight.current) {
+      setError('另一项生成正在提交，请稍后再试。');
+      return;
+    }
+    setSubmittingNodeIds(current => new Set(current).add(nodeId));
+    setError(null);
+    try {
+      if (!await persistNow()) return;
+      const dirtyAtSubmission = dirtyVersion.current;
+      runSubmissionInFlight.current = true;
+      const run = await retryCanvasRun(
+        projectId,
+        runId,
+        mode,
+        serverRevision.current,
+        candidateId,
+      );
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      setJobs(currentJobs => [
+        ...currentJobs.filter(job => job.job_id !== run.job.job_id),
+        run.job,
+      ]);
+      const resultId = run.job.canvas_run?.result_node_id;
+      if (resultId) setSelectedNodeIds(new Set([resultId]));
+    } catch (retryError) {
+      setError((retryError as Error).message);
+    } finally {
+      runSubmissionInFlight.current = false;
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+      setSubmittingNodeIds(current => {
+        const next = new Set(current);
+        next.delete(nodeId);
+        return next;
+      });
+    }
+  }
+
+  async function cancelRun(runId: string) {
+    setError(null);
+    try {
+      const updated = await cancelCanvasRun(projectId, runId);
+      setJobs(currentJobs => [
+        ...currentJobs.filter(job => job.job_id !== updated.job_id),
+        updated,
+      ]);
+    } catch (cancelError) {
+      setError((cancelError as Error).message);
+    }
+  }
+
   function recordHistorySnapshot() {
     const snapshot = latestDocument.current;
     if (!snapshot || history.current.past.at(-1) === snapshot) return;
@@ -772,6 +830,29 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set([id]));
   }, []);
 
+  function selectCandidate(nodeId: string, versionId: string) {
+    recordHistorySnapshot();
+    updateNode(nodeId, current => {
+      if (!isContentNode(current)) return current;
+      return {
+        ...current,
+        data: { ...current.data, current_version_id: versionId },
+      } as CanvasContentNode;
+    });
+  }
+
+  const jobsByResultNodeId = new Map<string, Job[]>();
+  for (const job of jobs) {
+    const resultNodeId = job.canvas_run?.result_node_id;
+    if (!resultNodeId) continue;
+    const history = jobsByResultNodeId.get(resultNodeId) ?? [];
+    history.push(job);
+    jobsByResultNodeId.set(resultNodeId, history);
+  }
+  for (const history of jobsByResultNodeId.values()) {
+    history.sort((a, b) => a.submitted_at.localeCompare(b.submitted_at));
+  }
+
   const contextValue: CanvasNodeContextValue = {
     projectId,
     contentVersions: document?.content_versions ?? {},
@@ -779,9 +860,13 @@ function CanvasEditorInner({
     jobsByRunId: new Map(
       jobs.flatMap(job => job.canvas_run ? [[job.canvas_run.run_id, job] as const] : []),
     ),
+    jobsByResultNodeId,
     submittingNodeIds,
     selectNode: selectOnlyNode,
+    selectCandidate,
     submitRun,
+    retryRun,
+    cancelRun,
     updateNode,
     updateText,
     recordHistory: recordHistorySnapshot,

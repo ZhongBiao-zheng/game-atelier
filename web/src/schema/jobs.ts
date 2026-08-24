@@ -1,4 +1,4 @@
-export type JobStatus = 'pending_confirm' | 'pending' | 'done' | 'failed';
+export type JobStatus = 'pending_confirm' | 'pending' | 'done' | 'partial' | 'failed' | 'canceled';
 
 // 2026-05-25 重构: 原 JobKind 改名为 AssetSlot
 export type AssetSlot = 'portrait' | 'promo' | 'turnaround';
@@ -94,6 +94,7 @@ export interface CanvasJobContext {
     status: 'pending' | 'succeeded' | 'failed' | 'canceled';
     version_id: string | null;
     error: string | null;
+    replaces_candidate_id?: string | null;
   }>;
 }
 
@@ -119,6 +120,8 @@ export interface Job {
   progress_phase?: 'sent' | 'downloading' | null;
   // 2026-07-08: 出图完成时间戳（DONE/FAILED 终态回写；Web 只读）— 与 schemas.py 同步
   completed_at?: string | null;
+  runner_started_at?: string | null;
+  cancel_requested_at?: string | null;
   // 2026-08-10 (B2): UI 页面 job（namespace='ui'）归项目不归角色；Web 只读 — 与 schemas.py 同步
   project_id?: string | null;
   ui_scheme_id?: string | null;
