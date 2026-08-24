@@ -1255,7 +1255,11 @@ function CanvasEditorInner({
       z_index: 0,
     };
     const data = { current_version_id: null, generation_draft: draft, active_run_id: null };
-    if (kind === 'text') appendNode({ ...base, type: 'text', data }, menu);
+    if (kind === 'text') appendNode({
+      ...base,
+      type: 'text',
+      data: { ...data, display: { scale: 'sm' } },
+    }, menu);
     else if (kind === 'audio') appendNode({ ...base, type: 'audio', data }, menu);
     else if (kind === 'image') appendNode({
       ...base,
@@ -1398,7 +1402,12 @@ function CanvasEditorInner({
       title: '粘贴文本',
       position: defaultPosition(),
       z_index: 0,
-      data: { current_version_id: versionId, generation_draft: null, active_run_id: null },
+      data: {
+        current_version_id: versionId,
+        generation_draft: null,
+        active_run_id: null,
+        display: { scale: 'sm' },
+      },
     };
     pendingTextVersions.current.set(nodeId, versionId);
     commit(current => ({

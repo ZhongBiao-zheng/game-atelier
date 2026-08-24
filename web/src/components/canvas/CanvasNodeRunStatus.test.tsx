@@ -39,7 +39,10 @@ const idleNodes: CanvasNode[] = [
   { ...imageNode, data: { ...imageNode.data, active_run_id: null } },
   {
     id: 'text', title: '文本', type: 'text', position: { x: 0, y: 0 }, z_index: 0,
-    data: { current_version_id: null, generation_draft: null, active_run_id: null },
+    data: {
+      current_version_id: null, generation_draft: null, active_run_id: null,
+      display: { scale: 'sm' },
+    },
   },
   {
     id: 'video', title: '视频', type: 'video', position: { x: 0, y: 0 }, z_index: 0,
@@ -332,7 +335,7 @@ it('keeps cancellation and reverse-prompt labels honest', () => {
     </CanvasNodeContext.Provider>,
   );
   expect(screen.getByRole('button', { name: '按原设置重试反推提示词' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '选择节点 生成图片，分析失败' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: '选择节点 生成图片，分析失败' })).toBeInTheDocument();
 });
 
 it('does not expose reverse-prompt recovery for a Run owned by another result node', () => {
@@ -359,7 +362,7 @@ it('does not expose reverse-prompt recovery for a Run owned by another result no
     </CanvasNodeContext.Provider>,
   );
 
-  expect(screen.getByRole('button', { name: '选择节点 生成图片，待编辑' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: '选择节点 生成图片，待编辑' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '从反推文本创建图片配置' })).not.toBeInTheDocument();
 });
 
@@ -403,7 +406,7 @@ it('shows an empty error body and retries the immutable snapshot from body or to
     </CanvasNodeContext.Provider>,
   );
 
-  expect(screen.getByRole('button', { name: '选择节点 生成图片，生成失败' })).toHaveAttribute(
+  expect(screen.getByRole('group', { name: '选择节点 生成图片，生成失败' })).toHaveAttribute(
     'data-canvas-node-status',
     'error',
   );

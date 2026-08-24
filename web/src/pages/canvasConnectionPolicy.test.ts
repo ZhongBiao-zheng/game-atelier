@@ -24,7 +24,9 @@ function node(
 ): CanvasNode {
   const common = { id, title: id, position: { x: 0, y: 0 }, z_index: 0 };
   const nodeContentData = { ...contentData, current_version_id: currentVersionId };
-  if (type === 'text') return { ...common, type, data: nodeContentData };
+  if (type === 'text') {
+    return { ...common, type, data: { ...nodeContentData, display: { scale: 'sm' } } };
+  }
   if (type === 'image') {
     return { ...common, type, data: { ...nodeContentData, display: { fit: 'contain', free_resize: false } } };
   }

@@ -55,6 +55,14 @@ export interface CanvasContentNodeData {
   active_run_id: string | null;
 }
 
+export interface CanvasTextDisplay {
+  scale: 'xs' | 'sm' | 'base';
+}
+
+export interface CanvasTextNodeData extends CanvasContentNodeData {
+  display: CanvasTextDisplay;
+}
+
 export interface CanvasMediaDisplay {
   fit: 'contain' | 'cover';
   free_resize: boolean;
@@ -70,7 +78,7 @@ interface CanvasNodeBase {
 
 export interface CanvasTextNode extends CanvasNodeBase {
   type: 'text';
-  data: CanvasContentNodeData;
+  data: CanvasTextNodeData;
 }
 
 export interface CanvasImageNode extends CanvasNodeBase {

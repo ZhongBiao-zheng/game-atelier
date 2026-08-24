@@ -344,6 +344,15 @@ class CanvasContentNodeData(BaseModel):
     active_run_id: str | None = None
 
 
+class CanvasTextDisplay(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scale: Literal["xs", "sm", "base"] = "sm"
+
+
+class CanvasTextNodeData(CanvasContentNodeData):
+    display: CanvasTextDisplay = Field(default_factory=CanvasTextDisplay)
+
+
 class CanvasMediaDisplay(BaseModel):
     model_config = ConfigDict(extra="forbid")
     fit: Literal["contain", "cover"] = "contain"
@@ -413,7 +422,7 @@ class CanvasNodeBase(BaseModel):
 
 class CanvasTextNode(CanvasNodeBase):
     type: Literal["text"]
-    data: CanvasContentNodeData
+    data: CanvasTextNodeData
 
 
 class CanvasImageNode(CanvasNodeBase):

@@ -50,6 +50,7 @@ from character_workflow.lib.schemas import (
     CanvasResultCandidate,
     CanvasSnapshotInput,
     CanvasTextNode,
+    CanvasTextNodeData,
     CanvasTextVersion,
     CanvasUserMaskOrigin,
     CanvasVideoNode,
@@ -856,7 +857,7 @@ def _new_result_node(
         return CanvasTextNode(
             **common,
             type="text",
-            data=CanvasContentNodeData(
+            data=CanvasTextNodeData(
                 current_version_id=None,
                 generation_draft=draft,
                 active_run_id=run_id,

@@ -32,6 +32,7 @@ from character_workflow.lib.schemas import (
     CanvasPrompt,
     CanvasPromptPatch,
     CanvasTextNode,
+    CanvasTextNodeData,
     CanvasTextVersion,
     CanvasUserEditOrigin,
     CanvasVideoNode,
@@ -263,9 +264,13 @@ def _content_node(version_id: str, title: str, position: CanvasPoint, kind: str)
         "position": position,
         "z_index": 0,
     }
-    data = CanvasContentNodeData(current_version_id=version_id)
     if kind == "text":
-        return CanvasTextNode(**base, type="text", data=data)
+        return CanvasTextNode(
+            **base,
+            type="text",
+            data=CanvasTextNodeData(current_version_id=version_id),
+        )
+    data = CanvasContentNodeData(current_version_id=version_id)
     if kind == "audio":
         return CanvasAudioNode(**base, type="audio", data=data)
     media_data = data.model_dump()

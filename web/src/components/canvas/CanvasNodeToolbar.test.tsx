@@ -31,7 +31,10 @@ const draft = {
 const nodes: CanvasNode[] = [
   {
     id: 'text', title: '文本', type: 'text', position: { x: 0, y: 0 }, z_index: 0,
-    data: { current_version_id: null, generation_draft: null, active_run_id: null },
+    data: {
+      current_version_id: null, generation_draft: null, active_run_id: null,
+      display: { scale: 'sm' },
+    },
   },
   {
     id: 'image', title: '图片', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
@@ -194,6 +197,136 @@ it('shows content actions in the floating toolbar instead of the title row', () 
   expect(within(toolbar).getByRole('button', { name: '替换 视频' })).toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '编辑视频 视频' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '重命名节点 视频' }).closest('header')).not.toContainElement(toolbar);
+});
+
+it('edits text inside the node as one history session', () => {
+  const text = {
+    ...nodes[0],
+    data: { ...nodes[0].data, current_version_id: 'version-text' },
+  } as CanvasNode;
+  const context = nodeContext({
+    contentVersions: {
+      'version-text': {
+        version_id: 'version-text',
+        kind: 'text',
+        text: '雨夜列车分镜',
+        created_at: '2026-08-25T00:00:00Z',
+        sha256: 'c'.repeat(64),
+        origin: { kind: 'user_edit' },
+      },
+    },
+  });
+
+  const { container } = render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: text }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+
+  const toolbar = screen.getByRole('toolbar', { name: '文本 节点工具' });
+  fireEvent.click(within(toolbar).getByRole('button', { name: '编辑文本 文本' }));
+
+  const editor = screen.getByRole('textbox', { name: '编辑 文本 正文' });
+  expect(editor).toHaveValue('雨夜列车分镜');
+  expect(editor).toHaveFocus();
+  expect(context.recordHistory).toHaveBeenCalledTimes(1);
+
+  fireEvent.change(editor, { target: { value: '雨夜列车最终分镜' } });
+  expect(context.updateText).toHaveBeenCalledWith('text', '雨夜列车最终分镜');
+  fireEvent.keyDown(editor, { key: 'Escape' });
+  expect(screen.queryByRole('textbox', { name: '编辑 文本 正文' })).not.toBeInTheDocument();
+
+  fireEvent.doubleClick(container.querySelector('[data-canvas-node-id="text"]')!);
+  expect(screen.getByRole('textbox', { name: '编辑 文本 正文' })).toBeInTheDocument();
+  expect(context.recordHistory).toHaveBeenCalledTimes(2);
+  expect(context.previewContent).not.toHaveBeenCalled();
+});
+
+it('cycles text size through Atelier type tokens', () => {
+  const context = nodeContext();
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: nodes[0] }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+
+  const toolbar = screen.getByRole('toolbar', { name: '文本 节点工具' });
+  fireEvent.click(within(toolbar).getByRole('button', { name: '减小 文本 字号' }));
+  const decrease = vi.mocked(context.updateNode).mock.calls[0]?.[1];
+  expect(decrease?.(nodes[0])).toMatchObject({ data: { display: { scale: 'xs' } } });
+
+  fireEvent.click(within(toolbar).getByRole('button', { name: '增大 文本 字号' }));
+  const increase = vi.mocked(context.updateNode).mock.calls[1]?.[1];
+  expect(increase?.(nodes[0])).toMatchObject({ data: { display: { scale: 'base' } } });
+  expect(context.recordHistory).toHaveBeenCalledTimes(2);
+});
+
+it('renders distinct empty media surfaces with direct upload actions', () => {
+  const context = nodeContext();
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      {nodes.slice(1, 4).map(node => <NodeCard key={node.id} data={{ domain: node }} selected />)}
+    </CanvasNodeContext.Provider>,
+  );
+
+  expect(screen.getByText('空图片节点')).toBeInTheDocument();
+  expect(screen.getByText('空视频节点')).toBeInTheDocument();
+  expect(screen.getByText('空音频节点')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: '上传图片到 图片' }));
+  fireEvent.click(screen.getByRole('button', { name: '上传视频到 视频' }));
+  fireEvent.click(screen.getByRole('button', { name: '上传音频到 音频' }));
+  expect(context.replaceMedia).toHaveBeenNthCalledWith(1, nodes[1]);
+  expect(context.replaceMedia).toHaveBeenNthCalledWith(2, nodes[2]);
+  expect(context.replaceMedia).toHaveBeenNthCalledWith(3, nodes[3]);
+});
+
+it('keeps populated media playable inside the node without opening preview from controls', async () => {
+  const populated = nodes.slice(1, 4).map((node, index) => ({
+    ...node,
+    data: { ...node.data, current_version_id: `version-${node.type}` },
+    ...(node.type === 'image'
+      ? { data: { ...node.data, current_version_id: 'version-image', display: { fit: 'contain', free_resize: true } } }
+      : node.type === 'video'
+        ? { data: { ...node.data, current_version_id: 'version-video', display: { fit: 'cover', free_resize: false } } }
+      : {}),
+    id: `${node.id}-${index}`,
+  })) as CanvasNode[];
+  const context = nodeContext({
+    contentVersions: {
+      'version-image': {
+        version_id: 'version-image', kind: 'image', path: 'uploads/image.png', mime_type: 'image/png', bytes: 42,
+        width: 1024, height: 1024, duration_ms: null, created_at: '2026-08-25T00:00:00Z',
+        sha256: 'd'.repeat(64), origin: { kind: 'upload', upload_id: 'image' },
+      },
+      'version-video': {
+        version_id: 'version-video', kind: 'video', path: 'uploads/video.mp4', mime_type: 'video/mp4', bytes: 42,
+        width: 1920, height: 1080, duration_ms: 1000, created_at: '2026-08-25T00:00:00Z',
+        sha256: 'e'.repeat(64), origin: { kind: 'upload', upload_id: 'video' },
+      },
+      'version-audio': {
+        version_id: 'version-audio', kind: 'audio', path: 'uploads/audio.mp3', mime_type: 'audio/mpeg', bytes: 42,
+        width: null, height: null, duration_ms: 1000, created_at: '2026-08-25T00:00:00Z',
+        sha256: 'f'.repeat(64), origin: { kind: 'upload', upload_id: 'audio' },
+      },
+    },
+  });
+
+  const { container } = render(
+    <CanvasNodeContext.Provider value={context}>
+      {populated.map(node => <NodeCard key={node.id} data={{ domain: node }} selected />)}
+    </CanvasNodeContext.Provider>,
+  );
+
+  expect(container.querySelector('img.object-fill')).toBeInTheDocument();
+  const video = container.querySelector('video[controls]');
+  const audio = container.querySelector('audio[controls]');
+  expect(video).toBeInTheDocument();
+  expect(video).toHaveClass('object-cover');
+  expect(audio).toBeInTheDocument();
+  fireEvent.doubleClick(video!);
+  fireEvent.doubleClick(audio!);
+  expect(context.previewContent).not.toHaveBeenCalled();
 });
 
 it('keeps an unselected image toolbar mounted while its portal menu is open', async () => {

@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ChevronRight, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, MessageSquare, Orbit, Paintbrush, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, X, ZoomIn } from 'lucide-react';
+import { Check, ChevronRight, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, MessageSquare, Minus, Orbit, Paintbrush, Pencil, Plus, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, X, ZoomIn } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -124,9 +124,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const context = useContext(CanvasNodeContext);
   const node = data.domain;
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [isEditingText, setIsEditingText] = useState(false);
   const [titleDraft, setTitleDraft] = useState(node.title);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const titleTriggerRef = useRef<HTMLButtonElement>(null);
+  const textEditorRef = useRef<HTMLTextAreaElement>(null);
+  const contentSurfaceRef = useRef<HTMLElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const titleExitInProgress = useRef(false);
   const restoreTitleFocus = useRef(false);
@@ -181,6 +184,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     titleInputRef.current?.focus();
     titleInputRef.current?.select();
   }, [isEditingTitle]);
+  useEffect(() => {
+    if (!isEditingText) return;
+    const editor = textEditorRef.current;
+    editor?.focus();
+    editor?.setSelectionRange(editor.value.length, editor.value.length);
+  }, [isEditingText]);
   useEffect(() => {
     if (isEditingTitle) return;
     if (restoreTitleFocus.current) titleTriggerRef.current?.focus();
@@ -324,6 +333,30 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     restoreTitleFocus.current = true;
     setTitleDraft(node.title);
     setIsEditingTitle(false);
+  }
+
+  function beginTextEditing() {
+    if (!context || node.type !== 'text' || isEditingText) return;
+    context.selectNode(node.id);
+    context.recordHistory();
+    setIsEditingText(true);
+  }
+
+  function finishTextEditing(restoreFocus: boolean) {
+    setIsEditingText(false);
+    if (restoreFocus) requestAnimationFrame(() => contentSurfaceRef.current?.focus());
+  }
+
+  function setTextScale(direction: -1 | 1) {
+    if (!context || node.type !== 'text') return;
+    const scales = ['xs', 'sm', 'base'] as const;
+    const current = scales.indexOf(node.data.display.scale);
+    const scale = scales[Math.max(0, Math.min(scales.length - 1, current + direction))];
+    if (scale === node.data.display.scale) return;
+    context.recordHistory();
+    context.updateNode(node.id, candidate => candidate.type === 'text'
+      ? { ...candidate, data: { ...candidate.data, display: { scale } } }
+      : candidate);
   }
 
   return (
@@ -478,6 +511,9 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               submitting={submittingNode}
               copyablePrompt={copyablePrompt}
               context={context}
+              onEditText={beginTextEditing}
+              onDecreaseText={() => setTextScale(-1)}
+              onIncreaseText={() => setTextScale(1)}
             />
           )}
         </div>
@@ -494,9 +530,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         />
       )}
       <article
+        ref={contentSurfaceRef}
         data-canvas-node-id={node.id}
         data-canvas-node-status={nodeRunState.status}
-        role="button"
+        role="group"
         tabIndex={0}
         aria-busy={replacingMedia || nodeRunState.status === 'loading'}
         aria-label={`选择节点 ${node.title}，${nodeRunState.label}`}
@@ -509,9 +546,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           context.selectNode(node.id);
         }}
         onDoubleClick={event => {
-          if (!content) return;
           event.stopPropagation();
-          context.previewContent(content.version_id, node.title, node.id);
+          if (node.type === 'text') {
+            beginTextEditing();
+            return;
+          }
+          if (content) context.previewContent(content.version_id, node.title, node.id);
         }}
         onKeyDown={event => {
           if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -527,23 +567,62 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         )}
         <div className={cn('h-full bg-secondary/20', node.type === 'text' ? 'min-h-32' : 'min-h-44')}>
           {node.type === 'text' && (
-            <p className="line-clamp-5 whitespace-pre-wrap p-3 text-sm leading-relaxed text-foreground">
-              {content?.kind === 'text' && content.text
-                ? content.text
-                : draft ? '选择节点，填写下方生成设置' : '选择节点后输入文本…'}
-            </p>
+            isEditingText ? (
+              <textarea
+                ref={textEditorRef}
+                aria-label={`编辑 ${node.title} 正文`}
+                value={content?.kind === 'text' ? content.text : ''}
+                placeholder="输入文本…"
+                className={cn(
+                  'nodrag nowheel block h-full min-h-32 w-full resize-none overflow-y-auto border-0 bg-transparent p-3 leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+                  textScaleClass(node.data.display.scale),
+                )}
+                onChange={event => context.updateText(node.id, event.target.value)}
+                onBlur={() => finishTextEditing(false)}
+                onPointerDown={event => event.stopPropagation()}
+                onDoubleClick={event => event.stopPropagation()}
+                onKeyDown={event => {
+                  event.stopPropagation();
+                  if (event.key !== 'Escape') return;
+                  event.preventDefault();
+                  finishTextEditing(true);
+                }}
+              />
+            ) : (
+              <p className={cn(
+                'h-full min-h-32 overflow-y-auto whitespace-pre-wrap p-3 leading-relaxed text-foreground',
+                textScaleClass(node.data.display.scale),
+              )}>
+                {content?.kind === 'text' && content.text
+                  ? content.text
+                  : draft ? '双击输入文本，或填写下方生成设置' : '双击输入文本…'}
+              </p>
+            )
           )}
           {content && content.kind !== 'text' && (
-            <MediaPreview kind={content.kind} src={canvasMediaUrl(context.projectId, content.version_id)} />
+            <MediaPreview
+              kind={content.kind}
+              src={canvasMediaUrl(context.projectId, content.version_id)}
+              title={node.title}
+              fit={node.type === 'image' || node.type === 'video' ? node.data.display.fit : 'contain'}
+              freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
+            />
           )}
           {node.type === 'image' && content?.kind === 'image' && context.showImageInfo && (
             <span className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-[calc(100%-1.5rem)] truncate rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium tabular-nums text-foreground backdrop-blur-glass">
               {formatCanvasImageInfo(content)}
             </span>
           )}
-          {node.type !== 'text' && !content && (
+          {isCanvasContentNode(node) && node.type !== 'text' && !content && (
+            <EmptyMediaSurface
+              node={node}
+              replacing={replacingMedia}
+              onUpload={() => context.replaceMedia(node)}
+            />
+          )}
+          {!isCanvasContentNode(node) && !content && (
             <div className="grid min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
-              {node.type === 'config' ? '生成配置' : node.type === 'group' ? '分组' : '选择节点，填写下方生成设置'}
+              {node.type === 'config' ? '生成配置' : node.type === 'group' ? '分组' : '插件节点'}
             </div>
           )}
         </div>
@@ -798,6 +877,9 @@ function CanvasNodeToolbar({
   submitting,
   copyablePrompt,
   context,
+  onEditText,
+  onDecreaseText,
+  onIncreaseText,
 }: {
   node: CanvasNode;
   content: CanvasContentVersion | undefined;
@@ -805,12 +887,36 @@ function CanvasNodeToolbar({
   submitting: boolean;
   copyablePrompt: string | null;
   context: CanvasNodeContextValue;
+  onEditText: () => void;
+  onDecreaseText: () => void;
+  onIncreaseText: () => void;
 }) {
   const contentNode = isCanvasContentNode(node) ? node : null;
   const mediaNode = contentNode && contentNode.type !== 'text' ? contentNode : null;
 
   return (
     <>
+      {node.type === 'text' && (
+        <>
+          <MediaToolButton label={`编辑文本 ${node.title}`} onClick={onEditText}>
+            <Pencil />
+          </MediaToolButton>
+          <MediaToolButton
+            label={`减小 ${node.title} 字号`}
+            disabled={node.data.display.scale === 'xs'}
+            onClick={onDecreaseText}
+          >
+            <Minus />
+          </MediaToolButton>
+          <MediaToolButton
+            label={`增大 ${node.title} 字号`}
+            disabled={node.data.display.scale === 'base'}
+            onClick={onIncreaseText}
+          >
+            <Plus />
+          </MediaToolButton>
+        </>
+      )}
       <MediaToolButton
         label={content ? `查看 ${node.title} 详情` : `查看 ${node.title} 设置`}
         onClick={() => {
@@ -1907,12 +2013,117 @@ function nodeIcon(node: CanvasNode) {
   return <Sparkles className="size-3.5 shrink-0" />;
 }
 
-function MediaPreview({ kind, src, compact = false }: { kind: 'image' | 'video' | 'audio'; src: string; compact?: boolean }) {
+function textScaleClass(scale: 'xs' | 'sm' | 'base') {
+  if (scale === 'xs') return 'text-xs';
+  if (scale === 'base') return 'text-base';
+  return 'text-sm';
+}
+
+function EmptyMediaSurface({
+  node,
+  replacing,
+  onUpload,
+}: {
+  node: Exclude<CanvasContentNode, { type: 'text' }>;
+  replacing: boolean;
+  onUpload: () => void;
+}) {
+  const label = node.type === 'image' ? '图片' : node.type === 'video' ? '视频' : '音频';
+  const Icon = node.type === 'image' ? FileImage : node.type === 'video' ? FileVideo : FileAudio;
+  return (
+    <div className="grid min-h-44 place-items-center p-4 text-center text-muted-foreground">
+      <div className="flex flex-col items-center gap-3">
+        <span className="grid size-12 place-items-center rounded-lg bg-secondary/60">
+          <Icon className="size-6 opacity-50" aria-hidden="true" />
+        </span>
+        <span className="text-xs">空{label}节点</span>
+        <button
+          type="button"
+          aria-label={`上传${label}到 ${node.title}`}
+          disabled={replacing}
+          className="nodrag nowheel inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-transparent px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
+          onClick={event => {
+            event.stopPropagation();
+            onUpload();
+          }}
+          onPointerDown={event => event.stopPropagation()}
+          onDoubleClick={event => event.stopPropagation()}
+        >
+          {replacing ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <FileUp className="size-3.5" aria-hidden="true" />}
+          上传{label}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MediaPreview({
+  kind,
+  src,
+  title = '',
+  fit = 'contain',
+  freeResize = false,
+  compact = false,
+}: {
+  kind: 'image' | 'video' | 'audio';
+  src: string;
+  title?: string;
+  fit?: 'contain' | 'cover';
+  freeResize?: boolean;
+  compact?: boolean;
+}) {
   const { mediaRef, resolvedSrc } = useLazyMedia(src);
-  if (kind === 'image') return <img src={src} alt="" loading="lazy" decoding="async" className={cn('size-full object-contain', compact && 'max-h-48 rounded-md')} />;
-  if (kind === 'video') return <video ref={mediaRef} src={resolvedSrc} controls={compact} muted={!compact} playsInline preload={resolvedSrc ? 'metadata' : 'none'} className={cn('size-full object-contain', compact && 'max-h-48 rounded-md')} />;
-  if (!compact) return <div ref={mediaRef} className="grid size-full place-items-center gap-2 p-3 text-xs text-muted-foreground"><FileAudio className="size-8" aria-hidden="true" /><span>音频素材</span></div>;
-  return <div ref={mediaRef} className="grid size-full place-items-center p-3"><audio src={resolvedSrc} controls preload={resolvedSrc ? 'metadata' : 'none'} className="w-full" /></div>;
+  const stopCanvasInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
+  if (kind === 'image') return (
+    <img
+      src={src}
+      alt={title}
+      loading="lazy"
+      decoding="async"
+      draggable={false}
+      className={cn(
+        'size-full select-none',
+        freeResize ? 'object-fill' : fit === 'cover' ? 'object-cover' : 'object-contain',
+        compact && 'max-h-48 rounded-md',
+      )}
+    />
+  );
+  if (kind === 'video') return (
+    <video
+      ref={mediaRef}
+      src={resolvedSrc}
+      controls
+      playsInline
+      preload={resolvedSrc ? 'metadata' : 'none'}
+      data-canvas-media-controls="video"
+      className={cn(
+        'nodrag nowheel size-full',
+        freeResize ? 'object-fill' : fit === 'cover' ? 'object-cover' : 'object-contain',
+        compact && 'max-h-48 rounded-md',
+      )}
+      onClick={stopCanvasInteraction}
+      onDoubleClick={stopCanvasInteraction}
+      onPointerDown={stopCanvasInteraction}
+      onKeyDown={stopCanvasInteraction}
+    />
+  );
+  return (
+    <div className="nodrag nowheel grid size-full place-items-center gap-3 p-4 text-xs text-muted-foreground">
+      {!compact && <span className="flex items-center gap-2"><FileAudio className="size-5" aria-hidden="true" />音频素材</span>}
+      <audio
+        ref={mediaRef}
+        src={resolvedSrc}
+        controls
+        preload={resolvedSrc ? 'metadata' : 'none'}
+        data-canvas-media-controls="audio"
+        className="w-full"
+        onClick={stopCanvasInteraction}
+        onDoubleClick={stopCanvasInteraction}
+        onPointerDown={stopCanvasInteraction}
+        onKeyDown={stopCanvasInteraction}
+      />
+    </div>
+  );
 }
 
 function useLazyMedia(src: string) {

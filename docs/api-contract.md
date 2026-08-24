@@ -113,6 +113,9 @@ Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径�
 `schema_version: 2`，不包含 v1 union、fallback 或 converter。
 客户端在所有视口共用同一份 revision 化 Document；响应式面板、焦点、选择与媒体预览都是本地呈现状态，
 不会进入 `canvas.json`。预览媒体仍只通过已登记 `version_id` 读取，不从节点或 Job 拼接裸路径。
+文本节点的 `data.display.scale` 只接受 Atelier 字阶 token `xs/sm/base`，缺省为 `sm`；字号切换属于
+Document 显示状态并参与 revision 与 undo/redo，不修改文本 Content Version。图片/视频继续使用
+`data.display.fit/free_resize`；视频和音频播放进度、音量与控件焦点只属于浏览器呈现状态，不落盘。
 画布外观属于作者可撤销的项目设置：`settings.background` 明确选择空白、点阵或线框，
 `settings.show_image_info` 控制图片节点是否展示当前不可变 Content Version 的真实宽高与文件体积。
 `settings.show_minimap` 控制中等及桌面视口的小地图；手机端始终隐藏。三者随普通 Document revision 保存并

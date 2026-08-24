@@ -83,10 +83,10 @@ Status: ready-for-human
 
 | ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
 |---|---|---|---|---|
-| C01 | 文本节点 | `CanvasNodeType.Text`；`03-built-in-nodes.png` | same | partial |
-| C02 | 空/有内容图片节点 | `CanvasNodeType.Image`、`canvas-node.tsx` | adapted：统一媒体资源节点存储 | partial |
-| C03 | 空/有内容视频节点 | `CanvasNodeType.Video` | adapted | partial |
-| C04 | 空/有内容音频节点 | `CanvasNodeType.Audio` | adapted | partial |
+| C01 | 文本节点 | `CanvasNodeType.Text`；`03-built-in-nodes.png` | same：节点内双击/工具条编辑，字号映射 Atelier `xs/sm/base` token，见 issue 37 | none |
+| C02 | 空/有内容图片节点 | `CanvasNodeType.Image`、`canvas-node.tsx` | adapted：不可变 Content Version 存储；独立空态上传与 contain/cover/free-resize 表面，见 issue 37 | none |
+| C03 | 空/有内容视频节点 | `CanvasNodeType.Video` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | none |
+| C04 | 空/有内容音频节点 | `CanvasNodeType.Audio` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | none |
 | C05 | 生成配置节点，可切换文本/图片/视频/音频 | `canvas-config-composer.tsx` | adapted：提交到统一 Job Runner | full |
 | C06 | 分组节点，显示成员数量 | `CanvasNodeType.Group`、groupId | same | full |
 | C07 | 开放字符串插件节点 | `CanvasNodeTypeId`、node registry | adapted：使用受限插件契约 | full |

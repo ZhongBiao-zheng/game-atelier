@@ -432,7 +432,12 @@ it('restores the narrow-screen inspector when the generation panel closes', () =
 const generationNodes: Array<[CanvasNode, string]> = [
   [{
     id: 'text-one', title: '文案', type: 'text', position: { x: 0, y: 0 }, z_index: 0,
-    data: { current_version_id: null, generation_draft: { ...draft, mode: 'text' }, active_run_id: null },
+    data: {
+      current_version_id: null,
+      generation_draft: { ...draft, mode: 'text' },
+      active_run_id: null,
+      display: { scale: 'sm' },
+    },
   }, '文本生成设置'],
   [{
     id: 'image-one', title: '图片', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
