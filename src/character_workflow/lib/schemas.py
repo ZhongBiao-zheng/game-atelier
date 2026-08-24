@@ -719,6 +719,8 @@ class CanvasProjectCover(BaseModel):
 
 class CanvasProjectSummary(CanvasProject):
     cover: CanvasProjectCover | None = None
+    node_count: int = Field(ge=0)
+    connection_count: int = Field(ge=0)
 
 
 class CanvasProjectList(BaseModel):

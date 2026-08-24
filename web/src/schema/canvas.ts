@@ -194,6 +194,8 @@ export interface CanvasProject {
 
 export interface CanvasProjectSummary extends CanvasProject {
   cover: { version_id: string } | null;
+  node_count: number;
+  connection_count: number;
 }
 
 export interface CanvasPackageInspection {

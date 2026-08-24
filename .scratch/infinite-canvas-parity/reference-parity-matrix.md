@@ -37,16 +37,16 @@ Status: ready-for-human
 
 | ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
 |---|---|---|---|---|
-| A01 | 画布项目卡片库与空态 | `pages/canvas/index.tsx`；`01-project-index.png` | adapted：保留现有 Atelier 卡片墙 | partial |
+| A01 | 画布项目卡片库与空态 | `pages/canvas/index.tsx`；`01-project-index.png` | adapted：Atelier 卡片墙、创建卡与响应式空态，见 issue 26 | full |
 | A02 | 新建并立即进入独立画布 | `createProject()` + `/canvas/:id` | same | none |
 | A03 | 打开/切换多个画布项目 | `CanvasProjectCard`、顶部“我的画布” | same | none |
-| A04 | 卡片与画布内双击重命名 | `canvas-project-card.tsx`、`canvas-top-bar.tsx` | same | partial |
+| A04 | 卡片与画布内双击重命名 | `canvas-project-card.tsx`、`canvas-top-bar.tsx` | same：卡片与顶部原地输入，见 issue 26 | full |
 | A05 | 单项目确认删除 | `canvas-delete-projects-dialog.tsx` | same | full |
 | A06 | 多选项目、批量导出/删除、删除全部 | `pages/canvas/index.tsx` | same | full |
 | A07 | 单项目/多项目 ZIP 导出，媒体随包 | `canvas-export.ts`，format version 3 | adapted：服务端生成/校验项目包 | full |
 | A08 | ZIP 导入并分配新项目 ID | `pages/canvas/index.tsx::importCanvas` | adapted：服务端解包和路径白名单 | full |
 | A09 | 最近项目入口 | `/canvas?mode=recent` 打开列表首项 | same | full |
-| A10 | 项目统计节点/连线和更新时间 | `CanvasProjectCard` | same | partial |
+| A10 | 项目统计节点/连线和更新时间 | `CanvasProjectCard` | same：列表 summary 从当前 Document 派生，见 issue 26 | full |
 | A11 | 浏览器 IndexedDB/localforage 持久化 | `use-canvas-store.ts` | adapted：必须使用现有文件系统真源 | none |
 | A12 | 项目保存 viewport、背景、图片信息与 Agent 会话 | `CanvasProject` type | adapted：Canvas Document v2 分域保存 | partial |
 

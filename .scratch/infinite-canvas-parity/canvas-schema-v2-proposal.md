@@ -75,10 +75,17 @@ interface CanvasProject {
   created_at: string;
   updated_at: string;
 }
+
+interface CanvasProjectSummary extends CanvasProject {
+  cover: { version_id: string } | null;
+  node_count: number;
+  connection_count: number;
+}
 ```
 
 `project.json` 不重复保存封面；封面从当前图片 Content Version 派生。复制、删除和导入导出是项目命令，
-不是额外状态字段。
+不是额外状态字段。`CanvasProjectSummary` 只用于列表响应；封面、节点数和连线数都从当前 Document 派生，
+不写回 `project.json`。
 
 ### CanvasDocument
 

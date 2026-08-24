@@ -33,6 +33,7 @@ import {
   Maximize2,
   Minus,
   MousePointer2,
+  Pencil,
   Plus,
   Redo2,
   Scan,
@@ -60,6 +61,7 @@ import {
   insertCanvasPrompt,
   listCanvasJobs,
   listCanvasProjects,
+  renameCanvasProject,
   replaceCanvasNodeMedia,
   retryCanvasRun,
   runCanvasMediaOperation,
@@ -108,6 +110,7 @@ import {
   type CanvasLibraryMode,
 } from '@/components/canvas/CanvasLibraryPanel';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -242,6 +245,8 @@ function CanvasEditorInner({
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [viewportZoom, setViewportZoom] = useState(1);
+  const [projectRenameDraft, setProjectRenameDraft] = useState<string | null>(null);
+  const [projectRenameBusy, setProjectRenameBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
@@ -297,6 +302,10 @@ function CanvasEditorInner({
   const viewportCommandEpoch = useRef(0);
   const cancelViewportCommand = useRef<(() => void) | null>(null);
   const finishZoomSliderRef = useRef<() => void>(() => undefined);
+  const projectRenameInputRef = useRef<HTMLInputElement>(null);
+  const projectRenameTriggerRef = useRef<HTMLButtonElement>(null);
+  const projectRenameInFlight = useRef(false);
+  const cancelProjectRename = useRef(false);
   const {
     screenToFlowPosition,
     fitView,
@@ -327,6 +336,8 @@ function CanvasEditorInner({
     setCreateMenu(null);
     setShortcutsOpen(false);
     setViewportZoom(1);
+    setProjectRenameDraft(null);
+    setProjectRenameBusy(false);
     setLibraryMode(null);
     setLibraryFocusAssetId(null);
     setLibraryError(null);
@@ -371,6 +382,8 @@ function CanvasEditorInner({
     runSubmissionInFlight.current = false;
     documentCommandInFlight.current = false;
     canvasUiPreferencesSaveInFlight.current = false;
+    projectRenameInFlight.current = false;
+    cancelProjectRename.current = false;
     void getCanvasUiPreferences()
       .then(value => {
         if (!cancelled) setCanvasUiPreferences(value);
@@ -660,6 +673,10 @@ function CanvasEditorInner({
   }, [dirtySignal, flushSave]);
 
   const persistNow = useCallback(async (): Promise<boolean> => {
+    if (projectRenameInFlight.current) {
+      setError('项目名称正在保存，请稍后再离开。');
+      return false;
+    }
     if (runSubmissionInFlight.current || documentCommandInFlight.current) {
       setError('画布命令正在提交，请等待完成后再离开或执行其他操作。');
       return false;
@@ -848,6 +865,45 @@ function CanvasEditorInner({
   const selectedContentNode = selectedNode && isContentNode(selectedNode) ? selectedNode : null;
   const selectedDraft = selectedNode ? generationDraftForNode(selectedNode) : null;
   const projectName = projects.find(project => project.project_id === projectId)?.name ?? '画布项目';
+
+  function beginProjectRename() {
+    cancelProjectRename.current = false;
+    setProjectRenameDraft(projectName);
+    requestAnimationFrame(() => projectRenameInputRef.current?.select());
+  }
+
+  async function commitProjectRename(restoreFocus: boolean) {
+    if (projectRenameDraft === null || projectRenameInFlight.current || cancelProjectRename.current) return;
+    const name = projectRenameDraft.trim();
+    if (!name) {
+      setError('请输入画布项目名称');
+      requestAnimationFrame(() => projectRenameInputRef.current?.focus());
+      return;
+    }
+    if (name === projectName) {
+      setProjectRenameDraft(null);
+      if (restoreFocus) requestAnimationFrame(() => projectRenameTriggerRef.current?.focus());
+      return;
+    }
+    projectRenameInFlight.current = true;
+    setProjectRenameBusy(true);
+    setError(null);
+    try {
+      const renamed = await renameCanvasProject(projectId, name);
+      setProjects(current => current.map(project => (
+        project.project_id === projectId ? { ...project, name: renamed.name } : project
+      )));
+      setProjectRenameDraft(null);
+      announceToolNotice(`已重命名为“${renamed.name}”`);
+      if (restoreFocus) requestAnimationFrame(() => projectRenameTriggerRef.current?.focus());
+    } catch (renameError) {
+      setError((renameError as Error).message);
+      requestAnimationFrame(() => projectRenameInputRef.current?.focus());
+    } finally {
+      projectRenameInFlight.current = false;
+      setProjectRenameBusy(false);
+    }
+  }
 
   function defaultPosition() {
     return screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
@@ -2537,13 +2593,52 @@ function CanvasEditorInner({
           <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
             <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="返回画布项目列表" onClick={() => void persistNow().then(saved => { if (saved) onBack(); })}><ArrowLeft /></Button>
             <div className="h-6 w-px bg-border" />
-            <label className="relative min-w-0">
-              <span className="sr-only">切换画布项目</span>
-              <select value={projectId} onChange={event => void persistNow().then(saved => { if (saved) onSwitchProject(event.target.value); })} className="h-9 max-w-28 appearance-none truncate rounded-md bg-transparent pl-2 pr-8 text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary sm:max-w-52">
-                {projects.map(project => <option key={project.project_id} value={project.project_id}>{project.name}</option>)}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2 top-2.5 size-4 text-muted-foreground" />
-            </label>
+            {projectRenameDraft === null ? (
+              <div className="flex min-w-0 items-center">
+                <label className="relative min-w-0">
+                  <span className="sr-only">切换画布项目</span>
+                  <select
+                    value={projectId}
+                    title="双击重命名当前画布"
+                    onDoubleClick={event => {
+                      event.preventDefault();
+                      beginProjectRename();
+                    }}
+                    onChange={event => void persistNow().then(saved => { if (saved) onSwitchProject(event.target.value); })}
+                    className="h-9 max-w-24 appearance-none truncate rounded-md bg-transparent pl-2 pr-7 text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary sm:max-w-48"
+                  >
+                    {projects.map(project => <option key={project.project_id} value={project.project_id}>{project.name}</option>)}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                </label>
+                <Button ref={projectRenameTriggerRef} variant="ghost" size="icon" className="size-8 shrink-0" aria-label={`重命名画布项目 ${projectName}`} onClick={beginProjectRename}>
+                  <Pencil className="size-3.5" aria-hidden="true" />
+                </Button>
+              </div>
+            ) : (
+              <Input
+                ref={projectRenameInputRef}
+                value={projectRenameDraft}
+                disabled={projectRenameBusy}
+                aria-label="画布项目名称"
+                className="h-9 w-32 sm:w-52"
+                onChange={event => setProjectRenameDraft(event.target.value)}
+                onBlur={() => void commitProjectRename(false)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    void commitProjectRename(true);
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    cancelProjectRename.current = true;
+                    setProjectRenameDraft(null);
+                    requestAnimationFrame(() => projectRenameTriggerRef.current?.focus());
+                  }
+                }}
+              />
+            )}
           </div>
           <div aria-live="polite" className="pointer-events-auto max-w-24 truncate rounded-full border border-border bg-glass px-3 py-2 text-xs text-muted-foreground backdrop-blur-glass shell-glow sm:max-w-none">
             {saveState === 'saving' ? '保存中…' : saveState === 'error' ? '保存冲突，内容已保留' : `已保存 · v${document.revision}`}

@@ -37,8 +37,7 @@ import type { CanvasPackageInspection, CanvasProjectSummary, CanvasTrashEntry } 
 
 type EditorState =
   | { open: false }
-  | { open: true; mode: 'create'; name: string }
-  | { open: true; mode: 'rename'; project: CanvasProjectSummary; name: string };
+  | { open: true; name: string };
 
 type DeleteState =
   | { open: false }
@@ -95,20 +94,21 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
     setSaving(true);
     setEditorError(null);
     try {
-      if (editor.mode === 'create') {
-        const project = await createCanvasProject(name);
-        setEditor({ open: false });
-        onOpenProject(project.project_id);
-        return;
-      }
-      await renameCanvasProject(editor.project.project_id, name);
+      const project = await createCanvasProject(name);
       setEditor({ open: false });
-      await load();
+      onOpenProject(project.project_id);
     } catch (error) {
       setEditorError((error as Error).message);
     } finally {
       setSaving(false);
     }
+  }
+
+  async function renameProjectInline(project: CanvasProjectSummary, name: string) {
+    const renamed = await renameCanvasProject(project.project_id, name);
+    setProjects(current => current
+      .map(item => item.project_id === project.project_id ? { ...item, ...renamed } : item)
+      .sort((left, right) => right.updated_at.localeCompare(left.updated_at)));
   }
 
   async function prepareDelete(project: CanvasProjectSummary) {
@@ -294,7 +294,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
             type="button"
             aria-label="新建项目"
             onClick={() => {
-              setEditor({ open: true, mode: 'create', name: '' });
+              setEditor({ open: true, name: '' });
               setEditorError(null);
             }}
             className="group flex min-h-72 cursor-pointer flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border bg-card/30 px-6 text-center transition-colors hover:border-input hover:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -312,10 +312,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
                 key={project.project_id}
                 project={project}
                 onOpen={() => onOpenProject(project.project_id)}
-                onRename={() => {
-                  setEditor({ open: true, mode: 'rename', project, name: project.name });
-                  setEditorError(null);
-                }}
+                onInlineRename={name => renameProjectInline(project, name)}
                 onExport={() => void handleExport(project)}
                 onDelete={() => void prepareDelete(project)}
                 disabled={busyProjectId === project.project_id}
@@ -328,7 +325,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
         {editor.open && (
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>{editor.mode === 'create' ? '新建画布项目' : '重命名画布项目'}</DialogTitle>
+              <DialogTitle>新建画布项目</DialogTitle>
               <DialogDescription>画布项目独立于创作台和工坊，不会由 Skill 自动填充。</DialogDescription>
             </DialogHeader>
             <form className="space-y-4" onSubmit={submitEditor}>
@@ -350,7 +347,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
               <DialogFooter>
                 <Button type="button" variant="outline" disabled={saving} onClick={() => setEditor({ open: false })}>取消</Button>
                 <Button type="submit" disabled={saving}>
-                  {saving ? '保存中…' : editor.mode === 'create' ? '创建并进入' : '保存'}
+                  {saving ? '保存中…' : '创建并进入'}
                 </Button>
               </DialogFooter>
             </form>
@@ -463,22 +460,70 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
 function CanvasProjectCard({
   project,
   onOpen,
-  onRename,
+  onInlineRename,
   onExport,
   onDelete,
   disabled,
 }: {
   project: CanvasProjectSummary;
   onOpen: () => void;
-  onRename: () => void;
+  onInlineRename: (name: string) => Promise<void>;
   onExport: () => void;
   onDelete: () => void;
   disabled: boolean;
 }) {
+  const [renaming, setRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState(project.name);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameBusy, setRenameBusy] = useState(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const renameTriggerRef = useRef<HTMLButtonElement>(null);
+  const renameInFlight = useRef(false);
+  const cancelRename = useRef(false);
+
+  function beginInlineRename() {
+    if (disabled) return;
+    cancelRename.current = false;
+    setRenameDraft(project.name);
+    setRenameError(null);
+    setRenaming(true);
+    requestAnimationFrame(() => renameInputRef.current?.select());
+  }
+
+  async function commitInlineRename(restoreFocus: boolean) {
+    if (renameInFlight.current || cancelRename.current) return;
+    const name = renameDraft.trim();
+    if (!name) {
+      setRenameError('请输入画布项目名称');
+      requestAnimationFrame(() => renameInputRef.current?.focus());
+      return;
+    }
+    if (name === project.name) {
+      setRenaming(false);
+      if (restoreFocus) requestAnimationFrame(() => renameTriggerRef.current?.focus());
+      return;
+    }
+    renameInFlight.current = true;
+    setRenameBusy(true);
+    setRenameError(null);
+    try {
+      await onInlineRename(name);
+      setRenaming(false);
+      if (restoreFocus) requestAnimationFrame(() => renameTriggerRef.current?.focus());
+    } catch (error) {
+      setRenameError((error as Error).message);
+      requestAnimationFrame(() => renameInputRef.current?.focus());
+    } finally {
+      renameInFlight.current = false;
+      setRenameBusy(false);
+    }
+  }
+
   return (
     <article className="group relative overflow-hidden rounded-xl border border-border bg-card/45 transition-colors hover:border-input">
       <button
         type="button"
+        disabled={disabled}
         aria-label={`打开画布项目 ${project.name}`}
         onClick={onOpen}
         className="block w-full cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
@@ -495,19 +540,64 @@ function CanvasProjectCard({
             <Palette className="size-8" aria-hidden="true" />
           </div>
         )}
-        <div className="min-h-24 space-y-1 p-4 pr-14">
-          <h2 className="truncate text-base font-medium text-foreground">{project.name}</h2>
-          <p className="tabular-nums text-sm text-muted-foreground">{formatActivity(project.updated_at)}</p>
-        </div>
       </button>
+      <div className="min-h-28 space-y-1 p-4 pr-14">
+        {renaming ? (
+          <div className="space-y-1.5">
+            <Input
+              ref={renameInputRef}
+              value={renameDraft}
+              disabled={renameBusy}
+              aria-label={`重命名画布项目 ${project.name}`}
+              aria-invalid={Boolean(renameError)}
+              onChange={event => setRenameDraft(event.target.value)}
+              onBlur={() => void commitInlineRename(false)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void commitInlineRename(true);
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelRename.current = true;
+                  setRenameError(null);
+                  setRenaming(false);
+                  requestAnimationFrame(() => renameTriggerRef.current?.focus());
+                }
+              }}
+            />
+            {renameError && <p role="alert" className="text-xs text-destructive">{renameError}</p>}
+          </div>
+        ) : (
+          <button
+            ref={renameTriggerRef}
+            type="button"
+            disabled={disabled}
+            title="双击重命名"
+            onClick={event => {
+              if (event.detail === 0) onOpen();
+            }}
+            onDoubleClick={event => {
+              event.preventDefault();
+              beginInlineRename();
+            }}
+            className="block max-w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <h2 className="truncate text-base font-medium text-foreground">{project.name}</h2>
+          </button>
+        )}
+        <p className="text-xs text-muted-foreground">
+          <span className="tabular-nums">{project.node_count}</span> 个节点 · <span className="tabular-nums">{project.connection_count}</span> 条连线
+        </p>
+        <p className="tabular-nums text-sm text-muted-foreground">{formatActivity(project.updated_at)}</p>
+      </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button disabled={disabled} variant="ghost" size="icon" aria-label={`管理画布项目 ${project.name}`} className="absolute bottom-2 right-2 size-11">
+          <Button disabled={disabled || renameBusy} variant="ghost" size="icon" aria-label={`管理画布项目 ${project.name}`} className="absolute bottom-2 right-2 size-11">
             <MoreHorizontal aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={onRename}><Pencil aria-hidden="true" />重命名</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => window.setTimeout(beginInlineRename, 0)}><Pencil aria-hidden="true" />重命名</DropdownMenuItem>
           <DropdownMenuItem onSelect={onExport}><Download aria-hidden="true" />导出项目包</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={onDelete} className="text-destructive"><Trash2 aria-hidden="true" />删除</DropdownMenuItem>

@@ -495,15 +495,12 @@ def _version_belongs_to_other_canvas(project_id: str, version_id: str) -> bool:
     return False
 
 
-def resolve_canvas_media(project_id: str, version_id: str) -> tuple[Path, CanvasMediaVersion]:
-    document = read_canvas_document(project_id)
-    version = document.content_versions.get(version_id)
-    if version is None:
-        if _version_belongs_to_other_canvas(project_id, version_id):
-            raise PermissionError("canvas media version belongs to another project")
-        raise FileNotFoundError(version_id)
+def _resolve_canvas_media_version(
+    project_id: str,
+    version: CanvasMediaVersion,
+) -> tuple[Path, CanvasMediaVersion]:
     if version.kind == "text":
-        raise FileNotFoundError(version_id)
+        raise FileNotFoundError(version.version_id)
     target = _path_for_media(project_id, version.path)
     project_dir = canvas_project_dir(project_id).resolve()
     uploads = (project_dir / "uploads").resolve()
@@ -511,11 +508,11 @@ def resolve_canvas_media(project_id: str, version_id: str) -> tuple[Path, Canvas
     derived = (project_dir / "derived").resolve()
     if target.is_relative_to(uploads):
         if not target.is_file():
-            raise FileNotFoundError(version_id)
+            raise FileNotFoundError(version.version_id)
         return target, version
     if target.is_relative_to(derived) and version.origin.kind == "local_tool":
         if not target.is_file():
-            raise FileNotFoundError(version_id)
+            raise FileNotFoundError(version.version_id)
         return target, version
     if not target.is_relative_to(outputs) or version.origin.kind != "job_output":
         raise PermissionError("canvas media version has an invalid owned path")
@@ -532,8 +529,18 @@ def resolve_canvas_media(project_id: str, version_id: str) -> tuple[Path, Canvas
     if str(target) not in normalized:
         raise PermissionError("media path is not registered on this canvas job")
     if not target.is_file():
-        raise FileNotFoundError(version_id)
+        raise FileNotFoundError(version.version_id)
     return target, version
+
+
+def resolve_canvas_media(project_id: str, version_id: str) -> tuple[Path, CanvasMediaVersion]:
+    document = read_canvas_document(project_id)
+    version = document.content_versions.get(version_id)
+    if version is None:
+        if _version_belongs_to_other_canvas(project_id, version_id):
+            raise PermissionError("canvas media version belongs to another project")
+        raise FileNotFoundError(version_id)
+    return _resolve_canvas_media_version(project_id, version)
 
 
 def canvas_media_response_metadata(version: CanvasMediaVersion) -> tuple[str, str]:
@@ -545,11 +552,10 @@ def canvas_media_response_metadata(version: CanvasMediaVersion) -> tuple[str, st
     return media_type, f"{stem or 'canvas-media'}{suffix}"
 
 
-def _cover_for_project(project_id: str) -> CanvasProjectCover | None:
-    try:
-        document = read_canvas_document(project_id)
-    except (OSError, ValueError, ValidationError, json.JSONDecodeError):
-        return None
+def _cover_for_project(
+    project_id: str,
+    document: CanvasDocument,
+) -> CanvasProjectCover | None:
     for node in reversed(document.nodes):
         if node.type != "image" or node.data.current_version_id is None:
             continue
@@ -557,7 +563,7 @@ def _cover_for_project(project_id: str) -> CanvasProjectCover | None:
         if version is None or version.kind != "image":
             continue
         try:
-            target, _version = resolve_canvas_media(project_id, version.version_id)
+            target, _version = _resolve_canvas_media_version(project_id, version)
         except (KeyError, OSError, PermissionError, ValueError):
             continue
         if target.is_file():
@@ -571,11 +577,22 @@ def list_canvas_projects() -> list[CanvasProjectSummary]:
         return []
     projects: list[CanvasProjectSummary] = []
     for path in root.glob("*/project.json"):
+        project_id = path.parent.name
         try:
-            project = CanvasProject.model_validate_json(path.read_text(encoding="utf-8"))
-            projects.append(
-                CanvasProjectSummary(**project.model_dump(), cover=_cover_for_project(project.project_id))
-            )
-        except (OSError, ValidationError, json.JSONDecodeError, KeyError):
+            with file_lock(_canvas_lock_path(project_id)):
+                _recover_canvas_transactions_unlocked(project_id)
+                project = CanvasProject.model_validate_json(path.read_text(encoding="utf-8"))
+                if project.project_id != project_id:
+                    raise ValueError("canvas project_id does not match its directory")
+                document = _read_canvas_document_unlocked(project_id)
+                projects.append(
+                    CanvasProjectSummary(
+                        **project.model_dump(),
+                        cover=_cover_for_project(project_id, document),
+                        node_count=len(document.nodes),
+                        connection_count=len(document.connections),
+                    )
+                )
+        except (OSError, RuntimeError, ValueError, ValidationError, json.JSONDecodeError, KeyError):
             continue
     return sorted(projects, key=lambda item: (item.updated_at, item.project_id), reverse=True)

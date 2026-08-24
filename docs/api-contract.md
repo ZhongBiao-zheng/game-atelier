@@ -89,6 +89,9 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /canvas/projects/{id}/library/assets` `/canvas/projects/{id}/library/prompts`
 `GET /canvas/trash` `GET /canvas/ui-preferences`
 
+`GET /canvas/projects` 的 `CanvasProjectSummary` 在项目元数据之外返回派生的 `cover`、`node_count` 与
+`connection_count`；这些字段不进入 `project.json`，必须与当前 `canvas.json` 一致。
+
 ### 人工画布契约
 
 画布是 Web 用户人工创建、人工编排的独立创作空间，Skill 不创建项目、不填充节点，也不推进整张图。
