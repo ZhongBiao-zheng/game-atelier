@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArrowLeft, Eye, EyeOff, X } from 'lucide-react';
-import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
+import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
 
 type ProviderKind = 'official' | 'third_party' | 'custom';
 type ApiModality = 'image' | 'video' | 'audio' | 'llm';
@@ -174,6 +174,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
           // 「重拉一次列表来修协议」必须真的有效：protocol 是纯机器字段（表单里没有输入口），
           // 命中上游就用上游值覆盖，否则存错 / 存空的行永远修不回来。
           protocol: hit.protocol,
+          input_modalities: hit.input_modalities,
           // name 有输入框、可能被改成自己的叫法，只在空着或还等于 id 时补上游名。
           name: !m.name.trim() || m.name.trim() === m.id.trim() ? hit.name : m.name,
           // 分类归表单管（编辑态已存行是只读徽标）；只有未识别行的显式二选一才回写。
@@ -185,7 +186,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
       .filter((m) => fetchedChecked.has(m.id) && !keptIds.has(m.id))
       // protocol 必须随模型一起存：它是上游协议标注的解析结果（图片 ark/openai、视频
       // seedance/kling/…），丢了就得靠 caller 端启发式猜端点。
-      .map((m) => ({ name: m.name, id: m.id, modality: resolvedModality(m) as ModelModality, protocol: m.protocol }));
+      .map((m) => ({ name: m.name, id: m.id, modality: resolvedModality(m) as ModelModality, protocol: m.protocol, input_modalities: m.input_modalities }));
     const next = [...kept, ...added];
     setModels(next.length ? next : [{ name: '', id: '' }]);
     setPreview(null);
@@ -226,7 +227,19 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     setError(null);
     try {
       const cleanModels = models
-        .map((model) => ({ name: model.name.trim(), id: model.id.trim(), modality: model.modality ?? 'image' as ModelModality, protocol: model.protocol ?? null }))
+        .map((model) => {
+          const modality = model.modality ?? 'image' as ModelModality;
+          const inputModalities = modality === 'text'
+            ? Array.from(new Set<ModelInputModality>(['text', ...(model.input_modalities ?? [])]))
+            : model.input_modalities ?? [];
+          return {
+            name: model.name.trim(),
+            id: model.id.trim(),
+            modality,
+            protocol: model.protocol ?? null,
+            input_modalities: inputModalities,
+          };
+        })
         .filter((model) => model.name && model.id);
       // key 级 modalities 由模型标注派生；存量契约用 llm 表示文本生成能力。
       const derivedModalities = Array.from(new Set([
@@ -657,10 +670,10 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                   </div>
                 </div>
                 {fetchError && <div className="mb-2 text-sm text-destructive">{fetchError}</div>}
-                <div className="mb-2 grid grid-cols-[1fr_1fr_6.5rem_auto] gap-2 text-xs text-muted-foreground">
+                <div className="mb-2 grid grid-cols-[1fr_1fr_15rem_auto] gap-2 text-xs text-muted-foreground">
                   <span>模型别名</span>
                   <span>模型 ID</span>
-                  <span>分类</span>
+                  <span>分类 / 输入</span>
                   <span className="sr-only">操作</span>
                 </div>
                 <div className="space-y-2">
@@ -684,43 +697,63 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                         className={`${fieldClass} font-mono`}
                         placeholder="请求里使用的 ID，例如：doubao-seedream-5-0-260128"
                       />
-                      {isLocked(model) ? (
-                        /* 已存在的模型分类固化为只读徽标——添加完成后不允许再调分类。 */
-                        <div role="group" aria-label={`模型分类 ${index + 1}`} className="flex items-center">
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-xs ${
-                              (model.modality ?? 'image') === 'video'
-                                ? 'border-border text-foreground'
-                                : 'border-primary/40 text-primary'
-                            }`}
+                      <div className="space-y-1.5">
+                        {isLocked(model) ? (
+                          /* 已存在的模型分类固化为只读徽标——添加完成后不允许再调分类。 */
+                          <div role="group" aria-label={`模型分类 ${index + 1}`} className="flex items-center">
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-xs ${
+                                (model.modality ?? 'image') === 'video'
+                                  ? 'border-border text-foreground'
+                                  : 'border-primary/40 text-primary'
+                              }`}
+                            >
+                              {CATEGORY_LABELS[model.modality ?? 'image']}
+                            </span>
+                          </div>
+                        ) : (
+                          <div
+                            role="group"
+                            aria-label={`模型分类 ${index + 1}`}
+                            className="flex items-center rounded-md border border-border p-0.5"
                           >
-                            {CATEGORY_LABELS[model.modality ?? 'image']}
-                          </span>
-                        </div>
-                      ) : (
-                        <div
-                          role="group"
-                          aria-label={`模型分类 ${index + 1}`}
-                          className="flex items-center rounded-md border border-border p-0.5"
-                        >
-                          {GENERATION_MODALITIES.map((mod) => {
-                            const active = (model.modality ?? 'image') === mod;
-                            return (
-                              <button
-                                key={mod}
-                                type="button"
-                                aria-pressed={active}
-                                onClick={() => setModels(models.map((m, i) => i === index ? { ...m, modality: mod } : m))}
-                                className={`rounded-sm px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                                  active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
-                                }`}
-                              >
-                                {CATEGORY_LABELS[mod]}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+                            {GENERATION_MODALITIES.map((mod) => {
+                              const active = (model.modality ?? 'image') === mod;
+                              return (
+                                <button
+                                  key={mod}
+                                  type="button"
+                                  aria-pressed={active}
+                                  onClick={() => setModels(models.map((m, i) => i === index ? {
+                                    ...m,
+                                    modality: mod,
+                                    input_modalities: mod === 'text' ? ['text'] : [],
+                                  } : m))}
+                                  className={`rounded-sm px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                                    active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                                  }`}
+                                >
+                                  {CATEGORY_LABELS[mod]}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {(model.modality ?? 'image') === 'text' && (
+                          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <input
+                              type="checkbox"
+                              checked={(model.input_modalities ?? []).includes('image')}
+                              onChange={(event) => setModels(models.map((current, i) => i === index ? {
+                                ...current,
+                                input_modalities: event.target.checked ? ['text', 'image'] : ['text'],
+                              } : current))}
+                              className="size-3.5 accent-[color:var(--primary)]"
+                            />
+                            支持图片输入
+                          </label>
+                        )}
+                      </div>
                       <button
                         type="button"
                         onClick={() => setModels(models.filter((_, i) => i !== index))}

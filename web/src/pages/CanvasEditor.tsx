@@ -43,6 +43,7 @@ import {
   cancelCanvasRun,
   canvasDownloadUrl,
   canvasMediaUrl,
+  createCanvasReversePromptConfig,
   createCanvasPrompt,
   deleteCanvasAsset,
   deleteCanvasPrompt,
@@ -59,6 +60,7 @@ import {
   saveCanvasAsset,
   saveCanvasDocument,
   submitCanvasRun,
+  submitCanvasReversePrompt,
   updateCanvasAsset,
   updateCanvasPrompt,
   uploadCanvasMedia,
@@ -73,6 +75,7 @@ import {
   ToolButton,
   canvasNodeTypes,
   copyablePromptForNode,
+  isReversePromptJob,
   type CanvasNodeContextValue,
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
@@ -206,6 +209,7 @@ function CanvasEditorInner({
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
   const syncedTerminalRuns = useRef(new Set<string>());
+  const reversePromptConfigAttempts = useRef(new Set<string>());
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
   const { screenToFlowPosition, fitView } = useReactFlow<FlowNode>();
   const acceptAssets = useCallback((value: RevisionedSidecar<CanvasLibraryAsset>) => {
@@ -243,6 +247,7 @@ function CanvasEditorInner({
     history.current = { past: [], future: [] };
     pendingTextVersions.current.clear();
     syncedTerminalRuns.current.clear();
+    reversePromptConfigAttempts.current.clear();
     dirtyVersion.current = 0;
     setDirtySignal(0);
     serverRevision.current = 0;
@@ -1079,6 +1084,46 @@ function CanvasEditorInner({
     }
   }, [flushSave, mergeSubmittedRunDocument, persistNow, projectId]);
 
+  const reversePrompt = useCallback(async (node: CanvasContentNode) => {
+    if (node.type !== 'image' || !node.data.current_version_id) {
+      setError('请选择一个已有内容的图片节点再反推提示词。');
+      return;
+    }
+    if (runSubmissionInFlight.current) {
+      setError('另一项生成正在提交，请稍后再试。');
+      return;
+    }
+    setSubmittingNodeIds(current => new Set(current).add(node.id));
+    setError(null);
+    try {
+      if (!await persistNow()) return;
+      const dirtyAtSubmission = dirtyVersion.current;
+      runSubmissionInFlight.current = true;
+      const run = await submitCanvasReversePrompt(
+        projectId,
+        node.id,
+        serverRevision.current,
+      );
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      setJobs(currentJobs => [
+        ...currentJobs.filter(job => job.job_id !== run.job.job_id),
+        run.job,
+      ]);
+      const resultId = run.job.canvas_run?.result_node_id;
+      if (resultId) setSelectedNodeIds(new Set([resultId]));
+    } catch (submitError) {
+      setError((submitError as Error).message);
+    } finally {
+      runSubmissionInFlight.current = false;
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+      setSubmittingNodeIds(current => {
+        const next = new Set(current);
+        next.delete(node.id);
+        return next;
+      });
+    }
+  }, [flushSave, mergeSubmittedRunDocument, persistNow, projectId]);
+
   const retryRun = useCallback(async (
     nodeId: string,
     runId: string,
@@ -1216,6 +1261,23 @@ function CanvasEditorInner({
     }
     return grouped;
   }, [jobs]);
+  const reversePromptConfiguredNodeIds = useMemo(() => {
+    const configured = new Set<string>();
+    if (!document) return configured;
+    const configIds = new Set(
+      document.nodes.filter(node => node.type === 'config').map(node => node.id),
+    );
+    for (const connection of document.connections) {
+      if (
+        connection.role === 'input'
+        && connection.target_node_id === reversePromptConfigNodeId(connection.source_node_id)
+        && configIds.has(connection.target_node_id)
+      ) {
+        configured.add(connection.source_node_id);
+      }
+    }
+    return configured;
+  }, [document]);
   const previewContent = useCallback((versionId: string, title: string, nodeId: string) => {
     const version = latestDocument.current?.content_versions[versionId];
     if (version) setPreview({ nodeId, title, version });
@@ -1243,6 +1305,97 @@ function CanvasEditorInner({
       setError('无法写入剪贴板，请检查浏览器权限后重试。');
     }
   }, [announceToolNotice, jobsByResultNodeId]);
+
+  const recoverReversePromptConfig = useCallback(async (job: Job) => {
+    const context = job.canvas_run;
+    if (!context || !isReversePromptJob(job)) return;
+    if (documentCommandInFlight.current || runSubmissionInFlight.current) return;
+    reversePromptConfigAttempts.current.add(context.run_id);
+    setSubmittingNodeIds(current => new Set(current).add(context.result_node_id));
+    setError(null);
+    try {
+      if (!await persistNow()) return;
+      const before = latestDocument.current;
+      if (!before) return;
+      const dirtyAtCommand = dirtyVersion.current;
+      documentCommandInFlight.current = true;
+      const remote = await createCanvasReversePromptConfig(
+        projectId,
+        context.run_id,
+        serverRevision.current,
+      );
+      const concurrent = latestDocument.current ?? remote;
+      const configId = reversePromptConfigNodeId(context.result_node_id);
+      const remoteConfig = remote.nodes.find(node => node.id === configId);
+      if (!remoteConfig || remoteConfig.type !== 'config') {
+        throw new Error('服务端没有返回反推图片配置节点。');
+      }
+      const hadConfig = concurrent.nodes.some(node => node.id === configId);
+      const connectionIds = new Set(concurrent.connections.map(connection => connection.id));
+      const createdConnections = remote.connections.filter(connection => (
+        connection.role === 'input'
+        && connection.source_node_id === context.result_node_id
+        && connection.target_node_id === configId
+        && !connectionIds.has(connection.id)
+      ));
+      const authoritativeRevision = Math.max(serverRevision.current, remote.revision);
+      const merged: CanvasDocument = {
+        ...concurrent,
+        revision: authoritativeRevision,
+        updated_at: remote.revision >= serverRevision.current ? remote.updated_at : concurrent.updated_at,
+        nodes: hadConfig ? concurrent.nodes : [...concurrent.nodes, remoteConfig],
+        connections: [...concurrent.connections, ...createdConnections],
+        content_versions: { ...remote.content_versions, ...concurrent.content_versions },
+      };
+      if (!hadConfig) {
+        history.current.past.push(concurrent);
+        history.current.past = history.current.past.slice(-50);
+        history.current.future = [];
+      }
+      serverRevision.current = authoritativeRevision;
+      latestDocument.current = merged;
+      if (dirtyVersion.current > dirtyAtCommand) {
+        saveQueued.current = merged;
+        setSaveState('saving');
+      } else {
+        saveQueued.current = null;
+        setSaveState('saved');
+      }
+      flowNodeCache.current.clear();
+      setDocument(merged);
+      setSelectedConnectionIds(new Set());
+      setSelectedNodeIds(new Set([configId]));
+      announceToolNotice('已从反推文本创建图片生成配置');
+    } catch (configError) {
+      setError((configError as Error).message);
+    } finally {
+      documentCommandInFlight.current = false;
+      setSubmittingNodeIds(current => {
+        const next = new Set(current);
+        next.delete(context.result_node_id);
+        return next;
+      });
+      if (saveQueued.current) void flushSave().catch(() => {
+        setError('图片配置已创建，但并发编辑尚未保存。请检查服务后重试。');
+      });
+    }
+  }, [announceToolNotice, flushSave, persistNow, projectId]);
+
+  useEffect(() => {
+    if (documentCommandInFlight.current || runSubmissionInFlight.current) return;
+    const pending = jobs.find(job => {
+      const context = job.canvas_run;
+      return Boolean(
+        context
+        && isReversePromptJob(job)
+        && (job.status === 'done' || job.status === 'partial')
+        && context.candidates.some(candidate => candidate.status === 'succeeded')
+        && !reversePromptConfiguredNodeIds.has(context.result_node_id)
+        && !reversePromptConfigAttempts.current.has(context.run_id),
+      );
+    });
+    if (pending) void recoverReversePromptConfig(pending);
+  }, [jobs, recoverReversePromptConfig, reversePromptConfiguredNodeIds]);
 
   const mergeMediaPointerCommand = useCallback((
     remote: CanvasDocument,
@@ -1514,6 +1667,9 @@ function CanvasEditorInner({
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
     copyPrompt,
+    reversePrompt,
+    recoverReversePromptConfig,
+    reversePromptConfiguredNodeIds,
     replaceMedia,
     toggleFreeResize,
     openMediaOperation,
@@ -1534,7 +1690,10 @@ function CanvasEditorInner({
     previewContent,
     projectId,
     recordHistorySnapshot,
+    recoverReversePromptConfig,
     replaceMedia,
+    reversePrompt,
+    reversePromptConfiguredNodeIds,
     retryRun,
     selectCandidate,
     selectOnlyNode,
@@ -1722,6 +1881,11 @@ function CanvasEditorInner({
             onCopyPrompt={copyablePromptForNode(selectedContentNode, jobsByResultNodeId)
               ? () => void copyPrompt(selectedContentNode)
               : undefined}
+            onReversePrompt={selectedContentNode.type === 'image'
+              && selectedContentNode.data.current_version_id
+              ? () => void reversePrompt(selectedContentNode)
+              : undefined}
+            reversePromptBusy={submittingNodeIds.has(selectedContentNode.id)}
             onReplaceMedia={selectedContentNode.data.current_version_id
               ? () => replaceMedia(selectedContentNode)
               : undefined}
@@ -1990,6 +2154,10 @@ function replacementAccept(kind: MediaReplaceTarget['kind']) {
   if (kind === 'image') return '.png,.jpg,.jpeg,.webp';
   if (kind === 'video') return '.mp4,.webm,.mov';
   return '.mp3,.wav,.m4a,.aac';
+}
+
+function reversePromptConfigNodeId(resultNodeId: string) {
+  return `config-reverse-${resultNodeId}`;
 }
 
 function canvasNodeRenderedSize(

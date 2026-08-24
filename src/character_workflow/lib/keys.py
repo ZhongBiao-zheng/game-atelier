@@ -30,6 +30,7 @@ Provider = Literal[
 ]
 Kind = Literal["portrait", "promo", "turnaround"]
 ModelModality = Literal["text", "image", "video", "audio"]
+ModelInputModality = Literal["text", "image", "video", "audio"]
 
 
 class ModelSpec(BaseModel):
@@ -41,6 +42,8 @@ class ModelSpec(BaseModel):
     # 权威值来自上游 /models 的协议标注（models-preview 解析后随模型一起存）；旧数据为
     # None，读时由 _backfill_model_protocols 按启发式回填（见 read_keys_db）。
     protocol: str | None = None
+    # 模型可理解的输入模态。反推提示词等多模态文本能力只认明确声明，不按模型名猜。
+    input_modalities: list[ModelInputModality] = Field(default_factory=list)
 
 
 class KeySpec(BaseModel):

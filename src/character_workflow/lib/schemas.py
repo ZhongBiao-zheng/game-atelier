@@ -746,6 +746,12 @@ class CanvasRunCreate(BaseModel):
     requested_count: int = Field(default=1, ge=1, le=4)
 
 
+class CanvasReversePromptCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    surface_node_id: str = Field(min_length=1, max_length=120)
+    expected_revision: int = Field(ge=0)
+
+
 class CanvasRunResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     job: Job
@@ -757,6 +763,11 @@ class CanvasRunRetry(BaseModel):
     mode: Literal["original", "current"]
     expected_revision: int = Field(ge=0)
     candidate_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class CanvasReversePromptConfigCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=0)
 
 
 SidecarItem = TypeVar("SidecarItem")

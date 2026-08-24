@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, Plus, RotateCcw, Sparkles, Square, Trash2, Type, Unlock, ZoomIn } from 'lucide-react';
+import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, Plus, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, ZoomIn } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -46,6 +46,9 @@ export interface CanvasNodeContextValue {
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
+  reversePrompt: (node: CanvasContentNode) => Promise<void>;
+  recoverReversePromptConfig: (job: Job) => Promise<void>;
+  reversePromptConfiguredNodeIds: ReadonlySet<string>;
   replaceMedia: (node: CanvasContentNode) => void;
   toggleFreeResize: (node: CanvasContentNode) => void;
   openMediaOperation: (node: CanvasContentNode, tool: CanvasMediaTool) => void;
@@ -67,6 +70,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const compactMediaTools = (node.size?.width ?? 320) < 480;
   const replacingMedia = context.mediaReplaceBusyNodeIds.has(node.id);
   const imageResizeUnlocked = node.type === 'image' && node.data.display.free_resize;
+  const submittingNode = context.submittingNodeIds.has(node.id);
+  const nodeRunId = activeRunId(node);
+  const nodeJob = nodeRunId ? context.jobsByRunId.get(nodeRunId) : undefined;
+  const reversePromptJob = nodeJob && isReversePromptJob(nodeJob) ? nodeJob : undefined;
+  const reversePromptRunning = reversePromptJob?.status === 'pending' || reversePromptJob?.status === 'pending_confirm';
+  const reversePromptSucceeded = reversePromptJob?.canvas_run?.candidates.some(candidate => candidate.status === 'succeeded') ?? false;
 
   return (
     <div className="canvas-node-shell group relative h-full w-full overflow-visible" data-selected={selected ? 'true' : 'false'}>
@@ -143,6 +152,15 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               <ClipboardCopy className="size-3.5" aria-hidden="true" />
             </button>
           )}
+          {node.type === 'image' && content?.kind === 'image' && !compactMediaTools && (
+            <MediaToolButton
+              label={`反推 ${node.title} 的提示词`}
+              disabled={submittingNode || replacingMedia}
+              onClick={() => void context.reversePrompt(node)}
+            >
+              {submittingNode ? <LoaderCircle className="animate-spin" /> : <ScanText />}
+            </MediaToolButton>
+          )}
           {content && content.kind !== 'text' && providesContent(node) && (!compactMediaTools || node.type !== 'image') && (
             <MediaToolButton
               label={`替换 ${node.title}`}
@@ -167,6 +185,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" onClick={event => event.stopPropagation()}>
+                  <MediaToolMenuItem label={`反推 ${node.title} 的提示词`} disabled={submittingNode || replacingMedia} onSelect={() => void context.reversePrompt(node)}>{submittingNode ? <LoaderCircle className="animate-spin" /> : <ScanText />}</MediaToolMenuItem>
                   <MediaToolMenuItem label={`替换 ${node.title}`} disabled={replacingMedia} onSelect={() => context.replaceMedia(node)}>{replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}</MediaToolMenuItem>
                   <MediaToolMenuItem label={imageResizeUnlocked ? `锁定 ${node.title} 比例` : `自由缩放 ${node.title}`} disabled={replacingMedia} onSelect={() => context.toggleFreeResize(node)}>{imageResizeUnlocked ? <Lock /> : <Unlock />}</MediaToolMenuItem>
                   <MediaToolMenuItem label={`裁剪 ${node.title}`} disabled={replacingMedia} onSelect={() => context.openMediaOperation(node, 'crop')}><Crop /></MediaToolMenuItem>
@@ -182,6 +201,33 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
                 <MediaToolButton label={`本地放大 ${node.title}`} disabled={replacingMedia} onClick={() => context.openMediaOperation(node, 'upscale')}><ZoomIn /></MediaToolButton>
               </>
             )
+          )}
+          {reversePromptJob && reversePromptRunning && (
+            <MediaToolButton
+              label="停止反推提示词"
+              disabled={Boolean(reversePromptJob.cancel_requested_at)}
+              onClick={() => void context.cancelRun(reversePromptJob.canvas_run!.run_id)}
+            >
+              {reversePromptJob.cancel_requested_at ? <LoaderCircle className="animate-spin" /> : <Square />}
+            </MediaToolButton>
+          )}
+          {reversePromptJob && !reversePromptRunning && !reversePromptSucceeded && (
+            <MediaToolButton
+              label="按原设置重试反推提示词"
+              disabled={submittingNode}
+              onClick={() => void context.retryRun(node.id, reversePromptJob.canvas_run!.run_id, 'original')}
+            >
+              {submittingNode ? <LoaderCircle className="animate-spin" /> : <RotateCcw />}
+            </MediaToolButton>
+          )}
+          {reversePromptJob && reversePromptSucceeded && !context.reversePromptConfiguredNodeIds.has(node.id) && (
+            <MediaToolButton
+              label="从反推文本创建图片配置"
+              disabled={submittingNode}
+              onClick={() => void context.recoverReversePromptConfig(reversePromptJob)}
+            >
+              {submittingNode ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
+            </MediaToolButton>
           )}
           <button
             type="button"
@@ -232,6 +278,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
             <p className="line-clamp-5 whitespace-pre-wrap p-3 text-sm leading-relaxed text-foreground">
               {content?.kind === 'text' && content.text
                 ? content.text
+                : reversePromptRunning
+                  ? '正在分析图片并整理提示词…'
+                  : reversePromptJob?.status === 'failed'
+                    ? reversePromptJob.error || '反推提示词失败，可从节点工具栏重试'
                 : draft ? '选择节点，填写下方生成设置' : '选择节点后输入文本…'}
             </p>
           )}
@@ -619,6 +669,7 @@ export function CanvasInspector({
   onPreview,
   onSaveAsset,
   onCopyPrompt,
+  onReversePrompt,
   onReplaceMedia,
   onToggleFreeResize,
   downloadHref,
@@ -626,6 +677,7 @@ export function CanvasInspector({
   onSplit,
   onUpscale,
   replaceMediaBusy = false,
+  reversePromptBusy = false,
   saveAssetBusy = false,
 }: {
   node: CanvasContentNode;
@@ -639,6 +691,7 @@ export function CanvasInspector({
   onPreview?: () => void;
   onSaveAsset?: () => void;
   onCopyPrompt?: () => void;
+  onReversePrompt?: () => void;
   onReplaceMedia?: () => void;
   onToggleFreeResize?: () => void;
   downloadHref?: string;
@@ -646,6 +699,7 @@ export function CanvasInspector({
   onSplit?: () => void;
   onUpscale?: () => void;
   replaceMediaBusy?: boolean;
+  reversePromptBusy?: boolean;
   saveAssetBusy?: boolean;
 }) {
   const content = contentForNode(node, contentVersions);
@@ -664,6 +718,11 @@ export function CanvasInspector({
           )}
           {onCopyPrompt && (
             <Button variant="ghost" size="icon" aria-label={`复制 ${node.title} 的生成提示词`} onClick={onCopyPrompt}><ClipboardCopy /></Button>
+          )}
+          {content?.kind === 'image' && onReversePrompt && (
+            <Button variant="ghost" size="icon" disabled={reversePromptBusy || replaceMediaBusy} aria-label={`反推 ${node.title} 的提示词`} onClick={onReversePrompt}>
+              {reversePromptBusy ? <LoaderCircle className="animate-spin" /> : <ScanText />}
+            </Button>
           )}
           {content && content.kind !== 'text' && onReplaceMedia && (
             <Button variant="ghost" size="icon" disabled={replaceMediaBusy} aria-label={`替换 ${node.title}`} onClick={onReplaceMedia}>
@@ -814,6 +873,11 @@ function activeRunId(node: CanvasNode): string | null {
     return node.data.active_run_id;
   }
   return null;
+}
+
+export function isReversePromptJob(job: Job): boolean {
+  return job.canvas_run?.snapshot.normalized_params.preset_id === 'canvas.reverse_prompt'
+    && job.canvas_run.snapshot.normalized_params.preset_version === 1;
 }
 
 function runStatus(job: Job | undefined): string {

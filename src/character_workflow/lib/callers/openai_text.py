@@ -1,6 +1,8 @@
 """OpenAI-compatible text generation through chat/completions."""
 from __future__ import annotations
 
+import base64
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -11,6 +13,30 @@ from character_workflow.lib.callers.openai_compat import api_root
 
 class OpenAITextError(RuntimeError):
     pass
+
+
+_IMAGE_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+_MAX_INLINE_IMAGE_BYTES = 25 * 1024 * 1024
+
+
+def _image_url(reference: str) -> str:
+    if reference.startswith(("https://", "http://")):
+        return reference
+    if reference.startswith(("data:image/png;", "data:image/jpeg;", "data:image/webp;")):
+        return reference
+    path = Path(reference)
+    mime_type = _IMAGE_MIME.get(path.suffix.lower())
+    if mime_type is None or not path.is_file():
+        raise OpenAITextError("multimodal text input is not a supported image")
+    if path.stat().st_size > _MAX_INLINE_IMAGE_BYTES:
+        raise OpenAITextError("multimodal text input exceeds 25 MiB")
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
 
 
 def _content_text(choice: object) -> str | None:
@@ -65,9 +91,19 @@ def generate(
         )
 
     options = params or {}
+    references = [str(value) for value in options.get("reference_images") or []]
+    content: str | list[dict[str, Any]] = prompt
+    if references:
+        content = [
+            {"type": "text", "text": prompt},
+            *[
+                {"type": "image_url", "image_url": {"url": _image_url(reference)}}
+                for reference in references
+            ],
+        ]
     payload: dict[str, Any] = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": content}],
         "n": max(1, int(n)),
         "stream": False,
     }

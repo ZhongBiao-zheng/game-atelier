@@ -1,6 +1,7 @@
 import { request, requestJson } from './http';
 export type ApiModality = 'image' | 'video' | 'audio' | 'llm' | string;
 export type ModelModality = 'text' | 'image' | 'video' | 'audio';
+export type ModelInputModality = 'text' | 'image' | 'video' | 'audio';
 
 export interface KeyView {
   alias: string;
@@ -40,6 +41,8 @@ export interface KeyModel {
   modality?: ModelModality | null;
   /** 调用协议 id —— 四模态均由后端解析；不可解析时 null。 */
   protocol?: string | null;
+  /** 模型可理解的输入模态；多模态文本能力只认明确声明。 */
+  input_modalities?: ModelInputModality[];
 }
 
 /** 模型分类的统一判定：模型级标注优先，未标注按 key 级 modalities 兜底。 */
@@ -100,6 +103,7 @@ export interface RemoteModel {
   modality: ModelModality | null;
   category: ModelCategory;
   protocol: string | null;
+  input_modalities: ModelInputModality[];
 }
 
 export interface ModelsPreview {

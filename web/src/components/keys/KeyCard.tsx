@@ -8,7 +8,13 @@ export interface KeyRow {
   base_url?: string | null;
   masked_secret: string;
   capabilities?: string[];
-  models?: { name: string; id: string; modality?: 'text' | 'image' | 'video' | 'audio' | null }[];
+  models?: {
+    name: string;
+    id: string;
+    modality?: 'text' | 'image' | 'video' | 'audio' | null;
+    protocol?: string | null;
+    input_modalities?: Array<'text' | 'image' | 'video' | 'audio'>;
+  }[];
   homepage_url?: string | null;
   docs_url?: string | null;
   api_key_url?: string | null;

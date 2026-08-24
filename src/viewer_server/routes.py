@@ -63,7 +63,8 @@ from character_workflow.lib.schemas import (
     CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasPrompt, CanvasPromptCreate, CanvasPromptPatch,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
-    CanvasProjectList, CanvasProjectRename, CanvasRunCreate, CanvasRunResponse, CanvasRunRetry,
+    CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
+    CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse, CanvasRunRetry,
     CanvasUploadResponse, RevisionedSidecar,
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
@@ -1572,6 +1573,18 @@ def _image_protocol(item: dict) -> str | None:
     return None
 
 
+def _model_input_modalities(item: dict) -> list[str]:
+    """Normalize explicit upstream input modality declarations; never infer vision from model ids."""
+    arch = item.get("architecture")
+    raw = item.get("input_modalities")
+    if raw is None and isinstance(arch, dict):
+        raw = arch.get("input_modalities")
+    if not isinstance(raw, list):
+        return []
+    allowed = {"text", "image", "video", "audio"}
+    return [kind for kind in (str(value).lower() for value in raw) if kind in allowed]
+
+
 @router.post("/keys/models-preview")
 def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
     """代理拉取上游 GET {base}/models 供 Key 表单做模型映射。
@@ -1659,6 +1672,7 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
             # unknown 与 excluded 都要能被前端区分：前者是「需要你确认」，不是「其他垃圾」。
             "category": category,
             "protocol": protocol,
+            "input_modalities": _model_input_modalities(item),
         })
     return {"models": models, "total": total, "excluded": excluded}
 
@@ -2684,6 +2698,89 @@ def _run_canvas_job_safely(job_id: str) -> None:
     except Exception:  # noqa: BLE001
         # run_canvas_job persists both the friendly Job failure and failed candidates.
         logger.warning("canvas run failed: %s", job_id)
+
+
+def _canvas_run_revision_conflict(error: RuntimeError) -> HTTPException | None:
+    detail = str(error)
+    if not detail.startswith("revision_conflict:"):
+        return None
+    return HTTPException(409, detail={
+        "code": "revision_conflict",
+        "message": "画布已发生变化，请保留当前内容并重试。",
+        "current_revision": int(detail.split(":", 1)[1]),
+    })
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/reverse-prompt",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+def post_canvas_reverse_prompt(
+    project_id: str,
+    payload: CanvasReversePromptCreate,
+    background: BackgroundTasks,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import (
+        CanvasRunCommandError,
+        submit_reverse_prompt_run,
+    )
+
+    try:
+        job, document = submit_reverse_prompt_run(
+            project_id,
+            payload.surface_node_id,
+            payload.expected_revision,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None
+    except CanvasRunCommandError as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/{run_id}/reverse-prompt-config",
+    response_model=CanvasDocument,
+)
+def post_canvas_reverse_prompt_config(
+    project_id: str,
+    run_id: str,
+    payload: CanvasReversePromptConfigCreate,
+) -> CanvasDocument:
+    from character_workflow.lib.canvas_runs import (
+        CanvasRunCommandError,
+        create_reverse_prompt_config,
+    )
+
+    try:
+        return create_reverse_prompt_config(project_id, run_id, payload.expected_revision)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或反推生成记录") from None
+    except CanvasRunCommandError as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
 
 
 @router.post(

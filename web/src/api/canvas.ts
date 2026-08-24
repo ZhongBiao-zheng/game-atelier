@@ -371,6 +371,41 @@ export function submitCanvasRun(
   );
 }
 
+export function submitCanvasReversePrompt(
+  projectId: string,
+  surfaceNodeId: string,
+  expectedRevision: number,
+): Promise<CanvasRun> {
+  return requestJson<CanvasRun>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/reverse-prompt`,
+    '反推图片提示词',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        surface_node_id: surfaceNodeId,
+        expected_revision: expectedRevision,
+      }),
+    },
+  );
+}
+
+export function createCanvasReversePromptConfig(
+  projectId: string,
+  runId: string,
+  expectedRevision: number,
+): Promise<CanvasDocument> {
+  return requestJson<CanvasDocument>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/reverse-prompt-config`,
+    '创建反推图片配置',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    },
+  );
+}
+
 export function retryCanvasRun(
   projectId: string,
   runId: string,

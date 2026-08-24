@@ -29,6 +29,8 @@ from character_workflow.lib.schemas import (
     AssetSlot,
     CanvasActor,
     CanvasContentVersion,
+    CanvasConfigNode,
+    CanvasConfigNodeData,
     CanvasDerivationConnection,
     CanvasDocument,
     CanvasGenerationDraft,
@@ -37,6 +39,7 @@ from character_workflow.lib.schemas import (
     CanvasAudioNode,
     CanvasContentNodeData,
     CanvasImageNode,
+    CanvasInputConnection,
     CanvasJobContext,
     CanvasJobOutputOrigin,
     CanvasMediaDisplay,
@@ -74,6 +77,23 @@ _RUN_GLOBAL_GATE = BoundedSemaphore(4)
 _RUN_VIDEO_GATE = BoundedSemaphore(1)
 _RUN_ALIAS_GATES: dict[str, BoundedSemaphore] = {}
 _RUN_ALIAS_GATES_LOCK = Lock()
+_REVERSE_PROMPT_PRESET_ID = "canvas.reverse_prompt"
+_REVERSE_PROMPT_PRESET_VERSION = 1
+_REVERSE_PROMPT = (
+    "分析唯一附带的图片，写出一段可以直接用于图像生成模型的中文提示词。"
+    "准确描述主体、动作或状态、构图、场景、光线、色彩、材质、镜头视角与画面风格；"
+    "只写图中能够判断的内容，不虚构品牌、人物身份或文字含义。"
+    "不要解释分析过程，不要使用标题、列表、Markdown，也不要提到‘这张图’或‘参考图’。"
+)
+
+
+class CanvasRunCommandError(Exception):
+    """Stable, user-facing rejection from a specialized Canvas Run command."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
 
 def _now() -> str:
@@ -328,6 +348,48 @@ def _model_modality(model: ModelSpec, key: KeySpec) -> str:
     return "image"
 
 
+def _keys_default_first() -> list[KeySpec]:
+    database = read_keys_db()
+    return sorted(
+        database.keys,
+        key=lambda key: 0 if key.alias == database.default_alias else 1,
+    )
+
+
+def _supports_openai_text(key: KeySpec, model: ModelSpec) -> bool:
+    declared_chat = model.protocol in {"openai", "openai-chat", "chat-completions"}
+    return (
+        model.protocol in {None, "openai", "openai-chat", "chat-completions"}
+        and (key.provider in {"openai", "openrouter", "tokendance", "custom"} or declared_chat)
+    )
+
+
+def _resolve_reverse_prompt_model() -> tuple[KeySpec, ModelSpec]:
+    for key in _keys_default_first():
+        for model in key.models:
+            if (
+                _model_modality(model, key) == "text"
+                and "image" in model.input_modalities
+                and _supports_openai_text(key, model)
+            ):
+                return key, model
+    raise CanvasRunCommandError(
+        "canvas_reverse_prompt_model_missing",
+        "未配置支持图片输入的文本模型。请在设置中为兼容模型开启“支持图片输入”。",
+    )
+
+
+def _resolve_default_image_model() -> tuple[KeySpec, ModelSpec]:
+    for key in _keys_default_first():
+        for model in key.models:
+            if _model_modality(model, key) == "image":
+                return key, model
+    raise CanvasRunCommandError(
+        "canvas_image_default_missing",
+        "未配置可用的图片生成模型；反推文本已保留，请先在设置中接入图片模型。",
+    )
+
+
 def _resolve_key_and_model(
     draft: CanvasGenerationDraft,
 ) -> tuple[KeySpec, ModelSpec, JobKind]:
@@ -558,24 +620,21 @@ def _with_active_run(node: CanvasNode, run_id: str) -> CanvasNode:
 
 def _new_result_node(
     surface: CanvasNode,
-    draft: CanvasGenerationDraft,
+    mode: str,
+    draft: CanvasGenerationDraft | None,
     run_id: str,
     result_id: str,
+    title: str,
 ) -> CanvasNode:
     width = surface.size.width if surface.size is not None else 320
     position = surface.position.model_copy(update={"x": surface.position.x + width + 120})
     common = {
         "id": result_id,
-        "title": {
-            "text": "生成文本",
-            "image": "生成图片",
-            "video": "生成视频",
-            "audio": "生成音频",
-        }[draft.mode],
+        "title": title,
         "position": position,
         "z_index": surface.z_index,
     }
-    if draft.mode == "text":
+    if mode == "text":
         return CanvasTextNode(
             **common,
             type="text",
@@ -585,7 +644,7 @@ def _new_result_node(
                 active_run_id=run_id,
             ),
         )
-    if draft.mode == "audio":
+    if mode == "audio":
         return CanvasAudioNode(
             **common,
             type="audio",
@@ -601,9 +660,131 @@ def _new_result_node(
         active_run_id=run_id,
         display=CanvasMediaDisplay(),
     )
-    if draft.mode == "image":
+    if mode == "image":
         return CanvasImageNode(**common, type="image", data=data)
     return CanvasVideoNode(**common, type="video", data=data)
+
+
+def _commit_frozen_run(
+    project_id: str,
+    current: CanvasDocument,
+    surface: CanvasNode,
+    key: KeySpec,
+    model: ModelSpec,
+    kind: JobKind,
+    *,
+    mode: str,
+    final_prompt: str,
+    input_policy: str,
+    normalized: dict[str, Any],
+    job_params: JobParams,
+    inputs: list[CanvasSnapshotInput],
+    requested_count: int,
+    result_title: str,
+    result_draft: CanvasGenerationDraft | None,
+    allow_surface_reuse: bool,
+    transaction_kind: str,
+    mask_version_id: str | None = None,
+) -> tuple[Job, CanvasDocument]:
+    timestamp = _now()
+    job_id = new_job_id()
+    run_id = f"run-{secrets.token_hex(12)}"
+    use_surface = (
+        allow_surface_reuse
+        and surface.type in {"text", "image", "video", "audio"}
+        and surface.type == mode
+        and _current_version_id(surface) is None
+    )
+    result_id = surface.id if use_surface else f"{mode}-{secrets.token_hex(12)}"
+    snapshot_payload = {
+        "snapshot_version": 1,
+        "surface_node_id": surface.id,
+        "result_node_id": result_id,
+        "mode": mode,
+        "final_prompt": final_prompt,
+        "input_policy": input_policy,
+        "model": model.id,
+        "provider": key.provider,
+        "alias": key.alias,
+        "normalized_params": normalized,
+        "inputs": [item.model_dump(mode="json") for item in inputs],
+        "mask_version_id": mask_version_id,
+        "submitted_at": timestamp,
+        "submitted_by": CanvasActor(kind="user").model_dump(mode="json"),
+    }
+    snapshot = CanvasGenerationSnapshot(
+        **snapshot_payload,
+        request_fingerprint=_canonical_sha(snapshot_payload),
+    )
+    candidates = [
+        CanvasResultCandidate(
+            candidate_id=f"candidate-{secrets.token_hex(10)}",
+            index=index,
+            status="pending",
+        )
+        for index in range(requested_count)
+    ]
+    context = CanvasJobContext(
+        run_id=run_id,
+        snapshot=snapshot,
+        result_node_id=result_id,
+        candidates=candidates,
+    )
+    job = Job(
+        job_id=job_id,
+        character_id=key.alias,
+        prompt=final_prompt,
+        submitted_at=timestamp,
+        model=model.id,
+        params=job_params,
+        output_paths=[],
+        status=JobStatus.PENDING,
+        error=None,
+        asset_slot=AssetSlot.PORTRAIT,
+        kind=kind,
+        namespace="canvas",
+        canvas_project_id=project_id,
+        canvas_run=context,
+        alias=key.alias,
+        provider=key.provider,
+    )
+
+    nodes = [
+        _with_active_run(node, run_id) if node.id == result_id else node
+        for node in current.nodes
+    ]
+    connections = list(current.connections)
+    if result_id != surface.id:
+        nodes.append(_new_result_node(
+            surface,
+            mode,
+            result_draft,
+            run_id,
+            result_id,
+            result_title,
+        ))
+        connections.append(CanvasDerivationConnection(
+            id=f"connection-{secrets.token_hex(12)}",
+            role="derivation",
+            source_node_id=surface.id,
+            target_node_id=result_id,
+            origin=CanvasGenerationRunOrigin(kind="generation_run", run_id=run_id),
+        ))
+    updated = current.model_copy(update={
+        "revision": current.revision + 1,
+        "updated_at": timestamp,
+        "nodes": nodes,
+        "connections": connections,
+    })
+    _commit_transaction_unlocked(
+        project_id,
+        run_id,
+        transaction_kind,
+        current.revision,
+        job,
+        updated,
+    )
+    return job, updated
 
 
 def submit_canvas_run(
@@ -633,82 +814,195 @@ def submit_canvas_run(
         job_params.reference_images = media_paths["image"] or None
         job_params.reference_videos = media_paths["video"] or None
         job_params.reference_audios = media_paths["audio"] or None
+        return _commit_frozen_run(
+            project_id,
+            current,
+            surface,
+            key,
+            model,
+            kind,
+            mode=draft.mode,
+            final_prompt=final_prompt,
+            input_policy=draft.input_policy,
+            normalized=normalized,
+            job_params=job_params,
+            inputs=inputs,
+            requested_count=requested_count,
+            result_title={
+                "text": "生成文本",
+                "image": "生成图片",
+                "video": "生成视频",
+                "audio": "生成音频",
+            }[draft.mode],
+            result_draft=draft,
+            allow_surface_reuse=True,
+            transaction_kind="submit",
+        )
+
+
+def submit_reverse_prompt_run(
+    project_id: str,
+    surface_node_id: str,
+    expected_revision: int,
+) -> tuple[Job, CanvasDocument]:
+    """Freeze one owned image into the versioned reverse-prompt preset and a text Run."""
+    with file_lock(_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        current = _read_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
+        surface = next((node for node in current.nodes if node.id == surface_node_id), None)
+        if not isinstance(surface, CanvasImageNode) or not surface.data.current_version_id:
+            raise CanvasRunCommandError(
+                "canvas_reverse_prompt_source_missing",
+                "请选择一个已有内容的图片节点再反推提示词。",
+            )
+        version = current.content_versions.get(surface.data.current_version_id)
+        if not isinstance(version, CanvasMediaVersion) or version.kind != "image":
+            raise CanvasRunCommandError(
+                "canvas_reverse_prompt_source_missing",
+                "图片节点当前没有可读取的项目内版本。",
+            )
+        key, model = _resolve_reverse_prompt_model()
+        inputs = [CanvasSnapshotInput(
+            order=0,
+            source="implicit_self",
+            node_id=surface.id,
+            version_id=version.version_id,
+            kind="image",
+        )]
+        paths = _input_paths(project_id, current, inputs)
+        normalized = {
+            "n": 1,
+            "temperature": 0.2,
+            "max_tokens": 1200,
+            "preset_id": _REVERSE_PROMPT_PRESET_ID,
+            "preset_version": _REVERSE_PROMPT_PRESET_VERSION,
+        }
+        job_params = JobParams(**normalized)
+        job_params.reference_images = paths["image"]
+        return _commit_frozen_run(
+            project_id,
+            current,
+            surface,
+            key,
+            model,
+            JobKind.TEXT,
+            mode="text",
+            final_prompt=_REVERSE_PROMPT,
+            input_policy="mentions_only",
+            normalized=normalized,
+            job_params=job_params,
+            inputs=inputs,
+            requested_count=1,
+            result_title="反推提示词",
+            result_draft=None,
+            allow_surface_reuse=False,
+            transaction_kind="reverse_prompt",
+        )
+
+
+def _is_reverse_prompt_snapshot(snapshot: CanvasGenerationSnapshot) -> bool:
+    return (
+        snapshot.mode == "text"
+        and snapshot.normalized_params.get("preset_id") == _REVERSE_PROMPT_PRESET_ID
+        and snapshot.normalized_params.get("preset_version") == _REVERSE_PROMPT_PRESET_VERSION
+    )
+
+
+def _reverse_prompt_config_ids(result_node_id: str) -> tuple[str, str]:
+    return f"config-reverse-{result_node_id}", f"connection-reverse-{result_node_id}"
+
+
+def create_reverse_prompt_config(
+    project_id: str,
+    run_id: str,
+    expected_revision: int,
+) -> CanvasDocument:
+    """Idempotently connect a successful reverse-prompt text result to an image config node."""
+    with file_lock(_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        current = _read_document_unlocked(project_id)
+        job = _job_for_run(project_id, run_id)
+        context = job.canvas_run
+        if context is None or not _is_reverse_prompt_snapshot(context.snapshot):
+            raise CanvasRunCommandError(
+                "canvas_reverse_prompt_run_invalid",
+                "这个生成记录不是图片反推提示词任务。",
+            )
+        if job.status not in {JobStatus.DONE, JobStatus.PARTIAL} or not any(
+            candidate.status == "succeeded" for candidate in context.candidates
+        ):
+            raise CanvasRunCommandError(
+                "canvas_reverse_prompt_not_ready",
+                "反推提示词尚未成功完成，暂时不能创建图片配置。",
+            )
+        result = next(
+            (node for node in current.nodes if node.id == context.result_node_id),
+            None,
+        )
+        version_id = result.data.current_version_id if isinstance(result, CanvasTextNode) else None
+        version = current.content_versions.get(version_id) if version_id else None
+        if not isinstance(result, CanvasTextNode) or not isinstance(version, CanvasTextVersion):
+            raise CanvasRunCommandError(
+                "canvas_reverse_prompt_result_missing",
+                "反推生成的文本节点或内容版本已经不存在。",
+            )
+
+        config_id, connection_id = _reverse_prompt_config_ids(result.id)
+        existing_config = next((node for node in current.nodes if node.id == config_id), None)
+        existing_connection = next(
+            (
+                connection for connection in current.connections
+                if connection.role == "input"
+                and connection.source_node_id == result.id
+                and connection.target_node_id == config_id
+            ),
+            None,
+        )
+        if existing_config is not None and not isinstance(existing_config, CanvasConfigNode):
+            raise CanvasRunCommandError(
+                "canvas_reverse_prompt_config_conflict",
+                "画布中已有同标识但类型不兼容的节点，无法恢复图片配置。",
+            )
+        if existing_config is not None and existing_connection is not None:
+            return current
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
 
         timestamp = _now()
-        job_id = new_job_id()
-        run_id = f"run-{secrets.token_hex(12)}"
-        use_surface = (
-            surface.type in {"text", "image", "video", "audio"}
-            and surface.type == draft.mode
-            and _current_version_id(surface) is None
-        )
-        result_id = surface.id if use_surface else f"{draft.mode}-{secrets.token_hex(12)}"
-        snapshot_payload = {
-            "snapshot_version": 1,
-            "surface_node_id": surface.id,
-            "result_node_id": result_id,
-            "mode": draft.mode,
-            "final_prompt": final_prompt,
-            "input_policy": draft.input_policy,
-            "model": draft.model,
-            "provider": key.provider,
-            "alias": key.alias,
-            "normalized_params": normalized,
-            "inputs": [item.model_dump(mode="json") for item in inputs],
-            "mask_version_id": None,
-            "submitted_at": timestamp,
-            "submitted_by": CanvasActor(kind="user").model_dump(mode="json"),
-        }
-        snapshot = CanvasGenerationSnapshot(
-            **snapshot_payload,
-            request_fingerprint=_canonical_sha(snapshot_payload),
-        )
-        candidates = [
-            CanvasResultCandidate(
-                candidate_id=f"candidate-{secrets.token_hex(10)}",
-                index=index,
-                status="pending",
-            )
-            for index in range(requested_count)
-        ]
-        context = CanvasJobContext(
-            run_id=run_id,
-            snapshot=snapshot,
-            result_node_id=result_id,
-            candidates=candidates,
-        )
-        job = Job(
-            job_id=job_id,
-            character_id=key.alias,
-            prompt=final_prompt,
-            submitted_at=timestamp,
-            model=draft.model,
-            params=job_params,
-            output_paths=[],
-            status=JobStatus.PENDING,
-            error=None,
-            asset_slot=AssetSlot.PORTRAIT,
-            kind=kind,
-            namespace="canvas",
-            canvas_project_id=project_id,
-            canvas_run=context,
-            alias=key.alias,
-            provider=key.provider,
-        )
-
-        nodes = [
-            _with_active_run(node, run_id) if node.id == result_id else node
-            for node in current.nodes
-        ]
+        nodes = list(current.nodes)
+        if existing_config is None:
+            key, model = _resolve_default_image_model()
+            width = result.size.width if result.size is not None else 320
+            nodes.append(CanvasConfigNode(
+                id=config_id,
+                type="config",
+                title="图片生成配置",
+                position=result.position.model_copy(update={"x": result.position.x + width + 120}),
+                z_index=result.z_index,
+                data=CanvasConfigNodeData(draft=CanvasGenerationDraft(
+                    mode="image",
+                    prompt=f"@[node:{result.id}]",
+                    input_policy="mentions_only",
+                    model=model.id,
+                    alias=key.alias,
+                    params=JobParams(n=1, ratio="1:1"),
+                    updated_at=timestamp,
+                )),
+            ))
         connections = list(current.connections)
-        if result_id != surface.id:
-            nodes.append(_new_result_node(surface, draft, run_id, result_id))
-            connections.append(CanvasDerivationConnection(
-                id=f"connection-{secrets.token_hex(12)}",
-                role="derivation",
-                source_node_id=surface.id,
-                target_node_id=result_id,
-                origin=CanvasGenerationRunOrigin(kind="generation_run", run_id=run_id),
+        if existing_connection is None:
+            if any(connection.id == connection_id for connection in connections):
+                raise CanvasRunCommandError(
+                    "canvas_reverse_prompt_config_conflict",
+                    "画布中已有同标识但指向不同节点的连接。",
+                )
+            connections.append(CanvasInputConnection(
+                id=connection_id,
+                role="input",
+                source_node_id=result.id,
+                target_node_id=config_id,
             ))
         updated = current.model_copy(update={
             "revision": current.revision + 1,
@@ -716,15 +1010,8 @@ def submit_canvas_run(
             "nodes": nodes,
             "connections": connections,
         })
-        _commit_transaction_unlocked(
-            project_id,
-            run_id,
-            "submit",
-            current.revision,
-            job,
-            updated,
-        )
-        return job, updated
+        _write_project_state_unlocked(project_id, updated)
+        return updated
 
 
 def _job_for_run(project_id: str, run_id: str) -> Job:
