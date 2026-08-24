@@ -60,7 +60,7 @@ from character_workflow.lib.schemas import (
     CharacterAssociationPatch, CharacterAssociationsFile,
     CanvasDocument, CanvasLibraryAsset, CanvasLibraryAssetCreate, CanvasLibraryAssetPatch,
     CanvasLibraryInsertRequest, CanvasPackageCommitRequest, CanvasPackageImportResponse,
-    CanvasMediaOperationRequest, CanvasMediaOperationResponse,
+    CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasPrompt, CanvasPromptCreate, CanvasPromptPatch,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
     CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
@@ -450,7 +450,7 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
         params = job.params.model_dump() if job.params else {}
         for field in (
             "reference_images", "reference_videos", "reference_audios",
-            "mj_sref", "mj_cref", "mj_oref",
+            "mask_image", "mj_sref", "mj_cref", "mj_oref",
         ):
             value = params.get(field)
             if isinstance(value, str):
@@ -2752,6 +2752,57 @@ def post_canvas_reverse_prompt(
 
 
 @router.post(
+    "/canvas/projects/{project_id}/runs/mask-edit",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+async def post_canvas_mask_edit(
+    project_id: str,
+    background: BackgroundTasks,
+    surface_node_id: str = Form(...),
+    expected_revision: int = Form(...),
+    requested_count: int = Form(1),
+    mask_file: UploadFile = File(...),
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_masks import CanvasMaskError
+    from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_mask_edit_run
+
+    try:
+        payload = CanvasMaskEditCreate(
+            surface_node_id=surface_node_id,
+            expected_revision=expected_revision,
+            requested_count=requested_count,
+        )
+        body = await mask_file.read(25 * 1024 * 1024 + 1)
+        job, document = submit_mask_edit_run(
+            project_id,
+            payload.surface_node_id,
+            payload.expected_revision,
+            payload.requested_count,
+            body,
+        )
+    except ValidationError as error:
+        raise HTTPException(422, detail=error.errors()) from error
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None
+    except (CanvasRunCommandError, CanvasMaskError) as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
     "/canvas/projects/{project_id}/runs/{run_id}/reverse-prompt-config",
     response_model=CanvasDocument,
 )
@@ -2855,6 +2906,8 @@ def post_canvas_run_retry(
             "result_node_missing": "原结果节点已被删除，不能在原位置重试",
             "snapshot_input_missing": "原生成使用的输入版本已经不存在",
             "snapshot_input_changed": "原生成使用的输入文件已经变化",
+            "snapshot_mask_missing": "原局部编辑使用的蒙版版本已经不存在",
+            "snapshot_mask_changed": "原局部编辑使用的蒙版文件已经变化",
             "snapshot_model_missing": "原生成使用的密钥或模型已经不可用",
         }
         raise HTTPException(409, detail=messages.get(detail, detail)) from error

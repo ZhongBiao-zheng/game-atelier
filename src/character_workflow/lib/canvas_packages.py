@@ -412,11 +412,18 @@ def _portable_job(job: Job, document: CanvasDocument) -> bytes:
             raise CanvasPackageError(f"任务 {job.job_id} 的快照输入已损坏")
         if version.kind != "text":
             references[version.kind].append(version.path)
+    mask_path: str | None = None
+    if job.canvas_run.snapshot.mask_version_id is not None:
+        mask = versions.get(job.canvas_run.snapshot.mask_version_id)
+        if mask is None or mask.kind != "image" or mask.origin.kind != "user_mask":
+            raise CanvasPackageError(f"任务 {job.job_id} 的遮罩版本已损坏")
+        mask_path = mask.path
     params = job.params.model_copy(
         update={
             "reference_images": references["image"] or None,
             "reference_videos": references["video"] or None,
             "reference_audios": references["audio"] or None,
+            "mask_image": mask_path,
         }
     )
     portable = job.model_copy(
@@ -1037,6 +1044,12 @@ def _remap_jobs(
         raw["params"]["reference_images"] = references["image"] or None
         raw["params"]["reference_videos"] = references["video"] or None
         raw["params"]["reference_audios"] = references["audio"] or None
+        mask_version_id = job.canvas_run.snapshot.mask_version_id
+        raw["params"]["mask_image"] = (
+            f"canvases/{project_id}/{document.content_versions[mask_version_id].path}"
+            if mask_version_id is not None
+            else None
+        )
         raw["output_paths"] = []
         for candidate in job.canvas_run.candidates:
             if candidate.version_id is None:

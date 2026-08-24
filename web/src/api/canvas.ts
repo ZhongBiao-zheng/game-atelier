@@ -390,6 +390,25 @@ export function submitCanvasReversePrompt(
   );
 }
 
+export function submitCanvasMaskEdit(
+  projectId: string,
+  surfaceNodeId: string,
+  expectedRevision: number,
+  requestedCount: number,
+  mask: Blob,
+): Promise<CanvasRun> {
+  const form = new FormData();
+  form.append('surface_node_id', surfaceNodeId);
+  form.append('expected_revision', String(expectedRevision));
+  form.append('requested_count', String(requestedCount));
+  form.append('mask_file', mask, 'mask.png');
+  return requestJson<CanvasRun>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/mask-edit`,
+    '提交局部编辑',
+    { method: 'POST', body: form },
+  );
+}
+
 export function createCanvasReversePromptConfig(
   projectId: string,
   runId: string,

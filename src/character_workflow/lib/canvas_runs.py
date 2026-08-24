@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import secrets
 from contextlib import nullcontext
@@ -12,7 +13,7 @@ from threading import BoundedSemaphore, Lock
 from typing import Any
 
 from character_workflow.lib import data_root
-from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
 from character_workflow.lib.canvas_projects import canvas_project_dir, read_canvas_project
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.job_runner import image_dimensions, is_valid_audio, run_job
@@ -50,6 +51,7 @@ from character_workflow.lib.schemas import (
     CanvasSnapshotInput,
     CanvasTextNode,
     CanvasTextVersion,
+    CanvasUserMaskOrigin,
     CanvasVideoNode,
     Job,
     JobKind,
@@ -156,11 +158,12 @@ def _prepare_transaction(
     before_revision: int,
     job: Job,
     document: CanvasDocument,
+    artifacts: list[dict[str, Any]] | None = None,
 ) -> Path:
     job_payload = job.model_dump(mode="json")
     document_payload = document.model_dump(mode="json")
     transaction = {
-        "schema_version": 1,
+        "schema_version": 2,
         "state": "prepared",
         "kind": kind,
         "project_id": project_id,
@@ -172,6 +175,7 @@ def _prepare_transaction(
         "job_sha256": _canonical_sha(job_payload),
         "document": document_payload,
         "document_sha256": _canonical_sha(document_payload),
+        "artifacts": artifacts or [],
     }
     path = _transaction_path(project_id, run_id)
     atomic_write_json(path, transaction)
@@ -187,6 +191,7 @@ def _commit_transaction_unlocked(
     document: CanvasDocument,
     *,
     job_locked: bool = False,
+    artifacts: list[dict[str, Any]] | None = None,
 ) -> None:
     def commit() -> None:
         path = _prepare_transaction(
@@ -196,13 +201,15 @@ def _commit_transaction_unlocked(
             before_revision,
             job,
             document,
+            artifacts,
         )
+        _install_transaction_artifacts(project_id, artifacts or [])
         write_job_under_lock(job)
         _write_project_state_unlocked(project_id, document)
         atomic_write_json(
             path,
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "state": "committed",
                 "project_id": project_id,
                 "run_id": run_id,
@@ -216,6 +223,59 @@ def _commit_transaction_unlocked(
         return
     with job_lock(job.job_id):
         commit()
+
+
+def _artifact_path(project_id: str, raw: str) -> Path:
+    root = canvas_project_dir(project_id).resolve()
+    target = (root / raw).resolve()
+    if not target.is_relative_to(root) or target == root:
+        raise ValueError("canvas transaction artifact path is outside project")
+    return target
+
+
+def _validate_transaction_artifact(project_id: str, raw: dict[str, Any]) -> tuple[Path, Path]:
+    staged = _artifact_path(project_id, str(raw["staged_path"]))
+    final = _artifact_path(project_id, str(raw["final_path"]))
+    expected_sha = str(raw["sha256"])
+    expected_bytes = int(raw["bytes"])
+    if not re.fullmatch(r"[a-f0-9]{64}", expected_sha) or expected_bytes < 0:
+        raise ValueError("canvas transaction artifact fingerprint is invalid")
+    return staged, final
+
+
+def _artifact_matches(path: Path, raw: dict[str, Any]) -> bool:
+    return (
+        path.is_file()
+        and path.stat().st_size == int(raw["bytes"])
+        and _sha256_file(path) == raw["sha256"]
+    )
+
+
+def _install_transaction_artifacts(project_id: str, artifacts: list[dict[str, Any]]) -> None:
+    for raw in artifacts:
+        staged, final = _validate_transaction_artifact(project_id, raw)
+        if _artifact_matches(final, raw):
+            staged.unlink(missing_ok=True)
+            continue
+        if not _artifact_matches(staged, raw):
+            raise ValueError("canvas transaction artifact is missing or changed")
+        final.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(staged, final)
+        if not _artifact_matches(final, raw):
+            raise ValueError("canvas transaction artifact could not be installed")
+
+
+def _remove_transaction_artifacts(
+    project_id: str,
+    artifacts: list[dict[str, Any]],
+    *,
+    include_final: bool,
+) -> None:
+    for raw in artifacts:
+        staged, final = _validate_transaction_artifact(project_id, raw)
+        staged.unlink(missing_ok=True)
+        if include_final and _artifact_matches(final, raw):
+            final.unlink(missing_ok=True)
 
 
 def _document_has_run(document: CanvasDocument, run_id: str) -> bool:
@@ -286,12 +346,21 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
                 continue
             job_payload = raw["job"]
             document_payload = raw["document"]
+            artifacts = raw.get("artifacts", [])
+            if not isinstance(artifacts, list) or not all(
+                isinstance(item, dict) for item in artifacts
+            ):
+                raise ValueError("canvas transaction artifacts are invalid")
+            for artifact in artifacts:
+                _validate_transaction_artifact(project_id, artifact)
             if _canonical_sha(job_payload) != raw["job_sha256"]:
                 raise ValueError("canvas transaction job fingerprint mismatch")
             if _canonical_sha(document_payload) != raw["document_sha256"]:
                 raise ValueError("canvas transaction document fingerprint mismatch")
             job = Job.model_validate(job_payload)
-            creates_run = raw.get("kind") in {"submit", "retry"}
+            creates_run = raw.get("kind") in {
+                "submit", "retry", "reverse_prompt", "mask_edit"
+            }
             recovered_job = _failed_recovered_submit(job) if creates_run else job
             target = CanvasDocument.model_validate(document_payload)
             if job.canvas_project_id != project_id or target.project_id != project_id:
@@ -314,9 +383,15 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
                     and current.revision == raw["before_revision"]
                 ):
                     # Only the prepared journal exists; neither source of truth was committed.
+                    _remove_transaction_artifacts(
+                        project_id,
+                        artifacts,
+                        include_final=True,
+                    )
                     path.unlink(missing_ok=True)
                     continue
                 if current.revision == raw["before_revision"]:
+                    _install_transaction_artifacts(project_id, artifacts)
                     if not job_matches or recovered_job != job:
                         write_job_under_lock(recovered_job)
                     _write_project_state_unlocked(project_id, target)
@@ -326,6 +401,7 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
                     current.revision >= raw["target_revision"]
                     or _document_has_run(current, raw["run_id"])
                 ):
+                    _install_transaction_artifacts(project_id, artifacts)
                     if not job_matches or recovered_job != job:
                         write_job_under_lock(recovered_job)
                     path.unlink(missing_ok=True)
@@ -685,10 +761,13 @@ def _commit_frozen_run(
     allow_surface_reuse: bool,
     transaction_kind: str,
     mask_version_id: str | None = None,
+    run_id: str | None = None,
+    additional_versions: list[CanvasContentVersion] | None = None,
+    artifacts: list[dict[str, Any]] | None = None,
 ) -> tuple[Job, CanvasDocument]:
     timestamp = _now()
     job_id = new_job_id()
-    run_id = f"run-{secrets.token_hex(12)}"
+    run_id = run_id or f"run-{secrets.token_hex(12)}"
     use_surface = (
         allow_surface_reuse
         and surface.type in {"text", "image", "video", "audio"}
@@ -770,11 +849,17 @@ def _commit_frozen_run(
             target_node_id=result_id,
             origin=CanvasGenerationRunOrigin(kind="generation_run", run_id=run_id),
         ))
+    content_versions = dict(current.content_versions)
+    for version in additional_versions or []:
+        if version.version_id in content_versions:
+            raise ValueError("canvas content version already exists")
+        content_versions[version.version_id] = version
     updated = current.model_copy(update={
         "revision": current.revision + 1,
         "updated_at": timestamp,
         "nodes": nodes,
         "connections": connections,
+        "content_versions": content_versions,
     })
     _commit_transaction_unlocked(
         project_id,
@@ -783,6 +868,7 @@ def _commit_frozen_run(
         current.revision,
         job,
         updated,
+        artifacts=artifacts,
     )
     return job, updated
 
@@ -900,6 +986,146 @@ def submit_reverse_prompt_run(
             allow_surface_reuse=False,
             transaction_kind="reverse_prompt",
         )
+
+
+def submit_mask_edit_run(
+    project_id: str,
+    surface_node_id: str,
+    expected_revision: int,
+    requested_count: int,
+    mask_body: bytes,
+) -> tuple[Job, CanvasDocument]:
+    """Freeze a user mask and its persisted image Draft into one recoverable Run."""
+    from character_workflow.lib.callers.openai_image import supports_image_mask
+    from character_workflow.lib.canvas_masks import normalize_canvas_mask
+
+    if requested_count < 1 or requested_count > 4:
+        raise CanvasRunCommandError(
+            "canvas_mask_count_invalid",
+            "局部编辑一次只能生成 1–4 张候选图。",
+        )
+    run_id = f"run-{secrets.token_hex(12)}"
+    staged_path: Path | None = None
+    try:
+        with file_lock(_lock_path(project_id)):
+            recover_canvas_transactions_unlocked(project_id)
+            current = _read_document_unlocked(project_id)
+            if current.revision != expected_revision:
+                raise RuntimeError(f"revision_conflict:{current.revision}")
+            surface = next(
+                (node for node in current.nodes if node.id == surface_node_id),
+                None,
+            )
+            if not isinstance(surface, CanvasImageNode) or not surface.data.current_version_id:
+                raise CanvasRunCommandError(
+                    "canvas_mask_source_missing",
+                    "请选择一个已有内容的图片节点再进行局部编辑。",
+                )
+            source = current.content_versions.get(surface.data.current_version_id)
+            if not isinstance(source, CanvasMediaVersion) or source.kind != "image":
+                raise CanvasRunCommandError(
+                    "canvas_mask_source_missing",
+                    "图片节点当前没有可读取的项目内版本。",
+                )
+            draft = _draft_for_node(surface)
+            if draft is None or draft.mode != "image":
+                raise CanvasRunCommandError(
+                    "canvas_mask_draft_missing",
+                    "请先填写局部编辑提示词并选择图片模型。",
+                )
+            key, model, kind = _resolve_key_and_model(draft)
+            if not supports_image_mask(key.provider, model.id, model.protocol):
+                raise CanvasRunCommandError(
+                    "canvas_media_capability_missing",
+                    "当前模型不支持局部蒙版编辑，请选择 GPT Image 兼容模型。",
+                )
+            normalized, job_params = _normalized_params(draft, requested_count)
+            unsupported_mentions = [
+                node_id for node_id in _MENTION.findall(draft.prompt)
+                if node_id != surface.id
+            ]
+            if unsupported_mentions:
+                raise CanvasRunCommandError(
+                    "canvas_mask_prompt_invalid",
+                    "局部编辑提示词不能引用其它节点；本次输入只冻结当前源图。",
+                )
+            inputs = [CanvasSnapshotInput(
+                order=0,
+                source="implicit_self",
+                node_id=surface.id,
+                version_id=source.version_id,
+                kind="image",
+            )]
+            _validate_input_capabilities(model, kind, inputs, job_params)
+            final_prompt = _render_final_prompt(current, draft, inputs)
+            media_paths = _input_paths(project_id, current, inputs)
+            if not media_paths["image"]:
+                raise CanvasRunCommandError(
+                    "canvas_mask_source_missing",
+                    "源图片文件不存在，无法创建局部编辑。",
+                )
+            normalized_mask = normalize_canvas_mask(
+                Path(media_paths["image"][0]),
+                source,
+                mask_body,
+            )
+            mask_id = f"mask-{secrets.token_hex(12)}"
+            version_id = f"version-{secrets.token_hex(12)}"
+            staged_path = canvas_project_dir(project_id) / ".runtime" / "run-inputs" / f"{run_id}.png"
+            final_path = canvas_project_dir(project_id) / "uploads" / f"{mask_id}.png"
+            atomic_write_bytes(staged_path, normalized_mask.body)
+            mask_version = CanvasMediaVersion(
+                version_id=version_id,
+                created_at=_now(),
+                sha256=normalized_mask.sha256,
+                origin=CanvasUserMaskOrigin(
+                    kind="user_mask",
+                    source_version_id=source.version_id,
+                ),
+                kind="image",
+                path=final_path.relative_to(canvas_project_dir(project_id)).as_posix(),
+                mime_type="image/png",
+                bytes=len(normalized_mask.body),
+                width=normalized_mask.width,
+                height=normalized_mask.height,
+            )
+            job_params.reference_images = media_paths["image"]
+            job_params.reference_videos = None
+            job_params.reference_audios = None
+            job_params.mask_image = str(final_path.resolve())
+            artifact = {
+                "staged_path": staged_path.relative_to(canvas_project_dir(project_id)).as_posix(),
+                "final_path": final_path.relative_to(canvas_project_dir(project_id)).as_posix(),
+                "bytes": len(normalized_mask.body),
+                "sha256": normalized_mask.sha256,
+            }
+            return _commit_frozen_run(
+                project_id,
+                current,
+                surface,
+                key,
+                model,
+                kind,
+                mode="image",
+                final_prompt=final_prompt,
+                input_policy="mentions_only",
+                normalized=normalized,
+                job_params=job_params,
+                inputs=inputs,
+                requested_count=requested_count,
+                result_title="局部编辑",
+                result_draft=draft,
+                allow_surface_reuse=False,
+                transaction_kind="mask_edit",
+                mask_version_id=version_id,
+                run_id=run_id,
+                additional_versions=[mask_version],
+                artifacts=[artifact],
+            )
+    except BaseException:
+        if staged_path is not None and not _transaction_path(project_id, run_id).exists():
+            staged_path.unlink(missing_ok=True)
+        raise
 
 
 def _is_reverse_prompt_snapshot(snapshot: CanvasGenerationSnapshot) -> bool:
@@ -1054,6 +1280,26 @@ def _validate_retry_snapshot(
         target = canvas_project_dir(project_id) / version.path
         if _sha256_file(target) != version.sha256:
             raise RuntimeError("snapshot_input_changed")
+    paths["mask"] = []
+    if snapshot.mask_version_id is not None:
+        mask = document.content_versions.get(snapshot.mask_version_id)
+        source_ids = {item.version_id for item in snapshot.inputs if item.kind == "image"}
+        if (
+            not isinstance(mask, CanvasMediaVersion)
+            or mask.kind != "image"
+            or mask.origin.kind != "user_mask"
+            or mask.origin.source_version_id not in source_ids
+        ):
+            raise RuntimeError("snapshot_mask_missing")
+        root = canvas_project_dir(project_id).resolve()
+        target = (root / mask.path).resolve()
+        if (
+            not target.is_relative_to(root)
+            or not target.is_file()
+            or _sha256_file(target) != mask.sha256
+        ):
+            raise RuntimeError("snapshot_mask_changed")
+        paths["mask"] = [str(target)]
     return paths
 
 
@@ -1071,6 +1317,7 @@ def _retry_job_params(
     params.reference_images = media_paths["image"] or None
     params.reference_videos = media_paths["video"] or None
     params.reference_audios = media_paths["audio"] or None
+    params.mask_image = (media_paths.get("mask") or [None])[0]
     return params
 
 

@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, Plus, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, ZoomIn } from 'lucide-react';
+import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, Paintbrush, Plus, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, ZoomIn } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -52,6 +52,7 @@ export interface CanvasNodeContextValue {
   replaceMedia: (node: CanvasContentNode) => void;
   toggleFreeResize: (node: CanvasContentNode) => void;
   openMediaOperation: (node: CanvasContentNode, tool: CanvasMediaTool) => void;
+  openMaskEdit: (node: CanvasContentNode) => void;
   deleteNode: (id: string) => void;
 }
 
@@ -189,6 +190,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
                   <MediaToolMenuItem label={`替换 ${node.title}`} disabled={replacingMedia} onSelect={() => context.replaceMedia(node)}>{replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}</MediaToolMenuItem>
                   <MediaToolMenuItem label={imageResizeUnlocked ? `锁定 ${node.title} 比例` : `自由缩放 ${node.title}`} disabled={replacingMedia} onSelect={() => context.toggleFreeResize(node)}>{imageResizeUnlocked ? <Lock /> : <Unlock />}</MediaToolMenuItem>
                   <MediaToolMenuItem label={`裁剪 ${node.title}`} disabled={replacingMedia} onSelect={() => context.openMediaOperation(node, 'crop')}><Crop /></MediaToolMenuItem>
+                  <MediaToolMenuItem label={`局部编辑 ${node.title}`} disabled={submittingNode || replacingMedia} onSelect={() => context.openMaskEdit(node)}><Paintbrush /></MediaToolMenuItem>
                   <MediaToolMenuItem label={`切分 ${node.title}`} disabled={replacingMedia} onSelect={() => context.openMediaOperation(node, 'split')}><Grid2X2 /></MediaToolMenuItem>
                   <MediaToolMenuItem label={`本地放大 ${node.title}`} disabled={replacingMedia} onSelect={() => context.openMediaOperation(node, 'upscale')}><ZoomIn /></MediaToolMenuItem>
                 </DropdownMenuContent>
@@ -197,6 +199,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               <>
                 <MediaToolButton label={imageResizeUnlocked ? `锁定 ${node.title} 比例` : `自由缩放 ${node.title}`} disabled={replacingMedia} onClick={() => context.toggleFreeResize(node)}>{imageResizeUnlocked ? <Lock /> : <Unlock />}</MediaToolButton>
                 <MediaToolButton label={`裁剪 ${node.title}`} disabled={replacingMedia} onClick={() => context.openMediaOperation(node, 'crop')}><Crop /></MediaToolButton>
+                <MediaToolButton label={`局部编辑 ${node.title}`} disabled={submittingNode || replacingMedia} onClick={() => context.openMaskEdit(node)}><Paintbrush /></MediaToolButton>
                 <MediaToolButton label={`切分 ${node.title}`} disabled={replacingMedia} onClick={() => context.openMediaOperation(node, 'split')}><Grid2X2 /></MediaToolButton>
                 <MediaToolButton label={`本地放大 ${node.title}`} disabled={replacingMedia} onClick={() => context.openMediaOperation(node, 'upscale')}><ZoomIn /></MediaToolButton>
               </>
@@ -674,6 +677,7 @@ export function CanvasInspector({
   onToggleFreeResize,
   downloadHref,
   onCrop,
+  onMaskEdit,
   onSplit,
   onUpscale,
   replaceMediaBusy = false,
@@ -696,6 +700,7 @@ export function CanvasInspector({
   onToggleFreeResize?: () => void;
   downloadHref?: string;
   onCrop?: () => void;
+  onMaskEdit?: () => void;
   onSplit?: () => void;
   onUpscale?: () => void;
   replaceMediaBusy?: boolean;
@@ -742,6 +747,9 @@ export function CanvasInspector({
           )}
           {content?.kind === 'image' && onCrop && (
             <Button variant="ghost" size="icon" disabled={replaceMediaBusy} aria-label={`裁剪 ${node.title}`} onClick={onCrop}><Crop /></Button>
+          )}
+          {content?.kind === 'image' && onMaskEdit && (
+            <Button variant="ghost" size="icon" disabled={replaceMediaBusy || reversePromptBusy} aria-label={`局部编辑 ${node.title}`} onClick={onMaskEdit}><Paintbrush /></Button>
           )}
           {content?.kind === 'image' && onSplit && (
             <Button variant="ghost" size="icon" disabled={replaceMediaBusy} aria-label={`切分 ${node.title}`} onClick={onSplit}><Grid2X2 /></Button>

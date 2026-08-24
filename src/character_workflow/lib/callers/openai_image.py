@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 from collections.abc import Mapping
 from http.client import IncompleteRead
+import io
 import math
 import re
 import subprocess
@@ -13,6 +14,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from character_workflow.lib import net_env
 
@@ -99,6 +101,13 @@ def render(
         raise OpenAIImageError("custom provider requires base_url")
 
     family = image_family(model)
+    mask_path = kwargs.get("mask_image") or (kwargs.get("params") or {}).get("mask_image")
+    if mask_path and not supports_image_mask(
+        key.provider,
+        model,
+        _effective_image_protocol(key, model),
+    ):
+        raise OpenAIImageError("current image model does not support mask edits")
     # 尺寸下限是模型属性，与 provider / 网关无关（实测：同一把词元跳动 key 下 5.0-lite 要
     # 3686400 像素、5.0-pro 只要 921600，两条协议路径给出的下限一模一样）。所以归一化按
     # 模型族判，火山直连 / Tuzi / 词元跳动下的 seedream 一视同仁。
@@ -162,21 +171,26 @@ def render(
 
     # custom 走 family 判定补诚实；命名 provider(openai/seedream/tokendance/HK) 分支不动。
     # family / is_seedream 已在上方（尺寸归一化前）算好，这里不重算。
-    custom_img = key.provider == "custom" and family in ("gpt-image", "nano-banana")
-    is_hk_image = is_hk and _hk_image_model(model)
     # quality 按**族**判，与前端 imageControlCaps 同一判据（旧版按 provider：词元跳动上的
     # gpt-image 界面给四档、后端静默丢弃；provider=openai 下的 dall-e 反过来会被塞进
     # gpt-image 的 low/high 词表，而 DALL·E 只认 standard|hd）。
     wants_quality = family in ("gpt-image", "nano-banana")
     quality = _quality_param(kwargs) if wants_quality else None
     ref_paths = _collect_ref_paths(kwargs, key.provider, model)
+    if mask_path and not ref_paths:
+        raise OpenAIImageError("mask edit requires a source image")
 
     # 图生图端点按族分流：gpt-image 族走官方同步 /images/edits（multipart，OpenAI/HK 实现）。
     # nano-banana 是 Gemini 多模态，OpenAI-HK / 聚合商对其 /images/edits 一律 403（openresty
     # 网关层拒未实现路由），必须走 generations 的 image 字段（实测 OpenAI-HK 可用）——
     # 故 edits 仅限 gpt-image，nano-banana 落到下方 generations+image 兜底。
     # 不用 generations+image 做 gpt-image（那是 Ark/seedream 路子），更绝不加 ?async=true。
-    if (is_hk_image or custom_img) and family == "gpt-image" and ref_paths:
+    supports_edits = supports_image_mask(
+        key.provider,
+        model,
+        _effective_image_protocol(key, model),
+    )
+    if supports_edits and ref_paths:
         paths: list[str] = []
         for _ in range(requested):
             data = _post_multipart(
@@ -185,7 +199,7 @@ def render(
                 fields=_hk_edits_fields(
                     model=model, prompt=prompt, size=requested_size, quality=quality, n=1
                 ),
-                files=_ref_file_parts(ref_paths),
+                files=_ref_file_parts(ref_paths, str(mask_path) if mask_path else None),
                 timeout=timeout,
             )
             paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
@@ -296,12 +310,58 @@ def _guess_mime(path: str) -> str:
     return "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
 
 
-def _ref_file_parts(paths: list[str]) -> list[tuple]:
+def _ref_file_parts(paths: list[str], mask_path: str | None = None) -> list[tuple]:
     """multipart 文件部件列表；多张参考图重复 `image` 字段名（OpenAI-HK edits 约定）。"""
     parts: list[tuple] = []
+    source_size: tuple[int, int] | None = None
     for p in paths:
-        parts.append(("image", (Path(p).name, Path(p).read_bytes(), _guess_mime(p))))
+        if mask_path:
+            image_bytes, size = _normalized_edit_image(Path(p))
+            source_size = source_size or size
+            parts.append(("image", (f"{Path(p).stem}.png", image_bytes, "image/png")))
+        else:
+            parts.append(("image", (Path(p).name, Path(p).read_bytes(), _guess_mime(p))))
+    if mask_path:
+        if source_size is None:
+            raise OpenAIImageError("mask edit requires a source image")
+        parts.append(("mask", ("mask.png", _normalized_edit_mask(Path(mask_path), source_size), "image/png")))
     return parts
+
+
+def _normalized_edit_image(path: Path) -> tuple[bytes, tuple[int, int]]:
+    try:
+        with Image.open(path) as opened:
+            if getattr(opened, "is_animated", False) or getattr(opened, "n_frames", 1) != 1:
+                raise OpenAIImageError("mask edit source must be a static image")
+            opened.load()
+            oriented = ImageOps.exif_transpose(opened)
+            has_alpha = "A" in oriented.getbands() or "transparency" in opened.info
+            normalized = oriented.convert("RGBA" if has_alpha else "RGB")
+            output = io.BytesIO()
+            normalized.save(output, format="PNG")
+            return output.getvalue(), normalized.size
+    except OpenAIImageError:
+        raise
+    except (OSError, UnidentifiedImageError, ValueError) as error:
+        raise OpenAIImageError("mask edit source is not a readable image") from error
+
+
+def _normalized_edit_mask(path: Path, source_size: tuple[int, int]) -> bytes:
+    try:
+        with Image.open(path) as opened:
+            if opened.format != "PNG" or opened.size != source_size:
+                raise OpenAIImageError("mask and source image must have identical PNG dimensions")
+            opened.load()
+            gray = opened.convert("L")
+            rgba = Image.new("RGBA", source_size, (255, 255, 255, 255))
+            rgba.putalpha(gray)
+            output = io.BytesIO()
+            rgba.save(output, format="PNG")
+            return output.getvalue()
+    except OpenAIImageError:
+        raise
+    except (OSError, UnidentifiedImageError, ValueError) as error:
+        raise OpenAIImageError("mask is not a readable PNG image") from error
 
 
 def _hk_edits_fields(
@@ -411,6 +471,15 @@ def image_family(model: str) -> str:
     if "seedream" in m or "seededit" in m:
         return "seedream"
     return "standard"
+
+
+def supports_image_mask(provider: str, model: str, protocol: str | None = None) -> bool:
+    """Whether this configured transport has a verified GPT Image edits endpoint."""
+    return (
+        image_family(model) == "gpt-image"
+        and provider in {"openai", "custom"}
+        and protocol in {None, "openai"}
+    )
 
 
 def _hk_image_model(model: str) -> bool:

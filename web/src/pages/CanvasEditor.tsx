@@ -60,6 +60,7 @@ import {
   saveCanvasAsset,
   saveCanvasDocument,
   submitCanvasRun,
+  submitCanvasMaskEdit,
   submitCanvasReversePrompt,
   updateCanvasAsset,
   updateCanvasPrompt,
@@ -79,6 +80,10 @@ import {
   type CanvasNodeContextValue,
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
+import {
+  CanvasMaskEditDialog,
+  type CanvasMaskEditSubmission,
+} from '@/components/canvas/CanvasMaskEditDialog';
 import {
   CanvasMediaOperationDialog,
   type CanvasMediaTool,
@@ -133,6 +138,12 @@ interface MediaOperationState {
   version: CanvasMediaVersion;
 }
 
+interface MaskEditState {
+  nodeId: string;
+  title: string;
+  version: CanvasMediaVersion;
+}
+
 interface MediaReplaceTarget {
   nodeId: string;
   title: string;
@@ -181,6 +192,9 @@ function CanvasEditorInner({
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
   const [mediaOperationError, setMediaOperationError] = useState<string | null>(null);
+  const [maskEdit, setMaskEdit] = useState<MaskEditState | null>(null);
+  const [maskEditBusy, setMaskEditBusy] = useState(false);
+  const [maskEditError, setMaskEditError] = useState<string | null>(null);
   const [mediaReplaceTarget, setMediaReplaceTarget] = useState<MediaReplaceTarget | null>(null);
   const [mediaReplaceBusyNodeIds, setMediaReplaceBusyNodeIds] = useState<Set<string>>(() => new Set());
   const [mediaReplaceError, setMediaReplaceError] = useState<{ nodeId: string; message: string } | null>(null);
@@ -238,6 +252,9 @@ function CanvasEditorInner({
     setMediaOperation(null);
     setMediaOperationBusy(false);
     setMediaOperationError(null);
+    setMaskEdit(null);
+    setMaskEditBusy(false);
+    setMaskEditError(null);
     setMediaReplaceTarget(null);
     setMediaReplaceBusyNodeIds(new Set());
     setMediaReplaceError(null);
@@ -1573,6 +1590,89 @@ function CanvasEditorInner({
     setMediaOperation({ nodeId: node.id, title: node.title, tool, version });
   }, []);
 
+  const openMaskEdit = useCallback((node: CanvasContentNode) => {
+    const versionId = node.data.current_version_id;
+    const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
+    if (node.type !== 'image' || !version || version.kind !== 'image' || !version.width || !version.height) {
+      setError('这个节点没有可局部编辑的图片版本。');
+      return;
+    }
+    setPreview(null);
+    setMediaOperation(null);
+    setMaskEditError(null);
+    setMaskEdit({ nodeId: node.id, title: node.title, version });
+  }, []);
+
+  const submitMaskEdit = useCallback(async (submission: CanvasMaskEditSubmission) => {
+    if (!maskEdit || runSubmissionInFlight.current) return;
+    setMaskEditBusy(true);
+    setMaskEditError(null);
+    setSubmittingNodeIds(current => new Set(current).add(maskEdit.nodeId));
+    try {
+      if (documentCommandInFlight.current) {
+        setMaskEditError('另一个媒体操作正在处理，请稍后重试。');
+        return;
+      }
+      const before = latestDocument.current;
+      if (!before) return;
+      const sourceNode = before.nodes.find(node => node.id === maskEdit.nodeId);
+      if (!sourceNode || sourceNode.type !== 'image') {
+        setMaskEditError('源图片节点已经不存在。');
+        return;
+      }
+      history.current.past.push(before);
+      history.current.past = history.current.past.slice(-50);
+      history.current.future = [];
+      const withDraft: CanvasDocument = {
+        ...before,
+        updated_at: new Date().toISOString(),
+        nodes: before.nodes.map(node => node.id === maskEdit.nodeId && node.type === 'image'
+          ? { ...node, data: { ...node.data, generation_draft: submission.draft } }
+          : node),
+      };
+      latestDocument.current = withDraft;
+      setDocument(withDraft);
+      dirtyVersion.current += 1;
+      setDirtySignal(dirtyVersion.current);
+      saveQueued.current = withDraft;
+      try {
+        await flushSave();
+      } catch {
+        setMaskEditError('自动保存失败，局部编辑尚未提交。请检查服务后重试。');
+        return;
+      }
+      const dirtyAtSubmission = dirtyVersion.current;
+      runSubmissionInFlight.current = true;
+      const run = await submitCanvasMaskEdit(
+        projectId,
+        maskEdit.nodeId,
+        serverRevision.current,
+        submission.requestedCount,
+        submission.mask,
+      );
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      setJobs(currentJobs => [
+        ...currentJobs.filter(job => job.job_id !== run.job.job_id),
+        run.job,
+      ]);
+      const resultId = run.job.canvas_run?.result_node_id;
+      if (resultId) setSelectedNodeIds(new Set([resultId]));
+      setMaskEdit(null);
+      announceToolNotice(`已提交“${maskEdit.title}”的局部编辑`);
+    } catch (submitError) {
+      setMaskEditError((submitError as Error).message);
+    } finally {
+      runSubmissionInFlight.current = false;
+      setMaskEditBusy(false);
+      setSubmittingNodeIds(current => {
+        const next = new Set(current);
+        next.delete(maskEdit.nodeId);
+        return next;
+      });
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+    }
+  }, [announceToolNotice, flushSave, maskEdit, mergeSubmittedRunDocument, projectId]);
+
   const submitMediaOperation = useCallback(async (operation: CanvasMediaOperation) => {
     if (!mediaOperation || mediaOperationInFlight.current) return;
     if (documentCommandInFlight.current) {
@@ -1673,6 +1773,7 @@ function CanvasEditorInner({
     replaceMedia,
     toggleFreeResize,
     openMediaOperation,
+    openMaskEdit,
     deleteNode,
   }), [
     assets?.revision,
@@ -1687,6 +1788,7 @@ function CanvasEditorInner({
     mediaReplaceBusyNodeIds,
     mediaReplaceError,
     openMediaOperation,
+    openMaskEdit,
     previewContent,
     projectId,
     recordHistorySnapshot,
@@ -1720,6 +1822,10 @@ function CanvasEditorInner({
   const previewJob = previewJobId
     ? jobs.find(job => job.job_id === previewJobId)
     : undefined;
+  const maskEditNode = maskEdit
+    ? document.nodes.find(node => node.id === maskEdit.nodeId) ?? null
+    : null;
+  const maskEditDraft = maskEditNode ? generationDraftForNode(maskEditNode) : null;
 
   return (
     <CanvasNodeContext.Provider value={contextValue}>
@@ -1893,6 +1999,10 @@ function CanvasEditorInner({
               && selectedContentNode.data.current_version_id
               ? () => toggleFreeResize(selectedContentNode)
               : undefined}
+            onMaskEdit={selectedContentNode.type === 'image'
+              && selectedContentNode.data.current_version_id
+              ? () => openMaskEdit(selectedContentNode)
+              : undefined}
             replaceMediaBusy={mediaReplaceBusyNodeIds.has(selectedContentNode.id)}
             onCrop={() => openMediaOperation(selectedContentNode, 'crop')}
             onSplit={() => openMediaOperation(selectedContentNode, 'split')}
@@ -1912,7 +2022,27 @@ function CanvasEditorInner({
           />
         )}
 
-        {!preview && !mediaOperation && <CanvasActionFeedback error={error} notice={toolNotice} onDismissError={() => setError(null)} className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4" />}
+        {!preview && !mediaOperation && !maskEdit && <CanvasActionFeedback error={error} notice={toolNotice} onDismissError={() => setError(null)} className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4" />}
+
+        {maskEdit && (
+          <CanvasMaskEditDialog
+            open
+            title={maskEdit.title}
+            version={maskEdit.version}
+            mediaUrl={canvasMediaUrl(projectId, maskEdit.version.version_id)}
+            keys={keys}
+            initialDraft={maskEditDraft}
+            busy={maskEditBusy}
+            error={maskEditError}
+            onOpenChange={open => {
+              if (!open && !maskEditBusy) {
+                setMaskEdit(null);
+                setMaskEditError(null);
+              }
+            }}
+            onSubmit={submission => void submitMaskEdit(submission)}
+          />
+        )}
 
         {mediaOperation && (
           <CanvasMediaOperationDialog

@@ -49,6 +49,8 @@ class JobParams(BaseModel):
     vendor: str | None = None
     n: int | None = None
     reference_images: list[str] | None = None
+    # Canvas 局部编辑专用：服务端从不可变 mask Content Version 解析，浏览器不能传路径。
+    mask_image: str | None = None
     requested_size: str | None = None
     actual_size: str | None = None
     warnings: list[str] | None = None
@@ -600,6 +602,24 @@ class CanvasDocument(BaseModel):
         for version_id, version in self.content_versions.items():
             if version_id != version.version_id:
                 raise ValueError("canvas content version key must match version_id")
+            if version.origin.kind == "user_mask":
+                source = self.content_versions.get(version.origin.source_version_id)
+                if (
+                    version.kind != "image"
+                    or source is None
+                    or source.kind != "image"
+                    or (
+                        version.width is not None
+                        and source.width is not None
+                        and version.width != source.width
+                    )
+                    or (
+                        version.height is not None
+                        and source.height is not None
+                        and version.height != source.height
+                    )
+                ):
+                    raise ValueError("canvas user mask references an incompatible source version")
         group_members: set[str] = set()
         for node in self.nodes:
             if node.type in {"text", "image", "video", "audio"}:
@@ -750,6 +770,13 @@ class CanvasReversePromptCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     surface_node_id: str = Field(min_length=1, max_length=120)
     expected_revision: int = Field(ge=0)
+
+
+class CanvasMaskEditCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    surface_node_id: str = Field(min_length=1, max_length=120)
+    expected_revision: int = Field(ge=0)
+    requested_count: int = Field(default=1, ge=1, le=4)
 
 
 class CanvasRunResponse(BaseModel):

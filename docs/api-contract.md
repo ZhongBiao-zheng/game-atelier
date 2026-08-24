@@ -61,7 +61,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /studio/jobs/{id}/archive`
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
-`POST /canvas/projects/{id}/runs`
+`POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit}`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
 `POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
 `DELETE /canvas/projects/{id}` `POST /canvas/trash/{trash_id}/restore`
@@ -149,6 +149,15 @@ Draft 不读不改；停止与 original retry 复用普通 Run 生命周期，cu
 `POST .../runs/{run_id}/reverse-prompt-config` 在成功文本结果后幂等创建图片 Config Node 及文本→配置
 Input Connection。图片模型同样由服务端优先 default Key、再按登记顺序选择；缺模型时保留反推文本且
 零写。重复请求即使携带旧 revision，也返回已经存在的同一配置，不重复创建节点或连接。
+
+`POST /canvas/projects/{id}/runs/mask-edit` 使用 multipart，只接受 `surface_node_id / expected_revision /
+requested_count / mask_file`。prompt、alias、model 与参数必须先保存为源图片节点的 image Draft，服务端
+读取后冻结；浏览器不能传媒体路径或绕过 Draft。蒙版必须是与 EXIF 归一后源图同尺寸的单帧 PNG，透明或
+灰度值 0 表示编辑、255 表示保留，空蒙版拒绝。服务端把归一灰度蒙版登记为不可变 `user_mask` Content
+Version，并与 Job、Snapshot、结果节点、派生边在同一可恢复事务提交；Snapshot 记录
+`mask_version_id`，且唯一输入固定为当前源图 Version，不接收其它连接节点引用；original retry 重新校验
+源图与蒙版摘要后原样复用。首版只允许已验证走 OpenAI-compatible
+`/images/edits` 的 GPT Image 模型；不支持时返回 `canvas_media_capability_missing`，绝不降级为整图生成。
 
 `POST /canvas/projects/{id}/media-operations` 只接受当前图片节点和不可变源 Version ID，并以
 discriminated union 执行 `crop`、`split` 或确定性 `upscale`。服务端用 Pillow 校验真实格式、摘要、静态帧、

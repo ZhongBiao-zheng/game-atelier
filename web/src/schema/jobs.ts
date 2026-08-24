@@ -15,6 +15,8 @@ export interface JobParams {
   vendor?: string;
   n?: number;
   reference_images?: string[];
+  /** Canvas 局部编辑的服务端解析 mask 路径；浏览器不直接写入。 */
+  mask_image?: string;
   requested_size?: string;
   actual_size?: string;
   warnings?: string[];
