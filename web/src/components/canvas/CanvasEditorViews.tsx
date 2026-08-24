@@ -1,4 +1,4 @@
-import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
+import { Handle, NodeResizer, NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react';
 import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, MessageSquare, Orbit, Paintbrush, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, ZoomIn } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
@@ -88,8 +88,35 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const [titleDraft, setTitleDraft] = useState(node.title);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const titleTriggerRef = useRef<HTMLButtonElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const titleExitInProgress = useRef(false);
   const restoreTitleFocus = useRef(false);
+  const toolbarHideTimer = useRef<number | null>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const toolbarOffsetXRef = useRef(0);
+  const toolbarOverlayOpenRef = useRef(false);
+  const [toolbarActive, setToolbarActive] = useState(false);
+  const [toolbarOverlayOpen, setToolbarOverlayOpen] = useState(false);
+  const [toolbarPosition, setToolbarPosition] = useState(Position.Top);
+  const [toolbarOffsetX, setToolbarOffsetX] = useState(0);
+  const showToolbar = useCallback(() => {
+    if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
+    toolbarHideTimer.current = null;
+    setToolbarActive(true);
+  }, []);
+  const scheduleToolbarHide = useCallback(() => {
+    if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
+    toolbarHideTimer.current = window.setTimeout(() => {
+      toolbarHideTimer.current = null;
+      if (!toolbarOverlayOpenRef.current) setToolbarActive(false);
+    }, 120);
+  }, []);
+  const updateToolbarOverlayOpen = useCallback((open: boolean) => {
+    toolbarOverlayOpenRef.current = open;
+    setToolbarOverlayOpen(open);
+    if (open) showToolbar();
+    else scheduleToolbarHide();
+  }, [scheduleToolbarHide, showToolbar]);
   useEffect(() => {
     if (!isEditingTitle) setTitleDraft(node.title);
   }, [isEditingTitle, node.title]);
@@ -104,6 +131,63 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     restoreTitleFocus.current = false;
     titleExitInProgress.current = false;
   }, [isEditingTitle, node.title]);
+  useEffect(() => () => {
+    if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
+  }, []);
+  useEffect(() => {
+    if (!selected && !toolbarActive && !toolbarOverlayOpen) return;
+    const controls = toolbarControls(toolbarRef.current);
+    const activeControl = controls.find(control => control === document.activeElement) ?? controls[0];
+    updateToolbarTabStops(controls, activeControl);
+  });
+  useEffect(() => {
+    if (!selected && !toolbarActive && !toolbarOverlayOpen) return;
+    let frame = 0;
+    const updatePlacement = () => {
+      const shell = shellRef.current;
+      const toolbar = toolbarRef.current;
+      const toolbarAnchor = toolbar?.parentElement;
+      if (!shell || !toolbar || !toolbarAnchor) return;
+      const nodeRect = shell.getBoundingClientRect();
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const anchorRect = toolbarAnchor.getBoundingClientRect();
+      if (!nodeRect.width || !nodeRect.height || !toolbarRect.width || !toolbarRect.height) return;
+      const margin = 16;
+      const topSpace = nodeRect.top - margin;
+      const bottomSpace = window.innerHeight - nodeRect.bottom - margin;
+      const nextPosition = topSpace >= toolbarRect.height + 32 || topSpace >= bottomSpace
+        ? Position.Top
+        : Position.Bottom;
+      if (nextPosition !== toolbarPosition) setToolbarPosition(nextPosition);
+
+      const currentOffset = toolbarOffsetXRef.current;
+      const baseLeft = anchorRect.left;
+      const baseRight = anchorRect.right;
+      let nextOffset = 0;
+      if (baseLeft < margin) nextOffset = margin - baseLeft;
+      if (baseRight + nextOffset > window.innerWidth - margin) {
+        nextOffset -= baseRight + nextOffset - (window.innerWidth - margin);
+      }
+      if (Math.abs(nextOffset - currentOffset) >= 0.5) {
+        toolbarOffsetXRef.current = nextOffset;
+        setToolbarOffsetX(nextOffset);
+      }
+    };
+    frame = window.requestAnimationFrame(updatePlacement);
+    const observer = new MutationObserver(updatePlacement);
+    if (toolbarRef.current?.parentElement) {
+      observer.observe(toolbarRef.current.parentElement, {
+        attributes: true,
+        attributeFilter: ['style'],
+      });
+    }
+    window.addEventListener('resize', updatePlacement);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener('resize', updatePlacement);
+    };
+  }, [selected, toolbarActive, toolbarOverlayOpen, toolbarPosition]);
   if (!context) return null;
   const renameNode = context.renameNode;
   const content = contentForNode(node, context.contentVersions);
@@ -148,7 +232,15 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   }
 
   return (
-    <div className="canvas-node-shell group relative h-full w-full overflow-visible" data-selected={selected ? 'true' : 'false'}>
+    <div
+      ref={shellRef}
+      className="canvas-node-shell group relative h-full w-full overflow-visible"
+      data-selected={selected ? 'true' : 'false'}
+      onPointerEnter={showToolbar}
+      onPointerLeave={scheduleToolbarHide}
+      onFocusCapture={showToolbar}
+      onBlurCapture={scheduleToolbarHide}
+    >
       <NodeResizer
         isVisible={selected && !replacingMedia}
         keepAspectRatio={node.type === 'image' && !node.data.display.free_resize}
@@ -163,7 +255,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           size: { width: params.width, height: params.height },
         }))}
       />
-      <header className="absolute bottom-full left-1 right-1 flex items-center justify-between gap-2 pb-2 text-xs text-muted-foreground">
+      <header className="absolute bottom-full left-1 right-1 flex items-center pb-2 text-xs text-muted-foreground">
         <span
           className="flex min-w-0 flex-1 items-center gap-1.5"
           onPointerDown={event => event.stopPropagation()}
@@ -214,130 +306,84 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
             </button>
           )}
         </span>
-        <span className="flex shrink-0 items-center gap-1">
-          {content && canvasNodeProvidesContent(node) && node.type !== 'image' && (
-            <button
-              type="button"
-              disabled={context.libraryBusy}
-              aria-label={`将 ${node.title} 存入资产库`}
-              className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-30 group-focus-within:opacity-100 group-hover:opacity-100"
-              onClick={event => {
-                event.stopPropagation();
-                void context.saveAsset(node);
-              }}
-            >
-              <Library className="size-3.5" aria-hidden="true" />
-            </button>
-          )}
-          {content && node.type !== 'image' && (
-            <button
-              type="button"
-              title={`查看 ${node.title} 详情`}
-              aria-label={`查看 ${node.title} 详情`}
-              className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100"
-              onClick={event => {
-                event.stopPropagation();
-                context.previewContent(content.version_id, node.title, node.id);
-              }}
-            >
-              <Eye className="size-3.5" aria-hidden="true" />
-            </button>
-          )}
-          {content && content.kind !== 'text' && node.type !== 'image' && (
-            <a
-              href={canvasDownloadUrl(context.projectId, content.version_id)}
-              title={`下载 ${node.title}`}
-              aria-label={`下载 ${node.title}`}
-              className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100"
-              onClick={event => event.stopPropagation()}
-            >
-              <Download className="size-3.5" aria-hidden="true" />
-            </a>
-          )}
-          {copyablePrompt && canvasNodeProvidesContent(node) && node.type !== 'image' && (
-            <button
-              type="button"
-              title={`复制 ${node.title} 的生成提示词`}
-              aria-label={`复制 ${node.title} 的生成提示词`}
-              className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100"
-              onClick={event => {
-                event.stopPropagation();
-                void context.copyPrompt(node);
-              }}
-            >
-              <ClipboardCopy className="size-3.5" aria-hidden="true" />
-            </button>
-          )}
-          {content && content.kind !== 'text' && canvasNodeProvidesContent(node) && node.type !== 'image' && (
-            <MediaToolButton
-              label={`替换 ${node.title}`}
-              disabled={replacingMedia}
-              onClick={() => context.replaceMedia(node)}
-            >
-              {replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}
-            </MediaToolButton>
-          )}
-          {node.type === 'video' && content?.kind === 'video' && (
-            <MediaToolButton
-              label={`编辑视频 ${node.title}`}
-              disabled={submittingNode || replacingMedia}
-              onClick={() => context.editVideo(node)}
-            >
-              <MessageSquare />
-            </MediaToolButton>
-          )}
-          {node.type !== 'image' && <button
-            type="button"
-            aria-label="删除节点"
-            className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100"
-            onClick={event => {
-              event.stopPropagation();
-              context.deleteNode(node.id);
-            }}
-          >
-            <Trash2 className="size-3.5" aria-hidden="true" />
-          </button>}
-        </span>
       </header>
-      {node.type === 'image' && content?.kind === 'image' && (
-        <div className="nodrag absolute bottom-full left-1/2 z-20 mb-8 flex w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-xl border border-border bg-glass p-1 opacity-0 backdrop-blur-glass transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 shell-glow">
-          <ImageNodeToolbar
-            node={node}
-            compact={compactMediaTools}
-            replacing={replacingMedia}
-            submitting={submittingNode}
-            copyablePrompt={copyablePrompt}
-            context={context}
-          />
-          {reversePromptJob && reversePromptRunning && (
-            <MediaToolButton
-              label="停止反推提示词"
-              disabled={Boolean(reversePromptJob.cancel_requested_at)}
-              onClick={() => void context.cancelRun(reversePromptJob.canvas_run!.run_id)}
-            >
-              {reversePromptJob.cancel_requested_at ? <LoaderCircle className="animate-spin" /> : <Square />}
-            </MediaToolButton>
-          )}
-          {reversePromptJob && !reversePromptRunning && !reversePromptSucceeded && (
-            <MediaToolButton
-              label="按原设置重试反推提示词"
-              disabled={submittingNode}
-              onClick={() => void context.retryRun(node.id, reversePromptJob.canvas_run!.run_id, 'original')}
-            >
-              {submittingNode ? <LoaderCircle className="animate-spin" /> : <RotateCcw />}
-            </MediaToolButton>
-          )}
-          {reversePromptJob && reversePromptSucceeded && !context.reversePromptConfiguredNodeIds.has(node.id) && (
-            <MediaToolButton
-              label="从反推文本创建图片配置"
-              disabled={submittingNode}
-              onClick={() => void context.recoverReversePromptConfig(reversePromptJob)}
-            >
-              {submittingNode ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
-            </MediaToolButton>
+      <NodeToolbar
+        isVisible={selected || toolbarActive || toolbarOverlayOpen}
+        position={toolbarPosition}
+        align="center"
+        offset={32}
+        className="nodrag nowheel max-w-[calc(100vw-2rem)]"
+      >
+        <div
+          ref={toolbarRef}
+          role="toolbar"
+          aria-label={`${node.title} 节点工具`}
+          data-canvas-node-toolbar={node.id}
+          className="flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-border bg-glass p-1 backdrop-blur-glass shell-glow"
+          style={{ transform: `translateX(${toolbarOffsetX}px)` }}
+          onPointerEnter={showToolbar}
+          onPointerLeave={scheduleToolbarHide}
+          onFocusCapture={event => {
+            showToolbar();
+            const focused = (event.target as HTMLElement).closest<HTMLElement>('button, a[href]');
+            updateToolbarTabStops(toolbarControls(event.currentTarget), focused);
+          }}
+          onBlurCapture={scheduleToolbarHide}
+          onPointerDown={event => event.stopPropagation()}
+          onClick={event => event.stopPropagation()}
+          onKeyDown={handleToolbarKeyDown}
+        >
+          {node.type === 'image' && content?.kind === 'image' ? (
+            <>
+              <ImageNodeToolbar
+                node={node}
+                compact={compactMediaTools}
+                replacing={replacingMedia}
+                submitting={submittingNode}
+                copyablePrompt={copyablePrompt}
+                context={context}
+                onOverlayOpenChange={updateToolbarOverlayOpen}
+              />
+              {reversePromptJob && reversePromptRunning && (
+                <MediaToolButton
+                  label="停止反推提示词"
+                  disabled={Boolean(reversePromptJob.cancel_requested_at)}
+                  onClick={() => void context.cancelRun(reversePromptJob.canvas_run!.run_id)}
+                >
+                  {reversePromptJob.cancel_requested_at ? <LoaderCircle className="animate-spin" /> : <Square />}
+                </MediaToolButton>
+              )}
+              {reversePromptJob && !reversePromptRunning && !reversePromptSucceeded && (
+                <MediaToolButton
+                  label="按原设置重试反推提示词"
+                  disabled={submittingNode}
+                  onClick={() => void context.retryRun(node.id, reversePromptJob.canvas_run!.run_id, 'original')}
+                >
+                  {submittingNode ? <LoaderCircle className="animate-spin" /> : <RotateCcw />}
+                </MediaToolButton>
+              )}
+              {reversePromptJob && reversePromptSucceeded && !context.reversePromptConfiguredNodeIds.has(node.id) && (
+                <MediaToolButton
+                  label="从反推文本创建图片配置"
+                  disabled={submittingNode}
+                  onClick={() => void context.recoverReversePromptConfig(reversePromptJob)}
+                >
+                  {submittingNode ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
+                </MediaToolButton>
+              )}
+            </>
+          ) : (
+            <CanvasNodeToolbar
+              node={node}
+              content={content}
+              replacing={replacingMedia}
+              submitting={submittingNode}
+              copyablePrompt={copyablePrompt}
+              context={context}
+            />
           )}
         </div>
-      )}
+      </NodeToolbar>
       <article
         data-canvas-node-id={node.id}
         role="button"
@@ -422,6 +468,126 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   );
 }
 
+function CanvasNodeToolbar({
+  node,
+  content,
+  replacing,
+  submitting,
+  copyablePrompt,
+  context,
+}: {
+  node: CanvasNode;
+  content: CanvasContentVersion | undefined;
+  replacing: boolean;
+  submitting: boolean;
+  copyablePrompt: string | null;
+  context: CanvasNodeContextValue;
+}) {
+  const contentNode = isCanvasContentNode(node) ? node : null;
+  const mediaNode = contentNode && contentNode.type !== 'text' ? contentNode : null;
+
+  return (
+    <>
+      <MediaToolButton
+        label={content ? `查看 ${node.title} 详情` : `查看 ${node.title} 设置`}
+        onClick={() => {
+          if (content) context.previewContent(content.version_id, node.title, node.id);
+          else context.selectNode(node.id);
+        }}
+      >
+        <Eye />
+      </MediaToolButton>
+      {content && contentNode && canvasNodeProvidesContent(contentNode) && (
+        <MediaToolButton
+          label={`将 ${node.title} 存入资产库`}
+          disabled={context.libraryBusy}
+          onClick={() => void context.saveAsset(contentNode)}
+        >
+          <Library />
+        </MediaToolButton>
+      )}
+      {content && content.kind !== 'text' && (
+        <MediaToolLink
+          label={`下载 ${node.title}`}
+          href={canvasDownloadUrl(context.projectId, content.version_id)}
+        >
+          <Download />
+        </MediaToolLink>
+      )}
+      {copyablePrompt && contentNode && canvasNodeProvidesContent(contentNode) && (
+        <MediaToolButton
+          label={`复制 ${node.title} 的生成提示词`}
+          onClick={() => void context.copyPrompt(contentNode)}
+        >
+          <ClipboardCopy />
+        </MediaToolButton>
+      )}
+      {mediaNode && (
+        <MediaToolButton
+          label={content ? `替换 ${node.title}` : `上传到 ${node.title}`}
+          disabled={replacing}
+          onClick={() => context.replaceMedia(mediaNode)}
+        >
+          {replacing ? <LoaderCircle className="animate-spin" /> : <FileUp />}
+        </MediaToolButton>
+      )}
+      {node.type === 'video' && content?.kind === 'video' && (
+        <MediaToolButton
+          label={`编辑视频 ${node.title}`}
+          disabled={submitting || replacing}
+          onClick={() => context.editVideo(node)}
+        >
+          <MessageSquare />
+        </MediaToolButton>
+      )}
+      <MediaToolButton
+        label={`删除 ${node.title}`}
+        destructive
+        onClick={() => context.deleteNode(node.id)}
+      >
+        <Trash2 />
+      </MediaToolButton>
+    </>
+  );
+}
+
+function isCanvasContentNode(node: CanvasNode): node is CanvasContentNode {
+  return node.type === 'text'
+    || node.type === 'image'
+    || node.type === 'video'
+    || node.type === 'audio';
+}
+
+function handleToolbarKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  const controls = toolbarControls(event.currentTarget);
+  if (!controls.length) return;
+  const current = controls.indexOf(document.activeElement as HTMLElement);
+  const target = event.key === 'Home'
+    ? controls[0]
+    : event.key === 'End'
+      ? controls.at(-1)
+      : event.key === 'ArrowRight'
+        ? controls[(current + 1 + controls.length) % controls.length]
+        : controls[(current - 1 + controls.length) % controls.length];
+  event.preventDefault();
+  event.stopPropagation();
+  updateToolbarTabStops(controls, target);
+  target?.focus();
+}
+
+function toolbarControls(toolbar: HTMLDivElement | null) {
+  return toolbar
+    ? Array.from(toolbar.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]'))
+    : [];
+}
+
+function updateToolbarTabStops(controls: HTMLElement[], active: HTMLElement | null | undefined) {
+  controls.forEach(control => {
+    control.tabIndex = control === active ? 0 : -1;
+  });
+}
+
 type ImageToolbarAction = {
   id: CanvasImageQuickToolId;
   label: string;
@@ -440,6 +606,7 @@ function ImageNodeToolbar({
   submitting,
   copyablePrompt,
   context,
+  onOverlayOpenChange,
 }: {
   node: Extract<CanvasContentNode, { type: 'image' }>;
   compact: boolean;
@@ -447,10 +614,19 @@ function ImageNodeToolbar({
   submitting: boolean;
   copyablePrompt: string | null;
   context: CanvasNodeContextValue;
+  onOverlayOpenChange: (open: boolean) => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const menuOpenRef = useRef(false);
+  const settingsOpenRef = useRef(false);
+  const onOverlayOpenChangeRef = useRef(onOverlayOpenChange);
+  useEffect(() => {
+    onOverlayOpenChangeRef.current = onOverlayOpenChange;
+  }, [onOverlayOpenChange]);
+  useEffect(() => () => onOverlayOpenChangeRef.current(false), []);
   const resizeUnlocked = node.data.display.free_resize;
   const definitions = orderedCanvasImageTools(context.canvasUiPreferences.image_toolbar.tool_ids);
   const actions = definitions.flatMap(definition => {
@@ -549,9 +725,21 @@ function ImageNodeToolbar({
     return action ? [action] : [];
   });
 
+  function updateMenuOpen(open: boolean) {
+    menuOpenRef.current = open;
+    setMenuOpen(open);
+    onOverlayOpenChange(open || settingsOpenRef.current);
+  }
+
+  function updateSettingsOpen(open: boolean) {
+    settingsOpenRef.current = open;
+    setSettingsOpen(open);
+    onOverlayOpenChange(open || menuOpenRef.current);
+  }
+
   function openSettings() {
     setSettingsError(context.canvasUiPreferencesError);
-    setSettingsOpen(true);
+    updateSettingsOpen(true);
   }
 
   async function saveSettings(value: CanvasImageToolbarPreferences) {
@@ -559,7 +747,7 @@ function ImageNodeToolbar({
     setSettingsError(null);
     try {
       await context.saveImageToolbarPreferences(value);
-      setSettingsOpen(false);
+      updateSettingsOpen(false);
     } catch (error) {
       setSettingsError((error as Error).message);
     } finally {
@@ -570,13 +758,13 @@ function ImageNodeToolbar({
   return (
     <>
       {compact ? (
-        <DropdownMenu>
+        <DropdownMenu open={menuOpen} onOpenChange={updateMenuOpen}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
               title={`更多 ${node.title} 图片工具`}
               aria-label={`更多 ${node.title} 图片工具`}
-              className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+              className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               onClick={event => event.stopPropagation()}
             >
               <Ellipsis className="size-3.5" aria-hidden="true" />
@@ -646,7 +834,7 @@ function ImageNodeToolbar({
         value={context.canvasUiPreferences.image_toolbar}
         saving={settingsSaving}
         error={settingsError}
-        onOpenChange={setSettingsOpen}
+        onOpenChange={updateSettingsOpen}
         onSave={value => void saveSettings(value)}
       />
     </>
@@ -1241,7 +1429,7 @@ function MediaToolButton({ label, text, destructive = false, disabled = false, o
       aria-label={label}
       disabled={disabled}
       className={cn(
-        'nodrag flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30 group-focus-within:opacity-100 group-hover:opacity-100',
+        'nodrag flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30',
         text ? 'gap-1 px-2' : 'w-7',
         destructive && 'hover:text-destructive',
       )}
@@ -1268,7 +1456,7 @@ function MediaToolLink({ label, text, href, children }: {
       title={label}
       aria-label={label}
       className={cn(
-        'nodrag flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100',
+        'nodrag flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
         text ? 'gap-1 px-2' : 'w-7',
       )}
       onClick={event => event.stopPropagation()}

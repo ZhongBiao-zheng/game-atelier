@@ -398,15 +398,18 @@ def replace_canvas_node_media(
         current_version = (
             current.content_versions.get(current_version_id) if current_version_id else None
         )
-        if not isinstance(current_version, CanvasMediaVersion):
+        if current_version_id and not isinstance(current_version, CanvasMediaVersion):
             raise CanvasMediaReplaceError(
                 "canvas_media_node_missing",
-                "这个节点还没有可替换的媒体内容。",
+                "这个节点引用的媒体内容不存在。",
             )
-        if current_version.kind != node.type or media_kind != node.type:
+        if (
+            isinstance(current_version, CanvasMediaVersion)
+            and current_version.kind != node.type
+        ) or media_kind != node.type:
             raise CanvasMediaReplaceError(
                 "canvas_media_replace_kind_mismatch",
-                "替换文件必须与节点当前的媒体类型一致。",
+                "上传文件必须与节点的媒体类型一致。",
             )
 
         timestamp = _now()

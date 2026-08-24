@@ -193,6 +193,7 @@ interface MediaReplaceTarget {
   nodeId: string;
   title: string;
   kind: 'image' | 'video' | 'audio';
+  hadContent: boolean;
 }
 
 interface ViewportSyncToken {
@@ -2011,12 +2012,21 @@ function CanvasEditorInner({
   const replaceMedia = useCallback((node: CanvasContentNode) => {
     const versionId = node.data.current_version_id;
     const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
-    if (!version || version.kind === 'text' || version.kind !== node.type) {
-      setMediaReplaceError({ nodeId: node.id, message: '这个节点还没有可替换的媒体内容。' });
+    if (node.type === 'text') {
+      setMediaReplaceError({ nodeId: node.id, message: '文本节点不支持媒体上传。' });
+      return;
+    }
+    if (version && (version.kind === 'text' || version.kind !== node.type)) {
+      setMediaReplaceError({ nodeId: node.id, message: '这个节点引用了不匹配的媒体内容。' });
       return;
     }
     setMediaReplaceError(null);
-    setMediaReplaceTarget({ nodeId: node.id, title: node.title, kind: version.kind });
+    setMediaReplaceTarget({
+      nodeId: node.id,
+      title: node.title,
+      kind: node.type,
+      hadContent: Boolean(version),
+    });
     requestAnimationFrame(() => {
       if (!replaceMediaRef.current) return;
       replaceMediaRef.current.value = '';
@@ -2055,8 +2065,10 @@ function CanvasEditorInner({
       setSelectedConnectionIds(new Set());
       setSelectedNodeIds(new Set([target.nodeId]));
       announceToolNotice(mergeStatus === 'applied'
-        ? `已替换“${target.title}”，旧版本仍可撤销恢复`
-        : `“${target.title}”已有更新内容；替换文件已保留为历史版本`);
+        ? target.hadContent
+          ? `已替换“${target.title}”，旧版本仍可撤销恢复`
+          : `已将文件上传到“${target.title}”`
+        : `“${target.title}”已有更新内容；上传文件已保留为历史版本`);
       requestAnimationFrame(() => documentQueryNode(target.nodeId)?.focus());
     } catch (replaceError) {
       setMediaReplaceError({ nodeId: target.nodeId, message: (replaceError as Error).message });
@@ -2810,7 +2822,9 @@ function CanvasEditorInner({
             ref={replaceMediaRef}
             type="file"
             className="sr-only"
-            aria-label="选择替换媒体"
+            aria-label={mediaReplaceTarget
+              ? mediaReplaceTarget.hadContent ? '选择替换媒体' : '选择上传媒体'
+              : '选择节点媒体文件'}
             accept={mediaReplaceTarget ? replacementAccept(mediaReplaceTarget.kind) : undefined}
             onChange={event => {
               const file = event.target.files?.[0];

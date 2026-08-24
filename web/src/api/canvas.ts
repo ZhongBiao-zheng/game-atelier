@@ -301,7 +301,7 @@ export async function replaceCanvasNodeMedia(
   form.append('expected_revision', String(expectedRevision));
   return requestJson<CanvasUpload>(
     `/api/canvas/projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(nodeId)}/replace`,
-    '替换画布媒体',
+    '上传或替换画布媒体',
     { method: 'POST', body: form },
   );
 }

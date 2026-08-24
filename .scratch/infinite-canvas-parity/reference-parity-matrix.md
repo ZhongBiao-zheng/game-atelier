@@ -94,7 +94,7 @@ Status: ready-for-human
 | C09 | 四角 resize、图片比例锁/自由变形 | `canvas-node.tsx`、`freeResize` | adapted：React Flow NodeResizer | full |
 | C10 | 左右连接柄与有向连接 | `canvas-connections.tsx` | adapted：React Flow Handle/Edge；统一校验、空白创建、撤销持久化与有证据派生恢复，见 issue 28 | full |
 | C11 | 配置节点之间禁止连接 | 运行时文案 `configConnection` | same | full |
-| C12 | 节点 hover 工具条跟随节点 | `canvas-node-hover-toolbar.tsx` | same structure + Atelier styling | partial |
+| C12 | 节点 hover 工具条跟随节点 | `canvas-node-hover-toolbar.tsx` | same structure + Atelier styling | full |
 | C13 | 节点信息/JSON 双视图 | `CanvasNodeInfoModal` | same | full |
 | C14 | 错误节点工具条重试 | `canRetry` / `onRetry` | adapted：重试生成快照 | partial |
 | C15 | 节点状态 idle/loading/success/error | `CanvasNodeStatus` | adapted：映射 Job 状态 | partial |
@@ -209,7 +209,7 @@ Status: ready-for-human
 | I01 | 顶部项目/状态/配置区，底部居中工具 dock | runtime screenshots | same spatial hierarchy + Atelier styling | partial |
 | I02 | 左侧资源面板、中央画布、右侧 Agent 三栏可折叠/调整 | runtime/components | same | full |
 | I03 | 节点标题在卡片外上方，卡片本体承载内容 | `canvas-node.tsx`、runtime | same：标题与改名输入都跟随节点外沿，见 issue 27 | full |
-| I04 | hover 工具条位于节点上方 | `canvas-node-hover-toolbar.tsx` | same | partial |
+| I04 | hover 工具条位于节点上方 | `canvas-node-hover-toolbar.tsx` | same | full |
 | I05 | composer 是节点下方独立浮层并随节点移动 | prompt/config components | same | partial |
 | I06 | 连接柄位于节点左右中部，边低对比 | node/connections | same behavior + Atelier colors：48px 命中区、低对比贝塞尔、派生虚线与相关边高亮，见 issue 28 | full |
 | I07 | 浅/深主题、点/线/空白背景 | theme/appearance runtime | adapted：固定 Atelier 暗色 token；外观菜单明确选择点/线/空白并持久化 | full |
