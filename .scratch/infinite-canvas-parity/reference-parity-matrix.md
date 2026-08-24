@@ -90,7 +90,7 @@ Status: ready-for-human
 | C05 | 生成配置节点，可切换文本/图片/视频/音频 | `canvas-config-composer.tsx` | adapted：提交到统一 Job Runner | full |
 | C06 | 分组节点，显示成员数量 | `CanvasNodeType.Group`、groupId | same | full |
 | C07 | 开放字符串插件节点 | `CanvasNodeTypeId`、node registry | adapted：使用受限插件契约 | full |
-| C08 | 节点标题双击改名 | `canvas-node.tsx` | same | partial |
+| C08 | 节点标题双击改名 | `canvas-node.tsx` | same：七类节点共用卡片外原地输入，见 issue 27 | full |
 | C09 | 四角 resize、图片比例锁/自由变形 | `canvas-node.tsx`、`freeResize` | adapted：React Flow NodeResizer | full |
 | C10 | 左右连接柄与有向连接 | `canvas-connections.tsx` | adapted：React Flow Handle/Edge | partial |
 | C11 | 配置节点之间禁止连接 | 运行时文案 `configConnection` | same | full |
@@ -208,7 +208,7 @@ Status: ready-for-human
 |---|---|---|---|---|
 | I01 | 顶部项目/状态/配置区，底部居中工具 dock | runtime screenshots | same spatial hierarchy + Atelier styling | partial |
 | I02 | 左侧资源面板、中央画布、右侧 Agent 三栏可折叠/调整 | runtime/components | same | full |
-| I03 | 节点标题在卡片外上方，卡片本体承载内容 | `canvas-node.tsx`、runtime | same | partial |
+| I03 | 节点标题在卡片外上方，卡片本体承载内容 | `canvas-node.tsx`、runtime | same：标题与改名输入都跟随节点外沿，见 issue 27 | full |
 | I04 | hover 工具条位于节点上方 | `canvas-node-hover-toolbar.tsx` | same | partial |
 | I05 | composer 是节点下方独立浮层并随节点移动 | prompt/config components | same | partial |
 | I06 | 连接柄位于节点左右中部，边低对比 | node/connections | same behavior + Atelier colors | partial |

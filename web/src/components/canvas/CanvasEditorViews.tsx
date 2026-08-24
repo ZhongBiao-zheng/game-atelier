@@ -58,6 +58,7 @@ export interface CanvasNodeContextValue {
   retryRun: (id: string, runId: string, mode: 'original' | 'current', candidateId?: string) => Promise<void>;
   cancelRun: (runId: string) => Promise<void>;
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
+  renameNode: (id: string, title: string) => void;
   updateText: (id: string, text: string) => void;
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
@@ -79,8 +80,29 @@ export const CanvasNodeContext = createContext<CanvasNodeContextValue | null>(nu
 
 export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const context = useContext(CanvasNodeContext);
-  if (!context) return null;
   const node = data.domain;
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(node.title);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const titleTriggerRef = useRef<HTMLButtonElement>(null);
+  const titleExitInProgress = useRef(false);
+  const restoreTitleFocus = useRef(false);
+  useEffect(() => {
+    if (!isEditingTitle) setTitleDraft(node.title);
+  }, [isEditingTitle, node.title]);
+  useEffect(() => {
+    if (!isEditingTitle) return;
+    titleInputRef.current?.focus();
+    titleInputRef.current?.select();
+  }, [isEditingTitle]);
+  useEffect(() => {
+    if (isEditingTitle) return;
+    if (restoreTitleFocus.current) titleTriggerRef.current?.focus();
+    restoreTitleFocus.current = false;
+    titleExitInProgress.current = false;
+  }, [isEditingTitle, node.title]);
+  if (!context) return null;
+  const renameNode = context.renameNode;
   const content = contentForNode(node, context.contentVersions);
   const draft = generationDraft(node);
   const copyablePrompt = copyablePromptForNode(
@@ -95,6 +117,31 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const reversePromptJob = nodeJob && isReversePromptJob(nodeJob) ? nodeJob : undefined;
   const reversePromptRunning = reversePromptJob?.status === 'pending' || reversePromptJob?.status === 'pending_confirm';
   const reversePromptSucceeded = reversePromptJob?.canvas_run?.candidates.some(candidate => candidate.status === 'succeeded') ?? false;
+
+  function beginTitleEditing() {
+    titleExitInProgress.current = false;
+    restoreTitleFocus.current = false;
+    setTitleDraft(node.title);
+    setIsEditingTitle(true);
+  }
+
+  function finishTitleEditing(restoreFocus: boolean) {
+    if (titleExitInProgress.current) return;
+    titleExitInProgress.current = true;
+    const title = titleDraft.trim();
+    setTitleDraft(title || node.title);
+    setIsEditingTitle(false);
+    restoreTitleFocus.current = restoreFocus;
+    if (title && title !== node.title) renameNode(node.id, title);
+  }
+
+  function cancelTitleEditing() {
+    if (titleExitInProgress.current) return;
+    titleExitInProgress.current = true;
+    restoreTitleFocus.current = true;
+    setTitleDraft(node.title);
+    setIsEditingTitle(false);
+  }
 
   return (
     <div className="canvas-node-shell group relative h-full w-full overflow-visible" data-selected={selected ? 'true' : 'false'}>
@@ -113,9 +160,55 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         }))}
       />
       <header className="absolute bottom-full left-1 right-1 flex items-center justify-between gap-2 pb-2 text-xs text-muted-foreground">
-        <span className="flex min-w-0 items-center gap-1.5 truncate">
+        <span
+          className="flex min-w-0 flex-1 items-center gap-1.5"
+          onPointerDown={event => event.stopPropagation()}
+          onClick={event => event.stopPropagation()}
+          onDoubleClick={event => {
+            event.stopPropagation();
+            if (isEditingTitle) return;
+            event.preventDefault();
+            beginTitleEditing();
+          }}
+        >
           {nodeIcon(node)}
-          <span className="truncate">{node.title}</span>
+          {isEditingTitle ? (
+            <input
+              ref={titleInputRef}
+              value={titleDraft}
+              maxLength={120}
+              aria-label={`重命名节点 ${node.title}`}
+              className="nodrag nowheel h-7 min-w-0 flex-1 border-0 border-b border-dashed border-input bg-transparent px-0 text-xs font-medium text-foreground outline-none focus-visible:border-ring"
+              onChange={event => setTitleDraft(event.target.value)}
+              onBlur={() => finishTitleEditing(false)}
+              onKeyDown={event => {
+                event.stopPropagation();
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  finishTitleEditing(true);
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  cancelTitleEditing();
+                }
+              }}
+            />
+          ) : (
+            <button
+              ref={titleTriggerRef}
+              type="button"
+              title="双击或按 Enter 重命名节点"
+              aria-label={`重命名节点 ${node.title}`}
+              className="nodrag min-w-0 truncate border-b border-dashed border-transparent text-left text-xs font-medium text-muted-foreground transition-colors hover:border-current hover:text-foreground focus-visible:border-current focus-visible:text-foreground focus-visible:outline-none"
+              onKeyDown={event => {
+                if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'F2') return;
+                event.preventDefault();
+                event.stopPropagation();
+                beginTitleEditing();
+              }}
+            >
+              {node.title}
+            </button>
+          )}
         </span>
         <span className="flex shrink-0 items-center gap-1">
           {content && providesContent(node) && node.type !== 'image' && (
@@ -1077,6 +1170,7 @@ export function CanvasInspector({
       <input
         aria-label="节点标题"
         value={node.title}
+        maxLength={120}
         onFocus={recordHistory}
         onChange={event => updateNode(current => ({ ...current, title: event.target.value || '未命名节点' }))}
         className="canvas-input mb-2"

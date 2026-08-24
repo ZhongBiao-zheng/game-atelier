@@ -1338,6 +1338,13 @@ function CanvasEditorInner({
     commit(current => ({ ...current, nodes: current.nodes.map(node => node.id === nodeId ? updater(node) : node) }));
   }, [commit]);
 
+  const renameNode = useCallback((nodeId: string, title: string) => {
+    commit(current => ({
+      ...current,
+      nodes: current.nodes.map(node => node.id === nodeId ? { ...node, title } : node),
+    }), true);
+  }, [commit]);
+
   const updateText = useCallback((nodeId: string, text: string) => {
     commit(current => {
       const node = current.nodes.find(candidate => candidate.id === nodeId);
@@ -2372,6 +2379,7 @@ function CanvasEditorInner({
     retryRun,
     cancelRun,
     updateNode,
+    renameNode,
     updateText,
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
@@ -2415,6 +2423,7 @@ function CanvasEditorInner({
     reversePrompt,
     reversePromptConfiguredNodeIds,
     retryRun,
+    renameNode,
     selectCandidate,
     selectOnlyNode,
     submitRun,
