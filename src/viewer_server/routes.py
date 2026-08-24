@@ -57,10 +57,12 @@ from pydantic import field_validator
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
-    CanvasDocument, CanvasPackageCommitRequest, CanvasPackageImportResponse,
+    CanvasDocument, CanvasLibraryAsset, CanvasLibraryAssetCreate, CanvasLibraryAssetPatch,
+    CanvasLibraryInsertRequest, CanvasPackageCommitRequest, CanvasPackageImportResponse,
+    CanvasPrompt, CanvasPromptCreate, CanvasPromptPatch,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
     CanvasProjectList, CanvasProjectRename, CanvasRunCreate, CanvasRunResponse, CanvasRunRetry,
-    CanvasUploadResponse,
+    CanvasUploadResponse, RevisionedSidecar,
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
@@ -2183,6 +2185,260 @@ def put_canvas_document(
         raise
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
+
+
+def _canvas_if_match(if_match: str | None, subject: str) -> int:
+    if if_match is None:
+        raise HTTPException(428, detail=f"更新{subject}必须携带 If-Match revision")
+    try:
+        return int(if_match.strip().strip('"'))
+    except ValueError:
+        raise HTTPException(422, detail=f"If-Match 必须是{subject} revision") from None
+
+
+def _raise_canvas_library_error(error: Exception, missing: str) -> None:
+    from character_workflow.lib.canvas_library import CanvasLibraryStateError
+    if isinstance(error, CanvasLibraryStateError):
+        raise HTTPException(409, detail="画布项目创作库状态损坏，请重新导入或恢复项目") from error
+    if isinstance(error, KeyError):
+        raise HTTPException(404, detail=missing) from None
+    if isinstance(error, RuntimeError) and str(error).startswith("revision_conflict:"):
+        current_revision = int(str(error).split(":", 1)[1])
+        raise HTTPException(409, detail={
+            "code": "revision_conflict",
+            "current_revision": current_revision,
+        }) from None
+    if isinstance(error, PermissionError):
+        raise HTTPException(403, detail=str(error)) from error
+    if isinstance(error, ValueError):
+        raise HTTPException(422, detail=str(error)) from error
+    raise error
+
+
+@router.get(
+    "/canvas/projects/{project_id}/library/assets",
+    response_model=RevisionedSidecar[CanvasLibraryAsset],
+)
+def get_canvas_library_assets(project_id: str, response: Response):
+    from character_workflow.lib.canvas_library import read_canvas_assets
+    try:
+        sidecar = read_canvas_assets(project_id)
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个画布项目或资产库")
+
+
+@router.post(
+    "/canvas/projects/{project_id}/library/assets",
+    response_model=RevisionedSidecar[CanvasLibraryAsset],
+    status_code=201,
+)
+def post_canvas_library_asset(
+    project_id: str,
+    payload: CanvasLibraryAssetCreate,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import save_canvas_asset
+    try:
+        sidecar = save_canvas_asset(
+            project_id,
+            payload.version_id,
+            payload.title,
+            payload.tags,
+            _canvas_if_match(if_match, "资产库"),
+        )
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个内容版本或画布项目")
+
+
+@router.patch(
+    "/canvas/projects/{project_id}/library/assets/{asset_id}",
+    response_model=RevisionedSidecar[CanvasLibraryAsset],
+)
+def patch_canvas_library_asset(
+    project_id: str,
+    asset_id: str,
+    payload: CanvasLibraryAssetPatch,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import patch_canvas_asset
+    try:
+        sidecar = patch_canvas_asset(
+            project_id,
+            asset_id,
+            payload,
+            _canvas_if_match(if_match, "资产库"),
+        )
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个资产或画布项目")
+
+
+@router.delete(
+    "/canvas/projects/{project_id}/library/assets/{asset_id}",
+    response_model=RevisionedSidecar[CanvasLibraryAsset],
+)
+def delete_canvas_library_asset(
+    project_id: str,
+    asset_id: str,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import delete_canvas_asset
+    try:
+        sidecar = delete_canvas_asset(
+            project_id,
+            asset_id,
+            _canvas_if_match(if_match, "资产库"),
+        )
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个资产或画布项目")
+
+
+@router.post(
+    "/canvas/projects/{project_id}/library/assets/{asset_id}/insert",
+    response_model=CanvasDocument,
+)
+def post_canvas_library_asset_insert(
+    project_id: str,
+    asset_id: str,
+    payload: CanvasLibraryInsertRequest,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import insert_canvas_asset
+    try:
+        document = insert_canvas_asset(
+            project_id,
+            asset_id,
+            payload.position,
+            _canvas_if_match(if_match, "画布"),
+        )
+        response.headers["ETag"] = f'"{document.revision}"'
+        return document
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个资产或画布项目")
+
+
+@router.get(
+    "/canvas/projects/{project_id}/library/prompts",
+    response_model=RevisionedSidecar[CanvasPrompt],
+)
+def get_canvas_library_prompts(project_id: str, response: Response):
+    from character_workflow.lib.canvas_library import read_canvas_prompts
+    try:
+        sidecar = read_canvas_prompts(project_id)
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个画布项目或提示词库")
+
+
+@router.post(
+    "/canvas/projects/{project_id}/library/prompts",
+    response_model=RevisionedSidecar[CanvasPrompt],
+    status_code=201,
+)
+def post_canvas_library_prompt(
+    project_id: str,
+    payload: CanvasPromptCreate,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import create_canvas_prompt
+    try:
+        sidecar = create_canvas_prompt(
+            project_id,
+            payload.title,
+            payload.content,
+            payload.tags,
+            _canvas_if_match(if_match, "提示词库"),
+        )
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个画布项目")
+
+
+@router.patch(
+    "/canvas/projects/{project_id}/library/prompts/{prompt_id}",
+    response_model=RevisionedSidecar[CanvasPrompt],
+)
+def patch_canvas_library_prompt(
+    project_id: str,
+    prompt_id: str,
+    payload: CanvasPromptPatch,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import patch_canvas_prompt
+    try:
+        sidecar = patch_canvas_prompt(
+            project_id,
+            prompt_id,
+            payload,
+            _canvas_if_match(if_match, "提示词库"),
+        )
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个提示词或画布项目")
+
+
+@router.delete(
+    "/canvas/projects/{project_id}/library/prompts/{prompt_id}",
+    response_model=RevisionedSidecar[CanvasPrompt],
+)
+def delete_canvas_library_prompt(
+    project_id: str,
+    prompt_id: str,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import delete_canvas_prompt
+    try:
+        sidecar = delete_canvas_prompt(
+            project_id,
+            prompt_id,
+            _canvas_if_match(if_match, "提示词库"),
+        )
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个提示词或画布项目")
+
+
+@router.post(
+    "/canvas/projects/{project_id}/library/prompts/{prompt_id}/insert",
+    response_model=CanvasDocument,
+)
+def post_canvas_library_prompt_insert(
+    project_id: str,
+    prompt_id: str,
+    payload: CanvasLibraryInsertRequest,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import insert_canvas_prompt
+    try:
+        document = insert_canvas_prompt(
+            project_id,
+            prompt_id,
+            payload.position,
+            _canvas_if_match(if_match, "画布"),
+        )
+        response.headers["ETag"] = f'"{document.revision}"'
+        return document
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个提示词或画布项目")
 
 
 @router.post(

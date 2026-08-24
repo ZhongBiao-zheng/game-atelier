@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, Eye, FileAudio, FileImage, FileVideo, LoaderCircle, Plus, RotateCcw, Sparkles, Square, Trash2, Type } from 'lucide-react';
+import { Check, Eye, FileAudio, FileImage, FileVideo, Library, LoaderCircle, Plus, RotateCcw, Sparkles, Square, Trash2, Type } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasMediaUrl } from '@/api/canvas';
@@ -25,6 +25,7 @@ export interface CanvasNodeContextValue {
   jobsByRunId: ReadonlyMap<string, Job>;
   jobsByResultNodeId: ReadonlyMap<string, Job[]>;
   submittingNodeIds: ReadonlySet<string>;
+  libraryBusy: boolean;
   selectNode: (id: string) => void;
   previewContent: (id: string, title: string) => void;
   selectCandidate: (id: string, versionId: string) => void;
@@ -34,6 +35,7 @@ export interface CanvasNodeContextValue {
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
   updateText: (id: string, text: string) => void;
   recordHistory: () => void;
+  saveAsset: (node: CanvasContentNode) => Promise<void>;
   deleteNode: (id: string) => void;
 }
 
@@ -67,6 +69,20 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           <span className="truncate">{node.title}</span>
         </span>
         <span className="flex shrink-0 items-center gap-1">
+          {content && providesContent(node) && (
+            <button
+              type="button"
+              disabled={context.libraryBusy}
+              aria-label={`将 ${node.title} 存入资产库`}
+              className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-30 group-focus-within:opacity-100 group-hover:opacity-100"
+              onClick={event => {
+                event.stopPropagation();
+                void context.saveAsset(node);
+              }}
+            >
+              <Library className="size-3.5" aria-hidden="true" />
+            </button>
+          )}
           {content && (
             <button
               type="button"
@@ -508,6 +524,8 @@ export function CanvasInspector({
   contentVersions,
   mobileGeneration,
   onPreview,
+  onSaveAsset,
+  saveAssetBusy = false,
 }: {
   node: CanvasContentNode;
   updateNode: (updater: (node: CanvasNode) => CanvasNode) => void;
@@ -518,6 +536,8 @@ export function CanvasInspector({
   contentVersions: Readonly<Record<string, CanvasContentVersion>>;
   mobileGeneration?: React.ReactNode;
   onPreview?: () => void;
+  onSaveAsset?: () => void;
+  saveAssetBusy?: boolean;
 }) {
   const content = contentForNode(node, contentVersions);
   return (
@@ -527,6 +547,9 @@ export function CanvasInspector({
         <div className="flex shrink-0 items-center gap-1">
           {content && onPreview && (
             <Button variant="ghost" size="icon" aria-label={`预览 ${node.title}`} onClick={onPreview}><Eye /></Button>
+          )}
+          {content && onSaveAsset && (
+            <Button variant="ghost" size="icon" disabled={saveAssetBusy} aria-label={`将 ${node.title} 存入资产库`} onClick={onSaveAsset}><Library /></Button>
           )}
           <Button variant="ghost" size="icon" aria-label="删除选中节点" onClick={deleteNode}><Trash2 /></Button>
         </div>
@@ -564,7 +587,7 @@ export function EditorMessage({ text, icon, action }: { text: string; icon?: Rea
   return <div className="grid h-full place-items-center"><div className="flex items-center gap-2 text-sm text-muted-foreground">{icon}{text}{action}</div></div>;
 }
 
-export function ToolButton({ label, active, disabled, onClick, children, buttonRef, expanded, controlsId }: {
+export function ToolButton({ label, active, disabled, onClick, children, buttonRef, expanded, controlsId, popup = 'menu' }: {
   label: string;
   active?: boolean;
   disabled?: boolean;
@@ -573,8 +596,9 @@ export function ToolButton({ label, active, disabled, onClick, children, buttonR
   buttonRef?: Ref<HTMLButtonElement>;
   expanded?: boolean;
   controlsId?: string;
+  popup?: 'menu' | 'dialog' | false;
 }) {
-  return <button ref={buttonRef} type="button" title={label} aria-label={label} aria-pressed={active} aria-expanded={expanded} aria-controls={controlsId} aria-haspopup={controlsId ? 'menu' : undefined} disabled={disabled} onClick={onClick} className={cn('grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-30', active && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground')}>{children}</button>;
+  return <button ref={buttonRef} type="button" title={label} aria-label={label} aria-pressed={active} aria-expanded={expanded} aria-controls={controlsId} aria-haspopup={controlsId && popup ? popup : undefined} disabled={disabled} onClick={onClick} className={cn('grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-30', active && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground')}>{children}</button>;
 }
 
 export function AddMenuButton({ icon, title, description, onClick }: { icon: React.ReactNode; title: string; description?: string; onClick: () => void }) {
@@ -624,7 +648,7 @@ function acceptsInput(node: CanvasNode) {
   return node.type !== 'group' && node.type !== 'plugin';
 }
 
-function providesContent(node: CanvasNode) {
+function providesContent(node: CanvasNode): node is CanvasContentNode {
   return node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio';
 }
 

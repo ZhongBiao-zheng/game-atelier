@@ -82,6 +82,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /projects/{id}/studio-archive-targets?media_kind={image,video}`
 `GET /canvas/projects` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
 `GET /canvas/projects/{id}/content/{version_id}`
+`GET /canvas/projects/{id}/library/assets` `/canvas/projects/{id}/library/prompts`
 `GET /canvas/trash`
 
 ### 人工画布契约
@@ -140,6 +141,18 @@ schema、摘要和项目内引用校验，再凭 30 分钟 token 调用 `commit`
 把项目目录、owned Job 与完整恢复包移入 `.trash/canvases/<original_id>/<trash_id>/` 并写 tombstone；项目
 立即从索引消失，默认保留 30 天。`GET /canvas/trash` 只列仍可恢复的记录；恢复通过同一项目包导入器创建
 新项目 ID，原 ID 的 tombstone 不复活，避免与已经传播的删除记录争用身份。
+
+项目创作库分别落在 `library/assets.json` 与 `library/prompts.json`，两者都是独立
+`RevisionedSidecar`。所有写操作必须携带 sidecar 当前 `If-Match`；读取和成功写入响应返回对应
+`ETag`。资产通过 `POST /canvas/projects/{id}/library/assets` 收藏同项目现有 Content Version，同一
+version 最多一个条目；PATCH 只改标题和标签，DELETE 只移出资产库，不删除节点、Content Version 或
+媒体字节。`POST .../library/assets/{asset_id}/insert` 携带 Canvas Document 的 `If-Match` 和目标坐标，
+创建指向同一不可变 Content Version 的新节点。
+
+项目提示词通过 `POST/PATCH/DELETE .../library/prompts` 管理；项目本地条目可编辑，公共源条目在项目内
+只读。`POST .../library/prompts/{prompt_id}/insert` 携带 Canvas Document 的 `If-Match` 和目标坐标，
+先按当前提示词内容创建新的 `user_edit` Text Content Version，再创建指向该版本的文本节点。创作库写入
+与画布插入均在项目锁下校验 revision；冲突返回 409，不做 last-write-wins 或自动合并。
 
 ### 角色衍生契约
 

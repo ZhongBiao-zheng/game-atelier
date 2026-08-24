@@ -724,6 +724,21 @@ class RevisionedSidecar(BaseModel, Generic[SidecarItem]):
     updated_at: str
     items: list[SidecarItem] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def validate_unique_item_identity(self) -> "RevisionedSidecar[SidecarItem]":
+        if self.items and isinstance(self.items[0], CanvasLibraryAsset):
+            asset_ids = [item.asset_id for item in self.items]
+            version_ids = [item.version_id for item in self.items]
+            if len(asset_ids) != len(set(asset_ids)):
+                raise ValueError("canvas asset ids must be unique")
+            if len(version_ids) != len(set(version_ids)):
+                raise ValueError("each canvas content version can have at most one library entry")
+        if self.items and isinstance(self.items[0], CanvasPrompt):
+            prompt_ids = [item.prompt_id for item in self.items]
+            if len(prompt_ids) != len(set(prompt_ids)):
+                raise ValueError("canvas prompt ids must be unique")
+        return self
+
 
 class CanvasLibraryAsset(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -737,9 +752,41 @@ class CanvasPrompt(BaseModel):
     model_config = ConfigDict(extra="forbid")
     prompt_id: str = Field(min_length=1, max_length=160)
     title: str = Field(min_length=1, max_length=120)
-    content: str = Field(max_length=40_000)
+    content: str = Field(min_length=1, max_length=40_000)
     tags: list[str] = Field(default_factory=list)
     source: Literal["local", "public"]
+
+
+class CanvasLibraryAssetCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version_id: str = Field(min_length=1, max_length=160)
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class CanvasLibraryAssetPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    tags: list[str] | None = Field(default=None, max_length=20)
+
+
+class CanvasPromptCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=120)
+    content: str = Field(min_length=1, max_length=40_000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class CanvasPromptPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    content: str | None = Field(default=None, min_length=1, max_length=40_000)
+    tags: list[str] | None = Field(default=None, max_length=20)
+
+
+class CanvasLibraryInsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    position: CanvasPoint
 
 
 class CanvasPluginState(BaseModel):

@@ -23,6 +23,7 @@ import {
   FileImage,
   FileVideo,
   Grid2X2,
+  Library,
   LoaderCircle,
   Maximize2,
   MousePointer2,
@@ -31,19 +32,30 @@ import {
   Type,
   Undo2,
   Upload,
+  WandSparkles,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 
 import {
   cancelCanvasRun,
   canvasMediaUrl,
+  createCanvasPrompt,
+  deleteCanvasAsset,
+  deleteCanvasPrompt,
   getCanvasDocument,
+  getCanvasAssets,
+  getCanvasPrompts,
+  insertCanvasAsset,
+  insertCanvasPrompt,
   listCanvasJobs,
   listCanvasProjects,
   retryCanvasRun,
+  saveCanvasAsset,
   saveCanvasDocument,
   submitCanvasRun,
+  updateCanvasAsset,
+  updateCanvasPrompt,
   uploadCanvasMedia,
 } from '@/api/canvas';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
@@ -58,6 +70,11 @@ import {
   type CanvasNodeContextValue,
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
+import {
+  CANVAS_LIBRARY_DRAG_TYPE,
+  CanvasLibraryPanel,
+  type CanvasLibraryMode,
+} from '@/components/canvas/CanvasLibraryPanel';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -70,8 +87,11 @@ import type {
   CanvasContentVersion,
   CanvasContentNode,
   CanvasDocument,
+  CanvasLibraryAsset,
   CanvasNode,
+  CanvasPrompt,
   CanvasTextVersion,
+  RevisionedSidecar,
 } from '@/schema/canvas';
 import type { Job, JobKind } from '@/schema/jobs';
 import { normalizeCanvasImageParams } from './canvasEditorModel';
@@ -111,6 +131,13 @@ function CanvasEditorInner({
   const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [assets, setAssets] = useState<RevisionedSidecar<CanvasLibraryAsset> | null>(null);
+  const [prompts, setPrompts] = useState<RevisionedSidecar<CanvasPrompt> | null>(null);
+  const [libraryMode, setLibraryMode] = useState<CanvasLibraryMode | null>(null);
+  const [libraryFocusAssetId, setLibraryFocusAssetId] = useState<string | null>(null);
+  const [libraryBusy, setLibraryBusy] = useState(false);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
   const [submittingNodeIds, setSubmittingNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(() => new Set());
@@ -123,6 +150,8 @@ function CanvasEditorInner({
   const uploadRef = useRef<HTMLInputElement>(null);
   const editorRegionRef = useRef<HTMLElement>(null);
   const addTriggerRef = useRef<HTMLButtonElement>(null);
+  const assetLibraryTriggerRef = useRef<HTMLButtonElement>(null);
+  const promptLibraryTriggerRef = useRef<HTMLButtonElement>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
   const flowNodeCache = useRef(new Map<string, { node: CanvasNode; selected: boolean; flowNode: FlowNode }>());
@@ -132,11 +161,20 @@ function CanvasEditorInner({
   const saveInFlight = useRef<Promise<void> | null>(null);
   const saveQueued = useRef<CanvasDocument | null>(null);
   const runSubmissionInFlight = useRef(false);
+  const libraryMutationInFlight = useRef(false);
+  const libraryInsertInFlight = useRef(false);
+  const libraryInsertCommand = useRef<Promise<void> | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
   const syncedTerminalRuns = useRef(new Set<string>());
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
   const { screenToFlowPosition, fitView } = useReactFlow<FlowNode>();
+  const acceptAssets = useCallback((value: RevisionedSidecar<CanvasLibraryAsset>) => {
+    setAssets(current => !current || value.revision >= current.revision ? value : current);
+  }, []);
+  const acceptPrompts = useCallback((value: RevisionedSidecar<CanvasPrompt>) => {
+    setPrompts(current => !current || value.revision >= current.revision ? value : current);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,6 +186,11 @@ function CanvasEditorInner({
     setSubmittingNodeIds(new Set());
     setAddOpen(false);
     setCreateMenu(null);
+    setLibraryMode(null);
+    setLibraryFocusAssetId(null);
+    setLibraryError(null);
+    setAssets(null);
+    setPrompts(null);
     setPreview(null);
     flowNodeCache.current.clear();
     history.current = { past: [], future: [] };
@@ -157,7 +200,12 @@ function CanvasEditorInner({
     setDirtySignal(0);
     serverRevision.current = 0;
     runSubmissionInFlight.current = false;
-    Promise.all([listCanvasProjects(), getCanvasDocument(projectId), listKeys(), listCanvasJobs(projectId)])
+    Promise.all([
+      listCanvasProjects(),
+      getCanvasDocument(projectId),
+      listKeys(),
+      listCanvasJobs(projectId),
+    ])
       .then(([projectRows, canvasDocument, keyRows, canvasJobs]) => {
         if (cancelled) return;
         setProjects(projectRows);
@@ -174,6 +222,26 @@ function CanvasEditorInner({
       });
     return () => { cancelled = true; };
   }, [projectId]);
+
+  useEffect(() => {
+    if (!libraryMode) return;
+    let cancelled = false;
+    const load = libraryMode === 'assets'
+      ? assets ? null : getCanvasAssets(projectId).then(value => { if (!cancelled) acceptAssets(value); })
+      : prompts ? null : getCanvasPrompts(projectId).then(value => { if (!cancelled) acceptPrompts(value); });
+    if (!load) return;
+    setLibraryLoading(true);
+    setLibraryError(null);
+    void load.catch(loadError => {
+      if (!cancelled) setLibraryError((loadError as Error).message);
+    }).finally(() => {
+      if (!cancelled) setLibraryLoading(false);
+    });
+    return () => {
+      cancelled = true;
+      setLibraryLoading(false);
+    };
+  }, [acceptAssets, acceptPrompts, assets, libraryMode, projectId, prompts]);
 
   const mergeRunDocument = useCallback((remote: CanvasDocument) => {
     serverRevision.current = Math.max(serverRevision.current, remote.revision);
@@ -319,6 +387,11 @@ function CanvasEditorInner({
         requestAnimationFrame(() => editorRegionRef.current?.focus());
         return;
       }
+      if (libraryMode) {
+        event.preventDefault();
+        closeLibrary();
+        return;
+      }
       if (selectedNodeIds.size || selectedConnectionIds.size) {
         event.preventDefault();
         setSelectedNodeIds(new Set());
@@ -328,7 +401,7 @@ function CanvasEditorInner({
     }
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [addOpen, createMenu, selectedConnectionIds.size, selectedNodeIds.size]);
+  }, [addOpen, createMenu, libraryMode, selectedConnectionIds.size, selectedNodeIds.size]);
 
   useEffect(() => {
     if (!addOpen) return;
@@ -346,7 +419,7 @@ function CanvasEditorInner({
     : null;
 
   const flushSave = useCallback(function drainSaveQueue(): Promise<void> {
-    if (runSubmissionInFlight.current) return Promise.resolve();
+    if (runSubmissionInFlight.current || libraryInsertInFlight.current) return Promise.resolve();
     if (saveInFlight.current) {
       return saveInFlight.current.then(() => saveQueued.current ? drainSaveQueue() : undefined);
     }
@@ -404,6 +477,7 @@ function CanvasEditorInner({
   }, [dirtySignal, flushSave]);
 
   const persistNow = useCallback(async (): Promise<boolean> => {
+    if (libraryInsertCommand.current) await libraryInsertCommand.current;
     if (latestDocument.current && dirtyVersion.current > 0) {
       saveQueued.current = latestDocument.current;
       try {
@@ -578,6 +652,159 @@ function CanvasEditorInner({
 
   function defaultPosition() {
     return screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+  }
+
+  function closeLibrary() {
+    const trigger = libraryMode === 'prompts'
+      ? promptLibraryTriggerRef.current
+      : assetLibraryTriggerRef.current;
+    setLibraryMode(null);
+    requestAnimationFrame(() => trigger?.focus());
+  }
+
+  async function mutateLibrary(action: () => Promise<void>) {
+    if (libraryMutationInFlight.current) {
+      const concurrentError = new Error('另一项创作库操作正在处理，请稍后再试。');
+      setLibraryError(concurrentError.message);
+      throw concurrentError;
+    }
+    libraryMutationInFlight.current = true;
+    setLibraryBusy(true);
+    setLibraryError(null);
+    try {
+      await action();
+    } catch (mutationError) {
+      setLibraryError((mutationError as Error).message);
+      throw mutationError;
+    } finally {
+      libraryMutationInFlight.current = false;
+      setLibraryBusy(false);
+    }
+  }
+
+  async function saveNodeToLibrary(node: CanvasContentNode) {
+    const versionId = node.data.current_version_id;
+    if (!versionId) {
+      setError('这个节点还没有可保存的内容。');
+      return;
+    }
+    if (!await persistNow()) return;
+    setLibraryMode('assets');
+    try {
+      await mutateLibrary(async () => {
+        const currentAssets = assets ?? await getCanvasAssets(projectId);
+        const updated = await saveCanvasAsset(
+          projectId,
+          versionId,
+          node.title,
+          [],
+          currentAssets.revision,
+        );
+        acceptAssets(updated);
+        setLibraryFocusAssetId(
+          updated.items.find(item => item.version_id === versionId)?.asset_id ?? null,
+        );
+      });
+    } catch {
+      // 错误已显示在创作库面板。
+    }
+  }
+
+  async function insertLibraryItem(
+    kind: 'asset' | 'prompt',
+    id: string,
+    position = defaultPosition(),
+  ) {
+    if (!await persistNow()) return;
+    const before = latestDocument.current;
+    if (!before) return;
+    const dirtyAtInsertion = dirtyVersion.current;
+    libraryInsertInFlight.current = true;
+    const command = (async () => {
+      try {
+        await mutateLibrary(async () => {
+        const remote = kind === 'asset'
+          ? await insertCanvasAsset(projectId, id, position, serverRevision.current)
+          : await insertCanvasPrompt(projectId, id, position, serverRevision.current);
+        const previousIds = new Set(before.nodes.map(node => node.id));
+        const insertedNodes = remote.nodes.filter(node => !previousIds.has(node.id));
+        const inserted = insertedNodes[0];
+        const insertedVersions = Object.fromEntries(
+          Object.entries(remote.content_versions).filter(([versionId]) => (
+            !before.content_versions[versionId]
+          )),
+        );
+        const concurrent = latestDocument.current ?? before;
+        const concurrentIds = new Set(concurrent.nodes.map(node => node.id));
+        const authoritativeRevision = Math.max(serverRevision.current, remote.revision);
+        const merged: CanvasDocument = {
+          ...concurrent,
+          revision: authoritativeRevision,
+          updated_at: remote.updated_at,
+          nodes: [
+            ...concurrent.nodes,
+            ...insertedNodes.filter(node => !concurrentIds.has(node.id)),
+          ],
+          content_versions: {
+            ...insertedVersions,
+            ...concurrent.content_versions,
+          },
+        };
+        history.current.past.push(concurrent);
+        history.current.past = history.current.past.slice(-50);
+        history.current.future = [];
+        serverRevision.current = authoritativeRevision;
+        if (dirtyVersion.current > dirtyAtInsertion) {
+          saveQueued.current = merged;
+          setSaveState('saving');
+        } else {
+          saveQueued.current = null;
+          setSaveState('saved');
+        }
+        setDocument(merged);
+        flowNodeCache.current.clear();
+        setSelectedConnectionIds(new Set());
+        setSelectedNodeIds(inserted ? new Set([inserted.id]) : new Set());
+        requestAnimationFrame(() => {
+          if (inserted) documentQueryNode(inserted.id)?.focus();
+        });
+        });
+      } catch {
+        // 错误已显示在创作库面板。
+      } finally {
+        libraryInsertInFlight.current = false;
+        if (saveQueued.current) {
+          try {
+            await flushSave();
+          } catch {
+            setError('插入已完成，但并发编辑尚未保存。请检查服务后重试。');
+          }
+        }
+      }
+    })();
+    libraryInsertCommand.current = command;
+    try {
+      await command;
+    } finally {
+      if (libraryInsertCommand.current === command) libraryInsertCommand.current = null;
+    }
+  }
+
+  function handleLibraryDrop(event: DragEvent) {
+    const raw = event.dataTransfer.getData(CANVAS_LIBRARY_DRAG_TYPE);
+    if (!raw) return;
+    event.preventDefault();
+    try {
+      const item = JSON.parse(raw) as { kind?: string; id?: string };
+      if ((item.kind !== 'asset' && item.kind !== 'prompt') || !item.id) return;
+      void insertLibraryItem(
+        item.kind,
+        item.id,
+        screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+      );
+    } catch {
+      setLibraryError('无法识别拖入的创作库内容。');
+    }
   }
 
   function appendNode(node: CanvasNode, menu: CreateMenuState | null, baseDocument?: CanvasDocument) {
@@ -945,6 +1172,7 @@ function CanvasEditorInner({
     jobsByRunId,
     jobsByResultNodeId,
     submittingNodeIds,
+    libraryBusy,
     selectNode: selectOnlyNode,
     previewContent,
     selectCandidate,
@@ -954,14 +1182,17 @@ function CanvasEditorInner({
     updateNode,
     updateText,
     recordHistory: recordHistorySnapshot,
+    saveAsset: saveNodeToLibrary,
     deleteNode,
   }), [
+    assets?.revision,
     cancelRun,
     deleteNode,
     document?.content_versions,
     jobsByResultNodeId,
     jobsByRunId,
     keys,
+    libraryBusy,
     previewContent,
     projectId,
     recordHistorySnapshot,
@@ -997,6 +1228,12 @@ function CanvasEditorInner({
             setSelectedConnectionIds(new Set());
             setSelectedNodeIds(new Set());
           }}
+          onDragOver={event => {
+            if (!event.dataTransfer.types.includes(CANVAS_LIBRARY_DRAG_TYPE)) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+          }}
+          onDrop={handleLibraryDrop}
           onMoveEnd={(_, viewport: Viewport) => commit(current => ({ ...current, viewport }))}
           defaultViewport={document.viewport}
           minZoom={0.08}
@@ -1038,6 +1275,9 @@ function CanvasEditorInner({
             <ToolButton buttonRef={addTriggerRef} label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} expanded={addOpen} controlsId="canvas-add-menu" onClick={() => { setCreateMenu(null); setAddOpen(value => !value); }}>{addOpen ? <X /> : <Plus />}</ToolButton>
             <ToolButton label="选择工具" active={!addOpen && !createMenu} onClick={() => { setAddOpen(false); setCreateMenu(null); }}><MousePointer2 /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
+            <ToolButton buttonRef={assetLibraryTriggerRef} label="项目资产库" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); setLibraryMode(current => current === 'assets' ? null : 'assets'); }}><Library /></ToolButton>
+            <ToolButton buttonRef={promptLibraryTriggerRef} label="项目提示词库" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); setLibraryMode(current => current === 'prompts' ? null : 'prompts'); }}><WandSparkles /></ToolButton>
+            <div className="my-1 h-px w-7 bg-border" />
             <ToolButton label="撤销" disabled={history.current.past.length === 0} onClick={undo}><Undo2 /></ToolButton>
             <ToolButton label="重做" disabled={history.current.future.length === 0} onClick={redo}><Redo2 /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
@@ -1060,6 +1300,43 @@ function CanvasEditorInner({
           </div>
         )}
 
+        {libraryMode && (
+          <CanvasLibraryPanel
+            mode={libraryMode}
+            projectId={projectId}
+            assets={assets}
+            prompts={prompts}
+            contentVersions={document.content_versions}
+            focusAssetId={libraryFocusAssetId}
+            busy={libraryBusy || libraryLoading}
+            error={libraryError}
+            onModeChange={setLibraryMode}
+            onClose={closeLibrary}
+            onInsertAsset={assetId => void insertLibraryItem('asset', assetId)}
+            onInsertPrompt={promptId => void insertLibraryItem('prompt', promptId)}
+            onUpdateAsset={(assetId, input) => mutateLibrary(async () => {
+              if (!assets) return;
+              acceptAssets(await updateCanvasAsset(projectId, assetId, input, assets.revision));
+            })}
+            onDeleteAsset={assetId => mutateLibrary(async () => {
+              if (!assets) return;
+              acceptAssets(await deleteCanvasAsset(projectId, assetId, assets.revision));
+            })}
+            onCreatePrompt={input => mutateLibrary(async () => {
+              if (!prompts) return;
+              acceptPrompts(await createCanvasPrompt(projectId, input, prompts.revision));
+            })}
+            onUpdatePrompt={(promptId, input) => mutateLibrary(async () => {
+              if (!prompts) return;
+              acceptPrompts(await updateCanvasPrompt(projectId, promptId, input, prompts.revision));
+            })}
+            onDeletePrompt={promptId => mutateLibrary(async () => {
+              if (!prompts) return;
+              acceptPrompts(await deleteCanvasPrompt(projectId, promptId, prompts.revision));
+            })}
+          />
+        )}
+
         {selectedContentNode && (
           <CanvasInspector
             node={selectedContentNode}
@@ -1072,6 +1349,10 @@ function CanvasEditorInner({
             onPreview={selectedContentNode.data.current_version_id
               ? () => previewContent(selectedContentNode.data.current_version_id!, selectedContentNode.title)
               : undefined}
+            onSaveAsset={selectedContentNode.data.current_version_id
+              ? () => void saveNodeToLibrary(selectedContentNode)
+              : undefined}
+            saveAssetBusy={libraryBusy}
             mobileGeneration={selectedDraft ? (
               <CanvasGenerationComposer
                 embedded

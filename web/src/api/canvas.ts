@@ -2,10 +2,14 @@ import { request, requestJson } from './http';
 import type { Job } from '@/schema/jobs';
 import type {
   CanvasDocument,
+  CanvasLibraryAsset,
   CanvasPackageImport,
   CanvasPackageInspection,
   CanvasProject,
   CanvasProjectSummary,
+  CanvasPrompt,
+  CanvasPoint,
+  RevisionedSidecar,
   CanvasRun,
   CanvasTrashEntry,
   CanvasUpload,
@@ -114,6 +118,146 @@ export function getCanvasDocument(projectId: string): Promise<CanvasDocument> {
   return requestJson<CanvasDocument>(
     `/api/canvas/projects/${encodeURIComponent(projectId)}/document`,
     '读取画布',
+  );
+}
+
+export function getCanvasAssets(projectId: string): Promise<RevisionedSidecar<CanvasLibraryAsset>> {
+  return requestJson<RevisionedSidecar<CanvasLibraryAsset>>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/library/assets`,
+    '读取画布资产库',
+  );
+}
+
+export function saveCanvasAsset(
+  projectId: string,
+  versionId: string,
+  title: string,
+  tags: string[],
+  revision: number,
+): Promise<RevisionedSidecar<CanvasLibraryAsset>> {
+  return requestJson<RevisionedSidecar<CanvasLibraryAsset>>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/library/assets`,
+    '保存到画布资产库',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'If-Match': String(revision) },
+      body: JSON.stringify({ version_id: versionId, title, tags }),
+    },
+  );
+}
+
+export function updateCanvasAsset(
+  projectId: string,
+  assetId: string,
+  patch: { title?: string; tags?: string[] },
+  revision: number,
+): Promise<RevisionedSidecar<CanvasLibraryAsset>> {
+  return requestJson<RevisionedSidecar<CanvasLibraryAsset>>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/library/assets/${encodeURIComponent(assetId)}`,
+    '更新画布资产',
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'If-Match': String(revision) },
+      body: JSON.stringify(patch),
+    },
+  );
+}
+
+export function deleteCanvasAsset(
+  projectId: string,
+  assetId: string,
+  revision: number,
+): Promise<RevisionedSidecar<CanvasLibraryAsset>> {
+  return requestJson<RevisionedSidecar<CanvasLibraryAsset>>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/library/assets/${encodeURIComponent(assetId)}`,
+    '移出画布资产库',
+    { method: 'DELETE', headers: { 'If-Match': String(revision) } },
+  );
+}
+
+export function insertCanvasAsset(
+  projectId: string,
+  assetId: string,
+  position: CanvasPoint,
+  documentRevision: number,
+): Promise<CanvasDocument> {
+  return requestJson<CanvasDocument>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/library/assets/${encodeURIComponent(assetId)}/insert`,
+    '插入画布资产',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'If-Match': String(documentRevision) },
+      body: JSON.stringify({ position }),
+    },
+  );
+}
+
+export function getCanvasPrompts(projectId: string): Promise<RevisionedSidecar<CanvasPrompt>> {
+  return requestJson<RevisionedSidecar<CanvasPrompt>>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/library/prompts`,
+    '读取画布提示词库',
+  );
+}
+
+export function createCanvasPrompt(
+  projectId: string,
+  input: { title: string; content: string; tags: string[] },
+  revision: number,
+): Promise<RevisionedSidecar<CanvasPrompt>> {
+  return requestJson<RevisionedSidecar<CanvasPrompt>>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/library/prompts`,
+    '新建画布提示词',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'If-Match': String(revision) },
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function updateCanvasPrompt(
+  projectId: string,
+  promptId: string,
+  patch: { title?: string; content?: string; tags?: string[] },
+  revision: number,
+): Promise<RevisionedSidecar<CanvasPrompt>> {
+  return requestJson<RevisionedSidecar<CanvasPrompt>>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/library/prompts/${encodeURIComponent(promptId)}`,
+    '更新画布提示词',
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'If-Match': String(revision) },
+      body: JSON.stringify(patch),
+    },
+  );
+}
+
+export function deleteCanvasPrompt(
+  projectId: string,
+  promptId: string,
+  revision: number,
+): Promise<RevisionedSidecar<CanvasPrompt>> {
+  return requestJson<RevisionedSidecar<CanvasPrompt>>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/library/prompts/${encodeURIComponent(promptId)}`,
+    '删除画布提示词',
+    { method: 'DELETE', headers: { 'If-Match': String(revision) } },
+  );
+}
+
+export function insertCanvasPrompt(
+  projectId: string,
+  promptId: string,
+  position: CanvasPoint,
+  documentRevision: number,
+): Promise<CanvasDocument> {
+  return requestJson<CanvasDocument>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/library/prompts/${encodeURIComponent(promptId)}/insert`,
+    '将提示词插入画布',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'If-Match': String(documentRevision) },
+      body: JSON.stringify({ position }),
+    },
   );
 }
 
