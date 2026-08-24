@@ -19,6 +19,7 @@ import {
 import {
   ArrowLeft,
   ChevronDown,
+  CircleHelp,
   CircleDot,
   ClipboardCopy,
   Download,
@@ -126,8 +127,10 @@ import {
 } from '@/components/ui/dialog';
 import type {
   CanvasContentVersion,
+  CanvasConnection,
   CanvasContentNode,
   CanvasDocument,
+  CanvasGenerationDraft,
   CanvasImageToolbarPreferences,
   CanvasLibraryAsset,
   CanvasMediaOperation,
@@ -189,7 +192,15 @@ interface ViewportSyncToken {
   viewport: Viewport;
 }
 
+interface CanvasClipboardPayload {
+  schema_version: 1;
+  source_project_id: string;
+  nodes: CanvasNode[];
+  connections: CanvasConnection[];
+}
+
 const CANVAS_MOUSE_PAN_BUTTONS: number[] = [];
+const CANVAS_NODE_CLIPBOARD_TYPE = 'application/x-game-atelier-canvas-nodes';
 
 export function CanvasEditor(props: {
   projectId: string;
@@ -226,6 +237,7 @@ function CanvasEditorInner({
   const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(() => new Set());
   const [addOpen, setAddOpen] = useState(false);
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
@@ -251,6 +263,7 @@ function CanvasEditorInner({
   const promptLibraryTriggerRef = useRef<HTMLButtonElement>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
+  const shortcutsTriggerRef = useRef<HTMLButtonElement>(null);
   const flowNodeCache = useRef(new Map<string, { node: CanvasNode; selected: boolean; flowNode: FlowNode }>());
   const dirtyVersion = useRef(0);
   const [dirtySignal, setDirtySignal] = useState(0);
@@ -271,6 +284,8 @@ function CanvasEditorInner({
   const reversePromptConfigAttempts = useRef(new Set<string>());
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
   const viewportSync = useRef<ViewportSyncToken | null>(null);
+  const nodeClipboard = useRef<CanvasClipboardPayload | null>(null);
+  const pasteSequence = useRef(0);
   const {
     screenToFlowPosition,
     fitView,
@@ -296,6 +311,7 @@ function CanvasEditorInner({
     setSubmittingNodeIds(new Set());
     setAddOpen(false);
     setCreateMenu(null);
+    setShortcutsOpen(false);
     setLibraryMode(null);
     setLibraryFocusAssetId(null);
     setLibraryError(null);
@@ -321,6 +337,8 @@ function CanvasEditorInner({
     flowNodeCache.current.clear();
     history.current = { past: [], future: [] };
     viewportSync.current = null;
+    nodeClipboard.current = null;
+    pasteSequence.current = 0;
     pendingTextVersions.current.clear();
     syncedTerminalRuns.current.clear();
     reversePromptConfigAttempts.current.clear();
@@ -773,7 +791,7 @@ function CanvasEditorInner({
   useEffect(() => {
     function handleDelete(event: KeyboardEvent) {
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
-      if (isInteractiveTarget(event.target)) return;
+      if (isCanvasShortcutBlockedTarget(event.target)) return;
       if (selectedNodeIds.size === 0 && selectedConnectionIds.size === 0) return;
       event.preventDefault();
       const nodeIds = selectedNodeIds;
@@ -965,6 +983,8 @@ function CanvasEditorInner({
     if (baseDocument) {
       // 上传命令创建的 Content Version 已是服务端历史；撤销只移除随后添加的节点。
       history.current.past.push(baseDocument);
+      history.current.past = history.current.past.slice(-50);
+      history.current.future = [];
       const next = apply(baseDocument);
       setDocument(next);
       dirtyVersion.current += 1;
@@ -1030,8 +1050,8 @@ function CanvasEditorInner({
     }, menu);
   }
 
-  async function handleUpload(file: File) {
-    const menu = createMenu;
+  async function handleUpload(file: File, menuOverride: CreateMenuState | null = createMenu) {
+    const menu = menuOverride;
     if (!await persistNow()) return;
     const current = latestDocument.current;
     if (!current) return;
@@ -1079,6 +1099,148 @@ function CanvasEditorInner({
       setError((uploadError as Error).message);
     }
   }
+
+  function copySelectedNodes(event: ClipboardEvent) {
+    if (isCanvasShortcutBlockedTarget(event.target) || !document || selectedNodeIds.size === 0) return;
+    const nodes = document.nodes
+      .filter(node => selectedNodeIds.has(node.id))
+      .map(node => structuredClone(node));
+    if (!nodes.length) return;
+    const copiedIds = new Set(nodes.map(node => node.id));
+    const payload: CanvasClipboardPayload = {
+      schema_version: 1,
+      source_project_id: projectId,
+      nodes,
+      connections: document.connections
+        .filter(connection => (
+          connection.role === 'input'
+          && copiedIds.has(connection.source_node_id)
+          && copiedIds.has(connection.target_node_id)
+        ))
+        .map(connection => structuredClone(connection)),
+    };
+    event.preventDefault();
+    event.clipboardData?.setData(CANVAS_NODE_CLIPBOARD_TYPE, JSON.stringify(payload));
+    nodeClipboard.current = payload;
+    pasteSequence.current = 0;
+    announceToolNotice(`已复制 ${nodes.length} 个节点`);
+  }
+
+  function pasteCanvasNodes(payload: CanvasClipboardPayload) {
+    if (payload.source_project_id !== projectId) {
+      announceToolNotice('节点剪贴板只在当前画布项目内可用');
+      return;
+    }
+    if (!payload.nodes.length) return;
+    pasteSequence.current += 1;
+    const offset = 28 * pasteSequence.current;
+    const idMap = new Map(payload.nodes.map(node => [node.id, makeId(node.type)]));
+    const topZ = Math.max(0, ...(document?.nodes.map(node => node.z_index) ?? []));
+    const nodes = payload.nodes.map((source, index) => cloneCanvasNode(
+      source,
+      idMap,
+      { x: source.position.x + offset, y: source.position.y + offset },
+      topZ + index + 1,
+    ));
+    const connections = payload.connections.flatMap(connection => {
+      const sourceId = idMap.get(connection.source_node_id);
+      const targetId = idMap.get(connection.target_node_id);
+      return sourceId && targetId
+        ? [{ ...structuredClone(connection), id: makeId('connection'), source_node_id: sourceId, target_node_id: targetId }]
+        : [];
+    });
+    commit(current => ({
+      ...current,
+      nodes: [...current.nodes, ...nodes],
+      connections: [...current.connections, ...connections],
+    }), true);
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set(nodes.map(node => node.id)));
+    requestAnimationFrame(() => documentQueryNode(nodes[0].id)?.focus());
+    announceToolNotice(`已粘贴 ${nodes.length} 个节点`);
+  }
+
+  function pastePlainText(text: string) {
+    if (!text.trim()) return;
+    const nodeId = makeId('text');
+    const versionId = makeId('version');
+    const createdAt = new Date().toISOString();
+    const version: CanvasTextVersion = {
+      version_id: versionId,
+      kind: 'text',
+      text,
+      created_at: createdAt,
+      sha256: '0'.repeat(64),
+      origin: { kind: 'user_edit' },
+    };
+    const node: CanvasContentNode = {
+      id: nodeId,
+      type: 'text',
+      title: '粘贴文本',
+      position: defaultPosition(),
+      z_index: 0,
+      data: { current_version_id: versionId, generation_draft: null, active_run_id: null },
+    };
+    pendingTextVersions.current.set(nodeId, versionId);
+    commit(current => ({
+      ...current,
+      nodes: [...current.nodes, node],
+      content_versions: { ...current.content_versions, [versionId]: version },
+    }), true);
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([nodeId]));
+    requestAnimationFrame(() => documentQueryNode(nodeId)?.focus());
+    announceToolNotice('已从剪贴板创建文本节点');
+  }
+
+  useEffect(() => {
+    function handleSelectAll(event: KeyboardEvent) {
+      if ((!event.metaKey && !event.ctrlKey) || event.key.toLowerCase() !== 'a') return;
+      if (isCanvasShortcutBlockedTarget(event.target) || !document?.nodes.length) return;
+      event.preventDefault();
+      setSelectedConnectionIds(new Set());
+      setSelectedNodeIds(new Set(document.nodes.map(node => node.id)));
+      announceToolNotice(`已选择 ${document.nodes.length} 个节点`);
+    }
+
+    function handlePaste(event: ClipboardEvent) {
+      if (isCanvasShortcutBlockedTarget(event.target)) return;
+      const clipboard = event.clipboardData;
+      if (!clipboard) return;
+      const serialized = clipboard.getData(CANVAS_NODE_CLIPBOARD_TYPE);
+      const internalPayload = nodeClipboard.current;
+      const payload = internalPayload && serialized === JSON.stringify(internalPayload)
+        ? internalPayload
+        : null;
+      if (payload) {
+        event.preventDefault();
+        pasteCanvasNodes(payload);
+        return;
+      }
+      const image = Array.from(clipboard.items)
+        .find(item => item.kind === 'file' && item.type.startsWith('image/'))
+        ?.getAsFile();
+      if (image) {
+        event.preventDefault();
+        const flow = defaultPosition();
+        void handleUpload(image, { screen: { x: 0, y: 0 }, flow });
+        return;
+      }
+      const text = clipboard.getData('text/plain');
+      if (!text) return;
+      event.preventDefault();
+      pastePlainText(text);
+    }
+
+    window.addEventListener('keydown', handleSelectAll);
+    window.addEventListener('copy', copySelectedNodes);
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('keydown', handleSelectAll);
+      window.removeEventListener('copy', copySelectedNodes);
+      window.removeEventListener('paste', handlePaste);
+    };
+  });
 
   const updateNode = useCallback((nodeId: string, updater: (node: CanvasNode) => CanvasNode) => {
     commit(current => ({ ...current, nodes: current.nodes.map(node => node.id === nodeId ? updater(node) : node) }));
@@ -1325,7 +1487,7 @@ function CanvasEditorInner({
       const shouldUndo = key === 'z' && !event.shiftKey;
       const shouldRedo = key === 'y' || (key === 'z' && event.shiftKey);
       if (!shouldUndo && !shouldRedo) return;
-      if (isInteractiveTarget(event.target)) return;
+      if (isCanvasShortcutBlockedTarget(event.target)) return;
       event.preventDefault();
       if (shouldRedo) redo();
       else undo();
@@ -2106,6 +2268,7 @@ function CanvasEditorInner({
             setCreateMenu(null);
             setSelectedConnectionIds(new Set());
             setSelectedNodeIds(new Set());
+            requestAnimationFrame(() => editorRegionRef.current?.focus());
           }}
           onDragOver={event => {
             if (!event.dataTransfer.types.includes(CANVAS_LIBRARY_DRAG_TYPE)) return;
@@ -2130,6 +2293,7 @@ function CanvasEditorInner({
           zoomOnPinch
           panOnScroll
           panOnDrag={CANVAS_MOUSE_PAN_BUTTONS}
+          panActivationKeyCode={['Space', 'Control']}
           selectionOnDrag
           selectionMode={SelectionMode.Partial}
           deleteKeyCode={null}
@@ -2255,6 +2419,14 @@ function CanvasEditorInner({
               recordHistorySnapshot();
               void fitView({ duration: 150, padding: 0.12 });
             }}><Maximize2 /></ToolButton>
+            <ToolButton
+              buttonRef={shortcutsTriggerRef}
+              label="快捷键"
+              expanded={shortcutsOpen}
+              controlsId="canvas-shortcuts-dialog"
+              popup="dialog"
+              onClick={() => setShortcutsOpen(true)}
+            ><CircleHelp /></ToolButton>
           </div>
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
@@ -2424,6 +2596,19 @@ function CanvasEditorInner({
           />
         )}
 
+        <Dialog open={shortcutsOpen} onOpenChange={open => {
+          setShortcutsOpen(open);
+          if (!open) requestAnimationFrame(() => shortcutsTriggerRef.current?.focus());
+        }}>
+          <DialogContent id="canvas-shortcuts-dialog" className="max-h-[88dvh] max-w-xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>画布快捷键</DialogTitle>
+              <DialogDescription>节点编辑、视口导航与剪贴板操作</DialogDescription>
+            </DialogHeader>
+            <CanvasShortcutList />
+          </DialogContent>
+        </Dialog>
+
         {mediaOperation && (
           <CanvasMediaOperationDialog
             open
@@ -2482,6 +2667,41 @@ function CanvasCreateMenuItems({ allowResources, onAddText, onAddImage, onAddVid
     <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} />
     {allowResources && <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;
+}
+
+const CANVAS_SHORTCUTS = [
+  { keys: ['Space / Ctrl', '拖动'], label: '临时平移画布' },
+  { keys: ['空白拖动'], label: '框选多个节点' },
+  { keys: ['Shift / ⌘', '点击'], label: '追加选择节点' },
+  { keys: ['⌘ / Ctrl', 'A'], label: '全选节点' },
+  { keys: ['⌘ / Ctrl', 'C / V'], label: '复制 / 粘贴节点' },
+  { keys: ['⌘ / Ctrl', 'Z'], label: '撤销' },
+  { keys: ['⌘ / Ctrl', 'Shift', 'Z'], label: '重做' },
+  { keys: ['⌘ / Ctrl', 'Y'], label: '重做' },
+  { keys: ['Delete / Backspace'], label: '删除选中节点或连接' },
+  { keys: ['Esc'], label: '关闭浮层或清空选择' },
+  { keys: ['粘贴文本 / 图片'], label: '从系统剪贴板创建节点' },
+  { keys: ['拖入图片 / 视频 / 音频'], label: '上传到画布' },
+] as const;
+
+function CanvasShortcutList() {
+  return (
+    <div role="list" aria-label="画布快捷键列表" className="divide-y divide-border rounded-lg border border-border bg-background px-3">
+      {CANVAS_SHORTCUTS.map(item => (
+        <div key={`${item.keys.join('-')}-${item.label}`} role="listitem" className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(9rem,0.7fr)] sm:items-center">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {item.keys.map((key, index) => (
+              <span key={`${key}-${index}`} className="contents">
+                {index > 0 && <span aria-hidden="true" className="text-xs text-muted-foreground">+</span>}
+                <kbd className="rounded-md border border-border bg-secondary px-2 py-1 font-mono text-xs text-foreground">{key}</kbd>
+              </span>
+            ))}
+          </div>
+          <p className="text-sm text-muted-foreground sm:text-right">{item.label}</p>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function CanvasPreview({
@@ -2619,8 +2839,8 @@ function pointerPosition(event: MouseEvent | TouchEvent): XYPosition | null {
   return touch ? { x: touch.clientX, y: touch.clientY } : null;
 }
 
-function isInteractiveTarget(target: EventTarget | null) {
-  return target instanceof Element && Boolean(target.closest('input, textarea, select, button, a, [contenteditable="true"], [role="dialog"]'));
+function isCanvasShortcutBlockedTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]'));
 }
 
 function isMiniMapTarget(target: EventTarget | null) {
@@ -2714,6 +2934,76 @@ function sizeLockedToVersion(
     height = width / ratio;
   }
   return { width: Math.round(width), height: Math.round(height) };
+}
+
+function cloneCanvasNode(
+  source: CanvasNode,
+  idMap: ReadonlyMap<string, string>,
+  position: XYPosition,
+  zIndex: number,
+): CanvasNode {
+  const clone = structuredClone(source);
+  if (isContentNode(clone)) {
+    return {
+      ...clone,
+      id: idMap.get(source.id)!,
+      position,
+      z_index: zIndex,
+      data: {
+        ...clone.data,
+        generation_draft: cloneCanvasDraft(clone.data.generation_draft, idMap),
+        active_run_id: null,
+      },
+    } as CanvasNode;
+  }
+  if (clone.type === 'config') {
+    return {
+      ...clone,
+      id: idMap.get(source.id)!,
+      position,
+      z_index: zIndex,
+      data: { draft: cloneCanvasDraft(clone.data.draft, idMap)! },
+    };
+  }
+  if (clone.type === 'group') {
+    return {
+      ...clone,
+      id: idMap.get(source.id)!,
+      position,
+      z_index: zIndex,
+      data: {
+        member_node_ids: clone.data.member_node_ids.flatMap(memberId => {
+          const clonedId = idMap.get(memberId);
+          return clonedId ? [clonedId] : [];
+        }),
+      },
+    };
+  }
+  return {
+    ...clone,
+    id: idMap.get(source.id)!,
+    position,
+    z_index: zIndex,
+    data: {
+      ...clone.data,
+      generation_draft: cloneCanvasDraft(clone.data.generation_draft, idMap),
+    },
+  };
+}
+
+function cloneCanvasDraft(
+  draft: CanvasGenerationDraft | null,
+  idMap: ReadonlyMap<string, string>,
+): CanvasGenerationDraft | null {
+  if (!draft) return null;
+  return {
+    ...draft,
+    prompt: draft.prompt.replace(/@\[node:([^\]]+)\]/g, (_marker, nodeId: string) => {
+      const clonedId = idMap.get(nodeId);
+      return clonedId ? `@[node:${clonedId}]` : '';
+    }),
+    updated_at: new Date().toISOString(),
+  };
 }
 
 function makeId(prefix: string) {

@@ -58,14 +58,14 @@ Status: ready-for-human
 |---|---|---|---|---|
 | B01 | 无限平移、滚轮缩放、复位、百分比缩放滑杆 | `infinite-canvas.tsx`、`canvas-zoom-controls.tsx` | adapted：React Flow 实现相同行为 | partial |
 | B02 | 选择/移动两种工具模式 | `canvas-toolbar.tsx` | same | full |
-| B03 | Ctrl/Space 临时反转选择与移动 | 快捷键弹窗、`pending-test` | same | full |
+| B03 | Ctrl/Space 临时反转选择与移动 | 快捷键弹窗、`pending-test` | adapted：Space / Control 临时平移，不改变单指框选与两指平移，见 issue 24 | full |
 | B04 | 空白拖动框选，多节点选择 | 快捷键弹窗、`SelectionBox` | same | full |
 | B05 | Shift/Cmd 点击追加选择 | 快捷键弹窗 | same | full |
-| B06 | Cmd/Ctrl+A 全选 | 快捷键弹窗 | same | full |
-| B07 | Cmd/Ctrl+C/V 复制粘贴节点 | 快捷键弹窗 | same | full |
-| B08 | 从系统剪贴板粘贴文本/图片 | `project.tsx`、快捷键弹窗 | adapted：上传媒体必须落服务端 | full |
-| B09 | Delete/Backspace 删除节点或边 | 快捷键弹窗、context menu | same | partial |
-| B10 | Esc 清选择并关闭浮层 | 快捷键弹窗 | same | partial |
+| B06 | Cmd/Ctrl+A 全选 | 快捷键弹窗 | same：生产页与快捷键 Dialog 均已接通，见 issue 24 | full |
+| B07 | Cmd/Ctrl+C/V 复制粘贴节点 | 快捷键弹窗 | adapted：同项目复制节点与内部 input 连接，复用不可变 Version，见 issue 24 | full |
+| B08 | 从系统剪贴板粘贴文本/图片 | `project.tsx`、快捷键弹窗 | adapted：文本落人工 Version，图片先上传服务端，见 issue 24 | full |
+| B09 | Delete/Backspace 删除节点或边 | 快捷键弹窗、context menu | same：节点、边及关联连接单命令删除，输入控件不劫持，见 issue 24 | full |
+| B10 | Esc 清选择并关闭浮层 | 快捷键弹窗 | same：最上层优先收拢并归还焦点，见 issue 24 | full |
 | B11 | Cmd/Ctrl+Z、Shift+Z/Y 撤销重做 | toolbar/topbar/shortcut | same：toolbar、Z、Shift+Z 与 Y 共用历史，见 issue 23 | full |
 | B12 | 撤销覆盖节点、边、viewport、背景和 Agent 会话 | `canvas-shortcuts.zh-CN.mdx` | adapted：Document 节点/边/viewport/外观统一历史；Agent 按批准边界独立 | full |
 | B13 | 图片/视频/音频拖入画布自动建节点 | `project.tsx`、快捷键弹窗 | adapted：文件先上传服务端 | full |
