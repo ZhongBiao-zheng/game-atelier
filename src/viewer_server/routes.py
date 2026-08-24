@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Body, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
+from starlette.background import BackgroundTask
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
@@ -56,8 +57,9 @@ from pydantic import field_validator
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
-    CanvasDocument, CanvasProject, CanvasProjectCreate, CanvasProjectList,
-    CanvasProjectRename, CanvasRunCreate, CanvasRunResponse, CanvasRunRetry,
+    CanvasDocument, CanvasPackageCommitRequest, CanvasPackageImportResponse,
+    CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
+    CanvasProjectList, CanvasProjectRename, CanvasRunCreate, CanvasRunResponse, CanvasRunRetry,
     CanvasUploadResponse,
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
@@ -2000,7 +2002,9 @@ def _create_user_job(
 
 @router.get("/canvas/projects", response_model=CanvasProjectList)
 def get_canvas_projects() -> CanvasProjectList:
+    from character_workflow.lib.canvas_packages import recover_canvas_package_transactions
     from character_workflow.lib.canvas_projects import list_canvas_projects
+    recover_canvas_package_transactions()
     return CanvasProjectList(projects=list_canvas_projects())
 
 
@@ -2017,6 +2021,123 @@ def patch_canvas_project(project_id: str, payload: CanvasProjectRename) -> Canva
         return rename_canvas_project(project_id, payload.name)
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+
+
+@router.post("/canvas/projects/export")
+def post_canvas_projects_export(payload: CanvasProjectExportRequest) -> FileResponse:
+    from character_workflow.lib.canvas_packages import (
+        CanvasPackageError,
+        CanvasProjectBusyError,
+        export_canvas_projects,
+    )
+    try:
+        target, filename = export_canvas_projects(payload.project_ids)
+    except KeyError:
+        raise HTTPException(404, detail="找不到要导出的画布项目") from None
+    except CanvasProjectBusyError as error:
+        raise HTTPException(409, detail=str(error)) from error
+    except CanvasPackageError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    return FileResponse(
+        target,
+        media_type="application/zip",
+        filename=filename,
+        background=BackgroundTask(target.unlink, missing_ok=True),
+    )
+
+
+@router.post("/canvas/projects/import/inspect")
+async def post_canvas_project_import_inspect(file: UploadFile = File(...)) -> dict:
+    from character_workflow.lib.canvas_packages import (
+        CanvasPackageError,
+        CanvasProjectBusyError,
+        inspect_canvas_package,
+    )
+    raw_name = file.filename or "canvas-package.zip"
+    if Path(raw_name).suffix.lower() != ".zip":
+        raise HTTPException(422, detail="请选择 .zip 格式的 Canvas 项目包")
+    upload_root = data_root.runtime_dir() / "canvas-import-uploads"
+    upload_root.mkdir(parents=True, exist_ok=True)
+    target = upload_root / f"upload-{uuid.uuid4().hex}.zip"
+    total = 0
+    try:
+        with target.open("wb") as output:
+            while chunk := await file.read(8 * 1024 * 1024):
+                total += len(chunk)
+                if total > 2 * 1024 * 1024 * 1024:
+                    raise HTTPException(413, detail="Canvas 项目包不能超过 2 GiB")
+                output.write(chunk)
+        return inspect_canvas_package(target).model_dump(mode="json")
+    except CanvasProjectBusyError as error:
+        raise HTTPException(409, detail=str(error)) from error
+    except CanvasPackageError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    finally:
+        target.unlink(missing_ok=True)
+
+
+@router.post("/canvas/projects/import/commit", response_model=CanvasPackageImportResponse)
+def post_canvas_project_import_commit(
+    payload: CanvasPackageCommitRequest,
+) -> CanvasPackageImportResponse:
+    from character_workflow.lib.canvas_packages import CanvasPackageError, commit_canvas_package
+    try:
+        return CanvasPackageImportResponse(projects=commit_canvas_package(payload.token))
+    except KeyError:
+        raise HTTPException(404, detail="导入校验记录不存在，请重新选择项目包") from None
+    except TimeoutError:
+        raise HTTPException(410, detail="导入校验已过期，请重新选择项目包") from None
+    except CanvasPackageError as error:
+        raise HTTPException(422, detail=str(error)) from error
+
+
+@router.delete("/canvas/projects/{project_id}")
+def delete_canvas_project_route(
+    project_id: str,
+    payload: CanvasProjectDeleteRequest,
+) -> dict:
+    from character_workflow.lib.canvas_packages import (
+        CanvasPackageError,
+        CanvasProjectBusyError,
+        delete_canvas_project,
+    )
+    try:
+        return delete_canvas_project(
+            project_id,
+            payload.expected_revision,
+            payload.confirm_name,
+        ).model_dump(mode="json")
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    except CanvasProjectBusyError as error:
+        raise HTTPException(409, detail=str(error)) from error
+    except RuntimeError as error:
+        if str(error).startswith("revision_conflict:"):
+            current_revision = int(str(error).split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }) from None
+        raise
+    except CanvasPackageError as error:
+        raise HTTPException(422, detail=str(error)) from error
+
+
+@router.post("/canvas/trash/{trash_id}/restore", response_model=CanvasProject)
+def post_canvas_trash_restore(trash_id: str) -> CanvasProject:
+    from character_workflow.lib.canvas_packages import CanvasPackageError, restore_canvas_project
+    try:
+        return restore_canvas_project(trash_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这条画布回收记录") from None
+    except CanvasPackageError as error:
+        raise HTTPException(409, detail=str(error)) from error
+
+
+@router.get("/canvas/trash")
+def get_canvas_trash() -> dict:
+    from character_workflow.lib.canvas_packages import list_canvas_trash
+    return {"entries": [entry.model_dump(mode="json") for entry in list_canvas_trash()]}
 
 
 @router.get("/canvas/projects/{project_id}/document", response_model=CanvasDocument)

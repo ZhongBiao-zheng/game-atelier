@@ -666,6 +666,27 @@ class CanvasProjectRename(BaseModel):
     name: CanvasProjectName
 
 
+class CanvasProjectExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class CanvasProjectDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=0)
+    confirm_name: CanvasProjectName
+
+
+class CanvasPackageCommitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=12, max_length=100, pattern=r"^[a-z0-9-]+$")
+
+
+class CanvasPackageImportResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    projects: list[CanvasProject]
+
+
 class CanvasUploadResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: CanvasMediaVersion

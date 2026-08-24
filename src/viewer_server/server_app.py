@@ -108,12 +108,14 @@ async def lifespan(app: FastAPI):
             "reclaimed %d orphan studio job(s): %s", len(reclaimed), ", ".join(reclaimed)
         )
     from character_workflow.lib.canvas_projects import list_canvas_projects
+    from character_workflow.lib.canvas_packages import maintain_canvas_package_lifecycle
     from character_workflow.lib.canvas_runs import (
         reconcile_canvas_jobs,
         recover_canvas_transactions,
         run_canvas_job_scheduled,
     )
 
+    maintain_canvas_package_lifecycle()
     canvas_projects = list_canvas_projects()
     for project in canvas_projects:
         recover_canvas_transactions(project.project_id)
@@ -133,6 +135,13 @@ async def lifespan(app: FastAPI):
     observer = start_watchers()
     resume_tasks: set[asyncio.Task[None]] = set()
 
+    async def maintain_canvas_lifecycle() -> None:
+        while True:
+            await asyncio.sleep(6 * 60 * 60)
+            await asyncio.to_thread(maintain_canvas_package_lifecycle)
+
+    maintenance_task = asyncio.create_task(maintain_canvas_lifecycle())
+
     async def resume_canvas_job(job_id: str) -> None:
         try:
             await asyncio.to_thread(run_canvas_job_scheduled, job_id)
@@ -146,6 +155,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        maintenance_task.cancel()
         for task in resume_tasks:
             task.cancel()
         observer.stop()

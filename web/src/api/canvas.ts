@@ -1,10 +1,13 @@
-import { requestJson } from './http';
+import { request, requestJson } from './http';
 import type { Job } from '@/schema/jobs';
 import type {
   CanvasDocument,
+  CanvasPackageImport,
+  CanvasPackageInspection,
   CanvasProject,
   CanvasProjectSummary,
   CanvasRun,
+  CanvasTrashEntry,
   CanvasUpload,
 } from '@/schema/canvas';
 
@@ -30,6 +33,81 @@ export function renameCanvasProject(projectId: string, name: string): Promise<Ca
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name }),
   });
+}
+
+export async function exportCanvasProjects(projectIds: string[]): Promise<void> {
+  const response = await request('/api/canvas/projects/export', '导出画布项目', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ project_ids: projectIds }),
+  });
+  const blob = await response.blob();
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+  const filename = encodedName
+    ? decodeURIComponent(encodedName)
+    : plainName ?? '画布项目.game-atelier-canvas.zip';
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+export function inspectCanvasPackage(file: File): Promise<CanvasPackageInspection> {
+  const form = new FormData();
+  form.append('file', file);
+  return requestJson<CanvasPackageInspection>(
+    '/api/canvas/projects/import/inspect',
+    '校验 Canvas 项目包',
+    { method: 'POST', body: form },
+  );
+}
+
+export function commitCanvasPackage(token: string): Promise<CanvasPackageImport> {
+  return requestJson<CanvasPackageImport>(
+    '/api/canvas/projects/import/commit',
+    '导入 Canvas 项目包',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token }),
+    },
+  );
+}
+
+export function deleteCanvasProject(
+  projectId: string,
+  expectedRevision: number,
+  confirmName: string,
+): Promise<CanvasTrashEntry> {
+  return requestJson<CanvasTrashEntry>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}`,
+    '删除画布项目',
+    {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: expectedRevision, confirm_name: confirmName }),
+    },
+  );
+}
+
+export function restoreCanvasProject(trashId: string): Promise<CanvasProject> {
+  return requestJson<CanvasProject>(
+    `/api/canvas/trash/${encodeURIComponent(trashId)}/restore`,
+    '恢复画布项目',
+    { method: 'POST' },
+  );
+}
+
+export async function listCanvasTrash(): Promise<CanvasTrashEntry[]> {
+  const data = await requestJson<{ entries: CanvasTrashEntry[] }>(
+    '/api/canvas/trash',
+    '读取画布回收区',
+  );
+  return data.entries;
 }
 
 export function getCanvasDocument(projectId: string): Promise<CanvasDocument> {

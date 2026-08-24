@@ -62,6 +62,8 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/runs`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
+`POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
+`DELETE /canvas/projects/{id}` `POST /canvas/trash/{trash_id}/restore`
 
 **双向**
 `POST /characters/{id}/canonical` `POST /projects/{id}/ui-schemes/{scheme_id}/screens/canonical` `POST /experience`
@@ -80,6 +82,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /projects/{id}/studio-archive-targets?media_kind={image,video}`
 `GET /canvas/projects` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
 `GET /canvas/projects/{id}/content/{version_id}`
+`GET /canvas/trash`
 
 ### 人工画布契约
 
@@ -122,6 +125,21 @@ Draft/连接重新解析并冻结新 Snapshot。两者都创建新 Job/Run，不
 Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程内调度上限为全局 4 个、同一密钥别名
 2 个、视频 1 个；HTTP 后台任务与重启恢复共用同一组门控。文本/图片允许候选批量，视频/音频固定单
 结果。旧 `POST .../jobs` 已删除。
+
+项目包使用 `game-atelier-canvas-v1.zip`：`manifest.json` 对每个 metadata/blob 记录 SHA-256、字节数、
+MIME 与角色，项目内容放在 `projects/<package_project_id>/`，媒体放在
+`blobs/sha256/<first2>/<sha256>.<ext>`。导入先调用 `inspect` 完成路径、链接、重复条目、压缩比、配额、
+schema、摘要和项目内引用校验，再凭 30 分钟 token 调用 `commit`；commit 永远创建新项目，并重映射所有
+全局 Canvas Job ID、Run ID、output path、retry/derivation/content origin 引用。node/version/connection
+等项目内 ID 保留。包不包含凭证、全局 provider 配置、缓存、插件代码或运行中事务；存在 pending Job
+时导出、导入和删除均返回 409。
+导入、删除、恢复分别使用持久事务记录与独立 claim 锁；服务启动时恢复中断事务，并每 6 小时执行一次
+维护，实际清除超过 30 天的回收数据。
+
+删除请求必须携带当前 `expected_revision` 和完整 `confirm_name`。服务端在固定的 project→job 锁序下，
+把项目目录、owned Job 与完整恢复包移入 `.trash/canvases/<original_id>/<trash_id>/` 并写 tombstone；项目
+立即从索引消失，默认保留 30 天。`GET /canvas/trash` 只列仍可恢复的记录；恢复通过同一项目包导入器创建
+新项目 ID，原 ID 的 tombstone 不复活，避免与已经传播的删除记录争用身份。
 
 ### 角色衍生契约
 
