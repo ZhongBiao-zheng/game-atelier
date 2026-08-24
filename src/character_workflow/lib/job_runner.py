@@ -270,7 +270,7 @@ def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
     path.with_suffix(".md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run_job(job_id: str) -> Job:
+def run_job(job_id: str, *, defer_terminal: bool = False) -> Job:
     from character_workflow.lib.schemas import JobKind
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
     net_env.configure_proxy_bypass()
@@ -339,14 +339,21 @@ def run_job(job_id: str) -> Job:
             job = _save_params(read_job(job.job_id), params)
             for output_path in output_paths:
                 _write_sidecar(Path(output_path), job, params)
+            persisted_paths = output_paths
+            if defer_terminal:
+                persisted_paths = list(dict.fromkeys([*job.output_paths, *output_paths]))
             return update_job_status(
                 job.job_id,
-                status=JobStatus.DONE,
-                output_paths=output_paths,
+                status=JobStatus.PENDING if defer_terminal else JobStatus.DONE,
+                output_paths=persisted_paths,
                 error=None,
             )
     except Exception as e:
-        update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(e))
+        update_job_status(
+            job.job_id,
+            status=JobStatus.PENDING if defer_terminal else JobStatus.FAILED,
+            error=_friendly_error(e),
+        )
         if isinstance(e, JobRunnerError):
             raise
         raise JobRunnerError(str(e)) from e

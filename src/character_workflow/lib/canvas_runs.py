@@ -10,7 +10,7 @@ from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import BoundedSemaphore, Lock
-from typing import Any
+from typing import Any, Literal
 
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
@@ -1691,6 +1691,22 @@ def retry_canvas_run(
         )
         if result is None or result.type not in {"text", "image", "video", "audio"}:
             raise RuntimeError("result_node_missing")
+        replaced: CanvasResultCandidate | None = None
+        if candidate_id is not None:
+            replaced = next(
+                (item for item in context.candidates if item.candidate_id == candidate_id),
+                None,
+            )
+            if replaced is None:
+                raise KeyError(candidate_id)
+            if replaced.status not in {"failed", "canceled"}:
+                raise ValueError("只能单独重试失败或已停止的候选")
+            candidate_indices = [replaced.index]
+        else:
+            candidate_indices = [item.index for item in context.candidates]
+        if context.snapshot.mode not in {"text", "image"} and len(candidate_indices) != 1:
+            raise ValueError("视频与音频生成一次只允许一个结果")
+
         media_paths = _validate_retry_snapshot(project_id, current, context.snapshot)
         database = read_keys_db()
         key = next((item for item in database.keys if item.alias == context.snapshot.alias), None)
@@ -1700,20 +1716,6 @@ def retry_canvas_run(
         ) if key is not None else None
         if key is None or model is None or key.provider != context.snapshot.provider:
             raise RuntimeError("snapshot_model_missing")
-
-        replaced: CanvasResultCandidate | None = None
-        if candidate_id is not None:
-            replaced = next(
-                (item for item in context.candidates if item.candidate_id == candidate_id),
-                None,
-            )
-            if replaced is None:
-                raise KeyError(candidate_id)
-            candidate_indices = [replaced.index]
-        else:
-            candidate_indices = [item.index for item in context.candidates]
-        if context.snapshot.mode not in {"text", "image"} and len(candidate_indices) != 1:
-            raise ValueError("视频与音频生成一次只允许一个结果")
 
         timestamp = _now()
         new_run_id = f"run-{secrets.token_hex(12)}"
@@ -1808,6 +1810,46 @@ def request_canvas_run_cancel(project_id: str, run_id: str) -> Job:
             updated = job.model_copy(update={"cancel_requested_at": _now()})
             write_job_under_lock(updated)
             return updated
+
+
+def dismiss_canvas_candidate(
+    project_id: str,
+    run_id: str,
+    candidate_id: str,
+    expected_revision: int,
+) -> tuple[Job, CanvasDocument]:
+    """Hide one failed/canceled slot without deleting its immutable provenance."""
+    original = _job_for_run(project_id, run_id)
+    with file_lock(_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        current = _read_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
+        with job_lock(original.job_id):
+            job = read_job(original.job_id)
+            context = job.canvas_run
+            if context is None or context.run_id != run_id:
+                raise KeyError(run_id)
+            candidate = next(
+                (item for item in context.candidates if item.candidate_id == candidate_id),
+                None,
+            )
+            if candidate is None:
+                raise KeyError(candidate_id)
+            if candidate.status not in {"failed", "canceled"}:
+                raise ValueError("只能隐藏失败或已停止的候选")
+            if candidate.dismissed_at is not None:
+                return job, current
+            candidates = [
+                item.model_copy(update={"dismissed_at": _now()})
+                if item.candidate_id == candidate_id else item
+                for item in context.candidates
+            ]
+            updated = job.model_copy(update={
+                "canvas_run": context.model_copy(update={"candidates": candidates})
+            })
+            write_job_under_lock(updated)
+            return updated, current
 
 
 def _sha256_file(path: Path) -> str:
@@ -1908,6 +1950,253 @@ def _canceled_candidates(job: Job) -> Job:
     })
 
 
+def _candidate_aggregate(
+    candidates: list[CanvasResultCandidate],
+) -> tuple[JobStatus, str | None]:
+    if any(candidate.status == "pending" for candidate in candidates):
+        return JobStatus.PENDING, None
+    successful = sum(candidate.status == "succeeded" for candidate in candidates)
+    if successful == len(candidates):
+        return JobStatus.DONE, None
+    if successful:
+        return JobStatus.PARTIAL, "部分候选没有生成成功"
+    if candidates and all(candidate.status == "canceled" for candidate in candidates):
+        return JobStatus.CANCELED, None
+    return JobStatus.FAILED, "Canvas Job 没有可登记的结果"
+
+
+def _uses_incremental_candidates(job: Job) -> bool:
+    context = job.canvas_run
+    if context is None or len(context.candidates) <= 1 or job.kind != JobKind.IMAGE:
+        return False
+    from character_workflow.lib.callers.openai_image import image_family
+
+    # Midjourney returns one paid four-image grid from one request.
+    return image_family(job.model) != "midjourney"
+
+
+def _commit_canvas_candidate_attempt(
+    project_id: str,
+    job_id: str,
+    candidate_id: str,
+    *,
+    original_params: JobParams,
+    accumulated_paths: list[str],
+    output_path: str | None,
+    attempt_error: str | None,
+) -> Job:
+    """Commit one independently completed slot and expose its Version immediately."""
+    with file_lock(_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        current = _read_document_unlocked(project_id)
+        with job_lock(job_id):
+            job = read_job(job_id)
+            context = job.canvas_run
+            if context is None:
+                raise ValueError("canvas job is missing run context")
+            target = next(
+                (candidate for candidate in context.candidates if candidate.candidate_id == candidate_id),
+                None,
+            )
+            if target is None:
+                raise KeyError(candidate_id)
+            if target.status != "pending":
+                return job
+
+            version: CanvasContentVersion | None = None
+            if output_path is not None:
+                try:
+                    version = _output_version(project_id, job, target, output_path)
+                    completed = target.model_copy(update={
+                        "status": "succeeded",
+                        "version_id": version.version_id,
+                        "error": None,
+                    })
+                except (OSError, ValueError) as error:
+                    completed = target.model_copy(update={
+                        "status": "failed",
+                        "error": str(error),
+                    })
+            else:
+                completed = target.model_copy(update={
+                    "status": "failed",
+                    "error": attempt_error or "厂商没有返回这个候选结果",
+                })
+            had_success = any(candidate.status == "succeeded" for candidate in context.candidates)
+            candidates = [
+                completed if candidate.candidate_id == candidate_id else candidate
+                for candidate in context.candidates
+            ]
+            status, aggregate_error = _candidate_aggregate(candidates)
+            output_paths = list(accumulated_paths)
+            if version is not None and output_path is not None and output_path not in output_paths:
+                output_paths.append(output_path)
+            restored_params = original_params.model_copy(update={
+                "actual_size": job.params.actual_size or original_params.actual_size,
+                "warnings": job.params.warnings or original_params.warnings,
+            })
+            updated_job = job.model_copy(update={
+                "status": status,
+                "error": aggregate_error,
+                "params": restored_params,
+                "output_paths": output_paths,
+                "progress_phase": None,
+                "completed_at": _now() if status in {
+                    JobStatus.DONE,
+                    JobStatus.PARTIAL,
+                    JobStatus.FAILED,
+                    JobStatus.CANCELED,
+                } else None,
+                "canvas_run": context.model_copy(update={"candidates": candidates}),
+            })
+            if version is None:
+                write_job_under_lock(updated_job)
+                return updated_job
+
+            single_candidate_retry = (
+                len(candidates) == 1
+                and candidates[0].replaces_candidate_id is not None
+            )
+            nodes: list[CanvasNode] = []
+            for node in current.nodes:
+                if (
+                    node.id == context.result_node_id
+                    and node.type in {"text", "image", "video", "audio"}
+                    and node.data.active_run_id == context.run_id
+                    and not had_success
+                    and (not single_candidate_retry or node.data.current_version_id is None)
+                ):
+                    node = node.model_copy(update={
+                        "data": node.data.model_copy(update={
+                            "current_version_id": version.version_id,
+                        })
+                    })
+                nodes.append(node)
+            timestamp = _now()
+            updated_document = current.model_copy(update={
+                "revision": current.revision + 1,
+                "updated_at": timestamp,
+                "nodes": nodes,
+                "content_versions": {
+                    **current.content_versions,
+                    version.version_id: version,
+                },
+            })
+            _commit_transaction_unlocked(
+                project_id,
+                context.run_id,
+                "candidate_finalize",
+                current.revision,
+                updated_job,
+                updated_document,
+                job_locked=True,
+            )
+            return updated_job
+
+
+def _settle_pending_canvas_candidates(
+    project_id: str,
+    job_id: str,
+    *,
+    candidate_status: Literal["failed", "canceled"],
+    error: str | None,
+) -> Job:
+    with file_lock(_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        with job_lock(job_id):
+            job = read_job(job_id)
+            context = job.canvas_run
+            if context is None:
+                raise ValueError("canvas job is missing run context")
+            candidates = [
+                candidate.model_copy(update={"status": candidate_status, "error": error})
+                if candidate.status == "pending" else candidate
+                for candidate in context.candidates
+            ]
+            status, aggregate_error = _candidate_aggregate(candidates)
+            updated = job.model_copy(update={
+                "status": status,
+                "error": aggregate_error or error,
+                "progress_phase": None,
+                "completed_at": _now(),
+                "canvas_run": context.model_copy(update={"candidates": candidates}),
+            })
+            write_job_under_lock(updated)
+            return updated
+
+
+def _cancel_pending_canvas_candidates(project_id: str, job_id: str) -> Job:
+    return _settle_pending_canvas_candidates(
+        project_id,
+        job_id,
+        candidate_status="canceled",
+        error=None,
+    )
+
+
+def _fail_pending_canvas_candidates(project_id: str, job_id: str, error: str) -> Job:
+    return _settle_pending_canvas_candidates(
+        project_id,
+        job_id,
+        candidate_status="failed",
+        error=error,
+    )
+
+
+def _run_canvas_candidates_incrementally(job: Job) -> Job:
+    context = job.canvas_run
+    if context is None or not job.canvas_project_id:
+        raise ValueError("canvas job is missing run context")
+    original_params = job.params
+    while True:
+        with job_lock(job.job_id):
+            latest = read_job(job.job_id)
+            latest_context = latest.canvas_run
+            if latest_context is None:
+                raise ValueError("canvas job is missing run context")
+            pending = next(
+                (candidate for candidate in latest_context.candidates if candidate.status == "pending"),
+                None,
+            )
+            if pending is None:
+                return latest
+            cancel_requested = latest.cancel_requested_at is not None
+            accumulated_paths = list(latest.output_paths)
+            if not cancel_requested:
+                attempt_params = original_params.model_copy(update={"n": 1})
+                write_job_under_lock(latest.model_copy(update={
+                    "status": JobStatus.PENDING,
+                    "error": None,
+                    "params": attempt_params,
+                    "progress_phase": None,
+                    "completed_at": None,
+                }))
+        if cancel_requested:
+            return _cancel_pending_canvas_candidates(job.canvas_project_id, job.job_id)
+
+        output_path: str | None = None
+        attempt_error: str | None = None
+        try:
+            attempt = run_job(job.job_id, defer_terminal=True)
+            output_path = next(
+                (path for path in attempt.output_paths if path not in accumulated_paths),
+                None,
+            )
+        except Exception:
+            attempt = read_job(job.job_id)
+            attempt_error = attempt.error
+        committed = _commit_canvas_candidate_attempt(
+            job.canvas_project_id,
+            job.job_id,
+            pending.candidate_id,
+            original_params=original_params,
+            accumulated_paths=accumulated_paths,
+            output_path=output_path,
+            attempt_error=attempt_error,
+        )
+        original_params = committed.params
+
+
 def finalize_canvas_run(
     project_id: str,
     job_id: str,
@@ -1989,6 +2278,10 @@ def _finalize_canvas_run_under_locks(
         "canvas_run": context.model_copy(update={"candidates": candidates})
     })
     primary_version_id = successful[0].version_id
+    single_candidate_retry = (
+        len(candidates) == 1
+        and candidates[0].replaces_candidate_id is not None
+    )
     nodes: list[CanvasNode] = []
     for node in current.nodes:
         if (
@@ -1996,11 +2289,14 @@ def _finalize_canvas_run_under_locks(
             and node.type in {"text", "image", "video", "audio"}
             and node.data.active_run_id == context.run_id
         ):
-            node = node.model_copy(update={
-                "data": node.data.model_copy(update={
-                    "current_version_id": primary_version_id,
+            # A repaired slot joins the batch but never steals an already-successful primary.
+            # Full retries and first successes still become the displayed result.
+            if not single_candidate_retry or node.data.current_version_id is None:
+                node = node.model_copy(update={
+                    "data": node.data.model_copy(update={
+                        "current_version_id": primary_version_id,
+                    })
                 })
-            })
         nodes.append(node)
     timestamp = _now()
     updated = current.model_copy(update={
@@ -2047,6 +2343,8 @@ def run_canvas_job(job_id: str) -> Job:
             return canceled
         job = job.model_copy(update={"runner_started_at": _now()})
         write_job_under_lock(job)
+    if _uses_incremental_candidates(job):
+        return _run_canvas_candidates_incrementally(job)
     try:
         run_job(job_id)
     except Exception as error:
@@ -2075,6 +2373,34 @@ def run_canvas_job_scheduled(job_id: str) -> Job:
         return run_canvas_job(job_id)
 
 
+def _recover_incremental_candidate_output(job: Job) -> Job:
+    """Register a paid slot saved by the runner before a process interruption."""
+    context = job.canvas_run
+    if context is None or not job.canvas_project_id:
+        return job
+    successful_count = sum(
+        candidate.status == "succeeded" for candidate in context.candidates
+    )
+    if len(job.output_paths) <= successful_count:
+        return job
+    pending = next(
+        (candidate for candidate in context.candidates if candidate.status == "pending"),
+        None,
+    )
+    if pending is None:
+        return job
+    original_params = job.params.model_copy(update={"n": len(context.candidates)})
+    return _commit_canvas_candidate_attempt(
+        job.canvas_project_id,
+        job.job_id,
+        pending.candidate_id,
+        original_params=original_params,
+        accumulated_paths=job.output_paths[:successful_count],
+        output_path=job.output_paths[successful_count],
+        attempt_error=None,
+    )
+
+
 def reconcile_canvas_jobs(*, fail_pending: bool = False, project_id: str | None = None) -> list[str]:
     """Repair terminal Canvas Jobs; optionally fail orphaned in-flight requests on startup."""
     reconciled: list[str] = []
@@ -2089,19 +2415,30 @@ def reconcile_canvas_jobs(*, fail_pending: bool = False, project_id: str | None 
         if job.status in {JobStatus.PENDING, JobStatus.PENDING_CONFIRM}:
             if not fail_pending:
                 continue
+            if job.runner_started_at is not None and _uses_incremental_candidates(job):
+                job = _recover_incremental_candidate_output(job)
+                context = job.canvas_run
+                if context is not None and all(
+                    candidate.status != "pending" for candidate in context.candidates
+                ):
+                    reconciled.append(job.job_id)
+                    continue
             if job.cancel_requested_at:
-                update_job_status(job.job_id, status=JobStatus.CANCELED, error=None)
+                _cancel_pending_canvas_candidates(job.canvas_project_id, job.job_id)
+                reconciled.append(job.job_id)
+                continue
             elif job.runner_started_at is None:
                 # The durable command exists but no provider call was claimed. Startup may resume
                 # it without risking a duplicate charge.
                 reconciled.append(job.job_id)
                 continue
             else:
-                update_job_status(
+                _fail_pending_canvas_candidates(
+                    job.canvas_project_id,
                     job.job_id,
-                    status=JobStatus.FAILED,
-                    error="服务已重启，原生成请求状态未知；未自动重试以避免重复扣费",
+                    "服务已重启，原生成请求状态未知；未自动重试以避免重复扣费",
                 )
-        finalize_canvas_run(job.canvas_project_id, job.job_id)
+        else:
+            finalize_canvas_run(job.canvas_project_id, job.job_id)
         reconciled.append(job.job_id)
     return reconciled

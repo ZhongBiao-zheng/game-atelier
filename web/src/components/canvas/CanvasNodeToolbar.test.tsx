@@ -95,6 +95,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     submitRun: vi.fn(async () => undefined),
     retryRun: vi.fn(async () => undefined),
     cancelRun: vi.fn(async () => undefined),
+    dismissCandidate: vi.fn(async () => undefined),
     updateNode: vi.fn(),
     renameNode: vi.fn(),
     updateText: vi.fn(),

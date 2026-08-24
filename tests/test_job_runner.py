@@ -200,6 +200,44 @@ def test_run_job_routes_custom_provider_through_dispatch(project, monkeypatch):
     assert captured["output_dir"] != expected.parent
 
 
+def test_deferred_image_attempt_keeps_job_pending_and_appends_new_output(project, monkeypatch):
+    existing = project / "studio" / "studio-batch" / "existing.png"
+    existing.parent.mkdir(parents=True)
+    _write_png(existing)
+    save_job(Job(
+        job_id="studio-batch",
+        character_id="zz-main",
+        prompt="fox",
+        submitted_at="2026-05-28T00:00:00+08:00",
+        model="gpt-image-2-all",
+        params=JobParams(size="1024x1024", n=1),
+        output_paths=[str(existing)],
+        status=JobStatus.PENDING,
+        error=None,
+        asset_slot=AssetSlot.PORTRAIT,
+        kind=JobKind.IMAGE,
+        namespace="studio",
+        alias="zz-main",
+        provider="custom",
+    ))
+
+    def fake_dispatch(*, output_dir, **_kwargs):
+        output = Path(output_dir) / "new.png"
+        _write_png(output, width=4, height=3)
+        return [str(output)]
+
+    monkeypatch.setattr(job_runner, "dispatch", fake_dispatch)
+
+    attempt = job_runner.run_job("studio-batch", defer_terminal=True)
+
+    assert attempt.status == JobStatus.PENDING
+    assert attempt.completed_at is None
+    assert attempt.error is None
+    assert attempt.output_paths[0] == str(existing)
+    assert len(attempt.output_paths) == 2
+    assert Path(attempt.output_paths[1]).is_file()
+
+
 def test_valid_image_rejects_zero_byte(project):
     zero = project / "characters" / "holy" / "promo" / "lovart_empty.png"
     zero.write_bytes(b"")

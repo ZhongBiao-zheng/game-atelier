@@ -479,3 +479,20 @@ export function cancelCanvasRun(projectId: string, runId: string): Promise<Job> 
     { method: 'POST' },
   );
 }
+
+export function dismissCanvasCandidate(
+  projectId: string,
+  runId: string,
+  candidateId: string,
+  expectedRevision: number,
+): Promise<CanvasRun> {
+  return requestJson<CanvasRun>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/candidates/${encodeURIComponent(candidateId)}/dismiss`,
+    '删除候选槽位',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    },
+  );
+}

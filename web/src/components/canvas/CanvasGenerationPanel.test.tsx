@@ -15,6 +15,7 @@ import {
   restoreCanvasNodeFocus,
 } from './canvasNodePanelInteraction';
 import type { CanvasNode } from '@/schema/canvas';
+import type { Job } from '@/schema/jobs';
 
 vi.mock('@xyflow/react', () => ({
   NodeResizer: () => null,
@@ -69,6 +70,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     submitRun: vi.fn(async () => undefined),
     retryRun: vi.fn(async () => undefined),
     cancelRun: vi.fn(async () => undefined),
+    dismissCandidate: vi.fn(async () => undefined),
     updateNode: vi.fn(),
     renameNode: vi.fn(),
     updateText: vi.fn(),
@@ -87,6 +89,94 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     saveImageToolbarPreferences: vi.fn(async () => undefined),
     deleteNode: vi.fn(),
     ...overrides,
+  };
+}
+
+const imageResultNode: CanvasNode = {
+  id: 'image-result',
+  title: '图片结果',
+  type: 'image',
+  position: { x: 0, y: 0 },
+  z_index: 0,
+  data: {
+    current_version_id: 'version-main',
+    generation_draft: draft,
+    active_run_id: 'run-batch',
+    display: { fit: 'contain', free_resize: false },
+  },
+};
+
+function batchJob(): Job {
+  return {
+    job_id: 'job-batch',
+    character_id: 'openai-main',
+    prompt: '纸雕狐狸',
+    submitted_at: '2026-08-25T00:00:00Z',
+    model: 'gpt-image-1',
+    params: { n: 3 },
+    output_paths: [],
+    status: 'partial',
+    error: '部分候选没有生成成功',
+    kind: 'image',
+    namespace: 'canvas',
+    canvas_project_id: 'canvas-test',
+    alias: 'openai-main',
+    provider: 'openai',
+    canvas_run: {
+      run_id: 'run-batch',
+      result_node_id: imageResultNode.id,
+      snapshot: {
+        snapshot_version: 1,
+        surface_node_id: 'config-one',
+        result_node_id: imageResultNode.id,
+        mode: 'image',
+        final_prompt: '纸雕狐狸',
+        input_policy: 'all_connected',
+        model: 'gpt-image-1',
+        provider: 'openai',
+        alias: 'openai-main',
+        normalized_params: { n: 3 },
+        inputs: [],
+        mask_version_id: null,
+        submitted_at: '2026-08-25T00:00:00Z',
+        submitted_by: { kind: 'user', actor_id: null },
+        request_fingerprint: 'a'.repeat(64),
+      },
+      candidates: [
+        { candidate_id: 'candidate-main', index: 0, status: 'succeeded', version_id: 'version-main', error: null },
+        { candidate_id: 'candidate-other', index: 1, status: 'succeeded', version_id: 'version-other', error: null },
+        { candidate_id: 'candidate-failed', index: 2, status: 'failed', version_id: null, error: '上游超时' },
+      ],
+    },
+  };
+}
+
+function imageVersions() {
+  return {
+    'version-main': {
+      version_id: 'version-main',
+      created_at: '2026-08-25T00:00:00Z',
+      sha256: 'a'.repeat(64),
+      origin: { kind: 'job_output' as const, job_id: 'job-batch', candidate_id: 'candidate-main' },
+      kind: 'image' as const,
+      path: 'outputs/job-batch/main.png',
+      mime_type: 'image/png',
+      bytes: 12,
+      width: 1024,
+      height: 1024,
+    },
+    'version-other': {
+      version_id: 'version-other',
+      created_at: '2026-08-25T00:00:00Z',
+      sha256: 'b'.repeat(64),
+      origin: { kind: 'job_output' as const, job_id: 'job-batch', candidate_id: 'candidate-other' },
+      kind: 'image' as const,
+      path: 'outputs/job-batch/other.png',
+      mime_type: 'image/png',
+      bytes: 12,
+      width: 1024,
+      height: 1024,
+    },
   };
 }
 
@@ -110,6 +200,88 @@ it('renders the generation composer as an independent panel below the selected n
   expect(screen.queryByText(/\d+×/)).not.toBeInTheDocument();
   expect(within(panel).getByText('图片生成')).toBeInTheDocument();
   expect(within(panel).getByText('· 分镜出图')).toBeInTheDocument();
+});
+
+it('renders image candidates as a collapsed stack owned by the result node', () => {
+  const job = batchJob();
+  const context = nodeContext({
+    contentVersions: imageVersions(),
+    jobsByRunId: new Map([['run-batch', job]]),
+    jobsByResultNodeId: new Map([[imageResultNode.id, [job]]]),
+  });
+
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: imageResultNode }} selected={false} />
+    </CanvasNodeContext.Provider>,
+  );
+
+  expect(screen.getByTestId('canvas-candidate-stack')).toHaveAttribute('data-expanded', 'false');
+  expect(screen.getByRole('button', { name: '展开 3 个候选结果' })).toBeInTheDocument();
+  expect(screen.queryByRole('group', { name: '候选 2' })).not.toBeInTheDocument();
+});
+
+it('expands image candidates around the node and exposes candidate-specific actions', () => {
+  const job = batchJob();
+  const context = nodeContext({
+    contentVersions: imageVersions(),
+    jobsByRunId: new Map([['run-batch', job]]),
+    jobsByResultNodeId: new Map([[imageResultNode.id, [job]]]),
+  });
+
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: imageResultNode }} selected={false} />
+    </CanvasNodeContext.Provider>,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: '展开 3 个候选结果' }));
+  expect(screen.getByTestId('canvas-candidate-stack')).toHaveAttribute('data-expanded', 'true');
+  expect(screen.getByRole('group', { name: '候选 2' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: '候选 3' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '重试候选 2' })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: '将候选 2 设为主结果' }));
+  expect(context.selectCandidate).toHaveBeenCalledWith(imageResultNode.id, 'version-other');
+
+  fireEvent.click(screen.getByRole('button', { name: '重试候选 3' }));
+  expect(context.retryRun).toHaveBeenCalledWith(
+    imageResultNode.id,
+    'run-batch',
+    'original',
+    'candidate-failed',
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: '删除候选 3' }));
+  expect(context.dismissCandidate).toHaveBeenCalledWith('run-batch', 'candidate-failed');
+});
+
+it('keeps retry and delete available for the last failed image slot', () => {
+  const job = batchJob();
+  job.status = 'failed';
+  job.canvas_run!.candidates = [job.canvas_run!.candidates[2]];
+  const context = nodeContext({
+    contentVersions: imageVersions(),
+    jobsByRunId: new Map([['run-batch', job]]),
+    jobsByResultNodeId: new Map([[imageResultNode.id, [job]]]),
+  });
+
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: imageResultNode }} selected={false} />
+    </CanvasNodeContext.Provider>,
+  );
+
+  expect(screen.queryByRole('button', { name: /展开 1 个候选结果/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '重试候选 3' }));
+  fireEvent.click(screen.getByRole('button', { name: '删除候选 3' }));
+  expect(context.retryRun).toHaveBeenCalledWith(
+    imageResultNode.id,
+    'run-batch',
+    'original',
+    'candidate-failed',
+  );
+  expect(context.dismissCandidate).toHaveBeenCalledWith('run-batch', 'candidate-failed');
 });
 
 it('closes the generation panel without removing node handles', () => {

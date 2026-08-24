@@ -121,10 +121,10 @@ Status: ready-for-human
 | D14 | 音色、格式、速度、instructions | `audio-settings-panel.tsx` | adapted：按 provider capability 显示，关闭前原子提交本地草稿，服务端再次归一化 | none |
 | D15 | `@` 引用已连接文本/图片/视频/音频 | prompt chip/resource mention components | adapted：稳定 node token + 直接连接候选 + missing 双端拒绝（issue 34） | none |
 | D16 | 提交前根据当前连接重新编号引用 | runtime composer 文案 | adapted：冻结输入后按模态与真实数组顺序重编号（issue 34） | none |
-| D17 | 图片数量 N 立即创建 N 个槽位并独立更新 | multi-image metadata、`pending-test` | adapted：一轮 Job 的候选状态 | full |
-| D18 | 多图收起堆叠、展开、设主图 | `canvas-node.tsx`、`pending-test` | same | full |
-| D19 | 单槽位重试/删除，不抢占成功主图 | `project.tsx`、`pending-test` | adapted：候选/轮次模型 | full |
-| D20 | 停止当前生成，保留已完成结果 | `stopTitle/continue`、AbortController | adapted：Job 取消/部分成功 | full |
+| D17 | 图片数量 N 立即创建 N 个槽位并独立更新 | multi-image metadata、`pending-test` | adapted：一轮 Job 内逐槽执行并即时登记（issue 35） | none |
+| D18 | 多图收起堆叠、展开、设主图 | `canvas-node.tsx`、`pending-test` | same：结果节点拥有堆叠与展开候选（issue 35） | none |
+| D19 | 单槽位重试/删除，不抢占成功主图 | `project.tsx`、`pending-test` | adapted：候选重试 Run + tombstone（issue 35） | none |
+| D20 | 停止当前生成，保留已完成结果 | `stopTitle/continue`、AbortController | adapted：持久取消意图 + 候选聚合终态（issue 35） | none |
 | D21 | 生成元数据保存 prompt/model/size/quality/references | `CanvasNodeMetadata` | adapted：不可变 Generation Snapshot | partial |
 | D22 | 根据保存元数据重试；引用丢失明确报错 | `handleRetryNode` | adapted：快照路径与存在性验证 | partial |
 | D23 | 自定义模型调用脚本 | `model-script-editor.tsx`、`model-plugin.ts` | adapted：服务端受控 caller/plugin，不执行浏览器任意脚本 | full |

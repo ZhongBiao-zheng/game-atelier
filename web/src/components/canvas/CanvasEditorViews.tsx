@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, MessageSquare, Orbit, Paintbrush, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, X, ZoomIn } from 'lucide-react';
+import { Check, ChevronRight, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, MessageSquare, Orbit, Paintbrush, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, X, ZoomIn } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -38,6 +38,7 @@ import {
 import { imageControlCaps } from '@/lib/imageControlCaps';
 import { VideoControls } from '@/components/studio/VideoControls';
 import { cn } from '@/lib/utils';
+import { presentCanvasCandidates, type CanvasCandidateEntry } from '@/lib/canvasCandidates';
 import {
   missingCanvasMentionIds,
   type CanvasMentionReference,
@@ -97,6 +98,7 @@ export interface CanvasNodeContextValue {
   submitRun: (id: string) => Promise<void>;
   retryRun: (id: string, runId: string, mode: 'original' | 'current', candidateId?: string) => Promise<void>;
   cancelRun: (runId: string) => Promise<void>;
+  dismissCandidate: (runId: string, candidateId: string) => Promise<void>;
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
   renameNode: (id: string, title: string) => void;
   updateText: (id: string, text: string) => void;
@@ -137,6 +139,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const [toolbarActive, setToolbarActive] = useState(false);
   const [toolbarOverlayOpen, setToolbarOverlayOpen] = useState(false);
   const [toolbarPosition, setToolbarPosition] = useState(Position.Top);
+  const [candidateBatchExpanded, setCandidateBatchExpanded] = useState(false);
   const [toolbarOffsetX, setToolbarOffsetX] = useState(0);
   const [generationPanelOffsetX, setGenerationPanelOffsetX] = useState(0);
   const [generationPanelViewportWidth, setGenerationPanelViewportWidth] = useState(() => window.innerWidth);
@@ -294,6 +297,9 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const nodeJob = nodeRunState.job;
   const reversePromptJob = nodeJob && isReversePromptJob(nodeJob) ? nodeJob : undefined;
   const reversePromptSucceeded = reversePromptJob?.canvas_run?.candidates.some(candidate => candidate.status === 'succeeded') ?? false;
+  const imageCandidates = node.type === 'image'
+    ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? []).current
+    : [];
 
   function beginTitleEditing() {
     titleExitInProgress.current = false;
@@ -476,6 +482,17 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           )}
         </div>
       </NodeToolbar>
+      {node.type === 'image' && imageCandidates.length > 0 && (
+        <ImageCandidateBatch
+          node={node}
+          entries={imageCandidates}
+          primaryVersionId={node.data.current_version_id}
+          expanded={candidateBatchExpanded}
+          disabled={submittingNode || nodeRunState.status === 'loading'}
+          context={context}
+          onToggle={() => setCandidateBatchExpanded(current => !current)}
+        />
+      )}
       <article
         data-canvas-node-id={node.id}
         data-canvas-node-status={nodeRunState.status}
@@ -574,6 +591,202 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function ImageCandidateBatch({
+  node,
+  entries,
+  primaryVersionId,
+  expanded,
+  disabled,
+  context,
+  onToggle,
+}: {
+  node: Extract<CanvasContentNode, { type: 'image' }>;
+  entries: CanvasCandidateEntry[];
+  primaryVersionId: string | null;
+  expanded: boolean;
+  disabled: boolean;
+  context: CanvasNodeContextValue;
+  onToggle: () => void;
+}) {
+  const primary = entries.find(entry => entry.candidate.version_id === primaryVersionId) ?? entries[0];
+  const others = entries.filter(entry => entry.candidate.candidate_id !== primary.candidate.candidate_id);
+  const primaryTerminalFailure = primary.candidate.status === 'failed' || primary.candidate.status === 'canceled';
+
+  return (
+    <div
+      data-testid="canvas-candidate-stack"
+      data-expanded={expanded ? 'true' : 'false'}
+      className="nodrag nowheel pointer-events-none absolute inset-0 overflow-visible"
+    >
+      {!expanded && entries.length > 1 && entries.slice(1, 4).map((entry, index) => (
+        <span
+          key={entry.candidate.candidate_id}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 rounded-lg border border-border bg-card"
+          style={{ transform: `translate(${10 + index * 6}px, ${5 + index * 4}px) rotate(${index + 1}deg)` }}
+        />
+      ))}
+      {expanded && entries.length > 1 && others.map((entry, index) => (
+        <ImageCandidateCard
+          key={entry.candidate.candidate_id}
+          node={node}
+          entry={entry}
+          index={index}
+          disabled={disabled}
+          context={context}
+        />
+      ))}
+      {primaryTerminalFailure && !disabled && (
+        <CandidateFailureActions
+          number={primary.candidate.index + 1}
+          onRetry={() => void context.retryRun(
+            node.id,
+            primary.job.canvas_run!.run_id,
+            'original',
+            primary.candidate.candidate_id,
+          )}
+          onDismiss={() => void context.dismissCandidate(
+            primary.job.canvas_run!.run_id,
+            primary.candidate.candidate_id,
+          )}
+        />
+      )}
+      {entries.length > 1 && (
+        <button
+          type="button"
+          className="pointer-events-auto absolute right-2 top-2 z-20 inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-glass px-3 text-xs font-medium text-foreground backdrop-blur-glass transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label={`${expanded ? '收起' : '展开'} ${entries.length} 个候选结果`}
+          aria-expanded={expanded}
+          onPointerDown={event => event.stopPropagation()}
+          onClick={event => {
+            event.stopPropagation();
+            onToggle();
+          }}
+        >
+          {entries.length} 个候选
+          <ChevronRight className={cn('size-3.5 transition-transform', expanded && 'rotate-90')} aria-hidden="true" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ImageCandidateCard({
+  node,
+  entry,
+  index,
+  disabled,
+  context,
+}: {
+  node: Extract<CanvasContentNode, { type: 'image' }>;
+  entry: CanvasCandidateEntry;
+  index: number;
+  disabled: boolean;
+  context: CanvasNodeContextValue;
+}) {
+  const { candidate } = entry;
+  const horizontalOffset = index + 1;
+  const version = candidate.version_id ? context.contentVersions[candidate.version_id] : undefined;
+  const terminalFailure = candidate.status === 'failed' || candidate.status === 'canceled';
+  return (
+    <section
+      role="group"
+      aria-label={`候选 ${candidate.index + 1}`}
+      className="pointer-events-auto absolute top-0 z-20 h-full overflow-hidden rounded-lg border border-border bg-card shell-glow"
+      style={{
+        left: `calc(${horizontalOffset * 100}% + ${horizontalOffset * 16}px)`,
+        width: '100%',
+      }}
+      onPointerDown={event => event.stopPropagation()}
+      onDoubleClick={event => {
+        event.stopPropagation();
+        if (version) context.previewContent(version.version_id, `${node.title} · 候选 ${candidate.index + 1}`, node.id);
+      }}
+    >
+      {version?.kind === 'image'
+        ? <MediaPreview kind="image" src={canvasMediaUrl(context.projectId, version.version_id)} />
+        : (
+          <div className="grid size-full min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
+            {candidate.status === 'pending'
+              ? <LoaderCircle className="animate-spin" aria-label={`候选 ${candidate.index + 1} 生成中`} />
+              : candidate.error || (candidate.status === 'canceled' ? '已停止' : '结果待同步')}
+          </div>
+        )}
+      <span className="absolute left-2 top-2 rounded-md border border-border bg-glass px-2 py-1 text-xs text-muted-foreground backdrop-blur-glass">
+        {candidate.index + 1}
+      </span>
+      {!disabled && version?.kind === 'image' && (
+        <button
+          type="button"
+          aria-label={`将候选 ${candidate.index + 1} 设为主结果`}
+          title="设为主结果"
+          className="absolute bottom-2 left-2 grid size-8 place-items-center rounded-full border border-border bg-glass text-muted-foreground backdrop-blur-glass transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          onClick={event => {
+            event.stopPropagation();
+            context.selectCandidate(node.id, version.version_id);
+          }}
+        >
+          <Check className="size-4" aria-hidden="true" />
+        </button>
+      )}
+      {terminalFailure && !disabled && (
+        <CandidateFailureActions
+          number={candidate.index + 1}
+          onRetry={() => void context.retryRun(
+            node.id,
+            entry.job.canvas_run!.run_id,
+            'original',
+            candidate.candidate_id,
+          )}
+          onDismiss={() => void context.dismissCandidate(
+            entry.job.canvas_run!.run_id,
+            candidate.candidate_id,
+          )}
+        />
+      )}
+    </section>
+  );
+}
+
+function CandidateFailureActions({
+  number,
+  onRetry,
+  onDismiss,
+}: {
+  number: number;
+  onRetry: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="pointer-events-auto absolute bottom-2 right-2 z-20 flex items-center gap-1.5">
+      <button
+        type="button"
+        aria-label={`重试候选 ${number}`}
+        title="按原设置重试这个候选"
+        className="grid size-8 place-items-center rounded-full border border-border bg-glass text-muted-foreground backdrop-blur-glass transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        onClick={event => {
+          event.stopPropagation();
+          onRetry();
+        }}
+      >
+        <RotateCcw className="size-4" aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        aria-label={`删除候选 ${number}`}
+        title="删除这个失败槽位"
+        className="grid size-8 place-items-center rounded-full border border-border bg-glass text-muted-foreground backdrop-blur-glass transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        onClick={event => {
+          event.stopPropagation();
+          onDismiss();
+        }}
+      >
+        <Trash2 className="size-4" aria-hidden="true" />
+      </button>
     </div>
   );
 }
@@ -1079,14 +1292,16 @@ export function CanvasGenerationComposer({
             ? `输入 @ 引用已连接内容 · ${mentionReferences.length} 项可用`
             : '连接文本、图片、视频或音频后，可输入 @ 引用。'}
       </p>
-      <CandidateHistory
-        nodeId={node.id}
-        primaryVersionId={node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio'
-          ? node.data.current_version_id : null}
-        context={context}
-        running={Boolean(running)}
-        submitting={submitting}
-      />
+      {node.type !== 'image' && (
+        <CandidateHistory
+          nodeId={node.id}
+          primaryVersionId={node.type === 'text' || node.type === 'video' || node.type === 'audio'
+            ? node.data.current_version_id : null}
+          context={context}
+          running={Boolean(running)}
+          submitting={submitting}
+        />
+      )}
       <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
         <CanvasModelPicker
           choices={modelChoices}
@@ -1285,11 +1500,6 @@ export function CanvasMobileGenerationPanel({
   );
 }
 
-type CandidateEntry = {
-  job: Job;
-  candidate: NonNullable<Job['canvas_run']>['candidates'][number];
-};
-
 function CandidateHistory({
   nodeId,
   primaryVersionId,
@@ -1303,15 +1513,8 @@ function CandidateHistory({
   running: boolean;
   submitting: boolean;
 }) {
-  const entries: CandidateEntry[] = (context.jobsByResultNodeId.get(nodeId) ?? []).flatMap(job => (
-    job.canvas_run?.candidates.map(candidate => ({ job, candidate })) ?? []
-  ));
-  if (!entries.length) return null;
-  const currentByIndex = new Map<number, CandidateEntry>();
-  for (const entry of entries) currentByIndex.set(entry.candidate.index, entry);
-  const current = [...currentByIndex.values()].sort((a, b) => a.candidate.index - b.candidate.index);
-  const currentIds = new Set(current.map(entry => entry.candidate.candidate_id));
-  const history = entries.filter(entry => !currentIds.has(entry.candidate.candidate_id)).reverse();
+  const { current, history } = presentCanvasCandidates(context.jobsByResultNodeId.get(nodeId) ?? []);
+  if (!current.length && !history.length) return null;
 
   return (
     <div className="border-t border-border/70 py-3">
@@ -1349,7 +1552,7 @@ function CandidateGrid({
   retryDisabled,
 }: {
   label: string;
-  entries: CandidateEntry[];
+  entries: CanvasCandidateEntry[];
   context: CanvasNodeContextValue;
   nodeId: string;
   primaryVersionId: string | null;
@@ -1392,7 +1595,10 @@ function CandidateGrid({
                 <Check className="size-3.5" aria-hidden="true" />
               </button>
             )}
-            {!retryDisabled && job.canvas_run && (
+            {!retryDisabled
+              && job.canvas_run
+              && (candidate.status === 'failed' || candidate.status === 'canceled')
+              && (
               <button
                 type="button"
                 aria-label={`重试候选 ${candidate.index + 1}`}

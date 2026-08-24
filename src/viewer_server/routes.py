@@ -58,7 +58,7 @@ from pydantic import field_validator
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
-    CanvasAngleRunCreate, CanvasDocument, CanvasLibraryAsset, CanvasLibraryAssetCreate,
+    CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasLibraryAsset, CanvasLibraryAssetCreate,
     CanvasLibraryAssetPatch,
     CanvasLibraryInsertRequest, CanvasPackageCommitRequest, CanvasPackageImportResponse,
     CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
@@ -3006,6 +3006,41 @@ def post_canvas_run_cancel(project_id: str, run_id: str) -> Job:
         raise HTTPException(404, detail="找不到这个画布生成记录") from None
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/{run_id}/candidates/{candidate_id}/dismiss",
+    response_model=CanvasRunResponse,
+)
+def post_canvas_candidate_dismiss(
+    project_id: str,
+    run_id: str,
+    candidate_id: str,
+    payload: CanvasCandidateDismiss,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import dismiss_canvas_candidate
+
+    try:
+        job, document = dismiss_canvas_candidate(
+            project_id,
+            run_id,
+            candidate_id,
+            payload.expected_revision,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个生成记录或候选结果") from None
+    except RuntimeError as error:
+        detail = str(error)
+        if detail.startswith("revision_conflict:"):
+            current_revision = int(detail.split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }) from None
+        raise HTTPException(409, detail=detail) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    return CanvasRunResponse(job=job, document=document)
 
 
 class _CharacterArchiveTarget(BaseModel):

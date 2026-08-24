@@ -53,6 +53,7 @@ import {
   canvasMediaUrl,
   createCanvasReversePromptConfig,
   createCanvasPrompt,
+  dismissCanvasCandidate,
   deleteCanvasAsset,
   deleteCanvasPrompt,
   getCanvasDocument,
@@ -332,6 +333,7 @@ function CanvasEditorInner({
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
   const syncedTerminalRuns = useRef(new Set<string>());
+  const syncedCandidateVersionIds = useRef(new Set<string>());
   const reversePromptConfigAttempts = useRef(new Set<string>());
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
   const viewportSync = useRef<ViewportSyncToken | null>(null);
@@ -419,6 +421,7 @@ function CanvasEditorInner({
     pendingViewportCommand.current = null;
     pendingTextVersions.current.clear();
     syncedTerminalRuns.current.clear();
+    syncedCandidateVersionIds.current.clear();
     reversePromptConfigAttempts.current.clear();
     dirtyVersion.current = 0;
     setDirtySignal(0);
@@ -592,11 +595,21 @@ function CanvasEditorInner({
           && job.status !== 'pending_confirm'
           && !syncedTerminalRuns.current.has(job.canvas_run.run_id)
         ));
-        if (completedRuns.length) {
+        const newCandidateVersionIds = canvasJobs.flatMap(job => (
+          job.canvas_run?.candidates.flatMap(candidate => (
+            candidate.status === 'succeeded'
+            && candidate.version_id
+            && !syncedCandidateVersionIds.current.has(candidate.version_id)
+              ? [candidate.version_id]
+              : []
+          )) ?? []
+        ));
+        if (completedRuns.length || newCandidateVersionIds.length) {
           const remote = await getCanvasDocument(projectId);
           if (cancelled) return;
           mergeRunDocument(remote);
           for (const job of completedRuns) syncedTerminalRuns.current.add(job.canvas_run!.run_id);
+          for (const versionId of newCandidateVersionIds) syncedCandidateVersionIds.current.add(versionId);
         }
         setJobs(canvasJobs);
       } catch (pollError) {
@@ -1640,6 +1653,27 @@ function CanvasEditorInner({
     }
   }, [projectId]);
 
+  const dismissCandidate = useCallback(async (runId: string, candidateId: string) => {
+    setError(null);
+    try {
+      if (!await persistNow()) return;
+      const result = await dismissCanvasCandidate(
+        projectId,
+        runId,
+        candidateId,
+        serverRevision.current,
+      );
+      if (latestDocument.current?.project_id !== projectId) return;
+      setJobs(currentJobs => [
+        ...currentJobs.filter(job => job.job_id !== result.job.job_id),
+        result.job,
+      ]);
+    } catch (dismissError) {
+      if (latestDocument.current?.project_id !== projectId) return;
+      setError((dismissError as Error).message);
+    }
+  }, [persistNow, projectId]);
+
   const recordHistorySnapshot = useCallback(() => {
     const snapshot = latestDocument.current;
     if (!snapshot || history.current.past.at(-1) === snapshot) return;
@@ -2530,6 +2564,7 @@ function CanvasEditorInner({
     submitRun,
     retryRun,
     cancelRun,
+    dismissCandidate,
     updateNode,
     renameNode,
     updateText,
@@ -2556,6 +2591,7 @@ function CanvasEditorInner({
     deleteNode,
     dismissedGenerationPanelNodeId,
     dismissGenerationPanel,
+    dismissCandidate,
     document?.content_versions,
     document?.settings.show_image_info,
     editVideo,

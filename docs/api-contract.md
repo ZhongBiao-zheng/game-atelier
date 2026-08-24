@@ -153,8 +153,9 @@ voice/format、0.25–4 的 speed 与去除首尾空白后的非空 instructions
 显示标签或 Version/path。断开连接后的 token 保留为 missing，Web 阻止提交且服务端再次拒绝，不能降级成
 普通文本。冻结后服务端按 Snapshot 实际输入顺序分别为文本、图片、视频、音频从 1 编号，重复 token 复用
 同一编号；final prompt 的标签与 `reference_images/reference_videos/reference_audios` 各自数组顺序一致，
-隐式自身输入也参与编号。Runner 完成后再次通过短事务登记输出 Content Version、candidate 状态与
-结果节点当前版本。批量候选逐个校验：全部成功为 `done`，部分成功为 `partial`，全部失败为 `failed`，
+隐式自身输入也参与编号。非原生批量的图片候选按槽位执行，每个成功槽位立即通过短事务登记
+Content Version、candidate 状态与首个成功主结果；Midjourney 原生四宫格仍保留单次请求再逐槽登记。
+批量候选逐个校验：全部成功为 `done`，部分成功为 `partial`，全部失败为 `failed`，
 停止且没有有效产物为 `canceled`；部分失败不会抹掉已经成功的 Content Version。
 `POST .../runs/{run_id}/retry` 明确区分 `original` 与 `current`：前者校验并复用原 Snapshot 的精确
 version/hash/model，允许用 `candidate_id` 单独补跑并记录 `replaces_candidate_id`；后者从结果节点当前
@@ -162,6 +163,9 @@ Draft/连接重新解析并冻结新 Snapshot。两者都创建新 Job/Run，不
 `POST .../runs/{run_id}/cancel` 只持久化幂等 `cancel_requested_at`。Runner 尚未认领时不调用厂商并落为
 `canceled`；同步厂商请求已发出时不伪装即时中断，UI 明示上游可能继续执行，有效返回仍登记，未返回候选
 才标记 canceled。prepared 事务在下次项目访问或命令前完成/丢弃，不能从节点当前内容重造 Snapshot。
+`POST .../runs/{run_id}/candidates/{candidate_id}/dismiss` 只允许隐藏 `failed/canceled` 槽位并写入
+`dismissed_at` tombstone；Job、Snapshot、错误与既有 Content Version 均不删除，最新 tombstone 也不会让
+同索引的旧失败槽位重新出现。单槽位重试成功只补回该索引，不覆盖已有成功主结果。
 服务启动时先恢复全部项目事务，再核对孤儿 Job：`runner_started_at` 为空的持久任务尚未调用厂商，可安全
 重新领取；已经领取但仍无终态的请求状态未知，明确标记失败且不自动重试，避免重复扣费。视频与
 Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程内调度上限为全局 4 个、同一密钥别名

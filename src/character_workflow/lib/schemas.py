@@ -157,6 +157,8 @@ class CanvasResultCandidate(BaseModel):
     version_id: str | None = None
     error: str | None = None
     replaces_candidate_id: str | None = None
+    # UI dismissal is a tombstone: Job/Snapshot/Version provenance remains auditable.
+    dismissed_at: str | None = None
 
 
 class CanvasJobContext(BaseModel):
@@ -856,6 +858,11 @@ class CanvasRunRetry(BaseModel):
     mode: Literal["original", "current"]
     expected_revision: int = Field(ge=0)
     candidate_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class CanvasCandidateDismiss(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=0)
 
 
 class CanvasReversePromptConfigCreate(BaseModel):
