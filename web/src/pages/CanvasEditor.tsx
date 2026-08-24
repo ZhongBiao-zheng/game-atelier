@@ -53,6 +53,7 @@ import {
   insertCanvasPrompt,
   listCanvasJobs,
   listCanvasProjects,
+  replaceCanvasNodeMedia,
   retryCanvasRun,
   runCanvasMediaOperation,
   saveCanvasAsset,
@@ -129,6 +130,12 @@ interface MediaOperationState {
   version: CanvasMediaVersion;
 }
 
+interface MediaReplaceTarget {
+  nodeId: string;
+  title: string;
+  kind: 'image' | 'video' | 'audio';
+}
+
 const CANVAS_MOUSE_PAN_BUTTONS: number[] = [];
 
 export function CanvasEditor(props: {
@@ -171,8 +178,12 @@ function CanvasEditorInner({
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
   const [mediaOperationError, setMediaOperationError] = useState<string | null>(null);
+  const [mediaReplaceTarget, setMediaReplaceTarget] = useState<MediaReplaceTarget | null>(null);
+  const [mediaReplaceBusyNodeIds, setMediaReplaceBusyNodeIds] = useState<Set<string>>(() => new Set());
+  const [mediaReplaceError, setMediaReplaceError] = useState<{ nodeId: string; message: string } | null>(null);
   const [toolNotice, setToolNotice] = useState<string | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
+  const replaceMediaRef = useRef<HTMLInputElement>(null);
   const editorRegionRef = useRef<HTMLElement>(null);
   const addTriggerRef = useRef<HTMLButtonElement>(null);
   const assetLibraryTriggerRef = useRef<HTMLButtonElement>(null);
@@ -190,6 +201,7 @@ function CanvasEditorInner({
   const libraryInsertInFlight = useRef(false);
   const libraryInsertCommand = useRef<Promise<void> | null>(null);
   const mediaOperationInFlight = useRef(false);
+  const documentCommandInFlight = useRef(false);
   const toolNoticeTimer = useRef<number | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
@@ -222,6 +234,9 @@ function CanvasEditorInner({
     setMediaOperation(null);
     setMediaOperationBusy(false);
     setMediaOperationError(null);
+    setMediaReplaceTarget(null);
+    setMediaReplaceBusyNodeIds(new Set());
+    setMediaReplaceError(null);
     setToolNotice(null);
     if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
     flowNodeCache.current.clear();
@@ -232,6 +247,7 @@ function CanvasEditorInner({
     setDirtySignal(0);
     serverRevision.current = 0;
     runSubmissionInFlight.current = false;
+    documentCommandInFlight.current = false;
     Promise.all([
       listCanvasProjects(),
       getCanvasDocument(projectId),
@@ -454,7 +470,7 @@ function CanvasEditorInner({
     : null;
 
   const flushSave = useCallback(function drainSaveQueue(): Promise<void> {
-    if (runSubmissionInFlight.current || libraryInsertInFlight.current) return Promise.resolve();
+    if (runSubmissionInFlight.current || libraryInsertInFlight.current || documentCommandInFlight.current) return Promise.resolve();
     if (saveInFlight.current) {
       return saveInFlight.current.then(() => saveQueued.current ? drainSaveQueue() : undefined);
     }
@@ -512,6 +528,10 @@ function CanvasEditorInner({
   }, [dirtySignal, flushSave]);
 
   const persistNow = useCallback(async (): Promise<boolean> => {
+    if (runSubmissionInFlight.current || documentCommandInFlight.current) {
+      setError('画布命令正在提交，请等待完成后再离开或执行其他操作。');
+      return false;
+    }
     if (libraryInsertCommand.current) await libraryInsertCommand.current;
     if (latestDocument.current && dirtyVersion.current > 0) {
       saveQueued.current = latestDocument.current;
@@ -548,13 +568,14 @@ function CanvasEditorInner({
       const selected = selectedNodeIds.has(node.id);
       const cached = flowNodeCache.current.get(node.id);
       if (cached?.node === node && cached.selected === selected) return cached.flowNode;
+      const renderedSize = canvasNodeRenderedSize(node, document?.content_versions ?? {});
       const flowNode: FlowNode = {
         id: node.id,
         type: 'canvasNode',
         position: node.position,
         style: {
-          width: node.size?.width ?? (node.type === 'text' ? 256 : 320),
-          height: node.size?.height ?? (node.type === 'text' ? 144 : 176),
+          width: renderedSize.width,
+          height: renderedSize.height,
           zIndex: node.z_index,
         },
         selected,
@@ -567,7 +588,7 @@ function CanvasEditorInner({
       if (!activeIds.has(id)) flowNodeCache.current.delete(id);
     }
     return next;
-  }, [document?.nodes, selectedNodeIds]);
+  }, [document?.content_versions, document?.nodes, selectedNodeIds]);
 
   const flowEdges = useMemo(() => (document?.connections ?? []).map(connection => ({
     id: connection.id,
@@ -1223,6 +1244,170 @@ function CanvasEditorInner({
     }
   }, [announceToolNotice, jobsByResultNodeId]);
 
+  const mergeMediaPointerCommand = useCallback((
+    remote: CanvasDocument,
+    nodeId: string,
+    dirtyAtCommand: number,
+    beforeCommand: CanvasDocument,
+  ) => {
+    const concurrent = latestDocument.current ?? remote;
+    const remoteNode = remote.nodes.find(node => node.id === nodeId);
+    const beforeNode = beforeCommand.nodes.find(node => node.id === nodeId);
+    const concurrentNode = concurrent.nodes.find(node => node.id === nodeId);
+    const beforePointer = beforeNode && isContentNode(beforeNode)
+      ? beforeNode.data.current_version_id
+      : null;
+    const remotePointer = remoteNode && isContentNode(remoteNode)
+      ? remoteNode.data.current_version_id
+      : null;
+    const concurrentPointer = concurrentNode && isContentNode(concurrentNode)
+      ? concurrentNode.data.current_version_id
+      : null;
+    const pointerWasSuperseded = (
+      !remotePointer
+      || !concurrentNode
+      || !isContentNode(concurrentNode)
+      || (concurrentPointer !== beforePointer && concurrentPointer !== remotePointer)
+    );
+    const shouldApplyPointer = !pointerWasSuperseded && concurrentPointer !== remotePointer;
+    const mergedNodes = concurrent.nodes.map(node => {
+      if (!shouldApplyPointer || node.id !== nodeId || !isContentNode(node)) return node;
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          current_version_id: remotePointer,
+        },
+      } as CanvasContentNode;
+    });
+    const authoritativeRevision = Math.max(serverRevision.current, remote.revision);
+    const merged: CanvasDocument = {
+      ...concurrent,
+      revision: authoritativeRevision,
+      updated_at: remote.revision >= serverRevision.current ? remote.updated_at : concurrent.updated_at,
+      nodes: mergedNodes,
+      content_versions: { ...remote.content_versions, ...concurrent.content_versions },
+    };
+    if (!pointerWasSuperseded) {
+      const historySnapshot: CanvasDocument = concurrentPointer === remotePointer
+        ? {
+            ...concurrent,
+            nodes: concurrent.nodes.map(node => (
+              node.id === nodeId && isContentNode(node)
+                ? { ...node, data: { ...node.data, current_version_id: beforePointer } } as CanvasContentNode
+                : node
+            )),
+          }
+        : concurrent;
+      history.current.past.push(historySnapshot);
+      history.current.past = history.current.past.slice(-50);
+      history.current.future = [];
+    }
+    serverRevision.current = authoritativeRevision;
+    latestDocument.current = merged;
+    if (dirtyVersion.current > dirtyAtCommand) {
+      saveQueued.current = merged;
+      setSaveState('saving');
+    } else {
+      saveQueued.current = null;
+      setSaveState('saved');
+    }
+    flowNodeCache.current.clear();
+    setDocument(merged);
+    return pointerWasSuperseded ? 'superseded' as const : 'applied' as const;
+  }, []);
+
+  const replaceMedia = useCallback((node: CanvasContentNode) => {
+    const versionId = node.data.current_version_id;
+    const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
+    if (!version || version.kind === 'text' || version.kind !== node.type) {
+      setMediaReplaceError({ nodeId: node.id, message: '这个节点还没有可替换的媒体内容。' });
+      return;
+    }
+    setMediaReplaceError(null);
+    setMediaReplaceTarget({ nodeId: node.id, title: node.title, kind: version.kind });
+    requestAnimationFrame(() => {
+      if (!replaceMediaRef.current) return;
+      replaceMediaRef.current.value = '';
+      replaceMediaRef.current.click();
+    });
+  }, []);
+
+  const handleMediaReplace = useCallback(async (file: File, target: MediaReplaceTarget) => {
+    if (documentCommandInFlight.current) {
+      setMediaReplaceError({ nodeId: target.nodeId, message: '另一个媒体操作正在处理，请稍后重试。' });
+      return;
+    }
+    setMediaReplaceBusyNodeIds(current => new Set(current).add(target.nodeId));
+    setMediaReplaceError(null);
+    try {
+      if (!await persistNow()) {
+        setMediaReplaceError({ nodeId: target.nodeId, message: '自动保存失败，媒体尚未替换。请检查服务后重试。' });
+        return;
+      }
+      const before = latestDocument.current;
+      if (!before) return;
+      const dirtyAtCommand = dirtyVersion.current;
+      documentCommandInFlight.current = true;
+      const uploaded = await replaceCanvasNodeMedia(
+        projectId,
+        target.nodeId,
+        file,
+        serverRevision.current,
+      );
+      const mergeStatus = mergeMediaPointerCommand(
+        uploaded.document,
+        target.nodeId,
+        dirtyAtCommand,
+        before,
+      );
+      setSelectedConnectionIds(new Set());
+      setSelectedNodeIds(new Set([target.nodeId]));
+      announceToolNotice(mergeStatus === 'applied'
+        ? `已替换“${target.title}”，旧版本仍可撤销恢复`
+        : `“${target.title}”已有更新内容；替换文件已保留为历史版本`);
+      requestAnimationFrame(() => documentQueryNode(target.nodeId)?.focus());
+    } catch (replaceError) {
+      setMediaReplaceError({ nodeId: target.nodeId, message: (replaceError as Error).message });
+    } finally {
+      documentCommandInFlight.current = false;
+      setMediaReplaceBusyNodeIds(current => {
+        const next = new Set(current);
+        next.delete(target.nodeId);
+        return next;
+      });
+      setMediaReplaceTarget(null);
+      if (saveQueued.current) void flushSave().catch(() => {
+        setError('替换已完成，但并发编辑尚未保存。请检查服务后重试。');
+      });
+    }
+  }, [announceToolNotice, flushSave, mergeMediaPointerCommand, persistNow, projectId]);
+
+  const toggleFreeResize = useCallback((node: CanvasContentNode) => {
+    if (node.type !== 'image') return;
+    const versionId = node.data.current_version_id;
+    const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
+    const locking = node.data.display.free_resize;
+    commit(current => ({
+      ...current,
+      nodes: current.nodes.map(candidate => {
+        if (candidate.id !== node.id || candidate.type !== 'image') return candidate;
+        return {
+          ...candidate,
+          size: version?.kind === 'image'
+            ? sizeLockedToVersion(candidate.size, version)
+            : candidate.size,
+          data: {
+            ...candidate.data,
+            display: { ...candidate.data.display, free_resize: !candidate.data.display.free_resize },
+          },
+        };
+      }),
+    }), true);
+    flowNodeCache.current.delete(node.id);
+    announceToolNotice(locking ? `已锁定“${node.title}”的图片比例` : `已开启“${node.title}”自由缩放`);
+  }, [announceToolNotice, commit]);
+
   const openMediaOperation = useCallback((node: CanvasContentNode, tool: CanvasMediaTool) => {
     const versionId = node.data.current_version_id;
     const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
@@ -1237,6 +1422,10 @@ function CanvasEditorInner({
 
   const submitMediaOperation = useCallback(async (operation: CanvasMediaOperation) => {
     if (!mediaOperation || mediaOperationInFlight.current) return;
+    if (documentCommandInFlight.current) {
+      setMediaOperationError('另一个媒体操作正在处理，请稍后重试。');
+      return;
+    }
     mediaOperationInFlight.current = true;
     setMediaOperationBusy(true);
     setMediaOperationError(null);
@@ -1247,6 +1436,8 @@ function CanvasEditorInner({
       }
       const before = latestDocument.current;
       if (!before) return;
+      const dirtyAtCommand = dirtyVersion.current;
+      documentCommandInFlight.current = true;
       const result = await runCanvasMediaOperation(
         projectId,
         mediaOperation.nodeId,
@@ -1254,12 +1445,33 @@ function CanvasEditorInner({
         serverRevision.current,
         operation,
       );
-      history.current.past.push({ ...before, revision: serverRevision.current });
+      const concurrent = latestDocument.current ?? before;
+      const knownNodeIds = new Set(concurrent.nodes.map(node => node.id));
+      const knownConnectionIds = new Set(concurrent.connections.map(connection => connection.id));
+      const createdNodes = result.document.nodes.filter(node => (
+        result.created_node_ids.includes(node.id) && !knownNodeIds.has(node.id)
+      ));
+      const createdConnections = result.document.connections.filter(connection => (
+        connection.role === 'derivation'
+        && result.created_node_ids.includes(connection.target_node_id)
+        && !knownConnectionIds.has(connection.id)
+      ));
+      const merged: CanvasDocument = {
+        ...concurrent,
+        revision: result.document.revision,
+        updated_at: result.document.updated_at,
+        nodes: [...concurrent.nodes, ...createdNodes],
+        connections: [...concurrent.connections, ...createdConnections],
+        content_versions: { ...result.document.content_versions, ...concurrent.content_versions },
+      };
+      history.current.past.push(concurrent);
       history.current.past = history.current.past.slice(-50);
       history.current.future = [];
       serverRevision.current = result.document.revision;
-      latestDocument.current = result.document;
-      setDocument(result.document);
+      latestDocument.current = merged;
+      if (dirtyVersion.current > dirtyAtCommand) saveQueued.current = merged;
+      flowNodeCache.current.clear();
+      setDocument(merged);
       setSelectedConnectionIds(new Set());
       setSelectedNodeIds(new Set(result.created_node_ids));
       setMediaOperation(null);
@@ -1272,10 +1484,14 @@ function CanvasEditorInner({
     } catch (operationError) {
       setMediaOperationError((operationError as Error).message);
     } finally {
+      documentCommandInFlight.current = false;
       mediaOperationInFlight.current = false;
       setMediaOperationBusy(false);
+      if (saveQueued.current) void flushSave().catch(() => {
+        setError('图片处理已完成，但并发编辑尚未保存。请检查服务后重试。');
+      });
     }
-  }, [announceToolNotice, mediaOperation, persistNow, projectId]);
+  }, [announceToolNotice, flushSave, mediaOperation, persistNow, projectId]);
 
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     projectId,
@@ -1284,6 +1500,8 @@ function CanvasEditorInner({
     jobsByRunId,
     jobsByResultNodeId,
     submittingNodeIds,
+    mediaReplaceBusyNodeIds,
+    mediaReplaceError,
     libraryBusy,
     selectNode: selectOnlyNode,
     previewContent,
@@ -1296,6 +1514,8 @@ function CanvasEditorInner({
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
     copyPrompt,
+    replaceMedia,
+    toggleFreeResize,
     openMediaOperation,
     deleteNode,
   }), [
@@ -1308,15 +1528,19 @@ function CanvasEditorInner({
     jobsByRunId,
     keys,
     libraryBusy,
+    mediaReplaceBusyNodeIds,
+    mediaReplaceError,
     openMediaOperation,
     previewContent,
     projectId,
     recordHistorySnapshot,
+    replaceMedia,
     retryRun,
     selectCandidate,
     selectOnlyNode,
     submitRun,
     submittingNodeIds,
+    toggleFreeResize,
     updateNode,
     updateText,
   ]);
@@ -1419,6 +1643,20 @@ function CanvasEditorInner({
             </div>
           )}
           <input ref={uploadRef} type="file" className="sr-only" accept="image/*,video/*,audio/*" onChange={event => { const file = event.target.files?.[0]; if (file) void handleUpload(file); event.target.value = ''; }} />
+          <input
+            ref={replaceMediaRef}
+            type="file"
+            className="sr-only"
+            aria-label="选择替换媒体"
+            accept={mediaReplaceTarget ? replacementAccept(mediaReplaceTarget.kind) : undefined}
+            onChange={event => {
+              const file = event.target.files?.[0];
+              const target = mediaReplaceTarget;
+              if (file && target) void handleMediaReplace(file, target);
+              else setMediaReplaceTarget(null);
+              event.target.value = '';
+            }}
+          />
         </div>
 
         {createMenu && (
@@ -1484,6 +1722,14 @@ function CanvasEditorInner({
             onCopyPrompt={copyablePromptForNode(selectedContentNode, jobsByResultNodeId)
               ? () => void copyPrompt(selectedContentNode)
               : undefined}
+            onReplaceMedia={selectedContentNode.data.current_version_id
+              ? () => replaceMedia(selectedContentNode)
+              : undefined}
+            onToggleFreeResize={selectedContentNode.type === 'image'
+              && selectedContentNode.data.current_version_id
+              ? () => toggleFreeResize(selectedContentNode)
+              : undefined}
+            replaceMediaBusy={mediaReplaceBusyNodeIds.has(selectedContentNode.id)}
             onCrop={() => openMediaOperation(selectedContentNode, 'crop')}
             onSplit={() => openMediaOperation(selectedContentNode, 'split')}
             onUpscale={() => openMediaOperation(selectedContentNode, 'upscale')}
@@ -1738,6 +1984,49 @@ function nextBackground(background: CanvasDocument['settings']['background']): C
   if (background === 'none') return 'dots';
   if (background === 'dots') return 'lines';
   return 'none';
+}
+
+function replacementAccept(kind: MediaReplaceTarget['kind']) {
+  if (kind === 'image') return '.png,.jpg,.jpeg,.webp';
+  if (kind === 'video') return '.mp4,.webm,.mov';
+  return '.mp3,.wav,.m4a,.aac';
+}
+
+function canvasNodeRenderedSize(
+  node: CanvasNode,
+  versions: Readonly<Record<string, CanvasContentVersion>>,
+) {
+  if (node.type === 'text') return node.size ?? { width: 256, height: 144 };
+  if (node.type !== 'image' || node.data.display.free_resize || !node.data.current_version_id) {
+    return node.size ?? { width: 320, height: 176 };
+  }
+  const version = versions[node.data.current_version_id];
+  return version?.kind === 'image'
+    ? sizeLockedToVersion(node.size, version)
+    : node.size ?? { width: 320, height: 176 };
+}
+
+function sizeLockedToVersion(
+  current: CanvasNode['size'],
+  version: CanvasMediaVersion,
+) {
+  if (!version.width || !version.height) return current ?? { width: 320, height: 176 };
+  const ratio = version.width / version.height;
+  let width = Math.min(4000, Math.max(240, current?.width ?? 320));
+  let height = width / ratio;
+  if (height < 150) {
+    height = 150;
+    width = height * ratio;
+  }
+  if (height > 4000) {
+    height = 4000;
+    width = height * ratio;
+  }
+  if (width > 4000) {
+    width = 4000;
+    height = width / ratio;
+  }
+  return { width: Math.round(width), height: Math.round(height) };
 }
 
 function makeId(prefix: string) {

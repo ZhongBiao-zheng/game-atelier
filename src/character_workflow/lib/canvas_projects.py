@@ -6,16 +6,18 @@ import hashlib
 import re
 import secrets
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 
+from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
 from character_workflow.lib.file_lock import file_lock
-from character_workflow.lib.job_runner import image_dimensions_from_bytes
 from character_workflow.lib.jobs import read_job
 from character_workflow.lib.schemas import (
+    CanvasAudioNode,
     CanvasDerivationConnection,
     CanvasDocument,
     CanvasImageNode,
@@ -26,6 +28,7 @@ from character_workflow.lib.schemas import (
     CanvasProjectCover,
     CanvasProjectSummary,
     CanvasUploadOrigin,
+    CanvasVideoNode,
     RevisionedSidecar,
 )
 
@@ -46,6 +49,15 @@ _MEDIA_MIME = {
     ".aac": "audio/aac",
     ".ogg": "audio/ogg",
 }
+
+
+class CanvasMediaReplaceError(Exception):
+    """Expected, user-facing rejection from the media replacement command."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
 
 def _sniff_media_mime(body: bytes) -> str | None:
@@ -304,49 +316,145 @@ def save_canvas_upload(
         current = _read_canvas_document_unlocked(project_id)
         if current.revision != expected_revision:
             raise RuntimeError(f"revision_conflict:{current.revision}")
-        upload_id = secrets.token_hex(16)
-        version_id = f"version-{secrets.token_hex(12)}"
-        target = canvas_project_dir(project_id) / "uploads" / f"{upload_id}{ext}"
         timestamp = _now()
-        detected_mime = _sniff_media_mime(body)
-        if detected_mime is None or detected_mime != _MEDIA_MIME[ext]:
-            raise ValueError("canvas upload content does not match its file extension")
-        width: int | None = None
-        height: int | None = None
-        if media_kind == "image":
-            dimensions = image_dimensions_from_bytes(body)
-            if dimensions is None:
-                raise ValueError("canvas image bytes do not match a supported image format")
-            width, height = dimensions
-        version = CanvasMediaVersion(
-            version_id=version_id,
-            created_at=timestamp,
-            sha256=hashlib.sha256(body).hexdigest(),
-            origin=CanvasUploadOrigin(kind="upload", upload_id=upload_id),
-            kind=media_kind,
-            path=target.relative_to(canvas_project_dir(project_id)).as_posix(),
-            mime_type=detected_mime,
-            bytes=len(body),
-            width=width,
-            height=height,
-        )
+        version, target = _new_upload_version(project_id, ext, body, media_kind, timestamp)
         updated = current.model_copy(update={
             "revision": current.revision + 1,
             "updated_at": timestamp,
-            "content_versions": {**current.content_versions, version_id: version},
+            "content_versions": {**current.content_versions, version.version_id: version},
         })
-        try:
-            atomic_write_bytes(target, body)
-            atomic_write_json(
-                _project_path(project_id),
-                project.model_copy(update={"updated_at": timestamp}).model_dump(mode="json"),
-            )
-            # canvas.json 是命令提交点；它最后落盘，避免出现引用尚未登记文件的版本。
-            atomic_write_json(_document_path(project_id), updated.model_dump(mode="json"))
-        except BaseException:
-            target.unlink(missing_ok=True)
-            raise
+        _commit_canvas_upload(project_id, project, updated, target, body, timestamp)
         return version, updated, _display_filename(raw_name)
+
+
+def replace_canvas_node_media(
+    project_id: str,
+    node_id: str,
+    raw_name: str,
+    ext: str,
+    body: bytes,
+    media_kind: str,
+    expected_revision: int,
+) -> tuple[CanvasMediaVersion, CanvasDocument, str]:
+    """Create an immutable upload version and point one same-kind media node at it."""
+    with file_lock(_canvas_lock_path(project_id)):
+        _recover_canvas_transactions_unlocked(project_id)
+        project = read_canvas_project(project_id)
+        current = _read_canvas_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
+
+        node = next((candidate for candidate in current.nodes if candidate.id == node_id), None)
+        if not isinstance(node, (CanvasImageNode, CanvasVideoNode, CanvasAudioNode)):
+            raise CanvasMediaReplaceError(
+                "canvas_media_node_missing",
+                "找不到可替换的媒体节点。",
+            )
+        current_version_id = node.data.current_version_id
+        current_version = (
+            current.content_versions.get(current_version_id) if current_version_id else None
+        )
+        if not isinstance(current_version, CanvasMediaVersion):
+            raise CanvasMediaReplaceError(
+                "canvas_media_node_missing",
+                "这个节点还没有可替换的媒体内容。",
+            )
+        if current_version.kind != node.type or media_kind != node.type:
+            raise CanvasMediaReplaceError(
+                "canvas_media_replace_kind_mismatch",
+                "替换文件必须与节点当前的媒体类型一致。",
+            )
+
+        timestamp = _now()
+        try:
+            version, target = _new_upload_version(
+                project_id, ext, body, media_kind, timestamp
+            )
+        except ValueError as error:
+            raise CanvasMediaReplaceError(
+                "canvas_media_decode_failed",
+                "文件内容与扩展名不匹配，或媒体格式无法识别。",
+            ) from error
+
+        replaced_node = node.model_copy(update={
+            "data": node.data.model_copy(update={"current_version_id": version.version_id}),
+        })
+        updated = current.model_copy(update={
+            "revision": current.revision + 1,
+            "updated_at": timestamp,
+            "nodes": [replaced_node if candidate.id == node_id else candidate for candidate in current.nodes],
+            "content_versions": {**current.content_versions, version.version_id: version},
+        })
+        _commit_canvas_upload(project_id, project, updated, target, body, timestamp)
+        return version, updated, _display_filename(raw_name)
+
+
+def _new_upload_version(
+    project_id: str,
+    ext: str,
+    body: bytes,
+    media_kind: str,
+    timestamp: str,
+) -> tuple[CanvasMediaVersion, Path]:
+    upload_id = secrets.token_hex(16)
+    target = canvas_project_dir(project_id) / "uploads" / f"{upload_id}{ext}"
+    detected_mime = _sniff_media_mime(body)
+    if detected_mime is None or detected_mime != _MEDIA_MIME[ext]:
+        raise ValueError("canvas upload content does not match its file extension")
+    width: int | None = None
+    height: int | None = None
+    if media_kind == "image":
+        width, height = _display_image_dimensions(body)
+    version = CanvasMediaVersion(
+        version_id=f"version-{secrets.token_hex(12)}",
+        created_at=timestamp,
+        sha256=hashlib.sha256(body).hexdigest(),
+        origin=CanvasUploadOrigin(kind="upload", upload_id=upload_id),
+        kind=media_kind,
+        path=target.relative_to(canvas_project_dir(project_id)).as_posix(),
+        mime_type=detected_mime,
+        bytes=len(body),
+        width=width,
+        height=height,
+    )
+    return version, target
+
+
+def _commit_canvas_upload(
+    project_id: str,
+    project: CanvasProject,
+    document: CanvasDocument,
+    target: Path,
+    body: bytes,
+    timestamp: str,
+) -> None:
+    """Commit upload bytes and metadata before the canvas document reference."""
+    try:
+        atomic_write_bytes(target, body)
+        atomic_write_json(
+            _project_path(project_id),
+            project.model_copy(update={"updated_at": timestamp}).model_dump(mode="json"),
+        )
+        # canvas.json is the command commit point; referenced bytes and metadata land first.
+        atomic_write_json(_document_path(project_id), document.model_dump(mode="json"))
+    except BaseException:
+        target.unlink(missing_ok=True)
+        raise
+
+
+def _display_image_dimensions(body: bytes) -> tuple[int, int]:
+    """Read the browser-visible size, including EXIF rotations, without rewriting upload bytes."""
+    try:
+        with Image.open(BytesIO(body)) as image:
+            width, height = image.size
+            orientation = image.getexif().get(274, 1)
+    except (OSError, UnidentifiedImageError, ValueError) as error:
+        raise ValueError("canvas image bytes do not match a supported image format") from error
+    if orientation in {5, 6, 7, 8}:
+        width, height = height, width
+    if width <= 0 or height <= 0:
+        raise ValueError("canvas image dimensions are invalid")
+    return width, height
 
 
 def _display_filename(raw_name: str) -> str:

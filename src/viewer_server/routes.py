@@ -519,13 +519,11 @@ def _size_reject_detail(raw_name: str, body: bytes, limit: int) -> str:
     )
 
 
-@router.post("/uploads")
-async def post_upload(file: UploadFile = File(...)) -> dict:
-    """画师在 Web 上传源图 → .runtime/uploads/<uuid><ext>。
-    返回的 path 可直接拼到 `/game-atelier:promo <id> --upload <path>` 复制命令里，
-    Skill 拿到后将其挪到 characters/<id>/source/。
-    """
-    raw_name = file.filename or "upload"
+async def _read_media_upload(
+    file: UploadFile,
+    fallback_name: str = "upload",
+) -> tuple[str, str, bytes, Literal["image", "video", "audio"]]:
+    raw_name = file.filename or fallback_name
     ext = Path(raw_name).suffix.lower()
     if ext not in _UPLOAD_ALLOWED_EXTS:
         raise HTTPException(422, detail=_ext_reject_detail(raw_name, ext, _UPLOAD_ALLOWED_EXTS))
@@ -533,6 +531,19 @@ async def post_upload(file: UploadFile = File(...)) -> dict:
     limit = _upload_max_bytes(ext)
     if len(body) > limit:
         raise HTTPException(413, detail=_size_reject_detail(raw_name, body, limit))
+    media_kind: Literal["image", "video", "audio"] = (
+        "image" if ext in _IMAGE_UPLOAD_EXTS else "video" if ext in _VIDEO_UPLOAD_EXTS else "audio"
+    )
+    return raw_name, ext, body, media_kind
+
+
+@router.post("/uploads")
+async def post_upload(file: UploadFile = File(...)) -> dict:
+    """画师在 Web 上传源图 → .runtime/uploads/<uuid><ext>。
+    返回的 path 可直接拼到 `/game-atelier:promo <id> --upload <path>` 复制命令里，
+    Skill 拿到后将其挪到 characters/<id>/source/。
+    """
+    raw_name, ext, body, _media_kind = await _read_media_upload(file)
     uploads = _runtime() / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
     name = f"{uuid.uuid4().hex}{ext}"
@@ -2454,17 +2465,7 @@ async def post_canvas_upload(
     expected_revision: int = Form(...),
 ) -> CanvasUploadResponse:
     from character_workflow.lib.canvas_projects import save_canvas_upload
-    raw_name = file.filename or "upload"
-    ext = Path(raw_name).suffix.lower()
-    if ext not in _UPLOAD_ALLOWED_EXTS:
-        raise HTTPException(422, detail=_ext_reject_detail(raw_name, ext, _UPLOAD_ALLOWED_EXTS))
-    body = await file.read()
-    limit = _upload_max_bytes(ext)
-    if len(body) > limit:
-        raise HTTPException(413, detail=_size_reject_detail(raw_name, body, limit))
-    media_kind: Literal["image", "video", "audio"] = (
-        "image" if ext in _IMAGE_UPLOAD_EXTS else "video" if ext in _VIDEO_UPLOAD_EXTS else "audio"
-    )
+    raw_name, ext, body, media_kind = await _read_media_upload(file)
     try:
         version, document, filename = save_canvas_upload(
             project_id, raw_name, ext, body, media_kind, expected_revision
@@ -2481,6 +2482,61 @@ async def post_canvas_upload(
         raise
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
+    return CanvasUploadResponse(version=version, filename=filename, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/nodes/{node_id}/replace",
+    response_model=CanvasUploadResponse,
+    status_code=201,
+)
+async def post_canvas_node_media_replace(
+    project_id: str,
+    node_id: str,
+    file: UploadFile = File(...),
+    expected_revision: int = Form(...),
+) -> CanvasUploadResponse:
+    from character_workflow.lib.canvas_projects import (
+        CanvasMediaReplaceError,
+        replace_canvas_node_media,
+    )
+
+    raw_name, ext, body, media_kind = await _read_media_upload(file, "replacement")
+    try:
+        version, document, filename = replace_canvas_node_media(
+            project_id,
+            node_id,
+            raw_name,
+            ext,
+            body,
+            media_kind,
+            expected_revision,
+        )
+    except CanvasMediaReplaceError as error:
+        status = 404 if error.code == "canvas_media_node_missing" else 422
+        raise HTTPException(
+            status,
+            detail={"code": error.code, "message": error.message},
+        ) from error
+    except KeyError:
+        raise HTTPException(404, detail={
+            "code": "canvas_media_node_missing",
+            "message": "找不到这个画布项目或媒体节点。",
+        }) from None
+    except RuntimeError as error:
+        if str(error).startswith("revision_conflict:"):
+            current_revision = int(str(error).split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "canvas_media_revision_conflict",
+                "message": "画布已在别处更新，请刷新后重试。",
+                "current_revision": current_revision,
+            }) from None
+        raise
+    except ValueError as error:
+        raise HTTPException(422, detail={
+            "code": "canvas_media_decode_failed",
+            "message": "文件内容与扩展名不匹配，或媒体格式无法识别。",
+        }) from error
     return CanvasUploadResponse(version=version, filename=filename, document=document)
 
 

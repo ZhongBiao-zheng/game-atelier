@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileVideo, Grid2X2, Library, LoaderCircle, Plus, RotateCcw, Sparkles, Square, Trash2, Type, ZoomIn } from 'lucide-react';
+import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, Plus, RotateCcw, Sparkles, Square, Trash2, Type, Unlock, ZoomIn } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -32,6 +32,8 @@ export interface CanvasNodeContextValue {
   jobsByRunId: ReadonlyMap<string, Job>;
   jobsByResultNodeId: ReadonlyMap<string, Job[]>;
   submittingNodeIds: ReadonlySet<string>;
+  mediaReplaceBusyNodeIds: ReadonlySet<string>;
+  mediaReplaceError: { nodeId: string; message: string } | null;
   libraryBusy: boolean;
   selectNode: (id: string) => void;
   previewContent: (id: string, title: string, nodeId: string) => void;
@@ -44,6 +46,8 @@ export interface CanvasNodeContextValue {
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
+  replaceMedia: (node: CanvasContentNode) => void;
+  toggleFreeResize: (node: CanvasContentNode) => void;
   openMediaOperation: (node: CanvasContentNode, tool: CanvasMediaTool) => void;
   deleteNode: (id: string) => void;
 }
@@ -61,11 +65,14 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     context.jobsByResultNodeId,
   );
   const compactMediaTools = (node.size?.width ?? 320) < 480;
+  const replacingMedia = context.mediaReplaceBusyNodeIds.has(node.id);
+  const imageResizeUnlocked = node.type === 'image' && node.data.display.free_resize;
 
   return (
     <div className="canvas-node-shell group relative h-full w-full overflow-visible" data-selected={selected ? 'true' : 'false'}>
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !replacingMedia}
+        keepAspectRatio={node.type === 'image' && !node.data.display.free_resize}
         minWidth={node.type === 'text' ? 220 : 240}
         minHeight={node.type === 'text' ? 120 : 150}
         color="var(--primary)"
@@ -136,6 +143,15 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               <ClipboardCopy className="size-3.5" aria-hidden="true" />
             </button>
           )}
+          {content && content.kind !== 'text' && providesContent(node) && (!compactMediaTools || node.type !== 'image') && (
+            <MediaToolButton
+              label={`替换 ${node.title}`}
+              disabled={replacingMedia}
+              onClick={() => context.replaceMedia(node)}
+            >
+              {replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}
+            </MediaToolButton>
+          )}
           {node.type === 'image' && content?.kind === 'image' && (
             compactMediaTools ? (
               <DropdownMenu>
@@ -151,16 +167,19 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" onClick={event => event.stopPropagation()}>
-                  <MediaToolMenuItem label={`裁剪 ${node.title}`} onSelect={() => context.openMediaOperation(node, 'crop')}><Crop /></MediaToolMenuItem>
-                  <MediaToolMenuItem label={`切分 ${node.title}`} onSelect={() => context.openMediaOperation(node, 'split')}><Grid2X2 /></MediaToolMenuItem>
-                  <MediaToolMenuItem label={`本地放大 ${node.title}`} onSelect={() => context.openMediaOperation(node, 'upscale')}><ZoomIn /></MediaToolMenuItem>
+                  <MediaToolMenuItem label={`替换 ${node.title}`} disabled={replacingMedia} onSelect={() => context.replaceMedia(node)}>{replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}</MediaToolMenuItem>
+                  <MediaToolMenuItem label={imageResizeUnlocked ? `锁定 ${node.title} 比例` : `自由缩放 ${node.title}`} disabled={replacingMedia} onSelect={() => context.toggleFreeResize(node)}>{imageResizeUnlocked ? <Lock /> : <Unlock />}</MediaToolMenuItem>
+                  <MediaToolMenuItem label={`裁剪 ${node.title}`} disabled={replacingMedia} onSelect={() => context.openMediaOperation(node, 'crop')}><Crop /></MediaToolMenuItem>
+                  <MediaToolMenuItem label={`切分 ${node.title}`} disabled={replacingMedia} onSelect={() => context.openMediaOperation(node, 'split')}><Grid2X2 /></MediaToolMenuItem>
+                  <MediaToolMenuItem label={`本地放大 ${node.title}`} disabled={replacingMedia} onSelect={() => context.openMediaOperation(node, 'upscale')}><ZoomIn /></MediaToolMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
               <>
-                <MediaToolButton label={`裁剪 ${node.title}`} onClick={() => context.openMediaOperation(node, 'crop')}><Crop /></MediaToolButton>
-                <MediaToolButton label={`切分 ${node.title}`} onClick={() => context.openMediaOperation(node, 'split')}><Grid2X2 /></MediaToolButton>
-                <MediaToolButton label={`本地放大 ${node.title}`} onClick={() => context.openMediaOperation(node, 'upscale')}><ZoomIn /></MediaToolButton>
+                <MediaToolButton label={imageResizeUnlocked ? `锁定 ${node.title} 比例` : `自由缩放 ${node.title}`} disabled={replacingMedia} onClick={() => context.toggleFreeResize(node)}>{imageResizeUnlocked ? <Lock /> : <Unlock />}</MediaToolButton>
+                <MediaToolButton label={`裁剪 ${node.title}`} disabled={replacingMedia} onClick={() => context.openMediaOperation(node, 'crop')}><Crop /></MediaToolButton>
+                <MediaToolButton label={`切分 ${node.title}`} disabled={replacingMedia} onClick={() => context.openMediaOperation(node, 'split')}><Grid2X2 /></MediaToolButton>
+                <MediaToolButton label={`本地放大 ${node.title}`} disabled={replacingMedia} onClick={() => context.openMediaOperation(node, 'upscale')}><ZoomIn /></MediaToolButton>
               </>
             )
           )}
@@ -181,6 +200,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         data-canvas-node-id={node.id}
         role="button"
         tabIndex={0}
+        aria-busy={replacingMedia}
         aria-label={`选择节点 ${node.title}`}
         className={cn(
           'relative h-full overflow-hidden rounded-lg border bg-card/95 text-foreground transition-colors shell-glow',
@@ -202,6 +222,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           context.selectNode(node.id);
         }}
       >
+        {context.mediaReplaceError?.nodeId === node.id && (
+          <p role="alert" className="absolute inset-x-2 top-2 z-20 rounded-md border border-destructive/40 bg-card/95 px-2 py-1.5 text-xs text-destructive">
+            {context.mediaReplaceError.message}
+          </p>
+        )}
         <div className={cn('h-full bg-secondary/20', node.type === 'text' ? 'min-h-32' : 'min-h-44')}>
           {node.type === 'text' && (
             <p className="line-clamp-5 whitespace-pre-wrap p-3 text-sm leading-relaxed text-foreground">
@@ -594,10 +619,13 @@ export function CanvasInspector({
   onPreview,
   onSaveAsset,
   onCopyPrompt,
+  onReplaceMedia,
+  onToggleFreeResize,
   downloadHref,
   onCrop,
   onSplit,
   onUpscale,
+  replaceMediaBusy = false,
   saveAssetBusy = false,
 }: {
   node: CanvasContentNode;
@@ -611,18 +639,21 @@ export function CanvasInspector({
   onPreview?: () => void;
   onSaveAsset?: () => void;
   onCopyPrompt?: () => void;
+  onReplaceMedia?: () => void;
+  onToggleFreeResize?: () => void;
   downloadHref?: string;
   onCrop?: () => void;
   onSplit?: () => void;
   onUpscale?: () => void;
+  replaceMediaBusy?: boolean;
   saveAssetBusy?: boolean;
 }) {
   const content = contentForNode(node, contentVersions);
   return (
     <aside className="canvas-inspector-panel absolute inset-x-3 bottom-3 z-20 rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow md:bottom-auto md:left-auto md:right-4 md:top-20 md:w-72">
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-3 flex flex-col gap-2">
         <p className="truncate text-sm font-medium">{node.title}</p>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex flex-wrap items-center justify-end gap-1">
           {content && onPreview && (
             <Button variant="ghost" size="icon" aria-label={`查看 ${node.title} 详情`} onClick={onPreview}><Eye /></Button>
           )}
@@ -634,14 +665,30 @@ export function CanvasInspector({
           {onCopyPrompt && (
             <Button variant="ghost" size="icon" aria-label={`复制 ${node.title} 的生成提示词`} onClick={onCopyPrompt}><ClipboardCopy /></Button>
           )}
+          {content && content.kind !== 'text' && onReplaceMedia && (
+            <Button variant="ghost" size="icon" disabled={replaceMediaBusy} aria-label={`替换 ${node.title}`} onClick={onReplaceMedia}>
+              {replaceMediaBusy ? <LoaderCircle className="animate-spin" /> : <FileUp />}
+            </Button>
+          )}
+          {node.type === 'image' && content?.kind === 'image' && onToggleFreeResize && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={node.data.display.free_resize ? `锁定 ${node.title} 比例` : `自由缩放 ${node.title}`}
+              disabled={replaceMediaBusy}
+              onClick={onToggleFreeResize}
+            >
+              {node.data.display.free_resize ? <Lock /> : <Unlock />}
+            </Button>
+          )}
           {content?.kind === 'image' && onCrop && (
-            <Button variant="ghost" size="icon" aria-label={`裁剪 ${node.title}`} onClick={onCrop}><Crop /></Button>
+            <Button variant="ghost" size="icon" disabled={replaceMediaBusy} aria-label={`裁剪 ${node.title}`} onClick={onCrop}><Crop /></Button>
           )}
           {content?.kind === 'image' && onSplit && (
-            <Button variant="ghost" size="icon" aria-label={`切分 ${node.title}`} onClick={onSplit}><Grid2X2 /></Button>
+            <Button variant="ghost" size="icon" disabled={replaceMediaBusy} aria-label={`切分 ${node.title}`} onClick={onSplit}><Grid2X2 /></Button>
           )}
           {content?.kind === 'image' && onUpscale && (
-            <Button variant="ghost" size="icon" aria-label={`本地放大 ${node.title}`} onClick={onUpscale}><ZoomIn /></Button>
+            <Button variant="ghost" size="icon" disabled={replaceMediaBusy} aria-label={`本地放大 ${node.title}`} onClick={onUpscale}><ZoomIn /></Button>
           )}
           {content && onSaveAsset && (
             <Button variant="ghost" size="icon" disabled={saveAssetBusy} aria-label={`将 ${node.title} 存入资产库`} onClick={onSaveAsset}><Library /></Button>
@@ -696,13 +743,14 @@ export function ToolButton({ label, active, disabled, onClick, children, buttonR
   return <button ref={buttonRef} type="button" title={label} aria-label={label} aria-pressed={active} aria-expanded={expanded} aria-controls={controlsId} aria-haspopup={controlsId && popup ? popup : undefined} disabled={disabled} onClick={onClick} className={cn('grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-30', active && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground')}>{children}</button>;
 }
 
-function MediaToolButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+function MediaToolButton({ label, disabled = false, onClick, children }: { label: string; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
       title={label}
       aria-label={label}
-      className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100"
+      disabled={disabled}
+      className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30 group-focus-within:opacity-100 group-hover:opacity-100"
       onClick={event => {
         event.stopPropagation();
         onClick();
@@ -713,9 +761,9 @@ function MediaToolButton({ label, onClick, children }: { label: string; onClick:
   );
 }
 
-function MediaToolMenuItem({ label, onSelect, children }: { label: string; onSelect: () => void; children: React.ReactNode }) {
+function MediaToolMenuItem({ label, disabled = false, onSelect, children }: { label: string; disabled?: boolean; onSelect: () => void; children: React.ReactNode }) {
   return (
-    <DropdownMenuItem aria-label={label} onSelect={onSelect}>
+    <DropdownMenuItem aria-label={label} disabled={disabled} onSelect={onSelect}>
       <span aria-hidden="true" className="[&>svg]:size-4">{children}</span>
       {label}
     </DropdownMenuItem>

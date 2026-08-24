@@ -290,6 +290,22 @@ export async function uploadCanvasMedia(
   );
 }
 
+export async function replaceCanvasNodeMedia(
+  projectId: string,
+  nodeId: string,
+  file: File,
+  expectedRevision: number,
+): Promise<CanvasUpload> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('expected_revision', String(expectedRevision));
+  return requestJson<CanvasUpload>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(nodeId)}/replace`,
+    '替换画布媒体',
+    { method: 'POST', body: form },
+  );
+}
+
 export function canvasMediaUrl(
   projectId: string,
   versionId: string,

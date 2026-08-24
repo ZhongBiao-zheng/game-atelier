@@ -153,6 +153,13 @@ EXIF 方向与 64MP 上限，统一输出剥离元数据的 RGB/RGBA PNG；切�
 `code/message` 的结构化错误。产物移动前的资源错误保证零提交；移动后的错误返回事务待恢复语义，
 不谎报零变化，也不把 Pillow 或文件系统异常直接暴露为 500。
 
+`POST /canvas/projects/{id}/nodes/{node_id}/replace` 只允许已有 image/video/audio 节点用同模态文件替换。
+请求使用 multipart `file + expected_revision`；服务端校验真实 MIME、节点当前 Version 与 revision 后，创建
+新的不可变 upload Content Version，并只切换原节点 `current_version_id`。旧 Version 与字节继续保留，
+因此画布 undo/redo 只恢复指针，不重新上传。跨模态、伪后缀、空节点和 revision 冲突均为零写。
+图片的 `display.free_resize=false` 让 React Flow resize 保持当前 Version 宽高比；切换只更新节点显示
+状态，不修改 Content Version 的真实尺寸。
+
 项目包使用 `game-atelier-canvas-v1.zip`：`manifest.json` 对每个 metadata/blob 记录 SHA-256、字节数、
 MIME 与角色，项目内容放在 `projects/<package_project_id>/`，媒体放在
 `blobs/sha256/<first2>/<sha256>.<ext>`。导入先调用 `inspect` 完成路径、链接、重复条目、压缩比、配额、
