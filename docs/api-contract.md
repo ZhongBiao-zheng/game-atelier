@@ -143,8 +143,10 @@ Document；扩展名只作入口白名单，文件类型、MIME、摘要、大�
 修改快照、prompt 或参数。`POST /canvas/projects/{id}/runs` 只接受
 `surface_node_id / expected_revision / requested_count`；服务端从已保存 Draft、连接与 Content Version
 解析真实输入，冻结 `canvas_run.snapshot`，并用项目内短事务原子提交 Job、结果节点与 Derivation Connection。
-四模态均进入同一个 Job Runner：图片/视频沿用既有厂商协议，文本首版走 OpenAI-compatible
-`chat/completions`，音频首版走 OpenAI-compatible `audio/speech`；模型配置的 protocol 不匹配时明确
+四模态均进入同一个 Job Runner：图片/视频沿用既有厂商协议；文本只接受明确可执行的
+OpenAI-compatible `chat/completions` 或 `responses`，后者支持 `reasoning_effort`，其中 `auto` 只作为
+Draft 选择且冻结/请求时省略；音频只接受 OpenAI-compatible `audio/speech`，冻结并发送白名单内的
+voice/format、0.25–4 的 speed 与去除首尾空白后的非空 instructions。模型配置的 protocol 不匹配时明确
 拒绝，不做伪兼容。连接输入会先按 Prompt 内 `@[node:id]` 的出现顺序冻结，再补未提及连接，并在冻结前按
 模型/协议校验媒体类型和数量。Runner 完成后再次通过短事务登记输出 Content Version、candidate 状态与
 结果节点当前版本。批量候选逐个校验：全部成功为 `done`，部分成功为 `partial`，全部失败为 `failed`，

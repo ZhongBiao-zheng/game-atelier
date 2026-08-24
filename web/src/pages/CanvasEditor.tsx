@@ -156,8 +156,12 @@ import {
   canvasConnectionCreationCapabilities,
   canCreateCanvasInputConnection,
   closestCanvasConnectionEndpoint,
+  normalizeCanvasAudioParams,
   normalizeCanvasImageParams,
+  normalizeCanvasTextParams,
   normalizeCanvasVideoParams,
+  supportsCanvasAudioGeneration,
+  supportsCanvasTextGeneration,
   supportsCanvasVideoEdit,
 } from './canvasEditorModel';
 
@@ -1164,7 +1168,13 @@ function CanvasEditorInner({
 
   function addGenerationNode(kind: JobKind, menu: CreateMenuState | null = createMenu) {
     const key = firstKeyForKind(keys, kind);
-    const selectedModel = key?.models.find(item => modelModality(item, key) === kind);
+    const selectedModel = key?.models.find(item => (
+      modelModality(item, key) === kind
+      && (kind !== 'audio'
+        || supportsCanvasAudioGeneration(item.id, key.provider, item.protocol))
+      && (kind !== 'text'
+        || supportsCanvasTextGeneration(key.provider, item.protocol))
+    ));
     const model = selectedModel?.id ?? '';
     const now = new Date().toISOString();
     const draft = {
@@ -1187,8 +1197,13 @@ function CanvasEditorInner({
               { duration: 5, ratio: '16:9', resolution: '720p', generate_audio: true },
             )
           : kind === 'audio'
-            ? { voice: 'alloy', response_format: 'mp3', speed: 1 }
-            : { n: 1 },
+            ? normalizeCanvasAudioParams(
+                model,
+                key?.provider,
+                selectedModel?.protocol,
+                { voice: 'alloy', response_format: 'mp3', speed: 1 },
+              )
+            : normalizeCanvasTextParams(selectedModel?.protocol, { n: 1, reasoning_effort: 'auto' }),
       updated_at: now,
     };
     const base = {
@@ -3238,7 +3253,13 @@ function formatCanvasTimestamp(value: string) {
 }
 
 function firstKeyForKind(keys: KeyView[], kind: JobKind) {
-  return keys.find(key => key.models.some(model => modelModality(model, key) === kind));
+  return keys.find(key => key.models.some(model => (
+    modelModality(model, key) === kind
+    && (kind !== 'audio'
+      || supportsCanvasAudioGeneration(model.id, key.provider, model.protocol))
+    && (kind !== 'text'
+      || supportsCanvasTextGeneration(key.provider, model.protocol))
+  )));
 }
 
 function firstVideoEditModel(keys: KeyView[]) {

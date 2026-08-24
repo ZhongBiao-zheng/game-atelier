@@ -50,6 +50,9 @@ _MEDIA_MIME = {
     ".m4a": "audio/mp4",
     ".aac": "audio/aac",
     ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".opus": "audio/ogg",
+    ".pcm": "audio/pcm",
 }
 
 

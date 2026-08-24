@@ -4,7 +4,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { KeyView } from '@/api/keys';
 import { imageControlCaps } from '@/lib/imageControlCaps';
-import { CanvasCountSettings, CanvasImageSettings, CanvasModelPicker } from './CanvasGenerationControls';
+import {
+  CanvasAudioSettings,
+  CanvasImageSettings,
+  CanvasModelPicker,
+  CanvasTextSettings,
+} from './CanvasGenerationControls';
 
 function key(alias: string, provider: string, model: string): KeyView {
   return {
@@ -89,20 +94,84 @@ describe('CanvasModelPicker', () => {
   });
 });
 
-describe('CanvasCountSettings', () => {
-  it('returns focus after choosing a candidate count with Enter', async () => {
+describe('CanvasTextSettings', () => {
+  it('shows reasoning and candidate controls in an independent portal', async () => {
     const user = userEvent.setup();
-    const onChange = vi.fn();
-    render(<CanvasCountSettings value={2} onChange={onChange} />);
+    const onPatch = vi.fn();
+    render(<CanvasTextSettings supportsReasoning params={{ n: 2, reasoning_effort: 'auto' }} onPatch={onPatch} />);
 
     const trigger = screen.getByRole('button', { name: '文本生成设置' });
     await user.click(trigger);
-    await waitFor(() => expect(screen.getByRole('option', { name: '1 个' })).toHaveFocus());
-    await user.keyboard('{Enter}');
+    const popover = screen.getByTestId('canvas-text-settings-popover');
+    expect(popover).toHaveAttribute('data-toolbar-popover');
+    expect(screen.getByLabelText('选择推理强度')).toBeInTheDocument();
+    expect(screen.getByLabelText('选择文本生成数量')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: '极高' }));
+    expect(onPatch).toHaveBeenCalledWith({ reasoning_effort: 'xhigh' });
+  });
 
-    expect(onChange).toHaveBeenCalledWith(1);
-    expect(screen.queryByLabelText('选择文本生成数量')).not.toBeInTheDocument();
-    expect(trigger).toHaveFocus();
+  it('hides reasoning for chat-completions models', () => {
+    render(<CanvasTextSettings supportsReasoning={false} params={{ n: 1 }} onPatch={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '文本生成设置' }));
+    expect(screen.queryByLabelText('选择推理强度')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('选择文本生成数量')).toBeInTheDocument();
+  });
+});
+
+describe('CanvasAudioSettings', () => {
+  it('shows voice, format, speed and instructions in an independent portal', () => {
+    const onPatch = vi.fn();
+    render(<CanvasAudioSettings
+      params={{ voice: 'alloy', response_format: 'mp3', speed: 1 }}
+      onPatch={onPatch}
+    />);
+
+    fireEvent.click(screen.getByRole('button', { name: '音频生成设置' }));
+    const popover = screen.getByTestId('canvas-audio-settings-popover');
+    expect(popover).toHaveAttribute('data-toolbar-popover');
+    expect(screen.getByLabelText('选择音色')).toBeInTheDocument();
+    expect(screen.getByLabelText('选择音频格式')).toBeInTheDocument();
+    expect(screen.getByLabelText('自定义语速')).toHaveValue(1);
+    expect(screen.getByLabelText('朗读指令')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('option', { name: 'Marin' }));
+    fireEvent.click(screen.getByRole('option', { name: 'PCM' }));
+    fireEvent.click(screen.getByRole('option', { name: '1.25x' }));
+    expect(onPatch).toHaveBeenNthCalledWith(1, { voice: 'marin' });
+    expect(onPatch).toHaveBeenNthCalledWith(2, { response_format: 'pcm' });
+    expect(onPatch).toHaveBeenNthCalledWith(3, { speed: 1.25 });
+  });
+
+  it('commits clamped custom speed and trimmed instructions on blur', () => {
+    const onPatch = vi.fn();
+    render(<CanvasAudioSettings
+      params={{ voice: 'alloy', response_format: 'mp3', speed: 1 }}
+      onPatch={onPatch}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: '音频生成设置' }));
+    fireEvent.change(screen.getByLabelText('自定义语速'), { target: { value: '8' } });
+    fireEvent.blur(screen.getByLabelText('自定义语速'));
+    fireEvent.change(screen.getByLabelText('朗读指令'), { target: { value: '  温柔、克制  ' } });
+    fireEvent.blur(screen.getByLabelText('朗读指令'));
+    expect(onPatch).toHaveBeenCalledWith({ speed: 4 });
+    expect(onPatch).toHaveBeenCalledWith({ instructions: '温柔、克制' });
+  });
+
+  it('commits pending fields atomically before an outside click closes the portal', () => {
+    const onPatch = vi.fn();
+    render(<CanvasAudioSettings
+      params={{ voice: 'alloy', response_format: 'mp3', speed: 1 }}
+      onPatch={onPatch}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: '音频生成设置' }));
+    fireEvent.change(screen.getByLabelText('自定义语速'), { target: { value: '1.35' } });
+    fireEvent.change(screen.getByLabelText('朗读指令'), { target: { value: '  平静旁白  ' } });
+
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByTestId('canvas-audio-settings-popover')).not.toBeInTheDocument();
+    expect(onPatch).toHaveBeenCalledOnce();
+    expect(onPatch).toHaveBeenCalledWith({ speed: 1.35, instructions: '平静旁白' });
   });
 });
 

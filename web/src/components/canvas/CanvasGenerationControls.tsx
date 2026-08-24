@@ -1,12 +1,32 @@
-import { useRef, useState, type ReactNode } from 'react';
-import { Boxes, Check, Images, Settings2 } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Boxes, Check, Settings2 } from 'lucide-react';
 
 import type { KeyView } from '@/api/keys';
 import { RatioIcon } from '@/components/studio/RatioIcon';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { QUALITY_LABELS, type ImageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import { normalizeStudioSizeForModel, type Resolution } from '@/lib/studioSize';
+import {
+  AUDIO_FORMAT_OPTIONS,
+  AUDIO_SPEED_PRESETS,
+  AUDIO_VOICE_OPTIONS,
+  audioFormatLabel,
+  audioSpeedLabel,
+  audioVoiceLabel,
+  normalizeAudioFormat,
+  normalizeAudioSpeed,
+  normalizeAudioVoice,
+} from '@/lib/audioGeneration';
 import type { JobParams } from '@/schema/jobs';
+
+const REASONING_OPTIONS = ['auto', 'low', 'medium', 'high', 'xhigh'] as const;
+const REASONING_LABELS: Record<(typeof REASONING_OPTIONS)[number], string> = {
+  auto: '自动',
+  low: '轻度',
+  medium: '中',
+  high: '高',
+  xhigh: '极高',
+};
 
 export interface CanvasModelChoice {
   key: KeyView;
@@ -257,19 +277,35 @@ export function CanvasImageSettings({
   );
 }
 
-export function CanvasCountSettings({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+export function CanvasTextSettings({
+  supportsReasoning,
+  params,
+  onPatch,
+}: {
+  supportsReasoning: boolean;
+  params: JobParams;
+  onPatch: (patch: JobParams) => void;
+}) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
+  const count = Math.max(1, Math.min(4, Number(params.n) || 1));
+  const reasoning = REASONING_OPTIONS.includes(params.reasoning_effort as (typeof REASONING_OPTIONS)[number])
+    ? params.reasoning_effort as (typeof REASONING_OPTIONS)[number]
+    : 'auto';
+  const summary = supportsReasoning
+    ? `推理 ${REASONING_LABELS[reasoning]} · ${count} 个`
+    : `${count} 个候选`;
   return (
-    <div ref={anchorRef} className="relative">
+    <div ref={anchorRef} className="relative min-w-0">
       <button
         type="button"
         aria-label="文本生成设置"
         aria-expanded={open}
         onClick={() => setOpen(current => !current)}
-        className="flex h-9 items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="flex h-9 max-w-full items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
-        <Images className="size-3.5" aria-hidden="true" /> {value} 个候选
+        <Settings2 className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="truncate">{summary}</span>
       </button>
       <ToolbarPopover
         open={open}
@@ -277,21 +313,176 @@ export function CanvasCountSettings({ value, onChange }: { value: number; onChan
         anchorRef={anchorRef}
         autoFocus
         direction="up"
-        className="w-[240px] rounded-xl border border-border bg-card p-3"
+        data-testid="canvas-text-settings-popover"
+        className="w-[320px] rounded-xl border border-border bg-card p-3"
       >
-        <SettingsSection title="生成数量">
-          <OptionTrack
-            label="选择文本生成数量"
-            values={[1, 2, 3, 4]}
-            selected={String(value)}
-            getLabel={item => `${item} 个`}
-            onSelect={item => {
-              onChange(Number(item));
-              setOpen(false);
-              anchorRef.current?.querySelector<HTMLElement>('button')?.focus();
-            }}
-          />
-        </SettingsSection>
+        <div className="space-y-4">
+          {supportsReasoning && (
+            <SettingsSection title="推理强度">
+              <OptionTrack
+                label="选择推理强度"
+                values={REASONING_OPTIONS}
+                selected={reasoning}
+                getLabel={value => REASONING_LABELS[value]}
+                onSelect={value => onPatch({ reasoning_effort: value })}
+              />
+            </SettingsSection>
+          )}
+          <SettingsSection title="生成数量">
+            <OptionTrack
+              label="选择文本生成数量"
+              values={[1, 2, 3, 4]}
+              selected={String(count)}
+              getLabel={item => `${item} 个`}
+              onSelect={item => onPatch({ n: Number(item) })}
+            />
+          </SettingsSection>
+        </div>
+      </ToolbarPopover>
+    </div>
+  );
+}
+
+export function CanvasAudioSettings({
+  params,
+  onPatch,
+}: {
+  params: JobParams;
+  onPatch: (patch: JobParams) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const voice = normalizeAudioVoice(params.voice);
+  const format = normalizeAudioFormat(params.response_format);
+  const speed = normalizeAudioSpeed(params.speed);
+  const instructions = String(params.instructions ?? '');
+  const [speedDraft, setSpeedDraft] = useState(String(speed));
+  const [instructionsDraft, setInstructionsDraft] = useState(instructions);
+  const committedRef = useRef({ speed, instructions });
+
+  useEffect(() => {
+    committedRef.current.speed = speed;
+    setSpeedDraft(String(speed));
+  }, [speed]);
+  useEffect(() => {
+    committedRef.current.instructions = instructions;
+    setInstructionsDraft(instructions);
+  }, [instructions]);
+
+  function commitDrafts(fields: { speed: boolean; instructions: boolean }) {
+    const patch: JobParams = {};
+    if (fields.speed) {
+      const normalizedSpeed = normalizeAudioSpeed(speedDraft);
+      setSpeedDraft(String(normalizedSpeed));
+      if (normalizedSpeed !== committedRef.current.speed) {
+        patch.speed = normalizedSpeed;
+        committedRef.current.speed = normalizedSpeed;
+      }
+    }
+    if (fields.instructions) {
+      const normalizedInstructions = instructionsDraft.trim();
+      setInstructionsDraft(normalizedInstructions);
+      if (normalizedInstructions !== committedRef.current.instructions) {
+        patch.instructions = normalizedInstructions || undefined;
+        committedRef.current.instructions = normalizedInstructions;
+      }
+    }
+    if (Object.keys(patch).length) onPatch(patch);
+  }
+
+  function commitSpeed() {
+    commitDrafts({ speed: true, instructions: false });
+  }
+
+  function commitInstructions() {
+    commitDrafts({ speed: false, instructions: true });
+  }
+
+  function close() {
+    commitDrafts({ speed: true, instructions: true });
+    setOpen(false);
+  }
+
+  function toggle() {
+    if (open) close();
+    else setOpen(true);
+  }
+
+  return (
+    <div ref={anchorRef} className="relative min-w-0">
+      <button
+        type="button"
+        aria-label="音频生成设置"
+        aria-expanded={open}
+        onClick={toggle}
+        className="flex h-9 max-w-full items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        <Settings2 className="size-3.5 shrink-0" aria-hidden="true" />
+        <span className="truncate">
+          {audioVoiceLabel(voice)} · {audioFormatLabel(format)} · {audioSpeedLabel(speed)}
+        </span>
+      </button>
+      <ToolbarPopover
+        open={open}
+        onClose={close}
+        anchorRef={anchorRef}
+        autoFocus
+        direction="up"
+        data-testid="canvas-audio-settings-popover"
+        className="max-h-[70vh] w-[356px] overflow-y-auto rounded-xl border border-border bg-card p-3"
+      >
+        <div className="space-y-4">
+          <SettingsSection title="音色">
+            <OptionGrid
+              label="选择音色"
+              values={AUDIO_VOICE_OPTIONS}
+              selected={voice}
+              onSelect={value => onPatch({ voice: value })}
+            />
+          </SettingsSection>
+          <SettingsSection title="格式">
+            <OptionGrid
+              label="选择音频格式"
+              values={AUDIO_FORMAT_OPTIONS}
+              selected={format}
+              onSelect={value => onPatch({ response_format: value })}
+            />
+          </SettingsSection>
+          <SettingsSection title="语速">
+            <OptionTrack
+              label="选择语速预设"
+              values={AUDIO_SPEED_PRESETS}
+              selected={String(speed)}
+              getLabel={value => audioSpeedLabel(value)}
+              onSelect={value => onPatch({ speed: value })}
+            />
+            <input
+              type="number"
+              aria-label="自定义语速"
+              min={0.25}
+              max={4}
+              step={0.05}
+              value={speedDraft}
+              onChange={event => setSpeedDraft(event.target.value)}
+              onBlur={commitSpeed}
+              onKeyDown={event => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+              }}
+              className="mt-2 h-9 w-full rounded-md border border-input bg-transparent px-3 text-center text-sm text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          </SettingsSection>
+          <SettingsSection title="朗读指令">
+            <textarea
+              aria-label="朗读指令"
+              rows={3}
+              value={instructionsDraft}
+              placeholder="例如：语气温柔、语速平稳，句尾稍作停顿"
+              onChange={event => setInstructionsDraft(event.target.value)}
+              onBlur={commitInstructions}
+              className="w-full resize-none rounded-md border border-input bg-transparent px-3 py-2 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          </SettingsSection>
+        </div>
       </ToolbarPopover>
     </div>
   );
@@ -337,6 +528,37 @@ function OptionTrack<T extends string | number>({
           className="h-8 rounded-md px-2 text-center text-sm transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60"
         >
           {getLabel(value)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function OptionGrid<T extends string>({
+  label,
+  values,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  values: ReadonlyArray<{ value: T; label: string }>;
+  selected: string;
+  onSelect: (value: T) => void;
+}) {
+  return (
+    <div role="listbox" aria-label={label} className="grid grid-cols-3 gap-y-1 rounded-lg bg-popover p-1">
+      {values.map(item => (
+        <button
+          key={item.value}
+          type="button"
+          role="option"
+          aria-selected={selected === item.value}
+          onClick={() => {
+            if (selected !== item.value) onSelect(item.value);
+          }}
+          className="h-8 rounded-md px-2 text-center text-sm transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60"
+        >
+          {item.label}
         </button>
       ))}
     </div>

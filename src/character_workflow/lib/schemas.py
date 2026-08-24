@@ -73,9 +73,10 @@ class JobParams(BaseModel):
     watermark: bool | None = None
     reference_videos: list[str] | None = None
     reference_audios: list[str] | None = None
-    # 文本生成参数（OpenAI-compatible chat/completions）。
+    # 文本生成参数（OpenAI-compatible chat/completions 与 Responses）。
     temperature: float | None = None
     max_tokens: int | None = None
+    reasoning_effort: Literal["auto", "low", "medium", "high", "xhigh"] | None = None
     # 语音生成参数（OpenAI-compatible audio/speech）。
     voice: str | None = None
     speed: float | None = None

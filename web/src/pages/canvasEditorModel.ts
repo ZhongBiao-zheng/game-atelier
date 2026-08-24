@@ -5,6 +5,11 @@ import {
   type Resolution,
 } from '@/lib/studioSize';
 import type { JobParams } from '@/schema/jobs';
+import {
+  normalizeAudioFormat,
+  normalizeAudioSpeed,
+  normalizeAudioVoice,
+} from '@/lib/audioGeneration';
 import type {
   CanvasContentNode,
   CanvasContentVersion,
@@ -141,6 +146,70 @@ export function normalizeCanvasImageParams(
       model,
     );
   }
+  return params;
+}
+
+export function supportsCanvasTextReasoning(protocol: string | null | undefined) {
+  return protocol === 'openai-responses';
+}
+
+export function supportsCanvasTextGeneration(
+  provider: string | null | undefined,
+  protocol: string | null | undefined,
+) {
+  const supportedProtocols = [null, undefined, 'openai', 'openai-chat', 'chat-completions', 'openai-responses'];
+  const declared = protocol != null && supportedProtocols.includes(protocol);
+  return supportedProtocols.includes(protocol)
+    && (['openai', 'openrouter', 'tokendance', 'custom'].includes(String(provider)) || declared);
+}
+
+export function normalizeCanvasTextParams(
+  protocol: string | null | undefined,
+  current: JobParams,
+): JobParams {
+  const n = Math.max(1, Math.min(4, Number(current.n) || 1));
+  const params: JobParams = { n };
+  if (typeof current.temperature === 'number' && protocol !== 'openai-responses') {
+    params.temperature = current.temperature;
+  }
+  if (typeof current.max_tokens === 'number') params.max_tokens = current.max_tokens;
+  if (
+    supportsCanvasTextReasoning(protocol)
+    && ['auto', 'low', 'medium', 'high', 'xhigh'].includes(String(current.reasoning_effort))
+  ) {
+    params.reasoning_effort = current.reasoning_effort;
+  }
+  return params;
+}
+
+export function supportsCanvasAudioGeneration(
+  model: string,
+  provider: string | null | undefined,
+  protocol: string | null | undefined,
+) {
+  if (['openai', 'openai-speech', 'tts', 'speech'].includes(String(protocol))) return true;
+  if (protocol != null || !['openai', 'custom'].includes(String(provider))) return false;
+  const normalized = model.toLowerCase();
+  if (['asr', 'speech-to-text', 'speech2text', 'whisper'].some(value => normalized.includes(value))) {
+    return false;
+  }
+  return normalized.includes('tts') || normalized.includes('text-to-speech');
+}
+
+export function normalizeCanvasAudioParams(
+  model: string,
+  provider: string | null | undefined,
+  protocol: string | null | undefined,
+  current: JobParams,
+): JobParams {
+  if (!supportsCanvasAudioGeneration(model, provider, protocol)) return {};
+  const params: JobParams = {
+    voice: normalizeAudioVoice(current.voice),
+    response_format: normalizeAudioFormat(current.response_format),
+    speed: normalizeAudioSpeed(current.speed),
+  };
+  const instructions = String(current.instructions ?? '').trim();
+  if (instructions) params.instructions = instructions;
   return params;
 }
 

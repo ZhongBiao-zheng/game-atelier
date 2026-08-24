@@ -7,9 +7,10 @@ import { modelModality, type KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
 import {
-  CanvasCountSettings,
+  CanvasAudioSettings,
   CanvasImageSettings,
   CanvasModelPicker,
+  CanvasTextSettings,
   type CanvasModelChoice,
 } from '@/components/canvas/CanvasGenerationControls';
 import type { CanvasMediaTool } from '@/components/canvas/CanvasMediaOperationDialog';
@@ -51,8 +52,13 @@ import {
   canvasNodeHasCurrentContent,
   canvasNodeProvidesContent,
   canvasVideoEditCaps,
+  normalizeCanvasAudioParams,
   normalizeCanvasImageParams,
+  normalizeCanvasTextParams,
   normalizeCanvasVideoParams,
+  supportsCanvasAudioGeneration,
+  supportsCanvasTextGeneration,
+  supportsCanvasTextReasoning,
   supportsCanvasVideoEdit,
 } from '@/pages/canvasEditorModel';
 
@@ -958,6 +964,10 @@ export function CanvasGenerationComposer({
   const acceptsModel = (model: KeyView['models'][number], key: KeyView) => (
     modelModality(model, key) === draft.mode
     && (!editingExistingVideo || supportsCanvasVideoEdit(model.id, model.protocol))
+    && (draft.mode !== 'audio'
+      || supportsCanvasAudioGeneration(model.id, key.provider, model.protocol))
+    && (draft.mode !== 'text'
+      || supportsCanvasTextGeneration(key.provider, model.protocol))
   );
   const availableKeys = context.keys.filter(key => key.models.some(model => acceptsModel(model, key)));
   const modelChoices: CanvasModelChoice[] = availableKeys.flatMap(key => key.models
@@ -1062,6 +1072,8 @@ export function CanvasGenerationComposer({
               model: model.id,
               params: draft.mode === 'image'
                 ? normalizeCanvasImageParams(model.id, key.provider, current.params, model.protocol)
+                : draft.mode === 'text'
+                  ? normalizeCanvasTextParams(model.protocol, current.params)
                 : draft.mode === 'video'
                   ? normalizeCanvasVideoParams(
                       model.id,
@@ -1069,16 +1081,25 @@ export function CanvasGenerationComposer({
                       current.params,
                       editingExistingVideo,
                     )
-                  : current.params,
+                  : normalizeCanvasAudioParams(
+                      model.id,
+                      key.provider,
+                      model.protocol,
+                      current.params,
+                    ),
             }));
           }}
         />
         {draft.mode === 'text' && (
-          <CanvasCountSettings
-            value={Math.max(1, Math.min(4, Number(draft.params.n) || 1))}
-            onChange={n => updateDraftWithHistory(current => ({
+          <CanvasTextSettings
+            supportsReasoning={supportsCanvasTextReasoning(selectedModel?.protocol)}
+            params={draft.params}
+            onPatch={patch => updateDraftWithHistory(current => ({
               ...current,
-              params: { ...current.params, n },
+              params: normalizeCanvasTextParams(
+                selectedModel?.protocol,
+                { ...current.params, ...patch },
+              ),
             }))}
           />
         )}
@@ -1144,35 +1165,19 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-        {draft.mode === 'audio' && (
-          <>
-            <select
-              aria-label="声音"
-              value={String(draft.params.voice ?? 'alloy')}
-              onFocus={context.recordHistory}
-              onChange={event => updateDraft(current => ({
-                ...current,
-                params: { ...current.params, voice: event.target.value },
-                updated_at: new Date().toISOString(),
-              }))}
-              className="h-9 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              {['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse', 'marin', 'cedar'].map(value => <option key={value}>{value}</option>)}
-            </select>
-            <select
-              aria-label="音频格式"
-              value={String(draft.params.response_format ?? 'mp3')}
-              onFocus={context.recordHistory}
-              onChange={event => updateDraft(current => ({
-                ...current,
-                params: { ...current.params, response_format: event.target.value },
-                updated_at: new Date().toISOString(),
-              }))}
-              className="h-9 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              {['mp3', 'wav', 'opus', 'aac', 'flac'].map(value => <option key={value}>{value}</option>)}
-            </select>
-          </>
+        {draft.mode === 'audio' && selectedKey && selectedModel && (
+          <CanvasAudioSettings
+            params={draft.params}
+            onPatch={patch => updateDraftWithHistory(current => ({
+              ...current,
+              params: normalizeCanvasAudioParams(
+                current.model,
+                selectedKey.provider,
+                selectedModel.protocol,
+                { ...current.params, ...patch },
+              ),
+            }))}
+          />
         )}
         <span className="max-w-52 truncate text-xs text-muted-foreground" title={runStatus(activeJob)}>
           {runStatus(activeJob)}

@@ -342,6 +342,75 @@ it('records text candidate changes but ignores the already selected value', () =
   expect(recordHistory).toHaveBeenCalledOnce();
 });
 
+it('records Responses reasoning changes but ignores the selected effort', () => {
+  const recordHistory = vi.fn();
+  const textKey = {
+    alias: 'responses-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
+    models: [{ id: 'gpt-5', name: 'GPT 5', modality: 'text' as const, protocol: 'openai-responses' }],
+  };
+  const textNode = {
+    ...generationNodes[0][0],
+    data: {
+      ...generationNodes[0][0].data,
+      generation_draft: {
+        ...draft,
+        mode: 'text' as const,
+        alias: textKey.alias,
+        model: textKey.models[0].id,
+        params: { n: 1, reasoning_effort: 'auto' as const },
+      },
+    },
+  } as CanvasNode;
+  render(
+    <CanvasNodeContext.Provider value={nodeContext({ keys: [textKey], recordHistory })}>
+      <NodeCard data={{ domain: textNode }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: '文本生成设置' }));
+  fireEvent.click(screen.getByRole('option', { name: '自动' }));
+  expect(recordHistory).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('option', { name: '高' }));
+  expect(recordHistory).toHaveBeenCalledOnce();
+});
+
+it('records audio setting changes but ignores the selected voice', () => {
+  const recordHistory = vi.fn();
+  const audioKey = {
+    alias: 'speech-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
+    models: [{
+      id: 'gpt-4o-mini-tts', name: 'GPT 4o Mini TTS', modality: 'audio' as const,
+      protocol: 'openai-speech',
+    }],
+  };
+  const audioNode = {
+    ...generationNodes[3][0],
+    data: {
+      ...generationNodes[3][0].data,
+      generation_draft: {
+        ...draft,
+        mode: 'audio' as const,
+        alias: audioKey.alias,
+        model: audioKey.models[0].id,
+        params: { voice: 'alloy', response_format: 'mp3', speed: 1 },
+      },
+    },
+  } as CanvasNode;
+  render(
+    <CanvasNodeContext.Provider value={nodeContext({ keys: [audioKey], recordHistory })}>
+      <NodeCard data={{ domain: audioNode }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: '音频生成设置' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Alloy' }));
+  expect(recordHistory).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('option', { name: 'Marin' }));
+  expect(recordHistory).toHaveBeenCalledOnce();
+});
+
 it('undoes and redoes image parameter changes as atomic history entries', () => {
   const imageKey = {
     alias: 'image-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,

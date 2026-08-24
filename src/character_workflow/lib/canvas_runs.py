@@ -74,6 +74,7 @@ _OUTPUT_MIME = {
     ".flac": "audio/flac",
     ".opus": "audio/ogg",
     ".aac": "audio/aac",
+    ".pcm": "audio/pcm",
 }
 _RUN_GLOBAL_GATE = BoundedSemaphore(4)
 _RUN_VIDEO_GATE = BoundedSemaphore(1)
@@ -435,11 +436,15 @@ def _keys_default_first() -> list[KeySpec]:
 
 
 def _supports_openai_text(key: KeySpec, model: ModelSpec) -> bool:
-    declared_chat = model.protocol in {"openai", "openai-chat", "chat-completions"}
-    return (
-        model.protocol in {None, "openai", "openai-chat", "chat-completions"}
-        and (key.provider in {"openai", "openrouter", "tokendance", "custom"} or declared_chat)
-    )
+    from character_workflow.lib.callers.openai_text import supports_model
+
+    return supports_model(key, model)
+
+
+def _supports_openai_speech(key: KeySpec, model: ModelSpec) -> bool:
+    from character_workflow.lib.callers.openai_audio import supports_model
+
+    return supports_model(key, model)
 
 
 def _resolve_reverse_prompt_model() -> tuple[KeySpec, ModelSpec]:
@@ -730,7 +735,42 @@ def _normalized_params(
             normalized["background"] = draft.params.background
         normalized["n"] = effective_count
     elif draft.mode == "text":
-        normalized["n"] = effective_count
+        if not _supports_openai_text(key, model):
+            raise ValueError("当前文本模型没有可用的生成协议")
+        text_params: dict[str, Any] = {"n": effective_count}
+        if draft.params.temperature is not None and model.protocol != "openai-responses":
+            text_params["temperature"] = draft.params.temperature
+        if draft.params.max_tokens is not None:
+            text_params["max_tokens"] = draft.params.max_tokens
+        if (
+            model.protocol == "openai-responses"
+            and draft.params.reasoning_effort is not None
+            and draft.params.reasoning_effort != "auto"
+        ):
+            text_params["reasoning_effort"] = draft.params.reasoning_effort
+        normalized = text_params
+    elif draft.mode == "audio":
+        if requested_count != 1:
+            raise ValueError("视频与音频生成一次只允许一个结果")
+        if not _supports_openai_speech(key, model):
+            raise ValueError("当前音频模型没有可用的语音生成协议")
+        from character_workflow.lib.callers.openai_audio import (
+            AUDIO_FORMATS,
+            AUDIO_VOICES,
+        )
+
+        voice = str(draft.params.voice or "alloy").lower()
+        response_format = str(draft.params.response_format or "mp3").lower()
+        raw_speed = draft.params.speed if draft.params.speed is not None else 1
+        speed = round(max(0.25, min(4.0, float(raw_speed))), 2)
+        normalized = {
+            "voice": voice if voice in AUDIO_VOICES else "alloy",
+            "response_format": response_format if response_format in AUDIO_FORMATS else "mp3",
+            "speed": speed,
+        }
+        instructions = str(draft.params.instructions or "").strip()
+        if instructions:
+            normalized["instructions"] = instructions
     else:
         if requested_count != 1:
             raise ValueError("视频与音频生成一次只允许一个结果")

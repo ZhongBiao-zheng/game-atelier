@@ -1,3 +1,5 @@
+import pytest
+
 from character_workflow.lib.canvas_runs import _normalized_params
 from character_workflow.lib.keys import KeySpec, ModelSpec
 from character_workflow.lib.schemas import CanvasGenerationDraft, JobParams
@@ -85,3 +87,91 @@ def test_canvas_server_strips_unsupported_video_watermark():
 
     assert "watermark" not in kling_normalized
     assert seedance_normalized["watermark"] is True
+
+
+def test_canvas_server_keeps_reasoning_only_for_responses_protocol():
+    responses = ModelSpec(
+        name="GPT Responses",
+        id="gpt-5",
+        modality="text",
+        protocol="openai-responses",
+    )
+    chat = responses.model_copy(update={"protocol": "openai-chat"})
+
+    responses_normalized, _, _ = _normalized_params(
+        _draft("text", responses.id, n=3, reasoning_effort="xhigh", voice="alloy"),
+        3,
+        _key("openai", responses),
+        responses,
+    )
+    chat_normalized, _, _ = _normalized_params(
+        _draft("text", chat.id, n=2, reasoning_effort="high"),
+        2,
+        _key("openai", chat),
+        chat,
+    )
+
+    assert responses_normalized == {"n": 3, "reasoning_effort": "xhigh"}
+    assert chat_normalized == {"n": 2}
+
+    auto_normalized, _, _ = _normalized_params(
+        _draft("text", responses.id, n=1, reasoning_effort="auto", temperature=0.8),
+        1,
+        _key("openai", responses),
+        responses,
+    )
+    assert auto_normalized == {"n": 1}
+
+
+def test_canvas_server_normalizes_openai_speech_controls():
+    speech = ModelSpec(
+        name="TTS",
+        id="gpt-4o-mini-tts",
+        modality="audio",
+        protocol="openai-speech",
+    )
+
+    normalized, job_params, requested_count = _normalized_params(
+        _draft(
+            "audio",
+            speech.id,
+            voice="marin",
+            response_format="pcm",
+            speed=9,
+            instructions="  温柔、克制  ",
+            reasoning_effort="high",
+            ratio="16:9",
+        ),
+        1,
+        _key("openai", speech),
+        speech,
+    )
+
+    assert requested_count == 1
+    assert normalized == {
+        "voice": "marin",
+        "response_format": "pcm",
+        "speed": 4.0,
+        "instructions": "温柔、克制",
+    }
+    assert job_params.model_dump(exclude_none=True) == normalized
+
+
+def test_canvas_server_rejects_unimplemented_text_and_audio_protocols():
+    text = ModelSpec(
+        name="Claude Messages",
+        id="claude",
+        modality="text",
+        protocol="anthropic:messages",
+    )
+    audio = ModelSpec(
+        name="Music",
+        id="music-generator",
+        modality="audio",
+        protocol="audio-generation",
+    )
+
+    with pytest.raises(ValueError, match="文本模型没有可用"):
+        _normalized_params(_draft("text", text.id, n=1), 1, _key("custom", text), text)
+    with pytest.raises(ValueError, match="音频模型没有可用"):
+        _normalized_params(_draft("audio", audio.id), 1, _key("custom", audio), audio)

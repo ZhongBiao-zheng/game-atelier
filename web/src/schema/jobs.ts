@@ -40,6 +40,7 @@ export interface JobParams {
   reference_audios?: string[];
   temperature?: number;
   max_tokens?: number;
+  reasoning_effort?: 'auto' | 'low' | 'medium' | 'high' | 'xhigh';
   voice?: string;
   speed?: number;
   response_format?: string;

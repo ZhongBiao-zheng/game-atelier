@@ -1,4 +1,4 @@
-"""OpenAI-compatible text generation through chat/completions."""
+"""OpenAI-compatible text generation through chat/completions or Responses."""
 from __future__ import annotations
 
 import base64
@@ -22,6 +22,18 @@ _IMAGE_MIME = {
     ".webp": "image/webp",
 }
 _MAX_INLINE_IMAGE_BYTES = 25 * 1024 * 1024
+_SUPPORTED_PROTOCOLS = {
+    None, "openai", "openai-chat", "chat-completions", "openai-responses",
+}
+
+
+def supports_model(key: Any, model: Any) -> bool:
+    protocol = model.protocol if model is not None else None
+    declared = protocol in _SUPPORTED_PROTOCOLS - {None}
+    return (
+        protocol in _SUPPORTED_PROTOCOLS
+        and (key.provider in {"openai", "openrouter", "tokendance", "custom"} or declared)
+    )
 
 
 def _image_url(reference: str) -> str:
@@ -56,6 +68,59 @@ def _content_text(choice: object) -> str | None:
     return None
 
 
+def _response_text(body: object) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    direct = body.get("output_text")
+    if isinstance(direct, str):
+        return direct.strip() or None
+    output = body.get("output")
+    if not isinstance(output, list):
+        return None
+    parts: list[str] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        parts.extend(
+            str(part.get("text"))
+            for part in content
+            if isinstance(part, dict)
+            and part.get("type") in {"output_text", "text"}
+            and isinstance(part.get("text"), str)
+        )
+    return "".join(parts).strip() or None
+
+
+def _post_json(
+    *,
+    url: str,
+    access_key: str,
+    payload: dict[str, Any],
+    timeout: float | tuple[float, float],
+) -> object:
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {access_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=timeout,
+        )
+    except requests.RequestException as error:
+        raise OpenAITextError(str(error)) from error
+    if response.status_code >= 400:
+        raise OpenAITextError(f"text api {response.status_code}: {response.text[:500]}")
+    try:
+        return response.json()
+    except ValueError as error:
+        raise OpenAITextError(f"text api response is not JSON: {error}") from error
+
+
 def generate(
     *,
     prompt: str,
@@ -72,24 +137,16 @@ def generate(
     if key is None:
         raise OpenAITextError(f"alias not found: {alias}")
     spec = next((item for item in key.models if item.id == model), None)
-    declared_openai_chat = spec is not None and spec.protocol in {
-        "openai", "openai-chat", "chat-completions"
-    }
-    if (
-        key.provider not in {"openai", "openrouter", "tokendance", "custom"}
-        and not declared_openai_chat
-    ):
-        raise OpenAITextError(f"provider {key.provider!r} does not support openai-chat")
+    protocol = spec.protocol if spec is not None else None
+    if not supports_model(key, spec):
+        raise OpenAITextError(
+            f"provider {key.provider!r} / protocol {protocol!r} does not support text generation"
+        )
     base_url = (key.base_url or "").strip()
     if not base_url and key.provider == "openai":
         base_url = "https://api.openai.com/v1"
     if not base_url:
         raise OpenAITextError("text provider requires base_url")
-    if spec and spec.protocol not in {None, "openai", "openai-chat", "chat-completions"}:
-        raise OpenAITextError(
-            f"text protocol {spec.protocol!r} is not supported; expected openai-chat"
-        )
-
     options = params or {}
     references = [str(value) for value in options.get("reference_images") or []]
     content: str | list[dict[str, Any]] = prompt
@@ -101,6 +158,39 @@ def generate(
                 for reference in references
             ],
         ]
+    if protocol == "openai-responses":
+        response_input: str | list[dict[str, Any]] = prompt
+        if references:
+            response_input = [{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    *[
+                        {"type": "input_image", "image_url": _image_url(reference)}
+                        for reference in references
+                    ],
+                ],
+            }]
+        response_payload: dict[str, Any] = {"model": model, "input": response_input}
+        effort = str(options.get("reasoning_effort") or "auto")
+        if effort != "auto":
+            response_payload["reasoning"] = {"effort": effort}
+        if options.get("max_tokens") is not None:
+            response_payload["max_output_tokens"] = int(options["max_tokens"])
+        generated: list[str] = []
+        for _ in range(max(1, int(n))):
+            body = _post_json(
+                url=f"{api_root(base_url)}/responses",
+                access_key=key.access_key,
+                payload=response_payload,
+                timeout=timeout,
+            )
+            text = _response_text(body)
+            if not text:
+                raise OpenAITextError(f"text api returned no text: {body!r}")
+            generated.append(text)
+        return generated
+
     payload: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": content}],
@@ -111,24 +201,12 @@ def generate(
         payload["temperature"] = float(options["temperature"])
     if options.get("max_tokens") is not None:
         payload["max_tokens"] = int(options["max_tokens"])
-    try:
-        response = requests.post(
-            f"{api_root(base_url)}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {key.access_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=timeout,
-        )
-    except requests.RequestException as error:
-        raise OpenAITextError(str(error)) from error
-    if response.status_code >= 400:
-        raise OpenAITextError(f"text api {response.status_code}: {response.text[:500]}")
-    try:
-        body = response.json()
-    except ValueError as error:
-        raise OpenAITextError(f"text api response is not JSON: {error}") from error
+    body = _post_json(
+        url=f"{api_root(base_url)}/chat/completions",
+        access_key=key.access_key,
+        payload=payload,
+        timeout=timeout,
+    )
     choices = body.get("choices") if isinstance(body, dict) else None
     outputs = [_content_text(choice) for choice in choices] if isinstance(choices, list) else []
     generated = [item for item in outputs if item]

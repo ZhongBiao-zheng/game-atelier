@@ -247,6 +247,8 @@ def is_valid_audio(path: Path) -> bool:
         return head.startswith(b"OggS")
     if suffix == ".aac":
         return len(head) >= 2 and head[0] == 0xFF and head[1] & 0xF0 == 0xF0
+    if suffix == ".pcm":
+        return True
     return False
 
 

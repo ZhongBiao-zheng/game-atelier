@@ -1396,9 +1396,9 @@ _PROTOCOL_UNSUPPORTED_AUDIO_GENERATION_HINTS = (
     "text2audio", "audio-generation", "audio-generations", "t2a", "music",
 )
 _PROTOCOL_TEXT_GENERATION_HINTS = (
-    "chat-completions", "chat/completions",
+    "chat-completions", "chat/completions", "openai:responses", "openai/responses",
 )
-_PROTOCOL_UNSUPPORTED_TEXT_GENERATION_HINTS = ("responses", "messages", "completions")
+_PROTOCOL_UNSUPPORTED_TEXT_GENERATION_HINTS = ("messages", "completions")
 # 明确不能生成四模态内容的协议动词：全部命中才判 excluded。
 _PROTOCOL_NON_VISUAL_HINTS = (
     "embeddings", "rerank", "moderations", "asr", "speech-to-text", "speech2text",
@@ -1429,9 +1429,9 @@ def _classify_model(item: dict) -> str:
         any(h in p for h in _PROTOCOL_NON_VISUAL_HINTS) for p in protocols
     ):
         return "excluded"
-    # `responses` / `messages` / legacy `completions` 虽然能产文本，但首版 caller 只实现
-    # chat/completions。显式协议不匹配时必须停在 unknown，不能再靠 id / output modality
-    # 把它包装成可执行模型；否则 UI 会允许提交，runner 却只能打错端点。
+    # Anthropic `messages` / legacy `completions` 虽然能产文本，但当前 caller 未实现。
+    # 显式协议不匹配时必须停在 unknown，不能再靠 id / output modality 把它包装成
+    # 可执行模型；否则 UI 会允许提交，runner 却只能打错端点。
     if any(
         any(hint in protocol for hint in _PROTOCOL_UNSUPPORTED_TEXT_GENERATION_HINTS)
         for protocol in protocols
@@ -1483,6 +1483,8 @@ def _guess_model_modality(item: dict) -> str | None:
 
 def _text_protocol(item: dict) -> str | None:
     protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
+    if any("openai:responses" in p or "openai/responses" in p for p in protocols):
+        return "openai-responses"
     if any("chat-completions" in p or "chat/completions" in p for p in protocols):
         return "openai-chat"
     return None

@@ -116,9 +116,9 @@ Status: ready-for-human
 | D09 | 文本/配置驱动音频 | `requestAudioGeneration` | adapted：新增音频 capability/Job | full |
 | D10 | 节点独立选择模型和参数 | settings popovers | adapted：复用现有 keys/capability matrix | none |
 | D11 | 图片尺寸/比例/质量/透明背景/数量 | `image-settings-panel.tsx` | adapted：只显示模型真实支持参数 | none |
-| D12 | 文本推理强度 auto/low/medium/high/xhigh | `text-settings-panel.tsx`、`pending-test` | adapted：按模型 capability 显示 | full |
+| D12 | 文本推理强度 auto/low/medium/high/xhigh | `text-settings-panel.tsx`、`pending-test` | adapted：仅 `openai-responses` 展示并发送 reasoning，auto 省略协议参数；文本候选数 1–4 | none |
 | D13 | 视频尺寸、时长、质量、音频、水印 | `video-settings-panel.tsx` | adapted：按 provider capability 显示 | none |
-| D14 | 音色、格式、速度、instructions | `audio-settings-panel.tsx` | adapted：按 provider capability 显示 | full |
+| D14 | 音色、格式、速度、instructions | `audio-settings-panel.tsx` | adapted：按 provider capability 显示，关闭前原子提交本地草稿，服务端再次归一化 | none |
 | D15 | `@` 引用已连接文本/图片/视频/音频 | prompt chip/resource mention components | adapted：连接解析 + 显式 mention | full |
 | D16 | 提交前根据当前连接重新编号引用 | runtime composer 文案 | adapted：Resolved Input | full |
 | D17 | 图片数量 N 立即创建 N 个槽位并独立更新 | multi-image metadata、`pending-test` | adapted：一轮 Job 的候选状态 | full |
