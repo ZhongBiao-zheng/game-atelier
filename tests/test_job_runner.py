@@ -374,6 +374,108 @@ def test_friendly_error_genuine_connect_failure_still_network():
     assert "网络连不上厂商接口" in job_runner._friendly_error(err)
 
 
+def test_friendly_error_provider_cors_points_to_server_api_url_not_browser():
+    err = Exception("CORS policy: No 'Access-Control-Allow-Origin' header")
+    msg = job_runner._friendly_error(err)
+    assert "本地服务端直连" in msg
+    assert "API 地址" in msg
+    assert "浏览器" in msg
+
+
+def test_friendly_error_generic_network_error_names_server_to_provider_hop():
+    err = Exception("ERR_NETWORK Network Error")
+    msg = job_runner._friendly_error(err)
+    assert "viewer-server" in msg
+    assert "厂商接口" in msg
+
+
+def test_friendly_error_dns_is_not_misread_as_invalid_image_resolution():
+    err = Exception(
+        "NameResolutionError: Failed to resolve 'provider.invalid' "
+        "([Errno 8] nodename nor servname provided)"
+    )
+    msg = job_runner._friendly_error(err)
+    assert "无法解析厂商接口域名" in msg
+    assert "出图尺寸" not in msg
+
+
+def test_friendly_error_redacts_local_paths_without_swallowing_task_id():
+    err = Exception(
+        "video failed task_id=cgt-keep-me source=/Volumes/Art Drive/private/ref.png; "
+        r"cache=C:\Users\artist\My Documents\ref.png; "
+        r"mirror=\\server\share\private\ref.png; "
+        "mask=file:///Users/artist/private/mask.png; "
+        "endpoint=https://example.com/v1/render?access_token=secret-value&token=second-secret"
+        "&access_key=query-access&secret_key=query-secret&private_key=query-private"
+        "&password=query-password&authorization=query-authorization"
+        "&OSSAccessKeyId=oss-access&X-Amz-Credential=aws-credential"
+        "&X-Amz-Security-Token=aws-token&X-Goog-Credential=gcs-credential"
+        "&X-Goog-Signature=gcs-signature&access%5Fkey=encoded-access; "
+        "request https://api.example.com/v1/render path=/Users/a/ref.png; "
+        "authenticated=https://user:password@example.com/v1; "
+        '{"access_key":"json secret token"}; '
+        'api_key="quoted secret token"; '
+        r'escaped={\"api_key\":\"escaped-secret\"}; '
+        "X-API-Key: header-secret; X-Auth-Token=auth-secret; "
+        "client_secret=client-secret; private_key=private-secret; "
+        "Authorization: Bearer sk-private"
+    )
+    msg = job_runner._friendly_error(err)
+    assert "cgt-keep-me" in msg
+    assert "/Volumes/Art Drive" not in msg
+    assert "My Documents" not in msg
+    assert "server\\share" not in msg
+    assert "file:///Users" not in msg
+    assert "secret-value" not in msg
+    assert "second-secret" not in msg
+    assert "query-access" not in msg
+    assert "query-secret" not in msg
+    assert "query-private" not in msg
+    assert "query-password" not in msg
+    assert "query-authorization" not in msg
+    assert "oss-access" not in msg
+    assert "aws-credential" not in msg
+    assert "aws-token" not in msg
+    assert "gcs-credential" not in msg
+    assert "gcs-signature" not in msg
+    assert "encoded-access" not in msg
+    assert "json secret token" not in msg
+    assert "quoted secret token" not in msg
+    assert "escaped-secret" not in msg
+    assert "header-secret" not in msg
+    assert "auth-secret" not in msg
+    assert "client-secret" not in msg
+    assert "private-secret" not in msg
+    assert "sk-private" not in msg
+    assert "https://example.com/v1/render" in msg
+    assert "https://api.example.com/v1/render" in msg
+    assert "user:password" not in msg
+    assert "https://<redacted>@example.com/v1" in msg
+    assert "/Users/a/ref.png" not in msg
+    assert msg.count("<local-path>") == 5
+    assert msg.count("<redacted>") == 22
+
+
+def test_friendly_error_path_redaction_preserves_following_task_id():
+    err = Exception(
+        "source=/workspace/ref.png: denied task_id=cgt-keep-after-path; "
+        "mask=file:///Users/a/mask.png task_id=cgt-keep-after-file"
+    )
+    msg = job_runner._friendly_error(err)
+    assert "/workspace/ref.png" not in msg
+    assert "cgt-keep-after-path" in msg
+    assert "cgt-keep-after-file" in msg
+
+
+def test_friendly_error_ssl_handshake_failure_is_not_generic_network_error():
+    err = Exception("SSLError: [SSL: WRONG_VERSION_NUMBER] wrong version number")
+    msg = job_runner._friendly_error(err)
+    assert "TLS / SSL 握手失败" in msg
+    assert "协议或端口" in msg
+    assert "证书失败" not in msg
+    assert "网络连不上厂商接口" not in msg
+
+
 def test_friendly_error_read_timeout_still_upstream_overload():
     err = Exception("HTTPSConnectionPool(host='api.openai-hk.com', port=443): Read timed out. (read timeout=180.0)")
     msg = job_runner._friendly_error(err)

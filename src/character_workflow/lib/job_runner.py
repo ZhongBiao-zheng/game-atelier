@@ -1,6 +1,7 @@
 """Job runner — turns PENDING_CONFIRM JSON jobs into durable image/video assets."""
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -44,18 +45,115 @@ def _friendly_error(err: BaseException) -> str:
     **永远保留原始报错**：视频侧会把 task_id 挂在报错里（产物已计费、要靠它人工找回），
     整条替换会把这类关键标识一起冲掉。所以分支只负责给中文提示，原文由这里统一附加。
     """
+    raw = _redact_local_paths(str(err))
     hint = _error_hint(str(err).lower())
     if hint is None:
-        return str(err)
-    return f"{hint}（原始报错：{err}）"
+        return raw
+    return f"{hint}（原始报错：{raw}）"
+
+
+def _redact_local_paths(message: str) -> str:
+    """Keep task ids/upstream diagnostics while removing secrets and workstation locations."""
+    message = re.sub(
+        r"(?i)(?<![\w?&-])((?:(?:\\?['\"])?(?:authorization|api[_-]?key|access[_-]?key|"
+        r"secret[_-]?key|x[-_]api[-_]key|x[-_]auth[-_]token|client[-_]secret|private[-_]key|"
+        r"access_token|auth_token|password|token)(?:\\?['\"])?\s*[:=]\s*))"
+        r"(?:\\?['\"][^'\"]*\\?['\"]|bearer\s+[^\s,;}]+|[^\s,;}]+)",
+        r"\1<redacted>",
+        message,
+    )
+
+    urls: list[str] = []
+
+    def stash_url(match: re.Match[str]) -> str:
+        url = re.sub(
+            r"(?i)(https?://)[^/@\s]+@",
+            r"\1<redacted>@",
+            match.group(0),
+        )
+        url = re.sub(r"([?&][^=&#\s]+)=([^&#\s]*)", r"\1=<redacted>", url)
+        urls.append(url)
+        return f"__SAFE_HTTP_URL_{len(urls) - 1}__"
+
+    message = re.sub(r"https?://[^\s'\"\)\]\}}]+", stash_url, message, flags=re.IGNORECASE)
+    message = re.sub(
+        r"(['\"])(?:/|[A-Za-z]:\\|\\\\)[^'\"\n]+\1",
+        "<local-path>",
+        message,
+    )
+    field_end = r"(?=\s+[A-Za-z_][\w-]*\s*[:=]|[,;\n)\]}]|$)"
+
+    def redact_path_field(match: re.Match[str]) -> str:
+        value = match.group(2).strip().strip("'\"")
+        if re.match(r"(?i)^(?:file://|/|~/|[A-Za-z]:\\|\\\\)", value):
+            return f"{match.group(1)}<local-path>"
+        return match.group(0)
+
+    message = re.sub(
+        rf"(?i)\b((?:path|source|file|filename|cache|mask)\s*[:=]\s*)(.+?){field_end}",
+        redact_path_field,
+        message,
+    )
+    message = re.sub(rf"(?i)file://.+?{field_end}", "<local-path>", message)
+    message = re.sub(
+        rf"(?<!\w)[A-Za-z]:\\.+?{field_end}",
+        "<local-path>",
+        message,
+    )
+    message = re.sub(rf"(?<!\\)\\\\.+?{field_end}", "<local-path>", message)
+
+    def redact_unix_path(match: re.Match[str]) -> str:
+        return "<local-path>"
+
+    message = re.sub(
+        rf"(?<![:/])/[A-Za-z0-9._~-].+?{field_end}",
+        redact_unix_path,
+        message,
+    )
+    for index, url in enumerate(urls):
+        message = message.replace(f"__SAFE_HTTP_URL_{index}__", url)
+    return message
 
 
 def _error_hint(low: str) -> str | None:
     """按报文特征给中文提示；认不出返回 None（调用方原样透出）。"""
+    if (
+        "cors" in low
+        or "cross-origin" in low
+        or "access-control-allow-origin" in low
+    ):
+        return (
+            "厂商接口返回了跨域 / 浏览器端点错误。画布生成实际由本地服务端直连，不受浏览器"
+            "跨域限制；这通常表示 Base URL 配成了网页地址。请在设置页改成厂商的服务端 API 地址后重试。"
+        )
     if "proxy" in low and ("connect" in low or "proxyerror" in low or "max retries" in low):
         return (
             "连不上本机代理（VPN / Clash 等）。这些国产厂商无需翻墙：请在代理工具里"
             "关闭代理，或把厂商域名加入直连/绕过规则后重试。"
+        )
+    if (
+        "name resolution" in low
+        or "failed to resolve" in low
+        or "getaddrinfo failed" in low
+        or "nodename nor servname" in low
+    ):
+        return (
+            "viewer-server 无法解析厂商接口域名：请检查 Base URL 拼写、DNS 与网络连接后重试。"
+        )
+    if "certificate_verify_failed" in low or "certificate verify failed" in low:
+        return (
+            "viewer-server 校验厂商接口的 TLS 证书失败：请确认 Base URL 是官方 HTTPS API 地址，"
+            "并检查系统时间或代理是否替换了证书后重试。"
+        )
+    if "tls" in low or "sslerror" in low or "[ssl:" in low or "ssl handshake" in low:
+        return (
+            "viewer-server 与厂商接口的 TLS / SSL 握手失败：通常是 Base URL 协议或端口不匹配，"
+            "也可能是代理中途改写连接。请核对官方 HTTPS API 地址、端口和代理直连规则后重试。"
+        )
+    if "err_network" in low or "network error" in low:
+        return (
+            "viewer-server 到厂商接口的网络请求失败：这不是浏览器跨域问题。"
+            "请检查厂商 Base URL、网络和代理直连规则后重试。"
         )
     # 上传阶段超时：urllib3 用 connect 超时兜请求体上传，参考图偏大 / 上行慢会在传图时 write 超时。
     if "write operation timed out" in low or ("aborted" in low and "write" in low):

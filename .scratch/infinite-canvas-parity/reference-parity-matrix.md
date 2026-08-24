@@ -125,10 +125,10 @@ Status: ready-for-human
 | D18 | 多图收起堆叠、展开、设主图 | `canvas-node.tsx`、`pending-test` | same：结果节点拥有堆叠与展开候选（issue 35） | none |
 | D19 | 单槽位重试/删除，不抢占成功主图 | `project.tsx`、`pending-test` | adapted：候选重试 Run + tombstone（issue 35） | none |
 | D20 | 停止当前生成，保留已完成结果 | `stopTitle/continue`、AbortController | adapted：持久取消意图 + 候选聚合终态（issue 35） | none |
-| D21 | 生成元数据保存 prompt/model/size/quality/references | `CanvasNodeMetadata` | adapted：不可变 Generation Snapshot | partial |
-| D22 | 根据保存元数据重试；引用丢失明确报错 | `handleRetryNode` | adapted：快照路径与存在性验证 | partial |
+| D21 | 生成元数据保存 prompt/model/size/quality/references | `CanvasNodeMetadata` | adapted：不可变 Snapshot 在详情中展示最终 prompt、模型、完整安全参数、冻结 node/version 与独立执行结果，见 issue 36 | none |
+| D22 | 根据保存元数据重试；引用丢失明确报错 | `handleRetryNode` | adapted：原设置严格复用快照；稳定错误码与 recovery 明确引导检查历史输入或按当前设置再生成，见 issue 36 | none |
 | D23 | 自定义模型调用脚本 | `model-script-editor.tsx`、`model-plugin.ts` | adapted：服务端受控 caller/plugin，不执行浏览器任意脚本 | full |
-| D24 | 生成跨域错误专门提示 | latest commit、`pending-test` | adapted：服务端直连后转换为友好错误 | partial |
+| D24 | 生成跨域错误专门提示 | latest commit、`pending-test` | adapted：区分 CORS/错误 API 地址、DNS、TLS、代理与网络跳点；诊断脱敏且保留 task_id，见 issue 36 | none |
 
 ## E. 图片与媒体节点工具
 

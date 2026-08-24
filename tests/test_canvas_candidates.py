@@ -21,6 +21,7 @@ from character_workflow.lib.canvas_runs import (
     run_canvas_job,
 )
 from character_workflow.lib.jobs import read_job, save_job, update_job_status
+from character_workflow.lib.keys import KeySpec, KeysDB, ModelSpec, write_keys_db
 from character_workflow.lib.schemas import (
     CanvasActor,
     CanvasGenerationSnapshot,
@@ -365,3 +366,42 @@ def test_successful_candidate_cannot_be_retried_as_a_single_slot():
             document.revision,
             candidate.candidate_id,
         )
+
+
+def test_original_retry_reuses_the_frozen_prompt_model_and_parameters():
+    run_id = "run-retry-frozen-snapshot"
+    project, document, _primary = _project_with_result_node(
+        primary_version_id=None,
+        active_run_id=run_id,
+    )
+    write_keys_db(KeysDB(default_alias="openai-main", keys=[KeySpec(
+        alias="openai-main",
+        provider="openai",
+        access_key="sk-test",
+        models=[ModelSpec(name="GPT Image 1", id="gpt-image-1", modality="image")],
+        created_at=NOW,
+    )]))
+    original = _job(project.project_id, run_id, [CanvasResultCandidate(
+        candidate_id="candidate-failed",
+        index=0,
+        status="failed",
+        error="network down",
+    )]).model_copy(update={"status": JobStatus.FAILED, "error": "network down"})
+    save_job(original)
+
+    retry, updated_document = retry_canvas_run(
+        project.project_id,
+        run_id,
+        "original",
+        document.revision,
+    )
+
+    assert retry.retry_of == original.job_id
+    assert retry.prompt == original.canvas_run.snapshot.final_prompt
+    assert retry.model == original.canvas_run.snapshot.model
+    assert retry.alias == original.canvas_run.snapshot.alias
+    assert retry.provider == original.canvas_run.snapshot.provider
+    assert retry.params.ratio == original.canvas_run.snapshot.normalized_params["ratio"]
+    assert retry.canvas_run.snapshot.final_prompt == original.canvas_run.snapshot.final_prompt
+    assert retry.canvas_run.snapshot.normalized_params == original.canvas_run.snapshot.normalized_params
+    assert updated_document.revision == document.revision + 1

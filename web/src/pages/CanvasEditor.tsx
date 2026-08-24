@@ -93,6 +93,10 @@ import {
 } from '@/components/canvas/CanvasEditorViews';
 import { isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
 import {
+  CanvasGenerationMetadata,
+  canvasRetryErrorMessage,
+} from '@/components/canvas/CanvasGenerationMetadata';
+import {
   CanvasMaskEditDialog,
   type CanvasMaskEditSubmission,
 } from '@/components/canvas/CanvasMaskEditDialog';
@@ -1628,7 +1632,7 @@ function CanvasEditorInner({
       const resultId = run.job.canvas_run?.result_node_id;
       if (resultId) setSelectedNodeIds(new Set([resultId]));
     } catch (retryError) {
-      setError((retryError as Error).message);
+      setError(canvasRetryErrorMessage(retryError, mode));
     } finally {
       runSubmissionInFlight.current = false;
       if (saveQueued.current) void flushSave().catch(() => undefined);
@@ -3154,6 +3158,7 @@ function CanvasEditorInner({
                 projectId={projectId}
                 preview={preview}
                 job={previewJob}
+                nodes={document.nodes}
                 onCopyPrompt={previewNode && previewPrompt && isContentNode(previewNode)
                   ? () => void copyPrompt(previewNode)
                   : undefined}
@@ -3223,11 +3228,13 @@ function CanvasPreview({
   projectId,
   preview,
   job,
+  nodes,
   onCopyPrompt,
 }: {
   projectId: string;
   preview: PreviewState;
   job?: Job;
+  nodes: CanvasNode[];
   onCopyPrompt?: () => void;
 }) {
   const { version } = preview;
@@ -3256,10 +3263,12 @@ function CanvasPreview({
         )}
         {version.kind !== 'text' && <MetadataItem label="文件体积" value={formatCanvasBytes(version.bytes)} numeric />}
         {version.kind !== 'text' && <MetadataItem label="格式" value={version.mime_type} />}
-        {job?.canvas_run && <MetadataItem label="模型" value={job.canvas_run.snapshot.model} />}
         <MetadataItem label="创建时间" value={formatCanvasTimestamp(version.created_at)} numeric />
         <MetadataItem label="版本" value={version.version_id} technical />
       </dl>
+      {job?.canvas_run && (
+        <CanvasGenerationMetadata snapshot={job.canvas_run.snapshot} job={job} nodes={nodes} />
+      )}
       <DialogFooter>
         {onCopyPrompt && (
           <Button variant="outline" onClick={onCopyPrompt}>

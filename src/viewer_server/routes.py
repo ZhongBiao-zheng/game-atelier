@@ -2977,15 +2977,41 @@ def post_canvas_run_retry(
                 "current_revision": current_revision,
             }) from None
         messages = {
-            "run_not_terminal": "当前生成尚未结束，不能重试",
-            "result_node_missing": "原结果节点已被删除，不能在原位置重试",
-            "snapshot_input_missing": "原生成使用的输入版本已经不存在",
-            "snapshot_input_changed": "原生成使用的输入文件已经变化",
-            "snapshot_mask_missing": "原局部编辑使用的蒙版版本已经不存在",
-            "snapshot_mask_changed": "原局部编辑使用的蒙版文件已经变化",
-            "snapshot_model_missing": "原生成使用的密钥或模型已经不可用",
+            "run_not_terminal": (
+                "当前生成尚未结束，不能重试",
+                "等待当前生成结束，或先停止生成。",
+            ),
+            "result_node_missing": (
+                "原结果节点已被删除，不能在原位置重试",
+                "恢复结果节点，或新建生成节点后重新提交。",
+            ),
+            "snapshot_input_missing": (
+                "原生成使用的输入版本已经不存在",
+                "检查历史输入；如需使用画布当前内容，请按当前设置再次生成。",
+            ),
+            "snapshot_input_changed": (
+                "原生成使用的输入文件已经变化",
+                "恢复原文件；如需使用当前文件，请按当前设置再次生成。",
+            ),
+            "snapshot_mask_missing": (
+                "原局部编辑使用的蒙版版本已经不存在",
+                "重新绘制蒙版后，按当前设置再次生成。",
+            ),
+            "snapshot_mask_changed": (
+                "原局部编辑使用的蒙版文件已经变化",
+                "重新绘制蒙版后，按当前设置再次生成。",
+            ),
+            "snapshot_model_missing": (
+                "原生成使用的密钥或模型已经不可用",
+                "在节点设置中选择当前可用模型，再按当前设置生成。",
+            ),
         }
-        raise HTTPException(409, detail=messages.get(detail, detail)) from error
+        message, recovery = messages.get(detail, (detail, "检查画布当前状态后重试。"))
+        raise HTTPException(409, detail={
+            "code": detail,
+            "message": message,
+            "recovery": recovery,
+        }) from error
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
     from viewer_server import routes as _self
