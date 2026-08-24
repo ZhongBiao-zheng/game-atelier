@@ -140,6 +140,10 @@ Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程
 2 个、视频 1 个；HTTP 后台任务与重启恢复共用同一组门控。文本/图片允许候选批量，视频/音频固定单
 结果。旧 `POST .../jobs` 已删除。
 
+已有 Video Content Node 以 video Draft 提交时属于视频派生编辑：Snapshot 固定只冻结节点当前视频一个
+`implicit_self`，忽略该节点的 Input Connection，并在创建 Run 前拒绝 `@[node:*]` mention；结果始终写入
+独立视频节点与 generation-run Derivation Connection，不覆盖源节点。
+
 `POST /canvas/projects/{id}/runs/reverse-prompt` 只接受 `surface_node_id + expected_revision`。服务端固定
 `canvas.reverse_prompt` preset v1，优先全局 default Key、再按登记顺序选择首个 `modality=text`、
 `input_modalities` 明确包含 image 且支持 OpenAI-compatible chat 的模型；浏览器不能传 preset、alias、

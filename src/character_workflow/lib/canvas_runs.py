@@ -527,10 +527,20 @@ def _resolve_inputs(
     if self_version_id is not None and draft.mode != "audio":
         candidates.append(("implicit_self", surface.id))
 
+    editing_existing_video = (
+        surface.type == "video"
+        and draft.mode == "video"
+        and self_version_id is not None
+    )
+    if editing_existing_video and _MENTION.search(draft.prompt):
+        raise ValueError("视频编辑只使用当前视频，不接受其它节点引用")
+
     incoming = [
         edge for edge in document.connections
         if edge.role == "input" and edge.target_node_id == surface.id
     ]
+    if editing_existing_video:
+        incoming = []
     connected_ids = list(dict.fromkeys(edge.source_node_id for edge in incoming))
     mentioned_ids = list(dict.fromkeys(_MENTION.findall(draft.prompt)))
     unknown_mentions = [node_id for node_id in mentioned_ids if node_id not in connected_ids]

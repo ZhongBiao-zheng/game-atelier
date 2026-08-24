@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, Orbit, Paintbrush, Plus, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, ZoomIn } from 'lucide-react';
+import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, MessageSquare, Orbit, Paintbrush, Plus, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, ZoomIn } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { imageControlCaps } from '@/lib/imageControlCaps';
+import { VideoControls } from '@/components/studio/VideoControls';
 import { cn } from '@/lib/utils';
 import type {
   CanvasContentNode,
@@ -21,7 +22,12 @@ import type {
   CanvasNode,
 } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
-import { normalizeCanvasImageParams } from '@/pages/canvasEditorModel';
+import {
+  canvasVideoEditCaps,
+  normalizeCanvasImageParams,
+  normalizeCanvasVideoParams,
+  supportsCanvasVideoEdit,
+} from '@/pages/canvasEditorModel';
 
 export type FlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
 
@@ -54,6 +60,7 @@ export interface CanvasNodeContextValue {
   openMediaOperation: (node: CanvasContentNode, tool: CanvasMediaTool) => void;
   openMaskEdit: (node: CanvasContentNode) => void;
   openAngle: (node: CanvasContentNode) => void;
+  editVideo: (node: CanvasContentNode) => void;
   deleteNode: (id: string) => void;
 }
 
@@ -170,6 +177,15 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               onClick={() => context.replaceMedia(node)}
             >
               {replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}
+            </MediaToolButton>
+          )}
+          {node.type === 'video' && content?.kind === 'video' && (
+            <MediaToolButton
+              label={`编辑视频 ${node.title}`}
+              disabled={submittingNode || replacingMedia}
+              onClick={() => context.editVideo(node)}
+            >
+              <MessageSquare />
             </MediaToolButton>
           )}
           {node.type === 'image' && content?.kind === 'image' && (
@@ -331,10 +347,28 @@ export function CanvasGenerationComposer({
   context: CanvasNodeContextValue;
   embedded?: boolean;
 }) {
-  const availableKeys = context.keys.filter(key => key.models.some(model => modelModality(model, key) === draft.mode));
+  const editingExistingVideo = draft.mode === 'video'
+    && node.type === 'video'
+    && Boolean(node.data.current_version_id);
+  const acceptsModel = (model: KeyView['models'][number], key: KeyView) => (
+    modelModality(model, key) === draft.mode
+    && (!editingExistingVideo || supportsCanvasVideoEdit(model.id, model.protocol))
+  );
+  const availableKeys = context.keys.filter(key => key.models.some(model => acceptsModel(model, key)));
   const selectedKey = context.keys.find(key => key.alias === draft.alias);
-  const models = (selectedKey?.models ?? []).filter(model => modelModality(model, selectedKey) === draft.mode);
+  const models = (selectedKey?.models ?? []).filter(model => acceptsModel(model, selectedKey!));
+  const selectedModel = models.find(model => model.id === draft.model);
   const imageCaps = draft.mode === 'image' ? imageControlCaps(draft.model, selectedKey?.provider) : null;
+  const rawVideoCaps = draft.mode === 'video'
+    ? canvasVideoEditCaps(draft.model, selectedModel?.protocol)
+    : null;
+  const videoCaps = rawVideoCaps && editingExistingVideo
+    ? { ...rawVideoCaps, modes: rawVideoCaps.modes.filter(mode => mode === 'omni') }
+    : rawVideoCaps;
+  const videoMode = videoCaps?.modes.includes('omni')
+    && (editingExistingVideo || draft.params.frame_mode === 'auto')
+    ? 'omni'
+    : videoCaps?.modes[0] ?? 'firstlast';
   const runId = activeRunId(node);
   const activeJob = runId ? context.jobsByRunId.get(runId) : undefined;
   const submitting = context.submittingNodeIds.has(node.id);
@@ -383,13 +417,16 @@ export function CanvasGenerationComposer({
           onFocus={context.recordHistory}
           onChange={event => {
             const key = context.keys.find(item => item.alias === event.target.value);
-            const model = key?.models.find(item => modelModality(item, key) === draft.mode)?.id ?? '';
+            const selected = key?.models.find(item => acceptsModel(item, key));
+            const model = selected?.id ?? '';
             updateDraft(current => ({
               ...current,
               alias: event.target.value || null,
               model,
               params: draft.mode === 'image'
                 ? normalizeCanvasImageParams(model, key?.provider, current.params)
+                : draft.mode === 'video'
+                  ? normalizeCanvasVideoParams(model, selected?.protocol, current.params, editingExistingVideo)
                 : current.params,
               updated_at: new Date().toISOString(),
             }));
@@ -408,6 +445,13 @@ export function CanvasGenerationComposer({
             model: event.target.value,
             params: draft.mode === 'image'
               ? normalizeCanvasImageParams(event.target.value, selectedKey?.provider, current.params)
+              : draft.mode === 'video'
+                ? normalizeCanvasVideoParams(
+                    event.target.value,
+                    models.find(model => model.id === event.target.value)?.protocol,
+                    current.params,
+                    editingExistingVideo,
+                  )
               : current.params,
             updated_at: new Date().toISOString(),
           }))}
@@ -431,7 +475,7 @@ export function CanvasGenerationComposer({
             {[1, 2, 3, 4].map(value => <option key={value} value={value}>{value} 个候选</option>)}
           </select>
         )}
-        {draft.mode !== 'text' && draft.mode !== 'audio' && (
+        {draft.mode === 'image' && (
           <select
             aria-label="比例"
             value={String(draft.params.ratio ?? (draft.mode === 'image' ? '1:1' : '16:9'))}
@@ -445,6 +489,47 @@ export function CanvasGenerationComposer({
           >
             {(imageCaps?.ratios ?? ['1:1', '16:9', '9:16', '4:3', '3:4']).map(value => <option key={value}>{value}</option>)}
           </select>
+        )}
+        {draft.mode === 'video' && videoCaps && (
+          <VideoControls
+            caps={videoCaps}
+            mode={videoMode}
+            duration={Number(draft.params.duration ?? videoCaps.durations[0] ?? 5)}
+            resolution={String(draft.params.resolution ?? videoCaps.resolutions[0] ?? '720p')}
+            ratio={String(draft.params.ratio ?? videoCaps.ratios[0] ?? '16:9')}
+            quality={draft.params.mode === 'pro' ? 'pro' : 'std'}
+            generateAudio={draft.params.generate_audio !== false}
+            onModeChange={mode => updateDraft(current => ({
+              ...current,
+              params: { ...current.params, frame_mode: mode === 'omni' ? 'auto' : 'firstlast' },
+              updated_at: new Date().toISOString(),
+            }))}
+            onDurationChange={duration => updateDraft(current => ({
+              ...current,
+              params: { ...current.params, duration },
+              updated_at: new Date().toISOString(),
+            }))}
+            onResolutionChange={resolution => updateDraft(current => ({
+              ...current,
+              params: { ...current.params, resolution },
+              updated_at: new Date().toISOString(),
+            }))}
+            onRatioChange={ratio => updateDraft(current => ({
+              ...current,
+              params: { ...current.params, ratio },
+              updated_at: new Date().toISOString(),
+            }))}
+            onQualityChange={quality => updateDraft(current => ({
+              ...current,
+              params: { ...current.params, mode: quality },
+              updated_at: new Date().toISOString(),
+            }))}
+            onGenerateAudioChange={generateAudio => updateDraft(current => ({
+              ...current,
+              params: { ...current.params, generate_audio: generateAudio },
+              updated_at: new Date().toISOString(),
+            }))}
+          />
         )}
         {draft.mode === 'audio' && (
           <>
@@ -508,7 +593,7 @@ export function CanvasGenerationComposer({
             <Button
               type="button"
               size="sm"
-              disabled={submitting || !draft.prompt.trim() || !draft.alias || !draft.model}
+              disabled={submitting || !draft.prompt.trim() || !draft.alias || !selectedModel}
               onClick={() => void context.retryRun(node.id, runId, 'current')}
             >
               {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
@@ -521,7 +606,7 @@ export function CanvasGenerationComposer({
             type="button"
             size="sm"
             className="ml-auto"
-            disabled={submitting || !draft.prompt.trim() || !draft.alias || !draft.model}
+            disabled={submitting || !draft.prompt.trim() || !draft.alias || !selectedModel}
             onClick={() => void context.submitRun(node.id)}
           >
             {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
@@ -682,6 +767,7 @@ export function CanvasInspector({
   onCrop,
   onMaskEdit,
   onAngle,
+  onEditVideo,
   onSplit,
   onUpscale,
   replaceMediaBusy = false,
@@ -706,6 +792,7 @@ export function CanvasInspector({
   onCrop?: () => void;
   onMaskEdit?: () => void;
   onAngle?: () => void;
+  onEditVideo?: () => void;
   onSplit?: () => void;
   onUpscale?: () => void;
   replaceMediaBusy?: boolean;
@@ -758,6 +845,9 @@ export function CanvasInspector({
           )}
           {content?.kind === 'image' && onAngle && (
             <Button variant="ghost" size="icon" disabled={replaceMediaBusy || reversePromptBusy} aria-label={`多角度 ${node.title}`} onClick={onAngle}><Orbit /></Button>
+          )}
+          {content?.kind === 'video' && onEditVideo && (
+            <Button variant="ghost" size="icon" disabled={replaceMediaBusy || reversePromptBusy} aria-label={`编辑视频 ${node.title}`} onClick={onEditVideo}><MessageSquare /></Button>
           )}
           {content?.kind === 'image' && onSplit && (
             <Button variant="ghost" size="icon" disabled={replaceMediaBusy} aria-label={`切分 ${node.title}`} onClick={onSplit}><Grid2X2 /></Button>

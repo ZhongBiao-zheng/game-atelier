@@ -121,7 +121,11 @@ import type {
 } from '@/schema/canvas';
 import type { Job, JobKind } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
-import { normalizeCanvasImageParams } from './canvasEditorModel';
+import {
+  normalizeCanvasImageParams,
+  normalizeCanvasVideoParams,
+  supportsCanvasVideoEdit,
+} from './canvasEditorModel';
 
 interface CreateMenuState {
   screen: XYPosition;
@@ -937,7 +941,8 @@ function CanvasEditorInner({
 
   function addGenerationNode(kind: JobKind, menu: CreateMenuState | null = createMenu) {
     const key = firstKeyForKind(keys, kind);
-    const model = key?.models.find(item => modelModality(item, key) === kind)?.id ?? '';
+    const selectedModel = key?.models.find(item => modelModality(item, key) === kind);
+    const model = selectedModel?.id ?? '';
     const now = new Date().toISOString();
     const draft = {
       mode: kind,
@@ -948,7 +953,11 @@ function CanvasEditorInner({
       params: kind === 'image'
         ? normalizeCanvasImageParams(model, key?.provider, { n: 1, ratio: '1:1' })
         : kind === 'video'
-          ? { duration: 5, ratio: '16:9', resolution: '720p', generate_audio: true }
+          ? normalizeCanvasVideoParams(
+              model,
+              selectedModel?.protocol,
+              { duration: 5, ratio: '16:9', resolution: '720p', generate_audio: true },
+            )
           : kind === 'audio'
             ? { voice: 'alloy', response_format: 'mp3', speed: 1 }
             : { n: 1 },
@@ -1704,6 +1713,65 @@ function CanvasEditorInner({
     setAngleState({ nodeId: node.id, title: node.title, version });
   }, []);
 
+  const editVideo = useCallback((node: CanvasContentNode) => {
+    const versionId = node.data.current_version_id;
+    const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
+    if (node.type !== 'video' || !version || version.kind !== 'video') {
+      setError('这个节点没有可编辑的视频版本。');
+      return;
+    }
+    const existingDraft = node.data.generation_draft?.mode === 'video'
+      ? node.data.generation_draft
+      : null;
+    const existingKey = existingDraft
+      ? keys.find(key => key.alias === existingDraft.alias)
+      : null;
+    const existingModel = existingKey?.models.find(model => (
+      model.id === existingDraft?.model
+      && modelModality(model, existingKey) === 'video'
+      && supportsCanvasVideoEdit(model.id, model.protocol)
+    ));
+    const fallback = firstVideoEditModel(keys);
+    const key = existingModel && existingKey ? existingKey : fallback?.key;
+    const model = existingModel ?? fallback?.model;
+    if (!key || !model) {
+      setError('未配置支持参考视频的生成模型。请先在设置中接入 Seedance 2.x 等兼容模型。');
+      return;
+    }
+    const now = new Date().toISOString();
+    const prompt = existingDraft?.prompt
+      || copyablePromptForNode(node, jobsByResultNodeId)
+      || '';
+    const draft = {
+      mode: 'video' as const,
+      prompt,
+      input_policy: existingDraft?.input_policy ?? 'all_connected' as const,
+      model: model.id,
+      alias: key.alias,
+      params: normalizeCanvasVideoParams(
+        model.id,
+        model.protocol,
+        existingDraft?.params ?? {},
+        true,
+      ),
+      updated_at: now,
+    };
+    setPreview(null);
+    setMediaOperation(null);
+    setMaskEdit(null);
+    setAngleState(null);
+    setError(null);
+    commit(current => ({
+      ...current,
+      nodes: current.nodes.map(candidate => candidate.id === node.id && candidate.type === 'video'
+        ? { ...candidate, data: { ...candidate.data, generation_draft: draft } }
+        : candidate),
+    }), true);
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([node.id]));
+    announceToolNotice(`已打开“${node.title}”的视频编辑设置`);
+  }, [announceToolNotice, commit, jobsByResultNodeId, keys]);
+
   const submitAngle = useCallback(async (params: CanvasAngleParams) => {
     if (!angleState || runSubmissionInFlight.current) return;
     setAngleBusy(true);
@@ -1850,6 +1918,7 @@ function CanvasEditorInner({
     openMediaOperation,
     openMaskEdit,
     openAngle,
+    editVideo,
     deleteNode,
   }), [
     assets?.revision,
@@ -1857,6 +1926,7 @@ function CanvasEditorInner({
     copyPrompt,
     deleteNode,
     document?.content_versions,
+    editVideo,
     jobsByResultNodeId,
     jobsByRunId,
     keys,
@@ -2083,6 +2153,10 @@ function CanvasEditorInner({
             onAngle={selectedContentNode.type === 'image'
               && selectedContentNode.data.current_version_id
               ? () => openAngle(selectedContentNode)
+              : undefined}
+            onEditVideo={selectedContentNode.type === 'video'
+              && selectedContentNode.data.current_version_id
+              ? () => editVideo(selectedContentNode)
               : undefined}
             replaceMediaBusy={mediaReplaceBusyNodeIds.has(selectedContentNode.id)}
             onCrop={() => openMediaOperation(selectedContentNode, 'crop')}
@@ -2324,6 +2398,17 @@ function formatCanvasTimestamp(value: string) {
 
 function firstKeyForKind(keys: KeyView[], kind: JobKind) {
   return keys.find(key => key.models.some(model => modelModality(model, key) === kind));
+}
+
+function firstVideoEditModel(keys: KeyView[]) {
+  for (const key of keys) {
+    const model = key.models.find(candidate => (
+      modelModality(candidate, key) === 'video'
+      && supportsCanvasVideoEdit(candidate.id, candidate.protocol)
+    ));
+    if (model) return { key, model };
+  }
+  return null;
 }
 
 function pointerPosition(event: MouseEvent | TouchEvent): XYPosition | null {
