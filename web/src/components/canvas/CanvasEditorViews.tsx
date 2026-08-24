@@ -7,6 +7,7 @@ import { modelModality, type KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
 import type { CanvasMediaTool } from '@/components/canvas/CanvasMediaOperationDialog';
+import { formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
 import { orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import {
   DropdownMenu,
@@ -48,6 +49,7 @@ export interface CanvasNodeContextValue {
   mediaReplaceError: { nodeId: string; message: string } | null;
   canvasUiPreferences: CanvasUiPreferences;
   canvasUiPreferencesError: string | null;
+  showImageInfo: boolean;
   libraryBusy: boolean;
   selectNode: (id: string) => void;
   previewContent: (id: string, title: string, nodeId: string) => void;
@@ -284,6 +286,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           )}
           {content && content.kind !== 'text' && (
             <MediaPreview kind={content.kind} src={canvasMediaUrl(context.projectId, content.version_id)} />
+          )}
+          {node.type === 'image' && content?.kind === 'image' && context.showImageInfo && (
+            <span className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-[calc(100%-1.5rem)] truncate rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium tabular-nums text-foreground backdrop-blur-glass">
+              {formatCanvasImageInfo(content)}
+            </span>
           )}
           {node.type !== 'text' && !content && (
             <div className="grid min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">

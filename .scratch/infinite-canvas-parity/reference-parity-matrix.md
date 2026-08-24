@@ -144,7 +144,7 @@ Status: ready-for-human
 | E08 | 任意行列切图并生成子节点 | `canvas-node-split-dialog.tsx` | same result, server-owned files | full |
 | E09 | 本地放大到目标长边 | `canvas-node-upscale-dialog.tsx` | adapted：浏览器/服务端算子待票 09 决定 | full |
 | E10 | 多角度生成 | `CanvasNodeAngleDialog` + `generateAngleNode` | adapted：图片生成 Job | full |
-| E11 | 大图查看和图片详情 | preview modal/info modal | same | partial |
+| E11 | 大图查看和图片详情 | preview modal/info modal | same：节点显示当前 Version 宽高/体积，详情保留完整 metadata，见 issue 21 | full |
 | E12 | 自定义图片节点快捷工具与是否显示文字 | toolbar settings + localStorage | adapted：应用级 `.config/canvas-ui.json`，revision/原子写，见 issue 20 | full |
 | E13 | AI 超分入口 | `project.tsx` 只显示“暂未实现” | excluded：不是已交付功能；若要做是产品新增 | n/a |
 | E14 | 视频编辑 prompt 入口 | hover toolbar `isVideo -> edit` | adapted：视频派生 Job | full |
@@ -212,7 +212,7 @@ Status: ready-for-human
 | I04 | hover 工具条位于节点上方 | `canvas-node-hover-toolbar.tsx` | same | partial |
 | I05 | composer 是节点下方独立浮层并随节点移动 | prompt/config components | same | partial |
 | I06 | 连接柄位于节点左右中部，边低对比 | node/connections | same behavior + Atelier colors | partial |
-| I07 | 浅/深主题、点/线/空白背景 | theme/appearance runtime | adapted：Atelier token | full |
+| I07 | 浅/深主题、点/线/空白背景 | theme/appearance runtime | adapted：固定 Atelier 暗色 token；外观菜单明确选择点/线/空白并持久化 | full |
 | I08 | 画布和 Agent/左栏适配窄屏 | components + pending tests | adapted：375/768 明确可用降级 | full |
 | I09 | 逐像素复制 Ant Design、白色工具条、字体与品牌色 | reference implementation detail | excluded：与“适配原项目”冲突 | n/a |
 

@@ -265,7 +265,7 @@ class CanvasViewport(BaseModel):
 
 class CanvasSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    background: Literal["lines", "dots", "grid", "none"] = "none"
+    background: Literal["lines", "dots", "none"] = "none"
     show_image_info: bool = True
 
 

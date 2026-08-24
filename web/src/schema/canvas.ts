@@ -7,7 +7,7 @@ export interface CanvasSize { width: number; height: number }
 export interface CanvasViewport { x: number; y: number; zoom: number }
 
 export interface CanvasSettings {
-  background: 'lines' | 'dots' | 'grid' | 'none';
+  background: 'lines' | 'dots' | 'none';
   show_image_info: boolean;
 }
 

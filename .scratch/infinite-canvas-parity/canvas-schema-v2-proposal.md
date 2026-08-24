@@ -96,7 +96,7 @@ interface CanvasDocument {
 }
 
 interface CanvasSettings {
-  background: 'lines' | 'dots' | 'grid' | 'none';
+  background: 'lines' | 'dots' | 'none';
   show_image_info: boolean;
 }
 ```

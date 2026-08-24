@@ -19,18 +19,21 @@ import {
 import {
   ArrowLeft,
   ChevronDown,
+  CircleDot,
   ClipboardCopy,
   Download,
   FileAudio,
   FileImage,
   FileVideo,
   Grid2X2,
+  Info,
   Library,
   LoaderCircle,
   Maximize2,
   MousePointer2,
   Plus,
   Redo2,
+  Square,
   Type,
   Undo2,
   Upload,
@@ -95,12 +98,23 @@ import {
   type CanvasMediaTool,
 } from '@/components/canvas/CanvasMediaOperationDialog';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from '@/components/canvas/canvasImageToolbar';
+import { formatCanvasBytes } from '@/components/canvas/canvasMediaFormatting';
 import {
   CANVAS_LIBRARY_DRAG_TYPE,
   CanvasLibraryPanel,
   type CanvasLibraryMode,
 } from '@/components/canvas/CanvasLibraryPanel';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -1945,6 +1959,7 @@ function CanvasEditorInner({
     mediaReplaceError,
     canvasUiPreferences,
     canvasUiPreferencesError,
+    showImageInfo: document?.settings.show_image_info ?? true,
     libraryBusy,
     selectNode: selectOnlyNode,
     previewContent,
@@ -1976,6 +1991,7 @@ function CanvasEditorInner({
     copyPrompt,
     deleteNode,
     document?.content_versions,
+    document?.settings.show_image_info,
     editVideo,
     jobsByResultNodeId,
     jobsByRunId,
@@ -2096,7 +2112,56 @@ function CanvasEditorInner({
             <ToolButton label="撤销" disabled={history.current.past.length === 0} onClick={undo}><Undo2 /></ToolButton>
             <ToolButton label="重做" disabled={history.current.future.length === 0} onClick={redo}><Redo2 /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
-            <ToolButton label="切换画布背景" active={document.settings.background !== 'none'} onClick={() => commit(current => ({ ...current, settings: { ...current.settings, background: nextBackground(current.settings.background) } }), true)}><Grid2X2 /></ToolButton>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  title="画布外观"
+                  aria-label="画布外观"
+                  className="grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:bg-primary data-[state=open]:text-primary-foreground"
+                >
+                  <Grid2X2 aria-hidden="true" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="right" align="end" className="w-48 rounded-xl">
+                <DropdownMenuLabel>画布背景</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={document.settings.background}
+                  onValueChange={value => {
+                    if (value !== 'none' && value !== 'dots' && value !== 'lines') return;
+                    if (value === document.settings.background) return;
+                    commit(current => ({
+                      ...current,
+                      settings: {
+                        ...current.settings,
+                        background: value,
+                      },
+                    }), true);
+                  }}
+                >
+                  {([
+                    ['none', '空白', Square],
+                    ['dots', '点阵', CircleDot],
+                    ['lines', '线框', Grid2X2],
+                  ] as const).map(([value, label, Icon]) => (
+                    <DropdownMenuRadioItem key={value} value={value} className="gap-2">
+                      <Icon className="size-4" aria-hidden="true" />{label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem
+                  checked={document.settings.show_image_info}
+                  className="gap-2"
+                  onCheckedChange={checked => commit(current => ({
+                    ...current,
+                    settings: { ...current.settings, show_image_info: checked },
+                  }), true)}
+                >
+                  <Info className="size-4" aria-hidden="true" />显示图片信息
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <ToolButton label="适应全部节点" onClick={() => void fitView({ duration: 150, padding: 0.12 })}><Maximize2 /></ToolButton>
           </div>
           {addOpen && (
@@ -2362,7 +2427,7 @@ function CanvasPreview({
         {version.kind !== 'text' && version.width && version.height && (
           <MetadataItem label="尺寸" value={`${version.width} × ${version.height}`} numeric />
         )}
-        {version.kind !== 'text' && <MetadataItem label="文件体积" value={formatBytes(version.bytes)} numeric />}
+        {version.kind !== 'text' && <MetadataItem label="文件体积" value={formatCanvasBytes(version.bytes)} numeric />}
         {version.kind !== 'text' && <MetadataItem label="格式" value={version.mime_type} />}
         {job?.canvas_run && <MetadataItem label="模型" value={job.canvas_run.snapshot.model} />}
         <MetadataItem label="创建时间" value={formatCanvasTimestamp(version.created_at)} numeric />
@@ -2436,12 +2501,6 @@ function contentOriginLabel(version: CanvasContentVersion, job?: Job) {
   return '本地放大';
 }
 
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
 function formatCanvasTimestamp(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN');
@@ -2504,14 +2563,8 @@ function providesContent(node: CanvasNode) {
 
 function backgroundVariant(background: CanvasDocument['settings']['background']) {
   if (background === 'dots') return BackgroundVariant.Dots;
-  if (background === 'lines' || background === 'grid') return BackgroundVariant.Lines;
+  if (background === 'lines') return BackgroundVariant.Lines;
   return null;
-}
-
-function nextBackground(background: CanvasDocument['settings']['background']): CanvasDocument['settings']['background'] {
-  if (background === 'none') return 'dots';
-  if (background === 'dots') return 'lines';
-  return 'none';
 }
 
 function replacementAccept(kind: MediaReplaceTarget['kind']) {

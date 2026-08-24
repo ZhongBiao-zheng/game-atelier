@@ -106,6 +106,10 @@ Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径�
 `schema_version: 2`，不包含 v1 union、fallback 或 converter。
 客户端在所有视口共用同一份 revision 化 Document；响应式面板、焦点、选择与媒体预览都是本地呈现状态，
 不会进入 `canvas.json`。预览媒体仍只通过已登记 `version_id` 读取，不从节点或 Job 拼接裸路径。
+画布外观属于作者可撤销的项目设置：`settings.background` 明确选择空白、点阵或线框，
+`settings.show_image_info` 控制图片节点是否展示当前不可变 Content Version 的真实宽高与文件体积。
+二者随普通 Document revision 保存并参与 Web undo/redo；图片详情 Dialog 始终保留完整 metadata，不受节点
+信息条开关影响。
 媒体 Content Version 的 `path` 始终相对当前画布项目目录；资产库与提示词使用 revision 化 sidecar，插件
 私有状态使用带 plugin id/version 的独立 envelope，不把这些业务对象塞回热路径 `canvas.json`。
 
