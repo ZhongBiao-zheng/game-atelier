@@ -531,7 +531,7 @@ export function PromptInput({
   const [localH, setLocalH] = useState(initSize.h);
   const [sizeLocked, setSizeLocked] = useState(true);
   // 能力四项按模型族判（provider 只决定端点/协议，openrouter 另外改 size 语义）。
-  const caps = imageControlCaps(selectedModel?.id, provider?.provider);
+  const caps = imageControlCaps(selectedModel?.id, provider?.provider, selectedModel?.protocol);
   // MJ 的比例/版本/stylize 由渠道固定注入，张数也固定 4 —— 这些控件不能装作可选。
   const isMj = caps.family === 'midjourney';
   const maxRef = maxReferenceImages(selectedModel?.id);

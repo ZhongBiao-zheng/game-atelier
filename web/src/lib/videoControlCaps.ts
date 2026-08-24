@@ -33,6 +33,8 @@ export interface VideoControlCaps {
   qualities?: VideoQuality[];
   /** 是否支持「生成音频」开关（params.generate_audio）。 */
   supportsAudio: boolean;
+  /** 是否支持显式控制成片水印。 */
+  supportsWatermark: boolean;
   /** 是否支持参考视频（params.reference_videos）。 */
   supportsReferenceVideo: boolean;
   /** 是否支持参考音频（params.reference_audios）。 */
@@ -66,6 +68,7 @@ function seedanceCaps(id: string): VideoControlCaps {
       resolutions: ['480p', '720p', '1080p'],
       ratios: is15 ? SEEDANCE_RATIOS : SEEDANCE_RATIOS.filter((r) => r !== 'adaptive'),
       supportsAudio: is15,
+      supportsWatermark: true,
       supportsReferenceVideo: false,
       supportsReferenceAudio: false,
       maxFrames: 2,
@@ -92,6 +95,7 @@ function seedanceCaps(id: string): VideoControlCaps {
     resolutions,
     ratios: SEEDANCE_RATIOS,
     supportsAudio: true,
+    supportsWatermark: true,
     supportsReferenceVideo: true,
     supportsReferenceAudio: true,
     maxFrames: 2,
@@ -109,6 +113,7 @@ const HAPPYHORSE_BASE = {
   resolutions: ['720P', '1080P'],
   durations: durationRange(3, 15),
   supportsAudio: false,
+  supportsWatermark: true,
   supportsReferenceVideo: false,
   supportsReferenceAudio: false,
 };
@@ -146,6 +151,7 @@ const OPENROUTER_VIDEO_CAPS: VideoControlCaps = {
   resolutions: [],
   ratios: ['16:9', '9:16', '1:1'],
   supportsAudio: true,
+  supportsWatermark: false,
   supportsReferenceVideo: false,
   supportsReferenceAudio: false,
   maxFrames: 2,
@@ -158,6 +164,7 @@ const STANDARD_CAPS: VideoControlCaps = {
   resolutions: ['720p'],
   ratios: ['16:9', '9:16', '1:1'],
   supportsAudio: false,
+  supportsWatermark: false,
   supportsReferenceVideo: false,
   supportsReferenceAudio: false,
   maxFrames: 2,
@@ -180,6 +187,7 @@ function klingCaps(id: string): VideoControlCaps {
     ratios: isO1 ? ['16:9', '9:16', '1:1'] : KLING_RATIOS,
     qualities: isV26 || isMaster ? undefined : ['std', 'pro'],
     supportsAudio: isV26,
+    supportsWatermark: false,
     supportsReferenceVideo: false,
     supportsReferenceAudio: false,
     maxFrames: 2,

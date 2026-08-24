@@ -694,9 +694,13 @@ def _validate_input_capabilities(
 def _normalized_params(
     draft: CanvasGenerationDraft,
     requested_count: int,
-) -> tuple[dict[str, Any], JobParams]:
+    key: KeySpec,
+    model: ModelSpec,
+) -> tuple[dict[str, Any], JobParams, int]:
+    from character_workflow.lib.callers.openai_image import image_family, resolve_image_protocol
+
     normalized = draft.params.model_dump(mode="json", exclude_none=True)
-    for key in (
+    for field in (
         "actual_size",
         "warnings",
         "requested_size",
@@ -704,14 +708,40 @@ def _normalized_params(
         "reference_videos",
         "reference_audios",
     ):
-        normalized.pop(key, None)
-    if draft.mode in {"text", "image"}:
-        normalized["n"] = requested_count
+        normalized.pop(field, None)
+    normalized.pop("background", None)
+    normalized.pop("watermark", None)
+    effective_count = requested_count
+    if draft.mode == "image":
+        family = image_family(model.id)
+        if family == "midjourney":
+            effective_count = 4
+        protocol = model.protocol or resolve_image_protocol(
+            key.provider,
+            key.base_url,
+            model.id,
+        )
+        if (
+            family == "gpt-image"
+            and key.provider != "openrouter"
+            and protocol in {None, "openai"}
+            and draft.params.background is not None
+        ):
+            normalized["background"] = draft.params.background
+        normalized["n"] = effective_count
+    elif draft.mode == "text":
+        normalized["n"] = effective_count
     else:
         if requested_count != 1:
             raise ValueError("视频与音频生成一次只允许一个结果")
         normalized.pop("n", None)
-    return normalized, JobParams(**normalized)
+        if (
+            draft.mode == "video"
+            and model.protocol in {"seedance", "dashscope"}
+            and draft.params.watermark is not None
+        ):
+            normalized["watermark"] = draft.params.watermark
+    return normalized, JobParams(**normalized), effective_count
 
 
 def _with_active_run(node: CanvasNode, run_id: str) -> CanvasNode:
@@ -942,7 +972,12 @@ def submit_canvas_run(
         if draft is None:
             raise ValueError("当前节点没有可提交的生成设置")
         key, model, kind = _resolve_key_and_model(draft)
-        normalized, job_params = _normalized_params(draft, requested_count)
+        normalized, job_params, effective_count = _normalized_params(
+            draft,
+            requested_count,
+            key,
+            model,
+        )
         inputs = _resolve_inputs(current, surface, draft)
         _validate_input_capabilities(model, kind, inputs, job_params)
         final_prompt = _render_final_prompt(current, draft, inputs)
@@ -963,7 +998,7 @@ def submit_canvas_run(
             normalized=normalized,
             job_params=job_params,
             inputs=inputs,
-            requested_count=requested_count,
+            requested_count=effective_count,
             result_title={
                 "text": "生成文本",
                 "image": "生成图片",
@@ -1089,7 +1124,12 @@ def submit_mask_edit_run(
                     "canvas_media_capability_missing",
                     "当前模型不支持局部蒙版编辑，请选择 GPT Image 兼容模型。",
                 )
-            normalized, job_params = _normalized_params(draft, requested_count)
+            normalized, job_params, effective_count = _normalized_params(
+                draft,
+                requested_count,
+                key,
+                model,
+            )
             unsupported_mentions = [
                 node_id for node_id in _MENTION.findall(draft.prompt)
                 if node_id != surface.id
@@ -1162,7 +1202,7 @@ def submit_mask_edit_run(
                 normalized=normalized,
                 job_params=job_params,
                 inputs=inputs,
-                requested_count=requested_count,
+                requested_count=effective_count,
                 result_title="局部编辑",
                 result_draft=draft,
                 allow_surface_reuse=False,

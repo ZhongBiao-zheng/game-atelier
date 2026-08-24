@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { useRef, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 
 import {
@@ -295,4 +296,111 @@ it.each(generationNodes)('uses the shared independent panel for $title', (genera
     </CanvasNodeContext.Provider>,
   );
   expect(screen.getByRole('region', { name: label })).toHaveAttribute('data-floating-node-panel', 'true');
+});
+
+it('opens video controls from the node generation panel', () => {
+  const videoNode = generationNodes[2][0];
+  const key = {
+    alias: 'video-key', provider: 'seedance', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
+    models: [{ id: 'seedance-2.0', name: 'Seedance 2.0', modality: 'video' as const, protocol: 'seedance' }],
+  };
+  const generationDraft = {
+    ...draft,
+    mode: 'video' as const,
+    alias: key.alias,
+    model: key.models[0].id,
+    params: { duration: 5, resolution: '720p', ratio: '16:9' },
+  };
+  const configuredNode = {
+    ...videoNode,
+    data: { ...videoNode.data, generation_draft: generationDraft },
+  } as CanvasNode;
+  render(
+    <CanvasNodeContext.Provider value={nodeContext({ keys: [key] })}>
+      <NodeCard data={{ domain: configuredNode }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: /^视频生成设置$/ }));
+  expect(screen.getByTestId('video-settings-popover')).toBeInTheDocument();
+  expect(screen.getByText('视频水印')).toBeInTheDocument();
+});
+
+it('records text candidate changes but ignores the already selected value', () => {
+  const recordHistory = vi.fn();
+  const textNode = generationNodes[0][0];
+  render(
+    <CanvasNodeContext.Provider value={nodeContext({ recordHistory })}>
+      <NodeCard data={{ domain: textNode }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: '文本生成设置' }));
+  fireEvent.click(screen.getByRole('option', { name: '1 个' }));
+  expect(recordHistory).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('option', { name: '2 个' }));
+  expect(recordHistory).toHaveBeenCalledOnce();
+});
+
+it('undoes and redoes image parameter changes as atomic history entries', () => {
+  const imageKey = {
+    alias: 'image-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
+    models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' as const, protocol: 'openai' }],
+  };
+  const initialNode = {
+    ...generationNodes[1][0],
+    data: {
+      ...generationNodes[1][0].data,
+      generation_draft: {
+        ...draft,
+        alias: imageKey.alias,
+        model: imageKey.models[0].id,
+        params: { n: 1, ratio: '1:1', quality: 'low', size: '2048x2048' },
+      },
+    },
+  } as CanvasNode;
+
+  function HistoryHarness() {
+    const [current, setCurrent] = useState(initialNode);
+    const past = useRef<CanvasNode[]>([]);
+    const future = useRef<CanvasNode[]>([]);
+    const context = nodeContext({
+      keys: [imageKey],
+      recordHistory: () => {
+        past.current.push(current);
+        future.current = [];
+      },
+      updateNode: (_nodeId, updater) => setCurrent(value => updater(value)),
+    });
+    return (
+      <CanvasNodeContext.Provider value={context}>
+        <NodeCard data={{ domain: current }} selected />
+        <button type="button" onClick={() => {
+          const previous = past.current.pop();
+          if (!previous) return;
+          future.current.push(current);
+          setCurrent(previous);
+        }}>history undo</button>
+        <button type="button" onClick={() => {
+          const next = future.current.pop();
+          if (!next) return;
+          past.current.push(current);
+          setCurrent(next);
+        }}>history redo</button>
+      </CanvasNodeContext.Provider>
+    );
+  }
+
+  render(<HistoryHarness />);
+  const settings = screen.getByRole('button', { name: '打开图片参数' });
+  fireEvent.click(settings);
+  fireEvent.click(screen.getByRole('option', { name: '4:3' }));
+  expect(settings).toHaveTextContent('4:3');
+
+  fireEvent.click(screen.getByRole('button', { name: 'history undo' }));
+  expect(screen.getByRole('button', { name: '打开图片参数' })).toHaveTextContent('1:1');
+
+  fireEvent.click(screen.getByRole('button', { name: 'history redo' }));
+  expect(screen.getByRole('button', { name: '打开图片参数' })).toHaveTextContent('4:3');
 });

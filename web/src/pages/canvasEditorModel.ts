@@ -95,10 +95,12 @@ export function normalizeCanvasImageParams(
   model: string,
   provider: string | null | undefined,
   current: JobParams,
+  protocol?: string | null,
 ): JobParams {
-  const caps = imageControlCaps(model, provider);
+  const caps = imageControlCaps(model, provider, protocol);
   const {
     quality: currentQuality,
+    background: currentBackground,
     reference_images: _referenceImages,
     reference_videos: _referenceVideos,
     reference_audios: _referenceAudios,
@@ -110,7 +112,7 @@ export function normalizeCanvasImageParams(
   const ratio = caps.ratios.includes(currentRatio) ? currentRatio : caps.ratios[0];
   const n = caps.family === 'midjourney'
     ? MJ_IMAGES_PER_TASK
-    : 1;
+    : Math.max(1, Math.min(4, Number(current.n) || 1));
   const params: JobParams = { ...retained, n, ratio };
 
   if (caps.showResolution && caps.resolutions.length) {
@@ -123,11 +125,21 @@ export function normalizeCanvasImageParams(
       ? currentQuality
       : caps.qualities[0];
   }
+  if (caps.supportsTransparentBackground
+    && ['auto', 'opaque', 'transparent'].includes(String(currentBackground))) {
+    params.background = currentBackground;
+  }
   if (caps.sizeKind === 'ratio') {
     params.size = ratio;
   } else if (caps.sizeKind === 'pixels') {
     const resolution = (params.resolution as Resolution | undefined) ?? '2K';
-    params.size = normalizeStudioSizeForModel(studioSizeFor(ratio, resolution, model), model);
+    const currentPixelSize = typeof current.size === 'string' && /^\d+x\d+$/.test(current.size)
+      ? current.size
+      : null;
+    params.size = normalizeStudioSizeForModel(
+      currentPixelSize ?? studioSizeFor(ratio, resolution, model),
+      model,
+    );
   }
   return params;
 }
@@ -163,6 +175,7 @@ export function normalizeCanvasVideoParams(
     mode: currentQuality,
     frame_mode: currentFrameMode,
     generate_audio: currentGenerateAudio,
+    watermark: currentWatermark,
     reference_images: _referenceImages,
     reference_videos: _referenceVideos,
     reference_audios: _referenceAudios,
@@ -209,6 +222,9 @@ export function normalizeCanvasVideoParams(
     params.generate_audio = typeof currentGenerateAudio === 'boolean'
       ? currentGenerateAudio
       : true;
+  }
+  if (caps.supportsWatermark) {
+    params.watermark = typeof currentWatermark === 'boolean' ? currentWatermark : false;
   }
   if (editingExistingVideo) {
     params.frame_mode = 'auto';

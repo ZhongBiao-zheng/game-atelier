@@ -63,12 +63,14 @@ class JobParams(BaseModel):
     # 图片参数 —— 前端实际在发（Studio 提交链路），显式声明保证双端类型对齐
     ratio: str | None = None               # e.g. "16:9"
     quality: str | None = None             # low | medium | high | auto
+    background: Literal["auto", "opaque", "transparent"] | None = None
     # 视频参数（kind=video）—— 做成一等公民以保证双端类型对齐
     duration: int | None = None            # 秒，1-60
     resolution: str | None = None          # 480p | 720p | 1080p
     mode: str | None = None                # kling 生成档位 std | pro（≠ frame_mode）
     frame_mode: str | None = None          # auto | first | last | firstlast
     generate_audio: bool | None = None
+    watermark: bool | None = None
     reference_videos: list[str] | None = None
     reference_audios: list[str] | None = None
     # 文本生成参数（OpenAI-compatible chat/completions）。

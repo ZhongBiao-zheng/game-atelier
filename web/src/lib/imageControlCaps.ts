@@ -31,6 +31,8 @@ export interface ImageControlCaps {
   showCustomSize: boolean;
   /** 质量选项；null 表示该族不暴露质量控件（也不该写进 job params）。 */
   qualities: Quality[] | null;
+  /** 是否支持 OpenAI 图片 API 的透明背景。 */
+  supportsTransparentBackground: boolean;
   /** size 传给后端的语义：'ratio' = 传比例字符串(如 16:9)；'pixels' = 传 WxH；
    *  'none' = 该族不接受任何尺寸参数，控件与 params 都不该出现尺寸（MJ：比例由渠道锁定）。 */
   sizeKind: 'ratio' | 'pixels' | 'none';
@@ -51,6 +53,7 @@ const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'resolu
     showResolution: false,
     showCustomSize: false,
     qualities: ['low', 'medium', 'high'],
+    supportsTransparentBackground: false,
     sizeKind: 'ratio',
   },
   'gpt-image': {
@@ -58,6 +61,7 @@ const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'resolu
     showResolution: false,
     showCustomSize: true,
     qualities: ['low', 'medium', 'high', 'auto'],
+    supportsTransparentBackground: true,
     sizeKind: 'pixels',
   },
   seedream: {
@@ -65,6 +69,7 @@ const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'resolu
     showResolution: true,
     showCustomSize: true,
     qualities: null,
+    supportsTransparentBackground: false,
     sizeKind: 'pixels',
   },
   // MJ 任务代理协议：body 里没有 size / quality 字段，一切控制都在 prompt 尾部的 flag 里。
@@ -76,6 +81,7 @@ const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'resolu
     showResolution: false,
     showCustomSize: false,
     qualities: null,
+    supportsTransparentBackground: false,
     sizeKind: 'none',
   },
   standard: {
@@ -83,6 +89,7 @@ const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'resolu
     showResolution: true,
     showCustomSize: true,
     qualities: null,
+    supportsTransparentBackground: false,
     sizeKind: 'pixels',
   },
 };
@@ -90,6 +97,7 @@ const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'resolu
 export function imageControlCaps(
   modelId?: string | null,
   provider?: string | null,
+  protocol?: string | null,
 ): ImageControlCaps {
   const family = imageFamily(modelId);
   const base = FAMILY_CAPS[family];
@@ -103,12 +111,15 @@ export function imageControlCaps(
       resolutions: [],
       showCustomSize: false,
       qualities: base.qualities,
+      supportsTransparentBackground: false,
       sizeKind: 'ratio',
     };
   }
   return {
     family,
     ...base,
+    supportsTransparentBackground: base.supportsTransparentBackground
+      && (protocol == null || protocol === 'openai'),
     resolutions: base.showResolution ? availableResolutions(modelId) : [],
   };
 }

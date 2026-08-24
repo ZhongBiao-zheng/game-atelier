@@ -114,10 +114,10 @@ Status: ready-for-human
 | D07 | 图片参考编辑/图生图 | `requestEdit`、resource references | adapted：Job snapshot refs | full |
 | D08 | 文本/图片/配置驱动视频 | `requestVideoGeneration` | adapted：现有视频 capability + Job | partial |
 | D09 | 文本/配置驱动音频 | `requestAudioGeneration` | adapted：新增音频 capability/Job | full |
-| D10 | 节点独立选择模型和参数 | settings popovers | adapted：复用现有 keys/capability matrix | partial |
-| D11 | 图片尺寸/比例/质量/透明背景/数量 | `image-settings-panel.tsx` | adapted：只显示模型真实支持参数 | partial |
+| D10 | 节点独立选择模型和参数 | settings popovers | adapted：复用现有 keys/capability matrix | none |
+| D11 | 图片尺寸/比例/质量/透明背景/数量 | `image-settings-panel.tsx` | adapted：只显示模型真实支持参数 | none |
 | D12 | 文本推理强度 auto/low/medium/high/xhigh | `text-settings-panel.tsx`、`pending-test` | adapted：按模型 capability 显示 | full |
-| D13 | 视频尺寸、时长、质量、音频、水印 | `video-settings-panel.tsx` | adapted：按 provider capability 显示 | partial |
+| D13 | 视频尺寸、时长、质量、音频、水印 | `video-settings-panel.tsx` | adapted：按 provider capability 显示 | none |
 | D14 | 音色、格式、速度、instructions | `audio-settings-panel.tsx` | adapted：按 provider capability 显示 | full |
 | D15 | `@` 引用已连接文本/图片/视频/音频 | prompt chip/resource mention components | adapted：连接解析 + 显式 mention | full |
 | D16 | 提交前根据当前连接重新编号引用 | runtime composer 文案 | adapted：Resolved Input | full |

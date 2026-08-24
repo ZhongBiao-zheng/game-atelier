@@ -701,6 +701,60 @@ def test_render_openai_hk_gpt_image_uses_images_endpoint_with_size_and_quality(
     assert "sequential_image_generation" not in payload
 
 
+def test_render_gpt_image_passes_transparent_background(
+    isolated_data_root, tmp_path, monkeypatch,
+):
+    _add_key(alias="openai-hk", provider="custom", base_url="https://api.openai-hk.com")
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["payload"] = json
+        return FakePostResponse({
+            "data": [{"b64_json": "data:image/png;base64," + base64.b64encode(b"png").decode()}],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    openai_image.render(
+        prompt="cutout", model="gpt-image-2", alias="openai-hk", output_dir=tmp_path,
+        n=1, params={"background": "transparent"},
+    )
+    assert captured["payload"]["background"] == "transparent"
+
+
+def test_render_ark_gpt_image_strips_unverified_background(
+    isolated_data_root, tmp_path, monkeypatch,
+):
+    keys.add_key(KeySpec(
+        alias="ark-gpt",
+        provider="custom",
+        base_url="https://api.example.com/v1",
+        access_key="test-key",
+        capabilities=["portrait"],
+        models=[{
+            "name": "GPT Image 2",
+            "id": "gpt-image-2",
+            "modality": "image",
+            "protocol": "ark",
+        }],
+        created_at="2026-08-25T00:00:00Z",
+    ))
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured["payload"] = json
+        return FakePostResponse({
+            "data": [{"b64_json": "data:image/png;base64," + base64.b64encode(b"png").decode()}],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    openai_image.render(
+        prompt="cutout", model="gpt-image-2", alias="ark-gpt", output_dir=tmp_path,
+        n=1, params={"background": "transparent"},
+    )
+
+    assert "background" not in captured["payload"]
+
+
 def test_render_openai_hk_gpt_image_snaps_offtable_portrait_to_supported_size(
     isolated_data_root,
     tmp_path,

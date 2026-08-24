@@ -31,7 +31,7 @@ it('builds a standalone generation request without legacy references', () => {
   const result = buildCanvasGenerationRequest(target, 'openai');
 
   expect(result.prompt).toBe('电影感列车');
-  expect(result.params).toEqual({ n: 1, ratio: '1:1', quality: 'low', size: '2048x2048' });
+  expect(result.params).toEqual({ n: 2, ratio: '1:1', quality: 'low', size: '2048x2048' });
   expect(result).toMatchObject({ model: 'gpt-image-2', alias: 'main', kind: 'image' });
 });
 
@@ -42,7 +42,7 @@ it('normalizes model-specific image parameters when switching models', () => {
     { n: 2, ratio: '21:9', resolution: '4K', quality: 'invalid' },
   );
 
-  expect(params).toEqual({ n: 1, ratio: '21:9', quality: 'low', size: '2048x880' });
+  expect(params).toEqual({ n: 2, ratio: '21:9', quality: 'low', size: '2048x880' });
 });
 
 it('locks Midjourney jobs to the four paid outputs from one task', () => {

@@ -28,12 +28,14 @@ export interface JobParams {
   // 图片参数 —— 与 schemas.py::JobParams 同步（ratio 如 "16:9"；quality: low|medium|high|auto）
   ratio?: string;
   quality?: string;
+  background?: 'auto' | 'opaque' | 'transparent';
   // 视频参数（kind=video）—— 与 schemas.py::JobParams 同步
   duration?: number;
   resolution?: string;
   mode?: string; // kling 生成档位 std|pro（≠ frame_mode）
   frame_mode?: 'auto' | 'first' | 'last' | 'firstlast';
   generate_audio?: boolean;
+  watermark?: boolean;
   reference_videos?: string[];
   reference_audios?: string[];
   temperature?: number;

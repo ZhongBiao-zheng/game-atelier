@@ -176,6 +176,12 @@ def render(
     # gpt-image 的 low/high 词表，而 DALL·E 只认 standard|hd）。
     wants_quality = family in ("gpt-image", "nano-banana")
     quality = _quality_param(kwargs) if wants_quality else None
+    image_protocol = _effective_image_protocol(key, model)
+    background = (
+        _background_param(kwargs)
+        if family == "gpt-image" and image_protocol in {None, "openai"}
+        else None
+    )
     ref_paths = _collect_ref_paths(kwargs, key.provider, model)
     if mask_path and not ref_paths:
         raise OpenAIImageError("mask edit requires a source image")
@@ -197,7 +203,8 @@ def render(
                 _edits_url(base_url),
                 key.access_key,
                 fields=_hk_edits_fields(
-                    model=model, prompt=prompt, size=requested_size, quality=quality, n=1
+                    model=model, prompt=prompt, size=requested_size, quality=quality,
+                    background=background, n=1,
                 ),
                 files=_ref_file_parts(ref_paths, str(mask_path) if mask_path else None),
                 timeout=timeout,
@@ -212,7 +219,6 @@ def render(
     # 网关按协议挂端点：同一网关下不同模型支持的协议不同，打错入口会被判「无可用端点」。
     # 只有 ark 需要换 URL；None / openai 走默认 OpenAI 兼容入口，其他显式协议必须拒绝，
     # 不能把用户手动错标的 chat/audio 模型伪兼容成图片模型。
-    image_protocol = _effective_image_protocol(key, model)
     if image_protocol not in {None, "openai", "ark"}:
         raise OpenAIImageError(
             f"image protocol {image_protocol!r} is not supported; expected openai or ark"
@@ -228,6 +234,7 @@ def render(
             n=num,
             image=ref_image,
             quality=quality,
+            background=background,
             seedream=is_seedream,
             sequential=sends_ark_params and _supports_sequential(model),
         )
@@ -365,13 +372,16 @@ def _normalized_edit_mask(path: Path, source_size: tuple[int, int]) -> bytes:
 
 
 def _hk_edits_fields(
-    *, model: str, prompt: str, size: object, quality: str | None, n: int = 1
+    *, model: str, prompt: str, size: object, quality: str | None,
+    background: str | None = None, n: int = 1,
 ) -> dict:
     fields: dict[str, str] = {"model": model, "prompt": prompt, "n": str(max(1, n))}
     if size:
         fields["size"] = str(size)
     if quality:
         fields["quality"] = quality
+    if background:
+        fields["background"] = background
     return fields
 
 
@@ -414,6 +424,7 @@ def _image_generation_payload(
     n: int,
     image: str | list[str] | None = None,
     quality: str | None = None,
+    background: str | None = None,
     seedream: bool = False,
     sequential: bool = False,
 ) -> dict:
@@ -435,6 +446,8 @@ def _image_generation_payload(
         payload["output_format"] = "png"
     if quality:  # gpt-image / nano-banana：low/medium/high/auto
         payload["quality"] = quality
+    if background:  # gpt-image：auto/opaque/transparent
+        payload["background"] = background
     # Seedream / Ark 图生图：image 接受 URL 或 base64 data-url，单张为 str、多张为 list。
     if image:
         payload["image"] = image
@@ -495,6 +508,12 @@ def _quality_param(kwargs: dict) -> str | None:
     params = kwargs.get("params") or {}
     q = kwargs.get("quality") or params.get("quality")
     return q if q in ("low", "medium", "high", "auto") else None
+
+
+def _background_param(kwargs: dict) -> str | None:
+    params = kwargs.get("params") or {}
+    background = kwargs.get("background") or params.get("background")
+    return background if background in ("auto", "opaque", "transparent") else None
 
 
 def max_reference_images(model: str) -> int:

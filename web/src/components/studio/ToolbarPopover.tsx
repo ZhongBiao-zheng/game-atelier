@@ -21,6 +21,8 @@ interface Props {
   /** 面板与锚点的横向对齐：start = 左边缘对齐（默认），end = 右边缘对齐。
    *  靠屏幕右侧的锚点（顶栏图标钮）必须用 end，否则宽面板会溢出视口。 */
   align?: 'start' | 'end';
+  /** 打开后把焦点移入首个交互项；菜单/设置面板启用，富文本建议层保持原输入焦点。 */
+  autoFocus?: boolean;
   /** 面板视觉类（宽度 / 圆角 / 背景 / 内边距），不含定位类。 */
   className?: string;
   role?: string;
@@ -45,6 +47,7 @@ export function ToolbarPopover({
   anchorRef,
   direction = 'up',
   align = 'start',
+  autoFocus = false,
   className = '',
   children,
   ...rest
@@ -58,6 +61,7 @@ export function ToolbarPopover({
   } | null>(null);
   /** 是否已经用「面板渲染后的实测宽度」摆过一次（每次开合重置）。 */
   const measured = useRef(false);
+  const focused = useRef(false);
 
   const place = useCallback(() => {
     const a = anchorRef.current;
@@ -80,6 +84,7 @@ export function ToolbarPopover({
   useLayoutEffect(() => {
     if (!open) {
       measured.current = false;
+      focused.current = false;
       return;
     }
     place();
@@ -99,6 +104,16 @@ export function ToolbarPopover({
     place();
   }, [open, pos, place]);
 
+  useLayoutEffect(() => {
+    if (!autoFocus || !open || pos === null || focused.current || !panelRef.current) return;
+    const first = panelRef.current.querySelector<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (!first) return;
+    focused.current = true;
+    first.focus();
+  }, [autoFocus, open, pos]);
+
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
@@ -109,6 +124,25 @@ export function ToolbarPopover({
     }
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
+  }, [open, onClose, anchorRef]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      const anchor = anchorRef.current;
+      const trigger = anchor?.matches('button, [href], input, select, textarea, [tabindex]')
+        ? anchor as HTMLElement
+        : anchor?.querySelector<HTMLElement>(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          );
+      trigger?.focus();
+    }
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
   }, [open, onClose, anchorRef]);
 
   if (!open || !pos) return null;

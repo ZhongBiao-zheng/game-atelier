@@ -19,12 +19,14 @@ interface Props {
   ratio: string;
   quality?: VideoQuality;
   generateAudio: boolean;
+  watermark?: boolean;
   onModeChange: (mode: VideoMode) => void;
   onDurationChange: (duration: number) => void;
   onResolutionChange: (resolution: string) => void;
   onRatioChange: (ratio: string) => void;
   onQualityChange?: (quality: VideoQuality) => void;
   onGenerateAudioChange: (generateAudio: boolean) => void;
+  onWatermarkChange?: (watermark: boolean) => void;
   menuDirection?: 'up' | 'down';
 }
 
@@ -40,12 +42,14 @@ export function VideoControls({
   ratio,
   quality,
   generateAudio,
+  watermark = false,
   onModeChange,
   onDurationChange,
   onResolutionChange,
   onRatioChange,
   onQualityChange,
   onGenerateAudioChange,
+  onWatermarkChange,
   menuDirection = 'up',
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -83,6 +87,7 @@ export function VideoControls({
         open={open}
         onClose={() => setOpen(false)}
         anchorRef={wrapRef}
+        autoFocus
         direction={menuDirection}
         data-testid="video-settings-popover"
         className="w-[320px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3"
@@ -168,6 +173,19 @@ export function VideoControls({
                     开启
                   </SegmentButton>
                   <SegmentButton selected={!generateAudio} onClick={() => onGenerateAudioChange(false)}>
+                    关闭
+                  </SegmentButton>
+                </div>
+              </Section>
+            )}
+
+            {caps.supportsWatermark && onWatermarkChange && (
+              <Section title="视频水印">
+                <div role="listbox" aria-label="视频水印开关" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                  <SegmentButton selected={watermark} onClick={() => onWatermarkChange(true)}>
+                    开启
+                  </SegmentButton>
+                  <SegmentButton selected={!watermark} onClick={() => onWatermarkChange(false)}>
                     关闭
                   </SegmentButton>
                 </div>

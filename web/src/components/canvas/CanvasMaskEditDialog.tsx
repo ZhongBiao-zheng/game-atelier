@@ -235,7 +235,13 @@ export function CanvasMaskEditDialog({
     const mask = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
     if (!mask) return;
     const baseParams = initialDraft?.params ?? {};
-    const params = normalizeCanvasImageParams(model, selectedKey?.provider, baseParams);
+    const selectedModel = selectedKey?.models.find(item => item.id === model);
+    const params = normalizeCanvasImageParams(
+      model,
+      selectedKey?.provider,
+      baseParams,
+      selectedModel?.protocol,
+    );
     params.n = requestedCount;
     params.quality = quality;
     params.size = 'auto';
@@ -346,7 +352,7 @@ function isMaskModel(model: KeyView['models'][number], key: KeyView | undefined)
   return Boolean(
     key
     && modelModality(model, key) === 'image'
-    && imageControlCaps(model.id, key.provider).family === 'gpt-image'
+    && imageControlCaps(model.id, key.provider, model.protocol).family === 'gpt-image'
     && (model.protocol == null || model.protocol === 'openai'),
   );
 }

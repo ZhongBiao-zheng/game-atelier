@@ -346,6 +346,8 @@ def render_video(
     # 上游默认 true（2.0 系）：关闭必须显式发 false，省略字段≠关闭。
     if params.get("generate_audio") is not None:
         body["generate_audio"] = bool(params["generate_audio"])
+    if params.get("watermark") is not None:
+        body["watermark"] = bool(params["watermark"])
 
     out_dir = Path(output_dir)
     n = max(1, min(4, int(params.get("n") or 1)))

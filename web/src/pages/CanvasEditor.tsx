@@ -1174,7 +1174,12 @@ function CanvasEditorInner({
       model,
       alias: key?.alias ?? null,
       params: kind === 'image'
-        ? normalizeCanvasImageParams(model, key?.provider, { n: 1, ratio: '1:1' })
+        ? normalizeCanvasImageParams(
+            model,
+            key?.provider,
+            { n: 1, ratio: '1:1' },
+            selectedModel?.protocol,
+          )
         : kind === 'video'
           ? normalizeCanvasVideoParams(
               model,

@@ -5,8 +5,8 @@ import { videoControlCaps } from '@/lib/videoControlCaps';
 
 const seedance = videoControlCaps('doubao-seedance-2-0-fast-260128');
 
-function setup(overrides = {}) {
-  const props = {
+function setupProps(overrides = {}) {
+  return {
     caps: seedance,
     mode: 'firstlast' as const,
     duration: 5,
@@ -20,11 +20,34 @@ function setup(overrides = {}) {
     onGenerateAudioChange: vi.fn(),
     ...overrides,
   };
+}
+
+function setup(overrides = {}) {
+  const props = setupProps(overrides);
   render(<VideoControls {...props} />);
   return props;
 }
 
 describe('VideoControls（五合一汇总按钮）', () => {
+  it('shows a watermark section only when the model and caller support it', () => {
+    const onWatermarkChange = vi.fn();
+    const { rerender } = render(
+      <VideoControls
+        {...setupProps()}
+        caps={{ ...seedance, supportsWatermark: true }}
+        watermark={false}
+        onWatermarkChange={onWatermarkChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '视频生成设置' }));
+    expect(screen.getByText('视频水印')).toBeInTheDocument();
+    const section = screen.getByText('视频水印').closest('section')!;
+    fireEvent.click(section.querySelectorAll('[role="option"]')[0]);
+    expect(onWatermarkChange).toHaveBeenCalledWith(true);
+
+    rerender(<VideoControls {...setupProps()} caps={{ ...seedance, supportsWatermark: false }} />);
+    expect(screen.queryByText('视频水印')).not.toBeInTheDocument();
+  });
   it('collapsed button summarizes mode · ratio · resolution · duration', () => {
     setup();
     const button = screen.getByLabelText('视频生成设置');

@@ -6,6 +6,12 @@ import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import { modelModality, type KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
+import {
+  CanvasCountSettings,
+  CanvasImageSettings,
+  CanvasModelPicker,
+  type CanvasModelChoice,
+} from '@/components/canvas/CanvasGenerationControls';
 import type { CanvasMediaTool } from '@/components/canvas/CanvasMediaOperationDialog';
 import {
   CanvasNodeRunBadge,
@@ -954,10 +960,15 @@ export function CanvasGenerationComposer({
     && (!editingExistingVideo || supportsCanvasVideoEdit(model.id, model.protocol))
   );
   const availableKeys = context.keys.filter(key => key.models.some(model => acceptsModel(model, key)));
+  const modelChoices: CanvasModelChoice[] = availableKeys.flatMap(key => key.models
+    .filter(model => acceptsModel(model, key))
+    .map(model => ({ key, model })));
   const selectedKey = context.keys.find(key => key.alias === draft.alias);
   const models = (selectedKey?.models ?? []).filter(model => acceptsModel(model, selectedKey!));
   const selectedModel = models.find(model => model.id === draft.model);
-  const imageCaps = draft.mode === 'image' ? imageControlCaps(draft.model, selectedKey?.provider) : null;
+  const imageCaps = draft.mode === 'image'
+    ? imageControlCaps(draft.model, selectedKey?.provider, selectedModel?.protocol)
+    : null;
   const rawVideoCaps = draft.mode === 'video'
     ? canvasVideoEditCaps(draft.model, selectedModel?.protocol)
     : null;
@@ -977,6 +988,15 @@ export function CanvasGenerationComposer({
 
   function updateDraft(updater: (current: CanvasGenerationDraft) => CanvasGenerationDraft) {
     context.updateNode(node.id, current => withGenerationDraft(current, updater(generationDraft(current)!)));
+  }
+
+  function updateDraftWithHistory(
+    updater: (current: CanvasGenerationDraft) => CanvasGenerationDraft,
+  ) {
+    const preview = updater(draft);
+    if (JSON.stringify(preview) === JSON.stringify(draft)) return;
+    context.recordHistory();
+    updateDraft(current => ({ ...updater(current), updated_at: new Date().toISOString() }));
   }
 
   return (
@@ -1031,84 +1051,58 @@ export function CanvasGenerationComposer({
         submitting={submitting}
       />
       <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
-        <select
-          aria-label="密钥"
-          value={draft.alias ?? ''}
-          onFocus={context.recordHistory}
-          onChange={event => {
-            const key = context.keys.find(item => item.alias === event.target.value);
-            const selected = key?.models.find(item => acceptsModel(item, key));
-            const model = selected?.id ?? '';
-            updateDraft(current => ({
+        <CanvasModelPicker
+          choices={modelChoices}
+          alias={draft.alias ?? null}
+          model={draft.model}
+          onSelect={({ key, model }) => {
+            updateDraftWithHistory(current => ({
               ...current,
-              alias: event.target.value || null,
-              model,
+              alias: key.alias,
+              model: model.id,
               params: draft.mode === 'image'
-                ? normalizeCanvasImageParams(model, key?.provider, current.params)
+                ? normalizeCanvasImageParams(model.id, key.provider, current.params, model.protocol)
                 : draft.mode === 'video'
-                  ? normalizeCanvasVideoParams(model, selected?.protocol, current.params, editingExistingVideo)
-                : current.params,
-              updated_at: new Date().toISOString(),
+                  ? normalizeCanvasVideoParams(
+                      model.id,
+                      model.protocol,
+                      current.params,
+                      editingExistingVideo,
+                    )
+                  : current.params,
             }));
           }}
-          className="h-9 max-w-28 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          <option value="">选择密钥</option>
-          {availableKeys.map(key => <option key={key.alias} value={key.alias}>{key.alias}</option>)}
-        </select>
-        <select
-          aria-label="模型"
-          value={draft.model}
-          onFocus={context.recordHistory}
-          onChange={event => updateDraft(current => ({
-            ...current,
-            model: event.target.value,
-            params: draft.mode === 'image'
-              ? normalizeCanvasImageParams(event.target.value, selectedKey?.provider, current.params)
-              : draft.mode === 'video'
-                ? normalizeCanvasVideoParams(
-                    event.target.value,
-                    models.find(model => model.id === event.target.value)?.protocol,
-                    current.params,
-                    editingExistingVideo,
-                  )
-              : current.params,
-            updated_at: new Date().toISOString(),
-          }))}
-          className="h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        >
-          <option value="">选择模型</option>
-          {models.map(model => <option key={model.id} value={model.id}>{model.name || model.id}</option>)}
-        </select>
-        {(draft.mode === 'text' || draft.mode === 'image') && (
-          <select
-            aria-label="候选数"
-            value={String(draft.params.n ?? 1)}
-            onFocus={context.recordHistory}
-            onChange={event => updateDraft(current => ({
+        />
+        {draft.mode === 'text' && (
+          <CanvasCountSettings
+            value={Math.max(1, Math.min(4, Number(draft.params.n) || 1))}
+            onChange={n => updateDraftWithHistory(current => ({
               ...current,
-              params: { ...current.params, n: Number(event.target.value) },
-              updated_at: new Date().toISOString(),
+              params: { ...current.params, n },
             }))}
-            className="h-9 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            {[1, 2, 3, 4].map(value => <option key={value} value={value}>{value} 个候选</option>)}
-          </select>
+          />
         )}
-        {draft.mode === 'image' && (
-          <select
-            aria-label="比例"
-            value={String(draft.params.ratio ?? (draft.mode === 'image' ? '1:1' : '16:9'))}
-            onFocus={context.recordHistory}
-            onChange={event => updateDraft(current => ({
-              ...current,
-              params: { ...current.params, ratio: event.target.value },
-              updated_at: new Date().toISOString(),
-            }))}
-            className="h-9 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            {(imageCaps?.ratios ?? ['1:1', '16:9', '9:16', '4:3', '3:4']).map(value => <option key={value}>{value}</option>)}
-          </select>
+        {draft.mode === 'image' && imageCaps && (
+          <CanvasImageSettings
+            caps={imageCaps}
+            model={draft.model}
+            params={draft.params}
+            onPatch={(patch, options) => updateDraftWithHistory(current => {
+              const merged = { ...current.params, ...patch };
+              if (options?.resetSize) delete merged.size;
+              return {
+                ...current,
+                params: normalizeCanvasImageParams(
+                  current.model,
+                  context.keys.find(key => key.alias === current.alias)?.provider,
+                  merged,
+                  context.keys
+                    .find(key => key.alias === current.alias)
+                    ?.models.find(model => model.id === current.model)?.protocol,
+                ),
+              };
+            })}
+          />
         )}
         {draft.mode === 'video' && videoCaps && (
           <VideoControls
@@ -1119,35 +1113,34 @@ export function CanvasGenerationComposer({
             ratio={String(draft.params.ratio ?? videoCaps.ratios[0] ?? '16:9')}
             quality={draft.params.mode === 'pro' ? 'pro' : 'std'}
             generateAudio={draft.params.generate_audio !== false}
-            onModeChange={mode => updateDraft(current => ({
+            watermark={draft.params.watermark === true}
+            onModeChange={mode => updateDraftWithHistory(current => ({
               ...current,
               params: { ...current.params, frame_mode: mode === 'omni' ? 'auto' : 'firstlast' },
-              updated_at: new Date().toISOString(),
             }))}
-            onDurationChange={duration => updateDraft(current => ({
+            onDurationChange={duration => updateDraftWithHistory(current => ({
               ...current,
               params: { ...current.params, duration },
-              updated_at: new Date().toISOString(),
             }))}
-            onResolutionChange={resolution => updateDraft(current => ({
+            onResolutionChange={resolution => updateDraftWithHistory(current => ({
               ...current,
               params: { ...current.params, resolution },
-              updated_at: new Date().toISOString(),
             }))}
-            onRatioChange={ratio => updateDraft(current => ({
+            onRatioChange={ratio => updateDraftWithHistory(current => ({
               ...current,
               params: { ...current.params, ratio },
-              updated_at: new Date().toISOString(),
             }))}
-            onQualityChange={quality => updateDraft(current => ({
+            onQualityChange={quality => updateDraftWithHistory(current => ({
               ...current,
               params: { ...current.params, mode: quality },
-              updated_at: new Date().toISOString(),
             }))}
-            onGenerateAudioChange={generateAudio => updateDraft(current => ({
+            onGenerateAudioChange={generateAudio => updateDraftWithHistory(current => ({
               ...current,
               params: { ...current.params, generate_audio: generateAudio },
-              updated_at: new Date().toISOString(),
+            }))}
+            onWatermarkChange={watermark => updateDraftWithHistory(current => ({
+              ...current,
+              params: { ...current.params, watermark },
             }))}
           />
         )}

@@ -145,8 +145,8 @@ def _build_body(prompt: str, model: str, params: dict[str, Any]) -> dict[str, An
     if media:
         inp["media"] = media
 
-    # 官方 watermark 默认 true（"Happy Horse" 角标），恒显式关。
-    parameters: dict[str, Any] = {"watermark": False}
+    # 官方 watermark 默认 true（"Happy Horse" 角标）；产品默认关，但允许节点显式开启。
+    parameters: dict[str, Any] = {"watermark": bool(params.get("watermark", False))}
     if params.get("resolution"):
         parameters["resolution"] = str(params["resolution"]).upper()  # 官方要求大写 P
     if mode in ("t2v", "r2v") and params.get("ratio"):

@@ -13,6 +13,7 @@ describe('videoControlCaps', () => {
     expect(caps.ratios).toContain('adaptive');
     expect(caps.resolutions).toContain('1080p');
     expect(caps.supportsAudio).toBe(true);
+    expect(caps.supportsWatermark).toBe(true);
     expect(caps.supportsReferenceVideo).toBe(true);
     expect(caps.supportsReferenceAudio).toBe(true);
     expect(caps.maxFrames).toBe(2);
@@ -82,6 +83,7 @@ describe('videoControlCaps', () => {
     expect(t2v.durations[0]).toBe(3);
     expect(t2v.durations[t2v.durations.length - 1]).toBe(15);
     expect(t2v.ratios).toContain('4:5');
+    expect(t2v.supportsWatermark).toBe(true);
 
     const i2v = videoControlCaps('happyhorse-1.0-i2v');
     expect(i2v.maxFrames).toBe(1); // 仅首帧
@@ -110,6 +112,7 @@ describe('videoControlCaps', () => {
     expect(caps.supportsReferenceVideo).toBe(false);
     expect(caps.supportsReferenceAudio).toBe(false);
     expect(caps.supportsAudio).toBe(false);
+    expect(caps.supportsWatermark).toBe(false);
   });
 
   it('handles null/undefined modelId without throwing', () => {
