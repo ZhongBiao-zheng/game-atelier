@@ -66,8 +66,8 @@ Status: ready-for-human
 | B08 | 从系统剪贴板粘贴文本/图片 | `project.tsx`、快捷键弹窗 | adapted：上传媒体必须落服务端 | full |
 | B09 | Delete/Backspace 删除节点或边 | 快捷键弹窗、context menu | same | partial |
 | B10 | Esc 清选择并关闭浮层 | 快捷键弹窗 | same | partial |
-| B11 | Cmd/Ctrl+Z、Shift+Z/Y 撤销重做 | toolbar/topbar/shortcut | same | partial |
-| B12 | 撤销覆盖节点、边、viewport、背景和 Agent 会话 | `canvas-shortcuts.zh-CN.mdx` | adapted：历史命令/快照统一 | partial |
+| B11 | Cmd/Ctrl+Z、Shift+Z/Y 撤销重做 | toolbar/topbar/shortcut | same：toolbar、Z、Shift+Z 与 Y 共用历史，见 issue 23 | full |
+| B12 | 撤销覆盖节点、边、viewport、背景和 Agent 会话 | `canvas-shortcuts.zh-CN.mdx` | adapted：Document 节点/边/viewport/外观统一历史；Agent 按批准边界独立 | full |
 | B13 | 图片/视频/音频拖入画布自动建节点 | `project.tsx`、快捷键弹窗 | adapted：文件先上传服务端 | full |
 | B14 | 双击空白打开节点创建菜单 | `NodeCreateMenu` | same | full |
 | B15 | 从连接柄拖到空白打开“带连接创建”菜单 | `ConnectionCreateMenu` | adapted：React Flow `onConnectEnd` | full |

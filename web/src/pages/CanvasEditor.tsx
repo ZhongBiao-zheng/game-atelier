@@ -184,6 +184,11 @@ interface MediaReplaceTarget {
   kind: 'image' | 'video' | 'audio';
 }
 
+interface ViewportSyncToken {
+  projectId: string;
+  viewport: Viewport;
+}
+
 const CANVAS_MOUSE_PAN_BUTTONS: number[] = [];
 
 export function CanvasEditor(props: {
@@ -265,7 +270,15 @@ function CanvasEditorInner({
   const syncedTerminalRuns = useRef(new Set<string>());
   const reversePromptConfigAttempts = useRef(new Set<string>());
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
-  const { screenToFlowPosition, fitView, getZoom, setCenter } = useReactFlow<FlowNode>();
+  const viewportSync = useRef<ViewportSyncToken | null>(null);
+  const {
+    screenToFlowPosition,
+    fitView,
+    getViewport,
+    getZoom,
+    setCenter,
+    setViewport,
+  } = useReactFlow<FlowNode>();
   const acceptAssets = useCallback((value: RevisionedSidecar<CanvasLibraryAsset>) => {
     setAssets(current => !current || value.revision >= current.revision ? value : current);
   }, []);
@@ -307,6 +320,7 @@ function CanvasEditorInner({
     if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
     flowNodeCache.current.clear();
     history.current = { past: [], future: [] };
+    viewportSync.current = null;
     pendingTextVersions.current.clear();
     syncedTerminalRuns.current.clear();
     reversePromptConfigAttempts.current.clear();
@@ -1263,40 +1277,57 @@ function CanvasEditorInner({
     history.current.future = [];
   }, []);
 
+  const syncHistoryViewport = useCallback((viewport: Viewport) => {
+    if (sameViewport(getViewport(), viewport)) return;
+    const token = { projectId, viewport };
+    viewportSync.current = token;
+    void setViewport(viewport).then(applied => {
+      if (!applied && viewportSync.current === token) viewportSync.current = null;
+    });
+  }, [getViewport, projectId, setViewport]);
+
   const undo = useCallback(() => {
     const previous = history.current.past.pop();
     if (!previous || !document) return;
     history.current.future.push(document);
-    setDocument({
+    const restored = {
       ...previous,
       revision: document.revision,
       updated_at: new Date().toISOString(),
       content_versions: { ...previous.content_versions, ...document.content_versions },
-    });
+    };
+    setDocument(restored);
+    syncHistoryViewport(restored.viewport);
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
-  }, [document]);
+  }, [document, syncHistoryViewport]);
 
   const redo = useCallback(() => {
     const next = history.current.future.pop();
     if (!next || !document) return;
     history.current.past.push(document);
-    setDocument({
+    const restored = {
       ...next,
       revision: document.revision,
       updated_at: new Date().toISOString(),
       content_versions: { ...next.content_versions, ...document.content_versions },
-    });
+    };
+    setDocument(restored);
+    syncHistoryViewport(restored.viewport);
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
-  }, [document]);
+  }, [document, syncHistoryViewport]);
 
   useEffect(() => {
     function handleHistoryShortcut(event: KeyboardEvent) {
-      if ((!event.metaKey && !event.ctrlKey) || event.key.toLowerCase() !== 'z') return;
+      if (!event.metaKey && !event.ctrlKey) return;
+      const key = event.key.toLowerCase();
+      const shouldUndo = key === 'z' && !event.shiftKey;
+      const shouldRedo = key === 'y' || (key === 'z' && event.shiftKey);
+      if (!shouldUndo && !shouldRedo) return;
       if (isInteractiveTarget(event.target)) return;
       event.preventDefault();
-      if (event.shiftKey) redo();
+      if (shouldRedo) redo();
       else undo();
     }
     window.addEventListener('keydown', handleHistoryShortcut);
@@ -2044,7 +2075,18 @@ function CanvasEditorInner({
 
   return (
     <CanvasNodeContext.Provider value={contextValue}>
-      <section ref={editorRegionRef} tabIndex={-1} className="relative h-full min-h-0 overflow-hidden bg-background outline-none" aria-label={`画布编辑器 ${projectName}`}>
+      <section
+        ref={editorRegionRef}
+        tabIndex={-1}
+        className="relative h-full min-h-0 overflow-hidden bg-background outline-none"
+        aria-label={`画布编辑器 ${projectName}`}
+        onPointerDownCapture={event => {
+          if (isMiniMapTarget(event.target)) recordHistorySnapshot();
+        }}
+        onWheelCapture={event => {
+          if (isMiniMapTarget(event.target)) recordHistorySnapshot();
+        }}
+      >
         <ReactFlow<FlowNode>
           nodes={flowNodes}
           edges={flowEdges}
@@ -2055,6 +2097,11 @@ function CanvasEditorInner({
           onNodesChange={onNodesChange}
           onNodeClick={(_, node) => selectOnlyNode(node.id)}
           onNodeDragStart={recordHistorySnapshot}
+          onMoveStart={event => {
+            if (!event) return;
+            viewportSync.current = null;
+            recordHistorySnapshot();
+          }}
           onPaneClick={() => {
             setCreateMenu(null);
             setSelectedConnectionIds(new Set());
@@ -2066,7 +2113,16 @@ function CanvasEditorInner({
             event.dataTransfer.dropEffect = 'copy';
           }}
           onDrop={handleLibraryDrop}
-          onMoveEnd={(_, viewport: Viewport) => commit(current => ({ ...current, viewport }))}
+          onMoveEnd={(_, viewport: Viewport) => {
+            if (latestDocument.current?.project_id !== projectId) return;
+            const sync = viewportSync.current;
+            if (sync?.projectId === projectId && sameViewport(sync.viewport, viewport)) {
+              viewportSync.current = null;
+              return;
+            }
+            viewportSync.current = null;
+            commit(current => ({ ...current, viewport }));
+          }}
           defaultViewport={document.viewport}
           minZoom={0.08}
           maxZoom={2.5}
@@ -2081,7 +2137,14 @@ function CanvasEditorInner({
           className="canvas-flow"
         >
           {background && <Background variant={background} gap={22} size={1} />}
-          <Controls position="bottom-left" showInteractive={false} className="canvas-controls hidden sm:flex" />
+          <Controls
+            position="bottom-left"
+            showInteractive={false}
+            className="canvas-controls hidden sm:flex"
+            onZoomIn={recordHistorySnapshot}
+            onZoomOut={recordHistorySnapshot}
+            onFitView={recordHistorySnapshot}
+          />
           {document.settings.show_minimap && (
             <MiniMap
               position="bottom-left"
@@ -2093,6 +2156,7 @@ function CanvasEditorInner({
               maskColor="var(--scrim)"
               onClick={(event, position) => {
                 event.stopPropagation();
+                recordHistorySnapshot();
                 void setCenter(position.x, position.y, { zoom: getZoom(), duration: 150 });
               }}
             />
@@ -2187,7 +2251,10 @@ function CanvasEditorInner({
                 </DropdownMenuCheckboxItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <ToolButton label="适应全部节点" onClick={() => void fitView({ duration: 150, padding: 0.12 })}><Maximize2 /></ToolButton>
+            <ToolButton label="适应全部节点" onClick={() => {
+              recordHistorySnapshot();
+              void fitView({ duration: 150, padding: 0.12 });
+            }}><Maximize2 /></ToolButton>
           </div>
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
@@ -2556,6 +2623,10 @@ function isInteractiveTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest('input, textarea, select, button, a, [contenteditable="true"], [role="dialog"]'));
 }
 
+function isMiniMapTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest('.react-flow__minimap'));
+}
+
 function handleMenuNavigation(event: React.KeyboardEvent<HTMLDivElement>) {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
   const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
@@ -2590,6 +2661,12 @@ function backgroundVariant(background: CanvasDocument['settings']['background'])
   if (background === 'dots') return BackgroundVariant.Dots;
   if (background === 'lines') return BackgroundVariant.Lines;
   return null;
+}
+
+function sameViewport(left: Viewport, right: Viewport) {
+  return Math.abs(left.x - right.x) < 0.001
+    && Math.abs(left.y - right.y) < 0.001
+    && Math.abs(left.zoom - right.zoom) < 0.001;
 }
 
 function replacementAccept(kind: MediaReplaceTarget['kind']) {
