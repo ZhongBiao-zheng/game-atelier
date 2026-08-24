@@ -56,7 +56,7 @@ Status: ready-for-human
 
 | ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
 |---|---|---|---|---|
-| B01 | 无限平移、滚轮缩放、复位、百分比缩放滑杆 | `infinite-canvas.tsx`、`canvas-zoom-controls.tsx` | adapted：React Flow 实现相同行为 | partial |
+| B01 | 无限平移、滚轮缩放、复位、百分比缩放滑杆 | `infinite-canvas.tsx`、`canvas-zoom-controls.tsx` | adapted：React Flow 同一 viewport，8%–250% 滑杆与 100% 复位，见 issue 25 | full |
 | B02 | 选择/移动两种工具模式 | `canvas-toolbar.tsx` | same | full |
 | B03 | Ctrl/Space 临时反转选择与移动 | 快捷键弹窗、`pending-test` | adapted：Space / Control 临时平移，不改变单指框选与两指平移，见 issue 24 | full |
 | B04 | 空白拖动框选，多节点选择 | 快捷键弹窗、`SelectionBox` | same | full |

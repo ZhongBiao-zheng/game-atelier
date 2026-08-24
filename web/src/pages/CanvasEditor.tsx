@@ -3,7 +3,6 @@ import '@xyflow/react/dist/style.css';
 import {
   Background,
   BackgroundVariant,
-  Controls,
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
@@ -32,9 +31,11 @@ import {
   LoaderCircle,
   MapPinned,
   Maximize2,
+  Minus,
   MousePointer2,
   Plus,
   Redo2,
+  Scan,
   Square,
   Type,
   Undo2,
@@ -201,6 +202,8 @@ interface CanvasClipboardPayload {
 
 const CANVAS_MOUSE_PAN_BUTTONS: number[] = [];
 const CANVAS_NODE_CLIPBOARD_TYPE = 'application/x-game-atelier-canvas-nodes';
+const CANVAS_MIN_ZOOM = 0.08;
+const CANVAS_MAX_ZOOM = 2.5;
 
 export function CanvasEditor(props: {
   projectId: string;
@@ -238,6 +241,7 @@ function CanvasEditorInner({
   const [addOpen, setAddOpen] = useState(false);
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [viewportZoom, setViewportZoom] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
@@ -286,6 +290,13 @@ function CanvasEditorInner({
   const viewportSync = useRef<ViewportSyncToken | null>(null);
   const nodeClipboard = useRef<CanvasClipboardPayload | null>(null);
   const pasteSequence = useRef(0);
+  const zoomSliderActive = useRef(false);
+  const zoomSliderCommitTimer = useRef<number | null>(null);
+  const zoomSliderMove = useRef<Promise<boolean> | null>(null);
+  const pendingViewportCommand = useRef<Promise<void> | null>(null);
+  const viewportCommandEpoch = useRef(0);
+  const cancelViewportCommand = useRef<(() => void) | null>(null);
+  const finishZoomSliderRef = useRef<() => void>(() => undefined);
   const {
     screenToFlowPosition,
     fitView,
@@ -293,6 +304,9 @@ function CanvasEditorInner({
     getZoom,
     setCenter,
     setViewport,
+    zoomIn,
+    zoomOut,
+    zoomTo,
   } = useReactFlow<FlowNode>();
   const acceptAssets = useCallback((value: RevisionedSidecar<CanvasLibraryAsset>) => {
     setAssets(current => !current || value.revision >= current.revision ? value : current);
@@ -312,6 +326,7 @@ function CanvasEditorInner({
     setAddOpen(false);
     setCreateMenu(null);
     setShortcutsOpen(false);
+    setViewportZoom(1);
     setLibraryMode(null);
     setLibraryFocusAssetId(null);
     setLibraryError(null);
@@ -339,6 +354,14 @@ function CanvasEditorInner({
     viewportSync.current = null;
     nodeClipboard.current = null;
     pasteSequence.current = 0;
+    zoomSliderActive.current = false;
+    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
+    zoomSliderCommitTimer.current = null;
+    zoomSliderMove.current = null;
+    viewportCommandEpoch.current += 1;
+    cancelViewportCommand.current?.();
+    cancelViewportCommand.current = null;
+    pendingViewportCommand.current = null;
     pendingTextVersions.current.clear();
     syncedTerminalRuns.current.clear();
     reversePromptConfigAttempts.current.clear();
@@ -365,6 +388,7 @@ function CanvasEditorInner({
         if (cancelled) return;
         setProjects(projectRows);
         setDocument(canvasDocument);
+        setViewportZoom(canvasDocument.viewport.zoom);
         serverRevision.current = canvasDocument.revision;
         setKeys(keyRows.keys);
         setJobs(canvasJobs);
@@ -378,6 +402,7 @@ function CanvasEditorInner({
     return () => {
       cancelled = true;
       if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
+      if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
     };
   }, [projectId]);
 
@@ -640,6 +665,17 @@ function CanvasEditorInner({
       return false;
     }
     if (libraryInsertCommand.current) await libraryInsertCommand.current;
+    if (zoomSliderActive.current) finishZoomSliderRef.current();
+    while (pendingViewportCommand.current) {
+      const pending = pendingViewportCommand.current;
+      try {
+        await pending;
+      } catch {
+        setError('画布视口尚未保存，请稍后重试。');
+        return false;
+      }
+      if (pendingViewportCommand.current === pending) pendingViewportCommand.current = null;
+    }
     if (latestDocument.current && dirtyVersion.current > 0) {
       saveQueued.current = latestDocument.current;
       try {
@@ -1438,6 +1474,124 @@ function CanvasEditorInner({
     history.current.past = history.current.past.slice(-50);
     history.current.future = [];
   }, []);
+
+  const commitViewportDocument = useCallback((viewport: Viewport) => {
+    const current = latestDocument.current;
+    if (!current || current.project_id !== projectId || sameViewport(current.viewport, viewport)) return false;
+    if (history.current.past.at(-1) !== current) history.current.past.push(current);
+    history.current.past = history.current.past.slice(-50);
+    history.current.future = [];
+    const next = { ...current, viewport, updated_at: new Date().toISOString() };
+    latestDocument.current = next;
+    setDocument(next);
+    dirtyVersion.current += 1;
+    setDirtySignal(dirtyVersion.current);
+    return true;
+  }, [projectId]);
+
+  const interruptViewportCommand = useCallback(() => {
+    viewportCommandEpoch.current += 1;
+    cancelViewportCommand.current?.();
+    cancelViewportCommand.current = null;
+    pendingViewportCommand.current = null;
+    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
+    zoomSliderCommitTimer.current = null;
+    zoomSliderActive.current = false;
+    zoomSliderMove.current = null;
+  }, []);
+
+  const beginZoomSlider = useCallback(() => {
+    interruptViewportCommand();
+    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
+    zoomSliderCommitTimer.current = null;
+    zoomSliderActive.current = true;
+    const viewport = getViewport();
+    zoomSliderMove.current = setViewport(viewport).then(() => true, () => true);
+  }, [getViewport, interruptViewportCommand, setViewport]);
+
+  const commitZoomSliderViewport = useCallback(() => {
+    if (latestDocument.current?.project_id !== projectId) return;
+    const viewport = getViewport();
+    viewportSync.current = { projectId, viewport };
+    if (!commitViewportDocument(viewport)) viewportSync.current = null;
+  }, [commitViewportDocument, getViewport, projectId]);
+
+  const finishZoomSlider = useCallback(() => {
+    if (!zoomSliderActive.current) return;
+    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
+    zoomSliderCommitTimer.current = null;
+    const finalize = () => {
+      if (!zoomSliderActive.current) return;
+      zoomSliderActive.current = false;
+      commitZoomSliderViewport();
+    };
+    const move = zoomSliderMove.current;
+    let timeoutId: number | null = null;
+    const moveSettled = move
+      ? Promise.race([
+          move.then(() => undefined, () => undefined),
+          new Promise<void>(resolve => {
+            timeoutId = window.setTimeout(resolve, 250);
+          }),
+        ])
+      : Promise.resolve();
+    const pending = moveSettled.then(finalize).finally(() => {
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    });
+    pendingViewportCommand.current = pending;
+    const clearPending = () => {
+      if (pendingViewportCommand.current === pending) pendingViewportCommand.current = null;
+    };
+    void pending.then(clearPending, clearPending);
+  }, [commitZoomSliderViewport]);
+  finishZoomSliderRef.current = finishZoomSlider;
+
+  const scheduleZoomSliderCommit = useCallback(() => {
+    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
+    zoomSliderCommitTimer.current = window.setTimeout(() => {
+      zoomSliderCommitTimer.current = null;
+      finishZoomSlider();
+    }, 120);
+  }, [finishZoomSlider]);
+
+  const runViewportCommand = useCallback((command: () => Promise<boolean>) => {
+    const previous = pendingViewportCommand.current;
+    const epoch = viewportCommandEpoch.current;
+    const operation = (async () => {
+      if (previous) await previous;
+      if (viewportCommandEpoch.current !== epoch || latestDocument.current?.project_id !== projectId) return;
+      let cancel!: () => void;
+      let timeoutId: number | null = null;
+      const cancelled = new Promise<'cancelled'>(resolve => {
+        cancel = () => resolve('cancelled');
+      });
+      cancelViewportCommand.current = cancel;
+      const result = await Promise.race([
+        Promise.resolve().then(command).then(() => 'finished' as const),
+        cancelled,
+        new Promise<'timeout'>(resolve => {
+          timeoutId = window.setTimeout(() => resolve('timeout'), 300);
+        }),
+      ]).catch(commandError => {
+        setError((commandError as Error).message);
+        return 'cancelled' as const;
+      });
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      if (cancelViewportCommand.current === cancel) cancelViewportCommand.current = null;
+      if (result === 'cancelled'
+        || viewportCommandEpoch.current !== epoch
+        || latestDocument.current?.project_id !== projectId) return;
+      const viewport = getViewport();
+      viewportSync.current = { projectId, viewport };
+      if (!commitViewportDocument(viewport)) viewportSync.current = null;
+    })();
+    pendingViewportCommand.current = operation;
+    const clearPending = () => {
+      if (pendingViewportCommand.current === operation) pendingViewportCommand.current = null;
+    };
+    void operation.then(clearPending, clearPending);
+    return operation;
+  }, [commitViewportDocument, getViewport, projectId]);
 
   const syncHistoryViewport = useCallback((viewport: Viewport) => {
     if (sameViewport(getViewport(), viewport)) return;
@@ -2242,12 +2396,6 @@ function CanvasEditorInner({
         tabIndex={-1}
         className="relative h-full min-h-0 overflow-hidden bg-background outline-none"
         aria-label={`画布编辑器 ${projectName}`}
-        onPointerDownCapture={event => {
-          if (isMiniMapTarget(event.target)) recordHistorySnapshot();
-        }}
-        onWheelCapture={event => {
-          if (isMiniMapTarget(event.target)) recordHistorySnapshot();
-        }}
       >
         <ReactFlow<FlowNode>
           nodes={flowNodes}
@@ -2261,9 +2409,10 @@ function CanvasEditorInner({
           onNodeDragStart={recordHistorySnapshot}
           onMoveStart={event => {
             if (!event) return;
+            interruptViewportCommand();
             viewportSync.current = null;
-            recordHistorySnapshot();
           }}
+          onMove={(_, viewport: Viewport) => setViewportZoom(viewport.zoom)}
           onPaneClick={() => {
             setCreateMenu(null);
             setSelectedConnectionIds(new Set());
@@ -2278,17 +2427,18 @@ function CanvasEditorInner({
           onDrop={handleLibraryDrop}
           onMoveEnd={(_, viewport: Viewport) => {
             if (latestDocument.current?.project_id !== projectId) return;
+            if (zoomSliderActive.current || pendingViewportCommand.current) return;
             const sync = viewportSync.current;
             if (sync?.projectId === projectId && sameViewport(sync.viewport, viewport)) {
               viewportSync.current = null;
               return;
             }
             viewportSync.current = null;
-            commit(current => ({ ...current, viewport }));
+            commitViewportDocument(viewport);
           }}
           defaultViewport={document.viewport}
-          minZoom={0.08}
-          maxZoom={2.5}
+          minZoom={CANVAS_MIN_ZOOM}
+          maxZoom={CANVAS_MAX_ZOOM}
           zoomOnScroll={false}
           zoomOnPinch
           panOnScroll
@@ -2301,14 +2451,6 @@ function CanvasEditorInner({
           className="canvas-flow"
         >
           {background && <Background variant={background} gap={22} size={1} />}
-          <Controls
-            position="bottom-left"
-            showInteractive={false}
-            className="canvas-controls hidden sm:flex"
-            onZoomIn={recordHistorySnapshot}
-            onZoomOut={recordHistorySnapshot}
-            onFitView={recordHistorySnapshot}
-          />
           {document.settings.show_minimap && (
             <MiniMap
               position="bottom-left"
@@ -2320,12 +2462,76 @@ function CanvasEditorInner({
               maskColor="var(--scrim)"
               onClick={(event, position) => {
                 event.stopPropagation();
-                recordHistorySnapshot();
-                void setCenter(position.x, position.y, { zoom: getZoom(), duration: 150 });
+                void runViewportCommand(() => setCenter(position.x, position.y, { zoom: getZoom(), duration: 150 }));
               }}
             />
           )}
         </ReactFlow>
+
+        <div className="canvas-zoom-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
+          <button
+            type="button"
+            aria-label="缩小画布"
+            disabled={viewportZoom <= CANVAS_MIN_ZOOM + 0.0005}
+            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={() => {
+              if (getZoom() <= CANVAS_MIN_ZOOM + 0.0005) return;
+              void runViewportCommand(() => zoomOut({ duration: 150 }));
+            }}
+          ><Minus className="size-4" aria-hidden="true" /></button>
+          <input
+            type="range"
+            min="8"
+            max="250"
+            step="1"
+            value={Math.round(viewportZoom * 100)}
+            aria-label="画布缩放百分比"
+            aria-valuetext={`${Math.round(viewportZoom * 100)}%`}
+            className="h-1 w-24 cursor-pointer accent-primary sm:w-32"
+            onPointerDown={beginZoomSlider}
+            onPointerUp={finishZoomSlider}
+            onPointerCancel={finishZoomSlider}
+            onKeyDown={event => {
+              if (isRangeAdjustmentKey(event.key)) beginZoomSlider();
+            }}
+            onKeyUp={event => {
+              if (isRangeAdjustmentKey(event.key)) finishZoomSlider();
+            }}
+            onBlur={finishZoomSlider}
+            onChange={event => {
+              const shouldScheduleCommit = !zoomSliderActive.current
+                || zoomSliderCommitTimer.current !== null;
+              if (!zoomSliderActive.current) beginZoomSlider();
+              const zoom = Number(event.target.value) / 100;
+              setViewportZoom(zoom);
+              const previousMove = zoomSliderMove.current;
+              zoomSliderMove.current = previousMove
+                ? previousMove.then(() => zoomTo(zoom), () => zoomTo(zoom))
+                : zoomTo(zoom);
+              if (shouldScheduleCommit) scheduleZoomSliderCommit();
+            }}
+          />
+          <span aria-live="polite" className="w-11 text-right text-xs tabular-nums text-muted-foreground">{Math.round(viewportZoom * 100)}%</span>
+          <button
+            type="button"
+            aria-label="放大画布"
+            disabled={viewportZoom >= CANVAS_MAX_ZOOM - 0.0005}
+            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={() => {
+              if (getZoom() >= CANVAS_MAX_ZOOM - 0.0005) return;
+              void runViewportCommand(() => zoomIn({ duration: 150 }));
+            }}
+          ><Plus className="size-4" aria-hidden="true" /></button>
+          <button
+            type="button"
+            aria-label="复位画布缩放到 100%"
+            className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            onClick={() => {
+              if (Math.abs(getZoom() - 1) < 0.001) return;
+              void runViewportCommand(() => zoomTo(1, { duration: 150 }));
+            }}
+          ><Scan className="size-4" aria-hidden="true" /></button>
+        </div>
 
         <div className="canvas-editor-top pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-2 p-2 sm:gap-3 sm:p-3 md:p-4">
           <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
@@ -2416,8 +2622,7 @@ function CanvasEditorInner({
               </DropdownMenuContent>
             </DropdownMenu>
             <ToolButton label="适应全部节点" onClick={() => {
-              recordHistorySnapshot();
-              void fitView({ duration: 150, padding: 0.12 });
+              void runViewportCommand(() => fitView({ duration: 150, padding: 0.12 }));
             }}><Maximize2 /></ToolButton>
             <ToolButton
               buttonRef={shortcutsTriggerRef}
@@ -2843,8 +3048,8 @@ function isCanvasShortcutBlockedTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"]'));
 }
 
-function isMiniMapTarget(target: EventTarget | null) {
-  return target instanceof Element && Boolean(target.closest('.react-flow__minimap'));
+function isRangeAdjustmentKey(key: string) {
+  return ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(key);
 }
 
 function handleMenuNavigation(event: React.KeyboardEvent<HTMLDivElement>) {
