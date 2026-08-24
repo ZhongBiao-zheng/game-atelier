@@ -19,6 +19,8 @@ import {
 import {
   ArrowLeft,
   ChevronDown,
+  ClipboardCopy,
+  Download,
   FileAudio,
   FileImage,
   FileVideo,
@@ -39,6 +41,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } fro
 
 import {
   cancelCanvasRun,
+  canvasDownloadUrl,
   canvasMediaUrl,
   createCanvasPrompt,
   deleteCanvasAsset,
@@ -67,6 +70,7 @@ import {
   EditorMessage,
   ToolButton,
   canvasNodeTypes,
+  copyablePromptForNode,
   type CanvasNodeContextValue,
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
@@ -80,6 +84,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -94,6 +99,7 @@ import type {
   RevisionedSidecar,
 } from '@/schema/canvas';
 import type { Job, JobKind } from '@/schema/jobs';
+import { cn } from '@/lib/utils';
 import { normalizeCanvasImageParams } from './canvasEditorModel';
 
 interface CreateMenuState {
@@ -104,6 +110,7 @@ interface CreateMenuState {
 }
 
 interface PreviewState {
+  nodeId: string;
   title: string;
   version: CanvasContentVersion;
 }
@@ -147,6 +154,7 @@ function CanvasEditorInner({
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [toolNotice, setToolNotice] = useState<string | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const editorRegionRef = useRef<HTMLElement>(null);
   const addTriggerRef = useRef<HTMLButtonElement>(null);
@@ -164,6 +172,7 @@ function CanvasEditorInner({
   const libraryMutationInFlight = useRef(false);
   const libraryInsertInFlight = useRef(false);
   const libraryInsertCommand = useRef<Promise<void> | null>(null);
+  const toolNoticeTimer = useRef<number | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
   const syncedTerminalRuns = useRef(new Set<string>());
@@ -192,6 +201,8 @@ function CanvasEditorInner({
     setAssets(null);
     setPrompts(null);
     setPreview(null);
+    setToolNotice(null);
+    if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
     flowNodeCache.current.clear();
     history.current = { past: [], future: [] };
     pendingTextVersions.current.clear();
@@ -220,7 +231,10 @@ function CanvasEditorInner({
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
+    };
   }, [projectId]);
 
   useEffect(() => {
@@ -1160,10 +1174,33 @@ function CanvasEditorInner({
     }
     return grouped;
   }, [jobs]);
-  const previewContent = useCallback((versionId: string, title: string) => {
+  const previewContent = useCallback((versionId: string, title: string, nodeId: string) => {
     const version = latestDocument.current?.content_versions[versionId];
-    if (version) setPreview({ title, version });
+    if (version) setPreview({ nodeId, title, version });
   }, []);
+
+  const announceToolNotice = useCallback((message: string) => {
+    setToolNotice(message);
+    if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
+    toolNoticeTimer.current = window.setTimeout(() => {
+      setToolNotice(null);
+      toolNoticeTimer.current = null;
+    }, 1800);
+  }, []);
+
+  const copyPrompt = useCallback(async (node: CanvasContentNode) => {
+    const prompt = copyablePromptForNode(
+      node,
+      jobsByResultNodeId,
+    );
+    if (!prompt) return;
+    try {
+      await navigator.clipboard.writeText(prompt);
+      announceToolNotice(`已复制“${node.title}”的生成提示词`);
+    } catch {
+      setError('无法写入剪贴板，请检查浏览器权限后重试。');
+    }
+  }, [announceToolNotice, jobsByResultNodeId]);
 
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     projectId,
@@ -1183,10 +1220,12 @@ function CanvasEditorInner({
     updateText,
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
+    copyPrompt,
     deleteNode,
   }), [
     assets?.revision,
     cancelRun,
+    copyPrompt,
     deleteNode,
     document?.content_versions,
     jobsByResultNodeId,
@@ -1209,6 +1248,18 @@ function CanvasEditorInner({
   if (!document) return <EditorMessage text={error || '画布读取失败'} action={<Button onClick={onBack}>返回项目列表</Button>} />;
 
   const background = backgroundVariant(document.settings.background);
+  const previewNode = preview
+    ? document.nodes.find(node => node.id === preview.nodeId) ?? null
+    : null;
+  const previewPrompt = previewNode
+    ? copyablePromptForNode(previewNode, jobsByResultNodeId)
+    : null;
+  const previewJobId = preview && preview.version.origin.kind === 'job_output'
+    ? preview.version.origin.job_id
+    : null;
+  const previewJob = previewJobId
+    ? jobs.find(job => job.job_id === previewJobId)
+    : undefined;
 
   return (
     <CanvasNodeContext.Provider value={contextValue}>
@@ -1347,7 +1398,14 @@ function CanvasEditorInner({
             projectId={projectId}
             contentVersions={document.content_versions}
             onPreview={selectedContentNode.data.current_version_id
-              ? () => previewContent(selectedContentNode.data.current_version_id!, selectedContentNode.title)
+              ? () => previewContent(selectedContentNode.data.current_version_id!, selectedContentNode.title, selectedContentNode.id)
+              : undefined}
+            downloadHref={selectedContentNode.data.current_version_id
+              && document.content_versions[selectedContentNode.data.current_version_id]?.kind !== 'text'
+              ? canvasDownloadUrl(projectId, selectedContentNode.data.current_version_id)
+              : undefined}
+            onCopyPrompt={copyablePromptForNode(selectedContentNode, jobsByResultNodeId)
+              ? () => void copyPrompt(selectedContentNode)
               : undefined}
             onSaveAsset={selectedContentNode.data.current_version_id
               ? () => void saveNodeToLibrary(selectedContentNode)
@@ -1364,16 +1422,24 @@ function CanvasEditorInner({
           />
         )}
 
-        {error && <div role="alert" className="absolute right-3 top-20 z-30 flex max-w-sm items-start gap-2 rounded-lg border border-destructive/30 bg-popover px-3 py-2 text-sm text-destructive shell-glow md:right-4"><span className="flex-1">{error}</span><button type="button" aria-label="关闭错误提示" onClick={() => setError(null)}><X className="size-4" /></button></div>}
+        {!preview && <CanvasActionFeedback error={error} notice={toolNotice} onDismissError={() => setError(null)} className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4" />}
 
         <Dialog open={Boolean(preview)} onOpenChange={open => { if (!open) setPreview(null); }}>
           {preview && (
             <DialogContent className="max-h-[90dvh] max-w-4xl overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{preview.title}</DialogTitle>
-                <DialogDescription>画布内容预览</DialogDescription>
+                <DialogDescription>原始内容、来源与生成信息</DialogDescription>
               </DialogHeader>
-              <CanvasPreview projectId={projectId} preview={preview} />
+              <CanvasActionFeedback error={error} notice={toolNotice} onDismissError={() => setError(null)} />
+              <CanvasPreview
+                projectId={projectId}
+                preview={preview}
+                job={previewJob}
+                onCopyPrompt={previewNode && previewPrompt && isContentNode(previewNode)
+                  ? () => void copyPrompt(previewNode)
+                  : undefined}
+              />
             </DialogContent>
           )}
         </Dialog>
@@ -1399,19 +1465,124 @@ function CanvasCreateMenuItems({ allowResources, onAddText, onAddImage, onAddVid
   </>;
 }
 
-function CanvasPreview({ projectId, preview }: { projectId: string; preview: PreviewState }) {
+function CanvasPreview({
+  projectId,
+  preview,
+  job,
+  onCopyPrompt,
+}: {
+  projectId: string;
+  preview: PreviewState;
+  job?: Job;
+  onCopyPrompt?: () => void;
+}) {
   const { version } = preview;
-  if (version.kind === 'text') {
-    return <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{version.text || '暂无文本内容'}</p>;
-  }
-  const src = canvasMediaUrl(projectId, version.version_id);
-  if (version.kind === 'image') {
-    return <img src={src} alt={preview.title} decoding="async" className="max-h-[72dvh] w-full rounded-lg object-contain" />;
-  }
-  if (version.kind === 'video') {
-    return <video src={src} controls playsInline preload="metadata" className="max-h-[72dvh] w-full rounded-lg object-contain" />;
-  }
-  return <audio src={src} controls preload="metadata" className="w-full" />;
+  const src = version.kind === 'text' ? null : canvasMediaUrl(projectId, version.version_id);
+  return (
+    <div className="space-y-4">
+      {version.kind === 'text' && (
+        <p className="max-h-[58dvh] overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-background p-4 text-sm leading-relaxed text-foreground">
+          {version.text || '暂无文本内容'}
+        </p>
+      )}
+      {version.kind === 'image' && src && (
+        <img src={src} alt={preview.title} decoding="async" className="max-h-[58dvh] w-full rounded-lg object-contain" />
+      )}
+      {version.kind === 'video' && src && (
+        <video src={src} controls playsInline preload="metadata" className="max-h-[58dvh] w-full rounded-lg object-contain" />
+      )}
+      {version.kind === 'audio' && src && (
+        <audio src={src} controls preload="metadata" className="w-full" />
+      )}
+      <dl className="grid gap-2 rounded-lg border border-border bg-background p-4 text-sm sm:grid-cols-2">
+        <MetadataItem label="类型" value={contentKindLabel(version.kind)} />
+        <MetadataItem label="来源" value={contentOriginLabel(version, job)} />
+        {version.kind !== 'text' && version.width && version.height && (
+          <MetadataItem label="尺寸" value={`${version.width} × ${version.height}`} numeric />
+        )}
+        {version.kind !== 'text' && <MetadataItem label="文件体积" value={formatBytes(version.bytes)} numeric />}
+        {version.kind !== 'text' && <MetadataItem label="格式" value={version.mime_type} />}
+        {job?.canvas_run && <MetadataItem label="模型" value={job.canvas_run.snapshot.model} />}
+        <MetadataItem label="创建时间" value={formatCanvasTimestamp(version.created_at)} numeric />
+        <MetadataItem label="版本" value={version.version_id} technical />
+      </dl>
+      <DialogFooter>
+        {onCopyPrompt && (
+          <Button variant="outline" onClick={onCopyPrompt}>
+            <ClipboardCopy aria-hidden="true" />复制生成提示词
+          </Button>
+        )}
+        {version.kind !== 'text' && (
+          <Button asChild>
+            <a href={canvasDownloadUrl(projectId, version.version_id)}>
+              <Download aria-hidden="true" />下载原文件
+            </a>
+          </Button>
+        )}
+      </DialogFooter>
+    </div>
+  );
+}
+
+function CanvasActionFeedback({ error, notice, onDismissError, className }: {
+  error: string | null;
+  notice: string | null;
+  onDismissError: () => void;
+  className?: string;
+}) {
+  if (!error && !notice) return null;
+  return (
+    <div className={cn('flex flex-col gap-2', className)}>
+      {error && (
+        <div role="alert" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-popover px-3 py-2 text-sm text-destructive shell-glow">
+          <span className="flex-1">{error}</span>
+          <button type="button" aria-label="关闭错误提示" onClick={onDismissError}><X className="size-4" /></button>
+        </div>
+      )}
+      {notice && <div role="status" className="rounded-lg border border-border bg-popover px-3 py-2 text-sm text-foreground shell-glow">{notice}</div>}
+    </div>
+  );
+}
+
+function MetadataItem({ label, value, numeric = false, technical = false }: {
+  label: string;
+  value: string;
+  numeric?: boolean;
+  technical?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={cn('mt-0.5 truncate text-foreground', numeric && 'tabular-nums', technical && 'font-mono text-xs')} title={value}>{value}</dd>
+    </div>
+  );
+}
+
+function contentKindLabel(kind: CanvasContentVersion['kind']) {
+  return { text: '文本', image: '图片', video: '视频', audio: '音频' }[kind];
+}
+
+function contentOriginLabel(version: CanvasContentVersion, job?: Job) {
+  const { origin } = version;
+  if (origin.kind === 'user_edit') return '人工编辑';
+  if (origin.kind === 'upload') return '上传素材';
+  if (origin.kind === 'user_mask') return '局部编辑蒙版';
+  if (origin.kind === 'job_output') return job?.model ? `AI 生成 · ${job.model}` : 'AI 生成';
+  if (origin.kind === 'import') return '项目包导入';
+  if (origin.operation.kind === 'crop') return '本地裁剪';
+  if (origin.operation.kind === 'split') return '本地切图';
+  return '本地放大';
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatCanvasTimestamp(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN');
 }
 
 function firstKeyForKind(keys: KeyView[], kind: JobKind) {

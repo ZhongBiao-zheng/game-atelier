@@ -1,8 +1,8 @@
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, Eye, FileAudio, FileImage, FileVideo, Library, LoaderCircle, Plus, RotateCcw, Sparkles, Square, Trash2, Type } from 'lucide-react';
+import { Check, ClipboardCopy, Download, Eye, FileAudio, FileImage, FileVideo, Library, LoaderCircle, Plus, RotateCcw, Sparkles, Square, Trash2, Type } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
-import { canvasMediaUrl } from '@/api/canvas';
+import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import { modelModality, type KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { imageControlCaps } from '@/lib/imageControlCaps';
@@ -27,7 +27,7 @@ export interface CanvasNodeContextValue {
   submittingNodeIds: ReadonlySet<string>;
   libraryBusy: boolean;
   selectNode: (id: string) => void;
-  previewContent: (id: string, title: string) => void;
+  previewContent: (id: string, title: string, nodeId: string) => void;
   selectCandidate: (id: string, versionId: string) => void;
   submitRun: (id: string) => Promise<void>;
   retryRun: (id: string, runId: string, mode: 'original' | 'current', candidateId?: string) => Promise<void>;
@@ -36,6 +36,7 @@ export interface CanvasNodeContextValue {
   updateText: (id: string, text: string) => void;
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
+  copyPrompt: (node: CanvasContentNode) => Promise<void>;
   deleteNode: (id: string) => void;
 }
 
@@ -47,6 +48,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const node = data.domain;
   const content = contentForNode(node, context.contentVersions);
   const draft = generationDraft(node);
+  const copyablePrompt = copyablePromptForNode(
+    node,
+    context.jobsByResultNodeId,
+  );
 
   return (
     <div className="canvas-node-shell group relative h-full w-full overflow-visible" data-selected={selected ? 'true' : 'false'}>
@@ -86,14 +91,40 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           {content && (
             <button
               type="button"
-              aria-label={`预览 ${node.title}`}
+              title={`查看 ${node.title} 详情`}
+              aria-label={`查看 ${node.title} 详情`}
               className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100"
               onClick={event => {
                 event.stopPropagation();
-                context.previewContent(content.version_id, node.title);
+                context.previewContent(content.version_id, node.title, node.id);
               }}
             >
               <Eye className="size-3.5" aria-hidden="true" />
+            </button>
+          )}
+          {content && content.kind !== 'text' && (
+            <a
+              href={canvasDownloadUrl(context.projectId, content.version_id)}
+              title={`下载 ${node.title}`}
+              aria-label={`下载 ${node.title}`}
+              className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100"
+              onClick={event => event.stopPropagation()}
+            >
+              <Download className="size-3.5" aria-hidden="true" />
+            </a>
+          )}
+          {copyablePrompt && providesContent(node) && (
+            <button
+              type="button"
+              title={`复制 ${node.title} 的生成提示词`}
+              aria-label={`复制 ${node.title} 的生成提示词`}
+              className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100"
+              onClick={event => {
+                event.stopPropagation();
+                void context.copyPrompt(node);
+              }}
+            >
+              <ClipboardCopy className="size-3.5" aria-hidden="true" />
             </button>
           )}
           <button
@@ -125,7 +156,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         onDoubleClick={event => {
           if (!content) return;
           event.stopPropagation();
-          context.previewContent(content.version_id, node.title);
+          context.previewContent(content.version_id, node.title, node.id);
         }}
         onKeyDown={event => {
           if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -525,6 +556,8 @@ export function CanvasInspector({
   mobileGeneration,
   onPreview,
   onSaveAsset,
+  onCopyPrompt,
+  downloadHref,
   saveAssetBusy = false,
 }: {
   node: CanvasContentNode;
@@ -537,6 +570,8 @@ export function CanvasInspector({
   mobileGeneration?: React.ReactNode;
   onPreview?: () => void;
   onSaveAsset?: () => void;
+  onCopyPrompt?: () => void;
+  downloadHref?: string;
   saveAssetBusy?: boolean;
 }) {
   const content = contentForNode(node, contentVersions);
@@ -546,7 +581,15 @@ export function CanvasInspector({
         <p className="truncate text-sm font-medium">{node.title}</p>
         <div className="flex shrink-0 items-center gap-1">
           {content && onPreview && (
-            <Button variant="ghost" size="icon" aria-label={`预览 ${node.title}`} onClick={onPreview}><Eye /></Button>
+            <Button variant="ghost" size="icon" aria-label={`查看 ${node.title} 详情`} onClick={onPreview}><Eye /></Button>
+          )}
+          {content && content.kind !== 'text' && downloadHref && (
+            <Button asChild variant="ghost" size="icon">
+              <a href={downloadHref} aria-label={`下载 ${node.title}`}><Download /></a>
+            </Button>
+          )}
+          {onCopyPrompt && (
+            <Button variant="ghost" size="icon" aria-label={`复制 ${node.title} 的生成提示词`} onClick={onCopyPrompt}><ClipboardCopy /></Button>
           )}
           {content && onSaveAsset && (
             <Button variant="ghost" size="icon" disabled={saveAssetBusy} aria-label={`将 ${node.title} 存入资产库`} onClick={onSaveAsset}><Library /></Button>
@@ -614,6 +657,20 @@ function generationDraft(node: CanvasNode): CanvasGenerationDraft | null {
   if (node.type === 'config') return node.data.draft;
   if ('generation_draft' in node.data) return node.data.generation_draft;
   return null;
+}
+
+export function copyablePromptForNode(
+  node: CanvasNode,
+  jobsByResultNodeId: ReadonlyMap<string, Job[]>,
+): string | null {
+  const history = jobsByResultNodeId.get(node.id) ?? [];
+  const completed = [...history]
+    .reverse()
+    .find(job => (job.status === 'done' || job.status === 'partial') && job.canvas_run?.snapshot.final_prompt.trim());
+  if (completed?.canvas_run?.snapshot.final_prompt) return completed.canvas_run.snapshot.final_prompt;
+  if (history.length > 0) return null;
+  const draft = generationDraft(node);
+  return draft?.prompt.trim() ? draft.prompt : null;
 }
 
 function withGenerationDraft(node: CanvasNode, draft: CanvasGenerationDraft): CanvasNode {

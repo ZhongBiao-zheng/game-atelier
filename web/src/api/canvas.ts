@@ -292,7 +292,14 @@ export function canvasMediaUrl(
   projectId: string,
   versionId: string,
 ): string {
-  return `/api/canvas/projects/${encodeURIComponent(projectId)}/content/${encodeURIComponent(versionId)}`;
+  return `/api/canvas/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/media`;
+}
+
+export function canvasDownloadUrl(
+  projectId: string,
+  versionId: string,
+): string {
+  return `/api/canvas/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/download`;
 }
 
 export function listCanvasJobs(projectId: string): Promise<Job[]> {

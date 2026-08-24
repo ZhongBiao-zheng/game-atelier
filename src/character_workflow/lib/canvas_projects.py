@@ -329,10 +329,32 @@ def _path_for_media(project_id: str, path: str) -> Path:
     return target
 
 
-def resolve_canvas_media(project_id: str, version_id: str) -> Path:
+def _version_belongs_to_other_canvas(project_id: str, version_id: str) -> bool:
+    root = canvas_projects_root()
+    if not root.exists():
+        return False
+    for project_path in root.glob("*/project.json"):
+        if project_path.parent.name == project_id:
+            continue
+        try:
+            document = CanvasDocument.model_validate_json(
+                (project_path.parent / "canvas.json").read_text(encoding="utf-8")
+            )
+        except (OSError, ValidationError, json.JSONDecodeError):
+            continue
+        if version_id in document.content_versions:
+            return True
+    return False
+
+
+def resolve_canvas_media(project_id: str, version_id: str) -> tuple[Path, CanvasMediaVersion]:
     document = read_canvas_document(project_id)
     version = document.content_versions.get(version_id)
-    if version is None or version.kind == "text":
+    if version is None:
+        if _version_belongs_to_other_canvas(project_id, version_id):
+            raise PermissionError("canvas media version belongs to another project")
+        raise FileNotFoundError(version_id)
+    if version.kind == "text":
         raise FileNotFoundError(version_id)
     target = _path_for_media(project_id, version.path)
     project_dir = canvas_project_dir(project_id).resolve()
@@ -342,11 +364,11 @@ def resolve_canvas_media(project_id: str, version_id: str) -> Path:
     if target.is_relative_to(uploads):
         if not target.is_file():
             raise FileNotFoundError(version_id)
-        return target
+        return target, version
     if target.is_relative_to(derived) and version.origin.kind == "local_tool":
         if not target.is_file():
             raise FileNotFoundError(version_id)
-        return target
+        return target, version
     if not target.is_relative_to(outputs) or version.origin.kind != "job_output":
         raise PermissionError("canvas media version has an invalid owned path")
     try:
@@ -363,7 +385,16 @@ def resolve_canvas_media(project_id: str, version_id: str) -> Path:
         raise PermissionError("media path is not registered on this canvas job")
     if not target.is_file():
         raise FileNotFoundError(version_id)
-    return target
+    return target, version
+
+
+def canvas_media_response_metadata(version: CanvasMediaVersion) -> tuple[str, str]:
+    suffix = Path(version.path).suffix.lower()
+    media_type = _MEDIA_MIME.get(suffix)
+    if media_type is None or not media_type.startswith(f"{version.kind}/"):
+        raise PermissionError("canvas media version has an invalid media type")
+    stem = re.sub(r"[^a-zA-Z0-9._-]+", "-", version.version_id).strip(".-")[:96]
+    return media_type, f"{stem or 'canvas-media'}{suffix}"
 
 
 def _cover_for_project(project_id: str) -> CanvasProjectCover | None:
@@ -378,7 +409,7 @@ def _cover_for_project(project_id: str) -> CanvasProjectCover | None:
         if version is None or version.kind != "image":
             continue
         try:
-            target = resolve_canvas_media(project_id, version.version_id)
+            target, _version = resolve_canvas_media(project_id, version.version_id)
         except (KeyError, OSError, PermissionError, ValueError):
             continue
         if target.is_file():

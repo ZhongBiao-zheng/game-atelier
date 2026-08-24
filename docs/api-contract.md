@@ -81,7 +81,8 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /projects/{id}/character-associations`
 `GET /projects/{id}/studio-archive-targets?media_kind={image,video}`
 `GET /canvas/projects` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
-`GET /canvas/projects/{id}/content/{version_id}`
+`GET /canvas/projects/{id}/versions/{version_id}/media`
+`GET /canvas/projects/{id}/versions/{version_id}/download`
 `GET /canvas/projects/{id}/library/assets` `/canvas/projects/{id}/library/prompts`
 `GET /canvas/trash`
 
@@ -90,6 +91,14 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 画布是 Web 用户人工创建、人工编排的独立创作空间，Skill 不创建项目、不填充节点，也不推进整张图。
 文件系统真源为 schema v2 `canvases/<id>/project.json` 与 revision 化 `canvas.json`；资源字节放
 `uploads/`，确定性工具产物放 `derived/<operation_id>/`，生成产物按 job 放 `outputs/<job_id>/`。
+
+Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径：
+
+- `GET /api/canvas/projects/{project_id}/versions/{version_id}/media`：同源内联预览，固定安全 MIME、
+  `nosniff`，不可变私有缓存。
+- `GET /api/canvas/projects/{project_id}/versions/{version_id}/download`：附件下载，服务端生成安全文件名。
+
+旧的 `/content/{version_id}` 路径已删除，不保留兼容分支。
 `CanvasDocument` 保存 viewport/settings、七类稳定节点、两类连接与不可变 `content_versions`。运行时只接受
 `schema_version: 2`，不包含 v1 union、fallback 或 converter。
 客户端在所有视口共用同一份 revision 化 Document；响应式面板、焦点、选择与媒体预览都是本地呈现状态，

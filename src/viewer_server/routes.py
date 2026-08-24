@@ -2482,14 +2482,45 @@ async def post_canvas_upload(
     return CanvasUploadResponse(version=version, filename=filename, document=document)
 
 
-@router.get("/canvas/projects/{project_id}/content/{version_id}")
+@router.get("/canvas/projects/{project_id}/versions/{version_id}/media")
 def get_canvas_media(
     project_id: str,
     version_id: str,
 ) -> FileResponse:
-    from character_workflow.lib.canvas_projects import resolve_canvas_media
+    return _canvas_media_file_response(project_id, version_id, download=False)
+
+
+@router.get("/canvas/projects/{project_id}/versions/{version_id}/download")
+def download_canvas_media(
+    project_id: str,
+    version_id: str,
+) -> FileResponse:
+    return _canvas_media_file_response(project_id, version_id, download=True)
+
+
+def _canvas_media_file_response(
+    project_id: str,
+    version_id: str,
+    *,
+    download: bool,
+) -> FileResponse:
+    from character_workflow.lib.canvas_projects import (
+        canvas_media_response_metadata,
+        resolve_canvas_media,
+    )
     try:
-        return FileResponse(resolve_canvas_media(project_id, version_id))
+        path, version = resolve_canvas_media(project_id, version_id)
+        media_type, filename = canvas_media_response_metadata(version)
+        headers = {"X-Content-Type-Options": "nosniff"}
+        if not download:
+            headers["Cache-Control"] = "private, max-age=31536000, immutable"
+        return FileResponse(
+            path,
+            media_type=media_type,
+            filename=filename if download else None,
+            content_disposition_type="attachment" if download else "inline",
+            headers=headers,
+        )
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
     except FileNotFoundError:
