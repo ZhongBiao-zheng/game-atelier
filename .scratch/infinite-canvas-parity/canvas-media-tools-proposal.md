@@ -306,6 +306,7 @@ POST /api/canvas/projects/{project_id}/versions/{version_id}/library
 | `canvas_media_too_large` | 报真实像素/体积与本工具上限 |
 | `canvas_media_invalid_crop` | 选区为空/越界，请重新选择 |
 | `canvas_media_invalid_split` | 切线重叠、块太小或超过 12×12 |
+| `canvas_media_invalid_request` | 无法识别操作类型或放大参数，请检查后重试 |
 | `canvas_media_upscale_not_needed` | 目标长边没有大于原图 |
 | `canvas_media_output_too_large` | 预计输出超出内存/落盘上限 |
 | `canvas_media_capability_missing` | 当前模型不支持 mask/视频编辑 |

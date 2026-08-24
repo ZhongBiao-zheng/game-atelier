@@ -60,7 +60,8 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /jobs/{id}/{confirm,cancel}` `DELETE /jobs/{id}` `DELETE /jobs/{id}/image`
 `POST /studio/jobs/{id}/archive`
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
-`POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/runs`
+`POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
+`POST /canvas/projects/{id}/runs`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
 `POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
 `DELETE /canvas/projects/{id}` `POST /canvas/trash/{trash_id}/restore`
@@ -110,6 +111,9 @@ Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径�
 媒体命令创建。真实生成输入冻结在 Canvas Job 的 `canvas_run.snapshot`，节点不保存 `job_ids` 或候选数组。
 普通 `PUT document` 必须携带 `If-Match: <revision>`：服务端项目锁内校验后 revision + 1；冲突返回 409，
 不做自动合并。Web PUT 只能新增 `user_edit` 文本版本，不能写媒体版本、修改既有版本或伪造派生连接。
+历史重做只允许恢复一种受控例外：结果 Content Version 已存在于服务端，且其不可变 `local_tool`
+`operation_id/source_version_id` 与提交的源节点、结果节点和派生边吻合；它只恢复已提交历史，不创建新
+Version，也不重新处理媒体。
 
 上传接口使用 multipart `file + expected_revision`，服务端登记不可变媒体 Content Version 并返回更新后的
 Document；扩展名只作入口白名单，文件类型、MIME、摘要、大小和图片尺寸均由服务端字节重算，伪扩展上传
@@ -135,6 +139,19 @@ Draft/连接重新解析并冻结新 Snapshot。两者都创建新 Job/Run，不
 Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程内调度上限为全局 4 个、同一密钥别名
 2 个、视频 1 个；HTTP 后台任务与重启恢复共用同一组门控。文本/图片允许候选批量，视频/音频固定单
 结果。旧 `POST .../jobs` 已删除。
+
+`POST /canvas/projects/{id}/media-operations` 只接受当前图片节点和不可变源 Version ID，并以
+discriminated union 执行 `crop`、`split` 或确定性 `upscale`。服务端用 Pillow 校验真实格式、摘要、静态帧、
+EXIF 方向与 64MP 上限，统一输出剥离元数据的 RGB/RGBA PNG；切图限制 2–12 行列且每块最短边至少 16px，
+放大只允许 1024/2048/3072/4096 长边和 nearest/bilinear/lanczos，明确不提供 AI 细节恢复。一次命令在
+项目级串行、全局最多并发 2 个；全部输出先写 staging，校验总块数与体积后原子移动到
+`derived/<operation_id>/` 并提交 Document。若进程在移动后中断，下一次项目访问按事务摘要完成提交；恢复不
+重跑图片处理。冲突为零写，源文件永不覆盖；一次 split 的结果节点和 `local_tool` 派生边作为一个画布历史
+命令撤销/重做，Content Version 与字节继续保留。裁剪/切图参数校验分别固定返回
+`canvas_media_invalid_crop` / `canvas_media_invalid_split`，无法识别的请求或放大参数返回
+`canvas_media_invalid_request`；解码、规模、源不一致、revision 冲突、处理资源与事务失败均返回带
+`code/message` 的结构化错误。产物移动前的资源错误保证零提交；移动后的错误返回事务待恢复语义，
+不谎报零变化，也不把 Pillow 或文件系统异常直接暴露为 500。
 
 项目包使用 `game-atelier-canvas-v1.zip`：`manifest.json` 对每个 metadata/blob 记录 SHA-256、字节数、
 MIME 与角色，项目内容放在 `projects/<package_project_id>/`，媒体放在

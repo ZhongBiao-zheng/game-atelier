@@ -22,12 +22,16 @@ function statusReason(status: number, statusText: string): string {
   return statusText || '未知错误';
 }
 
-/** FastAPI 的两种 detail 形态：字符串，或 422 校验的 [{loc,msg}]。 */
+/** FastAPI 的 detail 形态：字符串、稳定错误对象，或 422 校验的 [{loc,msg}]。 */
 function readDetail(body: unknown): string | null {
   if (typeof body === 'string') return body.trim() || null;
   if (!body || typeof body !== 'object') return null;
   const detail = (body as { detail?: unknown }).detail;
   if (typeof detail === 'string') return detail.trim() || null;
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === 'string') return message.trim() || null;
+  }
   if (Array.isArray(detail)) {
     const parts = detail
       .map((item) => {

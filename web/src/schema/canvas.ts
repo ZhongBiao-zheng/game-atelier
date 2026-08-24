@@ -197,6 +197,22 @@ export interface CanvasUpload {
   document: CanvasDocument;
 }
 
+export type CanvasMediaOperation =
+  | { kind: 'crop'; rect: { x: number; y: number; width: number; height: number } }
+  | { kind: 'split'; horizontal_lines: number[]; vertical_lines: number[] }
+  | {
+      kind: 'upscale';
+      target_long_edge: 1024 | 2048 | 3072 | 4096;
+      algorithm: 'nearest' | 'bilinear' | 'lanczos';
+    };
+
+export interface CanvasMediaOperationResult {
+  operation_id: string;
+  document: CanvasDocument;
+  created_version_ids: string[];
+  created_node_ids: string[];
+}
+
 export interface CanvasRun {
   job: Job;
   document: CanvasDocument;

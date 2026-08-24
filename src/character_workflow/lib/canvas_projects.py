@@ -16,7 +16,9 @@ from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.job_runner import image_dimensions_from_bytes
 from character_workflow.lib.jobs import read_job
 from character_workflow.lib.schemas import (
+    CanvasDerivationConnection,
     CanvasDocument,
+    CanvasImageNode,
     CanvasMediaVersion,
     CanvasLibraryAsset,
     CanvasPrompt,
@@ -172,8 +174,12 @@ def _read_canvas_document_unlocked(project_id: str) -> CanvasDocument:
 
 def _recover_canvas_transactions_unlocked(project_id: str) -> None:
     from character_workflow.lib.canvas_runs import recover_canvas_transactions_unlocked
+    from character_workflow.lib.canvas_media_operations import (
+        recover_canvas_media_operations_unlocked,
+    )
 
     recover_canvas_transactions_unlocked(project_id)
+    recover_canvas_media_operations_unlocked(project_id)
 
 
 def read_canvas_document(project_id: str) -> CanvasDocument:
@@ -215,7 +221,9 @@ def _normalized_web_document(
         edge.id: edge for edge in submitted.connections if edge.role == "derivation"
     }
     for edge_id, edge in submitted_derivations.items():
-        if current_derivations.get(edge_id) != edge:
+        if current_derivations.get(edge_id) == edge:
+            continue
+        if not _is_proven_local_tool_history_restore(current, submitted, edge):
             raise ValueError("document save cannot create or modify derivation connections")
 
     return submitted.model_copy(update={
@@ -223,6 +231,38 @@ def _normalized_web_document(
         "updated_at": timestamp,
         "content_versions": versions,
     })
+
+
+def _is_proven_local_tool_history_restore(
+    current: CanvasDocument,
+    submitted: CanvasDocument,
+    edge: CanvasDerivationConnection,
+) -> bool:
+    """Allow redo to restore an exact, already-committed local-tool derivation.
+
+    The browser still cannot mint provenance: the target version and its immutable origin must
+    already exist in the server document, and both submitted nodes must point at the exact source
+    and result versions recorded by that origin.
+    """
+    if edge.origin.kind != "local_tool":
+        return False
+    source = next((node for node in submitted.nodes if node.id == edge.source_node_id), None)
+    target = next((node for node in submitted.nodes if node.id == edge.target_node_id), None)
+    if not isinstance(source, CanvasImageNode) or not isinstance(target, CanvasImageNode):
+        return False
+    target_version_id = target.data.current_version_id
+    source_version_id = source.data.current_version_id
+    if not target_version_id or not source_version_id:
+        return False
+    target_version = current.content_versions.get(target_version_id)
+    if not isinstance(target_version, CanvasMediaVersion):
+        return False
+    origin = target_version.origin
+    return (
+        origin.kind == "local_tool"
+        and origin.operation_id == edge.origin.operation_id
+        and origin.source_version_id == source_version_id
+    )
 
 
 def save_canvas_document(

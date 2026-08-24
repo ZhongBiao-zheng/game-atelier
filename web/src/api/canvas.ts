@@ -3,6 +3,8 @@ import type { Job } from '@/schema/jobs';
 import type {
   CanvasDocument,
   CanvasLibraryAsset,
+  CanvasMediaOperation,
+  CanvasMediaOperationResult,
   CanvasPackageImport,
   CanvasPackageInspection,
   CanvasProject,
@@ -300,6 +302,29 @@ export function canvasDownloadUrl(
   versionId: string,
 ): string {
   return `/api/canvas/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/download`;
+}
+
+export function runCanvasMediaOperation(
+  projectId: string,
+  sourceNodeId: string,
+  sourceVersionId: string,
+  expectedRevision: number,
+  operation: CanvasMediaOperation,
+): Promise<CanvasMediaOperationResult> {
+  return requestJson<CanvasMediaOperationResult>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/media-operations`,
+    '处理画布图片',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        expected_revision: expectedRevision,
+        source_node_id: sourceNodeId,
+        source_version_id: sourceVersionId,
+        operation,
+      }),
+    },
+  );
 }
 
 export function listCanvasJobs(projectId: string): Promise<Job[]> {

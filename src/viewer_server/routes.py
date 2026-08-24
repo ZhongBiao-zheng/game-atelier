@@ -12,12 +12,13 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Body, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
@@ -59,6 +60,7 @@ from character_workflow.lib.schemas import (
     CharacterAssociationPatch, CharacterAssociationsFile,
     CanvasDocument, CanvasLibraryAsset, CanvasLibraryAssetCreate, CanvasLibraryAssetPatch,
     CanvasLibraryInsertRequest, CanvasPackageCommitRequest, CanvasPackageImportResponse,
+    CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasPrompt, CanvasPromptCreate, CanvasPromptPatch,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
     CanvasProjectList, CanvasProjectRename, CanvasRunCreate, CanvasRunResponse, CanvasRunRetry,
@@ -2480,6 +2482,78 @@ async def post_canvas_upload(
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
     return CanvasUploadResponse(version=version, filename=filename, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/media-operations",
+    response_model=CanvasMediaOperationResponse,
+    status_code=201,
+)
+async def post_canvas_media_operation(
+    project_id: str,
+    payload: Any = Body(default=None),
+) -> CanvasMediaOperationResponse:
+    from character_workflow.lib.canvas_media_operations import (
+        CanvasMediaOperationError,
+        execute_canvas_media_operation,
+    )
+
+    try:
+        request = CanvasMediaOperationRequest.model_validate(payload)
+    except ValidationError:
+        operation_kind = (
+            payload.get("operation", {}).get("kind")
+            if isinstance(payload, dict) and isinstance(payload.get("operation"), dict)
+            else None
+        )
+        error_code = {
+            "crop": "canvas_media_invalid_crop",
+            "split": "canvas_media_invalid_split",
+            "upscale": "canvas_media_invalid_request",
+        }.get(operation_kind, "canvas_media_invalid_request")
+        raise HTTPException(422, detail={
+            "code": error_code,
+            "message": "图片处理参数无效，请检查选区、切线或放大设置。",
+        }) from None
+
+    try:
+        return await run_in_threadpool(execute_canvas_media_operation, project_id, request)
+    except CanvasMediaOperationError as error:
+        status = 404 if error.code == "canvas_media_source_missing" else 422
+        raise HTTPException(
+            status,
+            detail={"code": error.code, "message": error.message},
+        ) from error
+    except KeyError:
+        raise HTTPException(404, detail={
+            "code": "canvas_media_source_missing",
+            "message": "找不到这个画布项目或源图片节点。",
+        }) from None
+    except PermissionError as error:
+        raise HTTPException(403, detail={
+            "code": "canvas_media_source_missing",
+            "message": str(error),
+        }) from error
+    except (OSError, MemoryError) as error:
+        logger.warning("canvas media operation could not write outputs: %s", type(error).__name__)
+        raise HTTPException(503, detail={
+            "code": "canvas_media_processing_unavailable",
+            "message": "本地图片处理暂时不可用，未提交任何画布变化。",
+        }) from error
+    except RuntimeError as error:
+        detail = str(error)
+        if detail.startswith("revision_conflict:"):
+            current_revision = int(detail.split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "canvas_media_revision_conflict",
+                "message": "画布已经变化，刷新后可保留选择并重试。",
+                "current_revision": current_revision,
+            }) from error
+        logger.warning("canvas media operation failed: %s", type(error).__name__)
+        raise HTTPException(409, detail={
+            "code": "canvas_media_transaction_failed",
+            "message": "图片处理事务未能安全提交，请刷新画布后重试。",
+        }) from error
 
 
 @router.get("/canvas/projects/{project_id}/versions/{version_id}/media")

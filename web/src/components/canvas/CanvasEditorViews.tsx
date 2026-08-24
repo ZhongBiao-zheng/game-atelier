@@ -1,10 +1,17 @@
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ClipboardCopy, Download, Eye, FileAudio, FileImage, FileVideo, Library, LoaderCircle, Plus, RotateCcw, Sparkles, Square, Trash2, Type } from 'lucide-react';
+import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileVideo, Grid2X2, Library, LoaderCircle, Plus, RotateCcw, Sparkles, Square, Trash2, Type, ZoomIn } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import { modelModality, type KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
+import type { CanvasMediaTool } from '@/components/canvas/CanvasMediaOperationDialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { imageControlCaps } from '@/lib/imageControlCaps';
 import { cn } from '@/lib/utils';
 import type {
@@ -37,6 +44,7 @@ export interface CanvasNodeContextValue {
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
+  openMediaOperation: (node: CanvasContentNode, tool: CanvasMediaTool) => void;
   deleteNode: (id: string) => void;
 }
 
@@ -52,6 +60,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     node,
     context.jobsByResultNodeId,
   );
+  const compactMediaTools = (node.size?.width ?? 320) < 480;
 
   return (
     <div className="canvas-node-shell group relative h-full w-full overflow-visible" data-selected={selected ? 'true' : 'false'}>
@@ -126,6 +135,34 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
             >
               <ClipboardCopy className="size-3.5" aria-hidden="true" />
             </button>
+          )}
+          {node.type === 'image' && content?.kind === 'image' && (
+            compactMediaTools ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    title={`更多 ${node.title} 图片工具`}
+                    aria-label={`更多 ${node.title} 图片工具`}
+                    className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+                    onClick={event => event.stopPropagation()}
+                  >
+                    <Ellipsis className="size-3.5" aria-hidden="true" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" onClick={event => event.stopPropagation()}>
+                  <MediaToolMenuItem label={`裁剪 ${node.title}`} onSelect={() => context.openMediaOperation(node, 'crop')}><Crop /></MediaToolMenuItem>
+                  <MediaToolMenuItem label={`切分 ${node.title}`} onSelect={() => context.openMediaOperation(node, 'split')}><Grid2X2 /></MediaToolMenuItem>
+                  <MediaToolMenuItem label={`本地放大 ${node.title}`} onSelect={() => context.openMediaOperation(node, 'upscale')}><ZoomIn /></MediaToolMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <>
+                <MediaToolButton label={`裁剪 ${node.title}`} onClick={() => context.openMediaOperation(node, 'crop')}><Crop /></MediaToolButton>
+                <MediaToolButton label={`切分 ${node.title}`} onClick={() => context.openMediaOperation(node, 'split')}><Grid2X2 /></MediaToolButton>
+                <MediaToolButton label={`本地放大 ${node.title}`} onClick={() => context.openMediaOperation(node, 'upscale')}><ZoomIn /></MediaToolButton>
+              </>
+            )
           )}
           <button
             type="button"
@@ -558,6 +595,9 @@ export function CanvasInspector({
   onSaveAsset,
   onCopyPrompt,
   downloadHref,
+  onCrop,
+  onSplit,
+  onUpscale,
   saveAssetBusy = false,
 }: {
   node: CanvasContentNode;
@@ -572,6 +612,9 @@ export function CanvasInspector({
   onSaveAsset?: () => void;
   onCopyPrompt?: () => void;
   downloadHref?: string;
+  onCrop?: () => void;
+  onSplit?: () => void;
+  onUpscale?: () => void;
   saveAssetBusy?: boolean;
 }) {
   const content = contentForNode(node, contentVersions);
@@ -590,6 +633,15 @@ export function CanvasInspector({
           )}
           {onCopyPrompt && (
             <Button variant="ghost" size="icon" aria-label={`复制 ${node.title} 的生成提示词`} onClick={onCopyPrompt}><ClipboardCopy /></Button>
+          )}
+          {content?.kind === 'image' && onCrop && (
+            <Button variant="ghost" size="icon" aria-label={`裁剪 ${node.title}`} onClick={onCrop}><Crop /></Button>
+          )}
+          {content?.kind === 'image' && onSplit && (
+            <Button variant="ghost" size="icon" aria-label={`切分 ${node.title}`} onClick={onSplit}><Grid2X2 /></Button>
+          )}
+          {content?.kind === 'image' && onUpscale && (
+            <Button variant="ghost" size="icon" aria-label={`本地放大 ${node.title}`} onClick={onUpscale}><ZoomIn /></Button>
           )}
           {content && onSaveAsset && (
             <Button variant="ghost" size="icon" disabled={saveAssetBusy} aria-label={`将 ${node.title} 存入资产库`} onClick={onSaveAsset}><Library /></Button>
@@ -642,6 +694,32 @@ export function ToolButton({ label, active, disabled, onClick, children, buttonR
   popup?: 'menu' | 'dialog' | false;
 }) {
   return <button ref={buttonRef} type="button" title={label} aria-label={label} aria-pressed={active} aria-expanded={expanded} aria-controls={controlsId} aria-haspopup={controlsId && popup ? popup : undefined} disabled={disabled} onClick={onClick} className={cn('grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-30', active && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground')}>{children}</button>;
+}
+
+function MediaToolButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground opacity-0 transition-[color,opacity,background-color] hover:bg-secondary hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary group-focus-within:opacity-100 group-hover:opacity-100"
+      onClick={event => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      <span aria-hidden="true" className="[&>svg]:size-3.5">{children}</span>
+    </button>
+  );
+}
+
+function MediaToolMenuItem({ label, onSelect, children }: { label: string; onSelect: () => void; children: React.ReactNode }) {
+  return (
+    <DropdownMenuItem aria-label={label} onSelect={onSelect}>
+      <span aria-hidden="true" className="[&>svg]:size-4">{children}</span>
+      {label}
+    </DropdownMenuItem>
+  );
 }
 
 export function AddMenuButton({ icon, title, description, onClick }: { icon: React.ReactNode; title: string; description?: string; onClick: () => void }) {

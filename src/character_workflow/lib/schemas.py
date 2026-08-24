@@ -694,6 +694,51 @@ class CanvasUploadResponse(BaseModel):
     document: CanvasDocument
 
 
+CanvasSplitLine = Annotated[float, Field(gt=0, lt=1)]
+
+
+class CanvasCropMediaOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["crop"]
+    rect: CanvasNormalizedRect
+
+
+class CanvasSplitMediaOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["split"]
+    horizontal_lines: list[CanvasSplitLine] = Field(min_length=1, max_length=11)
+    vertical_lines: list[CanvasSplitLine] = Field(min_length=1, max_length=11)
+
+
+class CanvasUpscaleMediaOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["upscale"]
+    target_long_edge: Literal[1024, 2048, 3072, 4096]
+    algorithm: Literal["nearest", "bilinear", "lanczos"]
+
+
+CanvasMediaOperation = Annotated[
+    CanvasCropMediaOperation | CanvasSplitMediaOperation | CanvasUpscaleMediaOperation,
+    Field(discriminator="kind"),
+]
+
+
+class CanvasMediaOperationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=0)
+    source_node_id: str = Field(min_length=1, max_length=120)
+    source_version_id: str = Field(min_length=1, max_length=160)
+    operation: CanvasMediaOperation
+
+
+class CanvasMediaOperationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation_id: str
+    document: CanvasDocument
+    created_version_ids: list[str]
+    created_node_ids: list[str]
+
+
 class CanvasRunCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     surface_node_id: str = Field(min_length=1, max_length=120)

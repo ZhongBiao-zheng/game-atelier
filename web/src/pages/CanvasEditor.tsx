@@ -54,6 +54,7 @@ import {
   listCanvasJobs,
   listCanvasProjects,
   retryCanvasRun,
+  runCanvasMediaOperation,
   saveCanvasAsset,
   saveCanvasDocument,
   submitCanvasRun,
@@ -75,6 +76,10 @@ import {
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
 import {
+  CanvasMediaOperationDialog,
+  type CanvasMediaTool,
+} from '@/components/canvas/CanvasMediaOperationDialog';
+import {
   CANVAS_LIBRARY_DRAG_TYPE,
   CanvasLibraryPanel,
   type CanvasLibraryMode,
@@ -93,6 +98,8 @@ import type {
   CanvasContentNode,
   CanvasDocument,
   CanvasLibraryAsset,
+  CanvasMediaOperation,
+  CanvasMediaVersion,
   CanvasNode,
   CanvasPrompt,
   CanvasTextVersion,
@@ -113,6 +120,13 @@ interface PreviewState {
   nodeId: string;
   title: string;
   version: CanvasContentVersion;
+}
+
+interface MediaOperationState {
+  nodeId: string;
+  title: string;
+  tool: CanvasMediaTool;
+  version: CanvasMediaVersion;
 }
 
 const CANVAS_MOUSE_PAN_BUTTONS: number[] = [];
@@ -154,6 +168,9 @@ function CanvasEditorInner({
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
+  const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
+  const [mediaOperationError, setMediaOperationError] = useState<string | null>(null);
   const [toolNotice, setToolNotice] = useState<string | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const editorRegionRef = useRef<HTMLElement>(null);
@@ -172,6 +189,7 @@ function CanvasEditorInner({
   const libraryMutationInFlight = useRef(false);
   const libraryInsertInFlight = useRef(false);
   const libraryInsertCommand = useRef<Promise<void> | null>(null);
+  const mediaOperationInFlight = useRef(false);
   const toolNoticeTimer = useRef<number | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
@@ -201,6 +219,9 @@ function CanvasEditorInner({
     setAssets(null);
     setPrompts(null);
     setPreview(null);
+    setMediaOperation(null);
+    setMediaOperationBusy(false);
+    setMediaOperationError(null);
     setToolNotice(null);
     if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
     flowNodeCache.current.clear();
@@ -1202,6 +1223,60 @@ function CanvasEditorInner({
     }
   }, [announceToolNotice, jobsByResultNodeId]);
 
+  const openMediaOperation = useCallback((node: CanvasContentNode, tool: CanvasMediaTool) => {
+    const versionId = node.data.current_version_id;
+    const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
+    if (!version || version.kind !== 'image' || !version.width || !version.height) {
+      setError('这个节点没有可处理的本地图片。');
+      return;
+    }
+    setPreview(null);
+    setMediaOperationError(null);
+    setMediaOperation({ nodeId: node.id, title: node.title, tool, version });
+  }, []);
+
+  const submitMediaOperation = useCallback(async (operation: CanvasMediaOperation) => {
+    if (!mediaOperation || mediaOperationInFlight.current) return;
+    mediaOperationInFlight.current = true;
+    setMediaOperationBusy(true);
+    setMediaOperationError(null);
+    try {
+      if (!await persistNow()) {
+        setMediaOperationError('自动保存失败，图片处理尚未开始。请检查服务后重试。');
+        return;
+      }
+      const before = latestDocument.current;
+      if (!before) return;
+      const result = await runCanvasMediaOperation(
+        projectId,
+        mediaOperation.nodeId,
+        mediaOperation.version.version_id,
+        serverRevision.current,
+        operation,
+      );
+      history.current.past.push({ ...before, revision: serverRevision.current });
+      history.current.past = history.current.past.slice(-50);
+      history.current.future = [];
+      serverRevision.current = result.document.revision;
+      latestDocument.current = result.document;
+      setDocument(result.document);
+      setSelectedConnectionIds(new Set());
+      setSelectedNodeIds(new Set(result.created_node_ids));
+      setMediaOperation(null);
+      announceToolNotice(
+        operation.kind === 'split'
+          ? `已生成 ${result.created_node_ids.length} 个切图节点`
+          : operation.kind === 'crop' ? '已生成裁剪节点' : '已生成本地放大节点',
+      );
+      requestAnimationFrame(() => editorRegionRef.current?.focus());
+    } catch (operationError) {
+      setMediaOperationError((operationError as Error).message);
+    } finally {
+      mediaOperationInFlight.current = false;
+      setMediaOperationBusy(false);
+    }
+  }, [announceToolNotice, mediaOperation, persistNow, projectId]);
+
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     projectId,
     contentVersions: document?.content_versions ?? {},
@@ -1221,6 +1296,7 @@ function CanvasEditorInner({
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
     copyPrompt,
+    openMediaOperation,
     deleteNode,
   }), [
     assets?.revision,
@@ -1232,6 +1308,7 @@ function CanvasEditorInner({
     jobsByRunId,
     keys,
     libraryBusy,
+    openMediaOperation,
     previewContent,
     projectId,
     recordHistorySnapshot,
@@ -1407,6 +1484,9 @@ function CanvasEditorInner({
             onCopyPrompt={copyablePromptForNode(selectedContentNode, jobsByResultNodeId)
               ? () => void copyPrompt(selectedContentNode)
               : undefined}
+            onCrop={() => openMediaOperation(selectedContentNode, 'crop')}
+            onSplit={() => openMediaOperation(selectedContentNode, 'split')}
+            onUpscale={() => openMediaOperation(selectedContentNode, 'upscale')}
             onSaveAsset={selectedContentNode.data.current_version_id
               ? () => void saveNodeToLibrary(selectedContentNode)
               : undefined}
@@ -1422,7 +1502,26 @@ function CanvasEditorInner({
           />
         )}
 
-        {!preview && <CanvasActionFeedback error={error} notice={toolNotice} onDismissError={() => setError(null)} className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4" />}
+        {!preview && !mediaOperation && <CanvasActionFeedback error={error} notice={toolNotice} onDismissError={() => setError(null)} className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4" />}
+
+        {mediaOperation && (
+          <CanvasMediaOperationDialog
+            open
+            tool={mediaOperation.tool}
+            title={mediaOperation.title}
+            version={mediaOperation.version}
+            mediaUrl={canvasMediaUrl(projectId, mediaOperation.version.version_id)}
+            busy={mediaOperationBusy}
+            error={mediaOperationError}
+            onOpenChange={open => {
+              if (!open) {
+                setMediaOperation(null);
+                setMediaOperationError(null);
+              }
+            }}
+            onSubmit={operation => void submitMediaOperation(operation)}
+          />
+        )}
 
         <Dialog open={Boolean(preview)} onOpenChange={open => { if (!open) setPreview(null); }}>
           {preview && (
