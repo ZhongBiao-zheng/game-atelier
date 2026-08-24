@@ -326,6 +326,14 @@
   .canvas-mobile-generation {
     min-width: 0;
   }
+  .canvas-mobile-generation-panel {
+    right: max(0.75rem, env(safe-area-inset-right));
+    left: calc(4.5rem + env(safe-area-inset-left));
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    max-height: min(72dvh, 42rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 
   .canvas-flow {
     --xy-background-color: var(--background);

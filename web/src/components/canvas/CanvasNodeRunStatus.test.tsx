@@ -169,6 +169,12 @@ function nodeContext(job: Job): CanvasNodeContextValue {
     canvasUiPreferencesError: null,
     showImageInfo: false,
     libraryBusy: false,
+    generationPanel: {
+      dismissedNodeId: null,
+      viewportZoom: 1,
+      narrowViewport: false,
+      dismiss: vi.fn(),
+    },
     selectNode: vi.fn(),
     previewContent: vi.fn(),
     selectCandidate: vi.fn(),

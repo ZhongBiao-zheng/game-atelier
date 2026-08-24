@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, MessageSquare, Orbit, Paintbrush, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, ZoomIn } from 'lucide-react';
+import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, MessageSquare, Orbit, Paintbrush, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, X, ZoomIn } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -16,6 +16,10 @@ import {
 } from '@/components/canvas/CanvasNodeRunStatus';
 import { formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
 import { orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
+import {
+  canvasNodePanelOffsetX,
+  canvasNodePanelWidth,
+} from '@/components/canvas/canvasNodePanelPlacement';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -48,6 +52,13 @@ import {
 
 export type FlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
 
+export interface CanvasGenerationPanelContextValue {
+  dismissedNodeId: string | null;
+  viewportZoom: number;
+  narrowViewport: boolean;
+  dismiss: (id: string) => void;
+}
+
 export interface CanvasNodeContextValue {
   projectId: string;
   contentVersions: Readonly<Record<string, CanvasContentVersion>>;
@@ -61,6 +72,7 @@ export interface CanvasNodeContextValue {
   canvasUiPreferencesError: string | null;
   showImageInfo: boolean;
   libraryBusy: boolean;
+  generationPanel: CanvasGenerationPanelContextValue;
   selectNode: (id: string) => void;
   previewContent: (id: string, title: string, nodeId: string) => void;
   selectCandidate: (id: string, versionId: string) => void;
@@ -100,12 +112,28 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const restoreTitleFocus = useRef(false);
   const toolbarHideTimer = useRef<number | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const generationPanelAnchorRef = useRef<HTMLDivElement>(null);
   const toolbarOffsetXRef = useRef(0);
+  const generationPanelOffsetXRef = useRef(0);
   const toolbarOverlayOpenRef = useRef(false);
   const [toolbarActive, setToolbarActive] = useState(false);
   const [toolbarOverlayOpen, setToolbarOverlayOpen] = useState(false);
   const [toolbarPosition, setToolbarPosition] = useState(Position.Top);
   const [toolbarOffsetX, setToolbarOffsetX] = useState(0);
+  const [generationPanelOffsetX, setGenerationPanelOffsetX] = useState(0);
+  const [generationPanelViewportWidth, setGenerationPanelViewportWidth] = useState(() => window.innerWidth);
+  const draft = generationDraft(node);
+  const generationPanelVisible = Boolean(
+    context
+    && selected
+    && draft
+    && !context.generationPanel.narrowViewport
+    && context.generationPanel.dismissedNodeId !== node.id,
+  );
+  const generationPanelWidth = canvasNodePanelWidth(
+    generationPanelViewportWidth,
+    context?.generationPanel.viewportZoom ?? 1,
+  );
   const showToolbar = useCallback(() => {
     if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
     toolbarHideTimer.current = null;
@@ -195,11 +223,48 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
       window.removeEventListener('resize', updatePlacement);
     };
   }, [selected, toolbarActive, toolbarOverlayOpen, toolbarPosition]);
+  useEffect(() => {
+    if (!generationPanelVisible) return;
+    let frame = 0;
+    const updatePlacement = () => {
+      const anchor = generationPanelAnchorRef.current;
+      if (!anchor) return;
+      setGenerationPanelViewportWidth(current => current === window.innerWidth ? current : window.innerWidth);
+      const zoom = Math.max(context?.generationPanel.viewportZoom ?? 1, 0.1);
+      const rect = anchor.getBoundingClientRect();
+      if (!rect.width) return;
+      const previousOffset = generationPanelOffsetXRef.current;
+      const previousScreenOffset = previousOffset * zoom;
+      const nextOffset = canvasNodePanelOffsetX({
+        left: rect.left - previousScreenOffset,
+        right: rect.right - previousScreenOffset,
+      }, window.innerWidth, zoom);
+      if (Math.abs(nextOffset - previousOffset) < 0.5) return;
+      generationPanelOffsetXRef.current = nextOffset;
+      setGenerationPanelOffsetX(nextOffset);
+    };
+    frame = window.requestAnimationFrame(updatePlacement);
+    const nodeElement = shellRef.current?.closest('.react-flow__node');
+    const viewportElement = shellRef.current?.closest('.react-flow__viewport');
+    const mutationObserver = new MutationObserver(updatePlacement);
+    if (nodeElement) mutationObserver.observe(nodeElement, { attributes: true, attributeFilter: ['style'] });
+    if (viewportElement) mutationObserver.observe(viewportElement, { attributes: true, attributeFilter: ['style'] });
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(updatePlacement);
+    if (generationPanelAnchorRef.current) resizeObserver?.observe(generationPanelAnchorRef.current);
+    window.addEventListener('resize', updatePlacement);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      mutationObserver.disconnect();
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updatePlacement);
+    };
+  }, [context?.generationPanel.viewportZoom, generationPanelVisible, generationPanelWidth]);
   if (!context) return null;
   const renameNode = context.renameNode;
   const content = contentForNode(node, context.contentVersions);
   const hasCurrentContent = canvasNodeHasCurrentContent(node, context.contentVersions);
-  const draft = generationDraft(node);
   const copyablePrompt = copyablePromptForNode(
     node,
     context.jobsByResultNodeId,
@@ -473,9 +538,22 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           <span className="canvas-node-handle-dot" aria-hidden="true" />
         </Handle>
       )}
-      {selected && draft && (
-        <div className="absolute left-1/2 top-full z-20 hidden w-[38rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 pt-6 md:block">
-          <CanvasGenerationComposer node={node} draft={draft} context={context} />
+      {generationPanelVisible && draft && (
+        <div
+          ref={generationPanelAnchorRef}
+          data-canvas-node-panel-anchor={node.id}
+          className="absolute left-1/2 top-full z-20 pt-4"
+          style={{
+            width: generationPanelWidth,
+            transform: `translateX(calc(-50% + ${generationPanelOffsetX}px))`,
+          }}
+        >
+          <CanvasGenerationComposer
+            node={node}
+            draft={draft}
+            context={context}
+            onClose={() => context.generationPanel.dismiss(node.id)}
+          />
         </div>
       )}
     </div>
@@ -860,11 +938,13 @@ export function CanvasGenerationComposer({
   draft,
   context,
   embedded = false,
+  onClose,
 }: {
   node: CanvasNode;
   draft: CanvasGenerationDraft;
   context: CanvasNodeContextValue;
   embedded?: boolean;
+  onClose?: () => void;
 }) {
   const editingExistingVideo = draft.mode === 'video'
     && node.type === 'video'
@@ -888,10 +968,12 @@ export function CanvasGenerationComposer({
     && (editingExistingVideo || draft.params.frame_mode === 'auto')
     ? 'omni'
     : videoCaps?.modes[0] ?? 'firstlast';
-  const runId = activeRunId(node);
-  const activeJob = runId ? context.jobsByRunId.get(runId) : undefined;
+  const nodeRunState = canvasNodeRunState(node, context.jobsByRunId);
+  const activeJob = nodeRunState.job;
+  const runId = activeJob?.canvas_run?.run_id;
   const submitting = context.submittingNodeIds.has(node.id);
-  const running = activeJob?.status === 'pending' || activeJob?.status === 'pending_confirm';
+  const running = nodeRunState.status === 'loading';
+  const modeLabel = { text: '文本', image: '图片', video: '视频', audio: '音频' }[draft.mode];
 
   function updateDraft(updater: (current: CanvasGenerationDraft) => CanvasGenerationDraft) {
     context.updateNode(node.id, current => withGenerationDraft(current, updater(generationDraft(current)!)));
@@ -899,22 +981,41 @@ export function CanvasGenerationComposer({
 
   return (
     <section
-      aria-label={`${{ text: '文本', image: '图片', video: '视频', audio: '音频' }[draft.mode]}生成设置`}
+      aria-label={`${modeLabel}生成设置`}
       data-floating-node-panel="true"
       className={cn(
         'nodrag nowheel',
-        embedded ? 'canvas-mobile-generation' : 'rounded-xl border border-border bg-glass p-4 backdrop-blur-glass shell-glow',
+        embedded ? 'canvas-mobile-generation' : 'overflow-hidden rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow',
       )}
       onClick={event => event.stopPropagation()}
       onKeyDown={event => event.stopPropagation()}
     >
+      <div className="mb-1 flex min-w-0 items-center justify-between gap-2 px-1">
+        <p className="flex min-w-0 items-center gap-2 text-xs font-medium text-foreground">
+          <Sparkles className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="shrink-0">{modeLabel}生成</span>
+          <span className="truncate text-muted-foreground">· {node.title}</span>
+        </p>
+        {onClose && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-7 shrink-0 rounded-full"
+            aria-label={`关闭${modeLabel}生成设置`}
+            onClick={onClose}
+          >
+            <X aria-hidden="true" />
+          </Button>
+        )}
+      </div>
       <textarea
         aria-label="提示词"
         rows={4}
         value={draft.prompt}
         onFocus={context.recordHistory}
         onChange={event => updateDraft(current => ({ ...current, prompt: event.target.value, updated_at: new Date().toISOString() }))}
-        className="min-h-28 w-full resize-none bg-transparent px-1 py-2 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
+        className="min-h-28 w-full resize-none rounded-md bg-transparent px-3 py-3 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
         placeholder={draft.mode === 'video'
           ? '描述镜头运动与画面变化'
           : draft.mode === 'audio'
@@ -929,7 +1030,7 @@ export function CanvasGenerationComposer({
         running={Boolean(running)}
         submitting={submitting}
       />
-      <div className="flex flex-wrap items-center gap-1.5 border-t border-border/70 pt-2">
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
         <select
           aria-label="密钥"
           value={draft.alias ?? ''}
@@ -1137,6 +1238,28 @@ export function CanvasGenerationComposer({
   );
 }
 
+export function CanvasMobileGenerationPanel({
+  node,
+  draft,
+  context,
+}: {
+  node: CanvasNode;
+  draft: CanvasGenerationDraft;
+  context: CanvasNodeContextValue;
+}) {
+  return (
+    <aside className="canvas-mobile-generation-panel absolute z-20 rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow">
+      <CanvasGenerationComposer
+        embedded
+        node={node}
+        draft={draft}
+        context={context}
+        onClose={() => context.generationPanel.dismiss(node.id)}
+      />
+    </aside>
+  );
+}
+
 type CandidateEntry = {
   job: Job;
   candidate: NonNullable<Job['canvas_run']>['candidates'][number];
@@ -1275,7 +1398,7 @@ export function CanvasInspector({
   deleteNode,
   projectId,
   contentVersions,
-  mobileGeneration,
+  hideOnMobile = false,
   onPreview,
   onSaveAsset,
   onCopyPrompt,
@@ -1300,7 +1423,7 @@ export function CanvasInspector({
   deleteNode: () => void;
   projectId: string;
   contentVersions: Readonly<Record<string, CanvasContentVersion>>;
-  mobileGeneration?: React.ReactNode;
+  hideOnMobile?: boolean;
   onPreview?: () => void;
   onSaveAsset?: () => void;
   onCopyPrompt?: () => void;
@@ -1320,7 +1443,10 @@ export function CanvasInspector({
 }) {
   const content = contentForNode(node, contentVersions);
   return (
-    <aside className="canvas-inspector-panel absolute inset-x-3 bottom-3 z-20 rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow md:bottom-auto md:left-auto md:right-4 md:top-20 md:w-72">
+    <aside className={cn(
+      'canvas-inspector-panel absolute inset-x-3 bottom-3 z-20 rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow md:bottom-auto md:left-auto md:right-4 md:top-20 md:block md:w-72',
+      hideOnMobile && 'hidden',
+    )}>
       <div className="mb-3 flex flex-col gap-2">
         <p className="truncate text-sm font-medium">{node.title}</p>
         <div className="flex flex-wrap items-center justify-end gap-1">
@@ -1400,11 +1526,6 @@ export function CanvasInspector({
       )}
       {content && content.kind !== 'text' && (
         <MediaPreview kind={content.kind} src={canvasMediaUrl(projectId, content.version_id)} compact />
-      )}
-      {mobileGeneration && (
-        <div className="mt-3 border-t border-border/70 pt-3 md:hidden">
-          {mobileGeneration}
-        </div>
       )}
     </aside>
   );
@@ -1534,13 +1655,6 @@ function withGenerationDraft(node: CanvasNode, draft: CanvasGenerationDraft): Ca
   if (node.type === 'audio') return { ...node, data: { ...node.data, generation_draft: draft } };
   if (node.type === 'plugin') return { ...node, data: { ...node.data, generation_draft: draft } };
   return node;
-}
-
-function activeRunId(node: CanvasNode): string | null {
-  if (node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio') {
-    return node.data.active_run_id;
-  }
-  return null;
 }
 
 function runStatus(job: Job | undefined): string {

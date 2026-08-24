@@ -80,8 +80,8 @@ import { getCanvasUiPreferences, saveCanvasUiPreferences } from '@/api/canvasUi'
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import {
   AddMenuButton,
-  CanvasGenerationComposer,
   CanvasInspector,
+  CanvasMobileGenerationPanel,
   CanvasNodeContext,
   EditorMessage,
   ToolButton,
@@ -105,6 +105,10 @@ import {
 } from '@/components/canvas/CanvasMediaOperationDialog';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from '@/components/canvas/canvasImageToolbar';
 import { formatCanvasBytes } from '@/components/canvas/canvasMediaFormatting';
+import {
+  generationPanelDismissalAfterNodeSelection,
+  restoreCanvasNodeFocus,
+} from '@/components/canvas/canvasNodePanelInteraction';
 import {
   CANVAS_LIBRARY_DRAG_TYPE,
   CanvasLibraryPanel,
@@ -230,6 +234,7 @@ function CanvasEditorInner({
   onBack: () => void;
   onSwitchProject: (projectId: string) => void;
 }) {
+  const narrowViewport = useNarrowCanvasViewport();
   const [document, setDocument] = useState<CanvasDocument | null>(null);
   const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
@@ -246,6 +251,7 @@ function CanvasEditorInner({
   const [submittingNodeIds, setSubmittingNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(() => new Set());
+  const [dismissedGenerationPanelNodeId, setDismissedGenerationPanelNodeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [connectionInProgress, setConnectionInProgress] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -907,6 +913,11 @@ function CanvasEditorInner({
   const selectedNode = document?.nodes.find(node => node.id === selectedId) ?? null;
   const selectedContentNode = selectedNode && isContentNode(selectedNode) ? selectedNode : null;
   const selectedDraft = selectedNode ? generationDraftForNode(selectedNode) : null;
+  const generationPanelOpen = Boolean(
+    selectedNode
+    && selectedDraft
+    && dismissedGenerationPanelNodeId !== selectedNode.id,
+  );
   const projectName = projects.find(project => project.project_id === projectId)?.name ?? '画布项目';
 
   function beginProjectRename() {
@@ -1770,6 +1781,12 @@ function CanvasEditorInner({
   const selectOnlyNode = useCallback((id: string) => {
     setSelectedConnectionIds(new Set());
     setSelectedNodeIds(new Set([id]));
+    setDismissedGenerationPanelNodeId(current => generationPanelDismissalAfterNodeSelection(current, id));
+  }, []);
+
+  const dismissGenerationPanel = useCallback((id: string) => {
+    setDismissedGenerationPanelNodeId(id);
+    restoreCanvasNodeFocus(id);
   }, []);
 
   const selectCandidate = useCallback((nodeId: string, versionId: string) => {
@@ -2437,6 +2454,12 @@ function CanvasEditorInner({
     canvasUiPreferencesError,
     showImageInfo: document?.settings.show_image_info ?? true,
     libraryBusy,
+    generationPanel: {
+      dismissedNodeId: dismissedGenerationPanelNodeId,
+      viewportZoom,
+      narrowViewport,
+      dismiss: dismissGenerationPanel,
+    },
     selectNode: selectOnlyNode,
     previewContent,
     selectCandidate,
@@ -2467,6 +2490,8 @@ function CanvasEditorInner({
     canvasUiPreferencesError,
     copyPrompt,
     deleteNode,
+    dismissedGenerationPanelNodeId,
+    dismissGenerationPanel,
     document?.content_versions,
     document?.settings.show_image_info,
     editVideo,
@@ -2476,6 +2501,7 @@ function CanvasEditorInner({
     libraryBusy,
     mediaReplaceBusyNodeIds,
     mediaReplaceError,
+    narrowViewport,
     openAngle,
     openMaskEdit,
     openMediaOperation,
@@ -2496,6 +2522,7 @@ function CanvasEditorInner({
     toggleFreeResize,
     updateNode,
     updateText,
+    viewportZoom,
   ]);
 
   if (loading) return <EditorMessage icon={<LoaderCircle className="size-5 animate-spin" />} text="正在展开画布…" />;
@@ -2931,14 +2958,15 @@ function CanvasEditorInner({
               ? () => void saveNodeToLibrary(selectedContentNode)
               : undefined}
             saveAssetBusy={libraryBusy}
-            mobileGeneration={selectedDraft ? (
-              <CanvasGenerationComposer
-                embedded
-                node={selectedContentNode}
-                draft={selectedDraft}
-                context={contextValue}
-              />
-            ) : null}
+            hideOnMobile={narrowViewport && generationPanelOpen}
+          />
+        )}
+
+        {narrowViewport && generationPanelOpen && selectedNode && selectedDraft && (
+          <CanvasMobileGenerationPanel
+            node={selectedNode}
+            draft={selectedDraft}
+            context={contextValue}
           />
         )}
 
@@ -3257,6 +3285,22 @@ function generationDraftForNode(node: CanvasNode) {
   if (node.type === 'config') return node.data.draft;
   if ('generation_draft' in node.data) return node.data.generation_draft;
   return null;
+}
+
+function useNarrowCanvasViewport() {
+  const query = '(max-width: 767px)';
+  const [narrow, setNarrow] = useState(() => (
+    typeof window.matchMedia === 'function' ? window.matchMedia(query).matches : false
+  ));
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia(query);
+    const update = () => setNarrow(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  return narrow;
 }
 
 function connectionDropNodeId(pointer: XYPosition, side: 'left' | 'right') {

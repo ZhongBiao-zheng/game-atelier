@@ -105,7 +105,7 @@ Status: ready-for-human
 
 | ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
 |---|---|---|---|---|
-| D01 | 节点下方独立 composer/提示词面板 | `canvas-node-prompt-panel.tsx`、`canvas-config-composer.tsx` | same structure + Atelier controls | partial |
+| D01 | 节点下方独立 composer/提示词面板 | `canvas-node-prompt-panel.tsx`、`canvas-config-composer.tsx` | same structure + Atelier controls：六类生成节点共用独立提示词面板，真实能力与操作置底，关闭可重开，见 issue 31 | full |
 | D02 | 空节点首个结果原位填充 | `canvas-node-manual.zh-CN.mdx` | same | full |
 | D03 | 已有内容节点作为来源，结果建立下游节点 | manual + generation helpers | same | full |
 | D04 | 文本改写；编辑已有文本时创建连接结果 | manual、`requestImageQuestion` | adapted：文本生成 Job/caller | full |
@@ -210,7 +210,7 @@ Status: ready-for-human
 | I02 | 左侧资源面板、中央画布、右侧 Agent 三栏可折叠/调整 | runtime/components | same | full |
 | I03 | 节点标题在卡片外上方，卡片本体承载内容 | `canvas-node.tsx`、runtime | same：标题与改名输入都跟随节点外沿，见 issue 27 | full |
 | I04 | hover 工具条位于节点上方 | `canvas-node-hover-toolbar.tsx` | same | full |
-| I05 | composer 是节点下方独立浮层并随节点移动 | prompt/config components | same | partial |
+| I05 | composer 是节点下方独立浮层并随节点移动 | prompt/config components | same：节点外 sibling 锚点随拖拽/缩放，边缘钳位与高倍 zoom 安全宽度，窄屏独立底部面板，见 issue 31 | full |
 | I06 | 连接柄位于节点左右中部，边低对比 | node/connections | same behavior + Atelier colors：48px 命中区、低对比贝塞尔、派生虚线与相关边高亮，见 issue 28 | full |
 | I07 | 浅/深主题、点/线/空白背景 | theme/appearance runtime | adapted：固定 Atelier 暗色 token；外观菜单明确选择点/线/空白并持久化 | full |
 | I08 | 画布和 Agent/左栏适配窄屏 | components + pending tests | adapted：375/768 明确可用降级 | full |
