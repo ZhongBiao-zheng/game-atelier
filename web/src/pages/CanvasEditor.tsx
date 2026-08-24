@@ -9,6 +9,7 @@ import {
   SelectionMode,
   type Connection,
   type EdgeChange,
+  type IsValidConnection,
   type NodeChange,
   type OnConnectEnd,
   type Viewport,
@@ -44,7 +45,7 @@ import {
   WandSparkles,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react';
 
 import {
   cancelCanvasRun,
@@ -148,6 +149,9 @@ import type {
 import type { Job, JobKind } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
 import {
+  canvasConnectionCreationCapabilities,
+  canCreateCanvasInputConnection,
+  closestCanvasConnectionEndpoint,
   normalizeCanvasImageParams,
   normalizeCanvasVideoParams,
   supportsCanvasVideoEdit,
@@ -241,6 +245,8 @@ function CanvasEditorInner({
   const [submittingNodeIds, setSubmittingNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(() => new Set());
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [connectionInProgress, setConnectionInProgress] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -331,6 +337,8 @@ function CanvasEditorInner({
     setDocument(null);
     setSelectedNodeIds(new Set());
     setSelectedConnectionIds(new Set());
+    setHoveredNodeId(null);
+    setConnectionInProgress(false);
     setSubmittingNodeIds(new Set());
     setAddOpen(false);
     setCreateMenu(null);
@@ -750,16 +758,37 @@ function CanvasEditorInner({
     return next;
   }, [document?.content_versions, document?.nodes, selectedNodeIds]);
 
-  const flowEdges = useMemo(() => (document?.connections ?? []).map(connection => ({
-    id: connection.id,
-    source: connection.source_node_id,
-    target: connection.target_node_id,
-    type: 'smoothstep',
-    className: connection.role === 'derivation' ? 'canvas-provenance-edge' : 'canvas-input-edge',
-    selected: selectedConnectionIds.has(connection.id),
-    selectable: true,
-    deletable: true,
-  })), [document?.connections, selectedConnectionIds]);
+  const activeNodeId = hoveredNodeId ?? (
+    selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value ?? null : null
+  );
+  const flowEdges = useMemo(() => {
+    const titles = new Map((document?.nodes ?? []).map(node => [node.id, node.title]));
+    return (document?.connections ?? []).map(connection => {
+      const active = activeNodeId === connection.source_node_id || activeNodeId === connection.target_node_id;
+      const sourceTitle = titles.get(connection.source_node_id) ?? connection.source_node_id;
+      const targetTitle = titles.get(connection.target_node_id) ?? connection.target_node_id;
+      return {
+        id: connection.id,
+        source: connection.source_node_id,
+        target: connection.target_node_id,
+        type: 'bezier',
+        className: cn(
+          connection.role === 'derivation' ? 'canvas-provenance-edge' : 'canvas-input-edge',
+          active && 'canvas-active-edge',
+        ),
+        ariaLabel: `${connection.role === 'derivation' ? '派生' : '输入'}连接：${sourceTitle} → ${targetTitle}`,
+        interactionWidth: 16,
+        selected: selectedConnectionIds.has(connection.id),
+        selectable: true,
+        focusable: true,
+        deletable: true,
+      };
+    });
+  }, [activeNodeId, document?.connections, document?.nodes, selectedConnectionIds]);
+
+  const isValidConnection = useCallback<IsValidConnection>((connection) => (
+    canCreateCanvasInputConnection(latestDocument.current, connection)
+  ), []);
 
   const onNodesChange = useCallback((changes: NodeChange<FlowNode>[]) => {
     const selectionChanges = changes.filter(change => change.type === 'select' || change.type === 'remove');
@@ -791,15 +820,12 @@ function CanvasEditorInner({
   }, [commit]);
 
   const onConnect = useCallback((connection: Connection) => {
-    if (!connection.source || !connection.target || connection.source === connection.target) return;
-    const source = latestDocument.current?.nodes.find(node => node.id === connection.source);
-    const target = latestDocument.current?.nodes.find(node => node.id === connection.target);
-    if (!source || !target || !providesContent(source) || target.type === 'group' || target.type === 'plugin') {
+    if (!canCreateCanvasInputConnection(latestDocument.current, connection)) {
       setError('这两个节点不能建立输入连接。');
       return;
     }
+    setError(null);
     commit(current => {
-      if (current.connections.some(edge => edge.role === 'input' && edge.source_node_id === connection.source && edge.target_node_id === connection.target)) return current;
       return {
         ...current,
         connections: [...current.connections, {
@@ -813,8 +839,24 @@ function CanvasEditorInner({
   }, [commit]);
 
   const onConnectEnd = useCallback<OnConnectEnd>((event, state) => {
+    setConnectionInProgress(false);
     if (state.isValid || !state.fromNode) return;
+    if (state.toHandle) return;
     const pointer = pointerPosition(event);
+    const startedFromTarget = state.fromHandle?.type === 'target';
+    const dropNodeId = state.toNode?.id ?? (
+      pointer ? connectionDropNodeId(pointer, startedFromTarget ? 'right' : 'left') : null
+    );
+    if (dropNodeId) {
+      const connection: Connection = {
+        source: startedFromTarget ? dropNodeId : state.fromNode.id,
+        target: startedFromTarget ? state.fromNode.id : dropNodeId,
+        sourceHandle: null,
+        targetHandle: null,
+      };
+      if (canCreateCanvasInputConnection(latestDocument.current, connection)) onConnect(connection);
+      return;
+    }
     if (!pointer) return;
     setAddOpen(false);
     setCreateMenu({
@@ -826,7 +868,7 @@ function CanvasEditorInner({
       sourceId: state.fromNode.id,
       sourceHandle: state.fromHandle?.type ?? 'source',
     });
-  }, [screenToFlowPosition]);
+  }, [onConnect, screenToFlowPosition]);
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     setSelectedConnectionIds(current => {
@@ -1064,13 +1106,24 @@ function CanvasEditorInner({
 
   function appendNode(node: CanvasNode, menu: CreateMenuState | null, baseDocument?: CanvasDocument) {
     const apply = (current: CanvasDocument) => {
+      const nodes = [...current.nodes, node];
       const connections = [...current.connections];
       if (menu?.sourceId) {
         const sourceNodeId = menu.sourceHandle === 'target' ? node.id : menu.sourceId;
         const targetNodeId = menu.sourceHandle === 'target' ? menu.sourceId : node.id;
-        connections.push({ id: makeId('connection'), role: 'input', source_node_id: sourceNodeId, target_node_id: targetNodeId });
+        if (canCreateCanvasInputConnection({ ...current, nodes }, {
+          source: sourceNodeId,
+          target: targetNodeId,
+        })) {
+          connections.push({
+            id: makeId('connection'),
+            role: 'input',
+            source_node_id: sourceNodeId,
+            target_node_id: targetNodeId,
+          });
+        }
       }
-      return { ...current, nodes: [...current.nodes, node], connections };
+      return { ...current, nodes, connections };
     };
     if (baseDocument) {
       // 上传命令创建的 Content Version 已是服务端历史；撤销只移除随后添加的节点。
@@ -2467,10 +2520,14 @@ function CanvasEditorInner({
           edges={flowEdges}
           nodeTypes={canvasNodeTypes}
           onConnect={onConnect}
+          onConnectStart={() => setConnectionInProgress(true)}
           onConnectEnd={onConnectEnd}
+          isValidConnection={isValidConnection}
           onEdgesChange={onEdgesChange}
           onNodesChange={onNodesChange}
           onNodeClick={(_, node) => selectOnlyNode(node.id)}
+          onNodeMouseEnter={(_, node) => setHoveredNodeId(node.id)}
+          onNodeMouseLeave={(_, node) => setHoveredNodeId(current => current === node.id ? null : current)}
           onNodeDragStart={recordHistorySnapshot}
           onMoveStart={event => {
             if (!event) return;
@@ -2513,7 +2570,12 @@ function CanvasEditorInner({
           selectionMode={SelectionMode.Partial}
           deleteKeyCode={null}
           onlyRenderVisibleElements
-          className="canvas-flow"
+          className={cn('canvas-flow', connectionInProgress && 'canvas-flow-connecting')}
+          style={{
+            '--canvas-handle-size': `${48 / viewportZoom}px`,
+            '--canvas-handle-dot-size': `${12 / viewportZoom}px`,
+            '--canvas-handle-border-size': `${2 / viewportZoom}px`,
+          } as CSSProperties}
         >
           {background && <Background variant={background} gap={22} size={1} />}
           {document.settings.show_minimap && (
@@ -2740,7 +2802,7 @@ function CanvasEditorInner({
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>
-              <CanvasCreateMenuItems allowResources onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onUpload={() => uploadRef.current?.click()} />
+              <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onUpload={() => uploadRef.current?.click()} />
             </div>
           )}
           <input ref={uploadRef} type="file" className="sr-only" accept="image/*,video/*,audio/*" onChange={event => { const file = event.target.files?.[0]; if (file) void handleUpload(file); event.target.value = ''; }} />
@@ -2763,7 +2825,7 @@ function CanvasEditorInner({
         {createMenu && (
           <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenu.screen.x, top: createMenu.screen.y }}>
             <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs uppercase tracking-label text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></button></div>
-            <CanvasCreateMenuItems allowResources={createMenu.sourceHandle === 'target'} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onUpload={() => uploadRef.current?.click()} />
+            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onUpload={() => uploadRef.current?.click()} />
           </div>
         )}
 
@@ -2961,8 +3023,9 @@ function CanvasEditorInner({
   );
 }
 
-function CanvasCreateMenuItems({ allowResources, onAddText, onAddImage, onAddVideo, onAddAudio, onUpload }: {
-  allowResources: boolean;
+function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, onAddText, onAddImage, onAddVideo, onAddAudio, onUpload }: {
+  allowEmptyNodes: boolean;
+  allowUpload: boolean;
   onAddText: () => void;
   onAddImage: () => void;
   onAddVideo: () => void;
@@ -2970,11 +3033,11 @@ function CanvasCreateMenuItems({ allowResources, onAddText, onAddImage, onAddVid
   onUpload: () => void;
 }) {
   return <>
-    {allowResources && <AddMenuButton icon={<Type />} title="文本" description="脚本、提示词与备注" onClick={onAddText} />}
-    <AddMenuButton icon={<FileImage />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} />
-    <AddMenuButton icon={<FileVideo />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />
-    <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} />
-    {allowResources && <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
+    {allowEmptyNodes && <AddMenuButton icon={<Type />} title="文本" description="脚本、提示词与备注" onClick={onAddText} />}
+    {allowEmptyNodes && <AddMenuButton icon={<FileImage />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} />}
+    {allowEmptyNodes && <AddMenuButton icon={<FileVideo />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />}
+    {allowEmptyNodes && <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} />}
+    {allowUpload && <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;
 }
 
@@ -3182,8 +3245,20 @@ function generationDraftForNode(node: CanvasNode) {
   return null;
 }
 
-function providesContent(node: CanvasNode) {
-  return isContentNode(node);
+function connectionDropNodeId(pointer: XYPosition, side: 'left' | 'right') {
+  const direct = window.document
+    .elementFromPoint(pointer.x, pointer.y)
+    ?.closest<HTMLElement>('.react-flow__node')
+    ?.dataset.id;
+  if (direct) return direct;
+  const nodes = [...window.document.querySelectorAll<HTMLElement>('.react-flow__node[data-id]')]
+    .flatMap((element) => {
+      const id = element.dataset.id;
+      if (!id) return [];
+      const rect = element.getBoundingClientRect();
+      return [{ id, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }];
+    });
+  return closestCanvasConnectionEndpoint(pointer, nodes, side);
 }
 
 function backgroundVariant(background: CanvasDocument['settings']['background']) {

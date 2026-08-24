@@ -5,11 +5,91 @@ import {
   type Resolution,
 } from '@/lib/studioSize';
 import type { JobParams } from '@/schema/jobs';
+import type {
+  CanvasContentNode,
+  CanvasContentVersion,
+  CanvasDocument,
+  CanvasNode,
+} from '@/schema/canvas';
 import {
   videoControlCaps,
   type VideoControlCaps,
   type VideoQuality,
 } from '@/lib/videoControlCaps';
+
+export function canvasNodeAcceptsInput(node: CanvasNode) {
+  return node.type !== 'group' && node.type !== 'plugin';
+}
+
+export function canvasNodeProvidesContent(node: CanvasNode): node is CanvasContentNode {
+  return node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio';
+}
+
+export function canvasNodeHasCurrentContent(
+  node: CanvasNode,
+  versions: Readonly<Record<string, CanvasContentVersion>>,
+): node is CanvasContentNode {
+  if (!canvasNodeProvidesContent(node) || !node.data.current_version_id) return false;
+  return versions[node.data.current_version_id]?.kind === node.type;
+}
+
+export function canCreateCanvasInputConnection(
+  document: CanvasDocument | null,
+  connection: { source: string | null; target: string | null },
+) {
+  if (!document || !connection.source || !connection.target || connection.source === connection.target) {
+    return false;
+  }
+  const source = document.nodes.find(node => node.id === connection.source);
+  const target = document.nodes.find(node => node.id === connection.target);
+  if (
+    !source
+    || !target
+    || !canvasNodeHasCurrentContent(source, document.content_versions)
+    || !canvasNodeAcceptsInput(target)
+  ) {
+    return false;
+  }
+  return !document.connections.some(edge => (
+    edge.role === 'input'
+    && edge.source_node_id === connection.source
+    && edge.target_node_id === connection.target
+  ));
+}
+
+export function closestCanvasConnectionEndpoint(
+  pointer: { x: number; y: number },
+  nodes: ReadonlyArray<{
+    id: string;
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  }>,
+  side: 'left' | 'right',
+  maximumDistance = 32,
+) {
+  let nearest: { id: string; distance: number } | null = null;
+  for (const node of nodes) {
+    const besideNode = side === 'left' ? pointer.x < node.left : pointer.x > node.right;
+    const alignedWithHandle = pointer.y >= node.top && pointer.y <= node.bottom;
+    if (!besideNode || !alignedWithHandle) continue;
+    const distance = Math.min(
+      Math.abs(node.left - pointer.x),
+      Math.abs(node.right - pointer.x),
+    );
+    if (distance <= maximumDistance && (!nearest || distance < nearest.distance)) {
+      nearest = { id: node.id, distance };
+    }
+  }
+  return nearest?.id ?? null;
+}
+
+export function canvasConnectionCreationCapabilities(sourceHandle: 'source' | 'target') {
+  return sourceHandle === 'target'
+    ? { allowEmptyNodes: false, allowUpload: true }
+    : { allowEmptyNodes: true, allowUpload: false };
+}
 
 export function normalizeCanvasImageParams(
   model: string,

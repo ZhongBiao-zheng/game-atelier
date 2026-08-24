@@ -351,37 +351,39 @@
   }
   .canvas-flow .react-flow__handle.canvas-node-handle {
     display: grid;
-    width: 3rem !important;
-    height: 3rem !important;
+    width: var(--canvas-handle-size, 3rem) !important;
+    height: var(--canvas-handle-size, 3rem) !important;
     place-items: center;
     border: 0 !important;
     background: transparent !important;
-    opacity: 0.55;
+    cursor: crosshair;
+    opacity: 0;
+    pointer-events: none !important;
     transition: opacity 160ms ease;
   }
   .canvas-flow .canvas-node-shell:hover .canvas-node-handle,
   .canvas-flow .canvas-node-shell:focus-within .canvas-node-handle,
-  .canvas-flow .canvas-node-shell[data-selected="true"] .canvas-node-handle {
+  .canvas-flow .react-flow__node:focus .canvas-node-handle,
+  .canvas-flow .react-flow__node:focus-visible .canvas-node-handle,
+  .canvas-flow .canvas-node-shell[data-selected="true"] .canvas-node-handle,
+  .canvas-flow.canvas-flow-connecting .canvas-node-handle {
     opacity: 1;
+    pointer-events: auto !important;
+  }
+  .canvas-flow .canvas-node-handle.canvas-node-handle-disabled {
+    opacity: 0 !important;
+    pointer-events: none !important;
   }
   .canvas-flow .canvas-node-handle-dot {
-    display: grid;
-    width: 2rem;
-    height: 2rem;
-    place-items: center;
-    border: 1px solid var(--border);
+    width: var(--canvas-handle-dot-size, 0.75rem);
+    height: var(--canvas-handle-dot-size, 0.75rem);
+    border: var(--canvas-handle-border-size, 2px) solid var(--muted-foreground);
     border-radius: 999px;
     background: var(--card);
-    color: var(--muted-foreground);
-    transition: border-color 160ms ease, color 160ms ease;
-  }
-  .canvas-flow .canvas-node-handle-dot svg {
-    width: 1rem;
-    height: 1rem;
+    transition: border-color 160ms ease;
   }
   .canvas-flow .canvas-node-handle:hover .canvas-node-handle-dot {
     border-color: var(--primary);
-    color: var(--primary);
   }
   .canvas-flow .react-flow__resize-control.canvas-node-resize-line {
     border-color: color-mix(in srgb, var(--primary) 72%, transparent);
@@ -394,10 +396,21 @@
     background: var(--primary);
   }
   .canvas-flow .react-flow__edge-path {
-    stroke-width: 1.5;
+    stroke-width: 1.5 !important;
+  }
+  .canvas-flow .canvas-provenance-edge .react-flow__edge-path {
+    stroke-dasharray: 5 5;
+  }
+  .canvas-flow .react-flow__edge.canvas-active-edge .react-flow__edge-path {
+    stroke: color-mix(in srgb, var(--primary) 72%, var(--border)) !important;
+    stroke-width: 2 !important;
   }
   .canvas-flow .react-flow__edge.selected .react-flow__edge-path {
-    stroke-width: 2;
+    stroke: var(--primary) !important;
+    stroke-width: 2 !important;
+  }
+  .canvas-flow .react-flow__connection-path {
+    stroke-dasharray: 5 5;
   }
 
   @media (min-width: 40rem) {

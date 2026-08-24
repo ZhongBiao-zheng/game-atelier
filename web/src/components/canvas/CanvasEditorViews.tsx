@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, MessageSquare, Orbit, Paintbrush, Plus, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, ZoomIn } from 'lucide-react';
+import { Check, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, MessageSquare, Orbit, Paintbrush, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, ZoomIn } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -30,6 +30,9 @@ import type {
 } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import {
+  canvasNodeAcceptsInput,
+  canvasNodeHasCurrentContent,
+  canvasNodeProvidesContent,
   canvasVideoEditCaps,
   normalizeCanvasImageParams,
   normalizeCanvasVideoParams,
@@ -104,6 +107,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   if (!context) return null;
   const renameNode = context.renameNode;
   const content = contentForNode(node, context.contentVersions);
+  const hasCurrentContent = canvasNodeHasCurrentContent(node, context.contentVersions);
   const draft = generationDraft(node);
   const copyablePrompt = copyablePromptForNode(
     node,
@@ -211,7 +215,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           )}
         </span>
         <span className="flex shrink-0 items-center gap-1">
-          {content && providesContent(node) && node.type !== 'image' && (
+          {content && canvasNodeProvidesContent(node) && node.type !== 'image' && (
             <button
               type="button"
               disabled={context.libraryBusy}
@@ -250,7 +254,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               <Download className="size-3.5" aria-hidden="true" />
             </a>
           )}
-          {copyablePrompt && providesContent(node) && node.type !== 'image' && (
+          {copyablePrompt && canvasNodeProvidesContent(node) && node.type !== 'image' && (
             <button
               type="button"
               title={`复制 ${node.title} 的生成提示词`}
@@ -264,7 +268,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               <ClipboardCopy className="size-3.5" aria-hidden="true" />
             </button>
           )}
-          {content && content.kind !== 'text' && providesContent(node) && node.type !== 'image' && (
+          {content && content.kind !== 'text' && canvasNodeProvidesContent(node) && node.type !== 'image' && (
             <MediaToolButton
               label={`替换 ${node.title}`}
               disabled={replacingMedia}
@@ -392,14 +396,21 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           )}
         </div>
       </article>
-      {acceptsInput(node) && (
+      {canvasNodeAcceptsInput(node) && (
         <Handle type="target" position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
-          <span className="canvas-node-handle-dot"><Plus aria-hidden="true" /></span>
+          <span className="canvas-node-handle-dot" aria-hidden="true" />
         </Handle>
       )}
-      {providesContent(node) && (
-        <Handle type="source" position={Position.Right} className="canvas-node-handle" aria-label="从此节点连接">
-          <span className="canvas-node-handle-dot"><Plus aria-hidden="true" /></span>
+      {canvasNodeProvidesContent(node) && (
+        <Handle
+          type="source"
+          position={Position.Right}
+          isConnectable={hasCurrentContent}
+          className={cn('canvas-node-handle', !hasCurrentContent && 'canvas-node-handle-disabled')}
+          aria-label={hasCurrentContent ? '从此节点连接' : undefined}
+          aria-hidden={!hasCurrentContent}
+        >
+          <span className="canvas-node-handle-dot" aria-hidden="true" />
         </Handle>
       )}
       {selected && draft && (
@@ -1344,14 +1355,6 @@ function runStatus(job: Job | undefined): string {
   if (job.status === 'partial') return '部分结果完成';
   if (job.status === 'canceled') return job.error ? `已停止 · ${job.error}` : '已停止';
   return job.error || '生成失败';
-}
-
-function acceptsInput(node: CanvasNode) {
-  return node.type !== 'group' && node.type !== 'plugin';
-}
-
-function providesContent(node: CanvasNode): node is CanvasContentNode {
-  return node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio';
 }
 
 function nodeIcon(node: CanvasNode) {

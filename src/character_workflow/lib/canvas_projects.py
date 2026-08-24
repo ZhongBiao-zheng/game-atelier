@@ -27,6 +27,8 @@ from character_workflow.lib.schemas import (
     CanvasProject,
     CanvasProjectCover,
     CanvasProjectSummary,
+    CanvasTextNode,
+    CanvasTextVersion,
     CanvasUploadOrigin,
     CanvasVideoNode,
     RevisionedSidecar,
@@ -235,7 +237,10 @@ def _normalized_web_document(
     for edge_id, edge in submitted_derivations.items():
         if current_derivations.get(edge_id) == edge:
             continue
-        if not _is_proven_local_tool_history_restore(current, submitted, edge):
+        if not (
+            _is_proven_local_tool_history_restore(current, submitted, edge)
+            or _is_proven_generation_history_restore(current, submitted, edge)
+        ):
             raise ValueError("document save cannot create or modify derivation connections")
 
     return submitted.model_copy(update={
@@ -274,6 +279,45 @@ def _is_proven_local_tool_history_restore(
         origin.kind == "local_tool"
         and origin.operation_id == edge.origin.operation_id
         and origin.source_version_id == source_version_id
+    )
+
+
+def _is_proven_generation_history_restore(
+    current: CanvasDocument,
+    submitted: CanvasDocument,
+    edge: CanvasDerivationConnection,
+) -> bool:
+    if edge.origin.kind != "generation_run":
+        return False
+    target = next((node for node in submitted.nodes if node.id == edge.target_node_id), None)
+    if not isinstance(target, (CanvasTextNode, CanvasImageNode, CanvasVideoNode, CanvasAudioNode)):
+        return False
+    target_version_id = target.data.current_version_id
+    target_version = current.content_versions.get(target_version_id or "")
+    if not isinstance(target_version, (CanvasTextVersion, CanvasMediaVersion)):
+        return False
+    origin = target_version.origin
+    if origin.kind != "job_output":
+        return False
+    try:
+        job = read_job(origin.job_id)
+    except (FileNotFoundError, json.JSONDecodeError, ValidationError):
+        return False
+    run = job.canvas_run
+    if (
+        job.namespace != "canvas"
+        or job.canvas_project_id != current.project_id
+        or run is None
+        or run.run_id != edge.origin.run_id
+        or run.snapshot.surface_node_id != edge.source_node_id
+        or run.result_node_id != edge.target_node_id
+    ):
+        return False
+    return any(
+        candidate.status == "succeeded"
+        and candidate.candidate_id == origin.candidate_id
+        and candidate.version_id == target_version_id
+        for candidate in run.candidates
     )
 
 

@@ -92,7 +92,7 @@ Status: ready-for-human
 | C07 | 开放字符串插件节点 | `CanvasNodeTypeId`、node registry | adapted：使用受限插件契约 | full |
 | C08 | 节点标题双击改名 | `canvas-node.tsx` | same：七类节点共用卡片外原地输入，见 issue 27 | full |
 | C09 | 四角 resize、图片比例锁/自由变形 | `canvas-node.tsx`、`freeResize` | adapted：React Flow NodeResizer | full |
-| C10 | 左右连接柄与有向连接 | `canvas-connections.tsx` | adapted：React Flow Handle/Edge | partial |
+| C10 | 左右连接柄与有向连接 | `canvas-connections.tsx` | adapted：React Flow Handle/Edge；统一校验、空白创建、撤销持久化与有证据派生恢复，见 issue 28 | full |
 | C11 | 配置节点之间禁止连接 | 运行时文案 `configConnection` | same | full |
 | C12 | 节点 hover 工具条跟随节点 | `canvas-node-hover-toolbar.tsx` | same structure + Atelier styling | partial |
 | C13 | 节点信息/JSON 双视图 | `CanvasNodeInfoModal` | same | full |
@@ -211,7 +211,7 @@ Status: ready-for-human
 | I03 | 节点标题在卡片外上方，卡片本体承载内容 | `canvas-node.tsx`、runtime | same：标题与改名输入都跟随节点外沿，见 issue 27 | full |
 | I04 | hover 工具条位于节点上方 | `canvas-node-hover-toolbar.tsx` | same | partial |
 | I05 | composer 是节点下方独立浮层并随节点移动 | prompt/config components | same | partial |
-| I06 | 连接柄位于节点左右中部，边低对比 | node/connections | same behavior + Atelier colors | partial |
+| I06 | 连接柄位于节点左右中部，边低对比 | node/connections | same behavior + Atelier colors：48px 命中区、低对比贝塞尔、派生虚线与相关边高亮，见 issue 28 | full |
 | I07 | 浅/深主题、点/线/空白背景 | theme/appearance runtime | adapted：固定 Atelier 暗色 token；外观菜单明确选择点/线/空白并持久化 | full |
 | I08 | 画布和 Agent/左栏适配窄屏 | components + pending tests | adapted：375/768 明确可用降级 | full |
 | I09 | 逐像素复制 Ant Design、白色工具条、字体与品牌色 | reference implementation detail | excluded：与“适配原项目”冲突 | n/a |
