@@ -61,7 +61,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /studio/jobs/{id}/archive`
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
-`POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit}`
+`POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle}`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
 `POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
 `DELETE /canvas/projects/{id}` `POST /canvas/trash/{trash_id}/restore`
@@ -158,6 +158,13 @@ Version，并与 Job、Snapshot、结果节点、派生边在同一可恢复事�
 `mask_version_id`，且唯一输入固定为当前源图 Version，不接收其它连接节点引用；original retry 重新校验
 源图与蒙版摘要后原样复用。首版只允许已验证走 OpenAI-compatible
 `/images/edits` 的 GPT Image 模型；不支持时返回 `canvas_media_capability_missing`，绝不降级为整图生成。
+
+`POST /canvas/projects/{id}/runs/angle` 只接受 `surface_node_id / expected_revision / requested_count` 与
+`horizontal_angle(-60..60) / pitch_angle(-45..45) / camera_distance(1..10) / wide_angle`。服务端优先全局
+default Key、再按登记顺序选择首个支持至少一张参考图的图片模型；浏览器不能传自由 prompt、alias、model
+或媒体路径。服务端固定 `canvas.angle_edit` preset v1，把当前图片 Version 作为唯一 Snapshot input，完整
+机位参数、preset、真实 provider/alias/model 和受控最终 prompt 一并冻结。结果始终是独立图片节点及一条
+generation-run Derivation Connection；original retry 重新校验源图摘要并逐字段复用原 Snapshot。
 
 `POST /canvas/projects/{id}/media-operations` 只接受当前图片节点和不可变源 Version ID，并以
 discriminated union 执行 `crop`、`split` 或确定性 `upscale`。服务端用 Pillow 校验真实格式、摘要、静态帧、

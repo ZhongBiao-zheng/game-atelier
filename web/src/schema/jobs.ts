@@ -17,6 +17,11 @@ export interface JobParams {
   reference_images?: string[];
   /** Canvas 局部编辑的服务端解析 mask 路径；浏览器不直接写入。 */
   mask_image?: string;
+  /** Canvas 多角度生成的服务端受控相机参数。 */
+  angle_horizontal?: number;
+  angle_pitch?: number;
+  angle_distance?: number;
+  angle_wide?: boolean;
   requested_size?: string;
   actual_size?: string;
   warnings?: string[];

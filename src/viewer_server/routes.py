@@ -58,7 +58,8 @@ from pydantic import field_validator
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
-    CanvasDocument, CanvasLibraryAsset, CanvasLibraryAssetCreate, CanvasLibraryAssetPatch,
+    CanvasAngleRunCreate, CanvasDocument, CanvasLibraryAsset, CanvasLibraryAssetCreate,
+    CanvasLibraryAssetPatch,
     CanvasLibraryInsertRequest, CanvasPackageCommitRequest, CanvasPackageImportResponse,
     CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasPrompt, CanvasPromptCreate, CanvasPromptPatch,
@@ -2731,6 +2732,48 @@ def post_canvas_reverse_prompt(
             project_id,
             payload.surface_node_id,
             payload.expected_revision,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None
+    except CanvasRunCommandError as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/angle",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+def post_canvas_angle_run(
+    project_id: str,
+    payload: CanvasAngleRunCreate,
+    background: BackgroundTasks,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_angle_run
+
+    try:
+        job, document = submit_angle_run(
+            project_id,
+            payload.surface_node_id,
+            payload.expected_revision,
+            payload.requested_count,
+            payload.horizontal_angle,
+            payload.pitch_angle,
+            payload.camera_distance,
+            payload.wide_angle,
         )
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None

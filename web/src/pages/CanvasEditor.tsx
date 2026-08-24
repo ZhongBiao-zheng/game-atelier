@@ -59,6 +59,7 @@ import {
   runCanvasMediaOperation,
   saveCanvasAsset,
   saveCanvasDocument,
+  submitCanvasAngleRun,
   submitCanvasRun,
   submitCanvasMaskEdit,
   submitCanvasReversePrompt,
@@ -84,6 +85,10 @@ import {
   CanvasMaskEditDialog,
   type CanvasMaskEditSubmission,
 } from '@/components/canvas/CanvasMaskEditDialog';
+import {
+  CanvasAngleDialog,
+  type CanvasAngleParams,
+} from '@/components/canvas/CanvasAngleDialog';
 import {
   CanvasMediaOperationDialog,
   type CanvasMediaTool,
@@ -144,6 +149,12 @@ interface MaskEditState {
   version: CanvasMediaVersion;
 }
 
+interface AngleState {
+  nodeId: string;
+  title: string;
+  version: CanvasMediaVersion;
+}
+
 interface MediaReplaceTarget {
   nodeId: string;
   title: string;
@@ -195,6 +206,9 @@ function CanvasEditorInner({
   const [maskEdit, setMaskEdit] = useState<MaskEditState | null>(null);
   const [maskEditBusy, setMaskEditBusy] = useState(false);
   const [maskEditError, setMaskEditError] = useState<string | null>(null);
+  const [angleState, setAngleState] = useState<AngleState | null>(null);
+  const [angleBusy, setAngleBusy] = useState(false);
+  const [angleError, setAngleError] = useState<string | null>(null);
   const [mediaReplaceTarget, setMediaReplaceTarget] = useState<MediaReplaceTarget | null>(null);
   const [mediaReplaceBusyNodeIds, setMediaReplaceBusyNodeIds] = useState<Set<string>>(() => new Set());
   const [mediaReplaceError, setMediaReplaceError] = useState<{ nodeId: string; message: string } | null>(null);
@@ -255,6 +269,9 @@ function CanvasEditorInner({
     setMaskEdit(null);
     setMaskEditBusy(false);
     setMaskEditError(null);
+    setAngleState(null);
+    setAngleBusy(false);
+    setAngleError(null);
     setMediaReplaceTarget(null);
     setMediaReplaceBusyNodeIds(new Set());
     setMediaReplaceError(null);
@@ -1673,6 +1690,64 @@ function CanvasEditorInner({
     }
   }, [announceToolNotice, flushSave, maskEdit, mergeSubmittedRunDocument, projectId]);
 
+  const openAngle = useCallback((node: CanvasContentNode) => {
+    const versionId = node.data.current_version_id;
+    const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
+    if (node.type !== 'image' || !version || version.kind !== 'image') {
+      setError('这个节点没有可生成新角度的图片版本。');
+      return;
+    }
+    setPreview(null);
+    setMediaOperation(null);
+    setMaskEdit(null);
+    setAngleError(null);
+    setAngleState({ nodeId: node.id, title: node.title, version });
+  }, []);
+
+  const submitAngle = useCallback(async (params: CanvasAngleParams) => {
+    if (!angleState || runSubmissionInFlight.current) return;
+    setAngleBusy(true);
+    setAngleError(null);
+    setSubmittingNodeIds(current => new Set(current).add(angleState.nodeId));
+    try {
+      if (!await persistNow()) {
+        setAngleError('自动保存失败，多角度生成尚未提交。请检查服务后重试。');
+        return;
+      }
+      const dirtyAtSubmission = dirtyVersion.current;
+      runSubmissionInFlight.current = true;
+      const run = await submitCanvasAngleRun(projectId, {
+        surface_node_id: angleState.nodeId,
+        expected_revision: serverRevision.current,
+        requested_count: params.requestedCount,
+        horizontal_angle: params.horizontalAngle,
+        pitch_angle: params.pitchAngle,
+        camera_distance: params.cameraDistance,
+        wide_angle: params.wideAngle,
+      });
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      setJobs(currentJobs => [
+        ...currentJobs.filter(job => job.job_id !== run.job.job_id),
+        run.job,
+      ]);
+      const resultId = run.job.canvas_run?.result_node_id;
+      if (resultId) setSelectedNodeIds(new Set([resultId]));
+      setAngleState(null);
+      announceToolNotice(`已提交“${angleState.title}”的多角度生成`);
+    } catch (submitError) {
+      setAngleError((submitError as Error).message);
+    } finally {
+      runSubmissionInFlight.current = false;
+      setAngleBusy(false);
+      setSubmittingNodeIds(current => {
+        const next = new Set(current);
+        next.delete(angleState.nodeId);
+        return next;
+      });
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+    }
+  }, [angleState, announceToolNotice, flushSave, mergeSubmittedRunDocument, persistNow, projectId]);
+
   const submitMediaOperation = useCallback(async (operation: CanvasMediaOperation) => {
     if (!mediaOperation || mediaOperationInFlight.current) return;
     if (documentCommandInFlight.current) {
@@ -1774,6 +1849,7 @@ function CanvasEditorInner({
     toggleFreeResize,
     openMediaOperation,
     openMaskEdit,
+    openAngle,
     deleteNode,
   }), [
     assets?.revision,
@@ -1787,8 +1863,9 @@ function CanvasEditorInner({
     libraryBusy,
     mediaReplaceBusyNodeIds,
     mediaReplaceError,
-    openMediaOperation,
+    openAngle,
     openMaskEdit,
+    openMediaOperation,
     previewContent,
     projectId,
     recordHistorySnapshot,
@@ -2003,6 +2080,10 @@ function CanvasEditorInner({
               && selectedContentNode.data.current_version_id
               ? () => openMaskEdit(selectedContentNode)
               : undefined}
+            onAngle={selectedContentNode.type === 'image'
+              && selectedContentNode.data.current_version_id
+              ? () => openAngle(selectedContentNode)
+              : undefined}
             replaceMediaBusy={mediaReplaceBusyNodeIds.has(selectedContentNode.id)}
             onCrop={() => openMediaOperation(selectedContentNode, 'crop')}
             onSplit={() => openMediaOperation(selectedContentNode, 'split')}
@@ -2022,7 +2103,7 @@ function CanvasEditorInner({
           />
         )}
 
-        {!preview && !mediaOperation && !maskEdit && <CanvasActionFeedback error={error} notice={toolNotice} onDismissError={() => setError(null)} className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4" />}
+        {!preview && !mediaOperation && !maskEdit && !angleState && <CanvasActionFeedback error={error} notice={toolNotice} onDismissError={() => setError(null)} className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4" />}
 
         {maskEdit && (
           <CanvasMaskEditDialog
@@ -2041,6 +2122,23 @@ function CanvasEditorInner({
               }
             }}
             onSubmit={submission => void submitMaskEdit(submission)}
+          />
+        )}
+
+        {angleState && (
+          <CanvasAngleDialog
+            open
+            title={angleState.title}
+            mediaUrl={canvasMediaUrl(projectId, angleState.version.version_id)}
+            busy={angleBusy}
+            error={angleError}
+            onOpenChange={open => {
+              if (!open && !angleBusy) {
+                setAngleState(null);
+                setAngleError(null);
+              }
+            }}
+            onSubmit={params => void submitAngle(params)}
           />
         )}
 

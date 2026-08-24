@@ -51,6 +51,11 @@ class JobParams(BaseModel):
     reference_images: list[str] | None = None
     # Canvas 局部编辑专用：服务端从不可变 mask Content Version 解析，浏览器不能传路径。
     mask_image: str | None = None
+    # Canvas 多角度生成专用：结构化相机参数进入 Snapshot，caller 只消费最终 prompt。
+    angle_horizontal: int | None = Field(default=None, ge=-60, le=60)
+    angle_pitch: int | None = Field(default=None, ge=-45, le=45)
+    angle_distance: float | None = Field(default=None, ge=1, le=10)
+    angle_wide: bool | None = None
     requested_size: str | None = None
     actual_size: str | None = None
     warnings: list[str] | None = None
@@ -777,6 +782,17 @@ class CanvasMaskEditCreate(BaseModel):
     surface_node_id: str = Field(min_length=1, max_length=120)
     expected_revision: int = Field(ge=0)
     requested_count: int = Field(default=1, ge=1, le=4)
+
+
+class CanvasAngleRunCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    surface_node_id: str = Field(min_length=1, max_length=120)
+    expected_revision: int = Field(ge=0)
+    requested_count: int = Field(default=1, ge=1, le=4)
+    horizontal_angle: int = Field(default=0, ge=-60, le=60)
+    pitch_angle: int = Field(default=9, ge=-45, le=45)
+    camera_distance: float = Field(default=4.8, ge=1, le=10)
+    wide_angle: bool = False
 
 
 class CanvasRunResponse(BaseModel):

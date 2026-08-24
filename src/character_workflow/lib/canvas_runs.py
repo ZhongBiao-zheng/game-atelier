@@ -81,6 +81,8 @@ _RUN_ALIAS_GATES: dict[str, BoundedSemaphore] = {}
 _RUN_ALIAS_GATES_LOCK = Lock()
 _REVERSE_PROMPT_PRESET_ID = "canvas.reverse_prompt"
 _REVERSE_PROMPT_PRESET_VERSION = 1
+_ANGLE_PROMPT_PRESET_ID = "canvas.angle_edit"
+_ANGLE_PROMPT_PRESET_VERSION = 1
 _REVERSE_PROMPT = (
     "分析唯一附带的图片，写出一段可以直接用于图像生成模型的中文提示词。"
     "准确描述主体、动作或状态、构图、场景、光线、色彩、材质、镜头视角与画面风格；"
@@ -359,7 +361,7 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
                 raise ValueError("canvas transaction document fingerprint mismatch")
             job = Job.model_validate(job_payload)
             creates_run = raw.get("kind") in {
-                "submit", "retry", "reverse_prompt", "mask_edit"
+                "submit", "retry", "reverse_prompt", "mask_edit", "angle"
             }
             recovered_job = _failed_recovered_submit(job) if creates_run else job
             target = CanvasDocument.model_validate(document_payload)
@@ -463,6 +465,22 @@ def _resolve_default_image_model() -> tuple[KeySpec, ModelSpec]:
     raise CanvasRunCommandError(
         "canvas_image_default_missing",
         "未配置可用的图片生成模型；反推文本已保留，请先在设置中接入图片模型。",
+    )
+
+
+def _resolve_default_image_edit_model() -> tuple[KeySpec, ModelSpec]:
+    from character_workflow.lib.callers.openai_image import max_reference_images
+
+    for key in _keys_default_first():
+        for model in key.models:
+            if (
+                _model_modality(model, key) == "image"
+                and max_reference_images(model.id) >= 1
+            ):
+                return key, model
+    raise CanvasRunCommandError(
+        "canvas_angle_model_missing",
+        "未配置支持参考图片的生成模型。请先在设置中接入可进行图片编辑的模型。",
     )
 
 
@@ -696,6 +714,7 @@ def _with_active_run(node: CanvasNode, run_id: str) -> CanvasNode:
 
 def _new_result_node(
     surface: CanvasNode,
+    existing_nodes: list[CanvasNode],
     mode: str,
     draft: CanvasGenerationDraft | None,
     run_id: str,
@@ -704,6 +723,26 @@ def _new_result_node(
 ) -> CanvasNode:
     width = surface.size.width if surface.size is not None else 320
     position = surface.position.model_copy(update={"x": surface.position.x + width + 120})
+    candidate_width = 320
+    candidate_height = 240
+    occupied = sorted(
+        (
+            node.position.y,
+            node.position.y + (node.size.height if node.size is not None else 240),
+        )
+        for node in existing_nodes
+        if not (
+            position.x + candidate_width <= node.position.x
+            or node.position.x + (node.size.width if node.size is not None else 320) <= position.x
+        )
+    )
+    candidate_y = position.y
+    for top, bottom in occupied:
+        if candidate_y + candidate_height <= top:
+            break
+        if candidate_y < bottom and candidate_y + candidate_height > top:
+            candidate_y = bottom + 80
+    position = position.model_copy(update={"y": candidate_y})
     common = {
         "id": result_id,
         "title": title,
@@ -836,6 +875,7 @@ def _commit_frozen_run(
     if result_id != surface.id:
         nodes.append(_new_result_node(
             surface,
+            nodes,
             mode,
             result_draft,
             run_id,
@@ -1126,6 +1166,165 @@ def submit_mask_edit_run(
         if staged_path is not None and not _transaction_path(project_id, run_id).exists():
             staged_path.unlink(missing_ok=True)
         raise
+
+
+def _angle_label(
+    horizontal_angle: int,
+    pitch_angle: int,
+    camera_distance: float,
+    wide_angle: bool,
+) -> str:
+    horizontal = (
+        "正面"
+        if horizontal_angle == 0
+        else f"向右旋转 {horizontal_angle}°"
+        if horizontal_angle > 0
+        else f"向左旋转 {abs(horizontal_angle)}°"
+    )
+    pitch = (
+        "平视"
+        if pitch_angle == 0
+        else f"俯视 {pitch_angle}°"
+        if pitch_angle > 0
+        else f"仰视 {abs(pitch_angle)}°"
+    )
+    lens = "广角镜头" if wide_angle else "标准镜头"
+    return f"{horizontal}，{pitch}，相机距离 {camera_distance:.1f}，{lens}"
+
+
+def _angle_prompt(
+    horizontal_angle: int,
+    pitch_angle: int,
+    camera_distance: float,
+    wide_angle: bool,
+) -> str:
+    label = _angle_label(horizontal_angle, pitch_angle, camera_distance, wide_angle)
+    return (
+        "基于唯一附带的参考图片，生成同一主体在新摄影机视角下的完整图像。"
+        f"相机设置：{label}。"
+        "只改变摄影机方位、俯仰、距离与镜头透视；严格保持主体身份、造型结构、服饰、材质、"
+        "色彩、背景内容、光线方向和原画风格，不增加新主体，不重设计现有元素。"
+    )
+
+
+def _angle_result_title(
+    horizontal_angle: int,
+    pitch_angle: int,
+    wide_angle: bool,
+) -> str:
+    horizontal = (
+        "正面"
+        if horizontal_angle == 0
+        else f"右{horizontal_angle}°"
+        if horizontal_angle > 0
+        else f"左{abs(horizontal_angle)}°"
+    )
+    pitch = (
+        "平视"
+        if pitch_angle == 0
+        else f"俯{pitch_angle}°"
+        if pitch_angle > 0
+        else f"仰{abs(pitch_angle)}°"
+    )
+    lens = " · 广角" if wide_angle else ""
+    return f"新角度 · {horizontal} · {pitch}{lens}"
+
+
+def submit_angle_run(
+    project_id: str,
+    surface_node_id: str,
+    expected_revision: int,
+    requested_count: int,
+    horizontal_angle: int,
+    pitch_angle: int,
+    camera_distance: float,
+    wide_angle: bool,
+) -> tuple[Job, CanvasDocument]:
+    """Freeze one owned image and structured camera controls into an Image Run."""
+    if requested_count < 1 or requested_count > 4:
+        raise CanvasRunCommandError(
+            "canvas_angle_count_invalid",
+            "多角度生成一次只能创建 1–4 张候选图。",
+        )
+    with file_lock(_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        current = _read_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
+        surface = next((node for node in current.nodes if node.id == surface_node_id), None)
+        if not isinstance(surface, CanvasImageNode) or not surface.data.current_version_id:
+            raise CanvasRunCommandError(
+                "canvas_angle_source_missing",
+                "请选择一个已有内容的图片节点再生成新角度。",
+            )
+        source = current.content_versions.get(surface.data.current_version_id)
+        if not isinstance(source, CanvasMediaVersion) or source.kind != "image":
+            raise CanvasRunCommandError(
+                "canvas_angle_source_missing",
+                "图片节点当前没有可读取的项目内版本。",
+            )
+        key, model = _resolve_default_image_edit_model()
+        inputs = [CanvasSnapshotInput(
+            order=0,
+            source="implicit_self",
+            node_id=surface.id,
+            version_id=source.version_id,
+            kind="image",
+        )]
+        job_params = JobParams(
+            n=requested_count,
+            angle_horizontal=horizontal_angle,
+            angle_pitch=pitch_angle,
+            angle_distance=camera_distance,
+            angle_wide=wide_angle,
+        )
+        _validate_input_capabilities(model, JobKind.IMAGE, inputs, job_params)
+        paths = _input_paths(project_id, current, inputs)
+        job_params.reference_images = paths["image"]
+        normalized = job_params.model_dump(mode="json", exclude_none=True)
+        normalized.pop("reference_images", None)
+        normalized.update({
+            "preset_id": _ANGLE_PROMPT_PRESET_ID,
+            "preset_version": _ANGLE_PROMPT_PRESET_VERSION,
+        })
+        final_prompt = _angle_prompt(
+            horizontal_angle,
+            pitch_angle,
+            camera_distance,
+            wide_angle,
+        )
+        result_draft = CanvasGenerationDraft(
+            mode="image",
+            prompt=final_prompt,
+            input_policy="mentions_only",
+            model=model.id,
+            alias=key.alias,
+            params=job_params.model_copy(update={"reference_images": None}),
+            updated_at=_now(),
+        )
+        return _commit_frozen_run(
+            project_id,
+            current,
+            surface,
+            key,
+            model,
+            JobKind.IMAGE,
+            mode="image",
+            final_prompt=final_prompt,
+            input_policy="mentions_only",
+            normalized=normalized,
+            job_params=job_params,
+            inputs=inputs,
+            requested_count=requested_count,
+            result_title=_angle_result_title(
+                horizontal_angle,
+                pitch_angle,
+                wide_angle,
+            ),
+            result_draft=result_draft,
+            allow_surface_reuse=False,
+            transaction_kind="angle",
+        )
 
 
 def _is_reverse_prompt_snapshot(snapshot: CanvasGenerationSnapshot) -> bool:

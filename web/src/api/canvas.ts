@@ -409,6 +409,31 @@ export function submitCanvasMaskEdit(
   );
 }
 
+export interface CanvasAngleRunPayload {
+  surface_node_id: string;
+  expected_revision: number;
+  requested_count: number;
+  horizontal_angle: number;
+  pitch_angle: number;
+  camera_distance: number;
+  wide_angle: boolean;
+}
+
+export function submitCanvasAngleRun(
+  projectId: string,
+  payload: CanvasAngleRunPayload,
+): Promise<CanvasRun> {
+  return requestJson<CanvasRun>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/angle`,
+    '提交多角度生成',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export function createCanvasReversePromptConfig(
   projectId: string,
   runId: string,
