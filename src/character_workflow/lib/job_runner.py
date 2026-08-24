@@ -11,7 +11,7 @@ from typing import Any
 from character_workflow.lib import data_root
 from character_workflow.lib import net_env
 from character_workflow.lib.asset_versions import asset_output_lock, next_asset_path
-from character_workflow.lib.callers import dispatch, dispatch_video
+from character_workflow.lib.callers import dispatch, dispatch_audio, dispatch_text, dispatch_video
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
     job_output_dir_for,
@@ -231,6 +231,25 @@ def is_valid_video(path: Path) -> bool:
     return False
 
 
+def is_valid_audio(path: Path) -> bool:
+    if not path.exists() or path.stat().st_size <= 0:
+        return False
+    with path.open("rb") as handle:
+        head = handle.read(16)
+    suffix = path.suffix.lower()
+    if suffix == ".mp3":
+        return head.startswith(b"ID3") or (len(head) >= 2 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0)
+    if suffix == ".wav":
+        return head.startswith(b"RIFF") and head[8:12] == b"WAVE"
+    if suffix == ".flac":
+        return head.startswith(b"fLaC")
+    if suffix == ".opus":
+        return head.startswith(b"OggS")
+    if suffix == ".aac":
+        return len(head) >= 2 and head[0] == 0xFF and head[1] & 0xF0 == 0xF0
+    return False
+
+
 def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
     created_at = datetime.now(timezone.utc).isoformat()
     lines = [
@@ -265,8 +284,12 @@ def run_job(job_id: str) -> Job:
     allowed_statuses = (JobStatus.PENDING_CONFIRM, JobStatus.PENDING)
     if job.status not in allowed_statuses:
         raise JobRunnerError(f"job not in a runnable status (current: {job.status.value})")
+    if job.kind == JobKind.TEXT:
+        return _run_text_job(job)
     if job.kind == JobKind.VIDEO:
         return _run_video_job(job)
+    if job.kind == JobKind.AUDIO:
+        return _run_audio_job(job)
 
     job = _normalize_reference_images(job)
     params = _params(job)
@@ -325,6 +348,87 @@ def run_job(job_id: str) -> Job:
         if isinstance(e, JobRunnerError):
             raise
         raise JobRunnerError(str(e)) from e
+
+
+def _run_text_job(job: Job) -> Job:
+    params = _params(job)
+    try:
+        if not job.alias:
+            raise JobRunnerError("text job requires an alias to route to a provider")
+        if job.status == JobStatus.PENDING_CONFIRM:
+            update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
+        outputs = dispatch_text(
+            prompt=job.prompt,
+            model=job.model,
+            alias=job.alias,
+            n=max(1, int(params.get("n") or 1)),
+            params=params,
+        )
+        texts = [text for text in outputs if text and len(text) <= 40_000]
+        if not texts:
+            raise JobRunnerError(f"{job.provider or job.alias} returned no valid text artifacts")
+        output_dir = job_output_dir_for(job)
+        output_paths: list[str] = []
+        with asset_output_lock(output_dir):
+            for text in texts[: max(1, int(params.get("n") or 1))]:
+                target = next_asset_path(output_dir, "txt")
+                target.write_text(text, encoding="utf-8")
+                output_paths.append(str(target))
+        job = _save_params(read_job(job.job_id), params)
+        for output_path in output_paths:
+            _write_sidecar(Path(output_path), job, params)
+        return update_job_status(
+            job.job_id,
+            status=JobStatus.DONE,
+            output_paths=output_paths,
+            error=None,
+        )
+    except Exception as error:
+        update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(error))
+        if isinstance(error, JobRunnerError):
+            raise
+        raise JobRunnerError(str(error)) from error
+
+
+def _run_audio_job(job: Job) -> Job:
+    params = _params(job)
+    try:
+        if not job.alias:
+            raise JobRunnerError("audio job requires an alias to route to a provider")
+        if job.status == JobStatus.PENDING_CONFIRM:
+            update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
+        with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider or 'audio'}-") as tmp:
+            outputs = dispatch_audio(
+                prompt=job.prompt,
+                model=job.model,
+                alias=job.alias,
+                output_dir=Path(tmp),
+                params=params,
+            )
+            valid = [Path(path) for path in outputs if is_valid_audio(Path(path))]
+            if not valid:
+                raise JobRunnerError(f"{job.provider or job.alias} returned no valid audio artifacts")
+            output_dir = job_output_dir_for(job)
+            output_paths: list[str] = []
+            with asset_output_lock(output_dir):
+                for source in valid[:1]:
+                    target = next_asset_path(output_dir, source.suffix)
+                    shutil.move(str(source), target)
+                    output_paths.append(str(target))
+        job = _save_params(read_job(job.job_id), params)
+        for output_path in output_paths:
+            _write_sidecar(Path(output_path), job, params)
+        return update_job_status(
+            job.job_id,
+            status=JobStatus.DONE,
+            output_paths=output_paths,
+            error=None,
+        )
+    except Exception as error:
+        update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(error))
+        if isinstance(error, JobRunnerError):
+            raise
+        raise JobRunnerError(str(error)) from error
 
 
 def _run_video_job(job: Job) -> Job:

@@ -30,9 +30,11 @@ class AssetSlot(str, Enum):
 
 
 class JobKind(str, Enum):
-    # 媒体类型 — 与 AssetSlot / namespace 解耦；runner 依此分派图片或视频 caller。
+    # 产物类型 — 与 AssetSlot / namespace 解耦；Canvas 可使用四种生成 caller。
+    TEXT = "text"
     IMAGE = "image"
     VIDEO = "video"
+    AUDIO = "audio"
 
 
 Namespace = Literal["character", "studio", "ui", "video", "canvas"]
@@ -61,6 +63,14 @@ class JobParams(BaseModel):
     generate_audio: bool | None = None
     reference_videos: list[str] | None = None
     reference_audios: list[str] | None = None
+    # 文本生成参数（OpenAI-compatible chat/completions）。
+    temperature: float | None = None
+    max_tokens: int | None = None
+    # 语音生成参数（OpenAI-compatible audio/speech）。
+    voice: str | None = None
+    speed: float | None = None
+    response_format: str | None = None
+    instructions: str | None = None
     # 2026-08-10 (B3): UI 页面风格候选 —— 结构锁定、只换风格时记来源关系。
     # style_variant = 画师给的风格方向标签；base_version = 结构所本的基准页文件名（如 v1.png）。
     style_variant: str | None = None

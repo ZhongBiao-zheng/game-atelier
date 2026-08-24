@@ -122,9 +122,44 @@ def dispatch_video(
     )
 
 
+def dispatch_text(
+    *,
+    prompt: str,
+    model: str,
+    alias: str,
+    n: int = 1,
+    params: dict[str, Any] | None = None,
+    **kwargs: Any,
+) -> list[str]:
+    from .openai_text import generate
+
+    return generate(
+        prompt=prompt, model=model, alias=alias, n=n, params=params, **kwargs
+    )
+
+
+def dispatch_audio(
+    *,
+    prompt: str,
+    model: str,
+    alias: str,
+    output_dir: Any,
+    params: dict[str, Any] | None = None,
+    **kwargs: Any,
+) -> list[str]:
+    from .openai_audio import render
+
+    return render(
+        prompt=prompt, model=model, alias=alias, output_dir=output_dir,
+        params=params, **kwargs,
+    )
+
+
 __all__ = [
     "dispatch",
+    "dispatch_text",
     "dispatch_video",
+    "dispatch_audio",
     "stubs",
     "NoSuchKeyError",
     "WrongProviderError",

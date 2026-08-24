@@ -103,8 +103,9 @@ Document；扩展名只作入口白名单，文件类型、MIME、摘要、大�
 修改快照、prompt 或参数。`POST /canvas/projects/{id}/runs` 只接受
 `surface_node_id / expected_revision / requested_count`；服务端从已保存 Draft、连接与 Content Version
 解析真实输入，冻结 `canvas_run.snapshot`，并用项目内短事务原子提交 Job、结果节点与 Derivation Connection。
-当前可执行纵切开放现有 Job Runner 已支持的图片/视频；文本、音频在对应 caller 落地前由服务端明确拒绝，
-不提供假入口。连接输入会先按 Prompt 内 `@[node:id]` 的出现顺序冻结，再补未提及连接，并在冻结前按
+四模态均进入同一个 Job Runner：图片/视频沿用既有厂商协议，文本首版走 OpenAI-compatible
+`chat/completions`，音频首版走 OpenAI-compatible `audio/speech`；模型配置的 protocol 不匹配时明确
+拒绝，不做伪兼容。连接输入会先按 Prompt 内 `@[node:id]` 的出现顺序冻结，再补未提及连接，并在冻结前按
 模型/协议校验媒体类型和数量。Runner 完成后再次通过短事务登记输出 Content Version、candidate 状态与
 结果节点当前版本。批量候选逐个校验：全部成功为 `done`，部分成功为 `partial`，全部失败为 `failed`，
 停止且没有有效产物为 `canceled`；部分失败不会抹掉已经成功的 Content Version。
@@ -117,7 +118,8 @@ Draft/连接重新解析并冻结新 Snapshot。两者都创建新 Job/Run，不
 服务启动时先恢复全部项目事务，再核对孤儿 Job：`runner_started_at` 为空的持久任务尚未调用厂商，可安全
 重新领取；已经领取但仍无终态的请求状态未知，明确标记失败且不自动重试，避免重复扣费。视频与
 Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程内调度上限为全局 4 个、同一密钥别名
-2 个、视频 1 个；HTTP 后台任务与重启恢复共用同一组门控。旧 `POST .../jobs` 已删除。
+2 个、视频 1 个；HTTP 后台任务与重启恢复共用同一组门控。文本/图片允许候选批量，视频/音频固定单
+结果。旧 `POST .../jobs` 已删除。
 
 ### 角色衍生契约
 

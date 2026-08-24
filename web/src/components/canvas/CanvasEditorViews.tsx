@@ -99,7 +99,9 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         <div className={cn('h-full bg-secondary/20', node.type === 'text' ? 'min-h-32' : 'min-h-44')}>
           {node.type === 'text' && (
             <p className="line-clamp-5 whitespace-pre-wrap p-3 text-sm leading-relaxed text-foreground">
-              {content?.kind === 'text' && content.text ? content.text : '选择节点后输入文本…'}
+              {content?.kind === 'text' && content.text
+                ? content.text
+                : draft ? '选择节点，填写下方生成设置' : '选择节点后输入文本…'}
             </p>
           )}
           {content && content.kind !== 'text' && (
@@ -155,7 +157,7 @@ function GenerationComposer({
 
   return (
     <section
-      aria-label={`${draft.mode === 'image' ? '图片' : draft.mode === 'video' ? '视频' : '内容'}生成设置`}
+      aria-label={`${{ text: '文本', image: '图片', video: '视频', audio: '音频' }[draft.mode]}生成设置`}
       data-floating-node-panel="true"
       className="nodrag nowheel rounded-xl border border-border bg-glass p-4 backdrop-blur-glass shell-glow"
       onClick={event => event.stopPropagation()}
@@ -168,7 +170,11 @@ function GenerationComposer({
         onFocus={context.recordHistory}
         onChange={event => updateDraft(current => ({ ...current, prompt: event.target.value, updated_at: new Date().toISOString() }))}
         className="min-h-28 w-full resize-none bg-transparent px-1 py-2 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
-        placeholder={draft.mode === 'video' ? '描述镜头运动与画面变化' : '描述任何你想要生成的内容'}
+        placeholder={draft.mode === 'video'
+          ? '描述镜头运动与画面变化'
+          : draft.mode === 'audio'
+            ? '输入需要朗读的文本'
+            : draft.mode === 'text' ? '描述要创作的文案、脚本或内容' : '描述任何你想要生成的内容'}
       />
       <CandidateHistory
         nodeId={node.id}
@@ -218,6 +224,21 @@ function GenerationComposer({
           <option value="">选择模型</option>
           {models.map(model => <option key={model.id} value={model.id}>{model.name || model.id}</option>)}
         </select>
+        {(draft.mode === 'text' || draft.mode === 'image') && (
+          <select
+            aria-label="候选数"
+            value={String(draft.params.n ?? 1)}
+            onFocus={context.recordHistory}
+            onChange={event => updateDraft(current => ({
+              ...current,
+              params: { ...current.params, n: Number(event.target.value) },
+              updated_at: new Date().toISOString(),
+            }))}
+            className="h-9 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            {[1, 2, 3, 4].map(value => <option key={value} value={value}>{value} 个候选</option>)}
+          </select>
+        )}
         {draft.mode !== 'text' && draft.mode !== 'audio' && (
           <select
             aria-label="比例"
@@ -232,6 +253,36 @@ function GenerationComposer({
           >
             {(imageCaps?.ratios ?? ['1:1', '16:9', '9:16', '4:3', '3:4']).map(value => <option key={value}>{value}</option>)}
           </select>
+        )}
+        {draft.mode === 'audio' && (
+          <>
+            <select
+              aria-label="声音"
+              value={String(draft.params.voice ?? 'alloy')}
+              onFocus={context.recordHistory}
+              onChange={event => updateDraft(current => ({
+                ...current,
+                params: { ...current.params, voice: event.target.value },
+                updated_at: new Date().toISOString(),
+              }))}
+              className="h-9 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              {['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'onyx', 'nova', 'sage', 'shimmer', 'verse', 'marin', 'cedar'].map(value => <option key={value}>{value}</option>)}
+            </select>
+            <select
+              aria-label="音频格式"
+              value={String(draft.params.response_format ?? 'mp3')}
+              onFocus={context.recordHistory}
+              onChange={event => updateDraft(current => ({
+                ...current,
+                params: { ...current.params, response_format: event.target.value },
+                updated_at: new Date().toISOString(),
+              }))}
+              className="h-9 rounded-md border border-input bg-transparent px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              {['mp3', 'wav', 'opus', 'aac', 'flac'].map(value => <option key={value}>{value}</option>)}
+            </select>
+          </>
         )}
         <span className="max-w-52 truncate text-xs text-muted-foreground" title={runStatus(activeJob)}>
           {runStatus(activeJob)}
@@ -372,15 +423,17 @@ function CandidateGrid({
               candidate.version_id === primaryVersionId ? 'border-primary' : 'border-border',
             )}
           >
-            {version && version.kind !== 'text'
-              ? <MediaPreview kind={version.kind} src={canvasMediaUrl(context.projectId, version.version_id)} />
-              : (
+            {version?.kind === 'text'
+              ? <p className="line-clamp-4 min-h-20 whitespace-pre-wrap p-2 text-xs leading-relaxed text-foreground">{version.text}</p>
+              : version
+                ? <MediaPreview kind={version.kind} src={canvasMediaUrl(context.projectId, version.version_id)} />
+                : (
                 <div className="grid min-h-20 place-items-center px-2 text-center text-xs text-muted-foreground">
                   {candidate.status === 'pending'
                     ? <LoaderCircle className="animate-spin" aria-label="候选生成中" />
                     : candidate.status === 'canceled' ? candidate.error || '已停止' : candidate.error || '结果待同步'}
                 </div>
-              )}
+                )}
             <span className="absolute left-1.5 top-1.5 rounded bg-background/80 px-1.5 py-0.5 text-xs text-muted-foreground">
               {candidate.index + 1}
             </span>

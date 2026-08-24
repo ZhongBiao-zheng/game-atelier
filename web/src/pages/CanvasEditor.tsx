@@ -539,26 +539,7 @@ function CanvasEditorInner({
   }
 
   function addTextNode(menu: CreateMenuState | null = createMenu) {
-    const nodeId = makeId('text');
-    const versionId = makeId('version');
-    const version: CanvasTextVersion = {
-      version_id: versionId,
-      kind: 'text',
-      text: '',
-      created_at: new Date().toISOString(),
-      sha256: '0'.repeat(64),
-      origin: { kind: 'user_edit' },
-    };
-    pendingTextVersions.current.set(nodeId, versionId);
-    commit(current => ({ ...current, content_versions: { ...current.content_versions, [versionId]: version } }));
-    appendNode({
-      id: nodeId,
-      type: 'text',
-      title: '文本',
-      position: menu?.flow ?? defaultPosition(),
-      z_index: 0,
-      data: { current_version_id: versionId, generation_draft: null, active_run_id: null },
-    }, menu);
+    addGenerationNode('text', menu);
   }
 
   function addGenerationNode(kind: JobKind, menu: CreateMenuState | null = createMenu) {
@@ -573,21 +554,31 @@ function CanvasEditorInner({
       alias: key?.alias ?? null,
       params: kind === 'image'
         ? normalizeCanvasImageParams(model, key?.provider, { n: 1, ratio: '1:1' })
-        : { duration: 5, ratio: '16:9', resolution: '720p', generate_audio: true },
+        : kind === 'video'
+          ? { duration: 5, ratio: '16:9', resolution: '720p', generate_audio: true }
+          : kind === 'audio'
+            ? { voice: 'alloy', response_format: 'mp3', speed: 1 }
+            : { n: 1 },
       updated_at: now,
     };
-    appendNode({
+    const base = {
       id: makeId(kind),
-      type: kind,
-      title: kind === 'image' ? '图片' : '视频',
+      title: { text: '文本', image: '图片', video: '视频', audio: '音频' }[kind],
       position: menu?.flow ?? defaultPosition(),
       z_index: 0,
-      data: {
-        current_version_id: null,
-        generation_draft: draft,
-        active_run_id: null,
-        display: { fit: 'contain', free_resize: false },
-      },
+    };
+    const data = { current_version_id: null, generation_draft: draft, active_run_id: null };
+    if (kind === 'text') appendNode({ ...base, type: 'text', data }, menu);
+    else if (kind === 'audio') appendNode({ ...base, type: 'audio', data }, menu);
+    else if (kind === 'image') appendNode({
+      ...base,
+      type: 'image',
+      data: { ...data, display: { fit: 'contain', free_resize: false } },
+    }, menu);
+    else appendNode({
+      ...base,
+      type: 'video',
+      data: { ...data, display: { fit: 'contain', free_resize: false } },
     }, menu);
   }
 
@@ -702,7 +693,7 @@ function CanvasEditorInner({
       const node = current?.nodes.find(candidate => candidate.id === nodeId);
       const draft = node ? generationDraftForNode(node) : null;
       if (!current || !node || !draft) throw new Error('当前节点没有可提交的生成设置');
-      const requestedCount = draft.mode === 'image'
+      const requestedCount = draft.mode === 'text' || draft.mode === 'image'
         ? Math.max(1, Math.min(4, Number(draft.params.n ?? 1)))
         : 1;
       const dirtyAtSubmission = dirtyVersion.current;
@@ -946,7 +937,7 @@ function CanvasEditorInner({
           {addOpen && (
             <div className="popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>
-              <CanvasCreateMenuItems allowResources showAudioShortcut onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onUpload={() => uploadRef.current?.click()} />
+              <CanvasCreateMenuItems allowResources onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onUpload={() => uploadRef.current?.click()} />
             </div>
           )}
           <input ref={uploadRef} type="file" className="sr-only" accept="image/*,video/*,audio/*" onChange={event => { const file = event.target.files?.[0]; if (file) void handleUpload(file); event.target.value = ''; }} />
@@ -955,7 +946,7 @@ function CanvasEditorInner({
         {createMenu && (
           <div aria-label="连接创建节点" className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenu.screen.x, top: createMenu.screen.y }}>
             <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs uppercase tracking-label text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => setCreateMenu(null)} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground"><X className="size-4" /></button></div>
-            <CanvasCreateMenuItems allowResources={createMenu.sourceHandle === 'target'} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onUpload={() => uploadRef.current?.click()} />
+            <CanvasCreateMenuItems allowResources={createMenu.sourceHandle === 'target'} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onUpload={() => uploadRef.current?.click()} />
           </div>
         )}
 
@@ -977,19 +968,19 @@ function CanvasEditorInner({
   );
 }
 
-function CanvasCreateMenuItems({ allowResources, showAudioShortcut = false, onAddText, onAddImage, onAddVideo, onUpload }: {
+function CanvasCreateMenuItems({ allowResources, onAddText, onAddImage, onAddVideo, onAddAudio, onUpload }: {
   allowResources: boolean;
-  showAudioShortcut?: boolean;
   onAddText: () => void;
   onAddImage: () => void;
   onAddVideo: () => void;
+  onAddAudio: () => void;
   onUpload: () => void;
 }) {
   return <>
     {allowResources && <AddMenuButton icon={<Type />} title="文本" description="脚本、提示词与备注" onClick={onAddText} />}
     <AddMenuButton icon={<FileImage />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} />
     <AddMenuButton icon={<FileVideo />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />
-    {allowResources && showAudioShortcut && <AddMenuButton icon={<FileAudio />} title="音频素材" description="上传一段声音或音乐" onClick={onUpload} />}
+    <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} />
     {allowResources && <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;
 }

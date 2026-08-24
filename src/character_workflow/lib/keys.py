@@ -29,13 +29,13 @@ Provider = Literal[
     "custom",
 ]
 Kind = Literal["portrait", "promo", "turnaround"]
-ModelModality = Literal["image", "video"]
+ModelModality = Literal["text", "image", "video", "audio"]
 
 
 class ModelSpec(BaseModel):
     name: str
     id: str
-    # None = 未标注：消费端按 key 级 modalities 兜底（含 video 且不含 image → video）。
+    # None = 未标注：消费端按 key 级 modalities 兜底。
     modality: ModelModality | None = None
     # 调用协议 id —— 视频：seedance/kling/dashscope/openrouter；图片：ark/openai。
     # 权威值来自上游 /models 的协议标注（models-preview 解析后随模型一起存）；旧数据为
@@ -143,6 +143,13 @@ def _backfill_model_protocols(db: KeysDB) -> None:
     for key in db.keys:
         for spec in key.models:
             if spec.protocol is not None:
+                continue
+            # 文本/音频没有图片协议回填；它们只接受上游明确标注或各 caller 自己的
+            # 保守旧模型推断，不能因为共用 ModelSpec 就误走 image resolver。
+            key_modalities = set(key.modalities)
+            if spec.modality in {"text", "audio"} or (
+                spec.modality is None and key_modalities in ({"llm"}, {"audio"})
+            ):
                 continue
             if _is_video_model(spec, key):
                 spec.protocol = resolve_protocol(key.provider, key.base_url, spec.id)

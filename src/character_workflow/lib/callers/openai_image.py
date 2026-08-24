@@ -196,8 +196,14 @@ def render(
     ref_image = _reference_image_param(kwargs, key.provider, model)
 
     # 网关按协议挂端点：同一网关下不同模型支持的协议不同，打错入口会被判「无可用端点」。
-    # 只有 ark 需要换 URL，其余（None / openai）走默认 OpenAI 兼容入口。
-    is_ark_image = _effective_image_protocol(key, model) == "ark"
+    # 只有 ark 需要换 URL；None / openai 走默认 OpenAI 兼容入口，其他显式协议必须拒绝，
+    # 不能把用户手动错标的 chat/audio 模型伪兼容成图片模型。
+    image_protocol = _effective_image_protocol(key, model)
+    if image_protocol not in {None, "openai", "ark"}:
+        raise OpenAIImageError(
+            f"image protocol {image_protocol!r} is not supported; expected openai or ark"
+        )
+    is_ark_image = image_protocol == "ark"
     generations_url = _ark_image_url(base_url) if is_ark_image else _image_url(base_url)
 
     def _gen_payload(num: int) -> dict:

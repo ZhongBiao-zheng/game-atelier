@@ -2,7 +2,7 @@
 
 Type: feature
 
-Status: ready-for-human
+Status: done
 
 Blocked by: 03
 
@@ -17,7 +17,7 @@ Blocked by: 03
 
 - 项目、节点、参考绑定和生成都只由用户操作产生。
 - 移动/连接节点不运行；没有 Skill 回合或整图执行入口。
-- 图片/视频生成状态在原节点更新，旧 Job/候选不被覆盖。
+- 四模态生成状态在原节点更新，旧 Job/候选不被覆盖。
 - 删除节点不误删上传文件或 Job 产物。
 
 ## Comments
@@ -25,4 +25,6 @@ Blocked by: 03
 - 2026-08-23：等待纠正版整体方案批准。
 - 2026-08-23：纠正版方案已确认，可按 Scope 实施。
 - 2026-08-24：图片/视频 Run lifecycle 纵切已接通：候选部分成功、诚实停止请求、原 Snapshot/当前
-  Draft 两种重试、候选替代关系与重启恢复均进入服务端真源；文本/音频 caller 仍待后续纵切。
+  Draft 两种重试、候选替代关系与重启恢复均进入服务端真源。
+- 2026-08-24：文本 `chat/completions` 与音频 `audio/speech` caller 接入同一 Run lifecycle；四模态
+  节点、模型分类、候选版本、停止与重试闭环完成。

@@ -193,7 +193,7 @@ function toKeyRow(k: {
   provider: string;
   base_url?: string | null;
   access_key: string;
-  models?: { name: string; id: string; modality?: 'image' | 'video' | null }[];
+  models?: { name: string; id: string; modality?: 'text' | 'image' | 'video' | 'audio' | null }[];
   capabilities?: string[];
   homepage_url?: string | null;
   docs_url?: string | null;

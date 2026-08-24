@@ -15,7 +15,7 @@ from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_projects import canvas_project_dir, read_canvas_project
 from character_workflow.lib.file_lock import file_lock
-from character_workflow.lib.job_runner import image_dimensions, run_job
+from character_workflow.lib.job_runner import image_dimensions, is_valid_audio, run_job
 from character_workflow.lib.jobs import (
     job_lock,
     list_jobs,
@@ -34,6 +34,8 @@ from character_workflow.lib.schemas import (
     CanvasGenerationDraft,
     CanvasGenerationRunOrigin,
     CanvasGenerationSnapshot,
+    CanvasAudioNode,
+    CanvasContentNodeData,
     CanvasImageNode,
     CanvasJobContext,
     CanvasJobOutputOrigin,
@@ -43,6 +45,8 @@ from character_workflow.lib.schemas import (
     CanvasNode,
     CanvasResultCandidate,
     CanvasSnapshotInput,
+    CanvasTextNode,
+    CanvasTextVersion,
     CanvasVideoNode,
     Job,
     JobKind,
@@ -60,6 +64,11 @@ _OUTPUT_MIME = {
     ".mp4": "video/mp4",
     ".mov": "video/quicktime",
     ".webm": "video/webm",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".opus": "audio/ogg",
+    ".aac": "audio/aac",
 }
 _RUN_GLOBAL_GATE = BoundedSemaphore(4)
 _RUN_VIDEO_GATE = BoundedSemaphore(1)
@@ -306,17 +315,22 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
             raise RuntimeError(f"invalid canvas transaction {path.name}") from error
 
 
-def _model_is_video(model: ModelSpec, key: KeySpec) -> bool:
+def _model_modality(model: ModelSpec, key: KeySpec) -> str:
     if model.modality is not None:
-        return model.modality == "video"
-    return "video" in key.modalities and "image" not in key.modalities
+        return model.modality
+    modalities = set(key.modalities)
+    if modalities == {"video"}:
+        return "video"
+    if modalities == {"audio"}:
+        return "audio"
+    if modalities == {"llm"}:
+        return "text"
+    return "image"
 
 
 def _resolve_key_and_model(
     draft: CanvasGenerationDraft,
 ) -> tuple[KeySpec, ModelSpec, JobKind]:
-    if draft.mode not in {"image", "video"}:
-        raise ValueError("当前纵切只开放图片与视频生成")
     database = read_keys_db()
     alias = draft.alias or database.default_alias
     if not alias:
@@ -327,7 +341,7 @@ def _resolve_key_and_model(
     model = next((item for item in key.models if item.id == draft.model), None)
     if model is None:
         raise ValueError("所选模型不属于当前密钥")
-    kind = JobKind.VIDEO if _model_is_video(model, key) else JobKind.IMAGE
+    kind = JobKind(_model_modality(model, key))
     if kind.value != draft.mode:
         raise ValueError("所选模型与节点生成类型不匹配")
     return key, model, kind
@@ -354,7 +368,7 @@ def _resolve_inputs(
 ) -> list[CanvasSnapshotInput]:
     candidates: list[tuple[str, str]] = []
     self_version_id = _current_version_id(surface)
-    if self_version_id is not None:
+    if self_version_id is not None and draft.mode != "audio":
         candidates.append(("implicit_self", surface.id))
 
     incoming = [
@@ -441,6 +455,11 @@ def _validate_input_capabilities(
         media_kind: sum(item.kind == media_kind for item in inputs)
         for media_kind in ("image", "video", "audio")
     }
+    if kind in {JobKind.TEXT, JobKind.AUDIO}:
+        if any(counts.values()):
+            label = "文本" if kind == JobKind.TEXT else "音频"
+            raise ValueError(f"当前{label}生成只支持文本输入")
+        return
     if kind == JobKind.IMAGE:
         if counts["video"] or counts["audio"]:
             raise ValueError("图片生成当前只支持文本与图片输入")
@@ -520,11 +539,11 @@ def _normalized_params(
         "reference_audios",
     ):
         normalized.pop(key, None)
-    if draft.mode == "image":
+    if draft.mode in {"text", "image"}:
         normalized["n"] = requested_count
     else:
         if requested_count != 1:
-            raise ValueError("视频生成一次只允许一个结果")
+            raise ValueError("视频与音频生成一次只允许一个结果")
         normalized.pop("n", None)
     return normalized, JobParams(**normalized)
 
@@ -547,10 +566,35 @@ def _new_result_node(
     position = surface.position.model_copy(update={"x": surface.position.x + width + 120})
     common = {
         "id": result_id,
-        "title": "生成图片" if draft.mode == "image" else "生成视频",
+        "title": {
+            "text": "生成文本",
+            "image": "生成图片",
+            "video": "生成视频",
+            "audio": "生成音频",
+        }[draft.mode],
         "position": position,
         "z_index": surface.z_index,
     }
+    if draft.mode == "text":
+        return CanvasTextNode(
+            **common,
+            type="text",
+            data=CanvasContentNodeData(
+                current_version_id=None,
+                generation_draft=draft,
+                active_run_id=run_id,
+            ),
+        )
+    if draft.mode == "audio":
+        return CanvasAudioNode(
+            **common,
+            type="audio",
+            data=CanvasContentNodeData(
+                current_version_id=None,
+                generation_draft=draft,
+                active_run_id=run_id,
+            ),
+        )
     data = CanvasMediaNodeData(
         current_version_id=None,
         generation_draft=draft,
@@ -594,7 +638,7 @@ def submit_canvas_run(
         job_id = new_job_id()
         run_id = f"run-{secrets.token_hex(12)}"
         use_surface = (
-            surface.type in {"image", "video"}
+            surface.type in {"text", "image", "video", "audio"}
             and surface.type == draft.mode
             and _current_version_id(surface) is None
         )
@@ -732,7 +776,7 @@ def _retry_job_params(
     requested_count: int,
 ) -> JobParams:
     normalized = dict(snapshot.normalized_params)
-    if snapshot.mode == "image":
+    if snapshot.mode in {"text", "image"}:
         normalized["n"] = requested_count
     else:
         normalized.pop("n", None)
@@ -772,7 +816,7 @@ def retry_canvas_run(
             raise RuntimeError("result_node_missing")
         requested_count = (
             max(1, min(4, int(draft.params.n or 1)))
-            if draft.mode == "image" else 1
+            if draft.mode in {"text", "image"} else 1
         )
         return submit_canvas_run(
             project_id,
@@ -822,14 +866,14 @@ def retry_canvas_run(
             candidate_indices = [replaced.index]
         else:
             candidate_indices = [item.index for item in context.candidates]
-        if context.snapshot.mode != "image" and len(candidate_indices) != 1:
-            raise ValueError("视频生成一次只允许一个结果")
+        if context.snapshot.mode not in {"text", "image"} and len(candidate_indices) != 1:
+            raise ValueError("视频与音频生成一次只允许一个结果")
 
         timestamp = _now()
         new_run_id = f"run-{secrets.token_hex(12)}"
         retry_job_id = new_job_id()
         retry_normalized = dict(context.snapshot.normalized_params)
-        if context.snapshot.mode == "image":
+        if context.snapshot.mode in {"text", "image"}:
             retry_normalized["n"] = len(candidate_indices)
         retry_snapshot_payload = context.snapshot.model_dump(
             mode="json",
@@ -933,7 +977,7 @@ def _output_version(
     job: Job,
     candidate: CanvasResultCandidate,
     output_path: str,
-) -> CanvasMediaVersion:
+) -> CanvasTextVersion | CanvasMediaVersion:
     root = canvas_project_dir(project_id).resolve()
     raw = Path(output_path)
     target = (
@@ -942,6 +986,24 @@ def _output_version(
     owned = (root / "outputs" / job.job_id).resolve()
     if not target.is_relative_to(owned) or not target.is_file():
         raise ValueError("Canvas Job 产物不属于当前 Run")
+    if job.kind == JobKind.TEXT:
+        if target.suffix.lower() != ".txt":
+            raise ValueError("Canvas 文本 Job 返回了不支持的格式")
+        text = target.read_text(encoding="utf-8").strip()
+        if not text or len(text) > 40_000:
+            raise ValueError("Canvas 文本 Job 返回了无效文本")
+        return CanvasTextVersion(
+            version_id=f"version-{secrets.token_hex(12)}",
+            created_at=_now(),
+            sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            origin=CanvasJobOutputOrigin(
+                kind="job_output",
+                job_id=job.job_id,
+                candidate_id=candidate.candidate_id,
+            ),
+            kind="text",
+            text=text,
+        )
     mime_type = _OUTPUT_MIME.get(target.suffix.lower())
     if mime_type is None:
         raise ValueError("Canvas Job 返回了不支持的媒体格式")
@@ -952,6 +1014,8 @@ def _output_version(
         if dimensions is None:
             raise ValueError("Canvas Job 返回了无效图片")
         width, height = dimensions
+    if job.kind == JobKind.AUDIO and not is_valid_audio(target):
+        raise ValueError("Canvas Job 返回了无效音频")
     return CanvasMediaVersion(
         version_id=f"version-{secrets.token_hex(12)}",
         created_at=_now(),

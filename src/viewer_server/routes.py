@@ -1334,13 +1334,13 @@ class _ModelsPreviewPayload(BaseModel):
     provider: str | None = None
     base_url: str | None = None
     access_key: str | None = None
-    # 逃生舱：连明确判定为非视觉的模型也一并返回（deny 词表判过头时用）。
+    # 逃生舱：连判定为不可生成的模型也一并返回（词表判过头时用）。
     include_all: bool = False
 
 
-# 模型分类：image / video / unknown / excluded。
+# 模型分类：text / image / video / audio / unknown / excluded。
 #
-# excluded 是**唯一**授权丢弃的类别，条件很窄：上游明确标注了协议、且每一条协议都是非视觉。
+# excluded 是**唯一**授权丢弃的类别：上游明确标注了协议，且全部都不能生成四模态内容。
 # 判不出来一律 unknown 留在列表里让画师自己确认 —— 协议词汇是各厂自造的（同一份词元跳动
 # 数据里就有 zai:layout-parsing / bocha:web-search / unifuncs:web-reader），词表永远追不完，
 # 「认不出就丢」会让某个网关的模型列表整片消失且用户看不出原因。
@@ -1352,6 +1352,15 @@ _IMAGE_ID_HINTS = (
     "image", "seedream", "seededit", "dall-e", "dalle", "flux", "banana", "midjourney",
     "cogview", "imagen", "ideogram", "recraft", "irag", "kolors", "hidream",
 )
+_AUDIO_ID_HINTS = (
+    "tts", "speech", "text-to-speech",
+)
+_AUDIO_NON_GENERATION_ID_HINTS = (
+    "asr", "speech-to-text", "speech2text", "transcription", "whisper",
+)
+_TEXT_ID_HINTS = (
+    "gpt", "claude", "gemini", "deepseek", "qwen", "llama", "mistral", "command-r",
+)
 # 协议动词（冒号后半段）判视觉；seedance:generations 这类动词无信息量，靠厂商前缀兜。
 _PROTOCOL_IMAGE_HINTS = (
     "image-generations", "image-generation", "images", "image-edits", "images-edits",
@@ -1361,10 +1370,20 @@ _PROTOCOL_VIDEO_HINTS = (
     "video", "seedance", "vidu", "happyhorse", "t2v", "i2v", "r2v",
     "text2video", "image2video",
 )
-# 明确非视觉的协议动词：全部命中才判 excluded。
+_PROTOCOL_AUDIO_GENERATION_HINTS = (
+    "text-to-speech", "tts",
+)
+_PROTOCOL_UNSUPPORTED_AUDIO_GENERATION_HINTS = (
+    "text2audio", "audio-generation", "audio-generations", "t2a", "music",
+)
+_PROTOCOL_TEXT_GENERATION_HINTS = (
+    "chat-completions", "chat/completions",
+)
+_PROTOCOL_UNSUPPORTED_TEXT_GENERATION_HINTS = ("responses", "messages", "completions")
+# 明确不能生成四模态内容的协议动词：全部命中才判 excluded。
 _PROTOCOL_NON_VISUAL_HINTS = (
-    "chat-completions", "completions", "responses", "messages", "embeddings", "rerank",
-    "moderations", "t2a", "tts", "asr", "speech", "audio", "transcriptions", "translations",
+    "embeddings", "rerank", "moderations", "asr", "speech-to-text", "speech2text",
+    "transcriptions", "translations",
     "voice_clone", "web-search", "web-reader", "search", "layout-parsing", "ocr",
 )
 
@@ -1376,42 +1395,102 @@ def _id_hits(mid: str, hints: tuple[str, ...]) -> bool:
 
 
 def _classify_model(item: dict) -> str:
-    """返回 image / video / unknown / excluded —— 只有 excluded 会被过滤掉。"""
+    """返回四种可生成模态、unknown 或 excluded。"""
     protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
     if any(h in p for p in protocols for h in _PROTOCOL_IMAGE_HINTS):
         return "image"
     if any(h in p for p in protocols for h in _PROTOCOL_VIDEO_HINTS):
         return "video"
-    # 每一条协议都是非视觉才排除；混合标注（含一条看不懂的）保守留下。
+    if any(_protocol_is_openai_speech(protocol) for protocol in protocols):
+        return "audio"
+    if any(h in p for p in protocols for h in _PROTOCOL_TEXT_GENERATION_HINTS):
+        return "text"
+    # 每一条协议都明确不能生成四模态内容才排除；混合标注保守留下。
     if protocols and all(
         any(h in p for h in _PROTOCOL_NON_VISUAL_HINTS) for p in protocols
     ):
         return "excluded"
+    # `responses` / `messages` / legacy `completions` 虽然能产文本，但首版 caller 只实现
+    # chat/completions。显式协议不匹配时必须停在 unknown，不能再靠 id / output modality
+    # 把它包装成可执行模型；否则 UI 会允许提交，runner 却只能打错端点。
+    if any(
+        any(hint in protocol for hint in _PROTOCOL_UNSUPPORTED_TEXT_GENERATION_HINTS)
+        for protocol in protocols
+    ):
+        return "unknown"
+    if any(
+        any(hint in protocol for hint in _PROTOCOL_UNSUPPORTED_AUDIO_GENERATION_HINTS)
+        for protocol in protocols
+    ):
+        return "unknown"
 
     # OpenRouter 等不给 supported_protocols，但给 architecture.output_modalities —— 这是
     # 权威字段，必须排在 id 猜测之前（实测它能修好 openrouter/auto、干掉 inkling 假阳性）。
+    mid = str(item.get("id") or "").lower()
     arch = item.get("architecture")
     out = {str(m).lower() for m in (arch or {}).get("output_modalities") or []} if isinstance(arch, dict) else set()
     if "video" in out:
         return "video"
     if "image" in out:
         return "image"
-    if out and not (out & {"image", "video"}):
-        # 上游明说输出里没有图也没有视频（纯文本 / 纯音频）——它自己声明的，可以信。
+    if "audio" in out:
+        return (
+            "audio"
+            if _id_hits(mid, _AUDIO_ID_HINTS)
+            and not _id_hits(mid, _AUDIO_NON_GENERATION_ID_HINTS)
+            else "unknown"
+        )
+    if "text" in out:
+        return "text"
+    if out:
         return "excluded"
 
-    mid = str(item.get("id") or "").lower()
     if _id_hits(mid, _VIDEO_ID_HINTS):
         return "video"
     if _id_hits(mid, _IMAGE_ID_HINTS):
         return "image"
+    if _id_hits(mid, _AUDIO_ID_HINTS) and not _id_hits(mid, _AUDIO_NON_GENERATION_ID_HINTS):
+        return "audio"
+    if _id_hits(mid, _TEXT_ID_HINTS):
+        return "text"
     return "unknown"
 
 
 def _guess_model_modality(item: dict) -> str | None:
-    """分类结果里只有 image / video 能当 modality；unknown 交给画师标，excluded 不入列表。"""
+    """四种生成类别可直接作为 modality；unknown 交给画师标。"""
     category = _classify_model(item)
-    return category if category in ("image", "video") else None
+    return category if category in ("text", "image", "video", "audio") else None
+
+
+def _text_protocol(item: dict) -> str | None:
+    protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
+    if any("chat-completions" in p or "chat/completions" in p for p in protocols):
+        return "openai-chat"
+    return None
+
+
+def _audio_protocol(item: dict) -> str | None:
+    protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
+    if any(_protocol_is_openai_speech(protocol) for protocol in protocols):
+        return "openai-speech"
+    return None
+
+
+def _declared_unknown_protocol(item: dict) -> str | None:
+    """保留 unknown 模型的显式协议，让手动标模态后 caller 仍能诚实拒绝错端点。"""
+    protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
+    return protocols[0] if protocols else None
+
+
+def _protocol_is_openai_speech(protocol: str) -> bool:
+    blocked = ("asr", "transcription", "speech-to-text", "speech2text")
+    if any(item in protocol for item in blocked):
+        return False
+    return (
+        any(item in protocol for item in _PROTOCOL_AUDIO_GENERATION_HINTS)
+        or protocol.endswith(":speech")
+        or protocol.endswith("audio/speech")
+    )
 
 
 def _fetch_model_rows(url: str, headers: dict) -> list:
@@ -1538,21 +1617,24 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         seen_ids.add(mid)
         total += 1
         category = _classify_model(item)
-        # 明确的非视觉模型不入列表：一把词元跳动 key 上游有 78 个模型，其中 61 个是对话 /
-        # 语音 / 搜索类，全塞进选择器只会淹掉那 17 个真正能出图出片的。include_all 是逃生舱：
+        # 明确不能生成内容的模型不入列表；include_all 是逃生舱：
         # deny 词表哪天判过头了，画师能自己看到全量，不至于变成死路。
         if category == "excluded" and not payload.include_all:
             excluded += 1
             continue
-        modality = category if category in ("image", "video") else None
+        modality = category if category in ("text", "image", "video", "audio") else None
         # 视频：协议 guess（resolve 不中 → None，交后端 dispatch 时判定 / 诚实报错）。
         # 图片：直接读上游协议标注（决定走 Ark 原生端点还是 OpenAI 兼容入口）。
         if modality == "video":
             protocol = resolve_protocol(preview_provider, base_url, mid)
         elif modality == "image":
             protocol = _image_protocol(item)
+        elif modality == "text":
+            protocol = _text_protocol(item)
+        elif modality == "audio":
+            protocol = _audio_protocol(item)
         else:
-            protocol = None
+            protocol = _declared_unknown_protocol(item)
         models.append({
             "id": mid,
             "name": str(item.get("name") or mid),
@@ -1881,6 +1963,8 @@ def _create_user_job(
     namespace: Literal["studio"],
 ) -> Job:
     """Build and persist one Web-confirmed Studio job."""
+    if body.kind not in {JobKind.IMAGE, JobKind.VIDEO}:
+        raise HTTPException(422, detail="创作台目前只接受图片或视频任务")
     db = keys.read_keys_db()
     alias = body.alias or db.default_alias
     if not alias:

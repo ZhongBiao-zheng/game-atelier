@@ -46,11 +46,15 @@ type PickerFilter = 'all' | ModelCategory;
 
 // 「未识别」不是「其他垃圾」——上游协议词汇各厂自造、词表追不完，认不出的条目要画师自己确认。
 const CATEGORY_LABELS: Record<ModelCategory, string> = {
+  text: '文本',
   image: '图片',
   video: '视频',
+  audio: '音频',
   unknown: '未识别',
-  excluded: '非视觉',
+  excluded: '不可生成',
 };
+
+const GENERATION_MODALITIES = ['text', 'image', 'video', 'audio'] as const;
 
 // 仅前端的行级标记：编辑态「打开表单时已存在的模型」分类锁死为只读，新增行不带此标记。
 // _locked 随 spread 在每次 setModels 中传递，增删行都不会错乱（不依赖 id 值或行下标）。
@@ -114,7 +118,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
 
   // 模型映射：服务端代理拉上游 /models（CORS + 编辑态前端只有掩码密钥，见 models-preview）。
   const fetchModelsBaseUrl = baseUrl.trim() || providerByValue(provider).defaultBaseUrl || '';
-  /** includeAll = 逃生舱重拉：把后端判定「明确非视觉」的条目也一并列出来。 */
+  /** includeAll = 逃生舱重拉：把后端判定「不可生成」的条目也一并列出来。 */
   const fetchModels = async (includeAll = false) => {
     setFetching(true);
     setFetchError(null);
@@ -128,7 +132,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
         access_key: !editing || keyChanged ? accessKey.trim() || null : null,
         include_all: includeAll,
       });
-      const order = (m: RemoteModel) => ['image', 'video', 'unknown', 'excluded'].indexOf(m.category);
+      const order = (m: RemoteModel) => ['text', 'image', 'video', 'audio', 'unknown', 'excluded'].indexOf(m.category);
       const sorted = [...remote.models].sort((a, b) => order(a) - order(b));
       const enabledIds = new Set(models.map((m) => m.id.trim()).filter(Boolean));
       // 逃生舱重拉发生在 picker 内部：已勾选的和已指定的分类都要留着，否则「看一眼全量」
@@ -224,10 +228,9 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
       const cleanModels = models
         .map((model) => ({ name: model.name.trim(), id: model.id.trim(), modality: model.modality ?? 'image' as ModelModality, protocol: model.protocol ?? null }))
         .filter((model) => model.name && model.id);
-      // key 级 modalities 由模型标注派生（key 级仅作摘要/兜底），preset 的 llm 等附加能力保留。
+      // key 级 modalities 由模型标注派生；存量契约用 llm 表示文本生成能力。
       const derivedModalities = Array.from(new Set([
-        ...preset.modalities.filter((m) => m !== 'image' && m !== 'video'),
-        ...cleanModels.map((m) => m.modality),
+        ...cleanModels.map((m) => m.modality === 'text' ? 'llm' : m.modality),
       ]));
       const payload: KeyCreatePayload = {
         alias: usesNamedAlias(provider) ? alias.trim() : provider,
@@ -286,9 +289,9 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
   const pickerVisible = pickerFilter === 'all'
     ? pickerSearched
     : pickerSearched.filter((m) => m.category === pickerFilter);
-  // 「非视觉」chip 只在逃生舱把它们拉进来时才出现，平时不给这一档噪音。
+  // 「不可生成」chip 只在逃生舱把它们拉进来时出现。
   const pickerFilters: PickerFilter[] = [
-    'all', 'image', 'video', 'unknown',
+    'all', 'text', 'image', 'video', 'audio', 'unknown',
     ...((preview?.models ?? []).some((m) => m.category === 'excluded') ? (['excluded'] as const) : []),
   ];
 
@@ -336,8 +339,8 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <span>
                   {preview.includeAll
-                    ? '已显示全部，含非图像 / 视频模型'
-                    : `已过滤 ${preview.excluded} 个非图像 / 视频模型`}
+                    ? '已显示全部，含不可生成模型'
+                    : `已过滤 ${preview.excluded} 个不可生成模型`}
                 </span>
                 <button
                   type="button"
@@ -345,7 +348,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                   disabled={fetching}
                   className={textActionClass}
                 >
-                  {fetching ? '获取中...' : preview.includeAll ? '只看图像 / 视频' : '显示全部'}
+                  {fetching ? '获取中...' : preview.includeAll ? '只看可生成模型' : '显示全部'}
                 </button>
               </div>
             )}
@@ -405,11 +408,11 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                     {CATEGORY_LABELS[m.modality]}
                   </span>
                 ) : (
-                  /* 上游认不出分类的行：就地二选一，不给「默认图片」这种静默兜底的机会。 */
+                  /* 上游认不出分类的行：就地选择四模态，不做静默兜底。 */
                   <div role="group" aria-label={`分类 ${m.id}`} className="flex shrink-0 items-center gap-2">
                     <span className="text-xs text-muted-foreground">{CATEGORY_LABELS[m.category]}</span>
                     <div className="flex items-center rounded-md border border-border p-0.5">
-                      {(['image', 'video'] as const).map((mod) => {
+                      {GENERATION_MODALITIES.map((mod) => {
                         const active = modalityPick[m.id] === mod;
                         return (
                           <button
@@ -421,7 +424,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                               active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
                             }`}
                           >
-                            {mod === 'image' ? '图片' : '视频'}
+                            {CATEGORY_LABELS[mod]}
                           </button>
                         );
                       })}
@@ -662,7 +665,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                 </div>
                 <div className="space-y-2">
                   {models.map((model, index) => (
-                    <div key={index} className="grid grid-cols-[1fr_1fr_6.5rem_auto] items-center gap-2">
+                    <div key={index} className="grid grid-cols-[1fr_1fr_15rem_auto] items-center gap-2">
                       <label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</label>
                       <input
                         id={`key-model-name-${index}`}
@@ -691,7 +694,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                                 : 'border-primary/40 text-primary'
                             }`}
                           >
-                            {(model.modality ?? 'image') === 'video' ? '视频' : '图片'}
+                            {CATEGORY_LABELS[model.modality ?? 'image']}
                           </span>
                         </div>
                       ) : (
@@ -700,7 +703,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                           aria-label={`模型分类 ${index + 1}`}
                           className="flex items-center rounded-md border border-border p-0.5"
                         >
-                          {(['image', 'video'] as const).map((mod) => {
+                          {GENERATION_MODALITIES.map((mod) => {
                             const active = (model.modality ?? 'image') === mod;
                             return (
                               <button
@@ -712,7 +715,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                                   active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
                                 }`}
                               >
-                                {mod === 'image' ? '图片' : '视频'}
+                                {CATEGORY_LABELS[mod]}
                               </button>
                             );
                           })}

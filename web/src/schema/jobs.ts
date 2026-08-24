@@ -4,7 +4,7 @@ export type JobStatus = 'pending_confirm' | 'pending' | 'done' | 'partial' | 'fa
 export type AssetSlot = 'portrait' | 'promo' | 'turnaround';
 
 // 新 JobKind: 媒体类型
-export type JobKind = 'image' | 'video';
+export type JobKind = 'text' | 'image' | 'video' | 'audio';
 
 export type Namespace = 'character' | 'studio' | 'ui' | 'video' | 'canvas';
 
@@ -29,6 +29,12 @@ export interface JobParams {
   generate_audio?: boolean;
   reference_videos?: string[];
   reference_audios?: string[];
+  temperature?: number;
+  max_tokens?: number;
+  voice?: string;
+  speed?: number;
+  response_format?: string;
+  instructions?: string;
   // B3 UI 页面风格候选来源关系 —— 与 schemas.py::JobParams 同步
   style_variant?: string;
   base_version?: string;

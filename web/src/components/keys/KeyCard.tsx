@@ -8,7 +8,7 @@ export interface KeyRow {
   base_url?: string | null;
   masked_secret: string;
   capabilities?: string[];
-  models?: { name: string; id: string; modality?: 'image' | 'video' | null }[];
+  models?: { name: string; id: string; modality?: 'text' | 'image' | 'video' | 'audio' | null }[];
   homepage_url?: string | null;
   docs_url?: string | null;
   api_key_url?: string | null;
@@ -29,8 +29,10 @@ export function KeyCard({ row, onEdit, onDelete }: Props) {
   const linkUrl = row.homepage_url || row.base_url;
   const vendorName = providerLabel(row.provider, row.alias);
   const models = row.models ?? [];
+  const textCount = models.filter((m) => modelModality(m, row) === 'text').length;
   const imageCount = models.filter((m) => modelModality(m, row) === 'image').length;
   const videoCount = models.filter((m) => modelModality(m, row) === 'video').length;
+  const audioCount = models.filter((m) => modelModality(m, row) === 'audio').length;
 
   return (
     <div className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-secondary/30">
@@ -58,6 +60,11 @@ export function KeyCard({ row, onEdit, onDelete }: Props) {
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
+        {textCount > 0 && (
+          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+            文本 {textCount}
+          </span>
+        )}
         {imageCount > 0 && (
           <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
             图 {imageCount}
@@ -66,6 +73,11 @@ export function KeyCard({ row, onEdit, onDelete }: Props) {
         {videoCount > 0 && (
           <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
             视频 {videoCount}
+          </span>
+        )}
+        {audioCount > 0 && (
+          <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground">
+            音频 {audioCount}
           </span>
         )}
       </div>
