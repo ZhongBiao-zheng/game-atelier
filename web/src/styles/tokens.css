@@ -314,7 +314,7 @@
     left: max(0.75rem, env(safe-area-inset-left));
   }
   .canvas-library-panel {
-    left: calc(max(0.75rem, env(safe-area-inset-left)) + 3.25rem);
+    left: calc(max(0.75rem, env(safe-area-inset-left)) + 3.5rem);
   }
   .canvas-zoom-dock {
     left: max(0.75rem, env(safe-area-inset-left));
