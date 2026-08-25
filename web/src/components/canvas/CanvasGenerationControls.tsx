@@ -315,7 +315,6 @@ export function CanvasTextSettings({
 } & ToolbarPopoverMenuProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const count = Math.max(1, Math.min(4, Number(params.n) || 1));
   const reasoning = REASONING_OPTIONS.includes(params.reasoning_effort as (typeof REASONING_OPTIONS)[number])
     ? params.reasoning_effort as (typeof REASONING_OPTIONS)[number]
     : 'auto';
@@ -326,13 +325,13 @@ export function CanvasTextSettings({
     ? String(params.max_tokens)
     : 'auto';
   const summary = supportsReasoning
-    ? `推理 ${REASONING_LABELS[reasoning]} · ${count} 个`
-    : `${TEXT_TEMPERATURE_LABELS[temperature] ?? temperature} · ${count} 个`;
+    ? `推理 ${REASONING_LABELS[reasoning]}`
+    : TEXT_TEMPERATURE_LABELS[temperature] ?? temperature;
   return (
     <div ref={anchorRef} className="relative min-w-0">
       <button
         type="button"
-        aria-label="LLM 生成设置"
+        aria-label="文本设置"
         aria-expanded={open}
         onClick={() => setOpen(current => !current)}
         className="flex h-9 max-w-full items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -384,15 +383,6 @@ export function CanvasTextSettings({
               onSelect={value => onPatch({
                 max_tokens: value === 'auto' ? undefined : Number(value),
               })}
-            />
-          </SettingsSection>
-          <SettingsSection title="生成数量">
-            <OptionTrack
-              label="选择文本生成数量"
-              values={[1, 2, 3, 4]}
-              selected={String(count)}
-              getLabel={item => `${item} 个`}
-              onSelect={item => onPatch({ n: Number(item) })}
             />
           </SettingsSection>
         </div>

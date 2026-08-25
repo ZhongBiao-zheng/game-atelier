@@ -1638,7 +1638,7 @@ function CanvasEditorInner({
       const node = current?.nodes.find(candidate => candidate.id === nodeId);
       const draft = node ? generationDraftForNode(node) : null;
       if (!current || !node || !draft) throw new Error('当前节点没有可提交的生成设置');
-      const requestedCount = draft.mode === 'text' || draft.mode === 'image'
+      const requestedCount = draft.mode === 'image'
         ? Math.max(1, Math.min(4, Number(draft.params.n ?? 1)))
         : 1;
       const dirtyAtSubmission = dirtyVersion.current;

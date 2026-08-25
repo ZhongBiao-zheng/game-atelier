@@ -163,7 +163,7 @@ export function CanvasNodeRunOverlay({
       >
         {state.detail || state.label}
       </span>
-      {!compact && state.status === 'error' && state.job?.canvas_run && (
+      {!compact && node.type !== 'text' && state.status === 'error' && state.job?.canvas_run && (
         <Button
           type="button"
           size="sm"

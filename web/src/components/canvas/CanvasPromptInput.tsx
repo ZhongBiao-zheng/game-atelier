@@ -17,6 +17,10 @@ import {
   type CanvasMentionReference,
 } from '@/lib/canvasMentions';
 import { cn } from '@/lib/utils';
+import {
+  CanvasMaterialHoverDetail,
+  type CanvasMaterialHoverState,
+} from '@/components/canvas/CanvasMaterialHoverDetail';
 
 interface MentionState {
   query: string;
@@ -52,6 +56,7 @@ export function CanvasPromptInput({
   const previewRef = useRef(onPreviewReference);
   const [mention, setMention] = useState<MentionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [hoveredReference, setHoveredReference] = useState<CanvasMaterialHoverState | null>(null);
   const referenceById = useMemo(
     () => new Map(references.map(reference => [reference.nodeId, reference])),
     [references],
@@ -82,6 +87,7 @@ export function CanvasPromptInput({
       && value === lastEmittedRef.current
       && referenceSignature === lastReferenceSignatureRef.current
     ) return;
+    setHoveredReference(null);
     editor.replaceChildren(...promptNodes(value, referenceById));
     lastEmittedRef.current = value;
     lastReferenceSignatureRef.current = referenceSignature;
@@ -117,6 +123,18 @@ export function CanvasPromptInput({
   function emit(next: string) {
     lastEmittedRef.current = next;
     onChange(next);
+  }
+
+  function showReferenceDetail(target: HTMLElement) {
+    const nodeId = target.dataset.canvasMentionId;
+    const reference = nodeId ? referenceById.get(nodeId) : undefined;
+    if (!reference) return;
+    const bounds = target.getBoundingClientRect();
+    setHoveredReference({
+      reference,
+      left: bounds.left + bounds.width / 2,
+      top: bounds.top - 8,
+    });
   }
 
   function syncFromEditor() {
@@ -186,6 +204,33 @@ export function CanvasPromptInput({
           event.stopPropagation();
           previewRef.current?.(reference);
         }}
+        onMouseOver={event => {
+          const target = event.target instanceof Element
+            ? event.target.closest<HTMLElement>('[data-canvas-mention-id]')
+            : null;
+          if (target) showReferenceDetail(target);
+        }}
+        onMouseOut={event => {
+          const target = event.target instanceof Element
+            ? event.target.closest<HTMLElement>('[data-canvas-mention-id]')
+            : null;
+          if (!target) return;
+          if (event.relatedTarget instanceof Node && target.contains(event.relatedTarget)) return;
+          setHoveredReference(null);
+        }}
+        onFocusCapture={event => {
+          const target = event.target instanceof Element
+            ? event.target.closest<HTMLElement>('[data-canvas-mention-id]')
+            : null;
+          if (target) showReferenceDetail(target);
+        }}
+        onBlurCapture={event => {
+          const target = event.target instanceof Element
+            ? event.target.closest<HTMLElement>('[data-canvas-mention-id]')
+            : null;
+          if (target) setHoveredReference(null);
+        }}
+        onScroll={() => setHoveredReference(null)}
         onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
           event.stopPropagation();
           if (event.nativeEvent.isComposing) return;
@@ -224,7 +269,12 @@ export function CanvasPromptInput({
             syncMention();
           }
         }}
-        onBlur={() => {
+        onBlur={event => {
+          if (
+            event.relatedTarget instanceof Node
+            && event.currentTarget.contains(event.relatedTarget)
+          ) return;
+          setHoveredReference(null);
           const editor = editorRef.current;
           if (editor) editor.replaceChildren(...promptNodes(lastEmittedRef.current, referenceById));
           window.setTimeout(closeMention, 120);
@@ -239,6 +289,7 @@ export function CanvasPromptInput({
           onSelect={insertReference}
         />
       )}
+      {hoveredReference && <CanvasMaterialHoverDetail {...hoveredReference} />}
     </div>
   );
 }
@@ -360,6 +411,7 @@ function mentionChip(reference: CanvasMentionReference | undefined, nodeId?: str
   const id = reference?.nodeId ?? nodeId ?? '';
   const wrapper = document.createElement('span');
   wrapper.setAttribute('contenteditable', 'false');
+  wrapper.tabIndex = 0;
   wrapper.dataset.canvasMentionId = id;
   wrapper.dataset.canvasMentionToken = canvasMentionToken(id);
   wrapper.className = 'mx-0.5 inline-flex h-7 max-w-40 items-center gap-1 overflow-hidden rounded-md border border-border bg-secondary px-1.5 align-middle text-xs leading-none text-foreground';
@@ -370,6 +422,7 @@ function mentionChip(reference: CanvasMentionReference | undefined, nodeId?: str
     wrapper.textContent = '引用已断开';
     return wrapper;
   }
+  wrapper.setAttribute('aria-describedby', `canvas-material-detail-${id}`);
   wrapper.setAttribute('aria-label', `引用${mentionKindLabel(reference.kind)}：${reference.title}`);
   wrapper.title = `${reference.label} · ${reference.title}`;
   if (reference.kind === 'image' && reference.previewUrl) {

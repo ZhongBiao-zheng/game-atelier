@@ -1,7 +1,6 @@
 import { Handle, NodeResizer, NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react';
 import { Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, RotateCcw, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
-import { createPortal } from 'react-dom';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import type { KeyView } from '@/api/keys';
@@ -15,6 +14,10 @@ import {
   type CanvasModelChoice,
 } from '@/components/canvas/CanvasGenerationControls';
 import { CanvasPromptInput } from '@/components/canvas/CanvasPromptInput';
+import {
+  CanvasMaterialHoverDetail,
+  type CanvasMaterialHoverState,
+} from '@/components/canvas/CanvasMaterialHoverDetail';
 import type { CanvasMediaTool } from '@/components/canvas/CanvasMediaOperationDialog';
 import {
   CanvasNodeRunBadge,
@@ -366,7 +369,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           onClick={event => event.stopPropagation()}
           onKeyDown={handleToolbarKeyDown}
         >
-          {nodeRunState.status === 'error' && nodeJob?.canvas_run && (
+          {node.type !== 'text' && nodeRunState.status === 'error' && nodeJob?.canvas_run && (
             <MediaToolButton
               label={nodeRunState.reversePrompt ? '按原设置重试反推提示词' : `按原设置重试 ${node.title}`}
               disabled={submittingNode}
@@ -1364,7 +1367,9 @@ export function CanvasGenerationComposer({
   const runId = activeJob?.canvas_run?.run_id;
   const submitting = context.submittingNodeIds.has(node.id);
   const running = nodeRunState.status === 'loading';
+  const textMode = draft.mode === 'text';
   const modeLabel = CANVAS_GENERATION_MODE_LABELS[draft.mode];
+  const panelLabel = textMode ? '文本' : `${modeLabel}生成设置`;
   const mentionReferences = context.mentionReferencesByNodeId.get(node.id) ?? [];
   const missingMentionIds = missingCanvasMentionIds(draft.prompt, mentionReferences);
   const hasMissingMentions = missingMentionIds.length > 0;
@@ -1384,7 +1389,7 @@ export function CanvasGenerationComposer({
 
   return (
     <section
-      aria-label={`${modeLabel}生成设置`}
+      aria-label={panelLabel}
       data-floating-node-panel="true"
       className={cn(
         'nodrag',
@@ -1397,8 +1402,8 @@ export function CanvasGenerationComposer({
       <div className="mb-1 flex min-w-0 items-center justify-between gap-2 px-1">
         <p className="flex min-w-0 items-center gap-2 text-xs font-medium text-foreground">
           <Sparkles className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <span className="shrink-0">{modeLabel}生成</span>
-          <span className="truncate text-muted-foreground">· {node.title}</span>
+          <span className="shrink-0">{textMode ? '文本' : `${modeLabel}生成`}</span>
+          {!textMode && <span className="truncate text-muted-foreground">· {node.title}</span>}
         </p>
         {onClose && (
           <Button
@@ -1406,7 +1411,7 @@ export function CanvasGenerationComposer({
             variant="ghost"
             size="icon"
             className="size-7 shrink-0 rounded-full"
-            aria-label={`关闭${modeLabel}生成设置`}
+            aria-label={`关闭${panelLabel}`}
             onClick={onClose}
           >
             <X aria-hidden="true" />
@@ -1446,20 +1451,22 @@ export function CanvasGenerationComposer({
               ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
-      <p
-        role={hasMissingMentions ? 'alert' : undefined}
-        className={cn(
-          'min-h-5 px-3 pt-1 text-xs',
-          hasMissingMentions ? 'text-destructive' : 'text-muted-foreground',
-        )}
-      >
-        {hasMissingMentions
-          ? `${missingMentionIds.length} 个引用已断开，请重新连接或删除引用。`
-          : mentionReferences.length
-            ? `输入 @ 引用已连接内容 · ${mentionReferences.length} 项可用`
-            : '连接文本、图片、视频或音频后，可输入 @ 引用。'}
-      </p>
-      {node.type !== 'image' && (
+      {(hasMissingMentions || !textMode) && (
+        <p
+          role={hasMissingMentions ? 'alert' : undefined}
+          className={cn(
+            'min-h-5 px-3 pt-1 text-xs',
+            hasMissingMentions ? 'text-destructive' : 'text-muted-foreground',
+          )}
+        >
+          {hasMissingMentions
+            ? `${missingMentionIds.length} 个引用已断开，请重新连接或删除引用。`
+            : mentionReferences.length
+              ? `输入 @ 引用已连接内容 · ${mentionReferences.length} 项可用`
+              : '连接文本、图片、视频或音频后，可输入 @ 引用。'}
+        </p>
+      )}
+      {node.type !== 'image' && !textMode && (
         <CandidateHistory
           nodeId={node.id}
           primaryVersionId={node.type === 'text' || node.type === 'video' || node.type === 'audio'
@@ -1605,7 +1612,18 @@ export function CanvasGenerationComposer({
           </Button>
         )}
         {!running && activeJob && runId && (
-          <>
+          textMode ? (
+            <Button
+              type="button"
+              size="sm"
+              className="ml-auto"
+              disabled={submitting || hasMissingMentions || !draft.prompt.trim() || !draft.alias || !selectedModel}
+              onClick={() => void context.retryRun(node.id, runId, 'current')}
+            >
+              {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+              {submitting ? '提交中…' : '生成'}
+            </Button>
+          ) : <>
             <Button
               type="button"
               size="sm"
@@ -1637,7 +1655,7 @@ export function CanvasGenerationComposer({
             onClick={() => void context.submitRun(node.id)}
           >
             {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
-            {submitting ? '提交中…' : '开始生成'}
+            {submitting ? '提交中…' : textMode ? '生成' : '开始生成'}
           </Button>
         )}
       </div>
@@ -1660,11 +1678,7 @@ function CanvasMaterialConnections({
 }) {
   const choices = materials.filter(reference => reference.nodeId !== node.id);
   const connected = choices.filter(reference => connectedNodeIds.has(reference.nodeId));
-  const [hoveredMaterial, setHoveredMaterial] = useState<{
-    reference: CanvasMaterialReference;
-    left: number;
-    top: number;
-  } | null>(null);
+  const [hoveredMaterial, setHoveredMaterial] = useState<CanvasMaterialHoverState | null>(null);
   const showMaterialDetail = (
     reference: CanvasMaterialReference,
     target: HTMLElement,
@@ -1749,63 +1763,6 @@ function CanvasMaterialConnections({
       </div>
       {hoveredMaterial && <CanvasMaterialHoverDetail {...hoveredMaterial} />}
     </>
-  );
-}
-
-function CanvasMaterialHoverDetail({
-  reference,
-  left,
-  top,
-}: {
-  reference: CanvasMaterialReference;
-  left: number;
-  top: number;
-}) {
-  return createPortal(
-    <figure
-      id={`canvas-material-detail-${reference.nodeId}`}
-      role="tooltip"
-      aria-label={`素材详情 ${reference.title}`}
-      data-canvas-material-hover={reference.nodeId}
-      className="pointer-events-none fixed z-50 w-64 overflow-hidden rounded-lg border border-border bg-card shell-glow"
-      style={{ left, top, transform: 'translate(-50%, -100%)' }}
-    >
-      {reference.kind === 'image' && reference.previewUrl ? (
-        <img
-          src={reference.previewUrl}
-          alt={reference.title}
-          className="h-40 w-full bg-background object-contain"
-        />
-      ) : reference.kind === 'video' && reference.previewUrl ? (
-        <video
-          src={reference.previewUrl}
-          aria-label={reference.title}
-          autoPlay
-          muted
-          loop
-          playsInline
-          preload="metadata"
-          className="h-40 w-full bg-black object-contain"
-        />
-      ) : reference.kind === 'text' ? (
-        <div className="flex h-40 items-center px-4 text-sm leading-relaxed text-foreground">
-          <p className="line-clamp-5">{reference.text || '空文本素材'}</p>
-        </div>
-      ) : (
-        <div className="grid h-40 place-items-center bg-secondary/30 text-muted-foreground">
-          {reference.kind === 'audio'
-            ? <FileAudio className="size-8" aria-hidden="true" />
-            : reference.kind === 'video'
-              ? <FileVideo className="size-8" aria-hidden="true" />
-              : <FileImage className="size-8" aria-hidden="true" />}
-        </div>
-      )}
-      <figcaption className="flex min-w-0 items-center gap-2 border-t border-border px-3 py-2">
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{reference.title}</span>
-        <span className="shrink-0 text-xs text-muted-foreground">{mentionKindLabel(reference.kind)}</span>
-      </figcaption>
-    </figure>,
-    document.body,
   );
 }
 

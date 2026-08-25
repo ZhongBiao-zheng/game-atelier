@@ -858,7 +858,8 @@ def _normalized_params(
     elif draft.mode == "text":
         if not _supports_openai_text(key, model):
             raise ValueError("当前文本模型没有可用的生成协议")
-        text_params: dict[str, Any] = {"n": effective_count}
+        effective_count = 1
+        text_params: dict[str, Any] = {"n": 1}
         if draft.params.temperature is not None and model.protocol != "openai-responses":
             text_params["temperature"] = draft.params.temperature
         if draft.params.max_tokens is not None:
@@ -1765,7 +1766,7 @@ def retry_canvas_run(
             raise RuntimeError("result_node_missing")
         requested_count = (
             max(1, min(4, int(draft.params.n or 1)))
-            if draft.mode in {"text", "image"} else 1
+            if draft.mode == "image" else 1
         )
         return submit_canvas_run(
             project_id,
