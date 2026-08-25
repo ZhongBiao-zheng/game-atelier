@@ -408,12 +408,36 @@
   .canvas-flow .react-flow__resize-control.canvas-node-resize-line {
     border-color: color-mix(in srgb, var(--primary) 72%, transparent);
   }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-line.left {
+    left: -1px;
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-line.right {
+    left: calc(100% + 1px);
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-line.top {
+    top: -1px;
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-line.bottom {
+    top: calc(100% + 1px);
+  }
   .canvas-flow .react-flow__resize-control.canvas-node-resize-handle {
     width: 0.55rem;
     height: 0.55rem;
     border: 1px solid var(--background);
     border-radius: 999px;
     background: var(--primary);
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-handle.left {
+    left: -1px;
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-handle.right {
+    left: calc(100% + 1px);
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-handle.top {
+    top: -1px;
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-handle.bottom {
+    top: calc(100% + 1px);
   }
   .canvas-flow .react-flow__edge-path {
     stroke-width: 1.5 !important;
@@ -431,6 +455,38 @@
   }
   .canvas-flow .react-flow__connection-path {
     stroke-dasharray: 5 5;
+  }
+  @keyframes canvasGenerationSpin {
+    to { transform: rotate(360deg); }
+  }
+  @keyframes canvasGenerationBreathe {
+    50% { opacity: 0.28; transform: scale(0.72); }
+  }
+  .canvas-generation-indicator {
+    position: relative;
+    display: grid;
+    place-items: center;
+    border: 1px solid color-mix(in srgb, var(--status-running) 48%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--status-running) 8%, transparent);
+  }
+  .canvas-generation-indicator::before {
+    position: absolute;
+    inset: 0.3rem;
+    border-radius: inherit;
+    background: color-mix(in srgb, var(--status-running) 18%, transparent);
+    content: '';
+    animation: canvasGenerationBreathe 1.4s ease-in-out infinite;
+  }
+  .canvas-generation-indicator svg {
+    position: relative;
+    animation: canvasGenerationSpin 900ms linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .canvas-generation-indicator::before,
+    .canvas-generation-indicator svg {
+      animation: none;
+    }
   }
 
   @media (min-width: 40rem) {

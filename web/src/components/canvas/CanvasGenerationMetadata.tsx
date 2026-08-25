@@ -122,6 +122,32 @@ function kindLabel(kind: CanvasGenerationSnapshot['mode']): string {
   return { text: '文本', image: '图片', video: '视频', audio: '音频' }[kind];
 }
 
+function generationRecordPrompt(finalPrompt: string): string {
+  const separator = '\n\n参考文本：\n';
+  const separatorIndex = finalPrompt.indexOf(separator);
+  if (separatorIndex < 0) return finalPrompt;
+  const prompt = finalPrompt.slice(0, separatorIndex);
+  const frozenText = finalPrompt.slice(separatorIndex + separator.length);
+  const references = new Map<string, string>();
+  for (const match of frozenText.matchAll(/(?:^|\n\n)【文本(\d+)】\n([\s\S]*?)(?=\n\n【文本\d+】\n|$)/g)) {
+    references.set(match[1], match[2].trim());
+  }
+  const inlineReferences = new Set(
+    [...prompt.matchAll(/【文本(\d+)】/g)].map(match => match[1]),
+  );
+  const displayPrompt = prompt.replace(/【文本(\d+)】/g, (_label, index: string) => (
+    references.get(index) || '空文本'
+  )).trim();
+  const appendedReferences = [...references.entries()]
+    .filter(([index]) => !inlineReferences.has(index))
+    .map(([, text]) => text || '空文本');
+  const sections = [displayPrompt];
+  if (appendedReferences.length) {
+    sections.push(`参考文本：\n${appendedReferences.join('\n\n')}`);
+  }
+  return sections.filter(Boolean).join('\n\n') || '空提示词';
+}
+
 export function canvasRetryErrorMessage(error: unknown, mode: 'original' | 'current'): string {
   if (error instanceof ApiError) {
     if (
@@ -157,7 +183,9 @@ export function CanvasGenerationMetadata({ snapshot, job, nodes }: {
     <section role="region" aria-label="生成记录" className="space-y-4 rounded-lg border border-border bg-background p-4">
       <div>
         <p className="text-xs font-medium uppercase tracking-label text-muted-foreground/70">生成记录</p>
-        <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">{snapshot.final_prompt}</p>
+        <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+          {generationRecordPrompt(snapshot.final_prompt)}
+        </p>
       </div>
 
       <dl className="grid gap-3 text-sm sm:grid-cols-2">

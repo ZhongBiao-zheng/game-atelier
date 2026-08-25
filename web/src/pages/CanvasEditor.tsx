@@ -222,6 +222,32 @@ interface ViewportSyncToken {
   viewport: Viewport;
 }
 
+function materializeEmptyTextContent(document: CanvasDocument): {
+  document: CanvasDocument;
+  versionIds: Map<string, string>;
+} {
+  const versionIds = new Map<string, string>();
+  const contentVersions = { ...document.content_versions };
+  const nodes = document.nodes.map(node => {
+    if (node.type !== 'text' || node.data.current_version_id) return node;
+    const versionId = makeId('version');
+    versionIds.set(node.id, versionId);
+    contentVersions[versionId] = {
+      version_id: versionId,
+      kind: 'text',
+      text: '',
+      created_at: new Date().toISOString(),
+      sha256: '0'.repeat(64),
+      origin: { kind: 'user_edit' },
+    };
+    return { ...node, data: { ...node.data, current_version_id: versionId } };
+  });
+  return {
+    document: versionIds.size ? { ...document, nodes, content_versions: contentVersions } : document,
+    versionIds,
+  };
+}
+
 function canvasMentionGraphSignature(document: CanvasDocument | null): string {
   if (!document) return '';
   return JSON.stringify({
@@ -462,10 +488,18 @@ function CanvasEditorInner({
     ])
       .then(([projectRows, canvasDocument, keyRows, canvasJobs]) => {
         if (cancelled) return;
+        const hydrated = materializeEmptyTextContent(canvasDocument);
+        for (const [nodeId, versionId] of hydrated.versionIds) {
+          pendingTextVersions.current.set(nodeId, versionId);
+        }
         setProjects(projectRows);
-        setDocument(canvasDocument);
+        setDocument(hydrated.document);
         setViewportZoom(canvasDocument.viewport.zoom);
         serverRevision.current = canvasDocument.revision;
+        if (hydrated.versionIds.size) {
+          dirtyVersion.current += 1;
+          setDirtySignal(dirtyVersion.current);
+        }
         setKeys([...keyRows.keys].sort((left, right) => (
           Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
         )));
@@ -1225,14 +1259,23 @@ function CanvasEditorInner({
     }
   }
 
-  function appendNode(node: CanvasNode, menu: CreateMenuState | null, baseDocument?: CanvasDocument) {
+  function appendNode(
+    node: CanvasNode,
+    menu: CreateMenuState | null,
+    baseDocument?: CanvasDocument,
+    initialVersions: CanvasContentVersion[] = [],
+  ) {
     const apply = (current: CanvasDocument) => {
       const nodes = [...current.nodes, node];
       const connections = [...current.connections];
+      const contentVersions = initialVersions.reduce<Record<string, CanvasContentVersion>>(
+        (versions, version) => ({ ...versions, [version.version_id]: version }),
+        current.content_versions,
+      );
       if (menu?.sourceId) {
         const sourceNodeId = menu.sourceHandle === 'target' ? node.id : menu.sourceId;
         const targetNodeId = menu.sourceHandle === 'target' ? menu.sourceId : node.id;
-        if (canCreateCanvasInputConnection({ ...current, nodes }, {
+        if (canCreateCanvasInputConnection({ ...current, nodes, content_versions: contentVersions }, {
           source: sourceNodeId,
           target: targetNodeId,
         })) {
@@ -1244,7 +1287,7 @@ function CanvasEditorInner({
           });
         }
       }
-      return { ...current, nodes, connections };
+      return { ...current, nodes, connections, content_versions: contentVersions };
     };
     if (baseDocument) {
       // 上传命令创建的 Content Version 已是服务端历史；撤销只移除随后添加的节点。
@@ -1283,12 +1326,23 @@ function CanvasEditorInner({
       z_index: 0,
     };
     const data = { current_version_id: null, generation_draft: draft, active_run_id: null };
-    if (kind === 'text') appendNode({
-      ...base,
-      type: 'text',
-      data: { ...data, display: { scale: 'sm' } },
-    }, menu);
-    else if (kind === 'audio') appendNode({ ...base, type: 'audio', data }, menu);
+    if (kind === 'text') {
+      const versionId = makeId('version');
+      const version: CanvasTextVersion = {
+        version_id: versionId,
+        kind: 'text',
+        text: '',
+        created_at: new Date().toISOString(),
+        sha256: '0'.repeat(64),
+        origin: { kind: 'user_edit' },
+      };
+      pendingTextVersions.current.set(base.id, versionId);
+      appendNode({
+        ...base,
+        type: 'text',
+        data: { ...data, current_version_id: versionId, display: { scale: 'sm' } },
+      }, menu, undefined, [version]);
+    } else if (kind === 'audio') appendNode({ ...base, type: 'audio', data }, menu);
     else if (kind === 'image') appendNode({
       ...base,
       type: 'image',
@@ -2439,8 +2493,8 @@ function CanvasEditorInner({
     const version = source && source.type === 'text' && source.data.current_version_id
       ? current?.content_versions[source.data.current_version_id]
       : null;
-    if (!current || !source || source.type !== 'text' || version?.kind !== 'text' || !version.text.trim()) {
-      setError('请先输入文本内容，再创建图片生成配置。');
+    if (!current || !source || source.type !== 'text' || version?.kind !== 'text') {
+      setError('这个文本节点暂时无法创建图片生成配置。');
       return;
     }
     const configId = makeId('config');

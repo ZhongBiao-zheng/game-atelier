@@ -978,7 +978,7 @@ function CanvasNodeToolbar({
           </MediaToolButton>
           <MediaToolButton
             label={`用 ${node.title} 生成图片`}
-            disabled={content?.kind !== 'text' || !content.text.trim()}
+            disabled={content?.kind !== 'text'}
             onClick={() => context.createImageConfigFromText(node.id)}
           >
             <FileImage />

@@ -301,8 +301,6 @@ export function createConnectedCanvasConfig(
   ) return null;
   const source = document.nodes.find(node => node.id === sourceNodeId);
   if (!source || !canvasNodeHasCurrentContent(source, document.content_versions)) return null;
-  const version = document.content_versions[source.data.current_version_id!];
-  if (version.kind === 'text' && !version.text.trim()) return null;
   const sourceWidth = source.size?.width ?? (source.type === 'text' ? 256 : 320);
   const token = `@[node:${source.id}]`;
   const prompt = draft.prompt.trim() ? `${draft.prompt.trim()} ${token}` : token;

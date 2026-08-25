@@ -145,7 +145,15 @@ export function CanvasNodeRunOverlay({
           : 'border-[color:var(--status-failed)]/30 text-[color:var(--status-failed)]',
       )}
     >
-      {state.status === 'loading' && <LoaderCircle className="size-4 shrink-0" aria-hidden="true" />}
+      {state.status === 'loading' && (
+        <span
+          data-canvas-generation-indicator="true"
+          className={cn('canvas-generation-indicator shrink-0', compact ? 'size-5' : 'size-12')}
+          aria-hidden="true"
+        >
+          <LoaderCircle className={compact ? 'size-3.5' : 'size-5'} />
+        </span>
+      )}
       <span
         className={cn(
           'min-w-0 max-w-full',
