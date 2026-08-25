@@ -39,9 +39,12 @@ describe('canvas chrome spatial hierarchy', () => {
     expect(tokenSource).toContain('.canvas-add-menu');
     expect(tokenSource).toContain('.canvas-config-dock');
     expect(tokenSource).toContain('.canvas-library-panel');
-    expect(tokenSource).toContain('max-width: 63.999rem');
-    expect(tokenSource).toContain('+ 4.25rem');
-    expect(tokenSource).toContain('+ 8.25rem');
+    expect(tokenSource).toMatch(
+      /@media \(min-width: 48rem\) and \(max-width: 63\.999rem\) \{[\s\S]*?\.canvas-tool-dock \{[\s\S]*?\+ 4\.25rem[\s\S]*?\.canvas-add-menu \{[\s\S]*?\+ 8\.25rem/,
+    );
+    expect(tokenSource).toMatch(
+      /@media \(min-width: 48rem\) \{[\s\S]*?\.canvas-library-panel \{\s*left: max\(1rem, env\(safe-area-inset-left\)\)/,
+    );
     expect(canvasEditorSource).not.toContain('md:bottom-14');
     expect(tokenSource).not.toContain('.canvas-tool-rail');
   });

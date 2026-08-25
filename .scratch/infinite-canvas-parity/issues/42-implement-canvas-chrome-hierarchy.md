@@ -2,7 +2,7 @@
 
 Type: implement
 
-Status: in-progress
+Status: ready-for-human
 
 Blocked by: 41-implement-generation-default-preferences
 
@@ -40,4 +40,9 @@ Blocked by: 41-implement-generation-default-preferences
 
 ## Verification
 
-待完成。
+- `pnpm exec vitest run src/pages/canvasChromeLayout.test.ts src/pages/canvasConnectionPolicy.test.ts src/pages/canvasGenerationConfig.test.ts src/components/canvas/CanvasThemeSelector.test.tsx src/components/canvas/CanvasGenerationPreferencesDialog.test.tsx src/test/designDrift.test.ts`：30 项通过。
+- `pnpm exec tsc -p /tmp/tsconfig.canvas-e37.json --noEmit`：通过。
+- `pnpm exec vite build && node scripts/normalize-dist.mjs`：通过（2673 modules）。
+- Spec / standards 双轴审查：CLEAR。
+- `pnpm exec tsc -b --noEmit`：仅命中既有 Canvas v1 测试债；本票无新增错误。
+- 待人工刷新受控内置浏览器后，完成 375 / 768 / 1024 / desktop 的真实布局与菜单交互核验，再关闭 I01。
