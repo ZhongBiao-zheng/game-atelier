@@ -35,6 +35,14 @@ export function canvasNodeProvidesContent(node: CanvasNode): node is CanvasConte
   return node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio';
 }
 
+export function canvasNodeRenderZIndex(
+  persistedZIndex: number,
+  selected: boolean,
+  maximumPersistedZIndex: number,
+) {
+  return selected ? Math.max(persistedZIndex, maximumPersistedZIndex) + 1 : persistedZIndex;
+}
+
 export function canvasNodeHasCurrentContent(
   node: CanvasNode,
   versions: Readonly<Record<string, CanvasContentVersion>>,

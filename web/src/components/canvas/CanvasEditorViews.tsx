@@ -30,7 +30,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { imageControlCaps } from '@/lib/imageControlCaps';
@@ -191,7 +190,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     node,
     context.jobsByResultNodeId,
   );
-  const compactMediaTools = (node.size?.width ?? 320) < 480;
   const replacingMedia = context.mediaReplaceBusyNodeIds.has(node.id);
   const submittingNode = context.submittingNodeIds.has(node.id);
   const nodeRunState = canvasNodeRunState(node, context.jobsByRunId);
@@ -364,11 +362,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               {nodeJob.cancel_requested_at ? <LoaderCircle /> : <Square />}
             </MediaToolButton>
           )}
-          {node.type === 'image' && content?.kind === 'image' ? (
+          {node.type === 'image' ? (
             <>
               <ImageNodeToolbar
                 node={node}
-                compact={compactMediaTools}
+                content={content}
                 replacing={replacingMedia}
                 submitting={submittingNode}
                 copyablePrompt={copyablePrompt}
@@ -944,27 +942,36 @@ function CanvasNodeToolbar({
       >
         <Eye />
       </MediaToolButton>
-      {content && contentNode && canvasNodeProvidesContent(contentNode) && (
+      {contentNode && canvasNodeProvidesContent(contentNode) && (content || mediaNode) && (
         <MediaToolButton
           label={`将 ${node.title} 存入资产库`}
-          disabled={context.libraryBusy}
-          onClick={() => void context.saveAsset(contentNode)}
+          disabled={!content || context.libraryBusy}
+          onClick={() => {
+            if (content) void context.saveAsset(contentNode);
+          }}
         >
           <Library />
         </MediaToolButton>
       )}
-      {content && content.kind !== 'text' && (
+      {content && content.kind !== 'text' ? (
         <MediaToolLink
           label={`下载 ${node.title}`}
           href={canvasDownloadUrl(context.projectId, content.version_id)}
         >
           <Download />
         </MediaToolLink>
-      )}
-      {copyablePrompt && contentNode && canvasNodeProvidesContent(contentNode) && (
+      ) : mediaNode ? (
+        <MediaToolButton label={`下载 ${node.title}`} disabled onClick={() => undefined}>
+          <Download />
+        </MediaToolButton>
+      ) : null}
+      {contentNode && canvasNodeProvidesContent(contentNode) && (copyablePrompt || mediaNode) && (
         <MediaToolButton
           label={`复制 ${node.title} 的生成提示词`}
-          onClick={() => void context.copyPrompt(contentNode)}
+          disabled={!copyablePrompt}
+          onClick={() => {
+            if (copyablePrompt) void context.copyPrompt(contentNode);
+          }}
         >
           <ClipboardCopy />
         </MediaToolButton>
@@ -978,11 +985,13 @@ function CanvasNodeToolbar({
           {replacing ? <LoaderCircle className="animate-spin" /> : <FileUp />}
         </MediaToolButton>
       )}
-      {node.type === 'video' && content?.kind === 'video' && (
+      {node.type === 'video' && (
         <MediaToolButton
           label={`编辑视频 ${node.title}`}
-          disabled={submitting || replacing}
-          onClick={() => context.editVideo(node)}
+          disabled={content?.kind !== 'video' || submitting || replacing}
+          onClick={() => {
+            if (content?.kind === 'video') context.editVideo(node);
+          }}
         >
           <MessageSquare />
         </MediaToolButton>
@@ -1043,12 +1052,12 @@ type ImageToolbarAction = {
   disabled?: boolean;
   destructive?: boolean;
   href?: string;
-  run?: () => void;
+  run: () => void;
 };
 
 function ImageNodeToolbar({
   node,
-  compact,
+  content,
   replacing,
   submitting,
   copyablePrompt,
@@ -1056,19 +1065,16 @@ function ImageNodeToolbar({
   onOverlayOpenChange,
 }: {
   node: Extract<CanvasContentNode, { type: 'image' }>;
-  compact: boolean;
+  content: CanvasContentVersion | undefined;
   replacing: boolean;
   submitting: boolean;
   copyablePrompt: string | null;
   context: CanvasNodeContextValue;
   onOverlayOpenChange: (open: boolean) => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
-  const menuOpenRef = useRef(false);
-  const settingsOpenRef = useRef(false);
   const onOverlayOpenChangeRef = useRef(onOverlayOpenChange);
   useEffect(() => {
     onOverlayOpenChangeRef.current = onOverlayOpenChange;
@@ -1076,6 +1082,8 @@ function ImageNodeToolbar({
   useEffect(() => () => onOverlayOpenChangeRef.current(false), []);
   const resizeUnlocked = node.data.display.free_resize;
   const uploadedImageMaterial = isUploadedImageMaterialNode(node, context.contentVersions);
+  const imageContent = content?.kind === 'image' ? content : undefined;
+  const currentVersionId = imageContent?.version_id;
   const definitions = orderedCanvasImageTools(context.canvasUiPreferences.image_toolbar.tool_ids);
   const actions = definitions.flatMap(definition => {
     const Icon = definition.icon;
@@ -1083,9 +1091,11 @@ function ImageNodeToolbar({
     let action: ImageToolbarAction | null = null;
     if (definition.id === 'info') action = {
       ...common,
-      label: `查看 ${node.title} 详情`,
+      label: currentVersionId ? `查看 ${node.title} 详情` : `查看 ${node.title} 设置`,
       icon: <Icon />,
-      run: () => context.previewContent(node.data.current_version_id!, node.title, node.id),
+      run: () => currentVersionId
+        ? context.previewContent(currentVersionId, node.title, node.id)
+        : context.selectNode(node.id),
     };
     if (definition.id === 'delete') action = {
       ...common,
@@ -1098,31 +1108,41 @@ function ImageNodeToolbar({
       ...common,
       label: `将 ${node.title} 存入资产库`,
       icon: <Icon />,
-      disabled: context.libraryBusy,
-      run: () => void context.saveAsset(node),
+      disabled: !currentVersionId || context.libraryBusy,
+      run: () => {
+        if (currentVersionId) void context.saveAsset(node);
+      },
     };
     if (definition.id === 'download') action = {
       ...common,
       label: `下载 ${node.title}`,
       icon: <Icon />,
-      href: canvasDownloadUrl(context.projectId, node.data.current_version_id!),
+      disabled: !currentVersionId,
+      href: currentVersionId ? canvasDownloadUrl(context.projectId, currentVersionId) : undefined,
+      run: () => undefined,
     };
-    if (definition.id === 'copyPrompt' && copyablePrompt) action = {
+    if (definition.id === 'copyPrompt') action = {
       ...common,
       label: `复制 ${node.title} 的生成提示词`,
       icon: <Icon />,
-      run: () => void context.copyPrompt(node),
+      disabled: !copyablePrompt,
+      run: () => {
+        if (copyablePrompt) void context.copyPrompt(node);
+      },
     };
     if (definition.id === 'reversePrompt') action = {
       ...common,
       label: `反推 ${node.title} 的提示词`,
       icon: submitting ? <LoaderCircle className="animate-spin" /> : <Icon />,
-      disabled: submitting || replacing,
-      run: () => void context.reversePrompt(node),
+      disabled: !currentVersionId || submitting || replacing,
+      run: () => {
+        if (currentVersionId) void context.reversePrompt(node);
+      },
     };
     if (definition.id === 'replace' && !uploadedImageMaterial) action = {
       ...common,
-      label: `替换 ${node.title}`,
+      label: currentVersionId ? `替换 ${node.title}` : `上传到 ${node.title}`,
+      text: currentVersionId ? definition.label : '上传图片',
       icon: replacing ? <LoaderCircle className="animate-spin" /> : <Icon />,
       disabled: replacing,
       run: () => context.replaceMedia(node),
@@ -1139,50 +1159,53 @@ function ImageNodeToolbar({
       ...common,
       label: `局部编辑 ${node.title}`,
       icon: <Icon />,
-      disabled: submitting || replacing,
-      run: () => context.openMaskEdit(node),
+      disabled: !currentVersionId || submitting || replacing,
+      run: () => {
+        if (currentVersionId) context.openMaskEdit(node);
+      },
     };
     if (definition.id === 'crop') action = {
       ...common,
       label: `裁剪 ${node.title}`,
       icon: <Icon />,
-      disabled: replacing,
-      run: () => context.openMediaOperation(node, 'crop'),
+      disabled: !currentVersionId || replacing,
+      run: () => {
+        if (currentVersionId) context.openMediaOperation(node, 'crop');
+      },
     };
     if (definition.id === 'split') action = {
       ...common,
       label: `切分 ${node.title}`,
       icon: <Icon />,
-      disabled: replacing,
-      run: () => context.openMediaOperation(node, 'split'),
+      disabled: !currentVersionId || replacing,
+      run: () => {
+        if (currentVersionId) context.openMediaOperation(node, 'split');
+      },
     };
     if (definition.id === 'upscale') action = {
       ...common,
       label: `本地放大 ${node.title}`,
       icon: <Icon />,
-      disabled: replacing,
-      run: () => context.openMediaOperation(node, 'upscale'),
+      disabled: !currentVersionId || replacing,
+      run: () => {
+        if (currentVersionId) context.openMediaOperation(node, 'upscale');
+      },
     };
     if (definition.id === 'angle') action = {
       ...common,
       label: `多角度 ${node.title}`,
       icon: <Icon />,
-      disabled: submitting || replacing,
-      run: () => context.openAngle(node),
+      disabled: !currentVersionId || submitting || replacing,
+      run: () => {
+        if (currentVersionId) context.openAngle(node);
+      },
     };
     return action ? [action] : [];
   });
 
-  function updateMenuOpen(open: boolean) {
-    menuOpenRef.current = open;
-    setMenuOpen(open);
-    onOverlayOpenChange(open || settingsOpenRef.current);
-  }
-
   function updateSettingsOpen(open: boolean) {
-    settingsOpenRef.current = open;
     setSettingsOpen(open);
-    onOverlayOpenChange(open || menuOpenRef.current);
+    onOverlayOpenChange(open);
   }
 
   function openSettings() {
@@ -1205,78 +1228,34 @@ function ImageNodeToolbar({
 
   return (
     <>
-      {compact ? (
-        <DropdownMenu open={menuOpen} onOpenChange={updateMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              title={`更多 ${node.title} 图片工具`}
-              aria-label={`更多 ${node.title} 图片工具`}
-              className="nodrag grid size-7 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              onClick={event => event.stopPropagation()}
-            >
-              <Ellipsis className="size-3.5" aria-hidden="true" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" onClick={event => event.stopPropagation()}>
-            {actions.map(action => action.href ? (
-              <DropdownMenuItem key={action.id} asChild>
-                <a href={action.href} aria-label={action.label}>
-                  <span aria-hidden="true" className="[&>svg]:size-4">{action.icon}</span>
-                  {action.text}
-                </a>
-              </DropdownMenuItem>
-            ) : (
-              <MediaToolMenuItem
-                key={action.id}
-                label={action.label}
-                text={action.text}
-                destructive={action.destructive}
-                disabled={action.disabled}
-                onSelect={action.run!}
-              >
-                {action.icon}
-              </MediaToolMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={openSettings}>
-              <Ellipsis className="size-4" aria-hidden="true" />
-              配置快捷工具
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+      {actions.map(action => action.href ? (
+        <MediaToolLink
+          key={action.id}
+          label={action.label}
+          text={context.canvasUiPreferences.image_toolbar.show_labels ? action.text : undefined}
+          href={action.href}
+        >
+          {action.icon}
+        </MediaToolLink>
       ) : (
-        <>
-          {actions.map(action => action.href ? (
-            <MediaToolLink
-              key={action.id}
-              label={action.label}
-              text={context.canvasUiPreferences.image_toolbar.show_labels ? action.text : undefined}
-              href={action.href}
-            >
-              {action.icon}
-            </MediaToolLink>
-          ) : (
-            <MediaToolButton
-              key={action.id}
-              label={action.label}
-              text={context.canvasUiPreferences.image_toolbar.show_labels ? action.text : undefined}
-              destructive={action.destructive}
-              disabled={action.disabled}
-              onClick={action.run!}
-            >
-              {action.icon}
-            </MediaToolButton>
-          ))}
-          <MediaToolButton
-            label="配置图片快捷工具"
-            text={context.canvasUiPreferences.image_toolbar.show_labels ? '更多' : undefined}
-            onClick={openSettings}
-          >
-            <Ellipsis />
-          </MediaToolButton>
-        </>
-      )}
+        <MediaToolButton
+          key={action.id}
+          label={action.label}
+          text={context.canvasUiPreferences.image_toolbar.show_labels ? action.text : undefined}
+          destructive={action.destructive}
+          disabled={action.disabled}
+          onClick={action.run}
+        >
+          {action.icon}
+        </MediaToolButton>
+      ))}
+      <MediaToolButton
+        label="配置图片快捷工具"
+        text={context.canvasUiPreferences.image_toolbar.show_labels ? '更多' : undefined}
+        onClick={openSettings}
+      >
+        <Ellipsis />
+      </MediaToolButton>
       <CanvasImageToolbarPreferencesDialog
         open={settingsOpen}
         value={context.canvasUiPreferences.image_toolbar}
@@ -2023,22 +2002,6 @@ function MediaToolLink({ label, text, href, children }: {
       <span aria-hidden="true" className="[&>svg]:size-3.5">{children}</span>
       {text && <span className="text-xs">{text}</span>}
     </a>
-  );
-}
-
-function MediaToolMenuItem({ label, text = label, destructive = false, disabled = false, onSelect, children }: {
-  label: string;
-  text?: string;
-  destructive?: boolean;
-  disabled?: boolean;
-  onSelect: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <DropdownMenuItem aria-label={label} destructive={destructive} disabled={disabled} onSelect={onSelect}>
-      <span aria-hidden="true" className="[&>svg]:size-4">{children}</span>
-      {text}
-    </DropdownMenuItem>
   );
 }
 

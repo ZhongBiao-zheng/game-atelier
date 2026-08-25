@@ -94,7 +94,7 @@ Status: completed
 | C09 | 四角 resize、图片比例锁/自由变形 | `canvas-node.tsx`、`freeResize` | adapted：React Flow NodeResizer | full |
 | C10 | 左右连接柄与有向连接 | `canvas-connections.tsx` | adapted：React Flow Handle/Edge；统一校验、空白创建、撤销持久化与有证据派生恢复，见 issue 28 | full |
 | C11 | 配置节点之间禁止连接 | 运行时文案 `configConnection` | same | full |
-| C12 | 节点工具条跟随节点 | `canvas-node-hover-toolbar.tsx` | adapted：点击选中后固定出现在节点上方，反向补偿缩放并允许随节点移出视口 | full |
+| C12 | 节点工具条跟随节点 | `canvas-node-hover-toolbar.tsx` | adapted：点击选中后固定出现在节点上方，反向补偿缩放并允许随节点移出视口；选中节点临时高于全部持久化节点，完整图片工具不按节点宽度折叠，空媒体保留 disabled 功能位 | full |
 | C13 | 节点信息/JSON/检查器视图 | `CanvasNodeInfoModal` | excluded：后续产品决策确认实际价值有限，节点操作统一收口到选中态工具条与节点内编辑 | n/a |
 | C14 | 错误节点工具条重试 | `canRetry` / `onRetry` | adapted：validated result Job 按不可变快照重试，见 issue 30 | full |
 | C15 | 节点状态 idle/loading/success/error | `CanvasNodeStatus` | adapted：由 validated result Job 派生且保留旧内容，见 issue 30 | full |

@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 
 import {
   buildCanvasGenerationRequest,
+  canvasNodeRenderZIndex,
   normalizeCanvasImageParams,
 } from './canvasEditorModel';
 import type { CanvasGenerationNode } from '@/schema/canvas';
@@ -26,6 +27,11 @@ const target: CanvasGenerationNode = {
     job_ids: [],
   },
 };
+
+it('raises selected nodes above every persisted canvas layer without changing other nodes', () => {
+  expect(canvasNodeRenderZIndex(3, false, 12)).toBe(3);
+  expect(canvasNodeRenderZIndex(3, true, 12)).toBe(13);
+});
 
 it('builds a standalone generation request without legacy references', () => {
   const result = buildCanvasGenerationRequest(target, 'openai');

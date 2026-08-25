@@ -147,9 +147,21 @@ it('renders one independent selected toolbar for every canvas node type', () => 
   const imageToolbar = screen.getByRole('toolbar', { name: '图片 节点工具' });
   fireEvent.click(within(imageToolbar).getByRole('button', { name: '上传到 图片' }));
   expect(context.replaceMedia).toHaveBeenCalledWith(nodes[1]);
+  expect(within(imageToolbar).getByRole('button', { name: '将 图片 存入资产库' })).toBeDisabled();
+  expect(within(imageToolbar).getByRole('button', { name: '下载 图片' })).toBeDisabled();
+  expect(within(imageToolbar).getByRole('button', { name: '反推 图片 的提示词' })).toBeDisabled();
+  expect(within(imageToolbar).getByRole('button', { name: '局部编辑 图片' })).toBeDisabled();
+  expect(within(imageToolbar).getByRole('button', { name: '裁剪 图片' })).toBeDisabled();
+  expect(within(imageToolbar).getByRole('button', { name: '切分 图片' })).toBeDisabled();
+  expect(within(imageToolbar).getByRole('button', { name: '本地放大 图片' })).toBeDisabled();
+
+  const videoToolbar = screen.getByRole('toolbar', { name: '视频 节点工具' });
+  expect(within(videoToolbar).getByRole('button', { name: '将 视频 存入资产库' })).toBeDisabled();
+  expect(within(videoToolbar).getByRole('button', { name: '下载 视频' })).toBeDisabled();
+  expect(within(videoToolbar).getByRole('button', { name: '编辑视频 视频' })).toBeDisabled();
 
   const firstTool = within(imageToolbar).getByRole('button', { name: '查看 图片 设置' });
-  const secondTool = within(imageToolbar).getByRole('button', { name: '上传到 图片' });
+  const secondTool = within(imageToolbar).getByRole('button', { name: '删除 图片' });
   expect(firstTool).toHaveAttribute('tabindex', '0');
   expect(secondTool).toHaveAttribute('tabindex', '-1');
   act(() => firstTool.focus());
@@ -393,7 +405,7 @@ it('keeps populated media playable inside the node without opening preview from 
   expect(context.previewContent).not.toHaveBeenCalled();
 });
 
-it('shows the image toolbar after selection and keeps it mounted while its portal menu is open', async () => {
+it('shows every configured image action after selection and keeps it mounted while settings are open', async () => {
   const image = {
     ...nodes[1],
     data: { ...nodes[1].data, current_version_id: 'version-image' },
@@ -432,10 +444,14 @@ it('shows the image toolbar after selection and keeps it mounted while its porta
   );
 
   const toolbar = screen.getByRole('toolbar', { name: '图片 节点工具' });
-  const moreButton = within(toolbar).getByRole('button', { name: '更多 图片 图片工具' });
-  act(() => moreButton.focus());
-  fireEvent.keyDown(moreButton, { key: 'Enter' });
-  expect(await screen.findByRole('menu')).toBeInTheDocument();
+  expect(within(toolbar).getByRole('button', { name: '局部编辑 图片' })).toBeInTheDocument();
+  expect(within(toolbar).getByRole('button', { name: '裁剪 图片' })).toBeInTheDocument();
+  expect(within(toolbar).getByRole('button', { name: '切分 图片' })).toBeInTheDocument();
+  expect(within(toolbar).getByRole('button', { name: '本地放大 图片' })).toBeInTheDocument();
+  const settingsButton = within(toolbar).getByRole('button', { name: '配置图片快捷工具' });
+  act(() => settingsButton.focus());
+  fireEvent.click(settingsButton);
+  expect(await screen.findByRole('dialog', { name: '自定义图片快捷工具' })).toBeInTheDocument();
 
   rerender(
     <CanvasNodeContext.Provider value={context}>
@@ -444,7 +460,7 @@ it('shows the image toolbar after selection and keeps it mounted while its porta
   );
 
   expect(document.querySelector('[data-canvas-node-toolbar="image"]')).toBeInTheDocument();
-  expect(screen.getByRole('menu')).toBeInTheDocument();
+  expect(screen.getByRole('dialog', { name: '自定义图片快捷工具' })).toBeInTheDocument();
 });
 
 it('treats an uploaded image as a pure material with toolbar and one direct replace action only', async () => {
@@ -486,7 +502,5 @@ it('treats an uploaded image as a pure material with toolbar and one direct repl
   expect(context.replaceMedia).toHaveBeenCalledWith(uploadedImage);
 
   const toolbar = screen.getByRole('toolbar', { name: '图片 节点工具' });
-  fireEvent.keyDown(within(toolbar).getByRole('button', { name: '更多 图片 图片工具' }), { key: 'Enter' });
-  expect(await screen.findByRole('menu')).toBeInTheDocument();
-  expect(screen.queryByRole('menuitem', { name: '替换 图片' })).not.toBeInTheDocument();
+  expect(within(toolbar).queryByRole('button', { name: '替换 图片' })).not.toBeInTheDocument();
 });

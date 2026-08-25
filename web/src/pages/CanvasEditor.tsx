@@ -167,6 +167,7 @@ import {
 } from '@/lib/canvasMentions';
 import {
   canvasConnectionCreationCapabilities,
+  canvasNodeRenderZIndex,
   canCreateCanvasInputConnection,
   closestCanvasConnectionEndpoint,
   createCanvasGenerationDraft,
@@ -795,6 +796,7 @@ function CanvasEditorInner({
 
   const flowNodes = useMemo<FlowNode[]>(() => {
     const activeIds = new Set<string>();
+    const maximumPersistedZIndex = Math.max(0, ...(document?.nodes ?? []).map(node => node.z_index));
     const next = (document?.nodes ?? []).map(node => {
       activeIds.add(node.id);
       const selected = selectedNodeIds.has(node.id);
@@ -808,7 +810,7 @@ function CanvasEditorInner({
         style: {
           width: renderedSize.width,
           height: renderedSize.height,
-          zIndex: node.z_index,
+          zIndex: canvasNodeRenderZIndex(node.z_index, selected, maximumPersistedZIndex),
         },
         selected,
         data: { domain: node },
