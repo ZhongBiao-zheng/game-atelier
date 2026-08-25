@@ -18,6 +18,7 @@ import {
 } from '@xyflow/react';
 import {
   ArrowLeft,
+  Bot,
   ChevronDown,
   CircleHelp,
   CircleDot,
@@ -165,6 +166,7 @@ import {
   buildCanvasMaterialReferences,
   buildCanvasMentionReferences,
 } from '@/lib/canvasMentions';
+import { shouldPreventCanvasHistoryNavigation } from '@/lib/canvasTrackpad';
 import {
   canvasConnectionCreationCapabilities,
   canvasNodeRenderZIndex,
@@ -1293,16 +1295,19 @@ function CanvasEditorInner({
     }, menu);
   }
 
-  function addConfigNode(menu: CreateMenuState | null = createMenu) {
-    const draft = createCanvasGenerationDraft(keys, 'image', {
-      preference: canvasUiPreferences.generation_defaults.image,
+  function addConfigNode(
+    menu: CreateMenuState | null = createMenu,
+    mode: JobKind = 'image',
+  ) {
+    const draft = createCanvasGenerationDraft(keys, mode, {
+      preference: canvasUiPreferences.generation_defaults[mode],
       prompt: menu?.sourceId && menu.sourceHandle !== 'target'
         ? `@[node:${menu.sourceId}]`
         : '',
     });
     appendNode({
       id: makeId('config'),
-      title: '生成配置',
+      title: mode === 'text' ? 'LLM 对话' : '生成配置',
       type: 'config',
       position: menu?.flow ?? defaultPosition(),
       z_index: 0,
@@ -2770,6 +2775,23 @@ function CanvasEditorInner({
     viewportZoom,
   ]);
 
+  useEffect(() => {
+    const region = editorRegionRef.current;
+    if (!region) return;
+    const preventBrowserHistoryNavigation = (event: WheelEvent) => {
+      if (event.cancelable && shouldPreventCanvasHistoryNavigation(event)) {
+        event.preventDefault();
+      }
+    };
+    region.addEventListener('wheel', preventBrowserHistoryNavigation, {
+      capture: true,
+      passive: false,
+    });
+    return () => region.removeEventListener('wheel', preventBrowserHistoryNavigation, {
+      capture: true,
+    });
+  }, [document?.project_id]);
+
   if (loading) return <EditorMessage icon={<LoaderCircle className="size-5 animate-spin" />} text="正在展开画布…" />;
   if (!document) return <EditorMessage text={error || '画布读取失败'} action={<Button onClick={onBack}>返回项目列表</Button>} />;
 
@@ -2796,7 +2818,7 @@ function CanvasEditorInner({
       <section
         ref={editorRegionRef}
         tabIndex={-1}
-        className="relative h-full min-h-0 overflow-hidden bg-background outline-none"
+        className="canvas-editor-region relative h-full min-h-0 overflow-hidden bg-background outline-none"
         aria-label={`画布编辑器 ${projectName}`}
       >
         <ReactFlow<FlowNode>
@@ -3015,6 +3037,7 @@ function CanvasEditorInner({
               <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><FileImage /></ToolButton>
               <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><FileVideo /></ToolButton>
               <ToolButton label="添加音频节点" onClick={() => addGenerationNode('audio', null)}><FileAudio /></ToolButton>
+              <ToolButton label="添加 LLM 节点" onClick={() => addConfigNode(null, 'text')}><Bot /></ToolButton>
               <ToolButton label="添加生成配置节点" onClick={() => addConfigNode(null)}><WandSparkles /></ToolButton>
               <ToolButton label="上传素材" onClick={() => uploadRef.current?.click()}><Upload /></ToolButton>
               <div className="mx-1 h-7 w-px bg-border" />
@@ -3112,7 +3135,7 @@ function CanvasEditorInner({
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow md:left-1/2 md:top-auto md:-translate-x-1/2">
               <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>
-              <CanvasCreateMenuItems allowEmptyNodes allowUpload allowConfig onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onAddConfig={() => addConfigNode(null)} onUpload={() => uploadRef.current?.click()} />
+              <CanvasCreateMenuItems allowEmptyNodes allowUpload allowConfig onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onAddLlm={() => addConfigNode(null, 'text')} onAddConfig={() => addConfigNode(null)} onUpload={() => uploadRef.current?.click()} />
             </div>
           )}
           <input ref={uploadRef} type="file" className="sr-only" accept="image/*,video/*,audio/*" onChange={event => { const file = event.target.files?.[0]; if (file) void handleUpload(file); event.target.value = ''; }} />
@@ -3137,7 +3160,7 @@ function CanvasEditorInner({
         {createMenu && (
           <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenu.screen.x, top: createMenu.screen.y }}>
             <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs uppercase tracking-label text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></button></div>
-            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onAddConfig={() => addConfigNode(createMenu)} onUpload={() => uploadRef.current?.click()} />
+            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onAddLlm={() => addConfigNode(createMenu, 'text')} onAddConfig={() => addConfigNode(createMenu)} onUpload={() => uploadRef.current?.click()} />
           </div>
         )}
 
@@ -3295,7 +3318,7 @@ function CanvasEditorInner({
   );
 }
 
-function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, allowConfig, onAddText, onAddImage, onAddVideo, onAddAudio, onAddConfig, onUpload }: {
+function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, allowConfig, onAddText, onAddImage, onAddVideo, onAddAudio, onAddLlm, onAddConfig, onUpload }: {
   allowEmptyNodes: boolean;
   allowUpload: boolean;
   allowConfig: boolean;
@@ -3303,6 +3326,7 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, allowConfig, onAd
   onAddImage: () => void;
   onAddVideo: () => void;
   onAddAudio: () => void;
+  onAddLlm: () => void;
   onAddConfig: () => void;
   onUpload: () => void;
 }) {
@@ -3311,6 +3335,7 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, allowConfig, onAd
     {allowEmptyNodes && <AddMenuButton icon={<FileImage />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} />}
     {allowEmptyNodes && <AddMenuButton icon={<FileVideo />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />}
     {allowEmptyNodes && <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} />}
+    {allowConfig && <AddMenuButton icon={<Bot />} title="LLM 对话" description="对话、文案与结构化文本生成" onClick={onAddLlm} />}
     {allowConfig && <AddMenuButton icon={<WandSparkles />} title="生成配置" description="连接内容并选择生成类型" onClick={onAddConfig} />}
     {allowUpload && <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;

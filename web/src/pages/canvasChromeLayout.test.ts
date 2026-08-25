@@ -21,6 +21,7 @@ describe('canvas chrome spatial hierarchy', () => {
     for (const label of [
       '添加节点',
       '添加文本节点',
+      '添加 LLM 节点',
       '添加图片节点',
       '添加视频节点',
       '添加音频节点',
@@ -53,5 +54,6 @@ describe('canvas chrome spatial hierarchy', () => {
     expect(canvasEditorSource).not.toContain('md:bottom-14');
     expect(canvasEditorSource).not.toContain('canvas-library-panel absolute bottom-3');
     expect(tokenSource).not.toContain('.canvas-tool-rail');
+    expect(tokenSource).toMatch(/\.canvas-editor-region \{[\s\S]*?overscroll-behavior: none/);
   });
 });

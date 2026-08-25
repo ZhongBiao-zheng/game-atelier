@@ -32,7 +32,10 @@ def supports_model(key: Any, model: Any) -> bool:
     declared = protocol in _SUPPORTED_PROTOCOLS - {None}
     return (
         protocol in _SUPPORTED_PROTOCOLS
-        and (key.provider in {"openai", "openrouter", "tokendance", "custom"} or declared)
+        and (
+            key.provider in {"openai", "openrouter", "seedream", "tokendance", "custom"}
+            or declared
+        )
     )
 
 

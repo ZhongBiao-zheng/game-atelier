@@ -139,6 +139,30 @@ it('skips models that the Canvas Runner cannot route', () => {
   });
 });
 
+it('routes Volcengine conversation models into LLM generation', () => {
+  const volcengine: KeyView = {
+    ...keys[0],
+    alias: 'volcengine',
+    provider: 'seedream',
+    base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+    models: [{
+      id: 'doubao-seed-1-8-251228',
+      name: '豆包 Seed 1.8',
+      modality: 'text',
+      protocol: null,
+      input_modalities: ['text'],
+    }],
+  };
+
+  expect(firstCanvasGenerationModel([volcengine], 'text')).toMatchObject({
+    key: { alias: 'volcengine' },
+    model: { id: 'doubao-seed-1-8-251228' },
+  });
+  expect(createCanvasGenerationDraft([volcengine], 'text')).toMatchObject({
+    mode: 'text', alias: 'volcengine', model: 'doubao-seed-1-8-251228', params: { n: 1 },
+  });
+});
+
 it('keeps model and capability params empty when no routable model exists', () => {
   const unavailable: KeyView[] = [{
     ...keys[0], alias: 'unsupported-images', provider: 'nano_banana',

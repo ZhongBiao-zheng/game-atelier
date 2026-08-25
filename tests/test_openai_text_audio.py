@@ -86,6 +86,42 @@ def test_openai_responses_auto_omits_reasoning(monkeypatch):
     assert "reasoning" not in captured
 
 
+def test_volcengine_ark_text_model_uses_chat_completions(monkeypatch):
+    keys.add_key(keys.KeySpec(
+        alias="volcengine",
+        provider="seedream",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        access_key="ark-test",
+        models=[keys.ModelSpec(
+            name="豆包 Seed 1.8",
+            id="doubao-seed-1-8-251228",
+            modality="text",
+            protocol=None,
+            input_modalities=["text"],
+        )],
+        modalities=["image", "llm"],
+        created_at="2026-08-25T00:00:00Z",
+    ))
+    captured = {}
+
+    def fake_post(url, **kwargs):
+        captured.update(url=url, **kwargs)
+        return _JsonResponse({"choices": [{"message": {"content": "火山文本结果"}}]})
+
+    monkeypatch.setattr(openai_text.requests, "post", fake_post)
+    assert openai_text.generate(
+        prompt="写一句画布文案",
+        model="doubao-seed-1-8-251228",
+        alias="volcengine",
+        params={"temperature": 0.7, "max_tokens": 2048},
+    ) == ["火山文本结果"]
+    assert captured["url"] == (
+        "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+    )
+    assert captured["json"]["temperature"] == 0.7
+    assert captured["json"]["max_tokens"] == 2048
+
+
 def test_openai_speech_sends_all_controls_and_writes_pcm(tmp_path, monkeypatch):
     _add_key("openai-speech", "audio")
     captured = {}

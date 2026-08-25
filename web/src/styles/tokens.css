@@ -507,3 +507,6 @@
   ::-webkit-scrollbar-thumb { background: var(--secondary); border-radius: 999px; border: 2px solid var(--background); }
   ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
 }
+.canvas-editor-region {
+  overscroll-behavior: none;
+}

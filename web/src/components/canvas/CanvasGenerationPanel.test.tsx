@@ -247,7 +247,7 @@ it('switches a config node between generation modes and summarizes connected inp
   const modes = screen.getByRole('radiogroup', { name: '生成类型' });
   expect(within(modes).getByRole('radio', { name: '图片' })).toHaveAttribute('aria-checked', 'true');
   expect(screen.getByLabelText('当前模型')).toHaveTextContent('GPT Image 2');
-  expect(screen.getByText('文本 1')).toBeInTheDocument();
+  expect(screen.getByText('LLM 1')).toBeInTheDocument();
   expect(screen.getByText('图片 1')).toBeInTheDocument();
 
   const imageMode = within(modes).getByRole('radio', { name: '图片' });
@@ -506,7 +506,7 @@ const generationNodes: Array<[CanvasNode, string]> = [
       active_run_id: null,
       display: { scale: 'sm' },
     },
-  }, '文本生成设置'],
+  }, 'LLM生成设置'],
   [{
     id: 'image-one', title: '图片', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
     data: {
@@ -753,7 +753,7 @@ it('records text candidate changes but ignores the already selected value', () =
     </CanvasNodeContext.Provider>,
   );
 
-  fireEvent.click(screen.getByRole('button', { name: '文本生成设置' }));
+  fireEvent.click(screen.getByRole('button', { name: 'LLM 生成设置' }));
   fireEvent.click(screen.getByRole('option', { name: '1 个' }));
   expect(recordHistory).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('option', { name: '2 个' }));
@@ -786,8 +786,8 @@ it('records Responses reasoning changes but ignores the selected effort', () => 
     </CanvasNodeContext.Provider>,
   );
 
-  fireEvent.click(screen.getByRole('button', { name: '文本生成设置' }));
-  fireEvent.click(screen.getByRole('option', { name: '自动' }));
+  fireEvent.click(screen.getByRole('button', { name: 'LLM 生成设置' }));
+  fireEvent.click(within(screen.getByLabelText('选择推理强度')).getByRole('option', { name: '自动' }));
   expect(recordHistory).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('option', { name: '高' }));
   expect(recordHistory).toHaveBeenCalledOnce();

@@ -121,7 +121,7 @@ export function canvasConnectionCreationCapabilities(sourceHandle: 'source' | 't
 }
 
 export const CANVAS_GENERATION_MODE_LABELS: Record<CanvasGenerationDraft['mode'], string> = {
-  text: '文本',
+  text: 'LLM',
   image: '图片',
   video: '视频',
   audio: '音频',
@@ -396,7 +396,7 @@ export function supportsCanvasTextGeneration(
   const supportedProtocols = [null, undefined, 'openai', 'openai-chat', 'chat-completions', 'openai-responses'];
   const declared = protocol != null && supportedProtocols.includes(protocol);
   return supportedProtocols.includes(protocol)
-    && (['openai', 'openrouter', 'tokendance', 'custom'].includes(String(provider)) || declared);
+    && (['openai', 'openrouter', 'seedream', 'tokendance', 'custom'].includes(String(provider)) || declared);
 }
 
 export function normalizeCanvasTextParams(

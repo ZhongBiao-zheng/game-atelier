@@ -100,7 +100,7 @@ describe('CanvasTextSettings', () => {
     const onPatch = vi.fn();
     render(<CanvasTextSettings supportsReasoning params={{ n: 2, reasoning_effort: 'auto' }} onPatch={onPatch} />);
 
-    const trigger = screen.getByRole('button', { name: '文本生成设置' });
+    const trigger = screen.getByRole('button', { name: 'LLM 生成设置' });
     await user.click(trigger);
     const popover = screen.getByTestId('canvas-text-settings-popover');
     expect(popover).toHaveAttribute('data-toolbar-popover');
@@ -111,10 +111,17 @@ describe('CanvasTextSettings', () => {
   });
 
   it('hides reasoning for chat-completions models', () => {
-    render(<CanvasTextSettings supportsReasoning={false} params={{ n: 1 }} onPatch={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: '文本生成设置' }));
+    const onPatch = vi.fn();
+    render(<CanvasTextSettings supportsReasoning={false} params={{ n: 1 }} onPatch={onPatch} />);
+    fireEvent.click(screen.getByRole('button', { name: 'LLM 生成设置' }));
     expect(screen.queryByLabelText('选择推理强度')).not.toBeInTheDocument();
     expect(screen.getByLabelText('选择文本生成数量')).toBeInTheDocument();
+    expect(screen.getByLabelText('选择对话随机性')).toBeInTheDocument();
+    expect(screen.getByLabelText('选择最大输出长度')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: '均衡' }));
+    fireEvent.click(screen.getByRole('option', { name: '2048' }));
+    expect(onPatch).toHaveBeenNthCalledWith(1, { temperature: 0.7 });
+    expect(onPatch).toHaveBeenNthCalledWith(2, { max_tokens: 2048 });
   });
 });
 

@@ -520,6 +520,16 @@ def test_friendly_error_no_endpoints_reads_as_model_not_enabled_not_transient():
     assert "瞬时" not in msg
 
 
+def test_friendly_error_volcengine_account_overdue_points_to_balance():
+    err = Exception(
+        'text api 403: {"error":{"code":"AccountOverdueError",'
+        '"message":"The account is overdue"}}'
+    )
+    msg = job_runner._friendly_error(err)
+    assert "余额不足" in msg
+    assert "充值" in msg
+
+
 def test_friendly_error_pixel_floor_tells_user_to_enlarge():
     err = Exception(
         'image api 400: {"error":{"message":"The parameter `size` specified in the request '

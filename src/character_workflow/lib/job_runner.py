@@ -196,7 +196,15 @@ def _error_hint(low: str) -> str | None:
             "参考图或出图尺寸不被该模型接受（超出上限 / 比例或边长不合规）："
             "请缩小参考图、或换一个尺寸后重试。原始报文里有厂商给的具体限制。"
         )
-    if "quota" in low or "insufficient" in low or "余额" in low or "额度" in low or "欠费" in low:
+    if (
+        "quota" in low
+        or "insufficient" in low
+        or "accountoverdue" in low
+        or "account is overdue" in low
+        or "余额" in low
+        or "额度" in low
+        or "欠费" in low
+    ):
         return "厂商额度 / 余额不足：请到厂商官网充值或检查账户额度后重试。"
     # 连接已建立但被远端中途掐断：多是该生成过重 / 上游太慢超出厂商网关等待时限（非本机网络问题）。
     if (

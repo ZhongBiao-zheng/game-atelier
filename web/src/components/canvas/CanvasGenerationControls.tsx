@@ -31,6 +31,15 @@ const REASONING_LABELS: Record<(typeof REASONING_OPTIONS)[number], string> = {
   high: '高',
   xhigh: '极高',
 };
+const TEXT_TEMPERATURE_OPTIONS = ['auto', 0.2, 0.7, 1, 1.3] as const;
+const TEXT_TEMPERATURE_LABELS: Record<string, string> = {
+  auto: '自动',
+  '0.2': '严谨',
+  '0.7': '均衡',
+  '1': '灵活',
+  '1.3': '发散',
+};
+const TEXT_MAX_TOKEN_OPTIONS = ['auto', 512, 1024, 2048, 4096] as const;
 
 export interface CanvasModelChoice {
   key: KeyView;
@@ -310,14 +319,20 @@ export function CanvasTextSettings({
   const reasoning = REASONING_OPTIONS.includes(params.reasoning_effort as (typeof REASONING_OPTIONS)[number])
     ? params.reasoning_effort as (typeof REASONING_OPTIONS)[number]
     : 'auto';
+  const temperature = typeof params.temperature === 'number'
+    ? String(params.temperature)
+    : 'auto';
+  const maxTokens = typeof params.max_tokens === 'number'
+    ? String(params.max_tokens)
+    : 'auto';
   const summary = supportsReasoning
     ? `推理 ${REASONING_LABELS[reasoning]} · ${count} 个`
-    : `${count} 个候选`;
+    : `${TEXT_TEMPERATURE_LABELS[temperature] ?? temperature} · ${count} 个`;
   return (
     <div ref={anchorRef} className="relative min-w-0">
       <button
         type="button"
-        aria-label="文本生成设置"
+        aria-label="LLM 生成设置"
         aria-expanded={open}
         onClick={() => setOpen(current => !current)}
         className="flex h-9 max-w-full items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -347,6 +362,30 @@ export function CanvasTextSettings({
               />
             </SettingsSection>
           )}
+          {!supportsReasoning && (
+            <SettingsSection title="对话随机性">
+              <OptionTrack
+                label="选择对话随机性"
+                values={TEXT_TEMPERATURE_OPTIONS}
+                selected={temperature}
+                getLabel={value => TEXT_TEMPERATURE_LABELS[String(value)] ?? String(value)}
+                onSelect={value => onPatch({
+                  temperature: value === 'auto' ? undefined : Number(value),
+                })}
+              />
+            </SettingsSection>
+          )}
+          <SettingsSection title="最大输出长度">
+            <OptionTrack
+              label="选择最大输出长度"
+              values={TEXT_MAX_TOKEN_OPTIONS}
+              selected={maxTokens}
+              getLabel={value => value === 'auto' ? '自动' : String(value)}
+              onSelect={value => onPatch({
+                max_tokens: value === 'auto' ? undefined : Number(value),
+              })}
+            />
+          </SettingsSection>
           <SettingsSection title="生成数量">
             <OptionTrack
               label="选择文本生成数量"

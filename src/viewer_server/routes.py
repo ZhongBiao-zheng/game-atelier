@@ -1471,6 +1471,10 @@ def _classify_model(item: dict) -> str:
         return "image"
     if _id_hits(mid, _AUDIO_ID_HINTS) and not _id_hits(mid, _AUDIO_NON_GENERATION_ID_HINTS):
         return "audio"
+    if mid.startswith(("doubao-seed-", "doubao-pro-", "doubao-lite-")):
+        # 火山 /models 对豆包对话模型通常不返回 output_modalities 或
+        # supported_protocols；只收明确的对话家族，未知 doubao 家族仍交给用户确认。
+        return "text"
     if _id_hits(mid, _TEXT_ID_HINTS):
         return "text"
     return "unknown"

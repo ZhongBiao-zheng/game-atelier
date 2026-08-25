@@ -58,7 +58,7 @@ Status: completed
 |---|---|---|---|---|
 | B01 | 无限平移、滚轮缩放、复位、百分比缩放滑杆 | `infinite-canvas.tsx`、`canvas-zoom-controls.tsx` | adapted：React Flow 同一 viewport，8%–250% 滑杆与 100% 复位，见 issue 25 | full |
 | B02 | 选择/移动两种工具模式 | `canvas-toolbar.tsx` | same | full |
-| B03 | Ctrl/Space 临时反转选择与移动 | 快捷键弹窗、`pending-test` | adapted：Space / Control 临时平移，不改变单指框选与两指平移，见 issue 24 | full |
+| B03 | Ctrl/Space 临时反转选择与移动 | 快捷键弹窗、`pending-test` | adapted：Space / Control 临时平移，不改变单指框选与两指平移；Mac 横向双指 wheel 在画布 capture 阶段阻止浏览器 history navigation，见 issue 24 | full |
 | B04 | 空白拖动框选，多节点选择 | 快捷键弹窗、`SelectionBox` | same | full |
 | B05 | Shift/Cmd 点击追加选择 | 快捷键弹窗 | same | full |
 | B06 | Cmd/Ctrl+A 全选 | 快捷键弹窗 | same：生产页与快捷键 Dialog 均已接通，见 issue 24 | full |
@@ -114,9 +114,9 @@ Status: completed
 | D07 | 图片参考编辑/图生图 | `requestEdit`、resource references | adapted：Job snapshot refs | full |
 | D08 | 文本/图片/配置驱动视频 | `requestVideoGeneration` | adapted：Issue 40 配置四态切换 + 现有视频 capability + Job Runner | full |
 | D09 | 文本/配置驱动音频 | `requestAudioGeneration` | adapted：新增音频 capability/Job | full |
-| D10 | 节点独立选择模型和参数 | settings popovers | adapted：复用现有 keys/capability matrix | full |
+| D10 | 节点独立选择模型和参数 | settings popovers | adapted：复用现有 keys/capability matrix；工具条与创建菜单提供独立 LLM 入口，火山 Ark 对话模型走 OpenAI-compatible Chat Completions | full |
 | D11 | 图片尺寸/比例/质量/透明背景/数量 | `image-settings-panel.tsx` | adapted：只显示模型真实支持参数 | full |
-| D12 | 文本推理强度 auto/low/medium/high/xhigh | `text-settings-panel.tsx`、`pending-test` | adapted：仅 `openai-responses` 展示并发送 reasoning，auto 省略协议参数；文本候选数 1–4 | full |
+| D12 | 文本推理强度 auto/low/medium/high/xhigh | `text-settings-panel.tsx`、`pending-test` | adapted：`openai-responses` 展示 reasoning；Chat Completions 展示 temperature；两者均支持 max tokens 与候选数 1–4，auto 省略协议参数 | full |
 | D13 | 视频尺寸、时长、质量、音频、水印 | `video-settings-panel.tsx` | adapted：按 provider capability 显示 | full |
 | D14 | 音色、格式、速度、instructions | `audio-settings-panel.tsx` | adapted：按 provider capability 显示，关闭前原子提交本地草稿，服务端再次归一化 | full |
 | D15 | `@` 引用已连接文本/图片/视频/音频 | prompt chip/resource mention components | adapted：提示词上方独立素材条可点击查看，图片显示缩略图、视频显示首帧，通过 `+` 增删真实 Input Connection，并在 hover/聚焦时显示图片、视频、文本或音频详情；不自动改写稳定 node token，missing 继续双端拒绝（issue 34） | full |
@@ -160,7 +160,7 @@ Status: completed
 | F05 | 提示词搜索/标签/详情/复制/加入资产 | prompts page、`PromptDetailDialog` | same | full |
 | F06 | 在画布侧栏搜索公共提示词并插入文本节点 | `CanvasPromptsTab`、`pending-test` | same | full |
 | F07 | 提示词源启停、手动/定时刷新、保留上次成功缓存 | config prompt sources、scheduler | adapted：服务端调度/缓存 | full |
-| F08 | 渠道、模型与默认偏好配置 | `use-config-store.ts`、config modal | adapted：Keys 管渠道/模型；应用级 v2 偏好保存四模态默认模型与安全参数，见 issue 41 | full |
+| F08 | 渠道、模型与默认偏好配置 | `use-config-store.ts`、config modal | adapted：Keys 管渠道/模型；对话作为一等模型分类，火山预置图片 + 豆包对话模型并识别 `/models` 中未声明模态的豆包文本家族；应用级 v2 偏好保存四模态默认模型与安全参数，见 issue 41 | full |
 | F09 | 设置 JSON 导入导出，包含 API Key/WebDAV 凭证 | `config-file.ts` | adapted：不导出明文密钥；只导出非敏感偏好/引用 | full |
 | F10 | 本地存储用量、对象仓库和配额统计 | local storage settings、`pending-test` | adapted：显示服务端 Canvas 存储用量 | full |
 | F11 | WebDAV 测试和各域同步 | `app-sync.ts`、`webdav-sync.ts` | adapted：服务端同步项目包/manifest | full |

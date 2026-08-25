@@ -127,8 +127,20 @@ def test_create_key_persists_named_models(client):
 
     row = client.get("/api/keys").json()["keys"][0]
     assert row["models"] == [
-        {"name": "图片 5.0 Lite", "id": "doubao-seedream-5-0-260128", "modality": None, "protocol": None},
-        {"name": "图片 4.7", "id": "doubao-seedream-4-5-251128", "modality": None, "protocol": None},
+        {
+            "name": "图片 5.0 Lite",
+            "id": "doubao-seedream-5-0-260128",
+            "modality": None,
+            "protocol": None,
+            "input_modalities": [],
+        },
+        {
+            "name": "图片 4.7",
+            "id": "doubao-seedream-4-5-251128",
+            "modality": None,
+            "protocol": None,
+            "input_modalities": [],
+        },
     ]
 
 
@@ -388,6 +400,16 @@ def test_id_keyword_match_respects_word_boundaries():
     assert _classify_model({"id": "wanx-v1"}) == "unknown"
     # seededit 是真图生图模型，image_family 早就认它，此前 _IMAGE_ID_HINTS 漏了
     assert _classify_model({"id": "doubao-seededit-3-0-i2i"}) == "image"
+
+
+def test_classify_model_recognizes_doubao_conversation_without_misclassifying_media():
+    from viewer_server.routes import _classify_model
+
+    assert _classify_model({"id": "doubao-seed-1-8-251228"}) == "text"
+    assert _classify_model({"id": "doubao-seed-1-6-vision-250815"}) == "text"
+    assert _classify_model({"id": "doubao-embedding-text-240715"}) == "unknown"
+    assert _classify_model({"id": "doubao-seed3d-2-0-260328"}) == "unknown"
+    assert _classify_model({"id": "doubao-future-media-260101"}) == "unknown"
 
 
 def _preview_with_upstream(client, rows, **payload):
