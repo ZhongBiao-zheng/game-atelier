@@ -37,6 +37,8 @@ import { cn } from '@/lib/utils';
 import { presentCanvasCandidates, type CanvasCandidateEntry } from '@/lib/canvasCandidates';
 import {
   missingCanvasMentionIds,
+  mentionKindLabel,
+  type CanvasMaterialReference,
   type CanvasMentionReference,
 } from '@/lib/canvasMentions';
 import type {
@@ -75,6 +77,8 @@ export interface CanvasGenerationPanelContextValue {
 
 export interface CanvasNodeContextValue {
   projectId: string;
+  materialReferences: readonly CanvasMaterialReference[];
+  connectedMaterialNodeIdsByNodeId: ReadonlyMap<string, ReadonlySet<string>>;
   mentionReferencesByNodeId: ReadonlyMap<string, readonly CanvasMentionReference[]>;
   contentVersions: Readonly<Record<string, CanvasContentVersion>>;
   keys: KeyView[];
@@ -88,6 +92,7 @@ export interface CanvasNodeContextValue {
   showImageInfo: boolean;
   libraryBusy: boolean;
   generationPanel: CanvasGenerationPanelContextValue;
+  setMaterialConnected: (sourceNodeId: string, targetNodeId: string, connected: boolean) => void;
   selectNode: (id: string) => void;
   previewContent: (id: string, title: string, nodeId: string) => void;
   selectCandidate: (id: string, versionId: string) => void;
@@ -116,6 +121,7 @@ export interface CanvasNodeContextValue {
 }
 
 export const CanvasNodeContext = createContext<CanvasNodeContextValue | null>(null);
+const EMPTY_CANVAS_NODE_IDS: ReadonlySet<string> = new Set();
 
 export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const context = useContext(CanvasNodeContext);
@@ -257,7 +263,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           size: { width: params.width, height: params.height },
         }))}
       />
-      <header className="absolute bottom-full left-1 right-1 flex items-center pb-2 text-xs text-muted-foreground">
+      <header className="absolute bottom-full left-0 right-0 flex items-center pb-2 text-xs text-muted-foreground">
         <span
           className="flex min-w-0 flex-1 items-center gap-1.5"
           onPointerDown={event => event.stopPropagation()}
@@ -296,7 +302,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               type="button"
               title="双击或按 Enter 重命名节点"
               aria-label={`重命名节点 ${node.title}`}
-              className="nodrag min-w-0 truncate border-b border-dashed border-transparent text-left text-xs font-medium text-muted-foreground transition-colors hover:border-current hover:text-foreground focus-visible:border-current focus-visible:text-foreground focus-visible:outline-none"
+              className="nodrag min-w-0 truncate border-b border-dashed border-transparent text-left text-xs font-medium text-foreground transition-colors hover:border-current focus-visible:border-current focus-visible:outline-none"
               onKeyDown={event => {
                 if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'F2') return;
                 event.preventDefault();
@@ -1349,6 +1355,21 @@ export function CanvasGenerationComposer({
           </Button>
         )}
       </div>
+      <CanvasMaterialConnections
+        node={node}
+        materials={context.materialReferences}
+        connectedNodeIds={context.connectedMaterialNodeIdsByNodeId.get(node.id) ?? EMPTY_CANVAS_NODE_IDS}
+        onPreview={reference => context.previewContent(
+          reference.versionId,
+          reference.title,
+          reference.nodeId,
+        )}
+        onConnectedChange={(sourceNodeId, connected) => context.setMaterialConnected(
+          sourceNodeId,
+          node.id,
+          connected,
+        )}
+      />
       <CanvasPromptInput
         value={draft.prompt}
         references={mentionReferences}
@@ -1564,6 +1585,108 @@ export function CanvasGenerationComposer({
       </div>
     </section>
   );
+}
+
+function CanvasMaterialConnections({
+  node,
+  materials,
+  connectedNodeIds,
+  onPreview,
+  onConnectedChange,
+}: {
+  node: CanvasNode;
+  materials: readonly CanvasMaterialReference[];
+  connectedNodeIds: ReadonlySet<string>;
+  onPreview: (reference: CanvasMaterialReference) => void;
+  onConnectedChange: (sourceNodeId: string, connected: boolean) => void;
+}) {
+  const choices = materials.filter(reference => reference.nodeId !== node.id);
+  const connected = choices.filter(reference => connectedNodeIds.has(reference.nodeId));
+
+  return (
+    <div
+      role="group"
+      aria-label={`${node.title} 已对接素材`}
+      className="mb-1 flex min-h-12 min-w-0 items-center gap-2 overflow-x-auto px-1 py-1"
+    >
+      {connected.map(reference => (
+        <button
+          key={reference.nodeId}
+          type="button"
+          title={`查看素材：${reference.title}`}
+          aria-label={`查看已对接素材 ${reference.title}`}
+          className="relative grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          onClick={() => onPreview(reference)}
+        >
+          <CanvasMaterialPreview reference={reference} />
+          <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
+            {reference.title}
+          </span>
+        </button>
+      ))}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`为 ${node.title} 对接素材`}
+            title="选择画布素材"
+            className="grid size-12 shrink-0 place-items-center rounded-lg border border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <Plus className="size-5" aria-hidden="true" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="bottom" align="start" className="max-h-80 w-72 overflow-y-auto rounded-xl">
+          <p className="px-2 pb-2 pt-1 text-xs font-medium text-muted-foreground">选择画布素材</p>
+          {choices.length === 0 ? (
+            <p className="px-2 py-3 text-xs text-muted-foreground">画布上还没有可对接的素材。</p>
+          ) : choices.map(reference => {
+            const checked = connectedNodeIds.has(reference.nodeId);
+            return (
+              <DropdownMenuItem
+                key={reference.nodeId}
+                className="h-12 gap-2"
+                aria-label={`${checked ? '取消对接' : '对接'}素材 ${reference.title}`}
+                onSelect={event => {
+                  event.preventDefault();
+                  onConnectedChange(reference.nodeId, !checked);
+                }}
+              >
+                <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-secondary text-muted-foreground">
+                  <CanvasMaterialPreview reference={reference} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-medium text-foreground">{reference.title}</span>
+                  <span className="block text-xs text-muted-foreground">{mentionKindLabel(reference.kind)}</span>
+                </span>
+                {checked && <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+function CanvasMaterialPreview({ reference }: { reference: CanvasMaterialReference }) {
+  if (reference.kind === 'image' && reference.previewUrl) {
+    return (
+      <img
+        src={reference.previewUrl}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        draggable={false}
+        className="size-full object-cover"
+      />
+    );
+  }
+  const Icon = reference.kind === 'video'
+    ? FileVideo
+    : reference.kind === 'audio'
+      ? FileAudio
+      : Type;
+  return <Icon className="size-4" aria-hidden="true" />;
 }
 
 export function CanvasMobileGenerationPanel({

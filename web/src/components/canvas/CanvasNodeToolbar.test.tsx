@@ -74,6 +74,8 @@ const nodes: CanvasNode[] = [
 function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNodeContextValue {
   return {
     projectId: 'canvas-test',
+    materialReferences: [],
+    connectedMaterialNodeIdsByNodeId: new Map(),
     mentionReferencesByNodeId: new Map(),
     contentVersions: {},
     keys: [],
@@ -92,6 +94,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
       narrowViewport: false,
       dismiss: vi.fn(),
     },
+    setMaterialConnected: vi.fn(),
     selectNode: vi.fn(),
     previewContent: vi.fn(),
     selectCandidate: vi.fn(),

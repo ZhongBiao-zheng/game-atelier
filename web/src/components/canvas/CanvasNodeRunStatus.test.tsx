@@ -161,6 +161,8 @@ function canvasJob(status: JobStatus, overrides: Partial<Job> = {}, resultNodeId
 function nodeContext(job: Job): CanvasNodeContextValue {
   return {
     projectId: 'canvas-test',
+    materialReferences: [],
+    connectedMaterialNodeIdsByNodeId: new Map(),
     mentionReferencesByNodeId: new Map(),
     contentVersions: {},
     keys: [],
@@ -179,6 +181,7 @@ function nodeContext(job: Job): CanvasNodeContextValue {
       narrowViewport: false,
       dismiss: vi.fn(),
     },
+    setMaterialConnected: vi.fn(),
     selectNode: vi.fn(),
     previewContent: vi.fn(),
     selectCandidate: vi.fn(),

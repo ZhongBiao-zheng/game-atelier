@@ -6,6 +6,7 @@ import type {
   CanvasNode,
 } from '@/schema/canvas';
 import {
+  buildCanvasMaterialReferences,
   buildCanvasMentionReferences,
   canvasMentionToken,
   missingCanvasMentionIds,
@@ -57,6 +58,31 @@ const versions: Record<string, CanvasContentVersion> = {
 };
 
 describe('Canvas connected mentions', () => {
+  it('lists every canvas material with a valid current content version', () => {
+    const nodes = [
+      contentNode('image-a', 'image', 'version-image-a'),
+      contentNode('empty-video', 'video', null),
+      contentNode('text-a', 'text', 'version-text'),
+      config,
+    ];
+
+    expect(buildCanvasMaterialReferences('canvas-test', nodes, versions)).toEqual([
+      expect.objectContaining({
+        nodeId: 'image-a',
+        versionId: 'version-image-a',
+        kind: 'image',
+        title: 'image-image-a',
+      }),
+      expect.objectContaining({
+        nodeId: 'text-a',
+        versionId: 'version-text',
+        kind: 'text',
+        title: 'text-text-a',
+        text: '雨夜列车文案',
+      }),
+    ]);
+  });
+
   it('labels only incoming content with a valid current version, preserving connection order per kind', () => {
     const nodes = [
       contentNode('image-a', 'image', 'version-image-a'),

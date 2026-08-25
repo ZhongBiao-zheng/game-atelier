@@ -45,6 +45,8 @@ const node: CanvasNode = {
 function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNodeContextValue {
   return {
     projectId: 'canvas-test',
+    materialReferences: [],
+    connectedMaterialNodeIdsByNodeId: new Map(),
     mentionReferencesByNodeId: new Map(),
     contentVersions: {},
     keys: [],
@@ -63,6 +65,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
       narrowViewport: false,
       dismiss: vi.fn(),
     },
+    setMaterialConnected: vi.fn(),
     selectNode: vi.fn(),
     previewContent: vi.fn(),
     selectCandidate: vi.fn(),
@@ -558,6 +561,52 @@ it('renders connected references as chips and blocks a draft after that referenc
   expect(screen.getByRole('alert')).toHaveTextContent('1 个引用已断开');
   expect(screen.getByLabelText('引用已断开：image-source')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '开始生成' })).toBeDisabled();
+});
+
+it('connects canvas materials above the prompt without rewriting its @ content', async () => {
+  const setMaterialConnected = vi.fn();
+  const updateNode = vi.fn();
+  const draftWithAtContent = { ...draft, prompt: '保留 @ 原提示词' };
+  const material = {
+    nodeId: 'image-source',
+    versionId: 'version-source',
+    kind: 'image' as const,
+    title: '雨夜列车',
+    previewUrl: '/api/canvas/projects/canvas-test/versions/version-source/media',
+  };
+  const initial = nodeContext({
+    materialReferences: [material],
+    connectedMaterialNodeIdsByNodeId: new Map(),
+    setMaterialConnected,
+    updateNode,
+  });
+  const { rerender } = render(
+    <CanvasNodeContext.Provider value={initial}>
+      <CanvasMobileGenerationPanel node={node} draft={draftWithAtContent} context={initial} />
+    </CanvasNodeContext.Provider>,
+  );
+
+  expect(screen.queryByRole('button', { name: '查看已对接素材 雨夜列车' })).not.toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole('button', { name: '为 分镜出图 对接素材' }), { key: 'Enter' });
+  expect(await screen.findByRole('menu')).toHaveClass('max-h-80', 'overflow-y-auto');
+  fireEvent.click(await screen.findByRole('menuitem', { name: '对接素材 雨夜列车' }));
+
+  expect(setMaterialConnected).toHaveBeenCalledWith(material.nodeId, node.id, true);
+  expect(updateNode).not.toHaveBeenCalled();
+  fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+
+  const connected = nodeContext({
+    ...initial,
+    connectedMaterialNodeIdsByNodeId: new Map([[node.id, new Set([material.nodeId])]]),
+  });
+  rerender(
+    <CanvasNodeContext.Provider value={connected}>
+      <CanvasMobileGenerationPanel node={node} draft={draftWithAtContent} context={connected} />
+    </CanvasNodeContext.Provider>,
+  );
+  expect(screen.getByRole('button', { name: '查看已对接素材 雨夜列车' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '查看已对接素材 雨夜列车' })).toHaveTextContent('雨夜列车');
+  expect(screen.getByRole('combobox', { name: '提示词' })).toHaveTextContent('保留 @ 原提示词');
 });
 
 it('opens video controls from the node generation panel', () => {

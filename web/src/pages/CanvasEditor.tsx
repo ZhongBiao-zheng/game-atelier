@@ -160,7 +160,10 @@ import type {
 } from '@/schema/canvas';
 import type { Job, JobKind } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
-import { buildCanvasMentionReferences } from '@/lib/canvasMentions';
+import {
+  buildCanvasMaterialReferences,
+  buildCanvasMentionReferences,
+} from '@/lib/canvasMentions';
 import {
   canvasConnectionCreationCapabilities,
   canCreateCanvasInputConnection,
@@ -897,6 +900,42 @@ function CanvasEditorInner({
       };
     }, true);
   }, [commit]);
+
+  const setMaterialConnected = useCallback((
+    sourceNodeId: string,
+    targetNodeId: string,
+    connected: boolean,
+  ) => {
+    if (connected) {
+      onConnect({
+        source: sourceNodeId,
+        target: targetNodeId,
+        sourceHandle: null,
+        targetHandle: null,
+      });
+      return;
+    }
+    const removedIds = new Set(
+      latestDocument.current?.connections
+        .filter(connection => (
+          connection.role === 'input'
+          && connection.source_node_id === sourceNodeId
+          && connection.target_node_id === targetNodeId
+        ))
+        .map(connection => connection.id) ?? [],
+    );
+    if (removedIds.size === 0) return;
+    setError(null);
+    setSelectedConnectionIds(current => {
+      const next = new Set(current);
+      removedIds.forEach(id => next.delete(id));
+      return next;
+    });
+    commit(current => ({
+      ...current,
+      connections: current.connections.filter(connection => !removedIds.has(connection.id)),
+    }), true);
+  }, [commit, onConnect]);
 
   const onConnectEnd = useCallback<OnConnectEnd>((event, state) => {
     setConnectionInProgress(false);
@@ -2607,9 +2646,28 @@ function CanvasEditorInner({
       ),
     ]));
   }, [mentionGraphSignature, projectId]);
+  const materialReferences = useMemo(() => {
+    const current = mentionDocumentRef.current;
+    return current
+      ? buildCanvasMaterialReferences(projectId, current.nodes, current.content_versions)
+      : [];
+  }, [mentionGraphSignature, projectId]);
+  const connectedMaterialNodeIdsByNodeId = useMemo(() => {
+    const current = mentionDocumentRef.current;
+    const result = new Map<string, Set<string>>();
+    for (const connection of current?.connections ?? []) {
+      if (connection.role !== 'input') continue;
+      const sources = result.get(connection.target_node_id) ?? new Set<string>();
+      sources.add(connection.source_node_id);
+      result.set(connection.target_node_id, sources);
+    }
+    return result;
+  }, [mentionGraphSignature]);
 
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     projectId,
+    materialReferences,
+    connectedMaterialNodeIdsByNodeId,
     mentionReferencesByNodeId,
     contentVersions: document?.content_versions ?? {},
     keys,
@@ -2628,6 +2686,7 @@ function CanvasEditorInner({
       narrowViewport,
       dismiss: dismissGenerationPanel,
     },
+    setMaterialConnected,
     selectNode: selectOnlyNode,
     previewContent,
     selectCandidate,
@@ -2658,6 +2717,7 @@ function CanvasEditorInner({
     cancelRun,
     canvasUiPreferences,
     canvasUiPreferencesError,
+    connectedMaterialNodeIdsByNodeId,
     copyPrompt,
     createImageConfigFromText,
     deleteNode,
@@ -2673,6 +2733,7 @@ function CanvasEditorInner({
     libraryBusy,
     mediaReplaceBusyNodeIds,
     mediaReplaceError,
+    materialReferences,
     mentionReferencesByNodeId,
     narrowViewport,
     openAngle,
@@ -2690,6 +2751,7 @@ function CanvasEditorInner({
     renameNode,
     selectCandidate,
     selectOnlyNode,
+    setMaterialConnected,
     submitRun,
     submittingNodeIds,
     toggleFreeResize,

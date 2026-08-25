@@ -8,14 +8,17 @@ import type {
 
 export type CanvasMentionKind = 'text' | 'image' | 'video' | 'audio';
 
-export interface CanvasMentionReference {
+export interface CanvasMaterialReference {
   nodeId: string;
   versionId: string;
   kind: CanvasMentionKind;
-  label: string;
   title: string;
   text?: string;
   previewUrl?: string;
+}
+
+export interface CanvasMentionReference extends CanvasMaterialReference {
+  label: string;
 }
 
 const MENTION_PATTERN = /@\[node:([^\]]+)\]/g;
@@ -84,22 +87,26 @@ export function buildCanvasMentionReferences(
     ) return [];
     seen.add(connection.source_node_id);
     const node = nodesById.get(connection.source_node_id);
-    if (!node || !isMentionContentNode(node)) return [];
-    const versionId = node.data.current_version_id;
-    const version = versionId ? contentVersions[versionId] : undefined;
-    if (!version || version.kind !== node.type) return [];
-    const index = ++counts[version.kind];
+    const material = node
+      ? canvasMaterialReference(projectId, node, contentVersions)
+      : null;
+    if (!material) return [];
+    const index = ++counts[material.kind];
     return [{
-      nodeId: node.id,
-      versionId: version.version_id,
-      kind: version.kind,
-      label: `${mentionKindLabel(version.kind)}${index}`,
-      title: node.title,
-      text: version.kind === 'text' ? version.text : undefined,
-      previewUrl: version.kind === 'text'
-        ? undefined
-        : canvasMediaUrl(projectId, version.version_id),
+      ...material,
+      label: `${mentionKindLabel(material.kind)}${index}`,
     }];
+  });
+}
+
+export function buildCanvasMaterialReferences(
+  projectId: string,
+  nodes: readonly CanvasNode[],
+  contentVersions: Readonly<Record<string, CanvasContentVersion>>,
+): CanvasMaterialReference[] {
+  return nodes.flatMap(node => {
+    const reference = canvasMaterialReference(projectId, node, contentVersions);
+    return reference ? [reference] : [];
   });
 }
 
@@ -112,4 +119,25 @@ export function mentionKindLabel(kind: CanvasMentionKind): string {
 
 function isMentionContentNode(node: CanvasNode): node is CanvasContentNode {
   return node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio';
+}
+
+function canvasMaterialReference(
+  projectId: string,
+  node: CanvasNode,
+  contentVersions: Readonly<Record<string, CanvasContentVersion>>,
+): CanvasMaterialReference | null {
+  if (!isMentionContentNode(node)) return null;
+  const versionId = node.data.current_version_id;
+  const version = versionId ? contentVersions[versionId] : undefined;
+  if (!version || version.kind !== node.type) return null;
+  return {
+    nodeId: node.id,
+    versionId: version.version_id,
+    kind: version.kind,
+    title: node.title,
+    text: version.kind === 'text' ? version.text : undefined,
+    previewUrl: version.kind === 'text'
+      ? undefined
+      : canvasMediaUrl(projectId, version.version_id),
+  };
 }

@@ -90,7 +90,7 @@ Status: completed
 | C05 | 生成配置节点，可切换文本/图片/视频/音频 | `canvas-config-composer.tsx` | adapted：Issue 40 独立配置卡 + 四态 composer，提交到统一 Job Runner | full |
 | C06 | 分组节点，显示成员数量 | `CanvasNodeType.Group`、groupId | same | full |
 | C07 | 开放字符串插件节点 | `CanvasNodeTypeId`、node registry | adapted：使用受限插件契约 | full |
-| C08 | 节点标题双击改名 | `canvas-node.tsx` | same：七类节点共用卡片外原地输入，见 issue 27 | full |
+| C08 | 节点标题双击改名 | `canvas-node.tsx` | same：七类节点的素材名固定显示在卡片左上方并共用原地输入，见 issue 27 | full |
 | C09 | 四角 resize、图片比例锁/自由变形 | `canvas-node.tsx`、`freeResize` | adapted：React Flow NodeResizer | full |
 | C10 | 左右连接柄与有向连接 | `canvas-connections.tsx` | adapted：React Flow Handle/Edge；统一校验、空白创建、撤销持久化与有证据派生恢复，见 issue 28 | full |
 | C11 | 配置节点之间禁止连接 | 运行时文案 `configConnection` | same | full |
@@ -119,7 +119,7 @@ Status: completed
 | D12 | 文本推理强度 auto/low/medium/high/xhigh | `text-settings-panel.tsx`、`pending-test` | adapted：仅 `openai-responses` 展示并发送 reasoning，auto 省略协议参数；文本候选数 1–4 | full |
 | D13 | 视频尺寸、时长、质量、音频、水印 | `video-settings-panel.tsx` | adapted：按 provider capability 显示 | full |
 | D14 | 音色、格式、速度、instructions | `audio-settings-panel.tsx` | adapted：按 provider capability 显示，关闭前原子提交本地草稿，服务端再次归一化 | full |
-| D15 | `@` 引用已连接文本/图片/视频/音频 | prompt chip/resource mention components | adapted：稳定 node token + 直接连接候选 + missing 双端拒绝（issue 34） | full |
+| D15 | `@` 引用已连接文本/图片/视频/音频 | prompt chip/resource mention components | adapted：提示词上方独立素材条可查看、预览并通过 `+` 增删真实 Input Connection；不自动改写稳定 node token，missing 继续双端拒绝（issue 34） | full |
 | D16 | 提交前根据当前连接重新编号引用 | runtime composer 文案 | adapted：冻结输入后按模态与真实数组顺序重编号（issue 34） | full |
 | D17 | 图片数量 N 立即创建 N 个槽位并独立更新 | multi-image metadata、`pending-test` | adapted：一轮 Job 内逐槽执行并即时登记（issue 35） | full |
 | D18 | 多图收起堆叠、展开、设主图 | `canvas-node.tsx`、`pending-test` | same：结果节点拥有堆叠与展开候选（issue 35） | full |
