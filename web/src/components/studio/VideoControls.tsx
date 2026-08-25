@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { Clapperboard, Volume2, VolumeX } from 'lucide-react';
+import { CircleHelp, Clapperboard, Volume2, VolumeX } from 'lucide-react';
 import {
   VIDEO_MODE_LABELS,
   VIDEO_QUALITY_LABELS,
@@ -28,6 +28,7 @@ interface Props extends ToolbarPopoverMenuProps {
   onQualityChange?: (quality: VideoQuality) => void;
   onGenerateAudioChange: (generateAudio: boolean) => void;
   onWatermarkChange?: (watermark: boolean) => void;
+  referenceLimitLabel?: (mode: VideoMode) => string;
 }
 
 /** 生成方式 / 比例 / 清晰度（或档位）/ 生成时长 / 生成音频 多合一：
@@ -50,6 +51,7 @@ export function VideoControls({
   onQualityChange,
   onGenerateAudioChange,
   onWatermarkChange,
+  referenceLimitLabel,
   menuDirection = 'up',
   portalContainerRef,
 }: Props) {
@@ -57,7 +59,6 @@ export function VideoControls({
   const wrapRef = useRef<HTMLDivElement>(null);
   const effectiveQuality = quality ?? caps.qualities?.[0];
   const summary = [
-    VIDEO_MODE_LABELS[mode],
     caps.ratios.length > 0 ? ratioLabel(ratio) : null,
     caps.resolutions.length > 0 ? resolution : null,
     caps.qualities && effectiveQuality ? VIDEO_QUALITY_LABELS[effectiveQuality] : null,
@@ -76,7 +77,19 @@ export function VideoControls({
         }`}
       >
         <Clapperboard size={14} aria-hidden />
-        <span className="truncate">{summary}</span>
+        <span className="shrink-0">{VIDEO_MODE_LABELS[mode]}</span>
+        {referenceLimitLabel && (
+          <span className="group/help relative shrink-0" title={referenceLimitLabel(mode)}>
+            <CircleHelp className="size-3.5 text-muted-foreground" aria-hidden="true" />
+            <span
+              role="tooltip"
+              className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-2 w-max max-w-72 -translate-x-1/2 rounded-lg border border-border bg-popover px-2 py-1.5 text-xs font-normal leading-relaxed text-foreground opacity-0 transition-opacity group-hover/help:opacity-100 group-focus-within/help:opacity-100"
+            >
+              {referenceLimitLabel(mode)}
+            </span>
+          </span>
+        )}
+        {summary && <span className="truncate">{' · '}{summary}</span>}
         {caps.supportsAudio && (
           generateAudio
             ? <Volume2 size={13} aria-hidden className="shrink-0" />

@@ -30,16 +30,9 @@ import {
 import { formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
 import { orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { imageControlCaps } from '@/lib/imageControlCaps';
 import { VideoControls } from '@/components/studio/VideoControls';
 import {
-  VIDEO_MODE_LABELS,
   videoReferenceLimitLabel,
   videoReferenceLimits,
   type VideoReferenceLimits,
@@ -108,6 +101,16 @@ export interface CanvasNodeContextValue {
   libraryBusy: boolean;
   multiSelectionActive?: boolean;
   generationPanel: CanvasGenerationPanelContextValue;
+  materialPick?: {
+    targetNodeId: string;
+    slot?: CanvasVideoFrameSlot;
+    selectableNodeIds: ReadonlySet<string>;
+  } | null;
+  beginMaterialPick?: (request: {
+    targetNodeId: string;
+    slot?: CanvasVideoFrameSlot;
+    selectableNodeIds: ReadonlySet<string>;
+  }) => void;
   setMaterialConnected: (sourceNodeId: string, targetNodeId: string, connected: boolean) => void;
   setVideoFrameConnections?: (
     targetNodeId: string,
@@ -173,6 +176,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     && !context.generationPanel.narrowViewport
     && context.generationPanel.dismissedNodeId !== node.id,
   );
+  const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
   const generationPanelWidth = 608;
   const viewportZoom = context?.generationPanel.viewportZoom;
   const generationPanelZoom = viewportZoom && Number.isFinite(viewportZoom) && viewportZoom > 0
@@ -451,6 +455,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         className={cn(
           'relative h-full overflow-hidden rounded-lg border bg-card/95 text-foreground transition-colors shell-glow',
           selected ? 'border-primary' : 'border-border',
+          context.materialPick && materialPickEligible && 'cursor-copy border-primary',
+          context.materialPick && !materialPickEligible && 'cursor-default',
         )}
         onClick={event => {
           event.stopPropagation();
@@ -1451,11 +1457,19 @@ export function CanvasGenerationComposer({
           materials={context.materialReferences}
           frames={videoFrames}
           maxFrames={videoCaps.maxFrames}
+          pickingSlot={context.materialPick?.targetNodeId === node.id
+            ? context.materialPick.slot ?? null
+            : null}
           onPreview={reference => context.previewContent(
             reference.versionId,
             reference.title,
             reference.nodeId,
           )}
+          onBeginPick={(slot, selectableNodeIds) => context.beginMaterialPick?.({
+            targetNodeId: node.id,
+            slot,
+            selectableNodeIds,
+          })}
           onChange={frames => context.setVideoFrameConnections?.(
             node.id,
             frames,
@@ -1467,11 +1481,17 @@ export function CanvasGenerationComposer({
           materials={context.materialReferences}
           connectedNodeIds={context.connectedMaterialNodeIdsByNodeId.get(node.id) ?? EMPTY_CANVAS_NODE_IDS}
           limits={draft.mode === 'video' ? selectedVideoReferenceLimits : null}
+          picking={context.materialPick?.targetNodeId === node.id
+            && context.materialPick.slot === undefined}
           onPreview={reference => context.previewContent(
             reference.versionId,
             reference.title,
             reference.nodeId,
           )}
+          onBeginPick={selectableNodeIds => context.beginMaterialPick?.({
+            targetNodeId: node.id,
+            selectableNodeIds,
+          })}
           onConnectedChange={(sourceNodeId, connected) => context.setMaterialConnected(
             sourceNodeId,
             node.id,
@@ -1479,15 +1499,11 @@ export function CanvasGenerationComposer({
           )}
         />
       )}
-      {draft.mode === 'video' && selectedVideoReferenceLimits && (
-        <p className="px-1 pb-1 text-xs text-muted-foreground">
-          {videoReferenceLimitLabel(selectedVideoReferenceLimits)}
-        </p>
-      )}
       <CanvasPromptInput
         value={draft.prompt}
         references={mentionReferences}
         mentionsEnabled={mentionsEnabled}
+        disabledMentionHint={usesVideoFrameSlots ? '首尾帧模式不使用 @' : undefined}
         onFocus={context.recordHistory}
         onChange={prompt => updateDraft(current => ({ ...current, prompt, updated_at: new Date().toISOString() }))}
         onPreviewReference={reference => context.previewContent(
@@ -1505,29 +1521,6 @@ export function CanvasGenerationComposer({
               ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
-      {(hasReferenceError || !textMode) && (
-        <p
-          role={hasReferenceError ? 'alert' : undefined}
-          className={cn(
-            'min-h-5 px-3 pt-1 text-xs',
-            hasReferenceError ? 'text-destructive' : 'text-muted-foreground',
-          )}
-        >
-          {frameModeHasMentions
-            ? '首尾帧模式不支持 @，请删除已有引用。'
-            : missingVideoFrame
-              ? '首帧或尾帧素材已失效，请重新选择。'
-            : videoReferenceCapacityExceeded
-              ? '已选参考素材超过当前模型上限，请移除后再生成。'
-            : usesVideoFrameSlots
-              ? '首尾帧模式不使用 @，请在上方选择图片。'
-              : hasMissingMentions
-            ? `${missingMentionIds.length} 个引用已断开，请重新连接或删除引用。`
-            : mentionReferences.length
-              ? `输入 @ 引用已连接内容 · ${mentionReferences.length} 项可用`
-              : '连接文本、图片、视频或音频后，可输入 @ 引用。'}
-        </p>
-      )}
       {node.type !== 'image' && !textMode && (
         <CandidateHistory
           nodeId={node.id}
@@ -1543,18 +1536,6 @@ export function CanvasGenerationComposer({
           choices={modelChoices}
           alias={draft.alias ?? null}
           model={draft.model}
-          getDescription={draft.mode === 'video' ? choice => {
-            const choiceCaps = canvasVideoEditCaps(choice.model.id, choice.model.protocol);
-            const availableModes = editingExistingVideo
-              ? choiceCaps.modes.filter(mode => mode === 'omni')
-              : choiceCaps.modes;
-            return availableModes.map(mode => {
-              const limits = videoReferenceLimits(choiceCaps, mode);
-              return `${VIDEO_MODE_LABELS[mode]}：${limits.images} 图 / ${limits.videos} 视频 / ${limits.audios} 音频${
-                limits.mixedTotal ? `，总计 ${limits.mixedTotal}` : ''
-              }`;
-            }).join('；');
-          } : undefined}
           onSelect={({ key, model }) => {
             if (draft.mode === 'video') {
               const nextParams = normalizeCanvasVideoParams(
@@ -1642,6 +1623,9 @@ export function CanvasGenerationComposer({
             quality={draft.params.mode === 'pro' ? 'pro' : 'std'}
             generateAudio={draft.params.generate_audio !== false}
             watermark={draft.params.watermark === true}
+            referenceLimitLabel={mode => videoReferenceLimitLabel(
+              videoReferenceLimits(videoCaps, mode),
+            )}
             onModeChange={mode => {
               if (mode === 'omni') {
                 context.setVideoFrameConnections?.(node.id, {
@@ -1744,19 +1728,24 @@ function CanvasVideoFrameConnections({
   materials,
   frames,
   maxFrames,
+  pickingSlot,
   onPreview,
+  onBeginPick,
   onChange,
 }: {
   node: CanvasNode;
   materials: readonly CanvasMaterialReference[];
   frames: Readonly<Partial<Record<CanvasVideoFrameSlot, string>>>;
   maxFrames: 0 | 1 | 2;
+  pickingSlot: CanvasVideoFrameSlot | null;
   onPreview: (reference: CanvasMaterialReference) => void;
+  onBeginPick: (slot: CanvasVideoFrameSlot, selectableNodeIds: ReadonlySet<string>) => void;
   onChange: (frames: Readonly<Record<CanvasVideoFrameSlot, string | null>>) => void;
 }) {
   const images = materials.filter(reference => (
     reference.kind === 'image' && reference.nodeId !== node.id
   ));
+  if (maxFrames === 0) return null;
   const current = {
     first_frame: frames.first_frame ?? null,
     last_frame: frames.last_frame ?? null,
@@ -1770,12 +1759,15 @@ function CanvasVideoFrameConnections({
     >
       <CanvasVideoFrameSlot
         label="首帧"
-        slot="first_frame"
         selectedNodeId={current.first_frame}
         materials={images}
-        disabled={maxFrames === 0}
+        picking={pickingSlot === 'first_frame'}
         tilt="left"
         onPreview={onPreview}
+        onBeginPick={() => onBeginPick(
+          'first_frame',
+          new Set(images.map(reference => reference.nodeId)),
+        )}
         onSelect={sourceNodeId => onChange({ ...current, first_frame: sourceNodeId })}
       />
       {maxFrames >= 2 && (
@@ -1796,16 +1788,17 @@ function CanvasVideoFrameConnections({
       {maxFrames >= 2 && (
         <CanvasVideoFrameSlot
           label="尾帧"
-          slot="last_frame"
           selectedNodeId={current.last_frame}
           materials={images}
+          picking={pickingSlot === 'last_frame'}
           tilt="right"
           onPreview={onPreview}
+          onBeginPick={() => onBeginPick(
+            'last_frame',
+            new Set(images.map(reference => reference.nodeId)),
+          )}
           onSelect={sourceNodeId => onChange({ ...current, last_frame: sourceNodeId })}
         />
-      )}
-      {maxFrames === 0 && (
-        <span className="text-xs text-muted-foreground">当前模型不接收首尾帧</span>
       )}
     </div>
   );
@@ -1813,70 +1806,47 @@ function CanvasVideoFrameConnections({
 
 function CanvasVideoFrameSlot({
   label,
-  slot,
   selectedNodeId,
   materials,
-  disabled = false,
+  picking,
   tilt,
   onPreview,
+  onBeginPick,
   onSelect,
 }: {
   label: string;
-  slot: CanvasVideoFrameSlot;
   selectedNodeId: string | null;
   materials: readonly CanvasMaterialReference[];
-  disabled?: boolean;
+  picking: boolean;
   tilt: 'left' | 'right';
   onPreview: (reference: CanvasMaterialReference) => void;
+  onBeginPick: () => void;
   onSelect: (sourceNodeId: string | null) => void;
 }) {
   const selected = materials.find(reference => reference.nodeId === selectedNodeId);
   const rotate = tilt === 'left' ? '-rotate-3' : 'rotate-3';
   return (
     <div className={cn('relative size-14 shrink-0', rotate)}>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            disabled={disabled}
-            aria-label={selected ? `更换${label}` : `选择${label}`}
-            title={selected ? `更换${label}` : `从画布选择${label}`}
-            className="grid size-14 place-items-center overflow-hidden rounded-lg border border-dashed border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {selected ? (
-              <CanvasMaterialPreview reference={selected} />
-            ) : (
-              <span className="grid gap-0.5 text-center">
-                <Plus className="mx-auto size-4" aria-hidden="true" />
-                <span className="text-xs">{selectedNodeId ? '失效' : label}</span>
-              </span>
-            )}
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="bottom" align="start" className="max-h-80 w-72 overflow-y-auto rounded-xl">
-          <p className="px-2 pb-2 pt-1 text-xs font-medium text-muted-foreground">选择{label}</p>
-          {materials.length === 0 ? (
-            <p className="px-2 py-3 text-xs text-muted-foreground">画布上还没有可用图片。</p>
-          ) : materials.map(reference => (
-            <DropdownMenuItem
-              key={`${slot}:${reference.nodeId}`}
-              className="h-12 gap-2"
-              aria-label={`将 ${reference.title} 设为${label}`}
-              onSelect={() => onSelect(reference.nodeId)}
-            >
-              <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-secondary text-muted-foreground">
-                <CanvasMaterialPreview reference={reference} />
-              </span>
-              <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-                {reference.title}
-              </span>
-              {reference.nodeId === selectedNodeId && (
-                <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />
-              )}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <button
+        type="button"
+        disabled={materials.length === 0}
+        aria-label={selected ? `预览${label} ${selected.title}` : `在画布选择${label}`}
+        title={selected ? `预览${label}` : `在画布选择${label}`}
+        className={cn(
+          'grid size-14 place-items-center overflow-hidden rounded-lg border border-dashed bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40',
+          picking ? 'border-primary text-foreground' : 'border-border',
+        )}
+        onClick={() => selected ? onPreview(selected) : onBeginPick()}
+      >
+        {selected ? (
+          <CanvasMaterialPreview reference={selected} />
+        ) : (
+          <span className="grid gap-0.5 text-center">
+            <Plus className="mx-auto size-4" aria-hidden="true" />
+            <span className="text-xs">{selectedNodeId ? '失效' : label}</span>
+          </span>
+        )}
+      </button>
       {selectedNodeId && (
         <button
           type="button"
@@ -1889,15 +1859,9 @@ function CanvasVideoFrameSlot({
         </button>
       )}
       {selected && (
-        <button
-          type="button"
-          aria-label={`预览${label} ${selected.title}`}
-          title={`预览${label}`}
-          className="absolute inset-x-1 bottom-1 rounded bg-background/80 px-1 text-xs text-foreground"
-          onClick={() => onPreview(selected)}
-        >
+        <span className="pointer-events-none absolute inset-x-1 bottom-1 rounded bg-background/80 px-1 text-center text-xs text-foreground">
           {label}
-        </button>
+        </span>
       )}
     </div>
   );
@@ -1908,14 +1872,18 @@ function CanvasMaterialConnections({
   materials,
   connectedNodeIds,
   limits,
+  picking,
   onPreview,
+  onBeginPick,
   onConnectedChange,
 }: {
   node: CanvasNode;
   materials: readonly CanvasMaterialReference[];
   connectedNodeIds: ReadonlySet<string>;
   limits?: VideoReferenceLimits | null;
+  picking: boolean;
   onPreview: (reference: CanvasMaterialReference) => void;
+  onBeginPick: (selectableNodeIds: ReadonlySet<string>) => void;
   onConnectedChange: (sourceNodeId: string, connected: boolean) => void;
 }) {
   const choices = materials.filter(reference => reference.nodeId !== node.id);
@@ -1968,69 +1936,53 @@ function CanvasMaterialConnections({
         {connected.map(reference => {
           const detailVisible = hoveredMaterial?.reference.nodeId === reference.nodeId;
           return (
-            <button
-              key={reference.nodeId}
-              type="button"
-              aria-label={`查看已对接素材 ${reference.title}`}
-              aria-describedby={detailVisible ? `canvas-material-detail-${reference.nodeId}` : undefined}
-              className="relative grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              onMouseEnter={event => showMaterialDetail(reference, event.currentTarget)}
-              onMouseLeave={() => setHoveredMaterial(null)}
-              onFocus={event => showMaterialDetail(reference, event.currentTarget)}
-              onBlur={() => setHoveredMaterial(null)}
-              onClick={() => onPreview(reference)}
-            >
-              <CanvasMaterialPreview reference={reference} />
-              <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
-                {reference.title}
-              </span>
-            </button>
+            <span key={reference.nodeId} className="relative size-12 shrink-0">
+              <button
+                type="button"
+                aria-label={`查看已对接素材 ${reference.title}`}
+                aria-describedby={detailVisible ? `canvas-material-detail-${reference.nodeId}` : undefined}
+                className="relative grid size-12 place-items-center overflow-hidden rounded-lg border border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                onMouseEnter={event => showMaterialDetail(reference, event.currentTarget)}
+                onMouseLeave={() => setHoveredMaterial(null)}
+                onFocus={event => showMaterialDetail(reference, event.currentTarget)}
+                onBlur={() => setHoveredMaterial(null)}
+                onClick={() => onPreview(reference)}
+              >
+                <CanvasMaterialPreview reference={reference} />
+                <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
+                  {reference.title}
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-label={`取消对接素材 ${reference.title}`}
+                className="absolute -right-1 -top-1 z-10 grid size-5 place-items-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                onClick={() => onConnectedChange(reference.nodeId, false)}
+              >
+                <X className="size-3" aria-hidden="true" />
+              </button>
+            </span>
           );
         })}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={`为 ${node.title} 对接素材`}
-              title="选择画布素材"
-              className="grid size-12 shrink-0 place-items-center rounded-lg border border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <Plus className="size-5" aria-hidden="true" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent side="bottom" align="start" className="max-h-80 w-72 overflow-y-auto rounded-xl">
-            <p className="px-2 pb-2 pt-1 text-xs font-medium text-muted-foreground">选择画布素材</p>
-            {choices.length === 0 ? (
-              <p className="px-2 py-3 text-xs text-muted-foreground">画布上还没有可对接的素材。</p>
-            ) : choices.map(reference => {
-              const checked = connectedNodeIds.has(reference.nodeId);
-              const disabledReason = unavailableReason(reference);
-              return (
-                <DropdownMenuItem
-                  key={reference.nodeId}
-                  className="h-12 gap-2"
-                  disabled={Boolean(disabledReason)}
-                  aria-label={`${checked ? '取消对接' : '对接'}素材 ${reference.title}`}
-                  onSelect={event => {
-                    event.preventDefault();
-                    onConnectedChange(reference.nodeId, !checked);
-                  }}
-                >
-                  <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-secondary text-muted-foreground">
-                    <CanvasMaterialPreview reference={reference} />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium text-foreground">{reference.title}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {disabledReason ?? mentionKindLabel(reference.kind)}
-                    </span>
-                  </span>
-                  {checked && <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />}
-                </DropdownMenuItem>
-              );
-            })}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <button
+          type="button"
+          aria-label={`为 ${node.title} 在画布选择素材`}
+          title="在画布选择素材"
+          disabled={!choices.some(reference => (
+            !connectedNodeIds.has(reference.nodeId) && !unavailableReason(reference)
+          ))}
+          className={cn(
+            'grid size-12 shrink-0 place-items-center rounded-lg border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40',
+            picking ? 'border-primary text-foreground' : 'border-border',
+          )}
+          onClick={() => onBeginPick(new Set(choices.flatMap(reference => (
+            !connectedNodeIds.has(reference.nodeId) && !unavailableReason(reference)
+              ? [reference.nodeId]
+              : []
+          ))))}
+        >
+          <Plus className="size-5" aria-hidden="true" />
+        </button>
       </div>
       {hoveredMaterial && <CanvasMaterialHoverDetail {...hoveredMaterial} />}
     </>

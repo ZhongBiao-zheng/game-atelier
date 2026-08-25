@@ -51,7 +51,6 @@ export function CanvasModelPicker({
   alias,
   model,
   onSelect,
-  getDescription,
   menuDirection = 'up',
   portalContainerRef,
 }: {
@@ -59,7 +58,6 @@ export function CanvasModelPicker({
   alias: string | null;
   model: string;
   onSelect: (choice: CanvasModelChoice) => void;
-  getDescription?: (choice: CanvasModelChoice) => string | null;
 } & ToolbarPopoverMenuProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -107,7 +105,6 @@ export function CanvasModelPicker({
                 <div role="listbox" aria-label={`${group.key.alias} 可用模型`} className="rounded-lg bg-popover p-1">
                   {group.models.map(choice => {
                     const active = choice.key.alias === alias && choice.model.id === model;
-                    const description = getDescription?.(choice);
                     return (
                       <button
                         key={`${choice.key.alias}:${choice.model.id}`}
@@ -120,16 +117,9 @@ export function CanvasModelPicker({
                           setOpen(false);
                           anchorRef.current?.querySelector<HTMLElement>('button')?.focus();
                         }}
-                        className="flex min-h-12 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60"
+                        className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60"
                       >
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate">{choice.model.name || choice.model.id}</span>
-                          {description && (
-                            <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">
-                              {description}
-                            </span>
-                          )}
-                        </span>
+                        <span className="min-w-0 flex-1 truncate">{choice.model.name || choice.model.id}</span>
                         {active && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
                       </button>
                     );

@@ -186,6 +186,12 @@ interface CreateMenuState {
   sourceHandle?: 'source' | 'target';
 }
 
+interface MaterialPickState {
+  targetNodeId: string;
+  slot?: CanvasVideoFrameSlot;
+  selectableNodeIds: ReadonlySet<string>;
+}
+
 interface PreviewState {
   nodeId: string;
   title: string;
@@ -322,6 +328,7 @@ function CanvasEditorInner({
   const [dismissedGenerationPanelNodeId, setDismissedGenerationPanelNodeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [connectionInProgress, setConnectionInProgress] = useState(false);
+  const [materialPick, setMaterialPick] = useState<MaterialPickState | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -418,6 +425,7 @@ function CanvasEditorInner({
     setSelectedConnectionIds(new Set());
     setHoveredNodeId(null);
     setConnectionInProgress(false);
+    setMaterialPick(null);
     setSubmittingNodeIds(new Set());
     setAddOpen(false);
     setCreateMenu(null);
@@ -712,6 +720,11 @@ function CanvasEditorInner({
     function handleEscape(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
       if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
+      if (materialPick) {
+        event.preventDefault();
+        setMaterialPick(null);
+        return;
+      }
       if (addOpen) {
         event.preventDefault();
         setAddOpen(false);
@@ -738,7 +751,7 @@ function CanvasEditorInner({
     }
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [addOpen, createMenu, libraryMode, selectedConnectionIds.size, selectedNodeIds.size]);
+  }, [addOpen, createMenu, libraryMode, materialPick, selectedConnectionIds.size, selectedNodeIds.size]);
 
   useEffect(() => {
     if (!addOpen) return;
@@ -1063,6 +1076,16 @@ function CanvasEditorInner({
       ],
     }), true);
   }, [commit]);
+
+  const beginMaterialPick = useCallback((request: MaterialPickState) => {
+    if (request.selectableNodeIds.size === 0) return;
+    setMaterialPick({
+      ...request,
+      selectableNodeIds: new Set(request.selectableNodeIds),
+    });
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([request.targetNodeId]));
+  }, []);
 
   const onConnectEnd = useCallback<OnConnectEnd>((event, state) => {
     setConnectionInProgress(false);
@@ -2058,10 +2081,36 @@ function CanvasEditorInner({
   }, [redo, undo]);
 
   const selectOnlyNode = useCallback((id: string) => {
+    if (materialPick) {
+      if (!materialPick.selectableNodeIds.has(id)) return;
+      if (materialPick.slot) {
+        const currentFrames = latestDocument.current?.connections.reduce<
+          Record<CanvasVideoFrameSlot, string | null>
+        >((frames, connection) => {
+          if (
+            connection.role === 'input'
+            && connection.target_node_id === materialPick.targetNodeId
+            && connection.slot
+          ) frames[connection.slot] = connection.source_node_id;
+          return frames;
+        }, { first_frame: null, last_frame: null }) ?? {
+          first_frame: null,
+          last_frame: null,
+        };
+        setVideoFrameConnections(materialPick.targetNodeId, {
+          ...currentFrames,
+          [materialPick.slot]: id,
+        });
+      } else {
+        setMaterialConnected(id, materialPick.targetNodeId, true);
+      }
+      setMaterialPick(null);
+      return;
+    }
     setSelectedConnectionIds(new Set());
     setSelectedNodeIds(new Set([id]));
     setDismissedGenerationPanelNodeId(current => generationPanelDismissalAfterNodeSelection(current, id));
-  }, []);
+  }, [materialPick, setMaterialConnected, setVideoFrameConnections]);
 
   const dismissGenerationPanel = useCallback((id: string) => {
     setDismissedGenerationPanelNodeId(id);
@@ -2859,6 +2908,8 @@ function CanvasEditorInner({
       narrowViewport,
       dismiss: dismissGenerationPanel,
     },
+    materialPick,
+    beginMaterialPick,
     setMaterialConnected,
     setVideoFrameConnections,
     selectNode: selectOnlyNode,
@@ -2888,6 +2939,7 @@ function CanvasEditorInner({
     deleteNode,
   }), [
     assets?.revision,
+    beginMaterialPick,
     cancelRun,
     canvasUiPreferences,
     canvasUiPreferencesError,
@@ -2908,6 +2960,7 @@ function CanvasEditorInner({
     mediaReplaceBusyNodeIds,
     mediaReplaceError,
     materialReferences,
+    materialPick,
     mentionReferencesByNodeId,
     narrowViewport,
     openAngle,
@@ -3004,6 +3057,7 @@ function CanvasEditorInner({
           }}
           onMove={(_, viewport: Viewport) => setViewportZoom(viewport.zoom)}
           onPaneClick={() => {
+            setMaterialPick(null);
             setCreateMenu(null);
             setSelectedConnectionIds(new Set());
             setSelectedNodeIds(new Set());

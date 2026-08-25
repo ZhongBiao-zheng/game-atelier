@@ -33,6 +33,7 @@ interface CanvasPromptInputProps {
   value: string;
   references: readonly CanvasMentionReference[];
   mentionsEnabled?: boolean;
+  disabledMentionHint?: string;
   onChange: (value: string) => void;
   onFocus?: () => void;
   onPreviewReference?: (reference: CanvasMentionReference) => void;
@@ -44,6 +45,7 @@ export function CanvasPromptInput({
   value,
   references,
   mentionsEnabled = true,
+  disabledMentionHint,
   onChange,
   onFocus,
   onPreviewReference,
@@ -59,6 +61,9 @@ export function CanvasPromptInput({
   const [mention, setMention] = useState<MentionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [hoveredReference, setHoveredReference] = useState<CanvasMaterialHoverState | null>(null);
+  const showDisabledMentionHint = Boolean(
+    !mentionsEnabled && disabledMentionHint && value.includes('@'),
+  );
   const availableReferences = useMemo(
     () => mentionsEnabled ? references : [],
     [mentionsEnabled, references],
@@ -189,6 +194,7 @@ export function CanvasPromptInput({
           : undefined}
         className={cn(
           'min-h-28 w-full overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-transparent px-3 py-3 text-sm leading-relaxed text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring',
+          showDisabledMentionHint && 'pb-11',
           className,
         )}
         onFocus={onFocus}
@@ -299,6 +305,11 @@ export function CanvasPromptInput({
           window.setTimeout(closeMention, 120);
         }}
       />
+      {showDisabledMentionHint && (
+        <span className="pointer-events-none absolute bottom-2 left-3 rounded-md bg-secondary px-2 py-1 text-xs text-muted-foreground">
+          {disabledMentionHint}
+        </span>
+      )}
       {mention && candidates.length > 0 && (
         <CanvasMentionMenu
           anchor={mention.rect}
