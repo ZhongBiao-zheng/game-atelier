@@ -114,6 +114,7 @@ import { DEFAULT_CANVAS_UI_PREFERENCES } from '@/components/canvas/canvasImageTo
 import { formatCanvasBytes } from '@/components/canvas/canvasMediaFormatting';
 import {
   generationPanelDismissalAfterNodeSelection,
+  isUploadedImageMaterialNode,
   restoreCanvasNodeFocus,
 } from '@/components/canvas/canvasNodePanelInteraction';
 import {
@@ -1003,7 +1004,14 @@ function CanvasEditorInner({
   }, [commit, selectedConnectionIds, selectedNodeIds]);
 
   const selectedNode = document?.nodes.find(node => node.id === selectedId) ?? null;
-  const selectedDraft = selectedNode ? generationDraftForNode(selectedNode) : null;
+  const selectedIsUploadedImageMaterial = Boolean(
+    selectedNode
+    && document
+    && isUploadedImageMaterialNode(selectedNode, document.content_versions),
+  );
+  const selectedDraft = selectedNode && !selectedIsUploadedImageMaterial
+    ? generationDraftForNode(selectedNode)
+    : null;
   const generationPanelOpen = Boolean(
     selectedNode
     && selectedDraft

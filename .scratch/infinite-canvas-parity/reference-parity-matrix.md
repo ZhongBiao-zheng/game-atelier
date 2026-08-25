@@ -84,7 +84,7 @@ Status: completed
 | ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
 | C01 | 文本节点 | `CanvasNodeType.Text`；`03-built-in-nodes.png` | same：节点内双击/工具条编辑，字号映射 Atelier `xs/sm/base` token，见 issue 37 | full |
-| C02 | 空/有内容图片节点 | `CanvasNodeType.Image`、`canvas-node.tsx` | adapted：不可变 Content Version 存储；独立空态上传与 contain/cover/free-resize 表面，见 issue 37 | full |
+| C02 | 空/有内容图片节点 | `CanvasNodeType.Image`、`canvas-node.tsx` | adapted：不可变 Content Version 存储；独立空态上传与 contain/cover/free-resize 表面；上传图片为纯素材，选中不展示生成设置，见 issue 37 | full |
 | C03 | 空/有内容视频节点 | `CanvasNodeType.Video` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | full |
 | C04 | 空/有内容音频节点 | `CanvasNodeType.Audio` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | full |
 | C05 | 生成配置节点，可切换文本/图片/视频/音频 | `canvas-config-composer.tsx` | adapted：Issue 40 独立配置卡 + 四态 composer，提交到统一 Job Runner | full |
@@ -136,7 +136,7 @@ Status: completed
 |---|---|---|---|---|
 | E01 | 媒体加入资产库 | hover toolbar、`05-populated-image-tools.png` | adapted：写 Canvas 资产索引 | full |
 | E02 | 图片/视频/音频下载 | hover toolbar | same | full |
-| E03 | 图片/视频/音频替换 | hover toolbar | adapted：上传新版本并更新节点 | full |
+| E03 | 图片/视频/音频替换 | hover toolbar | adapted：上传新版本并更新节点；上传图片选中后在节点右上角提供直接替换入口 | full |
 | E04 | 复制生成图片的提示词 | image quick tools | same | full |
 | E05 | 反推提示词，创建文本+配置节点 | `reversePrompt`、preset | adapted：模型 Job + 新节点 | full |
 | E06 | 蒙版局部编辑 | `canvas-node-mask-edit-dialog.tsx` | adapted：本地 mask + 图片编辑 Job | full |

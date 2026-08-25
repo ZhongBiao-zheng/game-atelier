@@ -24,6 +24,7 @@ import {
 } from '@/components/canvas/CanvasNodeRunStatus';
 import { formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
 import { orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
+import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -139,10 +140,14 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const [toolbarOverlayOpen, setToolbarOverlayOpen] = useState(false);
   const [candidateBatchExpanded, setCandidateBatchExpanded] = useState(false);
   const draft = generationDraft(node);
+  const uploadedImageMaterial = Boolean(
+    context && isUploadedImageMaterialNode(node, context.contentVersions),
+  );
   const generationPanelVisible = Boolean(
     context
     && selected
     && draft
+    && !uploadedImageMaterial
     && !context.generationPanel.narrowViewport
     && context.generationPanel.dismissedNodeId !== node.id,
   );
@@ -482,6 +487,24 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               fit={node.type === 'image' || node.type === 'video' ? node.data.display.fit : 'contain'}
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
             />
+          )}
+          {selected && uploadedImageMaterial && node.type === 'image' && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              aria-label={`替换图片 ${node.title}`}
+              disabled={replacingMedia}
+              className="nodrag absolute right-3 top-3 z-10"
+              onPointerDown={event => event.stopPropagation()}
+              onClick={event => {
+                event.stopPropagation();
+                context.replaceMedia(node);
+              }}
+            >
+              {replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}
+              {replacingMedia ? '替换中' : '替换'}
+            </Button>
           )}
           {node.type === 'image' && content?.kind === 'image' && context.showImageInfo && (
             <span className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-[calc(100%-1.5rem)] truncate rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium tabular-nums text-foreground backdrop-blur-glass">
@@ -1050,6 +1073,7 @@ function ImageNodeToolbar({
   }, [onOverlayOpenChange]);
   useEffect(() => () => onOverlayOpenChangeRef.current(false), []);
   const resizeUnlocked = node.data.display.free_resize;
+  const uploadedImageMaterial = isUploadedImageMaterialNode(node, context.contentVersions);
   const definitions = orderedCanvasImageTools(context.canvasUiPreferences.image_toolbar.tool_ids);
   const actions = definitions.flatMap(definition => {
     const Icon = definition.icon;
@@ -1094,7 +1118,7 @@ function ImageNodeToolbar({
       disabled: submitting || replacing,
       run: () => void context.reversePrompt(node),
     };
-    if (definition.id === 'replace') action = {
+    if (definition.id === 'replace' && !uploadedImageMaterial) action = {
       ...common,
       label: `替换 ${node.title}`,
       icon: replacing ? <LoaderCircle className="animate-spin" /> : <Icon />,

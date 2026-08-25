@@ -11,6 +11,7 @@ import {
 import { DEFAULT_CANVAS_UI_PREFERENCES } from './canvasImageToolbar';
 import {
   generationPanelDismissalAfterNodeSelection,
+  isUploadedImageMaterialNode,
   restoreCanvasNodeFocus,
 } from './canvasNodePanelInteraction';
 import type { CanvasNode } from '@/schema/canvas';
@@ -388,6 +389,44 @@ it('does not mount a dismissed or narrow-screen desktop generation panel', () =>
     </CanvasNodeContext.Provider>,
   );
   expect(screen.queryByLabelText('图片生成设置')).not.toBeInTheDocument();
+});
+
+it('keeps generation settings for generated images while classifying upload versions as pure materials', () => {
+  const generatedContext = nodeContext({
+    contentVersions: {
+      'version-main': {
+        version_id: 'version-main',
+        kind: 'image',
+        created_at: '2026-08-25T00:00:00Z',
+        sha256: 'd'.repeat(64),
+        origin: { kind: 'job_output', job_id: 'job-batch', candidate_id: 'candidate-main' },
+        path: 'jobs/job-batch/main.png',
+        mime_type: 'image/png',
+        bytes: 42,
+        width: 1024,
+        height: 1024,
+        duration_ms: null,
+      },
+    },
+  });
+
+  render(
+    <CanvasNodeContext.Provider value={generatedContext}>
+      <NodeCard data={{ domain: imageResultNode }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+
+  expect(screen.getByRole('region', { name: '图片生成设置' })).toBeInTheDocument();
+  expect(isUploadedImageMaterialNode(imageResultNode, generatedContext.contentVersions)).toBe(false);
+  expect(isUploadedImageMaterialNode(
+    imageResultNode,
+    {
+      'version-main': {
+        ...generatedContext.contentVersions['version-main'],
+        origin: { kind: 'upload', upload_id: 'upload-image' },
+      },
+    },
+  )).toBe(true);
 });
 
 it('renders the narrow-screen composer in an independent bottom panel', () => {

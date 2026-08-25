@@ -417,3 +417,47 @@ it('shows the image toolbar after selection and keeps it mounted while its porta
   expect(document.querySelector('[data-canvas-node-toolbar="image"]')).toBeInTheDocument();
   expect(screen.getByRole('menu')).toBeInTheDocument();
 });
+
+it('treats an uploaded image as a pure material with toolbar and one direct replace action only', async () => {
+  const uploadedImage = {
+    ...nodes[1],
+    data: {
+      ...nodes[1].data,
+      current_version_id: 'version-uploaded-image',
+      generation_draft: draft,
+    },
+  } as CanvasNode;
+  const context = nodeContext({
+    contentVersions: {
+      'version-uploaded-image': {
+        version_id: 'version-uploaded-image',
+        kind: 'image',
+        created_at: '2026-08-25T00:00:00Z',
+        sha256: 'c'.repeat(64),
+        origin: { kind: 'upload', upload_id: 'upload-image' },
+        path: 'uploads/upload-image.png',
+        mime_type: 'image/png',
+        bytes: 42,
+        width: 1024,
+        height: 1024,
+        duration_ms: null,
+      },
+    },
+  });
+
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: uploadedImage }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+
+  expect(screen.getByRole('toolbar', { name: '图片 节点工具' })).toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: '图片生成设置' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '替换图片 图片' }));
+  expect(context.replaceMedia).toHaveBeenCalledWith(uploadedImage);
+
+  const toolbar = screen.getByRole('toolbar', { name: '图片 节点工具' });
+  fireEvent.keyDown(within(toolbar).getByRole('button', { name: '更多 图片 图片工具' }), { key: 'Enter' });
+  expect(await screen.findByRole('menu')).toBeInTheDocument();
+  expect(screen.queryByRole('menuitem', { name: '替换 图片' })).not.toBeInTheDocument();
+});
