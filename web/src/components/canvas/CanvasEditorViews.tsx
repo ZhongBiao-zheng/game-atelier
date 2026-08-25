@@ -20,6 +20,7 @@ import {
   CanvasNodeRunBadge,
   CanvasNodeRunLiveRegion,
   CanvasNodeRunOverlay,
+  canvasNodeRunDisplayError,
   canvasNodeRunState,
   isReversePromptJob,
 } from '@/components/canvas/CanvasNodeRunStatus';
@@ -93,6 +94,7 @@ export interface CanvasNodeContextValue {
   canvasUiPreferencesError: string | null;
   showImageInfo: boolean;
   libraryBusy: boolean;
+  multiSelectionActive?: boolean;
   generationPanel: CanvasGenerationPanelContextValue;
   setMaterialConnected: (sourceNodeId: string, targetNodeId: string, connected: boolean) => void;
   selectNode: (id: string) => void;
@@ -147,6 +149,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const generationPanelVisible = Boolean(
     context
     && selected
+    && !context.multiSelectionActive
     && draft
     && !uploadedImageMaterial
     && !context.generationPanel.narrowViewport
@@ -183,6 +186,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     const activeControl = controls.find(control => control === document.activeElement) ?? controls[0];
     updateToolbarTabStops(controls, activeControl);
   });
+  useEffect(() => {
+    if (!context?.multiSelectionActive) return;
+    setToolbarOverlayOpen(false);
+    setCandidateBatchExpanded(false);
+  }, [context?.multiSelectionActive]);
   if (!context) return null;
   const renameNode = context.renameNode;
   const content = contentForNode(node, context.contentVersions);
@@ -255,7 +263,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
       data-selected={selected ? 'true' : 'false'}
     >
       <NodeResizer
-        isVisible={selected && !replacingMedia}
+        isVisible={selected && !context.multiSelectionActive && !replacingMedia}
         keepAspectRatio={node.type === 'image' && !node.data.display.free_resize}
         minWidth={node.type === 'text' ? 220 : 240}
         minHeight={node.type === 'text' ? 120 : 150}
@@ -322,7 +330,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         <CanvasNodeRunBadge state={nodeRunState} />
       </header>
       <NodeToolbar
-        isVisible={selected || toolbarOverlayOpen}
+        isVisible={!context.multiSelectionActive && (selected || toolbarOverlayOpen)}
         position={Position.Top}
         align="center"
         offset={32}
@@ -441,8 +449,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         }}
       >
         {context.mediaReplaceError?.nodeId === node.id && (
-          <p role="alert" className="absolute inset-x-2 top-2 z-20 rounded-md border border-destructive/40 bg-card/95 px-2 py-1.5 text-xs text-destructive">
-            {context.mediaReplaceError.message}
+          <p
+            role="alert"
+            className="absolute inset-x-2 top-2 z-20 line-clamp-3 break-words rounded-md border border-destructive/40 bg-card/95 px-2 py-1.5 text-xs leading-relaxed text-destructive"
+          >
+            {canvasNodeRunDisplayError(context.mediaReplaceError.message, '替换失败，请稍后重试')}
           </p>
         )}
         <div className={cn('h-full bg-secondary/20', node.type === 'text' ? 'min-h-32' : 'min-h-44')}>
@@ -488,7 +499,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
             />
           )}
-          {selected && uploadedImageMaterial && node.type === 'image' && (
+          {selected && !context.multiSelectionActive && uploadedImageMaterial && node.type === 'image' && (
             <Button
               type="button"
               variant="secondary"
@@ -694,7 +705,10 @@ function ImageCandidateCard({
           <div className="grid size-full min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
             {candidate.status === 'pending'
               ? <LoaderCircle className="animate-spin" aria-label={`候选 ${candidate.index + 1} 生成中`} />
-              : candidate.error || (candidate.status === 'canceled' ? '已停止' : '结果待同步')}
+              : canvasNodeRunDisplayError(
+                candidate.error,
+                candidate.status === 'canceled' ? '已停止' : '结果待同步',
+              )}
           </div>
         )}
       <span className="absolute left-2 top-2 rounded-md border border-border bg-glass px-2 py-1 text-xs text-muted-foreground backdrop-blur-glass">
@@ -1335,7 +1349,8 @@ export function CanvasGenerationComposer({
       aria-label={`${modeLabel}生成设置`}
       data-floating-node-panel="true"
       className={cn(
-        'nodrag nowheel',
+        'nodrag',
+        embedded && 'nowheel',
         embedded ? 'canvas-mobile-generation' : 'overflow-hidden rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow',
       )}
       onClick={event => event.stopPropagation()}
@@ -1891,7 +1906,9 @@ function CandidateGrid({
                 <div className="grid min-h-20 place-items-center px-2 text-center text-xs text-muted-foreground">
                   {candidate.status === 'pending'
                     ? <LoaderCircle className="animate-spin" aria-label="候选生成中" />
-                    : candidate.status === 'canceled' ? candidate.error || '已停止' : candidate.error || '结果待同步'}
+                    : candidate.status === 'canceled'
+                      ? canvasNodeRunDisplayError(candidate.error, '已停止')
+                      : canvasNodeRunDisplayError(candidate.error, '结果待同步')}
                 </div>
                 )}
             <span className="absolute left-1.5 top-1.5 rounded bg-background/80 px-1.5 py-0.5 text-xs text-muted-foreground">
@@ -2051,8 +2068,10 @@ function runStatus(job: Job | undefined): string {
   }
   if (job.status === 'done') return '生成完成';
   if (job.status === 'partial') return '部分结果完成';
-  if (job.status === 'canceled') return job.error ? `已停止 · ${job.error}` : '已停止';
-  return job.error || '生成失败';
+  if (job.status === 'canceled') {
+    return job.error ? `已停止 · ${canvasNodeRunDisplayError(job.error, '已停止')}` : '已停止';
+  }
+  return canvasNodeRunDisplayError(job.error);
 }
 
 function nodeIcon(node: CanvasNode) {

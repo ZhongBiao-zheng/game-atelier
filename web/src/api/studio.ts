@@ -129,13 +129,14 @@ export async function resolveImageReferencePaths({
 }
 
 export async function listStudioJobs(): Promise<Job[]> {
-  // 记录统一：Studio 历史现展示全部出图（studio + skill 角色出图），按 status 过滤在前端 filterRounds 里做。
-  return requestJson<Job[]>('/api/jobs', '读取出图记录');
+  // Canvas 是独立人工创作空间；它的运行历史只在画布节点内展示，不进入创作台时间线。
+  const jobs = await requestJson<Job[]>('/api/jobs', '读取出图记录');
+  return jobs.filter(job => job.namespace !== 'canvas');
 }
 
 export async function getStudioJob(jobId: string): Promise<Job | null> {
   const resp = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
   if (!resp.ok) return null;
-  // 不再按 namespace 过滤：skill 角色出图的 SSE 更新也要进 Studio 历史（pending_confirm 在 round 派生时排除）。
-  return (await resp.json()) as Job;
+  const job = (await resp.json()) as Job;
+  return job.namespace === 'canvas' ? null : job;
 }

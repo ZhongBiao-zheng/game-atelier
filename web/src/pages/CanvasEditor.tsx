@@ -41,6 +41,7 @@ import {
   Scan,
   Settings2,
   Square,
+  Trash2,
   Type,
   Undo2,
   Upload,
@@ -92,7 +93,7 @@ import {
   type CanvasNodeContextValue,
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
-import { isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
+import { canvasNodeRunDisplayError, isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
 import { CanvasThemeSelector } from '@/components/canvas/CanvasThemeSelector';
 import {
   CanvasGenerationMetadata,
@@ -987,25 +988,30 @@ function CanvasEditorInner({
     if (removedIds.size) commit(current => ({ ...current, connections: current.connections.filter(edge => !removedIds.has(edge.id)) }), true);
   }, [commit]);
 
+  const deleteSelection = useCallback(() => {
+    if (selectedNodeIds.size === 0 && selectedConnectionIds.size === 0) return;
+    const nodeIds = selectedNodeIds;
+    commit(current => ({
+      ...current,
+      nodes: current.nodes.filter(node => !nodeIds.has(node.id)),
+      connections: current.connections.filter(edge => !selectedConnectionIds.has(edge.id) && !nodeIds.has(edge.source_node_id) && !nodeIds.has(edge.target_node_id)),
+    }), true);
+    setSelectedNodeIds(new Set());
+    setSelectedConnectionIds(new Set());
+    requestAnimationFrame(() => editorRegionRef.current?.focus());
+  }, [commit, selectedConnectionIds, selectedNodeIds]);
+
   useEffect(() => {
     function handleDelete(event: KeyboardEvent) {
       if (event.key !== 'Delete' && event.key !== 'Backspace') return;
       if (isCanvasShortcutBlockedTarget(event.target)) return;
       if (selectedNodeIds.size === 0 && selectedConnectionIds.size === 0) return;
       event.preventDefault();
-      const nodeIds = selectedNodeIds;
-      commit(current => ({
-        ...current,
-        nodes: current.nodes.filter(node => !nodeIds.has(node.id)),
-        connections: current.connections.filter(edge => !selectedConnectionIds.has(edge.id) && !nodeIds.has(edge.source_node_id) && !nodeIds.has(edge.target_node_id)),
-      }), true);
-      setSelectedNodeIds(new Set());
-      setSelectedConnectionIds(new Set());
-      requestAnimationFrame(() => editorRegionRef.current?.focus());
+      deleteSelection();
     }
     window.addEventListener('keydown', handleDelete);
     return () => window.removeEventListener('keydown', handleDelete);
-  }, [commit, selectedConnectionIds, selectedNodeIds]);
+  }, [deleteSelection, selectedConnectionIds.size, selectedNodeIds.size]);
 
   const selectedNode = document?.nodes.find(node => node.id === selectedId) ?? null;
   const selectedIsUploadedImageMaterial = Boolean(
@@ -2693,8 +2699,9 @@ function CanvasEditorInner({
     mediaReplaceError,
     canvasUiPreferences,
     canvasUiPreferencesError,
-    showImageInfo: document?.settings.show_image_info ?? true,
+    showImageInfo: document?.settings?.show_image_info ?? true,
     libraryBusy,
+    multiSelectionActive: selectedNodeIds.size > 1,
     generationPanel: {
       dismissedNodeId: dismissedGenerationPanelNodeId,
       viewportZoom,
@@ -2740,7 +2747,7 @@ function CanvasEditorInner({
     dismissGenerationPanel,
     dismissCandidate,
     document?.content_versions,
-    document?.settings.show_image_info,
+    document?.settings?.show_image_info,
     editVideo,
     jobsByResultNodeId,
     jobsByRunId,
@@ -2764,6 +2771,7 @@ function CanvasEditorInner({
     reversePromptConfiguredNodeIds,
     retryRun,
     renameNode,
+    selectedNodeIds.size,
     selectCandidate,
     selectOnlyNode,
     setMaterialConnected,
@@ -2900,6 +2908,43 @@ function CanvasEditorInner({
             />
           )}
         </ReactFlow>
+
+        {selectedNodeIds.size > 1 && (
+          <div
+            role="toolbar"
+            aria-label={`已选择 ${selectedNodeIds.size} 个节点`}
+            className="pointer-events-auto absolute left-1/2 top-20 z-30 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow"
+          >
+            <span className="px-2 text-xs font-medium text-foreground">
+              已选 {selectedNodeIds.size} 个节点
+            </span>
+            <span className="mx-1 h-5 w-px bg-border" aria-hidden="true" />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={deleteSelection}
+            >
+              <Trash2 aria-hidden="true" />
+              删除
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              aria-label="取消多选"
+              onClick={() => {
+                setSelectedNodeIds(new Set());
+                setSelectedConnectionIds(new Set());
+                requestAnimationFrame(() => editorRegionRef.current?.focus());
+              }}
+            >
+              <X aria-hidden="true" />
+            </Button>
+          </div>
+        )}
 
         <div className="canvas-zoom-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
           <button
@@ -3209,7 +3254,14 @@ function CanvasEditorInner({
           />
         )}
 
-        {!preview && !mediaOperation && !maskEdit && !angleState && <CanvasActionFeedback error={error} notice={toolNotice} onDismissError={() => setError(null)} className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4" />}
+        {!preview && !mediaOperation && !maskEdit && !angleState && selectedNodeIds.size <= 1 && (
+          <CanvasActionFeedback
+            error={error}
+            notice={toolNotice}
+            onDismissError={() => setError(null)}
+            className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4"
+          />
+        )}
 
         {maskEdit && (
           <CanvasMaskEditDialog
@@ -3446,11 +3498,12 @@ function CanvasActionFeedback({ error, notice, onDismissError, className }: {
   className?: string;
 }) {
   if (!error && !notice) return null;
+  const displayError = canvasNodeRunDisplayError(error, '操作失败，请稍后重试');
   return (
     <div className={cn('flex flex-col gap-2', className)}>
       {error && (
-        <div role="alert" className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-popover px-3 py-2 text-sm text-destructive shell-glow">
-          <span className="flex-1">{error}</span>
+        <div role="alert" className="flex min-w-0 items-start gap-2 overflow-hidden rounded-lg border border-destructive/30 bg-popover px-3 py-2 text-sm text-destructive shell-glow">
+          <span className="line-clamp-3 min-w-0 flex-1 break-words leading-relaxed">{displayError}</span>
           <button type="button" aria-label="关闭错误提示" onClick={onDismissError}><X className="size-4" /></button>
         </div>
       )}

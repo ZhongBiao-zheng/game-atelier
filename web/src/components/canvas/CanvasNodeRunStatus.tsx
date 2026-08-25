@@ -15,6 +15,15 @@ export interface CanvasNodeRunState {
   reversePrompt: boolean;
 }
 
+export function canvasNodeRunDisplayError(
+  detail: string | null | undefined,
+  fallback = '生成失败，请检查模型配置后重试',
+): string {
+  const friendly = detail?.split(/（原始报错[：:]/, 1)[0].replace(/\s+/g, ' ').trim();
+  if (!friendly) return fallback;
+  return friendly.length > 140 ? `${friendly.slice(0, 139)}…` : friendly;
+}
+
 export function canvasNodeRunState(
   node: CanvasNode,
   jobsByRunId: ReadonlyMap<string, Job>,
@@ -45,18 +54,33 @@ export function canvasNodeRunState(
     };
   }
   if (job.status === 'partial') {
-    return { status: 'success', label: '部分完成', detail: job.error, job, reversePrompt };
+    return {
+      status: 'success',
+      label: '部分完成',
+      detail: job.error ? canvasNodeRunDisplayError(job.error, '部分结果生成失败') : null,
+      job,
+      reversePrompt,
+    };
   }
   if (job.status === 'failed') {
     return {
       status: 'error',
       label: reversePrompt ? '分析失败' : '生成失败',
-      detail: job.error || (reversePrompt ? '反推提示词失败，可按原设置重试' : '生成失败，可按原设置重试'),
+      detail: canvasNodeRunDisplayError(
+        job.error,
+        reversePrompt ? '反推提示词失败，可按原设置重试' : '生成失败，可按原设置重试',
+      ),
       job,
       reversePrompt,
     };
   }
-  return { status: 'idle', label: '已停止', detail: job.error, job, reversePrompt };
+  return {
+    status: 'idle',
+    label: '已停止',
+    detail: job.error ? canvasNodeRunDisplayError(job.error, '已停止') : null,
+    job,
+    reversePrompt,
+  };
 }
 
 export function CanvasNodeRunBadge({ state }: { state: CanvasNodeRunState }) {
@@ -112,7 +136,7 @@ export function CanvasNodeRunOverlay({
   return (
     <div
       className={cn(
-        'nodrag nowheel pointer-events-none absolute z-20 flex text-xs backdrop-blur-glass',
+        'nodrag nowheel pointer-events-none absolute z-20 flex min-w-0 overflow-hidden text-xs backdrop-blur-glass',
         compact
           ? 'bottom-2 left-2 max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-md border bg-card/95 px-2 py-1.5'
           : 'inset-0 flex-col items-center justify-center gap-3 rounded-lg bg-card/95 px-5 text-center',
@@ -122,7 +146,13 @@ export function CanvasNodeRunOverlay({
       )}
     >
       {state.status === 'loading' && <LoaderCircle className="size-4 shrink-0" aria-hidden="true" />}
-      <span className={cn(compact && 'truncate')} title={state.detail || state.label}>
+      <span
+        className={cn(
+          'min-w-0 max-w-full',
+          compact ? 'truncate' : 'line-clamp-3 break-words leading-relaxed',
+        )}
+        title={state.detail || state.label}
+      >
         {state.detail || state.label}
       </span>
       {!compact && state.status === 'error' && state.job?.canvas_run && (
