@@ -203,6 +203,17 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const submittingNode = context.submittingNodeIds.has(node.id);
   const nodeRunState = canvasNodeRunState(node, context.jobsByRunId);
   const nodeJob = nodeRunState.job;
+  const emptyMediaNode = node.type !== 'text' && isCanvasContentNode(node) && !content
+    ? node
+    : null;
+  const hasConnectedInputs = (context.connectedMaterialNodeIdsByNodeId.get(node.id)?.size ?? 0) > 0;
+  const hasRunToolbarAction = Boolean(
+    nodeJob?.canvas_run
+    && (nodeRunState.status === 'loading' || nodeRunState.status === 'error'),
+  );
+  const hideEmptyMediaToolbar = Boolean(
+    emptyMediaNode && hasConnectedInputs && !hasRunToolbarAction,
+  );
   const reversePromptJob = nodeJob && isReversePromptJob(nodeJob) ? nodeJob : undefined;
   const reversePromptSucceeded = reversePromptJob?.canvas_run?.candidates.some(candidate => candidate.status === 'succeeded') ?? false;
   const imageCandidates = node.type === 'image'
@@ -331,7 +342,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         <CanvasNodeRunBadge state={nodeRunState} />
       </header>
       <NodeToolbar
-        isVisible={!context.multiSelectionActive && (selected || toolbarOverlayOpen)}
+        isVisible={
+          !context.multiSelectionActive
+          && !hideEmptyMediaToolbar
+          && (selected || toolbarOverlayOpen)
+        }
         position={Position.Top}
         align="center"
         offset={32}
@@ -371,7 +386,17 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               {nodeJob.cancel_requested_at ? <LoaderCircle /> : <Square />}
             </MediaToolButton>
           )}
-          {node.type === 'image' ? (
+          {emptyMediaNode ? (
+            !hasConnectedInputs && (
+              <MediaToolButton
+                label={`上传${CANVAS_GENERATION_MODE_LABELS[emptyMediaNode.type]}`}
+                disabled={replacingMedia}
+                onClick={() => context.replaceMedia(emptyMediaNode)}
+              >
+                {replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}
+              </MediaToolButton>
+            )
+          ) : node.type === 'image' ? (
             <>
               <ImageNodeToolbar
                 node={node}

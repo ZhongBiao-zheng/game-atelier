@@ -56,7 +56,8 @@ export function canvasNodeProvidesOutput(
   versions: Readonly<Record<string, CanvasContentVersion>>,
 ): node is CanvasContentNode {
   return (
-    node.type === 'image'
+    node.type === 'text'
+    || node.type === 'image'
     || node.type === 'video'
     || canvasNodeHasCurrentContent(node, versions)
   );
