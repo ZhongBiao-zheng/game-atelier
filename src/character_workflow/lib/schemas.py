@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Generic, Literal, TypeVar
@@ -750,6 +751,153 @@ class CanvasProjectCreate(BaseModel):
 class CanvasProjectRename(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: CanvasProjectName
+
+
+CanvasAgentSessionId = Annotated[
+    str,
+    StringConstraints(pattern=r"^session-[a-z0-9-]{8,64}$"),
+]
+CanvasAgentMessageId = Annotated[
+    str,
+    StringConstraints(pattern=r"^message-[a-z0-9-]{8,64}$"),
+]
+
+_CANVAS_AGENT_PRIVATE_TEXT = re.compile(
+    r"(?:"
+    r"data:[a-z0-9.+-]+/[a-z0-9.+-]+;"
+    r"|file://"
+    r"|(?:^|[\s\"'`(])(?:~|\.{1,2})[/\\][^\s\"'`)]+"
+    r"|(?:^|[\s\"'`(])/(?!api(?:/|\b)|/)[^\s\"'`)]+(?:/[^\s\"'`)]+)+"
+    r"|(?:^|[\s\"'`(])(?:[A-Za-z0-9._-]+/)+[A-Za-z0-9._-]+\."
+    r"(?:aac|gif|jpeg|jpg|json|m4a|md|mov|mp3|mp4|ogg|png|txt|wav|webm|webp)\b"
+    r"|[A-Za-z]:[/\\][^\s\"'`)]+"
+    r"|\\\\[^\\\s]+\\[^\s\"'`)]+"
+    r"|\bBearer\s+[A-Za-z0-9._~+/=-]{8,}"
+    r"|\b(?:api[_ -]?key|access[_ -]?token|secret|password)\s*[:=]\s*[^\s,;]+"
+    r"|\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*=\s*[^\s,;]+"
+    r"|\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _reject_canvas_agent_private_text(*values: str | None) -> None:
+    if any(
+        value is not None and _CANVAS_AGENT_PRIVATE_TEXT.search(value)
+        for value in values
+    ):
+        raise ValueError(
+            "canvas agent state cannot persist secrets, local paths, or data URLs"
+        )
+
+
+class CanvasAgentTokenUsage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+
+
+class CanvasAgentReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reference_id: str = Field(min_length=1, max_length=160)
+    kind: Literal["node", "content"]
+    node_id: str | None = Field(default=None, min_length=1, max_length=120)
+    version_id: str | None = Field(default=None, min_length=1, max_length=160)
+    title: str = Field(min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def validate_reference_target(self) -> "CanvasAgentReference":
+        if self.kind == "node" and self.node_id is None:
+            raise ValueError("canvas agent node reference requires node_id")
+        if self.kind == "content" and self.version_id is None:
+            raise ValueError("canvas agent content reference requires version_id")
+        _reject_canvas_agent_private_text(
+            self.reference_id,
+            self.node_id,
+            self.version_id,
+            self.title,
+        )
+        return self
+
+
+class CanvasAgentMessageCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["user", "assistant", "system", "tool", "error"]
+    title: str | None = Field(default=None, min_length=1, max_length=160)
+    text: str = Field(default="", max_length=200_000)
+    reasoning_summary: str | None = Field(default=None, max_length=40_000)
+    turn_id: str | None = Field(default=None, min_length=1, max_length=160)
+    references: list[CanvasAgentReference] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def reject_private_payloads(self) -> "CanvasAgentMessageCreate":
+        _reject_canvas_agent_private_text(
+            self.title,
+            self.text,
+            self.reasoning_summary,
+            self.turn_id,
+        )
+        return self
+
+
+class CanvasAgentMessage(CanvasAgentMessageCreate):
+    message_id: CanvasAgentMessageId
+    sequence: int = Field(ge=1)
+    created_at: str
+
+
+class CanvasAgentSession(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1] = 1
+    revision: int = Field(default=0, ge=0)
+    sequence: int = Field(default=0, ge=0)
+    session_id: CanvasAgentSessionId
+    project_id: str = Field(pattern=r"^canvas-[a-z0-9-]{8,64}$")
+    title: CanvasProjectName
+    status: Literal["idle", "running", "interrupted", "failed"] = "idle"
+    model: str | None = Field(default=None, min_length=1, max_length=160)
+    effort: Literal["low", "medium", "high", "xhigh"] | None = None
+    token_usage: CanvasAgentTokenUsage = Field(default_factory=CanvasAgentTokenUsage)
+    messages: list[CanvasAgentMessage] = Field(default_factory=list, max_length=20_000)
+    created_at: str
+    updated_at: str
+
+    @model_validator(mode="after")
+    def validate_message_sequence(self) -> "CanvasAgentSession":
+        _reject_canvas_agent_private_text(self.title, self.model)
+        message_ids = [message.message_id for message in self.messages]
+        sequences = [message.sequence for message in self.messages]
+        if len(message_ids) != len(set(message_ids)) or len(sequences) != len(set(sequences)):
+            raise ValueError("canvas agent message ids and sequences must be unique")
+        if sequences != sorted(sequences):
+            raise ValueError("canvas agent messages must be stored in sequence order")
+        if sequences and sequences[-1] > self.sequence:
+            raise ValueError("canvas agent session sequence is behind its messages")
+        return self
+
+
+class CanvasAgentSessionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: CanvasProjectName = "新对话"
+
+
+class CanvasAgentSessionSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: CanvasAgentSessionId
+    project_id: str = Field(pattern=r"^canvas-[a-z0-9-]{8,64}$")
+    title: CanvasProjectName
+    status: Literal["idle", "running", "interrupted", "failed"]
+    revision: int = Field(ge=0)
+    sequence: int = Field(ge=0)
+    message_count: int = Field(ge=0)
+    created_at: str
+    updated_at: str
+
+
+class CanvasAgentSessionList(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sessions: list[CanvasAgentSessionSummary]
+    corrupt_session_ids: list[CanvasAgentSessionId]
 
 
 class CanvasProjectExportRequest(BaseModel):

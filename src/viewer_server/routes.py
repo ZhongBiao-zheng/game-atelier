@@ -58,6 +58,7 @@ from pydantic import field_validator
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
+    CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionList,
     CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasLibraryAsset, CanvasLibraryAssetCreate,
     CanvasLibraryAssetPatch,
     CanvasLibraryInsertRequest, CanvasPackageCommitRequest, CanvasPackageImportResponse,
@@ -2254,6 +2255,94 @@ def _canvas_if_match(if_match: str | None, subject: str) -> int:
         return int(if_match.strip().strip('"'))
     except ValueError:
         raise HTTPException(422, detail=f"If-Match 必须是{subject} revision") from None
+
+
+def _raise_canvas_agent_session_error(error: Exception) -> None:
+    from character_workflow.lib.canvas_agent_sessions import CanvasAgentSessionStateError
+    if isinstance(error, CanvasAgentSessionStateError):
+        raise HTTPException(
+            409,
+            detail="Agent 会话状态损坏，该文件已隔离；请从项目包恢复",
+        ) from error
+    if isinstance(error, KeyError):
+        raise HTTPException(404, detail="找不到这个画布项目或 Agent 会话") from None
+    if isinstance(error, RuntimeError) and str(error).startswith("revision_conflict:"):
+        current_revision = int(str(error).split(":", 1)[1])
+        raise HTTPException(409, detail={
+            "code": "revision_conflict",
+            "current_revision": current_revision,
+        }) from None
+    raise error
+
+
+@router.get(
+    "/canvas/projects/{project_id}/agent/sessions",
+    response_model=CanvasAgentSessionList,
+)
+def get_canvas_agent_sessions(project_id: str) -> CanvasAgentSessionList:
+    from character_workflow.lib.canvas_agent_sessions import list_canvas_agent_sessions
+    try:
+        return list_canvas_agent_sessions(project_id)
+    except KeyError as error:
+        _raise_canvas_agent_session_error(error)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/agent/sessions",
+    response_model=CanvasAgentSession,
+    status_code=201,
+)
+def post_canvas_agent_session(
+    project_id: str,
+    payload: CanvasAgentSessionCreate,
+    response: Response,
+) -> CanvasAgentSession:
+    from character_workflow.lib.canvas_agent_sessions import create_canvas_agent_session
+    try:
+        session = create_canvas_agent_session(project_id, payload.title)
+        response.headers["ETag"] = f'"{session.revision}"'
+        return session
+    except KeyError as error:
+        _raise_canvas_agent_session_error(error)
+
+
+@router.get(
+    "/canvas/projects/{project_id}/agent/sessions/{session_id}",
+    response_model=CanvasAgentSession,
+)
+def get_canvas_agent_session(
+    project_id: str,
+    session_id: str,
+    response: Response,
+) -> CanvasAgentSession:
+    from character_workflow.lib.canvas_agent_sessions import read_canvas_agent_session
+    try:
+        session = read_canvas_agent_session(project_id, session_id)
+        response.headers["ETag"] = f'"{session.revision}"'
+        return session
+    except (KeyError, ValueError) as error:
+        _raise_canvas_agent_session_error(error)
+
+
+@router.delete(
+    "/canvas/projects/{project_id}/agent/sessions/{session_id}",
+    status_code=204,
+)
+def delete_canvas_agent_session_route(
+    project_id: str,
+    session_id: str,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> Response:
+    from character_workflow.lib.canvas_agent_sessions import delete_canvas_agent_session
+    try:
+        delete_canvas_agent_session(
+            project_id,
+            session_id,
+            _canvas_if_match(if_match, "Agent 会话"),
+        )
+        return Response(status_code=204)
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_agent_session_error(error)
 
 
 def _raise_canvas_library_error(error: Exception, missing: str) -> None:

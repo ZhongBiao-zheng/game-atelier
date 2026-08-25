@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json
+from character_workflow.lib.canvas_agent_sessions import canvas_agent_sessions_lock_path
 from character_workflow.lib.canvas_projects import (
     _project_dir_unchecked,
     _read_canvas_document_unlocked,
@@ -32,6 +33,7 @@ from character_workflow.lib.canvas_projects import (
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.jobs import job_lock, new_job_id, read_job
 from character_workflow.lib.schemas import (
+    CanvasAgentSession,
     CanvasDocument,
     CanvasLibraryAsset,
     CanvasPluginState,
@@ -452,7 +454,11 @@ def _metadata_files(project_dir: Path) -> list[Path]:
     return files
 
 
-def export_canvas_projects(project_ids: list[str]) -> tuple[Path, str]:
+def export_canvas_projects(
+    project_ids: list[str],
+    *,
+    _project_lifecycle_locks_held: bool = False,
+) -> tuple[Path, str]:
     """Create a complete, canonical package and return its temporary path and filename."""
     ordered_ids = list(dict.fromkeys(project_ids))
     if not ordered_ids:
@@ -463,9 +469,17 @@ def export_canvas_projects(project_ids: list[str]) -> tuple[Path, str]:
     project_names: list[str] = []
     package_id = f"package-{secrets.token_hex(12)}"
 
-    with file_lock(_lifecycle_lock_path()), ExitStack() as stack:
-        for project_id in sorted(ordered_ids):
-            stack.enter_context(file_lock(_project_lock_path(project_id)))
+    lifecycle_context = (
+        ExitStack()
+        if _project_lifecycle_locks_held
+        else file_lock(_lifecycle_lock_path())
+    )
+    with lifecycle_context, ExitStack() as stack:
+        if not _project_lifecycle_locks_held:
+            for project_id in sorted(ordered_ids):
+                stack.enter_context(file_lock(_project_lock_path(project_id)))
+            for project_id in sorted(ordered_ids):
+                stack.enter_context(file_lock(canvas_agent_sessions_lock_path(project_id)))
         for project_id in ordered_ids:
             _recover_canvas_transactions_unlocked(project_id)
             project = read_canvas_project(project_id)
@@ -513,8 +527,16 @@ def export_canvas_projects(project_ids: list[str]) -> tuple[Path, str]:
                     payload = json.loads(body)
                 except json.JSONDecodeError as error:
                     raise CanvasPackageError(f"项目元数据不是合法 JSON：{path}") from error
-                if "/agent/sessions/" in path and not isinstance(payload, dict):
-                    raise CanvasPackageError(f"Agent Session 顶层必须是对象：{path}")
+                if "/agent/sessions/" in path:
+                    try:
+                        session = CanvasAgentSession.model_validate(payload)
+                    except ValidationError as error:
+                        raise CanvasPackageError(f"Agent Session 不符合 schema：{path}") from error
+                    if (
+                        session.project_id != project_id
+                        or session.session_id != PurePosixPath(path).stem
+                    ):
+                        raise CanvasPackageError(f"Agent Session 归属或文件名不一致：{path}")
                 if "/plugins/" in path:
                     try:
                         plugin_state = CanvasPluginState.model_validate(payload)
@@ -805,11 +827,14 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
                 jobs.append(job)
             elif path in agent_paths:
                 try:
-                    payload = json.loads(archive.read(path))
-                except (json.JSONDecodeError, KeyError) as error:
-                    raise CanvasPackageError(f"Agent Session 不是合法 JSON：{path}") from error
-                if not isinstance(payload, dict):
-                    raise CanvasPackageError(f"Agent Session 顶层必须是对象：{path}")
+                    session = CanvasAgentSession.model_validate_json(archive.read(path))
+                except (ValidationError, json.JSONDecodeError, KeyError) as error:
+                    raise CanvasPackageError(f"Agent Session 不符合 schema：{path}") from error
+                if (
+                    session.project_id != project.project_id
+                    or session.session_id != PurePosixPath(path).stem
+                ):
+                    raise CanvasPackageError(f"Agent Session 归属或文件名不一致：{path}")
             elif path in plugin_paths:
                 try:
                     plugin_state = CanvasPluginState.model_validate_json(archive.read(path))
@@ -1116,7 +1141,14 @@ def _import_project(
             body = archive.read(f"{prefix}/{relative}")
             (target / relative).write_bytes(body)
         for path in sorted(row.entry_paths):
-            if path.startswith(f"{prefix}/agent/") or path.startswith(f"{prefix}/plugins/"):
+            if path.startswith(f"{prefix}/agent/"):
+                relative = PurePosixPath(path).relative_to(prefix)
+                destination = target.joinpath(*relative.parts)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                session = CanvasAgentSession.model_validate_json(archive.read(path))
+                remapped_session = session.model_copy(update={"project_id": project_id})
+                atomic_write_json(destination, remapped_session.model_dump(mode="json"))
+            elif path.startswith(f"{prefix}/plugins/"):
                 relative = PurePosixPath(path).relative_to(prefix)
                 destination = target.joinpath(*relative.parts)
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1255,21 +1287,18 @@ def delete_canvas_project(
     confirm_name: str,
 ) -> CanvasTrashEntry:
     """Move a project and its jobs into trash; the original ID remains tombstoned."""
-    document = _read_canvas_document_unlocked(project_id)
-    project = read_canvas_project(project_id)
-    if document.revision != expected_revision:
-        raise RuntimeError(f"revision_conflict:{document.revision}")
-    if confirm_name != project.name:
-        raise CanvasPackageError("确认名称与当前项目名称不一致")
-    package_path, _filename = export_canvas_projects([project_id])
-
     deleted_at = _now()
     trash_id = f"trash-{secrets.token_hex(12)}"
     trash_dir = data_root.resolve_data_root() / ".trash" / "canvases" / project_id / trash_id
     moved_jobs: list[tuple[Path, Path]] = []
     moved_project: tuple[Path, Path] | None = None
+    package_path: Path | None = None
     try:
-        with file_lock(_lifecycle_lock_path()), file_lock(_project_lock_path(project_id)):
+        with (
+            file_lock(_lifecycle_lock_path()),
+            file_lock(_project_lock_path(project_id)),
+            file_lock(canvas_agent_sessions_lock_path(project_id)),
+        ):
             _recover_package_transactions_unlocked()
             _recover_canvas_transactions_unlocked(project_id)
             current = _read_canvas_document_unlocked(project_id)
@@ -1278,6 +1307,10 @@ def delete_canvas_project(
                 raise RuntimeError(f"revision_conflict:{current.revision}")
             if current_project.name != confirm_name:
                 raise CanvasPackageError("项目名称刚刚发生变化，请重新确认删除")
+            package_path, _filename = export_canvas_projects(
+                [project_id],
+                _project_lifecycle_locks_held=True,
+            )
             jobs = _jobs_for_project(project_id)
             _assert_jobs_are_quiescent(jobs)
             with ExitStack() as stack:
@@ -1319,7 +1352,8 @@ def delete_canvas_project(
             if destination.exists():
                 destination.replace(source)
         shutil.rmtree(trash_dir, ignore_errors=True)
-        package_path.unlink(missing_ok=True)
+        if package_path is not None:
+            package_path.unlink(missing_ok=True)
         raise
 
 

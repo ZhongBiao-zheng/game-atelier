@@ -159,6 +159,7 @@ def create_canvas_project(name: str) -> CanvasProject:
     (target / "outputs").mkdir()
     (target / "derived").mkdir()
     (target / "library").mkdir()
+    (target / "agent" / "sessions").mkdir(parents=True)
     assets = RevisionedSidecar[CanvasLibraryAsset](updated_at=timestamp)
     prompts = RevisionedSidecar[CanvasPrompt](updated_at=timestamp)
     atomic_write_json(target / "library" / "assets.json", assets.model_dump(mode="json"))

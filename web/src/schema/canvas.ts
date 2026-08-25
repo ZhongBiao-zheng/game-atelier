@@ -206,6 +206,73 @@ export interface CanvasProjectSummary extends CanvasProject {
   connection_count: number;
 }
 
+export interface CanvasAgentTokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export interface CanvasAgentReference {
+  reference_id: string;
+  kind: 'node' | 'content';
+  node_id: string | null;
+  version_id: string | null;
+  title: string;
+}
+
+export interface CanvasAgentMessageCreate {
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'error';
+  title?: string | null;
+  text?: string;
+  reasoning_summary?: string | null;
+  turn_id?: string | null;
+  references?: CanvasAgentReference[];
+}
+
+export interface CanvasAgentMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'error';
+  title: string | null;
+  text: string;
+  reasoning_summary: string | null;
+  turn_id: string | null;
+  references: CanvasAgentReference[];
+  message_id: string;
+  sequence: number;
+  created_at: string;
+}
+
+export interface CanvasAgentSession {
+  schema_version: 1;
+  revision: number;
+  sequence: number;
+  session_id: string;
+  project_id: string;
+  title: string;
+  status: 'idle' | 'running' | 'interrupted' | 'failed';
+  model: string | null;
+  effort: 'low' | 'medium' | 'high' | 'xhigh' | null;
+  token_usage: CanvasAgentTokenUsage;
+  messages: CanvasAgentMessage[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CanvasAgentSessionSummary {
+  session_id: string;
+  project_id: string;
+  title: string;
+  status: 'idle' | 'running' | 'interrupted' | 'failed';
+  revision: number;
+  sequence: number;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CanvasAgentSessionList {
+  sessions: CanvasAgentSessionSummary[];
+  corrupt_session_ids: string[];
+}
+
 export interface CanvasPackageInspection {
   token: string;
   package_id: string;

@@ -65,6 +65,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /jobs/{id}/{confirm,cancel}` `DELETE /jobs/{id}` `DELETE /jobs/{id}/image`
 `POST /studio/jobs/{id}/archive`
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
+`POST /canvas/projects/{id}/agent/sessions` `DELETE /canvas/projects/{id}/agent/sessions/{session_id}`
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle}`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
@@ -91,6 +92,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /canvas/projects/{id}/versions/{version_id}/media`
 `GET /canvas/projects/{id}/versions/{version_id}/download`
 `GET /canvas/projects/{id}/library/assets` `/canvas/projects/{id}/library/prompts`
+`GET /canvas/projects/{id}/agent/sessions` `/canvas/projects/{id}/agent/sessions/{session_id}`
 `GET /canvas/trash` `GET /canvas/ui-preferences`
 
 `GET /canvas/projects` 的 `CanvasProjectSummary` 在项目元数据之外返回派生的 `cover`、`node_count` 与
@@ -122,6 +124,16 @@ Document 显示状态并参与 revision 与 undo/redo，不修改文本 Content 
 参与 Web undo/redo；图片详情 Dialog 始终保留完整 metadata，不受节点信息条开关影响。
 媒体 Content Version 的 `path` 始终相对当前画布项目目录；资产库与提示词使用 revision 化 sidecar，插件
 私有状态使用带 plugin id/version 的独立 envelope，不把这些业务对象塞回热路径 `canvas.json`。
+
+Canvas Agent 会话属于画布项目，文件真源为
+`canvases/<project_id>/agent/sessions/<session_id>.json`。每个 Session 使用独立 revision 与单调
+sequence，只保存可见消息、reasoning summary、稳定 node/version 引用和非敏感 token usage；
+不允许 API Key、token、环境变量、裸本地路径、data URL 或隐藏思维链。
+`POST .../agent/sessions` 由用户创建空会话，GET 列表会隔离单个损坏文件并返回
+`corrupt_session_ids`；`DELETE .../agent/sessions/{session_id}` 必须携带 Session `If-Match`，冲突零写入。
+项目包导出严格验证 Session schema/文件名/项目归属；导入新项目保留 session/message ID
+与会话历史，只重写 `project_id`。当前打开会话、panel 宽度、焦点和流式临时态属于浏览器呈现，
+不进入 Session 或 `canvas.json`。
 
 图片节点快捷工具偏好是工作区应用级状态，文件真源为 `.config/canvas-ui.json`，不属于任何画布项目。
 `GET /api/canvas/ui-preferences` 在文件不存在时返回 revision 0 的默认值且不制造文件；损坏或不符合严格

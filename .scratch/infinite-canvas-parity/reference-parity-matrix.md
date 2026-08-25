@@ -48,7 +48,7 @@ Status: ready-for-human
 | A09 | 最近项目入口 | `/canvas?mode=recent` 打开列表首项 | same | full |
 | A10 | 项目统计节点/连线和更新时间 | `CanvasProjectCard` | same：列表 summary 从当前 Document 派生，见 issue 26 | full |
 | A11 | 浏览器 IndexedDB/localforage 持久化 | `use-canvas-store.ts` | adapted：必须使用现有文件系统真源 | none |
-| A12 | 项目保存 viewport、背景、图片信息与 Agent 会话 | `CanvasProject` type | adapted：Canvas Document v2 分域保存 | partial |
+| A12 | 项目保存 viewport、背景、图片信息与 Agent 会话 | `CanvasProject` type | adapted：viewport/外观在 revision Document；Agent Session 使用独立 revision/sequence 冷 sidecar 与锁域，项目包严格验证并重映射，见 issue 38 | none |
 
 > 核对纠偏：固定基线没有“复制整个画布项目”入口；只有复制节点。因此项目复制不进入 parity。
 

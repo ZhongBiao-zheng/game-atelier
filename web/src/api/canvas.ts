@@ -1,6 +1,8 @@
 import { request, requestJson } from './http';
 import type { Job } from '@/schema/jobs';
 import type {
+  CanvasAgentSession,
+  CanvasAgentSessionList,
   CanvasDocument,
   CanvasLibraryAsset,
   CanvasMediaOperation,
@@ -39,6 +41,50 @@ export function renameCanvasProject(projectId: string, name: string): Promise<Ca
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name }),
   });
+}
+
+export function listCanvasAgentSessions(projectId: string): Promise<CanvasAgentSessionList> {
+  return requestJson<CanvasAgentSessionList>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/agent/sessions`,
+    '读取画布 Agent 会话',
+  );
+}
+
+export function createCanvasAgentSession(
+  projectId: string,
+  title: string,
+): Promise<CanvasAgentSession> {
+  return requestJson<CanvasAgentSession>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/agent/sessions`,
+    '创建画布 Agent 会话',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title }),
+    },
+  );
+}
+
+export function getCanvasAgentSession(
+  projectId: string,
+  sessionId: string,
+): Promise<CanvasAgentSession> {
+  return requestJson<CanvasAgentSession>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/agent/sessions/${encodeURIComponent(sessionId)}`,
+    '读取画布 Agent 会话',
+  );
+}
+
+export function deleteCanvasAgentSession(
+  projectId: string,
+  sessionId: string,
+  revision: number,
+): Promise<void> {
+  return request(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/agent/sessions/${encodeURIComponent(sessionId)}`,
+    '删除画布 Agent 会话',
+    { method: 'DELETE', headers: { 'If-Match': String(revision) } },
+  ).then(() => undefined);
 }
 
 export async function exportCanvasProjects(projectIds: string[]): Promise<void> {
