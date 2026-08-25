@@ -74,7 +74,7 @@ Status: ready-for-human
 | B16 | 右键节点复制/删除；右键边删除 | `canvas-context-menu.tsx` | same | full |
 | B17 | 小地图显示/隐藏和点击导航 | `canvas-mini-map.tsx` | adapted：React Flow MiniMap；Document 设置显隐，拖拽/滚轮/点击导航，见 issue 22 | full |
 | B18 | 点/线/空白三种背景 | `canvas-toolbar.tsx`；`menu-画布外观.png` | adapted：Atelier 背景 token | full |
-| B19 | 浅色/深色主题 | `canvas-theme.ts`、外观菜单 | adapted：遵循 Atelier 暖暗色，浅色保留可用 | partial |
+| B19 | 浅色/深色主题 | `canvas-theme.ts`、外观菜单 | adapted：复用 Atelier 语义 token 与 `atelier:theme`；Canvas 外观菜单可直接切换，见 Issue 39 | none |
 | B20 | 图片尺寸/信息显示开关 | `showImageInfo`、外观菜单 | same | full |
 | B21 | 清空画布二次确认 | `project.tsx` clear modal | same | full |
 | B22 | 选中节点/整批元素导出 | `canvas-side-panel.tsx::exportCanvasNodes` | adapted：服务端项目包/资源导出 | full |
@@ -212,7 +212,7 @@ Status: ready-for-human
 | I04 | hover 工具条位于节点上方 | `canvas-node-hover-toolbar.tsx` | same | full |
 | I05 | composer 是节点下方独立浮层并随节点移动 | prompt/config components | same：节点外 sibling 锚点随拖拽/缩放，边缘钳位与高倍 zoom 安全宽度，窄屏独立底部面板，见 issue 31 | full |
 | I06 | 连接柄位于节点左右中部，边低对比 | node/connections | same behavior + Atelier colors：48px 命中区、低对比贝塞尔、派生虚线与相关边高亮，见 issue 28 | full |
-| I07 | 浅/深主题、点/线/空白背景 | theme/appearance runtime | adapted：固定 Atelier 暗色 token；外观菜单明确选择点/线/空白并持久化 | full |
+| I07 | 浅/深主题、点/线/空白背景 | theme/appearance runtime | adapted：工作区浅/深主题与项目内点/线/空白背景统一收在外观菜单，见 Issue 21/39 | none |
 | I08 | 画布和 Agent/左栏适配窄屏 | components + pending tests | adapted：375/768 明确可用降级 | full |
 | I09 | 逐像素复制 Ant Design、白色工具条、字体与品牌色 | reference implementation detail | excluded：与“适配原项目”冲突 | n/a |
 

@@ -60,6 +60,7 @@
 }
 
 :root {
+  color-scheme: dark;
   /* Atelier — warm dark palette (see DESIGN.md) */
 
   /* 表面阶梯（暖中性，R≥G≥B）：画布 → 卡片 → 弹层 → hover */
@@ -105,6 +106,7 @@
    纯白画廊（按飙哥给的参考站调）：画布纯白，表面向灰走深（与暗色阶梯方向相反），
    文字纯黑系，发丝边纯黑 alpha；黄铜压深到 #8F6234 保证白底对比（AA 验证见 DESIGN.md § Color） */
 :root.light {
+  color-scheme: light;
   --background: #FFFFFF;
   --foreground: #000000;
   --card: #FAFAFA;
@@ -337,7 +339,9 @@
 
   .canvas-flow {
     --xy-background-color: var(--background);
-    --xy-background-pattern-dots-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+    --xy-background-pattern-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+    --xy-selection-background-color: color-mix(in srgb, var(--primary) 12%, transparent);
+    --xy-selection-border: 1px dotted color-mix(in srgb, var(--primary) 72%, transparent);
     --xy-edge-stroke: color-mix(in srgb, var(--primary) 42%, var(--border));
     --xy-edge-stroke-selected: var(--primary);
     --xy-connectionline-stroke: var(--primary);
@@ -346,6 +350,7 @@
     --xy-controls-button-color: var(--foreground);
     --xy-controls-button-border-color: var(--border);
     --xy-minimap-background-color: var(--card);
+    --xy-attribution-background-color: var(--glass);
   }
   .canvas-flow .react-flow__minimap.canvas-minimap {
     left: max(0.75rem, env(safe-area-inset-left)) !important;

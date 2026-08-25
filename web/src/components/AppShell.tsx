@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { LayoutGroup, motion } from 'motion/react';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
 import { HomeIcon, LibraryBig, Moon, Palette, Settings, Sparkles, Sun } from 'lucide-react';
@@ -10,24 +9,20 @@ import { CanvasProjectIndex } from '@/pages/CanvasProjectIndex';
 import { CanvasEditor } from '@/pages/CanvasEditor';
 import { CharacterDetail } from '@/pages/CharacterDetail';
 import { SettingsPage } from '@/pages/settings/Settings';
-import { applyTheme, loadTheme, saveTheme, type Theme } from '@/lib/theme';
+import { setTheme, useTheme, type Theme } from '@/lib/theme';
 import {
   isWorkshopWorkspace,
 } from '@/components/workshop/workspaces';
 
 /** 深浅主题切换：图标显示目的地（暗色显太阳 = 点了去浅色） */
 function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>(loadTheme);
+  const theme = useTheme();
   const next: Theme = theme === 'dark' ? 'light' : 'dark';
   return (
     <button
       type="button"
       aria-label={next === 'light' ? '切换到浅色主题' : '切换到深色主题'}
-      onClick={() => {
-        setTheme(next);
-        applyTheme(next);
-        saveTheme(next);
-      }}
+      onClick={() => setTheme(next)}
       className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-glass backdrop-blur-glass text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       {theme === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}

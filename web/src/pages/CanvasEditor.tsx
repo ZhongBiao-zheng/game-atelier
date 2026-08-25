@@ -92,6 +92,7 @@ import {
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
 import { isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
+import { CanvasThemeSelector } from '@/components/canvas/CanvasThemeSelector';
 import {
   CanvasGenerationMetadata,
   canvasRetryErrorMessage,
@@ -2892,6 +2893,9 @@ function CanvasEditorInner({
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="right" align="end" className="w-48 rounded-xl">
+                <DropdownMenuLabel>主题</DropdownMenuLabel>
+                <CanvasThemeSelector />
+                <DropdownMenuSeparator />
                 <DropdownMenuLabel>画布背景</DropdownMenuLabel>
                 <DropdownMenuRadioGroup
                   value={document.settings.background}
