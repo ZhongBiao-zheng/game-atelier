@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, MessageSquare, Minus, Pencil, Plus, RotateCcw, Sparkles, Square, Trash2, Type, Unlock, X } from 'lucide-react';
+import { Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, RotateCcw, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -2061,7 +2061,48 @@ function MediaPreview({
   compact?: boolean;
 }) {
   const { mediaRef, resolvedSrc } = useLazyMedia(src);
+  const videoElement = useRef<HTMLVideoElement | null>(null);
+  const [videoPlaying, setVideoPlaying] = useState(false);
+  const [videoCurrentTime, setVideoCurrentTime] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [videoMuted, setVideoMuted] = useState(false);
+  const [videoVolume, setVideoVolume] = useState(1);
   const stopCanvasInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
+  const videoRef = useCallback((element: HTMLVideoElement | null) => {
+    videoElement.current = element;
+    mediaRef(element);
+  }, [mediaRef]);
+  const toggleVideoPlayback = () => {
+    const video = videoElement.current;
+    if (!video) return;
+    if (videoPlaying) video.pause();
+    else void video.play().catch(() => setVideoPlaying(false));
+  };
+  const seekVideo = (seconds: number) => {
+    const video = videoElement.current;
+    if (!video) return;
+    video.currentTime = seconds;
+    setVideoCurrentTime(seconds);
+  };
+  const setVolume = (volume: number) => {
+    const video = videoElement.current;
+    if (!video) return;
+    video.volume = volume;
+    video.muted = volume === 0;
+    setVideoVolume(volume);
+    setVideoMuted(volume === 0);
+  };
+  const toggleVideoMuted = () => {
+    const video = videoElement.current;
+    if (!video) return;
+    video.muted = !video.muted;
+    setVideoMuted(video.muted);
+  };
+  const showVideoFullscreen = () => {
+    const video = videoElement.current;
+    if (!video?.requestFullscreen) return;
+    void video.requestFullscreen().catch(() => undefined);
+  };
   if (kind === 'image') return (
     <img
       src={src}
@@ -2076,25 +2117,100 @@ function MediaPreview({
       )}
     />
   );
-  if (kind === 'video') return (
-    <video
-      ref={mediaRef}
-      src={resolvedSrc}
-      controls
-      playsInline
-      preload={resolvedSrc ? 'metadata' : 'none'}
-      data-canvas-media-controls="video"
-      className={cn(
-        'nodrag nowheel size-full',
-        freeResize ? 'object-fill' : fit === 'cover' ? 'object-cover' : 'object-contain',
-        compact && 'max-h-48 rounded-md',
-      )}
-      onClick={stopCanvasInteraction}
-      onDoubleClick={stopCanvasInteraction}
-      onPointerDown={stopCanvasInteraction}
-      onKeyDown={stopCanvasInteraction}
-    />
-  );
+  if (kind === 'video') {
+    const mediaLabel = title || '视频';
+    return (
+      <div className={cn('relative size-full', compact && 'max-h-48')}>
+        <video
+          ref={videoRef}
+          src={resolvedSrc}
+          playsInline
+          preload={resolvedSrc ? 'metadata' : 'none'}
+          data-canvas-media-controls="video"
+          className={cn(
+            'size-full',
+            freeResize ? 'object-fill' : fit === 'cover' ? 'object-cover' : 'object-contain',
+            compact && 'max-h-48 rounded-md',
+          )}
+          onClick={event => event.preventDefault()}
+          onDoubleClick={stopCanvasInteraction}
+          onPlay={() => setVideoPlaying(true)}
+          onPause={() => setVideoPlaying(false)}
+          onEnded={() => setVideoPlaying(false)}
+          onLoadedMetadata={event => {
+            setVideoDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0);
+            setVideoCurrentTime(event.currentTarget.currentTime);
+            setVideoMuted(event.currentTarget.muted);
+            setVideoVolume(event.currentTarget.volume);
+          }}
+          onTimeUpdate={event => setVideoCurrentTime(event.currentTarget.currentTime)}
+          onVolumeChange={event => {
+            setVideoMuted(event.currentTarget.muted);
+            setVideoVolume(event.currentTarget.volume);
+          }}
+        />
+        <div
+          className="nodrag nowheel absolute bottom-2 left-2 right-2 z-10 flex items-center gap-2 rounded-lg border border-border bg-glass p-1.5 text-foreground backdrop-blur-glass"
+          onPointerDown={stopCanvasInteraction}
+          onDoubleClick={stopCanvasInteraction}
+          onClick={stopCanvasInteraction}
+          onKeyDown={stopCanvasInteraction}
+        >
+          <button
+            type="button"
+            aria-label={`${videoPlaying ? '暂停' : '播放'} ${mediaLabel}`}
+            className="grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            onClick={toggleVideoPlayback}
+          >
+            {videoPlaying
+              ? <Pause className="size-4" aria-hidden="true" />
+              : <Play className="size-4" aria-hidden="true" />}
+          </button>
+          <input
+            type="range"
+            aria-label="视频播放进度"
+            min={0}
+            max={videoDuration || 0}
+            step="any"
+            value={Math.min(videoCurrentTime, videoDuration || 0)}
+            className="min-w-0 flex-1 accent-primary"
+            onChange={event => seekVideo(Number(event.currentTarget.value))}
+          />
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            {formatMediaTime(videoCurrentTime)} / {formatMediaTime(videoDuration)}
+          </span>
+          <button
+            type="button"
+            aria-label={`${videoMuted ? '取消静音' : '静音'} ${mediaLabel}`}
+            className="grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            onClick={toggleVideoMuted}
+          >
+            {videoMuted || videoVolume === 0
+              ? <VolumeX className="size-4" aria-hidden="true" />
+              : <Volume2 className="size-4" aria-hidden="true" />}
+          </button>
+          <input
+            type="range"
+            aria-label="视频音量"
+            min={0}
+            max={1}
+            step={0.05}
+            value={videoMuted ? 0 : videoVolume}
+            className="w-16 accent-primary"
+            onChange={event => setVolume(Number(event.currentTarget.value))}
+          />
+          <button
+            type="button"
+            aria-label={`全屏播放 ${mediaLabel}`}
+            className="grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            onClick={showVideoFullscreen}
+          >
+            <Maximize2 className="size-4" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="nodrag nowheel grid size-full place-items-center gap-3 p-4 text-xs text-muted-foreground">
       {!compact && <span className="flex items-center gap-2"><FileAudio className="size-5" aria-hidden="true" />音频素材</span>}
@@ -2112,6 +2228,12 @@ function MediaPreview({
       />
     </div>
   );
+}
+
+function formatMediaTime(seconds: number) {
+  const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  const minutes = Math.floor(safeSeconds / 60);
+  return `${minutes}:${String(safeSeconds % 60).padStart(2, '0')}`;
 }
 
 function useLazyMedia(src: string) {

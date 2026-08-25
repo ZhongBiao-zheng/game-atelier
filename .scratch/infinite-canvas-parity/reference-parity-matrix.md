@@ -85,7 +85,7 @@ Status: completed
 |---|---|---|---|---|
 | C01 | 文本节点 | `CanvasNodeType.Text`；`03-built-in-nodes.png` | same：节点内双击/工具条编辑，字号映射 Atelier `xs/sm/base` token，见 issue 37 | full |
 | C02 | 空/有内容图片节点 | `CanvasNodeType.Image`、`canvas-node.tsx` | adapted：不可变 Content Version 存储；独立空态上传与 contain/cover/free-resize 表面；上传图片为纯素材，选中不展示生成设置，见 issue 37 | full |
-| C03 | 空/有内容视频节点 | `CanvasNodeType.Video` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | full |
+| C03 | 空/有内容视频节点 | `CanvasNodeType.Video` | adapted：独立空态上传、惰性媒体 URL 与节点内播放器；画面单击选择节点，播放/暂停、进度、音量与全屏仅由自有控制条触发，见 issue 37 | full |
 | C04 | 空/有内容音频节点 | `CanvasNodeType.Audio` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | full |
 | C05 | 生成配置节点，可切换文本/图片/视频/音频 | `canvas-config-composer.tsx` | adapted：Issue 40 独立配置卡 + 四态 composer，提交到统一 Job Runner | full |
 | C06 | 分组节点，显示成员数量 | `CanvasNodeType.Group`、groupId | same | full |
