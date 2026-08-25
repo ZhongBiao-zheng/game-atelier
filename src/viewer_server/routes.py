@@ -2992,7 +2992,7 @@ def post_canvas_run(
     payload: CanvasRunCreate,
     background: BackgroundTasks,
 ) -> CanvasRunResponse:
-    from character_workflow.lib.canvas_runs import submit_canvas_run
+    from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_canvas_run
 
     try:
         job, document = submit_canvas_run(
@@ -3003,6 +3003,11 @@ def post_canvas_run(
         )
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目或生成节点") from None
+    except CanvasRunCommandError as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
     except RuntimeError as error:
         if str(error).startswith("revision_conflict:"):
             current_revision = int(str(error).split(":", 1)[1])

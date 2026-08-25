@@ -151,6 +151,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     && selected
     && !context.multiSelectionActive
     && draft
+    && !(node.type === 'config' && draft.mode === 'text')
     && !uploadedImageMaterial
     && !context.generationPanel.narrowViewport
     && context.generationPanel.dismissedNodeId !== node.id,
@@ -396,7 +397,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               node={node}
               content={content}
               replacing={replacingMedia}
-              submitting={submittingNode}
+              submitting={submittingNode || nodeRunState.status === 'loading'}
               copyablePrompt={copyablePrompt}
               context={context}
               onEditText={beginTextEditing}
@@ -436,6 +437,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         onDoubleClick={event => {
           event.stopPropagation();
           if (node.type === 'text') {
+            if (nodeRunState.status === 'loading') return;
             beginTextEditing();
             return;
           }
@@ -463,6 +465,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
                 ref={textEditorRef}
                 aria-label={`编辑 ${node.title} 正文`}
                 value={content?.kind === 'text' ? content.text : ''}
+                disabled={nodeRunState.status === 'loading'}
                 placeholder="输入文本…"
                 className={cn(
                   'nodrag nowheel block h-full min-h-32 w-full resize-none overflow-y-auto border-0 bg-transparent p-3 leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
@@ -792,6 +795,7 @@ const CONFIG_GENERATION_MODES = [
   { mode: 'video', label: CANVAS_GENERATION_MODE_LABELS.video, icon: FileVideo },
   { mode: 'audio', label: CANVAS_GENERATION_MODE_LABELS.audio, icon: FileAudio },
 ] as const;
+const CONFIG_OUTPUT_MODES = CONFIG_GENERATION_MODES.filter(({ mode }) => mode !== 'text');
 
 function CanvasConfigNodeSurface({
   node,
@@ -803,6 +807,7 @@ function CanvasConfigNodeSurface({
   const draft = node.data.draft;
   const selectedKey = context.keys.find(key => key.alias === draft.alias);
   const selectedModel = selectedKey?.models.find(model => model.id === draft.model);
+  const textModeRemoved = draft.mode === 'text';
   const references = context.mentionReferencesByNodeId.get(node.id) ?? [];
   const counts = references.reduce<Record<CanvasGenerationDraft['mode'], number>>((current, reference) => {
     current[reference.kind] += 1;
@@ -847,12 +852,12 @@ function CanvasConfigNodeSurface({
       <div
         role="radiogroup"
         aria-label="生成类型"
-        className="nodrag nowheel grid grid-cols-4 gap-1 rounded-lg border border-border bg-background/50 p-1"
+        className="nodrag nowheel grid grid-cols-3 gap-1 rounded-lg border border-border bg-background/50 p-1"
         onPointerDown={event => event.stopPropagation()}
         onClick={event => event.stopPropagation()}
         onKeyDown={handleModeKeys}
       >
-        {CONFIG_GENERATION_MODES.map(({ mode, label, icon: Icon }) => (
+        {CONFIG_OUTPUT_MODES.map(({ mode, label, icon: Icon }) => (
           <button
             key={mode}
             type="button"
@@ -878,10 +883,18 @@ function CanvasConfigNodeSurface({
         ))}
       </div>
       <div className="min-w-0">
-        <p className="text-xs text-muted-foreground">当前模型</p>
-        <p aria-label="当前模型" className="mt-1 truncate text-sm font-medium text-foreground" title={selectedModel?.name ?? draft.model}>
-          {selectedModel?.name ?? (draft.model || '未选择兼容模型')}
-        </p>
+        {textModeRemoved ? (
+          <p role="status" className="text-xs leading-relaxed text-muted-foreground">
+            文本生成已合并到文本节点，请选择其它输出类型或删除此配置。
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground">当前模型</p>
+            <p aria-label="当前模型" className="mt-1 truncate text-sm font-medium text-foreground" title={selectedModel?.name ?? draft.model}>
+              {selectedModel?.name ?? (draft.model || '未选择兼容模型')}
+            </p>
+          </>
+        )}
       </div>
       <div className="flex min-h-6 flex-wrap items-center gap-1.5" aria-label="连接输入摘要">
         {CONFIG_GENERATION_MODES.flatMap(({ mode, label }) => counts[mode] > 0
@@ -921,7 +934,7 @@ function CanvasNodeToolbar({
     <>
       {node.type === 'text' && (
         <>
-          <MediaToolButton label={`编辑文本 ${node.title}`} onClick={onEditText}>
+          <MediaToolButton label={`编辑文本 ${node.title}`} disabled={submitting} onClick={onEditText}>
             <Pencil />
           </MediaToolButton>
           <MediaToolButton

@@ -1012,7 +1012,7 @@ def _commit_frozen_run(
         allow_surface_reuse
         and surface.type in {"text", "image", "video", "audio"}
         and surface.type == mode
-        and _current_version_id(surface) is None
+        and (mode == "text" or _current_version_id(surface) is None)
     )
     result_id = surface.id if use_surface else f"{mode}-{secrets.token_hex(12)}"
     snapshot_payload = {
@@ -1132,6 +1132,11 @@ def submit_canvas_run(
         draft = _draft_for_node(surface)
         if draft is None:
             raise ValueError("当前节点没有可提交的生成设置")
+        if surface.type == "config" and draft.mode == "text":
+            raise CanvasRunCommandError(
+                "canvas_text_config_removed",
+                "文本生成已合并到文本节点，请使用文本节点。",
+            )
         key, model, kind = _resolve_key_and_model(draft)
         normalized, job_params, effective_count = _normalized_params(
             draft,
