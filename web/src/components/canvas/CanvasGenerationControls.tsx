@@ -324,9 +324,10 @@ export function CanvasTextSettings({
   const maxTokens = typeof params.max_tokens === 'number'
     ? String(params.max_tokens)
     : 'auto';
+  const count = Math.max(1, Math.min(4, Number(params.n) || 1));
   const summary = supportsReasoning
-    ? `推理 ${REASONING_LABELS[reasoning]}`
-    : TEXT_TEMPERATURE_LABELS[temperature] ?? temperature;
+    ? `推理 ${REASONING_LABELS[reasoning]} · ${count} 个`
+    : `${TEXT_TEMPERATURE_LABELS[temperature] ?? temperature} · ${count} 个`;
   return (
     <div ref={anchorRef} className="relative min-w-0">
       <button
@@ -383,6 +384,15 @@ export function CanvasTextSettings({
               onSelect={value => onPatch({
                 max_tokens: value === 'auto' ? undefined : Number(value),
               })}
+            />
+          </SettingsSection>
+          <SettingsSection title="生成数量">
+            <OptionTrack
+              label="选择文本生成数量"
+              values={[1, 2, 3, 4]}
+              selected={String(count)}
+              getLabel={value => `${value} 个`}
+              onSelect={value => onPatch({ n: Number(value) })}
             />
           </SettingsSection>
         </div>

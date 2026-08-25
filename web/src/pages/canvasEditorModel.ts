@@ -402,7 +402,9 @@ export function normalizeCanvasTextParams(
   protocol: string | null | undefined,
   current: JobParams,
 ): JobParams {
-  const params: JobParams = { n: 1 };
+  const params: JobParams = {
+    n: Math.max(1, Math.min(4, Number(current.n) || 1)),
+  };
   if (typeof current.temperature === 'number' && protocol !== 'openai-responses') {
     params.temperature = current.temperature;
   }

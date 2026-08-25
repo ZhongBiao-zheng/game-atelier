@@ -538,13 +538,25 @@ function CanvasEditorInner({
     };
   }, [acceptAssets, acceptPrompts, assets, libraryMode, projectId, prompts]);
 
-  const mergeRunDocument = useCallback((remote: CanvasDocument) => {
+  const mergeRunDocument = useCallback((
+    remote: CanvasDocument,
+    runIds: ReadonlySet<string>,
+  ) => {
     serverRevision.current = Math.max(serverRevision.current, remote.revision);
     setDocument(current => {
       if (!current || remote.revision <= current.revision) return current;
       const remoteNodes = new Map(remote.nodes.map(node => [node.id, node]));
-      const nodeIds = new Set(current.nodes.map(node => node.id));
-      const nodes = current.nodes.map(node => {
+      const currentNodeIds = new Set(current.nodes.map(node => node.id));
+      const serverAddedNodeIds = new Set(remote.connections.flatMap(connection => (
+        connection.role === 'derivation'
+        && connection.origin.kind === 'generation_run'
+        && runIds.has(connection.origin.run_id)
+        && !currentNodeIds.has(connection.target_node_id)
+          ? [connection.target_node_id]
+          : []
+      )));
+      const serverAddedNodes = remote.nodes.filter(node => serverAddedNodeIds.has(node.id));
+      const nodes = [...current.nodes.map(node => {
         const serverNode = remoteNodes.get(node.id);
         if (!serverNode || !isContentNode(node) || !isContentNode(serverNode)) return node;
         if (!node.data.active_run_id || node.data.active_run_id !== serverNode.data.active_run_id) return node;
@@ -555,20 +567,28 @@ function CanvasEditorInner({
             current_version_id: serverNode.data.current_version_id,
           },
         } as CanvasContentNode;
-      });
+      }), ...serverAddedNodes];
+      const nodeIds = new Set(nodes.map(node => node.id));
       const connectionIds = new Set(current.connections.map(connection => connection.id));
-      const serverDerivations = remote.connections.filter(connection => (
-        connection.role === 'derivation'
-        && !connectionIds.has(connection.id)
+      const serverRunConnections = remote.connections.filter(connection => (
+        !connectionIds.has(connection.id)
         && nodeIds.has(connection.source_node_id)
         && nodeIds.has(connection.target_node_id)
+        && (
+          (
+            connection.role === 'derivation'
+            && connection.origin.kind === 'generation_run'
+            && runIds.has(connection.origin.run_id)
+          )
+          || serverAddedNodeIds.has(connection.target_node_id)
+        )
       ));
       const merged: CanvasDocument = {
         ...current,
         revision: remote.revision,
         updated_at: remote.updated_at,
         nodes,
-        connections: [...current.connections, ...serverDerivations],
+        connections: [...current.connections, ...serverRunConnections],
         content_versions: { ...remote.content_versions, ...current.content_versions },
       };
       if (saveQueued.current) saveQueued.current = merged;
@@ -647,7 +667,14 @@ function CanvasEditorInner({
           && job.status !== 'pending_confirm'
           && !syncedTerminalRuns.current.has(job.canvas_run.run_id)
         ));
-        const newCandidateVersionIds = canvasJobs.flatMap(job => (
+        const jobsWithNewCandidateVersions = canvasJobs.filter(job => (
+          job.canvas_run?.candidates.some(candidate => (
+            candidate.status === 'succeeded'
+            && candidate.version_id
+            && !syncedCandidateVersionIds.current.has(candidate.version_id)
+          ))
+        ));
+        const newCandidateVersionIds = jobsWithNewCandidateVersions.flatMap(job => (
           job.canvas_run?.candidates.flatMap(candidate => (
             candidate.status === 'succeeded'
             && candidate.version_id
@@ -656,10 +683,14 @@ function CanvasEditorInner({
               : []
           )) ?? []
         ));
+        const runIdsToSync = new Set([
+          ...completedRuns.map(job => job.canvas_run!.run_id),
+          ...jobsWithNewCandidateVersions.map(job => job.canvas_run!.run_id),
+        ]);
         if (completedRuns.length || newCandidateVersionIds.length) {
           const remote = await getCanvasDocument(projectId);
           if (cancelled) return;
-          mergeRunDocument(remote);
+          mergeRunDocument(remote, runIdsToSync);
           for (const job of completedRuns) syncedTerminalRuns.current.add(job.canvas_run!.run_id);
           for (const versionId of newCandidateVersionIds) syncedCandidateVersionIds.current.add(versionId);
         }
@@ -1638,7 +1669,7 @@ function CanvasEditorInner({
       const node = current?.nodes.find(candidate => candidate.id === nodeId);
       const draft = node ? generationDraftForNode(node) : null;
       if (!current || !node || !draft) throw new Error('当前节点没有可提交的生成设置');
-      const requestedCount = draft.mode === 'image'
+      const requestedCount = draft.mode === 'text' || draft.mode === 'image'
         ? Math.max(1, Math.min(4, Number(draft.params.n ?? 1)))
         : 1;
       const dirtyAtSubmission = dirtyVersion.current;

@@ -858,8 +858,7 @@ def _normalized_params(
     elif draft.mode == "text":
         if not _supports_openai_text(key, model):
             raise ValueError("当前文本模型没有可用的生成协议")
-        effective_count = 1
-        text_params: dict[str, Any] = {"n": 1}
+        text_params: dict[str, Any] = {"n": effective_count}
         if draft.params.temperature is not None and model.protocol != "openai-responses":
             text_params["temperature"] = draft.params.temperature
         if draft.params.max_tokens is not None:
@@ -1766,7 +1765,7 @@ def retry_canvas_run(
             raise RuntimeError("result_node_missing")
         requested_count = (
             max(1, min(4, int(draft.params.n or 1)))
-            if draft.mode == "image" else 1
+            if draft.mode in {"text", "image"} else 1
         )
         return submit_canvas_run(
             project_id,
@@ -2386,27 +2385,126 @@ def _finalize_canvas_run_under_locks(
         len(candidates) == 1
         and candidates[0].replaces_candidate_id is not None
     )
+    text_primary = next(
+        (candidate for candidate in successful if candidate.index == 0),
+        None,
+    )
     nodes: list[CanvasNode] = []
+    result_node: CanvasTextNode | None = None
     for node in current.nodes:
         if (
             node.id == context.result_node_id
             and node.type in {"text", "image", "video", "audio"}
             and node.data.active_run_id == context.run_id
         ):
-            # A repaired slot joins the batch but never steals an already-successful primary.
-            # Full retries and first successes still become the displayed result.
-            if not single_candidate_retry or node.data.current_version_id is None:
+            # A repaired slot never steals an already-successful result. For text batches,
+            # only candidate 0 owns the anchor node; the other indices get their own nodes.
+            should_display_version = (
+                job.kind != JobKind.TEXT
+                or text_primary is not None
+            ) and (
+                not single_candidate_retry
+                or node.data.current_version_id is None
+            )
+            if should_display_version:
                 node = node.model_copy(update={
                     "data": node.data.model_copy(update={
-                        "current_version_id": primary_version_id,
+                        "current_version_id": (
+                            text_primary.version_id
+                            if job.kind == JobKind.TEXT and text_primary is not None
+                            else primary_version_id
+                        ),
                     })
                 })
+            if node.type == "text":
+                result_node = node
         nodes.append(node)
+    connections = list(current.connections)
+    if (
+        job.kind == JobKind.TEXT
+        and result_node is not None
+        and (len(candidates) > 1 or single_candidate_retry)
+    ):
+        node_width = result_node.size.width if result_node.size is not None else 256
+        node_height = result_node.size.height if result_node.size is not None else 144
+        offsets = {
+            1: (node_width + 120, 0),
+            2: (0, node_height + 120),
+            3: (node_width + 120, node_height + 120),
+        }
+        source_inputs = [
+            connection
+            for connection in current.connections
+            if connection.role == "input"
+            and connection.target_node_id == result_node.id
+        ]
+        for candidate in successful:
+            if candidate.index not in offsets:
+                continue
+            offset_x, offset_y = offsets[candidate.index]
+            slot_key = hashlib.sha256(
+                f"{result_node.id}:{candidate.index}".encode("utf-8")
+            ).hexdigest()[:20]
+            candidate_node_id = f"text-result-{slot_key}"
+            candidate_node = CanvasTextNode(
+                id=candidate_node_id,
+                title=f"{result_node.title[:118]}-{candidate.index + 1}",
+                type="text",
+                position=result_node.position.model_copy(update={
+                    "x": result_node.position.x + offset_x,
+                    "y": result_node.position.y + offset_y,
+                }),
+                size=result_node.size,
+                z_index=result_node.z_index,
+                data=result_node.data.model_copy(update={
+                    "current_version_id": candidate.version_id,
+                    "active_run_id": None,
+                }),
+            )
+            existing_index = next(
+                (index for index, node in enumerate(nodes) if node.id == candidate_node_id),
+                None,
+            )
+            if existing_index is None:
+                nodes.append(candidate_node)
+            else:
+                nodes[existing_index] = candidate_node
+            if not any(
+                connection.role == "derivation"
+                and connection.source_node_id == result_node.id
+                and connection.target_node_id == candidate_node_id
+                for connection in connections
+            ):
+                connections.append(CanvasDerivationConnection(
+                    id=f"connection-{secrets.token_hex(12)}",
+                    role="derivation",
+                    source_node_id=result_node.id,
+                    target_node_id=candidate_node_id,
+                    origin=CanvasGenerationRunOrigin(
+                        kind="generation_run",
+                        run_id=context.run_id,
+                    ),
+                ))
+            for connection in source_inputs:
+                if any(
+                    existing.role == "input"
+                    and existing.source_node_id == connection.source_node_id
+                    and existing.target_node_id == candidate_node_id
+                    for existing in connections
+                ):
+                    continue
+                connections.append(CanvasInputConnection(
+                    id=f"connection-{secrets.token_hex(12)}",
+                    role="input",
+                    source_node_id=connection.source_node_id,
+                    target_node_id=candidate_node_id,
+                ))
     timestamp = _now()
     updated = current.model_copy(update={
         "revision": current.revision + 1,
         "updated_at": timestamp,
         "nodes": nodes,
+        "connections": connections,
         "content_versions": {
             **current.content_versions,
             **{version.version_id: version for version in versions},

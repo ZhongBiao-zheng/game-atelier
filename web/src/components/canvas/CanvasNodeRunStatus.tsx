@@ -1,6 +1,5 @@
-import { LoaderCircle, RotateCcw } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
@@ -68,7 +67,7 @@ export function canvasNodeRunState(
       label: reversePrompt ? '分析失败' : '生成失败',
       detail: canvasNodeRunDisplayError(
         job.error,
-        reversePrompt ? '反推提示词失败，可按原设置重试' : '生成失败，可按原设置重试',
+        reversePrompt ? '反推提示词失败，请检查设置后重新生成' : '生成失败，请检查设置后重新生成',
       ),
       job,
       reversePrompt,
@@ -119,17 +118,11 @@ export function CanvasNodeRunLiveRegion({ state }: { state: CanvasNodeRunState }
 }
 
 export function CanvasNodeRunOverlay({
-  node,
   state,
   hasContent,
-  submitting,
-  onRetry,
 }: {
-  node: CanvasNode;
   state: CanvasNodeRunState;
   hasContent: boolean;
-  submitting: boolean;
-  onRetry: (nodeId: string, runId: string) => void;
 }) {
   if (state.status !== 'loading' && state.status !== 'error') return null;
   const compact = hasContent;
@@ -163,22 +156,6 @@ export function CanvasNodeRunOverlay({
       >
         {state.detail || state.label}
       </span>
-      {!compact && node.type !== 'text' && state.status === 'error' && state.job?.canvas_run && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="pointer-events-auto"
-          disabled={submitting}
-          onClick={event => {
-            event.stopPropagation();
-            onRetry(node.id, state.job!.canvas_run!.run_id);
-          }}
-        >
-          {submitting ? <LoaderCircle aria-hidden="true" /> : <RotateCcw aria-hidden="true" />}
-          {submitting ? '提交中…' : '按原设置重试'}
-        </Button>
-      )}
     </div>
   );
 }

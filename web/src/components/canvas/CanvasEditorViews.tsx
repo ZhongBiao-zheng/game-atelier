@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, RotateCcw, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -209,14 +209,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const emptyMediaNode = node.type !== 'text' && isCanvasContentNode(node) && !content
     ? node
     : null;
-  const hasConnectedInputs = (context.connectedMaterialNodeIdsByNodeId.get(node.id)?.size ?? 0) > 0;
-  const hasRunToolbarAction = Boolean(
-    nodeJob?.canvas_run
-    && (nodeRunState.status === 'loading' || nodeRunState.status === 'error'),
-  );
-  const hideEmptyMediaToolbar = Boolean(
-    emptyMediaNode && hasConnectedInputs && !hasRunToolbarAction,
-  );
   const reversePromptJob = nodeJob && isReversePromptJob(nodeJob) ? nodeJob : undefined;
   const reversePromptSucceeded = reversePromptJob?.canvas_run?.candidates.some(candidate => candidate.status === 'succeeded') ?? false;
   const imageCandidates = node.type === 'image'
@@ -347,7 +339,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
       <NodeToolbar
         isVisible={
           !context.multiSelectionActive
-          && !hideEmptyMediaToolbar
           && (selected || toolbarOverlayOpen)
         }
         position={Position.Top}
@@ -369,15 +360,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           onClick={event => event.stopPropagation()}
           onKeyDown={handleToolbarKeyDown}
         >
-          {node.type !== 'text' && nodeRunState.status === 'error' && nodeJob?.canvas_run && (
-            <MediaToolButton
-              label={nodeRunState.reversePrompt ? '按原设置重试反推提示词' : `按原设置重试 ${node.title}`}
-              disabled={submittingNode}
-              onClick={() => void context.retryRun(node.id, nodeJob.canvas_run!.run_id, 'original')}
-            >
-              {submittingNode ? <LoaderCircle /> : <RotateCcw />}
-            </MediaToolButton>
-          )}
           {nodeRunState.status === 'loading' && nodeJob?.canvas_run && (
             <MediaToolButton
               label={nodeRunState.reversePrompt
@@ -390,15 +372,13 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
             </MediaToolButton>
           )}
           {emptyMediaNode ? (
-            !hasConnectedInputs && (
-              <MediaToolButton
-                label={`上传${CANVAS_GENERATION_MODE_LABELS[emptyMediaNode.type]}`}
-                disabled={replacingMedia}
-                onClick={() => context.replaceMedia(emptyMediaNode)}
-              >
-                {replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}
-              </MediaToolButton>
-            )
+            <MediaToolButton
+              label={`上传${CANVAS_GENERATION_MODE_LABELS[emptyMediaNode.type]}`}
+              disabled={replacingMedia}
+              onClick={() => context.replaceMedia(emptyMediaNode)}
+            >
+              {replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}
+            </MediaToolButton>
           ) : node.type === 'image' ? (
             <>
               <ImageNodeToolbar
@@ -554,11 +534,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
             </span>
           )}
           {isCanvasContentNode(node) && node.type !== 'text' && !content && (
-            <EmptyMediaSurface
-              node={node}
-              replacing={replacingMedia}
-              onUpload={() => context.replaceMedia(node)}
-            />
+            <EmptyMediaSurface node={node} />
           )}
           {node.type === 'config' && (
             <CanvasConfigNodeSurface node={node} context={context} />
@@ -572,11 +548,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
       </article>
       <CanvasNodeRunLiveRegion state={nodeRunState} />
       <CanvasNodeRunOverlay
-        node={node}
         state={nodeRunState}
         hasContent={Boolean(content)}
-        submitting={submittingNode}
-        onRetry={(nodeId, runId) => void context.retryRun(nodeId, runId, 'original')}
       />
       {canvasNodeAcceptsInput(node) && (
         <Handle type="target" position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
@@ -666,12 +639,6 @@ function ImageCandidateBatch({
       {primaryTerminalFailure && !disabled && (
         <CandidateFailureActions
           number={primary.candidate.index + 1}
-          onRetry={() => void context.retryRun(
-            node.id,
-            primary.job.canvas_run!.run_id,
-            'original',
-            primary.candidate.candidate_id,
-          )}
           onDismiss={() => void context.dismissCandidate(
             primary.job.canvas_run!.run_id,
             primary.candidate.candidate_id,
@@ -762,12 +729,6 @@ function ImageCandidateCard({
       {terminalFailure && !disabled && (
         <CandidateFailureActions
           number={candidate.index + 1}
-          onRetry={() => void context.retryRun(
-            node.id,
-            entry.job.canvas_run!.run_id,
-            'original',
-            candidate.candidate_id,
-          )}
           onDismiss={() => void context.dismissCandidate(
             entry.job.canvas_run!.run_id,
             candidate.candidate_id,
@@ -780,27 +741,13 @@ function ImageCandidateCard({
 
 function CandidateFailureActions({
   number,
-  onRetry,
   onDismiss,
 }: {
   number: number;
-  onRetry: () => void;
   onDismiss: () => void;
 }) {
   return (
     <div className="pointer-events-auto absolute bottom-2 right-2 z-20 flex items-center gap-1.5">
-      <button
-        type="button"
-        aria-label={`重试候选 ${number}`}
-        title="按原设置重试这个候选"
-        className="grid size-8 place-items-center rounded-full border border-border bg-glass text-muted-foreground backdrop-blur-glass transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        onClick={event => {
-          event.stopPropagation();
-          onRetry();
-        }}
-      >
-        <RotateCcw className="size-4" aria-hidden="true" />
-      </button>
       <button
         type="button"
         aria-label={`删除候选 ${number}`}
@@ -1612,39 +1559,16 @@ export function CanvasGenerationComposer({
           </Button>
         )}
         {!running && activeJob && runId && (
-          textMode ? (
-            <Button
-              type="button"
-              size="sm"
-              className="ml-auto"
-              disabled={submitting || hasMissingMentions || !draft.prompt.trim() || !draft.alias || !selectedModel}
-              onClick={() => void context.retryRun(node.id, runId, 'current')}
-            >
-              {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
-              {submitting ? '提交中…' : '生成'}
-            </Button>
-          ) : <>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="ml-auto"
-              disabled={submitting}
-              onClick={() => void context.retryRun(node.id, runId, 'original')}
-            >
-              <RotateCcw aria-hidden="true" />
-              原设置重试
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={submitting || hasMissingMentions || !draft.prompt.trim() || !draft.alias || !selectedModel}
-              onClick={() => void context.retryRun(node.id, runId, 'current')}
-            >
-              {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
-              {submitting ? '提交中…' : '当前设置再生成'}
-            </Button>
-          </>
+          <Button
+            type="button"
+            size="sm"
+            className="ml-auto"
+            disabled={submitting || hasMissingMentions || !draft.prompt.trim() || !draft.alias || !selectedModel}
+            onClick={() => void context.retryRun(node.id, runId, 'current')}
+          >
+            {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+            {submitting ? '提交中…' : '生成'}
+          </Button>
         )}
         {!running && !activeJob && (
           <Button
@@ -1847,7 +1771,7 @@ function CandidateHistory({
         context={context}
         nodeId={nodeId}
         primaryVersionId={primaryVersionId}
-        retryDisabled={running || submitting}
+        actionsDisabled={running || submitting}
       />
       {history.length > 0 && (
         <details className="mt-2 text-xs text-muted-foreground">
@@ -1858,7 +1782,7 @@ function CandidateHistory({
             context={context}
             nodeId={nodeId}
             primaryVersionId={primaryVersionId}
-            retryDisabled={running || submitting}
+            actionsDisabled={running || submitting}
           />
         </details>
       )}
@@ -1872,18 +1796,18 @@ function CandidateGrid({
   context,
   nodeId,
   primaryVersionId,
-  retryDisabled,
+  actionsDisabled,
 }: {
   label: string;
   entries: CanvasCandidateEntry[];
   context: CanvasNodeContextValue;
   nodeId: string;
   primaryVersionId: string | null;
-  retryDisabled: boolean;
+  actionsDisabled: boolean;
 }) {
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={label}>
-      {entries.map(({ job, candidate }) => {
+      {entries.map(({ candidate }) => {
         const version = candidate.version_id ? context.contentVersions[candidate.version_id] : undefined;
         return (
           <div
@@ -1909,7 +1833,7 @@ function CandidateGrid({
             <span className="absolute left-1.5 top-1.5 rounded bg-background/80 px-1.5 py-0.5 text-xs text-muted-foreground">
               {candidate.index + 1}
             </span>
-            {!retryDisabled && candidate.version_id && candidate.version_id !== primaryVersionId && (
+            {!actionsDisabled && candidate.version_id && candidate.version_id !== primaryVersionId && (
               <button
                 type="button"
                 aria-label={`将候选 ${candidate.index + 1} 设为主结果`}
@@ -1918,25 +1842,6 @@ function CandidateGrid({
                 onClick={() => context.selectCandidate(nodeId, candidate.version_id!)}
               >
                 <Check className="size-3.5" aria-hidden="true" />
-              </button>
-            )}
-            {!retryDisabled
-              && job.canvas_run
-              && (candidate.status === 'failed' || candidate.status === 'canceled')
-              && (
-              <button
-                type="button"
-                aria-label={`重试候选 ${candidate.index + 1}`}
-                title="按原设置重试这个候选"
-                className="absolute bottom-1.5 right-1.5 grid size-7 place-items-center rounded-full border border-border bg-background/90 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                onClick={() => void context.retryRun(
-                  nodeId,
-                  job.canvas_run!.run_id,
-                  'original',
-                  candidate.candidate_id,
-                )}
-              >
-                <RotateCcw className="size-3.5" aria-hidden="true" />
               </button>
             )}
           </div>
@@ -2085,12 +1990,8 @@ function textScaleClass(scale: 'xs' | 'sm' | 'base') {
 
 function EmptyMediaSurface({
   node,
-  replacing,
-  onUpload,
 }: {
   node: Exclude<CanvasContentNode, { type: 'text' }>;
-  replacing: boolean;
-  onUpload: () => void;
 }) {
   const label = node.type === 'image' ? '图片' : node.type === 'video' ? '视频' : '音频';
   const Icon = node.type === 'image' ? FileImage : node.type === 'video' ? FileVideo : FileAudio;
@@ -2101,21 +2002,6 @@ function EmptyMediaSurface({
           <Icon className="size-6 opacity-50" aria-hidden="true" />
         </span>
         <span className="text-xs">空{label}节点</span>
-        <button
-          type="button"
-          aria-label={`上传${label}到 ${node.title}`}
-          disabled={replacing}
-          className="nodrag nowheel inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-transparent px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
-          onClick={event => {
-            event.stopPropagation();
-            onUpload();
-          }}
-          onPointerDown={event => event.stopPropagation()}
-          onDoubleClick={event => event.stopPropagation()}
-        >
-          {replacing ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" /> : <FileUp className="size-3.5" aria-hidden="true" />}
-          上传{label}
-        </button>
       </div>
     </div>
   );
