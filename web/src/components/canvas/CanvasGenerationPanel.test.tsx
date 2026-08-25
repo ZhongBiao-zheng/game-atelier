@@ -24,6 +24,10 @@ vi.mock('@xyflow/react', () => ({
   Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
 }));
 
+vi.mock('@/lib/videoFrame', () => ({
+  useVideoFrame: (url: string | null) => url ? `${url}#frame` : null,
+}));
+
 const draft = {
   mode: 'image' as const,
   prompt: '',
@@ -680,6 +684,9 @@ it('plays a silent connected-video preview only while its material is hovered', 
   );
 
   const materialButton = screen.getByRole('button', { name: '查看已对接素材 荒原镜头' });
+  const thumbnail = materialButton.querySelector('img[data-canvas-material-thumbnail="video-source"]');
+  expect(thumbnail).toHaveAttribute('src', `${material.previewUrl}#frame`);
+
   fireEvent.mouseEnter(materialButton);
   const detail = screen.getByRole('tooltip', { name: '素材详情 荒原镜头' });
   const video = within(detail).getByLabelText('荒原镜头');

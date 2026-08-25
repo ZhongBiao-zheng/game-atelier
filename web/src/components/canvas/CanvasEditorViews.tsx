@@ -37,6 +37,7 @@ import { imageControlCaps } from '@/lib/imageControlCaps';
 import { VideoControls } from '@/components/studio/VideoControls';
 import { cn } from '@/lib/utils';
 import { presentCanvasCandidates, type CanvasCandidateEntry } from '@/lib/canvasCandidates';
+import { useVideoFrame } from '@/lib/videoFrame';
 import {
   missingCanvasMentionIds,
   mentionKindLabel,
@@ -1777,6 +1778,9 @@ function CanvasMaterialHoverDetail({
 }
 
 function CanvasMaterialPreview({ reference }: { reference: CanvasMaterialReference }) {
+  const videoFrame = useVideoFrame(
+    reference.kind === 'video' ? reference.previewUrl ?? null : null,
+  );
   if (reference.kind === 'image' && reference.previewUrl) {
     return (
       <img
@@ -1786,6 +1790,17 @@ function CanvasMaterialPreview({ reference }: { reference: CanvasMaterialReferen
         decoding="async"
         draggable={false}
         className="size-full object-cover"
+      />
+    );
+  }
+  if (reference.kind === 'video' && videoFrame) {
+    return (
+      <img
+        src={videoFrame}
+        alt=""
+        data-canvas-material-thumbnail={reference.nodeId}
+        draggable={false}
+        className="size-full bg-black object-cover"
       />
     );
   }

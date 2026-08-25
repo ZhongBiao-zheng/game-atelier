@@ -119,7 +119,7 @@ Status: completed
 | D12 | 文本推理强度 auto/low/medium/high/xhigh | `text-settings-panel.tsx`、`pending-test` | adapted：仅 `openai-responses` 展示并发送 reasoning，auto 省略协议参数；文本候选数 1–4 | full |
 | D13 | 视频尺寸、时长、质量、音频、水印 | `video-settings-panel.tsx` | adapted：按 provider capability 显示 | full |
 | D14 | 音色、格式、速度、instructions | `audio-settings-panel.tsx` | adapted：按 provider capability 显示，关闭前原子提交本地草稿，服务端再次归一化 | full |
-| D15 | `@` 引用已连接文本/图片/视频/音频 | prompt chip/resource mention components | adapted：提示词上方独立素材条可点击查看，通过 `+` 增删真实 Input Connection，并在 hover/聚焦时显示图片、视频、文本或音频详情；不自动改写稳定 node token，missing 继续双端拒绝（issue 34） | full |
+| D15 | `@` 引用已连接文本/图片/视频/音频 | prompt chip/resource mention components | adapted：提示词上方独立素材条可点击查看，图片显示缩略图、视频显示首帧，通过 `+` 增删真实 Input Connection，并在 hover/聚焦时显示图片、视频、文本或音频详情；不自动改写稳定 node token，missing 继续双端拒绝（issue 34） | full |
 | D16 | 提交前根据当前连接重新编号引用 | runtime composer 文案 | adapted：冻结输入后按模态与真实数组顺序重编号（issue 34） | full |
 | D17 | 图片数量 N 立即创建 N 个槽位并独立更新 | multi-image metadata、`pending-test` | adapted：一轮 Job 内逐槽执行并即时登记（issue 35） | full |
 | D18 | 多图收起堆叠、展开、设主图 | `canvas-node.tsx`、`pending-test` | same：结果节点拥有堆叠与展开候选（issue 35） | full |
