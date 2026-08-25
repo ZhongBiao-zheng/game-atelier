@@ -16,7 +16,7 @@ vi.mock('@xyflow/react', () => ({
     isVisible?: boolean;
   } & React.HTMLAttributes<HTMLDivElement>) => isVisible ? <div {...props}>{children}</div> : null,
   Handle: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
-  Position: { Left: 'left', Right: 'right' },
+  Position: { Left: 'left', Right: 'right', Top: 'top' },
 }));
 
 const draft = {
@@ -361,7 +361,7 @@ it('keeps populated media playable inside the node without opening preview from 
   expect(context.previewContent).not.toHaveBeenCalled();
 });
 
-it('keeps an unselected image toolbar mounted while its portal menu is open', async () => {
+it('shows the image toolbar after selection and keeps it mounted while its portal menu is open', async () => {
   const image = {
     ...nodes[1],
     data: { ...nodes[1].data, current_version_id: 'version-image' },
@@ -384,21 +384,32 @@ it('keeps an unselected image toolbar mounted while its portal menu is open', as
     },
   });
 
-  const { container } = render(
+  const { rerender } = render(
     <CanvasNodeContext.Provider value={context}>
       <NodeCard data={{ domain: image }} selected={false} />
     </CanvasNodeContext.Provider>,
   );
 
-  fireEvent.pointerEnter(container.querySelector('.canvas-node-shell')!);
+  fireEvent.pointerEnter(screen.getByRole('group', { name: '选择节点 图片，待编辑' }));
+  expect(screen.queryByRole('toolbar', { name: '图片 节点工具' })).not.toBeInTheDocument();
+
+  rerender(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: image }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+
   const toolbar = screen.getByRole('toolbar', { name: '图片 节点工具' });
   const moreButton = within(toolbar).getByRole('button', { name: '更多 图片 图片工具' });
   act(() => moreButton.focus());
   fireEvent.keyDown(moreButton, { key: 'Enter' });
   expect(await screen.findByRole('menu')).toBeInTheDocument();
 
-  fireEvent.pointerLeave(toolbar);
-  await act(() => new Promise(resolve => window.setTimeout(resolve, 160)));
+  rerender(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: image }} selected={false} />
+    </CanvasNodeContext.Provider>,
+  );
 
   expect(document.querySelector('[data-canvas-node-toolbar="image"]')).toBeInTheDocument();
   expect(screen.getByRole('menu')).toBeInTheDocument();

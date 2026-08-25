@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ChevronRight, ClipboardCopy, Crop, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Grid2X2, Library, LoaderCircle, Lock, MessageSquare, Minus, Orbit, Paintbrush, Pencil, Plus, RotateCcw, ScanText, Sparkles, Square, Trash2, Type, Unlock, X, ZoomIn } from 'lucide-react';
+import { Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, MessageSquare, Minus, Pencil, Plus, RotateCcw, Sparkles, Square, Trash2, Type, Unlock, X } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -24,10 +24,6 @@ import {
 } from '@/components/canvas/CanvasNodeRunStatus';
 import { formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
 import { orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
-import {
-  canvasNodePanelOffsetX,
-  canvasNodePanelWidth,
-} from '@/components/canvas/canvasNodePanelPlacement';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -131,22 +127,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const titleTriggerRef = useRef<HTMLButtonElement>(null);
   const textEditorRef = useRef<HTMLTextAreaElement>(null);
   const contentSurfaceRef = useRef<HTMLElement>(null);
-  const shellRef = useRef<HTMLDivElement>(null);
   const titleExitInProgress = useRef(false);
   const restoreTitleFocus = useRef(false);
-  const toolbarHideTimer = useRef<number | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const generationPanelAnchorRef = useRef<HTMLDivElement>(null);
-  const toolbarOffsetXRef = useRef(0);
-  const generationPanelOffsetXRef = useRef(0);
-  const toolbarOverlayOpenRef = useRef(false);
-  const [toolbarActive, setToolbarActive] = useState(false);
   const [toolbarOverlayOpen, setToolbarOverlayOpen] = useState(false);
-  const [toolbarPosition, setToolbarPosition] = useState(Position.Top);
   const [candidateBatchExpanded, setCandidateBatchExpanded] = useState(false);
-  const [toolbarOffsetX, setToolbarOffsetX] = useState(0);
-  const [generationPanelOffsetX, setGenerationPanelOffsetX] = useState(0);
-  const [generationPanelViewportWidth, setGenerationPanelViewportWidth] = useState(() => window.innerWidth);
   const draft = generationDraft(node);
   const generationPanelVisible = Boolean(
     context
@@ -155,31 +140,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     && !context.generationPanel.narrowViewport
     && context.generationPanel.dismissedNodeId !== node.id,
   );
-  const generationPanelWidth = canvasNodePanelWidth(
-    generationPanelViewportWidth,
-  );
+  const generationPanelWidth = 608;
   const viewportZoom = context?.generationPanel.viewportZoom;
   const generationPanelZoom = viewportZoom && Number.isFinite(viewportZoom) && viewportZoom > 0
     ? viewportZoom
     : 1;
-  const showToolbar = useCallback(() => {
-    if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
-    toolbarHideTimer.current = null;
-    setToolbarActive(true);
-  }, []);
-  const scheduleToolbarHide = useCallback(() => {
-    if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
-    toolbarHideTimer.current = window.setTimeout(() => {
-      toolbarHideTimer.current = null;
-      if (!toolbarOverlayOpenRef.current) setToolbarActive(false);
-    }, 120);
-  }, []);
-  const updateToolbarOverlayOpen = useCallback((open: boolean) => {
-    toolbarOverlayOpenRef.current = open;
-    setToolbarOverlayOpen(open);
-    if (open) showToolbar();
-    else scheduleToolbarHide();
-  }, [scheduleToolbarHide, showToolbar]);
   useEffect(() => {
     if (!isEditingTitle) setTitleDraft(node.title);
   }, [isEditingTitle, node.title]);
@@ -200,101 +165,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     restoreTitleFocus.current = false;
     titleExitInProgress.current = false;
   }, [isEditingTitle, node.title]);
-  useEffect(() => () => {
-    if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
-  }, []);
   useEffect(() => {
-    if (!selected && !toolbarActive && !toolbarOverlayOpen) return;
+    if (!selected && !toolbarOverlayOpen) return;
     const controls = toolbarControls(toolbarRef.current);
     const activeControl = controls.find(control => control === document.activeElement) ?? controls[0];
     updateToolbarTabStops(controls, activeControl);
   });
-  useEffect(() => {
-    if (!selected && !toolbarActive && !toolbarOverlayOpen) return;
-    let frame = 0;
-    const updatePlacement = () => {
-      const shell = shellRef.current;
-      const toolbar = toolbarRef.current;
-      const toolbarAnchor = toolbar?.parentElement;
-      if (!shell || !toolbar || !toolbarAnchor) return;
-      const nodeRect = shell.getBoundingClientRect();
-      const toolbarRect = toolbar.getBoundingClientRect();
-      const anchorRect = toolbarAnchor.getBoundingClientRect();
-      if (!nodeRect.width || !nodeRect.height || !toolbarRect.width || !toolbarRect.height) return;
-      const margin = 16;
-      const topSpace = nodeRect.top - margin;
-      const bottomSpace = window.innerHeight - nodeRect.bottom - margin;
-      const nextPosition = topSpace >= toolbarRect.height + 32 || topSpace >= bottomSpace
-        ? Position.Top
-        : Position.Bottom;
-      if (nextPosition !== toolbarPosition) setToolbarPosition(nextPosition);
-
-      const currentOffset = toolbarOffsetXRef.current;
-      const baseLeft = anchorRect.left;
-      const baseRight = anchorRect.right;
-      let nextOffset = 0;
-      if (baseLeft < margin) nextOffset = margin - baseLeft;
-      if (baseRight + nextOffset > window.innerWidth - margin) {
-        nextOffset -= baseRight + nextOffset - (window.innerWidth - margin);
-      }
-      if (Math.abs(nextOffset - currentOffset) >= 0.5) {
-        toolbarOffsetXRef.current = nextOffset;
-        setToolbarOffsetX(nextOffset);
-      }
-    };
-    frame = window.requestAnimationFrame(updatePlacement);
-    const observer = new MutationObserver(updatePlacement);
-    if (toolbarRef.current?.parentElement) {
-      observer.observe(toolbarRef.current.parentElement, {
-        attributes: true,
-        attributeFilter: ['style'],
-      });
-    }
-    window.addEventListener('resize', updatePlacement);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      observer.disconnect();
-      window.removeEventListener('resize', updatePlacement);
-    };
-  }, [selected, toolbarActive, toolbarOverlayOpen, toolbarPosition]);
-  useEffect(() => {
-    if (!generationPanelVisible) return;
-    let frame = 0;
-    const updatePlacement = () => {
-      const anchor = generationPanelAnchorRef.current;
-      if (!anchor) return;
-      setGenerationPanelViewportWidth(current => current === window.innerWidth ? current : window.innerWidth);
-      const zoom = generationPanelZoom;
-      const rect = anchor.getBoundingClientRect();
-      if (!rect.width) return;
-      const previousOffset = generationPanelOffsetXRef.current;
-      const previousScreenOffset = previousOffset * zoom;
-      const nextOffset = canvasNodePanelOffsetX({
-        left: rect.left - previousScreenOffset,
-        right: rect.right - previousScreenOffset,
-      }, window.innerWidth, zoom);
-      if (Math.abs(nextOffset - previousOffset) < 0.5) return;
-      generationPanelOffsetXRef.current = nextOffset;
-      setGenerationPanelOffsetX(nextOffset);
-    };
-    frame = window.requestAnimationFrame(updatePlacement);
-    const nodeElement = shellRef.current?.closest('.react-flow__node');
-    const viewportElement = shellRef.current?.closest('.react-flow__viewport');
-    const mutationObserver = new MutationObserver(updatePlacement);
-    if (nodeElement) mutationObserver.observe(nodeElement, { attributes: true, attributeFilter: ['style'] });
-    if (viewportElement) mutationObserver.observe(viewportElement, { attributes: true, attributeFilter: ['style'] });
-    const resizeObserver = typeof ResizeObserver === 'undefined'
-      ? null
-      : new ResizeObserver(updatePlacement);
-    if (generationPanelAnchorRef.current) resizeObserver?.observe(generationPanelAnchorRef.current);
-    window.addEventListener('resize', updatePlacement);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      mutationObserver.disconnect();
-      resizeObserver?.disconnect();
-      window.removeEventListener('resize', updatePlacement);
-    };
-  }, [generationPanelVisible, generationPanelWidth, generationPanelZoom]);
   if (!context) return null;
   const renameNode = context.renameNode;
   const content = contentForNode(node, context.contentVersions);
@@ -364,13 +240,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
 
   return (
     <div
-      ref={shellRef}
       className="canvas-node-shell group relative h-full w-full overflow-visible"
       data-selected={selected ? 'true' : 'false'}
-      onPointerEnter={showToolbar}
-      onPointerLeave={scheduleToolbarHide}
-      onFocusCapture={showToolbar}
-      onBlurCapture={scheduleToolbarHide}
     >
       <NodeResizer
         isVisible={selected && !replacingMedia}
@@ -440,27 +311,22 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         <CanvasNodeRunBadge state={nodeRunState} />
       </header>
       <NodeToolbar
-        isVisible={selected || toolbarActive || toolbarOverlayOpen}
-        position={toolbarPosition}
+        isVisible={selected || toolbarOverlayOpen}
+        position={Position.Top}
         align="center"
         offset={32}
-        className="nodrag nowheel max-w-[calc(100vw-2rem)]"
+        className="nodrag nowheel"
       >
         <div
           ref={toolbarRef}
           role="toolbar"
           aria-label={`${node.title} 节点工具`}
           data-canvas-node-toolbar={node.id}
-          className="flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-border bg-glass p-1 backdrop-blur-glass shell-glow"
-          style={{ transform: `translateX(${toolbarOffsetX}px)` }}
-          onPointerEnter={showToolbar}
-          onPointerLeave={scheduleToolbarHide}
+          className="flex items-center gap-1 rounded-xl border border-border bg-glass p-1 backdrop-blur-glass shell-glow"
           onFocusCapture={event => {
-            showToolbar();
             const focused = (event.target as HTMLElement).closest<HTMLElement>('button, a[href]');
             updateToolbarTabStops(toolbarControls(event.currentTarget), focused);
           }}
-          onBlurCapture={scheduleToolbarHide}
           onPointerDown={event => event.stopPropagation()}
           onClick={event => event.stopPropagation()}
           onKeyDown={handleToolbarKeyDown}
@@ -494,7 +360,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
                 submitting={submittingNode}
                 copyablePrompt={copyablePrompt}
                 context={context}
-                onOverlayOpenChange={updateToolbarOverlayOpen}
+                onOverlayOpenChange={setToolbarOverlayOpen}
               />
               {reversePromptJob && reversePromptSucceeded && !context.reversePromptConfiguredNodeIds.has(node.id) && (
                 <MediaToolButton
@@ -658,11 +524,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
       )}
       {generationPanelVisible && draft && (
         <div
-          ref={generationPanelAnchorRef}
           data-canvas-node-panel-anchor={node.id}
           className="absolute z-20"
           style={{
-            left: `calc(50% + ${generationPanelOffsetX}px)`,
+            left: '50%',
             top: `calc(100% + ${16 / generationPanelZoom}px)`,
             width: generationPanelWidth,
             marginLeft: -generationPanelWidth / 2,
@@ -1841,147 +1706,6 @@ function CandidateGrid({
         );
       })}
     </div>
-  );
-}
-
-export function CanvasInspector({
-  node,
-  updateNode,
-  updateText,
-  recordHistory,
-  deleteNode,
-  projectId,
-  contentVersions,
-  hideOnMobile = false,
-  onPreview,
-  onSaveAsset,
-  onCopyPrompt,
-  onReversePrompt,
-  onReplaceMedia,
-  onToggleFreeResize,
-  downloadHref,
-  onCrop,
-  onMaskEdit,
-  onAngle,
-  onEditVideo,
-  onSplit,
-  onUpscale,
-  replaceMediaBusy = false,
-  reversePromptBusy = false,
-  saveAssetBusy = false,
-}: {
-  node: CanvasContentNode;
-  updateNode: (updater: (node: CanvasNode) => CanvasNode) => void;
-  updateText: (text: string) => void;
-  recordHistory: () => void;
-  deleteNode: () => void;
-  projectId: string;
-  contentVersions: Readonly<Record<string, CanvasContentVersion>>;
-  hideOnMobile?: boolean;
-  onPreview?: () => void;
-  onSaveAsset?: () => void;
-  onCopyPrompt?: () => void;
-  onReversePrompt?: () => void;
-  onReplaceMedia?: () => void;
-  onToggleFreeResize?: () => void;
-  downloadHref?: string;
-  onCrop?: () => void;
-  onMaskEdit?: () => void;
-  onAngle?: () => void;
-  onEditVideo?: () => void;
-  onSplit?: () => void;
-  onUpscale?: () => void;
-  replaceMediaBusy?: boolean;
-  reversePromptBusy?: boolean;
-  saveAssetBusy?: boolean;
-}) {
-  const content = contentForNode(node, contentVersions);
-  return (
-    <aside className={cn(
-      'canvas-inspector-panel absolute inset-x-3 bottom-3 z-20 rounded-xl border border-border bg-glass p-3 backdrop-blur-glass shell-glow md:bottom-auto md:left-auto md:right-4 md:top-20 md:block md:w-72',
-      hideOnMobile && 'hidden',
-    )}>
-      <div className="mb-3 flex flex-col gap-2">
-        <p className="truncate text-sm font-medium">{node.title}</p>
-        <div className="flex flex-wrap items-center justify-end gap-1">
-          {content && onPreview && (
-            <Button variant="ghost" size="icon" aria-label={`查看 ${node.title} 详情`} onClick={onPreview}><Eye /></Button>
-          )}
-          {content && content.kind !== 'text' && downloadHref && (
-            <Button asChild variant="ghost" size="icon">
-              <a href={downloadHref} aria-label={`下载 ${node.title}`}><Download /></a>
-            </Button>
-          )}
-          {onCopyPrompt && (
-            <Button variant="ghost" size="icon" aria-label={`复制 ${node.title} 的生成提示词`} onClick={onCopyPrompt}><ClipboardCopy /></Button>
-          )}
-          {content?.kind === 'image' && onReversePrompt && (
-            <Button variant="ghost" size="icon" disabled={reversePromptBusy || replaceMediaBusy} aria-label={`反推 ${node.title} 的提示词`} onClick={onReversePrompt}>
-              {reversePromptBusy ? <LoaderCircle className="animate-spin" /> : <ScanText />}
-            </Button>
-          )}
-          {content && content.kind !== 'text' && onReplaceMedia && (
-            <Button variant="ghost" size="icon" disabled={replaceMediaBusy} aria-label={`替换 ${node.title}`} onClick={onReplaceMedia}>
-              {replaceMediaBusy ? <LoaderCircle className="animate-spin" /> : <FileUp />}
-            </Button>
-          )}
-          {node.type === 'image' && content?.kind === 'image' && onToggleFreeResize && (
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={node.data.display.free_resize ? `锁定 ${node.title} 比例` : `自由缩放 ${node.title}`}
-              disabled={replaceMediaBusy}
-              onClick={onToggleFreeResize}
-            >
-              {node.data.display.free_resize ? <Lock /> : <Unlock />}
-            </Button>
-          )}
-          {content?.kind === 'image' && onCrop && (
-            <Button variant="ghost" size="icon" disabled={replaceMediaBusy} aria-label={`裁剪 ${node.title}`} onClick={onCrop}><Crop /></Button>
-          )}
-          {content?.kind === 'image' && onMaskEdit && (
-            <Button variant="ghost" size="icon" disabled={replaceMediaBusy || reversePromptBusy} aria-label={`局部编辑 ${node.title}`} onClick={onMaskEdit}><Paintbrush /></Button>
-          )}
-          {content?.kind === 'image' && onAngle && (
-            <Button variant="ghost" size="icon" disabled={replaceMediaBusy || reversePromptBusy} aria-label={`多角度 ${node.title}`} onClick={onAngle}><Orbit /></Button>
-          )}
-          {content?.kind === 'video' && onEditVideo && (
-            <Button variant="ghost" size="icon" disabled={replaceMediaBusy || reversePromptBusy} aria-label={`编辑视频 ${node.title}`} onClick={onEditVideo}><MessageSquare /></Button>
-          )}
-          {content?.kind === 'image' && onSplit && (
-            <Button variant="ghost" size="icon" disabled={replaceMediaBusy} aria-label={`切分 ${node.title}`} onClick={onSplit}><Grid2X2 /></Button>
-          )}
-          {content?.kind === 'image' && onUpscale && (
-            <Button variant="ghost" size="icon" disabled={replaceMediaBusy} aria-label={`本地放大 ${node.title}`} onClick={onUpscale}><ZoomIn /></Button>
-          )}
-          {content && onSaveAsset && (
-            <Button variant="ghost" size="icon" disabled={saveAssetBusy} aria-label={`将 ${node.title} 存入资产库`} onClick={onSaveAsset}><Library /></Button>
-          )}
-          <Button variant="ghost" size="icon" aria-label="删除选中节点" onClick={deleteNode}><Trash2 /></Button>
-        </div>
-      </div>
-      <input
-        aria-label="节点标题"
-        value={node.title}
-        maxLength={120}
-        onFocus={recordHistory}
-        onChange={event => updateNode(current => ({ ...current, title: event.target.value || '未命名节点' }))}
-        className="canvas-input mb-2"
-      />
-      {node.type === 'text' && (
-        <textarea
-          aria-label="文本内容"
-          rows={8}
-          value={content?.kind === 'text' ? content.text : ''}
-          onFocus={recordHistory}
-          onChange={event => updateText(event.target.value)}
-          className="canvas-input resize-y"
-        />
-      )}
-      {content && content.kind !== 'text' && (
-        <MediaPreview kind={content.kind} src={canvasMediaUrl(projectId, content.version_id)} compact />
-      )}
-    </aside>
   );
 }
 

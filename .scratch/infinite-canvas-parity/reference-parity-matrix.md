@@ -94,8 +94,8 @@ Status: completed
 | C09 | 四角 resize、图片比例锁/自由变形 | `canvas-node.tsx`、`freeResize` | adapted：React Flow NodeResizer | full |
 | C10 | 左右连接柄与有向连接 | `canvas-connections.tsx` | adapted：React Flow Handle/Edge；统一校验、空白创建、撤销持久化与有证据派生恢复，见 issue 28 | full |
 | C11 | 配置节点之间禁止连接 | 运行时文案 `configConnection` | same | full |
-| C12 | 节点 hover 工具条跟随节点 | `canvas-node-hover-toolbar.tsx` | same structure + Atelier styling | full |
-| C13 | 节点信息/JSON 双视图 | `CanvasNodeInfoModal` | same | full |
+| C12 | 节点工具条跟随节点 | `canvas-node-hover-toolbar.tsx` | adapted：点击选中后固定出现在节点上方，反向补偿缩放并允许随节点移出视口 | full |
+| C13 | 节点信息/JSON/检查器视图 | `CanvasNodeInfoModal` | excluded：后续产品决策确认实际价值有限，节点操作统一收口到选中态工具条与节点内编辑 | n/a |
 | C14 | 错误节点工具条重试 | `canRetry` / `onRetry` | adapted：validated result Job 按不可变快照重试，见 issue 30 | full |
 | C15 | 节点状态 idle/loading/success/error | `CanvasNodeStatus` | adapted：由 validated result Job 派生且保留旧内容，见 issue 30 | full |
 | C16 | 侧栏按名称/正文/提示词搜索和按类型筛选节点 | `CanvasNodesTab` | same | full |
@@ -209,8 +209,8 @@ Status: completed
 | I01 | 顶部项目/状态/配置区，底部居中工具 dock | runtime screenshots | same spatial hierarchy + Atelier styling：375/768/1024/1440 真实 viewport 核验，见 issue 42 | full |
 | I02 | 左侧资源面板、中央画布、右侧 Agent 三栏可折叠/调整 | runtime/components | same | full |
 | I03 | 节点标题在卡片外上方，卡片本体承载内容 | `canvas-node.tsx`、runtime | same：标题与改名输入都跟随节点外沿，见 issue 27 | full |
-| I04 | hover 工具条位于节点上方 | `canvas-node-hover-toolbar.tsx` | same | full |
-| I05 | composer 是节点下方独立浮层并随节点移动 | prompt/config components | same：节点外 sibling 锚点随拖拽移动，反向补偿 viewport zoom 保持固定屏幕宽高与字阶，边缘钳位；窄屏独立底部面板，见 issue 31 | full |
+| I04 | 节点工具条位于节点上方 | `canvas-node-hover-toolbar.tsx` | adapted：仅选中时显示，固定屏幕尺寸，跟随节点且不翻边、不钳位 | full |
+| I05 | composer 是节点下方独立浮层并随节点移动 | prompt/config components | same：节点外 sibling 锚点随拖拽移动，反向补偿 viewport zoom 保持固定屏幕宽高与字阶，允许随节点移出视口；窄屏独立底部面板，见 issue 31 | full |
 | I06 | 连接柄位于节点左右中部，边低对比 | node/connections | same behavior + Atelier colors：48px 命中区；图片、视频等内容节点即使尚未产出也保留右侧可预连 source handle，见 issue 28 | full |
 | I07 | 浅/深主题、点/线/空白背景 | theme/appearance runtime | adapted：工作区浅/深主题与项目内点/线/空白背景统一收在外观菜单，见 Issue 21/39 | full |
 | I08 | 画布和 Agent/左栏适配窄屏 | components + pending tests | adapted：375/768 明确可用降级 | full |
@@ -218,8 +218,8 @@ Status: completed
 
 ## 核对结论
 
-1. 固定基线共登记 **136 个核对项**：131 项已按 `same/adapted` 边界完整交付，5 项上游未来、占位、
-   安全缺陷或品牌实现明确排除；远程插件直读密钥、设置包导出明文密钥等实现缺陷未复制。
+1. 固定基线共登记 **136 个核对项**：经后续产品决策调整为 130 项按 `same/adapted` 边界完整交付，
+   6 项上游未来、占位、安全缺陷、品牌实现或低价值检查器明确排除；远程插件直读密钥、设置包导出明文密钥等实现缺陷未复制。
 2. 独立画布项目、React Flow 机械层、节点与连接、四模态生成、媒体工具、资源/提示词、Agent、
    插件、安全导入导出、主题与响应式 chrome 已接入 game-atelier 的文件真源、Job Runner 和设计系统。
 3. 固定参考只作为用户可观察结果基线；上游 TypeScript 缺陷、AI 超分占位和未交付 TODO 均未冒充 parity。
@@ -231,7 +231,7 @@ Status: completed
 - `evidence/01-project-index.png`：项目库空态与 Agent 首次连接面板。
 - `evidence/02-empty-canvas.png`：空白画布的三栏布局、顶部与底部控件。
 - `evidence/03-built-in-nodes.png`：六类一方节点与配置 composer。
-- `evidence/04-image-node-hover.png`：空图片节点、下方 composer 与 hover 工具条。
+- `evidence/04-image-node-hover.png`：空图片节点、下方 composer 与节点工具条的旧版运行证据；当前工具条改为点击选中后显示。
 - `evidence/05-populated-image-tools.png`：有内容图片节点及默认快捷工具。
 - `evidence/menu-画布外观.png`、`menu-快捷键.png`、`menu-节点插件.png`、
   `menu-打开画布菜单.png`：四类浮层实机入口。

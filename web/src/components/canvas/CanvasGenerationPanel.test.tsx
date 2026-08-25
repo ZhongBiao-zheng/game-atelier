@@ -3,7 +3,6 @@ import { useRef, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 
 import {
-  CanvasInspector,
   CanvasNodeCard,
   CanvasNodeContext,
   CanvasMobileGenerationPanel,
@@ -450,36 +449,6 @@ it('returns focus to the node after its panel closes', () => {
 
   expect(schedule).toHaveBeenCalledOnce();
   expect(nodeElement).toHaveFocus();
-});
-
-it('restores the narrow-screen inspector when the generation panel closes', () => {
-  const imageNode: CanvasNode = {
-    id: 'image-mobile',
-    title: '移动端图片',
-    type: 'image',
-    position: { x: 0, y: 0 },
-    z_index: 0,
-    data: {
-      current_version_id: null,
-      generation_draft: draft,
-      active_run_id: null,
-      display: { fit: 'contain', free_resize: false },
-    },
-  };
-  const inspectorProps = {
-    node: imageNode,
-    updateNode: vi.fn(),
-    updateText: vi.fn(),
-    recordHistory: vi.fn(),
-    deleteNode: vi.fn(),
-    projectId: 'canvas-test',
-    contentVersions: {},
-  };
-  const { container, rerender } = render(<CanvasInspector {...inspectorProps} hideOnMobile />);
-  expect(container.querySelector('.canvas-inspector-panel')).toHaveClass('hidden');
-
-  rerender(<CanvasInspector {...inspectorProps} hideOnMobile={false} />);
-  expect(container.querySelector('.canvas-inspector-panel')).not.toHaveClass('hidden');
 });
 
 const generationNodes: Array<[CanvasNode, string]> = [

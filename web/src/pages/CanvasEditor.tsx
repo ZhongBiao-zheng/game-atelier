@@ -82,7 +82,6 @@ import { getCanvasUiPreferences, saveCanvasUiPreferences } from '@/api/canvasUi'
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import {
   AddMenuButton,
-  CanvasInspector,
   CanvasMobileGenerationPanel,
   CanvasNodeContext,
   EditorMessage,
@@ -965,7 +964,6 @@ function CanvasEditorInner({
   }, [commit, selectedConnectionIds, selectedNodeIds]);
 
   const selectedNode = document?.nodes.find(node => node.id === selectedId) ?? null;
-  const selectedContentNode = selectedNode && isContentNode(selectedNode) ? selectedNode : null;
   const selectedDraft = selectedNode ? generationDraftForNode(selectedNode) : null;
   const generationPanelOpen = Boolean(
     selectedNode
@@ -3105,61 +3103,6 @@ function CanvasEditorInner({
               if (!prompts) return;
               acceptPrompts(await deleteCanvasPrompt(projectId, promptId, prompts.revision));
             })}
-          />
-        )}
-
-        {selectedContentNode && (
-          <CanvasInspector
-            node={selectedContentNode}
-            updateNode={updater => updateNode(selectedContentNode.id, updater)}
-            updateText={text => updateText(selectedContentNode.id, text)}
-            recordHistory={recordHistorySnapshot}
-            deleteNode={() => deleteNode(selectedContentNode.id)}
-            projectId={projectId}
-            contentVersions={document.content_versions}
-            onPreview={selectedContentNode.data.current_version_id
-              ? () => previewContent(selectedContentNode.data.current_version_id!, selectedContentNode.title, selectedContentNode.id)
-              : undefined}
-            downloadHref={selectedContentNode.data.current_version_id
-              && document.content_versions[selectedContentNode.data.current_version_id]?.kind !== 'text'
-              ? canvasDownloadUrl(projectId, selectedContentNode.data.current_version_id)
-              : undefined}
-            onCopyPrompt={copyablePromptForNode(selectedContentNode, jobsByResultNodeId)
-              ? () => void copyPrompt(selectedContentNode)
-              : undefined}
-            onReversePrompt={selectedContentNode.type === 'image'
-              && selectedContentNode.data.current_version_id
-              ? () => void reversePrompt(selectedContentNode)
-              : undefined}
-            reversePromptBusy={submittingNodeIds.has(selectedContentNode.id)}
-            onReplaceMedia={selectedContentNode.data.current_version_id
-              ? () => replaceMedia(selectedContentNode)
-              : undefined}
-            onToggleFreeResize={selectedContentNode.type === 'image'
-              && selectedContentNode.data.current_version_id
-              ? () => toggleFreeResize(selectedContentNode)
-              : undefined}
-            onMaskEdit={selectedContentNode.type === 'image'
-              && selectedContentNode.data.current_version_id
-              ? () => openMaskEdit(selectedContentNode)
-              : undefined}
-            onAngle={selectedContentNode.type === 'image'
-              && selectedContentNode.data.current_version_id
-              ? () => openAngle(selectedContentNode)
-              : undefined}
-            onEditVideo={selectedContentNode.type === 'video'
-              && selectedContentNode.data.current_version_id
-              ? () => editVideo(selectedContentNode)
-              : undefined}
-            replaceMediaBusy={mediaReplaceBusyNodeIds.has(selectedContentNode.id)}
-            onCrop={() => openMediaOperation(selectedContentNode, 'crop')}
-            onSplit={() => openMediaOperation(selectedContentNode, 'split')}
-            onUpscale={() => openMediaOperation(selectedContentNode, 'upscale')}
-            onSaveAsset={selectedContentNode.data.current_version_id
-              ? () => void saveNodeToLibrary(selectedContentNode)
-              : undefined}
-            saveAssetBusy={libraryBusy}
-            hideOnMobile={narrowViewport && generationPanelOpen}
           />
         )}
 
