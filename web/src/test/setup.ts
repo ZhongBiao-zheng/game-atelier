@@ -2,6 +2,17 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach, beforeEach } from 'vitest';
 
+// jsdom 没实现媒体播放生命周期；生产代码离屏时会主动 pause + load 释放解码器，
+// 测试环境统一提供空实现，避免把预期的资源清理打印成 Not implemented 错误。
+Object.defineProperty(HTMLMediaElement.prototype, 'pause', {
+  configurable: true,
+  value: () => {},
+});
+Object.defineProperty(HTMLMediaElement.prototype, 'load', {
+  configurable: true,
+  value: () => {},
+});
+
 // 跨测试文件隔离。vitest 在低核 CI（ubuntu runner）上会复用 worker：多个测试
 // 文件在同一进程、共享同一个 jsdom document 顺序执行。本地多核则每文件独立
 // worker、document 互不可见——所以下面这类污染只在 CI 复现、本地恒过，表现为

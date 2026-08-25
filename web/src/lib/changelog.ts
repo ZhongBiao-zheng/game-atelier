@@ -31,6 +31,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.30.4',
+    date: '2026-08-25',
+    headline: '大量视频历史不再拖慢创作台',
+    changes: [
+      { kind: 'fix', text: '创作台只加载接近屏幕的视频，并把较早记录分批展开；几十上百条视频也不会在打开页面时同时占用内存和处理器' },
+    ],
+  },
+  {
     version: '5.30.3',
     date: '2026-08-22',
     headline: 'Skill 筛选覆盖全部工作流产物',

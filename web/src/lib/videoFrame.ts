@@ -5,10 +5,28 @@
  */
 import { useEffect, useState } from 'react';
 
-/** 视频首帧 → 小尺寸 dataURL；解码失败返回 null 退回图标。 */
-export function captureVideoFrame(url: string): Promise<string | null> {
+/** 视频首帧 → 小尺寸 dataURL；解码失败或调用方取消时返回 null 退回图标。 */
+export function captureVideoFrame(url: string, signal?: AbortSignal): Promise<string | null> {
   return new Promise((resolve) => {
     const video = document.createElement('video');
+    let settled = false;
+    const finish = (thumb: string | null) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', abort);
+      video.onloadeddata = null;
+      video.onerror = null;
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      resolve(thumb);
+    };
+    const abort = () => finish(null);
+    if (signal?.aborted) {
+      finish(null);
+      return;
+    }
+    signal?.addEventListener('abort', abort, { once: true });
     video.muted = true;
     video.preload = 'auto';
     video.onloadeddata = () => {
@@ -19,44 +37,78 @@ export function captureVideoFrame(url: string): Promise<string | null> {
         canvas.width = w;
         canvas.height = h;
         canvas.getContext('2d')?.drawImage(video, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
+        finish(canvas.toDataURL('image/jpeg', 0.7));
       } catch {
-        resolve(null);
+        finish(null);
       }
     };
-    video.onerror = () => resolve(null);
+    video.onerror = () => finish(null);
     video.src = url;
   });
 }
 
+const MAX_FRAME_CACHE_SIZE = 100;
 const frameCache = new Map<string, string | null>();
-const inflight = new Map<string, Promise<string | null>>();
 
-function getVideoFrame(url: string): Promise<string | null> {
-  if (frameCache.has(url)) return Promise.resolve(frameCache.get(url) ?? null);
-  let p = inflight.get(url);
-  if (!p) {
-    p = captureVideoFrame(url).then((thumb) => {
-      frameCache.set(url, thumb);
-      inflight.delete(url);
-      return thumb;
-    });
-    inflight.set(url, p);
-  }
-  return p;
+interface FrameTask {
+  controller: AbortController;
+  promise: Promise<string | null>;
+  consumers: number;
 }
 
-export function useVideoFrame(url: string | null): string | null {
+const inflight = new Map<string, FrameTask>();
+
+function cacheFrame(url: string, thumb: string | null): void {
+  frameCache.delete(url);
+  frameCache.set(url, thumb);
+  if (frameCache.size <= MAX_FRAME_CACHE_SIZE) return;
+  const oldest = frameCache.keys().next().value;
+  if (oldest) frameCache.delete(oldest);
+}
+
+function createFrameTask(url: string): FrameTask {
+  const controller = new AbortController();
+  const task: FrameTask = {
+    controller,
+    consumers: 0,
+    promise: Promise.resolve(null),
+  };
+  task.promise = captureVideoFrame(url, controller.signal).then((thumb) => {
+    if (!controller.signal.aborted) cacheFrame(url, thumb);
+    if (inflight.get(url) === task) inflight.delete(url);
+    return thumb;
+  });
+  inflight.set(url, task);
+  return task;
+}
+
+function subscribeVideoFrame(url: string, onFrame: (thumb: string | null) => void): () => void {
+  if (frameCache.has(url)) {
+    onFrame(frameCache.get(url) ?? null);
+    return () => {};
+  }
+  const task = inflight.get(url) ?? createFrameTask(url);
+  task.consumers += 1;
+  let active = true;
+  void task.promise.then((thumb) => {
+    if (active) onFrame(thumb);
+  });
+  return () => {
+    active = false;
+    task.consumers = Math.max(0, task.consumers - 1);
+    if (task.consumers === 0 && inflight.get(url) === task) {
+      inflight.delete(url);
+      task.controller.abort();
+    }
+  };
+}
+
+export function useVideoFrame(url: string | null, enabled: boolean): string | null {
   const [thumb, setThumb] = useState<string | null>(url ? frameCache.get(url) ?? null : null);
   useEffect(() => {
-    if (!url) return;
-    let alive = true;
-    void getVideoFrame(url).then((t) => {
-      if (alive) setThumb(t);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [url]);
+    setThumb(url ? frameCache.get(url) ?? null : null);
+    if (!url || !enabled) return;
+    return subscribeVideoFrame(url, setThumb);
+  }, [url, enabled]);
   return thumb;
 }
