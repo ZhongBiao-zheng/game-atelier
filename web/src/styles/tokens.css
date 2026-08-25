@@ -367,16 +367,26 @@
     box-shadow: none;
   }
   .canvas-flow .react-flow__handle.canvas-node-handle {
-    display: grid;
-    width: var(--canvas-handle-size, 3rem) !important;
-    height: var(--canvas-handle-size, 3rem) !important;
-    place-items: center;
+    width: 1px !important;
+    min-width: 1px !important;
+    height: 1px !important;
+    min-height: 1px !important;
     border: 0 !important;
     background: transparent !important;
     cursor: crosshair;
     opacity: 0;
     pointer-events: none !important;
     transition: opacity 160ms ease;
+  }
+  .canvas-flow .react-flow__handle.canvas-node-handle::before {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--canvas-handle-size, 3rem);
+    height: var(--canvas-handle-size, 3rem);
+    border-radius: 999px;
+    content: '';
+    transform: translate(-50%, -50%);
   }
   .canvas-flow .canvas-node-shell:hover .canvas-node-handle,
   .canvas-flow .canvas-node-shell:focus-within .canvas-node-handle,
@@ -388,11 +398,16 @@
     pointer-events: auto !important;
   }
   .canvas-flow .canvas-node-handle-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
     width: var(--canvas-handle-dot-size, 0.75rem);
     height: var(--canvas-handle-dot-size, 0.75rem);
     border: var(--canvas-handle-border-size, 2px) solid var(--muted-foreground);
     border-radius: 999px;
     background: var(--card);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
     transition: border-color 160ms ease;
   }
   .canvas-flow .canvas-node-handle:hover .canvas-node-handle-dot {
