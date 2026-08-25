@@ -646,6 +646,50 @@ it('connects canvas materials above the prompt without rewriting its @ content',
   expect(screen.getByRole('button', { name: '查看已对接素材 雨夜列车' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '查看已对接素材 雨夜列车' })).toHaveTextContent('雨夜列车');
   expect(screen.getByRole('combobox', { name: '提示词' })).toHaveTextContent('保留 @ 原提示词');
+
+  const materialButton = screen.getByRole('button', { name: '查看已对接素材 雨夜列车' });
+  fireEvent.mouseEnter(materialButton);
+  const hoverDetail = screen.getByRole('tooltip', { name: '素材详情 雨夜列车' });
+  expect(hoverDetail).toHaveAttribute('data-canvas-material-hover', material.nodeId);
+  expect(within(hoverDetail).getByRole('img', { name: '雨夜列车' })).toHaveAttribute('src', material.previewUrl);
+  fireEvent.mouseLeave(materialButton);
+  expect(screen.queryByRole('tooltip', { name: '素材详情 雨夜列车' })).not.toBeInTheDocument();
+
+  fireEvent.focus(materialButton);
+  expect(screen.getByRole('tooltip', { name: '素材详情 雨夜列车' })).toBeInTheDocument();
+  fireEvent.blur(materialButton);
+  expect(screen.queryByRole('tooltip', { name: '素材详情 雨夜列车' })).not.toBeInTheDocument();
+});
+
+it('plays a silent connected-video preview only while its material is hovered', () => {
+  const material = {
+    nodeId: 'video-source',
+    versionId: 'version-video-source',
+    kind: 'video' as const,
+    title: '荒原镜头',
+    previewUrl: '/api/canvas/projects/canvas-test/versions/version-video-source/media',
+  };
+  const context = nodeContext({
+    materialReferences: [material],
+    connectedMaterialNodeIdsByNodeId: new Map([[node.id, new Set([material.nodeId])]]),
+  });
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      <CanvasMobileGenerationPanel node={node} draft={draft} context={context} />
+    </CanvasNodeContext.Provider>,
+  );
+
+  const materialButton = screen.getByRole('button', { name: '查看已对接素材 荒原镜头' });
+  fireEvent.mouseEnter(materialButton);
+  const detail = screen.getByRole('tooltip', { name: '素材详情 荒原镜头' });
+  const video = within(detail).getByLabelText('荒原镜头');
+  expect(video).toHaveAttribute('src', material.previewUrl);
+  expect(video).toHaveAttribute('autoplay');
+  expect(video).toHaveProperty('muted', true);
+  expect(video).toHaveAttribute('loop');
+
+  fireEvent.mouseLeave(materialButton);
+  expect(screen.queryByRole('tooltip', { name: '素材详情 荒原镜头' })).not.toBeInTheDocument();
 });
 
 it('opens video controls from the node generation panel', () => {

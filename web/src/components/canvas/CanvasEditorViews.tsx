@@ -1,6 +1,7 @@
 import { Handle, NodeResizer, NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react';
 import { Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, RotateCcw, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
+import { createPortal } from 'react-dom';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import type { KeyView } from '@/api/keys';
@@ -1626,69 +1627,152 @@ function CanvasMaterialConnections({
 }) {
   const choices = materials.filter(reference => reference.nodeId !== node.id);
   const connected = choices.filter(reference => connectedNodeIds.has(reference.nodeId));
+  const [hoveredMaterial, setHoveredMaterial] = useState<{
+    reference: CanvasMaterialReference;
+    left: number;
+    top: number;
+  } | null>(null);
+  const showMaterialDetail = (
+    reference: CanvasMaterialReference,
+    target: HTMLElement,
+  ) => {
+    const bounds = target.getBoundingClientRect();
+    setHoveredMaterial({
+      reference,
+      left: bounds.left + bounds.width / 2,
+      top: bounds.top - 8,
+    });
+  };
 
   return (
-    <div
-      role="group"
-      aria-label={`${node.title} 已对接素材`}
-      className="mb-1 flex min-h-12 min-w-0 items-center gap-2 overflow-x-auto px-1 py-1"
+    <>
+      <div
+        role="group"
+        aria-label={`${node.title} 已对接素材`}
+        className="mb-1 flex min-h-12 min-w-0 items-center gap-2 overflow-x-auto px-1 py-1"
+      >
+        {connected.map(reference => {
+          const detailVisible = hoveredMaterial?.reference.nodeId === reference.nodeId;
+          return (
+            <button
+              key={reference.nodeId}
+              type="button"
+              aria-label={`查看已对接素材 ${reference.title}`}
+              aria-describedby={detailVisible ? `canvas-material-detail-${reference.nodeId}` : undefined}
+              className="relative grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              onMouseEnter={event => showMaterialDetail(reference, event.currentTarget)}
+              onMouseLeave={() => setHoveredMaterial(null)}
+              onFocus={event => showMaterialDetail(reference, event.currentTarget)}
+              onBlur={() => setHoveredMaterial(null)}
+              onClick={() => onPreview(reference)}
+            >
+              <CanvasMaterialPreview reference={reference} />
+              <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
+                {reference.title}
+              </span>
+            </button>
+          );
+        })}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={`为 ${node.title} 对接素材`}
+              title="选择画布素材"
+              className="grid size-12 shrink-0 place-items-center rounded-lg border border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <Plus className="size-5" aria-hidden="true" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent side="bottom" align="start" className="max-h-80 w-72 overflow-y-auto rounded-xl">
+            <p className="px-2 pb-2 pt-1 text-xs font-medium text-muted-foreground">选择画布素材</p>
+            {choices.length === 0 ? (
+              <p className="px-2 py-3 text-xs text-muted-foreground">画布上还没有可对接的素材。</p>
+            ) : choices.map(reference => {
+              const checked = connectedNodeIds.has(reference.nodeId);
+              return (
+                <DropdownMenuItem
+                  key={reference.nodeId}
+                  className="h-12 gap-2"
+                  aria-label={`${checked ? '取消对接' : '对接'}素材 ${reference.title}`}
+                  onSelect={event => {
+                    event.preventDefault();
+                    onConnectedChange(reference.nodeId, !checked);
+                  }}
+                >
+                  <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-secondary text-muted-foreground">
+                    <CanvasMaterialPreview reference={reference} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium text-foreground">{reference.title}</span>
+                    <span className="block text-xs text-muted-foreground">{mentionKindLabel(reference.kind)}</span>
+                  </span>
+                  {checked && <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {hoveredMaterial && <CanvasMaterialHoverDetail {...hoveredMaterial} />}
+    </>
+  );
+}
+
+function CanvasMaterialHoverDetail({
+  reference,
+  left,
+  top,
+}: {
+  reference: CanvasMaterialReference;
+  left: number;
+  top: number;
+}) {
+  return createPortal(
+    <figure
+      id={`canvas-material-detail-${reference.nodeId}`}
+      role="tooltip"
+      aria-label={`素材详情 ${reference.title}`}
+      data-canvas-material-hover={reference.nodeId}
+      className="pointer-events-none fixed z-50 w-64 overflow-hidden rounded-lg border border-border bg-card shell-glow"
+      style={{ left, top, transform: 'translate(-50%, -100%)' }}
     >
-      {connected.map(reference => (
-        <button
-          key={reference.nodeId}
-          type="button"
-          title={`查看素材：${reference.title}`}
-          aria-label={`查看已对接素材 ${reference.title}`}
-          className="relative grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          onClick={() => onPreview(reference)}
-        >
-          <CanvasMaterialPreview reference={reference} />
-          <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
-            {reference.title}
-          </span>
-        </button>
-      ))}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-label={`为 ${node.title} 对接素材`}
-            title="选择画布素材"
-            className="grid size-12 shrink-0 place-items-center rounded-lg border border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <Plus className="size-5" aria-hidden="true" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent side="bottom" align="start" className="max-h-80 w-72 overflow-y-auto rounded-xl">
-          <p className="px-2 pb-2 pt-1 text-xs font-medium text-muted-foreground">选择画布素材</p>
-          {choices.length === 0 ? (
-            <p className="px-2 py-3 text-xs text-muted-foreground">画布上还没有可对接的素材。</p>
-          ) : choices.map(reference => {
-            const checked = connectedNodeIds.has(reference.nodeId);
-            return (
-              <DropdownMenuItem
-                key={reference.nodeId}
-                className="h-12 gap-2"
-                aria-label={`${checked ? '取消对接' : '对接'}素材 ${reference.title}`}
-                onSelect={event => {
-                  event.preventDefault();
-                  onConnectedChange(reference.nodeId, !checked);
-                }}
-              >
-                <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-secondary text-muted-foreground">
-                  <CanvasMaterialPreview reference={reference} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-medium text-foreground">{reference.title}</span>
-                  <span className="block text-xs text-muted-foreground">{mentionKindLabel(reference.kind)}</span>
-                </span>
-                {checked && <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />}
-              </DropdownMenuItem>
-            );
-          })}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+      {reference.kind === 'image' && reference.previewUrl ? (
+        <img
+          src={reference.previewUrl}
+          alt={reference.title}
+          className="h-40 w-full bg-background object-contain"
+        />
+      ) : reference.kind === 'video' && reference.previewUrl ? (
+        <video
+          src={reference.previewUrl}
+          aria-label={reference.title}
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          className="h-40 w-full bg-black object-contain"
+        />
+      ) : reference.kind === 'text' ? (
+        <div className="flex h-40 items-center px-4 text-sm leading-relaxed text-foreground">
+          <p className="line-clamp-5">{reference.text || '空文本素材'}</p>
+        </div>
+      ) : (
+        <div className="grid h-40 place-items-center bg-secondary/30 text-muted-foreground">
+          {reference.kind === 'audio'
+            ? <FileAudio className="size-8" aria-hidden="true" />
+            : reference.kind === 'video'
+              ? <FileVideo className="size-8" aria-hidden="true" />
+              : <FileImage className="size-8" aria-hidden="true" />}
+        </div>
+      )}
+      <figcaption className="flex min-w-0 items-center gap-2 border-t border-border px-3 py-2">
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{reference.title}</span>
+        <span className="shrink-0 text-xs text-muted-foreground">{mentionKindLabel(reference.kind)}</span>
+      </figcaption>
+    </figure>,
+    document.body,
   );
 }
 
