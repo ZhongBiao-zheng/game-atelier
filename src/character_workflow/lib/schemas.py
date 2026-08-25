@@ -133,7 +133,7 @@ class CanvasActor(BaseModel):
 class CanvasSnapshotInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     order: int = Field(ge=0)
-    source: Literal["implicit_self", "input_connection"]
+    source: Literal["implicit_self", "input_connection", "first_frame", "last_frame"]
     node_id: str
     version_id: str
     kind: Literal["text", "image", "video", "audio"]
@@ -591,6 +591,7 @@ class CanvasInputConnection(BaseModel):
     role: Literal["input"]
     source_node_id: str = Field(min_length=1)
     target_node_id: str = Field(min_length=1)
+    slot: Literal["first_frame", "last_frame"] | None = None
 
 
 class CanvasGenerationRunOrigin(BaseModel):
@@ -780,7 +781,12 @@ class CanvasDocument(BaseModel):
         if len(edge_ids) != len(set(edge_ids)):
             raise ValueError("canvas connection ids must be unique")
         edge_endpoints = [
-            (edge.role, edge.source_node_id, edge.target_node_id)
+            (
+                edge.role,
+                edge.source_node_id,
+                edge.target_node_id,
+                edge.slot if edge.role == "input" else None,
+            )
             for edge in self.connections
         ]
         if len(edge_endpoints) != len(set(edge_endpoints)):
@@ -821,6 +827,7 @@ class CanvasDocument(BaseModel):
                     if member is None or member.type == "group" or member_id in group_members:
                         raise ValueError("canvas group membership is invalid")
                     group_members.add(member_id)
+        occupied_frame_slots: set[tuple[str, str]] = set()
         for edge in self.connections:
             if edge.source_node_id not in nodes_by_id or edge.target_node_id not in nodes_by_id:
                 raise ValueError("canvas connection references a missing node")
@@ -835,6 +842,18 @@ class CanvasDocument(BaseModel):
                     raise ValueError("canvas input source cannot provide content")
                 if target.type == "plugin":
                     raise ValueError("canvas plugin connections require a verified capability manifest")
+                if edge.slot is not None:
+                    target_draft = (
+                        target.data.draft
+                        if target.type == "config"
+                        else target.data.generation_draft
+                    )
+                    if source.type != "image" or target_draft is None or target_draft.mode != "video":
+                        raise ValueError("canvas video frame slots require an image source and video draft")
+                    slot_key = (edge.target_node_id, edge.slot)
+                    if slot_key in occupied_frame_slots:
+                        raise ValueError("canvas video frame slot can only have one source")
+                    occupied_frame_slots.add(slot_key)
         if len(self.model_dump_json().encode("utf-8")) > 25 * 1024 * 1024:
             raise ValueError("canvas document exceeds 25 MiB")
         return self

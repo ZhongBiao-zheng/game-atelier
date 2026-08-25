@@ -32,6 +32,7 @@ interface MentionState {
 interface CanvasPromptInputProps {
   value: string;
   references: readonly CanvasMentionReference[];
+  mentionsEnabled?: boolean;
   onChange: (value: string) => void;
   onFocus?: () => void;
   onPreviewReference?: (reference: CanvasMentionReference) => void;
@@ -42,6 +43,7 @@ interface CanvasPromptInputProps {
 export function CanvasPromptInput({
   value,
   references,
+  mentionsEnabled = true,
   onChange,
   onFocus,
   onPreviewReference,
@@ -57,23 +59,27 @@ export function CanvasPromptInput({
   const [mention, setMention] = useState<MentionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [hoveredReference, setHoveredReference] = useState<CanvasMaterialHoverState | null>(null);
-  const referenceById = useMemo(
-    () => new Map(references.map(reference => [reference.nodeId, reference])),
-    [references],
+  const availableReferences = useMemo(
+    () => mentionsEnabled ? references : [],
+    [mentionsEnabled, references],
   );
-  const referenceSignature = references
+  const referenceById = useMemo(
+    () => new Map(availableReferences.map(reference => [reference.nodeId, reference])),
+    [availableReferences],
+  );
+  const referenceSignature = availableReferences
     .map(reference => `${reference.nodeId}:${reference.versionId}:${reference.label}:${reference.title}`)
     .join('|');
   const candidates = useMemo(() => {
     if (!mention) return [];
     const query = mention.query.trim().toLocaleLowerCase();
-    if (!query) return [...references];
-    return references.filter(reference => (
+    if (!query) return [...availableReferences];
+    return availableReferences.filter(reference => (
       `${reference.label} ${reference.title} ${mentionKindLabel(reference.kind)} ${reference.text ?? ''}`
         .toLocaleLowerCase()
         .includes(query)
     ));
-  }, [mention, references]);
+  }, [availableReferences, mention]);
 
   useEffect(() => {
     previewRef.current = onPreviewReference;
@@ -88,10 +94,14 @@ export function CanvasPromptInput({
       && referenceSignature === lastReferenceSignatureRef.current
     ) return;
     setHoveredReference(null);
-    editor.replaceChildren(...promptNodes(value, referenceById));
+    editor.replaceChildren(...promptNodes(value, referenceById, mentionsEnabled));
     lastEmittedRef.current = value;
     lastReferenceSignatureRef.current = referenceSignature;
-  }, [referenceById, referenceSignature, value]);
+  }, [mentionsEnabled, referenceById, referenceSignature, value]);
+
+  useEffect(() => {
+    if (!mentionsEnabled) closeMention();
+  }, [mentionsEnabled]);
 
   function closeMention() {
     setMention(null);
@@ -100,7 +110,7 @@ export function CanvasPromptInput({
 
   function syncMention() {
     const editor = editorRef.current;
-    if (!editor || !references.length) {
+    if (!mentionsEnabled || !editor || !availableReferences.length) {
       closeMention();
       return;
     }
@@ -152,7 +162,7 @@ export function CanvasPromptInput({
     const next = `${current.slice(0, mention.start)}${token}${current.slice(mention.end)}`;
     const caretOffset = mention.start + token.length;
     const marked = `${next.slice(0, caretOffset)}\uFEFF${next.slice(caretOffset)}`;
-    editor.replaceChildren(...promptNodes(marked, referenceById));
+    editor.replaceChildren(...promptNodes(marked, referenceById, mentionsEnabled));
     placeCaretAtMarker(editor);
     closeMention();
     emit(next);
@@ -265,7 +275,10 @@ export function CanvasPromptInput({
           }
         }}
         onKeyUp={event => {
-          if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') {
+          if (
+            mentionsEnabled
+            && (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete')
+          ) {
             syncMention();
           }
         }}
@@ -276,7 +289,13 @@ export function CanvasPromptInput({
           ) return;
           setHoveredReference(null);
           const editor = editorRef.current;
-          if (editor) editor.replaceChildren(...promptNodes(lastEmittedRef.current, referenceById));
+          if (editor) {
+            editor.replaceChildren(...promptNodes(
+              lastEmittedRef.current,
+              referenceById,
+              mentionsEnabled,
+            ));
+          }
           window.setTimeout(closeMention, 120);
         }}
       />
@@ -395,7 +414,9 @@ function MentionPreview({ reference }: { reference: CanvasMentionReference }) {
 function promptNodes(
   value: string,
   references: ReadonlyMap<string, CanvasMentionReference>,
+  mentionsEnabled = true,
 ): Node[] {
+  if (!mentionsEnabled) return [document.createTextNode(value)];
   const nodes: Node[] = [];
   let lastIndex = 0;
   for (const match of canvasMentionMatches(value)) {

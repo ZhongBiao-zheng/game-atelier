@@ -203,7 +203,13 @@ function preferredCanvasGenerationModel(
 function defaultCanvasGenerationParams(mode: CanvasGenerationDraft['mode']): JobParams {
   if (mode === 'image') return { n: 1, ratio: '1:1' };
   if (mode === 'video') {
-    return { duration: 5, ratio: '16:9', resolution: '720p', generate_audio: true };
+    return {
+      duration: 5,
+      ratio: '16:9',
+      resolution: '720p',
+      frame_mode: 'firstlast',
+      generate_audio: true,
+    };
   }
   if (mode === 'audio') return { voice: 'alloy', response_format: 'mp3', speed: 1 };
   return { n: 1, reasoning_effort: 'auto' };
@@ -531,10 +537,17 @@ export function normalizeCanvasVideoParams(
   if (caps.supportsWatermark) {
     params.watermark = typeof currentWatermark === 'boolean' ? currentWatermark : false;
   }
-  if (editingExistingVideo) {
+  const supportsFrameSlots = caps.modes.includes('firstlast');
+  const supportsOmni = caps.modes.includes('omni');
+  const usesFrameSlots = ['first', 'last', 'firstlast'].includes(String(currentFrameMode));
+  if (editingExistingVideo || (!supportsFrameSlots && supportsOmni)) {
     params.frame_mode = 'auto';
-  } else if (currentFrameMode) {
+  } else if (!supportsOmni && supportsFrameSlots) {
+    params.frame_mode = 'firstlast';
+  } else if (usesFrameSlots || currentFrameMode === 'auto') {
     params.frame_mode = currentFrameMode;
+  } else {
+    params.frame_mode = caps.modes[0] === 'omni' ? 'auto' : 'firstlast';
   }
   return params;
 }

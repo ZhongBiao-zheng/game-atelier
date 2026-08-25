@@ -1,5 +1,5 @@
 import { Handle, NodeResizer, NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -38,10 +38,17 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { imageControlCaps } from '@/lib/imageControlCaps';
 import { VideoControls } from '@/components/studio/VideoControls';
+import {
+  VIDEO_MODE_LABELS,
+  videoReferenceLimitLabel,
+  videoReferenceLimits,
+  type VideoReferenceLimits,
+} from '@/lib/videoControlCaps';
 import { cn } from '@/lib/utils';
 import { presentCanvasCandidates, type CanvasCandidateEntry } from '@/lib/canvasCandidates';
 import { useVideoFrame } from '@/lib/videoFrame';
 import {
+  canvasMentionMatches,
   missingCanvasMentionIds,
   mentionKindLabel,
   type CanvasMaterialReference,
@@ -55,6 +62,7 @@ import type {
   CanvasImageToolbarPreferences,
   CanvasNode,
   CanvasUiPreferences,
+  CanvasVideoFrameSlot,
 } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import {
@@ -85,6 +93,7 @@ export interface CanvasNodeContextValue {
   projectId: string;
   materialReferences: readonly CanvasMaterialReference[];
   connectedMaterialNodeIdsByNodeId: ReadonlyMap<string, ReadonlySet<string>>;
+  videoFrameNodeIdsByNodeId?: ReadonlyMap<string, Readonly<Partial<Record<CanvasVideoFrameSlot, string>>>>;
   mentionReferencesByNodeId: ReadonlyMap<string, readonly CanvasMentionReference[]>;
   contentVersions: Readonly<Record<string, CanvasContentVersion>>;
   keys: KeyView[];
@@ -100,6 +109,10 @@ export interface CanvasNodeContextValue {
   multiSelectionActive?: boolean;
   generationPanel: CanvasGenerationPanelContextValue;
   setMaterialConnected: (sourceNodeId: string, targetNodeId: string, connected: boolean) => void;
+  setVideoFrameConnections?: (
+    targetNodeId: string,
+    frames: Readonly<Record<CanvasVideoFrameSlot, string | null>>,
+  ) => void;
   selectNode: (id: string) => void;
   previewContent: (id: string, title: string, nodeId: string) => void;
   selectCandidate: (id: string, versionId: string) => void;
@@ -129,6 +142,7 @@ export interface CanvasNodeContextValue {
 
 export const CanvasNodeContext = createContext<CanvasNodeContextValue | null>(null);
 const EMPTY_CANVAS_NODE_IDS: ReadonlySet<string> = new Set();
+const EMPTY_VIDEO_FRAME_NODE_IDS: Readonly<Partial<Record<CanvasVideoFrameSlot, string>>> = {};
 
 export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const context = useContext(CanvasNodeContext);
@@ -1309,6 +1323,12 @@ export function CanvasGenerationComposer({
     && (editingExistingVideo || draft.params.frame_mode === 'auto')
     ? 'omni'
     : videoCaps?.modes[0] ?? 'firstlast';
+  const usesVideoFrameSlots = draft.mode === 'video' && videoMode === 'firstlast';
+  const selectedVideoReferenceLimits = videoCaps
+    ? videoReferenceLimits(videoCaps, videoMode)
+    : null;
+  const videoFrames = context.videoFrameNodeIdsByNodeId?.get(node.id)
+    ?? EMPTY_VIDEO_FRAME_NODE_IDS;
   const nodeRunState = canvasNodeRunState(node, context.jobsByRunId);
   const activeJob = nodeRunState.job;
   const runId = activeJob?.canvas_run?.run_id;
@@ -1318,8 +1338,68 @@ export function CanvasGenerationComposer({
   const modeLabel = CANVAS_GENERATION_MODE_LABELS[draft.mode];
   const panelLabel = textMode ? '文本' : `${modeLabel}生成设置`;
   const mentionReferences = context.mentionReferencesByNodeId.get(node.id) ?? [];
-  const missingMentionIds = missingCanvasMentionIds(draft.prompt, mentionReferences);
+  const mentionsEnabled = !usesVideoFrameSlots;
+  const frameModeHasMentions = usesVideoFrameSlots && canvasMentionMatches(draft.prompt).length > 0;
+  const missingMentionIds = mentionsEnabled
+    ? missingCanvasMentionIds(draft.prompt, mentionReferences)
+    : [];
   const hasMissingMentions = missingMentionIds.length > 0;
+  const missingVideoFrame = usesVideoFrameSlots && Object.values(videoFrames).some(sourceNodeId => (
+    sourceNodeId && !context.materialReferences.some(reference => (
+      reference.nodeId === sourceNodeId && reference.kind === 'image'
+    ))
+  ));
+  const connectedMaterialNodeIds = context.connectedMaterialNodeIdsByNodeId.get(node.id)
+    ?? EMPTY_CANVAS_NODE_IDS;
+  const connectedVideoMediaCounts = context.materialReferences.reduce(
+    (counts, reference) => {
+      if (!connectedMaterialNodeIds.has(reference.nodeId) || reference.kind === 'text') return counts;
+      counts[reference.kind] += 1;
+      return counts;
+    },
+    { image: 0, video: 0, audio: 0 },
+  );
+  const videoReferenceCapacityExceeded = Boolean(
+    draft.mode === 'video'
+    && videoMode === 'omni'
+    && selectedVideoReferenceLimits
+    && (
+      connectedVideoMediaCounts.image > selectedVideoReferenceLimits.images
+      || connectedVideoMediaCounts.video > selectedVideoReferenceLimits.videos
+      || connectedVideoMediaCounts.audio > selectedVideoReferenceLimits.audios
+      || (
+        selectedVideoReferenceLimits.mixedTotal !== undefined
+        && connectedVideoMediaCounts.image
+          + connectedVideoMediaCounts.video
+          + connectedVideoMediaCounts.audio > selectedVideoReferenceLimits.mixedTotal
+      )
+    )
+  );
+  const hasReferenceError = hasMissingMentions
+    || frameModeHasMentions
+    || missingVideoFrame
+    || videoReferenceCapacityExceeded;
+
+  useEffect(() => {
+    if (!usesVideoFrameSlots || !videoCaps) return;
+    if (videoCaps.maxFrames === 0 && (videoFrames.first_frame || videoFrames.last_frame)) {
+      context.setVideoFrameConnections?.(node.id, { first_frame: null, last_frame: null });
+      return;
+    }
+    if (videoCaps.maxFrames === 1 && videoFrames.last_frame) {
+      context.setVideoFrameConnections?.(node.id, {
+        first_frame: videoFrames.first_frame ?? null,
+        last_frame: null,
+      });
+    }
+  }, [
+    context,
+    node.id,
+    usesVideoFrameSlots,
+    videoCaps,
+    videoFrames.first_frame,
+    videoFrames.last_frame,
+  ]);
 
   function updateDraft(updater: (current: CanvasGenerationDraft) => CanvasGenerationDraft) {
     context.updateNode(node.id, current => withGenerationDraft(current, updater(generationDraft(current)!)));
@@ -1365,24 +1445,49 @@ export function CanvasGenerationComposer({
           </Button>
         )}
       </div>
-      <CanvasMaterialConnections
-        node={node}
-        materials={context.materialReferences}
-        connectedNodeIds={context.connectedMaterialNodeIdsByNodeId.get(node.id) ?? EMPTY_CANVAS_NODE_IDS}
-        onPreview={reference => context.previewContent(
-          reference.versionId,
-          reference.title,
-          reference.nodeId,
-        )}
-        onConnectedChange={(sourceNodeId, connected) => context.setMaterialConnected(
-          sourceNodeId,
-          node.id,
-          connected,
-        )}
-      />
+      {usesVideoFrameSlots && videoCaps ? (
+        <CanvasVideoFrameConnections
+          node={node}
+          materials={context.materialReferences}
+          frames={videoFrames}
+          maxFrames={videoCaps.maxFrames}
+          onPreview={reference => context.previewContent(
+            reference.versionId,
+            reference.title,
+            reference.nodeId,
+          )}
+          onChange={frames => context.setVideoFrameConnections?.(
+            node.id,
+            frames,
+          )}
+        />
+      ) : (
+        <CanvasMaterialConnections
+          node={node}
+          materials={context.materialReferences}
+          connectedNodeIds={context.connectedMaterialNodeIdsByNodeId.get(node.id) ?? EMPTY_CANVAS_NODE_IDS}
+          limits={draft.mode === 'video' ? selectedVideoReferenceLimits : null}
+          onPreview={reference => context.previewContent(
+            reference.versionId,
+            reference.title,
+            reference.nodeId,
+          )}
+          onConnectedChange={(sourceNodeId, connected) => context.setMaterialConnected(
+            sourceNodeId,
+            node.id,
+            connected,
+          )}
+        />
+      )}
+      {draft.mode === 'video' && selectedVideoReferenceLimits && (
+        <p className="px-1 pb-1 text-xs text-muted-foreground">
+          {videoReferenceLimitLabel(selectedVideoReferenceLimits)}
+        </p>
+      )}
       <CanvasPromptInput
         value={draft.prompt}
         references={mentionReferences}
+        mentionsEnabled={mentionsEnabled}
         onFocus={context.recordHistory}
         onChange={prompt => updateDraft(current => ({ ...current, prompt, updated_at: new Date().toISOString() }))}
         onPreviewReference={reference => context.previewContent(
@@ -1391,22 +1496,32 @@ export function CanvasGenerationComposer({
           reference.nodeId,
         )}
         placeholder={draft.mode === 'video'
-          ? '描述镜头运动与画面变化，输入 @ 引用已连接内容'
+          ? usesVideoFrameSlots
+            ? '描述镜头运动与画面变化'
+            : '描述镜头运动与画面变化，输入 @ 引用已连接内容'
           : draft.mode === 'audio'
             ? '输入需要朗读的文本，输入 @ 引用已连接内容'
             : draft.mode === 'text'
               ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
-      {(hasMissingMentions || !textMode) && (
+      {(hasReferenceError || !textMode) && (
         <p
-          role={hasMissingMentions ? 'alert' : undefined}
+          role={hasReferenceError ? 'alert' : undefined}
           className={cn(
             'min-h-5 px-3 pt-1 text-xs',
-            hasMissingMentions ? 'text-destructive' : 'text-muted-foreground',
+            hasReferenceError ? 'text-destructive' : 'text-muted-foreground',
           )}
         >
-          {hasMissingMentions
+          {frameModeHasMentions
+            ? '首尾帧模式不支持 @，请删除已有引用。'
+            : missingVideoFrame
+              ? '首帧或尾帧素材已失效，请重新选择。'
+            : videoReferenceCapacityExceeded
+              ? '已选参考素材超过当前模型上限，请移除后再生成。'
+            : usesVideoFrameSlots
+              ? '首尾帧模式不使用 @，请在上方选择图片。'
+              : hasMissingMentions
             ? `${missingMentionIds.length} 个引用已断开，请重新连接或删除引用。`
             : mentionReferences.length
               ? `输入 @ 引用已连接内容 · ${mentionReferences.length} 项可用`
@@ -1428,7 +1543,36 @@ export function CanvasGenerationComposer({
           choices={modelChoices}
           alias={draft.alias ?? null}
           model={draft.model}
+          getDescription={draft.mode === 'video' ? choice => {
+            const choiceCaps = canvasVideoEditCaps(choice.model.id, choice.model.protocol);
+            const availableModes = editingExistingVideo
+              ? choiceCaps.modes.filter(mode => mode === 'omni')
+              : choiceCaps.modes;
+            return availableModes.map(mode => {
+              const limits = videoReferenceLimits(choiceCaps, mode);
+              return `${VIDEO_MODE_LABELS[mode]}：${limits.images} 图 / ${limits.videos} 视频 / ${limits.audios} 音频${
+                limits.mixedTotal ? `，总计 ${limits.mixedTotal}` : ''
+              }`;
+            }).join('；');
+          } : undefined}
           onSelect={({ key, model }) => {
+            if (draft.mode === 'video') {
+              const nextParams = normalizeCanvasVideoParams(
+                model.id,
+                model.protocol,
+                draft.params,
+                editingExistingVideo,
+              );
+              if (
+                nextParams.frame_mode === 'auto'
+                && (videoFrames.first_frame || videoFrames.last_frame)
+              ) {
+                context.setVideoFrameConnections?.(node.id, {
+                  first_frame: null,
+                  last_frame: null,
+                });
+              }
+            }
             updateDraftWithHistory(current => ({
               ...current,
               alias: key.alias,
@@ -1498,10 +1642,18 @@ export function CanvasGenerationComposer({
             quality={draft.params.mode === 'pro' ? 'pro' : 'std'}
             generateAudio={draft.params.generate_audio !== false}
             watermark={draft.params.watermark === true}
-            onModeChange={mode => updateDraftWithHistory(current => ({
-              ...current,
-              params: { ...current.params, frame_mode: mode === 'omni' ? 'auto' : 'firstlast' },
-            }))}
+            onModeChange={mode => {
+              if (mode === 'omni') {
+                context.setVideoFrameConnections?.(node.id, {
+                  first_frame: null,
+                  last_frame: null,
+                });
+              }
+              updateDraftWithHistory(current => ({
+                ...current,
+                params: { ...current.params, frame_mode: mode === 'omni' ? 'auto' : 'firstlast' },
+              }));
+            }}
             onDurationChange={duration => updateDraftWithHistory(current => ({
               ...current,
               params: { ...current.params, duration },
@@ -1563,7 +1715,7 @@ export function CanvasGenerationComposer({
             type="button"
             size="sm"
             className="ml-auto"
-            disabled={submitting || hasMissingMentions || !draft.prompt.trim() || !draft.alias || !selectedModel}
+            disabled={submitting || hasReferenceError || !draft.prompt.trim() || !draft.alias || !selectedModel}
             onClick={() => void context.retryRun(node.id, runId, 'current')}
           >
             {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
@@ -1575,7 +1727,7 @@ export function CanvasGenerationComposer({
             type="button"
             size="sm"
             className="ml-auto"
-            disabled={submitting || hasMissingMentions || !draft.prompt.trim() || !draft.alias || !selectedModel}
+            disabled={submitting || hasReferenceError || !draft.prompt.trim() || !draft.alias || !selectedModel}
             onClick={() => void context.submitRun(node.id)}
           >
             {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
@@ -1587,21 +1739,194 @@ export function CanvasGenerationComposer({
   );
 }
 
+function CanvasVideoFrameConnections({
+  node,
+  materials,
+  frames,
+  maxFrames,
+  onPreview,
+  onChange,
+}: {
+  node: CanvasNode;
+  materials: readonly CanvasMaterialReference[];
+  frames: Readonly<Partial<Record<CanvasVideoFrameSlot, string>>>;
+  maxFrames: 0 | 1 | 2;
+  onPreview: (reference: CanvasMaterialReference) => void;
+  onChange: (frames: Readonly<Record<CanvasVideoFrameSlot, string | null>>) => void;
+}) {
+  const images = materials.filter(reference => (
+    reference.kind === 'image' && reference.nodeId !== node.id
+  ));
+  const current = {
+    first_frame: frames.first_frame ?? null,
+    last_frame: frames.last_frame ?? null,
+  };
+
+  return (
+    <div
+      role="group"
+      aria-label={`${node.title} 首尾帧`}
+      className="mb-1 flex min-h-18 items-center gap-2 overflow-visible px-2 py-1"
+    >
+      <CanvasVideoFrameSlot
+        label="首帧"
+        slot="first_frame"
+        selectedNodeId={current.first_frame}
+        materials={images}
+        disabled={maxFrames === 0}
+        tilt="left"
+        onPreview={onPreview}
+        onSelect={sourceNodeId => onChange({ ...current, first_frame: sourceNodeId })}
+      />
+      {maxFrames >= 2 && (
+        <button
+          type="button"
+          aria-label="互换首尾帧"
+          title="互换首尾帧"
+          disabled={!current.first_frame && !current.last_frame}
+          className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40"
+          onClick={() => onChange({
+            first_frame: current.last_frame,
+            last_frame: current.first_frame,
+          })}
+        >
+          <ArrowLeftRight className="size-4" aria-hidden="true" />
+        </button>
+      )}
+      {maxFrames >= 2 && (
+        <CanvasVideoFrameSlot
+          label="尾帧"
+          slot="last_frame"
+          selectedNodeId={current.last_frame}
+          materials={images}
+          tilt="right"
+          onPreview={onPreview}
+          onSelect={sourceNodeId => onChange({ ...current, last_frame: sourceNodeId })}
+        />
+      )}
+      {maxFrames === 0 && (
+        <span className="text-xs text-muted-foreground">当前模型不接收首尾帧</span>
+      )}
+    </div>
+  );
+}
+
+function CanvasVideoFrameSlot({
+  label,
+  slot,
+  selectedNodeId,
+  materials,
+  disabled = false,
+  tilt,
+  onPreview,
+  onSelect,
+}: {
+  label: string;
+  slot: CanvasVideoFrameSlot;
+  selectedNodeId: string | null;
+  materials: readonly CanvasMaterialReference[];
+  disabled?: boolean;
+  tilt: 'left' | 'right';
+  onPreview: (reference: CanvasMaterialReference) => void;
+  onSelect: (sourceNodeId: string | null) => void;
+}) {
+  const selected = materials.find(reference => reference.nodeId === selectedNodeId);
+  const rotate = tilt === 'left' ? '-rotate-3' : 'rotate-3';
+  return (
+    <div className={cn('relative size-14 shrink-0', rotate)}>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            disabled={disabled}
+            aria-label={selected ? `更换${label}` : `选择${label}`}
+            title={selected ? `更换${label}` : `从画布选择${label}`}
+            className="grid size-14 place-items-center overflow-hidden rounded-lg border border-dashed border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {selected ? (
+              <CanvasMaterialPreview reference={selected} />
+            ) : (
+              <span className="grid gap-0.5 text-center">
+                <Plus className="mx-auto size-4" aria-hidden="true" />
+                <span className="text-xs">{selectedNodeId ? '失效' : label}</span>
+              </span>
+            )}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="bottom" align="start" className="max-h-80 w-72 overflow-y-auto rounded-xl">
+          <p className="px-2 pb-2 pt-1 text-xs font-medium text-muted-foreground">选择{label}</p>
+          {materials.length === 0 ? (
+            <p className="px-2 py-3 text-xs text-muted-foreground">画布上还没有可用图片。</p>
+          ) : materials.map(reference => (
+            <DropdownMenuItem
+              key={`${slot}:${reference.nodeId}`}
+              className="h-12 gap-2"
+              aria-label={`将 ${reference.title} 设为${label}`}
+              onSelect={() => onSelect(reference.nodeId)}
+            >
+              <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-secondary text-muted-foreground">
+                <CanvasMaterialPreview reference={reference} />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                {reference.title}
+              </span>
+              {reference.nodeId === selectedNodeId && (
+                <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />
+              )}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {selectedNodeId && (
+        <button
+          type="button"
+          aria-label={`移除${label}`}
+          title={`移除${label}`}
+          className="absolute -right-1 -top-1 z-10 grid size-5 place-items-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          onClick={() => onSelect(null)}
+        >
+          <X className="size-3" aria-hidden="true" />
+        </button>
+      )}
+      {selected && (
+        <button
+          type="button"
+          aria-label={`预览${label} ${selected.title}`}
+          title={`预览${label}`}
+          className="absolute inset-x-1 bottom-1 rounded bg-background/80 px-1 text-xs text-foreground"
+          onClick={() => onPreview(selected)}
+        >
+          {label}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function CanvasMaterialConnections({
   node,
   materials,
   connectedNodeIds,
+  limits,
   onPreview,
   onConnectedChange,
 }: {
   node: CanvasNode;
   materials: readonly CanvasMaterialReference[];
   connectedNodeIds: ReadonlySet<string>;
+  limits?: VideoReferenceLimits | null;
   onPreview: (reference: CanvasMaterialReference) => void;
   onConnectedChange: (sourceNodeId: string, connected: boolean) => void;
 }) {
   const choices = materials.filter(reference => reference.nodeId !== node.id);
   const connected = choices.filter(reference => connectedNodeIds.has(reference.nodeId));
+  const connectedCounts = connected.reduce<Record<'image' | 'video' | 'audio', number>>(
+    (counts, reference) => {
+      if (reference.kind !== 'text') counts[reference.kind] += 1;
+      return counts;
+    },
+    { image: 0, video: 0, audio: 0 },
+  );
   const [hoveredMaterial, setHoveredMaterial] = useState<CanvasMaterialHoverState | null>(null);
   const showMaterialDetail = (
     reference: CanvasMaterialReference,
@@ -1614,6 +1939,24 @@ function CanvasMaterialConnections({
       top: bounds.top - 8,
     });
   };
+
+  function unavailableReason(reference: CanvasMaterialReference): string | null {
+    if (!limits || reference.kind === 'text' || connectedNodeIds.has(reference.nodeId)) return null;
+    const mixedCount = connectedCounts.image + connectedCounts.video + connectedCounts.audio;
+    if (limits.mixedTotal && mixedCount >= limits.mixedTotal) {
+      return `混合参考素材最多 ${limits.mixedTotal} 个`;
+    }
+    const limit = reference.kind === 'image'
+      ? limits.images
+      : reference.kind === 'video'
+        ? limits.videos
+        : limits.audios;
+    if (limit === 0) return `当前模型不支持参考${mentionKindLabel(reference.kind)}`;
+    if (connectedCounts[reference.kind] >= limit) {
+      return `最多选择 ${limit} 个${mentionKindLabel(reference.kind)}素材`;
+    }
+    return null;
+  }
 
   return (
     <>
@@ -1661,10 +2004,12 @@ function CanvasMaterialConnections({
               <p className="px-2 py-3 text-xs text-muted-foreground">画布上还没有可对接的素材。</p>
             ) : choices.map(reference => {
               const checked = connectedNodeIds.has(reference.nodeId);
+              const disabledReason = unavailableReason(reference);
               return (
                 <DropdownMenuItem
                   key={reference.nodeId}
                   className="h-12 gap-2"
+                  disabled={Boolean(disabledReason)}
                   aria-label={`${checked ? '取消对接' : '对接'}素材 ${reference.title}`}
                   onSelect={event => {
                     event.preventDefault();
@@ -1676,7 +2021,9 @@ function CanvasMaterialConnections({
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-xs font-medium text-foreground">{reference.title}</span>
-                    <span className="block text-xs text-muted-foreground">{mentionKindLabel(reference.kind)}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {disabledReason ?? mentionKindLabel(reference.kind)}
+                    </span>
                   </span>
                   {checked && <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />}
                 </DropdownMenuItem>

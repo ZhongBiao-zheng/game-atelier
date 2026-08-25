@@ -179,11 +179,14 @@ export interface CanvasPluginNode extends CanvasNodeBase {
 export type CanvasContentNode = CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode;
 export type CanvasNode = CanvasContentNode | CanvasConfigNode | CanvasGroupNode | CanvasPluginNode;
 
+export type CanvasVideoFrameSlot = 'first_frame' | 'last_frame';
+
 export interface CanvasInputConnection {
   id: string;
   role: 'input';
   source_node_id: string;
   target_node_id: string;
+  slot?: CanvasVideoFrameSlot | null;
 }
 
 export interface CanvasDerivationConnection {

@@ -44,6 +44,8 @@ export interface VideoControlCaps {
   /** 参考素材上限覆盖（缺省用 9/3/3 全局常量；happyhorse video-edit = 5 图 + 1 视频）。 */
   maxRefImages?: number;
   maxRefVideos?: number;
+  maxRefAudios?: number;
+  maxMixedReferences?: number;
 }
 
 // Seedance 官方档位（provider-config.md「视频契约 — Seedance」）：
@@ -100,7 +102,14 @@ function seedanceCaps(id: string): VideoControlCaps {
     supportsReferenceAudio: true,
     maxFrames: 2,
     // 2.5 的全能参考矩阵比 2.0 系宽得多（官方 图30 / 视频10 / 音频10）。
-    ...(is25 ? { maxRefImages: 30, maxRefVideos: 10 } : {}),
+    ...(is25
+      ? { maxRefImages: 30, maxRefVideos: 10, maxRefAudios: 10 }
+      : {
+          maxRefImages: 9,
+          maxRefVideos: 3,
+          maxRefAudios: 3,
+          ...(is20 ? { maxMixedReferences: 12 } : {}),
+        }),
   };
 }
 
@@ -224,4 +233,36 @@ export const VIDEO_MODE_LABELS: Record<VideoMode, string> = {
 /** 比例的展示标签：adaptive 显示为中文，其余原样。 */
 export function ratioLabel(ratio: string): string {
   return ratio === 'adaptive' ? '自适应' : ratio;
+}
+
+export interface VideoReferenceLimits {
+  images: number;
+  videos: number;
+  audios: number;
+  mixedTotal?: number;
+}
+
+export function videoReferenceLimits(
+  caps: VideoControlCaps,
+  mode: VideoMode,
+): VideoReferenceLimits {
+  if (mode === 'firstlast') {
+    return { images: caps.maxFrames, videos: 0, audios: 0 };
+  }
+  return {
+    images: caps.maxRefImages ?? 9,
+    videos: caps.supportsReferenceVideo ? caps.maxRefVideos ?? 3 : 0,
+    audios: caps.supportsReferenceAudio ? caps.maxRefAudios ?? 3 : 0,
+    ...(caps.maxMixedReferences ? { mixedTotal: caps.maxMixedReferences } : {}),
+  };
+}
+
+export function videoReferenceLimitLabel(limits: VideoReferenceLimits): string {
+  const labels = [
+    limits.images > 0 ? `最多 ${limits.images} 张图` : '不支持图片',
+    limits.videos > 0 ? `最多 ${limits.videos} 个视频` : '不支持视频',
+    limits.audios > 0 ? `最多 ${limits.audios} 段音频` : '不支持音频',
+  ];
+  if (limits.mixedTotal) labels.push(`混合最多 ${limits.mixedTotal} 个`);
+  return labels.join(' · ');
 }

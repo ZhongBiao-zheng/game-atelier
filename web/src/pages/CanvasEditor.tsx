@@ -158,6 +158,7 @@ import type {
   CanvasPrompt,
   CanvasTextVersion,
   CanvasUiPreferences,
+  CanvasVideoFrameSlot,
   RevisionedSidecar,
 } from '@/schema/canvas';
 import type { Job, JobKind } from '@/schema/jobs';
@@ -1006,6 +1007,62 @@ function CanvasEditorInner({
       connections: current.connections.filter(connection => !removedIds.has(connection.id)),
     }), true);
   }, [commit, onConnect]);
+
+  const setVideoFrameConnections = useCallback((
+    targetNodeId: string,
+    frames: Readonly<Record<CanvasVideoFrameSlot, string | null>>,
+  ) => {
+    const current = latestDocument.current;
+    const target = current?.nodes.find(node => node.id === targetNodeId);
+    if (!current || !target || target.type === 'group' || target.type === 'config'
+      || target.data.generation_draft?.mode !== 'video') {
+      setError('只有视频生成节点可以设置首尾帧。');
+      return;
+    }
+    const selectedSources = Object.entries(frames).filter(
+      (entry): entry is [CanvasVideoFrameSlot, string] => Boolean(entry[1]),
+    );
+    const invalidSource = selectedSources.find(([, sourceNodeId]) => {
+      const source = current.nodes.find(node => node.id === sourceNodeId);
+      if (!source || source.type !== 'image' || !source.data.current_version_id) return true;
+      return current.content_versions[source.data.current_version_id]?.kind !== 'image';
+    });
+    if (invalidSource) {
+      setError('首尾帧只能选择画布上已有内容的图片节点。');
+      return;
+    }
+    setError(null);
+    const removedIds = new Set(current.connections
+      .filter(connection => (
+        connection.role === 'input'
+        && connection.target_node_id === targetNodeId
+        && Boolean(connection.slot)
+      ))
+      .map(connection => connection.id));
+    setSelectedConnectionIds(selected => {
+      if (![...removedIds].some(id => selected.has(id))) return selected;
+      const next = new Set(selected);
+      removedIds.forEach(id => next.delete(id));
+      return next;
+    });
+    commit(document => ({
+      ...document,
+      connections: [
+        ...document.connections.filter(connection => !(
+          connection.role === 'input'
+          && connection.target_node_id === targetNodeId
+          && Boolean(connection.slot)
+        )),
+        ...selectedSources.map(([slot, sourceNodeId]) => ({
+          id: makeId('connection'),
+          role: 'input' as const,
+          source_node_id: sourceNodeId,
+          target_node_id: targetNodeId,
+          slot,
+        })),
+      ],
+    }), true);
+  }, [commit]);
 
   const onConnectEnd = useCallback<OnConnectEnd>((event, state) => {
     setConnectionInProgress(false);
@@ -2759,10 +2816,21 @@ function CanvasEditorInner({
     const current = mentionDocumentRef.current;
     const result = new Map<string, Set<string>>();
     for (const connection of current?.connections ?? []) {
-      if (connection.role !== 'input') continue;
+      if (connection.role !== 'input' || connection.slot) continue;
       const sources = result.get(connection.target_node_id) ?? new Set<string>();
       sources.add(connection.source_node_id);
       result.set(connection.target_node_id, sources);
+    }
+    return result;
+  }, [mentionGraphSignature]);
+  const videoFrameNodeIdsByNodeId = useMemo(() => {
+    const current = mentionDocumentRef.current;
+    const result = new Map<string, Partial<Record<CanvasVideoFrameSlot, string>>>();
+    for (const connection of current?.connections ?? []) {
+      if (connection.role !== 'input' || !connection.slot) continue;
+      const frames = result.get(connection.target_node_id) ?? {};
+      frames[connection.slot] = connection.source_node_id;
+      result.set(connection.target_node_id, frames);
     }
     return result;
   }, [mentionGraphSignature]);
@@ -2771,6 +2839,7 @@ function CanvasEditorInner({
     projectId,
     materialReferences,
     connectedMaterialNodeIdsByNodeId,
+    videoFrameNodeIdsByNodeId,
     mentionReferencesByNodeId,
     contentVersions: document?.content_versions ?? {},
     keys,
@@ -2791,6 +2860,7 @@ function CanvasEditorInner({
       dismiss: dismissGenerationPanel,
     },
     setMaterialConnected,
+    setVideoFrameConnections,
     selectNode: selectOnlyNode,
     previewContent,
     selectCandidate,
@@ -2857,12 +2927,14 @@ function CanvasEditorInner({
     selectCandidate,
     selectOnlyNode,
     setMaterialConnected,
+    setVideoFrameConnections,
     submitRun,
     submittingNodeIds,
     toggleFreeResize,
     updateNode,
     updateText,
     viewportZoom,
+    videoFrameNodeIdsByNodeId,
   ]);
 
   useEffect(() => {

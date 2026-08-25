@@ -620,6 +620,10 @@ def _current_version_id(node: CanvasNode) -> str | None:
     return None
 
 
+def _uses_video_frame_slots(draft: CanvasGenerationDraft) -> bool:
+    return draft.mode == "video" and draft.params.frame_mode in {"first", "last", "firstlast"}
+
+
 def _resolve_inputs(
     document: CanvasDocument,
     surface: CanvasNode,
@@ -635,6 +639,8 @@ def _resolve_inputs(
         and draft.mode == "video"
         and self_version_id is not None
     )
+    if editing_existing_video and _uses_video_frame_slots(draft):
+        raise ValueError("已有视频的再次编辑只支持全能参考模式")
     if editing_existing_video and _MENTION.search(draft.prompt):
         raise ValueError("视频编辑只使用当前视频，不接受其它节点引用")
 
@@ -644,15 +650,29 @@ def _resolve_inputs(
     ]
     if editing_existing_video:
         incoming = []
-    connected_ids = list(dict.fromkeys(edge.source_node_id for edge in incoming))
-    mentioned_ids = list(dict.fromkeys(_MENTION.findall(draft.prompt)))
-    unknown_mentions = [node_id for node_id in mentioned_ids if node_id not in connected_ids]
-    if unknown_mentions:
-        raise ValueError("提示词引用了未连接到当前节点的内容")
-    selected_ids = mentioned_ids
-    if draft.input_policy == "all_connected":
-        selected_ids.extend(node_id for node_id in connected_ids if node_id not in mentioned_ids)
-    candidates.extend(("input_connection", node_id) for node_id in selected_ids)
+    uses_video_frame_slots = _uses_video_frame_slots(draft)
+    if uses_video_frame_slots:
+        if _MENTION.search(draft.prompt):
+            raise ValueError("首尾帧模式不支持 @ 引用，请删除引用后再生成")
+        for slot in ("first_frame", "last_frame"):
+            edges = [edge for edge in incoming if edge.slot == slot]
+            if len(edges) > 1:
+                raise ValueError("首帧或尾帧只能连接一个图片素材")
+            if edges:
+                candidates.append((slot, edges[0].source_node_id))
+    else:
+        # Slot connections belong exclusively to first/last-frame mode. A stale slot left by an
+        # interrupted client update must never silently change an omni-reference request.
+        incoming = [edge for edge in incoming if edge.slot is None]
+        connected_ids = list(dict.fromkeys(edge.source_node_id for edge in incoming))
+        mentioned_ids = list(dict.fromkeys(_MENTION.findall(draft.prompt)))
+        unknown_mentions = [node_id for node_id in mentioned_ids if node_id not in connected_ids]
+        if unknown_mentions:
+            raise ValueError("提示词引用了未连接到当前节点的内容")
+        selected_ids = mentioned_ids
+        if draft.input_policy == "all_connected":
+            selected_ids.extend(node_id for node_id in connected_ids if node_id not in mentioned_ids)
+        candidates.extend(("input_connection", node_id) for node_id in selected_ids)
 
     nodes = {node.id: node for node in document.nodes}
     resolved: list[CanvasSnapshotInput] = []
@@ -662,6 +682,8 @@ def _resolve_inputs(
         version = document.content_versions.get(version_id) if version_id else None
         if node is None or version is None:
             raise ValueError("生成输入缺少可用的内容版本")
+        if source in {"first_frame", "last_frame"} and version.kind != "image":
+            raise ValueError("首帧和尾帧只能选择图片素材")
         resolved.append(CanvasSnapshotInput(
             order=len(resolved),
             source=source,
@@ -698,7 +720,11 @@ def _render_final_prompt(
             media_labels.append(label)
             if marker in prompt:
                 prompt = prompt.replace(marker, label)
-    if media_labels:
+    semantic_video_frames = any(
+        item.source in {"first_frame", "last_frame"}
+        for item in inputs
+    )
+    if media_labels and not semantic_video_frames:
         prompt = (
             f"参考素材编号：{'、'.join(media_labels)}。请按这些编号理解提示词中的引用。"
             f"\n\n{prompt}"
@@ -761,6 +787,15 @@ def _validate_input_capabilities(
         if counts["image"] > limit:
             raise ValueError(f"当前图片模型最多支持 {limit} 张参考图")
         return
+
+    if params.frame_mode in {"first", "last", "firstlast"}:
+        if counts["video"] or counts["audio"]:
+            raise ValueError("首尾帧模式只支持图片输入")
+        expected_images = 2 if params.frame_mode == "firstlast" else 1
+        if counts["image"] != expected_images:
+            raise ValueError(f"当前首尾帧设置需要 {expected_images} 张图片")
+        if model.protocol == "seedance" and params.frame_mode == "last":
+            raise ValueError("当前 Seedance 模型不能只设置尾帧，请先选择首帧")
 
     protocol = model.protocol
     if protocol == "seedance":
@@ -1145,6 +1180,23 @@ def submit_canvas_run(
             model,
         )
         inputs = _resolve_inputs(current, surface, draft)
+        if _uses_video_frame_slots(draft) or any(
+            item.source in {"first_frame", "last_frame"} for item in inputs
+        ):
+            frame_sources = {item.source for item in inputs}
+            if {"first_frame", "last_frame"}.issubset(frame_sources):
+                effective_frame_mode = "firstlast"
+            elif "first_frame" in frame_sources:
+                effective_frame_mode = "first"
+            elif "last_frame" in frame_sources:
+                effective_frame_mode = "last"
+            else:
+                effective_frame_mode = None
+            job_params.frame_mode = effective_frame_mode
+            if effective_frame_mode is None:
+                normalized.pop("frame_mode", None)
+            else:
+                normalized["frame_mode"] = effective_frame_mode
         _validate_input_capabilities(model, kind, inputs, job_params)
         final_prompt = _render_final_prompt(current, draft, inputs)
         media_paths = _input_paths(project_id, current, inputs)

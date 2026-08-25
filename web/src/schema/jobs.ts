@@ -89,7 +89,7 @@ export interface CanvasGenerationSnapshot {
   normalized_params: Record<string, unknown>;
   inputs: Array<{
     order: number;
-    source: 'implicit_self' | 'input_connection';
+    source: 'implicit_self' | 'input_connection' | 'first_frame' | 'last_frame';
     node_id: string;
     version_id: string;
     kind: 'text' | 'image' | 'video' | 'audio';

@@ -175,6 +175,16 @@ voice/format、0.25–4 的 speed 与去除首尾空白后的非空 instructions
 同一编号；final prompt 的标签与 `reference_images/reference_videos/reference_audios` 各自数组顺序一致，
 隐式自身输入也参与编号。非原生批量的图片候选按槽位执行，每个成功槽位立即通过短事务登记
 Content Version、candidate 状态与首个成功主结果；Midjourney 原生四宫格仍保留单次请求再逐槽登记。
+
+视频 Draft 的 `frame_mode=first|last|firstlast` 使用语义化 Input Connection：可选 `slot` 只能是
+`first_frame` 或 `last_frame`，源节点必须是已有图片 Content Version，目标必须是视频生成节点，且同一
+目标的每个槽位最多一条连接；同一图片允许同时占用首帧和尾帧。首尾帧模式不解析普通素材连接，也禁止
+`@[node:*]`，浏览器给出固定提示且服务端再次拒绝；切换到全能参考会删除槽位连接，服务端也会忽略任何
+异常残留槽位。提交时按实际槽位推导 wire `frame_mode` 和首尾图片顺序，不能由浏览器伪造媒体数组。
+视频模型选择器与当前素材区必须同时公开各模式的图片、视频、音频上限；浏览器在选择阶段限制新增并阻止
+超限提交，服务端仍按模型协议重新核对单模态与混合总数。Canvas 不列出只接受公网视频 URL、无法消费
+项目内 Content Version 的 HappyHorse video-edit 模型。
+
 批量候选逐个校验：全部成功为 `done`，部分成功为 `partial`，全部失败为 `failed`，
 停止且没有有效产物为 `canceled`；部分失败不会抹掉已经成功的 Content Version。
 `POST .../runs/{run_id}/retry` 明确区分 `original` 与 `current`：前者校验并复用原 Snapshot 的精确
