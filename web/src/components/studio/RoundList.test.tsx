@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RoundList, type RoundState } from './RoundList';
 
 const videoDone: RoundState = {
@@ -31,6 +31,11 @@ const videoWithRefs: RoundState = {
   },
 };
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
 describe('RoundList video', () => {
   it('renders a <video> element for a video round', () => {
     const { container } = render(<RoundList rounds={[videoDone]} />);
@@ -42,6 +47,98 @@ describe('RoundList video', () => {
   it('renders the prompt text', () => {
     render(<RoundList rounds={[videoDone]} />);
     expect(screen.getByText('一只猫在跳舞')).toBeInTheDocument();
+  });
+
+  it('does not create players or decode reference videos before the round nears the viewport', () => {
+    let intersectionCallback: IntersectionObserverCallback | undefined;
+    class MockIntersectionObserver implements IntersectionObserver {
+      readonly root = null;
+      readonly rootMargin = '600px 0px';
+      readonly thresholds = [0];
+      constructor(callback: IntersectionObserverCallback) {
+        intersectionCallback = callback;
+      }
+      disconnect() {}
+      observe() {}
+      takeRecords() { return []; }
+      unobserve() {}
+    }
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+    const createElement = vi.spyOn(document, 'createElement');
+    const round: RoundState = {
+      ...videoWithRefs,
+      jobId: 'job-lazy-video',
+      imagePaths: ['/data/studio/job-lazy-video/v1.mp4'],
+      config: {
+        ...videoWithRefs.config,
+        referenceVideos: ['/uploads/lazy-reference.mp4'],
+      },
+    };
+
+    const { container } = render(<RoundList rounds={[round]} />);
+    expect(container.querySelector('video')).toBeNull();
+    expect(screen.getByTestId('studio-video-placeholder')).toBeInTheDocument();
+    expect(createElement.mock.calls.filter(([tag]) => tag === 'video')).toHaveLength(0);
+
+    act(() => {
+      intersectionCallback?.(
+        [{ isIntersecting: true } as IntersectionObserverEntry],
+        {} as IntersectionObserver,
+      );
+    });
+    expect(container.querySelector('video')).not.toBeNull();
+    expect(createElement.mock.calls.filter(([tag]) => tag === 'video').length).toBeGreaterThan(0);
+    const hiddenDecoder = createElement.mock.results
+      .map(({ value }) => value)
+      .find((node): node is HTMLVideoElement => (
+        node instanceof HTMLVideoElement
+        && node.preload === 'auto'
+        && !container.contains(node)
+      ));
+    expect(hiddenDecoder?.getAttribute('src')).toContain('lazy-reference.mp4');
+
+    act(() => {
+      intersectionCallback?.(
+        [{ isIntersecting: false } as IntersectionObserverEntry],
+        {} as IntersectionObserver,
+      );
+    });
+    expect(container.querySelector('video')).toBeNull();
+    expect(hiddenDecoder?.getAttribute('src')).toBeNull();
+  });
+
+  it('mounts only the newest 30 rounds initially and loads older history in batches', () => {
+    const rounds = Array.from({ length: 100 }, (_, index): RoundState => ({
+      ...videoDone,
+      jobId: `job-video-${index}`,
+      submittedAt: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+      imagePaths: [`/data/studio/job-video-${index}/v1.mp4`],
+    }));
+    const { container } = render(<RoundList rounds={rounds} />);
+
+    expect(container.querySelectorAll('[data-round-job]')).toHaveLength(30);
+    expect(container.querySelector('[data-round-job="job-video-0"]')).toBeNull();
+    expect(container.querySelector('[data-round-job="job-video-99"]')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '加载更早记录（剩余 70 条）' }));
+    expect(container.querySelectorAll('[data-round-job]')).toHaveLength(60);
+    fireEvent.click(screen.getByRole('button', { name: '加载更早记录（剩余 40 条）' }));
+    expect(container.querySelectorAll('[data-round-job]')).toHaveLength(90);
+    fireEvent.click(screen.getByRole('button', { name: '加载更早记录（剩余 10 条）' }));
+    expect(container.querySelectorAll('[data-round-job]')).toHaveLength(100);
+    expect(screen.queryByRole('button', { name: /加载更早记录/ })).toBeNull();
+  });
+
+  it('keeps an older deep-linked round mounted outside the newest batch', () => {
+    const rounds = Array.from({ length: 40 }, (_, index): RoundState => ({
+      ...videoDone,
+      jobId: `job-focus-${index}`,
+      submittedAt: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+      imagePaths: [`/data/studio/job-focus-${index}/v1.mp4`],
+    }));
+    const { container } = render(<RoundList rounds={rounds} focusJobId="job-focus-2" />);
+    expect(container.querySelector('[data-round-job="job-focus-2"]')).not.toBeNull();
+    expect(container.querySelector('[data-round-job="job-focus-39"]')).not.toBeNull();
   });
 });
 
