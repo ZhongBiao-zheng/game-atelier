@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { Clapperboard, Volume2, VolumeX } from 'lucide-react';
 import {
   VIDEO_MODE_LABELS,
@@ -9,10 +9,10 @@ import {
   type VideoQuality,
 } from '@/lib/videoControlCaps';
 import { RatioIcon } from './RatioIcon';
-import { ToolbarPopover } from './ToolbarPopover';
+import { ToolbarPopover, type ToolbarPopoverMenuProps } from './ToolbarPopover';
 import { cn } from '@/lib/utils';
 
-interface Props {
+interface Props extends ToolbarPopoverMenuProps {
   caps: VideoControlCaps;
   mode: VideoMode;
   duration: number;
@@ -28,8 +28,6 @@ interface Props {
   onQualityChange?: (quality: VideoQuality) => void;
   onGenerateAudioChange: (generateAudio: boolean) => void;
   onWatermarkChange?: (watermark: boolean) => void;
-  menuDirection?: 'up' | 'down';
-  portalContainerRef?: RefObject<HTMLElement | null>;
 }
 
 /** 生成方式 / 比例 / 清晰度（或档位）/ 生成时长 / 生成音频 多合一：

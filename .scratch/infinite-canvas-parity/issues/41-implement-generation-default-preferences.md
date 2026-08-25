@@ -2,7 +2,7 @@
 
 Type: implement
 
-Status: in-progress
+Status: completed
 
 Blocked by: 40-implement-generation-config-entrypoints
 
@@ -43,4 +43,11 @@ Blocked by: 40-implement-generation-config-entrypoints
 
 ## Verification
 
-待完成。
+- `uv run pytest -q tests/test_canvas_generation_preferences.py tests/test_canvas_generation_params.py tests/test_canvas_generation_history_restore.py tests/test_canvas_candidates.py tests/test_canvas_mentions.py tests/test_openai_image.py -k 'not slow' --disable-warnings`：138 passed。
+- `uv run ruff check src/character_workflow/lib/schemas.py src/character_workflow/lib/canvas_runs.py src/character_workflow/lib/callers/openai_image.py tests/test_canvas_generation_preferences.py`：通过。
+- `pnpm exec vitest run src/api/canvasUi.test.ts src/pages/canvasGenerationConfig.test.ts src/components/studio/VideoControls.test.tsx src/components/canvas/CanvasGenerationControls.test.tsx src/components/canvas/CanvasGenerationPreferencesDialog.test.tsx src/test/designDrift.test.ts`：41 passed。
+- `pnpm exec tsc -p /tmp/tsconfig.canvas-e37.json --noEmit`：全部生产源码通过；仓库全量 `tsc -b` 仍只有既有 Canvas v1 测试债。
+- `pnpm exec vite build && node scripts/normalize-dist.mjs`：production source build 通过（2673 modules），仅保留既有 bundle size 提示。
+- 全量基线：Python 1002 passed / 8 failed / 3 skipped；Web 480 passed / 22 failed / 13 errors，失败仍集中在既有 Canvas v1、Keys 测试与用户工作树版本差异，本票聚焦套件无新增回归。
+- 真实 `localhost:5175`：桌面与 390×600 下四模态 Dialog、内部滚动、焦点域、嵌套 Escape、模型/参数弹层均通过；自动选模调整为 2 张后仍显示“自动选择”，取消后零持久化，浏览器 error log 为空。
+- 双轴审查三轮闭环：四模态 TS 白名单、契约过期、路径语义、自动参数、反推模型 capability 与尺寸归一问题均已修复；Standards / Spec 最终均为 CLEAR。

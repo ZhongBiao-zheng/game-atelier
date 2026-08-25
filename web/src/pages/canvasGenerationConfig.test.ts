@@ -179,6 +179,20 @@ it('uses a valid saved model preference and normalizes its default params', () =
   });
 });
 
+it('applies saved default params while the model remains automatic', () => {
+  expect(createCanvasGenerationDraft(keys, 'image', {
+    preference: {
+      selection: null,
+      params: { n: 3, ratio: '16:9', quality: 'high' },
+    },
+    now: '2026-08-25T04:30:00Z',
+  })).toMatchObject({
+    alias: 'image-key',
+    model: 'gpt-image-2',
+    params: { n: 3, ratio: '16:9', quality: 'high' },
+  });
+});
+
 it('falls back without leaking params from a stale model preference', () => {
   const stale = {
     selection: { alias: 'removed-key', model: 'removed-model' },

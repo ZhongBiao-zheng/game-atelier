@@ -111,6 +111,18 @@ def test_generation_preferences_reject_unsafe_or_cross_modality_params(isolated_
     assert not data_root.canvas_ui_file().exists()
 
 
+def test_generation_preferences_reject_paths_disguised_as_option_values(isolated_data_root):
+    client = _client(isolated_data_root)
+    image_path = _payload()
+    image_path["generation_defaults"]["image"]["params"]["size"] = "/tmp/private.png"
+    video_path = _payload()
+    video_path["generation_defaults"]["video"]["params"]["ratio"] = r"C:\\private.mp4"
+
+    assert client.put("/api/canvas/ui-preferences", json=image_path).status_code == 422
+    assert client.put("/api/canvas/ui-preferences", json=video_path).status_code == 422
+    assert not data_root.canvas_ui_file().exists()
+
+
 def test_generation_preferences_do_not_silently_accept_v1_or_corrupt_files(isolated_data_root):
     client = _client(isolated_data_root)
     path = data_root.canvas_ui_file()
@@ -197,3 +209,79 @@ def test_reverse_prompt_recovery_falls_back_without_leaking_stale_params(isolate
 
     assert (key.alias, model.id) == ("fallback", "gpt-image-1")
     assert params.model_dump(exclude_none=True) == {"n": 1, "ratio": "1:1"}
+
+
+def test_reverse_prompt_recovery_applies_auto_model_params(isolated_data_root):
+    write_keys_db(KeysDB(default_alias="fallback", keys=[
+        KeySpec(
+            alias="fallback",
+            provider="openai",
+            access_key="secret",
+            created_at="2026-08-25T00:00:00Z",
+            models=[ModelSpec(name="Fallback", id="gpt-image-1", modality="image")],
+        ),
+    ]))
+    payload = _payload()
+    payload["generation_defaults"]["image"] = {
+        "selection": None,
+        "params": {
+            "n": 3,
+            "ratio": "16:9",
+            "size": "4096x4096",
+            "quality": "high",
+        },
+    }
+    assert _client(isolated_data_root).put(
+        "/api/canvas/ui-preferences", json=payload
+    ).status_code == 200
+
+    key, model, params = _resolve_default_image_model()
+
+    assert (key.alias, model.id) == ("fallback", "gpt-image-1")
+    assert params.model_dump(exclude_none=True) == {
+        "n": 3,
+        "ratio": "16:9",
+        "size": "2880x2880",
+        "quality": "high",
+    }
+
+
+def test_reverse_prompt_recovery_normalizes_auto_params_for_selected_model(isolated_data_root):
+    write_keys_db(KeysDB(default_alias="fallback", keys=[
+        KeySpec(
+            alias="fallback",
+            provider="tokendance",
+            access_key="secret",
+            created_at="2026-08-25T00:00:00Z",
+            models=[ModelSpec(
+                name="Fallback",
+                id="seedream-5.0-pro",
+                modality="image",
+                protocol="ark",
+            )],
+        ),
+    ]))
+    payload = _payload()
+    payload["generation_defaults"]["image"] = {
+        "selection": None,
+        "params": {
+            "n": 3,
+            "ratio": "16:9",
+            "resolution": "4K",
+            "size": "2048x2048",
+            "quality": "high",
+            "background": "transparent",
+        },
+    }
+    assert _client(isolated_data_root).put(
+        "/api/canvas/ui-preferences", json=payload
+    ).status_code == 200
+
+    _, _, params = _resolve_default_image_model()
+
+    assert params.model_dump(exclude_none=True) == {
+        "n": 3,
+        "ratio": "16:9",
+        "resolution": "2K",
+        "size": "2048x2048",
+    }

@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Boxes, Check, Settings2 } from 'lucide-react';
 
 import type { KeyView } from '@/api/keys';
 import { RatioIcon } from '@/components/studio/RatioIcon';
-import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
+import {
+  ToolbarPopover,
+  type ToolbarPopoverMenuProps,
+} from '@/components/studio/ToolbarPopover';
 import { QUALITY_LABELS, type ImageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import { cn } from '@/lib/utils';
 import { normalizeStudioSizeForModel, type Resolution } from '@/lib/studioSize';
@@ -46,9 +49,7 @@ export function CanvasModelPicker({
   alias: string | null;
   model: string;
   onSelect: (choice: CanvasModelChoice) => void;
-  menuDirection?: 'up' | 'down';
-  portalContainerRef?: RefObject<HTMLElement | null>;
-}) {
+} & ToolbarPopoverMenuProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const selected = choices.find(choice => choice.key.alias === alias && choice.model.id === model);
@@ -138,9 +139,7 @@ export function CanvasImageSettings({
   model: string;
   params: JobParams;
   onPatch: (patch: JobParams, options?: { resetSize?: boolean }) => void;
-  menuDirection?: 'up' | 'down';
-  portalContainerRef?: RefObject<HTMLElement | null>;
-}) {
+} & ToolbarPopoverMenuProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const ratio = String(params.ratio ?? caps.ratios[0] ?? '1:1');
@@ -304,9 +303,7 @@ export function CanvasTextSettings({
   supportsReasoning: boolean;
   params: JobParams;
   onPatch: (patch: JobParams) => void;
-  menuDirection?: 'up' | 'down';
-  portalContainerRef?: RefObject<HTMLElement | null>;
-}) {
+} & ToolbarPopoverMenuProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const count = Math.max(1, Math.min(4, Number(params.n) || 1));
@@ -373,9 +370,7 @@ export function CanvasAudioSettings({
 }: {
   params: JobParams;
   onPatch: (patch: JobParams) => void;
-  menuDirection?: 'up' | 'down';
-  portalContainerRef?: RefObject<HTMLElement | null>;
-}) {
+} & ToolbarPopoverMenuProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const voice = normalizeAudioVoice(params.voice);

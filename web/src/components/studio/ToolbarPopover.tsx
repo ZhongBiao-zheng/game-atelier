@@ -11,13 +11,20 @@ import {
   type RefObject,
 } from 'react';
 
+export type ToolbarPopoverDirection = 'up' | 'down';
+
+export interface ToolbarPopoverMenuProps {
+  menuDirection?: ToolbarPopoverDirection;
+  portalContainerRef?: RefObject<HTMLElement | null>;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
   /** 触发器（控件 chip 外壳），用于测量定位。 */
   anchorRef: RefObject<HTMLElement | null>;
   /** 向上弹（bottom-full）还是向下弹（top-full）。 */
-  direction?: 'up' | 'down';
+  direction?: ToolbarPopoverDirection;
   /** 面板与锚点的横向对齐：start = 左边缘对齐（默认），end = 右边缘对齐。
    *  靠屏幕右侧的锚点（顶栏图标钮）必须用 end，否则宽面板会溢出视口。 */
   align?: 'start' | 'end';
@@ -25,7 +32,7 @@ interface Props {
   autoFocus?: boolean;
   /** 面板视觉类（宽度 / 圆角 / 背景 / 内边距），不含定位类。 */
   className?: string;
-  /** 弹窗内使用时把 portal 留在焦点域内；定位会自动切换为容器内 absolute。 */
+  /** Dialog 的焦点陷阱必须拥有 portaled 面板，否则菜单交互会被 Radix 抢回焦点。 */
   portalContainerRef?: RefObject<HTMLElement | null>;
   role?: string;
   'aria-label'?: string;

@@ -480,6 +480,63 @@ def _supports_canvas_image_generation(key: KeySpec, model: ModelSpec) -> bool:
     return protocol in {None, "openai", "ark"}
 
 
+def _normalized_image_preference_params(
+    key: KeySpec,
+    model: ModelSpec,
+    params: dict[str, Any],
+) -> JobParams:
+    from character_workflow.lib.callers.openai_image import (
+        image_family,
+        normalize_image_pixel_size,
+        normalized_model_id,
+        resolve_image_protocol,
+    )
+
+    family = image_family(model.id)
+    ratios = {
+        "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3",
+        *(("21:9",) if family != "nano-banana" else ()),
+    }
+    ratio = str(params.get("ratio") or "1:1")
+    if ratio not in ratios:
+        ratio = "1:1"
+    count = 4 if family == "midjourney" else max(1, min(4, int(params.get("n") or 1)))
+    normalized: dict[str, Any] = {"n": count, "ratio": ratio}
+
+    quality = params.get("quality")
+    if family in {"gpt-image", "nano-banana"} and quality in {
+        "low", "medium", "high", "auto",
+    }:
+        normalized["quality"] = quality
+    if family == "midjourney":
+        return JobParams.model_validate(normalized)
+    if key.provider == "openrouter" or family == "nano-banana":
+        normalized["size"] = ratio
+        return JobParams.model_validate(normalized)
+
+    size = params.get("size")
+    if isinstance(size, str) and re.fullmatch(r"\d+x\d+", size):
+        normalized["size"] = normalize_image_pixel_size(model.id, size)
+    if family in {"seedream", "standard"}:
+        resolutions = {"2K", "4K"}
+        if "seedream-5-0-pro" in normalized_model_id(model.id):
+            resolutions = {"2K"}
+        resolution = str(params.get("resolution") or "2K").upper()
+        normalized["resolution"] = resolution if resolution in resolutions else "2K"
+    if family == "gpt-image":
+        protocol = model.protocol or resolve_image_protocol(
+            key.provider,
+            key.base_url,
+            model.id,
+        )
+        background = params.get("background")
+        if protocol in {None, "openai"} and background in {
+            "auto", "opaque", "transparent",
+        }:
+            normalized["background"] = background
+    return JobParams.model_validate(normalized)
+
+
 def _resolve_default_image_model() -> tuple[KeySpec, ModelSpec, JobParams]:
     keys = _keys_default_first()
     try:
@@ -498,11 +555,16 @@ def _resolve_default_image_model() -> tuple[KeySpec, ModelSpec, JobParams]:
                     model.id == preference.selection.model
                     and _supports_canvas_image_generation(key, model)
                 ):
-                    return key, model, JobParams.model_validate(preference.params)
+                    return key, model, _normalized_image_preference_params(
+                        key,
+                        model,
+                        preference.params,
+                    )
     for key in keys:
         for model in key.models:
             if _supports_canvas_image_generation(key, model):
-                return key, model, JobParams(n=1, ratio="1:1")
+                params = preference.params if preference.selection is None else {}
+                return key, model, _normalized_image_preference_params(key, model, params)
     raise CanvasRunCommandError(
         "canvas_image_default_missing",
         "未配置可用的图片生成模型；反推文本已保留，请先在设置中接入图片模型。",

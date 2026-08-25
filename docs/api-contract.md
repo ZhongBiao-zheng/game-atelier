@@ -142,7 +142,8 @@ schema 的文件返回 409，原字节保持不变。`PUT /api/canvas/ui-prefere
 不允许重复但允许空清单；`generation_defaults` 严格包含 text/image/video/audio 四项，每项只保存可选的
 `{ alias, model }` 与该模态白名单参数。媒体引用、蒙版、本机路径、运行回写字段和跨模态参数一律 422。
 服务端在独立文件锁内校验 revision 并原子替换，冲突返回当前 revision。生成偏好只影响后续新建 Draft
-和配置节点模式切换；失效模型回退首个 Runner 可路由模型且不继承旧参数，已有节点、Run Snapshot 与 Job
+和配置节点模式切换；模型保持自动选择时仍独立应用该模态默认参数。失效的显式模型回退首个 Runner 可路由
+模型且不继承旧参数，已有节点、Run Snapshot 与 Job
 保持不变。该偏好跨项目生效，但不进入 `CanvasDocument`、undo/redo、项目 revision、项目包 manifest/zip
 或插件私有状态；凭证、Base URL 与模型目录仍只属于 Keys。
 
@@ -202,8 +203,9 @@ model 或媒体路径。Snapshot 冻结完整 preset 正文/版本、真实模�
 multimodal content 发送服务端解析的项目内图片。成功结果是独立文本节点及 generation-run 派生边，源图片
 Draft 不读不改；停止与 original retry 复用普通 Run 生命周期，current retry 不适用。
 `POST .../runs/{run_id}/reverse-prompt-config` 在成功文本结果后幂等创建图片 Config Node 及文本→配置
-Input Connection。图片模型同样由服务端优先 default Key、再按登记顺序选择；缺模型时保留反推文本且
-零写。重复请求即使携带旧 revision，也返回已经存在的同一配置，不重复创建节点或连接。
+Input Connection。图片模型优先使用仍可路由的画布图片生成偏好；偏好保持自动选择或显式模型失效时，
+再按 default Key 优先、其余登记顺序选择。自动选择会应用已保存的默认参数，失效的显式模型不泄漏旧参数；
+缺模型时保留反推文本且零写。重复请求即使携带旧 revision，也返回已经存在的同一配置，不重复创建节点或连接。
 
 `POST /canvas/projects/{id}/runs/mask-edit` 使用 multipart，只接受 `surface_node_id / expected_revision /
 requested_count / mask_file`。prompt、alias、model 与参数必须先保存为源图片节点的 image Draft，服务端

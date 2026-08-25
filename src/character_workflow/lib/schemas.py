@@ -319,6 +319,16 @@ class CanvasGenerationModelSelection(BaseModel):
     model: str = Field(min_length=1, max_length=200)
 
 
+CanvasSafeOption = Annotated[
+    str,
+    StringConstraints(
+        min_length=1,
+        max_length=32,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:+-]*$",
+    ),
+]
+
+
 class CanvasTextDefaultParams(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     n: int | None = Field(default=None, ge=1, le=4)
@@ -330,20 +340,20 @@ class CanvasTextDefaultParams(BaseModel):
 class CanvasImageDefaultParams(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     n: int | None = Field(default=None, ge=1, le=4)
-    ratio: str | None = Field(default=None, min_length=1, max_length=32)
-    resolution: str | None = Field(default=None, min_length=1, max_length=32)
-    size: str | None = Field(default=None, min_length=1, max_length=32)
-    quality: str | None = Field(default=None, min_length=1, max_length=32)
+    ratio: CanvasSafeOption | None = None
+    resolution: CanvasSafeOption | None = None
+    size: CanvasSafeOption | None = None
+    quality: Literal["low", "medium", "high", "auto"] | None = None
     background: Literal["auto", "opaque", "transparent"] | None = None
 
 
 class CanvasVideoDefaultParams(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     duration: int | None = Field(default=None, ge=1, le=60)
-    ratio: str | None = Field(default=None, min_length=1, max_length=32)
-    resolution: str | None = Field(default=None, min_length=1, max_length=32)
+    ratio: CanvasSafeOption | None = None
+    resolution: CanvasSafeOption | None = None
     frame_mode: Literal["auto", "firstlast"] | None = None
-    mode: str | None = Field(default=None, min_length=1, max_length=32)
+    mode: Literal["std", "pro"] | None = None
     generate_audio: bool | None = None
     watermark: bool | None = None
 

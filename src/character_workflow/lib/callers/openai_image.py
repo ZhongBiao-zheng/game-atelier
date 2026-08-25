@@ -783,6 +783,42 @@ def _normalize_size_for_provider(size: object, is_seedream: bool, model: str = "
     return size
 
 
+def normalize_image_pixel_size(model: str, size: str) -> str:
+    """Canvas preferences can outlive model ordering, so reapply the final family's limits."""
+    match = re.fullmatch(r"(\d+)x(\d+)", size.strip())
+    if not match:
+        return size
+    width, height = (int(value) for value in match.groups())
+    if width <= 0 or height <= 0:
+        return size
+    family = image_family(model)
+    if family == "seedream":
+        return str(_normalize_size_for_provider(size, True, model))
+    if family != "gpt-image":
+        return size
+
+    max_edge = 3_840
+    min_pixels = 655_360
+    max_pixels = 8_294_400
+    edge = max(width, height)
+    if edge > max_edge:
+        scale = max_edge / edge
+        width *= scale
+        height *= scale
+    pixels = width * height
+    if pixels > max_pixels:
+        scale = math.sqrt(max_pixels / pixels)
+        width *= scale
+        height *= scale
+    elif pixels < min_pixels:
+        scale = math.sqrt(min_pixels / pixels)
+        width *= scale
+        height *= scale
+    rounded_width = max(16, int(width / 16 + 0.5) * 16)
+    rounded_height = max(16, int(height / 16 + 0.5) * 16)
+    return f"{rounded_width}x{rounded_height}"
+
+
 def _chat_image_payload(
     *,
     prompt: str,

@@ -45,15 +45,60 @@ export interface CanvasGenerationModelSelection {
   model: string;
 }
 
-export interface CanvasGenerationDefault {
-  selection: CanvasGenerationModelSelection | null;
-  params: JobParams;
+export type CanvasGenerationMode = 'text' | 'image' | 'video' | 'audio';
+
+export interface CanvasTextDefaultParams {
+  n?: number;
+  temperature?: number;
+  max_tokens?: number;
+  reasoning_effort?: 'auto' | 'low' | 'medium' | 'high' | 'xhigh';
 }
 
-export type CanvasGenerationDefaults = Record<CanvasGenerationDraft['mode'], CanvasGenerationDefault>;
+export interface CanvasImageDefaultParams {
+  n?: number;
+  ratio?: string;
+  resolution?: string;
+  size?: string;
+  quality?: 'low' | 'medium' | 'high' | 'auto';
+  background?: 'auto' | 'opaque' | 'transparent';
+}
+
+export interface CanvasVideoDefaultParams {
+  duration?: number;
+  ratio?: string;
+  resolution?: string;
+  frame_mode?: 'auto' | 'firstlast';
+  mode?: 'std' | 'pro';
+  generate_audio?: boolean;
+  watermark?: boolean;
+}
+
+export interface CanvasAudioDefaultParams {
+  voice?: 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'fable' | 'nova' | 'onyx'
+    | 'sage' | 'shimmer' | 'verse' | 'marin' | 'cedar';
+  response_format?: 'mp3' | 'wav' | 'opus' | 'aac' | 'flac' | 'pcm';
+  speed?: number;
+  instructions?: string;
+}
+
+export interface CanvasGenerationParamsByMode {
+  text: CanvasTextDefaultParams;
+  image: CanvasImageDefaultParams;
+  video: CanvasVideoDefaultParams;
+  audio: CanvasAudioDefaultParams;
+}
+
+export interface CanvasGenerationDefault<M extends CanvasGenerationMode = CanvasGenerationMode> {
+  selection: CanvasGenerationModelSelection | null;
+  params: CanvasGenerationParamsByMode[M];
+}
+
+export type CanvasGenerationDefaults = {
+  [M in CanvasGenerationMode]: CanvasGenerationDefault<M>;
+};
 
 export interface CanvasGenerationDraft {
-  mode: 'text' | 'image' | 'video' | 'audio';
+  mode: CanvasGenerationMode;
   prompt: string;
   input_policy: 'all_connected' | 'mentions_only';
   model: string;

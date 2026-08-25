@@ -32,6 +32,7 @@ import type {
   CanvasGenerationDefault,
   CanvasGenerationDefaults,
   CanvasGenerationDraft,
+  CanvasGenerationMode,
 } from '@/schema/canvas';
 import type { JobParams } from '@/schema/jobs';
 
@@ -56,15 +57,26 @@ function defaultsForSave(
   value: CanvasGenerationDefaults,
   keys: KeyView[],
 ): CanvasGenerationDefaults {
-  function normalize(mode: CanvasGenerationDraft['mode']): CanvasGenerationDefault {
+  function normalize<M extends CanvasGenerationMode>(mode: M): CanvasGenerationDefault<M> {
     const current = value[mode];
-    if (!current.selection) return { selection: null, params: {} };
+    if (!current.selection) {
+      const automatic = keys.flatMap(key => key.models.map(model => ({ key, model })))
+        .find(choice => canvasGenerationModelSupportsMode(choice.key, choice.model, mode));
+      if (!automatic) return current;
+      const normalized = canvasGenerationPreferenceForModel(
+        automatic.key,
+        automatic.model,
+        mode,
+        current.params as JobParams,
+      );
+      return { selection: null, params: normalized?.params ?? current.params };
+    }
     const key = keys.find(candidate => candidate.alias === current.selection?.alias);
     const model = key?.models.find(candidate => candidate.id === current.selection?.model);
     if (!key || !model || !canvasGenerationModelSupportsMode(key, model, mode)) {
       return { selection: null, params: {} };
     }
-    return canvasGenerationPreferenceForModel(key, model, mode, current.params)
+    return canvasGenerationPreferenceForModel(key, model, mode, current.params as JobParams)
       ?? { selection: null, params: {} };
   }
   return {
@@ -120,10 +132,10 @@ export function CanvasGenerationPreferencesDialog({
         effectiveChoice.key,
         effectiveChoice.model,
         activeMode,
-        selectedChoice ? preference.params : {},
+        selectedChoice || preference.selection === null ? preference.params as JobParams : {},
       )
     : null;
-  const params = effectivePreference?.params ?? {};
+  const params = (effectivePreference?.params ?? {}) as JobParams;
 
   function setPreference(mode: CanvasGenerationDraft['mode'], next: CanvasGenerationDefault) {
     setDraft(current => ({ ...current, [mode]: next }));
@@ -134,7 +146,7 @@ export function CanvasGenerationPreferencesDialog({
       choice.key,
       choice.model,
       activeMode,
-      selectedChoice ? preference.params : {},
+      selectedChoice || preference.selection === null ? preference.params as JobParams : {},
     );
     if (next) setPreference(activeMode, next);
   }
@@ -149,7 +161,12 @@ export function CanvasGenerationPreferencesDialog({
       activeMode,
       merged,
     );
-    if (next) setPreference(activeMode, next);
+    if (next) {
+      setPreference(activeMode, {
+        selection: preference.selection,
+        params: next.params,
+      });
+    }
   }
 
   const imageCaps = activeMode === 'image' && effectiveChoice
@@ -234,7 +251,7 @@ export function CanvasGenerationPreferencesDialog({
                 variant="ghost"
                 size="sm"
                 disabled={preference.selection === null}
-                onClick={() => setPreference(activeMode, { selection: null, params: {} })}
+                onClick={() => setPreference(activeMode, { selection: null, params })}
               >
                 <RotateCcw aria-hidden="true" />恢复自动选择
               </Button>
@@ -268,7 +285,7 @@ export function CanvasGenerationPreferencesDialog({
             <div className="space-y-2 border-t border-border pt-4">
               <div>
                 <p className="text-sm font-medium">默认参数</p>
-                <p className="text-xs text-muted-foreground">调整参数时会固定当前模型；节点内仍可单独修改。</p>
+                <p className="text-xs text-muted-foreground">参数可与自动选模独立保存；节点内仍可单独修改。</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {activeMode === 'text' && (

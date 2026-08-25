@@ -135,4 +135,21 @@ describe('CanvasGenerationPreferencesDialog', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(onSave).not.toHaveBeenCalled();
   });
+
+  it('keeps default params when automatic model selection is saved', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    setup({ onSave });
+
+    await user.click(screen.getByRole('button', { name: '打开图片参数' }));
+    await user.click(screen.getByRole('option', { name: '2 张' }));
+    await user.click(screen.getByRole('button', { name: '保存偏好' }));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      image: {
+        selection: null,
+        params: expect.objectContaining({ n: 2, ratio: '1:1' }),
+      },
+    }));
+  });
 });

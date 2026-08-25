@@ -15,6 +15,8 @@ import type {
   CanvasContentNode,
   CanvasContentVersion,
   CanvasGenerationDefault,
+  CanvasGenerationMode,
+  CanvasGenerationParamsByMode,
   CanvasGenerationDraft,
   CanvasDocument,
   CanvasNode,
@@ -203,12 +205,12 @@ function normalizedCanvasGenerationParams(
   return normalizeCanvasTextParams(model.protocol, current);
 }
 
-export function canvasGenerationPreferenceForModel(
+export function canvasGenerationPreferenceForModel<M extends CanvasGenerationMode>(
   key: KeyView,
   model: KeyView['models'][number],
-  mode: CanvasGenerationDraft['mode'],
+  mode: M,
   current: JobParams = {},
-): CanvasGenerationDefault | null {
+): CanvasGenerationDefault<M> | null {
   if (!canvasGenerationModelSupportsMode(key, model, mode)) return null;
   return {
     selection: { alias: key.alias, model: model.id },
@@ -217,7 +219,7 @@ export function canvasGenerationPreferenceForModel(
       model,
       mode,
       { ...defaultCanvasGenerationParams(mode), ...current },
-    ),
+    ) as CanvasGenerationParamsByMode[M],
   };
 }
 
@@ -234,7 +236,8 @@ export function createCanvasGenerationDraft(
   const preferred = preferredCanvasGenerationModel(keys, mode, options.preference);
   const selected = preferred ?? firstCanvasGenerationModel(keys, mode);
   const model = selected?.model.id ?? '';
-  const sourceParams = preferred
+  const mayApplyPreferenceParams = preferred || options.preference?.selection === null;
+  const sourceParams = mayApplyPreferenceParams
     ? { ...defaultCanvasGenerationParams(mode), ...options.preference?.params }
     : defaultCanvasGenerationParams(mode);
   const params = !selected
