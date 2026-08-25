@@ -2874,7 +2874,7 @@ function CanvasEditorInner({
           ><Scan className="size-4" aria-hidden="true" /></button>
         </div>
 
-        <div className="canvas-editor-top pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-2 p-2 sm:gap-3 sm:p-3 md:p-4">
+        <div className="canvas-editor-top pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-start gap-2 p-2 sm:gap-3 sm:p-3 md:p-4">
           <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
             <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="返回画布项目列表" onClick={() => void persistNow().then(saved => { if (saved) onBack(); })}><ArrowLeft /></Button>
             <div className="h-6 w-px bg-border" />
@@ -2930,11 +2930,30 @@ function CanvasEditorInner({
           </div>
         </div>
 
-        <div className="canvas-tool-rail absolute left-3 top-1/2 z-20 -translate-y-1/2 md:left-4">
-          <div className="relative flex flex-col items-center gap-1 rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
-            <ToolButton buttonRef={addTriggerRef} label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} expanded={addOpen} controlsId="canvas-add-menu" onClick={() => { setCreateMenu(null); setAddOpen(value => !value); }}>{addOpen ? <X /> : <Plus />}</ToolButton>
+        <div className="canvas-mobile-rail absolute left-3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-1 rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:contents">
+          <div className="canvas-tool-dock contents md:absolute md:z-20 md:flex md:-translate-x-1/2 md:items-center md:gap-1 md:rounded-full md:border md:border-border md:bg-glass md:p-1.5 md:backdrop-blur-glass md:shell-glow">
+            <span className="xl:hidden">
+              <ToolButton buttonRef={addTriggerRef} label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} expanded={addOpen} controlsId="canvas-add-menu" onClick={() => { setCreateMenu(null); setAddOpen(value => !value); }}>{addOpen ? <X /> : <Plus />}</ToolButton>
+            </span>
             <ToolButton label="选择工具" active={!addOpen && !createMenu} onClick={() => { setAddOpen(false); setCreateMenu(null); }}><MousePointer2 /></ToolButton>
-            <div className="my-1 h-px w-7 bg-border" />
+            <div className="my-1 h-px w-7 bg-border md:mx-1 md:my-0 md:h-7 md:w-px" />
+            <ToolButton label="撤销" disabled={history.current.past.length === 0} onClick={undo}><Undo2 /></ToolButton>
+            <ToolButton label="重做" disabled={history.current.future.length === 0} onClick={redo}><Redo2 /></ToolButton>
+            <div className="my-1 h-px w-7 bg-border md:mx-1 md:my-0 md:h-7 md:w-px" />
+            <div className="hidden xl:contents">
+              <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><Type /></ToolButton>
+              <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><FileImage /></ToolButton>
+              <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><FileVideo /></ToolButton>
+              <ToolButton label="添加音频节点" onClick={() => addGenerationNode('audio', null)}><FileAudio /></ToolButton>
+              <ToolButton label="添加生成配置节点" onClick={() => addConfigNode(null)}><WandSparkles /></ToolButton>
+              <ToolButton label="上传素材" onClick={() => uploadRef.current?.click()}><Upload /></ToolButton>
+              <div className="mx-1 h-7 w-px bg-border" />
+            </div>
+            <ToolButton label="适应全部节点" onClick={() => {
+              void runViewportCommand(() => fitView({ duration: 150, padding: 0.12 }));
+            }}><Maximize2 /></ToolButton>
+          </div>
+          <div className="canvas-config-dock contents md:absolute md:z-20 md:flex md:items-center md:gap-1 md:rounded-xl md:border md:border-border md:bg-glass md:p-1.5 md:backdrop-blur-glass md:shell-glow">
             <ToolButton buttonRef={assetLibraryTriggerRef} label="项目资产库" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); setLibraryMode(current => current === 'assets' ? null : 'assets'); }}><Library /></ToolButton>
             <ToolButton buttonRef={promptLibraryTriggerRef} label="项目提示词库" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); setLibraryMode(current => current === 'prompts' ? null : 'prompts'); }}><WandSparkles /></ToolButton>
             <ToolButton
@@ -2950,10 +2969,7 @@ function CanvasEditorInner({
                 setGenerationPreferencesOpen(true);
               }}
             ><Settings2 /></ToolButton>
-            <div className="my-1 h-px w-7 bg-border" />
-            <ToolButton label="撤销" disabled={history.current.past.length === 0} onClick={undo}><Undo2 /></ToolButton>
-            <ToolButton label="重做" disabled={history.current.future.length === 0} onClick={redo}><Redo2 /></ToolButton>
-            <div className="my-1 h-px w-7 bg-border" />
+            <div className="my-1 h-px w-7 bg-border md:mx-1 md:my-0 md:h-7 md:w-px" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
@@ -2965,7 +2981,7 @@ function CanvasEditorInner({
                   <Grid2X2 aria-hidden="true" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent side="right" align="end" className="w-48 rounded-xl">
+              <DropdownMenuContent side={narrowViewport ? 'right' : 'bottom'} align="end" className="w-48 rounded-xl">
                 <DropdownMenuLabel>主题</DropdownMenuLabel>
                 <CanvasThemeSelector />
                 <DropdownMenuSeparator />
@@ -2977,10 +2993,7 @@ function CanvasEditorInner({
                     if (value === document.settings.background) return;
                     commit(current => ({
                       ...current,
-                      settings: {
-                        ...current.settings,
-                        background: value,
-                      },
+                      settings: { ...current.settings, background: value },
                     }), true);
                   }}
                 >
@@ -3017,9 +3030,6 @@ function CanvasEditorInner({
                 </DropdownMenuCheckboxItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <ToolButton label="适应全部节点" onClick={() => {
-              void runViewportCommand(() => fitView({ duration: 150, padding: 0.12 }));
-            }}><Maximize2 /></ToolButton>
             <ToolButton
               buttonRef={shortcutsTriggerRef}
               label="快捷键"
@@ -3030,7 +3040,7 @@ function CanvasEditorInner({
             ><CircleHelp /></ToolButton>
           </div>
           {addOpen && (
-            <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
+            <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow md:left-1/2 md:top-auto md:-translate-x-1/2">
               <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>
               <CanvasCreateMenuItems allowEmptyNodes allowUpload allowConfig onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onAddConfig={() => addConfigNode(null)} onUpload={() => uploadRef.current?.click()} />
             </div>

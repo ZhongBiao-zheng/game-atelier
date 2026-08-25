@@ -310,8 +310,11 @@
     padding-right: max(0.5rem, env(safe-area-inset-right));
     padding-left: max(0.5rem, env(safe-area-inset-left));
   }
-  .canvas-tool-rail {
+  .canvas-mobile-rail {
     left: max(0.75rem, env(safe-area-inset-left));
+  }
+  .canvas-library-panel {
+    left: calc(max(0.75rem, env(safe-area-inset-left)) + 3.25rem);
   }
   .canvas-zoom-dock {
     left: max(0.75rem, env(safe-area-inset-left));
@@ -439,11 +442,34 @@
       padding-right: max(1rem, env(safe-area-inset-right));
       padding-left: max(1rem, env(safe-area-inset-left));
     }
+    .canvas-tool-dock {
+      right: auto;
+      bottom: max(0.75rem, env(safe-area-inset-bottom));
+      left: 50%;
+    }
+    .canvas-add-menu {
+      bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 4rem);
+    }
+    .canvas-config-dock {
+      top: max(1rem, env(safe-area-inset-top));
+      right: max(1rem, env(safe-area-inset-right));
+    }
+    .canvas-library-panel {
+      left: max(1rem, env(safe-area-inset-left));
+    }
     .canvas-inspector-panel {
       right: 1rem;
       left: auto;
       bottom: auto;
       max-height: calc(100dvh - 6rem);
+    }
+  }
+  @media (min-width: 48rem) and (max-width: 63.999rem) {
+    .canvas-tool-dock {
+      bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 4.25rem);
+    }
+    .canvas-add-menu {
+      bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 8.25rem);
     }
   }
   @media (prefers-reduced-motion: reduce) {
