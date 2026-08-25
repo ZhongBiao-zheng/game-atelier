@@ -3,11 +3,16 @@ import { expect, it } from 'vitest';
 import { canvasNodePanelOffsetX, canvasNodePanelWidth } from './canvasNodePanelPlacement';
 
 it('keeps the preferred panel width at ordinary zoom', () => {
-  expect(canvasNodePanelWidth(1440, 1)).toBe(608);
+  expect(canvasNodePanelWidth(1440)).toBe(608);
 });
 
-it('shrinks the canvas-space width at high zoom to preserve screen margins', () => {
-  expect(canvasNodePanelWidth(1440, 2.5)).toBeCloseTo(563.2);
+it('keeps screen width independent from canvas zoom', () => {
+  expect(canvasNodePanelWidth(1440)).toBe(608);
+  expect(canvasNodePanelWidth(768)).toBe(608);
+});
+
+it('shrinks only when the viewport cannot fit the preferred screen width', () => {
+  expect(canvasNodePanelWidth(540)).toBe(508);
 });
 
 it('keeps a centered node panel in place when it fits the viewport', () => {

@@ -8,6 +8,9 @@ Status: ready-for-agent
 Library Entry 复用 Content Version；项目包导入创建新项目；WebDAV 分叉创建冲突副本；公共 Prompt
 编辑或加入库后成为项目本地内容。
 
+2026-08-25 用户更新删除契约：画布项目只做一次点击确认后的永久删除，不提供名称验证、回收区、撤销或
+恢复入口。删除过程可使用不可见的短期事务目录保证崩溃一致性，但该目录不是用户资产保留区。
+
 ## 结论摘要
 
 推荐方案 A：**画布项目是内容所有权边界；同一项目内复用 Content Version，跨画布、创作台与工坊
@@ -190,16 +193,14 @@ type CanvasTransferOrigin = {
 | 删除 Local Prompt | 本地条目消失 | 已插入文本节点/历史 Snapshot | 无媒体副作用 |
 | 禁用/删除 Prompt Source | 不再搜索或刷新该源 | 已 fork 的 Local Prompt、已插入节点、上次缓存 | 缓存可延迟清理 |
 | 删除 Job candidate 展示槽 | active/primary 展示关系改变 | Job、candidate、Snapshot、version | 保留 |
-| 删除 Canvas Project | 从项目索引消失并产生删除 tombstone | 已发布到工坊的副本 | 项目与 owned Jobs 原子移入 trash |
-| 清空 trash | 恢复能力消失 | 工坊副本、其他画布副本 | 删除该项目全部 owned bytes/jobs |
+| 删除 Canvas Project | 点击确认后从项目索引永久消失 | 已发布到工坊、其他画布的独立副本 | 项目与 owned Jobs 在同一事务中删除 |
 
-活动项目内不自动 GC Content Version 或 Job 历史。项目删除先原子移入
-`.trash/canvases/<project_id>/<deleted_at>/`，关联 Canvas Job 同事务移入 trash 并写 tombstone；默认保留
-30 天后由维护任务清理。UI 仍满足“确认删除后立即从列表消失”，但崩溃或误删可恢复。批量删除逐项目
-事务，单个失败不声称全部成功。
+活动项目内不自动 GC Content Version 或 Job 历史。项目删除把项目目录与关联 Canvas Job 原子转移到
+`.runtime/canvas-delete-transactions/` 的短期事务目录，提交后立即清理；启动恢复只会完成已提交的永久
+删除，不向用户暴露恢复能力。批量删除逐项目事务，单个失败不声称全部成功。
 
-WebDAV 已关联项目的删除会同步 tombstone；另一设备收到后同样移入本地 trash。用户可以从 trash 恢复为
-新项目 ID，避免与已经传播的 tombstone 争夺原 ID。
+WebDAV 已关联项目的删除仍可同步不可恢复的 tombstone；另一设备收到后永久删除对应本地项目。若远端
+编辑与本地删除分叉，远端编辑内容导入为新的冲突副本，原 ID 仍维持删除。
 
 ## 公共提示词与本地提示词
 
@@ -314,7 +315,7 @@ interface CanvasPackageManifest {
 - 包含项目文档、项目 library、Canvas Jobs/Snapshots/candidates、Agent sessions 和 plugin state，才能
   恢复参考基线可观察的历史、会话与插件节点状态。
 - 不包含 project runtime transaction、缩略图/波形缓存、prompt source cache、provider/WebDAV 凭证、
-  全局配置、插件代码或 trash。
+  全局配置、插件代码或删除事务暂存。
 - 模型 alias 可以作为草稿偏好保留；导入机器缺少该 alias 时显示“未配置”，不能偷偷换默认 provider。
 - 选中节点/整图“导出内容”是用户交付 ZIP（媒体、txt/json），不是可再次导入的项目包；两种动作和文案
   必须分开。
@@ -366,7 +367,7 @@ Snapshot manifest 是不可变对象，包含 package format 同构的 entry 清
 | 本地和远端都未改 | no-op |
 | 双方都从 last_synced 分叉 | 保留本地；远端导入为新 ID 的“冲突副本” |
 | latest 在上传中被别人更新 | 重新读取；按上面规则 fast-forward 或冲突副本 |
-| 远端 tombstone 是后代 | 本地项目移入 trash |
+| 远端 tombstone 是后代 | 本地项目永久删除 |
 | 本地已删除且远端未分叉 | 上传 tombstone |
 | 本地删除与远端编辑分叉 | 不吞编辑；远端恢复为冲突副本，本地原 ID 维持删除 |
 
@@ -405,11 +406,11 @@ revision/不可变历史，字段级合并无法安全重建跨文件事务；�
 | POST /canvas/projects/export | 服务端流式生成单/多项目包 |
 | POST /canvas/projects/import/inspect | staging 校验并返回报告，不写 live |
 | POST /canvas/projects/import/commit | 基于 inspect token 原子导入新项目 |
-| DELETE /canvas/projects/{id} | 确认 token + expected revision；移入 trash/tombstone |
+| DELETE /canvas/projects/{id} | expected revision；一次确认后永久删除项目与 owned Jobs |
 | POST /canvas/projects/{id}/sync | 单项目 WebDAV 状态机 |
 | POST /canvas/sync | 已启用项目批量同步，逐项目返回结果 |
 | POST /canvas/webdav/test | 服务端测试 auth、写读删与条件请求 |
-| GET /canvas/storage | 按项目统计 metadata/uploads/outputs/jobs/cache/trash |
+| GET /canvas/storage | 按项目统计 metadata/uploads/outputs/jobs/cache |
 
 所有 mutating API 都通过 project lock、revision 和原子写；transfer/publication/import/delete/sync 用第 03 关
 的短期 transaction 模式。接口只收稳定 ID，不收任意本地 path。

@@ -43,6 +43,17 @@ export function canvasNodeHasCurrentContent(
   return versions[node.data.current_version_id]?.kind === node.type;
 }
 
+export function canvasNodeProvidesOutput(
+  node: CanvasNode,
+  versions: Readonly<Record<string, CanvasContentVersion>>,
+): node is CanvasContentNode {
+  return (
+    node.type === 'image'
+    || node.type === 'video'
+    || canvasNodeHasCurrentContent(node, versions)
+  );
+}
+
 export function canCreateCanvasInputConnection(
   document: CanvasDocument | null,
   connection: { source: string | null; target: string | null },
@@ -55,7 +66,7 @@ export function canCreateCanvasInputConnection(
   if (
     !source
     || !target
-    || !canvasNodeHasCurrentContent(source, document.content_versions)
+    || !canvasNodeProvidesOutput(source, document.content_versions)
     || !canvasNodeAcceptsInput(target)
   ) {
     return false;

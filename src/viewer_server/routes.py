@@ -2154,22 +2154,19 @@ def post_canvas_project_import_commit(
         raise HTTPException(422, detail=str(error)) from error
 
 
-@router.delete("/canvas/projects/{project_id}")
+@router.delete("/canvas/projects/{project_id}", status_code=204)
 def delete_canvas_project_route(
     project_id: str,
     payload: CanvasProjectDeleteRequest,
-) -> dict:
+) -> Response:
     from character_workflow.lib.canvas_packages import (
         CanvasPackageError,
         CanvasProjectBusyError,
         delete_canvas_project,
     )
     try:
-        return delete_canvas_project(
-            project_id,
-            payload.expected_revision,
-            payload.confirm_name,
-        ).model_dump(mode="json")
+        delete_canvas_project(project_id, payload.expected_revision)
+        return Response(status_code=204)
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
     except CanvasProjectBusyError as error:
@@ -2184,23 +2181,6 @@ def delete_canvas_project_route(
         raise
     except CanvasPackageError as error:
         raise HTTPException(422, detail=str(error)) from error
-
-
-@router.post("/canvas/trash/{trash_id}/restore", response_model=CanvasProject)
-def post_canvas_trash_restore(trash_id: str) -> CanvasProject:
-    from character_workflow.lib.canvas_packages import CanvasPackageError, restore_canvas_project
-    try:
-        return restore_canvas_project(trash_id)
-    except KeyError:
-        raise HTTPException(404, detail="找不到这条画布回收记录") from None
-    except CanvasPackageError as error:
-        raise HTTPException(409, detail=str(error)) from error
-
-
-@router.get("/canvas/trash")
-def get_canvas_trash() -> dict:
-    from character_workflow.lib.canvas_packages import list_canvas_trash
-    return {"entries": [entry.model_dump(mode="json") for entry in list_canvas_trash()]}
 
 
 @router.get("/canvas/projects/{project_id}/document", response_model=CanvasDocument)

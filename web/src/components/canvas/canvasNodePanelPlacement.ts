@@ -5,13 +5,11 @@ type HorizontalRect = {
 
 export function canvasNodePanelWidth(
   viewportWidth: number,
-  zoom: number,
   preferredWidth = 608,
   margin = 16,
 ) {
-  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   if (!Number.isFinite(viewportWidth) || viewportWidth <= margin * 2) return preferredWidth;
-  return Math.min(preferredWidth, (viewportWidth - margin * 2) / safeZoom);
+  return Math.min(preferredWidth, viewportWidth - margin * 2);
 }
 
 export function canvasNodePanelOffsetX(

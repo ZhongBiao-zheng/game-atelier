@@ -387,10 +387,6 @@
     opacity: 1;
     pointer-events: auto !important;
   }
-  .canvas-flow .canvas-node-handle.canvas-node-handle-disabled {
-    opacity: 0 !important;
-    pointer-events: none !important;
-  }
   .canvas-flow .canvas-node-handle-dot {
     width: var(--canvas-handle-dot-size, 0.75rem);
     height: var(--canvas-handle-dot-size, 0.75rem);

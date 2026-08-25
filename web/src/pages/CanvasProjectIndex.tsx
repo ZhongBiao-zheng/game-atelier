@@ -10,9 +10,7 @@ import {
   getCanvasDocument,
   inspectCanvasPackage,
   listCanvasProjects,
-  listCanvasTrash,
   renameCanvasProject,
-  restoreCanvasProject,
 } from '@/api/canvas';
 import { Button } from '@/components/ui/button';
 import {
@@ -32,7 +30,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { CanvasPackageInspection, CanvasProjectSummary, CanvasTrashEntry } from '@/schema/canvas';
+import type { CanvasPackageInspection, CanvasProjectSummary } from '@/schema/canvas';
 
 
 type EditorState =
@@ -41,7 +39,7 @@ type EditorState =
 
 type DeleteState =
   | { open: false }
-  | { open: true; project: CanvasProjectSummary; revision: number; confirmName: string };
+  | { open: true; project: CanvasProjectSummary; revision: number };
 
 type ImportState =
   | { open: false }
@@ -62,11 +60,6 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
-  const [recoverable, setRecoverable] = useState<CanvasTrashEntry | null>(null);
-  const [trashOpen, setTrashOpen] = useState(false);
-  const [trashEntries, setTrashEntries] = useState<CanvasTrashEntry[]>([]);
-  const [trashLoading, setTrashLoading] = useState(false);
-  const [trashError, setTrashError] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -117,7 +110,7 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
     try {
       const document = await getCanvasDocument(project.project_id);
       setDeleteError(null);
-      setDeleteState({ open: true, project, revision: document.revision, confirmName: '' });
+      setDeleteState({ open: true, project, revision: document.revision });
     } catch (error) {
       setActionError((error as Error).message);
     } finally {
@@ -128,20 +121,14 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
   async function submitDelete(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!deleteState.open) return;
-    if (deleteState.confirmName !== deleteState.project.name) {
-      setDeleteError('请输入完整项目名称以确认删除');
-      return;
-    }
     setBusyProjectId(deleteState.project.project_id);
     setDeleteError(null);
     try {
-      const entry = await deleteCanvasProject(
+      await deleteCanvasProject(
         deleteState.project.project_id,
         deleteState.revision,
-        deleteState.confirmName,
       );
-      setProjects(current => current.filter(item => item.project_id !== entry.original_project_id));
-      setRecoverable(entry);
+      setProjects(current => current.filter(item => item.project_id !== deleteState.project.project_id));
       setDeleteState({ open: false });
     } catch (error) {
       setDeleteError((error as Error).message);
@@ -191,50 +178,6 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
     }
   }
 
-  async function undoDelete() {
-    if (!recoverable) return;
-    setImporting(true);
-    setActionError(null);
-    try {
-      await restoreCanvasProject(recoverable.trash_id);
-      setTrashEntries(current => current.filter(item => item.trash_id !== recoverable.trash_id));
-      setRecoverable(null);
-      await load();
-    } catch (error) {
-      setActionError((error as Error).message);
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  async function openTrash() {
-    setTrashOpen(true);
-    setTrashLoading(true);
-    setTrashError(null);
-    try {
-      setTrashEntries(await listCanvasTrash());
-    } catch (error) {
-      setTrashError((error as Error).message);
-    } finally {
-      setTrashLoading(false);
-    }
-  }
-
-  async function restoreTrashEntry(entry: CanvasTrashEntry) {
-    setTrashLoading(true);
-    setTrashError(null);
-    try {
-      await restoreCanvasProject(entry.trash_id);
-      setTrashEntries(current => current.filter(item => item.trash_id !== entry.trash_id));
-      if (recoverable?.trash_id === entry.trash_id) setRecoverable(null);
-      await load();
-    } catch (error) {
-      setTrashError((error as Error).message);
-    } finally {
-      setTrashLoading(false);
-    }
-  }
-
   return (
     <section className="stable-scroll h-full overflow-y-auto bg-background">
       <div className="w-full px-4 py-8 sm:px-6 md:px-10 md:py-12">
@@ -247,9 +190,6 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" disabled={trashLoading} onClick={() => void openTrash()}>
-              <Trash2 aria-hidden="true" />回收区
-            </Button>
             <Button variant="outline" disabled={importing} onClick={() => importRef.current?.click()}>
               <Upload aria-hidden="true" />{importing ? '校验中…' : '导入项目包'}
             </Button>
@@ -276,15 +216,6 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
                 <RefreshCw aria-hidden="true" />重试
               </Button>
             )}
-          </div>
-        )}
-
-        {recoverable && (
-          <div role="status" className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card/60 px-4 py-3 text-sm text-foreground">
-            <span>“{recoverable.project_name}”已移入回收区，将保留 30 天。</span>
-            <Button variant="outline" size="sm" disabled={importing} onClick={() => void undoDelete()}>
-              撤销删除
-            </Button>
           </div>
         )}
 
@@ -387,70 +318,20 @@ export function CanvasProjectIndex({ onOpenProject }: { onOpenProject: (projectI
             <DialogHeader>
               <DialogTitle>删除“{deleteState.project.name}”？</DialogTitle>
               <DialogDescription>
-                项目和生成记录会移入回收区并保留 30 天。请输入完整项目名称确认。
+                项目、节点、媒体与生成记录将被永久删除，此操作无法撤销。
               </DialogDescription>
             </DialogHeader>
             <form className="space-y-4" onSubmit={submitDelete}>
-              <div className="space-y-2">
-                <Label htmlFor="canvas-delete-confirm">项目名称</Label>
-                <Input
-                  id="canvas-delete-confirm"
-                  autoFocus
-                  autoComplete="off"
-                  aria-invalid={Boolean(deleteError)}
-                  aria-describedby={deleteError ? 'canvas-delete-confirm-error' : undefined}
-                  value={deleteState.confirmName}
-                  onChange={event => {
-                    setDeleteError(null);
-                    setDeleteState(current => current.open ? {
-                      ...current,
-                      confirmName: event.target.value,
-                    } : current);
-                  }}
-                />
-                {deleteError && <p id="canvas-delete-confirm-error" role="alert" className="text-xs text-destructive">{deleteError}</p>}
-              </div>
+              {deleteError && <p role="alert" className="text-xs text-destructive">{deleteError}</p>}
               <DialogFooter>
                 <Button type="button" variant="outline" disabled={Boolean(busyProjectId)} onClick={() => setDeleteState({ open: false })}>取消</Button>
                 <Button type="submit" variant="destructive" disabled={Boolean(busyProjectId)}>
-                  {busyProjectId ? '正在移入回收区…' : '删除项目'}
+                  {busyProjectId ? '正在删除…' : '确认删除'}
                 </Button>
               </DialogFooter>
             </form>
           </DialogContent>
         )}
-      </Dialog>
-
-      <Dialog open={trashOpen} onOpenChange={open => { if (!trashLoading) { setTrashError(null); setTrashOpen(open); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>画布回收区</DialogTitle>
-            <DialogDescription>删除的项目保留 30 天；恢复时会分配新的项目 ID。</DialogDescription>
-          </DialogHeader>
-          {trashError && <p role="alert" className="text-xs text-destructive">{trashError}</p>}
-          <div className="max-h-80 space-y-2 overflow-y-auto" aria-busy={trashLoading}>
-            {trashLoading && trashEntries.length === 0 && (
-              <p role="status" className="py-8 text-center text-sm text-muted-foreground">正在读取回收区…</p>
-            )}
-            {!trashLoading && trashEntries.length === 0 && (
-              <p className="py-8 text-center text-sm text-muted-foreground">回收区是空的</p>
-            )}
-            {trashEntries.map(entry => (
-              <div key={entry.trash_id} className="flex items-center justify-between gap-4 rounded-lg border border-border bg-secondary/20 p-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-foreground">{entry.project_name}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{formatExpiry(entry.expires_at)}</p>
-                </div>
-                <Button variant="outline" size="sm" disabled={trashLoading} onClick={() => void restoreTrashEntry(entry)}>
-                  恢复
-                </Button>
-              </div>
-            ))}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" disabled={trashLoading} onClick={() => setTrashOpen(false)}>关闭</Button>
-          </DialogFooter>
-        </DialogContent>
       </Dialog>
     </section>
   );
@@ -632,11 +513,4 @@ function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${Math.ceil(value / 1024)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-
-function formatExpiry(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '恢复期限未知';
-  return `保留至 ${new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(date)}`;
 }

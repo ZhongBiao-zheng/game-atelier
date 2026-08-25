@@ -1030,7 +1030,6 @@ class CanvasProjectExportRequest(BaseModel):
 class CanvasProjectDeleteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(ge=0)
-    confirm_name: CanvasProjectName
 
 
 class CanvasPackageCommitRequest(BaseModel):

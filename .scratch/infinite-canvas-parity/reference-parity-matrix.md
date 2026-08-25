@@ -41,7 +41,7 @@ Status: completed
 | A02 | 新建并立即进入独立画布 | `createProject()` + `/canvas/:id` | same | full |
 | A03 | 打开/切换多个画布项目 | `CanvasProjectCard`、顶部“我的画布” | same | full |
 | A04 | 卡片与画布内双击重命名 | `canvas-project-card.tsx`、`canvas-top-bar.tsx` | same：卡片与顶部原地输入，见 issue 26 | full |
-| A05 | 单项目确认删除 | `canvas-delete-projects-dialog.tsx` | same | full |
+| A05 | 单项目确认删除 | `canvas-delete-projects-dialog.tsx` | adapted：一次确认后永久删除，不要求输入项目名 | full |
 | A06 | 多选项目、批量导出/删除、删除全部 | `pages/canvas/index.tsx` | same | full |
 | A07 | 单项目/多项目 ZIP 导出，媒体随包 | `canvas-export.ts`，format version 3 | adapted：服务端生成/校验项目包 | full |
 | A08 | ZIP 导入并分配新项目 ID | `pages/canvas/index.tsx::importCanvas` | adapted：服务端解包和路径白名单 | full |
@@ -210,8 +210,8 @@ Status: completed
 | I02 | 左侧资源面板、中央画布、右侧 Agent 三栏可折叠/调整 | runtime/components | same | full |
 | I03 | 节点标题在卡片外上方，卡片本体承载内容 | `canvas-node.tsx`、runtime | same：标题与改名输入都跟随节点外沿，见 issue 27 | full |
 | I04 | hover 工具条位于节点上方 | `canvas-node-hover-toolbar.tsx` | same | full |
-| I05 | composer 是节点下方独立浮层并随节点移动 | prompt/config components | same：节点外 sibling 锚点随拖拽/缩放，边缘钳位与高倍 zoom 安全宽度，窄屏独立底部面板，见 issue 31 | full |
-| I06 | 连接柄位于节点左右中部，边低对比 | node/connections | same behavior + Atelier colors：48px 命中区、低对比贝塞尔、派生虚线与相关边高亮，见 issue 28 | full |
+| I05 | composer 是节点下方独立浮层并随节点移动 | prompt/config components | same：节点外 sibling 锚点随拖拽移动，反向补偿 viewport zoom 保持固定屏幕宽高与字阶，边缘钳位；窄屏独立底部面板，见 issue 31 | full |
+| I06 | 连接柄位于节点左右中部，边低对比 | node/connections | same behavior + Atelier colors：48px 命中区；图片、视频等内容节点即使尚未产出也保留右侧可预连 source handle，见 issue 28 | full |
 | I07 | 浅/深主题、点/线/空白背景 | theme/appearance runtime | adapted：工作区浅/深主题与项目内点/线/空白背景统一收在外观菜单，见 Issue 21/39 | full |
 | I08 | 画布和 Agent/左栏适配窄屏 | components + pending tests | adapted：375/768 明确可用降级 | full |
 | I09 | 逐像素复制 Ant Design、白色工具条、字体与品牌色 | reference implementation detail | excluded：与“适配原项目”冲突 | n/a |

@@ -4,6 +4,8 @@ Type: feature
 Status: done
 Blocked by: Issue 10
 
+> 2026-08-25 产品决策更新：本 Issue 的导入/导出交付继续有效；可恢复删除、回收区与 restore API 已移除。当前契约为一次确认后的永久删除，见 `docs/api-contract.md`。
+
 ## Scope
 
 - 单项目/多项目共用 `game-atelier-canvas-v1.zip` 规范导出器。

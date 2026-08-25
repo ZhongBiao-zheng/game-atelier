@@ -344,16 +344,6 @@ export interface CanvasPackageImport {
   projects: CanvasProject[];
 }
 
-export interface CanvasTrashEntry {
-  trash_id: string;
-  original_project_id: string;
-  project_name: string;
-  deleted_at: string;
-  expires_at: string;
-  restored_at: string | null;
-  restored_project_id: string | null;
-}
-
 export interface CanvasUpload {
   version: CanvasMediaVersion;
   filename: string;

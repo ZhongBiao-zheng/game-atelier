@@ -1,4 +1,4 @@
-"""Canvas project packages and recoverable project lifecycle operations."""
+"""Canvas project packages and permanent project lifecycle operations."""
 
 from __future__ import annotations
 
@@ -52,7 +52,6 @@ _MAX_ENTRIES = 20_000
 _MAX_COMPRESSION_RATIO = 100
 _MAX_METADATA_BYTES = 25 * 1024 * 1024
 _IMPORT_TTL = timedelta(minutes=30)
-_TRASH_RETENTION = timedelta(days=30)
 _SAFE_TOKEN = re.compile(r"^[a-z0-9-]{12,100}$")
 _BLOB_PATH = re.compile(r"^blobs/sha256/([a-f0-9]{2})/([a-f0-9]{64})(\.[a-z0-9]+)$")
 _EXECUTABLE_SUFFIXES = {
@@ -152,17 +151,6 @@ class CanvasPackageInspection(BaseModel):
     extracted_bytes: int
 
 
-class CanvasTrashEntry(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    trash_id: str
-    original_project_id: str
-    project_name: str
-    deleted_at: str
-    expires_at: str
-    restored_at: str | None = None
-    restored_project_id: str | None = None
-
-
 def _lifecycle_lock_path() -> Path:
     return data_root.runtime_dir() / "locks" / "canvas-project-lifecycle.lock"
 
@@ -175,40 +163,42 @@ def _package_transactions_root() -> Path:
     return data_root.runtime_dir() / "canvas-package-transactions"
 
 
+def _delete_transactions_root() -> Path:
+    return data_root.runtime_dir() / "canvas-delete-transactions"
+
+
 def _import_claim_lock_path(token: str) -> Path:
     return data_root.runtime_dir() / "locks" / f"canvas-import-{token}.lock"
 
 
-def _restore_lock_path(trash_id: str) -> Path:
-    return data_root.runtime_dir() / "locks" / f"canvas-restore-{trash_id}.lock"
-
-
 def _recover_delete_transactions_unlocked() -> None:
-    trash_root = data_root.resolve_data_root() / ".trash" / "canvases"
-    if not trash_root.exists():
+    root = _delete_transactions_root()
+    if not root.exists():
         return
-    for journal_path in sorted(trash_root.glob("*/*/delete-transaction.json")):
-        trash_dir = journal_path.parent
+    for transaction in sorted(root.iterdir()):
+        if not transaction.is_dir():
+            continue
+        journal_path = transaction / "transaction.json"
+        if not journal_path.is_file():
+            shutil.rmtree(transaction, ignore_errors=True)
+            continue
         try:
             journal = json.loads(journal_path.read_text(encoding="utf-8"))
             project_id = str(journal["project_id"])
             job_ids = [str(item) for item in journal["job_ids"]]
         except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
-            raise CanvasPackageError(f"删除事务记录损坏：{trash_dir.name}") from error
+            raise CanvasPackageError(f"删除事务记录损坏：{transaction.name}") from error
         live_project = _project_dir_unchecked(project_id)
-        if live_project.exists():
-            with ExitStack() as stack:
-                stack.enter_context(file_lock(live_project / ".canvas.lock"))
-                for job_id in sorted(job_ids):
-                    stack.enter_context(job_lock(job_id))
-                for job_id in job_ids:
-                    source = trash_dir / "jobs" / f"{job_id}.json"
-                    destination = data_root.runtime_dir() / "jobs" / f"{job_id}.json"
-                    if source.exists() and not destination.exists():
-                        source.replace(destination)
-            shutil.rmtree(trash_dir, ignore_errors=True)
-        else:
-            journal_path.unlink(missing_ok=True)
+        staged_project = transaction / "project"
+        if live_project.exists() and not staged_project.exists():
+            shutil.rmtree(transaction, ignore_errors=True)
+            continue
+        with ExitStack() as stack:
+            for job_id in sorted(job_ids):
+                stack.enter_context(job_lock(job_id))
+            for job_id in job_ids:
+                (data_root.runtime_dir() / "jobs" / f"{job_id}.json").unlink(missing_ok=True)
+        shutil.rmtree(transaction, ignore_errors=True)
 
 
 def _recover_import_transactions_unlocked() -> None:
@@ -246,52 +236,19 @@ def _recover_import_transactions_unlocked() -> None:
         shutil.rmtree(transaction, ignore_errors=True)
 
 
-def _recover_restore_transaction_unlocked(journal_path: Path) -> None:
-    trash_dir = journal_path.parent
-    try:
-        journal = json.loads(journal_path.read_text(encoding="utf-8"))
-        state = journal["state"]
-        project_id = journal.get("project_id")
-        restored_at = journal["restored_at"]
-        tombstone_path = trash_dir / "tombstone.json"
-        entry = CanvasTrashEntry.model_validate_json(tombstone_path.read_text(encoding="utf-8"))
-    except (OSError, KeyError, TypeError, ValidationError, json.JSONDecodeError) as error:
-        raise CanvasPackageError(f"恢复事务记录损坏：{trash_dir.name}") from error
-    claimed = next(iter(sorted(trash_dir.glob(".package.claimed-*.zip"))), None)
-    if (
-        state == "imported"
-        and isinstance(project_id, str)
-        and _project_dir_unchecked(project_id).exists()
-    ):
-        restored = entry.model_copy(
-            update={"restored_at": restored_at, "restored_project_id": project_id}
-        )
-        atomic_write_json(tombstone_path, restored.model_dump(mode="json"))
-        shutil.rmtree(trash_dir / "project", ignore_errors=True)
-        shutil.rmtree(trash_dir / "jobs", ignore_errors=True)
-        if claimed is not None:
-            claimed.unlink(missing_ok=True)
-        journal_path.unlink(missing_ok=True)
-        return
-    package_path = trash_dir / "package.zip"
-    if claimed is not None and not package_path.exists():
-        claimed.replace(package_path)
-    journal_path.unlink(missing_ok=True)
-
-
 def _recover_package_transactions_unlocked() -> None:
     _recover_delete_transactions_unlocked()
     _recover_import_transactions_unlocked()
 
 
 def recover_canvas_package_transactions() -> None:
-    """Rollback interrupted package/delete commits before exposing project listings."""
+    """Rollback interrupted imports and finish interrupted permanent deletions."""
     with file_lock(_lifecycle_lock_path()):
         _recover_package_transactions_unlocked()
 
 
 def maintain_canvas_package_lifecycle() -> None:
-    """Recover abandoned claims and purge expired trash on startup and periodically."""
+    """Recover abandoned package claims on startup and periodically."""
     recover_canvas_package_transactions()
 
     imports_root = data_root.runtime_dir() / "canvas-imports"
@@ -331,33 +288,6 @@ def maintain_canvas_package_lifecycle() -> None:
                 claimed.replace(original)
             else:
                 shutil.rmtree(claimed, ignore_errors=True)
-
-    trash_root = data_root.resolve_data_root() / ".trash" / "canvases"
-    restore_journals = (
-        sorted(trash_root.glob("*/*/restore-transaction.json")) if trash_root.exists() else []
-    )
-    for journal_path in restore_journals:
-        trash_id = journal_path.parent.name
-        with file_lock(_restore_lock_path(trash_id)), file_lock(_lifecycle_lock_path()):
-            _recover_import_transactions_unlocked()
-            if journal_path.exists():
-                _recover_restore_transaction_unlocked(journal_path)
-
-    expired_candidates = (
-        sorted(trash_root.glob("*/*/tombstone.json")) if trash_root.exists() else []
-    )
-    for path in expired_candidates:
-        trash_id = path.parent.name
-        with file_lock(_restore_lock_path(trash_id)), file_lock(_lifecycle_lock_path()):
-            if not path.exists():
-                continue
-            try:
-                entry = CanvasTrashEntry.model_validate_json(path.read_text(encoding="utf-8"))
-            except (OSError, ValidationError, json.JSONDecodeError):
-                continue
-            if datetime.fromisoformat(entry.expires_at) <= _now():
-                shutil.rmtree(path.parent, ignore_errors=True)
-
 
 def _jobs_for_project(project_id: str) -> list[Job]:
     jobs: list[Job] = []
@@ -1284,186 +1214,52 @@ def commit_canvas_package(token: str) -> list[CanvasProject]:
 def delete_canvas_project(
     project_id: str,
     expected_revision: int,
-    confirm_name: str,
-) -> CanvasTrashEntry:
-    """Move a project and its jobs into trash; the original ID remains tombstoned."""
-    deleted_at = _now()
-    trash_id = f"trash-{secrets.token_hex(12)}"
-    trash_dir = data_root.resolve_data_root() / ".trash" / "canvases" / project_id / trash_id
-    moved_jobs: list[tuple[Path, Path]] = []
-    moved_project: tuple[Path, Path] | None = None
-    package_path: Path | None = None
-    try:
-        with (
-            file_lock(_lifecycle_lock_path()),
-            file_lock(_project_lock_path(project_id)),
-            file_lock(canvas_agent_sessions_lock_path(project_id)),
-        ):
-            _recover_package_transactions_unlocked()
-            _recover_canvas_transactions_unlocked(project_id)
-            current = _read_canvas_document_unlocked(project_id)
-            current_project = read_canvas_project(project_id)
-            if current.revision != expected_revision:
-                raise RuntimeError(f"revision_conflict:{current.revision}")
-            if current_project.name != confirm_name:
-                raise CanvasPackageError("项目名称刚刚发生变化，请重新确认删除")
-            package_path, _filename = export_canvas_projects(
-                [project_id],
-                _project_lifecycle_locks_held=True,
-            )
-            jobs = _jobs_for_project(project_id)
-            _assert_jobs_are_quiescent(jobs)
-            with ExitStack() as stack:
-                for job in jobs:
-                    stack.enter_context(job_lock(job.job_id))
-                trash_dir.mkdir(parents=True, exist_ok=False)
-                (trash_dir / "jobs").mkdir()
-                package_path.replace(trash_dir / "package.zip")
-                entry = CanvasTrashEntry(
-                    trash_id=trash_id,
-                    original_project_id=project_id,
-                    project_name=current_project.name,
-                    deleted_at=deleted_at.isoformat(),
-                    expires_at=(deleted_at + _TRASH_RETENTION).isoformat(),
-                )
-                atomic_write_json(trash_dir / "tombstone.json", entry.model_dump(mode="json"))
-                atomic_write_json(
-                    trash_dir / "delete-transaction.json",
-                    {
-                        "project_id": project_id,
-                        "job_ids": [job.job_id for job in jobs],
-                    },
-                )
-                for job in jobs:
-                    source = data_root.runtime_dir() / "jobs" / f"{job.job_id}.json"
-                    destination = trash_dir / "jobs" / source.name
-                    source.replace(destination)
-                    moved_jobs.append((source, destination))
-                source_project = canvas_project_dir(project_id)
-                destination_project = trash_dir / "project"
-                source_project.replace(destination_project)
-                moved_project = (source_project, destination_project)
-                (trash_dir / "delete-transaction.json").unlink()
-                return entry
-    except BaseException:
-        if moved_project is not None and moved_project[1].exists():
-            moved_project[1].replace(moved_project[0])
-        for source, destination in reversed(moved_jobs):
-            if destination.exists():
-                destination.replace(source)
-        shutil.rmtree(trash_dir, ignore_errors=True)
-        if package_path is not None:
-            package_path.unlink(missing_ok=True)
-        raise
-
-
-def _find_trash_entry(trash_id: str) -> Path:
-    if _SAFE_TOKEN.fullmatch(trash_id) is None:
-        raise KeyError(trash_id)
-    root = data_root.resolve_data_root() / ".trash" / "canvases"
-    matches = list(root.glob(f"*/{trash_id}/tombstone.json")) if root.exists() else []
-    if len(matches) != 1:
-        raise KeyError(trash_id)
-    return matches[0]
-
-
-def list_canvas_trash() -> list[CanvasTrashEntry]:
-    with file_lock(_lifecycle_lock_path()):
+) -> None:
+    """Permanently delete a project and every Canvas job it owns."""
+    transaction = _delete_transactions_root() / f"delete-{secrets.token_hex(12)}"
+    with (
+        file_lock(_lifecycle_lock_path()),
+        file_lock(_project_lock_path(project_id)),
+        file_lock(canvas_agent_sessions_lock_path(project_id)),
+    ):
         _recover_package_transactions_unlocked()
-        root = data_root.resolve_data_root() / ".trash" / "canvases"
-        if not root.exists():
-            return []
-        entries: list[CanvasTrashEntry] = []
-        for path in root.glob("*/*/tombstone.json"):
-            try:
-                entry = CanvasTrashEntry.model_validate_json(path.read_text(encoding="utf-8"))
-            except (OSError, ValidationError, json.JSONDecodeError):
-                continue
-            if datetime.fromisoformat(entry.expires_at) > _now() and entry.restored_at is None:
-                entries.append(entry)
-        return sorted(entries, key=lambda item: item.deleted_at, reverse=True)
-
-
-def _discard_imported_project(project_id: str) -> None:
-    with file_lock(_lifecycle_lock_path()), file_lock(_project_lock_path(project_id)):
+        _recover_canvas_transactions_unlocked(project_id)
+        current = _read_canvas_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
         jobs = _jobs_for_project(project_id)
         with ExitStack() as stack:
             for job in jobs:
                 stack.enter_context(job_lock(job.job_id))
-            for job in jobs:
-                (data_root.runtime_dir() / "jobs" / f"{job.job_id}.json").unlink(missing_ok=True)
-            shutil.rmtree(canvas_project_dir(project_id))
-
-
-def _restore_canvas_project_locked(trash_id: str) -> CanvasProject:
-    restored_at = _now_text()
-    with file_lock(_lifecycle_lock_path()):
-        _recover_package_transactions_unlocked()
-        tombstone_path = _find_trash_entry(trash_id)
-        entry = CanvasTrashEntry.model_validate_json(tombstone_path.read_text(encoding="utf-8"))
-        if entry.restored_at is not None:
-            raise CanvasPackageError("这个项目已经恢复过了")
-        if datetime.fromisoformat(entry.expires_at) <= _now():
-            raise CanvasPackageError("这个项目已超过 30 天恢复期限")
-        package_path = tombstone_path.parent / "package.zip"
-        if not package_path.is_file():
-            raise CanvasPackageError("回收站中的项目包已经不存在")
-        claimed = package_path.with_name(f".package.claimed-{secrets.token_hex(6)}.zip")
-        restore_journal = tombstone_path.parent / "restore-transaction.json"
-        atomic_write_json(
-            restore_journal,
-            {"state": "claimed", "restored_at": restored_at, "project_id": None},
-        )
-        package_path.replace(claimed)
-
-    def record_import(projects: list[CanvasProject]) -> None:
-        if len(projects) != 1:
-            raise CanvasPackageError("回收站项目包必须只包含一个项目")
-        atomic_write_json(
-            restore_journal,
-            {
-                "state": "imported",
-                "restored_at": restored_at,
-                "project_id": projects[0].project_id,
-            },
-        )
-
-    try:
-        projects = _commit_package(claimed, commit_hook=record_import)
-    except BaseException:
-        with file_lock(_lifecycle_lock_path()):
-            if not package_path.exists() and claimed.exists():
-                claimed.replace(package_path)
-            restore_journal.unlink(missing_ok=True)
-        raise
-    project = projects[0]
-    restored = entry.model_copy(
-        update={
-            "restored_at": restored_at,
-            "restored_project_id": project.project_id,
-        }
-    )
-    try:
-        with file_lock(_lifecycle_lock_path()):
-            atomic_write_json(tombstone_path, restored.model_dump(mode="json"))
-    except BaseException:
-        _discard_imported_project(project.project_id)
-        with file_lock(_lifecycle_lock_path()):
-            if not package_path.exists() and claimed.exists():
-                claimed.replace(package_path)
-        raise
-    shutil.rmtree(tombstone_path.parent / "project", ignore_errors=True)
-    shutil.rmtree(tombstone_path.parent / "jobs", ignore_errors=True)
-    try:
-        claimed.unlink(missing_ok=True)
-        restore_journal.unlink(missing_ok=True)
-    except OSError:
-        pass
-    return project
-
-
-def restore_canvas_project(trash_id: str) -> CanvasProject:
-    if _SAFE_TOKEN.fullmatch(trash_id) is None:
-        raise KeyError(trash_id)
-    with file_lock(_restore_lock_path(trash_id)):
-        return _restore_canvas_project_locked(trash_id)
+            locked_jobs = [read_job(job.job_id) for job in jobs]
+            _assert_jobs_are_quiescent(locked_jobs)
+            moved_jobs: list[tuple[Path, Path]] = []
+            moved_project: tuple[Path, Path] | None = None
+            try:
+                transaction.mkdir(parents=True, exist_ok=False)
+                (transaction / "jobs").mkdir()
+                atomic_write_json(
+                    transaction / "transaction.json",
+                    {
+                        "project_id": project_id,
+                        "job_ids": [job.job_id for job in locked_jobs],
+                    },
+                )
+                source_project = canvas_project_dir(project_id)
+                destination_project = transaction / "project"
+                source_project.replace(destination_project)
+                moved_project = (source_project, destination_project)
+                for job in locked_jobs:
+                    source = data_root.runtime_dir() / "jobs" / f"{job.job_id}.json"
+                    destination = transaction / "jobs" / source.name
+                    source.replace(destination)
+                    moved_jobs.append((source, destination))
+            except BaseException:
+                for source, destination in reversed(moved_jobs):
+                    if destination.exists():
+                        destination.replace(source)
+                if moved_project is not None and moved_project[1].exists():
+                    moved_project[1].replace(moved_project[0])
+                shutil.rmtree(transaction, ignore_errors=True)
+                raise
+    shutil.rmtree(transaction, ignore_errors=True)

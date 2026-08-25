@@ -70,7 +70,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle}`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
 `POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
-`DELETE /canvas/projects/{id}` `POST /canvas/trash/{trash_id}/restore`
+`DELETE /canvas/projects/{id}`
 `PUT /canvas/ui-preferences`
 
 **双向**
@@ -93,7 +93,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /canvas/projects/{id}/versions/{version_id}/download`
 `GET /canvas/projects/{id}/library/assets` `/canvas/projects/{id}/library/prompts`
 `GET /canvas/projects/{id}/agent/sessions` `/canvas/projects/{id}/agent/sessions/{session_id}`
-`GET /canvas/trash` `GET /canvas/ui-preferences`
+`GET /canvas/ui-preferences`
 
 `GET /canvas/projects` 的 `CanvasProjectSummary` 在项目元数据之外返回派生的 `cover`、`node_count` 与
 `connection_count`；这些字段不进入 `project.json`，必须与当前 `canvas.json` 一致。
@@ -251,13 +251,12 @@ schema、摘要和项目内引用校验，再凭 30 分钟 token 调用 `commit`
 全局 Canvas Job ID、Run ID、output path、retry/derivation/content origin 引用。node/version/connection
 等项目内 ID 保留。包不包含凭证、全局 provider 配置、缓存、插件代码或运行中事务；存在 pending Job
 时导出、导入和删除均返回 409。
-导入、删除、恢复分别使用持久事务记录与独立 claim 锁；服务启动时恢复中断事务，并每 6 小时执行一次
-维护，实际清除超过 30 天的回收数据。
+导入与删除分别使用持久事务记录和固定锁序；服务启动时回滚中断的导入，并完成中断的永久删除。每 6 小时
+维护一次过期或遗弃的导入 claim。
 
-删除请求必须携带当前 `expected_revision` 和完整 `confirm_name`。服务端在固定的 project→job 锁序下，
-把项目目录、owned Job 与完整恢复包移入 `.trash/canvases/<original_id>/<trash_id>/` 并写 tombstone；项目
-立即从索引消失，默认保留 30 天。`GET /canvas/trash` 只列仍可恢复的记录；恢复通过同一项目包导入器创建
-新项目 ID，原 ID 的 tombstone 不复活，避免与已经传播的删除记录争用身份。
+删除请求只携带当前 `expected_revision`。服务端在固定的 project→job 锁序下确认 revision 与 owned Job
+均静止后，先把项目和 Job 原子移入 `.runtime/canvas-delete-transactions/` 的短期事务目录，再立即物理清除；
+项目从索引消失后不可恢复。画布不提供回收区、撤销删除或恢复 API。
 
 项目创作库分别落在 `library/assets.json` 与 `library/prompts.json`，两者都是独立
 `RevisionedSidecar`。所有写操作必须携带 sidecar 当前 `If-Match`；读取和成功写入响应返回对应

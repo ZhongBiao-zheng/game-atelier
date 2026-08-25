@@ -7,6 +7,7 @@ import {
   canCreateCanvasInputConnection,
   canvasNodeAcceptsInput,
   canvasNodeHasCurrentContent,
+  canvasNodeProvidesOutput,
   canvasNodeProvidesContent,
   closestCanvasConnectionEndpoint,
 } from './canvasEditorModel';
@@ -19,7 +20,7 @@ const contentData = {
 
 function node(
   id: string,
-  type: 'text' | 'image' | 'config' | 'group' | 'plugin',
+  type: 'text' | 'image' | 'video' | 'audio' | 'config' | 'group' | 'plugin',
   currentVersionId: string | null = null,
 ): CanvasNode {
   const common = { id, title: id, position: { x: 0, y: 0 }, z_index: 0 };
@@ -27,9 +28,10 @@ function node(
   if (type === 'text') {
     return { ...common, type, data: { ...nodeContentData, display: { scale: 'sm' } } };
   }
-  if (type === 'image') {
+  if (type === 'image' || type === 'video') {
     return { ...common, type, data: { ...nodeContentData, display: { fit: 'contain', free_resize: false } } };
   }
+  if (type === 'audio') return { ...common, type, data: nodeContentData };
   if (type === 'config') {
     return {
       ...common,
@@ -84,6 +86,10 @@ describe('canvas connection policy', () => {
     expect(canvasNodeAcceptsInput(node('plugin', 'plugin'))).toBe(false);
     expect(canvasNodeHasCurrentContent(node('empty', 'text'), {})).toBe(false);
     expect(canvasNodeHasCurrentContent(node('missing', 'text', 'version-missing'), {})).toBe(false);
+    expect(canvasNodeProvidesOutput(node('empty-image', 'image'), {})).toBe(true);
+    expect(canvasNodeProvidesOutput(node('empty-video', 'video'), {})).toBe(true);
+    expect(canvasNodeProvidesOutput(node('empty-text', 'text'), {})).toBe(false);
+    expect(canvasNodeProvidesOutput(node('empty-audio', 'audio'), {})).toBe(false);
   });
 
   it('allows directional cycles while rejecting self, duplicate, and invalid endpoints', () => {
@@ -91,6 +97,8 @@ describe('canvas connection policy', () => {
       node('source', 'text', 'version-source'),
       node('target', 'text', 'version-target'),
       node('empty', 'text'),
+      node('empty-image', 'image'),
+      node('empty-video', 'video'),
       node('config', 'config'),
       node('group', 'group'),
       node('plugin', 'plugin'),
@@ -118,6 +126,8 @@ describe('canvas connection policy', () => {
     expect(canCreateCanvasInputConnection(current, { source: 'source', target: 'source' })).toBe(false);
     expect(canCreateCanvasInputConnection(current, { source: 'config', target: 'target' })).toBe(false);
     expect(canCreateCanvasInputConnection(current, { source: 'empty', target: 'target' })).toBe(false);
+    expect(canCreateCanvasInputConnection(current, { source: 'empty-image', target: 'target' })).toBe(true);
+    expect(canCreateCanvasInputConnection(current, { source: 'empty-video', target: 'target' })).toBe(true);
     expect(canCreateCanvasInputConnection(current, { source: 'source', target: 'group' })).toBe(false);
     expect(canCreateCanvasInputConnection(current, { source: 'source', target: 'plugin' })).toBe(false);
 

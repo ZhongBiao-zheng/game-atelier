@@ -55,7 +55,7 @@ import type {
 import type { Job } from '@/schema/jobs';
 import {
   canvasNodeAcceptsInput,
-  canvasNodeHasCurrentContent,
+  canvasNodeProvidesOutput,
   canvasNodeProvidesContent,
   CANVAS_GENERATION_MODE_LABELS,
   canvasGenerationModelSupportsMode,
@@ -157,8 +157,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   );
   const generationPanelWidth = canvasNodePanelWidth(
     generationPanelViewportWidth,
-    context?.generationPanel.viewportZoom ?? 1,
   );
+  const viewportZoom = context?.generationPanel.viewportZoom;
+  const generationPanelZoom = viewportZoom && Number.isFinite(viewportZoom) && viewportZoom > 0
+    ? viewportZoom
+    : 1;
   const showToolbar = useCallback(() => {
     if (toolbarHideTimer.current !== null) window.clearTimeout(toolbarHideTimer.current);
     toolbarHideTimer.current = null;
@@ -261,7 +264,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
       const anchor = generationPanelAnchorRef.current;
       if (!anchor) return;
       setGenerationPanelViewportWidth(current => current === window.innerWidth ? current : window.innerWidth);
-      const zoom = Math.max(context?.generationPanel.viewportZoom ?? 1, 0.1);
+      const zoom = generationPanelZoom;
       const rect = anchor.getBoundingClientRect();
       if (!rect.width) return;
       const previousOffset = generationPanelOffsetXRef.current;
@@ -291,11 +294,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
       resizeObserver?.disconnect();
       window.removeEventListener('resize', updatePlacement);
     };
-  }, [context?.generationPanel.viewportZoom, generationPanelVisible, generationPanelWidth]);
+  }, [generationPanelVisible, generationPanelWidth, generationPanelZoom]);
   if (!context) return null;
   const renameNode = context.renameNode;
   const content = contentForNode(node, context.contentVersions);
-  const hasCurrentContent = canvasNodeHasCurrentContent(node, context.contentVersions);
   const copyablePrompt = copyablePromptForNode(
     node,
     context.jobsByResultNodeId,
@@ -644,14 +646,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           <span className="canvas-node-handle-dot" aria-hidden="true" />
         </Handle>
       )}
-      {canvasNodeProvidesContent(node) && (
+      {canvasNodeProvidesOutput(node, context.contentVersions) && (
         <Handle
           type="source"
           position={Position.Right}
-          isConnectable={hasCurrentContent}
-          className={cn('canvas-node-handle', !hasCurrentContent && 'canvas-node-handle-disabled')}
-          aria-label={hasCurrentContent ? '从此节点连接' : undefined}
-          aria-hidden={!hasCurrentContent}
+          className="canvas-node-handle"
+          aria-label="从此节点连接"
         >
           <span className="canvas-node-handle-dot" aria-hidden="true" />
         </Handle>
@@ -660,10 +660,14 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         <div
           ref={generationPanelAnchorRef}
           data-canvas-node-panel-anchor={node.id}
-          className="absolute left-1/2 top-full z-20 pt-4"
+          className="absolute z-20"
           style={{
+            left: `calc(50% + ${generationPanelOffsetX}px)`,
+            top: `calc(100% + ${16 / generationPanelZoom}px)`,
             width: generationPanelWidth,
-            transform: `translateX(calc(-50% + ${generationPanelOffsetX}px))`,
+            marginLeft: -generationPanelWidth / 2,
+            transform: `scale(${1 / generationPanelZoom})`,
+            transformOrigin: 'top center',
           }}
         >
           <CanvasGenerationComposer

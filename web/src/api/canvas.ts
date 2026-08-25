@@ -15,7 +15,6 @@ import type {
   CanvasPoint,
   RevisionedSidecar,
   CanvasRun,
-  CanvasTrashEntry,
   CanvasUpload,
 } from '@/schema/canvas';
 
@@ -133,33 +132,16 @@ export function commitCanvasPackage(token: string): Promise<CanvasPackageImport>
 export function deleteCanvasProject(
   projectId: string,
   expectedRevision: number,
-  confirmName: string,
-): Promise<CanvasTrashEntry> {
-  return requestJson<CanvasTrashEntry>(
+): Promise<void> {
+  return request(
     `/api/canvas/projects/${encodeURIComponent(projectId)}`,
     '删除画布项目',
     {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ expected_revision: expectedRevision, confirm_name: confirmName }),
+      body: JSON.stringify({ expected_revision: expectedRevision }),
     },
-  );
-}
-
-export function restoreCanvasProject(trashId: string): Promise<CanvasProject> {
-  return requestJson<CanvasProject>(
-    `/api/canvas/trash/${encodeURIComponent(trashId)}/restore`,
-    '恢复画布项目',
-    { method: 'POST' },
-  );
-}
-
-export async function listCanvasTrash(): Promise<CanvasTrashEntry[]> {
-  const data = await requestJson<{ entries: CanvasTrashEntry[] }>(
-    '/api/canvas/trash',
-    '读取画布回收区',
-  );
-  return data.entries;
+  ).then(() => undefined);
 }
 
 export function getCanvasDocument(projectId: string): Promise<CanvasDocument> {
