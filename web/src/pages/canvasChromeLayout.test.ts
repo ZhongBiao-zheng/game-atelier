@@ -39,7 +39,11 @@ describe('canvas chrome spatial hierarchy', () => {
     expect(tokenSource).toContain('.canvas-add-menu');
     expect(tokenSource).toContain('.canvas-config-dock');
     expect(tokenSource).toContain('.canvas-library-panel');
+    expect(tokenSource).toContain('.canvas-flow .react-flow__minimap.canvas-minimap');
     expect(tokenSource).toContain("left: calc(max(0.75rem, env(safe-area-inset-left)) + 3.5rem)");
+    expect(tokenSource).toContain('+ 3.375rem');
+    expect(tokenSource).toContain('+ 8.125rem');
+    expect(tokenSource).toContain('left: max(15px, env(safe-area-inset-left)) !important');
     expect(tokenSource).toMatch(
       /@media \(min-width: 48rem\) and \(max-width: 63\.999rem\) \{[\s\S]*?\.canvas-tool-dock \{[\s\S]*?\+ 4\.25rem[\s\S]*?\.canvas-add-menu \{[\s\S]*?\+ 8\.25rem/,
     );
@@ -47,6 +51,7 @@ describe('canvas chrome spatial hierarchy', () => {
       /@media \(min-width: 48rem\) \{[\s\S]*?\.canvas-library-panel \{\s*left: max\(1rem, env\(safe-area-inset-left\)\)/,
     );
     expect(canvasEditorSource).not.toContain('md:bottom-14');
+    expect(canvasEditorSource).not.toContain('canvas-library-panel absolute bottom-3');
     expect(tokenSource).not.toContain('.canvas-tool-rail');
   });
 });

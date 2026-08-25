@@ -2,7 +2,7 @@
 
 Type: implement
 
-Status: ready-for-human
+Status: completed
 
 Blocked by: 41-implement-generation-default-preferences
 
@@ -45,4 +45,9 @@ Blocked by: 41-implement-generation-default-preferences
 - `pnpm exec vite build && node scripts/normalize-dist.mjs`：通过（2673 modules）。
 - Spec / standards 双轴审查：CLEAR。
 - `pnpm exec tsc -b --noEmit`：仅命中既有 Canvas v1 测试债；本票无新增错误。
-- 待人工刷新受控内置浏览器后，完成 375 / 768 / 1024 / desktop 的真实布局与菜单交互核验，再关闭 I01。
+- 受控内置浏览器精确 viewport：375px 无横向溢出，添加菜单、资源面板与生成偏好 Dialog 均在视口内，Escape 后焦点分别返回触发器。
+- 768px：紧凑工具 dock、缩放、小地图、Inspector、顶部配置区互不重叠；添加菜单与 dock 间距 10px，资源面板与 dock 间距 8px。
+- 1024px：继续使用紧凑 dock，资源面板与缩放间距 8px；顶部、Inspector、小地图与底部控件无重叠。
+- 1440px：六个直接创建/上传动作展开，紧凑“添加”入口隐藏；顶部左右区、完整工具 dock、缩放、小地图、Inspector 与资源面板互不重叠。
+- 640–767px MiniMap 与纵向工具条独立避让；745px 实测间距 13px。所有相关定位继续消费 safe-area inset。
+- 最终 Spec / standards 双轴审查：CLEAR。

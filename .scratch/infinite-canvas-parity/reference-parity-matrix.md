@@ -1,6 +1,6 @@
 # Infinite Canvas 参考基线核对表
 
-Status: ready-for-human
+Status: completed
 
 ## Baseline
 
@@ -17,7 +17,7 @@ Status: ready-for-human
 - **adapted**：保留相同用户能力，但按照 game-atelier 的 React Flow、FastAPI、文件真源、
   Job Runner、能力矩阵和 Atelier 设计系统重新实现。
 - **excluded**：固定基线中明确未实现、仅在 TODO 中，或并非参考项目能力；不是把已交付功能静默砍掉。
-- **现状 gap**：`none / partial / full` 分别表示本项目已具备、部分具备、尚未具备。
+- **交付状态**：`full` 表示已按 `same/adapted` 边界交付并核验；`partial` 表示仍有缺口；`n/a` 表示固定基线排除项。
 
 ## 基线健康度
 
@@ -35,11 +35,11 @@ Status: ready-for-human
 
 ## A. 项目生命周期与持久化
 
-| ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
+| ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
 | A01 | 画布项目卡片库与空态 | `pages/canvas/index.tsx`；`01-project-index.png` | adapted：Atelier 卡片墙、创建卡与响应式空态，见 issue 26 | full |
-| A02 | 新建并立即进入独立画布 | `createProject()` + `/canvas/:id` | same | none |
-| A03 | 打开/切换多个画布项目 | `CanvasProjectCard`、顶部“我的画布” | same | none |
+| A02 | 新建并立即进入独立画布 | `createProject()` + `/canvas/:id` | same | full |
+| A03 | 打开/切换多个画布项目 | `CanvasProjectCard`、顶部“我的画布” | same | full |
 | A04 | 卡片与画布内双击重命名 | `canvas-project-card.tsx`、`canvas-top-bar.tsx` | same：卡片与顶部原地输入，见 issue 26 | full |
 | A05 | 单项目确认删除 | `canvas-delete-projects-dialog.tsx` | same | full |
 | A06 | 多选项目、批量导出/删除、删除全部 | `pages/canvas/index.tsx` | same | full |
@@ -47,14 +47,14 @@ Status: ready-for-human
 | A08 | ZIP 导入并分配新项目 ID | `pages/canvas/index.tsx::importCanvas` | adapted：服务端解包和路径白名单 | full |
 | A09 | 最近项目入口 | `/canvas?mode=recent` 打开列表首项 | same | full |
 | A10 | 项目统计节点/连线和更新时间 | `CanvasProjectCard` | same：列表 summary 从当前 Document 派生，见 issue 26 | full |
-| A11 | 浏览器 IndexedDB/localforage 持久化 | `use-canvas-store.ts` | adapted：必须使用现有文件系统真源 | none |
-| A12 | 项目保存 viewport、背景、图片信息与 Agent 会话 | `CanvasProject` type | adapted：viewport/外观在 revision Document；Agent Session 使用独立 revision/sequence 冷 sidecar 与锁域，项目包严格验证并重映射，见 issue 38 | none |
+| A11 | 浏览器 IndexedDB/localforage 持久化 | `use-canvas-store.ts` | adapted：必须使用现有文件系统真源 | full |
+| A12 | 项目保存 viewport、背景、图片信息与 Agent 会话 | `CanvasProject` type | adapted：viewport/外观在 revision Document；Agent Session 使用独立 revision/sequence 冷 sidecar 与锁域，项目包严格验证并重映射，见 issue 38 | full |
 
 > 核对纠偏：固定基线没有“复制整个画布项目”入口；只有复制节点。因此项目复制不进入 parity。
 
 ## B. 画布机械层与快捷键
 
-| ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
+| ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
 | B01 | 无限平移、滚轮缩放、复位、百分比缩放滑杆 | `infinite-canvas.tsx`、`canvas-zoom-controls.tsx` | adapted：React Flow 同一 viewport，8%–250% 滑杆与 100% 复位，见 issue 25 | full |
 | B02 | 选择/移动两种工具模式 | `canvas-toolbar.tsx` | same | full |
@@ -74,19 +74,19 @@ Status: ready-for-human
 | B16 | 右键节点复制/删除；右键边删除 | `canvas-context-menu.tsx` | same | full |
 | B17 | 小地图显示/隐藏和点击导航 | `canvas-mini-map.tsx` | adapted：React Flow MiniMap；Document 设置显隐，拖拽/滚轮/点击导航，见 issue 22 | full |
 | B18 | 点/线/空白三种背景 | `canvas-toolbar.tsx`；`menu-画布外观.png` | adapted：Atelier 背景 token | full |
-| B19 | 浅色/深色主题 | `canvas-theme.ts`、外观菜单 | adapted：复用 Atelier 语义 token 与 `atelier:theme`；Canvas 外观菜单可直接切换，见 Issue 39 | none |
+| B19 | 浅色/深色主题 | `canvas-theme.ts`、外观菜单 | adapted：复用 Atelier 语义 token 与 `atelier:theme`；Canvas 外观菜单可直接切换，见 Issue 39 | full |
 | B20 | 图片尺寸/信息显示开关 | `showImageInfo`、外观菜单 | same | full |
 | B21 | 清空画布二次确认 | `project.tsx` clear modal | same | full |
 | B22 | 选中节点/整批元素导出 | `canvas-side-panel.tsx::exportCanvasNodes` | adapted：服务端项目包/资源导出 | full |
 
 ## C. 节点模型与通用行为
 
-| ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
+| ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
-| C01 | 文本节点 | `CanvasNodeType.Text`；`03-built-in-nodes.png` | same：节点内双击/工具条编辑，字号映射 Atelier `xs/sm/base` token，见 issue 37 | none |
-| C02 | 空/有内容图片节点 | `CanvasNodeType.Image`、`canvas-node.tsx` | adapted：不可变 Content Version 存储；独立空态上传与 contain/cover/free-resize 表面，见 issue 37 | none |
-| C03 | 空/有内容视频节点 | `CanvasNodeType.Video` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | none |
-| C04 | 空/有内容音频节点 | `CanvasNodeType.Audio` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | none |
+| C01 | 文本节点 | `CanvasNodeType.Text`；`03-built-in-nodes.png` | same：节点内双击/工具条编辑，字号映射 Atelier `xs/sm/base` token，见 issue 37 | full |
+| C02 | 空/有内容图片节点 | `CanvasNodeType.Image`、`canvas-node.tsx` | adapted：不可变 Content Version 存储；独立空态上传与 contain/cover/free-resize 表面，见 issue 37 | full |
+| C03 | 空/有内容视频节点 | `CanvasNodeType.Video` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | full |
+| C04 | 空/有内容音频节点 | `CanvasNodeType.Audio` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | full |
 | C05 | 生成配置节点，可切换文本/图片/视频/音频 | `canvas-config-composer.tsx` | adapted：Issue 40 独立配置卡 + 四态 composer，提交到统一 Job Runner | full |
 | C06 | 分组节点，显示成员数量 | `CanvasNodeType.Group`、groupId | same | full |
 | C07 | 开放字符串插件节点 | `CanvasNodeTypeId`、node registry | adapted：使用受限插件契约 | full |
@@ -103,7 +103,7 @@ Status: ready-for-human
 
 ## D. 生成与结果模型
 
-| ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
+| ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
 | D01 | 节点下方独立 composer/提示词面板 | `canvas-node-prompt-panel.tsx`、`canvas-config-composer.tsx` | same structure + Atelier controls：六类生成节点共用独立提示词面板，真实能力与操作置底，关闭可重开，见 issue 31 | full |
 | D02 | 空节点首个结果原位填充 | `canvas-node-manual.zh-CN.mdx` | same | full |
@@ -114,25 +114,25 @@ Status: ready-for-human
 | D07 | 图片参考编辑/图生图 | `requestEdit`、resource references | adapted：Job snapshot refs | full |
 | D08 | 文本/图片/配置驱动视频 | `requestVideoGeneration` | adapted：Issue 40 配置四态切换 + 现有视频 capability + Job Runner | full |
 | D09 | 文本/配置驱动音频 | `requestAudioGeneration` | adapted：新增音频 capability/Job | full |
-| D10 | 节点独立选择模型和参数 | settings popovers | adapted：复用现有 keys/capability matrix | none |
-| D11 | 图片尺寸/比例/质量/透明背景/数量 | `image-settings-panel.tsx` | adapted：只显示模型真实支持参数 | none |
-| D12 | 文本推理强度 auto/low/medium/high/xhigh | `text-settings-panel.tsx`、`pending-test` | adapted：仅 `openai-responses` 展示并发送 reasoning，auto 省略协议参数；文本候选数 1–4 | none |
-| D13 | 视频尺寸、时长、质量、音频、水印 | `video-settings-panel.tsx` | adapted：按 provider capability 显示 | none |
-| D14 | 音色、格式、速度、instructions | `audio-settings-panel.tsx` | adapted：按 provider capability 显示，关闭前原子提交本地草稿，服务端再次归一化 | none |
-| D15 | `@` 引用已连接文本/图片/视频/音频 | prompt chip/resource mention components | adapted：稳定 node token + 直接连接候选 + missing 双端拒绝（issue 34） | none |
-| D16 | 提交前根据当前连接重新编号引用 | runtime composer 文案 | adapted：冻结输入后按模态与真实数组顺序重编号（issue 34） | none |
-| D17 | 图片数量 N 立即创建 N 个槽位并独立更新 | multi-image metadata、`pending-test` | adapted：一轮 Job 内逐槽执行并即时登记（issue 35） | none |
-| D18 | 多图收起堆叠、展开、设主图 | `canvas-node.tsx`、`pending-test` | same：结果节点拥有堆叠与展开候选（issue 35） | none |
-| D19 | 单槽位重试/删除，不抢占成功主图 | `project.tsx`、`pending-test` | adapted：候选重试 Run + tombstone（issue 35） | none |
-| D20 | 停止当前生成，保留已完成结果 | `stopTitle/continue`、AbortController | adapted：持久取消意图 + 候选聚合终态（issue 35） | none |
-| D21 | 生成元数据保存 prompt/model/size/quality/references | `CanvasNodeMetadata` | adapted：不可变 Snapshot 在详情中展示最终 prompt、模型、完整安全参数、冻结 node/version 与独立执行结果，见 issue 36 | none |
-| D22 | 根据保存元数据重试；引用丢失明确报错 | `handleRetryNode` | adapted：原设置严格复用快照；稳定错误码与 recovery 明确引导检查历史输入或按当前设置再生成，见 issue 36 | none |
+| D10 | 节点独立选择模型和参数 | settings popovers | adapted：复用现有 keys/capability matrix | full |
+| D11 | 图片尺寸/比例/质量/透明背景/数量 | `image-settings-panel.tsx` | adapted：只显示模型真实支持参数 | full |
+| D12 | 文本推理强度 auto/low/medium/high/xhigh | `text-settings-panel.tsx`、`pending-test` | adapted：仅 `openai-responses` 展示并发送 reasoning，auto 省略协议参数；文本候选数 1–4 | full |
+| D13 | 视频尺寸、时长、质量、音频、水印 | `video-settings-panel.tsx` | adapted：按 provider capability 显示 | full |
+| D14 | 音色、格式、速度、instructions | `audio-settings-panel.tsx` | adapted：按 provider capability 显示，关闭前原子提交本地草稿，服务端再次归一化 | full |
+| D15 | `@` 引用已连接文本/图片/视频/音频 | prompt chip/resource mention components | adapted：稳定 node token + 直接连接候选 + missing 双端拒绝（issue 34） | full |
+| D16 | 提交前根据当前连接重新编号引用 | runtime composer 文案 | adapted：冻结输入后按模态与真实数组顺序重编号（issue 34） | full |
+| D17 | 图片数量 N 立即创建 N 个槽位并独立更新 | multi-image metadata、`pending-test` | adapted：一轮 Job 内逐槽执行并即时登记（issue 35） | full |
+| D18 | 多图收起堆叠、展开、设主图 | `canvas-node.tsx`、`pending-test` | same：结果节点拥有堆叠与展开候选（issue 35） | full |
+| D19 | 单槽位重试/删除，不抢占成功主图 | `project.tsx`、`pending-test` | adapted：候选重试 Run + tombstone（issue 35） | full |
+| D20 | 停止当前生成，保留已完成结果 | `stopTitle/continue`、AbortController | adapted：持久取消意图 + 候选聚合终态（issue 35） | full |
+| D21 | 生成元数据保存 prompt/model/size/quality/references | `CanvasNodeMetadata` | adapted：不可变 Snapshot 在详情中展示最终 prompt、模型、完整安全参数、冻结 node/version 与独立执行结果，见 issue 36 | full |
+| D22 | 根据保存元数据重试；引用丢失明确报错 | `handleRetryNode` | adapted：原设置严格复用快照；稳定错误码与 recovery 明确引导检查历史输入或按当前设置再生成，见 issue 36 | full |
 | D23 | 自定义模型调用脚本 | `model-script-editor.tsx`、`model-plugin.ts` | adapted：服务端受控 caller/plugin，不执行浏览器任意脚本 | full |
-| D24 | 生成跨域错误专门提示 | latest commit、`pending-test` | adapted：区分 CORS/错误 API 地址、DNS、TLS、代理与网络跳点；诊断脱敏且保留 task_id，见 issue 36 | none |
+| D24 | 生成跨域错误专门提示 | latest commit、`pending-test` | adapted：区分 CORS/错误 API 地址、DNS、TLS、代理与网络跳点；诊断脱敏且保留 task_id，见 issue 36 | full |
 
 ## E. 图片与媒体节点工具
 
-| ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
+| ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
 | E01 | 媒体加入资产库 | hover toolbar、`05-populated-image-tools.png` | adapted：写 Canvas 资产索引 | full |
 | E02 | 图片/视频/音频下载 | hover toolbar | same | full |
@@ -151,7 +151,7 @@ Status: ready-for-human
 
 ## F. 资产库、提示词与设置同步
 
-| ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
+| ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
 | F01 | 左侧“画布/资产/提示词库”三 Tab、可调整宽度/收起 | `canvas-side-panel.tsx`、runtime | same structure + Atelier styling | full |
 | F02 | 独立资产库，图片/视频/音频/文本可复用 | `use-asset-store.ts`、`pages/assets` | adapted：Canvas 项目资产文件真源 | full |
@@ -167,7 +167,7 @@ Status: ready-for-human
 
 ## G. Canvas Agent
 
-| ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
+| ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
 | G01 | 右侧可调整宽度的 Agent 面板 | runtime、`local-agent-panel.tsx` | same structure + Atelier styling | full |
 | G02 | 本地 URL/token 自动/手动连接与状态 | `agent-connect-view.tsx` | adapted：viewer-server 内部/受控 sidecar | full |
@@ -189,7 +189,7 @@ Status: ready-for-human
 
 ## H. 节点插件
 
-| ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
+| ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
 | H01 | 官方/本地/第三方插件管理、安装/启停/更新/卸载 | plugin manager/runtime | adapted：签名包或受信目录，不直接执行任意 URL | full |
 | H02 | 远程 JS URL 安装 | `plugin-loader.ts` | adapted：相同安装体验，受 sandbox/权限控制 | full |
@@ -204,29 +204,27 @@ Status: ready-for-human
 
 ## I. 视觉与响应式基线
 
-| ID | 参考基线行为 | Source/runtime evidence | Parity | 现状 gap |
+| ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
-| I01 | 顶部项目/状态/配置区，底部居中工具 dock | runtime screenshots | same spatial hierarchy + Atelier styling | partial |
+| I01 | 顶部项目/状态/配置区，底部居中工具 dock | runtime screenshots | same spatial hierarchy + Atelier styling：375/768/1024/1440 真实 viewport 核验，见 issue 42 | full |
 | I02 | 左侧资源面板、中央画布、右侧 Agent 三栏可折叠/调整 | runtime/components | same | full |
 | I03 | 节点标题在卡片外上方，卡片本体承载内容 | `canvas-node.tsx`、runtime | same：标题与改名输入都跟随节点外沿，见 issue 27 | full |
 | I04 | hover 工具条位于节点上方 | `canvas-node-hover-toolbar.tsx` | same | full |
 | I05 | composer 是节点下方独立浮层并随节点移动 | prompt/config components | same：节点外 sibling 锚点随拖拽/缩放，边缘钳位与高倍 zoom 安全宽度，窄屏独立底部面板，见 issue 31 | full |
 | I06 | 连接柄位于节点左右中部，边低对比 | node/connections | same behavior + Atelier colors：48px 命中区、低对比贝塞尔、派生虚线与相关边高亮，见 issue 28 | full |
-| I07 | 浅/深主题、点/线/空白背景 | theme/appearance runtime | adapted：工作区浅/深主题与项目内点/线/空白背景统一收在外观菜单，见 Issue 21/39 | none |
+| I07 | 浅/深主题、点/线/空白背景 | theme/appearance runtime | adapted：工作区浅/深主题与项目内点/线/空白背景统一收在外观菜单，见 Issue 21/39 | full |
 | I08 | 画布和 Agent/左栏适配窄屏 | components + pending tests | adapted：375/768 明确可用降级 | full |
 | I09 | 逐像素复制 Ant Design、白色工具条、字体与品牌色 | reference implementation detail | excluded：与“适配原项目”冲突 | n/a |
 
 ## 核对结论
 
-1. 固定基线共登记 **136 个核对项**：131 项进入 `same/adapted` 目标，5 项上游未来、占位、
-   安全缺陷或品牌实现明确排除；另拒绝复制两个实现缺陷——远程插件直读密钥、设置包导出明文密钥。
-2. game-atelier 当前只在独立项目、React Flow 基础机械层、图片/视频单节点生成、自动保存、
-   小地图和下方 composer 上具有部分基础；多选/创建菜单/配置节点/批量结果/资源侧栏/图片工具/
-   Agent/插件/WebDAV 均属于完整缺口。
-3. 参考项目不能作为无条件健康真源：当前 commit 生产构建成功但 TypeScript 失败，AI 超分是占位，
-   且官方仍有大规模人工待测清单。我们的“完美复刻”必须以矩阵验收，而不是以复制代码为准。
-4. 下一票必须先裁定连接与 Generation Snapshot 语义，否则 D15-D22、Agent 操作、插件 host、
-   导入导出和重试都会基于互相冲突的数据模型开发。
+1. 固定基线共登记 **136 个核对项**：131 项已按 `same/adapted` 边界完整交付，5 项上游未来、占位、
+   安全缺陷或品牌实现明确排除；远程插件直读密钥、设置包导出明文密钥等实现缺陷未复制。
+2. 独立画布项目、React Flow 机械层、节点与连接、四模态生成、媒体工具、资源/提示词、Agent、
+   插件、安全导入导出、主题与响应式 chrome 已接入 game-atelier 的文件真源、Job Runner 和设计系统。
+3. 固定参考只作为用户可观察结果基线；上游 TypeScript 缺陷、AI 超分占位和未交付 TODO 均未冒充 parity。
+4. 最终 I01 经 375 / 768 / 1024 / 1440 真实 viewport、聚焦测试、源码 TypeScript、production build
+   与双轴代码审查关闭；矩阵不存在 `partial` 项。
 
 ## Runtime evidence
 

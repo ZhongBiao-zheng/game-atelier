@@ -156,7 +156,7 @@ export function CanvasLibraryPanel({
       <aside
         id="canvas-library-panel"
         aria-label={mode === 'assets' ? '项目资产库' : '项目提示词库'}
-        className="canvas-library-panel absolute bottom-3 top-20 z-20 flex w-[min(22rem,calc(100vw-5rem))] flex-col overflow-hidden rounded-xl border border-border bg-popover shell-glow md:top-24"
+        className="canvas-library-panel absolute top-20 z-20 flex w-[min(22rem,calc(100vw-5rem))] flex-col overflow-hidden rounded-xl border border-border bg-popover shell-glow md:top-24"
       >
         <header className="flex items-center justify-between border-b border-border p-3">
           <div className="flex items-center gap-2">
