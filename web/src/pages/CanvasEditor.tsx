@@ -163,12 +163,9 @@ import {
   canvasConnectionCreationCapabilities,
   canCreateCanvasInputConnection,
   closestCanvasConnectionEndpoint,
-  normalizeCanvasAudioParams,
-  normalizeCanvasImageParams,
-  normalizeCanvasTextParams,
+  createCanvasGenerationDraft,
+  createConnectedCanvasConfig,
   normalizeCanvasVideoParams,
-  supportsCanvasAudioGeneration,
-  supportsCanvasTextGeneration,
   supportsCanvasVideoEdit,
 } from './canvasEditorModel';
 
@@ -1210,45 +1207,7 @@ function CanvasEditorInner({
   }
 
   function addGenerationNode(kind: JobKind, menu: CreateMenuState | null = createMenu) {
-    const key = firstKeyForKind(keys, kind);
-    const selectedModel = key?.models.find(item => (
-      modelModality(item, key) === kind
-      && (kind !== 'audio'
-        || supportsCanvasAudioGeneration(item.id, key.provider, item.protocol))
-      && (kind !== 'text'
-        || supportsCanvasTextGeneration(key.provider, item.protocol))
-    ));
-    const model = selectedModel?.id ?? '';
-    const now = new Date().toISOString();
-    const draft = {
-      mode: kind,
-      prompt: '',
-      input_policy: 'all_connected' as const,
-      model,
-      alias: key?.alias ?? null,
-      params: kind === 'image'
-        ? normalizeCanvasImageParams(
-            model,
-            key?.provider,
-            { n: 1, ratio: '1:1' },
-            selectedModel?.protocol,
-          )
-        : kind === 'video'
-          ? normalizeCanvasVideoParams(
-              model,
-              selectedModel?.protocol,
-              { duration: 5, ratio: '16:9', resolution: '720p', generate_audio: true },
-            )
-          : kind === 'audio'
-            ? normalizeCanvasAudioParams(
-                model,
-                key?.provider,
-                selectedModel?.protocol,
-                { voice: 'alloy', response_format: 'mp3', speed: 1 },
-              )
-            : normalizeCanvasTextParams(selectedModel?.protocol, { n: 1, reasoning_effort: 'auto' }),
-      updated_at: now,
-    };
+    const draft = createCanvasGenerationDraft(keys, kind, { inputPolicy: 'all_connected' });
     const base = {
       id: makeId(kind),
       title: { text: '文本', image: '图片', video: '视频', audio: '音频' }[kind],
@@ -1271,6 +1230,22 @@ function CanvasEditorInner({
       ...base,
       type: 'video',
       data: { ...data, display: { fit: 'contain', free_resize: false } },
+    }, menu);
+  }
+
+  function addConfigNode(menu: CreateMenuState | null = createMenu) {
+    const draft = createCanvasGenerationDraft(keys, 'image', {
+      prompt: menu?.sourceId && menu.sourceHandle !== 'target'
+        ? `@[node:${menu.sourceId}]`
+        : '',
+    });
+    appendNode({
+      id: makeId('config'),
+      title: '生成配置',
+      type: 'config',
+      position: menu?.flow ?? defaultPosition(),
+      z_index: 0,
+      data: { draft },
     }, menu);
   }
 
@@ -2389,6 +2364,39 @@ function CanvasEditorInner({
     announceToolNotice(`已打开“${node.title}”的视频编辑设置`);
   }, [announceToolNotice, commit, jobsByResultNodeId, keys]);
 
+  const createImageConfigFromText = useCallback((nodeId: string) => {
+    const current = latestDocument.current;
+    const source = current?.nodes.find(node => node.id === nodeId);
+    const version = source && source.type === 'text' && source.data.current_version_id
+      ? current?.content_versions[source.data.current_version_id]
+      : null;
+    if (!current || !source || source.type !== 'text' || version?.kind !== 'text' || !version.text.trim()) {
+      setError('请先输入文本内容，再创建图片生成配置。');
+      return;
+    }
+    const configId = makeId('config');
+    const next = createConnectedCanvasConfig(
+      current,
+      nodeId,
+      createCanvasGenerationDraft(keys, 'image'),
+      { nodeId: configId, connectionId: makeId('connection') },
+    );
+    if (!next) {
+      setError('无法从这个文本节点创建图片生成配置。');
+      return;
+    }
+    setError(null);
+    commit(() => next, true);
+    setDismissedGenerationPanelNodeId(null);
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([configId]));
+    setAddOpen(false);
+    setCreateMenu(null);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      documentQueryNode(configId)?.focus();
+    }));
+  }, [commit, keys]);
+
   const submitAngle = useCallback(async (params: CanvasAngleParams) => {
     if (!angleState || runSubmissionInFlight.current) return;
     setAngleBusy(true);
@@ -2582,6 +2590,7 @@ function CanvasEditorInner({
     updateNode,
     renameNode,
     updateText,
+    createImageConfigFromText,
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
     copyPrompt,
@@ -2602,6 +2611,7 @@ function CanvasEditorInner({
     canvasUiPreferences,
     canvasUiPreferencesError,
     copyPrompt,
+    createImageConfigFromText,
     deleteNode,
     dismissedGenerationPanelNodeId,
     dismissGenerationPanel,
@@ -2959,7 +2969,7 @@ function CanvasEditorInner({
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>
-              <CanvasCreateMenuItems allowEmptyNodes allowUpload onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onUpload={() => uploadRef.current?.click()} />
+              <CanvasCreateMenuItems allowEmptyNodes allowUpload allowConfig onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onAddConfig={() => addConfigNode(null)} onUpload={() => uploadRef.current?.click()} />
             </div>
           )}
           <input ref={uploadRef} type="file" className="sr-only" accept="image/*,video/*,audio/*" onChange={event => { const file = event.target.files?.[0]; if (file) void handleUpload(file); event.target.value = ''; }} />
@@ -2984,7 +2994,7 @@ function CanvasEditorInner({
         {createMenu && (
           <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenu.screen.x, top: createMenu.screen.y }}>
             <div className="flex items-center justify-between px-2 pb-2 pt-1"><p className="text-xs uppercase tracking-label text-muted-foreground">创建并连接</p><button type="button" aria-label="关闭连接创建菜单" onClick={() => { setCreateMenu(null); requestAnimationFrame(() => editorRegionRef.current?.focus()); }} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><X className="size-4" /></button></div>
-            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onUpload={() => uploadRef.current?.click()} />
+            <CanvasCreateMenuItems {...canvasConnectionCreationCapabilities(createMenu.sourceHandle ?? 'source')} onAddText={() => addTextNode(createMenu)} onAddImage={() => addGenerationNode('image', createMenu)} onAddVideo={() => addGenerationNode('video', createMenu)} onAddAudio={() => addGenerationNode('audio', createMenu)} onAddConfig={() => addConfigNode(createMenu)} onUpload={() => uploadRef.current?.click()} />
           </div>
         )}
 
@@ -3184,13 +3194,15 @@ function CanvasEditorInner({
   );
 }
 
-function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, onAddText, onAddImage, onAddVideo, onAddAudio, onUpload }: {
+function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, allowConfig, onAddText, onAddImage, onAddVideo, onAddAudio, onAddConfig, onUpload }: {
   allowEmptyNodes: boolean;
   allowUpload: boolean;
+  allowConfig: boolean;
   onAddText: () => void;
   onAddImage: () => void;
   onAddVideo: () => void;
   onAddAudio: () => void;
+  onAddConfig: () => void;
   onUpload: () => void;
 }) {
   return <>
@@ -3198,6 +3210,7 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, onAddText, onAddI
     {allowEmptyNodes && <AddMenuButton icon={<FileImage />} title="图片" description="空节点可填写生成设置" onClick={onAddImage} />}
     {allowEmptyNodes && <AddMenuButton icon={<FileVideo />} title="视频" description="空节点可填写生成设置" onClick={onAddVideo} />}
     {allowEmptyNodes && <AddMenuButton icon={<FileAudio />} title="音频" description="旁白、对白与语音" onClick={onAddAudio} />}
+    {allowConfig && <AddMenuButton icon={<WandSparkles />} title="生成配置" description="连接内容并选择生成类型" onClick={onAddConfig} />}
     {allowUpload && <AddMenuButton icon={<Upload />} title="上传素材" description="图片、视频或音频" onClick={onUpload} />}
   </>;
 }
@@ -3353,16 +3366,6 @@ function contentOriginLabel(version: CanvasContentVersion, job?: Job) {
 function formatCanvasTimestamp(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN');
-}
-
-function firstKeyForKind(keys: KeyView[], kind: JobKind) {
-  return keys.find(key => key.models.some(model => (
-    modelModality(model, key) === kind
-    && (kind !== 'audio'
-      || supportsCanvasAudioGeneration(model.id, key.provider, model.protocol))
-    && (kind !== 'text'
-      || supportsCanvasTextGeneration(key.provider, model.protocol))
-  )));
 }
 
 function firstVideoEditModel(keys: KeyView[]) {

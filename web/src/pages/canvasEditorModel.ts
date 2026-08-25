@@ -5,6 +5,7 @@ import {
   type Resolution,
 } from '@/lib/studioSize';
 import type { JobParams } from '@/schema/jobs';
+import { modelModality, type KeyView } from '@/api/keys';
 import {
   normalizeAudioFormat,
   normalizeAudioSpeed,
@@ -13,6 +14,7 @@ import {
 import type {
   CanvasContentNode,
   CanvasContentVersion,
+  CanvasGenerationDraft,
   CanvasDocument,
   CanvasNode,
 } from '@/schema/canvas';
@@ -92,8 +94,181 @@ export function closestCanvasConnectionEndpoint(
 
 export function canvasConnectionCreationCapabilities(sourceHandle: 'source' | 'target') {
   return sourceHandle === 'target'
-    ? { allowEmptyNodes: false, allowUpload: true }
-    : { allowEmptyNodes: true, allowUpload: false };
+    ? { allowEmptyNodes: false, allowUpload: true, allowConfig: false }
+    : { allowEmptyNodes: true, allowUpload: false, allowConfig: true };
+}
+
+export const CANVAS_GENERATION_MODE_LABELS: Record<CanvasGenerationDraft['mode'], string> = {
+  text: '文本',
+  image: '图片',
+  video: '视频',
+  audio: '音频',
+};
+
+function isOpenAiHkBaseUrl(baseUrl: string | null | undefined) {
+  return (baseUrl ?? '').toLowerCase().includes('openai-hk.com');
+}
+
+function canvasImageModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
+  const family = imageControlCaps(model.id, key.provider, model.protocol).family;
+  if (family === 'midjourney' || key.provider === 'openrouter') return true;
+  if (!['openai', 'midjourney', 'seedream', 'tokendance', 'custom'].includes(key.provider)) {
+    return false;
+  }
+  return model.protocol == null || ['openai', 'ark'].includes(model.protocol);
+}
+
+function canvasVideoModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
+  const protocol = model.protocol ?? (() => {
+    const id = model.id.toLowerCase();
+    if (key.provider === 'seedance') return 'seedance';
+    if (key.provider === 'openrouter') return 'openrouter';
+    if (key.provider === 'tokendance') {
+      if (id.includes('seedance')) return 'seedance';
+      if (id.includes('happyhorse')) return 'dashscope';
+    }
+    if (id.startsWith('kling') && isOpenAiHkBaseUrl(key.base_url)) return 'kling';
+    return null;
+  })();
+  if (!['seedance', 'kling', 'dashscope', 'openrouter'].includes(String(protocol))) return false;
+  // Canvas Runner 明确拒绝 HappyHorse video-edit：它只收公网 URL，画布内容是本地版本。
+  return protocol !== 'dashscope' || !model.id.toLowerCase().includes('video-edit');
+}
+
+export function canvasGenerationModelSupportsMode(
+  key: KeyView,
+  model: KeyView['models'][number],
+  mode: CanvasGenerationDraft['mode'],
+  options: { editingExistingVideo?: boolean } = {},
+) {
+  return modelModality(model, key) === mode
+    && (mode !== 'image' || canvasImageModelIsRoutable(key, model))
+    && (mode !== 'video' || canvasVideoModelIsRoutable(key, model))
+    && (!options.editingExistingVideo || supportsCanvasVideoEdit(model.id, model.protocol))
+    && (mode !== 'audio'
+      || supportsCanvasAudioGeneration(model.id, key.provider, model.protocol))
+    && (mode !== 'text'
+      || supportsCanvasTextGeneration(key.provider, model.protocol));
+}
+
+export function firstCanvasGenerationModel(
+  keys: readonly KeyView[],
+  mode: CanvasGenerationDraft['mode'],
+) {
+  for (const key of keys) {
+    const model = key.models.find(candidate => canvasGenerationModelSupportsMode(key, candidate, mode));
+    if (model) return { key, model };
+  }
+  return null;
+}
+
+function defaultCanvasGenerationParams(mode: CanvasGenerationDraft['mode']): JobParams {
+  if (mode === 'image') return { n: 1, ratio: '1:1' };
+  if (mode === 'video') {
+    return { duration: 5, ratio: '16:9', resolution: '720p', generate_audio: true };
+  }
+  if (mode === 'audio') return { voice: 'alloy', response_format: 'mp3', speed: 1 };
+  return { n: 1, reasoning_effort: 'auto' };
+}
+
+export function createCanvasGenerationDraft(
+  keys: readonly KeyView[],
+  mode: CanvasGenerationDraft['mode'],
+  options: {
+    prompt?: string;
+    inputPolicy?: CanvasGenerationDraft['input_policy'];
+    now?: string;
+  } = {},
+): CanvasGenerationDraft {
+  const selected = firstCanvasGenerationModel(keys, mode);
+  const model = selected?.model.id ?? '';
+  const sourceParams = defaultCanvasGenerationParams(mode);
+  const params = !selected
+    ? {}
+    : mode === 'image'
+      ? normalizeCanvasImageParams(
+          model,
+          selected.key.provider,
+          sourceParams,
+          selected.model.protocol,
+        )
+      : mode === 'video'
+        ? normalizeCanvasVideoParams(model, selected.model.protocol, sourceParams)
+        : mode === 'audio'
+          ? normalizeCanvasAudioParams(
+              model,
+              selected.key.provider,
+              selected.model.protocol,
+              sourceParams,
+            )
+          : normalizeCanvasTextParams(selected.model.protocol, sourceParams);
+  return {
+    mode,
+    prompt: options.prompt ?? '',
+    input_policy: options.inputPolicy ?? 'mentions_only',
+    model,
+    alias: selected?.key.alias ?? null,
+    params,
+    updated_at: options.now ?? new Date().toISOString(),
+  };
+}
+
+export function switchCanvasGenerationDraft(
+  keys: readonly KeyView[],
+  current: CanvasGenerationDraft,
+  mode: CanvasGenerationDraft['mode'],
+  now = new Date().toISOString(),
+) {
+  if (mode === current.mode) return current;
+  return createCanvasGenerationDraft(keys, mode, {
+    prompt: current.prompt,
+    inputPolicy: current.input_policy,
+    now,
+  });
+}
+
+export function createConnectedCanvasConfig(
+  document: CanvasDocument,
+  sourceNodeId: string,
+  draft: CanvasGenerationDraft,
+  ids: { nodeId: string; connectionId: string },
+): CanvasDocument | null {
+  if (
+    document.nodes.some(node => node.id === ids.nodeId)
+    || document.connections.some(connection => connection.id === ids.connectionId)
+  ) return null;
+  const source = document.nodes.find(node => node.id === sourceNodeId);
+  if (!source || !canvasNodeHasCurrentContent(source, document.content_versions)) return null;
+  const version = document.content_versions[source.data.current_version_id!];
+  if (version.kind === 'text' && !version.text.trim()) return null;
+  const sourceWidth = source.size?.width ?? (source.type === 'text' ? 256 : 320);
+  const token = `@[node:${source.id}]`;
+  const prompt = draft.prompt.trim() ? `${draft.prompt.trim()} ${token}` : token;
+  const configNode: CanvasNode = {
+    id: ids.nodeId,
+    title: `${CANVAS_GENERATION_MODE_LABELS[draft.mode]}生成`,
+    type: 'config',
+    position: { x: source.position.x + sourceWidth + 96, y: source.position.y },
+    z_index: 0,
+    data: {
+      draft: { ...draft, prompt, input_policy: 'mentions_only' },
+    },
+  };
+  const nodes = [...document.nodes, configNode];
+  if (!canCreateCanvasInputConnection({ ...document, nodes }, {
+    source: source.id,
+    target: configNode.id,
+  })) return null;
+  return {
+    ...document,
+    nodes,
+    connections: [...document.connections, {
+      id: ids.connectionId,
+      role: 'input',
+      source_node_id: source.id,
+      target_node_id: configNode.id,
+    }],
+  };
 }
 
 export function normalizeCanvasImageParams(

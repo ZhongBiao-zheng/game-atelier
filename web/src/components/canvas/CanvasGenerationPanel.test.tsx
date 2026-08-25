@@ -74,6 +74,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     updateNode: vi.fn(),
     renameNode: vi.fn(),
     updateText: vi.fn(),
+    createImageConfigFromText: vi.fn(),
     recordHistory: vi.fn(),
     saveAsset: vi.fn(async () => undefined),
     copyPrompt: vi.fn(async () => undefined),
@@ -200,6 +201,58 @@ it('renders the generation composer as an independent panel below the selected n
   expect(screen.queryByText(/\d+×/)).not.toBeInTheDocument();
   expect(within(panel).getByText('图片生成')).toBeInTheDocument();
   expect(within(panel).getByText('· 分镜出图')).toBeInTheDocument();
+  expect(within(panel).queryByRole('button', { name: '打开图片参数' })).not.toBeInTheDocument();
+  expect(within(panel).getByRole('button', { name: '开始生成' })).toBeDisabled();
+});
+
+it('switches a config node between generation modes and summarizes connected inputs', () => {
+  const recordHistory = vi.fn();
+  const updateNode = vi.fn();
+  const imageKey = {
+    alias: 'image-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
+    models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' as const, protocol: 'openai' }],
+  };
+  const videoKey = {
+    alias: 'video-key', provider: 'seedance', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
+    models: [{ id: 'seedance-2.0', name: 'Seedance 2.0', modality: 'video' as const, protocol: 'seedance' }],
+  };
+  const context = nodeContext({
+    keys: [imageKey, videoKey],
+    recordHistory,
+    updateNode,
+    mentionReferencesByNodeId: new Map([[node.id, [
+      { nodeId: 'text-one', versionId: 'text-v1', kind: 'text', label: '文本1', title: '脚本' },
+      { nodeId: 'image-one', versionId: 'image-v1', kind: 'image', label: '图片1', title: '构图', previewUrl: '/image' },
+    ]]]),
+  });
+  const configured = {
+    ...node,
+    data: { draft: { ...draft, alias: imageKey.alias, model: imageKey.models[0].id } },
+  } as CanvasNode;
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: configured }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+
+  const modes = screen.getByRole('radiogroup', { name: '生成类型' });
+  expect(within(modes).getByRole('radio', { name: '图片' })).toHaveAttribute('aria-checked', 'true');
+  expect(screen.getByLabelText('当前模型')).toHaveTextContent('GPT Image 2');
+  expect(screen.getByText('文本 1')).toBeInTheDocument();
+  expect(screen.getByText('图片 1')).toBeInTheDocument();
+
+  const imageMode = within(modes).getByRole('radio', { name: '图片' });
+  const videoMode = within(modes).getByRole('radio', { name: '视频' });
+  act(() => imageMode.focus());
+  fireEvent.keyDown(imageMode, { key: 'ArrowRight' });
+  expect(videoMode).toHaveFocus();
+  expect(recordHistory).toHaveBeenCalledOnce();
+  const updater = updateNode.mock.calls[0]?.[1];
+  expect(updater?.(configured)).toMatchObject({
+    data: { draft: { mode: 'video', alias: 'video-key', model: 'seedance-2.0' } },
+  });
 });
 
 it('renders image candidates as a collapsed stack owned by the result node', () => {
@@ -480,7 +533,7 @@ it('renders connected references as chips and blocks a draft after that referenc
   const imageKey = {
     alias: 'image-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
     capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
-    models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' as const, protocol: 'openai-image' }],
+    models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' as const, protocol: 'openai' }],
   };
   const source: CanvasNode = {
     id: 'image-source', title: '雨夜列车', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
@@ -568,9 +621,26 @@ it('opens video controls from the node generation panel', () => {
 
 it('records text candidate changes but ignores the already selected value', () => {
   const recordHistory = vi.fn();
-  const textNode = generationNodes[0][0];
+  const textKey = {
+    alias: 'text-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
+    models: [{ id: 'gpt-5', name: 'GPT 5', modality: 'text' as const, protocol: 'openai' }],
+  };
+  const baseTextNode = generationNodes[0][0];
+  const textNode = {
+    ...baseTextNode,
+    data: {
+      ...baseTextNode.data,
+      generation_draft: {
+        ...draft,
+        mode: 'text' as const,
+        alias: textKey.alias,
+        model: textKey.models[0].id,
+      },
+    },
+  } as CanvasNode;
   render(
-    <CanvasNodeContext.Provider value={nodeContext({ recordHistory })}>
+    <CanvasNodeContext.Provider value={nodeContext({ keys: [textKey], recordHistory })}>
       <NodeCard data={{ domain: textNode }} selected />
     </CanvasNodeContext.Provider>,
   );

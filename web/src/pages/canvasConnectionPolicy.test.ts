@@ -146,10 +146,12 @@ describe('canvas connection policy', () => {
     expect(canvasConnectionCreationCapabilities('target')).toEqual({
       allowEmptyNodes: false,
       allowUpload: true,
+      allowConfig: false,
     });
     expect(canvasConnectionCreationCapabilities('source')).toEqual({
       allowEmptyNodes: true,
       allowUpload: false,
+      allowConfig: true,
     });
   });
 });

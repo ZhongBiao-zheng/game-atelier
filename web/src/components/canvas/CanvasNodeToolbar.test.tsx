@@ -102,6 +102,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     updateNode: vi.fn(),
     renameNode: vi.fn(),
     updateText: vi.fn(),
+    createImageConfigFromText: vi.fn(),
     recordHistory: vi.fn(),
     saveAsset: vi.fn(async () => undefined),
     copyPrompt: vi.fn(async () => undefined),
@@ -259,6 +260,37 @@ it('cycles text size through Atelier type tokens', () => {
   const increase = vi.mocked(context.updateNode).mock.calls[1]?.[1];
   expect(increase?.(nodes[0])).toMatchObject({ data: { display: { scale: 'base' } } });
   expect(context.recordHistory).toHaveBeenCalledTimes(2);
+});
+
+it('creates an image config from populated text and disables the shortcut for empty text', () => {
+  const populated = {
+    ...nodes[0],
+    data: { ...nodes[0].data, current_version_id: 'version-text' },
+  } as CanvasNode;
+  const context = nodeContext({
+    contentVersions: {
+      'version-text': {
+        version_id: 'version-text', kind: 'text', text: '雨夜列车分镜',
+        created_at: '2026-08-25T00:00:00Z', sha256: 'a'.repeat(64),
+        origin: { kind: 'user_edit' },
+      },
+    },
+  });
+  const { rerender } = render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: populated }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: '用 文本 生成图片' }));
+  expect(context.createImageConfigFromText).toHaveBeenCalledWith('text');
+
+  rerender(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: nodes[0] }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  expect(screen.getByRole('button', { name: '用 文本 生成图片' })).toBeDisabled();
 });
 
 it('renders distinct empty media surfaces with direct upload actions', () => {

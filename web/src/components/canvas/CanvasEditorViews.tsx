@@ -3,7 +3,7 @@ import { Check, ChevronRight, ClipboardCopy, Crop, Download, Ellipsis, Eye, File
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
-import { modelModality, type KeyView } from '@/api/keys';
+import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
 import {
@@ -57,15 +57,15 @@ import {
   canvasNodeAcceptsInput,
   canvasNodeHasCurrentContent,
   canvasNodeProvidesContent,
+  CANVAS_GENERATION_MODE_LABELS,
+  canvasGenerationModelSupportsMode,
   canvasVideoEditCaps,
   normalizeCanvasAudioParams,
   normalizeCanvasImageParams,
   normalizeCanvasTextParams,
   normalizeCanvasVideoParams,
-  supportsCanvasAudioGeneration,
-  supportsCanvasTextGeneration,
   supportsCanvasTextReasoning,
-  supportsCanvasVideoEdit,
+  switchCanvasGenerationDraft,
 } from '@/pages/canvasEditorModel';
 
 export type FlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
@@ -102,6 +102,7 @@ export interface CanvasNodeContextValue {
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
   renameNode: (id: string, title: string) => void;
   updateText: (id: string, text: string) => void;
+  createImageConfigFromText: (id: string) => void;
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
@@ -620,9 +621,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
               onUpload={() => context.replaceMedia(node)}
             />
           )}
-          {!isCanvasContentNode(node) && !content && (
+          {node.type === 'config' && (
+            <CanvasConfigNodeSurface node={node} context={context} />
+          )}
+          {(node.type === 'group' || node.type === 'plugin') && !content && (
             <div className="grid min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
-              {node.type === 'config' ? '生成配置' : node.type === 'group' ? '分组' : '插件节点'}
+              {node.type === 'group' ? '分组' : '插件节点'}
             </div>
           )}
         </div>
@@ -870,6 +874,111 @@ function CandidateFailureActions({
   );
 }
 
+const CONFIG_GENERATION_MODES = [
+  { mode: 'text', label: CANVAS_GENERATION_MODE_LABELS.text, icon: Type },
+  { mode: 'image', label: CANVAS_GENERATION_MODE_LABELS.image, icon: FileImage },
+  { mode: 'video', label: CANVAS_GENERATION_MODE_LABELS.video, icon: FileVideo },
+  { mode: 'audio', label: CANVAS_GENERATION_MODE_LABELS.audio, icon: FileAudio },
+] as const;
+
+function CanvasConfigNodeSurface({
+  node,
+  context,
+}: {
+  node: Extract<CanvasNode, { type: 'config' }>;
+  context: CanvasNodeContextValue;
+}) {
+  const draft = node.data.draft;
+  const selectedKey = context.keys.find(key => key.alias === draft.alias);
+  const selectedModel = selectedKey?.models.find(model => model.id === draft.model);
+  const references = context.mentionReferencesByNodeId.get(node.id) ?? [];
+  const counts = references.reduce<Record<CanvasGenerationDraft['mode'], number>>((current, reference) => {
+    current[reference.kind] += 1;
+    return current;
+  }, { text: 0, image: 0, video: 0, audio: 0 });
+
+  function selectMode(mode: CanvasGenerationDraft['mode']) {
+    context.selectNode(node.id);
+    if (mode === draft.mode) return;
+    context.recordHistory();
+    context.updateNode(node.id, current => current.type === 'config'
+      ? {
+          ...current,
+          data: {
+            draft: switchCanvasGenerationDraft(context.keys, current.data.draft, mode),
+          },
+        }
+      : current);
+  }
+
+  function handleModeKeys(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+    const radios = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]'));
+    if (!radios.length) return;
+    const current = radios.indexOf(document.activeElement as HTMLButtonElement);
+    const delta = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
+    const target = event.key === 'Home'
+      ? radios[0]
+      : event.key === 'End'
+        ? radios.at(-1)
+        : radios[(current + delta + radios.length) % radios.length];
+    event.preventDefault();
+    event.stopPropagation();
+    target?.focus();
+    target?.click();
+  }
+
+  return (
+    <div className="flex min-h-44 flex-col justify-between gap-3 p-3">
+      <div
+        role="radiogroup"
+        aria-label="生成类型"
+        className="nodrag nowheel grid grid-cols-4 gap-1 rounded-lg border border-border bg-background/50 p-1"
+        onPointerDown={event => event.stopPropagation()}
+        onClick={event => event.stopPropagation()}
+        onKeyDown={handleModeKeys}
+      >
+        {CONFIG_GENERATION_MODES.map(({ mode, label, icon: Icon }) => (
+          <button
+            key={mode}
+            type="button"
+            role="radio"
+            aria-checked={draft.mode === mode}
+            aria-label={label}
+            tabIndex={draft.mode === mode ? 0 : -1}
+            className={cn(
+              'flex min-w-0 flex-col items-center gap-1 rounded-md px-1 py-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+              draft.mode === mode
+                ? 'bg-secondary font-medium text-foreground'
+                : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+            )}
+            onClick={() => selectMode(mode)}
+          >
+            <Icon className="size-4" aria-hidden="true" />
+            <span>{label}</span>
+            <span
+              aria-hidden="true"
+              className={cn('h-0.5 w-4 rounded-full', draft.mode === mode ? 'bg-primary' : 'bg-transparent')}
+            />
+          </button>
+        ))}
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">当前模型</p>
+        <p aria-label="当前模型" className="mt-1 truncate text-sm font-medium text-foreground" title={selectedModel?.name ?? draft.model}>
+          {selectedModel?.name ?? (draft.model || '未选择兼容模型')}
+        </p>
+      </div>
+      <div className="flex min-h-6 flex-wrap items-center gap-1.5" aria-label="连接输入摘要">
+        {CONFIG_GENERATION_MODES.flatMap(({ mode, label }) => counts[mode] > 0
+          ? [<span key={mode} className="rounded-md border border-border bg-secondary/60 px-2 py-1 text-xs text-muted-foreground">{label} {counts[mode]}</span>]
+          : [])}
+        {references.length === 0 && <span className="text-xs text-muted-foreground">暂无连接输入</span>}
+      </div>
+    </div>
+  );
+}
+
 function CanvasNodeToolbar({
   node,
   content,
@@ -914,6 +1023,13 @@ function CanvasNodeToolbar({
             onClick={onIncreaseText}
           >
             <Plus />
+          </MediaToolButton>
+          <MediaToolButton
+            label={`用 ${node.title} 生成图片`}
+            disabled={content?.kind !== 'text' || !content.text.trim()}
+            onClick={() => context.createImageConfigFromText(node.id)}
+          >
+            <FileImage />
           </MediaToolButton>
         </>
       )}
@@ -1287,12 +1403,7 @@ export function CanvasGenerationComposer({
     && node.type === 'video'
     && Boolean(node.data.current_version_id);
   const acceptsModel = (model: KeyView['models'][number], key: KeyView) => (
-    modelModality(model, key) === draft.mode
-    && (!editingExistingVideo || supportsCanvasVideoEdit(model.id, model.protocol))
-    && (draft.mode !== 'audio'
-      || supportsCanvasAudioGeneration(model.id, key.provider, model.protocol))
-    && (draft.mode !== 'text'
-      || supportsCanvasTextGeneration(key.provider, model.protocol))
+    canvasGenerationModelSupportsMode(key, model, draft.mode, { editingExistingVideo })
   );
   const availableKeys = context.keys.filter(key => key.models.some(model => acceptsModel(model, key)));
   const modelChoices: CanvasModelChoice[] = availableKeys.flatMap(key => key.models
@@ -1301,10 +1412,10 @@ export function CanvasGenerationComposer({
   const selectedKey = context.keys.find(key => key.alias === draft.alias);
   const models = (selectedKey?.models ?? []).filter(model => acceptsModel(model, selectedKey!));
   const selectedModel = models.find(model => model.id === draft.model);
-  const imageCaps = draft.mode === 'image'
+  const imageCaps = draft.mode === 'image' && selectedModel
     ? imageControlCaps(draft.model, selectedKey?.provider, selectedModel?.protocol)
     : null;
-  const rawVideoCaps = draft.mode === 'video'
+  const rawVideoCaps = draft.mode === 'video' && selectedModel
     ? canvasVideoEditCaps(draft.model, selectedModel?.protocol)
     : null;
   const videoCaps = rawVideoCaps && editingExistingVideo
@@ -1319,7 +1430,7 @@ export function CanvasGenerationComposer({
   const runId = activeJob?.canvas_run?.run_id;
   const submitting = context.submittingNodeIds.has(node.id);
   const running = nodeRunState.status === 'loading';
-  const modeLabel = { text: '文本', image: '图片', video: '视频', audio: '音频' }[draft.mode];
+  const modeLabel = CANVAS_GENERATION_MODE_LABELS[draft.mode];
   const mentionReferences = context.mentionReferencesByNodeId.get(node.id) ?? [];
   const missingMentionIds = missingCanvasMentionIds(draft.prompt, mentionReferences);
   const hasMissingMentions = missingMentionIds.length > 0;
@@ -1438,7 +1549,7 @@ export function CanvasGenerationComposer({
             }));
           }}
         />
-        {draft.mode === 'text' && (
+        {draft.mode === 'text' && selectedModel && (
           <CanvasTextSettings
             supportsReasoning={supportsCanvasTextReasoning(selectedModel?.protocol)}
             params={draft.params}

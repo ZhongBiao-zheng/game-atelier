@@ -87,7 +87,7 @@ Status: ready-for-human
 | C02 | 空/有内容图片节点 | `CanvasNodeType.Image`、`canvas-node.tsx` | adapted：不可变 Content Version 存储；独立空态上传与 contain/cover/free-resize 表面，见 issue 37 | none |
 | C03 | 空/有内容视频节点 | `CanvasNodeType.Video` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | none |
 | C04 | 空/有内容音频节点 | `CanvasNodeType.Audio` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | none |
-| C05 | 生成配置节点，可切换文本/图片/视频/音频 | `canvas-config-composer.tsx` | adapted：提交到统一 Job Runner | full |
+| C05 | 生成配置节点，可切换文本/图片/视频/音频 | `canvas-config-composer.tsx` | adapted：Issue 40 独立配置卡 + 四态 composer，提交到统一 Job Runner | full |
 | C06 | 分组节点，显示成员数量 | `CanvasNodeType.Group`、groupId | same | full |
 | C07 | 开放字符串插件节点 | `CanvasNodeTypeId`、node registry | adapted：使用受限插件契约 | full |
 | C08 | 节点标题双击改名 | `canvas-node.tsx` | same：七类节点共用卡片外原地输入，见 issue 27 | full |
@@ -109,10 +109,10 @@ Status: ready-for-human
 | D02 | 空节点首个结果原位填充 | `canvas-node-manual.zh-CN.mdx` | same | full |
 | D03 | 已有内容节点作为来源，结果建立下游节点 | manual + generation helpers | same | full |
 | D04 | 文本改写；编辑已有文本时创建连接结果 | manual、`requestImageQuestion` | adapted：文本生成 Job/caller | full |
-| D05 | 文本节点一键创建生图配置 | hover toolbar `generateImage` | same | full |
-| D06 | 文生图 | image generation API | adapted：现有图片 capability + Job | partial |
+| D05 | 文本节点一键创建生图配置 | hover toolbar `generateImage` | adapted：Issue 40 建 config + input edge + 稳定引用，不自动提交 | full |
+| D06 | 文生图 | image generation API | adapted：Issue 40 复用真实可路由图片 capability + Job Runner | full |
 | D07 | 图片参考编辑/图生图 | `requestEdit`、resource references | adapted：Job snapshot refs | full |
-| D08 | 文本/图片/配置驱动视频 | `requestVideoGeneration` | adapted：现有视频 capability + Job | partial |
+| D08 | 文本/图片/配置驱动视频 | `requestVideoGeneration` | adapted：Issue 40 配置四态切换 + 现有视频 capability + Job Runner | full |
 | D09 | 文本/配置驱动音频 | `requestAudioGeneration` | adapted：新增音频 capability/Job | full |
 | D10 | 节点独立选择模型和参数 | settings popovers | adapted：复用现有 keys/capability matrix | none |
 | D11 | 图片尺寸/比例/质量/透明背景/数量 | `image-settings-panel.tsx` | adapted：只显示模型真实支持参数 | none |

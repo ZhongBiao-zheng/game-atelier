@@ -4,6 +4,7 @@ import pytest
 
 from character_workflow.lib import canvas_runs
 from character_workflow.lib.canvas_runs import (
+    _commit_frozen_run,
     _render_final_prompt,
     _resolve_inputs,
     submit_canvas_run,
@@ -339,3 +340,67 @@ def test_submit_keeps_snapshot_labels_and_all_job_media_arrays_in_frozen_order(
     ]
     assert params.reference_videos == [str(tmp_path / "uploads/video-a.mp4")]
     assert params.reference_audios == [str(tmp_path / "uploads/audio-a.wav")]
+
+
+def test_config_video_commit_creates_downstream_video_with_derivation(monkeypatch):
+    document = _document("把 @[node:text-a] 做成一段雨夜列车镜头")
+    surface = next(node for node in document.nodes if node.id == "config")
+    draft = surface.data.draft.model_copy(update={
+        "mode": "video",
+        "model": "seedance-2.0",
+        "alias": "seedance",
+        "params": JobParams(duration=5, resolution="720p", ratio="16:9"),
+    })
+    surface.data.draft = draft
+    inputs = _resolve_inputs(document, surface, draft)
+    key = KeySpec(
+        alias="seedance",
+        provider="seedance",
+        access_key="secret",
+        models=[],
+        created_at=NOW,
+    )
+    model = ModelSpec(
+        name="Seedance",
+        id="seedance-2.0",
+        modality="video",
+        protocol="seedance",
+    )
+    monkeypatch.setattr(canvas_runs, "_commit_transaction_unlocked", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(canvas_runs, "_now", lambda: NOW)
+
+    job, updated = _commit_frozen_run(
+        document.project_id,
+        document,
+        surface,
+        key,
+        model,
+        JobKind.VIDEO,
+        mode="video",
+        final_prompt=_render_final_prompt(document, draft, inputs),
+        input_policy=draft.input_policy,
+        normalized={"duration": 5, "resolution": "720p", "ratio": "16:9"},
+        job_params=JobParams(duration=5, resolution="720p", ratio="16:9"),
+        inputs=inputs,
+        requested_count=1,
+        result_title="生成视频",
+        result_draft=draft,
+        allow_surface_reuse=True,
+        transaction_kind="submit",
+        run_id="run-video",
+    )
+
+    assert job.kind == JobKind.VIDEO
+    assert job.canvas_run is not None
+    assert job.canvas_run.snapshot.mode == "video"
+    assert job.canvas_run.snapshot.surface_node_id == "config"
+    result = next(node for node in updated.nodes if node.id == job.canvas_run.result_node_id)
+    assert result.type == "video"
+    assert result.data.active_run_id == "run-video"
+    assert any(
+        edge.role == "derivation"
+        and edge.source_node_id == "config"
+        and edge.target_node_id == result.id
+        and edge.origin.run_id == "run-video"
+        for edge in updated.connections
+    )
