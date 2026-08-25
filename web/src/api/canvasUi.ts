@@ -1,5 +1,6 @@
 import { requestJson } from './http';
 import type {
+  CanvasGenerationDefaults,
   CanvasImageToolbarPreferences,
   CanvasUiPreferences,
 } from '@/schema/canvas';
@@ -11,10 +12,15 @@ export function getCanvasUiPreferences(): Promise<CanvasUiPreferences> {
 export function saveCanvasUiPreferences(
   expectedRevision: number,
   imageToolbar: CanvasImageToolbarPreferences,
+  generationDefaults: CanvasGenerationDefaults,
 ): Promise<CanvasUiPreferences> {
   return requestJson<CanvasUiPreferences>('/api/canvas/ui-preferences', '保存画布界面偏好', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ expected_revision: expectedRevision, image_toolbar: imageToolbar }),
+    body: JSON.stringify({
+      expected_revision: expectedRevision,
+      image_toolbar: imageToolbar,
+      generation_defaults: generationDefaults,
+    }),
   });
 }

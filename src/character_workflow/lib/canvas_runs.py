@@ -15,6 +15,10 @@ from typing import Any, Literal
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
 from character_workflow.lib.canvas_projects import canvas_project_dir, read_canvas_project
+from character_workflow.lib.canvas_ui import (
+    CanvasUiPreferencesError,
+    read_canvas_ui_preferences,
+)
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.job_runner import image_dimensions, is_valid_audio, run_job
 from character_workflow.lib.jobs import (
@@ -463,11 +467,42 @@ def _resolve_reverse_prompt_model() -> tuple[KeySpec, ModelSpec]:
     )
 
 
-def _resolve_default_image_model() -> tuple[KeySpec, ModelSpec]:
-    for key in _keys_default_first():
+def _supports_canvas_image_generation(key: KeySpec, model: ModelSpec) -> bool:
+    from character_workflow.lib.callers.openai_image import image_family, resolve_image_protocol
+
+    if _model_modality(model, key) != "image" or key.provider == "nano_banana":
+        return False
+    if image_family(model.id) == "midjourney" or key.provider == "openrouter":
+        return True
+    if key.provider not in {"openai", "midjourney", "seedream", "tokendance", "custom"}:
+        return False
+    protocol = model.protocol or resolve_image_protocol(key.provider, key.base_url, model.id)
+    return protocol in {None, "openai", "ark"}
+
+
+def _resolve_default_image_model() -> tuple[KeySpec, ModelSpec, JobParams]:
+    keys = _keys_default_first()
+    try:
+        preference = read_canvas_ui_preferences().generation_defaults.image
+    except CanvasUiPreferencesError as error:
+        raise CanvasRunCommandError(
+            "canvas_ui_preferences_invalid",
+            "画布生成偏好文件损坏，请先在画布中重新保存生成偏好。",
+        ) from error
+    if preference.selection is not None:
+        for key in keys:
+            if key.alias != preference.selection.alias:
+                continue
+            for model in key.models:
+                if (
+                    model.id == preference.selection.model
+                    and _supports_canvas_image_generation(key, model)
+                ):
+                    return key, model, JobParams.model_validate(preference.params)
+    for key in keys:
         for model in key.models:
-            if _model_modality(model, key) == "image":
-                return key, model
+            if _supports_canvas_image_generation(key, model):
+                return key, model, JobParams(n=1, ratio="1:1")
     raise CanvasRunCommandError(
         "canvas_image_default_missing",
         "未配置可用的图片生成模型；反推文本已保留，请先在设置中接入图片模型。",
@@ -1512,7 +1547,7 @@ def create_reverse_prompt_config(
         timestamp = _now()
         nodes = list(current.nodes)
         if existing_config is None:
-            key, model = _resolve_default_image_model()
+            key, model, params = _resolve_default_image_model()
             width = result.size.width if result.size is not None else 320
             nodes.append(CanvasConfigNode(
                 id=config_id,
@@ -1526,7 +1561,7 @@ def create_reverse_prompt_config(
                     input_policy="mentions_only",
                     model=model.id,
                     alias=key.alias,
-                    params=JobParams(n=1, ratio="1:1"),
+                    params=params,
                     updated_at=timestamp,
                 )),
             ))

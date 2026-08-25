@@ -160,7 +160,7 @@ Status: ready-for-human
 | F05 | 提示词搜索/标签/详情/复制/加入资产 | prompts page、`PromptDetailDialog` | same | full |
 | F06 | 在画布侧栏搜索公共提示词并插入文本节点 | `CanvasPromptsTab`、`pending-test` | same | full |
 | F07 | 提示词源启停、手动/定时刷新、保留上次成功缓存 | config prompt sources、scheduler | adapted：服务端调度/缓存 | full |
-| F08 | 渠道、模型与默认偏好配置 | `use-config-store.ts`、config modal | adapted：复用现有 Keys 与 capability matrix | partial |
+| F08 | 渠道、模型与默认偏好配置 | `use-config-store.ts`、config modal | adapted：Keys 管渠道/模型；应用级 v2 偏好保存四模态默认模型与安全参数，见 issue 41 | full |
 | F09 | 设置 JSON 导入导出，包含 API Key/WebDAV 凭证 | `config-file.ts` | adapted：不导出明文密钥；只导出非敏感偏好/引用 | full |
 | F10 | 本地存储用量、对象仓库和配额统计 | local storage settings、`pending-test` | adapted：显示服务端 Canvas 存储用量 | full |
 | F11 | WebDAV 测试和各域同步 | `app-sync.ts`、`webdav-sync.ts` | adapted：服务端同步项目包/manifest | full |

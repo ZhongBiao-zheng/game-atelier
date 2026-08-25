@@ -25,6 +25,8 @@ interface Props {
   autoFocus?: boolean;
   /** 面板视觉类（宽度 / 圆角 / 背景 / 内边距），不含定位类。 */
   className?: string;
+  /** 弹窗内使用时把 portal 留在焦点域内；定位会自动切换为容器内 absolute。 */
+  portalContainerRef?: RefObject<HTMLElement | null>;
   role?: string;
   'aria-label'?: string;
   'aria-multiselectable'?: boolean | 'true' | 'false';
@@ -49,6 +51,7 @@ export function ToolbarPopover({
   align = 'start',
   autoFocus = false,
   className = '',
+  portalContainerRef,
   children,
   ...rest
 }: Props) {
@@ -72,14 +75,25 @@ export function ToolbarPopover({
     // 面板落地后由下面那个 layout effect 带着实测宽度再摆一次。
     const w = panelRef.current?.offsetWidth ?? 0;
     const clamp = (v: number) => Math.max(GAP, Math.min(v, window.innerWidth - w - GAP));
-    const x =
-      align === 'end' ? { right: clamp(window.innerWidth - r.right) } : { left: clamp(r.left) };
+    const globalX = align === 'end'
+      ? window.innerWidth - clamp(window.innerWidth - r.right) - w
+      : clamp(r.left);
+    const containerRect = portalContainerRef?.current?.getBoundingClientRect();
+    if (containerRect) {
+      setPos(direction === 'down'
+        ? { left: globalX - containerRect.left, top: r.bottom - containerRect.top + GAP }
+        : { left: globalX - containerRect.left, bottom: containerRect.bottom - r.top + GAP });
+      return;
+    }
+    const x = align === 'end'
+      ? { right: clamp(window.innerWidth - r.right) }
+      : { left: globalX };
     setPos(
       direction === 'down'
         ? { ...x, top: r.bottom + GAP }
         : { ...x, bottom: window.innerHeight - r.top + GAP },
     );
-  }, [align,anchorRef, direction]);
+  }, [align, anchorRef, direction, portalContainerRef]);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -151,7 +165,7 @@ export function ToolbarPopover({
       ref={panelRef}
       data-toolbar-popover=""
       style={{
-        position: 'fixed',
+        position: portalContainerRef?.current ? 'absolute' : 'fixed',
         left: pos.left,
         right: pos.right,
         top: pos.top,
@@ -163,6 +177,6 @@ export function ToolbarPopover({
     >
       {children}
     </div>,
-    document.body,
+    portalContainerRef?.current ?? document.body,
   );
 }

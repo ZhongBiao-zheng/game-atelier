@@ -5,6 +5,7 @@ export type ModelInputModality = 'text' | 'image' | 'video' | 'audio';
 
 export interface KeyView {
   alias: string;
+  is_default?: boolean;
   provider: string;
   base_url: string | null;
   access_key: string; // masked

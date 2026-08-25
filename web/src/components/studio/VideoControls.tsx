@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Clapperboard, Volume2, VolumeX } from 'lucide-react';
 import {
   VIDEO_MODE_LABELS,
@@ -10,6 +10,7 @@ import {
 } from '@/lib/videoControlCaps';
 import { RatioIcon } from './RatioIcon';
 import { ToolbarPopover } from './ToolbarPopover';
+import { cn } from '@/lib/utils';
 
 interface Props {
   caps: VideoControlCaps;
@@ -28,6 +29,7 @@ interface Props {
   onGenerateAudioChange: (generateAudio: boolean) => void;
   onWatermarkChange?: (watermark: boolean) => void;
   menuDirection?: 'up' | 'down';
+  portalContainerRef?: RefObject<HTMLElement | null>;
 }
 
 /** 生成方式 / 比例 / 清晰度（或档位）/ 生成时长 / 生成音频 多合一：
@@ -51,6 +53,7 @@ export function VideoControls({
   onGenerateAudioChange,
   onWatermarkChange,
   menuDirection = 'up',
+  portalContainerRef,
 }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -89,8 +92,12 @@ export function VideoControls({
         anchorRef={wrapRef}
         autoFocus
         direction={menuDirection}
+        portalContainerRef={portalContainerRef}
         data-testid="video-settings-popover"
-        className="w-[320px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3"
+        className={cn(
+          portalContainerRef ? 'max-h-[55vh]' : 'max-h-[70vh]',
+          'w-[320px] overflow-y-auto rounded-xl border border-border bg-card p-3',
+        )}
       >
         <div className="space-y-4">
             {caps.modes.length > 1 && (

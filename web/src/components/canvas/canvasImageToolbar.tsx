@@ -48,11 +48,17 @@ export const DEFAULT_CANVAS_IMAGE_TOOL_IDS = CANVAS_IMAGE_TOOLS
   .map(tool => tool.id);
 
 export const DEFAULT_CANVAS_UI_PREFERENCES: CanvasUiPreferences = {
-  schema_version: 1,
+  schema_version: 2,
   revision: 0,
   image_toolbar: {
     tool_ids: DEFAULT_CANVAS_IMAGE_TOOL_IDS,
     show_labels: false,
+  },
+  generation_defaults: {
+    text: { selection: null, params: {} },
+    image: { selection: null, params: {} },
+    video: { selection: null, params: {} },
+    audio: { selection: null, params: {} },
   },
   updated_at: null,
 };

@@ -9,7 +9,15 @@ from datetime import datetime
 from enum import Enum
 from typing import Annotated, Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 
 class JobStatus(str, Enum):
@@ -305,11 +313,114 @@ class CanvasImageToolbarPreferences(BaseModel):
         return self
 
 
+class CanvasGenerationModelSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    alias: str = Field(min_length=1, max_length=120)
+    model: str = Field(min_length=1, max_length=200)
+
+
+class CanvasTextDefaultParams(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    n: int | None = Field(default=None, ge=1, le=4)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    max_tokens: int | None = Field(default=None, ge=1, le=1_000_000)
+    reasoning_effort: Literal["auto", "low", "medium", "high", "xhigh"] | None = None
+
+
+class CanvasImageDefaultParams(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    n: int | None = Field(default=None, ge=1, le=4)
+    ratio: str | None = Field(default=None, min_length=1, max_length=32)
+    resolution: str | None = Field(default=None, min_length=1, max_length=32)
+    size: str | None = Field(default=None, min_length=1, max_length=32)
+    quality: str | None = Field(default=None, min_length=1, max_length=32)
+    background: Literal["auto", "opaque", "transparent"] | None = None
+
+
+class CanvasVideoDefaultParams(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    duration: int | None = Field(default=None, ge=1, le=60)
+    ratio: str | None = Field(default=None, min_length=1, max_length=32)
+    resolution: str | None = Field(default=None, min_length=1, max_length=32)
+    frame_mode: Literal["auto", "firstlast"] | None = None
+    mode: str | None = Field(default=None, min_length=1, max_length=32)
+    generate_audio: bool | None = None
+    watermark: bool | None = None
+
+
+class CanvasAudioDefaultParams(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    voice: Literal[
+        "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx",
+        "sage", "shimmer", "verse", "marin", "cedar",
+    ] | None = None
+    response_format: Literal["mp3", "wav", "opus", "aac", "flac", "pcm"] | None = None
+    speed: float | None = Field(default=None, ge=0.25, le=4)
+    instructions: str | None = Field(default=None, max_length=4096)
+
+
+def _validated_canvas_default_params(value: object, schema: type[BaseModel]) -> dict[str, JsonValue]:
+    return schema.model_validate(value).model_dump(mode="json", exclude_none=True)
+
+
+class CanvasTextGenerationDefault(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    selection: CanvasGenerationModelSelection | None = None
+    params: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("params")
+    @classmethod
+    def valid_params(cls, value: object) -> dict[str, JsonValue]:
+        return _validated_canvas_default_params(value, CanvasTextDefaultParams)
+
+
+class CanvasImageGenerationDefault(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    selection: CanvasGenerationModelSelection | None = None
+    params: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("params")
+    @classmethod
+    def valid_params(cls, value: object) -> dict[str, JsonValue]:
+        return _validated_canvas_default_params(value, CanvasImageDefaultParams)
+
+
+class CanvasVideoGenerationDefault(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    selection: CanvasGenerationModelSelection | None = None
+    params: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("params")
+    @classmethod
+    def valid_params(cls, value: object) -> dict[str, JsonValue]:
+        return _validated_canvas_default_params(value, CanvasVideoDefaultParams)
+
+
+class CanvasAudioGenerationDefault(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    selection: CanvasGenerationModelSelection | None = None
+    params: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("params")
+    @classmethod
+    def valid_params(cls, value: object) -> dict[str, JsonValue]:
+        return _validated_canvas_default_params(value, CanvasAudioDefaultParams)
+
+
+class CanvasGenerationDefaults(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    text: CanvasTextGenerationDefault = Field(default_factory=CanvasTextGenerationDefault)
+    image: CanvasImageGenerationDefault = Field(default_factory=CanvasImageGenerationDefault)
+    video: CanvasVideoGenerationDefault = Field(default_factory=CanvasVideoGenerationDefault)
+    audio: CanvasAudioGenerationDefault = Field(default_factory=CanvasAudioGenerationDefault)
+
+
 class CanvasUiPreferences(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     revision: int = Field(default=0, ge=0)
     image_toolbar: CanvasImageToolbarPreferences
+    generation_defaults: CanvasGenerationDefaults
     updated_at: datetime | None = None
 
 
@@ -317,6 +428,7 @@ class CanvasUiPreferencesUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     expected_revision: int = Field(ge=0)
     image_toolbar: CanvasImageToolbarPreferences
+    generation_defaults: CanvasGenerationDefaults
 
 
 class CanvasGenerationDraft(BaseModel):

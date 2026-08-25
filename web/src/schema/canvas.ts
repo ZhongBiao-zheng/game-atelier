@@ -33,11 +33,24 @@ export interface CanvasImageToolbarPreferences {
 }
 
 export interface CanvasUiPreferences {
-  schema_version: 1;
+  schema_version: 2;
   revision: number;
   image_toolbar: CanvasImageToolbarPreferences;
+  generation_defaults: CanvasGenerationDefaults;
   updated_at: string | null;
 }
+
+export interface CanvasGenerationModelSelection {
+  alias: string;
+  model: string;
+}
+
+export interface CanvasGenerationDefault {
+  selection: CanvasGenerationModelSelection | null;
+  params: JobParams;
+}
+
+export type CanvasGenerationDefaults = Record<CanvasGenerationDraft['mode'], CanvasGenerationDefault>;
 
 export interface CanvasGenerationDraft {
   mode: 'text' | 'image' | 'video' | 'audio';

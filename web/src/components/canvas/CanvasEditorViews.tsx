@@ -905,7 +905,9 @@ function CanvasConfigNodeSurface({
       ? {
           ...current,
           data: {
-            draft: switchCanvasGenerationDraft(context.keys, current.data.draft, mode),
+            draft: switchCanvasGenerationDraft(context.keys, current.data.draft, mode, {
+              preference: context.canvasUiPreferences.generation_defaults[mode],
+            }),
           },
         }
       : current);

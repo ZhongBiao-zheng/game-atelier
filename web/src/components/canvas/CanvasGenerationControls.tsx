@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Boxes, Check, Settings2 } from 'lucide-react';
 
 import type { KeyView } from '@/api/keys';
 import { RatioIcon } from '@/components/studio/RatioIcon';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import { QUALITY_LABELS, type ImageControlCaps, type Quality } from '@/lib/imageControlCaps';
+import { cn } from '@/lib/utils';
 import { normalizeStudioSizeForModel, type Resolution } from '@/lib/studioSize';
 import {
   AUDIO_FORMAT_OPTIONS,
@@ -38,11 +39,15 @@ export function CanvasModelPicker({
   alias,
   model,
   onSelect,
+  menuDirection = 'up',
+  portalContainerRef,
 }: {
   choices: CanvasModelChoice[];
   alias: string | null;
   model: string;
   onSelect: (choice: CanvasModelChoice) => void;
+  menuDirection?: 'up' | 'down';
+  portalContainerRef?: RefObject<HTMLElement | null>;
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -72,9 +77,13 @@ export function CanvasModelPicker({
         onClose={() => setOpen(false)}
         anchorRef={anchorRef}
         autoFocus
-        direction="up"
+        direction={menuDirection}
+        portalContainerRef={portalContainerRef}
         data-testid="canvas-model-popover"
-        className="max-h-[60vh] w-[320px] overflow-y-auto rounded-xl border border-border bg-card p-3"
+        className={cn(
+          portalContainerRef ? 'max-h-[45vh]' : 'max-h-[60vh]',
+          'w-[320px] overflow-y-auto rounded-xl border border-border bg-card p-3',
+        )}
       >
         {grouped.length ? (
           <div className="space-y-3">
@@ -122,11 +131,15 @@ export function CanvasImageSettings({
   model,
   params,
   onPatch,
+  menuDirection = 'up',
+  portalContainerRef,
 }: {
   caps: ImageControlCaps;
   model: string;
   params: JobParams;
   onPatch: (patch: JobParams, options?: { resetSize?: boolean }) => void;
+  menuDirection?: 'up' | 'down';
+  portalContainerRef?: RefObject<HTMLElement | null>;
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -168,9 +181,13 @@ export function CanvasImageSettings({
         onClose={() => setOpen(false)}
         anchorRef={anchorRef}
         autoFocus
-        direction="up"
+        direction={menuDirection}
+        portalContainerRef={portalContainerRef}
         data-testid="canvas-image-settings-popover"
-        className="max-h-[70vh] w-[320px] overflow-y-auto rounded-xl border border-border bg-card p-3"
+        className={cn(
+          portalContainerRef ? 'max-h-[55vh]' : 'max-h-[70vh]',
+          'w-[320px] overflow-y-auto rounded-xl border border-border bg-card p-3',
+        )}
       >
         <div className="space-y-4">
           <SettingsSection title="比例">
@@ -281,10 +298,14 @@ export function CanvasTextSettings({
   supportsReasoning,
   params,
   onPatch,
+  menuDirection = 'up',
+  portalContainerRef,
 }: {
   supportsReasoning: boolean;
   params: JobParams;
   onPatch: (patch: JobParams) => void;
+  menuDirection?: 'up' | 'down';
+  portalContainerRef?: RefObject<HTMLElement | null>;
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -312,7 +333,8 @@ export function CanvasTextSettings({
         onClose={() => setOpen(false)}
         anchorRef={anchorRef}
         autoFocus
-        direction="up"
+        direction={menuDirection}
+        portalContainerRef={portalContainerRef}
         data-testid="canvas-text-settings-popover"
         className="w-[320px] rounded-xl border border-border bg-card p-3"
       >
@@ -346,9 +368,13 @@ export function CanvasTextSettings({
 export function CanvasAudioSettings({
   params,
   onPatch,
+  menuDirection = 'up',
+  portalContainerRef,
 }: {
   params: JobParams;
   onPatch: (patch: JobParams) => void;
+  menuDirection?: 'up' | 'down';
+  portalContainerRef?: RefObject<HTMLElement | null>;
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -427,9 +453,13 @@ export function CanvasAudioSettings({
         onClose={close}
         anchorRef={anchorRef}
         autoFocus
-        direction="up"
+        direction={menuDirection}
+        portalContainerRef={portalContainerRef}
         data-testid="canvas-audio-settings-popover"
-        className="max-h-[70vh] w-[356px] overflow-y-auto rounded-xl border border-border bg-card p-3"
+        className={cn(
+          portalContainerRef ? 'max-h-[55vh]' : 'max-h-[70vh]',
+          'w-[356px] overflow-y-auto rounded-xl border border-border bg-card p-3',
+        )}
       >
         <div className="space-y-4">
           <SettingsSection title="音色">

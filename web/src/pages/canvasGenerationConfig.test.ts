@@ -5,6 +5,7 @@ import type { CanvasDocument, CanvasGenerationDraft } from '@/schema/canvas';
 import {
   createCanvasGenerationDraft,
   createConnectedCanvasConfig,
+  canvasGenerationPreferenceForModel,
   firstCanvasGenerationModel,
   switchCanvasGenerationDraft,
 } from './canvasEditorModel';
@@ -65,7 +66,7 @@ it('creates a capability-honest config draft and preserves references while swit
     keys,
     current,
     'video',
-    '2026-08-25T02:00:00Z',
+    { now: '2026-08-25T02:00:00Z' },
   );
   expect(video).toMatchObject({
     mode: 'video', alias: 'video-key', model: 'seedance-2.0',
@@ -149,5 +150,47 @@ it('keeps model and capability params empty when no routable model exists', () =
   })).toEqual({
     mode: 'image', prompt: '', input_policy: 'mentions_only', model: '', alias: null,
     params: {}, updated_at: '2026-08-25T03:00:00Z',
+  });
+});
+
+it('uses a valid saved model preference and normalizes its default params', () => {
+  const alternate: KeyView = {
+    ...keys[0],
+    alias: 'image-alt',
+    models: [{
+      id: 'gpt-image-1', name: 'GPT Image 1', modality: 'image', protocol: 'openai',
+    }],
+  };
+  const preference = canvasGenerationPreferenceForModel(
+    alternate,
+    alternate.models[0],
+    'image',
+    { n: 3, ratio: '16:9', quality: 'high' },
+  );
+
+  expect(preference).not.toBeNull();
+  expect(createCanvasGenerationDraft([...keys, alternate], 'image', {
+    preference: preference!,
+    now: '2026-08-25T04:00:00Z',
+  })).toMatchObject({
+    alias: 'image-alt',
+    model: 'gpt-image-1',
+    params: { n: 3, ratio: '16:9', quality: 'high' },
+  });
+});
+
+it('falls back without leaking params from a stale model preference', () => {
+  const stale = {
+    selection: { alias: 'removed-key', model: 'removed-model' },
+    params: { n: 4, ratio: '9:16', quality: 'high' },
+  };
+
+  expect(createCanvasGenerationDraft(keys, 'image', {
+    preference: stale,
+    now: '2026-08-25T05:00:00Z',
+  })).toMatchObject({
+    alias: 'image-key',
+    model: 'gpt-image-2',
+    params: { n: 1, ratio: '1:1' },
   });
 });

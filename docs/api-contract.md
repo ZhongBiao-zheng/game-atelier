@@ -135,12 +135,16 @@ sequence，只保存可见消息、reasoning summary、稳定 node/version 引�
 与会话历史，只重写 `project_id`。当前打开会话、panel 宽度、焦点和流式临时态属于浏览器呈现，
 不进入 Session 或 `canvas.json`。
 
-图片节点快捷工具偏好是工作区应用级状态，文件真源为 `.config/canvas-ui.json`，不属于任何画布项目。
+画布界面与生成偏好是工作区应用级状态，文件真源为 `.config/canvas-ui.json`，不属于任何画布项目。
 `GET /api/canvas/ui-preferences` 在文件不存在时返回 revision 0 的默认值且不制造文件；损坏或不符合严格
 schema 的文件返回 409，原字节保持不变。`PUT /api/canvas/ui-preferences` 请求为
-`{ expected_revision, image_toolbar: { tool_ids, show_labels } }`：工具 ID 必须来自固定枚举，不允许重复，
-允许空清单；服务端在独立文件锁内校验 revision 并原子替换，冲突返回当前 revision。该偏好跨项目生效，
-但不进入 `CanvasDocument`、undo/redo、项目包 manifest/zip 或插件私有状态。
+`{ expected_revision, image_toolbar, generation_defaults }`。`image_toolbar` 的工具 ID 必须来自固定枚举，
+不允许重复但允许空清单；`generation_defaults` 严格包含 text/image/video/audio 四项，每项只保存可选的
+`{ alias, model }` 与该模态白名单参数。媒体引用、蒙版、本机路径、运行回写字段和跨模态参数一律 422。
+服务端在独立文件锁内校验 revision 并原子替换，冲突返回当前 revision。生成偏好只影响后续新建 Draft
+和配置节点模式切换；失效模型回退首个 Runner 可路由模型且不继承旧参数，已有节点、Run Snapshot 与 Job
+保持不变。该偏好跨项目生效，但不进入 `CanvasDocument`、undo/redo、项目 revision、项目包 manifest/zip
+或插件私有状态；凭证、Base URL 与模型目录仍只属于 Keys。
 
 `Input Connection` 是当前可编辑输入资格，不触发下游；`Derivation Connection` 只由生成提交或受控本地
 媒体命令创建。真实生成输入冻结在 Canvas Job 的 `canvas_run.snapshot`，节点不保存 `job_ids` 或候选数组。

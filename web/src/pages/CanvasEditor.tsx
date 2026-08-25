@@ -38,6 +38,7 @@ import {
   Plus,
   Redo2,
   Scan,
+  Settings2,
   Square,
   Type,
   Undo2,
@@ -97,6 +98,7 @@ import {
   CanvasGenerationMetadata,
   canvasRetryErrorMessage,
 } from '@/components/canvas/CanvasGenerationMetadata';
+import { CanvasGenerationPreferencesDialog } from '@/components/canvas/CanvasGenerationPreferencesDialog';
 import {
   CanvasMaskEditDialog,
   type CanvasMaskEditSubmission,
@@ -145,6 +147,7 @@ import type {
   CanvasConnection,
   CanvasContentNode,
   CanvasDocument,
+  CanvasGenerationDefaults,
   CanvasGenerationDraft,
   CanvasImageToolbarPreferences,
   CanvasLibraryAsset,
@@ -289,6 +292,8 @@ function CanvasEditorInner({
   const [addOpen, setAddOpen] = useState(false);
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [generationPreferencesOpen, setGenerationPreferencesOpen] = useState(false);
+  const [generationPreferencesSaving, setGenerationPreferencesSaving] = useState(false);
   const [viewportZoom, setViewportZoom] = useState(1);
   const [projectRenameDraft, setProjectRenameDraft] = useState<string | null>(null);
   const [projectRenameBusy, setProjectRenameBusy] = useState(false);
@@ -318,6 +323,7 @@ function CanvasEditorInner({
   const addMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
   const shortcutsTriggerRef = useRef<HTMLButtonElement>(null);
+  const generationPreferencesTriggerRef = useRef<HTMLButtonElement>(null);
   const flowNodeCache = useRef(new Map<string, { node: CanvasNode; selected: boolean; flowNode: FlowNode }>());
   const dirtyVersion = useRef(0);
   const [dirtySignal, setDirtySignal] = useState(0);
@@ -383,6 +389,8 @@ function CanvasEditorInner({
     setAddOpen(false);
     setCreateMenu(null);
     setShortcutsOpen(false);
+    setGenerationPreferencesOpen(false);
+    setGenerationPreferencesSaving(false);
     setViewportZoom(1);
     setProjectRenameDraft(null);
     setProjectRenameBusy(false);
@@ -452,7 +460,9 @@ function CanvasEditorInner({
         setDocument(canvasDocument);
         setViewportZoom(canvasDocument.viewport.zoom);
         serverRevision.current = canvasDocument.revision;
-        setKeys(keyRows.keys);
+        setKeys([...keyRows.keys].sort((left, right) => (
+          Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
+        )));
         setJobs(canvasJobs);
       })
       .catch(loadError => {
@@ -1207,7 +1217,10 @@ function CanvasEditorInner({
   }
 
   function addGenerationNode(kind: JobKind, menu: CreateMenuState | null = createMenu) {
-    const draft = createCanvasGenerationDraft(keys, kind, { inputPolicy: 'all_connected' });
+    const draft = createCanvasGenerationDraft(keys, kind, {
+      inputPolicy: 'all_connected',
+      preference: canvasUiPreferences.generation_defaults[kind],
+    });
     const base = {
       id: makeId(kind),
       title: { text: '文本', image: '图片', video: '视频', audio: '音频' }[kind],
@@ -1235,6 +1248,7 @@ function CanvasEditorInner({
 
   function addConfigNode(menu: CreateMenuState | null = createMenu) {
     const draft = createCanvasGenerationDraft(keys, 'image', {
+      preference: canvasUiPreferences.generation_defaults.image,
       prompt: menu?.sourceId && menu.sourceHandle !== 'target'
         ? `@[node:${menu.sourceId}]`
         : '',
@@ -2378,7 +2392,9 @@ function CanvasEditorInner({
     const next = createConnectedCanvasConfig(
       current,
       nodeId,
-      createCanvasGenerationDraft(keys, 'image'),
+      createCanvasGenerationDraft(keys, 'image', {
+        preference: canvasUiPreferences.generation_defaults.image,
+      }),
       { nodeId: configId, connectionId: makeId('connection') },
     );
     if (!next) {
@@ -2395,7 +2411,7 @@ function CanvasEditorInner({
     requestAnimationFrame(() => requestAnimationFrame(() => {
       documentQueryNode(configId)?.focus();
     }));
-  }, [commit, keys]);
+  }, [canvasUiPreferences.generation_defaults.image, commit, keys]);
 
   const submitAngle = useCallback(async (params: CanvasAngleParams) => {
     if (!angleState || runSubmissionInFlight.current) return;
@@ -2514,18 +2530,24 @@ function CanvasEditorInner({
     }
   }, [announceToolNotice, flushSave, mediaOperation, persistNow, projectId]);
 
-  const persistImageToolbarPreferences = useCallback(async (
-    value: CanvasImageToolbarPreferences,
+  const persistCanvasUiPreferences = useCallback(async (
+    imageToolbar: CanvasImageToolbarPreferences,
+    generationDefaults: CanvasGenerationDefaults,
+    successNotice: string,
   ) => {
     if (canvasUiPreferencesSaveInFlight.current) {
       throw new Error('另一项画布界面设置正在保存，请稍后重试。');
     }
     canvasUiPreferencesSaveInFlight.current = true;
     try {
-      const saved = await saveCanvasUiPreferences(canvasUiPreferences.revision, value);
+      const saved = await saveCanvasUiPreferences(
+        canvasUiPreferences.revision,
+        imageToolbar,
+        generationDefaults,
+      );
       setCanvasUiPreferences(saved);
       setCanvasUiPreferencesError(null);
-      announceToolNotice('图片快捷工具已更新');
+      announceToolNotice(successNotice);
     } catch (saveError) {
       let message = (saveError as Error).message;
       try {
@@ -2541,6 +2563,34 @@ function CanvasEditorInner({
       canvasUiPreferencesSaveInFlight.current = false;
     }
   }, [announceToolNotice, canvasUiPreferences.revision]);
+
+  const persistImageToolbarPreferences = useCallback(async (
+    value: CanvasImageToolbarPreferences,
+  ) => persistCanvasUiPreferences(
+    value,
+    canvasUiPreferences.generation_defaults,
+    '图片快捷工具已更新',
+  ), [canvasUiPreferences.generation_defaults, persistCanvasUiPreferences]);
+
+  const persistGenerationPreferences = useCallback(async (
+    value: CanvasGenerationDefaults,
+  ) => {
+    setGenerationPreferencesSaving(true);
+    setCanvasUiPreferencesError(null);
+    try {
+      await persistCanvasUiPreferences(
+        canvasUiPreferences.image_toolbar,
+        value,
+        '生成偏好已更新',
+      );
+      setGenerationPreferencesOpen(false);
+      requestAnimationFrame(() => generationPreferencesTriggerRef.current?.focus());
+    } catch {
+      // 保存函数已重新读取冲突版本并写入明确错误；保留弹窗让用户核对。
+    } finally {
+      setGenerationPreferencesSaving(false);
+    }
+  }, [canvasUiPreferences.image_toolbar, persistCanvasUiPreferences]);
 
   const mentionGraphSignature = canvasMentionGraphSignature(document);
   const mentionDocumentRef = useRef(document);
@@ -2887,6 +2937,19 @@ function CanvasEditorInner({
             <div className="my-1 h-px w-7 bg-border" />
             <ToolButton buttonRef={assetLibraryTriggerRef} label="项目资产库" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); setLibraryMode(current => current === 'assets' ? null : 'assets'); }}><Library /></ToolButton>
             <ToolButton buttonRef={promptLibraryTriggerRef} label="项目提示词库" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); setLibraryMode(current => current === 'prompts' ? null : 'prompts'); }}><WandSparkles /></ToolButton>
+            <ToolButton
+              buttonRef={generationPreferencesTriggerRef}
+              label="生成偏好"
+              active={generationPreferencesOpen}
+              expanded={generationPreferencesOpen}
+              controlsId="canvas-generation-preferences-dialog"
+              popup="dialog"
+              onClick={() => {
+                setAddOpen(false);
+                setCreateMenu(null);
+                setGenerationPreferencesOpen(true);
+              }}
+            ><Settings2 /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
             <ToolButton label="撤销" disabled={history.current.past.length === 0} onClick={undo}><Undo2 /></ToolButton>
             <ToolButton label="重做" disabled={history.current.future.length === 0} onClick={redo}><Redo2 /></ToolButton>
@@ -3149,6 +3212,19 @@ function CanvasEditorInner({
             <CanvasShortcutList />
           </DialogContent>
         </Dialog>
+
+        <CanvasGenerationPreferencesDialog
+          open={generationPreferencesOpen}
+          value={canvasUiPreferences.generation_defaults}
+          keys={keys}
+          saving={generationPreferencesSaving}
+          error={canvasUiPreferencesError}
+          onOpenChange={open => {
+            setGenerationPreferencesOpen(open);
+            if (!open) requestAnimationFrame(() => generationPreferencesTriggerRef.current?.focus());
+          }}
+          onSave={value => void persistGenerationPreferences(value)}
+        />
 
         {mediaOperation && (
           <CanvasMediaOperationDialog

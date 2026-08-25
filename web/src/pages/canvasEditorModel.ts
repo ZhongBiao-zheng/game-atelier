@@ -14,6 +14,7 @@ import {
 import type {
   CanvasContentNode,
   CanvasContentVersion,
+  CanvasGenerationDefault,
   CanvasGenerationDraft,
   CanvasDocument,
   CanvasNode,
@@ -110,6 +111,7 @@ function isOpenAiHkBaseUrl(baseUrl: string | null | undefined) {
 }
 
 function canvasImageModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
+  if (key.provider === 'nano_banana') return false;
   const family = imageControlCaps(model.id, key.provider, model.protocol).family;
   if (family === 'midjourney' || key.provider === 'openrouter') return true;
   if (!['openai', 'midjourney', 'seedream', 'tokendance', 'custom'].includes(key.provider)) {
@@ -162,6 +164,20 @@ export function firstCanvasGenerationModel(
   return null;
 }
 
+function preferredCanvasGenerationModel(
+  keys: readonly KeyView[],
+  mode: CanvasGenerationDraft['mode'],
+  preference: CanvasGenerationDefault | undefined,
+) {
+  const selection = preference?.selection;
+  if (!selection) return null;
+  const key = keys.find(candidate => candidate.alias === selection.alias);
+  const model = key?.models.find(candidate => candidate.id === selection.model);
+  return key && model && canvasGenerationModelSupportsMode(key, model, mode)
+    ? { key, model }
+    : null;
+}
+
 function defaultCanvasGenerationParams(mode: CanvasGenerationDraft['mode']): JobParams {
   if (mode === 'image') return { n: 1, ratio: '1:1' };
   if (mode === 'video') {
@@ -171,37 +187,59 @@ function defaultCanvasGenerationParams(mode: CanvasGenerationDraft['mode']): Job
   return { n: 1, reasoning_effort: 'auto' };
 }
 
+function normalizedCanvasGenerationParams(
+  key: KeyView,
+  model: KeyView['models'][number],
+  mode: CanvasGenerationDraft['mode'],
+  current: JobParams,
+) {
+  if (mode === 'image') {
+    return normalizeCanvasImageParams(model.id, key.provider, current, model.protocol);
+  }
+  if (mode === 'video') return normalizeCanvasVideoParams(model.id, model.protocol, current);
+  if (mode === 'audio') {
+    return normalizeCanvasAudioParams(model.id, key.provider, model.protocol, current);
+  }
+  return normalizeCanvasTextParams(model.protocol, current);
+}
+
+export function canvasGenerationPreferenceForModel(
+  key: KeyView,
+  model: KeyView['models'][number],
+  mode: CanvasGenerationDraft['mode'],
+  current: JobParams = {},
+): CanvasGenerationDefault | null {
+  if (!canvasGenerationModelSupportsMode(key, model, mode)) return null;
+  return {
+    selection: { alias: key.alias, model: model.id },
+    params: normalizedCanvasGenerationParams(
+      key,
+      model,
+      mode,
+      { ...defaultCanvasGenerationParams(mode), ...current },
+    ),
+  };
+}
+
 export function createCanvasGenerationDraft(
   keys: readonly KeyView[],
   mode: CanvasGenerationDraft['mode'],
   options: {
     prompt?: string;
     inputPolicy?: CanvasGenerationDraft['input_policy'];
+    preference?: CanvasGenerationDefault;
     now?: string;
   } = {},
 ): CanvasGenerationDraft {
-  const selected = firstCanvasGenerationModel(keys, mode);
+  const preferred = preferredCanvasGenerationModel(keys, mode, options.preference);
+  const selected = preferred ?? firstCanvasGenerationModel(keys, mode);
   const model = selected?.model.id ?? '';
-  const sourceParams = defaultCanvasGenerationParams(mode);
+  const sourceParams = preferred
+    ? { ...defaultCanvasGenerationParams(mode), ...options.preference?.params }
+    : defaultCanvasGenerationParams(mode);
   const params = !selected
     ? {}
-    : mode === 'image'
-      ? normalizeCanvasImageParams(
-          model,
-          selected.key.provider,
-          sourceParams,
-          selected.model.protocol,
-        )
-      : mode === 'video'
-        ? normalizeCanvasVideoParams(model, selected.model.protocol, sourceParams)
-        : mode === 'audio'
-          ? normalizeCanvasAudioParams(
-              model,
-              selected.key.provider,
-              selected.model.protocol,
-              sourceParams,
-            )
-          : normalizeCanvasTextParams(selected.model.protocol, sourceParams);
+    : normalizedCanvasGenerationParams(selected.key, selected.model, mode, sourceParams);
   return {
     mode,
     prompt: options.prompt ?? '',
@@ -217,13 +255,14 @@ export function switchCanvasGenerationDraft(
   keys: readonly KeyView[],
   current: CanvasGenerationDraft,
   mode: CanvasGenerationDraft['mode'],
-  now = new Date().toISOString(),
+  options: { preference?: CanvasGenerationDefault; now?: string } = {},
 ) {
   if (mode === current.mode) return current;
   return createCanvasGenerationDraft(keys, mode, {
     prompt: current.prompt,
     inputPolicy: current.input_policy,
-    now,
+    preference: options.preference,
+    now: options.now,
   });
 }
 
