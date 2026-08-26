@@ -55,6 +55,11 @@ const CATEGORY_LABELS: Record<ModelCategory, string> = {
 };
 
 const GENERATION_MODALITIES = ['text', 'image', 'video', 'audio'] as const;
+const TEXT_INPUT_MODALITIES = [
+  ['image', '图片'],
+  ['video', '视频'],
+  ['audio', '音频'],
+] as const;
 
 // 仅前端的行级标记：编辑态「打开表单时已存在的模型」分类锁死为只读，新增行不带此标记。
 // _locked 随 spread 在每次 setModels 中传递，增删行都不会错乱（不依赖 id 值或行下标）。
@@ -740,18 +745,29 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                           </div>
                         )}
                         {(model.modality ?? 'image') === 'text' && (
-                          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <input
-                              type="checkbox"
-                              checked={(model.input_modalities ?? []).includes('image')}
-                              onChange={(event) => setModels(models.map((current, i) => i === index ? {
-                                ...current,
-                                input_modalities: event.target.checked ? ['text', 'image'] : ['text'],
-                              } : current))}
-                              className="size-3.5 accent-[color:var(--primary)]"
-                            />
-                            支持图片输入
-                          </label>
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                            <span>理解输入</span>
+                            {TEXT_INPUT_MODALITIES.map(([inputModality, label]) => (
+                              <label key={inputModality} className="flex items-center gap-1.5">
+                                <input
+                                  type="checkbox"
+                                  checked={(model.input_modalities ?? []).includes(inputModality)}
+                                  onChange={(event) => setModels(models.map((current, i) => {
+                                    if (i !== index) return current;
+                                    const currentInputs = new Set<ModelInputModality>(
+                                      current.input_modalities ?? ['text'],
+                                    );
+                                    currentInputs.add('text');
+                                    if (event.target.checked) currentInputs.add(inputModality);
+                                    else currentInputs.delete(inputModality);
+                                    return { ...current, input_modalities: Array.from(currentInputs) };
+                                  }))}
+                                  className="size-3.5 accent-[color:var(--primary)]"
+                                />
+                                {label}
+                              </label>
+                            ))}
+                          </div>
                         )}
                       </div>
                       <button

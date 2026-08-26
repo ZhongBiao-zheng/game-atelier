@@ -768,15 +768,40 @@ def _validate_input_capabilities(
     kind: JobKind,
     inputs: list[CanvasSnapshotInput],
     params: JobParams,
+    provider: str | None = None,
 ) -> None:
     counts = {
         media_kind: sum(item.kind == media_kind for item in inputs)
         for media_kind in ("image", "video", "audio")
     }
-    if kind in {JobKind.TEXT, JobKind.AUDIO}:
+    if kind == JobKind.TEXT:
+        unsupported = [
+            media_kind
+            for media_kind in ("image", "video", "audio")
+            if counts[media_kind] and media_kind not in model.input_modalities
+        ]
+        if unsupported:
+            labels = {"image": "图片", "video": "视频", "audio": "音频"}
+            raise ValueError(f"当前模型不支持{'、'.join(labels[item] for item in unsupported)}输入")
+        if provider is not None:
+            from character_workflow.lib.callers.openai_text import supports_input_modality
+
+            unsupported_transport = [
+                media_kind
+                for media_kind in ("image", "video", "audio")
+                if counts[media_kind]
+                and not supports_input_modality(provider, model.protocol, media_kind)
+            ]
+            if unsupported_transport:
+                labels = {"image": "图片", "video": "视频", "audio": "音频"}
+                raise ValueError(
+                    "当前模型接口不支持"
+                    f"{'、'.join(labels[item] for item in unsupported_transport)}输入"
+                )
+        return
+    if kind == JobKind.AUDIO:
         if any(counts.values()):
-            label = "文本" if kind == JobKind.TEXT else "音频"
-            raise ValueError(f"当前{label}生成只支持文本输入")
+            raise ValueError("当前音频生成只支持文本输入")
         return
     if kind == JobKind.IMAGE:
         if counts["video"] or counts["audio"]:
@@ -1197,7 +1222,7 @@ def submit_canvas_run(
                 normalized.pop("frame_mode", None)
             else:
                 normalized["frame_mode"] = effective_frame_mode
-        _validate_input_capabilities(model, kind, inputs, job_params)
+        _validate_input_capabilities(model, kind, inputs, job_params, key.provider)
         final_prompt = _render_final_prompt(current, draft, inputs)
         media_paths = _input_paths(project_id, current, inputs)
         job_params.reference_images = media_paths["image"] or None
@@ -1364,7 +1389,7 @@ def submit_mask_edit_run(
                 version_id=source.version_id,
                 kind="image",
             )]
-            _validate_input_capabilities(model, kind, inputs, job_params)
+            _validate_input_capabilities(model, kind, inputs, job_params, key.provider)
             final_prompt = _render_final_prompt(current, draft, inputs)
             media_paths = _input_paths(project_id, current, inputs)
             if not media_paths["image"]:

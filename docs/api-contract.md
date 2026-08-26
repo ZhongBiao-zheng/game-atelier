@@ -219,6 +219,12 @@ Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程
 model 或媒体路径。Snapshot 冻结完整 preset 正文/版本、真实模型与唯一图片 Version，文本 caller 用
 multimodal content 发送服务端解析的项目内图片。成功结果是独立文本节点及 generation-run 派生边，源图片
 Draft 不读不改；停止与 original retry 复用普通 Run 生命周期，current retry 不适用。
+
+普通文本 Run 可冻结并传输图片、视频和音频 Input Connection，但只认所选文本模型显式声明的
+`input_modalities`，不按模型名称猜测能力。Chat Completions 在兼容端点分别使用 `image_url`、
+`video_url` 与 `input_audio`；Ark-compatible Responses 分别使用 `input_image`、`input_video` 与
+`input_audio`。本机媒体由 caller 编码后提交；模型虽声明能力但当前供应商协议没有对应传输格式时，
+同样在创建 Run 前拒绝。两种拒绝都只显示一条短消息，不在画布增加常驻说明组件。
 `POST .../runs/{run_id}/reverse-prompt-config` 在成功文本结果后幂等创建图片 Config Node 及文本→配置
 Input Connection。图片模型优先使用仍可路由的画布图片生成偏好；偏好保持自动选择或显式模型失效时，
 再按 default Key 优先、其余登记顺序选择。自动选择会应用已保存的默认参数，失效的显式模型不泄漏旧参数；

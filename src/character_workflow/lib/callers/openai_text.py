@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,28 @@ _IMAGE_MIME = {
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
 }
+_VIDEO_MIME = {
+    ".mp4": "video/mp4",
+    ".mpeg": "video/mpeg",
+    ".mpg": "video/mpeg",
+    ".mov": "video/quicktime",
+    ".webm": "video/webm",
+}
+_AUDIO_MIME = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/m4a",
+    ".aac": "audio/aac",
+}
+_AUDIO_FORMAT = {
+    ".mp3": "mp3",
+    ".wav": "wav",
+    ".m4a": "m4a",
+    ".aac": "aac",
+}
 _MAX_INLINE_IMAGE_BYTES = 25 * 1024 * 1024
+_MAX_INLINE_AUDIO_BYTES = 25 * 1024 * 1024
+_MAX_INLINE_VIDEO_BYTES = 50 * 1024 * 1024
 _SUPPORTED_PROTOCOLS = {
     None, "openai", "openai-chat", "chat-completions", "openai-responses",
 }
@@ -39,19 +61,95 @@ def supports_model(key: Any, model: Any) -> bool:
     )
 
 
-def _image_url(reference: str) -> str:
+def supports_input_modality(provider: str, protocol: str | None, modality: str) -> bool:
+    """Whether this caller has a wire format for one declared model input."""
+    if modality == "image":
+        return True
+    if protocol == "openai-responses":
+        return provider in {"seedream", "tokendance", "custom"}
+    if modality == "video" and provider == "openai":
+        return False
+    return modality in {"video", "audio"}
+
+
+def _media_data_url(
+    reference: str,
+    *,
+    mime_types: dict[str, str],
+    max_bytes: int,
+    label: str,
+) -> str:
     if reference.startswith(("https://", "http://")):
         return reference
-    if reference.startswith(("data:image/png;", "data:image/jpeg;", "data:image/webp;")):
+    if reference.startswith("data:"):
+        header, separator, encoded = reference.partition(",")
+        mime_type = header.removeprefix("data:").split(";", 1)[0]
+        if not separator or ";base64" not in header or mime_type not in mime_types.values():
+            raise OpenAITextError(f"不支持的{label}输入")
+        try:
+            decoded_size = len(base64.b64decode(encoded, validate=True))
+        except (binascii.Error, ValueError) as error:
+            raise OpenAITextError(f"{label}输入 Base64 无效") from error
+        if decoded_size > max_bytes:
+            raise OpenAITextError(f"{label}输入文件过大")
         return reference
     path = Path(reference)
-    mime_type = _IMAGE_MIME.get(path.suffix.lower())
+    mime_type = mime_types.get(path.suffix.lower())
     if mime_type is None or not path.is_file():
-        raise OpenAITextError("multimodal text input is not a supported image")
-    if path.stat().st_size > _MAX_INLINE_IMAGE_BYTES:
-        raise OpenAITextError("multimodal text input exceeds 25 MiB")
+        raise OpenAITextError(f"不支持的{label}输入")
+    if path.stat().st_size > max_bytes:
+        raise OpenAITextError(f"{label}输入文件过大")
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
+
+
+def _image_url(reference: str) -> str:
+    return _media_data_url(
+        reference,
+        mime_types=_IMAGE_MIME,
+        max_bytes=_MAX_INLINE_IMAGE_BYTES,
+        label="图片",
+    )
+
+
+def _video_url(reference: str) -> str:
+    return _media_data_url(
+        reference,
+        mime_types=_VIDEO_MIME,
+        max_bytes=_MAX_INLINE_VIDEO_BYTES,
+        label="视频",
+    )
+
+
+def _audio_url(reference: str) -> str:
+    return _media_data_url(
+        reference,
+        mime_types=_AUDIO_MIME,
+        max_bytes=_MAX_INLINE_AUDIO_BYTES,
+        label="音频",
+    )
+
+
+def _chat_audio(reference: str) -> dict[str, str]:
+    if reference.startswith(("https://", "http://")):
+        suffix = Path(reference.split("?", 1)[0]).suffix.lower()
+        audio_format = _AUDIO_FORMAT.get(suffix)
+        if audio_format is None:
+            raise OpenAITextError("无法识别音频格式")
+        return {"url": reference, "format": audio_format}
+
+    data_url = _audio_url(reference)
+    header, separator, encoded = data_url.partition(",")
+    if not separator or ";base64" not in header:
+        raise OpenAITextError("音频输入必须使用 Base64")
+    mime_type = header.removeprefix("data:").split(";", 1)[0]
+    audio_format = next(
+        (value for suffix, value in _AUDIO_FORMAT.items() if _AUDIO_MIME[suffix] == mime_type),
+        None,
+    )
+    if audio_format is None:
+        raise OpenAITextError("无法识别音频格式")
+    return {"data": encoded, "format": audio_format}
 
 
 def _content_text(choice: object) -> str | None:
@@ -151,26 +249,59 @@ def generate(
     if not base_url:
         raise OpenAITextError("text provider requires base_url")
     options = params or {}
-    references = [str(value) for value in options.get("reference_images") or []]
+    image_references = [str(value) for value in options.get("reference_images") or []]
+    video_references = [str(value) for value in options.get("reference_videos") or []]
+    audio_references = [str(value) for value in options.get("reference_audios") or []]
+    unsupported = [
+        modality
+        for modality, references in (
+            ("image", image_references),
+            ("video", video_references),
+            ("audio", audio_references),
+        )
+        if references and not supports_input_modality(key.provider, protocol, modality)
+    ]
+    if unsupported:
+        labels = {"image": "图片", "video": "视频", "audio": "音频"}
+        raise OpenAITextError(
+            f"当前模型接口不支持{'、'.join(labels[item] for item in unsupported)}输入"
+        )
+    has_references = bool(image_references or video_references or audio_references)
     content: str | list[dict[str, Any]] = prompt
-    if references:
+    if has_references:
         content = [
             {"type": "text", "text": prompt},
             *[
                 {"type": "image_url", "image_url": {"url": _image_url(reference)}}
-                for reference in references
+                for reference in image_references
+            ],
+            *[
+                {"type": "video_url", "video_url": {"url": _video_url(reference)}}
+                for reference in video_references
+            ],
+            *[
+                {"type": "input_audio", "input_audio": _chat_audio(reference)}
+                for reference in audio_references
             ],
         ]
     if protocol == "openai-responses":
         response_input: str | list[dict[str, Any]] = prompt
-        if references:
+        if has_references:
             response_input = [{
                 "role": "user",
                 "content": [
                     {"type": "input_text", "text": prompt},
                     *[
                         {"type": "input_image", "image_url": _image_url(reference)}
-                        for reference in references
+                        for reference in image_references
+                    ],
+                    *[
+                        {"type": "input_video", "video_url": _video_url(reference)}
+                        for reference in video_references
+                    ],
+                    *[
+                        {"type": "input_audio", "audio_url": _audio_url(reference)}
+                        for reference in audio_references
                     ],
                 ],
             }]
