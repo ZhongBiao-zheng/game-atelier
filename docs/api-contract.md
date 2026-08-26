@@ -88,7 +88,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /projects/{id}/characters/index` `/projects/{id}/characters/{character_id}/workspace`
 `GET /projects/{id}/character-associations`
 `GET /projects/{id}/studio-archive-targets?media_kind={image,video}`
-`GET /canvas/projects` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
+`GET /canvas/projects` `/canvas/project-options` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
 `GET /canvas/projects/{id}/versions/{version_id}/media`
 `GET /canvas/projects/{id}/versions/{version_id}/download`
 `GET /canvas/projects/{id}/library/assets` `/canvas/projects/{id}/library/prompts`
@@ -97,6 +97,9 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 
 `GET /canvas/projects` 的 `CanvasProjectSummary` 在项目元数据之外返回派生的 `cover`、`node_count` 与
 `connection_count`；这些字段不进入 `project.json`，必须与当前 `canvas.json` 一致。
+
+`GET /canvas/project-options` 只返回 `CanvasProject` 基础元数据，供编辑器内项目切换器使用；它不会读取每个项目的
+完整 `canvas.json`，避免打开画布时随其他大画布的体积产生额外解析开销。
 
 ### 人工画布契约
 

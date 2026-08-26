@@ -366,6 +366,7 @@
     border: 0 !important;
     background: transparent !important;
     cursor: crosshair;
+    z-index: 30;
     opacity: 0;
     pointer-events: none !important;
     transition: opacity 160ms ease;

@@ -647,3 +647,23 @@ def list_canvas_projects() -> list[CanvasProjectSummary]:
         except (OSError, RuntimeError, ValueError, ValidationError, json.JSONDecodeError, KeyError):
             continue
     return sorted(projects, key=lambda item: (item.updated_at, item.project_id), reverse=True)
+
+
+def list_canvas_project_options() -> list[CanvasProject]:
+    """List lightweight project switcher rows without parsing every canvas document."""
+    root = canvas_projects_root()
+    if not root.exists():
+        return []
+    projects: list[CanvasProject] = []
+    for path in root.glob("*/project.json"):
+        project_id = path.parent.name
+        try:
+            with file_lock(_canvas_lock_path(project_id)):
+                _recover_canvas_transactions_unlocked(project_id)
+                project = CanvasProject.model_validate_json(path.read_text(encoding="utf-8"))
+                if project.project_id != project_id:
+                    raise ValueError("canvas project_id does not match its directory")
+                projects.append(project)
+        except (OSError, RuntimeError, ValueError, ValidationError, json.JSONDecodeError, KeyError):
+            continue
+    return sorted(projects, key=lambda item: (item.updated_at, item.project_id), reverse=True)

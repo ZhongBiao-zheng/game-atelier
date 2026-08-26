@@ -155,7 +155,9 @@ import type {
   CanvasMediaOperation,
   CanvasMediaVersion,
   CanvasNode,
+  CanvasPoint,
   CanvasPrompt,
+  CanvasSize,
   CanvasTextVersion,
   CanvasUiPreferences,
   CanvasVideoFrameSlot,
@@ -228,6 +230,12 @@ interface MediaReplaceTarget {
 interface ViewportSyncToken {
   projectId: string;
   viewport: Viewport;
+}
+
+interface LiveNodeLayout {
+  nodeId: string;
+  position: CanvasPoint;
+  size: CanvasSize;
 }
 
 function materializeEmptyTextContent(document: CanvasDocument): {
@@ -365,7 +373,16 @@ function CanvasEditorInner({
   const createMenuRef = useRef<HTMLDivElement>(null);
   const shortcutsTriggerRef = useRef<HTMLButtonElement>(null);
   const generationPreferencesTriggerRef = useRef<HTMLButtonElement>(null);
-  const flowNodeCache = useRef(new Map<string, { node: CanvasNode; selected: boolean; flowNode: FlowNode }>());
+  const flowNodeCache = useRef(new Map<string, {
+    node: CanvasNode;
+    selected: boolean;
+    liveLayout: LiveNodeLayout | undefined;
+    flowNode: FlowNode;
+  }>());
+  const [liveNodeLayout, setLiveNodeLayout] = useState<LiveNodeLayout | null>(null);
+  const pendingLiveNodeLayout = useRef<LiveNodeLayout | null>(null);
+  const activeResizeNodeId = useRef<string | null>(null);
+  const resizePreviewFrame = useRef<number | null>(null);
   const dirtyVersion = useRef(0);
   const [dirtySignal, setDirtySignal] = useState(0);
   const serverRevision = useRef(0);
@@ -459,6 +476,11 @@ function CanvasEditorInner({
     setToolNotice(null);
     if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
     flowNodeCache.current.clear();
+    activeResizeNodeId.current = null;
+    pendingLiveNodeLayout.current = null;
+    if (resizePreviewFrame.current !== null) window.cancelAnimationFrame(resizePreviewFrame.current);
+    resizePreviewFrame.current = null;
+    setLiveNodeLayout(null);
     history.current = { past: [], future: [] };
     viewportSync.current = null;
     nodeClipboard.current = null;
@@ -491,7 +513,7 @@ function CanvasEditorInner({
         if (!cancelled) setCanvasUiPreferencesError((preferencesError as Error).message);
       });
     Promise.all([
-      listCanvasProjects(),
+      listCanvasProjects(true),
       getCanvasDocument(projectId),
       listKeys(),
       listCanvasJobs(projectId),
@@ -525,6 +547,7 @@ function CanvasEditorInner({
       cancelled = true;
       if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
       if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
+      if (resizePreviewFrame.current !== null) window.cancelAnimationFrame(resizePreviewFrame.current);
     };
   }, [projectId]);
 
@@ -876,19 +899,51 @@ function CanvasEditorInner({
     setDirtySignal(dirtyVersion.current);
   }, []);
 
+  const previewNodeResize = useCallback((nodeId: string, layout: Omit<LiveNodeLayout, 'nodeId'>) => {
+    activeResizeNodeId.current = nodeId;
+    pendingLiveNodeLayout.current = { nodeId, ...layout };
+    if (resizePreviewFrame.current !== null) return;
+    resizePreviewFrame.current = window.requestAnimationFrame(() => {
+      resizePreviewFrame.current = null;
+      setLiveNodeLayout(pendingLiveNodeLayout.current);
+    });
+  }, []);
+
+  const completeNodeResize = useCallback((nodeId: string, layout: Omit<LiveNodeLayout, 'nodeId'>) => {
+    activeResizeNodeId.current = null;
+    pendingLiveNodeLayout.current = null;
+    if (resizePreviewFrame.current !== null) window.cancelAnimationFrame(resizePreviewFrame.current);
+    resizePreviewFrame.current = null;
+    setLiveNodeLayout(null);
+    commit(current => ({
+      ...current,
+      nodes: current.nodes.map(node => node.id === nodeId ? {
+        ...node,
+        position: layout.position,
+        size: layout.size,
+      } : node),
+    }));
+  }, [commit]);
+
   const flowNodes = useMemo<FlowNode[]>(() => {
     const activeIds = new Set<string>();
     const maximumPersistedZIndex = Math.max(0, ...(document?.nodes ?? []).map(node => node.z_index));
     const next = (document?.nodes ?? []).map(node => {
       activeIds.add(node.id);
       const selected = selectedNodeIds.has(node.id);
+      const liveLayout = liveNodeLayout?.nodeId === node.id ? liveNodeLayout : undefined;
       const cached = flowNodeCache.current.get(node.id);
-      if (cached?.node === node && cached.selected === selected) return cached.flowNode;
-      const renderedSize = canvasNodeRenderedSize(node, document?.content_versions ?? {});
+      if (
+        cached?.node === node
+        && cached.selected === selected
+        && cached.liveLayout === liveLayout
+      ) return cached.flowNode;
+      const renderedSize = liveLayout?.size
+        ?? canvasNodeRenderedSize(node, document?.content_versions ?? {});
       const flowNode: FlowNode = {
         id: node.id,
         type: 'canvasNode',
-        position: node.position,
+        position: liveLayout?.position ?? node.position,
         style: {
           width: renderedSize.width,
           height: renderedSize.height,
@@ -897,14 +952,14 @@ function CanvasEditorInner({
         selected,
         data: { domain: node },
       };
-      flowNodeCache.current.set(node.id, { node, selected, flowNode });
+      flowNodeCache.current.set(node.id, { node, selected, liveLayout, flowNode });
       return flowNode;
     });
     for (const id of flowNodeCache.current.keys()) {
       if (!activeIds.has(id)) flowNodeCache.current.delete(id);
     }
     return next;
-  }, [document?.content_versions, document?.nodes, selectedNodeIds]);
+  }, [document?.content_versions, document?.nodes, liveNodeLayout, selectedNodeIds]);
 
   const activeNodeId = hoveredNodeId ?? (
     selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value ?? null : null
@@ -951,7 +1006,13 @@ function CanvasEditorInner({
         return next;
       });
     }
-    const graphChanges = changes.filter(change => change.type === 'position' || change.type === 'remove');
+    const graphChanges = changes.filter(change => (
+      change.type === 'remove'
+      || (
+        change.type === 'position'
+        && activeResizeNodeId.current !== change.id
+      )
+    ));
     if (!graphChanges.length) return;
     commit(current => {
       let nodes = [...current.nodes];
@@ -968,6 +1029,14 @@ function CanvasEditorInner({
         edge => removedNodeIds.has(edge.source_node_id) || removedNodeIds.has(edge.target_node_id),
       );
     }, graphChanges.some(change => change.type === 'remove'));
+    const removedIds = new Set(changes.flatMap(change => change.type === 'remove' ? [change.id] : []));
+    if (activeResizeNodeId.current && removedIds.has(activeResizeNodeId.current)) {
+      activeResizeNodeId.current = null;
+      pendingLiveNodeLayout.current = null;
+      if (resizePreviewFrame.current !== null) window.cancelAnimationFrame(resizePreviewFrame.current);
+      resizePreviewFrame.current = null;
+      setLiveNodeLayout(null);
+    }
   }, [commit]);
 
   const onConnect = useCallback((connection: Connection) => {
@@ -2936,6 +3005,8 @@ function CanvasEditorInner({
     cancelRun,
     dismissCandidate,
     updateNode,
+    previewNodeResize,
+    completeNodeResize,
     renameNode,
     updateText,
     createImageConfigFromText,
@@ -2960,6 +3031,7 @@ function CanvasEditorInner({
     canvasUiPreferences,
     canvasUiPreferencesError,
     connectedMaterialNodeIdsByNodeId,
+    completeNodeResize,
     copyPrompt,
     createImageConfigFromText,
     deleteNode,
@@ -3002,6 +3074,7 @@ function CanvasEditorInner({
     toggleFreeResize,
     updateNode,
     updateText,
+    previewNodeResize,
     viewportZoom,
     videoFrameNodeIdsByNodeId,
   ]);

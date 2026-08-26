@@ -2045,6 +2045,14 @@ def get_canvas_projects() -> CanvasProjectList:
     return CanvasProjectList(projects=list_canvas_projects())
 
 
+@router.get("/canvas/project-options", response_model=list[CanvasProject])
+def get_canvas_project_options() -> list[CanvasProject]:
+    from character_workflow.lib.canvas_packages import recover_canvas_package_transactions
+    from character_workflow.lib.canvas_projects import list_canvas_project_options
+    recover_canvas_package_transactions()
+    return list_canvas_project_options()
+
+
 @router.get("/canvas/ui-preferences", response_model=CanvasUiPreferences)
 def get_canvas_ui_preferences() -> CanvasUiPreferences:
     from character_workflow.lib.canvas_ui import (

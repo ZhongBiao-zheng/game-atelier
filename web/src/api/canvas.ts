@@ -18,7 +18,14 @@ import type {
   CanvasUpload,
 } from '@/schema/canvas';
 
-export async function listCanvasProjects(): Promise<CanvasProjectSummary[]> {
+export function listCanvasProjects(lightweight: true): Promise<CanvasProject[]>;
+export function listCanvasProjects(lightweight?: false): Promise<CanvasProjectSummary[]>;
+export async function listCanvasProjects(
+  lightweight = false,
+): Promise<CanvasProject[] | CanvasProjectSummary[]> {
+  if (lightweight) {
+    return requestJson<CanvasProject[]>('/api/canvas/project-options', '读取画布项目选项');
+  }
   const data = await requestJson<{ projects: CanvasProjectSummary[] }>(
     '/api/canvas/projects',
     '读取画布项目',

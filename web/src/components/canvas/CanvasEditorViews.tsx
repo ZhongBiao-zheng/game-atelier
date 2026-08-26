@@ -1,4 +1,13 @@
-import { Handle, NodeResizer, NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react';
+import {
+  Handle,
+  NodeResizer,
+  NodeToolbar,
+  Position,
+  type Node,
+  type NodeProps,
+  type OnResize,
+  type OnResizeEnd,
+} from '@xyflow/react';
 import { ArrowLeftRight, Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
 import { createPortal } from 'react-dom';
@@ -55,6 +64,8 @@ import type {
   CanvasImageQuickToolId,
   CanvasImageToolbarPreferences,
   CanvasNode,
+  CanvasPoint,
+  CanvasSize,
   CanvasUiPreferences,
   CanvasVideoFrameSlot,
 } from '@/schema/canvas';
@@ -125,6 +136,8 @@ export interface CanvasNodeContextValue {
   cancelRun: (runId: string) => Promise<void>;
   dismissCandidate: (runId: string, candidateId: string) => Promise<void>;
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
+  previewNodeResize?: (id: string, layout: { position: CanvasPoint; size: CanvasSize }) => void;
+  completeNodeResize?: (id: string, layout: { position: CanvasPoint; size: CanvasSize }) => void;
   renameNode: (id: string, title: string) => void;
   updateText: (id: string, text: string) => void;
   createImageConfigFromText: (id: string) => void;
@@ -218,6 +231,24 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   useEffect(() => {
     if (!context?.materialPick || !materialPickEligible) setMaterialPickPointer(null);
   }, [context?.materialPick, materialPickEligible]);
+  const recordNodeResizeHistory = context?.recordHistory;
+  const previewNodeResize = context?.previewNodeResize;
+  const completeNodeResize = context?.completeNodeResize;
+  const handleResizeStart = useCallback(() => {
+    recordNodeResizeHistory?.();
+  }, [recordNodeResizeHistory]);
+  const handleResize = useCallback<OnResize>((_, params) => {
+    previewNodeResize?.(node.id, {
+      position: { x: params.x, y: params.y },
+      size: { width: params.width, height: params.height },
+    });
+  }, [node.id, previewNodeResize]);
+  const handleResizeEnd = useCallback<OnResizeEnd>((_, params) => {
+    completeNodeResize?.(node.id, {
+      position: { x: params.x, y: params.y },
+      size: { width: params.width, height: params.height },
+    });
+  }, [completeNodeResize, node.id]);
 
   function moveMaterialPickTooltip(clientX: number, clientY: number) {
     setMaterialPickPointer({
@@ -307,11 +338,9 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         color="var(--primary)"
         handleClassName="canvas-node-resize-handle"
         lineClassName="canvas-node-resize-line"
-        onResizeStart={context.recordHistory}
-        onResizeEnd={(_, params) => context.updateNode(node.id, current => ({
-          ...current,
-          size: { width: params.width, height: params.height },
-        }))}
+        onResizeStart={handleResizeStart}
+        onResize={handleResize}
+        onResizeEnd={handleResizeEnd}
       />
       <header className="absolute bottom-full left-0 right-0 flex items-center pb-2 text-xs text-muted-foreground">
         <span
