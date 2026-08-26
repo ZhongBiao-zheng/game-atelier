@@ -454,9 +454,9 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         aria-busy={replacingMedia || nodeRunState.status === 'loading'}
         aria-label={`选择节点 ${node.title}，${nodeRunState.label}`}
         className={cn(
-          'relative h-full overflow-hidden rounded-lg border bg-card/95 text-foreground transition-colors shell-glow',
+          'group/material relative h-full overflow-hidden rounded-lg border bg-card/95 text-foreground transition-colors shell-glow',
           selected ? 'border-primary' : 'border-border',
-          context.materialPick && materialPickEligible && 'cursor-copy border-primary',
+          context.materialPick && materialPickEligible && 'cursor-copy hover:border-primary focus-visible:border-primary',
           context.materialPick && !materialPickEligible && 'cursor-default',
         )}
         onClick={event => {
@@ -479,6 +479,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           context.selectNode(node.id);
         }}
       >
+        {context.materialPick && materialPickEligible && (
+          <span className="pointer-events-none absolute left-3 top-3 z-30 rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium text-foreground opacity-0 backdrop-blur-glass transition-opacity duration-150 shell-glow group-hover/material:opacity-100 group-focus-within/material:opacity-100">
+            选择 {node.title}
+          </span>
+        )}
         {context.mediaReplaceError?.nodeId === node.id && (
           <p
             role="alert"

@@ -166,6 +166,7 @@ import { cn } from '@/lib/utils';
 import {
   buildCanvasMaterialReferences,
   buildCanvasMentionReferences,
+  removeCanvasMentionTokens,
 } from '@/lib/canvasMentions';
 import { shouldPreventCanvasHistoryNavigation } from '@/lib/canvasTrackpad';
 import {
@@ -954,15 +955,18 @@ function CanvasEditorInner({
     if (!graphChanges.length) return;
     commit(current => {
       let nodes = [...current.nodes];
-      let connections = current.connections;
+      const removedNodeIds = new Set<string>();
       for (const change of graphChanges) {
         if (change.type === 'position' && change.position) nodes = nodes.map(node => node.id === change.id ? { ...node, position: change.position! } : node);
         if (change.type === 'remove') {
+          removedNodeIds.add(change.id);
           nodes = nodes.filter(node => node.id !== change.id);
-          connections = connections.filter(edge => edge.source_node_id !== change.id && edge.target_node_id !== change.id);
         }
       }
-      return { ...current, nodes, connections };
+      return removeCanvasConnections(
+        { ...current, nodes },
+        edge => removedNodeIds.has(edge.source_node_id) || removedNodeIds.has(edge.target_node_id),
+      );
     }, graphChanges.some(change => change.type === 'remove'));
   }, [commit]);
 
@@ -1015,10 +1019,10 @@ function CanvasEditorInner({
       removedIds.forEach(id => next.delete(id));
       return next;
     });
-    commit(current => ({
-      ...current,
-      connections: current.connections.filter(connection => !removedIds.has(connection.id)),
-    }), true);
+    commit(current => removeCanvasConnections(
+      current,
+      connection => removedIds.has(connection.id),
+    ), true);
   }, [commit, onConnect]);
 
   const setVideoFrameConnections = useCallback((
@@ -1132,17 +1136,25 @@ function CanvasEditorInner({
       return next;
     });
     const removedIds = new Set(changes.filter(change => change.type === 'remove').map(change => change.id));
-    if (removedIds.size) commit(current => ({ ...current, connections: current.connections.filter(edge => !removedIds.has(edge.id)) }), true);
+    if (removedIds.size) {
+      commit(current => removeCanvasConnections(
+        current,
+        edge => removedIds.has(edge.id),
+      ), true);
+    }
   }, [commit]);
 
   const deleteSelection = useCallback(() => {
     if (selectedNodeIds.size === 0 && selectedConnectionIds.size === 0) return;
     const nodeIds = selectedNodeIds;
-    commit(current => ({
-      ...current,
-      nodes: current.nodes.filter(node => !nodeIds.has(node.id)),
-      connections: current.connections.filter(edge => !selectedConnectionIds.has(edge.id) && !nodeIds.has(edge.source_node_id) && !nodeIds.has(edge.target_node_id)),
-    }), true);
+    commit(current => {
+      const next = removeCanvasConnections(current, edge => (
+        selectedConnectionIds.has(edge.id)
+        || nodeIds.has(edge.source_node_id)
+        || nodeIds.has(edge.target_node_id)
+      ));
+      return { ...next, nodes: next.nodes.filter(node => !nodeIds.has(node.id)) };
+    }, true);
     setSelectedNodeIds(new Set());
     setSelectedConnectionIds(new Set());
     requestAnimationFrame(() => editorRegionRef.current?.focus());
@@ -1725,11 +1737,12 @@ function CanvasEditorInner({
   }, [commit]);
 
   const deleteNode = useCallback((nodeId: string) => {
-    commit(current => ({
-      ...current,
-      nodes: current.nodes.filter(node => node.id !== nodeId),
-      connections: current.connections.filter(edge => edge.source_node_id !== nodeId && edge.target_node_id !== nodeId),
-    }), true);
+    commit(current => {
+      const next = removeCanvasConnections(current, edge => (
+        edge.source_node_id === nodeId || edge.target_node_id === nodeId
+      ));
+      return { ...next, nodes: next.nodes.filter(node => node.id !== nodeId) };
+    }, true);
     setSelectedNodeIds(current => {
       if (!current.has(nodeId)) return current;
       const next = new Set(current);
@@ -3833,6 +3846,51 @@ function generationDraftForNode(node: CanvasNode) {
   if (node.type === 'config') return node.data.draft;
   if ('generation_draft' in node.data) return node.data.generation_draft;
   return null;
+}
+
+function withGenerationDraftForNode(
+  node: CanvasNode,
+  draft: CanvasGenerationDraft,
+): CanvasNode {
+  if (node.type === 'config') return { ...node, data: { draft } };
+  if ('generation_draft' in node.data) {
+    return { ...node, data: { ...node.data, generation_draft: draft } } as CanvasNode;
+  }
+  return node;
+}
+
+function removeCanvasConnections(
+  document: CanvasDocument,
+  shouldRemove: (connection: CanvasConnection) => boolean,
+): CanvasDocument {
+  const removed = document.connections.filter(shouldRemove);
+  if (removed.length === 0) return document;
+  const connections = document.connections.filter(connection => !shouldRemove(connection));
+  const remainingPairs = new Set(connections.flatMap(connection => (
+    connection.role === 'input' && !connection.slot
+      ? [`${connection.source_node_id}\u0000${connection.target_node_id}`]
+      : []
+  )));
+  const disconnectedByTarget = new Map<string, Set<string>>();
+  for (const connection of removed) {
+    if (connection.role !== 'input' || connection.slot) continue;
+    const pair = `${connection.source_node_id}\u0000${connection.target_node_id}`;
+    if (remainingPairs.has(pair)) continue;
+    const nodeIds = disconnectedByTarget.get(connection.target_node_id) ?? new Set<string>();
+    nodeIds.add(connection.source_node_id);
+    disconnectedByTarget.set(connection.target_node_id, nodeIds);
+  }
+  if (disconnectedByTarget.size === 0) return { ...document, connections };
+  const updatedAt = new Date().toISOString();
+  const nodes = document.nodes.map(node => {
+    const disconnectedNodeIds = disconnectedByTarget.get(node.id);
+    const draft = generationDraftForNode(node);
+    if (!disconnectedNodeIds || !draft) return node;
+    const prompt = removeCanvasMentionTokens(draft.prompt, disconnectedNodeIds);
+    if (prompt === draft.prompt) return node;
+    return withGenerationDraftForNode(node, { ...draft, prompt, updated_at: updatedAt });
+  });
+  return { ...document, nodes, connections };
 }
 
 function useNarrowCanvasViewport() {

@@ -432,28 +432,22 @@ function promptNodes(
   let lastIndex = 0;
   for (const match of canvasMentionMatches(value)) {
     if (match.index > lastIndex) nodes.push(document.createTextNode(value.slice(lastIndex, match.index)));
-    nodes.push(mentionChip(references.get(match.nodeId), match.nodeId));
+    const reference = references.get(match.nodeId);
+    if (reference) nodes.push(mentionChip(reference));
     lastIndex = match.index + match.token.length;
   }
   if (lastIndex < value.length) nodes.push(document.createTextNode(value.slice(lastIndex)));
   return nodes.length ? nodes : [document.createTextNode('')];
 }
 
-function mentionChip(reference: CanvasMentionReference | undefined, nodeId?: string): HTMLElement {
-  const id = reference?.nodeId ?? nodeId ?? '';
+function mentionChip(reference: CanvasMentionReference): HTMLElement {
+  const id = reference.nodeId;
   const wrapper = document.createElement('span');
   wrapper.setAttribute('contenteditable', 'false');
   wrapper.tabIndex = 0;
   wrapper.dataset.canvasMentionId = id;
   wrapper.dataset.canvasMentionToken = canvasMentionToken(id);
   wrapper.className = 'mx-0.5 inline-flex h-7 max-w-40 items-center gap-1 overflow-hidden rounded-md border border-border bg-secondary px-1.5 align-middle text-xs leading-none text-foreground';
-  if (!reference) {
-    wrapper.className += ' border-destructive/70 text-destructive';
-    wrapper.setAttribute('aria-label', `引用已断开：${id}`);
-    wrapper.title = `引用已断开：${id}`;
-    wrapper.textContent = '引用已断开';
-    return wrapper;
-  }
   wrapper.setAttribute('aria-describedby', `canvas-material-detail-${id}`);
   wrapper.setAttribute('aria-label', `引用${mentionKindLabel(reference.kind)}：${reference.title}`);
   wrapper.title = `${reference.label} · ${reference.title}`;

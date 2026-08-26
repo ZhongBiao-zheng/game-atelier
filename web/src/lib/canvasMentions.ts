@@ -45,6 +45,16 @@ export function canvasMentionMatches(prompt: string): CanvasMentionMatch[] {
   }));
 }
 
+export function removeCanvasMentionTokens(
+  prompt: string,
+  nodeIds: ReadonlySet<string>,
+): string {
+  if (nodeIds.size === 0) return prompt;
+  return prompt.replace(MENTION_PATTERN, (token, nodeId: string) => (
+    nodeIds.has(nodeId) ? '' : token
+  ));
+}
+
 export function missingCanvasMentionIds(
   prompt: string,
   references: readonly CanvasMentionReference[],
