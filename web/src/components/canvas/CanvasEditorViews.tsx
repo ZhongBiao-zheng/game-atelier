@@ -392,6 +392,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           {emptyMediaNode ? (
             <MediaToolButton
               label={`上传${CANVAS_GENERATION_MODE_LABELS[emptyMediaNode.type]}`}
+              text="上传附件"
               disabled={replacingMedia}
               onClick={() => context.replaceMedia(emptyMediaNode)}
             >

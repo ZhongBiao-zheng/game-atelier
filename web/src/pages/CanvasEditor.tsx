@@ -1083,6 +1083,9 @@ function CanvasEditorInner({
       ...request,
       selectableNodeIds: new Set(request.selectableNodeIds),
     });
+    setAddOpen(false);
+    setCreateMenu(null);
+    setLibraryMode(null);
     setSelectedConnectionIds(new Set());
     setSelectedNodeIds(new Set([request.targetNodeId]));
   }, []);
@@ -3057,8 +3060,11 @@ function CanvasEditorInner({
           }}
           onMove={(_, viewport: Viewport) => setViewportZoom(viewport.zoom)}
           onPaneClick={() => {
-            setMaterialPick(null);
             setCreateMenu(null);
+            if (materialPick) {
+              requestAnimationFrame(() => editorRegionRef.current?.focus());
+              return;
+            }
             setSelectedConnectionIds(new Set());
             setSelectedNodeIds(new Set());
             requestAnimationFrame(() => editorRegionRef.current?.focus());
@@ -3100,7 +3106,7 @@ function CanvasEditorInner({
           } as CSSProperties}
         >
           {background && <Background variant={background} gap={22} size={1} />}
-          {document.settings.show_minimap && (
+          {document.settings.show_minimap && !materialPick && (
             <MiniMap
               position="bottom-left"
               className="canvas-minimap hidden sm:block"
@@ -3154,7 +3160,8 @@ function CanvasEditorInner({
           </div>
         )}
 
-        <div className="canvas-zoom-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
+        {!materialPick && (
+          <div className="canvas-zoom-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
           <button
             type="button"
             aria-label="缩小画布"
@@ -3217,7 +3224,29 @@ function CanvasEditorInner({
               void runViewportCommand(() => zoomTo(1, { duration: 150 }));
             }}
           ><Scan className="size-4" aria-hidden="true" /></button>
-        </div>
+          </div>
+        )}
+
+        {materialPick && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="pointer-events-auto absolute left-1/2 top-3 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary py-1 pl-4 pr-1 text-xs font-medium text-primary-foreground shell-glow sm:top-4"
+          >
+            <span>从画布选择参考</span>
+            <button
+              type="button"
+              aria-label="退出画布参考选择"
+              className="rounded-full bg-background/20 px-2.5 py-1 text-primary-foreground transition-colors hover:bg-background/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground"
+              onClick={() => {
+                setMaterialPick(null);
+                requestAnimationFrame(() => editorRegionRef.current?.focus());
+              }}
+            >
+              退出
+            </button>
+          </div>
+        )}
 
         <div className="canvas-editor-top pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-start gap-2 p-2 sm:gap-3 sm:p-3 md:p-4">
           <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow">
@@ -3275,7 +3304,8 @@ function CanvasEditorInner({
           </div>
         </div>
 
-        <div className="canvas-mobile-rail absolute left-3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-1 rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:contents">
+        {!materialPick && (
+          <div className="canvas-mobile-rail absolute left-3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-1 rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:contents">
           <div className="canvas-tool-dock contents md:absolute md:z-20 md:flex md:-translate-x-1/2 md:items-center md:gap-1 md:rounded-full md:border md:border-border md:bg-glass md:p-1.5 md:backdrop-blur-glass md:shell-glow">
             <span className="xl:hidden">
               <ToolButton buttonRef={addTriggerRef} label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} expanded={addOpen} controlsId="canvas-add-menu" onClick={() => { setCreateMenu(null); setAddOpen(value => !value); }}>{addOpen ? <X /> : <Plus />}</ToolButton>
@@ -3390,24 +3420,26 @@ function CanvasEditorInner({
               <CanvasCreateMenuItems allowEmptyNodes allowUpload allowConfig onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onAddConfig={() => addConfigNode(null)} onUpload={() => uploadRef.current?.click()} />
             </div>
           )}
-          <input ref={uploadRef} type="file" className="sr-only" accept="image/*,video/*,audio/*" onChange={event => { const file = event.target.files?.[0]; if (file) void handleUpload(file); event.target.value = ''; }} />
-          <input
-            ref={replaceMediaRef}
-            type="file"
-            className="sr-only"
-            aria-label={mediaReplaceTarget
-              ? mediaReplaceTarget.hadContent ? '选择替换媒体' : '选择上传媒体'
-              : '选择节点媒体文件'}
-            accept={mediaReplaceTarget ? replacementAccept(mediaReplaceTarget.kind) : undefined}
-            onChange={event => {
-              const file = event.target.files?.[0];
-              const target = mediaReplaceTarget;
-              if (file && target) void handleMediaReplace(file, target);
-              else setMediaReplaceTarget(null);
-              event.target.value = '';
-            }}
-          />
-        </div>
+          </div>
+        )}
+
+        <input ref={uploadRef} type="file" className="sr-only" accept="image/*,video/*,audio/*" onChange={event => { const file = event.target.files?.[0]; if (file) void handleUpload(file); event.target.value = ''; }} />
+        <input
+          ref={replaceMediaRef}
+          type="file"
+          className="sr-only"
+          aria-label={mediaReplaceTarget
+            ? mediaReplaceTarget.hadContent ? '选择替换媒体' : '选择上传媒体'
+            : '选择节点媒体文件'}
+          accept={mediaReplaceTarget ? replacementAccept(mediaReplaceTarget.kind) : undefined}
+          onChange={event => {
+            const file = event.target.files?.[0];
+            const target = mediaReplaceTarget;
+            if (file && target) void handleMediaReplace(file, target);
+            else setMediaReplaceTarget(null);
+            event.target.value = '';
+          }}
+        />
 
         {createMenu && (
           <div ref={createMenuRef} role="menu" aria-label="连接创建节点" onKeyDown={handleMenuNavigation} className="fixed z-20 w-56 rounded-xl border border-border bg-popover p-2 shell-glow" style={{ left: createMenu.screen.x, top: createMenu.screen.y }}>
