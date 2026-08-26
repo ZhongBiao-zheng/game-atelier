@@ -322,7 +322,8 @@
     display: none;
   }
   .canvas-library-panel {
-    left: calc(max(0.75rem, env(safe-area-inset-left)) + 3.5rem);
+    right: max(0.75rem, env(safe-area-inset-right));
+    left: auto;
     bottom: max(0.75rem, env(safe-area-inset-bottom));
   }
   .canvas-zoom-dock {
@@ -513,17 +514,33 @@
     }
     .canvas-tool-dock {
       right: auto;
-      bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 4.25rem);
-      left: 50%;
+      bottom: auto;
+      left: max(1rem, env(safe-area-inset-left));
+      top: calc(50% - 4rem);
+      overscroll-behavior: contain;
+      scrollbar-color: var(--muted-foreground) transparent;
+      scrollbar-width: thin;
+      transform: translateY(-50%);
+    }
+    .canvas-tool-dock::-webkit-scrollbar {
+      width: 4px;
+    }
+    .canvas-tool-dock::-webkit-scrollbar-thumb {
+      border-radius: 999px;
+      background: var(--muted-foreground);
     }
     .canvas-add-menu {
-      bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 8.25rem);
+      bottom: auto;
+      left: calc(max(1rem, env(safe-area-inset-left)) + 3.75rem);
+      top: calc(50% - 4rem);
+      transform: translateY(-50%);
     }
     .canvas-flow .react-flow__minimap.canvas-minimap {
       left: max(15px, env(safe-area-inset-left)) !important;
     }
     .canvas-library-panel {
-      left: max(1rem, env(safe-area-inset-left));
+      right: max(1rem, env(safe-area-inset-right));
+      left: auto;
       bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 3.375rem);
     }
   }

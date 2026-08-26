@@ -3499,15 +3499,15 @@ function CanvasEditorInner({
 
         {!materialPick && (
           <div className="canvas-mobile-rail absolute left-3 top-1/2 z-20 flex max-h-[calc(100dvh-8rem)] -translate-y-1/2 flex-col items-center gap-1 overflow-y-auto rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:contents md:max-h-none md:overflow-visible">
-          <div className="canvas-tool-dock contents md:absolute md:z-20 md:flex md:-translate-x-1/2 md:items-center md:gap-1 md:rounded-full md:border md:border-border md:bg-glass md:p-1.5 md:backdrop-blur-glass md:shell-glow">
+          <div className="canvas-tool-dock contents md:absolute md:z-20 md:flex md:max-h-[calc(100dvh-17rem)] md:flex-col md:items-center md:gap-0 md:overflow-y-auto md:rounded-full md:border md:border-border md:bg-glass md:p-1.5 md:backdrop-blur-glass md:shell-glow">
             <span className="xl:hidden">
               <ToolButton buttonRef={addTriggerRef} label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} expanded={addOpen} controlsId="canvas-add-menu" onClick={() => { setCreateMenu(null); setAddOpen(value => !value); }}>{addOpen ? <X /> : <Plus />}</ToolButton>
             </span>
             <ToolButton label="选择工具" active={!addOpen && !createMenu} onClick={() => { setAddOpen(false); setCreateMenu(null); }}><MousePointer2 /></ToolButton>
-            <div className="my-1 h-px w-7 bg-border md:mx-1 md:my-0 md:h-7 md:w-px" />
+            <div className="my-1 h-px w-7 bg-border" />
             <ToolButton label="撤销" disabled={history.current.past.length === 0} onClick={undo}><Undo2 /></ToolButton>
             <ToolButton label="重做" disabled={history.current.future.length === 0} onClick={redo}><Redo2 /></ToolButton>
-            <div className="my-1 h-px w-7 bg-border md:mx-1 md:my-0 md:h-7 md:w-px" />
+            <div className="my-1 h-px w-7 bg-border" />
             <div className="hidden xl:contents">
               <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><Type /></ToolButton>
               <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><FileImage /></ToolButton>
@@ -3515,7 +3515,7 @@ function CanvasEditorInner({
               <ToolButton label="添加音频节点" onClick={() => addGenerationNode('audio', null)}><FileAudio /></ToolButton>
               <ToolButton label="添加生成配置节点" onClick={() => addConfigNode(null)}><WandSparkles /></ToolButton>
               <ToolButton label="上传素材" onClick={() => uploadRef.current?.click()}><Upload /></ToolButton>
-              <div className="mx-1 h-7 w-px bg-border" />
+              <div className="my-1 h-px w-7 bg-border" />
             </div>
             <ToolButton label="适应全部节点" onClick={() => {
               void runViewportCommand(() => fitView({ duration: 150, padding: 0.12 }));
@@ -3523,7 +3523,7 @@ function CanvasEditorInner({
           </div>
           {narrowViewport && <div className="canvas-config-dock contents">{renderCanvasConfigControls('mobile')}</div>}
           {addOpen && (
-            <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow md:left-1/2 md:top-auto md:-translate-x-1/2">
+            <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>
               <CanvasCreateMenuItems allowEmptyNodes allowUpload allowConfig onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onAddConfig={() => addConfigNode(null)} onUpload={() => uploadRef.current?.click()} />
             </div>
