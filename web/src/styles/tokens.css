@@ -304,6 +304,9 @@
     outline: 1px solid var(--ring);
     outline-offset: -1px;
   }
+  .canvas-library-search-input {
+    padding-left: 2.25rem;
+  }
 
   .canvas-editor-top {
     padding-top: max(0.5rem, env(safe-area-inset-top));
@@ -312,6 +315,11 @@
   }
   .canvas-mobile-rail {
     left: max(0.75rem, env(safe-area-inset-left));
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+  .canvas-mobile-rail::-webkit-scrollbar {
+    display: none;
   }
   .canvas-library-panel {
     left: calc(max(0.75rem, env(safe-area-inset-left)) + 3.5rem);
@@ -505,15 +513,11 @@
     }
     .canvas-tool-dock {
       right: auto;
-      bottom: max(0.75rem, env(safe-area-inset-bottom));
+      bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 4.25rem);
       left: 50%;
     }
     .canvas-add-menu {
-      bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 4rem);
-    }
-    .canvas-config-dock {
-      top: max(1rem, env(safe-area-inset-top));
-      right: max(1rem, env(safe-area-inset-right));
+      bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 8.25rem);
     }
     .canvas-flow .react-flow__minimap.canvas-minimap {
       left: max(15px, env(safe-area-inset-left)) !important;
@@ -524,12 +528,6 @@
     }
   }
   @media (min-width: 48rem) and (max-width: 63.999rem) {
-    .canvas-tool-dock {
-      bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 4.25rem);
-    }
-    .canvas-add-menu {
-      bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 8.25rem);
-    }
     .canvas-library-panel {
       bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 8.125rem);
     }

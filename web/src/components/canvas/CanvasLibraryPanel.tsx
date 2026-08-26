@@ -170,15 +170,15 @@ export function CanvasLibraryPanel({
         </header>
 
         <div className="grid grid-cols-2 border-b border-border p-1.5" role="group" aria-label="创作库类型">
-          <button type="button" aria-pressed={mode === 'assets'} onClick={() => onModeChange('assets')} className={cn('rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground', mode === 'assets' && 'bg-secondary text-foreground')}>资产</button>
-          <button type="button" aria-pressed={mode === 'prompts'} onClick={() => onModeChange('prompts')} className={cn('rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground', mode === 'prompts' && 'bg-secondary text-foreground')}>提示词</button>
+          <button type="button" aria-pressed={mode === 'assets'} onClick={() => onModeChange('assets')} className={cn('rounded-md px-3 py-2 text-sm text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary', mode === 'assets' && 'bg-secondary text-foreground')}>资产</button>
+          <button type="button" aria-pressed={mode === 'prompts'} onClick={() => onModeChange('prompts')} className={cn('rounded-md px-3 py-2 text-sm text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary', mode === 'prompts' && 'bg-secondary text-foreground')}>提示词</button>
         </div>
 
         <div className="p-3 pb-2">
           <label className="relative block">
             <span className="sr-only">搜索{mode === 'assets' ? '资产' : '提示词'}</span>
-            <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" aria-hidden="true" />
-            <input value={query} onChange={event => setQuery(event.target.value)} placeholder={`搜索${mode === 'assets' ? '资产' : '提示词'}或标签`} className="canvas-input pl-9" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <input value={query} onChange={event => setQuery(event.target.value)} placeholder={`搜索${mode === 'assets' ? '资产' : '提示词'}或标签`} className="canvas-input canvas-library-search-input" />
           </label>
           {mode === 'prompts' && !promptDraft && (
             <Button variant="outline" size="sm" className="mt-2 w-full" disabled={busy || !prompts} onClick={() => { setDraftError(null); setPromptDraft({ title: '', content: '', tags: '' }); }}><Plus />新建提示词</Button>

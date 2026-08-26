@@ -299,6 +299,7 @@ const CANVAS_MOUSE_PAN_BUTTONS: number[] = [];
 const CANVAS_NODE_CLIPBOARD_TYPE = 'application/x-game-atelier-canvas-nodes';
 const CANVAS_MIN_ZOOM = 0.08;
 const CANVAS_MAX_ZOOM = 2.5;
+const CANVAS_CHROME_BUTTON_CLASS = 'grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
 export function CanvasEditor(props: {
   projectId: string;
@@ -3117,6 +3118,98 @@ function CanvasEditorInner({
     : null;
   const maskEditDraft = maskEditNode ? generationDraftForNode(maskEditNode) : null;
 
+  const renderCanvasConfigControls = (placement: 'mobile' | 'desktop') => (
+    <>
+      <button
+        type="button"
+        title={document.settings.show_minimap ? '关闭小地图' : '打开小地图'}
+        aria-label={document.settings.show_minimap ? '关闭小地图' : '打开小地图'}
+        aria-pressed={document.settings.show_minimap}
+        className={cn(
+          CANVAS_CHROME_BUTTON_CLASS,
+          document.settings.show_minimap && 'bg-secondary text-foreground',
+        )}
+        onClick={() => commit(current => ({
+          ...current,
+          settings: { ...current.settings, show_minimap: !current.settings.show_minimap },
+        }), true)}
+      ><MapPinned /></button>
+      <ToolButton buttonRef={assetLibraryTriggerRef} label="项目资产库" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); setLibraryMode(current => current === 'assets' ? null : 'assets'); }}><Library /></ToolButton>
+      <ToolButton buttonRef={promptLibraryTriggerRef} label="项目提示词库" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); setLibraryMode(current => current === 'prompts' ? null : 'prompts'); }}><WandSparkles /></ToolButton>
+      <ToolButton
+        buttonRef={generationPreferencesTriggerRef}
+        label="生成偏好"
+        active={generationPreferencesOpen}
+        expanded={generationPreferencesOpen}
+        controlsId="canvas-generation-preferences-dialog"
+        popup="dialog"
+        onClick={() => {
+          setAddOpen(false);
+          setCreateMenu(null);
+          setGenerationPreferencesOpen(true);
+        }}
+      ><Settings2 /></ToolButton>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            title="画布外观"
+            aria-label="画布外观"
+            className={cn(CANVAS_CHROME_BUTTON_CLASS, 'data-[state=open]:bg-primary data-[state=open]:text-primary-foreground')}
+          >
+            <Grid2X2 aria-hidden="true" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side={placement === 'mobile' ? 'right' : 'top'} align="start" className="w-48 rounded-xl">
+          <DropdownMenuLabel>主题</DropdownMenuLabel>
+          <CanvasThemeSelector />
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>画布背景</DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={document.settings.background}
+            onValueChange={value => {
+              if (value !== 'none' && value !== 'dots' && value !== 'lines') return;
+              if (value === document.settings.background) return;
+              commit(current => ({
+                ...current,
+                settings: { ...current.settings, background: value },
+              }), true);
+            }}
+          >
+            {([
+              ['none', '空白', Square],
+              ['dots', '点阵', CircleDot],
+              ['lines', '线框', Grid2X2],
+            ] as const).map(([value, label, Icon]) => (
+              <DropdownMenuRadioItem key={value} value={value} className="gap-2">
+                <Icon className="size-4" aria-hidden="true" />{label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuCheckboxItem
+            checked={document.settings.show_image_info}
+            className="gap-2"
+            onCheckedChange={checked => commit(current => ({
+              ...current,
+              settings: { ...current.settings, show_image_info: checked },
+            }), true)}
+          >
+            <Info className="size-4" aria-hidden="true" />显示图片信息
+          </DropdownMenuCheckboxItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <ToolButton
+        buttonRef={shortcutsTriggerRef}
+        label="快捷键"
+        expanded={shortcutsOpen}
+        controlsId="canvas-shortcuts-dialog"
+        popup="dialog"
+        onClick={() => setShortcutsOpen(true)}
+      ><CircleHelp /></ToolButton>
+    </>
+  );
+
   return (
     <CanvasNodeContext.Provider value={contextValue}>
       <section
@@ -3248,6 +3341,8 @@ function CanvasEditorInner({
 
         {!materialPick && (
           <div className="canvas-zoom-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
+          {!narrowViewport && renderCanvasConfigControls('desktop')}
+          <span className="mx-1 h-7 w-px bg-border" aria-hidden="true" />
           <button
             type="button"
             aria-label="缩小画布"
@@ -3340,22 +3435,34 @@ function CanvasEditorInner({
             <div className="h-6 w-px bg-border" />
             {projectRenameDraft === null ? (
               <div className="flex min-w-0 items-center">
-                <label className="relative min-w-0">
-                  <span className="sr-only">切换画布项目</span>
-                  <select
-                    value={projectId}
-                    title="双击重命名当前画布"
-                    onDoubleClick={event => {
-                      event.preventDefault();
-                      beginProjectRename();
-                    }}
-                    onChange={event => void persistNow().then(saved => { if (saved) onSwitchProject(event.target.value); })}
-                    className="h-9 max-w-24 appearance-none truncate rounded-md bg-transparent pl-2 pr-7 text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary sm:max-w-48"
-                  >
-                    {projects.map(project => <option key={project.project_id} value={project.project_id}>{project.name}</option>)}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                </label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      title="切换画布项目"
+                      className="flex h-9 min-w-0 max-w-28 items-center gap-1 rounded-md px-2 text-sm font-medium text-foreground outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:bg-secondary sm:max-w-52"
+                    >
+                      <span className="truncate">{projectName}</span>
+                      <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent side="bottom" align="start" className="min-w-44 rounded-xl">
+                    <DropdownMenuLabel>切换项目</DropdownMenuLabel>
+                    <DropdownMenuRadioGroup
+                      value={projectId}
+                      onValueChange={value => {
+                        if (value === projectId) return;
+                        void persistNow().then(saved => { if (saved) onSwitchProject(value); });
+                      }}
+                    >
+                      {projects.map(project => (
+                        <DropdownMenuRadioItem key={project.project_id} value={project.project_id}>
+                          <span className="max-w-52 truncate">{project.name}</span>
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <Button ref={projectRenameTriggerRef} variant="ghost" size="icon" className="size-8 shrink-0" aria-label={`重命名画布项目 ${projectName}`} onClick={beginProjectRename}>
                   <Pencil className="size-3.5" aria-hidden="true" />
                 </Button>
@@ -3391,7 +3498,7 @@ function CanvasEditorInner({
         </div>
 
         {!materialPick && (
-          <div className="canvas-mobile-rail absolute left-3 top-1/2 z-20 flex -translate-y-1/2 flex-col items-center gap-1 rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:contents">
+          <div className="canvas-mobile-rail absolute left-3 top-1/2 z-20 flex max-h-[calc(100dvh-8rem)] -translate-y-1/2 flex-col items-center gap-1 overflow-y-auto rounded-full border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:contents md:max-h-none md:overflow-visible">
           <div className="canvas-tool-dock contents md:absolute md:z-20 md:flex md:-translate-x-1/2 md:items-center md:gap-1 md:rounded-full md:border md:border-border md:bg-glass md:p-1.5 md:backdrop-blur-glass md:shell-glow">
             <span className="xl:hidden">
               <ToolButton buttonRef={addTriggerRef} label={addOpen ? '关闭添加菜单' : '添加节点'} active={addOpen} expanded={addOpen} controlsId="canvas-add-menu" onClick={() => { setCreateMenu(null); setAddOpen(value => !value); }}>{addOpen ? <X /> : <Plus />}</ToolButton>
@@ -3414,92 +3521,7 @@ function CanvasEditorInner({
               void runViewportCommand(() => fitView({ duration: 150, padding: 0.12 }));
             }}><Maximize2 /></ToolButton>
           </div>
-          <div className="canvas-config-dock contents md:absolute md:z-20 md:flex md:items-center md:gap-1 md:rounded-xl md:border md:border-border md:bg-glass md:p-1.5 md:backdrop-blur-glass md:shell-glow">
-            <ToolButton buttonRef={assetLibraryTriggerRef} label="项目资产库" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); setLibraryMode(current => current === 'assets' ? null : 'assets'); }}><Library /></ToolButton>
-            <ToolButton buttonRef={promptLibraryTriggerRef} label="项目提示词库" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); setLibraryMode(current => current === 'prompts' ? null : 'prompts'); }}><WandSparkles /></ToolButton>
-            <ToolButton
-              buttonRef={generationPreferencesTriggerRef}
-              label="生成偏好"
-              active={generationPreferencesOpen}
-              expanded={generationPreferencesOpen}
-              controlsId="canvas-generation-preferences-dialog"
-              popup="dialog"
-              onClick={() => {
-                setAddOpen(false);
-                setCreateMenu(null);
-                setGenerationPreferencesOpen(true);
-              }}
-            ><Settings2 /></ToolButton>
-            <div className="my-1 h-px w-7 bg-border md:mx-1 md:my-0 md:h-7 md:w-px" />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  title="画布外观"
-                  aria-label="画布外观"
-                  className="grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary data-[state=open]:bg-primary data-[state=open]:text-primary-foreground"
-                >
-                  <Grid2X2 aria-hidden="true" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side={narrowViewport ? 'right' : 'bottom'} align="end" className="w-48 rounded-xl">
-                <DropdownMenuLabel>主题</DropdownMenuLabel>
-                <CanvasThemeSelector />
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>画布背景</DropdownMenuLabel>
-                <DropdownMenuRadioGroup
-                  value={document.settings.background}
-                  onValueChange={value => {
-                    if (value !== 'none' && value !== 'dots' && value !== 'lines') return;
-                    if (value === document.settings.background) return;
-                    commit(current => ({
-                      ...current,
-                      settings: { ...current.settings, background: value },
-                    }), true);
-                  }}
-                >
-                  {([
-                    ['none', '空白', Square],
-                    ['dots', '点阵', CircleDot],
-                    ['lines', '线框', Grid2X2],
-                  ] as const).map(([value, label, Icon]) => (
-                    <DropdownMenuRadioItem key={value} value={value} className="gap-2">
-                      <Icon className="size-4" aria-hidden="true" />{label}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuCheckboxItem
-                  checked={document.settings.show_image_info}
-                  className="gap-2"
-                  onCheckedChange={checked => commit(current => ({
-                    ...current,
-                    settings: { ...current.settings, show_image_info: checked },
-                  }), true)}
-                >
-                  <Info className="size-4" aria-hidden="true" />显示图片信息
-                </DropdownMenuCheckboxItem>
-                <DropdownMenuCheckboxItem
-                  checked={document.settings.show_minimap}
-                  className="gap-2"
-                  onCheckedChange={checked => commit(current => ({
-                    ...current,
-                    settings: { ...current.settings, show_minimap: checked },
-                  }), true)}
-                >
-                  <MapPinned className="size-4" aria-hidden="true" />显示小地图
-                </DropdownMenuCheckboxItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <ToolButton
-              buttonRef={shortcutsTriggerRef}
-              label="快捷键"
-              expanded={shortcutsOpen}
-              controlsId="canvas-shortcuts-dialog"
-              popup="dialog"
-              onClick={() => setShortcutsOpen(true)}
-            ><CircleHelp /></ToolButton>
-          </div>
+          {narrowViewport && <div className="canvas-config-dock contents">{renderCanvasConfigControls('mobile')}</div>}
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow md:left-1/2 md:top-auto md:-translate-x-1/2">
               <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>
