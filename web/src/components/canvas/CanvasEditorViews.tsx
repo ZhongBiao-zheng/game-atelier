@@ -1,6 +1,7 @@
 import { Handle, NodeResizer, NodeToolbar, Position, type Node, type NodeProps } from '@xyflow/react';
 import { ArrowLeftRight, Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
+import { createPortal } from 'react-dom';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import type { KeyView } from '@/api/keys';
@@ -162,6 +163,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [toolbarOverlayOpen, setToolbarOverlayOpen] = useState(false);
   const [candidateBatchExpanded, setCandidateBatchExpanded] = useState(false);
+  const [materialPickPointer, setMaterialPickPointer] = useState<{ left: number; top: number } | null>(null);
   const draft = generationDraft(node);
   const uploadedImageMaterial = Boolean(
     context && isUploadedImageMaterialNode(node, context.contentVersions),
@@ -213,6 +215,16 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     setToolbarOverlayOpen(false);
     setCandidateBatchExpanded(false);
   }, [context?.multiSelectionActive]);
+  useEffect(() => {
+    if (!context?.materialPick || !materialPickEligible) setMaterialPickPointer(null);
+  }, [context?.materialPick, materialPickEligible]);
+
+  function moveMaterialPickTooltip(clientX: number, clientY: number) {
+    setMaterialPickPointer({
+      left: clientX + 14,
+      top: clientY + 14,
+    });
+  }
   if (!context) return null;
   const renameNode = context.renameNode;
   const content = contentForNode(node, context.contentVersions);
@@ -454,7 +466,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         aria-busy={replacingMedia || nodeRunState.status === 'loading'}
         aria-label={`选择节点 ${node.title}，${nodeRunState.label}`}
         className={cn(
-          'group/material relative h-full overflow-hidden rounded-lg border bg-card/95 text-foreground transition-colors shell-glow',
+          'relative h-full overflow-hidden rounded-lg border bg-card/95 text-foreground transition-colors shell-glow',
           selected ? 'border-primary' : 'border-border',
           context.materialPick && materialPickEligible && 'cursor-copy hover:border-primary focus-visible:border-primary',
           context.materialPick && !materialPickEligible && 'cursor-default',
@@ -462,6 +474,21 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         onClick={event => {
           event.stopPropagation();
           context.selectNode(node.id);
+        }}
+        onPointerMove={event => {
+          if (context.materialPick && materialPickEligible) {
+            moveMaterialPickTooltip(event.clientX, event.clientY);
+          }
+        }}
+        onPointerLeave={() => setMaterialPickPointer(null)}
+        onFocus={event => {
+          if (!context.materialPick || !materialPickEligible) return;
+          const bounds = event.currentTarget.getBoundingClientRect();
+          setMaterialPickPointer({ left: bounds.left + 12, top: bounds.top + 12 });
+        }}
+        onBlur={event => {
+          if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+          setMaterialPickPointer(null);
         }}
         onDoubleClick={event => {
           event.stopPropagation();
@@ -479,10 +506,14 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           context.selectNode(node.id);
         }}
       >
-        {context.materialPick && materialPickEligible && (
-          <span className="pointer-events-none absolute left-3 top-3 z-30 rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium text-foreground opacity-0 backdrop-blur-glass transition-opacity duration-150 shell-glow group-hover/material:opacity-100 group-focus-within/material:opacity-100">
+        {materialPickPointer && createPortal(
+          <span
+            className="pointer-events-none fixed z-30 max-w-64 truncate rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium text-foreground backdrop-blur-glass shell-glow"
+            style={materialPickPointer}
+          >
             选择 {node.title}
-          </span>
+          </span>,
+          document.body,
         )}
         {context.mediaReplaceError?.nodeId === node.id && (
           <p
