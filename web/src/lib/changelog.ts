@@ -52,11 +52,12 @@ export const CHANGELOG: ChangelogEntry[] = [
   {
     version: '5.31.6',
     date: '2026-08-27',
-    headline: '创作台统一显示图片和视频预估费用',
+    headline: '创作台统一显示费用，文本自动保存不再打断编辑',
     changes: [
       { kind: 'fix', text: '创作台按实际渠道、模型、画质、数量、时长和分辨率统一计算本次生成费用，OpenAI-HK 图片、火山直连 Seedream / Seedance 与百炼直连 HappyHorse 均可显示' },
       { kind: 'fix', text: '没有核实价格的模型、档位或聚合渠道不显示费用提示，避免把官方直连价错误套到聚合渠道' },
       { kind: 'fix', text: 'Seedance 视频按输出 token 显示约价；带参考视频但无法取得素材时长时停止低估且不显示费用' },
+      { kind: 'fix', text: '文本节点自动保存、切换应用或输入法候选窗临时失焦时继续保持编辑；点击编辑区外部、Tab 移开焦点或按 Escape 才退出' },
     ],
   },
   {

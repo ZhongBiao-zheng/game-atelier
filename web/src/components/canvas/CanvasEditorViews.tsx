@@ -14,7 +14,7 @@ import { ArrowLeftRight, Check, ChevronRight, ClipboardCopy, Download, Ellipsis,
 import {
   createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef,
   useState,
-  type ReactNode, type Ref, type RefObject,
+  type FocusEvent as ReactFocusEvent, type ReactNode, type Ref, type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
@@ -185,6 +185,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const titleTriggerRef = useRef<HTMLButtonElement>(null);
   const textEditorRef = useRef<HTMLTextAreaElement>(null);
+  const textEditingExitRequested = useRef(false);
+  const textSelectionRef = useRef<{
+    start: number;
+    end: number;
+    direction: 'forward' | 'backward' | 'none';
+  } | null>(null);
   const contentSurfaceRef = useRef<HTMLElement>(null);
   const titleExitInProgress = useRef(false);
   const restoreTitleFocus = useRef(false);
@@ -222,6 +228,29 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     const editor = textEditorRef.current;
     editor?.focus();
     editor?.setSelectionRange(editor.value.length, editor.value.length);
+    if (editor) rememberTextSelection(editor);
+  }, [isEditingText]);
+  useLayoutEffect(() => {
+    if (!isEditingText || textEditingExitRequested.current) return;
+    const editor = textEditorRef.current;
+    if (!editor || window.document.activeElement === editor) return;
+    // 保存回写可能替换 textarea DOM，旧节点不会再触发 blur。编辑会话仍有效时把焦点
+    // 和选区交给新节点；普通输入时 activeElement 已经是 editor，不会触碰当前选区。
+    editor.focus({ preventScroll: true });
+    restoreTextSelection(editor);
+  }, [isEditingText, node]);
+  useEffect(() => {
+    if (!isEditingText) return;
+    const finishOnOutsidePointer = (event: PointerEvent) => {
+      const surface = contentSurfaceRef.current;
+      if (!surface || !(event.target instanceof Element) || surface.contains(event.target)) return;
+      textEditingExitRequested.current = true;
+      setIsEditingText(false);
+    };
+    // blur 不能代表用户结束编辑：自动保存重渲染、切应用和输入法候选窗都可能让
+    // textarea 短暂失焦。只响应用户明确点到编辑区外的 pointerdown。
+    window.document.addEventListener('pointerdown', finishOnOutsidePointer, true);
+    return () => window.document.removeEventListener('pointerdown', finishOnOutsidePointer, true);
   }, [isEditingText]);
   useEffect(() => {
     if (isEditingTitle) return;
@@ -317,12 +346,50 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     if (!context || node.type !== 'text' || isEditingText) return;
     context.selectNode(node.id);
     context.recordHistory();
+    textEditingExitRequested.current = false;
+    textSelectionRef.current = null;
     setIsEditingText(true);
   }
 
   function finishTextEditing(restoreFocus: boolean) {
+    textEditingExitRequested.current = true;
     setIsEditingText(false);
     if (restoreFocus) requestAnimationFrame(() => contentSurfaceRef.current?.focus());
+  }
+
+  function restoreTextEditingFocus() {
+    requestAnimationFrame(() => {
+      if (textEditingExitRequested.current) return;
+      const editor = textEditorRef.current;
+      editor?.focus({ preventScroll: true });
+      if (editor) restoreTextSelection(editor);
+    });
+  }
+
+  function rememberTextSelection(editor: HTMLTextAreaElement) {
+    textSelectionRef.current = {
+      start: editor.selectionStart,
+      end: editor.selectionEnd,
+      direction: editor.selectionDirection,
+    };
+  }
+
+  function restoreTextSelection(editor: HTMLTextAreaElement) {
+    const selection = textSelectionRef.current;
+    if (!selection) return;
+    const end = Math.min(selection.end, editor.value.length);
+    const start = Math.min(selection.start, end);
+    editor.setSelectionRange(start, end, selection.direction);
+  }
+
+  function handleTextEditorBlur(event: ReactFocusEvent<HTMLTextAreaElement>) {
+    // Tab、辅助技术或弹窗把焦点明确移到另一个控件时结束编辑，避免形成焦点陷阱。
+    // 自动保存替换 DOM、切换应用和输入法候选窗造成的临时失焦通常没有 relatedTarget。
+    if (event.relatedTarget instanceof Element) {
+      finishTextEditing(false);
+      return;
+    }
+    restoreTextEditingFocus();
   }
 
   function setTextScale(direction: -1 | 1) {
@@ -580,19 +647,21 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
                   'nodrag nowheel block h-full min-h-32 w-full resize-none overflow-y-auto border-0 bg-transparent p-3 leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
                   textScaleClass(node.data.display.scale),
                 )}
-                onChange={event => context.updateText(node.id, event.target.value)}
-                onBlur={() => {
-                  // 整个窗口 / 标签页失焦时不退出编辑态：切应用、切标签，以及 Windows 上
-                  // 部分中文输入法的候选窗，都会让 textarea 收到 blur。退出编辑态会连带把
-                  // 正在进行的输入法组合掐断，画师看到的就是「打着字突然被弹出来、输入法
-                  // 也断了」。焦点仍在本页内（真的点了别处）时照旧退出。
-                  if (!document.hasFocus()) return;
-                  finishTextEditing(false);
+                onChange={event => {
+                  rememberTextSelection(event.target);
+                  context.updateText(node.id, event.target.value);
                 }}
+                onSelect={event => rememberTextSelection(event.currentTarget)}
+                onBlur={handleTextEditorBlur}
                 onPointerDown={event => event.stopPropagation()}
                 onDoubleClick={event => event.stopPropagation()}
                 onKeyDown={event => {
                   event.stopPropagation();
+                  if (event.key === 'Tab') {
+                    event.preventDefault();
+                    finishTextEditing(true);
+                    return;
+                  }
                   if (event.key !== 'Escape') return;
                   event.preventDefault();
                   finishTextEditing(true);
