@@ -152,8 +152,20 @@ def _document_path(project_id: str) -> Path:
     return canvas_project_dir(project_id) / "canvas.json"
 
 
-def _canvas_lock_path(project_id: str) -> Path:
-    return canvas_project_dir(project_id) / ".canvas.lock"
+def canvas_project_lock_path(project_id: str) -> Path:
+    """画布项目的自动保存锁。**不能放进项目目录里。**
+
+    `file_lock` 在整个临界区里一直持着这个文件的句柄，而 `delete_canvas_project` 要在同一个
+    临界区里把项目目录整体 rename 到删除事务目录下。Windows 不允许 rename 一个内部还有打开
+    句柄的目录：锁文件放在项目目录里，删项目就是 PermissionError WinError 5。POSIX 上 rename
+    带着打开的文件一起走，没事——所以这个 bug 只有 Windows 会犯，而删项目路由在此之前没有
+    任何测试覆盖。放 `.runtime/locks/` 下，与 `canvas_agent_sessions_lock_path` 一致。
+
+    这个路径原来在四个模块里各写了一份（canvas_projects / canvas_packages /
+    canvas_media_operations / canvas_runs），跨进程互斥全靠四份拷贝恰好一致；现在只有这一处。
+    """
+    canvas_project_dir(project_id)  # 只为校验 project_id 与项目存在，与 agent sessions 锁同款
+    return data_root.runtime_dir() / "locks" / f"canvas-project-{project_id}.lock"
 
 
 def create_canvas_project(name: str) -> CanvasProject:
@@ -199,7 +211,7 @@ def read_canvas_project(project_id: str) -> CanvasProject:
 
 
 def rename_canvas_project(project_id: str, name: str) -> CanvasProject:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         project = read_canvas_project(project_id)
         updated = project.model_copy(update={"name": name, "updated_at": _now()})
         atomic_write_json(_project_path(project_id), updated.model_dump(mode="json"))
@@ -234,7 +246,7 @@ def _recover_canvas_transactions_unlocked(project_id: str) -> None:
 
 
 def read_canvas_document(project_id: str) -> CanvasDocument:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         return _read_canvas_document_unlocked(project_id)
 
@@ -395,7 +407,7 @@ def save_canvas_document(
     document: CanvasDocument,
     expected_revision: int,
 ) -> CanvasDocument:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         project = read_canvas_project(project_id)
         current = _read_canvas_document_unlocked(project_id)
@@ -426,7 +438,7 @@ def save_canvas_upload(
     media_kind: str,
     expected_revision: int,
 ) -> tuple[CanvasMediaVersion, CanvasDocument, str]:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         project = read_canvas_project(project_id)
         current = _read_canvas_document_unlocked(project_id)
@@ -453,7 +465,7 @@ def replace_canvas_node_media(
     expected_revision: int,
 ) -> tuple[CanvasMediaVersion, CanvasDocument, str]:
     """Create an immutable upload version and point one same-kind media node at it."""
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         project = read_canvas_project(project_id)
         current = _read_canvas_document_unlocked(project_id)
@@ -707,7 +719,7 @@ def list_canvas_projects() -> list[CanvasProjectSummary]:
     for path in root.glob("*/project.json"):
         project_id = path.parent.name
         try:
-            with file_lock(_canvas_lock_path(project_id)):
+            with file_lock(canvas_project_lock_path(project_id)):
                 _recover_canvas_transactions_unlocked(project_id)
                 project = CanvasProject.model_validate_json(path.read_text(encoding="utf-8"))
                 if project.project_id != project_id:
@@ -737,7 +749,7 @@ def list_canvas_project_options() -> list[CanvasProject]:
     for path in root.glob("*/project.json"):
         project_id = path.parent.name
         try:
-            with file_lock(_canvas_lock_path(project_id)):
+            with file_lock(canvas_project_lock_path(project_id)):
                 _recover_canvas_transactions_unlocked(project_id)
                 project = CanvasProject.model_validate_json(path.read_text(encoding="utf-8"))
                 if project.project_id != project_id:

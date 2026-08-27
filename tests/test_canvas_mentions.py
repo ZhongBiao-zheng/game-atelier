@@ -308,7 +308,9 @@ def test_submit_keeps_snapshot_labels_and_all_job_media_arrays_in_frozen_order(
     captured = {}
 
     monkeypatch.setattr(canvas_runs, "canvas_project_dir", lambda _project_id: tmp_path)
-    monkeypatch.setattr(canvas_runs, "_lock_path", lambda _project_id: tmp_path / "canvas.lock")
+    monkeypatch.setattr(
+        canvas_runs, "canvas_project_lock_path", lambda _project_id: tmp_path / "canvas.lock"
+    )
     monkeypatch.setattr(canvas_runs, "recover_canvas_transactions_unlocked", lambda _project_id: None)
     monkeypatch.setattr(canvas_runs, "_read_document_unlocked", lambda _project_id: document)
     monkeypatch.setattr(canvas_runs, "_resolve_key_and_model", lambda _draft: (key, model, JobKind.VIDEO))

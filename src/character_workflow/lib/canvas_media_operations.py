@@ -18,6 +18,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_projects import (
     canvas_project_dir,
+    canvas_project_lock_path,
     read_canvas_project,
     resolve_canvas_media,
 )
@@ -80,10 +81,6 @@ def _now() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).isoformat()
-
-
-def _canvas_lock_path(project_id: str) -> Path:
-    return canvas_project_dir(project_id) / ".canvas.lock"
 
 
 def _operation_lock_path(project_id: str) -> Path:
@@ -592,7 +589,7 @@ def execute_canvas_media_operation(
     request: CanvasMediaOperationRequest,
 ) -> CanvasMediaOperationResponse:
     with _GLOBAL_OPERATION_GATE, file_lock(_operation_lock_path(project_id)):
-        with file_lock(_canvas_lock_path(project_id)):
+        with file_lock(canvas_project_lock_path(project_id)):
             from character_workflow.lib.canvas_runs import recover_canvas_transactions_unlocked
 
             recover_canvas_transactions_unlocked(project_id)
@@ -636,7 +633,7 @@ def execute_canvas_media_operation(
                     "本地图片处理超过 60 秒，未提交任何画布变化。",
                 )
 
-            with file_lock(_canvas_lock_path(project_id)):
+            with file_lock(canvas_project_lock_path(project_id)):
                 from character_workflow.lib.canvas_runs import recover_canvas_transactions_unlocked
 
                 recover_canvas_transactions_unlocked(project_id)

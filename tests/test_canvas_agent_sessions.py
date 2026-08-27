@@ -18,7 +18,7 @@ from character_workflow.lib.canvas_packages import (
     export_canvas_projects,
     inspect_canvas_package,
 )
-from character_workflow.lib.canvas_projects import _canvas_lock_path, canvas_project_dir
+from character_workflow.lib.canvas_projects import canvas_project_dir, canvas_project_lock_path
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.schemas import (
     CanvasAgentMessageCreate,
@@ -247,7 +247,7 @@ def test_agent_message_append_does_not_wait_for_canvas_document_lock(client):
     session_id = _create_session(client, project_id)["session_id"]
 
     with ThreadPoolExecutor(max_workers=1) as pool:
-        with file_lock(_canvas_lock_path(project_id)):
+        with file_lock(canvas_project_lock_path(project_id)):
             result = pool.submit(
                 append_canvas_agent_message,
                 project_id,

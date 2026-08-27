@@ -10,13 +10,13 @@ from pydantic import ValidationError
 
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_projects import (
-    _canvas_lock_path,
     _document_path,
     _project_path,
     _read_canvas_document_unlocked,
     _recover_canvas_transactions_unlocked,
     _now,
     canvas_project_dir,
+    canvas_project_lock_path,
     read_canvas_project,
 )
 from character_workflow.lib.file_lock import file_lock
@@ -66,12 +66,12 @@ def _read_sidecar(
 
 
 def read_canvas_assets(project_id: str) -> RevisionedSidecar[CanvasLibraryAsset]:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         return _read_sidecar(project_id, "assets", CanvasLibraryAsset)
 
 
 def read_canvas_prompts(project_id: str) -> RevisionedSidecar[CanvasPrompt]:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         return _read_sidecar(project_id, "prompts", CanvasPrompt)
 
 
@@ -127,7 +127,7 @@ def save_canvas_asset(
     tags: list[str],
     expected_revision: int,
 ) -> RevisionedSidecar[CanvasLibraryAsset]:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         current = _read_sidecar(project_id, "assets", CanvasLibraryAsset)
         _check_revision(current, expected_revision)
@@ -151,7 +151,7 @@ def patch_canvas_asset(
     patch: CanvasLibraryAssetPatch,
     expected_revision: int,
 ) -> RevisionedSidecar[CanvasLibraryAsset]:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         current = _read_sidecar(project_id, "assets", CanvasLibraryAsset)
         _check_revision(current, expected_revision)
@@ -175,7 +175,7 @@ def delete_canvas_asset(
     asset_id: str,
     expected_revision: int,
 ) -> RevisionedSidecar[CanvasLibraryAsset]:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         current = _read_sidecar(project_id, "assets", CanvasLibraryAsset)
         _check_revision(current, expected_revision)
@@ -192,7 +192,7 @@ def create_canvas_prompt(
     tags: list[str],
     expected_revision: int,
 ) -> RevisionedSidecar[CanvasPrompt]:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         current = _read_sidecar(project_id, "prompts", CanvasPrompt)
         _check_revision(current, expected_revision)
@@ -212,7 +212,7 @@ def patch_canvas_prompt(
     patch: CanvasPromptPatch,
     expected_revision: int,
 ) -> RevisionedSidecar[CanvasPrompt]:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         current = _read_sidecar(project_id, "prompts", CanvasPrompt)
         _check_revision(current, expected_revision)
@@ -240,7 +240,7 @@ def delete_canvas_prompt(
     prompt_id: str,
     expected_revision: int,
 ) -> RevisionedSidecar[CanvasPrompt]:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         current = _read_sidecar(project_id, "prompts", CanvasPrompt)
         _check_revision(current, expected_revision)
@@ -286,7 +286,7 @@ def insert_canvas_asset(
     position: CanvasPoint,
     expected_revision: int,
 ) -> CanvasDocument:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         assets = _read_sidecar(project_id, "assets", CanvasLibraryAsset)
         asset = next((item for item in assets.items if item.asset_id == asset_id), None)
@@ -317,7 +317,7 @@ def insert_canvas_prompt(
     position: CanvasPoint,
     expected_revision: int,
 ) -> CanvasDocument:
-    with file_lock(_canvas_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         prompts = _read_sidecar(project_id, "prompts", CanvasPrompt)
         prompt = next((item for item in prompts.items if item.prompt_id == prompt_id), None)

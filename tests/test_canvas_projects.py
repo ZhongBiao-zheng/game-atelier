@@ -7,6 +7,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from character_workflow.lib.canvas_projects import canvas_project_lock_path
 from character_workflow.lib.jobs import job_output_dir_for, read_job
 from viewer_server.server_app import build_app
 
@@ -80,6 +81,13 @@ def test_canvas_project_create_list_rename_and_empty_document(client, isolated_d
     project_id = created["project_id"]
     assert created["name"] == "分镜实验"
     assert (isolated_data_root / "canvases" / project_id / "project.json").exists()
+
+    # 自动保存锁不许放进项目目录：删项目要在持锁期间把项目目录整体 rename 走，Windows 不允许
+    # rename 一个内部还有打开句柄的目录（POSIX 允许，所以这条只在 Windows 上会以 WinError 5
+    # 的形式暴露）。这里在任何平台上都能拦住把锁挪回项目目录的改动。
+    lock = canvas_project_lock_path(project_id)
+    assert lock.parent == isolated_data_root / ".runtime" / "locks"
+    assert not list((isolated_data_root / "canvases" / project_id).glob("*.lock"))
 
     listed = client.get("/api/canvas/projects").json()["projects"]
     assert [item["project_id"] for item in listed] == [project_id]

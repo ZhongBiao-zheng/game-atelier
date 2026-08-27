@@ -14,7 +14,11 @@ from typing import Any, Literal
 
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
-from character_workflow.lib.canvas_projects import canvas_project_dir, read_canvas_project
+from character_workflow.lib.canvas_projects import (
+    canvas_project_dir,
+    canvas_project_lock_path,
+    read_canvas_project,
+)
 from character_workflow.lib.canvas_ui import (
     CanvasUiPreferencesError,
     read_canvas_ui_preferences,
@@ -117,10 +121,6 @@ def _document_path(project_id: str) -> Path:
 
 def _project_path(project_id: str) -> Path:
     return canvas_project_dir(project_id) / "project.json"
-
-
-def _lock_path(project_id: str) -> Path:
-    return canvas_project_dir(project_id) / ".canvas.lock"
 
 
 def _transactions_dir(project_id: str) -> Path:
@@ -321,7 +321,7 @@ def _failed_recovered_submit(job: Job) -> Job:
 
 def recover_canvas_transactions(project_id: str) -> None:
     """Finish a prepared job/document pair before any later canvas command."""
-    with file_lock(_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
 
 
@@ -1181,7 +1181,7 @@ def submit_canvas_run(
     requested_count: int = 1,
 ) -> tuple[Job, CanvasDocument]:
     """Atomically freeze one persisted draft into a Job and visible result surface."""
-    with file_lock(_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         current = _read_document_unlocked(project_id)
         if current.revision != expected_revision:
@@ -1260,7 +1260,7 @@ def submit_reverse_prompt_run(
     expected_revision: int,
 ) -> tuple[Job, CanvasDocument]:
     """Freeze one owned image into the versioned reverse-prompt preset and a text Run."""
-    with file_lock(_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         current = _read_document_unlocked(project_id)
         if current.revision != expected_revision:
@@ -1335,7 +1335,7 @@ def submit_mask_edit_run(
     run_id = f"run-{secrets.token_hex(12)}"
     staged_path: Path | None = None
     try:
-        with file_lock(_lock_path(project_id)):
+        with file_lock(canvas_project_lock_path(project_id)):
             recover_canvas_transactions_unlocked(project_id)
             current = _read_document_unlocked(project_id)
             if current.revision != expected_revision:
@@ -1539,7 +1539,7 @@ def submit_angle_run(
             "canvas_angle_count_invalid",
             "多角度生成一次只能创建 1–4 张候选图。",
         )
-    with file_lock(_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         current = _read_document_unlocked(project_id)
         if current.revision != expected_revision:
@@ -1638,7 +1638,7 @@ def create_reverse_prompt_config(
     expected_revision: int,
 ) -> CanvasDocument:
     """Idempotently connect a successful reverse-prompt text result to an image config node."""
-    with file_lock(_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         current = _read_document_unlocked(project_id)
         job = _job_for_run(project_id, run_id)
@@ -1785,7 +1785,7 @@ def retry_canvas_run(
 def request_canvas_run_cancel(project_id: str, run_id: str) -> Job:
     """Persist an idempotent stop request without pretending the provider already stopped."""
     original = _job_for_run(project_id, run_id)
-    with file_lock(_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         with job_lock(original.job_id):
             job = read_job(original.job_id)
@@ -1811,7 +1811,7 @@ def dismiss_canvas_candidate(
 ) -> tuple[Job, CanvasDocument]:
     """Hide one failed/canceled slot without deleting its immutable provenance."""
     original = _job_for_run(project_id, run_id)
-    with file_lock(_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         current = _read_document_unlocked(project_id)
         if current.revision != expected_revision:
@@ -1977,7 +1977,7 @@ def _commit_canvas_candidate_attempt(
     attempt_error: str | None,
 ) -> Job:
     """Commit one independently completed slot and expose its Version immediately."""
-    with file_lock(_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         current = _read_document_unlocked(project_id)
         with job_lock(job_id):
@@ -2087,7 +2087,7 @@ def _settle_pending_canvas_candidates(
     candidate_status: Literal["failed", "canceled"],
     error: str | None,
 ) -> Job:
-    with file_lock(_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         with job_lock(job_id):
             job = read_job(job_id)
@@ -2188,7 +2188,7 @@ def finalize_canvas_run(
     job_id: str,
 ) -> tuple[Job, CanvasDocument | None]:
     """Commit runner outputs as immutable versions; safe to call more than once."""
-    with file_lock(_lock_path(project_id)):
+    with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         with job_lock(job_id):
             return _finalize_canvas_run_under_locks(project_id, job_id)

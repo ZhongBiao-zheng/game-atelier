@@ -27,6 +27,7 @@ from character_workflow.lib.canvas_projects import (
     _read_canvas_document_unlocked,
     _recover_canvas_transactions_unlocked,
     canvas_project_dir,
+    canvas_project_lock_path,
     canvas_projects_root,
     read_canvas_project,
 )
@@ -154,10 +155,6 @@ class CanvasPackageInspection(BaseModel):
 
 def _lifecycle_lock_path() -> Path:
     return data_root.runtime_dir() / "locks" / "canvas-project-lifecycle.lock"
-
-
-def _project_lock_path(project_id: str) -> Path:
-    return canvas_project_dir(project_id) / ".canvas.lock"
 
 
 def _package_transactions_root() -> Path:
@@ -408,7 +405,7 @@ def export_canvas_projects(
     with lifecycle_context, ExitStack() as stack:
         if not _project_lifecycle_locks_held:
             for project_id in sorted(ordered_ids):
-                stack.enter_context(file_lock(_project_lock_path(project_id)))
+                stack.enter_context(file_lock(canvas_project_lock_path(project_id)))
             for project_id in sorted(ordered_ids):
                 stack.enter_context(file_lock(canvas_agent_sessions_lock_path(project_id)))
         for project_id in ordered_ids:
@@ -1214,7 +1211,7 @@ def delete_canvas_project(
     transaction = _delete_transactions_root() / f"delete-{secrets.token_hex(12)}"
     with (
         file_lock(_lifecycle_lock_path()),
-        file_lock(_project_lock_path(project_id)),
+        file_lock(canvas_project_lock_path(project_id)),
         file_lock(canvas_agent_sessions_lock_path(project_id)),
     ):
         _recover_package_transactions_unlocked()
