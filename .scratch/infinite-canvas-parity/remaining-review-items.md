@@ -34,11 +34,11 @@
 | C5 | `onNodesChange` 里逐 change 做 `nodes.map`，多选拖动是 O(n²) 且每帧都跑 | `CanvasEditor.tsx:1022` | low | 未复核细节 |
 | C6 | 画布完全没接现有 SSE，改用 1.2s 轮询，每次后端做两遍全量 job 目录扫描 | `CanvasEditor.tsx:704-747` | low | 确认未修。另：`canvasMentionGraphSignature` 每次 render 都 `JSON.stringify` 全图 |
 
-## D 组 · 工程链与文档（4 条）
+## D 组 · 工程链与文档（4 条，D1 已修）
 
 | # | 问题 | 位置 | 级别 | 现状复核 |
 |---|---|---|---|---|
-| D1 | 仓库没有 ESLint，`react-hooks/exhaustive-deps` 从未跑过 | `web/package.json` `"lint"` | medium | 确认未修：`pnpm lint` 只是 `tsc -b --noEmit`；画布里有 55 项手维护依赖数组（已有一个缺口） |
+| D1 | ~~仓库没有 ESLint~~ | `web/eslint.config.js` | medium | ✅ 已修（commit e596b90）：`pnpm lint` = `tsc -b --noEmit && eslint .`，只开 `react-hooks/rules-of-hooks` 与 `exhaustive-deps`。首跑 18 处，修 11 处、留 7 处带理由的 disable |
 | D2 | `CanvasEditorInner` 单组件 3408 行、176 个 hook 调用点 | `CanvasEditor.tsx:312–3720` | medium | 确认未修。已产生后果：两个 run status 映射器文案分歧、同一 helper 两处实现 |
 | D3 | parity matrix 声称 130 项全 full，但七组能力在代码里找不到实现 | `reference-parity-matrix.md` | medium | 未复核。Canvas Agent G01–G15 / 节点插件 H01–H09 / WebDAV F04–F11 / C16 C17 / C06 / B22 / A06 / B21 |
 | D4 | 后端 30+ 处英文 `ValueError` 直接当 detail 返回给用户，409 语义还错了 | `canvas_projects.py:222` | low | 确认未修：同批路径里 `CanvasRunCommandError` 走的是规范 `{code, message}` 中文结构，两套风格并存 |
@@ -50,8 +50,13 @@
 
 **第二批（A 组 5 条）**：见上表。7 条回归测试，每条都验过「把修复改回去会红」。
 
-## 留给飙哥定的一条
+**第三批（D1）**：接入 ESLint。commit e596b90。
 
-`canvasNodeProvidesOutput` 里 audio 不在按类型放行之列：空的音频节点连不上线，空的文本 / 图片 /
-视频节点可以。这条差异没有记录理由，`canvasConnectionPolicy.test.ts` 有断言钉死。按 A5 的口径
-（先连线后出图）它应该一致，但那是产品判断，没动。
+## 已定的事
+
+- 空音频节点也可作为连线源，与其它三类一致（2026-08-27 飙哥拍板，已落地）。
+
+## 提交记录
+
+- `0b3975f` 5.30.4：外部成图导入 + 画布验收修复 11 条
+- `e596b90` 接入 ESLint（react-hooks 两条规则）
