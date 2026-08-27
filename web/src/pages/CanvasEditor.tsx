@@ -2156,6 +2156,8 @@ function CanvasEditorInner({
     requestAnimationFrame(() => editorRegionRef.current?.focus());
   }, [commit]);
 
+  const reportError = useCallback((message: string) => setError(message), []);
+
   const submitRun = useCallback(async (nodeId: string) => {
     if (runSubmissionInFlight.current) {
       setError('另一项生成正在提交，请稍后再试。');
@@ -3360,6 +3362,7 @@ function CanvasEditorInner({
     selectNode: selectOnlyNode,
     previewContent,
     selectCandidate,
+    reportError,
     submitRun,
     retryRun,
     cancelRun,
@@ -3419,6 +3422,7 @@ function CanvasEditorInner({
     previewContent,
     persistImageToolbarPreferences,
     projectId,
+    reportError,
     recordHistorySnapshot,
     recoverReversePromptConfig,
     replaceMedia,
@@ -3581,6 +3585,9 @@ function CanvasEditorInner({
       ><CircleHelp /></ToolButton>
     </>
   );
+
+  const canvasFeedbackVisible = !preview && !mediaOperation && !maskEdit && !angleState
+    && !shortcutsOpen && !generationPreferencesOpen && selectedNodeIds.size <= 1;
 
   return (
     <CanvasNodeContext.Provider value={contextValue}>
@@ -4039,9 +4046,18 @@ function CanvasEditorInner({
           />
         )}
 
-        {!preview && !mediaOperation && !maskEdit && !angleState && selectedNodeIds.size <= 1 && (
+        {canvasFeedbackVisible && error && (
           <CanvasActionFeedback
             error={error}
+            notice={null}
+            onDismissError={() => setError(null)}
+            className="absolute left-1/2 top-20 z-30 w-full max-w-lg -translate-x-1/2 items-center px-3"
+          />
+        )}
+
+        {canvasFeedbackVisible && toolNotice && (
+          <CanvasActionFeedback
+            error={null}
             notice={toolNotice}
             onDismissError={() => setError(null)}
             className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4"

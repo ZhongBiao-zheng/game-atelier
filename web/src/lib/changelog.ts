@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.10',
+    date: '2026-08-27',
+    headline: '生成面板只保留操作，不再常驻提示',
+    changes: [
+      { kind: 'fix', text: '所有节点生成面板删除完成状态、配置状态和阻塞原因等常驻文案' },
+      { kind: 'fix', text: '配置无法生成时保持按钮可点击，点击后统一在画布中上方提示原因' },
+    ],
+  },
+  {
     version: '5.31.9',
     date: '2026-08-27',
     headline: '视频结果回到节点，文本连接同步引用',

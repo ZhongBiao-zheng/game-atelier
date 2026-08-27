@@ -793,11 +793,7 @@ export function normalizeCanvasVideoParams(
   return params;
 }
 
-/** 「开始生成」按钮被禁用的原因。
- *  这个按钮有五个禁用条件：四类引用错误（由 referenceErrorMessage 出文案）、没有可用模型、
- *  没有选中模型、提示词为空。后三条原来一条都不解释，用户看到的只是一个点不动的按钮——
- *  没有密钥的新用户尤其如此，界面上既不说缺什么，也不说去哪儿补。
- *  kind 用来区分要不要把这句话渲染出来：提示词为空时输入框本身已经在说了，只进 title。 */
+/** 生成动作无法提交的原因。按钮保持可点击，由点击动作把原因交给画布顶部反馈。 */
 export type CanvasGenerateBlock = {
   kind: 'no_model_available' | 'no_model_selected' | 'no_prompt';
   message: string;

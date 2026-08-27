@@ -17,7 +17,6 @@ import {
   type FocusEvent as ReactFocusEvent, type ReactNode, type Ref, type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Link } from 'wouter';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import type { KeyView } from '@/api/keys';
@@ -42,7 +41,6 @@ import {
   CanvasNodeRunOverlay,
   canvasNodeRunDisplayError,
   canvasNodeRunState,
-  canvasNodeRunStateForJob,
   isReversePromptJob,
 } from '@/components/canvas/CanvasNodeRunStatus';
 import { formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
@@ -146,6 +144,7 @@ export interface CanvasNodeContextValue {
   selectNode: (id: string) => void;
   previewContent: (id: string, title: string, nodeId: string) => void;
   selectCandidate: (id: string, versionId: string) => void;
+  reportError?: (message: string) => void;
   submitRun: (id: string) => Promise<void>;
   retryRun: (id: string, runId: string) => Promise<void>;
   cancelRun: (runId: string) => Promise<void>;
@@ -1813,8 +1812,7 @@ export function CanvasGenerationComposer({
     videoReferenceCapacityExceeded,
     pendingInputTitles: blockingPendingInputs.map(input => input.title),
   });
-  // 结构性阻塞（没有可用模型 / 没选模型 / 没提示词）排在引用问题前面：引用问题上面已经有一条
-  // 红色告警在说了，这三条原来一句解释都没有。
+  // 结构性问题优先，因为补引用也无法让一个没有模型或提示词的请求变得可提交。
   const generateBlock = canvasGenerateBlock({
     mode: draft.mode,
     modelChoiceCount: modelChoices.length,
@@ -1824,13 +1822,6 @@ export function CanvasGenerationComposer({
     prompt: draft.prompt,
   });
   const blockedReason = generateBlock?.message ?? referenceProblem;
-  const generateDisabled = submitting || blockedReason !== null;
-  const generateBlockHintId = `${node.id}-generate-block-${embedded ? 'embedded' : 'floating'}`;
-  // 缺模型的两条在提示词下方给真实出口；空提示词只禁用生成，不再占底栏位置重复提醒。
-  const showBlockHint = Boolean(generateBlock && generateBlock.kind !== 'no_prompt');
-  const statusText = generateBlock?.kind === 'no_prompt' && !activeJob?.error
-    ? ''
-    : runStatus(activeJob);
 
   useEffect(() => {
     if (!usesVideoFrameSlots || !videoCaps) return;
@@ -1864,6 +1855,18 @@ export function CanvasGenerationComposer({
     if (JSON.stringify(preview) === JSON.stringify(draft)) return;
     context.recordHistory();
     updateDraft(current => ({ ...updater(current), updated_at: new Date().toISOString() }));
+  }
+
+  function submitGeneration() {
+    if (blockedReason) {
+      context.reportError?.(blockedReason);
+      return;
+    }
+    if (activeJob && runId) {
+      void context.retryRun(node.id, runId);
+      return;
+    }
+    void context.submitRun(node.id);
   }
 
   useEffect(() => {
@@ -1985,27 +1988,6 @@ export function CanvasGenerationComposer({
               ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
-      {referenceProblem ? (
-        <p
-          role="alert"
-          className="mt-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs leading-relaxed text-destructive"
-        >
-          {referenceProblem}
-        </p>
-      ) : showBlockHint && generateBlock && (
-        // 没有可用模型时给一条真出口——沉浸式画布把顶栏（含设置入口）整块藏了，
-        // 新用户在这里除了一个点不动的按钮什么都看不到。
-        <p id={generateBlockHintId} className="mt-1.5 px-1 text-xs leading-relaxed text-muted-foreground">
-          {generateBlock.message}
-          {generateBlock.kind === 'no_model_available' && (
-            <>
-              {' '}
-              <Link href="/settings" className="text-primary underline underline-offset-2">去设置里添加</Link>
-              后回来再生成。
-            </>
-          )}
-        </p>
-      )}
       {node.type === 'audio' && (
         <CandidateHistory
           nodeId={node.id}
@@ -2163,11 +2145,6 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-          {statusText && (
-            <span className="max-w-52 truncate text-xs text-muted-foreground" title={statusText}>
-              {statusText}
-            </span>
-          )}
         </div>
         {running && activeJob && (
           <Button
@@ -2187,10 +2164,8 @@ export function CanvasGenerationComposer({
             type="button"
             size="sm"
             className="shrink-0"
-            disabled={generateDisabled}
-            title={blockedReason ?? undefined}
-            aria-describedby={showBlockHint ? generateBlockHintId : undefined}
-            onClick={() => void context.retryRun(node.id, runId)}
+            disabled={submitting}
+            onClick={submitGeneration}
           >
             {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
             {submitting ? '提交中…' : '生成'}
@@ -2201,10 +2176,8 @@ export function CanvasGenerationComposer({
             type="button"
             size="sm"
             className="shrink-0"
-            disabled={generateDisabled}
-            title={blockedReason ?? undefined}
-            aria-describedby={showBlockHint ? generateBlockHintId : undefined}
-            onClick={() => void context.submitRun(node.id)}
+            disabled={submitting}
+            onClick={submitGeneration}
           >
             {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
             {submitting ? '提交中…' : textMode ? '生成' : '开始生成'}
@@ -2756,20 +2729,6 @@ function withGenerationDraft(node: CanvasNode, draft: CanvasGenerationDraft): Ca
   if (node.type === 'audio') return { ...node, data: { ...node.data, generation_draft: draft } };
   if (node.type === 'plugin') return { ...node, data: { ...node.data, generation_draft: draft } };
   return node;
-}
-
-/** 生成面板的状态行。
- *
- *  这里原来是第二套 job→文案 映射，和节点角标那套已经漂开：`partial` 一个说「部分完成」
- *  一个说「部分结果完成」；失败时这边直接把 `job.error` 铺出来，丢掉了「分析失败 / 生成失败」
- *  的区分，兜底建议也从「请检查设置后重新生成」变成了「请检查模型配置后重试」。
- *  现在只从 `canvasNodeRunStateForJob` 派生，面板专属的两句留在这里：
- *  没有 job 时说配置已存下来了，生成中时说结果会自己回来（角标那边已经写着「正在生成」）。 */
-function runStatus(job: Job | undefined): string {
-  if (!job) return '配置已保存';
-  const state = canvasNodeRunStateForJob(job);
-  if (state.status === 'loading') return state.detail ?? '结果会自动回到节点';
-  return state.detail ? `${state.label} · ${state.detail}` : state.label;
 }
 
 function nodeIcon(node: CanvasNode) {
