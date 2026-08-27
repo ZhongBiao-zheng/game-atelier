@@ -5,6 +5,7 @@
   python -m skill.character_workflow set-active <id>
   python -m skill.character_workflow append-lesson --kind portrait --line "...经验..."
   python -m skill.character_workflow import-reference --character <id> --slot portrait --path <image>
+  python -m skill.character_workflow import-output --character <id> --slot portrait --path <image>
   python -m skill.character_workflow submit --kind portrait --prompt-file <path> [--character <id>]
 """
 from __future__ import annotations
@@ -416,6 +417,30 @@ def _import_reference(args: argparse.Namespace) -> int:
     return 0
 
 
+def _import_output(args: argparse.Namespace) -> int:
+    from character_workflow.lib.asset_import import import_output
+
+    try:
+        prompt = (
+            Path(args.prompt_file).read_text(encoding="utf-8")
+            if args.prompt_file
+            else "外部生成图片导入"
+        )
+        result = import_output(
+            character_id=args.character,
+            source_path=args.path,
+            slot=AssetSlot(args.slot),
+            model=args.model,
+            prompt=prompt,
+            reference_images=args.reference_image,
+        )
+    except (FileNotFoundError, OSError, ValueError) as e:
+        print(f"import-output: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
 def _rename_character_id(args: argparse.Namespace) -> int:
     from character_workflow.lib.identity import rename_character_id
 
@@ -579,6 +604,23 @@ def main(argv: list[str] | None = None) -> int:
         help="按图片实际类型登记：角色立绘或三视图",
     )
     p_import.add_argument("--path", required=True, help="待导入图片路径")
+
+    p_import_output = sub.add_parser(
+        "import-output",
+        help="把 Lovart 等外部成图登记为可见的 DONE job；不自动定稿",
+    )
+    p_import_output.add_argument("--character", required=True, help="目标角色 id")
+    p_import_output.add_argument(
+        "--slot", required=True, choices=("portrait", "promo", "turnaround"),
+        help="成图所属资产槽位",
+    )
+    p_import_output.add_argument("--path", required=True, help="待导入图片路径")
+    p_import_output.add_argument("--model", default="external", help="外部生成模型标识")
+    p_import_output.add_argument("--prompt-file", default=None, help="本次生成提示词文件")
+    p_import_output.add_argument(
+        "--reference-image", action="append", default=None,
+        help="本次生成使用的参考图；可重复",
+    )
 
     p_rename = sub.add_parser(
         "rename-character-id",
@@ -771,6 +813,8 @@ def main(argv: list[str] | None = None) -> int:
         return _assign_character(args)
     if args.cmd == "import-reference":
         return _import_reference(args)
+    if args.cmd == "import-output":
+        return _import_output(args)
     if args.cmd == "rename-character-id":
         return _rename_character_id(args)
     if args.cmd == "append-memory":

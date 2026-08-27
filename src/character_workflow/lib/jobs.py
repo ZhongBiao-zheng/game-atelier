@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import secrets
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -16,10 +15,7 @@ from character_workflow.lib import data_root, keys
 from character_workflow.lib.atomic_io import atomic_write_text
 from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus, Namespace
 
-if os.name == "nt":
-    import msvcrt
-else:
-    import fcntl
+from character_workflow.lib.file_lock import file_lock
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +46,9 @@ def job_output_dir_for(job: "Job") -> Path:
     if job.namespace == "studio":
         from character_workflow.lib.studio_jobs import studio_output_dir
         return studio_output_dir(job.job_id)
+    if job.namespace == "canvas":
+        from character_workflow.lib.canvas_projects import canvas_output_dir
+        return canvas_output_dir(job.canvas_project_id, job.job_id)
     if job.namespace == "ui":
         from character_workflow.lib.ui_jobs import screen_output_dir
         return screen_output_dir(job.project_id, job.ui_scheme_id, job.screen_id)
@@ -67,23 +66,8 @@ def job_lock(job_id: str) -> Iterator[None]:
 
     锁加在 sidecar .lock 文件上而非 job 文件本身：原子写走 tmp.replace 换 inode，
     锁在被换掉的旧 inode 上等于没锁。进程崩溃时 OS 自动释放，不会留死锁。"""
-    lock_path = _runtime_dir() / "jobs" / f"{job_id}.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(lock_path, "a+", encoding="utf-8") as f:
-        if os.name == "nt":
-            f.seek(0)
-            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
-            try:
-                yield
-            finally:
-                f.seek(0)
-                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    with file_lock(_runtime_dir() / "jobs" / f"{job_id}.lock"):
+        yield
 
 
 def new_job_id() -> str:
@@ -102,6 +86,15 @@ def save_job(job: Job) -> Job:
     """Persist a complete Job model after structured updates."""
     with job_lock(job.job_id):
         return _write(job)
+
+
+def write_job_under_lock(job: Job) -> Job:
+    """Persist a Job while the caller holds ``job_lock(job.job_id)``.
+
+    Cross-file transactions use this narrow primitive so their full read-modify-write sequence can
+    follow the fixed project-lock → job-lock order without recursively acquiring the sidecar lock.
+    """
+    return _write(job)
 
 
 def migrate_ui_job_to_scheme(
@@ -176,6 +169,7 @@ def write_job(
     ui_scheme_id: str | None = None,
     screen_id: str | None = None,
     production_id: str | None = None,
+    canvas_project_id: str | None = None,
     kind: JobKind = JobKind.IMAGE,
 ) -> Job:
     """落盘一条 job 文件。默认 PENDING_CONFIRM —— Skill 先写好调用细节，
@@ -206,6 +200,7 @@ def write_job(
         ui_scheme_id=ui_scheme_id,
         screen_id=screen_id,
         production_id=production_id,
+        canvas_project_id=canvas_project_id,
         kind=kind,
         source_image=source_image,
         alias=alias,
@@ -228,7 +223,12 @@ def update_job_status(
         job = read_job(job_id)
         update: dict[str, Any] = {"status": status}
         # 终态清空进度卡点，避免 retry/回看读到陈旧 phase；并盖出图完成时间戳（算耗时/展示生成时间用）。
-        if status in (JobStatus.DONE, JobStatus.FAILED):
+        if status in (
+            JobStatus.DONE,
+            JobStatus.PARTIAL,
+            JobStatus.FAILED,
+            JobStatus.CANCELED,
+        ):
             update["progress_phase"] = None
             update["completed_at"] = datetime.now(timezone.utc).isoformat()
         if output_paths is not None:
@@ -243,7 +243,12 @@ def update_job_phase(job_id: str, phase: str) -> Job:
     """视频 caller 回写进度卡点（sent / downloading）。终态 job 不回写。"""
     with job_lock(job_id):
         job = read_job(job_id)
-        if job.status in (JobStatus.DONE, JobStatus.FAILED):
+        if job.status in (
+            JobStatus.DONE,
+            JobStatus.PARTIAL,
+            JobStatus.FAILED,
+            JobStatus.CANCELED,
+        ):
             return job
         return _write(job.model_copy(update={"progress_phase": phase}))
 

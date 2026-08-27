@@ -110,6 +110,9 @@ def test_turn_start_cli_serializes_key_models(isolated_data_root):
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["available_keys"][0]["models"] == [
-        {"name": "Doubao-Seedream-4.5", "id": "doubao-seedream-4-5-251128", "modality": None, "protocol": None}
+        {
+            "name": "Doubao-Seedream-4.5", "id": "doubao-seedream-4-5-251128",
+            "modality": None, "protocol": None, "input_modalities": [],
+        }
     ]
     assert "secret-value" not in result.stdout

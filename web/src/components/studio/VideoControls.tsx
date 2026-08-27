@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react';
-import { Clapperboard, Volume2, VolumeX } from 'lucide-react';
+import { CircleHelp, Clapperboard, Volume2, VolumeX } from 'lucide-react';
 import {
   VIDEO_MODE_LABELS,
   VIDEO_QUALITY_LABELS,
@@ -9,9 +9,10 @@ import {
   type VideoQuality,
 } from '@/lib/videoControlCaps';
 import { RatioIcon } from './RatioIcon';
-import { ToolbarPopover } from './ToolbarPopover';
+import { ToolbarPopover, type ToolbarPopoverMenuProps } from './ToolbarPopover';
+import { cn } from '@/lib/utils';
 
-interface Props {
+interface Props extends ToolbarPopoverMenuProps {
   caps: VideoControlCaps;
   mode: VideoMode;
   duration: number;
@@ -19,13 +20,15 @@ interface Props {
   ratio: string;
   quality?: VideoQuality;
   generateAudio: boolean;
+  watermark?: boolean;
   onModeChange: (mode: VideoMode) => void;
   onDurationChange: (duration: number) => void;
   onResolutionChange: (resolution: string) => void;
   onRatioChange: (ratio: string) => void;
   onQualityChange?: (quality: VideoQuality) => void;
   onGenerateAudioChange: (generateAudio: boolean) => void;
-  menuDirection?: 'up' | 'down';
+  onWatermarkChange?: (watermark: boolean) => void;
+  referenceLimitLabel?: (mode: VideoMode) => string;
 }
 
 /** 生成方式 / 比例 / 清晰度（或档位）/ 生成时长 / 生成音频 多合一：
@@ -40,19 +43,22 @@ export function VideoControls({
   ratio,
   quality,
   generateAudio,
+  watermark = false,
   onModeChange,
   onDurationChange,
   onResolutionChange,
   onRatioChange,
   onQualityChange,
   onGenerateAudioChange,
+  onWatermarkChange,
+  referenceLimitLabel,
   menuDirection = 'up',
+  portalContainerRef,
 }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const effectiveQuality = quality ?? caps.qualities?.[0];
   const summary = [
-    VIDEO_MODE_LABELS[mode],
     caps.ratios.length > 0 ? ratioLabel(ratio) : null,
     caps.resolutions.length > 0 ? resolution : null,
     caps.qualities && effectiveQuality ? VIDEO_QUALITY_LABELS[effectiveQuality] : null,
@@ -63,7 +69,7 @@ export function VideoControls({
     <div ref={wrapRef} className="relative">
       <button
         type="button"
-        aria-label="视频生成设置"
+        aria-label="视频设置"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         className={`inline-flex min-w-0 max-w-full h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
@@ -71,7 +77,19 @@ export function VideoControls({
         }`}
       >
         <Clapperboard size={14} aria-hidden />
-        <span className="truncate">{summary}</span>
+        <span className="shrink-0">{VIDEO_MODE_LABELS[mode]}</span>
+        {referenceLimitLabel && (
+          <span className="group/help relative shrink-0" title={referenceLimitLabel(mode)}>
+            <CircleHelp className="size-3.5 text-muted-foreground" aria-hidden="true" />
+            <span
+              role="tooltip"
+              className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-2 w-max max-w-72 -translate-x-1/2 rounded-lg border border-border bg-popover px-2 py-1.5 text-xs font-normal leading-relaxed text-foreground opacity-0 transition-opacity group-hover/help:opacity-100 group-focus-within/help:opacity-100"
+            >
+              {referenceLimitLabel(mode)}
+            </span>
+          </span>
+        )}
+        {summary && <span className="truncate">{' · '}{summary}</span>}
         {caps.supportsAudio && (
           generateAudio
             ? <Volume2 size={13} aria-hidden className="shrink-0" />
@@ -83,9 +101,14 @@ export function VideoControls({
         open={open}
         onClose={() => setOpen(false)}
         anchorRef={wrapRef}
+        autoFocus
         direction={menuDirection}
+        portalContainerRef={portalContainerRef}
         data-testid="video-settings-popover"
-        className="w-[320px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3"
+        className={cn(
+          portalContainerRef ? 'max-h-[55vh]' : 'max-h-[70vh]',
+          'w-[320px] overflow-y-auto rounded-xl border border-border bg-card p-3',
+        )}
       >
         <div className="space-y-4">
             {caps.modes.length > 1 && (
@@ -168,6 +191,19 @@ export function VideoControls({
                     开启
                   </SegmentButton>
                   <SegmentButton selected={!generateAudio} onClick={() => onGenerateAudioChange(false)}>
+                    关闭
+                  </SegmentButton>
+                </div>
+              </Section>
+            )}
+
+            {caps.supportsWatermark && onWatermarkChange && (
+              <Section title="视频水印">
+                <div role="listbox" aria-label="视频水印开关" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                  <SegmentButton selected={watermark} onClick={() => onWatermarkChange(true)}>
+                    开启
+                  </SegmentButton>
+                  <SegmentButton selected={!watermark} onClick={() => onWatermarkChange(false)}>
                     关闭
                   </SegmentButton>
                 </div>

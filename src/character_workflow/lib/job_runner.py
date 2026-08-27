@@ -1,8 +1,10 @@
 """Job runner — turns PENDING_CONFIRM JSON jobs into durable image/video assets."""
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -10,7 +12,7 @@ from typing import Any
 from character_workflow.lib import data_root
 from character_workflow.lib import net_env
 from character_workflow.lib.asset_versions import asset_output_lock, next_asset_path
-from character_workflow.lib.callers import dispatch, dispatch_video
+from character_workflow.lib.callers import dispatch, dispatch_audio, dispatch_text, dispatch_video
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
     job_output_dir_for,
@@ -27,24 +29,146 @@ class JobRunnerError(RuntimeError):
     pass
 
 
+def _cancel_checker(job: Job) -> Callable[[], bool] | None:
+    if job.namespace != "canvas":
+        return None
+
+    def should_cancel() -> bool:
+        return read_job(job.job_id).cancel_requested_at is not None
+
+    return should_cancel
+
+
 def _friendly_error(err: BaseException) -> str:
     """把底层报错翻成画师能看懂的中文落进 job.error。
 
     **永远保留原始报错**：视频侧会把 task_id 挂在报错里（产物已计费、要靠它人工找回），
     整条替换会把这类关键标识一起冲掉。所以分支只负责给中文提示，原文由这里统一附加。
     """
+    raw = _redact_local_paths(str(err))
     hint = _error_hint(str(err).lower())
     if hint is None:
-        return str(err)
-    return f"{hint}（原始报错：{err}）"
+        return raw
+    return f"{hint}（原始报错：{raw}）"
+
+
+def _redact_local_paths(message: str) -> str:
+    """Keep task ids/upstream diagnostics while removing secrets and workstation locations."""
+    message = re.sub(
+        r"(?i)(?<![\w?&-])((?:(?:\\?['\"])?(?:authorization|api[_-]?key|access[_-]?key|"
+        r"secret[_-]?key|x[-_]api[-_]key|x[-_]auth[-_]token|client[-_]secret|private[-_]key|"
+        r"access_token|auth_token|password|token)(?:\\?['\"])?\s*[:=]\s*))"
+        r"(?:\\?['\"][^'\"]*\\?['\"]|bearer\s+[^\s,;}]+|[^\s,;}]+)",
+        r"\1<redacted>",
+        message,
+    )
+
+    urls: list[str] = []
+
+    def stash_url(match: re.Match[str]) -> str:
+        url = re.sub(
+            r"(?i)(https?://)[^/@\s]+@",
+            r"\1<redacted>@",
+            match.group(0),
+        )
+        url = re.sub(r"([?&][^=&#\s]+)=([^&#\s]*)", r"\1=<redacted>", url)
+        urls.append(url)
+        return f"__SAFE_HTTP_URL_{len(urls) - 1}__"
+
+    message = re.sub(r"https?://[^\s'\"\)\]\}}]+", stash_url, message, flags=re.IGNORECASE)
+    message = re.sub(
+        r"(['\"])(?:/|[A-Za-z]:\\|\\\\)[^'\"\n]+\1",
+        "<local-path>",
+        message,
+    )
+    field_end = r"(?=\s+[A-Za-z_][\w-]*\s*[:=]|[,;\n)\]}]|$)"
+
+    def redact_path_field(match: re.Match[str]) -> str:
+        value = match.group(2).strip().strip("'\"")
+        if re.match(r"(?i)^(?:file://|/|~/|[A-Za-z]:\\|\\\\)", value):
+            return f"{match.group(1)}<local-path>"
+        return match.group(0)
+
+    message = re.sub(
+        rf"(?i)\b((?:path|source|file|filename|cache|mask)\s*[:=]\s*)(.+?){field_end}",
+        redact_path_field,
+        message,
+    )
+    message = re.sub(rf"(?i)file://.+?{field_end}", "<local-path>", message)
+    message = re.sub(
+        rf"(?<!\w)[A-Za-z]:\\.+?{field_end}",
+        "<local-path>",
+        message,
+    )
+    message = re.sub(rf"(?<!\\)\\\\.+?{field_end}", "<local-path>", message)
+
+    def redact_unix_path(match: re.Match[str]) -> str:
+        return "<local-path>"
+
+    message = re.sub(
+        rf"(?<![:/])/[A-Za-z0-9._~-].+?{field_end}",
+        redact_unix_path,
+        message,
+    )
+    for index, url in enumerate(urls):
+        message = message.replace(f"__SAFE_HTTP_URL_{index}__", url)
+    return message
 
 
 def _error_hint(low: str) -> str | None:
     """按报文特征给中文提示；认不出返回 None（调用方原样透出）。"""
+    if (
+        "cors" in low
+        or "cross-origin" in low
+        or "access-control-allow-origin" in low
+    ):
+        return (
+            "厂商接口返回了跨域 / 浏览器端点错误。画布生成实际由本地服务端直连，不受浏览器"
+            "跨域限制；这通常表示 Base URL 配成了网页地址。请在设置页改成厂商的服务端 API 地址后重试。"
+        )
     if "proxy" in low and ("connect" in low or "proxyerror" in low or "max retries" in low):
         return (
             "连不上本机代理（VPN / Clash 等）。这些国产厂商无需翻墙：请在代理工具里"
             "关闭代理，或把厂商域名加入直连/绕过规则后重试。"
+        )
+    if (
+        "name resolution" in low
+        or "failed to resolve" in low
+        or "getaddrinfo failed" in low
+        or "nodename nor servname" in low
+    ):
+        return (
+            "viewer-server 无法解析厂商接口域名：请检查 Base URL 拼写、DNS 与网络连接后重试。"
+        )
+    if "certificate_verify_failed" in low or "certificate verify failed" in low:
+        return (
+            "viewer-server 校验厂商接口的 TLS 证书失败：请确认 Base URL 是官方 HTTPS API 地址，"
+            "并检查系统时间或代理是否替换了证书后重试。"
+        )
+    if "tls" in low or "sslerror" in low or "[ssl:" in low or "ssl handshake" in low:
+        return (
+            "viewer-server 与厂商接口的 TLS / SSL 握手失败：通常是 Base URL 协议或端口不匹配，"
+            "也可能是代理中途改写连接。请核对官方 HTTPS API 地址、端口和代理直连规则后重试。"
+        )
+    if "err_network" in low or "network error" in low:
+        return (
+            "viewer-server 到厂商接口的网络请求失败：这不是浏览器跨域问题。"
+            "请检查厂商 Base URL、网络和代理直连规则后重试。"
+        )
+    # 画布内部不变式被打破（事务、Run 上下文、归属、版本冲突）。canvas_runs 里这些断言是给开发者
+    # 定位用的英文原文，翻译掉反而更难查；但它们会经 _friendly_error 原样落进 job.error、
+    # 显示在节点卡上——所以必须有一句人话在前面，否则画师看到的就是一行英文断言。
+    if (
+        "canvas transaction " in low
+        or "canvas job is missing run context" in low
+        or "canvas content version already exists" in low
+        or "does not belong to this canvas project" in low
+        or "is not a canvas run" in low
+        or "canvas document project_id does not match" in low
+    ):
+        return (
+            "画布内部状态校验未通过：这不是网络或厂商的问题，产物没有挂到画布上。"
+            "请重启 viewer-server 后重试；如果反复出现，把下面的原始报错一起发出来。"
         )
     # 上传阶段超时：urllib3 用 connect 超时兜请求体上传，参考图偏大 / 上行慢会在传图时 write 超时。
     if "write operation timed out" in low or ("aborted" in low and "write" in low):
@@ -87,7 +211,15 @@ def _error_hint(low: str) -> str | None:
             "参考图或出图尺寸不被该模型接受（超出上限 / 比例或边长不合规）："
             "请缩小参考图、或换一个尺寸后重试。原始报文里有厂商给的具体限制。"
         )
-    if "quota" in low or "insufficient" in low or "余额" in low or "额度" in low or "欠费" in low:
+    if (
+        "quota" in low
+        or "insufficient" in low
+        or "accountoverdue" in low
+        or "account is overdue" in low
+        or "余额" in low
+        or "额度" in low
+        or "欠费" in low
+    ):
         return "厂商额度 / 余额不足：请到厂商官网充值或检查账户额度后重试。"
     # 连接已建立但被远端中途掐断：多是该生成过重 / 上游太慢超出厂商网关等待时限（非本机网络问题）。
     if (
@@ -220,6 +352,27 @@ def is_valid_video(path: Path) -> bool:
     return False
 
 
+def is_valid_audio(path: Path) -> bool:
+    if not path.exists() or path.stat().st_size <= 0:
+        return False
+    with path.open("rb") as handle:
+        head = handle.read(16)
+    suffix = path.suffix.lower()
+    if suffix == ".mp3":
+        return head.startswith(b"ID3") or (len(head) >= 2 and head[0] == 0xFF and head[1] & 0xE0 == 0xE0)
+    if suffix == ".wav":
+        return head.startswith(b"RIFF") and head[8:12] == b"WAVE"
+    if suffix == ".flac":
+        return head.startswith(b"fLaC")
+    if suffix == ".opus":
+        return head.startswith(b"OggS")
+    if suffix == ".aac":
+        return len(head) >= 2 and head[0] == 0xFF and head[1] & 0xF0 == 0xF0
+    if suffix == ".pcm":
+        return True
+    return False
+
+
 def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
     created_at = datetime.now(timezone.utc).isoformat()
     lines = [
@@ -238,17 +391,28 @@ def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
     path.with_suffix(".md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run_job(job_id: str) -> Job:
+def run_job(job_id: str, *, defer_terminal: bool = False) -> Job:
     from character_workflow.lib.schemas import JobKind
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
     net_env.configure_proxy_bypass()
     job = read_job(job_id)
+    should_cancel = _cancel_checker(job)
+
+    def on_phase(phase: str) -> None:
+        if should_cancel is not None and should_cancel():
+            raise JobRunnerError("Canvas Run 已请求停止")
+        update_job_phase(job.job_id, phase)
+
     # Studio jobs start PENDING (UI submit = consent); character jobs start PENDING_CONFIRM.
     allowed_statuses = (JobStatus.PENDING_CONFIRM, JobStatus.PENDING)
     if job.status not in allowed_statuses:
         raise JobRunnerError(f"job not in a runnable status (current: {job.status.value})")
+    if job.kind == JobKind.TEXT:
+        return _run_text_job(job)
     if job.kind == JobKind.VIDEO:
         return _run_video_job(job)
+    if job.kind == JobKind.AUDIO:
+        return _run_audio_job(job)
 
     job = _normalize_reference_images(job)
     params = _params(job)
@@ -259,6 +423,12 @@ def run_job(job_id: str) -> Job:
         if job.status == JobStatus.PENDING_CONFIRM:
             update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
         with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider or 'image'}-") as tmp:
+            dispatch_kwargs: dict[str, Any] = {}
+            if should_cancel is not None:
+                from character_workflow.lib.callers.openai_image import image_family
+
+                if image_family(job.model) == "midjourney":
+                    dispatch_kwargs["should_cancel"] = should_cancel
             paths = dispatch(
                 prompt=job.prompt,
                 model=job.model,
@@ -269,7 +439,8 @@ def run_job(job_id: str) -> Job:
                 params=params,
                 # MJ 是唯一异步图片协议（submit + 轮询，FAST 档 ~40s、RELAX 可到几分钟），
                 # 进度卡点回写让前端不必干等。同步 caller 收下即忽略（都吃 **kwargs）。
-                on_phase=lambda phase: update_job_phase(job.job_id, phase),
+                on_phase=on_phase,
+                **dispatch_kwargs,
             )
             selected = [(Path(p), dims) for p in paths if (dims := image_dimensions(Path(p)))]
             if not selected:
@@ -289,17 +460,105 @@ def run_job(job_id: str) -> Job:
             job = _save_params(read_job(job.job_id), params)
             for output_path in output_paths:
                 _write_sidecar(Path(output_path), job, params)
+            persisted_paths = output_paths
+            if defer_terminal:
+                persisted_paths = list(dict.fromkeys([*job.output_paths, *output_paths]))
             return update_job_status(
                 job.job_id,
-                status=JobStatus.DONE,
-                output_paths=output_paths,
+                status=JobStatus.PENDING if defer_terminal else JobStatus.DONE,
+                output_paths=persisted_paths,
                 error=None,
             )
     except Exception as e:
-        update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(e))
+        update_job_status(
+            job.job_id,
+            status=JobStatus.PENDING if defer_terminal else JobStatus.FAILED,
+            error=_friendly_error(e),
+        )
         if isinstance(e, JobRunnerError):
             raise
         raise JobRunnerError(str(e)) from e
+
+
+def _run_text_job(job: Job) -> Job:
+    params = _params(job)
+    try:
+        if not job.alias:
+            raise JobRunnerError("text job requires an alias to route to a provider")
+        if job.status == JobStatus.PENDING_CONFIRM:
+            update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
+        outputs = dispatch_text(
+            prompt=job.prompt,
+            model=job.model,
+            alias=job.alias,
+            n=max(1, int(params.get("n") or 1)),
+            params=params,
+        )
+        texts = [text for text in outputs if text and len(text) <= 40_000]
+        if not texts:
+            raise JobRunnerError(f"{job.provider or job.alias} returned no valid text artifacts")
+        output_dir = job_output_dir_for(job)
+        output_paths: list[str] = []
+        with asset_output_lock(output_dir):
+            for text in texts[: max(1, int(params.get("n") or 1))]:
+                target = next_asset_path(output_dir, "txt")
+                target.write_text(text, encoding="utf-8")
+                output_paths.append(str(target))
+        job = _save_params(read_job(job.job_id), params)
+        for output_path in output_paths:
+            _write_sidecar(Path(output_path), job, params)
+        return update_job_status(
+            job.job_id,
+            status=JobStatus.DONE,
+            output_paths=output_paths,
+            error=None,
+        )
+    except Exception as error:
+        update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(error))
+        if isinstance(error, JobRunnerError):
+            raise
+        raise JobRunnerError(str(error)) from error
+
+
+def _run_audio_job(job: Job) -> Job:
+    params = _params(job)
+    try:
+        if not job.alias:
+            raise JobRunnerError("audio job requires an alias to route to a provider")
+        if job.status == JobStatus.PENDING_CONFIRM:
+            update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
+        with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider or 'audio'}-") as tmp:
+            outputs = dispatch_audio(
+                prompt=job.prompt,
+                model=job.model,
+                alias=job.alias,
+                output_dir=Path(tmp),
+                params=params,
+            )
+            valid = [Path(path) for path in outputs if is_valid_audio(Path(path))]
+            if not valid:
+                raise JobRunnerError(f"{job.provider or job.alias} returned no valid audio artifacts")
+            output_dir = job_output_dir_for(job)
+            output_paths: list[str] = []
+            with asset_output_lock(output_dir):
+                for source in valid[:1]:
+                    target = next_asset_path(output_dir, source.suffix)
+                    shutil.move(str(source), target)
+                    output_paths.append(str(target))
+        job = _save_params(read_job(job.job_id), params)
+        for output_path in output_paths:
+            _write_sidecar(Path(output_path), job, params)
+        return update_job_status(
+            job.job_id,
+            status=JobStatus.DONE,
+            output_paths=output_paths,
+            error=None,
+        )
+    except Exception as error:
+        update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(error))
+        if isinstance(error, JobRunnerError):
+            raise
+        raise JobRunnerError(str(error)) from error
 
 
 def _run_video_job(job: Job) -> Job:
@@ -309,6 +568,13 @@ def _run_video_job(job: Job) -> Job:
     """
     job = _normalize_reference_images(job)
     params = _params(job)
+    should_cancel = _cancel_checker(job)
+
+    def on_phase(phase: str) -> None:
+        if should_cancel is not None and should_cancel():
+            raise JobRunnerError("Canvas Run 已请求停止")
+        update_job_phase(job.job_id, phase)
+
     try:
         if not job.alias:
             raise JobRunnerError("video job requires an alias to route to a provider")
@@ -322,7 +588,8 @@ def _run_video_job(job: Job) -> Job:
                 output_dir=Path(tmp),
                 params=params,
                 # 进度卡点回写 job 文件（sent/downloading），watcher SSE 推给前端。
-                on_phase=lambda phase: update_job_phase(job.job_id, phase),
+                on_phase=on_phase,
+                should_cancel=should_cancel,
             )
             valid = [Path(p) for p in paths if is_valid_video(Path(p))]
             if not valid:

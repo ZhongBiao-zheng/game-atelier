@@ -12,11 +12,13 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, BackgroundTasks, Body, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, BackgroundTasks, Body, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, Response
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
@@ -35,7 +37,7 @@ from character_workflow.lib.atomic_io import (
 from character_workflow.lib.job_runner import image_dimensions_from_bytes
 from character_workflow.lib.jobs import (
     _load_job, delete_failed_job, job_lock, list_jobs, read_job, remove_image_from_job,
-    save_job, update_job_status, write_job,
+    new_job_id, save_job, update_job_status, write_job,
 )
 from character_workflow.lib.schemas import AssetSlot as _AssetSlot
 from character_workflow.lib.projects import (
@@ -56,6 +58,16 @@ from pydantic import field_validator
 from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
+    CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionList,
+    CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasLibraryAsset, CanvasLibraryAssetCreate,
+    CanvasLibraryAssetPatch,
+    CanvasLibraryInsertRequest, CanvasPackageCommitRequest, CanvasPackageImportResponse,
+    CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
+    CanvasPrompt, CanvasPromptCreate, CanvasPromptPatch,
+    CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
+    CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
+    CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse, CanvasRunRetry,
+    CanvasUiPreferences, CanvasUiPreferencesUpdate, CanvasUploadResponse, RevisionedSidecar,
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
@@ -388,6 +400,8 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
     # 防与 Skill 进程的 update_job_status 互相覆盖。
     with job_lock(job_id):
         data = json.loads(p.read_text(encoding="utf-8"))
+        if data.get("namespace") == "canvas":
+            raise HTTPException(403, detail="Canvas Job 的快照和参数不能通过通用编辑接口修改")
         for field, value in patch.model_dump(exclude_unset=True).items():
             data[field] = value
         atomic_write_json(p, data)
@@ -438,7 +452,7 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
         params = job.params.model_dump() if job.params else {}
         for field in (
             "reference_images", "reference_videos", "reference_audios",
-            "mj_sref", "mj_cref", "mj_oref",
+            "mask_image", "mj_sref", "mj_cref", "mj_oref",
         ):
             value = params.get(field)
             if isinstance(value, str):
@@ -508,13 +522,11 @@ def _size_reject_detail(raw_name: str, body: bytes, limit: int) -> str:
     )
 
 
-@router.post("/uploads")
-async def post_upload(file: UploadFile = File(...)) -> dict:
-    """画师在 Web 上传源图 → .runtime/uploads/<uuid><ext>。
-    返回的 path 可直接拼到 `/game-atelier:promo <id> --upload <path>` 复制命令里，
-    Skill 拿到后将其挪到 characters/<id>/source/。
-    """
-    raw_name = file.filename or "upload"
+async def _read_media_upload(
+    file: UploadFile,
+    fallback_name: str = "upload",
+) -> tuple[str, str, bytes, Literal["image", "video", "audio"]]:
+    raw_name = file.filename or fallback_name
     ext = Path(raw_name).suffix.lower()
     if ext not in _UPLOAD_ALLOWED_EXTS:
         raise HTTPException(422, detail=_ext_reject_detail(raw_name, ext, _UPLOAD_ALLOWED_EXTS))
@@ -522,12 +534,29 @@ async def post_upload(file: UploadFile = File(...)) -> dict:
     limit = _upload_max_bytes(ext)
     if len(body) > limit:
         raise HTTPException(413, detail=_size_reject_detail(raw_name, body, limit))
+    media_kind: Literal["image", "video", "audio"] = (
+        "image" if ext in _IMAGE_UPLOAD_EXTS else "video" if ext in _VIDEO_UPLOAD_EXTS else "audio"
+    )
+    return raw_name, ext, body, media_kind
+
+
+@router.post("/uploads")
+async def post_upload(file: UploadFile = File(...)) -> dict:
+    """画师在 Web 上传源图 → .runtime/uploads/<uuid><ext>。
+    返回的 path 可直接拼到 `/game-atelier:promo <id> --upload <path>` 复制命令里，
+    Skill 拿到后将其挪到 characters/<id>/source/。
+    """
+    raw_name, ext, body, _media_kind = await _read_media_upload(file)
+    target = await run_in_threadpool(_store_runtime_upload, ext, body)
+    return {"path": str(target.resolve()), "filename": raw_name}
+
+
+def _store_runtime_upload(ext: str, body: bytes) -> Path:
     uploads = _runtime() / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
-    name = f"{uuid.uuid4().hex}{ext}"
-    target = uploads / name
+    target = uploads / f"{uuid.uuid4().hex}{ext}"
     atomic_write_bytes(target, body)
-    return {"path": str(target.resolve()), "filename": raw_name}
+    return target
 
 
 @router.post("/characters/{character_id}/gallery/{kind}")
@@ -555,6 +584,16 @@ async def post_gallery_image(
             413, detail=_size_reject_detail(raw_name, body, _IMAGE_UPLOAD_MAX_BYTES)
         )
 
+    job_id, target = await run_in_threadpool(_store_gallery_upload, character_id, kind, ext, body)
+    return {"job_id": job_id, "path": str(target.resolve()), "filename": raw_name}
+
+
+def _store_gallery_upload(
+    character_id: str,
+    kind: str,
+    ext: str,
+    body: bytes,
+) -> tuple[str, Path]:
     out_dir = _project_root() / "characters" / character_id / kind
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -576,8 +615,7 @@ async def post_gallery_image(
         asset_slot=_AssetSlot(kind),
     )
     update_job_status(job_id, status=JobStatus.DONE, output_paths=[str(target.resolve())])
-
-    return {"job_id": job_id, "path": str(target.resolve()), "filename": raw_name}
+    return job_id, target
 
 
 @router.post("/characters", response_model=CharacterEntry)
@@ -981,7 +1019,9 @@ _STATUS_CN = {
     "pending_confirm": "等待确认出图",
     "pending": "正在出图",
     "done": "已完成",
+    "partial": "部分完成",
     "failed": "已失败",
+    "canceled": "已停止",
 }
 
 
@@ -1327,13 +1367,13 @@ class _ModelsPreviewPayload(BaseModel):
     provider: str | None = None
     base_url: str | None = None
     access_key: str | None = None
-    # 逃生舱：连明确判定为非视觉的模型也一并返回（deny 词表判过头时用）。
+    # 逃生舱：连判定为不可生成的模型也一并返回（词表判过头时用）。
     include_all: bool = False
 
 
-# 模型分类：image / video / unknown / excluded。
+# 模型分类：text / image / video / audio / unknown / excluded。
 #
-# excluded 是**唯一**授权丢弃的类别，条件很窄：上游明确标注了协议、且每一条协议都是非视觉。
+# excluded 是**唯一**授权丢弃的类别：上游明确标注了协议，且全部都不能生成四模态内容。
 # 判不出来一律 unknown 留在列表里让画师自己确认 —— 协议词汇是各厂自造的（同一份词元跳动
 # 数据里就有 zai:layout-parsing / bocha:web-search / unifuncs:web-reader），词表永远追不完，
 # 「认不出就丢」会让某个网关的模型列表整片消失且用户看不出原因。
@@ -1345,6 +1385,15 @@ _IMAGE_ID_HINTS = (
     "image", "seedream", "seededit", "dall-e", "dalle", "flux", "banana", "midjourney",
     "cogview", "imagen", "ideogram", "recraft", "irag", "kolors", "hidream",
 )
+_AUDIO_ID_HINTS = (
+    "tts", "speech", "text-to-speech",
+)
+_AUDIO_NON_GENERATION_ID_HINTS = (
+    "asr", "speech-to-text", "speech2text", "transcription", "whisper",
+)
+_TEXT_ID_HINTS = (
+    "gpt", "claude", "gemini", "deepseek", "qwen", "llama", "mistral", "command-r",
+)
 # 协议动词（冒号后半段）判视觉；seedance:generations 这类动词无信息量，靠厂商前缀兜。
 _PROTOCOL_IMAGE_HINTS = (
     "image-generations", "image-generation", "images", "image-edits", "images-edits",
@@ -1354,10 +1403,20 @@ _PROTOCOL_VIDEO_HINTS = (
     "video", "seedance", "vidu", "happyhorse", "t2v", "i2v", "r2v",
     "text2video", "image2video",
 )
-# 明确非视觉的协议动词：全部命中才判 excluded。
+_PROTOCOL_AUDIO_GENERATION_HINTS = (
+    "text-to-speech", "tts",
+)
+_PROTOCOL_UNSUPPORTED_AUDIO_GENERATION_HINTS = (
+    "text2audio", "audio-generation", "audio-generations", "t2a", "music",
+)
+_PROTOCOL_TEXT_GENERATION_HINTS = (
+    "chat-completions", "chat/completions", "openai:responses", "openai/responses",
+)
+_PROTOCOL_UNSUPPORTED_TEXT_GENERATION_HINTS = ("messages", "completions")
+# 明确不能生成四模态内容的协议动词：全部命中才判 excluded。
 _PROTOCOL_NON_VISUAL_HINTS = (
-    "chat-completions", "completions", "responses", "messages", "embeddings", "rerank",
-    "moderations", "t2a", "tts", "asr", "speech", "audio", "transcriptions", "translations",
+    "embeddings", "rerank", "moderations", "asr", "speech-to-text", "speech2text",
+    "transcriptions", "translations",
     "voice_clone", "web-search", "web-reader", "search", "layout-parsing", "ocr",
 )
 
@@ -1369,42 +1428,108 @@ def _id_hits(mid: str, hints: tuple[str, ...]) -> bool:
 
 
 def _classify_model(item: dict) -> str:
-    """返回 image / video / unknown / excluded —— 只有 excluded 会被过滤掉。"""
+    """返回四种可生成模态、unknown 或 excluded。"""
     protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
     if any(h in p for p in protocols for h in _PROTOCOL_IMAGE_HINTS):
         return "image"
     if any(h in p for p in protocols for h in _PROTOCOL_VIDEO_HINTS):
         return "video"
-    # 每一条协议都是非视觉才排除；混合标注（含一条看不懂的）保守留下。
+    if any(_protocol_is_openai_speech(protocol) for protocol in protocols):
+        return "audio"
+    if any(h in p for p in protocols for h in _PROTOCOL_TEXT_GENERATION_HINTS):
+        return "text"
+    # 每一条协议都明确不能生成四模态内容才排除；混合标注保守留下。
     if protocols and all(
         any(h in p for h in _PROTOCOL_NON_VISUAL_HINTS) for p in protocols
     ):
         return "excluded"
+    # Anthropic `messages` / legacy `completions` 虽然能产文本，但当前 caller 未实现。
+    # 显式协议不匹配时必须停在 unknown，不能再靠 id / output modality 把它包装成
+    # 可执行模型；否则 UI 会允许提交，runner 却只能打错端点。
+    if any(
+        any(hint in protocol for hint in _PROTOCOL_UNSUPPORTED_TEXT_GENERATION_HINTS)
+        for protocol in protocols
+    ):
+        return "unknown"
+    if any(
+        any(hint in protocol for hint in _PROTOCOL_UNSUPPORTED_AUDIO_GENERATION_HINTS)
+        for protocol in protocols
+    ):
+        return "unknown"
 
     # OpenRouter 等不给 supported_protocols，但给 architecture.output_modalities —— 这是
     # 权威字段，必须排在 id 猜测之前（实测它能修好 openrouter/auto、干掉 inkling 假阳性）。
+    mid = str(item.get("id") or "").lower()
     arch = item.get("architecture")
     out = {str(m).lower() for m in (arch or {}).get("output_modalities") or []} if isinstance(arch, dict) else set()
     if "video" in out:
         return "video"
     if "image" in out:
         return "image"
-    if out and not (out & {"image", "video"}):
-        # 上游明说输出里没有图也没有视频（纯文本 / 纯音频）——它自己声明的，可以信。
+    if "audio" in out:
+        return (
+            "audio"
+            if _id_hits(mid, _AUDIO_ID_HINTS)
+            and not _id_hits(mid, _AUDIO_NON_GENERATION_ID_HINTS)
+            else "unknown"
+        )
+    if "text" in out:
+        return "text"
+    if out:
         return "excluded"
 
-    mid = str(item.get("id") or "").lower()
     if _id_hits(mid, _VIDEO_ID_HINTS):
         return "video"
     if _id_hits(mid, _IMAGE_ID_HINTS):
         return "image"
+    if _id_hits(mid, _AUDIO_ID_HINTS) and not _id_hits(mid, _AUDIO_NON_GENERATION_ID_HINTS):
+        return "audio"
+    if mid.startswith(("doubao-seed-", "doubao-pro-", "doubao-lite-")):
+        # 火山 /models 对豆包对话模型通常不返回 output_modalities 或
+        # supported_protocols；只收明确的对话家族，未知 doubao 家族仍交给用户确认。
+        return "text"
+    if _id_hits(mid, _TEXT_ID_HINTS):
+        return "text"
     return "unknown"
 
 
 def _guess_model_modality(item: dict) -> str | None:
-    """分类结果里只有 image / video 能当 modality；unknown 交给画师标，excluded 不入列表。"""
+    """四种生成类别可直接作为 modality；unknown 交给画师标。"""
     category = _classify_model(item)
-    return category if category in ("image", "video") else None
+    return category if category in ("text", "image", "video", "audio") else None
+
+
+def _text_protocol(item: dict) -> str | None:
+    protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
+    if any("openai:responses" in p or "openai/responses" in p for p in protocols):
+        return "openai-responses"
+    if any("chat-completions" in p or "chat/completions" in p for p in protocols):
+        return "openai-chat"
+    return None
+
+
+def _audio_protocol(item: dict) -> str | None:
+    protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
+    if any(_protocol_is_openai_speech(protocol) for protocol in protocols):
+        return "openai-speech"
+    return None
+
+
+def _declared_unknown_protocol(item: dict) -> str | None:
+    """保留 unknown 模型的显式协议，让手动标模态后 caller 仍能诚实拒绝错端点。"""
+    protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
+    return protocols[0] if protocols else None
+
+
+def _protocol_is_openai_speech(protocol: str) -> bool:
+    blocked = ("asr", "transcription", "speech-to-text", "speech2text")
+    if any(item in protocol for item in blocked):
+        return False
+    return (
+        any(item in protocol for item in _PROTOCOL_AUDIO_GENERATION_HINTS)
+        or protocol.endswith(":speech")
+        or protocol.endswith("audio/speech")
+    )
 
 
 def _fetch_model_rows(url: str, headers: dict) -> list:
@@ -1469,6 +1594,18 @@ def _image_protocol(item: dict) -> str | None:
     return None
 
 
+def _model_input_modalities(item: dict) -> list[str]:
+    """Normalize explicit upstream input modality declarations; never infer vision from model ids."""
+    arch = item.get("architecture")
+    raw = item.get("input_modalities")
+    if raw is None and isinstance(arch, dict):
+        raw = arch.get("input_modalities")
+    if not isinstance(raw, list):
+        return []
+    allowed = {"text", "image", "video", "audio"}
+    return [kind for kind in (str(value).lower() for value in raw) if kind in allowed]
+
+
 @router.post("/keys/models-preview")
 def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
     """代理拉取上游 GET {base}/models 供 Key 表单做模型映射。
@@ -1531,21 +1668,24 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
         seen_ids.add(mid)
         total += 1
         category = _classify_model(item)
-        # 明确的非视觉模型不入列表：一把词元跳动 key 上游有 78 个模型，其中 61 个是对话 /
-        # 语音 / 搜索类，全塞进选择器只会淹掉那 17 个真正能出图出片的。include_all 是逃生舱：
+        # 明确不能生成内容的模型不入列表；include_all 是逃生舱：
         # deny 词表哪天判过头了，画师能自己看到全量，不至于变成死路。
         if category == "excluded" and not payload.include_all:
             excluded += 1
             continue
-        modality = category if category in ("image", "video") else None
+        modality = category if category in ("text", "image", "video", "audio") else None
         # 视频：协议 guess（resolve 不中 → None，交后端 dispatch 时判定 / 诚实报错）。
         # 图片：直接读上游协议标注（决定走 Ark 原生端点还是 OpenAI 兼容入口）。
         if modality == "video":
             protocol = resolve_protocol(preview_provider, base_url, mid)
         elif modality == "image":
             protocol = _image_protocol(item)
+        elif modality == "text":
+            protocol = _text_protocol(item)
+        elif modality == "audio":
+            protocol = _audio_protocol(item)
         else:
-            protocol = None
+            protocol = _declared_unknown_protocol(item)
         models.append({
             "id": mid,
             "name": str(item.get("name") or mid),
@@ -1553,6 +1693,7 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
             # unknown 与 excluded 都要能被前端区分：前者是「需要你确认」，不是「其他垃圾」。
             "category": category,
             "protocol": protocol,
+            "input_modalities": _model_input_modalities(item),
         })
     return {"models": models, "total": total, "excluded": excluded}
 
@@ -1868,6 +2009,1187 @@ class _StudioJobCreate(BaseModel):
     kind: JobKind = JobKind.IMAGE
 
 
+def _create_user_job(
+    body: _StudioJobCreate,
+    *,
+    namespace: Literal["studio"],
+) -> Job:
+    """Build and persist one Web-confirmed Studio job."""
+    if body.kind not in {JobKind.IMAGE, JobKind.VIDEO}:
+        raise HTTPException(422, detail="创作台目前只接受图片或视频任务")
+    db = keys.read_keys_db()
+    alias = body.alias or db.default_alias
+    if not alias:
+        raise HTTPException(status_code=400, detail="no default key configured")
+    key_row = next((k for k in db.keys if k.alias == alias), None)
+    if not key_row:
+        raise HTTPException(status_code=400, detail=f"unknown alias {alias}")
+    params = body.params.model_copy(deep=True)
+    if body.kind == JobKind.IMAGE:
+        image_count = params.n if params.n is not None else 1
+        if image_count < 1 or image_count > 4:
+            raise HTTPException(status_code=422, detail="params.n must be between 1 and 4")
+        params.n = image_count
+
+    job = Job(
+        job_id=new_job_id(),
+        character_id=alias,
+        prompt=body.prompt,
+        submitted_at=datetime.now(timezone.utc).isoformat(),
+        model=body.model,
+        params=params,
+        output_paths=[],
+        status=JobStatus.PENDING,
+        error=None,
+        asset_slot=_AssetSlot.PORTRAIT,
+        kind=body.kind,
+        namespace=namespace,
+        alias=alias,
+        provider=key_row.provider,
+    )
+    return save_job(job)
+
+
+@router.get("/canvas/projects", response_model=CanvasProjectList)
+def get_canvas_projects() -> CanvasProjectList:
+    from character_workflow.lib.canvas_packages import recover_canvas_package_transactions
+    from character_workflow.lib.canvas_projects import list_canvas_projects
+    recover_canvas_package_transactions()
+    return CanvasProjectList(projects=list_canvas_projects())
+
+
+@router.get("/canvas/project-options", response_model=list[CanvasProject])
+def get_canvas_project_options() -> list[CanvasProject]:
+    from character_workflow.lib.canvas_packages import recover_canvas_package_transactions
+    from character_workflow.lib.canvas_projects import list_canvas_project_options
+    recover_canvas_package_transactions()
+    return list_canvas_project_options()
+
+
+@router.get("/canvas/ui-preferences", response_model=CanvasUiPreferences)
+def get_canvas_ui_preferences() -> CanvasUiPreferences:
+    from character_workflow.lib.canvas_ui import (
+        CanvasUiPreferencesError,
+        read_canvas_ui_preferences,
+    )
+    try:
+        return read_canvas_ui_preferences()
+    except CanvasUiPreferencesError as error:
+        raise HTTPException(409, detail=str(error)) from error
+
+
+@router.put("/canvas/ui-preferences", response_model=CanvasUiPreferences)
+def put_canvas_ui_preferences(payload: CanvasUiPreferencesUpdate) -> CanvasUiPreferences:
+    from character_workflow.lib.canvas_ui import (
+        CanvasUiPreferencesError,
+        CanvasUiRevisionConflict,
+        save_canvas_ui_preferences,
+    )
+    try:
+        return save_canvas_ui_preferences(payload)
+    except CanvasUiRevisionConflict as error:
+        raise HTTPException(409, detail={
+            "code": "revision_conflict",
+            "current_revision": error.current_revision,
+        }) from error
+    except CanvasUiPreferencesError as error:
+        raise HTTPException(409, detail=str(error)) from error
+
+
+@router.post("/canvas/projects", response_model=CanvasProject, status_code=201)
+def post_canvas_project(payload: CanvasProjectCreate) -> CanvasProject:
+    from character_workflow.lib.canvas_projects import create_canvas_project
+    return create_canvas_project(payload.name)
+
+
+@router.patch("/canvas/projects/{project_id}", response_model=CanvasProject)
+def patch_canvas_project(project_id: str, payload: CanvasProjectRename) -> CanvasProject:
+    from character_workflow.lib.canvas_projects import rename_canvas_project
+    try:
+        return rename_canvas_project(project_id, payload.name)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+
+
+@router.post("/canvas/projects/export")
+def post_canvas_projects_export(payload: CanvasProjectExportRequest) -> FileResponse:
+    from character_workflow.lib.canvas_packages import (
+        CanvasPackageError,
+        CanvasProjectBusyError,
+        export_canvas_projects,
+    )
+    try:
+        target, filename = export_canvas_projects(payload.project_ids)
+    except KeyError:
+        raise HTTPException(404, detail="找不到要导出的画布项目") from None
+    except CanvasProjectBusyError as error:
+        raise HTTPException(409, detail=str(error)) from error
+    except CanvasPackageError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    return FileResponse(
+        target,
+        media_type="application/zip",
+        filename=filename,
+        background=BackgroundTask(target.unlink, missing_ok=True),
+    )
+
+
+@router.post("/canvas/projects/import/inspect")
+async def post_canvas_project_import_inspect(file: UploadFile = File(...)) -> dict:
+    from character_workflow.lib.canvas_packages import (
+        CanvasPackageError,
+        CanvasProjectBusyError,
+        inspect_canvas_package,
+    )
+    raw_name = file.filename or "canvas-package.zip"
+    if Path(raw_name).suffix.lower() != ".zip":
+        raise HTTPException(422, detail="请选择 .zip 格式的 Canvas 项目包")
+    upload_root = data_root.runtime_dir() / "canvas-import-uploads"
+    upload_root.mkdir(parents=True, exist_ok=True)
+    target = upload_root / f"upload-{uuid.uuid4().hex}.zip"
+    total = 0
+    try:
+        # 落盘和解包都是同步阻塞的，而这条路由必须是 async（要 await 分块读上传流）。
+        # 直接在协程里做，2 GiB 的写入加整包扫描会把事件循环连同 SSE 一起冻住；
+        # inspect_canvas_package 还会去抢画布文件锁，Skill 进程持锁时是无限期阻塞。
+        with target.open("wb") as output:
+            while chunk := await file.read(8 * 1024 * 1024):
+                total += len(chunk)
+                if total > 2 * 1024 * 1024 * 1024:
+                    raise HTTPException(413, detail="Canvas 项目包不能超过 2 GiB")
+                await run_in_threadpool(output.write, chunk)
+        result = await run_in_threadpool(inspect_canvas_package, target)
+        return result.model_dump(mode="json")
+    except CanvasProjectBusyError as error:
+        raise HTTPException(409, detail=str(error)) from error
+    except CanvasPackageError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    finally:
+        target.unlink(missing_ok=True)
+
+
+@router.post("/canvas/projects/import/commit", response_model=CanvasPackageImportResponse)
+def post_canvas_project_import_commit(
+    payload: CanvasPackageCommitRequest,
+) -> CanvasPackageImportResponse:
+    from character_workflow.lib.canvas_packages import CanvasPackageError, commit_canvas_package
+    try:
+        return CanvasPackageImportResponse(projects=commit_canvas_package(payload.token))
+    except KeyError:
+        raise HTTPException(404, detail="导入校验记录不存在，请重新选择项目包") from None
+    except TimeoutError:
+        raise HTTPException(410, detail="导入校验已过期，请重新选择项目包") from None
+    except CanvasPackageError as error:
+        raise HTTPException(422, detail=str(error)) from error
+
+
+@router.delete("/canvas/projects/{project_id}", status_code=204)
+def delete_canvas_project_route(
+    project_id: str,
+    payload: CanvasProjectDeleteRequest,
+) -> Response:
+    from character_workflow.lib.canvas_packages import (
+        CanvasPackageError,
+        CanvasProjectBusyError,
+        delete_canvas_project,
+    )
+    try:
+        delete_canvas_project(project_id, payload.expected_revision)
+        return Response(status_code=204)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    except CanvasProjectBusyError as error:
+        raise HTTPException(409, detail=str(error)) from error
+    except RuntimeError as error:
+        if str(error).startswith("revision_conflict:"):
+            current_revision = int(str(error).split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }) from None
+        raise
+    except CanvasPackageError as error:
+        raise HTTPException(422, detail=str(error)) from error
+
+
+@router.get("/canvas/projects/{project_id}/document", response_model=CanvasDocument)
+def get_canvas_document(project_id: str, response: Response) -> CanvasDocument:
+    from character_workflow.lib.canvas_projects import read_canvas_document
+    try:
+        document = read_canvas_document(project_id)
+        response.headers["ETag"] = f'"{document.revision}"'
+        return document
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    except ValueError as error:
+        raise _canvas_document_http_error(error) from error
+
+
+@router.put("/canvas/projects/{project_id}/document", response_model=CanvasDocument)
+def put_canvas_document(
+    project_id: str,
+    payload: CanvasDocument,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> CanvasDocument:
+    from character_workflow.lib.canvas_projects import save_canvas_document
+    if if_match is None:
+        raise HTTPException(428, detail="保存画布必须携带 If-Match revision")
+    try:
+        expected_revision = int(if_match.strip().strip('"'))
+    except ValueError:
+        raise HTTPException(422, detail="If-Match 必须是画布 revision") from None
+    try:
+        document = save_canvas_document(project_id, payload, expected_revision)
+        response.headers["ETag"] = f'"{document.revision}"'
+        return document
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    except RuntimeError as error:
+        if str(error).startswith("revision_conflict:"):
+            current_revision = int(str(error).split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }) from None
+        raise
+    except ValueError as error:
+        raise _canvas_document_http_error(error) from error
+
+
+def _canvas_document_http_error(error: ValueError) -> HTTPException:
+    """把画布库的结构化错误翻成 HTTP 状态。
+
+    关键的一条：`CanvasStorageError`（存档文件不见了 / 记着别的项目 ID）是**服务端**数据
+    完整性故障，必须 500，不能是 409。409 在前端的文案是「刷新后重试」，而对着一个不存在的
+    canvas.json 重试永远不会成功——原来 GET document 就是 409，画师只会一直刷。
+    """
+    from character_workflow.lib.canvas_projects import CanvasDocumentError, CanvasStorageError
+    if isinstance(error, CanvasStorageError):
+        logger.warning("canvas storage integrity failure: %s", error.code)
+        return HTTPException(500, detail={"code": error.code, "message": error.message})
+    if isinstance(error, CanvasDocumentError):
+        return HTTPException(422, detail={"code": error.code, "message": error.message})
+    return HTTPException(422, detail=str(error))
+
+
+def _canvas_if_match(if_match: str | None, subject: str) -> int:
+    if if_match is None:
+        raise HTTPException(428, detail=f"更新{subject}必须携带 If-Match revision")
+    try:
+        return int(if_match.strip().strip('"'))
+    except ValueError:
+        raise HTTPException(422, detail=f"If-Match 必须是{subject} revision") from None
+
+
+def _raise_canvas_agent_session_error(error: Exception) -> None:
+    from character_workflow.lib.canvas_agent_sessions import CanvasAgentSessionStateError
+    if isinstance(error, CanvasAgentSessionStateError):
+        raise HTTPException(
+            409,
+            detail="Agent 会话状态损坏，该文件已隔离；请从项目包恢复",
+        ) from error
+    if isinstance(error, KeyError):
+        raise HTTPException(404, detail="找不到这个画布项目或 Agent 会话") from None
+    if isinstance(error, RuntimeError) and str(error).startswith("revision_conflict:"):
+        current_revision = int(str(error).split(":", 1)[1])
+        raise HTTPException(409, detail={
+            "code": "revision_conflict",
+            "current_revision": current_revision,
+        }) from None
+    raise error
+
+
+@router.get(
+    "/canvas/projects/{project_id}/agent/sessions",
+    response_model=CanvasAgentSessionList,
+)
+def get_canvas_agent_sessions(project_id: str) -> CanvasAgentSessionList:
+    from character_workflow.lib.canvas_agent_sessions import list_canvas_agent_sessions
+    try:
+        return list_canvas_agent_sessions(project_id)
+    except KeyError as error:
+        _raise_canvas_agent_session_error(error)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/agent/sessions",
+    response_model=CanvasAgentSession,
+    status_code=201,
+)
+def post_canvas_agent_session(
+    project_id: str,
+    payload: CanvasAgentSessionCreate,
+    response: Response,
+) -> CanvasAgentSession:
+    from character_workflow.lib.canvas_agent_sessions import create_canvas_agent_session
+    try:
+        session = create_canvas_agent_session(project_id, payload.title)
+        response.headers["ETag"] = f'"{session.revision}"'
+        return session
+    except KeyError as error:
+        _raise_canvas_agent_session_error(error)
+
+
+@router.get(
+    "/canvas/projects/{project_id}/agent/sessions/{session_id}",
+    response_model=CanvasAgentSession,
+)
+def get_canvas_agent_session(
+    project_id: str,
+    session_id: str,
+    response: Response,
+) -> CanvasAgentSession:
+    from character_workflow.lib.canvas_agent_sessions import read_canvas_agent_session
+    try:
+        session = read_canvas_agent_session(project_id, session_id)
+        response.headers["ETag"] = f'"{session.revision}"'
+        return session
+    except (KeyError, ValueError) as error:
+        _raise_canvas_agent_session_error(error)
+
+
+@router.delete(
+    "/canvas/projects/{project_id}/agent/sessions/{session_id}",
+    status_code=204,
+)
+def delete_canvas_agent_session_route(
+    project_id: str,
+    session_id: str,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> Response:
+    from character_workflow.lib.canvas_agent_sessions import delete_canvas_agent_session
+    try:
+        delete_canvas_agent_session(
+            project_id,
+            session_id,
+            _canvas_if_match(if_match, "Agent 会话"),
+        )
+        return Response(status_code=204)
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_agent_session_error(error)
+
+
+def _raise_canvas_library_error(error: Exception, missing: str) -> None:
+    from character_workflow.lib.canvas_library import CanvasLibraryStateError
+    if isinstance(error, CanvasLibraryStateError):
+        raise HTTPException(409, detail="画布项目创作库状态损坏，请重新导入或恢复项目") from error
+    if isinstance(error, KeyError):
+        raise HTTPException(404, detail=missing) from None
+    if isinstance(error, RuntimeError) and str(error).startswith("revision_conflict:"):
+        current_revision = int(str(error).split(":", 1)[1])
+        raise HTTPException(409, detail={
+            "code": "revision_conflict",
+            "current_revision": current_revision,
+        }) from None
+    if isinstance(error, PermissionError):
+        raise HTTPException(403, detail=str(error)) from error
+    if isinstance(error, ValueError):
+        raise HTTPException(422, detail=str(error)) from error
+    raise error
+
+
+@router.get(
+    "/canvas/projects/{project_id}/library/assets",
+    response_model=RevisionedSidecar[CanvasLibraryAsset],
+)
+def get_canvas_library_assets(project_id: str, response: Response):
+    from character_workflow.lib.canvas_library import read_canvas_assets
+    try:
+        sidecar = read_canvas_assets(project_id)
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个画布项目或资产库")
+
+
+@router.post(
+    "/canvas/projects/{project_id}/library/assets",
+    response_model=RevisionedSidecar[CanvasLibraryAsset],
+    status_code=201,
+)
+def post_canvas_library_asset(
+    project_id: str,
+    payload: CanvasLibraryAssetCreate,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import save_canvas_asset
+    try:
+        sidecar = save_canvas_asset(
+            project_id,
+            payload.version_id,
+            payload.title,
+            payload.tags,
+            _canvas_if_match(if_match, "资产库"),
+        )
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个内容版本或画布项目")
+
+
+@router.patch(
+    "/canvas/projects/{project_id}/library/assets/{asset_id}",
+    response_model=RevisionedSidecar[CanvasLibraryAsset],
+)
+def patch_canvas_library_asset(
+    project_id: str,
+    asset_id: str,
+    payload: CanvasLibraryAssetPatch,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import patch_canvas_asset
+    try:
+        sidecar = patch_canvas_asset(
+            project_id,
+            asset_id,
+            payload,
+            _canvas_if_match(if_match, "资产库"),
+        )
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个资产或画布项目")
+
+
+@router.delete(
+    "/canvas/projects/{project_id}/library/assets/{asset_id}",
+    response_model=RevisionedSidecar[CanvasLibraryAsset],
+)
+def delete_canvas_library_asset(
+    project_id: str,
+    asset_id: str,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import delete_canvas_asset
+    try:
+        sidecar = delete_canvas_asset(
+            project_id,
+            asset_id,
+            _canvas_if_match(if_match, "资产库"),
+        )
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个资产或画布项目")
+
+
+@router.post(
+    "/canvas/projects/{project_id}/library/assets/{asset_id}/insert",
+    response_model=CanvasDocument,
+)
+def post_canvas_library_asset_insert(
+    project_id: str,
+    asset_id: str,
+    payload: CanvasLibraryInsertRequest,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import insert_canvas_asset
+    try:
+        document = insert_canvas_asset(
+            project_id,
+            asset_id,
+            payload.position,
+            _canvas_if_match(if_match, "画布"),
+        )
+        response.headers["ETag"] = f'"{document.revision}"'
+        return document
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个资产或画布项目")
+
+
+@router.get(
+    "/canvas/projects/{project_id}/library/prompts",
+    response_model=RevisionedSidecar[CanvasPrompt],
+)
+def get_canvas_library_prompts(project_id: str, response: Response):
+    from character_workflow.lib.canvas_library import read_canvas_prompts
+    try:
+        sidecar = read_canvas_prompts(project_id)
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个画布项目或提示词库")
+
+
+@router.post(
+    "/canvas/projects/{project_id}/library/prompts",
+    response_model=RevisionedSidecar[CanvasPrompt],
+    status_code=201,
+)
+def post_canvas_library_prompt(
+    project_id: str,
+    payload: CanvasPromptCreate,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import create_canvas_prompt
+    try:
+        sidecar = create_canvas_prompt(
+            project_id,
+            payload.title,
+            payload.content,
+            payload.tags,
+            _canvas_if_match(if_match, "提示词库"),
+        )
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个画布项目")
+
+
+@router.patch(
+    "/canvas/projects/{project_id}/library/prompts/{prompt_id}",
+    response_model=RevisionedSidecar[CanvasPrompt],
+)
+def patch_canvas_library_prompt(
+    project_id: str,
+    prompt_id: str,
+    payload: CanvasPromptPatch,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import patch_canvas_prompt
+    try:
+        sidecar = patch_canvas_prompt(
+            project_id,
+            prompt_id,
+            payload,
+            _canvas_if_match(if_match, "提示词库"),
+        )
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个提示词或画布项目")
+
+
+@router.delete(
+    "/canvas/projects/{project_id}/library/prompts/{prompt_id}",
+    response_model=RevisionedSidecar[CanvasPrompt],
+)
+def delete_canvas_library_prompt(
+    project_id: str,
+    prompt_id: str,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import delete_canvas_prompt
+    try:
+        sidecar = delete_canvas_prompt(
+            project_id,
+            prompt_id,
+            _canvas_if_match(if_match, "提示词库"),
+        )
+        response.headers["ETag"] = f'"{sidecar.revision}"'
+        return sidecar
+    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个提示词或画布项目")
+
+
+@router.post(
+    "/canvas/projects/{project_id}/library/prompts/{prompt_id}/insert",
+    response_model=CanvasDocument,
+)
+def post_canvas_library_prompt_insert(
+    project_id: str,
+    prompt_id: str,
+    payload: CanvasLibraryInsertRequest,
+    response: Response,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    from character_workflow.lib.canvas_library import insert_canvas_prompt
+    try:
+        document = insert_canvas_prompt(
+            project_id,
+            prompt_id,
+            payload.position,
+            _canvas_if_match(if_match, "画布"),
+        )
+        response.headers["ETag"] = f'"{document.revision}"'
+        return document
+    except (KeyError, RuntimeError, ValueError) as error:
+        _raise_canvas_library_error(error, "找不到这个提示词或画布项目")
+
+
+@router.post(
+    "/canvas/projects/{project_id}/uploads",
+    response_model=CanvasUploadResponse,
+    status_code=201,
+)
+async def post_canvas_upload(
+    project_id: str,
+    file: UploadFile = File(...),
+    expected_revision: int = Form(...),
+) -> CanvasUploadResponse:
+    from character_workflow.lib.canvas_projects import save_canvas_upload
+    raw_name, ext, body, media_kind = await _read_media_upload(file)
+    try:
+        # 这条路由必须是 async（要 await 读上传流），但落盘的这一段是同步的：解码媒体、抢画布
+        # 文件锁、写文档。Skill 进程持锁时锁等待没有上限，直接在协程里做等于整个事件循环停摆
+        # （SSE 一起断）。同文件的 media-operations 路由用的就是这个写法。
+        version, document, filename = await run_in_threadpool(
+            save_canvas_upload,
+            project_id, raw_name, ext, body, media_kind, expected_revision,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    except RuntimeError as error:
+        if str(error).startswith("revision_conflict:"):
+            current_revision = int(str(error).split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }) from None
+        raise
+    except ValueError as error:
+        raise _canvas_document_http_error(error) from error
+    return CanvasUploadResponse(version=version, filename=filename, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/nodes/{node_id}/replace",
+    response_model=CanvasUploadResponse,
+    status_code=201,
+)
+async def post_canvas_node_media_replace(
+    project_id: str,
+    node_id: str,
+    file: UploadFile = File(...),
+    expected_revision: int = Form(...),
+) -> CanvasUploadResponse:
+    from character_workflow.lib.canvas_projects import (
+        CanvasMediaReplaceError,
+        replace_canvas_node_media,
+    )
+
+    raw_name, ext, body, media_kind = await _read_media_upload(file, "replacement")
+    try:
+        version, document, filename = await run_in_threadpool(
+            replace_canvas_node_media,
+            project_id,
+            node_id,
+            raw_name,
+            ext,
+            body,
+            media_kind,
+            expected_revision,
+        )
+    except CanvasMediaReplaceError as error:
+        status = 404 if error.code == "canvas_media_node_missing" else 422
+        raise HTTPException(
+            status,
+            detail={"code": error.code, "message": error.message},
+        ) from error
+    except KeyError:
+        raise HTTPException(404, detail={
+            "code": "canvas_media_node_missing",
+            "message": "找不到这个画布项目或媒体节点。",
+        }) from None
+    except RuntimeError as error:
+        if str(error).startswith("revision_conflict:"):
+            current_revision = int(str(error).split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "canvas_media_revision_conflict",
+                "message": "画布已在别处更新，请刷新后重试。",
+                "current_revision": current_revision,
+            }) from None
+        raise
+    except ValueError as error:
+        raise HTTPException(422, detail={
+            "code": "canvas_media_decode_failed",
+            "message": "文件内容与扩展名不匹配，或媒体格式无法识别。",
+        }) from error
+    return CanvasUploadResponse(version=version, filename=filename, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/media-operations",
+    response_model=CanvasMediaOperationResponse,
+    status_code=201,
+)
+async def post_canvas_media_operation(
+    project_id: str,
+    payload: Any = Body(default=None),
+) -> CanvasMediaOperationResponse:
+    from character_workflow.lib.canvas_media_operations import (
+        CanvasMediaOperationError,
+        execute_canvas_media_operation,
+    )
+
+    try:
+        request = CanvasMediaOperationRequest.model_validate(payload)
+    except ValidationError:
+        operation_kind = (
+            payload.get("operation", {}).get("kind")
+            if isinstance(payload, dict) and isinstance(payload.get("operation"), dict)
+            else None
+        )
+        error_code = {
+            "crop": "canvas_media_invalid_crop",
+            "split": "canvas_media_invalid_split",
+            "upscale": "canvas_media_invalid_request",
+        }.get(operation_kind, "canvas_media_invalid_request")
+        raise HTTPException(422, detail={
+            "code": error_code,
+            "message": "图片处理参数无效，请检查选区、切线或放大设置。",
+        }) from None
+
+    try:
+        return await run_in_threadpool(execute_canvas_media_operation, project_id, request)
+    except CanvasMediaOperationError as error:
+        status = 404 if error.code == "canvas_media_source_missing" else 422
+        raise HTTPException(
+            status,
+            detail={"code": error.code, "message": error.message},
+        ) from error
+    except KeyError:
+        raise HTTPException(404, detail={
+            "code": "canvas_media_source_missing",
+            "message": "找不到这个画布项目或源图片节点。",
+        }) from None
+    except PermissionError as error:
+        raise HTTPException(403, detail={
+            "code": "canvas_media_source_missing",
+            "message": str(error),
+        }) from error
+    except (OSError, MemoryError) as error:
+        logger.warning("canvas media operation could not write outputs: %s", type(error).__name__)
+        raise HTTPException(503, detail={
+            "code": "canvas_media_processing_unavailable",
+            "message": "本地图片处理暂时不可用，未提交任何画布变化。",
+        }) from error
+    except RuntimeError as error:
+        detail = str(error)
+        if detail.startswith("revision_conflict:"):
+            current_revision = int(detail.split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "canvas_media_revision_conflict",
+                "message": "画布已经变化，刷新后可保留选择并重试。",
+                "current_revision": current_revision,
+            }) from error
+        logger.warning("canvas media operation failed: %s", type(error).__name__)
+        raise HTTPException(409, detail={
+            "code": "canvas_media_transaction_failed",
+            "message": "图片处理事务未能安全提交，请刷新画布后重试。",
+        }) from error
+
+
+@router.get("/canvas/projects/{project_id}/versions/{version_id}/media")
+def get_canvas_media(
+    project_id: str,
+    version_id: str,
+    w: int | None = Query(default=None, gt=0, le=8192),
+) -> FileResponse:
+    """w 是「这张图会被显示成多宽」，不是「请给我这个尺寸」。
+
+    服务端向上取到固定档位（256 / 512 / 1024）后发缩略图；原图本来就更小、
+    是动图、或者要的比最大档位还宽时照发原图。缩略图纯属优化，不改变可见内容。
+    """
+    return _canvas_media_file_response(project_id, version_id, download=False, display_width=w)
+
+
+@router.get("/canvas/projects/{project_id}/versions/{version_id}/download")
+def download_canvas_media(
+    project_id: str,
+    version_id: str,
+) -> FileResponse:
+    return _canvas_media_file_response(project_id, version_id, download=True)
+
+
+def _canvas_media_file_response(
+    project_id: str,
+    version_id: str,
+    *,
+    download: bool,
+    display_width: int | None = None,
+) -> FileResponse:
+    from character_workflow.lib.canvas_projects import (
+        canvas_media_response_metadata,
+        resolve_canvas_media,
+    )
+    from character_workflow.lib.canvas_thumbnails import resolve_canvas_thumbnail
+    try:
+        path, version = resolve_canvas_media(project_id, version_id)
+        media_type, filename = canvas_media_response_metadata(version)
+        if display_width is not None:
+            thumbnail = resolve_canvas_thumbnail(project_id, version, path, display_width)
+            if thumbnail is not None:
+                path, media_type = thumbnail, "image/webp"
+        headers = {"X-Content-Type-Options": "nosniff"}
+        if not download:
+            headers["Cache-Control"] = "private, max-age=31536000, immutable"
+        return FileResponse(
+            path,
+            media_type=media_type,
+            filename=filename if download else None,
+            content_disposition_type="attachment" if download else "inline",
+            headers=headers,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    except FileNotFoundError:
+        raise HTTPException(404, detail="找不到这个画布媒体文件") from None
+    except PermissionError as error:
+        raise HTTPException(403, detail=str(error)) from error
+
+
+@router.get("/canvas/projects/{project_id}/jobs", response_model=list[Job])
+def get_canvas_jobs(project_id: str) -> list[Job]:
+    from character_workflow.lib.canvas_runs import reconcile_canvas_jobs
+    from character_workflow.lib.canvas_projects import read_canvas_project
+    from character_workflow.lib.jobs import list_jobs
+    try:
+        read_canvas_project(project_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
+    def canvas_jobs() -> list[Job]:
+        return [
+            job
+            for job in list_jobs()
+            if job.namespace == "canvas" and job.canvas_project_id == project_id
+        ]
+
+    # 出图期间前端会一直轮这条接口。list_jobs() 要把 .runtime/jobs 下每一个 job 文件都解析
+    # 一遍，所以把刚读到的这一份直接交给 reconcile，只在真修过东西时才走第二遍扫描——
+    # 而「有东西要修」在轮询期间几乎不发生。
+    jobs = canvas_jobs()
+    return canvas_jobs() if reconcile_canvas_jobs(project_id=project_id, jobs=jobs) else jobs
+
+
+def _run_canvas_job_safely(job_id: str) -> None:
+    from character_workflow.lib.canvas_runs import run_canvas_job_scheduled
+
+    try:
+        run_canvas_job_scheduled(job_id)
+    except Exception:  # noqa: BLE001
+        # run_canvas_job persists both the friendly Job failure and failed candidates.
+        logger.warning("canvas run failed: %s", job_id)
+
+
+def _canvas_run_revision_conflict(error: RuntimeError) -> HTTPException | None:
+    detail = str(error)
+    if not detail.startswith("revision_conflict:"):
+        return None
+    return HTTPException(409, detail={
+        "code": "revision_conflict",
+        "message": "画布已发生变化，请保留当前内容并重试。",
+        "current_revision": int(detail.split(":", 1)[1]),
+    })
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/reverse-prompt",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+def post_canvas_reverse_prompt(
+    project_id: str,
+    payload: CanvasReversePromptCreate,
+    background: BackgroundTasks,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import (
+        CanvasRunCommandError,
+        submit_reverse_prompt_run,
+    )
+
+    try:
+        job, document = submit_reverse_prompt_run(
+            project_id,
+            payload.surface_node_id,
+            payload.expected_revision,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None
+    except CanvasRunCommandError as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/angle",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+def post_canvas_angle_run(
+    project_id: str,
+    payload: CanvasAngleRunCreate,
+    background: BackgroundTasks,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_angle_run
+
+    try:
+        job, document = submit_angle_run(
+            project_id,
+            payload.surface_node_id,
+            payload.expected_revision,
+            payload.requested_count,
+            payload.horizontal_angle,
+            payload.pitch_angle,
+            payload.camera_distance,
+            payload.wide_angle,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None
+    except CanvasRunCommandError as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/mask-edit",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+async def post_canvas_mask_edit(
+    project_id: str,
+    background: BackgroundTasks,
+    surface_node_id: str = Form(...),
+    expected_revision: int = Form(...),
+    requested_count: int = Form(1),
+    mask_file: UploadFile = File(...),
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_masks import CanvasMaskError
+    from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_mask_edit_run
+
+    try:
+        payload = CanvasMaskEditCreate(
+            surface_node_id=surface_node_id,
+            expected_revision=expected_revision,
+            requested_count=requested_count,
+        )
+        body = await mask_file.read(25 * 1024 * 1024 + 1)
+        job, document = await run_in_threadpool(
+            submit_mask_edit_run,
+            project_id,
+            payload.surface_node_id,
+            payload.expected_revision,
+            payload.requested_count,
+            body,
+        )
+    except ValidationError as error:
+        raise HTTPException(422, detail=error.errors()) from error
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None
+    except (CanvasRunCommandError, CanvasMaskError) as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/{run_id}/reverse-prompt-config",
+    response_model=CanvasDocument,
+)
+def post_canvas_reverse_prompt_config(
+    project_id: str,
+    run_id: str,
+    payload: CanvasReversePromptConfigCreate,
+) -> CanvasDocument:
+    from character_workflow.lib.canvas_runs import (
+        CanvasRunCommandError,
+        create_reverse_prompt_config,
+    )
+
+    try:
+        return create_reverse_prompt_config(project_id, run_id, payload.expected_revision)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或反推生成记录") from None
+    except CanvasRunCommandError as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+def post_canvas_run(
+    project_id: str,
+    payload: CanvasRunCreate,
+    background: BackgroundTasks,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_canvas_run
+
+    try:
+        job, document = submit_canvas_run(
+            project_id,
+            payload.surface_node_id,
+            payload.expected_revision,
+            payload.requested_count,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或生成节点") from None
+    except CanvasRunCommandError as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
+    except RuntimeError as error:
+        if str(error).startswith("revision_conflict:"):
+            current_revision = int(str(error).split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }) from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/{run_id}/retry",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+def post_canvas_run_retry(
+    project_id: str,
+    run_id: str,
+    payload: CanvasRunRetry,
+    background: BackgroundTasks,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import retry_canvas_run
+
+    try:
+        job, document = retry_canvas_run(
+            project_id,
+            run_id,
+            payload.expected_revision,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个生成记录") from None
+    except RuntimeError as error:
+        detail = str(error)
+        if detail.startswith("revision_conflict:"):
+            current_revision = int(detail.split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }) from None
+        messages = {
+            "run_not_terminal": (
+                "当前生成尚未结束，不能重试",
+                "等待当前生成结束，或先停止生成。",
+            ),
+            "result_node_missing": (
+                "原结果节点已被删除，不能在原位置重试",
+                "恢复结果节点，或新建生成节点后重新提交。",
+            ),
+        }
+        message, recovery = messages.get(detail, (detail, "检查画布当前状态后重试。"))
+        raise HTTPException(409, detail={
+            "code": detail,
+            "message": message,
+            "recovery": recovery,
+        }) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/{run_id}/cancel",
+    response_model=Job,
+)
+def post_canvas_run_cancel(project_id: str, run_id: str) -> Job:
+    from character_workflow.lib.canvas_runs import request_canvas_run_cancel
+
+    try:
+        return request_canvas_run_cancel(project_id, run_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布生成记录") from None
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/{run_id}/candidates/{candidate_id}/dismiss",
+    response_model=CanvasRunResponse,
+)
+def post_canvas_candidate_dismiss(
+    project_id: str,
+    run_id: str,
+    candidate_id: str,
+    payload: CanvasCandidateDismiss,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import dismiss_canvas_candidate
+
+    try:
+        job, document = dismiss_canvas_candidate(
+            project_id,
+            run_id,
+            candidate_id,
+            payload.expected_revision,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个生成记录或候选结果") from None
+    except RuntimeError as error:
+        detail = str(error)
+        if detail.startswith("revision_conflict:"):
+            current_revision = int(detail.split(":", 1)[1])
+            raise HTTPException(409, detail={
+                "code": "revision_conflict",
+                "current_revision": current_revision,
+            }) from None
+        raise HTTPException(409, detail=detail) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    return CanvasRunResponse(job=job, document=document)
+
+
 class _CharacterArchiveTarget(BaseModel):
     model_config = {"extra": "forbid"}
     kind: Literal["character"]
@@ -1950,7 +3272,12 @@ def _run_studio_job_safely(job_id: str) -> None:
             job = read_job(job_id)
         except FileNotFoundError:
             return
-        if job.status != JobStatus.DONE and job.status != JobStatus.FAILED:
+        if job.status not in {
+            JobStatus.DONE,
+            JobStatus.PARTIAL,
+            JobStatus.FAILED,
+            JobStatus.CANCELED,
+        }:
             update_job_status(job_id, status=JobStatus.FAILED, error=str(e))
 
 
@@ -1965,40 +3292,7 @@ def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> di
     The runner is fired via BackgroundTasks so the response returns immediately;
     the UI then polls /api/jobs/<id> to observe status transitions.
     """
-    db = keys.read_keys_db()
-    alias = body.alias or db.default_alias
-    if not alias:
-        raise HTTPException(status_code=400, detail="no default key configured")
-    key_row = next((k for k in db.keys if k.alias == alias), None)
-    if not key_row:
-        raise HTTPException(status_code=400, detail=f"unknown alias {alias}")
-    params = body.params.model_copy(deep=True)
-    if body.kind == JobKind.IMAGE:
-        image_count = params.n if params.n is not None else 1
-        if image_count < 1 or image_count > 4:
-            raise HTTPException(status_code=422, detail="params.n must be between 1 and 4")
-        params.n = image_count
-
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    job_id = f"job-{ts}{uuid.uuid4().hex[:8]}"
-
-    job = Job(
-        job_id=job_id,
-        character_id=alias,  # placeholder for non-null invariant; runner reads namespace
-        prompt=body.prompt,
-        submitted_at=datetime.now(timezone.utc).isoformat(),
-        model=body.model,
-        params=params,
-        output_paths=[],
-        status=JobStatus.PENDING,  # Studio skips pending_confirm (UI submit = explicit consent)
-        error=None,
-        asset_slot=_AssetSlot.PORTRAIT,  # ignored when namespace="studio"
-        kind=body.kind,
-        namespace="studio",
-        alias=alias,
-        provider=key_row.provider,
-    )
-    save_job(job)
+    job = _create_user_job(body, namespace="studio")
     # Dispatch through module-level symbol so tests can monkeypatch routes._run_studio_job_safely.
     from viewer_server import routes as _self
     background.add_task(_self._run_studio_job_safely, job.job_id)

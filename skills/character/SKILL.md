@@ -1,6 +1,6 @@
 ---
 name: character
-version: 4.6.0
+version: 4.7.0
 description: |
   游戏角色立绘工作流：承接画师反馈，通过对话问清风格/配色/镜头/道具后出图，
   并支持对已出立绘改皮肤、换色、重画。
@@ -186,7 +186,27 @@ uv run python -m character_workflow import-reference --character <角色id> --sl
 uv run python -m character_workflow import-reference --character <角色id> --slot turnaround --path <图片路径>
 ```
 
-命令会把原图按内容哈希备份到 `characters/<id>/source/`，同时登记到 `portrait/` 或 `turnaround/`，重复执行幂等。导入只代表“已有参考素材”，**不自动定稿**、不写 `canonical.json`；定稿仍要等画师明确确认后走 `set-canonical`。
+命令会把原图按内容哈希备份到 `characters/<id>/source/`，同时登记到 `portrait/` 或 `turnaround/`，并创建一条 `DONE` Job，因此导入完成后图片会立刻出现在 Web 对应的「立绘 / 三视图」页；重复执行幂等。导入只代表“已有参考素材”，**不自动定稿**、不写 `canonical.json`；定稿仍要等画师明确确认后走 `set-canonical`。
+
+### 外部生图结果：必须登记，禁止只复制文件
+
+Lovart、其他生图 Skill、外部编辑器或用户下载回来的成图，不经过本 Skill 的 `submit → run-job`，因此必须显式归档：
+
+```bash
+uv run python -m character_workflow import-output \
+  --character <角色id> \
+  --slot portrait \
+  --path <成图路径> \
+  --model "Lovart · GPT Image 2 Medium" \
+  --prompt-file <本次提示词路径> \
+  --reference-image <本次使用的参考图绝对路径>
+```
+
+Codex / Installed Plugin 模式仍按本 Skill 前文规则，把 `uv run python -m character_workflow` 换成对应的 `$BOOT --run -m character_workflow` 前缀。`--reference-image` 可重复传入。
+
+该命令会把外部图片归档为槽位内的下一个 `vN`，同时创建 `DONE` Job；若图片已经是目标槽位内的 `vN`，则原地补登记。返回的 `slot_path` 才是后续展示、对比和定稿使用的路径。它同样**不会自动定稿**。
+
+**角色页展示契约**：`portrait / promo / turnaround` 中任何希望在 Web 出现的图片，都必须同时属于一条 `DONE` Job。禁止用 `cp`、`mv`、Write 或其他文件操作直接把图片塞进槽位目录；“文件存在但没有 Job”属于不完整资产。外部出图后必须先执行 `import-output`，再把返回的 `slot_path` 渲染给画师。
 
 **Stage C**（无 active character）：列 `recent_chars` 中每个角色的 `id（tagline）`+ 新建 / 跳过。用户选定后立即 `set-active <id>` 并重新 turn-start，**不再弹二次确认**，直接进入 Stage D 推断。
 
@@ -357,6 +377,7 @@ turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、
 
 - `needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 态**绝不**启 viewer-server、绝不开窗。
 - 参考图一律走 CLI `--reference-image` / `--source-image`，**禁止手改 job JSON**。
+- 用户参考图必须走 `import-reference`；Lovart / 外部生成结果必须走 `import-output`。禁止直接复制进角色槽位，确保图片落盘与 Web 展示 Job 同时完成。
 - 确认卡原样转发 CLI（stderr）全文，不手写、不摘要、不增删字段。
 - 出图链路 submit→PENDING_CONFIRM→画师明确肯定→run-job；**绝不把沉默 / 模糊当默认推进**，模糊用 AskUserQuestion 二选一。
 - 三模式（A 编辑 / B 重出 / C 混合）互斥不混用；重出 / 修图仍过确认门。

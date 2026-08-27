@@ -145,8 +145,8 @@ def _build_body(prompt: str, model: str, params: dict[str, Any]) -> dict[str, An
     if media:
         inp["media"] = media
 
-    # 官方 watermark 默认 true（"Happy Horse" 角标），恒显式关。
-    parameters: dict[str, Any] = {"watermark": False}
+    # 官方 watermark 默认 true（"Happy Horse" 角标）；产品默认关，但允许节点显式开启。
+    parameters: dict[str, Any] = {"watermark": bool(params.get("watermark", False))}
     if params.get("resolution"):
         parameters["resolution"] = str(params["resolution"]).upper()  # 官方要求大写 P
     if mode in ("t2v", "r2v") and params.get("ratio"):
@@ -213,7 +213,9 @@ def _download_mp4(url: str, output_dir: Path, index: int, *, task_ref: str = "")
     return str(path)
 
 
-def _poll_task(*, base, headers, task_id, max_polls, poll_interval, sent_urls=None) -> str:
+def _poll_task(
+    *, base, headers, task_id, max_polls, poll_interval, sent_urls=None, should_cancel=None
+) -> str:
     """轮询到终态返回产物地址。
 
     网络抖动 / 5xx 交给 video_poll 吞掉重试（不扣 max_polls）；终态只认 output.task_status。
@@ -223,6 +225,7 @@ def _poll_task(*, base, headers, task_id, max_polls, poll_interval, sent_urls=No
     for resp in video_poll.poll_responses(
         url=url, headers=headers, timeout=180, max_polls=max_polls,
         poll_interval=poll_interval, task_ref=task_id, error_cls=HappyHorseVideoError,
+        should_cancel=should_cancel,
     ):
         payload = _json(resp)
         if not resp.ok:
@@ -254,6 +257,7 @@ def render_video(
     max_polls: int = 120,
     poll_interval: float = 15.0,  # 官方建议 15s 轮询（查询 RPS 上限 20）
     on_phase: Callable[[str], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
     **_kwargs,
 ) -> list[str]:
     """提交 n 条 HappyHorse 视频任务（先全部提交再逐个轮询），下 .mp4，返回本地路径 list[str]。
@@ -293,7 +297,8 @@ def render_video(
     out_dir = Path(output_dir)
     ready_urls = [
         _poll_task(base=base, headers=headers, task_id=t,
-                   max_polls=max_polls, poll_interval=poll_interval, sent_urls=sent_urls)
+                   max_polls=max_polls, poll_interval=poll_interval, sent_urls=sent_urls,
+                   should_cancel=should_cancel)
         for t in task_ids
     ]
     if on_phase:

@@ -109,6 +109,9 @@ export function StudioArchiveDialog({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
+    // targetKind 只在这里作为「上次选过什么」的初值参考读一次。把它列进依赖会让用户每换一次
+    // 归档位置就重新拉一遍列表，并把选择重置回 preferred。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, request]);
 
   const availableKinds = useMemo(

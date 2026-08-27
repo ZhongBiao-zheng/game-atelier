@@ -97,7 +97,7 @@ function renderVideoMode(overrides = {}) {
 describe('PromptInput video mode', () => {
   it('renders the combined video settings button in video kind', () => {
     renderVideoMode();
-    expect(screen.getByLabelText('视频生成设置')).toBeInTheDocument();
+    expect(screen.getByLabelText('视频设置')).toBeInTheDocument();
     cleanup();
   });
 

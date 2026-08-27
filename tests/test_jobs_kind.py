@@ -94,6 +94,8 @@ def test_jobparams_accepts_video_fields():
         resolution="720p",
         frame_mode="firstlast",
         generate_audio=True,
+        watermark=False,
+        background="transparent",
         reference_videos=["/abs/clip.mp4"],
         reference_audios=["/abs/voice.mp3"],
     )
@@ -101,5 +103,7 @@ def test_jobparams_accepts_video_fields():
     assert p.resolution == "720p"
     assert p.frame_mode == "firstlast"
     assert p.generate_audio is True
+    assert p.watermark is False
+    assert p.background == "transparent"
     assert p.reference_videos == ["/abs/clip.mp4"]
     assert p.reference_audios == ["/abs/voice.mp3"]

@@ -531,13 +531,14 @@ export function PromptInput({
   const [localH, setLocalH] = useState(initSize.h);
   const [sizeLocked, setSizeLocked] = useState(true);
   // 能力四项按模型族判（provider 只决定端点/协议，openrouter 另外改 size 语义）。
-  const caps = imageControlCaps(selectedModel?.id, provider?.provider);
+  const caps = imageControlCaps(selectedModel?.id, provider?.provider, selectedModel?.protocol);
   // MJ 的比例/版本/stylize 由渠道固定注入，张数也固定 4 —— 这些控件不能装作可选。
   const isMj = caps.family === 'midjourney';
   const maxRef = maxReferenceImages(selectedModel?.id);
   // omni 参考上限：按族覆盖（happyhorse video-edit = 5 图 + 1 视频），缺省 9/3/3。
   const maxRefImgs = videoCaps?.maxRefImages ?? MAX_REF_IMAGES;
   const maxRefVids = videoCaps?.maxRefVideos ?? MAX_REF_VIDEOS;
+  const maxRefAudios = videoCaps?.maxRefAudios ?? MAX_REF_AUDIOS;
   const stackAccept = isOmni
     ? ['image/*', videoCaps?.supportsReferenceVideo && 'video/*', videoCaps?.supportsReferenceAudio && 'audio/*']
         .filter(Boolean)
@@ -546,7 +547,7 @@ export function PromptInput({
   const stackCanAdd = isOmni
     ? referenceImages.length < maxRefImgs ||
       (Boolean(videoCaps?.supportsReferenceVideo) && referenceVideos.length < maxRefVids) ||
-      (Boolean(videoCaps?.supportsReferenceAudio) && referenceAudios.length < MAX_REF_AUDIOS)
+      (Boolean(videoCaps?.supportsReferenceAudio) && referenceAudios.length < maxRefAudios)
     : referenceImages.length < maxRef;
   // Seedance（火山 Ark）不支持只给尾帧：last_frame 必须配 first_frame。只填尾帧槽时在客户端
   // 拦下并禁用生成，不浪费一轮注定被上游拒的 API 往返（其余族 / 模式 / 再次生成路径不受影响）。
@@ -680,7 +681,7 @@ export function PromptInput({
           if (videoCaps?.supportsReferenceVideo && videos.length < maxRefVids) videos.push(file);
           else dropped.video++;
         } else if (file.type.startsWith('audio/')) {
-          if (videoCaps?.supportsReferenceAudio && audios.length < MAX_REF_AUDIOS) audios.push(file);
+          if (videoCaps?.supportsReferenceAudio && audios.length < maxRefAudios) audios.push(file);
           else dropped.audio++;
         } else if (file.type.startsWith('image/')) {
           if (images.length < maxRefImgs) images.push(file);
@@ -693,7 +694,7 @@ export function PromptInput({
       const parts: string[] = [];
       if (dropped.image) parts.push(`参考图最多 ${maxRefImgs} 张`);
       if (dropped.video) parts.push(videoCaps?.supportsReferenceVideo ? `参考视频最多 ${maxRefVids} 个` : '当前模型不支持参考视频');
-      if (dropped.audio) parts.push(videoCaps?.supportsReferenceAudio ? `参考音频最多 ${MAX_REF_AUDIOS} 段` : '当前模型不支持参考音频');
+      if (dropped.audio) parts.push(videoCaps?.supportsReferenceAudio ? `参考音频最多 ${maxRefAudios} 段` : '当前模型不支持参考音频');
       const droppedTotal = dropped.image + dropped.video + dropped.audio;
       if (parts.length) showRefHint(`${parts.join('，')}，已忽略 ${droppedTotal} 个文件`);
     } else {
@@ -916,7 +917,7 @@ export function PromptInput({
                       e.preventDefault();
                       // 已达上限的入口置灰但保持可点 → 点击解释原因（pointer-events-none 会吞掉 title）。
                       showRefHint(isOmni
-                        ? `参考素材已达上限，已忽略新文件（图 ${maxRefImgs}${videoCaps?.supportsReferenceVideo ? ` / 视频 ${maxRefVids}` : ''}${videoCaps?.supportsReferenceAudio ? ` / 音频 ${MAX_REF_AUDIOS}` : ''}）`
+                        ? `参考素材已达上限，已忽略新文件（图 ${maxRefImgs}${videoCaps?.supportsReferenceVideo ? ` / 视频 ${maxRefVids}` : ''}${videoCaps?.supportsReferenceAudio ? ` / 音频 ${maxRefAudios}` : ''}）`
                         : `参考图最多 ${maxRef} 张，删除后才能继续添加`);
                     }}
                     className={`absolute flex items-center justify-center rounded-full border-[0.5px] border-border bg-secondary transition-colors ${

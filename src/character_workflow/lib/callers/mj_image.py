@@ -307,7 +307,7 @@ def _download_png(url: str, output_dir: Path, index: int, *, task_ref: str = "")
 
 def _poll_task(
     *, root: str, headers: dict[str, str], task_id: str,
-    max_polls: int, poll_interval: float,
+    max_polls: int, poll_interval: float, should_cancel: Callable[[], bool] | None = None,
 ) -> list[str]:
     """轮询到终态，返回产物地址列表。
 
@@ -318,6 +318,7 @@ def _poll_task(
     for resp in video_poll.poll_responses(
         url=url, headers=headers, timeout=60, max_polls=max_polls,
         poll_interval=poll_interval, task_ref=task_id, error_cls=MidjourneyError,
+        should_cancel=should_cancel,
     ):
         payload = _json(resp)
         if not resp.ok:
@@ -350,6 +351,7 @@ def render(
     max_polls: int = 120,
     poll_interval: float = 3.0,
     on_phase: Callable[[str], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
     **_kwargs,
 ) -> list[str]:
     """提交 imagine 任务并轮询取图，返回本地 .png 路径 list[str]。
@@ -400,6 +402,7 @@ def render(
         for url in _poll_task(
             root=root, headers=headers, task_id=task_id,
             max_polls=max_polls, poll_interval=poll_interval,
+            should_cancel=should_cancel,
         ):
             if on_phase and not downloading:
                 downloading = True

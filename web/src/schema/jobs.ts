@@ -1,12 +1,12 @@
-export type JobStatus = 'pending_confirm' | 'pending' | 'done' | 'failed';
+export type JobStatus = 'pending_confirm' | 'pending' | 'done' | 'partial' | 'failed' | 'canceled';
 
 // 2026-05-25 重构: 原 JobKind 改名为 AssetSlot
 export type AssetSlot = 'portrait' | 'promo' | 'turnaround';
 
 // 新 JobKind: 媒体类型
-export type JobKind = 'image' | 'video';
+export type JobKind = 'text' | 'image' | 'video' | 'audio';
 
-export type Namespace = 'character' | 'studio' | 'ui' | 'video';
+export type Namespace = 'character' | 'studio' | 'ui' | 'video' | 'canvas';
 
 export interface JobParams {
   size?: string;
@@ -15,20 +15,36 @@ export interface JobParams {
   vendor?: string;
   n?: number;
   reference_images?: string[];
+  /** Canvas 局部编辑的服务端解析 mask 路径；浏览器不直接写入。 */
+  mask_image?: string;
+  /** Canvas 多角度生成的服务端受控相机参数。 */
+  angle_horizontal?: number;
+  angle_pitch?: number;
+  angle_distance?: number;
+  angle_wide?: boolean;
   requested_size?: string;
   actual_size?: string;
   warnings?: string[];
   // 图片参数 —— 与 schemas.py::JobParams 同步（ratio 如 "16:9"；quality: low|medium|high|auto）
   ratio?: string;
   quality?: string;
+  background?: 'auto' | 'opaque' | 'transparent';
   // 视频参数（kind=video）—— 与 schemas.py::JobParams 同步
   duration?: number;
   resolution?: string;
   mode?: string; // kling 生成档位 std|pro（≠ frame_mode）
   frame_mode?: 'auto' | 'first' | 'last' | 'firstlast';
   generate_audio?: boolean;
+  watermark?: boolean;
   reference_videos?: string[];
   reference_audios?: string[];
+  temperature?: number;
+  max_tokens?: number;
+  reasoning_effort?: 'auto' | 'low' | 'medium' | 'high' | 'xhigh';
+  voice?: string;
+  speed?: number;
+  response_format?: string;
+  instructions?: string;
   // B3 UI 页面风格候选来源关系 —— 与 schemas.py::JobParams 同步
   style_variant?: string;
   base_version?: string;
@@ -60,6 +76,44 @@ export interface JobParams {
   [key: string]: unknown;
 }
 
+export interface CanvasGenerationSnapshot {
+  snapshot_version: 1;
+  surface_node_id: string;
+  result_node_id: string;
+  mode: 'text' | 'image' | 'video' | 'audio';
+  final_prompt: string;
+  input_policy: 'all_connected' | 'mentions_only';
+  model: string;
+  provider: string;
+  alias: string | null;
+  normalized_params: Record<string, unknown>;
+  inputs: Array<{
+    order: number;
+    source: 'implicit_self' | 'input_connection' | 'first_frame' | 'last_frame';
+    node_id: string;
+    version_id: string;
+    kind: 'text' | 'image' | 'video' | 'audio';
+  }>;
+  mask_version_id: string | null;
+  submitted_at: string;
+  submitted_by: { kind: 'user' | 'agent' | 'plugin'; actor_id: string | null };
+  request_fingerprint: string;
+}
+
+export interface CanvasJobContext {
+  run_id: string;
+  snapshot: CanvasGenerationSnapshot;
+  result_node_id: string;
+  candidates: Array<{
+    candidate_id: string;
+    index: number;
+    status: 'pending' | 'succeeded' | 'failed' | 'canceled';
+    version_id: string | null;
+    error: string | null;
+    dismissed_at?: string | null;
+  }>;
+}
+
 export interface Job {
   job_id: string;
   character_id: string;
@@ -82,12 +136,17 @@ export interface Job {
   progress_phase?: 'sent' | 'downloading' | null;
   // 2026-07-08: 出图完成时间戳（DONE/FAILED 终态回写；Web 只读）— 与 schemas.py 同步
   completed_at?: string | null;
+  runner_started_at?: string | null;
+  cancel_requested_at?: string | null;
   // 2026-08-10 (B2): UI 页面 job（namespace='ui'）归项目不归角色；Web 只读 — 与 schemas.py 同步
   project_id?: string | null;
   ui_scheme_id?: string | null;
   screen_id?: string | null;
   // 项目视频 job（namespace='video'）归完整企划；Web 只读 — 与 schemas.py 同步
   production_id?: string | null;
+  // 人工画布 job（namespace='canvas'）归独立画布项目；Web 只读。
+  canvas_project_id?: string | null;
+  canvas_run?: CanvasJobContext | null;
 }
 
 export const WEB_EDITABLE_FIELDS = ['prompt', 'params'] as const;

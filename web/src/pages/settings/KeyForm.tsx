@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ArrowLeft, Eye, EyeOff, X } from 'lucide-react';
-import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
+import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
 
 type ProviderKind = 'official' | 'third_party' | 'custom';
 type ApiModality = 'image' | 'video' | 'audio' | 'llm';
@@ -18,8 +18,8 @@ interface ProviderPreset {
 }
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
-  { value: 'openai', label: 'OpenAI', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://platform.openai.com', docsUrl: 'https://platform.openai.com/docs', apiKeyUrl: 'https://platform.openai.com/api-keys', defaultBaseUrl: 'https://api.openai.com/v1', defaultModels: [{ name: 'GPT Image 1', id: 'gpt-image-1' }] },
-  { value: 'seedream', label: '火山引擎', kind: 'official', modalities: ['image'], homepageUrl: 'https://www.volcengine.com', docsUrl: 'https://www.volcengine.com/docs/82379/1399008', apiKeyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModels: [{ name: '图片 5.0', id: 'doubao-seedream-5-0-260128' }] },
+  { value: 'openai', label: 'OpenAI', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://platform.openai.com', docsUrl: 'https://platform.openai.com/docs', apiKeyUrl: 'https://platform.openai.com/api-keys', defaultBaseUrl: 'https://api.openai.com/v1', defaultModels: [{ name: 'GPT Image 1', id: 'gpt-image-1' }, { name: 'GPT 5', id: 'gpt-5', modality: 'text', protocol: 'openai-responses', input_modalities: ['text'] }] },
+  { value: 'seedream', label: '火山引擎', kind: 'official', modalities: ['image', 'llm'], homepageUrl: 'https://www.volcengine.com', docsUrl: 'https://www.volcengine.com/docs/82379/1399008', apiKeyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModels: [{ name: '图片 5.0', id: 'doubao-seedream-5-0-260128' }, { name: '豆包 Seed 1.8', id: 'doubao-seed-1-8-251228', modality: 'text', protocol: 'openai-chat', input_modalities: ['text'] }] },
   { value: 'tokendance', label: '词元跳动', kind: 'official', modalities: ['image', 'video'], homepageUrl: 'https://tokendance.space', docsUrl: 'https://tokendance.space/docs/quickstart', apiKeyUrl: 'https://tokendance.space/keys', defaultBaseUrl: 'https://tokendance.space/gateway/v1', defaultModels: [{ name: 'Seedream 5.0 Lite', id: 'seedream-5.0-lite', modality: 'image', protocol: 'openai' }, { name: 'Seedream 5.0 Pro', id: 'seedream-5.0-pro', modality: 'image', protocol: 'ark' }, { name: 'Seedance 2.0', id: 'seedance-2.0', modality: 'video', protocol: 'seedance' }] },
   { value: 'openrouter', label: 'OpenRouter', kind: 'official', modalities: ['image', 'video'], homepageUrl: 'https://openrouter.ai', docsUrl: 'https://openrouter.ai/docs/quickstart', apiKeyUrl: 'https://openrouter.ai/settings/keys', defaultBaseUrl: 'https://openrouter.ai/api/v1', defaultModels: [{ name: 'GPT Image 2', id: 'openai/gpt-image-2', modality: 'image' }, { name: 'Google: Veo 3.1', id: 'google/veo-3.1', modality: 'video' }] },
   { value: 'custom', label: '自定义', kind: 'custom', modalities: ['image'], defaultBaseUrl: '', defaultModels: [{ name: '', id: '' }] },
@@ -46,11 +46,20 @@ type PickerFilter = 'all' | ModelCategory;
 
 // 「未识别」不是「其他垃圾」——上游协议词汇各厂自造、词表追不完，认不出的条目要画师自己确认。
 const CATEGORY_LABELS: Record<ModelCategory, string> = {
+  text: '对话',
   image: '图片',
   video: '视频',
+  audio: '音频',
   unknown: '未识别',
-  excluded: '非视觉',
+  excluded: '不可生成',
 };
+
+const GENERATION_MODALITIES = ['text', 'image', 'video', 'audio'] as const;
+const TEXT_INPUT_MODALITIES = [
+  ['image', '图片'],
+  ['video', '视频'],
+  ['audio', '音频'],
+] as const;
 
 // 仅前端的行级标记：编辑态「打开表单时已存在的模型」分类锁死为只读，新增行不带此标记。
 // _locked 随 spread 在每次 setModels 中传递，增删行都不会错乱（不依赖 id 值或行下标）。
@@ -114,7 +123,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
 
   // 模型映射：服务端代理拉上游 /models（CORS + 编辑态前端只有掩码密钥，见 models-preview）。
   const fetchModelsBaseUrl = baseUrl.trim() || providerByValue(provider).defaultBaseUrl || '';
-  /** includeAll = 逃生舱重拉：把后端判定「明确非视觉」的条目也一并列出来。 */
+  /** includeAll = 逃生舱重拉：把后端判定「不可生成」的条目也一并列出来。 */
   const fetchModels = async (includeAll = false) => {
     setFetching(true);
     setFetchError(null);
@@ -128,7 +137,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
         access_key: !editing || keyChanged ? accessKey.trim() || null : null,
         include_all: includeAll,
       });
-      const order = (m: RemoteModel) => ['image', 'video', 'unknown', 'excluded'].indexOf(m.category);
+      const order = (m: RemoteModel) => ['text', 'image', 'video', 'audio', 'unknown', 'excluded'].indexOf(m.category);
       const sorted = [...remote.models].sort((a, b) => order(a) - order(b));
       const enabledIds = new Set(models.map((m) => m.id.trim()).filter(Boolean));
       // 逃生舱重拉发生在 picker 内部：已勾选的和已指定的分类都要留着，否则「看一眼全量」
@@ -170,6 +179,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
           // 「重拉一次列表来修协议」必须真的有效：protocol 是纯机器字段（表单里没有输入口），
           // 命中上游就用上游值覆盖，否则存错 / 存空的行永远修不回来。
           protocol: hit.protocol,
+          input_modalities: hit.input_modalities,
           // name 有输入框、可能被改成自己的叫法，只在空着或还等于 id 时补上游名。
           name: !m.name.trim() || m.name.trim() === m.id.trim() ? hit.name : m.name,
           // 分类归表单管（编辑态已存行是只读徽标）；只有未识别行的显式二选一才回写。
@@ -181,7 +191,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
       .filter((m) => fetchedChecked.has(m.id) && !keptIds.has(m.id))
       // protocol 必须随模型一起存：它是上游协议标注的解析结果（图片 ark/openai、视频
       // seedance/kling/…），丢了就得靠 caller 端启发式猜端点。
-      .map((m) => ({ name: m.name, id: m.id, modality: resolvedModality(m) as ModelModality, protocol: m.protocol }));
+      .map((m) => ({ name: m.name, id: m.id, modality: resolvedModality(m) as ModelModality, protocol: m.protocol, input_modalities: m.input_modalities }));
     const next = [...kept, ...added];
     setModels(next.length ? next : [{ name: '', id: '' }]);
     setPreview(null);
@@ -222,12 +232,23 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     setError(null);
     try {
       const cleanModels = models
-        .map((model) => ({ name: model.name.trim(), id: model.id.trim(), modality: model.modality ?? 'image' as ModelModality, protocol: model.protocol ?? null }))
+        .map((model) => {
+          const modality = model.modality ?? 'image' as ModelModality;
+          const inputModalities = modality === 'text'
+            ? Array.from(new Set<ModelInputModality>(['text', ...(model.input_modalities ?? [])]))
+            : model.input_modalities ?? [];
+          return {
+            name: model.name.trim(),
+            id: model.id.trim(),
+            modality,
+            protocol: model.protocol ?? null,
+            input_modalities: inputModalities,
+          };
+        })
         .filter((model) => model.name && model.id);
-      // key 级 modalities 由模型标注派生（key 级仅作摘要/兜底），preset 的 llm 等附加能力保留。
+      // key 级 modalities 由模型标注派生；存量契约用 llm 表示文本生成能力。
       const derivedModalities = Array.from(new Set([
-        ...preset.modalities.filter((m) => m !== 'image' && m !== 'video'),
-        ...cleanModels.map((m) => m.modality),
+        ...cleanModels.map((m) => m.modality === 'text' ? 'llm' : m.modality),
       ]));
       const payload: KeyCreatePayload = {
         alias: usesNamedAlias(provider) ? alias.trim() : provider,
@@ -286,9 +307,9 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
   const pickerVisible = pickerFilter === 'all'
     ? pickerSearched
     : pickerSearched.filter((m) => m.category === pickerFilter);
-  // 「非视觉」chip 只在逃生舱把它们拉进来时才出现，平时不给这一档噪音。
+  // 「不可生成」chip 只在逃生舱把它们拉进来时出现。
   const pickerFilters: PickerFilter[] = [
-    'all', 'image', 'video', 'unknown',
+    'all', 'text', 'image', 'video', 'audio', 'unknown',
     ...((preview?.models ?? []).some((m) => m.category === 'excluded') ? (['excluded'] as const) : []),
   ];
 
@@ -336,8 +357,8 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <span>
                   {preview.includeAll
-                    ? '已显示全部，含非图像 / 视频模型'
-                    : `已过滤 ${preview.excluded} 个非图像 / 视频模型`}
+                    ? '已显示全部，含不可生成模型'
+                    : `已过滤 ${preview.excluded} 个不可生成模型`}
                 </span>
                 <button
                   type="button"
@@ -345,7 +366,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                   disabled={fetching}
                   className={textActionClass}
                 >
-                  {fetching ? '获取中...' : preview.includeAll ? '只看图像 / 视频' : '显示全部'}
+                  {fetching ? '获取中...' : preview.includeAll ? '只看可生成模型' : '显示全部'}
                 </button>
               </div>
             )}
@@ -405,11 +426,11 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                     {CATEGORY_LABELS[m.modality]}
                   </span>
                 ) : (
-                  /* 上游认不出分类的行：就地二选一，不给「默认图片」这种静默兜底的机会。 */
+                  /* 上游认不出分类的行：就地选择四模态，不做静默兜底。 */
                   <div role="group" aria-label={`分类 ${m.id}`} className="flex shrink-0 items-center gap-2">
                     <span className="text-xs text-muted-foreground">{CATEGORY_LABELS[m.category]}</span>
                     <div className="flex items-center rounded-md border border-border p-0.5">
-                      {(['image', 'video'] as const).map((mod) => {
+                      {GENERATION_MODALITIES.map((mod) => {
                         const active = modalityPick[m.id] === mod;
                         return (
                           <button
@@ -421,7 +442,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                               active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
                             }`}
                           >
-                            {mod === 'image' ? '图片' : '视频'}
+                            {CATEGORY_LABELS[mod]}
                           </button>
                         );
                       })}
@@ -654,15 +675,15 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                   </div>
                 </div>
                 {fetchError && <div className="mb-2 text-sm text-destructive">{fetchError}</div>}
-                <div className="mb-2 grid grid-cols-[1fr_1fr_6.5rem_auto] gap-2 text-xs text-muted-foreground">
+                <div className="mb-2 grid grid-cols-[1fr_1fr_15rem_auto] gap-2 text-xs text-muted-foreground">
                   <span>模型别名</span>
                   <span>模型 ID</span>
-                  <span>分类</span>
+                  <span>分类 / 输入</span>
                   <span className="sr-only">操作</span>
                 </div>
                 <div className="space-y-2">
                   {models.map((model, index) => (
-                    <div key={index} className="grid grid-cols-[1fr_1fr_6.5rem_auto] items-center gap-2">
+                    <div key={index} className="grid grid-cols-[1fr_1fr_15rem_auto] items-center gap-2">
                       <label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</label>
                       <input
                         id={`key-model-name-${index}`}
@@ -681,43 +702,74 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                         className={`${fieldClass} font-mono`}
                         placeholder="请求里使用的 ID，例如：doubao-seedream-5-0-260128"
                       />
-                      {isLocked(model) ? (
-                        /* 已存在的模型分类固化为只读徽标——添加完成后不允许再调分类。 */
-                        <div role="group" aria-label={`模型分类 ${index + 1}`} className="flex items-center">
-                          <span
-                            className={`rounded-full border px-2 py-0.5 text-xs ${
-                              (model.modality ?? 'image') === 'video'
-                                ? 'border-border text-foreground'
-                                : 'border-primary/40 text-primary'
-                            }`}
+                      <div className="space-y-1.5">
+                        {isLocked(model) ? (
+                          /* 已存在的模型分类固化为只读徽标——添加完成后不允许再调分类。 */
+                          <div role="group" aria-label={`模型分类 ${index + 1}`} className="flex items-center">
+                            <span
+                              className={`rounded-full border px-2 py-0.5 text-xs ${
+                                (model.modality ?? 'image') === 'video'
+                                  ? 'border-border text-foreground'
+                                  : 'border-primary/40 text-primary'
+                              }`}
+                            >
+                              {CATEGORY_LABELS[model.modality ?? 'image']}
+                            </span>
+                          </div>
+                        ) : (
+                          <div
+                            role="group"
+                            aria-label={`模型分类 ${index + 1}`}
+                            className="flex items-center rounded-md border border-border p-0.5"
                           >
-                            {(model.modality ?? 'image') === 'video' ? '视频' : '图片'}
-                          </span>
-                        </div>
-                      ) : (
-                        <div
-                          role="group"
-                          aria-label={`模型分类 ${index + 1}`}
-                          className="flex items-center rounded-md border border-border p-0.5"
-                        >
-                          {(['image', 'video'] as const).map((mod) => {
-                            const active = (model.modality ?? 'image') === mod;
-                            return (
-                              <button
-                                key={mod}
-                                type="button"
-                                aria-pressed={active}
-                                onClick={() => setModels(models.map((m, i) => i === index ? { ...m, modality: mod } : m))}
-                                className={`rounded-sm px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                                  active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
-                                }`}
-                              >
-                                {mod === 'image' ? '图片' : '视频'}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+                            {GENERATION_MODALITIES.map((mod) => {
+                              const active = (model.modality ?? 'image') === mod;
+                              return (
+                                <button
+                                  key={mod}
+                                  type="button"
+                                  aria-pressed={active}
+                                  onClick={() => setModels(models.map((m, i) => i === index ? {
+                                    ...m,
+                                    modality: mod,
+                                    input_modalities: mod === 'text' ? ['text'] : [],
+                                  } : m))}
+                                  className={`rounded-sm px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                                    active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                                  }`}
+                                >
+                                  {CATEGORY_LABELS[mod]}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {(model.modality ?? 'image') === 'text' && (
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                            <span>理解输入</span>
+                            {TEXT_INPUT_MODALITIES.map(([inputModality, label]) => (
+                              <label key={inputModality} className="flex items-center gap-1.5">
+                                <input
+                                  type="checkbox"
+                                  checked={(model.input_modalities ?? []).includes(inputModality)}
+                                  onChange={(event) => setModels(models.map((current, i) => {
+                                    if (i !== index) return current;
+                                    const currentInputs = new Set<ModelInputModality>(
+                                      current.input_modalities ?? ['text'],
+                                    );
+                                    currentInputs.add('text');
+                                    if (event.target.checked) currentInputs.add(inputModality);
+                                    else currentInputs.delete(inputModality);
+                                    return { ...current, input_modalities: Array.from(currentInputs) };
+                                  }))}
+                                  className="size-3.5 accent-[color:var(--primary)]"
+                                />
+                                {label}
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <button
                         type="button"
                         onClick={() => setModels(models.filter((_, i) => i !== index))}

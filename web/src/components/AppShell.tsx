@@ -1,31 +1,28 @@
-import { useState } from 'react';
 import { LayoutGroup, motion } from 'motion/react';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
-import { HomeIcon, LibraryBig, Moon, Settings, Sparkles, Sun } from 'lucide-react';
+import { HomeIcon, LibraryBig, Moon, Palette, Settings, Sparkles, Sun } from 'lucide-react';
 
 import { ChangelogButton } from '@/components/ChangelogButton';
 import { Home } from '@/pages/Home';
 import { Studio } from '@/pages/Studio';
+import { CanvasProjectIndex } from '@/pages/CanvasProjectIndex';
+import { CanvasEditor } from '@/pages/CanvasEditor';
 import { CharacterDetail } from '@/pages/CharacterDetail';
 import { SettingsPage } from '@/pages/settings/Settings';
-import { applyTheme, loadTheme, saveTheme, type Theme } from '@/lib/theme';
+import { setTheme, useTheme, type Theme } from '@/lib/theme';
 import {
   isWorkshopWorkspace,
 } from '@/components/workshop/workspaces';
 
 /** 深浅主题切换：图标显示目的地（暗色显太阳 = 点了去浅色） */
 function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>(loadTheme);
+  const theme = useTheme();
   const next: Theme = theme === 'dark' ? 'light' : 'dark';
   return (
     <button
       type="button"
       aria-label={next === 'light' ? '切换到浅色主题' : '切换到深色主题'}
-      onClick={() => {
-        setTheme(next);
-        applyTheme(next);
-        saveTheme(next);
-      }}
+      onClick={() => setTheme(next)}
       className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-glass backdrop-blur-glass text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
       {theme === 'dark' ? <Sun size={18} aria-hidden /> : <Moon size={18} aria-hidden />}
@@ -36,6 +33,7 @@ function ThemeToggle() {
 const NAV_TABS: { to: string; label: string; icon: typeof HomeIcon }[] = [
   { to: '/', label: '主页', icon: HomeIcon },
   { to: '/studio', label: '创作台', icon: Sparkles },
+  { to: '/canvas', label: '画布', icon: Palette },
   { to: '/workshop', label: '工坊', icon: LibraryBig },
 ];
 
@@ -70,16 +68,18 @@ function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string
 }
 
 export function AppShell() {
-  const [loc] = useLocation();
+  const [loc, setLocation] = useLocation();
   const onWorkshop = loc.startsWith('/workshop');
   const onStudio = loc === '/studio';
+  const onCanvas = loc.startsWith('/canvas');
   const onHome = loc === '/';
   const onSettings = loc.startsWith('/settings');
-  const activeIndex = onHome ? 0 : onStudio ? 1 : onWorkshop ? 2 : -1;
+  const immersiveCanvas = /^\/canvas\/[^/]+$/.test(loc);
+  const activeIndex = onHome ? 0 : onStudio ? 1 : onCanvas ? 2 : onWorkshop ? 3 : -1;
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-30 shrink-0">
+      {!immersiveCanvas && <header className="sticky top-0 z-30 shrink-0">
         <div className="mx-auto grid h-14 min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-3 md:h-20 md:gap-4 md:px-8">
           <Link href="/" className="flex shrink-0 items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
             <span className="font-display text-2xl font-normal">
@@ -109,13 +109,26 @@ export function AppShell() {
             </Link>
           </div>
         </div>
-      </header>
+      </header>}
 
       {/* stable-scroll：本壳是首页/工坊的真·滚动容器，固定滚动槽避免滚动条增删改内宽 → 列宽 → w-full 图高 → 墙高的自激抽搐环（见 scrollbar-gutter-feedback-loop memory）*/}
-      <main role="main" className="flex-1 min-h-0 overflow-y-auto stable-scroll">
+      <main role="main" className={immersiveCanvas ? 'flex-1 min-h-0 overflow-hidden' : 'flex-1 min-h-0 overflow-y-auto stable-scroll'}>
         <Switch>
           <Route path="/">{() => <Home />}</Route>
           <Route path="/studio">{() => <Studio />}</Route>
+          <Route path="/canvas/:projectId">{params => (
+            <CanvasEditor
+              key={params.projectId}
+              projectId={decodeURIComponent(params.projectId)}
+              onBack={() => setLocation('/canvas')}
+              onSwitchProject={projectId => setLocation(`/canvas/${encodeURIComponent(projectId)}`)}
+            />
+          )}</Route>
+          <Route path="/canvas">{() => (
+            <CanvasProjectIndex
+              onOpenProject={projectId => setLocation(`/canvas/${encodeURIComponent(projectId)}`)}
+            />
+          )}</Route>
           <Route path="/workshop/unassigned/characters/:id/:assetSlot/:jobId/:imagePath">
             {(params) => (
               <CharacterDetail

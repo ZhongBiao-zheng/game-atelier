@@ -51,6 +51,10 @@ def characters_dir() -> Path:
     return resolve_data_root() / "characters"
 
 
+def canvases_dir() -> Path:
+    return resolve_data_root() / "canvases"
+
+
 def workspace_memory() -> Path:
     return resolve_data_root() / "MEMORY.md"
 
@@ -61,6 +65,10 @@ def workspace_worldview() -> Path:
 
 def keys_file() -> Path:
     return config_dir() / "keys.json"
+
+
+def canvas_ui_file() -> Path:
+    return config_dir() / "canvas-ui.json"
 
 
 def write_global_config(path: Path) -> None:

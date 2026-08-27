@@ -275,7 +275,7 @@ describe('KeyForm', () => {
     expect(screen.getByText('自定义供应商可以创建多个配置，请用不同配置名称区分额度、用途或上游。')).toBeInTheDocument();
   });
 
-  it('creates a third-party image provider with structured metadata', async () => {
+  it('creates a Volcengine provider with image and conversation models', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({ alias: 'seedream' }),
@@ -295,8 +295,38 @@ describe('KeyForm', () => {
       base_url: 'https://ark.cn-beijing.volces.com/api/v3',
       access_key: 'ark-test',
       homepage_url: 'https://www.volcengine.com',
-      modalities: ['image'],
+      modalities: ['image', 'llm'],
       notes: '',
+    });
+    expect(body.models).toContainEqual({
+      name: '豆包 Seed 1.8',
+      id: 'doubao-seed-1-8-251228',
+      modality: 'text',
+      protocol: 'openai-chat',
+      input_modalities: ['text'],
+    });
+  });
+
+  it('creates an OpenAI provider with image and conversation models', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ alias: 'openai' }),
+    });
+    globalThis.fetch = fetchMock as any;
+
+    render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
+    fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'sk-test' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.modalities).toEqual(['image', 'llm']);
+    expect(body.models).toContainEqual({
+      name: 'GPT 5',
+      id: 'gpt-5',
+      modality: 'text',
+      protocol: 'openai-responses',
+      input_modalities: ['text'],
     });
   });
 
@@ -332,8 +362,8 @@ describe('KeyForm', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     // protocol 随模型一起提交（手填行没有上游标注 → null，由后端按启发式兜底）
     expect(body.models).toEqual([
-      { name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image', protocol: null },
-      { name: 'Sora 2', id: 'sora-2', modality: 'video', protocol: null },
+      { name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image', protocol: null, input_modalities: [] },
+      { name: 'Sora 2', id: 'sora-2', modality: 'video', protocol: null, input_modalities: [] },
     ]);
     expect(body.modalities).toEqual(['image', 'video']);
     expect(body.routing_scope).toBeUndefined();
@@ -344,9 +374,9 @@ describe('KeyForm', () => {
 
     expect(screen.getByText('模型别名')).toBeInTheDocument();
     expect(screen.getByText('模型 ID')).toBeInTheDocument();
-    expect(screen.getByText('分类')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('给人看的名字，例如：图片 5.0')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('请求里使用的 ID，例如：doubao-seedream-5-0-260128')).toBeInTheDocument();
+    expect(screen.getByText('分类 / 输入')).toBeInTheDocument();
+    expect(screen.getAllByPlaceholderText('给人看的名字，例如：图片 5.0')).toHaveLength(2);
+    expect(screen.getAllByPlaceholderText('请求里使用的 ID，例如：doubao-seedream-5-0-260128')).toHaveLength(2);
   });
 
   it('validates the custom API request URL from the test button', () => {
@@ -372,6 +402,7 @@ describe('KeyForm', () => {
     render(<KeyForm onCreated={() => {}} onCancel={() => {}} />);
     fireEvent.change(screen.getByLabelText('供应商选择'), { target: { value: 'seedream' } });
     fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'ark-test' } });
+    fireEvent.click(screen.getByRole('button', { name: '删除模型 2' }));
     fireEvent.change(screen.getByLabelText('模型名称 1'), { target: { value: '图片 5.0 Lite' } });
     fireEvent.change(screen.getByLabelText('模型 ID 1'), { target: { value: 'doubao-seedream-5-0-260128' } });
     fireEvent.click(screen.getByRole('button', { name: '添加模型' }));
@@ -382,8 +413,8 @@ describe('KeyForm', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.models).toEqual([
-      { name: '图片 5.0 Lite', id: 'doubao-seedream-5-0-260128', modality: 'image', protocol: null },
-      { name: '图片 4.7', id: 'doubao-seedream-4-5-251128', modality: 'image', protocol: null },
+      { name: '图片 5.0 Lite', id: 'doubao-seedream-5-0-260128', modality: 'image', protocol: null, input_modalities: [] },
+      { name: '图片 4.7', id: 'doubao-seedream-4-5-251128', modality: 'image', protocol: null, input_modalities: [] },
     ]);
   });
 
@@ -543,7 +574,7 @@ describe('KeyForm 模型选择器', () => {
     ));
 
     expect(screen.getByText(/上游 78 个/)).toBeInTheDocument();
-    expect(screen.getByText('已过滤 61 个非图像 / 视频模型')).toBeInTheDocument();
+    expect(screen.getByText('已过滤 61 个不可生成模型')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '显示全部' })).toBeInTheDocument();
   });
 
@@ -567,11 +598,11 @@ describe('KeyForm 模型选择器', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /seedance-2\.0/ }));
     fireEvent.click(screen.getByRole('button', { name: '显示全部' }));
 
-    await waitFor(() => expect(screen.getByText('已显示全部，含非图像 / 视频模型')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('已显示全部，含不可生成模型')).toBeInTheDocument());
     expect(JSON.parse(previewCalls(fetchMock)[0][1].body).include_all).toBe(false);
     expect(JSON.parse(previewCalls(fetchMock)[1][1].body).include_all).toBe(true);
-    // 「非视觉」这一档只在全量态出现；重拉不该把刚点完的勾清掉
-    expect(screen.getByRole('button', { name: '非视觉 2' })).toBeInTheDocument();
+    // 「不可生成」这一档只在全量态出现；重拉不该把刚点完的勾清掉
+    expect(screen.getByRole('button', { name: '不可生成 2' })).toBeInTheDocument();
     expect(screen.getByText('已选 1 个模型')).toBeInTheDocument();
   });
 
@@ -596,7 +627,7 @@ describe('KeyForm 模型选择器', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => u === '/api/keys')).toBe(true));
     expect(bodyOf(fetchMock, '/api/keys').models).toEqual([
-      { name: 'glm-4.7', id: 'glm-4.7', modality: 'video', protocol: null },
+      { name: 'glm-4.7', id: 'glm-4.7', modality: 'video', protocol: null, input_modalities: [] },
     ]);
   });
 
@@ -673,7 +704,7 @@ describe('KeyForm 模型选择器', () => {
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => u === '/api/keys/tokendance')).toBe(true));
     expect(bodyOf(fetchMock, '/api/keys/tokendance').models).toEqual([
-      { name: '主力出图', id: 'seedream-5.0-pro', modality: 'image', protocol: 'ark' },
+      { name: '主力出图', id: 'seedream-5.0-pro', modality: 'image', protocol: 'ark', input_modalities: [] },
     ]);
   });
 });

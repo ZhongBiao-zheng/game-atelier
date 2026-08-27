@@ -22,12 +22,47 @@ function statusReason(status: number, statusText: string): string {
   return statusText || '未知错误';
 }
 
-/** FastAPI 的两种 detail 形态：字符串，或 422 校验的 [{loc,msg}]。 */
-function readDetail(body: unknown): string | null {
-  if (typeof body === 'string') return body.trim() || null;
-  if (!body || typeof body !== 'object') return null;
+interface ApiErrorDetail {
+  message: string | null;
+  code: string | null;
+  recovery: string | null;
+}
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly reason: string | null;
+  readonly recovery: string | null;
+
+  constructor(message: string, options: {
+    status: number;
+    code?: string | null;
+    reason?: string | null;
+    recovery?: string | null;
+  }) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = options.status;
+    this.code = options.code ?? null;
+    this.reason = options.reason ?? null;
+    this.recovery = options.recovery ?? null;
+  }
+}
+
+/** FastAPI 的 detail 形态：字符串、稳定错误对象，或 422 校验的 [{loc,msg}]。 */
+function readDetail(body: unknown): ApiErrorDetail {
+  if (typeof body === 'string') return { message: body.trim() || null, code: null, recovery: null };
+  if (!body || typeof body !== 'object') return { message: null, code: null, recovery: null };
   const detail = (body as { detail?: unknown }).detail;
-  if (typeof detail === 'string') return detail.trim() || null;
+  if (typeof detail === 'string') return { message: detail.trim() || null, code: null, recovery: null };
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const stable = detail as { message?: unknown; code?: unknown; recovery?: unknown };
+    return {
+      message: typeof stable.message === 'string' ? stable.message.trim() || null : null,
+      code: typeof stable.code === 'string' ? stable.code : null,
+      recovery: typeof stable.recovery === 'string' ? stable.recovery.trim() || null : null,
+    };
+  }
   if (Array.isArray(detail)) {
     const parts = detail
       .map((item) => {
@@ -37,9 +72,9 @@ function readDetail(body: unknown): string | null {
         return [where, typeof msg === 'string' ? msg : null].filter(Boolean).join(' ');
       })
       .filter(Boolean);
-    return parts.length > 0 ? parts.join('；') : null;
+    return { message: parts.length > 0 ? parts.join('；') : null, code: null, recovery: null };
   }
-  return null;
+  return { message: null, code: null, recovery: null };
 }
 
 /** 报错里嵌用户输入（名字 / 文件名）时先剪短：一条 200 字的错误挂在窄侧栏里没人读得下去。 */
@@ -48,20 +83,26 @@ export function clip(text: string, max = 24): string {
 }
 
 /** 失败响应 → 中文 Error。`what` 是动作名（「上传参考图」「创建出图任务」），不带「失败」。 */
-export async function apiError(resp: Response, what: string): Promise<Error> {
-  let reason: string | null = null;
+export async function apiError(resp: Response, what: string): Promise<ApiError> {
+  let detail: ApiErrorDetail = { message: null, code: null, recovery: null };
   try {
     const text = await resp.text();
     try {
-      reason = readDetail(JSON.parse(text));
+      detail = readDetail(JSON.parse(text));
     } catch {
-      reason = text.trim().slice(0, 300) || null;
+      detail.message = text.trim().slice(0, 300) || null;
     }
   } catch {
-    reason = null;
+    detail.message = null;
   }
-  return new Error(
-    `${what}失败：${reason ?? statusReason(resp.status, resp.statusText)}（HTTP ${resp.status}）`,
+  return new ApiError(
+    `${what}失败：${detail.message ?? statusReason(resp.status, resp.statusText)}（HTTP ${resp.status}）`,
+    {
+      status: resp.status,
+      code: detail.code,
+      reason: detail.message,
+      recovery: detail.recovery,
+    },
   );
 }
 

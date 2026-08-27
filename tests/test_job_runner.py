@@ -200,6 +200,44 @@ def test_run_job_routes_custom_provider_through_dispatch(project, monkeypatch):
     assert captured["output_dir"] != expected.parent
 
 
+def test_deferred_image_attempt_keeps_job_pending_and_appends_new_output(project, monkeypatch):
+    existing = project / "studio" / "studio-batch" / "existing.png"
+    existing.parent.mkdir(parents=True)
+    _write_png(existing)
+    save_job(Job(
+        job_id="studio-batch",
+        character_id="zz-main",
+        prompt="fox",
+        submitted_at="2026-05-28T00:00:00+08:00",
+        model="gpt-image-2-all",
+        params=JobParams(size="1024x1024", n=1),
+        output_paths=[str(existing)],
+        status=JobStatus.PENDING,
+        error=None,
+        asset_slot=AssetSlot.PORTRAIT,
+        kind=JobKind.IMAGE,
+        namespace="studio",
+        alias="zz-main",
+        provider="custom",
+    ))
+
+    def fake_dispatch(*, output_dir, **_kwargs):
+        output = Path(output_dir) / "new.png"
+        _write_png(output, width=4, height=3)
+        return [str(output)]
+
+    monkeypatch.setattr(job_runner, "dispatch", fake_dispatch)
+
+    attempt = job_runner.run_job("studio-batch", defer_terminal=True)
+
+    assert attempt.status == JobStatus.PENDING
+    assert attempt.completed_at is None
+    assert attempt.error is None
+    assert attempt.output_paths[0] == str(existing)
+    assert len(attempt.output_paths) == 2
+    assert Path(attempt.output_paths[1]).is_file()
+
+
 def test_valid_image_rejects_zero_byte(project):
     zero = project / "characters" / "holy" / "promo" / "lovart_empty.png"
     zero.write_bytes(b"")
@@ -327,6 +365,24 @@ def test_friendly_error_remote_disconnect_reads_as_gateway_not_network():
     assert "代理" not in msg
 
 
+def test_friendly_error_canvas_invariant_gets_chinese_before_the_english_assertion():
+    """canvas_runs 里那批英文断言（事务 / Run 上下文 / 归属 / 版本冲突）会原样落进 job.error、
+    显示在节点卡上。断言原文对开发者有用，保留；但前面必须先有一句人话。"""
+    for raw in (
+        "canvas job is missing run context",
+        "canvas transaction document fingerprint mismatch",
+        "job does not belong to this canvas project",
+        "job is not a Canvas Run",
+        "canvas content version already exists",
+    ):
+        msg = job_runner._friendly_error(Exception(raw))
+        assert "画布内部状态校验未通过" in msg, raw
+        # 原文照留，不然没法查。
+        assert raw in msg, raw
+        # 别把人往网络 / 代理坑带 —— 这类根本不是网络问题。
+        assert "代理" not in msg and "网络连不上" not in msg, raw
+
+
 def test_friendly_error_genuine_connect_failure_still_network():
     err = Exception(
         "HTTPSConnectionPool(host='api.openai-hk.com', port=443): Max retries exceeded "
@@ -334,6 +390,108 @@ def test_friendly_error_genuine_connect_failure_still_network():
         "[Errno 61] Connection refused'))"
     )
     assert "网络连不上厂商接口" in job_runner._friendly_error(err)
+
+
+def test_friendly_error_provider_cors_points_to_server_api_url_not_browser():
+    err = Exception("CORS policy: No 'Access-Control-Allow-Origin' header")
+    msg = job_runner._friendly_error(err)
+    assert "本地服务端直连" in msg
+    assert "API 地址" in msg
+    assert "浏览器" in msg
+
+
+def test_friendly_error_generic_network_error_names_server_to_provider_hop():
+    err = Exception("ERR_NETWORK Network Error")
+    msg = job_runner._friendly_error(err)
+    assert "viewer-server" in msg
+    assert "厂商接口" in msg
+
+
+def test_friendly_error_dns_is_not_misread_as_invalid_image_resolution():
+    err = Exception(
+        "NameResolutionError: Failed to resolve 'provider.invalid' "
+        "([Errno 8] nodename nor servname provided)"
+    )
+    msg = job_runner._friendly_error(err)
+    assert "无法解析厂商接口域名" in msg
+    assert "出图尺寸" not in msg
+
+
+def test_friendly_error_redacts_local_paths_without_swallowing_task_id():
+    err = Exception(
+        "video failed task_id=cgt-keep-me source=/Volumes/Art Drive/private/ref.png; "
+        r"cache=C:\Users\artist\My Documents\ref.png; "
+        r"mirror=\\server\share\private\ref.png; "
+        "mask=file:///Users/artist/private/mask.png; "
+        "endpoint=https://example.com/v1/render?access_token=secret-value&token=second-secret"
+        "&access_key=query-access&secret_key=query-secret&private_key=query-private"
+        "&password=query-password&authorization=query-authorization"
+        "&OSSAccessKeyId=oss-access&X-Amz-Credential=aws-credential"
+        "&X-Amz-Security-Token=aws-token&X-Goog-Credential=gcs-credential"
+        "&X-Goog-Signature=gcs-signature&access%5Fkey=encoded-access; "
+        "request https://api.example.com/v1/render path=/Users/a/ref.png; "
+        "authenticated=https://user:password@example.com/v1; "
+        '{"access_key":"json secret token"}; '
+        'api_key="quoted secret token"; '
+        r'escaped={\"api_key\":\"escaped-secret\"}; '
+        "X-API-Key: header-secret; X-Auth-Token=auth-secret; "
+        "client_secret=client-secret; private_key=private-secret; "
+        "Authorization: Bearer sk-private"
+    )
+    msg = job_runner._friendly_error(err)
+    assert "cgt-keep-me" in msg
+    assert "/Volumes/Art Drive" not in msg
+    assert "My Documents" not in msg
+    assert "server\\share" not in msg
+    assert "file:///Users" not in msg
+    assert "secret-value" not in msg
+    assert "second-secret" not in msg
+    assert "query-access" not in msg
+    assert "query-secret" not in msg
+    assert "query-private" not in msg
+    assert "query-password" not in msg
+    assert "query-authorization" not in msg
+    assert "oss-access" not in msg
+    assert "aws-credential" not in msg
+    assert "aws-token" not in msg
+    assert "gcs-credential" not in msg
+    assert "gcs-signature" not in msg
+    assert "encoded-access" not in msg
+    assert "json secret token" not in msg
+    assert "quoted secret token" not in msg
+    assert "escaped-secret" not in msg
+    assert "header-secret" not in msg
+    assert "auth-secret" not in msg
+    assert "client-secret" not in msg
+    assert "private-secret" not in msg
+    assert "sk-private" not in msg
+    assert "https://example.com/v1/render" in msg
+    assert "https://api.example.com/v1/render" in msg
+    assert "user:password" not in msg
+    assert "https://<redacted>@example.com/v1" in msg
+    assert "/Users/a/ref.png" not in msg
+    assert msg.count("<local-path>") == 5
+    assert msg.count("<redacted>") == 22
+
+
+def test_friendly_error_path_redaction_preserves_following_task_id():
+    err = Exception(
+        "source=/workspace/ref.png: denied task_id=cgt-keep-after-path; "
+        "mask=file:///Users/a/mask.png task_id=cgt-keep-after-file"
+    )
+    msg = job_runner._friendly_error(err)
+    assert "/workspace/ref.png" not in msg
+    assert "cgt-keep-after-path" in msg
+    assert "cgt-keep-after-file" in msg
+
+
+def test_friendly_error_ssl_handshake_failure_is_not_generic_network_error():
+    err = Exception("SSLError: [SSL: WRONG_VERSION_NUMBER] wrong version number")
+    msg = job_runner._friendly_error(err)
+    assert "TLS / SSL 握手失败" in msg
+    assert "协议或端口" in msg
+    assert "证书失败" not in msg
+    assert "网络连不上厂商接口" not in msg
 
 
 def test_friendly_error_read_timeout_still_upstream_overload():
@@ -378,6 +536,16 @@ def test_friendly_error_no_endpoints_reads_as_model_not_enabled_not_transient():
     assert "没有可用端点" in msg
     assert "未开通" in msg
     assert "瞬时" not in msg
+
+
+def test_friendly_error_volcengine_account_overdue_points_to_balance():
+    err = Exception(
+        'text api 403: {"error":{"code":"AccountOverdueError",'
+        '"message":"The account is overdue"}}'
+    )
+    msg = job_runner._friendly_error(err)
+    assert "余额不足" in msg
+    assert "充值" in msg
 
 
 def test_friendly_error_pixel_floor_tells_user_to_enlarge():

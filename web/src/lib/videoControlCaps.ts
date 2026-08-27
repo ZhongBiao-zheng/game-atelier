@@ -33,6 +33,8 @@ export interface VideoControlCaps {
   qualities?: VideoQuality[];
   /** 是否支持「生成音频」开关（params.generate_audio）。 */
   supportsAudio: boolean;
+  /** 是否支持显式控制成片水印。 */
+  supportsWatermark: boolean;
   /** 是否支持参考视频（params.reference_videos）。 */
   supportsReferenceVideo: boolean;
   /** 是否支持参考音频（params.reference_audios）。 */
@@ -42,6 +44,8 @@ export interface VideoControlCaps {
   /** 参考素材上限覆盖（缺省用 9/3/3 全局常量；happyhorse video-edit = 5 图 + 1 视频）。 */
   maxRefImages?: number;
   maxRefVideos?: number;
+  maxRefAudios?: number;
+  maxMixedReferences?: number;
 }
 
 // Seedance 官方档位（provider-config.md「视频契约 — Seedance」）：
@@ -66,6 +70,7 @@ function seedanceCaps(id: string): VideoControlCaps {
       resolutions: ['480p', '720p', '1080p'],
       ratios: is15 ? SEEDANCE_RATIOS : SEEDANCE_RATIOS.filter((r) => r !== 'adaptive'),
       supportsAudio: is15,
+      supportsWatermark: true,
       supportsReferenceVideo: false,
       supportsReferenceAudio: false,
       maxFrames: 2,
@@ -92,11 +97,19 @@ function seedanceCaps(id: string): VideoControlCaps {
     resolutions,
     ratios: SEEDANCE_RATIOS,
     supportsAudio: true,
+    supportsWatermark: true,
     supportsReferenceVideo: true,
     supportsReferenceAudio: true,
     maxFrames: 2,
     // 2.5 的全能参考矩阵比 2.0 系宽得多（官方 图30 / 视频10 / 音频10）。
-    ...(is25 ? { maxRefImages: 30, maxRefVideos: 10 } : {}),
+    ...(is25
+      ? { maxRefImages: 30, maxRefVideos: 10, maxRefAudios: 10 }
+      : {
+          maxRefImages: 9,
+          maxRefVideos: 3,
+          maxRefAudios: 3,
+          ...(is20 ? { maxMixedReferences: 12 } : {}),
+        }),
   };
 }
 
@@ -109,6 +122,7 @@ const HAPPYHORSE_BASE = {
   resolutions: ['720P', '1080P'],
   durations: durationRange(3, 15),
   supportsAudio: false,
+  supportsWatermark: true,
   supportsReferenceVideo: false,
   supportsReferenceAudio: false,
 };
@@ -146,6 +160,7 @@ const OPENROUTER_VIDEO_CAPS: VideoControlCaps = {
   resolutions: [],
   ratios: ['16:9', '9:16', '1:1'],
   supportsAudio: true,
+  supportsWatermark: false,
   supportsReferenceVideo: false,
   supportsReferenceAudio: false,
   maxFrames: 2,
@@ -158,6 +173,7 @@ const STANDARD_CAPS: VideoControlCaps = {
   resolutions: ['720p'],
   ratios: ['16:9', '9:16', '1:1'],
   supportsAudio: false,
+  supportsWatermark: false,
   supportsReferenceVideo: false,
   supportsReferenceAudio: false,
   maxFrames: 2,
@@ -180,6 +196,7 @@ function klingCaps(id: string): VideoControlCaps {
     ratios: isO1 ? ['16:9', '9:16', '1:1'] : KLING_RATIOS,
     qualities: isV26 || isMaster ? undefined : ['std', 'pro'],
     supportsAudio: isV26,
+    supportsWatermark: false,
     supportsReferenceVideo: false,
     supportsReferenceAudio: false,
     maxFrames: 2,
@@ -216,4 +233,36 @@ export const VIDEO_MODE_LABELS: Record<VideoMode, string> = {
 /** 比例的展示标签：adaptive 显示为中文，其余原样。 */
 export function ratioLabel(ratio: string): string {
   return ratio === 'adaptive' ? '自适应' : ratio;
+}
+
+export interface VideoReferenceLimits {
+  images: number;
+  videos: number;
+  audios: number;
+  mixedTotal?: number;
+}
+
+export function videoReferenceLimits(
+  caps: VideoControlCaps,
+  mode: VideoMode,
+): VideoReferenceLimits {
+  if (mode === 'firstlast') {
+    return { images: caps.maxFrames, videos: 0, audios: 0 };
+  }
+  return {
+    images: caps.maxRefImages ?? 9,
+    videos: caps.supportsReferenceVideo ? caps.maxRefVideos ?? 3 : 0,
+    audios: caps.supportsReferenceAudio ? caps.maxRefAudios ?? 3 : 0,
+    ...(caps.maxMixedReferences ? { mixedTotal: caps.maxMixedReferences } : {}),
+  };
+}
+
+export function videoReferenceLimitLabel(limits: VideoReferenceLimits): string {
+  const labels = [
+    limits.images > 0 ? `最多 ${limits.images} 张图` : '不支持图片',
+    limits.videos > 0 ? `最多 ${limits.videos} 个视频` : '不支持视频',
+    limits.audios > 0 ? `最多 ${limits.audios} 段音频` : '不支持音频',
+  ];
+  if (limits.mixedTotal) labels.push(`混合最多 ${limits.mixedTotal} 个`);
+  return labels.join(' · ');
 }

@@ -241,6 +241,16 @@ def test_happyhorse_t2v_body_follows_dashscope_contract(tokendance_key, tmp_path
     assert body["parameters"]["seed"] == 42
 
 
+def test_happyhorse_watermark_can_be_enabled(tokendance_key, tmp_path, monkeypatch):
+    posted: dict = {}
+    hh = _mock_happyhorse_upstream(monkeypatch, posted)
+    hh.render_video(
+        prompt="马奔跑", model="happyhorse-1.0-t2v", alias="td",
+        output_dir=tmp_path / "o", params={"watermark": True}, poll_interval=0,
+    )
+    assert posted["body"]["parameters"]["watermark"] is True
+
+
 def test_happyhorse_i2v_maps_first_frame(tokendance_key, tmp_path, monkeypatch):
     posted: dict = {}
     hh = _mock_happyhorse_upstream(monkeypatch, posted)

@@ -15,6 +15,8 @@
 | CharacterWorkspaceResponse / CharacterIndexResponse | `lib/schemas.py` | `web/src/api/characters.ts` | `tests/test_character_workspace.py` + `CharacterWorkspace.test.tsx` + `CharacterIndex.test.tsx` |
 | ProjectIndexItem / GalleryMedia | `lib/schemas.py` | `web/src/api/gallery.ts` | `tests/test_gallery_project.py` + `ProjectIndexPage.test.tsx` + `ProjectPage.test.tsx` |
 | StudioArchiveTarget | `lib/studio_archive.py` | `web/src/api/studio.ts` | `tests/test_studio_archive.py` + `StudioArchiveDialog.test.tsx` |
+| CanvasProject / CanvasDocument / CanvasJobContext | `lib/schemas.py` | `web/src/schema/canvas.ts` + `schema/jobs.ts` | `tests/test_canvas_projects.py` + `CanvasEditor.test.tsx` |
+| CanvasUiPreferences | `lib/schemas.py` | `web/src/schema/canvas.ts` | issue 20 隔离 API/文件/浏览器契约核对（旧测试只读，不改） |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
 | 视频控件能力 | 各 `*_video.py` | `lib/videoControlCaps.ts` | 无 —— 靠人 |
 
@@ -26,15 +28,19 @@
 
 - 状态机：`status` `error` `submitted_at` `completed_at` `progress_phase`
 - 产物：`output_paths`
-- 归属：`character_id` `project_id` `ui_scheme_id` `screen_id` `production_id` `namespace` `asset_slot` `kind`
+- 归属：`character_id` `project_id` `ui_scheme_id` `screen_id` `production_id` `canvas_project_id` `namespace` `asset_slot` `kind`
 - 路由：`alias` `provider` `model` —— 换模型只能新建 job（`POST /studio/jobs`），不能改已有的
 - 血缘：`retry_of` `source_image`；创作台归档血缘写在 `params.archived_from_job_id / archived_from_path`
 
 `JobParams` = `extra="allow"`（加字段不会被上游拒），但**双端仍要同步声明**，否则 TS 那边拿不到类型。后端独占写入的三个：`actual_size`、`warnings`、`requested_size` —— 前端只读不写。
 
+Canvas 节点媒体设置新增的显式参数也遵循同一契约：图片 `background` 只允许
+`auto | opaque | transparent`，并只向已验证的 GPT Image 直连协议发送；视频 `watermark`
+为 bool，只在 Seedance / HappyHorse capability 开启时写入 Snapshot 与厂商请求。
+
 Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每组最多 4 张），分别归属风格、角色、Omni 语义槽；垫图仍写入通用的 `reference_images`。Web 创建 job，caller 只负责把本地路径转公网 URL 并拼接对应 flag。
 
-`namespace` 决定产物落哪：`character` → `characters/<id>/<slot>/`，`studio` → `studio/<job_id>/`，`ui` → `projects/<slug>/ui/<ui_scheme_id>/screens/<screen_id>/`，`video` → `projects/<slug>/videos/<production_id>/versions/`。UI job 必须同时带 `project_id / ui_scheme_id / screen_id`；项目视频 job 必须同时带 `project_id / production_id`。Prompt 内的镜头段落不参与资产归属。`kind` 是媒体轴（image/video），别拿它表达归属。
+`namespace` 决定产物落哪：`character` → `characters/<id>/<slot>/`，`studio` → `studio/<job_id>/`，`ui` → `projects/<slug>/ui/<ui_scheme_id>/screens/<screen_id>/`，`video` → `projects/<slug>/videos/<production_id>/versions/`，`canvas` → `canvases/<canvas_project_id>/outputs/<job_id>/`。UI job 必须同时带 `project_id / ui_scheme_id / screen_id`；项目视频 job 必须同时带 `project_id / production_id`；画布 job 必须带 `canvas_project_id`。Prompt 内的镜头段落不参与资产归属。`kind` 是媒体轴（image/video），别拿它表达归属。
 
 ## 端点
 
@@ -58,6 +64,14 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /clipboard-attempt` `DELETE /characters/{id}`
 `POST /jobs/{id}/{confirm,cancel}` `DELETE /jobs/{id}` `DELETE /jobs/{id}/image`
 `POST /studio/jobs/{id}/archive`
+`POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
+`POST /canvas/projects/{id}/agent/sessions` `DELETE /canvas/projects/{id}/agent/sessions/{session_id}`
+`POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
+`POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle}`
+`POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
+`POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
+`DELETE /canvas/projects/{id}`
+`PUT /canvas/ui-preferences`
 
 **双向**
 `POST /characters/{id}/canonical` `POST /projects/{id}/ui-schemes/{scheme_id}/screens/canonical` `POST /experience`
@@ -74,6 +88,229 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /projects/{id}/characters/index` `/projects/{id}/characters/{character_id}/workspace`
 `GET /projects/{id}/character-associations`
 `GET /projects/{id}/studio-archive-targets?media_kind={image,video}`
+`GET /canvas/projects` `/canvas/project-options` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
+`GET /canvas/projects/{id}/versions/{version_id}/media`
+`GET /canvas/projects/{id}/versions/{version_id}/download`
+`GET /canvas/projects/{id}/library/assets` `/canvas/projects/{id}/library/prompts`
+`GET /canvas/projects/{id}/agent/sessions` `/canvas/projects/{id}/agent/sessions/{session_id}`
+`GET /canvas/ui-preferences`
+
+`GET /canvas/projects` 的 `CanvasProjectSummary` 在项目元数据之外返回派生的 `cover`、`node_count` 与
+`connection_count`；这些字段不进入 `project.json`，必须与当前 `canvas.json` 一致。
+
+`GET /canvas/project-options` 只返回 `CanvasProject` 基础元数据，供编辑器内项目切换器使用；它不会读取每个项目的
+完整 `canvas.json`，避免打开画布时随其他大画布的体积产生额外解析开销。
+
+### 人工画布契约
+
+画布是 Web 用户人工创建、人工编排的独立创作空间，Skill 不创建项目、不填充节点，也不推进整张图。
+文件系统真源为 schema v2 `canvases/<id>/project.json` 与 revision 化 `canvas.json`；资源字节放
+`uploads/`，确定性工具产物放 `derived/<operation_id>/`，生成产物按 job 放 `outputs/<job_id>/`。
+
+Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径：
+
+- `GET /api/canvas/projects/{project_id}/versions/{version_id}/media`：同源内联预览，固定安全 MIME、
+  `nosniff`，不可变私有缓存。可选 `?w=` 是**这张图会被显示成多宽**（已含设备像素比），不是想要的位图
+  尺寸：服务端向上取到固定档位 256 / 512 / 1024 后返回缓存的 WebP 缩略图，`image/webp`。原图本身更小、
+  是动图、非图片、或 `w` 超过最大档位时照发原图——缩略图纯属优化，不改变可见内容，也没有失败态。
+  缓存落在 `.runtime/canvas-thumbnails/<project_id>/`，不进项目目录（导出包会按 `content_versions`
+  逐一核对项目目录里的文件）；缓存键是不可变的 `version_id` 加档位，因此永不失效。
+- `GET /api/canvas/projects/{project_id}/versions/{version_id}/download`：附件下载，服务端生成安全文件名。
+
+旧的 `/content/{version_id}` 路径已删除，不保留兼容分支。
+
+画布的错误响应统一走 `{code, message}`（message 中文，给画师看；code 稳定，给前端分支用）：
+`CanvasRunCommandError` / `CanvasMediaReplaceError` / `CanvasDocumentError` 都是这个形状。
+状态码的划分是**谁能修**：客户端提交的内容不合规 → 422；revision 被别处改过、刷新后重试有意义
+→ 409；画布存档文件不见了或记着别的项目 ID（`CanvasStorageError`）→ **500**，因为这是服务端
+数据完整性故障，重试永远不会成功，而前端的 409 文案写着「刷新后重试」。
+`canvas_runs` 里那批英文断言是后台管线的内部不变式，不作为 HTTP detail 返回；它们经
+`job_runner._friendly_error` 加一句中文前缀后落进 `job.error`，原文保留以便定位。
+`CanvasDocument` 保存 viewport/settings、七类稳定节点、两类连接与不可变 `content_versions`。运行时只接受
+`schema_version: 2`，不包含 v1 union、fallback 或 converter。
+客户端在所有视口共用同一份 revision 化 Document；响应式面板、焦点、选择与媒体预览都是本地呈现状态，
+不会进入 `canvas.json`。预览媒体仍只通过已登记 `version_id` 读取，不从节点或 Job 拼接裸路径。
+文本节点的 `data.display.scale` 只接受 Atelier 字阶 token `xs/sm/base`，缺省为 `sm`；字号切换属于
+Document 显示状态并参与 revision 与 undo/redo，不修改文本 Content Version。图片/视频继续使用
+`data.display.fit/free_resize`；视频和音频播放进度、音量与控件焦点只属于浏览器呈现状态，不落盘。
+画布外观属于作者可撤销的项目设置：`settings.background` 明确选择空白、点阵或线框，
+`settings.show_image_info` 控制图片节点是否展示当前不可变 Content Version 的真实宽高与文件体积。
+`settings.show_minimap` 控制中等及桌面视口的小地图；手机端始终隐藏。三者随普通 Document revision 保存并
+参与 Web undo/redo；图片详情 Dialog 始终保留完整 metadata，不受节点信息条开关影响。
+媒体 Content Version 的 `path` 始终相对当前画布项目目录；资产库与提示词使用 revision 化 sidecar，插件
+私有状态使用带 plugin id/version 的独立 envelope，不把这些业务对象塞回热路径 `canvas.json`。
+
+Canvas Agent 会话属于画布项目，文件真源为
+`canvases/<project_id>/agent/sessions/<session_id>.json`。每个 Session 使用独立 revision 与单调
+sequence，只保存可见消息、reasoning summary、稳定 node/version 引用和非敏感 token usage；
+不允许 API Key、token、环境变量、裸本地路径、data URL 或隐藏思维链。
+`POST .../agent/sessions` 由用户创建空会话，GET 列表会隔离单个损坏文件并返回
+`corrupt_session_ids`；`DELETE .../agent/sessions/{session_id}` 必须携带 Session `If-Match`，冲突零写入。
+项目包导出严格验证 Session schema/文件名/项目归属；导入新项目保留 session/message ID
+与会话历史，只重写 `project_id`。当前打开会话、panel 宽度、焦点和流式临时态属于浏览器呈现，
+不进入 Session 或 `canvas.json`。
+
+画布界面与生成偏好是工作区应用级状态，文件真源为 `.config/canvas-ui.json`，不属于任何画布项目。
+`GET /api/canvas/ui-preferences` 在文件不存在时返回 revision 0 的默认值且不制造文件；损坏或不符合严格
+schema 的文件返回 409，原字节保持不变。`PUT /api/canvas/ui-preferences` 请求为
+`{ expected_revision, image_toolbar, generation_defaults }`。`image_toolbar` 的工具 ID 必须来自固定枚举，
+不允许重复但允许空清单；`generation_defaults` 严格包含 text/image/video/audio 四项，每项只保存可选的
+`{ alias, model }` 与该模态白名单参数。媒体引用、蒙版、本机路径、运行回写字段和跨模态参数一律 422。
+服务端在独立文件锁内校验 revision 并原子替换，冲突返回当前 revision。生成偏好只影响后续新建 Draft
+和配置节点模式切换；模型保持自动选择时仍独立应用该模态默认参数。失效的显式模型回退首个 Runner 可路由
+模型且不继承旧参数，已有节点、Run Snapshot 与 Job
+保持不变。该偏好跨项目生效，但不进入 `CanvasDocument`、undo/redo、项目 revision、项目包 manifest/zip
+或插件私有状态；凭证、Base URL 与模型目录仍只属于 Keys。
+
+`Input Connection` 是当前可编辑输入资格，不触发下游；`Derivation Connection` 只由生成提交或受控本地
+媒体命令创建。真实生成输入冻结在 Canvas Job 的 `canvas_run.snapshot`，节点不保存 `job_ids` 或候选数组。
+普通 `PUT document` 必须携带 `If-Match: <revision>`：服务端项目锁内校验后 revision + 1；冲突返回 409，
+不做自动合并。Web PUT 只能新增 `user_edit` 文本版本，不能写媒体版本、修改既有版本或伪造派生连接。
+历史重做只允许恢复两种已有权威证据的受控例外：其一是结果 Content Version 已存在于服务端，且其不可变
+`local_tool` `operation_id/source_version_id` 与提交的源节点、结果节点和派生边吻合；其二是结果 Version 的
+`job_output` 指向同项目 Canvas Job 的成功 Candidate，且 Job 的 `canvas_run`、Snapshot 源节点、结果节点、
+Run ID 与派生边全部吻合。两种例外都只恢复已提交历史，不创建新 Version，也不重新执行工具或生成任务。
+
+上传接口使用 multipart `file + expected_revision`，服务端登记不可变媒体 Content Version 并返回更新后的
+Document；扩展名只作入口白名单，文件类型、MIME、摘要、大小和图片尺寸均由服务端字节重算，伪扩展上传
+直接拒绝。`canvas.json` 最大 25 MiB，单项目最多 10,000 节点 / 20,000 连接，单插件节点 payload 最大
+256 KiB。媒体读取只收 `version_id`，不接受裸 path/job_id。Canvas Job 禁止通过通用 `/prompt/{job_id}`
+修改快照、prompt 或参数。`POST /canvas/projects/{id}/runs` 只接受
+`surface_node_id / expected_revision / requested_count`；服务端从已保存 Draft、连接与 Content Version
+解析真实输入，冻结 `canvas_run.snapshot`，并用项目内短事务原子提交 Job、结果节点与 Derivation Connection。
+Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_FIELDS`）：`PUT .../document`
+落盘前过一次，冻结 Snapshot 时再过一次，名单外的键一律丢弃。所有路径类字段
+（`reference_images/videos/audios`、`mask_image`、`mj_sref/cref/oref`）与 caller 回写字段
+（`actual_size`、`warnings`、`mj_flags`）都不在名单里 —— 浏览器不能提交路径，Canvas 的参考素材只能
+来自不可变 Content Version。
+四模态均进入同一个 Job Runner：图片/视频沿用既有厂商协议；文本只接受明确可执行的
+OpenAI-compatible `chat/completions` 或 `responses`，后者支持 `reasoning_effort`，其中 `auto` 只作为
+Draft 选择且冻结/请求时省略；音频只接受 OpenAI-compatible `audio/speech`，冻结并发送白名单内的
+voice/format、0.25–4 的 speed 与去除首尾空白后的非空 instructions。模型配置的 protocol 不匹配时明确
+拒绝，不做伪兼容。连接输入会先按 Prompt 内 `@[node:id]` 的出现顺序冻结，再补未提及连接，并在冻结前按
+模型/协议校验媒体类型和数量。`@` 菜单只枚举当前 surface 的直接 incoming `Input Connection` 且已有
+同模态 Content Version 的文本、图片、视频和音频；Draft 永远保存稳定 node token，不保存“图片1”等
+显示标签或 Version/path。断开连接时 Web 同一事务删除对应 token，不展示失效引用；服务端仍拒绝绕过 Web
+提交的异常 missing token，不能降级成普通文本。冻结后服务端按 Snapshot 实际输入顺序分别为文本、图片、视频、音频从 1 编号，重复 token 复用
+同一编号；final prompt 的标签与 `reference_images/reference_videos/reference_audios` 各自数组顺序一致，
+隐式自身输入也参与编号。非原生批量的图片候选按槽位执行，每个成功槽位立即通过短事务登记
+Content Version、candidate 状态与首个成功主结果；Midjourney 原生四宫格仍保留单次请求再逐槽登记。
+
+视频 Draft 的 `frame_mode=first|last|firstlast` 使用语义化 Input Connection：可选 `slot` 只能是
+`first_frame` 或 `last_frame`，源节点必须是已有图片 Content Version，目标必须是视频生成节点，且同一
+目标的每个槽位最多一条连接；同一图片允许同时占用首帧和尾帧。首尾帧模式不解析普通素材连接，也禁止
+`@[node:*]`；用户在提示词内输入 `@` 时，浏览器只在输入框内部给出简短提示，服务端再次拒绝；切换到
+全能参考会删除槽位连接，服务端也会忽略任何
+异常残留槽位。提交时按实际槽位推导 wire `frame_mode` 和首尾图片顺序，不能由浏览器伪造媒体数组。
+模型选择器只展示模型名；当前视频模式名后的帮助入口在 hover 时显示图片、视频、音频与混合上限。
+素材区的 `+` 不打开候选菜单，而是进入画布点选状态，用户可移动画布并点击一个合法素材节点完成连接；
+点选期间界面进入专注态：隐藏小地图/缩放、右上配置和底部主工具栏，在顶部显示“从画布选择参考”与退出
+动作；合法素材节点 hover 时点亮边框，“选择 + 节点名”跟随光标移动，键盘聚焦时显示在节点起始位置。项目标题、节点、节点上方上传入口
+与当前生成面板保持可用。点击空白画布不会退出，选择成功、按
+`Esc` 或点击退出后恢复全部 Chrome。空媒体节点的唯一上传入口使用“上传附件”胶囊样式。
+浏览器在选择阶段限制新增并阻止超限提交，服务端仍按模型协议重新核对单模态与混合总数。Canvas 不列出
+只接受公网视频 URL、无法消费
+项目内 Content Version 的 HappyHorse video-edit 模型。
+
+批量候选逐个校验：全部成功为 `done`，部分成功为 `partial`，全部失败为 `failed`，
+停止且没有有效产物为 `canceled`；部分失败不会抹掉已经成功的 Content Version。
+`POST .../runs/{run_id}/retry` 只接受 `expected_revision`：从结果节点当前 Draft/连接重新解析并冻结新
+Snapshot，创建新 Job/Run，不覆盖旧记录。没有按原 Snapshot 重跑的入口，也不能只补跑单个候选。
+`POST .../runs/{run_id}/cancel` 只持久化幂等 `cancel_requested_at`。Runner 尚未认领时不调用厂商并落为
+`canceled`；同步厂商请求已发出时不伪装即时中断，UI 明示上游可能继续执行，有效返回仍登记，未返回候选
+才标记 canceled。prepared 事务在下次项目访问或命令前完成/丢弃，不能从节点当前内容重造 Snapshot。
+`POST .../runs/{run_id}/candidates/{candidate_id}/dismiss` 只允许隐藏 `failed/canceled` 槽位并写入
+`dismissed_at` tombstone；Job、Snapshot、错误与既有 Content Version 均不删除，最新 tombstone 也不会让
+同索引的旧失败槽位重新出现。
+服务启动时先恢复全部项目事务，再核对孤儿 Job：`runner_started_at` 为空的持久任务尚未调用厂商，可安全
+重新领取；已经领取但仍无终态的请求状态未知，明确标记失败且不自动重试，避免重复扣费。视频与
+Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程内调度上限为全局 4 个、同一密钥别名
+2 个、视频 1 个；HTTP 后台任务与重启恢复共用同一组门控。文本/图片允许候选批量，视频/音频固定单
+结果。旧 `POST .../jobs` 已删除。
+
+已有 Video Content Node 以 video Draft 提交时属于视频派生编辑：Snapshot 固定只冻结节点当前视频一个
+`implicit_self`，忽略该节点的 Input Connection，并在创建 Run 前拒绝 `@[node:*]` mention；结果始终写入
+独立视频节点与 generation-run Derivation Connection，不覆盖源节点。
+
+`POST /canvas/projects/{id}/runs/reverse-prompt` 只接受 `surface_node_id + expected_revision`。服务端固定
+`canvas.reverse_prompt` preset v1，优先全局 default Key、再按登记顺序选择首个 `modality=text`、
+`input_modalities` 明确包含 image 且支持 OpenAI-compatible chat 的模型；浏览器不能传 preset、alias、
+model 或媒体路径。Snapshot 冻结完整 preset 正文/版本、真实模型与唯一图片 Version，文本 caller 用
+multimodal content 发送服务端解析的项目内图片。成功结果是独立文本节点及 generation-run 派生边，源图片
+Draft 不读不改；停止与 original retry 复用普通 Run 生命周期，current retry 不适用。
+
+普通文本 Run 可冻结并传输图片、视频和音频 Input Connection，但只认所选文本模型显式声明的
+`input_modalities`，不按模型名称猜测能力。Chat Completions 在兼容端点分别使用 `image_url`、
+`video_url` 与 `input_audio`；Ark-compatible Responses 分别使用 `input_image`、`input_video` 与
+`input_audio`。本机媒体由 caller 编码后提交；模型虽声明能力但当前供应商协议没有对应传输格式时，
+同样在创建 Run 前拒绝。两种拒绝都只显示一条短消息，不在画布增加常驻说明组件。
+`POST .../runs/{run_id}/reverse-prompt-config` 在成功文本结果后幂等创建图片 Config Node 及文本→配置
+Input Connection。图片模型优先使用仍可路由的画布图片生成偏好；偏好保持自动选择或显式模型失效时，
+再按 default Key 优先、其余登记顺序选择。自动选择会应用已保存的默认参数，失效的显式模型不泄漏旧参数；
+缺模型时保留反推文本且零写。重复请求即使携带旧 revision，也返回已经存在的同一配置，不重复创建节点或连接。
+
+`POST /canvas/projects/{id}/runs/mask-edit` 使用 multipart，只接受 `surface_node_id / expected_revision /
+requested_count / mask_file`。prompt、alias、model 与参数必须先保存为源图片节点的 image Draft，服务端
+读取后冻结；浏览器不能传媒体路径或绕过 Draft。蒙版必须是与 EXIF 归一后源图同尺寸的单帧 PNG，透明或
+灰度值 0 表示编辑、255 表示保留，空蒙版拒绝。服务端把归一灰度蒙版登记为不可变 `user_mask` Content
+Version，并与 Job、Snapshot、结果节点、派生边在同一可恢复事务提交；Snapshot 记录
+`mask_version_id`，且唯一输入固定为当前源图 Version，不接收其它连接节点引用；original retry 重新校验
+源图与蒙版摘要后原样复用。首版只允许已验证走 OpenAI-compatible
+`/images/edits` 的 GPT Image 模型；不支持时返回 `canvas_media_capability_missing`，绝不降级为整图生成。
+
+`POST /canvas/projects/{id}/runs/angle` 只接受 `surface_node_id / expected_revision / requested_count` 与
+`horizontal_angle(-60..60) / pitch_angle(-45..45) / camera_distance(1..10) / wide_angle`。服务端优先全局
+default Key、再按登记顺序选择首个支持至少一张参考图的图片模型；浏览器不能传自由 prompt、alias、model
+或媒体路径。服务端固定 `canvas.angle_edit` preset v1，把当前图片 Version 作为唯一 Snapshot input，完整
+机位参数、preset、真实 provider/alias/model 和受控最终 prompt 一并冻结。结果始终是独立图片节点及一条
+generation-run Derivation Connection；original retry 重新校验源图摘要并逐字段复用原 Snapshot。
+
+`POST /canvas/projects/{id}/media-operations` 只接受当前图片节点和不可变源 Version ID，并以
+discriminated union 执行 `crop`、`split` 或确定性 `upscale`。服务端用 Pillow 校验真实格式、摘要、静态帧、
+EXIF 方向与 64MP 上限，统一输出剥离元数据的 RGB/RGBA PNG；切图限制 2–12 行列且每块最短边至少 16px，
+放大只允许 1024/2048/3072/4096 长边和 nearest/bilinear/lanczos，明确不提供 AI 细节恢复。一次命令在
+项目级串行、全局最多并发 2 个；全部输出先写 staging，校验总块数与体积后原子移动到
+`derived/<operation_id>/` 并提交 Document。若进程在移动后中断，下一次项目访问按事务摘要完成提交；恢复不
+重跑图片处理。冲突为零写，源文件永不覆盖；一次 split 的结果节点和 `local_tool` 派生边作为一个画布历史
+命令撤销/重做，Content Version 与字节继续保留。裁剪/切图参数校验分别固定返回
+`canvas_media_invalid_crop` / `canvas_media_invalid_split`，无法识别的请求或放大参数返回
+`canvas_media_invalid_request`；解码、规模、源不一致、revision 冲突、处理资源与事务失败均返回带
+`code/message` 的结构化错误。产物移动前的资源错误保证零提交；移动后的错误返回事务待恢复语义，
+不谎报零变化，也不把 Pillow 或文件系统异常直接暴露为 500。
+
+`POST /canvas/projects/{id}/nodes/{node_id}/replace` 允许 image/video/audio 节点用同模态文件填充或替换。
+请求使用 multipart `file + expected_revision`；服务端校验真实 MIME、节点模态与 revision；已有内容时还要
+校验当前 Version。命令创建新的不可变 upload Content Version，并只切换原节点 `current_version_id`。
+空节点直接指向新 Version；已有节点的旧 Version 与字节继续保留，因此画布 undo/redo 只恢复指针，不重新
+上传。跨模态、伪后缀、节点缺失、已有指针引用的 Version 缺失和 revision 冲突均为零写。
+图片的 `display.free_resize=false` 让 React Flow resize 保持当前 Version 宽高比；切换只更新节点显示
+状态，不修改 Content Version 的真实尺寸。
+
+项目包使用 `game-atelier-canvas-v1.zip`：`manifest.json` 对每个 metadata/blob 记录 SHA-256、字节数、
+MIME 与角色，项目内容放在 `projects/<package_project_id>/`，媒体放在
+`blobs/sha256/<first2>/<sha256>.<ext>`。导入先调用 `inspect` 完成路径、链接、重复条目、压缩比、配额、
+schema、摘要和项目内引用校验，再凭 30 分钟 token 调用 `commit`；commit 永远创建新项目，并重映射所有
+全局 Canvas Job ID、Run ID、output path、retry/derivation/content origin 引用。node/version/connection
+等项目内 ID 保留。包不包含凭证、全局 provider 配置、缓存、插件代码或运行中事务；存在 pending Job
+时导出、导入和删除均返回 409。
+导入与删除分别使用持久事务记录和固定锁序；服务启动时回滚中断的导入，并完成中断的永久删除。每 6 小时
+维护一次过期或遗弃的导入 claim。
+
+删除请求只携带当前 `expected_revision`。服务端在固定的 project→job 锁序下确认 revision 与 owned Job
+均静止后，先把项目和 Job 原子移入 `.runtime/canvas-delete-transactions/` 的短期事务目录，再立即物理清除；
+项目从索引消失后不可恢复。画布不提供回收区、撤销删除或恢复 API。
+
+项目创作库分别落在 `library/assets.json` 与 `library/prompts.json`，两者都是独立
+`RevisionedSidecar`。所有写操作必须携带 sidecar 当前 `If-Match`；读取和成功写入响应返回对应
+`ETag`。资产通过 `POST /canvas/projects/{id}/library/assets` 收藏同项目现有 Content Version，同一
+version 最多一个条目；PATCH 只改标题和标签，DELETE 只移出资产库，不删除节点、Content Version 或
+媒体字节。`POST .../library/assets/{asset_id}/insert` 携带 Canvas Document 的 `If-Match` 和目标坐标，
+创建指向同一不可变 Content Version 的新节点。
+
+项目提示词通过 `POST/PATCH/DELETE .../library/prompts` 管理；项目本地条目可编辑，公共源条目在项目内
+只读。`POST .../library/prompts/{prompt_id}/insert` 携带 Canvas Document 的 `If-Match` 和目标坐标，
+先按当前提示词内容创建新的 `user_edit` Text Content Version，再创建指向该版本的文本节点。创作库写入
+与画布插入均在项目锁下校验 revision；冲突返回 409，不做 last-write-wins 或自动合并。
 
 ### 角色衍生契约
 

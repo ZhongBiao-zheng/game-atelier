@@ -1,0 +1,27 @@
+interface:
+  display_name: "Game Atelier Character"
+  short_description: "用参考图和对话建立、生成、迭代并定稿项目角色立绘。"
+  default_prompt: "Use $game-atelier:character to create or iterate a character portrait, registering every reference and external result in the visible asset gallery."
+compatibility:
+  canonical_format: "agent-skills"
+  adapter_targets:
+    - "openai"
+    - "claude"
+    - "generic"
+  activation:
+    mode: "manual"
+    paths:
+      - "SKILL.md"
+      - "references/prompt-zh.md"
+      - "references/spec-protocol.md"
+  execution:
+    context: "inline"
+    shell: "bash"
+  trust:
+    source_tier: "local"
+    remote_inline_execution: "forbid"
+    remote_metadata_policy: "allow-metadata-only"
+  degradation:
+    openai: "metadata-adapter"
+    claude: "neutral-source-plus-adapter"
+    generic: "neutral-source"

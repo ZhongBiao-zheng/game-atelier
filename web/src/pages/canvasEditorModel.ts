@@ -1,0 +1,710 @@
+import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
+import {
+  normalizeStudioSizeForModel,
+  studioSizeFor,
+  type Resolution,
+} from '@/lib/studioSize';
+import type { Job, JobParams } from '@/schema/jobs';
+import { modelModality, type KeyView } from '@/api/keys';
+import {
+  normalizeAudioFormat,
+  normalizeAudioSpeed,
+  normalizeAudioVoice,
+} from '@/lib/audioGeneration';
+import type {
+  CanvasContentNode,
+  CanvasContentVersion,
+  CanvasGenerationDefault,
+  CanvasGenerationMode,
+  CanvasGenerationParamsByMode,
+  CanvasGenerationDraft,
+  CanvasDocument,
+  CanvasNode,
+  CanvasSize,
+} from '@/schema/canvas';
+import {
+  videoControlCaps,
+  type VideoControlCaps,
+  type VideoQuality,
+} from '@/lib/videoControlCaps';
+
+/** 把轮询回来的 job 列表并进本地列表。
+ *
+ *  轮询以前是整体赋值。提交 / 重试 / 取消都会先乐观写一条 job 进来做即时回显，而轮询请求发出
+ *  到响应落地之间还夹着一次 getCanvasDocument，窗口宽到足以跨过一次提交：整体赋值会把那条刚
+ *  提交的 pending job 抹掉，hasRunningJobs 随之为假，轮询 effect 自己卸载，界面就永远停在
+ *  旧状态，且没有任何报错。
+ *
+ *  服务端对它返回的每一条都是权威的，所以本地同 id 的一律被覆盖；只有服务端这次没返回的本地
+ *  条目才保留下来。服务端真删掉某条时，下一轮（本地没有并发写入）会走整体赋值，自动收敛。 */
+export function acceptCanvasJobs(local: readonly Job[], remote: readonly Job[]): Job[] {
+  const remoteIds = new Set(remote.map(job => job.job_id));
+  const localOnly = local.filter(job => !remoteIds.has(job.job_id));
+  return localOnly.length ? [...remote, ...localOnly] : [...remote];
+}
+
+export function upsertCanvasJob(local: readonly Job[], job: Job): Job[] {
+  return [...local.filter(item => item.job_id !== job.job_id), job];
+}
+
+/** 后端 CanvasSize 是 Field(gt=0, le=4000)。超界的那一次自动保存返回 422，而 422 在界面上被
+ *  归到「保存冲突，内容已保留」——用户以为没事，实际之后每一次编辑都不再落盘，且没有恢复路径。
+ *  所以尺寸必须在写入本地文档之前就夹住，而不是等服务端拒绝。 */
+export const CANVAS_MAX_NODE_SIZE = 4000;
+
+export function clampCanvasNodeSize(size: CanvasSize): CanvasSize {
+  const width = Math.min(CANVAS_MAX_NODE_SIZE, Math.max(1, size.width));
+  const height = Math.min(CANVAS_MAX_NODE_SIZE, Math.max(1, size.height));
+  return width === size.width && height === size.height ? size : { width, height };
+}
+
+/** 前端新造的文本 Content Version 用全零 sha256 占位，服务端落盘时改写成真实摘要。
+ *  所以「sha256 还是占位值」精确等价于「服务端还没接收过这个版本」。 */
+export const CANVAS_LOCAL_VERSION_SHA = '0'.repeat(64);
+
+export function canvasVersionIsPersisted(version: CanvasContentVersion) {
+  return version.sha256 !== CANVAS_LOCAL_VERSION_SHA;
+}
+
+/** 把服务端返回的 Content Version 合并进本地文档。
+ *
+ *  服务端拥有已持久化版本的 sha256 与 created_at，并且把「已存在版本的任何差异」当致命错误
+ *  （canvas_projects.py 的 existing canvas content versions are immutable → 422）。所以共有
+ *  id 一律以服务端为准，只有服务端还没见过的本地版本原样保留。反过来写（本地覆盖服务端）会让
+ *  本地永久留着占位 sha256，之后每一次保存都提交一份服务端已判非法的数据，且无法自愈。 */
+export function acceptServerContentVersions(
+  local: Readonly<Record<string, CanvasContentVersion>>,
+  server: Readonly<Record<string, CanvasContentVersion>>,
+): Record<string, CanvasContentVersion> {
+  return { ...local, ...server };
+}
+
+/** 撤销 / 重做时恢复 Content Version。
+ *
+ *  两条不变式决定了这里既不能整份用快照、也不能整份用当前值：
+ *  - Content Version 只增不删（隐藏用 tombstone）。而且省略一个服务端已持久化的版本会被
+ *    服务端判成「修改了已存在版本」，同样 422。所以任何情况下都不丢版本。
+ *  - 已持久化版本不可变。用旧快照里的占位 sha256 覆盖它会把保存永久锁死。
+ *
+ *  于是：只把「服务端还没接收」的版本回退到快照里的内容，其余原样保留。节点的
+ *  current_version_id 指针由快照的 nodes 负责回退，撤销靠改指针而不是删版本。 */
+export function restoreContentVersions(
+  snapshot: Readonly<Record<string, CanvasContentVersion>>,
+  current: Readonly<Record<string, CanvasContentVersion>>,
+): Record<string, CanvasContentVersion> {
+  const restored: Record<string, CanvasContentVersion> = { ...current };
+  for (const [versionId, version] of Object.entries(snapshot)) {
+    if (canvasVersionIsPersisted(restored[versionId] ?? version)) continue;
+    restored[versionId] = version;
+  }
+  return restored;
+}
+
+export function canvasNodeActiveRunId(node: CanvasNode): string | null {
+  return 'active_run_id' in node.data ? node.data.active_run_id ?? null : null;
+}
+
+/** 生成进行中的节点为什么不能删。
+ *
+ *  厂商调用已经发出并且要计费，而服务端 finalize 只在结果节点还在文档里时才把产物挂回节点上：
+ *  删掉它，run 照跑照扣钱，产物落进 content_versions 后没有任何节点指向它，画布上永远看不到，
+ *  也没有回收入口。取消运行中的 run 目前没有接口，所以只能拦住并说清原因，不能替用户
+ *  「删了顺便取消」。 */
+export function canvasDeletionBlockedMessage(
+  nodes: readonly CanvasNode[],
+  nodeIds: ReadonlySet<string>,
+): string | null {
+  const blocked = nodes.filter(
+    node => nodeIds.has(node.id) && canvasNodeActiveRunId(node) !== null,
+  );
+  if (blocked.length === 0) return null;
+  if (blocked.length === 1) return `「${blocked[0].title}」正在生成，结束后才能删除。`;
+  return `选中的节点里有 ${blocked.length} 个正在生成，结束后才能删除。`;
+}
+
+export function canvasNodeAcceptsInput(node: CanvasNode) {
+  return node.type !== 'group' && node.type !== 'plugin';
+}
+
+export function canvasNodeProvidesContent(node: CanvasNode): node is CanvasContentNode {
+  return node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio';
+}
+
+export function canvasNodeRenderZIndex(
+  persistedZIndex: number,
+  selected: boolean,
+  maximumPersistedZIndex: number,
+) {
+  return selected ? Math.max(persistedZIndex, maximumPersistedZIndex) + 1 : persistedZIndex;
+}
+
+export function canvasNodeHasCurrentContent(
+  node: CanvasNode,
+  versions: Readonly<Record<string, CanvasContentVersion>>,
+): node is CanvasContentNode {
+  if (!canvasNodeProvidesContent(node) || !node.data.current_version_id) return false;
+  return versions[node.data.current_version_id]?.kind === node.type;
+}
+
+/** 内容节点即使还没有内容也能当连线源：「先把图连起来，再逐个生成」是画布上最自然的用法。
+ *
+ *  代价是提交时那些还空着的输入会被服务端整单拒绝，所以空输入必须在生成按钮上就被拦住并指名，
+ *  见 canvasPendingInputNodes 和 referenceErrorMessage。
+ *
+ *  四类内容节点一视同仁之后就不再需要版本表了：canvasNodeHasCurrentContent 的第一道判据也是
+ *  canvasNodeProvidesContent，`A || (A && …)` 恒等于 A。留着那个参数只会逼调用方去拿全量版本表
+ *  （节点卡因此每一次按键都要重渲染，见 CanvasEditor 里 resolveVersion 的说明）。 */
+export function canvasNodeProvidesOutput(node: CanvasNode): node is CanvasContentNode {
+  return canvasNodeProvidesContent(node);
+}
+
+export interface CanvasPendingInput {
+  nodeId: string;
+  title: string;
+}
+
+/** 每个目标节点上「已连接但还没有内容」的输入源。
+ *
+ *  只看不带 slot 的 input 连线：首尾帧模式下服务端会把不带 slot 的连线全部丢掉，带 slot 的那两条
+ *  由 missingVideoFrame 单独把关。 */
+export function canvasPendingInputNodes(
+  document: CanvasDocument | null,
+): Map<string, CanvasPendingInput[]> {
+  const result = new Map<string, CanvasPendingInput[]>();
+  if (!document) return result;
+  const nodes = new Map(document.nodes.map(node => [node.id, node]));
+  for (const connection of document.connections) {
+    if (connection.role !== 'input' || connection.slot) continue;
+    const source = nodes.get(connection.source_node_id);
+    if (!source || canvasNodeHasCurrentContent(source, document.content_versions)) continue;
+    const pending = result.get(connection.target_node_id) ?? [];
+    pending.push({ nodeId: source.id, title: source.title });
+    result.set(connection.target_node_id, pending);
+  }
+  return result;
+}
+
+export function canCreateCanvasInputConnection(
+  document: CanvasDocument | null,
+  connection: { source: string | null; target: string | null },
+) {
+  if (!document || !connection.source || !connection.target || connection.source === connection.target) {
+    return false;
+  }
+  const source = document.nodes.find(node => node.id === connection.source);
+  const target = document.nodes.find(node => node.id === connection.target);
+  if (
+    !source
+    || !target
+    || !canvasNodeProvidesOutput(source)
+    || !canvasNodeAcceptsInput(target)
+  ) {
+    return false;
+  }
+  return !document.connections.some(edge => (
+    edge.role === 'input'
+    && edge.source_node_id === connection.source
+    && edge.target_node_id === connection.target
+  ));
+}
+
+export function closestCanvasConnectionEndpoint(
+  pointer: { x: number; y: number },
+  nodes: ReadonlyArray<{
+    id: string;
+    left: number;
+    right: number;
+    top: number;
+    bottom: number;
+  }>,
+  side: 'left' | 'right',
+  maximumDistance = 32,
+) {
+  let nearest: { id: string; distance: number } | null = null;
+  for (const node of nodes) {
+    const besideNode = side === 'left' ? pointer.x < node.left : pointer.x > node.right;
+    const alignedWithHandle = pointer.y >= node.top && pointer.y <= node.bottom;
+    if (!besideNode || !alignedWithHandle) continue;
+    const distance = Math.min(
+      Math.abs(node.left - pointer.x),
+      Math.abs(node.right - pointer.x),
+    );
+    if (distance <= maximumDistance && (!nearest || distance < nearest.distance)) {
+      nearest = { id: node.id, distance };
+    }
+  }
+  return nearest?.id ?? null;
+}
+
+export function canvasConnectionCreationCapabilities(sourceHandle: 'source' | 'target') {
+  return sourceHandle === 'target'
+    ? { allowEmptyNodes: false, allowUpload: true, allowConfig: false }
+    : { allowEmptyNodes: true, allowUpload: false, allowConfig: true };
+}
+
+export const CANVAS_GENERATION_MODE_LABELS: Record<CanvasGenerationDraft['mode'], string> = {
+  text: '文本',
+  image: '图片',
+  video: '视频',
+  audio: '音频',
+};
+
+function isOpenAiHkBaseUrl(baseUrl: string | null | undefined) {
+  return (baseUrl ?? '').toLowerCase().includes('openai-hk.com');
+}
+
+function canvasImageModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
+  if (key.provider === 'nano_banana') return false;
+  const family = imageControlCaps(model.id, key.provider, model.protocol).family;
+  if (family === 'midjourney' || key.provider === 'openrouter') return true;
+  if (!['openai', 'midjourney', 'seedream', 'tokendance', 'custom'].includes(key.provider)) {
+    return false;
+  }
+  return model.protocol == null || ['openai', 'ark'].includes(model.protocol);
+}
+
+function canvasVideoModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
+  const protocol = model.protocol ?? (() => {
+    const id = model.id.toLowerCase();
+    if (key.provider === 'seedance') return 'seedance';
+    if (key.provider === 'openrouter') return 'openrouter';
+    if (key.provider === 'tokendance') {
+      if (id.includes('seedance')) return 'seedance';
+      if (id.includes('happyhorse')) return 'dashscope';
+    }
+    if (id.startsWith('kling') && isOpenAiHkBaseUrl(key.base_url)) return 'kling';
+    return null;
+  })();
+  if (!['seedance', 'kling', 'dashscope', 'openrouter'].includes(String(protocol))) return false;
+  // Canvas Runner 明确拒绝 HappyHorse video-edit：它只收公网 URL，画布内容是本地版本。
+  return protocol !== 'dashscope' || !model.id.toLowerCase().includes('video-edit');
+}
+
+export function canvasGenerationModelSupportsMode(
+  key: KeyView,
+  model: KeyView['models'][number],
+  mode: CanvasGenerationDraft['mode'],
+  options: { editingExistingVideo?: boolean } = {},
+) {
+  return modelModality(model, key) === mode
+    && (mode !== 'image' || canvasImageModelIsRoutable(key, model))
+    && (mode !== 'video' || canvasVideoModelIsRoutable(key, model))
+    && (!options.editingExistingVideo || supportsCanvasVideoEdit(model.id, model.protocol))
+    && (mode !== 'audio'
+      || supportsCanvasAudioGeneration(model.id, key.provider, model.protocol))
+    && (mode !== 'text'
+      || supportsCanvasTextGeneration(key.provider, model.protocol));
+}
+
+export function firstCanvasGenerationModel(
+  keys: readonly KeyView[],
+  mode: CanvasGenerationDraft['mode'],
+) {
+  for (const key of keys) {
+    const model = key.models.find(candidate => canvasGenerationModelSupportsMode(key, candidate, mode));
+    if (model) return { key, model };
+  }
+  return null;
+}
+
+function preferredCanvasGenerationModel(
+  keys: readonly KeyView[],
+  mode: CanvasGenerationDraft['mode'],
+  preference: CanvasGenerationDefault | undefined,
+) {
+  const selection = preference?.selection;
+  if (!selection) return null;
+  const key = keys.find(candidate => candidate.alias === selection.alias);
+  const model = key?.models.find(candidate => candidate.id === selection.model);
+  return key && model && canvasGenerationModelSupportsMode(key, model, mode)
+    ? { key, model }
+    : null;
+}
+
+function defaultCanvasGenerationParams(mode: CanvasGenerationDraft['mode']): JobParams {
+  if (mode === 'image') return { n: 1, ratio: '1:1' };
+  if (mode === 'video') {
+    return {
+      duration: 5,
+      ratio: '16:9',
+      resolution: '720p',
+      frame_mode: 'firstlast',
+      generate_audio: true,
+    };
+  }
+  if (mode === 'audio') return { voice: 'alloy', response_format: 'mp3', speed: 1 };
+  return { n: 1, reasoning_effort: 'auto' };
+}
+
+function normalizedCanvasGenerationParams(
+  key: KeyView,
+  model: KeyView['models'][number],
+  mode: CanvasGenerationDraft['mode'],
+  current: JobParams,
+) {
+  if (mode === 'image') {
+    return normalizeCanvasImageParams(model.id, key.provider, current, model.protocol);
+  }
+  if (mode === 'video') return normalizeCanvasVideoParams(model.id, model.protocol, current);
+  if (mode === 'audio') {
+    return normalizeCanvasAudioParams(model.id, key.provider, model.protocol, current);
+  }
+  return normalizeCanvasTextParams(model.protocol, current);
+}
+
+export function canvasGenerationPreferenceForModel<M extends CanvasGenerationMode>(
+  key: KeyView,
+  model: KeyView['models'][number],
+  mode: M,
+  current: JobParams = {},
+): CanvasGenerationDefault<M> | null {
+  if (!canvasGenerationModelSupportsMode(key, model, mode)) return null;
+  return {
+    selection: { alias: key.alias, model: model.id },
+    params: normalizedCanvasGenerationParams(
+      key,
+      model,
+      mode,
+      { ...defaultCanvasGenerationParams(mode), ...current },
+    ) as CanvasGenerationParamsByMode[M],
+  };
+}
+
+export function createCanvasGenerationDraft(
+  keys: readonly KeyView[],
+  mode: CanvasGenerationDraft['mode'],
+  options: {
+    prompt?: string;
+    inputPolicy?: CanvasGenerationDraft['input_policy'];
+    preference?: CanvasGenerationDefault;
+    now?: string;
+  } = {},
+): CanvasGenerationDraft {
+  const preferred = preferredCanvasGenerationModel(keys, mode, options.preference);
+  const selected = preferred ?? firstCanvasGenerationModel(keys, mode);
+  const model = selected?.model.id ?? '';
+  const mayApplyPreferenceParams = preferred || options.preference?.selection === null;
+  const sourceParams = mayApplyPreferenceParams
+    ? { ...defaultCanvasGenerationParams(mode), ...options.preference?.params }
+    : defaultCanvasGenerationParams(mode);
+  const params = !selected
+    ? {}
+    : normalizedCanvasGenerationParams(selected.key, selected.model, mode, sourceParams);
+  return {
+    mode,
+    prompt: options.prompt ?? '',
+    input_policy: options.inputPolicy ?? 'mentions_only',
+    model,
+    alias: selected?.key.alias ?? null,
+    params,
+    updated_at: options.now ?? new Date().toISOString(),
+  };
+}
+
+export function switchCanvasGenerationDraft(
+  keys: readonly KeyView[],
+  current: CanvasGenerationDraft,
+  mode: CanvasGenerationDraft['mode'],
+  options: { preference?: CanvasGenerationDefault; now?: string } = {},
+) {
+  if (mode === current.mode) return current;
+  return createCanvasGenerationDraft(keys, mode, {
+    prompt: current.prompt,
+    inputPolicy: current.input_policy,
+    preference: options.preference,
+    now: options.now,
+  });
+}
+
+export function createConnectedCanvasConfig(
+  document: CanvasDocument,
+  sourceNodeId: string,
+  draft: CanvasGenerationDraft,
+  ids: { nodeId: string; connectionId: string },
+): CanvasDocument | null {
+  if (
+    document.nodes.some(node => node.id === ids.nodeId)
+    || document.connections.some(connection => connection.id === ids.connectionId)
+  ) return null;
+  const source = document.nodes.find(node => node.id === sourceNodeId);
+  if (!source || !canvasNodeHasCurrentContent(source, document.content_versions)) return null;
+  const sourceWidth = source.size?.width ?? (source.type === 'text' ? 256 : 320);
+  const token = `@[node:${source.id}]`;
+  const prompt = draft.prompt.trim() ? `${draft.prompt.trim()} ${token}` : token;
+  const configNode: CanvasNode = {
+    id: ids.nodeId,
+    title: `${CANVAS_GENERATION_MODE_LABELS[draft.mode]}生成`,
+    type: 'config',
+    position: { x: source.position.x + sourceWidth + 96, y: source.position.y },
+    z_index: 0,
+    data: {
+      draft: { ...draft, prompt, input_policy: 'mentions_only' },
+    },
+  };
+  const nodes = [...document.nodes, configNode];
+  if (!canCreateCanvasInputConnection({ ...document, nodes }, {
+    source: source.id,
+    target: configNode.id,
+  })) return null;
+  return {
+    ...document,
+    nodes,
+    connections: [...document.connections, {
+      id: ids.connectionId,
+      role: 'input',
+      source_node_id: source.id,
+      target_node_id: configNode.id,
+    }],
+  };
+}
+
+export function normalizeCanvasImageParams(
+  model: string,
+  provider: string | null | undefined,
+  current: JobParams,
+  protocol?: string | null,
+): JobParams {
+  const caps = imageControlCaps(model, provider, protocol);
+  const {
+    quality: currentQuality,
+    background: currentBackground,
+    reference_images: _referenceImages,
+    reference_videos: _referenceVideos,
+    reference_audios: _referenceAudios,
+    resolution: _resolution,
+    size: _size,
+    ...retained
+  } = current;
+  const currentRatio = String(current.ratio ?? '');
+  const ratio = caps.ratios.includes(currentRatio) ? currentRatio : caps.ratios[0];
+  const n = caps.family === 'midjourney'
+    ? MJ_IMAGES_PER_TASK
+    : Math.max(1, Math.min(4, Number(current.n) || 1));
+  const params: JobParams = { ...retained, n, ratio };
+
+  if (caps.showResolution && caps.resolutions.length) {
+    params.resolution = caps.resolutions.includes(current.resolution as Resolution)
+      ? current.resolution
+      : caps.resolutions[0];
+  }
+  if (caps.qualities?.length) {
+    params.quality = caps.qualities.includes(currentQuality as Quality)
+      ? currentQuality
+      : caps.qualities[0];
+  }
+  if (caps.supportsTransparentBackground
+    && ['auto', 'opaque', 'transparent'].includes(String(currentBackground))) {
+    params.background = currentBackground;
+  }
+  if (caps.sizeKind === 'ratio') {
+    params.size = ratio;
+  } else if (caps.sizeKind === 'pixels') {
+    const resolution = (params.resolution as Resolution | undefined) ?? '2K';
+    const currentPixelSize = typeof current.size === 'string' && /^\d+x\d+$/.test(current.size)
+      ? current.size
+      : null;
+    params.size = normalizeStudioSizeForModel(
+      currentPixelSize ?? studioSizeFor(ratio, resolution, model),
+      model,
+    );
+  }
+  return params;
+}
+
+export function supportsCanvasTextReasoning(protocol: string | null | undefined) {
+  return protocol === 'openai-responses';
+}
+
+export function supportsCanvasTextGeneration(
+  provider: string | null | undefined,
+  protocol: string | null | undefined,
+) {
+  const supportedProtocols = [null, undefined, 'openai', 'openai-chat', 'chat-completions', 'openai-responses'];
+  const declared = protocol != null && supportedProtocols.includes(protocol);
+  return supportedProtocols.includes(protocol)
+    && (['openai', 'openrouter', 'seedream', 'tokendance', 'custom'].includes(String(provider)) || declared);
+}
+
+export function normalizeCanvasTextParams(
+  protocol: string | null | undefined,
+  current: JobParams,
+): JobParams {
+  const params: JobParams = {
+    n: Math.max(1, Math.min(4, Number(current.n) || 1)),
+  };
+  if (typeof current.temperature === 'number' && protocol !== 'openai-responses') {
+    params.temperature = current.temperature;
+  }
+  if (typeof current.max_tokens === 'number') params.max_tokens = current.max_tokens;
+  if (
+    supportsCanvasTextReasoning(protocol)
+    && ['auto', 'low', 'medium', 'high', 'xhigh'].includes(String(current.reasoning_effort))
+  ) {
+    params.reasoning_effort = current.reasoning_effort;
+  }
+  return params;
+}
+
+export function supportsCanvasAudioGeneration(
+  model: string,
+  provider: string | null | undefined,
+  protocol: string | null | undefined,
+) {
+  if (['openai', 'openai-speech', 'tts', 'speech'].includes(String(protocol))) return true;
+  if (protocol != null || !['openai', 'custom'].includes(String(provider))) return false;
+  const normalized = model.toLowerCase();
+  if (['asr', 'speech-to-text', 'speech2text', 'whisper'].some(value => normalized.includes(value))) {
+    return false;
+  }
+  return normalized.includes('tts') || normalized.includes('text-to-speech');
+}
+
+export function normalizeCanvasAudioParams(
+  model: string,
+  provider: string | null | undefined,
+  protocol: string | null | undefined,
+  current: JobParams,
+): JobParams {
+  if (!supportsCanvasAudioGeneration(model, provider, protocol)) return {};
+  const params: JobParams = {
+    voice: normalizeAudioVoice(current.voice),
+    response_format: normalizeAudioFormat(current.response_format),
+    speed: normalizeAudioSpeed(current.speed),
+  };
+  const instructions = String(current.instructions ?? '').trim();
+  if (instructions) params.instructions = instructions;
+  return params;
+}
+
+export function canvasVideoEditCaps(
+  model: string,
+  protocol: string | null | undefined,
+): VideoControlCaps {
+  return videoControlCaps(model, protocol);
+}
+
+export function supportsCanvasVideoEdit(
+  model: string,
+  protocol: string | null | undefined,
+): boolean {
+  const caps = canvasVideoEditCaps(model, protocol);
+  // Canvas Content Version 永远是服务端本地文件；HappyHorse video-edit 只收公网 URL，
+  // 不能把“协议支持”冒充成“当前空间可执行”。Seedance 会走项目已有 OSS 中转。
+  return caps.supportsReferenceVideo && caps.family !== 'happyhorse';
+}
+
+export function normalizeCanvasVideoParams(
+  model: string,
+  protocol: string | null | undefined,
+  current: JobParams,
+  editingExistingVideo = false,
+): JobParams {
+  const caps = canvasVideoEditCaps(model, protocol);
+  const {
+    duration: currentDuration,
+    resolution: currentResolution,
+    ratio: currentRatio,
+    mode: currentQuality,
+    frame_mode: currentFrameMode,
+    generate_audio: currentGenerateAudio,
+    watermark: currentWatermark,
+    reference_images: _referenceImages,
+    reference_videos: _referenceVideos,
+    reference_audios: _referenceAudios,
+    n: _count,
+    size: _size,
+    quality: _imageQuality,
+    mask_image: _mask,
+    angle_horizontal: _angleHorizontal,
+    angle_pitch: _anglePitch,
+    angle_distance: _angleDistance,
+    angle_wide: _angleWide,
+    voice: _voice,
+    speed: _speed,
+    response_format: _responseFormat,
+    instructions: _instructions,
+    temperature: _temperature,
+    max_tokens: _maxTokens,
+    ...retained
+  } = current;
+  const params: JobParams = { ...retained };
+
+  if (caps.durations.length) {
+    const duration = Number(currentDuration);
+    params.duration = caps.durations.includes(duration)
+      ? duration
+      : caps.durations.includes(5) ? 5 : caps.durations[0];
+  }
+  if (caps.resolutions.length) {
+    params.resolution = caps.resolutions.includes(String(currentResolution))
+      ? String(currentResolution)
+      : caps.resolutions[0];
+  }
+  if (caps.ratios.length) {
+    params.ratio = caps.ratios.includes(String(currentRatio))
+      ? String(currentRatio)
+      : caps.ratios.includes('16:9') ? '16:9' : caps.ratios[0];
+  }
+  if (caps.qualities?.length) {
+    params.mode = caps.qualities.includes(currentQuality as VideoQuality)
+      ? currentQuality
+      : caps.qualities[0];
+  }
+  if (caps.supportsAudio) {
+    params.generate_audio = typeof currentGenerateAudio === 'boolean'
+      ? currentGenerateAudio
+      : true;
+  }
+  if (caps.supportsWatermark) {
+    params.watermark = typeof currentWatermark === 'boolean' ? currentWatermark : false;
+  }
+  const supportsFrameSlots = caps.modes.includes('firstlast');
+  const supportsOmni = caps.modes.includes('omni');
+  const usesFrameSlots = ['first', 'last', 'firstlast'].includes(String(currentFrameMode));
+  if (editingExistingVideo || (!supportsFrameSlots && supportsOmni)) {
+    params.frame_mode = 'auto';
+  } else if (!supportsOmni && supportsFrameSlots) {
+    params.frame_mode = 'firstlast';
+  } else if (usesFrameSlots || currentFrameMode === 'auto') {
+    params.frame_mode = currentFrameMode;
+  } else {
+    params.frame_mode = caps.modes[0] === 'omni' ? 'auto' : 'firstlast';
+  }
+  return params;
+}
+
+/** 「开始生成」按钮被禁用的原因。
+ *  这个按钮有五个禁用条件：四类引用错误（由 referenceErrorMessage 出文案）、没有可用模型、
+ *  没有选中模型、提示词为空。后三条原来一条都不解释，用户看到的只是一个点不动的按钮——
+ *  没有密钥的新用户尤其如此，界面上既不说缺什么，也不说去哪儿补。
+ *  kind 用来区分要不要把这句话渲染出来：提示词为空时输入框本身已经在说了，只进 title。 */
+export type CanvasGenerateBlock = {
+  kind: 'no_model_available' | 'no_model_selected' | 'no_prompt';
+  message: string;
+};
+
+export function canvasGenerateBlock(input: {
+  mode: CanvasGenerationDraft['mode'];
+  modelChoiceCount: number;
+  keyCount: number;
+  alias: string | null | undefined;
+  modelSelected: boolean;
+  prompt: string;
+}): CanvasGenerateBlock | null {
+  if (input.modelChoiceCount === 0) {
+    const label = CANVAS_GENERATION_MODE_LABELS[input.mode];
+    return {
+      kind: 'no_model_available',
+      message: input.keyCount === 0
+        ? '还没有配置任何模型密钥。'
+        : `已配置的密钥里没有能做${label}生成的模型。`,
+    };
+  }
+  if (!input.alias || !input.modelSelected) {
+    return { kind: 'no_model_selected', message: '先在上方选择一个生成模型。' };
+  }
+  if (!input.prompt.trim()) {
+    return { kind: 'no_prompt', message: '先填写提示词。' };
+  }
+  return null;
+}

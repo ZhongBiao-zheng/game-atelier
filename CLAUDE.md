@@ -123,7 +123,7 @@ cd web && pnpm test                                   # vitest run
 
 # Lint / TypeCheck
 uv run ruff check src tests                           # Python lint（line-length=100）
-cd web && pnpm lint                                   # tsc -b --noEmit
+cd web && pnpm lint                                   # tsc -b --noEmit + eslint（只开 react-hooks 两条规则）
 
 # 构建
 make build                                            # vite build → web/dist/（viewer-server 自动挂载）

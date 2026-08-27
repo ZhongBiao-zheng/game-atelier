@@ -99,6 +99,22 @@ def test_generate_audio_explicit_passthrough(seedance_key, tmp_path, monkeypatch
     assert "generate_audio" not in bodies[-1]
 
 
+def test_watermark_explicit_passthrough(seedance_key, tmp_path, monkeypatch):
+    bodies: list[dict] = []
+    monkeypatch.setattr(
+        vv.requests, "post",
+        lambda url, headers=None, json=None, timeout=None: (
+            bodies.append(json) or _FakeResp(200, {"data": {"video_url": "https://x/v.mp4"}})
+        ),
+    )
+    monkeypatch.setattr(vv, "_download_mp4", lambda url, d, i, **kw: "ok")
+    common = dict(prompt="p", model="", alias="ark", output_dir=tmp_path / "o", poll_interval=0)
+    vv.render_video(**common, params={"watermark": True})
+    assert bodies[-1]["watermark"] is True
+    vv.render_video(**common, params={"watermark": False})
+    assert bodies[-1]["watermark"] is False
+
+
 def test_on_phase_called_sent_then_downloading(seedance_key, tmp_path, monkeypatch):
     monkeypatch.setattr(vv.requests, "post", lambda *a, **k: _FakeResp(200, {"data": {"id": "t1"}}))
     monkeypatch.setattr(

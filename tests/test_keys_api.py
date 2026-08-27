@@ -127,8 +127,20 @@ def test_create_key_persists_named_models(client):
 
     row = client.get("/api/keys").json()["keys"][0]
     assert row["models"] == [
-        {"name": "图片 5.0 Lite", "id": "doubao-seedream-5-0-260128", "modality": None, "protocol": None},
-        {"name": "图片 4.7", "id": "doubao-seedream-4-5-251128", "modality": None, "protocol": None},
+        {
+            "name": "图片 5.0 Lite",
+            "id": "doubao-seedream-5-0-260128",
+            "modality": None,
+            "protocol": None,
+            "input_modalities": [],
+        },
+        {
+            "name": "图片 4.7",
+            "id": "doubao-seedream-4-5-251128",
+            "modality": None,
+            "protocol": None,
+            "input_modalities": [],
+        },
     ]
 
 
@@ -214,7 +226,7 @@ def test_models_preview_reads_image_protocol_from_upstream_annotation(tmp_path, 
             "id": "seedream-5.0-lite",
             "supported_protocols": ["ark:image-generations", "openai:image-generations"],
         },
-        # 非出图模型 → 不分类也不给协议
+        # 文本模型 → 作为 Canvas 文本生成模型返回
         {"id": "some-chat", "supported_protocols": ["openai:chat-completions"]},
     ]
 
@@ -239,9 +251,9 @@ def test_models_preview_reads_image_protocol_from_upstream_annotation(tmp_path, 
 
     assert by_id["seedream-5.0-pro"]["protocol"] == "ark"
     assert by_id["seedream-5.0-lite"]["protocol"] == "openai"
-    # 纯 chat 协议的模型明确非视觉 → 不入列表（只计进 excluded）
-    assert "some-chat" not in by_id
-    assert r.json()["excluded"] == 1
+    assert by_id["some-chat"]["modality"] == "text"
+    assert by_id["some-chat"]["protocol"] == "openai-chat"
+    assert r.json()["excluded"] == 0
 
 
 def test_reveal_returns_stored_plaintext(client):
@@ -335,17 +347,23 @@ def test_models_preview_allows_any_host_when_caller_brings_its_own_key(tmp_path,
 # --- 模型列表分类：只丢明确的非视觉模型 ---
 
 def test_classify_model_uses_protocol_annotation():
-    from viewer_server.routes import _classify_model
+    from viewer_server.routes import _classify_model, _text_protocol
     assert _classify_model({"id": "a", "supported_protocols": ["ark:image-generations"]}) == "image"
     assert _classify_model({"id": "b", "supported_protocols": ["seedance:generations"]}) == "video"
-    assert _classify_model({"id": "c", "supported_protocols": ["openai:chat-completions"]}) == "excluded"
+    assert _classify_model({"id": "c", "supported_protocols": ["openai:chat-completions"]}) == "text"
     assert _classify_model({
         "id": "d", "supported_protocols": ["openai:chat-completions", "anthropic:messages"],
-    }) == "excluded"
-    # 混合标注里有一条看不懂的 → 保守留下，绝不丢
+    }) == "text"
+    # 已知可执行协议优先于同一模型的未知附加协议。
     assert _classify_model({
         "id": "e", "supported_protocols": ["openai:chat-completions", "acme:mystery-thing"],
-    }) == "unknown"
+    }) == "text"
+    assert _classify_model({
+        "id": "f", "supported_protocols": ["openai:responses"],
+    }) == "text"
+    assert _text_protocol({
+        "id": "f", "supported_protocols": ["openai:responses"],
+    }) == "openai-responses"
 
 
 def test_classify_model_does_not_short_circuit_on_unknown_protocols():
@@ -367,11 +385,11 @@ def test_classify_model_reads_output_modalities_before_guessing_id():
     }) == "image"
     assert _classify_model({
         "id": "thinkingmachines/inkling", "architecture": {"output_modalities": ["text"]},
-    }) == "excluded"
-    # 纯音频也排除：上游自己声明了输出里没有图和视频
+    }) == "text"
+    # 音频输出但不是明确 TTS：保守留作 unknown，不能包装成可执行语音模型。
     assert _classify_model({
         "id": "google/lyria-3-pro", "architecture": {"output_modalities": ["audio"]},
-    }) == "excluded"
+    }) == "unknown"
 
 
 def test_id_keyword_match_respects_word_boundaries():
@@ -382,6 +400,16 @@ def test_id_keyword_match_respects_word_boundaries():
     assert _classify_model({"id": "wanx-v1"}) == "unknown"
     # seededit 是真图生图模型，image_family 早就认它，此前 _IMAGE_ID_HINTS 漏了
     assert _classify_model({"id": "doubao-seededit-3-0-i2i"}) == "image"
+
+
+def test_classify_model_recognizes_doubao_conversation_without_misclassifying_media():
+    from viewer_server.routes import _classify_model
+
+    assert _classify_model({"id": "doubao-seed-1-8-251228"}) == "text"
+    assert _classify_model({"id": "doubao-seed-1-6-vision-250815"}) == "text"
+    assert _classify_model({"id": "doubao-embedding-text-240715"}) == "unknown"
+    assert _classify_model({"id": "doubao-seed3d-2-0-260328"}) == "unknown"
+    assert _classify_model({"id": "doubao-future-media-260101"}) == "unknown"
 
 
 def _preview_with_upstream(client, rows, **payload):
@@ -409,12 +437,13 @@ def test_models_preview_filters_non_visual_and_reports_counts(tmp_path, monkeypa
     body = _preview_with_upstream(client, rows).json()
     ids = [m["id"] for m in body["models"]]
 
-    assert "glm-4.7" not in ids and "text-embed" not in ids
-    assert body["excluded"] == 2
+    assert "glm-4.7" in ids and "text-embed" not in ids
+    assert body["excluded"] == 1
     assert body["total"] == 5
     # unknown 留在列表里，标成 category=unknown 让画师自己确认（不是「其他垃圾」）
     assert [m["category"] for m in body["models"] if m["id"] == "mystery-model"] == ["unknown"]
     assert [m["modality"] for m in body["models"] if m["id"] == "mystery-model"] == [None]
+    assert [m["protocol"] for m in body["models"] if m["id"] == "glm-4.7"] == ["openai-chat"]
 
 
 def test_models_preview_include_all_is_the_escape_hatch(tmp_path, monkeypatch):
@@ -476,7 +505,8 @@ def test_models_preview_pulls_openrouter_video_list_separately(tmp_path, monkeyp
     assert by_id["google/veo-3.1"]["modality"] == "video"
     assert by_id["google/veo-3.1"]["protocol"] == "openrouter"  # 可路由，不是留空
     assert body["total"] == 3  # 两个列表合并后的去重总数
-    assert body["excluded"] == 1
+    assert by_id["some/chat"]["modality"] == "text"
+    assert body["excluded"] == 0
 
 
 def test_models_preview_survives_missing_extra_video_list(tmp_path, monkeypatch):

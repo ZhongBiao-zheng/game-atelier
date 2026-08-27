@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 from collections.abc import Mapping
 from http.client import IncompleteRead
+import io
 import math
 import re
 import subprocess
@@ -13,6 +14,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from character_workflow.lib import net_env
 
@@ -99,6 +101,13 @@ def render(
         raise OpenAIImageError("custom provider requires base_url")
 
     family = image_family(model)
+    mask_path = kwargs.get("mask_image") or (kwargs.get("params") or {}).get("mask_image")
+    if mask_path and not supports_image_mask(
+        key.provider,
+        model,
+        _effective_image_protocol(key, model),
+    ):
+        raise OpenAIImageError("current image model does not support mask edits")
     # 尺寸下限是模型属性，与 provider / 网关无关（实测：同一把词元跳动 key 下 5.0-lite 要
     # 3686400 像素、5.0-pro 只要 921600，两条协议路径给出的下限一模一样）。所以归一化按
     # 模型族判，火山直连 / Tuzi / 词元跳动下的 seedream 一视同仁。
@@ -162,30 +171,42 @@ def render(
 
     # custom 走 family 判定补诚实；命名 provider(openai/seedream/tokendance/HK) 分支不动。
     # family / is_seedream 已在上方（尺寸归一化前）算好，这里不重算。
-    custom_img = key.provider == "custom" and family in ("gpt-image", "nano-banana")
-    is_hk_image = is_hk and _hk_image_model(model)
     # quality 按**族**判，与前端 imageControlCaps 同一判据（旧版按 provider：词元跳动上的
     # gpt-image 界面给四档、后端静默丢弃；provider=openai 下的 dall-e 反过来会被塞进
     # gpt-image 的 low/high 词表，而 DALL·E 只认 standard|hd）。
     wants_quality = family in ("gpt-image", "nano-banana")
     quality = _quality_param(kwargs) if wants_quality else None
+    image_protocol = _effective_image_protocol(key, model)
+    background = (
+        _background_param(kwargs)
+        if family == "gpt-image" and image_protocol in {None, "openai"}
+        else None
+    )
     ref_paths = _collect_ref_paths(kwargs, key.provider, model)
+    if mask_path and not ref_paths:
+        raise OpenAIImageError("mask edit requires a source image")
 
     # 图生图端点按族分流：gpt-image 族走官方同步 /images/edits（multipart，OpenAI/HK 实现）。
     # nano-banana 是 Gemini 多模态，OpenAI-HK / 聚合商对其 /images/edits 一律 403（openresty
     # 网关层拒未实现路由），必须走 generations 的 image 字段（实测 OpenAI-HK 可用）——
     # 故 edits 仅限 gpt-image，nano-banana 落到下方 generations+image 兜底。
     # 不用 generations+image 做 gpt-image（那是 Ark/seedream 路子），更绝不加 ?async=true。
-    if (is_hk_image or custom_img) and family == "gpt-image" and ref_paths:
+    supports_edits = supports_image_mask(
+        key.provider,
+        model,
+        _effective_image_protocol(key, model),
+    )
+    if supports_edits and ref_paths:
         paths: list[str] = []
         for _ in range(requested):
             data = _post_multipart(
                 _edits_url(base_url),
                 key.access_key,
                 fields=_hk_edits_fields(
-                    model=model, prompt=prompt, size=requested_size, quality=quality, n=1
+                    model=model, prompt=prompt, size=requested_size, quality=quality,
+                    background=background, n=1,
                 ),
-                files=_ref_file_parts(ref_paths),
+                files=_ref_file_parts(ref_paths, str(mask_path) if mask_path else None),
                 timeout=timeout,
             )
             paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
@@ -196,8 +217,13 @@ def render(
     ref_image = _reference_image_param(kwargs, key.provider, model)
 
     # 网关按协议挂端点：同一网关下不同模型支持的协议不同，打错入口会被判「无可用端点」。
-    # 只有 ark 需要换 URL，其余（None / openai）走默认 OpenAI 兼容入口。
-    is_ark_image = _effective_image_protocol(key, model) == "ark"
+    # 只有 ark 需要换 URL；None / openai 走默认 OpenAI 兼容入口，其他显式协议必须拒绝，
+    # 不能把用户手动错标的 chat/audio 模型伪兼容成图片模型。
+    if image_protocol not in {None, "openai", "ark"}:
+        raise OpenAIImageError(
+            f"image protocol {image_protocol!r} is not supported; expected openai or ark"
+        )
+    is_ark_image = image_protocol == "ark"
     generations_url = _ark_image_url(base_url) if is_ark_image else _image_url(base_url)
 
     def _gen_payload(num: int) -> dict:
@@ -208,6 +234,7 @@ def render(
             n=num,
             image=ref_image,
             quality=quality,
+            background=background,
             seedream=is_seedream,
             sequential=sends_ark_params and _supports_sequential(model),
         )
@@ -290,22 +317,71 @@ def _guess_mime(path: str) -> str:
     return "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
 
 
-def _ref_file_parts(paths: list[str]) -> list[tuple]:
+def _ref_file_parts(paths: list[str], mask_path: str | None = None) -> list[tuple]:
     """multipart 文件部件列表；多张参考图重复 `image` 字段名（OpenAI-HK edits 约定）。"""
     parts: list[tuple] = []
+    source_size: tuple[int, int] | None = None
     for p in paths:
-        parts.append(("image", (Path(p).name, Path(p).read_bytes(), _guess_mime(p))))
+        if mask_path:
+            image_bytes, size = _normalized_edit_image(Path(p))
+            source_size = source_size or size
+            parts.append(("image", (f"{Path(p).stem}.png", image_bytes, "image/png")))
+        else:
+            parts.append(("image", (Path(p).name, Path(p).read_bytes(), _guess_mime(p))))
+    if mask_path:
+        if source_size is None:
+            raise OpenAIImageError("mask edit requires a source image")
+        parts.append(("mask", ("mask.png", _normalized_edit_mask(Path(mask_path), source_size), "image/png")))
     return parts
 
 
+def _normalized_edit_image(path: Path) -> tuple[bytes, tuple[int, int]]:
+    try:
+        with Image.open(path) as opened:
+            if getattr(opened, "is_animated", False) or getattr(opened, "n_frames", 1) != 1:
+                raise OpenAIImageError("mask edit source must be a static image")
+            opened.load()
+            oriented = ImageOps.exif_transpose(opened)
+            has_alpha = "A" in oriented.getbands() or "transparency" in opened.info
+            normalized = oriented.convert("RGBA" if has_alpha else "RGB")
+            output = io.BytesIO()
+            normalized.save(output, format="PNG")
+            return output.getvalue(), normalized.size
+    except OpenAIImageError:
+        raise
+    except (OSError, UnidentifiedImageError, ValueError) as error:
+        raise OpenAIImageError("mask edit source is not a readable image") from error
+
+
+def _normalized_edit_mask(path: Path, source_size: tuple[int, int]) -> bytes:
+    try:
+        with Image.open(path) as opened:
+            if opened.format != "PNG" or opened.size != source_size:
+                raise OpenAIImageError("mask and source image must have identical PNG dimensions")
+            opened.load()
+            gray = opened.convert("L")
+            rgba = Image.new("RGBA", source_size, (255, 255, 255, 255))
+            rgba.putalpha(gray)
+            output = io.BytesIO()
+            rgba.save(output, format="PNG")
+            return output.getvalue()
+    except OpenAIImageError:
+        raise
+    except (OSError, UnidentifiedImageError, ValueError) as error:
+        raise OpenAIImageError("mask is not a readable PNG image") from error
+
+
 def _hk_edits_fields(
-    *, model: str, prompt: str, size: object, quality: str | None, n: int = 1
+    *, model: str, prompt: str, size: object, quality: str | None,
+    background: str | None = None, n: int = 1,
 ) -> dict:
     fields: dict[str, str] = {"model": model, "prompt": prompt, "n": str(max(1, n))}
     if size:
         fields["size"] = str(size)
     if quality:
         fields["quality"] = quality
+    if background:
+        fields["background"] = background
     return fields
 
 
@@ -348,6 +424,7 @@ def _image_generation_payload(
     n: int,
     image: str | list[str] | None = None,
     quality: str | None = None,
+    background: str | None = None,
     seedream: bool = False,
     sequential: bool = False,
 ) -> dict:
@@ -369,6 +446,8 @@ def _image_generation_payload(
         payload["output_format"] = "png"
     if quality:  # gpt-image / nano-banana：low/medium/high/auto
         payload["quality"] = quality
+    if background:  # gpt-image：auto/opaque/transparent
+        payload["background"] = background
     # Seedream / Ark 图生图：image 接受 URL 或 base64 data-url，单张为 str、多张为 list。
     if image:
         payload["image"] = image
@@ -407,6 +486,15 @@ def image_family(model: str) -> str:
     return "standard"
 
 
+def supports_image_mask(provider: str, model: str, protocol: str | None = None) -> bool:
+    """Whether this configured transport has a verified GPT Image edits endpoint."""
+    return (
+        image_family(model) == "gpt-image"
+        and provider in {"openai", "custom"}
+        and protocol in {None, "openai"}
+    )
+
+
 def _hk_image_model(model: str) -> bool:
     """OpenAI-HK 上走 images 端点（支持 size+quality）的模型族。
 
@@ -422,6 +510,24 @@ def _quality_param(kwargs: dict) -> str | None:
     return q if q in ("low", "medium", "high", "auto") else None
 
 
+def _background_param(kwargs: dict) -> str | None:
+    params = kwargs.get("params") or {}
+    background = kwargs.get("background") or params.get("background")
+    return background if background in ("auto", "opaque", "transparent") else None
+
+
+def max_reference_images(model: str) -> int:
+    """Return the image-reference limit shared by submission and provider callers."""
+    family = image_family(model)
+    if family == "seedream":
+        return 10
+    if family == "gpt-image":
+        return 16
+    if family == "nano-banana":
+        return 3
+    return 4
+
+
 def _max_reference_images(provider: str, model: str) -> int:
     """参考图（图生图输入）数量上限 —— 按**模型族**判，不按 provider。
 
@@ -431,14 +537,7 @@ def _max_reference_images(provider: str, model: str) -> int:
     provider 参数保留只为签名兼容调用点；判据已完全交给 image_family。
     与前端 `web/src/lib/referenceLimits.ts` 同表，由 capability-matrix.json 锁死。
     """
-    family = image_family(model)
-    if family == "seedream":
-        return 10
-    if family == "gpt-image":
-        return 16
-    if family == "nano-banana":
-        return 3
-    return 4
+    return max_reference_images(model)
 
 
 def _collect_ref_paths(kwargs: dict, provider: str, model: str) -> list[str]:
@@ -682,6 +781,42 @@ def _normalize_size_for_provider(size: object, is_seedream: bool, model: str = "
         scale = (max_pixels / pixels) ** 0.5
         return f"{max(1, int(width * scale))}x{max(1, int(height * scale))}"
     return size
+
+
+def normalize_image_pixel_size(model: str, size: str) -> str:
+    """Canvas preferences can outlive model ordering, so reapply the final family's limits."""
+    match = re.fullmatch(r"(\d+)x(\d+)", size.strip())
+    if not match:
+        return size
+    width, height = (int(value) for value in match.groups())
+    if width <= 0 or height <= 0:
+        return size
+    family = image_family(model)
+    if family == "seedream":
+        return str(_normalize_size_for_provider(size, True, model))
+    if family != "gpt-image":
+        return size
+
+    max_edge = 3_840
+    min_pixels = 655_360
+    max_pixels = 8_294_400
+    edge = max(width, height)
+    if edge > max_edge:
+        scale = max_edge / edge
+        width *= scale
+        height *= scale
+    pixels = width * height
+    if pixels > max_pixels:
+        scale = math.sqrt(max_pixels / pixels)
+        width *= scale
+        height *= scale
+    elif pixels < min_pixels:
+        scale = math.sqrt(min_pixels / pixels)
+        width *= scale
+        height *= scale
+    rounded_width = max(16, int(width / 16 + 0.5) * 16)
+    rounded_height = max(16, int(height / 16 + 0.5) * 16)
+    return f"{rounded_width}x{rounded_height}"
 
 
 def _chat_image_payload(

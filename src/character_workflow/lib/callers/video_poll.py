@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from math import ceil
 from typing import Any
 
@@ -82,6 +82,7 @@ def poll_responses(
     poll_interval: float,
     task_ref: str,
     error_cls: type[Exception],
+    should_cancel: Callable[[], bool] | None = None,
 ) -> Iterator[Any]:
     """按 poll_interval 节奏轮询 GET，逐次 yield「值得解读」的响应。
 
@@ -93,8 +94,12 @@ def poll_responses(
     consecutive = 0
     polls_left = max_polls
     while polls_left > 0:
+        if should_cancel and should_cancel():
+            raise error_cls(with_task_ref("生成已按请求停止", task_ref))
         if poll_interval:
             time.sleep(poll_interval)
+        if should_cancel and should_cancel():
+            raise error_cls(with_task_ref("生成已按请求停止", task_ref))
         try:
             resp = requests.get(url, headers=headers, timeout=timeout)
         except requests.RequestException as e:

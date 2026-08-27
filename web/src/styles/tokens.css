@@ -60,6 +60,7 @@
 }
 
 :root {
+  color-scheme: dark;
   /* Atelier — warm dark palette (see DESIGN.md) */
 
   /* 表面阶梯（暖中性，R≥G≥B）：画布 → 卡片 → 弹层 → hover */
@@ -105,6 +106,7 @@
    纯白画廊（按飙哥给的参考站调）：画布纯白，表面向灰走深（与暗色阶梯方向相反），
    文字纯黑系，发丝边纯黑 alpha；黄铜压深到 #8F6234 保证白底对比（AA 验证见 DESIGN.md § Color） */
 :root.light {
+  color-scheme: light;
   --background: #FFFFFF;
   --foreground: #000000;
   --card: #FAFAFA;
@@ -285,6 +287,274 @@
     outline-offset: 3px;
     border-radius: 999px;
   }
+
+  .canvas-input {
+    width: 100%;
+    border: 1px solid var(--input);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--background) 70%, transparent);
+    color: var(--foreground);
+    padding: 0.55rem 0.7rem;
+    font-size: var(--text-sm);
+    line-height: 1.4;
+    outline: none;
+  }
+  .canvas-input:focus-visible {
+    border-color: var(--ring);
+    outline: 1px solid var(--ring);
+    outline-offset: -1px;
+  }
+  .canvas-library-search-input {
+    padding-left: 2.25rem;
+  }
+
+  .canvas-editor-top {
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+    padding-right: max(0.5rem, env(safe-area-inset-right));
+    padding-left: max(0.5rem, env(safe-area-inset-left));
+  }
+  .canvas-mobile-rail {
+    left: max(0.75rem, env(safe-area-inset-left));
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+  .canvas-mobile-rail::-webkit-scrollbar {
+    display: none;
+  }
+  .canvas-library-panel {
+    right: max(0.75rem, env(safe-area-inset-right));
+    left: auto;
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .canvas-zoom-dock {
+    left: max(0.75rem, env(safe-area-inset-left));
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .canvas-mobile-generation {
+    min-width: 0;
+  }
+  .canvas-mobile-generation-panel {
+    right: max(0.75rem, env(safe-area-inset-right));
+    left: calc(4.5rem + env(safe-area-inset-left));
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    max-height: min(72dvh, 42rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .canvas-flow {
+    --xy-background-color: var(--background);
+    --xy-background-pattern-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+    --xy-selection-background-color: color-mix(in srgb, var(--primary) 12%, transparent);
+    --xy-selection-border: 1px dotted color-mix(in srgb, var(--primary) 72%, transparent);
+    --xy-edge-stroke: color-mix(in srgb, var(--primary) 42%, var(--border));
+    --xy-edge-stroke-selected: var(--primary);
+    --xy-connectionline-stroke: var(--primary);
+    --xy-controls-button-background-color: var(--glass);
+    --xy-controls-button-background-color-hover: var(--secondary);
+    --xy-controls-button-color: var(--foreground);
+    --xy-controls-button-border-color: var(--border);
+    --xy-minimap-background-color: var(--card);
+    --xy-attribution-background-color: var(--glass);
+  }
+  .canvas-flow .react-flow__minimap.canvas-minimap {
+    left: calc(max(0.75rem, env(safe-area-inset-left)) + 3.25rem) !important;
+    bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 4rem) !important;
+    width: 12rem;
+    height: 7.5rem;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: none;
+  }
+  .canvas-flow .react-flow__handle.canvas-node-handle {
+    width: 1px !important;
+    min-width: 1px !important;
+    height: 1px !important;
+    min-height: 1px !important;
+    border: 0 !important;
+    background: transparent !important;
+    cursor: crosshair;
+    z-index: 30;
+    opacity: 0;
+    pointer-events: none !important;
+    transition: opacity 160ms ease;
+  }
+  .canvas-flow .react-flow__handle.canvas-node-handle::before {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--canvas-handle-size, 3rem);
+    height: var(--canvas-handle-size, 3rem);
+    border-radius: 999px;
+    content: '';
+    transform: translate(-50%, -50%);
+  }
+  .canvas-flow .canvas-node-shell:hover .canvas-node-handle,
+  .canvas-flow .canvas-node-shell:focus-within .canvas-node-handle,
+  .canvas-flow .react-flow__node:focus .canvas-node-handle,
+  .canvas-flow .react-flow__node:focus-visible .canvas-node-handle,
+  .canvas-flow .canvas-node-shell[data-selected="true"] .canvas-node-handle,
+  .canvas-flow.canvas-flow-connecting .canvas-node-handle {
+    opacity: 1;
+    pointer-events: auto !important;
+  }
+  .canvas-flow .canvas-node-handle-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--canvas-handle-dot-size, 0.75rem);
+    height: var(--canvas-handle-dot-size, 0.75rem);
+    border: var(--canvas-handle-border-size, 2px) solid var(--muted-foreground);
+    border-radius: 999px;
+    background: var(--card);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: border-color 160ms ease;
+  }
+  .canvas-flow .canvas-node-handle:hover .canvas-node-handle-dot {
+    border-color: var(--primary);
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-line {
+    border-color: color-mix(in srgb, var(--primary) 72%, transparent);
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-line.left {
+    left: -1px;
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-line.right {
+    left: calc(100% + 1px);
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-line.top {
+    top: -1px;
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-line.bottom {
+    top: calc(100% + 1px);
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-handle {
+    width: 0.55rem;
+    height: 0.55rem;
+    border: 1px solid var(--background);
+    border-radius: 999px;
+    background: var(--primary);
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-handle.left {
+    left: -1px;
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-handle.right {
+    left: calc(100% + 1px);
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-handle.top {
+    top: -1px;
+  }
+  .canvas-flow .react-flow__resize-control.canvas-node-resize-handle.bottom {
+    top: calc(100% + 1px);
+  }
+  .canvas-flow .react-flow__edge-path {
+    stroke-width: 1.5 !important;
+  }
+  .canvas-flow .canvas-provenance-edge .react-flow__edge-path {
+    stroke-dasharray: 5 5;
+  }
+  .canvas-flow .react-flow__edge.canvas-active-edge .react-flow__edge-path {
+    stroke: color-mix(in srgb, var(--primary) 72%, var(--border)) !important;
+    stroke-width: 2 !important;
+  }
+  .canvas-flow .react-flow__edge.selected .react-flow__edge-path {
+    stroke: var(--primary) !important;
+    stroke-width: 2 !important;
+  }
+  .canvas-flow .react-flow__connection-path {
+    stroke-dasharray: 5 5;
+  }
+  @keyframes canvasGenerationSpin {
+    to { transform: rotate(360deg); }
+  }
+  @keyframes canvasGenerationBreathe {
+    50% { opacity: 0.28; transform: scale(0.72); }
+  }
+  .canvas-generation-indicator {
+    position: relative;
+    display: grid;
+    place-items: center;
+    border: 1px solid color-mix(in srgb, var(--status-running) 48%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--status-running) 8%, transparent);
+  }
+  .canvas-generation-indicator::before {
+    position: absolute;
+    inset: 0.3rem;
+    border-radius: inherit;
+    background: color-mix(in srgb, var(--status-running) 18%, transparent);
+    content: '';
+    animation: canvasGenerationBreathe 1.4s ease-in-out infinite;
+  }
+  .canvas-generation-indicator svg {
+    position: relative;
+    animation: canvasGenerationSpin 900ms linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .canvas-generation-indicator::before,
+    .canvas-generation-indicator svg {
+      animation: none;
+    }
+  }
+
+  @media (min-width: 40rem) {
+    .canvas-editor-top {
+      padding-top: max(0.75rem, env(safe-area-inset-top));
+      padding-right: max(0.75rem, env(safe-area-inset-right));
+      padding-left: max(0.75rem, env(safe-area-inset-left));
+    }
+  }
+  @media (min-width: 48rem) {
+    .canvas-editor-top {
+      padding-top: max(1rem, env(safe-area-inset-top));
+      padding-right: max(1rem, env(safe-area-inset-right));
+      padding-left: max(1rem, env(safe-area-inset-left));
+    }
+    .canvas-tool-dock {
+      right: auto;
+      bottom: auto;
+      left: max(1rem, env(safe-area-inset-left));
+      top: calc(50% - 4rem);
+      overscroll-behavior: contain;
+      scrollbar-color: var(--muted-foreground) transparent;
+      scrollbar-width: thin;
+      transform: translateY(-50%);
+    }
+    .canvas-tool-dock::-webkit-scrollbar {
+      width: 4px;
+    }
+    .canvas-tool-dock::-webkit-scrollbar-thumb {
+      border-radius: 999px;
+      background: var(--muted-foreground);
+    }
+    .canvas-add-menu {
+      bottom: auto;
+      left: calc(max(1rem, env(safe-area-inset-left)) + 3.75rem);
+      top: calc(50% - 4rem);
+      transform: translateY(-50%);
+    }
+    .canvas-flow .react-flow__minimap.canvas-minimap {
+      left: max(15px, env(safe-area-inset-left)) !important;
+    }
+    .canvas-library-panel {
+      right: max(1rem, env(safe-area-inset-right));
+      left: auto;
+      bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 3.375rem);
+    }
+  }
+  @media (min-width: 48rem) and (max-width: 63.999rem) {
+    .canvas-library-panel {
+      bottom: calc(max(0.75rem, env(safe-area-inset-bottom)) + 8.125rem);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .canvas-flow .react-flow__handle.canvas-node-handle,
+    .canvas-flow .canvas-node-handle-dot {
+      transition: none;
+    }
+  }
 }
 
 @layer base {
@@ -308,4 +578,7 @@
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--secondary); border-radius: 999px; border: 2px solid var(--background); }
   ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
+}
+.canvas-editor-region {
+  overscroll-behavior: none;
 }
