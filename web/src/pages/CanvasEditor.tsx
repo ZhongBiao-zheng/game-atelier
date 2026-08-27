@@ -339,6 +339,13 @@ const CANVAS_MOUSE_PAN_BUTTONS: number[] = [1];
 // 事件、deltaMode 也都是 0，运行时区分不了，所以只能按平台近似（macOS 触控板优先，其余鼠标
 // 优先）。捏合缩放走 zoomOnPinch，两个平台都保留。
 const CANVAS_WHEEL_ZOOMS = !/Mac/i.test(navigator.userAgent);
+// 删除节点的按键也得按平台分。macOS 键盘上那个「delete」键发出来的是 Backspace（物理上没有
+// 独立的 Delete 键），所以 mac 必须收 Backspace；Windows / Linux 有独立 Delete 键，而 Backspace
+// 在那边就是纯粹的「退格」—— 画师在文本节点里打错字按退格，整个节点直接没了（2026-08-27 实测
+// 反馈，节点连内容一起消失）。所以 mac 收两个键，其余平台只收 Delete。
+const CANVAS_DELETE_KEYS: readonly string[] = /Mac/i.test(navigator.userAgent)
+  ? ['Delete', 'Backspace']
+  : ['Delete'];
 const CANVAS_NODE_CLIPBOARD_TYPE = 'application/x-game-atelier-canvas-nodes';
 const CANVAS_MIN_ZOOM = 0.08;
 const CANVAS_MAX_ZOOM = 2.5;
@@ -1417,8 +1424,10 @@ function CanvasEditorInner({
 
   useEffect(() => {
     function handleDelete(event: KeyboardEvent) {
-      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      if (!CANVAS_DELETE_KEYS.includes(event.key)) return;
+      // 事件 target 与当前焦点都要看：正在文本框里打字时，这个破坏性快捷键一律不生效。
       if (isCanvasShortcutBlockedTarget(event.target)) return;
+      if (isCanvasShortcutBlockedTarget(window.document.activeElement)) return;
       if (selectedNodeIds.size === 0 && selectedConnectionIds.size === 0) return;
       event.preventDefault();
       deleteSelection();
@@ -4061,7 +4070,7 @@ const CANVAS_SHORTCUTS = [
   { keys: ['⌘ / Ctrl', 'Z'], label: '撤销' },
   { keys: ['⌘ / Ctrl', 'Shift', 'Z'], label: '重做' },
   { keys: ['⌘ / Ctrl', 'Y'], label: '重做' },
-  { keys: ['Delete / Backspace'], label: '删除选中节点或连接' },
+  { keys: [CANVAS_DELETE_KEYS.join(' / ')], label: '删除选中节点或连接' },
   { keys: ['Esc'], label: '关闭浮层或清空选择' },
   { keys: ['粘贴文本 / 图片'], label: '从系统剪贴板创建节点' },
   { keys: ['拖入图片 / 视频 / 音频'], label: '上传到画布' },

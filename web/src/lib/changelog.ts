@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.5',
+    date: '2026-08-27',
+    headline: 'Windows 上退格键不再删节点；生成面板不再压住节点',
+    changes: [
+      { kind: 'fix', text: 'Windows / Linux 上删除节点只认 Delete 键，退格键不再删节点 —— 以前在文本节点里打错字按一下退格，整个节点连内容一起消失（macOS 的 delete 键发的就是退格，那边两个键都还能用）' },
+      { kind: 'fix', text: '生成面板实在没地方放时会压窄自己摆到节点侧面，不再压住节点 —— 面板盖住节点时，双击节点进编辑状态的落点其实是面板，打字进不去文本框：按字母不启动中文输入法、按退格删掉整个节点' },
+    ],
+  },
+  {
     version: '5.31.4',
     date: '2026-08-27',
     headline: '编辑文本时切走不再被弹出编辑态，生成面板少压节点',
