@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -162,6 +162,27 @@ async def lifespan(app: FastAPI):
         observer.join(timeout=2)
 
 
+# 发布产物用固定文件名（去哈希，见 web/vite.config.ts），所以必须显式要求浏览器每次验证。
+# 缺了 Cache-Control 时浏览器按 RFC 9111 的启发式新鲜期缓存，约 (now - last-modified) 的 10%：
+# dist 构建于一周前 → 约 17 小时内一个请求都不发，画师 git pull 完打开还是旧 UI（2026-08-27
+# Windows 实测：更新到 5.31.1 后顶栏仍显示 5.30.3、没有画布，只有 Ctrl+F5 能穿透）。
+# no-cache 不是禁用缓存，是「用之前必须条件请求」；etag 命中照样回 304，本机往返可忽略。
+_STATIC_CACHE_CONTROL = "no-cache"
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    """固定文件名的发布产物：可以缓存，但每次使用前必须回服务端验证。"""
+
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = _STATIC_CACHE_CONTROL
+        return response
+
+
+def _revalidated_file(path: Path) -> FileResponse:
+    return FileResponse(path, headers={"Cache-Control": _STATIC_CACHE_CONTROL})
+
+
 def build_app(dist_dir: Path | None = None) -> FastAPI:
     _install_secret_filter()
     app = FastAPI(title="Game Atelier viewer-server", lifespan=lifespan)
@@ -175,7 +196,7 @@ def build_app(dist_dir: Path | None = None) -> FastAPI:
     if dist_dir.exists():
         assets_dir = dist_dir / "assets"
         if assets_dir.exists():
-            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+            app.mount("/assets", RevalidatedStaticFiles(directory=assets_dir), name="assets")
 
         @app.get("/{path:path}")
         async def spa_fallback(path: str):
@@ -187,10 +208,10 @@ def build_app(dist_dir: Path | None = None) -> FastAPI:
             try:
                 file.resolve().relative_to(dist_dir.resolve())
             except ValueError:
-                return FileResponse(dist_dir / "index.html")
+                return _revalidated_file(dist_dir / "index.html")
             if path and file.is_file():
-                return FileResponse(file)
-            return FileResponse(dist_dir / "index.html")
+                return _revalidated_file(file)
+            return _revalidated_file(dist_dir / "index.html")
     else:
         # 前端未构建：给出可读提示页，而不是裸 404（用户开窗只会看到一行报错）。
         @app.get("/{path:path}")

@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.2',
+    date: '2026-08-27',
+    headline: '更新完打开就是新版；画布能用鼠标平移了',
+    changes: [
+      { kind: 'fix', text: '更新后打开工坊直接是新版本 —— 以前浏览器会拿几小时前的缓存，表现成「更新了但顶栏版本没变、新功能也没有」，只有手动 Ctrl+F5 才能穿透' },
+      { kind: 'fix', text: '画布可以按住鼠标中键拖动平移（在空白处也有效），滚轮改为缩放画面 —— 以前只认触控板双指和 Space / Ctrl + 拖动，用鼠标的人在空白处按中键完全没反应' },
+    ],
+  },
+  {
     version: '5.31.1',
     date: '2026-08-27',
     headline: '画布的生成面板跟着节点走，也不再压住选中的节点',
