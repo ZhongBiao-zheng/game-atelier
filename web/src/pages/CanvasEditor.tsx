@@ -441,6 +441,14 @@ function CanvasEditorInner({
     zoomOut,
     zoomTo,
   } = useReactFlow<FlowNode>();
+  const closeLibrary = useCallback(() => {
+    const trigger = libraryMode === 'prompts'
+      ? promptLibraryTriggerRef.current
+      : assetLibraryTriggerRef.current;
+    setLibraryMode(null);
+    requestAnimationFrame(() => trigger?.focus());
+  }, [libraryMode]);
+
   const acceptAssets = useCallback((value: RevisionedSidecar<CanvasLibraryAsset>) => {
     setAssets(current => !current || value.revision >= current.revision ? value : current);
   }, []);
@@ -803,7 +811,7 @@ function CanvasEditorInner({
     }
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [addOpen, createMenu, libraryMode, materialPick, selectedConnectionIds.size, selectedNodeIds.size]);
+  }, [addOpen, closeLibrary, createMenu, libraryMode, materialPick, selectedConnectionIds.size, selectedNodeIds.size]);
 
   useEffect(() => {
     if (!addOpen) return;
@@ -900,6 +908,7 @@ function CanvasEditorInner({
   // 撤销栈是个 ref（快照数组要在同一次事件里被连续读写，做不成 state），但撤销 / 重做按钮的禁用态
   // 得跟着它变。所以这条 effect 故意不写依赖数组：历史在 9 处被就地修改，每一处都伴随一次
   // setDocument，也就是每一次修改后都会跑到这里。两次长度读取 + 相等就 bail，代价是常数级。
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 规则担心的更新链由上面的相等 bail 掐断
   useEffect(() => {
     setHistoryDepth(current => {
       const past = history.current.past.length;
@@ -1389,15 +1398,7 @@ function CanvasEditorInner({
     return screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
   }
 
-  function closeLibrary() {
-    const trigger = libraryMode === 'prompts'
-      ? promptLibraryTriggerRef.current
-      : assetLibraryTriggerRef.current;
-    setLibraryMode(null);
-    requestAnimationFrame(() => trigger?.focus());
-  }
-
-  async function mutateLibrary(action: () => Promise<void>) {
+  const mutateLibrary = useCallback(async (action: () => Promise<void>) => {
     if (libraryMutationInFlight.current) {
       const concurrentError = new Error('另一项创作库操作正在处理，请稍后再试。');
       setLibraryError(concurrentError.message);
@@ -1415,9 +1416,9 @@ function CanvasEditorInner({
       libraryMutationInFlight.current = false;
       setLibraryBusy(false);
     }
-  }
+  }, []);
 
-  async function saveNodeToLibrary(node: CanvasContentNode) {
+  const saveNodeToLibrary = useCallback(async (node: CanvasContentNode) => {
     const versionId = node.data.current_version_id;
     if (!versionId) {
       setError('这个节点还没有可保存的内容。');
@@ -1443,7 +1444,7 @@ function CanvasEditorInner({
     } catch {
       // 错误已显示在创作库面板。
     }
-  }
+  }, [acceptAssets, assets, mutateLibrary, persistNow, projectId]);
 
   async function insertLibraryItem(
     kind: 'asset' | 'prompt',
@@ -1972,7 +1973,13 @@ function CanvasEditorInner({
         return next;
       });
     }
-  }, [flushSave, mergeSubmittedRunDocument, persistNow, projectId]);
+  }, [
+    applyLocalJob,
+    flushSave,
+    mergeSubmittedRunDocument,
+    persistNow,
+    projectId,
+  ]);
 
   const reversePrompt = useCallback(async (node: CanvasContentNode) => {
     if (node.type !== 'image' || !node.data.current_version_id) {
@@ -2009,7 +2016,13 @@ function CanvasEditorInner({
         return next;
       });
     }
-  }, [flushSave, mergeSubmittedRunDocument, persistNow, projectId]);
+  }, [
+    applyLocalJob,
+    flushSave,
+    mergeSubmittedRunDocument,
+    persistNow,
+    projectId,
+  ]);
 
   const retryRun = useCallback(async (nodeId: string, runId: string) => {
     if (runSubmissionInFlight.current) {
@@ -2038,7 +2051,13 @@ function CanvasEditorInner({
         return next;
       });
     }
-  }, [flushSave, mergeSubmittedRunDocument, persistNow, projectId]);
+  }, [
+    applyLocalJob,
+    flushSave,
+    mergeSubmittedRunDocument,
+    persistNow,
+    projectId,
+  ]);
 
   const cancelRun = useCallback(async (runId: string) => {
     setError(null);
@@ -2048,7 +2067,7 @@ function CanvasEditorInner({
     } catch (cancelError) {
       setError((cancelError as Error).message);
     }
-  }, [projectId]);
+  }, [applyLocalJob, projectId]);
 
   const dismissCandidate = useCallback(async (runId: string, candidateId: string) => {
     setError(null);
@@ -2066,7 +2085,7 @@ function CanvasEditorInner({
       if (latestDocument.current?.project_id !== projectId) return;
       setError((dismissError as Error).message);
     }
-  }, [persistNow, projectId]);
+  }, [applyLocalJob, persistNow, projectId]);
 
   const recordHistorySnapshot = useCallback(() => {
     const snapshot = latestDocument.current;
@@ -2722,7 +2741,14 @@ function CanvasEditorInner({
       });
       if (saveQueued.current) void flushSave().catch(() => undefined);
     }
-  }, [announceToolNotice, flushSave, maskEdit, mergeSubmittedRunDocument, projectId]);
+  }, [
+    announceToolNotice,
+    applyLocalJob,
+    flushSave,
+    maskEdit,
+    mergeSubmittedRunDocument,
+    projectId,
+  ]);
 
   const openAngle = useCallback((node: CanvasContentNode) => {
     const versionId = node.data.current_version_id;
@@ -2871,7 +2897,15 @@ function CanvasEditorInner({
       });
       if (saveQueued.current) void flushSave().catch(() => undefined);
     }
-  }, [angleState, announceToolNotice, flushSave, mergeSubmittedRunDocument, persistNow, projectId]);
+  }, [
+    angleState,
+    announceToolNotice,
+    applyLocalJob,
+    flushSave,
+    mergeSubmittedRunDocument,
+    persistNow,
+    projectId,
+  ]);
 
   const submitMediaOperation = useCallback(async (operation: CanvasMediaOperation) => {
     if (!mediaOperation || mediaOperationInFlight.current) return;
@@ -3011,6 +3045,10 @@ function CanvasEditorInner({
     }
   }, [canvasUiPreferences.image_toolbar, persistCanvasUiPreferences]);
 
+  // 下面四张按节点索引的图都从 ref 读文档、用图签名做失效判据，而不是直接依赖 document：
+  // 拖动每一帧、提示词每一次按键都会换掉 document 的引用，但只要「节点 id / 标题 / 当前版本 /
+  // draft.mode + input 连线」这四样没变，这几张图就没有必要重算。exhaustive-deps 看不出这层
+  // 关系，只会报「依赖里有没用到的 mentionGraphSignature」—— 那正是它存在的理由。
   const mentionGraphSignature = canvasMentionGraphSignature(document);
   const mentionDocumentRef = useRef(document);
   mentionDocumentRef.current = document;
@@ -3027,12 +3065,14 @@ function CanvasEditorInner({
         current.content_versions,
       ),
     ]));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
   }, [mentionGraphSignature, projectId]);
   const materialReferences = useMemo(() => {
     const current = mentionDocumentRef.current;
     return current
       ? buildCanvasMaterialReferences(projectId, current.nodes, current.content_versions)
       : [];
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
   }, [mentionGraphSignature, projectId]);
   const connectedMaterialNodeIdsByNodeId = useMemo(() => {
     const current = mentionDocumentRef.current;
@@ -3044,10 +3084,11 @@ function CanvasEditorInner({
       result.set(connection.target_node_id, sources);
     }
     return result;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
   }, [mentionGraphSignature]);
   const pendingInputNodesByNodeId = useMemo(
     () => canvasPendingInputNodes(mentionDocumentRef.current),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 与同组的两张图共用图签名做失效判据
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
     [mentionGraphSignature],
   );
   const videoFrameNodeIdsByNodeId = useMemo(() => {
@@ -3060,6 +3101,7 @@ function CanvasEditorInner({
       result.set(connection.target_node_id, frames);
     }
     return result;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
   }, [mentionGraphSignature]);
 
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
@@ -3120,7 +3162,7 @@ function CanvasEditorInner({
     saveImageToolbarPreferences: persistImageToolbarPreferences,
     deleteNode,
   }), [
-    assets?.revision,
+    // assets 的失效经由 saveNodeToLibrary 传导（它依赖 assets），不再单列 assets?.revision。
     beginMaterialPick,
     cancelRun,
     canvasUiPreferences,
@@ -3159,6 +3201,7 @@ function CanvasEditorInner({
     reversePromptConfiguredNodeIds,
     retryRun,
     renameNode,
+    saveNodeToLibrary,
     selectedNodeIds.size,
     selectCandidate,
     selectOnlyNode,

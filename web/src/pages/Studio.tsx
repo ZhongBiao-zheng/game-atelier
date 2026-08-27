@@ -166,7 +166,7 @@ function StudioFull() {
       setVideoResolution(caps.resolutions[0]);
     }
     if (caps.qualities && !caps.qualities.includes(videoQuality)) setVideoQuality(caps.qualities[0]);
-  }, [kind, model, videoMode, videoRatio, duration, videoResolution, videoQuality]);
+  }, [kind, keys, providerAlias, model, videoMode, videoRatio, duration, videoResolution, videoQuality]);
   // manual 由 PromptInput 给：只有亲手改宽高输入框才是 true，切比例/档位/模型的
   // 自动重算是 false。存进 saveSelection 后，下次恢复不必再靠比对数值去猜意图。
   const handleCustomSizeChange = useCallback((w: number, h: number, manual?: boolean) => {
@@ -338,6 +338,9 @@ function StudioFull() {
     return () => {
       cancelled = true;
     };
+    // saved 是首帧读到的存档快照，这条 effect 只在挂载时跑一次。把 saved.* 列进依赖会让它在
+    // 用户改动写回存档后重跑，用旧值覆盖刚做的选择 —— 恢复必须是一次性的。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 持久化供应商/模型/尺寸/张数等全部选择，切页面再回来时恢复。providerAlias 为空说明 keys 还没加载完，先不写。

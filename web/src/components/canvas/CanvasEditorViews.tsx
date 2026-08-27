@@ -12,7 +12,8 @@ import {
 } from '@xyflow/react';
 import { ArrowLeftRight, Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
-  createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState,
+  createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef,
+  useState,
   type ReactNode, type Ref, type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -1587,12 +1588,21 @@ export function CanvasGenerationComposer({
   const imageCaps = draft.mode === 'image' && selectedModel
     ? imageControlCaps(draft.model, selectedKey?.provider, selectedModel?.protocol)
     : null;
-  const rawVideoCaps = draft.mode === 'video' && selectedModel
-    ? canvasVideoEditCaps(draft.model, selectedModel?.protocol)
-    : null;
-  const videoCaps = rawVideoCaps && editingExistingVideo
-    ? { ...rawVideoCaps, modes: rawVideoCaps.modes.filter(mode => mode === 'omni') }
-    : rawVideoCaps;
+  // 两层都要 memo：canvasVideoEditCaps 每次调用都返回新对象，展开一层又造一个新对象。
+  // 下面那条纠偏 effect 依赖 videoCaps，不 memo 的话它每一次 render 都重跑，而它会 commit
+  // 首尾帧连接。selectedModel 取自 context.keys 里的元素，引用本身是稳的。
+  const rawVideoCaps = useMemo(
+    () => draft.mode === 'video' && selectedModel
+      ? canvasVideoEditCaps(draft.model, selectedModel.protocol)
+      : null,
+    [draft.mode, draft.model, selectedModel],
+  );
+  const videoCaps = useMemo(
+    () => rawVideoCaps && editingExistingVideo
+      ? { ...rawVideoCaps, modes: rawVideoCaps.modes.filter(mode => mode === 'omni') }
+      : rawVideoCaps,
+    [editingExistingVideo, rawVideoCaps],
+  );
   const videoMode = videoCaps?.modes.includes('omni')
     && (editingExistingVideo || draft.params.frame_mode === 'auto')
     ? 'omni'
