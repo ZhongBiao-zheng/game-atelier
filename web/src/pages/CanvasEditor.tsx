@@ -84,7 +84,7 @@ import {
 } from '@/api/canvas';
 import { getCanvasUiPreferences, saveCanvasUiPreferences } from '@/api/canvasUi';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
-import { useSSE } from '@/hooks/useSSE';
+import { useCanvasJobSync } from '@/hooks/useCanvasJobSync';
 import {
   AddMenuButton,
   CanvasMobileGenerationPanel,
@@ -183,8 +183,6 @@ import {
   canvasNodeRenderZIndex,
   canCreateCanvasInputConnection,
   clampCanvasNodeSize,
-  acceptCanvasJobs,
-  upsertCanvasJob,
   canvasPendingInputNodes,
   closestCanvasConnectionEndpoint,
   createCanvasGenerationDraft,
@@ -364,10 +362,6 @@ function CanvasEditorInner({
   const [document, setDocument] = useState<CanvasDocument | null>(null);
   const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
-  const [jobs, setJobsState] = useState<Job[]>([]);
-  // 每一次本地乐观写入都推进 epoch。轮询在发请求前拍下 epoch，响应落地时若 epoch 变了，
-  // 说明这份列表已经落后于本地，只能并进去，不能整体赋值。见 acceptCanvasJobs。
-  const jobsEpoch = useRef(0);
   const [assets, setAssets] = useState<RevisionedSidecar<CanvasLibraryAsset> | null>(null);
   const [prompts, setPrompts] = useState<RevisionedSidecar<CanvasPrompt> | null>(null);
   const [canvasUiPreferences, setCanvasUiPreferences] = useState<CanvasUiPreferences>(DEFAULT_CANVAS_UI_PREFERENCES);
@@ -457,8 +451,6 @@ function CanvasEditorInner({
   const toolNoticeTimer = useRef<number | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
-  const syncedTerminalRuns = useRef(new Set<string>());
-  const syncedCandidateVersionIds = useRef(new Set<string>());
   const reversePromptConfigAttempts = useRef(new Set<string>());
   // 只有本会话提交过的反推 run 才会自动生成图片配置节点。原来的判据是「这个结果节点上还没挂配置」，
   // 于是删掉配置节点后刷新，甚至只是第一次打开一个有历史反推记录的项目，节点都会自己长回来。
@@ -503,6 +495,76 @@ function CanvasEditorInner({
   const acceptPrompts = useCallback((value: RevisionedSidecar<CanvasPrompt>) => {
     setPrompts(current => !current || value.revision >= current.revision ? value : current);
   }, []);
+
+  const mergeRunDocument = useCallback((
+    remote: CanvasDocument,
+    runIds: ReadonlySet<string>,
+  ) => {
+    serverRevision.current = Math.max(serverRevision.current, remote.revision);
+    setDocument(current => {
+      if (!current || remote.revision <= current.revision) return current;
+      const remoteNodes = new Map(remote.nodes.map(node => [node.id, node]));
+      const currentNodeIds = new Set(current.nodes.map(node => node.id));
+      const serverAddedNodeIds = new Set(remote.connections.flatMap(connection => (
+        connection.role === 'derivation'
+        && connection.origin.kind === 'generation_run'
+        && runIds.has(connection.origin.run_id)
+        && !currentNodeIds.has(connection.target_node_id)
+          ? [connection.target_node_id]
+          : []
+      )));
+      const serverAddedNodes = remote.nodes.filter(node => serverAddedNodeIds.has(node.id));
+      const nodes = [...current.nodes.map(node => {
+        const serverNode = remoteNodes.get(node.id);
+        if (!serverNode || !isContentNode(node) || !isContentNode(serverNode)) return node;
+        if (!node.data.active_run_id || node.data.active_run_id !== serverNode.data.active_run_id) return node;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            current_version_id: serverNode.data.current_version_id,
+          },
+        } as CanvasContentNode;
+      }), ...serverAddedNodes];
+      const nodeIds = new Set(nodes.map(node => node.id));
+      const connectionIds = new Set(current.connections.map(connection => connection.id));
+      const serverRunConnections = remote.connections.filter(connection => (
+        !connectionIds.has(connection.id)
+        && nodeIds.has(connection.source_node_id)
+        && nodeIds.has(connection.target_node_id)
+        && (
+          (
+            connection.role === 'derivation'
+            && connection.origin.kind === 'generation_run'
+            && runIds.has(connection.origin.run_id)
+          )
+          || serverAddedNodeIds.has(connection.target_node_id)
+        )
+      ));
+      const merged: CanvasDocument = {
+        ...current,
+        revision: remote.revision,
+        updated_at: remote.updated_at,
+        nodes,
+        connections: [...current.connections, ...serverRunConnections],
+        content_versions: acceptServerContentVersions(
+          current.content_versions,
+          remote.content_versions,
+        ),
+      };
+      if (saveQueued.current) saveQueued.current = merged;
+      return merged;
+    });
+  }, []);
+
+  // 出图记录的同步整体在 useCanvasJobSync 里：epoch 记账、兜底轮询、SSE 订阅都归它，
+  // 这里只把「结果并回文档」这一半交出去。必须声明在下面那个切项目的 effect 之前——
+  // 那个 effect 的依赖数组要引用 acceptJobs / resetJobSync。
+  const { jobs, acceptJobs, applyLocalJob, reset: resetJobSync } = useCanvasJobSync({
+    projectId,
+    mergeRunDocument,
+    onError: setError,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -566,8 +628,7 @@ function CanvasEditorInner({
     cancelViewportCommand.current = null;
     pendingViewportCommand.current = null;
     pendingTextVersions.current.clear();
-    syncedTerminalRuns.current.clear();
-    syncedCandidateVersionIds.current.clear();
+    resetJobSync();
     reversePromptConfigAttempts.current.clear();
     reversePromptConfigEligibleRuns.current.clear();
     dirtyVersion.current = 0;
@@ -608,7 +669,7 @@ function CanvasEditorInner({
         setKeys([...keyRows.keys].sort((left, right) => (
           Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
         )));
-        setJobsState(current => acceptCanvasJobs(current, canvasJobs));
+        acceptJobs(canvasJobs);
       })
       .catch(loadError => {
         if (!cancelled) setError((loadError as Error).message);
@@ -622,7 +683,7 @@ function CanvasEditorInner({
       if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
       if (resizePreviewFrame.current !== null) window.cancelAnimationFrame(resizePreviewFrame.current);
     };
-  }, [projectId]);
+  }, [acceptJobs, projectId, resetJobSync]);
 
   useEffect(() => {
     if (!libraryMode) return;
@@ -644,66 +705,6 @@ function CanvasEditorInner({
     };
   }, [acceptAssets, acceptPrompts, assets, libraryMode, projectId, prompts]);
 
-  const mergeRunDocument = useCallback((
-    remote: CanvasDocument,
-    runIds: ReadonlySet<string>,
-  ) => {
-    serverRevision.current = Math.max(serverRevision.current, remote.revision);
-    setDocument(current => {
-      if (!current || remote.revision <= current.revision) return current;
-      const remoteNodes = new Map(remote.nodes.map(node => [node.id, node]));
-      const currentNodeIds = new Set(current.nodes.map(node => node.id));
-      const serverAddedNodeIds = new Set(remote.connections.flatMap(connection => (
-        connection.role === 'derivation'
-        && connection.origin.kind === 'generation_run'
-        && runIds.has(connection.origin.run_id)
-        && !currentNodeIds.has(connection.target_node_id)
-          ? [connection.target_node_id]
-          : []
-      )));
-      const serverAddedNodes = remote.nodes.filter(node => serverAddedNodeIds.has(node.id));
-      const nodes = [...current.nodes.map(node => {
-        const serverNode = remoteNodes.get(node.id);
-        if (!serverNode || !isContentNode(node) || !isContentNode(serverNode)) return node;
-        if (!node.data.active_run_id || node.data.active_run_id !== serverNode.data.active_run_id) return node;
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            current_version_id: serverNode.data.current_version_id,
-          },
-        } as CanvasContentNode;
-      }), ...serverAddedNodes];
-      const nodeIds = new Set(nodes.map(node => node.id));
-      const connectionIds = new Set(current.connections.map(connection => connection.id));
-      const serverRunConnections = remote.connections.filter(connection => (
-        !connectionIds.has(connection.id)
-        && nodeIds.has(connection.source_node_id)
-        && nodeIds.has(connection.target_node_id)
-        && (
-          (
-            connection.role === 'derivation'
-            && connection.origin.kind === 'generation_run'
-            && runIds.has(connection.origin.run_id)
-          )
-          || serverAddedNodeIds.has(connection.target_node_id)
-        )
-      ));
-      const merged: CanvasDocument = {
-        ...current,
-        revision: remote.revision,
-        updated_at: remote.updated_at,
-        nodes,
-        connections: [...current.connections, ...serverRunConnections],
-        content_versions: acceptServerContentVersions(
-          current.content_versions,
-          remote.content_versions,
-        ),
-      };
-      if (saveQueued.current) saveQueued.current = merged;
-      return merged;
-    });
-  }, []);
 
   const mergeSubmittedRunDocument = useCallback((
     remote: CanvasDocument,
@@ -760,124 +761,6 @@ function CanvasEditorInner({
     }
     setDocument(merged);
   }, []);
-
-  const applyLocalJob = useCallback((job: Job) => {
-    jobsEpoch.current += 1;
-    setJobsState(current => upsertCanvasJob(current, job));
-  }, []);
-
-  const hasRunningJobs = jobs.some(job => (
-    job.namespace === 'canvas'
-    && (job.status === 'pending' || job.status === 'pending_confirm')
-  ));
-
-  // 出图完成的通知走 SSE，轮询退成兜底。
-  //
-  // 画布 job 和角色 / Studio 的 job 在同一个 .runtime/jobs 目录下，watcher 早就在广播
-  // job-changed 了，画布只是一直没订阅：以前最坏要等 1.2 秒才看见出图完成。
-  // 轮询不能砍（#18 的教训，见 Studio 里那段注释）：系统代理的 TUN / 全局模式会把
-  // 127.0.0.1 的流式响应整条缓冲，心跳也被憋住，浏览器永不 onerror、永不重连，SSE 成为
-  // 唯一命脉时就是卡住不动。所以保留 pending 期间的定时全量拉取，只把间隔从 1.2s 放到 4s，
-  // 与 Studio 一致。
-  const requestJobSync = useRef<() => void>(() => undefined);
-
-  useEffect(() => {
-    if (!hasRunningJobs) {
-      requestJobSync.current = () => undefined;
-      return;
-    }
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const epoch = jobsEpoch.current;
-        const canvasJobs = await listCanvasJobs(projectId);
-        if (cancelled) return;
-        const completedRuns = canvasJobs.filter(job => (
-          job.canvas_run
-          && job.status !== 'pending'
-          && job.status !== 'pending_confirm'
-          && !syncedTerminalRuns.current.has(job.canvas_run.run_id)
-        ));
-        const jobsWithNewCandidateVersions = canvasJobs.filter(job => (
-          job.canvas_run?.candidates.some(candidate => (
-            candidate.status === 'succeeded'
-            && candidate.version_id
-            && !syncedCandidateVersionIds.current.has(candidate.version_id)
-          ))
-        ));
-        const newCandidateVersionIds = jobsWithNewCandidateVersions.flatMap(job => (
-          job.canvas_run?.candidates.flatMap(candidate => (
-            candidate.status === 'succeeded'
-            && candidate.version_id
-            && !syncedCandidateVersionIds.current.has(candidate.version_id)
-              ? [candidate.version_id]
-              : []
-          )) ?? []
-        ));
-        const runIdsToSync = new Set([
-          ...completedRuns.map(job => job.canvas_run!.run_id),
-          ...jobsWithNewCandidateVersions.map(job => job.canvas_run!.run_id),
-        ]);
-        if (completedRuns.length || newCandidateVersionIds.length) {
-          const remote = await getCanvasDocument(projectId);
-          if (cancelled) return;
-          mergeRunDocument(remote, runIdsToSync);
-          for (const job of completedRuns) syncedTerminalRuns.current.add(job.canvas_run!.run_id);
-          for (const versionId of newCandidateVersionIds) syncedCandidateVersionIds.current.add(versionId);
-        }
-        setJobsState(current => (
-          jobsEpoch.current === epoch ? canvasJobs : acceptCanvasJobs(current, canvasJobs)
-        ));
-      } catch (pollError) {
-        if (!cancelled) setError((pollError as Error).message);
-      }
-    };
-    // SSE 会成串地推（每写一个候选就是一次），这里合并：在跑就记一笔，跑完再补一次。
-    let inFlight = false;
-    let queued = false;
-    const sync = async () => {
-      if (inFlight) {
-        queued = true;
-        return;
-      }
-      inFlight = true;
-      try {
-        await poll();
-      } finally {
-        inFlight = false;
-        if (queued && !cancelled) {
-          queued = false;
-          void sync();
-        }
-      }
-    };
-    requestJobSync.current = () => void sync();
-    const timer = window.setInterval(() => void sync(), 4000);
-    void sync();
-    return () => {
-      cancelled = true;
-      requestJobSync.current = () => undefined;
-      window.clearInterval(timer);
-    };
-  }, [hasRunningJobs, mergeRunDocument, projectId]);
-
-  const canvasJobIds = useMemo(
-    () => new Set(jobs.filter(job => job.namespace === 'canvas').map(job => job.job_id)),
-    [jobs],
-  );
-
-  // useSSE 每次 render 都把回调换到 ref 上，所以这里直接闭包捕获就是最新的一份。
-  useSSE({
-    // 只在有 job 在跑时建连：画布之外没有别的东西会改这个项目的 job，闲着时这条连接没有用处。
-    enabled: hasRunningJobs,
-    onJobChanged: data => {
-      // job-changed 是全局广播，角色出图和 Studio 出图也会进来。认得的才拉。
-      if (data.job_id && !canvasJobIds.has(data.job_id)) return;
-      requestJobSync.current();
-    },
-    // 重连后全量补一次：断连期间 / 队列满丢掉的事件靠这一下补齐。
-    onConnect: () => requestJobSync.current(),
-  });
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {

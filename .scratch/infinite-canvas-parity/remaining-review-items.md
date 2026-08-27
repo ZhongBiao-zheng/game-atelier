@@ -1,7 +1,8 @@
 # 画布审查 · 剩余待修清单
 
-来源：2026-08-26 无限画布验收账（31 条）。P0 4 条 + 前五条已修完并合入工作区改动。
-本文件只列**尚未修**的 20 条，按「先修什么」排序。每条已用 grep 复核过当前代码状态。
+来源：2026-08-26 无限画布验收账（31 条）。**31 条已全部处理完**（2026-08-27）。
+原文件只列当时尚未修的 20 条，按「先修什么」排序；现在保留作为逐条的处理记录，
+每条的「现状复核」写的是实际改法与实测依据，不是计划。位置列已随代码更新。
 
 ## A 组 · 会真丢东西 / 功能是死的 —— ✅ 全部已修（2026-08-27，未提交）
 
@@ -10,7 +11,7 @@
 | A1 | 节点拖大过 4000px 后自动保存永久 422，界面却报「保存冲突，内容已保留」 | `CanvasEditor.tsx:954` `completeNodeResize` | high | ✅ 已修：`clampCanvasNodeSize` + NodeResizer `maxWidth/maxHeight`；保存失败文案改成「保存失败 · 重试」并显示服务端 detail |
 | A2 | 配置节点的视频首尾帧整条链路是死的：UI 按 `draft.mode` 渲染，handler 按 `node.type` 拒绝 | `CanvasEditor.tsx` 首尾帧 handler | high | ✅ 已修：handler 改用 `generationDraftForNode(target)?.mode`，与渲染侧同一判据；浏览器实测首帧连线落盘 |
 | A3 | 画布平移缩放进撤销栈，Ctrl+Z 撤的是镜头，还会把内容编辑挤出 50 条上限 | `CanvasEditor.tsx:2054` `commitViewportDocument` | high | ✅ 已修：视口不再进历史，撤销也不再还原镜头；撤销/重做禁用态改读 state |
-| A4 | 轮询用整体赋值写 jobs，覆盖刚提交的 job，最坏把轮询自己停掉 | `CanvasEditor.tsx:741` | medium | ✅ 已修：轮询发请求前拍 epoch，响应落地时 epoch 变了就走 `acceptCanvasJobs` 并入 |
+| A4 | 轮询用整体赋值写 jobs，覆盖刚提交的 job，最坏把轮询自己停掉 | `hooks/useCanvasJobSync.ts`（D2 之后搬到这里） | medium | ✅ 已修：轮询发请求前拍 epoch，响应落地时 epoch 变了就走 `acceptCanvasJobs` 并入 |
 | A5 | 空节点可以先连线，服务端在 `all_connected` 下整单拒绝，报错不指名是哪个节点 | `canvasEditorModel.ts:62` `canvasNodeProvidesOutput` | medium | ✅ 已修：前端 `canvasPendingInputNodes` 在按钮上拦住并指名；服务端错误也改成指名版本 |
 
 ## B 组 · 承诺落空 / 首次使用 —— ✅ 全部已修（2026-08-27）
@@ -34,26 +35,37 @@
 | C5 | `onNodesChange` 里逐 change 做 `nodes.map`，多选拖动是 O(n²) 且每帧都跑 | `CanvasEditor.tsx:1022` | low | ✅ 已修：先把这一批 change 收成位移表 + 删除集，再对节点扫一遍。复杂度本身测不出来，回归测试钉的是改写后的语义（多节点位移一次落定 + 同批删除仍清掉悬空连线） |
 | C6 | 画布完全没接现有 SSE，改用 1.2s 轮询，每次后端做两遍全量 job 目录扫描 | `CanvasEditor.tsx:704-747` | low | ✅ 已修三处：① 接 `useSSE`（pending 期间建连，按 job_id 过滤非画布广播，突发推送做合并），轮询保留为兜底并从 1.2s 放到 4s，与 Studio 一致——**不能砍**，见 #18 的教训；② `/canvas/projects/{id}/jobs` 把读到的列表交给 `reconcile_canvas_jobs`，只在真修过东西时才走第二遍扫描；③ 图签名片段按对象引用挂 WeakMap，外层 `useMemo` 只看 nodes / connections 两个数组的引用 |
 
-## D 组 · 工程链与文档（4 条，D1 D3 D4 已修）
+## D 组 · 工程链与文档（4 条，✅ 全部已修）
 
 | # | 问题 | 位置 | 级别 | 现状复核 |
 |---|---|---|---|---|
 | D1 | ~~仓库没有 ESLint~~ | `web/eslint.config.js` | medium | ✅ 已修（commit e596b90）：`pnpm lint` = `tsc -b --noEmit && eslint .`，只开 `react-hooks/rules-of-hooks` 与 `exhaustive-deps`。首跑 18 处，修 11 处、留 7 处带理由的 disable |
-| D2 | `CanvasEditorInner` 单组件 3408 行、176 个 hook 调用点 | `CanvasEditor.tsx:312–3720` | 部分 | ⚠️ **只修了后果，没拆组件**（取舍见下）。两处后果都实证到并修掉：① run status 两套映射已漂开（`partial` 文案不同；失败时面板丢掉「分析失败 / 生成失败」的区分，兜底建议一个说「检查模型配置」一个说「检查设置」）→ 抽出 `canvasNodeRunStateForJob` 作唯一真表，面板状态行从它派生；② `clamp` 在 `CanvasPromptInput` 与 `CanvasMediaOperationDialog` 各写一份 → 收进 `lib/utils.ts`。加了 2 条渲染层守卫：再抄一份映射就会红 |
+| D2 | `CanvasEditorInner` 单组件 3408 行、176 个 hook 调用点 | `CanvasEditor.tsx:352–3992`<br>`hooks/useCanvasJobSync.ts` | ✅ | ✅ 已修（后果 + 唯一一处清楚的边界，取舍见下）。抽出 `useCanvasJobSync`：出图记录的同步（jobs state、epoch 记账、已同步 run 的记账、兜底轮询、SSE 订阅）从组件里整块搬到 `hooks/useCanvasJobSync.ts`，对外只剩 `jobs` + `acceptJobs` / `applyLocalJob` / `reset` 三个函数，组件 3756 → 3641 行、hook 调用点 130 → 124。零测试改动，31 条画布测试全绿即等价性证明。两处后果都实证到并修掉：① run status 两套映射已漂开（`partial` 文案不同；失败时面板丢掉「分析失败 / 生成失败」的区分，兜底建议一个说「检查模型配置」一个说「检查设置」）→ 抽出 `canvasNodeRunStateForJob` 作唯一真表，面板状态行从它派生；② `clamp` 在 `CanvasPromptInput` 与 `CanvasMediaOperationDialog` 各写一份 → 收进 `lib/utils.ts`。加了 2 条渲染层守卫：再抄一份映射就会红 |
 | D3 | parity matrix 声称 130 项全 full，但七组能力在代码里找不到实现 | `reference-parity-matrix.md` | medium | ✅ 已修：逐条对代码复核，**37 项**改判 `missing`（图例新增该状态）—— G01–G15、H01–H09 两整节 + F01 F04 F06 F07 F09 F10 F11 + C06 C16 C17 + A06 B21 B22。同时纠正审查的两处反向误报：F05、F08 确有实现。结论段改成真实计数表 + 「判 full 之前先 grep 非测试调用方」的判据 |
 | D4 | 后端 30+ 处英文 `ValueError` 直接当 detail 返回给用户，409 语义还错了 | `canvas_projects.py:222` | low | ✅ 已修：**审查把两条路径混在一起说了**。真正当 HTTP detail 返回的只有 canvas_projects.py 的 10 处 → 收进 `CanvasDocumentError(code, message)` 中文结构，与 `CanvasRunCommandError` 统一；canvas_runs.py 的 28 处是后台管线的内部不变式，只经 `job.error` 露出，翻译掉反而难查，改为在 `_error_hint` 加一句中文前缀、原文照留。409 语义：`CanvasStorageError`（存档文件不见了）改判 500——409 前端文案是「刷新后重试」，对着不存在的 canvas.json 刷一辈子也不会好；原测试恰好把这个 bug 钉住了，一并改掉 |
 
 ## D2 的取舍（2026-08-27）
 
-拆 3408 行的 `CanvasEditorInner` 没做，理由不是懒：
+分两步做的：先修后果，再抽唯一一处清楚的边界。整体大拆分仍然没做。
 
 - 行数本身不是缺陷，**后果**才是。审查给出的两条后果（两套 status 映射、同一 helper 两处实现）
   已经实证并修掉，还各加了守卫，复发会红。
 - 一次行为等价的大拆分会动到几乎每一条画布测试（`CanvasEditor.test.tsx` 31 条全走这个组件），
   风险集中在「看不出差别的回归」上，而这类回归恰恰是测试最难抓的。
-- 真正值得抽的边界只有一处清楚的：出图同步（SSE + 兜底轮询 + `mergeRunDocument`，C6 刚整理过），
-  可以变成 `useCanvasJobSync(projectId, …)`。约 1.5 小时，含改测试。**要做就单独一个 PR**，
-  不要和功能改动混在一起——否则 review 时分不清哪一行是搬的、哪一行是改的。
+- 抽出的边界判据是**谁写这份 state**，不是「这段看起来能独立」。grep 下来 jobs state、
+  `jobsEpoch`、`syncedTerminalRuns`、`syncedCandidateVersionIds` 只有出图同步这一条路径会碰
+  （加上切项目时的清账），所以搬出去之后对外只需要 3 个函数；反过来 `mergeRunDocument` 只写
+  document，留在组件里由调用方传进来——hook 因此拿不到画布文档的任何 state 或 ref。
+  按「能不能独立成文件」找边界的话，会连着 document 的 3 个 ref 一起搬，接口反而更宽。
+- 一处副作用：hook 要声明在切项目的 effect 之前（那个 effect 的依赖数组要引用
+  `acceptJobs` / `resetJobSync`），所以 `mergeRunDocument` 一并上移到该 effect 之前。
+- 收益是接口，不是行数：3756 → 3641 行只减了 3%。真正的变化是这份 state 有了唯一的写入者，
+  以后动轮询间隔 / 改 SSE 过滤条件不必再在 3600 行里确认「还有谁在写 jobs」。
+- **零测试改动**是这次的等价性证明：31 条画布测试原样全绿。如果需要改测试才能过，说明搬的
+  过程中改了行为——那就该退回去重做，而不是顺手把测试改成新行为。
+
+剩下没抽的部分（节点交互、库面板、媒体操作对话框、视口命令）都还没有这样清楚的
+「唯一写入者」边界，硬拆只会得到一堆互传 10 个 ref 的 hook。等某一块的 state 归属先变清楚。
 
 ## 已修（未提交）
 
