@@ -12,12 +12,8 @@ describe('estimateGenerationCost', () => {
       quality: 'low',
     });
 
-    expect(result).toMatchObject({
-      amount: 0.18,
-      currency: 'CNY',
-      precision: 'exact',
-    });
-    expect(formatGenerationCost(result!)).toBe('¥0.18');
+    expect(result).toBe(0.18);
+    expect(formatGenerationCost(result!)).toBe('¥ 0.18');
   });
 
   it('calculates Ark Seedream per-image pricing', () => {
@@ -31,7 +27,7 @@ describe('estimateGenerationCost', () => {
       count: 2,
     });
 
-    expect(result).toMatchObject({ amount: 0.44, precision: 'exact' });
+    expect(result).toBe(0.44);
   });
 
   it('does not reuse Ark pricing for the same model through TokenDance', () => {
@@ -58,8 +54,13 @@ describe('estimateGenerationCost', () => {
       hasReferenceVideo: false,
     });
 
-    expect(result).toMatchObject({ amount: 7.992, precision: 'estimated' });
-    expect(formatGenerationCost(result!)).toBe('约 ¥7.99');
+    expect(result).toBe(7.992);
+    expect(formatGenerationCost(result!)).toBe('¥ 7.99');
+  });
+
+  it('费用展示最多保留两位小数，不补无意义的零', () => {
+    expect(formatGenerationCost(10.1)).toBe('¥ 10.1');
+    expect(formatGenerationCost(10.119)).toBe('¥ 10.12');
   });
 
   it('refuses a misleading Seedance estimate when reference-video duration is unknown', () => {
@@ -99,7 +100,7 @@ describe('estimateGenerationCost', () => {
       ratio: '4:3',
     });
 
-    expect(result).toMatchObject({ amount: 4.021183 });
+    expect(result).toBe(4.021183);
   });
 
   it('does not price a direct channel when the model protocol conflicts', () => {
@@ -128,7 +129,7 @@ describe('estimateGenerationCost', () => {
       resolution: '1080P',
     });
 
-    expect(result).toMatchObject({ amount: 7.2, precision: 'exact' });
+    expect(result).toBe(7.2);
   });
 
   it('returns null for an unpriced provider', () => {

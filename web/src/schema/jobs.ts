@@ -14,6 +14,8 @@ export interface JobParams {
   cfg_scale?: number;
   vendor?: string;
   n?: number;
+  /** Studio 提交时冻结的可核实人民币总价；无法计算时不写。 */
+  estimated_cost_cny?: number;
   reference_images?: string[];
   /** Canvas 局部编辑的服务端解析 mask 路径；浏览器不直接写入。 */
   mask_image?: string;

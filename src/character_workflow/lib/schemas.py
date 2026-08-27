@@ -62,6 +62,8 @@ class JobParams(BaseModel):
     # 出图卡片展示用 —— 让画师在确认前看到完整调用细节
     vendor: str | None = None
     n: int | None = None
+    # Studio 提交时冻结的可核实人民币总价；无法计算时不写。
+    estimated_cost_cny: float | None = Field(default=None, ge=0)
     reference_images: list[str] | None = None
     # Canvas 局部编辑专用：服务端从不可变 mask Content Version 解析，浏览器不能传路径。
     mask_image: str | None = None

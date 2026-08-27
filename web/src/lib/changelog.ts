@@ -31,6 +31,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.8',
+    date: '2026-08-28',
+    headline: '费用统一显示在生成历史右侧',
+    changes: [
+      { kind: 'fix', text: '能可靠计算的费用统一折合人民币，按“¥ 10.11”显示在“耗时 · 时间”一行最右侧；无法计算时不显示' },
+      { kind: 'fix', text: '费用在提交时按当次渠道冻结，旧记录缺少快照时不用当前配置误算' },
+      { kind: 'fix', text: '出图历史向上滚动接近顶部时自动分批加载，不再需要点击“加载更早记录”' },
+    ],
+  },
+  {
     version: '5.31.7',
     date: '2026-08-28',
     headline: 'Tuzi 出图断线后能继续取回，不再白扣一次钱',

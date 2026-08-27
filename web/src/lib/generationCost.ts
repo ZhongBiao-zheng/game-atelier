@@ -1,14 +1,5 @@
 import type { Quality } from '@/lib/imageControlCaps';
 
-type CostPrecision = 'exact' | 'estimated';
-
-export interface GenerationCostResult {
-  amount: number;
-  currency: 'CNY';
-  precision: CostPrecision;
-  source: string;
-}
-
 export interface GenerationCostRequest {
   provider?: { provider?: string | null; baseUrl?: string | null };
   model?: { id?: string | null; protocol?: string | null };
@@ -76,10 +67,6 @@ const LEGACY_SEEDANCE_DIMENSIONS: Record<string, Record<string, readonly [number
   },
 };
 
-const ARK_PRICING_SOURCE = '火山方舟公开价格（2026-08-27）';
-const DASHSCOPE_PRICING_SOURCE = '阿里云百炼公开价格（2026-08-27）';
-const OPENAI_HK_PRICING_SOURCE = 'OpenAI-HK 积分价目（10000 积分 = ¥1）';
-
 function normalize(value?: string | null): string {
   return (value ?? '').trim().toLowerCase().replace(/[._]/g, '-');
 }
@@ -118,9 +105,8 @@ function isDashScopeDirect(provider?: GenerationCostRequest['provider']): boolea
   return hostname(provider?.baseUrl) === 'dashscope.aliyuncs.com';
 }
 
-function priced(amount: number, precision: CostPrecision, source: string): GenerationCostResult {
-  const stableAmount = Math.round(amount * 1_000_000) / 1_000_000;
-  return { amount: stableAmount, currency: 'CNY', precision, source };
+function priced(amount: number): number {
+  return Math.round(amount * 1_000_000) / 1_000_000;
 }
 
 function protocolMatches(protocol: string | null | undefined, expected: string): boolean {
@@ -128,26 +114,18 @@ function protocolMatches(protocol: string | null | undefined, expected: string):
   return !actual || actual === expected;
 }
 
-function estimateOpenAiHkImage(request: GenerationCostRequest): GenerationCostResult | null {
+function estimateOpenAiHkImage(request: GenerationCostRequest): number | null {
   const model = normalize(request.model?.id);
   const credits = request.quality ? OPENAI_HK_IMAGE_CREDITS[model]?.[request.quality] : undefined;
   if (credits == null) return null;
-  return priced(
-    credits * safeCount(request.count) / CREDITS_PER_YUAN,
-    'exact',
-    OPENAI_HK_PRICING_SOURCE,
-  );
+  return priced(credits * safeCount(request.count) / CREDITS_PER_YUAN);
 }
 
-function estimateArkImage(request: GenerationCostRequest): GenerationCostResult | null {
+function estimateArkImage(request: GenerationCostRequest): number | null {
   const model = normalize(request.model?.id);
   const unitPrice = ARK_SEEDREAM_YUAN_PER_IMAGE[model];
   if (unitPrice == null) return null;
-  return priced(
-    unitPrice * safeCount(request.count),
-    'exact',
-    ARK_PRICING_SOURCE,
-  );
+  return priced(unitPrice * safeCount(request.count));
 }
 
 function arkSeedanceRate(model: string, resolution: string, generateAudio: boolean): number | null {
@@ -166,7 +144,7 @@ function seedanceOutputPixels(model: string, resolution: string, ratio: string):
   return dimensions ? dimensions[0] * dimensions[1] : null;
 }
 
-function estimateArkVideo(request: GenerationCostRequest): GenerationCostResult | null {
+function estimateArkVideo(request: GenerationCostRequest): number | null {
   if (request.hasReferenceVideo) return null;
   const resolution = normalize(request.resolution);
   const ratio = request.ratio?.trim();
@@ -181,7 +159,7 @@ function estimateArkVideo(request: GenerationCostRequest): GenerationCostResult 
 
   const outputTokens = (duration! * pixels * 24) / 1024;
   const amount = outputTokens * rate * safeCount(request.count) / 1_000_000;
-  return priced(amount, 'estimated', ARK_PRICING_SOURCE);
+  return priced(amount);
 }
 
 function happyHorseRate(model: string, resolution: string): number | null {
@@ -194,21 +172,21 @@ function happyHorseRate(model: string, resolution: string): number | null {
   return null;
 }
 
-function estimateDashScopeVideo(request: GenerationCostRequest): GenerationCostResult | null {
+function estimateDashScopeVideo(request: GenerationCostRequest): number | null {
   const model = normalize(request.model?.id);
   const duration = request.duration;
   const rate = happyHorseRate(model, normalize(request.resolution));
   if (rate == null || !Number.isFinite(duration) || (duration ?? 0) <= 0) {
     return null;
   }
-  return priced(rate * duration! * safeCount(request.count), 'exact', DASHSCOPE_PRICING_SOURCE);
+  return priced(rate * duration! * safeCount(request.count));
 }
 
 /**
- * 单次生成的前置价格估算。规则必须同时命中真实渠道与模型；不能把直连官方价
+ * 单次生成的价格估算。规则必须同时命中真实渠道与模型；不能把直连官方价
  * 套到 TokenDance、OpenRouter 等聚合渠道。无法可靠计算时返回 null，调用方不展示费用。
  */
-export function estimateGenerationCost(request: GenerationCostRequest): GenerationCostResult | null {
+export function estimateGenerationCost(request: GenerationCostRequest): number | null {
   if (!request.model?.id || !request.provider) return null;
 
   if (
@@ -242,7 +220,7 @@ export function estimateGenerationCost(request: GenerationCostRequest): Generati
   return null;
 }
 
-export function formatGenerationCost(result: GenerationCostResult): string {
-  const prefix = result.precision === 'estimated' ? '约 ' : '';
-  return `${prefix}¥${result.amount.toFixed(2)}`;
+export function formatGenerationCost(amount: number): string {
+  const rounded = Math.round((amount + Number.EPSILON) * 100) / 100;
+  return `¥ ${rounded.toFixed(2).replace(/\.?0+$/, '')}`;
 }

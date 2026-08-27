@@ -130,6 +130,8 @@ function mockCompletedBatchAndKeys() {
             ratio: '4:3',
             resolution: '2K',
             size: '2304x1728',
+            n: 2,
+            estimated_cost_cny: 0.5,
             reference_images: ['/tmp/ref.png'],
           },
           output_paths: ['/tmp/studio/job-studio-1/v1.png', '/tmp/studio/job-studio-1/v2.png'],
@@ -305,6 +307,7 @@ describe('Studio', () => {
         resolution: '4K',
         size: '4096x2304',
         n: 3,
+        estimated_cost_cny: 0.66,
       },
     });
   });
@@ -838,6 +841,7 @@ describe('Studio', () => {
       'href',
       '/api/gallery/image?path=%2FUsers%2Fme%2Fproject%2Fstudio%2Fjob-studio-1%2Fv1.png',
     );
+    expect(screen.queryByTestId('round-generation-cost')).toBeNull();
   });
 
   it('restores a pending studio job after returning to the page', async () => {
@@ -1036,6 +1040,7 @@ describe('Studio', () => {
     expect(screen.getAllByRole('img', { name: /生成结果/ })).toHaveLength(2);
     expect(screen.getByTestId('studio-result-thumb-1')).toHaveClass('w-[251.5px]');
     expect(screen.getByTestId('studio-result-thumb-2')).toHaveClass('w-[251.5px]');
+    expect(screen.getByTestId('round-generation-cost')).toHaveTextContent('¥ 0.5');
     expect(screen.getByRole('button', { name: '重新编辑' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '再次生成' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument();
@@ -1386,7 +1391,12 @@ describe('Studio video submission', () => {
     expect(body).toMatchObject({
       kind: 'video',
       // 上游 generate_audio 默认 true：音频关闭也必须显式发 false，省略字段≠关闭。
-      params: expect.objectContaining({ duration: 5, resolution: '720p', generate_audio: false }),
+      params: expect.objectContaining({
+        duration: 5,
+        resolution: '720p',
+        generate_audio: false,
+        estimated_cost_cny: 3.996,
+      }),
     });
   });
 

@@ -96,6 +96,7 @@ def test_jobparams_accepts_video_fields():
         generate_audio=True,
         watermark=False,
         background="transparent",
+        estimated_cost_cny=3.996,
         reference_videos=["/abs/clip.mp4"],
         reference_audios=["/abs/voice.mp3"],
     )
@@ -105,5 +106,15 @@ def test_jobparams_accepts_video_fields():
     assert p.generate_audio is True
     assert p.watermark is False
     assert p.background == "transparent"
+    assert p.estimated_cost_cny == 3.996
     assert p.reference_videos == ["/abs/clip.mp4"]
     assert p.reference_audios == ["/abs/voice.mp3"]
+
+
+def test_jobparams_rejects_negative_estimated_cost():
+    from pydantic import ValidationError
+
+    from character_workflow.lib.schemas import JobParams
+
+    with pytest.raises(ValidationError):
+        JobParams(estimated_cost_cny=-0.01)

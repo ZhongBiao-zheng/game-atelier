@@ -18,6 +18,7 @@ import { imageFamily } from '@/lib/modelFamily';
 import { MJ_DEFAULTS, mjParamsFromJob, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
+import { estimateGenerationCost } from '@/lib/generationCost';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
@@ -453,6 +454,13 @@ function StudioFull() {
           }
         : {}),
     };
+    const estimatedCost = generationCostForSubmission(
+      selectedKey,
+      effectiveModel,
+      'image',
+      jobParams,
+    );
+    if (estimatedCost != null) jobParams.estimated_cost_cny = estimatedCost;
 
     const startedAt = Date.now();
     const myRound: RoundState = { kind: 'pending', startedAt, config };
@@ -577,6 +585,13 @@ function StudioFull() {
       ...(vidPaths.length ? { reference_videos: vidPaths } : {}),
       ...(audPaths.length ? { reference_audios: audPaths } : {}),
     };
+    const estimatedCost = generationCostForSubmission(
+      selectedKey,
+      effectiveModel,
+      'video',
+      videoParams,
+    );
+    if (estimatedCost != null) videoParams.estimated_cost_cny = estimatedCost;
 
     const config: RoundConfig = {
       prompt,
@@ -648,6 +663,7 @@ function StudioFull() {
       <div
         ref={scrollRef}
         onScroll={handleHistoryScroll}
+        data-studio-history-scroll
         data-testid="studio-history-scroll"
         className="flex h-full flex-col-reverse overflow-y-auto pt-20 pb-[210px]"
       >
@@ -994,6 +1010,36 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
   };
 }
 
+function generationCostForSubmission(
+  selectedKey: KeyView | undefined,
+  modelId: string,
+  kind: 'image' | 'video',
+  params: JobParams,
+): number | null {
+  if (!selectedKey) return null;
+  const selectedModel = selectedKey.models.find((item) => item.id === modelId);
+  const p = params ?? {};
+  const quality = (p.quality === 'low' || p.quality === 'medium'
+    || p.quality === 'high' || p.quality === 'auto')
+    ? p.quality
+    : undefined;
+  return estimateGenerationCost({
+    provider: {
+      provider: selectedKey.provider,
+      baseUrl: selectedKey.base_url,
+    },
+    model: { id: modelId, protocol: selectedModel?.protocol },
+    kind,
+    count: typeof p.n === 'number' ? p.n : undefined,
+    quality,
+    duration: typeof p.duration === 'number' ? p.duration : undefined,
+    resolution: typeof p.resolution === 'string' ? p.resolution : undefined,
+    ratio: typeof p.ratio === 'string' ? p.ratio : undefined,
+    generateAudio: p.generate_audio === true,
+    hasReferenceVideo: stringList(p.reference_videos).length > 0,
+  });
+}
+
 function clampImageCount(value: unknown): number {
   const parsed = typeof value === 'number' ? value : parseInt(String(value ?? 1), 10);
   if (!Number.isFinite(parsed)) return 1;
@@ -1024,6 +1070,7 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
           submittedAt: job.submitted_at,
           completedAt: job.completed_at,
           imagePaths: job.output_paths,
+          generationCost: frozenGenerationCost(job),
           config: configForJob(job, keys),
         }];
       }
@@ -1046,6 +1093,13 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
         config: configForJob(job, keys),
       }];
     });
+}
+
+function frozenGenerationCost(job: Job): number | undefined {
+  const amount = job.params?.estimated_cost_cny;
+  return typeof amount === 'number' && Number.isFinite(amount) && amount >= 0
+    ? amount
+    : undefined;
 }
 
 function roundKey(round: RoundState): string | null {
