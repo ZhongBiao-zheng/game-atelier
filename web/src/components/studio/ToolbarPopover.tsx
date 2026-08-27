@@ -48,7 +48,9 @@ const GAP = 12;
  *
  * 为什么 portal：底栏控件行改成横向滚动后（overflow-x:auto 强制 overflow-y 也裁剪），
  * 内联 absolute 面板会被滚动容器纵向切掉。portal 出去让面板脱离裁剪，定位靠测量锚点
- * getBoundingClientRect，滚动 / resize 时跟随。外点关闭在此自理（点锚点与面板内不关）。
+ * getBoundingClientRect：滚动 / resize 时跟随，锚点自己在视口里移动（画布平移、节点浮层
+ * 改 left/top）时也跟随 —— 后者没有事件可听，靠逐帧比对锚点 rect。外点关闭在此自理
+ * （点锚点与面板内不关）。
  */
 export function ToolbarPopover({
   open,
@@ -116,6 +118,34 @@ export function ToolbarPopover({
       window.removeEventListener('resize', place);
     };
   }, [open, place]);
+
+  // 锚点自己在视口里移动时，没有任何事件可以听：画布平移是 xyflow 给 viewport 加 CSS
+  // transform，节点浮层面板是父组件改 left / top —— 两者都不触发 scroll / resize，于是
+  // 面板走了、这层子弹窗钉在屏幕原地（2026-08-27 画布实测）。所以逐帧比对锚点的视口
+  // rect，只在真的变了时重新摆。这是「订阅容器的变化 ≠ 订阅元素的变化」的第二次：
+  // 5.31.1 修了面板跟随节点，面板里的子弹窗当时没跟着修。
+  //
+  // 和下面那条「二次定位不用 rAF」不冲突：那条说的是**首次**摆放不能依赖 rAF（后台标签
+  // 页被节流就永远卡在首帧位置）；这里只负责**跟随**，而后台标签页里没有东西在动。
+  useEffect(() => {
+    if (!open) return;
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    const rectKey = () => {
+      const r = anchor.getBoundingClientRect();
+      return `${r.left},${r.top},${r.right},${r.bottom}`;
+    };
+    let last = rectKey();
+    let raf = requestAnimationFrame(function tick() {
+      const key = rectKey();
+      if (key !== last) {
+        last = key;
+        place();
+      }
+      raf = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [open, place, anchorRef]);
 
   // 二次定位走 layout effect 而不是 rAF：标签页在后台时 rAF 被节流，面板会卡在首帧
   // 那个没夹紧的位置（本仓在 framer-motion 上踩过同一个节流坑）。

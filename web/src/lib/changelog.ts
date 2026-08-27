@@ -31,6 +31,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.3',
+    date: '2026-08-27',
+    headline: '画布里选模型的弹窗也跟着面板走了',
+    changes: [
+      { kind: 'fix', text: '画布生成面板里的模型 / 参数下拉弹窗跟着面板一起移动 —— 以前平移画布时面板走了、弹窗钉在屏幕原地' },
+    ],
+  },
+  {
     version: '5.31.2',
     date: '2026-08-27',
     headline: '更新完打开就是新版；画布能用鼠标平移了',
