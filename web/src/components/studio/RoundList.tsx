@@ -1,4 +1,4 @@
-import { type ButtonHTMLAttributes, useEffect, useMemo, useRef, useState } from 'react';
+import { type ButtonHTMLAttributes, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Trash2 } from 'lucide-react';
 
@@ -17,6 +17,9 @@ import {
 
 import { Lightbox } from '../Lightbox';
 import { WaitingCopy } from './WaitingCopy';
+
+const HISTORY_BATCH_SIZE = 30;
+const MEDIA_ROOT_MARGIN = '600px 0px';
 
 export interface RoundConfig {
   prompt: string;
@@ -77,6 +80,7 @@ function aspectStyle(config: RoundConfig): { aspectRatio: string } {
 
 export function RoundList({
   rounds,
+  focusJobId,
   favorites,
   onToggleFavorite,
   hiddenPaths,
@@ -90,6 +94,7 @@ export function RoundList({
   onArchive,
 }: {
   rounds: RoundState[];
+  focusJobId?: string;
   favorites?: string[];
   onToggleFavorite?: (path: string) => void | Promise<void>;
   hiddenPaths?: string[];
@@ -103,21 +108,43 @@ export function RoundList({
   onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [mountedHistoryCount, setMountedHistoryCount] = useState(HISTORY_BATCH_SIZE);
   if (rounds.length === 0) return null;
+  const newestWindow = rounds.slice(-mountedHistoryCount);
+  const focusedRound = focusJobId
+    ? rounds.find((round) => round.jobId === focusJobId)
+    : undefined;
+  const mountedRounds = focusedRound && !newestWindow.includes(focusedRound)
+    ? [focusedRound, ...newestWindow]
+    : newestWindow;
+  const remainingCount = Math.max(0, rounds.length - mountedHistoryCount);
   return (
     <>
       <div
         data-testid="studio-round-list"
         className="mx-auto mt-8 w-full min-w-[800px] max-w-[1024px] space-y-8 text-left"
       >
-        {rounds.map((r) => {
+        {remainingCount > 0 && (
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={() => setMountedHistoryCount((count) => count + HISTORY_BATCH_SIZE)}
+              className="h-9 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              加载更早记录（剩余 {remainingCount} 条）
+            </button>
+          </div>
+        )}
+        {mountedRounds.map((r) => {
           const stableKey =
             r.kind === 'pending' && r.jobId ? `pending-${r.jobId}` :
             r.kind === 'pending' ? `pending-${r.startedAt}` :
             `${r.kind}-${r.submittedAt}`;
           return (
             // data-round-job：首页作品深链（/studio?job=）滚动定位的锚点。
-            <div key={stableKey} data-round-job={r.jobId ?? undefined}>
+            <MediaActivationBoundary key={stableKey} jobId={r.jobId}>
+              {(mediaActive) => (
+              <>
               {r.kind === 'pending' && (
                 <div className="mb-3">
                   <WaitingCopy startedAt={r.startedAt} />
@@ -126,9 +153,9 @@ export function RoundList({
               {r.kind === 'pending' && (
                 <section className="space-y-3">
                   <div className="flex items-start gap-3 text-sm">
-                    <ReferenceStack config={r.config} jobId={r.jobId} onReuse={onReuseReferences} />
+                    <ReferenceStack config={r.config} jobId={r.jobId} onReuse={onReuseReferences} mediaActive={mediaActive} />
                     <div className="min-w-0 flex-1">
-                      <MentionPrompt prompt={r.config.prompt} config={r.config} jobId={r.jobId} />
+                      <MentionPrompt prompt={r.config.prompt} config={r.config} jobId={r.jobId} mediaActive={mediaActive} />
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1">
@@ -171,6 +198,7 @@ export function RoundList({
                   onReuseReferences={onReuseReferences}
                   onEditAsReference={onEditAsReference}
                   onArchive={onArchive}
+                  mediaActive={mediaActive}
                 />
               )}
               {r.kind === 'failed' && (
@@ -180,14 +208,46 @@ export function RoundList({
                   onReEdit={onReEdit}
                   onRegenerate={onRegenerate}
                   onReuseReferences={onReuseReferences}
+                  mediaActive={mediaActive}
                 />
               )}
-            </div>
+              </>
+              )}
+            </MediaActivationBoundary>
           );
         })}
       </div>
       {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
     </>
+  );
+}
+
+function MediaActivationBoundary({
+  jobId,
+  children,
+}: {
+  jobId?: string;
+  children: (mediaActive: boolean) => ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [mediaActive, setMediaActive] = useState(() => typeof IntersectionObserver === 'undefined');
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      setMediaActive(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setMediaActive(entry.isIntersecting),
+      { rootMargin: MEDIA_ROOT_MARGIN },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={ref} data-round-job={jobId ?? undefined}>
+      {children(mediaActive)}
+    </div>
   );
 }
 
@@ -317,10 +377,12 @@ function ReferenceStack({
   config,
   jobId,
   onReuse,
+  mediaActive,
 }: {
   config: RoundConfig;
   jobId?: string;
   onReuse?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
+  mediaActive: boolean;
 }) {
   const refs = allRefs(config);
   const [hover, setHover] = useState(false);
@@ -361,7 +423,7 @@ function ReferenceStack({
             }}
             className="absolute block overflow-hidden rounded-lg border-[1.5px] border-white bg-card"
           >
-            <RefThumb src={src} jobId={jobId} />
+            <RefThumb src={src} jobId={jobId} mediaActive={mediaActive} />
           </span>
         );
       })}
@@ -383,7 +445,17 @@ function mentionRefPath(config: RoundConfig, kind: MentionKind, n: number): stri
 type MentionHover = { kind: MentionKind; path: string; left: number; top: number };
 
 /** 历史记录里的提示词：@图片N/@图N/@视频N/@音频N 渲染成同款 chip。 */
-function MentionPrompt({ prompt, config, jobId }: { prompt: string; config: RoundConfig; jobId?: string }) {
+function MentionPrompt({
+  prompt,
+  config,
+  jobId,
+  mediaActive,
+}: {
+  prompt: string;
+  config: RoundConfig;
+  jobId?: string;
+  mediaActive: boolean;
+}) {
   const [hover, setHover] = useState<MentionHover | null>(null);
   const parts = useMemo(() => {
     const out: Array<string | { label: string; kind: MentionKind; path: string }> = [];
@@ -408,7 +480,15 @@ function MentionPrompt({ prompt, config, jobId }: { prompt: string; config: Roun
           typeof part === 'string' ? (
             <span key={i}>{part}</span>
           ) : (
-            <MentionChip key={i} label={part.label} kind={part.kind} path={part.path} jobId={jobId} onHover={setHover} />
+            <MentionChip
+              key={i}
+              label={part.label}
+              kind={part.kind}
+              path={part.path}
+              jobId={jobId}
+              onHover={setHover}
+              mediaActive={mediaActive}
+            />
           ),
         )}
       </p>
@@ -446,14 +526,15 @@ function MentionPrompt({ prompt, config, jobId }: { prompt: string; config: Roun
   );
 }
 
-function MentionChip({ label, kind, path, jobId, onHover }: {
+function MentionChip({ label, kind, path, jobId, onHover, mediaActive }: {
   label: string;
   kind: MentionKind;
   path: string;
   jobId?: string;
   onHover: (h: MentionHover | null) => void;
+  mediaActive: boolean;
 }) {
-  const frame = useVideoFrame(kind === 'video' ? refImageSrc(path, jobId) : null);
+  const frame = useVideoFrame(kind === 'video' ? refImageSrc(path, jobId) : null, mediaActive);
   const thumb = kind === 'image' ? refImageSrc(path, jobId) : frame;
   return (
     <span
@@ -478,10 +559,13 @@ function MentionChip({ label, kind, path, jobId, onHover }: {
 }
 
 // 堆叠卡内容：图片直出、视频抽首帧（失败退回 Film 图标）、音频固定 Music 图标。
-function RefThumb({ src, jobId }: { src: string; jobId?: string }) {
+function RefThumb({ src, jobId, mediaActive }: { src: string; jobId?: string; mediaActive: boolean }) {
   const isImage = isImagePath(src);
   const isAudio = !isImage && isAudioPath(src);
-  const frame = useVideoFrame(!isImage && !isAudio ? refImageSrc(src, jobId) : null);
+  const frame = useVideoFrame(
+    !isImage && !isAudio ? refImageSrc(src, jobId) : null,
+    mediaActive,
+  );
   const thumb = isImage ? refImageSrc(src, jobId) : frame;
   if (thumb) {
     return <img src={thumb} alt="参考素材" className="h-full w-full object-cover" draggable={false} />;
@@ -506,6 +590,7 @@ function DoneBatch({
   onReuseReferences,
   onEditAsReference,
   onArchive,
+  mediaActive,
 }: {
   round: Extract<RoundState, { kind: 'done' }>;
   favorites?: string[];
@@ -519,6 +604,7 @@ function DoneBatch({
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onEditAsReference?: (path: string) => void | Promise<void>;
   onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
+  mediaActive: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement>(null);
@@ -554,9 +640,19 @@ function DoneBatch({
   return (
     <section className="space-y-3">
       <div className="flex items-start gap-3 text-sm">
-        <ReferenceStack config={round.config} jobId={round.jobId} onReuse={onReuseReferences} />
+        <ReferenceStack
+          config={round.config}
+          jobId={round.jobId}
+          onReuse={onReuseReferences}
+          mediaActive={mediaActive}
+        />
         <div className="min-w-0 flex-1">
-          <MentionPrompt prompt={round.config.prompt} config={round.config} jobId={round.jobId} />
+          <MentionPrompt
+            prompt={round.config.prompt}
+            config={round.config}
+            jobId={round.jobId}
+            mediaActive={mediaActive}
+          />
           <p className="mt-1 text-sm text-muted-foreground">
             {specMeta.join(' · ')}
             {shownMjFlags && (
@@ -591,14 +687,25 @@ function DoneBatch({
                 <figure
                   key={path}
                   data-testid={`studio-result-video-${index + 1}`}
-                  className="group relative w-[420px] max-w-full overflow-hidden rounded-md bg-card"
+                  className="group relative w-[420px] max-w-full overflow-hidden rounded-lg border border-border bg-card"
                 >
-                  <video
-                    src={videoSrc(path)}
-                    controls
-                    preload="metadata"
-                    className="h-full w-full rounded-md"
-                  />
+                  {mediaActive ? (
+                    <video
+                      src={videoSrc(path)}
+                      controls
+                      preload="metadata"
+                      playsInline
+                      className="h-full w-full"
+                    />
+                  ) : (
+                    <div
+                      data-testid="studio-video-placeholder"
+                      style={aspectStyle(round.config)}
+                      className="flex h-full w-full items-center justify-center text-muted-foreground"
+                    >
+                      <Film className="size-6" aria-hidden />
+                    </div>
+                  )}
                   <div className="absolute right-2 top-2 flex gap-1.5">
                     {round.mode !== 'skill' && onArchive && (
                       <button
@@ -646,6 +753,8 @@ function DoneBatch({
                   <img
                     src={imageSrc(path)}
                     alt={`生成结果 ${index + 1}`}
+                    loading="lazy"
+                    decoding="async"
                     className="h-full w-full object-contain"
                   />
                   <div className="absolute right-2 top-2 flex gap-1.5">
@@ -761,12 +870,14 @@ function FailedCard({
   onReEdit,
   onRegenerate,
   onReuseReferences,
+  mediaActive,
 }: {
   round: Extract<RoundState, { kind: 'failed' }>;
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
+  mediaActive: boolean;
 }) {
   const { config } = round;
   const meta = config
@@ -783,9 +894,19 @@ function FailedCard({
     <section className="space-y-3">
       {config && (
         <div className="flex items-start gap-3 text-sm">
-          <ReferenceStack config={config} jobId={round.jobId} onReuse={onReuseReferences} />
+          <ReferenceStack
+            config={config}
+            jobId={round.jobId}
+            onReuse={onReuseReferences}
+            mediaActive={mediaActive}
+          />
           <div className="min-w-0 flex-1">
-            <MentionPrompt prompt={config.prompt} config={config} jobId={round.jobId} />
+            <MentionPrompt
+              prompt={config.prompt}
+              config={config}
+              jobId={round.jobId}
+              mediaActive={mediaActive}
+            />
             {meta.length > 0 && (
               <p className="mt-1 text-sm text-muted-foreground">{meta.join(' | ')}</p>
             )}

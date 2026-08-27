@@ -2335,6 +2335,9 @@ function CanvasMaterialConnections({
 function CanvasMaterialPreview({ reference }: { reference: CanvasMaterialReference }) {
   const videoFrame = useVideoFrame(
     reference.kind === 'video' ? reference.previewUrl ?? null : null,
+    // 素材芯片只在生成面板打开时才挂载，没有创作台那样的「离屏就别解码」的门；
+    // 第二个参数是 origin 那边给历史列表做懒加载加的（useVideoFrame(url, enabled)）。
+    true,
   );
   if (reference.kind === 'image' && reference.previewUrl) {
     return (

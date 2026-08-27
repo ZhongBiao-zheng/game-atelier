@@ -1292,6 +1292,25 @@ class CanvasPluginState(BaseModel):
             raise ValueError("canvas plugin state exceeds 1 MiB")
         return self
 
+    @model_validator(mode="after")
+    def validate_namespace_ownership(self) -> "Job":
+        if self.namespace == "ui":
+            if not self.project_id or not self.ui_scheme_id or not self.screen_id:
+                raise ValueError("ui job requires project_id, ui_scheme_id and screen_id")
+            if self.kind is not JobKind.IMAGE:
+                raise ValueError("ui job must use kind=image")
+        elif self.ui_scheme_id is not None or self.screen_id is not None:
+            raise ValueError("ui_scheme_id and screen_id are only valid for namespace=ui")
+
+        if self.namespace == "video":
+            if not self.project_id or not self.production_id:
+                raise ValueError("video job requires project_id and production_id")
+            if self.kind is not JobKind.VIDEO:
+                raise ValueError("video namespace must use kind=video")
+        elif self.production_id is not None:
+            raise ValueError("production_id is only valid for namespace=video")
+        return self
+
 
 class WebEditableJobPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")

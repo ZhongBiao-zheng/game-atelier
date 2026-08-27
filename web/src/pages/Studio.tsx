@@ -653,6 +653,7 @@ function StudioFull() {
       >
         <RoundList
           rounds={reversedRounds}
+          focusJobId={targetJobId ?? undefined}
           favorites={favorites}
           onToggleFavorite={toggleFavorite}
           hiddenPaths={hiddenPaths}
