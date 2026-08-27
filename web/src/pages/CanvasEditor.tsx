@@ -177,10 +177,13 @@ import {
 import { shouldPreventCanvasHistoryNavigation } from '@/lib/canvasTrackpad';
 import {
   CANVAS_LOCAL_VERSION_SHA,
+  CANVAS_DEFAULT_NODE_SIZE,
+  CANVAS_TEXT_NODE_DEFAULT_SIZE,
   acceptServerContentVersions,
   canvasConnectionCreationCapabilities,
   canvasDeletionBlockedMessage,
   canvasNodeRenderZIndex,
+  canvasNodeRenderedSize,
   canCreateCanvasInputConnection,
   clampCanvasNodeSize,
   canvasPendingInputNodes,
@@ -188,7 +191,9 @@ import {
   createCanvasGenerationDraft,
   createConnectedCanvasConfig,
   normalizeCanvasVideoParams,
+  placeCanvasNodeWithoutOverlap,
   restoreContentVersions,
+  sizeLockedToCanvasVersion,
   supportsCanvasVideoEdit,
 } from './canvasEditorModel';
 
@@ -452,6 +457,10 @@ function CanvasEditorInner({
   const resizePreviewFrame = useRef<number | null>(null);
   const dirtyVersion = useRef(0);
   const [dirtySignal, setDirtySignal] = useState(0);
+  const activeTextEditingNodeIds = useRef(new Set<string>());
+  const autosaveObservedDirtyVersion = useRef(0);
+  const [textEditingSignal, setTextEditingSignal] = useState(0);
+  const imeComposing = useRef(false);
   const serverRevision = useRef(0);
   const saveInFlight = useRef<Promise<void> | null>(null);
   const saveQueued = useRef<CanvasDocument | null>(null);
@@ -580,6 +589,15 @@ function CanvasEditorInner({
     onError: setError,
   });
 
+  const setTextEditing = useCallback((nodeId: string, editing: boolean) => {
+    const active = activeTextEditingNodeIds.current;
+    const changed = editing ? !active.has(nodeId) : active.has(nodeId);
+    if (!changed) return;
+    if (editing) active.add(nodeId);
+    else active.delete(nodeId);
+    setTextEditingSignal(current => current + 1);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -647,6 +665,9 @@ function CanvasEditorInner({
     reversePromptConfigEligibleRuns.current.clear();
     dirtyVersion.current = 0;
     setDirtySignal(0);
+    activeTextEditingNodeIds.current.clear();
+    autosaveObservedDirtyVersion.current = 0;
+    setTextEditingSignal(0);
     serverRevision.current = 0;
     runSubmissionInFlight.current = false;
     documentCommandInFlight.current = false;
@@ -861,15 +882,29 @@ function CanvasEditorInner({
     ? selectedNodeIds.values().next().value ?? null
     : null;
 
-  const flushSave = useCallback(function drainSaveQueue(): Promise<void> {
+  const flushSave = useCallback(function drainSaveQueue(force = false): Promise<void> {
     if (runSubmissionInFlight.current || libraryInsertInFlight.current || documentCommandInFlight.current) return Promise.resolve();
     if (saveInFlight.current) {
-      return saveInFlight.current.then(() => saveQueued.current ? drainSaveQueue() : undefined);
+      return saveInFlight.current.then(() => (
+        saveQueued.current
+        && (force || (
+          !imeComposing.current
+          && activeTextEditingNodeIds.current.size === 0
+        ))
+          ? drainSaveQueue(force)
+          : undefined
+      ));
     }
     const run = async () => {
       let failedSnapshot: CanvasDocument | null = null;
       try {
-        while (saveQueued.current) {
+        while (
+          saveQueued.current
+          && (force || (
+            !imeComposing.current
+            && activeTextEditingNodeIds.current.size === 0
+          ))
+        ) {
           const snapshot = saveQueued.current;
           saveQueued.current = null;
           failedSnapshot = snapshot;
@@ -934,7 +969,6 @@ function CanvasEditorInner({
   // 很容易在「拼音打完、还没选字」这个空档里触发。组合期间落盘既会把半成品文本写进版本，
   // 也让整棵画布在组合中途重渲染。所以组合期间只排队不起定时器，compositionend 之后立刻补上。
   // 监听挂在 document 上：文本节点的 textarea、提示词输入框都在这一层之下，一处覆盖全部。
-  const imeComposing = useRef(false);
   const [compositionSignal, setCompositionSignal] = useState(0);
   useEffect(() => {
     const start = () => { imeComposing.current = true; };
@@ -953,13 +987,21 @@ function CanvasEditorInner({
 
   useEffect(() => {
     const snapshot = latestDocument.current;
-    if (!snapshot || dirtySignal === 0) return;
-    saveQueued.current = snapshot;
-    // 队列已经排上了，卸载冲刷与 beforeunload 守卫照样看得到，组合期间只是不起这一次定时器。
-    if (imeComposing.current) return;
+    if (!snapshot || dirtySignal === 0) {
+      autosaveObservedDirtyVersion.current = 0;
+      return;
+    }
+    if (dirtySignal > autosaveObservedDirtyVersion.current) {
+      autosaveObservedDirtyVersion.current = dirtySignal;
+      saveQueued.current = snapshot;
+    }
+    if (!saveQueued.current) return;
+    // 队列已经排上了，卸载冲刷与 beforeunload 守卫照样看得到；输入法组合和文本编辑会话
+    // 期间都只更新内存，不启动保存。退出文本编辑后 textEditingSignal 变化，再统一保存一次。
+    if (imeComposing.current || activeTextEditingNodeIds.current.size > 0) return;
     const timer = window.setTimeout(() => void flushSave().catch(() => undefined), 350);
     return () => window.clearTimeout(timer);
-  }, [compositionSignal, dirtySignal, flushSave]);
+  }, [compositionSignal, dirtySignal, flushSave, textEditingSignal]);
 
   // 撤销栈是个 ref（快照数组要在同一次事件里被连续读写，做不成 state），但撤销 / 重做按钮的禁用态
   // 得跟着它变。所以这条 effect 故意不写依赖数组：历史在 9 处被就地修改，每一处都伴随一次
@@ -978,7 +1020,7 @@ function CanvasEditorInner({
   // 清理函数用的是注册它那次 render 的闭包，切项目时冲的是旧 projectId，不会串项目。
   useEffect(() => () => {
     if (!saveQueued.current) return;
-    void flushSave().catch(() => undefined);
+    void flushSave(true).catch(() => undefined);
   }, [flushSave]);
 
   // 关标签 / 刷新 / 硬跳转时 fetch 会被浏览器一起掐掉，冲不出去，只能拦一下让画师自己决定。
@@ -1016,7 +1058,7 @@ function CanvasEditorInner({
     if (latestDocument.current && dirtyVersion.current > 0) {
       saveQueued.current = latestDocument.current;
       try {
-        await flushSave();
+        await flushSave(true);
       } catch {
         setError('自动保存失败，已留在当前画布。请检查服务后重试。');
         return false;
@@ -1497,8 +1539,48 @@ function CanvasEditorInner({
     }
   }
 
-  function defaultPosition() {
-    return screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+  function canvasPlacementBounds() {
+    const surface = editorRegionRef.current?.getBoundingClientRect();
+    const screenBounds = {
+      left: (surface?.left ?? 0) + 24,
+      right: (surface?.right ?? window.innerWidth) - 24,
+      top: (surface?.top ?? 0) + 24,
+      bottom: (surface?.bottom ?? window.innerHeight) - 24,
+    };
+    const topLeft = screenToFlowPosition({ x: screenBounds.left, y: screenBounds.top });
+    const bottomRight = screenToFlowPosition({ x: screenBounds.right, y: screenBounds.bottom });
+    return {
+      screenBounds,
+      flowBounds: {
+        left: Math.min(topLeft.x, bottomRight.x),
+        right: Math.max(topLeft.x, bottomRight.x),
+        top: Math.min(topLeft.y, bottomRight.y),
+        bottom: Math.max(topLeft.y, bottomRight.y),
+      },
+    };
+  }
+
+  function placeNewNode(preferred: CanvasPoint, size: CanvasSize) {
+    const { flowBounds } = canvasPlacementBounds();
+    return placeCanvasNodeWithoutOverlap(
+      preferred,
+      latestDocument.current?.nodes ?? [],
+      size,
+      flowBounds,
+      node => canvasNodeRenderedSize(node, latestDocument.current?.content_versions ?? {}),
+    );
+  }
+
+  function defaultPosition(size: CanvasSize = CANVAS_DEFAULT_NODE_SIZE) {
+    const { screenBounds } = canvasPlacementBounds();
+    const center = screenToFlowPosition({
+      x: (screenBounds.left + screenBounds.right) / 2,
+      y: (screenBounds.top + screenBounds.bottom) / 2,
+    });
+    return placeNewNode(
+      { x: center.x - size.width / 2, y: center.y - size.height / 2 },
+      size,
+    );
   }
 
   const mutateLibrary = useCallback(async (action: () => Promise<void>) => {
@@ -1552,7 +1634,7 @@ function CanvasEditorInner({
   async function insertLibraryItem(
     kind: 'asset' | 'prompt',
     id: string,
-    position = defaultPosition(),
+    position?: CanvasPoint,
   ) {
     if (!await persistNow()) return;
     const before = latestDocument.current;
@@ -1562,12 +1644,14 @@ function CanvasEditorInner({
     const command = (async () => {
       try {
         await mutateLibrary(async () => {
+        const insertionPosition = position
+          ? placeNewNode(position, CANVAS_DEFAULT_NODE_SIZE)
+          : defaultPosition();
         const remote = kind === 'asset'
-          ? await insertCanvasAsset(projectId, id, position, serverRevision.current)
-          : await insertCanvasPrompt(projectId, id, position, serverRevision.current);
+          ? await insertCanvasAsset(projectId, id, insertionPosition, serverRevision.current)
+          : await insertCanvasPrompt(projectId, id, insertionPosition, serverRevision.current);
         const previousIds = new Set(before.nodes.map(node => node.id));
         const insertedNodes = remote.nodes.filter(node => !previousIds.has(node.id));
-        const inserted = insertedNodes[0];
         const insertedVersions = Object.fromEntries(
           Object.entries(remote.content_versions).filter(([versionId]) => (
             !before.content_versions[versionId]
@@ -1576,24 +1660,45 @@ function CanvasEditorInner({
         const concurrent = latestDocument.current ?? before;
         const concurrentIds = new Set(concurrent.nodes.map(node => node.id));
         const authoritativeRevision = Math.max(serverRevision.current, remote.revision);
+        const mergedVersions = acceptServerContentVersions(
+          concurrent.content_versions,
+          insertedVersions,
+        );
+        const placedInsertedNodes: CanvasNode[] = [];
+        const { flowBounds } = canvasPlacementBounds();
+        for (const inserted of insertedNodes) {
+          if (concurrentIds.has(inserted.id)) continue;
+          const placedPosition = placeCanvasNodeWithoutOverlap(
+            inserted.position,
+            [...concurrent.nodes, ...placedInsertedNodes],
+            canvasNodeRenderedSize(inserted, mergedVersions),
+            flowBounds,
+            node => canvasNodeRenderedSize(node, mergedVersions),
+          );
+          placedInsertedNodes.push({ ...inserted, position: placedPosition });
+        }
+        const remoteInsertedPositions = new Map(
+          insertedNodes.map(node => [node.id, node.position] as const),
+        );
+        const insertedLayoutChanged = placedInsertedNodes.some(node => {
+          const remotePosition = remoteInsertedPositions.get(node.id);
+          return node.position.x !== remotePosition?.x || node.position.y !== remotePosition?.y;
+        });
         const merged: CanvasDocument = {
           ...concurrent,
           revision: authoritativeRevision,
           updated_at: remote.updated_at,
           nodes: [
             ...concurrent.nodes,
-            ...insertedNodes.filter(node => !concurrentIds.has(node.id)),
+            ...placedInsertedNodes,
           ],
-          content_versions: acceptServerContentVersions(
-            concurrent.content_versions,
-            insertedVersions,
-          ),
+          content_versions: mergedVersions,
         };
         history.current.past.push(concurrent);
         history.current.past = history.current.past.slice(-50);
         history.current.future = [];
         serverRevision.current = authoritativeRevision;
-        if (dirtyVersion.current > dirtyAtInsertion) {
+        if (dirtyVersion.current > dirtyAtInsertion || insertedLayoutChanged) {
           saveQueued.current = merged;
           setSaveState('saving');
         } else {
@@ -1603,10 +1708,7 @@ function CanvasEditorInner({
         setDocument(merged);
         flowNodeCache.current.clear();
         setSelectedConnectionIds(new Set());
-        setSelectedNodeIds(inserted ? new Set([inserted.id]) : new Set());
-        requestAnimationFrame(() => {
-          if (inserted) documentQueryNode(inserted.id)?.focus();
-        });
+        setSelectedNodeIds(new Set());
         });
       } catch {
         // 错误已显示在创作库面板。
@@ -1705,12 +1807,9 @@ function CanvasEditorInner({
       commit(apply, true);
     }
     setSelectedConnectionIds(new Set());
-    setSelectedNodeIds(new Set([node.id]));
+    setSelectedNodeIds(new Set());
     setAddOpen(false);
     setCreateMenu(null);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      documentQueryNode(node.id)?.focus();
-    }));
   }
 
   function addTextNode(menu: CreateMenuState | null = createMenu) {
@@ -1722,10 +1821,11 @@ function CanvasEditorInner({
       inputPolicy: 'all_connected',
       preference: canvasUiPreferences.generation_defaults[kind],
     });
+    const nodeSize = kind === 'text' ? CANVAS_TEXT_NODE_DEFAULT_SIZE : CANVAS_DEFAULT_NODE_SIZE;
     const base = {
       id: makeId(kind),
       title: { text: '文本', image: '图片', video: '视频', audio: '音频' }[kind],
-      position: menu?.flow ?? defaultPosition(),
+      position: menu?.flow ? placeNewNode(menu.flow, nodeSize) : defaultPosition(nodeSize),
       z_index: 0,
     };
     const data = { current_version_id: null, generation_draft: draft, active_run_id: null };
@@ -1769,7 +1869,9 @@ function CanvasEditorInner({
       id: makeId('config'),
       title: '生成配置',
       type: 'config',
-      position: menu?.flow ?? defaultPosition(),
+      position: menu?.flow
+        ? placeNewNode(menu.flow, CANVAS_DEFAULT_NODE_SIZE)
+        : defaultPosition(CANVAS_DEFAULT_NODE_SIZE),
       z_index: 0,
       data: { draft },
     }, menu);
@@ -1799,7 +1901,12 @@ function CanvasEditorInner({
       const base = {
         id: makeId(version.kind),
         title: uploaded.filename,
-        position: menu?.flow ?? defaultPosition(),
+        position: (() => {
+          const size = version.kind === 'image'
+            ? sizeLockedToCanvasVersion(null, version)
+            : CANVAS_DEFAULT_NODE_SIZE;
+          return menu?.flow ? placeNewNode(menu.flow, size) : defaultPosition(size);
+        })(),
         z_index: 0,
       };
       const node: CanvasContentNode = version.kind === 'audio'
@@ -1861,10 +1968,24 @@ function CanvasEditorInner({
     const offset = 28 * pasteSequence.current;
     const idMap = new Map(payload.nodes.map(node => [node.id, makeId(node.type)]));
     const topZ = Math.max(0, ...(document?.nodes.map(node => node.z_index) ?? []));
+    const versions = latestDocument.current?.content_versions ?? {};
+    const left = Math.min(...payload.nodes.map(node => node.position.x));
+    const top = Math.min(...payload.nodes.map(node => node.position.y));
+    const right = Math.max(...payload.nodes.map(node => (
+      node.position.x + canvasNodeRenderedSize(node, versions).width
+    )));
+    const bottom = Math.max(...payload.nodes.map(node => (
+      node.position.y + canvasNodeRenderedSize(node, versions).height
+    )));
+    const groupPosition = placeNewNode(
+      { x: left + offset, y: top + offset },
+      { width: right - left, height: bottom - top },
+    );
+    const shift = { x: groupPosition.x - left, y: groupPosition.y - top };
     const nodes = payload.nodes.map((source, index) => cloneCanvasNode(
       source,
       idMap,
-      { x: source.position.x + offset, y: source.position.y + offset },
+      { x: source.position.x + shift.x, y: source.position.y + shift.y },
       topZ + index + 1,
     ));
     const connections = payload.connections.flatMap(connection => {
@@ -1880,8 +2001,7 @@ function CanvasEditorInner({
       connections: [...current.connections, ...connections],
     }), true);
     setSelectedConnectionIds(new Set());
-    setSelectedNodeIds(new Set(nodes.map(node => node.id)));
-    requestAnimationFrame(() => documentQueryNode(nodes[0].id)?.focus());
+    setSelectedNodeIds(new Set());
     announceToolNotice(`已粘贴 ${nodes.length} 个节点`);
   }
 
@@ -1902,7 +2022,7 @@ function CanvasEditorInner({
       id: nodeId,
       type: 'text',
       title: '粘贴文本',
-      position: defaultPosition(),
+      position: defaultPosition(CANVAS_TEXT_NODE_DEFAULT_SIZE),
       z_index: 0,
       data: {
         current_version_id: versionId,
@@ -1918,8 +2038,7 @@ function CanvasEditorInner({
       content_versions: { ...current.content_versions, [versionId]: version },
     }), true);
     setSelectedConnectionIds(new Set());
-    setSelectedNodeIds(new Set([nodeId]));
-    requestAnimationFrame(() => documentQueryNode(nodeId)?.focus());
+    setSelectedNodeIds(new Set());
     announceToolNotice('已从剪贴板创建文本节点');
   }
 
@@ -2753,7 +2872,7 @@ function CanvasEditorInner({
         return {
           ...candidate,
           size: version?.kind === 'image'
-            ? sizeLockedToVersion(candidate.size, version)
+            ? sizeLockedToCanvasVersion(candidate.size, version)
             : candidate.size,
           data: {
             ...candidate.data,
@@ -2965,12 +3084,9 @@ function CanvasEditorInner({
     commit(() => next, true);
     setDismissedGenerationPanelNodeId(null);
     setSelectedConnectionIds(new Set());
-    setSelectedNodeIds(new Set([configId]));
+    setSelectedNodeIds(new Set());
     setAddOpen(false);
     setCreateMenu(null);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      documentQueryNode(configId)?.focus();
-    }));
   }, [canvasUiPreferences.generation_defaults.image, commit, keys]);
 
   const submitAngle = useCallback(async (params: CanvasAngleParams) => {
@@ -3253,6 +3369,7 @@ function CanvasEditorInner({
     completeNodeResize,
     renameNode,
     updateText,
+    setTextEditing,
     createImageConfigFromText,
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
@@ -3314,6 +3431,7 @@ function CanvasEditorInner({
     selectCandidate,
     selectOnlyNode,
     setMaterialConnected,
+    setTextEditing,
     setVideoFrameConnections,
     submitRun,
     submittingNodeIds,
@@ -4363,43 +4481,6 @@ function replacementAccept(kind: MediaReplaceTarget['kind']) {
 
 function reversePromptConfigNodeId(resultNodeId: string) {
   return `config-reverse-${resultNodeId}`;
-}
-
-function canvasNodeRenderedSize(
-  node: CanvasNode,
-  versions: Readonly<Record<string, CanvasContentVersion>>,
-) {
-  if (node.type === 'text') return node.size ?? { width: 256, height: 144 };
-  if (node.type !== 'image' || node.data.display.free_resize || !node.data.current_version_id) {
-    return node.size ?? { width: 320, height: 176 };
-  }
-  const version = versions[node.data.current_version_id];
-  return version?.kind === 'image'
-    ? sizeLockedToVersion(node.size, version)
-    : node.size ?? { width: 320, height: 176 };
-}
-
-function sizeLockedToVersion(
-  current: CanvasNode['size'],
-  version: CanvasMediaVersion,
-) {
-  if (!version.width || !version.height) return current ?? { width: 320, height: 176 };
-  const ratio = version.width / version.height;
-  let width = Math.min(4000, Math.max(240, current?.width ?? 320));
-  let height = width / ratio;
-  if (height < 150) {
-    height = 150;
-    width = height * ratio;
-  }
-  if (height > 4000) {
-    height = 4000;
-    width = height * ratio;
-  }
-  if (width > 4000) {
-    width = 4000;
-    height = width / ratio;
-  }
-  return { width: Math.round(width), height: Math.round(height) };
 }
 
 function cloneCanvasNode(

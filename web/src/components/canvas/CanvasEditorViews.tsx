@@ -154,6 +154,7 @@ export interface CanvasNodeContextValue {
   completeNodeResize?: (id: string, layout: { position: CanvasPoint; size: CanvasSize }) => void;
   renameNode: (id: string, title: string) => void;
   updateText: (id: string, text: string) => void;
+  setTextEditing?: (id: string, editing: boolean) => void;
   createImageConfigFromText: (id: string) => void;
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
@@ -178,6 +179,7 @@ const EMPTY_CANVAS_PENDING_INPUTS: readonly CanvasPendingInput[] = [];
 
 export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const context = useContext(CanvasNodeContext);
+  const setTextEditing = context?.setTextEditing;
   const node = data.domain;
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
@@ -245,13 +247,15 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
       const surface = contentSurfaceRef.current;
       if (!surface || !(event.target instanceof Element) || surface.contains(event.target)) return;
       textEditingExitRequested.current = true;
+      setTextEditing?.(node.id, false);
       setIsEditingText(false);
     };
     // blur 不能代表用户结束编辑：自动保存重渲染、切应用和输入法候选窗都可能让
     // textarea 短暂失焦。只响应用户明确点到编辑区外的 pointerdown。
     window.document.addEventListener('pointerdown', finishOnOutsidePointer, true);
     return () => window.document.removeEventListener('pointerdown', finishOnOutsidePointer, true);
-  }, [isEditingText]);
+  }, [isEditingText, node.id, setTextEditing]);
+  useEffect(() => () => setTextEditing?.(node.id, false), [node.id, setTextEditing]);
   useEffect(() => {
     if (isEditingTitle) return;
     if (restoreTitleFocus.current) titleTriggerRef.current?.focus();
@@ -348,11 +352,13 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     context.recordHistory();
     textEditingExitRequested.current = false;
     textSelectionRef.current = null;
+    setTextEditing?.(node.id, true);
     setIsEditingText(true);
   }
 
   function finishTextEditing(restoreFocus: boolean) {
     textEditingExitRequested.current = true;
+    setTextEditing?.(node.id, false);
     setIsEditingText(false);
     if (restoreFocus) requestAnimationFrame(() => contentSurfaceRef.current?.focus());
   }
