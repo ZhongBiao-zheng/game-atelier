@@ -547,12 +547,16 @@ async def post_upload(file: UploadFile = File(...)) -> dict:
     Skill 拿到后将其挪到 characters/<id>/source/。
     """
     raw_name, ext, body, _media_kind = await _read_media_upload(file)
+    target = await run_in_threadpool(_store_runtime_upload, ext, body)
+    return {"path": str(target.resolve()), "filename": raw_name}
+
+
+def _store_runtime_upload(ext: str, body: bytes) -> Path:
     uploads = _runtime() / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
-    name = f"{uuid.uuid4().hex}{ext}"
-    target = uploads / name
+    target = uploads / f"{uuid.uuid4().hex}{ext}"
     atomic_write_bytes(target, body)
-    return {"path": str(target.resolve()), "filename": raw_name}
+    return target
 
 
 @router.post("/characters/{character_id}/gallery/{kind}")
@@ -580,6 +584,16 @@ async def post_gallery_image(
             413, detail=_size_reject_detail(raw_name, body, _IMAGE_UPLOAD_MAX_BYTES)
         )
 
+    job_id, target = await run_in_threadpool(_store_gallery_upload, character_id, kind, ext, body)
+    return {"job_id": job_id, "path": str(target.resolve()), "filename": raw_name}
+
+
+def _store_gallery_upload(
+    character_id: str,
+    kind: str,
+    ext: str,
+    body: bytes,
+) -> tuple[str, Path]:
     out_dir = _project_root() / "characters" / character_id / kind
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -601,8 +615,7 @@ async def post_gallery_image(
         asset_slot=_AssetSlot(kind),
     )
     update_job_status(job_id, status=JobStatus.DONE, output_paths=[str(target.resolve())])
-
-    return {"job_id": job_id, "path": str(target.resolve()), "filename": raw_name}
+    return job_id, target
 
 
 @router.post("/characters", response_model=CharacterEntry)
@@ -2136,13 +2149,17 @@ async def post_canvas_project_import_inspect(file: UploadFile = File(...)) -> di
     target = upload_root / f"upload-{uuid.uuid4().hex}.zip"
     total = 0
     try:
+        # 落盘和解包都是同步阻塞的，而这条路由必须是 async（要 await 分块读上传流）。
+        # 直接在协程里做，2 GiB 的写入加整包扫描会把事件循环连同 SSE 一起冻住；
+        # inspect_canvas_package 还会去抢画布文件锁，Skill 进程持锁时是无限期阻塞。
         with target.open("wb") as output:
             while chunk := await file.read(8 * 1024 * 1024):
                 total += len(chunk)
                 if total > 2 * 1024 * 1024 * 1024:
                     raise HTTPException(413, detail="Canvas 项目包不能超过 2 GiB")
-                output.write(chunk)
-        return inspect_canvas_package(target).model_dump(mode="json")
+                await run_in_threadpool(output.write, chunk)
+        result = await run_in_threadpool(inspect_canvas_package, target)
+        return result.model_dump(mode="json")
     except CanvasProjectBusyError as error:
         raise HTTPException(409, detail=str(error)) from error
     except CanvasPackageError as error:
@@ -2595,8 +2612,12 @@ async def post_canvas_upload(
     from character_workflow.lib.canvas_projects import save_canvas_upload
     raw_name, ext, body, media_kind = await _read_media_upload(file)
     try:
-        version, document, filename = save_canvas_upload(
-            project_id, raw_name, ext, body, media_kind, expected_revision
+        # 这条路由必须是 async（要 await 读上传流），但落盘的这一段是同步的：解码媒体、抢画布
+        # 文件锁、写文档。Skill 进程持锁时锁等待没有上限，直接在协程里做等于整个事件循环停摆
+        # （SSE 一起断）。同文件的 media-operations 路由用的就是这个写法。
+        version, document, filename = await run_in_threadpool(
+            save_canvas_upload,
+            project_id, raw_name, ext, body, media_kind, expected_revision,
         )
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
@@ -2631,7 +2652,8 @@ async def post_canvas_node_media_replace(
 
     raw_name, ext, body, media_kind = await _read_media_upload(file, "replacement")
     try:
-        version, document, filename = replace_canvas_node_media(
+        version, document, filename = await run_in_threadpool(
+            replace_canvas_node_media,
             project_id,
             node_id,
             raw_name,
@@ -2930,7 +2952,8 @@ async def post_canvas_mask_edit(
             requested_count=requested_count,
         )
         body = await mask_file.read(25 * 1024 * 1024 + 1)
-        job, document = submit_mask_edit_run(
+        job, document = await run_in_threadpool(
+            submit_mask_edit_run,
             project_id,
             payload.surface_node_id,
             payload.expected_revision,

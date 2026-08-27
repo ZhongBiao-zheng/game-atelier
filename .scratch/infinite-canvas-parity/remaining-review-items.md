@@ -23,12 +23,12 @@
 | B4 | 生成按钮 5 个禁用条件（4 种引用错误 + 无密钥 / 无模型），界面对哪一个都不解释 | `CanvasEditorViews.tsx:1963` | low | ✅ 已修：`canvasGenerateBlock` 出三条结构性原因，缺模型两条渲染在提示词下方（带 aria-describedby），缺提示词借用状态行 |
 | B5 | 新建的空画布没有任何空状态引导 | `CanvasEditor.tsx:3220` 附近 | low | ✅ 已修：空画布居中卡片 + 文本节点 / 图片节点 / 上传素材三个直达按钮 |
 
-## C 组 · 性能（6 条，C1 已修）
+## C 组 · 性能（6 条，C1 C2 已修）
 
 | # | 问题 | 位置 | 级别 | 现状复核 |
 |---|---|---|---|---|
 | C1 | `contextValue` 混入 `viewportZoom` / `content_versions`，缩放和打字穿透 memo 重渲染所有节点卡 | `CanvasEditor.tsx:3060` 附近 | medium | ✅ 已修：`viewportZoom` 是死字段（无消费方）直接删；版本表换成常量引用的 `resolveVersion`；另查出第三个同类源 `reversePromptConfiguredNodeIds`（`useMemo(..., [document])`），改走图签名。回归测试量的是 context 引用变化次数 |
-| C2 | async 路由里直接调同步阻塞的包导入 / 上传，冻住整个事件循环（含 SSE） | `routes.py:2145` | medium | 确认未修：同文件 2704 行的媒体路由用的是 `run_in_threadpool`，是内部不一致 |
+| C2 | async 路由里直接调同步阻塞的包导入 / 上传，冻住整个事件循环（含 SSE） | `routes.py:2145` | medium | ✅ 已修：6 条 async 路由的阻塞段全部走 `run_in_threadpool`（项目包扫描 / 分块落盘 / 画布上传 / 媒体替换 / 蒙版编辑 / 图廊上传 + job 写入）。判据不是耗时而是**抢文件锁**：Skill 持锁时协程里等锁没有上限 |
 | C3 | 节点缩略图直接用原图，缩放到全局会一次性拉满分辨率原图 | `web/src/api/canvas.ts:344` | medium | 未复核细节；200 节点时是 200 张全分辨率原图同时解码 |
 | C4 | `flowEdges` 依赖 `document.nodes` + `activeNodeId`，每帧 / 每键 / 每次 hover 重建全部连线 | `CanvasEditor.tsx:991` | low | 未复核细节 |
 | C5 | `onNodesChange` 里逐 change 做 `nodes.map`，多选拖动是 O(n²) 且每帧都跑 | `CanvasEditor.tsx:1022` | low | 未复核细节 |
