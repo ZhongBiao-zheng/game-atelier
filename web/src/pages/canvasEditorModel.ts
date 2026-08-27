@@ -672,3 +672,39 @@ export function normalizeCanvasVideoParams(
   }
   return params;
 }
+
+/** 「开始生成」按钮被禁用的原因。
+ *  这个按钮有五个禁用条件：四类引用错误（由 referenceErrorMessage 出文案）、没有可用模型、
+ *  没有选中模型、提示词为空。后三条原来一条都不解释，用户看到的只是一个点不动的按钮——
+ *  没有密钥的新用户尤其如此，界面上既不说缺什么，也不说去哪儿补。
+ *  kind 用来区分要不要把这句话渲染出来：提示词为空时输入框本身已经在说了，只进 title。 */
+export type CanvasGenerateBlock = {
+  kind: 'no_model_available' | 'no_model_selected' | 'no_prompt';
+  message: string;
+};
+
+export function canvasGenerateBlock(input: {
+  mode: CanvasGenerationDraft['mode'];
+  modelChoiceCount: number;
+  keyCount: number;
+  alias: string | null | undefined;
+  modelSelected: boolean;
+  prompt: string;
+}): CanvasGenerateBlock | null {
+  if (input.modelChoiceCount === 0) {
+    const label = CANVAS_GENERATION_MODE_LABELS[input.mode];
+    return {
+      kind: 'no_model_available',
+      message: input.keyCount === 0
+        ? '还没有配置任何模型密钥。'
+        : `已配置的密钥里没有能做${label}生成的模型。`,
+    };
+  }
+  if (!input.alias || !input.modelSelected) {
+    return { kind: 'no_model_selected', message: '先在上方选择一个生成模型。' };
+  }
+  if (!input.prompt.trim()) {
+    return { kind: 'no_prompt', message: '先填写提示词。' };
+  }
+  return null;
+}

@@ -17,6 +17,7 @@ import {
   type ReactNode, type Ref, type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'wouter';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import type { KeyView } from '@/api/keys';
@@ -82,6 +83,7 @@ import {
   canvasNodeProvidesContent,
   CANVAS_GENERATION_MODE_LABELS,
   CANVAS_MAX_NODE_SIZE,
+  canvasGenerateBlock,
   canvasGenerationModelSupportsMode,
   canvasVideoEditCaps,
   normalizeCanvasAudioParams,
@@ -1675,7 +1677,25 @@ export function CanvasGenerationComposer({
     videoReferenceCapacityExceeded,
     pendingInputTitles: blockingPendingInputs.map(input => input.title),
   });
-  const hasReferenceError = referenceProblem !== null;
+  // 结构性阻塞（没有可用模型 / 没选模型 / 没提示词）排在引用问题前面：引用问题上面已经有一条
+  // 红色告警在说了，这三条原来一句解释都没有。
+  const generateBlock = canvasGenerateBlock({
+    mode: draft.mode,
+    modelChoiceCount: modelChoices.length,
+    keyCount: context.keys.length,
+    alias: draft.alias,
+    modelSelected: Boolean(selectedModel),
+    prompt: draft.prompt,
+  });
+  const blockedReason = generateBlock?.message ?? referenceProblem;
+  const generateDisabled = submitting || blockedReason !== null;
+  const generateBlockHintId = `${node.id}-generate-block-${embedded ? 'embedded' : 'floating'}`;
+  // 三条原因各只显示一次：缺模型的两条在提示词下方（带设置入口），缺提示词那条借用状态行
+  // ——那行原本在一个点不动的按钮旁边写着「配置已保存」。任务本身报错时错误优先。
+  const showBlockHint = Boolean(generateBlock && generateBlock.kind !== 'no_prompt');
+  const statusText = generateBlock?.kind === 'no_prompt' && !activeJob?.error
+    ? generateBlock.message
+    : runStatus(activeJob);
 
   useEffect(() => {
     if (!usesVideoFrameSlots || !videoCaps) return;
@@ -1812,12 +1832,25 @@ export function CanvasGenerationComposer({
               ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
-      {referenceProblem && (
+      {referenceProblem ? (
         <p
           role="alert"
           className="mt-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs leading-relaxed text-destructive"
         >
           {referenceProblem}
+        </p>
+      ) : showBlockHint && generateBlock && (
+        // 没有可用模型时给一条真出口——沉浸式画布把顶栏（含设置入口）整块藏了，
+        // 新用户在这里除了一个点不动的按钮什么都看不到。
+        <p id={generateBlockHintId} className="mt-1.5 px-1 text-xs leading-relaxed text-muted-foreground">
+          {generateBlock.message}
+          {generateBlock.kind === 'no_model_available' && (
+            <>
+              {' '}
+              <Link href="/settings" className="text-primary underline underline-offset-2">去设置里添加</Link>
+              后回来再生成。
+            </>
+          )}
         </p>
       )}
       {node.type !== 'image' && !textMode && (
@@ -1977,8 +2010,8 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-        <span className="max-w-52 truncate text-xs text-muted-foreground" title={runStatus(activeJob)}>
-          {runStatus(activeJob)}
+        <span className="max-w-52 truncate text-xs text-muted-foreground" title={statusText}>
+          {statusText}
         </span>
         {running && activeJob && (
           <Button
@@ -1998,7 +2031,9 @@ export function CanvasGenerationComposer({
             type="button"
             size="sm"
             className="ml-auto"
-            disabled={submitting || hasReferenceError || !draft.prompt.trim() || !draft.alias || !selectedModel}
+            disabled={generateDisabled}
+            title={blockedReason ?? undefined}
+            aria-describedby={showBlockHint ? generateBlockHintId : undefined}
             onClick={() => void context.retryRun(node.id, runId)}
           >
             {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
@@ -2010,7 +2045,9 @@ export function CanvasGenerationComposer({
             type="button"
             size="sm"
             className="ml-auto"
-            disabled={submitting || hasReferenceError || !draft.prompt.trim() || !draft.alias || !selectedModel}
+            disabled={generateDisabled}
+            title={blockedReason ?? undefined}
+            aria-describedby={showBlockHint ? generateBlockHintId : undefined}
             onClick={() => void context.submitRun(node.id)}
           >
             {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}

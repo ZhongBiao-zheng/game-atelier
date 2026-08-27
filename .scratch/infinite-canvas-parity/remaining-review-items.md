@@ -13,15 +13,15 @@
 | A4 | 轮询用整体赋值写 jobs，覆盖刚提交的 job，最坏把轮询自己停掉 | `CanvasEditor.tsx:741` | medium | ✅ 已修：轮询发请求前拍 epoch，响应落地时 epoch 变了就走 `acceptCanvasJobs` 并入 |
 | A5 | 空节点可以先连线，服务端在 `all_connected` 下整单拒绝，报错不指名是哪个节点 | `canvasEditorModel.ts:62` `canvasNodeProvidesOutput` | medium | ✅ 已修：前端 `canvasPendingInputNodes` 在按钮上拦住并指名；服务端错误也改成指名版本 |
 
-## B 组 · 承诺落空 / 首次使用（5 条）
+## B 组 · 承诺落空 / 首次使用 —— ✅ 全部已修（2026-08-27）
 
 | # | 问题 | 位置 | 级别 | 现状复核 |
 |---|---|---|---|---|
-| B1 | 全新用户在沉浸式画布里是死路：没密钥时生成按钮无原因禁用，顶栏（含设置入口）被整块隐藏 | `AppShell.tsx:77-82` | medium | 确认未修：`immersiveCanvas` 匹配 `/canvas/<id>` 时 header 不渲染；模型下拉里已有「请先在设置中配置密钥」文案，但没有出口 |
-| B2 | Shift / ⌘ 点击追加选择被 `selectOnlyNode` 打平，快捷键面板承诺的多选方式失效 | `CanvasEditor.tsx:3307` | medium | 确认未修：`onNodeClick` 无条件调 `selectOnlyNode` |
-| B3 | 反推提示词完成后自动创建配置节点、抢走选中态，删掉后刷新会复活 | `CanvasEditor.tsx:2354` 附近 | medium | 未复核细节 |
-| B4 | 生成按钮 5 个禁用条件（4 种引用错误 + 无密钥 / 无模型），界面对哪一个都不解释 | `CanvasEditorViews.tsx:1963` | low | 部分修：引用错误文案已加；按钮本身仍无 `title` / `aria-describedby` |
-| B5 | 新建的空画布没有任何空状态引导 | `CanvasEditor.tsx:3220` 附近 | low | 确认未修：全仓 grep 不到画布空状态文案 |
+| B1 | 全新用户在沉浸式画布里是死路：没密钥时生成按钮无原因禁用，顶栏（含设置入口）被整块隐藏 | `AppShell.tsx:77-82` | medium | ✅ 已修：画布控件条（桌面左下 / 窄屏左侧轨）加了 `/settings` 入口；无可用模型时生成面板里直接给「去设置里添加」链接 |
+| B2 | Shift / ⌘ 点击追加选择被 `selectOnlyNode` 打平，快捷键面板承诺的多选方式失效 | `CanvasEditor.tsx:3307` | medium | ✅ 已修：带修饰键时 `onNodeClick` 让路给 xyflow 自己的选择集；`multiSelectionKeyCode` 加上 Shift，同时把 `selectionKeyCode` 置空（否则 Pane 会吞掉落在节点上的 pointerdown 去起框选） |
+| B3 | 反推提示词完成后自动创建配置节点、抢走选中态，删掉后刷新会复活 | `CanvasEditor.tsx:2354` 附近 | medium | ✅ 已修：自动创建只对本会话提交过的 run 生效（原判据「结果节点上还没挂配置」刷新后又成立）；只有选择还停在反推结果节点上时才移动焦点 |
+| B4 | 生成按钮 5 个禁用条件（4 种引用错误 + 无密钥 / 无模型），界面对哪一个都不解释 | `CanvasEditorViews.tsx:1963` | low | ✅ 已修：`canvasGenerateBlock` 出三条结构性原因，缺模型两条渲染在提示词下方（带 aria-describedby），缺提示词借用状态行 |
+| B5 | 新建的空画布没有任何空状态引导 | `CanvasEditor.tsx:3220` 附近 | low | ✅ 已修：空画布居中卡片 + 文本节点 / 图片节点 / 上传素材三个直达按钮 |
 
 ## C 组 · 性能（6 条）
 
@@ -51,6 +51,12 @@
 **第二批（A 组 5 条）**：见上表。7 条回归测试，每条都验过「把修复改回去会红」。
 
 **第三批（D1）**：接入 ESLint。commit e596b90。
+
+**第四批（B 组 5 条）**：见上表。4 条回归测试，每条都验过「把修复改回去会红」。
+Shift 点击这条在浏览器里验不了：`computer` 的每一次操作都会重新聚焦标签页，而 xyflow 的
+`useKeyPress` 挂了 `window blur` 重置，合成的「按住 Shift」在点击落地前必被清掉。
+判据改为读 xyflow 源码（`handleNodeClick` 在 `onNodeClick` 之前跑、`Pane.onPointerDownCapture`
+在 selectionKey 按下时吞掉节点上的 pointerdown）+ 单测复刻同一顺序。
 
 ## 已定的事
 

@@ -38,6 +38,7 @@ import {
   Plus,
   Redo2,
   Scan,
+  Settings,
   Settings2,
   Square,
   Trash2,
@@ -48,6 +49,7 @@ import {
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react';
+import { Link } from 'wouter';
 
 import {
   cancelCanvasRun,
@@ -307,6 +309,10 @@ const CANVAS_MOUSE_PAN_BUTTONS: number[] = [];
 const CANVAS_NODE_CLIPBOARD_TYPE = 'application/x-game-atelier-canvas-nodes';
 const CANVAS_MIN_ZOOM = 0.08;
 const CANVAS_MAX_ZOOM = 2.5;
+// xyflow 默认只认 Meta/Control，Shift 归 selectionKeyCode（框选）。框选已经由 selectionOnDrag
+// 接管，所以把 Shift 也并进多选键、并把 selectionKeyCode 置空，和快捷键面板写的「Shift / ⌘ 点击」对齐。
+const CANVAS_MULTI_SELECT_KEYS = ['Shift', 'Meta', 'Control'];
+
 const CANVAS_CHROME_BUTTON_CLASS = 'grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
 export function CanvasEditor(props: {
@@ -345,6 +351,8 @@ function CanvasEditorInner({
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [submittingNodeIds, setSubmittingNodeIds] = useState<Set<string>>(() => new Set());
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
+  // 供异步回调读当前选择用：后台自动动作要判断「用户是不是已经去点别的了」。
+  const latestSelectedNodeIds = useRef(selectedNodeIds);
   const [selectedConnectionIds, setSelectedConnectionIds] = useState<Set<string>>(() => new Set());
   const [dismissedGenerationPanelNodeId, setDismissedGenerationPanelNodeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
@@ -415,6 +423,9 @@ function CanvasEditorInner({
   const syncedTerminalRuns = useRef(new Set<string>());
   const syncedCandidateVersionIds = useRef(new Set<string>());
   const reversePromptConfigAttempts = useRef(new Set<string>());
+  // 只有本会话提交过的反推 run 才会自动生成图片配置节点。原来的判据是「这个结果节点上还没挂配置」，
+  // 于是删掉配置节点后刷新，甚至只是第一次打开一个有历史反推记录的项目，节点都会自己长回来。
+  const reversePromptConfigEligibleRuns = useRef(new Set<string>());
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
   const viewportSync = useRef<ViewportSyncToken | null>(null);
   const nodeClipboard = useRef<CanvasClipboardPayload | null>(null);
@@ -519,6 +530,7 @@ function CanvasEditorInner({
     syncedTerminalRuns.current.clear();
     syncedCandidateVersionIds.current.clear();
     reversePromptConfigAttempts.current.clear();
+    reversePromptConfigEligibleRuns.current.clear();
     dirtyVersion.current = 0;
     setDirtySignal(0);
     serverRevision.current = 0;
@@ -824,6 +836,10 @@ function CanvasEditorInner({
   }, [createMenu]);
 
   latestDocument.current = document;
+  useEffect(() => {
+    latestSelectedNodeIds.current = selectedNodeIds;
+  }, [selectedNodeIds]);
+
   const selectedId = selectedNodeIds.size === 1
     ? selectedNodeIds.values().next().value ?? null
     : null;
@@ -2001,6 +2017,7 @@ function CanvasEditorInner({
         node.id,
         serverRevision.current,
       );
+      if (run.job.canvas_run) reversePromptConfigEligibleRuns.current.add(run.job.canvas_run.run_id);
       mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
       applyLocalJob(run.job);
       const resultId = run.job.canvas_run?.result_node_id;
@@ -2036,6 +2053,9 @@ function CanvasEditorInner({
       const dirtyAtSubmission = dirtyVersion.current;
       runSubmissionInFlight.current = true;
       const run = await retryCanvasRun(projectId, runId, serverRevision.current);
+      if (run.job.canvas_run && isReversePromptJob(run.job)) {
+        reversePromptConfigEligibleRuns.current.add(run.job.canvas_run.run_id);
+      }
       mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
       applyLocalJob(run.job);
       const resultId = run.job.canvas_run?.result_node_id;
@@ -2439,8 +2459,13 @@ function CanvasEditorInner({
       }
       flowNodeCache.current.clear();
       setDocument(merged);
-      setSelectedConnectionIds(new Set());
-      setSelectedNodeIds(new Set([configId]));
+      // 这是后台自动动作，不是用户点出来的：只有当选择还停在反推结果节点上（提交时留下的那个
+      // 选中态）才把焦点挪到新配置节点。用户已经去点别的东西了就别抢。
+      const selection = latestSelectedNodeIds.current;
+      if (selection.size === 1 && selection.has(context.result_node_id)) {
+        setSelectedConnectionIds(new Set());
+        setSelectedNodeIds(new Set([configId]));
+      }
       announceToolNotice('已从反推文本创建图片生成配置');
     } catch (configError) {
       setError((configError as Error).message);
@@ -2466,6 +2491,7 @@ function CanvasEditorInner({
         && isReversePromptJob(job)
         && (job.status === 'done' || job.status === 'partial')
         && context.candidates.some(candidate => candidate.status === 'succeeded')
+        && reversePromptConfigEligibleRuns.current.has(context.run_id)
         && !reversePromptConfiguredNodeIds.has(context.result_node_id)
         && !reversePromptConfigAttempts.current.has(context.run_id),
       );
@@ -3337,6 +3363,14 @@ function CanvasEditorInner({
           </DropdownMenuCheckboxItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {/* 沉浸式画布把整条顶栏（含设置入口）藏了：没有密钥的新用户在画布里点不动「生成」，
+          也没有任何地方能去配置。这颗按钮是画布内唯一的全局设置出口。 */}
+      <Link
+        href="/settings"
+        title="设置"
+        aria-label="设置"
+        className={CANVAS_CHROME_BUTTON_CLASS}
+      ><Settings aria-hidden="true" /></Link>
       <ToolButton
         buttonRef={shortcutsTriggerRef}
         label="快捷键"
@@ -3366,7 +3400,19 @@ function CanvasEditorInner({
           isValidConnection={isValidConnection}
           onEdgesChange={onEdgesChange}
           onNodesChange={onNodesChange}
-          onNodeClick={(_, node) => selectOnlyNode(node.id)}
+          multiSelectionKeyCode={CANVAS_MULTI_SELECT_KEYS}
+          // Shift 必须从 selectionKeyCode 上摘掉，否则 Pane 的 onPointerDownCapture 会在按住 Shift 时
+          // 把落在节点上的 pointerdown 也吞掉去起框选（stopPropagation + preventDefault），
+          // 节点根本收不到这次点击，松手时零面积框选还会把整个选择清空。
+          // 框选本来就由 selectionOnDrag 接管（空白处直接拖），Shift 这一路是多余的。
+          selectionKeyCode={null}
+          onNodeClick={(event, node) => {
+            // xyflow 在 onNodeClick 之前已经按 multiSelectionKeyCode 把这次点击并进（或移出）选择集，
+            // 这里再无条件调 selectOnlyNode 会立刻打平成单选——快捷键面板承诺的「Shift / ⌘ 点击追加
+            // 选择」一直因此失效。取材模式不参与：那时点击的语义是「挑这一个」。
+            if (!materialPick && (event.shiftKey || event.metaKey || event.ctrlKey)) return;
+            selectOnlyNode(node.id);
+          }}
           onNodeMouseEnter={(_, node) => setHoveredNodeId(node.id)}
           onNodeMouseLeave={(_, node) => setHoveredNodeId(current => current === node.id ? null : current)}
           onNodeDragStart={recordHistorySnapshot}
@@ -3442,6 +3488,31 @@ function CanvasEditorInner({
             />
           )}
         </ReactFlow>
+
+        {document.nodes.length === 0 && !materialPick && (
+          // 新建的画布原来是一整块空背景：没有任何东西说这里能放什么、从哪儿开始。
+          // 壳不吃事件，画布照样能拖能缩放。
+          <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center p-6">
+            <div className="pointer-events-auto flex max-w-sm flex-col items-center gap-3 rounded-xl border border-border bg-glass p-6 text-center backdrop-blur-glass shell-glow">
+              <p className="text-sm font-medium text-foreground">画布还是空的</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                从一个节点开始：文本节点写提示词，空的图片 / 视频节点填生成设置，
+                或者把本地素材直接拖进画布。节点之间连线，输出就会成为下一步的输入。
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => addTextNode(null)}>
+                  <Type aria-hidden="true" />文本节点
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => addGenerationNode('image', null)}>
+                  <FileImage aria-hidden="true" />图片节点
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => uploadRef.current?.click()}>
+                  <Upload aria-hidden="true" />上传素材
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {selectedNodeIds.size > 1 && (
           <div

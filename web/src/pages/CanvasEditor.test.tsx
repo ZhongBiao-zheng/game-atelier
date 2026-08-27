@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 
 import { CanvasEditor } from './CanvasEditor';
 import {
+  createCanvasReversePromptConfig,
   getCanvasDocument,
   listCanvasJobs,
   listCanvasProjects,
@@ -29,7 +30,7 @@ vi.mock('@xyflow/react', () => {
     useStore: (selector: (state: { transform: [number, number, number] }) => unknown) =>
       selector({ transform: [0, 0, 1] }),
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onMoveEnd, onDragOver, onDrop }: {
+    ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, multiSelectionKeyCode, selectionKeyCode, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onMoveEnd, onDragOver, onDrop }: {
       children: React.ReactNode;
       edges: Array<{ id: string; selected?: boolean }>;
       nodes: Array<{ id: string; selected?: boolean; data: unknown }>;
@@ -40,15 +41,29 @@ vi.mock('@xyflow/react', () => {
       onEdgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean }>) => void;
       onNodesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean }>) => void;
       onNodeClick?: (event: React.MouseEvent, node: { id: string }) => void;
+      multiSelectionKeyCode?: string[];
+      selectionKeyCode?: string[] | null;
       onMoveEnd?: (event: unknown, viewport: { x: number; y: number; zoom: number }) => void;
       onDragOver?: (event: unknown) => void;
       onDrop?: (event: unknown) => void;
     }) => {
       const CanvasNode = nodeTypes?.canvasNode;
       return (
-        <div data-testid="react-flow" data-node-count={nodes.length} data-visible-only={onlyRenderVisibleElements}>
+        <div data-testid="react-flow" data-node-count={nodes.length} data-visible-only={onlyRenderVisibleElements} data-multi-select-keys={(multiSelectionKeyCode ?? []).join(',')} data-selection-key={selectionKeyCode === null ? 'none' : String(selectionKeyCode)}>
           {nodes.map(node => (
-            <button type="button" key={node.id} aria-label={`flow-node-${node.id}`} onClick={event => onNodeClick?.(event, node)} />
+            <button
+              type="button"
+              key={node.id}
+              aria-label={`flow-node-${node.id}`}
+              onClick={event => {
+                // 复刻 xyflow 的真实顺序：handleNodeClick 先按 multiSelectionKeyCode 更新选择集，
+                // 之后才轮到 onNodeClick。B2 的 bug 就藏在这个顺序里。
+                if (event.shiftKey || event.metaKey || event.ctrlKey) {
+                  onNodesChange?.([{ id: node.id, type: 'select', selected: !node.selected }]);
+                }
+                onNodeClick?.(event, node);
+              }}
+            />
           ))}
           {CanvasNode && nodes.filter(node => node.selected).map(node => (
             <CanvasNode key={`view-${node.id}`} id={node.id} data={node.data} selected={true} />
@@ -855,4 +870,96 @@ it('keeps a just-submitted job that an in-flight poll response predates', async 
   await waitFor(() => expect(
     document.querySelector('[data-canvas-node-status-label="loading"]'),
   ).not.toBeNull(), { timeout: 1000 });
+});
+
+it('appends to the selection on a modifier click instead of collapsing it to one node', async () => {
+  // 快捷键面板一直写着「Shift / ⌘ 点击追加选择节点」，但 onNodeClick 无条件调 selectOnlyNode，
+  // 把 xyflow 刚并进来的那一次点击立刻打平成单选。
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [textNode('text-one', '开场白'), imageNode('image-one', '图片')],
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  expect(screen.getByTestId('react-flow').dataset.multiSelectKeys).toBe('Shift,Meta,Control');
+  // Shift 必须同时从 selectionKeyCode 上摘掉：xyflow 的 Pane 在按住 selectionKey 时会用
+  // onPointerDownCapture 吞掉落在节点上的 pointerdown 去起框选，节点永远收不到这次点击。
+  expect(screen.getByTestId('react-flow').dataset.selectionKey).toBe('none');
+
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-text-one' }));
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-image-one' }), { shiftKey: true });
+
+  expect(await screen.findByRole('toolbar', { name: '已选择 2 个节点' })).toBeTruthy();
+});
+
+it('leaves a reverse-prompt config node deleted instead of recreating it on the next load', async () => {
+  // 自动创建的判据原来是「这个结果节点上还没挂配置」。删掉配置节点后一刷新判据又成立，
+  // 节点自己长回来；打开一个有历史反推记录的项目同样会凭空长出配置节点。
+  const reverseJob = {
+    job_id: 'job-reverse', character_id: 'main', prompt: '反推',
+    submitted_at: '2026-08-26T00:00:00Z', model: 'gpt-5', params: { n: 1 },
+    output_paths: [], status: 'done', error: null, kind: 'text', namespace: 'canvas',
+    canvas_project_id: 'canvas-one', alias: 'main', provider: 'openai',
+    canvas_run: {
+      run_id: 'run-reverse',
+      result_node_id: 'text-reverse',
+      candidates: [{
+        candidate_id: 'run-reverse-0', index: 0, status: 'succeeded',
+        version_id: 'version-reverse', error: null,
+      }],
+      snapshot: {
+        snapshot_version: 1, surface_node_id: 'image-one', result_node_id: 'text-reverse',
+        mode: 'text', final_prompt: '反推', input_policy: 'mentions_only',
+        model: 'gpt-5', provider: 'openai', alias: 'main',
+        normalized_params: { preset_id: 'canvas.reverse_prompt', preset_version: 1 },
+        inputs: [], mask_version_id: null, submitted_at: '2026-08-26T00:00:00Z',
+        submitted_by: { kind: 'user', actor_id: null }, request_fingerprint: 'f',
+      },
+    },
+  } as unknown as Job;
+  vi.mocked(listCanvasJobs).mockResolvedValue([reverseJob]);
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [textNode('text-reverse', '反推提示词', 'version-reverse')],
+    content_versions: {
+      'version-reverse': {
+        version_id: 'version-reverse', kind: 'text', text: '雨夜列车',
+        created_at: '2026-08-26T00:00:00Z', sha256: 'd'.repeat(64),
+        origin: { kind: 'job_output', job_id: 'job-reverse', candidate_id: 'run-reverse-0' },
+      },
+    },
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  // 给自动创建 effect 留出跑完的时间；它命中时会调 createCanvasReversePromptConfig。
+  await waitFor(() => expect(listCanvasJobs).toHaveBeenCalled());
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(createCanvasReversePromptConfig).not.toHaveBeenCalled();
+});
+
+it('explains why the generate button is disabled when no configured key can do the job', async () => {
+  // 五个禁用条件里，缺模型 / 缺密钥这两条原来一句解释都没有，沉浸式画布又把设置入口整块藏了。
+  vi.mocked(listKeys).mockResolvedValue({ keys: [] });
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [imageNode('image-one', '图片', { ...imageDraft, alias: '', model: '' })],
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-image-one' }));
+
+  const hint = await screen.findByText(/还没有配置任何模型密钥/);
+  expect(within(hint).getByRole('link', { name: '去设置里添加' }).getAttribute('href')).toBe('/settings');
+  expect(screen.getByRole('button', { name: /开始生成/ }).hasAttribute('disabled')).toBe(true);
+});
+
+it('offers a way in on an empty canvas and a settings entry the immersive chrome otherwise hides', async () => {
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  expect(screen.getByText('画布还是空的')).toBeTruthy();
+  expect(screen.getByRole('link', { name: '设置' }).getAttribute('href')).toBe('/settings');
+
+  fireEvent.click(screen.getByRole('button', { name: '文本节点' }));
+  expect(screen.queryByText('画布还是空的')).toBeNull();
 });
