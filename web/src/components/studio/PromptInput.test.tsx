@@ -19,6 +19,25 @@ const hkKey: KeyView = {
   created_at: '2026-05-25T00:00:00Z',
 };
 
+const seedreamKey: KeyView = {
+  alias: 'seedream',
+  provider: 'seedream',
+  base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+  access_key: 'ark...key',
+  secret_key: null,
+  capabilities: ['portrait'],
+  models: [
+    {
+      name: 'Seedream 5.0',
+      id: 'doubao-seedream-5-0-260128',
+      modality: 'image',
+      protocol: 'ark',
+    },
+  ],
+  notes: '',
+  created_at: '2026-08-27T00:00:00Z',
+};
+
 function renderWith(model: string) {
   return render(
     <PromptInput
@@ -54,7 +73,7 @@ describe('PromptInput 尺寸面板按模型族渲染', () => {
 import { videoControlCaps } from '@/lib/videoControlCaps';
 
 const videoKey = {
-  alias: 'ark', provider: 'seedance', base_url: null, access_key: '***', secret_key: null,
+  alias: 'ark', provider: 'volcengine_video', base_url: null, access_key: '***', secret_key: null,
   capabilities: [], models: [{ name: 'Seedance', id: 'doubao-seedance-2-0-fast-260128' }],
   modalities: ['video'], notes: '', created_at: '',
 };
@@ -304,39 +323,52 @@ describe('PromptInput 参考素材超限提示', () => {
   });
 });
 
-describe('PromptInput 消耗提示（仅 OpenAI-HK 聚合商，人民币无单位无汉字）', () => {
-  it('hk + gpt-image-2 低质量 ×3 → 0.18', () => {
+describe('PromptInput 统一费用提示', () => {
+  it('显示 OpenAI-HK 图片费用', () => {
     render(
       <PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="gpt-image-2" quality="low" count={3} />,
     );
-    const hint = screen.getByTestId('credit-cost-hint');
-    expect(hint).toHaveTextContent('0.18');
-    expect(hint.textContent).not.toMatch(/[一-龥¥]/);
+    expect(screen.getByTestId('generation-cost-hint')).toHaveTextContent('¥0.18');
     cleanup();
   });
 
-  it('未定价档位（nano-banana 高质量）不显示', () => {
+  it('显示 Ark Seedream 按张费用', () => {
+    render(
+      <PromptInput
+        onSubmit={vi.fn()}
+        providers={[seedreamKey]}
+        providerAlias="seedream"
+        model="doubao-seedream-5-0-260128"
+        count={2}
+      />,
+    );
+    expect(screen.getByTestId('generation-cost-hint')).toHaveTextContent('¥0.44');
+    cleanup();
+  });
+
+  it('未定价档位不显示费用提示', () => {
     render(
       <PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="nano-banana" quality="high" />,
     );
-    expect(screen.queryByTestId('credit-cost-hint')).toBeNull();
+    expect(screen.queryByTestId('generation-cost-hint')).toBeNull();
     cleanup();
   });
 
-  it('非 hk 厂商不显示', () => {
+  it('未核实价格的聚合渠道不显示费用提示', () => {
     const otherKey = { ...hkKey, base_url: 'https://api.example.com' };
     render(
       <PromptInput onSubmit={vi.fn()} providers={[otherKey]} providerAlias="hk" model="gpt-image-2" quality="low" />,
     );
-    expect(screen.queryByTestId('credit-cost-hint')).toBeNull();
+    expect(screen.queryByTestId('generation-cost-hint')).toBeNull();
     cleanup();
   });
 
-  it('视频模式（ark key 无价目）不显示', () => {
-    renderVideoMode({ count: 4 });
-    expect(screen.queryByTestId('credit-cost-hint')).toBeNull();
+  it('显示 Ark Seedance 视频预计费用', () => {
+    renderVideoMode({ videoCount: 1 });
+    expect(screen.getByTestId('generation-cost-hint')).toHaveTextContent('约 ¥4.00');
     cleanup();
   });
+
 });
 
 describe('PromptInput 键盘提交规范（Enter 出图 / Shift+Enter 换行）', () => {

@@ -31,6 +31,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.6',
+    date: '2026-08-27',
+    headline: '创作台统一显示图片和视频预估费用',
+    changes: [
+      { kind: 'fix', text: '创作台按实际渠道、模型、画质、数量、时长和分辨率统一计算本次生成费用，OpenAI-HK 图片、火山直连 Seedream / Seedance 与百炼直连 HappyHorse 均可显示' },
+      { kind: 'fix', text: '没有核实价格的模型、档位或聚合渠道不显示费用提示，避免把官方直连价错误套到聚合渠道' },
+      { kind: 'fix', text: 'Seedance 视频按输出 token 显示约价；带参考视频但无法取得素材时长时停止低估且不显示费用' },
+    ],
+  },
+  {
     version: '5.31.5',
     date: '2026-08-27',
     headline: 'Windows 上退格键不再删节点；生成面板不再压住节点',

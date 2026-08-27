@@ -14,7 +14,7 @@ import {
 import { MJ_DEFAULTS, type MjParams } from '@/lib/mjParams';
 import { MjControls } from './MjControls';
 import { EMPTY_MJ_REFS, MjReferenceSlots, type MjRefSlots } from './MjReferenceSlots';
-import { estimateCostYuan, isHkAggregator } from '@/lib/creditCost';
+import { estimateGenerationCost, formatGenerationCost } from '@/lib/generationCost';
 import { captureVideoFrame } from '@/lib/videoFrame';
 import { VideoControls } from './VideoControls';
 import {
@@ -560,9 +560,20 @@ export function PromptInput({
     Boolean(videoFrames?.last);
   const canSubmit =
     Boolean(provider && selectedModel && text.trim() && !disabled) && !lastFrameOnlyBlocked;
-  // 消耗提示只对 OpenAI-HK 聚合商显示（人民币，无单位）；未定价的模型/档位返回 null 即隐藏。
-  const costYuan = isHkAggregator(provider?.base_url)
-    ? estimateCostYuan({ model: selectedModel?.id, quality, n: isVideo ? videoCount : count })
+  // 计价必须同时命中真实渠道与明确模型 ID；未核实价格直接返回 null，不在创作台展示。
+  const generationCost = provider && selectedModel
+    ? estimateGenerationCost({
+        provider: { provider: provider.provider, baseUrl: provider.base_url },
+        model: { id: selectedModel.id, protocol: selectedModel.protocol },
+        kind: isVideo ? 'video' : 'image',
+        count: isVideo ? videoCount : count,
+        quality,
+        duration: isVideo ? duration : undefined,
+        resolution: isVideo ? videoResolution : resolution,
+        ratio: isVideo ? videoRatio : ratio,
+        generateAudio: isVideo ? generateAudio : undefined,
+        hasReferenceVideo: isVideo && referenceVideos.length > 0,
+      })
     : null;
   const minPx = 1;
   // 控件行右缘渐隐 + 箭头几何：悬停时为箭头让出 36px 槽位，渐隐带 40px 落在箭头左侧。
@@ -1506,13 +1517,14 @@ export function PromptInput({
               <Film size={12} aria-hidden />
               需先放首帧
             </span>
-          ) : costYuan !== null ? (
+          ) : generationCost ? (
             <span
-              data-testid="credit-cost-hint"
+              data-testid="generation-cost-hint"
               className="inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums"
+              title={generationCost.source}
             >
               <Coins size={12} aria-hidden />
-              {costYuan}
+              {formatGenerationCost(generationCost)}
             </span>
           ) : null}
         </div>
