@@ -155,6 +155,21 @@ def _error_hint(low: str) -> str | None:
             "viewer-server 到厂商接口的网络请求失败：这不是浏览器跨域问题。"
             "请检查厂商 Base URL、网络和代理直连规则后重试。"
         )
+    # 画布内部不变式被打破（事务、Run 上下文、归属、版本冲突）。canvas_runs 里这些断言是给开发者
+    # 定位用的英文原文，翻译掉反而更难查；但它们会经 _friendly_error 原样落进 job.error、
+    # 显示在节点卡上——所以必须有一句人话在前面，否则画师看到的就是一行英文断言。
+    if (
+        "canvas transaction " in low
+        or "canvas job is missing run context" in low
+        or "canvas content version already exists" in low
+        or "does not belong to this canvas project" in low
+        or "is not a canvas run" in low
+        or "canvas document project_id does not match" in low
+    ):
+        return (
+            "画布内部状态校验未通过：这不是网络或厂商的问题，产物没有挂到画布上。"
+            "请重启 viewer-server 后重试；如果反复出现，把下面的原始报错一起发出来。"
+        )
     # 上传阶段超时：urllib3 用 connect 超时兜请求体上传，参考图偏大 / 上行慢会在传图时 write 超时。
     if "write operation timed out" in low or ("aborted" in low and "write" in low):
         return (

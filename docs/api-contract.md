@@ -118,6 +118,14 @@ Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径�
 - `GET /api/canvas/projects/{project_id}/versions/{version_id}/download`：附件下载，服务端生成安全文件名。
 
 旧的 `/content/{version_id}` 路径已删除，不保留兼容分支。
+
+画布的错误响应统一走 `{code, message}`（message 中文，给画师看；code 稳定，给前端分支用）：
+`CanvasRunCommandError` / `CanvasMediaReplaceError` / `CanvasDocumentError` 都是这个形状。
+状态码的划分是**谁能修**：客户端提交的内容不合规 → 422；revision 被别处改过、刷新后重试有意义
+→ 409；画布存档文件不见了或记着别的项目 ID（`CanvasStorageError`）→ **500**，因为这是服务端
+数据完整性故障，重试永远不会成功，而前端的 409 文案写着「刷新后重试」。
+`canvas_runs` 里那批英文断言是后台管线的内部不变式，不作为 HTTP detail 返回；它们经
+`job_runner._friendly_error` 加一句中文前缀后落进 `job.error`，原文保留以便定位。
 `CanvasDocument` 保存 viewport/settings、七类稳定节点、两类连接与不可变 `content_versions`。运行时只接受
 `schema_version: 2`，不包含 v1 union、fallback 或 converter。
 客户端在所有视口共用同一份 revision 化 Document；响应式面板、焦点、选择与媒体预览都是本地呈现状态，

@@ -176,13 +176,80 @@ def test_canvas_document_save_requires_an_if_match_revision(client):
 
 
 def test_canvas_document_does_not_fallback_when_truth_file_is_missing(client, isolated_data_root):
+    """存档文件不见了要明确报错，不能静默造一份空 Document 出来。
+
+    状态码是 500 而不是 409：409 在前端的文案是「刷新后重试」，而对着一个不存在的 canvas.json
+    重试永远不会成功——画师只会一直刷。这是服务端数据完整性故障，得让人去看日志和数据目录。
+    """
     project_id = _create_project(client)["project_id"]
     (isolated_data_root / "canvases" / project_id / "canvas.json").unlink()
 
     response = client.get(f"/api/canvas/projects/{project_id}/document")
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == "canvas document is missing"
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail["code"] == "canvas_document_missing"
+    # 给画师看的是中文，且明说反复刷新没用。
+    assert "canvas.json" in detail["message"]
+    assert "刷新" in detail["message"]
+
+
+def test_document_save_rejections_are_chinese_with_a_stable_code(client):
+    """保存被拒的原因原来是英文断言直接当 detail 返回（`existing canvas content versions
+    are immutable` 之类）。改成和同批路径一致的中文 `{code, message}`。"""
+    project_id = _create_project(client)["project_id"]
+    current = _document(client, project_id)
+
+    # 1. 提交的内容属于另一个项目
+    foreign = {**current, "project_id": "canvas-somewhere-else"}
+    response = _save_document(client, project_id, foreign)
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == {
+        "code": "canvas_document_project_mismatch",
+        "message": "提交的画布内容属于另一个项目，没有保存。",
+    }
+
+    # 2. If-Match 与提交内容里的 revision 不一致
+    response = client.put(
+        f"/api/canvas/projects/{project_id}/document",
+        json=current,
+        headers={"If-Match": str(current["revision"] + 1)},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["code"] == "canvas_if_match_mismatch"
+
+    # 3. 保存请求自己造一个非 user_edit 的版本
+    forged = {
+        **current,
+        "content_versions": {
+            "version-forged": {
+                "version_id": "version-forged",
+                "kind": "text",
+                "text": "服务端才能写的产物",
+                "created_at": _CREATED_AT,
+                "sha256": "f" * 64,
+                "origin": {"kind": "job_output", "job_id": "job-x", "candidate_id": "c-0"},
+            },
+        },
+    }
+    response = _save_document(client, project_id, forged)
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["code"] == "canvas_version_not_user_text"
+
+
+def test_upload_rejection_says_which_check_failed_in_chinese(client):
+    project_id = _create_project(client)["project_id"]
+    # 扩展名说是 png，内容不是 —— 按魔术字节判定。
+    response = client.post(
+        f"/api/canvas/projects/{project_id}/uploads",
+        files={"file": ("fake.png", b"not an image at all", "image/png")},
+        data={"expected_revision": "0"},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"] == {
+        "code": "canvas_upload_ext_mismatch",
+        "message": "文件的实际内容和扩展名不一致（按魔术字节判定），没有上传。",
+    }
 
 
 def test_canvas_upload_and_media_endpoint_stay_inside_project(client, isolated_data_root):

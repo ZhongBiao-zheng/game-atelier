@@ -34,14 +34,14 @@
 | C5 | `onNodesChange` 里逐 change 做 `nodes.map`，多选拖动是 O(n²) 且每帧都跑 | `CanvasEditor.tsx:1022` | low | ✅ 已修：先把这一批 change 收成位移表 + 删除集，再对节点扫一遍。复杂度本身测不出来，回归测试钉的是改写后的语义（多节点位移一次落定 + 同批删除仍清掉悬空连线） |
 | C6 | 画布完全没接现有 SSE，改用 1.2s 轮询，每次后端做两遍全量 job 目录扫描 | `CanvasEditor.tsx:704-747` | low | ✅ 已修三处：① 接 `useSSE`（pending 期间建连，按 job_id 过滤非画布广播，突发推送做合并），轮询保留为兜底并从 1.2s 放到 4s，与 Studio 一致——**不能砍**，见 #18 的教训；② `/canvas/projects/{id}/jobs` 把读到的列表交给 `reconcile_canvas_jobs`，只在真修过东西时才走第二遍扫描；③ 图签名片段按对象引用挂 WeakMap，外层 `useMemo` 只看 nodes / connections 两个数组的引用 |
 
-## D 组 · 工程链与文档（4 条，D1 已修）
+## D 组 · 工程链与文档（4 条，D1 D3 D4 已修）
 
 | # | 问题 | 位置 | 级别 | 现状复核 |
 |---|---|---|---|---|
 | D1 | ~~仓库没有 ESLint~~ | `web/eslint.config.js` | medium | ✅ 已修（commit e596b90）：`pnpm lint` = `tsc -b --noEmit && eslint .`，只开 `react-hooks/rules-of-hooks` 与 `exhaustive-deps`。首跑 18 处，修 11 处、留 7 处带理由的 disable |
 | D2 | `CanvasEditorInner` 单组件 3408 行、176 个 hook 调用点 | `CanvasEditor.tsx:312–3720` | medium | 确认未修。已产生后果：两个 run status 映射器文案分歧、同一 helper 两处实现 |
-| D3 | parity matrix 声称 130 项全 full，但七组能力在代码里找不到实现 | `reference-parity-matrix.md` | medium | 未复核。Canvas Agent G01–G15 / 节点插件 H01–H09 / WebDAV F04–F11 / C16 C17 / C06 / B22 / A06 / B21 |
-| D4 | 后端 30+ 处英文 `ValueError` 直接当 detail 返回给用户，409 语义还错了 | `canvas_projects.py:222` | low | 确认未修：同批路径里 `CanvasRunCommandError` 走的是规范 `{code, message}` 中文结构，两套风格并存 |
+| D3 | parity matrix 声称 130 项全 full，但七组能力在代码里找不到实现 | `reference-parity-matrix.md` | medium | ✅ 已修：逐条对代码复核，**37 项**改判 `missing`（图例新增该状态）—— G01–G15、H01–H09 两整节 + F01 F04 F06 F07 F09 F10 F11 + C06 C16 C17 + A06 B21 B22。同时纠正审查的两处反向误报：F05、F08 确有实现。结论段改成真实计数表 + 「判 full 之前先 grep 非测试调用方」的判据 |
+| D4 | 后端 30+ 处英文 `ValueError` 直接当 detail 返回给用户，409 语义还错了 | `canvas_projects.py:222` | low | ✅ 已修：**审查把两条路径混在一起说了**。真正当 HTTP detail 返回的只有 canvas_projects.py 的 10 处 → 收进 `CanvasDocumentError(code, message)` 中文结构，与 `CanvasRunCommandError` 统一；canvas_runs.py 的 28 处是后台管线的内部不变式，只经 `job.error` 露出，翻译掉反而难查，改为在 `_error_hint` 加一句中文前缀、原文照留。409 语义：`CanvasStorageError`（存档文件不见了）改判 500——409 前端文案是「刷新后重试」，对着不存在的 canvas.json 刷一辈子也不会好；原测试恰好把这个 bug 钉住了，一并改掉 |
 
 ## 已修（未提交）
 

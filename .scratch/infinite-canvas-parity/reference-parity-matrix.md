@@ -1,6 +1,8 @@
 # Infinite Canvas 参考基线核对表
 
-Status: completed
+Status: **corrected 2026-08-27** —— 原表把 37 项标成 `full`，按代码复核后全部改判 `missing`。
+原始判定是照着「设计意图 / schema / 接口存在」写的，不是照着「用户能不能用」写的。
+两组整节被误标（Canvas Agent G01–G15、节点插件 H01–H09），另有 13 项零散误标。
 
 ## Baseline
 
@@ -17,7 +19,8 @@ Status: completed
 - **adapted**：保留相同用户能力，但按照 game-atelier 的 React Flow、FastAPI、文件真源、
   Job Runner、能力矩阵和 Atelier 设计系统重新实现。
 - **excluded**：固定基线中明确未实现、仅在 TODO 中，或并非参考项目能力；不是把已交付功能静默砍掉。
-- **交付状态**：`full` 表示已按 `same/adapted` 边界交付并核验；`partial` 表示仍有缺口；`n/a` 表示固定基线排除项。
+- **交付状态**：`full` 表示已按 `same/adapted` 边界交付并核验；`partial` 表示有可用实现但仍有缺口；
+  `missing` 表示**没有任何用户可用实现**（schema、类型、无调用方的接口都不算交付）；`n/a` 表示固定基线排除项。
 
 ## 基线健康度
 
@@ -42,7 +45,7 @@ Status: completed
 | A03 | 打开/切换多个画布项目 | `CanvasProjectCard`、顶部“我的画布” | same | full |
 | A04 | 卡片与画布内双击重命名 | `canvas-project-card.tsx`、`canvas-top-bar.tsx` | same：卡片与顶部原地输入，见 issue 26 | full |
 | A05 | 单项目确认删除 | `canvas-delete-projects-dialog.tsx` | adapted：一次确认后永久删除，不要求输入项目名 | full |
-| A06 | 多选项目、批量导出/删除、删除全部 | `pages/canvas/index.tsx` | same | full |
+| A06 | 多选项目、批量导出/删除、删除全部 | `pages/canvas/index.tsx` | same ⚠️ 未交付：项目库没有多选、批量导出/删除或删除全部；只有单项目卡片菜单里的导出与删除 | missing |
 | A07 | 单项目/多项目 ZIP 导出，媒体随包 | `canvas-export.ts`，format version 3 | adapted：服务端生成/校验项目包 | full |
 | A08 | ZIP 导入并分配新项目 ID | `pages/canvas/index.tsx::importCanvas` | adapted：服务端解包和路径白名单 | full |
 | A09 | 最近项目入口 | `/canvas?mode=recent` 打开列表首项 | same | full |
@@ -76,8 +79,8 @@ Status: completed
 | B18 | 点/线/空白三种背景 | `canvas-toolbar.tsx`；`menu-画布外观.png` | adapted：Atelier 背景 token | full |
 | B19 | 浅色/深色主题 | `canvas-theme.ts`、外观菜单 | adapted：复用 Atelier 语义 token 与 `atelier:theme`；Canvas 外观菜单可直接切换，见 Issue 39 | full |
 | B20 | 图片尺寸/信息显示开关 | `showImageInfo`、外观菜单 | same | full |
-| B21 | 清空画布二次确认 | `project.tsx` clear modal | same | full |
-| B22 | 选中节点/整批元素导出 | `canvas-side-panel.tsx::exportCanvasNodes` | adapted：服务端项目包/资源导出 | full |
+| B21 | 清空画布二次确认 | `project.tsx` clear modal | same ⚠️ 未交付：画布上没有任何「清空」入口 | missing |
+| B22 | 选中节点/整批元素导出 | `canvas-side-panel.tsx::exportCanvasNodes` | adapted：服务端项目包/资源导出 ⚠️ 未交付：没有「导出选中节点」；导出只有整项目包一种粒度 | missing |
 
 ## C. 节点模型与通用行为
 
@@ -88,7 +91,7 @@ Status: completed
 | C03 | 空/有内容视频节点 | `CanvasNodeType.Video` | adapted：独立空态上传、惰性媒体 URL 与节点内播放器；画面单击选择节点，播放/暂停、进度、音量与全屏仅由自有控制条触发，见 issue 37 | full |
 | C04 | 空/有内容音频节点 | `CanvasNodeType.Audio` | adapted：独立空态上传、惰性媒体 URL 与节点内原生播放器，见 issue 37 | full |
 | C05 | 生成配置节点，可切换文本/图片/视频/音频 | `canvas-config-composer.tsx` | adapted：Issue 40 独立配置卡 + 四态 composer，提交到统一 Job Runner | full |
-| C06 | 分组节点，显示成员数量 | `CanvasNodeType.Group`、groupId | same | full |
+| C06 | 分组节点，显示成员数量 | `CanvasNodeType.Group`、groupId | same ⚠️ 未交付：`CanvasGroupNode` 只有 schema 与成员校验，UI 没有创建入口，节点卡只会渲染一句「分组」占位 | missing |
 | C07 | 开放字符串插件节点 | `CanvasNodeTypeId`、node registry | adapted：使用受限插件契约 | full |
 | C08 | 节点标题双击改名 | `canvas-node.tsx` | same：七类节点的素材名固定显示在卡片左上方并共用原地输入，见 issue 27 | full |
 | C09 | 四角 resize、图片比例锁/自由变形 | `canvas-node.tsx`、`freeResize` | adapted：React Flow NodeResizer | full |
@@ -98,8 +101,8 @@ Status: completed
 | C13 | 节点信息/JSON/检查器视图 | `CanvasNodeInfoModal` | excluded：后续产品决策确认实际价值有限，节点操作统一收口到选中态工具条与节点内编辑 | n/a |
 | C14 | 错误节点工具条重试 | `canRetry` / `onRetry` | adapted：失败后在生成面板按当前 Draft 整批重新提交；按原快照重试已于 2026-08-26 移除 | partial |
 | C15 | 节点状态 idle/loading/success/error | `CanvasNodeStatus` | adapted：由 validated result Job 派生且保留旧内容，见 issue 30 | full |
-| C16 | 侧栏按名称/正文/提示词搜索和按类型筛选节点 | `CanvasNodesTab` | same | full |
-| C17 | 侧栏点击节点定位/选中，图片可单独预览 | `CanvasNodesTab`、`pending-test` | adapted：React Flow fitView | full |
+| C16 | 侧栏按名称/正文/提示词搜索和按类型筛选节点 | `CanvasNodesTab` | same ⚠️ 未交付：侧栏只有「资产 / 提示词」两个 Tab，没有节点 Tab，也就没有按名称/正文/提示词搜索或按类型筛选 | missing |
+| C17 | 侧栏点击节点定位/选中，图片可单独预览 | `CanvasNodesTab`、`pending-test` | adapted：React Flow fitView ⚠️ 未交付：同上，没有节点列表，也就没有点击定位与单独预览 | missing |
 
 ## D. 生成与结果模型
 
@@ -153,53 +156,63 @@ Status: completed
 
 | ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
-| F01 | 左侧“画布/资产/提示词库”三 Tab、可调整宽度/收起 | `canvas-side-panel.tsx`、runtime | same structure + Atelier styling | full |
+| F01 | 左侧“画布/资产/提示词库”三 Tab、可调整宽度/收起 | `canvas-side-panel.tsx`、runtime | same structure + Atelier styling ⚠️ 未交付：实为固定宽度（`w-[min(22rem,…)]`）的浮层面板，只有「资产 / 提示词」两个 Tab，既无节点 Tab 也不能调宽或收起 | missing |
 | F02 | 独立资产库，图片/视频/音频/文本可复用 | `use-asset-store.ts`、`pages/assets` | adapted：Canvas 项目资产文件真源 | full |
 | F03 | 上传资产、搜索/分类、插入画布、删除 | `CanvasAssetsTab`、assets page | same | full |
-| F04 | 公共提示词来源、七个内置源、自定义 JSON URL | prompt source services/config | adapted：服务端抓取、缓存、schema 校验 | full |
+| F04 | 公共提示词来源、七个内置源、自定义 JSON URL | prompt source services/config | adapted：服务端抓取、缓存、schema 校验 ⚠️ 未交付：只有项目内的提示词库，没有公共来源、七个内置源或自定义 JSON URL | missing |
 | F05 | 提示词搜索/标签/详情/复制/加入资产 | prompts page、`PromptDetailDialog` | same | full |
-| F06 | 在画布侧栏搜索公共提示词并插入文本节点 | `CanvasPromptsTab`、`pending-test` | same | full |
-| F07 | 提示词源启停、手动/定时刷新、保留上次成功缓存 | config prompt sources、scheduler | adapted：服务端调度/缓存 | full |
+| F06 | 在画布侧栏搜索公共提示词并插入文本节点 | `CanvasPromptsTab`、`pending-test` | same ⚠️ 未交付：侧栏搜索的是项目内提示词，没有公共提示词源可搜 | missing |
+| F07 | 提示词源启停、手动/定时刷新、保留上次成功缓存 | config prompt sources、scheduler | adapted：服务端调度/缓存 ⚠️ 未交付：没有提示词源，也就没有启停、刷新调度与缓存 | missing |
 | F08 | 渠道、模型与默认偏好配置 | `use-config-store.ts`、config modal | adapted：Keys 管渠道/模型；对话作为一等模型分类，火山预置图片 + 豆包对话模型并识别 `/models` 中未声明模态的豆包文本家族；应用级 v2 偏好保存四模态默认模型与安全参数，见 issue 41 | full |
-| F09 | 设置 JSON 导入导出，包含 API Key/WebDAV 凭证 | `config-file.ts` | adapted：不导出明文密钥；只导出非敏感偏好/引用 | full |
-| F10 | 本地存储用量、对象仓库和配额统计 | local storage settings、`pending-test` | adapted：显示服务端 Canvas 存储用量 | full |
-| F11 | WebDAV 测试和各域同步 | `app-sync.ts`、`webdav-sync.ts` | adapted：服务端同步项目包/manifest | full |
+| F09 | 设置 JSON 导入导出，包含 API Key/WebDAV 凭证 | `config-file.ts` | adapted：不导出明文密钥；只导出非敏感偏好/引用 ⚠️ 未交付：没有设置导入导出 | missing |
+| F10 | 本地存储用量、对象仓库和配额统计 | local storage settings、`pending-test` | adapted：显示服务端 Canvas 存储用量 ⚠️ 未交付：没有存储用量统计 | missing |
+| F11 | WebDAV 测试和各域同步 | `app-sync.ts`、`webdav-sync.ts` | adapted：服务端同步项目包/manifest ⚠️ 未交付：只有 ADR 0010 的设计，没有 WebDAV 实现 | missing |
 
 ## G. Canvas Agent
 
+> **G01–G15 全部 `missing`（2026-08-27 按代码复核改判，此前误标 full）。** 现有的只是一个会话文件仓库
+> （`canvas_agent_sessions.py`：读 / 列 / 建 / 追加消息 / 删）加 4 条 CRUD 接口，以及 `web/src/api/canvas.ts`
+> 里 4 个**零调用方**的客户端函数。没有 Agent 面板、没有连接态、没有流式回复、没有审批卡、没有 Skills 管理、
+> 没有结构化改图命令通道、没有 MCP 或 Codex adapter。判据：这 4 个函数在非测试代码里的调用数全为 0。
+> 「有 schema、有类型、有接口」不等于交付——用户点不到的东西不进 parity。
+
 | ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
-| G01 | 右侧可调整宽度的 Agent 面板 | runtime、`local-agent-panel.tsx` | same structure + Atelier styling | full |
-| G02 | 本地 URL/token 自动/手动连接与状态 | `agent-connect-view.tsx` | adapted：viewer-server 内部/受控 sidecar | full |
-| G03 | 对话、新对话、历史、Skills、诊断日志四 Tab | runtime buttons、agent components | same | full |
-| G04 | 读取当前项目/节点/边/选择/viewport/状态 | `CanvasAgentSnapshot`、MCP tools | adapted：只读 API +页面实例绑定 | full |
-| G05 | 结构化新增/修改/移动/删除节点和边 | `canvas-agent-ops.ts`、agent operations | adapted：命令校验、审计、undo | full |
-| G06 | Agent 一次操作快照撤销 | `use-agent-bridge.ts` | adapted：纳入统一命令历史 | full |
-| G07 | 流式回复、思考、计划、命令、文件/网页/工具事件 | agent event formatter/chat | same | full |
-| G08 | 请求批准/自动审查/完全访问与审批卡 | `pending-test`、approval API | adapted：项目内权限矩阵，不默认完全访问 | full |
-| G09 | 停止 turn、失败恢复、token 统计 | local agent panel | same | full |
-| G10 | 历史恢复、批量删除、SSE 实时与历史一致 | agent history + pending tests | adapted：会话文件真源 | full |
-| G11 | 图片附件与画布引用 chip | agent composer/reference preview | adapted：媒体路径白名单 | full |
-| G12 | 多标签页页面身份隔离，turn 固定发起页 | agent session/site tools + pending tests | same security outcome | full |
-| G13 | 当前画布优先，不重复列表/导航 | `pending-test` | same | full |
-| G14 | Skills 列表/启停/使用/新建/编辑/删除/从会话或画布生成草稿 | `agent-skills-view.tsx` | adapted：不得让 Skill 未确认推进画布 | full |
-| G15 | Canvas Agent HTTP/MCP 与 Codex adapter | `canvas-agent/src/server`、agent client | adapted：决定复用当前 Codex 还是 sidecar | full |
+| G01 | 右侧可调整宽度的 Agent 面板 | runtime、`local-agent-panel.tsx` | same structure + Atelier styling ⚠️ 未交付，原因见本节开头 | missing |
+| G02 | 本地 URL/token 自动/手动连接与状态 | `agent-connect-view.tsx` | adapted：viewer-server 内部/受控 sidecar ⚠️ 未交付，原因见本节开头 | missing |
+| G03 | 对话、新对话、历史、Skills、诊断日志四 Tab | runtime buttons、agent components | same ⚠️ 未交付，原因见本节开头 | missing |
+| G04 | 读取当前项目/节点/边/选择/viewport/状态 | `CanvasAgentSnapshot`、MCP tools | adapted：只读 API +页面实例绑定 ⚠️ 未交付，原因见本节开头 | missing |
+| G05 | 结构化新增/修改/移动/删除节点和边 | `canvas-agent-ops.ts`、agent operations | adapted：命令校验、审计、undo ⚠️ 未交付，原因见本节开头 | missing |
+| G06 | Agent 一次操作快照撤销 | `use-agent-bridge.ts` | adapted：纳入统一命令历史 ⚠️ 未交付，原因见本节开头 | missing |
+| G07 | 流式回复、思考、计划、命令、文件/网页/工具事件 | agent event formatter/chat | same ⚠️ 未交付，原因见本节开头 | missing |
+| G08 | 请求批准/自动审查/完全访问与审批卡 | `pending-test`、approval API | adapted：项目内权限矩阵，不默认完全访问 ⚠️ 未交付，原因见本节开头 | missing |
+| G09 | 停止 turn、失败恢复、token 统计 | local agent panel | same ⚠️ 未交付，原因见本节开头 | missing |
+| G10 | 历史恢复、批量删除、SSE 实时与历史一致 | agent history + pending tests | adapted：会话文件真源 ⚠️ 未交付，原因见本节开头 | missing |
+| G11 | 图片附件与画布引用 chip | agent composer/reference preview | adapted：媒体路径白名单 ⚠️ 未交付，原因见本节开头 | missing |
+| G12 | 多标签页页面身份隔离，turn 固定发起页 | agent session/site tools + pending tests | same security outcome ⚠️ 未交付，原因见本节开头 | missing |
+| G13 | 当前画布优先，不重复列表/导航 | `pending-test` | same ⚠️ 未交付，原因见本节开头 | missing |
+| G14 | Skills 列表/启停/使用/新建/编辑/删除/从会话或画布生成草稿 | `agent-skills-view.tsx` | adapted：不得让 Skill 未确认推进画布 ⚠️ 未交付，原因见本节开头 | missing |
+| G15 | Canvas Agent HTTP/MCP 与 Codex adapter | `canvas-agent/src/server`、agent client | adapted：决定复用当前 Codex 还是 sidecar ⚠️ 未交付，原因见本节开头 | missing |
 | G16 | Claude Agent SDK adapter | upstream TODO | excluded：固定基线未交付 | n/a |
 | G17 | Skill 网络安装、资源管理、Agent memory | upstream TODO | excluded：固定基线未交付 | n/a |
 
 ## H. 节点插件
 
+> **H01–H09 全部 `missing`（2026-08-27 按代码复核改判，此前误标 full）。** 现有的只是 `CanvasPluginState`
+> 一个受尺寸限制的 JSON 字段，以及节点卡上一句「插件节点」占位文案。没有插件接口、没有 SDK、没有加载器、
+> 没有 sandbox / capability broker、没有官方示例。沙箱设计写在 ADR 0012，尚未实现。
+
 | ID | 参考基线行为 | Source/runtime evidence | Parity | 交付状态 |
 |---|---|---|---|---|
-| H01 | 官方/本地/第三方插件管理、安装/启停/更新/卸载 | plugin manager/runtime | adapted：签名包或受信目录，不直接执行任意 URL | full |
-| H02 | 远程 JS URL 安装 | `plugin-loader.ts` | adapted：相同安装体验，受 sandbox/权限控制 | full |
-| H03 | manifest、节点定义、图标/描述/默认尺寸 | plugin SDK types | adapted：本项目 SDK | full |
-| H04 | 自定义 renderer、panel、toolbar、interaction/move | plugin SDK + host hook | adapted：iframe/worker/host capability | full |
-| H05 | 文档宣称 serialize/deserialize/migrate；运行时实际只有 JSON metadata 保存与缺失插件占位 | docs features、SDK 无迁移 hook、`MissingPluginContent` | adapted：host envelope + sandbox 原子迁移，实现完整 data-survival outcome | full |
-| H06 | 插件申请文本/图片/视频 AI；音频通过内置 panel mode | `CanvasPluginAi`、`CanvasBuiltinPanelConfig` | adapted：四模态统一代理到 Job Runner | full |
-| H07 | 插件结构化操作节点/边、读取资源 | `CanvasPluginHost` | adapted：capability authorization | full |
-| H08 | HTML/Markdown/Panorama/Sticky/SVG 官方示例 | `plugins/canvas/*` | same examples as compatibility fixtures, Atelier visual | full |
-| H09 | 插件源码离线缓存和版本固定 | plugin store/source | adapted：本地已审计包缓存 | full |
+| H01 | 官方/本地/第三方插件管理、安装/启停/更新/卸载 | plugin manager/runtime | adapted：签名包或受信目录，不直接执行任意 URL ⚠️ 未交付，原因见本节开头 | missing |
+| H02 | 远程 JS URL 安装 | `plugin-loader.ts` | adapted：相同安装体验，受 sandbox/权限控制 ⚠️ 未交付，原因见本节开头 | missing |
+| H03 | manifest、节点定义、图标/描述/默认尺寸 | plugin SDK types | adapted：本项目 SDK ⚠️ 未交付，原因见本节开头 | missing |
+| H04 | 自定义 renderer、panel、toolbar、interaction/move | plugin SDK + host hook | adapted：iframe/worker/host capability ⚠️ 未交付，原因见本节开头 | missing |
+| H05 | 文档宣称 serialize/deserialize/migrate；运行时实际只有 JSON metadata 保存与缺失插件占位 | docs features、SDK 无迁移 hook、`MissingPluginContent` | adapted：host envelope + sandbox 原子迁移，实现完整 data-survival outcome ⚠️ 未交付，原因见本节开头 | missing |
+| H06 | 插件申请文本/图片/视频 AI；音频通过内置 panel mode | `CanvasPluginAi`、`CanvasBuiltinPanelConfig` | adapted：四模态统一代理到 Job Runner ⚠️ 未交付，原因见本节开头 | missing |
+| H07 | 插件结构化操作节点/边、读取资源 | `CanvasPluginHost` | adapted：capability authorization ⚠️ 未交付，原因见本节开头 | missing |
+| H08 | HTML/Markdown/Panorama/Sticky/SVG 官方示例 | `plugins/canvas/*` | same examples as compatibility fixtures, Atelier visual ⚠️ 未交付，原因见本节开头 | missing |
+| H09 | 插件源码离线缓存和版本固定 | plugin store/source | adapted：本地已审计包缓存 ⚠️ 未交付，原因见本节开头 | missing |
 | H10 | 插件直接访问页面本地数据/API Key | 官方警告 | excluded：明确拒绝复制该安全缺陷 | n/a |
 
 ## I. 视觉与响应式基线
@@ -218,13 +231,38 @@ Status: completed
 
 ## 核对结论
 
-1. 固定基线共登记 **136 个核对项**：经后续产品决策调整为 130 项按 `same/adapted` 边界完整交付，
-   6 项上游未来、占位、安全缺陷、品牌实现或低价值检查器明确排除；远程插件直读密钥、设置包导出明文密钥等实现缺陷未复制。
-2. 独立画布项目、React Flow 机械层、节点与连接、四模态生成、媒体工具、资源/提示词、Agent、
-   插件、安全导入导出、主题与响应式 chrome 已接入 game-atelier 的文件真源、Job Runner 和设计系统。
-3. 固定参考只作为用户可观察结果基线；上游 TypeScript 缺陷、AI 超分占位和未交付 TODO 均未冒充 parity。
-4. 最终 I01 经 375 / 768 / 1024 / 1440 真实 viewport、聚焦测试、源码 TypeScript、production build
-   与双轴代码审查关闭；矩阵不存在 `partial` 项。
+固定基线共登记 **136 个核对项**（原文的「136 项 / 130 项完整交付」里，130 是错的）：
+
+| 交付状态 | 数量 | 说明 |
+|---|---|---|
+| `full` | 90 | 已按 `same/adapted` 边界交付并核验 |
+| `partial` | 2 | C14、D19 —— 均因产品决策主动收窄，见行内说明 |
+| `missing` | 37 | 见下方「改判说明」 |
+| `n/a` | 6 | 上游 TODO、占位、明确拒绝复制的安全缺陷 |
+| `none` | 1 | D22 —— 按保存元数据重试已于 2026-08-26 按产品决定移除 |
+
+已交付的部分是实的：独立画布项目、React Flow 机械层、七类节点与两类连接、四模态生成与候选、
+媒体工具（裁剪 / 切分 / 蒙版 / 角度）、项目资产与提示词库、项目包安全导出导入、主题与响应式 chrome，
+都接在 game-atelier 的文件真源、Job Runner 与设计系统上。
+
+### 改判说明（2026-08-27）
+
+原表的 `full` 是照「设计意图 / schema / 接口是否存在」判的，不是照「用户能不能用」判的。
+按代码逐条复核后，37 项改判 `missing`：
+
+- **G01–G15（15 项，整节）** Canvas Agent。只有会话文件仓库 + 4 条 CRUD 接口 + 4 个零调用方的前端函数。
+- **H01–H09（9 项，整节）** 节点插件。只有一个受尺寸限制的 JSON 字段和一句占位文案。
+- **F01 F04 F06 F07 F09 F10 F11（7 项）** 侧栏三 Tab / 可调宽收起、公共提示词源（含七个内置源）、
+  源启停与刷新调度、设置导入导出、存储用量、WebDAV 同步。侧栏实为固定宽度的两 Tab 浮层；
+  提示词只有项目内的那一份；WebDAV 只有 ADR 0010 的设计。
+- **C06 C16 C17（3 项）** 分组节点（schema 有、UI 无创建入口）、侧栏节点搜索筛选、点击定位预览。
+- **A06 B21 B22（3 项）** 项目多选与批量导出/删除/删除全部、清空画布二次确认、导出选中节点。
+
+复核里也纠正了两处**反向**误报：F05（提示词搜索 / 标签 / 详情 / 复制 / 加入资产）与
+F08（渠道、模型与四模态默认偏好）确有实现，`full` 是对的。
+
+**这张表以后怎么用**：`full` 的判据是「用户能点到并得到结果」。schema、TS 类型、没有调用方的接口、
+只写了 ADR 的设计，一律不算——判 `full` 之前先 grep 一次非测试代码里的调用方。
 
 ## Runtime evidence
 

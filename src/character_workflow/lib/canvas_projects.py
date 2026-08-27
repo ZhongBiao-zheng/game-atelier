@@ -68,6 +68,29 @@ class CanvasMediaReplaceError(Exception):
         self.message = message
 
 
+class CanvasDocumentError(ValueError):
+    """预期内的、给画师看的拒绝：提交上来的画布内容不合规。
+
+    继承 `ValueError` 是刻意的：库里和路由里已有多处 `except ValueError`（项目列表扫描靠它跳过
+    坏项目），继承下来行为一律不变，只是 detail 从英文断言变成中文 `{code, message}`——
+    与同批路径的 `CanvasRunCommandError` / `CanvasMediaReplaceError` 一个形状。
+    """
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class CanvasStorageError(CanvasDocumentError):
+    """画布存档文件本身不见了或坏了 —— 服务端数据完整性故障。
+
+    单独分出来只为一件事：它**不能**被翻成 409。409 的含义是「资源被别处改过了，刷新后重试」，
+    而对着一个不存在的 canvas.json 重试永远不会成功；前端的 409 文案正好写着「刷新后重试」，
+    画师会照着刷一整天。这类一律 500，让人去看服务端日志和数据目录。
+    """
+
+
 def _sniff_media_mime(body: bytes) -> str | None:
     if body.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
@@ -186,10 +209,17 @@ def rename_canvas_project(project_id: str, name: str) -> CanvasProject:
 def _read_canvas_document_unlocked(project_id: str) -> CanvasDocument:
     path = _document_path(project_id)
     if not path.exists():
-        raise ValueError("canvas document is missing")
+        raise CanvasStorageError(
+            "canvas_document_missing",
+            "这个画布的存档文件（canvas.json）不见了，服务端读不出内容。"
+            "请检查数据目录后再打开——反复刷新不会让它回来。",
+        )
     document = CanvasDocument.model_validate_json(path.read_text(encoding="utf-8"))
     if document.project_id != project_id:
-        raise ValueError("canvas document project_id does not match its directory")
+        raise CanvasStorageError(
+            "canvas_document_project_mismatch",
+            "这个画布的存档文件记着另一个项目的 ID，服务端拒绝按当前项目读取。请检查数据目录。",
+        )
     return document
 
 
@@ -234,19 +264,28 @@ def _normalized_web_document(
     timestamp: str,
 ) -> CanvasDocument:
     if submitted.project_id != current.project_id:
-        raise ValueError("canvas document project_id does not match its directory")
+        raise CanvasDocumentError(
+            "canvas_document_project_mismatch",
+            "提交的画布内容属于另一个项目，没有保存。",
+        )
     if submitted.revision != current.revision:
         raise RuntimeError(f"revision_conflict:{current.revision}")
 
     versions = dict(submitted.content_versions)
     for version_id, existing in current.content_versions.items():
         if versions.get(version_id) != existing:
-            raise ValueError("existing canvas content versions are immutable")
+            raise CanvasDocumentError(
+                "canvas_version_immutable",
+                "已存在的内容版本不可改动，这次保存动到了历史版本，没有保存。",
+            )
     for version_id, candidate in list(versions.items()):
         if version_id in current.content_versions:
             continue
         if candidate.kind != "text" or candidate.origin.kind != "user_edit":
-            raise ValueError("document save can only create user-edited text versions")
+            raise CanvasDocumentError(
+                "canvas_version_not_user_text",
+                "保存只能新建手动编辑的文本版本；生成产物由服务端写入，没有保存。",
+            )
         versions[version_id] = candidate.model_copy(
             update={
                 "created_at": timestamp,
@@ -267,7 +306,10 @@ def _normalized_web_document(
             _is_proven_local_tool_history_restore(current, submitted, edge)
             or _is_proven_generation_history_restore(current, submitted, edge)
         ):
-            raise ValueError("document save cannot create or modify derivation connections")
+            raise CanvasDocumentError(
+                "canvas_derivation_readonly",
+                "派生连线由服务端在生成时写入，保存请求不能新建或改动它，没有保存。",
+            )
 
     return submitted.model_copy(update={
         "revision": current.revision + 1,
@@ -358,7 +400,10 @@ def save_canvas_document(
         project = read_canvas_project(project_id)
         current = _read_canvas_document_unlocked(project_id)
         if expected_revision != document.revision:
-            raise ValueError("If-Match must equal the submitted document revision")
+            raise CanvasDocumentError(
+                "canvas_if_match_mismatch",
+                "If-Match 的 revision 和提交内容里的 revision 不一致，没有保存。",
+            )
         timestamp = _now()
         updated = _normalized_web_document(current, document, timestamp)
         touched = project.model_copy(update={"updated_at": timestamp})
@@ -474,7 +519,10 @@ def _new_upload_version(
     target = canvas_project_dir(project_id) / "uploads" / f"{upload_id}{ext}"
     detected_mime = _sniff_media_mime(body)
     if detected_mime is None or detected_mime != _MEDIA_MIME[ext]:
-        raise ValueError("canvas upload content does not match its file extension")
+        raise CanvasDocumentError(
+            "canvas_upload_ext_mismatch",
+            "文件的实际内容和扩展名不一致（按魔术字节判定），没有上传。",
+        )
     width: int | None = None
     height: int | None = None
     if media_kind == "image":
@@ -523,11 +571,17 @@ def _display_image_dimensions(body: bytes) -> tuple[int, int]:
             width, height = image.size
             orientation = image.getexif().get(274, 1)
     except (OSError, UnidentifiedImageError, ValueError) as error:
-        raise ValueError("canvas image bytes do not match a supported image format") from error
+        raise CanvasDocumentError(
+            "canvas_image_decode_failed",
+            "这个文件不是能识别的图片格式，或者图片已经损坏。",
+        ) from error
     if orientation in {5, 6, 7, 8}:
         width, height = height, width
     if width <= 0 or height <= 0:
-        raise ValueError("canvas image dimensions are invalid")
+        raise CanvasDocumentError(
+            "canvas_image_size_invalid",
+            "读不出有效的图片尺寸（宽或高为 0）。",
+        )
     return width, height
 
 
@@ -657,6 +711,8 @@ def list_canvas_projects() -> list[CanvasProjectSummary]:
                 _recover_canvas_transactions_unlocked(project_id)
                 project = CanvasProject.model_validate_json(path.read_text(encoding="utf-8"))
                 if project.project_id != project_id:
+                    # 故意留英文裸 ValueError：这条不给用户看，它是下面那个 except 的
+                    # 「跳过这个坏项目」信号，列表接口不能因为一个坏目录整体失败。
                     raise ValueError("canvas project_id does not match its directory")
                 document = _read_canvas_document_unlocked(project_id)
                 projects.append(
@@ -685,6 +741,8 @@ def list_canvas_project_options() -> list[CanvasProject]:
                 _recover_canvas_transactions_unlocked(project_id)
                 project = CanvasProject.model_validate_json(path.read_text(encoding="utf-8"))
                 if project.project_id != project_id:
+                    # 故意留英文裸 ValueError：这条不给用户看，它是下面那个 except 的
+                    # 「跳过这个坏项目」信号，列表接口不能因为一个坏目录整体失败。
                     raise ValueError("canvas project_id does not match its directory")
                 projects.append(project)
         except (OSError, RuntimeError, ValueError, ValidationError, json.JSONDecodeError, KeyError):

@@ -365,6 +365,24 @@ def test_friendly_error_remote_disconnect_reads_as_gateway_not_network():
     assert "代理" not in msg
 
 
+def test_friendly_error_canvas_invariant_gets_chinese_before_the_english_assertion():
+    """canvas_runs 里那批英文断言（事务 / Run 上下文 / 归属 / 版本冲突）会原样落进 job.error、
+    显示在节点卡上。断言原文对开发者有用，保留；但前面必须先有一句人话。"""
+    for raw in (
+        "canvas job is missing run context",
+        "canvas transaction document fingerprint mismatch",
+        "job does not belong to this canvas project",
+        "job is not a Canvas Run",
+        "canvas content version already exists",
+    ):
+        msg = job_runner._friendly_error(Exception(raw))
+        assert "画布内部状态校验未通过" in msg, raw
+        # 原文照留，不然没法查。
+        assert raw in msg, raw
+        # 别把人往网络 / 代理坑带 —— 这类根本不是网络问题。
+        assert "代理" not in msg and "网络连不上" not in msg, raw
+
+
 def test_friendly_error_genuine_connect_failure_still_network():
     err = Exception(
         "HTTPSConnectionPool(host='api.openai-hk.com', port=443): Max retries exceeded "

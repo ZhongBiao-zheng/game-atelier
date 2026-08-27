@@ -2222,7 +2222,7 @@ def get_canvas_document(project_id: str, response: Response) -> CanvasDocument:
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
     except ValueError as error:
-        raise HTTPException(409, detail=str(error)) from error
+        raise _canvas_document_http_error(error) from error
 
 
 @router.put("/canvas/projects/{project_id}/document", response_model=CanvasDocument)
@@ -2254,7 +2254,23 @@ def put_canvas_document(
             }) from None
         raise
     except ValueError as error:
-        raise HTTPException(422, detail=str(error)) from error
+        raise _canvas_document_http_error(error) from error
+
+
+def _canvas_document_http_error(error: ValueError) -> HTTPException:
+    """把画布库的结构化错误翻成 HTTP 状态。
+
+    关键的一条：`CanvasStorageError`（存档文件不见了 / 记着别的项目 ID）是**服务端**数据
+    完整性故障，必须 500，不能是 409。409 在前端的文案是「刷新后重试」，而对着一个不存在的
+    canvas.json 重试永远不会成功——原来 GET document 就是 409，画师只会一直刷。
+    """
+    from character_workflow.lib.canvas_projects import CanvasDocumentError, CanvasStorageError
+    if isinstance(error, CanvasStorageError):
+        logger.warning("canvas storage integrity failure: %s", error.code)
+        return HTTPException(500, detail={"code": error.code, "message": error.message})
+    if isinstance(error, CanvasDocumentError):
+        return HTTPException(422, detail={"code": error.code, "message": error.message})
+    return HTTPException(422, detail=str(error))
 
 
 def _canvas_if_match(if_match: str | None, subject: str) -> int:
@@ -2630,7 +2646,7 @@ async def post_canvas_upload(
             }) from None
         raise
     except ValueError as error:
-        raise HTTPException(422, detail=str(error)) from error
+        raise _canvas_document_http_error(error) from error
     return CanvasUploadResponse(version=version, filename=filename, document=document)
 
 
