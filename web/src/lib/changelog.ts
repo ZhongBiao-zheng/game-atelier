@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.1',
+    date: '2026-08-27',
+    headline: '画布的生成面板跟着节点走，也不再压住选中的节点',
+    changes: [
+      { kind: 'fix', text: '拖动节点时生成面板跟着一起走 —— 以前面板留在原地，只能关掉重新点开' },
+      { kind: 'fix', text: '生成面板不再压住选中的节点：节点上下都放不下面板时改放到节点侧面，那张图整张可见（正要看着它写提示词）' },
+    ],
+  },
+  {
     version: '5.31.0',
     date: '2026-08-27',
     headline: '新增「画布」：把生成节点连成一张图来创作',

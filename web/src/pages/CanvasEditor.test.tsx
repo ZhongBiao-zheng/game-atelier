@@ -27,15 +27,34 @@ import type {
 } from '@/schema/canvas';
 
 vi.mock('@xyflow/react', () => {
+  // 生成面板按「画布 transform」和「锚点节点自己的几何」两路重新定位，所以 mock 的 store
+  // 得把这两样都提供成**真实的稳定值**：
+  // - transform 必须是同一个数组引用。原来写的是 `selector({ transform: [0, 0, 1] })`，每次
+  //   调用都是新数组，于是面板在测试里每次 render 都重新定位一次 —— 「拖动节点时面板不跟随」
+  //   这个 bug 因此在测试里完全看不出来（注释当时写的是常量数组，代码并没有做到）。
+  // - nodeLookup 用 ReactFlow 收到的 nodes 重建，位置 / 尺寸变了 useStore 才看得见。
+  type MockInternalNode = {
+    internals: { positionAbsolute: { x: number; y: number } };
+    measured: { width?: number; height?: number };
+  };
+  const flowTransform: [number, number, number] = [0, 0, 1];
+  let flowNodeLookup = new Map<string, MockInternalNode>();
   return {
-    // 生成面板订阅 transform 重新定位；mock 返回常量数组，避免每次 render 换引用。
-    useStore: (selector: (state: { transform: [number, number, number] }) => unknown) =>
-      selector({ transform: [0, 0, 1] }),
+    useStore: (selector: (state: {
+      transform: [number, number, number];
+      nodeLookup: Map<string, MockInternalNode>;
+    }) => unknown) => selector({ transform: flowTransform, nodeLookup: flowNodeLookup }),
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, multiSelectionKeyCode, selectionKeyCode, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onNodeMouseEnter, onMove, onMoveEnd, onDragOver, onDrop }: {
       children: React.ReactNode;
       edges: Array<{ id: string; selected?: boolean }>;
-      nodes: Array<{ id: string; selected?: boolean; data: unknown }>;
+      nodes: Array<{
+        id: string;
+        selected?: boolean;
+        data: unknown;
+        position?: { x: number; y: number };
+        style?: { width?: number; height?: number };
+      }>;
       nodeTypes?: Record<string, React.ComponentType<Record<string, unknown>>>;
       onlyRenderVisibleElements?: boolean;
       onConnect?: (connection: { source: string; target: string; sourceHandle: null; targetHandle: null }) => void;
@@ -54,6 +73,10 @@ vi.mock('@xyflow/react', () => {
       const CanvasNode = nodeTypes?.canvasNode;
       if (flowEdgeIdentities[flowEdgeIdentities.length - 1] !== edges) flowEdgeIdentities.push(edges);
       flowHandlers.nodesChange = onNodesChange;
+      flowNodeLookup = new Map(nodes.map(node => [node.id, {
+        internals: { positionAbsolute: node.position ?? { x: 0, y: 0 } },
+        measured: { width: node.style?.width, height: node.style?.height },
+      }]));
       return (
         <div data-testid="react-flow" data-node-count={nodes.length} data-visible-only={onlyRenderVisibleElements} data-multi-select-keys={(multiSelectionKeyCode ?? []).join(',')} data-selection-key={selectionKeyCode === null ? 'none' : String(selectionKeyCode)}>
           {nodes.map(node => (
@@ -1127,6 +1150,35 @@ it('applies a multi-node drag and a simultaneous delete in one pass over the doc
   ]);
   // 被删节点的连线要跟着走，不能留下悬空连接。
   expect(saved.connections).toEqual([]);
+});
+
+it('re-places the generation panel when the node it is anchored to moves', async () => {
+  // 画师报的：点开生成面板后拖节点，面板留在原地不跟随。面板只订阅了画布 transform，
+  // 而拖节点改的是节点自己的位置，定位 effect 不会重跑。
+  //
+  // 钉的是「节点位置变了会不会重新量锚点矩形」，不是量出来的数值：jsdom 里
+  // getBoundingClientRect 恒为全 0，位置算不出真值，断言数值等于什么都测不到。
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [imageNode('image-one', '图片', imageDraft)],
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-image-one' }));
+  await waitFor(() => {
+    expect(document.querySelector('[data-canvas-node-panel-anchor="image-one"]')).toBeTruthy();
+  });
+
+  const shell = document.querySelector('.canvas-node-shell') as HTMLElement;
+  expect(shell).toBeTruthy();
+  const measure = vi.spyOn(shell, 'getBoundingClientRect');
+
+  act(() => {
+    flowHandlers.nodesChange?.([
+      { id: 'image-one', type: 'position', position: { x: 620, y: 480 } },
+    ]);
+  });
+
+  expect(measure).toHaveBeenCalled();
 });
 
 it('pulls canvas jobs as soon as SSE says one changed, without waiting for the next poll', async () => {
