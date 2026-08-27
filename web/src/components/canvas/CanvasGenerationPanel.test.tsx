@@ -913,10 +913,14 @@ it('keeps the generation panel reachable when it fits neither above nor below', 
   const tallNode = rect(400, 40, 320, 640);
 
   const placement = placeCanvasGenerationPanel(tallNode, rect(0, 0, 700, 400), 600);
+  const panel = rect(placement.left, placement.top, placement.width, Math.min(600, placement.maxHeight));
 
   expect(placement.top).toBe(16);
   expect(placement.maxHeight).toBe(368);
-  expect(placement.width).toBe(608);
+  // 全宽 608 摆不下时压窄换零重叠：旧实现保持 608、横向压住节点 284px，而面板压住节点会
+  // 直接毁掉交互 —— 双击节点进编辑态的落点变成面板，打字进不去文本框。
+  expect(placement.width).toBe(368);
+  expect(overlaps(panel, tallNode)).toBe(false);
 });
 
 function overlaps(a: ReturnType<typeof rect>, b: ReturnType<typeof rect>) {

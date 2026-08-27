@@ -700,6 +700,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
 
 export const CANVAS_GENERATION_PANEL_WIDTH = 608;
 const CANVAS_GENERATION_PANEL_GAP = 16;
+/** 四个位置都放不下时，面板可以窄到这个宽度去换「不压住节点」。 */
+const CANVAS_GENERATION_PANEL_MIN_WIDTH = 360;
 
 /** 只用到矩形的这几个数，写成最小接口好让放置逻辑纯函数化、能单测。 */
 export interface CanvasPanelRect {
@@ -763,6 +765,22 @@ export function placeCanvasGenerationPanel(
   const toLeft = anchor.left - gap - width;
   if (toLeft >= bounds.left + gap) {
     return { left: toLeft, top: beside, width, maxHeight };
+  }
+
+  // 到这里四个位置都放不下了。压住节点会直接毁掉交互 —— 面板盖住节点，双击节点进编辑态的
+  // 落点就变成了面板，画师打字进不去文本框：按字母不启动输入法、按退格删掉整个节点
+  // （2026-08-27 画师实测报的就是这一串）。所以宁可把面板压窄换「零重叠」，也不要全宽压住节点。
+  const rightRoom = bounds.right - gap - (anchor.right + gap);
+  const leftRoom = (anchor.left - gap) - (bounds.left + gap);
+  const widestSide = Math.max(rightRoom, leftRoom);
+  if (widestSide >= CANVAS_GENERATION_PANEL_MIN_WIDTH) {
+    const narrow = Math.min(width, widestSide);
+    return {
+      left: rightRoom >= leftRoom ? anchor.right + gap : anchor.left - gap - narrow,
+      top: beside,
+      width: narrow,
+      maxHeight,
+    };
   }
 
   // 四个位置都放不下时，不能直接贴着可视区下沿摆：alignedLeft 是按节点居中算的，贴下沿的
