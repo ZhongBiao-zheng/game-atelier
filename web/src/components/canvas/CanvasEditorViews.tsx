@@ -713,8 +713,13 @@ export interface CanvasPanelPlacement {
 
 /** 生成面板放在哪：贴着节点，但整体夹在可视区域内。视口坐标系。
  *
- *  竖直方向优先放节点下方；下方装不下就翻到上方；两边都装不下就贴住可视区并交给 maxHeight
- *  限高（面板内部滚动），保证任何缩放档位下面板都完整可达。 */
+ *  顺序是下方 → 上方 → 侧面 → 贴住可视区。**侧面这一档是为了不压住锚点节点**：面板高度
+ *  520-660（视频面板最高），1440×900 这一档常见的情况是上下都差几十像素装不下，原来直接
+ *  落到最后一档「贴住可视区」，结果面板压掉选中节点的下半张图——而画师正要看着那张图写
+ *  提示词。有横向余量时改放到节点侧面，节点整张可见。
+ *
+ *  最后一档仍然会压住节点一部分，但那时节点本身已经占满可用区域，没有不压的摆法；
+ *  这一档靠 maxHeight 限高（面板内部滚动）保证面板自己完整可达。 */
 export function placeCanvasGenerationPanel(
   anchor: CanvasPanelRect,
   bounds: CanvasPanelRect,
@@ -724,18 +729,36 @@ export function placeCanvasGenerationPanel(
   const width = Math.min(CANVAS_GENERATION_PANEL_WIDTH, Math.max(240, bounds.width - gap * 2));
   const maxHeight = Math.max(160, bounds.height - gap * 2);
   const height = Math.min(panelHeight > 0 ? panelHeight : maxHeight, maxHeight);
-  const left = Math.min(
-    Math.max(anchor.left + anchor.width / 2 - width / 2, bounds.left + gap),
+  const clampLeft = (value: number) => Math.min(
+    Math.max(value, bounds.left + gap),
     Math.max(bounds.left + gap, bounds.right - width - gap),
   );
+  const clampTop = (value: number) => Math.min(
+    Math.max(value, bounds.top + gap),
+    Math.max(bounds.top + gap, bounds.bottom - gap - height),
+  );
+  const alignedLeft = clampLeft(anchor.left + anchor.width / 2 - width / 2);
+
   const below = anchor.bottom + gap;
+  if (below + height <= bounds.bottom - gap) {
+    return { left: alignedLeft, top: below, width, maxHeight };
+  }
   const above = anchor.top - gap - height;
-  const top = below + height <= bounds.bottom - gap
-    ? below
-    : above >= bounds.top + gap
-      ? above
-      : Math.max(bounds.top + gap, bounds.bottom - gap - height);
-  return { left, top, width, maxHeight };
+  if (above >= bounds.top + gap) {
+    return { left: alignedLeft, top: above, width, maxHeight };
+  }
+
+  const beside = clampTop(anchor.top + anchor.height / 2 - height / 2);
+  const toRight = anchor.right + gap;
+  if (toRight + width <= bounds.right - gap) {
+    return { left: toRight, top: beside, width, maxHeight };
+  }
+  const toLeft = anchor.left - gap - width;
+  if (toLeft >= bounds.left + gap) {
+    return { left: toLeft, top: beside, width, maxHeight };
+  }
+
+  return { left: alignedLeft, top: clampTop(bounds.bottom - gap - height), width, maxHeight };
 }
 
 /** 画布外框上的常驻控件占了哪几条边。
@@ -764,6 +787,21 @@ function canvasChromeInsetBounds(surface: HTMLElement): CanvasPanelRect {
 }
 
 const canvasFlowTransform = (state: ReactFlowState) => state.transform;
+
+/** 锚点节点自己的位置与尺寸，拼成字符串。
+ *
+ *  拖动节点和缩放节点都只改节点自己的几何，不改画布 transform——面板原来只订阅 transform，
+ *  所以拖着节点走它会留在原地（画师报的第一个问题）。
+ *
+ *  返回字符串而不是 `{x, y, width, height}`：`useStore` 默认 Object.is 比较，返回对象等于
+ *  每帧都是新引用，会让面板在平移、缩放、任何 store 变化时都重渲染一次。同类坑见
+ *  CanvasEditor 里 edgeLookup 那段注释。 */
+function canvasNodeGeometry(state: ReactFlowState, nodeId: string) {
+  const node = state.nodeLookup.get(nodeId);
+  if (!node) return '';
+  const { x, y } = node.internals.positionAbsolute;
+  return `${x},${y},${node.measured.width ?? 0},${node.measured.height ?? 0}`;
+}
 
 function samePlacement(a: CanvasPanelPlacement | null, b: CanvasPanelPlacement) {
   return a !== null
@@ -801,6 +839,12 @@ function CanvasNodeFloatingPanel({
   const [placement, setPlacement] = useState<CanvasPanelPlacement | null>(null);
   // 平移与缩放都改 transform，订阅它就不用起 rAF 常驻轮询。
   const transform = useStore(canvasFlowTransform);
+  // 拖动 / 缩放这个节点本身不动 transform，得另外订阅节点自己的几何。
+  const geometrySelector = useCallback(
+    (state: ReactFlowState) => canvasNodeGeometry(state, nodeId),
+    [nodeId],
+  );
+  const geometry = useStore(geometrySelector);
   const surface = surfaceRef?.current ?? null;
 
   const place = useCallback(() => {
@@ -839,7 +883,7 @@ function CanvasNodeFloatingPanel({
     place();
     window.addEventListener('resize', place);
     return () => window.removeEventListener('resize', place);
-  }, [place, transform]);
+  }, [geometry, place, transform]);
 
   return createPortal(
     <div

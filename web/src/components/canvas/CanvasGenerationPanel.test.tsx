@@ -28,8 +28,10 @@ function versionResolver(versions: Readonly<Record<string, CanvasContentVersion>
 
 vi.mock('@xyflow/react', () => ({
   // 生成面板订阅 transform 重新定位；mock 返回常量数组，避免每次 render 换引用。
-  useStore: (selector: (state: { transform: [number, number, number] }) => unknown) =>
-    selector({ transform: [0, 0, 1] }),
+  useStore: (selector: (state: {
+    transform: [number, number, number];
+    nodeLookup: Map<string, never>;
+  }) => unknown) => selector({ transform: [0, 0, 1], nodeLookup: new Map<string, never>() }),
   NodeResizer: () => null,
   NodeToolbar: () => null,
   Handle: ({ type }: { type: 'source' | 'target' }) => <button type="button">{type}</button>,
@@ -915,6 +917,36 @@ it('keeps the generation panel reachable when it fits neither above nor below', 
   expect(placement.top).toBe(16);
   expect(placement.maxHeight).toBe(368);
   expect(placement.width).toBe(608);
+});
+
+function overlaps(a: ReturnType<typeof rect>, b: ReturnType<typeof rect>) {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+it('puts the generation panel beside the node instead of on top of it', () => {
+  // 画师实测（1446×990）：图片 / 视频面板高 520-660，上下都差几十像素装不下，原实现直接落到
+  // 最后那档「贴住可视区」，把选中节点的下半张图压掉了 —— 而画师正要看着那张图写提示词。
+  const node = rect(90, 60, 330, 330);
+
+  const placement = placeCanvasGenerationPanel(node, rect(0, 0, 1440, 900), 860);
+  // maxHeight 是上限，不是实际高度：面板真实高度是 min(传入高度, maxHeight)。
+  const panel = rect(placement.left, placement.top, placement.width, Math.min(860, placement.maxHeight));
+
+  expect(placement.left).toBeGreaterThanOrEqual(node.right + 16);
+  expect(overlaps(panel, node)).toBe(false);
+  expect(panel.bottom).toBeLessThanOrEqual(900 - 16);
+});
+
+it('falls back to the panel-on-top placement only when there is no room beside the node either', () => {
+  // 侧面也放不下时仍然要保证面板自己完整可达（限高 + 内部滚动），这时压住节点是没得选。
+  const wideNode = rect(0, 40, 1400, 640);
+
+  const placement = placeCanvasGenerationPanel(wideNode, rect(0, 0, 1440, 900), 860);
+  const panel = rect(placement.left, placement.top, placement.width, Math.min(860, placement.maxHeight));
+
+  expect(overlaps(panel, wideNode)).toBe(true);
+  expect(panel.top).toBeGreaterThanOrEqual(16);
+  expect(panel.bottom).toBeLessThanOrEqual(900 - 16);
 });
 
 it('takes the panel status line from the same job→copy table as the node badge', () => {
