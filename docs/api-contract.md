@@ -110,7 +110,11 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径：
 
 - `GET /api/canvas/projects/{project_id}/versions/{version_id}/media`：同源内联预览，固定安全 MIME、
-  `nosniff`，不可变私有缓存。
+  `nosniff`，不可变私有缓存。可选 `?w=` 是**这张图会被显示成多宽**（已含设备像素比），不是想要的位图
+  尺寸：服务端向上取到固定档位 256 / 512 / 1024 后返回缓存的 WebP 缩略图，`image/webp`。原图本身更小、
+  是动图、非图片、或 `w` 超过最大档位时照发原图——缩略图纯属优化，不改变可见内容，也没有失败态。
+  缓存落在 `.runtime/canvas-thumbnails/<project_id>/`，不进项目目录（导出包会按 `content_versions`
+  逐一核对项目目录里的文件）；缓存键是不可变的 `version_id` 加档位，因此永不失效。
 - `GET /api/canvas/projects/{project_id}/versions/{version_id}/download`：附件下载，服务端生成安全文件名。
 
 旧的 `/content/{version_id}` 路径已删除，不保留兼容分支。

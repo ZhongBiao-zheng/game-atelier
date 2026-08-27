@@ -411,7 +411,7 @@ function CanvasProjectCard({
       >
         {project.cover ? (
           <img
-            src={canvasMediaUrl(project.project_id, project.cover.version_id)}
+            src={canvasMediaUrl(project.project_id, project.cover.version_id, 360)}
             alt=""
             loading="lazy"
             className="aspect-[16/10] w-full border-b border-border object-cover"

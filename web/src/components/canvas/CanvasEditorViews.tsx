@@ -604,7 +604,13 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           {content && content.kind !== 'text' && (
             <MediaPreview
               kind={content.kind}
-              src={canvasMediaUrl(context.projectId, content.version_id)}
+              // 节点卡上的图按卡片宽度取缩略图。画布上一屏能有几十上百个节点，
+              // 发原图等于让浏览器同时解出同样多张满分辨率位图。
+              src={canvasMediaUrl(
+                context.projectId,
+                content.version_id,
+                content.kind === 'image' ? node.size?.width ?? 320 : undefined,
+              )}
               title={node.title}
               fit={node.type === 'image' || node.type === 'video' ? node.data.display.fit : 'contain'}
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
@@ -962,7 +968,7 @@ function ImageCandidateCard({
       }}
     >
       {version?.kind === 'image'
-        ? <MediaPreview kind="image" src={canvasMediaUrl(context.projectId, version.version_id)} />
+        ? <MediaPreview kind="image" src={canvasMediaUrl(context.projectId, version.version_id, node.size?.width ?? 320)} />
         : (
           <div className="grid size-full min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
             {candidate.status === 'pending'
@@ -2456,7 +2462,7 @@ function CandidateGrid({
             {version?.kind === 'text'
               ? <p className="line-clamp-4 min-h-20 whitespace-pre-wrap p-2 text-xs leading-relaxed text-foreground">{version.text}</p>
               : version
-                ? <MediaPreview kind={version.kind} src={canvasMediaUrl(context.projectId, version.version_id)} />
+                ? <MediaPreview kind={version.kind} src={canvasMediaUrl(context.projectId, version.version_id, version.kind === 'image' ? 160 : undefined)} />
                 : (
                 <div className="grid min-h-20 place-items-center px-2 text-center text-xs text-muted-foreground">
                   {candidate.status === 'pending'

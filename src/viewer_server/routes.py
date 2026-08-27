@@ -2766,8 +2766,14 @@ async def post_canvas_media_operation(
 def get_canvas_media(
     project_id: str,
     version_id: str,
+    w: int | None = Query(default=None, gt=0, le=8192),
 ) -> FileResponse:
-    return _canvas_media_file_response(project_id, version_id, download=False)
+    """w 是「这张图会被显示成多宽」，不是「请给我这个尺寸」。
+
+    服务端向上取到固定档位（256 / 512 / 1024）后发缩略图；原图本来就更小、
+    是动图、或者要的比最大档位还宽时照发原图。缩略图纯属优化，不改变可见内容。
+    """
+    return _canvas_media_file_response(project_id, version_id, download=False, display_width=w)
 
 
 @router.get("/canvas/projects/{project_id}/versions/{version_id}/download")
@@ -2783,14 +2789,20 @@ def _canvas_media_file_response(
     version_id: str,
     *,
     download: bool,
+    display_width: int | None = None,
 ) -> FileResponse:
     from character_workflow.lib.canvas_projects import (
         canvas_media_response_metadata,
         resolve_canvas_media,
     )
+    from character_workflow.lib.canvas_thumbnails import resolve_canvas_thumbnail
     try:
         path, version = resolve_canvas_media(project_id, version_id)
         media_type, filename = canvas_media_response_metadata(version)
+        if display_width is not None:
+            thumbnail = resolve_canvas_thumbnail(project_id, version, path, display_width)
+            if thumbnail is not None:
+                path, media_type = thumbnail, "image/webp"
         headers = {"X-Content-Type-Options": "nosniff"}
         if not download:
             headers["Cache-Control"] = "private, max-age=31536000, immutable"

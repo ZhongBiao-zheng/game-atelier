@@ -30,6 +30,7 @@ from character_workflow.lib.canvas_projects import (
     canvas_projects_root,
     read_canvas_project,
 )
+from character_workflow.lib.canvas_thumbnails import discard_canvas_thumbnails
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.jobs import job_lock, new_job_id, read_job
 from character_workflow.lib.schemas import (
@@ -1257,3 +1258,5 @@ def delete_canvas_project(
                 shutil.rmtree(transaction, ignore_errors=True)
                 raise
     shutil.rmtree(transaction, ignore_errors=True)
+    # 缩略图缓存放在 .runtime 下，不随项目目录一起被移走：删项目时得自己收。
+    discard_canvas_thumbnails(project_id)

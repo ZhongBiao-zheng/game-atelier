@@ -291,7 +291,7 @@ function LibraryForm({ title, busy, error, onCancel, onSubmit, children }: {
 function LibraryAssetPreview({ projectId, version }: { projectId: string; version?: CanvasContentVersion }) {
   const className = 'grid size-14 shrink-0 place-items-center overflow-hidden rounded-md border border-border bg-secondary text-muted-foreground';
   if (!version) return <span className={className}><FileText className="size-5" aria-hidden="true" /></span>;
-  if (version.kind === 'image') return <span className={className}><img src={canvasMediaUrl(projectId, version.version_id)} alt="" loading="lazy" className="size-full object-cover" /></span>;
+  if (version.kind === 'image') return <span className={className}><img src={canvasMediaUrl(projectId, version.version_id, 56)} alt="" loading="lazy" className="size-full object-cover" /></span>;
   if (version.kind === 'video') return <span className={className}><FileVideo className="size-5" aria-hidden="true" /></span>;
   if (version.kind === 'audio') return <span className={className}><FileAudio className="size-5" aria-hidden="true" /></span>;
   if (version.kind === 'text') return <span className={className}><FileText className="size-5" aria-hidden="true" /></span>;

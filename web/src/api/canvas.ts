@@ -341,11 +341,31 @@ export async function replaceCanvasNodeMedia(
   );
 }
 
+/** 与后端 `canvas_thumbnails.CANVAS_THUMBNAIL_WIDTHS` 同一组档位。
+ *
+ *  两边都取档是有原因的：服务端取档是为了不让调用方无限往磁盘写派生文件；客户端取档是为了
+ *  让 URL 只有这几个取值——否则拖动节点边框时每一帧都是一个新 URL，浏览器会把同一张图重新
+ *  拉几十遍。真值在服务端，这份副本漂了也只是档位选大一档，不会改变看到的内容。 */
+const CANVAS_THUMBNAIL_WIDTHS = [256, 512, 1024];
+
+/** 把「这张图会显示成多宽」换算成要向服务端申请的位图宽度；超过最大档位返回 null＝要原图。 */
+function canvasThumbnailWidth(displayWidth: number): number | null {
+  const ratio = typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+  const needed = displayWidth * ratio;
+  return CANVAS_THUMBNAIL_WIDTHS.find(candidate => needed <= candidate) ?? null;
+}
+
+/** displayWidth 传的是 CSS 像素下的显示宽度，不是想要的位图尺寸——设备像素比和档位都由这里算。
+ *  不传＝要原图（全屏预览、蒙版编辑、下载这类地方）。 */
 export function canvasMediaUrl(
   projectId: string,
   versionId: string,
+  displayWidth?: number,
 ): string {
-  return `/api/canvas/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/media`;
+  const base = `/api/canvas/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}/media`;
+  if (displayWidth === undefined || displayWidth <= 0) return base;
+  const width = canvasThumbnailWidth(displayWidth);
+  return width === null ? base : `${base}?w=${width}`;
 }
 
 export function canvasDownloadUrl(

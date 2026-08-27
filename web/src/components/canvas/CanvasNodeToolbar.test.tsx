@@ -512,3 +512,37 @@ it('treats an uploaded image as a pure material with toolbar and one direct repl
   const toolbar = screen.getByRole('toolbar', { name: '图片 节点工具' });
   expect(within(toolbar).queryByRole('button', { name: '替换 图片' })).not.toBeInTheDocument();
 });
+
+it('loads node-card images at the tier above the card width, not the original', () => {
+  // 缩放到能看见几十上百个节点时，发原图等于让浏览器同时解出同样多张满分辨率位图。
+  const version: CanvasContentVersion = {
+    version_id: 'version-image',
+    kind: 'image',
+    created_at: '2026-08-25T00:00:00Z',
+    sha256: 'b'.repeat(64),
+    origin: { kind: 'upload', upload_id: 'upload-image' },
+    path: 'uploads/upload-image.png',
+    mime_type: 'image/png',
+    bytes: 4_000_000,
+    width: 2048,
+    height: 2048,
+    duration_ms: null,
+  };
+  const image = {
+    ...nodes[1],
+    size: { width: 320, height: 320 },
+    data: { ...nodes[1].data, current_version_id: 'version-image' },
+  } as CanvasNode;
+  const context = nodeContext({ resolveVersion: versionResolver({ 'version-image': version }) });
+
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: image }} selected={false} />
+    </CanvasNodeContext.Provider>,
+  );
+
+  expect(screen.getByRole('img', { name: '图片' })).toHaveAttribute(
+    'src',
+    '/api/canvas/projects/canvas-test/versions/version-image/media?w=512',
+  );
+});

@@ -146,8 +146,9 @@ function canvasMaterialReference(
     kind: version.kind,
     title: node.title,
     text: version.kind === 'text' ? version.text : undefined,
+    // 这个 URL 只喂给素材芯片和 w-64 的悬浮详情，两处都是小图。
     previewUrl: version.kind === 'text'
       ? undefined
-      : canvasMediaUrl(projectId, version.version_id),
+      : canvasMediaUrl(projectId, version.version_id, version.kind === 'image' ? 256 : undefined),
   };
 }
