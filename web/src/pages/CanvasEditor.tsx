@@ -331,7 +331,14 @@ interface CanvasClipboardPayload {
   connections: CanvasConnection[];
 }
 
-const CANVAS_MOUSE_PAN_BUTTONS: number[] = [];
+// 鼠标中键（button 1）拖动平移。原来是空数组 —— 任何鼠标键都不触发拖动平移，画布只能靠
+// 触控板双指滑动或 Space/Ctrl+拖动移动，用鼠标的画师在空白处按中键完全没反应。左键留给
+// selectionOnDrag 框选，右键留给上下文菜单，所以这里只放中键。
+const CANVAS_MOUSE_PAN_BUTTONS: number[] = [1];
+// 滚轮语义必须按输入设备分：鼠标滚轮要缩放，触控板双指滑动要平移。两者用的是同一个 wheel
+// 事件、deltaMode 也都是 0，运行时区分不了，所以只能按平台近似（macOS 触控板优先，其余鼠标
+// 优先）。捏合缩放走 zoomOnPinch，两个平台都保留。
+const CANVAS_WHEEL_ZOOMS = !/Mac/i.test(navigator.userAgent);
 const CANVAS_NODE_CLIPBOARD_TYPE = 'application/x-game-atelier-canvas-nodes';
 const CANVAS_MIN_ZOOM = 0.08;
 const CANVAS_MAX_ZOOM = 2.5;
@@ -3432,6 +3439,13 @@ function CanvasEditorInner({
         tabIndex={-1}
         className="canvas-editor-region relative h-full min-h-0 overflow-hidden bg-background outline-none"
         aria-label={`画布编辑器 ${projectName}`}
+        onMouseDown={event => {
+          // Windows 的 Chrome / Edge 在中键按下时启动浏览器自动滚动（十字光标 + 跟着鼠标滚
+          // 最近的可滚动祖先），会和中键平移抢同一串事件。xyflow 的 d3-zoom 监听器直接挂在
+          // pane 上、比这个 React 冒泡处理器先跑，所以在这里 preventDefault 只掐掉浏览器的
+          // 默认动作，平移不受影响。只拦中键，左右键照旧。
+          if (event.button === 1) event.preventDefault();
+        }}
       >
         <ReactFlow<FlowNode>
           nodes={flowNodes}
@@ -3498,9 +3512,9 @@ function CanvasEditorInner({
           defaultViewport={document.viewport}
           minZoom={CANVAS_MIN_ZOOM}
           maxZoom={CANVAS_MAX_ZOOM}
-          zoomOnScroll={false}
+          zoomOnScroll={CANVAS_WHEEL_ZOOMS}
           zoomOnPinch
-          panOnScroll
+          panOnScroll={!CANVAS_WHEEL_ZOOMS}
           panOnDrag={CANVAS_MOUSE_PAN_BUTTONS}
           panActivationKeyCode={['Space', 'Control']}
           selectionOnDrag
@@ -4013,7 +4027,10 @@ function CanvasCreateMenuItems({ allowEmptyNodes, allowUpload, allowConfig, onAd
 }
 
 const CANVAS_SHORTCUTS = [
+  { keys: ['鼠标中键', '拖动'], label: '平移画布' },
   { keys: ['Space / Ctrl', '拖动'], label: '临时平移画布' },
+  { keys: ['鼠标滚轮'], label: '缩放画布' },
+  { keys: ['触控板双指'], label: '滑动平移 / 捏合缩放' },
   { keys: ['空白拖动'], label: '框选多个节点' },
   { keys: ['Shift / ⌘', '点击'], label: '追加选择节点' },
   { keys: ['⌘ / Ctrl', 'A'], label: '全选节点' },
