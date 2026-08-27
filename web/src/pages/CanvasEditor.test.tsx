@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { useContext } from 'react';
 
@@ -32,7 +32,7 @@ vi.mock('@xyflow/react', () => {
     useStore: (selector: (state: { transform: [number, number, number] }) => unknown) =>
       selector({ transform: [0, 0, 1] }),
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, multiSelectionKeyCode, selectionKeyCode, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onMove, onMoveEnd, onDragOver, onDrop }: {
+    ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, multiSelectionKeyCode, selectionKeyCode, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onNodeMouseEnter, onMove, onMoveEnd, onDragOver, onDrop }: {
       children: React.ReactNode;
       edges: Array<{ id: string; selected?: boolean }>;
       nodes: Array<{ id: string; selected?: boolean; data: unknown }>;
@@ -41,8 +41,9 @@ vi.mock('@xyflow/react', () => {
       onConnect?: (connection: { source: string; target: string; sourceHandle: null; targetHandle: null }) => void;
       onConnectEnd?: (event: MouseEvent, state: { isValid: boolean; fromNode: { id: string }; fromHandle: { type: 'source' | 'target' } }) => void;
       onEdgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean }>) => void;
-      onNodesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean }>) => void;
+      onNodesChange?: (changes: Array<{ id: string; type: string; selected?: boolean; position?: { x: number; y: number } }>) => void;
       onNodeClick?: (event: React.MouseEvent, node: { id: string }) => void;
+      onNodeMouseEnter?: (event: unknown, node: { id: string }) => void;
       multiSelectionKeyCode?: string[];
       selectionKeyCode?: string[] | null;
       onMoveEnd?: (event: unknown, viewport: { x: number; y: number; zoom: number }) => void;
@@ -51,6 +52,8 @@ vi.mock('@xyflow/react', () => {
       onDrop?: (event: unknown) => void;
     }) => {
       const CanvasNode = nodeTypes?.canvasNode;
+      if (flowEdgeIdentities[flowEdgeIdentities.length - 1] !== edges) flowEdgeIdentities.push(edges);
+      flowHandlers.nodesChange = onNodesChange;
       return (
         <div data-testid="react-flow" data-node-count={nodes.length} data-visible-only={onlyRenderVisibleElements} data-multi-select-keys={(multiSelectionKeyCode ?? []).join(',')} data-selection-key={selectionKeyCode === null ? 'none' : String(selectionKeyCode)}>
           {nodes.map(node => (
@@ -101,6 +104,14 @@ vi.mock('@xyflow/react', () => {
                 aria-label="simulate node select"
                 onClick={() => onNodesChange?.([{ id: nodes[0].id, type: 'select', selected: true }])}
               />
+              {nodes.map(node => (
+                <button
+                  key={`hover-${node.id}`}
+                  type="button"
+                  aria-label={`simulate hover ${node.id}`}
+                  onClick={() => onNodeMouseEnter?.({}, node)}
+                />
+              ))}
             </>
           )}
           {edges.length > 0 && (
@@ -235,6 +246,12 @@ vi.mock('@/api/keys', async importOriginal => {
  *  重渲染一次。所以「context 换了几次引用」就是 C1 要压住的那个数。探针挂在 ReactFlow mock 的
  *  children 里，正好在 provider 内部。 */
 const canvasContextIdentities: unknown[] = [];
+/** 每次交给 ReactFlow 的 edges 数组换引用就记一笔——xyflow 的 EdgeWrapper 按对象引用重渲染。 */
+const flowEdgeIdentities: unknown[] = [];
+/** 直接拿到 ReactFlow 收到的 onNodesChange：position / remove 这类变更没有对应的 UI 入口。 */
+const flowHandlers: {
+  nodesChange?: (changes: Array<{ id: string; type: string; selected?: boolean; position?: { x: number; y: number } }>) => void;
+} = {};
 
 function CanvasContextIdentityProbe() {
   const value = useContext(CanvasNodeContext);
@@ -305,6 +322,8 @@ function documentWith(overrides: Partial<CanvasDocument>): CanvasDocument {
 beforeEach(() => {
   vi.clearAllMocks();
   canvasContextIdentities.length = 0;
+  flowEdgeIdentities.length = 0;
+  flowHandlers.nodesChange = undefined;
   // jsdom 不实现 elementFromPoint，而连接拖到空白处要用它探测落点节点。
   document.elementFromPoint = () => null;
   // 编辑器只调 listCanvasProjects(true)（轻量分支，返回 CanvasProject[]）；
@@ -331,6 +350,13 @@ beforeEach(() => {
 
 function lastSavedDocument() {
   return vi.mocked(saveCanvasDocument).mock.calls.at(-1)?.[1];
+}
+
+function savedTextOf(saved: CanvasDocument | undefined, nodeId: string) {
+  const node = saved?.nodes.find(candidate => candidate.id === nodeId);
+  const versionId = node && node.type === 'text' ? node.data.current_version_id : null;
+  const version = versionId ? saved?.content_versions[versionId] : undefined;
+  return version?.kind === 'text' ? version.text : undefined;
 }
 
 function savedText(saved: CanvasDocument | undefined) {
@@ -1018,4 +1044,86 @@ it('keeps the node context stable while typing and while zooming', async () => {
   fireEvent.blur(editor);
   expect(await screen.findByText('雨夜列车进站')).toBeTruthy();
   expect(canvasContextIdentities.length).toBe(before);
+});
+
+it('keeps connection objects stable while typing and while hovering an unrelated node', async () => {
+  // flowEdges 的依赖里有 document.nodes（连线的无障碍名称要用节点标题）和 activeNodeId（hover），
+  // 所以以前每打一个字、每挪一次鼠标，全部连线都会换成新对象——xyflow 的 EdgeWrapper 是
+  // useStore(s => s.edgeLookup.get(id))，默认 Object.is 比较，换对象就重画。
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [
+      textNode('source-one', '前置', 'version-one'),
+      imageNode('target-one', '图片', imageDraft),
+      textNode('loner', '旁白', 'version-two'),
+    ],
+    connections: [{
+      id: 'connection-one', role: 'input', source_node_id: 'source-one', target_node_id: 'target-one',
+    }],
+    content_versions: {
+      'version-one': {
+        version_id: 'version-one', kind: 'text', text: '前置文本',
+        created_at: '2026-08-26T00:00:00Z', sha256: 'c'.repeat(64), origin: { kind: 'user_edit' },
+      },
+      'version-two': {
+        version_id: 'version-two', kind: 'text', text: '旁白初稿',
+        created_at: '2026-08-26T00:00:00Z', sha256: 'd'.repeat(64), origin: { kind: 'user_edit' },
+      },
+    },
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-loner' }));
+  fireEvent.doubleClick(await screen.findByText('旁白初稿'));
+  const editor = await screen.findByLabelText('编辑 旁白 正文');
+  // 第一次输入会给这个节点建本地版本，是真的结构变化；从第二次起才是纯内容变化。
+  fireEvent.change(editor, { target: { value: '旁白一' } });
+
+  const before = flowEdgeIdentities.length;
+  fireEvent.change(editor, { target: { value: '旁白一二' } });
+  fireEvent.change(editor, { target: { value: '旁白一二三' } });
+  // 悬停一个不在任何连线上的节点：没有一条连线的 active 会变。
+  fireEvent.click(screen.getByRole('button', { name: 'simulate hover loner' }));
+
+  await waitFor(
+    () => expect(savedTextOf(lastSavedDocument(), 'loner')).toBe('旁白一二三'),
+    { timeout: 1500 },
+  );
+  expect(flowEdgeIdentities.length).toBe(before);
+
+  // 而缓存不是冻住的：悬停到连线端点上，那条连线该换对象还是要换。
+  fireEvent.click(screen.getByRole('button', { name: 'simulate hover source-one' }));
+  expect(flowEdgeIdentities.length).toBe(before + 1);
+});
+
+it('applies a multi-node drag and a simultaneous delete in one pass over the document', async () => {
+  // C5 把「每条 change 各扫一遍全部节点」换成先收查找表再扫一遍。复杂度本身测不出来，
+  // 这条钉的是改写后的语义：多节点位移一次落定，同一批里的删除照样生效。
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [
+      textNode('a', '甲'),
+      textNode('b', '乙'),
+      textNode('c', '丙'),
+    ],
+    connections: [{ id: 'edge-bc', role: 'input', source_node_id: 'b', target_node_id: 'c' }],
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+
+  act(() => {
+    flowHandlers.nodesChange?.([
+      { id: 'a', type: 'position', position: { x: 40, y: 60 } },
+      { id: 'b', type: 'position', position: { x: 90, y: 10 } },
+      { id: 'c', type: 'remove' },
+    ]);
+  });
+
+  await waitFor(() => expect(lastSavedDocument()).toBeTruthy(), { timeout: 1500 });
+  const saved = lastSavedDocument()!;
+  expect(saved.nodes.map(node => [node.id, node.position])).toEqual([
+    ['a', { x: 40, y: 60 }],
+    ['b', { x: 90, y: 10 }],
+  ]);
+  // 被删节点的连线要跟着走，不能留下悬空连接。
+  expect(saved.connections).toEqual([]);
 });

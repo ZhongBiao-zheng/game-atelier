@@ -8,6 +8,7 @@ import {
   ReactFlowProvider,
   SelectionMode,
   type Connection,
+  type Edge,
   type EdgeChange,
   type IsValidConnection,
   type NodeChange,
@@ -401,6 +402,15 @@ function CanvasEditorInner({
     liveLayout: LiveNodeLayout | undefined;
     flowNode: FlowNode;
   }>());
+  const flowEdgeCache = useRef(new Map<string, {
+    connection: CanvasConnection;
+    active: boolean;
+    selected: boolean;
+    sourceTitle: string;
+    targetTitle: string;
+    flowEdge: Edge;
+  }>());
+  const flowEdgesRef = useRef<Edge[]>([]);
   const [liveNodeLayout, setLiveNodeLayout] = useState<LiveNodeLayout | null>(null);
   const pendingLiveNodeLayout = useRef<LiveNodeLayout | null>(null);
   const activeResizeNodeId = useRef<string | null>(null);
@@ -509,6 +519,8 @@ function CanvasEditorInner({
     setToolNotice(null);
     if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
     flowNodeCache.current.clear();
+    flowEdgeCache.current.clear();
+    flowEdgesRef.current = [];
     activeResizeNodeId.current = null;
     pendingLiveNodeLayout.current = null;
     if (resizePreviewFrame.current !== null) window.cancelAnimationFrame(resizePreviewFrame.current);
@@ -1091,13 +1103,32 @@ function CanvasEditorInner({
   const activeNodeId = hoveredNodeId ?? (
     selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value ?? null : null
   );
+  /** 连线对象和节点卡一样按引用做缓存。
+   *
+   *  xyflow 的 EdgeWrapper 是 `useStore(s => s.edgeLookup.get(id))`，默认 Object.is 比较：
+   *  换一个新对象就重渲染这条连线。而这个 memo 的依赖里有 `document.nodes`（连线的无障碍
+   *  名称要用节点标题）和 `activeNodeId`（hover），所以以前每打一个字、每挪一次鼠标，
+   *  全部连线都会换成新对象重画一遍。
+   *
+   *  数组本身也复用：一条都没变时返回上一次那个数组，`setEdges` 连跑都不用跑。 */
   const flowEdges = useMemo(() => {
     const titles = new Map((document?.nodes ?? []).map(node => [node.id, node.title]));
-    return (document?.connections ?? []).map(connection => {
+    const liveIds = new Set<string>();
+    const next = (document?.connections ?? []).map(connection => {
+      liveIds.add(connection.id);
       const active = activeNodeId === connection.source_node_id || activeNodeId === connection.target_node_id;
+      const selected = selectedConnectionIds.has(connection.id);
       const sourceTitle = titles.get(connection.source_node_id) ?? connection.source_node_id;
       const targetTitle = titles.get(connection.target_node_id) ?? connection.target_node_id;
-      return {
+      const cached = flowEdgeCache.current.get(connection.id);
+      if (
+        cached?.connection === connection
+        && cached.active === active
+        && cached.selected === selected
+        && cached.sourceTitle === sourceTitle
+        && cached.targetTitle === targetTitle
+      ) return cached.flowEdge;
+      const flowEdge: Edge = {
         id: connection.id,
         source: connection.source_node_id,
         target: connection.target_node_id,
@@ -1109,12 +1140,27 @@ function CanvasEditorInner({
         ),
         ariaLabel: `${connection.role === 'derivation' ? '派生' : '输入'}连接：${sourceTitle} → ${targetTitle}`,
         interactionWidth: 16,
-        selected: selectedConnectionIds.has(connection.id),
+        selected,
         selectable: true,
         focusable: true,
         deletable: true,
       };
+      flowEdgeCache.current.set(
+        connection.id,
+        { connection, active, selected, sourceTitle, targetTitle, flowEdge },
+      );
+      return flowEdge;
     });
+    for (const id of flowEdgeCache.current.keys()) {
+      if (!liveIds.has(id)) flowEdgeCache.current.delete(id);
+    }
+    // 逐项按引用比，而不是「有没有走过 else 分支」：顺序变了也要当成变了。
+    const previous = flowEdgesRef.current;
+    if (next.length === previous.length && next.every((edge, index) => edge === previous[index])) {
+      return previous;
+    }
+    flowEdgesRef.current = next;
+    return next;
   }, [activeNodeId, document?.connections, document?.nodes, selectedConnectionIds]);
 
   const isValidConnection = useCallback<IsValidConnection>((connection) => (
@@ -1143,14 +1189,20 @@ function CanvasEditorInner({
     ));
     if (!graphChanges.length) return;
     commit(current => {
-      let nodes = [...current.nodes];
+      // 先把这一批 change 收成两张查找表，再对节点扫一遍。
+      // 原来是每条 change 各做一次 nodes.map / nodes.filter：框选拖动时 change 数和节点数
+      // 同阶，于是 O(n²)，而且拖动期间每一帧都要跑一次。
+      const movedTo = new Map<string, XYPosition>();
       const removedNodeIds = new Set<string>();
       for (const change of graphChanges) {
-        if (change.type === 'position' && change.position) nodes = nodes.map(node => node.id === change.id ? { ...node, position: change.position! } : node);
-        if (change.type === 'remove') {
-          removedNodeIds.add(change.id);
-          nodes = nodes.filter(node => node.id !== change.id);
-        }
+        if (change.type === 'position' && change.position) movedTo.set(change.id, change.position);
+        if (change.type === 'remove') removedNodeIds.add(change.id);
+      }
+      const nodes: CanvasNode[] = [];
+      for (const node of current.nodes) {
+        if (removedNodeIds.has(node.id)) continue;
+        const position = movedTo.get(node.id);
+        nodes.push(position ? { ...node, position } : node);
       }
       return removeCanvasConnections(
         { ...current, nodes },
