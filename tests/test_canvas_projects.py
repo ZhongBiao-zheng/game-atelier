@@ -350,3 +350,26 @@ def test_frozen_run_never_reads_a_draft_supplied_path(client, isolated_data_root
 
     leaked = client.get("/api/raw", params={"job_id": job_id, "path": str(secret)})
     assert leaked.status_code == 403
+
+
+def test_canvas_jobs_endpoint_scans_the_jobs_directory_once(client, monkeypatch):
+    """出图期间前端一直轮这条接口，list_jobs() 要解析 .runtime/jobs 下的每一个 job 文件。"""
+    from character_workflow.lib import canvas_runs, jobs as jobs_module
+    from viewer_server import routes as routes_module
+
+    project_id = _create_project(client)["project_id"]
+    scans: list[int] = []
+    original = jobs_module.list_jobs
+
+    def counted() -> list:
+        scans.append(1)
+        return original()
+
+    # 两个绑定都要换：路由在函数体里 import，canvas_runs 在模块顶层 import。
+    monkeypatch.setattr(jobs_module, "list_jobs", counted)
+    monkeypatch.setattr(canvas_runs, "list_jobs", counted)
+    monkeypatch.setattr(routes_module, "list_jobs", counted, raising=False)
+
+    response = client.get(f"/api/canvas/projects/{project_id}/jobs")
+    assert response.status_code == 200, response.text
+    assert len(scans) == 1

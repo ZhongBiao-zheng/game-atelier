@@ -2479,10 +2479,20 @@ def _recover_incremental_candidate_output(job: Job) -> Job:
     )
 
 
-def reconcile_canvas_jobs(*, fail_pending: bool = False, project_id: str | None = None) -> list[str]:
-    """Repair terminal Canvas Jobs; optionally fail orphaned in-flight requests on startup."""
+def reconcile_canvas_jobs(
+    *,
+    fail_pending: bool = False,
+    project_id: str | None = None,
+    jobs: list[Job] | None = None,
+) -> list[str]:
+    """Repair terminal Canvas Jobs; optionally fail orphaned in-flight requests on startup.
+
+    jobs 可以传一份已经读好的列表。list_jobs() 会把 `.runtime/jobs/` 下每一个 job 文件读出来
+    解析一遍（全仓所有角色、Studio、画布的 job 都在同一个目录），而画布轮询原来一次请求要跑
+    两遍：这里一遍，路由拼列表时又一遍。
+    """
     reconciled: list[str] = []
-    for job in list_jobs():
+    for job in (list_jobs() if jobs is None else jobs):
         if job.namespace != "canvas" or not job.canvas_project_id:
             continue
         if project_id is not None and job.canvas_project_id != project_id:

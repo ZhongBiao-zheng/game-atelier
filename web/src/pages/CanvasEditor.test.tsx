@@ -911,7 +911,8 @@ it('keeps a just-submitted job that an in-flight poll response predates', async 
   releasePoll();
 
   // 第三次轮询本身就是断言：只有新提交的 job 活了下来，轮询才会继续。
-  await waitFor(() => expect(listCanvasJobs).toHaveBeenCalledTimes(3), { timeout: 2500 });
+  // 兜底轮询间隔是 4s（SSE 接管了「出图完成」的通知，见下面那条用例），所以这里要等满一轮。
+  await waitFor(() => expect(listCanvasJobs).toHaveBeenCalledTimes(3), { timeout: 6000 });
   await waitFor(() => expect(
     document.querySelector('[data-canvas-node-status-label="loading"]'),
   ).not.toBeNull(), { timeout: 1000 });
@@ -1126,4 +1127,72 @@ it('applies a multi-node drag and a simultaneous delete in one pass over the doc
   ]);
   // 被删节点的连线要跟着走，不能留下悬空连接。
   expect(saved.connections).toEqual([]);
+});
+
+it('pulls canvas jobs as soon as SSE says one changed, without waiting for the next poll', async () => {
+  // 画布 job 和角色 / Studio 的 job 在同一个 .runtime/jobs 目录下，watcher 早就在广播
+  // job-changed，画布只是一直没订阅：以前最坏要等一整轮兜底轮询才看见出图完成。
+  class TestEventSource {
+    static last: TestEventSource | null = null;
+    listeners = new Map<string, Array<(event: MessageEvent) => void>>();
+    onopen: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    constructor(public url: string) { TestEventSource.last = this; }
+    addEventListener(type: string, callback: (event: MessageEvent) => void) {
+      this.listeners.set(type, [...(this.listeners.get(type) ?? []), callback]);
+    }
+    close() {}
+    emit(type: string, data: unknown) {
+      this.listeners.get(type)?.forEach(callback => (
+        callback({ data: JSON.stringify(data) } as MessageEvent)
+      ));
+    }
+  }
+  vi.stubGlobal('EventSource', TestEventSource);
+
+  const draft: CanvasGenerationDraft = {
+    mode: 'image', prompt: '雨夜', input_policy: 'mentions_only',
+    model: 'gpt-image-2', alias: 'default', params: {}, updated_at: '2026-08-26T00:00:00Z',
+  };
+  const pending = {
+    job_id: 'job-canvas-1', character_id: 'main', prompt: '雨夜',
+    submitted_at: '2026-08-26T00:00:00Z', model: 'gpt-image-2', params: { n: 1 },
+    output_paths: [], status: 'pending', error: null, kind: 'image', namespace: 'canvas',
+    canvas_project_id: 'canvas-one', alias: 'default', provider: 'openai',
+    canvas_run: {
+      run_id: 'run-1',
+      result_node_id: 'image-one',
+      candidates: [{ candidate_id: 'run-1-0', index: 0, status: 'pending', version_id: null, error: null }],
+      snapshot: {
+        snapshot_version: 1, surface_node_id: 'image-one', result_node_id: 'image-one',
+        mode: 'image', final_prompt: '雨夜', input_policy: 'mentions_only',
+        model: 'gpt-image-2', provider: 'openai', alias: 'default', normalized_params: {},
+        inputs: [], mask_version_id: null, submitted_at: '2026-08-26T00:00:00Z',
+        submitted_by: { kind: 'user', actor_id: null }, request_fingerprint: 'f',
+      },
+    },
+  } as unknown as Job;
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [imageNode('image-one', '图片', draft)],
+  }));
+  vi.mocked(listCanvasJobs).mockResolvedValue([pending]);
+
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  await waitFor(() => expect(listCanvasJobs).toHaveBeenCalled());
+  await waitFor(() => expect(TestEventSource.last).not.toBeNull());
+
+  const before = vi.mocked(listCanvasJobs).mock.calls.length;
+  await act(async () => {
+    TestEventSource.last!.emit('job-changed', { job_id: 'job-canvas-1', status: 'done' });
+  });
+  expect(vi.mocked(listCanvasJobs).mock.calls.length).toBe(before + 1);
+
+  // 别的命名空间的 job（角色 / Studio 出图）也走同一条广播，画布不该跟着拉。
+  await act(async () => {
+    TestEventSource.last!.emit('job-changed', { job_id: 'job-character-9', status: 'done' });
+  });
+  expect(vi.mocked(listCanvasJobs).mock.calls.length).toBe(before + 1);
+
+  vi.unstubAllGlobals();
 });

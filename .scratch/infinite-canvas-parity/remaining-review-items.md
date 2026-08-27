@@ -23,7 +23,7 @@
 | B4 | 生成按钮 5 个禁用条件（4 种引用错误 + 无密钥 / 无模型），界面对哪一个都不解释 | `CanvasEditorViews.tsx:1963` | low | ✅ 已修：`canvasGenerateBlock` 出三条结构性原因，缺模型两条渲染在提示词下方（带 aria-describedby），缺提示词借用状态行 |
 | B5 | 新建的空画布没有任何空状态引导 | `CanvasEditor.tsx:3220` 附近 | low | ✅ 已修：空画布居中卡片 + 文本节点 / 图片节点 / 上传素材三个直达按钮 |
 
-## C 组 · 性能（6 条，C1–C5 已修）
+## C 组 · 性能 —— ✅ 全部已修（2026-08-27）
 
 | # | 问题 | 位置 | 级别 | 现状复核 |
 |---|---|---|---|---|
@@ -32,7 +32,7 @@
 | C3 | 节点缩略图直接用原图，缩放到全局会一次性拉满分辨率原图 | `web/src/api/canvas.ts:344` | medium | ✅ 已修：媒体接口加 `?w=`（显示宽度，含 DPR），服务端取档 256/512/1024 发缓存 WebP；节点卡、候选、素材库、项目封面、素材悬浮都改走缩略图，全屏预览 / 蒙版 / 下载仍是原图。缓存在 `.runtime/canvas-thumbnails/`，不进项目目录（导出包按 content_versions 核对） |
 | C4 | `flowEdges` 依赖 `document.nodes` + `activeNodeId`，每帧 / 每键 / 每次 hover 重建全部连线 | `CanvasEditor.tsx:991` | low | ✅ 已修：连线对象按 `flowNodeCache` 同款做逐条缓存（判据＝连接对象 / active / selected / 两端标题），数组本身逐项按引用比、没变就复用上一次那个——`setEdges` 连跑都不用跑。判据来自 xyflow 源码：`EdgeWrapper` 是 `useStore(s => s.edgeLookup.get(id))`，默认 Object.is |
 | C5 | `onNodesChange` 里逐 change 做 `nodes.map`，多选拖动是 O(n²) 且每帧都跑 | `CanvasEditor.tsx:1022` | low | ✅ 已修：先把这一批 change 收成位移表 + 删除集，再对节点扫一遍。复杂度本身测不出来，回归测试钉的是改写后的语义（多节点位移一次落定 + 同批删除仍清掉悬空连线） |
-| C6 | 画布完全没接现有 SSE，改用 1.2s 轮询，每次后端做两遍全量 job 目录扫描 | `CanvasEditor.tsx:704-747` | low | 确认未修。另：`canvasMentionGraphSignature` 每次 render 都 `JSON.stringify` 全图 |
+| C6 | 画布完全没接现有 SSE，改用 1.2s 轮询，每次后端做两遍全量 job 目录扫描 | `CanvasEditor.tsx:704-747` | low | ✅ 已修三处：① 接 `useSSE`（pending 期间建连，按 job_id 过滤非画布广播，突发推送做合并），轮询保留为兜底并从 1.2s 放到 4s，与 Studio 一致——**不能砍**，见 #18 的教训；② `/canvas/projects/{id}/jobs` 把读到的列表交给 `reconcile_canvas_jobs`，只在真修过东西时才走第二遍扫描；③ 图签名片段按对象引用挂 WeakMap，外层 `useMemo` 只看 nodes / connections 两个数组的引用 |
 
 ## D 组 · 工程链与文档（4 条，D1 已修）
 
@@ -55,6 +55,10 @@
 **第五批（C1）**：context 每一次按键 / 每一帧缩放都换引用 → 所有节点卡重渲染。三个源全修，
 外加把 `canvasNodeProvidesOutput` 那个恒等无效的 `versions` 参数删掉（`A || (A && …)` ≡ A）。
 回归测试：探针挂在 provider 内部数 context 的引用变化次数，三处修复各自改回去都会红。
+
+**第六批（C2–C6）**：async 路由阻塞段进线程池 · 节点卡改用服务端缩略图 · 连线逐条缓存 ·
+多选拖动去掉 O(n²) · 接 SSE 并把兜底轮询放到 4s、后端少扫一遍 job 目录、图签名挂 WeakMap。
+除 C5（纯复杂度，测不出来，改钉语义）外每条都验过「把修复改回去会红」。
 
 **第四批（B 组 5 条）**：见上表。4 条回归测试，每条都验过「把修复改回去会红」。
 Shift 点击这条在浏览器里验不了：`computer` 的每一次操作都会重新聚焦标签页，而 xyflow 的

@@ -84,6 +84,7 @@ import {
 } from '@/api/canvas';
 import { getCanvasUiPreferences, saveCanvasUiPreferences } from '@/api/canvasUi';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
+import { useSSE } from '@/hooks/useSSE';
 import {
   AddMenuButton,
   CanvasMobileGenerationPanel,
@@ -275,28 +276,54 @@ function materializeEmptyTextContent(document: CanvasDocument): {
   };
 }
 
-function canvasMentionGraphSignature(document: CanvasDocument | null): string {
-  if (!document) return '';
-  return JSON.stringify({
-    nodes: document.nodes.map(node => {
-      if (node.type === 'config') {
-        return [node.id, node.title, node.type, null, node.data.draft.mode];
-      }
-      if (node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio') {
-        return [
+/** 逐条按对象引用缓存的签名片段。
+ *
+ *  签名原来是每次 render 现算一遍：给全部节点各建一个数组，再 JSON.stringify 整个结构。
+ *  200 个节点时，打字每一次按键、拖动每一帧都要付这笔钱。节点对象本身是不可变的
+ *  （commit 只重建被改的那个），所以片段可以挂在对象上，只有真变过的那条才重算。
+ *
+ *  片段用 JSON 而不是自己拼分隔符：标题是用户输入，JSON 的转义保证不同的图不会拼出同一个串。 */
+const mentionNodeFragments = new WeakMap<CanvasNode, string>();
+const mentionConnectionFragments = new WeakMap<CanvasConnection, string>();
+
+function mentionNodeFragment(node: CanvasNode): string {
+  const cached = mentionNodeFragments.get(node);
+  if (cached !== undefined) return cached;
+  const fragment = JSON.stringify(
+    node.type === 'config'
+      ? [node.id, node.title, node.type, null, node.data.draft.mode]
+      : node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio'
+        ? [
           node.id,
           node.title,
           node.type,
           node.data.current_version_id,
           node.data.generation_draft?.mode ?? null,
-        ];
-      }
-      return [node.id, node.title, node.type];
-    }),
-    inputConnections: document.connections
-      .filter(connection => connection.role === 'input')
-      .map(connection => [connection.id, connection.source_node_id, connection.target_node_id]),
-  });
+        ]
+        : [node.id, node.title, node.type],
+  );
+  mentionNodeFragments.set(node, fragment);
+  return fragment;
+}
+
+function mentionConnectionFragment(connection: CanvasConnection): string {
+  const cached = mentionConnectionFragments.get(connection);
+  if (cached !== undefined) return cached;
+  const fragment = JSON.stringify([
+    connection.id, connection.source_node_id, connection.target_node_id,
+  ]);
+  mentionConnectionFragments.set(connection, fragment);
+  return fragment;
+}
+
+function canvasMentionGraphSignature(document: CanvasDocument | null): string {
+  if (!document) return '';
+  const nodes = document.nodes.map(mentionNodeFragment).join(',');
+  const connections = document.connections
+    .filter(connection => connection.role === 'input')
+    .map(mentionConnectionFragment)
+    .join(',');
+  return `${nodes}|${connections}`;
 }
 
 interface CanvasClipboardPayload {
@@ -744,8 +771,21 @@ function CanvasEditorInner({
     && (job.status === 'pending' || job.status === 'pending_confirm')
   ));
 
+  // 出图完成的通知走 SSE，轮询退成兜底。
+  //
+  // 画布 job 和角色 / Studio 的 job 在同一个 .runtime/jobs 目录下，watcher 早就在广播
+  // job-changed 了，画布只是一直没订阅：以前最坏要等 1.2 秒才看见出图完成。
+  // 轮询不能砍（#18 的教训，见 Studio 里那段注释）：系统代理的 TUN / 全局模式会把
+  // 127.0.0.1 的流式响应整条缓冲，心跳也被憋住，浏览器永不 onerror、永不重连，SSE 成为
+  // 唯一命脉时就是卡住不动。所以保留 pending 期间的定时全量拉取，只把间隔从 1.2s 放到 4s，
+  // 与 Studio 一致。
+  const requestJobSync = useRef<() => void>(() => undefined);
+
   useEffect(() => {
-    if (!hasRunningJobs) return;
+    if (!hasRunningJobs) {
+      requestJobSync.current = () => undefined;
+      return;
+    }
     let cancelled = false;
     const poll = async () => {
       try {
@@ -792,13 +832,52 @@ function CanvasEditorInner({
         if (!cancelled) setError((pollError as Error).message);
       }
     };
-    const timer = window.setInterval(() => void poll(), 1200);
-    void poll();
+    // SSE 会成串地推（每写一个候选就是一次），这里合并：在跑就记一笔，跑完再补一次。
+    let inFlight = false;
+    let queued = false;
+    const sync = async () => {
+      if (inFlight) {
+        queued = true;
+        return;
+      }
+      inFlight = true;
+      try {
+        await poll();
+      } finally {
+        inFlight = false;
+        if (queued && !cancelled) {
+          queued = false;
+          void sync();
+        }
+      }
+    };
+    requestJobSync.current = () => void sync();
+    const timer = window.setInterval(() => void sync(), 4000);
+    void sync();
     return () => {
       cancelled = true;
+      requestJobSync.current = () => undefined;
       window.clearInterval(timer);
     };
   }, [hasRunningJobs, mergeRunDocument, projectId]);
+
+  const canvasJobIds = useMemo(
+    () => new Set(jobs.filter(job => job.namespace === 'canvas').map(job => job.job_id)),
+    [jobs],
+  );
+
+  // useSSE 每次 render 都把回调换到 ref 上，所以这里直接闭包捕获就是最新的一份。
+  useSSE({
+    // 只在有 job 在跑时建连：画布之外没有别的东西会改这个项目的 job，闲着时这条连接没有用处。
+    enabled: hasRunningJobs,
+    onJobChanged: data => {
+      // job-changed 是全局广播，角色出图和 Studio 出图也会进来。认得的才拉。
+      if (data.job_id && !canvasJobIds.has(data.job_id)) return;
+      requestJobSync.current();
+    },
+    // 重连后全量补一次：断连期间 / 队列满丢掉的事件靠这一下补齐。
+    onConnect: () => requestJobSync.current(),
+  });
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
@@ -857,7 +936,13 @@ function CanvasEditorInner({
   // draft.mode + input 连线」这四样没变，这几张图就没有必要重算。它们都进了节点 context，
   // 重算一次就等于所有节点卡重渲染一次。exhaustive-deps 看不出这层关系，只会报「依赖里有没用到的
   // mentionGraphSignature」—— 那正是它存在的理由。
-  const mentionGraphSignature = canvasMentionGraphSignature(document);
+  // nodes / connections 两个数组的引用没变就不用重算：hover、选择、缩放、面板开合都会
+  // 让组件重渲染，但它们碰不到文档。
+  const mentionGraphSignature = useMemo(
+    () => canvasMentionGraphSignature(document),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只看这两个数组的引用，不看整份 document
+    [document?.nodes, document?.connections],
+  );
   const mentionDocumentRef = useRef(document);
   mentionDocumentRef.current = document;
 

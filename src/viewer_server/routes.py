@@ -2830,12 +2830,18 @@ def get_canvas_jobs(project_id: str) -> list[Job]:
         read_canvas_project(project_id)
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
-    reconcile_canvas_jobs(project_id=project_id)
-    return [
-        job
-        for job in list_jobs()
-        if job.namespace == "canvas" and job.canvas_project_id == project_id
-    ]
+    def canvas_jobs() -> list[Job]:
+        return [
+            job
+            for job in list_jobs()
+            if job.namespace == "canvas" and job.canvas_project_id == project_id
+        ]
+
+    # 出图期间前端会一直轮这条接口。list_jobs() 要把 .runtime/jobs 下每一个 job 文件都解析
+    # 一遍，所以把刚读到的这一份直接交给 reconcile，只在真修过东西时才走第二遍扫描——
+    # 而「有东西要修」在轮询期间几乎不发生。
+    jobs = canvas_jobs()
+    return canvas_jobs() if reconcile_canvas_jobs(project_id=project_id, jobs=jobs) else jobs
 
 
 def _run_canvas_job_safely(job_id: str) -> None:
