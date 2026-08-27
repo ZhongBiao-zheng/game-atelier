@@ -42,6 +42,7 @@ import {
   CanvasNodeRunOverlay,
   canvasNodeRunDisplayError,
   canvasNodeRunState,
+  canvasNodeRunStateForJob,
   isReversePromptJob,
 } from '@/components/canvas/CanvasNodeRunStatus';
 import { formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
@@ -2609,17 +2610,18 @@ function withGenerationDraft(node: CanvasNode, draft: CanvasGenerationDraft): Ca
   return node;
 }
 
+/** 生成面板的状态行。
+ *
+ *  这里原来是第二套 job→文案 映射，和节点角标那套已经漂开：`partial` 一个说「部分完成」
+ *  一个说「部分结果完成」；失败时这边直接把 `job.error` 铺出来，丢掉了「分析失败 / 生成失败」
+ *  的区分，兜底建议也从「请检查设置后重新生成」变成了「请检查模型配置后重试」。
+ *  现在只从 `canvasNodeRunStateForJob` 派生，面板专属的两句留在这里：
+ *  没有 job 时说配置已存下来了，生成中时说结果会自己回来（角标那边已经写着「正在生成」）。 */
 function runStatus(job: Job | undefined): string {
   if (!job) return '配置已保存';
-  if (job.status === 'pending' || job.status === 'pending_confirm') {
-    return job.cancel_requested_at ? '已请求停止，上游可能仍在执行' : '结果会自动回到节点';
-  }
-  if (job.status === 'done') return '生成完成';
-  if (job.status === 'partial') return '部分结果完成';
-  if (job.status === 'canceled') {
-    return job.error ? `已停止 · ${canvasNodeRunDisplayError(job.error, '已停止')}` : '已停止';
-  }
-  return canvasNodeRunDisplayError(job.error);
+  const state = canvasNodeRunStateForJob(job);
+  if (state.status === 'loading') return state.detail ?? '结果会自动回到节点';
+  return state.detail ? `${state.label} · ${state.detail}` : state.label;
 }
 
 function nodeIcon(node: CanvasNode) {

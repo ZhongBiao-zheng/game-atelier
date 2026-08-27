@@ -16,7 +16,7 @@ import {
   mentionKindLabel,
   type CanvasMentionReference,
 } from '@/lib/canvasMentions';
-import { cn } from '@/lib/utils';
+import { clamp, cn } from '@/lib/utils';
 import {
   CanvasMaterialHoverDetail,
   type CanvasMaterialHoverState,
@@ -578,6 +578,3 @@ function findMentionSibling(node: Node, previous: boolean, includeSelf = false):
   return current instanceof HTMLElement && current.dataset.canvasMentionId ? current : null;
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}

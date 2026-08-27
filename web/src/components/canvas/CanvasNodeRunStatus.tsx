@@ -33,6 +33,16 @@ export function canvasNodeRunState(
   if (!job) {
     return { status: 'idle', label: '待编辑', detail: null, job: undefined, reversePrompt: false };
   }
+  return canvasNodeRunStateForJob(job);
+}
+
+/** job → 状态与文案的**唯一**一张表。
+ *
+ *  生成面板的状态行原来自己抄了一份，两份已经漂开了：`partial` 一个说「部分完成」一个说
+ *  「部分结果完成」；失败时面板那份丢掉了反推与出图的区分，连给的建议都不一样
+ *  （「请检查模型配置后重试」对「请检查设置后重新生成」）。所以拆出这个只吃 job 的入口，
+ *  节点角标和面板状态行都从这里派生，面板专属的措辞在 runStatus 里叠加。 */
+export function canvasNodeRunStateForJob(job: Job): CanvasNodeRunState {
   const reversePrompt = isReversePromptJob(job);
   if (job.status === 'pending' || job.status === 'pending_confirm') {
     return {

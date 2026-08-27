@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { cn } from '@/lib/utils';
+import { clamp, cn } from '@/lib/utils';
 import type { CanvasMediaOperation, CanvasMediaVersion } from '@/schema/canvas';
 
 export type CanvasMediaTool = 'crop' | 'split' | 'upscale';
@@ -693,6 +693,3 @@ function scaledSize(width: number, height: number, longEdge: number) {
   return { width: Math.round(width * scale), height: Math.round(height * scale) };
 }
 
-function clamp(value: number, minimum: number, maximum: number) {
-  return Math.min(maximum, Math.max(minimum, value));
-}

@@ -916,3 +916,61 @@ it('keeps the generation panel reachable when it fits neither above nor below', 
   expect(placement.maxHeight).toBe(368);
   expect(placement.width).toBe(608);
 });
+
+it('takes the panel status line from the same job→copy table as the node badge', () => {
+  // 面板状态行原来是第二套映射，和节点角标那套漂开了：`partial` 一个说「部分完成」一个说
+  // 「部分结果完成」；失败时面板直接铺 job.error，丢掉「分析失败 / 生成失败」的区分。
+  // 这条用例钉住「两处同源」——再抄一份映射就会红。
+  const cases: Array<[Partial<Job>, string, string]> = [
+    [{ status: 'partial', error: '第 2 张没出来' }, '部分完成 · 第 2 张没出来', '部分结果完成'],
+    [{ status: 'failed', error: '余额不足' }, '生成失败 · 余额不足', ''],
+    [{ status: 'canceled', error: null }, '已停止', ''],
+    [{ status: 'done', error: null }, '生成完成', ''],
+  ];
+  for (const [patch, expected, staleCopy] of cases) {
+    const job = { ...batchJob(), ...patch } as Job;
+    const context = nodeContext({
+      resolveVersion: versionResolver(imageVersions()),
+      jobsByRunId: new Map([['run-batch', job]]),
+      jobsByResultNodeId: new Map([[imageResultNode.id, [job]]]),
+    });
+    const { unmount } = render(
+      <CanvasNodeContext.Provider value={context}>
+        <NodeCard data={{ domain: imageResultNode }} selected />
+      </CanvasNodeContext.Provider>,
+    );
+    // 状态行与角标必须来自同一张表：行文本以角标的 label 开头。
+    const badge = document.querySelector('[data-canvas-node-status-label]');
+    expect(badge?.textContent).toBeTruthy();
+    const line = screen.getByTitle(expected);
+    expect(line).toHaveTextContent(expected);
+    expect(expected.startsWith(badge!.textContent!.trim())).toBe(true);
+    if (staleCopy) expect(screen.queryByTitle(staleCopy)).not.toBeInTheDocument();
+    unmount();
+  }
+});
+
+it('keeps the reverse-prompt wording in the panel status line, not just on the badge', () => {
+  // 旧的面板映射对 failed 只铺 job.error，反推失败在面板上被说成普通出图失败。
+  const job = batchJob();
+  job.status = 'failed';
+  job.error = null;
+  job.canvas_run!.snapshot.normalized_params = {
+    preset_id: 'canvas.reverse_prompt',
+    preset_version: 1,
+  };
+  const context = nodeContext({
+    resolveVersion: versionResolver(imageVersions()),
+    jobsByRunId: new Map([['run-batch', job]]),
+    jobsByResultNodeId: new Map([[imageResultNode.id, [job]]]),
+  });
+
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: imageResultNode }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+
+  expect(screen.getByTitle('分析失败 · 反推提示词失败，请检查设置后重新生成')).toBeInTheDocument();
+  expect(screen.queryByTitle('生成失败，请检查模型配置后重试')).not.toBeInTheDocument();
+});

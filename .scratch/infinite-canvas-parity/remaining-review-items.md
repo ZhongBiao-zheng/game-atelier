@@ -39,9 +39,21 @@
 | # | 问题 | 位置 | 级别 | 现状复核 |
 |---|---|---|---|---|
 | D1 | ~~仓库没有 ESLint~~ | `web/eslint.config.js` | medium | ✅ 已修（commit e596b90）：`pnpm lint` = `tsc -b --noEmit && eslint .`，只开 `react-hooks/rules-of-hooks` 与 `exhaustive-deps`。首跑 18 处，修 11 处、留 7 处带理由的 disable |
-| D2 | `CanvasEditorInner` 单组件 3408 行、176 个 hook 调用点 | `CanvasEditor.tsx:312–3720` | medium | 确认未修。已产生后果：两个 run status 映射器文案分歧、同一 helper 两处实现 |
+| D2 | `CanvasEditorInner` 单组件 3408 行、176 个 hook 调用点 | `CanvasEditor.tsx:312–3720` | 部分 | ⚠️ **只修了后果，没拆组件**（取舍见下）。两处后果都实证到并修掉：① run status 两套映射已漂开（`partial` 文案不同；失败时面板丢掉「分析失败 / 生成失败」的区分，兜底建议一个说「检查模型配置」一个说「检查设置」）→ 抽出 `canvasNodeRunStateForJob` 作唯一真表，面板状态行从它派生；② `clamp` 在 `CanvasPromptInput` 与 `CanvasMediaOperationDialog` 各写一份 → 收进 `lib/utils.ts`。加了 2 条渲染层守卫：再抄一份映射就会红 |
 | D3 | parity matrix 声称 130 项全 full，但七组能力在代码里找不到实现 | `reference-parity-matrix.md` | medium | ✅ 已修：逐条对代码复核，**37 项**改判 `missing`（图例新增该状态）—— G01–G15、H01–H09 两整节 + F01 F04 F06 F07 F09 F10 F11 + C06 C16 C17 + A06 B21 B22。同时纠正审查的两处反向误报：F05、F08 确有实现。结论段改成真实计数表 + 「判 full 之前先 grep 非测试调用方」的判据 |
 | D4 | 后端 30+ 处英文 `ValueError` 直接当 detail 返回给用户，409 语义还错了 | `canvas_projects.py:222` | low | ✅ 已修：**审查把两条路径混在一起说了**。真正当 HTTP detail 返回的只有 canvas_projects.py 的 10 处 → 收进 `CanvasDocumentError(code, message)` 中文结构，与 `CanvasRunCommandError` 统一；canvas_runs.py 的 28 处是后台管线的内部不变式，只经 `job.error` 露出，翻译掉反而难查，改为在 `_error_hint` 加一句中文前缀、原文照留。409 语义：`CanvasStorageError`（存档文件不见了）改判 500——409 前端文案是「刷新后重试」，对着不存在的 canvas.json 刷一辈子也不会好；原测试恰好把这个 bug 钉住了，一并改掉 |
+
+## D2 的取舍（2026-08-27）
+
+拆 3408 行的 `CanvasEditorInner` 没做，理由不是懒：
+
+- 行数本身不是缺陷，**后果**才是。审查给出的两条后果（两套 status 映射、同一 helper 两处实现）
+  已经实证并修掉，还各加了守卫，复发会红。
+- 一次行为等价的大拆分会动到几乎每一条画布测试（`CanvasEditor.test.tsx` 31 条全走这个组件），
+  风险集中在「看不出差别的回归」上，而这类回归恰恰是测试最难抓的。
+- 真正值得抽的边界只有一处清楚的：出图同步（SSE + 兜底轮询 + `mergeRunDocument`，C6 刚整理过），
+  可以变成 `useCanvasJobSync(projectId, …)`。约 1.5 小时，含改测试。**要做就单独一个 PR**，
+  不要和功能改动混在一起——否则 review 时分不清哪一行是搬的、哪一行是改的。
 
 ## 已修（未提交）
 
