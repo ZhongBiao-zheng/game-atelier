@@ -775,8 +775,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
 
 export const CANVAS_GENERATION_PANEL_WIDTH = 608;
 const CANVAS_GENERATION_PANEL_GAP = 16;
-/** 四个位置都放不下时，面板可以窄到这个宽度去换「不压住节点」。 */
-const CANVAS_GENERATION_PANEL_MIN_WIDTH = 360;
 
 /** 只用到矩形的这几个数，写成最小接口好让放置逻辑纯函数化、能单测。 */
 export interface CanvasPanelRect {
@@ -795,33 +793,23 @@ export interface CanvasPanelPlacement {
   maxHeight: number;
 }
 
-/** 生成面板放在哪：贴着节点，但整体夹在可视区域内。视口坐标系。
+/** 生成面板只贴在节点正下方或正上方，视口坐标系。
  *
- *  顺序是下方 → 上方 → 侧面 → 贴住可视区。**侧面这一档是为了不压住锚点节点**：面板高度
- *  520-660（视频面板最高），1440×900 这一档常见的情况是上下都差几十像素装不下，原来直接
- *  落到最后一档「贴住可视区」，结果面板压掉选中节点的下半张图——而画师正要看着那张图写
- *  提示词。有横向余量时改放到节点侧面，节点整张可见。
+ *  横坐标永远按节点中心对齐，不再为了留在屏幕里而夹边、压窄或跳到节点左右。这样拖动节点时
+ *  面板与节点的空间关系始终稳定；节点靠近画布边缘时允许面板自然超出可视范围。
  *
- *  最后一档仍然会压住节点一部分，但那时节点本身已经占满可用区域，没有不压的摆法；
- *  这一档靠 maxHeight 限高（面板内部滚动）保证面板自己完整可达。 */
+ *  垂直方向优先放下方，下方放不下再放上方；两边都放不下时选剩余空间更大的一侧。maxHeight
+ *  仍负责限制超高内容并让面板内部滚动，不参与横向适配。 */
 export function placeCanvasGenerationPanel(
   anchor: CanvasPanelRect,
   bounds: CanvasPanelRect,
   panelHeight: number,
 ): CanvasPanelPlacement {
   const gap = CANVAS_GENERATION_PANEL_GAP;
-  const width = Math.min(CANVAS_GENERATION_PANEL_WIDTH, Math.max(240, bounds.width - gap * 2));
+  const width = CANVAS_GENERATION_PANEL_WIDTH;
   const maxHeight = Math.max(160, bounds.height - gap * 2);
   const height = Math.min(panelHeight > 0 ? panelHeight : maxHeight, maxHeight);
-  const clampLeft = (value: number) => Math.min(
-    Math.max(value, bounds.left + gap),
-    Math.max(bounds.left + gap, bounds.right - width - gap),
-  );
-  const clampTop = (value: number) => Math.min(
-    Math.max(value, bounds.top + gap),
-    Math.max(bounds.top + gap, bounds.bottom - gap - height),
-  );
-  const alignedLeft = clampLeft(anchor.left + anchor.width / 2 - width / 2);
+  const alignedLeft = anchor.left + anchor.width / 2 - width / 2;
 
   const below = anchor.bottom + gap;
   if (below + height <= bounds.bottom - gap) {
@@ -832,51 +820,14 @@ export function placeCanvasGenerationPanel(
     return { left: alignedLeft, top: above, width, maxHeight };
   }
 
-  const beside = clampTop(anchor.top + anchor.height / 2 - height / 2);
-  const toRight = anchor.right + gap;
-  if (toRight + width <= bounds.right - gap) {
-    return { left: toRight, top: beside, width, maxHeight };
-  }
-  const toLeft = anchor.left - gap - width;
-  if (toLeft >= bounds.left + gap) {
-    return { left: toLeft, top: beside, width, maxHeight };
-  }
-
-  // 到这里四个位置都放不下了。压住节点会直接毁掉交互 —— 面板盖住节点，双击节点进编辑态的
-  // 落点就变成了面板，画师打字进不去文本框：按字母不启动输入法、按退格删掉整个节点
-  // （2026-08-27 画师实测报的就是这一串）。所以宁可把面板压窄换「零重叠」，也不要全宽压住节点。
-  const rightRoom = bounds.right - gap - (anchor.right + gap);
-  const leftRoom = (anchor.left - gap) - (bounds.left + gap);
-  const widestSide = Math.max(rightRoom, leftRoom);
-  if (widestSide >= CANVAS_GENERATION_PANEL_MIN_WIDTH) {
-    const narrow = Math.min(width, widestSide);
-    return {
-      left: rightRoom >= leftRoom ? anchor.right + gap : anchor.left - gap - narrow,
-      top: beside,
-      width: narrow,
-      maxHeight,
-    };
-  }
-
-  // 四个位置都放不下时，不能直接贴着可视区下沿摆：alignedLeft 是按节点居中算的，贴下沿的
-  // 结果正好把整个节点盖住（1280×720 实测：面板 584×280、节点在视口中部，above 只差 16px
-  // 就够）。改成在「已经夹进可视区」的四个候选里挑与节点重叠面积最小的那个 —— 同一个例子里
-  // 贴上沿只压住节点顶部 16px，节点主体仍然看得见。纯几何比较，不含位置偏好。
-  const overlapArea = (left: number, top: number) => {
-    const horizontal = Math.max(0, Math.min(left + width, anchor.right) - Math.max(left, anchor.left));
-    const vertical = Math.max(0, Math.min(top + height, anchor.bottom) - Math.max(top, anchor.top));
-    return horizontal * vertical;
+  const roomBelow = bounds.bottom - anchor.bottom;
+  const roomAbove = anchor.top - bounds.top;
+  return {
+    left: alignedLeft,
+    top: roomBelow >= roomAbove ? below : above,
+    width,
+    maxHeight,
   };
-  const fallbacks = [
-    { left: alignedLeft, top: clampTop(anchor.bottom + gap) },
-    { left: alignedLeft, top: clampTop(anchor.top - gap - height) },
-    { left: clampLeft(anchor.right + gap), top: beside },
-    { left: clampLeft(anchor.left - gap - width), top: beside },
-  ];
-  const leastCovering = fallbacks.reduce((best, candidate) => (
-    overlapArea(candidate.left, candidate.top) < overlapArea(best.left, best.top) ? candidate : best
-  ));
-  return { ...leastCovering, width, maxHeight };
 }
 
 /** 画布外框上的常驻控件占了哪几条边。
@@ -936,7 +887,7 @@ function samePlacement(a: CanvasPanelPlacement | null, b: CanvasPanelPlacement) 
  *  left=-77，提示词编辑区左边 64px 落在视口外，看不见也点不到）；而且它活在 transform 层里，
  *  夹视口这件事在那儿做不到——父级 transform 之后再 clamp 也夹不回来。
  *  portal 到 .canvas-editor-region（position:relative）之后：尺寸恒定不再受缩放影响，位置按节点
- *  的屏幕矩形算并夹在容器内，文字也不再被分数倍缩放糊掉。
+ *  的屏幕矩形算，文字也不再被分数倍缩放糊掉。
  *
  *  位置状态留在本组件内：children 由父级 render 传进来，本组件因平移重新定位时 children 仍是
  *  同一个 element 引用，React 会跳过整棵子树，面板内容不会跟着每帧重渲染。 */
