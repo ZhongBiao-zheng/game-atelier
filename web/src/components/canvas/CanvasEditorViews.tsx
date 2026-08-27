@@ -581,7 +581,14 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
                   textScaleClass(node.data.display.scale),
                 )}
                 onChange={event => context.updateText(node.id, event.target.value)}
-                onBlur={() => finishTextEditing(false)}
+                onBlur={() => {
+                  // 整个窗口 / 标签页失焦时不退出编辑态：切应用、切标签，以及 Windows 上
+                  // 部分中文输入法的候选窗，都会让 textarea 收到 blur。退出编辑态会连带把
+                  // 正在进行的输入法组合掐断，画师看到的就是「打着字突然被弹出来、输入法
+                  // 也断了」。焦点仍在本页内（真的点了别处）时照旧退出。
+                  if (!document.hasFocus()) return;
+                  finishTextEditing(false);
+                }}
                 onPointerDown={event => event.stopPropagation()}
                 onDoubleClick={event => event.stopPropagation()}
                 onKeyDown={event => {
@@ -758,7 +765,25 @@ export function placeCanvasGenerationPanel(
     return { left: toLeft, top: beside, width, maxHeight };
   }
 
-  return { left: alignedLeft, top: clampTop(bounds.bottom - gap - height), width, maxHeight };
+  // 四个位置都放不下时，不能直接贴着可视区下沿摆：alignedLeft 是按节点居中算的，贴下沿的
+  // 结果正好把整个节点盖住（1280×720 实测：面板 584×280、节点在视口中部，above 只差 16px
+  // 就够）。改成在「已经夹进可视区」的四个候选里挑与节点重叠面积最小的那个 —— 同一个例子里
+  // 贴上沿只压住节点顶部 16px，节点主体仍然看得见。纯几何比较，不含位置偏好。
+  const overlapArea = (left: number, top: number) => {
+    const horizontal = Math.max(0, Math.min(left + width, anchor.right) - Math.max(left, anchor.left));
+    const vertical = Math.max(0, Math.min(top + height, anchor.bottom) - Math.max(top, anchor.top));
+    return horizontal * vertical;
+  };
+  const fallbacks = [
+    { left: alignedLeft, top: clampTop(anchor.bottom + gap) },
+    { left: alignedLeft, top: clampTop(anchor.top - gap - height) },
+    { left: clampLeft(anchor.right + gap), top: beside },
+    { left: clampLeft(anchor.left - gap - width), top: beside },
+  ];
+  const leastCovering = fallbacks.reduce((best, candidate) => (
+    overlapArea(candidate.left, candidate.top) < overlapArea(best.left, best.top) ? candidate : best
+  ));
+  return { ...leastCovering, width, maxHeight };
 }
 
 /** 画布外框上的常驻控件占了哪几条边。
