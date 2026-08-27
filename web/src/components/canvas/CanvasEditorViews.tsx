@@ -59,6 +59,7 @@ import { cn } from '@/lib/utils';
 import { presentCanvasCandidates, type CanvasCandidateEntry } from '@/lib/canvasCandidates';
 import { useVideoFrame } from '@/lib/videoFrame';
 import {
+  appendCanvasMentionToken,
   canvasMentionMatches,
   missingCanvasMentionIds,
   mentionKindLabel,
@@ -176,6 +177,7 @@ export const CanvasNodeContext = createContext<CanvasNodeContextValue | null>(nu
 const EMPTY_CANVAS_NODE_IDS: ReadonlySet<string> = new Set();
 const EMPTY_VIDEO_FRAME_NODE_IDS: Readonly<Partial<Record<CanvasVideoFrameSlot, string>>> = {};
 const EMPTY_CANVAS_PENDING_INPUTS: readonly CanvasPendingInput[] = [];
+const EMPTY_CANVAS_MENTION_REFERENCES: readonly CanvasMentionReference[] = [];
 
 export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const context = useContext(CanvasNodeContext);
@@ -317,7 +319,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     : null;
   const reversePromptJob = nodeJob && isReversePromptJob(nodeJob) ? nodeJob : undefined;
   const reversePromptSucceeded = reversePromptJob?.canvas_run?.candidates.some(candidate => candidate.status === 'succeeded') ?? false;
-  const imageCandidates = node.type === 'image'
+  const mediaCandidates = node.type === 'image' || node.type === 'video'
     ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? []).current
     : [];
 
@@ -563,10 +565,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           )}
         </div>
       </NodeToolbar>
-      {node.type === 'image' && imageCandidates.length > 0 && (
-        <ImageCandidateBatch
+      {(node.type === 'image' || node.type === 'video') && mediaCandidates.length > 0 && (
+        <MediaCandidateBatch
           node={node}
-          entries={imageCandidates}
+          entries={mediaCandidates}
           primaryVersionId={node.data.current_version_id}
           expanded={candidateBatchExpanded}
           disabled={submittingNode || nodeRunState.status === 'loading'}
@@ -975,7 +977,7 @@ function CanvasNodeFloatingPanel({
   );
 }
 
-function ImageCandidateBatch({
+function MediaCandidateBatch({
   node,
   entries,
   primaryVersionId,
@@ -984,7 +986,7 @@ function ImageCandidateBatch({
   context,
   onToggle,
 }: {
-  node: Extract<CanvasContentNode, { type: 'image' }>;
+  node: Extract<CanvasContentNode, { type: 'image' | 'video' }>;
   entries: CanvasCandidateEntry[];
   primaryVersionId: string | null;
   expanded: boolean;
@@ -1011,7 +1013,7 @@ function ImageCandidateBatch({
         />
       ))}
       {expanded && entries.length > 1 && others.map((entry, index) => (
-        <ImageCandidateCard
+        <MediaCandidateCard
           key={entry.candidate.candidate_id}
           node={node}
           entry={entry}
@@ -1049,14 +1051,14 @@ function ImageCandidateBatch({
   );
 }
 
-function ImageCandidateCard({
+function MediaCandidateCard({
   node,
   entry,
   index,
   disabled,
   context,
 }: {
-  node: Extract<CanvasContentNode, { type: 'image' }>;
+  node: Extract<CanvasContentNode, { type: 'image' | 'video' }>;
   entry: CanvasCandidateEntry;
   index: number;
   disabled: boolean;
@@ -1081,8 +1083,20 @@ function ImageCandidateCard({
         if (version) context.previewContent(version.version_id, `${node.title} · 候选 ${candidate.index + 1}`, node.id);
       }}
     >
-      {version?.kind === 'image'
-        ? <MediaPreview kind="image" src={canvasMediaUrl(context.projectId, version.version_id, node.size?.width ?? 320)} />
+      {version?.kind === node.type
+        ? (
+          <MediaPreview
+            kind={version.kind}
+            src={canvasMediaUrl(
+              context.projectId,
+              version.version_id,
+              version.kind === 'image' ? node.size?.width ?? 320 : undefined,
+            )}
+            title={`${node.title} · 候选 ${candidate.index + 1}`}
+            fit={node.data.display.fit}
+            freeResize={node.data.display.free_resize}
+          />
+        )
         : (
           <div className="grid size-full min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
             {candidate.status === 'pending'
@@ -1096,7 +1110,7 @@ function ImageCandidateCard({
       <span className="absolute left-2 top-2 rounded-md border border-border bg-glass px-2 py-1 text-xs text-muted-foreground backdrop-blur-glass">
         {candidate.index + 1}
       </span>
-      {!disabled && version?.kind === 'image' && (
+      {!disabled && version?.kind === node.type && (
         <button
           type="button"
           aria-label={`将候选 ${candidate.index + 1} 设为主结果`}
@@ -1744,7 +1758,8 @@ export function CanvasGenerationComposer({
   const textMode = draft.mode === 'text';
   const modeLabel = CANVAS_GENERATION_MODE_LABELS[draft.mode];
   const panelLabel = `${modeLabel}设置`;
-  const mentionReferences = context.mentionReferencesByNodeId.get(node.id) ?? [];
+  const mentionReferences = context.mentionReferencesByNodeId.get(node.id)
+    ?? EMPTY_CANVAS_MENTION_REFERENCES;
   const mentionsEnabled = !usesVideoFrameSlots;
   const frameModeHasMentions = usesVideoFrameSlots && canvasMentionMatches(draft.prompt).length > 0;
   const missingMentionIds = mentionsEnabled
@@ -1811,11 +1826,10 @@ export function CanvasGenerationComposer({
   const blockedReason = generateBlock?.message ?? referenceProblem;
   const generateDisabled = submitting || blockedReason !== null;
   const generateBlockHintId = `${node.id}-generate-block-${embedded ? 'embedded' : 'floating'}`;
-  // 三条原因各只显示一次：缺模型的两条在提示词下方（带设置入口），缺提示词那条借用状态行
-  // ——那行原本在一个点不动的按钮旁边写着「配置已保存」。任务本身报错时错误优先。
+  // 缺模型的两条在提示词下方给真实出口；空提示词只禁用生成，不再占底栏位置重复提醒。
   const showBlockHint = Boolean(generateBlock && generateBlock.kind !== 'no_prompt');
   const statusText = generateBlock?.kind === 'no_prompt' && !activeJob?.error
-    ? generateBlock.message
+    ? ''
     : runStatus(activeJob);
 
   useEffect(() => {
@@ -1851,6 +1865,24 @@ export function CanvasGenerationComposer({
     context.recordHistory();
     updateDraft(current => ({ ...updater(current), updated_at: new Date().toISOString() }));
   }
+
+  useEffect(() => {
+    if (draft.mode !== 'video' || !mentionsEnabled) return;
+    const present = new Set(canvasMentionMatches(draft.prompt).map(match => match.nodeId));
+    const missing = mentionReferences
+      .filter(reference => reference.kind === 'text' && !present.has(reference.nodeId))
+      .map(reference => reference.nodeId);
+    if (missing.length === 0) return;
+    context.updateNode(node.id, current => {
+      const currentDraft = generationDraft(current);
+      if (!currentDraft) return current;
+      return withGenerationDraft(current, {
+        ...currentDraft,
+        prompt: missing.reduce(appendCanvasMentionToken, currentDraft.prompt),
+        updated_at: new Date().toISOString(),
+      });
+    });
+  }, [context, draft.mode, draft.prompt, mentionReferences, mentionsEnabled, node.id]);
 
   return (
     <section
@@ -1974,18 +2006,18 @@ export function CanvasGenerationComposer({
           )}
         </p>
       )}
-      {node.type !== 'image' && !textMode && (
+      {node.type === 'audio' && (
         <CandidateHistory
           nodeId={node.id}
-          primaryVersionId={node.type === 'text' || node.type === 'video' || node.type === 'audio'
-            ? node.data.current_version_id : null}
+          primaryVersionId={node.data.current_version_id}
           context={context}
           running={Boolean(running)}
           submitting={submitting}
         />
       )}
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
-        <CanvasModelPicker
+      <div className="mt-2 flex items-end gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          <CanvasModelPicker
           choices={modelChoices}
           alias={draft.alias ?? null}
           model={draft.model}
@@ -2031,7 +2063,7 @@ export function CanvasGenerationComposer({
             }));
           }}
         />
-        {draft.mode === 'text' && selectedModel && (
+          {draft.mode === 'text' && selectedModel && (
           <CanvasTextSettings
             supportsReasoning={supportsCanvasTextReasoning(selectedModel?.protocol)}
             params={draft.params}
@@ -2044,7 +2076,7 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-        {draft.mode === 'image' && imageCaps && (
+          {draft.mode === 'image' && imageCaps && (
           <CanvasImageSettings
             caps={imageCaps}
             model={draft.model}
@@ -2066,7 +2098,7 @@ export function CanvasGenerationComposer({
             })}
           />
         )}
-        {draft.mode === 'video' && videoCaps && (
+          {draft.mode === 'video' && videoCaps && (
           <VideoControls
             caps={videoCaps}
             mode={videoMode}
@@ -2117,7 +2149,7 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-        {draft.mode === 'audio' && selectedKey && selectedModel && (
+          {draft.mode === 'audio' && selectedKey && selectedModel && (
           <CanvasAudioSettings
             params={draft.params}
             onPatch={patch => updateDraftWithHistory(current => ({
@@ -2131,15 +2163,18 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-        <span className="max-w-52 truncate text-xs text-muted-foreground" title={statusText}>
-          {statusText}
-        </span>
+          {statusText && (
+            <span className="max-w-52 truncate text-xs text-muted-foreground" title={statusText}>
+              {statusText}
+            </span>
+          )}
+        </div>
         {running && activeJob && (
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="ml-auto"
+            className="shrink-0"
             disabled={Boolean(activeJob.cancel_requested_at)}
             onClick={() => void context.cancelRun(activeJob.canvas_run!.run_id)}
           >
@@ -2151,7 +2186,7 @@ export function CanvasGenerationComposer({
           <Button
             type="button"
             size="sm"
-            className="ml-auto"
+            className="shrink-0"
             disabled={generateDisabled}
             title={blockedReason ?? undefined}
             aria-describedby={showBlockHint ? generateBlockHintId : undefined}
@@ -2165,7 +2200,7 @@ export function CanvasGenerationComposer({
           <Button
             type="button"
             size="sm"
-            className="ml-auto"
+            className="shrink-0"
             disabled={generateDisabled}
             title={blockedReason ?? undefined}
             aria-describedby={showBlockHint ? generateBlockHintId : undefined}

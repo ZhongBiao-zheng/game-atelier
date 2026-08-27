@@ -45,6 +45,12 @@ export function canvasMentionMatches(prompt: string): CanvasMentionMatch[] {
   }));
 }
 
+export function appendCanvasMentionToken(prompt: string, nodeId: string): string {
+  if (canvasMentionNodeIds(prompt).includes(nodeId)) return prompt;
+  const token = canvasMentionToken(nodeId);
+  return prompt.trim() ? `${prompt.trimEnd()} ${token}` : token;
+}
+
 export function removeCanvasMentionTokens(
   prompt: string,
   nodeIds: ReadonlySet<string>,
@@ -86,7 +92,6 @@ export function buildCanvasMentionReferences(
     : isMentionContentNode(surface)
       ? surface.data.generation_draft
       : null;
-  if (surface.type === 'video' && surfaceVersion && draft?.mode === 'video') return [];
   if (surfaceVersion && draft?.mode !== 'audio') counts[surfaceVersion.kind] += 1;
   const seen = new Set<string>();
   return connections.flatMap(connection => {

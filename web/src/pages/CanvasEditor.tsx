@@ -4423,8 +4423,9 @@ function removeCanvasConnections(
     const draft = generationDraftForNode(node);
     if (!disconnectedNodeIds || !draft) return node;
     const prompt = removeCanvasMentionTokens(draft.prompt, disconnectedNodeIds);
-    if (prompt === draft.prompt) return node;
-    return withGenerationDraftForNode(node, { ...draft, prompt, updated_at: updatedAt });
+    const normalizedPrompt = prompt.trim() ? prompt : '';
+    if (normalizedPrompt === draft.prompt) return node;
+    return withGenerationDraftForNode(node, { ...draft, prompt: normalizedPrompt, updated_at: updatedAt });
   });
   return { ...document, nodes, connections };
 }

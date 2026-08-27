@@ -31,6 +31,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.9',
+    date: '2026-08-27',
+    headline: '视频结果回到节点，文本连接同步引用',
+    changes: [
+      { kind: 'fix', text: '视频生成设置不再重复预览结果；多个视频候选改在视频节点上依次展开' },
+      { kind: 'fix', text: '文本连接到全能参考视频后自动显示对应引用，断开后同步清空引用' },
+      { kind: 'fix', text: '空提示词不再占用底栏提示位置，生成按钮始终保留独立空间' },
+    ],
+  },
+  {
     version: '5.31.8',
     date: '2026-08-28',
     headline: '费用统一显示在生成历史右侧',
