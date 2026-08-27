@@ -1,3 +1,4 @@
+import type { CanvasContentVersion } from '@/schema/canvas';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 
@@ -8,6 +9,13 @@ import {
 } from './CanvasEditorViews';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from './canvasImageToolbar';
 import type { CanvasNode } from '@/schema/canvas';
+
+
+/** context 里已经不再是版本表而是解析器（见 CanvasEditor 里 resolveVersion 的说明），
+ *  测试仍然用字面量声明版本，这里包一层。 */
+function versionResolver(versions: Readonly<Record<string, CanvasContentVersion>>) {
+  return (versionId: string | null | undefined) => (versionId ? versions[versionId] : undefined);
+}
 
 vi.mock('@xyflow/react', () => ({
   // 生成面板订阅 transform 重新定位；mock 返回常量数组，避免每次 render 换引用。
@@ -80,7 +88,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     materialReferences: [],
     connectedMaterialNodeIdsByNodeId: new Map(),
     mentionReferencesByNodeId: new Map(),
-    contentVersions: {},
+    resolveVersion: versionResolver({}),
     keys: [],
     jobsByRunId: new Map(),
     jobsByResultNodeId: new Map(),
@@ -93,7 +101,6 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     libraryBusy: false,
     generationPanel: {
       dismissedNodeId: null,
-      viewportZoom: 1,
       narrowViewport: false,
       dismiss: vi.fn(),
     },
@@ -182,7 +189,7 @@ it('shows content actions in the floating toolbar instead of the title row', () 
     data: { ...nodes[2].data, current_version_id: 'version-video' },
   } as CanvasNode;
   const context = nodeContext({
-    contentVersions: {
+    resolveVersion: versionResolver({
       'version-video': {
         version_id: 'version-video',
         kind: 'video',
@@ -196,7 +203,7 @@ it('shows content actions in the floating toolbar instead of the title row', () 
         height: 1080,
         duration_ms: 1000,
       },
-    },
+    }),
   });
 
   render(
@@ -220,7 +227,7 @@ it('edits text inside the node as one history session', () => {
     data: { ...nodes[0].data, current_version_id: 'version-text' },
   } as CanvasNode;
   const context = nodeContext({
-    contentVersions: {
+    resolveVersion: versionResolver({
       'version-text': {
         version_id: 'version-text',
         kind: 'text',
@@ -229,7 +236,7 @@ it('edits text inside the node as one history session', () => {
         sha256: 'c'.repeat(64),
         origin: { kind: 'user_edit' },
       },
-    },
+    }),
   });
 
   const { container } = render(
@@ -282,13 +289,13 @@ it('creates an image config from populated text and disables the shortcut for em
     data: { ...nodes[0].data, current_version_id: 'version-text' },
   } as CanvasNode;
   const context = nodeContext({
-    contentVersions: {
+    resolveVersion: versionResolver({
       'version-text': {
         version_id: 'version-text', kind: 'text', text: '雨夜列车分镜',
         created_at: '2026-08-25T00:00:00Z', sha256: 'a'.repeat(64),
         origin: { kind: 'user_edit' },
       },
-    },
+    }),
   });
   const { rerender } = render(
     <CanvasNodeContext.Provider value={context}>
@@ -341,7 +348,7 @@ it('keeps populated media playable inside the node without opening preview from 
     };
   }) as CanvasNode[];
   const context = nodeContext({
-    contentVersions: {
+    resolveVersion: versionResolver({
       'version-image': {
         version_id: 'version-image', kind: 'image', path: 'uploads/image.png', mime_type: 'image/png', bytes: 42,
         width: 1024, height: 1024, duration_ms: null, created_at: '2026-08-25T00:00:00Z',
@@ -357,7 +364,7 @@ it('keeps populated media playable inside the node without opening preview from 
         width: null, height: null, duration_ms: 1000, created_at: '2026-08-25T00:00:00Z',
         sha256: 'f'.repeat(64), origin: { kind: 'upload', upload_id: 'audio' },
       },
-    },
+    }),
   });
 
   const { container } = render(
@@ -412,7 +419,7 @@ it('shows every configured image action after selection and keeps it mounted whi
     data: { ...nodes[1].data, current_version_id: 'version-image' },
   } as CanvasNode;
   const context = nodeContext({
-    contentVersions: {
+    resolveVersion: versionResolver({
       'version-image': {
         version_id: 'version-image',
         kind: 'image',
@@ -426,7 +433,7 @@ it('shows every configured image action after selection and keeps it mounted whi
         height: 1024,
         duration_ms: null,
       },
-    },
+    }),
   });
 
   const { rerender } = render(
@@ -474,7 +481,7 @@ it('treats an uploaded image as a pure material with toolbar and one direct repl
     },
   } as CanvasNode;
   const context = nodeContext({
-    contentVersions: {
+    resolveVersion: versionResolver({
       'version-uploaded-image': {
         version_id: 'version-uploaded-image',
         kind: 'image',
@@ -488,7 +495,7 @@ it('treats an uploaded image as a pure material with toolbar and one direct repl
         height: 1024,
         duration_ms: null,
       },
-    },
+    }),
   });
 
   render(

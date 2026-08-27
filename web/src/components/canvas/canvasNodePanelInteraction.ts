@@ -7,13 +7,14 @@ export function generationPanelDismissalAfterNodeSelection(
   return dismissedNodeId === selectedNodeId ? null : dismissedNodeId;
 }
 
+/** 收的是「已经解析好的当前版本」而不是全量版本表：节点卡拿不到全量表，
+ *  原因见 CanvasEditor 里 resolveVersion 的说明。 */
 export function isUploadedImageMaterialNode(
   node: CanvasNode,
-  contentVersions: Readonly<Record<string, CanvasContentVersion>>,
+  content: CanvasContentVersion | undefined,
 ) {
   if (node.type !== 'image' || !node.data.current_version_id) return false;
-  const version = contentVersions[node.data.current_version_id];
-  return version?.kind === 'image' && version.origin.kind === 'upload';
+  return content?.kind === 'image' && content.origin.kind === 'upload';
 }
 
 export function restoreCanvasNodeFocus(

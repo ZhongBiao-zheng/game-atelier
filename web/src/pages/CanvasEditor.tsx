@@ -840,6 +840,29 @@ function CanvasEditorInner({
     latestSelectedNodeIds.current = selectedNodeIds;
   }, [selectedNodeIds]);
 
+  // 下面几张按节点索引的图都从 ref 读文档、用图签名做失效判据，而不是直接依赖 document：
+  // 拖动每一帧、提示词每一次按键都会换掉 document 的引用，但只要「节点 id / 标题 / 当前版本 /
+  // draft.mode + input 连线」这四样没变，这几张图就没有必要重算。它们都进了节点 context，
+  // 重算一次就等于所有节点卡重渲染一次。exhaustive-deps 看不出这层关系，只会报「依赖里有没用到的
+  // mentionGraphSignature」—— 那正是它存在的理由。
+  const mentionGraphSignature = canvasMentionGraphSignature(document);
+  const mentionDocumentRef = useRef(document);
+  mentionDocumentRef.current = document;
+
+  /** 节点卡按 version_id 取内容，走这个常量引用的解析器，而不是把整张版本表塞进 context。
+   *
+   *  版本表每一次按键都会换引用（updateText 每次都重建 content_versions），而 context 变了就会
+   *  绕过 memo 重渲染**所有**节点卡——缩放到能看见 200 个节点时每一帧都在做这件事。
+   *  解析器读的是 latestDocument.current，它在同一次 render 的上面几行刚被赋成本次的 document，
+   *  和直接读 props 是同一份数据。
+   *
+   *  代价是一条不变式：节点卡显示的内容变了，必须同时伴随「节点对象换引用」或「jobs 变化」，
+   *  否则卡片不会重渲染。目前都满足——updateText 每次都重建被改的那个节点对象，服务端回填走
+   *  current_version_id / jobs，候选版本随 job 完成进来。加新的内容写入路径时要守住这条。 */
+  const resolveVersion = useCallback((versionId: string | null | undefined) => (
+    versionId ? latestDocument.current?.content_versions[versionId] : undefined
+  ), []);
+
   const selectedId = selectedNodeIds.size === 1
     ? selectedNodeIds.values().next().value ?? null
     : null;
@@ -1358,7 +1381,12 @@ function CanvasEditorInner({
   const selectedIsUploadedImageMaterial = Boolean(
     selectedNode
     && document
-    && isUploadedImageMaterialNode(selectedNode, document.content_versions),
+    && isUploadedImageMaterialNode(
+      selectedNode,
+      'current_version_id' in selectedNode.data && selectedNode.data.current_version_id
+        ? document.content_versions[selectedNode.data.current_version_id]
+        : undefined,
+    ),
   );
   const selectedDraft = selectedNode && !selectedIsUploadedImageMaterial
     && !(selectedNode.type === 'config' && selectedNode.data.draft.mode === 'text')
@@ -2356,6 +2384,7 @@ function CanvasEditorInner({
   }, [jobs]);
   const reversePromptConfiguredNodeIds = useMemo(() => {
     const configured = new Set<string>();
+    const document = mentionDocumentRef.current;
     if (!document) return configured;
     const configIds = new Set(
       document.nodes.filter(node => node.type === 'config').map(node => node.id),
@@ -2370,7 +2399,8 @@ function CanvasEditorInner({
       }
     }
     return configured;
-  }, [document]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
+  }, [mentionGraphSignature]);
   const previewContent = useCallback((versionId: string, title: string, nodeId: string) => {
     const version = latestDocument.current?.content_versions[versionId];
     if (version) setPreview({ nodeId, title, version });
@@ -3071,13 +3101,6 @@ function CanvasEditorInner({
     }
   }, [canvasUiPreferences.image_toolbar, persistCanvasUiPreferences]);
 
-  // 下面四张按节点索引的图都从 ref 读文档、用图签名做失效判据，而不是直接依赖 document：
-  // 拖动每一帧、提示词每一次按键都会换掉 document 的引用，但只要「节点 id / 标题 / 当前版本 /
-  // draft.mode + input 连线」这四样没变，这几张图就没有必要重算。exhaustive-deps 看不出这层
-  // 关系，只会报「依赖里有没用到的 mentionGraphSignature」—— 那正是它存在的理由。
-  const mentionGraphSignature = canvasMentionGraphSignature(document);
-  const mentionDocumentRef = useRef(document);
-  mentionDocumentRef.current = document;
   const mentionReferencesByNodeId = useMemo(() => {
     const current = mentionDocumentRef.current;
     if (!current) return new Map();
@@ -3137,7 +3160,7 @@ function CanvasEditorInner({
     videoFrameNodeIdsByNodeId,
     pendingInputNodesByNodeId,
     mentionReferencesByNodeId,
-    contentVersions: document?.content_versions ?? {},
+    resolveVersion,
     keys,
     jobsByRunId,
     jobsByResultNodeId,
@@ -3151,7 +3174,6 @@ function CanvasEditorInner({
     multiSelectionActive: selectedNodeIds.size > 1,
     generationPanel: {
       dismissedNodeId: dismissedGenerationPanelNodeId,
-      viewportZoom,
       narrowViewport,
       dismiss: dismissGenerationPanel,
       surfaceRef: editorRegionRef,
@@ -3201,7 +3223,8 @@ function CanvasEditorInner({
     dismissedGenerationPanelNodeId,
     dismissGenerationPanel,
     dismissCandidate,
-    document?.content_versions,
+    // 版本表不进依赖：它每一次按键都换引用，而 context 变了就会绕过 memo 重渲染所有节点卡。
+    // 节点卡改走 resolveVersion（常量引用），失效由节点对象自身的引用变化承担。
     document?.settings?.show_image_info,
     editVideo,
     jobsByResultNodeId,
@@ -3239,7 +3262,7 @@ function CanvasEditorInner({
     updateNode,
     updateText,
     previewNodeResize,
-    viewportZoom,
+    resolveVersion,
     videoFrameNodeIdsByNodeId,
     pendingInputNodesByNodeId,
   ]);

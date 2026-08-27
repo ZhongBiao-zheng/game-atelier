@@ -11,6 +11,13 @@ import { canvasNodeRunState } from './CanvasNodeRunStatus';
 import type { CanvasContentVersion, CanvasNode } from '@/schema/canvas';
 import type { Job, JobStatus } from '@/schema/jobs';
 
+
+/** context 里已经不再是版本表而是解析器（见 CanvasEditor 里 resolveVersion 的说明），
+ *  测试仍然用字面量声明版本，这里包一层。 */
+function versionResolver(versions: Readonly<Record<string, CanvasContentVersion>>) {
+  return (versionId: string | null | undefined) => (versionId ? versions[versionId] : undefined);
+}
+
 vi.mock('@xyflow/react', () => ({
   // 生成面板订阅 transform 重新定位；mock 返回常量数组，避免每次 render 换引用。
   useStore: (selector: (state: { transform: [number, number, number] }) => unknown) =>
@@ -167,7 +174,7 @@ function nodeContext(job: Job): CanvasNodeContextValue {
     materialReferences: [],
     connectedMaterialNodeIdsByNodeId: new Map(),
     mentionReferencesByNodeId: new Map(),
-    contentVersions: {},
+    resolveVersion: versionResolver({}),
     keys: [],
     jobsByRunId: new Map([['run-1', job]]),
     jobsByResultNodeId: new Map([[imageNode.id, [job]]]),
@@ -180,7 +187,6 @@ function nodeContext(job: Job): CanvasNodeContextValue {
     libraryBusy: false,
     generationPanel: {
       dismissedNodeId: null,
-      viewportZoom: 1,
       narrowViewport: false,
       dismiss: vi.fn(),
     },
@@ -248,7 +254,7 @@ it.each(contentNodes.map(node => [node.type, node] as const))(
         const context = nodeContext(job);
         if (hasContent) {
           const version = existingVersion(node);
-          context.contentVersions = { [version.version_id]: version };
+          context.resolveVersion = versionResolver({ [version.version_id]: version });
         }
         const { container, unmount } = render(
           <CanvasNodeContext.Provider value={context}>
@@ -357,7 +363,7 @@ it('does not expose reverse-prompt recovery for a Run owned by another result no
   const node = withExistingContent(imageNode);
   const context = nodeContext(wrongReverse);
   const version = existingVersion(node);
-  context.contentVersions = { [version.version_id]: version };
+  context.resolveVersion = versionResolver({ [version.version_id]: version });
 
   render(
     <CanvasNodeContext.Provider value={context}>
@@ -376,14 +382,14 @@ it('keeps existing content visible while a new run is loading and exposes stop i
   } as CanvasNode;
   const job = canvasJob('pending');
   const context = nodeContext(job);
-  context.contentVersions = {
+  context.resolveVersion = versionResolver({
     'version-existing': {
       version_id: 'version-existing', kind: 'image', created_at: '2026-08-25T00:00:00Z',
       sha256: 'a'.repeat(64), origin: { kind: 'upload', upload_id: 'upload-1' },
       path: 'uploads/existing.png', mime_type: 'image/png', bytes: 42,
       width: 1024, height: 1024, duration_ms: null,
     },
-  };
+  });
 
   const { container } = render(
     <CanvasNodeContext.Provider value={context}>
@@ -423,14 +429,14 @@ it('keeps old content visible after failure', () => {
   } as CanvasNode;
   const job = canvasJob('failed');
   const context = nodeContext(job);
-  context.contentVersions = {
+  context.resolveVersion = versionResolver({
     'version-existing': {
       version_id: 'version-existing', kind: 'image', created_at: '2026-08-25T00:00:00Z',
       sha256: 'b'.repeat(64), origin: { kind: 'upload', upload_id: 'upload-2' },
       path: 'uploads/existing.png', mime_type: 'image/png', bytes: 42,
       width: 1024, height: 1024, duration_ms: null,
     },
-  };
+  });
 
   const { container } = render(
     <CanvasNodeContext.Provider value={context}>

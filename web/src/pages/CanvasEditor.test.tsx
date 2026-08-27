@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
+import { useContext } from 'react';
 
 import { CanvasEditor } from './CanvasEditor';
+import { CanvasNodeContext } from '@/components/canvas/CanvasEditorViews';
 import {
   createCanvasReversePromptConfig,
   getCanvasDocument,
@@ -30,7 +32,7 @@ vi.mock('@xyflow/react', () => {
     useStore: (selector: (state: { transform: [number, number, number] }) => unknown) =>
       selector({ transform: [0, 0, 1] }),
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, multiSelectionKeyCode, selectionKeyCode, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onMoveEnd, onDragOver, onDrop }: {
+    ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, multiSelectionKeyCode, selectionKeyCode, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onMove, onMoveEnd, onDragOver, onDrop }: {
       children: React.ReactNode;
       edges: Array<{ id: string; selected?: boolean }>;
       nodes: Array<{ id: string; selected?: boolean; data: unknown }>;
@@ -44,6 +46,7 @@ vi.mock('@xyflow/react', () => {
       multiSelectionKeyCode?: string[];
       selectionKeyCode?: string[] | null;
       onMoveEnd?: (event: unknown, viewport: { x: number; y: number; zoom: number }) => void;
+      onMove?: (event: unknown, viewport: { x: number; y: number; zoom: number }) => void;
       onDragOver?: (event: unknown) => void;
       onDrop?: (event: unknown) => void;
     }) => {
@@ -109,6 +112,8 @@ vi.mock('@xyflow/react', () => {
             />
           )}
           <button type="button" aria-label="simulate viewport change" onClick={() => onMoveEnd?.({}, { x: 120, y: -40, zoom: 0.7 })} />
+          <button type="button" aria-label="simulate live zoom" onClick={() => onMove?.({}, { x: 0, y: 0, zoom: 0.42 })} />
+          <CanvasContextIdentityProbe />
           <button
             type="button"
             aria-label="simulate file drop"
@@ -226,6 +231,19 @@ vi.mock('@/api/keys', async importOriginal => {
   return { ...original, listKeys: vi.fn() };
 });
 
+/** 节点卡的 memo 挡不住 context 变化：provider 的 value 换一次引用，所有订阅它的节点卡就全部
+ *  重渲染一次。所以「context 换了几次引用」就是 C1 要压住的那个数。探针挂在 ReactFlow mock 的
+ *  children 里，正好在 provider 内部。 */
+const canvasContextIdentities: unknown[] = [];
+
+function CanvasContextIdentityProbe() {
+  const value = useContext(CanvasNodeContext);
+  if (canvasContextIdentities[canvasContextIdentities.length - 1] !== value) {
+    canvasContextIdentities.push(value);
+  }
+  return null;
+}
+
 const imageDraft: CanvasGenerationDraft = {
   mode: 'image',
   prompt: '',
@@ -286,6 +304,7 @@ function documentWith(overrides: Partial<CanvasDocument>): CanvasDocument {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  canvasContextIdentities.length = 0;
   // jsdom 不实现 elementFromPoint，而连接拖到空白处要用它探测落点节点。
   document.elementFromPoint = () => null;
   // 编辑器只调 listCanvasProjects(true)（轻量分支，返回 CanvasProject[]）；
@@ -962,4 +981,41 @@ it('offers a way in on an empty canvas and a settings entry the immersive chrome
 
   fireEvent.click(screen.getByRole('button', { name: '文本节点' }));
   expect(screen.queryByText('画布还是空的')).toBeNull();
+});
+
+it('keeps the node context stable while typing and while zooming', async () => {
+  // contextValue 原来把整张 content_versions 和 viewportZoom 都算进依赖：每一次按键、每一帧缩放
+  // 都换一次 context 引用，而 context 变化会绕过节点卡的 memo，把所有卡一起重渲染。
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [textNode('text-one', '开场白', 'version-one'), imageNode('image-one', '图片')],
+    content_versions: {
+      'version-one': {
+        version_id: 'version-one', kind: 'text', text: '雨夜',
+        created_at: '2026-08-26T00:00:00Z', sha256: 'e'.repeat(64),
+        origin: { kind: 'user_edit' },
+      },
+    },
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-text-one' }));
+  fireEvent.doubleClick(await screen.findByText('雨夜'));
+  const editor = await screen.findByLabelText('编辑 开场白 正文');
+  // 第一次输入会给这个节点建一条本地版本，current_version_id 变了 —— 那是真的结构变化，
+  // 图签名跟着失效是对的。从第二次输入开始才是纯内容变化，下面量的是这一段。
+  fireEvent.change(editor, { target: { value: '雨夜列' } });
+
+  const before = canvasContextIdentities.length;
+  fireEvent.change(editor, { target: { value: '雨夜列车' } });
+  fireEvent.change(editor, { target: { value: '雨夜列车进站' } });
+  fireEvent.click(screen.getByRole('button', { name: 'simulate live zoom' }));
+
+  // 文本确实写进去了，说明上面三次输入不是空转。
+  await waitFor(() => expect(savedText(lastSavedDocument())).toBe('雨夜列车进站'), { timeout: 1500 });
+  // 而且节点卡确实跟着重渲染了：resolveVersion 是常量引用，卡片的失效完全靠节点对象换引用，
+  // 这条断言就是那条不变式的守卫。
+  fireEvent.blur(editor);
+  expect(await screen.findByText('雨夜列车进站')).toBeTruthy();
+  expect(canvasContextIdentities.length).toBe(before);
 });

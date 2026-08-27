@@ -1,3 +1,4 @@
+import type { CanvasContentVersion } from '@/schema/canvas';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { useRef, useState } from 'react';
 import { expect, it, vi } from 'vitest';
@@ -17,6 +18,13 @@ import {
 } from './canvasNodePanelInteraction';
 import type { CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
+
+
+/** context 里已经不再是版本表而是解析器（见 CanvasEditor 里 resolveVersion 的说明），
+ *  测试仍然用字面量声明版本，这里包一层。 */
+function versionResolver(versions: Readonly<Record<string, CanvasContentVersion>>) {
+  return (versionId: string | null | undefined) => (versionId ? versions[versionId] : undefined);
+}
 
 vi.mock('@xyflow/react', () => ({
   // 生成面板订阅 transform 重新定位；mock 返回常量数组，避免每次 render 换引用。
@@ -57,7 +65,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     materialReferences: [],
     connectedMaterialNodeIdsByNodeId: new Map(),
     mentionReferencesByNodeId: new Map(),
-    contentVersions: {},
+    resolveVersion: versionResolver({}),
     keys: [],
     jobsByRunId: new Map(),
     jobsByResultNodeId: new Map(),
@@ -70,7 +78,6 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     libraryBusy: false,
     generationPanel: {
       dismissedNodeId: null,
-      viewportZoom: 1,
       narrowViewport: false,
       dismiss: vi.fn(),
     },
@@ -269,7 +276,7 @@ it('switches a config node between generation modes and summarizes connected inp
 it('renders image candidates as a collapsed stack owned by the result node', () => {
   const job = batchJob();
   const context = nodeContext({
-    contentVersions: imageVersions(),
+    resolveVersion: versionResolver(imageVersions()),
     jobsByRunId: new Map([['run-batch', job]]),
     jobsByResultNodeId: new Map([[imageResultNode.id, [job]]]),
   });
@@ -288,7 +295,7 @@ it('renders image candidates as a collapsed stack owned by the result node', () 
 it('expands image candidates around the node and exposes candidate-specific actions', () => {
   const job = batchJob();
   const context = nodeContext({
-    contentVersions: imageVersions(),
+    resolveVersion: versionResolver(imageVersions()),
     jobsByRunId: new Map([['run-batch', job]]),
     jobsByResultNodeId: new Map([[imageResultNode.id, [job]]]),
   });
@@ -316,7 +323,7 @@ it('keeps delete available for the last failed image slot', () => {
   job.status = 'failed';
   job.canvas_run!.candidates = [job.canvas_run!.candidates[2]];
   const context = nodeContext({
-    contentVersions: imageVersions(),
+    resolveVersion: versionResolver(imageVersions()),
     jobsByRunId: new Map([['run-batch', job]]),
     jobsByResultNodeId: new Map([[imageResultNode.id, [job]]]),
   });
@@ -337,7 +344,6 @@ it('closes the generation panel without removing node handles', () => {
   const context = nodeContext({
     generationPanel: {
       dismissedNodeId: null,
-      viewportZoom: 1,
       narrowViewport: false,
       dismiss: dismissGenerationPanel,
     },
@@ -358,7 +364,6 @@ it('does not mount a dismissed or narrow-screen desktop generation panel', () =>
     <CanvasNodeContext.Provider value={nodeContext({
       generationPanel: {
         dismissedNodeId: node.id,
-        viewportZoom: 1,
         narrowViewport: false,
         dismiss: vi.fn(),
       },
@@ -372,7 +377,6 @@ it('does not mount a dismissed or narrow-screen desktop generation panel', () =>
     <CanvasNodeContext.Provider value={nodeContext({
       generationPanel: {
         dismissedNodeId: null,
-        viewportZoom: 1,
         narrowViewport: true,
         dismiss: vi.fn(),
       },
@@ -385,7 +389,7 @@ it('does not mount a dismissed or narrow-screen desktop generation panel', () =>
 
 it('keeps generation settings for generated images while classifying upload versions as pure materials', () => {
   const generatedContext = nodeContext({
-    contentVersions: {
+    resolveVersion: versionResolver({
       'version-main': {
         version_id: 'version-main',
         kind: 'image',
@@ -399,7 +403,7 @@ it('keeps generation settings for generated images while classifying upload vers
         height: 1024,
         duration_ms: null,
       },
-    },
+    }),
   });
 
   render(
@@ -409,15 +413,11 @@ it('keeps generation settings for generated images while classifying upload vers
   );
 
   expect(screen.getByRole('region', { name: '图片设置' })).toBeInTheDocument();
-  expect(isUploadedImageMaterialNode(imageResultNode, generatedContext.contentVersions)).toBe(false);
+  const generatedVersion = generatedContext.resolveVersion('version-main')!;
+  expect(isUploadedImageMaterialNode(imageResultNode, generatedVersion)).toBe(false);
   expect(isUploadedImageMaterialNode(
     imageResultNode,
-    {
-      'version-main': {
-        ...generatedContext.contentVersions['version-main'],
-        origin: { kind: 'upload', upload_id: 'upload-image' },
-      },
-    },
+    { ...generatedVersion, origin: { kind: 'upload', upload_id: 'upload-image' } },
   )).toBe(true);
 });
 
@@ -426,7 +426,6 @@ it('renders the narrow-screen composer in an independent bottom panel', () => {
   const context = nodeContext({
     generationPanel: {
       dismissedNodeId: null,
-      viewportZoom: 1,
       narrowViewport: true,
       dismiss: dismissGenerationPanel,
     },
@@ -448,7 +447,6 @@ it('reopens the panel when the dismissed node is selected again', () => {
   const dismissedContext = nodeContext({
     generationPanel: {
       dismissedNodeId: node.id,
-      viewportZoom: 1,
       narrowViewport: false,
       dismiss: vi.fn(),
     },
@@ -570,7 +568,7 @@ it('renders connected references as chips and blocks a draft after that referenc
       title: source.title,
       previewUrl: '/api/canvas/projects/canvas-test/media/version-source',
     }]]]),
-    contentVersions: { [version.version_id]: version },
+    resolveVersion: versionResolver({ [version.version_id]: version }),
     keys: [imageKey],
   });
   const { rerender } = render(

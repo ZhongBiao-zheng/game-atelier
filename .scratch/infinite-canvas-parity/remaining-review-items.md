@@ -23,11 +23,11 @@
 | B4 | 生成按钮 5 个禁用条件（4 种引用错误 + 无密钥 / 无模型），界面对哪一个都不解释 | `CanvasEditorViews.tsx:1963` | low | ✅ 已修：`canvasGenerateBlock` 出三条结构性原因，缺模型两条渲染在提示词下方（带 aria-describedby），缺提示词借用状态行 |
 | B5 | 新建的空画布没有任何空状态引导 | `CanvasEditor.tsx:3220` 附近 | low | ✅ 已修：空画布居中卡片 + 文本节点 / 图片节点 / 上传素材三个直达按钮 |
 
-## C 组 · 性能（6 条）
+## C 组 · 性能（6 条，C1 已修）
 
 | # | 问题 | 位置 | 级别 | 现状复核 |
 |---|---|---|---|---|
-| C1 | `contextValue` 混入 `viewportZoom` / `content_versions`，缩放和打字穿透 memo 重渲染所有节点卡 | `CanvasEditor.tsx:3060` 附近 | medium | 确认未修：`viewportZoom` 仍在同一个 `useMemo` 里 |
+| C1 | `contextValue` 混入 `viewportZoom` / `content_versions`，缩放和打字穿透 memo 重渲染所有节点卡 | `CanvasEditor.tsx:3060` 附近 | medium | ✅ 已修：`viewportZoom` 是死字段（无消费方）直接删；版本表换成常量引用的 `resolveVersion`；另查出第三个同类源 `reversePromptConfiguredNodeIds`（`useMemo(..., [document])`），改走图签名。回归测试量的是 context 引用变化次数 |
 | C2 | async 路由里直接调同步阻塞的包导入 / 上传，冻住整个事件循环（含 SSE） | `routes.py:2145` | medium | 确认未修：同文件 2704 行的媒体路由用的是 `run_in_threadpool`，是内部不一致 |
 | C3 | 节点缩略图直接用原图，缩放到全局会一次性拉满分辨率原图 | `web/src/api/canvas.ts:344` | medium | 未复核细节；200 节点时是 200 张全分辨率原图同时解码 |
 | C4 | `flowEdges` 依赖 `document.nodes` + `activeNodeId`，每帧 / 每键 / 每次 hover 重建全部连线 | `CanvasEditor.tsx:991` | low | 未复核细节 |
@@ -51,6 +51,10 @@
 **第二批（A 组 5 条）**：见上表。7 条回归测试，每条都验过「把修复改回去会红」。
 
 **第三批（D1）**：接入 ESLint。commit e596b90。
+
+**第五批（C1）**：context 每一次按键 / 每一帧缩放都换引用 → 所有节点卡重渲染。三个源全修，
+外加把 `canvasNodeProvidesOutput` 那个恒等无效的 `versions` 参数删掉（`A || (A && …)` ≡ A）。
+回归测试：探针挂在 provider 内部数 context 的引用变化次数，三处修复各自改回去都会红。
 
 **第四批（B 组 5 条）**：见上表。4 条回归测试，每条都验过「把修复改回去会红」。
 Shift 点击这条在浏览器里验不了：`computer` 的每一次操作都会重新聚焦标签页，而 xyflow 的

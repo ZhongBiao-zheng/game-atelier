@@ -149,13 +149,13 @@ export function canvasNodeHasCurrentContent(
 /** 内容节点即使还没有内容也能当连线源：「先把图连起来，再逐个生成」是画布上最自然的用法。
  *
  *  代价是提交时那些还空着的输入会被服务端整单拒绝，所以空输入必须在生成按钮上就被拦住并指名，
- *  见 canvasPendingInputNodes 和 referenceErrorMessage。四类内容节点一视同仁，versions 只用来
- *  判断插件等非内容节点。 */
-export function canvasNodeProvidesOutput(
-  node: CanvasNode,
-  versions: Readonly<Record<string, CanvasContentVersion>>,
-): node is CanvasContentNode {
-  return canvasNodeProvidesContent(node) || canvasNodeHasCurrentContent(node, versions);
+ *  见 canvasPendingInputNodes 和 referenceErrorMessage。
+ *
+ *  四类内容节点一视同仁之后就不再需要版本表了：canvasNodeHasCurrentContent 的第一道判据也是
+ *  canvasNodeProvidesContent，`A || (A && …)` 恒等于 A。留着那个参数只会逼调用方去拿全量版本表
+ *  （节点卡因此每一次按键都要重渲染，见 CanvasEditor 里 resolveVersion 的说明）。 */
+export function canvasNodeProvidesOutput(node: CanvasNode): node is CanvasContentNode {
+  return canvasNodeProvidesContent(node);
 }
 
 export interface CanvasPendingInput {
@@ -196,7 +196,7 @@ export function canCreateCanvasInputConnection(
   if (
     !source
     || !target
-    || !canvasNodeProvidesOutput(source, document.content_versions)
+    || !canvasNodeProvidesOutput(source)
     || !canvasNodeAcceptsInput(target)
   ) {
     return false;

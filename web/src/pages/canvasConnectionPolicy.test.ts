@@ -88,10 +88,10 @@ describe('canvas connection policy', () => {
     expect(canvasNodeHasCurrentContent(node('missing', 'text', 'version-missing'), {})).toBe(false);
     // 四类内容节点都无条件算内容源：先连线、后逐个生成是正常画布工作流。空输入不是在这里拦，
     // 而是由 canvasPendingInputNodes 在生成按钮上指名拦住。
-    expect(canvasNodeProvidesOutput(node('empty-image', 'image'), {})).toBe(true);
-    expect(canvasNodeProvidesOutput(node('empty-video', 'video'), {})).toBe(true);
-    expect(canvasNodeProvidesOutput(node('empty-text', 'text'), {})).toBe(true);
-    expect(canvasNodeProvidesOutput(node('empty-audio', 'audio'), {})).toBe(true);
+    expect(canvasNodeProvidesOutput(node('empty-image', 'image'))).toBe(true);
+    expect(canvasNodeProvidesOutput(node('empty-video', 'video'))).toBe(true);
+    expect(canvasNodeProvidesOutput(node('empty-text', 'text'))).toBe(true);
+    expect(canvasNodeProvidesOutput(node('empty-audio', 'audio'))).toBe(true);
   });
 
   it('allows directional cycles while rejecting self, duplicate, and invalid endpoints', () => {

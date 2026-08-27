@@ -99,7 +99,6 @@ export type FlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
 
 export interface CanvasGenerationPanelContextValue {
   dismissedNodeId: string | null;
-  viewportZoom: number;
   narrowViewport: boolean;
   dismiss: (id: string) => void;
   /** 面板 portal 的落点（画布区域，position:relative）。缺省时退回 body + fixed 定位。 */
@@ -113,7 +112,8 @@ export interface CanvasNodeContextValue {
   videoFrameNodeIdsByNodeId?: ReadonlyMap<string, Readonly<Partial<Record<CanvasVideoFrameSlot, string>>>>;
   pendingInputNodesByNodeId?: ReadonlyMap<string, readonly CanvasPendingInput[]>;
   mentionReferencesByNodeId: ReadonlyMap<string, readonly CanvasMentionReference[]>;
-  contentVersions: Readonly<Record<string, CanvasContentVersion>>;
+  /** 按 version_id 取内容。常量引用，不随版本表变化——原因见 CanvasEditor 里的说明。 */
+  resolveVersion: (versionId: string | null | undefined) => CanvasContentVersion | undefined;
   keys: KeyView[];
   jobsByRunId: ReadonlyMap<string, Job>;
   jobsByResultNodeId: ReadonlyMap<string, Job[]>;
@@ -192,8 +192,9 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const [candidateBatchExpanded, setCandidateBatchExpanded] = useState(false);
   const [materialPickPointer, setMaterialPickPointer] = useState<{ left: number; top: number } | null>(null);
   const draft = generationDraft(node);
+  const nodeContent = context ? contentForNode(node, context.resolveVersion) : undefined;
   const uploadedImageMaterial = Boolean(
-    context && isUploadedImageMaterialNode(node, context.contentVersions),
+    context && isUploadedImageMaterialNode(node, nodeContent),
   );
   const generationPanelVisible = Boolean(
     context
@@ -268,7 +269,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   }
   if (!context) return null;
   const renameNode = context.renameNode;
-  const content = contentForNode(node, context.contentVersions);
+  const content = nodeContent;
   const copyablePrompt = copyablePromptForNode(
     node,
     context.jobsByResultNodeId,
@@ -655,7 +656,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           <span className="canvas-node-handle-dot" aria-hidden="true" />
         </Handle>
       )}
-      {canvasNodeProvidesOutput(node, context.contentVersions) && (
+      {canvasNodeProvidesOutput(node) && (
         <Handle
           type="source"
           position={Position.Right}
@@ -943,7 +944,7 @@ function ImageCandidateCard({
 }) {
   const { candidate } = entry;
   const horizontalOffset = index + 1;
-  const version = candidate.version_id ? context.contentVersions[candidate.version_id] : undefined;
+  const version = context.resolveVersion(candidate.version_id);
   const terminalFailure = candidate.status === 'failed' || candidate.status === 'canceled';
   return (
     <section
@@ -1374,7 +1375,7 @@ function ImageNodeToolbar({
   }, [onOverlayOpenChange]);
   useEffect(() => () => onOverlayOpenChangeRef.current(false), []);
   const resizeUnlocked = node.data.display.free_resize;
-  const uploadedImageMaterial = isUploadedImageMaterialNode(node, context.contentVersions);
+  const uploadedImageMaterial = isUploadedImageMaterialNode(node, content);
   const imageContent = content?.kind === 'image' ? content : undefined;
   const currentVersionId = imageContent?.version_id;
   const definitions = orderedCanvasImageTools(context.canvasUiPreferences.image_toolbar.tool_ids);
@@ -2443,7 +2444,7 @@ function CandidateGrid({
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={label}>
       {entries.map(({ candidate }) => {
-        const version = candidate.version_id ? context.contentVersions[candidate.version_id] : undefined;
+        const version = context.resolveVersion(candidate.version_id);
         return (
           <div
             key={candidate.candidate_id}
@@ -2561,9 +2562,12 @@ export function AddMenuButton({ icon, title, description, onClick }: { icon: Rea
   return <button type="button" role="menuitem" onClick={onClick} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><span className="grid size-9 shrink-0 place-items-center rounded-md bg-secondary text-muted-foreground">{icon}</span><span className="min-w-0"><span className="block text-sm font-medium">{title}</span>{description && <span className="block truncate text-xs text-muted-foreground">{description}</span>}</span></button>;
 }
 
-function contentForNode(node: CanvasNode, versions: Readonly<Record<string, CanvasContentVersion>>) {
-  if (!('current_version_id' in node.data) || !node.data.current_version_id) return undefined;
-  return versions[node.data.current_version_id];
+function contentForNode(
+  node: CanvasNode,
+  resolveVersion: (versionId: string | null | undefined) => CanvasContentVersion | undefined,
+) {
+  if (!('current_version_id' in node.data)) return undefined;
+  return resolveVersion(node.data.current_version_id);
 }
 
 function generationDraft(node: CanvasNode): CanvasGenerationDraft | null {
