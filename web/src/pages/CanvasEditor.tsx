@@ -923,13 +923,36 @@ function CanvasEditorInner({
     return promise;
   }, [projectId]);
 
+  // 中文 / 日文输入法在候选未确认前一直处于 composition 状态，而自动保存的去抖只有 350ms，
+  // 很容易在「拼音打完、还没选字」这个空档里触发。组合期间落盘既会把半成品文本写进版本，
+  // 也让整棵画布在组合中途重渲染。所以组合期间只排队不起定时器，compositionend 之后立刻补上。
+  // 监听挂在 document 上：文本节点的 textarea、提示词输入框都在这一层之下，一处覆盖全部。
+  const imeComposing = useRef(false);
+  const [compositionSignal, setCompositionSignal] = useState(0);
+  useEffect(() => {
+    const start = () => { imeComposing.current = true; };
+    const end = () => {
+      imeComposing.current = false;
+      setCompositionSignal(current => current + 1);
+    };
+    // 走 window.document —— 这个组件里 `document` 是画布文档那个 state，把全局的遮住了。
+    window.document.addEventListener('compositionstart', start);
+    window.document.addEventListener('compositionend', end);
+    return () => {
+      window.document.removeEventListener('compositionstart', start);
+      window.document.removeEventListener('compositionend', end);
+    };
+  }, []);
+
   useEffect(() => {
     const snapshot = latestDocument.current;
     if (!snapshot || dirtySignal === 0) return;
     saveQueued.current = snapshot;
+    // 队列已经排上了，卸载冲刷与 beforeunload 守卫照样看得到，组合期间只是不起这一次定时器。
+    if (imeComposing.current) return;
     const timer = window.setTimeout(() => void flushSave().catch(() => undefined), 350);
     return () => window.clearTimeout(timer);
-  }, [dirtySignal, flushSave]);
+  }, [compositionSignal, dirtySignal, flushSave]);
 
   // 撤销栈是个 ref（快照数组要在同一次事件里被连续读写，做不成 state），但撤销 / 重做按钮的禁用态
   // 得跟着它变。所以这条 effect 故意不写依赖数组：历史在 9 处被就地修改，每一处都伴随一次

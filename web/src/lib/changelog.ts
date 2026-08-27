@@ -31,6 +31,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.4',
+    date: '2026-08-27',
+    headline: '编辑文本时切走不再被弹出编辑态，生成面板少压节点',
+    changes: [
+      { kind: 'fix', text: '编辑文本节点时切到别的应用 / 标签页不再退出编辑状态 —— 以前一失焦就退出，中文输入法正在选字时会被一起掐断' },
+      { kind: 'fix', text: '中文 / 日文输入法正在选字时不自动保存，选完字立刻补上，半成品文本不再落盘' },
+      { kind: 'fix', text: '视口实在放不下生成面板时，改挑压住节点最少的位置摆 —— 以前贴着可视区下沿摆，正好把整个节点盖住' },
+    ],
+  },
+  {
     version: '5.31.3',
     date: '2026-08-27',
     headline: '画布里选模型的弹窗也跟着面板走了',
