@@ -196,20 +196,18 @@ interface Job {
 
 ## 重试语义
 
-### 按原设置重试
+### 重试（原「按原设置重试」，2026-08-26 已按产品决定移除 original / candidate_id）
 
-`POST runs/{run_id}/retry {mode: "original", candidate_id?}`：
+`POST runs/{run_id}/retry {expected_revision}`：
 
 - 复制原 Snapshot 的 final prompt、provider/model/alias、normalized params 和精确 version IDs。
 - 所有引用先做存在性与 hash 校验；缺失即 409 `snapshot_input_missing`，不回退当前节点。
 - 新建 Job/Run，`retry_of` 指原 Job；result node 复用原节点。
-- 单 candidate 重试时 requested count=1，并记录 `replaces_candidate_id`；成功后替换该展示槽但保留旧
-  candidate/Job 历史。
 - source→result 已有 Derivation 时不造重复边；新 Snapshot 自己记录真实 Run。
 
 ### 使用当前设置再次生成
 
-`mode: "current"` 重新读取 Draft/连接/mentions，产生新 Snapshot；它不是 retry_of，也不复用旧输入。
+重试重新读取 Draft/连接/mentions，产生新 Snapshot；它不是 retry_of，也不复用旧输入。
 UI 文案必须把两者分开。
 
 ## 停止与取消

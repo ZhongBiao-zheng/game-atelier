@@ -17,6 +17,7 @@ from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_js
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.jobs import read_job
 from character_workflow.lib.schemas import (
+    CanvasNode,
     CanvasAudioNode,
     CanvasDerivationConnection,
     CanvasDocument,
@@ -32,6 +33,8 @@ from character_workflow.lib.schemas import (
     CanvasUploadOrigin,
     CanvasVideoNode,
     RevisionedSidecar,
+    JobParams,
+    canvas_allowed_draft_params,
 )
 
 
@@ -206,6 +209,25 @@ def read_canvas_document(project_id: str) -> CanvasDocument:
         return _read_canvas_document_unlocked(project_id)
 
 
+def _draft_sanitized_nodes(nodes: list[CanvasNode]) -> list[CanvasNode]:
+    """Strip params no browser may submit from every Draft on the submitted document.
+
+    第二道闸。第一道在 canvas_runs._normalized_params（冻结 Snapshot 时）。两道都要：写入侧保证
+    磁盘上不留服务端独占字段，冻结侧保证即使磁盘上有历史残留也进不了 job.params。
+    """
+    sanitized: list[CanvasNode] = []
+    for node in nodes:
+        data = node.data
+        for field in ("generation_draft", "draft"):
+            draft = getattr(data, field, None)
+            if draft is None:
+                continue
+            allowed = JobParams(**canvas_allowed_draft_params(draft.mode, draft.params))
+            data = data.model_copy(update={field: draft.model_copy(update={"params": allowed})})
+        sanitized.append(node if data is node.data else node.model_copy(update={"data": data}))
+    return sanitized
+
+
 def _normalized_web_document(
     current: CanvasDocument,
     submitted: CanvasDocument,
@@ -251,6 +273,7 @@ def _normalized_web_document(
         "revision": current.revision + 1,
         "updated_at": timestamp,
         "content_versions": versions,
+        "nodes": _draft_sanitized_nodes(submitted.nodes),
     })
 
 

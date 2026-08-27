@@ -96,18 +96,19 @@ it('shows the immutable prompt, model parameters, actual output and frozen refer
   expect(record).toHaveTextContent('本地文件（路径已隐藏）');
 });
 
-it('turns frozen-reference retry failures into an actionable choice without auto fallback', () => {
+it('shows the server message together with its recovery hint on retry failure', () => {
   const error = new ApiError(
-    '按原设置重试失败：原生成使用的输入版本已经不存在（HTTP 409）',
+    '原结果节点已被删除，不能在原位置重试',
     {
       status: 409,
-      code: 'snapshot_input_missing',
-      reason: '原生成使用的输入版本已经不存在',
-      recovery: '检查历史输入；如需使用画布当前内容，请点“当前设置再生成”。',
+      code: 'result_node_missing',
+      reason: '原结果节点已被删除，不能在原位置重试',
+      recovery: '恢复结果节点，或新建生成节点后重新提交。',
     },
   );
 
-  expect(canvasRetryErrorMessage(error, 'original')).toBe(
-    '原设置无法复现：原生成使用的输入版本已经不存在。检查历史输入；如需使用画布当前内容，请点“当前设置再生成”。',
+  expect(canvasRetryErrorMessage(error)).toBe(
+    '原结果节点已被删除，不能在原位置重试 恢复结果节点，或新建生成节点后重新提交。',
   );
+  expect(canvasRetryErrorMessage(new Error('网络中断'))).toBe('网络中断');
 });

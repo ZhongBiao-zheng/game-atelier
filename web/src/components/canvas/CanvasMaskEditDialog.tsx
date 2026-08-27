@@ -265,7 +265,7 @@ export function CanvasMaskEditDialog({
       <DialogContent className="max-h-[94dvh] max-w-5xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Paintbrush aria-hidden="true" />局部编辑“{title}”</DialogTitle>
-          <DialogDescription>涂抹需要改变的区域；原图和蒙版会冻结进本次生成记录，便于原样重试。</DialogDescription>
+          <DialogDescription>涂抹需要改变的区域；原图和蒙版会冻结进本次生成记录，便于事后溯源。</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">

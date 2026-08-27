@@ -45,29 +45,26 @@ function job(
   };
 }
 
-it('overlays a retried slot without replacing the other current candidates', () => {
+it('overlays every slot of a whole-batch retry and pushes the superseded run into history', () => {
   const original = job('original', '2026-08-25T00:00:00Z', [
     { candidate_id: 'slot-0', index: 0, status: 'succeeded', version_id: 'version-0', error: null },
     { candidate_id: 'slot-1', index: 1, status: 'failed', version_id: null, error: 'failed' },
   ]);
   const retry = job('retry', '2026-08-25T00:01:00Z', [
-    {
-      candidate_id: 'slot-1-retry',
-      index: 1,
-      status: 'pending',
-      version_id: null,
-      error: null,
-      replaces_candidate_id: 'slot-1',
-    },
+    { candidate_id: 'slot-0-retry', index: 0, status: 'pending', version_id: null, error: null },
+    { candidate_id: 'slot-1-retry', index: 1, status: 'pending', version_id: null, error: null },
   ]);
 
   const presentation = presentCanvasCandidates([original, retry]);
 
   expect(presentation.current.map(entry => entry.candidate.candidate_id)).toEqual([
-    'slot-0',
+    'slot-0-retry',
     'slot-1-retry',
   ]);
-  expect(presentation.history.map(entry => entry.candidate.candidate_id)).toEqual(['slot-1']);
+  expect(presentation.history.map(entry => entry.candidate.candidate_id)).toEqual([
+    'slot-1',
+    'slot-0',
+  ]);
 });
 
 it('keeps a dismissed latest entry as a tombstone instead of reviving the old failed slot', () => {
@@ -77,18 +74,27 @@ it('keeps a dismissed latest entry as a tombstone instead of reviving the old fa
   ]);
   const dismissedRetry = job('retry', '2026-08-25T00:01:00Z', [
     {
+      candidate_id: 'slot-0-retry',
+      index: 0,
+      status: 'succeeded',
+      version_id: 'version-0-retry',
+      error: null,
+    },
+    {
       candidate_id: 'slot-1-retry',
       index: 1,
       status: 'canceled',
       version_id: null,
       error: null,
-      replaces_candidate_id: 'slot-1',
       dismissed_at: '2026-08-25T00:02:00Z',
     },
   ]);
 
   const presentation = presentCanvasCandidates([original, dismissedRetry]);
 
-  expect(presentation.current.map(entry => entry.candidate.candidate_id)).toEqual(['slot-0']);
-  expect(presentation.history.map(entry => entry.candidate.candidate_id)).toEqual(['slot-1']);
+  expect(presentation.current.map(entry => entry.candidate.candidate_id)).toEqual(['slot-0-retry']);
+  expect(presentation.history.map(entry => entry.candidate.candidate_id)).toEqual([
+    'slot-1',
+    'slot-0',
+  ]);
 });

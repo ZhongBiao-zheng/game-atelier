@@ -404,3 +404,36 @@ def test_config_video_commit_creates_downstream_video_with_derivation(monkeypatc
         and edge.origin.run_id == "run-video"
         for edge in updated.connections
     )
+
+
+def test_empty_connected_input_is_rejected_by_name_not_as_an_anonymous_error():
+    # 「先连线，后逐个生成」是画布上最自然的用法，所以这条错误是常态路径。以前只说
+    # 「生成输入缺少可用的内容版本」，用户既不知道该先生成谁，也不知道该断开哪条连线。
+    document = _document("合成这几张", policy="all_connected")
+    empty = next(node for node in document.nodes if node.id == "image-b")
+    empty.title = "待生成的分镜"
+    empty.data.current_version_id = None
+    surface = next(node for node in document.nodes if node.id == "config")
+
+    with pytest.raises(ValueError, match="已连接的「待生成的分镜」还没有内容"):
+        _resolve_inputs(document, surface, surface.data.draft)
+
+
+def test_empty_frame_slot_input_names_the_slot_it_belongs_to():
+    document = _document("让它动起来", policy="all_connected")
+    empty = next(node for node in document.nodes if node.id == "image-b")
+    empty.title = "起始帧"
+    empty.data.current_version_id = None
+    surface = next(node for node in document.nodes if node.id == "config")
+    surface.data.draft = surface.data.draft.model_copy(update={
+        "mode": "video",
+        "model": "seedance-2.0",
+        "params": JobParams(frame_mode="firstlast"),
+    })
+    document.connections = [
+        edge for edge in document.connections if edge.source_node_id == "image-b"
+    ]
+    document.connections[0].slot = "first_frame"
+
+    with pytest.raises(ValueError, match="首帧连接的「起始帧」还没有内容"):
+        _resolve_inputs(document, surface, surface.data.draft)

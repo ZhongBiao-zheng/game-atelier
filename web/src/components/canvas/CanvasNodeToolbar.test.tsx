@@ -10,6 +10,9 @@ import { DEFAULT_CANVAS_UI_PREFERENCES } from './canvasImageToolbar';
 import type { CanvasNode } from '@/schema/canvas';
 
 vi.mock('@xyflow/react', () => ({
+  // 生成面板订阅 transform 重新定位；mock 返回常量数组，避免每次 render 换引用。
+  useStore: (selector: (state: { transform: [number, number, number] }) => unknown) =>
+    selector({ transform: [0, 0, 1] }),
   NodeResizer: () => null,
   NodeToolbar: ({ children, isVisible, ...props }: {
     children?: React.ReactNode;
@@ -138,30 +141,26 @@ it('renders one independent selected toolbar for every canvas node type', () => 
   );
 
   expect(screen.getAllByRole('toolbar')).toHaveLength(7);
+  // 空媒体节点（image/video/audio）的工具条只保留一个上传入口，删除等动作要等它拿到内容版本。
+  const emptyMediaTitles = new Set(['图片', '视频', '音频']);
   for (const node of nodes) {
     const toolbar = screen.getByRole('toolbar', { name: `${node.title} 节点工具` });
     expect(toolbar).toHaveAttribute('data-canvas-node-toolbar', node.id);
+    if (emptyMediaTitles.has(node.title)) {
+      expect(within(toolbar).getAllByRole('button').map(button => button.getAttribute('aria-label')))
+        .toEqual([`上传${node.title}`]);
+      continue;
+    }
     expect(within(toolbar).getByRole('button', { name: `删除 ${node.title}` })).toBeInTheDocument();
   }
 
   const imageToolbar = screen.getByRole('toolbar', { name: '图片 节点工具' });
-  fireEvent.click(within(imageToolbar).getByRole('button', { name: '上传到 图片' }));
+  fireEvent.click(within(imageToolbar).getByRole('button', { name: '上传图片' }));
   expect(context.replaceMedia).toHaveBeenCalledWith(nodes[1]);
-  expect(within(imageToolbar).getByRole('button', { name: '将 图片 存入资产库' })).toBeDisabled();
-  expect(within(imageToolbar).getByRole('button', { name: '下载 图片' })).toBeDisabled();
-  expect(within(imageToolbar).getByRole('button', { name: '反推 图片 的提示词' })).toBeDisabled();
-  expect(within(imageToolbar).getByRole('button', { name: '局部编辑 图片' })).toBeDisabled();
-  expect(within(imageToolbar).getByRole('button', { name: '裁剪 图片' })).toBeDisabled();
-  expect(within(imageToolbar).getByRole('button', { name: '切分 图片' })).toBeDisabled();
-  expect(within(imageToolbar).getByRole('button', { name: '本地放大 图片' })).toBeDisabled();
 
-  const videoToolbar = screen.getByRole('toolbar', { name: '视频 节点工具' });
-  expect(within(videoToolbar).getByRole('button', { name: '将 视频 存入资产库' })).toBeDisabled();
-  expect(within(videoToolbar).getByRole('button', { name: '下载 视频' })).toBeDisabled();
-  expect(within(videoToolbar).getByRole('button', { name: '编辑视频 视频' })).toBeDisabled();
-
-  const firstTool = within(imageToolbar).getByRole('button', { name: '查看 图片 设置' });
-  const secondTool = within(imageToolbar).getByRole('button', { name: '删除 图片' });
+  const configToolbar = screen.getByRole('toolbar', { name: '配置 节点工具' });
+  const firstTool = within(configToolbar).getAllByRole('button')[0];
+  const secondTool = within(configToolbar).getAllByRole('button')[1];
   expect(firstTool).toHaveAttribute('tabindex', '0');
   expect(secondTool).toHaveAttribute('tabindex', '-1');
   act(() => firstTool.focus());
@@ -173,7 +172,7 @@ it('renders one independent selected toolbar for every canvas node type', () => 
   const imageShell = imageToolbar.closest('.canvas-node-shell');
   const title = within(imageShell as HTMLElement).getByRole('button', { name: '重命名节点 图片' });
   expect(title.closest('header')).not.toContainElement(
-    within(imageToolbar).getByRole('button', { name: '删除 图片' }),
+    within(imageToolbar).getByRole('button', { name: '上传图片' }),
   );
 });
 
@@ -320,25 +319,27 @@ it('renders distinct empty media surfaces with direct upload actions', () => {
   expect(screen.getByText('空视频节点')).toBeInTheDocument();
   expect(screen.getByText('空音频节点')).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole('button', { name: '上传图片到 图片' }));
-  fireEvent.click(screen.getByRole('button', { name: '上传视频到 视频' }));
-  fireEvent.click(screen.getByRole('button', { name: '上传音频到 音频' }));
+  fireEvent.click(screen.getByRole('button', { name: '上传图片' }));
+  fireEvent.click(screen.getByRole('button', { name: '上传视频' }));
+  fireEvent.click(screen.getByRole('button', { name: '上传音频' }));
   expect(context.replaceMedia).toHaveBeenNthCalledWith(1, nodes[1]);
   expect(context.replaceMedia).toHaveBeenNthCalledWith(2, nodes[2]);
   expect(context.replaceMedia).toHaveBeenNthCalledWith(3, nodes[3]);
 });
 
 it('keeps populated media playable inside the node without opening preview from controls', async () => {
-  const populated = nodes.slice(1, 4).map((node, index) => ({
-    ...node,
-    data: { ...node.data, current_version_id: `version-${node.type}` },
-    ...(node.type === 'image'
-      ? { data: { ...node.data, current_version_id: 'version-image', display: { fit: 'contain', free_resize: true } } }
-      : node.type === 'video'
-        ? { data: { ...node.data, current_version_id: 'version-video', display: { fit: 'cover', free_resize: false } } }
-      : {}),
-    id: `${node.id}-${index}`,
-  })) as CanvasNode[];
+  const populated = nodes.slice(1, 4).map((node, index) => {
+    const data = { ...node.data, current_version_id: `version-${node.type}` };
+    return {
+      ...node,
+      id: `${node.id}-${index}`,
+      data: node.type === 'image'
+        ? { ...data, display: { fit: 'contain', free_resize: true } }
+        : node.type === 'video'
+          ? { ...data, display: { fit: 'cover', free_resize: false } }
+          : data,
+    };
+  }) as CanvasNode[];
   const context = nodeContext({
     contentVersions: {
       'version-image': {
@@ -366,8 +367,8 @@ it('keeps populated media playable inside the node without opening preview from 
   );
 
   expect(container.querySelector('img.object-fill')).toBeInTheDocument();
-  const video = container.querySelector('video[data-canvas-media-controls="video"]');
-  const audio = container.querySelector('audio[controls]');
+  const video = container.querySelector<HTMLVideoElement>('video[data-canvas-media-controls="video"]');
+  const audio = container.querySelector<HTMLAudioElement>('audio[controls]');
   expect(video).toBeInTheDocument();
   expect(video).toHaveClass('object-cover');
   expect(screen.getByRole('slider', { name: '视频播放进度' })).toBeInTheDocument();
@@ -497,7 +498,7 @@ it('treats an uploaded image as a pure material with toolbar and one direct repl
   );
 
   expect(screen.getByRole('toolbar', { name: '图片 节点工具' })).toBeInTheDocument();
-  expect(screen.queryByRole('region', { name: '图片生成设置' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: '图片设置' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '替换图片 图片' }));
   expect(context.replaceMedia).toHaveBeenCalledWith(uploadedImage);
 

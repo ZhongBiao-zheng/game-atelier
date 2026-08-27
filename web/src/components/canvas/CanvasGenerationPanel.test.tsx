@@ -6,6 +6,7 @@ import {
   CanvasNodeCard,
   CanvasNodeContext,
   CanvasMobileGenerationPanel,
+  placeCanvasGenerationPanel,
   type CanvasNodeContextValue,
 } from './CanvasEditorViews';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from './canvasImageToolbar';
@@ -18,6 +19,9 @@ import type { CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 
 vi.mock('@xyflow/react', () => ({
+  // 生成面板订阅 transform 重新定位；mock 返回常量数组，避免每次 render 换引用。
+  useStore: (selector: (state: { transform: [number, number, number] }) => unknown) =>
+    selector({ transform: [0, 0, 1] }),
   NodeResizer: () => null,
   NodeToolbar: () => null,
   Handle: ({ type }: { type: 'source' | 'target' }) => <button type="button">{type}</button>,
@@ -201,14 +205,14 @@ it('renders the generation composer as an independent panel below the selected n
     </CanvasNodeContext.Provider>,
   );
 
-  const panel = screen.getByLabelText('图片生成设置');
+  const panel = screen.getByLabelText('图片设置');
   expect(panel).toHaveAttribute('data-floating-node-panel', 'true');
   expect(panel.closest('article')).toBeNull();
   expect(panel.parentElement).toHaveAttribute('data-canvas-node-panel-anchor', 'config-one');
   expect(screen.queryByText(/\d+×/)).not.toBeInTheDocument();
   expect(within(panel).getByText('图片生成')).toBeInTheDocument();
   expect(within(panel).getByText('· 分镜出图')).toBeInTheDocument();
-  expect(within(panel).queryByRole('button', { name: '打开图片参数' })).not.toBeInTheDocument();
+  expect(within(panel).queryByRole('button', { name: '图片设置' })).not.toBeInTheDocument();
   expect(within(panel).getByRole('button', { name: '开始生成' })).toBeDisabled();
 });
 
@@ -247,7 +251,7 @@ it('switches a config node between generation modes and summarizes connected inp
   const modes = screen.getByRole('radiogroup', { name: '生成类型' });
   expect(within(modes).getByRole('radio', { name: '图片' })).toHaveAttribute('aria-checked', 'true');
   expect(screen.getByLabelText('当前模型')).toHaveTextContent('GPT Image 2');
-  expect(screen.getByText('LLM 1')).toBeInTheDocument();
+  expect(screen.getByText('文本 1')).toBeInTheDocument();
   expect(screen.getByText('图片 1')).toBeInTheDocument();
 
   const imageMode = within(modes).getByRole('radio', { name: '图片' });
@@ -299,24 +303,15 @@ it('expands image candidates around the node and exposes candidate-specific acti
   expect(screen.getByTestId('canvas-candidate-stack')).toHaveAttribute('data-expanded', 'true');
   expect(screen.getByRole('group', { name: '候选 2' })).toBeInTheDocument();
   expect(screen.getByRole('group', { name: '候选 3' })).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: '重试候选 2' })).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: '将候选 2 设为主结果' }));
   expect(context.selectCandidate).toHaveBeenCalledWith(imageResultNode.id, 'version-other');
-
-  fireEvent.click(screen.getByRole('button', { name: '重试候选 3' }));
-  expect(context.retryRun).toHaveBeenCalledWith(
-    imageResultNode.id,
-    'run-batch',
-    'original',
-    'candidate-failed',
-  );
 
   fireEvent.click(screen.getByRole('button', { name: '删除候选 3' }));
   expect(context.dismissCandidate).toHaveBeenCalledWith('run-batch', 'candidate-failed');
 });
 
-it('keeps retry and delete available for the last failed image slot', () => {
+it('keeps delete available for the last failed image slot', () => {
   const job = batchJob();
   job.status = 'failed';
   job.canvas_run!.candidates = [job.canvas_run!.candidates[2]];
@@ -333,14 +328,7 @@ it('keeps retry and delete available for the last failed image slot', () => {
   );
 
   expect(screen.queryByRole('button', { name: /展开 1 个候选结果/ })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '重试候选 3' }));
   fireEvent.click(screen.getByRole('button', { name: '删除候选 3' }));
-  expect(context.retryRun).toHaveBeenCalledWith(
-    imageResultNode.id,
-    'run-batch',
-    'original',
-    'candidate-failed',
-  );
   expect(context.dismissCandidate).toHaveBeenCalledWith('run-batch', 'candidate-failed');
 });
 
@@ -360,7 +348,7 @@ it('closes the generation panel without removing node handles', () => {
     </CanvasNodeContext.Provider>,
   );
 
-  fireEvent.click(screen.getByRole('button', { name: '关闭图片生成设置' }));
+  fireEvent.click(screen.getByRole('button', { name: '关闭图片设置' }));
   expect(dismissGenerationPanel).toHaveBeenCalledWith(node.id);
   expect(screen.getByRole('button', { name: 'target' })).toBeInTheDocument();
 });
@@ -378,7 +366,7 @@ it('does not mount a dismissed or narrow-screen desktop generation panel', () =>
       <NodeCard data={{ domain: node }} selected />
     </CanvasNodeContext.Provider>,
   );
-  expect(screen.queryByLabelText('图片生成设置')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('图片设置')).not.toBeInTheDocument();
 
   rerender(
     <CanvasNodeContext.Provider value={nodeContext({
@@ -392,7 +380,7 @@ it('does not mount a dismissed or narrow-screen desktop generation panel', () =>
       <NodeCard data={{ domain: node }} selected />
     </CanvasNodeContext.Provider>,
   );
-  expect(screen.queryByLabelText('图片生成设置')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('图片设置')).not.toBeInTheDocument();
 });
 
 it('keeps generation settings for generated images while classifying upload versions as pure materials', () => {
@@ -420,7 +408,7 @@ it('keeps generation settings for generated images while classifying upload vers
     </CanvasNodeContext.Provider>,
   );
 
-  expect(screen.getByRole('region', { name: '图片生成设置' })).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: '图片设置' })).toBeInTheDocument();
   expect(isUploadedImageMaterialNode(imageResultNode, generatedContext.contentVersions)).toBe(false);
   expect(isUploadedImageMaterialNode(
     imageResultNode,
@@ -449,10 +437,10 @@ it('renders the narrow-screen composer in an independent bottom panel', () => {
     </CanvasNodeContext.Provider>,
   );
 
-  const panel = screen.getByLabelText('图片生成设置');
+  const panel = screen.getByLabelText('图片设置');
   expect(panel.closest('.canvas-mobile-generation-panel')).toBeInTheDocument();
   expect(panel.closest('article')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: '关闭图片生成设置' }));
+  fireEvent.click(screen.getByRole('button', { name: '关闭图片设置' }));
   expect(dismissGenerationPanel).toHaveBeenCalledWith(node.id);
 });
 
@@ -470,7 +458,7 @@ it('reopens the panel when the dismissed node is selected again', () => {
       <NodeCard data={{ domain: node }} selected />
     </CanvasNodeContext.Provider>,
   );
-  expect(screen.queryByLabelText('图片生成设置')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('图片设置')).not.toBeInTheDocument();
 
   const reopenedId = generationPanelDismissalAfterNodeSelection(node.id, node.id);
   rerender(
@@ -480,7 +468,7 @@ it('reopens the panel when the dismissed node is selected again', () => {
       <NodeCard data={{ domain: node }} selected />
     </CanvasNodeContext.Provider>,
   );
-  expect(screen.getByLabelText('图片生成设置')).toBeInTheDocument();
+  expect(screen.getByLabelText('图片设置')).toBeInTheDocument();
 });
 
 it('returns focus to the node after its panel closes', () => {
@@ -506,33 +494,33 @@ const generationNodes: Array<[CanvasNode, string]> = [
       active_run_id: null,
       display: { scale: 'sm' },
     },
-  }, 'LLM生成设置'],
+  }, '文本设置'],
   [{
     id: 'image-one', title: '图片', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
     data: {
       current_version_id: null, generation_draft: draft, active_run_id: null,
       display: { fit: 'contain', free_resize: false },
     },
-  }, '图片生成设置'],
+  }, '图片设置'],
   [{
     id: 'video-one', title: '视频', type: 'video', position: { x: 0, y: 0 }, z_index: 0,
     data: {
       current_version_id: null, generation_draft: { ...draft, mode: 'video' }, active_run_id: null,
       display: { fit: 'contain', free_resize: false },
     },
-  }, '视频生成设置'],
+  }, '视频设置'],
   [{
     id: 'audio-one', title: '音频', type: 'audio', position: { x: 0, y: 0 }, z_index: 0,
     data: { current_version_id: null, generation_draft: { ...draft, mode: 'audio' }, active_run_id: null },
-  }, '音频生成设置'],
-  [node, '图片生成设置'],
+  }, '音频设置'],
+  [node, '图片设置'],
   [{
     id: 'plugin-one', title: '插件', type: 'plugin', position: { x: 0, y: 0 }, z_index: 0,
     data: {
       plugin_id: 'test', node_type: 'test', plugin_version: '1', data_schema_version: 1,
       payload: {}, generation_draft: draft,
     },
-  }, '图片生成设置'],
+  }, '图片设置'],
 ];
 
 it.each(generationNodes)('uses the shared independent panel for $title', (generationNode, label) => {
@@ -592,7 +580,6 @@ it('renders connected references as chips and blocks a draft after that referenc
   );
 
   expect(screen.getByLabelText('引用图片：雨夜列车')).toHaveTextContent('图片1');
-  expect(screen.getByText('输入 @ 引用已连接内容 · 1 项可用')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '开始生成' })).toBeEnabled();
 
   const disconnected = nodeContext({ ...connected, mentionReferencesByNodeId: new Map() });
@@ -601,13 +588,15 @@ it('renders connected references as chips and blocks a draft after that referenc
       <CanvasMobileGenerationPanel node={configuredNode} draft={configuredNode.data.draft} context={disconnected} />
     </CanvasNodeContext.Provider>,
   );
-  expect(screen.getByRole('alert')).toHaveTextContent('1 个引用已断开');
-  expect(screen.getByLabelText('引用已断开：image-source')).toBeInTheDocument();
+  // 断连后引用 chip 不再渲染，但按钮为什么灰着必须说出来。
+  expect(screen.queryByLabelText(/引用已断开/)).not.toBeInTheDocument();
+  expect(screen.getByRole('alert')).toHaveTextContent('提示词里有 1 处引用指向已断开的素材，删掉这些引用后再生成。');
   expect(screen.getByRole('button', { name: '开始生成' })).toBeDisabled();
 });
 
 it('connects canvas materials above the prompt without rewriting its @ content', async () => {
   const setMaterialConnected = vi.fn();
+  const beginMaterialPick = vi.fn();
   const updateNode = vi.fn();
   const draftWithAtContent = { ...draft, prompt: '保留 @ 原提示词' };
   const material = {
@@ -621,6 +610,7 @@ it('connects canvas materials above the prompt without rewriting its @ content',
     materialReferences: [material],
     connectedMaterialNodeIdsByNodeId: new Map(),
     setMaterialConnected,
+    beginMaterialPick,
     updateNode,
   });
   const { rerender } = render(
@@ -630,13 +620,14 @@ it('connects canvas materials above the prompt without rewriting its @ content',
   );
 
   expect(screen.queryByRole('button', { name: '查看已对接素材 雨夜列车' })).not.toBeInTheDocument();
-  fireEvent.keyDown(screen.getByRole('button', { name: '为 分镜出图 对接素材' }), { key: 'Enter' });
-  expect(await screen.findByRole('menu')).toHaveClass('max-h-80', 'overflow-y-auto');
-  fireEvent.click(await screen.findByRole('menuitem', { name: '对接素材 雨夜列车' }));
-
-  expect(setMaterialConnected).toHaveBeenCalledWith(material.nodeId, node.id, true);
+  // 选材不再是面板内下拉：点 + 号进入画布选材态，由画布上点节点触发 setMaterialConnected。
+  fireEvent.click(screen.getByRole('button', { name: '为 分镜出图 在画布选择素材' }));
+  expect(beginMaterialPick).toHaveBeenCalledWith({
+    targetNodeId: node.id,
+    selectableNodeIds: new Set([material.nodeId]),
+  });
+  expect(setMaterialConnected).not.toHaveBeenCalled();
   expect(updateNode).not.toHaveBeenCalled();
-  fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
 
   const connected = nodeContext({
     ...initial,
@@ -722,7 +713,7 @@ it('opens video controls from the node generation panel', () => {
       <NodeCard data={{ domain: configuredNode }} selected />
     </CanvasNodeContext.Provider>,
   );
-  fireEvent.click(screen.getByRole('button', { name: /^视频生成设置$/ }));
+  fireEvent.click(screen.getByRole('button', { name: /^视频设置$/ }));
   expect(screen.getByTestId('video-settings-popover')).toBeInTheDocument();
   expect(screen.getByText('视频水印')).toBeInTheDocument();
 });
@@ -753,7 +744,7 @@ it('records text candidate changes but ignores the already selected value', () =
     </CanvasNodeContext.Provider>,
   );
 
-  fireEvent.click(screen.getByRole('button', { name: 'LLM 生成设置' }));
+  fireEvent.click(screen.getByRole('button', { name: '文本设置' }));
   fireEvent.click(screen.getByRole('option', { name: '1 个' }));
   expect(recordHistory).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('option', { name: '2 个' }));
@@ -786,7 +777,7 @@ it('records Responses reasoning changes but ignores the selected effort', () => 
     </CanvasNodeContext.Provider>,
   );
 
-  fireEvent.click(screen.getByRole('button', { name: 'LLM 生成设置' }));
+  fireEvent.click(screen.getByRole('button', { name: '文本设置' }));
   fireEvent.click(within(screen.getByLabelText('选择推理强度')).getByRole('option', { name: '自动' }));
   expect(recordHistory).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('option', { name: '高' }));
@@ -822,7 +813,7 @@ it('records audio setting changes but ignores the selected voice', () => {
     </CanvasNodeContext.Provider>,
   );
 
-  fireEvent.click(screen.getByRole('button', { name: '音频生成设置' }));
+  fireEvent.click(screen.getByRole('button', { name: '音频设置' }));
   fireEvent.click(screen.getByRole('option', { name: 'Alloy' }));
   expect(recordHistory).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('option', { name: 'Marin' }));
@@ -880,14 +871,50 @@ it('undoes and redoes image parameter changes as atomic history entries', () => 
   }
 
   render(<HistoryHarness />);
-  const settings = screen.getByRole('button', { name: '打开图片参数' });
+  const settings = screen.getByRole('button', { name: '图片设置' });
   fireEvent.click(settings);
   fireEvent.click(screen.getByRole('option', { name: '4:3' }));
   expect(settings).toHaveTextContent('4:3');
 
   fireEvent.click(screen.getByRole('button', { name: 'history undo' }));
-  expect(screen.getByRole('button', { name: '打开图片参数' })).toHaveTextContent('1:1');
+  expect(screen.getByRole('button', { name: '图片设置' })).toHaveTextContent('1:1');
 
   fireEvent.click(screen.getByRole('button', { name: 'history redo' }));
-  expect(screen.getByRole('button', { name: '打开图片参数' })).toHaveTextContent('4:3');
+  expect(screen.getByRole('button', { name: '图片设置' })).toHaveTextContent('4:3');
+});
+
+function rect(left: number, top: number, width: number, height: number) {
+  return { left, top, width, height, right: left + width, bottom: top + height };
+}
+
+const VIEWPORT = rect(0, 0, 1280, 720);
+
+it('clamps the generation panel inside the canvas instead of letting it overflow the left edge', () => {
+  // 审查实测：1280×720 下选中靠左的节点，面板 left=-77，提示词编辑区左边 64px 落在视口外。
+  const nearLeftEdge = rect(180, 200, 94, 160);
+
+  const placement = placeCanvasGenerationPanel(nearLeftEdge, VIEWPORT, 290);
+
+  expect(placement.left).toBe(16);
+  expect(placement.left + placement.width).toBeLessThanOrEqual(VIEWPORT.right - 16);
+  expect(placement.top).toBe(376);
+});
+
+it('flips the generation panel above the node when there is no room below', () => {
+  const nearBottom = rect(500, 560, 240, 140);
+
+  const placement = placeCanvasGenerationPanel(nearBottom, VIEWPORT, 290);
+
+  expect(placement.top).toBe(254);
+  expect(placement.top + 290).toBeLessThanOrEqual(nearBottom.top - 16);
+});
+
+it('keeps the generation panel reachable when it fits neither above nor below', () => {
+  const tallNode = rect(400, 40, 320, 640);
+
+  const placement = placeCanvasGenerationPanel(tallNode, rect(0, 0, 700, 400), 600);
+
+  expect(placement.top).toBe(16);
+  expect(placement.maxHeight).toBe(368);
+  expect(placement.width).toBe(608);
 });

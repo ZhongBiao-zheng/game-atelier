@@ -166,6 +166,11 @@ Document；扩展名只作入口白名单，文件类型、MIME、摘要、大�
 修改快照、prompt 或参数。`POST /canvas/projects/{id}/runs` 只接受
 `surface_node_id / expected_revision / requested_count`；服务端从已保存 Draft、连接与 Content Version
 解析真实输入，冻结 `canvas_run.snapshot`，并用项目内短事务原子提交 Job、结果节点与 Derivation Connection。
+Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_FIELDS`）：`PUT .../document`
+落盘前过一次，冻结 Snapshot 时再过一次，名单外的键一律丢弃。所有路径类字段
+（`reference_images/videos/audios`、`mask_image`、`mj_sref/cref/oref`）与 caller 回写字段
+（`actual_size`、`warnings`、`mj_flags`）都不在名单里 —— 浏览器不能提交路径，Canvas 的参考素材只能
+来自不可变 Content Version。
 四模态均进入同一个 Job Runner：图片/视频沿用既有厂商协议；文本只接受明确可执行的
 OpenAI-compatible `chat/completions` 或 `responses`，后者支持 `reasoning_effort`，其中 `auto` 只作为
 Draft 选择且冻结/请求时省略；音频只接受 OpenAI-compatible `audio/speech`，冻结并发送白名单内的
@@ -197,15 +202,14 @@ Content Version、candidate 状态与首个成功主结果；Midjourney 原生�
 
 批量候选逐个校验：全部成功为 `done`，部分成功为 `partial`，全部失败为 `failed`，
 停止且没有有效产物为 `canceled`；部分失败不会抹掉已经成功的 Content Version。
-`POST .../runs/{run_id}/retry` 明确区分 `original` 与 `current`：前者校验并复用原 Snapshot 的精确
-version/hash/model，允许用 `candidate_id` 单独补跑并记录 `replaces_candidate_id`；后者从结果节点当前
-Draft/连接重新解析并冻结新 Snapshot。两者都创建新 Job/Run，不覆盖旧记录。
+`POST .../runs/{run_id}/retry` 只接受 `expected_revision`：从结果节点当前 Draft/连接重新解析并冻结新
+Snapshot，创建新 Job/Run，不覆盖旧记录。没有按原 Snapshot 重跑的入口，也不能只补跑单个候选。
 `POST .../runs/{run_id}/cancel` 只持久化幂等 `cancel_requested_at`。Runner 尚未认领时不调用厂商并落为
 `canceled`；同步厂商请求已发出时不伪装即时中断，UI 明示上游可能继续执行，有效返回仍登记，未返回候选
 才标记 canceled。prepared 事务在下次项目访问或命令前完成/丢弃，不能从节点当前内容重造 Snapshot。
 `POST .../runs/{run_id}/candidates/{candidate_id}/dismiss` 只允许隐藏 `failed/canceled` 槽位并写入
 `dismissed_at` tombstone；Job、Snapshot、错误与既有 Content Version 均不删除，最新 tombstone 也不会让
-同索引的旧失败槽位重新出现。单槽位重试成功只补回该索引，不覆盖已有成功主结果。
+同索引的旧失败槽位重新出现。
 服务启动时先恢复全部项目事务，再核对孤儿 Job：`runner_started_at` 为空的持久任务尚未调用厂商，可安全
 重新领取；已经领取但仍无终态的请求状态未知，明确标记失败且不自动重试，避免重复扣费。视频与
 Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程内调度上限为全局 4 个、同一密钥别名

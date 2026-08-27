@@ -12,8 +12,8 @@ export type CanvasCandidatePresentation = {
 
 /**
  * Fold immutable run history into the slots currently shown by the result node.
- * A retry replaces only its original index; a dismissed latest entry hides that slot
- * instead of revealing stale content underneath it.
+ * A retry re-runs the whole batch, so its candidates overwrite the same indices; a
+ * dismissed latest entry hides that slot instead of revealing stale content underneath.
  */
 export function presentCanvasCandidates(jobs: readonly Job[]): CanvasCandidatePresentation {
   const entries: CanvasCandidateEntry[] = jobs.flatMap(job => (

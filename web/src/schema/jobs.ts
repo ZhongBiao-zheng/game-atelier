@@ -110,7 +110,6 @@ export interface CanvasJobContext {
     status: 'pending' | 'succeeded' | 'failed' | 'canceled';
     version_id: string | null;
     error: string | null;
-    replaces_candidate_id?: string | null;
     dismissed_at?: string | null;
   }>;
 }

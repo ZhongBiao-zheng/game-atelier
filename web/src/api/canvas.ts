@@ -488,21 +488,15 @@ export function createCanvasReversePromptConfig(
 export function retryCanvasRun(
   projectId: string,
   runId: string,
-  mode: 'original' | 'current',
   expectedRevision: number,
-  candidateId?: string,
 ): Promise<CanvasRun> {
   return requestJson<CanvasRun>(
     `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/retry`,
-    mode === 'original' ? '按原设置重试' : '按当前设置再次生成',
+    '按当前设置再次生成',
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        mode,
-        expected_revision: expectedRevision,
-        ...(candidateId ? { candidate_id: candidateId } : {}),
-      }),
+      body: JSON.stringify({ expected_revision: expectedRevision }),
     },
   );
 }

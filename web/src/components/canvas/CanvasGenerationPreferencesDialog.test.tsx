@@ -79,7 +79,7 @@ describe('CanvasGenerationPreferencesDialog', () => {
     await user.click(screen.getByRole('button', { name: '选择生成模型' }));
 
     await user.click(screen.getByRole('option', { name: 'Seedream 5 Lite' }));
-    await user.click(screen.getByRole('button', { name: '打开图片参数' }));
+    await user.click(screen.getByRole('button', { name: '图片设置' }));
     await user.click(screen.getByRole('option', { name: '2 张' }));
     await user.click(screen.getByRole('button', { name: '保存偏好' }));
 
@@ -141,7 +141,7 @@ describe('CanvasGenerationPreferencesDialog', () => {
     const onSave = vi.fn();
     setup({ onSave });
 
-    await user.click(screen.getByRole('button', { name: '打开图片参数' }));
+    await user.click(screen.getByRole('button', { name: '图片设置' }));
     await user.click(screen.getByRole('option', { name: '2 张' }));
     await user.click(screen.getByRole('button', { name: '保存偏好' }));
 

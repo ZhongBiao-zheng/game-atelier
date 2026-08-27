@@ -86,10 +86,12 @@ describe('canvas connection policy', () => {
     expect(canvasNodeAcceptsInput(node('plugin', 'plugin'))).toBe(false);
     expect(canvasNodeHasCurrentContent(node('empty', 'text'), {})).toBe(false);
     expect(canvasNodeHasCurrentContent(node('missing', 'text', 'version-missing'), {})).toBe(false);
+    // 四类内容节点都无条件算内容源：先连线、后逐个生成是正常画布工作流。空输入不是在这里拦，
+    // 而是由 canvasPendingInputNodes 在生成按钮上指名拦住。
     expect(canvasNodeProvidesOutput(node('empty-image', 'image'), {})).toBe(true);
     expect(canvasNodeProvidesOutput(node('empty-video', 'video'), {})).toBe(true);
-    expect(canvasNodeProvidesOutput(node('empty-text', 'text'), {})).toBe(false);
-    expect(canvasNodeProvidesOutput(node('empty-audio', 'audio'), {})).toBe(false);
+    expect(canvasNodeProvidesOutput(node('empty-text', 'text'), {})).toBe(true);
+    expect(canvasNodeProvidesOutput(node('empty-audio', 'audio'), {})).toBe(true);
   });
 
   it('allows directional cycles while rejecting self, duplicate, and invalid endpoints', () => {
@@ -125,7 +127,7 @@ describe('canvas connection policy', () => {
     expect(canCreateCanvasInputConnection(current, { source: 'target', target: 'source' })).toBe(true);
     expect(canCreateCanvasInputConnection(current, { source: 'source', target: 'source' })).toBe(false);
     expect(canCreateCanvasInputConnection(current, { source: 'config', target: 'target' })).toBe(false);
-    expect(canCreateCanvasInputConnection(current, { source: 'empty', target: 'target' })).toBe(false);
+    expect(canCreateCanvasInputConnection(current, { source: 'empty', target: 'target' })).toBe(true);
     expect(canCreateCanvasInputConnection(current, { source: 'empty-image', target: 'target' })).toBe(true);
     expect(canCreateCanvasInputConnection(current, { source: 'empty-video', target: 'target' })).toBe(true);
     expect(canCreateCanvasInputConnection(current, { source: 'source', target: 'group' })).toBe(false);

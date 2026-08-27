@@ -62,6 +62,7 @@ from character_workflow.lib.schemas import (
     JobKind,
     JobParams,
     JobStatus,
+    canvas_allowed_draft_params,
 )
 
 
@@ -367,7 +368,7 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
                 raise ValueError("canvas transaction document fingerprint mismatch")
             job = Job.model_validate(job_payload)
             creates_run = raw.get("kind") in {
-                "submit", "retry", "reverse_prompt", "mask_edit", "angle"
+                "submit", "reverse_prompt", "mask_edit", "angle"
             }
             recovered_job = _failed_recovered_submit(job) if creates_run else job
             target = CanvasDocument.model_validate(document_payload)
@@ -681,7 +682,13 @@ def _resolve_inputs(
         version_id = _current_version_id(node) if node is not None else None
         version = document.content_versions.get(version_id) if version_id else None
         if node is None or version is None:
-            raise ValueError("生成输入缺少可用的内容版本")
+            # 「先连线，后逐个生成」是画布上最自然的用法，所以这条错误是常态而不是异常路径：
+            # 不指名是哪个节点，用户既不知道要先生成谁，也不知道要断开哪条连线。
+            title = node.title if node is not None else node_id
+            if source in {"first_frame", "last_frame"}:
+                slot_label = "首帧" if source == "first_frame" else "尾帧"
+                raise ValueError(f"{slot_label}连接的「{title}」还没有内容，先把它生成出来再提交")
+            raise ValueError(f"已连接的「{title}」还没有内容，先把它生成出来，或断开这条连接")
         if source in {"first_frame", "last_frame"} and version.kind != "image":
             raise ValueError("首帧和尾帧只能选择图片素材")
         resolved.append(CanvasSnapshotInput(
@@ -885,16 +892,9 @@ def _normalized_params(
 ) -> tuple[dict[str, Any], JobParams, int]:
     from character_workflow.lib.callers.openai_image import image_family, resolve_image_protocol
 
-    normalized = draft.params.model_dump(mode="json", exclude_none=True)
-    for field in (
-        "actual_size",
-        "warnings",
-        "requested_size",
-        "reference_images",
-        "reference_videos",
-        "reference_audios",
-    ):
-        normalized.pop(field, None)
+    # 白名单重组，不是黑名单剔除：见 schemas.CANVAS_DRAFT_PARAM_FIELDS。
+    normalized = canvas_allowed_draft_params(draft.mode, draft.params)
+    # 这两个只在模型确实支持时由下面各分支重新放回。
     normalized.pop("background", None)
     normalized.pop("watermark", None)
     effective_count = requested_count
@@ -1748,227 +1748,38 @@ def _job_for_run(project_id: str, run_id: str) -> Job:
     return job
 
 
-def _validate_retry_snapshot(
-    project_id: str,
-    document: CanvasDocument,
-    snapshot: CanvasGenerationSnapshot,
-) -> dict[str, list[str]]:
-    for item in snapshot.inputs:
-        version = document.content_versions.get(item.version_id)
-        if version is None or version.kind != item.kind:
-            raise RuntimeError("snapshot_input_missing")
-        if version.kind == "text":
-            digest = hashlib.sha256(version.text.encode("utf-8")).hexdigest()
-            if digest != version.sha256:
-                raise RuntimeError("snapshot_input_changed")
-    try:
-        paths = _input_paths(project_id, document, snapshot.inputs)
-    except ValueError as error:
-        raise RuntimeError("snapshot_input_missing") from error
-    for item in snapshot.inputs:
-        version = document.content_versions[item.version_id]
-        if version.kind == "text":
-            continue
-        target = canvas_project_dir(project_id) / version.path
-        if _sha256_file(target) != version.sha256:
-            raise RuntimeError("snapshot_input_changed")
-    paths["mask"] = []
-    if snapshot.mask_version_id is not None:
-        mask = document.content_versions.get(snapshot.mask_version_id)
-        source_ids = {item.version_id for item in snapshot.inputs if item.kind == "image"}
-        if (
-            not isinstance(mask, CanvasMediaVersion)
-            or mask.kind != "image"
-            or mask.origin.kind != "user_mask"
-            or mask.origin.source_version_id not in source_ids
-        ):
-            raise RuntimeError("snapshot_mask_missing")
-        root = canvas_project_dir(project_id).resolve()
-        target = (root / mask.path).resolve()
-        if (
-            not target.is_relative_to(root)
-            or not target.is_file()
-            or _sha256_file(target) != mask.sha256
-        ):
-            raise RuntimeError("snapshot_mask_changed")
-        paths["mask"] = [str(target)]
-    return paths
-
-
-def _retry_job_params(
-    snapshot: CanvasGenerationSnapshot,
-    media_paths: dict[str, list[str]],
-    requested_count: int,
-) -> JobParams:
-    normalized = dict(snapshot.normalized_params)
-    if snapshot.mode in {"text", "image"}:
-        normalized["n"] = requested_count
-    else:
-        normalized.pop("n", None)
-    params = JobParams(**normalized)
-    params.reference_images = media_paths["image"] or None
-    params.reference_videos = media_paths["video"] or None
-    params.reference_audios = media_paths["audio"] or None
-    params.mask_image = (media_paths.get("mask") or [None])[0]
-    return params
-
-
 def retry_canvas_run(
     project_id: str,
     run_id: str,
-    mode: str,
     expected_revision: int,
-    candidate_id: str | None = None,
 ) -> tuple[Job, CanvasDocument]:
-    """Retry an immutable Snapshot, or submit the result node's current Draft."""
+    """Submit the result node's current Draft again as a brand-new Run."""
     original = _job_for_run(project_id, run_id)
     context = original.canvas_run
     if context is None:
         raise ValueError("Canvas Run 缺少 Snapshot")
-    if mode == "current":
-        if candidate_id is not None:
-            raise ValueError("按当前设置再次生成不能指定历史候选")
-        with job_lock(original.job_id):
-            original = read_job(original.job_id)
-        if original.status in {JobStatus.PENDING, JobStatus.PENDING_CONFIRM}:
-            raise RuntimeError("run_not_terminal")
-        current = _read_document_unlocked(project_id)
-        result = next(
-            (node for node in current.nodes if node.id == context.result_node_id),
-            None,
-        )
-        draft = _draft_for_node(result) if result is not None else None
-        if draft is None:
-            raise RuntimeError("result_node_missing")
-        requested_count = (
-            max(1, min(4, int(draft.params.n or 1)))
-            if draft.mode in {"text", "image"} else 1
-        )
-        return submit_canvas_run(
-            project_id,
-            context.result_node_id,
-            expected_revision,
-            requested_count,
-        )
-    if mode != "original":
-        raise ValueError("未知的重试模式")
-
-    with file_lock(_lock_path(project_id)):
-        recover_canvas_transactions_unlocked(project_id)
-        current = _read_document_unlocked(project_id)
-        if current.revision != expected_revision:
-            raise RuntimeError(f"revision_conflict:{current.revision}")
-        with job_lock(original.job_id):
-            original = read_job(original.job_id)
-        if original.status in {JobStatus.PENDING, JobStatus.PENDING_CONFIRM}:
-            raise RuntimeError("run_not_terminal")
-        context = original.canvas_run
-        if context is None:
-            raise ValueError("Canvas Run 缺少 Snapshot")
-        result = next(
-            (node for node in current.nodes if node.id == context.result_node_id),
-            None,
-        )
-        if result is None or result.type not in {"text", "image", "video", "audio"}:
-            raise RuntimeError("result_node_missing")
-        replaced: CanvasResultCandidate | None = None
-        if candidate_id is not None:
-            replaced = next(
-                (item for item in context.candidates if item.candidate_id == candidate_id),
-                None,
-            )
-            if replaced is None:
-                raise KeyError(candidate_id)
-            if replaced.status not in {"failed", "canceled"}:
-                raise ValueError("只能单独重试失败或已停止的候选")
-            candidate_indices = [replaced.index]
-        else:
-            candidate_indices = [item.index for item in context.candidates]
-        if context.snapshot.mode not in {"text", "image"} and len(candidate_indices) != 1:
-            raise ValueError("视频与音频生成一次只允许一个结果")
-
-        media_paths = _validate_retry_snapshot(project_id, current, context.snapshot)
-        database = read_keys_db()
-        key = next((item for item in database.keys if item.alias == context.snapshot.alias), None)
-        model = next(
-            (item for item in key.models if item.id == context.snapshot.model),
-            None,
-        ) if key is not None else None
-        if key is None or model is None or key.provider != context.snapshot.provider:
-            raise RuntimeError("snapshot_model_missing")
-
-        timestamp = _now()
-        new_run_id = f"run-{secrets.token_hex(12)}"
-        retry_job_id = new_job_id()
-        retry_normalized = dict(context.snapshot.normalized_params)
-        if context.snapshot.mode in {"text", "image"}:
-            retry_normalized["n"] = len(candidate_indices)
-        retry_snapshot_payload = context.snapshot.model_dump(
-            mode="json",
-            exclude={"request_fingerprint"},
-        )
-        retry_snapshot_payload.update({
-            "normalized_params": retry_normalized,
-            "submitted_at": timestamp,
-            "submitted_by": CanvasActor(kind="user").model_dump(mode="json"),
-        })
-        retry_snapshot = CanvasGenerationSnapshot(
-            **retry_snapshot_payload,
-            request_fingerprint=_canonical_sha(retry_snapshot_payload),
-        )
-        candidates = [
-            CanvasResultCandidate(
-                candidate_id=f"candidate-{secrets.token_hex(10)}",
-                index=index,
-                status="pending",
-                replaces_candidate_id=replaced.candidate_id if replaced is not None else None,
-            )
-            for index in candidate_indices
-        ]
-        new_context = CanvasJobContext(
-            run_id=new_run_id,
-            snapshot=retry_snapshot,
-            result_node_id=context.result_node_id,
-            candidates=candidates,
-        )
-        job = Job(
-            job_id=retry_job_id,
-            character_id=key.alias,
-            prompt=retry_snapshot.final_prompt,
-            submitted_at=timestamp,
-            model=model.id,
-            params=_retry_job_params(retry_snapshot, media_paths, len(candidates)),
-            output_paths=[],
-            status=JobStatus.PENDING,
-            error=None,
-            asset_slot=AssetSlot.PORTRAIT,
-            kind=JobKind(retry_snapshot.mode),
-            namespace="canvas",
-            canvas_project_id=project_id,
-            canvas_run=new_context,
-            alias=key.alias,
-            provider=key.provider,
-            retry_of=original.job_id,
-        )
-        nodes = [
-            _with_active_run(node, new_run_id)
-            if node.id == context.result_node_id else node
-            for node in current.nodes
-        ]
-        updated = current.model_copy(update={
-            "revision": current.revision + 1,
-            "updated_at": timestamp,
-            "nodes": nodes,
-        })
-        _commit_transaction_unlocked(
-            project_id,
-            new_run_id,
-            "retry",
-            current.revision,
-            job,
-            updated,
-        )
-        return job, updated
+    with job_lock(original.job_id):
+        original = read_job(original.job_id)
+    if original.status in {JobStatus.PENDING, JobStatus.PENDING_CONFIRM}:
+        raise RuntimeError("run_not_terminal")
+    current = _read_document_unlocked(project_id)
+    result = next(
+        (node for node in current.nodes if node.id == context.result_node_id),
+        None,
+    )
+    draft = _draft_for_node(result) if result is not None else None
+    if draft is None:
+        raise RuntimeError("result_node_missing")
+    requested_count = (
+        max(1, min(4, int(draft.params.n or 1)))
+        if draft.mode in {"text", "image"} else 1
+    )
+    return submit_canvas_run(
+        project_id,
+        context.result_node_id,
+        expected_revision,
+        requested_count,
+    )
 
 
 def request_canvas_run_cancel(project_id: str, run_id: str) -> Job:
@@ -2233,10 +2044,6 @@ def _commit_canvas_candidate_attempt(
                 write_job_under_lock(updated_job)
                 return updated_job
 
-            single_candidate_retry = (
-                len(candidates) == 1
-                and candidates[0].replaces_candidate_id is not None
-            )
             nodes: list[CanvasNode] = []
             for node in current.nodes:
                 if (
@@ -2244,7 +2051,6 @@ def _commit_canvas_candidate_attempt(
                     and node.type in {"text", "image", "video", "audio"}
                     and node.data.active_run_id == context.run_id
                     and not had_success
-                    and (not single_candidate_retry or node.data.current_version_id is None)
                 ):
                     node = node.model_copy(update={
                         "data": node.data.model_copy(update={
@@ -2458,10 +2264,6 @@ def _finalize_canvas_run_under_locks(
         "canvas_run": context.model_copy(update={"candidates": candidates})
     })
     primary_version_id = successful[0].version_id
-    single_candidate_retry = (
-        len(candidates) == 1
-        and candidates[0].replaces_candidate_id is not None
-    )
     text_primary = next(
         (candidate for candidate in successful if candidate.index == 0),
         None,
@@ -2474,14 +2276,11 @@ def _finalize_canvas_run_under_locks(
             and node.type in {"text", "image", "video", "audio"}
             and node.data.active_run_id == context.run_id
         ):
-            # A repaired slot never steals an already-successful result. For text batches,
-            # only candidate 0 owns the anchor node; the other indices get their own nodes.
+            # For text batches only candidate 0 owns the anchor node; the other indices
+            # get their own nodes.
             should_display_version = (
                 job.kind != JobKind.TEXT
                 or text_primary is not None
-            ) and (
-                not single_candidate_retry
-                or node.data.current_version_id is None
             )
             if should_display_version:
                 node = node.model_copy(update={
@@ -2500,7 +2299,7 @@ def _finalize_canvas_run_under_locks(
     if (
         job.kind == JobKind.TEXT
         and result_node is not None
-        and (len(candidates) > 1 or single_candidate_retry)
+        and len(candidates) > 1
     ):
         node_width = result_node.size.width if result_node.size is not None else 256
         node_height = result_node.size.height if result_node.size is not None else 144

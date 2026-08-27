@@ -69,8 +69,11 @@ export function CanvasModelPicker({
     return groups;
   }, []);
 
+  // basis 给到 12rem：所在行是 flex-wrap，basis:0 时窄屏下这一格会被压成 10px，而按钮的图标 +
+  // 内边距撑着 26px 画到父盒外面，压住右边的参数控件（375px 实测重叠 10px）。给了真实基准宽度
+  // 之后窄屏会换行、宽屏仍由 flex-1 撑满。
   return (
-    <div ref={anchorRef} className="relative min-w-0 flex-1">
+    <div ref={anchorRef} className="relative min-w-0 flex-1 basis-48">
       <button
         type="button"
         aria-label="选择生成模型"
@@ -80,7 +83,8 @@ export function CanvasModelPicker({
       >
         <Boxes className="size-3.5 shrink-0" aria-hidden="true" />
         <span className="truncate">{selected?.model.name || selected?.model.id || '选择模型'}</span>
-        {selected && <span className="ml-auto shrink-0 text-muted-foreground">{selected.key.alias}</span>}
+        {/* shrink-0 会让 alias 在 375px 下按自然宽画到父盒外面，压住下一个控件。 */}
+        {selected && <span className="ml-auto min-w-0 truncate text-muted-foreground">{selected.key.alias}</span>}
       </button>
       <ToolbarPopover
         open={open}
@@ -176,7 +180,7 @@ export function CanvasImageSettings({
     <div ref={anchorRef} className="relative min-w-0">
       <button
         type="button"
-        aria-label="打开图片参数"
+        aria-label="图片设置"
         aria-expanded={open}
         onClick={() => setOpen(value => !value)}
         className="flex h-9 max-w-full items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -472,7 +476,7 @@ export function CanvasAudioSettings({
     <div ref={anchorRef} className="relative min-w-0">
       <button
         type="button"
-        aria-label="音频生成设置"
+        aria-label="音频设置"
         aria-expanded={open}
         onClick={toggle}
         className="flex h-9 max-w-full items-center gap-1.5 rounded-md border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"

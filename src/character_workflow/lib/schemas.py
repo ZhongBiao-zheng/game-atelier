@@ -165,7 +165,6 @@ class CanvasResultCandidate(BaseModel):
     status: Literal["pending", "succeeded", "failed", "canceled"]
     version_id: str | None = None
     error: str | None = None
-    replaces_candidate_id: str | None = None
     # UI dismissal is a tombstone: Job/Snapshot/Version provenance remains auditable.
     dismissed_at: str | None = None
 
@@ -450,6 +449,42 @@ class CanvasGenerationDraft(BaseModel):
     alias: str | None = Field(default=None, max_length=120)
     params: JobParams = Field(default_factory=JobParams)
     updated_at: str
+
+
+# 浏览器可以通过 PUT /canvas/projects/{id}/document 自由写入每个 Draft 的 params，而 JobParams 是
+# extra="allow"。所以冻结 Snapshot 时不能从全量 model_dump 起手做黑名单剔除：漏掉任何一个服务端
+# 独占字段，浏览器就能把本地路径写进 job.params —— /api/raw 的读取白名单正是按 params 里的路径字段
+# （mask_image / mj_sref / mj_cref / mj_oref）构造的，等于用一次正常出图换任意本地文件读取权，
+# 而 mj_image caller 还会把本地路径上传成公网直链。
+# 下面按 mode 列出「浏览器有权提交」的字段，其余一律丢弃。Canvas 的参考素材只能来自不可变
+# Content Version，所以全部路径类字段都不在名单里；新增控件时必须同时把字段加进这里。
+CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
+    "image": frozenset({
+        "n", "size", "ratio", "resolution", "quality", "background",
+        # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
+        "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",
+        # Midjourney 的纯标量 flag（都有 Field 上下界）；三组参考路径与 caller 回写的
+        # mj_flags 不在其中。
+        "mode", "bot_type", "mj_version", "mj_stylize", "mj_chaos", "mj_weird",
+        "mj_seed", "mj_no", "mj_tile", "mj_iw", "mj_sw", "mj_cw", "mj_ow",
+    }),
+    "video": frozenset({
+        "duration", "resolution", "ratio", "mode", "frame_mode",
+        "generate_audio", "watermark",
+    }),
+    "text": frozenset({"n", "temperature", "max_tokens", "reasoning_effort"}),
+    "audio": frozenset({"voice", "response_format", "speed", "instructions"}),
+}
+
+
+def canvas_allowed_draft_params(mode: str, params: JobParams) -> dict[str, Any]:
+    """Keep only the Draft params a browser is allowed to submit for this mode."""
+    allowed = CANVAS_DRAFT_PARAM_FIELDS.get(mode, frozenset())
+    return {
+        field: value
+        for field, value in params.model_dump(mode="json", exclude_none=True).items()
+        if field in allowed
+    }
 
 
 def _draft_with_default_policy(value: object, policy: str) -> object:
@@ -1152,9 +1187,7 @@ class CanvasRunResponse(BaseModel):
 
 class CanvasRunRetry(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    mode: Literal["original", "current"]
     expected_revision: int = Field(ge=0)
-    candidate_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
 class CanvasCandidateDismiss(BaseModel):

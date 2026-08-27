@@ -100,7 +100,7 @@ describe('CanvasTextSettings', () => {
     const onPatch = vi.fn();
     render(<CanvasTextSettings supportsReasoning params={{ n: 2, reasoning_effort: 'auto' }} onPatch={onPatch} />);
 
-    const trigger = screen.getByRole('button', { name: 'LLM 生成设置' });
+    const trigger = screen.getByRole('button', { name: '文本设置' });
     await user.click(trigger);
     const popover = screen.getByTestId('canvas-text-settings-popover');
     expect(popover).toHaveAttribute('data-toolbar-popover');
@@ -113,7 +113,7 @@ describe('CanvasTextSettings', () => {
   it('hides reasoning for chat-completions models', () => {
     const onPatch = vi.fn();
     render(<CanvasTextSettings supportsReasoning={false} params={{ n: 1 }} onPatch={onPatch} />);
-    fireEvent.click(screen.getByRole('button', { name: 'LLM 生成设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '文本设置' }));
     expect(screen.queryByLabelText('选择推理强度')).not.toBeInTheDocument();
     expect(screen.getByLabelText('选择文本生成数量')).toBeInTheDocument();
     expect(screen.getByLabelText('选择对话随机性')).toBeInTheDocument();
@@ -133,7 +133,7 @@ describe('CanvasAudioSettings', () => {
       onPatch={onPatch}
     />);
 
-    fireEvent.click(screen.getByRole('button', { name: '音频生成设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '音频设置' }));
     const popover = screen.getByTestId('canvas-audio-settings-popover');
     expect(popover).toHaveAttribute('data-toolbar-popover');
     expect(screen.getByLabelText('选择音色')).toBeInTheDocument();
@@ -155,7 +155,7 @@ describe('CanvasAudioSettings', () => {
       params={{ voice: 'alloy', response_format: 'mp3', speed: 1 }}
       onPatch={onPatch}
     />);
-    fireEvent.click(screen.getByRole('button', { name: '音频生成设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '音频设置' }));
     fireEvent.change(screen.getByLabelText('自定义语速'), { target: { value: '8' } });
     fireEvent.blur(screen.getByLabelText('自定义语速'));
     fireEvent.change(screen.getByLabelText('朗读指令'), { target: { value: '  温柔、克制  ' } });
@@ -170,7 +170,7 @@ describe('CanvasAudioSettings', () => {
       params={{ voice: 'alloy', response_format: 'mp3', speed: 1 }}
       onPatch={onPatch}
     />);
-    fireEvent.click(screen.getByRole('button', { name: '音频生成设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '音频设置' }));
     fireEvent.change(screen.getByLabelText('自定义语速'), { target: { value: '1.35' } });
     fireEvent.change(screen.getByLabelText('朗读指令'), { target: { value: '  平静旁白  ' } });
 
@@ -192,7 +192,7 @@ describe('CanvasImageSettings', () => {
         onPatch={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: '打开图片参数' }));
+    fireEvent.click(screen.getByRole('button', { name: '图片设置' }));
     expect(screen.getByText('透明背景')).toBeInTheDocument();
     expect(screen.getByText('自定义尺寸')).toBeInTheDocument();
     expect(screen.getByText('质量')).toBeInTheDocument();
@@ -209,7 +209,7 @@ describe('CanvasImageSettings', () => {
         onPatch={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: '打开图片参数' }));
+    fireEvent.click(screen.getByRole('button', { name: '图片设置' }));
     expect(screen.getByText('分辨率')).toBeInTheDocument();
     expect(screen.getByText('自定义尺寸')).toBeInTheDocument();
     expect(screen.queryByText('质量')).not.toBeInTheDocument();
@@ -225,7 +225,7 @@ describe('CanvasImageSettings', () => {
         onPatch={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: '打开图片参数' }));
+    fireEvent.click(screen.getByRole('button', { name: '图片设置' }));
     expect(screen.getByText('Midjourney 每次任务固定返回 4 张方案。')).toBeInTheDocument();
     expect(screen.queryByLabelText('选择图片生成数量')).not.toBeInTheDocument();
   });

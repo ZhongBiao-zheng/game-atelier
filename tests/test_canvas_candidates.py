@@ -58,7 +58,12 @@ def _snapshot(result_node_id: str) -> CanvasGenerationSnapshot:
     )
 
 
-def _project_with_result_node(*, primary_version_id: str | None, active_run_id: str):
+def _project_with_result_node(
+    *,
+    primary_version_id: str | None,
+    active_run_id: str,
+    generation_draft: dict | None = None,
+):
     project = create_canvas_project("候选结果")
     current = read_canvas_document(project.project_id)
     payload = current.model_dump(mode="json")
@@ -71,7 +76,7 @@ def _project_with_result_node(*, primary_version_id: str | None, active_run_id: 
             "z_index": 0,
             "data": {
                 "current_version_id": None,
-                "generation_draft": None,
+                "generation_draft": generation_draft,
                 "active_run_id": active_run_id,
                 "display": {"fit": "contain", "free_resize": False},
             },
@@ -123,31 +128,6 @@ def _write_output(project_id: str, job_id: str, name: str = "candidate.png") -> 
     target = canvas_output_dir(project_id, job_id) / name
     target.write_bytes(PNG)
     return str(target)
-
-
-def test_single_candidate_retry_succeeds_without_stealing_existing_primary():
-    run_id = "run-retry-one"
-    project, _document, primary_version_id = _project_with_result_node(
-        primary_version_id="version-existing",
-        active_run_id=run_id,
-    )
-    candidate = CanvasResultCandidate(
-        candidate_id="candidate-retry",
-        index=1,
-        status="pending",
-        replaces_candidate_id="candidate-failed",
-    )
-    job = _job(project.project_id, run_id, [candidate])
-    output = _write_output(project.project_id, job.job_id)
-    save_job(job.model_copy(update={"status": JobStatus.DONE, "output_paths": [output]}))
-
-    finalized, document = finalize_canvas_run(project.project_id, job.job_id)
-
-    assert finalized.canvas_run.candidates[0].status == "succeeded"
-    assert finalized.canvas_run.candidates[0].version_id is not None
-    assert document is not None
-    result = next(node for node in document.nodes if node.id == "image-result")
-    assert result.data.current_version_id == primary_version_id
 
 
 def test_cancel_with_one_output_keeps_success_and_cancels_remaining_slots():
@@ -342,37 +322,20 @@ def test_only_failed_or_canceled_candidate_can_be_hidden(status: str):
         )
 
 
-def test_successful_candidate_cannot_be_retried_as_a_single_slot():
-    run_id = "run-no-retry-success"
-    project, document, primary_version_id = _project_with_result_node(
-        primary_version_id="version-existing",
-        active_run_id=run_id,
-    )
-    candidate = CanvasResultCandidate(
-        candidate_id="candidate-success",
-        index=0,
-        status="succeeded",
-        version_id=primary_version_id,
-    )
-    save_job(_job(project.project_id, run_id, [candidate]).model_copy(update={
-        "status": JobStatus.DONE,
-    }))
-
-    with pytest.raises(ValueError, match="只能单独重试失败或已停止的候选"):
-        retry_canvas_run(
-            project.project_id,
-            run_id,
-            "original",
-            document.revision,
-            candidate.candidate_id,
-        )
-
-
-def test_original_retry_reuses_the_frozen_prompt_model_and_parameters():
-    run_id = "run-retry-frozen-snapshot"
+def test_retry_resubmits_the_result_node_current_draft():
+    run_id = "run-retry-current-draft"
     project, document, _primary = _project_with_result_node(
         primary_version_id=None,
         active_run_id=run_id,
+        generation_draft={
+            "mode": "image",
+            "prompt": "换个角度的纸雕狐狸",
+            "input_policy": "all_connected",
+            "model": "gpt-image-1",
+            "alias": "openai-main",
+            "params": {"n": 1, "ratio": "1:1"},
+            "updated_at": NOW,
+        },
     )
     write_keys_db(KeysDB(default_alias="openai-main", keys=[KeySpec(
         alias="openai-main",
@@ -392,16 +355,13 @@ def test_original_retry_reuses_the_frozen_prompt_model_and_parameters():
     retry, updated_document = retry_canvas_run(
         project.project_id,
         run_id,
-        "original",
         document.revision,
     )
 
-    assert retry.retry_of == original.job_id
-    assert retry.prompt == original.canvas_run.snapshot.final_prompt
-    assert retry.model == original.canvas_run.snapshot.model
-    assert retry.alias == original.canvas_run.snapshot.alias
-    assert retry.provider == original.canvas_run.snapshot.provider
-    assert retry.params.ratio == original.canvas_run.snapshot.normalized_params["ratio"]
-    assert retry.canvas_run.snapshot.final_prompt == original.canvas_run.snapshot.final_prompt
-    assert retry.canvas_run.snapshot.normalized_params == original.canvas_run.snapshot.normalized_params
-    assert updated_document.revision == document.revision + 1
+    # 重试不再复刻冻结快照，而是拿节点当前 Draft 重新解析并冻结新的 Snapshot。
+    assert retry.job_id != original.job_id
+    assert retry.canvas_run.run_id != run_id
+    assert retry.prompt == "换个角度的纸雕狐狸"
+    assert retry.canvas_run.snapshot.final_prompt == "换个角度的纸雕狐狸"
+    assert retry.canvas_run.result_node_id == "image-result"
+    assert updated_document.revision > document.revision

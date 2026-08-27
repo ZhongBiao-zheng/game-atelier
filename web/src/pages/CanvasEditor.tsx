@@ -172,13 +172,21 @@ import {
 } from '@/lib/canvasMentions';
 import { shouldPreventCanvasHistoryNavigation } from '@/lib/canvasTrackpad';
 import {
+  CANVAS_LOCAL_VERSION_SHA,
+  acceptServerContentVersions,
   canvasConnectionCreationCapabilities,
+  canvasDeletionBlockedMessage,
   canvasNodeRenderZIndex,
   canCreateCanvasInputConnection,
+  clampCanvasNodeSize,
+  acceptCanvasJobs,
+  upsertCanvasJob,
+  canvasPendingInputNodes,
   closestCanvasConnectionEndpoint,
   createCanvasGenerationDraft,
   createConnectedCanvasConfig,
   normalizeCanvasVideoParams,
+  restoreContentVersions,
   supportsCanvasVideoEdit,
 } from './canvasEditorModel';
 
@@ -253,7 +261,7 @@ function materializeEmptyTextContent(document: CanvasDocument): {
       kind: 'text',
       text: '',
       created_at: new Date().toISOString(),
-      sha256: '0'.repeat(64),
+      sha256: CANVAS_LOCAL_VERSION_SHA,
       origin: { kind: 'user_edit' },
     };
     return { ...node, data: { ...node.data, current_version_id: versionId } };
@@ -322,7 +330,10 @@ function CanvasEditorInner({
   const [document, setDocument] = useState<CanvasDocument | null>(null);
   const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobs, setJobsState] = useState<Job[]>([]);
+  // 每一次本地乐观写入都推进 epoch。轮询在发请求前拍下 epoch，响应落地时若 epoch 变了，
+  // 说明这份列表已经落后于本地，只能并进去，不能整体赋值。见 acceptCanvasJobs。
+  const jobsEpoch = useRef(0);
   const [assets, setAssets] = useState<RevisionedSidecar<CanvasLibraryAsset> | null>(null);
   const [prompts, setPrompts] = useState<RevisionedSidecar<CanvasPrompt> | null>(null);
   const [canvasUiPreferences, setCanvasUiPreferences] = useState<CanvasUiPreferences>(DEFAULT_CANVAS_UI_PREFERENCES);
@@ -350,6 +361,8 @@ function CanvasEditorInner({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
+  const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
+  const [historyDepth, setHistoryDepth] = useState({ past: 0, future: 0 });
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
@@ -536,7 +549,7 @@ function CanvasEditorInner({
         setKeys([...keyRows.keys].sort((left, right) => (
           Number(Boolean(right.is_default)) - Number(Boolean(left.is_default))
         )));
-        setJobs(canvasJobs);
+        setJobsState(current => acceptCanvasJobs(current, canvasJobs));
       })
       .catch(loadError => {
         if (!cancelled) setError((loadError as Error).message);
@@ -623,7 +636,10 @@ function CanvasEditorInner({
         updated_at: remote.updated_at,
         nodes,
         connections: [...current.connections, ...serverRunConnections],
-        content_versions: { ...remote.content_versions, ...current.content_versions },
+        content_versions: acceptServerContentVersions(
+          current.content_versions,
+          remote.content_versions,
+        ),
       };
       if (saveQueued.current) saveQueued.current = merged;
       return merged;
@@ -675,12 +691,20 @@ function CanvasEditorInner({
       updated_at: remote.updated_at,
       nodes,
       connections: [...current.connections, ...runConnections],
-      content_versions: { ...remote.content_versions, ...current.content_versions },
+      content_versions: acceptServerContentVersions(
+        current.content_versions,
+        remote.content_versions,
+      ),
     };
     if (saveQueued.current || dirtyVersion.current > dirtyAtSubmission) {
       saveQueued.current = merged;
     }
     setDocument(merged);
+  }, []);
+
+  const applyLocalJob = useCallback((job: Job) => {
+    jobsEpoch.current += 1;
+    setJobsState(current => upsertCanvasJob(current, job));
   }, []);
 
   const hasRunningJobs = jobs.some(job => (
@@ -693,6 +717,7 @@ function CanvasEditorInner({
     let cancelled = false;
     const poll = async () => {
       try {
+        const epoch = jobsEpoch.current;
         const canvasJobs = await listCanvasJobs(projectId);
         if (cancelled) return;
         const completedRuns = canvasJobs.filter(job => (
@@ -728,7 +753,9 @@ function CanvasEditorInner({
           for (const job of completedRuns) syncedTerminalRuns.current.add(job.canvas_run!.run_id);
           for (const versionId of newCandidateVersionIds) syncedCandidateVersionIds.current.add(versionId);
         }
-        setJobs(canvasJobs);
+        setJobsState(current => (
+          jobsEpoch.current === epoch ? canvasJobs : acceptCanvasJobs(current, canvasJobs)
+        ));
       } catch (pollError) {
         if (!cancelled) setError((pollError as Error).message);
       }
@@ -817,7 +844,16 @@ function CanvasEditorInner({
           serverRevision.current = authoritativeRevision;
           const queued = saveQueued.current as CanvasDocument | null;
           if (queued) {
-            saveQueued.current = { ...queued, revision: authoritativeRevision };
+            // 排队中的快照是在服务端回写之前拍下的，同样带着占位 sha256。
+            // 不把服务端真值合进来，下一次保存就会提交一份服务端已判非法的数据。
+            saveQueued.current = {
+              ...queued,
+              revision: authoritativeRevision,
+              content_versions: acceptServerContentVersions(
+                queued.content_versions,
+                saved.content_versions,
+              ),
+            };
           }
           setDocument(current => {
             if (!current) return current;
@@ -825,14 +861,24 @@ function CanvasEditorInner({
             return {
               ...current,
               revision: Math.max(current.revision, authoritativeRevision),
-              content_versions: { ...saved.content_versions, ...current.content_versions },
+              content_versions: acceptServerContentVersions(
+                current.content_versions,
+                saved.content_versions,
+              ),
             };
           });
         }
         setSaveState('saved');
+        setSaveErrorDetail(null);
       } catch (saveError) {
         if (!saveQueued.current && failedSnapshot) saveQueued.current = failedSnapshot;
         setSaveState('error');
+        // 自动保存的失败在这里是唯一能被观察到的地方：调用方基本都 .catch(() => undefined)，
+        // 而状态药丸在窄屏被 max-w-24 truncate 掉。保存一失败，本地文档就和服务端分叉了，
+        // 之后每一次编辑都不落盘，所以必须把服务端的 detail 原样送到报错条上。
+        const detail = (saveError as Error).message;
+        setSaveErrorDetail(detail);
+        setError(detail);
         throw saveError;
       }
     };
@@ -850,6 +896,36 @@ function CanvasEditorInner({
     const timer = window.setTimeout(() => void flushSave().catch(() => undefined), 350);
     return () => window.clearTimeout(timer);
   }, [dirtySignal, flushSave]);
+
+  // 撤销栈是个 ref（快照数组要在同一次事件里被连续读写，做不成 state），但撤销 / 重做按钮的禁用态
+  // 得跟着它变。所以这条 effect 故意不写依赖数组：历史在 9 处被就地修改，每一处都伴随一次
+  // setDocument，也就是每一次修改后都会跑到这里。两次长度读取 + 相等就 bail，代价是常数级。
+  useEffect(() => {
+    setHistoryDepth(current => {
+      const past = history.current.past.length;
+      const future = history.current.future.length;
+      return current.past === past && current.future === future ? current : { past, future };
+    });
+  });
+
+  // 上面那条 effect 每次 dirtySignal 变化都 clearTimeout，排队的快照没人接手。
+  // 卸载（画布内返回、路由跳走、切项目）走的是 SPA 路径，fetch 不会被掐，所以这里补一次冲刷；
+  // 清理函数用的是注册它那次 render 的闭包，切项目时冲的是旧 projectId，不会串项目。
+  useEffect(() => () => {
+    if (!saveQueued.current) return;
+    void flushSave().catch(() => undefined);
+  }, [flushSave]);
+
+  // 关标签 / 刷新 / 硬跳转时 fetch 会被浏览器一起掐掉，冲不出去，只能拦一下让画师自己决定。
+  useEffect(() => {
+    function warnBeforeUnload(event: BeforeUnloadEvent) {
+      if (!saveQueued.current && !saveInFlight.current) return;
+      event.preventDefault();
+      event.returnValue = '';
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, []);
 
   const persistNow = useCallback(async (): Promise<boolean> => {
     if (projectRenameInFlight.current) {
@@ -921,7 +997,9 @@ function CanvasEditorInner({
       nodes: current.nodes.map(node => node.id === nodeId ? {
         ...node,
         position: layout.position,
-        size: layout.size,
+        // NodeResizer 已经在 maxWidth / maxHeight 上刹住了，这里再夹一次是因为落盘超界的代价
+        // 不是这一次保存失败，而是之后所有编辑都不落盘：见 clampCanvasNodeSize。
+        size: clampCanvasNodeSize(layout.size),
       } : node),
     }));
   }, [commit]);
@@ -975,7 +1053,8 @@ function CanvasEditorInner({
         id: connection.id,
         source: connection.source_node_id,
         target: connection.target_node_id,
-        type: 'bezier',
+        // xyflow v12 没有 'bezier' 这个内置类型，写它会 fallback 到 default 并每次刷警告。
+        type: 'default',
         className: cn(
           connection.role === 'derivation' ? 'canvas-provenance-edge' : 'canvas-input-edge',
           active && 'canvas-active-edge',
@@ -1101,8 +1180,11 @@ function CanvasEditorInner({
   ) => {
     const current = latestDocument.current;
     const target = current?.nodes.find(node => node.id === targetNodeId);
-    if (!current || !target || target.type === 'group' || target.type === 'config'
-      || target.data.generation_draft?.mode !== 'video') {
+    // 判据必须和渲染控件的那一侧一致：面板按 draft.mode 决定要不要给首尾帧控件，这里以前按
+    // node.type 收窄，把配置节点排除掉了——配置节点的 mode 是 video 但 type 是 config，于是
+    // 控件显示、点了没反应。服务端的 _resolve_inputs 只看 surface.id 上的 slot 连线，本来就
+    // 支持配置节点，所以对齐到 draft 这一侧。
+    if (!current || !target || generationDraftForNode(target)?.mode !== 'video') {
       setError('只有视频生成节点可以设置首尾帧。');
       return;
     }
@@ -1217,6 +1299,11 @@ function CanvasEditorInner({
   const deleteSelection = useCallback(() => {
     if (selectedNodeIds.size === 0 && selectedConnectionIds.size === 0) return;
     const nodeIds = selectedNodeIds;
+    const blocked = canvasDeletionBlockedMessage(latestDocument.current?.nodes ?? [], nodeIds);
+    if (blocked) {
+      setError(blocked);
+      return;
+    }
     commit(current => {
       const next = removeCanvasConnections(current, edge => (
         selectedConnectionIds.has(edge.id)
@@ -1393,10 +1480,10 @@ function CanvasEditorInner({
             ...concurrent.nodes,
             ...insertedNodes.filter(node => !concurrentIds.has(node.id)),
           ],
-          content_versions: {
-            ...insertedVersions,
-            ...concurrent.content_versions,
-          },
+          content_versions: acceptServerContentVersions(
+            concurrent.content_versions,
+            insertedVersions,
+          ),
         };
         history.current.past.push(concurrent);
         history.current.past = history.current.past.slice(-50);
@@ -1438,7 +1525,23 @@ function CanvasEditorInner({
     }
   }
 
-  function handleLibraryDrop(event: DragEvent) {
+  function handleCanvasDrop(event: DragEvent) {
+    const files = Array.from(event.dataTransfer.files ?? []);
+    if (files.length) {
+      // 不 preventDefault 的话浏览器按默认行为打开这个文件，整个应用被顶掉，
+      // 未保存的画布内容一起丢。快捷键面板本来就承诺「拖入图片 / 视频 / 音频 → 上传到画布」。
+      event.preventDefault();
+      const origin = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      void (async () => {
+        for (const [index, file] of files.entries()) {
+          await handleUpload(file, {
+            screen: { x: event.clientX, y: event.clientY },
+            flow: { x: origin.x + index * 32, y: origin.y + index * 32 },
+          });
+        }
+      })();
+      return;
+    }
     const raw = event.dataTransfer.getData(CANVAS_LIBRARY_DRAG_TYPE);
     if (!raw) return;
     event.preventDefault();
@@ -1529,7 +1632,7 @@ function CanvasEditorInner({
         kind: 'text',
         text: '',
         created_at: new Date().toISOString(),
-        sha256: '0'.repeat(64),
+        sha256: CANVAS_LOCAL_VERSION_SHA,
         origin: { kind: 'user_edit' },
       };
       pendingTextVersions.current.set(base.id, versionId);
@@ -1584,10 +1687,10 @@ function CanvasEditorInner({
         ...concurrent,
         revision: uploaded.document.revision,
         updated_at: uploaded.document.updated_at,
-        content_versions: {
-          ...uploaded.document.content_versions,
-          ...concurrent.content_versions,
-        },
+        content_versions: acceptServerContentVersions(
+          concurrent.content_versions,
+          uploaded.document.content_versions,
+        ),
       };
       const base = {
         id: makeId(version.kind),
@@ -1688,7 +1791,7 @@ function CanvasEditorInner({
       kind: 'text',
       text,
       created_at: createdAt,
-      sha256: '0'.repeat(64),
+      sha256: CANVAS_LOCAL_VERSION_SHA,
       origin: { kind: 'user_edit' },
     };
     const node: CanvasContentNode = {
@@ -1787,13 +1890,13 @@ function CanvasEditorInner({
       }
       const existing = current.content_versions[versionId];
       const version: CanvasTextVersion = existing?.kind === 'text'
-        ? { ...existing, text, sha256: '0'.repeat(64) }
+        ? { ...existing, text, sha256: CANVAS_LOCAL_VERSION_SHA }
         : {
             version_id: versionId,
             kind: 'text',
             text,
             created_at: new Date().toISOString(),
-            sha256: '0'.repeat(64),
+            sha256: CANVAS_LOCAL_VERSION_SHA,
             origin: { kind: 'user_edit' },
           };
       return {
@@ -1807,6 +1910,14 @@ function CanvasEditorInner({
   }, [commit]);
 
   const deleteNode = useCallback((nodeId: string) => {
+    const blocked = canvasDeletionBlockedMessage(
+      latestDocument.current?.nodes ?? [],
+      new Set([nodeId]),
+    );
+    if (blocked) {
+      setError(blocked);
+      return;
+    }
     commit(current => {
       const next = removeCanvasConnections(current, edge => (
         edge.source_node_id === nodeId || edge.target_node_id === nodeId
@@ -1847,10 +1958,7 @@ function CanvasEditorInner({
         requestedCount,
       );
       mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
-      setJobs(currentJobs => [
-        ...currentJobs.filter(job => job.job_id !== run.job.job_id),
-        run.job,
-      ]);
+      applyLocalJob(run.job);
       const resultId = run.job.canvas_run?.result_node_id;
       if (resultId) setSelectedNodeIds(new Set([resultId]));
     } catch (submitError) {
@@ -1887,10 +1995,7 @@ function CanvasEditorInner({
         serverRevision.current,
       );
       mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
-      setJobs(currentJobs => [
-        ...currentJobs.filter(job => job.job_id !== run.job.job_id),
-        run.job,
-      ]);
+      applyLocalJob(run.job);
       const resultId = run.job.canvas_run?.result_node_id;
       if (resultId) setSelectedNodeIds(new Set([resultId]));
     } catch (submitError) {
@@ -1906,12 +2011,7 @@ function CanvasEditorInner({
     }
   }, [flushSave, mergeSubmittedRunDocument, persistNow, projectId]);
 
-  const retryRun = useCallback(async (
-    nodeId: string,
-    runId: string,
-    mode: 'original' | 'current',
-    candidateId?: string,
-  ) => {
+  const retryRun = useCallback(async (nodeId: string, runId: string) => {
     if (runSubmissionInFlight.current) {
       setError('另一项生成正在提交，请稍后再试。');
       return;
@@ -1922,22 +2022,13 @@ function CanvasEditorInner({
       if (!await persistNow()) return;
       const dirtyAtSubmission = dirtyVersion.current;
       runSubmissionInFlight.current = true;
-      const run = await retryCanvasRun(
-        projectId,
-        runId,
-        mode,
-        serverRevision.current,
-        candidateId,
-      );
+      const run = await retryCanvasRun(projectId, runId, serverRevision.current);
       mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
-      setJobs(currentJobs => [
-        ...currentJobs.filter(job => job.job_id !== run.job.job_id),
-        run.job,
-      ]);
+      applyLocalJob(run.job);
       const resultId = run.job.canvas_run?.result_node_id;
       if (resultId) setSelectedNodeIds(new Set([resultId]));
     } catch (retryError) {
-      setError(canvasRetryErrorMessage(retryError, mode));
+      setError(canvasRetryErrorMessage(retryError));
     } finally {
       runSubmissionInFlight.current = false;
       if (saveQueued.current) void flushSave().catch(() => undefined);
@@ -1953,10 +2044,7 @@ function CanvasEditorInner({
     setError(null);
     try {
       const updated = await cancelCanvasRun(projectId, runId);
-      setJobs(currentJobs => [
-        ...currentJobs.filter(job => job.job_id !== updated.job_id),
-        updated,
-      ]);
+      applyLocalJob(updated);
     } catch (cancelError) {
       setError((cancelError as Error).message);
     }
@@ -1973,10 +2061,7 @@ function CanvasEditorInner({
         serverRevision.current,
       );
       if (latestDocument.current?.project_id !== projectId) return;
-      setJobs(currentJobs => [
-        ...currentJobs.filter(job => job.job_id !== result.job.job_id),
-        result.job,
-      ]);
+      applyLocalJob(result.job);
     } catch (dismissError) {
       if (latestDocument.current?.project_id !== projectId) return;
       setError((dismissError as Error).message);
@@ -1991,12 +2076,12 @@ function CanvasEditorInner({
     history.current.future = [];
   }, []);
 
+  // 镜头不进撤销栈。以前这里每次平移 / 缩放都 push 一条历史，于是 Ctrl+Z 撤的是取景而不是编辑，
+  // 平移次数够多时真正想撤的那次修改已经被 50 条上限挤出去了。视口仍然会落盘（它属于文档），
+  // 只是不再是一个可撤销的动作。
   const commitViewportDocument = useCallback((viewport: Viewport) => {
     const current = latestDocument.current;
     if (!current || current.project_id !== projectId || sameViewport(current.viewport, viewport)) return false;
-    if (history.current.past.at(-1) !== current) history.current.past.push(current);
-    history.current.past = history.current.past.slice(-50);
-    history.current.future = [];
     const next = { ...current, viewport, updated_at: new Date().toISOString() };
     latestDocument.current = next;
     setDocument(next);
@@ -2109,15 +2194,6 @@ function CanvasEditorInner({
     return operation;
   }, [commitViewportDocument, getViewport, projectId]);
 
-  const syncHistoryViewport = useCallback((viewport: Viewport) => {
-    if (sameViewport(getViewport(), viewport)) return;
-    const token = { projectId, viewport };
-    viewportSync.current = token;
-    void setViewport(viewport).then(applied => {
-      if (!applied && viewportSync.current === token) viewportSync.current = null;
-    });
-  }, [getViewport, projectId, setViewport]);
-
   const undo = useCallback(() => {
     const previous = history.current.past.pop();
     if (!previous || !document) return;
@@ -2126,13 +2202,18 @@ function CanvasEditorInner({
       ...previous,
       revision: document.revision,
       updated_at: new Date().toISOString(),
-      content_versions: { ...previous.content_versions, ...document.content_versions },
+      // 镜头既不进撤销栈也不被撤销还原：撤销时把用户当前的取景留住，不要把画布甩回快照拍下时
+      // 的位置——那次跳动本身比看不见变化更让人失去方向。
+      viewport: document.viewport,
+      content_versions: restoreContentVersions(
+        previous.content_versions,
+        document.content_versions,
+      ),
     };
     setDocument(restored);
-    syncHistoryViewport(restored.viewport);
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
-  }, [document, syncHistoryViewport]);
+  }, [document]);
 
   const redo = useCallback(() => {
     const next = history.current.future.pop();
@@ -2142,13 +2223,16 @@ function CanvasEditorInner({
       ...next,
       revision: document.revision,
       updated_at: new Date().toISOString(),
-      content_versions: { ...next.content_versions, ...document.content_versions },
+      viewport: document.viewport,
+      content_versions: restoreContentVersions(
+        next.content_versions,
+        document.content_versions,
+      ),
     };
     setDocument(restored);
-    syncHistoryViewport(restored.viewport);
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
-  }, [document, syncHistoryViewport]);
+  }, [document]);
 
   useEffect(() => {
     function handleHistoryShortcut(event: KeyboardEvent) {
@@ -2315,7 +2399,10 @@ function CanvasEditorInner({
         updated_at: remote.revision >= serverRevision.current ? remote.updated_at : concurrent.updated_at,
         nodes: hadConfig ? concurrent.nodes : [...concurrent.nodes, remoteConfig],
         connections: [...concurrent.connections, ...createdConnections],
-        content_versions: { ...remote.content_versions, ...concurrent.content_versions },
+        content_versions: acceptServerContentVersions(
+          concurrent.content_versions,
+          remote.content_versions,
+        ),
       };
       if (!hadConfig) {
         history.current.past.push(concurrent);
@@ -2409,7 +2496,10 @@ function CanvasEditorInner({
       revision: authoritativeRevision,
       updated_at: remote.revision >= serverRevision.current ? remote.updated_at : concurrent.updated_at,
       nodes: mergedNodes,
-      content_versions: { ...remote.content_versions, ...concurrent.content_versions },
+      content_versions: acceptServerContentVersions(
+        concurrent.content_versions,
+        remote.content_versions,
+      ),
     };
     if (!pointerWasSuperseded) {
       const historySnapshot: CanvasDocument = concurrentPointer === remotePointer
@@ -2615,10 +2705,7 @@ function CanvasEditorInner({
         submission.mask,
       );
       mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
-      setJobs(currentJobs => [
-        ...currentJobs.filter(job => job.job_id !== run.job.job_id),
-        run.job,
-      ]);
+      applyLocalJob(run.job);
       const resultId = run.job.canvas_run?.result_node_id;
       if (resultId) setSelectedNodeIds(new Set([resultId]));
       setMaskEdit(null);
@@ -2767,10 +2854,7 @@ function CanvasEditorInner({
         wide_angle: params.wideAngle,
       });
       mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
-      setJobs(currentJobs => [
-        ...currentJobs.filter(job => job.job_id !== run.job.job_id),
-        run.job,
-      ]);
+      applyLocalJob(run.job);
       const resultId = run.job.canvas_run?.result_node_id;
       if (resultId) setSelectedNodeIds(new Set([resultId]));
       setAngleState(null);
@@ -2831,7 +2915,10 @@ function CanvasEditorInner({
         updated_at: result.document.updated_at,
         nodes: [...concurrent.nodes, ...createdNodes],
         connections: [...concurrent.connections, ...createdConnections],
-        content_versions: { ...result.document.content_versions, ...concurrent.content_versions },
+        content_versions: acceptServerContentVersions(
+          concurrent.content_versions,
+          result.document.content_versions,
+        ),
       };
       history.current.past.push(concurrent);
       history.current.past = history.current.past.slice(-50);
@@ -2958,6 +3045,11 @@ function CanvasEditorInner({
     }
     return result;
   }, [mentionGraphSignature]);
+  const pendingInputNodesByNodeId = useMemo(
+    () => canvasPendingInputNodes(mentionDocumentRef.current),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 与同组的两张图共用图签名做失效判据
+    [mentionGraphSignature],
+  );
   const videoFrameNodeIdsByNodeId = useMemo(() => {
     const current = mentionDocumentRef.current;
     const result = new Map<string, Partial<Record<CanvasVideoFrameSlot, string>>>();
@@ -2975,6 +3067,7 @@ function CanvasEditorInner({
     materialReferences,
     connectedMaterialNodeIdsByNodeId,
     videoFrameNodeIdsByNodeId,
+    pendingInputNodesByNodeId,
     mentionReferencesByNodeId,
     contentVersions: document?.content_versions ?? {},
     keys,
@@ -2993,6 +3086,7 @@ function CanvasEditorInner({
       viewportZoom,
       narrowViewport,
       dismiss: dismissGenerationPanel,
+      surfaceRef: editorRegionRef,
     },
     materialPick,
     beginMaterialPick,
@@ -3078,6 +3172,7 @@ function CanvasEditorInner({
     previewNodeResize,
     viewportZoom,
     videoFrameNodeIdsByNodeId,
+    pendingInputNodesByNodeId,
   ]);
 
   useEffect(() => {
@@ -3249,11 +3344,14 @@ function CanvasEditorInner({
             requestAnimationFrame(() => editorRegionRef.current?.focus());
           }}
           onDragOver={event => {
-            if (!event.dataTransfer.types.includes(CANVAS_LIBRARY_DRAG_TYPE)) return;
+            const types = event.dataTransfer.types;
+            // 'Files' 也要接：dragover 不 preventDefault 时 drop 事件根本不会派发，
+            // 浏览器直接导航到被拖进来的文件。
+            if (!types.includes(CANVAS_LIBRARY_DRAG_TYPE) && !types.includes('Files')) return;
             event.preventDefault();
             event.dataTransfer.dropEffect = 'copy';
           }}
-          onDrop={handleLibraryDrop}
+          onDrop={handleCanvasDrop}
           onMoveEnd={(_, viewport: Viewport) => {
             if (latestDocument.current?.project_id !== projectId) return;
             if (zoomSliderActive.current || pendingViewportCommand.current) return;
@@ -3492,8 +3590,27 @@ function CanvasEditorInner({
               />
             )}
           </div>
-          <div aria-live="polite" className="pointer-events-auto max-w-24 truncate rounded-full border border-border bg-glass px-3 py-2 text-xs text-muted-foreground backdrop-blur-glass shell-glow sm:max-w-none">
-            {saveState === 'saving' ? '保存中…' : saveState === 'error' ? '保存冲突，内容已保留' : `已保存 · v${document.revision}`}
+          <div
+            aria-live="polite"
+            className={cn(
+              'pointer-events-auto max-w-24 truncate rounded-full border bg-glass px-3 py-2 text-xs backdrop-blur-glass shell-glow sm:max-w-none',
+              saveState === 'error'
+                ? 'border-destructive/40 text-destructive'
+                : 'border-border text-muted-foreground',
+            )}
+          >
+            {saveState === 'saving' ? '保存中…' : saveState === 'error' ? (
+              // 原文案是「保存冲突，内容已保留」。它把所有失败都说成冲突，还向用户保证内容没事——
+              // 实际是本地已经和服务端分叉，之后的编辑都不落盘。这里只说失败，并给出重试入口。
+              <button
+                type="button"
+                title={saveErrorDetail ?? undefined}
+                className="underline-offset-2 hover:underline focus-visible:outline-none focus-visible:underline"
+                onClick={() => void flushSave().catch(() => undefined)}
+              >
+                保存失败 · 重试
+              </button>
+            ) : `已保存 · v${document.revision}`}
           </div>
         </div>
 
@@ -3505,8 +3622,8 @@ function CanvasEditorInner({
             </span>
             <ToolButton label="选择工具" active={!addOpen && !createMenu} onClick={() => { setAddOpen(false); setCreateMenu(null); }}><MousePointer2 /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
-            <ToolButton label="撤销" disabled={history.current.past.length === 0} onClick={undo}><Undo2 /></ToolButton>
-            <ToolButton label="重做" disabled={history.current.future.length === 0} onClick={redo}><Redo2 /></ToolButton>
+            <ToolButton label="撤销" disabled={historyDepth.past === 0} onClick={undo}><Undo2 /></ToolButton>
+            <ToolButton label="重做" disabled={historyDepth.future === 0} onClick={redo}><Redo2 /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
             <div className="hidden xl:contents">
               <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><Type /></ToolButton>
@@ -3521,7 +3638,7 @@ function CanvasEditorInner({
               void runViewportCommand(() => fitView({ duration: 150, padding: 0.12 }));
             }}><Maximize2 /></ToolButton>
           </div>
-          {narrowViewport && <div className="canvas-config-dock contents">{renderCanvasConfigControls('mobile')}</div>}
+          {narrowViewport && <div className="contents">{renderCanvasConfigControls('mobile')}</div>}
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>

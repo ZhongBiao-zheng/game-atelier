@@ -3,13 +3,18 @@ import {
   NodeResizer,
   NodeToolbar,
   Position,
+  useStore,
   type Node,
+  type ReactFlowState,
   type NodeProps,
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
 import { ArrowLeftRight, Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
-import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type Ref } from 'react';
+import {
+  createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState,
+  type ReactNode, type Ref, type RefObject,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
@@ -75,6 +80,7 @@ import {
   canvasNodeProvidesOutput,
   canvasNodeProvidesContent,
   CANVAS_GENERATION_MODE_LABELS,
+  CANVAS_MAX_NODE_SIZE,
   canvasGenerationModelSupportsMode,
   canvasVideoEditCaps,
   normalizeCanvasAudioParams,
@@ -83,6 +89,7 @@ import {
   normalizeCanvasVideoParams,
   supportsCanvasTextReasoning,
   switchCanvasGenerationDraft,
+  type CanvasPendingInput,
 } from '@/pages/canvasEditorModel';
 
 export type FlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
@@ -92,6 +99,8 @@ export interface CanvasGenerationPanelContextValue {
   viewportZoom: number;
   narrowViewport: boolean;
   dismiss: (id: string) => void;
+  /** 面板 portal 的落点（画布区域，position:relative）。缺省时退回 body + fixed 定位。 */
+  surfaceRef?: RefObject<HTMLElement | null>;
 }
 
 export interface CanvasNodeContextValue {
@@ -99,6 +108,7 @@ export interface CanvasNodeContextValue {
   materialReferences: readonly CanvasMaterialReference[];
   connectedMaterialNodeIdsByNodeId: ReadonlyMap<string, ReadonlySet<string>>;
   videoFrameNodeIdsByNodeId?: ReadonlyMap<string, Readonly<Partial<Record<CanvasVideoFrameSlot, string>>>>;
+  pendingInputNodesByNodeId?: ReadonlyMap<string, readonly CanvasPendingInput[]>;
   mentionReferencesByNodeId: ReadonlyMap<string, readonly CanvasMentionReference[]>;
   contentVersions: Readonly<Record<string, CanvasContentVersion>>;
   keys: KeyView[];
@@ -132,7 +142,7 @@ export interface CanvasNodeContextValue {
   previewContent: (id: string, title: string, nodeId: string) => void;
   selectCandidate: (id: string, versionId: string) => void;
   submitRun: (id: string) => Promise<void>;
-  retryRun: (id: string, runId: string, mode: 'original' | 'current', candidateId?: string) => Promise<void>;
+  retryRun: (id: string, runId: string) => Promise<void>;
   cancelRun: (runId: string) => Promise<void>;
   dismissCandidate: (runId: string, candidateId: string) => Promise<void>;
   updateNode: (id: string, updater: (node: CanvasNode) => CanvasNode) => void;
@@ -160,6 +170,7 @@ export interface CanvasNodeContextValue {
 export const CanvasNodeContext = createContext<CanvasNodeContextValue | null>(null);
 const EMPTY_CANVAS_NODE_IDS: ReadonlySet<string> = new Set();
 const EMPTY_VIDEO_FRAME_NODE_IDS: Readonly<Partial<Record<CanvasVideoFrameSlot, string>>> = {};
+const EMPTY_CANVAS_PENDING_INPUTS: readonly CanvasPendingInput[] = [];
 
 export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const context = useContext(CanvasNodeContext);
@@ -192,11 +203,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     && context.generationPanel.dismissedNodeId !== node.id,
   );
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
-  const generationPanelWidth = 608;
-  const viewportZoom = context?.generationPanel.viewportZoom;
-  const generationPanelZoom = viewportZoom && Number.isFinite(viewportZoom) && viewportZoom > 0
-    ? viewportZoom
-    : 1;
+  const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!isEditingTitle) setTitleDraft(node.title);
   }, [isEditingTitle, node.title]);
@@ -327,6 +334,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
 
   return (
     <div
+      ref={setShellElement}
       className="canvas-node-shell group relative h-full w-full overflow-visible"
       data-selected={selected ? 'true' : 'false'}
     >
@@ -335,6 +343,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         keepAspectRatio={node.type === 'image' && !node.data.display.free_resize}
         minWidth={node.type === 'text' ? 220 : 240}
         minHeight={node.type === 'text' ? 120 : 150}
+        maxWidth={CANVAS_MAX_NODE_SIZE}
+        maxHeight={CANVAS_MAX_NODE_SIZE}
         color="var(--primary)"
         handleClassName="canvas-node-resize-handle"
         lineClassName="canvas-node-resize-line"
@@ -653,17 +663,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         </Handle>
       )}
       {generationPanelVisible && draft && (
-        <div
-          data-canvas-node-panel-anchor={node.id}
-          className="absolute z-20"
-          style={{
-            left: '50%',
-            top: `calc(100% + ${16 / generationPanelZoom}px)`,
-            width: generationPanelWidth,
-            marginLeft: -generationPanelWidth / 2,
-            transform: `scale(${1 / generationPanelZoom})`,
-            transformOrigin: 'top center',
-          }}
+        <CanvasNodeFloatingPanel
+          nodeId={node.id}
+          anchor={shellElement}
+          surfaceRef={context.generationPanel.surfaceRef}
         >
           <CanvasGenerationComposer
             node={node}
@@ -671,9 +674,180 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
             context={context}
             onClose={() => context.generationPanel.dismiss(node.id)}
           />
-        </div>
+        </CanvasNodeFloatingPanel>
       )}
     </div>
+  );
+}
+
+export const CANVAS_GENERATION_PANEL_WIDTH = 608;
+const CANVAS_GENERATION_PANEL_GAP = 16;
+
+/** 只用到矩形的这几个数，写成最小接口好让放置逻辑纯函数化、能单测。 */
+export interface CanvasPanelRect {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+export interface CanvasPanelPlacement {
+  left: number;
+  top: number;
+  width: number;
+  maxHeight: number;
+}
+
+/** 生成面板放在哪：贴着节点，但整体夹在可视区域内。视口坐标系。
+ *
+ *  竖直方向优先放节点下方；下方装不下就翻到上方；两边都装不下就贴住可视区并交给 maxHeight
+ *  限高（面板内部滚动），保证任何缩放档位下面板都完整可达。 */
+export function placeCanvasGenerationPanel(
+  anchor: CanvasPanelRect,
+  bounds: CanvasPanelRect,
+  panelHeight: number,
+): CanvasPanelPlacement {
+  const gap = CANVAS_GENERATION_PANEL_GAP;
+  const width = Math.min(CANVAS_GENERATION_PANEL_WIDTH, Math.max(240, bounds.width - gap * 2));
+  const maxHeight = Math.max(160, bounds.height - gap * 2);
+  const height = Math.min(panelHeight > 0 ? panelHeight : maxHeight, maxHeight);
+  const left = Math.min(
+    Math.max(anchor.left + anchor.width / 2 - width / 2, bounds.left + gap),
+    Math.max(bounds.left + gap, bounds.right - width - gap),
+  );
+  const below = anchor.bottom + gap;
+  const above = anchor.top - gap - height;
+  const top = below + height <= bounds.bottom - gap
+    ? below
+    : above >= bounds.top + gap
+      ? above
+      : Math.max(bounds.top + gap, bounds.bottom - gap - height);
+  return { left, top, width, maxHeight };
+}
+
+/** 画布外框上的常驻控件占了哪几条边。
+ *
+ *  只夹进视口还不够：面板贴着可视区下沿摆的时候，「开始生成」正好落在左下那组缩放控件底下
+ *  （1280×720 实测），主操作点不到。按控件的实际矩形收缩可用区域，尺寸变了不用改这里。 */
+function canvasChromeInsetBounds(surface: HTMLElement): CanvasPanelRect {
+  const bounds = surface.getBoundingClientRect();
+  const edge = (selector: string) => surface.querySelector(selector)?.getBoundingClientRect() ?? null;
+  const rail = edge('.canvas-tool-dock') ?? edge('.canvas-mobile-rail');
+  const zoom = edge('.canvas-zoom-dock');
+  const library = edge('.canvas-library-panel');
+  const top = edge('.canvas-editor-top');
+  const left = rail ? Math.max(bounds.left, rail.right) : bounds.left;
+  const right = library ? Math.min(bounds.right, library.left) : bounds.right;
+  const upper = top ? Math.max(bounds.top, top.bottom) : bounds.top;
+  const lower = zoom ? Math.min(bounds.bottom, zoom.top) : bounds.bottom;
+  return {
+    left,
+    right,
+    top: upper,
+    bottom: lower,
+    width: Math.max(0, right - left),
+    height: Math.max(0, lower - upper),
+  };
+}
+
+const canvasFlowTransform = (state: ReactFlowState) => state.transform;
+
+function samePlacement(a: CanvasPanelPlacement | null, b: CanvasPanelPlacement) {
+  return a !== null
+    && Math.abs(a.left - b.left) < 0.5
+    && Math.abs(a.top - b.top) < 0.5
+    && a.width === b.width
+    && a.maxHeight === b.maxHeight;
+}
+
+/** 生成面板挂在画布区域上，不再挂在节点里面。
+ *
+ *  原实现是 React Flow 节点的子元素，靠 scale(1/zoom) 反缩放对抗画布缩放。两个后果：
+ *  transform 默认绕中心缩放，608px 的面板放大后向左右各溢出上百像素（1280×720 视口实测面板
+ *  left=-77，提示词编辑区左边 64px 落在视口外，看不见也点不到）；而且它活在 transform 层里，
+ *  夹视口这件事在那儿做不到——父级 transform 之后再 clamp 也夹不回来。
+ *  portal 到 .canvas-editor-region（position:relative）之后：尺寸恒定不再受缩放影响，位置按节点
+ *  的屏幕矩形算并夹在容器内，文字也不再被分数倍缩放糊掉。
+ *
+ *  位置状态留在本组件内：children 由父级 render 传进来，本组件因平移重新定位时 children 仍是
+ *  同一个 element 引用，React 会跳过整棵子树，面板内容不会跟着每帧重渲染。 */
+function CanvasNodeFloatingPanel({
+  nodeId,
+  anchor,
+  surfaceRef,
+  children,
+}: {
+  nodeId: string;
+  /** 节点外壳的 DOM 节点。传元素而不是 ref：子组件的 layout effect 在父级 ref 挂上之前就跑，
+   *  用 ref 会拿到 null，首帧永远定位不上。父级用 callback ref 把它变成 state 传下来。 */
+  anchor: HTMLElement | null;
+  surfaceRef?: RefObject<HTMLElement | null>;
+  children: ReactNode;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = useState<CanvasPanelPlacement | null>(null);
+  // 平移与缩放都改 transform，订阅它就不用起 rAF 常驻轮询。
+  const transform = useStore(canvasFlowTransform);
+  const surface = surfaceRef?.current ?? null;
+
+  const place = useCallback(() => {
+    if (!anchor) return;
+    const measured = surface ? canvasChromeInsetBounds(surface) : null;
+    // 容器还没布局（宽或高为 0）时按视口算，否则面板会被夹成 240×160。
+    const bounds: CanvasPanelRect = measured && measured.width > 0 && measured.height > 0
+      ? measured
+      : {
+        left: 0,
+        top: 0,
+        right: window.innerWidth,
+        bottom: window.innerHeight,
+        width: window.innerWidth,
+        height: window.innerHeight,
+      };
+    const viewportPlacement = placeCanvasGenerationPanel(
+      anchor.getBoundingClientRect(),
+      bounds,
+      panelRef.current?.offsetHeight ?? 0,
+    );
+    // portal 进容器时按容器坐标存，避免 render 阶段再读一次布局。
+    // 原点用容器自身的矩形，不能用上面那个被控件收缩过的 bounds。
+    const origin = surface?.getBoundingClientRect();
+    const next = origin
+      ? {
+        ...viewportPlacement,
+        left: viewportPlacement.left - origin.left,
+        top: viewportPlacement.top - origin.top,
+      }
+      : viewportPlacement;
+    setPlacement(current => samePlacement(current, next) ? current : next);
+  }, [anchor, surface]);
+
+  useLayoutEffect(() => {
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [place, transform]);
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      data-canvas-node-panel-anchor={nodeId}
+      style={{
+        position: surface ? 'absolute' : 'fixed',
+        left: placement?.left ?? 0,
+        top: placement?.top ?? 0,
+        width: placement?.width ?? CANVAS_GENERATION_PANEL_WIDTH,
+        maxHeight: placement?.maxHeight,
+        overflowY: 'auto',
+        zIndex: surface ? 10 : 50,
+        visibility: placement ? undefined : 'hidden',
+      }}
+    >
+      {children}
+    </div>,
+    surface ?? document.body,
   );
 }
 
@@ -1126,6 +1300,34 @@ function toolbarControls(toolbar: HTMLDivElement | null) {
     : [];
 }
 
+/** 「开始生成」被引用问题挡住时给出的唯一一条说明。
+ *  四类问题按优先级取第一条，不叠加解释——按钮灰着却不说原因，用户只能报「点了没反应」。 */
+function referenceErrorMessage(problems: {
+  missingMentionCount: number;
+  frameModeHasMentions: boolean;
+  missingVideoFrame: boolean;
+  videoReferenceCapacityExceeded: boolean;
+  pendingInputTitles: readonly string[];
+}) {
+  if (problems.frameModeHasMentions) return '首尾帧模式不支持 @ 引用，删掉提示词里的 @ 内容后再生成。';
+  if (problems.missingVideoFrame) return '首帧或尾帧连接的节点已不是可用图片，重新连接后再生成。';
+  if (problems.videoReferenceCapacityExceeded) return '已连接的参考素材超出该模型上限，减少连接后再生成。';
+  // 排在 missingMentionCount 前面：一个「已连接但还没生成」的节点同样不在可用素材里，会被
+  // 上一条误报成「引用指向已断开的素材」——那句话会把用户引去删引用，而真正该做的是先生成它。
+  if (problems.pendingInputTitles.length) {
+    const count = problems.pendingInputTitles.length;
+    const names = problems.pendingInputTitles.slice(0, 3).map(title => `「${title}」`).join('、');
+    const rest = count > 3 ? ` 等 ${count} 个节点` : '';
+    return count === 1
+      ? `${names}还没有内容，先把它生成出来，或断开这条连接。`
+      : `${names}${rest}还没有内容，先把它们生成出来，或断开这些连接。`;
+  }
+  if (problems.missingMentionCount > 0) {
+    return `提示词里有 ${problems.missingMentionCount} 处引用指向已断开的素材，删掉这些引用后再生成。`;
+  }
+  return null;
+}
+
 function updateToolbarTabStops(controls: HTMLElement[], active: HTMLElement | null | undefined) {
   controls.forEach(control => {
     control.tabIndex = control === active ? 0 : -1;
@@ -1408,14 +1610,13 @@ export function CanvasGenerationComposer({
   const running = nodeRunState.status === 'loading';
   const textMode = draft.mode === 'text';
   const modeLabel = CANVAS_GENERATION_MODE_LABELS[draft.mode];
-  const panelLabel = textMode ? '文本' : `${modeLabel}生成设置`;
+  const panelLabel = `${modeLabel}设置`;
   const mentionReferences = context.mentionReferencesByNodeId.get(node.id) ?? [];
   const mentionsEnabled = !usesVideoFrameSlots;
   const frameModeHasMentions = usesVideoFrameSlots && canvasMentionMatches(draft.prompt).length > 0;
   const missingMentionIds = mentionsEnabled
     ? missingCanvasMentionIds(draft.prompt, mentionReferences)
     : [];
-  const hasMissingMentions = missingMentionIds.length > 0;
   const missingVideoFrame = usesVideoFrameSlots && Object.values(videoFrames).some(sourceNodeId => (
     sourceNodeId && !context.materialReferences.some(reference => (
       reference.nodeId === sourceNodeId && reference.kind === 'image'
@@ -1447,10 +1648,24 @@ export function CanvasGenerationComposer({
       )
     )
   );
-  const hasReferenceError = hasMissingMentions
-    || frameModeHasMentions
-    || missingVideoFrame
-    || videoReferenceCapacityExceeded;
+  // 服务端在 all_connected 下把所有已连接节点无条件纳入，缺内容就整单 422。首尾帧模式下不带
+  // slot 的连线会被服务端整体丢掉，所以那时这些空输入不构成问题。
+  const pendingInputs = usesVideoFrameSlots
+    ? EMPTY_CANVAS_PENDING_INPUTS
+    : context.pendingInputNodesByNodeId?.get(node.id) ?? EMPTY_CANVAS_PENDING_INPUTS;
+  const blockingPendingInputs = draft.input_policy === 'all_connected'
+    ? pendingInputs
+    : pendingInputs.filter(input => (
+      canvasMentionMatches(draft.prompt).some(match => match.nodeId === input.nodeId)
+    ));
+  const referenceProblem = referenceErrorMessage({
+    missingMentionCount: missingMentionIds.length,
+    frameModeHasMentions,
+    missingVideoFrame,
+    videoReferenceCapacityExceeded,
+    pendingInputTitles: blockingPendingInputs.map(input => input.title),
+  });
+  const hasReferenceError = referenceProblem !== null;
 
   useEffect(() => {
     if (!usesVideoFrameSlots || !videoCaps) return;
@@ -1587,6 +1802,14 @@ export function CanvasGenerationComposer({
               ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
+      {referenceProblem && (
+        <p
+          role="alert"
+          className="mt-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs leading-relaxed text-destructive"
+        >
+          {referenceProblem}
+        </p>
+      )}
       {node.type !== 'image' && !textMode && (
         <CandidateHistory
           nodeId={node.id}
@@ -1766,7 +1989,7 @@ export function CanvasGenerationComposer({
             size="sm"
             className="ml-auto"
             disabled={submitting || hasReferenceError || !draft.prompt.trim() || !draft.alias || !selectedModel}
-            onClick={() => void context.retryRun(node.id, runId, 'current')}
+            onClick={() => void context.retryRun(node.id, runId)}
           >
             {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
             {submitting ? '提交中…' : '生成'}

@@ -3048,12 +3048,10 @@ def post_canvas_run_retry(
         job, document = retry_canvas_run(
             project_id,
             run_id,
-            payload.mode,
             payload.expected_revision,
-            payload.candidate_id,
         )
     except KeyError:
-        raise HTTPException(404, detail="找不到这个生成记录或候选结果") from None
+        raise HTTPException(404, detail="找不到这个生成记录") from None
     except RuntimeError as error:
         detail = str(error)
         if detail.startswith("revision_conflict:"):
@@ -3070,26 +3068,6 @@ def post_canvas_run_retry(
             "result_node_missing": (
                 "原结果节点已被删除，不能在原位置重试",
                 "恢复结果节点，或新建生成节点后重新提交。",
-            ),
-            "snapshot_input_missing": (
-                "原生成使用的输入版本已经不存在",
-                "检查历史输入；如需使用画布当前内容，请按当前设置再次生成。",
-            ),
-            "snapshot_input_changed": (
-                "原生成使用的输入文件已经变化",
-                "恢复原文件；如需使用当前文件，请按当前设置再次生成。",
-            ),
-            "snapshot_mask_missing": (
-                "原局部编辑使用的蒙版版本已经不存在",
-                "重新绘制蒙版后，按当前设置再次生成。",
-            ),
-            "snapshot_mask_changed": (
-                "原局部编辑使用的蒙版文件已经变化",
-                "重新绘制蒙版后，按当前设置再次生成。",
-            ),
-            "snapshot_model_missing": (
-                "原生成使用的密钥或模型已经不可用",
-                "在节点设置中选择当前可用模型，再按当前设置生成。",
             ),
         }
         message, recovery = messages.get(detail, (detail, "检查画布当前状态后重试。"))

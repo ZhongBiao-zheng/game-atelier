@@ -45,14 +45,6 @@ const PARAM_LABELS: Record<string, string> = {
   mj_ow: 'Omni 权重',
 };
 
-const FROZEN_RETRY_CODES = new Set([
-  'snapshot_input_missing',
-  'snapshot_input_changed',
-  'snapshot_mask_missing',
-  'snapshot_mask_changed',
-  'snapshot_model_missing',
-]);
-
 const REFERENCE_PARAM_KEYS = new Set([
   'reference_images',
   'reference_videos',
@@ -148,16 +140,8 @@ function generationRecordPrompt(finalPrompt: string): string {
   return sections.filter(Boolean).join('\n\n') || '空提示词';
 }
 
-export function canvasRetryErrorMessage(error: unknown, mode: 'original' | 'current'): string {
+export function canvasRetryErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    if (
-      mode === 'original'
-      && error.code
-      && FROZEN_RETRY_CODES.has(error.code)
-      && error.reason
-    ) {
-      return `原设置无法复现：${error.reason}。${error.recovery ?? '请检查历史生成记录后重试。'}`;
-    }
     return error.recovery ? `${error.message} ${error.recovery}` : error.message;
   }
   if (error instanceof Error) return error.message;

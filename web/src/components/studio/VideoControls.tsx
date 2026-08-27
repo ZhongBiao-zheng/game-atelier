@@ -69,7 +69,7 @@ export function VideoControls({
     <div ref={wrapRef} className="relative">
       <button
         type="button"
-        aria-label="视频生成设置"
+        aria-label="视频设置"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         className={`inline-flex min-w-0 max-w-full h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${

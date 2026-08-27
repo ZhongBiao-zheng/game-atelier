@@ -12,6 +12,9 @@ import type { CanvasContentVersion, CanvasNode } from '@/schema/canvas';
 import type { Job, JobStatus } from '@/schema/jobs';
 
 vi.mock('@xyflow/react', () => ({
+  // 生成面板订阅 transform 重新定位；mock 返回常量数组，避免每次 render 换引用。
+  useStore: (selector: (state: { transform: [number, number, number] }) => unknown) =>
+    selector({ transform: [0, 0, 1] }),
   NodeResizer: () => null,
   NodeToolbar: ({ children, isVisible, ...props }: {
     children?: React.ReactNode;
@@ -258,9 +261,6 @@ it.each(contentNodes.map(node => [node.type, node] as const))(
         const liveRegion = screen.getByRole(status === 'pending' ? 'status' : 'alert');
         expect(article).not.toContainElement(liveRegion);
         if (hasContent) expectExistingContent(node, container);
-        if (!hasContent && status === 'failed') {
-          expect(article).not.toContainElement(screen.getByRole('button', { name: '按原设置重试' }));
-        }
         unmount();
       }
     }
@@ -338,7 +338,6 @@ it('keeps cancellation and reverse-prompt labels honest', () => {
       <NodeCard data={{ domain: imageNode }} selected />
     </CanvasNodeContext.Provider>,
   );
-  expect(screen.getByRole('button', { name: '按原设置重试反推提示词' })).toBeInTheDocument();
   expect(screen.getByRole('group', { name: '选择节点 生成图片，分析失败' })).toBeInTheDocument();
 });
 
@@ -401,7 +400,7 @@ it('keeps existing content visible while a new run is loading and exposes stop i
   expect(context.cancelRun).toHaveBeenCalledWith('run-1');
 });
 
-it('shows an empty error body and retries the immutable snapshot from body or toolbar', () => {
+it('shows an empty error body carrying the upstream failure message', () => {
   const job = canvasJob('failed');
   const context = nodeContext(job);
   render(
@@ -415,13 +414,9 @@ it('shows an empty error body and retries the immutable snapshot from body or to
     'error',
   );
   expect(screen.getByRole('alert')).toHaveTextContent('上游服务暂时不可用');
-  fireEvent.click(screen.getByRole('button', { name: '按原设置重试' }));
-  fireEvent.click(within(screen.getByRole('toolbar')).getByRole('button', { name: '按原设置重试 生成图片' }));
-  expect(context.retryRun).toHaveBeenNthCalledWith(1, imageNode.id, 'run-1', 'original');
-  expect(context.retryRun).toHaveBeenNthCalledWith(2, imageNode.id, 'run-1', 'original');
 });
 
-it('keeps old content visible after failure and leaves retry in the node toolbar', () => {
+it('keeps old content visible after failure', () => {
   const node = {
     ...imageNode,
     data: { ...imageNode.data, current_version_id: 'version-existing' },
@@ -445,6 +440,4 @@ it('keeps old content visible after failure and leaves retry in the node toolbar
 
   expect(container.querySelector('img')).toBeInTheDocument();
   expect(screen.getByRole('alert')).toHaveTextContent('上游服务暂时不可用');
-  expect(screen.queryByRole('button', { name: '按原设置重试' })).not.toBeInTheDocument();
-  expect(within(screen.getByRole('toolbar')).getByRole('button', { name: '按原设置重试 生成图片' })).toBeInTheDocument();
 });

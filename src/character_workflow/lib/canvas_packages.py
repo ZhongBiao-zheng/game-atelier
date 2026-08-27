@@ -810,12 +810,6 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
             candidate_ids = {candidate.candidate_id for candidate in job.canvas_run.candidates}
             if len(candidate_ids) != len(job.canvas_run.candidates):
                 raise CanvasPackageError(f"任务 {job.job_id} 包含重复候选 ID")
-            for candidate in job.canvas_run.candidates:
-                if candidate.replaces_candidate_id is not None and (
-                    candidate.replaces_candidate_id == candidate.candidate_id
-                    or candidate.replaces_candidate_id not in candidate_ids
-                ):
-                    raise CanvasPackageError(f"任务 {job.job_id} 的候选替换引用无法解析")
         for node in document.nodes:
             active_run_id = getattr(node.data, "active_run_id", None)
             if active_run_id is not None and active_run_id not in run_ids:

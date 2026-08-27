@@ -101,12 +101,21 @@ it('creates one connected image config to the right of a non-empty text node', (
   expect(next?.revision).toBe(4);
 });
 
-it('refuses to create a connected config from empty text', () => {
+it('creates a connected config from blank text because text nodes always count as sources', () => {
   const draft = createCanvasGenerationDraft(keys, 'image');
-  expect(createConnectedCanvasConfig(documentWithText('  '), 'text-source', draft, {
+  const next = createConnectedCanvasConfig(documentWithText('  '), 'text-source', draft, {
     nodeId: 'config-image',
     connectionId: 'connection-text-image',
-  })).toBeNull();
+  });
+
+  // 空白文本节点仍是合法内容源：先连线后打字是正常画布工作流。
+  expect(next).not.toBeNull();
+  expect(next?.connections).toEqual([expect.objectContaining({
+    id: 'connection-text-image',
+    role: 'input',
+    source_node_id: 'text-source',
+    target_node_id: 'config-image',
+  })]);
 });
 
 it('skips models that the Canvas Runner cannot route', () => {

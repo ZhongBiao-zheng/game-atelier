@@ -82,7 +82,8 @@ describe('CanvasPromptInput', () => {
     const editor = screen.getByRole('combobox', { name: '提示词' });
     editor.focus();
     expect(screen.getByLabelText('引用图片：雨夜列车')).toHaveTextContent('图片1');
-    expect(screen.getByLabelText('引用已断开：gone')).toBeInTheDocument();
+    // 断连时 token 由 removeCanvasMentionTokens 直接从 prompt 里剥掉，不再渲染「引用已断开」chip。
+    expect(screen.queryByLabelText(/引用已断开/)).not.toBeInTheDocument();
 
     rerender(
       <CanvasPromptInput

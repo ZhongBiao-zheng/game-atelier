@@ -1,3 +1,4 @@
+import { Link } from 'wouter';
 import { AudioLines, Clapperboard, Image as ImageIcon, RotateCcw, Type } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
@@ -344,7 +345,8 @@ export function CanvasGenerationPreferencesDialog({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-4 py-3">
           <p className="text-xs text-muted-foreground">密钥、渠道和模型清单仍由全局设置统一管理。</p>
           <Button asChild type="button" variant="outline" size="sm">
-            <a href="/settings">管理供应商</a>
+            {/* 原生 <a> 会整页刷新，把画布上还没落盘的编辑一起带走。 */}
+            <Link href="/settings">管理供应商</Link>
           </Button>
         </div>
 

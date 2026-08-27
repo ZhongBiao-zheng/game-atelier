@@ -96,7 +96,7 @@ Status: completed
 | C11 | 配置节点之间禁止连接 | 运行时文案 `configConnection` | same | full |
 | C12 | 节点工具条跟随节点 | `canvas-node-hover-toolbar.tsx` | adapted：点击选中后固定出现在节点上方，反向补偿缩放并允许随节点移出视口；选中节点临时高于全部持久化节点，完整图片工具不按节点宽度折叠，空媒体保留 disabled 功能位 | full |
 | C13 | 节点信息/JSON/检查器视图 | `CanvasNodeInfoModal` | excluded：后续产品决策确认实际价值有限，节点操作统一收口到选中态工具条与节点内编辑 | n/a |
-| C14 | 错误节点工具条重试 | `canRetry` / `onRetry` | adapted：validated result Job 按不可变快照重试，见 issue 30 | full |
+| C14 | 错误节点工具条重试 | `canRetry` / `onRetry` | adapted：失败后在生成面板按当前 Draft 整批重新提交；按原快照重试已于 2026-08-26 移除 | partial |
 | C15 | 节点状态 idle/loading/success/error | `CanvasNodeStatus` | adapted：由 validated result Job 派生且保留旧内容，见 issue 30 | full |
 | C16 | 侧栏按名称/正文/提示词搜索和按类型筛选节点 | `CanvasNodesTab` | same | full |
 | C17 | 侧栏点击节点定位/选中，图片可单独预览 | `CanvasNodesTab`、`pending-test` | adapted：React Flow fitView | full |
@@ -123,10 +123,10 @@ Status: completed
 | D16 | 提交前根据当前连接重新编号引用 | runtime composer 文案 | adapted：冻结输入后按模态与真实数组顺序重编号（issue 34） | full |
 | D17 | 图片数量 N 立即创建 N 个槽位并独立更新 | multi-image metadata、`pending-test` | adapted：一轮 Job 内逐槽执行并即时登记（issue 35） | full |
 | D18 | 多图收起堆叠、展开、设主图 | `canvas-node.tsx`、`pending-test` | same：结果节点拥有堆叠与展开候选（issue 35） | full |
-| D19 | 单槽位重试/删除，不抢占成功主图 | `project.tsx`、`pending-test` | adapted：候选重试 Run + tombstone（issue 35） | full |
+| D19 | 单槽位重试/删除，不抢占成功主图 | `project.tsx`、`pending-test` | adapted：只保留 tombstone 删除；单槽位重试已于 2026-08-26 按产品决定移除 | partial |
 | D20 | 停止当前生成，保留已完成结果 | `stopTitle/continue`、AbortController | adapted：持久取消意图 + 候选聚合终态（issue 35） | full |
 | D21 | 生成元数据保存 prompt/model/size/quality/references | `CanvasNodeMetadata` | adapted：不可变 Snapshot 在详情中展示最终 prompt、模型、完整安全参数、冻结 node/version 与独立执行结果，见 issue 36 | full |
-| D22 | 根据保存元数据重试；引用丢失明确报错 | `handleRetryNode` | adapted：原设置严格复用快照；稳定错误码与 recovery 明确引导检查历史输入或按当前设置再生成，见 issue 36 | full |
+| D22 | 根据保存元数据重试；引用丢失明确报错 | `handleRetryNode` | dropped：按保存元数据重试已于 2026-08-26 移除；重试一律按节点当前 Draft 重新解析 | none |
 | D23 | 自定义模型调用脚本 | `model-script-editor.tsx`、`model-plugin.ts` | adapted：服务端受控 caller/plugin，不执行浏览器任意脚本 | full |
 | D24 | 生成跨域错误专门提示 | latest commit、`pending-test` | adapted：区分 CORS/错误 API 地址、DNS、TLS、代理与网络跳点；诊断脱敏且保留 task_id，见 issue 36 | full |
 
