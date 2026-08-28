@@ -34,6 +34,7 @@ from character_workflow.lib.schemas import (
     CanvasTextVersion,
     CanvasUploadOrigin,
     CanvasVideoNode,
+    CanvasViewport,
     RevisionedSidecar,
     JobParams,
     canvas_allowed_draft_params,
@@ -168,7 +169,9 @@ def _parse_canvas_document_bytes(body: bytes, project_id: str) -> CanvasDocument
             "canvas_document_too_large",
             "这个画布的存档文件超过 25 MiB，服务端拒绝加载。请先优化或恢复项目存档。",
         )
-    document = CanvasDocument.model_validate_json(body)
+    document = CanvasDocument.model_validate_json(body).model_copy(
+        update={"viewport": CanvasViewport()}
+    )
     if document.project_id != project_id:
         raise CanvasStorageError(
             "canvas_document_project_mismatch",
@@ -209,7 +212,9 @@ def _read_canvas_document_path(path: Path, project_id: str) -> CanvasDocument:
 
 
 def _serialize_canvas_document(document: CanvasDocument) -> bytes:
-    body = document.model_dump_json().encode("utf-8")
+    # Viewport is browser-session UI state. It stays in the transport model so API payloads remain
+    # simple, but it never enters the durable canvas document.
+    body = document.model_dump_json(exclude={"viewport"}).encode("utf-8")
     if len(body) > _MAX_CANVAS_DOCUMENT_BYTES:
         raise CanvasDocumentError(
             "canvas_document_too_large",
@@ -405,6 +410,7 @@ def _normalized_web_document(
     return submitted.model_copy(update={
         "revision": current.revision + 1,
         "updated_at": timestamp,
+        "viewport": CanvasViewport(),
         "content_versions": versions,
         "nodes": _draft_sanitized_nodes(submitted.nodes),
     })

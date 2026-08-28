@@ -176,7 +176,7 @@ def _prepare_transaction(
     # Reject an oversized canvas before the prepared journal, artifacts, or Job can become durable.
     _serialize_canvas_document(document)
     job_payload = job.model_dump(mode="json")
-    document_payload = document.model_dump(mode="json")
+    document_payload = document.model_dump(mode="json", exclude={"viewport"})
     transaction = {
         "schema_version": 2,
         "state": "prepared",

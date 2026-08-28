@@ -343,6 +343,10 @@ function documentWith(overrides: Partial<CanvasDocument>): CanvasDocument {
   return { ...emptyDocument, ...overrides };
 }
 
+async function waitPastCanvasAutosaveWindow() {
+  await new Promise(resolve => setTimeout(resolve, 450));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   canvasContextIdentities.length = 0;
@@ -736,7 +740,7 @@ it('selects and deletes a persisted connection without deleting its nodes', asyn
   })));
 });
 
-it('hands 150 media nodes to visible-area rendering and persists the viewport', async () => {
+it('hands 150 media nodes to visible-area rendering without persisting the viewport', async () => {
   vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
     nodes: Array.from({ length: 150 }, (_, index) => ({
       ...imageNode(`image-${index}`, `${index}.png`),
@@ -749,9 +753,8 @@ it('hands 150 media nodes to visible-area rendering and persists the viewport', 
   expect(await screen.findByTestId('react-flow')).toHaveAttribute('data-node-count', '150');
   expect(screen.getByTestId('react-flow')).toHaveAttribute('data-visible-only', 'true');
   fireEvent.click(screen.getByRole('button', { name: 'simulate viewport change' }));
-  await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
-    viewport: { x: 120, y: -40, zoom: 0.7 },
-  })));
+  await waitPastCanvasAutosaveWindow();
+  expect(saveCanvasDocument).not.toHaveBeenCalled();
 });
 
 it('refuses to delete a node while its generation is still running', async () => {
@@ -850,7 +853,7 @@ it('surfaces the server detail when an automatic save fails instead of claiming 
   expect(screen.queryByText('保存冲突，内容已保留')).toBeNull();
 });
 
-it('keeps panning out of the undo stack so Ctrl+Z still undoes the last edit', async () => {
+it('keeps panning out of persistence and the undo stack', async () => {
   // 平移以前每次都 push 一条历史：撤销撤的是镜头，而且平移够多次时真正想撤的那次编辑
   // 已经被 50 条上限挤出去了。
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
@@ -858,10 +861,9 @@ it('keeps panning out of the undo stack so Ctrl+Z still undoes the last edit', a
   expect(screen.getByRole('button', { name: '撤销' })).toBeDisabled();
 
   fireEvent.click(screen.getByRole('button', { name: 'simulate viewport change' }));
-  await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
-    viewport: { x: 120, y: -40, zoom: 0.7 },
-  })), { timeout: 1000 });
+  await waitPastCanvasAutosaveWindow();
 
+  expect(saveCanvasDocument).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: '撤销' })).toBeDisabled();
 });
 

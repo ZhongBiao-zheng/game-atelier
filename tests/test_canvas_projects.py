@@ -107,7 +107,7 @@ def test_canvas_project_create_list_rename_and_empty_document(client, isolated_d
     assert renamed.json()["name"] == "列车广告片"
 
 
-def test_canvas_document_roundtrip_and_rejects_dangling_connection(client):
+def test_canvas_document_roundtrip_and_rejects_dangling_connection(client, isolated_data_root):
     project_id = _create_project(client)["project_id"]
     current = _document(client, project_id)
     document = {
@@ -157,11 +157,17 @@ def test_canvas_document_roundtrip_and_rejects_dangling_connection(client):
     saved = _save_document(client, project_id, document)
     assert saved.status_code == 200, saved.json()
     body = saved.json()
-    assert body["viewport"] == {"x": 18.0, "y": -4.0, "zoom": 0.8}
+    assert body["viewport"] == {"x": 0.0, "y": 0.0, "zoom": 1.0}
     assert body["revision"] == current["revision"] + 1
     # 服务端拥有 sha256 与 created_at：前端占位值会被真值覆盖。
     assert body["content_versions"]["version-text"]["sha256"] != "0" * 64
     assert _document(client, project_id) == body
+    stored = json.loads(
+        (isolated_data_root / "canvases" / project_id / "canvas.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "viewport" not in stored
 
     dangling = {**body, "connections": [{
         **body["connections"][0],

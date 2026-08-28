@@ -651,7 +651,7 @@ def execute_canvas_media_operation(
                 # Keep the transaction recoverable: never mark it prepared when its document
                 # cannot pass the canvas storage limit.
                 _serialize_canvas_document(updated)
-                document_payload = updated.model_dump(mode="json")
+                document_payload = updated.model_dump(mode="json", exclude={"viewport"})
                 manifest = [
                     {
                         "filename": item.filename,

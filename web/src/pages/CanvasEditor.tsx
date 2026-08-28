@@ -243,11 +243,6 @@ interface MediaReplaceTarget {
   hadContent: boolean;
 }
 
-interface ViewportSyncToken {
-  projectId: string;
-  viewport: Viewport;
-}
-
 interface LiveNodeLayout {
   nodeId: string;
   position: CanvasPoint;
@@ -355,6 +350,7 @@ const CANVAS_DELETE_KEYS: readonly string[] = /Mac/i.test(navigator.userAgent)
 const CANVAS_NODE_CLIPBOARD_TYPE = 'application/x-game-atelier-canvas-nodes';
 const CANVAS_MIN_ZOOM = 0.08;
 const CANVAS_MAX_ZOOM = 2.5;
+const CANVAS_DEFAULT_VIEWPORT: Viewport = { x: 0, y: 0, zoom: 1 };
 // xyflow 默认只认 Meta/Control，Shift 归 selectionKeyCode（框选）。框选已经由 selectionOnDrag
 // 接管，所以把 Shift 也并进多选键、并把 selectionKeyCode 置空，和快捷键面板写的「Shift / ⌘ 点击」对齐。
 const CANVAS_MULTI_SELECT_KEYS = ['Shift', 'Meta', 'Control'];
@@ -480,16 +476,14 @@ function CanvasEditorInner({
   // 于是删掉配置节点后刷新，甚至只是第一次打开一个有历史反推记录的项目，节点都会自己长回来。
   const reversePromptConfigEligibleRuns = useRef(new Set<string>());
   const history = useRef<{ past: CanvasDocument[]; future: CanvasDocument[] }>({ past: [], future: [] });
-  const viewportSync = useRef<ViewportSyncToken | null>(null);
   const nodeClipboard = useRef<CanvasClipboardPayload | null>(null);
   const pasteSequence = useRef(0);
   const zoomSliderActive = useRef(false);
-  const zoomSliderCommitTimer = useRef<number | null>(null);
+  const zoomSliderSettleTimer = useRef<number | null>(null);
   const zoomSliderMove = useRef<Promise<boolean> | null>(null);
   const pendingViewportCommand = useRef<Promise<void> | null>(null);
   const viewportCommandEpoch = useRef(0);
   const cancelViewportCommand = useRef<(() => void) | null>(null);
-  const finishZoomSliderRef = useRef<() => void>(() => undefined);
   const projectRenameInputRef = useRef<HTMLInputElement>(null);
   const projectRenameTriggerRef = useRef<HTMLButtonElement>(null);
   const projectRenameInFlight = useRef(false);
@@ -649,12 +643,11 @@ function CanvasEditorInner({
     resizePreviewFrame.current = null;
     setLiveNodeLayout(null);
     history.current = { past: [], future: [] };
-    viewportSync.current = null;
     nodeClipboard.current = null;
     pasteSequence.current = 0;
     zoomSliderActive.current = false;
-    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
-    zoomSliderCommitTimer.current = null;
+    if (zoomSliderSettleTimer.current !== null) window.clearTimeout(zoomSliderSettleTimer.current);
+    zoomSliderSettleTimer.current = null;
     zoomSliderMove.current = null;
     viewportCommandEpoch.current += 1;
     cancelViewportCommand.current?.();
@@ -696,7 +689,7 @@ function CanvasEditorInner({
         }
         setProjects(projectRows);
         setDocument(hydrated.document);
-        setViewportZoom(canvasDocument.viewport.zoom);
+        setViewportZoom(CANVAS_DEFAULT_VIEWPORT.zoom);
         serverRevision.current = canvasDocument.revision;
         if (hydrated.versionIds.size) {
           dirtyVersion.current += 1;
@@ -716,7 +709,7 @@ function CanvasEditorInner({
     return () => {
       cancelled = true;
       if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
-      if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
+      if (zoomSliderSettleTimer.current !== null) window.clearTimeout(zoomSliderSettleTimer.current);
       if (resizePreviewFrame.current !== null) window.cancelAnimationFrame(resizePreviewFrame.current);
     };
   }, [acceptJobs, projectId, resetJobSync]);
@@ -1045,17 +1038,6 @@ function CanvasEditorInner({
       return false;
     }
     if (libraryInsertCommand.current) await libraryInsertCommand.current;
-    if (zoomSliderActive.current) finishZoomSliderRef.current();
-    while (pendingViewportCommand.current) {
-      const pending = pendingViewportCommand.current;
-      try {
-        await pending;
-      } catch {
-        setError('画布视口尚未保存，请稍后重试。');
-        return false;
-      }
-      if (pendingViewportCommand.current === pending) pendingViewportCommand.current = null;
-    }
     if (latestDocument.current && dirtyVersion.current > 0) {
       saveQueued.current = latestDocument.current;
       try {
@@ -2337,55 +2319,33 @@ function CanvasEditorInner({
     history.current.future = [];
   }, []);
 
-  // 镜头不进撤销栈。以前这里每次平移 / 缩放都 push 一条历史，于是 Ctrl+Z 撤的是取景而不是编辑，
-  // 平移次数够多时真正想撤的那次修改已经被 50 条上限挤出去了。视口仍然会落盘（它属于文档），
-  // 只是不再是一个可撤销的动作。
-  const commitViewportDocument = useCallback((viewport: Viewport) => {
-    const current = latestDocument.current;
-    if (!current || current.project_id !== projectId || sameViewport(current.viewport, viewport)) return false;
-    const next = { ...current, viewport, updated_at: new Date().toISOString() };
-    latestDocument.current = next;
-    setDocument(next);
-    dirtyVersion.current += 1;
-    setDirtySignal(dirtyVersion.current);
-    return true;
-  }, [projectId]);
-
   const interruptViewportCommand = useCallback(() => {
     viewportCommandEpoch.current += 1;
     cancelViewportCommand.current?.();
     cancelViewportCommand.current = null;
     pendingViewportCommand.current = null;
-    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
-    zoomSliderCommitTimer.current = null;
+    if (zoomSliderSettleTimer.current !== null) window.clearTimeout(zoomSliderSettleTimer.current);
+    zoomSliderSettleTimer.current = null;
     zoomSliderActive.current = false;
     zoomSliderMove.current = null;
   }, []);
 
   const beginZoomSlider = useCallback(() => {
     interruptViewportCommand();
-    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
-    zoomSliderCommitTimer.current = null;
+    if (zoomSliderSettleTimer.current !== null) window.clearTimeout(zoomSliderSettleTimer.current);
+    zoomSliderSettleTimer.current = null;
     zoomSliderActive.current = true;
     const viewport = getViewport();
     zoomSliderMove.current = setViewport(viewport).then(() => true, () => true);
   }, [getViewport, interruptViewportCommand, setViewport]);
 
-  const commitZoomSliderViewport = useCallback(() => {
-    if (latestDocument.current?.project_id !== projectId) return;
-    const viewport = getViewport();
-    viewportSync.current = { projectId, viewport };
-    if (!commitViewportDocument(viewport)) viewportSync.current = null;
-  }, [commitViewportDocument, getViewport, projectId]);
-
   const finishZoomSlider = useCallback(() => {
     if (!zoomSliderActive.current) return;
-    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
-    zoomSliderCommitTimer.current = null;
+    if (zoomSliderSettleTimer.current !== null) window.clearTimeout(zoomSliderSettleTimer.current);
+    zoomSliderSettleTimer.current = null;
     const finalize = () => {
       if (!zoomSliderActive.current) return;
       zoomSliderActive.current = false;
-      commitZoomSliderViewport();
     };
     const move = zoomSliderMove.current;
     let timeoutId: number | null = null;
@@ -2405,13 +2365,12 @@ function CanvasEditorInner({
       if (pendingViewportCommand.current === pending) pendingViewportCommand.current = null;
     };
     void pending.then(clearPending, clearPending);
-  }, [commitZoomSliderViewport]);
-  finishZoomSliderRef.current = finishZoomSlider;
+  }, []);
 
-  const scheduleZoomSliderCommit = useCallback(() => {
-    if (zoomSliderCommitTimer.current !== null) window.clearTimeout(zoomSliderCommitTimer.current);
-    zoomSliderCommitTimer.current = window.setTimeout(() => {
-      zoomSliderCommitTimer.current = null;
+  const scheduleZoomSliderFinish = useCallback(() => {
+    if (zoomSliderSettleTimer.current !== null) window.clearTimeout(zoomSliderSettleTimer.current);
+    zoomSliderSettleTimer.current = window.setTimeout(() => {
+      zoomSliderSettleTimer.current = null;
       finishZoomSlider();
     }, 120);
   }, [finishZoomSlider]);
@@ -2428,7 +2387,7 @@ function CanvasEditorInner({
         cancel = () => resolve('cancelled');
       });
       cancelViewportCommand.current = cancel;
-      const result = await Promise.race([
+      await Promise.race([
         Promise.resolve().then(command).then(() => 'finished' as const),
         cancelled,
         new Promise<'timeout'>(resolve => {
@@ -2440,12 +2399,6 @@ function CanvasEditorInner({
       });
       if (timeoutId !== null) window.clearTimeout(timeoutId);
       if (cancelViewportCommand.current === cancel) cancelViewportCommand.current = null;
-      if (result === 'cancelled'
-        || viewportCommandEpoch.current !== epoch
-        || latestDocument.current?.project_id !== projectId) return;
-      const viewport = getViewport();
-      viewportSync.current = { projectId, viewport };
-      if (!commitViewportDocument(viewport)) viewportSync.current = null;
     })();
     pendingViewportCommand.current = operation;
     const clearPending = () => {
@@ -2453,7 +2406,7 @@ function CanvasEditorInner({
     };
     void operation.then(clearPending, clearPending);
     return operation;
-  }, [commitViewportDocument, getViewport, projectId]);
+  }, [projectId]);
 
   const undo = useCallback(() => {
     const previous = history.current.past.pop();
@@ -2463,9 +2416,6 @@ function CanvasEditorInner({
       ...previous,
       revision: document.revision,
       updated_at: new Date().toISOString(),
-      // 镜头既不进撤销栈也不被撤销还原：撤销时把用户当前的取景留住，不要把画布甩回快照拍下时
-      // 的位置——那次跳动本身比看不见变化更让人失去方向。
-      viewport: document.viewport,
       content_versions: restoreContentVersions(
         previous.content_versions,
         document.content_versions,
@@ -2484,7 +2434,6 @@ function CanvasEditorInner({
       ...next,
       revision: document.revision,
       updated_at: new Date().toISOString(),
-      viewport: document.viewport,
       content_versions: restoreContentVersions(
         next.content_versions,
         document.content_versions,
@@ -3647,7 +3596,6 @@ function CanvasEditorInner({
           onMoveStart={event => {
             if (!event) return;
             interruptViewportCommand();
-            viewportSync.current = null;
           }}
           onMove={(_, viewport: Viewport) => setViewportZoom(viewport.zoom)}
           onPaneClick={() => {
@@ -3669,18 +3617,7 @@ function CanvasEditorInner({
             event.dataTransfer.dropEffect = 'copy';
           }}
           onDrop={handleCanvasDrop}
-          onMoveEnd={(_, viewport: Viewport) => {
-            if (latestDocument.current?.project_id !== projectId) return;
-            if (zoomSliderActive.current || pendingViewportCommand.current) return;
-            const sync = viewportSync.current;
-            if (sync?.projectId === projectId && sameViewport(sync.viewport, viewport)) {
-              viewportSync.current = null;
-              return;
-            }
-            viewportSync.current = null;
-            commitViewportDocument(viewport);
-          }}
-          defaultViewport={document.viewport}
+          defaultViewport={CANVAS_DEFAULT_VIEWPORT}
           minZoom={CANVAS_MIN_ZOOM}
           maxZoom={CANVAS_MAX_ZOOM}
           zoomOnScroll={CANVAS_WHEEL_ZOOMS}
@@ -3813,8 +3750,8 @@ function CanvasEditorInner({
             }}
             onBlur={finishZoomSlider}
             onChange={event => {
-              const shouldScheduleCommit = !zoomSliderActive.current
-                || zoomSliderCommitTimer.current !== null;
+              const shouldScheduleFinish = !zoomSliderActive.current
+                || zoomSliderSettleTimer.current !== null;
               if (!zoomSliderActive.current) beginZoomSlider();
               const zoom = Number(event.target.value) / 100;
               setViewportZoom(zoom);
@@ -3822,7 +3759,7 @@ function CanvasEditorInner({
               zoomSliderMove.current = previousMove
                 ? previousMove.then(() => zoomTo(zoom), () => zoomTo(zoom))
                 : zoomTo(zoom);
-              if (shouldScheduleCommit) scheduleZoomSliderCommit();
+              if (shouldScheduleFinish) scheduleZoomSliderFinish();
             }}
           />
           <span aria-live="polite" className="w-11 text-right text-xs tabular-nums text-muted-foreground">{Math.round(viewportZoom * 100)}%</span>
@@ -4546,12 +4483,6 @@ function backgroundVariant(background: CanvasDocument['settings']['background'])
   if (background === 'dots') return BackgroundVariant.Dots;
   if (background === 'lines') return BackgroundVariant.Lines;
   return null;
-}
-
-function sameViewport(left: Viewport, right: Viewport) {
-  return Math.abs(left.x - right.x) < 0.001
-    && Math.abs(left.y - right.y) < 0.001
-    && Math.abs(left.zoom - right.zoom) < 0.001;
 }
 
 function replacementAccept(kind: MediaReplaceTarget['kind']) {
