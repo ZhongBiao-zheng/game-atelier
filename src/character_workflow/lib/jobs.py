@@ -7,6 +7,7 @@ import secrets
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Any, Iterator
 
 from pydantic import ValidationError
@@ -22,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 
 _UNSET = object()
+_JOB_LIST_CACHE_LOCK = Lock()
+_job_list_cache_signature: tuple[str, tuple[tuple[str, int, int, int], ...]] | None = None
+_job_list_cache: tuple[Job, ...] = ()
 
 
 def _runtime_dir() -> Path:
@@ -85,7 +89,8 @@ def new_job_id() -> str:
 
 def _write(job: Job) -> Job:
     p = _path(job.job_id)
-    atomic_write_text(p, job.model_dump_json(indent=2))
+    atomic_write_text(p, job.model_dump_json())
+    _invalidate_job_list_cache()
     return job
 
 
@@ -158,18 +163,47 @@ def _load_job(data: Any) -> Job:
     return Job.model_validate(data)
 
 
+def _invalidate_job_list_cache() -> None:
+    global _job_list_cache_signature
+    with _JOB_LIST_CACHE_LOCK:
+        _job_list_cache_signature = None
+
+
+def _job_file_signature(
+    jobs_dir: Path,
+) -> tuple[tuple[str, tuple[tuple[str, int, int, int], ...]], list[Path]]:
+    paths = sorted(jobs_dir.glob("*.json"))
+    rows: list[tuple[str, int, int, int]] = []
+    stable_paths: list[Path] = []
+    for path in paths:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        rows.append((path.name, stat.st_mtime_ns, stat.st_size, stat.st_ino))
+        stable_paths.append(path)
+    return (str(jobs_dir.resolve()), tuple(rows)), stable_paths
+
+
 def list_jobs() -> list[Job]:
+    global _job_list_cache, _job_list_cache_signature
     jobs_dir = _runtime_dir() / "jobs"
     if not jobs_dir.exists():
         return []
-    jobs: list[Job] = []
-    for p in sorted(jobs_dir.glob("*.json")):
-        # 一条坏文件（半写 / 手改 schema 不符）不能拖垮整个列表 → 跳过并留日志。
-        try:
-            jobs.append(_load_job(json.loads(p.read_text(encoding="utf-8"))))
-        except (OSError, json.JSONDecodeError, ValidationError):
-            logger.warning("skipping bad job file: %s", p.name)
-    return jobs
+    signature, paths = _job_file_signature(jobs_dir)
+    with _JOB_LIST_CACHE_LOCK:
+        if signature == _job_list_cache_signature:
+            return list(_job_list_cache)
+        jobs: list[Job] = []
+        for path in paths:
+            # 一条坏文件（半写 / 手改 schema 不符）不能拖垮整个列表 → 跳过并留日志。
+            try:
+                jobs.append(_load_job(json.loads(path.read_text(encoding="utf-8"))))
+            except (OSError, json.JSONDecodeError, ValidationError):
+                logger.warning("skipping bad job file: %s", path.name)
+        _job_list_cache_signature = signature
+        _job_list_cache = tuple(jobs)
+        return list(jobs)
 
 
 def write_job(
@@ -294,6 +328,7 @@ def delete_failed_job(job_id: str) -> None:
             if p.exists():
                 p.unlink()
         _path(job_id).unlink()
+        _invalidate_job_list_cache()
 
 
 def clone_job_for_retry(job_id: str) -> Job:

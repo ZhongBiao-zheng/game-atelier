@@ -17,6 +17,9 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_projects import (
+    _read_canvas_document_path,
+    _serialize_canvas_document,
+    _write_canvas_document,
     canvas_project_dir,
     canvas_project_lock_path,
     read_canvas_project,
@@ -102,19 +105,15 @@ def _project_path(project_id: str) -> Path:
 
 
 def _read_document_unlocked(project_id: str) -> CanvasDocument:
-    document = CanvasDocument.model_validate_json(
-        _document_path(project_id).read_text(encoding="utf-8")
-    )
-    if document.project_id != project_id:
-        raise ValueError("canvas document project_id does not match its directory")
-    return document
+    return _read_canvas_document_path(_document_path(project_id), project_id)
 
 
 def _write_project_state_unlocked(project_id: str, document: CanvasDocument) -> None:
+    body = _serialize_canvas_document(document)
     project = read_canvas_project(project_id)
     touched = project.model_copy(update={"updated_at": document.updated_at})
     atomic_write_json(_project_path(project_id), touched.model_dump(mode="json"))
-    atomic_write_json(_document_path(project_id), document.model_dump(mode="json"))
+    _write_canvas_document(_document_path(project_id), document, body)
 
 
 def _canonical_sha(value: Any) -> str:
@@ -649,6 +648,9 @@ def execute_canvas_media_operation(
                     outputs,
                     split_lines,
                 )
+                # Keep the transaction recoverable: never mark it prepared when its document
+                # cannot pass the canvas storage limit.
+                _serialize_canvas_document(updated)
                 document_payload = updated.model_dump(mode="json")
                 manifest = [
                     {

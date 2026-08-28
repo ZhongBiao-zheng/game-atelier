@@ -901,8 +901,6 @@ class CanvasDocument(BaseModel):
                     if slot_key in occupied_frame_slots:
                         raise ValueError("canvas video frame slot can only have one source")
                     occupied_frame_slots.add(slot_key)
-        if len(self.model_dump_json().encode("utf-8")) > 25 * 1024 * 1024:
-            raise ValueError("canvas document exceeds 25 MiB")
         return self
 
 

@@ -14,6 +14,8 @@ from character_workflow.lib.canvas_projects import (
     _project_path,
     _read_canvas_document_unlocked,
     _recover_canvas_transactions_unlocked,
+    _serialize_canvas_document,
+    _write_canvas_document,
     _now,
     canvas_project_dir,
     canvas_project_lock_path,
@@ -305,9 +307,10 @@ def insert_canvas_asset(
             "updated_at": timestamp,
             "nodes": [*current.nodes, node],
         })
+        body = _serialize_canvas_document(updated)
         project = read_canvas_project(project_id).model_copy(update={"updated_at": timestamp})
         atomic_write_json(_project_path(project_id), project.model_dump(mode="json"))
-        atomic_write_json(_document_path(project_id), updated.model_dump(mode="json"))
+        _write_canvas_document(_document_path(project_id), updated, body)
         return updated
 
 
@@ -343,7 +346,8 @@ def insert_canvas_prompt(
             "nodes": [*current.nodes, node],
             "content_versions": {**current.content_versions, version_id: version},
         })
+        body = _serialize_canvas_document(updated)
         project = read_canvas_project(project_id).model_copy(update={"updated_at": timestamp})
         atomic_write_json(_project_path(project_id), project.model_dump(mode="json"))
-        atomic_write_json(_document_path(project_id), updated.model_dump(mode="json"))
+        _write_canvas_document(_document_path(project_id), updated, body)
         return updated

@@ -23,9 +23,13 @@ from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_agent_sessions import canvas_agent_sessions_lock_path
 from character_workflow.lib.canvas_projects import (
+    _discard_canvas_document_cache,
     _project_dir_unchecked,
+    _parse_canvas_document_bytes,
     _read_canvas_document_unlocked,
     _recover_canvas_transactions_unlocked,
+    _serialize_canvas_document,
+    _write_canvas_document,
     canvas_project_dir,
     canvas_project_lock_path,
     canvas_projects_root,
@@ -423,7 +427,7 @@ def export_canvas_projects(
             paths: list[str] = []
             metadata = {
                 f"{prefix}/project.json": project.model_dump_json(indent=2).encode("utf-8"),
-                f"{prefix}/canvas.json": document.model_dump_json(indent=2).encode("utf-8"),
+                f"{prefix}/canvas.json": _serialize_canvas_document(document),
             }
             project_dir = canvas_project_dir(project_id)
             project_root = project_dir.resolve()
@@ -726,14 +730,17 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
             raise CanvasPackageError(f"项目 {row.package_project_id} 的元数据角色不正确")
         try:
             project = CanvasProject.model_validate_json(archive.read(f"{prefix}/project.json"))
-            document = CanvasDocument.model_validate_json(archive.read(f"{prefix}/canvas.json"))
+            document = _parse_canvas_document_bytes(
+                archive.read(f"{prefix}/canvas.json"),
+                row.original_project_id,
+            )
             assets = RevisionedSidecar[CanvasLibraryAsset].model_validate_json(
                 archive.read(f"{prefix}/library/assets.json")
             )
             RevisionedSidecar[CanvasPrompt].model_validate_json(
                 archive.read(f"{prefix}/library/prompts.json")
             )
-        except (ValidationError, json.JSONDecodeError, KeyError) as error:
+        except (ValueError, json.JSONDecodeError, KeyError) as error:
             raise CanvasPackageError(f"项目 {row.package_project_id} 的元数据不合法") from error
         if (
             project.project_id != row.original_project_id
@@ -1018,7 +1025,10 @@ def _import_project(
 ) -> tuple[CanvasProject, Path, list[tuple[Job, Path]]]:
     prefix = f"projects/{row.package_project_id}"
     source_project = CanvasProject.model_validate_json(archive.read(f"{prefix}/project.json"))
-    source_document = CanvasDocument.model_validate_json(archive.read(f"{prefix}/canvas.json"))
+    source_document = _parse_canvas_document_bytes(
+        archive.read(f"{prefix}/canvas.json"),
+        row.original_project_id,
+    )
     jobs = [
         Job.model_validate_json(archive.read(path))
         for path in sorted(row.entry_paths)
@@ -1034,7 +1044,6 @@ def _import_project(
         raise CanvasPackageError("项目包包含重复或缺失的 Canvas Run ID")
 
     target = transaction_root / "projects" / project_id
-    target.mkdir(parents=True, exist_ok=False)
     timestamp = _now_text()
     project = source_project.model_copy(
         update={
@@ -1051,14 +1060,16 @@ def _import_project(
         _blob_index(manifest),
     )
     remapped_jobs = _remap_jobs(jobs, project_id, document, job_ids, run_ids)
+    document_body = _serialize_canvas_document(document)
 
+    target.mkdir(parents=True, exist_ok=False)
     try:
         (target / "uploads").mkdir()
         (target / "outputs").mkdir()
         (target / "derived").mkdir()
         (target / "library").mkdir()
         atomic_write_json(target / "project.json", project.model_dump(mode="json"))
-        atomic_write_json(target / "canvas.json", document.model_dump(mode="json"))
+        _write_canvas_document(target / "canvas.json", document, document_body)
         for relative in ("library/assets.json", "library/prompts.json"):
             body = archive.read(f"{prefix}/{relative}")
             (target / relative).write_bytes(body)
@@ -1094,7 +1105,7 @@ def _import_project(
         jobs_root.mkdir(parents=True, exist_ok=True)
         for job in remapped_jobs:
             pending = jobs_root / f"{job.job_id}.json"
-            pending.write_text(job.model_dump_json(indent=2), encoding="utf-8")
+            pending.write_text(job.model_dump_json(), encoding="utf-8")
             pending_jobs.append((job, pending))
         return project, target, pending_jobs
     except BaseException:
@@ -1254,6 +1265,7 @@ def delete_canvas_project(
                     moved_project[1].replace(moved_project[0])
                 shutil.rmtree(transaction, ignore_errors=True)
                 raise
+    _discard_canvas_document_cache(_project_dir_unchecked(project_id) / "canvas.json")
     shutil.rmtree(transaction, ignore_errors=True)
     # 缩略图缓存放在 .runtime 下，不随项目目录一起被移走：删项目时得自己收。
     discard_canvas_thumbnails(project_id)

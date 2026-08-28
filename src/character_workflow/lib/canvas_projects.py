@@ -5,9 +5,11 @@ import json
 import hashlib
 import re
 import secrets
+from collections import OrderedDict
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+from threading import Lock
 
 from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
@@ -57,6 +59,14 @@ _MEDIA_MIME = {
     ".opus": "audio/ogg",
     ".pcm": "audio/pcm",
 }
+_MAX_CANVAS_DOCUMENT_BYTES = 25 * 1024 * 1024
+_DOCUMENT_CACHE_MAX_BYTES = 32 * 1024 * 1024
+_DOCUMENT_CACHE_LOCK = Lock()
+_document_cache: OrderedDict[
+    Path,
+    tuple[tuple[int, int, int], CanvasDocument],
+] = OrderedDict()
+_document_cache_bytes = 0
 
 
 class CanvasMediaReplaceError(Exception):
@@ -152,6 +162,81 @@ def _document_path(project_id: str) -> Path:
     return canvas_project_dir(project_id) / "canvas.json"
 
 
+def _parse_canvas_document_bytes(body: bytes, project_id: str) -> CanvasDocument:
+    if len(body) > _MAX_CANVAS_DOCUMENT_BYTES:
+        raise CanvasStorageError(
+            "canvas_document_too_large",
+            "这个画布的存档文件超过 25 MiB，服务端拒绝加载。请先优化或恢复项目存档。",
+        )
+    document = CanvasDocument.model_validate_json(body)
+    if document.project_id != project_id:
+        raise CanvasStorageError(
+            "canvas_document_project_mismatch",
+            "这个画布的存档文件记着另一个项目的 ID，服务端拒绝按当前项目读取。请检查数据目录。",
+        )
+    return document
+
+
+def _read_canvas_document_path(path: Path, project_id: str) -> CanvasDocument:
+    stat = path.stat()
+    signature = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+    cache_key = path.resolve()
+    with _DOCUMENT_CACHE_LOCK:
+        cached = _document_cache.get(cache_key)
+        if cached is not None and cached[0] == signature:
+            _document_cache.move_to_end(cache_key)
+            return cached[1]
+    document = _parse_canvas_document_bytes(path.read_bytes(), project_id)
+    refreshed = path.stat()
+    refreshed_signature = (refreshed.st_mtime_ns, refreshed.st_size, refreshed.st_ino)
+    if refreshed_signature == signature:
+        with _DOCUMENT_CACHE_LOCK:
+            global _document_cache_bytes
+            previous = _document_cache.pop(cache_key, None)
+            if previous is not None:
+                _document_cache_bytes -= previous[0][1]
+            _document_cache[cache_key] = (signature, document)
+            _document_cache_bytes += signature[1]
+            while (
+                _document_cache_bytes > _DOCUMENT_CACHE_MAX_BYTES
+                and len(_document_cache) > 1
+            ):
+                _evicted_path, (evicted_signature, _evicted_document) = (
+                    _document_cache.popitem(last=False)
+                )
+                _document_cache_bytes -= evicted_signature[1]
+    return document
+
+
+def _serialize_canvas_document(document: CanvasDocument) -> bytes:
+    body = document.model_dump_json().encode("utf-8")
+    if len(body) > _MAX_CANVAS_DOCUMENT_BYTES:
+        raise CanvasDocumentError(
+            "canvas_document_too_large",
+            "画布内容超过 25 MiB，请删除不需要的内容后再保存。",
+        )
+    return body
+
+
+def _write_canvas_document(
+    path: Path,
+    document: CanvasDocument,
+    body: bytes | None = None,
+) -> None:
+    atomic_write_bytes(path, body if body is not None else _serialize_canvas_document(document))
+    # A different process may replace the file immediately after this write. Do not associate
+    # the caller's object with a later file signature; the next read validates and caches disk truth.
+    _discard_canvas_document_cache(path)
+
+
+def _discard_canvas_document_cache(path: Path) -> None:
+    global _document_cache_bytes
+    with _DOCUMENT_CACHE_LOCK:
+        cached = _document_cache.pop(path.resolve(), None)
+        if cached is not None:
+            _document_cache_bytes -= cached[0][1]
+
+
 def canvas_project_lock_path(project_id: str) -> Path:
     """画布项目的自动保存锁。**不能放进项目目录里。**
 
@@ -192,7 +277,7 @@ def create_canvas_project(name: str) -> CanvasProject:
     )
     document = CanvasDocument(project_id=project_id, revision=0, updated_at=timestamp)
     # project.json 是项目存在标记，最后写；中途失败的半成品目录不会被列表或读取识别。
-    atomic_write_json(target / "canvas.json", document.model_dump(mode="json"))
+    _write_canvas_document(target / "canvas.json", document)
     (target / "uploads").mkdir()
     (target / "outputs").mkdir()
     (target / "derived").mkdir()
@@ -226,13 +311,7 @@ def _read_canvas_document_unlocked(project_id: str) -> CanvasDocument:
             "这个画布的存档文件（canvas.json）不见了，服务端读不出内容。"
             "请检查数据目录后再打开——反复刷新不会让它回来。",
         )
-    document = CanvasDocument.model_validate_json(path.read_text(encoding="utf-8"))
-    if document.project_id != project_id:
-        raise CanvasStorageError(
-            "canvas_document_project_mismatch",
-            "这个画布的存档文件记着另一个项目的 ID，服务端拒绝按当前项目读取。请检查数据目录。",
-        )
-    return document
+    return _read_canvas_document_path(path, project_id)
 
 
 def _recover_canvas_transactions_unlocked(project_id: str) -> None:
@@ -418,9 +497,10 @@ def save_canvas_document(
             )
         timestamp = _now()
         updated = _normalized_web_document(current, document, timestamp)
+        body = _serialize_canvas_document(updated)
         touched = project.model_copy(update={"updated_at": timestamp})
         atomic_write_json(_project_path(project_id), touched.model_dump(mode="json"))
-        atomic_write_json(_document_path(project_id), updated.model_dump(mode="json"))
+        _write_canvas_document(_document_path(project_id), updated, body)
         return updated
 
 
@@ -563,6 +643,7 @@ def _commit_canvas_upload(
     timestamp: str,
 ) -> None:
     """Commit upload bytes and metadata before the canvas document reference."""
+    document_body = _serialize_canvas_document(document)
     try:
         atomic_write_bytes(target, body)
         atomic_write_json(
@@ -570,7 +651,7 @@ def _commit_canvas_upload(
             project.model_copy(update={"updated_at": timestamp}).model_dump(mode="json"),
         )
         # canvas.json is the command commit point; referenced bytes and metadata land first.
-        atomic_write_json(_document_path(project_id), document.model_dump(mode="json"))
+        _write_canvas_document(_document_path(project_id), document, document_body)
     except BaseException:
         target.unlink(missing_ok=True)
         raise
@@ -625,10 +706,11 @@ def _version_belongs_to_other_canvas(project_id: str, version_id: str) -> bool:
         if project_path.parent.name == project_id:
             continue
         try:
-            document = CanvasDocument.model_validate_json(
-                (project_path.parent / "canvas.json").read_text(encoding="utf-8")
+            document = _read_canvas_document_path(
+                project_path.parent / "canvas.json",
+                project_path.parent.name,
             )
-        except (OSError, ValidationError, json.JSONDecodeError):
+        except (OSError, ValueError, ValidationError, json.JSONDecodeError):
             continue
         if version_id in document.content_versions:
             return True
