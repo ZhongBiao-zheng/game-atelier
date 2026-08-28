@@ -8,6 +8,7 @@ import { useVideoFrame } from '@/lib/videoFrame';
 import type { GenMode } from '@/lib/historyFilters';
 import { isGalleryFavorited, isGalleryHidden } from '@/api/gallery';
 import { formatBeijingTime } from '@/lib/time';
+import { formatGenerationCost } from '@/lib/generationCost';
 import {
   canonicalMentionLabel,
   createMentionTokenRegex,
@@ -20,6 +21,7 @@ import { WaitingCopy } from './WaitingCopy';
 
 const HISTORY_BATCH_SIZE = 30;
 const MEDIA_ROOT_MARGIN = '600px 0px';
+const HISTORY_LOAD_ROOT_MARGIN = '800px 0px 0px';
 
 export interface RoundConfig {
   prompt: string;
@@ -65,7 +67,7 @@ export type RoundState =
       progressPhase?: 'sent' | 'downloading' | null;
       config: RoundConfig;
     }
-  | { kind: 'done'; mode?: GenMode; jobId: string; submittedAt: string; completedAt?: string | null; imagePaths: string[]; config: RoundConfig }
+  | { kind: 'done'; mode?: GenMode; jobId: string; submittedAt: string; completedAt?: string | null; imagePaths: string[]; generationCost?: number; config: RoundConfig }
   | { kind: 'failed'; mode?: GenMode; jobId?: string; submittedAt: string; reason: string; config?: RoundConfig };
 
 /** 生成中占位框的宽高比：按目标比例（"16:9"）→ 退回尺寸（"1024x1536"）→ 退回 1:1。
@@ -109,7 +111,11 @@ export function RoundList({
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [mountedHistoryCount, setMountedHistoryCount] = useState(HISTORY_BATCH_SIZE);
-  if (rounds.length === 0) return null;
+  const [historyAutoLoadArmed, setHistoryAutoLoadArmed] = useState(() => !focusJobId);
+  const historySentinelRef = useRef<HTMLDivElement>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const roundsLengthRef = useRef(rounds.length);
+  roundsLengthRef.current = rounds.length;
   const newestWindow = rounds.slice(-mountedHistoryCount);
   const focusedRound = focusJobId
     ? rounds.find((round) => round.jobId === focusJobId)
@@ -118,22 +124,83 @@ export function RoundList({
     ? [focusedRound, ...newestWindow]
     : newestWindow;
   const remainingCount = Math.max(0, rounds.length - mountedHistoryCount);
+  const hasEarlierHistory = remainingCount > 0;
+  useEffect(() => setHistoryAutoLoadArmed(!focusJobId), [focusJobId]);
+  useEffect(() => {
+    const sentinel = historySentinelRef.current;
+    if (historyAutoLoadArmed || !hasEarlierHistory || !sentinel) return;
+    const root = sentinel.closest('[data-studio-history-scroll]');
+    if (!root) return;
+    const armFromWheel = (event: Event) => {
+      if ((event as WheelEvent).deltaY < 0) setHistoryAutoLoadArmed(true);
+    };
+    const captureTouchStart = (event: Event) => {
+      const touch = (event as TouchEvent).touches[0];
+      touchStartRef.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+    };
+    const armFromTouch = (event: Event) => {
+      const start = touchStartRef.current;
+      const touch = (event as TouchEvent).touches[0];
+      if (!start || !touch) return;
+      const deltaX = touch.clientX - start.x;
+      const deltaY = touch.clientY - start.y;
+      // 历史在视口上方：手指向下拖才是向更早记录滚动。横向/反向轻扫不武装。
+      if (deltaY > 8 && deltaY > Math.abs(deltaX)) setHistoryAutoLoadArmed(true);
+    };
+    const armFromKey = (event: Event) => {
+      if (['ArrowUp', 'PageUp', 'Home'].includes((event as KeyboardEvent).key)) {
+        setHistoryAutoLoadArmed(true);
+      }
+    };
+    root.addEventListener('wheel', armFromWheel, { passive: true });
+    root.addEventListener('touchstart', captureTouchStart, { passive: true });
+    root.addEventListener('touchmove', armFromTouch, { passive: true });
+    root.addEventListener('keydown', armFromKey);
+    return () => {
+      root.removeEventListener('wheel', armFromWheel);
+      root.removeEventListener('touchstart', captureTouchStart);
+      root.removeEventListener('touchmove', armFromTouch);
+      root.removeEventListener('keydown', armFromKey);
+    };
+  }, [hasEarlierHistory, historyAutoLoadArmed]);
+  // 复刻成熟无限列表的 loader-row 模式：顶部哨兵进入预加载区时再追加一页。
+  // 观察器不随每批重建，一次进入只触发一次，避免哨兵停留时连续挂载全部历史。
+  useEffect(() => {
+    const sentinel = historySentinelRef.current;
+    if (
+      !historyAutoLoadArmed
+      || !hasEarlierHistory
+      || !sentinel
+      || typeof IntersectionObserver === 'undefined'
+    ) return;
+    const root = sentinel.closest('[data-studio-history-scroll]');
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        setMountedHistoryCount((count) => Math.min(
+          count + HISTORY_BATCH_SIZE,
+          roundsLengthRef.current,
+        ));
+      },
+      { root, rootMargin: HISTORY_LOAD_ROOT_MARGIN },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasEarlierHistory, historyAutoLoadArmed]);
+  if (rounds.length === 0) return null;
   return (
     <>
       <div
         data-testid="studio-round-list"
         className="mx-auto mt-8 w-full min-w-[800px] max-w-[1024px] space-y-8 text-left"
       >
-        {remainingCount > 0 && (
-          <div className="flex justify-center">
-            <button
-              type="button"
-              onClick={() => setMountedHistoryCount((count) => count + HISTORY_BATCH_SIZE)}
-              className="h-9 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              加载更早记录（剩余 {remainingCount} 条）
-            </button>
-          </div>
+        {hasEarlierHistory && (
+          <div
+            ref={historySentinelRef}
+            data-testid="history-load-sentinel"
+            aria-hidden="true"
+            className="h-px w-full"
+          />
         )}
         {mountedRounds.map((r) => {
           const stableKey =
@@ -661,9 +728,17 @@ function DoneBatch({
               </span>
             )}
           </p>
-          {runMeta.length > 0 && (
-            <p data-testid="round-run-meta" className="mt-0.5 text-xs text-muted-foreground/60">
-              {runMeta.join(' · ')}
+          {(runMeta.length > 0 || round.generationCost != null) && (
+            <p data-testid="round-run-meta" className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground/60">
+              <span>{runMeta.join(' · ')}</span>
+              {round.generationCost != null && (
+                <span
+                  data-testid="round-generation-cost"
+                  className="ml-auto shrink-0 tabular-nums"
+                >
+                  {formatGenerationCost(round.generationCost)}
+                </span>
+              )}
             </p>
           )}
           {/* 后端回写的静默改写提示（尺寸归一化 / 参考图截断）——是提示不是错误，走 muted 灰不用暖红。 */}

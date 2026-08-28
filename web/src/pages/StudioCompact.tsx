@@ -11,6 +11,7 @@ import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageC
 import { MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { EMPTY_MJ_REFS, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
+import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import type { JobKind, JobParams } from '@/schema/jobs';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
@@ -232,6 +233,13 @@ export function StudioCompact() {
           }
         : {}),
     };
+    const estimatedCost = estimateGenerationCostForSubmission(
+      selectedKey,
+      effectiveModel,
+      'image',
+      jobParams,
+    );
+    if (estimatedCost != null) jobParams.estimated_cost_cny = estimatedCost;
 
     try {
       await createStudioJob({
@@ -319,6 +327,13 @@ export function StudioCompact() {
       ...(vidPaths.length ? { reference_videos: vidPaths } : {}),
       ...(audPaths.length ? { reference_audios: audPaths } : {}),
     };
+    const estimatedCost = estimateGenerationCostForSubmission(
+      selectedKey,
+      effectiveModel,
+      'video',
+      videoParams,
+    );
+    if (estimatedCost != null) videoParams.estimated_cost_cny = estimatedCost;
 
     try {
       await createStudioJob({

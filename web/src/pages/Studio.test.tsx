@@ -130,6 +130,8 @@ function mockCompletedBatchAndKeys() {
             ratio: '4:3',
             resolution: '2K',
             size: '2304x1728',
+            n: 2,
+            estimated_cost_cny: 0.5,
             reference_images: ['/tmp/ref.png'],
           },
           output_paths: ['/tmp/studio/job-studio-1/v1.png', '/tmp/studio/job-studio-1/v2.png'],
@@ -305,6 +307,7 @@ describe('Studio', () => {
         resolution: '4K',
         size: '4096x2304',
         n: 3,
+        estimated_cost_cny: 0.66,
       },
     });
   });
@@ -838,6 +841,7 @@ describe('Studio', () => {
       'href',
       '/api/gallery/image?path=%2FUsers%2Fme%2Fproject%2Fstudio%2Fjob-studio-1%2Fv1.png',
     );
+    expect(screen.queryByTestId('round-generation-cost')).toBeNull();
   });
 
   it('restores a pending studio job after returning to the page', async () => {
@@ -1036,6 +1040,7 @@ describe('Studio', () => {
     expect(screen.getAllByRole('img', { name: /生成结果/ })).toHaveLength(2);
     expect(screen.getByTestId('studio-result-thumb-1')).toHaveClass('w-[251.5px]');
     expect(screen.getByTestId('studio-result-thumb-2')).toHaveClass('w-[251.5px]');
+    expect(screen.getByTestId('round-generation-cost')).toHaveTextContent('¥ 0.5');
     expect(screen.getByRole('button', { name: '重新编辑' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '再次生成' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument();
@@ -1386,7 +1391,12 @@ describe('Studio video submission', () => {
     expect(body).toMatchObject({
       kind: 'video',
       // 上游 generate_audio 默认 true：音频关闭也必须显式发 false，省略字段≠关闭。
-      params: expect.objectContaining({ duration: 5, resolution: '720p', generate_audio: false }),
+      params: expect.objectContaining({
+        duration: 5,
+        resolution: '720p',
+        generate_audio: false,
+        estimated_cost_cny: 3.996,
+      }),
     });
   });
 
@@ -1729,6 +1739,47 @@ describe('Studio compact mode errors', () => {
     // 报错要说清是哪一步失败 + 状态码（英文 `studio job failed: 500` 那种对画师没用）
     expect(alert).toHaveTextContent('创建出图任务失败');
     expect(alert).toHaveTextContent('500');
+  });
+
+  it('freezes the same CNY cost snapshot when submitting from compact mode', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'volc',
+            keys: [{
+              alias: 'volc', provider: 'seedream', base_url: null,
+              access_key: 'ak', secret_key: null, capabilities: [],
+              models: [{
+                name: '图片 4.5', id: 'doubao-seedream-4-5-251128', protocol: 'ark',
+              }],
+              notes: '', created_at: '2026-05-25T00:00:00Z', is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/studio/jobs') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            job_id: 'compact-priced', status: 'pending', submitted_at: '2026-08-28T00:00:00Z',
+          }),
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+    renderStudioCompact();
+
+    const textarea = await screen.findByLabelText('生图 prompt');
+    typePrompt(textarea, '首页也要记录费用');
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const request = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(request![1]!.body));
+    expect(body.params.estimated_cost_cny).toBe(0.25);
   });
 });
 

@@ -1,6 +1,6 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUp, Box, ChevronRight, Coins, Film, ImageIcon, Images, Music, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
+import { ArrowUp, Box, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
 import { modelModality, type KeyView } from '@/api/keys';
 import { availableResolutions, computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
 import { providerLabel } from '@/lib/providerLabels';
@@ -14,7 +14,6 @@ import {
 import { MJ_DEFAULTS, type MjParams } from '@/lib/mjParams';
 import { MjControls } from './MjControls';
 import { EMPTY_MJ_REFS, MjReferenceSlots, type MjRefSlots } from './MjReferenceSlots';
-import { estimateGenerationCost, formatGenerationCost } from '@/lib/generationCost';
 import { captureVideoFrame } from '@/lib/videoFrame';
 import { VideoControls } from './VideoControls';
 import {
@@ -560,21 +559,6 @@ export function PromptInput({
     Boolean(videoFrames?.last);
   const canSubmit =
     Boolean(provider && selectedModel && text.trim() && !disabled) && !lastFrameOnlyBlocked;
-  // 计价必须同时命中真实渠道与明确模型 ID；未核实价格直接返回 null，不在创作台展示。
-  const generationCost = provider && selectedModel
-    ? estimateGenerationCost({
-        provider: { provider: provider.provider, baseUrl: provider.base_url },
-        model: { id: selectedModel.id, protocol: selectedModel.protocol },
-        kind: isVideo ? 'video' : 'image',
-        count: isVideo ? videoCount : count,
-        quality,
-        duration: isVideo ? duration : undefined,
-        resolution: isVideo ? videoResolution : resolution,
-        ratio: isVideo ? videoRatio : ratio,
-        generateAudio: isVideo ? generateAudio : undefined,
-        hasReferenceVideo: isVideo && referenceVideos.length > 0,
-      })
-    : null;
   const minPx = 1;
   // 控件行右缘渐隐 + 箭头几何：悬停时为箭头让出 36px 槽位，渐隐带 40px 落在箭头左侧。
   const SCROLL_ARROW = 36;
@@ -1509,7 +1493,7 @@ export function PromptInput({
         </div>
         {/* pr-12 给提交按钮让位：按钮已改为绝对定位锚在壳右下角（见 shell 末尾），不再占这一行的 flex 位 */}
         <div className="flex items-center gap-3 shrink-0 pr-12">
-          {lastFrameOnlyBlocked ? (
+          {lastFrameOnlyBlocked && (
             <span
               data-testid="frame-block-hint"
               className="inline-flex items-center gap-1 text-xs text-destructive"
@@ -1517,16 +1501,7 @@ export function PromptInput({
               <Film size={12} aria-hidden />
               需先放首帧
             </span>
-          ) : generationCost ? (
-            <span
-              data-testid="generation-cost-hint"
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums"
-              title={generationCost.source}
-            >
-              <Coins size={12} aria-hidden />
-              {formatGenerationCost(generationCost)}
-            </span>
-          ) : null}
+          )}
         </div>
       </div>
           </div>

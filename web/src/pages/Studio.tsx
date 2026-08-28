@@ -18,6 +18,7 @@ import { imageFamily } from '@/lib/modelFamily';
 import { MJ_DEFAULTS, mjParamsFromJob, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
+import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
@@ -453,6 +454,13 @@ function StudioFull() {
           }
         : {}),
     };
+    const estimatedCost = estimateGenerationCostForSubmission(
+      selectedKey,
+      effectiveModel,
+      'image',
+      jobParams,
+    );
+    if (estimatedCost != null) jobParams.estimated_cost_cny = estimatedCost;
 
     const startedAt = Date.now();
     const myRound: RoundState = { kind: 'pending', startedAt, config };
@@ -577,6 +585,13 @@ function StudioFull() {
       ...(vidPaths.length ? { reference_videos: vidPaths } : {}),
       ...(audPaths.length ? { reference_audios: audPaths } : {}),
     };
+    const estimatedCost = estimateGenerationCostForSubmission(
+      selectedKey,
+      effectiveModel,
+      'video',
+      videoParams,
+    );
+    if (estimatedCost != null) videoParams.estimated_cost_cny = estimatedCost;
 
     const config: RoundConfig = {
       prompt,
@@ -648,6 +663,7 @@ function StudioFull() {
       <div
         ref={scrollRef}
         onScroll={handleHistoryScroll}
+        data-studio-history-scroll
         data-testid="studio-history-scroll"
         className="flex h-full flex-col-reverse overflow-y-auto pt-20 pb-[210px]"
       >
@@ -1024,6 +1040,7 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
           submittedAt: job.submitted_at,
           completedAt: job.completed_at,
           imagePaths: job.output_paths,
+          generationCost: frozenGenerationCost(job),
           config: configForJob(job, keys),
         }];
       }
@@ -1046,6 +1063,13 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
         config: configForJob(job, keys),
       }];
     });
+}
+
+function frozenGenerationCost(job: Job): number | undefined {
+  const amount = job.params?.estimated_cost_cny;
+  return typeof amount === 'number' && Number.isFinite(amount) && amount >= 0
+    ? amount
+    : undefined;
 }
 
 function roundKey(round: RoundState): string | null {

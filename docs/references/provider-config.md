@@ -131,7 +131,7 @@
 | nano-banana-hd | 3200 | — | — |
 
 统一计价入口是 `web/src/lib/generationCost.ts`。价格规则必须同时命中真实渠道、模型与参数：
-命中后在创作台显示本次提交总价；没有核实价格的模型、档位或聚合渠道不显示费用提示。
+命中后在提交时把总价冻结到 `params.estimated_cost_cny`，创作台出图历史只在“耗时 · 时间”行最右侧读该快照；旧记录缺少快照，或模型、档位、聚合渠道没有核实价格时都不显示费用。
 绝不把官方直连价套到 TokenDance / OpenRouter 等聚合商。
 
 目前纳入的图片规则：OpenAI-HK 上表、Ark 直连 `doubao-seedream-5-0-260128`

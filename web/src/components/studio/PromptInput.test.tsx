@@ -19,25 +19,6 @@ const hkKey: KeyView = {
   created_at: '2026-05-25T00:00:00Z',
 };
 
-const seedreamKey: KeyView = {
-  alias: 'seedream',
-  provider: 'seedream',
-  base_url: 'https://ark.cn-beijing.volces.com/api/v3',
-  access_key: 'ark...key',
-  secret_key: null,
-  capabilities: ['portrait'],
-  models: [
-    {
-      name: 'Seedream 5.0',
-      id: 'doubao-seedream-5-0-260128',
-      modality: 'image',
-      protocol: 'ark',
-    },
-  ],
-  notes: '',
-  created_at: '2026-08-27T00:00:00Z',
-};
-
 function renderWith(model: string) {
   return render(
     <PromptInput
@@ -323,52 +304,14 @@ describe('PromptInput 参考素材超限提示', () => {
   });
 });
 
-describe('PromptInput 统一费用提示', () => {
-  it('显示 OpenAI-HK 图片费用', () => {
+describe('PromptInput 费用展示位置', () => {
+  it('输入区不再显示费用，费用只放在生成历史', () => {
     render(
       <PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="gpt-image-2" quality="low" count={3} />,
     );
-    expect(screen.getByTestId('generation-cost-hint')).toHaveTextContent('¥0.18');
-    cleanup();
-  });
-
-  it('显示 Ark Seedream 按张费用', () => {
-    render(
-      <PromptInput
-        onSubmit={vi.fn()}
-        providers={[seedreamKey]}
-        providerAlias="seedream"
-        model="doubao-seedream-5-0-260128"
-        count={2}
-      />,
-    );
-    expect(screen.getByTestId('generation-cost-hint')).toHaveTextContent('¥0.44');
-    cleanup();
-  });
-
-  it('未定价档位不显示费用提示', () => {
-    render(
-      <PromptInput onSubmit={vi.fn()} providers={[hkKey]} providerAlias="hk" model="nano-banana" quality="high" />,
-    );
     expect(screen.queryByTestId('generation-cost-hint')).toBeNull();
     cleanup();
   });
-
-  it('未核实价格的聚合渠道不显示费用提示', () => {
-    const otherKey = { ...hkKey, base_url: 'https://api.example.com' };
-    render(
-      <PromptInput onSubmit={vi.fn()} providers={[otherKey]} providerAlias="hk" model="gpt-image-2" quality="low" />,
-    );
-    expect(screen.queryByTestId('generation-cost-hint')).toBeNull();
-    cleanup();
-  });
-
-  it('显示 Ark Seedance 视频预计费用', () => {
-    renderVideoMode({ videoCount: 1 });
-    expect(screen.getByTestId('generation-cost-hint')).toHaveTextContent('约 ¥4.00');
-    cleanup();
-  });
-
 });
 
 describe('PromptInput 键盘提交规范（Enter 出图 / Shift+Enter 换行）', () => {

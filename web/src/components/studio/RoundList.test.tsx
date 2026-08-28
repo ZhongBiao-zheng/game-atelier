@@ -107,26 +107,79 @@ describe('RoundList video', () => {
     expect(hiddenDecoder?.getAttribute('src')).toBeNull();
   });
 
-  it('mounts only the newest 30 rounds initially and loads older history in batches', () => {
+  it('初始只挂载最新 30 条，向上接近顶部时每次自动追加 30 条', () => {
+    const observed = new Map<Element, {
+      callback: IntersectionObserverCallback;
+      options?: IntersectionObserverInit;
+      observer: IntersectionObserver;
+    }>();
+    class MockIntersectionObserver implements IntersectionObserver {
+      readonly root: Element | Document | null;
+      readonly rootMargin: string;
+      readonly thresholds = [0];
+      constructor(
+        private callback: IntersectionObserverCallback,
+        private options?: IntersectionObserverInit,
+      ) {
+        this.root = options?.root ?? null;
+        this.rootMargin = options?.rootMargin ?? '0px';
+      }
+      disconnect() {}
+      observe(target: Element) {
+        observed.set(target, { callback: this.callback, options: this.options, observer: this });
+      }
+      takeRecords() { return []; }
+      unobserve(target: Element) { observed.delete(target); }
+    }
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
     const rounds = Array.from({ length: 100 }, (_, index): RoundState => ({
       ...videoDone,
       jobId: `job-video-${index}`,
       submittedAt: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
       imagePaths: [`/data/studio/job-video-${index}/v1.mp4`],
     }));
-    const { container } = render(<RoundList rounds={rounds} />);
+    const { container } = render(
+      <div data-studio-history-scroll>
+        <RoundList rounds={rounds} />
+      </div>,
+    );
 
     expect(container.querySelectorAll('[data-round-job]')).toHaveLength(30);
     expect(container.querySelector('[data-round-job="job-video-0"]')).toBeNull();
     expect(container.querySelector('[data-round-job="job-video-99"]')).not.toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: '加载更早记录（剩余 70 条）' }));
-    expect(container.querySelectorAll('[data-round-job]')).toHaveLength(60);
-    fireEvent.click(screen.getByRole('button', { name: '加载更早记录（剩余 40 条）' }));
-    expect(container.querySelectorAll('[data-round-job]')).toHaveLength(90);
-    fireEvent.click(screen.getByRole('button', { name: '加载更早记录（剩余 10 条）' }));
-    expect(container.querySelectorAll('[data-round-job]')).toHaveLength(100);
     expect(screen.queryByRole('button', { name: /加载更早记录/ })).toBeNull();
+
+    let sentinel = screen.getByTestId('history-load-sentinel');
+    const firstObservation = observed.get(sentinel)!;
+    expect(firstObservation.options?.root).toBe(container.firstElementChild);
+    expect(firstObservation.options?.rootMargin).toBe('800px 0px 0px');
+
+    act(() => firstObservation.callback(
+      [{ isIntersecting: true, target: sentinel } as unknown as IntersectionObserverEntry],
+      firstObservation.observer,
+    ));
+    expect(container.querySelectorAll('[data-round-job]')).toHaveLength(60);
+
+    act(() => firstObservation.callback(
+      [{ isIntersecting: false, target: sentinel } as unknown as IntersectionObserverEntry],
+      firstObservation.observer,
+    ));
+    act(() => firstObservation.callback(
+      [{ isIntersecting: true, target: sentinel } as unknown as IntersectionObserverEntry],
+      firstObservation.observer,
+    ));
+    expect(container.querySelectorAll('[data-round-job]')).toHaveLength(90);
+
+    act(() => firstObservation.callback(
+      [{ isIntersecting: false, target: sentinel } as unknown as IntersectionObserverEntry],
+      firstObservation.observer,
+    ));
+    act(() => firstObservation.callback(
+      [{ isIntersecting: true, target: sentinel } as unknown as IntersectionObserverEntry],
+      firstObservation.observer,
+    ));
+    expect(container.querySelectorAll('[data-round-job]')).toHaveLength(100);
+    expect(screen.queryByTestId('history-load-sentinel')).toBeNull();
   });
 
   it('keeps an older deep-linked round mounted outside the newest batch', () => {
@@ -139,6 +192,60 @@ describe('RoundList video', () => {
     const { container } = render(<RoundList rounds={rounds} focusJobId="job-focus-2" />);
     expect(container.querySelector('[data-round-job="job-focus-2"]')).not.toBeNull();
     expect(container.querySelector('[data-round-job="job-focus-39"]')).not.toBeNull();
+  });
+
+  it('深链定位旧记录时不误触发加载，只在用户真实向上滚动后启用', () => {
+    const observed = new Map<Element, {
+      callback: IntersectionObserverCallback;
+      observer: IntersectionObserver;
+    }>();
+    class MockIntersectionObserver implements IntersectionObserver {
+      readonly root = null;
+      readonly rootMargin = '0px';
+      readonly thresholds = [0];
+      constructor(private callback: IntersectionObserverCallback) {}
+      disconnect() {}
+      observe(target: Element) {
+        observed.set(target, { callback: this.callback, observer: this });
+      }
+      takeRecords() { return []; }
+      unobserve(target: Element) { observed.delete(target); }
+    }
+    vi.stubGlobal('IntersectionObserver', MockIntersectionObserver);
+    const rounds = Array.from({ length: 100 }, (_, index): RoundState => ({
+      ...videoDone,
+      jobId: `job-deep-${index}`,
+      submittedAt: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+      imagePaths: [`/data/studio/job-deep-${index}/v1.mp4`],
+    }));
+    const { container } = render(
+      <div data-studio-history-scroll>
+        <RoundList rounds={rounds} focusJobId="job-deep-2" />
+      </div>,
+    );
+    const scrollRoot = container.firstElementChild!;
+    const sentinel = screen.getByTestId('history-load-sentinel');
+
+    // 深链定位阶段还没有 loader observer，反复 scrollIntoView 不会吞批次。
+    expect(observed.has(sentinel)).toBe(false);
+    expect(container.querySelectorAll('[data-round-job]')).toHaveLength(31);
+
+    fireEvent.touchStart(scrollRoot, { touches: [{ clientX: 40, clientY: 100 }] });
+    fireEvent.touchMove(scrollRoot, { touches: [{ clientX: 40, clientY: 70 }] });
+    expect(observed.has(sentinel)).toBe(false);
+
+    fireEvent.touchStart(scrollRoot, { touches: [{ clientX: 40, clientY: 100 }] });
+    fireEvent.touchMove(scrollRoot, { touches: [{ clientX: 100, clientY: 104 }] });
+    expect(observed.has(sentinel)).toBe(false);
+
+    fireEvent.touchStart(scrollRoot, { touches: [{ clientX: 40, clientY: 100 }] });
+    fireEvent.touchMove(scrollRoot, { touches: [{ clientX: 40, clientY: 130 }] });
+    const observation = observed.get(sentinel)!;
+    act(() => observation.callback(
+      [{ isIntersecting: true, target: sentinel } as unknown as IntersectionObserverEntry],
+      observation.observer,
+    ));
+    expect(container.querySelectorAll('[data-round-job]')).toHaveLength(61);
   });
 });
 
@@ -382,6 +489,24 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
     expect(specLine).toBeTruthy();
     expect(specLine).not.toBe(runLine);
     expect(specLine!.textContent).not.toContain('耗时');
+  });
+
+  it('可计价时在运行信息行最右侧显示费用，最多保留两位小数', () => {
+    render(<RoundList rounds={[{
+      ...timedDone,
+      generationCost: 10.111,
+    }]} />);
+
+    const runLine = screen.getByTestId('round-run-meta');
+    const cost = screen.getByTestId('round-generation-cost');
+    expect(runLine).toHaveClass('flex');
+    expect(cost).toHaveTextContent('¥ 10.11');
+    expect(cost).toHaveClass('ml-auto', 'tabular-nums');
+  });
+
+  it('无法计价时不显示费用', () => {
+    render(<RoundList rounds={[timedDone]} />);
+    expect(screen.queryByTestId('round-generation-cost')).toBeNull();
   });
 
   it('旧 job 无 completed_at 时不显示耗时/时间（优雅降级）', () => {
