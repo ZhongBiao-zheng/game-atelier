@@ -3,7 +3,11 @@ import type { KeyView } from '@/api/keys';
 import type { JobParams } from '@/schema/jobs';
 
 export interface GenerationCostRequest {
-  provider?: { provider?: string | null; baseUrl?: string | null };
+  provider?: {
+    provider?: string | null;
+    baseUrl?: string | null;
+    billingGroup?: string | null;
+  };
   model?: { id?: string | null; protocol?: string | null };
   kind: 'image' | 'video';
   count?: number;
@@ -15,12 +19,36 @@ export interface GenerationCostRequest {
   hasReferenceVideo?: boolean;
 }
 
-const CREDITS_PER_YUAN = 10_000;
-const OPENAI_HK_IMAGE_CREDITS: Record<string, Partial<Record<Quality, number>>> = {
-  'gpt-image-2': { low: 600, medium: 1200, high: 2400 },
-  'nano-banana': { low: 2000 },
-  'nano-banana-2': { low: 4800, medium: 9600 },
-  'nano-banana-hd': { low: 3200 },
+const OPENAI_HK_FIXED_YUAN_PER_IMAGE: Record<string, number> = {
+  'gpt-image-2': 0.08,
+  'nano-banana': 0.2,
+  'nano-banana-hd': 0.32,
+};
+const OPENAI_HK_NANO_BANANA_2_YUAN: Partial<Record<Quality, number>> = {
+  low: 0.48,
+  medium: 0.72,
+  high: 1,
+};
+
+const TUZI_DEFAULT_YUAN_PER_IMAGE: Record<string, number> = {
+  'gpt-image-2': 0.035,
+  'doubao-seedream-4-5-251128': 0.12,
+  'seedream-4-5': 0.12,
+  'seedream-5-0-pro': 0.6,
+  'nano-banana-pro': 0.072,
+  'nano-banana-pro-2k': 0.32,
+  'nano-banana-pro-4k': 0.35,
+  'nano-banana-2': 0.3,
+  'nano-banana-2-2k': 0.48,
+  'nano-banana-2-4k': 0.82,
+};
+const TUZI_GROUP_YUAN_PER_IMAGE: Record<string, Record<string, number>> = {
+  default: TUZI_DEFAULT_YUAN_PER_IMAGE,
+  '绘画': { 'gpt-image-2': 0.21 },
+};
+const TOKEN_DANCE_YUAN_PER_IMAGE: Record<string, number> = {
+  'seedream-5-0-lite': 0.22,
+  'seedream-5-0-pro': 0.3,
 };
 
 const ARK_SEEDREAM_YUAN_PER_IMAGE: Record<string, number> = {
@@ -94,6 +122,10 @@ function isOpenAiHk(baseUrl?: string | null): boolean {
   return isDomain(hostname(baseUrl), 'openai-hk.com');
 }
 
+function isTuzi(baseUrl?: string | null): boolean {
+  return isDomain(hostname(baseUrl), 'tu-zi.com');
+}
+
 function isArkDirect(provider?: GenerationCostRequest['provider']): boolean {
   const name = normalize(provider?.provider);
   const configuredBaseUrl = provider?.baseUrl?.trim();
@@ -118,9 +150,25 @@ function protocolMatches(protocol: string | null | undefined, expected: string):
 
 function estimateOpenAiHkImage(request: GenerationCostRequest): number | null {
   const model = normalize(request.model?.id);
-  const credits = request.quality ? OPENAI_HK_IMAGE_CREDITS[model]?.[request.quality] : undefined;
-  if (credits == null) return null;
-  return priced(credits * safeCount(request.count) / CREDITS_PER_YUAN);
+  const unitPrice = model === 'nano-banana-2'
+    ? (request.quality ? OPENAI_HK_NANO_BANANA_2_YUAN[request.quality] : undefined)
+    : OPENAI_HK_FIXED_YUAN_PER_IMAGE[model];
+  if (unitPrice == null) return null;
+  return priced(unitPrice * safeCount(request.count));
+}
+
+function estimateTuziImage(request: GenerationCostRequest): number | null {
+  const group = request.provider?.billingGroup?.trim();
+  if (!group) return null;
+  const model = normalize(request.model?.id);
+  if (group === 'default' && model === 'mj-imagine') return 0.1505;
+  const unitPrice = TUZI_GROUP_YUAN_PER_IMAGE[group]?.[model];
+  return unitPrice == null ? null : priced(unitPrice * safeCount(request.count));
+}
+
+function estimateTokenDanceImage(request: GenerationCostRequest): number | null {
+  const unitPrice = TOKEN_DANCE_YUAN_PER_IMAGE[normalize(request.model?.id)];
+  return unitPrice == null ? null : priced(unitPrice * safeCount(request.count));
 }
 
 function estimateArkImage(request: GenerationCostRequest): number | null {
@@ -191,12 +239,18 @@ function estimateDashScopeVideo(request: GenerationCostRequest): number | null {
 export function estimateGenerationCost(request: GenerationCostRequest): number | null {
   if (!request.model?.id || !request.provider) return null;
 
+  if (request.kind === 'image' && isTuzi(request.provider.baseUrl)) {
+    return estimateTuziImage(request);
+  }
   if (
     request.kind === 'image'
     && isOpenAiHk(request.provider.baseUrl)
     && protocolMatches(request.model.protocol, 'openai')
   ) {
     return estimateOpenAiHkImage(request);
+  }
+  if (request.kind === 'image' && normalize(request.provider.provider) === 'tokendance') {
+    return estimateTokenDanceImage(request);
   }
   if (
     request.kind === 'image'
@@ -242,6 +296,7 @@ export function estimateGenerationCostForSubmission(
     provider: {
       provider: selectedKey.provider,
       baseUrl: selectedKey.base_url,
+      billingGroup: selectedKey.billing_group,
     },
     model: { id: modelId, protocol: selectedModel?.protocol },
     kind,

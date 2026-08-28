@@ -64,6 +64,8 @@ class JobParams(BaseModel):
     n: int | None = None
     # Studio 提交时冻结的可核实人民币总价；无法计算时不写。
     estimated_cost_cny: float | None = Field(default=None, ge=0)
+    # 厂商成功响应返回的实际人民币费用；历史展示优先于预计快照。
+    actual_cost_cny: float | None = Field(default=None, ge=0)
     reference_images: list[str] | None = None
     # Canvas 局部编辑专用：服务端从不可变 mask Content Version 解析，浏览器不能传路径。
     mask_image: str | None = None

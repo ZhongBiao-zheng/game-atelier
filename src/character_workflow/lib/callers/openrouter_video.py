@@ -20,6 +20,7 @@ import requests
 
 from character_workflow.lib import keys as _keys
 from character_workflow.lib.callers import video_poll
+from character_workflow.lib.callers.openrouter_usage import cost_usd
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -102,7 +103,7 @@ def _build_body(prompt: str, model: str, params: dict[str, Any]) -> dict[str, An
 def _poll_job(
     *, polling_url: str, headers: dict, max_polls: int, poll_interval: float,
     task_ref: str = "", should_cancel: Callable[[], bool] | None = None,
-) -> str:
+) -> tuple[str, float | None]:
     """轮询到终态返回下载地址。
 
     网络抖动 / 5xx 交给 video_poll 吞掉重试（不扣 max_polls）；终态只认 body 里的 status。
@@ -126,7 +127,7 @@ def _poll_job(
             # input_references / frame_images，回显进不了这里。
             urls = payload.get("unsigned_urls")
             if isinstance(urls, list) and urls and isinstance(urls[0], str):
-                return urls[0]
+                return urls[0], cost_usd(payload)
             raise OpenRouterVideoError(
                 video_poll.with_task_ref("视频任务成功但未返回下载地址", ref)
             )
@@ -165,6 +166,7 @@ def render_video(
     max_polls: int = 120,
     poll_interval: float = 15.0,
     on_phase: Callable[[str], None] | None = None,
+    on_cost_usd: Callable[[float], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
     **_kwargs,
 ) -> list[str]:
@@ -199,14 +201,19 @@ def render_video(
         on_phase("sent")
 
     out_dir = Path(output_dir)
-    ready_urls = [
-        _poll_job(
-            polling_url=u, headers=headers, max_polls=max_polls,
+    ready_urls: list[str] = []
+    total_cost_usd = 0.0
+    for polling_url, job_id in jobs:
+        ready_url, cost_usd = _poll_job(
+            polling_url=polling_url, headers=headers, max_polls=max_polls,
             poll_interval=poll_interval, task_ref=job_id,
             should_cancel=should_cancel,
         )
-        for u, job_id in jobs
-    ]
+        ready_urls.append(ready_url)
+        if cost_usd is not None:
+            total_cost_usd += cost_usd
+            if on_cost_usd is not None:
+                on_cost_usd(total_cost_usd)
     if on_phase:
         on_phase("downloading")
     return [

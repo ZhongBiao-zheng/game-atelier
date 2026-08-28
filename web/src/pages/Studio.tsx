@@ -1066,7 +1066,10 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
 }
 
 function frozenGenerationCost(job: Job): number | undefined {
-  const amount = job.params?.estimated_cost_cny;
+  const actual = job.params?.actual_cost_cny;
+  const amount = typeof actual === 'number' && Number.isFinite(actual) && actual >= 0
+    ? actual
+    : job.params?.estimated_cost_cny;
   return typeof amount === 'number' && Number.isFinite(amount) && amount >= 0
     ? amount
     : undefined;

@@ -192,6 +192,7 @@ function toKeyRow(k: {
   alias: string;
   provider: string;
   base_url?: string | null;
+  billing_group?: string | null;
   access_key: string;
   models?: {
     name: string;
@@ -213,6 +214,7 @@ function toKeyRow(k: {
     alias: k.alias,
     provider: k.provider,
     base_url: k.base_url ?? null,
+    billing_group: k.billing_group ?? null,
     masked_secret: k.access_key ?? '****',
     models: k.models ?? [],
     capabilities: k.capabilities ?? [],
@@ -231,6 +233,7 @@ function toKeyFormInitial(row: KeyRow): Partial<KeyCreatePayload> {
     alias: row.alias,
     provider: row.provider,
     base_url: row.base_url ?? null,
+    billing_group: row.billing_group ?? null,
     access_key: row.masked_secret,
     capabilities: row.capabilities ?? ['portrait', 'promo', 'turnaround'],
     models: row.models ?? [],

@@ -1289,6 +1289,7 @@ class _KeyCreatePayload(BaseModel):
     alias: str
     provider: str
     base_url: str | None = None
+    billing_group: str | None = None
     access_key: str
     secret_key: str | None = None
     capabilities: list[str] = []
@@ -1313,6 +1314,7 @@ class _KeyCreatePayload(BaseModel):
 
 class _KeyPatchPayload(BaseModel):
     base_url: str | None = None
+    billing_group: str | None = None
     access_key: str | None = None
     secret_key: str | None = None
     capabilities: list[str] | None = None
@@ -1347,6 +1349,7 @@ def create_key(payload: _KeyCreatePayload) -> dict:
         spec = keys.KeySpec(
             alias=payload.alias, provider=payload.provider,
             base_url=payload.base_url,
+            billing_group=payload.billing_group,
             access_key=payload.access_key, secret_key=payload.secret_key,
             capabilities=payload.capabilities, models=payload.models,
             homepage_url=payload.homepage_url,
@@ -1370,6 +1373,9 @@ def create_key(payload: _KeyCreatePayload) -> dict:
 @router.patch("/keys/{alias}")
 def patch_key_endpoint(alias: str, payload: _KeyPatchPayload) -> dict:
     patch_data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    # billing_group 留空表示明确关闭聚合商计价；不能像密钥字段一样把显式 null 当作“未传”。
+    if "billing_group" in payload.model_fields_set:
+        patch_data["billing_group"] = payload.billing_group
     try:
         keys.patch_key(alias, patch_data)
     except keys.NoSuchAliasError:

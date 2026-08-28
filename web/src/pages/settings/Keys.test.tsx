@@ -446,6 +446,30 @@ describe('KeyForm', () => {
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('编辑 my-openrouter');
   });
 
+  it('persists a custom provider billing group', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ alias: 'Tuzi' }) });
+    globalThis.fetch = fetchMock as any;
+    render(
+      <KeyForm
+        mode="edit"
+        initial={{
+          alias: 'Tuzi', provider: 'custom', base_url: 'https://api.tu-zi.com',
+          billing_group: 'default', access_key: 'sk...zz', models: [],
+        }}
+        onCreated={() => {}}
+        onCancel={() => {}}
+        submitLabel="保存修改"
+      />,
+    );
+
+    expect(screen.getByLabelText('计费分组（可选）')).toHaveValue('default');
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    expect(body.billing_group).toBe('default');
+  });
+
   it('edit mode locks existing models to a read-only category badge; new rows stay editable', () => {
     render(
       <KeyForm

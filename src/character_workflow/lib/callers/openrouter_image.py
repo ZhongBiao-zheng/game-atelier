@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import base64
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from character_workflow.lib import keys as _keys
 from character_workflow.lib import net_env
+from character_workflow.lib.callers.openrouter_usage import cost_usd
 
 from .openai_image import OpenAIImageError, _post_json
 
@@ -40,8 +43,6 @@ def render(
     timeout: float | tuple[float, float] = net_env.DEFAULT_TIMEOUT,
     **kwargs: Any,
 ) -> list[str]:
-    from character_workflow.lib import keys as _keys
-
     key = _keys.find_by_alias(alias)
     if key is None:
         raise ValueError(f"alias not found: {alias}")
@@ -58,11 +59,25 @@ def render(
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    on_cost_usd: Callable[[float], None] | None = kwargs.get("on_cost_usd")
+    total_cost_usd = 0.0
+
+    def record_cost(payload: dict[str, Any]) -> None:
+        nonlocal total_cost_usd
+        cost = cost_usd(payload)
+        if cost is None:
+            return
+        total_cost_usd += cost
+        if on_cost_usd is not None:
+            on_cost_usd(total_cost_usd)
+
     data = _post_json(url, key.access_key, _payload(requested), timeout=timeout)
+    record_cost(data)
     paths = _write_outputs(data, out_dir)
     # 部分模型忽略 n 只回 1 张，循环补足（与 openai_image 同策略）。
     while len(paths) < requested:
         data = _post_json(url, key.access_key, _payload(1), timeout=timeout)
+        record_cost(data)
         paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
     return paths[:requested]
 

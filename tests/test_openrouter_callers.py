@@ -77,18 +77,24 @@ def test_dispatch_openrouter_render_writes_b64_outputs(openrouter_key, tmp_path,
     def fake_post_json(url, api_key, payload, *, timeout):
         calls["url"] = url
         calls["payload"] = payload
-        return {"data": [{"b64_json": base64.b64encode(_PNG).decode()}]}
+        return {
+            "data": [{"b64_json": base64.b64encode(_PNG).decode()}],
+            "usage": {"cost": 0.04},
+        }
 
     monkeypatch.setattr(openrouter_image, "_post_json", fake_post_json)
     out = tmp_path / "out"
+    costs = []
     paths = dispatch(
         prompt="a cat", model="openai/gpt-image-2", alias="OpenRouter",
         output_dir=out, n=1, params={"size": "1:1", "quality": "medium"},
+        on_cost_usd=costs.append,
     )
     assert calls["url"] == "https://openrouter.ai/api/v1/images"
     assert calls["payload"]["aspect_ratio"] == "1:1"
     assert len(paths) == 1
     assert Path(paths[0]).read_bytes() == _PNG
+    assert costs == [0.04]
 
 
 def test_video_body_frame_modes(tmp_path):
@@ -148,17 +154,21 @@ def test_video_render_submits_polls_downloads(openrouter_key, tmp_path, monkeypa
             payload["unsigned_urls"] = [
                 "https://openrouter.ai/api/v1/videos/job1/content?index=0"
             ]
+            payload["usage"] = {"cost": 0.25}
         return FakeResp(payload)
 
     monkeypatch.setattr(openrouter_video.requests, "post", fake_post)
     monkeypatch.setattr(openrouter_video.requests, "get", fake_get)
 
+    costs = []
     paths = openrouter_video.render_video(
         prompt="p", model="google/veo-3.1", alias="OpenRouter",
         output_dir=tmp_path / "vid", params={}, poll_interval=0,
+        on_cost_usd=costs.append,
     )
     assert seen["posts"] == 1
     assert Path(paths[0]).read_bytes() == b"MP4DATA"
+    assert costs == [0.25]
 
 
 def test_video_render_failed_status_raises(openrouter_key, tmp_path, monkeypatch):

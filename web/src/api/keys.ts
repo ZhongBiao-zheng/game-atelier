@@ -8,6 +8,7 @@ export interface KeyView {
   is_default?: boolean;
   provider: string;
   base_url: string | null;
+  billing_group?: string | null;
   access_key: string; // masked
   secret_key: null;
   capabilities: string[];
@@ -24,6 +25,7 @@ export interface KeyCreatePayload {
   alias: string;
   provider: string;
   base_url?: string | null;
+  billing_group?: string | null;
   access_key: string;
   secret_key?: string | null;
   capabilities: string[];
