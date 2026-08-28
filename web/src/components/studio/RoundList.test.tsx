@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MJ_DEFAULTS } from '@/lib/mjParams';
 import { RoundList, type RoundState } from './RoundList';
 
 const videoDone: RoundState = {
@@ -32,6 +33,7 @@ const videoWithRefs: RoundState = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -451,6 +453,31 @@ describe('RoundList progress badge', () => {
     render(<RoundList rounds={[imageRound]} />);
     expect(screen.getByTestId('progress-badge').textContent).toBe('20% 生成中');
   });
+
+  it('生成中显示模型、参数、提交时间，并且耗时每秒动态更新', () => {
+    vi.useFakeTimers();
+    const startedAt = Date.UTC(2026, 6, 8, 10, 0, 0);
+    vi.setSystemTime(startedAt + 21_000);
+    const round = pendingRound({
+      startedAt,
+      config: {
+        prompt: '正在生成的图',
+        model: 'mj_fast_imagine',
+        modelName: 'Midjourney',
+        kind: 'image',
+        ratio: '3:4',
+        n: 4,
+        referenceImages: [],
+      },
+    });
+
+    render(<RoundList rounds={[round]} />);
+
+    expect(screen.getByTestId('pending-spec-meta')).toHaveTextContent('Midjourney · 3:4 · 4 张');
+    expect(screen.getByTestId('pending-run-meta')).toHaveTextContent('耗时 21s · 2026-07-08 18:00');
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(screen.getByTestId('pending-run-meta')).toHaveTextContent('耗时 22s');
+  });
 });
 
 describe('RoundList done metadata: 耗时 + 生成时间', () => {
@@ -624,5 +651,28 @@ describe('RoundList reference assets', () => {
     expect(screen.getByTestId('round-mj-flags')).toHaveTextContent('--v 6 --chaos 10');
     expect(screen.getByTestId('round-mj-flags')).not.toHaveTextContent('oss.example');
     expect(screen.getByTestId('round-mj-flags')).not.toHaveTextContent('--sref');
+  });
+
+  it('MJ 历史在实际 flag 未含 seed 时补上后端取回的生成 seed', () => {
+    const round: RoundState = {
+      kind: 'done',
+      jobId: 'job-mj-seed',
+      submittedAt: '2026-07-08T10:00:00+00:00',
+      completedAt: '2026-07-08T10:01:00+00:00',
+      imagePaths: ['/data/studio/job-mj-seed/v1.png'],
+      config: {
+        prompt: '有 seed 的图',
+        model: 'mj_fast_imagine',
+        modelName: 'Midjourney',
+        kind: 'image',
+        referenceImages: [],
+        mjParams: { ...MJ_DEFAULTS, seed: '636646138' },
+        mjFlags: '--niji 7 --ar 3:4 --stylize 100 --chaos 0 --weird 0',
+      },
+    };
+
+    render(<RoundList rounds={[round]} />);
+
+    expect(screen.getByTestId('round-mj-flags')).toHaveTextContent('--seed 636646138');
   });
 });

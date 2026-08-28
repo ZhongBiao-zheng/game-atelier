@@ -1,7 +1,8 @@
 """Midjourney 任务代理协议（midjourney-proxy 兼容）图片 caller。
 
 POST /mj/submit/imagine 拿 result 任务 ID → GET /mj/task/{id}/fetch 轮询 status →
-SUCCESS 后取 imageUrls[].url，拉字节落 .png。鉴权 Authorization: Bearer <key>。
+SUCCESS 后取 imageUrls[].url，并通过 GET /mj/task/{id}/image-seed 取回实际 seed，最后拉字节
+落 .png。鉴权 Authorization: Bearer <key>。
 契约来源：https://api.tu-zi.com/docs/api/midjourney + apifox OpenAPI（343646946e0 / 343646941e0）。
 
 与其他图片 caller 的三处结构性差异（都是 2026-08-17 对 Tuzi MJ 分组实测得来）：
@@ -340,6 +341,31 @@ def _poll_task(
     raise MidjourneyError(f"Midjourney 任务轮询超时: {task_id}")
 
 
+def _fetch_image_seed(*, root: str, headers: dict[str, str], task_id: str) -> int | None:
+    """取回本次生成实际使用的 seed。
+
+    midjourney-proxy 的 fetch 终态不含 seed，需要另打 image-seed。这个接口依赖渠道的 Bot
+    私信配置，失败时只能缺省元数据，不能把已经成功并计费的图片判成失败。
+    """
+    try:
+        resp = requests.get(
+            f"{root}/mj/task/{task_id}/image-seed",
+            headers=headers,
+            timeout=60,
+        )
+        payload = _json(resp)
+    except (requests.RequestException, MidjourneyError):
+        return None
+    if not resp.ok or payload.get("code") != 1:
+        return None
+    raw = payload.get("result")
+    try:
+        seed = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return seed if seed >= 0 else None
+
+
 def render(
     *,
     prompt: str,
@@ -399,11 +425,25 @@ def render(
     paths: list[str] = []
     downloading = False
     for task_id in task_ids:
-        for url in _poll_task(
+        urls = _poll_task(
             root=root, headers=headers, task_id=task_id,
             max_polls=max_polls, poll_interval=poll_interval,
             should_cancel=should_cancel,
-        ):
+        )
+        # UI 的 Midjourney 一次任务固定返回 4 张，共享同一个 seed。多任务（n>4）会有多个
+        # seed，现有 JobParams 没有可准确表达它们的字段，因此只在单任务时回填。
+        if len(task_ids) == 1 and params.get("mj_seed") in (None, ""):
+            generated_seed = _fetch_image_seed(root=root, headers=headers, task_id=task_id)
+            if generated_seed is not None:
+                params["mj_seed"] = generated_seed
+                if params_in is not None:
+                    params_in["mj_seed"] = generated_seed
+            else:
+                _warn(
+                    params_in,
+                    "未能取回 Midjourney seed；渠道需要配置 Bot 私信 ID，图片结果不受影响",
+                )
+        for url in urls:
             if on_phase and not downloading:
                 downloading = True
                 on_phase("downloading")

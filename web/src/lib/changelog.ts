@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.14',
+    date: '2026-08-28',
+    headline: '生成中补齐参数，Midjourney 记录真实种子',
+    changes: [
+      { kind: 'fix', text: '图片和视频生成过程中同步显示模型、规格、提交时间与动态耗时，样式与完成记录一致' },
+      { kind: 'fix', text: 'Midjourney 成功出图后自动取回实际 seed，并显示在该轮历史参数中；取回失败不影响已付费图片' },
+    ],
+  },
+  {
     version: '5.31.13',
     date: '2026-08-28',
     headline: '已核实渠道费用写入生成记录',

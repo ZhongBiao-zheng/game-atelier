@@ -80,6 +80,23 @@ function aspectStyle(config: RoundConfig): { aspectRatio: string } {
   return { aspectRatio: '1 / 1' };
 }
 
+function specMetadata(config: RoundConfig): string[] {
+  return [
+    config.modelName ?? config.model,
+    config.size,
+    config.ratio,
+    config.resolution,
+    config.n && config.n > 1 ? `${config.n} 张` : undefined,
+  ].filter((value): value is string => Boolean(value));
+}
+
+function shownMjMetadata(config: RoundConfig): string {
+  const flags = visibleMjFlags(config.mjFlags);
+  const seed = config.mjParams?.seed.trim();
+  if (!seed || /(?:^|\s)--seed(?:\s|$)/.test(flags)) return flags;
+  return [flags, `--seed ${seed}`].filter(Boolean).join(' ');
+}
+
 export function RoundList({
   rounds,
   focusJobId,
@@ -213,43 +230,14 @@ export function RoundList({
               {(mediaActive) => (
               <>
               {r.kind === 'pending' && (
-                <div className="mb-3">
-                  <WaitingCopy startedAt={r.startedAt} />
-                </div>
-              )}
-              {r.kind === 'pending' && (
-                <section className="space-y-3">
-                  <div className="flex items-start gap-3 text-sm">
-                    <ReferenceStack config={r.config} jobId={r.jobId} onReuse={onReuseReferences} mediaActive={mediaActive} />
-                    <div className="min-w-0 flex-1">
-                      <MentionPrompt prompt={r.config.prompt} config={r.config} jobId={r.jobId} mediaActive={mediaActive} />
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {Array.from({ length: Math.max(1, r.config.n ?? 1) }, (_, i) => (
-                      <div
-                        key={i}
-                        data-testid={i === 0 && r.jobId ? `studio-pending-${r.jobId}` : undefined}
-                        data-skeleton
-                        aria-busy="true"
-                        style={aspectStyle(r.config)}
-                        className="relative w-[251.5px] bg-card/40 rounded-lg flex items-center justify-center"
-                      >
-                        <ProgressBadge round={r} />
-                        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <ActionButton onClick={() => { void onReEdit?.(r.config, r.jobId); }}>重新编辑</ActionButton>
-                    <ActionButton onClick={() => { void onRegenerate?.(r.config); }}>再次生成</ActionButton>
-                    {r.jobId && onDeleteFailed && (
-                      <ActionButton compact aria-label="删除出图记录" title="删除出图记录" onClick={() => { void onDeleteFailed(r.jobId!); }}>
-                        <Trash2 className="size-4" />
-                      </ActionButton>
-                    )}
-                  </div>
-                </section>
+                <PendingBatch
+                  round={r}
+                  onDeleteFailed={onDeleteFailed}
+                  onReEdit={onReEdit}
+                  onRegenerate={onRegenerate}
+                  onReuseReferences={onReuseReferences}
+                  mediaActive={mediaActive}
+                />
               )}
               {r.kind === 'done' && (
                 <DoneBatch
@@ -285,6 +273,96 @@ export function RoundList({
         })}
       </div>
       {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+    </>
+  );
+}
+
+function PendingBatch({
+  round,
+  onDeleteFailed,
+  onReEdit,
+  onRegenerate,
+  onReuseReferences,
+  mediaActive,
+}: {
+  round: Extract<RoundState, { kind: 'pending' }>;
+  onDeleteFailed?: (jobId: string) => void | Promise<void>;
+  onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
+  onRegenerate?: (config: RoundConfig) => void | Promise<void>;
+  onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
+  mediaActive: boolean;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const specMeta = specMetadata(round.config);
+  const shownMjFlags = shownMjMetadata(round.config);
+  const elapsedSec = Math.max(0, Math.floor((now - round.startedAt) / 1000));
+  const submittedAt = formatBeijingTime(new Date(round.startedAt).toISOString());
+
+  return (
+    <>
+      <div className="mb-3">
+        <WaitingCopy startedAt={round.startedAt} now={now} />
+      </div>
+      <section className="space-y-3">
+        <div className="flex items-start gap-3 text-sm">
+          <ReferenceStack
+            config={round.config}
+            jobId={round.jobId}
+            onReuse={onReuseReferences}
+            mediaActive={mediaActive}
+          />
+          <div className="min-w-0 flex-1">
+            <MentionPrompt
+              prompt={round.config.prompt}
+              config={round.config}
+              jobId={round.jobId}
+              mediaActive={mediaActive}
+            />
+            <p data-testid="pending-spec-meta" className="mt-1 text-sm text-muted-foreground">
+              {specMeta.join(' · ')}
+              {shownMjFlags && (
+                <span className="ml-2 text-muted-foreground/60">{shownMjFlags}</span>
+              )}
+            </p>
+            <p data-testid="pending-run-meta" className="mt-0.5 text-xs text-muted-foreground/60">
+              耗时 {elapsedSec}s · {submittedAt}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {Array.from({ length: Math.max(1, round.config.n ?? 1) }, (_, i) => (
+            <div
+              key={i}
+              data-testid={i === 0 && round.jobId ? `studio-pending-${round.jobId}` : undefined}
+              data-skeleton
+              aria-busy="true"
+              style={aspectStyle(round.config)}
+              className="relative flex w-[251.5px] items-center justify-center rounded-lg bg-card/40"
+            >
+              <ProgressBadge round={round} now={now} />
+              <div className="size-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
+          <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
+          {round.jobId && onDeleteFailed && (
+            <ActionButton
+              compact
+              aria-label="删除出图记录"
+              title="删除出图记录"
+              onClick={() => { void onDeleteFailed(round.jobId!); }}
+            >
+              <Trash2 className="size-4" />
+            </ActionButton>
+          )}
+        </div>
+      </section>
     </>
   );
 }
@@ -343,12 +421,13 @@ function progressPercent(opts: {
   return 20;
 }
 
-function ProgressBadge({ round }: { round: Extract<RoundState, { kind: 'pending' }> }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+function ProgressBadge({
+  round,
+  now,
+}: {
+  round: Extract<RoundState, { kind: 'pending' }>;
+  now: number;
+}) {
   const percent = progressPercent({
     isVideo: round.config.kind === 'video',
     phase: round.progressPhase,
@@ -691,18 +770,12 @@ function DoneBatch({
       : null;
   // 两行分层：出图参数（模型/尺寸/比例/清晰度/张数）是主元信息；耗时 + 生成时间是运行信息，
   // 降到更小更淡的次行，别和参数挤在一行。
-  const specMeta = [
-    round.config.modelName ?? round.config.model,
-    round.config.size,
-    round.config.ratio,
-    round.config.resolution,
-    round.config.n && round.config.n > 1 ? `${round.config.n} 张` : undefined,
-  ].filter(Boolean);
+  const specMeta = specMetadata(round.config);
   const runMeta = [
     elapsedSec != null ? `耗时 ${elapsedSec}s` : undefined,
     round.completedAt ? formatBeijingTime(round.completedAt) : undefined,
   ].filter(Boolean);
-  const shownMjFlags = visibleMjFlags(round.config.mjFlags);
+  const shownMjFlags = shownMjMetadata(round.config);
 
   return (
     <section className="space-y-3">

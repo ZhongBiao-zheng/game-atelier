@@ -1,11 +1,4 @@
-import { useEffect, useState } from 'react';
-
-export function WaitingCopy({ startedAt }: { startedAt: number }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
+export function WaitingCopy({ startedAt, now }: { startedAt: number; now: number }) {
   const elapsed = Math.floor((now - startedAt) / 1000);
   let copy = '';
   if (elapsed >= 30) copy = '可能要再等一会，复杂场景慢一点。';
