@@ -31,6 +31,42 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.12',
+    date: '2026-08-27',
+    headline: '生成面板只保留操作，不再常驻提示',
+    changes: [
+      { kind: 'fix', text: '所有节点生成面板删除完成状态、配置状态和阻塞原因等常驻文案' },
+      { kind: 'fix', text: '配置无法生成时保持按钮可点击，点击后统一在画布中上方提示原因' },
+    ],
+  },
+  {
+    version: '5.31.11',
+    date: '2026-08-27',
+    headline: '视频结果回到节点，文本连接同步引用',
+    changes: [
+      { kind: 'fix', text: '视频生成设置不再重复预览结果；多个视频候选改在视频节点上依次展开' },
+      { kind: 'fix', text: '文本连接到全能参考视频后自动显示对应引用，断开后同步清空引用' },
+      { kind: 'fix', text: '空提示词不再占用底栏提示位置，生成按钮始终保留独立空间' },
+    ],
+  },
+  {
+    version: '5.31.10',
+    date: '2026-08-27',
+    headline: '节点弹窗只在上下跟随',
+    changes: [
+      { kind: 'fix', text: '节点生成弹窗只在节点正上方或正下方跟随，不再跳到左右，也不再为适应屏幕改变横向位置' },
+    ],
+  },
+  {
+    version: '5.31.9',
+    date: '2026-08-27',
+    headline: '文本编辑完成后再保存，新节点自动避让',
+    changes: [
+      { kind: 'fix', text: '文本节点编辑期间只更新画布内存，退出编辑后统一自动保存一次' },
+      { kind: 'feat', text: '新建节点不再默认选中，并从当前视口中心向外寻找最近的空白位置' },
+    ],
+  },
+  {
     version: '5.31.8',
     date: '2026-08-28',
     headline: '费用统一显示在生成历史右侧',
@@ -52,11 +88,12 @@ export const CHANGELOG: ChangelogEntry[] = [
   {
     version: '5.31.6',
     date: '2026-08-27',
-    headline: '创作台统一显示图片和视频预估费用',
+    headline: '创作台统一显示费用，文本自动保存不再打断编辑',
     changes: [
       { kind: 'fix', text: '创作台按实际渠道、模型、画质、数量、时长和分辨率统一计算本次生成费用，OpenAI-HK 图片、火山直连 Seedream / Seedance 与百炼直连 HappyHorse 均可显示' },
       { kind: 'fix', text: '没有核实价格的模型、档位或聚合渠道不显示费用提示，避免把官方直连价错误套到聚合渠道' },
       { kind: 'fix', text: 'Seedance 视频按输出 token 显示约价；带参考视频但无法取得素材时长时停止低估且不显示费用' },
+      { kind: 'fix', text: '文本节点自动保存、切换应用或输入法候选窗临时失焦时继续保持编辑；点击编辑区外部、Tab 移开焦点或按 Escape 才退出' },
     ],
   },
   {

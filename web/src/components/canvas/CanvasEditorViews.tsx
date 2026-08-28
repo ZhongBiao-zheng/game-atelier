@@ -14,10 +14,9 @@ import { ArrowLeftRight, Check, ChevronRight, ClipboardCopy, Download, Ellipsis,
 import {
   createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef,
   useState,
-  type ReactNode, type Ref, type RefObject,
+  type FocusEvent as ReactFocusEvent, type ReactNode, type Ref, type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Link } from 'wouter';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import type { KeyView } from '@/api/keys';
@@ -42,7 +41,6 @@ import {
   CanvasNodeRunOverlay,
   canvasNodeRunDisplayError,
   canvasNodeRunState,
-  canvasNodeRunStateForJob,
   isReversePromptJob,
 } from '@/components/canvas/CanvasNodeRunStatus';
 import { formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
@@ -145,6 +143,7 @@ export interface CanvasNodeContextValue {
   selectNode: (id: string) => void;
   previewContent: (id: string, title: string, nodeId: string) => void;
   selectCandidate: (id: string, versionId: string) => void;
+  reportError?: (message: string) => void;
   submitRun: (id: string) => Promise<void>;
   retryRun: (id: string, runId: string) => Promise<void>;
   cancelRun: (runId: string) => Promise<void>;
@@ -154,6 +153,7 @@ export interface CanvasNodeContextValue {
   completeNodeResize?: (id: string, layout: { position: CanvasPoint; size: CanvasSize }) => void;
   renameNode: (id: string, title: string) => void;
   updateText: (id: string, text: string) => void;
+  setTextEditing?: (id: string, editing: boolean) => void;
   createImageConfigFromText: (id: string) => void;
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
@@ -175,9 +175,11 @@ export const CanvasNodeContext = createContext<CanvasNodeContextValue | null>(nu
 const EMPTY_CANVAS_NODE_IDS: ReadonlySet<string> = new Set();
 const EMPTY_VIDEO_FRAME_NODE_IDS: Readonly<Partial<Record<CanvasVideoFrameSlot, string>>> = {};
 const EMPTY_CANVAS_PENDING_INPUTS: readonly CanvasPendingInput[] = [];
+const EMPTY_CANVAS_MENTION_REFERENCES: readonly CanvasMentionReference[] = [];
 
 export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const context = useContext(CanvasNodeContext);
+  const setTextEditing = context?.setTextEditing;
   const node = data.domain;
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
@@ -185,6 +187,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const titleTriggerRef = useRef<HTMLButtonElement>(null);
   const textEditorRef = useRef<HTMLTextAreaElement>(null);
+  const textEditingExitRequested = useRef(false);
+  const textSelectionRef = useRef<{
+    start: number;
+    end: number;
+    direction: 'forward' | 'backward' | 'none';
+  } | null>(null);
   const contentSurfaceRef = useRef<HTMLElement>(null);
   const titleExitInProgress = useRef(false);
   const restoreTitleFocus = useRef(false);
@@ -222,7 +230,32 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     const editor = textEditorRef.current;
     editor?.focus();
     editor?.setSelectionRange(editor.value.length, editor.value.length);
+    if (editor) rememberTextSelection(editor);
   }, [isEditingText]);
+  useLayoutEffect(() => {
+    if (!isEditingText || textEditingExitRequested.current) return;
+    const editor = textEditorRef.current;
+    if (!editor || window.document.activeElement === editor) return;
+    // 保存回写可能替换 textarea DOM，旧节点不会再触发 blur。编辑会话仍有效时把焦点
+    // 和选区交给新节点；普通输入时 activeElement 已经是 editor，不会触碰当前选区。
+    editor.focus({ preventScroll: true });
+    restoreTextSelection(editor);
+  }, [isEditingText, node]);
+  useEffect(() => {
+    if (!isEditingText) return;
+    const finishOnOutsidePointer = (event: PointerEvent) => {
+      const surface = contentSurfaceRef.current;
+      if (!surface || !(event.target instanceof Element) || surface.contains(event.target)) return;
+      textEditingExitRequested.current = true;
+      setTextEditing?.(node.id, false);
+      setIsEditingText(false);
+    };
+    // blur 不能代表用户结束编辑：自动保存重渲染、切应用和输入法候选窗都可能让
+    // textarea 短暂失焦。只响应用户明确点到编辑区外的 pointerdown。
+    window.document.addEventListener('pointerdown', finishOnOutsidePointer, true);
+    return () => window.document.removeEventListener('pointerdown', finishOnOutsidePointer, true);
+  }, [isEditingText, node.id, setTextEditing]);
+  useEffect(() => () => setTextEditing?.(node.id, false), [node.id, setTextEditing]);
   useEffect(() => {
     if (isEditingTitle) return;
     if (restoreTitleFocus.current) titleTriggerRef.current?.focus();
@@ -284,8 +317,20 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     : null;
   const reversePromptJob = nodeJob && isReversePromptJob(nodeJob) ? nodeJob : undefined;
   const reversePromptSucceeded = reversePromptJob?.canvas_run?.candidates.some(candidate => candidate.status === 'succeeded') ?? false;
-  const imageCandidates = node.type === 'image'
-    ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? []).current
+  const candidatePresentation = node.type === 'image' || node.type === 'video'
+    ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? [])
+    : null;
+  const mediaCandidates = candidatePresentation
+    ? node.type === 'video'
+      ? [
+          ...candidatePresentation.current,
+          ...candidatePresentation.history.filter(entry => (
+            entry.candidate.status === 'succeeded'
+            && Boolean(entry.candidate.version_id)
+            && !entry.candidate.dismissed_at
+          )),
+        ]
+      : candidatePresentation.current
     : [];
 
   function beginTitleEditing() {
@@ -317,12 +362,52 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     if (!context || node.type !== 'text' || isEditingText) return;
     context.selectNode(node.id);
     context.recordHistory();
+    textEditingExitRequested.current = false;
+    textSelectionRef.current = null;
+    setTextEditing?.(node.id, true);
     setIsEditingText(true);
   }
 
   function finishTextEditing(restoreFocus: boolean) {
+    textEditingExitRequested.current = true;
+    setTextEditing?.(node.id, false);
     setIsEditingText(false);
     if (restoreFocus) requestAnimationFrame(() => contentSurfaceRef.current?.focus());
+  }
+
+  function restoreTextEditingFocus() {
+    requestAnimationFrame(() => {
+      if (textEditingExitRequested.current) return;
+      const editor = textEditorRef.current;
+      editor?.focus({ preventScroll: true });
+      if (editor) restoreTextSelection(editor);
+    });
+  }
+
+  function rememberTextSelection(editor: HTMLTextAreaElement) {
+    textSelectionRef.current = {
+      start: editor.selectionStart,
+      end: editor.selectionEnd,
+      direction: editor.selectionDirection,
+    };
+  }
+
+  function restoreTextSelection(editor: HTMLTextAreaElement) {
+    const selection = textSelectionRef.current;
+    if (!selection) return;
+    const end = Math.min(selection.end, editor.value.length);
+    const start = Math.min(selection.start, end);
+    editor.setSelectionRange(start, end, selection.direction);
+  }
+
+  function handleTextEditorBlur(event: ReactFocusEvent<HTMLTextAreaElement>) {
+    // Tab、辅助技术或弹窗把焦点明确移到另一个控件时结束编辑，避免形成焦点陷阱。
+    // 自动保存替换 DOM、切换应用和输入法候选窗造成的临时失焦通常没有 relatedTarget。
+    if (event.relatedTarget instanceof Element) {
+      finishTextEditing(false);
+      return;
+    }
+    restoreTextEditingFocus();
   }
 
   function setTextScale(direction: -1 | 1) {
@@ -490,10 +575,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           )}
         </div>
       </NodeToolbar>
-      {node.type === 'image' && imageCandidates.length > 0 && (
-        <ImageCandidateBatch
+      {(node.type === 'image' || node.type === 'video') && mediaCandidates.length > 0 && (
+        <MediaCandidateBatch
           node={node}
-          entries={imageCandidates}
+          entries={mediaCandidates}
           primaryVersionId={node.data.current_version_id}
           expanded={candidateBatchExpanded}
           disabled={submittingNode || nodeRunState.status === 'loading'}
@@ -580,19 +665,21 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
                   'nodrag nowheel block h-full min-h-32 w-full resize-none overflow-y-auto border-0 bg-transparent p-3 leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
                   textScaleClass(node.data.display.scale),
                 )}
-                onChange={event => context.updateText(node.id, event.target.value)}
-                onBlur={() => {
-                  // 整个窗口 / 标签页失焦时不退出编辑态：切应用、切标签，以及 Windows 上
-                  // 部分中文输入法的候选窗，都会让 textarea 收到 blur。退出编辑态会连带把
-                  // 正在进行的输入法组合掐断，画师看到的就是「打着字突然被弹出来、输入法
-                  // 也断了」。焦点仍在本页内（真的点了别处）时照旧退出。
-                  if (!document.hasFocus()) return;
-                  finishTextEditing(false);
+                onChange={event => {
+                  rememberTextSelection(event.target);
+                  context.updateText(node.id, event.target.value);
                 }}
+                onSelect={event => rememberTextSelection(event.currentTarget)}
+                onBlur={handleTextEditorBlur}
                 onPointerDown={event => event.stopPropagation()}
                 onDoubleClick={event => event.stopPropagation()}
                 onKeyDown={event => {
                   event.stopPropagation();
+                  if (event.key === 'Tab') {
+                    event.preventDefault();
+                    finishTextEditing(true);
+                    return;
+                  }
                   if (event.key !== 'Escape') return;
                   event.preventDefault();
                   finishTextEditing(true);
@@ -700,8 +787,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
 
 export const CANVAS_GENERATION_PANEL_WIDTH = 608;
 const CANVAS_GENERATION_PANEL_GAP = 16;
-/** 四个位置都放不下时，面板可以窄到这个宽度去换「不压住节点」。 */
-const CANVAS_GENERATION_PANEL_MIN_WIDTH = 360;
 
 /** 只用到矩形的这几个数，写成最小接口好让放置逻辑纯函数化、能单测。 */
 export interface CanvasPanelRect {
@@ -720,33 +805,23 @@ export interface CanvasPanelPlacement {
   maxHeight: number;
 }
 
-/** 生成面板放在哪：贴着节点，但整体夹在可视区域内。视口坐标系。
+/** 生成面板只贴在节点正下方或正上方，视口坐标系。
  *
- *  顺序是下方 → 上方 → 侧面 → 贴住可视区。**侧面这一档是为了不压住锚点节点**：面板高度
- *  520-660（视频面板最高），1440×900 这一档常见的情况是上下都差几十像素装不下，原来直接
- *  落到最后一档「贴住可视区」，结果面板压掉选中节点的下半张图——而画师正要看着那张图写
- *  提示词。有横向余量时改放到节点侧面，节点整张可见。
+ *  横坐标永远按节点中心对齐，不再为了留在屏幕里而夹边、压窄或跳到节点左右。这样拖动节点时
+ *  面板与节点的空间关系始终稳定；节点靠近画布边缘时允许面板自然超出可视范围。
  *
- *  最后一档仍然会压住节点一部分，但那时节点本身已经占满可用区域，没有不压的摆法；
- *  这一档靠 maxHeight 限高（面板内部滚动）保证面板自己完整可达。 */
+ *  垂直方向优先放下方，下方放不下再放上方；两边都放不下时选剩余空间更大的一侧。maxHeight
+ *  仍负责限制超高内容并让面板内部滚动，不参与横向适配。 */
 export function placeCanvasGenerationPanel(
   anchor: CanvasPanelRect,
   bounds: CanvasPanelRect,
   panelHeight: number,
 ): CanvasPanelPlacement {
   const gap = CANVAS_GENERATION_PANEL_GAP;
-  const width = Math.min(CANVAS_GENERATION_PANEL_WIDTH, Math.max(240, bounds.width - gap * 2));
+  const width = CANVAS_GENERATION_PANEL_WIDTH;
   const maxHeight = Math.max(160, bounds.height - gap * 2);
   const height = Math.min(panelHeight > 0 ? panelHeight : maxHeight, maxHeight);
-  const clampLeft = (value: number) => Math.min(
-    Math.max(value, bounds.left + gap),
-    Math.max(bounds.left + gap, bounds.right - width - gap),
-  );
-  const clampTop = (value: number) => Math.min(
-    Math.max(value, bounds.top + gap),
-    Math.max(bounds.top + gap, bounds.bottom - gap - height),
-  );
-  const alignedLeft = clampLeft(anchor.left + anchor.width / 2 - width / 2);
+  const alignedLeft = anchor.left + anchor.width / 2 - width / 2;
 
   const below = anchor.bottom + gap;
   if (below + height <= bounds.bottom - gap) {
@@ -757,51 +832,14 @@ export function placeCanvasGenerationPanel(
     return { left: alignedLeft, top: above, width, maxHeight };
   }
 
-  const beside = clampTop(anchor.top + anchor.height / 2 - height / 2);
-  const toRight = anchor.right + gap;
-  if (toRight + width <= bounds.right - gap) {
-    return { left: toRight, top: beside, width, maxHeight };
-  }
-  const toLeft = anchor.left - gap - width;
-  if (toLeft >= bounds.left + gap) {
-    return { left: toLeft, top: beside, width, maxHeight };
-  }
-
-  // 到这里四个位置都放不下了。压住节点会直接毁掉交互 —— 面板盖住节点，双击节点进编辑态的
-  // 落点就变成了面板，画师打字进不去文本框：按字母不启动输入法、按退格删掉整个节点
-  // （2026-08-27 画师实测报的就是这一串）。所以宁可把面板压窄换「零重叠」，也不要全宽压住节点。
-  const rightRoom = bounds.right - gap - (anchor.right + gap);
-  const leftRoom = (anchor.left - gap) - (bounds.left + gap);
-  const widestSide = Math.max(rightRoom, leftRoom);
-  if (widestSide >= CANVAS_GENERATION_PANEL_MIN_WIDTH) {
-    const narrow = Math.min(width, widestSide);
-    return {
-      left: rightRoom >= leftRoom ? anchor.right + gap : anchor.left - gap - narrow,
-      top: beside,
-      width: narrow,
-      maxHeight,
-    };
-  }
-
-  // 四个位置都放不下时，不能直接贴着可视区下沿摆：alignedLeft 是按节点居中算的，贴下沿的
-  // 结果正好把整个节点盖住（1280×720 实测：面板 584×280、节点在视口中部，above 只差 16px
-  // 就够）。改成在「已经夹进可视区」的四个候选里挑与节点重叠面积最小的那个 —— 同一个例子里
-  // 贴上沿只压住节点顶部 16px，节点主体仍然看得见。纯几何比较，不含位置偏好。
-  const overlapArea = (left: number, top: number) => {
-    const horizontal = Math.max(0, Math.min(left + width, anchor.right) - Math.max(left, anchor.left));
-    const vertical = Math.max(0, Math.min(top + height, anchor.bottom) - Math.max(top, anchor.top));
-    return horizontal * vertical;
+  const roomBelow = bounds.bottom - anchor.bottom;
+  const roomAbove = anchor.top - bounds.top;
+  return {
+    left: alignedLeft,
+    top: roomBelow >= roomAbove ? below : above,
+    width,
+    maxHeight,
   };
-  const fallbacks = [
-    { left: alignedLeft, top: clampTop(anchor.bottom + gap) },
-    { left: alignedLeft, top: clampTop(anchor.top - gap - height) },
-    { left: clampLeft(anchor.right + gap), top: beside },
-    { left: clampLeft(anchor.left - gap - width), top: beside },
-  ];
-  const leastCovering = fallbacks.reduce((best, candidate) => (
-    overlapArea(candidate.left, candidate.top) < overlapArea(best.left, best.top) ? candidate : best
-  ));
-  return { ...leastCovering, width, maxHeight };
 }
 
 /** 画布外框上的常驻控件占了哪几条边。
@@ -861,7 +899,7 @@ function samePlacement(a: CanvasPanelPlacement | null, b: CanvasPanelPlacement) 
  *  left=-77，提示词编辑区左边 64px 落在视口外，看不见也点不到）；而且它活在 transform 层里，
  *  夹视口这件事在那儿做不到——父级 transform 之后再 clamp 也夹不回来。
  *  portal 到 .canvas-editor-region（position:relative）之后：尺寸恒定不再受缩放影响，位置按节点
- *  的屏幕矩形算并夹在容器内，文字也不再被分数倍缩放糊掉。
+ *  的屏幕矩形算，文字也不再被分数倍缩放糊掉。
  *
  *  位置状态留在本组件内：children 由父级 render 传进来，本组件因平移重新定位时 children 仍是
  *  同一个 element 引用，React 会跳过整棵子树，面板内容不会跟着每帧重渲染。 */
@@ -949,7 +987,7 @@ function CanvasNodeFloatingPanel({
   );
 }
 
-function ImageCandidateBatch({
+function MediaCandidateBatch({
   node,
   entries,
   primaryVersionId,
@@ -958,7 +996,7 @@ function ImageCandidateBatch({
   context,
   onToggle,
 }: {
-  node: Extract<CanvasContentNode, { type: 'image' }>;
+  node: Extract<CanvasContentNode, { type: 'image' | 'video' }>;
   entries: CanvasCandidateEntry[];
   primaryVersionId: string | null;
   expanded: boolean;
@@ -969,6 +1007,7 @@ function ImageCandidateBatch({
   const primary = entries.find(entry => entry.candidate.version_id === primaryVersionId) ?? entries[0];
   const others = entries.filter(entry => entry.candidate.candidate_id !== primary.candidate.candidate_id);
   const primaryTerminalFailure = primary.candidate.status === 'failed' || primary.candidate.status === 'canceled';
+  const primaryNumber = node.type === 'video' ? 1 : primary.candidate.index + 1;
 
   return (
     <div
@@ -985,18 +1024,19 @@ function ImageCandidateBatch({
         />
       ))}
       {expanded && entries.length > 1 && others.map((entry, index) => (
-        <ImageCandidateCard
+        <MediaCandidateCard
           key={entry.candidate.candidate_id}
           node={node}
           entry={entry}
           index={index}
+          number={node.type === 'video' ? index + 2 : entry.candidate.index + 1}
           disabled={disabled}
           context={context}
         />
       ))}
       {primaryTerminalFailure && !disabled && (
         <CandidateFailureActions
-          number={primary.candidate.index + 1}
+          number={primaryNumber}
           onDismiss={() => void context.dismissCandidate(
             primary.job.canvas_run!.run_id,
             primary.candidate.candidate_id,
@@ -1023,16 +1063,18 @@ function ImageCandidateBatch({
   );
 }
 
-function ImageCandidateCard({
+function MediaCandidateCard({
   node,
   entry,
   index,
+  number,
   disabled,
   context,
 }: {
-  node: Extract<CanvasContentNode, { type: 'image' }>;
+  node: Extract<CanvasContentNode, { type: 'image' | 'video' }>;
   entry: CanvasCandidateEntry;
   index: number;
+  number: number;
   disabled: boolean;
   context: CanvasNodeContextValue;
 }) {
@@ -1043,7 +1085,7 @@ function ImageCandidateCard({
   return (
     <section
       role="group"
-      aria-label={`候选 ${candidate.index + 1}`}
+      aria-label={`候选 ${number}`}
       className="pointer-events-auto absolute top-0 z-20 h-full overflow-hidden rounded-lg border border-border bg-card shell-glow"
       style={{
         left: `calc(${horizontalOffset * 100}% + ${horizontalOffset * 16}px)`,
@@ -1052,15 +1094,27 @@ function ImageCandidateCard({
       onPointerDown={event => event.stopPropagation()}
       onDoubleClick={event => {
         event.stopPropagation();
-        if (version) context.previewContent(version.version_id, `${node.title} · 候选 ${candidate.index + 1}`, node.id);
+        if (version) context.previewContent(version.version_id, `${node.title} · 候选 ${number}`, node.id);
       }}
     >
-      {version?.kind === 'image'
-        ? <MediaPreview kind="image" src={canvasMediaUrl(context.projectId, version.version_id, node.size?.width ?? 320)} />
+      {version?.kind === node.type
+        ? (
+          <MediaPreview
+            kind={version.kind}
+            src={canvasMediaUrl(
+              context.projectId,
+              version.version_id,
+              version.kind === 'image' ? node.size?.width ?? 320 : undefined,
+            )}
+            title={`${node.title} · 候选 ${number}`}
+            fit={node.data.display.fit}
+            freeResize={node.data.display.free_resize}
+          />
+        )
         : (
           <div className="grid size-full min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
             {candidate.status === 'pending'
-              ? <LoaderCircle className="animate-spin" aria-label={`候选 ${candidate.index + 1} 生成中`} />
+              ? <LoaderCircle className="animate-spin" aria-label={`候选 ${number} 生成中`} />
               : canvasNodeRunDisplayError(
                 candidate.error,
                 candidate.status === 'canceled' ? '已停止' : '结果待同步',
@@ -1068,12 +1122,12 @@ function ImageCandidateCard({
           </div>
         )}
       <span className="absolute left-2 top-2 rounded-md border border-border bg-glass px-2 py-1 text-xs text-muted-foreground backdrop-blur-glass">
-        {candidate.index + 1}
+        {number}
       </span>
-      {!disabled && version?.kind === 'image' && (
+      {!disabled && version?.kind === node.type && (
         <button
           type="button"
-          aria-label={`将候选 ${candidate.index + 1} 设为主结果`}
+          aria-label={`将候选 ${number} 设为主结果`}
           title="设为主结果"
           className="absolute bottom-2 left-2 grid size-8 place-items-center rounded-full border border-border bg-glass text-muted-foreground backdrop-blur-glass transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           onClick={event => {
@@ -1086,7 +1140,7 @@ function ImageCandidateCard({
       )}
       {terminalFailure && !disabled && (
         <CandidateFailureActions
-          number={candidate.index + 1}
+          number={number}
           onDismiss={() => void context.dismissCandidate(
             entry.job.canvas_run!.run_id,
             candidate.candidate_id,
@@ -1718,7 +1772,8 @@ export function CanvasGenerationComposer({
   const textMode = draft.mode === 'text';
   const modeLabel = CANVAS_GENERATION_MODE_LABELS[draft.mode];
   const panelLabel = `${modeLabel}设置`;
-  const mentionReferences = context.mentionReferencesByNodeId.get(node.id) ?? [];
+  const mentionReferences = context.mentionReferencesByNodeId.get(node.id)
+    ?? EMPTY_CANVAS_MENTION_REFERENCES;
   const mentionsEnabled = !usesVideoFrameSlots;
   const frameModeHasMentions = usesVideoFrameSlots && canvasMentionMatches(draft.prompt).length > 0;
   const missingMentionIds = mentionsEnabled
@@ -1772,8 +1827,7 @@ export function CanvasGenerationComposer({
     videoReferenceCapacityExceeded,
     pendingInputTitles: blockingPendingInputs.map(input => input.title),
   });
-  // 结构性阻塞（没有可用模型 / 没选模型 / 没提示词）排在引用问题前面：引用问题上面已经有一条
-  // 红色告警在说了，这三条原来一句解释都没有。
+  // 结构性问题优先，因为补引用也无法让一个没有模型或提示词的请求变得可提交。
   const generateBlock = canvasGenerateBlock({
     mode: draft.mode,
     modelChoiceCount: modelChoices.length,
@@ -1783,14 +1837,6 @@ export function CanvasGenerationComposer({
     prompt: draft.prompt,
   });
   const blockedReason = generateBlock?.message ?? referenceProblem;
-  const generateDisabled = submitting || blockedReason !== null;
-  const generateBlockHintId = `${node.id}-generate-block-${embedded ? 'embedded' : 'floating'}`;
-  // 三条原因各只显示一次：缺模型的两条在提示词下方（带设置入口），缺提示词那条借用状态行
-  // ——那行原本在一个点不动的按钮旁边写着「配置已保存」。任务本身报错时错误优先。
-  const showBlockHint = Boolean(generateBlock && generateBlock.kind !== 'no_prompt');
-  const statusText = generateBlock?.kind === 'no_prompt' && !activeJob?.error
-    ? generateBlock.message
-    : runStatus(activeJob);
 
   useEffect(() => {
     if (!usesVideoFrameSlots || !videoCaps) return;
@@ -1824,6 +1870,18 @@ export function CanvasGenerationComposer({
     if (JSON.stringify(preview) === JSON.stringify(draft)) return;
     context.recordHistory();
     updateDraft(current => ({ ...updater(current), updated_at: new Date().toISOString() }));
+  }
+
+  function submitGeneration() {
+    if (blockedReason) {
+      context.reportError?.(blockedReason);
+      return;
+    }
+    if (activeJob && runId) {
+      void context.retryRun(node.id, runId);
+      return;
+    }
+    void context.submitRun(node.id);
   }
 
   return (
@@ -1927,39 +1985,18 @@ export function CanvasGenerationComposer({
               ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
-      {referenceProblem ? (
-        <p
-          role="alert"
-          className="mt-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs leading-relaxed text-destructive"
-        >
-          {referenceProblem}
-        </p>
-      ) : showBlockHint && generateBlock && (
-        // 没有可用模型时给一条真出口——沉浸式画布把顶栏（含设置入口）整块藏了，
-        // 新用户在这里除了一个点不动的按钮什么都看不到。
-        <p id={generateBlockHintId} className="mt-1.5 px-1 text-xs leading-relaxed text-muted-foreground">
-          {generateBlock.message}
-          {generateBlock.kind === 'no_model_available' && (
-            <>
-              {' '}
-              <Link href="/settings" className="text-primary underline underline-offset-2">去设置里添加</Link>
-              后回来再生成。
-            </>
-          )}
-        </p>
-      )}
-      {node.type !== 'image' && !textMode && (
+      {node.type === 'audio' && (
         <CandidateHistory
           nodeId={node.id}
-          primaryVersionId={node.type === 'text' || node.type === 'video' || node.type === 'audio'
-            ? node.data.current_version_id : null}
+          primaryVersionId={node.data.current_version_id}
           context={context}
           running={Boolean(running)}
           submitting={submitting}
         />
       )}
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
-        <CanvasModelPicker
+      <div className="mt-2 flex items-end gap-1.5 rounded-xl border border-border/70 bg-card/55 p-1.5">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          <CanvasModelPicker
           choices={modelChoices}
           alias={draft.alias ?? null}
           model={draft.model}
@@ -2005,7 +2042,7 @@ export function CanvasGenerationComposer({
             }));
           }}
         />
-        {draft.mode === 'text' && selectedModel && (
+          {draft.mode === 'text' && selectedModel && (
           <CanvasTextSettings
             supportsReasoning={supportsCanvasTextReasoning(selectedModel?.protocol)}
             params={draft.params}
@@ -2018,7 +2055,7 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-        {draft.mode === 'image' && imageCaps && (
+          {draft.mode === 'image' && imageCaps && (
           <CanvasImageSettings
             caps={imageCaps}
             model={draft.model}
@@ -2040,7 +2077,7 @@ export function CanvasGenerationComposer({
             })}
           />
         )}
-        {draft.mode === 'video' && videoCaps && (
+          {draft.mode === 'video' && videoCaps && (
           <VideoControls
             caps={videoCaps}
             mode={videoMode}
@@ -2091,7 +2128,7 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-        {draft.mode === 'audio' && selectedKey && selectedModel && (
+          {draft.mode === 'audio' && selectedKey && selectedModel && (
           <CanvasAudioSettings
             params={draft.params}
             onPatch={patch => updateDraftWithHistory(current => ({
@@ -2105,15 +2142,13 @@ export function CanvasGenerationComposer({
             }))}
           />
         )}
-        <span className="max-w-52 truncate text-xs text-muted-foreground" title={statusText}>
-          {statusText}
-        </span>
+        </div>
         {running && activeJob && (
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="ml-auto"
+            className="shrink-0"
             disabled={Boolean(activeJob.cancel_requested_at)}
             onClick={() => void context.cancelRun(activeJob.canvas_run!.run_id)}
           >
@@ -2125,11 +2160,9 @@ export function CanvasGenerationComposer({
           <Button
             type="button"
             size="sm"
-            className="ml-auto"
-            disabled={generateDisabled}
-            title={blockedReason ?? undefined}
-            aria-describedby={showBlockHint ? generateBlockHintId : undefined}
-            onClick={() => void context.retryRun(node.id, runId)}
+            className="shrink-0"
+            disabled={submitting}
+            onClick={submitGeneration}
           >
             {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
             {submitting ? '提交中…' : '生成'}
@@ -2139,11 +2172,9 @@ export function CanvasGenerationComposer({
           <Button
             type="button"
             size="sm"
-            className="ml-auto"
-            disabled={generateDisabled}
-            title={blockedReason ?? undefined}
-            aria-describedby={showBlockHint ? generateBlockHintId : undefined}
-            onClick={() => void context.submitRun(node.id)}
+            className="shrink-0"
+            disabled={submitting}
+            onClick={submitGeneration}
           >
             {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
             {submitting ? '提交中…' : textMode ? '生成' : '开始生成'}
@@ -2695,20 +2726,6 @@ function withGenerationDraft(node: CanvasNode, draft: CanvasGenerationDraft): Ca
   if (node.type === 'audio') return { ...node, data: { ...node.data, generation_draft: draft } };
   if (node.type === 'plugin') return { ...node, data: { ...node.data, generation_draft: draft } };
   return node;
-}
-
-/** 生成面板的状态行。
- *
- *  这里原来是第二套 job→文案 映射，和节点角标那套已经漂开：`partial` 一个说「部分完成」
- *  一个说「部分结果完成」；失败时这边直接把 `job.error` 铺出来，丢掉了「分析失败 / 生成失败」
- *  的区分，兜底建议也从「请检查设置后重新生成」变成了「请检查模型配置后重试」。
- *  现在只从 `canvasNodeRunStateForJob` 派生，面板专属的两句留在这里：
- *  没有 job 时说配置已存下来了，生成中时说结果会自己回来（角标那边已经写着「正在生成」）。 */
-function runStatus(job: Job | undefined): string {
-  if (!job) return '配置已保存';
-  const state = canvasNodeRunStateForJob(job);
-  if (state.status === 'loading') return state.detail ?? '结果会自动回到节点';
-  return state.detail ? `${state.label} · ${state.detail}` : state.label;
 }
 
 function nodeIcon(node: CanvasNode) {

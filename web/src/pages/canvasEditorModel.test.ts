@@ -6,6 +6,7 @@ import {
   canvasPendingInputNodes,
   clampCanvasNodeSize,
   normalizeCanvasImageParams,
+  placeCanvasNodeWithoutOverlap,
 } from './canvasEditorModel';
 import type { CanvasDocument, CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
@@ -43,6 +44,66 @@ it('clamps node sizes to the server bound instead of letting the save 422 foreve
   expect(clampCanvasNodeSize({ width: 0, height: -5 })).toEqual({ width: 1, height: 1 });
   const inBounds = { width: 420, height: 260 };
   expect(clampCanvasNodeSize(inBounds)).toBe(inBounds);
+});
+
+function placementNode(id: string, x: number, y: number): CanvasNode {
+  return {
+    id,
+    title: id,
+    type: 'image',
+    position: { x, y },
+    size: { width: 320, height: 176 },
+    z_index: 0,
+    data: {
+      current_version_id: null,
+      generation_draft: null,
+      active_run_id: null,
+      display: { fit: 'contain', free_resize: false },
+    },
+  };
+}
+
+it('keeps the preferred position when it is free', () => {
+  expect(placeCanvasNodeWithoutOverlap(
+    { x: 120, y: 80 },
+    [placementNode('far', 900, 600)],
+    { width: 320, height: 176 },
+  )).toEqual({ x: 120, y: 80 });
+});
+
+it('moves a colliding node to the nearest ranked free position', () => {
+  expect(placeCanvasNodeWithoutOverlap(
+    { x: 0, y: 0 },
+    [placementNode('occupied', 0, 0)],
+    { width: 320, height: 176 },
+  )).toEqual({ x: 368, y: 0 });
+});
+
+it('falls outside a full viewport instead of overlapping an existing node', () => {
+  expect(placeCanvasNodeWithoutOverlap(
+    { x: 0, y: 0 },
+    [placementNode('occupied', 0, 0)],
+    { width: 320, height: 176 },
+    { left: 0, top: 0, right: 320, bottom: 176 },
+  )).toEqual({ x: 368, y: 0 });
+});
+
+it('places successive nodes in distinct nearby slots', () => {
+  const nodes = [placementNode('first', 0, 0), placementNode('second', 368, 0)];
+  const third = placeCanvasNodeWithoutOverlap(
+    { x: 0, y: 0 },
+    nodes,
+    { width: 320, height: 176 },
+  );
+  nodes.push(placementNode('third', third.x, third.y));
+  const fourth = placeCanvasNodeWithoutOverlap(
+    { x: 0, y: 0 },
+    nodes,
+    { width: 320, height: 176 },
+  );
+
+  expect(third).toEqual({ x: 0, y: 224 });
+  expect(fourth).toEqual({ x: -368, y: 0 });
 });
 
 function job(id: string, status: Job['status']): Job {

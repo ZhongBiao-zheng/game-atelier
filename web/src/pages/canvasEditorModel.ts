@@ -19,7 +19,9 @@ import type {
   CanvasGenerationParamsByMode,
   CanvasGenerationDraft,
   CanvasDocument,
+  CanvasMediaVersion,
   CanvasNode,
+  CanvasPoint,
   CanvasSize,
 } from '@/schema/canvas';
 import {
@@ -56,6 +58,117 @@ export function clampCanvasNodeSize(size: CanvasSize): CanvasSize {
   const width = Math.min(CANVAS_MAX_NODE_SIZE, Math.max(1, size.width));
   const height = Math.min(CANVAS_MAX_NODE_SIZE, Math.max(1, size.height));
   return width === size.width && height === size.height ? size : { width, height };
+}
+
+export interface CanvasPlacementBounds {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+export const CANVAS_TEXT_NODE_DEFAULT_SIZE: CanvasSize = { width: 256, height: 144 };
+export const CANVAS_DEFAULT_NODE_SIZE: CanvasSize = { width: 320, height: 176 };
+const CANVAS_NODE_PLACEMENT_GAP = 48;
+
+function canvasPlacementDirectionRank({ x, y }: { x: number; y: number }) {
+  return x > 0 && y === 0 ? 0
+    : x === 0 && y > 0 ? 1
+      : x < 0 && y === 0 ? 2
+        : x === 0 && y < 0 ? 3
+          : y > 0 ? 4 : 5;
+}
+
+export function sizeLockedToCanvasVersion(
+  current: CanvasNode['size'],
+  version: CanvasMediaVersion,
+) {
+  if (!version.width || !version.height) return current ?? CANVAS_DEFAULT_NODE_SIZE;
+  const ratio = version.width / version.height;
+  let width = Math.min(4000, Math.max(240, current?.width ?? CANVAS_DEFAULT_NODE_SIZE.width));
+  let height = width / ratio;
+  if (height < 150) {
+    height = 150;
+    width = height * ratio;
+  }
+  if (height > 4000) {
+    height = 4000;
+    width = height * ratio;
+  }
+  if (width > 4000) {
+    width = 4000;
+    height = width / ratio;
+  }
+  return { width: Math.round(width), height: Math.round(height) };
+}
+
+export function canvasNodeRenderedSize(
+  node: CanvasNode,
+  versions: Readonly<Record<string, CanvasContentVersion>>,
+): CanvasSize {
+  if (node.type === 'text') return node.size ?? CANVAS_TEXT_NODE_DEFAULT_SIZE;
+  if (node.type !== 'image' || node.data.display.free_resize || !node.data.current_version_id) {
+    return node.size ?? CANVAS_DEFAULT_NODE_SIZE;
+  }
+  const version = versions[node.data.current_version_id];
+  return version?.kind === 'image'
+    ? sizeLockedToCanvasVersion(node.size, version)
+    : node.size ?? CANVAS_DEFAULT_NODE_SIZE;
+}
+
+/** 从期望位置开始，按网格圈由内向外找一个不与现有节点重叠的点。
+ *
+ * React Flow 官方的新节点示例把屏幕坐标先交给 screenToFlowPosition；这里只负责转换之后的
+ * 单节点放置。整张图自动布局会改动用户已经摆好的节点，不适合「点一下工具栏加一个节点」，
+ * 所以只移动新节点，并优先把它留在当前可视区。 */
+export function placeCanvasNodeWithoutOverlap(
+  preferred: CanvasPoint,
+  nodes: readonly CanvasNode[],
+  size: CanvasSize,
+  bounds?: CanvasPlacementBounds,
+  resolveNodeSize: (node: CanvasNode) => CanvasSize = node => (
+    node.size ?? (node.type === 'text' ? CANVAS_TEXT_NODE_DEFAULT_SIZE : CANVAS_DEFAULT_NODE_SIZE)
+  ),
+): CanvasPoint {
+  const stepX = size.width + CANVAS_NODE_PLACEMENT_GAP;
+  const stepY = size.height + CANVAS_NODE_PLACEMENT_GAP;
+  const rings = Math.min(24, Math.max(4, Math.ceil(Math.sqrt(nodes.length + 1)) + 2));
+  const offsets: Array<{ x: number; y: number }> = [];
+  for (let y = -rings; y <= rings; y += 1) {
+    for (let x = -rings; x <= rings; x += 1) offsets.push({ x, y });
+  }
+  offsets.sort((left, right) => {
+    const leftRing = Math.max(Math.abs(left.x), Math.abs(left.y));
+    const rightRing = Math.max(Math.abs(right.x), Math.abs(right.y));
+    if (leftRing !== rightRing) return leftRing - rightRing;
+    const leftDirection = canvasPlacementDirectionRank(left);
+    const rightDirection = canvasPlacementDirectionRank(right);
+    if (leftDirection !== rightDirection) return leftDirection - rightDirection;
+    const leftDistance = (left.x * stepX) ** 2 + (left.y * stepY) ** 2;
+    const rightDistance = (right.x * stepX) ** 2 + (right.y * stepY) ** 2;
+    return leftDistance - rightDistance;
+  });
+
+  const overlaps = (position: CanvasPoint) => nodes.some(node => {
+    const occupied = resolveNodeSize(node);
+    return position.x < node.position.x + occupied.width + CANVAS_NODE_PLACEMENT_GAP
+      && position.x + size.width + CANVAS_NODE_PLACEMENT_GAP > node.position.x
+      && position.y < node.position.y + occupied.height + CANVAS_NODE_PLACEMENT_GAP
+      && position.y + size.height + CANVAS_NODE_PLACEMENT_GAP > node.position.y;
+  });
+  const insideBounds = (position: CanvasPoint) => !bounds || (
+    position.x >= bounds.left
+    && position.y >= bounds.top
+    && position.x + size.width <= bounds.right
+    && position.y + size.height <= bounds.bottom
+  );
+  const candidates = offsets.map(offset => ({
+    x: preferred.x + offset.x * stepX,
+    y: preferred.y + offset.y * stepY,
+  }));
+  return candidates.find(position => insideBounds(position) && !overlaps(position))
+    ?? candidates.find(position => !overlaps(position))
+    ?? preferred;
 }
 
 /** 前端新造的文本 Content Version 用全零 sha256 占位，服务端落盘时改写成真实摘要。
@@ -431,11 +544,18 @@ export function createConnectedCanvasConfig(
   const sourceWidth = source.size?.width ?? (source.type === 'text' ? 256 : 320);
   const token = `@[node:${source.id}]`;
   const prompt = draft.prompt.trim() ? `${draft.prompt.trim()} ${token}` : token;
+  const configSize = CANVAS_DEFAULT_NODE_SIZE;
   const configNode: CanvasNode = {
     id: ids.nodeId,
     title: `${CANVAS_GENERATION_MODE_LABELS[draft.mode]}生成`,
     type: 'config',
-    position: { x: source.position.x + sourceWidth + 96, y: source.position.y },
+    position: placeCanvasNodeWithoutOverlap(
+      { x: source.position.x + sourceWidth + 96, y: source.position.y },
+      document.nodes,
+      configSize,
+      undefined,
+      node => canvasNodeRenderedSize(node, document.content_versions),
+    ),
     z_index: 0,
     data: {
       draft: { ...draft, prompt, input_policy: 'mentions_only' },
@@ -673,11 +793,7 @@ export function normalizeCanvasVideoParams(
   return params;
 }
 
-/** 「开始生成」按钮被禁用的原因。
- *  这个按钮有五个禁用条件：四类引用错误（由 referenceErrorMessage 出文案）、没有可用模型、
- *  没有选中模型、提示词为空。后三条原来一条都不解释，用户看到的只是一个点不动的按钮——
- *  没有密钥的新用户尤其如此，界面上既不说缺什么，也不说去哪儿补。
- *  kind 用来区分要不要把这句话渲染出来：提示词为空时输入框本身已经在说了，只进 title。 */
+/** 生成动作无法提交的原因。按钮保持可点击，由点击动作把原因交给画布顶部反馈。 */
 export type CanvasGenerateBlock = {
   kind: 'no_model_available' | 'no_model_selected' | 'no_prompt';
   message: string;
