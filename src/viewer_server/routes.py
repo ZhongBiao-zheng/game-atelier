@@ -403,6 +403,17 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
         if data.get("namespace") == "canvas":
             raise HTTPException(403, detail="Canvas Job 的快照和参数不能通过通用编辑接口修改")
         for field, value in patch.model_dump(exclude_unset=True).items():
+            if field == "params" and isinstance(value, dict):
+                existing_params = data.get("params")
+                existing_params = existing_params if isinstance(existing_params, dict) else {}
+                # These fields identify an already billed provider task.  Browser edits must never
+                # replace or erase them, otherwise a forged/stale id could retrieve the wrong task
+                # or make the runner submit a second order after losing its recovery handle.
+                for owned in ("provider_task_protocol", "provider_task_ids"):
+                    if owned in existing_params:
+                        value[owned] = existing_params[owned]
+                    else:
+                        value.pop(owned, None)
             data[field] = value
         atomic_write_json(p, data)
     return {"ok": True}
@@ -2025,6 +2036,10 @@ def _create_user_job(
     if not key_row:
         raise HTTPException(status_code=400, detail=f"unknown alias {alias}")
     params = body.params.model_copy(deep=True)
+    # Provider task handles are runner-owned.  A Studio create request always represents a new
+    # order and may not attach itself to an arbitrary existing Tuzi task.
+    params.provider_task_protocol = None
+    params.provider_task_ids = None
     if body.kind == JobKind.IMAGE:
         image_count = params.n if params.n is not None else 1
         if image_count < 1 or image_count > 4:

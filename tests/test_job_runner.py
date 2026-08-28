@@ -200,6 +200,126 @@ def test_run_job_routes_custom_provider_through_dispatch(project, monkeypatch):
     assert captured["output_dir"] != expected.parent
 
 
+def test_run_job_persists_provider_task_id_before_dispatch_finishes(project, monkeypatch):
+    save_job(Job(
+        job_id="studio-tuzi-async",
+        character_id="Tuzi",
+        prompt="fox",
+        submitted_at="2026-08-28T00:00:00+08:00",
+        model="gpt-image-2",
+        params=JobParams(size="2048x2048", n=1),
+        output_paths=[],
+        status=JobStatus.PENDING,
+        error=None,
+        kind=JobKind.IMAGE,
+        namespace="studio",
+        alias="Tuzi",
+        provider="custom",
+    ))
+
+    def fake_dispatch(*, on_task_id, **kwargs):
+        on_task_id("tuzi-task-1")
+        persisted = read_job("studio-tuzi-async")
+        assert persisted.params.provider_task_protocol == "tuzi_async"
+        assert persisted.params.provider_task_ids == ["tuzi-task-1"]
+        out = Path(kwargs["output_dir"]) / "v1.png"
+        _write_png(out)
+        return [str(out)]
+
+    monkeypatch.setattr(job_runner, "dispatch", fake_dispatch)
+
+    final = job_runner.run_job("studio-tuzi-async")
+
+    assert final.status == JobStatus.DONE
+    assert final.params.provider_task_ids == ["tuzi-task-1"]
+
+
+def test_run_job_keeps_resumable_tuzi_task_pending_on_poll_abandon(project, monkeypatch):
+    from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
+
+    save_job(Job(
+        job_id="studio-tuzi-polling",
+        character_id="Tuzi",
+        prompt="fox",
+        submitted_at="2026-08-28T00:00:00+08:00",
+        model="gpt-image-2",
+        params=JobParams(
+            size="2048x2048",
+            provider_task_protocol="tuzi_async",
+            provider_task_ids=["paid-task"],
+        ),
+        output_paths=[], status=JobStatus.PENDING, error=None,
+        kind=JobKind.IMAGE, namespace="studio", alias="Tuzi", provider="custom",
+    ))
+    monkeypatch.setattr(
+        job_runner,
+        "dispatch",
+        lambda **kwargs: (_ for _ in ()).throw(
+            TuziAsyncPendingError("查询任务状态连续失败（task_id=paid-task）")
+        ),
+    )
+
+    result = job_runner.run_job("studio-tuzi-polling")
+
+    saved = read_job("studio-tuzi-polling")
+    assert result.status == JobStatus.PENDING
+    assert saved.status == JobStatus.PENDING
+    assert saved.params.provider_task_ids == ["paid-task"]
+
+
+def test_studio_runner_wrapper_does_not_overwrite_resumable_tuzi_pending(project, monkeypatch):
+    from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
+    from viewer_server.routes import _run_studio_job_safely
+
+    save_job(Job(
+        job_id="studio-tuzi-wrapper",
+        character_id="Tuzi",
+        prompt="fox",
+        submitted_at="2026-08-28T00:00:00+08:00",
+        model="gpt-image-2",
+        params=JobParams(
+            provider_task_protocol="tuzi_async",
+            provider_task_ids=["paid-task"],
+        ),
+        output_paths=[], status=JobStatus.PENDING, error=None,
+        kind=JobKind.IMAGE, namespace="studio", alias="Tuzi", provider="custom",
+    ))
+    monkeypatch.setattr(
+        job_runner,
+        "dispatch",
+        lambda **kwargs: (_ for _ in ()).throw(
+            TuziAsyncPendingError("查询任务状态连续失败（task_id=paid-task）")
+        ),
+    )
+
+    _run_studio_job_safely("studio-tuzi-wrapper")
+
+    assert read_job("studio-tuzi-wrapper").status == JobStatus.PENDING
+
+
+def test_run_job_does_not_dispatch_when_another_worker_owns_job(project, monkeypatch):
+    from character_workflow.lib.jobs import job_execution_lock
+
+    save_job(Job(
+        job_id="studio-claimed",
+        character_id="Tuzi",
+        prompt="fox",
+        submitted_at="2026-08-28T00:00:00+08:00",
+        model="gpt-image-2",
+        params=JobParams(), output_paths=[], status=JobStatus.PENDING, error=None,
+        kind=JobKind.IMAGE, namespace="studio", alias="Tuzi", provider="custom",
+    ))
+    monkeypatch.setattr(
+        job_runner, "dispatch", lambda **kwargs: pytest.fail("duplicate worker dispatched"),
+    )
+
+    with job_execution_lock("studio-claimed") as acquired:
+        assert acquired is True
+        result = job_runner.run_job("studio-claimed")
+
+    assert result.status == JobStatus.PENDING
+
+
 def test_deferred_image_attempt_keeps_job_pending_and_appends_new_output(project, monkeypatch):
     existing = project / "studio" / "studio-batch" / "existing.png"
     existing.parent.mkdir(parents=True)

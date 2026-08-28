@@ -62,6 +62,32 @@ def test_post_prompt_rejects_status_field(client, runtime):
     assert r.status_code == 422
 
 
+def test_post_prompt_preserves_runner_owned_provider_task_ids(client, runtime):
+    (runtime / "jobs" / "j1.json").write_text(json.dumps({
+        "job_id": "j1", "character_id": "c", "prompt": "old",
+        "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt-image-2",
+        "params": {
+            "size": "2048x2048",
+            "provider_task_protocol": "tuzi_async",
+            "provider_task_ids": ["server-task"],
+        },
+        "output_paths": [], "status": "failed", "error": "network",
+    }))
+
+    r = client.post("/api/prompt/j1", json={
+        "params": {
+            "size": "1024x1024",
+            "provider_task_protocol": "tuzi_async",
+            "provider_task_ids": ["forged-task"],
+        },
+    })
+
+    assert r.status_code == 200
+    params = json.loads((runtime / "jobs" / "j1.json").read_text())["params"]
+    assert params["size"] == "1024x1024"
+    assert params["provider_task_ids"] == ["server-task"]
+
+
 def test_post_feedback_writes_draft(client, runtime):
     r = client.post(
         "/api/feedback",

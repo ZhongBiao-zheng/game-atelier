@@ -3,7 +3,7 @@ server 重启时还 pending 的必然已死；不回收 = 前端永久转圈 + �
 from fastapi.testclient import TestClient
 
 from character_workflow.lib import jobs as jobs_lib
-from character_workflow.lib.schemas import Job, JobParams, JobStatus
+from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
 from viewer_server.server_app import build_app
 
 
@@ -33,6 +33,47 @@ def test_fail_orphan_studio_jobs_only_touches_pending_studio(isolated_data_root)
     assert "interrupted" in (orphan.error or "")
     assert jobs_lib.read_job("studio-done").status == JobStatus.DONE
     assert jobs_lib.read_job("char-pending").status == JobStatus.PENDING
+
+
+def test_recoverable_tuzi_async_job_is_resumed_instead_of_failed(isolated_data_root):
+    resumable = _studio_job("studio-tuzi", JobStatus.PENDING).model_copy(update={
+        "kind": JobKind.IMAGE,
+        "params": JobParams(
+            provider_task_protocol="tuzi_async",
+            provider_task_ids=["async-1"],
+        ),
+    })
+    jobs_lib.save_job(resumable)
+
+    reclaimed = jobs_lib.fail_orphan_studio_jobs()
+
+    assert reclaimed == []
+    assert jobs_lib.resumable_studio_jobs() == ["studio-tuzi"]
+    assert jobs_lib.read_job("studio-tuzi").status == JobStatus.PENDING
+
+
+def test_lifespan_resumes_tuzi_async_job_on_startup(isolated_data_root, monkeypatch):
+    from threading import Event
+
+    from viewer_server import routes
+
+    resumed = Event()
+    resumable = _studio_job("studio-tuzi", JobStatus.PENDING).model_copy(update={
+        "kind": JobKind.IMAGE,
+        "params": JobParams(
+            provider_task_protocol="tuzi_async",
+            provider_task_ids=["async-1"],
+        ),
+    })
+    jobs_lib.save_job(resumable)
+    monkeypatch.setattr(
+        routes,
+        "_run_studio_job_safely",
+        lambda job_id: resumed.set() if job_id == "studio-tuzi" else None,
+    )
+
+    with TestClient(build_app()):
+        assert resumed.wait(1)
 
 
 def test_lifespan_reclaims_orphans_on_startup(isolated_data_root):

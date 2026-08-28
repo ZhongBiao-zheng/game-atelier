@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from character_workflow.lib.jobs import fail_orphan_studio_jobs, read_job
+from character_workflow.lib.jobs import fail_orphan_studio_jobs, read_job, resumable_studio_jobs
 from character_workflow.lib.secret_filter import SecretRedactionFilter
 from viewer_server.routes import router
 from viewer_server.sse import hub, sse_router
@@ -102,6 +102,7 @@ async def lifespan(app: FastAPI):
         )
     # 孤儿回收：studio job 只在本进程跑，重启时还 pending 的必然已死（一键启动脚本
     # 每次双击都是 stop→start）。不回收 = Web 永久转圈 + 永久轮询。
+    resumable_studio = resumable_studio_jobs()
     reclaimed = fail_orphan_studio_jobs()
     if reclaimed:
         logging.getLogger(__name__).warning(
@@ -148,6 +149,26 @@ async def lifespan(app: FastAPI):
         except Exception:  # noqa: BLE001
             logging.getLogger(__name__).warning("resumed canvas run failed: %s", job_id)
 
+    async def resume_studio_job(job_id: str) -> None:
+        from viewer_server.routes import _run_studio_job_safely
+
+        await asyncio.to_thread(_run_studio_job_safely, job_id)
+
+    async def maintain_resumable_studio_jobs() -> None:
+        while True:
+            await asyncio.sleep(30)
+            for job_id in await asyncio.to_thread(resumable_studio_jobs):
+                task = asyncio.create_task(resume_studio_job(job_id))
+                resume_tasks.add(task)
+                task.add_done_callback(resume_tasks.discard)
+
+    studio_recovery_task = asyncio.create_task(maintain_resumable_studio_jobs())
+
+    for job_id in resumable_studio:
+        task = asyncio.create_task(resume_studio_job(job_id))
+        resume_tasks.add(task)
+        task.add_done_callback(resume_tasks.discard)
+
     for job_id in resumable:
         task = asyncio.create_task(resume_canvas_job(job_id))
         resume_tasks.add(task)
@@ -156,6 +177,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         maintenance_task.cancel()
+        studio_recovery_task.cancel()
         for task in resume_tasks:
             task.cancel()
         observer.stop()

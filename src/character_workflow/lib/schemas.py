@@ -69,6 +69,9 @@ class JobParams(BaseModel):
     requested_size: str | None = None
     actual_size: str | None = None
     warnings: list[str] | None = None
+    # 聚合商异步任务恢复信息。任务提交成功后立即落盘；服务重启只轮询这些既有任务，绝不重提。
+    provider_task_protocol: Literal["tuzi_async"] | None = None
+    provider_task_ids: list[str] | None = None
     # 图片参数 —— 前端实际在发（Studio 提交链路），显式声明保证双端类型对齐
     ratio: str | None = None               # e.g. "16:9"
     quality: str | None = None             # low | medium | high | auto

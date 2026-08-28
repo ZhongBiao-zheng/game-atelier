@@ -173,6 +173,8 @@ def test_clone_job_for_retry(runtime):
             "size": "1024x1024", "n": 2,
             "reference_images": ["/tmp/a.png"],
             "actual_size": "1024x1024", "warnings": ["timeout once"],
+            "provider_task_protocol": "tuzi_async",
+            "provider_task_ids": ["already-billed-task"],
         },
     )
     update_job_status("job-001", status=JobStatus.FAILED, error="API timeout")
@@ -189,6 +191,8 @@ def test_clone_job_for_retry(runtime):
     assert clone.params.n == 2
     assert clone.params.actual_size is None
     assert clone.params.warnings is None
+    assert clone.params.provider_task_protocol is None
+    assert clone.params.provider_task_ids is None
     # 原 job 与错误记录原样保留
     original = read_job("job-001")
     assert original.status == JobStatus.FAILED
