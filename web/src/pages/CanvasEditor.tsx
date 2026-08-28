@@ -170,6 +170,7 @@ import type {
 import type { Job, JobKind } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
 import {
+  appendCanvasMentionToken,
   buildCanvasMaterialReferences,
   buildCanvasMentionReferences,
   removeCanvasMentionTokens,
@@ -1273,7 +1274,7 @@ function CanvasEditorInner({
     }
     setError(null);
     commit(current => {
-      return {
+      const next: CanvasDocument = {
         ...current,
         connections: [...current.connections, {
           id: makeId('connection'),
@@ -1282,6 +1283,7 @@ function CanvasEditorInner({
           target_node_id: connection.target!,
         }],
       };
+      return syncCanvasPromptReferences(next, new Set([connection.target!]));
     }, true);
   }, [commit]);
 
@@ -1792,7 +1794,12 @@ function CanvasEditorInner({
           });
         }
       }
-      return { ...current, nodes, connections, content_versions: contentVersions };
+      const next = { ...current, nodes, connections, content_versions: contentVersions };
+      return menu?.sourceId
+        ? syncCanvasPromptReferences(next, new Set([
+          menu.sourceHandle === 'target' ? menu.sourceId : node.id,
+        ]))
+        : next;
     };
     if (baseDocument) {
       // 上传命令创建的 Content Version 已是服务端历史；撤销只移除随后添加的节点。
@@ -2092,7 +2099,13 @@ function CanvasEditorInner({
   });
 
   const updateNode = useCallback((nodeId: string, updater: (node: CanvasNode) => CanvasNode) => {
-    commit(current => ({ ...current, nodes: current.nodes.map(node => node.id === nodeId ? updater(node) : node) }));
+    commit(current => {
+      const next: CanvasDocument = {
+        ...current,
+        nodes: current.nodes.map(node => node.id === nodeId ? updater(node) : node),
+      };
+      return syncCanvasPromptReferences(next, canvasPromptSyncTargets(next, nodeId));
+    });
   }, [commit]);
 
   const renameNode = useCallback((nodeId: string, title: string) => {
@@ -2122,13 +2135,14 @@ function CanvasEditorInner({
             sha256: CANVAS_LOCAL_VERSION_SHA,
             origin: { kind: 'user_edit' },
           };
-      return {
+      const next: CanvasDocument = {
         ...current,
         content_versions: { ...current.content_versions, [versionId]: version },
         nodes: current.nodes.map(candidate => candidate.id === nodeId && candidate.type === 'text'
           ? { ...candidate, data: { ...candidate.data, current_version_id: versionId } }
           : candidate),
       };
+      return syncCanvasPromptReferences(next, canvasPromptSyncTargets(next, nodeId));
     });
   }, [commit]);
 
@@ -4432,18 +4446,68 @@ function removeCanvasConnections(
     nodeIds.add(connection.source_node_id);
     disconnectedByTarget.set(connection.target_node_id, nodeIds);
   }
-  if (disconnectedByTarget.size === 0) return { ...document, connections };
+  const next = { ...document, connections };
+  if (disconnectedByTarget.size === 0) return next;
+  return syncCanvasPromptReferences(next, new Set(disconnectedByTarget.keys()), disconnectedByTarget);
+}
+
+/** 让连接图和提示词引用在同一次文档事务里收敛。
+ *
+ * 全能参考视频会自动把已连接、已有内容的文本节点写成 @ token；断开最后一条同源连接时，
+ * 同一函数负责移除 token。不能放在生成面板 effect 里，否则未选中的目标节点不会挂载面板，
+ * 会长期保存成「连接已存在、提示词没有引用」的中间态。 */
+function syncCanvasPromptReferences(
+  document: CanvasDocument,
+  targetNodeIds: ReadonlySet<string>,
+  disconnectedByTarget: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
+): CanvasDocument {
+  if (targetNodeIds.size === 0) return document;
+  const nodesById = new Map(document.nodes.map(node => [node.id, node]));
+  const connectedByTarget = new Map<string, Set<string>>();
+  for (const connection of document.connections) {
+    if (
+      connection.role !== 'input'
+      || connection.slot
+      || !targetNodeIds.has(connection.target_node_id)
+    ) continue;
+    const sources = connectedByTarget.get(connection.target_node_id) ?? new Set<string>();
+    sources.add(connection.source_node_id);
+    connectedByTarget.set(connection.target_node_id, sources);
+  }
   const updatedAt = new Date().toISOString();
+  let changed = false;
   const nodes = document.nodes.map(node => {
-    const disconnectedNodeIds = disconnectedByTarget.get(node.id);
+    if (!targetNodeIds.has(node.id)) return node;
     const draft = generationDraftForNode(node);
-    if (!disconnectedNodeIds || !draft) return node;
-    const prompt = removeCanvasMentionTokens(draft.prompt, disconnectedNodeIds);
+    if (!draft) return node;
+    const disconnectedNodeIds = disconnectedByTarget.get(node.id) ?? new Set<string>();
+    let prompt = removeCanvasMentionTokens(draft.prompt, disconnectedNodeIds);
+    if (draft.mode === 'video' && draft.params.frame_mode === 'auto') {
+      for (const sourceNodeId of connectedByTarget.get(node.id) ?? []) {
+        const source = nodesById.get(sourceNodeId);
+        if (source?.type === 'text' && source.data.current_version_id) {
+          prompt = appendCanvasMentionToken(prompt, sourceNodeId);
+        }
+      }
+    }
     const normalizedPrompt = prompt.trim() ? prompt : '';
     if (normalizedPrompt === draft.prompt) return node;
+    changed = true;
     return withGenerationDraftForNode(node, { ...draft, prompt: normalizedPrompt, updated_at: updatedAt });
   });
-  return { ...document, nodes, connections };
+  return changed ? { ...document, nodes } : document;
+}
+
+function canvasPromptSyncTargets(document: CanvasDocument, changedNodeId: string): Set<string> {
+  const targets = new Set([changedNodeId]);
+  for (const connection of document.connections) {
+    if (
+      connection.role === 'input'
+      && !connection.slot
+      && connection.source_node_id === changedNodeId
+    ) targets.add(connection.target_node_id);
+  }
+  return targets;
 }
 
 function useNarrowCanvasViewport() {

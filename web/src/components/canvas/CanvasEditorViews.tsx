@@ -57,7 +57,6 @@ import { cn } from '@/lib/utils';
 import { presentCanvasCandidates, type CanvasCandidateEntry } from '@/lib/canvasCandidates';
 import { useVideoFrame } from '@/lib/videoFrame';
 import {
-  appendCanvasMentionToken,
   canvasMentionMatches,
   missingCanvasMentionIds,
   mentionKindLabel,
@@ -318,8 +317,20 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     : null;
   const reversePromptJob = nodeJob && isReversePromptJob(nodeJob) ? nodeJob : undefined;
   const reversePromptSucceeded = reversePromptJob?.canvas_run?.candidates.some(candidate => candidate.status === 'succeeded') ?? false;
-  const mediaCandidates = node.type === 'image' || node.type === 'video'
-    ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? []).current
+  const candidatePresentation = node.type === 'image' || node.type === 'video'
+    ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? [])
+    : null;
+  const mediaCandidates = candidatePresentation
+    ? node.type === 'video'
+      ? [
+          ...candidatePresentation.current,
+          ...candidatePresentation.history.filter(entry => (
+            entry.candidate.status === 'succeeded'
+            && Boolean(entry.candidate.version_id)
+            && !entry.candidate.dismissed_at
+          )),
+        ]
+      : candidatePresentation.current
     : [];
 
   function beginTitleEditing() {
@@ -996,6 +1007,7 @@ function MediaCandidateBatch({
   const primary = entries.find(entry => entry.candidate.version_id === primaryVersionId) ?? entries[0];
   const others = entries.filter(entry => entry.candidate.candidate_id !== primary.candidate.candidate_id);
   const primaryTerminalFailure = primary.candidate.status === 'failed' || primary.candidate.status === 'canceled';
+  const primaryNumber = node.type === 'video' ? 1 : primary.candidate.index + 1;
 
   return (
     <div
@@ -1017,13 +1029,14 @@ function MediaCandidateBatch({
           node={node}
           entry={entry}
           index={index}
+          number={node.type === 'video' ? index + 2 : entry.candidate.index + 1}
           disabled={disabled}
           context={context}
         />
       ))}
       {primaryTerminalFailure && !disabled && (
         <CandidateFailureActions
-          number={primary.candidate.index + 1}
+          number={primaryNumber}
           onDismiss={() => void context.dismissCandidate(
             primary.job.canvas_run!.run_id,
             primary.candidate.candidate_id,
@@ -1054,12 +1067,14 @@ function MediaCandidateCard({
   node,
   entry,
   index,
+  number,
   disabled,
   context,
 }: {
   node: Extract<CanvasContentNode, { type: 'image' | 'video' }>;
   entry: CanvasCandidateEntry;
   index: number;
+  number: number;
   disabled: boolean;
   context: CanvasNodeContextValue;
 }) {
@@ -1070,7 +1085,7 @@ function MediaCandidateCard({
   return (
     <section
       role="group"
-      aria-label={`候选 ${candidate.index + 1}`}
+      aria-label={`候选 ${number}`}
       className="pointer-events-auto absolute top-0 z-20 h-full overflow-hidden rounded-lg border border-border bg-card shell-glow"
       style={{
         left: `calc(${horizontalOffset * 100}% + ${horizontalOffset * 16}px)`,
@@ -1079,7 +1094,7 @@ function MediaCandidateCard({
       onPointerDown={event => event.stopPropagation()}
       onDoubleClick={event => {
         event.stopPropagation();
-        if (version) context.previewContent(version.version_id, `${node.title} · 候选 ${candidate.index + 1}`, node.id);
+        if (version) context.previewContent(version.version_id, `${node.title} · 候选 ${number}`, node.id);
       }}
     >
       {version?.kind === node.type
@@ -1091,7 +1106,7 @@ function MediaCandidateCard({
               version.version_id,
               version.kind === 'image' ? node.size?.width ?? 320 : undefined,
             )}
-            title={`${node.title} · 候选 ${candidate.index + 1}`}
+            title={`${node.title} · 候选 ${number}`}
             fit={node.data.display.fit}
             freeResize={node.data.display.free_resize}
           />
@@ -1099,7 +1114,7 @@ function MediaCandidateCard({
         : (
           <div className="grid size-full min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
             {candidate.status === 'pending'
-              ? <LoaderCircle className="animate-spin" aria-label={`候选 ${candidate.index + 1} 生成中`} />
+              ? <LoaderCircle className="animate-spin" aria-label={`候选 ${number} 生成中`} />
               : canvasNodeRunDisplayError(
                 candidate.error,
                 candidate.status === 'canceled' ? '已停止' : '结果待同步',
@@ -1107,12 +1122,12 @@ function MediaCandidateCard({
           </div>
         )}
       <span className="absolute left-2 top-2 rounded-md border border-border bg-glass px-2 py-1 text-xs text-muted-foreground backdrop-blur-glass">
-        {candidate.index + 1}
+        {number}
       </span>
       {!disabled && version?.kind === node.type && (
         <button
           type="button"
-          aria-label={`将候选 ${candidate.index + 1} 设为主结果`}
+          aria-label={`将候选 ${number} 设为主结果`}
           title="设为主结果"
           className="absolute bottom-2 left-2 grid size-8 place-items-center rounded-full border border-border bg-glass text-muted-foreground backdrop-blur-glass transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           onClick={event => {
@@ -1125,7 +1140,7 @@ function MediaCandidateCard({
       )}
       {terminalFailure && !disabled && (
         <CandidateFailureActions
-          number={candidate.index + 1}
+          number={number}
           onDismiss={() => void context.dismissCandidate(
             entry.job.canvas_run!.run_id,
             candidate.candidate_id,
@@ -1868,24 +1883,6 @@ export function CanvasGenerationComposer({
     }
     void context.submitRun(node.id);
   }
-
-  useEffect(() => {
-    if (draft.mode !== 'video' || !mentionsEnabled) return;
-    const present = new Set(canvasMentionMatches(draft.prompt).map(match => match.nodeId));
-    const missing = mentionReferences
-      .filter(reference => reference.kind === 'text' && !present.has(reference.nodeId))
-      .map(reference => reference.nodeId);
-    if (missing.length === 0) return;
-    context.updateNode(node.id, current => {
-      const currentDraft = generationDraft(current);
-      if (!currentDraft) return current;
-      return withGenerationDraft(current, {
-        ...currentDraft,
-        prompt: missing.reduce(appendCanvasMentionToken, currentDraft.prompt),
-        updated_at: new Date().toISOString(),
-      });
-    });
-  }, [context, draft.mode, draft.prompt, mentionReferences, mentionsEnabled, node.id]);
 
   return (
     <section

@@ -324,6 +324,84 @@ it('expands image candidates around the node and exposes candidate-specific acti
   expect(context.dismissCandidate).toHaveBeenCalledWith('run-batch', 'candidate-failed');
 });
 
+it('keeps successful video results from consecutive runs on the video node', () => {
+  const base = batchJob();
+  const videoJob = (
+    jobId: string,
+    runId: string,
+    candidateId: string,
+    versionId: string,
+    submittedAt: string,
+  ): Job => ({
+    ...base,
+    job_id: jobId,
+    kind: 'video',
+    status: 'done',
+    submitted_at: submittedAt,
+    canvas_run: {
+      ...base.canvas_run!,
+      run_id: runId,
+      result_node_id: 'video-result',
+      snapshot: {
+        ...base.canvas_run!.snapshot,
+        mode: 'video',
+        result_node_id: 'video-result',
+        submitted_at: submittedAt,
+      },
+      candidates: [{
+        candidate_id: candidateId,
+        index: 0,
+        status: 'succeeded',
+        version_id: versionId,
+        error: null,
+      }],
+    },
+  });
+  const original = videoJob('video-old', 'run-old', 'candidate-old', 'video-old', '2026-08-25T00:00:00Z');
+  const latest = videoJob('video-new', 'run-new', 'candidate-new', 'video-new', '2026-08-25T00:01:00Z');
+  const videoResult: CanvasNode = {
+    id: 'video-result',
+    title: '视频结果',
+    type: 'video',
+    position: { x: 0, y: 0 },
+    z_index: 0,
+    data: {
+      current_version_id: 'video-new',
+      generation_draft: { ...draft, mode: 'video' },
+      active_run_id: 'run-new',
+      display: { fit: 'contain', free_resize: false },
+    },
+  };
+  const versions = {
+    'video-old': {
+      version_id: 'video-old', kind: 'video' as const, path: 'outputs/video-old.mp4',
+      mime_type: 'video/mp4', bytes: 12, created_at: original.submitted_at,
+      sha256: 'a'.repeat(64), origin: { kind: 'job_output' as const, job_id: original.job_id, candidate_id: 'candidate-old' },
+    },
+    'video-new': {
+      version_id: 'video-new', kind: 'video' as const, path: 'outputs/video-new.mp4',
+      mime_type: 'video/mp4', bytes: 12, created_at: latest.submitted_at,
+      sha256: 'b'.repeat(64), origin: { kind: 'job_output' as const, job_id: latest.job_id, candidate_id: 'candidate-new' },
+    },
+  };
+  const context = nodeContext({
+    resolveVersion: versionResolver(versions),
+    jobsByRunId: new Map([['run-new', latest]]),
+    jobsByResultNodeId: new Map([[videoResult.id, [original, latest]]]),
+  });
+
+  render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: videoResult }} selected={false} />
+    </CanvasNodeContext.Provider>,
+  );
+
+  fireEvent.click(screen.getByRole('button', { name: '展开 2 个候选结果' }));
+  expect(screen.getByRole('group', { name: '候选 2' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '将候选 2 设为主结果' }));
+  expect(context.selectCandidate).toHaveBeenCalledWith(videoResult.id, 'video-old');
+});
+
 it('keeps delete available for the last failed image slot', () => {
   const job = batchJob();
   job.status = 'failed';

@@ -21,6 +21,7 @@ import type {
   CanvasDocument,
   CanvasGenerationDraft,
   CanvasImageNode,
+  CanvasNode,
   CanvasProject,
   CanvasProjectSummary,
   CanvasTextNode,
@@ -412,6 +413,21 @@ it('loads the immersive editor and stores a manually-authored text node as one c
   expect(lastSavedDocument()?.nodes[0]).toMatchObject({ type: 'text', title: '文本' });
 });
 
+it('does not autosave during text editing and saves exactly once after exit', async () => {
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  const editor = await addTextNodeWithBody('编辑完成后再保存');
+  vi.mocked(saveCanvasDocument).mockClear();
+
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+  expect(saveCanvasDocument).not.toHaveBeenCalled();
+
+  fireEvent.keyDown(editor, { key: 'Tab' });
+  await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledOnce(), { timeout: 1000 });
+  expect(savedText(lastSavedDocument())).toBe('编辑完成后再保存');
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)); });
+  expect(saveCanvasDocument).toHaveBeenCalledOnce();
+});
+
 it('keeps the server-owned content hash when typing continues during a save', async () => {
   // 服务端拥有 sha256：它把前端的占位值改写成真实摘要，并把「已存在版本的任何差异」
   // 当致命错误（422 existing canvas content versions are immutable）。保存在途中继续打字
@@ -550,6 +566,60 @@ it('creates and persists a directional input connection between canvas nodes', a
       target_node_id: 'target-one',
     })],
   })));
+});
+
+it('syncs an omni-video text reference in the connection transaction while unselected', async () => {
+  const videoTarget: CanvasNode = {
+    id: 'video-target',
+    title: '全能参考视频',
+    type: 'video',
+    position: { x: 320, y: 0 },
+    z_index: 0,
+    data: {
+      current_version_id: null,
+      generation_draft: {
+        mode: 'video',
+        prompt: '镜头向前推进',
+        input_policy: 'all_connected',
+        model: 'seedance-2.0',
+        alias: 'main',
+        params: { frame_mode: 'auto', duration: 5, ratio: '16:9', resolution: '720p' },
+        updated_at: '2026-08-28T00:00:00Z',
+      },
+      active_run_id: null,
+      display: { fit: 'contain', free_resize: false },
+    },
+  };
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [textNode('source-one', '前置', 'version-one'), videoTarget],
+    content_versions: {
+      'version-one': {
+        version_id: 'version-one', kind: 'text', text: '前置文本',
+        created_at: '2026-08-26T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'user_edit' },
+      },
+    },
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: 'simulate node connection' }));
+
+  await waitFor(() => {
+    const saved = lastSavedDocument();
+    const target = saved?.nodes.find(node => node.id === videoTarget.id);
+    expect(target?.type === 'video' ? target.data.generation_draft?.prompt : null)
+      .toBe('镜头向前推进 @[node:source-one]');
+  }, { timeout: 1000 });
+
+  fireEvent.click(screen.getByRole('button', { name: 'simulate edge selection' }));
+  fireEvent.keyDown(window, { key: 'Delete' });
+  await waitFor(() => {
+    const saved = lastSavedDocument();
+    const target = saved?.nodes.find(node => node.id === videoTarget.id);
+    expect(saved?.connections).toEqual([]);
+    expect(target?.type === 'video' ? target.data.generation_draft?.prompt : null)
+      .toBe('镜头向前推进 ');
+  }, { timeout: 1000 });
 });
 
 it('creates a node and input connection when a source handle is dragged to blank canvas', async () => {
