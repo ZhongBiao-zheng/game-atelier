@@ -8,11 +8,35 @@ import { X } from 'lucide-react';
  * 挂在输入壳（bg-glass backdrop-blur-glass）里的 fixed inset-0 会缩到壳那一小条里。
  * 首页/工坊那两处原本就在顶层，portal 对它们无副作用。
  */
-export function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
+export function Lightbox({
+  src,
+  onClose,
+  onPrevious,
+  onNext,
+}: {
+  src: string;
+  onClose: () => void;
+  onPrevious?: () => void;
+  onNext?: () => void;
+}) {
   const onCloseRef = useRef(onClose);
+  const onPreviousRef = useRef(onPrevious);
+  const onNextRef = useRef(onNext);
   onCloseRef.current = onClose;
+  onPreviousRef.current = onPrevious;
+  onNextRef.current = onNext;
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current(); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseRef.current();
+      if (e.key === 'ArrowLeft' && onPreviousRef.current) {
+        e.preventDefault();
+        onPreviousRef.current();
+      }
+      if (e.key === 'ArrowRight' && onNextRef.current) {
+        e.preventDefault();
+        onNextRef.current();
+      }
+    };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);

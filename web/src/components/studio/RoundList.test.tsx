@@ -251,6 +251,51 @@ describe('RoundList video', () => {
   });
 });
 
+describe('RoundList 大图键盘切换', () => {
+  it('在先后生成的多张图之间用左右方向键循环切换', () => {
+    const imageRound = (jobId: string, path: string): RoundState => ({
+      kind: 'done',
+      jobId,
+      submittedAt: jobId,
+      imagePaths: [path],
+      config: {
+        prompt: jobId,
+        model: 'gpt-image-2',
+        kind: 'image',
+        referenceImages: [],
+      },
+    });
+    const { container } = render(<RoundList rounds={[
+      imageRound('job-first', '/data/studio/job-first/v1.png'),
+      imageRound('job-second', '/data/studio/job-second/v1.png'),
+    ]} />);
+
+    fireEvent.click(container.querySelectorAll('[data-testid="studio-result-thumb-1"]')[0]);
+    expect(screen.getByAltText('大图')).toHaveAttribute(
+      'src',
+      expect.stringContaining('job-first%2Fv1.png'),
+    );
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(screen.getByAltText('大图')).toHaveAttribute(
+      'src',
+      expect.stringContaining('job-second%2Fv1.png'),
+    );
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(screen.getByAltText('大图')).toHaveAttribute(
+      'src',
+      expect.stringContaining('job-first%2Fv1.png'),
+    );
+
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(screen.getByAltText('大图')).toHaveAttribute(
+      'src',
+      expect.stringContaining('job-second%2Fv1.png'),
+    );
+  });
+});
+
 describe('RoundList skill 出图删除门控', () => {
   const imageDone = (mode?: 'image' | 'skill'): RoundState => ({
     kind: 'done',
