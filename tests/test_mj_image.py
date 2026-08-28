@@ -57,7 +57,17 @@ def mj_key(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _wire(monkeypatch, *, submit: dict, submit_status: int = 200, fetch: dict | None = None):
+def _wire(
+    monkeypatch,
+    *,
+    submit: dict,
+    submit_status: int = 200,
+    fetch: dict | None = None,
+    seed: dict | None = None,
+    seed_status: int = 200,
+    seen_get: list[str] | None = None,
+    seen_download_headers: list[dict[str, str]] | None = None,
+):
     """把 submit / 轮询 / 下载三条 HTTP 都接上。返回收集到的提交 body 列表。
 
     轮询与下载都走 requests.get —— mj_image.requests 与 video_poll.requests 是同一个模块
@@ -70,8 +80,15 @@ def _wire(monkeypatch, *, submit: dict, submit_status: int = 200, fetch: dict | 
         return _FakeResp(submit_status, submit)
 
     def fake_get(url, headers=None, timeout=None):
+        if seen_get is not None:
+            seen_get.append(url)
         if "/fetch" in url:
             return _FakeResp(200, fetch if fetch is not None else _success())
+        if "/image-seed" in url:
+            payload = seed if seed is not None else {"code": 1, "result": "636646138"}
+            return _FakeResp(seed_status, payload)
+        if seen_download_headers is not None:
+            seen_download_headers.append(dict(headers or {}))
         return _FakeResp(200, {}, content=b"PNG")
 
     monkeypatch.setattr(mj.requests, "post", fake_post)
@@ -99,6 +116,22 @@ def test_submits_polls_and_downloads_four_images(mj_key, tmp_path, monkeypatch):
     assert posted[0]["url"] == "https://api.tu-zi.com/mj/submit/imagine"
     assert len(out) == 4, "imageUrls 的 4 张单图都要落盘"
     assert all(Path(p).read_bytes() == b"PNG" for p in out)
+
+
+def test_downloads_with_browser_image_headers(mj_key, tmp_path, monkeypatch):
+    """产物 CDN 有 Cloudflare 反爬；裸 requests 会 403，图片请求头是下载契约。"""
+    seen_headers: list[dict[str, str]] = []
+    _wire(
+        monkeypatch,
+        submit={"code": 1, "description": "Submit Success", "result": "t-1"},
+        seen_download_headers=seen_headers,
+    )
+
+    _render(tmp_path, n=4)
+
+    assert len(seen_headers) == 4
+    assert all("Mozilla" in headers.get("User-Agent", "") for headers in seen_headers)
+    assert all(headers.get("Accept", "").startswith("image/") for headers in seen_headers)
 
 
 def test_grid_image_is_not_saved(mj_key, tmp_path, monkeypatch):
@@ -223,6 +256,56 @@ def test_no_warning_when_count_matches(mj_key, tmp_path, monkeypatch):
     _render(tmp_path, n=4, params=params)
     assert params["n"] == 4
     assert "warnings" not in params
+
+
+def test_generated_seed_is_fetched_and_written_back(mj_key, tmp_path, monkeypatch):
+    """随机 seed 不在 fetch 终态里，必须通过 image-seed 接口取回并持久化。"""
+    seen_get: list[str] = []
+    _wire(
+        monkeypatch,
+        submit={"code": 1, "description": "ok", "result": "t-1"},
+        seed={"code": 1, "result": "636646138"},
+        seen_get=seen_get,
+    )
+    params: dict = {"n": 4}
+
+    _render(tmp_path, n=4, params=params)
+
+    assert params["mj_seed"] == 636646138
+    assert "https://api.tu-zi.com/mj/task/t-1/image-seed" in seen_get
+
+
+def test_explicit_seed_does_not_call_image_seed_endpoint(mj_key, tmp_path, monkeypatch):
+    """画师已经指定 seed 时，历史直接沿用该值，不额外依赖私信取种子接口。"""
+    seen_get: list[str] = []
+    _wire(
+        monkeypatch,
+        submit={"code": 1, "description": "ok", "result": "t-1"},
+        seen_get=seen_get,
+    )
+    params: dict = {"n": 4, "mj_seed": 12345}
+
+    _render(tmp_path, n=4, params=params)
+
+    assert params["mj_seed"] == 12345
+    assert not any("/image-seed" in url for url in seen_get)
+
+
+def test_seed_lookup_failure_does_not_discard_paid_images(mj_key, tmp_path, monkeypatch):
+    """取 seed 是补充元数据；接口没配置时不能让已经生成并计费的图变成 FAILED。"""
+    _wire(
+        monkeypatch,
+        submit={"code": 1, "description": "ok", "result": "t-1"},
+        seed_status=503,
+        seed={"code": 4, "description": "private channel unavailable"},
+    )
+    params: dict = {"n": 4}
+
+    out = _render(tmp_path, n=4, params=params)
+
+    assert len(out) == 4
+    assert "mj_seed" not in params
+    assert any("seed" in warning for warning in params["warnings"])
 
 
 def test_more_than_four_wanted_submits_twice(mj_key, tmp_path, monkeypatch):
