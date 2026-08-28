@@ -66,6 +66,7 @@ def _wire(
     seed: dict | None = None,
     seed_status: int = 200,
     seen_get: list[str] | None = None,
+    seen_download_headers: list[dict[str, str]] | None = None,
 ):
     """把 submit / 轮询 / 下载三条 HTTP 都接上。返回收集到的提交 body 列表。
 
@@ -86,6 +87,8 @@ def _wire(
         if "/image-seed" in url:
             payload = seed if seed is not None else {"code": 1, "result": "636646138"}
             return _FakeResp(seed_status, payload)
+        if seen_download_headers is not None:
+            seen_download_headers.append(dict(headers or {}))
         return _FakeResp(200, {}, content=b"PNG")
 
     monkeypatch.setattr(mj.requests, "post", fake_post)
@@ -113,6 +116,22 @@ def test_submits_polls_and_downloads_four_images(mj_key, tmp_path, monkeypatch):
     assert posted[0]["url"] == "https://api.tu-zi.com/mj/submit/imagine"
     assert len(out) == 4, "imageUrls 的 4 张单图都要落盘"
     assert all(Path(p).read_bytes() == b"PNG" for p in out)
+
+
+def test_downloads_with_browser_image_headers(mj_key, tmp_path, monkeypatch):
+    """产物 CDN 有 Cloudflare 反爬；裸 requests 会 403，图片请求头是下载契约。"""
+    seen_headers: list[dict[str, str]] = []
+    _wire(
+        monkeypatch,
+        submit={"code": 1, "description": "Submit Success", "result": "t-1"},
+        seen_download_headers=seen_headers,
+    )
+
+    _render(tmp_path, n=4)
+
+    assert len(seen_headers) == 4
+    assert all("Mozilla" in headers.get("User-Agent", "") for headers in seen_headers)
+    assert all(headers.get("Accept", "").startswith("image/") for headers in seen_headers)
 
 
 def test_grid_image_is_not_saved(mj_key, tmp_path, monkeypatch):

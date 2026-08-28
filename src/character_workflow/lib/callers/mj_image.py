@@ -43,6 +43,17 @@ _ACCEPTED_CODES = {1, 21, 22}
 _TERMINAL_SUCCESS = "SUCCESS"
 _TERMINAL_FAILURE = "FAILURE"
 
+# sydney-ai 产物 CDN 会拦截 requests 默认 UA，返回 Cloudflare 403 挑战页。
+# 这里只模拟普通的浏览器图片请求，不把 API Authorization 泄露给独立 CDN 域名。
+_IMAGE_DOWNLOAD_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    ),
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+}
+
 # 上游错误码 → 中文。翻译的价值不在于「变成中文」，而在于把误导性的措辞纠正过来：
 # insert_midjourney_task_failed 字面像参数错，实际是渠道侧接不下任务（见模块 docstring）。
 _UPSTREAM_MESSAGES = {
@@ -294,7 +305,7 @@ def _image_urls(payload: dict[str, Any]) -> list[str]:
 def _download_png(url: str, output_dir: Path, index: int, *, task_ref: str = "") -> str:
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
-        resp = requests.get(url, timeout=300)
+        resp = requests.get(url, headers=_IMAGE_DOWNLOAD_HEADERS, timeout=300)
         resp.raise_for_status()
     except requests.RequestException as e:
         # 任务已跑完并计费，只是产物没拉下来 —— 带上 task_id 和源地址供人工找回。
