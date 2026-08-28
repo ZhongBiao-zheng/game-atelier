@@ -52,6 +52,21 @@ def test_post_studio_job_creates_pending(client):
     assert payload["params"]["n"] == 1
 
 
+def test_post_studio_job_strips_forged_provider_task_ids(client):
+    resp = client.post("/api/studio/jobs", json={
+        "prompt": "a quiet warm gallery",
+        "model": "gpt-image-2",
+        "params": {
+            "provider_task_protocol": "tuzi_async",
+            "provider_task_ids": ["someone-elses-task"],
+        },
+    })
+
+    assert resp.status_code == 201
+    assert resp.json()["params"].get("provider_task_protocol") is None
+    assert resp.json()["params"].get("provider_task_ids") is None
+
+
 def test_post_studio_job_uses_default_alias_when_omitted(client):
     resp = client.post("/api/studio/jobs", json={
         "prompt": "x",

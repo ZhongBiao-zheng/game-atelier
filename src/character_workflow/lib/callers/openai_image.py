@@ -17,6 +17,7 @@ import requests
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from character_workflow.lib import net_env
+from character_workflow.lib.callers import tuzi_async
 
 DEFAULT_SEEDREAM_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -129,7 +130,45 @@ def render(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     is_hk = _is_openai_hk(base_url)
+    is_tuzi = _is_tuzi_gateway(base_url)
     requested = max(1, int(n or 1))
+    params = kwargs.get("params") if isinstance(kwargs.get("params"), dict) else None
+    stored_task_ids = (
+        list(params.get("provider_task_ids") or [])
+        if params and params.get("provider_task_protocol") == "tuzi_async"
+        else []
+    )
+    resuming_stored_tasks = bool(stored_task_ids)
+    task_cursor = 0
+
+    def _next_task_id() -> str | None:
+        nonlocal task_cursor
+        value = stored_task_ids[task_cursor] if task_cursor < len(stored_task_ids) else None
+        task_cursor += 1
+        return value
+
+    def _remember_task_id(task_id: str) -> None:
+        if task_id not in stored_task_ids:
+            stored_task_ids.append(task_id)
+        if params is not None:
+            params["provider_task_protocol"] = "tuzi_async"
+            params["provider_task_ids"] = list(stored_task_ids)
+        callback = kwargs.get("on_params_changed")
+        if callable(callback):
+            callback()
+
+    def _post_image_json(url: str, payload: dict) -> dict:
+        if not is_tuzi:
+            return _post_json(url, key.access_key, payload, timeout=timeout)
+        return tuzi_async.execute_json(
+            url=url,
+            api_key=key.access_key,
+            payload=payload,
+            task_id=_next_task_id(),
+            on_task_id=_remember_task_id,
+            on_phase=kwargs.get("on_phase"),
+            should_cancel=kwargs.get("should_cancel"),
+        )
 
     # HK gpt-image 只认尺寸表的精确 WxH；表外值（如立绘常用的 1024x1536）会被出成正方形。
     # snap 到表内最近值，让 skill 立绘 / Studio 两条路径都拿到正确竖图。nano-banana 收比例串，不碰。
@@ -199,15 +238,26 @@ def render(
     if supports_edits and ref_paths:
         paths: list[str] = []
         for _ in range(requested):
-            data = _post_multipart(
-                _edits_url(base_url),
-                key.access_key,
-                fields=_hk_edits_fields(
-                    model=model, prompt=prompt, size=requested_size, quality=quality,
-                    background=background, n=1,
-                ),
-                files=_ref_file_parts(ref_paths, str(mask_path) if mask_path else None),
-                timeout=timeout,
+            if is_tuzi and resuming_stored_tasks and task_cursor >= len(stored_task_ids):
+                _warn(kwargs, f"恢复的厂商任务只返回了 {len(paths)} 张图（请求 {requested} 张）")
+                break
+            fields = _hk_edits_fields(
+                model=model, prompt=prompt, size=requested_size, quality=quality,
+                background=background, n=1,
+            )
+            files = _ref_file_parts(ref_paths, str(mask_path) if mask_path else None)
+            data = (
+                tuzi_async.execute_multipart(
+                    url=_edits_url(base_url), api_key=key.access_key,
+                    fields=fields, files=files, task_id=_next_task_id(),
+                    on_task_id=_remember_task_id, on_phase=kwargs.get("on_phase"),
+                    should_cancel=kwargs.get("should_cancel"),
+                )
+                if is_tuzi else
+                _post_multipart(
+                    _edits_url(base_url), key.access_key, fields=fields, files=files,
+                    timeout=timeout,
+                )
             )
             paths.extend(_write_outputs(data, out_dir, start_index=len(paths) + 1))
             if len(paths) >= requested:
@@ -239,12 +289,15 @@ def render(
             sequential=sends_ark_params and _supports_sequential(model),
         )
 
-    data = _post_json(generations_url, key.access_key, _gen_payload(requested), timeout=timeout)
+    data = _post_image_json(generations_url, _gen_payload(requested))
     paths = _write_outputs(data, out_dir)
     # 补足循环无条件开：终止条件本来就是「已拿到几张」，一次回够就不会进来。旧版按
     # provider/族开关，standard 族聚合商（Tuzi 等）忽略 n 只回 1 张时会静默少图。
     while len(paths) < requested:
-        data = _post_json(generations_url, key.access_key, _gen_payload(1), timeout=timeout)
+        if is_tuzi and resuming_stored_tasks and task_cursor >= len(stored_task_ids):
+            _warn(kwargs, f"恢复的厂商任务只返回了 {len(paths)} 张图（请求 {requested} 张）")
+            break
+        data = _post_image_json(generations_url, _gen_payload(1))
         before = len(paths)
         paths.extend(_write_outputs(data, out_dir, start_index=before + 1))
         if len(paths) == before:  # 一张都没多出来：厂商给不了更多，别空转
@@ -680,6 +733,11 @@ def _decode_b64_image(value: str) -> bytes:
 
 def _is_openai_hk(base_url: str) -> bool:
     return "openai-hk.com" in urlsplit(base_url).netloc.lower()
+
+
+def _is_tuzi_gateway(base_url: str) -> bool:
+    host = (urlsplit(base_url).hostname or "").lower()
+    return host == "tu-zi.com" or host.endswith(".tu-zi.com")
 
 
 # HK gpt-image 只接受尺寸表里的精确 WxH；表外值（如 1024x1536）会被按总像素出成

@@ -223,6 +223,54 @@ def test_text_batches_keep_the_existing_single_provider_request_path():
     assert canvas_runs._uses_incremental_candidates(job) is False
 
 
+def test_duplicate_incremental_runner_does_not_fail_owned_candidate(monkeypatch):
+    run_id = "run-busy-incremental"
+    project, _document, _primary = _project_with_result_node(
+        primary_version_id=None,
+        active_run_id=run_id,
+    )
+    candidate = CanvasResultCandidate(candidate_id="candidate-0", index=0, status="pending")
+    job = _job(project.project_id, run_id, [candidate])
+    save_job(job)
+    monkeypatch.setattr(
+        canvas_runs,
+        "run_job",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            canvas_runs.JobExecutionBusy("already owned")
+        ),
+    )
+
+    result = run_canvas_job(job.job_id)
+
+    assert result.status == JobStatus.PENDING
+    assert result.canvas_run.candidates[0].status == "pending"
+    assert result.error is None
+
+
+def test_duplicate_nonincremental_runner_does_not_finalize_owned_job(monkeypatch):
+    run_id = "run-busy-text"
+    project, _document, _primary = _project_with_result_node(
+        primary_version_id=None,
+        active_run_id=run_id,
+    )
+    candidate = CanvasResultCandidate(candidate_id="candidate-0", index=0, status="pending")
+    job = _job(project.project_id, run_id, [candidate]).model_copy(update={"kind": JobKind.TEXT})
+    save_job(job)
+    monkeypatch.setattr(
+        canvas_runs,
+        "run_job",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            canvas_runs.JobExecutionBusy("already owned")
+        ),
+    )
+
+    result = run_canvas_job(job.job_id)
+
+    assert result.status == JobStatus.PENDING
+    assert result.canvas_run.candidates[0].status == "pending"
+    assert result.error is None
+
+
 def test_restart_recovery_registers_paid_incremental_output_before_failing_unknown_slots():
     run_id = "run-recover-output"
     project, _document, _primary = _project_with_result_node(

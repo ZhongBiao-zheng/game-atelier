@@ -123,6 +123,107 @@ def test_render_openai_provider_posts_to_image_endpoint_and_writes_data_url(
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
+def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
+    image_bytes = b"\x89PNG\r\n\x1a\ntuzi"
+    params = {"provider_task_protocol": "tuzi_async", "provider_task_ids": ["saved-1"]}
+    calls: list[dict[str, object]] = []
+    persisted: list[str] = []
+
+    def fake_execute_json(**kwargs):
+        calls.append(kwargs)
+        return {
+            "data": [{"b64_json": base64.b64encode(image_bytes).decode("ascii")}],
+        }
+
+    monkeypatch.setattr(openai_image.tuzi_async, "execute_json", fake_execute_json)
+
+    paths = openai_image.render(
+        prompt="fox",
+        model="gpt-image-2",
+        alias="Tuzi",
+        output_dir=tmp_path,
+        n=1,
+        size="2048x2048",
+        params=params,
+        on_params_changed=lambda: persisted.extend(params["provider_task_ids"]),
+    )
+
+    assert calls[0]["url"] == "https://api.tu-zi.com/v1/images/generations"
+    assert calls[0]["task_id"] == "saved-1"
+    assert calls[0]["payload"].get("quality") is None
+    assert persisted == []
+    assert Path(paths[0]).read_bytes() == image_bytes
+
+
+def test_render_tuzi_resume_never_submits_supplemental_billed_task(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
+    calls: list[str | None] = []
+    params = {"provider_task_protocol": "tuzi_async", "provider_task_ids": ["saved-1"]}
+
+    def fake_execute_json(**kwargs):
+        calls.append(kwargs["task_id"])
+        return {"data": [{
+            "b64_json": base64.b64encode(b"\x89PNG\r\n\x1a\none").decode("ascii"),
+        }]}
+
+    monkeypatch.setattr(openai_image.tuzi_async, "execute_json", fake_execute_json)
+
+    paths = openai_image.render(
+        prompt="fox", model="gpt-image-2", alias="Tuzi", output_dir=tmp_path,
+        n=2, size="2048x2048", params=params,
+    )
+
+    assert calls == ["saved-1"]
+    assert len(paths) == 1
+    assert "只返回了 1 张图" in params["warnings"][0]
+
+
+def test_render_tuzi_reference_edit_uses_async_multipart(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
+    reference = tmp_path / "reference.png"
+    reference.write_bytes(b"\x89PNG\r\n\x1a\nreference")
+    image_bytes = b"\x89PNG\r\n\x1a\nedited"
+    captured: dict[str, object] = {}
+
+    def fake_execute_multipart(**kwargs):
+        captured.update(kwargs)
+        kwargs["on_task_id"]("edit-task-1")
+        return {"data": [{"b64_json": base64.b64encode(image_bytes).decode("ascii")}]}
+
+    monkeypatch.setattr(openai_image.tuzi_async, "execute_multipart", fake_execute_multipart)
+    params: dict[str, object] = {}
+
+    paths = openai_image.render(
+        prompt="restyle",
+        model="gpt-image-2",
+        alias="Tuzi",
+        output_dir=tmp_path / "out",
+        n=1,
+        size="2048x2048",
+        source_image=str(reference),
+        params=params,
+    )
+
+    assert captured["url"] == "https://api.tu-zi.com/v1/images/edits"
+    assert captured["fields"]["model"] == "gpt-image-2"
+    assert captured["files"][0][0] == "image"
+    assert params["provider_task_ids"] == ["edit-task-1"]
+    assert Path(paths[0]).read_bytes() == image_bytes
+
+
 def test_post_json_retries_only_pre_flight_failures(monkeypatch):
     """连接**建立阶段**的失败没送达上游，重试安全。"""
     image_bytes = b"\x89PNG\r\n\x1a\nretry"
@@ -1291,9 +1392,14 @@ def test_custom_seedream_normalizes_size_to_minimum_pixels(tmp_path, monkeypatch
         access_key="x", created_at="2026-07-08T00:00:00Z",
     ))
     posted = {}
-    monkeypatch.setattr(openai_image, "_post_json",
-                        lambda url, key, payload, *, timeout: (posted.update(body=payload),
-                                                               {"data": [{"b64_json": "aGk="}]})[1])
+    monkeypatch.setattr(
+        openai_image.tuzi_async,
+        "execute_json",
+        lambda **kwargs: (
+            posted.update(body=kwargs["payload"]),
+            {"data": [{"b64_json": "aGk="}]},
+        )[1],
+    )
     openai_image.render(prompt="p", model="doubao-seedream-4-5-251128", alias="tz",
                         output_dir=tmp_path / "o", size="1024x1024")
     w, h = (int(v) for v in posted["body"]["size"].split("x"))
@@ -1579,6 +1685,14 @@ def test_every_seedream_route_disables_watermark_and_asks_png(
         return FakePostResponse({"data": [{"b64_json": "aGk="}]})
 
     monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    monkeypatch.setattr(
+        openai_image.tuzi_async,
+        "execute_json",
+        lambda **kwargs: (
+            seen.update(kwargs["payload"]),
+            {"data": [{"b64_json": "aGk="}]},
+        )[1],
+    )
     openai_image.render(prompt="fox", model=model, alias="k", output_dir=tmp_path, size="2048x2048")
 
     assert seen["watermark"] is False, f"{provider} 这条路没关水印"

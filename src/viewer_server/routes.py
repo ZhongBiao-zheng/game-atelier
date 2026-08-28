@@ -1,6 +1,8 @@
 """HTTP routes — GET + POST endpoints."""
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import logging
 import os
@@ -9,7 +11,9 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -36,7 +40,8 @@ from character_workflow.lib.atomic_io import (
 )
 from character_workflow.lib.job_runner import image_dimensions_from_bytes
 from character_workflow.lib.jobs import (
-    _load_job, delete_failed_job, job_lock, list_jobs, read_job, remove_image_from_job,
+    _load_job, delete_failed_job, is_resumable_studio_job, job_lock, list_jobs, read_job,
+    remove_image_from_job,
     new_job_id, save_job, update_job_status, write_job,
 )
 from character_workflow.lib.schemas import AssetSlot as _AssetSlot
@@ -81,6 +86,12 @@ from character_workflow.lib.schemas import (
     UiSchemeCreate, UiSchemeDefaultSet, UiSchemesFile,
     WebEditableJobPatch,
 )
+
+
+_STUDIO_SHUTDOWN_EVENT = threading.Event()
+_STUDIO_RECOVERY_DELAY_SECONDS = 30
+_STUDIO_RUNNER_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="studio-job")
+_STUDIO_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 
 logger = logging.getLogger(__name__)
@@ -403,7 +414,23 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
         if data.get("namespace") == "canvas":
             raise HTTPException(403, detail="Canvas Job 的快照和参数不能通过通用编辑接口修改")
         for field, value in patch.model_dump(exclude_unset=True).items():
+            if field == "params" and isinstance(value, dict):
+                existing_params = data.get("params")
+                existing_params = existing_params if isinstance(existing_params, dict) else {}
+                # These fields identify an already billed provider task.  Browser edits must never
+                # replace or erase them, otherwise a forged/stale id could retrieve the wrong task
+                # or make the runner submit a second order after losing its recovery handle.
+                for owned in ("provider_task_protocol", "provider_task_ids"):
+                    if owned in existing_params:
+                        value[owned] = existing_params[owned]
+                    else:
+                        value.pop(owned, None)
             data[field] = value
+        # Validate the complete post-patch document before replacing the durable Job JSON.  This
+        # catches explicit nulls and cross-field violations without discarding legacy raw fields.
+        validated = dict(data)
+        validated.pop("seed", None)
+        Job.model_validate(validated)
         atomic_write_json(p, data)
     return {"ok": True}
 
@@ -1082,6 +1109,14 @@ def post_job_cancel(job_id: str) -> dict:
         (_runtime() / "jobs" / f"{job_id}.json").unlink()
         return {"ok": True, "job_id": job_id, "deleted": True}
     if job.status == JobStatus.PENDING:
+        if is_resumable_studio_job(job):
+            raise HTTPException(
+                409,
+                detail=(
+                    "这笔厂商任务已经提交并可能已扣费，不能作废。系统会继续查询同一个任务，"
+                    "不会重新下单；请等待恢复结果。"
+                ),
+            )
         age = _pending_age_minutes(job)
         if age is None or age >= STALE_PENDING_MINUTES:
             update_job_status(
@@ -2025,6 +2060,10 @@ def _create_user_job(
     if not key_row:
         raise HTTPException(status_code=400, detail=f"unknown alias {alias}")
     params = body.params.model_copy(deep=True)
+    # Provider task handles are runner-owned.  A Studio create request always represents a new
+    # order and may not attach itself to an arbitrary existing Tuzi task.
+    params.provider_task_protocol = None
+    params.provider_task_ids = None
     if body.kind == JobKind.IMAGE:
         image_count = params.n if params.n is not None else 1
         if image_count < 1 or image_count > 4:
@@ -3256,22 +3295,42 @@ def post_studio_archive(job_id: str, body: _StudioArchiveRequest) -> dict:
     return {"job": job.model_dump(mode="json"), "path": job.output_paths[0]}
 
 
-def _run_studio_job_safely(job_id: str) -> None:
-    """BackgroundTasks wrapper — runs job_runner.run_job and pins failures to job state.
+def _reset_studio_recovery_workers() -> None:
+    _STUDIO_SHUTDOWN_EVENT.clear()
 
-    Lazy import keeps test monkeypatching (`routes._run_studio_job_safely`) effective
-    and avoids importing the caller chain at module load.
+
+def _stop_studio_recovery_workers() -> None:
+    _STUDIO_SHUTDOWN_EVENT.set()
+    for task in tuple(_STUDIO_BACKGROUND_TASKS):
+        task.cancel()
+
+
+def _run_studio_job_once(
+    job_id: str,
+) -> bool:
+    """Run one provider attempt; return whether the same paid task remains resumable.
+
+    This synchronous function runs only in the dedicated Studio executor. Recovery delays live in
+    the async wrapper, so pending Tuzi tasks do not occupy FastAPI's shared AnyIO thread pool.
     """
-    from character_workflow.lib.job_runner import run_job
+    from character_workflow.lib.job_runner import JobExecutionBusy, run_job
+
     try:
-        run_job(job_id)
+        job = run_job(job_id, should_cancel=_STUDIO_SHUTDOWN_EVENT.is_set)
+    except JobExecutionBusy:
+        # Startup recovery and the original BackgroundTask can overlap. The lock owner is already
+        # handling this exact Job. Keep a Tuzi recovery waiter alive in case that owner disappears.
+        try:
+            return is_resumable_studio_job(read_job(job_id))
+        except FileNotFoundError:
+            return False
     except Exception as e:  # noqa: BLE001
-        # run_job already calls update_job_status(FAILED) on its own exception path,
-        # but guard against any uncaught path (e.g., raised before its try block).
+        # run_job already records provider failures. Guard only errors that escaped before its
+        # state-transition block (for example, loading a deleted Job).
         try:
             job = read_job(job_id)
         except FileNotFoundError:
-            return
+            return False
         if job.status not in {
             JobStatus.DONE,
             JobStatus.PARTIAL,
@@ -3279,6 +3338,42 @@ def _run_studio_job_safely(job_id: str) -> None:
             JobStatus.CANCELED,
         }:
             update_job_status(job_id, status=JobStatus.FAILED, error=str(e))
+        return False
+    return is_resumable_studio_job(job)
+
+
+async def _run_studio_job_safely(
+    job_id: str,
+    *,
+    max_recovery_attempts: int | None = None,
+) -> None:
+    """Run Studio work outside AnyIO's shared pool, with async recovery delays."""
+    attempts = 0
+    loop = asyncio.get_running_loop()
+    while not _STUDIO_SHUTDOWN_EVENT.is_set():
+        attempts += 1
+        should_retry = await loop.run_in_executor(
+            _STUDIO_RUNNER_EXECUTOR,
+            _run_studio_job_once,
+            job_id,
+        )
+        if not should_retry:
+            return
+        if max_recovery_attempts is not None and attempts >= max_recovery_attempts:
+            return
+        await asyncio.sleep(_STUDIO_RECOVERY_DELAY_SECONDS)
+
+
+async def _start_studio_job_task(job_id: str) -> None:
+    """Detach a Studio runner from the response lifecycle and track it for shutdown."""
+    from viewer_server import routes as _self
+
+    result = _self._run_studio_job_safely(job_id)
+    if not inspect.isawaitable(result):
+        return
+    task = asyncio.create_task(result)
+    _STUDIO_BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_STUDIO_BACKGROUND_TASKS.discard)
 
 
 @router.post("/studio/jobs", status_code=201)
@@ -3293,7 +3388,7 @@ def create_studio_job(body: _StudioJobCreate, background: BackgroundTasks) -> di
     the UI then polls /api/jobs/<id> to observe status transitions.
     """
     job = _create_user_job(body, namespace="studio")
-    # Dispatch through module-level symbol so tests can monkeypatch routes._run_studio_job_safely.
-    from viewer_server import routes as _self
-    background.add_task(_self._run_studio_job_safely, job.job_id)
+    # The BackgroundTask only detaches a tracked asyncio task; the potentially long provider
+    # lifecycle is not tied to Uvicorn's response-drain phase during shutdown.
+    background.add_task(_start_studio_job_task, job.job_id)
     return job.model_dump(mode="json")

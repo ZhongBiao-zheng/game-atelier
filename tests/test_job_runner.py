@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import struct
@@ -198,6 +199,148 @@ def test_run_job_routes_custom_provider_through_dispatch(project, monkeypatch):
     assert captured["alias"] == "zz-main"
     assert captured["model"] == "gpt-image-2-all"
     assert captured["output_dir"] != expected.parent
+
+
+def test_run_job_persists_provider_task_id_before_dispatch_finishes(project, monkeypatch):
+    save_job(Job(
+        job_id="studio-tuzi-async",
+        character_id="Tuzi",
+        prompt="fox",
+        submitted_at="2026-08-28T00:00:00+08:00",
+        model="gpt-image-2",
+        params=JobParams(size="2048x2048", n=1),
+        output_paths=[],
+        status=JobStatus.PENDING,
+        error=None,
+        kind=JobKind.IMAGE,
+        namespace="studio",
+        alias="Tuzi",
+        provider="custom",
+    ))
+
+    def fake_dispatch(*, on_params_changed, params, **kwargs):
+        params["provider_task_protocol"] = "tuzi_async"
+        params["provider_task_ids"] = ["tuzi-task-1"]
+        on_params_changed()
+        persisted = read_job("studio-tuzi-async")
+        assert persisted.params.provider_task_protocol == "tuzi_async"
+        assert persisted.params.provider_task_ids == ["tuzi-task-1"]
+        out = Path(kwargs["output_dir"]) / "v1.png"
+        _write_png(out)
+        return [str(out)]
+
+    monkeypatch.setattr(job_runner, "dispatch", fake_dispatch)
+
+    final = job_runner.run_job("studio-tuzi-async")
+
+    assert final.status == JobStatus.DONE
+    assert final.params.provider_task_ids == ["tuzi-task-1"]
+
+
+def test_run_job_keeps_resumable_tuzi_task_pending_on_poll_abandon(project, monkeypatch):
+    from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
+
+    save_job(Job(
+        job_id="studio-tuzi-polling",
+        character_id="Tuzi",
+        prompt="fox",
+        submitted_at="2026-08-28T00:00:00+08:00",
+        model="gpt-image-2",
+        params=JobParams(
+            size="2048x2048",
+            provider_task_protocol="tuzi_async",
+            provider_task_ids=["paid-task"],
+        ),
+        output_paths=[], status=JobStatus.PENDING, error=None,
+        kind=JobKind.IMAGE, namespace="studio", alias="Tuzi", provider="custom",
+    ))
+    monkeypatch.setattr(
+        job_runner,
+        "dispatch",
+        lambda **kwargs: (_ for _ in ()).throw(
+            TuziAsyncPendingError("查询任务状态连续失败（task_id=paid-task）")
+        ),
+    )
+
+    result = job_runner.run_job("studio-tuzi-polling")
+
+    saved = read_job("studio-tuzi-polling")
+    assert result.status == JobStatus.PENDING
+    assert saved.status == JobStatus.PENDING
+    assert saved.params.provider_task_ids == ["paid-task"]
+
+
+def test_studio_runner_wrapper_does_not_overwrite_resumable_tuzi_pending(project, monkeypatch):
+    from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
+    from viewer_server.routes import _run_studio_job_safely
+
+    save_job(Job(
+        job_id="studio-tuzi-wrapper",
+        character_id="Tuzi",
+        prompt="fox",
+        submitted_at="2026-08-28T00:00:00+08:00",
+        model="gpt-image-2",
+        params=JobParams(
+            provider_task_protocol="tuzi_async",
+            provider_task_ids=["paid-task"],
+        ),
+        output_paths=[], status=JobStatus.PENDING, error=None,
+        kind=JobKind.IMAGE, namespace="studio", alias="Tuzi", provider="custom",
+    ))
+    monkeypatch.setattr(
+        job_runner,
+        "dispatch",
+        lambda **kwargs: (_ for _ in ()).throw(
+            TuziAsyncPendingError("查询任务状态连续失败（task_id=paid-task）")
+        ),
+    )
+
+    asyncio.run(_run_studio_job_safely("studio-tuzi-wrapper", max_recovery_attempts=1))
+
+    assert read_job("studio-tuzi-wrapper").status == JobStatus.PENDING
+
+
+def test_studio_runner_retries_without_occupying_executor_during_delay(monkeypatch):
+    from viewer_server import routes
+
+    attempts = iter([True, False])
+    calls: list[str] = []
+
+    def fake_attempt(job_id: str) -> bool:
+        calls.append(job_id)
+        return next(attempts)
+
+    monkeypatch.setattr(routes, "_run_studio_job_once", fake_attempt)
+    monkeypatch.setattr(routes, "_STUDIO_RECOVERY_DELAY_SECONDS", 0)
+    routes._reset_studio_recovery_workers()
+
+    asyncio.run(routes._run_studio_job_safely("studio-paid"))
+
+    assert calls == ["studio-paid", "studio-paid"]
+
+
+def test_run_job_does_not_dispatch_when_another_worker_owns_job(project, monkeypatch):
+    from character_workflow.lib.jobs import job_execution_lock
+
+    save_job(Job(
+        job_id="studio-claimed",
+        character_id="Tuzi",
+        prompt="fox",
+        submitted_at="2026-08-28T00:00:00+08:00",
+        model="gpt-image-2",
+        params=JobParams(), output_paths=[], status=JobStatus.PENDING, error=None,
+        kind=JobKind.IMAGE, namespace="studio", alias="Tuzi", provider="custom",
+    ))
+    monkeypatch.setattr(
+        job_runner, "dispatch", lambda **kwargs: pytest.fail("duplicate worker dispatched"),
+    )
+
+    with job_execution_lock("studio-claimed") as acquired:
+        assert acquired is True
+        with pytest.raises(job_runner.JobExecutionBusy):
+            job_runner.run_job("studio-claimed")
+
+    assert read_job("studio-claimed").status == JobStatus.PENDING
 
 
 def test_deferred_image_attempt_keeps_job_pending_and_appends_new_output(project, monkeypatch):
@@ -436,7 +579,7 @@ def test_friendly_error_redacts_local_paths_without_swallowing_task_id():
         r'escaped={\"api_key\":\"escaped-secret\"}; '
         "X-API-Key: header-secret; X-Auth-Token=auth-secret; "
         "client_secret=client-secret; private_key=private-secret; "
-        "Authorization: Bearer sk-private"
+        "Authorization: Bearer sk-private; provider said invalid API key sk-abcdefghijk"
     )
     msg = job_runner._friendly_error(err)
     assert "cgt-keep-me" in msg
@@ -465,13 +608,14 @@ def test_friendly_error_redacts_local_paths_without_swallowing_task_id():
     assert "client-secret" not in msg
     assert "private-secret" not in msg
     assert "sk-private" not in msg
+    assert "sk-abcdefghijk" not in msg
     assert "https://example.com/v1/render" in msg
     assert "https://api.example.com/v1/render" in msg
     assert "user:password" not in msg
     assert "https://<redacted>@example.com/v1" in msg
     assert "/Users/a/ref.png" not in msg
     assert msg.count("<local-path>") == 5
-    assert msg.count("<redacted>") == 22
+    assert msg.count("<redacted>") == 23
 
 
 def test_friendly_error_path_redaction_preserves_following_task_id():

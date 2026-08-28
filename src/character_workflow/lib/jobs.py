@@ -15,7 +15,7 @@ from character_workflow.lib import data_root, keys
 from character_workflow.lib.atomic_io import atomic_write_text
 from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus, Namespace
 
-from character_workflow.lib.file_lock import file_lock
+from character_workflow.lib.file_lock import file_lock, try_file_lock
 
 
 logger = logging.getLogger(__name__)
@@ -70,6 +70,13 @@ def job_lock(job_id: str) -> Iterator[None]:
         yield
 
 
+@contextmanager
+def job_execution_lock(job_id: str) -> Iterator[bool]:
+    """Claim one provider runner per Job across threads/processes without blocking duplicates."""
+    with try_file_lock(_runtime_dir() / "jobs" / f"{job_id}.run.lock") as acquired:
+        yield acquired
+
+
 def new_job_id() -> str:
     """job_id 唯一生成点 —— submit / retry 共用，防止两处格式漂移。"""
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
@@ -86,6 +93,14 @@ def save_job(job: Job) -> Job:
     """Persist a complete Job model after structured updates."""
     with job_lock(job.job_id):
         return _write(job)
+
+
+def update_job_params(job_id: str, params: dict[str, Any] | JobParams) -> Job:
+    """Atomically replace params without overwriting concurrent status/phase/output updates."""
+    normalized = params if isinstance(params, JobParams) else JobParams(**params)
+    with job_lock(job_id):
+        current = read_job(job_id)
+        return write_job_under_lock(current.model_copy(update={"params": normalized}))
 
 
 def write_job_under_lock(job: Job) -> Job:
@@ -292,7 +307,13 @@ def clone_job_for_retry(job_id: str) -> Job:
         raise ValueError(
             f"job {job_id} is {src.status.value}, not failed —— 只有 failed job 可重试"
         )
-    params = src.params.model_copy(update={"actual_size": None, "warnings": None})
+    params = src.params.model_copy(update={
+        "actual_size": None,
+        "warnings": None,
+        # “再次生成”是明确的新订单，不能复用上一单的终态/过期任务 ID。
+        "provider_task_protocol": None,
+        "provider_task_ids": None,
+    })
     clone = src.model_copy(update={
         "job_id": new_job_id(),
         "submitted_at": datetime.now(timezone.utc).isoformat(),
@@ -308,12 +329,28 @@ def clone_job_for_retry(job_id: str) -> Job:
 def fail_orphan_studio_jobs(error: str = "server restarted, job interrupted") -> list[str]:
     """viewer-server 启动时回收孤儿 studio job，返回被回收的 job_id 列表。
 
-    studio job 只在 viewer-server 进程内跑（BackgroundTasks 同步阻塞），server
-    启动时还停在 pending 的必然已随上次进程一起死了 —— 直接判 FAILED，零误伤。
+    studio job 只在 viewer-server 进程的受控 executor 内跑，server 启动时仍 pending
+    且没有可恢复厂商任务 ID 的请求，必然已随上次进程一起中断 —— 直接判 FAILED。
     character job 由独立 Skill 进程跑，不能在这里清（前端按时限提示作废）。"""
     reclaimed: list[str] = []
     for job in list_jobs():
         if job.namespace == "studio" and job.status == JobStatus.PENDING:
+            if is_resumable_studio_job(job):
+                continue
             update_job_status(job.job_id, status=JobStatus.FAILED, error=error)
             reclaimed.append(job.job_id)
     return reclaimed
+
+
+def is_resumable_studio_job(job: Job) -> bool:
+    return bool(
+        job.namespace == "studio"
+        and job.status == JobStatus.PENDING
+        and job.params.provider_task_protocol == "tuzi_async"
+        and job.params.provider_task_ids
+    )
+
+
+def resumable_studio_jobs() -> list[str]:
+    """Return pending Studio jobs that can continue without creating a new billed request."""
+    return sorted(job.job_id for job in list_jobs() if is_resumable_studio_job(job))

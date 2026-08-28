@@ -1,6 +1,6 @@
 # API Key / 厂商配置参考
 
-> 配置 key、设计出图/出视频参数、排错时只看这份。汇总自官方文档与实测，2026-06-11 起持续更新（最近一次 2026-08-13）。
+> 配置 key、设计出图/出视频参数、排错时只看这份。汇总自官方文档与实测，2026-06-11 起持续更新（最近一次 2026-08-28）。
 > Skill 按任务挑模型、按模型族写提示词 → [model-routing.md](model-routing.md)。
 
 ## 配置在哪
@@ -45,7 +45,7 @@
 | `seedream` | seedream | `https://ark.cn-beijing.volces.com/api/v3` | doubao-seedream-5-0 / 4-5 | 图生图实测通 |
 | `OpenAI-HK` | custom | `https://api.openai-hk.com` | gpt-image-2、nano-banana / -2 / -hd | 实测通；kling caller 已写、模型未挂 key |
 | `tokendance` | tokendance | `https://tokendance.space/gateway/v1` | seedream-5.0-lite / -pro（图）、seedance-2.0 系 + happyhorse 系（视频） | 2026-08-13 出图实测通（pro 走 Ark 端点，960² 约 88s）|
-| `Tuzi` | custom | `https://api.tu-zi.com` | gpt-image-2、doubao-seedream-4-5、nano-banana-pro / -2 系 | **当前 default_alias** —— Skill 不指定 alias 时默认走这把。出图实测通；注意它对畸形请求**不快速失败**（实测缺 prompt / 不存在的模型 id 都挂满读超时不返回，服务本身是活的：`GET /v1/models` 2s 回 474 个模型）|
+| `Tuzi` | custom | `https://api.tu-zi.com` | gpt-image-2、doubao-seedream-4-5、nano-banana-pro / -2 系 | **当前 default_alias** —— Skill 不指定 alias 时默认走这把。图片走通用异步任务：先保存 task ID，再轮询原任务；短暂断网或 viewer-server 重启后可续查，不重发已计费请求 |
 | `OpenRouter` | openrouter | `https://openrouter.ai/api/v1` | gpt-image-2、seedream-4.5、gemini-3-pro-image、flux.2-pro（图）+ veo / sora / seedance / kling（视频，手填）| 实测通。契约与国内聚合商不同族，见 [openrouter-pricing.md](openrouter-pricing.md)：专用 `/images`（回 b64_json）+ 异步 `/videos` job；**视频模型不在默认 `/models` 里**（实测 409 条一个都没有），要用 `?output_modalities=video` 或 `/videos/models` 才列得出来（23 个：veo / sora / kling / seedance / hailuo / runway / wan / happyhorse…）——models-preview 已自动合并拉取 |
 
 密钥获取：火山 `console.volcengine.com/ark`、词元跳动 `tokendance.space/keys`、HK `open-hk.com` 控制台。
@@ -78,6 +78,15 @@
   - `gpt-image` 族 → `POST /v1/images/edits`（multipart，重复 `image` 文件部件）
   - `nano-banana` 族 → 仍走 `generations`，参考图放 `image` 字段。它是 Gemini 多模态，聚合商对其 `/images/edits` 一律 **403**（openresty 网关层拒未实现路由），别按 gpt-image 那条路设计。
 - 单次恒回 1 张，n>1 靠补足循环逐张补发。
+
+### Tuzi 聚合（provider=custom，base host 为 `tu-zi.com` 或其子域）
+
+- 图片生成与编辑统一走通用异步包装：`POST /async/<原 images 路径>` 提交，随后用
+  `GET /get-async?id=<task_id>` 查询，终态 `completed` 的 `result` 才按原图片响应解析。
+- task ID 必须在第一次查询前写入 Job；轮询网络失败或超时保持 `PENDING`，viewer-server
+  启动时与运行期间都会续查原任务。每个 Job 有跨进程执行锁，避免多个恢复线程重复处理。
+- 已有 task ID 的恢复流程只消费已登记任务；即使结果张数少于请求数量，也不补发新订单。
+  用户明确点击“再次生成”才会创建新 Job，并清除旧 task ID。
 - gpt-image：`quality` low/medium/high/auto。`size` 官方约束是「双边 16 倍数、最大边 3840、宽高比 ≤3:1」，但 **HK 只认一张 30 项的固定尺寸表**，表外值会被出成正方形 —— caller 会把任意 WxH **吸附**到表内最近值（先比例最近、再像素最近，见 `openai_image._snap_hk_gpt_image_size`），吸附结果写进 `params.warnings`。所以同一个 `gpt-image-2` 在 HK key 上会被 snap、在 Tuzi key 上原样发送。
 - nano-banana：`size` = 比例字符串原样发（`"16:9"`）；`quality` low/medium/high。
 

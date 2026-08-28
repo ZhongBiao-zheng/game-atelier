@@ -32,7 +32,7 @@
 - 路由：`alias` `provider` `model` —— 换模型只能新建 job（`POST /studio/jobs`），不能改已有的
 - 血缘：`retry_of` `source_image`；创作台归档血缘写在 `params.archived_from_job_id / archived_from_path`
 
-`JobParams` = `extra="allow"`（加字段不会被上游拒），但**双端仍要同步声明**，否则 TS 那边拿不到类型。后端独占写入的三个：`actual_size`、`warnings`、`requested_size` —— 前端只读不写。
+`JobParams` = `extra="allow"`（加字段不会被上游拒），但**双端仍要同步声明**，否则 TS 那边拿不到类型。后端独占写入的还有 `actual_size`、`warnings`、`requested_size`、`provider_task_protocol`、`provider_task_ids` —— 前端只读不写。后两项用于恢复已计费的聚合商异步任务：任务 ID 必须在首次轮询前落盘，重启后只允许续查原任务，不能重新提交。
 
 Canvas 节点媒体设置新增的显式参数也遵循同一契约：图片 `background` 只允许
 `auto | opaque | transparent`，并只向已验证的 GPT Image 直连协议发送；视频 `watermark`

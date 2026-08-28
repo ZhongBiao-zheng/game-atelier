@@ -25,6 +25,9 @@ export interface JobParams {
   requested_size?: string;
   actual_size?: string;
   warnings?: string[];
+  /** 聚合商异步任务恢复信息；Web 只读，重启后后端凭此续查，不能重新提交。 */
+  provider_task_protocol?: 'tuzi_async';
+  provider_task_ids?: string[];
   // 图片参数 —— 与 schemas.py::JobParams 同步（ratio 如 "16:9"；quality: low|medium|high|auto）
   ratio?: string;
   quality?: string;

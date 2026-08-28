@@ -15,26 +15,34 @@ from character_workflow.lib.asset_versions import asset_output_lock, next_asset_
 from character_workflow.lib.callers import dispatch, dispatch_audio, dispatch_text, dispatch_video
 from character_workflow.lib.active_character import read_active
 from character_workflow.lib.jobs import (
+    job_execution_lock,
     job_output_dir_for,
     list_jobs,
     read_job,
-    save_job,
+    update_job_params,
     update_job_phase,
     update_job_status,
 )
-from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
+from character_workflow.lib.schemas import AssetSlot, Job, JobStatus
 
 
 class JobRunnerError(RuntimeError):
     pass
 
 
-def _cancel_checker(job: Job) -> Callable[[], bool] | None:
+class JobExecutionBusy(JobRunnerError):
+    """Another process already owns this Job's provider execution."""
+
+
+def _cancel_checker(
+    job: Job,
+    external: Callable[[], bool] | None = None,
+) -> Callable[[], bool] | None:
     if job.namespace != "canvas":
-        return None
+        return external
 
     def should_cancel() -> bool:
-        return read_job(job.job_id).cancel_requested_at is not None
+        return bool(external and external()) or read_job(job.job_id).cancel_requested_at is not None
 
     return should_cancel
 
@@ -54,6 +62,7 @@ def _friendly_error(err: BaseException) -> str:
 
 def _redact_local_paths(message: str) -> str:
     """Keep task ids/upstream diagnostics while removing secrets and workstation locations."""
+    message = re.sub(r"(?i)\bsk-[A-Za-z0-9_-]{8,}", "<redacted>", message)
     message = re.sub(
         r"(?i)(?<![\w?&-])((?:(?:\\?['\"])?(?:authorization|api[_-]?key|access[_-]?key|"
         r"secret[_-]?key|x[-_]api[-_]key|x[-_]auth[-_]token|client[-_]secret|private[-_]key|"
@@ -261,7 +270,7 @@ def _params(job: Job) -> dict[str, Any]:
 
 
 def _save_params(job: Job, params: dict[str, Any]) -> Job:
-    return save_job(job.model_copy(update={"params": JobParams(**params)}))
+    return update_job_params(job.job_id, params)
 
 
 def _normalize_reference_images(job: Job) -> Job:
@@ -391,12 +400,34 @@ def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
     path.with_suffix(".md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run_job(job_id: str, *, defer_terminal: bool = False) -> Job:
+def run_job(
+    job_id: str,
+    *,
+    defer_terminal: bool = False,
+    should_cancel: Callable[[], bool] | None = None,
+) -> Job:
+    """Run at most one provider worker for a Job across threads and viewer-server processes."""
+    with job_execution_lock(job_id) as acquired:
+        if not acquired:
+            raise JobExecutionBusy(f"job {job_id} is already running")
+        return _run_job_claimed(
+            job_id,
+            defer_terminal=defer_terminal,
+            should_cancel_external=should_cancel,
+        )
+
+
+def _run_job_claimed(
+    job_id: str,
+    *,
+    defer_terminal: bool = False,
+    should_cancel_external: Callable[[], bool] | None = None,
+) -> Job:
     from character_workflow.lib.schemas import JobKind
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
     net_env.configure_proxy_bypass()
     job = read_job(job_id)
-    should_cancel = _cancel_checker(job)
+    should_cancel = _cancel_checker(job, should_cancel_external)
 
     def on_phase(phase: str) -> None:
         if should_cancel is not None and should_cancel():
@@ -425,10 +456,12 @@ def run_job(job_id: str, *, defer_terminal: bool = False) -> Job:
         with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider or 'image'}-") as tmp:
             dispatch_kwargs: dict[str, Any] = {}
             if should_cancel is not None:
-                from character_workflow.lib.callers.openai_image import image_family
+                dispatch_kwargs["should_cancel"] = should_cancel
 
-                if image_family(job.model) == "midjourney":
-                    dispatch_kwargs["should_cancel"] = should_cancel
+            def on_params_changed() -> None:
+                # Callers own provider-specific params; the runner only persists their mutation.
+                update_job_params(job.job_id, params)
+
             paths = dispatch(
                 prompt=job.prompt,
                 model=job.model,
@@ -437,9 +470,10 @@ def run_job(job_id: str, *, defer_terminal: bool = False) -> Job:
                 n=params.get("n") or 1,
                 size=params.get("size"),
                 params=params,
-                # MJ 是唯一异步图片协议（submit + 轮询，FAST 档 ~40s、RELAX 可到几分钟），
-                # 进度卡点回写让前端不必干等。同步 caller 收下即忽略（都吃 **kwargs）。
+                # 异步图片协议（MJ / Tuzi）在 submit 与下载时回写真实卡点；同步 caller
+                # 收下即忽略（都吃 **kwargs）。
                 on_phase=on_phase,
+                on_params_changed=on_params_changed,
                 **dispatch_kwargs,
             )
             selected = [(Path(p), dims) for p in paths if (dims := image_dimensions(Path(p)))]
@@ -470,11 +504,23 @@ def run_job(job_id: str, *, defer_terminal: bool = False) -> Job:
                 error=None,
             )
     except Exception as e:
-        update_job_status(
+        from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
+
+        provider_task_pending = isinstance(e, TuziAsyncPendingError)
+        saved = update_job_status(
             job.job_id,
-            status=JobStatus.PENDING if defer_terminal else JobStatus.FAILED,
+            status=(
+                JobStatus.PENDING
+                if defer_terminal or provider_task_pending
+                else JobStatus.FAILED
+            ),
             error=_friendly_error(e),
         )
+        # A paid Tuzi task still exists and has a durable provider id. Treat a temporary loss of
+        # polling as a normal resumable outcome; bubbling an exception would make outer background
+        # guards overwrite PENDING with FAILED.
+        if provider_task_pending:
+            return saved
         if isinstance(e, JobRunnerError):
             raise
         raise JobRunnerError(str(e)) from e
