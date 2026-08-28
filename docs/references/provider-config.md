@@ -121,20 +121,27 @@
 
 后端做过的改写（尺寸放大 / HK 档位吸附 / 参考图截断 / 出图张数不足）一律写进 `params.warnings`，由图卡展示——不再静默。
 
-### OpenAI-HK 价目（积分，10000 积分 = 1 元）
+### 已核实媒体价目
 
-| 模型 | low | medium | high |
-|---|---|---|---|
-| gpt-image-2 | 600 | 1200 | 2400 |
-| nano-banana | 2000 | — | — |
-| nano-banana-2 | 4800 | 9600 | — |
-| nano-banana-hd | 3200 | — | — |
+OpenAI-HK 按张：GPT Image 2 `¥0.08`、Nano Banana `¥0.20`、Nano Banana HD
+`¥0.32`；Nano Banana 2 的 low / medium / high 分别对应基础 / 2K / 4K，单价
+`¥0.48 / ¥0.72 / ¥1.00`。
+
+Tuzi 必须在 Key 上显式配置 `billing_group`。`default` 分组已核实 GPT Image 2、
+Seedream 4.5、Seedream 5.0 Pro、Nano Banana Pro、Nano Banana 2 与 Midjourney；
+Midjourney 按任务计费，四张拆分结果只计一次。`绘画` 分组当前只核实 GPT Image 2。
+未知分组或未知模型不显示价格。
+
+TokenDance 当前只对 Seedream 5.0 Lite / Pro 图片按张计价（`¥0.22 / ¥0.30`）。
+Seedance 自动路由尚不能确定实际服务商，保持不计价。
 
 统一计价入口是 `web/src/lib/generationCost.ts`。价格规则必须同时命中真实渠道、模型与参数：
-命中后在提交时把总价冻结到 `params.estimated_cost_cny`，创作台出图历史只在“耗时 · 时间”行最右侧读该快照；旧记录缺少快照，或模型、档位、聚合渠道没有核实价格时都不显示费用。
+命中后在提交时把总价冻结到 `params.estimated_cost_cny`。OpenRouter 图片成功响应及视频终态
+响应的 `usage.cost` 由 job runner 按固定汇率 `$1 = ¥7` 写入 `params.actual_cost_cny`；历史优先
+实际费用、其次预计快照。旧记录缺少快照，或模型、档位、聚合渠道没有核实价格时都不显示。
 绝不把官方直连价套到 TokenDance / OpenRouter 等聚合商。
 
-目前纳入的图片规则：OpenAI-HK 上表、Ark 直连 `doubao-seedream-5-0-260128`
+目前纳入的直连图片规则：Ark `doubao-seedream-5-0-260128`
 （0.22 元/张）与 `doubao-seedream-4-5-251128`（0.25 元/张）。模型 ID 必须精确命中，
 未知后缀或新版本在核价前不展示费用。
 

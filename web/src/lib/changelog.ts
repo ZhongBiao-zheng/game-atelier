@@ -31,6 +31,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.13',
+    date: '2026-08-28',
+    headline: '已核实渠道费用写入生成记录',
+    changes: [
+      { kind: 'fix', text: 'OpenAI-HK、Tuzi 分组与 TokenDance Seedream 按已核实价格保存人民币费用，无法确定的渠道继续不显示' },
+      { kind: 'fix', text: 'OpenRouter 成功响应返回实际扣费时自动折算人民币，生成历史优先显示实际费用' },
+      { kind: 'feat', text: '自定义渠道 KEY 可以保存计费分组，Tuzi 只有明确分组后才参与计价，避免串用其他账号价格' },
+    ],
+  },
+  {
     version: '5.31.12',
     date: '2026-08-27',
     headline: '生成面板只保留操作，不再常驻提示',

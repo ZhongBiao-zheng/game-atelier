@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { estimateGenerationCost, formatGenerationCost } from './generationCost';
 
 describe('estimateGenerationCost', () => {
-  it('calculates OpenAI-HK image credits by quality and output count', () => {
+  it('calculates fixed OpenAI-HK GPT Image 2 pricing regardless of quality', () => {
     const result = estimateGenerationCost({
       provider: { provider: 'custom', baseUrl: 'https://api.openai-hk.com' },
       model: { id: 'gpt-image-2' },
@@ -12,8 +12,61 @@ describe('estimateGenerationCost', () => {
       quality: 'low',
     });
 
-    expect(result).toBe(0.18);
-    expect(formatGenerationCost(result!)).toBe('¥ 0.18');
+    expect(result).toBe(0.24);
+    expect(formatGenerationCost(result!)).toBe('¥ 0.24');
+  });
+
+  it.each([
+    ['low', 0.48],
+    ['medium', 0.72],
+    ['high', 1],
+  ] as const)('maps OpenAI-HK Nano Banana 2 %s to the verified tier', (quality, price) => {
+    expect(estimateGenerationCost({
+      provider: { provider: 'custom', baseUrl: 'https://api.openai-hk.com' },
+      model: { id: 'nano-banana-2' }, kind: 'image', count: 1, quality,
+    })).toBe(price);
+  });
+
+  it('prices Tuzi by explicit billing group and model id', () => {
+    expect(estimateGenerationCost({
+      provider: {
+        provider: 'custom', baseUrl: 'https://api.tu-zi.com', billingGroup: 'default',
+      },
+      model: { id: 'nano-banana-pro-4k' }, kind: 'image', count: 2,
+    })).toBe(0.7);
+    expect(estimateGenerationCost({
+      provider: {
+        provider: 'custom', baseUrl: 'https://api.tu-zi.com', billingGroup: '绘画',
+      },
+      model: { id: 'gpt-image-2' }, kind: 'image', count: 2,
+    })).toBe(0.42);
+  });
+
+  it('does not guess Tuzi pricing without a verified billing group', () => {
+    expect(estimateGenerationCost({
+      provider: { provider: 'custom', baseUrl: 'https://api.tu-zi.com' },
+      model: { id: 'gpt-image-2' }, kind: 'image', count: 1,
+    })).toBeNull();
+  });
+
+  it('charges one Tuzi Midjourney task even though it yields four images', () => {
+    expect(estimateGenerationCost({
+      provider: {
+        provider: 'custom', baseUrl: 'https://api.tu-zi.com', billingGroup: 'default',
+      },
+      model: { id: 'mj_imagine' }, kind: 'image', count: 4,
+    })).toBe(0.1505);
+  });
+
+  it('prices verified TokenDance Seedream image models', () => {
+    expect(estimateGenerationCost({
+      provider: { provider: 'tokendance', baseUrl: 'https://tokendance.space/gateway/v1' },
+      model: { id: 'seedream-5.0-lite', protocol: 'openai' }, kind: 'image', count: 2,
+    })).toBe(0.44);
+    expect(estimateGenerationCost({
+      provider: { provider: 'tokendance', baseUrl: 'https://tokendance.space/gateway/v1' },
+      model: { id: 'seedream-5.0-pro', protocol: 'ark' }, kind: 'image', count: 2,
+    })).toBe(0.6);
   });
 
   it('calculates Ark Seedream per-image pricing', () => {
@@ -30,10 +83,10 @@ describe('estimateGenerationCost', () => {
     expect(result).toBe(0.44);
   });
 
-  it('does not reuse Ark pricing for the same model through TokenDance', () => {
+  it('does not reuse Ark pricing for an unknown model through TokenDance', () => {
     const result = estimateGenerationCost({
       provider: { provider: 'tokendance', baseUrl: 'https://tokendance.space/gateway/v1' },
-      model: { id: 'seedream-5.0-lite', protocol: 'ark' },
+      model: { id: 'seedream-unknown', protocol: 'ark' },
       kind: 'image',
       count: 1,
     });

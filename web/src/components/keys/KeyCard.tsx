@@ -6,6 +6,7 @@ export interface KeyRow {
   alias: string;
   provider: string;
   base_url?: string | null;
+  billing_group?: string | null;
   masked_secret: string;
   capabilities?: string[];
   models?: {

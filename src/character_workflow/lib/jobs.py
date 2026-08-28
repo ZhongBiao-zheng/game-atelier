@@ -309,6 +309,7 @@ def clone_job_for_retry(job_id: str) -> Job:
         )
     params = src.params.model_copy(update={
         "actual_size": None,
+        "actual_cost_cny": None,
         "warnings": None,
         # “再次生成”是明确的新订单，不能复用上一单的终态/过期任务 ID。
         "provider_task_protocol": None,

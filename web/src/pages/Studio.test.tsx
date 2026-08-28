@@ -132,6 +132,7 @@ function mockCompletedBatchAndKeys() {
             size: '2304x1728',
             n: 2,
             estimated_cost_cny: 0.5,
+            actual_cost_cny: 0.63,
             reference_images: ['/tmp/ref.png'],
           },
           output_paths: ['/tmp/studio/job-studio-1/v1.png', '/tmp/studio/job-studio-1/v2.png'],
@@ -1040,7 +1041,7 @@ describe('Studio', () => {
     expect(screen.getAllByRole('img', { name: /生成结果/ })).toHaveLength(2);
     expect(screen.getByTestId('studio-result-thumb-1')).toHaveClass('w-[251.5px]');
     expect(screen.getByTestId('studio-result-thumb-2')).toHaveClass('w-[251.5px]');
-    expect(screen.getByTestId('round-generation-cost')).toHaveTextContent('¥ 0.5');
+    expect(screen.getByTestId('round-generation-cost')).toHaveTextContent('¥ 0.63');
     expect(screen.getByRole('button', { name: '重新编辑' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '再次生成' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument();

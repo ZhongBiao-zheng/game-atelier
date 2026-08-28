@@ -97,6 +97,7 @@ def test_jobparams_accepts_video_fields():
         watermark=False,
         background="transparent",
         estimated_cost_cny=3.996,
+        actual_cost_cny=4.2,
         reference_videos=["/abs/clip.mp4"],
         reference_audios=["/abs/voice.mp3"],
     )
@@ -107,6 +108,7 @@ def test_jobparams_accepts_video_fields():
     assert p.watermark is False
     assert p.background == "transparent"
     assert p.estimated_cost_cny == 3.996
+    assert p.actual_cost_cny == 4.2
     assert p.reference_videos == ["/abs/clip.mp4"]
     assert p.reference_audios == ["/abs/voice.mp3"]
 
@@ -118,3 +120,5 @@ def test_jobparams_rejects_negative_estimated_cost():
 
     with pytest.raises(ValidationError):
         JobParams(estimated_cost_cny=-0.01)
+    with pytest.raises(ValidationError):
+        JobParams(actual_cost_cny=-0.01)

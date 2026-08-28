@@ -50,6 +50,8 @@ class KeySpec(BaseModel):
     alias: str
     provider: Provider
     base_url: str | None = None
+    # 聚合商可按账号分组采用不同价目；未配置时计价器必须保持未知，不能猜 default。
+    billing_group: str | None = None
     access_key: str
     secret_key: str | None = None
     capabilities: list[Kind] = Field(default_factory=list)

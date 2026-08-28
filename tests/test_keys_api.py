@@ -48,6 +48,7 @@ def test_create_custom_key_persists_base_url_without_leaking_secret(client):
     payload.update({
         "provider": "custom",
         "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "billing_group": "default",
         "access_key": "ark-secret",
         "secret_key": None,
     })
@@ -56,6 +57,7 @@ def test_create_custom_key_persists_base_url_without_leaking_secret(client):
 
     row = client.get("/api/keys").json()["keys"][0]
     assert row["base_url"] == "https://ark.cn-beijing.volces.com/api/v3"
+    assert row["billing_group"] == "default"
     assert row["access_key"] != "ark-secret"
     assert row["secret_key"] is None
 
@@ -156,6 +158,23 @@ def test_patch_key_updates_notes(client):
     assert r.status_code == 200
     found = next(k for k in client.get("/api/keys").json()["keys"] if k["alias"] == "lov")
     assert found["notes"] == "updated"
+
+
+def test_patch_key_updates_billing_group(client):
+    client.post("/api/keys", json=_make_payload())
+    assert client.patch("/api/keys/lov", json={"billing_group": "绘画"}).status_code == 200
+    found = client.get("/api/keys").json()["keys"][0]
+    assert found["billing_group"] == "绘画"
+
+
+def test_patch_key_clears_billing_group(client):
+    payload = _make_payload()
+    payload["billing_group"] = "default"
+    client.post("/api/keys", json=payload)
+
+    assert client.patch("/api/keys/lov", json={"billing_group": None}).status_code == 200
+    found = client.get("/api/keys").json()["keys"][0]
+    assert found["billing_group"] is None
 
 
 def test_patch_preserves_secret_when_not_provided(client):

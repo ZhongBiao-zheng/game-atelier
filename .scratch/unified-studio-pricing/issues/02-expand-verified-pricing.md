@@ -1,7 +1,7 @@
 # 02 — 扩展已核实渠道计价
 
 - Type: feature
-- Status: in-progress
+- Status: ready-for-human
 - Blocked by: remaining provider pricing documents
 
 ## 已确认
@@ -45,3 +45,4 @@
 - 2026-08-28：用户补充 Tuzi Midjourney 单任务价与 TokenDance Seedream / Seedance 费率截图；临时促销价与常规价分开记录。
 - 2026-08-28：用户确认 TokenDance Seedream 图片价按张、文本模型暂不计价、促销按有效期自动生效；实际路由与输出 Token 留待真实调用探测。
 - 2026-08-28：核对 OpenRouter 官方 Image / Video Models API；确定成功后优先使用响应 `usage.cost`，并记录当前项目 8 个媒体模型的官方 SKU。
+- 2026-08-28：运行时代码已落地 OpenAI-HK、Tuzi 分组、TokenDance Seedream 图片价；OpenRouter 图片/视频实际费用回写，历史优先实际费用。TokenDance Seedance 继续等待真实路由探测。

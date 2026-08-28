@@ -77,6 +77,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
   const [alias, setAlias] = useState(initial?.alias ?? (initial?.provider ? providerByValue(initial.provider).label : 'OpenAI'));
   const [provider, setProvider] = useState(initial?.provider ?? 'openai');
   const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? '');
+  const [billingGroup, setBillingGroup] = useState(initial?.billing_group ?? '');
   const [homepage, setHomepage] = useState(initial?.homepage_url ?? providerByValue(initial?.provider ?? 'openai').homepageUrl ?? '');
   const [accessKey, setAccessKey] = useState(initial?.access_key ?? '');
   // 编辑旧 Key 时模型可能没标注分类——载入即用 key 级 modalities 兜底值固化进每行，
@@ -113,6 +114,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
     setProvider(nextProvider);
     setAlias(usesNamedAlias(nextProvider) ? '' : nextPreset.label);
     setBaseUrl(nextPreset.defaultBaseUrl ?? '');
+    setBillingGroup('');
     setHomepage(nextPreset.homepageUrl ?? '');
     setModels(nextPreset.defaultModels);
     setUrlTest(null);
@@ -254,6 +256,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
         alias: usesNamedAlias(provider) ? alias.trim() : provider,
         provider,
         base_url: baseUrl.trim() || null,
+        billing_group: billingGroup.trim() || null,
         access_key: accessKey.trim(),
         secret_key: null,
         capabilities: ['portrait', 'promo', 'turnaround'],
@@ -267,6 +270,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
       if (editing && initial?.alias) {
         const patch: Partial<KeyCreatePayload> = {
           base_url: payload.base_url,
+          billing_group: payload.billing_group,
           access_key: payload.access_key,
           secret_key: payload.secret_key,
           capabilities: payload.capabilities,
@@ -626,6 +630,20 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                     )}
                     <p className="mt-2 text-xs text-muted-foreground">
                       请求时会自动拼接图片接口；根域名会补 /v1/images/generations，填完整路径也会直接使用。
+                    </p>
+                  </div>
+                  <div>
+                    <label htmlFor="key-billing-group" className={capLabelClass}>计费分组（可选）</label>
+                    <input
+                      id="key-billing-group"
+                      value={billingGroup}
+                      onChange={(e) => setBillingGroup(e.target.value)}
+                      className={fieldClass}
+                      placeholder="例如：default"
+                      autoComplete="off"
+                    />
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      仅用于按账号分组定价的聚合商；留空时不显示无法确认的价格。
                     </p>
                   </div>
                 </>

@@ -201,6 +201,37 @@ def test_run_job_routes_custom_provider_through_dispatch(project, monkeypatch):
     assert captured["output_dir"] != expected.parent
 
 
+def test_run_job_persists_openrouter_actual_cost_in_cny(project, monkeypatch):
+    save_job(Job(
+        job_id="studio-openrouter-cost",
+        character_id="OpenRouter",
+        prompt="fox",
+        submitted_at="2026-08-28T00:00:00+08:00",
+        model="openai/gpt-image-2",
+        params=JobParams(size="1:1", n=1, estimated_cost_cny=99),
+        output_paths=[],
+        status=JobStatus.PENDING,
+        error=None,
+        kind=JobKind.IMAGE,
+        namespace="studio",
+        alias="OpenRouter",
+        provider="openrouter",
+    ))
+
+    def fake_dispatch(*, output_dir, on_cost_usd, **kwargs):
+        on_cost_usd(0.04)
+        assert read_job("studio-openrouter-cost").params.actual_cost_cny == 0.28
+        out = Path(output_dir) / "v1.png"
+        _write_png(out)
+        return [str(out)]
+
+    monkeypatch.setattr(job_runner, "dispatch", fake_dispatch)
+    final = job_runner.run_job("studio-openrouter-cost")
+
+    assert final.params.actual_cost_cny == 0.28
+    assert final.params.estimated_cost_cny == 99
+
+
 def test_run_job_persists_provider_task_id_before_dispatch_finishes(project, monkeypatch):
     save_job(Job(
         job_id="studio-tuzi-async",

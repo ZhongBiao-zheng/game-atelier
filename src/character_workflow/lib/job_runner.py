@@ -1,6 +1,7 @@
 """Job runner — turns PENDING_CONFIRM JSON jobs into durable image/video assets."""
 from __future__ import annotations
 
+import math
 import re
 import shutil
 import tempfile
@@ -32,6 +33,19 @@ class JobRunnerError(RuntimeError):
 
 class JobExecutionBusy(JobRunnerError):
     """Another process already owns this Job's provider execution."""
+
+
+USD_TO_CNY = 7
+
+
+def _actual_cost_recorder(job_id: str, params: dict[str, Any]) -> Callable[[float], None]:
+    def record(cost_usd: float) -> None:
+        if not math.isfinite(cost_usd) or cost_usd < 0:
+            return
+        params["actual_cost_cny"] = round(cost_usd * USD_TO_CNY, 6)
+        update_job_params(job_id, params)
+
+    return record
 
 
 def _cancel_checker(
@@ -474,6 +488,7 @@ def _run_job_claimed(
                 # 收下即忽略（都吃 **kwargs）。
                 on_phase=on_phase,
                 on_params_changed=on_params_changed,
+                on_cost_usd=_actual_cost_recorder(job.job_id, params),
                 **dispatch_kwargs,
             )
             selected = [(Path(p), dims) for p in paths if (dims := image_dimensions(Path(p)))]
@@ -635,6 +650,7 @@ def _run_video_job(job: Job) -> Job:
                 params=params,
                 # 进度卡点回写 job 文件（sent/downloading），watcher SSE 推给前端。
                 on_phase=on_phase,
+                on_cost_usd=_actual_cost_recorder(job.job_id, params),
                 should_cancel=should_cancel,
             )
             valid = [Path(p) for p in paths if is_valid_video(Path(p))]
