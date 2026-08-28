@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.7',
+    date: '2026-08-28',
+    headline: 'Tuzi 出图断线后能继续取回，不再白扣一次钱',
+    changes: [
+      { kind: 'fix', text: 'Tuzi 图片生成改为先取得任务编号再查询结果；浏览器刷新、短暂断网或工坊后端重启后会继续查询同一笔已计费任务，不会重新发起生成' },
+      { kind: 'fix', text: '同一笔 Tuzi 任务同时只允许一个后台执行器处理；恢复旧任务时即使返回图片不足，也不会为了补数量偷偷再下一单' },
+    ],
+  },
+  {
     version: '5.31.6',
     date: '2026-08-27',
     headline: '创作台统一显示图片和视频预估费用',
