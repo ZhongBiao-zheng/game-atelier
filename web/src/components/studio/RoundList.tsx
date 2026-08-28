@@ -92,9 +92,17 @@ function specMetadata(config: RoundConfig): string[] {
 
 function shownMjMetadata(config: RoundConfig): string {
   const flags = visibleMjFlags(config.mjFlags);
+  const srefCode = config.mjParams?.srefCode.trim();
   const seed = config.mjParams?.seed.trim();
-  if (!seed || /(?:^|\s)--seed(?:\s|$)/.test(flags)) return flags;
-  return [flags, `--seed ${seed}`].filter(Boolean).join(' ');
+  const additions: string[] = [];
+  if (srefCode) {
+    additions.push(`--sref ${srefCode}`);
+    if (config.mjParams?.sw !== null && config.mjParams?.sw !== undefined) {
+      additions.push(`--sw ${config.mjParams.sw}`);
+    }
+  }
+  if (seed && !/(?:^|\s)--seed(?:\s|$)/.test(flags)) additions.push(`--seed ${seed}`);
+  return [flags, ...additions].filter(Boolean).join(' ');
 }
 
 export function RoundList({

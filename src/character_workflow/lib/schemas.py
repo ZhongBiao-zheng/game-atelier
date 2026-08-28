@@ -123,6 +123,7 @@ class JobParams(BaseModel):
     mj_no: str | None = None          # --no 排除词，逗号分隔
     mj_tile: bool | None = None       # --tile 无缝平铺
     mj_iw: float | None = None        # --iw 垫图权重 0-3
+    mj_sref_code: str | None = Field(default=None, pattern=r"^[0-9]+$", max_length=32)
     # 三种参考图：值是本地路径或公网 URL（caller 会把本地文件经 OSS 转成直链再拼 flag）。
     # 垫图不在这里 —— 它走 reference_images → body 的 base64Array。
     mj_sref: list[str] | None = None  # --sref 风格参考

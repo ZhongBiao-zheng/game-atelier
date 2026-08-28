@@ -71,6 +71,7 @@ export interface JobParams {
   mj_no?: string; // --no 排除词，逗号分隔
   mj_tile?: boolean; // --tile 无缝平铺
   mj_iw?: number; // --iw 垫图权重 0-3
+  mj_sref_code?: string; // --sref 编号（与图片式 mj_sref 互斥）
   // 三种参考图：本地路径或公网 URL（后端把本地文件经 OSS 转直链）。垫图走 reference_images。
   mj_sref?: string[]; // --sref 风格参考
   mj_sw?: number; // --sw 0-1000

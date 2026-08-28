@@ -30,6 +30,7 @@ describe('mjParamsToJob', () => {
     expect(out).not.toHaveProperty('mj_no');
     expect(out).not.toHaveProperty('mj_iw');
     expect(out).not.toHaveProperty('mj_tile');
+    expect(out).not.toHaveProperty('mj_sref_code');
   });
 
   it('给了值就发，seed 走整数、no 去空白', () => {
@@ -64,6 +65,7 @@ describe('mjParamsFromJob', () => {
       version: '7', // niji 体系的合法版本；填 MJ 的版本号会被纠正，那是另一条用例在管
       stylize: 750,
       chaos: 25,
+      srefCode: '1967932137',
       weird: 1000,
       seed: '999',
       no: 'blur',

@@ -17,12 +17,14 @@ export interface MjParams {
   version: string;
   stylize: number;
   chaos: number;
+  /** 空串 = 不发。只存数字本体，caller 负责拼成 `--sref <code>`。 */
+  srefCode: string;
   weird: number;
   /** 空串 = 不发（输入框友好；MJ 的 seed 无「默认值」概念）。 */
   seed: string;
   no: string;
   tile: boolean;
-  /** null = 不发（走上游默认权重）。这四个权重只在对应参考图槽上传了图时才有意义。 */
+  /** null = 不发（走上游默认权重）。sw 也适用于编号式 sref，其余权重需对应参考图。 */
   iw: number | null;
   sw: number | null;
   cw: number | null;
@@ -35,6 +37,7 @@ export const MJ_DEFAULTS: MjParams = {
   version: '8.2',
   stylize: 100,
   chaos: 0,
+  srefCode: '',
   weird: 0,
   seed: '',
   no: '',
@@ -96,6 +99,11 @@ export const MJ_SW_STEPS = [0, 100, 250, 500, 1000];
 export const MJ_CW_STEPS = [0, 25, 50, 100];
 export const MJ_OW_STEPS = [0, 100, 250, 500, 1000];
 
+/** 编号式 sref 是否正在占用风格参考语义槽。 */
+export function hasSrefCode(p: MjParams): boolean {
+  return p.srefCode.trim().length > 0;
+}
+
 /** 面板状态 → job params（键名与 schemas.py::JobParams 的 mj_* 字段一一对应）。
  *
  * version / stylize / chaos / weird 一律显式发，即使等于厂商默认值：这些参数直接决定产物
@@ -111,6 +119,7 @@ export function mjParamsToJob(p: MjParams): Record<string, unknown> {
     mj_chaos: p.chaos,
     mj_weird: p.weird,
   };
+  if (/^\d+$/.test(p.srefCode.trim())) out.mj_sref_code = p.srefCode.trim();
   const seed = Number.parseInt(p.seed.trim(), 10);
   if (Number.isFinite(seed)) out.mj_seed = seed;
   if (p.no.trim()) out.mj_no = p.no.trim();
@@ -135,6 +144,9 @@ export function mjParamsFromJob(params: Record<string, unknown> | undefined): Mj
     version: normalizeVersion(botType, typeof p.mj_version === 'string' ? p.mj_version : ''),
     stylize: num(p.mj_stylize, MJ_DEFAULTS.stylize),
     chaos: num(p.mj_chaos, MJ_DEFAULTS.chaos),
+    srefCode: typeof p.mj_sref_code === 'string' && /^\d+$/.test(p.mj_sref_code)
+      ? p.mj_sref_code
+      : '',
     weird: num(p.mj_weird, MJ_DEFAULTS.weird),
     seed: typeof p.mj_seed === 'number' ? String(p.mj_seed) : '',
     no: typeof p.mj_no === 'string' ? p.mj_no : '',

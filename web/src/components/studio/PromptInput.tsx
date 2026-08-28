@@ -11,7 +11,7 @@ import {
   QUALITY_LABELS,
   type Quality,
 } from '@/lib/imageControlCaps';
-import { MJ_DEFAULTS, type MjParams } from '@/lib/mjParams';
+import { hasSrefCode, MJ_DEFAULTS, type MjParams } from '@/lib/mjParams';
 import { MjControls } from './MjControls';
 import { EMPTY_MJ_REFS, MjReferenceSlots, type MjRefSlots } from './MjReferenceSlots';
 import { captureVideoFrame } from '@/lib/videoFrame';
@@ -944,6 +944,7 @@ export function PromptInput({
               refs={mjRefs}
               onChange={onMjRefsChange}
               version={mjParams.version}
+              srefCodeActive={hasSrefCode(mjParams)}
             />
           </div>
         )}
@@ -1386,7 +1387,7 @@ export function PromptInput({
               onChange={(patch) => onMjParamsChange?.(patch)}
               filledRefs={{
                 image: mjRefs.image.length > 0,
-                sref: mjRefs.sref.length > 0,
+                sref: mjRefs.sref.length > 0 || hasSrefCode(mjParams),
                 cref: mjRefs.cref.length > 0,
                 oref: mjRefs.oref.length > 0,
               }}

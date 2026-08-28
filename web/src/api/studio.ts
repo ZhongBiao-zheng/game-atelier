@@ -106,21 +106,28 @@ export interface MjReferencePaths {
 /** 完整版与紧凑版共用的 MJ 四组上传规则，避免任一入口漏传某个语义槽。 */
 export async function resolveImageReferencePaths({
   midjourney, referenceImages, mjRefs, overrideReferenceImages, overrideMjRefPaths,
+  srefCodeActive = false,
 }: {
   midjourney: boolean;
   referenceImages: File[];
   mjRefs: MjReferenceFiles;
   overrideReferenceImages?: string[];
   overrideMjRefPaths?: MjReferencePaths;
+  /** 编号式 sref 生效时，图片式 sref 不上传、不复用、不写入 job。 */
+  srefCodeActive?: boolean;
 }): Promise<{ referenceImages: string[]; mjRefPaths: MjReferencePaths }> {
   const paths = overrideReferenceImages
     ?? await Promise.all((midjourney ? mjRefs.image : referenceImages).map(uploadReferenceImage));
   let mjRefPaths: MjReferencePaths = {};
   if (midjourney) {
-    mjRefPaths = overrideMjRefPaths ?? Object.fromEntries(
+    const reusable = overrideMjRefPaths
+      ? Object.fromEntries(Object.entries(overrideMjRefPaths)
+          .filter(([slot]) => slot !== 'sref' || !srefCodeActive))
+      : undefined;
+    mjRefPaths = reusable ?? Object.fromEntries(
       await Promise.all(
         (['sref', 'cref', 'oref'] as const)
-          .filter((slot) => mjRefs[slot].length > 0)
+          .filter((slot) => (slot !== 'sref' || !srefCodeActive) && mjRefs[slot].length > 0)
           .map(async (slot) => [slot, await Promise.all(mjRefs[slot].map(uploadReferenceImage))] as const),
       ),
     );

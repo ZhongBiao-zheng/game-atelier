@@ -166,9 +166,20 @@ def _ref_flag_supported(flag: str, params: dict[str, Any]) -> bool:
 def _ref_flags(params: dict[str, Any], params_in: dict[str, Any] | None = None) -> list[str]:
     """把 sref / cref / oref 及各自权重拼成 flag 片段。"""
     out: list[str] = []
+    raw_sref_code = str(params.get("mj_sref_code") or "").strip()
+    if raw_sref_code and not (raw_sref_code.isascii() and raw_sref_code.isdigit()):
+        raise MidjourneyError("sref 编号只允许数字")
     for path_key, flag, weight_key, weight_flag in _REF_FLAG_SPECS:
         raw_refs = params.get(path_key)
         refs = [str(ref) for ref in raw_refs if ref] if isinstance(raw_refs, list) else []
+        if flag == "sref" and raw_sref_code:
+            if refs:
+                _warn(params_in, "已使用 sref 编号，本次已忽略上传的风格参考图")
+            out.append(f"--sref {raw_sref_code}")
+            weight = params.get(weight_key)
+            if weight is not None:
+                out.append(f"--{weight_flag} {int(weight)}")
+            continue
         if not refs:
             continue
         if len(refs) > _MAX_REFS_PER_SLOT:

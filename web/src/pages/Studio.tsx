@@ -15,7 +15,7 @@ import { StudioArchiveDialog, type StudioArchiveRequest } from '@/components/stu
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { imageFamily } from '@/lib/modelFamily';
-import { MJ_DEFAULTS, mjParamsFromJob, mjParamsToJob, type MjParams } from '@/lib/mjParams';
+import { hasSrefCode, MJ_DEFAULTS, mjParamsFromJob, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
@@ -398,6 +398,7 @@ function StudioFull() {
     const rawQuality = overrideConfig?.quality ?? quality;
     const effectiveQuality = caps.qualities?.includes(rawQuality) ? rawQuality : undefined;
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
+    const effectiveMjParams = overrideConfig?.mjParams ?? mjParams;
 
     setPending(true);
     // 提交前把参考图 File[] 上传到 .runtime/uploads/，拿到服务器路径写进 params.reference_images。
@@ -409,6 +410,7 @@ function StudioFull() {
         midjourney: caps.family === 'midjourney', referenceImages, mjRefs,
         overrideReferenceImages: overrideConfig?.referenceImages,
         overrideMjRefPaths: overrideConfig?.mjRefPaths,
+        srefCodeActive: hasSrefCode(effectiveMjParams),
       }));
     } catch (e: any) {
       setPending(false);
@@ -432,7 +434,7 @@ function StudioFull() {
       quality: effectiveQuality,
       referenceImages: refPaths,
       ...(caps.family === 'midjourney'
-        ? { mjParams: overrideConfig?.mjParams ?? mjParams, mjRefPaths }
+        ? { mjParams: effectiveMjParams, mjRefPaths }
         : {}),
     };
     // 控件隐藏的参数一律不写进 params（与视频侧同写法）：后端 openrouter_image 会把
@@ -447,7 +449,7 @@ function StudioFull() {
       // MJ 的一切控制都在 prompt flag 里，由后端 mj_image 拼接；这里只发结构化值。
       ...(caps.family === 'midjourney'
         ? {
-            ...mjParamsToJob(overrideConfig?.mjParams ?? mjParams),
+            ...mjParamsToJob(effectiveMjParams),
             ...(mjRefPaths.sref ? { mj_sref: mjRefPaths.sref } : {}),
             ...(mjRefPaths.cref ? { mj_cref: mjRefPaths.cref } : {}),
             ...(mjRefPaths.oref ? { mj_oref: mjRefPaths.oref } : {}),
