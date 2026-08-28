@@ -393,6 +393,7 @@ async function addTextNodeWithBody(body: string) {
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: '添加节点' }));
   fireEvent.click(within(screen.getByRole('menu', { name: '添加节点' })).getByRole('menuitem', { name: /^文本/ }));
+  fireEvent.click(screen.getByRole('button', { name: /^flow-node-text-/ }));
   fireEvent.doubleClick(screen.getByText(/^双击输入文本/));
   const editor = await screen.findByLabelText('编辑 文本 正文');
   fireEvent.change(editor, { target: { value: body } });
@@ -402,7 +403,8 @@ async function addTextNodeWithBody(body: string) {
 it('loads the immersive editor and stores a manually-authored text node as one content version', async () => {
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
 
-  await addTextNodeWithBody('雨夜列车分镜');
+  const editor = await addTextNodeWithBody('雨夜列车分镜');
+  fireEvent.keyDown(editor, { key: 'Tab' });
 
   expect(screen.getByTestId('flow-minimap')).toBeInTheDocument();
   await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalled(), { timeout: 1000 });
@@ -434,7 +436,8 @@ it('keeps the server-owned content hash when typing continues during a save', as
   });
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
 
-  await addTextNodeWithBody('第一笔');
+  const editor = await addTextNodeWithBody('第一笔');
+  fireEvent.keyDown(editor, { key: 'Tab' });
   await waitFor(() => expect(saveCount).toBe(1), { timeout: 1000 });
   const firstPayload = vi.mocked(saveCanvasDocument).mock.calls[0][1];
   const versionId = firstPayload.nodes[0].type === 'text'
@@ -767,7 +770,8 @@ it('surfaces the server detail when an automatic save fails instead of claiming 
     new Error('existing canvas content versions are immutable（HTTP 422）'),
   );
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
-  await addTextNodeWithBody('会保存失败的内容');
+  const editor = await addTextNodeWithBody('会保存失败的内容');
+  fireEvent.keyDown(editor, { key: 'Tab' });
 
   expect(await screen.findByRole('button', { name: '保存失败 · 重试' })).toBeTruthy();
   expect(
@@ -796,7 +800,10 @@ it('blocks generation by name when a connected input has no content yet', async 
   // 用空图片节点当来源：空文本节点在加载时会被 materializeEmptyTextContent 补上一个空版本，
   // 本来就不缺内容。
   vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
-    nodes: [imageNode('empty-one', '待生成的分镜'), imageNode('image-one', '图片', imageDraft)],
+    nodes: [
+      imageNode('empty-one', '待生成的分镜'),
+      imageNode('image-one', '图片', { ...imageDraft, prompt: '继续生成后续分镜' }),
+    ],
     connections: [{
       id: 'connection-one',
       role: 'input',
@@ -809,10 +816,12 @@ it('blocks generation by name when a connected input has no content yet', async 
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-image-one' }));
 
+  const generate = await screen.findByRole('button', { name: '开始生成' });
+  expect(generate).toBeEnabled();
+  fireEvent.click(generate);
   expect(
     await screen.findByText('「待生成的分镜」还没有内容，先把它生成出来，或断开这条连接。'),
   ).toBeTruthy();
-  expect(await screen.findByRole('button', { name: '开始生成' })).toBeDisabled();
 });
 
 it('accepts a first-frame pick on a config node whose draft is a video generation', async () => {
@@ -1006,8 +1015,7 @@ it('leaves a reverse-prompt config node deleted instead of recreating it on the 
   expect(createCanvasReversePromptConfig).not.toHaveBeenCalled();
 });
 
-it('explains why the generate button is disabled when no configured key can do the job', async () => {
-  // 五个禁用条件里，缺模型 / 缺密钥这两条原来一句解释都没有，沉浸式画布又把设置入口整块藏了。
+it('explains the missing-key block after the user tries to generate', async () => {
   vi.mocked(listKeys).mockResolvedValue({ keys: [] });
   vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
     nodes: [imageNode('image-one', '图片', { ...imageDraft, alias: '', model: '' })],
@@ -1017,9 +1025,10 @@ it('explains why the generate button is disabled when no configured key can do t
   await screen.findByLabelText('画布编辑器 列车短片');
   fireEvent.click(screen.getByRole('button', { name: 'flow-node-image-one' }));
 
-  const hint = await screen.findByText(/还没有配置任何模型密钥/);
-  expect(within(hint).getByRole('link', { name: '去设置里添加' }).getAttribute('href')).toBe('/settings');
-  expect(screen.getByRole('button', { name: /开始生成/ }).hasAttribute('disabled')).toBe(true);
+  const generate = screen.getByRole('button', { name: /开始生成/ });
+  expect(generate).toBeEnabled();
+  fireEvent.click(generate);
+  expect(await screen.findByText('还没有配置任何模型密钥。')).toBeTruthy();
 });
 
 it('offers a way in on an empty canvas and a settings entry the immersive chrome otherwise hides', async () => {
@@ -1062,10 +1071,10 @@ it('keeps the node context stable while typing and while zooming', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'simulate live zoom' }));
 
   // 文本确实写进去了，说明上面三次输入不是空转。
+  fireEvent.keyDown(editor, { key: 'Tab' });
   await waitFor(() => expect(savedText(lastSavedDocument())).toBe('雨夜列车进站'), { timeout: 1500 });
   // 而且节点卡确实跟着重渲染了：resolveVersion 是常量引用，卡片的失效完全靠节点对象换引用，
   // 这条断言就是那条不变式的守卫。
-  fireEvent.blur(editor);
   expect(await screen.findByText('雨夜列车进站')).toBeTruthy();
   expect(canvasContextIdentities.length).toBe(before);
 });
@@ -1109,6 +1118,7 @@ it('keeps connection objects stable while typing and while hovering an unrelated
   // 悬停一个不在任何连线上的节点：没有一条连线的 active 会变。
   fireEvent.click(screen.getByRole('button', { name: 'simulate hover loner' }));
 
+  fireEvent.keyDown(editor, { key: 'Tab' });
   await waitFor(
     () => expect(savedTextOf(lastSavedDocument(), 'loner')).toBe('旁白一二三'),
     { timeout: 1500 },

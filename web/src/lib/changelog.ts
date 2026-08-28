@@ -31,7 +31,7 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: '5.31.10',
+    version: '5.31.12',
     date: '2026-08-27',
     headline: '生成面板只保留操作，不再常驻提示',
     changes: [
@@ -40,13 +40,30 @@ export const CHANGELOG: ChangelogEntry[] = [
     ],
   },
   {
-    version: '5.31.9',
+    version: '5.31.11',
     date: '2026-08-27',
     headline: '视频结果回到节点，文本连接同步引用',
     changes: [
       { kind: 'fix', text: '视频生成设置不再重复预览结果；多个视频候选改在视频节点上依次展开' },
       { kind: 'fix', text: '文本连接到全能参考视频后自动显示对应引用，断开后同步清空引用' },
       { kind: 'fix', text: '空提示词不再占用底栏提示位置，生成按钮始终保留独立空间' },
+    ],
+  },
+  {
+    version: '5.31.10',
+    date: '2026-08-27',
+    headline: '节点弹窗只在上下跟随',
+    changes: [
+      { kind: 'fix', text: '节点生成弹窗只在节点正上方或正下方跟随，不再跳到左右，也不再为适应屏幕改变横向位置' },
+    ],
+  },
+  {
+    version: '5.31.9',
+    date: '2026-08-27',
+    headline: '文本编辑完成后再保存，新节点自动避让',
+    changes: [
+      { kind: 'fix', text: '文本节点编辑期间只更新画布内存，退出编辑后统一自动保存一次' },
+      { kind: 'feat', text: '新建节点不再默认选中，并从当前视口中心向外寻找最近的空白位置' },
     ],
   },
   {

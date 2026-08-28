@@ -117,7 +117,7 @@ describe('Canvas connected mentions', () => {
     }])).toEqual(['missing']);
   });
 
-  it('reserves the implicit self label and hides inputs for existing video edits', () => {
+  it('reserves the implicit self label and keeps connected inputs for existing video edits', () => {
     const existingImage = contentNode('surface-image', 'image', 'version-image-a');
     if (existingImage.type !== 'image') throw new Error('expected image node');
     existingImage.data.generation_draft = draft;
@@ -144,6 +144,8 @@ describe('Canvas connected mentions', () => {
       'canvas-test', existingVideo, [existingVideo, imageSource], [{
         id: 'video-input', role: 'input', source_node_id: imageSource.id, target_node_id: existingVideo.id,
       }], videoVersions,
-    )).toEqual([]);
+    )).toEqual([
+      expect.objectContaining({ nodeId: imageSource.id, label: '图片1' }),
+    ]);
   });
 });

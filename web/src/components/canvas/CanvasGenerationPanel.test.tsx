@@ -207,7 +207,8 @@ const NodeCard = CanvasNodeCard as React.ComponentType<{
 }>;
 
 it('renders the generation composer as an independent panel below the selected node', () => {
-  const context = nodeContext();
+  const reportError = vi.fn();
+  const context = nodeContext({ reportError });
   render(
     <CanvasNodeContext.Provider value={context}>
       <NodeCard data={{ domain: node }} selected />
@@ -222,7 +223,10 @@ it('renders the generation composer as an independent panel below the selected n
   expect(within(panel).getByText('图片生成')).toBeInTheDocument();
   expect(within(panel).getByText('· 分镜出图')).toBeInTheDocument();
   expect(within(panel).queryByRole('button', { name: '图片设置' })).not.toBeInTheDocument();
-  expect(within(panel).getByRole('button', { name: '开始生成' })).toBeDisabled();
+  const generate = within(panel).getByRole('button', { name: '开始生成' });
+  expect(generate).toBeEnabled();
+  fireEvent.click(generate);
+  expect(reportError).toHaveBeenCalledWith('还没有配置任何模型密钥。');
 });
 
 it('switches a config node between generation modes and summarizes connected inputs', () => {
@@ -532,7 +536,7 @@ it.each(generationNodes)('uses the shared independent panel for $title', (genera
   expect(screen.getByRole('region', { name: label })).toHaveAttribute('data-floating-node-panel', 'true');
 });
 
-it('renders connected references as chips and blocks a draft after that reference disconnects', () => {
+it('renders connected references as chips and reports a disconnected reference on generate', () => {
   const imageKey = {
     alias: 'image-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
     capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
@@ -582,16 +586,25 @@ it('renders connected references as chips and blocks a draft after that referenc
   expect(screen.getByLabelText('引用图片：雨夜列车')).toHaveTextContent('图片1');
   expect(screen.getByRole('button', { name: '开始生成' })).toBeEnabled();
 
-  const disconnected = nodeContext({ ...connected, mentionReferencesByNodeId: new Map() });
+  const reportError = vi.fn();
+  const disconnected = nodeContext({
+    ...connected,
+    mentionReferencesByNodeId: new Map(),
+    reportError,
+  });
   rerender(
     <CanvasNodeContext.Provider value={disconnected}>
       <CanvasMobileGenerationPanel node={configuredNode} draft={configuredNode.data.draft} context={disconnected} />
     </CanvasNodeContext.Provider>,
   );
-  // 断连后引用 chip 不再渲染，但按钮为什么灰着必须说出来。
+  // 断连后引用 chip 不再渲染；按钮仍可点击，原因由画布顶部统一反馈。
   expect(screen.queryByLabelText(/引用已断开/)).not.toBeInTheDocument();
-  expect(screen.getByRole('alert')).toHaveTextContent('提示词里有 1 处引用指向已断开的素材，删掉这些引用后再生成。');
-  expect(screen.getByRole('button', { name: '开始生成' })).toBeDisabled();
+  const generate = screen.getByRole('button', { name: '开始生成' });
+  expect(generate).toBeEnabled();
+  fireEvent.click(generate);
+  expect(reportError).toHaveBeenCalledWith(
+    '提示词里有 1 处引用指向已断开的素材，删掉这些引用后再生成。',
+  );
 });
 
 it('connects canvas materials above the prompt without rewriting its @ content', async () => {
@@ -889,14 +902,13 @@ function rect(left: number, top: number, width: number, height: number) {
 
 const VIEWPORT = rect(0, 0, 1280, 720);
 
-it('clamps the generation panel inside the canvas instead of letting it overflow the left edge', () => {
-  // 审查实测：1280×720 下选中靠左的节点，面板 left=-77，提示词编辑区左边 64px 落在视口外。
+it('keeps the generation panel horizontally centered on a node near the left edge', () => {
   const nearLeftEdge = rect(180, 200, 94, 160);
 
   const placement = placeCanvasGenerationPanel(nearLeftEdge, VIEWPORT, 290);
 
-  expect(placement.left).toBe(16);
-  expect(placement.left + placement.width).toBeLessThanOrEqual(VIEWPORT.right - 16);
+  expect(placement.left).toBe(-77);
+  expect(placement.width).toBe(608);
   expect(placement.top).toBe(376);
 });
 
@@ -909,54 +921,38 @@ it('flips the generation panel above the node when there is no room below', () =
   expect(placement.top + 290).toBeLessThanOrEqual(nearBottom.top - 16);
 });
 
-it('keeps the generation panel reachable when it fits neither above nor below', () => {
+it('chooses the roomier vertical side without changing horizontal alignment', () => {
   const tallNode = rect(400, 40, 320, 640);
 
   const placement = placeCanvasGenerationPanel(tallNode, rect(0, 0, 700, 400), 600);
-  const panel = rect(placement.left, placement.top, placement.width, Math.min(600, placement.maxHeight));
 
-  expect(placement.top).toBe(16);
+  expect(placement.left).toBe(256);
+  expect(placement.top).toBe(-344);
   expect(placement.maxHeight).toBe(368);
-  // 全宽 608 摆不下时压窄换零重叠：旧实现保持 608、横向压住节点 284px，而面板压住节点会
-  // 直接毁掉交互 —— 双击节点进编辑态的落点变成面板，打字进不去文本框。
-  expect(placement.width).toBe(368);
-  expect(overlaps(panel, tallNode)).toBe(false);
+  expect(placement.width).toBe(608);
 });
 
-function overlaps(a: ReturnType<typeof rect>, b: ReturnType<typeof rect>) {
-  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
-}
-
-it('puts the generation panel beside the node instead of on top of it', () => {
-  // 画师实测（1446×990）：图片 / 视频面板高 520-660，上下都差几十像素装不下，原实现直接落到
-  // 最后那档「贴住可视区」，把选中节点的下半张图压掉了 —— 而画师正要看着那张图写提示词。
+it('keeps the generation panel directly below instead of jumping sideways', () => {
   const node = rect(90, 60, 330, 330);
 
   const placement = placeCanvasGenerationPanel(node, rect(0, 0, 1440, 900), 860);
-  // maxHeight 是上限，不是实际高度：面板真实高度是 min(传入高度, maxHeight)。
-  const panel = rect(placement.left, placement.top, placement.width, Math.min(860, placement.maxHeight));
 
-  expect(placement.left).toBeGreaterThanOrEqual(node.right + 16);
-  expect(overlaps(panel, node)).toBe(false);
-  expect(panel.bottom).toBeLessThanOrEqual(900 - 16);
+  expect(placement.left).toBe(-49);
+  expect(placement.top).toBe(node.bottom + 16);
+  expect(placement.width).toBe(608);
 });
 
-it('falls back to the panel-on-top placement only when there is no room beside the node either', () => {
-  // 侧面也放不下时仍然要保证面板自己完整可达（限高 + 内部滚动），这时压住节点是没得选。
+it('prefers the roomier side even when the panel extends beyond the viewport', () => {
   const wideNode = rect(0, 40, 1400, 640);
 
   const placement = placeCanvasGenerationPanel(wideNode, rect(0, 0, 1440, 900), 860);
-  const panel = rect(placement.left, placement.top, placement.width, Math.min(860, placement.maxHeight));
 
-  expect(overlaps(panel, wideNode)).toBe(true);
-  expect(panel.top).toBeGreaterThanOrEqual(16);
-  expect(panel.bottom).toBeLessThanOrEqual(900 - 16);
+  expect(placement.left).toBe(396);
+  expect(placement.top).toBe(wideNode.bottom + 16);
+  expect(placement.width).toBe(608);
 });
 
-it('takes the panel status line from the same job→copy table as the node badge', () => {
-  // 面板状态行原来是第二套映射，和节点角标那套漂开了：`partial` 一个说「部分完成」一个说
-  // 「部分结果完成」；失败时面板直接铺 job.error，丢掉「分析失败 / 生成失败」的区分。
-  // 这条用例钉住「两处同源」——再抄一份映射就会红。
+it('keeps job state on the node badge without a persistent panel status line', () => {
   const cases: Array<[Partial<Job>, string, string]> = [
     [{ status: 'partial', error: '第 2 张没出来' }, '部分完成 · 第 2 张没出来', '部分结果完成'],
     [{ status: 'failed', error: '余额不足' }, '生成失败 · 余额不足', ''],
@@ -975,19 +971,16 @@ it('takes the panel status line from the same job→copy table as the node badge
         <NodeCard data={{ domain: imageResultNode }} selected />
       </CanvasNodeContext.Provider>,
     );
-    // 状态行与角标必须来自同一张表：行文本以角标的 label 开头。
     const badge = document.querySelector('[data-canvas-node-status-label]');
     expect(badge?.textContent).toBeTruthy();
-    const line = screen.getByTitle(expected);
-    expect(line).toHaveTextContent(expected);
     expect(expected.startsWith(badge!.textContent!.trim())).toBe(true);
+    expect(screen.queryByTitle(expected)).not.toBeInTheDocument();
     if (staleCopy) expect(screen.queryByTitle(staleCopy)).not.toBeInTheDocument();
     unmount();
   }
 });
 
-it('keeps the reverse-prompt wording in the panel status line, not just on the badge', () => {
-  // 旧的面板映射对 failed 只铺 job.error，反推失败在面板上被说成普通出图失败。
+it('keeps reverse-prompt failure on the node badge without a persistent panel line', () => {
   const job = batchJob();
   job.status = 'failed';
   job.error = null;
@@ -1007,6 +1000,7 @@ it('keeps the reverse-prompt wording in the panel status line, not just on the b
     </CanvasNodeContext.Provider>,
   );
 
-  expect(screen.getByTitle('分析失败 · 反推提示词失败，请检查设置后重新生成')).toBeInTheDocument();
+  expect(document.querySelector('[data-canvas-node-status-label]')).toHaveTextContent('分析失败');
+  expect(screen.queryByTitle('分析失败 · 反推提示词失败，请检查设置后重新生成')).not.toBeInTheDocument();
   expect(screen.queryByTitle('生成失败，请检查模型配置后重试')).not.toBeInTheDocument();
 });
