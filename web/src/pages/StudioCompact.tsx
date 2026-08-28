@@ -8,7 +8,7 @@ import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import type { RoundConfig } from '@/components/studio/RoundList';
 import { normalizeStudioSizeForModel, studioSizeFor } from '@/lib/studioSize';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
-import { MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
+import { hasSrefCode, MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { EMPTY_MJ_REFS, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
@@ -198,6 +198,7 @@ export function StudioCompact() {
             ));
     const rawQuality = overrideConfig?.quality ?? quality;
     const effectiveQuality = caps.qualities?.includes(rawQuality) ? rawQuality : undefined;
+    const effectiveMjParams = overrideConfig?.mjParams ?? mjParams;
 
     setPending(true);
     setCompactError(null);
@@ -208,6 +209,7 @@ export function StudioCompact() {
         midjourney: caps.family === 'midjourney', referenceImages, mjRefs,
         overrideReferenceImages: overrideConfig?.referenceImages,
         overrideMjRefPaths: overrideConfig?.mjRefPaths,
+        srefCodeActive: hasSrefCode(effectiveMjParams),
       }));
     } catch (e: any) {
       setPending(false);
@@ -226,7 +228,7 @@ export function StudioCompact() {
       // MJ 的控制全在 prompt flag 里，由后端 mj_image 拼接（同 StudioFull）。
       ...(caps.family === 'midjourney'
         ? {
-            ...mjParamsToJob(overrideConfig?.mjParams ?? mjParams),
+            ...mjParamsToJob(effectiveMjParams),
             ...(mjRefPaths.sref ? { mj_sref: mjRefPaths.sref } : {}),
             ...(mjRefPaths.cref ? { mj_cref: mjRefPaths.cref } : {}),
             ...(mjRefPaths.oref ? { mj_oref: mjRefPaths.oref } : {}),

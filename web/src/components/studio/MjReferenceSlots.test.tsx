@@ -14,6 +14,33 @@ function inputFor(label: string): HTMLInputElement {
 }
 
 describe('MjReferenceSlots', () => {
+  it('填写 sref 编号时灰掉上传槽，清空后保留已选图并恢复交互', () => {
+    const style = new File(['style'], 'style.png', { type: 'image/png' });
+    const { rerender } = render(
+      <MjReferenceSlots
+        refs={{ ...EMPTY_MJ_REFS, sref: [style] }}
+        onChange={() => {}}
+        version="8.2"
+        srefCodeActive
+      />,
+    );
+
+    const disabledGroup = screen.getByLabelText('风格参考，共 1 张');
+    expect(disabledGroup).toHaveClass('opacity-40');
+    expect(screen.getByRole('button', { name: '查看风格参考图' })).toBeDisabled();
+
+    rerender(
+      <MjReferenceSlots
+        refs={{ ...EMPTY_MJ_REFS, sref: [style] }}
+        onChange={() => {}}
+        version="8.2"
+        srefCodeActive={false}
+      />,
+    );
+    expect(screen.getByLabelText('风格参考，共 1 张')).not.toHaveClass('opacity-40');
+    expect(screen.getByRole('button', { name: '查看风格参考图' })).toBeEnabled();
+  });
+
   it('同一语义槽一次接收多张图片，并保留已有图片', () => {
     const first = new File(['a'], 'a.png', { type: 'image/png' });
     const second = new File(['b'], 'b.png', { type: 'image/png' });

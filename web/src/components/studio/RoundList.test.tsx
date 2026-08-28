@@ -675,4 +675,26 @@ describe('RoundList reference assets', () => {
 
     expect(screen.getByTestId('round-mj-flags')).toHaveTextContent('--seed 636646138');
   });
+
+  it('MJ 历史保留编号式 sref，不把它当作图片 URL 隐藏', () => {
+    const round: RoundState = {
+      kind: 'done',
+      jobId: 'job-mj-sref-code',
+      submittedAt: '2026-08-28T10:00:00+08:00',
+      imagePaths: ['/data/studio/job-mj-sref-code/v1.png'],
+      config: {
+        prompt: '编号风格',
+        model: 'mj_fast_imagine',
+        kind: 'image',
+        referenceImages: [],
+        mjParams: { ...MJ_DEFAULTS, srefCode: '1967932137', sw: 250 },
+        mjFlags: '--v 8.2 --sref 1967932137 --sw 250',
+      },
+    };
+
+    render(<RoundList rounds={[round]} />);
+
+    expect(screen.getByTestId('round-mj-flags')).toHaveTextContent('--sref 1967932137');
+    expect(screen.getByTestId('round-mj-flags')).toHaveTextContent('--sw 250');
+  });
 });

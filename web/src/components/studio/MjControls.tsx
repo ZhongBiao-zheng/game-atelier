@@ -183,6 +183,19 @@ export function MjControls({
             </div>
           </Section>
 
+          <Section title="风格编号 sref" hint="只填数字；填写后会暂停使用上传的风格参考图">
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={32}
+              value={value.srefCode}
+              onChange={(e) => onChange({ srefCode: e.target.value.replace(/[^0-9]/g, '') })}
+              placeholder="例如 1967932137"
+              aria-label="sref 编号"
+              className="h-9 w-full rounded-lg border border-input bg-popover px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60"
+            />
+          </Section>
+
           <Section title="排除词 no" hint="不想出现的东西，逗号分隔">
             <input
               type="text"

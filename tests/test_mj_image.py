@@ -367,6 +367,27 @@ def test_reference_flags_go_through_oss(mj_key, tmp_path, monkeypatch):
     assert uploaded == ["/local/style.png", "/local/char.png"]
 
 
+def test_sref_code_takes_precedence_without_upload(mj_key, tmp_path, monkeypatch):
+    """编号式 sref 与图片式 sref 互斥：编号存在时绝不上传图片，但 sw 仍生效。"""
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+
+    def _boom(path):
+        raise AssertionError(f"编号式 sref 生效时不应上传: {path}")
+
+    monkeypatch.setattr("character_workflow.lib.oss_upload.upload_for_public_url", _boom)
+    params = {
+        "mj_version": "8.2",
+        "mj_sref_code": "1967932137",
+        "mj_sref": ["/local/style.png"],
+        "mj_sw": 250,
+    }
+    _render(tmp_path, n=4, params=params)
+
+    sent = posted[0]["body"]["prompt"]
+    assert "--sref 1967932137 --sw 250" in sent
+    assert "/local/style.png" not in sent
+
+
 def test_unsupported_ref_is_not_uploaded(mj_key, tmp_path, monkeypatch):
     """版本不支持的参考图要在上传前就摘掉 —— 否则白往 OSS 传一张没人用的图。"""
     _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})

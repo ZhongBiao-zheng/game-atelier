@@ -96,13 +96,15 @@ function MjReferenceGroup({
   return (
     <div
       aria-label={files.length > 0 ? `${caption}参考，共 ${files.length} 张` : undefined}
-      className="group relative h-[70px] w-[56px] shrink-0"
+      title={disabled ? disabledHint : undefined}
+      className={`group relative h-[70px] w-[56px] shrink-0 ${disabled && files.length > 0 ? 'opacity-40' : ''}`}
     >
       <input
         id={inputId}
         type="file"
         accept="image/*"
         multiple
+        disabled={disabled}
         className="hidden"
         onChange={(event) => {
           const picked = Array.from(event.target.files ?? []);
@@ -132,15 +134,18 @@ function MjReferenceGroup({
           <button
             type="button"
             aria-label={`查看${caption}参考图`}
+            disabled={disabled}
             onClick={() => setZoomed(previews[0])}
-            className="relative block h-full w-full cursor-zoom-in overflow-hidden rounded-lg border border-border bg-card p-0 transition-transform duration-150 hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className={`relative block h-full w-full overflow-hidden rounded-lg border border-border bg-card p-0 transition-transform duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+              disabled ? 'cursor-not-allowed' : 'cursor-zoom-in hover:scale-[1.02]'
+            }`}
           >
             <img src={previews[0]} alt={`${caption}参考封面`} className="h-full w-full object-cover" />
             <span className="absolute inset-x-0 bottom-0 bg-scrim px-1.5 py-1 text-left text-xs text-foreground">
               {caption} · {files.length}
             </span>
           </button>
-          <div className={`invisible absolute bottom-full z-20 grid w-[246px] grid-cols-4 gap-1.5 rounded-xl border border-border bg-card p-2 opacity-0 transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 ${alignRight ? 'right-0' : 'left-0'}`}>
+          {!disabled && <div className={`invisible absolute bottom-full z-20 grid w-[246px] grid-cols-4 gap-1.5 rounded-xl border border-border bg-card p-2 opacity-0 transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 ${alignRight ? 'right-0' : 'left-0'}`}>
             {previews.map((preview, index) => (
               <div key={preview} className="relative h-[70px] w-[52px]">
                 <button
@@ -161,7 +166,7 @@ function MjReferenceGroup({
                 </button>
               </div>
             ))}
-            {!disabled && files.length < MAX_MJ_REFS_PER_SLOT && (
+            {files.length < MAX_MJ_REFS_PER_SLOT && (
               <label
                 htmlFor={inputId}
                 aria-label={`添加${caption}参考图`}
@@ -171,7 +176,7 @@ function MjReferenceGroup({
                 <span className="text-xs">继续添加</span>
               </label>
             )}
-          </div>
+          </div>}
         </>
       )}
       {zoomed && <Lightbox src={zoomed} onClose={() => setZoomed(null)} />}
@@ -183,11 +188,14 @@ export function MjReferenceSlots({
   refs,
   onChange,
   version,
+  srefCodeActive = false,
 }: {
   refs: MjRefSlots;
   onChange: (refs: MjRefSlots) => void;
   /** 当前 MJ 版本 —— 角色/Omni 槽按它决定可用性，免得放进一张必然失败的图。 */
   version: string;
+  /** 编号式 sref 与图片式 sref 互斥；只禁用槽，不删画师已选文件。 */
+  srefCodeActive?: boolean;
 }) {
   const [limitNotice, setLimitNotice] = useState(false);
   useEffect(() => {
@@ -208,7 +216,9 @@ export function MjReferenceSlots({
       )}
       {SLOTS.map(({ key, label, caption }, index) => {
         const gated = key === 'cref' || key === 'oref';
-        const off = gated && !refSlotSupported(key, version);
+        const versionOff = gated && !refSlotSupported(key, version);
+        const codeOff = key === 'sref' && srefCodeActive;
+        const off = versionOff || codeOff;
         return (
           <MjReferenceGroup
             key={key}
@@ -216,7 +226,9 @@ export function MjReferenceSlots({
             caption={caption}
             files={refs[key]}
             disabled={off}
-            disabledHint={off ? HINTS[key as 'cref' | 'oref'] : undefined}
+            disabledHint={codeOff
+              ? '已使用 sref 编号，清空编号后可继续使用风格参考图'
+              : versionOff ? HINTS[key as 'cref' | 'oref'] : undefined}
             alignRight={index >= 2}
             onChange={(files) => onChange({ ...refs, [key]: files })}
             onLimit={() => setLimitNotice(true)}
