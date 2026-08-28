@@ -135,6 +135,11 @@ export function RoundList({
   onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const lightboxSources = useMemo(() => rounds.flatMap((round) => (
+    round.kind === 'done' && round.config.kind !== 'video'
+      ? round.imagePaths.map(imageSrc)
+      : []
+  )), [rounds]);
   const [mountedHistoryCount, setMountedHistoryCount] = useState(HISTORY_BATCH_SIZE);
   const [historyAutoLoadArmed, setHistoryAutoLoadArmed] = useState(() => !focusJobId);
   const historySentinelRef = useRef<HTMLDivElement>(null);
@@ -151,6 +156,14 @@ export function RoundList({
   const remainingCount = Math.max(0, rounds.length - mountedHistoryCount);
   const hasEarlierHistory = remainingCount > 0;
   useEffect(() => setHistoryAutoLoadArmed(!focusJobId), [focusJobId]);
+  const moveLightbox = (offset: -1 | 1) => setLightboxSrc((current) => {
+    if (!current || lightboxSources.length < 2) return current;
+    const currentIndex = lightboxSources.indexOf(current);
+    if (currentIndex < 0) return current;
+    return lightboxSources[
+      (currentIndex + offset + lightboxSources.length) % lightboxSources.length
+    ];
+  });
   useEffect(() => {
     const sentinel = historySentinelRef.current;
     if (historyAutoLoadArmed || !hasEarlierHistory || !sentinel) return;
@@ -280,7 +293,14 @@ export function RoundList({
           );
         })}
       </div>
-      {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+      {lightboxSrc && (
+        <Lightbox
+          src={lightboxSrc}
+          onClose={() => setLightboxSrc(null)}
+          onPrevious={lightboxSources.length > 1 ? () => moveLightbox(-1) : undefined}
+          onNext={lightboxSources.length > 1 ? () => moveLightbox(1) : undefined}
+        />
+      )}
     </>
   );
 }

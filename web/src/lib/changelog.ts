@@ -31,6 +31,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.16',
+    date: '2026-08-28',
+    headline: '大图预览支持键盘切换',
+    changes: [
+      { kind: 'fix', text: '打开创作台任意生成图后，可用左右方向键在已完成图片间循环切换' },
+    ],
+  },
+  {
     version: '5.31.15',
     date: '2026-08-28',
     headline: 'Midjourney 支持 sref 风格编号',
