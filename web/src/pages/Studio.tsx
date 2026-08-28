@@ -18,7 +18,7 @@ import { imageFamily } from '@/lib/modelFamily';
 import { MJ_DEFAULTS, mjParamsFromJob, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
-import { estimateGenerationCost } from '@/lib/generationCost';
+import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
@@ -454,7 +454,7 @@ function StudioFull() {
           }
         : {}),
     };
-    const estimatedCost = generationCostForSubmission(
+    const estimatedCost = estimateGenerationCostForSubmission(
       selectedKey,
       effectiveModel,
       'image',
@@ -585,7 +585,7 @@ function StudioFull() {
       ...(vidPaths.length ? { reference_videos: vidPaths } : {}),
       ...(audPaths.length ? { reference_audios: audPaths } : {}),
     };
-    const estimatedCost = generationCostForSubmission(
+    const estimatedCost = estimateGenerationCostForSubmission(
       selectedKey,
       effectiveModel,
       'video',
@@ -1008,36 +1008,6 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
         }
       : {}),
   };
-}
-
-function generationCostForSubmission(
-  selectedKey: KeyView | undefined,
-  modelId: string,
-  kind: 'image' | 'video',
-  params: JobParams,
-): number | null {
-  if (!selectedKey) return null;
-  const selectedModel = selectedKey.models.find((item) => item.id === modelId);
-  const p = params ?? {};
-  const quality = (p.quality === 'low' || p.quality === 'medium'
-    || p.quality === 'high' || p.quality === 'auto')
-    ? p.quality
-    : undefined;
-  return estimateGenerationCost({
-    provider: {
-      provider: selectedKey.provider,
-      baseUrl: selectedKey.base_url,
-    },
-    model: { id: modelId, protocol: selectedModel?.protocol },
-    kind,
-    count: typeof p.n === 'number' ? p.n : undefined,
-    quality,
-    duration: typeof p.duration === 'number' ? p.duration : undefined,
-    resolution: typeof p.resolution === 'string' ? p.resolution : undefined,
-    ratio: typeof p.ratio === 'string' ? p.ratio : undefined,
-    generateAudio: p.generate_audio === true,
-    hasReferenceVideo: stringList(p.reference_videos).length > 0,
-  });
 }
 
 function clampImageCount(value: unknown): number {

@@ -1,4 +1,6 @@
 import type { Quality } from '@/lib/imageControlCaps';
+import type { KeyView } from '@/api/keys';
+import type { JobParams } from '@/schema/jobs';
 
 export interface GenerationCostRequest {
   provider?: { provider?: string | null; baseUrl?: string | null };
@@ -218,6 +220,40 @@ export function estimateGenerationCost(request: GenerationCostRequest): number |
     return estimateDashScopeVideo(request);
   }
   return null;
+}
+
+/**
+ * 把创作台 Job 参数还原成统一计价请求。完整创作台与首页紧凑入口必须共用这里，
+ * 否则同一模型会因提交入口不同而有的历史记录带费用、有的没有。
+ */
+export function estimateGenerationCostForSubmission(
+  selectedKey: KeyView | undefined,
+  modelId: string,
+  kind: 'image' | 'video',
+  params: JobParams,
+): number | null {
+  if (!selectedKey) return null;
+  const selectedModel = selectedKey.models.find((item) => item.id === modelId);
+  const quality = (params.quality === 'low' || params.quality === 'medium'
+    || params.quality === 'high' || params.quality === 'auto')
+    ? params.quality
+    : undefined;
+  return estimateGenerationCost({
+    provider: {
+      provider: selectedKey.provider,
+      baseUrl: selectedKey.base_url,
+    },
+    model: { id: modelId, protocol: selectedModel?.protocol },
+    kind,
+    count: typeof params.n === 'number' ? params.n : undefined,
+    quality,
+    duration: typeof params.duration === 'number' ? params.duration : undefined,
+    resolution: typeof params.resolution === 'string' ? params.resolution : undefined,
+    ratio: typeof params.ratio === 'string' ? params.ratio : undefined,
+    generateAudio: params.generate_audio === true,
+    hasReferenceVideo: Array.isArray(params.reference_videos)
+      && params.reference_videos.length > 0,
+  });
 }
 
 export function formatGenerationCost(amount: number): string {

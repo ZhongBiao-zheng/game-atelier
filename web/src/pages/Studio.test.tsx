@@ -1740,6 +1740,47 @@ describe('Studio compact mode errors', () => {
     expect(alert).toHaveTextContent('创建出图任务失败');
     expect(alert).toHaveTextContent('500');
   });
+
+  it('freezes the same CNY cost snapshot when submitting from compact mode', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'volc',
+            keys: [{
+              alias: 'volc', provider: 'seedream', base_url: null,
+              access_key: 'ak', secret_key: null, capabilities: [],
+              models: [{
+                name: '图片 4.5', id: 'doubao-seedream-4-5-251128', protocol: 'ark',
+              }],
+              notes: '', created_at: '2026-05-25T00:00:00Z', is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/studio/jobs') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            job_id: 'compact-priced', status: 'pending', submitted_at: '2026-08-28T00:00:00Z',
+          }),
+        } as any);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+    renderStudioCompact();
+
+    const textarea = await screen.findByLabelText('生图 prompt');
+    typePrompt(textarea, '首页也要记录费用');
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const request = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(request![1]!.body));
+    expect(body.params.estimated_cost_cny).toBe(0.25);
+  });
 });
 
 describe('Studio 首页深链定位（?job=）', () => {
