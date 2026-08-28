@@ -130,3 +130,41 @@ def test_poll_connection_drop_retries_same_task(monkeypatch):
 
     assert calls["get"] == 2
     assert result["data"][0]["url"].endswith("out.png")
+
+
+def test_unknown_poll_status_fails_instead_of_looping_forever(monkeypatch):
+    monkeypatch.setattr(
+        tuzi_async.requests,
+        "get",
+        lambda *args, **kwargs: _Response(200, {"status": "mystery_state"}),
+    )
+
+    with pytest.raises(tuzi_async.TuziAsyncError, match="未知状态"):
+        tuzi_async.execute_json(
+            url="https://api.tu-zi.com/v1/images/generations",
+            api_key="secret",
+            payload={},
+            task_id="async-existing",
+            poll_interval=0,
+        )
+
+
+def test_submit_rejects_oversized_task_id_before_polling(monkeypatch):
+    monkeypatch.setattr(
+        tuzi_async.requests,
+        "post",
+        lambda *args, **kwargs: _Response(202, {"id": "x" * 513, "status": "queued"}),
+    )
+    monkeypatch.setattr(
+        tuzi_async.requests,
+        "get",
+        lambda *args, **kwargs: pytest.fail("invalid task id must not be polled"),
+    )
+
+    with pytest.raises(tuzi_async.TuziAsyncError, match="任务 ID 过长"):
+        tuzi_async.execute_json(
+            url="https://api.tu-zi.com/v1/images/generations",
+            api_key="secret",
+            payload={},
+            poll_interval=0,
+        )

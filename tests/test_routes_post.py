@@ -88,6 +88,26 @@ def test_post_prompt_preserves_runner_owned_provider_task_ids(client, runtime):
     assert params["provider_task_ids"] == ["server-task"]
 
 
+def test_post_prompt_rejects_null_params_without_losing_provider_task_ids(client, runtime):
+    path = runtime / "jobs" / "j1.json"
+    path.write_text(json.dumps({
+        "job_id": "j1", "character_id": "c", "prompt": "old",
+        "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt-image-2",
+        "params": {
+            "provider_task_protocol": "tuzi_async",
+            "provider_task_ids": ["server-task"],
+        },
+        "output_paths": [], "status": "pending", "error": None,
+        "namespace": "studio", "kind": "image",
+    }))
+
+    response = client.post("/api/prompt/j1", json={"params": None})
+
+    assert response.status_code == 422
+    saved = json.loads(path.read_text())
+    assert saved["params"]["provider_task_ids"] == ["server-task"]
+
+
 def test_post_feedback_writes_draft(client, runtime):
     r = client.post(
         "/api/feedback",

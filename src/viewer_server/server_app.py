@@ -92,6 +92,9 @@ def _install_secret_filter() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     hub.set_loop(asyncio.get_running_loop())
+    from viewer_server.routes import _reset_studio_recovery_workers
+
+    _reset_studio_recovery_workers()
     # 插件升级入口：旧项目只在 server 启动阶段一次性改成 V1；正常 GET/Skill 读路径不做迁移。
     from character_workflow.lib.ui_schemes import migrate_legacy_projects
 
@@ -154,16 +157,6 @@ async def lifespan(app: FastAPI):
 
         await asyncio.to_thread(_run_studio_job_safely, job_id)
 
-    async def maintain_resumable_studio_jobs() -> None:
-        while True:
-            await asyncio.sleep(30)
-            for job_id in await asyncio.to_thread(resumable_studio_jobs):
-                task = asyncio.create_task(resume_studio_job(job_id))
-                resume_tasks.add(task)
-                task.add_done_callback(resume_tasks.discard)
-
-    studio_recovery_task = asyncio.create_task(maintain_resumable_studio_jobs())
-
     for job_id in resumable_studio:
         task = asyncio.create_task(resume_studio_job(job_id))
         resume_tasks.add(task)
@@ -176,8 +169,10 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        from viewer_server.routes import _stop_studio_recovery_workers
+
+        _stop_studio_recovery_workers()
         maintenance_task.cancel()
-        studio_recovery_task.cancel()
         for task in resume_tasks:
             task.cancel()
         observer.stop()

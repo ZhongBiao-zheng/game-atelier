@@ -30,12 +30,19 @@ class JobRunnerError(RuntimeError):
     pass
 
 
-def _cancel_checker(job: Job) -> Callable[[], bool] | None:
+class JobExecutionBusy(JobRunnerError):
+    """Another process already owns this Job's provider execution."""
+
+
+def _cancel_checker(
+    job: Job,
+    external: Callable[[], bool] | None = None,
+) -> Callable[[], bool] | None:
     if job.namespace != "canvas":
-        return None
+        return external
 
     def should_cancel() -> bool:
-        return read_job(job.job_id).cancel_requested_at is not None
+        return bool(external and external()) or read_job(job.job_id).cancel_requested_at is not None
 
     return should_cancel
 
@@ -55,6 +62,7 @@ def _friendly_error(err: BaseException) -> str:
 
 def _redact_local_paths(message: str) -> str:
     """Keep task ids/upstream diagnostics while removing secrets and workstation locations."""
+    message = re.sub(r"(?i)\bsk-[A-Za-z0-9_-]{8,}", "<redacted>", message)
     message = re.sub(
         r"(?i)(?<![\w?&-])((?:(?:\\?['\"])?(?:authorization|api[_-]?key|access[_-]?key|"
         r"secret[_-]?key|x[-_]api[-_]key|x[-_]auth[-_]token|client[-_]secret|private[-_]key|"
@@ -392,20 +400,34 @@ def _write_sidecar(path: Path, job: Job, params: dict[str, Any]) -> None:
     path.with_suffix(".md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def run_job(job_id: str, *, defer_terminal: bool = False) -> Job:
+def run_job(
+    job_id: str,
+    *,
+    defer_terminal: bool = False,
+    should_cancel: Callable[[], bool] | None = None,
+) -> Job:
     """Run at most one provider worker for a Job across threads and viewer-server processes."""
     with job_execution_lock(job_id) as acquired:
         if not acquired:
-            return read_job(job_id)
-        return _run_job_claimed(job_id, defer_terminal=defer_terminal)
+            raise JobExecutionBusy(f"job {job_id} is already running")
+        return _run_job_claimed(
+            job_id,
+            defer_terminal=defer_terminal,
+            should_cancel_external=should_cancel,
+        )
 
 
-def _run_job_claimed(job_id: str, *, defer_terminal: bool = False) -> Job:
+def _run_job_claimed(
+    job_id: str,
+    *,
+    defer_terminal: bool = False,
+    should_cancel_external: Callable[[], bool] | None = None,
+) -> Job:
     from character_workflow.lib.schemas import JobKind
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
     net_env.configure_proxy_bypass()
     job = read_job(job_id)
-    should_cancel = _cancel_checker(job)
+    should_cancel = _cancel_checker(job, should_cancel_external)
 
     def on_phase(phase: str) -> None:
         if should_cancel is not None and should_cancel():

@@ -292,7 +292,7 @@ def test_studio_runner_wrapper_does_not_overwrite_resumable_tuzi_pending(project
         ),
     )
 
-    _run_studio_job_safely("studio-tuzi-wrapper")
+    _run_studio_job_safely("studio-tuzi-wrapper", max_recovery_attempts=1)
 
     assert read_job("studio-tuzi-wrapper").status == JobStatus.PENDING
 
@@ -315,9 +315,10 @@ def test_run_job_does_not_dispatch_when_another_worker_owns_job(project, monkeyp
 
     with job_execution_lock("studio-claimed") as acquired:
         assert acquired is True
-        result = job_runner.run_job("studio-claimed")
+        with pytest.raises(job_runner.JobExecutionBusy):
+            job_runner.run_job("studio-claimed")
 
-    assert result.status == JobStatus.PENDING
+    assert read_job("studio-claimed").status == JobStatus.PENDING
 
 
 def test_deferred_image_attempt_keeps_job_pending_and_appends_new_output(project, monkeypatch):
@@ -556,7 +557,7 @@ def test_friendly_error_redacts_local_paths_without_swallowing_task_id():
         r'escaped={\"api_key\":\"escaped-secret\"}; '
         "X-API-Key: header-secret; X-Auth-Token=auth-secret; "
         "client_secret=client-secret; private_key=private-secret; "
-        "Authorization: Bearer sk-private"
+        "Authorization: Bearer sk-private; provider said invalid API key sk-abcdefghijk"
     )
     msg = job_runner._friendly_error(err)
     assert "cgt-keep-me" in msg
@@ -585,13 +586,14 @@ def test_friendly_error_redacts_local_paths_without_swallowing_task_id():
     assert "client-secret" not in msg
     assert "private-secret" not in msg
     assert "sk-private" not in msg
+    assert "sk-abcdefghijk" not in msg
     assert "https://example.com/v1/render" in msg
     assert "https://api.example.com/v1/render" in msg
     assert "user:password" not in msg
     assert "https://<redacted>@example.com/v1" in msg
     assert "/Users/a/ref.png" not in msg
     assert msg.count("<local-path>") == 5
-    assert msg.count("<redacted>") == 22
+    assert msg.count("<redacted>") == 23
 
 
 def test_friendly_error_path_redaction_preserves_following_task_id():

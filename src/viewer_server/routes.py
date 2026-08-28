@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,7 +37,8 @@ from character_workflow.lib.atomic_io import (
 )
 from character_workflow.lib.job_runner import image_dimensions_from_bytes
 from character_workflow.lib.jobs import (
-    _load_job, delete_failed_job, job_lock, list_jobs, read_job, remove_image_from_job,
+    _load_job, delete_failed_job, is_resumable_studio_job, job_lock, list_jobs, read_job,
+    remove_image_from_job,
     new_job_id, save_job, update_job_status, write_job,
 )
 from character_workflow.lib.schemas import AssetSlot as _AssetSlot
@@ -81,6 +83,10 @@ from character_workflow.lib.schemas import (
     UiSchemeCreate, UiSchemeDefaultSet, UiSchemesFile,
     WebEditableJobPatch,
 )
+
+
+_STUDIO_SHUTDOWN_EVENT = threading.Event()
+_STUDIO_RECOVERY_DELAY_SECONDS = 30
 
 
 logger = logging.getLogger(__name__)
@@ -415,6 +421,11 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
                     else:
                         value.pop(owned, None)
             data[field] = value
+        # Validate the complete post-patch document before replacing the durable Job JSON.  This
+        # catches explicit nulls and cross-field violations without discarding legacy raw fields.
+        validated = dict(data)
+        validated.pop("seed", None)
+        Job.model_validate(validated)
         atomic_write_json(p, data)
     return {"ok": True}
 
@@ -3271,29 +3282,58 @@ def post_studio_archive(job_id: str, body: _StudioArchiveRequest) -> dict:
     return {"job": job.model_dump(mode="json"), "path": job.output_paths[0]}
 
 
-def _run_studio_job_safely(job_id: str) -> None:
+def _reset_studio_recovery_workers() -> None:
+    _STUDIO_SHUTDOWN_EVENT.clear()
+
+
+def _stop_studio_recovery_workers() -> None:
+    _STUDIO_SHUTDOWN_EVENT.set()
+
+
+def _run_studio_job_safely(
+    job_id: str,
+    *,
+    max_recovery_attempts: int | None = None,
+) -> None:
     """BackgroundTasks wrapper — runs job_runner.run_job and pins failures to job state.
 
     Lazy import keeps test monkeypatching (`routes._run_studio_job_safely`) effective
     and avoids importing the caller chain at module load.
     """
-    from character_workflow.lib.job_runner import run_job
-    try:
-        run_job(job_id)
-    except Exception as e:  # noqa: BLE001
-        # run_job already calls update_job_status(FAILED) on its own exception path,
-        # but guard against any uncaught path (e.g., raised before its try block).
+    from character_workflow.lib.job_runner import JobExecutionBusy, run_job
+
+    attempts = 0
+    while not _STUDIO_SHUTDOWN_EVENT.is_set():
+        attempts += 1
         try:
-            job = read_job(job_id)
-        except FileNotFoundError:
+            job = run_job(job_id, should_cancel=_STUDIO_SHUTDOWN_EVENT.is_set)
+        except JobExecutionBusy:
+            # Startup recovery and the original BackgroundTask can overlap. The lock owner is
+            # already handling this exact Job; the duplicate worker exits without changing state.
             return
-        if job.status not in {
-            JobStatus.DONE,
-            JobStatus.PARTIAL,
-            JobStatus.FAILED,
-            JobStatus.CANCELED,
-        }:
-            update_job_status(job_id, status=JobStatus.FAILED, error=str(e))
+        except Exception as e:  # noqa: BLE001
+            # run_job already records provider failures. Guard only errors that escaped before its
+            # state-transition block (for example, loading a deleted Job).
+            try:
+                job = read_job(job_id)
+            except FileNotFoundError:
+                return
+            if job.status not in {
+                JobStatus.DONE,
+                JobStatus.PARTIAL,
+                JobStatus.FAILED,
+                JobStatus.CANCELED,
+            }:
+                update_job_status(job_id, status=JobStatus.FAILED, error=str(e))
+            return
+
+        if not is_resumable_studio_job(job):
+            return
+        if max_recovery_attempts is not None and attempts >= max_recovery_attempts:
+            return
+        # Keep one lightweight waiter per paid task instead of rescanning every historical Job.
+        if _STUDIO_SHUTDOWN_EVENT.wait(_STUDIO_RECOVERY_DELAY_SECONDS):
+            return
 
 
 @router.post("/studio/jobs", status_code=201)

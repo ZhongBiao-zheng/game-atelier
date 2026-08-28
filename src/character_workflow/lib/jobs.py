@@ -335,14 +335,14 @@ def fail_orphan_studio_jobs(error: str = "server restarted, job interrupted") ->
     reclaimed: list[str] = []
     for job in list_jobs():
         if job.namespace == "studio" and job.status == JobStatus.PENDING:
-            if _is_resumable_studio_job(job):
+            if is_resumable_studio_job(job):
                 continue
             update_job_status(job.job_id, status=JobStatus.FAILED, error=error)
             reclaimed.append(job.job_id)
     return reclaimed
 
 
-def _is_resumable_studio_job(job: Job) -> bool:
+def is_resumable_studio_job(job: Job) -> bool:
     return bool(
         job.namespace == "studio"
         and job.status == JobStatus.PENDING
@@ -353,4 +353,4 @@ def _is_resumable_studio_job(job: Job) -> bool:
 
 def resumable_studio_jobs() -> list[str]:
     """Return pending Studio jobs that can continue without creating a new billed request."""
-    return sorted(job.job_id for job in list_jobs() if _is_resumable_studio_job(job))
+    return sorted(job.job_id for job in list_jobs() if is_resumable_studio_job(job))

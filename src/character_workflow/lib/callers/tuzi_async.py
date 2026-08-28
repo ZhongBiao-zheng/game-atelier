@@ -28,6 +28,8 @@ class TuziAsyncPendingError(TuziAsyncError):
 
 _SUCCESS = frozenset({"completed", "success", "succeeded", "done"})
 _FAILURE = frozenset({"failure", "failed", "error", "expired", "cancelled", "canceled"})
+_PENDING = frozenset({"queued", "not_start", "submitted", "in_progress", "processing", "pending"})
+_POLL_TIMEOUT_SECONDS = 30
 
 
 def _async_url(url: str) -> str:
@@ -67,7 +69,12 @@ def _message(payload: dict[str, Any], status_code: int) -> str:
 
 def _task_id(payload: dict[str, Any]) -> str | None:
     value = payload.get("id") or payload.get("task_id") or payload.get("taskId")
-    return str(value).strip() if value is not None and str(value).strip() else None
+    task_id = str(value).strip() if value is not None else ""
+    if not task_id:
+        return None
+    if len(task_id) > 512:
+        raise TuziAsyncError("Tuzi 异步提交返回的任务 ID 过长")
+    return task_id
 
 
 def _result_json(payload: dict[str, Any], task_id: str) -> dict[str, Any]:
@@ -129,7 +136,7 @@ def _execute(
     for response in video_poll.poll_responses(
         url=_poll_url(url, current),
         headers=headers,
-        timeout=120,
+        timeout=_POLL_TIMEOUT_SECONDS,
         max_polls=max_polls,
         poll_interval=poll_interval,
         task_ref=current,
@@ -151,6 +158,12 @@ def _execute(
                 video_poll.with_task_ref(
                     f"Tuzi 异步任务失败：{payload.get('error') or payload.get('message') or status}",
                     current,
+                )
+            )
+        if status not in _PENDING:
+            raise TuziAsyncError(
+                video_poll.with_task_ref(
+                    f"Tuzi 异步任务返回未知状态：{status or '<empty>'}", current
                 )
             )
     raise TuziAsyncPendingError(
