@@ -150,7 +150,7 @@ def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
         n=1,
         size="2048x2048",
         params=params,
-        on_task_id=persisted.append,
+        on_params_changed=lambda: persisted.extend(params["provider_task_ids"]),
     )
 
     assert calls[0]["url"] == "https://api.tu-zi.com/v1/images/generations"

@@ -347,6 +347,26 @@ def test_post_job_cancel_fresh_pending_still_409(client, runtime):
     assert json.loads((runtime / "jobs" / "j1.json").read_text())["status"] == "pending"
 
 
+def test_post_job_cancel_never_discards_resumable_paid_tuzi_task(client, runtime):
+    (runtime / "jobs" / "j1.json").write_text(json.dumps({
+        "job_id": "j1", "character_id": "Tuzi", "prompt": "p",
+        "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt-image-2",
+        "params": {
+            "provider_task_protocol": "tuzi_async",
+            "provider_task_ids": ["paid-task-1"],
+        },
+        "output_paths": [], "status": "pending", "error": None,
+        "namespace": "studio", "kind": "image",
+    }))
+
+    response = client.post("/api/jobs/j1/cancel")
+
+    assert response.status_code == 409
+    saved = json.loads((runtime / "jobs" / "j1.json").read_text())
+    assert saved["status"] == "pending"
+    assert saved["params"]["provider_task_ids"] == ["paid-task-1"]
+
+
 def test_delete_failed_job_removes_job_file(client, runtime):
     (runtime / "jobs" / "j1.json").write_text(json.dumps({
         "job_id": "j1", "character_id": "c", "prompt": "p",

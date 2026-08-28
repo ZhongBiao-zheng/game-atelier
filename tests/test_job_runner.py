@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import struct
@@ -217,8 +218,10 @@ def test_run_job_persists_provider_task_id_before_dispatch_finishes(project, mon
         provider="custom",
     ))
 
-    def fake_dispatch(*, on_task_id, **kwargs):
-        on_task_id("tuzi-task-1")
+    def fake_dispatch(*, on_params_changed, params, **kwargs):
+        params["provider_task_protocol"] = "tuzi_async"
+        params["provider_task_ids"] = ["tuzi-task-1"]
+        on_params_changed()
         persisted = read_job("studio-tuzi-async")
         assert persisted.params.provider_task_protocol == "tuzi_async"
         assert persisted.params.provider_task_ids == ["tuzi-task-1"]
@@ -292,9 +295,28 @@ def test_studio_runner_wrapper_does_not_overwrite_resumable_tuzi_pending(project
         ),
     )
 
-    _run_studio_job_safely("studio-tuzi-wrapper", max_recovery_attempts=1)
+    asyncio.run(_run_studio_job_safely("studio-tuzi-wrapper", max_recovery_attempts=1))
 
     assert read_job("studio-tuzi-wrapper").status == JobStatus.PENDING
+
+
+def test_studio_runner_retries_without_occupying_executor_during_delay(monkeypatch):
+    from viewer_server import routes
+
+    attempts = iter([True, False])
+    calls: list[str] = []
+
+    def fake_attempt(job_id: str) -> bool:
+        calls.append(job_id)
+        return next(attempts)
+
+    monkeypatch.setattr(routes, "_run_studio_job_once", fake_attempt)
+    monkeypatch.setattr(routes, "_STUDIO_RECOVERY_DELAY_SECONDS", 0)
+    routes._reset_studio_recovery_workers()
+
+    asyncio.run(routes._run_studio_job_safely("studio-paid"))
+
+    assert calls == ["studio-paid", "studio-paid"]
 
 
 def test_run_job_does_not_dispatch_when_another_worker_owns_job(project, monkeypatch):

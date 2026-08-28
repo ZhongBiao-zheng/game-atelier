@@ -24,7 +24,12 @@ from character_workflow.lib.canvas_ui import (
     read_canvas_ui_preferences,
 )
 from character_workflow.lib.file_lock import file_lock
-from character_workflow.lib.job_runner import image_dimensions, is_valid_audio, run_job
+from character_workflow.lib.job_runner import (
+    JobExecutionBusy,
+    image_dimensions,
+    is_valid_audio,
+    run_job,
+)
 from character_workflow.lib.jobs import (
     job_lock,
     list_jobs,
@@ -2168,6 +2173,10 @@ def _run_canvas_candidates_incrementally(job: Job) -> Job:
                 (path for path in attempt.output_paths if path not in accumulated_paths),
                 None,
             )
+        except JobExecutionBusy:
+            # Another process owns this exact paid attempt. Leave the shared Job untouched;
+            # the lock owner will commit the candidate when it finishes.
+            return read_job(job.job_id)
         except Exception:
             attempt = read_job(job.job_id)
             attempt_error = attempt.error
@@ -2425,6 +2434,9 @@ def run_canvas_job(job_id: str) -> Job:
         return _run_canvas_candidates_incrementally(job)
     try:
         run_job(job_id)
+    except JobExecutionBusy:
+        # A duplicate scheduler must never mark the lock owner's in-flight Job as failed.
+        return read_job(job_id)
     except Exception as error:
         latest = read_job(job_id)
         if latest.status not in {

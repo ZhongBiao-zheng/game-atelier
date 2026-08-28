@@ -153,9 +153,9 @@ def render(
         if params is not None:
             params["provider_task_protocol"] = "tuzi_async"
             params["provider_task_ids"] = list(stored_task_ids)
-        callback = kwargs.get("on_task_id")
+        callback = kwargs.get("on_params_changed")
         if callable(callback):
-            callback(task_id)
+            callback()
 
     def _post_image_json(url: str, payload: dict) -> dict:
         if not is_tuzi:

@@ -329,8 +329,8 @@ def clone_job_for_retry(job_id: str) -> Job:
 def fail_orphan_studio_jobs(error: str = "server restarted, job interrupted") -> list[str]:
     """viewer-server 启动时回收孤儿 studio job，返回被回收的 job_id 列表。
 
-    studio job 只在 viewer-server 进程内跑（BackgroundTasks 同步阻塞），server
-    启动时还停在 pending 的必然已随上次进程一起死了 —— 直接判 FAILED，零误伤。
+    studio job 只在 viewer-server 进程的受控 executor 内跑，server 启动时仍 pending
+    且没有可恢复厂商任务 ID 的请求，必然已随上次进程一起中断 —— 直接判 FAILED。
     character job 由独立 Skill 进程跑，不能在这里清（前端按时限提示作废）。"""
     reclaimed: list[str] = []
     for job in list_jobs():

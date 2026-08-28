@@ -155,7 +155,7 @@ async def lifespan(app: FastAPI):
     async def resume_studio_job(job_id: str) -> None:
         from viewer_server.routes import _run_studio_job_safely
 
-        await asyncio.to_thread(_run_studio_job_safely, job_id)
+        await _run_studio_job_safely(job_id)
 
     for job_id in resumable_studio:
         task = asyncio.create_task(resume_studio_job(job_id))

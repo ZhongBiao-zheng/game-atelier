@@ -458,14 +458,8 @@ def _run_job_claimed(
             if should_cancel is not None:
                 dispatch_kwargs["should_cancel"] = should_cancel
 
-            def on_task_id(task_id: str) -> None:
-                # Callback contract only guarantees a task id. Keep this persistence boundary
-                # self-contained so a caller/test double cannot accidentally lose a paid task.
-                task_ids = list(params.get("provider_task_ids") or [])
-                if task_id not in task_ids:
-                    task_ids.append(task_id)
-                params["provider_task_protocol"] = "tuzi_async"
-                params["provider_task_ids"] = task_ids
+            def on_params_changed() -> None:
+                # Callers own provider-specific params; the runner only persists their mutation.
                 update_job_params(job.job_id, params)
 
             paths = dispatch(
@@ -479,7 +473,7 @@ def _run_job_claimed(
                 # 异步图片协议（MJ / Tuzi）在 submit 与下载时回写真实卡点；同步 caller
                 # 收下即忽略（都吃 **kwargs）。
                 on_phase=on_phase,
-                on_task_id=on_task_id,
+                on_params_changed=on_params_changed,
                 **dispatch_kwargs,
             )
             selected = [(Path(p), dims) for p in paths if (dims := image_dimensions(Path(p)))]

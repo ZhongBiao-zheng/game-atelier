@@ -66,11 +66,11 @@ def test_lifespan_resumes_tuzi_async_job_on_startup(isolated_data_root, monkeypa
         ),
     })
     jobs_lib.save_job(resumable)
-    monkeypatch.setattr(
-        routes,
-        "_run_studio_job_safely",
-        lambda job_id: resumed.set() if job_id == "studio-tuzi" else None,
-    )
+    async def fake_resume(job_id: str) -> None:
+        if job_id == "studio-tuzi":
+            resumed.set()
+
+    monkeypatch.setattr(routes, "_run_studio_job_safely", fake_resume)
 
     with TestClient(build_app()):
         assert resumed.wait(1)
