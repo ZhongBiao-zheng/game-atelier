@@ -241,6 +241,7 @@ export function CanvasMaskEditDialog({
       selectedKey?.provider,
       baseParams,
       selectedModel?.protocol,
+      selectedKey?.base_url,
     );
     params.n = requestedCount;
     params.quality = quality;

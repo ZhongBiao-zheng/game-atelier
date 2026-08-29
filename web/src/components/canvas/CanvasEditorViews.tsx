@@ -1737,7 +1737,12 @@ export function CanvasGenerationComposer({
   const models = (selectedKey?.models ?? []).filter(model => acceptsModel(model, selectedKey!));
   const selectedModel = models.find(model => model.id === draft.model);
   const imageCaps = draft.mode === 'image' && selectedModel
-    ? imageControlCaps(draft.model, selectedKey?.provider, selectedModel?.protocol)
+    ? imageControlCaps(
+        draft.model,
+        selectedKey?.provider,
+        selectedModel?.protocol,
+        selectedKey?.base_url,
+      )
     : null;
   // 两层都要 memo：canvasVideoEditCaps 每次调用都返回新对象，展开一层又造一个新对象。
   // 下面那条纠偏 effect 依赖 videoCaps，不 memo 的话它每一次 render 都重跑，而它会 commit
@@ -2028,7 +2033,13 @@ export function CanvasGenerationComposer({
               alias: key.alias,
               model: model.id,
               params: draft.mode === 'image'
-                ? normalizeCanvasImageParams(model.id, key.provider, current.params, model.protocol)
+                ? normalizeCanvasImageParams(
+                    model.id,
+                    key.provider,
+                    current.params,
+                    model.protocol,
+                    key.base_url,
+                  )
                 : draft.mode === 'text'
                   ? normalizeCanvasTextParams(model.protocol, current.params)
                 : draft.mode === 'video'
@@ -2077,6 +2088,7 @@ export function CanvasGenerationComposer({
                   context.keys
                     .find(key => key.alias === current.alias)
                     ?.models.find(model => model.id === current.model)?.protocol,
+                  context.keys.find(key => key.alias === current.alias)?.base_url,
                 ),
               };
             })}

@@ -502,7 +502,8 @@ def _image_generation_payload(
         # output_format：Ark 默认 jpeg，而我们把产物一律存成 .png —— 实测 26 张历史产物里
         # 11 张实际是 JPEG，既名实不符又白挨一道有损压缩。立绘要无损，显式要 png。
         payload["output_format"] = "png"
-    # Tuzi 基础型号与非 VIP 固定别名都靠 quality 路由；VIP/HD 的档位才内建在 model id。
+    # Tuzi 可调质量基础型号与其非 VIP 固定别名靠 quality 路由；
+    # VIP/HD/NT 与旧版 2.5 型号的档位内建在 model id。
     if quality:
         payload["quality"] = quality
     if background:  # gpt-image：auto/opaque/transparent
@@ -553,28 +554,45 @@ def fixed_nano_resolution_quality(model: str) -> str | None:
     return match.group(1) if match else None
 
 
+_TUZI_NANO_ROUTES = (
+    ("nano-banana-pro", "gemini-3-pro-image-preview", True),
+    ("nano-banana-2", "gemini-3.1-flash-image-preview", True),
+    ("nano-banana", "gemini-2.5-flash-image", False),
+)
+
+
+def _tuzi_nano_route(model: str) -> tuple[str, bool, str] | None:
+    normalized = normalized_model_id(model)
+    for alias, canonical, adjustable in _TUZI_NANO_ROUTES:
+        if normalized == alias:
+            return canonical, adjustable, ""
+        if normalized.startswith(f"{alias}-"):
+            return canonical, adjustable, normalized[len(alias):]
+    return None
+
+
 def tuzi_outbound_image_model(model: str) -> str:
     """Map Tuzi's public Nano Banana aliases to image-endpoint model ids."""
-    normalized = normalized_model_id(model)
-    aliases = (
-        ("nano-banana-pro", "gemini-3-pro-image-preview"),
-        ("nano-banana-2", "gemini-3.1-flash-image-preview"),
-    )
-    for alias, canonical in aliases:
-        if normalized == alias:
-            return canonical
-        if normalized.startswith(f"{alias}-"):
-            suffix = normalized[len(alias):]
-            if suffix in {"-2k", "-4k"}:
-                return canonical
-            return f"{canonical}{suffix}"
-    return model
+    route = _tuzi_nano_route(model)
+    if route is None:
+        return model
+    canonical, adjustable, suffix = route
+    if adjustable and suffix in {"-2k", "-4k"}:
+        return canonical
+    return f"{canonical}{suffix}"
 
 
 def tuzi_image_quality(model: str, quality: str | None) -> str | None:
     """Translate the shared UI quality scale to Tuzi's Gemini image-size values."""
+    route = _tuzi_nano_route(model)
+    if route is None:
+        return None
+    _canonical, adjustable, _suffix = route
+    if not adjustable:
+        # Other gateways may expose quality for this family; Tuzi's official transport does not.
+        return None
     normalized = normalized_model_id(model)
-    if normalized.endswith("-vip") or normalized.endswith("-hd"):
+    if normalized.endswith(("-vip", "-hd", "-nt")):
         return None
     fixed_quality = fixed_nano_resolution_quality(model)
     if fixed_quality is not None:

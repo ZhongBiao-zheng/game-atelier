@@ -14,7 +14,12 @@
  * 而不是像素，所以 provider=openrouter 时全族都改走比例、且不暴露分辨率/自定义像素
  * （后端 openrouter_image 会把 params.resolution 当 API 参数发出去，控件藏了还写就是静默计费）。
  */
-import { imageFamily, supportsImageQuality, type ImageFamily } from '@/lib/modelFamily';
+import {
+  imageFamily,
+  normalizedModelId,
+  supportsImageQuality,
+  type ImageFamily,
+} from '@/lib/modelFamily';
 import { availableResolutions, type Resolution } from '@/lib/studioSize';
 
 export type Quality = 'low' | 'medium' | 'high' | 'auto';
@@ -99,10 +104,24 @@ export function imageControlCaps(
   modelId?: string | null,
   provider?: string | null,
   protocol?: string | null,
+  baseUrl?: string | null,
 ): ImageControlCaps {
   const family = imageFamily(modelId);
   const base = FAMILY_CAPS[family];
-  const qualities = supportsImageQuality(modelId) ? base.qualities : null;
+  const normalized = normalizedModelId(modelId);
+  let isTuzi = false;
+  try {
+    const host = new URL(baseUrl ?? '').hostname.toLowerCase();
+    isTuzi = host === 'tu-zi.com' || host.endsWith('.tu-zi.com');
+  } catch {
+    // Missing or relative URLs are not Tuzi endpoints.
+  }
+  // Tuzi 只有 Pro 与 2 的基础型号接收独立 quality；旧 2.5、HD/NT/VIP 的档位
+  // 都编码在 model id。其他网关仍沿用共享的模型能力判定。
+  const supportsTuziQuality = normalized === 'nano-banana-pro' || normalized === 'nano-banana-2';
+  const qualities = supportsImageQuality(modelId) && (!isTuzi || supportsTuziQuality)
+    ? base.qualities
+    : null;
   // OpenRouter：size 走 aspect_ratio 比例语义（分辨率由厂商默认档决定），
   // 质量档位仍按模型能力给（固定 2K/4K Nano 型号不再叠加 quality）。
   if (provider === 'openrouter') {

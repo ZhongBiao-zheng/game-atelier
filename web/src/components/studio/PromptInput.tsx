@@ -571,7 +571,12 @@ export function PromptInput({
   const [localH, setLocalH] = useState(initSize.h);
   const [sizeLocked, setSizeLocked] = useState(true);
   // 能力四项按模型族判（provider 只决定端点/协议，openrouter 另外改 size 语义）。
-  const caps = imageControlCaps(selectedModel?.id, provider?.provider, selectedModel?.protocol);
+  const caps = imageControlCaps(
+    selectedModel?.id,
+    provider?.provider,
+    selectedModel?.protocol,
+    provider?.base_url,
+  );
   const sizeControlDetail = caps.showResolution
     ? (resolution === '2K' ? '高清 2K' : '超清 4K')
     : caps.qualities?.length

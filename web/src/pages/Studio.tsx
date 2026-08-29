@@ -407,7 +407,12 @@ function StudioFull() {
     const selectedKey = keys.find((item) => item.alias === effectiveAlias);
     const effectiveProvider = selectedKey?.provider ?? overrideConfig?.provider;
     // 能力按模型族判；provider 只在 openrouter 上改 size 语义（比例串而非像素）。
-    const caps = imageControlCaps(effectiveModel, effectiveProvider);
+    const caps = imageControlCaps(
+      effectiveModel,
+      effectiveProvider,
+      selectedKey?.models.find((item) => item.id === effectiveModel)?.protocol,
+      selectedKey?.base_url,
+    );
     // MJ 一次 imagine 固定回 4 张方案，张数不由画师定（见 MJ_IMAGES_PER_TASK）。
     const effectiveCount = caps.family === 'midjourney'
       ? MJ_IMAGES_PER_TASK
