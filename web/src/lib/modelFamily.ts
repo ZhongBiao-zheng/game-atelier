@@ -27,3 +27,14 @@ export function imageFamily(modelId?: string | null): ImageFamily {
   if (id.includes('seedream') || id.includes('seededit')) return 'seedream';
   return 'standard';
 }
+
+/** 图片 API 是否接受独立 quality 参数。
+ *
+ * Nano Banana 的无后缀型号用 low/medium/high 选档；Tuzi 等网关提供的 `-2k` / `-4k`
+ * 固定型号已经把清晰度编码进 model id，再叠加 quality 会覆盖型号档位。 */
+export function supportsImageQuality(modelId?: string | null): boolean {
+  const family = imageFamily(modelId);
+  if (family === 'gpt-image') return true;
+  if (family !== 'nano-banana') return false;
+  return !/-(?:2k|4k)$/.test(normalizedModelId(modelId));
+}

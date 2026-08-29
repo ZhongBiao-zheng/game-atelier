@@ -210,10 +210,10 @@ def render(
 
     # custom 走 family 判定补诚实；命名 provider(openai/seedream/tokendance/HK) 分支不动。
     # family / is_seedream 已在上方（尺寸归一化前）算好，这里不重算。
-    # quality 按**族**判，与前端 imageControlCaps 同一判据（旧版按 provider：词元跳动上的
+    # quality 按**模型能力**判，与前端 imageControlCaps 同一判据（旧版按 provider：词元跳动上的
     # gpt-image 界面给四档、后端静默丢弃；provider=openai 下的 dall-e 反过来会被塞进
     # gpt-image 的 low/high 词表，而 DALL·E 只认 standard|hd）。
-    wants_quality = family in ("gpt-image", "nano-banana")
+    wants_quality = supports_image_quality(model)
     quality = _quality_param(kwargs) if wants_quality else None
     image_protocol = _effective_image_protocol(key, model)
     background = (
@@ -497,7 +497,9 @@ def _image_generation_payload(
         # output_format：Ark 默认 jpeg，而我们把产物一律存成 .png —— 实测 26 张历史产物里
         # 11 张实际是 JPEG，既名实不符又白挨一道有损压缩。立绘要无损，显式要 png。
         payload["output_format"] = "png"
-    if quality:  # gpt-image / nano-banana：low/medium/high/auto
+    # 固定 `-2k` / `-4k` Nano Banana 型号已经用 model id 定档；旧 Job 即使残留
+    # quality，也在最终序列化边界丢弃，避免 low 覆盖 4K 型号。
+    if quality and supports_image_quality(model):
         payload["quality"] = quality
     if background:  # gpt-image：auto/opaque/transparent
         payload["background"] = background
@@ -537,6 +539,16 @@ def image_family(model: str) -> str:
     if "seedream" in m or "seededit" in m:
         return "seedream"
     return "standard"
+
+
+def supports_image_quality(model: str) -> bool:
+    """图片模型是否接受独立 quality 参数；与前端 supportsImageQuality 对齐。"""
+    family = image_family(model)
+    if family == "gpt-image":
+        return True
+    if family != "nano-banana":
+        return False
+    return re.search(r"-(?:2k|4k)$", normalized_model_id(model)) is None
 
 
 def supports_image_mask(provider: str, model: str, protocol: str | None = None) -> bool:

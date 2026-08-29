@@ -952,6 +952,27 @@ def test_render_openai_hk_nano_banana_passes_ratio_size_and_backfills(
     assert len(paths) == 3
 
 
+def test_fixed_resolution_nano_banana_never_serializes_quality():
+    """Tuzi 的 -2k/-4k 型号由 model id 定档，历史 Job 残留 quality 也必须在出站前丢弃。"""
+    fixed = openai_image._image_generation_payload(
+        model="nano-banana-pro-4k",
+        prompt="banana cat",
+        size="3:4",
+        n=1,
+        quality="low",
+    )
+    regular = openai_image._image_generation_payload(
+        model="nano-banana-pro",
+        prompt="banana cat",
+        size="3:4",
+        n=1,
+        quality="low",
+    )
+
+    assert "quality" not in fixed
+    assert regular["quality"] == "low"
+
+
 def test_image_items_from_text_cleans_malformed_markdown_url():
     dirty = (
         "![image](https://pro.filesystem.site/cdn/20260529/out.png]"
@@ -1738,7 +1759,7 @@ def test_capability_matrix_matches_shared_fixture(case):
     family = openai_image.image_family(model)
     assert family == case["family"], f"{model} 族判定"
     assert openai_image._max_reference_images(provider, model) == case["max_reference_images"]
-    assert (family in ("gpt-image", "nano-banana")) == case["supports_quality"]
+    assert openai_image.supports_image_quality(model) == case["supports_quality"]
     if case["min_pixels"] is None:
         assert family != "seedream"
     else:

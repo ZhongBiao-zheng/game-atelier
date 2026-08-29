@@ -360,6 +360,50 @@ describe('Studio', () => {
     expect(body.params).not.toHaveProperty('quality');
   });
 
+  it('Tuzi 固定 4K Nano Banana 只发比例，不让默认 low 覆盖型号档位', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'tuzi',
+            keys: [{
+              alias: 'tuzi',
+              provider: 'custom',
+              access_key: 'sk-tuzi...key',
+              secret_key: null,
+              capabilities: ['portrait'],
+              models: [{ name: 'Nano Banana Pro 4K', id: 'nano-banana-pro-4k' }],
+              notes: '',
+              created_at: '2026-08-29T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ job_id: 'j-4k', status: 'pending', submitted_at: '2026-08-29T00:00:00Z' }),
+      } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+    typePrompt(await screen.findByLabelText('生图 prompt'), '一张竖版角色海报');
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body.model).toBe('nano-banana-pro-4k');
+    expect(body.params.size).toBe('1:1');
+    expect(body.params).not.toHaveProperty('resolution');
+    expect(body.params).not.toHaveProperty('quality');
+  });
+
   it('renders image count control beside size and submits the selected count', async () => {
     renderStudio();
 

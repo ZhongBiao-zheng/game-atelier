@@ -14,6 +14,7 @@ const hkKey: KeyView = {
   models: [
     { name: 'GPT Image 2', id: 'gpt-image-2' },
     { name: 'Nano Banana', id: 'nano-banana' },
+    { name: 'Nano Banana Pro 4K', id: 'nano-banana-pro-4k' },
   ],
   notes: '',
   created_at: '2026-05-25T00:00:00Z',
@@ -53,6 +54,15 @@ describe('PromptInput 尺寸面板按模型族渲染', () => {
     renderWith('nano-banana');
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     expect(screen.getByLabelText('选择质量')).toBeInTheDocument();
+    expect(screen.queryByLabelText('选择分辨率')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
+    cleanup();
+  });
+
+  it('固定 4K nano-banana: 型号已经定档，不再显示质量', () => {
+    renderWith('nano-banana-pro-4k');
+    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    expect(screen.queryByLabelText('选择质量')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('选择分辨率')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
     cleanup();

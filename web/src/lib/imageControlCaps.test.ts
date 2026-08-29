@@ -13,6 +13,13 @@ describe('imageControlCaps', () => {
     expect(c.sizeKind).toBe('ratio');
   });
 
+  it('固定 2K/4K 型号由模型名控制清晰度，不显示或提交 quality', () => {
+    expect(imageControlCaps('nano-banana-pro-4k').qualities).toBeNull();
+    expect(imageControlCaps('nano-banana-2-2k').qualities).toBeNull();
+    expect(imageControlCaps('vendor/nano_banana_pro_4k').qualities).toBeNull();
+    expect(imageControlCaps('nano-banana-pro').qualities).toEqual(['low', 'medium', 'high']);
+  });
+
   it('gpt-image: 比例 + 自定义尺寸 + 质量(含 auto)，无分辨率，size 传像素', () => {
     const c = imageControlCaps('gpt-image-2');
     expect(c.family).toBe('gpt-image');
