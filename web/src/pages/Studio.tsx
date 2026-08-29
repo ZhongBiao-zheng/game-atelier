@@ -9,6 +9,7 @@ import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { PromptInput } from '@/components/studio/PromptInput';
 import {
   CreationAssetPanel,
+  type CreationAssetPanelHandle,
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
@@ -30,7 +31,7 @@ import { StudioCompact } from './StudioCompact';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 import { creationAssetImageUrl } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
-import type { CreationAsset, CreationImageAssetVersion } from '@/schema/creationAssets';
+import type { CreationAsset, CreationImageAssetContent } from '@/schema/creationAssets';
 import type { CanvasProject } from '@/schema/canvas';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
@@ -135,14 +136,9 @@ function StudioFull() {
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [assetPanelKind, setAssetPanelKind] = useState<'prompt' | 'image'>('prompt');
   const [assetSaveRequest, setAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
+  const assetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const [canvasTargets, setCanvasTargets] = useState<CanvasProject[]>([]);
-  const [insertTextRequest, setInsertTextRequest] = useState<{ requestId: string; text: string } | null>(null);
-  const [promptAssetUsage, setPromptAssetUsage] = useState<{
-    assetId: string;
-    versionId: string;
-    variableValues: Record<string, string>;
-    renderedPrompt: string;
-  } | null>(null);
+  const [promptAssetSourceTitle, setPromptAssetSourceTitle] = useState<string | null>(null);
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
   const [kind, setKind] = useState<JobKind>(saved.kind ?? 'image');
   // 旧版本 videoMode 存过 t2v/i2v/ref/v2v —— 仅 'omni' 原样保留，其余一律回落首尾帧。
@@ -433,6 +429,9 @@ function StudioFull() {
     const effectiveQuality = caps.qualities?.includes(rawQuality) ? rawQuality : undefined;
     const selectedModel = selectedKey?.models.find((item) => item.id === effectiveModel);
     const effectiveMjParams = overrideConfig?.mjParams ?? mjParams;
+    const effectiveSourceAssetTitle = overrideConfig
+      ? overrideConfig.sourceAssetTitle
+      : promptAssetSourceTitle ?? undefined;
 
     setPending(true);
     // 提交前把参考图 File[] 上传到 .runtime/uploads/，拿到服务器路径写进 params.reference_images。
@@ -467,6 +466,7 @@ function StudioFull() {
       n: effectiveCount,
       quality: effectiveQuality,
       referenceImages: refPaths,
+      ...(effectiveSourceAssetTitle ? { sourceAssetTitle: effectiveSourceAssetTitle } : {}),
       ...(caps.family === 'midjourney'
         ? { mjParams: effectiveMjParams, mjRefPaths }
         : {}),
@@ -480,12 +480,8 @@ function StudioFull() {
       n: effectiveCount,
       ...(effectiveQuality ? { quality: effectiveQuality } : {}),
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
-      ...(!overrideConfig && promptAssetUsage && prompt.trim() === promptAssetUsage.renderedPrompt.trim()
-        ? {
-            creation_prompt_asset_id: promptAssetUsage.assetId,
-            creation_prompt_version_id: promptAssetUsage.versionId,
-            creation_prompt_variable_values: promptAssetUsage.variableValues,
-          }
+      ...(effectiveSourceAssetTitle
+        ? { creation_asset_source_title: effectiveSourceAssetTitle }
         : {}),
       // MJ 的一切控制都在 prompt flag 里，由后端 mj_image 拼接；这里只发结构化值。
       ...(caps.family === 'midjourney'
@@ -602,6 +598,9 @@ function StudioFull() {
       ? overrideConfig.videoQuality
       : (effectiveCaps.qualities ? videoQuality : undefined);
     const effectiveCount = clampImageCount(overrideConfig?.n ?? videoCount);
+    const effectiveSourceAssetTitle = overrideConfig
+      ? overrideConfig.sourceAssetTitle
+      : promptAssetSourceTitle ?? undefined;
     // frame_mode 不再是用户选项：首尾帧模式按双槽推导（双帧→firstlast、仅首→first、仅尾→last、
     // 全空→省略 = 文生视频）；全能参考模式不发 frame_mode（全部按 reference_image 角色）。
     const effectiveFrameMode = overrideConfig
@@ -627,12 +626,8 @@ function StudioFull() {
       ...(imgPaths.length ? { reference_images: imgPaths } : {}),
       ...(vidPaths.length ? { reference_videos: vidPaths } : {}),
       ...(audPaths.length ? { reference_audios: audPaths } : {}),
-      ...(!overrideConfig && promptAssetUsage && prompt.trim() === promptAssetUsage.renderedPrompt.trim()
-        ? {
-            creation_prompt_asset_id: promptAssetUsage.assetId,
-            creation_prompt_version_id: promptAssetUsage.versionId,
-            creation_prompt_variable_values: promptAssetUsage.variableValues,
-          }
+      ...(effectiveSourceAssetTitle
+        ? { creation_asset_source_title: effectiveSourceAssetTitle }
         : {}),
     };
     const estimatedCost = estimateGenerationCostForSubmission(
@@ -660,6 +655,7 @@ function StudioFull() {
       referenceImages: imgPaths,
       referenceVideos: vidPaths,
       referenceAudios: audPaths,
+      ...(effectiveSourceAssetTitle ? { sourceAssetTitle: effectiveSourceAssetTitle } : {}),
     };
 
     const startedAt = Date.now();
@@ -790,11 +786,7 @@ function StudioFull() {
           onSubmit={onSubmit}
           disabled={pending}
           value={promptText}
-          onValueChange={(value) => {
-            setPromptText(value);
-            if (promptAssetUsage && value !== promptAssetUsage.renderedPrompt) setPromptAssetUsage(null);
-          }}
-          insertTextRequest={insertTextRequest}
+          onValueChange={setPromptText}
           onSavePromptAsset={() => {
             setAssetPanelKind('prompt');
             setAssetPanelOpen(true);
@@ -860,7 +852,10 @@ function StudioFull() {
             type="button"
             aria-label="打开创作资产"
             aria-expanded={assetPanelOpen}
-            onClick={() => setAssetPanelOpen(open => !open)}
+            onClick={() => {
+              if (assetPanelOpen) assetPanelRef.current?.requestClose();
+              else setAssetPanelOpen(true);
+            }}
             className={`pointer-events-auto grid shrink-0 place-items-center rounded-full border border-input bg-glass text-muted-foreground backdrop-blur-glass transition-all duration-300 hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
               dockCollapsed ? 'mb-[22px] size-8' : 'mb-4 size-10'
             }`}
@@ -875,6 +870,7 @@ function StudioFull() {
       </div>
       {assetPanelOpen && (
         <CreationAssetPanel
+          ref={assetPanelRef}
           initialKind={assetPanelKind}
           canvasTargets={canvasTargets.map(target => ({
             projectId: target.project_id,
@@ -885,35 +881,26 @@ function StudioFull() {
             setAssetSaveRequest(current => current?.requestId === requestId ? null : current);
           }}
           onClose={() => setAssetPanelOpen(false)}
-          onUsePrompt={(asset, renderedPrompt, variableValues, mode) => {
-            if (mode === 'replace') {
-              setPromptText(renderedPrompt);
-              setPromptAssetUsage({
-                assetId: asset.asset_id,
-                versionId: asset.latest_version_id,
-                variableValues,
-                renderedPrompt,
-              });
-            } else {
-              setPromptAssetUsage(null);
-              setInsertTextRequest({ requestId: crypto.randomUUID(), text: renderedPrompt });
-            }
+          onUsePrompt={(asset, renderedPrompt) => {
+            setPromptText(renderedPrompt);
+            setPromptAssetSourceTitle(asset.title);
             setClickPinned(true);
           }}
-          onUseImage={(asset, version) => { void addCreationAssetReference(asset, version); }}
+          onUseImage={(asset, content) => { void addCreationAssetReference(asset, content); }}
         />
       )}
       <StudioArchiveDialog request={archiveRequest} onClose={() => setArchiveRequest(null)} />
     </div>
   );
 
-  async function addCreationAssetReference(asset: CreationAsset, version: CreationImageAssetVersion) {
+  async function addCreationAssetReference(asset: CreationAsset, content: CreationImageAssetContent) {
     try {
-      const response = await fetch(creationAssetImageUrl(asset.asset_id, version.version_id));
+      const response = await fetch(creationAssetImageUrl(asset.asset_id));
       if (!response.ok) throw await apiError(response, '读取图片资产');
       const blob = await response.blob();
-      const file = new File([blob], version.filename, { type: version.mime_type });
+      const file = new File([blob], content.filename, { type: content.mime_type });
       setReferenceImages(current => [...current, file].slice(0, maxReferenceImagesForCurrentModel()));
+      setPromptAssetSourceTitle(asset.title);
       setClickPinned(true);
     } catch (error) {
       alert(error instanceof Error ? error.message : String(error));
@@ -1002,6 +989,7 @@ function StudioFull() {
       }
       // 模式与素材已同步排入同一批状态更新，Prompt 里的 @图片N 会直接生成带缩略图的 chip。
       setPromptText(config.prompt);
+      setPromptAssetSourceTitle(config.sourceAssetTitle ?? null);
     } catch (error) {
       if (requestSequence !== reEditSequence.current) return;
       alert(error instanceof Error ? error.message : '参考素材恢复失败');
@@ -1133,6 +1121,9 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
       ? p.quality
       : undefined,
     referenceImages: referenceImagesFor(job),
+    sourceAssetTitle: typeof p.creation_asset_source_title === 'string'
+      ? p.creation_asset_source_title
+      : undefined,
     // 后端跑 job 时回写的静默改写提示（尺寸归一化 / 参考图截断）——两端 schema 早有此字段。
     warnings: stringList(p.warnings),
     // MJ 参数从 job 还原：编辑导入 / 再次生成不带上就等于拿默认值重出一张不一样的图。

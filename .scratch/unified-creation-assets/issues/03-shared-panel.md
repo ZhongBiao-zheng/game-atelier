@@ -6,7 +6,7 @@ Blocked by: 01-backend-model
 
 ## Scope
 
-实现 Studio/Canvas 共用的资产 API、右侧面板、卡片、标签、归档、版本详情和提示词变量编辑器。
+实现 Studio/Canvas 共用的右侧面板、卡片、详情、统一编辑/删除和提示词变量编辑器。
 
 ## Acceptance
 
@@ -16,4 +16,4 @@ Blocked by: 01-backend-model
 
 ## Comments
 
-- 已实现 Studio/Canvas 共用右侧面板、搜索与范围过滤、卡片/标签、变量编辑与默认值使用、重复提醒、归档和不可变版本恢复。
+- 已实现 Studio/Canvas 共用右侧面板、搜索与范围过滤、卡片/标签、变量编辑与默认值使用、原位编辑、脏数据退出确认和不可恢复删除。

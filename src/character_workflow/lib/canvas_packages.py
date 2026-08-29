@@ -1164,9 +1164,6 @@ def commit_canvas_package(token: str) -> list[CanvasProject]:
             raise
         with file_lock(_lifecycle_lock_path()):
             shutil.rmtree(claimed, ignore_errors=True)
-        from character_workflow.lib.creation_assets import relate_imported_canvas_creation_assets
-        for project in projects:
-            relate_imported_canvas_creation_assets(project.project_id)
         return projects
 
 

@@ -19,7 +19,7 @@ from character_workflow.lib.canvas_projects import (
 )
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.schemas import (
-    CanvasCreationAssetOrigin,
+    CanvasCreationAssetSnapshotOrigin,
     CanvasInputConnection,
     CanvasLibraryAsset,
     CanvasMediaVersion,
@@ -28,8 +28,8 @@ from character_workflow.lib.schemas import (
     CreationAsset,
     CreationAssetCatalog,
     CreationAssetList,
-    CreationImageAssetVersion,
-    CreationPromptAssetVersion,
+    CreationImageAssetContent,
+    CreationPromptAssetContent,
     CreationPromptSegment,
     CreationPromptTextSegment,
     CreationPromptVariableSegment,
@@ -176,32 +176,11 @@ def render_prompt_segments(
     return "".join(parts)
 
 
-def _prompt_variable_values(
-    segments: list[CreationPromptSegment],
-    values: dict[str, str],
-) -> dict[str, str]:
-    """Keep only explicit values that still exist in the selected prompt version."""
-    names = {
-        segment.name
-        for segment in segments
-        if segment.kind == "variable"
-    }
-    return {
-        name: value
-        for name, value in values.items()
-        if name in names and isinstance(value, str)
-    }
-
-
-def _prompt_version(
+def _prompt_content(
     segments: list[CreationPromptSegment] | list[dict[str, str]],
-    *,
-    timestamp: str | None = None,
-) -> CreationPromptAssetVersion:
-    return CreationPromptAssetVersion(
+) -> CreationPromptAssetContent:
+    return CreationPromptAssetContent(
         kind="prompt",
-        version_id=f"asset-version-{secrets.token_hex(12)}",
-        created_at=timestamp or _now(),
         segments=_normalize_segments(segments),
     )
 
@@ -225,7 +204,7 @@ def _image_mime(body: bytes, declared: str | None, filename: str) -> str:
     return mime_type
 
 
-def _store_image_blob(body: bytes, filename: str, mime_type: str | None) -> CreationImageAssetVersion:
+def _store_image_blob(body: bytes, filename: str, mime_type: str | None) -> CreationImageAssetContent:
     if not body:
         raise ValueError("图片内容不能为空")
     if len(body) > 50 * 1024 * 1024:
@@ -238,10 +217,8 @@ def _store_image_blob(body: bytes, filename: str, mime_type: str | None) -> Crea
     target = data_root.resolve_data_root() / relative
     if not target.exists():
         atomic_write_bytes(target, body)
-    return CreationImageAssetVersion(
+    return CreationImageAssetContent(
         kind="image",
-        version_id=f"asset-version-{secrets.token_hex(12)}",
-        created_at=_now(),
         path=relative.as_posix(),
         mime_type=detected_mime,
         bytes=len(body),
@@ -255,10 +232,10 @@ def _new_asset(
     kind: Literal["prompt", "image"],
     title: str,
     tags: list[str],
-    version: CreationPromptAssetVersion | CreationImageAssetVersion,
+    content: CreationPromptAssetContent | CreationImageAssetContent,
     project_id: str | None,
 ) -> CreationAsset:
-    timestamp = version.created_at
+    timestamp = _now()
     return CreationAsset(
         asset_id=f"creation-asset-{secrets.token_hex(10)}",
         kind=kind,
@@ -266,8 +243,7 @@ def _new_asset(
         tags=_normalize_tags(tags),
         created_at=timestamp,
         updated_at=timestamp,
-        latest_version_id=version.version_id,
-        versions=[version],
+        content=content,
         project_ids=[project_id] if project_id else [],
     )
 
@@ -284,7 +260,7 @@ def create_prompt_asset(
             kind="prompt",
             title=title,
             tags=tags,
-            version=_prompt_version(segments),
+            content=_prompt_content(segments),
             project_id=project_id,
         )
         _write_catalog_unlocked(current, [asset, *current.assets])
@@ -295,7 +271,7 @@ def _image_duplicate(catalog: CreationAssetCatalog, digest: str) -> CreationAsse
     for asset in catalog.assets:
         if asset.kind != "image":
             continue
-        if any(version.sha256 == digest for version in asset.versions):
+        if asset.content.kind == "image" and asset.content.sha256 == digest:
             return asset
     return None
 
@@ -310,10 +286,10 @@ def create_image_asset_from_bytes(
     project_id: str | None = None,
     allow_existing: bool = False,
 ) -> CreationAsset:
-    version = _store_image_blob(body, filename, mime_type)
+    content = _store_image_blob(body, filename, mime_type)
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
-        duplicate = _image_duplicate(current, version.sha256)
+        duplicate = _image_duplicate(current, content.sha256)
         if duplicate:
             if not allow_existing:
                 raise CreationAssetDuplicateError(duplicate.asset_id)
@@ -337,7 +313,7 @@ def create_image_asset_from_bytes(
             kind="image",
             title=title,
             tags=tags,
-            version=version,
+            content=content,
             project_id=project_id,
         )
         _write_catalog_unlocked(current, [asset, *current.assets])
@@ -397,7 +373,6 @@ def list_creation_assets(
     kind: Literal["prompt", "image"] | None = None,
     scope: Literal["all", "project"] = "all",
     project_id: str | None = None,
-    archived: bool = False,
 ) -> CreationAssetList:
     migrate_legacy_canvas_libraries()
     if scope == "project" and not project_id:
@@ -408,7 +383,6 @@ def list_creation_assets(
             asset
             for asset in current.assets
             if (kind is None or asset.kind == kind)
-            and ((asset.archived_at is not None) == archived)
             and (scope != "project" or project_id in asset.project_ids)
         ]
         rows.sort(key=lambda asset: asset.last_used_at or asset.created_at, reverse=True)
@@ -423,30 +397,12 @@ def list_creation_assets(
         return CreationAssetList(revision=current.revision, assets=rows, recent_tags=tags[:20])
 
 
-def patch_creation_asset_metadata(
+def update_prompt_asset(
     asset_id: str,
     *,
-    title: str | None = None,
-    tags: list[str] | None = None,
-) -> CreationAsset:
-    with file_lock(_catalog_lock_path()):
-        current = _read_catalog_unlocked()
-        asset = next((row for row in current.assets if row.asset_id == asset_id), None)
-        if asset is None:
-            raise KeyError(asset_id)
-        changes: dict[str, object] = {"updated_at": _now()}
-        if title is not None:
-            changes["title"] = _required_text(title, "资产标题")
-        if tags is not None:
-            changes["tags"] = _normalize_tags(tags)
-        updated = asset.model_copy(update=changes)
-        _replace_asset(current, updated)
-        return updated
-
-
-def create_prompt_version(
-    asset_id: str,
+    title: str,
     segments: list[CreationPromptSegment] | list[dict[str, str]],
+    tags: list[str],
 ) -> CreationAsset:
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
@@ -454,92 +410,77 @@ def create_prompt_version(
         if asset is None:
             raise KeyError(asset_id)
         if asset.kind != "prompt":
-            raise ValueError("只有提示词资产可以创建提示词版本")
-        version = _prompt_version(segments)
+            raise ValueError("只有提示词资产可以使用这个编辑入口")
         updated = asset.model_copy(update={
-            "latest_version_id": version.version_id,
-            "versions": [*asset.versions, version],
-            "updated_at": version.created_at,
+            "title": _required_text(title, "资产标题"),
+            "tags": _normalize_tags(tags),
+            "content": _prompt_content(segments),
+            "updated_at": _now(),
         })
         _replace_asset(current, updated)
         return updated
 
 
-def create_image_version_from_bytes(
+def update_image_asset_from_bytes(
     asset_id: str,
     *,
-    body: bytes,
-    filename: str,
-    mime_type: str | None,
+    title: str,
+    tags: list[str],
+    body: bytes | None = None,
+    filename: str = "image",
+    mime_type: str | None = None,
 ) -> CreationAsset:
-    version = _store_image_blob(body, filename, mime_type)
+    orphan_path: Path | None = None
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
         asset = next((row for row in current.assets if row.asset_id == asset_id), None)
         if asset is None:
             raise KeyError(asset_id)
         if asset.kind != "image":
-            raise ValueError("只有图片资产可以创建图片版本")
-        duplicate = _image_duplicate(current, version.sha256)
-        if duplicate:
-            if duplicate.asset_id != asset_id:
-                raise CreationAssetDuplicateError(duplicate.asset_id)
-            existing = next(row for row in asset.versions if row.sha256 == version.sha256)
-            if existing.version_id == asset.latest_version_id:
-                return asset
+            raise ValueError("只有图片资产可以使用这个编辑入口")
+        replacement = _store_image_blob(body, filename, mime_type) if body is not None else None
+        content = replacement or asset.content
+        assert content.kind == "image"
+        duplicate = _image_duplicate(current, content.sha256)
+        if duplicate and duplicate.asset_id != asset_id:
+            raise CreationAssetDuplicateError(duplicate.asset_id)
         updated = asset.model_copy(update={
-            "latest_version_id": version.version_id,
-            "versions": [*asset.versions, version],
-            "updated_at": version.created_at,
+            "title": _required_text(title, "资产标题"),
+            "tags": _normalize_tags(tags),
+            "content": content,
+            "updated_at": _now(),
         })
         _replace_asset(current, updated)
-        return updated
+        assert asset.content.kind == "image"
+        if content.path != asset.content.path and not any(
+            row.asset_id != asset_id
+            and row.content.kind == "image"
+            and row.content.path == asset.content.path
+            for row in current.assets
+        ):
+            orphan_path = _image_blob_path(asset.content)
+    if orphan_path is not None:
+        orphan_path.unlink(missing_ok=True)
+    return updated
 
 
-def restore_creation_asset_version(asset_id: str, version_id: str) -> CreationAsset:
+def delete_creation_asset(asset_id: str) -> None:
+    """Physically remove one asset and delete its blob when no other asset uses it."""
+    orphan_path: Path | None = None
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
         asset = next((row for row in current.assets if row.asset_id == asset_id), None)
         if asset is None:
             raise KeyError(asset_id)
-        source = next((version for version in asset.versions if version.version_id == version_id), None)
-        if source is None:
-            raise KeyError(version_id)
-        timestamp = _now()
-        restored = source.model_copy(update={
-            "version_id": f"asset-version-{secrets.token_hex(12)}",
-            "created_at": timestamp,
-        })
-        updated = asset.model_copy(update={
-            "latest_version_id": restored.version_id,
-            "versions": [*asset.versions, restored],
-            "updated_at": timestamp,
-        })
-        _replace_asset(current, updated)
-        return updated
-
-
-def _set_archived(asset_id: str, archived: bool) -> CreationAsset:
-    with file_lock(_catalog_lock_path()):
-        current = _read_catalog_unlocked()
-        asset = next((row for row in current.assets if row.asset_id == asset_id), None)
-        if asset is None:
-            raise KeyError(asset_id)
-        timestamp = _now()
-        updated = asset.model_copy(update={
-            "archived_at": timestamp if archived else None,
-            "updated_at": timestamp,
-        })
-        _replace_asset(current, updated)
-        return updated
-
-
-def archive_creation_asset(asset_id: str) -> CreationAsset:
-    return _set_archived(asset_id, True)
-
-
-def restore_creation_asset(asset_id: str) -> CreationAsset:
-    return _set_archived(asset_id, False)
+        remaining = [row for row in current.assets if row.asset_id != asset_id]
+        if asset.content.kind == "image" and not any(
+            row.content.kind == "image" and row.content.path == asset.content.path
+            for row in remaining
+        ):
+            orphan_path = _image_blob_path(asset.content)
+        _write_catalog_unlocked(current, remaining)
+    if orphan_path is not None:
+        orphan_path.unlink(missing_ok=True)
 
 
 def mark_creation_asset_used(asset_id: str, project_id: str | None = None) -> CreationAsset:
@@ -557,20 +498,6 @@ def mark_creation_asset_used(asset_id: str, project_id: str | None = None) -> Cr
             "last_used_at": timestamp,
             "updated_at": timestamp,
             "project_ids": project_ids,
-        })
-        _replace_asset(current, updated)
-        return updated
-
-
-def remove_creation_asset_from_project(asset_id: str, project_id: str) -> CreationAsset:
-    with file_lock(_catalog_lock_path()):
-        current = _read_catalog_unlocked()
-        asset = next((row for row in current.assets if row.asset_id == asset_id), None)
-        if asset is None:
-            raise KeyError(asset_id)
-        updated = asset.model_copy(update={
-            "project_ids": [value for value in asset.project_ids if value != project_id],
-            "updated_at": _now(),
         })
         _replace_asset(current, updated)
         return updated
@@ -594,52 +521,22 @@ def remove_canvas_project_asset_relations(project_id: str) -> None:
         _write_catalog_unlocked(current, assets)
 
 
-def relate_imported_canvas_creation_assets(project_id: str) -> None:
-    """Restore project scope for global assets referenced by an imported Canvas snapshot."""
-    document = _read_canvas_document_unlocked(project_id)
-    referenced_ids: set[str] = set()
-    for version in document.content_versions.values():
-        if version.origin.kind == "creation_asset":
-            referenced_ids.add(version.origin.asset_id)
-    for node in document.nodes:
-        draft = (
-            node.data.draft
-            if node.type == "config"
-            else getattr(node.data, "generation_draft", None)
-        )
-        asset_id = getattr(draft.params, "creation_prompt_asset_id", None) if draft else None
-        if asset_id:
-            referenced_ids.add(asset_id)
-    if not referenced_ids:
-        return
-    with file_lock(_catalog_lock_path()):
-        current = _read_catalog_unlocked()
-        changed = False
-        assets: list[CreationAsset] = []
-        for asset in current.assets:
-            if asset.asset_id not in referenced_ids or project_id in asset.project_ids:
-                assets.append(asset)
-                continue
-            changed = True
-            assets.append(asset.model_copy(update={
-                "project_ids": [*asset.project_ids, project_id],
-                "updated_at": _now(),
-            }))
-        if changed:
-            _write_catalog_unlocked(current, assets)
-
-
-def creation_asset_image_path(asset_id: str, version_id: str) -> Path:
-    asset = get_creation_asset(asset_id)
-    version = next((row for row in asset.versions if row.version_id == version_id), None)
-    if version is None or version.kind != "image":
-        raise KeyError(version_id)
+def _image_blob_path(content: CreationImageAssetContent) -> Path:
     root = data_root.resolve_data_root().resolve()
-    path = (root / version.path).resolve()
+    path = (root / content.path).resolve()
     try:
         path.relative_to(root / "creation-assets" / "blobs")
     except ValueError as error:
         raise CreationAssetStateError("图片资产路径越出创作资产目录") from error
+    return path
+
+
+def creation_asset_image_path(asset_id: str) -> Path:
+    asset = get_creation_asset(asset_id)
+    content = asset.content
+    if content.kind != "image":
+        raise KeyError(asset_id)
+    path = _image_blob_path(content)
     if not path.is_file():
         raise CreationAssetStateError("图片资产文件缺失")
     return path
@@ -654,11 +551,7 @@ def insert_creation_asset_into_canvas(
     variable_values: dict[str, str] | None = None,
     target_node_id: str | None = None,
 ):
-    """Pin the latest global asset version into a Canvas document.
-
-    Canvas receives its own immutable content snapshot.  The origin keeps the global asset/version
-    identity, while later user edits create a normal user_edit version and therefore sever the link.
-    """
+    """Copy the current asset content into Canvas with a frozen title-only provenance snapshot."""
     from character_workflow.lib.canvas_library import _content_node
     from character_workflow.lib.canvas_projects import (
         _commit_canvas_upload,
@@ -672,19 +565,10 @@ def insert_creation_asset_into_canvas(
 
     values = variable_values or {}
     asset = get_creation_asset(asset_id)
-    if asset.archived_at is not None:
-        raise ValueError("已归档的创作资产不能插入画布")
-    source_version = next(
-        (version for version in asset.versions if version.version_id == asset.latest_version_id),
-        None,
-    )
-    if source_version is None:
-        raise CreationAssetStateError("创作资产缺少最新版本")
-    if source_version.kind == "prompt":
-        values = _prompt_variable_values(source_version.segments, values)
+    content = asset.content
     image_body: bytes | None = None
-    if source_version.kind == "image":
-        image_body = creation_asset_image_path(asset_id, source_version.version_id).read_bytes()
+    if content.kind == "image":
+        image_body = creation_asset_image_path(asset_id).read_bytes()
 
     with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
@@ -698,20 +582,18 @@ def insert_creation_asset_into_canvas(
             draft = getattr(target.data, "generation_draft", None)
             if getattr(target, "type", None) == "config":
                 draft = getattr(target.data, "draft", None)
-            if source_version.kind != "image" or draft is None or draft.mode not in {"image", "video"}:
+            if content.kind != "image" or draft is None or draft.mode not in {"image", "video"}:
                 raise ValueError("当前生成面板不能接收这个创作资产")
 
         timestamp = _now()
         version_id = f"version-{secrets.token_hex(12)}"
-        origin = CanvasCreationAssetOrigin(
-            kind="creation_asset",
-            asset_id=asset.asset_id,
-            asset_version_id=source_version.version_id,
-            variable_values=values,
+        origin = CanvasCreationAssetSnapshotOrigin(
+            kind="creation_asset_snapshot",
+            title=asset.title,
         )
         write_target: Path | None = None
-        if source_version.kind == "prompt":
-            rendered = render_prompt_segments(source_version.segments, values)
+        if content.kind == "prompt":
+            rendered = render_prompt_segments(content.segments, values)
             canvas_version = CanvasTextVersion(
                 version_id=version_id,
                 created_at=timestamp,
@@ -722,18 +604,18 @@ def insert_creation_asset_into_canvas(
             )
         else:
             assert image_body is not None
-            suffix = _IMAGE_SUFFIXES[source_version.mime_type]
+            suffix = _IMAGE_SUFFIXES[content.mime_type]
             relative = Path("uploads") / f"creation-asset-{secrets.token_hex(12)}{suffix}"
             write_target = canvas_project_dir(project_id) / relative
             width, height = _display_image_dimensions(image_body)
             canvas_version = CanvasMediaVersion(
                 version_id=version_id,
                 created_at=timestamp,
-                sha256=source_version.sha256,
+                sha256=content.sha256,
                 origin=origin,
                 kind="image",
                 path=relative.as_posix(),
-                mime_type=source_version.mime_type,
+                mime_type=content.mime_type,
                 bytes=len(image_body),
                 width=width,
                 height=height,
@@ -753,199 +635,6 @@ def insert_creation_asset_into_canvas(
             "nodes": [*current.nodes, node],
             "connections": connections,
             "content_versions": {**current.content_versions, version_id: canvas_version},
-        })
-        project = read_canvas_project(project_id).model_copy(update={"updated_at": timestamp})
-        if write_target is not None:
-            assert image_body is not None
-            _commit_canvas_upload(project_id, project, updated, write_target, image_body, timestamp)
-        else:
-            atomic_write_json(_project_path(project_id), project.model_dump(mode="json"))
-            atomic_write_json(_document_path(project_id), updated.model_dump(mode="json"))
-
-    mark_creation_asset_used(asset_id, project_id)
-    return updated
-
-
-def update_creation_asset_references_in_canvas(
-    *,
-    project_id: str,
-    asset_id: str,
-    node_id: str,
-    update_all: bool,
-    expected_revision: int,
-):
-    """Explicitly repin one or every current Canvas node reference to the latest asset version."""
-    from character_workflow.lib.canvas_projects import (
-        _commit_canvas_upload,
-        _display_image_dimensions,
-        _document_path,
-        _project_path,
-        _recover_canvas_transactions_unlocked,
-        read_canvas_project,
-    )
-
-    asset = get_creation_asset(asset_id)
-    if asset.archived_at is not None:
-        raise ValueError("已归档的创作资产不能更新引用")
-    source_version = next(
-        (version for version in asset.versions if version.version_id == asset.latest_version_id),
-        None,
-    )
-    if source_version is None:
-        raise CreationAssetStateError("创作资产缺少最新版本")
-    image_body = (
-        creation_asset_image_path(asset_id, source_version.version_id).read_bytes()
-        if source_version.kind == "image"
-        else None
-    )
-
-    with file_lock(canvas_project_lock_path(project_id)):
-        _recover_canvas_transactions_unlocked(project_id)
-        current = _read_canvas_document_unlocked(project_id)
-        if current.revision != expected_revision:
-            raise RuntimeError(f"revision_conflict:{current.revision}")
-        selected = next((node for node in current.nodes if node.id == node_id), None)
-        if selected is None:
-            raise KeyError(node_id)
-
-        def referenced_origin(node):
-            if node.type not in {"text", "image", "video", "audio"}:
-                return None
-            current_version_id = node.data.current_version_id
-            version = current.content_versions.get(current_version_id or "")
-            if version is None or version.origin.kind != "creation_asset":
-                return None
-            return version.origin if version.origin.asset_id == asset_id else None
-
-        def referenced_draft(node):
-            draft = (
-                node.data.draft
-                if node.type == "config"
-                else getattr(node.data, "generation_draft", None)
-            )
-            if draft is None or draft.params.creation_prompt_asset_id != asset_id:
-                return None
-            return draft
-
-        selected_origin = referenced_origin(selected)
-        selected_draft = referenced_draft(selected)
-        if selected_origin is None and selected_draft is None:
-            raise ValueError("所选节点不是这个创作资产的引用")
-        if selected_draft is not None and source_version.kind != "prompt":
-            raise ValueError("生成草稿只能引用提示词资产")
-        content_targets = [
-            node
-            for node in current.nodes
-            if referenced_origin(node) is not None and (update_all or node.id == node_id)
-        ]
-        draft_targets = [
-            node
-            for node in current.nodes
-            if source_version.kind == "prompt"
-            and referenced_draft(node) is not None
-            and (update_all or node.id == node_id)
-        ]
-        stale_content_targets = [
-            node
-            for node in content_targets
-            if referenced_origin(node).asset_version_id != source_version.version_id
-        ]
-        stale_draft_targets = [
-            node
-            for node in draft_targets
-            if referenced_draft(node).params.creation_prompt_version_id != source_version.version_id
-        ]
-        if not stale_content_targets and not stale_draft_targets:
-            return current
-
-        timestamp = _now()
-        new_versions = {}
-        next_version_by_node: dict[str, str] = {}
-        write_target: Path | None = None
-        if source_version.kind == "image":
-            if any(node.type != "image" for node in stale_content_targets):
-                raise ValueError("图片资产只能更新图片节点")
-            assert image_body is not None
-            version_id = f"version-{secrets.token_hex(12)}"
-            suffix = _IMAGE_SUFFIXES[source_version.mime_type]
-            relative = Path("uploads") / f"creation-asset-{secrets.token_hex(12)}{suffix}"
-            write_target = canvas_project_dir(project_id) / relative
-            width, height = _display_image_dimensions(image_body)
-            canvas_version = CanvasMediaVersion(
-                version_id=version_id,
-                created_at=timestamp,
-                sha256=source_version.sha256,
-                origin=CanvasCreationAssetOrigin(
-                    kind="creation_asset",
-                    asset_id=asset.asset_id,
-                    asset_version_id=source_version.version_id,
-                ),
-                kind="image",
-                path=relative.as_posix(),
-                mime_type=source_version.mime_type,
-                bytes=len(image_body),
-                width=width,
-                height=height,
-            )
-            new_versions[version_id] = canvas_version
-            next_version_by_node = {node.id: version_id for node in stale_content_targets}
-        else:
-            if any(node.type != "text" for node in stale_content_targets):
-                raise ValueError("提示词资产只能更新文本节点")
-            for node in stale_content_targets:
-                previous_origin = referenced_origin(node)
-                values = _prompt_variable_values(
-                    source_version.segments,
-                    previous_origin.variable_values,
-                )
-                rendered = render_prompt_segments(source_version.segments, values)
-                version_id = f"version-{secrets.token_hex(12)}"
-                new_versions[version_id] = CanvasTextVersion(
-                    version_id=version_id,
-                    created_at=timestamp,
-                    sha256=hashlib.sha256(rendered.encode("utf-8")).hexdigest(),
-                    origin=CanvasCreationAssetOrigin(
-                        kind="creation_asset",
-                        asset_id=asset.asset_id,
-                        asset_version_id=source_version.version_id,
-                        variable_values=values,
-                    ),
-                    kind="text",
-                    text=rendered,
-                )
-                next_version_by_node[node.id] = version_id
-
-        draft_target_ids = {node.id for node in stale_draft_targets}
-        updated_nodes = []
-        for node in current.nodes:
-            data = node.data
-            if node.id in next_version_by_node:
-                data = data.model_copy(update={
-                    "current_version_id": next_version_by_node[node.id],
-                })
-            if node.id in draft_target_ids:
-                draft = referenced_draft(node)
-                values = _prompt_variable_values(
-                    source_version.segments,
-                    draft.params.creation_prompt_variable_values or {},
-                )
-                updated_draft = draft.model_copy(update={
-                    "prompt": render_prompt_segments(source_version.segments, values),
-                    "params": draft.params.model_copy(update={
-                        "creation_prompt_asset_id": asset.asset_id,
-                        "creation_prompt_version_id": source_version.version_id,
-                        "creation_prompt_variable_values": values,
-                    }),
-                    "updated_at": timestamp,
-                })
-                draft_field = "draft" if node.type == "config" else "generation_draft"
-                data = data.model_copy(update={draft_field: updated_draft})
-            updated_nodes.append(node.model_copy(update={"data": data}))
-        updated = current.model_copy(update={
-            "revision": current.revision + 1,
-            "updated_at": timestamp,
-            "nodes": updated_nodes,
-            "content_versions": {**current.content_versions, **new_versions},
         })
         project = read_canvas_project(project_id).model_copy(update={"updated_at": timestamp})
         if write_target is not None:
@@ -997,7 +686,7 @@ def migrate_legacy_canvas_libraries() -> int:
                 continue
 
             for prompt in legacy_prompts:
-                version = _prompt_version([{
+                content = _prompt_content([{
                     "kind": "text",
                     "text": prompt.content,
                 }])
@@ -1005,7 +694,7 @@ def migrate_legacy_canvas_libraries() -> int:
                     kind="prompt",
                     title=prompt.title,
                     tags=prompt.tags,
-                    version=version,
+                    content=content,
                     project_id=project_id,
                 ))
                 migrated_count += 1
@@ -1017,7 +706,7 @@ def migrate_legacy_canvas_libraries() -> int:
                 source = canvas_project_dir(project_id) / canvas_version.path
                 if not source.is_file():
                     continue
-                version = _store_image_blob(
+                content = _store_image_blob(
                     source.read_bytes(),
                     source.name,
                     canvas_version.mime_type,
@@ -1026,7 +715,8 @@ def migrate_legacy_canvas_libraries() -> int:
                     row
                     for row in assets
                     if row.kind == "image"
-                    and any(item.sha256 == version.sha256 for item in row.versions)
+                    and row.content.kind == "image"
+                    and row.content.sha256 == content.sha256
                 ), None)
                 if duplicate:
                     project_ids = _normalize_project_ids([*duplicate.project_ids, project_id])
@@ -1041,7 +731,7 @@ def migrate_legacy_canvas_libraries() -> int:
                         kind="image",
                         title=legacy_asset.title,
                         tags=legacy_asset.tags,
-                        version=version,
+                        content=content,
                         project_id=project_id,
                     ))
                 migrated_count += 1

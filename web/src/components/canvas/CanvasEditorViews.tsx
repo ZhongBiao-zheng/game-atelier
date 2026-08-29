@@ -75,7 +75,7 @@ import type {
   CanvasUiPreferences,
   CanvasVideoFrameSlot,
 } from '@/schema/canvas';
-import type { Job, JobParams } from '@/schema/jobs';
+import type { Job } from '@/schema/jobs';
 import {
   canvasNodeAcceptsInput,
   canvasNodeProvidesOutput,
@@ -1977,7 +1977,7 @@ export function CanvasGenerationComposer({
         onChange={prompt => updateDraft(current => ({
           ...current,
           prompt,
-          params: severCreationPromptAssetLink(current.params),
+          params: current.params,
           updated_at: new Date().toISOString(),
         }))}
         onPreviewReference={reference => context.previewContent(
@@ -2743,14 +2743,6 @@ function withGenerationDraft(node: CanvasNode, draft: CanvasGenerationDraft): Ca
   if (node.type === 'audio') return { ...node, data: { ...node.data, generation_draft: draft } };
   if (node.type === 'plugin') return { ...node, data: { ...node.data, generation_draft: draft } };
   return node;
-}
-
-export function severCreationPromptAssetLink(params: JobParams): JobParams {
-  const next = { ...params };
-  delete next.creation_prompt_asset_id;
-  delete next.creation_prompt_version_id;
-  delete next.creation_prompt_variable_values;
-  return next;
 }
 
 function nodeIcon(node: CanvasNode) {

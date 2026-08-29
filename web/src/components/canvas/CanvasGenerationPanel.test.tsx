@@ -8,7 +8,6 @@ import {
   CanvasNodeContext,
   CanvasMobileGenerationPanel,
   placeCanvasGenerationPanel,
-  severCreationPromptAssetLink,
   type CanvasNodeContextValue,
 } from './CanvasEditorViews';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from './canvasImageToolbar';
@@ -42,15 +41,6 @@ vi.mock('@xyflow/react', () => ({
 vi.mock('@/lib/videoFrame', () => ({
   useVideoFrame: (url: string | null) => url ? `${url}#frame` : null,
 }));
-
-it('severs prompt asset provenance when the inserted prompt is edited', () => {
-  expect(severCreationPromptAssetLink({
-    n: 2,
-    creation_prompt_asset_id: 'asset-1',
-    creation_prompt_version_id: 'version-1',
-    creation_prompt_variable_values: { 主体: '白犬' },
-  })).toEqual({ n: 2 });
-});
 
 const draft = {
   mode: 'image' as const,

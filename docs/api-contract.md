@@ -17,7 +17,7 @@
 | StudioArchiveTarget | `lib/studio_archive.py` | `web/src/api/studio.ts` | `tests/test_studio_archive.py` + `StudioArchiveDialog.test.tsx` |
 | CanvasProject / CanvasDocument / CanvasJobContext | `lib/schemas.py` | `web/src/schema/canvas.ts` + `schema/jobs.ts` | `tests/test_canvas_projects.py` + `CanvasEditor.test.tsx` |
 | CanvasUiPreferences | `lib/schemas.py` | `web/src/schema/canvas.ts` | issue 20 隔离 API/文件/浏览器契约核对（旧测试只读，不改） |
-| CreationAsset / CreationAssetVersion | `lib/schemas.py` | `web/src/schema/creationAssets.ts` | `tests/test_creation_assets.py` + `CreationAssetPanel.test.tsx` |
+| CreationAsset / CreationAssetContent | `lib/schemas.py` | `web/src/schema/creationAssets.ts` | `tests/test_creation_assets.py` + `CreationAssetPanel.test.tsx` |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
 | 视频控件能力 | 各 `*_video.py` | `lib/videoControlCaps.ts` | 无 —— 靠人 |
 
@@ -71,12 +71,9 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle}`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
 `POST /creation-assets/prompts` `POST /creation-assets/images/{upload,from-path}`
-`PATCH /creation-assets/{asset_id}`
-`POST /creation-assets/{asset_id}/versions/{prompt,image}`
-`POST /creation-assets/{asset_id}/{archive,restore,use}`
-`POST /creation-assets/{asset_id}/versions/{version_id}/restore`
-`DELETE /creation-assets/{asset_id}/projects/{project_id}`
-`POST /canvas/projects/{id}/creation-assets/{asset_id}/{insert,update-references}`
+`PUT /creation-assets/{asset_id}/{prompt,image}`
+`POST /creation-assets/{asset_id}/use` `DELETE /creation-assets/{asset_id}`
+`POST /canvas/projects/{id}/creation-assets/{asset_id}/insert`
 `POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
 `DELETE /canvas/projects/{id}`
 `PUT /canvas/ui-preferences`
@@ -99,7 +96,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /canvas/projects` `/canvas/project-options` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
 `GET /canvas/projects/{id}/versions/{version_id}/media`
 `GET /canvas/projects/{id}/versions/{version_id}/download`
-`GET /creation-assets` `/creation-assets/{asset_id}/versions/{version_id}/content`
+`GET /creation-assets` `/creation-assets/{asset_id}/content`
 `GET /canvas/projects/{id}/agent/sessions` `/canvas/projects/{id}/agent/sessions/{session_id}`
 `GET /canvas/ui-preferences`
 
@@ -310,19 +307,23 @@ schema、摘要和项目内引用校验，再凭 30 分钟 token 调用 `commit`
 
 创作资产是应用级个人数据，真源为 `creation-assets/catalog.json` 与
 `creation-assets/blobs/<sha256>.<ext>`，Studio 与所有 Canvas 共享同一资产身份。资产只有 prompt/image
-两类；正文、变量与图片替换创建不可变版本，标题和标签只改元数据。图片按 SHA-256 去重；提示词重复只在
-Web 提醒。归档可恢复，第一版没有物理删除。
+两类，每个资产只维护一份当前内容；标题、标签、提示词正文/变量和图片均由同一个编辑入口原位更新。
+图片按 SHA-256 去重，提示词重复只在 Web 提醒。资产可物理删除，删除前必须显式确认，删除后不可恢复。
 
 Canvas 的“本项目”是 CreationAsset 上的项目关系过滤，不是项目内第二套可编辑 sidecar。首次使用资产会
-建立关系；移出项目只删除关系，不删除资产、节点、Content Version 或媒体字节。旧版
+建立关系；删除画布会清理该项目关系。旧版
 `library/assets.json` 与 `library/prompts.json` 在首次读取时幂等迁移，旧 HTTP library 端点已删除。
 
 `POST .../creation-assets/{asset_id}/insert` 携带 Canvas Document 的 `If-Match`、目标坐标和可选变量值，
-把资产最新版本固定为新的 Canvas Content Version；内容 origin 保存资产与版本身份。后续资产版本不会
-静默改写节点。`POST .../update-references` 仅在用户明确操作时更新当前节点或本画布同资产引用；提示词按
-各引用原有的同名变量值重新渲染，新增变量走默认值，删除变量不再保存。画布项目包携带这些已固定的内容
-快照而不携带个人资产库；导入后若本机仍有同一资产身份，则恢复新项目关系。删除画布会清除所有资产上的
-该项目关系。
+把资产当前内容复制为新的 Canvas Content Version；内容 origin 只保存当时的资产标题快照，不保存
+asset_id 或可回写引用。Studio Job 的 `params.creation_asset_source_title` 同样只保存只读标题快照。
+后续编辑或删除资产都不会改变既有节点、草稿或生成记录，也不存在更新引用 API。画布项目包只携带已复制
+内容和来源标题，不携带个人资产库。
+
+旧 schema v1 在 server 启动时一次性迁移到 v2：迁移前把完整 `creation-assets/` 和将被改写的 Job/
+Canvas 文件复制到 `.runtime/backups/creation-assets/<UTC timestamp>/`；资产保留最新内容、恢复原归档项，
+旧引用转成标题快照。Job 与 Canvas 分别在正式锁内完成完整 schema 校验后落盘；已被淘汰的旧图片版本
+blob 只在备份完成后从活动目录清理。运行时永不读取该备份。
 
 ### 角色衍生契约
 

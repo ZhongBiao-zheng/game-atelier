@@ -36,6 +36,8 @@ export interface RoundConfig {
   size?: string;
   n?: number;
   referenceImages: string[];
+  /** 使用创作资产时冻结的只读来源名称；不提供回跳或更新关系。 */
+  sourceAssetTitle?: string;
   /** MJ 专属参数（family=midjourney）——「编辑导入 / 再次生成」靠它还原画师当时的选择，
    *  否则会拿默认值静默重出一张不一样的图。 */
   mjParams?: MjParams;
@@ -366,6 +368,7 @@ function PendingBatch({
             <p data-testid="pending-run-meta" className="mt-0.5 text-xs text-muted-foreground/60">
               耗时 {elapsedSec}s · {submittedAt}
             </p>
+            {round.config.sourceAssetTitle && <p className="mt-0.5 text-xs text-muted-foreground/50">来源：{round.config.sourceAssetTitle}</p>}
           </div>
         </div>
         <div className="flex flex-wrap gap-1">
@@ -853,6 +856,7 @@ function DoneBatch({
               )}
             </p>
           )}
+          {round.config.sourceAssetTitle && <p data-testid="round-asset-source" className="mt-0.5 text-xs text-muted-foreground/50">来源：{round.config.sourceAssetTitle}</p>}
           {/* 后端回写的静默改写提示（尺寸归一化 / 参考图截断）——是提示不是错误，走 muted 灰不用暖红。 */}
           {(round.config.warnings?.length ?? 0) > 0 && (
             <ul data-testid="round-warnings" className="mt-1.5 space-y-1">

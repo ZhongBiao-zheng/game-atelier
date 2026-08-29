@@ -114,12 +114,10 @@ import {
 } from '@/components/canvas/canvasNodePanelInteraction';
 import {
   CreationAssetPanel,
+  type CreationAssetPanelHandle,
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
-import {
-  insertCreationAssetIntoCanvas,
-  updateCreationAssetReferencesInCanvas,
-} from '@/api/creationAssets';
+import { insertCreationAssetIntoCanvas } from '@/api/creationAssets';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -157,7 +155,7 @@ import type {
   CanvasUiPreferences,
   CanvasVideoFrameSlot,
 } from '@/schema/canvas';
-import type { CreationAsset, CreationImageAssetVersion } from '@/schema/creationAssets';
+import type { CreationAsset } from '@/schema/creationAssets';
 import type { Job, JobKind } from '@/schema/jobs';
 import { cn } from '@/lib/utils';
 import {
@@ -420,6 +418,7 @@ function CanvasEditorInner({
   const addTriggerRef = useRef<HTMLButtonElement>(null);
   const assetLibraryTriggerRef = useRef<HTMLButtonElement>(null);
   const promptLibraryTriggerRef = useRef<HTMLButtonElement>(null);
+  const creationAssetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
   const shortcutsTriggerRef = useRef<HTMLButtonElement>(null);
@@ -776,7 +775,7 @@ function CanvasEditorInner({
       }
       if (libraryMode) {
         event.preventDefault();
-        closeLibrary();
+        creationAssetPanelRef.current?.requestClose();
         return;
       }
       if (selectedNodeIds.size || selectedConnectionIds.size) {
@@ -1450,24 +1449,6 @@ function CanvasEditorInner({
     && !(selectedNode.type === 'config' && selectedNode.data.draft.mode === 'text')
     ? generationDraftForNode(selectedNode)
     : null;
-  const selectedContentVersion = selectedNode && document && isContentNode(selectedNode)
-    ? document.content_versions[selectedNode.data.current_version_id ?? '']
-    : undefined;
-  const selectedContentAssetReference = selectedContentVersion?.origin.kind === 'creation_asset'
-    ? {
-        assetId: selectedContentVersion.origin.asset_id,
-        versionId: selectedContentVersion.origin.asset_version_id,
-      }
-    : null;
-  const selectedDraftAssetReference = selectedDraft
-    && typeof selectedDraft.params.creation_prompt_asset_id === 'string'
-    && typeof selectedDraft.params.creation_prompt_version_id === 'string'
-    ? {
-        assetId: selectedDraft.params.creation_prompt_asset_id,
-        versionId: selectedDraft.params.creation_prompt_version_id,
-      }
-    : null;
-  const activeCreationAssetReference = selectedDraftAssetReference ?? selectedContentAssetReference;
   const generationPanelOpen = Boolean(
     selectedNode
     && selectedDraft
@@ -1704,38 +1685,6 @@ function CanvasEditorInner({
     } finally {
       if (libraryInsertCommand.current === command) libraryInsertCommand.current = null;
     }
-  }
-
-  async function updateCreationAssetReference(asset: CreationAsset, scope: 'current' | 'all') {
-    if (
-      !selectedNode
-      || (
-        selectedDraftAssetReference?.assetId !== asset.asset_id
-        && selectedContentAssetReference?.assetId !== asset.asset_id
-      )
-    ) {
-      throw new Error('当前没有选中这个创作资产的引用。');
-    }
-    if (!await persistNow()) throw new Error('画布尚未保存，无法更新资产引用。');
-    const before = latestDocument.current;
-    if (!before) throw new Error('画布尚未加载完成。');
-    const remote = await updateCreationAssetReferencesInCanvas({
-      projectId,
-      assetId: asset.asset_id,
-      nodeId: selectedNode.id,
-      scope,
-      documentRevision: serverRevision.current,
-    });
-    if (remote.revision === before.revision) return;
-    history.current.past.push(before);
-    history.current.past = history.current.past.slice(-50);
-    history.current.future = [];
-    serverRevision.current = remote.revision;
-    latestDocument.current = remote;
-    saveQueued.current = null;
-    setSaveState('saved');
-    flowNodeCache.current.clear();
-    setDocument(remote);
   }
 
   function handleCanvasDrop(event: DragEvent) {
@@ -3505,8 +3454,8 @@ function CanvasEditorInner({
           settings: { ...current.settings, show_minimap: !current.settings.show_minimap },
         }), true)}
       ><MapPinned /></button>
-      <ToolButton buttonRef={assetLibraryTriggerRef} label="图片资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); setLibraryMode(current => current === 'assets' ? null : 'assets'); }}><Library /></ToolButton>
-      <ToolButton buttonRef={promptLibraryTriggerRef} label="提示词资产" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); setLibraryMode(current => current === 'prompts' ? null : 'prompts'); }}><WandSparkles /></ToolButton>
+      <ToolButton buttonRef={assetLibraryTriggerRef} label="图片资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('assets'); else if (libraryMode === 'assets') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('assets')); }}><Library /></ToolButton>
+      <ToolButton buttonRef={promptLibraryTriggerRef} label="提示词资产" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('prompts'); else if (libraryMode === 'prompts') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('prompts')); }}><WandSparkles /></ToolButton>
       <ToolButton
         buttonRef={generationPreferencesTriggerRef}
         label="生成偏好"
@@ -4006,16 +3955,16 @@ function CanvasEditorInner({
 
         {libraryMode && (
           <CreationAssetPanel
+            ref={creationAssetPanelRef}
             className="canvas-library-panel"
             projectId={projectId}
             initialKind={libraryMode === 'prompts' ? 'prompt' : 'image'}
-            activeReference={activeCreationAssetReference}
             saveRequest={creationAssetSaveRequest}
             onSaveRequestHandled={requestId => {
               setCreationAssetSaveRequest(current => current?.requestId === requestId ? null : current);
             }}
             onClose={closeLibrary}
-            onUsePrompt={(asset, renderedPrompt, variableValues, mode) => {
+            onUsePrompt={(asset, renderedPrompt, variableValues) => {
               if (selectedNode && selectedDraft) {
                 commit(current => ({
                   ...current,
@@ -4023,18 +3972,13 @@ function CanvasEditorInner({
                     if (node.id !== selectedNode.id) return node;
                     const draft = generationDraftForNode(node);
                     if (!draft) return node;
-                    const params = { ...draft.params };
-                    delete params.creation_prompt_asset_id;
-                    delete params.creation_prompt_version_id;
-                    delete params.creation_prompt_variable_values;
-                    if (mode === 'replace') {
-                      params.creation_prompt_asset_id = asset.asset_id;
-                      params.creation_prompt_version_id = asset.latest_version_id;
-                      params.creation_prompt_variable_values = variableValues;
-                    }
+                    const params = {
+                      ...draft.params,
+                      creation_asset_source_title: asset.title,
+                    };
                     return withGenerationDraftForNode(node, {
                       ...draft,
-                      prompt: mode === 'replace' ? renderedPrompt : `${draft.prompt}${renderedPrompt}`,
+                      prompt: renderedPrompt,
                       params,
                       updated_at: new Date().toISOString(),
                     });
@@ -4044,14 +3988,13 @@ function CanvasEditorInner({
               }
               void insertCreationAsset(asset.asset_id, variableValues);
             }}
-            onUseImage={(asset: CreationAsset, _version: CreationImageAssetVersion) => {
+            onUseImage={(asset: CreationAsset) => {
               void insertCreationAsset(
                 asset.asset_id,
                 {},
                 selectedNode && selectedDraft ? selectedNode.id : undefined,
               );
             }}
-            onUpdateReference={updateCreationAssetReference}
           />
         )}
 
@@ -4356,7 +4299,7 @@ function contentOriginLabel(version: CanvasContentVersion, job?: Job) {
   if (origin.kind === 'user_mask') return '局部编辑蒙版';
   if (origin.kind === 'job_output') return job?.model ? `AI 生成 · ${job.model}` : 'AI 生成';
   if (origin.kind === 'import') return '项目包导入';
-  if (origin.kind === 'creation_asset') return '创作资产';
+  if (origin.kind === 'creation_asset_snapshot') return `创作资产 · ${origin.title}`;
   if (origin.operation.kind === 'crop') return '本地裁剪';
   if (origin.operation.kind === 'split') return '本地切图';
   return '本地放大';

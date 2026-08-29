@@ -65,7 +65,7 @@ from character_workflow.lib.schemas import (
     CharacterAssociationPatch, CharacterAssociationsFile,
     CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionList,
     CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument,
-    CanvasCreationAssetInsertRequest, CanvasCreationAssetUpdateRequest,
+    CanvasCreationAssetInsertRequest,
     CanvasPackageCommitRequest, CanvasPackageImportResponse,
     CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
@@ -75,8 +75,8 @@ from character_workflow.lib.schemas import (
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
-    CreationAsset, CreationAssetList, CreationAssetMetadataPatch, CreationAssetUseRequest,
-    CreationImagePathCreate, CreationPromptAssetCreate, CreationPromptVersionCreate,
+    CreationAsset, CreationAssetList, CreationAssetUseRequest,
+    CreationImagePathCreate, CreationPromptAssetCreate, CreationPromptAssetUpdate,
     FeedbackPost, GalleryMedia, Job, JobKind, JobParams, JobStatus, ProjectCreate,
     ProjectRename, ProjectGalleryResponse, ProjectIndexResponse,
     ProjectVideoProduction, ProjectVideoReferencesResponse,
@@ -2451,7 +2451,6 @@ def get_creation_assets(
     kind: Literal["prompt", "image"] | None = Query(default=None),
     scope: Literal["all", "project"] = Query(default="all"),
     project_id: str | None = Query(default=None),
-    archived: bool = Query(default=False),
 ):
     from character_workflow.lib.creation_assets import list_creation_assets
     try:
@@ -2459,7 +2458,6 @@ def get_creation_assets(
             kind=kind,
             scope=scope,
             project_id=project_id,
-            archived=archived,
         )
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
@@ -2520,70 +2518,42 @@ async def post_creation_image_upload(
         _raise_creation_asset_error(error)
 
 
-@router.patch("/creation-assets/{asset_id}", response_model=CreationAsset)
-def patch_creation_asset(asset_id: str, payload: CreationAssetMetadataPatch):
-    from character_workflow.lib.creation_assets import patch_creation_asset_metadata
+@router.put("/creation-assets/{asset_id}/prompt", response_model=CreationAsset)
+def put_creation_prompt_asset(asset_id: str, payload: CreationPromptAssetUpdate):
+    from character_workflow.lib.creation_assets import update_prompt_asset
     try:
-        return patch_creation_asset_metadata(
+        return update_prompt_asset(
             asset_id,
             title=payload.title,
+            segments=payload.segments,
             tags=payload.tags,
         )
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
 
 
-@router.post("/creation-assets/{asset_id}/versions/prompt", response_model=CreationAsset)
-def post_creation_prompt_version(asset_id: str, payload: CreationPromptVersionCreate):
-    from character_workflow.lib.creation_assets import create_prompt_version
+@router.put("/creation-assets/{asset_id}/image", response_model=CreationAsset)
+async def put_creation_image_asset(
+    asset_id: str,
+    title: str = Form(...),
+    tags: str = Form(default="[]"),
+    file: UploadFile | None = File(default=None),
+):
+    from character_workflow.lib.creation_assets import update_image_asset_from_bytes
     try:
-        return create_prompt_version(asset_id, payload.segments)
-    except (KeyError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
-@router.post(
-    "/creation-assets/{asset_id}/versions/image",
-    response_model=CreationAsset,
-    status_code=201,
-)
-async def post_creation_image_version(asset_id: str, file: UploadFile = File(...)):
-    from character_workflow.lib.creation_assets import create_image_version_from_bytes
-    try:
-        return create_image_version_from_bytes(
+        parsed_tags = json.loads(tags)
+        if not isinstance(parsed_tags, list) or not all(isinstance(tag, str) for tag in parsed_tags):
+            raise ValueError("tags 必须是字符串数组")
+        body = await file.read() if file is not None else None
+        return update_image_asset_from_bytes(
             asset_id,
-            body=await file.read(),
-            filename=file.filename or "image",
-            mime_type=file.content_type,
+            title=title,
+            tags=parsed_tags,
+            body=body,
+            filename=file.filename or "image" if file is not None else "image",
+            mime_type=file.content_type if file is not None else None,
         )
-    except (KeyError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
-@router.post("/creation-assets/{asset_id}/versions/{version_id}/restore", response_model=CreationAsset)
-def post_creation_asset_version_restore(asset_id: str, version_id: str):
-    from character_workflow.lib.creation_assets import restore_creation_asset_version
-    try:
-        return restore_creation_asset_version(asset_id, version_id)
-    except (KeyError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
-@router.post("/creation-assets/{asset_id}/archive", response_model=CreationAsset)
-def post_creation_asset_archive(asset_id: str):
-    from character_workflow.lib.creation_assets import archive_creation_asset
-    try:
-        return archive_creation_asset(asset_id)
-    except (KeyError, ValueError) as error:
-        _raise_creation_asset_error(error)
-
-
-@router.post("/creation-assets/{asset_id}/restore", response_model=CreationAsset)
-def post_creation_asset_restore(asset_id: str):
-    from character_workflow.lib.creation_assets import restore_creation_asset
-    try:
-        return restore_creation_asset(asset_id)
-    except (KeyError, ValueError) as error:
+    except (json.JSONDecodeError, KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
 
 
@@ -2596,20 +2566,21 @@ def post_creation_asset_use(asset_id: str, payload: CreationAssetUseRequest):
         _raise_creation_asset_error(error)
 
 
-@router.delete("/creation-assets/{asset_id}/projects/{project_id}", response_model=CreationAsset)
-def delete_creation_asset_project(asset_id: str, project_id: str):
-    from character_workflow.lib.creation_assets import remove_creation_asset_from_project
+@router.delete("/creation-assets/{asset_id}", status_code=204)
+def delete_creation_asset_route(asset_id: str) -> Response:
+    from character_workflow.lib.creation_assets import delete_creation_asset
     try:
-        return remove_creation_asset_from_project(asset_id, project_id)
+        delete_creation_asset(asset_id)
+        return Response(status_code=204)
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
 
 
-@router.get("/creation-assets/{asset_id}/versions/{version_id}/content")
-def get_creation_asset_content(asset_id: str, version_id: str):
+@router.get("/creation-assets/{asset_id}/content")
+def get_creation_asset_content(asset_id: str):
     from character_workflow.lib.creation_assets import creation_asset_image_path
     try:
-        return FileResponse(creation_asset_image_path(asset_id, version_id))
+        return FileResponse(creation_asset_image_path(asset_id))
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
 
@@ -2634,38 +2605,6 @@ def post_canvas_creation_asset_insert(
             expected_revision=_canvas_if_match(if_match, "画布"),
             variable_values=payload.variable_values,
             target_node_id=payload.target_node_id,
-        )
-        response.headers["ETag"] = f'"{document.revision}"'
-        return document
-    except RuntimeError as error:
-        _raise_canvas_revision_error(error)
-    except KeyError:
-        raise HTTPException(404, detail="找不到这个画布、节点或创作资产") from None
-    except ValueError as error:
-        raise HTTPException(422, detail=str(error)) from error
-
-
-@router.post(
-    "/canvas/projects/{project_id}/creation-assets/{asset_id}/update-references",
-    response_model=CanvasDocument,
-)
-def post_canvas_creation_asset_reference_update(
-    project_id: str,
-    asset_id: str,
-    payload: CanvasCreationAssetUpdateRequest,
-    response: Response,
-    if_match: str | None = Header(default=None, alias="If-Match"),
-):
-    from character_workflow.lib.creation_assets import (
-        update_creation_asset_references_in_canvas,
-    )
-    try:
-        document = update_creation_asset_references_in_canvas(
-            project_id=project_id,
-            asset_id=asset_id,
-            node_id=payload.node_id,
-            update_all=payload.scope == "all",
-            expected_revision=_canvas_if_match(if_match, "画布"),
         )
         response.headers["ETag"] = f'"{document.revision}"'
         return document

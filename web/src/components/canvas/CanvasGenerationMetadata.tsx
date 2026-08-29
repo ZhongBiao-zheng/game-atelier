@@ -43,6 +43,7 @@ const PARAM_LABELS: Record<string, string> = {
   mj_sw: '风格权重',
   mj_cw: '角色权重',
   mj_ow: 'Omni 权重',
+  creation_asset_source_title: '来源资产',
 };
 
 const REFERENCE_PARAM_KEYS = new Set([

@@ -216,12 +216,7 @@ export type CanvasContentOrigin =
         | { kind: 'upscale'; target_long_edge: number; algorithm: 'nearest' | 'bilinear' | 'lanczos' };
     }
   | { kind: 'import'; package_id: string }
-  | {
-      kind: 'creation_asset';
-      asset_id: string;
-      asset_version_id: string;
-      variable_values: Record<string, string>;
-    };
+  | { kind: 'creation_asset_snapshot'; title: string };
 
 interface CanvasContentVersionBase {
   version_id: string;

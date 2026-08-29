@@ -51,6 +51,17 @@ describe('RoundList video', () => {
     expect(screen.getByText('一只猫在跳舞')).toBeInTheDocument();
   });
 
+  it('shows the frozen creation asset title without an interactive reference', () => {
+    render(<RoundList rounds={[{
+      ...videoDone,
+      config: { ...videoDone.config, sourceAssetTitle: '雨夜电影感' },
+    }]} />);
+
+    const source = screen.getByTestId('round-asset-source');
+    expect(source).toHaveTextContent('来源：雨夜电影感');
+    expect(source.closest('a, button')).toBeNull();
+  });
+
   it('does not create players or decode reference videos before the round nears the viewport', () => {
     let intersectionCallback: IntersectionObserverCallback | undefined;
     class MockIntersectionObserver implements IntersectionObserver {

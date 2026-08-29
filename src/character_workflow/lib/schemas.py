@@ -66,10 +66,9 @@ class JobParams(BaseModel):
     estimated_cost_cny: float | None = Field(default=None, ge=0)
     # 厂商成功响应返回的实际人民币费用；历史展示优先于预计快照。
     actual_cost_cny: float | None = Field(default=None, ge=0)
-    # 从全局创作资产填入提示词时冻结来源版本与本次变量值；用户改正文后前端不再写这些字段。
-    creation_prompt_asset_id: str | None = None
-    creation_prompt_version_id: str | None = None
-    creation_prompt_variable_values: dict[str, str] | None = None
+    # 从创作资产复制提示词时冻结的只读来源名称。正文与变量值已经展开进 prompt，
+    # 不再保留 asset_id / version_id 或任何可回写引用。
+    creation_asset_source_title: str | None = Field(default=None, max_length=120)
     reference_images: list[str] | None = None
     # Canvas 局部编辑专用：服务端从不可变 mask Content Version 解析，浏览器不能传路径。
     mask_image: str | None = None
@@ -477,8 +476,7 @@ class CanvasGenerationDraft(BaseModel):
 CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     "image": frozenset({
         "n", "size", "ratio", "resolution", "quality", "background",
-        "creation_prompt_asset_id", "creation_prompt_version_id",
-        "creation_prompt_variable_values",
+        "creation_asset_source_title",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
         "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",
         # Midjourney 的纯标量 flag（都有 Field 上下界）；三组参考路径与 caller 回写的
@@ -488,18 +486,15 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     }),
     "video": frozenset({
         "duration", "resolution", "ratio", "mode", "frame_mode",
-        "generate_audio", "watermark", "creation_prompt_asset_id",
-        "creation_prompt_version_id", "creation_prompt_variable_values",
+        "generate_audio", "watermark", "creation_asset_source_title",
     }),
     "text": frozenset({
         "n", "temperature", "max_tokens", "reasoning_effort",
-        "creation_prompt_asset_id", "creation_prompt_version_id",
-        "creation_prompt_variable_values",
+        "creation_asset_source_title",
     }),
     "audio": frozenset({
         "voice", "response_format", "speed", "instructions",
-        "creation_prompt_asset_id", "creation_prompt_version_id",
-        "creation_prompt_variable_values",
+        "creation_asset_source_title",
     }),
 }
 
@@ -719,12 +714,10 @@ class CanvasImportOrigin(BaseModel):
     package_id: str
 
 
-class CanvasCreationAssetOrigin(BaseModel):
+class CanvasCreationAssetSnapshotOrigin(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["creation_asset"]
-    asset_id: str = Field(min_length=1, max_length=160)
-    asset_version_id: str = Field(min_length=1, max_length=160)
-    variable_values: dict[str, str] = Field(default_factory=dict)
+    kind: Literal["creation_asset_snapshot"]
+    title: str = Field(min_length=1, max_length=120)
 
 
 class CanvasNormalizedRect(BaseModel):
@@ -773,7 +766,7 @@ class CanvasLocalToolOrigin(BaseModel):
 
 CanvasContentOrigin = Annotated[
     CanvasUserEditOrigin | CanvasUploadOrigin | CanvasUserMaskOrigin | CanvasJobOutputOrigin
-    | CanvasLocalToolOrigin | CanvasImportOrigin | CanvasCreationAssetOrigin,
+    | CanvasLocalToolOrigin | CanvasImportOrigin | CanvasCreationAssetSnapshotOrigin,
     Field(discriminator="kind"),
 ]
 
@@ -1324,19 +1317,15 @@ CreationPromptSegment = Annotated[
 ]
 
 
-class CreationPromptAssetVersion(BaseModel):
+class CreationPromptAssetContent(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["prompt"]
-    version_id: str = Field(min_length=1, max_length=160)
-    created_at: str
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
 
 
-class CreationImageAssetVersion(BaseModel):
+class CreationImageAssetContent(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["image"]
-    version_id: str = Field(min_length=1, max_length=160)
-    created_at: str
     path: str = Field(min_length=1)
     mime_type: str = Field(pattern=r"^image/")
     bytes: int = Field(ge=1)
@@ -1344,8 +1333,8 @@ class CreationImageAssetVersion(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
 
 
-CreationAssetVersion = Annotated[
-    CreationPromptAssetVersion | CreationImageAssetVersion,
+CreationAssetContent = Annotated[
+    CreationPromptAssetContent | CreationImageAssetContent,
     Field(discriminator="kind"),
 ]
 
@@ -1359,20 +1348,13 @@ class CreationAsset(BaseModel):
     created_at: str
     updated_at: str
     last_used_at: str | None = None
-    archived_at: str | None = None
-    latest_version_id: str = Field(min_length=1, max_length=160)
-    versions: list[CreationAssetVersion] = Field(min_length=1)
+    content: CreationAssetContent
     project_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_version_identity(self) -> "CreationAsset":
-        version_ids = [version.version_id for version in self.versions]
-        if len(version_ids) != len(set(version_ids)):
-            raise ValueError("creation asset version ids must be unique")
-        if self.latest_version_id not in set(version_ids):
-            raise ValueError("creation asset latest version is missing")
-        if any(version.kind != self.kind for version in self.versions):
-            raise ValueError("creation asset versions must match asset kind")
+    def validate_content_identity(self) -> "CreationAsset":
+        if self.content.kind != self.kind:
+            raise ValueError("creation asset content must match asset kind")
         if len(self.project_ids) != len(set(self.project_ids)):
             raise ValueError("creation asset project ids must be unique")
         return self
@@ -1380,7 +1362,7 @@ class CreationAsset(BaseModel):
 
 class CreationAssetCatalog(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     revision: int = Field(default=0, ge=0)
     updated_at: str
     assets: list[CreationAsset] = Field(default_factory=list)
@@ -1409,9 +1391,11 @@ class CreationPromptAssetCreate(BaseModel):
     project_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
-class CreationPromptVersionCreate(BaseModel):
+class CreationPromptAssetUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=120)
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
+    tags: list[str] = Field(default_factory=list, max_length=20)
 
 
 class CreationImagePathCreate(BaseModel):
@@ -1421,12 +1405,6 @@ class CreationImagePathCreate(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=20)
     project_id: str | None = Field(default=None, min_length=1, max_length=160)
     allow_existing: bool = False
-
-
-class CreationAssetMetadataPatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    title: str | None = Field(default=None, min_length=1, max_length=120)
-    tags: list[str] | None = Field(default=None, max_length=20)
 
 
 class CreationAssetUseRequest(BaseModel):
@@ -1444,12 +1422,6 @@ class CanvasCreationAssetInsertRequest(BaseModel):
     position: CanvasPoint
     variable_values: dict[str, str] = Field(default_factory=dict)
     target_node_id: str | None = Field(default=None, min_length=1, max_length=160)
-
-
-class CanvasCreationAssetUpdateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    node_id: str = Field(min_length=1, max_length=160)
-    scope: Literal["current", "all"] = "current"
 
 
 class CanvasPluginState(BaseModel):

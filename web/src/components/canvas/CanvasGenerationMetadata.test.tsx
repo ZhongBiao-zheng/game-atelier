@@ -22,6 +22,7 @@ const snapshot: CanvasGenerationSnapshot = {
     background: 'opaque',
     preset_id: 'canvas.reverse_prompt',
     preset_version: 1,
+    creation_asset_source_title: '雨夜电影感',
     access_key: 'sk-must-not-render',
     debug: {
       path: '/Volumes/Art Drive/private/reference.png',
@@ -71,6 +72,8 @@ it('shows the immutable prompt, model parameters, actual output and frozen refer
   expect(within(record).getByText('节点已删除')).toBeInTheDocument();
   expect(within(record).getByText(/deleted-reference · version-deleted/)).toBeInTheDocument();
   expect(within(record).getByText('canvas.reverse_prompt')).toBeInTheDocument();
+  expect(within(record).getByText('来源资产')).toBeInTheDocument();
+  expect(within(record).getByText('雨夜电影感')).toBeInTheDocument();
   expect(within(record).getByText('2048x1152')).toBeInTheDocument();
   expect(within(record).getByText('厂商自动调整到支持尺寸')).toBeInTheDocument();
   expect(record).not.toHaveTextContent('/Users/');
