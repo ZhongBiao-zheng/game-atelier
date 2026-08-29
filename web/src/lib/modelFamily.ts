@@ -31,10 +31,11 @@ export function imageFamily(modelId?: string | null): ImageFamily {
 /** 图片 API 是否接受独立 quality 参数。
  *
  * Nano Banana 的无后缀型号用 low/medium/high 选档；Tuzi 等网关提供的 `-2k` / `-4k`
- * 固定型号已经把清晰度编码进 model id，再叠加 quality 会覆盖型号档位。 */
+ * 固定型号已经把清晰度编码进 model id，前端不再暴露可自由选择的 quality；后端会从
+ * model id 生成厂商计价路由需要的确定值。 */
 export function supportsImageQuality(modelId?: string | null): boolean {
   const family = imageFamily(modelId);
   if (family === 'gpt-image') return true;
   if (family !== 'nano-banana') return false;
-  return !/-(?:2k|4k)$/.test(normalizedModelId(modelId));
+  return !/-(?:2k|4k)(?:-vip)?$/.test(normalizedModelId(modelId));
 }

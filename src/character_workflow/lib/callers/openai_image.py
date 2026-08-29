@@ -213,8 +213,12 @@ def render(
     # quality 按**模型能力**判，与前端 imageControlCaps 同一判据（旧版按 provider：词元跳动上的
     # gpt-image 界面给四档、后端静默丢弃；provider=openai 下的 dall-e 反过来会被塞进
     # gpt-image 的 low/high 词表，而 DALL·E 只认 standard|hd）。
-    wants_quality = supports_image_quality(model)
-    quality = _quality_param(kwargs) if wants_quality else None
+    # Tuzi 的固定 Nano Banana 型号用 quality 同时做分辨率与计价路由：缺失会报
+    # model_price_error，旧 Job 的 low 又会把 4K 路由成 1K。固定值必须优先于历史参数。
+    fixed_tuzi_quality = fixed_nano_resolution_quality(model) if is_tuzi else None
+    quality = fixed_tuzi_quality
+    if quality is None and supports_image_quality(model):
+        quality = _quality_param(kwargs)
     image_protocol = _effective_image_protocol(key, model)
     background = (
         _background_param(kwargs)
@@ -497,9 +501,7 @@ def _image_generation_payload(
         # output_format：Ark 默认 jpeg，而我们把产物一律存成 .png —— 实测 26 张历史产物里
         # 11 张实际是 JPEG，既名实不符又白挨一道有损压缩。立绘要无损，显式要 png。
         payload["output_format"] = "png"
-    # 固定 `-2k` / `-4k` Nano Banana 型号已经用 model id 定档；旧 Job 即使残留
-    # quality，也在最终序列化边界丢弃，避免 low 覆盖 4K 型号。
-    if quality and supports_image_quality(model):
+    if quality:  # caller 已按 provider + model 能力归一；Tuzi 固定档会传 2k/4k
         payload["quality"] = quality
     if background:  # gpt-image：auto/opaque/transparent
         payload["background"] = background
@@ -541,14 +543,22 @@ def image_family(model: str) -> str:
     return "standard"
 
 
+def fixed_nano_resolution_quality(model: str) -> str | None:
+    """Return the deterministic quality route encoded by a fixed Nano Banana model id."""
+    if image_family(model) != "nano-banana":
+        return None
+    match = re.search(r"-(2k|4k)(?:-vip)?$", normalized_model_id(model))
+    return match.group(1) if match else None
+
+
 def supports_image_quality(model: str) -> bool:
-    """图片模型是否接受独立 quality 参数；与前端 supportsImageQuality 对齐。"""
+    """图片模型是否暴露独立 quality 选择；与前端 supportsImageQuality 对齐。"""
     family = image_family(model)
     if family == "gpt-image":
         return True
     if family != "nano-banana":
         return False
-    return re.search(r"-(?:2k|4k)$", normalized_model_id(model)) is None
+    return fixed_nano_resolution_quality(model) is None
 
 
 def supports_image_mask(provider: str, model: str, protocol: str | None = None) -> bool:

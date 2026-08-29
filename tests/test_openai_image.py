@@ -160,6 +160,36 @@ def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
+def test_render_tuzi_routes_fixed_nano_resolution_through_quality(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
+    captured: dict[str, object] = {}
+
+    def fake_execute_json(**kwargs):
+        captured.update(kwargs)
+        return {"data": [{
+            "b64_json": base64.b64encode(b"\x89PNG\r\n\x1a\n4k").decode("ascii"),
+        }]}
+
+    monkeypatch.setattr(openai_image.tuzi_async, "execute_json", fake_execute_json)
+
+    openai_image.render(
+        prompt="banana cat",
+        model="nano-banana-pro-4k",
+        alias="Tuzi",
+        output_dir=tmp_path,
+        n=1,
+        size="3:4",
+        params={"quality": "low"},
+    )
+
+    assert captured["url"] == "https://api.tu-zi.com/v1/images/generations"
+    assert captured["payload"]["quality"] == "4k"
+
+
 def test_render_tuzi_resume_never_submits_supplemental_billed_task(
     isolated_data_root,
     tmp_path,
@@ -952,25 +982,12 @@ def test_render_openai_hk_nano_banana_passes_ratio_size_and_backfills(
     assert len(paths) == 3
 
 
-def test_fixed_resolution_nano_banana_never_serializes_quality():
-    """Tuzi 的 -2k/-4k 型号由 model id 定档，历史 Job 残留 quality 也必须在出站前丢弃。"""
-    fixed = openai_image._image_generation_payload(
-        model="nano-banana-pro-4k",
-        prompt="banana cat",
-        size="3:4",
-        n=1,
-        quality="low",
-    )
-    regular = openai_image._image_generation_payload(
-        model="nano-banana-pro",
-        prompt="banana cat",
-        size="3:4",
-        n=1,
-        quality="low",
-    )
-
-    assert "quality" not in fixed
-    assert regular["quality"] == "low"
+def test_fixed_nano_resolution_quality_reads_model_suffix():
+    assert openai_image.fixed_nano_resolution_quality("nano-banana-pro-4k") == "4k"
+    assert openai_image.fixed_nano_resolution_quality("nano-banana-2-2k") == "2k"
+    assert openai_image.fixed_nano_resolution_quality("nano-banana-pro-4k-vip") == "4k"
+    assert openai_image.fixed_nano_resolution_quality("nano-banana-pro") is None
+    assert openai_image.fixed_nano_resolution_quality("gpt-image-2") is None
 
 
 def test_image_items_from_text_cleans_malformed_markdown_url():

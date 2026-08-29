@@ -42,7 +42,7 @@
       "min_pixels": null, "max_pixels": null
     },
     {
-      "why": "Tuzi 的 nano-banana-pro-4k 由模型名锁定分辨率，不再叠加 quality",
+      "why": "Tuzi 的 nano-banana-pro-4k 由模型名锁定分辨率，不暴露可选 quality",
       "model": "nano-banana-pro-4k", "provider": "custom",
       "family": "nano-banana", "max_reference_images": 3, "supports_quality": false,
       "min_pixels": null, "max_pixels": null

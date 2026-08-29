@@ -17,6 +17,7 @@ describe('imageControlCaps', () => {
     expect(imageControlCaps('nano-banana-pro-4k').qualities).toBeNull();
     expect(imageControlCaps('nano-banana-2-2k').qualities).toBeNull();
     expect(imageControlCaps('vendor/nano_banana_pro_4k').qualities).toBeNull();
+    expect(imageControlCaps('nano-banana-pro-4k-vip').qualities).toBeNull();
     expect(imageControlCaps('nano-banana-pro').qualities).toEqual(['low', 'medium', 'high']);
   });
 
