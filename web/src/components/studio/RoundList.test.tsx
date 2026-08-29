@@ -742,4 +742,23 @@ describe('RoundList reference assets', () => {
     expect(screen.getByTestId('round-mj-flags')).toHaveTextContent('--sref 1967932137');
     expect(screen.getByTestId('round-mj-flags')).toHaveTextContent('--sw 250');
   });
+
+  it('MJ 提交中也展示结构化 profile，不等待 caller 回写 flags', () => {
+    const round: RoundState = {
+      kind: 'pending',
+      jobId: 'job-mj-profile',
+      startedAt: Date.now(),
+      config: {
+        prompt: '建筑',
+        model: 'mj_fast_imagine',
+        kind: 'image',
+        referenceImages: [],
+        mjParams: { ...MJ_DEFAULTS, profile: 'e6wl24r' },
+      },
+    };
+
+    render(<RoundList rounds={[round]} />);
+
+    expect(screen.getByTestId('pending-spec-meta')).toHaveTextContent('--profile e6wl24r');
+  });
 });

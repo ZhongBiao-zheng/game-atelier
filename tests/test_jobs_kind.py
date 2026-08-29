@@ -122,3 +122,13 @@ def test_jobparams_rejects_negative_estimated_cost():
         JobParams(estimated_cost_cny=-0.01)
     with pytest.raises(ValidationError):
         JobParams(actual_cost_cny=-0.01)
+
+
+def test_jobparams_validates_midjourney_profile_code():
+    from pydantic import ValidationError
+
+    from character_workflow.lib.schemas import JobParams
+
+    assert JobParams(mj_profile="e6wl24r").mj_profile == "e6wl24r"
+    with pytest.raises(ValidationError):
+        JobParams(mj_profile="--profile e6wl24r")

@@ -124,6 +124,7 @@ class JobParams(BaseModel):
     mj_tile: bool | None = None       # --tile 无缝平铺
     mj_iw: float | None = None        # --iw 垫图权重 0-3
     mj_sref_code: str | None = Field(default=None, pattern=r"^[0-9]+$", max_length=32)
+    mj_profile: str | None = Field(default=None, pattern=r"^[A-Za-z0-9]+$", max_length=64)
     # 三种参考图：值是本地路径或公网 URL（caller 会把本地文件经 OSS 转成直链再拼 flag）。
     # 垫图不在这里 —— 它走 reference_images → body 的 base64Array。
     mj_sref: list[str] | None = None  # --sref 风格参考
@@ -478,6 +479,7 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
         # Midjourney 的纯标量 flag（都有 Field 上下界）；三组参考路径与 caller 回写的
         # mj_flags 不在其中。
         "mode", "bot_type", "mj_version", "mj_stylize", "mj_chaos", "mj_weird",
+        "mj_profile",
         "mj_seed", "mj_no", "mj_tile", "mj_iw", "mj_sw", "mj_cw", "mj_ow",
     }),
     "video": frozenset({

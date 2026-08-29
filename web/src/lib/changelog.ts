@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.31.17',
+    date: '2026-08-29',
+    headline: 'Midjourney 支持个性化 Profile',
+    changes: [
+      { kind: 'feat', text: 'Midjourney 生成设置在 sref 下新增 profile 输入，支持 code、ID 与完整参数粘贴' },
+      { kind: 'fix', text: 'Profile 进入 Job 参数、历史恢复与真实 flag 展示，再次生成不会静默丢失' },
+    ],
+  },
+  {
     version: '5.31.16',
     date: '2026-08-28',
     headline: '大图预览支持键盘切换',

@@ -388,6 +388,26 @@ def test_sref_code_takes_precedence_without_upload(mj_key, tmp_path, monkeypatch
     assert "/local/style.png" not in sent
 
 
+def test_profile_is_appended_as_structured_flag(mj_key, tmp_path, monkeypatch):
+    """Profile code 由 caller 追加，原始 prompt 保持纯描述并写回真实 flags。"""
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    params: dict = {"mj_version": "8.2", "mj_profile": "e6wl24r"}
+
+    _render(tmp_path, n=4, params=params)
+
+    assert posted[0]["body"]["prompt"] == "a knight --v 8.2 --profile e6wl24r"
+    assert params["mj_flags"] == "--v 8.2 --profile e6wl24r"
+
+
+@pytest.mark.parametrize("profile", ["bad profile", "--profile e6wl24r", "e6wl24r,"])
+def test_profile_rejects_prompt_syntax(mj_key, tmp_path, monkeypatch, profile):
+    """结构化字段只接 code/ID 本体，避免借 profile 值注入额外 prompt 参数。"""
+    _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+
+    with pytest.raises(mj.MidjourneyError, match="profile"):
+        _render(tmp_path, n=4, params={"mj_profile": profile})
+
+
 def test_unsupported_ref_is_not_uploaded(mj_key, tmp_path, monkeypatch):
     """版本不支持的参考图要在上传前就摘掉 —— 否则白往 OSS 传一张没人用的图。"""
     _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
