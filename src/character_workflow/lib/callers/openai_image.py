@@ -558,7 +558,7 @@ def tuzi_outbound_image_model(model: str) -> str:
     normalized = normalized_model_id(model)
     if image_family(normalized) != "nano-banana" or normalized.endswith("-vip"):
         return model
-    return re.sub(r"-(?:2k|4k)$", "", normalized)
+    return re.sub(r"[-_.](?:2k|4k)$", "", model, flags=re.IGNORECASE)
 
 
 def supports_image_quality(model: str) -> bool:

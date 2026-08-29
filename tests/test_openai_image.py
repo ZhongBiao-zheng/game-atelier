@@ -994,6 +994,10 @@ def test_fixed_nano_resolution_quality_reads_model_suffix():
     assert openai_image.tuzi_outbound_image_model("nano-banana-pro-2k") == "nano-banana-pro"
     assert openai_image.tuzi_outbound_image_model("nano-banana-2-4k") == "nano-banana-2"
     assert (
+        openai_image.tuzi_outbound_image_model("vendor/NANO_BANANA_PRO_4K")
+        == "vendor/NANO_BANANA_PRO"
+    )
+    assert (
         openai_image.tuzi_outbound_image_model("nano-banana-pro-4k-vip")
         == "nano-banana-pro-4k-vip"
     )
