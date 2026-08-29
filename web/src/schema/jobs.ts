@@ -18,6 +18,10 @@ export interface JobParams {
   estimated_cost_cny?: number;
   /** 厂商成功响应返回的实际人民币费用；历史展示优先于预计快照。 */
   actual_cost_cny?: number;
+  /** 从创作资产直接使用时冻结的版本；用户改正文后不再保留关联。 */
+  creation_prompt_asset_id?: string;
+  creation_prompt_version_id?: string;
+  creation_prompt_variable_values?: Record<string, string>;
   reference_images?: string[];
   /** Canvas 局部编辑的服务端解析 mask 路径；浏览器不直接写入。 */
   mask_image?: string;

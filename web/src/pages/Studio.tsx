@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearch } from 'wouter';
-import { ChevronsDown } from 'lucide-react';
+import { ChevronsDown, Library } from 'lucide-react';
 
 import { createStudioJob, getStudioJob, listStudioJobs, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
 import { apiError } from '@/api/http';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { useSSE, type JobChangedPayload } from '@/hooks/useSSE';
 import { PromptInput } from '@/components/studio/PromptInput';
+import {
+  CreationAssetPanel,
+  type CreationAssetSaveRequest,
+} from '@/components/assets/CreationAssetPanel';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
@@ -15,6 +19,7 @@ import { StudioArchiveDialog, type StudioArchiveRequest } from '@/components/stu
 import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { imageFamily } from '@/lib/modelFamily';
+import { maxReferenceImages } from '@/lib/referenceLimits';
 import { hasSrefCode, MJ_DEFAULTS, mjParamsFromJob, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
@@ -23,6 +28,10 @@ import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
+import { creationAssetImageUrl } from '@/api/creationAssets';
+import { listCanvasProjects } from '@/api/canvas';
+import type { CreationAsset, CreationImageAssetVersion } from '@/schema/creationAssets';
+import type { CanvasProject } from '@/schema/canvas';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
 
@@ -123,6 +132,17 @@ function StudioFull() {
   const [mjRefs, setMjRefs] = useState<MjRefSlots>(EMPTY_MJ_REFS);
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState('');
+  const [assetPanelOpen, setAssetPanelOpen] = useState(false);
+  const [assetPanelKind, setAssetPanelKind] = useState<'prompt' | 'image'>('prompt');
+  const [assetSaveRequest, setAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
+  const [canvasTargets, setCanvasTargets] = useState<CanvasProject[]>([]);
+  const [insertTextRequest, setInsertTextRequest] = useState<{ requestId: string; text: string } | null>(null);
+  const [promptAssetUsage, setPromptAssetUsage] = useState<{
+    assetId: string;
+    versionId: string;
+    variableValues: Record<string, string>;
+    renderedPrompt: string;
+  } | null>(null);
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
   const [kind, setKind] = useState<JobKind>(saved.kind ?? 'image');
   // 旧版本 videoMode 存过 t2v/i2v/ref/v2v —— 仅 'omni' 原样保留，其余一律回落首尾帧。
@@ -137,6 +157,15 @@ function StudioFull() {
   const [referenceAudios, setReferenceAudios] = useState<File[]>([]);
   // 首尾帧模式的双槽（与 referenceImages 分离：两个槽各自独立可空，仅尾帧也合法）。
   const [videoFrames, setVideoFrames] = useState<FrameSlots>({ first: null, last: null });
+
+  useEffect(() => {
+    if (!assetPanelOpen) return;
+    let cancelled = false;
+    void listCanvasProjects(true)
+      .then(projects => { if (!cancelled) setCanvasTargets(projects); })
+      .catch(() => { if (!cancelled) setCanvasTargets([]); });
+    return () => { cancelled = true; };
+  }, [assetPanelOpen]);
   // 重新编辑会异步拉取历史参考素材；只允许最后一次点击的结果回填，避免慢请求覆盖新选择。
   const reEditSequence = useRef(0);
   const selectedModelObj = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
@@ -446,6 +475,13 @@ function StudioFull() {
       n: effectiveCount,
       ...(effectiveQuality ? { quality: effectiveQuality } : {}),
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
+      ...(!overrideConfig && promptAssetUsage && prompt.trim() === promptAssetUsage.renderedPrompt.trim()
+        ? {
+            creation_prompt_asset_id: promptAssetUsage.assetId,
+            creation_prompt_version_id: promptAssetUsage.versionId,
+            creation_prompt_variable_values: promptAssetUsage.variableValues,
+          }
+        : {}),
       // MJ 的一切控制都在 prompt flag 里，由后端 mj_image 拼接；这里只发结构化值。
       ...(caps.family === 'midjourney'
         ? {
@@ -586,6 +622,13 @@ function StudioFull() {
       ...(imgPaths.length ? { reference_images: imgPaths } : {}),
       ...(vidPaths.length ? { reference_videos: vidPaths } : {}),
       ...(audPaths.length ? { reference_audios: audPaths } : {}),
+      ...(!overrideConfig && promptAssetUsage && prompt.trim() === promptAssetUsage.renderedPrompt.trim()
+        ? {
+            creation_prompt_asset_id: promptAssetUsage.assetId,
+            creation_prompt_version_id: promptAssetUsage.versionId,
+            creation_prompt_variable_values: promptAssetUsage.variableValues,
+          }
+        : {}),
     };
     const estimatedCost = estimateGenerationCostForSubmission(
       selectedKey,
@@ -683,12 +726,34 @@ function StudioFull() {
           onReuseReferences={handleReuseReferences}
           onEditAsReference={handleEditAsReference}
           onArchive={(jobId, path, mediaKind) => setArchiveRequest({ jobId, path, mediaKind })}
+          onSavePromptAsset={(config) => {
+            setAssetPanelKind('prompt');
+            setAssetPanelOpen(true);
+            setAssetSaveRequest({
+              requestId: crypto.randomUUID(),
+              kind: 'prompt',
+              title: config.prompt.trim().replace(/\s+/g, ' ').slice(0, 24),
+              segments: [{ kind: 'text', text: config.prompt }],
+            });
+          }}
+          onSaveImageAsset={(path, config) => {
+            setAssetPanelKind('image');
+            setAssetPanelOpen(true);
+            setAssetSaveRequest({
+              requestId: crypto.randomUUID(),
+              kind: 'image',
+              title: config.prompt.trim().replace(/\s+/g, ' ').slice(0, 24),
+              sourcePath: path,
+              previewUrl: `/api/gallery/image?path=${encodeURIComponent(path)}`,
+            });
+          }}
         />
       </div>
       {/* 浮层输入：wrapper 不收事件，两侧视觉与交互都穿透到历史区；壳本体在 PromptInput 内
           pointer-events-auto。 */}
       <div className="pointer-events-none absolute inset-x-0 bottom-4 px-3 sm:px-6">
-        <div className="relative mx-auto max-w-[780px]">
+        <div className="relative mx-auto flex max-w-[844px] items-end gap-3">
+          <div className="relative min-w-0 flex-1">
           {/* 回到底部：常驻挂载才有进出动画。锚定 bottom-full 让它跟着壳顶升降——
               壳展开时被顶着上移、同时向右上平移渐隐；收起时反向浮现。 */}
           <button
@@ -720,7 +785,25 @@ function StudioFull() {
           onSubmit={onSubmit}
           disabled={pending}
           value={promptText}
-          onValueChange={setPromptText}
+          onValueChange={(value) => {
+            setPromptText(value);
+            if (promptAssetUsage && value !== promptAssetUsage.renderedPrompt) setPromptAssetUsage(null);
+          }}
+          insertTextRequest={insertTextRequest}
+          onSavePromptAsset={() => {
+            setAssetPanelKind('prompt');
+            setAssetPanelOpen(true);
+            setAssetSaveRequest({
+              requestId: crypto.randomUUID(),
+              kind: 'prompt',
+              segments: [{ kind: 'text', text: promptText }],
+            });
+          }}
+          onSaveReferenceImage={(file) => {
+            setAssetPanelKind('image');
+            setAssetPanelOpen(true);
+            setAssetSaveRequest({ requestId: crypto.randomUUID(), kind: 'image', file });
+          }}
           providers={keys}
           providerAlias={providerAlias}
           model={model}
@@ -767,11 +850,68 @@ function StudioFull() {
           videoFrames={videoFrames}
           onVideoFramesChange={setVideoFrames}
         />
+          </div>
+          <button
+            type="button"
+            aria-label="打开创作资产"
+            aria-expanded={assetPanelOpen}
+            onClick={() => setAssetPanelOpen(open => !open)}
+            className="pointer-events-auto grid size-12 shrink-0 place-items-center rounded-full border border-input bg-glass text-muted-foreground backdrop-blur-glass transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <Library size={19} />
+          </button>
         </div>
       </div>
+      {assetPanelOpen && (
+        <CreationAssetPanel
+          initialKind={assetPanelKind}
+          canvasTargets={canvasTargets.map(target => ({
+            projectId: target.project_id,
+            name: target.name,
+          }))}
+          saveRequest={assetSaveRequest}
+          onSaveRequestHandled={(requestId) => {
+            setAssetSaveRequest(current => current?.requestId === requestId ? null : current);
+          }}
+          onClose={() => setAssetPanelOpen(false)}
+          onUsePrompt={(asset, renderedPrompt, variableValues, mode) => {
+            if (mode === 'replace') {
+              setPromptText(renderedPrompt);
+              setPromptAssetUsage({
+                assetId: asset.asset_id,
+                versionId: asset.latest_version_id,
+                variableValues,
+                renderedPrompt,
+              });
+            } else {
+              setPromptAssetUsage(null);
+              setInsertTextRequest({ requestId: crypto.randomUUID(), text: renderedPrompt });
+            }
+            setClickPinned(true);
+          }}
+          onUseImage={(asset, version) => { void addCreationAssetReference(asset, version); }}
+        />
+      )}
       <StudioArchiveDialog request={archiveRequest} onClose={() => setArchiveRequest(null)} />
     </div>
   );
+
+  async function addCreationAssetReference(asset: CreationAsset, version: CreationImageAssetVersion) {
+    try {
+      const response = await fetch(creationAssetImageUrl(asset.asset_id, version.version_id));
+      if (!response.ok) throw await apiError(response, '读取图片资产');
+      const blob = await response.blob();
+      const file = new File([blob], version.filename, { type: version.mime_type });
+      setReferenceImages(current => [...current, file].slice(0, maxReferenceImagesForCurrentModel()));
+      setClickPinned(true);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  function maxReferenceImagesForCurrentModel(): number {
+    return maxReferenceImages(model);
+  }
 
   async function deleteFailedRound(jobId: string) {
     const resp = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });

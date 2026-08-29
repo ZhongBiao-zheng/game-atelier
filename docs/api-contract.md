@@ -17,6 +17,7 @@
 | StudioArchiveTarget | `lib/studio_archive.py` | `web/src/api/studio.ts` | `tests/test_studio_archive.py` + `StudioArchiveDialog.test.tsx` |
 | CanvasProject / CanvasDocument / CanvasJobContext | `lib/schemas.py` | `web/src/schema/canvas.ts` + `schema/jobs.ts` | `tests/test_canvas_projects.py` + `CanvasEditor.test.tsx` |
 | CanvasUiPreferences | `lib/schemas.py` | `web/src/schema/canvas.ts` | issue 20 隔离 API/文件/浏览器契约核对（旧测试只读，不改） |
+| CreationAsset / CreationAssetVersion | `lib/schemas.py` | `web/src/schema/creationAssets.ts` | `tests/test_creation_assets.py` + `CreationAssetPanel.test.tsx` |
 | 图像能力矩阵 | `callers/openai_image.py` | `lib/modelFamily.ts` `referenceLimits.ts` `studioSize.ts` | `tests/fixtures/capability-matrix.json`，两端各自断言 |
 | 视频控件能力 | 各 `*_video.py` | `lib/videoControlCaps.ts` | 无 —— 靠人 |
 
@@ -69,6 +70,13 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle}`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
+`POST /creation-assets/prompts` `POST /creation-assets/images/{upload,from-path}`
+`PATCH /creation-assets/{asset_id}`
+`POST /creation-assets/{asset_id}/versions/{prompt,image}`
+`POST /creation-assets/{asset_id}/{archive,restore,use}`
+`POST /creation-assets/{asset_id}/versions/{version_id}/restore`
+`DELETE /creation-assets/{asset_id}/projects/{project_id}`
+`POST /canvas/projects/{id}/creation-assets/{asset_id}/{insert,update-references}`
 `POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
 `DELETE /canvas/projects/{id}`
 `PUT /canvas/ui-preferences`
@@ -91,7 +99,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `GET /canvas/projects` `/canvas/project-options` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
 `GET /canvas/projects/{id}/versions/{version_id}/media`
 `GET /canvas/projects/{id}/versions/{version_id}/download`
-`GET /canvas/projects/{id}/library/assets` `/canvas/projects/{id}/library/prompts`
+`GET /creation-assets` `/creation-assets/{asset_id}/versions/{version_id}/content`
 `GET /canvas/projects/{id}/agent/sessions` `/canvas/projects/{id}/agent/sessions/{session_id}`
 `GET /canvas/ui-preferences`
 
@@ -300,17 +308,21 @@ schema、摘要和项目内引用校验，再凭 30 分钟 token 调用 `commit`
 均静止后，先把项目和 Job 原子移入 `.runtime/canvas-delete-transactions/` 的短期事务目录，再立即物理清除；
 项目从索引消失后不可恢复。画布不提供回收区、撤销删除或恢复 API。
 
-项目创作库分别落在 `library/assets.json` 与 `library/prompts.json`，两者都是独立
-`RevisionedSidecar`。所有写操作必须携带 sidecar 当前 `If-Match`；读取和成功写入响应返回对应
-`ETag`。资产通过 `POST /canvas/projects/{id}/library/assets` 收藏同项目现有 Content Version，同一
-version 最多一个条目；PATCH 只改标题和标签，DELETE 只移出资产库，不删除节点、Content Version 或
-媒体字节。`POST .../library/assets/{asset_id}/insert` 携带 Canvas Document 的 `If-Match` 和目标坐标，
-创建指向同一不可变 Content Version 的新节点。
+创作资产是应用级个人数据，真源为 `creation-assets/catalog.json` 与
+`creation-assets/blobs/<sha256>.<ext>`，Studio 与所有 Canvas 共享同一资产身份。资产只有 prompt/image
+两类；正文、变量与图片替换创建不可变版本，标题和标签只改元数据。图片按 SHA-256 去重；提示词重复只在
+Web 提醒。归档可恢复，第一版没有物理删除。
 
-项目提示词通过 `POST/PATCH/DELETE .../library/prompts` 管理；项目本地条目可编辑，公共源条目在项目内
-只读。`POST .../library/prompts/{prompt_id}/insert` 携带 Canvas Document 的 `If-Match` 和目标坐标，
-先按当前提示词内容创建新的 `user_edit` Text Content Version，再创建指向该版本的文本节点。创作库写入
-与画布插入均在项目锁下校验 revision；冲突返回 409，不做 last-write-wins 或自动合并。
+Canvas 的“本项目”是 CreationAsset 上的项目关系过滤，不是项目内第二套可编辑 sidecar。首次使用资产会
+建立关系；移出项目只删除关系，不删除资产、节点、Content Version 或媒体字节。旧版
+`library/assets.json` 与 `library/prompts.json` 在首次读取时幂等迁移，旧 HTTP library 端点已删除。
+
+`POST .../creation-assets/{asset_id}/insert` 携带 Canvas Document 的 `If-Match`、目标坐标和可选变量值，
+把资产最新版本固定为新的 Canvas Content Version；内容 origin 保存资产与版本身份。后续资产版本不会
+静默改写节点。`POST .../update-references` 仅在用户明确操作时更新当前节点或本画布同资产引用；提示词按
+各引用原有的同名变量值重新渲染，新增变量走默认值，删除变量不再保存。画布项目包携带这些已固定的内容
+快照而不携带个人资产库；导入后若本机仍有同一资产身份，则恢复新项目关系。删除画布会清除所有资产上的
+该项目关系。
 
 ### 角色衍生契约
 

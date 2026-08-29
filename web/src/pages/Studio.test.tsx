@@ -1057,8 +1057,8 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
 
     expect(screen.getByTestId('studio-more-menu')).toHaveClass('absolute', 'left-full', 'top-0', 'ml-2');
-    expect(screen.getByTestId('studio-more-menu')).toHaveClass('w-[195px]', 'h-11', 'rounded-xl', 'bg-glass', 'p-0');
-    expect(screen.getByRole('button', { name: '删除该批次结果' })).toHaveClass('h-11', 'px-3', 'py-[9px]', 'text-sm');
+    expect(screen.getByTestId('studio-more-menu')).toHaveClass('w-[195px]', 'rounded-xl', 'bg-glass', 'p-1');
+    expect(screen.getByRole('button', { name: '删除该批次结果' })).toHaveClass('h-10', 'w-full', 'px-3', 'text-sm');
     expect(screen.getByTestId('studio-more-menu')).not.toHaveClass('top-full');
   });
 

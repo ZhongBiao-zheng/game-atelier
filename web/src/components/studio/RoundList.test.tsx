@@ -311,6 +311,14 @@ describe('RoundList skill 出图删除门控', () => {
     expect(screen.getByLabelText('更多操作')).toBeInTheDocument();
   });
 
+  it('通过更多操作显式保存历史提示词资产', () => {
+    const onSavePromptAsset = vi.fn();
+    render(<RoundList rounds={[imageDone('image')]} onSavePromptAsset={onSavePromptAsset} />);
+    fireEvent.click(screen.getByLabelText('更多操作'));
+    fireEvent.click(screen.getByRole('button', { name: '保存提示词资产' }));
+    expect(onSavePromptAsset).toHaveBeenCalledWith(imageDone('image').config);
+  });
+
   it('skill 出图不暴露删除入口（防从出图页抹掉角色磁盘资产）', () => {
     render(<RoundList rounds={[imageDone('skill')]} />);
     expect(screen.queryByLabelText('更多操作')).toBeNull();

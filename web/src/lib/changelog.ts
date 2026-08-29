@@ -31,6 +31,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.32.0',
+    date: '2026-08-29',
+    headline: '创作台与画布共用创作资产',
+    changes: [
+      { kind: 'feat', text: '新增应用级提示词与图片资产库，创作台和全部画布共享同一份资产、标签与归档状态' },
+      { kind: 'feat', text: '提示词可把正文片段设为带默认内容的变量，并通过不可变版本保留每次使用时的真实内容' },
+      { kind: 'feat', text: '画布旧引用只在明确操作后更新；原有画布本地资产会自动升级并保留项目关系' },
+    ],
+  },
+  {
     version: '5.31.16',
     date: '2026-08-28',
     headline: '大图预览支持键盘切换',

@@ -7,7 +7,7 @@ declare const process: { cwd: () => string };
 
 const tokenSource = readFileSync(`${process.cwd()}/src/styles/tokens.css`, 'utf-8');
 const libraryPanelSource = readFileSync(
-  `${process.cwd()}/src/components/canvas/CanvasLibraryPanel.tsx`,
+  `${process.cwd()}/src/components/assets/CreationAssetPanel.tsx`,
   'utf-8',
 );
 
@@ -63,7 +63,7 @@ describe('canvas chrome spatial hierarchy', () => {
     expect(tokenSource).toMatch(
       /@media \(min-width: 48rem\) and \(max-width: 63\.999rem\) \{[\s\S]*?\.canvas-library-panel \{[\s\S]*?\+ 8\.125rem/,
     );
-    expect(libraryPanelSource).toContain('canvas-library-panel absolute top-20');
+    expect(libraryPanelSource).toContain("'fixed bottom-56 right-4 top-24");
     expect(tokenSource).toMatch(/\.canvas-editor-region \{[\s\S]*?overscroll-behavior: none/);
     // 已删除的遗留类名不得回流。
     expect(tokenSource).not.toContain('.canvas-tool-rail');

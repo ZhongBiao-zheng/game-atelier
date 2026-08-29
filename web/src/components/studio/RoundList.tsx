@@ -1,6 +1,6 @@
 import { type ButtonHTMLAttributes, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Trash2 } from 'lucide-react';
+import { AlertTriangle, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Trash2 } from 'lucide-react';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -119,6 +119,8 @@ export function RoundList({
   onReuseReferences,
   onEditAsReference,
   onArchive,
+  onSavePromptAsset,
+  onSaveImageAsset,
 }: {
   rounds: RoundState[];
   focusJobId?: string;
@@ -133,6 +135,8 @@ export function RoundList({
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onEditAsReference?: (path: string) => void | Promise<void>;
   onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
+  onSavePromptAsset?: (config: RoundConfig) => void;
+  onSaveImageAsset?: (path: string, config: RoundConfig) => void;
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const lightboxSources = useMemo(() => rounds.flatMap((round) => (
@@ -274,6 +278,8 @@ export function RoundList({
                   onReuseReferences={onReuseReferences}
                   onEditAsReference={onEditAsReference}
                   onArchive={onArchive}
+                  onSavePromptAsset={onSavePromptAsset}
+                  onSaveImageAsset={onSaveImageAsset}
                   mediaActive={mediaActive}
                 />
               )}
@@ -764,6 +770,8 @@ function DoneBatch({
   onReuseReferences,
   onEditAsReference,
   onArchive,
+  onSavePromptAsset,
+  onSaveImageAsset,
   mediaActive,
 }: {
   round: Extract<RoundState, { kind: 'done' }>;
@@ -778,6 +786,8 @@ function DoneBatch({
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onEditAsReference?: (path: string) => void | Promise<void>;
   onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
+  onSavePromptAsset?: (config: RoundConfig) => void;
+  onSaveImageAsset?: (path: string, config: RoundConfig) => void;
   mediaActive: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -934,6 +944,20 @@ function DoneBatch({
                     className="h-full w-full object-contain"
                   />
                   <div className="absolute right-2 top-2 flex gap-1.5">
+                    {onSaveImageAsset && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onSaveImageAsset(path, round.config);
+                        }}
+                        aria-label={`保存生成结果 ${index + 1} 为资产`}
+                        title="保存为创作资产"
+                        className="grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      >
+                        <BookmarkPlus className="size-4" aria-hidden />
+                      </button>
+                    )}
                     {round.mode !== 'skill' && onArchive && (
                       <button
                         type="button"
@@ -1000,23 +1024,38 @@ function DoneBatch({
         <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
         {/* skill 出图（角色立绘/KV/三视图）在出图页只作溯源展示——删除会从磁盘抹掉角色资产，
             该操作只留在工坊页。这里仅对 studio 自家出图开放「删除该批次结果」。 */}
-        {round.mode !== 'skill' && (
+        {(onSavePromptAsset || round.mode !== 'skill') && (
         <div className="relative" ref={menuWrapRef}>
           <ActionButton compact aria-label="更多操作" onClick={() => setMenuOpen((value) => !value)}>...</ActionButton>
           {menuOpen && (
-            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 h-11 w-[195px] rounded-xl bg-glass backdrop-blur-glass border border-border p-0">
-              <button
-                type="button"
-                aria-label="删除该批次结果"
-                className="flex h-11 w-full items-center gap-2 rounded-xl px-3 py-[9px] text-left text-sm font-medium text-foreground hover:bg-secondary/80"
-                onClick={() => {
-                  setMenuOpen(false);
-                  void onDeleteBatch?.(round.jobId, round.imagePaths);
-                }}
-              >
-                <Trash2 className="size-4 shrink-0" aria-hidden />
-                删除该批次结果
-              </button>
+            <div data-testid="studio-more-menu" className="absolute left-full top-0 z-10 ml-2 w-[195px] rounded-xl border border-border bg-glass p-1 backdrop-blur-glass">
+              {onSavePromptAsset && (
+                <button
+                  type="button"
+                  className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-medium text-foreground hover:bg-secondary/80"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onSavePromptAsset(round.config);
+                  }}
+                >
+                  <BookmarkPlus className="size-4 shrink-0" aria-hidden />
+                  保存提示词资产
+                </button>
+              )}
+              {round.mode !== 'skill' && (
+                <button
+                  type="button"
+                  aria-label="删除该批次结果"
+                  className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm font-medium text-foreground hover:bg-secondary/80"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void onDeleteBatch?.(round.jobId, round.imagePaths);
+                  }}
+                >
+                  <Trash2 className="size-4 shrink-0" aria-hidden />
+                  删除该批次结果
+                </button>
+              )}
             </div>
           )}
         </div>

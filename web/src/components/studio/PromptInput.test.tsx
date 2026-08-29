@@ -352,3 +352,43 @@ describe('PromptInput 键盘提交规范（Enter 出图 / Shift+Enter 换行）'
     cleanup();
   });
 });
+
+describe('PromptInput 创作资产插入', () => {
+  it('把提示词资产插入最后一次编辑光标，不额外添加空格', () => {
+    const onValueChange = vi.fn();
+    const { rerender } = render(
+      <PromptInput
+        onSubmit={vi.fn()}
+        providers={[hkKey]}
+        providerAlias="hk"
+        model="gpt-image-2"
+        value="前后"
+        onValueChange={onValueChange}
+      />,
+    );
+    const editor = screen.getByLabelText('生图 prompt');
+    const textNode = editor.firstChild!;
+    const range = document.createRange();
+    range.setStart(textNode, 1);
+    range.collapse(true);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent.mouseUp(editor);
+
+    rerender(
+      <PromptInput
+        onSubmit={vi.fn()}
+        providers={[hkKey]}
+        providerAlias="hk"
+        model="gpt-image-2"
+        value="前后"
+        onValueChange={onValueChange}
+        insertTextRequest={{ requestId: 'insert-1', text: '资产' }}
+      />,
+    );
+
+    expect(onValueChange).toHaveBeenLastCalledWith('前资产后');
+    cleanup();
+  });
+});
