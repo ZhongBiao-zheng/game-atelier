@@ -861,9 +861,15 @@ function StudioFull() {
             aria-label="打开创作资产"
             aria-expanded={assetPanelOpen}
             onClick={() => setAssetPanelOpen(open => !open)}
-            className="pointer-events-auto grid size-12 shrink-0 place-items-center rounded-full border border-input bg-glass text-muted-foreground backdrop-blur-glass transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className={`pointer-events-auto grid shrink-0 place-items-center rounded-full border border-input bg-glass text-muted-foreground backdrop-blur-glass transition-all duration-300 hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+              dockCollapsed ? 'mb-[22px] size-8' : 'mb-4 size-10'
+            }`}
           >
-            <Library size={19} />
+            <Library
+              size={18}
+              aria-hidden
+              className={`transition-transform duration-300 ${dockCollapsed ? 'scale-90' : ''}`}
+            />
           </button>
         </div>
       </div>

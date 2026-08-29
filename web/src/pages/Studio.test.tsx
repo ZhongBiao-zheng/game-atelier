@@ -205,6 +205,13 @@ describe('Studio', () => {
     );
   });
 
+  it('资产入口与展开态生成按钮同尺寸、同底部高度', () => {
+    renderStudio();
+
+    expect(screen.getByLabelText('打开创作资产')).toHaveClass('size-10', 'mb-4');
+    expect(screen.getByLabelText('提交生成')).toHaveClass('w-10', 'h-10', 'bottom-4');
+  });
+
   it('shows no example prompt chips when no rounds', () => {
     renderStudio();
     expect(screen.queryByText(/试试/)).not.toBeInTheDocument();
