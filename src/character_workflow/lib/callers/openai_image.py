@@ -214,8 +214,10 @@ def render(
     # gpt-image 界面给四档、后端静默丢弃；provider=openai 下的 dall-e 反过来会被塞进
     # gpt-image 的 low/high 词表，而 DALL·E 只认 standard|hd）。
     # Tuzi 的固定 Nano Banana 型号用 quality 同时做分辨率与计价路由：缺失会报
-    # model_price_error，旧 Job 的 low 又会把 4K 路由成 1K。固定值必须优先于历史参数。
+    # model_price_error，旧 Job 的 low 又会把 4K 路由成 1K。非 VIP 固定型号只是目录别名，
+    # Tuzi 当前实际计价路由认基础型号 + quality；因此展示型号保留，出站型号在这里归一。
     fixed_tuzi_quality = fixed_nano_resolution_quality(model) if is_tuzi else None
+    outbound_model = tuzi_outbound_image_model(model) if is_tuzi else model
     quality = fixed_tuzi_quality
     if quality is None and supports_image_quality(model):
         quality = _quality_param(kwargs)
@@ -282,7 +284,7 @@ def render(
 
     def _gen_payload(num: int) -> dict:
         return _image_generation_payload(
-            model=model,
+            model=outbound_model,
             prompt=prompt,
             size=requested_size,
             n=num,
@@ -549,6 +551,14 @@ def fixed_nano_resolution_quality(model: str) -> str | None:
         return None
     match = re.search(r"-(2k|4k)(?:-vip)?$", normalized_model_id(model))
     return match.group(1) if match else None
+
+
+def tuzi_outbound_image_model(model: str) -> str:
+    """Map Tuzi's unpriced fixed-resolution aliases to their routable base model."""
+    normalized = normalized_model_id(model)
+    if image_family(normalized) != "nano-banana" or normalized.endswith("-vip"):
+        return model
+    return re.sub(r"-(?:2k|4k)$", "", normalized)
 
 
 def supports_image_quality(model: str) -> bool:

@@ -187,6 +187,7 @@ def test_render_tuzi_routes_fixed_nano_resolution_through_quality(
     )
 
     assert captured["url"] == "https://api.tu-zi.com/v1/images/generations"
+    assert captured["payload"]["model"] == "nano-banana-pro"
     assert captured["payload"]["quality"] == "4k"
 
 
@@ -988,6 +989,15 @@ def test_fixed_nano_resolution_quality_reads_model_suffix():
     assert openai_image.fixed_nano_resolution_quality("nano-banana-pro-4k-vip") == "4k"
     assert openai_image.fixed_nano_resolution_quality("nano-banana-pro") is None
     assert openai_image.fixed_nano_resolution_quality("gpt-image-2") is None
+
+    assert openai_image.tuzi_outbound_image_model("nano-banana-pro-4k") == "nano-banana-pro"
+    assert openai_image.tuzi_outbound_image_model("nano-banana-pro-2k") == "nano-banana-pro"
+    assert openai_image.tuzi_outbound_image_model("nano-banana-2-4k") == "nano-banana-2"
+    assert (
+        openai_image.tuzi_outbound_image_model("nano-banana-pro-4k-vip")
+        == "nano-banana-pro-4k-vip"
+    )
+    assert openai_image.tuzi_outbound_image_model("gpt-image-2") == "gpt-image-2"
 
 
 def test_image_items_from_text_cleans_malformed_markdown_url():
