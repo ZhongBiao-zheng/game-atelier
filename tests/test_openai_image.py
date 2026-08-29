@@ -160,10 +160,49 @@ def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
-def test_render_tuzi_routes_fixed_nano_resolution_through_quality(
+@pytest.mark.parametrize(
+    ("model", "requested_quality", "outbound_model", "outbound_quality"),
+    [
+        (
+            "nano-banana-pro-2k",
+            "high",
+            "gemini-3-pro-image-preview",
+            "2k",
+        ),
+        (
+            "nano-banana-pro-4k",
+            "low",
+            "gemini-3-pro-image-preview",
+            "4k",
+        ),
+        (
+            "nano-banana-2-2k",
+            "high",
+            "gemini-3.1-flash-image-preview",
+            "2k",
+        ),
+        (
+            "nano-banana-2-4k",
+            "low",
+            "gemini-3.1-flash-image-preview",
+            "4k",
+        ),
+        (
+            "nano-banana-pro-4k-vip",
+            "high",
+            "gemini-3-pro-image-preview-4k-vip",
+            None,
+        ),
+    ],
+)
+def test_render_tuzi_routes_nano_models_to_billable_payloads(
     isolated_data_root,
     tmp_path,
     monkeypatch,
+    model,
+    requested_quality,
+    outbound_model,
+    outbound_quality,
 ):
     _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
     captured: dict[str, object] = {}
@@ -178,17 +217,17 @@ def test_render_tuzi_routes_fixed_nano_resolution_through_quality(
 
     openai_image.render(
         prompt="banana cat",
-        model="nano-banana-pro-4k",
+        model=model,
         alias="Tuzi",
         output_dir=tmp_path,
         n=1,
         size="3:4",
-        params={"quality": "low"},
+        params={"quality": requested_quality},
     )
 
     assert captured["url"] == "https://api.tu-zi.com/v1/images/generations"
-    assert captured["payload"]["model"] == "nano-banana-pro"
-    assert captured["payload"]["quality"] == "4k"
+    assert captured["payload"]["model"] == outbound_model
+    assert captured["payload"].get("quality") == outbound_quality
 
 
 def test_render_tuzi_resume_never_submits_supplemental_billed_task(
@@ -990,16 +1029,25 @@ def test_fixed_nano_resolution_quality_reads_model_suffix():
     assert openai_image.fixed_nano_resolution_quality("nano-banana-pro") is None
     assert openai_image.fixed_nano_resolution_quality("gpt-image-2") is None
 
-    assert openai_image.tuzi_outbound_image_model("nano-banana-pro-4k") == "nano-banana-pro"
-    assert openai_image.tuzi_outbound_image_model("nano-banana-pro-2k") == "nano-banana-pro"
-    assert openai_image.tuzi_outbound_image_model("nano-banana-2-4k") == "nano-banana-2"
+    assert (
+        openai_image.tuzi_outbound_image_model("nano-banana-pro-4k")
+        == "gemini-3-pro-image-preview"
+    )
+    assert (
+        openai_image.tuzi_outbound_image_model("nano-banana-pro-2k")
+        == "gemini-3-pro-image-preview"
+    )
+    assert (
+        openai_image.tuzi_outbound_image_model("nano-banana-2-4k")
+        == "gemini-3.1-flash-image-preview"
+    )
     assert (
         openai_image.tuzi_outbound_image_model("vendor/NANO_BANANA_PRO_4K")
-        == "vendor/NANO_BANANA_PRO"
+        == "gemini-3-pro-image-preview"
     )
     assert (
         openai_image.tuzi_outbound_image_model("nano-banana-pro-4k-vip")
-        == "nano-banana-pro-4k-vip"
+        == "gemini-3-pro-image-preview-4k-vip"
     )
     assert openai_image.tuzi_outbound_image_model("gpt-image-2") == "gpt-image-2"
 
