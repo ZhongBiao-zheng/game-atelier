@@ -35,9 +35,12 @@ const TUZI_DEFAULT_YUAN_PER_IMAGE: Record<string, number> = {
   'doubao-seedream-4-5-251128': 0.12,
   'seedream-4-5': 0.12,
   'seedream-5-0-pro': 0.6,
-  'nano-banana-pro': 0.072,
-  'nano-banana-pro-2k': 0.32,
-  'nano-banana-pro-4k': 0.35,
+  // Tuzi Tier 2 default 分组按 gemini-3-pro-image-preview 请求统一计价；
+  // 1K/2K/4K 只是 quality 参数，不是三个计费 SKU。
+  'gemini-3-pro-image-preview': 0.3,
+  'nano-banana-pro': 0.3,
+  'nano-banana-pro-2k': 0.3,
+  'nano-banana-pro-4k': 0.3,
   'nano-banana-2': 0.3,
   'nano-banana-2-2k': 0.48,
   'nano-banana-2-4k': 0.82,
