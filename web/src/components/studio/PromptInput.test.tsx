@@ -30,6 +30,15 @@ function renderWith(model: string) {
   );
 }
 
+describe('PromptInput 编辑区', () => {
+  it('隐藏原生滚动条并保留纵向滚动', () => {
+    renderWith('gpt-image-2');
+    const editor = screen.getByRole('textbox', { name: '生图 prompt' });
+    expect(editor).toHaveClass('no-scrollbar', 'overflow-y-auto');
+    cleanup();
+  });
+});
+
 describe('PromptInput 尺寸面板按模型族渲染', () => {
   it('gpt-image: 显示自定义尺寸 + 质量，不显示分辨率', () => {
     renderWith('gpt-image-2');

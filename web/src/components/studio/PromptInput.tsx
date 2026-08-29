@@ -1027,7 +1027,7 @@ export function PromptInput({
           onCompositionEnd={() => { composing.current = false; onEditorInput(); }}
           onMouseOver={onEditorMouseOver}
           onMouseOut={onEditorMouseOut}
-          className={`flex-1 min-h-0 w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-sm text-foreground focus:outline-none rounded-md pl-2 transition-[height,padding] duration-300 empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground ${
+          className={`no-scrollbar flex-1 min-h-0 w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-sm text-foreground focus:outline-none rounded-md pl-2 transition-[height,padding] duration-300 empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground ${
             collapsed ? 'h-6 self-center overflow-hidden pr-10' : onSavePromptAsset ? 'h-full pr-10' : 'h-full pr-2'
           }`}
         />
