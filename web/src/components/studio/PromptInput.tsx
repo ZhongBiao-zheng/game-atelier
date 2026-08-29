@@ -572,6 +572,11 @@ export function PromptInput({
   const [sizeLocked, setSizeLocked] = useState(true);
   // 能力四项按模型族判（provider 只决定端点/协议，openrouter 另外改 size 语义）。
   const caps = imageControlCaps(selectedModel?.id, provider?.provider, selectedModel?.protocol);
+  const sizeControlDetail = caps.showResolution
+    ? (resolution === '2K' ? '高清 2K' : '超清 4K')
+    : caps.qualities?.length
+      ? (QUALITY_LABELS[quality] ?? quality)
+      : null;
   // MJ 的比例/版本/stylize 由渠道固定注入，张数也固定 4 —— 这些控件不能装作可选。
   const isMj = caps.family === 'midjourney';
   const maxRef = maxReferenceImages(selectedModel?.id);
@@ -1268,14 +1273,11 @@ export function PromptInput({
             >
               <Square size={14} aria-hidden />
               {caps.showCustomSize ? <>{localW}:{localH}</> : <>{ratio}</>}
-              {/* MJ 既无分辨率档也无质量档（都是 prompt flag），第二段没有内容，
-                  连分隔符一起省掉，否则按钮上挂一根光秃秃的竖线。 */}
-              {!isMj && (
+              {/* 第二段没有实际参数时连分隔符一起省掉，避免按钮末尾挂一根竖线。 */}
+              {sizeControlDetail && (
                 <>
                   <span className="text-muted-foreground">|</span>
-                  {caps.showResolution
-                    ? (resolution === '2K' ? '高清 2K' : '超清 4K')
-                    : (caps.qualities ? (QUALITY_LABELS[quality] ?? quality) : null)}
+                  {sizeControlDetail}
                 </>
               )}
             </ControlButton>

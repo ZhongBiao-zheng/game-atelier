@@ -81,13 +81,14 @@ function aspectStyle(config: RoundConfig): { aspectRatio: string } {
 }
 
 function specMetadata(config: RoundConfig): string[] {
-  return [
+  const values = [
     config.modelName ?? config.model,
     config.size,
     config.ratio,
     config.resolution,
     config.n && config.n > 1 ? `${config.n} 张` : undefined,
   ].filter((value): value is string => Boolean(value));
+  return values.filter((value, index) => values.indexOf(value) === index);
 }
 
 function shownMjMetadata(config: RoundConfig): string {
@@ -1095,15 +1096,7 @@ function FailedCard({
   mediaActive: boolean;
 }) {
   const { config } = round;
-  const meta = config
-    ? [
-        config.modelName ?? config.model,
-        config.size,
-        config.ratio,
-        config.resolution,
-        config.n && config.n > 1 ? `${config.n} 张` : undefined,
-      ].filter(Boolean)
-    : [];
+  const meta = config ? specMetadata(config) : [];
 
   return (
     <section className="space-y-3">

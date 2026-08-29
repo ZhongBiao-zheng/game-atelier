@@ -550,6 +550,21 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
     },
   };
 
+  it('size 与 ratio 相同时只显示一次比例', () => {
+    render(<RoundList rounds={[{
+      ...timedDone,
+      config: {
+        ...timedDone.config,
+        modelName: 'Nano Banana Pro 4K',
+        size: '3:4',
+        ratio: '3:4',
+        resolution: undefined,
+      },
+    }]} />);
+    expect(screen.getByText('Nano Banana Pro 4K · 3:4')).toBeInTheDocument();
+    expect(screen.queryByText('Nano Banana Pro 4K · 3:4 · 3:4')).toBeNull();
+  });
+
   it('显示出图耗时（completed_at − submitted_at）与北京时间生成时间', () => {
     const { container } = render(<RoundList rounds={[timedDone]} />);
     expect(container.textContent).toContain('耗时 12s');

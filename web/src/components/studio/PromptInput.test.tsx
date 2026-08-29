@@ -61,7 +61,10 @@ describe('PromptInput 尺寸面板按模型族渲染', () => {
 
   it('固定 4K nano-banana: 型号已经定档，不再显示质量', () => {
     renderWith('nano-banana-pro-4k');
-    fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
+    const sizeButton = screen.getByRole('button', { name: /选择比例和分辨率/ });
+    expect(sizeButton).toHaveTextContent(/^1:1$/);
+    expect(sizeButton).not.toHaveTextContent('|');
+    fireEvent.click(sizeButton);
     expect(screen.queryByLabelText('选择质量')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('选择分辨率')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
