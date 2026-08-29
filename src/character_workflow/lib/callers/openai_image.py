@@ -213,14 +213,12 @@ def render(
     # quality 按**模型能力**判，与前端 imageControlCaps 同一判据（旧版按 provider：词元跳动上的
     # gpt-image 界面给四档、后端静默丢弃；provider=openai 下的 dall-e 反过来会被塞进
     # gpt-image 的 low/high 词表，而 DALL·E 只认 standard|hd）。
-    # Tuzi 的固定 Nano Banana 型号用 quality 同时做分辨率与计价路由：缺失会报
-    # model_price_error，旧 Job 的 low 又会把 4K 路由成 1K。非 VIP 固定型号只是目录别名，
-    # Tuzi 当前实际计价路由认基础型号 + quality；因此展示型号保留，出站型号在这里归一。
-    fixed_tuzi_quality = fixed_nano_resolution_quality(model) if is_tuzi else None
+    # Tuzi 的 nano-banana-* 是展示别名，图片端点的正式路由使用 Gemini model id。
+    # 固定 2K/4K 型号把清晰度编码在正式 model id 里；只有基础型号另发 quality。
     outbound_model = tuzi_outbound_image_model(model) if is_tuzi else model
-    quality = fixed_tuzi_quality
-    if quality is None and supports_image_quality(model):
-        quality = _quality_param(kwargs)
+    quality = _quality_param(kwargs) if supports_image_quality(model) else None
+    if is_tuzi and family == "nano-banana":
+        quality = tuzi_image_quality(model, quality)
     image_protocol = _effective_image_protocol(key, model)
     background = (
         _background_param(kwargs)
@@ -503,7 +501,7 @@ def _image_generation_payload(
         # output_format：Ark 默认 jpeg，而我们把产物一律存成 .png —— 实测 26 张历史产物里
         # 11 张实际是 JPEG，既名实不符又白挨一道有损压缩。立绘要无损，显式要 png。
         payload["output_format"] = "png"
-    if quality:  # caller 已按 provider + model 能力归一；Tuzi 固定档会传 2k/4k
+    if quality:  # caller 已按 provider + model 能力归一；Tuzi 只有可调档基础型号会传。
         payload["quality"] = quality
     if background:  # gpt-image：auto/opaque/transparent
         payload["background"] = background
@@ -554,11 +552,28 @@ def fixed_nano_resolution_quality(model: str) -> str | None:
 
 
 def tuzi_outbound_image_model(model: str) -> str:
-    """Map Tuzi's unpriced fixed-resolution aliases to their routable base model."""
+    """Map Tuzi's public Nano Banana aliases to image-endpoint model ids."""
     normalized = normalized_model_id(model)
-    if image_family(normalized) != "nano-banana" or normalized.endswith("-vip"):
-        return model
-    return re.sub(r"[-_.](?:2k|4k)$", "", model, flags=re.IGNORECASE)
+    aliases = (
+        ("nano-banana-pro", "gemini-3-pro-image-preview"),
+        ("nano-banana-2", "gemini-3.1-flash-image-preview"),
+    )
+    for alias, canonical in aliases:
+        if normalized == alias:
+            return canonical
+        if normalized.startswith(f"{alias}-"):
+            return f"{canonical}{normalized[len(alias):]}"
+    return model
+
+
+def tuzi_image_quality(model: str, quality: str | None) -> str | None:
+    """Translate the shared UI quality scale to Tuzi's Gemini image-size values."""
+    normalized = normalized_model_id(model)
+    if fixed_nano_resolution_quality(model) is not None:
+        return None
+    if normalized.endswith("-vip") or normalized.endswith("-hd"):
+        return None
+    return {"low": "1k", "medium": "2k", "high": "4k"}.get(quality or "", "1k")
 
 
 def supports_image_quality(model: str) -> bool:
