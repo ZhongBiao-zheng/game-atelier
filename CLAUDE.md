@@ -117,6 +117,7 @@ make dev-unlink
 
 # 测试
 make test                                             # pytest + vitest
+make verify                                           # 交付前：完整 lint/test/clean build/产物一致性
 uv run pytest -v tests/test_jobs.py                   # 单个文件
 uv run pytest -v -k "test_pending_confirm"            # 按名字过滤
 cd web && pnpm test                                   # vitest run
@@ -178,6 +179,13 @@ Key routing rules:
 - Resume context → invoke /context-restore
 
 ## Agent skills
+
+### Product features
+
+重要用户可见功能、跨界面功能或会新增领域对象/Schema/迁移的改动，动手前必须读取并遵循
+`docs/agents/product-feature-workflow.md`。Product Contract 未确认前不得进入完整生产实现；收到新请求时先做
+分支范围检查，规则变化写入 Decision Changes，无关任务新建分支或 worktree。UI 功能需先验证风险状态，
+交付前运行 `make verify`，创建 PR 后未经用户明确授权不得合并。
 
 ### Issue tracker
 
