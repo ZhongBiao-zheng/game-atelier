@@ -210,11 +210,16 @@ def render(
 
     # custom 走 family 判定补诚实；命名 provider(openai/seedream/tokendance/HK) 分支不动。
     # family / is_seedream 已在上方（尺寸归一化前）算好，这里不重算。
-    # quality 按**族**判，与前端 imageControlCaps 同一判据（旧版按 provider：词元跳动上的
+    # quality 按**模型能力**判，与前端 imageControlCaps 同一判据（旧版按 provider：词元跳动上的
     # gpt-image 界面给四档、后端静默丢弃；provider=openai 下的 dall-e 反过来会被塞进
     # gpt-image 的 low/high 词表，而 DALL·E 只认 standard|hd）。
-    wants_quality = family in ("gpt-image", "nano-banana")
-    quality = _quality_param(kwargs) if wants_quality else None
+    # Tuzi 的 nano-banana-* 是展示别名，图片端点的正式路由使用 Gemini model id。
+    # 非 VIP 固定 2K/4K 别名也走基础 canonical model + quality；它们在目录中
+    # 虽有同名 canonical fixed model，但 default 分组未计价。VIP/HD 才保留固定型号。
+    outbound_model = tuzi_outbound_image_model(model) if is_tuzi else model
+    quality = _quality_param(kwargs) if supports_image_quality(model) else None
+    if is_tuzi and family == "nano-banana":
+        quality = tuzi_image_quality(model, quality)
     image_protocol = _effective_image_protocol(key, model)
     background = (
         _background_param(kwargs)
@@ -278,7 +283,7 @@ def render(
 
     def _gen_payload(num: int) -> dict:
         return _image_generation_payload(
-            model=model,
+            model=outbound_model,
             prompt=prompt,
             size=requested_size,
             n=num,
@@ -497,7 +502,9 @@ def _image_generation_payload(
         # output_format：Ark 默认 jpeg，而我们把产物一律存成 .png —— 实测 26 张历史产物里
         # 11 张实际是 JPEG，既名实不符又白挨一道有损压缩。立绘要无损，显式要 png。
         payload["output_format"] = "png"
-    if quality:  # gpt-image / nano-banana：low/medium/high/auto
+    # Tuzi 可调质量基础型号与其非 VIP 固定别名靠 quality 路由；
+    # VIP/HD/NT 与旧版 2.5 型号的档位内建在 model id。
+    if quality:
         payload["quality"] = quality
     if background:  # gpt-image：auto/opaque/transparent
         payload["background"] = background
@@ -537,6 +544,70 @@ def image_family(model: str) -> str:
     if "seedream" in m or "seededit" in m:
         return "seedream"
     return "standard"
+
+
+def fixed_nano_resolution_quality(model: str) -> str | None:
+    """Return the deterministic quality route encoded by a fixed Nano Banana model id."""
+    if image_family(model) != "nano-banana":
+        return None
+    match = re.search(r"-(2k|4k)(?:-vip)?$", normalized_model_id(model))
+    return match.group(1) if match else None
+
+
+_TUZI_NANO_ROUTES = (
+    ("nano-banana-pro", "gemini-3-pro-image-preview", True),
+    ("nano-banana-2", "gemini-3.1-flash-image-preview", True),
+    ("nano-banana", "gemini-2.5-flash-image", False),
+)
+
+
+def _tuzi_nano_route(model: str) -> tuple[str, bool, str] | None:
+    normalized = normalized_model_id(model)
+    for alias, canonical, adjustable in _TUZI_NANO_ROUTES:
+        if normalized == alias:
+            return canonical, adjustable, ""
+        if normalized.startswith(f"{alias}-"):
+            return canonical, adjustable, normalized[len(alias):]
+    return None
+
+
+def tuzi_outbound_image_model(model: str) -> str:
+    """Map Tuzi's public Nano Banana aliases to image-endpoint model ids."""
+    route = _tuzi_nano_route(model)
+    if route is None:
+        return model
+    canonical, adjustable, suffix = route
+    if adjustable and suffix in {"-2k", "-4k"}:
+        return canonical
+    return f"{canonical}{suffix}"
+
+
+def tuzi_image_quality(model: str, quality: str | None) -> str | None:
+    """Translate the shared UI quality scale to Tuzi's Gemini image-size values."""
+    route = _tuzi_nano_route(model)
+    if route is None:
+        return None
+    _canonical, adjustable, _suffix = route
+    if not adjustable:
+        # Other gateways may expose quality for this family; Tuzi's official transport does not.
+        return None
+    normalized = normalized_model_id(model)
+    if normalized.endswith(("-vip", "-hd", "-nt")):
+        return None
+    fixed_quality = fixed_nano_resolution_quality(model)
+    if fixed_quality is not None:
+        return fixed_quality
+    return {"low": "1k", "medium": "2k", "high": "4k"}.get(quality or "", "1k")
+
+
+def supports_image_quality(model: str) -> bool:
+    """图片模型是否暴露独立 quality 选择；与前端 supportsImageQuality 对齐。"""
+    family = image_family(model)
+    if family == "gpt-image":
+        return True
+    if family != "nano-banana":
+        return False
+    return fixed_nano_resolution_quality(model) is None
 
 
 def supports_image_mask(provider: str, model: str, protocol: str | None = None) -> bool:

@@ -14,6 +14,7 @@ const hkKey: KeyView = {
   models: [
     { name: 'GPT Image 2', id: 'gpt-image-2' },
     { name: 'Nano Banana', id: 'nano-banana' },
+    { name: 'Nano Banana Pro 4K', id: 'nano-banana-pro-4k' },
   ],
   notes: '',
   created_at: '2026-05-25T00:00:00Z',
@@ -30,6 +31,15 @@ function renderWith(model: string) {
   );
 }
 
+describe('PromptInput 编辑区', () => {
+  it('隐藏原生滚动条并保留纵向滚动', () => {
+    renderWith('gpt-image-2');
+    const editor = screen.getByRole('textbox', { name: '生图 prompt' });
+    expect(editor).toHaveClass('no-scrollbar', 'overflow-y-auto');
+    cleanup();
+  });
+});
+
 describe('PromptInput 尺寸面板按模型族渲染', () => {
   it('gpt-image: 显示自定义尺寸 + 质量，不显示分辨率', () => {
     renderWith('gpt-image-2');
@@ -44,6 +54,18 @@ describe('PromptInput 尺寸面板按模型族渲染', () => {
     renderWith('nano-banana');
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     expect(screen.getByLabelText('选择质量')).toBeInTheDocument();
+    expect(screen.queryByLabelText('选择分辨率')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
+    cleanup();
+  });
+
+  it('固定 4K nano-banana: 型号已经定档，不再显示质量', () => {
+    renderWith('nano-banana-pro-4k');
+    const sizeButton = screen.getByRole('button', { name: /选择比例和分辨率/ });
+    expect(sizeButton).toHaveTextContent(/^1:1$/);
+    expect(sizeButton).not.toHaveTextContent('|');
+    fireEvent.click(sizeButton);
+    expect(screen.queryByLabelText('选择质量')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('选择分辨率')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
     cleanup();
@@ -349,6 +371,46 @@ describe('PromptInput 键盘提交规范（Enter 出图 / Shift+Enter 换行）'
     fireEvent.compositionStart(editor);
     fireEvent.keyDown(editor, { key: 'Enter' });
     expect(onSubmit).not.toHaveBeenCalled();
+    cleanup();
+  });
+});
+
+describe('PromptInput 创作资产插入', () => {
+  it('把提示词资产插入最后一次编辑光标，不额外添加空格', () => {
+    const onValueChange = vi.fn();
+    const { rerender } = render(
+      <PromptInput
+        onSubmit={vi.fn()}
+        providers={[hkKey]}
+        providerAlias="hk"
+        model="gpt-image-2"
+        value="前后"
+        onValueChange={onValueChange}
+      />,
+    );
+    const editor = screen.getByLabelText('生图 prompt');
+    const textNode = editor.firstChild!;
+    const range = document.createRange();
+    range.setStart(textNode, 1);
+    range.collapse(true);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    fireEvent.mouseUp(editor);
+
+    rerender(
+      <PromptInput
+        onSubmit={vi.fn()}
+        providers={[hkKey]}
+        providerAlias="hk"
+        model="gpt-image-2"
+        value="前后"
+        onValueChange={onValueChange}
+        insertTextRequest={{ requestId: 'insert-1', text: '资产' }}
+      />,
+    );
+
+    expect(onValueChange).toHaveBeenLastCalledWith('前资产后');
     cleanup();
   });
 });

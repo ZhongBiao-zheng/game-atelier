@@ -175,6 +175,7 @@ export function CanvasGenerationPreferencesDialog({
         effectiveChoice.model.id,
         effectiveChoice.key.provider,
         effectiveChoice.model.protocol,
+        effectiveChoice.key.base_url,
       )
     : null;
   const videoCaps = activeMode === 'video' && effectiveChoice

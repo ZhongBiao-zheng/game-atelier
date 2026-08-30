@@ -51,6 +51,17 @@ describe('RoundList video', () => {
     expect(screen.getByText('一只猫在跳舞')).toBeInTheDocument();
   });
 
+  it('shows the frozen creation asset title without an interactive reference', () => {
+    render(<RoundList rounds={[{
+      ...videoDone,
+      config: { ...videoDone.config, sourceAssetTitle: '雨夜电影感' },
+    }]} />);
+
+    const source = screen.getByTestId('round-asset-source');
+    expect(source).toHaveTextContent('来源：雨夜电影感');
+    expect(source.closest('a, button')).toBeNull();
+  });
+
   it('does not create players or decode reference videos before the round nears the viewport', () => {
     let intersectionCallback: IntersectionObserverCallback | undefined;
     class MockIntersectionObserver implements IntersectionObserver {
@@ -311,6 +322,14 @@ describe('RoundList skill 出图删除门控', () => {
     expect(screen.getByLabelText('更多操作')).toBeInTheDocument();
   });
 
+  it('通过更多操作显式保存历史提示词资产', () => {
+    const onSavePromptAsset = vi.fn();
+    render(<RoundList rounds={[imageDone('image')]} onSavePromptAsset={onSavePromptAsset} />);
+    fireEvent.click(screen.getByLabelText('更多操作'));
+    fireEvent.click(screen.getByRole('button', { name: '保存提示词资产' }));
+    expect(onSavePromptAsset).toHaveBeenCalledWith(imageDone('image').config);
+  });
+
   it('skill 出图不暴露删除入口（防从出图页抹掉角色磁盘资产）', () => {
     render(<RoundList rounds={[imageDone('skill')]} />);
     expect(screen.queryByLabelText('更多操作')).toBeNull();
@@ -541,6 +560,21 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
       referenceImages: [],
     },
   };
+
+  it('size 与 ratio 相同时只显示一次比例', () => {
+    render(<RoundList rounds={[{
+      ...timedDone,
+      config: {
+        ...timedDone.config,
+        modelName: 'Nano Banana Pro 4K',
+        size: '3:4',
+        ratio: '3:4',
+        resolution: undefined,
+      },
+    }]} />);
+    expect(screen.getByText('Nano Banana Pro 4K · 3:4')).toBeInTheDocument();
+    expect(screen.queryByText('Nano Banana Pro 4K · 3:4 · 3:4')).toBeNull();
+  });
 
   it('显示出图耗时（completed_at − submitted_at）与北京时间生成时间', () => {
     const { container } = render(<RoundList rounds={[timedDone]} />);

@@ -160,6 +160,76 @@ def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
+@pytest.mark.parametrize(
+    ("model", "requested_quality", "outbound_model", "outbound_quality"),
+    [
+        (
+            "nano-banana-pro-2k",
+            "high",
+            "gemini-3-pro-image-preview",
+            "2k",
+        ),
+        (
+            "nano-banana-pro-4k",
+            "low",
+            "gemini-3-pro-image-preview",
+            "4k",
+        ),
+        (
+            "nano-banana-2-2k",
+            "high",
+            "gemini-3.1-flash-image-preview",
+            "2k",
+        ),
+        (
+            "nano-banana-2-4k",
+            "low",
+            "gemini-3.1-flash-image-preview",
+            "4k",
+        ),
+        (
+            "nano-banana-pro-4k-vip",
+            "high",
+            "gemini-3-pro-image-preview-4k-vip",
+            None,
+        ),
+    ],
+)
+def test_render_tuzi_routes_nano_models_to_billable_payloads(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+    model,
+    requested_quality,
+    outbound_model,
+    outbound_quality,
+):
+    _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
+    captured: dict[str, object] = {}
+
+    def fake_execute_json(**kwargs):
+        captured.update(kwargs)
+        return {"data": [{
+            "b64_json": base64.b64encode(b"\x89PNG\r\n\x1a\n4k").decode("ascii"),
+        }]}
+
+    monkeypatch.setattr(openai_image.tuzi_async, "execute_json", fake_execute_json)
+
+    openai_image.render(
+        prompt="banana cat",
+        model=model,
+        alias="Tuzi",
+        output_dir=tmp_path,
+        n=1,
+        size="3:4",
+        params={"quality": requested_quality},
+    )
+
+    assert captured["url"] == "https://api.tu-zi.com/v1/images/generations"
+    assert captured["payload"]["model"] == outbound_model
+    assert captured["payload"].get("quality") == outbound_quality
+
+
 def test_render_tuzi_resume_never_submits_supplemental_billed_task(
     isolated_data_root,
     tmp_path,
@@ -952,6 +1022,36 @@ def test_render_openai_hk_nano_banana_passes_ratio_size_and_backfills(
     assert len(paths) == 3
 
 
+def test_fixed_nano_resolution_quality_reads_model_suffix():
+    assert openai_image.fixed_nano_resolution_quality("nano-banana-pro-4k") == "4k"
+    assert openai_image.fixed_nano_resolution_quality("nano-banana-2-2k") == "2k"
+    assert openai_image.fixed_nano_resolution_quality("nano-banana-pro-4k-vip") == "4k"
+    assert openai_image.fixed_nano_resolution_quality("nano-banana-pro") is None
+    assert openai_image.fixed_nano_resolution_quality("gpt-image-2") is None
+
+    assert (
+        openai_image.tuzi_outbound_image_model("nano-banana-pro-4k")
+        == "gemini-3-pro-image-preview"
+    )
+    assert (
+        openai_image.tuzi_outbound_image_model("nano-banana-pro-2k")
+        == "gemini-3-pro-image-preview"
+    )
+    assert (
+        openai_image.tuzi_outbound_image_model("nano-banana-2-4k")
+        == "gemini-3.1-flash-image-preview"
+    )
+    assert (
+        openai_image.tuzi_outbound_image_model("vendor/NANO_BANANA_PRO_4K")
+        == "gemini-3-pro-image-preview"
+    )
+    assert (
+        openai_image.tuzi_outbound_image_model("nano-banana-pro-4k-vip")
+        == "gemini-3-pro-image-preview-4k-vip"
+    )
+    assert openai_image.tuzi_outbound_image_model("gpt-image-2") == "gpt-image-2"
+
+
 def test_image_items_from_text_cleans_malformed_markdown_url():
     dirty = (
         "![image](https://pro.filesystem.site/cdn/20260529/out.png]"
@@ -1738,7 +1838,7 @@ def test_capability_matrix_matches_shared_fixture(case):
     family = openai_image.image_family(model)
     assert family == case["family"], f"{model} 族判定"
     assert openai_image._max_reference_images(provider, model) == case["max_reference_images"]
-    assert (family in ("gpt-image", "nano-banana")) == case["supports_quality"]
+    assert openai_image.supports_image_quality(model) == case["supports_quality"]
     if case["min_pixels"] is None:
         assert family != "seedream"
     else:

@@ -55,6 +55,10 @@ def canvases_dir() -> Path:
     return resolve_data_root() / "canvases"
 
 
+def creation_assets_dir() -> Path:
+    return resolve_data_root() / "creation-assets"
+
+
 def workspace_memory() -> Path:
     return resolve_data_root() / "MEMORY.md"
 

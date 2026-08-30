@@ -23,8 +23,6 @@ from character_workflow.lib.schemas import (
     CanvasDocument,
     CanvasImageNode,
     CanvasMediaVersion,
-    CanvasLibraryAsset,
-    CanvasPrompt,
     CanvasProject,
     CanvasProjectCover,
     CanvasProjectSummary,
@@ -32,7 +30,6 @@ from character_workflow.lib.schemas import (
     CanvasTextVersion,
     CanvasUploadOrigin,
     CanvasVideoNode,
-    RevisionedSidecar,
     JobParams,
     canvas_allowed_draft_params,
 )
@@ -196,12 +193,7 @@ def create_canvas_project(name: str) -> CanvasProject:
     (target / "uploads").mkdir()
     (target / "outputs").mkdir()
     (target / "derived").mkdir()
-    (target / "library").mkdir()
     (target / "agent" / "sessions").mkdir(parents=True)
-    assets = RevisionedSidecar[CanvasLibraryAsset](updated_at=timestamp)
-    prompts = RevisionedSidecar[CanvasPrompt](updated_at=timestamp)
-    atomic_write_json(target / "library" / "assets.json", assets.model_dump(mode="json"))
-    atomic_write_json(target / "library" / "prompts.json", prompts.model_dump(mode="json"))
     atomic_write_json(target / "project.json", project.model_dump(mode="json"))
     return project
 

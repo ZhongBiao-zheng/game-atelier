@@ -5,7 +5,8 @@
  * 多个族，按 provider 判会把能力判错。
  *
  * 各族规格来自厂商文档：
- * - nano-banana：size 是比例枚举(不可自定义像素)，有质量，分辨率靠模型名区分。
+ * - nano-banana：size 是比例枚举(不可自定义像素)；无后缀型号有质量档，固定 2K/4K
+ *   型号的分辨率由模型名决定，不再叠加 quality。
  * - gpt-image：size 自由像素(最大边≤3840/双边16倍数/宽高比≤3:1)，有质量(含 auto)。
  * - seedream / standard：比例 + 2K/4K 分辨率 + 自定义像素，无质量。
  *
@@ -13,7 +14,12 @@
  * 而不是像素，所以 provider=openrouter 时全族都改走比例、且不暴露分辨率/自定义像素
  * （后端 openrouter_image 会把 params.resolution 当 API 参数发出去，控件藏了还写就是静默计费）。
  */
-import { imageFamily, type ImageFamily } from '@/lib/modelFamily';
+import {
+  imageFamily,
+  normalizedModelId,
+  supportsImageQuality,
+  type ImageFamily,
+} from '@/lib/modelFamily';
 import { availableResolutions, type Resolution } from '@/lib/studioSize';
 
 export type Quality = 'low' | 'medium' | 'high' | 'auto';
@@ -98,11 +104,26 @@ export function imageControlCaps(
   modelId?: string | null,
   provider?: string | null,
   protocol?: string | null,
+  baseUrl?: string | null,
 ): ImageControlCaps {
   const family = imageFamily(modelId);
   const base = FAMILY_CAPS[family];
+  const normalized = normalizedModelId(modelId);
+  let isTuzi = false;
+  try {
+    const host = new URL(baseUrl ?? '').hostname.toLowerCase();
+    isTuzi = host === 'tu-zi.com' || host.endsWith('.tu-zi.com');
+  } catch {
+    // Missing or relative URLs are not Tuzi endpoints.
+  }
+  // Tuzi 只有 Pro 与 2 的基础型号接收独立 quality；旧 2.5、HD/NT/VIP 的档位
+  // 都编码在 model id。其他网关仍沿用共享的模型能力判定。
+  const supportsTuziQuality = normalized === 'nano-banana-pro' || normalized === 'nano-banana-2';
+  const qualities = supportsImageQuality(modelId) && (!isTuzi || supportsTuziQuality)
+    ? base.qualities
+    : null;
   // OpenRouter：size 走 aspect_ratio 比例语义（分辨率由厂商默认档决定），
-  // 质量档位仍按族给（后端只对 gpt-image 族真的发 quality）。
+  // 质量档位仍按模型能力给（固定 2K/4K Nano 型号不再叠加 quality）。
   if (provider === 'openrouter') {
     return {
       family,
@@ -110,7 +131,7 @@ export function imageControlCaps(
       showResolution: false,
       resolutions: [],
       showCustomSize: false,
-      qualities: base.qualities,
+      qualities,
       supportsTransparentBackground: false,
       sizeKind: 'ratio',
     };
@@ -118,6 +139,7 @@ export function imageControlCaps(
   return {
     family,
     ...base,
+    qualities,
     supportsTransparentBackground: base.supportsTransparentBackground
       && (protocol == null || protocol === 'openai'),
     resolutions: base.showResolution ? availableResolutions(modelId) : [],

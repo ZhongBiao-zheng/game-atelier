@@ -133,6 +133,7 @@ function mockCompletedBatchAndKeys() {
             n: 2,
             estimated_cost_cny: 0.5,
             actual_cost_cny: 0.63,
+            creation_asset_source_title: '雨夜电影感',
             reference_images: ['/tmp/ref.png'],
           },
           output_paths: ['/tmp/studio/job-studio-1/v1.png', '/tmp/studio/job-studio-1/v2.png'],
@@ -203,6 +204,13 @@ describe('Studio', () => {
       'px-4',
       'pb-4',
     );
+  });
+
+  it('资产入口与展开态生成按钮同尺寸、同底部高度', () => {
+    renderStudio();
+
+    expect(screen.getByLabelText('打开创作资产')).toHaveClass('size-10', 'mb-4');
+    expect(screen.getByLabelText('提交生成')).toHaveClass('w-10', 'h-10', 'bottom-4');
   });
 
   it('shows no example prompt chips when no rounds', () => {
@@ -356,6 +364,50 @@ describe('Studio', () => {
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
     const body = JSON.parse(String(studioCall![1]!.body));
     expect(body.params.size).toBe('1:1'); // OpenRouter 收 aspect_ratio 比例串，不是像素
+    expect(body.params).not.toHaveProperty('resolution');
+    expect(body.params).not.toHaveProperty('quality');
+  });
+
+  it('Tuzi 固定 4K Nano Banana 只发比例，不让默认 low 覆盖型号档位', async () => {
+    const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'tuzi',
+            keys: [{
+              alias: 'tuzi',
+              provider: 'custom',
+              access_key: 'sk-tuzi...key',
+              secret_key: null,
+              capabilities: ['portrait'],
+              models: [{ name: 'Nano Banana Pro 4K', id: 'nano-banana-pro-4k' }],
+              notes: '',
+              created_at: '2026-08-29T00:00:00Z',
+              is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') {
+        return Promise.resolve({ ok: true, json: async () => [] } as any);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ job_id: 'j-4k', status: 'pending', submitted_at: '2026-08-29T00:00:00Z' }),
+      } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+    typePrompt(await screen.findByLabelText('生图 prompt'), '一张竖版角色海报');
+    fireEvent.click(screen.getByLabelText('提交生成'));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/studio/jobs', expect.any(Object)));
+    const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
+    const body = JSON.parse(String(studioCall![1]!.body));
+    expect(body.model).toBe('nano-banana-pro-4k');
+    expect(body.params.size).toBe('1:1');
     expect(body.params).not.toHaveProperty('resolution');
     expect(body.params).not.toHaveProperty('quality');
   });
@@ -1042,6 +1094,7 @@ describe('Studio', () => {
     expect(screen.getByTestId('studio-result-thumb-1')).toHaveClass('w-[251.5px]');
     expect(screen.getByTestId('studio-result-thumb-2')).toHaveClass('w-[251.5px]');
     expect(screen.getByTestId('round-generation-cost')).toHaveTextContent('¥ 0.63');
+    expect(screen.getByTestId('round-asset-source')).toHaveTextContent('来源：雨夜电影感');
     expect(screen.getByRole('button', { name: '重新编辑' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '再次生成' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument();
@@ -1057,8 +1110,8 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
 
     expect(screen.getByTestId('studio-more-menu')).toHaveClass('absolute', 'left-full', 'top-0', 'ml-2');
-    expect(screen.getByTestId('studio-more-menu')).toHaveClass('w-[195px]', 'h-11', 'rounded-xl', 'bg-glass', 'p-0');
-    expect(screen.getByRole('button', { name: '删除该批次结果' })).toHaveClass('h-11', 'px-3', 'py-[9px]', 'text-sm');
+    expect(screen.getByTestId('studio-more-menu')).toHaveClass('w-[195px]', 'rounded-xl', 'bg-glass', 'p-1');
+    expect(screen.getByRole('button', { name: '删除该批次结果' })).toHaveClass('h-10', 'w-full', 'px-3', 'text-sm');
     expect(screen.getByTestId('studio-more-menu')).not.toHaveClass('top-full');
   });
 
@@ -1126,6 +1179,7 @@ describe('Studio', () => {
         ratio: '4:3',
         resolution: '2K',
         size: '2304x1728',
+        creation_asset_source_title: '雨夜电影感',
       },
     });
   });

@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0014
 ---
 
 # 跨创作空间复制内容，并用不可变快照同步 Canvas Project

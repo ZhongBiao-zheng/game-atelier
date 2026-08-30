@@ -215,7 +215,8 @@ export type CanvasContentOrigin =
         | { kind: 'split'; horizontal_lines: number[]; vertical_lines: number[]; row: number; column: number }
         | { kind: 'upscale'; target_long_edge: number; algorithm: 'nearest' | 'bilinear' | 'lanczos' };
     }
-  | { kind: 'import'; package_id: string };
+  | { kind: 'import'; package_id: string }
+  | { kind: 'creation_asset_snapshot'; title: string };
 
 interface CanvasContentVersionBase {
   version_id: string;
@@ -372,28 +373,6 @@ export interface CanvasMediaOperationResult {
 export interface CanvasRun {
   job: Job;
   document: CanvasDocument;
-}
-
-export interface RevisionedSidecar<T> {
-  schema_version: 1;
-  revision: number;
-  updated_at: string;
-  items: T[];
-}
-
-export interface CanvasLibraryAsset {
-  asset_id: string;
-  version_id: string;
-  title: string;
-  tags: string[];
-}
-
-export interface CanvasPrompt {
-  prompt_id: string;
-  title: string;
-  content: string;
-  tags: string[];
-  source: 'local' | 'public';
 }
 
 export interface CanvasPluginState {

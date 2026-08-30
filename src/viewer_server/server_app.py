@@ -95,6 +95,16 @@ async def lifespan(app: FastAPI):
     from viewer_server.routes import _reset_studio_recovery_workers
 
     _reset_studio_recovery_workers()
+    from character_workflow.lib.creation_assets_migration import (
+        migrate_creation_assets_to_single_content,
+    )
+
+    asset_migration = migrate_creation_assets_to_single_content()
+    if asset_migration:
+        logging.getLogger(__name__).info(
+            "migrated creation assets to single content; backup: %s",
+            asset_migration["backup_path"],
+        )
     # 插件升级入口：旧项目只在 server 启动阶段一次性改成 V1；正常 GET/Skill 读路径不做迁移。
     from character_workflow.lib.ui_schemes import migrate_legacy_projects
 

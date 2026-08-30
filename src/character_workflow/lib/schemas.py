@@ -66,6 +66,9 @@ class JobParams(BaseModel):
     estimated_cost_cny: float | None = Field(default=None, ge=0)
     # 厂商成功响应返回的实际人民币费用；历史展示优先于预计快照。
     actual_cost_cny: float | None = Field(default=None, ge=0)
+    # 从创作资产复制提示词时冻结的只读来源名称。正文与变量值已经展开进 prompt，
+    # 不再保留 asset_id / version_id 或任何可回写引用。
+    creation_asset_source_title: str | None = Field(default=None, max_length=120)
     reference_images: list[str] | None = None
     # Canvas 局部编辑专用：服务端从不可变 mask Content Version 解析，浏览器不能传路径。
     mask_image: str | None = None
@@ -473,6 +476,7 @@ class CanvasGenerationDraft(BaseModel):
 CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     "image": frozenset({
         "n", "size", "ratio", "resolution", "quality", "background",
+        "creation_asset_source_title",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
         "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",
         # Midjourney 的纯标量 flag（都有 Field 上下界）；三组参考路径与 caller 回写的
@@ -482,10 +486,16 @@ CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     }),
     "video": frozenset({
         "duration", "resolution", "ratio", "mode", "frame_mode",
-        "generate_audio", "watermark",
+        "generate_audio", "watermark", "creation_asset_source_title",
     }),
-    "text": frozenset({"n", "temperature", "max_tokens", "reasoning_effort"}),
-    "audio": frozenset({"voice", "response_format", "speed", "instructions"}),
+    "text": frozenset({
+        "n", "temperature", "max_tokens", "reasoning_effort",
+        "creation_asset_source_title",
+    }),
+    "audio": frozenset({
+        "voice", "response_format", "speed", "instructions",
+        "creation_asset_source_title",
+    }),
 }
 
 
@@ -704,6 +714,12 @@ class CanvasImportOrigin(BaseModel):
     package_id: str
 
 
+class CanvasCreationAssetSnapshotOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["creation_asset_snapshot"]
+    title: str = Field(min_length=1, max_length=120)
+
+
 class CanvasNormalizedRect(BaseModel):
     model_config = ConfigDict(extra="forbid")
     x: float = Field(ge=0, le=1)
@@ -750,7 +766,7 @@ class CanvasLocalToolOrigin(BaseModel):
 
 CanvasContentOrigin = Annotated[
     CanvasUserEditOrigin | CanvasUploadOrigin | CanvasUserMaskOrigin | CanvasJobOutputOrigin
-    | CanvasLocalToolOrigin | CanvasImportOrigin,
+    | CanvasLocalToolOrigin | CanvasImportOrigin | CanvasCreationAssetSnapshotOrigin,
     Field(discriminator="kind"),
 ]
 
@@ -1282,9 +1298,129 @@ class CanvasPromptPatch(BaseModel):
     tags: list[str] | None = Field(default=None, max_length=20)
 
 
+class CreationPromptTextSegment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["text"]
+    text: str = Field(min_length=1, max_length=40_000)
+
+
+class CreationPromptVariableSegment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["variable"]
+    name: str = Field(min_length=1, max_length=40)
+    default_value: str = Field(min_length=1, max_length=40_000)
+
+
+CreationPromptSegment = Annotated[
+    CreationPromptTextSegment | CreationPromptVariableSegment,
+    Field(discriminator="kind"),
+]
+
+
+class CreationPromptAssetContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["prompt"]
+    segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
+
+
+class CreationImageAssetContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["image"]
+    path: str = Field(min_length=1)
+    mime_type: str = Field(pattern=r"^image/")
+    bytes: int = Field(ge=1)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    filename: str = Field(min_length=1, max_length=255)
+
+
+CreationAssetContent = Annotated[
+    CreationPromptAssetContent | CreationImageAssetContent,
+    Field(discriminator="kind"),
+]
+
+
+class CreationAsset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset_id: str = Field(min_length=1, max_length=160)
+    kind: Literal["prompt", "image"]
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    created_at: str
+    updated_at: str
+    last_used_at: str | None = None
+    content: CreationAssetContent
+    project_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_content_identity(self) -> "CreationAsset":
+        if self.content.kind != self.kind:
+            raise ValueError("creation asset content must match asset kind")
+        if len(self.project_ids) != len(set(self.project_ids)):
+            raise ValueError("creation asset project ids must be unique")
+        return self
+
+
+class CreationAssetCatalog(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[2] = 2
+    revision: int = Field(default=0, ge=0)
+    updated_at: str
+    assets: list[CreationAsset] = Field(default_factory=list)
+    migrated_canvas_project_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_asset_identity(self) -> "CreationAssetCatalog":
+        asset_ids = [asset.asset_id for asset in self.assets]
+        if len(asset_ids) != len(set(asset_ids)):
+            raise ValueError("creation asset ids must be unique")
+        return self
+
+
+class CreationAssetList(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=0)
+    assets: list[CreationAsset]
+
+
+class CreationPromptAssetCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=120)
+    segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    project_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class CreationPromptAssetUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=120)
+    segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class CreationImagePathCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=120)
+    source_path: str = Field(min_length=1)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    project_id: str | None = Field(default=None, min_length=1, max_length=160)
+    allow_existing: bool = False
+
+
+class CreationAssetUseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
 class CanvasLibraryInsertRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     position: CanvasPoint
+
+
+class CanvasCreationAssetInsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    position: CanvasPoint
+    variable_values: dict[str, str] = Field(default_factory=dict)
+    target_node_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 
 class CanvasPluginState(BaseModel):

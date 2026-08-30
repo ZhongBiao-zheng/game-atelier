@@ -27,13 +27,24 @@ describe('estimateGenerationCost', () => {
     })).toBe(price);
   });
 
-  it('prices Tuzi by explicit billing group and model id', () => {
-    expect(estimateGenerationCost({
-      provider: {
-        provider: 'custom', baseUrl: 'https://api.tu-zi.com', billingGroup: 'default',
-      },
-      model: { id: 'nano-banana-pro-4k' }, kind: 'image', count: 2,
-    })).toBe(0.7);
+  it('prices Tuzi default Gemini 3 Pro at a flat ¥0.3 across quality tiers', () => {
+    const provider = {
+      provider: 'custom', baseUrl: 'https://api.tu-zi.com', billingGroup: 'default',
+    };
+    for (const quality of ['low', 'medium', 'high'] as const) {
+      expect(estimateGenerationCost({
+        provider, model: { id: 'nano-banana-pro' }, kind: 'image', count: 1, quality,
+      })).toBe(0.3);
+    }
+    for (const model of [
+      'gemini-3-pro-image-preview',
+      'nano-banana-pro-2k',
+      'nano-banana-pro-4k',
+    ]) {
+      expect(estimateGenerationCost({
+        provider, model: { id: model }, kind: 'image', count: 2,
+      })).toBe(0.6);
+    }
     expect(estimateGenerationCost({
       provider: {
         provider: 'custom', baseUrl: 'https://api.tu-zi.com', billingGroup: '绘画',

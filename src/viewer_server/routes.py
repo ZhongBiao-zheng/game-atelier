@@ -64,18 +64,19 @@ from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
     CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionList,
-    CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasLibraryAsset, CanvasLibraryAssetCreate,
-    CanvasLibraryAssetPatch,
-    CanvasLibraryInsertRequest, CanvasPackageCommitRequest, CanvasPackageImportResponse,
+    CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument,
+    CanvasCreationAssetInsertRequest,
+    CanvasPackageCommitRequest, CanvasPackageImportResponse,
     CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
-    CanvasPrompt, CanvasPromptCreate, CanvasPromptPatch,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
     CanvasProjectList, CanvasProjectRename, CanvasReversePromptConfigCreate,
     CanvasReversePromptCreate, CanvasRunCreate, CanvasRunResponse, CanvasRunRetry,
-    CanvasUiPreferences, CanvasUiPreferencesUpdate, CanvasUploadResponse, RevisionedSidecar,
+    CanvasUiPreferences, CanvasUiPreferencesUpdate, CanvasUploadResponse,
     CharacterIndexResponse, CharacterWorkspaceResponse,
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
+    CreationAsset, CreationAssetList, CreationAssetUseRequest,
+    CreationImagePathCreate, CreationPromptAssetCreate, CreationPromptAssetUpdate,
     FeedbackPost, GalleryMedia, Job, JobKind, JobParams, JobStatus, ProjectCreate,
     ProjectRename, ProjectGalleryResponse, ProjectIndexResponse,
     ProjectVideoProduction, ProjectVideoReferencesResponse,
@@ -2415,249 +2416,204 @@ def delete_canvas_agent_session_route(
         _raise_canvas_agent_session_error(error)
 
 
-def _raise_canvas_library_error(error: Exception, missing: str) -> None:
-    from character_workflow.lib.canvas_library import CanvasLibraryStateError
-    if isinstance(error, CanvasLibraryStateError):
-        raise HTTPException(409, detail="画布项目创作库状态损坏，请重新导入或恢复项目") from error
-    if isinstance(error, KeyError):
-        raise HTTPException(404, detail=missing) from None
+def _raise_canvas_revision_error(error: RuntimeError) -> None:
     if isinstance(error, RuntimeError) and str(error).startswith("revision_conflict:"):
         current_revision = int(str(error).split(":", 1)[1])
         raise HTTPException(409, detail={
             "code": "revision_conflict",
             "current_revision": current_revision,
         }) from None
-    if isinstance(error, PermissionError):
-        raise HTTPException(403, detail=str(error)) from error
+    raise error
+
+
+def _raise_creation_asset_error(error: Exception) -> None:
+    from character_workflow.lib.creation_assets import (
+        CreationAssetDuplicateError,
+        CreationAssetStateError,
+    )
+    if isinstance(error, CreationAssetDuplicateError):
+        raise HTTPException(409, detail={
+            "code": "duplicate_asset",
+            "asset_id": error.asset_id,
+            "message": str(error),
+        }) from None
+    if isinstance(error, CreationAssetStateError):
+        raise HTTPException(409, detail=str(error)) from error
+    if isinstance(error, (KeyError, FileNotFoundError)):
+        raise HTTPException(404, detail="找不到这个创作资产或文件") from None
     if isinstance(error, ValueError):
         raise HTTPException(422, detail=str(error)) from error
     raise error
 
 
-@router.get(
-    "/canvas/projects/{project_id}/library/assets",
-    response_model=RevisionedSidecar[CanvasLibraryAsset],
-)
-def get_canvas_library_assets(project_id: str, response: Response):
-    from character_workflow.lib.canvas_library import read_canvas_assets
+@router.get("/creation-assets", response_model=CreationAssetList)
+def get_creation_assets(
+    kind: Literal["prompt", "image"] | None = Query(default=None),
+    scope: Literal["all", "project"] = Query(default="all"),
+    project_id: str | None = Query(default=None),
+):
+    from character_workflow.lib.creation_assets import list_creation_assets
     try:
-        sidecar = read_canvas_assets(project_id)
-        response.headers["ETag"] = f'"{sidecar.revision}"'
-        return sidecar
+        return list_creation_assets(
+            kind=kind,
+            scope=scope,
+            project_id=project_id,
+        )
     except (KeyError, ValueError) as error:
-        _raise_canvas_library_error(error, "找不到这个画布项目或资产库")
+        _raise_creation_asset_error(error)
 
 
-@router.post(
-    "/canvas/projects/{project_id}/library/assets",
-    response_model=RevisionedSidecar[CanvasLibraryAsset],
-    status_code=201,
-)
-def post_canvas_library_asset(
-    project_id: str,
-    payload: CanvasLibraryAssetCreate,
-    response: Response,
-    if_match: str | None = Header(default=None, alias="If-Match"),
-):
-    from character_workflow.lib.canvas_library import save_canvas_asset
+@router.post("/creation-assets/prompts", response_model=CreationAsset, status_code=201)
+def post_creation_prompt(payload: CreationPromptAssetCreate):
+    from character_workflow.lib.creation_assets import create_prompt_asset
     try:
-        sidecar = save_canvas_asset(
-            project_id,
-            payload.version_id,
+        return create_prompt_asset(
             payload.title,
+            payload.segments,
             payload.tags,
-            _canvas_if_match(if_match, "资产库"),
+            payload.project_id,
         )
-        response.headers["ETag"] = f'"{sidecar.revision}"'
-        return sidecar
-    except (KeyError, RuntimeError, ValueError) as error:
-        _raise_canvas_library_error(error, "找不到这个内容版本或画布项目")
+    except ValueError as error:
+        _raise_creation_asset_error(error)
 
 
-@router.patch(
-    "/canvas/projects/{project_id}/library/assets/{asset_id}",
-    response_model=RevisionedSidecar[CanvasLibraryAsset],
-)
-def patch_canvas_library_asset(
-    project_id: str,
-    asset_id: str,
-    payload: CanvasLibraryAssetPatch,
-    response: Response,
-    if_match: str | None = Header(default=None, alias="If-Match"),
-):
-    from character_workflow.lib.canvas_library import patch_canvas_asset
+@router.post("/creation-assets/images/from-path", response_model=CreationAsset, status_code=201)
+def post_creation_image_from_path(payload: CreationImagePathCreate):
+    from character_workflow.lib.creation_assets import create_image_asset_from_path
     try:
-        sidecar = patch_canvas_asset(
-            project_id,
-            asset_id,
-            payload,
-            _canvas_if_match(if_match, "资产库"),
+        return create_image_asset_from_path(
+            title=payload.title,
+            source_path=payload.source_path,
+            tags=payload.tags,
+            project_id=payload.project_id,
+            allow_existing=payload.allow_existing,
         )
-        response.headers["ETag"] = f'"{sidecar.revision}"'
-        return sidecar
-    except (KeyError, RuntimeError, ValueError) as error:
-        _raise_canvas_library_error(error, "找不到这个资产或画布项目")
+    except (FileNotFoundError, KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
 
 
-@router.delete(
-    "/canvas/projects/{project_id}/library/assets/{asset_id}",
-    response_model=RevisionedSidecar[CanvasLibraryAsset],
-)
-def delete_canvas_library_asset(
-    project_id: str,
-    asset_id: str,
-    response: Response,
-    if_match: str | None = Header(default=None, alias="If-Match"),
+@router.post("/creation-assets/images/upload", response_model=CreationAsset, status_code=201)
+async def post_creation_image_upload(
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    tags: str = Form(default="[]"),
+    project_id: str | None = Form(default=None),
+    allow_existing: bool = Form(default=False),
 ):
-    from character_workflow.lib.canvas_library import delete_canvas_asset
+    from character_workflow.lib.creation_assets import create_image_asset_from_bytes
     try:
-        sidecar = delete_canvas_asset(
-            project_id,
-            asset_id,
-            _canvas_if_match(if_match, "资产库"),
+        parsed_tags = json.loads(tags)
+        if not isinstance(parsed_tags, list) or not all(isinstance(tag, str) for tag in parsed_tags):
+            raise ValueError("tags 必须是字符串数组")
+        return create_image_asset_from_bytes(
+            title=title,
+            body=await file.read(),
+            filename=file.filename or "image",
+            mime_type=file.content_type,
+            tags=parsed_tags,
+            project_id=project_id,
+            allow_existing=allow_existing,
         )
-        response.headers["ETag"] = f'"{sidecar.revision}"'
-        return sidecar
-    except (KeyError, RuntimeError, ValueError) as error:
-        _raise_canvas_library_error(error, "找不到这个资产或画布项目")
+    except (json.JSONDecodeError, KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.put("/creation-assets/{asset_id}/prompt", response_model=CreationAsset)
+def put_creation_prompt_asset(asset_id: str, payload: CreationPromptAssetUpdate):
+    from character_workflow.lib.creation_assets import update_prompt_asset
+    try:
+        return update_prompt_asset(
+            asset_id,
+            title=payload.title,
+            segments=payload.segments,
+            tags=payload.tags,
+        )
+    except (KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.put("/creation-assets/{asset_id}/image", response_model=CreationAsset)
+async def put_creation_image_asset(
+    asset_id: str,
+    title: str = Form(...),
+    tags: str = Form(default="[]"),
+    file: UploadFile | None = File(default=None),
+):
+    from character_workflow.lib.creation_assets import update_image_asset_from_bytes
+    try:
+        parsed_tags = json.loads(tags)
+        if not isinstance(parsed_tags, list) or not all(isinstance(tag, str) for tag in parsed_tags):
+            raise ValueError("tags 必须是字符串数组")
+        body = await file.read() if file is not None else None
+        return update_image_asset_from_bytes(
+            asset_id,
+            title=title,
+            tags=parsed_tags,
+            body=body,
+            filename=file.filename or "image" if file is not None else "image",
+            mime_type=file.content_type if file is not None else None,
+        )
+    except (json.JSONDecodeError, KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.post("/creation-assets/{asset_id}/use", response_model=CreationAsset)
+def post_creation_asset_use(asset_id: str, payload: CreationAssetUseRequest):
+    from character_workflow.lib.creation_assets import mark_creation_asset_used
+    try:
+        return mark_creation_asset_used(asset_id, payload.project_id)
+    except (KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.delete("/creation-assets/{asset_id}", status_code=204)
+def delete_creation_asset_route(asset_id: str) -> Response:
+    from character_workflow.lib.creation_assets import delete_creation_asset
+    try:
+        delete_creation_asset(asset_id)
+        return Response(status_code=204)
+    except (KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
+
+
+@router.get("/creation-assets/{asset_id}/content")
+def get_creation_asset_content(asset_id: str):
+    from character_workflow.lib.creation_assets import creation_asset_image_path
+    try:
+        return FileResponse(creation_asset_image_path(asset_id))
+    except (KeyError, ValueError) as error:
+        _raise_creation_asset_error(error)
 
 
 @router.post(
-    "/canvas/projects/{project_id}/library/assets/{asset_id}/insert",
+    "/canvas/projects/{project_id}/creation-assets/{asset_id}/insert",
     response_model=CanvasDocument,
 )
-def post_canvas_library_asset_insert(
+def post_canvas_creation_asset_insert(
     project_id: str,
     asset_id: str,
-    payload: CanvasLibraryInsertRequest,
+    payload: CanvasCreationAssetInsertRequest,
     response: Response,
     if_match: str | None = Header(default=None, alias="If-Match"),
 ):
-    from character_workflow.lib.canvas_library import insert_canvas_asset
+    from character_workflow.lib.creation_assets import insert_creation_asset_into_canvas
     try:
-        document = insert_canvas_asset(
-            project_id,
-            asset_id,
-            payload.position,
-            _canvas_if_match(if_match, "画布"),
+        document = insert_creation_asset_into_canvas(
+            project_id=project_id,
+            asset_id=asset_id,
+            position=payload.position,
+            expected_revision=_canvas_if_match(if_match, "画布"),
+            variable_values=payload.variable_values,
+            target_node_id=payload.target_node_id,
         )
         response.headers["ETag"] = f'"{document.revision}"'
         return document
-    except (KeyError, RuntimeError, ValueError) as error:
-        _raise_canvas_library_error(error, "找不到这个资产或画布项目")
-
-
-@router.get(
-    "/canvas/projects/{project_id}/library/prompts",
-    response_model=RevisionedSidecar[CanvasPrompt],
-)
-def get_canvas_library_prompts(project_id: str, response: Response):
-    from character_workflow.lib.canvas_library import read_canvas_prompts
-    try:
-        sidecar = read_canvas_prompts(project_id)
-        response.headers["ETag"] = f'"{sidecar.revision}"'
-        return sidecar
-    except (KeyError, ValueError) as error:
-        _raise_canvas_library_error(error, "找不到这个画布项目或提示词库")
-
-
-@router.post(
-    "/canvas/projects/{project_id}/library/prompts",
-    response_model=RevisionedSidecar[CanvasPrompt],
-    status_code=201,
-)
-def post_canvas_library_prompt(
-    project_id: str,
-    payload: CanvasPromptCreate,
-    response: Response,
-    if_match: str | None = Header(default=None, alias="If-Match"),
-):
-    from character_workflow.lib.canvas_library import create_canvas_prompt
-    try:
-        sidecar = create_canvas_prompt(
-            project_id,
-            payload.title,
-            payload.content,
-            payload.tags,
-            _canvas_if_match(if_match, "提示词库"),
-        )
-        response.headers["ETag"] = f'"{sidecar.revision}"'
-        return sidecar
-    except (KeyError, RuntimeError, ValueError) as error:
-        _raise_canvas_library_error(error, "找不到这个画布项目")
-
-
-@router.patch(
-    "/canvas/projects/{project_id}/library/prompts/{prompt_id}",
-    response_model=RevisionedSidecar[CanvasPrompt],
-)
-def patch_canvas_library_prompt(
-    project_id: str,
-    prompt_id: str,
-    payload: CanvasPromptPatch,
-    response: Response,
-    if_match: str | None = Header(default=None, alias="If-Match"),
-):
-    from character_workflow.lib.canvas_library import patch_canvas_prompt
-    try:
-        sidecar = patch_canvas_prompt(
-            project_id,
-            prompt_id,
-            payload,
-            _canvas_if_match(if_match, "提示词库"),
-        )
-        response.headers["ETag"] = f'"{sidecar.revision}"'
-        return sidecar
-    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
-        _raise_canvas_library_error(error, "找不到这个提示词或画布项目")
-
-
-@router.delete(
-    "/canvas/projects/{project_id}/library/prompts/{prompt_id}",
-    response_model=RevisionedSidecar[CanvasPrompt],
-)
-def delete_canvas_library_prompt(
-    project_id: str,
-    prompt_id: str,
-    response: Response,
-    if_match: str | None = Header(default=None, alias="If-Match"),
-):
-    from character_workflow.lib.canvas_library import delete_canvas_prompt
-    try:
-        sidecar = delete_canvas_prompt(
-            project_id,
-            prompt_id,
-            _canvas_if_match(if_match, "提示词库"),
-        )
-        response.headers["ETag"] = f'"{sidecar.revision}"'
-        return sidecar
-    except (KeyError, PermissionError, RuntimeError, ValueError) as error:
-        _raise_canvas_library_error(error, "找不到这个提示词或画布项目")
-
-
-@router.post(
-    "/canvas/projects/{project_id}/library/prompts/{prompt_id}/insert",
-    response_model=CanvasDocument,
-)
-def post_canvas_library_prompt_insert(
-    project_id: str,
-    prompt_id: str,
-    payload: CanvasLibraryInsertRequest,
-    response: Response,
-    if_match: str | None = Header(default=None, alias="If-Match"),
-):
-    from character_workflow.lib.canvas_library import insert_canvas_prompt
-    try:
-        document = insert_canvas_prompt(
-            project_id,
-            prompt_id,
-            payload.position,
-            _canvas_if_match(if_match, "画布"),
-        )
-        response.headers["ETag"] = f'"{document.revision}"'
-        return document
-    except (KeyError, RuntimeError, ValueError) as error:
-        _raise_canvas_library_error(error, "找不到这个提示词或画布项目")
+    except RuntimeError as error:
+        _raise_canvas_revision_error(error)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布、节点或创作资产") from None
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
 
 
 @router.post(

@@ -456,7 +456,13 @@ function normalizedCanvasGenerationParams(
   current: JobParams,
 ) {
   if (mode === 'image') {
-    return normalizeCanvasImageParams(model.id, key.provider, current, model.protocol);
+    return normalizeCanvasImageParams(
+      model.id,
+      key.provider,
+      current,
+      model.protocol,
+      key.base_url,
+    );
   }
   if (mode === 'video') return normalizeCanvasVideoParams(model.id, model.protocol, current);
   if (mode === 'audio') {
@@ -583,8 +589,9 @@ export function normalizeCanvasImageParams(
   provider: string | null | undefined,
   current: JobParams,
   protocol?: string | null,
+  baseUrl?: string | null,
 ): JobParams {
-  const caps = imageControlCaps(model, provider, protocol);
+  const caps = imageControlCaps(model, provider, protocol, baseUrl);
   const {
     quality: currentQuality,
     background: currentBackground,

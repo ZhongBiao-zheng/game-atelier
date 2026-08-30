@@ -37,13 +37,10 @@ from character_workflow.lib.jobs import job_lock, new_job_id, read_job
 from character_workflow.lib.schemas import (
     CanvasAgentSession,
     CanvasDocument,
-    CanvasLibraryAsset,
     CanvasPluginState,
     CanvasProject,
-    CanvasPrompt,
     Job,
     JobStatus,
-    RevisionedSidecar,
 )
 
 
@@ -426,25 +423,6 @@ def export_canvas_projects(
                 f"{prefix}/canvas.json": document.model_dump_json(indent=2).encode("utf-8"),
             }
             project_dir = canvas_project_dir(project_id)
-            project_root = project_dir.resolve()
-            for relative in ("library/assets.json", "library/prompts.json"):
-                target = project_dir / relative
-                resolved = target.resolve()
-                if (
-                    target.is_symlink()
-                    or not resolved.is_relative_to(project_root)
-                    or not resolved.is_file()
-                ):
-                    raise CanvasPackageError(f"项目缺少 {relative}")
-                body = resolved.read_bytes()
-                try:
-                    if relative.endswith("assets.json"):
-                        RevisionedSidecar[CanvasLibraryAsset].model_validate_json(body)
-                    else:
-                        RevisionedSidecar[CanvasPrompt].model_validate_json(body)
-                except ValidationError as error:
-                    raise CanvasPackageError(f"项目 {relative} 不符合 schema") from error
-                metadata[f"{prefix}/{relative}"] = body
             for job in jobs:
                 metadata[f"{prefix}/jobs/{job.job_id}.json"] = _portable_job(job, document)
             for source in _metadata_files(project_dir):
@@ -684,8 +662,6 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
         required = {
             f"{prefix}/project.json",
             f"{prefix}/canvas.json",
-            f"{prefix}/library/assets.json",
-            f"{prefix}/library/prompts.json",
         }
         if not required.issubset(row.entry_paths) or not set(row.entry_paths).issubset(
             known_entries
@@ -727,12 +703,6 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
         try:
             project = CanvasProject.model_validate_json(archive.read(f"{prefix}/project.json"))
             document = CanvasDocument.model_validate_json(archive.read(f"{prefix}/canvas.json"))
-            assets = RevisionedSidecar[CanvasLibraryAsset].model_validate_json(
-                archive.read(f"{prefix}/library/assets.json")
-            )
-            RevisionedSidecar[CanvasPrompt].model_validate_json(
-                archive.read(f"{prefix}/library/prompts.json")
-            )
         except (ValidationError, json.JSONDecodeError, KeyError) as error:
             raise CanvasPackageError(f"项目 {row.package_project_id} 的元数据不合法") from error
         if (
@@ -740,8 +710,6 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
             or document.project_id != project.project_id
         ):
             raise CanvasPackageError("项目包 original_project_id 与文档不一致")
-        if any(item.version_id not in document.content_versions for item in assets.items):
-            raise CanvasPackageError("项目资产库引用了不存在的内容版本")
 
         jobs: list[Job] = []
         for path in row.entry_paths:
@@ -1056,12 +1024,8 @@ def _import_project(
         (target / "uploads").mkdir()
         (target / "outputs").mkdir()
         (target / "derived").mkdir()
-        (target / "library").mkdir()
         atomic_write_json(target / "project.json", project.model_dump(mode="json"))
         atomic_write_json(target / "canvas.json", document.model_dump(mode="json"))
-        for relative in ("library/assets.json", "library/prompts.json"):
-            body = archive.read(f"{prefix}/{relative}")
-            (target / relative).write_bytes(body)
         for path in sorted(row.entry_paths):
             if path.startswith(f"{prefix}/agent/"):
                 relative = PurePosixPath(path).relative_to(prefix)
@@ -1257,3 +1221,5 @@ def delete_canvas_project(
     shutil.rmtree(transaction, ignore_errors=True)
     # 缩略图缓存放在 .runtime 下，不随项目目录一起被移走：删项目时得自己收。
     discard_canvas_thumbnails(project_id)
+    from character_workflow.lib.creation_assets import remove_canvas_project_asset_relations
+    remove_canvas_project_asset_relations(project_id)

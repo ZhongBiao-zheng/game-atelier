@@ -1,6 +1,6 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUp, Box, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
+import { ArrowUp, BookmarkPlus, Box, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
 import { modelModality, type KeyView } from '@/api/keys';
 import { availableResolutions, computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
 import { providerLabel } from '@/lib/providerLabels';
@@ -39,6 +39,10 @@ interface Props {
   disabled?: boolean;
   value?: string;
   onValueChange?: (value: string) => void;
+  /** 外部资产面板要求在最后一次编辑光标处插入文本。 */
+  insertTextRequest?: { requestId: string; text: string } | null;
+  onSavePromptAsset?: () => void;
+  onSaveReferenceImage?: (file: File) => void;
   providers?: KeyView[];
   providerAlias?: string;
   model?: string;
@@ -210,6 +214,9 @@ export function PromptInput({
   disabled,
   value,
   onValueChange,
+  insertTextRequest,
+  onSavePromptAsset,
+  onSaveReferenceImage,
   providers = [],
   providerAlias,
   model,
@@ -285,6 +292,8 @@ export function PromptInput({
   // @引用编辑器：contentEditable DOM 是输入现场，text 字符串是状态层；
   // lastSynced 区分「用户输入回流」与「外部改写」——只有外部改写才重建 DOM。
   const editorRef = useRef<HTMLDivElement>(null);
+  const lastEditorRange = useRef<Range | null>(null);
+  const handledInsertRequest = useRef<string | null>(null);
   const lastSynced = useRef<string | null>(null);
   const composing = useRef(false);
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -454,6 +463,38 @@ export function PromptInput({
     syncFromDom();
   }
 
+  const rememberEditorRange = useCallback(() => {
+    const root = editorRef.current;
+    const selection = window.getSelection();
+    if (!root || !selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (root.contains(range.startContainer) && root.contains(range.endContainer)) {
+      lastEditorRange.current = range.cloneRange();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!insertTextRequest || handledInsertRequest.current === insertTextRequest.requestId) return;
+    handledInsertRequest.current = insertTextRequest.requestId;
+    const root = editorRef.current;
+    if (!root) return;
+    root.focus();
+    const selection = window.getSelection();
+    const saved = lastEditorRange.current;
+    if (selection && saved && root.contains(saved.startContainer) && root.contains(saved.endContainer)) {
+      selection.removeAllRanges();
+      selection.addRange(saved);
+    } else if (selection) {
+      const range = document.createRange();
+      range.selectNodeContents(root);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    insertPlainText(insertTextRequest.text);
+    rememberEditorRange();
+  }, [insertTextRequest, rememberEditorRange]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function insertMention(label: string) {
     const root = editorRef.current;
     if (!root) return;
@@ -530,7 +571,17 @@ export function PromptInput({
   const [localH, setLocalH] = useState(initSize.h);
   const [sizeLocked, setSizeLocked] = useState(true);
   // 能力四项按模型族判（provider 只决定端点/协议，openrouter 另外改 size 语义）。
-  const caps = imageControlCaps(selectedModel?.id, provider?.provider, selectedModel?.protocol);
+  const caps = imageControlCaps(
+    selectedModel?.id,
+    provider?.provider,
+    selectedModel?.protocol,
+    provider?.base_url,
+  );
+  const sizeControlDetail = caps.showResolution
+    ? (resolution === '2K' ? '高清 2K' : '超清 4K')
+    : caps.qualities?.length
+      ? (QUALITY_LABELS[quality] ?? quality)
+      : null;
   // MJ 的比例/版本/stylize 由渠道固定注入，张数也固定 4 —— 这些控件不能装作可选。
   const isMj = caps.family === 'midjourney';
   const maxRef = maxReferenceImages(selectedModel?.id);
@@ -902,6 +953,17 @@ export function PromptInput({
                         >
                           <X size={10} />
                         </button>
+                        {item.kind === 'image' && onSaveReferenceImage && (
+                          <button
+                            type="button"
+                            aria-label="保存参考图为资产"
+                            onClick={(e) => { e.stopPropagation(); onSaveReferenceImage(item.file); }}
+                            className="absolute -bottom-1.5 -right-1.5 z-10 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-border bg-scrim text-foreground/80 transition-colors hover:bg-secondary hover:text-foreground"
+                            style={{ opacity: hovered ? 1 : 0, pointerEvents: hovered ? 'auto' : 'none' }}
+                          >
+                            <BookmarkPlus size={10} />
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -967,15 +1029,28 @@ export function PromptInput({
           data-placeholder={isOmni && stackItems.length > 0 ? '开始一段灵感对话，输入 @ 引用参考素材...' : '开始一段灵感对话...'}
           onInput={onEditorInput}
           onKeyDown={onKey}
+          onKeyUp={rememberEditorRange}
+          onMouseUp={rememberEditorRange}
+          onBlur={rememberEditorRange}
           onPaste={onEditorPaste}
           onCompositionStart={() => { composing.current = true; }}
           onCompositionEnd={() => { composing.current = false; onEditorInput(); }}
           onMouseOver={onEditorMouseOver}
           onMouseOut={onEditorMouseOut}
-          className={`flex-1 min-h-0 w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-sm text-foreground focus:outline-none rounded-md pl-2 transition-[height,padding] duration-300 empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground ${
-            collapsed ? 'h-6 self-center overflow-hidden pr-10' : 'h-full pr-2'
+          className={`no-scrollbar flex-1 min-h-0 w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-sm text-foreground focus:outline-none rounded-md pl-2 transition-[height,padding] duration-300 empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground ${
+            collapsed ? 'h-6 self-center overflow-hidden pr-10' : onSavePromptAsset ? 'h-full pr-10' : 'h-full pr-2'
           }`}
         />
+        {onSavePromptAsset && !collapsed && text.trim() && (
+          <button
+            type="button"
+            aria-label="保存当前提示词为资产"
+            onClick={onSavePromptAsset}
+            className="absolute right-3 top-3 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+          >
+            <BookmarkPlus size={15} />
+          </button>
+        )}
         {/* chip hover 预览：视频静音循环播放 / 图片放大 / 音频文件卡，浮在 chip 上方 */}
         {chipHover && (() => {
           const item = mentionItems.find((m) => m.label === chipHover.label);
@@ -1203,14 +1278,11 @@ export function PromptInput({
             >
               <Square size={14} aria-hidden />
               {caps.showCustomSize ? <>{localW}:{localH}</> : <>{ratio}</>}
-              {/* MJ 既无分辨率档也无质量档（都是 prompt flag），第二段没有内容，
-                  连分隔符一起省掉，否则按钮上挂一根光秃秃的竖线。 */}
-              {!isMj && (
+              {/* 第二段没有实际参数时连分隔符一起省掉，避免按钮末尾挂一根竖线。 */}
+              {sizeControlDetail && (
                 <>
                   <span className="text-muted-foreground">|</span>
-                  {caps.showResolution
-                    ? (resolution === '2K' ? '高清 2K' : '超清 4K')
-                    : (caps.qualities ? (QUALITY_LABELS[quality] ?? quality) : null)}
+                  {sizeControlDetail}
                 </>
               )}
             </ControlButton>
