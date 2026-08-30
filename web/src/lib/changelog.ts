@@ -31,7 +31,7 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    version: '5.33.1',
+    version: '5.33.2',
     date: '2026-08-30',
     headline: '创作台与画布共用创作资产',
     changes: [
@@ -39,6 +39,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: 'feat', text: '提示词支持带默认内容的变量；资产详情统一为使用与编辑，编辑原位保存，不再维护版本或归档' },
       { kind: 'feat', text: '使用资产会复制并冻结来源标题；后续编辑或删除资产不会改写既有生成记录和画布内容' },
       { kind: 'fix', text: '资产编辑器的标签只显示一层，已选标签可直接删除' },
+      { kind: 'fix', text: '已选标签增加清晰的指向反馈，删除按钮也支持键盘聚焦' },
     ],
   },
   {
