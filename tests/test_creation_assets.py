@@ -82,7 +82,7 @@ def test_prompt_asset_has_one_mutable_content_and_renders_variables():
     assert render_prompt_segments(updated.content.segments, {}) == "一只毛绒三头犬站在火山口中。"
 
 
-def test_project_scope_and_recent_use_sorting():
+def test_project_scope_uses_last_used_sorting():
     first = create_prompt_asset("先创建", _segments(), ["角色"])
     second = create_prompt_asset("后创建", _segments("狐狸"), ["角色"], project_id="canvas-a")
 

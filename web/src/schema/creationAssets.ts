@@ -35,7 +35,6 @@ export interface CreationAsset {
 export interface CreationAssetList {
   revision: number;
   assets: CreationAsset[];
-  recent_tags: string[];
 }
 
 export function renderCreationPrompt(

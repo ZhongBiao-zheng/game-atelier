@@ -53,7 +53,7 @@ describe('CreationAssetPanel', () => {
   });
 
   it('opens card detail, uses prompt defaults in one step, and closes', async () => {
-    mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset], recent_tags: ['角色'] });
+    mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
     mocks.markUsed.mockResolvedValue(promptAsset);
     const onUsePrompt = vi.fn();
     const onClose = vi.fn();
@@ -82,7 +82,7 @@ describe('CreationAssetPanel', () => {
         ],
       },
     };
-    mocks.list.mockResolvedValue({ revision: 1, assets: [repeated], recent_tags: [] });
+    mocks.list.mockResolvedValue({ revision: 1, assets: [repeated] });
     mocks.markUsed.mockResolvedValue(repeated);
     const onUsePrompt = vi.fn();
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={onUsePrompt} onUseImage={vi.fn()} />);
@@ -99,7 +99,7 @@ describe('CreationAssetPanel', () => {
   });
 
   it('warns about an identical prompt but still allows an explicit duplicate save', async () => {
-    mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset], recent_tags: [] });
+    mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
     mocks.createPrompt.mockResolvedValue({ ...promptAsset, asset_id: 'asset-copy' });
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
 
@@ -117,8 +117,8 @@ describe('CreationAssetPanel', () => {
   it('checks prompt duplicates against the global library from a project-scoped Canvas', async () => {
     mocks.list.mockImplementation(async options => (
       options.scope === 'all'
-        ? { revision: 1, assets: [promptAsset], recent_tags: [] }
-        : { revision: 1, assets: [], recent_tags: [] }
+        ? { revision: 1, assets: [promptAsset] }
+        : { revision: 1, assets: [] }
     ));
     render(<CreationAssetPanel projectId="canvas-demo-1234" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
 
@@ -134,8 +134,8 @@ describe('CreationAssetPanel', () => {
   it('edits the same asset in place and returns to its detail', async () => {
     const updated = { ...promptAsset, title: '新标题' };
     mocks.list
-      .mockResolvedValueOnce({ revision: 1, assets: [promptAsset], recent_tags: [] })
-      .mockResolvedValue({ revision: 2, assets: [updated], recent_tags: [] });
+      .mockResolvedValueOnce({ revision: 1, assets: [promptAsset] })
+      .mockResolvedValue({ revision: 2, assets: [updated] });
     mocks.updatePrompt.mockResolvedValue(updated);
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
 
@@ -152,7 +152,7 @@ describe('CreationAssetPanel', () => {
   });
 
   it('asks before discarding a dirty edit', async () => {
-    mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset], recent_tags: [] });
+    mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
@@ -166,7 +166,7 @@ describe('CreationAssetPanel', () => {
   });
 
   it('also guards close requests from the parent trigger and keyboard shortcuts', async () => {
-    mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset], recent_tags: [] });
+    mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
     const onClose = vi.fn();
     const panelRef = createRef<CreationAssetPanelHandle>();
     render(<CreationAssetPanel ref={panelRef} onClose={onClose} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
@@ -184,8 +184,8 @@ describe('CreationAssetPanel', () => {
 
   it('physically deletes only after the irreversible confirmation', async () => {
     mocks.list
-      .mockResolvedValueOnce({ revision: 1, assets: [promptAsset], recent_tags: [] })
-      .mockResolvedValue({ revision: 2, assets: [], recent_tags: [] });
+      .mockResolvedValueOnce({ revision: 1, assets: [promptAsset] })
+      .mockResolvedValue({ revision: 2, assets: [] });
     mocks.deleteAsset.mockResolvedValue(undefined);
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
 

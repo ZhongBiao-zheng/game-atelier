@@ -131,7 +131,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   const [kind, setKind] = useState<CreationAssetKind>(initialKind);
   const [scope, setScope] = useState<'all' | 'project'>(projectId ? 'project' : 'all');
   const [assets, setAssets] = useState<CreationAsset[]>([]);
-  const [recentTags, setRecentTags] = useState<string[]>([]);
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [promptEditor, setPromptEditor] = useState<PromptEditorState | null>(null);
@@ -178,7 +177,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         projectId,
       });
       setAssets(response.assets);
-      setRecentTags(response.recent_tags);
       setSelectedId(current => {
         const target = preferredId ?? current;
         return response.assets.some(asset => asset.asset_id === target) ? target : null;
@@ -532,7 +530,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         <PromptEditor
           state={promptEditor}
           busy={busy}
-          recentTags={recentTags}
           textareaRef={textareaRef}
           variableName={variableName}
           selection={selection}
@@ -555,7 +552,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         <ImageEditor
           state={imageEditor}
           busy={busy}
-          recentTags={recentTags}
           duplicateTitle={assets.find(asset => asset.asset_id === duplicateImageAssetId)?.title}
           showSaveAndAddCanvas={canvasTargets.length > 0 && !imageEditor.assetId}
           onChange={setImageEditor}
@@ -619,10 +615,9 @@ function PromptPreview({ segments }: { segments: CreationPromptSegment[] }) {
   return <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{segments.map((segment, index) => segment.kind === 'text' ? segment.text : <span key={`${segment.name}-${index}`} className="mx-0.5 rounded border border-border bg-secondary px-1"><span className="text-muted-foreground">{segment.name}：</span><span className="text-foreground/80">{segment.default_value}</span></span>)}</p>;
 }
 
-function PromptEditor({ state, busy, recentTags, textareaRef, variableName, selection, duplicateTitle, showSaveAndAddCanvas, onChange, onTextChange, onCaptureSelection, onVariableNameChange, onAddVariable, onSave, onSaveAndAddCanvas, onConfirmDuplicate, onCancelDuplicate, onDelete }: {
+function PromptEditor({ state, busy, textareaRef, variableName, selection, duplicateTitle, showSaveAndAddCanvas, onChange, onTextChange, onCaptureSelection, onVariableNameChange, onAddVariable, onSave, onSaveAndAddCanvas, onConfirmDuplicate, onCancelDuplicate, onDelete }: {
   state: PromptEditorState;
   busy: boolean;
-  recentTags: string[];
   textareaRef: React.RefObject<HTMLTextAreaElement>;
   variableName: string;
   selection: { start: number; end: number } | null;
@@ -648,17 +643,16 @@ function PromptEditor({ state, busy, recentTags, textareaRef, variableName, sele
         <div className="mt-3 flex gap-2"><Input value={variableName} onChange={event => onVariableNameChange(event.target.value)} placeholder={selection ? '例如：主体' : '先在正文中选中内容'} disabled={!selection} /><Button size="sm" disabled={!selection || !variableName.trim()} onClick={onAddVariable}>设为变量</Button></div>
         {state.variables.length > 0 && <div className="mt-3 space-y-2">{state.variables.map(variable => <div key={variable.id} className="flex items-center gap-2 rounded-md bg-secondary px-2 py-1.5 text-xs"><span className="text-muted-foreground">{variable.name}：</span><span className="min-w-0 flex-1 truncate">{state.text.slice(variable.start, variable.end)}</span><button type="button" aria-label={`移除变量 ${variable.name}`} className="rounded p-1 text-muted-foreground hover:bg-background hover:text-foreground" onClick={() => onChange({ ...state, variables: state.variables.filter(item => item.id !== variable.id) })}><X className="size-3.5" /></button></div>)}</div>}
       </div>
-      <TagField value={state.tags} recentTags={recentTags} onChange={tags => onChange({ ...state, tags })} />
+      <TagField value={state.tags} onChange={tags => onChange({ ...state, tags })} />
       {duplicateTitle ? <div className="rounded-lg border border-border bg-card p-3 text-xs leading-relaxed"><p>提示词正文与“{duplicateTitle}”相同，仍可按你的意图保存为另一条资产。</p><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={onCancelDuplicate}>取消</Button><Button size="sm" disabled={busy} onClick={onConfirmDuplicate}>仍然保存</Button></div></div> : <div className="grid gap-2"><Button className="w-full" disabled={busy} onClick={onSave}>{busy ? '保存中…' : state.assetId ? '保存修改' : '保存提示词资产'}</Button>{showSaveAndAddCanvas && <Button variant="outline" className="w-full" disabled={busy} onClick={onSaveAndAddCanvas}>保存并加入画布</Button>}</div>}
       {onDelete && <DeleteAssetButton disabled={busy} onClick={onDelete} />}
     </div>
   );
 }
 
-function ImageEditor({ state, busy, recentTags, duplicateTitle, showSaveAndAddCanvas, onChange, onSave, onSaveAndAddCanvas, onConfirmDuplicate, onCancelDuplicate, onDelete }: {
+function ImageEditor({ state, busy, duplicateTitle, showSaveAndAddCanvas, onChange, onSave, onSaveAndAddCanvas, onConfirmDuplicate, onCancelDuplicate, onDelete }: {
   state: ImageEditorState;
   busy: boolean;
-  recentTags: string[];
   duplicateTitle?: string;
   showSaveAndAddCanvas: boolean;
   onChange: (state: ImageEditorState) => void;
@@ -673,7 +667,7 @@ function ImageEditor({ state, busy, recentTags, duplicateTitle, showSaveAndAddCa
       {state.file ? <ObjectUrlImage file={state.file} /> : state.previewUrl || state.sourcePath ? <img src={state.previewUrl || state.sourcePath} alt="图片资产预览" className="aspect-square w-full rounded-lg border border-border object-contain" /> : null}
       {state.assetId && <label className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-secondary focus-within:ring-1 focus-within:ring-primary"><FileImage className="size-4" />{state.file ? '重新选择图片' : '替换图片（可选）'}<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (file) onChange({ ...state, file }); event.target.value = ''; }} /></label>}
       <Field label="标题"><Input value={state.title} onChange={event => onChange({ ...state, title: event.target.value })} /></Field>
-      <TagField value={state.tags} recentTags={recentTags} onChange={tags => onChange({ ...state, tags })} />
+      <TagField value={state.tags} onChange={tags => onChange({ ...state, tags })} />
       {duplicateTitle ? <div className="rounded-lg border border-border bg-card p-3 text-xs leading-relaxed"><p>这张图片已经在资产库的“{duplicateTitle}”中。可以复用原资产，不会创建重复副本。</p><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={onCancelDuplicate}>取消</Button>{!state.assetId && <Button size="sm" disabled={busy} onClick={onConfirmDuplicate}>复用原资产</Button>}</div></div> : <div className="grid gap-2"><Button className="w-full" disabled={busy} onClick={onSave}>{busy ? '保存中…' : state.assetId ? '保存修改' : '保存图片资产'}</Button>{showSaveAndAddCanvas && <Button variant="outline" className="w-full" disabled={busy} onClick={onSaveAndAddCanvas}>保存并加入画布</Button>}</div>}
       {onDelete && <DeleteAssetButton disabled={busy} onClick={onDelete} />}
     </div>
@@ -717,7 +711,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return <label className="block space-y-1.5"><span className="flex items-center justify-between text-xs text-muted-foreground"><span>{label}</span>{hint && <span className="max-w-48 truncate">{hint}</span>}</span>{children}</label>;
 }
 
-function TagField({ value, recentTags, onChange }: { value: string; recentTags: string[]; onChange: (value: string) => void }) {
+function TagField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const current = new Set(parseTags(value));
   const [draft, setDraft] = useState('');
   const commitDraft = () => { const additions = parseTags(draft); if (!additions.length) return; onChange([...parseTags(value), ...additions].join(', ')); setDraft(''); };
@@ -725,7 +719,6 @@ function TagField({ value, recentTags, onChange }: { value: string; recentTags: 
     <Field label="标签">
       <div className="relative"><Tags className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={draft} onChange={event => setDraft(event.target.value)} onBlur={commitDraft} onKeyDown={event => { if (event.key !== 'Enter' && event.key !== ',') return; event.preventDefault(); commitDraft(); }} placeholder="输入标签，按 Enter 添加" className="pl-9" /></div>
       {current.size > 0 && <div className="flex flex-wrap gap-1.5 pt-1">{[...current].map(tag => <span key={tag} className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-xs text-muted-foreground">{tag}<button type="button" aria-label={`移除标签 ${tag}`} onClick={() => onChange(parseTags(value).filter(item => item !== tag).join(', '))}><X className="size-3" /></button></span>)}</div>}
-      {recentTags.length > 0 && <div className="flex flex-wrap gap-1.5 pt-1">{recentTags.slice(0, 8).map(tag => <button key={tag} type="button" className={cn('rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground', current.has(tag) && 'bg-secondary text-foreground')} onClick={() => { const tags = parseTags(value); onChange(current.has(tag) ? tags.filter(item => item !== tag).join(', ') : [...tags, tag].join(', ')); }}>{tag}</button>)}</div>}
     </Field>
   );
 }

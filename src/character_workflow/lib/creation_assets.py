@@ -386,15 +386,7 @@ def list_creation_assets(
             and (scope != "project" or project_id in asset.project_ids)
         ]
         rows.sort(key=lambda asset: asset.last_used_at or asset.created_at, reverse=True)
-        tags: list[str] = []
-        seen: set[str] = set()
-        for asset in rows:
-            for tag in asset.tags:
-                key = tag.casefold()
-                if key not in seen:
-                    tags.append(tag)
-                    seen.add(key)
-        return CreationAssetList(revision=current.revision, assets=rows, recent_tags=tags[:20])
+        return CreationAssetList(revision=current.revision, assets=rows)
 
 
 def update_prompt_asset(

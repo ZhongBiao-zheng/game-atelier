@@ -1380,7 +1380,6 @@ class CreationAssetList(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: int = Field(ge=0)
     assets: list[CreationAsset]
-    recent_tags: list[str]
 
 
 class CreationPromptAssetCreate(BaseModel):
