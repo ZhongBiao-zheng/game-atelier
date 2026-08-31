@@ -111,6 +111,12 @@ export interface CanvasGenerationSnapshot {
 }
 
 export interface CanvasJobContext {
+  batch?: {
+    batch_id: string;
+    item_id: string;
+    round_index: number;
+    step_index: number;
+  } | null;
   run_id: string;
   snapshot: CanvasGenerationSnapshot;
   result_node_id: string;

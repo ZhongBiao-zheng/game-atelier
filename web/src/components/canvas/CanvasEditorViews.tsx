@@ -19,6 +19,7 @@ import {
 import { createPortal } from 'react-dom';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
+import { CanvasBatchMaterialEditor, CanvasExecutionGroup } from './CanvasBatchControls';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
@@ -105,6 +106,9 @@ export interface CanvasGenerationPanelContextValue {
 }
 
 export interface CanvasNodeContextValue {
+  batchBusy?: boolean;
+  prepareBatch?: (nodeId: string) => Promise<void>;
+  uploadBatchImages?: (nodeId: string, files: File[], itemId?: string) => Promise<void>;
   projectId: string;
   materialReferences: readonly CanvasMaterialReference[];
   connectedMaterialNodeIdsByNodeId: ReadonlyMap<string, ReadonlySet<string>>;
@@ -207,6 +211,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   );
   const generationPanelVisible = Boolean(
     context
+    && !context.batchBusy
     && selected
     && !context.multiSelectionActive
     && draft
@@ -302,6 +307,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     });
   }
   if (!context) return null;
+  if (node.type === 'group') return <CanvasExecutionGroup node={node} context={context} selected={Boolean(selected)} />;
   const renameNode = context.renameNode;
   const content = nodeContent;
   const copyablePrompt = copyablePromptForNode(
@@ -317,21 +323,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     : null;
   const reversePromptJob = nodeJob && isReversePromptJob(nodeJob) ? nodeJob : undefined;
   const reversePromptSucceeded = reversePromptJob?.canvas_run?.candidates.some(candidate => candidate.status === 'succeeded') ?? false;
-  const candidatePresentation = node.type === 'image' || node.type === 'video'
+  const candidatePresentation = node.type === 'image'
     ? presentCanvasCandidates(context.jobsByResultNodeId.get(node.id) ?? [])
     : null;
-  const mediaCandidates = candidatePresentation
-    ? node.type === 'video'
-      ? [
-          ...candidatePresentation.current,
-          ...candidatePresentation.history.filter(entry => (
-            entry.candidate.status === 'succeeded'
-            && Boolean(entry.candidate.version_id)
-            && !entry.candidate.dismissed_at
-          )),
-        ]
-      : candidatePresentation.current
-    : [];
+  const mediaCandidates = candidatePresentation?.current ?? [];
 
   function beginTitleEditing() {
     titleExitInProgress.current = false;
@@ -575,7 +570,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           )}
         </div>
       </NodeToolbar>
-      {(node.type === 'image' || node.type === 'video') && mediaCandidates.length > 0 && (
+      {node.type === 'image' && mediaCandidates.length > 0 && (
         <MediaCandidateBatch
           node={node}
           entries={mediaCandidates}
@@ -601,6 +596,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           context.materialPick && !materialPickEligible && 'cursor-default',
         )}
         onClick={event => {
+          if (!context.materialPick && (event.shiftKey || event.metaKey || event.ctrlKey)) return;
           event.stopPropagation();
           context.selectNode(node.id);
         }}
@@ -740,9 +736,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           {node.type === 'config' && (
             <CanvasConfigNodeSurface node={node} context={context} />
           )}
-          {(node.type === 'group' || node.type === 'plugin') && !content && (
+          {node.type === 'batch_material' && <CanvasBatchMaterialEditor node={node} context={context} />}
+          {node.type === 'plugin' && !content && (
             <div className="grid min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
-              {node.type === 'group' ? '分组' : '插件节点'}
+              插件节点
             </div>
           )}
         </div>
@@ -996,7 +993,7 @@ function MediaCandidateBatch({
   context,
   onToggle,
 }: {
-  node: Extract<CanvasContentNode, { type: 'image' | 'video' }>;
+  node: Extract<CanvasContentNode, { type: 'image' }>;
   entries: CanvasCandidateEntry[];
   primaryVersionId: string | null;
   expanded: boolean;
@@ -1007,7 +1004,7 @@ function MediaCandidateBatch({
   const primary = entries.find(entry => entry.candidate.version_id === primaryVersionId) ?? entries[0];
   const others = entries.filter(entry => entry.candidate.candidate_id !== primary.candidate.candidate_id);
   const primaryTerminalFailure = primary.candidate.status === 'failed' || primary.candidate.status === 'canceled';
-  const primaryNumber = node.type === 'video' ? 1 : primary.candidate.index + 1;
+  const primaryNumber = primary.candidate.index + 1;
 
   return (
     <div
@@ -1029,7 +1026,7 @@ function MediaCandidateBatch({
           node={node}
           entry={entry}
           index={index}
-          number={node.type === 'video' ? index + 2 : entry.candidate.index + 1}
+          number={entry.candidate.index + 1}
           disabled={disabled}
           context={context}
         />
@@ -1071,7 +1068,7 @@ function MediaCandidateCard({
   disabled,
   context,
 }: {
-  node: Extract<CanvasContentNode, { type: 'image' | 'video' }>;
+  node: Extract<CanvasContentNode, { type: 'image' }>;
   entry: CanvasCandidateEntry;
   index: number;
   number: number;
@@ -1779,22 +1776,28 @@ export function CanvasGenerationComposer({
   const panelLabel = `${modeLabel}设置`;
   const mentionReferences = context.mentionReferencesByNodeId.get(node.id)
     ?? EMPTY_CANVAS_MENTION_REFERENCES;
+  const batchBinding = isCanvasContentNode(node) ? node.data.batch_result : null;
+  const boundMaterial = mentionReferences.find(reference => reference.nodeId === batchBinding?.source_node_id);
+  const materialReferences = boundMaterial
+    ? [...context.materialReferences.filter(reference => reference.nodeId !== boundMaterial.nodeId), boundMaterial]
+    : context.materialReferences;
   const mentionsEnabled = !usesVideoFrameSlots;
   const frameModeHasMentions = usesVideoFrameSlots && canvasMentionMatches(draft.prompt).length > 0;
   const missingMentionIds = mentionsEnabled
     ? missingCanvasMentionIds(draft.prompt, mentionReferences)
     : [];
   const missingVideoFrame = usesVideoFrameSlots && Object.values(videoFrames).some(sourceNodeId => (
-    sourceNodeId && !context.materialReferences.some(reference => (
+    sourceNodeId && !materialReferences.some(reference => (
       reference.nodeId === sourceNodeId && reference.kind === 'image'
     ))
   ));
   const connectedMaterialNodeIds = context.connectedMaterialNodeIdsByNodeId.get(node.id)
     ?? EMPTY_CANVAS_NODE_IDS;
-  const connectedVideoMediaCounts = context.materialReferences.reduce(
+  const connectedVideoMediaCounts = materialReferences.reduce(
     (counts, reference) => {
       if (!connectedMaterialNodeIds.has(reference.nodeId) || reference.kind === 'text') return counts;
-      counts[reference.kind] += 1;
+      counts[reference.kind] += reference.nodeId === batchBinding?.source_node_id
+        ? batchBinding.image_version_ids.length : 1;
       return counts;
     },
     { image: 0, video: 0, audio: 0 },
@@ -1947,7 +1950,7 @@ export function CanvasGenerationComposer({
       ) : (
         <CanvasMaterialConnections
           node={node}
-          materials={context.materialReferences}
+          materials={materialReferences}
           connectedNodeIds={context.connectedMaterialNodeIdsByNodeId.get(node.id) ?? EMPTY_CANVAS_NODE_IDS}
           limits={draft.mode === 'video' ? selectedVideoReferenceLimits : null}
           picking={context.materialPick?.targetNodeId === node.id

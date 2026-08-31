@@ -4,6 +4,8 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 
 export interface CanvasPoint { x: number; y: number }
 export interface CanvasSize { width: number; height: number }
+/** Derived group bounds are finite and positive, without the media surface's 4000px cap. */
+export type CanvasGroupSize = CanvasSize;
 export interface CanvasViewport { x: number; y: number; zoom: number }
 
 export interface CanvasSettings {
@@ -111,6 +113,14 @@ export interface CanvasContentNodeData {
   current_version_id: string | null;
   generation_draft: CanvasGenerationDraft | null;
   active_run_id: string | null;
+  batch_result?: {
+    batch_id: string;
+    template_node_id: string;
+    source_node_id: string | null;
+    item_id: string;
+    image_version_ids: string[];
+    round_index: number;
+  } | null;
 }
 
 export interface CanvasTextDisplay {
@@ -161,7 +171,18 @@ export interface CanvasConfigNode extends CanvasNodeBase {
 
 export interface CanvasGroupNode extends CanvasNodeBase {
   type: 'group';
-  data: { member_node_ids: string[] };
+  size?: CanvasGroupSize | null;
+  data: { member_node_ids: string[]; repeat_count?: number };
+}
+
+export interface CanvasBatchMaterialItem {
+  id: string;
+  image_version_ids: string[];
+}
+
+export interface CanvasBatchMaterialNode extends CanvasNodeBase {
+  type: 'batch_material';
+  data: { items: CanvasBatchMaterialItem[] };
 }
 
 export interface CanvasPluginNode extends CanvasNodeBase {
@@ -177,7 +198,7 @@ export interface CanvasPluginNode extends CanvasNodeBase {
 }
 
 export type CanvasContentNode = CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode;
-export type CanvasNode = CanvasContentNode | CanvasConfigNode | CanvasGroupNode | CanvasPluginNode;
+export type CanvasNode = CanvasContentNode | CanvasConfigNode | CanvasGroupNode | CanvasPluginNode | CanvasBatchMaterialNode;
 
 export type CanvasVideoFrameSlot = 'first_frame' | 'last_frame';
 

@@ -406,6 +406,12 @@ def export_canvas_projects(
             for project_id in sorted(ordered_ids):
                 stack.enter_context(file_lock(canvas_agent_sessions_lock_path(project_id)))
         for project_id in ordered_ids:
+            from character_workflow.lib.canvas_batches import assert_no_active_canvas_batch
+
+            try:
+                assert_no_active_canvas_batch(project_id)
+            except ValueError as error:
+                raise CanvasProjectBusyError(str(error)) from error
             _recover_canvas_transactions_unlocked(project_id)
             project = read_canvas_project(project_id)
             document = _read_canvas_document_unlocked(project_id)
@@ -1180,6 +1186,12 @@ def delete_canvas_project(
     ):
         _recover_package_transactions_unlocked()
         _recover_canvas_transactions_unlocked(project_id)
+        from character_workflow.lib.canvas_batches import assert_no_active_canvas_batch
+
+        try:
+            assert_no_active_canvas_batch(project_id)
+        except ValueError as error:
+            raise CanvasProjectBusyError(str(error)) from error
         current = _read_canvas_document_unlocked(project_id)
         if current.revision != expected_revision:
             raise RuntimeError(f"revision_conflict:{current.revision}")

@@ -103,7 +103,8 @@ export function buildCanvasMentionReferences(
     seen.add(connection.source_node_id);
     const node = nodesById.get(connection.source_node_id);
     const material = node
-      ? canvasMaterialReference(projectId, node, contentVersions)
+      ? canvasMaterialReference(projectId, node, contentVersions, isMentionContentNode(surface)
+        ? surface.data.batch_result : null)
       : null;
     if (!material) return [];
     const index = ++counts[material.kind];
@@ -140,7 +141,16 @@ function canvasMaterialReference(
   projectId: string,
   node: CanvasNode,
   contentVersions: Readonly<Record<string, CanvasContentVersion>>,
+  binding?: CanvasContentNode['data']['batch_result'],
 ): CanvasMaterialReference | null {
+  if (node.type === 'batch_material') {
+    const bound = binding?.source_node_id === node.id ? binding : null;
+    const versionId = bound ? bound.image_version_ids[0] : node.data.items[0]?.image_version_ids[0];
+    if (!versionId || contentVersions[versionId]?.kind !== 'image') return null;
+    return { nodeId: node.id, versionId, kind: 'image', title: bound
+      ? `${node.title} · 本批 ${bound.image_version_ids.length} 张` : `${node.title} · ${node.data.items.length} 项`,
+      previewUrl: canvasMediaUrl(projectId, versionId, 256) };
+  }
   if (!isMentionContentNode(node)) return null;
   const versionId = node.data.current_version_id;
   const version = versionId ? contentVersions[versionId] : undefined;

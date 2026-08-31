@@ -13,6 +13,7 @@ import {
 } from '@/lib/audioGeneration';
 import type {
   CanvasContentNode,
+  CanvasBatchMaterialNode,
   CanvasContentVersion,
   CanvasGenerationDefault,
   CanvasGenerationMode,
@@ -114,6 +115,27 @@ export function canvasNodeRenderedSize(
   return version?.kind === 'image'
     ? sizeLockedToCanvasVersion(node.size, version)
     : node.size ?? CANVAS_DEFAULT_NODE_SIZE;
+}
+
+/** Group membership is explicit; its frame follows its members, never creates dependencies. */
+export function normalizeCanvasGroups(document: CanvasDocument): CanvasDocument {
+  const byId = new Map(document.nodes.map(node => [node.id, node]));
+  return { ...document, nodes: document.nodes.map(node => {
+    if (node.type !== 'group') return node;
+    const members = node.data.member_node_ids.flatMap(id => {
+      const member = byId.get(id);
+      return member && member.type !== 'group' ? [member] : [];
+    });
+    if (!members.length) return { ...node, data: { ...node.data, member_node_ids: [] } };
+    const x = Math.min(...members.map(member => member.position.x)) - 24;
+    const y = Math.min(...members.map(member => member.position.y)) - 40;
+    const right = Math.max(...members.map(member => member.position.x + canvasNodeRenderedSize(member, document.content_versions).width)) + 24;
+    const bottom = Math.max(...members.map(member => member.position.y + canvasNodeRenderedSize(member, document.content_versions).height)) + 24;
+    const size = { width: right - x, height: bottom - y };
+    if (node.position.x === x && node.position.y === y && node.size?.width === size.width
+      && node.size?.height === size.height && members.length === node.data.member_node_ids.length) return node;
+    return { ...node, position: { x, y }, size, data: { ...node.data, member_node_ids: members.map(member => member.id) } };
+  }) };
 }
 
 /** 从期望位置开始，按网格圈由内向外找一个不与现有节点重叠的点。
@@ -236,7 +258,7 @@ export function canvasDeletionBlockedMessage(
 }
 
 export function canvasNodeAcceptsInput(node: CanvasNode) {
-  return node.type !== 'group' && node.type !== 'plugin';
+  return node.type !== 'group' && node.type !== 'plugin' && node.type !== 'batch_material';
 }
 
 export function canvasNodeProvidesContent(node: CanvasNode): node is CanvasContentNode {
@@ -267,13 +289,25 @@ export function canvasNodeHasCurrentContent(
  *  四类内容节点一视同仁之后就不再需要版本表了：canvasNodeHasCurrentContent 的第一道判据也是
  *  canvasNodeProvidesContent，`A || (A && …)` 恒等于 A。留着那个参数只会逼调用方去拿全量版本表
  *  （节点卡因此每一次按键都要重渲染，见 CanvasEditor 里 resolveVersion 的说明）。 */
-export function canvasNodeProvidesOutput(node: CanvasNode): node is CanvasContentNode {
-  return canvasNodeProvidesContent(node);
+export function canvasNodeProvidesOutput(node: CanvasNode): node is CanvasContentNode | CanvasBatchMaterialNode {
+  return canvasNodeProvidesContent(node) || node.type === 'batch_material';
 }
 
 export interface CanvasPendingInput {
   nodeId: string;
   title: string;
+}
+
+/** A different batch source needs a new confirmation, including when retrying a result. */
+export function canvasRequiresBatchRun(document: CanvasDocument | null, nodeId: string): boolean {
+  if (!document) return false;
+  const nodes = new Map(document.nodes.map(node => [node.id, node]));
+  const target = nodes.get(nodeId);
+  const boundSourceId = target && canvasNodeProvidesContent(target) ? target.data.batch_result?.source_node_id : null;
+  return document.connections.some(connection => connection.role === 'input'
+    && connection.target_node_id === nodeId
+    && nodes.get(connection.source_node_id)?.type === 'batch_material'
+    && connection.source_node_id !== boundSourceId);
 }
 
 /** 每个目标节点上「已连接但还没有内容」的输入源。
@@ -290,6 +324,15 @@ export function canvasPendingInputNodes(
     if (connection.role !== 'input' || connection.slot) continue;
     const source = nodes.get(connection.source_node_id);
     if (!source || canvasNodeHasCurrentContent(source, document.content_versions)) continue;
+    if (source.type === 'batch_material') {
+      const target = nodes.get(connection.target_node_id);
+      const binding = target && canvasNodeProvidesContent(target) ? target.data.batch_result : null;
+      if (binding?.source_node_id === source.id) {
+        if (binding.image_version_ids.length && binding.image_version_ids.every(
+          id => document.content_versions[id]?.kind === 'image',
+        )) continue;
+      } else if (source.data.items.length) continue;
+    }
     const pending = result.get(connection.target_node_id) ?? [];
     pending.push({ nodeId: source.id, title: source.title });
     result.set(connection.target_node_id, pending);
