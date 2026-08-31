@@ -44,7 +44,7 @@ function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string
       aria-current={isActive ? 'page' : undefined}
       className={[
         // 透明壳 + isolate 自成层叠上下文：选中态玻璃药丸是底层 motion 元素，文字常驻其上
-        'relative isolate h-9 md:h-10 inline-flex shrink-0 items-center gap-1.5 md:gap-2 rounded-full px-3 md:px-5 text-xs md:text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+        'relative isolate h-9 md:h-10 inline-flex shrink-0 items-center gap-1.5 md:gap-2 rounded-full px-2 sm:px-3 md:px-5 text-xs md:text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
         isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
       ].join(' ')}
     >
@@ -80,7 +80,7 @@ export function AppShell() {
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
       {!immersiveCanvas && <header className="sticky top-0 z-30 shrink-0">
-        <div className="mx-auto grid h-14 min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-3 md:h-20 md:gap-4 md:px-8">
+        <div className="mx-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 lg:h-20 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-4 lg:px-8 lg:py-0">
           <Link href="/" className="flex shrink-0 items-baseline gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm">
             <span className="font-display text-2xl font-normal">
               Atelier
@@ -88,13 +88,13 @@ export function AppShell() {
             <span className="hidden text-xs text-muted-foreground sm:inline">· 工作流</span>
           </Link>
           <LayoutGroup>
-            <nav className="flex min-w-0 max-w-[calc(100vw-9rem)] items-center justify-center gap-1 overflow-x-auto no-scrollbar px-2 md:max-w-none md:gap-3 md:px-3">
+            <nav className="order-last col-span-2 flex min-w-0 items-center justify-center gap-1 overflow-x-auto no-scrollbar px-2 lg:order-none lg:col-span-1 lg:gap-3 lg:px-3">
               {NAV_TABS.map((t, i) => (
                 <NavTab key={t.to} to={t.to} label={t.label} isActive={activeIndex === i} icon={t.icon} />
               ))}
             </nav>
           </LayoutGroup>
-          <div className="flex min-w-0 shrink-0 items-center justify-end gap-2">
+          <div className="flex min-w-0 shrink-0 items-center justify-end gap-1 sm:gap-2">
             <ChangelogButton />
             <ThemeToggle />
             <Link
