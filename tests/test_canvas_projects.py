@@ -39,7 +39,7 @@ def client(isolated_data_root, monkeypatch):
     from viewer_server import routes as routes_module
     monkeypatch.setattr(routes_module, "_run_studio_job_safely", lambda _job_id: None)
     monkeypatch.setattr(routes_module, "_run_canvas_job_safely", lambda _job_id: None)
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def _document(client: TestClient, project_id: str) -> dict:

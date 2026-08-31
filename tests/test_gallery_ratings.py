@@ -13,7 +13,7 @@ from viewer_server.server_app import build_app
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     (tmp_path / "characters").mkdir()
-    return TestClient(build_app(dist_dir=tmp_path / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=tmp_path / "dist"))
 
 
 def _img(tmp_path: Path) -> str:

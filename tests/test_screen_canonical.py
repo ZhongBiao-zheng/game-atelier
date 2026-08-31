@@ -143,7 +143,7 @@ def test_set_screen_canonical_cli_requires_path(capsys, project):
 
 @pytest.fixture
 def client(isolated_data_root):
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def test_screen_canonical_api_roundtrip(client, project, screen_images):

@@ -17,6 +17,7 @@ from viewer_server.connection_status import (
     STATUS_PATH, LocalConnectionStatus, create_connection_status,
 )
 from viewer_server.routes import router
+from viewer_server.request_boundary import LocalRequestBoundary, development_origin
 from viewer_server.sse import hub, sse_router
 from viewer_server.watcher import start_watchers
 
@@ -225,6 +226,8 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
         return connection_status
 
     app.add_middleware(CanvasDocumentBodyLimitMiddleware)
+    # Added last so untrusted requests are rejected before buffering document/upload bodies.
+    app.add_middleware(LocalRequestBoundary, dev_origin=development_origin())
     app.include_router(router)
     app.include_router(sse_router)
 

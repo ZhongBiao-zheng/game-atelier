@@ -34,7 +34,7 @@ def client(tmp_path, monkeypatch):
     # runner so we don't actually invoke lovart in unit tests.
     from viewer_server import routes as routes_module
     monkeypatch.setattr(routes_module, "_run_studio_job_safely", lambda _job_id: None)
-    return TestClient(build_app(dist_dir=tmp_path / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=tmp_path / "dist"))
 
 
 def test_post_studio_job_creates_pending(client):

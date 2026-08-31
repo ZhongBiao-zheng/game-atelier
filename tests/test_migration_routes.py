@@ -31,7 +31,7 @@ def runtime(isolated_data_root):
 
 @pytest.fixture
 def client(runtime):
-    return TestClient(build_app())
+    return TestClient(base_url="http://127.0.0.1", app=build_app())
 
 
 def test_get_spec_reads_from_nested_dir(client):

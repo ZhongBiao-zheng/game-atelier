@@ -108,7 +108,7 @@ curl -sS http://127.0.0.1:5174/api/jobs >/dev/null
 make install                                          # uv sync + pnpm install
 
 # 启动（双终端）
-uv run python src/viewer_server/server.py start     # 终端 A — server
+GAME_ATELIER_DEV_ORIGIN=http://localhost:5173 uv run python src/viewer_server/server.py start # 终端 A
 cd web && pnpm dev                                    # 终端 B — Vite dev
 
 # Skill 软链到 .claude/skills/（重启 CC 生效）

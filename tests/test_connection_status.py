@@ -68,7 +68,7 @@ def test_status_is_minimal_uncached_and_does_not_read_user_configuration(tmp_pat
         raise AssertionError("discovery must not read data root or user configuration")
 
     monkeypatch.setattr(data_root, "resolve_data_root", forbidden)
-    client = TestClient(build_app(dist_dir=tmp_path / "no-dist", instance_id=INSTANCE_ID))
+    client = TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=tmp_path / "no-dist", instance_id=INSTANCE_ID))
     response = client.get(STATUS_PATH)
 
     manifest = Path(__file__).resolve().parents[1] / ".claude-plugin" / "plugin.json"
@@ -82,8 +82,8 @@ def test_status_is_minimal_uncached_and_does_not_read_user_configuration(tmp_pat
 
 def test_instance_is_stable_in_one_app_and_changes_between_apps(tmp_path, monkeypatch):
     monkeypatch.delenv(INSTANCE_ENV, raising=False)
-    first = TestClient(build_app(dist_dir=tmp_path))
-    second = TestClient(build_app(dist_dir=tmp_path))
+    first = TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=tmp_path))
+    second = TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=tmp_path))
     first_id = first.get(STATUS_PATH).json()["instance_id"]
     assert first.get(STATUS_PATH).json()["instance_id"] == first_id
     assert second.get(STATUS_PATH).json()["instance_id"] != first_id

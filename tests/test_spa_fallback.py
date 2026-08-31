@@ -16,7 +16,7 @@ def client(tmp_path, monkeypatch):
     (dist / "assets").mkdir()  # ensure StaticFiles mount activates
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     app = build_app(dist_dir=dist)
-    return TestClient(app)
+    return TestClient(base_url="http://127.0.0.1", app=app)
 
 
 def test_spa_fallback_serves_index_for_client_route(client):
@@ -63,7 +63,7 @@ def test_missing_dist_returns_readable_503_not_bare_404(tmp_path, monkeypatch):
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     missing = tmp_path / "no" / "such" / "dist"
     app = build_app(dist_dir=missing)
-    client = TestClient(app)
+    client = TestClient(base_url="http://127.0.0.1", app=app)
 
     resp = client.get("/")
     assert resp.status_code == 503

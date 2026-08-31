@@ -15,7 +15,7 @@ from viewer_server.server_app import build_app
 
 
 def _client(root: Path) -> TestClient:
-    return TestClient(build_app(dist_dir=root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=root / "dist"))
 
 
 def _source_character(root: Path):

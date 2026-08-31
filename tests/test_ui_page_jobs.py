@@ -122,7 +122,7 @@ def test_submit_screen_cli_unknown_project(tmp_path, project):
 
 @pytest.fixture
 def client(isolated_data_root):
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def test_api_jobs_accepts_ui_job(client, project):

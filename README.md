@@ -158,7 +158,7 @@ make install
 make dev-link
 
 # 启动（双终端）
-uv run python src/viewer_server/server.py start    # 后端
+GAME_ATELIER_DEV_ORIGIN=http://localhost:5173 uv run python src/viewer_server/server.py start # 后端
 cd web && pnpm dev                                  # 前端
 
 # 测试
@@ -169,6 +169,9 @@ make build
 uv run python scripts/check_plugin.py
 claude plugin validate .
 ```
+
+开发页使用 `http://localhost:5173`；前端端口变更时同步修改 `GAME_ATELIER_DEV_ORIGIN`，不使用通配来源。
+该变量仅用于 Vite 开发代理，正常使用已构建的本地页面不需要设置，网站配对也不使用它。
 
 ---
 

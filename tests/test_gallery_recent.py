@@ -19,7 +19,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     chars = tmp_path / "characters"
     chars.mkdir()
-    return TestClient(build_app(dist_dir=tmp_path / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=tmp_path / "dist"))
 
 
 def _make_image(p: Path, mtime_offset: float = 0):

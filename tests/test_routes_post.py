@@ -23,7 +23,7 @@ def runtime(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(runtime):
-    return TestClient(build_app())
+    return TestClient(base_url="http://127.0.0.1", app=build_app())
 
 
 def test_post_spec_writes_file(client, runtime):

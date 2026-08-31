@@ -8,7 +8,7 @@ studio:
 	@bash scripts/studio.sh
 
 dev:
-	@echo "Start server: uv run python src/viewer_server/server.py start"
+	@echo "Start server: GAME_ATELIER_DEV_ORIGIN=http://localhost:5173 uv run python src/viewer_server/server.py start"
 	@echo "Start frontend: cd web && pnpm dev"
 
 build:

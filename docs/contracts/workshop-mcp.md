@@ -18,7 +18,8 @@
 采用官方 Python SDK 的 stdio server，拟入口 `python -m character_workflow.mcp`。
 这个入口是协议适配器，不是第二个 viewer-server；stdout 只输出 MCP JSON-RPC，诊断去 stderr，
 不调用会把安装进度或出图卡片写到 stdout 的 bootstrap / CLI 分支。
-SDK 拟新增为运行依赖 `mcp>=2.1.1,<3`，锁定解析结果；实际安装需用户同意并核验兼容性。
+用户已于 2026-08-31 同意新增官方 SDK。运行依赖为 `mcp>=2.1.1,<3`，当前锁定 2.1.1；
+依赖级 stdio 回归使用独立 echo fixture，不代表 Atelier 工具、授权或真实 Agent 联调已经实现。
 不引入 SDK 的开发 CLI extra 或新的 Node 服务，只使用已需要的服务端协议能力。
 
 用户先在本地管理页选择允许访问的项目，以及 `read`、`edit_documents`、`create_targets`、

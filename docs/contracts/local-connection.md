@@ -1,6 +1,6 @@
 # 本机连接契约
 
-> 连接握手已实现（P1a）；完整网站协议 `atelier-local/1` 尚未实现。
+> 连接握手（P1a）与 Host / Origin 边界（P1b）已实现；完整网站协议 `atelier-local/1` 尚未实现。
 > 除 `/api/connection/status` 外，下列新端点均为目标契约，不能当作当前可用 API。
 > 范围与阶段见[开发说明](../local-workspace.md)。正常数据 API 仍遵循 [API 契约](../api-contract.md)。
 
@@ -85,7 +85,18 @@ P1a 启动器以 `.runtime/server.instance` 和状态响应比对实例，不再
 探测固定回环地址，禁用代理与重定向、限制响应大小、检查服务名与 schema；状态响应禁止缓存。
 已有存活 PID 但实例无法核验时，启动器拒绝覆盖记录、再开第二个服务或向该 PID 发停止信号。
 旧版常驻服务须在更新前正常退出；不能靠自动探测失败触发 stop→start 来“升级”，以免中断生成。
-此切片没有开放 CORS、配对或鉴权业务能力，不改变下列权限设计的未实现状态。
+P1b 对所有请求校验 ASGI socket 的实际监听地址和端口，不能用 Host / Forwarded 自报值作为信任依据。
+仅接受 `127.0.0.1:<port>`（默认 80 端口省略）；重复 Host / Origin / Fetch Metadata 头拒绝。
+有 Origin 时必须是精确本机来源；有 Fetch Metadata 时要求 same-origin。唯一例外是无外站 Origin 的
+顶层 GET 文档导航到公开页面，以便从网站链接打开本地页面；API、媒体、SSE、OpenAPI / docs 不在例外内。
+拒绝在读取请求体前发生，包括 Canvas 大请求体检查前。WebSocket 尚未提供，统一拒绝。
+
+Vite 通过 `GAME_ATELIER_DEV_ORIGIN=http://localhost:5173` 显式登记一个开发来源；必须精确匹配，
+只接受带端口的 HTTP localhost / 127.0.0.1，不接受外站或通配。代理改写 Host 到实际后端，保留 Origin。
+生产运行不设置该变量；网站配对不能借用这个入口。
+
+P1b 仍没有会话身份、能力登记或原生维护凭据：无 Origin / Fetch Metadata 的原生本机请求沿用当前行为。
+不能将这些检查宣传为完整鉴权，也不能据此开放网站。CORS、配对与完整协议继续关闭。
 
 ### 编辑租约与换连接
 
@@ -151,6 +162,7 @@ Canvas 媒体与导入导出、资产库、FirstRunConfig、Feedback、Spec、Cl
 | HTTP | code | 页面处理 |
 | --- | --- | --- |
 | 401 | `CONNECTION_REQUIRED` / `SESSION_EXPIRED` | 进入未连接状态；停止后台读取 |
+| 421 | `HOST_DENIED`（P1b 已实现） | 请求 Host 与实际监听地址 / 端口不符，拒绝路由 |
 | 403 | `ORIGIN_DENIED` / `CAPABILITY_DENIED` / `SESSION_REVOKED` | 不重试；显示连接或权限原因 |
 | 409 | `INSTANCE_CHANGED` / `EDITOR_IN_USE` / `REVISION_CONFLICT` | 保留草稿，要求重连 / 接管 / 重取，不覆盖 |
 | 426 | `PROTOCOL_MISMATCH` | 展示双方版本与更新入口，不调用不兼容业务 API |

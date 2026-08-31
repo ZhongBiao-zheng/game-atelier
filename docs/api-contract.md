@@ -6,7 +6,7 @@
 
 网站连接本机与外部 Agent 工坊入口已进入分阶段开发：
 [开发范围与验收](local-workspace.md)、[本机连接](contracts/local-connection.md)、
-[工坊 MCP 与生成批准](contracts/workshop-mcp.md)。当前只有下面的本机状态握手已实现；
+[工坊 MCP 与生成批准](contracts/workshop-mcp.md)。当前已实现下面的本机状态握手与 Host / Origin 边界；
 其它新增端点是目标契约，不能当作当前可用 API。实现 PR 须同步更新本页的端点权限和双端 schema。
 
 改造不把项目改存浏览器、不把 Key 发给网站、不扩张 Canvas Agent 权限，也不增加第二条供应商执行路径。
@@ -16,6 +16,11 @@ instance 是每次启动的 32 位小写十六进制标识，不是访问凭据�
 响应 `Cache-Control: no-store`，不读取用户配置或数据。`protocol: null` 表示完整网站连接尚不可用，
 不能据此开放跨源调用或跳过鉴权。
 
+P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch Metadata；地址不符返回 421
+`HOST_DENIED`，来源不符返回 403 `ORIGIN_DENIED`。错误为
+`{ error: { code, message, request_id } }`，不回显来源或密钥，并设置 `Cache-Control: no-store`。
+本地会话鉴权尚未实现；原生无来源头请求沿用当前行为。开发来源登记与导航例外见连接契约。
+
 ## 双端同步点
 
 改左边必须同步右边，反之亦然。没有代码层共享，只有约定 + 守卫。
@@ -23,6 +28,7 @@ instance 是每次启动的 32 位小写十六进制标识，不是访问凭据�
 | 契约 | Python | TypeScript | 守卫 |
 |---|---|---|---|
 | LocalConnectionStatus | `viewer_server/connection_status.py` | `web/src/schema/connection.ts` | `tests/test_connection_status.py` |
+| LocalConnectionBoundaryError | `viewer_server/request_boundary.py` | `web/src/schema/connection.ts` | `tests/test_local_request_boundary.py` + `api/http.test.ts` |
 | Job / JobParams | `lib/schemas.py` | `web/src/schema/jobs.ts` | 无 —— 靠人 |
 | Key / ModelSpec | `lib/keys.py` | `web/src/api/keys.ts` | 无 —— 靠人 |
 | CharacterDerivative / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_derivatives.py` + `LeftSidebar.test.tsx` |

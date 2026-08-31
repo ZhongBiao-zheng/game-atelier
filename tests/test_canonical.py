@@ -144,7 +144,7 @@ def test_cli_missing_path_errors(hero, capsys):
 @pytest.fixture
 def client(hero):
     from viewer_server.server_app import build_app
-    return TestClient(build_app())
+    return TestClient(base_url="http://127.0.0.1", app=build_app())
 
 
 def test_api_get_empty(client):

@@ -167,14 +167,14 @@ def test_cli_stale_report(isolated_data_root, hero, capsys):
 def test_api_canonical_carries_stale_flags(isolated_data_root, hero):
     canonical.set_canonical("hero", AssetSlot.PORTRAIT, "characters/hero/portrait/v1.png")
     (isolated_data_root / "characters" / "hero" / "spec.md").write_text(SPEC_V2, encoding="utf-8")
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
     body = client.get("/api/characters/hero/canonical").json()
     assert body["portrait"]["spec_stale"] is True
     assert body["portrait"]["style_stale"] is False
 
 
 def test_api_post_canonical_returns_fresh_status(isolated_data_root, hero):
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
     body = client.post(
         "/api/characters/hero/canonical",
         json={"slot": "portrait", "path": "characters/hero/portrait/v1.png"},
@@ -192,6 +192,6 @@ def test_api_screen_canonical_carries_style_stale(isolated_data_root, hero, scre
     (isolated_data_root / "projects" / "mohuan" / "ui" / "v1" / "style.md").write_text(
         STYLE_V2, encoding="utf-8",
     )
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
     body = client.get(f"/api/projects/{hero.id}/ui-schemes/v1/screens/canonical").json()
     assert body["screens"]["home"]["style_stale"] is True

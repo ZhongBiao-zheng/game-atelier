@@ -22,7 +22,7 @@ def client(isolated_data_root):
     (isolated_data_root / ".config" / "keys.json").write_text(json.dumps({
         "version": 1, "default_alias": None, "keys": [],
     }))
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def _upload(client: TestClient, body: bytes, name: str = "wide.png") -> tuple[str, str]:

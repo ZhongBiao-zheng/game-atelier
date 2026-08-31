@@ -19,7 +19,7 @@ def runtime(isolated_data_root):
 
 @pytest.fixture
 def client(runtime):
-    return TestClient(build_app())
+    return TestClient(base_url="http://127.0.0.1", app=build_app())
 
 
 def test_get_jobs_empty(client):

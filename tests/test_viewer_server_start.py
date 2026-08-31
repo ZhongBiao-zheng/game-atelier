@@ -1,4 +1,5 @@
 import os
+import http.client
 import subprocess
 import sys
 import time
@@ -197,7 +198,7 @@ def test_foreground_server_uses_recorded_instance_and_releases_launch_lock(tmp_p
     def run(app, **kwargs):
         with try_file_lock(tmp_path / "server.start.lock") as acquired:
             assert acquired
-        status = TestClient(app).get("/api/connection/status").json()
+        status = TestClient(base_url="http://127.0.0.1", app=app).get("/api/connection/status").json()
         assert status["instance_id"] == read_instance(tmp_path)
         assert kwargs["host"] == "127.0.0.1"
         assert kwargs["port"] == read_port(tmp_path)
@@ -235,6 +236,21 @@ def test_real_local_runtime_can_be_discovered_reused_and_stopped(isolated_data_r
         assert found, "isolated runtime did not complete its real handshake"
         assert read_pid(runtime) == process.pid
         first_instance = read_instance(runtime)
+
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+        try:
+            connection.request("GET", "/api/config", headers={"Host": "rebind.example"})
+            response = connection.getresponse()
+            assert response.status == 421
+            response.read()
+            connection.request("POST", "/api/projects", body="{}", headers={
+                "Origin": "https://unpaired.vercel.app", "Content-Type": "application/json",
+            })
+            response = connection.getresponse()
+            assert response.status == 403
+            response.read()
+        finally:
+            connection.close()
 
         reused = subprocess.run(
             [sys.executable, "-c", prefix + "server.cmd_start(background=True)"],

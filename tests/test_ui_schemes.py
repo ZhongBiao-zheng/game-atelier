@@ -23,7 +23,7 @@ def test_new_project_starts_with_v1(isolated_data_root):
 def test_sidebar_scheme_list_hides_empty_scaffold(isolated_data_root):
     project = projects.create_project("魔幻", slug="mohuan")
 
-    client = TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    client = TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
     empty = client.get(f"/api/projects/{project.id}/ui-schemes?visible_only=true")
 
     assert empty.status_code == 200
@@ -120,7 +120,7 @@ def test_server_startup_runs_explicit_legacy_upgrade(isolated_data_root):
     image.parent.mkdir(parents=True)
     image.write_bytes(b"png")
 
-    with TestClient(build_app()) as client:
+    with TestClient(base_url="http://127.0.0.1", app=build_app()) as client:
         assert client.get("/api/projects").status_code == 200
 
     assert (root / "ui/v1/screens/home/v1.png").is_file()
@@ -216,7 +216,7 @@ def test_project_baseline_change_marks_every_ui_scheme_stale(isolated_data_root)
 
 def test_scheme_api_exposes_copy_and_default_controls(isolated_data_root):
     project = projects.create_project("魔幻", slug="mohuan")
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
 
     created = client.post(f"/api/projects/{project.id}/ui-schemes", json={
         "name": "V2", "source_scheme_id": "v1", "copy_style": False,

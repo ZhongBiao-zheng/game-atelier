@@ -46,7 +46,7 @@ _PNG = base64.b64decode(
 
 @pytest.fixture
 def client(isolated_data_root):
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def _segments(subject: str = "白色三头犬") -> list[dict[str, str]]:

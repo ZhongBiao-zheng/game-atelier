@@ -9,7 +9,7 @@ from viewer_server.server_app import build_app
 
 
 def _client(isolated_data_root) -> TestClient:
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def _payload(revision: int = 0) -> dict:

@@ -53,7 +53,8 @@ export class ApiError extends Error {
 function readDetail(body: unknown): ApiErrorDetail {
   if (typeof body === 'string') return { message: body.trim() || null, code: null, recovery: null };
   if (!body || typeof body !== 'object') return { message: null, code: null, recovery: null };
-  const detail = (body as { detail?: unknown }).detail;
+  const payload = body as { detail?: unknown; error?: unknown };
+  const detail = payload.detail ?? payload.error;
   if (typeof detail === 'string') return { message: detail.trim() || null, code: null, recovery: null };
   if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
     const stable = detail as { message?: unknown; code?: unknown; recovery?: unknown };
