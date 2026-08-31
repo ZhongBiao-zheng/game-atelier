@@ -1111,6 +1111,8 @@ function CanvasEditorInner({
           width: renderedSize.width,
           height: renderedSize.height,
           zIndex: node.type === 'group' ? 0 : canvasNodeRenderZIndex(node.z_index + 1, selected, maximumPersistedZIndex + 1),
+          // React Flow 的外层仍会捕获点击；仅让分组内部穿透不足以露出连线。
+          ...(node.type === 'group' ? { pointerEvents: 'none' as const } : {}),
         },
         selected,
         data: { domain: node },
