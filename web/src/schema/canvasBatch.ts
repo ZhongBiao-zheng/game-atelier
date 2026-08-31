@@ -14,6 +14,7 @@ export interface CanvasBatchRun {
     step_index: number;
     job_id: string;
     run_id: string;
+    result_node_id: string | null;
     status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
     version_id: string | null;
     error: string | null;

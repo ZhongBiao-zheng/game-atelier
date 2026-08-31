@@ -7,7 +7,7 @@ import { isCanvasBatchActive, type CanvasBatchRun } from '@/schema/canvasBatch';
 
 /** Poll the plan even between Jobs; a gap must not turn off generation synchronization. */
 export function useCanvasBatchRuns(projectId: string, acceptJobs: (jobs: Job[]) => void,
-  mergeDocument: (document: CanvasDocument, runIds: ReadonlySet<string>) => void,
+  mergeDocument: (document: CanvasDocument, runIds: ReadonlySet<string>, nodeIds?: ReadonlySet<string>) => void,
   onError: (message: string) => void) {
   const [runs, setRuns] = useState<CanvasBatchRun[]>([]);
   const [refresh, setRefresh] = useState(0);
@@ -32,7 +32,9 @@ export function useCanvasBatchRuns(projectId: string, acceptJobs: (jobs: Job[]) 
           const jobs = await listCanvasJobs(projectId);
           const document = await getCanvasDocument(projectId);
           if (canceled || requestedEpoch !== epoch.current) return;
-          mergeDocument(document, new Set(jobs.flatMap(job => job.canvas_run?.batch ? [job.canvas_run.run_id] : [])));
+          mergeDocument(document,
+            new Set(remote.flatMap(run => run.executions.map(entry => entry.run_id))),
+            new Set(remote.flatMap(run => run.executions.flatMap(entry => entry.result_node_id ? [entry.result_node_id] : []))));
           acceptJobs(jobs);
         }
         setRuns(remote);

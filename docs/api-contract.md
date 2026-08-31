@@ -190,7 +190,9 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 来自不可变 Content Version。
 批量执行使用 `batch_material` 节点：`data.items` 为最多 200 个 `{id,image_version_ids}`，
 每项 1–16 张已登记图片；项 ID 在节点内唯一。节点仅提供输入，没有生成 Draft。`group.data.repeat_count`
-为 1–20 轮，一层显式成员关系保持不变。分组或单节点可以调用：
+为 1–20 轮，一层显式成员关系保持不变。分组外框按成员显示边界派生，加载与实时合并使用同一规则；
+`group.size` 为正有限数的 `CanvasGroupSize`，不受普通节点 `CanvasSize` 的 4000px 上限影响，
+大批次展开后仍能包围所有成员。图片、视频等普通节点继续保留 4000px 尺寸上限。分组或单节点可以调用：
 
 - `POST /canvas/projects/{id}/batch-runs/prepare`：`{scope_node_id,expected_revision,repeat_count}`；
   校验冻结素材、输入依赖、模型能力及每步单产物，返回 `ready` 计划，不调用模型。最多 20 步、2000 次生成；
@@ -200,11 +202,17 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
   `{batch_id,item_id,round_index,step_index}`，两个 index 从 0 开始。
 - `POST .../batch-runs/{batch_id}/cancel`：取消未提交步骤，对当前 Job 发协作停止；已收费产物继续登记。
 - `GET .../batch-runs` / `GET .../batch-runs/{batch_id}`：读取最近 20 份计划/单份计划，
-  包含每项每步的 Job、Run、结果 Version ID 和状态。
+  包含每项每步的 Job、Run、结果 Version ID 和状态；`executions[].result_node_id` 在展开前为空，
+  首次提交事务展开链路后指向对应普通节点。未提交步骤不伪造节点的 `active_run_id`。
 
 批量计划冻结数据落在项目 `.runtime/batch-plans/`；进度在 `.runtime/batches/`，活动计划索引为
-`.runtime/batch-active.json`。同项同轮上游输出绑定到下游的精确 Version ID，复用原节点显示最新产物，
-所有结果仍由普通 Job/Candidate 保存。上次生成的输出不隐式成为下一次批量执行的自身参考。
+`.runtime/batch-active.json`。同项同轮上游输出绑定到下游的精确 Version ID。
+首次提交事务同时展开各项、各轮的真实结果节点和输入连线：第一项第一轮使用配置链路的原节点，
+其余项/轮按行排在现有内容下方，各行的下游只连接同行上游；不在一个节点中切换批次结果。
+内容节点的可选 `data.batch_result` 保存 `{batch_id,template_node_id,source_node_id,item_id,image_version_ids,round_index}`，
+绑定本批素材的不可变版本，单独再次生成时不读取其他批次；分组再次执行只读取原配置节点，
+不把自动展开的产物节点重新当作流程步骤。所有结果仍由普通 Job/Version 保存，视频不提供候选切换。
+上次生成的输出不隐式成为下一次批量执行的自身参考。
 失败停止剩余步骤，无自动付费重试；服务重启将活动计划标为 interrupted，不自动提交剩余步骤。
 计划文件属于本机执行状态，不随项目包导入；图片素材、普通节点及已经生成的 Jobs/Versions 仍随包保存。
 前端执行期间锁定画布内容编辑，仍可浏览结果；项目导出/删除在批量运行时拒绝。

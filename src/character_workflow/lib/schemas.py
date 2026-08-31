@@ -293,6 +293,13 @@ class CanvasSize(BaseModel):
     height: float = Field(gt=0, le=4000)
 
 
+class CanvasGroupSize(BaseModel):
+    """A derived member bounding box, not a resizable media surface."""
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
+
+
 class CanvasViewport(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     x: float = 0
@@ -526,11 +533,22 @@ def _draft_with_default_policy(value: object, policy: str) -> object:
     return value
 
 
+class CanvasBatchResultBinding(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    batch_id: str
+    template_node_id: str
+    source_node_id: str | None = None
+    item_id: str
+    image_version_ids: list[str] = Field(default_factory=list)
+    round_index: int = Field(ge=0)
+
+
 class CanvasContentNodeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
     current_version_id: str | None = None
     generation_draft: CanvasGenerationDraft | None = None
     active_run_id: str | None = None
+    batch_result: CanvasBatchResultBinding | None = None
 
 
 class CanvasTextDisplay(BaseModel):
@@ -654,6 +672,7 @@ class CanvasConfigNode(CanvasNodeBase):
 
 class CanvasGroupNode(CanvasNodeBase):
     type: Literal["group"]
+    size: CanvasGroupSize | None = None
     data: CanvasGroupNodeData
 
 
@@ -917,6 +936,11 @@ class CanvasDocument(BaseModel):
                         if version is None or version.kind != "image":
                             raise ValueError("batch material must reference project image versions")
             if node.type in {"text", "image", "video", "audio"}:
+                if node.data.batch_result:
+                    for image_id in node.data.batch_result.image_version_ids:
+                        image = self.content_versions.get(image_id)
+                        if image is None or image.kind != "image":
+                            raise ValueError("batch result binding requires owned image versions")
                 version_id = node.data.current_version_id
                 if version_id is not None:
                     version = self.content_versions.get(version_id)

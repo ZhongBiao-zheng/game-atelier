@@ -183,6 +183,7 @@ import {
   canCreateCanvasInputConnection,
   clampCanvasNodeSize,
   canvasPendingInputNodes,
+  canvasRequiresBatchRun,
   closestCanvasConnectionEndpoint,
   createCanvasGenerationDraft,
   createConnectedCanvasConfig,
@@ -299,6 +300,7 @@ function mentionNodeFragment(node: CanvasNode): string {
           node.type,
           node.data.current_version_id,
           node.data.generation_draft?.mode ?? null,
+          node.data.batch_result ?? null,
         ]
         : [node.id, node.title, node.type, node.type === 'batch_material' ? node.data.items : null],
   );
@@ -508,10 +510,11 @@ function CanvasEditorInner({
   const mergeRunDocument = useCallback((
     remote: CanvasDocument,
     runIds: ReadonlySet<string>,
+    resultNodeIds: ReadonlySet<string> = new Set(),
   ) => {
     serverRevision.current = Math.max(serverRevision.current, remote.revision);
     setDocument(current => {
-      if (!current || remote.revision <= current.revision) return current;
+      if (!current || remote.revision < current.revision) return current;
       const remoteNodes = new Map(remote.nodes.map(node => [node.id, node]));
       const currentNodeIds = new Set(current.nodes.map(node => node.id));
       const serverAddedNodeIds = new Set(remote.connections.flatMap(connection => (
@@ -522,18 +525,33 @@ function CanvasEditorInner({
           ? [connection.target_node_id]
           : []
       )));
+      for (const node of remote.nodes) {
+        if (isContentNode(node) && (runIds.has(node.data.active_run_id ?? '') || resultNodeIds.has(node.id))
+          && !currentNodeIds.has(node.id)) serverAddedNodeIds.add(node.id);
+      }
       const serverAddedNodes = remote.nodes.filter(node => serverAddedNodeIds.has(node.id));
       const nodes = [...current.nodes.map(node => {
         const serverNode = remoteNodes.get(node.id);
+        if (node.type === 'group' && serverNode?.type === 'group') {
+          const additions = serverNode.data.member_node_ids.filter(id => serverAddedNodeIds.has(id));
+          return additions.length ? { ...node, data: { ...node.data,
+            member_node_ids: [...new Set([...node.data.member_node_ids, ...additions])],
+          } } : node;
+        }
         if (!serverNode || !isContentNode(node) || !isContentNode(serverNode)) return node;
-        if (node.data.active_run_id !== serverNode.data.active_run_id
-          && !runIds.has(serverNode.data.active_run_id ?? '')) return node;
+        if (!resultNodeIds.has(node.id) && !runIds.has(serverNode.data.active_run_id ?? '')) return node;
+        // A same-revision Job response cannot replace text created locally while it was in flight.
+        const localVersion = node.data.current_version_id;
+        const hasUnsavedContent = activeTextEditingNodeIds.current.has(node.id)
+          || (localVersion && (pendingTextVersions.current.get(node.id) === localVersion
+            || !remote.content_versions[localVersion]));
         return {
           ...node,
           data: {
             ...node.data,
-            current_version_id: serverNode.data.current_version_id,
+            current_version_id: hasUnsavedContent ? localVersion : serverNode.data.current_version_id,
             active_run_id: serverNode.data.active_run_id,
+            batch_result: serverNode.data.batch_result,
           },
         } as CanvasContentNode;
       }), ...serverAddedNodes];
@@ -552,7 +570,7 @@ function CanvasEditorInner({
           || serverAddedNodeIds.has(connection.target_node_id)
         )
       ));
-      const merged: CanvasDocument = {
+      const merged: CanvasDocument = normalizeCanvasGroups({
         ...current,
         revision: remote.revision,
         updated_at: remote.updated_at,
@@ -562,7 +580,7 @@ function CanvasEditorInner({
           current.content_versions,
           remote.content_versions,
         ),
-      };
+      });
       if (saveQueued.current) saveQueued.current = merged;
       return merged;
     });
@@ -688,7 +706,7 @@ function CanvasEditorInner({
           pendingTextVersions.current.set(nodeId, versionId);
         }
         setProjects(projectRows);
-        setDocument(hydrated.document);
+        setDocument(normalizeCanvasGroups(hydrated.document));
         setViewportZoom(canvasDocument.viewport.zoom);
         serverRevision.current = canvasDocument.revision;
         if (hydrated.versionIds.size) {
@@ -1817,7 +1835,6 @@ function CanvasEditorInner({
     const top = Math.min(...members.map(node => node.position.y)) - 40;
     const right = Math.max(...members.map(node => node.position.x + canvasNodeRenderedSize(node, current.content_versions).width)) + 24;
     const bottom = Math.max(...members.map(node => node.position.y + canvasNodeRenderedSize(node, current.content_versions).height)) + 24;
-    if (right - left > 4000 || bottom - top > 4000) { setError('节点相距太远，请先移近再分组。'); return; }
     const id = makeId('group');
     commit(document => ({ ...document, nodes: [...document.nodes, { id, type: 'group', title: '执行分组',
       position: { x: left, y: top }, size: { width: right - left, height: bottom - top }, z_index: 0,
@@ -2246,11 +2263,9 @@ function CanvasEditorInner({
 
   const submitRun = useCallback(async (nodeId: string) => {
     if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return; }
-    const currentDocument = latestDocument.current;
-    const hasBatchSource = currentDocument?.connections.some(edge => edge.role === 'input'
-      && edge.target_node_id === nodeId
-      && currentDocument.nodes.some(node => node.id === edge.source_node_id && node.type === 'batch_material'));
-    if (hasBatchSource) { await prepareBatch(nodeId); return; }
+    if (canvasRequiresBatchRun(latestDocument.current, nodeId)) {
+      await prepareBatch(nodeId); return;
+    }
     if (runSubmissionInFlight.current) {
       setError('另一项生成正在提交，请稍后再试。');
       return;
@@ -2343,6 +2358,10 @@ function CanvasEditorInner({
   ]);
 
   const retryRun = useCallback(async (nodeId: string, runId: string) => {
+    if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return; }
+    if (canvasRequiresBatchRun(latestDocument.current, nodeId)) {
+      await prepareBatch(nodeId); return;
+    }
     if (runSubmissionInFlight.current) {
       setError('另一项生成正在提交，请稍后再试。');
       return;
@@ -2378,6 +2397,7 @@ function CanvasEditorInner({
     mergeSubmittedRunDocument,
     persistNow,
     projectId,
+    prepareBatch,
   ]);
 
   const cancelRun = useCallback(async (runId: string) => {
@@ -4691,6 +4711,14 @@ function cloneCanvasNode(
         ...clone.data,
         generation_draft: cloneCanvasDraft(clone.data.generation_draft, idMap),
         active_run_id: null,
+        batch_result: clone.data.batch_result ? {
+          ...clone.data.batch_result,
+          template_node_id: idMap.get(clone.data.batch_result.template_node_id)
+            ?? clone.data.batch_result.template_node_id,
+          source_node_id: clone.data.batch_result.source_node_id
+            ? idMap.get(clone.data.batch_result.source_node_id) ?? clone.data.batch_result.source_node_id
+            : null,
+        } : null,
       },
     } as CanvasNode;
   }

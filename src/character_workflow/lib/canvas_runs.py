@@ -698,6 +698,9 @@ def _resolve_inputs(
     version_bindings: dict[str, list[str]] | None = None,
 ) -> list[CanvasSnapshotInput]:
     candidates = canvas_input_sources(document, surface, draft)
+    batch_result = getattr(surface.data, "batch_result", None)
+    if version_bindings is None and batch_result and batch_result.source_node_id:
+        version_bindings = {batch_result.source_node_id: batch_result.image_version_ids}
 
     nodes = {node.id: node for node in document.nodes}
     resolved: list[CanvasSnapshotInput] = []

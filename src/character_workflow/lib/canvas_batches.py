@@ -20,6 +20,7 @@ from character_workflow.lib.canvas_runs import (
     _current_version_id,
     _draft_for_node,
     _input_paths,
+    _MENTION,
     _read_document_unlocked,
     PreparedCanvasGeneration,
     canvas_input_sources,
@@ -33,8 +34,10 @@ from character_workflow.lib.file_lock import file_lock, try_file_lock
 from character_workflow.lib.jobs import new_job_id, read_job
 from character_workflow.lib.schemas import (
     CanvasBatchJobOrigin,
+    CanvasBatchResultBinding,
     CanvasDocument,
     CanvasMediaVersion,
+    CanvasInputConnection,
     CanvasNode,
     CanvasSnapshotInput,
     CanvasTextVersion,
@@ -68,6 +71,7 @@ class CanvasBatchExecution(BatchModel):
     step_index: int
     job_id: str
     run_id: str
+    result_node_id: str | None = None
     status: Literal["queued", "running", "succeeded", "failed", "canceled"] = "queued"
     version_id: str | None = None
     error: str | None = None
@@ -152,7 +156,8 @@ def active_canvas_batch(project_id: str) -> CanvasBatchRun | None:
 
 def assert_node_not_batch_running(project_id: str, node_id: str) -> None:
     active = active_canvas_batch(project_id)
-    if active and node_id in {step.node_id for step in active.steps}:
+    if active and (node_id in {step.node_id for step in active.steps}
+                   or node_id in {_result_node_id(active, entry) for entry in active.executions}):
         raise ValueError("这个节点正在批量执行，请先停止或等待完成")
 
 
@@ -162,6 +167,7 @@ def assert_batch_document_change(current: CanvasDocument, submitted: CanvasDocum
         return
     nodes = {node.id: node for node in submitted.nodes}
     protected = {step.node_id for step in active.steps} | {active.scope_node_id}
+    protected.update(_result_node_id(active, entry) for entry in active.executions)
     if active.source_node_id:
         protected.add(active.source_node_id)
     for node in current.nodes:
@@ -194,8 +200,23 @@ def _executable(document: CanvasDocument, node: CanvasNode) -> bool:
 
 def _ordered_nodes(document: CanvasDocument, scope: CanvasNode) -> list[CanvasNode]:
     member_ids = scope.data.member_node_ids if scope.type == "group" else [scope.id]
-    selected = [node for node in document.nodes
-                if node.id in member_ids and _executable(document, node)]
+    selected = []
+    for node in document.nodes:
+        if node.id not in member_ids:
+            continue
+        binding = getattr(node.data, "batch_result", None)
+        if scope.type == "group" and binding and binding.template_node_id != node.id \
+                and binding.template_node_id in member_ids:
+            continue
+        node = node.model_copy(deep=True)
+        version = document.content_versions.get(_current_version_id(node) or "")
+        # Plan from the authored configuration, not an old video-edit implicit input.
+        # Only selected steps are replaced in the plan; excluded references stay intact.
+        if version and version.origin.kind == "job_output":
+            node.data.current_version_id = None
+            node.data.active_run_id = None
+        if _executable(document, node):
+            selected.append(node)
     if not selected:
         raise ValueError("范围内没有可执行节点，请先填写生成设置并连接输入")
     if len(selected) > 20:
@@ -218,6 +239,119 @@ def _model_signature(prepared: PreparedCanvasGeneration) -> str:
              "base_url": prepared.key.base_url,
              "model": prepared.model.model_dump(mode="json")}
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def _result_node_id(run: CanvasBatchRun, entry: CanvasBatchExecution) -> str:
+    if entry.item_index == 0 and entry.round_index == 0:
+        return run.steps[entry.step_index].node_id
+    return f"batch-result-{entry.run_id.removeprefix('run-')}"
+
+
+def _row_node_ids(run: CanvasBatchRun, entry: CanvasBatchExecution) -> dict[str, str]:
+    return {run.steps[other.step_index].node_id: _result_node_id(run, other)
+            for other in run.executions if other.item_index == entry.item_index
+            and other.round_index == entry.round_index}
+
+
+def _layout_height(node: CanvasNode, document: CanvasDocument) -> float:
+    height = node.size.height if node.size else (144 if node.type == "text" else 176)
+    if node.type != "image" or node.data.display.free_resize:
+        return height
+    # Match the image surface's aspect-locked sizing in canvasNodeRenderedSize.
+    width = min(4000, max(240, node.size.width if node.size else 320))
+    dimensions = []
+    version = document.content_versions.get(node.data.current_version_id or "")
+    if isinstance(version, CanvasMediaVersion) and version.width and version.height:
+        dimensions.append((version.width, version.height))
+    draft = _draft_for_node(node)
+    if draft:
+        for value in (draft.params.size, draft.params.ratio):
+            match = re.fullmatch(r"(\d+(?:\.\d+)?)[x:](\d+(?:\.\d+)?)", str(value or ""))
+            if match and float(match[1]) > 0 and float(match[2]) > 0:
+                dimensions.append((float(match[1]), float(match[2])))
+    return max(height, *(min(4000, max(150, width * h / w))
+                         for w, h in dimensions or [(1.0, 1.0)]))
+
+
+def _expanded_document(
+    current: CanvasDocument, run: CanvasBatchRun, plan: CanvasBatchPlan,
+) -> CanvasDocument:
+    """Create real result branches inside the first Job's existing document transaction."""
+    templates = {node.id: node for node in plan.document.nodes
+                 if node.id in {step.node_id for step in run.steps}}
+    top = min(node.position.y for node in templates.values())
+    bottom = max(node.position.y + _layout_height(node, plan.document)
+                 for node in templates.values())
+    row_height = bottom - top + 120
+    nodes = list(current.nodes)
+    connections = list(current.connections)
+    versions = dict(current.content_versions)
+    existing = {node.id: index for index, node in enumerate(nodes)}
+    # Additional rows go below existing content; the configured chain remains row one.
+    next_row_top = max((node.position.y + _layout_height(node, current)
+                        for node in nodes if node.type != "group"), default=bottom) + 120
+    for entry in run.executions:
+        result_id = _result_node_id(run, entry)
+        index = existing.get(result_id)
+        if index is not None and getattr(nodes[index].data, "active_run_id", None) == entry.run_id:
+            continue
+        template = templates[run.steps[entry.step_index].node_id]
+        row_ids = _row_node_ids(run, entry)
+        draft = _draft_for_node(template).model_copy(deep=True)
+        draft.prompt = _MENTION.sub(lambda match: f"@[node:{row_ids.get(match[1], match[1])}]",
+                                   draft.prompt)
+        row = entry.round_index * len(run.items) + entry.item_index
+        offset_y = next_row_top - top + (row - 1) * row_height if row else 0
+        item = run.items[entry.item_index]
+        binding = CanvasBatchResultBinding(
+            batch_id=run.batch_id, template_node_id=template.id,
+            source_node_id=run.source_node_id, item_id=item.id,
+            image_version_ids=item.image_version_ids, round_index=entry.round_index,
+        )
+        display_version = (_current_version_id(nodes[index])
+                           if index is not None else _current_version_id(template))
+        if template.type == "text" and display_version is None:
+            # Empty text is real document content, not a client-created unsaved edit.
+            display_version = f"version-{secrets.token_hex(12)}"
+            versions[display_version] = CanvasTextVersion(
+                version_id=display_version, kind="text", text="", created_at=_now(),
+                sha256=hashlib.sha256(b"").hexdigest(),
+                origin=CanvasUserEditOrigin(kind="user_edit"),
+            )
+        result = template.model_copy(update={
+            "id": result_id,
+            "position": template.position.model_copy(update={"y": template.position.y + offset_y}),
+            "data": template.data.model_copy(update={
+                "current_version_id": display_version,
+                "active_run_id": None,
+                "generation_draft": draft, "batch_result": binding,
+            }),
+        })
+        if index is None:
+            nodes.append(result)
+        else:
+            nodes[index] = result
+        entry.result_node_id = result_id
+        for edge in plan.document.connections:
+            if edge.role != "input" or edge.target_node_id != template.id:
+                continue
+            source_id = row_ids.get(edge.source_node_id, edge.source_node_id)
+            if any(other.source_node_id == source_id and other.target_node_id == result_id
+                   and other.role == "input" and other.slot == edge.slot for other in connections):
+                continue
+            connections.append(CanvasInputConnection(
+                id=f"connection-{secrets.token_hex(12)}", role="input",
+                source_node_id=source_id, target_node_id=result_id, slot=edge.slot,
+            ))
+    added_ids = [_result_node_id(run, entry) for entry in run.executions]
+    for index, node in enumerate(nodes):
+        if node.type == "group" and node.id == run.scope_node_id:
+            nodes[index] = node.model_copy(update={"data": node.data.model_copy(update={
+                "member_node_ids": list(dict.fromkeys([*node.data.member_node_ids, *added_ids])),
+            })})
+    return CanvasDocument.model_validate(current.model_copy(
+        update={"nodes": nodes, "connections": connections,
+                "content_versions": versions}).model_dump(mode="json"))
 
 
 def _preview_document(
@@ -251,20 +385,11 @@ def prepare_canvas_batch(project_id: str, payload: CanvasBatchCreate) -> CanvasB
         scope = next((node for node in current.nodes if node.id == payload.scope_node_id), None)
         if scope is None:
             raise KeyError(payload.scope_node_id)
-        # A previous generated output is not an extra input to the next batch. Explicit
-        # connections still reference frozen shared material outside the execution scope.
-        members = set(scope.data.member_node_ids if scope.type == "group" else [scope.id])
-        planning_nodes = []
-        for node in current.nodes:
-            version = current.content_versions.get(_current_version_id(node) or "")
-            if node.id in members and node.type in CONTENT_TYPES and version \
-                    and version.origin.kind == "job_output":
-                node = node.model_copy(update={"data": node.data.model_copy(
-                    update={"current_version_id": None, "active_run_id": None})})
-            planning_nodes.append(node.model_copy(deep=True))
-        planning = current.model_copy(update={"nodes": planning_nodes})
-        steps = _ordered_nodes(planning, scope)
-        step_ids = {node.id for node in steps}
+        steps = _ordered_nodes(current, scope)
+        steps_by_id = {node.id: node for node in steps}
+        step_ids = set(steps_by_id)
+        planning = current.model_copy(update={"nodes": [steps_by_id.get(node.id, node)
+                                                       for node in current.nodes]})
         required = step_ids | {source for node in steps for source in _sources(planning, node)}
         sources = [node for node in current.nodes
                    if node.id in required and node.type == "batch_material"]
@@ -280,13 +405,18 @@ def prepare_canvas_batch(project_id: str, payload: CanvasBatchCreate) -> CanvasB
         frozen_nodes = [node for node in planning.nodes if node.id in required]
         version_ids = {_current_version_id(node) for node in frozen_nodes}
         version_ids.update(version_id for item in items for version_id in item.image_version_ids)
-        frozen = current.model_copy(update={
+        version_ids.update(version_id for node in frozen_nodes
+                           if getattr(node.data, "batch_result", None)
+                           for version_id in node.data.batch_result.image_version_ids)
+        frozen = CanvasDocument.model_validate(current.model_copy(update={
             "nodes": frozen_nodes,
             "connections": [edge for edge in current.connections if edge.role == "input"
                             and edge.target_node_id in step_ids and edge.source_node_id in required],
             "content_versions": {key: value for key, value in current.content_versions.items()
                                  if key in version_ids},
-        })
+        }).model_dump(mode="json"))
+        frozen_by_id = {node.id: node for node in frozen.nodes}
+        steps = [frozen_by_id[node.id] for node in steps]
         # Resolve all existing files before any paid step; downstream placeholders never leave preflight.
         _input_paths(project_id, frozen, [CanvasSnapshotInput(
             order=index, source="input_connection", node_id="preflight", version_id=key,
@@ -423,7 +553,10 @@ def _run_canvas_batch(project_id: str, batch_id: str) -> None:
                 try:
                     recover_canvas_transactions_unlocked(project_id)
                     current = _read_document_unlocked(project_id)
-                    bindings = {run.steps[previous.step_index].node_id: [previous.version_id]
+                    if entry == run.executions[0]:
+                        current = _expanded_document(current, run, plan)
+                    row_ids = _row_node_ids(run, entry)
+                    bindings = {row_ids[run.steps[previous.step_index].node_id]: [previous.version_id]
                                 for previous in run.executions
                                 if previous.round_index == entry.round_index
                                 and previous.item_index == entry.item_index
@@ -431,17 +564,29 @@ def _run_canvas_batch(project_id: str, batch_id: str) -> None:
                     item = run.items[entry.item_index]
                     if run.source_node_id:
                         bindings[run.source_node_id] = item.image_version_ids
+                    # Planning already removes old generated outputs; genuine authored
+                    # source content must remain the same implicit input for every row.
+                    frozen_self_versions = {row_ids[node.id]: _current_version_id(node)
+                                            for node in plan.document.nodes if node.id in row_ids}
                     virtual = plan.document.model_copy(update={
+                        "nodes": [node for node in plan.document.nodes if node.id not in row_ids]
+                        + [node.model_copy(update={"data": node.data.model_copy(update={
+                            "current_version_id": frozen_self_versions[node.id],
+                        })}) for node in current.nodes if node.id in row_ids.values()],
+                        "connections": [edge.model_copy(update={
+                            "source_node_id": row_ids.get(edge.source_node_id, edge.source_node_id),
+                            "target_node_id": row_ids.get(edge.target_node_id, edge.target_node_id),
+                        }) for edge in plan.document.connections],
                         "content_versions": {**plan.document.content_versions,
                                              **current.content_versions},
                     })
                     node = next(node for node in virtual.nodes
-                                if node.id == run.steps[entry.step_index].node_id)
+                                if node.id == _result_node_id(run, entry))
                     if not any(candidate.id == node.id for candidate in current.nodes):
                         raise ValueError("执行节点已不存在，批量执行停止")
                     prepared = prepare_canvas_generation(project_id, virtual, node,
                                                          version_bindings=bindings)
-                    if _model_signature(prepared) != plan.model_signatures[node.id]:
+                    if _model_signature(prepared) != plan.model_signatures[run.steps[entry.step_index].node_id]:
                         raise ValueError("模型配置已改变，请重新确认后执行")
                     try:
                         read_job(entry.job_id)
