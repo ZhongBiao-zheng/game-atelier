@@ -1,6 +1,7 @@
 # 本机连接契约
 
-> 拟定协议 `atelier-local/1`，尚未实现；这里出现的新端点不能当作当前可用 API。
+> 连接握手已实现（P1a）；完整网站协议 `atelier-local/1` 尚未实现。
+> 除 `/api/connection/status` 外，下列新端点均为目标契约，不能当作当前可用 API。
 > 范围与阶段见[开发说明](../local-workspace.md)。正常数据 API 仍遵循 [API 契约](../api-contract.md)。
 
 ## 身份与信任
@@ -66,7 +67,7 @@ Fetch Metadata；不接受无 Origin 的匿名请求，不向网站提供 CORS �
 
 | 方法与路径 | 身份 | 请求 / 响应重点 |
 | --- | --- | --- |
-| `GET /api/connection/status` | 无 | `{ service: "game-atelier", instance_id, app_version, protocol: "atelier-local/1" }`，不含目录、项目数、Key 或会话 |
+| `GET /api/connection/status` | 无 | `{ service: "game-atelier", instance_id, app_version, protocol }`；P1a 的 protocol 固定为 null，完整鉴权就绪后才声明 `"atelier-local/1"`；不含目录、项目数、Key 或会话 |
 | `POST /api/connection/local-session` | 本地同源引导 | 本地 cookie；无业务数据 |
 | `POST /api/connection/pairings` | 本地管理 | `{ origin }` → `{ pairing_code, expires_at, instance_id }` |
 | `POST /api/connection/pair` | 已登记的待配对 Origin | `{ pairing_code, instance_id }` → `{ session_token, session_id, expires_at, capabilities }` |
@@ -78,6 +79,13 @@ Fetch Metadata；不接受无 Origin 的匿名请求，不向网站提供 CORS �
 
 这些端点与其 schema 在实现 PR 中同时落到 Python、TS 和测试；版本号不取代协议版本。
 Web 与服务必须协商同一个受支持协议；不匹配时停止读取与写入，显示更新指引，不试旧式匿名 API。
+`protocol: null` 明确表示只有本机发现能力，不能配对或从网站读取业务 API。
+
+P1a 启动器以 `.runtime/server.instance` 和状态响应比对实例，不再读取 `/api/config`。
+探测固定回环地址，禁用代理与重定向、限制响应大小、检查服务名与 schema；状态响应禁止缓存。
+已有存活 PID 但实例无法核验时，启动器拒绝覆盖记录、再开第二个服务或向该 PID 发停止信号。
+旧版常驻服务须在更新前正常退出；不能靠自动探测失败触发 stop→start 来“升级”，以免中断生成。
+此切片没有开放 CORS、配对或鉴权业务能力，不改变下列权限设计的未实现状态。
 
 ### 编辑租约与换连接
 

@@ -13,6 +13,9 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from character_workflow.lib.jobs import fail_orphan_studio_jobs, read_job, resumable_studio_jobs
 from character_workflow.lib.secret_filter import SecretRedactionFilter
+from viewer_server.connection_status import (
+    STATUS_PATH, LocalConnectionStatus, create_connection_status,
+)
 from viewer_server.routes import router
 from viewer_server.sse import hub, sse_router
 from viewer_server.watcher import start_watchers
@@ -210,9 +213,17 @@ def _revalidated_file(path: Path) -> FileResponse:
     return FileResponse(path, headers={"Cache-Control": _STATIC_CACHE_CONTROL})
 
 
-def build_app(dist_dir: Path | None = None) -> FastAPI:
+def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -> FastAPI:
     _install_secret_filter()
     app = FastAPI(title="Game Atelier viewer-server", lifespan=lifespan)
+    connection_status = create_connection_status(instance_id)
+
+    @app.get(STATUS_PATH, response_model=LocalConnectionStatus)
+    async def get_connection_status(response: Response) -> LocalConnectionStatus:
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return connection_status
+
     app.add_middleware(CanvasDocumentBodyLimitMiddleware)
     app.include_router(router)
     app.include_router(sse_router)

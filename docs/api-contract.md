@@ -4,12 +4,17 @@
 
 ## 开发中的扩展契约
 
-网站连接本机与外部 Agent 工坊入口已进入设计，尚未实现：
+网站连接本机与外部 Agent 工坊入口已进入分阶段开发：
 [开发范围与验收](local-workspace.md)、[本机连接](contracts/local-connection.md)、
-[工坊 MCP 与生成批准](contracts/workshop-mcp.md)。这些文档里的新增端点是目标契约，
-不能当作当前可用 API。实现 PR 须同步更新本页的端点权限和双端 schema；在那之前，下文仍描述现有运行时。
+[工坊 MCP 与生成批准](contracts/workshop-mcp.md)。当前只有下面的本机状态握手已实现；
+其它新增端点是目标契约，不能当作当前可用 API。实现 PR 须同步更新本页的端点权限和双端 schema。
 
 改造不把项目改存浏览器、不把 Key 发给网站、不扩张 Canvas Agent 权限，也不增加第二条供应商执行路径。
+
+`GET /api/connection/status` 返回 `{ service: "game-atelier", instance_id, app_version, protocol: null }`。
+instance 是每次启动的 32 位小写十六进制标识，不是访问凭据；app_version 从插件 manifest 读取。
+响应 `Cache-Control: no-store`，不读取用户配置或数据。`protocol: null` 表示完整网站连接尚不可用，
+不能据此开放跨源调用或跳过鉴权。
 
 ## 双端同步点
 
@@ -17,6 +22,7 @@
 
 | 契约 | Python | TypeScript | 守卫 |
 |---|---|---|---|
+| LocalConnectionStatus | `viewer_server/connection_status.py` | `web/src/schema/connection.ts` | `tests/test_connection_status.py` |
 | Job / JobParams | `lib/schemas.py` | `web/src/schema/jobs.ts` | 无 —— 靠人 |
 | Key / ModelSpec | `lib/keys.py` | `web/src/api/keys.ts` | 无 —— 靠人 |
 | CharacterDerivative / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_derivatives.py` + `LeftSidebar.test.tsx` |

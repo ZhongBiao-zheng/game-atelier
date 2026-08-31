@@ -7,6 +7,8 @@ import os
 import sys
 from pathlib import Path
 
+from character_workflow.lib.atomic_io import atomic_write_text
+
 
 def _pid_path(runtime: Path) -> Path:
     return runtime / "server.pid"
@@ -90,6 +92,22 @@ def write_port(runtime: Path, port: int) -> None:
     _port_path(runtime).write_text(str(port))
 
 
+def read_instance(runtime: Path) -> str | None:
+    try:
+        value = (runtime / "server.instance").read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError):
+        return None
+    if len(value) != 32 or any(char not in "0123456789abcdef" for char in value):
+        return None
+    return value
+
+
+def write_instance(runtime: Path, instance_id: str) -> None:
+    if len(instance_id) != 32 or any(char not in "0123456789abcdef" for char in instance_id):
+        raise ValueError("invalid server instance id")
+    atomic_write_text(runtime / "server.instance", instance_id)
+
+
 def cleanup_stale_pid(runtime: Path) -> bool:
     """Remove server.pid if the process is dead. Returns True if cleanup happened."""
     pid = read_pid(runtime)
@@ -99,4 +117,5 @@ def cleanup_stale_pid(runtime: Path) -> bool:
         return False
     _pid_path(runtime).unlink(missing_ok=True)
     _port_path(runtime).unlink(missing_ok=True)
+    (runtime / "server.instance").unlink(missing_ok=True)
     return True
