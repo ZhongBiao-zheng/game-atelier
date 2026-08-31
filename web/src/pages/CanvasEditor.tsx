@@ -79,6 +79,7 @@ import { useCanvasJobSync } from '@/hooks/useCanvasJobSync';
 import { useCanvasBatchRuns } from '@/hooks/useCanvasBatchRuns';
 import { prepareCanvasBatch, startCanvasBatch, cancelCanvasBatch } from '@/api/canvasBatch';
 import { CanvasBatchConfirmation, CanvasBatchResults } from '@/components/canvas/CanvasBatchControls';
+import { canvasEdgeTypes } from '@/components/canvas/CanvasConnectionEdge';
 import type { CanvasBatchRun } from '@/schema/canvasBatch';
 import {
   AddMenuButton,
@@ -1150,13 +1151,13 @@ function CanvasEditorInner({
         && cached.selected === selected
         && cached.sourceTitle === sourceTitle
         && cached.targetTitle === targetTitle
+        && cached.flowEdge.deletable === !activeBatch
       ) return cached.flowEdge;
       const flowEdge: Edge = {
         id: connection.id,
         source: connection.source_node_id,
         target: connection.target_node_id,
-        // xyflow v12 没有 'bezier' 这个内置类型，写它会 fallback 到 default 并每次刷警告。
-        type: 'default',
+        type: 'canvasConnection',
         className: cn(
           connection.role === 'derivation' ? 'canvas-provenance-edge' : 'canvas-input-edge',
           active && 'canvas-active-edge',
@@ -1166,7 +1167,7 @@ function CanvasEditorInner({
         selected,
         selectable: true,
         focusable: true,
-        deletable: true,
+        deletable: !activeBatch,
       };
       flowEdgeCache.current.set(
         connection.id,
@@ -1184,7 +1185,7 @@ function CanvasEditorInner({
     }
     flowEdgesRef.current = next;
     return next;
-  }, [activeNodeId, document?.connections, document?.nodes, selectedConnectionIds]);
+  }, [activeBatch, activeNodeId, document?.connections, document?.nodes, selectedConnectionIds]);
 
   const isValidConnection = useCallback<IsValidConnection>((connection) => (
     canCreateCanvasInputConnection(latestDocument.current, connection)
@@ -3705,6 +3706,7 @@ function CanvasEditorInner({
           nodes={flowNodes}
           edges={flowEdges}
           nodeTypes={canvasNodeTypes}
+          edgeTypes={canvasEdgeTypes}
           onConnect={onConnect}
           onConnectStart={() => setConnectionInProgress(true)}
           onConnectEnd={onConnectEnd}
@@ -3717,6 +3719,7 @@ function CanvasEditorInner({
           // 节点根本收不到这次点击，松手时零面积框选还会把整个选择清空。
           // 框选本来就由 selectionOnDrag 接管（空白处直接拖），Shift 这一路是多余的。
           selectionKeyCode={null}
+          selectNodesOnDrag={false}
           onNodeClick={(event, node) => {
             // xyflow 在 onNodeClick 之前已经按 multiSelectionKeyCode 把这次点击并进（或移出）选择集，
             // 这里再无条件调 selectOnlyNode 会立刻打平成单选——快捷键面板承诺的「Shift / ⌘ 点击追加
