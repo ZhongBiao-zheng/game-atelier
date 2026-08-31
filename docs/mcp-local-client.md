@@ -1,7 +1,8 @@
 # 在本机 Agent 中连接 Atelier 工坊
 
 本入口使用官方 Python MCP SDK 的 stdio 协议。Agent 通过受限工具访问已授权的工坊项目，
-文件仍由本机 viewer-server 管理；不需要网站部署，也不需要把作品或供应商 Key 交给 MCP 客户端。
+文件仍由本机 viewer-server 管理；不需要网站部署或迁移作品库，供应商 Key 不提供给 MCP 客户端。
+Agent 通过工具读取的文档、预览等获授权内容会进入其会话；生成时选中的输入会发送给模型供应商。
 业务权限和批准规则见[工坊契约](contracts/workshop-mcp.md)。
 
 ## 准备本机连接
