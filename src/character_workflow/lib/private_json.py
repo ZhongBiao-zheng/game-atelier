@@ -25,11 +25,13 @@ def _windows_acl(path: Path, *, restrict: bool = False) -> None:
     if restrict:
         dacl = win32security.ACL()
         dacl.AddAccessAllowedAce(win32security.ACL_REVISION, ntsecuritycon.FILE_ALL_ACCESS, owner)
+        # An elevated token can default new files to the Administrators group owner.
+        # Set both owner and protected ACL on our empty temporary before writing secrets.
         win32security.SetNamedSecurityInfo(
             str(path), win32security.SE_FILE_OBJECT,
-            win32security.DACL_SECURITY_INFORMATION
+            win32security.OWNER_SECURITY_INFORMATION | win32security.DACL_SECURITY_INFORMATION
             | win32security.PROTECTED_DACL_SECURITY_INFORMATION,
-            None, None, dacl, None,
+            owner, None, dacl, None,
         )
     descriptor = win32security.GetNamedSecurityInfo(
         str(path), win32security.SE_FILE_OBJECT,
