@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Layers, Plus, X } from 'lucide-react';
+import { useId, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, CircleHelp, Layers, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -11,6 +11,7 @@ import type { CanvasNodeContextValue } from './CanvasEditorViews';
 export function CanvasBatchMaterialEditor({ node, context }: {
   node: CanvasBatchMaterialNode; context: CanvasNodeContextValue;
 }) {
+  const helpId = useId();
   const input = useRef<HTMLInputElement>(null);
   const targetItem = useRef<string | undefined>(undefined);
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
@@ -47,7 +48,7 @@ export function CanvasBatchMaterialEditor({ node, context }: {
       if (event.dataTransfer.files.length) void upload(Array.from(event.dataTransfer.files));
     }}>
     <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-      <span className="tabular-nums">{node.data.items.length} 项 · 默认一张一项</span>
+      <span className="tabular-nums">{node.data.items.length} 项</span>
       <Button size="sm" variant="ghost" disabled={disabled} onClick={() => choose()}>
         <Plus className="size-4" />添加图片
       </Button>
@@ -104,7 +105,18 @@ export function CanvasBatchMaterialEditor({ node, context }: {
     </div>
     {uploading && <p role="status" className="text-xs text-muted-foreground">正在上传，已上传的素材会保留…</p>}
     {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-    <p className="text-xs text-muted-foreground">拖动调整顺序 · 每项右侧 + 增加同项参考</p>
+    <div className="relative flex shrink-0 justify-end">
+      <Button type="button" variant="ghost" size="icon"
+        className="peer size-6 rounded-full text-muted-foreground hover:text-foreground"
+        aria-label="批量素材使用说明" aria-describedby={helpId}
+        onClick={event => event.stopPropagation()}>
+        <CircleHelp aria-hidden="true" />
+      </Button>
+      <p id={helpId} role="tooltip"
+        className="pointer-events-none invisible absolute bottom-full right-0 z-20 mb-2 w-64 max-w-full rounded-lg border border-border bg-popover px-3 py-2 text-pretty text-xs leading-relaxed text-foreground peer-hover:visible peer-focus-visible:visible">
+        默认一张图一项；每项“+”追加同项参考图。拖动或用箭头排序。连接生成节点可逐项生成，分组后可连续执行链路。
+      </p>
+    </div>
   </div>;
 }
 
