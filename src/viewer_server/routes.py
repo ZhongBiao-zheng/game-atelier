@@ -262,36 +262,38 @@ def rename_character(character_id: str, payload: dict = Body(...)) -> dict:
             422, detail=f"名字不合法：不能换行、且不超过 80 字（当前 {len(new_name)} 字）"
         )
     p = _project_root() / "characters" / character_id / "spec.md"
-    if not p.exists():
-        raise HTTPException(
-            404,
-            detail=f"找不到角色 {character_id}（characters/{character_id}/spec.md 不存在，可能已被删除）",
-        )
-    text = p.read_text(encoding="utf-8")
-    # YAML frontmatter: update `name:` field
-    if text.startswith("---"):
-        end = text.find("\n---", 3)
-        if end != -1:
-            frontmatter = text[3:end]
-            if re.search(r"^name:\s*", frontmatter, re.MULTILINE):
-                new_frontmatter = re.sub(r"^name:\s*.+$", f"name: {new_name}", frontmatter, flags=re.MULTILINE)
-                new_text = "---" + new_frontmatter + text[end:]
+    from character_workflow.lib.workshop import document_lock, read_stable
+    with document_lock(p):
+        if not p.exists():
+            raise HTTPException(
+                404,
+                detail=f"找不到角色 {character_id}（characters/{character_id}/spec.md 不存在，可能已被删除）",
+            )
+        # Rename transforms the latest body under the same lock as Web/MCP document saves.
+        text = read_stable(p, 800000).decode("utf-8-sig")
+        if text.startswith("---"):
+            end = text.find("\n---", 3)
+            if end != -1:
+                frontmatter = text[3:end]
+                if re.search(r"^name:\s*", frontmatter, re.MULTILINE):
+                    new_frontmatter = re.sub(r"^name:\s*.+$", f"name: {new_name}", frontmatter, flags=re.MULTILINE)
+                    new_text = "---" + new_frontmatter + text[end:]
+                else:
+                    new_frontmatter = frontmatter.rstrip() + f"\nname: {new_name}\n"
+                    new_text = "---" + new_frontmatter + text[end:]
             else:
-                new_frontmatter = frontmatter.rstrip() + f"\nname: {new_name}\n"
-                new_text = "---" + new_frontmatter + text[end:]
+                new_text = text
         else:
-            new_text = text
-    else:
-        # Legacy: replace first `# heading`
-        lines = text.split("\n")
-        for i, line in enumerate(lines):
-            if re.match(r"^#\s+", line):
-                lines[i] = f"# {new_name}"
-                break
-        else:
-            lines = [f"# {new_name}", ""] + lines
-        new_text = "\n".join(lines)
-    atomic_write_text(p, new_text)
+            # Legacy: replace only the first heading, retaining every body line.
+            lines = text.split("\n")
+            for i, line in enumerate(lines):
+                if re.match(r"^#\s+", line):
+                    lines[i] = f"# {new_name}"
+                    break
+            else:
+                lines = [f"# {new_name}", ""] + lines
+            new_text = "\n".join(lines)
+        atomic_write_text(p, new_text)
     return {"ok": True, "id": character_id, "name": new_name}
 
 

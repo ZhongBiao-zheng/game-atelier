@@ -20,6 +20,7 @@ from uuid import uuid4
 from character_workflow.lib import data_root
 from character_workflow.lib import slug as slug_util
 from character_workflow.lib.atomic_io import atomic_write_text
+from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.schemas import Project, ProjectsFile
 
 
@@ -82,96 +83,110 @@ _WORLDVIEW_SKELETON = """# {name} · WORLDVIEW
 
 
 def create_project(name: str, slug: str | None = None) -> Project:
-    f = read_projects()
-    existing_slugs = {p.slug for p in f.projects}
+    with file_lock(_path().with_suffix(".lock")):
+        f = read_projects()
+        existing_slugs = {p.slug for p in f.projects}
 
-    if slug is None:
-        candidate = slug_util.generate(name)
-        final_slug = slug_util.dedupe(candidate, existing_slugs)
-    else:
-        if slug in existing_slugs:
-            raise ValueError(f"slug already exists: {slug!r}")
-        final_slug = slug
+        if slug is None:
+            candidate = slug_util.generate(name)
+            final_slug = slug_util.dedupe(candidate, existing_slugs)
+        else:
+            if slug in existing_slugs:
+                raise ValueError(f"slug already exists: {slug!r}")
+            final_slug = slug
 
-    project = Project(
-        id=f"p-{uuid4().hex[:10]}",
-        slug=final_slug,
-        name=name.strip(),
-        created_at=datetime.now(timezone.utc).isoformat(),
-    )
-    f.projects.insert(0, project)
-    _write(f)
-
-    project_dir = _projects_root() / final_slug
-    project_dir.mkdir(parents=True, exist_ok=True)
-    memory_path = project_dir / "MEMORY.md"
-    worldview_path = project_dir / "worldview.md"
-    if not memory_path.exists():
-        memory_path.write_text(
-            _MEMORY_SKELETON.format(name=name.strip()), encoding="utf-8"
+        project = Project(
+            id=f"p-{uuid4().hex[:10]}",
+            slug=final_slug,
+            name=name.strip(),
+            created_at=datetime.now(timezone.utc).isoformat(),
         )
-    if not worldview_path.exists():
-        worldview_path.write_text(
-            _WORLDVIEW_SKELETON.format(name=name.strip()), encoding="utf-8"
-        )
+        f.projects.insert(0, project)
+        _write(f)
 
-    from character_workflow.lib.ui_schemes import initialize_project
-    initialize_project(project)
+        project_dir = _projects_root() / final_slug
+        project_dir.mkdir(parents=True, exist_ok=True)
+        memory_path = project_dir / "MEMORY.md"
+        worldview_path = project_dir / "worldview.md"
+        if not memory_path.exists():
+            memory_path.write_text(
+                _MEMORY_SKELETON.format(name=name.strip()), encoding="utf-8"
+            )
+        if not worldview_path.exists():
+            worldview_path.write_text(
+                _WORLDVIEW_SKELETON.format(name=name.strip()), encoding="utf-8"
+            )
+
+        from character_workflow.lib.ui_schemes import initialize_project
+        initialize_project(project)
 
     return project
 
 
 def rename_project(project_id: str, name: str) -> Project:
-    f = read_projects()
-    for p in f.projects:
-        if p.id == project_id:
-            p.name = name.strip()
-            _write(f)
-            touch_project(p.id)
-            return p
-    raise KeyError(project_id)
+    with file_lock(_path().with_suffix(".lock")):
+        f = read_projects()
+        for p in f.projects:
+            if p.id == project_id:
+                p.name = name.strip()
+                _write(f)
+                touch_project(p.id)
+                return p
+        raise KeyError(project_id)
 
 
 def delete_project(project_id: str) -> None:
-    f = read_projects()
-    f.projects = [p for p in f.projects if p.id != project_id]
-    f.assignments = {c: pid for c, pid in f.assignments.items() if pid != project_id}
-    _write(f)
+    with file_lock(_path().with_suffix(".lock")):
+        f = read_projects()
+        f.projects = [p for p in f.projects if p.id != project_id]
+        f.assignments = {c: pid for c, pid in f.assignments.items() if pid != project_id}
+        _write(f)
 
 
 def reorder_projects(ordered_ids: list[str]) -> ProjectsFile:
-    f = read_projects()
-    id_to_project = {p.id: p for p in f.projects}
-    reordered = [id_to_project[pid] for pid in ordered_ids if pid in id_to_project]
-    extras = [p for p in f.projects if p.id not in set(ordered_ids)]
-    f.projects = reordered + extras
-    _write(f)
-    return f
+    with file_lock(_path().with_suffix(".lock")):
+        f = read_projects()
+        id_to_project = {p.id: p for p in f.projects}
+        reordered = [id_to_project[pid] for pid in ordered_ids if pid in id_to_project]
+        extras = [p for p in f.projects if p.id not in set(ordered_ids)]
+        f.projects = reordered + extras
+        _write(f)
+        return f
 
 
 def assign_characters(character_ids: list[str], project_id: str | None) -> ProjectsFile:
-    f = read_projects()
-    previous_project_ids = {
-        owner_id
-        for character_id in character_ids
-        if (owner_id := f.assignments.get(character_id)) is not None
-    }
-    if project_id is None:
-        for character_id in character_ids:
-            f.assignments.pop(character_id, None)
-    else:
-        if not any(p.id == project_id for p in f.projects):
-            raise KeyError(project_id)
-        for character_id in character_ids:
-            f.assignments[character_id] = project_id
-    _write(f)
-    for affected_project_id in previous_project_ids | ({project_id} if project_id else set()):
-        touch_project(affected_project_id)
-    return f
+    with file_lock(_path().with_suffix(".lock")):
+        f = read_projects()
+        previous_project_ids = {
+            owner_id
+            for character_id in character_ids
+            if (owner_id := f.assignments.get(character_id)) is not None
+        }
+        if project_id is None:
+            for character_id in character_ids:
+                f.assignments.pop(character_id, None)
+        else:
+            if not any(p.id == project_id for p in f.projects):
+                raise KeyError(project_id)
+            for character_id in character_ids:
+                f.assignments[character_id] = project_id
+        _write(f)
+        for affected_project_id in previous_project_ids | ({project_id} if project_id else set()):
+            touch_project(affected_project_id)
+        return f
 
 
 def assign_character(character_id: str, project_id: str | None) -> ProjectsFile:
     return assign_characters([character_id], project_id)
+
+
+def rename_character_assignment(old_id: str, new_id: str) -> None:
+    """Keep identity renames inside the same projects.json transaction boundary."""
+    with file_lock(_path().with_suffix(".lock")):
+        f = read_projects()
+        if old_id in f.assignments:
+            f.assignments[new_id] = f.assignments.pop(old_id)
+            _write(f)
 
 
 def touch_project(project_id: str) -> None:

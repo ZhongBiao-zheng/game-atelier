@@ -9,7 +9,7 @@ from character_workflow.lib import data_root
 from character_workflow.lib import slug as slug_util
 from character_workflow.lib.atomic_io import atomic_write_json, atomic_write_text
 from character_workflow.lib.active_character import read_active
-from character_workflow.lib.projects import read_projects
+from character_workflow.lib.projects import read_projects, rename_character_assignment
 from character_workflow.lib.schemas import PendingCharacterIdentity
 
 
@@ -229,19 +229,7 @@ def rename_character_id(old_id: str, new_id: str) -> dict[str, object]:
             active_data["active_id"] = new_id
             atomic_write_json(active_path, active_data)
 
-    projects_path = _runtime_dir() / "projects.json"
-    if projects_path.exists():
-        try:
-            projects_data = json.loads(projects_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            projects_data = None
-        if isinstance(projects_data, dict) and isinstance(
-            projects_data.get("assignments"), dict
-        ):
-            assignments = projects_data["assignments"]
-            if old_id in assignments:
-                assignments[new_id] = assignments.pop(old_id)
-                atomic_write_json(projects_path, projects_data)
+    rename_character_assignment(old_id, new_id)
 
     jobs_dir = _runtime_dir() / "jobs"
     if jobs_dir.exists():

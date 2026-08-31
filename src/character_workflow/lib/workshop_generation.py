@@ -18,7 +18,7 @@ from character_workflow.lib.jobs import (
 from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus
 from character_workflow.lib.workshop import (
     WorkshopError, actor_id, digest, media_entries, media_id_for_path, paginate,
-    read_stable, resolve_target, root, safe_path,
+    read_stable, resolve_target, root, safe_path, target_display_name,
 )
 from character_workflow.lib.workshop_schema import (
     GetGenerationInput, PrepareGenerationInput, TargetInput, WithdrawGenerationInput,
@@ -38,6 +38,7 @@ class GenerationRequest(BaseModel):
     created_at: str
     expires_at: str
     provider: str
+    target_name: str = ""
     references: list[dict[str, Any]] = Field(default_factory=list)
     frozen_params: dict[str, Any]
     job_id: str
@@ -177,7 +178,7 @@ def _normalized(payload: PrepareGenerationInput, entries: list[dict], model, key
 
 
 def prepare_generation(principal: Any, payload: PrepareGenerationInput) -> dict:
-    resolve_target(principal, payload.target, "prepare_generation")
+    directory = resolve_target(principal, payload.target, "prepare_generation")
     owner = actor_id(principal)
     request_id = "wr-" + digest([owner, payload.target.model_dump(), payload.idempotency_key])[:40]
     path = request_path(request_id)
@@ -219,6 +220,7 @@ def prepare_generation(principal: Any, payload: PrepareGenerationInput) -> dict:
             input=payload, fingerprint=fingerprint, config_fingerprint=config_fingerprint,
             created_at=_now().isoformat(), expires_at=(_now() + timedelta(hours=24)).isoformat(),
             provider=key.provider, references=refs, frozen_params=params, job_id=new_job_id(),
+            target_name=target_display_name(payload.target, directory),
         )
         _save(request)
         return request_view(request, agent=principal.kind == "agent")
@@ -261,7 +263,7 @@ def request_view(request: GenerationRequest, *, agent: bool = False) -> dict:
     params = {k: v for k, v in request.frozen_params.items() if not k.startswith("reference_")}
     return {
         "request_id": request.request_id, "revision": request.revision, "state": request.state,
-        "target": target.model_dump(), "target_name": name,
+        "target": target.model_dump(), "target_name": request.target_name or name,
         "alias": request.input.alias, "provider": request.provider, "model": request.input.model,
         "prompt": request.input.prompt, "params": params,
         "references": [{k: v for k, v in ref.items() if k != "snapshot_path"}

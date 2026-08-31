@@ -522,3 +522,120 @@ def test_formally_selected_project_image_is_available_to_video_request(setup, mo
     prepared = prepare(setup, target=target, model="seedance-2-0", params={"type": "video"},
                        media_ids=[media[0]["media_id"]])
     assert prepared["references"][0]["media_id"] == media[0]["media_id"]
+
+
+@pytest.mark.parametrize("first_writer", ["agent", "rename"])
+@pytest.mark.parametrize("frontmatter", [False, True])
+def test_web_rename_and_mcp_spec_save_share_latest_document_lock(setup, monkeypatch, first_writer, frontmatter):
+    from contextlib import contextmanager
+    from threading import Event
+    from tests.local_client import LocalTestClient
+    from viewer_server import routes
+    from viewer_server.server_app import build_app
+
+    spec = setup.root / "characters" / "bird" / "spec.md"
+    heading = "---\nname: 小鸟\n---" if frontmatter else "# 小鸟"
+    spec.write_text(heading + "\n\n原内容", encoding="utf-8")
+    original = ws.document_view(spec, "character_spec")
+    payload = WriteDocumentInput(target=setup.target, kind="character_spec",
+        content=heading + "\n\nAgent新增内容", expected_revision=original["revision"],
+        idempotency_key="rename-concurrent-agent")
+    entered_write = Event()
+    release_write = Event()
+    second_lock_attempt = Event()
+    original_atomic = ws.atomic_write_text
+    original_lock = ws.document_lock
+
+    def controlled_write(path, content, *args, **kwargs):
+        if path == spec and not entered_write.is_set():
+            entered_write.set()
+            assert release_write.wait(5), "test did not release document commit"
+        return original_atomic(path, content, *args, **kwargs)
+
+    @contextmanager
+    def observed_lock(path):
+        if path == spec and entered_write.is_set() and not release_write.is_set():
+            second_lock_attempt.set()
+        with original_lock(path):
+            yield
+
+    monkeypatch.setattr(ws, "atomic_write_text", controlled_write)
+    monkeypatch.setattr(routes, "atomic_write_text", controlled_write)
+    monkeypatch.setattr(ws, "document_lock", observed_lock)
+    client = LocalTestClient(base_url="http://127.0.0.1", app=build_app())
+    actions = {
+        "agent": lambda: ws.write_document(setup.agent, payload),
+        "rename": lambda: client.post("/api/characters/bird/rename", json={"name": "新名字"}),
+    }
+    second_writer = "rename" if first_writer == "agent" else "agent"
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(actions[first_writer])
+            try:
+                assert entered_write.wait(5)
+                second = pool.submit(actions[second_writer])
+                assert second_lock_attempt.wait(5), "rename did not use the common document lock"
+            finally:
+                release_write.set()
+            first_result = first.result(timeout=5)
+            if first_writer == "agent":
+                assert second.result(timeout=5).status_code == 200
+                assert "Agent新增内容" in spec.read_text(encoding="utf-8")
+            else:
+                assert first_result.status_code == 200
+                with pytest.raises(ws.WorkshopError) as error:
+                    second.result(timeout=5)
+                assert error.value.code == "DOCUMENT_CONFLICT"
+                assert "原内容" in spec.read_text(encoding="utf-8")
+        current = spec.read_text(encoding="utf-8")
+        assert ("name: 新名字" if frontmatter else "# 新名字") in current
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize("kind,name", [("ui_screen", "背包"), ("video", "小鸟的开场视频")])
+def test_target_discovery_and_approval_show_human_names_with_stable_ids(setup, kind, name):
+    payload = {"project_id": setup.project.id, "type": kind, "name": name,
+               "idempotency_key": "human-readable-target"}
+    if kind == "ui_screen":
+        payload["ui_scheme_id"] = "v1"
+    target = ws.create_target(setup.agent, CreateTargetInput(**payload))["target"]
+    listed = ws.list_targets(setup.agent, ListTargetsInput(project_id=setup.project.id))["targets"]
+    row = next(item for item in listed if item["target"] == target)
+    assert row["name"] == ("V1 · 背包" if kind == "ui_screen" else name)
+    assert target.get("screen_id", target.get("production_id")).startswith("w-")
+    options = ({"model": "seedance-2-0", "params": {"type": "video"}}
+               if kind == "video" else {})
+    request = prepare(setup, target=target, **options)
+    assert request["target_name"] == name and request["target"] == target
+    assert generation.read_request(request["request_id"]).target_name == name
+
+
+def test_character_frontmatter_name_is_used_and_request_name_remains_frozen(setup):
+    spec = setup.root / "characters" / "bird" / "spec.md"
+    spec.write_text('---\nname: "金色小鸟"\n---\n\n# 不作为名称的标题\n原内容', encoding="utf-8")
+    listed = ws.list_targets(setup.agent, ListTargetsInput(project_id=setup.project.id))["targets"]
+    assert next(item for item in listed if item["target"]["type"] == "character")["name"] == "金色小鸟"
+    request = prepare(setup)
+    assert request["target_name"] == "金色小鸟"
+    spec.write_text("# 改名后的鸟\n新内容", encoding="utf-8")
+    assert prepare(setup)["target_name"] == "金色小鸟"
+    spec.unlink()
+    history = generation.list_requests(setup.local)["requests"]
+    assert history[0]["target_name"] == "金色小鸟"
+    record = generation.read_request(request["request_id"])
+    assert generation.request_view(record.model_copy(update={"target_name": ""}))["target_name"] == "bird"
+
+
+@pytest.mark.parametrize("failure", ["missing", "invalid_utf8", "oversized", "symlink"])
+def test_display_name_fails_safely_without_affecting_target_identity(setup, tmp_path, failure):
+    path = setup.root / "name.md"
+    if failure == "invalid_utf8":
+        path.write_bytes(b"\xff\xff")
+    elif failure == "oversized":
+        path.write_text("# 不应读取\n" + "x" * 800001, encoding="utf-8")
+    elif failure == "symlink":
+        outside = tmp_path / "outside-title.md"
+        outside.write_text("# 外部私有标题", encoding="utf-8")
+        path.symlink_to(outside)
+    assert ws.document_display_name(path, "stable-id") == "stable-id"

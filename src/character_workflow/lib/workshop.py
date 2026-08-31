@@ -7,6 +7,7 @@ import io
 import json
 import mimetypes
 import os
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -165,6 +166,47 @@ def paginate(values: list, page: int, page_size: int, key: str) -> dict:
             "page_size": page_size, "total": len(values)}
 
 
+def document_display_name(path: Path, fallback: str) -> str:
+    """Read the existing name/title frontmatter or H1 convention, never an unbounded document."""
+    try:
+        text = read_stable(path, 800000).decode("utf-8-sig")
+    except (OSError, UnicodeError, WorkshopError):
+        return fallback
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            for key in ("name", "title"):
+                match = re.search(rf"^{key}:[ \t]*(.+?)[ \t]*$", text[3:end], re.MULTILINE)
+                if match:
+                    value = match.group(1).strip()
+                    try:
+                        decoded = json.loads(value)
+                        if isinstance(decoded, str):
+                            value = decoded
+                    except json.JSONDecodeError:
+                        if value.startswith("'") and value.endswith("'"):
+                            value = value[1:-1].replace("''", "'")
+                    value = " ".join(value.split())[:120]
+                    if value:
+                        return value
+    for line in text.splitlines()[:20]:
+        match = re.match(r"^#[ \t]+(.+?)[ \t]*$", line)
+        if match:
+            return match.group(1)[:120]
+    return fallback
+
+
+def target_display_name(target: WorkshopTarget, directory: Path) -> str:
+    """Display metadata only: callers have already resolved and authorized the stable target."""
+    if target.type == "character":
+        return document_display_name(directory / "spec.md", target.character_id)
+    if target.type == "ui":
+        return document_display_name(directory.parent / f"{target.screen_id}.md", target.screen_id)
+    if target.type == "video":
+        return document_display_name(directory / "brief.md", target.production_id)
+    return getattr(target, "ui_scheme_id", target.project_id)
+
+
 def list_targets(principal: Any, payload: ListTargetsInput) -> dict:
     project = authorize(principal, payload.project_id, "read")
     result = []
@@ -176,12 +218,9 @@ def list_targets(principal: Any, payload: ListTargetsInput) -> dict:
                                      character_id=character_id, asset_slot="portrait")
             try:
                 directory = resolve_target(principal, target)
-                content = read_stable(directory / "spec.md", 800000).decode("utf-8-sig")
             except (OSError, WorkshopError):
                 continue
-            title = next((line.lstrip("# ") for line in content.splitlines() if line.startswith("# ")),
-                         character_id)
-            result.append({"target": target.model_dump(), "name": title[:120]})
+            result.append({"target": target.model_dump(), "name": target_display_name(target, directory)})
     if payload.type in {None, "ui"}:
         for scheme in ui_schemes.read_schemes(project.id).schemes:
             result.append({"target": UiSchemeTarget(type="ui_scheme", project_id=project.id,
@@ -196,7 +235,8 @@ def list_targets(principal: Any, payload: ListTargetsInput) -> dict:
                     continue
                 target = UiTarget(type="ui", project_id=project.id,
                                   ui_scheme_id=scheme.id, screen_id=screen_id)
-                result.append({"target": target.model_dump(), "name": f"{scheme.name} · {screen_id}"})
+                name = target_display_name(target, screens / screen_id)
+                result.append({"target": target.model_dump(), "name": f"{scheme.name} · {name}"})
     if payload.type in {None, "video"}:
         videos = safe_path(data_root.projects_dir() / project.slug / "videos")
         for directory in sorted(videos.iterdir() if videos.exists() else []):
@@ -210,7 +250,7 @@ def list_targets(principal: Any, payload: ListTargetsInput) -> dict:
             except ValueError:
                 continue
             target = VideoTarget(type="video", project_id=project.id, production_id=directory.name)
-            result.append({"target": target.model_dump(), "name": directory.name})
+            result.append({"target": target.model_dump(), "name": target_display_name(target, directory)})
     return paginate(result, payload.page, payload.page_size, "targets")
 
 
@@ -266,9 +306,12 @@ def write_document(principal: Any, payload: WriteDocumentInput) -> dict:
                       payload.idempotency_key, payload.model_dump(), perform, recover)
 
 
+def document_lock(path: Path):
+    return file_lock(root() / "documents" / f"{digest(str(safe_path(path)))}.lock")
+
+
 def write_document_content(path: Path, kind: str, expected_revision: str, content: str) -> dict:
-    lock = root() / "documents" / f"{digest(str(safe_path(path)))}.lock"
-    with file_lock(lock):
+    with document_lock(path):
         current = document_view(path, kind)
         if current["revision"] != expected_revision:
             raise WorkshopError("DOCUMENT_CONFLICT", "文档已修改，请读取最新版本再保存")
@@ -291,8 +334,7 @@ def create_target(principal: Any, payload: CreateTargetInput) -> dict:
             directory = safe_path(data_root.characters_dir() / stable_id)
             if not directory.exists():
                 initialize_character_directory(stable_id, f"# {payload.name.strip()}\n")
-            with file_lock(root() / "projects.lock"):
-                projects.assign_character(stable_id, project.id)
+            projects.assign_character(stable_id, project.id)
             target = CharacterTarget(type="character", project_id=project.id,
                                      character_id=stable_id, asset_slot="portrait")
         elif payload.type == "video":
@@ -361,6 +403,7 @@ def media_entries(principal: Any, target: WorkshopTarget) -> list[tuple[dict, Pa
     if target.type in {"project", "ui_scheme"}:
         return []
     paths: set[Path] = set()
+    ui_canonical: dict[Path, dict] = {}
     for job in list_jobs():
         matches = (
             target.type == "character" and job.namespace == "character"
@@ -382,17 +425,41 @@ def media_entries(principal: Any, target: WorkshopTarget) -> list[tuple[dict, Pa
                 paths.add(Path(entry["path"]))
         # Source uploads are already scoped by the explicit character directory.
         paths.update((directory / "source").glob("*"))
+    elif target.type == "ui":
+        from character_workflow.lib.stale import screen_canonical_status
+        project = projects.resolve_project(target.project_id)
+        safe_path(directory.parent / "canonical.json")
+        safe_path(data_root.projects_dir() / project.slug / "style.md")
+        safe_path(directory.parent.parent / "style.md")
+        for screen_id, entry in screen_canonical_status(
+            target.project_id, target.ui_scheme_id
+        ).screens.items():
+            try:
+                ui_jobs.validate_screen_id(screen_id)
+            except ValueError:
+                continue
+            path = safe_path(Path(entry.path))
+            source_directory = safe_path(ui_jobs.screen_output_dir(
+                target.project_id, target.ui_scheme_id, screen_id))
+            mime = mimetypes.guess_type(path.name)[0] or ""
+            # Only the selected image from the same scheme, not another page's history.
+            if path.parent != source_directory or not mime.startswith("image/"):
+                continue
+            paths.add(path)
+            ui_canonical[path] = {"source_screen_id": screen_id, "is_canonical": True,
+                                  "style_stale": entry.style_stale}
     elif target.type == "video":
         safe_path(directory / "references.json")
         paths.update(Path(raw) for raw in video_jobs.read_references(
             target.project_id, target.production_id))
     result = []
+    seen: set[Path] = set()
     base = data_root.resolve_data_root().resolve()
     for candidate in sorted(paths):
         path = safe_path(candidate)
-        if not path.is_file():
+        if not path.is_file() or path in seen:
             continue
-        if not path.is_relative_to(directory):
+        if not path.is_relative_to(directory) and path not in ui_canonical:
             relative = path.relative_to(base).as_posix()
             if target.type != "video" or not video_jobs.is_project_reference_path(
                 target.project_id, relative
@@ -402,8 +469,10 @@ def media_entries(principal: Any, target: WorkshopTarget) -> list[tuple[dict, Pa
         kind = mime.split("/")[0]
         if kind not in {"image", "video", "audio"}:
             continue
+        seen.add(path)
         result.append(({"media_id": media_id_for_path(target, path), "kind": kind, "title": path.name,
-                        "mime_type": mime, "size_bytes": path.stat().st_size}, path))
+                        "mime_type": mime, "size_bytes": path.stat().st_size,
+                        **ui_canonical.get(path, {})}, path))
     return result
 
 
