@@ -1,10 +1,22 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { fetchOnboardingStatus, type OnboardingState } from './api/onboarding';
 import { DataRootPage } from './pages/onboarding/DataRoot';
 import { KeysPage } from './pages/settings/Keys';
 import { AppShell } from '@/components/AppShell';
 
+const BatchMaterialPrototype = import.meta.env.DEV
+  ? lazy(() => import('@/pages/prototype/CanvasBatchMaterialPrototype'))
+  : null;
+
 export function App() {
+  // The prototype is local-only: no onboarding, persistence, jobs or provider calls.
+  if (BatchMaterialPrototype && window.location.pathname === '/canvas/prototype-batch-materials') {
+    return <Suspense fallback={<div className="p-8 text-muted-foreground">加载原型…</div>}><BatchMaterialPrototype /></Suspense>;
+  }
+  return <RuntimeApp />;
+}
+
+function RuntimeApp() {
   const [state, setState] = useState<OnboardingState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
