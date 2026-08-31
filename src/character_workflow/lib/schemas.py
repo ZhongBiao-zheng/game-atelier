@@ -184,12 +184,21 @@ class CanvasResultCandidate(BaseModel):
     dismissed_at: str | None = None
 
 
+class CanvasBatchJobOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    batch_id: str = Field(pattern=r"^batch-[a-f0-9]{24}$")
+    item_id: str
+    round_index: int = Field(ge=0)
+    step_index: int = Field(ge=0)
+
+
 class CanvasJobContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
     run_id: str
     snapshot: CanvasGenerationSnapshot
     result_node_id: str
     candidates: list[CanvasResultCandidate]
+    batch: CanvasBatchJobOrigin | None = None
 
 
 class Job(BaseModel):
@@ -558,6 +567,24 @@ class CanvasConfigNodeData(BaseModel):
 class CanvasGroupNodeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
     member_node_ids: list[str] = Field(default_factory=list)
+    repeat_count: int = Field(default=1, ge=1, le=20)
+
+
+class CanvasBatchMaterialItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=120)
+    image_version_ids: list[str] = Field(min_length=1, max_length=16)
+
+
+class CanvasBatchMaterialData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[CanvasBatchMaterialItem] = Field(default_factory=list, max_length=200)
+
+    @model_validator(mode="after")
+    def unique_item_ids(self) -> "CanvasBatchMaterialData":
+        if len({item.id for item in self.items}) != len(self.items):
+            raise ValueError("batch material item ids must be unique")
+        return self
 
 
 class CanvasPluginNodeData(BaseModel):
@@ -630,6 +657,11 @@ class CanvasGroupNode(CanvasNodeBase):
     data: CanvasGroupNodeData
 
 
+class CanvasBatchMaterialNode(CanvasNodeBase):
+    type: Literal["batch_material"]
+    data: CanvasBatchMaterialData
+
+
 class CanvasPluginNode(CanvasNodeBase):
     type: Literal["plugin"]
     data: CanvasPluginNodeData
@@ -637,7 +669,7 @@ class CanvasPluginNode(CanvasNodeBase):
 
 CanvasNode = Annotated[
     CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode
-    | CanvasConfigNode | CanvasGroupNode | CanvasPluginNode,
+    | CanvasConfigNode | CanvasGroupNode | CanvasPluginNode | CanvasBatchMaterialNode,
     Field(discriminator="type"),
 ]
 
@@ -878,6 +910,12 @@ class CanvasDocument(BaseModel):
                     raise ValueError("canvas user mask references an incompatible source version")
         group_members: set[str] = set()
         for node in self.nodes:
+            if node.type == "batch_material":
+                for item in node.data.items:
+                    for version_id in item.image_version_ids:
+                        version = self.content_versions.get(version_id)
+                        if version is None or version.kind != "image":
+                            raise ValueError("batch material must reference project image versions")
             if node.type in {"text", "image", "video", "audio"}:
                 version_id = node.data.current_version_id
                 if version_id is not None:
@@ -905,6 +943,8 @@ class CanvasDocument(BaseModel):
                     raise ValueError("canvas input source cannot provide content")
                 if target.type == "plugin":
                     raise ValueError("canvas plugin connections require a verified capability manifest")
+                if target.type == "batch_material":
+                    raise ValueError("batch material nodes cannot receive input connections")
                 if edge.slot is not None:
                     target_draft = (
                         target.data.draft

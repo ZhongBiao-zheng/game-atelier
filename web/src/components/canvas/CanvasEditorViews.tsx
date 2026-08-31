@@ -19,6 +19,7 @@ import {
 import { createPortal } from 'react-dom';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
+import { CanvasBatchMaterialEditor, CanvasExecutionGroup } from './CanvasBatchControls';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
@@ -105,6 +106,9 @@ export interface CanvasGenerationPanelContextValue {
 }
 
 export interface CanvasNodeContextValue {
+  batchBusy?: boolean;
+  prepareBatch?: (nodeId: string) => Promise<void>;
+  uploadBatchImages?: (nodeId: string, files: File[], itemId?: string) => Promise<void>;
   projectId: string;
   materialReferences: readonly CanvasMaterialReference[];
   connectedMaterialNodeIdsByNodeId: ReadonlyMap<string, ReadonlySet<string>>;
@@ -207,6 +211,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
   );
   const generationPanelVisible = Boolean(
     context
+    && !context.batchBusy
     && selected
     && !context.multiSelectionActive
     && draft
@@ -302,6 +307,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
     });
   }
   if (!context) return null;
+  if (node.type === 'group') return <CanvasExecutionGroup node={node} context={context} selected={Boolean(selected)} />;
   const renameNode = context.renameNode;
   const content = nodeContent;
   const copyablePrompt = copyablePromptForNode(
@@ -740,9 +746,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           {node.type === 'config' && (
             <CanvasConfigNodeSurface node={node} context={context} />
           )}
-          {(node.type === 'group' || node.type === 'plugin') && !content && (
+          {node.type === 'batch_material' && <CanvasBatchMaterialEditor node={node} context={context} />}
+          {node.type === 'plugin' && !content && (
             <div className="grid min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
-              {node.type === 'group' ? '分组' : '插件节点'}
+              插件节点
             </div>
           )}
         </div>

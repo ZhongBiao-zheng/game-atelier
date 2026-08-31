@@ -188,6 +188,27 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 （`reference_images/videos/audios`、`mask_image`、`mj_sref/cref/oref`）与 caller 回写字段
 （`actual_size`、`warnings`、`mj_flags`）都不在名单里 —— 浏览器不能提交路径，Canvas 的参考素材只能
 来自不可变 Content Version。
+批量执行使用 `batch_material` 节点：`data.items` 为最多 200 个 `{id,image_version_ids}`，
+每项 1–16 张已登记图片；项 ID 在节点内唯一。节点仅提供输入，没有生成 Draft。`group.data.repeat_count`
+为 1–20 轮，一层显式成员关系保持不变。分组或单节点可以调用：
+
+- `POST /canvas/projects/{id}/batch-runs/prepare`：`{scope_node_id,expected_revision,repeat_count}`；
+  校验冻结素材、输入依赖、模型能力及每步单产物，返回 `ready` 计划，不调用模型。最多 20 步、2000 次生成；
+  一个范围只允许一个批量素材来源，无素材节点时固定输入为一项；不支持循环或配置/插件节点执行。
+- `POST .../batch-runs/{batch_id}/start`：确认后启动；revision 必须仍匹配，同项目只允许一份活动计划。
+  同一计划重复 start 不再调度。串行执行的普通 Canvas Job 带 `canvas_run.batch`
+  `{batch_id,item_id,round_index,step_index}`，两个 index 从 0 开始。
+- `POST .../batch-runs/{batch_id}/cancel`：取消未提交步骤，对当前 Job 发协作停止；已收费产物继续登记。
+- `GET .../batch-runs` / `GET .../batch-runs/{batch_id}`：读取最近 20 份计划/单份计划，
+  包含每项每步的 Job、Run、结果 Version ID 和状态。
+
+批量计划冻结数据落在项目 `.runtime/batch-plans/`；进度在 `.runtime/batches/`，活动计划索引为
+`.runtime/batch-active.json`。同项同轮上游输出绑定到下游的精确 Version ID，复用原节点显示最新产物，
+所有结果仍由普通 Job/Candidate 保存。上次生成的输出不隐式成为下一次批量执行的自身参考。
+失败停止剩余步骤，无自动付费重试；服务重启将活动计划标为 interrupted，不自动提交剩余步骤。
+计划文件属于本机执行状态，不随项目包导入；图片素材、普通节点及已经生成的 Jobs/Versions 仍随包保存。
+前端执行期间锁定画布内容编辑，仍可浏览结果；项目导出/删除在批量运行时拒绝。
+
 四模态均进入同一个 Job Runner：图片/视频沿用既有厂商协议；文本只接受明确可执行的
 OpenAI-compatible `chat/completions` 或 `responses`，后者支持 `reasoning_effort`，其中 `auto` 只作为
 Draft 选择且冻结/请求时省略；音频只接受 OpenAI-compatible `audio/speech`，冻结并发送白名单内的

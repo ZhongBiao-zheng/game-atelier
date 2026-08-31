@@ -141,6 +141,12 @@ function canvasMaterialReference(
   node: CanvasNode,
   contentVersions: Readonly<Record<string, CanvasContentVersion>>,
 ): CanvasMaterialReference | null {
+  if (node.type === 'batch_material') {
+    const versionId = node.data.items[0]?.image_version_ids[0];
+    if (!versionId || contentVersions[versionId]?.kind !== 'image') return null;
+    return { nodeId: node.id, versionId, kind: 'image', title: `${node.title} · ${node.data.items.length} 项`,
+      previewUrl: canvasMediaUrl(projectId, versionId, 256) };
+  }
   if (!isMentionContentNode(node)) return null;
   const versionId = node.data.current_version_id;
   const version = versionId ? contentVersions[versionId] : undefined;

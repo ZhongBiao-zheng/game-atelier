@@ -14,6 +14,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from character_workflow.lib.jobs import fail_orphan_studio_jobs, read_job, resumable_studio_jobs
 from character_workflow.lib.secret_filter import SecretRedactionFilter
 from viewer_server.routes import router
+from viewer_server.routes_canvas_batches import router as canvas_batches_router
 from viewer_server.sse import hub, sse_router
 from viewer_server.watcher import start_watchers
 
@@ -135,6 +136,10 @@ async def lifespan(app: FastAPI):
         recover_canvas_transactions(project.project_id)
 
     reconciled = reconcile_canvas_jobs(fail_pending=True)
+    from character_workflow.lib.canvas_batches import interrupt_canvas_batch_after_restart
+
+    for project in canvas_projects:
+        interrupt_canvas_batch_after_restart(project.project_id)
     resumable = [
         job_id for job_id in reconciled
         if (
@@ -215,6 +220,7 @@ def build_app(dist_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="Game Atelier viewer-server", lifespan=lifespan)
     app.add_middleware(CanvasDocumentBodyLimitMiddleware)
     app.include_router(router)
+    app.include_router(canvas_batches_router)
     app.include_router(sse_router)
 
     if dist_dir is None:
