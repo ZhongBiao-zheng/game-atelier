@@ -13,7 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json
-from character_workflow.lib.canvas_projects import canvas_project_dir, canvas_project_lock_path
+from character_workflow.lib.canvas_projects import (
+    CanvasStorageError, canvas_project_dir, canvas_project_lock_path,
+)
 from character_workflow.lib.canvas_runs import (
     _current_version_id,
     _draft_for_node,
@@ -118,7 +120,7 @@ def _save(run: CanvasBatchRun) -> None:
 def read_canvas_batch(project_id: str, batch_id: str) -> CanvasBatchRun:
     run = CanvasBatchRun.model_validate_json(_path(project_id, batch_id).read_text(encoding="utf-8"))
     if run.project_id != project_id or run.batch_id != batch_id:
-        raise ValueError("批量记录与项目不匹配")
+        raise CanvasStorageError("canvas_batch_ownership_mismatch", "批量记录与项目不匹配，请检查存档")
     if run.status not in ACTIVE:
         # Job/Candidate remains authoritative if a paid result arrived after plan interruption.
         for entry in run.executions:
@@ -140,7 +142,11 @@ def active_canvas_batch(project_id: str) -> CanvasBatchRun | None:
     pointer = canvas_project_dir(project_id) / ".runtime" / "batch-active.json"
     if not pointer.exists():
         return None
-    run = read_canvas_batch(project_id, json.loads(pointer.read_text(encoding="utf-8"))["batch_id"])
+    try:
+        batch_id = json.loads(pointer.read_text(encoding="utf-8"))["batch_id"]
+        run = read_canvas_batch(project_id, batch_id)
+    except (ValueError, KeyError, TypeError, FileNotFoundError) as error:
+        raise CanvasStorageError("canvas_batch_active_corrupt", "活动批量记录损坏或缺失，请检查存档") from error
     return run if run.status in ACTIVE else None
 
 

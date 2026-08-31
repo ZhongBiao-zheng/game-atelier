@@ -607,6 +607,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
           context.materialPick && !materialPickEligible && 'cursor-default',
         )}
         onClick={event => {
+          if (!context.materialPick && (event.shiftKey || event.metaKey || event.ctrlKey)) return;
           event.stopPropagation();
           context.selectNode(node.id);
         }}
