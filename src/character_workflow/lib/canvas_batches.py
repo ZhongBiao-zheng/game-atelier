@@ -15,13 +15,12 @@ from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_projects import canvas_project_dir, canvas_project_lock_path
 from character_workflow.lib.canvas_runs import (
-    _MENTION,
     _current_version_id,
     _draft_for_node,
     _input_paths,
     _read_document_unlocked,
-    _uses_video_frame_slots,
     PreparedCanvasGeneration,
+    canvas_input_sources,
     commit_canvas_generation_under_lock,
     prepare_canvas_generation,
     recover_canvas_transactions_unlocked,
@@ -120,6 +119,14 @@ def read_canvas_batch(project_id: str, batch_id: str) -> CanvasBatchRun:
     run = CanvasBatchRun.model_validate_json(_path(project_id, batch_id).read_text(encoding="utf-8"))
     if run.project_id != project_id or run.batch_id != batch_id:
         raise ValueError("批量记录与项目不匹配")
+    if run.status not in ACTIVE:
+        # Job/Candidate remains authoritative if a paid result arrived after plan interruption.
+        for entry in run.executions:
+            if entry.status in {"running", "failed"} and entry.version_id is None:
+                try:
+                    _capture_result(entry)
+                except FileNotFoundError:
+                    pass
     return run
 
 
@@ -163,16 +170,8 @@ def _sources(document: CanvasDocument, node: CanvasNode) -> list[str]:
     draft = _draft_for_node(node)
     if draft is None:
         return []
-    if node.type == "video" and _current_version_id(node):
-        return []
-    incoming = [edge for edge in document.connections
-                if edge.role == "input" and edge.target_node_id == node.id]
-    if _uses_video_frame_slots(draft):
-        return [edge.source_node_id for edge in incoming if edge.slot]
-    mentioned = _MENTION.findall(draft.prompt)
-    return list(dict.fromkeys(edge.source_node_id for edge in incoming if edge.slot is None
-                             and (draft.input_policy == "all_connected"
-                                  or edge.source_node_id in mentioned)))
+    return list(dict.fromkeys(source for role, source in canvas_input_sources(document, node, draft)
+                             if role != "implicit_self"))
 
 
 def _executable(document: CanvasDocument, node: CanvasNode) -> bool:
@@ -227,7 +226,7 @@ def _preview_document(
         if node.type == "text":
             version = CanvasTextVersion(**common, kind="text", text="本项上游文本")
         else:
-            version = CanvasMediaVersion(**common, kind=node.type, path="batch-preview",
+            version = CanvasMediaVersion(**common, kind=node.type, path="uploads/batch-preview",
                                          mime_type={"image": "image/png", "video": "video/mp4",
                                                     "audio": "audio/mpeg"}[node.type], bytes=1)
         versions[version_id] = version

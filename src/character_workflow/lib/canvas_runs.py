@@ -637,12 +637,12 @@ def _uses_video_frame_slots(draft: CanvasGenerationDraft) -> bool:
     return draft.mode == "video" and draft.params.frame_mode in {"first", "last", "firstlast"}
 
 
-def _resolve_inputs(
+def canvas_input_sources(
     document: CanvasDocument,
     surface: CanvasNode,
     draft: CanvasGenerationDraft,
-    version_bindings: dict[str, list[str]] | None = None,
-) -> list[CanvasSnapshotInput]:
+) -> list[tuple[str, str]]:
+    """Select source nodes once, shared by batch dependency planning and input freezing."""
     candidates: list[tuple[str, str]] = []
     self_version_id = _current_version_id(surface)
     if self_version_id is not None and draft.mode != "audio":
@@ -687,6 +687,17 @@ def _resolve_inputs(
         if draft.input_policy == "all_connected":
             selected_ids.extend(node_id for node_id in connected_ids if node_id not in mentioned_ids)
         candidates.extend(("input_connection", node_id) for node_id in selected_ids)
+
+    return candidates
+
+
+def _resolve_inputs(
+    document: CanvasDocument,
+    surface: CanvasNode,
+    draft: CanvasGenerationDraft,
+    version_bindings: dict[str, list[str]] | None = None,
+) -> list[CanvasSnapshotInput]:
+    candidates = canvas_input_sources(document, surface, draft)
 
     nodes = {node.id: node for node in document.nodes}
     resolved: list[CanvasSnapshotInput] = []
@@ -2580,6 +2591,11 @@ def reconcile_canvas_jobs(
                 reconciled.append(job.job_id)
                 continue
             elif job.runner_started_at is None:
+                if context is not None and context.batch is not None:
+                    # Batch approval is not permission to submit unstarted steps after restart.
+                    _cancel_pending_canvas_candidates(job.canvas_project_id, job.job_id)
+                    reconciled.append(job.job_id)
+                    continue
                 # The durable command exists but no provider call was claimed. Startup may resume
                 # it without risking a duplicate charge.
                 reconciled.append(job.job_id)

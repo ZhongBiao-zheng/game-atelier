@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from pydantic import ValidationError
 
 from character_workflow.lib.canvas_batches import (
     CanvasBatchCreate,
@@ -15,6 +16,7 @@ from character_workflow.lib.canvas_batches import (
     start_canvas_batch,
 )
 from character_workflow.lib.canvas_runs import CanvasRunCommandError
+from character_workflow.lib.canvas_projects import CanvasStorageError
 
 router = APIRouter(prefix="/api/canvas/projects/{project_id}/batch-runs")
 
@@ -23,17 +25,22 @@ router = APIRouter(prefix="/api/canvas/projects/{project_id}/batch-runs")
 def _command_errors() -> Iterator[None]:
     try:
         yield
-    except (KeyError, FileNotFoundError) as error:
-        raise HTTPException(404, detail="找不到画布项目、节点或批量记录") from error
+    except KeyError as error:
+        raise HTTPException(404, detail={"code": "canvas_batch_missing",
+            "message": "找不到画布项目、节点或批量记录"}) from error
+    except (FileNotFoundError, CanvasStorageError, ValidationError) as error:
+        raise HTTPException(500, detail={"code": "canvas_batch_storage_error",
+            "message": "批量执行存档缺失或不符合契约，请检查服务记录；未自动重试生成"}) from error
     except CanvasRunCommandError as error:
         raise HTTPException(422, detail={"code": error.code, "message": error.message}) from error
     except ValueError as error:
-        raise HTTPException(422, detail=str(error)) from error
+        raise HTTPException(422, detail={"code": "canvas_batch_invalid", "message": str(error)}) from error
     except RuntimeError as error:
         if str(error).startswith("revision_conflict:"):
             raise HTTPException(409, detail={"code": "revision_conflict",
+                "message": "画布已改变，请重新确认批量执行",
                 "current_revision": int(str(error).split(":", 1)[1])}) from error
-        raise HTTPException(409, detail=str(error)) from error
+        raise HTTPException(409, detail={"code": "canvas_batch_conflict", "message": str(error)}) from error
 
 
 @router.get("", response_model=list[CanvasBatchRun])

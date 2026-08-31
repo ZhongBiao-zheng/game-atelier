@@ -116,7 +116,7 @@ export function CanvasExecutionGroup({ node, context, selected }: {
     <div className="pointer-events-auto absolute bottom-full left-0 flex items-center gap-2 pb-3 text-xs">
       <button type="button" className="rounded-md px-2 py-1 font-medium text-foreground hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary"
         onClick={() => context.selectNode(node.id)}>{node.title} · {node.data.member_node_ids.length} 节点</button>
-      <div role={selected ? 'toolbar' : undefined} aria-label={`${node.title} 节点工具`} data-canvas-node-toolbar={node.id}
+      {selected && !context.multiSelectionActive && <div role="toolbar" aria-label={`${node.title} 节点工具`} data-canvas-node-toolbar={node.id}
         className="nodrag nopan flex items-center gap-2 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass">
         <label className="flex items-center gap-1 text-muted-foreground">重复
           <Input type="number" min={1} max={20} aria-label="分组重复轮数" value={node.data.repeat_count ?? 1}
@@ -130,7 +130,7 @@ export function CanvasExecutionGroup({ node, context, selected }: {
         <Button size="sm" disabled={context.batchBusy || context.submittingNodeIds.has(node.id)}
           onClick={() => void context.prepareBatch?.(node.id)}>执行分组</Button>
         <Button size="sm" variant="ghost" aria-label={`删除 ${node.title}`} title="解散分组，保留成员节点" disabled={context.batchBusy} onClick={() => context.deleteNode(node.id)}>解散</Button>
-      </div>
+      </div>}
     </div>
   </div>;
 }

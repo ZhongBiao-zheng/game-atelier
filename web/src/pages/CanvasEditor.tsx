@@ -583,6 +583,7 @@ function CanvasEditorInner({
   const [batchConfirmation, setBatchConfirmation] = useState<CanvasBatchRun | null>(null);
   const [batchCommandBusy, setBatchCommandBusy] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
+  const batchPreparedEditVersion = useRef(0);
 
   const setTextEditing = useCallback((nodeId: string, editing: boolean) => {
     const active = activeTextEditingNodeIds.current;
@@ -2213,8 +2214,10 @@ function CanvasEditorInner({
     try {
       if (!await persistNow()) return;
       const node = latestDocument.current?.nodes.find(candidate => candidate.id === nodeId);
+      const preparedEditVersion = dirtyVersion.current;
       const plan = await prepareCanvasBatch(projectId, nodeId, serverRevision.current,
         node?.type === 'group' ? node.data.repeat_count ?? 1 : 1);
+      batchPreparedEditVersion.current = preparedEditVersion;
       setBatchConfirmation(plan);
     } catch (failure) { setError((failure as Error).message); }
     finally { setSubmittingNodeIds(current => { const next = new Set(current); next.delete(nodeId); return next; }); }
@@ -2224,8 +2227,8 @@ function CanvasEditorInner({
     if (!batchConfirmation || runSubmissionInFlight.current) return;
     setBatchCommandBusy(true); setBatchError(null);
     try {
-      if (!await persistNow()) return;
-      if (serverRevision.current !== batchConfirmation.expected_revision) throw new Error('画布已改变，请返回修改并重新点击执行。');
+      if (dirtyVersion.current !== batchPreparedEditVersion.current
+        || serverRevision.current !== batchConfirmation.expected_revision) throw new Error('画布已改变，请返回修改并重新点击执行。');
       runSubmissionInFlight.current = true;
       const run = await startCanvasBatch(projectId, batchConfirmation.batch_id);
       batchBusyRef.current = true;
@@ -3866,7 +3869,6 @@ function CanvasEditorInner({
 
         {!materialPick && (
           <div className="canvas-zoom-dock absolute bottom-3 left-3 z-20 hidden items-center gap-1 rounded-xl border border-border bg-glass p-1.5 backdrop-blur-glass shell-glow md:flex">
-          <CanvasBatchResults projectId={projectId} runs={batchRuns} resolveVersion={resolveVersion} onCancel={stopBatch} onPreview={previewContent} />
           {!narrowViewport && renderCanvasConfigControls('desktop')}
           <span className="mx-1 h-7 w-px bg-border" aria-hidden="true" />
           <button
@@ -4054,6 +4056,7 @@ function CanvasEditorInner({
             <ToolButton label="重做" disabled={historyDepth.future === 0} onClick={redo}><Redo2 /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
             <div className="hidden xl:contents">
+              <ToolButton label="添加批量素材节点" onClick={() => addBatchMaterialNode(null)}><Layers /></ToolButton>
               <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><Type /></ToolButton>
               <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><FileImage /></ToolButton>
               <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><FileVideo /></ToolButton>
@@ -4256,6 +4259,9 @@ function CanvasEditorInner({
 
         <CanvasBatchConfirmation run={batchConfirmation} busy={batchCommandBusy} error={batchError}
           onClose={() => setBatchConfirmation(null)} onStart={() => void confirmBatch()} />
+        <div className="absolute bottom-16 right-3 z-20 md:bottom-3">
+          <CanvasBatchResults projectId={projectId} runs={batchRuns} resolveVersion={resolveVersion} onCancel={stopBatch} onPreview={previewContent} />
+        </div>
         <Dialog open={Boolean(preview)} onOpenChange={open => { if (!open) setPreview(null); }}>
           {preview && (
             <DialogContent className="max-h-[90dvh] max-w-4xl overflow-y-auto">
