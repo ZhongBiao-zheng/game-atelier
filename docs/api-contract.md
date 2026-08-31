@@ -2,6 +2,15 @@
 
 > 前后端形状的单一真值源。**改任一端先改这里**。厂商侧契约见 [references/provider-config.md](references/provider-config.md)。
 
+## 开发中的扩展契约
+
+网站连接本机与外部 Agent 工坊入口已进入设计，尚未实现：
+[开发范围与验收](local-workspace.md)、[本机连接](contracts/local-connection.md)、
+[工坊 MCP 与生成批准](contracts/workshop-mcp.md)。这些文档里的新增端点是目标契约，
+不能当作当前可用 API。实现 PR 须同步更新本页的端点权限和双端 schema；在那之前，下文仍描述现有运行时。
+
+改造不把项目改存浏览器、不把 Key 发给网站、不扩张 Canvas Agent 权限，也不增加第二条供应商执行路径。
+
 ## 双端同步点
 
 改左边必须同步右边，反之亦然。没有代码层共享，只有约定 + 守卫。
