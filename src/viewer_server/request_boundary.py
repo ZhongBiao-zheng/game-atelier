@@ -88,6 +88,12 @@ class LocalRequestBoundary:
             site = _header(scope, b"sec-fetch-site")
             mode = _header(scope, b"sec-fetch-mode")
             dest = _header(scope, b"sec-fetch-dest")
+            metadata_names = {
+                key.lower() for key, _ in scope.get("headers", [])
+                if key.lower().startswith(b"sec-fetch-")
+            }
+            for name in metadata_names:
+                _header(scope, name)
             allowed_origins = {f"http://{authority}"}
             if self.dev_origin is not None:
                 allowed_origins.add(self.dev_origin)
@@ -95,7 +101,7 @@ class LocalRequestBoundary:
                 await self._deny(scope, receive, send, "ORIGIN_DENIED", "此来源尚未获准连接本机")
                 return
             # Same-site is insufficient: another localhost port is a different application.
-            if site is not None and site != "same-origin" and not _public_navigation(scope, mode, dest):
+            if metadata_names and site != "same-origin" and not _public_navigation(scope, mode, dest):
                 await self._deny(scope, receive, send, "ORIGIN_DENIED", "请从本机页面访问工坊")
                 return
         except ValueError:

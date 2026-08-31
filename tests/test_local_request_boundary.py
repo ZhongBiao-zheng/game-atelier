@@ -57,6 +57,21 @@ def test_fetch_metadata_blocks_originless_browser_requests_to_private_routes(cli
     assert response.status_code == 403
 
 
+@pytest.mark.parametrize("metadata", [
+    {"Sec-Fetch-Mode": "no-cors"},
+    {"Sec-Fetch-Dest": "image"},
+    {"Sec-Fetch-User": "?1"},
+    {"Sec-Fetch-Storage-Access": "none"},
+    {"Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "image"},
+])
+@pytest.mark.parametrize("origin", [None, "http://127.0.0.1:5174"])
+def test_incomplete_metadata_is_not_treated_as_a_native_client(client, metadata, origin):
+    headers = dict(metadata)
+    if origin is not None:
+        headers["Origin"] = origin
+    assert client.get("/api/raw", headers=headers).status_code == 403
+
+
 def test_local_requests_remain_usable_but_do_not_claim_session_authentication(client):
     for headers in ({}, {"Origin": "http://127.0.0.1:5174", "Sec-Fetch-Site": "same-origin"}):
         response = client.get("/api/connection/status", headers=headers)
@@ -100,6 +115,7 @@ def test_forwarded_headers_cannot_replace_socket_identity(client):
     ("Host", "127.0.0.1:5174"), ("Origin", "http://127.0.0.1:5174"),
     ("Sec-Fetch-Site", "same-origin"),
     ("Sec-Fetch-Mode", "cors"), ("Sec-Fetch-Dest", "empty"),
+    ("Sec-Fetch-User", "?1"),
 ])
 def test_duplicate_security_headers_are_not_coalesced_into_a_trusted_value(client, name, value):
     response = client.get("/api/config", headers=[(name, value), (name, value)])
