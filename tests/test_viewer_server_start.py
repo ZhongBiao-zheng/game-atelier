@@ -220,9 +220,13 @@ def test_real_local_runtime_can_be_discovered_reused_and_stopped(isolated_data_r
         "server.webbrowser.open = lambda url: True; "
     )
     runtime = isolated_data_root / ".runtime"
+    # Windows venv's python.exe can be a redirector; Popen.pid then belongs to
+    # the launcher, while the service must record the actual interpreter PID.
     process = subprocess.Popen(
-        [sys.executable, "-c", prefix + "server.cmd_start(background=False)"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [sys.executable, "-c", "import os; print(os.getpid(), flush=True); "
+         + prefix + "server.cmd_start(background=False)"],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        text=True, encoding="utf-8",
     )
     try:
         deadline = time.monotonic() + 12
@@ -234,7 +238,10 @@ def test_real_local_runtime_can_be_discovered_reused_and_stopped(isolated_data_r
                 break
             time.sleep(0.05)
         assert found, "isolated runtime did not complete its real handshake"
-        assert read_pid(runtime) == process.pid
+        # The owned child printed before starting the now-verified service, so
+        # this read is ready; a PID from discovery alone is not proof of ownership.
+        runtime_pid = int(process.stdout.readline().strip())
+        assert read_pid(runtime) == runtime_pid
         first_instance = read_instance(runtime)
 
         connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
@@ -257,7 +264,7 @@ def test_real_local_runtime_can_be_discovered_reused_and_stopped(isolated_data_r
             env=env, capture_output=True, text=True, encoding="utf-8", timeout=10,
         )
         assert reused.returncode == 0, reused.stderr
-        assert read_pid(runtime) == process.pid
+        assert read_pid(runtime) == runtime_pid
         assert read_instance(runtime) == first_instance
 
         stopped = subprocess.run(
@@ -269,9 +276,16 @@ def test_real_local_runtime_can_be_discovered_reused_and_stopped(isolated_data_r
     finally:
         # Only the child created by this test may be terminated, never a discovered user PID.
         if process.poll() is None:
-            process.terminate()
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/T", "/F", "/PID", str(process.pid)],
+                    capture_output=True, timeout=5,
+                )
+            else:
+                process.terminate()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
+        process.stdout.close()
