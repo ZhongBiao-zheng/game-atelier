@@ -1,36 +1,14 @@
-## Problem
+## 变更
 
-<!-- 用户问题和本 PR 解决的结果。 -->
+<!-- 用户问题、解决范围；如有产品规则变化，说明新规则并链接仓库内文档。不要只引用本地 .scratch。 -->
 
-## Product contract and scope
+## 验证
 
-- PRD: <!-- .scratch/<feature>/PRD.md；Bug/微调可写 N/A -->
-- Contract change: <!-- None，或链接 PRD Decision Changes -->
-
-### Included
-
--
-
-### No-gos
-
--
-
-## User-facing verification
-
-<!-- 二选一；UI 改动附截图或列出实测状态。 -->
-
-- [ ] UI change：已在真实页面检查相关状态并附验证证据。
-- [ ] N/A：本 PR 没有 UI 改动。
-- [ ] PR 描述反映最新规则，不含已被推翻的旧设计。
-
-## Automated verification
-
-- [ ] 定向测试通过。
 - [ ] `make verify` 通过。
 - [ ] CI 通过。
+- UI 验证：<!-- 实测状态与证据；无 UI 改动写 N/A。 -->
 
-## Scope and merge gate
+## 合并检查
 
-- [ ] Diff 只包含本 PRD/问题范围内的实现与测试。
-- [ ] 中途出现的无关任务已移到独立分支或 worktree。
-- [ ] 尚未合并；只有用户明确授权后才合并。
+- [ ] 变更只包含本次范围，项目文档与当前实现一致。
+- [ ] 已获得用户明确的合并授权。
