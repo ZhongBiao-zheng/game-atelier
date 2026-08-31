@@ -378,6 +378,8 @@ describe('Studio', () => {
             keys: [{
               alias: 'tuzi',
               provider: 'custom',
+              base_url: 'https://api.tu-zi.com',
+              billing_group: 'default',
               access_key: 'sk-tuzi...key',
               secret_key: null,
               capabilities: ['portrait'],
@@ -407,6 +409,7 @@ describe('Studio', () => {
     const studioCall = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
     const body = JSON.parse(String(studioCall![1]!.body));
     expect(body.model).toBe('nano-banana-pro-4k');
+    expect(body.params.estimated_cost_cny).toBe(0.18);
     expect(body.params.size).toBe('1:1');
     expect(body.params).not.toHaveProperty('resolution');
     expect(body.params).not.toHaveProperty('quality');

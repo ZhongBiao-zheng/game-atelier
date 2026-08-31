@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.33.3',
+    date: '2026-08-31',
+    headline: 'Tuzi 香蕉 Pro 按新价格估算费用',
+    changes: [
+      { kind: 'fix', text: 'Tuzi default 香蕉 Pro 更新为 1K ¥0.12、2K ¥0.15、4K ¥0.18，固定分辨率型号也按对应档位计价' },
+      { kind: 'feat', text: '生成价格集中到独立清单维护；仅新提交使用新价格，历史费用保持不变' },
+    ],
+  },
+  {
     version: '5.33.2',
     date: '2026-08-30',
     headline: '创作台与画布共用创作资产',
