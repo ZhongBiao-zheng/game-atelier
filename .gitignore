@@ -29,6 +29,9 @@ worldview.md
 docs/plans/
 docs/superpowers/
 
+# 本地需求草稿与执行记录；长期产品规则提炼到 docs 后提交
+/.scratch/
+
 # 历史归档（旧设计稿、过时计划、外部 skill 残留等）
 archive/
 
