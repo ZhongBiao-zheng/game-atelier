@@ -1,40 +1,49 @@
 import '@xyflow/react/dist/style.css';
 import { createContext, useContext, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
-import { Handle, Position, ReactFlow, useNodesState, type Edge, type Node as FlowNode, type NodeProps } from '@xyflow/react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronLeft, ChevronRight, Expand, Film, ImagePlus, Images, Layers, Play, Plus, Square, Type, X } from 'lucide-react';
+import { Handle, Position, ReactFlow, useNodesState, type Node as ReactFlowNode, type NodeProps, type ReactFlowInstance } from '@xyflow/react';
+import { ArrowDown, ArrowLeft, ArrowUp, ImagePlus, Images, Layers, Play, Plus, Scan, Square, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
+import { CanvasNodeCard, CanvasNodeContext, type CanvasNodeContextValue, type FlowNode } from '@/components/canvas/CanvasEditorViews';
+import { DEFAULT_CANVAS_UI_PREFERENCES } from '@/components/canvas/canvasImageToolbar';
+import type { CanvasMaterialReference, CanvasMentionReference } from '@/lib/canvasMentions';
+import type { CanvasGenerationDraft } from '@/schema/canvas';
+import { createPrototypeCanvas, pipelineSteps, PROTOTYPE_KEYS, STEP_LABELS, type PrototypePipeline } from './batchCanvasFixtures';
 
 // Throwaway, in-memory interaction prototype. Never import runtime generation APIs here.
 type Material = { id: string; name: string; url?: string; sample?: number };
 type Item = { id: string; images: Material[] };
-type Target = 'video' | 'text';
 type Run = {
   items: Item[];
   rounds: number;
-  target: Target;
-  prompts: [string, string];
-  shared: boolean;
+  steps: string[];
+  drafts: Record<string, CanvasGenerationDraft>;
+  sharedTexts: string[];
   completedSteps: number;
   status: 'running' | 'stopped' | 'done';
 };
-type PrototypeNode = FlowNode<{ kind: 'materials' | 'promptA' | 'promptB' | 'image' | 'output' }, 'prototype'>;
+type BatchFlowNode = ReactFlowNode<Record<string, never>, 'batchPrototype'>;
+type PrototypeNode = FlowNode | BatchFlowNode;
+const batchNode: BatchFlowNode = { id: 'batch', type: 'batchPrototype', position: { x: 25, y: 40 }, data: {} };
 const number = (n: number) => String(n).padStart(2, '0');
 const sampleMaterial = (n: number): Material => ({ id: crypto.randomUUID(), name: `素材 ${number(n + 1)}`, sample: n });
 const sampleItems = (count: number): Item[] => Array.from({ length: count }, (_, i) => ({ id: crypto.randomUUID(), images: [sampleMaterial(i)] }));
 
 function usePrototypeState() {
   const [items, setItems] = useState<Item[]>(() => sampleItems(3));
-  const [variant, setVariant] = useState<'A' | 'B'>(() => new URLSearchParams(location.search).get('variant') === 'B' ? 'B' : 'A');
-  const [editorOpen, setEditorOpen] = useState(false);
+  const [pipeline, setPipeline] = useState<PrototypePipeline>('video');
+  const [initial] = useState(() => createPrototypeCanvas('video'));
+  const [nodes, setNodes, onNodesChange] = useNodesState<PrototypeNode>([batchNode, ...initial.nodes]);
+  const [versions, setVersions] = useState(initial.versions);
+  const [edges, setEdges] = useState(initial.edges);
+  const [dismissedNodeId, setDismissedNodeId] = useState<string | null>(null);
+  const [resultsOpen, setResultsOpen] = useState(false);
   const [rounds, setRounds] = useState(1);
-  const [target, setTarget] = useState<Target>('video');
-  const [prompts, setPrompts] = useState<[string, string]>(['保留主体和构图，转换为毛绒玩偶风格，柔和棚拍光。', '让画面中的角色轻轻转头，镜头缓慢推进，保持角色一致。']);
-  const [shared, setShared] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
   const [notice, setNotice] = useState('');
+  const flow = useRef<ReactFlowInstance<PrototypeNode> | null>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const uploadTarget = useRef<string | null>(null);
   const urls = useRef(new Set<string>());
@@ -45,7 +54,7 @@ function usePrototypeState() {
     return () => owned.forEach(url => URL.revokeObjectURL(url));
   }, []);
 
-  useEffect(() => { setRun(null); }, [items, rounds, target, prompts, shared]);
+  useEffect(() => { setRun(null); }, [items, rounds, pipeline]);
 
   useEffect(() => {
     const retained = new Set([...items, ...(run?.items ?? [])].flatMap(item => item.images.map(image => image.url)));
@@ -62,31 +71,10 @@ function usePrototypeState() {
     const timer = window.setInterval(() => setRun(previous => {
       if (!previous || previous.status !== 'running') return previous;
       const completedSteps = previous.completedSteps + 1;
-      return { ...previous, completedSteps, status: completedSteps >= previous.items.length * previous.rounds * 2 ? 'done' : 'running' };
+      return { ...previous, completedSteps, status: completedSteps >= previous.items.length * previous.rounds * previous.steps.length ? 'done' : 'running' };
     }), 650);
     return () => window.clearInterval(timer);
   }, [locked]);
-
-  const changeVariant = (next: 'A' | 'B') => {
-    setVariant(next);
-    setEditorOpen(false);
-    const url = new URL(location.href);
-    url.searchParams.set('variant', next);
-    history.replaceState(null, '', url);
-  };
-
-  useEffect(() => {
-    const keydown = (event: KeyboardEvent) => {
-      const element = event.target as HTMLElement;
-      if (editorOpen || element.closest('input, textarea, select, [contenteditable="true"], [role="dialog"], .react-flow__node')) return;
-      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-        event.preventDefault();
-        changeVariant(variant === 'A' ? 'B' : 'A');
-      }
-    };
-    window.addEventListener('keydown', keydown);
-    return () => window.removeEventListener('keydown', keydown);
-  }, [variant, editorOpen]);
 
   const addMaterials = (materials: Material[], itemId: string | null) => {
     if (locked || !materials.length) return;
@@ -124,11 +112,98 @@ function usePrototypeState() {
       return copy;
     });
   };
-  const start = () => {
+  const start = (onlyNode?: string) => {
     if (locked || !items.length) return;
-    setRun({ items: items.map(item => ({ ...item, images: [...item.images] })), rounds, target, prompts: [...prompts], shared, completedSteps: 0, status: 'running' });
+    const steps = onlyNode ? [onlyNode] : pipelineSteps(pipeline);
+    const drafts: Record<string, CanvasGenerationDraft> = {};
+    for (const id of steps) {
+      const node = nodes.find(candidate => candidate.id === id);
+      const domain = node?.type === 'canvasNode' ? node.data.domain : undefined;
+      const draft = domain && 'generation_draft' in domain.data ? domain.data.generation_draft : null;
+      if (!draft) return;
+      if ((draft.params.n ?? 1) !== 1) {
+        setNotice('本原型先验证每项一个产物，请把生成张数设为 1。');
+        return;
+      }
+      drafts[id] = structuredClone(draft);
+    }
+    setRun({ items: items.map(item => ({ ...item, images: [...item.images] })), rounds, steps, drafts, sharedTexts: Object.values(versions).flatMap(version => version.kind === 'text' ? [version.text] : []), completedSteps: 0, status: 'running' });
+    setNodes(current => current.map(node => ({ ...node, selected: false })));
+    setNotice('');
   };
-  return { items, setItems, variant, changeVariant, editorOpen, setEditorOpen, rounds, setRounds, target, setTarget, prompts, setPrompts, shared, setShared, run, setRun, locked, notice, fileInput, uploadTarget, receiveFiles, requestFiles, addMaterials, removeMaterial, moveItem, start };
+
+  const selectNode = (id: string) => {
+    setNodes(current => current.map(node => ({ ...node, selected: node.id === id })));
+    setDismissedNodeId(null);
+    setResultsOpen(false);
+    const node = nodes.find(candidate => candidate.id === id);
+    if (node?.type === 'canvasNode' && 'generation_draft' in node.data.domain.data && node.data.domain.data.generation_draft) {
+      void flow.current?.setViewport({ x: (surfaceRef.current?.clientWidth ?? 1280) / 2 - (node.position.x + 150) * .9, y: 55 - node.position.y * .9, zoom: .9 }, { duration: 200 });
+    }
+  };
+  const changePipeline = (next: PrototypePipeline) => {
+    if (locked) return;
+    const nextCanvas = createPrototypeCanvas(next);
+    setPipeline(next);
+    setNodes([batchNode, ...nextCanvas.nodes]);
+    setVersions(nextCanvas.versions);
+    setEdges(nextCanvas.edges);
+    setRun(null);
+    setResultsOpen(false);
+    setNotice('已切换示例链路，生成参数恢复为演示默认值；素材保留。');
+    window.requestAnimationFrame(() => void flow.current?.fitView({ padding: .15, maxZoom: 1, duration: 200 }));
+  };
+
+  const materials: CanvasMaterialReference[] = [
+    { nodeId: 'batch', versionId: 'prototype-batch', kind: 'image', title: `批量素材 · ${items.length} 项`, previewUrl: items[0]?.images[0]?.url },
+    ...nodes.flatMap(node => {
+      if (node.type !== 'canvasNode') return [];
+      const domain = node.data.domain;
+      if (domain.type !== 'text' && domain.type !== 'image' && domain.type !== 'video' && domain.type !== 'audio') return [];
+      const version = versions[domain.data.current_version_id ?? ''];
+      return [{ nodeId: node.id, versionId: domain.data.current_version_id ?? `prototype-${node.id}`, kind: domain.type, title: domain.title, text: version?.kind === 'text' ? version.text : undefined }];
+    }),
+  ];
+  const connected = new Map(nodes.map(node => [node.id, new Set(edges.filter(edge => edge.target === node.id).map(edge => edge.source))]));
+  const mentions = new Map<string, CanvasMentionReference[]>(nodes.map(node => {
+    const counts = { image: 0, text: 0, video: 0, audio: 0 };
+    const labels = { image: '图片', text: '文本', video: '视频', audio: '音频' };
+    return [node.id, materials.filter(material => connected.get(node.id)?.has(material.nodeId)).map(material => ({
+      ...material, label: `${labels[material.kind]}${++counts[material.kind]}`,
+    }))];
+  }));
+  const unavailable = () => setNotice('本原型固定示例链路，只演示批量素材和生成设置；其他操作未接入，不会写入真实项目。');
+  const context: CanvasNodeContextValue = {
+    projectId: 'prototype-batch', keys: PROTOTYPE_KEYS, materialReferences: materials,
+    connectedMaterialNodeIdsByNodeId: connected, mentionReferencesByNodeId: mentions,
+    resolveVersion: id => id ? versions[id] : undefined,
+    jobsByRunId: new Map(), jobsByResultNodeId: new Map(), submittingNodeIds: new Set(),
+    mediaReplaceBusyNodeIds: new Set(), mediaReplaceError: null,
+    canvasUiPreferences: DEFAULT_CANVAS_UI_PREFERENCES, canvasUiPreferencesError: null,
+    showImageInfo: false, libraryBusy: false,
+    generationPanel: { dismissedNodeId, narrowViewport: locked, dismiss: setDismissedNodeId, surfaceRef },
+    selectNode, recordHistory: () => {}, reportError: setNotice,
+    updateNode: (id, updater) => {
+      if (locked) return;
+      setNodes(current => current.map(node => node.id === id && node.type === 'canvasNode' ? { ...node, data: { domain: updater(node.data.domain) } } : node));
+      setRun(null);
+    },
+    renameNode: (id, title) => setNodes(current => current.map(node => node.id === id && node.type === 'canvasNode' ? { ...node, data: { domain: { ...node.data.domain, title } } } : node)),
+    updateText: (id, text) => {
+      if (locked) return;
+      setVersions(current => ({ ...current, [`prototype-${id}`]: { ...current[`prototype-${id}`], kind: 'text', text } }));
+      setRun(null);
+    },
+    submitRun: async id => start(id), retryRun: async id => start(id),
+    cancelRun: async () => setRun(current => current ? { ...current, status: 'stopped' } : current),
+    setMaterialConnected: unavailable, beginMaterialPick: unavailable, setVideoFrameConnections: unavailable,
+    previewContent: unavailable, selectCandidate: unavailable, dismissCandidate: async () => unavailable(),
+    createImageConfigFromText: unavailable, saveAsset: async () => unavailable(), copyPrompt: async () => unavailable(),
+    reversePrompt: async () => unavailable(), recoverReversePromptConfig: async () => unavailable(), reversePromptConfiguredNodeIds: new Set(),
+    replaceMedia: unavailable, toggleFreeResize: unavailable, openMediaOperation: unavailable, openMaskEdit: unavailable,
+    openAngle: unavailable, editVideo: unavailable, saveImageToolbarPreferences: async () => unavailable(), deleteNode: unavailable,
+  };
+  return { items, setItems, pipeline, changePipeline, rounds, setRounds, run, setRun, locked, notice, fileInput, uploadTarget, receiveFiles, requestFiles, removeMaterial, moveItem, start, nodes, onNodesChange, edges, context, surfaceRef, flow, resultsOpen, setResultsOpen };
 }
 
 type PrototypeState = ReturnType<typeof usePrototypeState>;
@@ -199,121 +274,80 @@ function MaterialList() {
   );
 }
 
-function MaterialsNode() {
+function MaterialsNode({ selected }: NodeProps<BatchFlowNode>) {
   const state = usePrototype();
   const total = state.items.reduce((sum, item) => sum + item.images.length, 0);
-  return <>
+  return <section className={cn('w-[356px] rounded-lg border bg-card p-4 text-sm text-foreground shell-glow', selected ? 'border-primary' : 'border-border')}>
     <div className="mb-3 flex items-center justify-between gap-2"><span className="flex items-center gap-2 font-medium"><Layers size={16} />批量素材</span><span className="text-xs text-primary">{state.items.length} 项 · {total} 张图</span></div>
-    {state.variant === 'A' ? <MaterialList /> : <div className="nodrag nowheel nopan space-y-4">
-      <div className="flex gap-2 overflow-hidden">{state.items.slice(0, 4).map(item => <Thumbnail key={item.id} material={item.images[0]} />)}{!state.items.length && <p className="text-sm text-muted-foreground">还没有素材</p>}</div>
-      <p className="text-xs text-muted-foreground">默认一图一项，需要时单独加参考。</p>
-      <Button variant="outline" className="w-full" onClick={() => state.setEditorOpen(true)}><Expand />展开 {state.items.length} 项</Button>
-      <FileDrop itemId={null}><Button variant="ghost" className="w-full" disabled={state.locked} onClick={() => state.requestFiles(null)}><Plus />拖入或添加一批图片</Button></FileDrop>
-    </div>}
-    <Handle type="source" position={Position.Right} id="items" />
-  </>;
-}
-
-function PromptNode({ index }: { index: 0 | 1 }) {
-  const state = usePrototype();
-  return <>
-    <div className="mb-3 flex items-center gap-2 font-medium"><Type size={16} />共用文本 {index === 0 ? 'A' : 'B'}<span className="ml-auto text-xs font-normal text-muted-foreground">全部项</span></div>
-    <textarea aria-label={`共用文本 ${index === 0 ? 'A' : 'B'}`} value={state.prompts[index]} disabled={state.locked} onChange={event => state.setPrompts(current => index === 0 ? [event.target.value, current[1]] : [current[0], event.target.value])} className="nodrag nowheel nopan h-20 w-full resize-none rounded-md bg-background/40 p-2 text-sm leading-relaxed no-scrollbar focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:opacity-50" />
-    <Handle type="source" position={Position.Bottom} />
-  </>;
-}
-
-function GenerationNode({ output }: { output: boolean }) {
-  const state = usePrototype();
-  const { run } = state;
-  const target = run?.target ?? state.target;
-  const completed = run ? Math.min(run.items.length * run.rounds, output ? Math.floor(run.completedSteps / 2) : Math.ceil(run.completedSteps / 2)) : 0;
-  const planned = run ? run.items.length * run.rounds : state.items.length * state.rounds;
-  return <>
-    <Handle type="target" position={Position.Left} id="media" />
-    <Handle type="target" position={Position.Top} id="prompt" />
-    {!output && <Handle type="source" position={Position.Right} />}
-    <div className="mb-3 flex items-center gap-2 font-medium">{output ? target === 'video' ? <Film size={16} /> : <Type size={16} /> : <Images size={16} />}{output ? '后续生成' : '图片生成'}<span className="ml-auto text-xs font-normal text-muted-foreground">{output ? '步骤 02' : '步骤 01'}</span></div>
-    <div className="nodrag nowheel nopan space-y-3">
-      {output ? <label className="flex items-center justify-between text-sm text-muted-foreground">产物类型<select aria-label="后续产物类型" value={state.target} disabled={state.locked} onChange={event => state.setTarget(event.target.value as Target)} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"><option value="video">视频</option><option value="text">文本</option></select></label> : <>
-        <p className="text-sm text-muted-foreground">每项参考图 + 共用文本 A</p>
-        <button disabled={state.locked} onClick={() => state.setShared(!state.shared)} className={cn('flex w-full items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:opacity-50', state.shared && 'border-primary/50 text-primary')} aria-pressed={state.shared}>{state.shared ? <Check size={14} /> : <Plus size={14} />}{state.shared ? '已加共用参考（示例），每项都使用' : '给所有项加同一张参考（示例）'}</button>
-      </>}
-      <div className="rounded-md bg-background/50 p-3">
-        <p className="text-sm">{output ? '收到每项的图，再自动接着跑' : '每项输出 1 张图'}</p>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{output ? '沿用项号；不会引用其他项的结果。' : '本原型先验证一对一链路，不自动扩散多候选图。'}</p>
-      </div>
-      <div className="flex items-center justify-between text-xs text-muted-foreground"><span>{run ? run.status === 'running' ? '模拟进度' : '模拟完成' : '预计产物'}</span><span className={run ? 'text-primary' : ''}>{run ? `${completed} / ${planned}` : planned} {output && target === 'video' ? '段' : output ? '份' : '张'}</span></div>
-      <div className="h-1 overflow-hidden rounded-full bg-secondary"><div className="h-full bg-primary transition-[width] duration-200 motion-reduce:transition-none" style={{ width: `${planned ? completed / planned * 100 : 0}%` }} /></div>
-    </div>
-  </>;
-}
-
-function PrototypeFlowNode({ data }: NodeProps<PrototypeNode>) {
-  return <section className="rounded-lg border border-border bg-card p-4 text-sm text-foreground" style={{ width: data.kind === 'materials' ? 356 : 286 }}>
-    {data.kind === 'materials' ? <MaterialsNode /> : data.kind === 'promptA' ? <PromptNode index={0} /> : data.kind === 'promptB' ? <PromptNode index={1} /> : <GenerationNode output={data.kind === 'output'} />}
+    <MaterialList />
+    <Handle type="source" position={Position.Right} className="canvas-node-handle" aria-label="批量素材输出"><span className="canvas-node-handle-dot" aria-hidden /></Handle>
   </section>;
 }
 
-const nodeTypes = { prototype: PrototypeFlowNode };
-const initialNodes: PrototypeNode[] = [
-  { id: 'materials', type: 'prototype', position: { x: 40, y: 70 }, data: { kind: 'materials' } },
-  { id: 'promptA', type: 'prototype', position: { x: 486, y: 35 }, data: { kind: 'promptA' } },
-  { id: 'image', type: 'prototype', position: { x: 486, y: 256 }, data: { kind: 'image' } },
-  { id: 'promptB', type: 'prototype', position: { x: 872, y: 35 }, data: { kind: 'promptB' } },
-  { id: 'output', type: 'prototype', position: { x: 872, y: 256 }, data: { kind: 'output' } },
-];
-const edges: Edge[] = [
-  { id: 'materials-image', source: 'materials', sourceHandle: 'items', target: 'image', targetHandle: 'media' },
-  { id: 'text-image', source: 'promptA', target: 'image', targetHandle: 'prompt' },
-  { id: 'image-output', source: 'image', target: 'output', targetHandle: 'media' },
-  { id: 'text-output', source: 'promptB', target: 'output', targetHandle: 'prompt' },
-].map(edge => ({ ...edge, style: { stroke: 'var(--primary)', strokeWidth: 1.5 } }));
+function ReusedCanvasNode(props: NodeProps<FlowNode>) {
+  const { run } = usePrototype();
+  const step = run?.steps.indexOf(props.id) ?? -1;
+  const completed = run && step >= 0 ? Math.max(0, Math.min(run.items.length * run.rounds, Math.floor((run.completedSteps + run.steps.length - 1 - step) / run.steps.length))) : 0;
+  return <div className="relative h-full w-full">
+    <CanvasNodeCard {...props} />
+    {run && step >= 0 && <div className="pointer-events-none absolute bottom-3 left-3 right-3 rounded-md border border-primary/30 bg-card/95 px-3 py-2 text-xs text-primary">
+      模拟{run.status === 'running' ? '中' : run.status === 'stopped' ? '已停止' : '完成'} · {completed} / {run.items.length * run.rounds} 项
+    </div>}
+  </div>;
+}
+
+const nodeTypes = { batchPrototype: MaterialsNode, canvasNode: ReusedCanvasNode };
 
 function Results() {
   const { run } = usePrototype();
-  if (!run) return <div className="px-5 py-5 text-sm text-muted-foreground">点击「模拟执行分组」，在这里查看素材 → 图片 → 视频 / 文本的逐项对应关系。</div>;
+  if (!run) return <div className="px-5 py-5 text-sm text-muted-foreground">点击「模拟执行分组」，查看每项的链路结果。节点内的生成按钮只模拟当前节点。</div>;
   const entries = Array.from({ length: run.rounds }, (_, round) => run.items.map((item, index) => ({ item, round, index }))).flat();
   return <div className="max-h-40 overflow-auto no-scrollbar" aria-label="模拟结果列表">
     <table className="w-full min-w-[650px] text-left text-xs">
-      <thead className="sticky top-0 bg-card text-muted-foreground"><tr><th className="px-5 py-2 font-normal">轮 / 项</th><th className="px-3 py-2 font-normal">本次输入</th><th className="px-3 py-2 font-normal">步骤 01 · 图片</th><th className="px-5 py-2 font-normal">步骤 02 · {run.target === 'video' ? '视频' : '文本'}</th></tr></thead>
-      <tbody>{entries.map(({ item, round, index }, order) => {
-        const imageDone = run.completedSteps > order * 2;
-        const outputDone = run.completedSteps > order * 2 + 1;
-        const status = (done: boolean, active: boolean) => done ? '模拟完成' : active && run.status === 'running' ? '模拟中…' : run.status === 'stopped' ? '已停止' : '等待';
-        return <tr key={`${round}-${item.id}`} className="border-t border-border/60"><td className="whitespace-nowrap px-5 py-3 text-muted-foreground">{number(round + 1)} / {number(index + 1)}</td><td className="px-3 py-3"><div className="flex items-center gap-2"><Thumbnail material={item.images[0]} className="size-8" /><span>{item.images.length} 张{run.shared ? ' + 共用参考' : ''}</span></div></td><td className="px-3 py-3"><span className={imageDone ? 'text-primary' : 'text-muted-foreground'}>{status(imageDone, run.completedSteps === order * 2)}</span></td><td className="px-5 py-3"><div className="flex items-center gap-2"><ArrowRight size={12} className="text-muted-foreground" /><span className={outputDone ? 'text-primary' : 'text-muted-foreground'}>{status(outputDone, run.completedSteps === order * 2 + 1)}</span>{imageDone && <span className="text-muted-foreground">· 使用本项图片</span>}</div></td></tr>;
-      })}</tbody>
+      <thead className="sticky top-0 bg-card text-muted-foreground"><tr><th className="px-5 py-2 font-normal">轮 / 项</th><th className="px-3 py-2 font-normal">本次输入</th>{run.steps.map(id => <th key={id} className="px-3 py-2 font-normal">{STEP_LABELS[id]}</th>)}</tr></thead>
+      <tbody>{entries.map(({ item, round, index }, order) => <tr key={`${round}-${item.id}`} className="border-t border-border/60">
+        <td className="whitespace-nowrap px-5 py-3 text-muted-foreground">{number(round + 1)} / {number(index + 1)}</td>
+        <td className="px-3 py-3"><div className="flex items-center gap-2"><Thumbnail material={item.images[0]} className="size-8" /><span>{item.images.length} 张参考</span></div></td>
+        {run.steps.map((id, step) => {
+          const offset = order * run.steps.length + step;
+          const done = run.completedSteps > offset;
+          return <td key={id} className={cn('px-3 py-3', done ? 'text-primary' : 'text-muted-foreground')}>
+            {done ? '模拟完成' : run.status === 'stopped' ? '已停止' : run.completedSteps === offset ? '模拟中…' : '等待'}
+            {done && step > 0 && <span className="ml-2 text-muted-foreground">· 本项{STEP_LABELS[run.steps[step - 1]]}</span>}
+          </td>;
+        })}
+      </tr>)}</tbody>
     </table>
   </div>;
 }
 
 export default function CanvasBatchMaterialPrototype() {
   const state = usePrototypeState();
-  const [nodes, , onNodesChange] = useNodesState(initialNodes);
-  const [resultsOpen, setResultsOpen] = useState(false);
   const totalTasks = state.items.length * state.rounds;
+  const completed = state.run ? Math.floor(state.run.completedSteps / state.run.steps.length) : 0;
   return <PrototypeContext.Provider value={state}>
-    <style>{`.prototype-icon { display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--muted-foreground); transition:color .15s,background-color .15s; } .prototype-icon:hover { color:var(--foreground); background:var(--secondary); } .prototype-icon:focus-visible { outline:2px solid var(--primary); outline-offset:2px; } .prototype-icon:disabled { opacity:.3; pointer-events:none; } .batch-prototype .react-flow__handle { width:8px; height:8px; background:var(--primary); border:2px solid var(--card); } .batch-prototype .react-flow__attribution { background:var(--card); color:var(--muted-foreground); }`}</style>
-    <div className="batch-prototype flex h-dvh flex-col overflow-hidden bg-background text-foreground">
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
-        <div className="flex items-center gap-3"><a href="/canvas" className="prototype-icon size-9 rounded-full border border-border" aria-label="返回正式画布"><ArrowLeft size={16} /></a><div><h1 className="text-base font-medium">批量素材 · 画布原型</h1><p className="mt-1 text-xs text-muted-foreground">仅内存演示，不上传、不保存、不调用模型。</p></div></div>
-        <div className="flex items-center gap-2"><Button variant="ghost" size="sm" disabled={state.locked} onClick={() => state.setItems(current => [...current, ...sampleItems(20)])}>追加 20 项示例</Button><Button variant="outline" size="sm" disabled={state.locked} onClick={() => { state.setItems(sampleItems(3)); state.setRun(null); }}>重置示例</Button></div>
-      </header>
-      <div className="mx-4 mt-4 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-glass px-4 py-3 backdrop-blur-glass">
-        <div><div className="flex items-center gap-2 text-sm font-medium"><Layers size={16} />示例分组<span className="font-normal text-muted-foreground">素材 → 图片 → {state.target === 'video' ? '视频' : '文本'}</span></div><p className="mt-1 text-xs text-muted-foreground">{state.items.length} 项 × {state.rounds} 轮 = {totalTasks} 条链路 · 共 {totalTasks * 2} 次模拟生成</p></div>
-        <div className="flex items-center gap-3"><label className="flex items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">重复<Input aria-label="重复轮数" type="number" min={1} max={20} step={1} value={state.rounds} disabled={state.locked} onChange={event => state.setRounds(Math.max(1, Math.min(20, Math.trunc(Number(event.target.value) || 1))))} className="w-14 text-center text-foreground" />轮</label>{state.locked ? <Button variant="outline" onClick={() => state.setRun(current => current ? { ...current, status: 'stopped' } : current)}><Square />停止模拟</Button> : <Button disabled={!state.items.length} onClick={state.start}><Play />模拟执行分组</Button>}</div>
+    <CanvasNodeContext.Provider value={state.context}>
+      <style>{`.prototype-icon { display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--muted-foreground); transition:color .15s,background-color .15s; } .prototype-icon:hover { color:var(--foreground); background:var(--secondary); } .prototype-icon:focus-visible { outline:2px solid var(--primary); outline-offset:2px; } .prototype-icon:disabled { opacity:.3; pointer-events:none; } .batch-prototype .react-flow__attribution { background:var(--card); color:var(--muted-foreground); }`}</style>
+      <div className="batch-prototype flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+        <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="flex items-center gap-3"><a href="/canvas" className="prototype-icon size-9 rounded-full border border-border" aria-label="返回正式画布"><ArrowLeft size={16} /></a><div><h1 className="text-base font-medium">批量素材 · 复用现有节点</h1><p className="mt-1 text-xs text-muted-foreground">只新增批量素材。其余节点和设置面板直接使用正式组件。</p></div></div>
+          <div className="flex items-center gap-2"><Button variant="ghost" size="sm" disabled={state.locked} onClick={() => state.setItems(current => [...current, ...sampleItems(20)])}>追加 20 项示例</Button><Button variant="outline" size="sm" disabled={state.locked} onClick={() => { state.setItems(sampleItems(3)); state.setRun(null); }}>重置素材</Button></div>
+        </header>
+        <div className="mx-4 mt-4 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-glass px-4 py-3 backdrop-blur-glass">
+          <div><label className="flex items-center gap-2 text-sm font-medium"><Layers size={16} />示例分组<select aria-label="示例链路" value={state.pipeline} disabled={state.locked} onChange={event => state.changePipeline(event.target.value as PrototypePipeline)} className="rounded-md border border-border bg-card px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"><option value="video">图片 → 视频</option><option value="audio">图片 → 文案 → 配音</option></select></label><p className="mt-1 text-xs text-muted-foreground">{state.items.length} 项 × {state.rounds} 轮 = {totalTasks} 条链路 · 每项一份产物</p></div>
+          <div className="flex items-center gap-3"><label className="flex items-center gap-2 whitespace-nowrap text-xs text-muted-foreground">重复<Input aria-label="重复轮数" type="number" min={1} max={20} step={1} value={state.rounds} disabled={state.locked} onChange={event => state.setRounds(Math.max(1, Math.min(20, Math.trunc(Number(event.target.value) || 1))))} className="w-14 text-center text-foreground" />轮</label>{state.locked ? <Button variant="outline" onClick={() => state.setRun(current => current ? { ...current, status: 'stopped' } : current)}><Square />停止模拟</Button> : <Button disabled={!state.items.length} onClick={() => state.start()}><Play />模拟执行分组</Button>}</div>
+        </div>
+        <div ref={state.surfaceRef} className="relative min-h-64 flex-1">
+          <ReactFlow<PrototypeNode> nodes={state.nodes} edges={state.edges} nodeTypes={nodeTypes} onNodesChange={state.onNodesChange} onInit={instance => { state.flow.current = instance; }} onNodeClick={(_, node) => state.context.selectNode(node.id)} nodesConnectable={false} edgesFocusable={false} deleteKeyCode={null} fitView fitViewOptions={{ padding: .15, maxZoom: 1 }} minZoom={.3} maxZoom={1.5} colorMode="dark" aria-label="批量素材工作流原型" />
+          <div className="absolute bottom-3 left-4 z-20"><Button variant="outline" size="sm" onClick={() => { state.context.generationPanel.dismiss(state.nodes.find(node => node.selected)?.id ?? ''); void state.flow.current?.fitView({ padding: .15, maxZoom: 1, duration: 200 }); }}><Scan />查看全图</Button></div>
+        </div>
+        <div role="status" className="shrink-0 px-5 py-2 text-xs text-muted-foreground">{state.locked ? '正在模拟，参数已冻结。不上传、不保存、不调用模型。' : state.run?.status === 'done' ? '模拟完成，没有产生真实媒体或费用。' : state.run?.status === 'stopped' ? '模拟已停止，保留已完成结果。' : state.notice || '点选生成节点打开原来的设置；双击文本节点编辑。仅内存演示，不上传、不保存、不调用模型。'}</div>
+        <section className="mx-4 mb-4 shrink-0 overflow-hidden rounded-xl border border-border bg-card">
+          <button className="flex w-full items-center justify-between gap-2 px-5 py-3 text-sm transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary" aria-expanded={state.resultsOpen} onClick={() => state.setResultsOpen(!state.resultsOpen)}><span className="flex items-center gap-2"><Images size={16} />模拟结果<span className="text-xs text-muted-foreground">{state.run ? `${completed} / ${state.run.items.length * state.run.rounds} 项完成${state.run.status === 'stopped' ? ' · 已停止' : ''}` : '尚未执行'}</span></span>{state.resultsOpen ? <ArrowDown size={14} /> : <ArrowUp size={14} />}</button>
+          {state.resultsOpen && <Results />}
+        </section>
+        <input ref={state.fileInput} type="file" accept="image/*" multiple className="hidden" aria-label="选择本地素材图片" onChange={event => { state.receiveFiles(Array.from(event.target.files ?? []), state.uploadTarget.current); event.target.value = ''; }} />
       </div>
-      <div className="relative min-h-64 flex-1">
-        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} nodesConnectable={false} edgesFocusable={false} deleteKeyCode={null} fitView fitViewOptions={{ padding: .1, maxZoom: 1 }} minZoom={.3} maxZoom={1.5} colorMode="dark" aria-label="批量素材工作流原型" />
-        <div className="pointer-events-none absolute bottom-2 left-5 right-5 flex justify-between gap-4 text-xs text-muted-foreground"><span>拖动标题移动节点 · 滚轮缩放</span><span className="max-w-[55%] text-right" role="status">{state.locked ? '正在模拟；素材和参数已锁定。' : state.run?.status === 'done' ? '模拟已完成，没有产生真实图像或费用。' : state.run?.status === 'stopped' ? '已停止，保留已完成的模拟结果。' : state.notice}</span></div>
-      </div>
-      <section className="mx-4 mb-16 shrink-0 overflow-hidden rounded-xl border border-border bg-card">
-        <button className="flex w-full items-center justify-between gap-2 px-5 py-3 text-sm transition-colors hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary" aria-expanded={resultsOpen} onClick={() => setResultsOpen(!resultsOpen)}><span className="flex items-center gap-2"><Images size={16} />模拟结果<span className="text-xs text-muted-foreground">{state.run ? `${Math.floor(state.run.completedSteps / 2)} / ${state.run.items.length * state.run.rounds} 项完成${state.run.status === 'stopped' ? ' · 已停止' : ''}` : '尚未执行'}</span></span>{resultsOpen ? <ArrowDown size={14} /> : <ArrowUp size={14} />}</button>
-        {resultsOpen && <Results />}
-      </section>
-      <div className="fixed bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 whitespace-nowrap rounded-full border border-border bg-glass px-2 py-1.5 text-xs backdrop-blur-glass" aria-label="原型方案切换"><button className="prototype-icon size-8 rounded-full" aria-label="上一个原型方案" onClick={() => state.changeVariant(state.variant === 'A' ? 'B' : 'A')}><ChevronLeft size={16} /></button><span>{state.variant} / 2 · {state.variant === 'A' ? '节点内直接编辑' : '紧凑节点，展开编辑'}</span><button className="prototype-icon size-8 rounded-full" aria-label="下一个原型方案" onClick={() => state.changeVariant(state.variant === 'A' ? 'B' : 'A')}><ChevronRight size={16} /></button></div>
-      <Dialog open={state.editorOpen} onOpenChange={state.setEditorOpen}><DialogContent className="max-w-xl"><DialogHeader><DialogTitle>批量素材 · {state.items.length} 项</DialogTitle><DialogDescription>调整只影响这份演示，不会改动资产库。</DialogDescription></DialogHeader><MaterialList /><Button variant="outline" onClick={() => state.setEditorOpen(false)}>完成</Button></DialogContent></Dialog>
-      <input ref={state.fileInput} type="file" accept="image/*" multiple className="hidden" aria-label="选择本地素材图片" onChange={event => { state.receiveFiles(Array.from(event.target.files ?? []), state.uploadTarget.current); event.target.value = ''; }} />
-    </div>
+    </CanvasNodeContext.Provider>
   </PrototypeContext.Provider>;
 }
