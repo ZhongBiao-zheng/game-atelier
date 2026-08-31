@@ -6,6 +6,7 @@ import { ProjectPage } from './ProjectPage';
 const sample = {
   project: { id: 'p1', slug: 'pokemon', name: '宝可梦风格', created_at: '2026-06-24T00:00:00+00:00', character_count: 3 },
   worldview_md: '暖色调',
+  revision: 'a'.repeat(64),
 };
 
 const works = [
@@ -102,7 +103,7 @@ const workspaceSummary = {
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/ui-schemes') && !url.includes('/screens/canonical')) return { ok: true, json: async () => ({ default_scheme_id: 'v1', schemes: [{ id: 'v1', name: 'V1', created_at: '' }] }) } as Response;
-    if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true }) } as Response;
+    if (init?.method === 'POST') return { ok: true, json: async () => ({ ok: true, revision: 'b'.repeat(64) }) } as Response;
     if (typeof url === 'string' && url === '/api/projects/p1/characters/index') {
       return { ok: true, json: async () => characterIndex } as Response;
     }
@@ -147,8 +148,20 @@ describe('ProjectPage', () => {
     expect(save).not.toBeDisabled();
     fireEvent.click(save);
     await waitFor(() =>
-      expect(fetch).toHaveBeenCalledWith('/api/experience', expect.objectContaining({ method: 'POST' })),
+      expect(fetch).toHaveBeenCalledWith('/api/experience', expect.objectContaining({ method: 'POST', body: JSON.stringify({ project: 'p1', worldview_md: '暖色调，避免 IP', expected_revision: sample.revision }) })),
     );
+  });
+
+  it('keeps the worldview draft visible when its source revision was changed by an Agent', async () => {
+    render(<ProjectPage projectId="p1" workspace="overview" />);
+    await screen.findByRole('button', { name: '编辑' }); fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    const editor = screen.getByRole('textbox', { name: '项目经验 / 世界观' });
+    fireEvent.change(editor, { target: { value: '我未保存的世界观' } });
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'DOCUMENT_CONFLICT', message: '文档已被其他编辑者修改' } }), { status: 409 }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await screen.findByText(/文档已被其他编辑者修改/);
+    expect(editor).toHaveValue('我未保存的世界观');
+    expect(screen.queryByText('已保存')).not.toBeInTheDocument();
   });
 
   it('编辑未保存时阻止浏览器后退离开项目', async () => {

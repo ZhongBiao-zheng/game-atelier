@@ -1,245 +1,62 @@
 ---
 name: turnaround
-version: 1.5.0
 description: |
-  角色三视图 / character sheet 生成：基于已有立绘引导画师锁定正/侧/背三面比例、表情、武器拆解，
-  一次性出横版三联视图，也支持改已出的三视图。
-  用户要做三视图 / 角色三面 / 设定集，或调用 /game-atelier:turnaround 时使用；
-  该角色还没有立绘（spec.md + portrait/）则先走 /game-atelier:character。
-allowed-tools:
-  - Bash
-  - Read
-  - Write
-  - Edit
-  - AskUserQuestion
-triggers:
-  - /game-atelier:turnaround
-  - 做三视图
-  - 出角色三面
-  - 出 character sheet
-  - 三视图
-  - 角色三面
+  角色三视图、character sheet 工作流：依据完整 spec 与已登记身份参考冻结外观，
+  生成适合建模或动画的正侧背工程图，经工坊 MCP 准备并等待本机人工批准。
+  用户要三视图、角色三面、结构设定或调用 /game-atelier:turnaround 时使用。
 ---
 
-## ⚠️ 启动必读 Memory（均在 data_root，turn-start 自动注入）
-
-game-atelier 的记忆全部锚定 data_root，**与代理工具无关**——不读 `~/.claude` / `~/.codex`。
-turn-start 已把这几层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段（slug 按 active 角色归属自动解析）：
-
-1. `project_worldview` ← `<data_root>/projects/<slug>/worldview.md`（**项目经验/世界观**：定位·调性·用语·项目规则；Web「项目经验」页可编辑，出图前作为项目背景纳入上下文）
-2. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用**出图经验**，按 kind 分段）
-3. `lessons_project` ← `<data_root>/projects/<slug>/MEMORY.md` 的 `### {kind}` 段（项目级**出图经验**，当前 kind）
-
-代理工具自己的项目记忆（Claude 读 `CLAUDE.md`、Codex 读 `AGENTS.md`）由代理原生加载，不归本工作流管。
-不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规。
-
-## 启动自检（bootstrap）——严格有序，开窗前必须全绿
-
-每次触发本 Skill，第一步先 `--check`（先判模式）：
-
-Dev mode：`uv run python scripts/bootstrap.py --check`
-Installed Plugin mode：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --check`（Windows 用 `python` 代替 `python3`，见下）
-Codex mode：先解析 bootstrap.py 绝对路径（跟随软链反推 repo 根），之后所有命令都用 `$BOOT`，**绝不用 `uv run`**：
-
-```bash
-BOOT=$(python -c "import os;p=os.path.realpath(os.path.expanduser('~/.codex/skills/game-atelier-turnaround'));print(os.path.join(os.path.dirname(os.path.dirname(p)),'scripts','bootstrap.py'))")
-python "$BOOT" --check
-```
-
-> 判断模式（三选一）：① 环境变量 `${CLAUDE_PLUGIN_ROOT}` 非空 → Installed Plugin mode（Claude，一律用其下的 plugin 命令，绝不用相对路径 `scripts/bootstrap.py`）；② 为空且运行于 **Codex**（`AI_AGENT` 以 `codex` 开头，或本 skill 软链在 `~/.codex/skills/`——Codex 不会设 `${CLAUDE_PLUGIN_ROOT}`）→ **Codex mode**：用上面解析的 `$BOOT`，**per-turn 绝不 `uv run`**（Codex 沙箱外的 uv 缓存会每轮弹权限，这正是要避开的坑）；③ 为空且在仓库内开发 → Dev mode。插件实装路径形如 `~/.claude/plugins/cache/<市场>/game-atelier/<版本>/`，绝不能硬编码 `~/.claude/plugins/game-atelier/`。**解释器名**：路径含盘符（`C:\...`）即 Windows → 用 `python`（Windows 的 `python3` 常是损坏的 Microsoft Store 别名：`python3 --version` 假装正常，但 `python3 -c ...` / 跑脚本会异常退出，如 exit 49）；macOS/Linux → 用 `python3`。某解释器跑插件脚本异常退出，立即换另一个名字重试，别反复试同一个。
-
-按 status 分流，**逐项推进到 ready 后才允许启 server / 开窗**：
-
-| status | 处理 | 可开窗 |
-|---|---|---|
-| `needs_web_build` | 前端未构建（缺 web/dist）。Dev：跑 `make build` 后重 `--check`；Plugin：告知安装包缺预构建 UI，让用户重装 / 反馈，**停在此不启 server** | ❌ |
-| `needs_data_root` | AskUserQuestion 问路径 → `<bootstrap.py> --init-data-root <path>` → 重 `--check` | ❌ |
-| `needs_uv` | 显示安装命令，不替用户跑；装完重 `--check` | ❌ |
-| `needs_venv` | `<bootstrap.py> --ensure-venv`（自动建依赖）→ 重 `--check` | ❌ |
-| `needs_keys_repair` | 告知 keys.json 损坏，引导修复 | ❌ |
-| `needs_first_key` | dist + venv 已就绪，启 viewer-server + 开窗引导加 Key | ✅ |
-| `ready` | 启 viewer-server，正常 turn-start | ✅ |
-
-铁律：`needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 状态下**绝不**启动 viewer-server、绝不开浏览器——否则用户开窗只会撞 404 / 接口报错。只有 dist 在、venv 在（`ready` 或 `needs_first_key`）才 start + open-browser。
-
-## 插件更新提醒（--check 顺路返回，不阻断流程）
-
-`--check` 输出带 `update` 字段。仅当 `update_available` 为 true 且 `dismissed` 为 false 时提醒一次：用 AskUserQuestion 问「插件有新版 v<latest>（当前 v<current>），要更新吗？」（选项：现在更新 / 这次跳过）。其余情况（字段为 null / 无更新 / 已跳过）只字不提，直接往下走。
-
-- **现在更新**：Installed Plugin mode → 跑 `claude plugin update game-atelier`；Dev / Codex mode（git clone）→ 在仓库根跑 `git checkout -- web/dist && git pull --ff-only`（dist 是入库构建产物，先还原防挡 pull）。完成后告知用户：新版下次会话（重启 CC / 重进 skill）生效，本轮继续按当前版本工作。
-- **这次跳过**：跑 `<bootstrap.py> --dismiss-update`（前缀按当前模式，同 `--check`），同一版本之后不再问；出更高版本再提。
-- 更新失败（网络 / 权限）：报错原样告知，继续本轮工作，不反复重试。
-
-## 模型 / API Key 选择规则
-
-**按任务挑模型** → 完整规则见 `docs/references/model-routing.md`。要点：
-
-- **常规出图（默认）→ GPT Image 2**（id 含 `gpt-image`）：提示词当实习生用，讲清做什么即可。
-- **画风 / 质感 / 细节调整 → nano-banana**（id 含 `nano-banana`）：提示词 SD 词组式，逐条写最小单位效果。
-- 从 `available_keys[].models` 里找目标族的 `id` + 其 `alias` → `submit --alias <alias> --model <model-id>`。
-- 找不到目标族 → 回退 `preferred_alias` 默认模型并说明；为 null → 停下告知缺 Key。
-- 用户点名 alias / provider / 模型 → 照用户，并更新 spec.md。选定模型在确认卡上显示，过目即确认；永不显示 key。
-
-> 三视图重工程精度：换模型族通常只发生在画师明确要调画风/质感时；常规出三视图稳走默认 gpt-image。
-
-## viewer-server 启停
-
-Turn 起始之前先执行：
-
-Dev：`uv run python src/viewer_server/server.py start --background`
-Plugin（Claude）：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --run -m viewer_server.server start --background`
-Codex：`python "$BOOT" --run -m viewer_server.server start --background`
-
-> Installed Plugin / Codex 模式下所有 `uv run python -m character_workflow ...` 改为 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --run ...` / `python "$BOOT" --run ...`（venv python 直跑、零 uv，per-turn 绝不 `uv run`）。环境困惑跑 `... --run -m character_workflow doctor` 自诊断。
-
-## Turn 起始
-
-```bash
-# Dev：
-uv run python -m character_workflow turn-start --kind turnaround
-# Codex / Installed Plugin：python "$BOOT" --run -m character_workflow turn-start --kind turnaround（绝不 uv run）
-```
-
-返回 `stage / recommend_action / active_id / spec / project_worldview / project_style / derivative / canonical / lessons_workspace / lessons_project`（出图经验来自 `<data_root>/MEMORY.md`，按 kind 分段，本 skill 取 turnaround 段）。按 `recommend_action` 决策，处理方式同 character 主 Skill。
-
-**subject 图选择（身份锚定）**：优先取 `canonical.portrait.path`（画师标的定稿立绘）作 subject_image；`canonical.portrait` 为 null 时回退 `portrait/v_latest.png`，并在转发确认卡时**加一句注明**"该角色暂无定稿立绘，本次以最新立绘 vN 作参考"。画师说某张三视图"定稿"时（经 AskUserQuestion 确认）跑 `set-canonical --kind turnaround --path <路径>` 写入。
-
-**角色衍生**：`derivative` 非 null 时，三视图的 spec、job、定稿与反馈仍全部属于当前 `active_id`。优先用当前衍生自己的 `canonical.portrait.path`；尚无立绘时按 `derivative.source_paths` 顺序使用冻结参考图，并以当前 spec 作为正 / 侧 / 背一致性的唯一结构说明。
-
-本 skill 只产 turnaround（三视图）。**对话中途画师需求转向立绘 / 美宣 → 直接切到对应 skill 执行流程**（Skill 工具调起 `/game-atelier:character` · `/game-atelier:promo`，一句话告知正在切），不在本 skill 内用 turnaround 上下文硬出别的 kind。
-
-## 角色（全程保持）
-
-资深游戏三视图画师。技术精度 > 美感，工程可用 > 创意延伸，下游省返工 > 画面好看。
-
-- 三视图是工程图：建模师/动画师/卡牌画师靠它对结构，美感是副产物，能对得上比好看更重要
-- spec 锚点 100% 继承：发色/瞳色/服装/武器已锁定；三视图只补"另外两面长什么样"，不顺手微调
-- 三面比例严格对齐：正/侧/背同一头顶线 + 同一脚底基线；武器/披风/配饰各面长度必须一致
-- 构图平实：横幅 1536×1024，三面均匀分布，浅灰/米白网格背景；不做戏剧化光线和场景背景
-- 道具说清三面：各面可见的扣环位置、斜度、握持方式逐面标注；道具特写非默认，画师明示才拆
-- "你定"时：三选一并说明对下游影响（A 纯三视图-建模够用 / B 加表情包-卡牌动画 / C 加武器拆解-武器系）
-- 不接受"差不多就行"：三视图精度决定下游返工成本，`consistency_level: strict`
-
-## 四维度引导
-
-**所有向画师提问都必须用 AskUserQuestion**（出图确认卡除外）。纯文字追问等于没问，画师选项清晰才能继续。AskUserQuestion 单次最多 4 个问题、每题最多 4 个选项（工具硬上限）；要问得更多就拆成两级——先问大方向，再问细节。
-
-**降级（结构化提问工具不可用，如 Codex Default mode 无 request_user_input）**：不得用松散文字凑合提问——输出固定格式文本确认卡并就地停下，等画师回复才能继续：
-
-```text
-【待确认】<问题一句话>
-1. <选项 A> — <一句话说明>
-2. <选项 B> — <一句话说明>
-回复编号，或直接描述你的想法。
-```
-
-输出确认卡后本轮立刻停下：不替画师选、不把沉默当默认、不继续推进。
-
-一次问 1-3 个，二选一优先，options 写"工序产出"而非画面元素：
-
-| 维度 | 关键问题 |
-|---|---|
-| 视图组合 | 标准三视图（正/侧/背）？要不要加 3/4 侧、表情包、动作小图？ |
-| 比例尺 | 三面身高严格一致？头身比？武器/披风长度各面对齐？ |
-| 道具拆解 | 武器单独拆视图还是挂在腰间？头饰要不要独立特写？ |
-| 画面规格 | 默认 1536×1024 横版三联；要不要加灰底等高辅助线 / 网格背景？ |
-
-## 写 prompt
-
-四维度问清后，按规则写中文 prompt，落到 `characters/<id>/spec.md` 的"三视图记录"小节。
-
-**应用 turn-start 记忆（必做）**：把 `project_worldview` 的项目定位 / 调性 / 用语 / 规则作背景约束、`lessons_project` / `lessons_workspace`（turnaround 段出图经验）作可复用手法与避坑项揉进 prompt——这是启动段那条红线（不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规）的落点，不是开头读一眼就忘。与 spec / 画师本轮指令冲突时后者优先，但要点名冲突。
-
-**spec 格式** → `docs/references/spec-template.md`
-从 `visual_dna` + `anchors` 提取角色视觉信息；从 `asset.turnaround` 读三视图固定参数。
-
-**底层规则** → `docs/references/art-prompt-system.md`
-**三视图专项** → `references/prompt-turnaround-zh.md`（downstream_use 映射、严格禁止项、多面可见信息拆解）
-**模型选择 + 按模型族写提示词** → `docs/references/model-routing.md`（先定模型族再动笔）
-
-### 参考图清单
-
-逐张查看身份图与布局参考，按最终 CLI 顺序给**每张参考图**写“序号 + 简短可见描述 + 用途”。即使第一张是默认立绘，也要描述角色一眼可见的颜色、轮廓、材质或标志物；布局图要描述三联排布 / 基线等可见结构。提交时按相同顺序重复传 `--reference-image`，不能只写“图一 / 图二”。
-
-## 修改已出图（三模式）
-
-画师指着现有图提修改需求时，**必须先 AskUserQuestion** 确认模式，不得自行假设：
-
-| 模式 | 做法 | 用于 |
-|---|---|---|
-| A 编辑当前图 | 上传当前图作参考；prompt 只写改动指令 | 只改局部细节，整体比例满意 |
-| B 完全重出 | 不带参考图；重走四维度，写完整新 prompt | 整张三视图都不满意 |
-| C 局部参考混合 | 带参考图锚定满意部分；prompt 完整重写并注明锚定范围 | 比例/基线满意，服装/武器要大改 |
-
-三模式互斥，混用三面对不齐风险更高。首次出图 / 用户主动"重画"不适用。
-
-## 出图流程
-
-默认单张出图；画幅 1536×1024 横版三联（下游建模 / 卡牌按此对结构，是设计约束不是 CLI 默认）；张数缺省由 CLI 按 `--kind` 决定。
-
-1. `uv run python -m character_workflow submit --kind turnaround --alias <选定alias> --model <选定model-id> --prompt-file <path> [--reference-image <path> ...] [--source-image <path>]` → 落盘 PENDING_CONFIRM（`--alias`/`--model` 按 model-routing 选；缺省回退默认 Key 首模型；`--reference-image` 可重复传多张，`--source-image` 是首张参考图的兼容别名——参考图一律走 CLI 参数，禁止手改 job JSON）
-2. 把 submit 在 stderr 打出的确认卡**原样转发**给画师（job_id / Key / model / 尺寸 1536×1024 / 参考图全列表 / 完整 prompt 原文），不得手写或摘要
-3. 判定画师回复：**明确肯定**（出图 / 确认 / OK / 可以 / 行 / 就这样 / 走吧 / 好）→ `uv run python -m character_workflow run-job <job_id>`；**要改**（具体改点）→ 改 prompt 重新 submit 出新确认卡（旧 PENDING_CONFIRM 作废、不复用），不 run-job；**否定 / 犹豫**（再想想 / 先不出 / 算了）→ 停在 PENDING_CONFIRM，不推进、不催；**模糊**（看不出肯定还是想改）→ 不擅自当肯定，用 AskUserQuestion 二选一「直接出图 / 还想改」。绝不把沉默或模糊当默认推进。
-4. 渲染成品给画师：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 Markdown 图片。图片地址按**渲染通道**选（**完整规则 + 判断方法 + 降级顺序见 `docs/references/image-presentation.md`**）：
-   - **终端内联图像**（iTerm2 / kitty 等终端里的 Claude Code / Codex CLI）→ 本地绝对路径 `![vN](output_paths[i])`；
-   - **HTML 渲染能访问本地文件**（`file://` 页面或应用自行注入本地资源）→ 本地绝对路径可行；
-   - **HTML 渲染不能访问本地文件**（`http://` 页面，如 DeepSeek Harness GUI）→ **本地路径会裂图**，优先转 viewer-server `/api/raw` HTTP URL：`http://127.0.0.1:<port>/api/raw?path=<data-root相对路径>&job_id=<job_id>`（带本次 job_id 白名单鉴权；端口读 `.runtime/server.port`，别写死 5174）；**项目没有后端 / server 不可用时用 base64 data URI**（`data:image/png;base64,...`，零依赖，任何 HTML 渲染都显示，大图先压小）。
-   `output_paths` 为空 / 缺失 = 本次未成图，走失败分支——**不复用上轮 `v_latest`、不在 slot 目录按 mtime 挑文件冒充本次产出**。
-
-失败时：网络 / 凭证失败 → 问画师重试还是改 prompt；选重试 → `retry-job <job_id>` 克隆新 job（错误记录保留、带 retry_of）再 `run-job`；输出路径不可写 → 提醒检查 `image_storage_root`。不盲目重试。
-
-### 收尾验证（render 前逐条过）
-
-① 渲染路径取本次 `output_paths`（见 step4），为空即走失败分支；
-② 对照 spec 三锚点（发色 / 瞳色 / 服装主色）+ 风格档 100% 继承，漂移则**主动点名**告知画师并提议带参考图走 A/C 模式修，不默默放行、不替画师定；
-③ 无糊脸 / 占位脸 / 裂图等崩坏；明显不达标提议 `retry-job` 或 A 模式重出（**重出 / 修图仍走 PENDING_CONFIRM 确认门**）。
-④ 三视图专项：正 / 侧 / 背三面**头顶线、脚底基线肉眼对齐**，武器 / 披风 / 配饰各面长度一致，对不上即按崩坏处理。
-
-## 上传图通道
-
-画师粘一张或多张参考图时：逐张存到 `characters/<id>/source/`，**三视图 reference_mode 只允许 `composition_only`**（仅参考布局/基线安排），`full_reference` / `style_only` / `color_lighting_only` / `pose_only` 一律拒绝（会让风格/光照/姿势污染 spec 锁定的工程结构）。画师若上传风格参考 → 拒绝："三视图风格已由 spec 锁定，要换风格先回 /game-atelier:character 改 spec"。立绘（canonical 定稿优先，无则 `portrait/v_latest.png`）是强制 subject_image，不可被参考图覆盖；所有实际上传图仍须逐张写进参考图清单并分别传 `--reference-image`。
-
-## Turn 收尾：经验沉淀（出图经验）
-
-turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、但还没沉淀过经验的本角色图。
-
-- **何时问**：`pending_distill` 非空 **且** 画师本轮不在赶活（intent≠revise、非出图确认中）。开口：「这几张你打了高分还没沉淀经验：<列路径/缩略>，要我帮你记吗？」一次说清，不反复唠叨。
-- **画师同意（或「沉第 N 张」）**：看那张图 + 读它的 job（prompt/model/params）+ 评分 → 拟**一条人话经验**（讲清「为什么成功 / 下次怎么复用」），单行，带证据图路径：
-  `- <日期> [<slot>·<评分>★] <人话经验>。证据图 <相对路径>`
-  把这条打成**沉淀确认卡**（复用出图确认卡格式）让画师过目。
-- **画师确认** → 跑 `append-memory --kind <slot> --scope <见下> --line "<上面那条>"`，再跑 `mark-distilled <该图相对路径>`。
-- **画师说「不用沉这张」** → 只跑 `mark-distilled <该图相对路径>`（当忽略，不再提醒）。
-- **scope 决策**：经验含具体角色/风格/配色/类目 → `--scope project`；通用技巧/prompt 协议 → `--scope workspace`。两者都进 MEMORY.md、都 agent-only、都不上 Web。
-
-## Turn 收尾报告（七件套，与 /game-atelier:ui 总控对齐）
-
-本轮有实质产物（出图完成 / spec 落盘 / 定稿变更）时，在渲染图之后以固定七件套收尾；纯对话轮不用：
-
-```text
-当前步骤：
-完成状态：
-本步产物：
-需要你检查：
-可选操作：
-进入下一步的条件：
-下一步可直接说的话：
-```
-
-## Guardrails
-
-只复述全文已散落的红线，集中一眼看全（不新增约束）：
-
-- `needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 态**绝不**启 viewer-server、绝不开窗。
-- 三视图参考图 reference_mode **只允许 `composition_only`**；`full_reference` / `style_only` / `color_lighting_only` / `pose_only` 一律拒绝——它们会让风格 / 光照 / 姿势污染受 spec 锁定的工程结构。
-- 立绘是强制 subject_image，不可被参考图覆盖：优先 `canonical.portrait`（定稿立绘），无定稿回退 `portrait/v_latest.png` 并在确认卡转发时注明回退。
-- spec 锚点（发色 / 瞳色 / 服装 / 武器 / 风格档）100% 继承，三视图只补"另外两面"，不顺手微调。
-- 参考图一律走 CLI `--reference-image` / `--source-image`，**禁止手改 job JSON**。
-- 确认卡原样转发 CLI（stderr）全文，不手写、不摘要、不增删字段。
-- 出图链路 submit→PENDING_CONFIRM→画师明确肯定→run-job；**绝不把沉默 / 模糊当默认推进**，模糊用 AskUserQuestion 二选一。
-- 三模式（A 编辑 / B 重出 / C 混合）互斥不混用；重出 / 修图仍过确认门。
-- 所有提问走 AskUserQuestion，单次 ≤4 问、每问 ≤4 选项；工具不可用时走文本确认卡降级。
-- 永远不显示 access_key / secret_key。
-
-## 跳过条件
-
-git / 代码 / 纯问答；画师还没出过立绘（先 `/game-atelier:character`）；用户说"先做美宣"。
+# 角色三视图
+
+默认单张出图，保持三面同时可比较。
+
+先完整读取 [MCP 工作流](../../docs/references/workshop-mcp-workflow.md)、
+[统一 Prompt 规则](../../docs/references/art-prompt-system.md)、
+[三视图 Prompt](references/prompt-turnaround-zh.md)、
+[模型选择](../../docs/references/model-routing.md)。项目操作只能通过受限 MCP。
+
+## 前置门
+
+`workshop_list_projects`、`workshop_list_targets` 找到明确角色，锁定
+`asset_slot:"turnaround"`。读 `workshop_get_context`、完整 `character_spec`、
+项目基线与世界观、当前项目三视图经验和反馈。
+
+完整 spec 与可核对的身份基准缺一不可。默认以当前角色定稿 portrait 为身份锚，
+没有定稿则明确选当前立绘；派生角色允许使用已冻结的来源作为身份基准，
+不能偷换父角色的新版本。通过 `workshop_list_media` / `workshop_read_media`
+核对登记图，资料缺失先回 character 补完。旧定稿过期要先说明，不能装作当前标准。
+
+## 工程约束与参考图清单
+
+先确认下游用途、视图组合、着色方式、道具拆解需求。默认正面 / 侧面 / 背面横向三联，
+全身含脚，中性站姿，三面头顶线 / 腰线 / 脚底线一致，比例、服装层次、道具位置固定。
+
+- 建模与绑骨以清楚结构和平涂为先；卡牌或服装用途再调整线条与细节密度。
+- 全部身份锚冻结，不能顺手改发型 / 颜色 / 服装；要求重新设计时先修 spec。
+- 禁止戏剧光影、特效粒子、动态夸张动作和复杂场景，说明这会妨碍工程读图；
+  用户想做气氛图可转立绘或美宣，不把气氛图冒充三视图。
+- 有身份图时不复述整份外观，文字补正侧背独有结构及工程要求。
+- 额外参考只允许布局用途 `composition_only`，不借用外部人物身份、服装、风格或色彩。
+- 参考图清单按实际 `media_ids` 顺序逐张写“序号 + 简短可见描述 + 用途”；
+  默认身份图和布局图都必须描述，不能只写图一图二。
+
+画幅优先 3:2 横幅（常用 1536×1024），实际 size / ratio 服从模型返回能力；
+模型不支持时请画师确认替代，不能把 unsupported 尺寸写成保证。
+背景浅灰 / 米白或浅网格，平光均匀，不写负向质量词堆叠。
+
+## 保存、人工批准、检验
+
+1. 按三视图参考的四段结构写 Prompt：简短角色与视图组合 → 各面独有细节 →
+   画面规格与辅助基线 → 继承风格。身份锚与 spec 冲突先解决，不带冲突出图。
+2. 用户确认的结构资料用 `workshop_write_document` 更新 `character_spec`，
+   必须先读完整文档、带 revision；不直写任何项目文件。
+3. `workshop_list_models` 核对能力，默认一张。用 `workshop_prepare_generation`
+   准备当前 turnaround 请求，请用户在本机 Atelier「待批准生成」人工批准后再执行。
+4. `workshop_get_generation` 查询同一 request ID；聊天“出图”不代替页面批准，
+   不用 shell 或供应商工具绕过，不自动重试付费任务。
+5. 成功后 `workshop_read_media` 查看本次媒体，检查三面比例、基线、关节 / 接缝、
+   服装和武器背面结构、手脚及锚点漂移。无法看图时注明未做视觉质检。
+6. 画师在 Web 选择定稿，Skill 不代选；旧版保留。反馈完成再确认对应 ID；
+   再生图要新请求与新的页面批准。
+
+产物归当前角色 turnaround/；收尾按共享七件套报告真实进度。

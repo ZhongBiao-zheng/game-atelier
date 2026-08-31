@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
+import { Link } from 'wouter';
 
 import { chooseFolder } from '@/api/folders';
 import { fetchConfig, updateConfig } from '@/api/config';
@@ -82,6 +83,7 @@ export function SettingsPage() {
   return (
     <div className="px-6 py-8 max-w-5xl mx-auto">
       <h1 className="font-display text-display text-foreground">设置</h1>
+      <Link href="/connection" className="mt-5 inline-flex rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">本机 Agent 连接</Link>
 
       <section className="grid gap-6 py-10 md:grid-cols-[220px_1fr] md:gap-12">
         <div>

@@ -25,8 +25,8 @@ class LocalConnectionStatus(BaseModel):
     service: Literal["game-atelier"]
     instance_id: InstanceId
     app_version: Annotated[str, StringConstraints(min_length=1, max_length=80, strict=True)]
-    # A handshake is not permission to connect. Advertise no hosted protocol until auth is ready.
-    protocol: None
+    # Protocol capability is not authorization; cross-origin pairing remains separately gated.
+    protocol: Literal["atelier-local/1"]
 
 
 def new_instance_id() -> str:
@@ -41,7 +41,7 @@ def create_connection_status(instance_id: str | None = None) -> LocalConnectionS
         service="game-atelier",
         instance_id=identity if identity is not None else new_instance_id(),
         app_version=version,
-        protocol=None,
+        protocol="atelier-local/1",
     )
 
 

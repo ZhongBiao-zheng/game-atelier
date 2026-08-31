@@ -142,7 +142,9 @@ def get_spec(character_id: str) -> dict:
     p = _project_root() / "characters" / character_id / "spec.md"
     if not p.exists():
         raise HTTPException(404, detail=f"找不到角色 {character_id} 的 spec.md（可能已被删除）")
-    return {"content": p.read_text(encoding="utf-8")}
+    from character_workflow.lib.workshop import document_view
+    view = document_view(p, "character_spec")
+    return {"content": view["content"], "revision": view["revision"]}
 
 
 _THUMBNAIL_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -398,9 +400,10 @@ def post_screen_canonical(
 @router.post("/spec/{character_id}")
 def post_spec(character_id: str, patch: SpecPatch) -> dict:
     p = _project_root() / "characters" / character_id / "spec.md"
-    atomic_write_text(p, patch.content)
+    from character_workflow.lib.workshop import write_document_content
+    result = write_document_content(p, "character_spec", patch.expected_revision, patch.content)
     write_active(character_id)
-    return {"ok": True, "path": str(p)}
+    return {"ok": True, "revision": result["revision"]}
 
 
 @router.post("/prompt/{job_id}")
@@ -412,8 +415,8 @@ def post_prompt(job_id: str, patch: WebEditableJobPatch) -> dict:
     # 防与 Skill 进程的 update_job_status 互相覆盖。
     with job_lock(job_id):
         data = json.loads(p.read_text(encoding="utf-8"))
-        if data.get("namespace") == "canvas":
-            raise HTTPException(403, detail="Canvas Job 的快照和参数不能通过通用编辑接口修改")
+        if data.get("namespace") == "canvas" or data.get("workshop_request_id"):
+            raise HTTPException(403, detail="已冻结任务的快照和参数不能通过通用编辑接口修改")
         for field, value in patch.model_dump(exclude_unset=True).items():
             if field == "params" and isinstance(value, dict):
                 existing_params = data.get("params")
@@ -996,6 +999,7 @@ class _ExperiencePatch(BaseModel):
     model_config = {"extra": "forbid"}
     project: str = Field(min_length=1)
     worldview_md: str
+    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 def _project_worldview_path(slug: str) -> Path:
@@ -1009,7 +1013,9 @@ def get_experience(project: str = Query(min_length=1)) -> dict:
     if proj is None:
         raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）")
     wv_path = _project_worldview_path(proj.slug)
-    worldview_md = wv_path.read_text(encoding="utf-8") if wv_path.exists() else ""
+    from character_workflow.lib.workshop import document_view
+    view = document_view(wv_path, "worldview")
+    worldview_md = view["content"]
     char_count = sum(1 for pid in pf.assignments.values() if pid == proj.id)
     return {
         "project": {
@@ -1017,6 +1023,7 @@ def get_experience(project: str = Query(min_length=1)) -> dict:
             "created_at": proj.created_at, "character_count": char_count,
         },
         "worldview_md": worldview_md,
+        "revision": view["revision"],
     }
 
 
@@ -1027,9 +1034,9 @@ def post_experience(patch: _ExperiencePatch) -> dict:
     if proj is None:
         raise HTTPException(status_code=404, detail="找不到这个项目（可能已被删除）")
     wv_path = _project_worldview_path(proj.slug)
-    wv_path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(wv_path, patch.worldview_md)
-    return {"ok": True}
+    from character_workflow.lib.workshop import write_document_content
+    result = write_document_content(wv_path, "worldview", patch.expected_revision, patch.worldview_md)
+    return {"ok": True, "revision": result["revision"]}
 
 
 @router.post("/characters/{character_id}/project", response_model=ProjectsFile)
@@ -1066,6 +1073,8 @@ def post_job_confirm(job_id: str) -> dict:
         job = read_job(job_id)
     except FileNotFoundError:
         raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from None
+    if job.namespace in {"character", "ui", "video"}:
+        raise HTTPException(409, detail="工坊草稿请重新准备，在本地工坊批准页确认后由服务执行")
     if job.status != JobStatus.PENDING_CONFIRM:
         raise HTTPException(
             409,

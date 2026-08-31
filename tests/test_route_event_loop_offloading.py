@@ -13,7 +13,7 @@ import asyncio
 import base64
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from viewer_server.server_app import build_app
 

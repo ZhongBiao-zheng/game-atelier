@@ -1,72 +1,94 @@
+import { fetchSpec, saveSpec } from '@/api/spec';
 import { useEffect, useRef, useState } from 'react';
 import { RefreshCw, Save, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useClipboard } from '../hooks/useClipboard';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { apiError } from '@/api/http';
 
 interface Props { characterId: string | null; characterName: string | null; sseSignal: number }
 
 export function SpecForm({ characterId, characterName, sseSignal }: Props) {
   const [content, setContent] = useState('');
   const [serverContent, setServerContent] = useState('');
+  const [revision, setRevision] = useState<string | null>(null);
+  const [serverRevision, setServerRevision] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ kind: 'ok' | 'warn'; msg: string } | null>(null);
   const copyToClipboard = useClipboard();
   const autoSaveTimer = useRef<number | null>(null);
+  const loadedCharacter = useRef<string | null>(null);
+  const readSequence = useRef(0);
+  const savingRef = useRef(false);
+  const latest = useRef({ content, dirty, characterId });
+  latest.current = { content, dirty, characterId };
 
   useEffect(() => {
     if (!characterId) return;
-    fetch(`/api/spec/${characterId}`)
-      .then(r => r.ok ? r.json() : { content: '' })
-      .then(d => {
-        setServerContent(d.content);
-        if (!dirty) { setContent(d.content); }
-      });
+    if (loadedCharacter.current !== characterId) {
+      loadedCharacter.current = characterId;
+      latest.current.dirty = false;
+      setContent(''); setServerContent(''); setRevision(null); setServerRevision(null);
+      setDirty(false); setToast(null);
+    }
+    void load(false);
+    return () => { readSequence.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characterId, sseSignal]);
 
-  useEffect(() => {
-    setDirty(false);
-    setToast(null);
-  }, [characterId]);
+  async function load(replace: boolean) {
+    if (!characterId) return;
+    const sequence = ++readSequence.current;
+    try {
+      const spec = await fetchSpec(characterId);
+      if (sequence !== readSequence.current || latest.current.characterId !== characterId) return;
+      setServerContent(spec.content); setServerRevision(spec.revision);
+      // A dirty draft keeps the revision it was based on, even after a remote SSE refresh.
+      if (replace || !latest.current.dirty) {
+        setContent(spec.content); setRevision(spec.revision); setDirty(false);
+      }
+    } catch (error) {
+      if (sequence === readSequence.current) setToast({ kind: 'warn', msg: String(error) });
+    }
+  }
 
   useEffect(() => {
-    if (!dirty || !characterId) return;
+    if (!dirty || !characterId || saving || revision === null) return;
     if (autoSaveTimer.current) window.clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = window.setTimeout(() => {
       void save(false);
     }, 5000);
     return () => { if (autoSaveTimer.current) window.clearTimeout(autoSaveTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [content, dirty, characterId]);
+  }, [content, dirty, characterId, saving, revision]);
 
   async function save(triggerClipboard: boolean) {
-    if (!characterId) return;
-    const r = await fetch(`/api/spec/${characterId}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content }),
-    });
-    if (!r.ok) { setToast({ kind: 'warn', msg: (await apiError(r, '保存角色 spec')).message }); return; }
-    setServerContent(content);
-    setDirty(false);
-    if (triggerClipboard) {
-      const { success } = await copyToClipboard('继续');
-      setToast(success
-        ? { kind: 'ok', msg: '已保存，切到 CC 按 Cmd+V Enter' }
-        : { kind: 'warn', msg: '保存成功，但剪贴板写入失败' });
-    }
+    if (!characterId || revision === null || savingRef.current) return;
+    savingRef.current = true; setSaving(true);
+    try {
+      const result = await saveSpec(characterId, content, revision);
+      if (latest.current.characterId !== characterId) return;
+      readSequence.current += 1;
+      setServerContent(content); setServerRevision(result.revision); setRevision(result.revision);
+      setDirty(latest.current.content !== content);
+      if (triggerClipboard) {
+        const { success } = await copyToClipboard('继续');
+        setToast(success
+          ? { kind: 'ok', msg: '已保存，切到 CC 按 Cmd+V Enter' }
+          : { kind: 'warn', msg: '保存成功，但剪贴板写入失败' });
+      }
+    } catch (error) {
+      if (latest.current.characterId === characterId) {
+        setToast({ kind: 'warn', msg: String(error) });
+        void load(false);
+      }
+    } finally { savingRef.current = false; setSaving(false); }
   }
 
   async function refresh() {
-    if (!characterId) return;
-    const r = await fetch(`/api/spec/${characterId}`);
-    if (!r.ok) { setToast({ kind: 'warn', msg: (await apiError(r, '刷新角色 spec')).message }); return; }
-    const d = await r.json();
-    setServerContent(d.content);
-    setContent(d.content);
-    setDirty(false);
+    if (dirty && !window.confirm('放弃未保存的 spec 内容并加载磁盘版本？')) return;
+    await load(true);
   }
 
   if (!characterId) {
@@ -80,7 +102,7 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
     );
   }
 
-  const stale = serverContent !== content && !dirty;
+  const stale = revision !== null && serverRevision !== null && revision !== serverRevision;
 
   return (
     <section className="h-full border-l border-border/60 bg-card/30 flex flex-col">
@@ -113,7 +135,10 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
             variant="outline"
             size="sm"
             className="h-6 px-2 text-xs"
-            onClick={() => setContent(serverContent)}
+            onClick={() => {
+              if (dirty && !window.confirm('放弃未保存的 spec 内容并采用磁盘版本？')) return;
+              setContent(serverContent); setRevision(serverRevision); setDirty(false); setToast(null);
+            }}
           >
             采用磁盘版
           </Button>
@@ -123,6 +148,7 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
       <div className="flex-1 min-h-0 flex flex-col px-5 pt-4 pb-3 gap-3">
         <Textarea
           value={content}
+          readOnly={revision === null}
           onChange={e => { setContent(e.target.value); setDirty(true); }}
           className="flex-1 resize-none font-mono text-sm leading-[1.7] bg-background/40"
           placeholder="角色规格 markdown…"
@@ -130,7 +156,7 @@ export function SpecForm({ characterId, characterName, sseSignal }: Props) {
         />
 
         <div className="flex items-center gap-3">
-          <Button onClick={() => save(true)} disabled={!dirty} size="sm">
+          <Button onClick={() => save(true)} disabled={!dirty || saving || revision === null} size="sm">
             <Save className="size-3.5" />
             保存
           </Button>

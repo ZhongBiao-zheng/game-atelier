@@ -14,14 +14,43 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
-from character_workflow.lib.jobs import clone_job_for_retry, new_job_id, write_job
+from character_workflow.lib.jobs import clone_job_for_retry
 from character_workflow.lib.job_runner import run_job, run_latest
 from character_workflow.lib.lessons import append_lesson
-from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobStatus
+from character_workflow.lib.schemas import AssetSlot, Job, JobKind
 from character_workflow.lib.turn_start import turn_start
+
+
+def _prepare_workshop_submission(*, target: dict, prompt: str, alias: str,
+                                 model: str, params: dict, references: list[str]) -> int:
+    """CLI can prepare a request, but cannot assert human approval or dispatch a provider."""
+    from pydantic import ValidationError
+    from character_workflow.lib.workshop import WorkshopError, media_entries
+    from character_workflow.lib.workshop_generation import prepare_generation
+    from character_workflow.lib.workshop_schema import PrepareGenerationInput, TargetInput
+
+    local = SimpleNamespace(kind="local", session_id="cli-prepare", grant_id=None)
+    try:
+        parsed = TargetInput(target=target).target
+        registered = {str(path.resolve()): item["media_id"] for item, path in media_entries(local, parsed)}
+        if any(str(Path(path).resolve()) not in registered for path in references):
+            raise WorkshopError("REFERENCE_NOT_ALLOWED", "参考图请先导入当前工坊目标，不能直接传任意路径")
+        request = prepare_generation(local, PrepareGenerationInput(
+            target=parsed, prompt=prompt, alias=alias, model=model, params=params,
+            media_ids=list(dict.fromkeys(registered[str(Path(path).resolve())] for path in references)),
+            idempotency_key=uuid4().hex,
+        ))
+    except (WorkshopError, ValidationError, OSError, KeyError, ValueError) as error:
+        print(f"prepare: {error}", file=sys.stderr)
+        return 1
+    print("请在本地工坊批准页确认，服务会执行本次冻结请求：" + request["approval_url"], file=sys.stderr)
+    print(json.dumps(request, ensure_ascii=False))
+    return 0
 
 
 def _force_utf8_stdio() -> None:
@@ -34,11 +63,7 @@ def _force_utf8_stdio() -> None:
 
 
 def _submit(args: argparse.Namespace) -> int:
-    """落盘一条 PENDING_CONFIRM job，stdout 输出纯 job_id。
-
-    集中默认值（model / n / size / status / job_id 格式），
-    SKILL.md 调用方不应该再次决定这些值。
-    """
+    """准备冻结的角色生成请求；stdout 输出 JSON，人工在本地页面批准后执行。"""
     char_id = args.character
     if not char_id:
         active = read_active()
@@ -55,8 +80,6 @@ def _submit(args: argparse.Namespace) -> int:
         print(f"submit: --prompt-file {args.prompt_file} 不存在", file=sys.stderr)
         return 1
     prompt = prompt_path.read_text(encoding="utf-8")
-
-    job_id = new_job_id()
 
     source_image = (
         str(Path(args.source_image).expanduser().resolve())
@@ -84,37 +107,27 @@ def _submit(args: argparse.Namespace) -> int:
             )
             return 2
         model = key.models[0].id
-    # 注：--model 允许自由传任意 id（models 列表只是建议，端点支持即可），不强校验。
+    # prepare 复核 model 已在所选 Key 下配置，不接受任意未登记模型。
 
     params: dict = {
-        "vendor": f"{key.alias} ({key.provider})",
+        "type": "image",
         "size": args.size,
-        "requested_size": args.size,
         "n": args.n,
-        "reference_images": reference_images,
     }
-
-    job = write_job(
-        job_id=job_id,
-        character_id=char_id,
-        prompt=prompt,
-        model=model,
-        params=params,
-        status=JobStatus.PENDING_CONFIRM,
-        asset_slot=AssetSlot(args.kind),
-        source_image=source_image,
-        alias=alias,
+    from character_workflow.lib.projects import read_projects
+    project_id = read_projects().assignments.get(char_id)
+    if not project_id:
+        print("submit: 请先把角色归入项目", file=sys.stderr)
+        return 1
+    return _prepare_workshop_submission(
+        target={"type": "character", "project_id": project_id,
+                "character_id": char_id, "asset_slot": args.kind},
+        prompt=prompt, model=model, params=params, alias=alias, references=reference_images,
     )
-    print(_confirmation_card(job), file=sys.stderr)
-    print(job_id)
-    return 0
 
 
 def _submit_screen(args: argparse.Namespace) -> int:
-    """B2: 落盘一条 UI 页面 job（namespace='ui'），stdout 输出纯 job_id。
-
-    输出归项目方案不归角色：run-job 后产物落 ui/<scheme>/screens/<screen-id>/vN.png。
-    """
+    """准备 UI 页面请求；本地批准后由 Job Runner 落盘到原项目方案目录。"""
     from character_workflow.lib import ui_jobs
 
     try:
@@ -154,34 +167,20 @@ def _submit_screen(args: argparse.Namespace) -> int:
         model = key.models[0].id
 
     params: dict = {
-        "vendor": f"{key.alias} ({key.provider})",
+        "type": "image",
         "size": args.size,
-        "requested_size": args.size,
         "n": args.n,
-        "reference_images": reference_images,
     }
     # B3 风格切换：结构锁定、只换风格时记来源关系，供 Web 并排对比与定稿溯源。
     if args.style_variant:
         params["style_variant"] = args.style_variant
     if args.base_version:
         params["base_version"] = args.base_version
-
-    job = write_job(
-        job_id=new_job_id(),
-        character_id="",  # namespace="ui" 时无角色归属；runner 按 project_id/screen_id 落盘
-        prompt=prompt,
-        model=model,
-        params=params,
-        status=JobStatus.PENDING_CONFIRM,
-        alias=alias,
-        namespace="ui",
-        project_id=project.id,
-        ui_scheme_id=scheme.id,
-        screen_id=args.screen,
+    return _prepare_workshop_submission(
+        target={"type": "ui", "project_id": project.id,
+                "ui_scheme_id": scheme.id, "screen_id": args.screen},
+        prompt=prompt, model=model, params=params, alias=alias, references=reference_images,
     )
-    print(_confirmation_card(job), file=sys.stderr)
-    print(job.job_id)
-    return 0
 
 
 def _create_video_production(args: argparse.Namespace) -> int:
@@ -283,22 +282,13 @@ def _submit_video_production(args: argparse.Namespace) -> int:
     except (FileNotFoundError, ValueError) as e:
         print(f"submit-video-production: {e}", file=sys.stderr)
         return 1
-    job = write_job(
-        job_id=new_job_id(),
-        character_id="",
-        prompt=prompt,
-        model=model,
-        params=params,
-        status=JobStatus.PENDING_CONFIRM,
-        alias=key.alias,
-        namespace="video",
-        project_id=project.id,
-        production_id=args.production,
-        kind=JobKind.VIDEO,
+    return _prepare_workshop_submission(
+        target={"type": "video", "project_id": project.id, "production_id": args.production},
+        prompt=prompt, model=model, alias=key.alias,
+        params={"type": "video", "duration": args.duration,
+                "resolution": args.resolution, "ratio": args.ratio},
+        references=params["reference_images"] + params["reference_videos"] + params["reference_audios"],
     )
-    print(_confirmation_card(job), file=sys.stderr)
-    print(job.job_id)
-    return 0
 
 
 def _set_video_selected(args: argparse.Namespace) -> int:
@@ -357,7 +347,7 @@ def _confirmation_card(job: Job) -> str:
         lines.extend(f"  {i}. {p}" for i, p in enumerate(audio_refs, 1))
     lines.append("prompt :")
     lines.append(job.prompt.rstrip("\n"))
-    lines.append("─── 画师确认后 run-job ───")
+    lines.append("─── 请在对应本地页面确认；工坊任务须重新准备生成请求 ───")
     return "\n".join(lines)
 
 
@@ -652,8 +642,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_submit = sub.add_parser(
         "submit",
-        help="落盘 PENDING_CONFIRM job —— 默认值集中点，"
-             "stdout 输出纯 job_id，stderr 输出确认卡；支持多张参考图（--reference-image 可重复）",
+        help="准备角色生成请求；stdout 输出请求 JSON，stderr 输出本地批准页链接；不自动调用供应商",
     )
     p_submit.add_argument(
         "--kind", required=True, choices=("portrait", "promo", "turnaround"),
@@ -675,18 +664,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_submit.add_argument(
         "--source-image", default=None,
-        help="首张参考图的兼容别名（promo / turnaround 旧用法，同时写 job.source_image）",
+        help="首张参考图；必须已经导入当前角色，会冻结到本次请求",
     )
     p_submit.add_argument(
         "--reference-image", action="append", default=None,
-        help="参考图绝对路径，可重复传多张；与 --source-image 合并去重后"
-             "写入 params.reference_images，无需手改 job JSON",
+        help="当前角色已登记的参考图绝对路径，可重复；合并去重后冻结，不接受任意外部文件",
     )
 
     p_ss = sub.add_parser(
         "submit-screen",
-        help="落盘 UI 页面 job（namespace='ui'）——产物归项目的明确 UI 方案；"
-             "stdout 输出纯 job_id，stderr 输出确认卡",
+        help="准备已建立 UI 页面的冻结请求；stdout 输出请求 JSON，人工在本地页面批准后执行",
     )
     p_ss.add_argument("--project", required=True, help="项目 id 或 slug")
     p_ss.add_argument("--scheme", default=None, help="UI 方案 id；缺省使用项目默认方案")
@@ -735,7 +722,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_vs = sub.add_parser(
         "submit-video-production",
-        help="提交项目完整视频 job（namespace='video'，产物归企划）",
+        help="准备项目完整视频请求；人工在本地页面批准后执行，产物归原企划",
     )
     p_vs.add_argument("--project", required=True, help="项目 id 或 slug")
     p_vs.add_argument("--production", required=True, help="企划 id")
@@ -755,19 +742,18 @@ def main(argv: list[str] | None = None) -> int:
     p_vc.add_argument("--path", default=None, help="要选定的 mp4 路径")
     p_vc.add_argument("--clear", action="store_true", help="取消选定")
 
-    p_run_job = sub.add_parser("run-job", help="确认并执行一个 PENDING_CONFIRM job")
+    p_run_job = sub.add_parser("run-job", help="执行本地页面已批准的 PENDING job；不能代替人工确认")
     p_run_job.add_argument("job_id")
 
     p_retry = sub.add_parser(
         "retry-job",
-        help="克隆一条 failed job 重试：原 job 错误记录保留，新 job 带 retry_of，"
-             "stdout 输出新 job_id（确认后 run-job <新id>）",
+        help="克隆 failed Studio job 草稿；工坊任务需重新 prepare 并获人工批准，不能直接重试",
     )
     p_retry.add_argument("job_id")
 
     p_run_latest = sub.add_parser(
         "run-latest",
-        help="执行当前角色最近一个 PENDING_CONFIRM job",
+        help="执行当前角色最近一个已在本地页面批准的 PENDING job",
     )
     p_run_latest.add_argument("--kind", choices=("portrait", "promo", "turnaround"))
     p_run_latest.add_argument("--character", default=None)

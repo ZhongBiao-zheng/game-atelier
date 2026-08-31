@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import pytest
 
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib import jobs, projects, stale, ui_jobs, ui_schemes
 from character_workflow.lib.schemas import UiSchemeCreate

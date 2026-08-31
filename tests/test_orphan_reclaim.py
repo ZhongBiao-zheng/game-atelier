@@ -1,6 +1,6 @@
 """孤儿 PENDING studio job 回收 — studio job 只在 viewer-server 进程内跑，
 server 重启时还 pending 的必然已死；不回收 = 前端永久转圈 + 永久轮询。"""
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib import jobs as jobs_lib
 from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus

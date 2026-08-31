@@ -5,7 +5,7 @@ import json
 from io import BytesIO
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 from PIL import Image
 
 from viewer_server.server_app import build_app

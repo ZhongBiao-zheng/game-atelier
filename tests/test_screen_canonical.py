@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.__main__ import main
 from character_workflow.lib import jobs, keys, projects, ui_jobs
@@ -110,15 +110,17 @@ def test_submit_screen_records_variant_and_base(tmp_path, capsys, project):
     _seed_key()
     prompt_file = tmp_path / "p.txt"
     prompt_file.write_text("首页·厚涂写实", encoding="utf-8")
+    ui_jobs.screen_output_dir(project.id, "v1", "home").mkdir(parents=True)
     rc = main([
         "submit-screen", "--project", "mohuan", "--screen", "home",
         "--prompt-file", str(prompt_file),
         "--style-variant", "厚涂写实", "--base-version", "v1.png",
     ])
     assert rc == 0
-    job = jobs.read_job(capsys.readouterr().out.strip())
-    assert job.params.style_variant == "厚涂写实"
-    assert job.params.base_version == "v1.png"
+    request = json.loads(capsys.readouterr().out)
+    assert request["params"]["style_variant"] == "厚涂写实"
+    assert request["params"]["base_version"] == "v1.png"
+    assert request["state"] == "awaiting_approval"
 
 
 def test_set_screen_canonical_cli(capsys, project, screen_images):

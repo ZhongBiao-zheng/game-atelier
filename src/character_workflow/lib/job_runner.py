@@ -1,4 +1,4 @@
-"""Job runner — turns PENDING_CONFIRM JSON jobs into durable image/video assets."""
+"""Job runner — turns approved PENDING jobs into durable image/video assets."""
 from __future__ import annotations
 
 import math
@@ -419,16 +419,30 @@ def run_job(
     *,
     defer_terminal: bool = False,
     should_cancel: Callable[[], bool] | None = None,
+    workshop_grant_is_active: Callable[[str, str, str], bool] | None = None,
 ) -> Job:
     """Run at most one provider worker for a Job across threads and viewer-server processes."""
     with job_execution_lock(job_id) as acquired:
         if not acquired:
             raise JobExecutionBusy(f"job {job_id} is already running")
-        return _run_job_claimed(
-            job_id,
-            defer_terminal=defer_terminal,
-            should_cancel_external=should_cancel,
-        )
+        from character_workflow.lib.workshop import WorkshopError
+        try:
+            return _run_job_claimed(
+                job_id,
+                defer_terminal=defer_terminal,
+                should_cancel_external=should_cancel,
+                workshop_grant_is_active=workshop_grant_is_active,
+            )
+        except WorkshopError as error:
+            from character_workflow.lib.workshop_generation import record_execution_rejection
+            record_execution_rejection(job_id, error.message)
+            raise JobRunnerError(error.message) from error
+        except Exception:
+            job = read_job(job_id)
+            if job.namespace in {"character", "ui", "video"} and job.status == JobStatus.PENDING:
+                from character_workflow.lib.workshop_generation import record_execution_rejection
+                record_execution_rejection(job_id, "执行意外中断，请核对任务和供应商订单；不会自动重试")
+            raise
 
 
 def _run_job_claimed(
@@ -436,6 +450,7 @@ def _run_job_claimed(
     *,
     defer_terminal: bool = False,
     should_cancel_external: Callable[[], bool] | None = None,
+    workshop_grant_is_active: Callable[[str, str, str], bool] | None = None,
 ) -> Job:
     from character_workflow.lib.schemas import JobKind
     # 国产厂商 host 绕过系统/坏代理（NO_PROXY），覆盖 skill（run-job）与 Studio（后台任务）两条路。
@@ -448,10 +463,11 @@ def _run_job_claimed(
             raise JobRunnerError("Canvas Run 已请求停止")
         update_job_phase(job.job_id, phase)
 
-    # Studio jobs start PENDING (UI submit = consent); character jobs start PENDING_CONFIRM.
-    allowed_statuses = (JobStatus.PENDING_CONFIRM, JobStatus.PENDING)
-    if job.status not in allowed_statuses:
+    if job.status != JobStatus.PENDING:
         raise JobRunnerError(f"job not in a runnable status (current: {job.status.value})")
+    if job.namespace in {"character", "ui", "video"}:
+        from character_workflow.lib.workshop_generation import claim_execution
+        claim_execution(job, workshop_grant_is_active)
     if job.kind == JobKind.TEXT:
         return _run_text_job(job)
     if job.kind == JobKind.VIDEO:
@@ -465,8 +481,6 @@ def _run_job_claimed(
     try:
         if not job.alias:
             raise JobRunnerError("job requires an alias to route to an image provider")
-        if job.status == JobStatus.PENDING_CONFIRM:
-            update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
         with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider or 'image'}-") as tmp:
             dispatch_kwargs: dict[str, Any] = {}
             if should_cancel is not None:
@@ -546,8 +560,6 @@ def _run_text_job(job: Job) -> Job:
     try:
         if not job.alias:
             raise JobRunnerError("text job requires an alias to route to a provider")
-        if job.status == JobStatus.PENDING_CONFIRM:
-            update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
         outputs = dispatch_text(
             prompt=job.prompt,
             model=job.model,
@@ -586,8 +598,6 @@ def _run_audio_job(job: Job) -> Job:
     try:
         if not job.alias:
             raise JobRunnerError("audio job requires an alias to route to a provider")
-        if job.status == JobStatus.PENDING_CONFIRM:
-            update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
         with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider or 'audio'}-") as tmp:
             outputs = dispatch_audio(
                 prompt=job.prompt,
@@ -639,8 +649,6 @@ def _run_video_job(job: Job) -> Job:
     try:
         if not job.alias:
             raise JobRunnerError("video job requires an alias to route to a provider")
-        if job.status == JobStatus.PENDING_CONFIRM:
-            update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
         with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider or 'video'}-") as tmp:
             paths = dispatch_video(
                 prompt=job.prompt,
@@ -696,12 +704,13 @@ def run_latest(
         job for job in list_jobs()
         if (
             job.character_id == character_id
-            and job.status == JobStatus.PENDING_CONFIRM
+            and job.status == JobStatus.PENDING
+            and job.workshop_request_id is not None
             and (kind is None or job.asset_slot == kind)
         )
     ]
     if not candidates:
         suffix = f" asset_slot={kind.value}" if kind else ""
-        raise JobRunnerError(f"no pending_confirm job for {character_id}{suffix}")
+        raise JobRunnerError(f"no approved pending job for {character_id}{suffix}")
     candidates.sort(key=lambda j: (j.submitted_at, j.job_id))
     return run_job(candidates[-1].job_id)

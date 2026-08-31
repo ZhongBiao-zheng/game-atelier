@@ -1,6 +1,6 @@
 # 工坊 MCP 与生成批准契约
 
-> 开发设计，尚未实现。外部工具协议为 `atelier-workshop/1`；不改变
+> 本地整合已实现工具、人工批准、原 Runner 执行与保守恢复，正在验收。外部工具协议为 `atelier-workshop/1`；不改变
 > [ADR-0011](../adr/0011-restrict-canvas-agent-to-approved-change-sets.md) 的画布 Agent 权限。
 
 ## 范围
@@ -15,11 +15,12 @@
 
 ## MCP 进程与授权
 
-采用官方 Python SDK 的 stdio server，拟入口 `python -m character_workflow.mcp`。
+采用官方 Python SDK 的 stdio server，入口 `python -m character_workflow.mcp --credentials <file>`。
 这个入口是协议适配器，不是第二个 viewer-server；stdout 只输出 MCP JSON-RPC，诊断去 stderr，
 不调用会把安装进度或出图卡片写到 stdout 的 bootstrap / CLI 分支。
 用户已于 2026-08-31 同意新增官方 SDK。运行依赖为 `mcp>=2.1.1,<3`，当前锁定 2.1.1；
-依赖级 stdio 回归使用独立 echo fixture，不代表 Atelier 工具、授权或真实 Agent 联调已经实现。
+回归包含 SDK 客户端真实启动 Atelier stdio、连接真实本机 HTTP、项目授权、文档冲突和撤销；
+不等于已经验收所有 Codex / Claude 客户端版本，具体限制见[本机客户端说明](../mcp-local-client.md)。
 不引入 SDK 的开发 CLI extra 或新的 Node 服务，只使用已需要的服务端协议能力。
 
 用户先在本地管理页选择允许访问的项目，以及 `read`、`edit_documents`、`create_targets`、
@@ -32,7 +33,7 @@ MCP 启动只读取自身的连接凭据，不扫描用户目录或更改 Agent 
 不私自重启或新建不同 data root。连接须核对实例及协议，不使用系统代理或跟随 HTTP 重定向。
 服务重启需重新建立运行时工具会话；持久授权仍须未撤销且在有效期内，不能用过期 session ID 当授权。
 
-拟管理端点 `POST /api/connection/agent-grants` 接受 `{ name, project_ids, capabilities, expires_at }`，
+管理端点 `POST /api/connection/agent-grants` 接受 `{ name, project_ids, capabilities, days?: 7 }`，
 默认有效期 7 天、最长 30 天；返回名称和本机凭据文件位置，原始秘密不经网站或工具返回。
 `POST /api/connection/agent-sessions` 用该凭据换取最长 2 小时且不超过 grant 到期时间的运行会话。
 `DELETE /api/connection/agent-grants/{id}` 同时撤销派生会话并关闭连接。
@@ -48,12 +49,15 @@ Agent 自报的 client 名称只供显示，不作为权限证明；HTTP 请求�
 
 ```ts
 type WorkshopTarget =
+  | { type: 'project'; project_id: string }
+  | { type: 'ui_scheme'; project_id: string; ui_scheme_id: string }
   | { type: 'character'; project_id: string; character_id: string;
       asset_slot: 'portrait' | 'promo' | 'turnaround' }
   | { type: 'ui'; project_id: string; ui_scheme_id: string; screen_id: string }
   | { type: 'video'; project_id: string; production_id: string }
 ```
 
+project / ui_scheme 只用于文档与上下文，不能 prepare 生成；新项目可直接维护三锚，不要求先造占位角色或页面。
 所有 ID 在服务端解析并检查归属；字符形状正确不代表有权限。工坊首版只接受归属明确项目的角色，
 已有项目外临时角色可在原界面归入项目后使用；不自动替用户创建项目或搬动文件。
 
@@ -70,6 +74,7 @@ type WorkshopTarget =
 | 工具 | 输入与结果 | 所需能力 / 副作用 |
 | --- | --- | --- |
 | `workshop_list_projects` | 分页返回授权项目的 ID / 名称，不列未授权项目 | read；只读 |
+| `workshop_list_targets` | project、类型过滤、分页 → 已有角色 / UI 页面 / 视频企划的名称与稳定 target | read；只列当前授权项目，支持按名字继续已有创作 |
 | `workshop_get_context` | project / target → 基线、文档修订、反馈 ID、目标资产引用 | read；只读 |
 | `workshop_list_models` | target → 已配置 alias、可用 model、参数 / 参考能力、可核实价格 | read；不含 Key / 任意 base_url |
 | `workshop_create_target` | project、类型、名字、必要父 ID、幂等键 → target | create_targets；新建角色 / UI 方案或页面 / 视频企划 |
@@ -87,12 +92,20 @@ type WorkshopTarget =
 MCP resources 同样按会话与对象鉴权；大视频不在文本工具响应塞 base64，返回类型、时长、尺寸及
 可在本机确认页面打开的资源引用。限制并发、分页、返回体和预览像素，避免一个工具拉完整作品库。
 
+当前工具使用 `{ payload: <专用输入模型> }`，HTTP 工具请求体最多 1 MiB、只接受 JSON；
+适配器最多同时处理 4 个调用，响应最大 1 MiB。`get_generation.output_media_ids` 精确指向本次 Job 产物，
+不通过名称或“最新文件”猜结果。Agent 看到的失败摘要去除本机路径及原始供应商错误。
+`list_models.capabilities` 只提供已核实的 count / quality / fixed_quality / duration 约束；
+未知 size / ratio / resolution 为 null，并附 capability_basis，不把未知值宣称为支持。
+输入参考硬上限在 `request_limits.max_references` 中返回，实际仍由模型适配器校验。
+
 允许的 document kind 按已有工作流逐个登记：项目基线 / 设计锚、角色 spec、UI 方案 style / screen map、
 视频 brief / 制作说明。每项必须在实现时对应现有路径解析器和 schema，禁止由传入 kind 拼成任意文件名。
 修改创建索引或镜头结构时调用已有领域操作，不把 `.runtime/*.json` 或任意 Markdown 路径开放为“文档”。
 
 第一条验收切片是角色 portrait：读 context → 更新 spec → 准备 → Web 批准 → 得到 Job 和图片。
-接着接入 promo / turnaround、UI、视频。工具表完整只表示目标契约，不代表这些流程已全部通过。
+再覆盖 promo / turnaround、UI、视频。本地回归覆盖这些目标的准备、批准与 fake provider 落盘；
+真实付费调用不属于自动验收。
 
 ## 生成请求、批准与执行
 

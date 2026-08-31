@@ -1,6 +1,16 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterEach, beforeEach } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
+
+// Business component tests isolate transport. Connection/security suites explicitly unmock
+// this module and exercise the real bootstrap, cookie, lease and cancellation path.
+vi.mock('@/api/connection', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/api/connection')>();
+  return {
+    ...actual,
+    connectionFetch: (input: string, init?: RequestInit) => init ? fetch(input, init) : fetch(input),
+  };
+});
 
 // jsdom 没实现媒体播放生命周期；生产代码离屏时会主动 pause + load 释放解码器，
 // 测试环境统一提供空实现，避免把预期的资源清理打印成 Not implemented 错误。

@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Layers2, LibraryBig, Trash2, UserPlus } from 'lucide-react';
 import { Link } from 'wouter';
@@ -46,8 +47,8 @@ export function LeftSidebar({
   const derivativeTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
-    fetch('/api/characters').then(response => response.json()).then(setCharacters);
-    fetch('/api/projects').then(response => response.json()).then(setProjects);
+    connectionFetch('/api/characters').then(response => response.json()).then(setCharacters);
+    connectionFetch('/api/projects').then(response => response.json()).then(setProjects);
   }, [sseSignal]);
 
   useEffect(() => {
@@ -86,7 +87,7 @@ export function LeftSidebar({
       return;
     }
     try {
-      const response = await fetch(`/api/characters/${editingId}/rename`, {
+      const response = await connectionFetch(`/api/characters/${editingId}/rename`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -119,7 +120,7 @@ export function LeftSidebar({
       return;
     }
     try {
-      const createdResponse = await fetch('/api/characters', {
+      const createdResponse = await connectionFetch('/api/characters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, project_id: activeProject.id }),
@@ -143,7 +144,7 @@ export function LeftSidebar({
     const target = deleteTarget;
     setDeleteTarget(null);
     try {
-      const response = await fetch(`/api/characters/${target.id}`, { method: 'DELETE' });
+      const response = await connectionFetch(`/api/characters/${target.id}`, { method: 'DELETE' });
       if (!response.ok) throw await apiError(response, `删除角色「${target.name}」`);
       setCharacters(current => current.filter(character => character.id !== target.id));
       setProjects(current => ({

@@ -5,7 +5,7 @@ import base64
 import json
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib.canvas_projects import canvas_project_lock_path
 from character_workflow.lib.jobs import job_output_dir_for, read_job

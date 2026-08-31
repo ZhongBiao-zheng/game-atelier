@@ -223,6 +223,7 @@ class Job(BaseModel):
     provider: str | None = None
     # 2026-06-10: retry-job 克隆 failed job 时指回原 job_id；原 job 错误记录保留。
     retry_of: str | None = None
+    workshop_request_id: str | None = Field(default=None, pattern=r"^wr-[a-f0-9]{40}$")
     # 2026-06-12: 出图进度真实卡点（视频 caller 经 job_runner 回写；Web 不能改）。
     # sent=任务已全部提交上游；downloading=任务成功、产物下载中。终态时清空。
     progress_phase: Literal["sent", "downloading"] | None = None
@@ -236,6 +237,8 @@ class Job(BaseModel):
 
     @model_validator(mode="after")
     def validate_namespace_ownership(self) -> "Job":
+        if self.workshop_request_id and self.namespace not in {"character", "ui", "video"}:
+            raise ValueError("workshop_request_id is only valid for Workshop jobs")
         if self.namespace == "ui":
             if not self.project_id or not self.ui_scheme_id or not self.screen_id:
                 raise ValueError("ui job requires project_id, ui_scheme_id and screen_id")
@@ -1598,7 +1601,9 @@ class VideoSelectedResponse(BaseModel):
 
 
 class SpecPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     content: str = Field(min_length=1)
+    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class FeedbackPost(BaseModel):
@@ -1815,6 +1820,7 @@ UiSchemeName = Annotated[
 
 
 class UiScheme(BaseModel):
+    creation_request_id: str | None = None
     model_config = ConfigDict(extra="forbid")
     id: str
     name: UiSchemeName

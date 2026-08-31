@@ -1,7 +1,7 @@
 """Skill #2 promo 端到端 smoke。
 
 Mock job_runner.dispatch，验证：
-1. promo Job 落盘是 PENDING_CONFIRM + kind=PROMO + source_image 保留
+1. promo 参考图冻结，人工批准后 Job 落盘是 PENDING
 2. 确认推进到 PENDING 后经 dispatch 出图，output_dir 指向 characters/<id>/promo/
 3. 出图成功落 DONE + output_paths 不污染 portrait/
 4. lessons 走 promo.md 分卷（context_loader.load_lessons）
@@ -15,9 +15,10 @@ import pytest
 from character_workflow.lib import context_loader as cl
 from character_workflow.lib import job_runner
 from character_workflow.lib.jobs import (
-    job_output_dir, read_job, write_job,
+    job_output_dir, write_job,
 )
 from character_workflow.lib.schemas import AssetSlot, JobStatus
+from tests.workshop_helpers import approved_character_job
 
 
 def _write_png(path: Path, width: int = 2, height: int = 2) -> None:
@@ -64,18 +65,16 @@ def project(tmp_path, monkeypatch):
 def test_promo_full_flow_writes_job_and_image(project, monkeypatch):
     src = project / "characters" / "holy" / "source" / "ref-001.png"
 
-    # 1. 落盘 PENDING_CONFIRM
-    write_job(
-        job_id="promo-001", character_id="holy",
+    j = approved_character_job(
+        character_id="holy",
         prompt="圣灵祭祀末战前夕 KV", model="generate_image_gpt_image_2",
-        params={"size": "1536x864", "n": 1, "vendor": "OpenAI"},
-        asset_slot=AssetSlot.PROMO, source_image=str(src),
+        params={"size": "1536x864", "n": 1},
+        asset_slot="promo", source_image=str(src),
         alias="oai",
     )
-    j = read_job("promo-001")
-    assert j.status == JobStatus.PENDING_CONFIRM
+    assert j.status == JobStatus.PENDING
     assert j.asset_slot == AssetSlot.PROMO
-    assert j.source_image == str(src)
+    assert Path(j.params.reference_images[0]).read_bytes() == src.read_bytes()
 
     # 2. mock dispatch 出图到临时目录，run_job 负责挪进 promo/
     captured_output_dir: list[Path] = []
@@ -87,8 +86,7 @@ def test_promo_full_flow_writes_job_and_image(project, monkeypatch):
 
     monkeypatch.setattr(job_runner, "dispatch", fake_dispatch)
 
-    # 3. 出图（run_job 内部把 PENDING_CONFIRM 推到 PENDING 再调 dispatch）
-    final = job_runner.run_job("promo-001")
+    final = job_runner.run_job(j.job_id)
 
     out_dir = job_output_dir("holy", AssetSlot.PROMO)
     expected_path = out_dir / "v1.png"

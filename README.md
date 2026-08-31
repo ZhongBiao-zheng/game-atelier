@@ -2,7 +2,9 @@
 
 **游戏角色资产工作流 Plugin，让 Claude Code 成为你的游戏美术助手。**
 
-通过对话描述角色概念，AI 自动整理 spec、生成出图 prompt，提交到你自己配置的图像服务，结果直接显示在本地 Web 画廊里。
+通过对话描述角色概念，AI 整理 spec 与出图 prompt；你在本地页面批准后，由工坊提交到自己配置的图像服务，结果回到本地画廊。
+
+> 本分支的本地整合仍待 PR 审阅，不代表已经发布。网站部署稍后进行；本地使用不依赖 Vercel。
 
 ---
 
@@ -41,11 +43,15 @@ claude --plugin-dir .
 
 ## 首次启动
 
-运行任意 `/game-atelier:*` 命令，插件自动引导完成三步初始化：
+运行 `/game-atelier:viewer-server`，按指引完成本地初始化：
 
 1. **数据目录** — 默认 `~/game-atelier/`（可自定义）
 2. **Python 环境** — 在数据目录内自动创建 `.venv`，无需手动安装依赖
 3. **API Key** — 打开本地 Web UI，在设置页添加图像服务 Key
+4. **Agent 授权** — 设置 → 本机 Agent 连接，选择项目与能力；按[本机 MCP 说明](docs/mcp-local-client.md)配置 Codex / Claude
+
+已有 Skill 名称不变，但创作操作通过 13 个受限 `workshop_*` 工具。注册 MCP 不会自动安装 Skill；
+凭据只保存在 OS 权限保护的本地文件里，不粘贴 token，不给 Agent 默认开放整个数据目录。
 
 > 数据目录（角色档案、图片、API Key）与插件完全分离，卸载插件不会影响你的资产。
 
@@ -81,7 +87,7 @@ claude --plugin-dir .
 1. /game-atelier:viewer-server     → 打开 Web 画廊
 2. /game-atelier:character 暗影刺客  → 开始或继续角色
 3. 描述你想要的形象 → AI 整理 spec，生成 prompt 预览
-4. 确认后出图 → 结果自动出现在 Web 画廊
+4. Agent 准备请求 → 在本地“待批准生成”页核对并批准 → 结果回到 Web 工坊
 5. 在 Web 上查看、编辑 spec、留下反馈
 6. 回到 Claude Code 继续迭代
 ```
@@ -126,6 +132,8 @@ claude --plugin-dir .
 | `uv` 未安装 | 按插件输出的命令安装，[安装文档](https://docs.astral.sh/uv/) |
 | 端口 5174 被占用 | viewer-server 自动使用后续空闲端口，见 `.runtime/server.port` |
 | Web UI 没打开 | 重新运行 `/game-atelier:viewer-server` |
+| Agent 提示没有授权 / MCP 工具 | 从本地设置创建项目授权，按 MCP 说明配置客户端；不退回直接出图命令 |
+| 另一个页面正在编辑 | 先保留旧页草稿，再显式接管；不同时编辑两份页面 |
 | API Key 填错 | 在 Web 设置页更新或删除后重新添加 |
 | 旧 server.pid 残留 | 启动时自动探活并清理 |
 | 更新被 `web/dist` 本地改动挡住 | 双击 `Mac一键修复.command` 或 `Windows一键修复.bat` |
@@ -178,5 +186,6 @@ claude plugin validate .
 ## 安全说明
 
 - viewer-server **仅绑定 `127.0.0.1`**，不对外网暴露
+- 项目、媒体、下载和 SSE 必须有本机会话；Agent 仅能使用授权项目的工坊工具，不能批准自己的生成请求
 - API Key 存储在本地 `.config/keys.json`，不写入任何日志或对话记录
 - 图片读取接口使用 job_id 白名单，只能访问已登记的输出文件

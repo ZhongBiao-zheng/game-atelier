@@ -1,6 +1,6 @@
 import json
 
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib import data_root
 from character_workflow.lib.canvas_runs import _resolve_default_image_model

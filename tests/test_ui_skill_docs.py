@@ -1,4 +1,4 @@
-"""B0/B1 —— UI 总控 + 策划锚 skill 文档与模板的结构守卫。"""
+"""UI 创作门禁与文档映射守卫；执行入口统一为 MCP，共同协议只维护一份。"""
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -18,6 +18,7 @@ ANCHOR_TEMPLATES = [
     "docs/references/prd-template.md",
     "docs/references/interaction-template.md",
 ]
+SHARED_WORKFLOW = "docs/references/workshop-mcp-workflow.md"
 
 
 def _read(path: str) -> str:
@@ -47,8 +48,10 @@ def test_ui_orchestrator_routes_and_gates():
     assert "ui-anchor" in text
     # B4 后 ui-screens 已上线，路由表直接调起
     assert "ui-screens" in text and "未上线，B4" not in text
-    # UI 规范写当前方案 style.md 的 ui.* 节
-    assert "ui.*" in text and "style.md" in text
+    # UI 规范写当前方案文档，物理路径由共享契约映射，不能错写项目基线。
+    assert "ui_style" in text and "ui.typography / ui.geometry / ui.states" in text
+    shared = _read(SHARED_WORKFLOW)
+    assert "projects/<slug>/ui/<scheme-id>/style.md" in shared and "ui.*" in shared
     # 未上线阶段必须如实告知，不伪造
     assert "未上线" in text
     # 锚文档门禁
@@ -62,23 +65,29 @@ def test_screen_brief_template_exists_with_frontmatter():
     assert "反向限制" in text
 
 
-def test_ui_page_skill_gates_and_submit_chain():
+def test_ui_page_skill_gates_and_mcp_approval_chain():
     text = _read("skills/ui-page/SKILL.md")
     # 正式门禁：三锚 approved（或 waiver）+ style.md 存在，不过不生图
-    assert "approved" in text and "waiver" in text and "style.md" in text
-    # 走 job 体系：submit-screen 提交 + run-job 确认执行
-    assert "submit-screen" in text and "run-job" in text
+    assert "approved" in text and "waiver" in text and "ui_style" in text
+    assert "项目基线或方案规范缺失" in text and "不生图" in text
+    # 复用 Job 体系，但 Skill 只准备请求；人工批准在本机页面完成。
+    assert "workshop_prepare_generation" in text and "workshop_get_generation" in text
+    assert "人工批准" in text and "停在批准门" in text
+    assert "聊天一次“全出”不替代页面批准" in text
     # brief 模板引用 + 产物归项目
     assert "screen-brief-template.md" in text
-    assert "projects/<slug>/ui/<scheme-id>/screens/" in text
+    assert "screen_brief" in text
+    assert "projects/<slug>/ui/<scheme-id>/screens/" in _read(SHARED_WORKFLOW)
 
 
 def test_ui_page_style_switch_mode():
     """B3：风格切换模式必须锁结构、记来源关系、定稿后回写 style.md ui.*。"""
     text = _read("skills/ui-page/SKILL.md")
     assert "风格切换模式" in text
-    assert "--style-variant" in text and "--base-version" in text
-    assert "set-screen-canonical" in text
+    assert "params.style_variant" in text and "params.base_version" in text
+    assert "media ID" in text
+    assert "画师在 Web 比较后选定 canonical" in text
+    assert "不代选、不直写 canonical" in text
     # 真正的产出是契约回写，不是候选图本身
     assert "ui.typography" in text and "approved" in text
     # 结构锁定 + 旧候选保留是硬纪律
@@ -116,36 +125,48 @@ def test_ui_screens_skill_gates_and_flow():
     text = _read("skills/ui-screens/SKILL.md")
     # 双门禁：三锚 approved/waiver + 风格已定稿
     assert "approved" in text and "waiver" in text
-    assert "ui.*" in text and "style.md" in text
+    assert "ui.*" in text and "ui_style" in text
+    assert "ui_style" in _read(SHARED_WORKFLOW) and "style.md" in _read(SHARED_WORKFLOW)
     # 审计 → 批范围 → 写 map → 交棒 ui-page
     assert "screen-taxonomy.md" in text
     assert "screen-map-template.md" in text
-    assert "screen-map.md" in text
+    assert "screen_map" in text
+    assert "projects/<slug>/ui/<scheme-id>/screens/screen-map.md" in _read(SHARED_WORKFLOW)
     assert "ui-page" in text
     # 范围由画师批 + 新增页先回写 prd + 不生图
     assert "画师批" in text
-    assert "回写 prd" in text
+    assert "先回写 PRD" in text
     assert "不生图" in text
 
 
 def test_ui_page_reads_screen_map():
     """B4：ui-page 定 screen-id 与写 brief 时优先取 screen-map 契约基础。"""
     text = _read("skills/ui-page/SKILL.md")
-    assert "screen-map.md" in text
+    assert "screen_map" in text
+    assert "screen-map.md" in _read(SHARED_WORKFLOW)
     assert "## screen.<id>" in text or "screen.<id>" in text
 
 
 def test_stale_propagation_discipline_in_skills():
     """A3：改锚点 / style.md 前列受影响定稿并确认；style.md 回写后刷新指纹。"""
     char = _read("skills/character/SKILL.md")
-    assert "stale-report" in char and "spec 已变更" in char
+    assert "共享工作流先列出受影响定稿" in char and "经确认修改" in char
     ui_page = _read("skills/ui-page/SKILL.md")
-    assert "stale-report" in ui_page and "刷新指纹" in ui_page
+    assert "共享工作流列出受影响定稿并等待确认" in ui_page
+    assert "Web 重新确认" in ui_page and "不能伪造已刷新" in ui_page
     ui = _read("skills/ui/SKILL.md")
-    assert "stale-report" in ui and "风格已变更" in ui
+    assert "共享工作流先列出受影响定稿" in ui and "经确认再写" in ui
+    shared = _read(SHARED_WORKFLOW)
+    for requirement in ("workshop_list_targets", "workshop_get_context", "spec_stale",
+                        "style_stale", "spec 已变更", "风格已变更", "刷新指纹",
+                        "等待画师确认", "当前方案", "整个项目", "尚未核实"):
+        assert requirement in shared
 
 
-def test_seven_field_closing_block_in_all_workflow_skills():
+def test_seven_field_closing_block_is_shared_by_all_workflow_skills():
+    shared = _read(SHARED_WORKFLOW)
+    for field in SEVEN_FIELDS:
+        assert field in shared, f"shared workflow missing {field!r}"
     for path in (
         "skills/game-atelier/SKILL.md",
         "skills/ui/SKILL.md",
@@ -155,13 +176,17 @@ def test_seven_field_closing_block_in_all_workflow_skills():
         "skills/character/SKILL.md",
         "skills/promo/SKILL.md",
         "skills/turnaround/SKILL.md",
+        "skills/video/SKILL.md",
     ):
         text = _read(path)
-        for field in SEVEN_FIELDS:
-            assert field in text, f"{path} missing {field!r}"
+        assert "../../docs/references/workshop-mcp-workflow.md" in text, path
+        assert "七件套" in text, path
 
 
-def test_ui_skills_use_plugin_root_var_not_hardcoded_path():
+def test_ui_skills_resolve_shared_references_without_hardcoded_install_path():
+    shared = _read(SHARED_WORKFLOW)
+    assert "${CLAUDE_PLUGIN_ROOT}" in shared
+    assert "当前 SKILL 的真实目录" in shared
     for path in (
         "skills/ui/SKILL.md",
         "skills/ui-anchor/SKILL.md",
@@ -170,4 +195,6 @@ def test_ui_skills_use_plugin_root_var_not_hardcoded_path():
     ):
         text = _read(path)
         assert "~/.claude/plugins/game-atelier/" not in text, path
-        assert "${CLAUDE_PLUGIN_ROOT}" in text, path
+        assert "../../docs/references/workshop-mcp-workflow.md" in text, path
+        target = (REPO_ROOT / path).parent / "../../docs/references/workshop-mcp-workflow.md"
+        assert target.resolve() == REPO_ROOT / SHARED_WORKFLOW, path

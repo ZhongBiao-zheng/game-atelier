@@ -16,6 +16,9 @@ from character_workflow.lib.secret_filter import SecretRedactionFilter
 from viewer_server.connection_status import (
     STATUS_PATH, LocalConnectionStatus, create_connection_status,
 )
+from viewer_server.connection_auth import ConnectionError, ConnectionStore
+from viewer_server.connection_middleware import ConnectionMiddleware, connection_error
+from viewer_server.connection_routes import connection_router
 from viewer_server.routes import router
 from viewer_server.request_boundary import LocalRequestBoundary, development_origin
 from viewer_server.sse import hub, sse_router
@@ -96,6 +99,7 @@ def _install_secret_filter() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     hub.set_loop(asyncio.get_running_loop())
+    await asyncio.to_thread(app.state.workshop_runtime.recover)
     from viewer_server.routes import _reset_studio_recovery_workers
 
     _reset_studio_recovery_workers()
@@ -191,6 +195,7 @@ async def lifespan(app: FastAPI):
             task.cancel()
         observer.stop()
         observer.join(timeout=2)
+        app.state.workshop_runtime.close()
 
 
 # 发布产物用固定文件名（去哈希，见 web/vite.config.ts），所以必须显式要求浏览器每次验证。
@@ -218,6 +223,12 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     _install_secret_filter()
     app = FastAPI(title="Game Atelier viewer-server", lifespan=lifespan)
     connection_status = create_connection_status(instance_id)
+    connection_store = ConnectionStore(connection_status.instance_id)
+    app.state.connection_store = connection_store
+
+    @app.exception_handler(ConnectionError)
+    async def handle_connection_error(_request, error: ConnectionError) -> JSONResponse:
+        return connection_error(error)
 
     @app.get(STATUS_PATH, response_model=LocalConnectionStatus)
     async def get_connection_status(response: Response) -> LocalConnectionStatus:
@@ -226,10 +237,17 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
         return connection_status
 
     app.add_middleware(CanvasDocumentBodyLimitMiddleware)
+    app.add_middleware(
+        ConnectionMiddleware, store=connection_store, dev_origin=development_origin(),
+    )
     # Added last so untrusted requests are rejected before buffering document/upload bodies.
     app.add_middleware(LocalRequestBoundary, dev_origin=development_origin())
     app.include_router(router)
+    app.include_router(connection_router(connection_store))
     app.include_router(sse_router)
+    from viewer_server.workshop_routes import register_workshop_routes
+
+    app.state.workshop_runtime = register_workshop_routes(app, connection_store.grant_allows)
 
     if dist_dir is None:
         dist_dir = Path(__file__).resolve().parents[2] / "web" / "dist"

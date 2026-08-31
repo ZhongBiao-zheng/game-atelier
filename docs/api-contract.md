@@ -6,20 +6,23 @@
 
 网站连接本机与外部 Agent 工坊入口已进入分阶段开发：
 [开发范围与验收](local-workspace.md)、[本机连接](contracts/local-connection.md)、
-[工坊 MCP 与生成批准](contracts/workshop-mcp.md)。当前已实现下面的本机状态握手与 Host / Origin 边界；
-其它新增端点是目标契约，不能当作当前可用 API。实现 PR 须同步更新本页的端点权限和双端 schema。
+[工坊 MCP 与生成批准](contracts/workshop-mcp.md)。本地整合分支已实现状态、鉴权、授权、编辑租约、
+工坊 typed 工具与批准执行；网站配对 / CORS / 媒体票据仍是未开放的目标，不得混称上线。
 
 改造不把项目改存浏览器、不把 Key 发给网站、不扩张 Canvas Agent 权限，也不增加第二条供应商执行路径。
 
-`GET /api/connection/status` 返回 `{ service: "game-atelier", instance_id, app_version, protocol: null }`。
+`GET /api/connection/status` 返回 `{ service: "game-atelier", instance_id, app_version, protocol: "atelier-local/1" }`。
 instance 是每次启动的 32 位小写十六进制标识，不是访问凭据；app_version 从插件 manifest 读取。
-响应 `Cache-Control: no-store`，不读取用户配置或数据。`protocol: null` 表示完整网站连接尚不可用，
-不能据此开放跨源调用或跳过鉴权。
+响应 `Cache-Control: no-store`，不读取用户配置或数据。本地协议就绪不代表网站已配对，
+不能据此开放跨源调用或跳过鉴权；旧 null 协议不被新前端继续使用。
 
 P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch Metadata；地址不符返回 421
 `HOST_DENIED`，来源不符返回 403 `ORIGIN_DENIED`。错误为
 `{ error: { code, message, request_id } }`，不回显来源或密钥，并设置 `Cache-Control: no-store`。
-本地会话鉴权尚未实现；原生无来源头请求沿用当前行为。开发来源登记与导航例外见连接契约。
+当前鉴权覆盖业务 API、媒体、SSE 与内部文档；本地 cookie / Agent bearer 不得混用。
+本地写入需要编辑租约（设置 / 授权管理除外），Agent 只可调用授权项目内的工坊工具。
+未知 API 默认 `CAPABILITY_DENIED`，未认证返回 `CONNECTION_REQUIRED`；不存在匿名原生业务旁路。
+开发来源登记与导航例外见连接契约。
 
 ## 双端同步点
 
@@ -29,6 +32,8 @@ P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch
 |---|---|---|---|
 | LocalConnectionStatus | `viewer_server/connection_status.py` | `web/src/schema/connection.ts` | `tests/test_connection_status.py` |
 | LocalConnectionBoundaryError | `viewer_server/request_boundary.py` | `web/src/schema/connection.ts` | `tests/test_local_request_boundary.py` + `api/http.test.ts` |
+| 本地会话 / Agent grant / 编辑租约 | `viewer_server/connection_routes.py` | `web/src/api/connection.ts` + `api/agentGrants.ts` | `tests/test_local_connection_auth.py` + `api/connection.test.ts` |
+| 工坊目标 / 生成请求 | `lib/workshop_schema.py` + `lib/workshop_generation.py` | `web/src/api/workshopRequests.ts` | `tests/test_workshop_runtime.py` + `tests/test_workshop_mcp.py` |
 | Job / JobParams | `lib/schemas.py` | `web/src/schema/jobs.ts` | 无 —— 靠人 |
 | Key / ModelSpec | `lib/keys.py` | `web/src/api/keys.ts` | 无 —— 靠人 |
 | CharacterDerivative / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_derivatives.py` + `LeftSidebar.test.tsx` |
@@ -53,6 +58,11 @@ P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch
 - 归属：`character_id` `project_id` `ui_scheme_id` `screen_id` `production_id` `canvas_project_id` `namespace` `asset_slot` `kind`
 - 路由：`alias` `provider` `model` —— 换模型只能新建 job（`POST /studio/jobs`），不能改已有的
 - 血缘：`retry_of` `source_image`；创作台归档血缘写在 `params.archived_from_job_id / archived_from_path`
+- 工坊批准归属：`workshop_request_id`，仅服务端绑定冻结请求；普通 prompt 编辑接口拒绝修改已冻结工坊 Job
+
+`run_job` 只接受 `PENDING`。工坊 character / ui / video 还必须持有内容匹配的已批准请求，
+`POST /jobs/{id}/confirm` 不再直接批准旧工坊草稿；需重新准备，在本地 `/workshop/requests` 批准。
+Canvas / Studio 保留自己的人工提交路径，不要求工坊请求。旧历史记录不伪造批准或批量改写。
 
 `JobParams` = `extra="allow"`（加字段不会被上游拒），但**双端仍要同步声明**，否则 TS 那边拿不到类型。Studio 在新建 Job 时可写 `estimated_cost_cny`，它是按当次 Key 渠道、模型与参数冻结的人民币预计总价；OpenRouter 等返回账单用量的 caller 可写 `actual_cost_cny`，历史优先实际费用、其次预计快照，缺失时不用当前 Key 重算。后端独占写入的还有 `actual_size`、`warnings`、`requested_size`、`provider_task_protocol`、`provider_task_ids` —— 前端只读不写。后两项用于恢复已计费的聚合商异步任务：任务 ID 必须在首次轮询前落盘，重启后只允许续查原任务，不能重新提交。
 
@@ -67,6 +77,16 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 ## 端点
 
 写操作按「谁有权」分组。全部前缀 `/api`，服务绑死 `127.0.0.1`。
+
+工坊本地请求管理为 `GET /workshop/requests` 和
+`POST /workshop/requests/{request_id}/approve { expected_revision }`；Agent 身份不能批准。
+其余 MCP 工具均为专用 POST 输入，详见工坊契约，不提供通用 HTTP / 文件工具。
+
+`GET /spec/{id}` 返回 `{ content, revision }`；`POST /spec/{id}` 要求
+`{ content, expected_revision }`。项目 experience 中的 worldview 同样返回 revision 并要求
+expected_revision 写入。revision 为完整内容 SHA-256；Web 与 MCP 复用同一锁与 CAS，
+冲突返回 `DOCUMENT_CONFLICT`，不覆盖更新内容。新文档修订是空字节 SHA-256。
+UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，不是客户端权限字段。
 
 **Web 独占写**（Skill 不碰）
 `POST /spec/{id}` `POST /prompt/{job_id}` `POST /feedback` `POST /uploads` `POST /studio/jobs`

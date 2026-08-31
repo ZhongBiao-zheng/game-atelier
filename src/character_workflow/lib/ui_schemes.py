@@ -154,10 +154,15 @@ def resolve_scheme(project_ref: str, scheme_id: str | None = None) -> tuple[Proj
     return project, scheme
 
 
-def create_scheme(project_ref: str, payload: UiSchemeCreate) -> UiSchemesFile:
+def create_scheme(project_ref: str, payload: UiSchemeCreate, *,
+                  creation_request_id: str | None = None) -> UiSchemesFile:
     project = resolve_project(project_ref)
     with job_lock(f"ui-schemes-{project.id}"):
         file = _read(project)
+        if creation_request_id and any(
+            item.creation_request_id == creation_request_id for item in file.schemes
+        ):
+            return file
         next_number = max(int(item.id[1:]) for item in file.schemes) + 1
         target_id = f"v{next_number}"
         target = scheme_dir(project, target_id)
@@ -186,7 +191,8 @@ def create_scheme(project_ref: str, payload: UiSchemeCreate) -> UiSchemesFile:
                         shutil.copytree(source_screen, target_screens / screen_id)
                     if source_brief.is_file():
                         shutil.copy2(source_brief, target_screens / source_brief.name)
-            file.schemes.append(UiScheme(id=target_id, name=payload.name, created_at=_now()))
+            file.schemes.append(UiScheme(id=target_id, name=payload.name, created_at=_now(),
+                                        creation_request_id=creation_request_id))
             return _write(project, file)
         except Exception:
             shutil.rmtree(target, ignore_errors=True)

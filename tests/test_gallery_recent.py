@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib.jobs import save_job
 from character_workflow.lib.projects import assign_character, create_project

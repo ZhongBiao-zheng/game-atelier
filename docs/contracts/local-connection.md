@@ -1,12 +1,13 @@
 # 本机连接契约
 
-> 连接握手（P1a）与 Host / Origin 边界（P1b）已实现；完整网站协议 `atelier-local/1` 尚未实现。
-> 除 `/api/connection/status` 外，下列新端点均为目标契约，不能当作当前可用 API。
+> 本地整合已实现握手、Host / Origin 边界、会话、编辑租约、Agent 项目授权与统一传输。
+> `atelier-local/1` 表示本地鉴权协议；网站配对、跨源 CORS、媒体票据仍为后续目标，当前不开放。
 > 范围与阶段见[开发说明](../local-workspace.md)。正常数据 API 仍遵循 [API 契约](../api-contract.md)。
 
 ## 身份与信任
 
-每次 viewer-server 启动创建随机 `instance_id`，进程停止或更换数据目录后失效。
+每次 viewer-server 启动创建随机 `instance_id`，进程停止后失效。实例标识服务进程；
+更换数据目录会撤销该进程的全部会话与编辑租约，新目录重新核验授权，不迁移旧连接。
 `instance_id` 只识别连接对象，不是密码。服务只监听 `127.0.0.1`；Host 必须为实际监听的
 `127.0.0.1:<port>`，不能因域名解析到回环地址就接受任意 Host。
 
@@ -42,7 +43,7 @@ Fetch Metadata；不接受无 Origin 的匿名请求，不向网站提供 CORS �
 本地同源 cookie 不作为网站跨站身份。网站的 Authorization 与本地管理 cookie 不可混用，
 有冲突的凭据拒绝；带管理 cookie 也不能让网站来源调用管理端点。
 
-## 网站配对
+## 网站配对（后续目标）
 
 1. 用户显式启动本机服务并打开本地管理页。在该页填写或确认网站的精确 HTTPS Origin。
    禁止通配符、`null`、`file:`、`data:`、含用户名密码的 URL 和任意子域。
@@ -63,7 +64,13 @@ Fetch Metadata；不接受无 Origin 的匿名请求，不向网站提供 CORS �
 `OPTIONS` 只允许已经登记的待配对 / 已配对 Origin，精确响应允许的方法和头，设置 `Vary: Origin`；
 不用 `Access-Control-Allow-Origin: *`，也不把 CORS 当身份验证。其它请求体在鉴权前不能被完整读取。
 
-### 拟新增端点
+### 连接端点
+
+当前已实现 status、local-session、sessions、editor-lease；表中 pairings / pair /
+media-tickets 未注册，不属于本地验收。当前 status 的 protocol 为 `atelier-local/1`。
+本地引导 `{}` 返回 `{ session_id, instance_id, expires_at }` 并设置最长 12 小时 cookie。
+租约 POST 接收 `{ client_id, takeover?: false }`，DELETE 接收 `{ client_id }` 并返回 204。
+控制请求最大 16 KiB，每实例最多 64 会话，每会话最多 4 路事件流。
 
 | 方法与路径 | 身份 | 请求 / 响应重点 |
 | --- | --- | --- |
@@ -95,8 +102,8 @@ Vite 通过 `GAME_ATELIER_DEV_ORIGIN=http://localhost:5173` 显式登记一个�
 只接受带端口的 HTTP localhost / 127.0.0.1，不接受外站或通配。代理改写 Host 到实际后端，保留 Origin。
 生产运行不设置该变量；网站配对不能借用这个入口。
 
-P1b 仍没有会话身份、能力登记或原生维护凭据：无 Origin / Fetch Metadata 的原生本机请求沿用当前行为。
-不能将这些检查宣传为完整鉴权，也不能据此开放网站。CORS、配对与完整协议继续关闭。
+P1b 本身不是鉴权；当前整合在其内侧增加 cookie / bearer 身份和显式能力登记，
+无 Origin / Fetch Metadata 的原生本机业务请求也必须认证。CORS 与网站配对继续关闭。
 
 ### 编辑租约与换连接
 
@@ -111,7 +118,10 @@ P1b 仍没有会话身份、能力登记或原生维护凭据：无 Origin / Fet
 
 ## 媒体、下载和事件
 
-### 资源级媒体票据
+本地页面的原生媒体、上传与下载使用同源 HttpOnly cookie，所有资源路由仍经鉴权和原白名单校验。
+同源媒体不另造 URL 令牌。`/events` 使用带身份的 fetch 事件流，撤销 / 到期后关闭。
+
+### 资源级媒体票据（后续网站目标）
 
 原生 `<img>` / `<video>` / `<audio>` 和下载链接不能统一附带 Authorization。
 不依赖第三方 cookie，不把完整会话 bearer 放进媒体 URL，也不把大视频全量下载成 Blob。

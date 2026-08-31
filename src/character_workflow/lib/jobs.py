@@ -303,6 +303,8 @@ def clone_job_for_retry(job_id: str) -> Job:
     （output_paths / error / params.actual_size / params.warnings），
     其余参数原样复制，并以 retry_of 指回原 job。"""
     src = read_job(job_id)
+    if src.namespace in {"character", "ui", "video"}:
+        raise ValueError("工坊重试需要新建生成请求并重新获得人工批准")
     if src.status != JobStatus.FAILED:
         raise ValueError(
             f"job {job_id} is {src.status.value}, not failed —— 只有 failed job 可重试"

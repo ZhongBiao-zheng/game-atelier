@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from viewer_server.server_app import build_app
 
@@ -31,16 +31,18 @@ def test_get_experience_returns_info_and_empty_worldview(client):
 
 def test_post_then_get_roundtrip(client):
     pid = _make_project(client)
+    revision = client.get(f"/api/experience?project={pid}").json()["revision"]
     assert client.post(
-        "/api/experience", json={"project": pid, "worldview_md": "暖色调，避免直呼 IP"}
-    ).json() == {"ok": True}
+        "/api/experience", json={"project": pid, "worldview_md": "暖色调，避免直呼 IP",
+                                  "expected_revision": revision}
+    ).json()["ok"] is True
     assert client.get(f"/api/experience?project={pid}").json()["worldview_md"] == "暖色调，避免直呼 IP"
 
 
 def test_unknown_project_404(client):
     assert client.get("/api/experience?project=p-nope").status_code == 404
     assert client.post(
-        "/api/experience", json={"project": "p-nope", "worldview_md": "x"}
+        "/api/experience", json={"project": "p-nope", "worldview_md": "x", "expected_revision": "0" * 64}
     ).status_code == 404
 
 

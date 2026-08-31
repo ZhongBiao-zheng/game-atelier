@@ -47,7 +47,7 @@
 
 ## 三、参考图清单协议
 
-多张参考图是一等输入。写 prompt 前先逐张看图,建立与 CLI 上传顺序一致的**参考图清单**；不能只靠文件名猜内容,也不能只写“图一 / 图二”而不解释模型看见了什么。
+多张参考图是一等输入。写 prompt 前先逐张看图,建立与 MCP 的 media_ids 顺序一致的**参考图清单**；不能只靠文件名猜内容,也不能只写“图一 / 图二”而不解释模型看见了什么。
 
 **两种用途**
 
@@ -68,9 +68,9 @@
 
 **基础设施与上传顺序**
 
-- `submit --reference-image <绝对路径>` 可重复传入,顺序写入 `params.reference_images` 并原样交给 provider。
-- `--source-image` 是首张参考图的兼容别名,也会并入同一有序清单；新流程优先统一使用可重复的 `--reference-image`。
-- prompt 中“第一张 / 第二张……”必须与 CLI 参数顺序完全一致；提交后以确认卡显示的参考图数量和顺序复核。
+- 通过 `workshop_list_media` / `workshop_read_media` 选择当前目标的已登记媒体，用有序 `media_ids` 传入 `workshop_prepare_generation`，不得传任意路径或 URL。
+- `subject_image` / `reference_image` 是创作用途，不是本 MCP 的额外参数；它们在提示词中明确区分。
+- prompt 中“第一张 / 第二张……”必须与 media_ids 顺序完全一致；在本机待批准请求中核对参考数量和顺序。
 - 每张原图分别上传。不要把多图预先拼成联系表；只有目标模型的参考图上限确实不足时,才先让画师决定删减或合并。
 - 角色与视觉用途的区分在 prompt 文本层完成,**禁止手改 job JSON**。
 
@@ -97,11 +97,11 @@
 | 图类 | 默认身份锚来源 | 画师上传图默认 mode |
 |---|---|---|
 | 立绘 first_gen | 无 | `reference_image`, `style_only` |
-| 立绘 variation / refinement | `characters/<id>/portrait/v<n-1>.png` | `reference_image`, `full_reference` |
+| 立绘 variation / refinement | 当前目标中明确选定的已登记立绘 | `reference_image`, `full_reference` |
 | 美宣 | 每个出镜角色从定稿立绘、最新立绘、定稿三视图、最新三视图或用户上传图中选至少一张 | `reference_image`, `full_reference` |
-| 三视图 | `characters/<id>/portrait/v_latest.png`(强制,主体不变) | `reference_image`, `composition_only` |
+| 三视图 | 当前角色的定稿立绘或已冻结的派生身份图（主体不变） | `reference_image`, `composition_only` |
 
-参考图不会隐式注入：runner 只转发 skill 显式传入的 `source_image` / `reference_images`。所以 skill 必须主动选图并逐个传入。美宣不要求一定有立绘,三视图或用户上传参考图同样可作身份锚；三视图生成流程仍优先用定稿立绘锚定主体。任何图类都必须把全部实际上传图写进参考图清单。
+参考图不会隐式注入：只有 Skill 显式传入且属于当前目标的 media_ids 才进入冻结请求，所以必须主动选图并按顺序传入。美宣不要求一定有立绘,三视图或用户上传参考图同样可作身份锚；三视图生成流程仍优先用定稿立绘锚定主体。任何图类都必须把全部实际上传图写进参考图清单。
 
 ---
 
@@ -133,7 +133,7 @@ prompt 文本层的全局禁忌,所有图类、所有模式通用:
 - **默认排除段**:不预设 negative prompt,优先正向描述约束画面;确需排除上版问题时,由专项规则或画师需求显式触发,且只写具体问题。
 - **模块标题**:不用【主体】【光线】【风格】这类【】分段。
 - **清单结构**:不用逐项列表、分号罗列。
-- **篇幅**:正文不超过 4 段。
+- **篇幅**:一般正文不超过 4 段；美宣的五段专项结构与局部编辑短模板按对应参考执行。
 
 ---
 

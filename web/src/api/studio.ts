@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { requestJson } from './http';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 
@@ -142,7 +143,7 @@ export async function listStudioJobs(): Promise<Job[]> {
 }
 
 export async function getStudioJob(jobId: string): Promise<Job | null> {
-  const resp = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+  const resp = await connectionFetch(`/api/jobs/${encodeURIComponent(jobId)}`);
   if (!resp.ok) return null;
   const job = (await resp.json()) as Job;
   return job.namespace === 'canvas' ? null : job;

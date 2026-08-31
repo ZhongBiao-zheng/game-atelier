@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearch } from 'wouter';
 import { ChevronsDown, Library } from 'lucide-react';
@@ -895,7 +896,7 @@ function StudioFull() {
 
   async function addCreationAssetReference(asset: CreationAsset, content: CreationImageAssetContent) {
     try {
-      const response = await fetch(creationAssetImageUrl(asset.asset_id));
+      const response = await connectionFetch(creationAssetImageUrl(asset.asset_id));
       if (!response.ok) throw await apiError(response, '读取图片资产');
       const blob = await response.blob();
       const file = new File([blob], content.filename, { type: content.mime_type });
@@ -912,7 +913,7 @@ function StudioFull() {
   }
 
   async function deleteFailedRound(jobId: string) {
-    const resp = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+    const resp = await connectionFetch(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
     // 删不掉要说话：静默 return 的话画师点了删除、记录还在，只能当成界面卡了。
     if (!resp.ok) { alert((await apiError(resp, '删除这条失败记录')).message); return; }
     // rounds 是渲染态，persistedJobs 是它的数据源之一：只清 rounds 的话，下一次 SSE 推送
@@ -1022,7 +1023,7 @@ function StudioFull() {
   async function deleteDoneBatch(jobId: string, imagePaths: string[]) {
     const responses = await Promise.all(
       imagePaths.map((path) =>
-        fetch(`/api/jobs/${encodeURIComponent(jobId)}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
+        connectionFetch(`/api/jobs/${encodeURIComponent(jobId)}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
       ),
     );
     const failed = responses.find((resp) => !resp.ok);
@@ -1032,7 +1033,8 @@ function StudioFull() {
 }
 
 // 服务器资产路径 → File。三类来源分流字节端点（与 RoundList 的 refImageSrc 同规则）：
-// http(s) 直链原样取；characters/studio 资产走 /api/gallery/image（/api/raw 不带 job_id
+// 历史 http(s) 参考直链不属于本机 API，必须 omit credentials，不能携带本机会话或 client ID。
+// characters/studio 资产走 /api/gallery/image（/api/raw 不带 job_id
 // 只放行 .runtime/uploads/，角色/出图产物会 403）；其余临时上传走 /api/raw。
 async function fetchAssetAsFile(path: string, baseName: string, jobId?: string): Promise<File> {
   const url = path.startsWith('http')
@@ -1042,7 +1044,7 @@ async function fetchAssetAsFile(path: string, baseName: string, jobId?: string):
       : /^(characters|studio)\//.test(path) || /\/(characters|studio)\//.test(path)
         ? `/api/gallery/image?path=${encodeURIComponent(path)}`
         : `/api/raw?path=${encodeURIComponent(path)}`;
-  const resp = await fetch(url);
+  const resp = await (url.startsWith('http') ? fetch(url, { credentials: 'omit' }) : connectionFetch(url));
   if (!resp.ok) throw await apiError(resp, `取回参考图（${path}）`);
   const blob = await resp.blob();
   const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');

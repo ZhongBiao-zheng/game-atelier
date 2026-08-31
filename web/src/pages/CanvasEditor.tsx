@@ -49,7 +49,7 @@ import {
   WandSparkles,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react';
 import { Link } from 'wouter';
 
 import {
@@ -75,6 +75,7 @@ import {
 import { getCanvasUiPreferences, saveCanvasUiPreferences } from '@/api/canvasUi';
 import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { useCanvasJobSync } from '@/hooks/useCanvasJobSync';
+import { LocalDraftExportContext } from '@/components/LocalDraftExportContext';
 import {
   AddMenuButton,
   CanvasMobileGenerationPanel,
@@ -369,6 +370,7 @@ function CanvasEditorInner({
   onSwitchProject: (projectId: string) => void;
 }) {
   const narrowViewport = useNarrowCanvasViewport();
+  const registerLocalDraft = useContext(LocalDraftExportContext);
   const [document, setDocument] = useState<CanvasDocument | null>(null);
   const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
@@ -800,6 +802,14 @@ function CanvasEditorInner({
   }, [createMenu]);
 
   latestDocument.current = document;
+  const draftProjectId = document?.project_id;
+  useEffect(() => {
+    if (!registerLocalDraft || !draftProjectId) return;
+    return registerLocalDraft(() => latestDocument.current ? {
+      filename: `${draftProjectId}.canvas-draft.json`,
+      document: latestDocument.current,
+    } : null);
+  }, [registerLocalDraft, draftProjectId]);
   useEffect(() => {
     latestSelectedNodeIds.current = selectedNodeIds;
   }, [selectedNodeIds]);

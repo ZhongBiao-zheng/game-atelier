@@ -108,7 +108,7 @@ def test_same_running_instance_is_reused(tmp_path, monkeypatch):
     monkeypatch.setattr(data_root, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(server, "_bootstrap_gate", lambda background: True)
     monkeypatch.setattr(server, "probe_connection_status", lambda port: LocalConnectionStatus(
-        service="game-atelier", instance_id="a" * 32, app_version="5.33.2", protocol=None,
+        service="game-atelier", instance_id="a" * 32, app_version="5.33.2", protocol="atelier-local/1",
     ))
     opened = []
     monkeypatch.setattr(server.webbrowser, "open", lambda url: opened.append(url))
@@ -126,7 +126,7 @@ def test_same_port_different_instance_cannot_be_reused_or_stopped(tmp_path, monk
     monkeypatch.setattr(data_root, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(server, "_bootstrap_gate", lambda background: True)
     monkeypatch.setattr(server, "probe_connection_status", lambda port: LocalConnectionStatus(
-        service="game-atelier", instance_id="b" * 32, app_version="5.33.2", protocol=None,
+        service="game-atelier", instance_id="b" * 32, app_version="5.33.2", protocol="atelier-local/1",
     ))
     monkeypatch.setattr(server, "_terminate", lambda pid: pytest.fail("wrong process"))
     monkeypatch.setattr(server.webbrowser, "open", lambda url: pytest.fail("wrong service"))
@@ -142,7 +142,7 @@ def test_stop_verified_instance_only(tmp_path, monkeypatch):
     write_instance(tmp_path, "a" * 32)
     monkeypatch.setattr(data_root, "runtime_dir", lambda: tmp_path)
     monkeypatch.setattr(server, "probe_connection_status", lambda port: LocalConnectionStatus(
-        service="game-atelier", instance_id="a" * 32, app_version="5.33.2", protocol=None,
+        service="game-atelier", instance_id="a" * 32, app_version="5.33.2", protocol="atelier-local/1",
     ))
     stopped = []
     monkeypatch.setattr(server, "_terminate", lambda pid: stopped.append(pid) or True)

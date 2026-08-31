@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import AsyncIterator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 
@@ -66,20 +67,38 @@ sse_router = APIRouter()
 
 
 @sse_router.get("/events")
-async def events() -> StreamingResponse:
+async def events(request: Request) -> StreamingResponse:
+    from viewer_server.connection_auth import ConnectionError
+
+    session = request.state.connection_session
+    store = request.app.state.connection_store
+    with store.lock:
+        if session.event_connections >= 4:
+            raise ConnectionError("CONNECTION_RATE_LIMITED", "事件连接过多，请关闭旧页面", 429)
+        session.event_connections += 1
+
     async def stream() -> AsyncIterator[str]:
         q = await hub.subscribe()
         try:
             yield "retry: 3000\n\n"  # browser reconnect interval
+            heartbeat_at = time.monotonic()
             while True:
+                with store.lock:
+                    store._refresh()
+                if session.revoked.is_set() or session.expires_at <= time.time():
+                    return
                 try:
-                    msg = await asyncio.wait_for(q.get(), timeout=HEARTBEAT_SECONDS)
+                    msg = await asyncio.wait_for(q.get(), timeout=min(0.5, HEARTBEAT_SECONDS))
                 except asyncio.TimeoutError:
-                    yield ": ping\n\n"  # SSE 注释：浏览器忽略，仅用于保活/探测半开连接
+                    if time.monotonic() - heartbeat_at >= HEARTBEAT_SECONDS:
+                        yield ": ping\n\n"
+                        heartbeat_at = time.monotonic()
                     continue
                 yield msg
         finally:
             hub.unsubscribe(q)
+            with store.lock:
+                session.event_connections -= 1
 
     return StreamingResponse(
         stream(),

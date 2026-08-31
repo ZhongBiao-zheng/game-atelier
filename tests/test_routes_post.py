@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from viewer_server.server_app import build_app
 
@@ -27,7 +27,8 @@ def client(runtime):
 
 
 def test_post_spec_writes_file(client, runtime):
-    r = client.post("/api/spec/shadow", json={"content": "# new content"})
+    revision = client.get("/api/spec/shadow").json()["revision"]
+    r = client.post("/api/spec/shadow", json={"content": "# new content", "expected_revision": revision})
     assert r.status_code == 200
     assert (Path.cwd() / "characters" / "shadow" / "spec.md").read_text() == "# new content"
 
@@ -268,7 +269,7 @@ def test_post_project_rejects_empty(client):
     assert r.status_code == 422
 
 
-def test_post_job_confirm_transitions_pending_confirm_to_pending(client, runtime):
+def test_post_job_confirm_cannot_approve_legacy_workshop_draft(client, runtime):
     (runtime / "jobs" / "j1.json").write_text(json.dumps({
         "job_id": "j1", "character_id": "c", "prompt": "p",
         "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt_image_2",
@@ -276,9 +277,9 @@ def test_post_job_confirm_transitions_pending_confirm_to_pending(client, runtime
         "status": "pending_confirm", "error": None,
     }))
     r = client.post("/api/jobs/j1/confirm")
-    assert r.status_code == 200, r.json()
+    assert r.status_code == 409, r.json()
     data = json.loads((runtime / "jobs" / "j1.json").read_text())
-    assert data["status"] == "pending"
+    assert data["status"] == "pending_confirm"
 
 
 def test_post_job_confirm_rejects_wrong_status(client, runtime):

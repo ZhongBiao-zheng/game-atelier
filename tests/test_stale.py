@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.__main__ import main
 from character_workflow.lib import canonical, projects, stale, ui_jobs

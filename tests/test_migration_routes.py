@@ -7,7 +7,7 @@ test_migration_routes + test_migration_gallery 合并（后者改 Python API
 import json
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from viewer_server.server_app import build_app
 
@@ -48,7 +48,8 @@ def test_get_spec_404_when_dir_missing(client):
 
 def test_post_spec_writes_into_nested_dir(client, runtime):
     """POST /api/spec/<id> 必须落到 characters/<id>/spec.md。"""
-    r = client.post("/api/spec/shadow", json={"content": "# 新名\n新内容"})
+    revision = client.get("/api/spec/shadow").json()["revision"]
+    r = client.post("/api/spec/shadow", json={"content": "# 新名\n新内容", "expected_revision": revision})
     assert r.status_code == 200, r.json()
     p = runtime.parent / "characters" / "shadow" / "spec.md"
     assert p.exists(), f"spec.md not at {p}"
@@ -57,7 +58,9 @@ def test_post_spec_writes_into_nested_dir(client, runtime):
 
 def test_post_spec_creates_dir_for_new_character(client, runtime):
     """新角色第一次保存 spec，目录应自动创建。"""
-    r = client.post("/api/spec/brand-new", json={"content": "# 新角色"})
+    import hashlib
+    r = client.post("/api/spec/brand-new", json={"content": "# 新角色",
+                                                "expected_revision": hashlib.sha256(b"").hexdigest()})
     assert r.status_code == 200
     p = runtime.parent / "characters" / "brand-new" / "spec.md"
     assert p.exists()

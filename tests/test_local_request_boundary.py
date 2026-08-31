@@ -72,11 +72,11 @@ def test_incomplete_metadata_is_not_treated_as_a_native_client(client, metadata,
     assert client.get("/api/raw", headers=headers).status_code == 403
 
 
-def test_local_requests_remain_usable_but_do_not_claim_session_authentication(client):
+def test_public_status_advertises_protocol_without_granting_a_session(client):
     for headers in ({}, {"Origin": "http://127.0.0.1:5174", "Sec-Fetch-Site": "same-origin"}):
         response = client.get("/api/connection/status", headers=headers)
         assert response.status_code == 200
-        assert response.json()["protocol"] is None
+        assert response.json()["protocol"] == "atelier-local/1"
         assert "set-cookie" not in response.headers
         assert "access-control-allow-origin" not in response.headers
 

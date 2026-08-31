@@ -1,393 +1,89 @@
 ---
 name: character
-version: 4.7.0
 description: |
-  游戏角色立绘工作流：承接画师反馈，通过对话问清风格/配色/镜头/道具后出图，
-  并支持对已出立绘改皮肤、换色、重画。
-  用户要做新角色、出立绘、改 / 迭代立绘、继续角色工作流，或调用
-  /game-atelier:character 时使用。
-allowed-tools:
-  - Bash
-  - Read
-  - Write
-  - Edit
-  - AskUserQuestion
-triggers:
-  - /game-atelier:character
-  - 开始角色工作流
-  - 做个角色
-  - 出张角色立绘
-  - 加个新角色
-  - 继续角色工作流
-  - 角色立绘
+  游戏角色立绘工作流：对话完善角色设定、风格和视觉锚点，经已授权工坊 MCP 准备生成，
+  由画师在本机 Atelier 批准后出图并迭代。用于新角色、立绘、换装换色、品质皮肤和角色反馈；
+  美宣、三视图分别交 promo、turnaround。调用 /game-atelier:character 时使用。
 ---
 
-## ⚠️ 启动必读 Memory（均在 data_root，turn-start 自动注入）
-
-game-atelier 的记忆全部锚定 data_root，**与代理工具无关**——不读 `~/.claude` / `~/.codex`。
-turn-start 已把这几层塞进返回 JSON，你**无需手动 Read 文件**，直接用返回字段（slug 按 active 角色归属自动解析）：
-
-1. `project_worldview` ← `<data_root>/projects/<slug>/worldview.md`（**项目经验/世界观**：定位·调性·用语·项目规则；Web「项目经验」页可编辑，出图前作为项目背景纳入上下文）
-2. `project_style` ← `<data_root>/projects/<slug>/style.md`（**项目风格契约**：画风工艺·色板语义·镜头·背景·禁止项，全项目角色共用；用法见「项目风格契约」节）
-3. `lessons_workspace` ← `<data_root>/MEMORY.md`（跨项目通用**出图经验**，按 kind 分段）
-4. `lessons_project` ← `<data_root>/projects/<slug>/MEMORY.md` 的 `### {kind}` 段（项目级**出图经验**，当前 kind）
-
-代理工具自己的项目记忆（Claude 读 `CLAUDE.md`、Codex 读 `AGENTS.md`）由代理原生加载，不归本工作流管。
-不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规。
-
-## 启动自检（bootstrap）——严格有序，开窗前必须全绿
-
-每次触发本 Skill，第一步先 `--check`（先判模式）：
-
-Dev mode：`uv run python scripts/bootstrap.py --check`
-Installed Plugin mode：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --check`（Windows 用 `python` 代替 `python3`，见下）
-Codex mode：先解析 bootstrap.py 绝对路径（跟随软链反推 repo 根），之后所有命令都用 `$BOOT`，**绝不用 `uv run`**：
-
-```bash
-BOOT=$(python -c "import os;p=os.path.realpath(os.path.expanduser('~/.codex/skills/game-atelier-character'));print(os.path.join(os.path.dirname(os.path.dirname(p)),'scripts','bootstrap.py'))")
-python "$BOOT" --check
-```
-
-> 判断模式（三选一）：① 环境变量 `${CLAUDE_PLUGIN_ROOT}` 非空 → Installed Plugin mode（Claude，一律用其下的 plugin 命令，绝不用相对路径 `scripts/bootstrap.py`）；② 为空且运行于 **Codex**（`AI_AGENT` 以 `codex` 开头，或本 skill 软链在 `~/.codex/skills/`——Codex 不会设 `${CLAUDE_PLUGIN_ROOT}`）→ **Codex mode**：用上面解析的 `$BOOT`，**per-turn 绝不 `uv run`**（Codex 沙箱外的 uv 缓存会每轮弹权限，这正是要避开的坑）；③ 为空且在仓库内开发 → Dev mode。插件实装路径形如 `~/.claude/plugins/cache/<市场>/game-atelier/<版本>/`，绝不能硬编码 `~/.claude/plugins/game-atelier/`。**解释器名**：路径含盘符（`C:\...`）即 Windows → 用 `python`（Windows 的 `python3` 常是损坏的 Microsoft Store 别名：`python3 --version` 假装正常，但 `python3 -c ...` / 跑脚本会异常退出，如 exit 49）；macOS/Linux → 用 `python3`。某解释器跑插件脚本异常退出，立即换另一个名字重试，别反复试同一个。
-
-按 status 分流，**逐项推进到 ready 后才允许启 server / 开窗**：
-
-| status | 处理 | 可开窗 |
-|---|---|---|
-| `needs_web_build` | 前端未构建（缺 web/dist）。Dev：跑 `make build` 后重 `--check`；Plugin：告知安装包缺预构建 UI，让用户重装 / 反馈，**停在此不启 server** | ❌ |
-| `needs_data_root` | AskUserQuestion 问路径 → `<bootstrap.py> --init-data-root <path>` → 重 `--check` | ❌ |
-| `needs_uv` | 显示安装命令，不替用户跑；装完重 `--check` | ❌ |
-| `needs_venv` | `<bootstrap.py> --ensure-venv`（自动建依赖）→ 重 `--check` | ❌ |
-| `needs_keys_repair` | 告知 keys.json 损坏，引导修复 | ❌ |
-| `needs_first_key` | dist + venv 已就绪，启 viewer-server + 开窗引导加 Key | ✅ |
-| `ready` | 启 viewer-server，正常 turn-start | ✅ |
-
-铁律：`needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 状态下**绝不**启动 viewer-server、绝不开浏览器——否则用户开窗只会撞 404 / 接口报错。只有 dist 在、venv 在（`ready` 或 `needs_first_key`）才 start + open-browser。
-
-## 插件更新提醒（--check 顺路返回，不阻断流程）
-
-`--check` 输出带 `update` 字段。仅当 `update_available` 为 true 且 `dismissed` 为 false 时提醒一次：用 AskUserQuestion 问「插件有新版 v<latest>（当前 v<current>），要更新吗？」（选项：现在更新 / 这次跳过）。其余情况（字段为 null / 无更新 / 已跳过）只字不提，直接往下走。
-
-- **现在更新**：Installed Plugin mode → 跑 `claude plugin update game-atelier`；Dev / Codex mode（git clone）→ 在仓库根跑 `git checkout -- web/dist && git pull --ff-only`（dist 是入库构建产物，先还原防挡 pull）。完成后告知用户：新版下次会话（重启 CC / 重进 skill）生效，本轮继续按当前版本工作。
-- **这次跳过**：跑 `<bootstrap.py> --dismiss-update`（前缀按当前模式，同 `--check`），同一版本之后不再问；出更高版本再提。
-- 更新失败（网络 / 权限）：报错原样告知，继续本轮工作，不反复重试。
-
-## 模型 / API Key 选择规则
-
-**按任务挑模型，不是只读默认 Key 的第一个模型** → 完整规则见 `docs/references/model-routing.md`。要点：
-
-- **常规出图（默认）→ GPT Image 2**（id 含 `gpt-image`）：提示词当实习生用，讲清做什么即可。
-- **画风 / 质感 / 细节调整 → nano-banana**（id 含 `nano-banana`）：提示词 SD 词组式，逐条写最小单位效果。
-- 从 `available_keys[].models` 里找目标族的 `id` + 其 `alias` → `submit --alias <alias> --model <model-id>`。
-- 找不到目标族 → 回退 `preferred_alias` 默认模型并说明；`preferred_alias` 为 null → 停下告知缺 Key。
-- 用户点名 alias / provider / 模型 → 照用户，并更新 spec.md。
-- 选定模型会在出图确认卡上显示，过目即确认；永远不显示 access_key / secret_key。
-
-## viewer-server 启停
-
-Turn 起始之前先执行：
-
-Dev：`uv run python src/viewer_server/server.py start --background`
-Plugin（Claude）：`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --run -m viewer_server.server start --background`
-Codex：`python "$BOOT" --run -m viewer_server.server start --background`
-
-Installed Plugin 模式下所有 `uv run python -m character_workflow ...` 命令改为 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --run -m character_workflow <subcmd>`；**Codex 模式同理用 `python "$BOOT" --run -m character_workflow <subcmd>`**——两者都是 venv python 直跑、零 uv，绝不在 per-turn 用 `uv run`。遇环境困惑（不知数据/工作区/为何弹权限）跑 `... --run -m character_workflow doctor` 自诊断。
-
-## Turn 起始
-
-```bash
-# Dev：
-uv run python -m character_workflow turn-start --message "<画师本轮原文>"
-# Codex / Installed Plugin：python "$BOOT" --run -m character_workflow turn-start --message "..."（绝不 uv run）
-```
-
-默认 `--kind portrait`，本 skill 只产**立绘（portrait）**。**一旦判断需求是 promo（美宣）/ turnaround（三视图）——无论开轮就如此、还是对话中途画师改了主意——直接切到对应 skill 的执行流程**：用 Skill 工具调起 `/game-atelier:promo` · `/game-atelier:turnaround`，一句话告知画师正在切，不必让 ta 手动重输命令。那两个 skill 开轮即 `turn-start --kind promo/turnaround`，`lessons_project` / `lessons_workspace` 自动切到对应 kind 段；不要在本 skill 内用 portrait 上下文硬出别的 kind（lessons 段会错配，分段沉淀也送错轮次）。三个 skill 互为可切换节点，按当前需求落到对的那个。
-
-关键返回字段：
-
-```json
-{
-  "spec_status": "ready | placeholder | missing",
-  "available_keys": [],
-  "preferred_alias": null,
-  "derivative": null,
-  "pending_identity_normalizations": []
-}
-```
-
-| 字段 | 含义 |
-|---|---|
-| `stage` | A/B/C/D/E — 当前流程位置 |
-| `recommend_action` | ask / render_card / switch / noop — 本轮主要决策 |
-| `active_id` / `spec` / `spec_status` | 当前角色和 spec 状态 |
-| `pending_identity_normalizations` | Web 创建的临时角色（`char-<数字>`）待整理队列 |
-| `recent_chars` | id + tagline 列表，Stage C 列选项用 |
-| `available_keys` / `preferred_alias` | Key 选择 |
-| `project_worldview` | 项目 worldview.md：项目经验/世界观（定位·调性·用语·规则），Web「项目经验」页可编辑 |
-| `project_style` | 项目风格契约 style.md 全文（含 frontmatter status）；"" = 项目还没有契约 |
-| `derivative` | 角色衍生来源；普通角色为 null，衍生角色包含来源角色快照、冻结参考图和当前槽位 |
-| `canonical` | active 角色定稿表（每 slot 至多一张 `{path, set_at, spec_fingerprint}`） |
-| `lessons_workspace` / `lessons_project` | 出图经验（workspace 通用 / 项目级，各取当前 kind 段；项目级来自 MEMORY.md） |
-
-**只看 `recommend_action` 决策**：
-
-| recommend_action | 行为 |
-|---|---|
-| `ask` | **必须调用 AskUserQuestion**（带 options）—— 按 stage 分叉问什么（见下） |
-| `render_card` | 写 prompt → submit CLI → 卡片 → 等确认 → run-job |
-| `switch` | `set-active <target>` 后重新 turn-start |
-| `noop` | 退出 turn，不动 file system |
-
-### pending_identity_normalizations（优先处理）
-
-`pending_identity_normalizations` 非空时，先于 Stage 普通流程处理。展示每条的 `old_id → display_name → recommended_id`、`asset_counts`、`spec_status`。用户确认后调：
-
-```bash
-uv run python -m character_workflow rename-character-id <old_id> <recommended_id>
-```
-
-整理 Web 创建角色时只处理当前角色，不能静默改名，不能批量改无关角色。若用户不同意推荐 id，停下询问新 id。
-
-整理完必须重新 turn-start 刷新 active / recent_chars / pending 队列。
-
-### 跨运行时选择协议
-
-Claude Code 用 AskUserQuestion；Codex 用 request_user_input。复杂选择先做两级选择：先问大方向，再问细节。不能伪造用户回答，不能把自由文本当成已确认选项；选择会影响 spec_status、角色 id 或出图参数时必须显式确认。
-
-**降级（结构化提问工具不可用时）**：如 Codex Default mode 没有 request_user_input，不得用松散文字凑合提问——必须输出固定格式的文本确认卡并就地停止，等画师回复后才能继续：
-
-```text
-【待确认】<问题一句话>
-1. <选项 A> — <一句话说明>
-2. <选项 B> — <一句话说明>
-回复编号，或直接描述你的想法。
-```
-
-输出确认卡后本轮立刻停下：不得替画师选择、不得把沉默当默认、不得继续推进流程。
-
-### Stage 分叉
-
-**Stage A / B（characters/ 为空）**：A 是目录不存在、B 是目录空。新装用户几乎总落在 **B**——因为 bootstrap 的 `--init-data-root` 预建了空的 `characters/`。两者处理一致，**按 turn-start 的 `has_projects` 分流**：
-
-- `has_projects == false`（还没有任何项目）→ **先问项目，再问角色**。角色永远从属于某个项目，不能凭空起一个孤立角色：
-  1. AskUserQuestion 第一题只问项目：「你当下在忙的是什么项目？一句话说说它的定位 / 世界观（10-30 字）」。
-  2. 据回答提炼项目名（拿不准就二次确认）→ `create-project "<项目名>"` 落盘，记下返回的 `id`。
-  3. 再问「第一个角色名 + 定位（≤20 字）」→ 落盘 spec → `assign-character <角色id> --project <项目id>` → 进 render_card。
-- `has_projects == true`（已有项目）→ 看 `projects`：仅 1 个直接归属它；多个先 AskUserQuestion 选归到哪个项目。再问「第一个角色名 + 定位」→ 落盘 → `assign-character` → render_card。
-
-**铁律**：characters 为空时，第一个问题必须是项目（在忙什么、定位），绝不上来就问「创建第一个角色吗」。理解项目后再据项目情况问角色。
-
-### 新角色已有素材：先归档，再继续
-
-用户在建项目 / 建角色时已经上传参考图，不能只把它当头像或临时上下文。角色目录和 spec 建立后，逐张查看并按画面内容分类：标准角色立绘 / 全身单面图归 `portrait`，正侧背联排或设定表归 `turnaround`；看不清类型时先问用户，不能猜。然后逐张执行：
-
-```bash
-uv run python -m character_workflow import-reference --character <角色id> --slot portrait --path <图片路径>
-uv run python -m character_workflow import-reference --character <角色id> --slot turnaround --path <图片路径>
-```
-
-命令会把原图按内容哈希备份到 `characters/<id>/source/`，同时登记到 `portrait/` 或 `turnaround/`，并创建一条 `DONE` Job，因此导入完成后图片会立刻出现在 Web 对应的「立绘 / 三视图」页；重复执行幂等。导入只代表“已有参考素材”，**不自动定稿**、不写 `canonical.json`；定稿仍要等画师明确确认后走 `set-canonical`。
-
-### 外部生图结果：必须登记，禁止只复制文件
-
-Lovart、其他生图 Skill、外部编辑器或用户下载回来的成图，不经过本 Skill 的 `submit → run-job`，因此必须显式归档：
-
-```bash
-uv run python -m character_workflow import-output \
-  --character <角色id> \
-  --slot portrait \
-  --path <成图路径> \
-  --model "Lovart · GPT Image 2 Medium" \
-  --prompt-file <本次提示词路径> \
-  --reference-image <本次使用的参考图绝对路径>
-```
-
-Codex / Installed Plugin 模式仍按本 Skill 前文规则，把 `uv run python -m character_workflow` 换成对应的 `$BOOT --run -m character_workflow` 前缀。`--reference-image` 可重复传入。
-
-该命令会把外部图片归档为槽位内的下一个 `vN`，同时创建 `DONE` Job；若图片已经是目标槽位内的 `vN`，则原地补登记。返回的 `slot_path` 才是后续展示、对比和定稿使用的路径。它同样**不会自动定稿**。
-
-**角色页展示契约**：`portrait / promo / turnaround` 中任何希望在 Web 出现的图片，都必须同时属于一条 `DONE` Job。禁止用 `cp`、`mv`、Write 或其他文件操作直接把图片塞进槽位目录；“文件存在但没有 Job”属于不完整资产。外部出图后必须先执行 `import-output`，再把返回的 `slot_path` 渲染给画师。
-
-**Stage C**（无 active character）：列 `recent_chars` 中每个角色的 `id（tagline）`+ 新建 / 跳过。用户选定后立即 `set-active <id>` 并重新 turn-start，**不再弹二次确认**，直接进入 Stage D 推断。
-
-**Stage D**（裸触发 / 冷启动 / 上轮已闭环）：
-
-`recommend_action == ask` 时，**先做资产侦察再提问**，禁止直接展示通用 4 选项：
-
-1. 列出 `<data_root>/characters/<active_id>/` 下各子目录的文件（`portrait/`、`promo/`、`turnaround/`），判断当前已有哪些资产。
-2. 结合 `project_worldview` 中的项目规则（如皮肤品质系统、已归档皮肤设计档案）推断最可能的下一步任务。
-3. 直接用有上下文的问题询问，而不是通用菜单。例：
-   - 角色有 portrait/v1.png 且项目有皮肤系统 → "当前项目有绿/蓝/紫/橙四档品质皮肤，要先做董卓的哪档？"
-   - 角色有 portrait 但无 turnaround → "已有立绘，接下来出三视图还是美宣？"
-   - 角色啥都没有 → 按现有流程：问外观设定。
-
-仅在侦察结果完全无法推断时，才退回通用 4 选项（说明为什么无法推断）。
-
-**Stage E**（active 未归属任何项目）：列已有项目 + 新开项目 + 跳过。画师选归属后 `assign-character <active_id> --project <project_id>` 再 turn-start。
-
-## 项目风格契约（style.md）
-
-`project_style` 是项目级视觉语言的单一事实源，专治同项目多角色连续生图的风格漂移。
-
-- **有契约（`project_style` 非空）**：新角色**跳过风格档 / 项目级配色 / 镜头 / 背景的提问**，直接把契约的 `style` / `palette` / `camera` / `background` / `taboo` 字段注入 spec 与 prompt；对话只问角色个体差异（身份、外观锚点、个体配色在色板内的取用）。画师本轮明确要求偏离契约时照画师，并点名"此处偏离项目契约"。
-- **无契约（"" 且项目已归属）**：首个角色照常问清风格档 / 配色 / 镜头，出图闭环后**主动提议**把这些回答沉淀成 `projects/<slug>/style.md`（格式 → `docs/references/style-template.md`，零占位纪律同 spec）；画师确认内容后用 Write 落盘，`status: draft` 起步，画师说"就按这个来"再改 `approved`。
-- **修改 approved 契约必须先经画师确认**——项目下所有角色的一致性都锚在这份文件上，不得静默改写；确认后同步更新 `updated` 日期。
-
-## 定稿（canonical）
-
-画师明确说某张图"定稿 / 就用这张"时，AskUserQuestion 确认后写入：
-
-```bash
-uv run python -m character_workflow set-canonical --kind portrait --path <该图路径>
-# 取消：... set-canonical --kind portrait --clear
-```
-
-每 slot 至多一张，设新图自动顶掉旧定稿；Web 角色页图卡也能设 / 取消（BadgeCheck 按钮）。promo / turnaround 出图默认引用定稿立绘作 subject。不得未经画师确认擅自定稿。
-
-**stale 传播（A3）**：定稿写入时盖 spec 指纹（visual_dna + anchors）与项目 style.md 指纹。
-**改锚点（visual_dna / anchors）或项目 style.md 前**，先读该角色 `canonical.json`（或跑
-`stale-report` 看全库）——有定稿就向画师列出「这些定稿会被标记过时」，经确认再改。
-改后 Web 图卡出「spec 已变更 / 风格已变更」角标；按新 spec 重出图并重新定稿即消。
-
-## 写出图 prompt
-
-**应用 turn-start 记忆（必做）**：把 `project_worldview` 的项目定位 / 调性 / 用语 / 规则作背景约束、`lessons_project` / `lessons_workspace`（portrait 段出图经验）作可复用手法与避坑项揉进 prompt——这是启动段那条红线（不依据 turn-start 返回的记忆就写 prompt / 出图 / 改 spec 视为违规）的落点，不是开头读一眼就忘。与 spec / 画师本轮指令冲突时后者优先，但要点名冲突。
-
-**所有向画师提问都必须用 AskUserQuestion**（出图确认卡除外）。纯文字追问等于没问，画师选项清晰才能继续。AskUserQuestion 单次最多 4 个问题、每题最多 4 个选项（工具硬上限）；要问得更多就拆成两级——先问大方向，再问细节。
-
-对话逐项问清：风格档 → 配色 → 镜头 → 视觉锚点。一次问 1-3 个，二选一优先，问清才动笔。`project_style` 非空时风格档 / 项目级配色 / 镜头 / 背景直接取契约不再问（见「项目风格契约」节），只问角色个体差异。
-
-**spec 格式** → `docs/references/spec-template.md`
-创建新 spec 时严格按模板 YAML 字段写；`asset.*` 节按需追加，问清才写，不写占位。
-
-**spec 零占位规则** → `references/spec-protocol.md`（不得在 spec 里写 `?` / TBD / 待定）
-**底层规则** → `docs/references/art-prompt-system.md`
-**立绘专项** → `references/prompt-zh.md`
-**模型选择 + 按模型族写提示词** → `docs/references/model-routing.md`（GPT 实习生式 / nano-banana SD 词组式——**先定模型族再动笔**）
-
-### 参考图清单
-
-有一张或多张参考图时，逐张看图并按最终 CLI 顺序写入 prompt：每张都要有“序号 + 简短可见描述 + 用途”。角色、场景、风格、姿势参考都遵守，不能只说“图一 / 图二”。提交时按相同顺序重复传 `--reference-image`；完整契约见 `art-prompt-system.md` 第三节。
-
-## 修改已出图（三模式）
-
-画师指着现有图提修改需求时，**必须先 AskUserQuestion** 确认模式，不得自行假设：
-
-| 模式 | 做法 | 用于 |
-|---|---|---|
-| A 编辑当前图 | 上传当前图作参考；prompt 只写改动指令 | 只改局部，整体满意 |
-| B 完全重出 | 不带参考图；重走 spec 补全，写完整新 prompt | 整张都不满意 |
-| C 局部参考混合 | 带参考图锚定满意部分；prompt 完整重写并注明锚定范围 | 人脸/配色满意，服装/姿势要大改 |
-
-三模式互斥，混用输出不稳定。首次出图 / 用户主动"重画"不适用。
-
-三种模式产出都是新 vN、原图保留——A 模式编辑当前图也出新 vN，不原地改 v1（引擎 `_next_asset_path` 不覆盖既有文件）；渲染时新旧版可一并列出。
-
-### 角色衍生（独立完整流程）
-
-`turn-start.derivative` 非 null 时，当前 active 是一个平级角色资产，不是来源角色的一次临时修改：
-
-- 创建时的来源图已复制冻结在 `derivative.source_paths`；它们只作为首轮补全 spec / 立绘的参考，不形成持续继承关系。
-- 当前衍生拥有自己的 spec、立绘、美宣、三视图、定稿、反馈和历史。所有 submit / set-canonical / spec 写入都只使用 `active_id`。
-- 首张立绘优先按 `derivative.source_paths` 的顺序传参考图；prompt 根据用户目标说明延伸方向，不凭空补来源差异说明。
-- 当前衍生有自己的 `canonical.portrait.path` 后，后续美宣 / 三视图优先只引用自己的定稿立绘。
-- 衍生可以独立移动、删除，也可以继续作为另一个衍生的来源；不得把来源 id 当作归属或删除约束。
-
-### 普通角色的临时换色 / 改图
-
-画师明确只要一次性修改现有图时走 A 模式；若要形成可继续做美宣和三视图的长期资产，应先在 Web「创建衍生」。临时改图的 prompt 只写改动点，不重述整套外观：
-
-```text
-根据参考图中的角色立绘为参考，生成这个角色的"<皮肤名>"主题角色立绘皮肤。
-将<默认服装/颜色>改为<目标服装/颜色>；<局部变化>；整体气质<目标气质>。
-<局部记忆点>。简约白色背景。不改武器，不加特效，不改动作。
-```
-
-正文 1-3 段，约 120-260 中文字。不写长排除段；必要边界合并到最后一句。
-
-## 出图流程
-
-1. 写 prompt 到临时文件，落盘 PENDING_CONFIRM：
-
-   ```bash
-   JOB_ID=$(uv run python -m character_workflow submit \
-     --kind portrait --alias <选定alias> --model <选定model-id> \
-     --prompt-file /tmp/cw-prompt-$$.md)
-   ```
-
-   `--alias` / `--model` 按 `docs/references/model-routing.md` 选定（常规→gpt-image / 风格调整→nano-banana）；缺省回退当前 kind 默认 Key 的首个模型。`--n` / 尺寸等缺省值由 CLI 按 `--kind` 决定，不在此硬写；`--reference-image <绝对路径>` 可重复传多张参考图（`--source-image` 是首张参考图的兼容别名）——参考图一律走 CLI 参数，**禁止手改 job JSON**。stdout 是纯 job_id，stderr 是 CLI 生成的出图确认卡。
-
-2. 把 submit 在 stderr 打出的确认卡**原样转发**给画师（含 job_id / Key / model / 尺寸 / 参考图全列表 / 完整 prompt 原文），不得手写或摘要确认卡
-3. 判定画师回复（确认卡已转发后），再决定是否 run-job：
-   - **推进** = 任何明确肯定（出图 / 确认 / OK / 可以 / 行 / 就这样 / 走吧 / 好）→ run-job。
-   - **修改** = 画师提出具体改点 → 改 prompt 重新 submit 出新确认卡，**不** run-job（旧 PENDING_CONFIRM 作废，不复用）。
-   - **否定 / 犹豫**（再想想 / 先不出 / 算了）→ 停在 PENDING_CONFIRM，不推进、不催。
-   - **模糊**（看不出是肯定还是想改）→ **不擅自当肯定**，用 AskUserQuestion 二选一确认「直接出图 / 还想改」。
-   绝不把沉默或模糊当默认推进。明确肯定后：
-
-   ```bash
-   uv run python -m character_workflow run-job "$JOB_ID"
-   # 或用户只说"出图"没有指定 job：
-   uv run python -m character_workflow run-latest --kind portrait
-   ```
-
-4. 渲染成品给画师：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 Markdown 图片，末尾提一句"Web 也能看，或直接说要改哪张"。图片地址按**渲染通道**选（**完整规则 + 判断方法 + 降级顺序见 `docs/references/image-presentation.md`**）：
-   - **终端内联图像**（iTerm2 / kitty 等终端里的 Claude Code / Codex CLI）→ 本地绝对路径 `![vN](output_paths[i])`；
-   - **HTML 渲染能访问本地文件**（`file://` 页面或应用自行注入本地资源）→ 本地绝对路径可行；
-   - **HTML 渲染不能访问本地文件**（`http://` 页面，如 DeepSeek Harness GUI）→ **本地路径会裂图**，优先转 viewer-server `/api/raw` HTTP URL：`http://127.0.0.1:<port>/api/raw?path=<data-root相对路径>&job_id=<job_id>`（带本次 job_id 白名单鉴权；端口读 `.runtime/server.port`，别写死 5174）；**项目没有后端 / server 不可用时用 base64 data URI**（`data:image/png;base64,...`，零依赖，任何 HTML 渲染都显示，大图先压小）。
-   `output_paths` 为空 / 缺失 = 本次未成图，走下方失败分支——**不复用上轮 `v_latest`、不在 slot 目录按 mtime 挑文件冒充本次产出**（曾踩过裂图）。
-
-失败时：网络/凭证失败 → 问画师重试还是改 prompt；画师选重试 → `NEW_ID=$(uv run python -m character_workflow retry-job "$JOB_ID")` 克隆原 job（错误记录保留，新 job 带 retry_of）→ `run-job "$NEW_ID"`；输出路径不可写 → 提醒检查 `image_storage_root`。
-
-### 收尾验证（render 前逐条过）
-
-① 渲染路径取本次 `output_paths`（见 step4），为空即走失败分支；
-② 对照 spec 三锚点（发色 / 瞳色 / 服装主色）+ 风格档，发现漂移**主动点名**告知画师「X 锚点偏了」并提议带参考图走 A/C 模式修——不默默放行、不替画师定要不要修；
-③ 无糊脸 / 占位脸 / 裂图等崩坏；明显不达标提议 `retry-job` 或 A 模式重出（**重出 / 修图仍走 PENDING_CONFIRM 确认门**）。
-
-## Turn 收尾：经验沉淀（出图经验）
-
-turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、但还没沉淀过经验的本角色图。
-
-- **何时问**：`pending_distill` 非空 **且** 画师本轮不在赶活（intent≠revise、非出图确认中）。开口：「这几张你打了高分还没沉淀经验：<列路径/缩略>，要我帮你记吗？」一次说清，不反复唠叨。
-- **画师同意（或「沉第 N 张」）**：看那张图 + 读它的 job（prompt/model/params）+ 评分 → 拟**一条人话经验**（讲清「为什么成功 / 下次怎么复用」），单行，带证据图路径：
-  `- <日期> [<slot>·<评分>★] <人话经验>。证据图 <相对路径>`
-  把这条打成**沉淀确认卡**（复用出图确认卡格式）让画师过目。
-- **画师确认** → 跑 `append-memory --kind <slot> --scope <见下> --line "<上面那条>"`，再跑 `mark-distilled <该图相对路径>`。
-- **画师说「不用沉这张」** → 只跑 `mark-distilled <该图相对路径>`（当忽略，不再提醒）。
-- **scope 决策**：经验含具体角色/风格/配色/类目 → `--scope project`；通用技巧/prompt 协议 → `--scope workspace`。两者都进 MEMORY.md、都 agent-only、都不上 Web。
-
-## Turn 收尾报告（七件套，与 /game-atelier:ui 总控对齐）
-
-本轮有实质产物（出图完成 / spec 落盘 / 定稿变更）时，在渲染图之后以固定七件套收尾；纯对话轮不用：
-
-```text
-当前步骤：
-完成状态：
-本步产物：
-需要你检查：
-可选操作：
-进入下一步的条件：
-下一步可直接说的话：
-```
-
-## Guardrails
-
-只复述全文已散落的红线，集中一眼看全（不新增约束）：
-
-- `needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 态**绝不**启 viewer-server、绝不开窗。
-- 参考图一律走 CLI `--reference-image` / `--source-image`，**禁止手改 job JSON**。
-- 用户参考图必须走 `import-reference`；Lovart / 外部生成结果必须走 `import-output`。禁止直接复制进角色槽位，确保图片落盘与 Web 展示 Job 同时完成。
-- 确认卡原样转发 CLI（stderr）全文，不手写、不摘要、不增删字段。
-- 出图链路 submit→PENDING_CONFIRM→画师明确肯定→run-job；**绝不把沉默 / 模糊当默认推进**，模糊用 AskUserQuestion 二选一。
-- 三模式（A 编辑 / B 重出 / C 混合）互斥不混用；重出 / 修图仍过确认门。
-- 所有提问走 AskUserQuestion，单次 ≤4 问、每问 ≤4 选项；工具不可用时走文本确认卡降级，不松散凑合。
-- 永远不显示 access_key / secret_key。
-- spec 零占位（不写 `?` / TBD / 待定），缺信息靠对话补，不猜不假设。
-- 锚点（发色 / 瞳色 / 服装主色 / 风格档）未经画师授权不改写。
-- `project_style` 非空时新角色不再重复问风格档，prompt 注入契约字段；修改 approved 契约必须先经画师确认。
-- 定稿（set-canonical）必须经画师明确确认，不得擅自标记。
-
-## 跳过条件
-
-git / 代码 / 部署 / 纯问答；用户没明确开始工作流且 viewer-server 没开；画师选"跳过本轮"。
+# 角色立绘
+
+先完整读取 [MCP 工作流](../../docs/references/workshop-mcp-workflow.md)，本 Skill 不提供
+shell / 文件直写 / 供应商调用的第二条执行路线。项目资料用 MCP，Read 仅用于插件参考文件。
+
+## 进入当前角色
+
+1. 用 `workshop_list_projects`、`workshop_list_targets` 定位用户指定项目和角色，
+   锁定 `{type:"character", project_id, character_id, asset_slot:"portrait"}`。
+2. 新角色得到用户明确请求后，`workshop_create_target` 创建角色；没有项目时请用户先在
+   Atelier 创建并授权。生成的 ID 原样使用，不能静默改名或为整理 Web 创建角色批量改 ID。
+3. `workshop_get_context` 读角色 spec、项目风格、世界观、当前项目立绘经验、反馈、
+   定稿与过期标记、派生来源。不猜全局 active，不读取无关角色或代理私人记忆。
+4. 只处理当前角色；`workshop_read_document(kind:"character_spec")` 取完整设定后再修改。
+   读取项目基线 `project_style` 与 `worldview`，其中已经明确的风格与定位不要重复提问。
+
+已有画作建档时，先让用户在 Atelier 上传并归入当前角色：参考原图归 source/，
+已经认可的立绘 / 三视图分别归 portrait / turnaround；上传不自动定稿。
+再通过 `workshop_list_media`、`workshop_read_media` 确认实际登记结果，不能仅凭聊天附件
+路径宣称导入成功。当前工具没有导入和改 ID 操作；界面没有对应入口时明确说明限制。
+
+## 设定：先问关键缺口，再保存
+
+必读 [spec 模板](../../docs/references/spec-template.md) 和
+[设定对话协议](references/spec-protocol.md)。`character_spec` 是角色事实源，不另存平行设定。
+
+- first_gen 先确认风格 / 参考 IP 或参考图、头身比、核心配色、服装与道具、全身或半身、
+  镜头和画幅。缺少风格、身份锚或头身比时先问，不带未知设定盲出。
+- 用户已有成熟原稿时先看图提取，不再从零问完整问卷。图中看不清的结构标为未确认，
+  不装作已理解；已确认设定逐项继承。
+- 风格、发色、瞳色、服装主色是锚；未请求变更的部分不可顺手重设计。
+- 只保存已确认内容，不写问号占位、TBD 或“待定”。用户尚未回答的字段省略，
+  而不是替用户拍板；已有内容不因模板缺节被整篇覆盖。
+- 修改经 `workshop_write_document` 完成，带刚读取的 revision；保存后核对返回结果。
+  反馈真正处理完再确认对应 feedback ID；只看过不等于处理完。
+
+Claude Code 用 AskUserQuestion；Codex 在可用时用 request_user_input。
+复杂选项采用“两级选择”：先大方向后细节；工具不可用则问一个文本问题等待，
+不能伪造用户回答。对话批准设定不等于批准付费生成。
+
+## 生成模式与参考图清单
+
+必读 [统一 Prompt 规则](../../docs/references/art-prompt-system.md)、
+[立绘 Prompt](references/prompt-zh.md)、[模型选择](../../docs/references/model-routing.md)。
+
+| 模式 | 用途 | 固定边界 |
+| --- | --- | --- |
+| first_gen | 首张视觉身份基准 | 默认全身正面直立、浅纯色背景、柔光；缺风格与头身比先问 |
+| variation | 动作、构图或表现变化 | 角色身份与未变更锚冻结；实际选定立绘作为有序参考 |
+| refinement | 换装换色、品质皮肤、局部修正 | 只描述本次改动，不重复整套外观，未指定的动作与道具不变 |
+
+已有定稿优先读 `canonical.portrait.media_id`；否则由实际媒体清单选图并向用户明示。
+过期标记存在时先解释 spec / style 已变化，不把旧图当新规范。派生角色优先自己的成果，
+没有时用 `derivative_source_media_ids` 冻结来源，不追随父角色“最新图”。
+
+参考图清单逐张记录序号、简短可见描述和用途，顺序就是 `media_ids` 顺序。
+立绘风格图只贡献笔触、材质和影调，不借用别人的身份；姿势图不能改变既定角色。
+换皮肤用短编辑 Prompt：参考负责“是谁”，文字负责“改什么”，通常 1–3 段、120–260 字。
+绿色品质以换色 / 局部变化为主，蓝色品质才扩展服装饰品；不擅加武器、特效、动作。
+首次生成一般 3–4 段自然中文，具体描述而非质量词堆叠。
+
+## 准备、批准、查看
+
+1. `workshop_list_models` 查询当前目标实际可用模型及参数能力；用户点名优先，
+   不可用要说明，不偷偷换供应商。默认一张，明确画幅和质量。
+2. 自检身份锚、头身比、背景、风格和参考图顺序。符合后用
+   `workshop_prepare_generation` 准备当前 portrait 请求。
+3. 告知 request ID、模型、内容、素材和费用状态，请用户在 Atelier「待批准生成」
+   **人工批准**；这一步停下。聊天里的“出图”不是页面批准，也不能自动重试付费请求。
+4. 批准后 `workshop_get_generation` 查询同一请求；完成后通过 `workshop_read_media`
+   看本次实际产物，不能按最新文件或旧图冒充本轮输出。
+5. 有视觉输入能力时检查锚点漂移、手脸崩坏、服装道具、头身比、轮廓、背景；
+   无法看图就明示未做视觉质检。让画师在 Web 对比并选择定稿，Skill 不代选。
+6. 下一轮围绕实际反馈修正，保存确认的 spec，再准备新的待批准请求。失败返回原因，
+   未经新的页面批准不再调用供应商。
+
+项目风格基线变更会影响下游美宣 / 三视图；按共享工作流先列出受影响定稿，再经确认修改。
+MCP 只提供当前目标上下文，不能声称已扫描全项目所有过期资产。经验总结可以先给建议，
+但没有写项目经验工具时不能宣称已沉淀入库。
+
+收尾按共享工作流七件套，清楚区分“文档已保存”“待人工批准”“处理中”“已生成”。

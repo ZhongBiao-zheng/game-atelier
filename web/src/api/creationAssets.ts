@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { apiError, requestJson } from './http';
 import type {
   CreationAsset,
@@ -63,7 +64,7 @@ export async function uploadImageCreationAsset(input: {
   if (input.allowExisting) form.append('allow_existing', 'true');
   let response: Response;
   try {
-    response = await fetch('/api/creation-assets/images/upload', { method: 'POST', body: form });
+    response = await connectionFetch('/api/creation-assets/images/upload', { method: 'POST', body: form });
   } catch (error) {
     throw new Error(`保存图片资产失败：${error instanceof Error ? error.message : String(error)}`);
   }
@@ -88,7 +89,7 @@ export async function saveImageCreationAssetFromPath(input: {
 }): Promise<CreationAsset> {
   let response: Response;
   try {
-    response = await fetch('/api/creation-assets/images/from-path', {
+    response = await connectionFetch('/api/creation-assets/images/from-path', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -139,7 +140,7 @@ export async function updateImageCreationAsset(
   if (input.file) form.append('file', input.file);
   let response: Response;
   try {
-    response = await fetch(
+    response = await connectionFetch(
       `/api/creation-assets/${encodeURIComponent(assetId)}/image`,
       { method: 'PUT', body: form },
     );
@@ -159,7 +160,7 @@ export async function updateImageCreationAsset(
 }
 
 export async function deleteCreationAsset(assetId: string): Promise<void> {
-  const response = await fetch(`/api/creation-assets/${encodeURIComponent(assetId)}`, {
+  const response = await connectionFetch(`/api/creation-assets/${encodeURIComponent(assetId)}`, {
     method: 'DELETE',
   });
   if (!response.ok) throw await apiError(response, '删除创作资产');

@@ -29,7 +29,7 @@ def payload(**overrides):
         "service": "game-atelier",
         "instance_id": INSTANCE_ID,
         "app_version": "5.33.2",
-        "protocol": None,
+        "protocol": "atelier-local/1",
         **overrides,
     }
 
@@ -171,5 +171,5 @@ def test_connection_status_shape_matches_typescript_contract():
     schema = schema_path.read_text(encoding="utf-8")
     for field in LocalConnectionStatus.model_fields:
         assert f"  {field}:" in schema
-    assert "protocol: null" in schema
+    assert "protocol: 'atelier-local/1'" in schema
     assert "service: 'game-atelier'" in schema

@@ -3,8 +3,13 @@ import { fetchOnboardingStatus, type OnboardingState } from './api/onboarding';
 import { DataRootPage } from './pages/onboarding/DataRoot';
 import { KeysPage } from './pages/settings/Keys';
 import { AppShell } from '@/components/AppShell';
+import { LocalConnectionGate } from '@/components/LocalConnectionGate';
 
 export function App() {
+  return <LocalConnectionGate><ConnectedApp /></LocalConnectionGate>;
+}
+
+function ConnectedApp() {
   const [state, setState] = useState<OnboardingState | null>(null);
   const [error, setError] = useState<string | null>(null);
 

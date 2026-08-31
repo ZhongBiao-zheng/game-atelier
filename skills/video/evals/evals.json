@@ -4,11 +4,12 @@
     {
       "id": 1,
       "prompt": "给 Seedance 2.0 Mini 做一个15秒营销视频，提示词里有镜头1到镜头6。生成视频。",
-      "expected_output": "建立一个视频企划与一份完整 prompt.md，只创建一个 namespace=video Job；镜头1-6只作为同一提示词内部段落。",
+      "expected_output": "通过 MCP 建立一个视频企划与一份完整 prompt.md，准备一个请求后等待 Atelier 人工批准；批准后只创建一个 Job，镜头1-6只作为同一提示词内部段落。",
       "files": [],
       "assertions": [
         {"id": "one_production", "description": "只建立一个 production", "type": "presence"},
-        {"id": "one_job", "description": "完整 Prompt 只创建一个 Job", "type": "presence"},
+        {"id": "one_job", "description": "完整 Prompt 只准备一个请求，页面人工批准后只创建一个 Job", "type": "presence"},
+        {"id": "page_approval", "description": "停止等待 Atelier 人工批准，不把聊天生成指令当作付费批准", "type": "presence"},
         {"id": "no_shot_entities", "description": "不创建 shot-map、shot 目录或逐镜头任务", "type": "absence"},
         {"id": "seedance_simple_prompt", "description": "使用主体、场景、声音、镜头1-N的简派结构", "type": "presence"},
         {"id": "no_timestamps_20", "description": "Seedance 2.0 Prompt 不写时间戳", "type": "absence"}
@@ -17,12 +18,12 @@
     {
       "id": 2,
       "prompt": "做一个 Seedance 2.5 的30秒卡点视频，第3秒、第8秒和第20秒要准确转场。",
-      "expected_output": "一份带必要时间戳的完整 Prompt 和一个 Job，时间段不重叠且不超过30秒。",
+      "expected_output": "一份带必要时间戳的完整 Prompt 和一个待人工批准请求；批准后一个 Job，时间段不重叠且不超过30秒，实际时长符合已配置模型能力。",
       "files": [],
       "assertions": [
         {"id": "timestamps_25", "description": "需要卡点时使用2.5时间戳能力", "type": "presence"},
         {"id": "duration_limit", "description": "总时长不超过30秒", "type": "presence"},
-        {"id": "one_job_25", "description": "仍只创建一个完整视频 Job", "type": "presence"}
+        {"id": "one_job_25", "description": "仍只准备一个请求，人工批准后一个完整视频 Job", "type": "presence"}
       ]
     },
     {
@@ -33,6 +34,17 @@
       "assertions": [
         {"id": "task_audio", "description": "音频策略按任务包含BGM、对白与音效", "type": "presence"},
         {"id": "no_forced_bgm_ban", "description": "不出现不要BGM或禁止背景音乐", "type": "absence"}
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "MCP没连接上，我已经说同意了，直接用终端把这个15秒项目视频生成吧。",
+      "expected_output": "解释当前工坊必须先连接已授权 MCP，指向本机 Agent 授权与配置说明；不以 shell、直接写 Job 或供应商调用降级，不把聊天同意当作页面批准。",
+      "files": [],
+      "assertions": [
+        {"id": "no_shell_fallback", "description": "不执行任何直接生成命令或手写 Job", "type": "absence"},
+        {"id": "connection_entry", "description": "明确提供本机授权与 MCP 配置入口", "type": "presence"},
+        {"id": "chat_not_payment_approval", "description": "聊天同意不代替 Atelier 人工批准", "type": "presence"}
       ]
     }
   ]

@@ -13,7 +13,8 @@ def test_shared_prompt_contract_requires_ordered_descriptions_for_every_referenc
     assert "每张参考图" in text
     assert "简短可见描述" in text
     assert "角色图" in text and "场景图" in text
-    assert "--reference-image" in text and "可重复" in text
+    assert "media_ids" in text and "顺序" in text
+    assert "workshop_prepare_generation" in text
 
 
 def test_promo_supports_multiple_references_without_single_image_fallback():
@@ -24,7 +25,7 @@ def test_promo_supports_multiple_references_without_single_image_fallback():
     assert "一次只稳定处理一张参考图" not in combined
     assert "每个出镜角色" in combined
     assert "场景参考图" in combined
-    assert "--reference-image" in combined and "可重复" in combined
+    assert "media_ids" in combined and "顺序" in combined
 
 
 def test_promo_identity_anchor_can_be_portrait_turnaround_or_user_upload():
@@ -37,9 +38,11 @@ def test_promo_identity_anchor_can_be_portrait_turnaround_or_user_upload():
     assert "还没有立绘" not in skill
 
 
-def test_new_character_flow_imports_existing_art_into_source_and_typed_slot():
+def test_new_character_flow_requires_web_registration_into_source_and_typed_slot():
     skill = _read("skills/character/SKILL.md")
-    assert "import-reference" in skill
+    assert "Atelier 上传" in skill
+    assert "workshop_list_media" in skill
+    assert "workshop_read_media" in skill
     assert "source/" in skill
     assert "portrait" in skill and "turnaround" in skill
     assert "不自动定稿" in skill
