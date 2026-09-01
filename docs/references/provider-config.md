@@ -123,6 +123,10 @@
 
 ### 已核实媒体价目
 
+单价的唯一维护入口是 [`web/src/lib/generationPrices.ts`](../../web/src/lib/generationPrices.ts)，
+各表单位与更新流程见 [价格清单维护](generation-pricing.md)。Tuzi default 香蕉 Pro
+已按用户提供的 2026-08-31 公告改为 1K / 2K / 4K 分档；两个 Gemini 名称与工坊展示别名共用单价。
+
 OpenAI-HK 按张：GPT Image 2 `¥0.08`、Nano Banana `¥0.20`、Nano Banana HD
 `¥0.32`；Nano Banana 2 的 low / medium / high 分别对应基础 / 2K / 4K，单价
 `¥0.48 / ¥0.72 / ¥1.00`。

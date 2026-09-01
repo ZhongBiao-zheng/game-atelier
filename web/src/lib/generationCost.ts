@@ -1,6 +1,18 @@
 import type { Quality } from '@/lib/imageControlCaps';
 import type { KeyView } from '@/api/keys';
 import type { JobParams } from '@/schema/jobs';
+import {
+  ARK_SEEDANCE_YUAN_PER_MILLION_TOKENS,
+  ARK_SEEDREAM_YUAN_PER_IMAGE,
+  HAPPYHORSE_1_0_YUAN_PER_SECOND,
+  HAPPYHORSE_1_1_YUAN_PER_SECOND,
+  OPENAI_HK_FIXED_YUAN_PER_IMAGE,
+  OPENAI_HK_NANO_BANANA_2_YUAN,
+  TOKEN_DANCE_YUAN_PER_IMAGE,
+  TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE,
+  TUZI_GROUP_YUAN_PER_IMAGE,
+  TUZI_MIDJOURNEY_YUAN_PER_TASK,
+} from '@/lib/generationPrices';
 
 export interface GenerationCostRequest {
   provider?: {
@@ -19,45 +31,10 @@ export interface GenerationCostRequest {
   hasReferenceVideo?: boolean;
 }
 
-const OPENAI_HK_FIXED_YUAN_PER_IMAGE: Record<string, number> = {
-  'gpt-image-2': 0.08,
-  'nano-banana': 0.2,
-  'nano-banana-hd': 0.32,
-};
-const OPENAI_HK_NANO_BANANA_2_YUAN: Partial<Record<Quality, number>> = {
-  low: 0.48,
-  medium: 0.72,
-  high: 1,
-};
-
-const TUZI_DEFAULT_YUAN_PER_IMAGE: Record<string, number> = {
-  'gpt-image-2': 0.035,
-  'doubao-seedream-4-5-251128': 0.12,
-  'seedream-4-5': 0.12,
-  'seedream-5-0-pro': 0.6,
-  // Tuzi Tier 2 default 分组按 gemini-3-pro-image-preview 请求统一计价；
-  // 1K/2K/4K 只是 quality 参数，不是三个计费 SKU。
-  'gemini-3-pro-image-preview': 0.3,
-  'nano-banana-pro': 0.3,
-  'nano-banana-pro-2k': 0.3,
-  'nano-banana-pro-4k': 0.3,
-  'nano-banana-2': 0.3,
-  'nano-banana-2-2k': 0.48,
-  'nano-banana-2-4k': 0.82,
-};
-const TUZI_GROUP_YUAN_PER_IMAGE: Record<string, Record<string, number>> = {
-  default: TUZI_DEFAULT_YUAN_PER_IMAGE,
-  '绘画': { 'gpt-image-2': 0.21 },
-};
-const TOKEN_DANCE_YUAN_PER_IMAGE: Record<string, number> = {
-  'seedream-5-0-lite': 0.22,
-  'seedream-5-0-pro': 0.3,
-};
-
-const ARK_SEEDREAM_YUAN_PER_IMAGE: Record<string, number> = {
-  'doubao-seedream-5-0-260128': 0.22,
-  'doubao-seedream-4-5-251128': 0.25,
-};
+const TUZI_GEMINI_3_PRO_MODELS = new Set([
+  'gemini-3-pro-image', 'gemini-3-pro-image-preview',
+  'nano-banana-pro', 'nano-banana-pro-2k', 'nano-banana-pro-4k',
+]);
 
 const HAPPYHORSE_1_1_MODELS = new Set([
   'happyhorse-1-1-t2v',
@@ -164,7 +141,14 @@ function estimateTuziImage(request: GenerationCostRequest): number | null {
   const group = request.provider?.billingGroup?.trim();
   if (!group) return null;
   const model = normalize(request.model?.id);
-  if (group === 'default' && model === 'mj-imagine') return 0.1505;
+  if (group === 'default' && model === 'mj-imagine') return TUZI_MIDJOURNEY_YUAN_PER_TASK;
+  if (group === 'default' && TUZI_GEMINI_3_PRO_MODELS.has(model)) {
+    // 与 Tuzi caller 一致：固定型号优先，其余 low / medium / high → 1K / 2K / 4K；
+    // 缺省或 auto 走 1K，不从无关的像素 size / resolution 猜测计费档位。
+    const tier = model.endsWith('-4k') ? '4k' : model.endsWith('-2k') ? '2k'
+      : request.quality === 'high' ? '4k' : request.quality === 'medium' ? '2k' : '1k';
+    return priced(TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE[tier] * safeCount(request.count));
+  }
   const unitPrice = TUZI_GROUP_YUAN_PER_IMAGE[group]?.[model];
   return unitPrice == null ? null : priced(unitPrice * safeCount(request.count));
 }
@@ -182,10 +166,15 @@ function estimateArkImage(request: GenerationCostRequest): number | null {
 }
 
 function arkSeedanceRate(model: string, resolution: string, generateAudio: boolean): number | null {
-  if (model === 'doubao-seedance-2-0-fast-260128') return 37;
-  if (model === 'doubao-seedance-2-0-260128') return resolution === '1080p' ? 51 : 46;
-  if (model === 'doubao-seedance-1-5-pro-260428') return generateAudio ? 16 : 8;
-  if (model === 'doubao-seedance-1-0-pro-250528') return 15;
+  const rates = ARK_SEEDANCE_YUAN_PER_MILLION_TOKENS;
+  if (model === 'doubao-seedance-2-0-fast-260128') return rates[model];
+  if (model === 'doubao-seedance-2-0-260128') {
+    return rates[model][resolution === '1080p' ? '1080p' : 'standard'];
+  }
+  if (model === 'doubao-seedance-1-5-pro-260428') {
+    return rates[model][generateAudio ? 'audio' : 'silent'];
+  }
+  if (model === 'doubao-seedance-1-0-pro-250528') return rates[model];
   return null;
 }
 
@@ -217,10 +206,10 @@ function estimateArkVideo(request: GenerationCostRequest): number | null {
 
 function happyHorseRate(model: string, resolution: string): number | null {
   if (HAPPYHORSE_1_1_MODELS.has(model)) {
-    return { '480p': 0.45, '720p': 0.9, '1080p': 1.2 }[resolution] ?? null;
+    return HAPPYHORSE_1_1_YUAN_PER_SECOND[resolution] ?? null;
   }
   if (HAPPYHORSE_1_0_MODELS.has(model)) {
-    return { '720p': 0.9, '1080p': 1.6 }[resolution] ?? null;
+    return HAPPYHORSE_1_0_YUAN_PER_SECOND[resolution] ?? null;
   }
   return null;
 }
