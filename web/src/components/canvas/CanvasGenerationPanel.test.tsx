@@ -324,7 +324,7 @@ it('expands image candidates around the node and exposes candidate-specific acti
   expect(context.dismissCandidate).toHaveBeenCalledWith('run-batch', 'candidate-failed');
 });
 
-it('keeps successful video results from consecutive runs on the video node', () => {
+it('shows the current video directly without candidate stacking or primary-result selection', () => {
   const base = batchJob();
   const videoJob = (
     jobId: string,
@@ -396,10 +396,11 @@ it('keeps successful video results from consecutive runs on the video node', () 
     </CanvasNodeContext.Provider>,
   );
 
-  fireEvent.click(screen.getByRole('button', { name: '展开 2 个候选结果' }));
-  expect(screen.getByRole('group', { name: '候选 2' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '将候选 2 设为主结果' }));
-  expect(context.selectCandidate).toHaveBeenCalledWith(videoResult.id, 'video-old');
+  expect(screen.getByRole('button', { name: '播放 视频结果' })).toBeInTheDocument();
+  expect(screen.queryByTestId('canvas-candidate-stack')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /个候选结果/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /设为主结果/ })).not.toBeInTheDocument();
+  expect(context.selectCandidate).not.toHaveBeenCalled();
 });
 
 it('keeps delete available for the last failed image slot', () => {

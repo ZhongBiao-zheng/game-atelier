@@ -275,6 +275,10 @@ def _normalized_web_document(
     if submitted.revision != current.revision:
         raise RuntimeError(f"revision_conflict:{current.revision}")
 
+    from character_workflow.lib.canvas_batches import assert_batch_document_change
+
+    assert_batch_document_change(current, submitted)
+
     versions = dict(submitted.content_versions)
     for version_id, existing in current.content_versions.items():
         if versions.get(version_id) != existing:

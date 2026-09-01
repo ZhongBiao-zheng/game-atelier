@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 from contextlib import nullcontext
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import BoundedSemaphore, Lock
@@ -42,6 +43,7 @@ from character_workflow.lib.keys import KeySpec, ModelSpec, read_keys_db
 from character_workflow.lib.schemas import (
     AssetSlot,
     CanvasActor,
+    CanvasBatchJobOrigin,
     CanvasContentVersion,
     CanvasConfigNode,
     CanvasConfigNodeData,
@@ -207,6 +209,11 @@ def _commit_transaction_unlocked(
     job_locked: bool = False,
     artifacts: list[dict[str, Any]] | None = None,
 ) -> None:
+    if kind in {"submit", "reverse_prompt", "mask_edit", "angle"} and job.canvas_run \
+            and job.canvas_run.batch is None:
+        from character_workflow.lib.canvas_batches import assert_node_not_batch_running
+
+        assert_node_not_batch_running(project_id, job.canvas_run.snapshot.surface_node_id)
     def commit() -> None:
         path = _prepare_transaction(
             project_id,
@@ -630,11 +637,12 @@ def _uses_video_frame_slots(draft: CanvasGenerationDraft) -> bool:
     return draft.mode == "video" and draft.params.frame_mode in {"first", "last", "firstlast"}
 
 
-def _resolve_inputs(
+def canvas_input_sources(
     document: CanvasDocument,
     surface: CanvasNode,
     draft: CanvasGenerationDraft,
-) -> list[CanvasSnapshotInput]:
+) -> list[tuple[str, str]]:
+    """Select source nodes once, shared by batch dependency planning and input freezing."""
     candidates: list[tuple[str, str]] = []
     self_version_id = _current_version_id(surface)
     if self_version_id is not None and draft.mode != "audio":
@@ -680,13 +688,31 @@ def _resolve_inputs(
             selected_ids.extend(node_id for node_id in connected_ids if node_id not in mentioned_ids)
         candidates.extend(("input_connection", node_id) for node_id in selected_ids)
 
+    return candidates
+
+
+def _resolve_inputs(
+    document: CanvasDocument,
+    surface: CanvasNode,
+    draft: CanvasGenerationDraft,
+    version_bindings: dict[str, list[str]] | None = None,
+) -> list[CanvasSnapshotInput]:
+    candidates = canvas_input_sources(document, surface, draft)
+    batch_result = getattr(surface.data, "batch_result", None)
+    if version_bindings is None and batch_result and batch_result.source_node_id:
+        version_bindings = {batch_result.source_node_id: batch_result.image_version_ids}
+
     nodes = {node.id: node for node in document.nodes}
     resolved: list[CanvasSnapshotInput] = []
     for source, node_id in candidates:
         node = nodes.get(node_id)
+        if node is not None and node.type == "batch_material" and version_bindings is None:
+            raise ValueError("批量素材需要通过批量执行提交")
         version_id = _current_version_id(node) if node is not None else None
-        version = document.content_versions.get(version_id) if version_id else None
-        if node is None or version is None:
+        version_ids = (version_bindings or {}).get(node_id, [version_id] if version_id else [])
+        if node is None or not version_ids or any(
+            item not in document.content_versions for item in version_ids
+        ):
             # 「先连线，后逐个生成」是画布上最自然的用法，所以这条错误是常态而不是异常路径：
             # 不指名是哪个节点，用户既不知道要先生成谁，也不知道要断开哪条连线。
             title = node.title if node is not None else node_id
@@ -694,15 +720,19 @@ def _resolve_inputs(
                 slot_label = "首帧" if source == "first_frame" else "尾帧"
                 raise ValueError(f"{slot_label}连接的「{title}」还没有内容，先把它生成出来再提交")
             raise ValueError(f"已连接的「{title}」还没有内容，先把它生成出来，或断开这条连接")
-        if source in {"first_frame", "last_frame"} and version.kind != "image":
-            raise ValueError("首帧和尾帧只能选择图片素材")
-        resolved.append(CanvasSnapshotInput(
-            order=len(resolved),
-            source=source,
-            node_id=node_id,
-            version_id=version.version_id,
-            kind=version.kind,
-        ))
+        if source in {"first_frame", "last_frame"} and len(version_ids) != 1:
+            raise ValueError("首帧或尾帧只能使用一张图片")
+        for selected_id in version_ids:
+            version = document.content_versions[selected_id]
+            if source in {"first_frame", "last_frame"} and version.kind != "image":
+                raise ValueError("首帧和尾帧只能选择图片素材")
+            resolved.append(CanvasSnapshotInput(
+                order=len(resolved),
+                source=source,
+                node_id=node_id,
+                version_id=version.version_id,
+                kind=version.kind,
+            ))
     return resolved
 
 
@@ -715,6 +745,7 @@ def _render_final_prompt(
     appended_text: list[str] = []
     media_labels: list[str] = []
     kind_counts = {"text": 0, "image": 0, "video": 0, "audio": 0}
+    replacements: dict[str, list[str]] = {}
     # Draft tokens are stable node IDs. Labels are rebuilt only after the current graph and
     # concrete versions have been frozen, so reconnecting or reordering cannot misaddress media.
     for item in inputs:
@@ -723,15 +754,13 @@ def _render_final_prompt(
         label = _input_label(version.kind, kind_counts[version.kind])
         marker = f"@[node:{item.node_id}]"
         if version.kind == "text":
-            if marker in prompt:
-                prompt = prompt.replace(marker, f"【{label}】")
-                appended_text.append(f"【{label}】\n{version.text}")
-            else:
-                appended_text.append(f"【{label}】\n{version.text}")
+            replacements.setdefault(marker, []).append(f"【{label}】")
+            appended_text.append(f"【{label}】\n{version.text}")
         else:
             media_labels.append(label)
-            if marker in prompt:
-                prompt = prompt.replace(marker, label)
+            replacements.setdefault(marker, []).append(label)
+    for marker, labels in replacements.items():
+        prompt = prompt.replace(marker, "、".join(labels))
     semantic_video_frames = any(
         item.source in {"first_frame", "last_frame"}
         for item in inputs
@@ -1069,15 +1098,17 @@ def _commit_frozen_run(
     run_id: str | None = None,
     additional_versions: list[CanvasContentVersion] | None = None,
     artifacts: list[dict[str, Any]] | None = None,
+    batch_origin: CanvasBatchJobOrigin | None = None,
+    job_id: str | None = None,
 ) -> tuple[Job, CanvasDocument]:
     timestamp = _now()
-    job_id = new_job_id()
+    job_id = job_id or new_job_id()
     run_id = run_id or f"run-{secrets.token_hex(12)}"
     use_surface = (
         allow_surface_reuse
         and surface.type in {"text", "image", "video", "audio"}
         and surface.type == mode
-        and (mode == "text" or _current_version_id(surface) is None)
+        and (batch_origin is not None or mode == "text" or _current_version_id(surface) is None)
     )
     result_id = surface.id if use_surface else f"{mode}-{secrets.token_hex(12)}"
     snapshot_payload = {
@@ -1113,6 +1144,7 @@ def _commit_frozen_run(
         snapshot=snapshot,
         result_node_id=result_id,
         candidates=candidates,
+        batch=batch_origin,
     )
     job = Job(
         job_id=job_id,
@@ -1179,6 +1211,101 @@ def _commit_frozen_run(
     return job, updated
 
 
+@dataclass
+class PreparedCanvasGeneration:
+    key: KeySpec
+    model: ModelSpec
+    kind: JobKind
+    draft: CanvasGenerationDraft
+    normalized: dict[str, Any]
+    job_params: JobParams
+    inputs: list[CanvasSnapshotInput]
+    requested_count: int
+    final_prompt: str
+
+
+def prepare_canvas_generation(
+    project_id: str,
+    document: CanvasDocument,
+    surface: CanvasNode,
+    requested_count: int = 1,
+    *,
+    version_bindings: dict[str, list[str]] | None = None,
+    resolve_media_paths: bool = True,
+) -> PreparedCanvasGeneration:
+    """Resolve one draft without writing a Job or making a provider request."""
+    draft = _draft_for_node(surface)
+    if draft is None:
+        raise ValueError("当前节点没有可提交的生成设置")
+    if surface.type == "config" and draft.mode == "text":
+        raise CanvasRunCommandError(
+            "canvas_text_config_removed",
+            "文本生成已合并到文本节点，请使用文本节点。",
+        )
+    key, model, kind = _resolve_key_and_model(draft)
+    normalized, job_params, effective_count = _normalized_params(draft, requested_count, key, model)
+    inputs = _resolve_inputs(document, surface, draft, version_bindings)
+    if _uses_video_frame_slots(draft) or any(
+        item.source in {"first_frame", "last_frame"} for item in inputs
+    ):
+        frame_sources = {item.source for item in inputs}
+        if {"first_frame", "last_frame"}.issubset(frame_sources):
+            effective_frame_mode = "firstlast"
+        elif "first_frame" in frame_sources:
+            effective_frame_mode = "first"
+        elif "last_frame" in frame_sources:
+            effective_frame_mode = "last"
+        else:
+            effective_frame_mode = None
+        job_params.frame_mode = effective_frame_mode
+        if effective_frame_mode is None:
+            normalized.pop("frame_mode", None)
+        else:
+            normalized["frame_mode"] = effective_frame_mode
+    _validate_input_capabilities(model, kind, inputs, job_params, key.provider)
+    final_prompt = _render_final_prompt(document, draft, inputs)
+    if resolve_media_paths:
+        media_paths = _input_paths(project_id, document, inputs)
+        job_params.reference_images = media_paths["image"] or None
+        job_params.reference_videos = media_paths["video"] or None
+        job_params.reference_audios = media_paths["audio"] or None
+    return PreparedCanvasGeneration(
+        key, model, kind, draft, normalized, job_params, inputs, effective_count, final_prompt,
+    )
+
+
+def commit_canvas_generation_under_lock(
+    project_id: str,
+    current: CanvasDocument,
+    surface: CanvasNode,
+    prepared: PreparedCanvasGeneration,
+    *,
+    batch_origin: CanvasBatchJobOrigin | None = None,
+    job_id: str | None = None,
+    run_id: str | None = None,
+) -> tuple[Job, CanvasDocument]:
+    """Caller holds the project lock; all generation modes share this transaction boundary."""
+    return _commit_frozen_run(
+        project_id, current, surface, prepared.key, prepared.model, prepared.kind,
+        mode=prepared.draft.mode,
+        final_prompt=prepared.final_prompt,
+        input_policy=prepared.draft.input_policy,
+        normalized=prepared.normalized,
+        job_params=prepared.job_params,
+        inputs=prepared.inputs,
+        requested_count=prepared.requested_count,
+        result_title={
+            "text": "生成文本", "image": "生成图片", "video": "生成视频", "audio": "生成音频",
+        }[prepared.draft.mode],
+        result_draft=prepared.draft,
+        allow_surface_reuse=True,
+        transaction_kind="submit",
+        batch_origin=batch_origin,
+        job_id=job_id,
+        run_id=run_id,
+    )
+
+
 def submit_canvas_run(
     project_id: str,
     surface_node_id: str,
@@ -1194,69 +1321,8 @@ def submit_canvas_run(
         surface = next((node for node in current.nodes if node.id == surface_node_id), None)
         if surface is None:
             raise KeyError(surface_node_id)
-        draft = _draft_for_node(surface)
-        if draft is None:
-            raise ValueError("当前节点没有可提交的生成设置")
-        if surface.type == "config" and draft.mode == "text":
-            raise CanvasRunCommandError(
-                "canvas_text_config_removed",
-                "文本生成已合并到文本节点，请使用文本节点。",
-            )
-        key, model, kind = _resolve_key_and_model(draft)
-        normalized, job_params, effective_count = _normalized_params(
-            draft,
-            requested_count,
-            key,
-            model,
-        )
-        inputs = _resolve_inputs(current, surface, draft)
-        if _uses_video_frame_slots(draft) or any(
-            item.source in {"first_frame", "last_frame"} for item in inputs
-        ):
-            frame_sources = {item.source for item in inputs}
-            if {"first_frame", "last_frame"}.issubset(frame_sources):
-                effective_frame_mode = "firstlast"
-            elif "first_frame" in frame_sources:
-                effective_frame_mode = "first"
-            elif "last_frame" in frame_sources:
-                effective_frame_mode = "last"
-            else:
-                effective_frame_mode = None
-            job_params.frame_mode = effective_frame_mode
-            if effective_frame_mode is None:
-                normalized.pop("frame_mode", None)
-            else:
-                normalized["frame_mode"] = effective_frame_mode
-        _validate_input_capabilities(model, kind, inputs, job_params, key.provider)
-        final_prompt = _render_final_prompt(current, draft, inputs)
-        media_paths = _input_paths(project_id, current, inputs)
-        job_params.reference_images = media_paths["image"] or None
-        job_params.reference_videos = media_paths["video"] or None
-        job_params.reference_audios = media_paths["audio"] or None
-        return _commit_frozen_run(
-            project_id,
-            current,
-            surface,
-            key,
-            model,
-            kind,
-            mode=draft.mode,
-            final_prompt=final_prompt,
-            input_policy=draft.input_policy,
-            normalized=normalized,
-            job_params=job_params,
-            inputs=inputs,
-            requested_count=effective_count,
-            result_title={
-                "text": "生成文本",
-                "image": "生成图片",
-                "video": "生成视频",
-                "audio": "生成音频",
-            }[draft.mode],
-            result_draft=draft,
-            allow_surface_reuse=True,
-            transaction_kind="submit",
-        )
+        prepared = prepare_canvas_generation(project_id, current, surface, requested_count)
+        return commit_canvas_generation_under_lock(project_id, current, surface, prepared)
 
 
 def submit_reverse_prompt_run(
@@ -2528,6 +2594,11 @@ def reconcile_canvas_jobs(
                 reconciled.append(job.job_id)
                 continue
             elif job.runner_started_at is None:
+                if context is not None and context.batch is not None:
+                    # Batch approval is not permission to submit unstarted steps after restart.
+                    _cancel_pending_canvas_candidates(job.canvas_project_id, job.job_id)
+                    reconciled.append(job.job_id)
+                    continue
                 # The durable command exists but no provider call was claimed. Startup may resume
                 # it without risking a duplicate charge.
                 reconciled.append(job.job_id)
