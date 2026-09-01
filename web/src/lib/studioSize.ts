@@ -170,11 +170,17 @@ export function normalizeStudioPixelSizeForModel(
   return size;
 }
 
-export function normalizeStudioSizeForModel(size: string, modelId?: string | null): string {
+export function parsePixelSize(size: string): { w: number; h: number } | null {
   const match = /^(\d+)x(\d+)$/.exec(size.trim());
-  if (!match) return size;
+  if (!match) return null;
+  return { w: Number(match[1]), h: Number(match[2]) };
+}
+
+export function normalizeStudioSizeForModel(size: string, modelId?: string | null): string {
+  const parsed = parsePixelSize(size);
+  if (!parsed) return size;
   const normalized = normalizeStudioPixelSizeForModel(
-    { w: Number(match[1]), h: Number(match[2]) },
+    parsed,
     modelId,
   );
   return `${normalized.w}x${normalized.h}`;

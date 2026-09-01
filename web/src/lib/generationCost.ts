@@ -10,9 +10,11 @@ import {
   OPENAI_HK_NANO_BANANA_2_YUAN,
   TOKEN_DANCE_YUAN_PER_IMAGE,
   TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE,
+  TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE,
   TUZI_GROUP_YUAN_PER_IMAGE,
   TUZI_MIDJOURNEY_YUAN_PER_TASK,
 } from '@/lib/generationPrices';
+import { parsePixelSize } from '@/lib/studioSize';
 
 export interface GenerationCostRequest {
   provider?: {
@@ -23,6 +25,7 @@ export interface GenerationCostRequest {
   model?: { id?: string | null; protocol?: string | null };
   kind: 'image' | 'video';
   count?: number;
+  size?: string;
   quality?: Quality;
   duration?: number;
   resolution?: string;
@@ -141,6 +144,7 @@ function estimateTuziImage(request: GenerationCostRequest): number | null {
   const group = request.provider?.billingGroup?.trim();
   if (!group) return null;
   const model = normalize(request.model?.id);
+  const exactModel = request.model?.id?.trim();
   if (group === 'default' && model === 'mj-imagine') return TUZI_MIDJOURNEY_YUAN_PER_TASK;
   if (group === 'default' && TUZI_GEMINI_3_PRO_MODELS.has(model)) {
     // 与 Tuzi caller 一致：固定型号优先，其余 low / medium / high → 1K / 2K / 4K；
@@ -148,6 +152,19 @@ function estimateTuziImage(request: GenerationCostRequest): number | null {
     const tier = model.endsWith('-4k') ? '4k' : model.endsWith('-2k') ? '2k'
       : request.quality === 'high' ? '4k' : request.quality === 'medium' ? '2k' : '1k';
     return priced(TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE[tier] * safeCount(request.count));
+  }
+  if (group === 'default' && exactModel === 'gpt-image-2') {
+    const size = request.size ? parsePixelSize(request.size) : null;
+    if (
+      !size
+      || !Number.isSafeInteger(size.w)
+      || !Number.isSafeInteger(size.h)
+      || size.w < 1
+      || size.h < 1
+    ) return null;
+    const maxEdge = Math.max(size.w, size.h);
+    const tier = maxEdge <= 1024 ? '1k' : maxEdge <= 2048 ? '2k' : '4k';
+    return priced(TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE[tier] * safeCount(request.count));
   }
   const unitPrice = TUZI_GROUP_YUAN_PER_IMAGE[group]?.[model];
   return unitPrice == null ? null : priced(unitPrice * safeCount(request.count));
@@ -293,6 +310,7 @@ export function estimateGenerationCostForSubmission(
     model: { id: modelId, protocol: selectedModel?.protocol },
     kind,
     count: typeof params.n === 'number' ? params.n : undefined,
+    size: typeof params.size === 'string' ? params.size : undefined,
     quality,
     duration: typeof params.duration === 'number' ? params.duration : undefined,
     resolution: typeof params.resolution === 'string' ? params.resolution : undefined,

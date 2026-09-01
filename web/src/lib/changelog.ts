@@ -31,6 +31,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前。第一条的 version 即当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.33.4',
+    date: '2026-09-01',
+    headline: '重要：Tuzi GPT Image 2 改为分辨率计费',
+    changes: [
+      { kind: 'fix', text: 'Tuzi default GPT Image 2 现按最终提交尺寸计费：1K ¥0.035，2K 与 4K 均为 ¥0.21 / 次' },
+      { kind: 'fix', text: '横竖比例和自定义尺寸均按最终像素最大边判档；旧记录保留提交时价格，不随新价回算' },
+    ],
+  },
+  {
     version: '5.33.3',
     date: '2026-08-31',
     headline: 'Tuzi 香蕉 Pro 按新价格估算费用',
