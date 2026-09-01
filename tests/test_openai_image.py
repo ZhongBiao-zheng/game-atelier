@@ -155,6 +155,7 @@ def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
 
     assert calls[0]["url"] == "https://api.tu-zi.com/v1/images/generations"
     assert calls[0]["task_id"] == "saved-1"
+    assert calls[0]["payload"]["size"] == "2048x2048"
     assert calls[0]["payload"].get("quality") is None
     assert persisted == []
     assert Path(paths[0]).read_bytes() == image_bytes
