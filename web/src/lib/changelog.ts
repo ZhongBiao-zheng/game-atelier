@@ -4,9 +4,11 @@
  * 走接口就要多一份运行时数据、多一条失败路径，而它永远不会在运行期变化。
  *
  * **发版时怎么加**：在数组**开头**插一条（新版在前），version 与 `.claude-plugin/plugin.json`
- * 的 version 保持一致 —— 两处真值必然漂移，所以 changelog.test.ts 里有一条断言把它们钉死，
- * 忘了同步会红。文案写给画师看：说这版能做什么，不是 commit message。
+ * 的 version 保持一致，changelog.test.ts 检查最新日志覆盖当前版本。
+ * 文案写给画师看：说这版能做什么，不是 commit message。
  */
+import pluginManifest from '../../../.claude-plugin/plugin.json';
+
 export type ChangeKind = 'feat' | 'fix';
 
 export interface ChangelogChange {
@@ -28,8 +30,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
   fix: '修复',
 };
 
-/** 新版在前。第一条的 version 即当前版本。 */
+/** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '5.33.5',
+    date: '2026-09-01',
+    headline: '版本与项目入口更简洁',
+    changes: [
+      { kind: 'feat', text: '顶栏显示当前版本号与 GitHub 入口，点击版本号即可查看更新日志' },
+      { kind: 'fix', text: '升级后只显示未读圆点，不再自动展开更新日志；窄屏导航与操作入口分行展示' },
+    ],
+  },
   {
     version: '5.33.4',
     date: '2026-09-01',
@@ -480,7 +491,8 @@ export const CHANGELOG: ChangelogEntry[] = [
   },
 ];
 
-export const CURRENT_VERSION = CHANGELOG[0].version;
+export const CURRENT_VERSION = pluginManifest.version;
+export const PROJECT_GITHUB_URL = pluginManifest.homepage;
 
 /** 展示顺序固定「先新增、后修复」，不按录入顺序 —— 画师先关心多了什么能力。 */
 const KIND_ORDER: ChangeKind[] = ['feat', 'fix'];

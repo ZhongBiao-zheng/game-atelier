@@ -3,12 +3,14 @@ import { describe, expect, it } from 'vitest';
 // ?raw 由 vite 在 transform 期内联，路径按文件位置解析——不依赖测试进程的 cwd
 // （make test 从仓库根跑、pnpm test 从 web/ 跑，两种都得过）。
 import pluginManifest from '../../../.claude-plugin/plugin.json?raw';
-import { CHANGELOG, CURRENT_VERSION, groupChanges, hasUnreadChangelog } from './changelog';
+import { CHANGELOG, CURRENT_VERSION, PROJECT_GITHUB_URL, groupChanges, hasUnreadChangelog } from './changelog';
 
 describe('changelog 数据', () => {
-  it('最新一条与 plugin.json 的版本一致 —— 两处真值靠这条断言钉死', () => {
-    const declared = (JSON.parse(pluginManifest) as { version: string }).version;
-    expect(CURRENT_VERSION).toBe(declared);
+  it('版本与仓库入口读取 plugin.json，最新日志覆盖当前版本', () => {
+    const declared = JSON.parse(pluginManifest) as { version: string; homepage: string };
+    expect(CURRENT_VERSION).toBe(declared.version);
+    expect(CHANGELOG[0].version).toBe(declared.version);
+    expect(PROJECT_GITHUB_URL).toBe(declared.homepage);
   });
 
   it('新版在前、版本号不重复', () => {
