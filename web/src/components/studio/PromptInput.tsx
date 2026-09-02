@@ -5,6 +5,7 @@ import { modelModality, type KeyView } from '@/api/keys';
 import { availableResolutions, computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
 import { providerLabel } from '@/lib/providerLabels';
 import { maxReferenceImages } from '@/lib/referenceLimits';
+import { imageFamily } from '@/lib/modelFamily';
 import {
   imageControlCaps,
   MJ_IMAGES_PER_TASK,
@@ -308,7 +309,23 @@ export function PromptInput({
     refHintTimer.current = window.setTimeout(() => setRefHint(null), 5000);
   }, []);
   useEffect(() => () => window.clearTimeout(refHintTimer.current), []);
+  // 厂商/模型列表按当前生成类型过滤：模型级 modality 标注优先，未标注按 key 级 modalities 兜底。
+  const wantedModality = isVideo ? 'video' : 'image';
+  const visibleProviders = providers.filter(
+    (p) => (p.models ?? []).some((m) => modelModality(m, p) === wantedModality),
+  );
+  const provider = visibleProviders.find((item) => item.alias === providerAlias) ?? visibleProviders[0];
+  const providerDisplayName = providerName(provider);
+  const models = (provider?.models ?? []).filter((m) => modelModality(m, provider) === wantedModality);
+  const selectedModel = models.find((item) => item.id === model) ?? models[0];
   const isOmni = isVideo && videoMode === 'omni' && Boolean(videoCaps);
+  // @引用开放给两类入口：视频「全能参考」(omni)，以及图片图生图（MJ 除外）。@ 提交时只剩
+  // 「图N」字面量（见 serializeMentions），能不能吃到取决于模型是否按输入顺序理解序号：
+  // seedream 官方 prompt 示例直接写「图1 / 图2」，gpt-image / nano-banana 是多模态模型、
+  // 输入数组有序；MJ 的参考图走 --sref/--cref 等 flag，prompt 文本里的「图1」对它没有意义，
+  // 开了就是骗人的糖。视频首尾帧模式也不开：两张图各有固定语义槽位，不靠序号指代。
+  const mentionsEnabled = isOmni
+    || (!isVideo && Boolean(onReferenceImagesChange) && imageFamily(selectedModel?.id) !== 'midjourney');
   // 参考堆叠的数据源：图片模式只有参考图；omni 模式图/视频/音频混排进同一叠扇形。
   const stackItems = useMemo(() => {
     const images = referenceImages.map((file) => ({ kind: 'image' as const, file }));
@@ -362,17 +379,16 @@ export function PromptInput({
   }, [mentionItems, thumbFor]);
   const chipMetaRef = useRef(chipMeta);
   chipMetaRef.current = chipMeta;
-  // @引用只属于视频「全能参考」(omni)：图片生成的参考图是朴素图生图，不走 @chip/编号/扇形倾斜。
-  // 用 ref 让 renderDom（[] 依赖、命令式构建）能读到最新模式而不必进依赖数组。
-  const isOmniRef = useRef(isOmni);
-  isOmniRef.current = isOmni;
+  // 用 ref 让 renderDom（[] 依赖、命令式构建）能读到最新开关而不必进依赖数组。
+  const mentionsEnabledRef = useRef(mentionsEnabled);
+  mentionsEnabledRef.current = mentionsEnabled;
 
   /** prompt 字符串 → 编辑器 DOM：@图N 字面量渲染成原子 chip。仅外部改写时调用。 */
   const renderDom = useCallback((value: string) => {
     const root = editorRef.current;
     if (!root) return;
-    // 非 omni（图片 / 视频首尾帧）：prompt 是纯文本，@图N 不渲染成 chip。
-    if (!isOmniRef.current) { root.textContent = value; return; }
+    // @引用未开放（MJ / 视频首尾帧）：prompt 是纯文本，@图N 不渲染成 chip。
+    if (!mentionsEnabledRef.current) { root.textContent = value; return; }
     root.textContent = '';
     let last = 0;
     for (const m of value.matchAll(createMentionTokenRegex())) {
@@ -427,7 +443,7 @@ export function PromptInput({
 
   /** 光标前一字符是 @ 且有素材 → 弹引用菜单。 */
   const updateMentionMenu = useCallback(() => {
-    if (!isOmni || stackItems.length === 0) {
+    if (!mentionsEnabled || stackItems.length === 0) {
       setMentionOpen(false);
       return;
     }
@@ -440,7 +456,7 @@ export function PromptInput({
       }
     }
     setMentionOpen(open);
-  }, [isOmni, stackItems.length]);
+  }, [mentionsEnabled, stackItems.length]);
 
   /** 在光标处插入纯文本（Enter 换行 / 粘贴去格式共用）。execCommand 保原生撤销栈，jsdom 无则 Range 兜底。 */
   function insertPlainText(value: string) {
@@ -557,15 +573,6 @@ export function PromptInput({
     ro.observe(el);
     return () => ro.disconnect();
   }, [updateScroll, isVideo, videoMode, model, providerAlias, providers, collapsed]);
-  // 厂商/模型列表按当前生成类型过滤：模型级 modality 标注优先，未标注按 key 级 modalities 兜底。
-  const wantedModality = isVideo ? 'video' : 'image';
-  const visibleProviders = providers.filter(
-    (p) => (p.models ?? []).some((m) => modelModality(m, p) === wantedModality),
-  );
-  const provider = visibleProviders.find((item) => item.alias === providerAlias) ?? visibleProviders[0];
-  const providerDisplayName = providerName(provider);
-  const models = (provider?.models ?? []).filter((m) => modelModality(m, provider) === wantedModality);
-  const selectedModel = models.find((item) => item.id === model) ?? models[0];
   const initSize = computeStudioPixelSize(ratio, resolution, selectedModel?.id);
   const [localW, setLocalW] = useState(initSize.w);
   const [localH, setLocalH] = useState(initSize.h);
@@ -893,8 +900,7 @@ export function PromptInput({
                 >
                   {stackItems.map((item, i) => {
                     const hovered = refHovered === i;
-                    // 倾斜扇形回到图片参考（2026-08-20 飙哥指定）：与 omni 同一套公式，
-                    // 只有 @编号徽标 / @引用仍是 omni 专属。
+                    // 倾斜扇形回到图片参考（2026-08-20 飙哥指定）：与 omni 同一套公式。
                     const angle = refExpanded ? expandAngle(i) : collapseAngle(i);
                     const thumb = thumbFor(i);
                     return (
@@ -934,8 +940,8 @@ export function PromptInput({
                               <span className="w-full truncate text-center text-xs">{item.file.name}</span>
                             </div>
                           )}
-                          {/* @引用编号徽标：仅 omni 全能参考需要（图片图生图不走 @引用）。 */}
-                          {isOmni && (
+                          {/* @引用编号徽标：与 mentionItems 的「图N」一致，用户看着它敲 @。 */}
+                          {mentionsEnabled && (
                             <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded bg-scrim px-1 text-xs leading-4 text-foreground/90">
                               {mentionItems[i]?.label}
                             </span>
@@ -1026,7 +1032,7 @@ export function PromptInput({
           role="textbox"
           aria-multiline="true"
           aria-label="生图 prompt"
-          data-placeholder={isOmni && stackItems.length > 0 ? '开始一段灵感对话，输入 @ 引用参考素材...' : '开始一段灵感对话...'}
+          data-placeholder={mentionsEnabled && stackItems.length > 0 ? '开始一段灵感对话，输入 @ 引用参考素材...' : '开始一段灵感对话...'}
           onInput={onEditorInput}
           onKeyDown={onKey}
           onKeyUp={rememberEditorRange}

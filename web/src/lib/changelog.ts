@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.34.0',
+    date: '2026-09-02',
+    headline: '图片生成也能 @ 引用参考图',
+    changes: [
+      { kind: 'feat', text: '创作台图片模式：参考图带「图1 / 图2」编号，prompt 里敲 @ 即可引用，像视频全能参考一样写「把图1的服装穿到图2的角色身上」' },
+      { kind: 'feat', text: '火山 Seedream、GPT Image、Nano Banana 均可用；Midjourney 的参考图走 --sref / --cref，不开放 @ 引用' },
+    ],
+  },
+  {
     version: '5.33.5',
     date: '2026-09-01',
     headline: '版本与项目入口更简洁',
