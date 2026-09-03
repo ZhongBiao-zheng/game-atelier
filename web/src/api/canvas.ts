@@ -301,6 +301,28 @@ export function submitCanvasReversePrompt(
   );
 }
 
+export function submitCanvasLayerDecomposition(
+  projectId: string,
+  surfaceNodeId: string,
+  expectedRevision: number,
+  selection: { alias: string; model: string },
+): Promise<CanvasRun> {
+  return requestJson<CanvasRun>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/layer-decomposition`,
+    '拆分图片图层',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        surface_node_id: surfaceNodeId,
+        expected_revision: expectedRevision,
+        alias: selection.alias,
+        model: selection.model,
+      }),
+    },
+  );
+}
+
 export function submitCanvasMaskEdit(
   projectId: string,
   surfaceNodeId: string,

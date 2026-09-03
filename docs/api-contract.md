@@ -109,7 +109,7 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `POST /canvas/projects` `PATCH /canvas/projects/{id}` `PUT /canvas/projects/{id}/document`
 `POST /canvas/projects/{id}/agent/sessions` `DELETE /canvas/projects/{id}/agent/sessions/{session_id}`
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
-`POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle}`
+`POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle,layer-decomposition}`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
 `POST /creation-assets/prompts` `POST /creation-assets/images/{upload,from-path}`
 `PUT /creation-assets/{asset_id}/{prompt,image}`
@@ -172,7 +172,7 @@ Canvas 媒体只按项目内不可变 `version_id` 读取，不接受裸路径�
 数据完整性故障，重试永远不会成功，而前端的 409 文案写着「刷新后重试」。
 `canvas_runs` 里那批英文断言是后台管线的内部不变式，不作为 HTTP detail 返回；它们经
 `job_runner._friendly_error` 加一句中文前缀后落进 `job.error`，原文保留以便定位。
-`CanvasDocument` 保存 viewport/settings、七类稳定节点、两类连接与不可变 `content_versions`。运行时只接受
+`CanvasDocument` 保存 viewport/settings、九类稳定节点、两类连接与不可变 `content_versions`。运行时只接受
 `schema_version: 2`，不包含 v1 union、fallback 或 converter。
 客户端在所有视口共用同一份 revision 化 Document；响应式面板、焦点、选择与媒体预览都是本地呈现状态，
 不会进入 `canvas.json`。预览媒体仍只通过已登记 `version_id` 读取，不从节点或 Job 拼接裸路径。
@@ -229,6 +229,35 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 （`reference_images/videos/audios`、`mask_image`、`mj_sref/cref/oref`）与 caller 回写字段
 （`actual_size`、`warnings`、`mj_flags`）都不在名单里 —— 浏览器不能提交路径，Canvas 的参考素材只能
 来自不可变 Content Version。
+批量执行使用 `batch_material` 节点：`data.items` 为最多 200 个 `{id,image_version_ids}`，
+每项 1–16 张已登记图片；项 ID 在节点内唯一。节点仅提供输入，没有生成 Draft。`group.data.repeat_count`
+为 1–20 轮，一层显式成员关系保持不变。分组外框按成员显示边界派生，加载与实时合并使用同一规则；
+`group.size` 为正有限数的 `CanvasGroupSize`，不受普通节点 `CanvasSize` 的 4000px 上限影响，
+大批次展开后仍能包围所有成员。图片、视频等普通节点继续保留 4000px 尺寸上限。分组或单节点可以调用：
+
+- `POST /canvas/projects/{id}/batch-runs/prepare`：`{scope_node_id,expected_revision,repeat_count}`；
+  校验冻结素材、输入依赖、模型能力及每步单产物，返回 `ready` 计划，不调用模型。最多 20 步、2000 次生成；
+  一个范围只允许一个批量素材来源，无素材节点时固定输入为一项；不支持循环或配置/插件节点执行。
+- `POST .../batch-runs/{batch_id}/start`：确认后启动；revision 必须仍匹配，同项目只允许一份活动计划。
+  同一计划重复 start 不再调度。串行执行的普通 Canvas Job 带 `canvas_run.batch`
+  `{batch_id,item_id,round_index,step_index}`，两个 index 从 0 开始。
+- `POST .../batch-runs/{batch_id}/cancel`：取消未提交步骤，对当前 Job 发协作停止；已收费产物继续登记。
+- `GET .../batch-runs` / `GET .../batch-runs/{batch_id}`：读取最近 20 份计划/单份计划，
+  包含每项每步的 Job、Run、结果 Version ID 和状态；`executions[].result_node_id` 在展开前为空，
+  首次提交事务展开链路后指向对应普通节点。未提交步骤不伪造节点的 `active_run_id`。
+
+批量计划冻结数据落在项目 `.runtime/batch-plans/`；进度在 `.runtime/batches/`，活动计划索引为
+`.runtime/batch-active.json`。同项同轮上游输出绑定到下游的精确 Version ID。
+首次提交事务同时展开各项、各轮的真实结果节点和输入连线：第一项第一轮使用配置链路的原节点，
+其余项/轮按行排在现有内容下方，各行的下游只连接同行上游；不在一个节点中切换批次结果。
+内容节点的可选 `data.batch_result` 保存 `{batch_id,template_node_id,source_node_id,item_id,image_version_ids,round_index}`，
+绑定本批素材的不可变版本，单独再次生成时不读取其他批次；分组再次执行只读取原配置节点，
+不把自动展开的产物节点重新当作流程步骤。所有结果仍由普通 Job/Version 保存，视频不提供候选切换。
+上次生成的输出不隐式成为下一次批量执行的自身参考。
+失败停止剩余步骤，无自动付费重试；服务重启将活动计划标为 interrupted，不自动提交剩余步骤。
+计划文件属于本机执行状态，不随项目包导入；图片素材、普通节点及已经生成的 Jobs/Versions 仍随包保存。
+前端执行期间锁定画布内容编辑，仍可浏览结果；项目导出/删除在批量运行时拒绝。
+
 四模态均进入同一个 Job Runner：图片/视频沿用既有厂商协议；文本只接受明确可执行的
 OpenAI-compatible `chat/completions` 或 `responses`，后者支持 `reasoning_effort`，其中 `auto` 只作为
 Draft 选择且冻结/请求时省略；音频只接受 OpenAI-compatible `audio/speech`，冻结并发送白名单内的
@@ -294,6 +323,21 @@ Draft 不读不改；停止与 original retry 复用普通 Run 生命周期，cu
 Input Connection。图片模型优先使用仍可路由的画布图片生成偏好；偏好保持自动选择或显式模型失效时，
 再按 default Key 优先、其余登记顺序选择。自动选择会应用已保存的默认参数，失效的显式模型不泄漏旧参数；
 缺模型时保留反推文本且零写。重复请求即使携带旧 revision，也返回已经存在的同一配置，不重复创建节点或连接。
+
+图片工具栏的“拆分图层”先在画布中创建一个 `layer_stack` 节点和一条图片输入连线，不调用厂商。未运行节点的
+`source_version_id` 跟随唯一上游图片的当前 Version，替换或重新生成上游图片时同时更新节点预览与随源图比例计算的
+初始尺寸；运行中及已完成节点冻结本次源 Version，历史产物不随上游变化。节点左侧展示源图，右侧保存用户选择的
+`alias + model` 与可选提示词。`POST
+/canvas/projects/{id}/runs/layer-decomposition` 只接受该节点的 `surface_node_id + expected_revision + alias + model`，
+服务端还会核对请求选择与节点已保存设置完全一致。只接受火山直连或明确使用 Ark 协议的 Seedream 5.0 Pro，
+绝不自动替换渠道或模型。比例固定为“智能”并继承输入图；分辨率默认 `auto`，可显式选择
+`1K / 1.5K / 2K`。调用固定提交单张源图、`layer_decomposition=true`、节点保存的 `size`、
+`output_format=png`、`response_format=b64_json` 与
+`watermark=false`，不自动回退到其他渠道或普通生图。提交与完成事务都复用原 `layer_stack` 节点；完成后把背景图
+和最多 16 张透明 PNG 全部登记为不可变图片 Version，并保存厂商返回的 `z_index`、`name`、
+`description`、`bounding_box`。底图使用普通 `job_output` 血缘，透明层使用带 `job_id + output_index` 的
+`layer_decomposition` 血缘；媒体读取和项目包导入导出均校验该索引与 Job 输出一致。图层栈按绝对 bbox
+重建原图，显隐只修改节点呈现状态，不改写产物字节或 Job 历史。
 
 `POST /canvas/projects/{id}/runs/mask-edit` 使用 multipart，只接受 `surface_node_id / expected_revision /
 requested_count / mask_file`。prompt、alias、model 与参数必须先保存为源图片节点的 image Draft，服务端

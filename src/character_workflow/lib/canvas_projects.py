@@ -275,6 +275,10 @@ def _normalized_web_document(
     if submitted.revision != current.revision:
         raise RuntimeError(f"revision_conflict:{current.revision}")
 
+    from character_workflow.lib.canvas_batches import assert_batch_document_change
+
+    assert_batch_document_change(current, submitted)
+
     versions = dict(submitted.content_versions)
     for version_id, existing in current.content_versions.items():
         if versions.get(version_id) != existing:
@@ -646,7 +650,9 @@ def _resolve_canvas_media_version(
         if not target.is_file():
             raise FileNotFoundError(version.version_id)
         return target, version
-    if not target.is_relative_to(outputs) or version.origin.kind != "job_output":
+    if not target.is_relative_to(outputs) or version.origin.kind not in {
+        "job_output", "layer_decomposition",
+    }:
         raise PermissionError("canvas media version has an invalid owned path")
     try:
         job = read_job(version.origin.job_id)
@@ -654,11 +660,24 @@ def _resolve_canvas_media_version(
         raise FileNotFoundError(version.origin.job_id) from error
     if job.namespace != "canvas" or job.canvas_project_id != project_id:
         raise PermissionError("job does not belong to this canvas project")
-    normalized = {
+    normalized = [
         str((Path(item) if Path(item).is_absolute() else data_root.resolve_data_root() / item).resolve())
         for item in job.output_paths
-    }
-    if str(target) not in normalized:
+    ]
+    if version.origin.kind == "layer_decomposition":
+        result = job.params.layer_decomposition_result
+        index = version.origin.output_index
+        metadata = None if result is None else next(
+            (item for item in result.outputs if item.output_index == index), None,
+        )
+        if (
+            metadata is None
+            or metadata.z_index == 0
+            or index >= len(normalized)
+            or normalized[index] != str(target)
+        ):
+            raise PermissionError("layer media path does not match its decomposition output")
+    elif str(target) not in normalized:
         raise PermissionError("media path is not registered on this canvas job")
     if not target.is_file():
         raise FileNotFoundError(version.version_id)

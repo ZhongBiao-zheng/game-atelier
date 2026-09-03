@@ -491,7 +491,7 @@ def _run_job_claimed(
                 update_job_params(job.job_id, params)
 
             paths = dispatch(
-                prompt=job.prompt,
+                prompt=_with_reference_numbering(job.prompt, params),
                 model=job.model,
                 alias=job.alias,
                 output_dir=Path(tmp),
@@ -512,8 +512,13 @@ def _run_job_claimed(
             output_dir = job_output_dir_for(job)
             output_paths: list[str] = []
             first_dims: tuple[int, int] | None = None
+            selected_outputs = (
+                selected
+                if params.get("layer_decomposition")
+                else selected[: max(1, int(params.get("n") or 1))]
+            )
             with asset_output_lock(output_dir):
-                for src, dims in selected[: max(1, int(params.get("n") or 1))]:
+                for src, dims in selected_outputs:
                     target = next_asset_path(output_dir, "png")
                     shutil.move(str(src), target)
                     output_paths.append(str(target))
@@ -553,6 +558,24 @@ def _run_job_claimed(
         if isinstance(e, JobRunnerError):
             raise
         raise JobRunnerError(str(e)) from e
+
+
+_REFERENCE_MENTION = re.compile(r"(?:图片|图)\d+")
+_REFERENCE_NUMBERING_MARK = "参考素材编号："
+
+
+def _with_reference_numbering(prompt: str, params: dict[str, Any]) -> str:
+    """创作台 @引用提交后只剩「图N」字面量；给多模态模型补一句编号说明，把序号钉到输入顺序上。
+
+    与画布 `_render_final_prompt` 同一契约（画布已自带这句，靠标记去重）。只在 prompt 真的
+    引用了序号且带参考图时才加：普通图生图 prompt 原样发。不写回 job.prompt——历史与再次编辑
+    看到的应该是画师自己写的那句。
+    """
+    refs = [r for r in (params.get("reference_images") or []) if r]
+    if not refs or _REFERENCE_NUMBERING_MARK in prompt or not _REFERENCE_MENTION.search(prompt):
+        return prompt
+    labels = "、".join(f"图{i}" for i in range(1, len(refs) + 1))
+    return f"{_REFERENCE_NUMBERING_MARK}{labels}。请按这些编号理解提示词中的引用。\n\n{prompt}"
 
 
 def _run_text_job(job: Job) -> Job:

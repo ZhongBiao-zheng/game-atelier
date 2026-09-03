@@ -21,6 +21,7 @@ from viewer_server.connection_middleware import ConnectionMiddleware, connection
 from viewer_server.connection_routes import connection_router
 from viewer_server.routes import router
 from viewer_server.request_boundary import LocalRequestBoundary, development_origin
+from viewer_server.routes_canvas_batches import router as canvas_batches_router
 from viewer_server.sse import hub, sse_router
 from viewer_server.watcher import start_watchers
 
@@ -143,6 +144,10 @@ async def lifespan(app: FastAPI):
         recover_canvas_transactions(project.project_id)
 
     reconciled = reconcile_canvas_jobs(fail_pending=True)
+    from character_workflow.lib.canvas_batches import interrupt_canvas_batch_after_restart
+
+    for project in canvas_projects:
+        interrupt_canvas_batch_after_restart(project.project_id)
     resumable = [
         job_id for job_id in reconciled
         if (
@@ -244,6 +249,7 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.add_middleware(LocalRequestBoundary, dev_origin=development_origin())
     app.include_router(router)
     app.include_router(connection_router(connection_store))
+    app.include_router(canvas_batches_router)
     app.include_router(sse_router)
     from viewer_server.workshop_routes import register_workshop_routes
 

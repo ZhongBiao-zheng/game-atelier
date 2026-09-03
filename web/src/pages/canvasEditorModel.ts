@@ -13,6 +13,7 @@ import {
 } from '@/lib/audioGeneration';
 import type {
   CanvasContentNode,
+  CanvasBatchMaterialNode,
   CanvasContentVersion,
   CanvasGenerationDefault,
   CanvasGenerationMode,
@@ -69,6 +70,11 @@ export interface CanvasPlacementBounds {
 
 export const CANVAS_TEXT_NODE_DEFAULT_SIZE: CanvasSize = { width: 256, height: 144 };
 export const CANVAS_DEFAULT_NODE_SIZE: CanvasSize = { width: 320, height: 176 };
+const CANVAS_LAYER_STACK_PANEL_WIDTH = 288;
+const CANVAS_LAYER_STACK_PREVIEW_WIDTH = 480;
+const CANVAS_LAYER_STACK_PREVIEW_MIN_WIDTH = 320;
+const CANVAS_LAYER_STACK_PREVIEW_MIN_HEIGHT = 400;
+const CANVAS_LAYER_STACK_PREVIEW_MAX_HEIGHT = 640;
 const CANVAS_NODE_PLACEMENT_GAP = 48;
 
 function canvasPlacementDirectionRank({ x, y }: { x: number; y: number }) {
@@ -102,6 +108,58 @@ export function sizeLockedToCanvasVersion(
   return { width: Math.round(width), height: Math.round(height) };
 }
 
+/** 图层栈左侧预览随源图比例伸缩，右侧设置区维持固定宽度。
+ *
+ * 横图优先保留足够的预览宽度，竖图优先保留足够的预览高度；两端都设上限，避免超长图把
+ * 新节点撑到远离当前视口。实际像素不会决定画布尺寸，避免一张 8K 图创建出 4000px 节点。 */
+export function layerStackSizeForCanvasVersion(
+  version: Pick<CanvasMediaVersion, 'width' | 'height'>,
+): CanvasSize {
+  if (!version.width || !version.height) return { width: 760, height: 480 };
+  const ratio = version.width / version.height;
+  let previewWidth = CANVAS_LAYER_STACK_PREVIEW_WIDTH;
+  let previewHeight = CANVAS_LAYER_STACK_PREVIEW_WIDTH / ratio;
+  if (previewHeight > CANVAS_LAYER_STACK_PREVIEW_MAX_HEIGHT) {
+    previewHeight = CANVAS_LAYER_STACK_PREVIEW_MAX_HEIGHT;
+    previewWidth = Math.max(CANVAS_LAYER_STACK_PREVIEW_MIN_WIDTH, previewHeight * ratio);
+  } else {
+    previewHeight = Math.max(CANVAS_LAYER_STACK_PREVIEW_MIN_HEIGHT, previewHeight);
+  }
+  return {
+    width: Math.round(previewWidth + CANVAS_LAYER_STACK_PANEL_WIDTH),
+    height: Math.round(previewHeight),
+  };
+}
+
+/** 未提交的图层栈跟随唯一上游图片的当前版本；运行中与已完成节点保持快照不变。 */
+export function syncDraftLayerStackSources(document: CanvasDocument): CanvasDocument {
+  const nodesById = new Map(document.nodes.map(node => [node.id, node]));
+  const sourceNodeIdByStackId = new Map<string, string>();
+  for (const connection of document.connections) {
+    if (connection.role !== 'input' || connection.slot) continue;
+    sourceNodeIdByStackId.set(connection.target_node_id, connection.source_node_id);
+  }
+  let changed = false;
+  const nodes = document.nodes.map(node => {
+    if (
+      node.type !== 'layer_stack'
+      || node.data.base_version_id
+      || node.data.active_run_id
+    ) return node;
+    const sourceNode = nodesById.get(sourceNodeIdByStackId.get(node.id) ?? '');
+    if (sourceNode?.type !== 'image' || !sourceNode.data.current_version_id) return node;
+    const version = document.content_versions[sourceNode.data.current_version_id];
+    if (version?.kind !== 'image' || version.version_id === node.data.source_version_id) return node;
+    changed = true;
+    return {
+      ...node,
+      size: layerStackSizeForCanvasVersion(version),
+      data: { ...node.data, source_version_id: version.version_id, error: null },
+    };
+  });
+  return changed ? { ...document, nodes } : document;
+}
+
 export function canvasNodeRenderedSize(
   node: CanvasNode,
   versions: Readonly<Record<string, CanvasContentVersion>>,
@@ -114,6 +172,27 @@ export function canvasNodeRenderedSize(
   return version?.kind === 'image'
     ? sizeLockedToCanvasVersion(node.size, version)
     : node.size ?? CANVAS_DEFAULT_NODE_SIZE;
+}
+
+/** Group membership is explicit; its frame follows its members, never creates dependencies. */
+export function normalizeCanvasGroups(document: CanvasDocument): CanvasDocument {
+  const byId = new Map(document.nodes.map(node => [node.id, node]));
+  return { ...document, nodes: document.nodes.map(node => {
+    if (node.type !== 'group') return node;
+    const members = node.data.member_node_ids.flatMap(id => {
+      const member = byId.get(id);
+      return member && member.type !== 'group' ? [member] : [];
+    });
+    if (!members.length) return { ...node, data: { ...node.data, member_node_ids: [] } };
+    const x = Math.min(...members.map(member => member.position.x)) - 24;
+    const y = Math.min(...members.map(member => member.position.y)) - 40;
+    const right = Math.max(...members.map(member => member.position.x + canvasNodeRenderedSize(member, document.content_versions).width)) + 24;
+    const bottom = Math.max(...members.map(member => member.position.y + canvasNodeRenderedSize(member, document.content_versions).height)) + 24;
+    const size = { width: right - x, height: bottom - y };
+    if (node.position.x === x && node.position.y === y && node.size?.width === size.width
+      && node.size?.height === size.height && members.length === node.data.member_node_ids.length) return node;
+    return { ...node, position: { x, y }, size, data: { ...node.data, member_node_ids: members.map(member => member.id) } };
+  }) };
 }
 
 /** 从期望位置开始，按网格圈由内向外找一个不与现有节点重叠的点。
@@ -236,7 +315,10 @@ export function canvasDeletionBlockedMessage(
 }
 
 export function canvasNodeAcceptsInput(node: CanvasNode) {
-  return node.type !== 'group' && node.type !== 'plugin';
+  return node.type !== 'group'
+    && node.type !== 'plugin'
+    && node.type !== 'batch_material'
+    && node.type !== 'layer_stack';
 }
 
 export function canvasNodeProvidesContent(node: CanvasNode): node is CanvasContentNode {
@@ -267,13 +349,25 @@ export function canvasNodeHasCurrentContent(
  *  四类内容节点一视同仁之后就不再需要版本表了：canvasNodeHasCurrentContent 的第一道判据也是
  *  canvasNodeProvidesContent，`A || (A && …)` 恒等于 A。留着那个参数只会逼调用方去拿全量版本表
  *  （节点卡因此每一次按键都要重渲染，见 CanvasEditor 里 resolveVersion 的说明）。 */
-export function canvasNodeProvidesOutput(node: CanvasNode): node is CanvasContentNode {
-  return canvasNodeProvidesContent(node);
+export function canvasNodeProvidesOutput(node: CanvasNode): node is CanvasContentNode | CanvasBatchMaterialNode {
+  return canvasNodeProvidesContent(node) || node.type === 'batch_material';
 }
 
 export interface CanvasPendingInput {
   nodeId: string;
   title: string;
+}
+
+/** A different batch source needs a new confirmation, including when retrying a result. */
+export function canvasRequiresBatchRun(document: CanvasDocument | null, nodeId: string): boolean {
+  if (!document) return false;
+  const nodes = new Map(document.nodes.map(node => [node.id, node]));
+  const target = nodes.get(nodeId);
+  const boundSourceId = target && canvasNodeProvidesContent(target) ? target.data.batch_result?.source_node_id : null;
+  return document.connections.some(connection => connection.role === 'input'
+    && connection.target_node_id === nodeId
+    && nodes.get(connection.source_node_id)?.type === 'batch_material'
+    && connection.source_node_id !== boundSourceId);
 }
 
 /** 每个目标节点上「已连接但还没有内容」的输入源。
@@ -290,6 +384,15 @@ export function canvasPendingInputNodes(
     if (connection.role !== 'input' || connection.slot) continue;
     const source = nodes.get(connection.source_node_id);
     if (!source || canvasNodeHasCurrentContent(source, document.content_versions)) continue;
+    if (source.type === 'batch_material') {
+      const target = nodes.get(connection.target_node_id);
+      const binding = target && canvasNodeProvidesContent(target) ? target.data.batch_result : null;
+      if (binding?.source_node_id === source.id) {
+        if (binding.image_version_ids.length && binding.image_version_ids.every(
+          id => document.content_versions[id]?.kind === 'image',
+        )) continue;
+      } else if (source.data.items.length) continue;
+    }
     const pending = result.get(connection.target_node_id) ?? [];
     pending.push({ nodeId: source.id, title: source.title });
     result.set(connection.target_node_id, pending);

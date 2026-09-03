@@ -66,6 +66,7 @@ from character_workflow.lib.schemas import (
     CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionList,
     CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument,
     CanvasCreationAssetInsertRequest,
+    CanvasLayerDecompositionCreate,
     CanvasPackageCommitRequest, CanvasPackageImportResponse,
     CanvasMaskEditCreate, CanvasMediaOperationRequest, CanvasMediaOperationResponse,
     CanvasProject, CanvasProjectCreate, CanvasProjectDeleteRequest, CanvasProjectExportRequest,
@@ -2891,6 +2892,48 @@ def _canvas_run_revision_conflict(error: RuntimeError) -> HTTPException | None:
         "message": "画布已发生变化，请保留当前内容并重试。",
         "current_revision": int(detail.split(":", 1)[1]),
     })
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/layer-decomposition",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+def post_canvas_layer_decomposition(
+    project_id: str,
+    payload: CanvasLayerDecompositionCreate,
+    background: BackgroundTasks,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import (
+        CanvasRunCommandError,
+        submit_layer_decomposition_run,
+    )
+
+    try:
+        job, document = submit_layer_decomposition_run(
+            project_id,
+            payload.surface_node_id,
+            payload.expected_revision,
+            payload.alias,
+            payload.model,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或拆分图层节点") from None
+    except CanvasRunCommandError as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
 
 
 @router.post(

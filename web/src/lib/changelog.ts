@@ -4,9 +4,11 @@
  * 走接口就要多一份运行时数据、多一条失败路径，而它永远不会在运行期变化。
  *
  * **发版时怎么加**：在数组**开头**插一条（新版在前），version 与 `.claude-plugin/plugin.json`
- * 的 version 保持一致 —— 两处真值必然漂移，所以 changelog.test.ts 里有一条断言把它们钉死，
- * 忘了同步会红。文案写给画师看：说这版能做什么，不是 commit message。
+ * 的 version 保持一致，changelog.test.ts 检查最新日志覆盖当前版本。
+ * 文案写给画师看：说这版能做什么，不是 commit message。
  */
+import pluginManifest from '../../../.claude-plugin/plugin.json';
+
 export type ChangeKind = 'feat' | 'fix';
 
 export interface ChangelogChange {
@@ -28,8 +30,63 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
   fix: '修复',
 };
 
-/** 新版在前。第一条的 version 即当前版本。 */
+/** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '5.35.0',
+    date: '2026-09-03',
+    headline: '画布图片可以拆分图层',
+    changes: [
+      { kind: 'feat', text: '图片节点工具栏新增「拆分图层」：先生成一个可编辑的图层栈节点，选好模型、要求与分辨率再开始，不会提前扣费' },
+      { kind: 'feat', text: '拆分结果按背景 + 透明图层重建原图，每层可单独显隐、下载；随项目包导入导出' },
+      { kind: 'feat', text: '目前只支持火山直连或 Ark 协议下的 Seedream 5.0 Pro，分辨率可选智能 / 1K / 1.5K / 2K' },
+    ],
+  },
+  {
+    version: '5.34.1',
+    date: '2026-09-03',
+    headline: 'Tuzi GPT Image 2 的 1K 价格再次下调',
+    changes: [
+      { kind: 'fix', text: 'Tuzi default GPT Image 2 的 1K 估价由 ¥0.035 调整为 ¥0.028 / 张；2K 与 4K 仍为 ¥0.21 / 张' },
+      { kind: 'fix', text: 'Tier 5 公告价 ¥0.024 / 张已记录；当前没有账号等级配置时仍按普通 default 价格估算，避免低估费用' },
+    ],
+  },
+  {
+    version: '5.34.0',
+    date: '2026-09-02',
+    headline: '图片生成也能 @ 引用参考图',
+    changes: [
+      { kind: 'feat', text: '创作台图片模式：参考图带「图1 / 图2」编号，prompt 里敲 @ 即可引用，像视频全能参考一样写「把图1的服装穿到图2的角色身上」' },
+      { kind: 'feat', text: '火山 Seedream、GPT Image、Nano Banana 均可用；Midjourney 的参考图走 --sref / --cref，不开放 @ 引用' },
+    ],
+  },
+  {
+    version: '5.33.5',
+    date: '2026-09-01',
+    headline: '版本与项目入口更简洁',
+    changes: [
+      { kind: 'feat', text: '顶栏显示当前版本号与 GitHub 入口，点击版本号即可查看更新日志' },
+      { kind: 'fix', text: '升级后只显示未读圆点，不再自动展开更新日志；窄屏导航与操作入口分行展示' },
+    ],
+  },
+  {
+    version: '5.33.4',
+    date: '2026-09-01',
+    headline: '重要：Tuzi GPT Image 2 改为分辨率计费',
+    changes: [
+      { kind: 'fix', text: 'Tuzi default GPT Image 2 现按最终提交尺寸计费：1K ¥0.035，2K 与 4K 均为 ¥0.21 / 次' },
+      { kind: 'fix', text: '横竖比例和自定义尺寸均按最终像素最大边判档；旧记录保留提交时价格，不随新价回算' },
+    ],
+  },
+  {
+    version: '5.33.3',
+    date: '2026-08-31',
+    headline: 'Tuzi 香蕉 Pro 按新价格估算费用',
+    changes: [
+      { kind: 'fix', text: 'Tuzi default 香蕉 Pro 更新为 1K ¥0.12、2K ¥0.15、4K ¥0.18，固定分辨率型号也按对应档位计价' },
+      { kind: 'feat', text: '生成价格集中到独立清单维护；仅新提交使用新价格，历史费用保持不变' },
+    ],
+  },
   {
     version: '5.33.2',
     date: '2026-08-30',
@@ -462,7 +519,8 @@ export const CHANGELOG: ChangelogEntry[] = [
   },
 ];
 
-export const CURRENT_VERSION = CHANGELOG[0].version;
+export const CURRENT_VERSION = pluginManifest.version;
+export const PROJECT_GITHUB_URL = pluginManifest.homepage;
 
 /** 展示顺序固定「先新增、后修复」，不按录入顺序 —— 画师先关心多了什么能力。 */
 const KIND_ORDER: ChangeKind[] = ['feat', 'fix'];

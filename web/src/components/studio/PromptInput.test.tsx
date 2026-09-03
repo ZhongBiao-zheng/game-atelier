@@ -221,7 +221,7 @@ describe('PromptInput @引用参考素材', () => {
     fireEvent.input(editor);
   }
 
-  // @引用只属于视频「全能参考」(omni)；图片模式是朴素图生图，不走 @chip（见 PromptInput isOmni 门控）。
+  // @引用开放给 omni 全能参考与图片图生图（MJ 除外），见 PromptInput mentionsEnabled 门控。
   it('omni 模式有素材时敲 @ 弹菜单，点选项把 @ 替换成原子 chip 并关闭菜单', () => {
     const onSubmit = vi.fn();
     const file = new File(['x'], 'hero.png', { type: 'image/png' });

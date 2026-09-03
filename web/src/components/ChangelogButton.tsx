@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Bell } from 'lucide-react';
 
+import { GitHubIcon } from '@/components/GitHubIcon';
 import { ToolbarPopover } from '@/components/studio/ToolbarPopover';
 import {
   CHANGELOG,
   CHANGE_KIND_LABEL,
   CURRENT_VERSION,
+  PROJECT_GITHUB_URL,
   groupChanges,
   hasUnreadChangelog,
   loadSeenVersion,
@@ -76,10 +77,10 @@ function VersionBlock({
   );
 }
 
-/** 顶栏「更新日志」入口：圆形图标钮 + 下拉面板。
+/** 顶栏版本号与仓库入口，更新日志只在主动点击时展开。
  *
  * 未读判定见 lib/changelog：首次使用静默标已读（新用户不该被历史更新拦住），
- * 只有「读过旧版本后升级」才亮红点并自动展开一次。打开即标已读。
+ * 只有「读过旧版本后升级」才亮圆点。打开即标已读。
  */
 export function ChangelogButton() {
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -88,15 +89,10 @@ export function ChangelogButton() {
   /** 正文还没滚到底 —— 底部加渐隐，明示下面还有版本 */
   const [fade, setFade] = useState(false);
 
-  // 落已读只在挂载时做一次：面板一旦露出内容就等于看过了，无论是自动展开还是手点。
-  // 若等用户「点关闭」才落，从别处点走就丢，下次进来又弹一次。
   useEffect(() => {
     const seen = loadSeenVersion();
-    if (hasUnreadChangelog(seen)) {
-      setUnread(true);
-      setOpen(true);
-    }
-    saveSeenVersion(CURRENT_VERSION);
+    setUnread(hasUnreadChangelog(seen));
+    if (seen === null) saveSeenVersion(CURRENT_VERSION);
   }, []);
 
   const close = useCallback((returnFocus = false) => {
@@ -117,7 +113,10 @@ export function ChangelogButton() {
 
   function toggle() {
     if (open) close();
-    else setOpen(true);
+    else {
+      saveSeenVersion(CURRENT_VERSION);
+      setOpen(true);
+    }
   }
 
   /** 渐隐只在「能滚且没到底」时挂。ref 回调里也测一次，面板首次渲染就拿到正确状态。 */
@@ -131,27 +130,40 @@ export function ChangelogButton() {
       <button
         ref={anchorRef}
         type="button"
-        aria-label={unread ? `更新日志（有新版本 ${CURRENT_VERSION}）` : '更新日志'}
+        aria-label={`v${CURRENT_VERSION} 更新日志${unread && !open ? '（有未读更新）' : ''}`}
+        title="查看更新日志"
+        aria-haspopup="dialog"
         aria-expanded={open}
         data-testid="changelog-trigger"
         onClick={toggle}
         className={[
-          'relative inline-flex h-10 w-10 items-center justify-center rounded-full bg-glass backdrop-blur-glass transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+          'relative inline-flex h-10 shrink-0 items-center justify-center rounded-full px-2 text-sm tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
           open
             ? 'text-primary ring-1 ring-border'
             : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
         ].join(' ')}
       >
-        <Bell size={18} aria-hidden />
-        {unread && (
-          // ring-background 让圆点脱开图标轮廓，暗底浅底都咬得住
+        v{CURRENT_VERSION}
+        {unread && !open && (
+          // ring-background 让圆点与文字分离，暗底浅底都能辨认
           <span
             aria-hidden
             data-testid="changelog-unread-dot"
-            className="absolute right-2 top-2 size-2 rounded-full bg-primary ring-2 ring-background"
+            className="absolute right-0 top-1 size-1.5 rounded-full bg-primary ring-2 ring-background"
           />
         )}
       </button>
+
+      <a
+        href={PROJECT_GITHUB_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="GitHub 项目仓库（新标签页打开）"
+        title="GitHub 项目仓库"
+        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      >
+        <GitHubIcon />
+      </a>
 
       <ToolbarPopover
         open={open}
