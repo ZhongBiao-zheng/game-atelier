@@ -4,6 +4,7 @@ import type {
   CreationAsset,
   CreationAssetKind,
   CreationAssetList,
+  CreationAssetRecommendation,
   CreationPromptSegment,
 } from '@/schema/creationAssets';
 import type { CanvasDocument, CanvasPoint } from '@/schema/canvas';
@@ -35,6 +36,7 @@ export function createPromptCreationAsset(input: {
   title: string;
   segments: CreationPromptSegment[];
   tags: string[];
+  recommendation?: CreationAssetRecommendation | null;
   projectId?: string;
 }): Promise<CreationAsset> {
   return requestJson<CreationAsset>('/api/creation-assets/prompts', '保存提示词资产', {
@@ -44,6 +46,7 @@ export function createPromptCreationAsset(input: {
       title: input.title,
       segments: input.segments,
       tags: input.tags,
+      recommendation: input.recommendation ?? null,
       project_id: input.projectId,
     }),
   });
@@ -117,7 +120,7 @@ export async function saveImageCreationAssetFromPath(input: {
 
 export function updatePromptCreationAsset(
   assetId: string,
-  input: { title: string; segments: CreationPromptSegment[]; tags: string[] },
+  input: { title: string; segments: CreationPromptSegment[]; tags: string[]; recommendation?: CreationAssetRecommendation | null },
 ): Promise<CreationAsset> {
   return requestJson<CreationAsset>(
     `/api/creation-assets/${encodeURIComponent(assetId)}/prompt`,

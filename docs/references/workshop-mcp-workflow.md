@@ -95,21 +95,25 @@ spec 变更影响当前角色各槽位；方案 ui_style 变更影响当前方�
    场景图都要描述；每个出镜角色有身份锚。`reference_mode` 是提示词中的用途，不是额外 API 字段。
    已定稿图优先；过期标记存在先告知；派生角色优先当前自己的作品，其次已冻结的派生来源，
    不能偷偷改用父角色后来新增的图。
-3. `workshop_list_models` 按当前目标列实际可用 alias/model/能力，再定模型与参数。
+3. 需求明确后先查提示词资产：`workshop_list_prompt_assets` 带候选标签查索引（回 id / 标题 / 标签
+   与全库 `tag_facets`，不带正文），命中再 `workshop_read_prompt_asset` 读那一条，填变量、取其
+   `recommendation`。没命中明说后自己组。协议全文见 `docs/references/prompt-assets.md`。
+4. `workshop_list_models` 按当前目标列实际可用 alias/model/能力，再定模型与参数。资产推荐的
+   模型 id 在列表里才用，不在则回落并在确认卡写明。
    能力为 null 表示尚未提供可靠枚举，不表示任意值都支持；不得把缺失能力写成已核验。
    用户点名优先，但不可用或超出能力时说明并让用户选择；不虚构 Key、价格或支持的尺寸。
    数量默认 1；保留用户明确的画幅 / 质量，价格未知不能写成免费。
-4. 领域门禁通过，调用 `workshop_prepare_generation`，冻结 target、prompt、alias/model、
+5. 领域门禁通过，调用 `workshop_prepare_generation`，冻结 target、prompt、alias/model、
    类型化 params、有序 media_ids。保存 `request_id`，向用户概括目标、内容、参考与费用状态。
    **此时只准备请求，未调用供应商、未完成出图。**
-5. 把确认卡（目标、模型、参考清单、参数、费用状态）转发画师，等明确肯定；沉默、模糊回答、
+6. 把确认卡（目标、模型、参考清单、参数、费用状态、提示词与配置来源）转发画师，等明确肯定；沉默、模糊回答、
    工具重试都不算批准，模糊时二选一追问。授权含 `execute_generation` 时，画师肯定后调
    `workshop_approve_generation`（request_id + 当前 revision）即完成批准；不含时请画师在 Atelier
    「待批准生成」页确认。两种批准都由服务端记录来源。
-6. 用户批准后，`workshop_get_generation` 查询同一 request ID 的状态与原 Job 产物。
+7. 用户批准后，`workshop_get_generation` 查询同一 request ID 的状态与原 Job 产物。
    不用“最新文件”猜本轮输出；连续未变化就报告仍处理中，不能靠重提请求催进度。
    网络结果不明先查状态；`EXECUTION_NEEDS_REVIEW` 回本机核对，不能自动再扣费。
-7. 失败只报告该请求的安全错误。用户要再次生成时准备新请求、使用新幂等键、重新页面批准。
+8. 失败只报告该请求的安全错误。用户要再次生成时准备新请求、使用新幂等键、重新页面批准。
    要撤回尚未执行的请求，用 `workshop_withdraw_generation` 和返回的最新 revision。
 
 ### workshop_prepare_generation

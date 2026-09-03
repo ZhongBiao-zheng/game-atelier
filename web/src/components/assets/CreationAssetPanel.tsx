@@ -53,6 +53,7 @@ import {
   renderCreationPrompt,
   type CreationAsset,
   type CreationAssetKind,
+  type CreationAssetRecommendation,
   type CreationImageAssetContent,
   type CreationPromptAssetContent,
   type CreationPromptSegment,
@@ -103,6 +104,10 @@ type PromptEditorState = {
   text: string;
   variables: PromptVariableRange[];
   tags: string;
+  /** 推荐配置（可选）：模型 id + 每行一条 key=value 的参数。 */
+  recommendationMode: 'image' | 'video';
+  recommendationModel: string;
+  recommendationParams: string;
   initialSignature: string;
 };
 
@@ -208,6 +213,9 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         text: template.text,
         variables: template.variables,
         tags: '',
+        recommendationMode: 'image' as const,
+        recommendationModel: '',
+        recommendationParams: '',
       };
       setPromptEditor({ ...draft, initialSignature: promptEditorSignature(draft) });
       setImageEditor(null);
@@ -303,6 +311,9 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       text: template.text,
       variables: template.variables,
       tags: asset?.tags.join(', ') ?? '',
+      recommendationMode: asset?.recommendation?.mode ?? 'image',
+      recommendationModel: asset?.recommendation?.model ?? '',
+      recommendationParams: formatRecommendationParams(asset?.recommendation?.params),
     };
     setSelectedId(null);
     setImageEditor(null);
@@ -349,6 +360,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         title: promptEditor.title.trim(),
         segments,
         tags: parseTags(promptEditor.tags),
+        recommendation: recommendationFromEditor(promptEditor),
       };
       const saved = promptEditor.assetId
         ? await updatePromptCreationAsset(promptEditor.assetId, input)
@@ -644,6 +656,14 @@ function PromptEditor({ state, busy, textareaRef, variableName, selection, dupli
         {state.variables.length > 0 && <div className="mt-3 space-y-2">{state.variables.map(variable => <div key={variable.id} className="flex items-center gap-2 rounded-md bg-secondary px-2 py-1.5 text-xs"><span className="text-muted-foreground">{variable.name}：</span><span className="min-w-0 flex-1 truncate">{state.text.slice(variable.start, variable.end)}</span><button type="button" aria-label={`移除变量 ${variable.name}`} className="rounded p-1 text-muted-foreground hover:bg-background hover:text-foreground" onClick={() => onChange({ ...state, variables: state.variables.filter(item => item.id !== variable.id) })}><X className="size-3.5" /></button></div>)}</div>}
       </div>
       <TagField value={state.tags} onChange={tags => onChange({ ...state, tags })} />
+      <div className="rounded-lg border border-border bg-card p-3">
+        <p className="text-sm font-medium">推荐配置</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">可选。Agent 选用这条提示词时按此定模型与参数；填模型 id，不填别名。</p>
+        <div className="mt-3 grid grid-cols-[auto_1fr] gap-2">
+          <select aria-label="推荐模式" value={state.recommendationMode} onChange={event => onChange({ ...state, recommendationMode: event.target.value as 'image' | 'video' })} className="h-9 rounded-md border border-input bg-transparent px-2 text-sm text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"><option value="image">图片</option><option value="video">视频</option></select>
+          <Input aria-label="推荐模型" value={state.recommendationModel} onChange={event => onChange({ ...state, recommendationModel: event.target.value })} placeholder="模型 id，如 gpt-image-2" />
+        </div>
+        <textarea aria-label="推荐参数" rows={3} value={state.recommendationParams} onChange={event => onChange({ ...state, recommendationParams: event.target.value })} placeholder={'每行一条，如\nquality=high\nsize=2048x2048'} className="mt-2 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring" />
+      </div>
       {duplicateTitle ? <div className="rounded-lg border border-border bg-card p-3 text-xs leading-relaxed"><p>提示词正文与“{duplicateTitle}”相同，仍可按你的意图保存为另一条资产。</p><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={onCancelDuplicate}>取消</Button><Button size="sm" disabled={busy} onClick={onConfirmDuplicate}>仍然保存</Button></div></div> : <div className="grid gap-2"><Button className="w-full" disabled={busy} onClick={onSave}>{busy ? '保存中…' : state.assetId ? '保存修改' : '保存提示词资产'}</Button>{showSaveAndAddCanvas && <Button variant="outline" className="w-full" disabled={busy} onClick={onSaveAndAddCanvas}>保存并加入画布</Button>}</div>}
       {onDelete && <DeleteAssetButton disabled={busy} onClick={onDelete} />}
     </div>
@@ -693,6 +713,7 @@ function AssetDetail({ asset, busy, values, onValuesChange, onUse, onEdit }: {
       <h2 className="mt-3 text-base font-medium">{asset.title}</h2>
       {asset.content.kind === 'prompt' && <PromptPreview segments={asset.content.segments} />}
       <TagList tags={asset.tags} />
+      {asset.recommendation && <p className="mt-2 truncate text-xs text-muted-foreground" title={recommendationSummary(asset.recommendation)}>推荐：{recommendationSummary(asset.recommendation)}</p>}
       {asset.content.kind === 'prompt' && variables.length > 0 && <div className="mt-4 space-y-3 rounded-lg border border-border bg-card p-3"><div><p className="text-sm font-medium">填写变量</p><p className="mt-1 text-xs text-muted-foreground">不填写时使用模板中的默认内容。</p></div>{variables.map(variable => <Field key={variable.name} label={variable.name} hint={`默认：${variable.defaultValue}`}><Input value={values[variable.name] ?? ''} onChange={event => onValuesChange({ ...values, [variable.name]: event.target.value })} placeholder={variable.defaultValue} /></Field>)}</div>}
       <div className="mt-4 flex gap-2"><Button className="flex-1" disabled={busy} onClick={onUse}>使用</Button><Button variant="outline" disabled={busy} onClick={onEdit}>编辑</Button></div>
     </div>
@@ -734,8 +755,36 @@ function uniquePromptVariables(content: CreationPromptAssetContent): { name: str
   return [...result].map(([name, defaultValue]) => ({ name, defaultValue }));
 }
 
-function promptEditorSignature(state: Pick<PromptEditorState, 'title' | 'text' | 'variables' | 'tags'>): string {
-  return JSON.stringify({ title: state.title, text: state.text, variables: state.variables, tags: state.tags });
+function promptEditorSignature(state: Omit<PromptEditorState, 'assetId' | 'initialSignature'>): string {
+  const { title, text, variables, tags, recommendationMode, recommendationModel, recommendationParams } = state;
+  return JSON.stringify({ title, text, variables, tags, recommendationMode, recommendationModel, recommendationParams });
+}
+
+function formatRecommendationParams(params?: Record<string, string | number | boolean>): string {
+  return Object.entries(params ?? {}).map(([key, value]) => `${key}=${String(value)}`).join('\n');
+}
+
+/** 每行 key=value；数字与 true/false 转成对应类型，其余按字符串。模型留空即不带推荐。 */
+function recommendationFromEditor(state: PromptEditorState): CreationAssetRecommendation | null {
+  const model = state.recommendationModel.trim();
+  if (!model) return null;
+  const params: Record<string, string | number | boolean> = {};
+  for (const line of state.recommendationParams.split(/\r?\n/)) {
+    const separator = line.indexOf('=');
+    if (separator <= 0) continue;
+    const key = line.slice(0, separator).trim();
+    const raw = line.slice(separator + 1).trim();
+    if (!key || !raw) continue;
+    if (raw === 'true' || raw === 'false') params[key] = raw === 'true';
+    else if (/^-?\d+(\.\d+)?$/.test(raw)) params[key] = Number(raw);
+    else params[key] = raw;
+  }
+  return { mode: state.recommendationMode, model, params };
+}
+
+function recommendationSummary(recommendation: CreationAssetRecommendation): string {
+  const params = Object.entries(recommendation.params).map(([key, value]) => `${key}=${String(value)}`);
+  return [recommendation.model, ...params].join(' · ');
 }
 
 function imageEditorSignature(state: Pick<ImageEditorState, 'title' | 'tags'>): string {

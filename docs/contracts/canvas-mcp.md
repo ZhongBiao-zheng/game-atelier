@@ -54,6 +54,11 @@ revision 不符返回 `DOCUMENT_CONFLICT`，重读后再改。生成产物、派
 复制为不可变 upload 版本并建节点；不接受相对路径、目录、URL。OS 用户已能读的文件才导得进，
 这不是对宿主 Agent 文件权限的沙箱（见工坊契约「限制边界」）。
 
+## 提示词资产
+
+画师存的提示词模板经工坊命名空间读取：`workshop_list_prompt_assets` / `workshop_read_prompt_asset`，
+授权含 `canvas_read` 即可调用（见 [工坊 MCP](workshop-mcp.md) 工具表与 `docs/references/prompt-assets.md`）。
+
 ## 错误
 
 复用工坊错误形状与 code：`TARGET_NOT_AUTHORIZED`（画布不在授权内）、`DOCUMENT_CONFLICT`、

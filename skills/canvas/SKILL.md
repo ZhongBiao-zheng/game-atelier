@@ -55,6 +55,13 @@ triggers:
 `params` 只收标量，按浏览器白名单过滤：图片常用 `n / size / ratio / quality`，视频 `duration / resolution / ratio`。
 路径类字段写了也会被丢弃，不要试。
 
+## 提示词资产（任务明确后先查）
+
+给生成面填 `set_draft` 前先查画师存的提示词模板：按需求挑标签查索引 → 命中则读全文、填变量、按其
+`recommendation` 定模型参数（本机无此模型则回落默认并说明）→ 确认卡注明「提示词来自资产〈标题〉」
+与配置来源层级；没命中就明说后自己组，不硬套。接口在工坊命名空间（`workshop_list_prompt_assets` / `workshop_read_prompt_asset`，画布授权含 `canvas_read` 即可用），两级接口、优先级与不做的事见
+`docs/references/prompt-assets.md`。不在启动时读全库。
+
 ## 生成：先确认卡，再看能力
 
 1. 发起前打确认卡给用户：画布名、生成面节点、模型 alias / model、prompt 摘要、接入的素材节点列表、

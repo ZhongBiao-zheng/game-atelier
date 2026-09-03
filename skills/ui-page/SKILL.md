@@ -159,6 +159,13 @@ uv run python -m character_workflow set-screen-canonical \
 下一步可直接说的话：
 ```
 
+## 提示词资产（任务明确后先查）
+
+写 prompt 前先查画师存的提示词模板：按需求挑标签查索引 → 命中则读全文、填变量、按其
+`recommendation` 定模型参数（本机无此模型则回落默认并说明）→ 确认卡注明「提示词来自资产〈标题〉」
+与配置来源层级；没命中就明说后自己组，不硬套。两级接口、优先级与不做的事见
+`docs/references/prompt-assets.md`。不在启动时读全库。
+
 ## 手的选择（CLI / MCP 双路径）
 
 本 Skill 的知识层（记忆注入、设定协议、prompt 规则、经验沉淀）与「手」无关；只有读写资料 / 准备 / 执行这一层按可用性选一条：
