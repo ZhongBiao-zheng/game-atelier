@@ -31,16 +31,18 @@
 - VIP、HD、其他分组与未知后缀没有核实价格，不能自动套用该公告。
 - 其他型号与渠道沿用原有核价；提取为独立表不代表重新核实了全部厂商价格。
 
-## Tuzi GPT Image 2：2026-09-01 更新
+## Tuzi GPT Image 2：2026-09-03 更新
 
-来源为用户提供的 Tuzi 调价公告：default 分组按请求参数分流，1K 单独计价，2K 与 4K
-合并为同一单价。Tuzi 的[图像 API 文档](https://api.tu-zi.com/docs/api/images)要求记录请求的
+来源为用户提供的 Tuzi 调价公告：default 分组按请求参数分流，1K 于 2026-09-03 再次
+下调，2K 与 4K 继续合并为同一单价。Tuzi 的[图像 API 文档](https://api.tu-zi.com/docs/api/images)要求记录请求的
 `size` 与 `quality`；模型页同时注明 default 分组可指定 `size`、`quality` 不保证可靠。因此：
 
 - 仅对 `tu-zi.com` 及其子域名、`billing_group=default`、精确型号 `gpt-image-2` 生效。
 - 按最终提交并冻结到 Job 的像素 `size` 判档：最大边 ≤1024 为 1K，1025–2048 为 2K，
   >2048 为 4K；横图、竖图与自定义尺寸使用同一规则。
 - `quality` 不参与计价；缺失或非法 size 不展示估价，避免误报 1K 低价。
+- 公告另列 Tier 5 账号的 1K 优惠价为 ¥0.024 / 张；当前 Key 配置没有账号等级字段，
+  估价器不自动套用该优惠，仍按普通 default 单价计算。
 - `绘画` 分组仍使用自己的固定单价；OpenAI-HK 与其他渠道不套用这张表。
 - 这次只记录 Tuzi 在服务端按参数选择内部渠道的事实；工坊仍把最终 size 原样发给 Tuzi，
   不在本地复制其内部路由。
