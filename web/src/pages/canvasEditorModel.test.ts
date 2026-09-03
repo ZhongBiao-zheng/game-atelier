@@ -5,8 +5,10 @@ import {
   canvasNodeRenderZIndex,
   canvasPendingInputNodes,
   clampCanvasNodeSize,
+  layerStackSizeForCanvasVersion,
   normalizeCanvasImageParams,
   placeCanvasNodeWithoutOverlap,
+  syncDraftLayerStackSources,
 } from './canvasEditorModel';
 import type { CanvasDocument, CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
@@ -44,6 +46,69 @@ it('clamps node sizes to the server bound instead of letting the save 422 foreve
   expect(clampCanvasNodeSize({ width: 0, height: -5 })).toEqual({ width: 1, height: 1 });
   const inBounds = { width: 420, height: 260 };
   expect(clampCanvasNodeSize(inBounds)).toBe(inBounds);
+});
+
+it('sizes a layer stack from the source image aspect ratio while preserving room for settings', () => {
+  const version = {
+    version_id: 'portrait', kind: 'image', path: 'uploads/portrait.png', mime_type: 'image/png',
+    bytes: 42, width: 900, height: 1600, duration_ms: null, created_at: '2026-09-03T00:00:00Z',
+    sha256: 'a'.repeat(64), origin: { kind: 'upload', upload_id: 'upload-portrait' },
+  } as const;
+
+  expect(layerStackSizeForCanvasVersion(version)).toEqual({ width: 648, height: 640 });
+  expect(layerStackSizeForCanvasVersion({ ...version, width: 1600, height: 900 })).toEqual({
+    width: 768,
+    height: 400,
+  });
+});
+
+it('follows an upstream image only while a layer stack is an idle draft', () => {
+  const source = {
+    id: 'source', title: '源图', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
+    data: {
+      current_version_id: 'source-new', generation_draft: null, active_run_id: null,
+      display: { fit: 'contain', free_resize: false },
+    },
+  } satisfies CanvasNode;
+  const stack = {
+    id: 'stack', title: '拆分图层', type: 'layer_stack', position: { x: 400, y: 0 }, z_index: 0,
+    size: { width: 760, height: 480 },
+    data: {
+      source_version_id: 'source-old', alias: 'tokendance', model: 'seedream-5.0-pro', prompt: '',
+      resolution: 'auto', base_version_id: null, base_visible: true, layers: [], active_run_id: null,
+      error: null,
+    },
+  } satisfies CanvasNode;
+  const version = {
+    version_id: 'source-new', kind: 'image', path: 'uploads/new.png', mime_type: 'image/png',
+    bytes: 42, width: 900, height: 1600, duration_ms: null, created_at: '2026-09-03T00:00:00Z',
+    sha256: 'b'.repeat(64), origin: { kind: 'upload', upload_id: 'upload-new' },
+  } as const;
+  const current = documentWithNodes([source, stack], [
+    { id: 'source-stack', role: 'input', source_node_id: source.id, target_node_id: stack.id },
+  ] as CanvasDocument['connections']);
+  current.content_versions[version.version_id] = version;
+
+  const synced = syncDraftLayerStackSources(current);
+  expect(synced.nodes.find(node => node.id === stack.id)).toMatchObject({
+    size: { width: 648, height: 640 },
+    data: { source_version_id: 'source-new' },
+  });
+
+  const running = {
+    ...current,
+    nodes: current.nodes.map(node => node.id === stack.id && node.type === 'layer_stack'
+      ? { ...node, data: { ...node.data, active_run_id: 'run-one' } }
+      : node),
+  };
+  const completed = {
+    ...current,
+    nodes: current.nodes.map(node => node.id === stack.id && node.type === 'layer_stack'
+      ? { ...node, data: { ...node.data, base_version_id: 'base' } }
+      : node),
+  };
+  expect(syncDraftLayerStackSources(running)).toBe(running);
+  expect(syncDraftLayerStackSources(completed)).toBe(completed);
 });
 
 function placementNode(id: string, x: number, y: number): CanvasNode {

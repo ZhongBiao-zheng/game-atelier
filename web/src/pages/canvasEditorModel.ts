@@ -70,6 +70,11 @@ export interface CanvasPlacementBounds {
 
 export const CANVAS_TEXT_NODE_DEFAULT_SIZE: CanvasSize = { width: 256, height: 144 };
 export const CANVAS_DEFAULT_NODE_SIZE: CanvasSize = { width: 320, height: 176 };
+const CANVAS_LAYER_STACK_PANEL_WIDTH = 288;
+const CANVAS_LAYER_STACK_PREVIEW_WIDTH = 480;
+const CANVAS_LAYER_STACK_PREVIEW_MIN_WIDTH = 320;
+const CANVAS_LAYER_STACK_PREVIEW_MIN_HEIGHT = 400;
+const CANVAS_LAYER_STACK_PREVIEW_MAX_HEIGHT = 640;
 const CANVAS_NODE_PLACEMENT_GAP = 48;
 
 function canvasPlacementDirectionRank({ x, y }: { x: number; y: number }) {
@@ -101,6 +106,58 @@ export function sizeLockedToCanvasVersion(
     height = width / ratio;
   }
   return { width: Math.round(width), height: Math.round(height) };
+}
+
+/** 图层栈左侧预览随源图比例伸缩，右侧设置区维持固定宽度。
+ *
+ * 横图优先保留足够的预览宽度，竖图优先保留足够的预览高度；两端都设上限，避免超长图把
+ * 新节点撑到远离当前视口。实际像素不会决定画布尺寸，避免一张 8K 图创建出 4000px 节点。 */
+export function layerStackSizeForCanvasVersion(
+  version: Pick<CanvasMediaVersion, 'width' | 'height'>,
+): CanvasSize {
+  if (!version.width || !version.height) return { width: 760, height: 480 };
+  const ratio = version.width / version.height;
+  let previewWidth = CANVAS_LAYER_STACK_PREVIEW_WIDTH;
+  let previewHeight = CANVAS_LAYER_STACK_PREVIEW_WIDTH / ratio;
+  if (previewHeight > CANVAS_LAYER_STACK_PREVIEW_MAX_HEIGHT) {
+    previewHeight = CANVAS_LAYER_STACK_PREVIEW_MAX_HEIGHT;
+    previewWidth = Math.max(CANVAS_LAYER_STACK_PREVIEW_MIN_WIDTH, previewHeight * ratio);
+  } else {
+    previewHeight = Math.max(CANVAS_LAYER_STACK_PREVIEW_MIN_HEIGHT, previewHeight);
+  }
+  return {
+    width: Math.round(previewWidth + CANVAS_LAYER_STACK_PANEL_WIDTH),
+    height: Math.round(previewHeight),
+  };
+}
+
+/** 未提交的图层栈跟随唯一上游图片的当前版本；运行中与已完成节点保持快照不变。 */
+export function syncDraftLayerStackSources(document: CanvasDocument): CanvasDocument {
+  const nodesById = new Map(document.nodes.map(node => [node.id, node]));
+  const sourceNodeIdByStackId = new Map<string, string>();
+  for (const connection of document.connections) {
+    if (connection.role !== 'input' || connection.slot) continue;
+    sourceNodeIdByStackId.set(connection.target_node_id, connection.source_node_id);
+  }
+  let changed = false;
+  const nodes = document.nodes.map(node => {
+    if (
+      node.type !== 'layer_stack'
+      || node.data.base_version_id
+      || node.data.active_run_id
+    ) return node;
+    const sourceNode = nodesById.get(sourceNodeIdByStackId.get(node.id) ?? '');
+    if (sourceNode?.type !== 'image' || !sourceNode.data.current_version_id) return node;
+    const version = document.content_versions[sourceNode.data.current_version_id];
+    if (version?.kind !== 'image' || version.version_id === node.data.source_version_id) return node;
+    changed = true;
+    return {
+      ...node,
+      size: layerStackSizeForCanvasVersion(version),
+      data: { ...node.data, source_version_id: version.version_id, error: null },
+    };
+  });
+  return changed ? { ...document, nodes } : document;
 }
 
 export function canvasNodeRenderedSize(

@@ -125,6 +125,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     reversePrompt: vi.fn(async () => undefined),
     createLayerDecomposition: vi.fn(),
     submitLayerDecomposition: vi.fn(async () => undefined),
+    replaceLayerStackSource: vi.fn(),
     recoverReversePromptConfig: vi.fn(async () => undefined),
     reversePromptConfiguredNodeIds: new Set(),
     replaceMedia: vi.fn(),
@@ -524,6 +525,7 @@ it('rebuilds a decomposed image from layers and hides a selected part', () => {
   expect(container.querySelector('[data-layer-stack-part="base"]')).toBeInTheDocument();
   expect(container.querySelector('[data-layer-stack-part="layer-subject"]')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: '显示主体' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '替换待拆分图片' })).not.toBeInTheDocument();
 
   rerender(<CanvasLayerStackSurface
     node={{
@@ -567,18 +569,27 @@ it('configures and starts layer decomposition inside the new node', () => {
     'src',
     expect.stringContaining('/versions/source/media'),
   );
+  expect(screen.getByRole('img', { name: '待拆分图片' })).toHaveAttribute('draggable', 'false');
   expect(screen.getByRole('button', { name: '选择生成模型' })).toHaveTextContent('Seedream 5.0 Pro');
-  expect(screen.getByText('保持原图比例 · PNG')).toBeInTheDocument();
+  expect(screen.queryByText('保持原图比例 · PNG')).not.toBeInTheDocument();
   expect(screen.getByLabelText('图片比例')).toHaveTextContent('智能');
-  expect(screen.getByText(/写法示例：对输入图进行精确图层分离/)).toBeInTheDocument();
+  expect(screen.getByRole('textbox', { name: '提示词' })).toHaveAttribute(
+    'placeholder',
+    '上传单张图片，分离图中元素，最高支持17张输出',
+  );
+  expect(screen.getByRole('button', { name: '图层拆分使用说明' })).toBeInTheDocument();
+  expect(screen.getByRole('tooltip')).toHaveTextContent('留空会自动识别主要图层');
+  expect(screen.getByLabelText('图层拆分设置')).not.toHaveClass('nowheel');
   expect(screen.getByRole('option', { name: '智能' })).toHaveAttribute('aria-selected', 'true');
   fireEvent.click(screen.getByRole('option', { name: '1.5K' }));
   const resolutionUpdate = vi.mocked(context.updateNode).mock.calls.at(-1)?.[1];
   expect(resolutionUpdate?.(layerStack)).toMatchObject({ data: { resolution: '1.5K' } });
-  fireEvent.focus(screen.getByRole('textbox', { name: '拆分要求' }));
-  fireEvent.change(screen.getByRole('textbox', { name: '拆分要求' }), { target: { value: '拆出主体' } });
+  fireEvent.focus(screen.getByRole('textbox', { name: '提示词' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '提示词' }), { target: { value: '拆出主体' } });
   expect(context.recordHistory).toHaveBeenCalledTimes(2);
   expect(context.updateNode).toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '替换待拆分图片' }));
+  expect(context.replaceLayerStackSource).toHaveBeenCalledWith('layer-stack-draft');
   fireEvent.click(screen.getByRole('button', { name: '开始拆分' }));
   expect(context.submitLayerDecomposition).toHaveBeenCalledWith('layer-stack-draft');
 });

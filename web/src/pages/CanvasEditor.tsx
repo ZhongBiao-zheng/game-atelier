@@ -190,12 +190,14 @@ import {
   closestCanvasConnectionEndpoint,
   createCanvasGenerationDraft,
   createConnectedCanvasConfig,
+  layerStackSizeForCanvasVersion,
   normalizeCanvasVideoParams,
   normalizeCanvasGroups,
   placeCanvasNodeWithoutOverlap,
   restoreContentVersions,
   sizeLockedToCanvasVersion,
   supportsCanvasVideoEdit,
+  syncDraftLayerStackSources,
 } from './canvasEditorModel';
 
 interface CreateMenuState {
@@ -241,6 +243,7 @@ interface MediaReplaceTarget {
   title: string;
   kind: 'image' | 'video' | 'audio';
   hadContent: boolean;
+  returnNodeId?: string;
 }
 
 interface ViewportSyncToken {
@@ -850,6 +853,18 @@ function CanvasEditorInner({
 
   latestDocument.current = document;
   useEffect(() => {
+    if (!document) return;
+    const synced = syncDraftLayerStackSources(document);
+    if (synced === document) return;
+    // 上游图片换版后，尚未运行的拆分节点必须在同一次本地收敛中更新快照与比例。
+    // 已运行 / 已完成节点由 helper 明确跳过，避免历史产物跟着上游变化。
+    latestDocument.current = synced;
+    saveQueued.current = synced;
+    setDocument(synced);
+    dirtyVersion.current += 1;
+    setDirtySignal(dirtyVersion.current);
+  }, [document]);
+  useEffect(() => {
     latestSelectedNodeIds.current = selectedNodeIds;
   }, [selectedNodeIds]);
 
@@ -1085,7 +1100,10 @@ function CanvasEditorInner({
       } else if (history.current.future.length) {
         history.current.future = [];
       }
-      return { ...normalizeCanvasGroups(updater(current)), updated_at: new Date().toISOString() };
+      return {
+        ...normalizeCanvasGroups(syncDraftLayerStackSources(updater(current))),
+        updated_at: new Date().toISOString(),
+      };
     });
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
@@ -2383,7 +2401,7 @@ function CanvasEditorInner({
       return;
     }
     const stackId = makeId('layer-stack');
-    const size = { width: 760, height: 480 };
+    const size = layerStackSizeForCanvasVersion(sourceVersion);
     const sourceSize = canvasNodeRenderedSize(source, current.content_versions);
     const position = placeCanvasNodeWithoutOverlap(
       { x: source.position.x + sourceSize.width + 72, y: source.position.y },
@@ -2680,7 +2698,7 @@ function CanvasEditorInner({
     const previous = history.current.past.pop();
     if (!previous || !document) return;
     history.current.future.push(document);
-    const restored = {
+    const restored = syncDraftLayerStackSources({
       ...previous,
       revision: document.revision,
       updated_at: new Date().toISOString(),
@@ -2691,7 +2709,7 @@ function CanvasEditorInner({
         previous.content_versions,
         document.content_versions,
       ),
-    };
+    });
     setDocument(restored);
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
@@ -2702,7 +2720,7 @@ function CanvasEditorInner({
     const next = history.current.future.pop();
     if (!next || !document) return;
     history.current.past.push(document);
-    const restored = {
+    const restored = syncDraftLayerStackSources({
       ...next,
       revision: document.revision,
       updated_at: new Date().toISOString(),
@@ -2711,7 +2729,7 @@ function CanvasEditorInner({
         next.content_versions,
         document.content_versions,
       ),
-    };
+    });
     setDocument(restored);
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
@@ -3021,7 +3039,7 @@ function CanvasEditorInner({
     return pointerWasSuperseded ? 'superseded' as const : 'applied' as const;
   }, []);
 
-  const replaceMedia = useCallback((node: CanvasContentNode) => {
+  const beginMediaReplacement = useCallback((node: CanvasContentNode, returnNodeId?: string) => {
     const versionId = node.data.current_version_id;
     const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
     if (node.type === 'text') {
@@ -3038,6 +3056,7 @@ function CanvasEditorInner({
       title: node.title,
       kind: node.type,
       hadContent: Boolean(version),
+      returnNodeId,
     });
     requestAnimationFrame(() => {
       if (!replaceMediaRef.current) return;
@@ -3045,6 +3064,31 @@ function CanvasEditorInner({
       replaceMediaRef.current.click();
     });
   }, []);
+
+  const replaceMedia = useCallback((node: CanvasContentNode) => {
+    beginMediaReplacement(node);
+  }, [beginMediaReplacement]);
+
+  const replaceLayerStackSource = useCallback((nodeId: string) => {
+    const current = latestDocument.current;
+    if (!current) return;
+    const stack = current?.nodes.find(node => node.id === nodeId);
+    if (stack?.type !== 'layer_stack' || stack.data.base_version_id || stack.data.active_run_id) {
+      setError('这个图层拆分节点的源图已经冻结。');
+      return;
+    }
+    const input = current.connections.find(connection => (
+      connection.role === 'input'
+      && !connection.slot
+      && connection.target_node_id === nodeId
+    ));
+    const source = current.nodes.find(node => node.id === input?.source_node_id);
+    if (source?.type !== 'image') {
+      setError('图层拆分节点没有可替换的上游图片。');
+      return;
+    }
+    beginMediaReplacement(source, nodeId);
+  }, [beginMediaReplacement]);
 
   const handleMediaReplace = useCallback(async (file: File, target: MediaReplaceTarget) => {
     if (documentCommandInFlight.current) {
@@ -3074,14 +3118,15 @@ function CanvasEditorInner({
         dirtyAtCommand,
         before,
       );
+      const returnNodeId = target.returnNodeId ?? target.nodeId;
       setSelectedConnectionIds(new Set());
-      setSelectedNodeIds(new Set([target.nodeId]));
+      setSelectedNodeIds(new Set([returnNodeId]));
       announceToolNotice(mergeStatus === 'applied'
         ? target.hadContent
           ? `已替换“${target.title}”，旧版本仍可撤销恢复`
           : `已将文件上传到“${target.title}”`
         : `“${target.title}”已有更新内容；上传文件已保留为历史版本`);
-      requestAnimationFrame(() => documentQueryNode(target.nodeId)?.focus());
+      requestAnimationFrame(() => documentQueryNode(returnNodeId)?.focus());
     } catch (replaceError) {
       setMediaReplaceError({ nodeId: target.nodeId, message: (replaceError as Error).message });
     } finally {
@@ -3622,6 +3667,7 @@ function CanvasEditorInner({
     recoverReversePromptConfig,
     reversePromptConfiguredNodeIds,
     replaceMedia,
+    replaceLayerStackSource,
     toggleFreeResize,
     openMediaOperation,
     openMaskEdit,
@@ -3669,6 +3715,7 @@ function CanvasEditorInner({
     recordHistorySnapshot,
     recoverReversePromptConfig,
     replaceMedia,
+    replaceLayerStackSource,
     reversePrompt,
     reversePromptConfiguredNodeIds,
     retryRun,

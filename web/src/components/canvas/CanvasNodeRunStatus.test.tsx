@@ -210,6 +210,7 @@ function nodeContext(job: Job): CanvasNodeContextValue {
     reversePrompt: vi.fn(async () => undefined),
     createLayerDecomposition: vi.fn(),
     submitLayerDecomposition: vi.fn(async () => undefined),
+    replaceLayerStackSource: vi.fn(),
     recoverReversePromptConfig: vi.fn(async () => undefined),
     reversePromptConfiguredNodeIds: new Set(),
     replaceMedia: vi.fn(),

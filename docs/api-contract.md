@@ -283,8 +283,10 @@ Input Connection。图片模型优先使用仍可路由的画布图片生成偏�
 再按 default Key 优先、其余登记顺序选择。自动选择会应用已保存的默认参数，失效的显式模型不泄漏旧参数；
 缺模型时保留反推文本且零写。重复请求即使携带旧 revision，也返回已经存在的同一配置，不重复创建节点或连接。
 
-图片工具栏的“拆分图层”先在画布中创建一个 `layer_stack` 节点和一条图片输入连线，不调用厂商。节点持有创建时的
-不可变源图片 Version，并在左侧展示它；右侧保存用户选择的 `alias + model` 与可选拆分要求。`POST
+图片工具栏的“拆分图层”先在画布中创建一个 `layer_stack` 节点和一条图片输入连线，不调用厂商。未运行节点的
+`source_version_id` 跟随唯一上游图片的当前 Version，替换或重新生成上游图片时同时更新节点预览与随源图比例计算的
+初始尺寸；运行中及已完成节点冻结本次源 Version，历史产物不随上游变化。节点左侧展示源图，右侧保存用户选择的
+`alias + model` 与可选提示词。`POST
 /canvas/projects/{id}/runs/layer-decomposition` 只接受该节点的 `surface_node_id + expected_revision + alias + model`，
 服务端还会核对请求选择与节点已保存设置完全一致。只接受火山直连或明确使用 Ark 协议的 Seedream 5.0 Pro，
 绝不自动替换渠道或模型。比例固定为“智能”并继承输入图；分辨率默认 `auto`，可显式选择

@@ -410,6 +410,7 @@ it('creates an editable layer-decomposition node before calling the model', asyn
       source_version_id: 'source-version', alias: 'tokendance', model: 'seedream-5.0-pro',
       resolution: 'auto',
     });
+    expect(stack?.size).toEqual({ width: 768, height: 400 });
     expect(saved?.connections).toContainEqual(expect.objectContaining({
       role: 'input', source_node_id: 'source-image', target_node_id: stack?.id,
     }));
