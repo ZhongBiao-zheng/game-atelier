@@ -43,7 +43,7 @@ Codex / Claude         │     └─ 工坊服务 → 人工批准 → Job Runn
 下表是 P0 核验的改造前差距，不是本地整合分支的当前可用性。当前新增实现包括
 `connection_*` 的会话 / 租约 / 授权、`web/src/api/connection.ts` 与带身份的 fetch SSE、
 `workshop.py` 的目标 / 文档 / 媒体权限、`workshop_generation.py` 的批准与恢复、
-`character_workflow.mcp` 的 16 个 typed 工具。按 ADR-0017，`submit*` CLI 保留「终端确认 → run-job」路径，
+`character_workflow.mcp` 的 18 个工坊 + 8 个画布 typed 工具。按 ADR-0017，`submit*` CLI 保留「终端确认 → run-job」路径，
 `run_job` 只对带 `workshop_request_id` 的任务核对服务端批准记录。媒体继续使用同源 HttpOnly cookie 和原生 Range，不全量转成 Blob。
 客户端说明见[本机 MCP](mcp-local-client.md)。SDK 测试不等于已验收所有真实 Agent 客户端。
 
@@ -156,7 +156,7 @@ P1b 在读取请求体和路由处理前，校验实际监听端口对应的 Hos
 - macOS 上使用真实本机服务、构建后的页面和应用内浏览器验证自动连接、授权创建 / 撤销、
   管理页与画布之间切换、第二标签页显式接管、原页面草稿保留与导出入口。
 - 隔离项目中完成“冻结参考图 → 页面批准 → fake provider → 原工坊产物 → 查看 / 下载入口”。
-  使用页面创建的受保护凭据运行真实 stdio MCP 客户端；可发现 16 个工具，准备不出图，撤销后调用被拒绝。
+  使用页面创建的受保护凭据运行真实 stdio MCP 客户端；可发现 18 个工坊工具与 8 个画布工具，准备不出图，撤销后调用被拒绝。
 - 领域回归覆盖角色、UI、视频；UI 可用同方案已定稿页面继续延展，参考内容在准备时冻结。
   故障恢复回归使用模拟供应商；没有拿用户 Key 做真实出图，也没有修改全局 Agent 配置。
 - 独立双轴审查发现并修复了项目索引并发丢写、角色改名覆盖文档、新 UI 页无法发现基准图三项问题；
