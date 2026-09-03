@@ -270,7 +270,6 @@ def test_reverse_prompt_recovery_normalizes_auto_params_for_selected_model(isola
             "resolution": "4K",
             "size": "2048x2048",
             "quality": "high",
-            "background": "transparent",
         },
     }
     assert _client(isolated_data_root).put(

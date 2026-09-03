@@ -27,20 +27,7 @@ describe('imageControlCaps', () => {
     expect(c.showResolution).toBe(false);
     expect(c.showCustomSize).toBe(true);
     expect(c.qualities).toContain('auto');
-    expect(c.supportsTransparentBackground).toBe(true);
     expect(c.sizeKind).toBe('pixels');
-  });
-
-  it('OpenRouter 不暴露未验证的透明背景能力', () => {
-    expect(imageControlCaps('openai/gpt-image-1', 'openrouter').supportsTransparentBackground)
-      .toBe(false);
-  });
-
-  it('Ark 协议不暴露仅直连 OpenAI 协议验证过的透明背景能力', () => {
-    expect(imageControlCaps('gpt-image-2', 'custom', 'ark').supportsTransparentBackground)
-      .toBe(false);
-    expect(imageControlCaps('gpt-image-2', 'custom', 'openai').supportsTransparentBackground)
-      .toBe(true);
   });
 
   it('seedream: 分辨率 + 自定义尺寸，无质量', () => {

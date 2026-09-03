@@ -407,7 +407,6 @@ function StudioFull() {
     const caps = imageControlCaps(
       effectiveModel,
       effectiveProvider,
-      selectedKey?.models.find((item) => item.id === effectiveModel)?.protocol,
       selectedKey?.base_url,
     );
     // MJ 一次 imagine 固定回 4 张方案，张数不由画师定（见 MJ_IMAGES_PER_TASK）。

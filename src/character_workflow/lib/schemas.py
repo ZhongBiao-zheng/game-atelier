@@ -446,7 +446,6 @@ class CanvasImageDefaultParams(BaseModel):
     resolution: CanvasSafeOption | None = None
     size: CanvasSafeOption | None = None
     quality: Literal["low", "medium", "high", "auto"] | None = None
-    background: Literal["auto", "opaque", "transparent"] | None = None
 
 
 class CanvasVideoDefaultParams(BaseModel):
@@ -563,7 +562,7 @@ class CanvasGenerationDraft(BaseModel):
 # Content Version，所以全部路径类字段都不在名单里；新增控件时必须同时把字段加进这里。
 CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     "image": frozenset({
-        "n", "size", "ratio", "resolution", "quality", "background",
+        "n", "size", "ratio", "resolution", "quality",
         "creation_asset_source_title",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
         "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",

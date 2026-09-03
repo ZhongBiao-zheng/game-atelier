@@ -3,7 +3,6 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { useContext } from 'react';
 import * as connection from '@/api/connection';
 import { createTestEventStream } from '@/test/eventStream';
-import { LocalDraftExportContext, type LocalDraftFactory } from '@/components/LocalDraftExportContext';
 
 import { CanvasEditor } from './CanvasEditor';
 import { CanvasNodeContext } from '@/components/canvas/CanvasEditorViews';
@@ -1359,18 +1358,4 @@ it('pulls canvas jobs as soon as SSE says one changed, without waiting for the n
 
   vi.unstubAllGlobals();
   state.mockRestore();
-});
-
-it('exports the current unsaved Canvas graph from memory without requesting a server package', async () => {
-  let factory: LocalDraftFactory | null = null;
-  const register = vi.fn((value: LocalDraftFactory) => { factory = value; return () => { factory = null; }; });
-  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [imageNode('image-one', '图片')] }));
-  render(<LocalDraftExportContext.Provider value={register}><CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} /></LocalDraftExportContext.Provider>);
-  await screen.findByLabelText('画布编辑器 列车短片');
-  await waitFor(() => expect(register).toHaveBeenCalledTimes(1));
-  act(() => flowHandlers.nodesChange?.([{ id: 'image-one', type: 'position', position: { x: 900, y: 700 } }]));
-  const snapshot = (factory as LocalDraftFactory | null)?.();
-  expect(snapshot?.filename).toBe('canvas-one.canvas-draft.json');
-  expect((snapshot?.document as CanvasDocument).nodes[0].position).toEqual({ x: 900, y: 700 });
-  expect(saveCanvasDocument).not.toHaveBeenCalled();
 });

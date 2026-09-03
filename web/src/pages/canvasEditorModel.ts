@@ -471,7 +471,7 @@ function isOpenAiHkBaseUrl(baseUrl: string | null | undefined) {
 
 function canvasImageModelIsRoutable(key: KeyView, model: KeyView['models'][number]) {
   if (key.provider === 'nano_banana') return false;
-  const family = imageControlCaps(model.id, key.provider, model.protocol).family;
+  const family = imageControlCaps(model.id, key.provider).family;
   if (family === 'midjourney' || key.provider === 'openrouter') return true;
   if (!['openai', 'midjourney', 'seedream', 'tokendance', 'custom'].includes(key.provider)) {
     return false;
@@ -563,7 +563,6 @@ function normalizedCanvasGenerationParams(
       model.id,
       key.provider,
       current,
-      model.protocol,
       key.base_url,
     );
   }
@@ -691,13 +690,11 @@ export function normalizeCanvasImageParams(
   model: string,
   provider: string | null | undefined,
   current: JobParams,
-  protocol?: string | null,
   baseUrl?: string | null,
 ): JobParams {
-  const caps = imageControlCaps(model, provider, protocol, baseUrl);
+  const caps = imageControlCaps(model, provider, baseUrl);
   const {
     quality: currentQuality,
-    background: currentBackground,
     reference_images: _referenceImages,
     reference_videos: _referenceVideos,
     reference_audios: _referenceAudios,
@@ -721,10 +718,6 @@ export function normalizeCanvasImageParams(
     params.quality = caps.qualities.includes(currentQuality as Quality)
       ? currentQuality
       : caps.qualities[0];
-  }
-  if (caps.supportsTransparentBackground
-    && ['auto', 'opaque', 'transparent'].includes(String(currentBackground))) {
-    params.background = currentBackground;
   }
   if (caps.sizeKind === 'ratio') {
     params.size = ratio;

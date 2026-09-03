@@ -62,7 +62,6 @@ export interface CanvasImageDefaultParams {
   resolution?: string;
   size?: string;
   quality?: 'low' | 'medium' | 'high' | 'auto';
-  background?: 'auto' | 'opaque' | 'transparent';
 }
 
 export interface CanvasVideoDefaultParams {

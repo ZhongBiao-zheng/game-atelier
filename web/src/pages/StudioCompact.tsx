@@ -184,7 +184,6 @@ export function StudioCompact() {
     const caps = imageControlCaps(
       effectiveModel,
       effectiveProvider,
-      selectedKey?.models.find((item) => item.id === effectiveModel)?.protocol,
       selectedKey?.base_url,
     );
     // MJ 一次 imagine 固定回 4 张方案（同 Studio.onSubmit）。

@@ -1754,7 +1754,6 @@ export function CanvasGenerationComposer({
     ? imageControlCaps(
         draft.model,
         selectedKey?.provider,
-        selectedModel?.protocol,
         selectedKey?.base_url,
       )
     : null;
@@ -2057,7 +2056,6 @@ export function CanvasGenerationComposer({
                     model.id,
                     key.provider,
                     current.params,
-                    model.protocol,
                     key.base_url,
                   )
                 : draft.mode === 'text'
@@ -2105,9 +2103,6 @@ export function CanvasGenerationComposer({
                   current.model,
                   context.keys.find(key => key.alias === current.alias)?.provider,
                   merged,
-                  context.keys
-                    .find(key => key.alias === current.alias)
-                    ?.models.find(model => model.id === current.model)?.protocol,
                   context.keys.find(key => key.alias === current.alias)?.base_url,
                 ),
               };

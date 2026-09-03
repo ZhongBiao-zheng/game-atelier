@@ -581,7 +581,6 @@ export function PromptInput({
   const caps = imageControlCaps(
     selectedModel?.id,
     provider?.provider,
-    selectedModel?.protocol,
     provider?.base_url,
   );
   const sizeControlDetail = caps.showResolution

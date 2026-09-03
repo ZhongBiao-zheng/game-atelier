@@ -183,7 +183,7 @@ describe('CanvasAudioSettings', () => {
 });
 
 describe('CanvasImageSettings', () => {
-  it('shows only direct GPT Image controls, including transparency and editable count', () => {
+  it('shows only direct GPT Image controls, including editable count', () => {
     render(
       <CanvasImageSettings
         caps={imageControlCaps('gpt-image-2', 'openai')}
@@ -193,14 +193,13 @@ describe('CanvasImageSettings', () => {
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: '图片设置' }));
-    expect(screen.getByText('透明背景')).toBeInTheDocument();
     expect(screen.getByText('自定义尺寸')).toBeInTheDocument();
     expect(screen.getByText('质量')).toBeInTheDocument();
     expect(screen.getByLabelText('选择图片生成数量')).toBeInTheDocument();
     expect(screen.queryByText('分辨率')).not.toBeInTheDocument();
   });
 
-  it('uses Seedream resolution controls without inventing quality or transparency', () => {
+  it('uses Seedream resolution controls without inventing quality', () => {
     render(
       <CanvasImageSettings
         caps={imageControlCaps('seedream-5.0-lite', 'seedream')}
@@ -213,7 +212,6 @@ describe('CanvasImageSettings', () => {
     expect(screen.getByText('分辨率')).toBeInTheDocument();
     expect(screen.getByText('自定义尺寸')).toBeInTheDocument();
     expect(screen.queryByText('质量')).not.toBeInTheDocument();
-    expect(screen.queryByText('透明背景')).not.toBeInTheDocument();
   });
 
   it('explains Midjourney fixed outputs instead of rendering a fake count control', () => {

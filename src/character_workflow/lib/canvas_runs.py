@@ -523,7 +523,6 @@ def _normalized_image_preference_params(
         image_family,
         normalize_image_pixel_size,
         normalized_model_id,
-        resolve_image_protocol,
     )
 
     family = image_family(model.id)
@@ -557,17 +556,6 @@ def _normalized_image_preference_params(
             resolutions = {"2K"}
         resolution = str(params.get("resolution") or "2K").upper()
         normalized["resolution"] = resolution if resolution in resolutions else "2K"
-    if family == "gpt-image":
-        protocol = model.protocol or resolve_image_protocol(
-            key.provider,
-            key.base_url,
-            model.id,
-        )
-        background = params.get("background")
-        if protocol in {None, "openai"} and background in {
-            "auto", "opaque", "transparent",
-        }:
-            normalized["background"] = background
     return JobParams.model_validate(normalized)
 
 
@@ -945,30 +933,17 @@ def _normalized_params(
     key: KeySpec,
     model: ModelSpec,
 ) -> tuple[dict[str, Any], JobParams, int]:
-    from character_workflow.lib.callers.openai_image import image_family, resolve_image_protocol
+    from character_workflow.lib.callers.openai_image import image_family
 
     # 白名单重组，不是黑名单剔除：见 schemas.CANVAS_DRAFT_PARAM_FIELDS。
     normalized = canvas_allowed_draft_params(draft.mode, draft.params)
-    # 这两个只在模型确实支持时由下面各分支重新放回。
-    normalized.pop("background", None)
+    # 只在模型确实支持时由下面的视频分支重新放回。
     normalized.pop("watermark", None)
     effective_count = requested_count
     if draft.mode == "image":
         family = image_family(model.id)
         if family == "midjourney":
             effective_count = 4
-        protocol = model.protocol or resolve_image_protocol(
-            key.provider,
-            key.base_url,
-            model.id,
-        )
-        if (
-            family == "gpt-image"
-            and key.provider != "openrouter"
-            and protocol in {None, "openai"}
-            and draft.params.background is not None
-        ):
-            normalized["background"] = draft.params.background
         normalized["n"] = effective_count
     elif draft.mode == "text":
         if not _supports_openai_text(key, model):

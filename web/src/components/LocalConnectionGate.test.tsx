@@ -52,7 +52,23 @@ describe('local connection gate', () => {
     const editor = await screen.findByLabelText('编辑草稿'); fireEvent.change(editor, { target: { value: '尚未保存的手稿' } });
     await act(async () => { await connectionFetch('/api/revoked'); });
     expect(screen.getByRole('dialog')).toHaveTextContent('授权已撤销'); expect(editor).toHaveValue('尚未保存的手稿'); expect(onMount).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: '复制可见草稿' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '取消' })).toBeInTheDocument();
+  });
+  it('lets the user dismiss the pause dialog, keep the page and reconnect later', async () => {
+    const network = server(); render(<LocalConnectionGate><Draft onMount={vi.fn()} /></LocalConnectionGate>);
+    const editor = await screen.findByLabelText('编辑草稿'); fireEvent.change(editor, { target: { value: '尚未保存的手稿' } });
+    network.mockRejectedValue(new TypeError('Failed to fetch'));
+    await act(async () => { await connectionFetch('/api/config').catch(() => {}); });
+    expect(screen.getByRole('dialog')).toHaveTextContent('本机连接已暂停');
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); expect(editor).toHaveValue('尚未保存的手稿');
+    fireEvent.click(screen.getByRole('button', { name: '重新连接' }));
+    await screen.findByRole('dialog'); expect(screen.getByRole('dialog')).toHaveTextContent('本机连接已暂停');
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    server();
+    fireEvent.click(screen.getByRole('button', { name: '重新连接' }));
+    await waitFor(() => expect(localConnection.getSnapshot().phase).toBe('ready'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); expect(screen.queryByText('本机连接已暂停')).not.toBeInTheDocument();
   });
   it('warns about unsaved content before an explicit takeover', async () => {
     const network = server({ occupied: true }); const onMount = vi.fn(); render(<LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate>);
