@@ -688,6 +688,9 @@ class CanvasLayerStackLayer(BaseModel):
 class CanvasLayerStackData(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source_version_id: str = Field(min_length=1, max_length=160)
+    alias: str | None = Field(default=None, min_length=1, max_length=120)
+    model: str | None = Field(default=None, min_length=1, max_length=240)
+    prompt: str = Field(default="", max_length=4000)
     base_version_id: str | None = Field(default=None, max_length=160)
     base_visible: bool = True
     layers: list[CanvasLayerStackLayer] = Field(default_factory=list, max_length=16)
@@ -1084,6 +1087,7 @@ class CanvasDocument(BaseModel):
                         raise ValueError("canvas group membership is invalid")
                     group_members.add(member_id)
         occupied_frame_slots: set[tuple[str, str]] = set()
+        layer_stack_inputs: dict[str, int] = {}
         for edge in self.connections:
             if edge.source_node_id not in nodes_by_id or edge.target_node_id not in nodes_by_id:
                 raise ValueError("canvas connection references a missing node")
@@ -1098,8 +1102,13 @@ class CanvasDocument(BaseModel):
                     raise ValueError("canvas input source cannot provide content")
                 if target.type == "plugin":
                     raise ValueError("canvas plugin connections require a verified capability manifest")
-                if target.type in {"batch_material", "layer_stack"}:
+                if target.type == "batch_material":
                     raise ValueError("batch material nodes cannot receive input connections")
+                if target.type == "layer_stack":
+                    if source.type != "image" or edge.slot is not None:
+                        raise ValueError("layer stack input must be one image node")
+                    layer_stack_inputs[target.id] = layer_stack_inputs.get(target.id, 0) + 1
+                    continue
                 if edge.slot is not None:
                     target_draft = (
                         target.data.draft
@@ -1112,6 +1121,8 @@ class CanvasDocument(BaseModel):
                     if slot_key in occupied_frame_slots:
                         raise ValueError("canvas video frame slot can only have one source")
                     occupied_frame_slots.add(slot_key)
+        if any(count > 1 for count in layer_stack_inputs.values()):
+            raise ValueError("layer stack cannot have more than one image input")
         if len(self.model_dump_json().encode("utf-8")) > 25 * 1024 * 1024:
             raise ValueError("canvas document exceeds 25 MiB")
         return self
@@ -1388,6 +1399,8 @@ class CanvasLayerDecompositionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     surface_node_id: str = Field(min_length=1, max_length=120)
     expected_revision: int = Field(ge=0)
+    alias: str = Field(min_length=1, max_length=120)
+    model: str = Field(min_length=1, max_length=240)
 
 
 class CanvasMaskEditCreate(BaseModel):

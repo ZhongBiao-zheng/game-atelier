@@ -10,6 +10,7 @@ import {
   listCanvasJobs,
   listCanvasProjects,
   saveCanvasDocument,
+  submitCanvasLayerDecomposition,
   submitCanvasRun,
   uploadCanvasMedia,
 } from '@/api/canvas';
@@ -366,6 +367,53 @@ beforeEach(() => {
 function lastSavedDocument() {
   return vi.mocked(saveCanvasDocument).mock.calls.at(-1)?.[1];
 }
+
+it('creates an editable layer-decomposition node before calling the model', async () => {
+  const source = {
+    ...imageNode('source-image', '源图'),
+    data: { ...imageNode('source-image', '源图').data, current_version_id: 'source-version' },
+  };
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [source],
+    content_versions: {
+      'source-version': {
+        version_id: 'source-version', kind: 'image', path: 'uploads/source.png', mime_type: 'image/png',
+        bytes: 42, width: 1200, height: 800, duration_ms: null,
+        created_at: '2026-09-03T00:00:00Z', sha256: 'a'.repeat(64),
+        origin: { kind: 'upload', upload_id: 'source-upload' },
+      },
+    },
+  }));
+  vi.mocked(listKeys).mockResolvedValue({
+    keys: [{
+      alias: 'tokendance', provider: 'tokendance', base_url: 'https://tokendance.space/gateway/v1',
+      access_key: '***', secret_key: null, capabilities: [], modalities: ['image'], notes: '',
+      created_at: '2026-09-03T00:00:00Z',
+      models: [{ name: 'Seedream 5.0 Pro', id: 'seedream-5.0-pro', modality: 'image', protocol: 'ark' }],
+    }],
+  });
+
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: 'flow-node-source-image' }));
+  fireEvent.click(screen.getByRole('button', { name: '拆分 源图 的图层' }));
+
+  expect(await screen.findByLabelText('图层拆分设置')).toBeInTheDocument();
+  expect(screen.getByRole('img', { name: '待拆分图片' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '选择生成模型' })).toHaveTextContent('Seedream 5.0 Pro');
+  expect(submitCanvasLayerDecomposition).not.toHaveBeenCalled();
+  await waitFor(() => {
+    const saved = lastSavedDocument();
+    const stack = saved?.nodes.find(node => node.type === 'layer_stack');
+    expect(stack?.data).toMatchObject({
+      source_version_id: 'source-version', alias: 'tokendance', model: 'seedream-5.0-pro',
+    });
+    expect(saved?.connections).toContainEqual(expect.objectContaining({
+      role: 'input', source_node_id: 'source-image', target_node_id: stack?.id,
+    }));
+  });
+});
 
 function savedTextOf(saved: CanvasDocument | undefined, nodeId: string) {
   const node = saved?.nodes.find(candidate => candidate.id === nodeId);

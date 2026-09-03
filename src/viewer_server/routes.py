@@ -2903,9 +2903,11 @@ def post_canvas_layer_decomposition(
             project_id,
             payload.surface_node_id,
             payload.expected_revision,
+            payload.alias,
+            payload.model,
         )
     except KeyError:
-        raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None
+        raise HTTPException(404, detail="找不到这个画布项目或拆分图层节点") from None
     except CanvasRunCommandError as error:
         raise HTTPException(422, detail={
             "code": error.code,

@@ -123,7 +123,8 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     saveAsset: vi.fn(async () => undefined),
     copyPrompt: vi.fn(async () => undefined),
     reversePrompt: vi.fn(async () => undefined),
-    decomposeLayers: vi.fn(async () => undefined),
+    createLayerDecomposition: vi.fn(),
+    submitLayerDecomposition: vi.fn(async () => undefined),
     recoverReversePromptConfig: vi.fn(async () => undefined),
     reversePromptConfiguredNodeIds: new Set(),
     replaceMedia: vi.fn(),
@@ -461,7 +462,8 @@ it('shows every configured image action after selection and keeps it mounted whi
   expect(within(toolbar).getByRole('button', { name: '切分 图片' })).toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '本地放大 图片' })).toBeInTheDocument();
   fireEvent.click(within(toolbar).getByRole('button', { name: '拆分 图片 的图层' }));
-  expect(context.decomposeLayers).toHaveBeenCalledWith(image);
+  expect(context.createLayerDecomposition).toHaveBeenCalledWith(image);
+  expect(screen.queryByRole('dialog', { name: '拆分图层' })).not.toBeInTheDocument();
   const settingsButton = within(toolbar).getByRole('button', { name: '配置图片快捷工具' });
   act(() => settingsButton.focus());
   fireEvent.click(settingsButton);
@@ -495,7 +497,8 @@ it('rebuilds a decomposed image from layers and hides a selected part', () => {
     id: 'layer-stack', title: '图层拆分', type: 'layer_stack', position: { x: 0, y: 0 }, z_index: 0,
     size: { width: 760, height: 480 },
     data: {
-      source_version_id: 'source', base_version_id: 'base', base_visible: true, active_run_id: null,
+      source_version_id: 'source', alias: 'tokendance', model: 'seedream-5.0-pro', prompt: '',
+      base_version_id: 'base', base_visible: true, active_run_id: null,
       error: null,
       layers: [{
         id: 'layer-subject', version_id: 'subject', z_index: 1, name: '主体', description: '透明主体',
@@ -530,6 +533,48 @@ it('rebuilds a decomposed image from layers and hides a selected part', () => {
     context={context}
   />);
   expect(screen.getByRole('alert')).toHaveTextContent('上游拆分失败');
+});
+
+it('configures and starts layer decomposition inside the new node', () => {
+  const source: CanvasContentVersion = {
+    version_id: 'source', kind: 'image', path: 'uploads/source.png', mime_type: 'image/png', bytes: 42,
+    width: 1200, height: 800, duration_ms: null, created_at: '2026-09-03T00:00:00Z',
+    sha256: 'c'.repeat(64), origin: { kind: 'upload', upload_id: 'source-upload' },
+  };
+  const layerStack = {
+    id: 'layer-stack-draft', title: '拆分图层', type: 'layer_stack', position: { x: 0, y: 0 }, z_index: 0,
+    size: { width: 760, height: 480 },
+    data: {
+      source_version_id: 'source', alias: 'tokendance', model: 'seedream-5.0-pro', prompt: '',
+      base_version_id: null, base_visible: true, layers: [], active_run_id: null, error: null,
+    },
+  } satisfies Extract<CanvasNode, { type: 'layer_stack' }>;
+  const context = nodeContext({
+    keys: [{
+      alias: 'tokendance', provider: 'tokendance', base_url: 'https://tokendance.space/gateway/v1',
+      access_key: '***', secret_key: null, capabilities: [], notes: '', is_default: true,
+      created_at: '2026-09-03T00:00:00Z',
+      models: [{
+        name: 'Seedream 5.0 Pro', id: 'seedream-5.0-pro', modality: 'image', protocol: 'ark',
+      }],
+    }],
+    resolveVersion: versionResolver({ source }),
+  });
+
+  render(<CanvasLayerStackSurface node={layerStack} context={context} />);
+
+  expect(screen.getByRole('img', { name: '待拆分图片' })).toHaveAttribute(
+    'src',
+    expect.stringContaining('/versions/source/media'),
+  );
+  expect(screen.getByRole('button', { name: '选择生成模型' })).toHaveTextContent('Seedream 5.0 Pro');
+  expect(screen.getByText('2K · PNG')).toBeInTheDocument();
+  fireEvent.focus(screen.getByRole('textbox', { name: '拆分要求' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '拆分要求' }), { target: { value: '拆出主体' } });
+  expect(context.recordHistory).toHaveBeenCalledOnce();
+  expect(context.updateNode).toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '开始拆分' }));
+  expect(context.submitLayerDecomposition).toHaveBeenCalledWith('layer-stack-draft');
 });
 
 it('treats an uploaded image as a pure material with toolbar and one direct replace action only', async () => {

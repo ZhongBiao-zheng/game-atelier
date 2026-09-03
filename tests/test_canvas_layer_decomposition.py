@@ -19,6 +19,7 @@ from character_workflow.lib.canvas_packages import (
     inspect_canvas_package,
 )
 from character_workflow.lib.canvas_runs import (
+    CanvasRunCommandError,
     finalize_canvas_run,
     submit_layer_decomposition_run,
 )
@@ -26,10 +27,14 @@ from character_workflow.lib.jobs import save_job
 from character_workflow.lib.keys import KeySpec, KeysDB, ModelSpec, write_keys_db
 from character_workflow.lib.schemas import (
     CanvasImageNode,
+    CanvasInputConnection,
+    CanvasLayerStackData,
+    CanvasLayerStackNode,
     JobParams,
     CanvasMediaDisplay,
     CanvasMediaNodeData,
     CanvasPoint,
+    CanvasSize,
     JobStatus,
 )
 from viewer_server.server_app import build_app
@@ -88,14 +93,54 @@ def _configure_seedream() -> None:
     )]))
 
 
-def test_layer_decomposition_creates_stack_and_registers_every_output(isolated_data_root):
+def _project_with_decomposition_node(
+    *,
+    alias: str = "ark",
+    model: str = "doubao-seedream-5-0-pro-260628",
+    prompt: str = "",
+):
+    project, current, version = _project_with_source_image()
+    stack = CanvasLayerStackNode(
+        id="layer-stack",
+        title="拆分图层",
+        type="layer_stack",
+        position=CanvasPoint(x=420, y=40),
+        size=CanvasSize(width=760, height=480),
+        z_index=0,
+        data=CanvasLayerStackData(
+            source_version_id=version.version_id,
+            alias=alias,
+            model=model,
+            prompt=prompt,
+        ),
+    )
+    edge = CanvasInputConnection(
+        id="source-to-layer-stack",
+        role="input",
+        source_node_id="source-image",
+        target_node_id=stack.id,
+    )
+    saved = save_canvas_document(
+        project.project_id,
+        current.model_copy(update={
+            "nodes": [*current.nodes, stack],
+            "connections": [*current.connections, edge],
+        }),
+        current.revision,
+    )
+    return project, saved, version
+
+
+def test_layer_decomposition_runs_existing_stack_and_registers_every_output(isolated_data_root):
     _configure_seedream()
-    project, current, source_version = _project_with_source_image()
+    project, current, source_version = _project_with_decomposition_node(prompt="拆出主体")
 
     job, submitted = submit_layer_decomposition_run(
         project.project_id,
-        "source-image",
+        "layer-stack",
         current.revision,
+        "ark",
+        "doubao-seedream-5-0-pro-260628",
     )
 
     result_node = next(node for node in submitted.nodes if node.id == job.canvas_run.result_node_id)
@@ -103,6 +148,9 @@ def test_layer_decomposition_creates_stack_and_registers_every_output(isolated_d
     assert result_node.data.source_version_id == source_version.version_id
     assert result_node.data.active_run_id == job.canvas_run.run_id
     assert result_node.data.error is None
+    assert len(submitted.nodes) == len(current.nodes)
+    assert job.prompt == "拆出主体"
+    assert job.canvas_run.snapshot.final_prompt == "拆出主体"
     assert job.provider == "seedream"
     assert job.params.layer_decomposition is True
     assert job.params.reference_images and len(job.params.reference_images) == 1
@@ -217,11 +265,13 @@ def test_layer_stack_rejects_dangling_image_versions(isolated_data_root):
 
 def test_failed_layer_decomposition_releases_node_and_persists_error(isolated_data_root):
     _configure_seedream()
-    project, current, _source_version = _project_with_source_image()
+    project, current, _source_version = _project_with_decomposition_node()
     job, _submitted = submit_layer_decomposition_run(
         project.project_id,
-        "source-image",
+        "layer-stack",
         current.revision,
+        "ark",
+        "doubao-seedream-5-0-pro-260628",
     )
     save_job(job.model_copy(update={
         "status": JobStatus.FAILED,
@@ -238,12 +288,71 @@ def test_failed_layer_decomposition_releases_node_and_persists_error(isolated_da
     assert node.data.error == "upstream failed"
 
 
+def test_layer_decomposition_uses_the_explicitly_selected_ark_model(isolated_data_root):
+    write_keys_db(KeysDB(default_alias="ark", keys=[
+        KeySpec(
+            alias="ark",
+            provider="seedream",
+            base_url="https://ark.cn-beijing.volces.com/api/v3",
+            access_key="secret",
+            created_at="2026-09-03T00:00:00Z",
+            models=[ModelSpec(
+                name="Seedream 5.0 Pro",
+                id="doubao-seedream-5-0-pro-260628",
+                modality="image",
+            )],
+        ),
+        KeySpec(
+            alias="tokendance",
+            provider="tokendance",
+            base_url="https://tokendance.space/gateway/v1",
+            access_key="secret",
+            created_at="2026-09-03T00:00:00Z",
+            models=[ModelSpec(
+                name="Seedream 5.0 Pro",
+                id="seedream-5.0-pro",
+                modality="image",
+                protocol="ark",
+            )],
+        ),
+    ]))
+    invalid_project, invalid_current, _source_version = _project_with_decomposition_node(
+        alias="missing",
+        model="seedream-5.0-pro",
+    )
+
+    with pytest.raises(CanvasRunCommandError, match="重新选择"):
+        submit_layer_decomposition_run(
+            invalid_project.project_id,
+            "layer-stack",
+            invalid_current.revision,
+            "missing",
+            "seedream-5.0-pro",
+        )
+
+    project, current, _source_version = _project_with_decomposition_node(
+        alias="tokendance",
+        model="seedream-5.0-pro",
+    )
+    job, _submitted = submit_layer_decomposition_run(
+        project.project_id,
+        "layer-stack",
+        current.revision,
+        "tokendance",
+        "seedream-5.0-pro",
+    )
+
+    assert job.alias == "tokendance"
+    assert job.provider == "tokendance"
+    assert job.model == "seedream-5.0-pro"
+
+
 def test_layer_decomposition_endpoint_schedules_the_canvas_job(
     isolated_data_root,
     monkeypatch,
 ):
     _configure_seedream()
-    project, current, _source_version = _project_with_source_image()
+    project, current, _source_version = _project_with_decomposition_node()
     scheduled: list[str] = []
     from viewer_server import routes as routes_module
 
@@ -256,10 +365,16 @@ def test_layer_decomposition_endpoint_schedules_the_canvas_job(
 
     response = client.post(
         f"/api/canvas/projects/{project.project_id}/runs/layer-decomposition",
-        json={"surface_node_id": "source-image", "expected_revision": current.revision},
+        json={
+            "surface_node_id": "layer-stack",
+            "expected_revision": current.revision,
+            "alias": "ark",
+            "model": "doubao-seedream-5-0-pro-260628",
+        },
     )
 
     assert response.status_code == 201, response.json()
     payload = response.json()
     assert scheduled == [payload["job"]["job_id"]]
-    assert any(node["type"] == "layer_stack" for node in payload["document"]["nodes"])
+    stack = next(node for node in payload["document"]["nodes"] if node["id"] == "layer-stack")
+    assert stack["data"]["active_run_id"] == payload["job"]["canvas_run"]["run_id"]

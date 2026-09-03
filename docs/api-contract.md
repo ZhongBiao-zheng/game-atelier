@@ -283,10 +283,13 @@ Input Connection。图片模型优先使用仍可路由的画布图片生成偏�
 再按 default Key 优先、其余登记顺序选择。自动选择会应用已保存的默认参数，失效的显式模型不泄漏旧参数；
 缺模型时保留反推文本且零写。重复请求即使携带旧 revision，也返回已经存在的同一配置，不重复创建节点或连接。
 
-`POST /canvas/projects/{id}/runs/layer-decomposition` 只接受 `surface_node_id + expected_revision`，且源节点
-必须拥有项目内图片 Version。服务端只选择官方火山方舟 `seedream` Key 下的 Seedream 5.0 Pro，固定提交
+图片工具栏的“拆分图层”先在画布中创建一个 `layer_stack` 节点和一条图片输入连线，不调用厂商。节点持有创建时的
+不可变源图片 Version，并在左侧展示它；右侧保存用户选择的 `alias + model` 与可选拆分要求。`POST
+/canvas/projects/{id}/runs/layer-decomposition` 只接受该节点的 `surface_node_id + expected_revision + alias + model`，
+服务端还会核对请求选择与节点已保存设置完全一致。只接受火山直连或明确使用 Ark 协议的 Seedream 5.0 Pro，
+绝不自动替换渠道或模型。调用固定提交
 单张源图、`layer_decomposition=true`、`size=2K`、`output_format=png`、`response_format=b64_json` 与
-`watermark=false`，不回退到聚合商或普通生图。提交事务创建独立 `layer_stack` 结果节点；完成事务把背景图
+`watermark=false`，不自动回退到其他渠道或普通生图。提交与完成事务都复用原 `layer_stack` 节点；完成后把背景图
 和最多 16 张透明 PNG 全部登记为不可变图片 Version，并保存厂商返回的 `z_index`、`name`、
 `description`、`bounding_box`。底图使用普通 `job_output` 血缘，透明层使用带 `job_id + output_index` 的
 `layer_decomposition` 血缘；媒体读取和项目包导入导出均校验该索引与 Job 输出一致。图层栈按绝对 bbox

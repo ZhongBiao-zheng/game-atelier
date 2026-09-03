@@ -59,7 +59,6 @@ from character_workflow.lib.schemas import (
     CanvasJobContext,
     CanvasJobOutputOrigin,
     CanvasLayerDecompositionOrigin,
-    CanvasLayerStackData,
     CanvasLayerStackLayer,
     CanvasLayerStackNode,
     CanvasMediaDisplay,
@@ -68,7 +67,6 @@ from character_workflow.lib.schemas import (
     CanvasNode,
     CanvasResultCandidate,
     CanvasSnapshotInput,
-    CanvasSize,
     CanvasTextNode,
     CanvasTextNodeData,
     CanvasTextVersion,
@@ -485,22 +483,31 @@ def _resolve_reverse_prompt_model() -> tuple[KeySpec, ModelSpec]:
     )
 
 
-def _resolve_layer_decomposition_model() -> tuple[KeySpec, ModelSpec]:
-    from character_workflow.lib.callers.openai_image import normalized_model_id
+def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySpec, ModelSpec]:
+    from character_workflow.lib.callers.openai_image import (
+        normalized_model_id,
+        resolve_image_protocol,
+    )
 
-    for key in _keys_default_first():
-        if key.provider != "seedream":
-            continue
-        for model in key.models:
-            if (
-                _model_modality(model, key) == "image"
-                and "seedream-5-0-pro" in normalized_model_id(model.id)
-                and model.protocol in {None, "ark", "openai"}
-            ):
-                return key, model
+    key = next((item for item in _keys_default_first() if item.alias == alias), None)
+    model = next((item for item in key.models if item.id == model_id), None) if key else None
+    protocol = (
+        model.protocol or resolve_image_protocol(key.provider, key.base_url, model.id)
+        if key and model
+        else None
+    )
+    if (
+        key
+        and model
+        and key.provider in {"seedream", "tokendance", "custom"}
+        and _model_modality(model, key) == "image"
+        and "seedream-5-0-pro" in normalized_model_id(model.id)
+        and (key.provider == "seedream" or protocol == "ark")
+    ):
+        return key, model
     raise CanvasRunCommandError(
-        "canvas_layer_decomposition_model_missing",
-        "未配置火山方舟 Seedream 5.0 Pro，请先在设置中接入该模型。",
+        "canvas_layer_decomposition_model_invalid",
+        "所选 Seedream 5.0 Pro 模型不可用于图层拆分，请重新选择。",
     )
 
 
@@ -1415,31 +1422,67 @@ def submit_layer_decomposition_run(
     project_id: str,
     surface_node_id: str,
     expected_revision: int,
+    alias: str,
+    model_id: str,
 ) -> tuple[Job, CanvasDocument]:
-    """Freeze one owned image into an official Seedream layer-decomposition Run."""
+    """Freeze one configured layer-stack node into a Seedream decomposition Run."""
     with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         current = _read_document_unlocked(project_id)
         if current.revision != expected_revision:
             raise RuntimeError(f"revision_conflict:{current.revision}")
         surface = next((node for node in current.nodes if node.id == surface_node_id), None)
-        if not isinstance(surface, CanvasImageNode) or not surface.data.current_version_id:
+        if not isinstance(surface, CanvasLayerStackNode):
             raise CanvasRunCommandError(
                 "canvas_layer_decomposition_source_missing",
-                "请选择一个已有内容的图片节点再拆分图层。",
+                "拆分图层节点已不存在。",
             )
-        source = current.content_versions.get(surface.data.current_version_id)
+        if surface.data.base_version_id is not None:
+            raise CanvasRunCommandError(
+                "canvas_layer_decomposition_already_completed",
+                "这个节点已经完成图层拆分。",
+            )
+        if surface.data.active_run_id is not None:
+            raise CanvasRunCommandError(
+                "canvas_layer_decomposition_already_running",
+                "这个节点正在拆分图层。",
+            )
+        if surface.data.alias != alias or surface.data.model != model_id:
+            raise CanvasRunCommandError(
+                "canvas_layer_decomposition_settings_changed",
+                "拆分节点设置已变化，请保存后重试。",
+            )
+        source = current.content_versions.get(surface.data.source_version_id)
         if not isinstance(source, CanvasMediaVersion) or source.kind != "image":
             raise CanvasRunCommandError(
                 "canvas_layer_decomposition_source_missing",
                 "图片节点当前没有可读取的项目内版本。",
             )
+        source_edge = next(
+            (
+                connection for connection in current.connections
+                if connection.role == "input"
+                and connection.target_node_id == surface.id
+            ),
+            None,
+        )
+        source_node = next(
+            (
+                node for node in current.nodes
+                if source_edge is not None and node.id == source_edge.source_node_id
+            ),
+            None,
+        )
+        if not isinstance(source_node, CanvasImageNode):
+            raise CanvasRunCommandError(
+                "canvas_layer_decomposition_source_missing",
+                "拆分节点与来源图片的连接已断开。",
+            )
 
-        key, model = _resolve_layer_decomposition_model()
+        key, model = _resolve_layer_decomposition_model(alias, model_id)
         timestamp = _now()
         job_id = new_job_id()
         run_id = f"run-{secrets.token_hex(12)}"
-        result_id = f"layer-stack-{secrets.token_hex(12)}"
         candidate = CanvasResultCandidate(
             candidate_id=f"candidate-{secrets.token_hex(10)}",
             index=0,
@@ -1448,7 +1491,7 @@ def submit_layer_decomposition_run(
         inputs = [CanvasSnapshotInput(
             order=0,
             source="implicit_self",
-            node_id=surface.id,
+            node_id=source_node.id,
             version_id=source.version_id,
             kind="image",
         )]
@@ -1462,9 +1505,9 @@ def submit_layer_decomposition_run(
         snapshot_payload = {
             "snapshot_version": 1,
             "surface_node_id": surface.id,
-            "result_node_id": result_id,
+            "result_node_id": surface.id,
             "mode": "image",
-            "final_prompt": "",
+            "final_prompt": surface.data.prompt,
             "input_policy": "mentions_only",
             "model": model.id,
             "provider": key.provider,
@@ -1482,7 +1525,7 @@ def submit_layer_decomposition_run(
         context = CanvasJobContext(
             run_id=run_id,
             snapshot=snapshot,
-            result_node_id=result_id,
+            result_node_id=surface.id,
             candidates=[candidate],
         )
         paths = _input_paths(project_id, current, inputs)
@@ -1495,7 +1538,7 @@ def submit_layer_decomposition_run(
         job = Job(
             job_id=job_id,
             character_id=key.alias,
-            prompt="",
+            prompt=surface.data.prompt,
             submitted_at=timestamp,
             model=model.id,
             params=job_params,
@@ -1510,40 +1553,19 @@ def submit_layer_decomposition_run(
             alias=key.alias,
             provider=key.provider,
         )
-        placement = _new_result_node(
-            surface,
-            current.nodes,
-            "image",
-            None,
-            run_id,
-            result_id,
-            "图层拆分",
-        ).position
-        result_node = CanvasLayerStackNode(
-            id=result_id,
-            title="图层拆分",
-            type="layer_stack",
-            position=placement,
-            size=CanvasSize(width=760, height=480),
-            z_index=surface.z_index,
-            data=CanvasLayerStackData(
-                source_version_id=source.version_id,
-                active_run_id=run_id,
-            ),
-        )
         updated = current.model_copy(update={
             "revision": current.revision + 1,
             "updated_at": timestamp,
-            "nodes": [*current.nodes, result_node],
-            "connections": [
-                *current.connections,
-                CanvasDerivationConnection(
-                    id=f"connection-{secrets.token_hex(12)}",
-                    role="derivation",
-                    source_node_id=surface.id,
-                    target_node_id=result_id,
-                    origin=CanvasGenerationRunOrigin(kind="generation_run", run_id=run_id),
-                ),
+            "nodes": [
+                node.model_copy(update={
+                    "data": node.data.model_copy(update={
+                        "active_run_id": run_id,
+                        "error": None,
+                    })
+                })
+                if isinstance(node, CanvasLayerStackNode) and node.id == surface.id
+                else node
+                for node in current.nodes
             ],
         })
         _commit_transaction_unlocked(

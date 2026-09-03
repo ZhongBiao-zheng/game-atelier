@@ -17,12 +17,14 @@ import {
   type FocusEvent as ReactFocusEvent, type ReactNode, type Ref, type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'wouter';
 
 import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasExecutionGroup } from './CanvasBatchControls';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
+import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
 import {
   CanvasAudioSettings,
   CanvasImageSettings,
@@ -164,7 +166,8 @@ export interface CanvasNodeContextValue {
   saveAsset: (node: CanvasContentNode) => Promise<void>;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
   reversePrompt: (node: CanvasContentNode) => Promise<void>;
-  decomposeLayers: (node: Extract<CanvasContentNode, { type: 'image' }>) => Promise<void>;
+  createLayerDecomposition: (node: Extract<CanvasContentNode, { type: 'image' }>) => void;
+  submitLayerDecomposition: (nodeId: string) => Promise<void>;
   recoverReversePromptConfig: (job: Job) => Promise<void>;
   reversePromptConfiguredNodeIds: ReadonlySet<string>;
   replaceMedia: (node: CanvasContentNode) => void;
@@ -754,7 +757,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
         state={nodeRunState}
         hasContent={Boolean(content || (node.type === 'layer_stack' && node.data.base_version_id))}
       />
-      {canvasNodeAcceptsInput(node) && (
+      {(canvasNodeAcceptsInput(node) || node.type === 'layer_stack') && (
         <Handle type="target" position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
           <span className="canvas-node-handle-dot" aria-hidden="true" />
         </Handle>
@@ -1697,7 +1700,7 @@ function ImageNodeToolbar({
         label={`拆分 ${node.title} 的图层`}
         text={context.canvasUiPreferences.image_toolbar.show_labels ? '拆分图层' : undefined}
         disabled={!currentVersionId || submitting || replacing}
-        onClick={() => void context.decomposeLayers(node)}
+        onClick={() => context.createLayerDecomposition(node)}
       >
         <Layers3 />
       </MediaToolButton>
@@ -2778,12 +2781,30 @@ export function CanvasLayerStackSurface({
   context: CanvasNodeContextValue;
 }) {
   const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null);
+  const [promptDraft, setPromptDraft] = useState(node.data.prompt);
+  const choices = useMemo(() => layerDecompositionModelChoices(context.keys), [context.keys]);
+  const source = context.resolveVersion(node.data.source_version_id);
+  const sourceImage = source?.kind === 'image' ? source : undefined;
   const base = context.resolveVersion(node.data.base_version_id);
   const baseImage = base?.kind === 'image' ? base : undefined;
   const layers = node.data.layers.flatMap(layer => {
     const version = context.resolveVersion(layer.version_id);
     return version?.kind === 'image' ? [{ layer, version }] : [];
   });
+  const selectedChoice = choices.find(choice => (
+    choice.key.alias === node.data.alias && choice.model.id === node.data.model
+  ));
+  const busy = Boolean(node.data.active_run_id) || context.submittingNodeIds.has(node.id);
+
+  useEffect(() => {
+    setPromptDraft(node.data.prompt);
+  }, [node.data.prompt]);
+
+  function updateDraft(patch: Partial<Pick<CanvasLayerStackNode['data'], 'alias' | 'model' | 'prompt'>>) {
+    context.updateNode(node.id, candidate => candidate.type === 'layer_stack'
+      ? { ...candidate, data: { ...candidate.data, ...patch, error: null } }
+      : candidate);
+  }
 
   function updateVisibility(layerId: string | null, visible: boolean) {
     context.recordHistory();
@@ -2861,41 +2882,98 @@ export function CanvasLayerStackSurface({
               );
             })}
           </svg>
-        ) : node.data.error ? (
-          <span role="alert" className="max-w-sm text-center text-xs leading-relaxed text-[color:var(--status-failed)]">
-            {canvasNodeRunDisplayError(node.data.error, '图层拆分失败，请重试')}
-          </span>
+        ) : sourceImage ? (
+          <img
+            src={canvasMediaUrl(context.projectId, sourceImage.version_id, 1024)}
+            alt="待拆分图片"
+            className="h-full w-full object-contain"
+          />
         ) : (
-          <span className="text-xs text-muted-foreground">等待图层结果</span>
+          <span className="text-xs text-[color:var(--status-failed)]">来源图片不可用</span>
         )}
       </div>
-      <div
-        className="nodrag nowheel w-64 shrink-0 overflow-y-auto border-l border-border p-2"
-        aria-label="图层列表"
-        onPointerDown={event => event.stopPropagation()}
-      >
-        {baseImage && (
-          <LayerStackRow
-            name="背景"
-            description={`${baseImage.width ?? 0}×${baseImage.height ?? 0}`}
-            src={canvasMediaUrl(context.projectId, baseImage.version_id, 128)}
-            downloadHref={canvasDownloadUrl(context.projectId, baseImage.version_id)}
-            visible={node.data.base_visible}
-            onVisibleChange={visible => updateVisibility(null, visible)}
-          />
+      <div className="nodrag nowheel w-72 shrink-0 border-l border-border" onPointerDown={event => event.stopPropagation()}>
+        {baseImage ? (
+          <div className="h-full overflow-y-auto p-2" aria-label="图层列表">
+            <LayerStackRow
+              name="背景"
+              description={`${baseImage.width ?? 0}×${baseImage.height ?? 0}`}
+              src={canvasMediaUrl(context.projectId, baseImage.version_id, 128)}
+              downloadHref={canvasDownloadUrl(context.projectId, baseImage.version_id)}
+              visible={node.data.base_visible}
+              onVisibleChange={visible => updateVisibility(null, visible)}
+            />
+            {layers.map(({ layer, version }) => (
+              <LayerStackRow
+                key={layer.id}
+                name={layer.name || `图层 ${layer.z_index}`}
+                description={layer.description}
+                src={canvasMediaUrl(context.projectId, version.version_id, 128)}
+                downloadHref={canvasDownloadUrl(context.projectId, version.version_id)}
+                visible={layer.visible}
+                onVisibleChange={visible => updateVisibility(layer.id, visible)}
+                onHoverChange={hovered => setHoveredLayerId(hovered ? layer.id : null)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="flex h-full flex-col gap-4 p-4" aria-label="图层拆分设置">
+            <label className="space-y-2 text-xs text-muted-foreground">
+              <span>模型</span>
+              <span className="flex">
+                <CanvasModelPicker
+                  choices={choices}
+                  alias={node.data.alias}
+                  model={node.data.model ?? ''}
+                  menuDirection="down"
+                  onSelect={choice => {
+                    context.recordHistory();
+                    updateDraft({ alias: choice.key.alias, model: choice.model.id });
+                  }}
+                />
+              </span>
+            </label>
+            <label className="flex min-h-0 flex-1 flex-col gap-2 text-xs text-muted-foreground">
+              <span>拆分要求</span>
+              <textarea
+                aria-label="拆分要求"
+                value={promptDraft}
+                disabled={busy}
+                maxLength={4000}
+                placeholder="留空则自动识别图层"
+                className="min-h-24 flex-1 resize-none rounded-md border border-border bg-transparent p-3 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary"
+                onFocus={() => context.recordHistory()}
+                onChange={event => {
+                  setPromptDraft(event.target.value);
+                  updateDraft({ prompt: event.target.value });
+                }}
+              />
+            </label>
+            {node.data.error && (
+              <p role="alert" className="line-clamp-3 text-xs leading-relaxed text-[color:var(--status-failed)]">
+                {canvasNodeRunDisplayError(node.data.error, '图层拆分失败，请重试')}
+              </p>
+            )}
+            <div className="mt-auto flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">2K · PNG</span>
+              {choices.length ? (
+                <Button
+                  type="button"
+                  className="ml-auto"
+                  disabled={!selectedChoice || busy || !sourceImage}
+                  onClick={() => void context.submitLayerDecomposition(node.id)}
+                >
+                  {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Layers3 aria-hidden="true" />}
+                  {busy ? '拆分中…' : '开始拆分'}
+                </Button>
+              ) : (
+                <Button asChild variant="outline" size="sm" className="ml-auto">
+                  <Link href="/settings/keys">配置模型</Link>
+                </Button>
+              )}
+            </div>
+          </div>
         )}
-        {layers.map(({ layer, version }) => (
-          <LayerStackRow
-            key={layer.id}
-            name={layer.name || `图层 ${layer.z_index}`}
-            description={layer.description}
-            src={canvasMediaUrl(context.projectId, version.version_id, 128)}
-            downloadHref={canvasDownloadUrl(context.projectId, version.version_id)}
-            visible={layer.visible}
-            onVisibleChange={visible => updateVisibility(layer.id, visible)}
-            onHoverChange={hovered => setHoveredLayerId(hovered ? layer.id : null)}
-          />
-        ))}
       </div>
     </div>
   );

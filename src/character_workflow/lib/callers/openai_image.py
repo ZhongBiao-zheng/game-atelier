@@ -282,8 +282,11 @@ def render(
     generations_url = _ark_image_url(base_url) if is_ark_image else _image_url(base_url)
 
     if params and params.get("layer_decomposition"):
-        if key.provider != "seedream" or "seedream-5-0-pro" not in normalized_model_id(model):
-            raise OpenAIImageError("layer decomposition requires official Seedream 5.0 Pro")
+        if (
+            "seedream-5-0-pro" not in normalized_model_id(model)
+            or not (key.provider == "seedream" or image_protocol == "ark")
+        ):
+            raise OpenAIImageError("layer decomposition requires an Ark-compatible Seedream 5.0 Pro")
         if not isinstance(ref_image, str):
             raise OpenAIImageError("layer decomposition requires exactly one source image")
         payload: dict[str, Any] = {

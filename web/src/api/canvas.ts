@@ -305,6 +305,7 @@ export function submitCanvasLayerDecomposition(
   projectId: string,
   surfaceNodeId: string,
   expectedRevision: number,
+  selection: { alias: string; model: string },
 ): Promise<CanvasRun> {
   return requestJson<CanvasRun>(
     `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/layer-decomposition`,
@@ -315,6 +316,8 @@ export function submitCanvasLayerDecomposition(
       body: JSON.stringify({
         surface_node_id: surfaceNodeId,
         expected_revision: expectedRevision,
+        alias: selection.alias,
+        model: selection.model,
       }),
     },
   );

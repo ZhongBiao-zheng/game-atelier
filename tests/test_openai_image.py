@@ -2019,6 +2019,64 @@ def test_render_seedream_layer_decomposition_preserves_ordered_metadata(
     assert persisted == [True]
 
 
+def test_render_seedream_layer_decomposition_supports_selected_tokendance_ark_model(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    keys.add_key(KeySpec(
+        alias="td-layers",
+        provider="tokendance",
+        base_url="https://tokendance.space/gateway/v1",
+        access_key="test-key",
+        models=[{
+            "name": "Seedream 5.0 Pro",
+            "id": "seedream-5.0-pro",
+            "modality": "image",
+            "protocol": "ark",
+        }],
+        created_at="2026-09-03T00:00:00Z",
+    ))
+    source = tmp_path / "source.png"
+    source.write_bytes(b"\x89PNG\r\n\x1a\nsource")
+    encoded = base64.b64encode(b"\x89PNG\r\n\x1a\noutput").decode("ascii")
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured.update({"url": url, "payload": json})
+        return FakePostResponse({
+            "data": [
+                {"b64_json": encoded, "z_index": 0, "size": "2K", "output_format": "png"},
+                {
+                    "b64_json": encoded,
+                    "z_index": 1,
+                    "size": "256x256",
+                    "output_format": "png",
+                    "bounding_box": {
+                        "absolute": [0, 0, 256, 256],
+                        "normalized": [0, 0, 125, 125],
+                    },
+                },
+            ],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    params = {"layer_decomposition": True, "reference_images": [str(source)]}
+
+    openai_image.render(
+        prompt="",
+        model="seedream-5.0-pro",
+        alias="td-layers",
+        output_dir=tmp_path / "outputs",
+        params=params,
+    )
+
+    assert captured["url"] == (
+        "https://tokendance.space/gateway/ark/v3/images/generations"
+    )
+    assert captured["payload"]["layer_decomposition"] is True
+
+
 def test_render_writes_warnings_for_silent_rewrites(isolated_data_root, tmp_path, monkeypatch):
     """尺寸归一 / 参考图截断此前完全静默 —— 现在要回传到 params.warnings。"""
     keys.add_key(KeySpec(

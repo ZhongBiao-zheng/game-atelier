@@ -94,6 +94,7 @@ import {
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
 import { canvasNodeRunDisplayError, isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
+import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
 import { CanvasThemeSelector } from '@/components/canvas/CanvasThemeSelector';
 import {
   CanvasGenerationMetadata,
@@ -153,6 +154,7 @@ import type {
   CanvasGenerationDefaults,
   CanvasGenerationDraft,
   CanvasImageToolbarPreferences,
+  CanvasLayerStackNode,
   CanvasMediaOperation,
   CanvasMediaVersion,
   CanvasNode,
@@ -757,8 +759,11 @@ function CanvasEditorInner({
     const hasResult = current.nodes.some(node => node.id === context.result_node_id);
     const resultReusesSurface = context.result_node_id === context.snapshot.surface_node_id;
     const nodes = current.nodes.map(node => {
-      if (node.id !== context.result_node_id || !isContentNode(node)) return node;
-      if (!remoteResult || !isContentNode(remoteResult)) return node;
+      if (node.id !== context.result_node_id || !remoteResult) return node;
+      if (node.type === 'layer_stack' && remoteResult.type === 'layer_stack') {
+        return { ...node, data: remoteResult.data };
+      }
+      if (!isContentNode(node) || !isContentNode(remoteResult)) return node;
       return {
         ...node,
         data: {
@@ -2365,18 +2370,78 @@ function CanvasEditorInner({
     projectId,
   ]);
 
-  const decomposeLayers = useCallback(async (
-    node: Extract<CanvasContentNode, { type: 'image' }>,
-  ) => {
-    if (!node.data.current_version_id) {
+  const createLayerDecomposition = useCallback((sourceNode: Extract<CanvasContentNode, { type: 'image' }>) => {
+    const current = latestDocument.current;
+    const source = current?.nodes.find(node => node.id === sourceNode.id);
+    if (!current || source?.type !== 'image' || !source.data.current_version_id) {
       setError('请选择一个已有内容的图片节点再拆分图层。');
+      return;
+    }
+    const sourceVersion = current.content_versions[source.data.current_version_id];
+    if (sourceVersion?.kind !== 'image') {
+      setError('图片节点当前没有可读取的项目内版本。');
+      return;
+    }
+    const stackId = makeId('layer-stack');
+    const size = { width: 760, height: 480 };
+    const sourceSize = canvasNodeRenderedSize(source, current.content_versions);
+    const position = placeCanvasNodeWithoutOverlap(
+      { x: source.position.x + sourceSize.width + 72, y: source.position.y },
+      current.nodes,
+      size,
+      undefined,
+      node => canvasNodeRenderedSize(node, current.content_versions),
+    );
+    const choice = layerDecompositionModelChoices(keys)[0];
+    const stack: CanvasLayerStackNode = {
+      id: stackId,
+      title: '拆分图层',
+      type: 'layer_stack',
+      position,
+      size,
+      z_index: source.z_index,
+      data: {
+        source_version_id: sourceVersion.version_id,
+        alias: choice?.key.alias ?? null,
+        model: choice?.model.id ?? null,
+        prompt: '',
+        base_version_id: null,
+        base_visible: true,
+        layers: [],
+        active_run_id: null,
+        error: null,
+      },
+    };
+    setError(null);
+    commit(document => ({
+      ...document,
+      nodes: [...document.nodes, stack],
+      connections: [...document.connections, {
+        id: makeId('connection'),
+        role: 'input',
+        source_node_id: source.id,
+        target_node_id: stack.id,
+      }],
+    }), true);
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([stackId]));
+  }, [commit, keys]);
+
+  const submitLayerDecomposition = useCallback(async (nodeId: string) => {
+    const node = latestDocument.current?.nodes.find(candidate => candidate.id === nodeId);
+    if (node?.type !== 'layer_stack' || node.data.base_version_id) {
+      setError('这个拆分图层节点已不可提交。');
+      return;
+    }
+    if (!node.data.alias || !node.data.model) {
+      setError('请先选择 Seedream 5.0 Pro 模型。');
       return;
     }
     if (runSubmissionInFlight.current) {
       setError('另一项生成正在提交，请稍后再试。');
       return;
     }
-    setSubmittingNodeIds(current => new Set(current).add(node.id));
+    setSubmittingNodeIds(current => new Set(current).add(nodeId));
     setError(null);
     try {
       if (!await persistNow()) return;
@@ -2384,8 +2449,9 @@ function CanvasEditorInner({
       runSubmissionInFlight.current = true;
       const run = await submitCanvasLayerDecomposition(
         projectId,
-        node.id,
+        nodeId,
         serverRevision.current,
+        { alias: node.data.alias, model: node.data.model },
       );
       mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
       applyLocalJob(run.job);
@@ -2398,7 +2464,7 @@ function CanvasEditorInner({
       if (saveQueued.current) void flushSave().catch(() => undefined);
       setSubmittingNodeIds(current => {
         const next = new Set(current);
-        next.delete(node.id);
+        next.delete(nodeId);
         return next;
       });
     }
@@ -3550,7 +3616,8 @@ function CanvasEditorInner({
     saveAsset: saveNodeToLibrary,
     copyPrompt,
     reversePrompt,
-    decomposeLayers,
+    createLayerDecomposition,
+    submitLayerDecomposition,
     recoverReversePromptConfig,
     reversePromptConfiguredNodeIds,
     replaceMedia,
@@ -3573,6 +3640,7 @@ function CanvasEditorInner({
     completeNodeResize,
     copyPrompt,
     createImageConfigFromText,
+    createLayerDecomposition,
     deleteNode,
     dismissedGenerationPanelNodeId,
     dismissGenerationPanel,
@@ -3601,7 +3669,6 @@ function CanvasEditorInner({
     recoverReversePromptConfig,
     replaceMedia,
     reversePrompt,
-    decomposeLayers,
     reversePromptConfiguredNodeIds,
     retryRun,
     renameNode,
@@ -3612,6 +3679,7 @@ function CanvasEditorInner({
     setMaterialConnected,
     setTextEditing,
     setVideoFrameConnections,
+    submitLayerDecomposition,
     submitRun,
     submittingNodeIds,
     toggleFreeResize,
