@@ -34,7 +34,7 @@ This file provides guidance to Claude Code (claude.ai/code) and Codex when worki
 
 - **viewer-server** (`src/viewer_server/`)：FastAPI，绑死 `127.0.0.1:5174`（被占用自动 +1）。文件读写 + SSE 推送。
 - **web** (`web/`)：Vite + React，dev 在 `5173`，build 落在 `web/dist/`，由 viewer-server 直接挂载。
-- **Skill 套件** (`skills/{character,promo,turnaround,viewer-server}/SKILL.md` + `src/character_workflow/` Python lib)：在 CC 里被 `/game-atelier:character <名>` 等触发，读 `<data_root>/.runtime/draft/`、调 Lovart / OpenAI / ... 出图。
+- **Skill 套件** (`skills/{character,promo,turnaround,ui*,video,canvas,viewer-server}/SKILL.md` + `src/character_workflow/` Python lib)：在 CC 里被 `/game-atelier:character <名>` 等触发，读 `<data_root>/.runtime/draft/`、调 Lovart / OpenAI / ... 出图。
 
 ## Dev mode
 

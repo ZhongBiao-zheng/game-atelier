@@ -83,6 +83,7 @@ UI：  锚文档 <x/3 approved> · UI 规范 <未建立/draft/approved> · 页�
 | 游戏 UI 任一阶段（策划锚 / UI 规范 / 页面生成 / 风格切换 / 页面延展） | Skill 工具调起 `ui`（UI 总控，内部再分派到 ui-anchor / ui-page / ui-screens） |
 | 项目视频（企划 / 完整多镜头 Prompt / 整片生成 / 选版） | Skill 工具调起 `video`；无项目自由试验才去 Web 创作台 |
 | 开窗看图 / 起 server / 加 API Key / Web 界面 | Skill 工具调起 `viewer-server` |
+| 在画布上摆节点 / 连线 / 导入本机图 / 画布出图 | Skill 工具调起 `canvas`（只走 canvas_* MCP，需画布授权） |
 | 新建项目 / 定项目定位 | 本总控处理（问一句定位 → `create-project "<项目名>"`） |
 | 世界观 / 项目经验 | 指向 Web「项目经验」页（写 `projects/<slug>/worldview.md`），总控不代笔 |
 | 改代码 / 排 bug / 跑测试 / 发版 / 纯问答 | 不归本总控，见「跳过条件」 |

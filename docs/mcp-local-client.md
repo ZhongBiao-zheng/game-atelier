@@ -11,7 +11,7 @@ Agent 通过工具读取的文档、预览等获授权内容会进入其会话�
 2. 在本机的 Agent 连接管理中创建授权：选择工坊项目 / 画布、需要的操作和有效期。只读查看只授予 `read`；
    改文档、创建目标和准备生成分别需要 `edit_documents`、`create_targets`、`prepare_generation`；
    `execute_generation` 允许 Agent 在你对话确认后直接批准。画布操作另有 `canvas_read / canvas_edit / canvas_generate`，
-   见[画布 MCP 契约](contracts/canvas-mcp.md)。
+   见[画布 MCP 契约](contracts/canvas-mcp.md)；操作引导在 `skills/canvas/SKILL.md`。
 3. 保存页面提供的凭据文件位置。文件由服务端生成和保护，不要复制其中的 token，
    不要上传、提交或将它粘贴到聊天 / MCP 配置。
 4. 确定安装了本项目依赖的 Python 解释器绝对路径。源码开发环境通常是仓库的 `.venv/bin/python`；
