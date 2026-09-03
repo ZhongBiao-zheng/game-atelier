@@ -383,7 +383,7 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
                 raise ValueError("canvas transaction document fingerprint mismatch")
             job = Job.model_validate(job_payload)
             creates_run = raw.get("kind") in {
-                "submit", "reverse_prompt", "mask_edit", "angle"
+                "submit", "reverse_prompt", "mask_edit", "angle", "layer_decomposition"
             }
             recovered_job = _failed_recovered_submit(job) if creates_run else job
             target = CanvasDocument.model_validate(document_payload)
@@ -484,25 +484,15 @@ def _resolve_reverse_prompt_model() -> tuple[KeySpec, ModelSpec]:
 
 
 def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySpec, ModelSpec]:
-    from character_workflow.lib.callers.openai_image import (
-        normalized_model_id,
-        resolve_image_protocol,
-    )
+    from character_workflow.lib.callers.openai_image import supports_layer_decomposition
 
     key = next((item for item in _keys_default_first() if item.alias == alias), None)
     model = next((item for item in key.models if item.id == model_id), None) if key else None
-    protocol = (
-        model.protocol or resolve_image_protocol(key.provider, key.base_url, model.id)
-        if key and model
-        else None
-    )
     if (
         key
         and model
-        and key.provider in {"seedream", "tokendance", "custom"}
         and _model_modality(model, key) == "image"
-        and "seedream-5-0-pro" in normalized_model_id(model.id)
-        and (key.provider == "seedream" or protocol == "ark")
+        and supports_layer_decomposition(key, model.id)
     ):
         return key, model
     raise CanvasRunCommandError(

@@ -282,10 +282,7 @@ def render(
     generations_url = _ark_image_url(base_url) if is_ark_image else _image_url(base_url)
 
     if params and params.get("layer_decomposition"):
-        if (
-            "seedream-5-0-pro" not in normalized_model_id(model)
-            or not (key.provider == "seedream" or image_protocol == "ark")
-        ):
+        if not supports_layer_decomposition(key, model):
             raise OpenAIImageError("layer decomposition requires an Ark-compatible Seedream 5.0 Pro")
         if not isinstance(ref_image, str):
             raise OpenAIImageError("layer decomposition requires exactly one source image")
@@ -366,6 +363,17 @@ def resolve_image_protocol(provider: str, base_url: str | None, model: str) -> s
 def _is_tokendance_gateway(base_url: str | None) -> bool:
     """按 host 判词元跳动网关 —— 比 `"tokendance" in base` 精确（路径里出现不算）。"""
     return "tokendance" in urlsplit((base_url or "").strip()).netloc.lower()
+
+
+def supports_layer_decomposition(key, model: str) -> bool:
+    """图层拆分唯一判据：Seedream 5.0 Pro 且实际走 Ark 协议（火山直连或已解析为 ark 的网关）。
+
+    canvas_runs 的模型筛选与 render 的出站门禁都调这里，不各写一份。前端
+    web/src/components/canvas/canvasLayerDecomposition.ts 是同一真值表的 TS 版。
+    """
+    if "seedream-5-0-pro" not in normalized_model_id(model):
+        return False
+    return key.provider == "seedream" or _effective_image_protocol(key, model) == "ark"
 
 
 def _effective_image_protocol(key, model: str) -> str | None:
