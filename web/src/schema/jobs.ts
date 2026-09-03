@@ -38,6 +38,28 @@ export interface JobParams {
   ratio?: string;
   quality?: string;
   background?: 'auto' | 'opaque' | 'transparent';
+  /** Seedream 5.0 Pro 图层拆分；结果中的 output_index 与 Job.output_paths 对齐。 */
+  layer_decomposition?: boolean;
+  layer_decomposition_result?: {
+    outputs: Array<{
+      output_index: number;
+      z_index: number;
+      size: string;
+      output_format: 'png' | 'jpeg';
+      name: string;
+      description: string;
+      bounding_box: {
+        absolute: [number, number, number, number];
+        normalized: [number, number, number, number];
+      } | null;
+    }>;
+    usage: {
+      input_images?: number | null;
+      generated_images?: number | null;
+      output_tokens?: number | null;
+      total_tokens?: number | null;
+    } | null;
+  };
   // 视频参数（kind=video）—— 与 schemas.py::JobParams 同步
   duration?: number;
   resolution?: string;

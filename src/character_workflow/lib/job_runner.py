@@ -498,8 +498,13 @@ def _run_job_claimed(
             output_dir = job_output_dir_for(job)
             output_paths: list[str] = []
             first_dims: tuple[int, int] | None = None
+            selected_outputs = (
+                selected
+                if params.get("layer_decomposition")
+                else selected[: max(1, int(params.get("n") or 1))]
+            )
             with asset_output_lock(output_dir):
-                for src, dims in selected[: max(1, int(params.get("n") or 1))]:
+                for src, dims in selected_outputs:
                     target = next_asset_path(output_dir, "png")
                     shutil.move(str(src), target)
                     output_paths.append(str(target))

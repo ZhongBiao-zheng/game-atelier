@@ -185,6 +185,37 @@ export interface CanvasBatchMaterialNode extends CanvasNodeBase {
   data: { items: CanvasBatchMaterialItem[] };
 }
 
+export interface CanvasLayerBoundingBox {
+  absolute: [number, number, number, number];
+  normalized: [number, number, number, number];
+}
+
+export interface CanvasLayerStackLayer {
+  id: string;
+  version_id: string;
+  z_index: number;
+  name: string;
+  description: string;
+  bounding_box: CanvasLayerBoundingBox;
+  visible: boolean;
+}
+
+export interface CanvasLayerStackNode extends CanvasNodeBase {
+  type: 'layer_stack';
+  data: {
+    source_version_id: string;
+    alias: string | null;
+    model: string | null;
+    prompt: string;
+    resolution: 'auto' | '1K' | '1.5K' | '2K';
+    base_version_id: string | null;
+    base_visible: boolean;
+    layers: CanvasLayerStackLayer[];
+    active_run_id: string | null;
+    error: string | null;
+  };
+}
+
 export interface CanvasPluginNode extends CanvasNodeBase {
   type: 'plugin';
   data: {
@@ -198,7 +229,8 @@ export interface CanvasPluginNode extends CanvasNodeBase {
 }
 
 export type CanvasContentNode = CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode;
-export type CanvasNode = CanvasContentNode | CanvasConfigNode | CanvasGroupNode | CanvasPluginNode | CanvasBatchMaterialNode;
+export type CanvasNode = CanvasContentNode | CanvasConfigNode | CanvasGroupNode | CanvasPluginNode
+  | CanvasBatchMaterialNode | CanvasLayerStackNode;
 
 export type CanvasVideoFrameSlot = 'first_frame' | 'last_frame';
 
@@ -227,6 +259,7 @@ export type CanvasContentOrigin =
   | { kind: 'upload'; upload_id: string }
   | { kind: 'user_mask'; source_version_id: string }
   | { kind: 'job_output'; job_id: string; candidate_id: string }
+  | { kind: 'layer_decomposition'; job_id: string; output_index: number }
   | {
       kind: 'local_tool';
       operation_id: string;

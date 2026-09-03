@@ -68,6 +68,7 @@ import {
   runCanvasMediaOperation,
   saveCanvasDocument,
   submitCanvasAngleRun,
+  submitCanvasLayerDecomposition,
   submitCanvasRun,
   submitCanvasMaskEdit,
   submitCanvasReversePrompt,
@@ -93,6 +94,7 @@ import {
   type FlowNode,
 } from '@/components/canvas/CanvasEditorViews';
 import { canvasNodeRunDisplayError, isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
+import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
 import { CanvasThemeSelector } from '@/components/canvas/CanvasThemeSelector';
 import {
   CanvasGenerationMetadata,
@@ -152,6 +154,7 @@ import type {
   CanvasGenerationDefaults,
   CanvasGenerationDraft,
   CanvasImageToolbarPreferences,
+  CanvasLayerStackNode,
   CanvasMediaOperation,
   CanvasMediaVersion,
   CanvasNode,
@@ -187,12 +190,14 @@ import {
   closestCanvasConnectionEndpoint,
   createCanvasGenerationDraft,
   createConnectedCanvasConfig,
+  layerStackSizeForCanvasVersion,
   normalizeCanvasVideoParams,
   normalizeCanvasGroups,
   placeCanvasNodeWithoutOverlap,
   restoreContentVersions,
   sizeLockedToCanvasVersion,
   supportsCanvasVideoEdit,
+  syncDraftLayerStackSources,
 } from './canvasEditorModel';
 
 interface CreateMenuState {
@@ -238,6 +243,7 @@ interface MediaReplaceTarget {
   title: string;
   kind: 'image' | 'video' | 'audio';
   hadContent: boolean;
+  returnNodeId?: string;
 }
 
 interface ViewportSyncToken {
@@ -538,6 +544,13 @@ function CanvasEditorInner({
             member_node_ids: [...new Set([...node.data.member_node_ids, ...additions])],
           } } : node;
         }
+        if (
+          node.type === 'layer_stack'
+          && serverNode?.type === 'layer_stack'
+          && resultNodeIds.has(node.id)
+        ) {
+          return { ...node, data: serverNode.data };
+        }
         if (!serverNode || !isContentNode(node) || !isContentNode(serverNode)) return node;
         if (!resultNodeIds.has(node.id) && !runIds.has(serverNode.data.active_run_id ?? '')) return node;
         // A same-revision Job response cannot replace text created locally while it was in flight.
@@ -749,8 +762,11 @@ function CanvasEditorInner({
     const hasResult = current.nodes.some(node => node.id === context.result_node_id);
     const resultReusesSurface = context.result_node_id === context.snapshot.surface_node_id;
     const nodes = current.nodes.map(node => {
-      if (node.id !== context.result_node_id || !isContentNode(node)) return node;
-      if (!remoteResult || !isContentNode(remoteResult)) return node;
+      if (node.id !== context.result_node_id || !remoteResult) return node;
+      if (node.type === 'layer_stack' && remoteResult.type === 'layer_stack') {
+        return { ...node, data: remoteResult.data };
+      }
+      if (!isContentNode(node) || !isContentNode(remoteResult)) return node;
       return {
         ...node,
         data: {
@@ -836,6 +852,18 @@ function CanvasEditorInner({
   }, [createMenu]);
 
   latestDocument.current = document;
+  useEffect(() => {
+    if (!document) return;
+    const synced = syncDraftLayerStackSources(document);
+    if (synced === document) return;
+    // 上游图片换版后，尚未运行的拆分节点必须在同一次本地收敛中更新快照与比例。
+    // 已运行 / 已完成节点由 helper 明确跳过，避免历史产物跟着上游变化。
+    latestDocument.current = synced;
+    saveQueued.current = synced;
+    setDocument(synced);
+    dirtyVersion.current += 1;
+    setDirtySignal(dirtyVersion.current);
+  }, [document]);
   useEffect(() => {
     latestSelectedNodeIds.current = selectedNodeIds;
   }, [selectedNodeIds]);
@@ -1072,7 +1100,10 @@ function CanvasEditorInner({
       } else if (history.current.future.length) {
         history.current.future = [];
       }
-      return { ...normalizeCanvasGroups(updater(current)), updated_at: new Date().toISOString() };
+      return {
+        ...normalizeCanvasGroups(syncDraftLayerStackSources(updater(current))),
+        updated_at: new Date().toISOString(),
+      };
     });
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
@@ -2357,6 +2388,113 @@ function CanvasEditorInner({
     projectId,
   ]);
 
+  const createLayerDecomposition = useCallback((sourceNode: Extract<CanvasContentNode, { type: 'image' }>) => {
+    const current = latestDocument.current;
+    const source = current?.nodes.find(node => node.id === sourceNode.id);
+    if (!current || source?.type !== 'image' || !source.data.current_version_id) {
+      setError('请选择一个已有内容的图片节点再拆分图层。');
+      return;
+    }
+    const sourceVersion = current.content_versions[source.data.current_version_id];
+    if (sourceVersion?.kind !== 'image') {
+      setError('图片节点当前没有可读取的项目内版本。');
+      return;
+    }
+    const stackId = makeId('layer-stack');
+    const size = layerStackSizeForCanvasVersion(sourceVersion);
+    const sourceSize = canvasNodeRenderedSize(source, current.content_versions);
+    const position = placeCanvasNodeWithoutOverlap(
+      { x: source.position.x + sourceSize.width + 72, y: source.position.y },
+      current.nodes,
+      size,
+      undefined,
+      node => canvasNodeRenderedSize(node, current.content_versions),
+    );
+    const choice = layerDecompositionModelChoices(keys)[0];
+    const stack: CanvasLayerStackNode = {
+      id: stackId,
+      title: '拆分图层',
+      type: 'layer_stack',
+      position,
+      size,
+      z_index: source.z_index,
+      data: {
+        source_version_id: sourceVersion.version_id,
+        alias: choice?.key.alias ?? null,
+        model: choice?.model.id ?? null,
+        prompt: '',
+        resolution: 'auto',
+        base_version_id: null,
+        base_visible: true,
+        layers: [],
+        active_run_id: null,
+        error: null,
+      },
+    };
+    setError(null);
+    commit(document => ({
+      ...document,
+      nodes: [...document.nodes, stack],
+      connections: [...document.connections, {
+        id: makeId('connection'),
+        role: 'input',
+        source_node_id: source.id,
+        target_node_id: stack.id,
+      }],
+    }), true);
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([stackId]));
+  }, [commit, keys]);
+
+  const submitLayerDecomposition = useCallback(async (nodeId: string) => {
+    const node = latestDocument.current?.nodes.find(candidate => candidate.id === nodeId);
+    if (node?.type !== 'layer_stack' || node.data.base_version_id) {
+      setError('这个拆分图层节点已不可提交。');
+      return;
+    }
+    if (!node.data.alias || !node.data.model) {
+      setError('请先选择 Seedream 5.0 Pro 模型。');
+      return;
+    }
+    if (runSubmissionInFlight.current) {
+      setError('另一项生成正在提交，请稍后再试。');
+      return;
+    }
+    setSubmittingNodeIds(current => new Set(current).add(nodeId));
+    setError(null);
+    try {
+      if (!await persistNow()) return;
+      const dirtyAtSubmission = dirtyVersion.current;
+      runSubmissionInFlight.current = true;
+      const run = await submitCanvasLayerDecomposition(
+        projectId,
+        nodeId,
+        serverRevision.current,
+        { alias: node.data.alias, model: node.data.model },
+      );
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      applyLocalJob(run.job);
+      const resultId = run.job.canvas_run?.result_node_id;
+      if (resultId) setSelectedNodeIds(new Set([resultId]));
+    } catch (submitError) {
+      setError((submitError as Error).message);
+    } finally {
+      runSubmissionInFlight.current = false;
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+      setSubmittingNodeIds(current => {
+        const next = new Set(current);
+        next.delete(nodeId);
+        return next;
+      });
+    }
+  }, [
+    applyLocalJob,
+    flushSave,
+    mergeSubmittedRunDocument,
+    persistNow,
+    projectId,
+  ]);
+
   const retryRun = useCallback(async (nodeId: string, runId: string) => {
     if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return; }
     if (canvasRequiresBatchRun(latestDocument.current, nodeId)) {
@@ -2560,7 +2698,7 @@ function CanvasEditorInner({
     const previous = history.current.past.pop();
     if (!previous || !document) return;
     history.current.future.push(document);
-    const restored = {
+    const restored = syncDraftLayerStackSources({
       ...previous,
       revision: document.revision,
       updated_at: new Date().toISOString(),
@@ -2571,7 +2709,7 @@ function CanvasEditorInner({
         previous.content_versions,
         document.content_versions,
       ),
-    };
+    });
     setDocument(restored);
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
@@ -2582,7 +2720,7 @@ function CanvasEditorInner({
     const next = history.current.future.pop();
     if (!next || !document) return;
     history.current.past.push(document);
-    const restored = {
+    const restored = syncDraftLayerStackSources({
       ...next,
       revision: document.revision,
       updated_at: new Date().toISOString(),
@@ -2591,7 +2729,7 @@ function CanvasEditorInner({
         next.content_versions,
         document.content_versions,
       ),
-    };
+    });
     setDocument(restored);
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
@@ -2901,7 +3039,7 @@ function CanvasEditorInner({
     return pointerWasSuperseded ? 'superseded' as const : 'applied' as const;
   }, []);
 
-  const replaceMedia = useCallback((node: CanvasContentNode) => {
+  const beginMediaReplacement = useCallback((node: CanvasContentNode, returnNodeId?: string) => {
     const versionId = node.data.current_version_id;
     const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
     if (node.type === 'text') {
@@ -2918,6 +3056,7 @@ function CanvasEditorInner({
       title: node.title,
       kind: node.type,
       hadContent: Boolean(version),
+      returnNodeId,
     });
     requestAnimationFrame(() => {
       if (!replaceMediaRef.current) return;
@@ -2925,6 +3064,31 @@ function CanvasEditorInner({
       replaceMediaRef.current.click();
     });
   }, []);
+
+  const replaceMedia = useCallback((node: CanvasContentNode) => {
+    beginMediaReplacement(node);
+  }, [beginMediaReplacement]);
+
+  const replaceLayerStackSource = useCallback((nodeId: string) => {
+    const current = latestDocument.current;
+    if (!current) return;
+    const stack = current?.nodes.find(node => node.id === nodeId);
+    if (stack?.type !== 'layer_stack' || stack.data.base_version_id || stack.data.active_run_id) {
+      setError('这个图层拆分节点的源图已经冻结。');
+      return;
+    }
+    const input = current.connections.find(connection => (
+      connection.role === 'input'
+      && !connection.slot
+      && connection.target_node_id === nodeId
+    ));
+    const source = current.nodes.find(node => node.id === input?.source_node_id);
+    if (source?.type !== 'image') {
+      setError('图层拆分节点没有可替换的上游图片。');
+      return;
+    }
+    beginMediaReplacement(source, nodeId);
+  }, [beginMediaReplacement]);
 
   const handleMediaReplace = useCallback(async (file: File, target: MediaReplaceTarget) => {
     if (documentCommandInFlight.current) {
@@ -2954,14 +3118,15 @@ function CanvasEditorInner({
         dirtyAtCommand,
         before,
       );
+      const returnNodeId = target.returnNodeId ?? target.nodeId;
       setSelectedConnectionIds(new Set());
-      setSelectedNodeIds(new Set([target.nodeId]));
+      setSelectedNodeIds(new Set([returnNodeId]));
       announceToolNotice(mergeStatus === 'applied'
         ? target.hadContent
           ? `已替换“${target.title}”，旧版本仍可撤销恢复`
           : `已将文件上传到“${target.title}”`
         : `“${target.title}”已有更新内容；上传文件已保留为历史版本`);
-      requestAnimationFrame(() => documentQueryNode(target.nodeId)?.focus());
+      requestAnimationFrame(() => documentQueryNode(returnNodeId)?.focus());
     } catch (replaceError) {
       setMediaReplaceError({ nodeId: target.nodeId, message: (replaceError as Error).message });
     } finally {
@@ -3497,9 +3662,12 @@ function CanvasEditorInner({
     saveAsset: saveNodeToLibrary,
     copyPrompt,
     reversePrompt,
+    createLayerDecomposition,
+    submitLayerDecomposition,
     recoverReversePromptConfig,
     reversePromptConfiguredNodeIds,
     replaceMedia,
+    replaceLayerStackSource,
     toggleFreeResize,
     openMediaOperation,
     openMaskEdit,
@@ -3519,6 +3687,7 @@ function CanvasEditorInner({
     completeNodeResize,
     copyPrompt,
     createImageConfigFromText,
+    createLayerDecomposition,
     deleteNode,
     dismissedGenerationPanelNodeId,
     dismissGenerationPanel,
@@ -3546,6 +3715,7 @@ function CanvasEditorInner({
     recordHistorySnapshot,
     recoverReversePromptConfig,
     replaceMedia,
+    replaceLayerStackSource,
     reversePrompt,
     reversePromptConfiguredNodeIds,
     retryRun,
@@ -3557,6 +3727,7 @@ function CanvasEditorInner({
     setMaterialConnected,
     setTextEditing,
     setVideoFrameConnections,
+    submitLayerDecomposition,
     submitRun,
     submittingNodeIds,
     toggleFreeResize,
@@ -3595,7 +3766,10 @@ function CanvasEditorInner({
   const previewPrompt = previewNode
     ? copyablePromptForNode(previewNode, jobsByResultNodeId)
     : null;
-  const previewJobId = preview && preview.version.origin.kind === 'job_output'
+  const previewJobId = preview && (
+    preview.version.origin.kind === 'job_output'
+    || preview.version.origin.kind === 'layer_decomposition'
+  )
     ? preview.version.origin.job_id
     : null;
   const previewJob = previewJobId
@@ -4481,6 +4655,9 @@ function contentOriginLabel(version: CanvasContentVersion, job?: Job) {
   if (origin.kind === 'upload') return '上传素材';
   if (origin.kind === 'user_mask') return '局部编辑蒙版';
   if (origin.kind === 'job_output') return job?.model ? `AI 生成 · ${job.model}` : 'AI 生成';
+  if (origin.kind === 'layer_decomposition') {
+    return job?.model ? `图层拆分 · ${job.model}` : '图层拆分';
+  }
   if (origin.kind === 'import') return '项目包导入';
   if (origin.kind === 'creation_asset_snapshot') return `创作资产 · ${origin.title}`;
   if (origin.operation.kind === 'crop') return '本地裁剪';
@@ -4747,6 +4924,7 @@ function cloneCanvasNode(
     };
   }
   if (clone.type === 'batch_material') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
+  if (clone.type === 'layer_stack') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
   return {
     ...clone,
     id: idMap.get(source.id)!,

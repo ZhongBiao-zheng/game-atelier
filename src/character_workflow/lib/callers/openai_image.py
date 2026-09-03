@@ -281,6 +281,35 @@ def render(
     is_ark_image = image_protocol == "ark"
     generations_url = _ark_image_url(base_url) if is_ark_image else _image_url(base_url)
 
+    if params and params.get("layer_decomposition"):
+        if not supports_layer_decomposition(key, model):
+            raise OpenAIImageError("layer decomposition requires an Ark-compatible Seedream 5.0 Pro")
+        if not isinstance(ref_image, str):
+            raise OpenAIImageError("layer decomposition requires exactly one source image")
+        layer_size = str(requested_size or "auto")
+        if layer_size not in {"auto", "1K", "1.5K", "2K"}:
+            raise OpenAIImageError(
+                "layer decomposition size must be auto, 1K, 1.5K, or 2K"
+            )
+        payload: dict[str, Any] = {
+            "model": model,
+            "image": ref_image,
+            "layer_decomposition": True,
+            "size": layer_size,
+            "output_format": "png",
+            "response_format": "b64_json",
+            "watermark": False,
+        }
+        if prompt.strip():
+            payload["prompt"] = prompt.strip()
+        data = _post_json(generations_url, key.access_key, payload, timeout=timeout)
+        paths, result = _write_layer_decomposition_outputs(data, out_dir)
+        params["layer_decomposition_result"] = result
+        callback = kwargs.get("on_params_changed")
+        if callable(callback):
+            callback()
+        return paths
+
     def _gen_payload(num: int) -> dict:
         return _image_generation_payload(
             model=outbound_model,
@@ -334,6 +363,17 @@ def resolve_image_protocol(provider: str, base_url: str | None, model: str) -> s
 def _is_tokendance_gateway(base_url: str | None) -> bool:
     """按 host 判词元跳动网关 —— 比 `"tokendance" in base` 精确（路径里出现不算）。"""
     return "tokendance" in urlsplit((base_url or "").strip()).netloc.lower()
+
+
+def supports_layer_decomposition(key, model: str) -> bool:
+    """图层拆分唯一判据：Seedream 5.0 Pro 且实际走 Ark 协议（火山直连或已解析为 ark 的网关）。
+
+    canvas_runs 的模型筛选与 render 的出站门禁都调这里，不各写一份。前端
+    web/src/components/canvas/canvasLayerDecomposition.ts 是同一真值表的 TS 版。
+    """
+    if "seedream-5-0-pro" not in normalized_model_id(model):
+        return False
+    return key.provider == "seedream" or _effective_image_protocol(key, model) == "ark"
 
 
 def _effective_image_protocol(key, model: str) -> str | None:
@@ -794,6 +834,65 @@ def _write_outputs(payload: dict, output_dir: Path, *, start_index: int = 1) -> 
     if not paths:
         raise OpenAIImageError(f"image api returned no downloadable image: {payload!r}")
     return paths
+
+
+def _write_layer_decomposition_outputs(
+    payload: dict[str, Any],
+    output_dir: Path,
+) -> tuple[list[str], dict[str, Any]]:
+    """Persist one base plus ordered transparent layers without discarding placement metadata."""
+    from character_workflow.lib.schemas import LayerDecompositionResult
+
+    items = payload.get("data")
+    if not isinstance(items, list) or not items:
+        raise OpenAIImageError(f"layer decomposition response missing data: {payload!r}")
+    typed_items: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict) or not isinstance(item.get("z_index"), int):
+            raise OpenAIImageError("layer decomposition response contains invalid layer metadata")
+        typed_items.append(item)
+    typed_items.sort(key=lambda item: item["z_index"])
+
+    paths: list[str] = []
+    outputs: list[dict[str, Any]] = []
+    for output_index, item in enumerate(typed_items):
+        b64 = item.get("b64_json")
+        url = item.get("url")
+        if isinstance(b64, str) and b64:
+            image_bytes = _decode_b64_image(b64)
+        elif isinstance(url, str) and url:
+            image_bytes = _download_image_url(_clean_image_url(url))
+        else:
+            raise OpenAIImageError("layer decomposition response contains no downloadable image")
+        target = output_dir / f"v{output_index + 1}.png"
+        target.write_bytes(image_bytes)
+        paths.append(str(target))
+        outputs.append({
+            "output_index": output_index,
+            "z_index": item["z_index"],
+            "size": item.get("size") or "unknown",
+            "output_format": item.get("output_format") or "png",
+            "name": item.get("name") or "",
+            "description": item.get("description") or "",
+            "bounding_box": item.get("bounding_box"),
+        })
+
+    raw_usage = payload.get("usage")
+    usage = None
+    if isinstance(raw_usage, dict):
+        usage = {
+            key: raw_usage.get(key)
+            for key in ("input_images", "generated_images", "output_tokens", "total_tokens")
+            if isinstance(raw_usage.get(key), int)
+        }
+    try:
+        result = LayerDecompositionResult.model_validate({
+            "outputs": outputs,
+            "usage": usage,
+        })
+    except ValueError as error:
+        raise OpenAIImageError(f"invalid layer decomposition metadata: {error}") from error
+    return paths, result.model_dump(mode="json")
 
 
 def _decode_b64_image(value: str) -> bytes:

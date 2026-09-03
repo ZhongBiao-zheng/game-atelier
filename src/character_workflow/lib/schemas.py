@@ -54,6 +54,72 @@ ProviderTaskId = Annotated[
 ]
 
 
+class LayerDecompositionBoundingBox(BaseModel):
+    """One layer's placement in the reconstructed Seedream canvas."""
+
+    model_config = ConfigDict(extra="forbid")
+    absolute: tuple[int, int, int, int]
+    normalized: tuple[int, int, int, int]
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "LayerDecompositionBoundingBox":
+        left, top, right, bottom = self.absolute
+        n_left, n_top, n_right, n_bottom = self.normalized
+        if min(self.absolute) < 0 or left >= right or top >= bottom:
+            raise ValueError("layer absolute bounding box is invalid")
+        if (
+            min(self.normalized) < 0
+            or max(self.normalized) > 1000
+            or n_left >= n_right
+            or n_top >= n_bottom
+        ):
+            raise ValueError("layer normalized bounding box is invalid")
+        return self
+
+
+class LayerDecompositionOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    output_index: int = Field(ge=0, le=16)
+    z_index: int = Field(ge=0, le=16)
+    size: str = Field(min_length=1, max_length=40)
+    output_format: Literal["png", "jpeg"]
+    name: str = Field(default="", max_length=200)
+    description: str = Field(default="", max_length=2000)
+    bounding_box: LayerDecompositionBoundingBox | None = None
+
+    @model_validator(mode="after")
+    def require_layer_bounds(self) -> "LayerDecompositionOutput":
+        if self.z_index > 0 and self.bounding_box is None:
+            raise ValueError("decomposed foreground layer requires a bounding box")
+        return self
+
+
+class LayerDecompositionUsage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    input_images: int | None = Field(default=None, ge=0)
+    generated_images: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+
+
+class LayerDecompositionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    outputs: list[LayerDecompositionOutput] = Field(min_length=2, max_length=17)
+    usage: LayerDecompositionUsage | None = None
+
+    @model_validator(mode="after")
+    def validate_outputs(self) -> "LayerDecompositionResult":
+        indices = [item.output_index for item in self.outputs]
+        z_indices = [item.z_index for item in self.outputs]
+        if indices != list(range(len(indices))):
+            raise ValueError("layer decomposition output indexes must be contiguous")
+        if z_indices != sorted(z_indices) or z_indices.count(0) != 1:
+            raise ValueError("layer decomposition outputs require one base followed by ordered layers")
+        if len(z_indices) != len(set(z_indices)):
+            raise ValueError("layer decomposition z indexes must be unique")
+        return self
+
+
 class JobParams(BaseModel):
     model_config = ConfigDict(extra="allow")
     size: str | None = None
@@ -87,6 +153,9 @@ class JobParams(BaseModel):
     ratio: str | None = None               # e.g. "16:9"
     quality: str | None = None             # low | medium | high | auto
     background: Literal["auto", "opaque", "transparent"] | None = None
+    # Seedream 5.0 Pro 图层拆分：caller 回写有序图层元数据，output_index 对齐 Job.output_paths。
+    layer_decomposition: bool | None = None
+    layer_decomposition_result: LayerDecompositionResult | None = None
     # 视频参数（kind=video）—— 做成一等公民以保证双端类型对齐
     duration: int | None = None            # 秒，1-60
     resolution: str | None = None          # 480p | 720p | 1080p
@@ -605,6 +674,31 @@ class CanvasBatchMaterialData(BaseModel):
         return self
 
 
+class CanvasLayerStackLayer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=120)
+    version_id: str = Field(min_length=1, max_length=160)
+    z_index: int = Field(ge=1, le=16)
+    name: str = Field(default="", max_length=200)
+    description: str = Field(default="", max_length=2000)
+    bounding_box: LayerDecompositionBoundingBox
+    visible: bool = True
+
+
+class CanvasLayerStackData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_version_id: str = Field(min_length=1, max_length=160)
+    alias: str | None = Field(default=None, min_length=1, max_length=120)
+    model: str | None = Field(default=None, min_length=1, max_length=240)
+    prompt: str = Field(default="", max_length=4000)
+    resolution: Literal["auto", "1K", "1.5K", "2K"] = "auto"
+    base_version_id: str | None = Field(default=None, max_length=160)
+    base_visible: bool = True
+    layers: list[CanvasLayerStackLayer] = Field(default_factory=list, max_length=16)
+    active_run_id: str | None = Field(default=None, max_length=160)
+    error: str | None = Field(default=None, max_length=4000)
+
+
 class CanvasPluginNodeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
     plugin_id: str = Field(min_length=1, max_length=120)
@@ -681,6 +775,11 @@ class CanvasBatchMaterialNode(CanvasNodeBase):
     data: CanvasBatchMaterialData
 
 
+class CanvasLayerStackNode(CanvasNodeBase):
+    type: Literal["layer_stack"]
+    data: CanvasLayerStackData
+
+
 class CanvasPluginNode(CanvasNodeBase):
     type: Literal["plugin"]
     data: CanvasPluginNodeData
@@ -688,7 +787,8 @@ class CanvasPluginNode(CanvasNodeBase):
 
 CanvasNode = Annotated[
     CanvasTextNode | CanvasImageNode | CanvasVideoNode | CanvasAudioNode
-    | CanvasConfigNode | CanvasGroupNode | CanvasPluginNode | CanvasBatchMaterialNode,
+    | CanvasConfigNode | CanvasGroupNode | CanvasPluginNode | CanvasBatchMaterialNode
+    | CanvasLayerStackNode,
     Field(discriminator="type"),
 ]
 
@@ -759,6 +859,15 @@ class CanvasJobOutputOrigin(BaseModel):
     candidate_id: str
 
 
+class CanvasLayerDecompositionOrigin(BaseModel):
+    """A non-candidate image emitted as part of one layer-decomposition result."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["layer_decomposition"]
+    job_id: str
+    output_index: int = Field(ge=1, le=16)
+
+
 class CanvasImportOrigin(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["import"]
@@ -817,7 +926,8 @@ class CanvasLocalToolOrigin(BaseModel):
 
 CanvasContentOrigin = Annotated[
     CanvasUserEditOrigin | CanvasUploadOrigin | CanvasUserMaskOrigin | CanvasJobOutputOrigin
-    | CanvasLocalToolOrigin | CanvasImportOrigin | CanvasCreationAssetSnapshotOrigin,
+    | CanvasLayerDecompositionOrigin | CanvasLocalToolOrigin | CanvasImportOrigin
+    | CanvasCreationAssetSnapshotOrigin,
     Field(discriminator="kind"),
 ]
 
@@ -865,6 +975,10 @@ class CanvasMediaVersion(CanvasContentVersionBase):
             len(parts) < 3 or parts[0] != "outputs" or parts[1] != self.origin.job_id
         ):
             raise ValueError("canvas output path does not match its job")
+        if self.origin.kind == "layer_decomposition" and (
+            len(parts) < 3 or parts[0] != "outputs" or parts[1] != self.origin.job_id
+        ):
+            raise ValueError("canvas layer output path does not match its job")
         return self
 
 
@@ -935,6 +1049,27 @@ class CanvasDocument(BaseModel):
                         version = self.content_versions.get(version_id)
                         if version is None or version.kind != "image":
                             raise ValueError("batch material must reference project image versions")
+            if node.type == "layer_stack":
+                source = self.content_versions.get(node.data.source_version_id)
+                if source is None or source.kind != "image":
+                    raise ValueError("layer stack must reference a source image version")
+                if node.data.base_version_id is not None:
+                    base = self.content_versions.get(node.data.base_version_id)
+                    if base is None or base.kind != "image":
+                        raise ValueError("layer stack must reference a base image version")
+                layer_ids = [layer.id for layer in node.data.layers]
+                layer_versions = [layer.version_id for layer in node.data.layers]
+                z_indices = [layer.z_index for layer in node.data.layers]
+                if (
+                    len(layer_ids) != len(set(layer_ids))
+                    or len(layer_versions) != len(set(layer_versions))
+                    or len(z_indices) != len(set(z_indices))
+                ):
+                    raise ValueError("layer stack layers must be unique")
+                for layer in node.data.layers:
+                    version = self.content_versions.get(layer.version_id)
+                    if version is None or version.kind != "image":
+                        raise ValueError("layer stack must reference image layer versions")
             if node.type in {"text", "image", "video", "audio"}:
                 if node.data.batch_result:
                     for image_id in node.data.batch_result.image_version_ids:
@@ -953,6 +1088,7 @@ class CanvasDocument(BaseModel):
                         raise ValueError("canvas group membership is invalid")
                     group_members.add(member_id)
         occupied_frame_slots: set[tuple[str, str]] = set()
+        layer_stack_inputs: dict[str, int] = {}
         for edge in self.connections:
             if edge.source_node_id not in nodes_by_id or edge.target_node_id not in nodes_by_id:
                 raise ValueError("canvas connection references a missing node")
@@ -963,12 +1099,17 @@ class CanvasDocument(BaseModel):
             if source.type == "group" or target.type == "group":
                 raise ValueError("canvas group nodes cannot be connection endpoints")
             if edge.role == "input":
-                if source.type in {"config", "plugin"}:
+                if source.type in {"config", "plugin", "layer_stack"}:
                     raise ValueError("canvas input source cannot provide content")
                 if target.type == "plugin":
                     raise ValueError("canvas plugin connections require a verified capability manifest")
                 if target.type == "batch_material":
                     raise ValueError("batch material nodes cannot receive input connections")
+                if target.type == "layer_stack":
+                    if source.type != "image" or edge.slot is not None:
+                        raise ValueError("layer stack input must be one image node")
+                    layer_stack_inputs[target.id] = layer_stack_inputs.get(target.id, 0) + 1
+                    continue
                 if edge.slot is not None:
                     target_draft = (
                         target.data.draft
@@ -981,6 +1122,8 @@ class CanvasDocument(BaseModel):
                     if slot_key in occupied_frame_slots:
                         raise ValueError("canvas video frame slot can only have one source")
                     occupied_frame_slots.add(slot_key)
+        if any(count > 1 for count in layer_stack_inputs.values()):
+            raise ValueError("layer stack cannot have more than one image input")
         if len(self.model_dump_json().encode("utf-8")) > 25 * 1024 * 1024:
             raise ValueError("canvas document exceeds 25 MiB")
         return self
@@ -1251,6 +1394,14 @@ class CanvasReversePromptCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     surface_node_id: str = Field(min_length=1, max_length=120)
     expected_revision: int = Field(ge=0)
+
+
+class CanvasLayerDecompositionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    surface_node_id: str = Field(min_length=1, max_length=120)
+    expected_revision: int = Field(ge=0)
+    alias: str = Field(min_length=1, max_length=120)
+    model: str = Field(min_length=1, max_length=240)
 
 
 class CanvasMaskEditCreate(BaseModel):

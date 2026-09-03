@@ -176,7 +176,13 @@ export function isReversePromptJob(job: Job): boolean {
 }
 
 function activeRunId(node: CanvasNode): string | null {
-  if (node.type === 'text' || node.type === 'image' || node.type === 'video' || node.type === 'audio') {
+  if (
+    node.type === 'text'
+    || node.type === 'image'
+    || node.type === 'video'
+    || node.type === 'audio'
+    || node.type === 'layer_stack'
+  ) {
     return node.data.active_run_id;
   }
   return null;

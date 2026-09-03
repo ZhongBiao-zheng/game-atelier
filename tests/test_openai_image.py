@@ -1925,6 +1925,160 @@ def test_render_direct_seedream_pro_omits_sequential(isolated_data_root, tmp_pat
     assert len(seen) == 2  # 补足循环补第二张
 
 
+def test_render_seedream_layer_decomposition_preserves_ordered_metadata(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    keys.add_key(KeySpec(
+        alias="ark-layers",
+        provider="seedream",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        access_key="test-key",
+        models=[{
+            "name": "Seedream 5.0 Pro",
+            "id": "doubao-seedream-5-0-pro-260628",
+            "modality": "image",
+        }],
+        created_at="2026-09-03T00:00:00Z",
+    ))
+    source = tmp_path / "source.png"
+    source.write_bytes(b"\x89PNG\r\n\x1a\nsource")
+    base = base64.b64encode(b"\x89PNG\r\n\x1a\nbase").decode("ascii")
+    foreground = base64.b64encode(b"\x89PNG\r\n\x1a\nforeground").decode("ascii")
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured.update({"url": url, "payload": json})
+        return FakePostResponse({
+            "data": [
+                {
+                    "b64_json": foreground,
+                    "size": "512x512",
+                    "output_format": "png",
+                    "z_index": 1,
+                    "name": "角色",
+                    "description": "前景角色",
+                    "bounding_box": {
+                        "absolute": [10, 20, 522, 532],
+                        "normalized": [5, 10, 260, 266],
+                    },
+                },
+                {
+                    "b64_json": base,
+                    "size": "2048x2048",
+                    "output_format": "png",
+                    "z_index": 0,
+                    "name": "",
+                    "description": "",
+                },
+            ],
+            "usage": {
+                "input_images": 1,
+                "generated_images": 2,
+                "output_tokens": 32768,
+                "total_tokens": 32768,
+            },
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    params = {
+        "layer_decomposition": True,
+        "reference_images": [str(source)],
+    }
+    persisted: list[bool] = []
+
+    paths = openai_image.render(
+        prompt="",
+        model="doubao-seedream-5-0-pro-260628",
+        alias="ark-layers",
+        output_dir=tmp_path / "outputs",
+        n=1,
+        size="2K",
+        params=params,
+        on_params_changed=lambda: persisted.append(True),
+    )
+
+    assert captured["url"] == "https://ark.cn-beijing.volces.com/api/v3/images/generations"
+    assert captured["payload"] == {
+        "model": "doubao-seedream-5-0-pro-260628",
+        "image": "data:image/png;base64," + base64.b64encode(source.read_bytes()).decode(),
+        "layer_decomposition": True,
+        "size": "2K",
+        "output_format": "png",
+        "response_format": "b64_json",
+        "watermark": False,
+    }
+    assert [Path(path).read_bytes() for path in paths] == [
+        b"\x89PNG\r\n\x1a\nbase",
+        b"\x89PNG\r\n\x1a\nforeground",
+    ]
+    result = params["layer_decomposition_result"]
+    assert [item["z_index"] for item in result["outputs"]] == [0, 1]
+    assert result["usage"]["output_tokens"] == 32768
+    assert persisted == [True]
+
+
+def test_render_seedream_layer_decomposition_supports_selected_tokendance_ark_model(
+    isolated_data_root,
+    tmp_path,
+    monkeypatch,
+):
+    keys.add_key(KeySpec(
+        alias="td-layers",
+        provider="tokendance",
+        base_url="https://tokendance.space/gateway/v1",
+        access_key="test-key",
+        models=[{
+            "name": "Seedream 5.0 Pro",
+            "id": "seedream-5.0-pro",
+            "modality": "image",
+            "protocol": "ark",
+        }],
+        created_at="2026-09-03T00:00:00Z",
+    ))
+    source = tmp_path / "source.png"
+    source.write_bytes(b"\x89PNG\r\n\x1a\nsource")
+    encoded = base64.b64encode(b"\x89PNG\r\n\x1a\noutput").decode("ascii")
+    captured: dict[str, object] = {}
+
+    def fake_post(url, headers, json, timeout):
+        captured.update({"url": url, "payload": json})
+        return FakePostResponse({
+            "data": [
+                {"b64_json": encoded, "z_index": 0, "size": "2K", "output_format": "png"},
+                {
+                    "b64_json": encoded,
+                    "z_index": 1,
+                    "size": "256x256",
+                    "output_format": "png",
+                    "bounding_box": {
+                        "absolute": [0, 0, 256, 256],
+                        "normalized": [0, 0, 125, 125],
+                    },
+                },
+            ],
+        })
+
+    monkeypatch.setattr(openai_image.requests, "post", fake_post)
+    params = {"layer_decomposition": True, "reference_images": [str(source)]}
+
+    openai_image.render(
+        prompt="",
+        model="seedream-5.0-pro",
+        alias="td-layers",
+        output_dir=tmp_path / "outputs",
+        size="1.5K",
+        params=params,
+    )
+
+    assert captured["url"] == (
+        "https://tokendance.space/gateway/ark/v3/images/generations"
+    )
+    assert captured["payload"]["layer_decomposition"] is True
+    assert captured["payload"]["size"] == "1.5K"
+
+
 def test_render_writes_warnings_for_silent_rewrites(isolated_data_root, tmp_path, monkeypatch):
     """尺寸归一 / 参考图截断此前完全静默 —— 现在要回传到 params.warnings。"""
     keys.add_key(KeySpec(

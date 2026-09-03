@@ -58,6 +58,9 @@ from character_workflow.lib.schemas import (
     CanvasInputConnection,
     CanvasJobContext,
     CanvasJobOutputOrigin,
+    CanvasLayerDecompositionOrigin,
+    CanvasLayerStackLayer,
+    CanvasLayerStackNode,
     CanvasMediaDisplay,
     CanvasMediaNodeData,
     CanvasMediaVersion,
@@ -209,7 +212,7 @@ def _commit_transaction_unlocked(
     job_locked: bool = False,
     artifacts: list[dict[str, Any]] | None = None,
 ) -> None:
-    if kind in {"submit", "reverse_prompt", "mask_edit", "angle"} and job.canvas_run \
+    if kind in {"submit", "reverse_prompt", "mask_edit", "angle", "layer_decomposition"} and job.canvas_run \
             and job.canvas_run.batch is None:
         from character_workflow.lib.canvas_batches import assert_node_not_batch_running
 
@@ -380,7 +383,7 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
                 raise ValueError("canvas transaction document fingerprint mismatch")
             job = Job.model_validate(job_payload)
             creates_run = raw.get("kind") in {
-                "submit", "reverse_prompt", "mask_edit", "angle"
+                "submit", "reverse_prompt", "mask_edit", "angle", "layer_decomposition"
             }
             recovered_job = _failed_recovered_submit(job) if creates_run else job
             target = CanvasDocument.model_validate(document_payload)
@@ -477,6 +480,24 @@ def _resolve_reverse_prompt_model() -> tuple[KeySpec, ModelSpec]:
     raise CanvasRunCommandError(
         "canvas_reverse_prompt_model_missing",
         "未配置支持图片输入的文本模型。请在设置中为兼容模型开启“支持图片输入”。",
+    )
+
+
+def _resolve_layer_decomposition_model(alias: str, model_id: str) -> tuple[KeySpec, ModelSpec]:
+    from character_workflow.lib.callers.openai_image import supports_layer_decomposition
+
+    key = next((item for item in _keys_default_first() if item.alias == alias), None)
+    model = next((item for item in key.models if item.id == model_id), None) if key else None
+    if (
+        key
+        and model
+        and _model_modality(model, key) == "image"
+        and supports_layer_decomposition(key, model.id)
+    ):
+        return key, model
+    raise CanvasRunCommandError(
+        "canvas_layer_decomposition_model_invalid",
+        "所选 Seedream 5.0 Pro 模型不可用于图层拆分，请重新选择。",
     )
 
 
@@ -1387,6 +1408,167 @@ def submit_reverse_prompt_run(
         )
 
 
+def submit_layer_decomposition_run(
+    project_id: str,
+    surface_node_id: str,
+    expected_revision: int,
+    alias: str,
+    model_id: str,
+) -> tuple[Job, CanvasDocument]:
+    """Freeze one configured layer-stack node into a Seedream decomposition Run."""
+    with file_lock(canvas_project_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        current = _read_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
+        surface = next((node for node in current.nodes if node.id == surface_node_id), None)
+        if not isinstance(surface, CanvasLayerStackNode):
+            raise CanvasRunCommandError(
+                "canvas_layer_decomposition_source_missing",
+                "拆分图层节点已不存在。",
+            )
+        if surface.data.base_version_id is not None:
+            raise CanvasRunCommandError(
+                "canvas_layer_decomposition_already_completed",
+                "这个节点已经完成图层拆分。",
+            )
+        if surface.data.active_run_id is not None:
+            raise CanvasRunCommandError(
+                "canvas_layer_decomposition_already_running",
+                "这个节点正在拆分图层。",
+            )
+        if surface.data.alias != alias or surface.data.model != model_id:
+            raise CanvasRunCommandError(
+                "canvas_layer_decomposition_settings_changed",
+                "拆分节点设置已变化，请保存后重试。",
+            )
+        source = current.content_versions.get(surface.data.source_version_id)
+        if not isinstance(source, CanvasMediaVersion) or source.kind != "image":
+            raise CanvasRunCommandError(
+                "canvas_layer_decomposition_source_missing",
+                "图片节点当前没有可读取的项目内版本。",
+            )
+        source_edge = next(
+            (
+                connection for connection in current.connections
+                if connection.role == "input"
+                and connection.target_node_id == surface.id
+            ),
+            None,
+        )
+        source_node = next(
+            (
+                node for node in current.nodes
+                if source_edge is not None and node.id == source_edge.source_node_id
+            ),
+            None,
+        )
+        if not isinstance(source_node, CanvasImageNode):
+            raise CanvasRunCommandError(
+                "canvas_layer_decomposition_source_missing",
+                "拆分节点与来源图片的连接已断开。",
+            )
+
+        key, model = _resolve_layer_decomposition_model(alias, model_id)
+        timestamp = _now()
+        job_id = new_job_id()
+        run_id = f"run-{secrets.token_hex(12)}"
+        candidate = CanvasResultCandidate(
+            candidate_id=f"candidate-{secrets.token_hex(10)}",
+            index=0,
+            status="pending",
+        )
+        inputs = [CanvasSnapshotInput(
+            order=0,
+            source="implicit_self",
+            node_id=source_node.id,
+            version_id=source.version_id,
+            kind="image",
+        )]
+        normalized = {
+            "layer_decomposition": True,
+            "size": surface.data.resolution,
+            "output_format": "png",
+            "watermark": False,
+            "n": 1,
+        }
+        snapshot_payload = {
+            "snapshot_version": 1,
+            "surface_node_id": surface.id,
+            "result_node_id": surface.id,
+            "mode": "image",
+            "final_prompt": surface.data.prompt,
+            "input_policy": "mentions_only",
+            "model": model.id,
+            "provider": key.provider,
+            "alias": key.alias,
+            "normalized_params": normalized,
+            "inputs": [item.model_dump(mode="json") for item in inputs],
+            "mask_version_id": None,
+            "submitted_at": timestamp,
+            "submitted_by": CanvasActor(kind="user").model_dump(mode="json"),
+        }
+        snapshot = CanvasGenerationSnapshot(
+            **snapshot_payload,
+            request_fingerprint=_canonical_sha(snapshot_payload),
+        )
+        context = CanvasJobContext(
+            run_id=run_id,
+            snapshot=snapshot,
+            result_node_id=surface.id,
+            candidates=[candidate],
+        )
+        paths = _input_paths(project_id, current, inputs)
+        job_params = JobParams(
+            n=1,
+            size=surface.data.resolution,
+            reference_images=paths["image"],
+            layer_decomposition=True,
+        )
+        job = Job(
+            job_id=job_id,
+            character_id=key.alias,
+            prompt=surface.data.prompt,
+            submitted_at=timestamp,
+            model=model.id,
+            params=job_params,
+            output_paths=[],
+            status=JobStatus.PENDING,
+            error=None,
+            asset_slot=AssetSlot.PORTRAIT,
+            kind=JobKind.IMAGE,
+            namespace="canvas",
+            canvas_project_id=project_id,
+            canvas_run=context,
+            alias=key.alias,
+            provider=key.provider,
+        )
+        updated = current.model_copy(update={
+            "revision": current.revision + 1,
+            "updated_at": timestamp,
+            "nodes": [
+                node.model_copy(update={
+                    "data": node.data.model_copy(update={
+                        "active_run_id": run_id,
+                        "error": None,
+                    })
+                })
+                if isinstance(node, CanvasLayerStackNode) and node.id == surface.id
+                else node
+                for node in current.nodes
+            ],
+        })
+        _commit_transaction_unlocked(
+            project_id,
+            run_id,
+            "layer_decomposition",
+            current.revision,
+            job,
+            updated,
+        )
+        return job, updated
+
+
 def submit_mask_edit_run(
     project_id: str,
     surface_node_id: str,
@@ -1927,6 +2109,8 @@ def _output_version(
     job: Job,
     candidate: CanvasResultCandidate,
     output_path: str,
+    *,
+    origin: CanvasLayerDecompositionOrigin | None = None,
 ) -> CanvasTextVersion | CanvasMediaVersion:
     root = canvas_project_dir(project_id).resolve()
     raw = Path(output_path)
@@ -1970,10 +2154,8 @@ def _output_version(
         version_id=f"version-{secrets.token_hex(12)}",
         created_at=_now(),
         sha256=_sha256_file(target),
-        origin=CanvasJobOutputOrigin(
-            kind="job_output",
-            job_id=job.job_id,
-            candidate_id=candidate.candidate_id,
+        origin=origin or CanvasJobOutputOrigin(
+            kind="job_output", job_id=job.job_id, candidate_id=candidate.candidate_id,
         ),
         kind=job.kind.value,
         path=target.relative_to(root).as_posix(),
@@ -2269,6 +2451,194 @@ def finalize_canvas_run(
             return _finalize_canvas_run_under_locks(project_id, job_id)
 
 
+def _finalize_layer_stack_failure(
+    project_id: str,
+    current: CanvasDocument,
+    job: Job,
+    *,
+    canceled: bool,
+    error: str | None,
+) -> tuple[Job, CanvasDocument | None]:
+    context = job.canvas_run
+    if context is None:
+        raise ValueError("canvas job is missing run context")
+    terminal = _canceled_candidates(job) if canceled else _failed_candidates(job)
+    terminal = terminal.model_copy(update={
+        "status": JobStatus.CANCELED if canceled else JobStatus.FAILED,
+        "error": None if canceled else (error or job.error or "图层拆分失败"),
+        "progress_phase": None,
+        "completed_at": job.completed_at or _now(),
+    })
+    nodes: list[CanvasNode] = []
+    changed = False
+    for node in current.nodes:
+        if (
+            isinstance(node, CanvasLayerStackNode)
+            and node.id == context.result_node_id
+            and node.data.active_run_id == context.run_id
+        ):
+            node = node.model_copy(update={
+                "data": node.data.model_copy(update={
+                    "active_run_id": None,
+                    "error": terminal.error,
+                })
+            })
+            changed = True
+        nodes.append(node)
+    if not changed:
+        write_job_under_lock(terminal)
+        return terminal, None
+    updated = current.model_copy(update={
+        "revision": current.revision + 1,
+        "updated_at": _now(),
+        "nodes": nodes,
+    })
+    _commit_transaction_unlocked(
+        project_id,
+        context.run_id,
+        "finalize",
+        current.revision,
+        terminal,
+        updated,
+        job_locked=True,
+    )
+    return terminal, updated
+
+
+def _finalize_layer_stack_under_locks(
+    project_id: str,
+    current: CanvasDocument,
+    job: Job,
+) -> tuple[Job, CanvasDocument | None]:
+    context = job.canvas_run
+    if context is None:
+        raise ValueError("canvas job is missing run context")
+    if job.status == JobStatus.CANCELED:
+        return _finalize_layer_stack_failure(
+            project_id, current, job, canceled=True, error=None,
+        )
+    if job.status == JobStatus.FAILED:
+        return _finalize_layer_stack_failure(
+            project_id, current, job, canceled=False, error=job.error,
+        )
+    if job.status not in {JobStatus.DONE, JobStatus.PARTIAL}:
+        return job, None
+    if all(candidate.status != "pending" for candidate in context.candidates):
+        return job, current
+    result_node = next(
+        (
+            node for node in current.nodes
+            if isinstance(node, CanvasLayerStackNode) and node.id == context.result_node_id
+        ),
+        None,
+    )
+    result = job.params.layer_decomposition_result
+    try:
+        if result_node is None or result_node.data.active_run_id != context.run_id:
+            raise ValueError("图层拆分结果节点已不存在")
+        if result is None or len(result.outputs) != len(job.output_paths):
+            raise ValueError("厂商返回的图层文件与元数据数量不一致")
+        candidate = context.candidates[0]
+        versions: list[CanvasMediaVersion] = []
+        versions_by_index: dict[int, CanvasMediaVersion] = {}
+        for output in result.outputs:
+            version = _output_version(
+                project_id,
+                job,
+                candidate,
+                job.output_paths[output.output_index],
+                origin=(
+                    None
+                    if output.z_index == 0
+                    else CanvasLayerDecompositionOrigin(
+                        kind="layer_decomposition",
+                        job_id=job.job_id,
+                        output_index=output.output_index,
+                    )
+                ),
+            )
+            if not isinstance(version, CanvasMediaVersion) or version.kind != "image":
+                raise ValueError("图层拆分返回了非图片产物")
+            versions.append(version)
+            versions_by_index[output.output_index] = version
+        base_output = next(output for output in result.outputs if output.z_index == 0)
+        base = versions_by_index[base_output.output_index]
+        if base.width is None or base.height is None:
+            raise ValueError("图层拆分底图缺少尺寸")
+        layers: list[CanvasLayerStackLayer] = []
+        for output in result.outputs:
+            if output.z_index == 0:
+                continue
+            bounds = output.bounding_box
+            if bounds is None:
+                raise ValueError("图层拆分产物缺少边界框")
+            left, top, right, bottom = bounds.absolute
+            if right > base.width or bottom > base.height:
+                raise ValueError("图层边界框超出底图范围")
+            layers.append(CanvasLayerStackLayer(
+                id=f"layer-{secrets.token_hex(10)}",
+                version_id=versions_by_index[output.output_index].version_id,
+                z_index=output.z_index,
+                name=output.name,
+                description=output.description,
+                bounding_box=bounds,
+                visible=True,
+            ))
+    except (IndexError, OSError, StopIteration, ValueError) as error:
+        return _finalize_layer_stack_failure(
+            project_id,
+            current,
+            job,
+            canceled=False,
+            error=str(error),
+        )
+
+    completed_candidate = context.candidates[0].model_copy(update={
+        "status": "succeeded",
+        "version_id": base.version_id,
+        "error": None,
+    })
+    updated_job = job.model_copy(update={
+        "status": JobStatus.DONE,
+        "error": None,
+        "progress_phase": None,
+        "completed_at": job.completed_at or _now(),
+        "canvas_run": context.model_copy(update={"candidates": [completed_candidate]}),
+    })
+    nodes = [
+        node.model_copy(update={
+            "data": node.data.model_copy(update={
+                "base_version_id": base.version_id,
+                "layers": layers,
+                "active_run_id": None,
+                "error": None,
+            })
+        })
+        if isinstance(node, CanvasLayerStackNode) and node.id == result_node.id
+        else node
+        for node in current.nodes
+    ]
+    updated = current.model_copy(update={
+        "revision": current.revision + 1,
+        "updated_at": _now(),
+        "nodes": nodes,
+        "content_versions": {
+            **current.content_versions,
+            **{version.version_id: version for version in versions},
+        },
+    })
+    _commit_transaction_unlocked(
+        project_id,
+        context.run_id,
+        "finalize",
+        current.revision,
+        updated_job,
+        updated,
+        job_locked=True,
+    )
+    return updated_job, updated
+
+
 def _finalize_canvas_run_under_locks(
     project_id: str,
     job_id: str,
@@ -2280,6 +2650,8 @@ def _finalize_canvas_run_under_locks(
     context = job.canvas_run
     if context is None:
         raise ValueError("canvas job is missing run context")
+    if job.params.layer_decomposition:
+        return _finalize_layer_stack_under_locks(project_id, current, job)
     if job.status == JobStatus.CANCELED:
         canceled = _canceled_candidates(job)
         write_job_under_lock(canceled)

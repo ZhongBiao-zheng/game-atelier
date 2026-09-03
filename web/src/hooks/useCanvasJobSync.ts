@@ -109,10 +109,18 @@ export function useCanvasJobSync({
           // Multi-text slots keep their node IDs and have no active_run_id. Match
           // their new versions to the actual Job outputs, not unrelated idle nodes.
           const outputVersionIds = new Set(newCandidateVersionIds);
-          const resultNodeIds = new Set(remote.nodes.flatMap(node => (
-            'current_version_id' in node.data && outputVersionIds.has(node.data.current_version_id ?? '')
-              ? [node.id] : []
-          )));
+          // 图层栈节点没有 current_version_id，产物挂在 base_version_id / layers 上，
+          // 只能按 result_node_id 认领；普通节点仍按新版本匹配，不动既有合并语义。
+          const layerStackResultNodeIds = [...completedRuns, ...jobsWithNewCandidateVersions]
+            .filter(job => job.params.layer_decomposition)
+            .map(job => job.canvas_run!.result_node_id);
+          const resultNodeIds = new Set([
+            ...layerStackResultNodeIds,
+            ...remote.nodes.flatMap(node => (
+              'current_version_id' in node.data && outputVersionIds.has(node.data.current_version_id ?? '')
+                ? [node.id] : []
+            )),
+          ]);
           mergeRunDocument(remote, runIdsToSync, resultNodeIds);
           for (const job of completedRuns) syncedTerminalRuns.current.add(job.canvas_run!.run_id);
           for (const versionId of newCandidateVersionIds) syncedCandidateVersionIds.current.add(versionId);

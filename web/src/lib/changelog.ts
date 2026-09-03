@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.35.0',
+    date: '2026-09-03',
+    headline: '画布图片可以拆分图层',
+    changes: [
+      { kind: 'feat', text: '图片节点工具栏新增「拆分图层」：先生成一个可编辑的图层栈节点，选好模型、要求与分辨率再开始，不会提前扣费' },
+      { kind: 'feat', text: '拆分结果按背景 + 透明图层重建原图，每层可单独显隐、下载；随项目包导入导出' },
+      { kind: 'feat', text: '目前只支持火山直连或 Ark 协议下的 Seedream 5.0 Pro，分辨率可选智能 / 1K / 1.5K / 2K' },
+    ],
+  },
+  {
     version: '5.34.1',
     date: '2026-09-03',
     headline: 'Tuzi GPT Image 2 的 1K 价格再次下调',
