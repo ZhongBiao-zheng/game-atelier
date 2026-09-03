@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.34.1',
+    date: '2026-09-03',
+    headline: 'Tuzi GPT Image 2 的 1K 价格再次下调',
+    changes: [
+      { kind: 'fix', text: 'Tuzi default GPT Image 2 的 1K 估价由 ¥0.035 调整为 ¥0.028 / 张；2K 与 4K 仍为 ¥0.21 / 张' },
+      { kind: 'fix', text: 'Tier 5 公告价 ¥0.024 / 张已记录；当前没有账号等级配置时仍按普通 default 价格估算，避免低估费用' },
+    ],
+  },
+  {
     version: '5.34.0',
     date: '2026-09-02',
     headline: '图片生成也能 @ 引用参考图',

@@ -28,10 +28,10 @@ export const TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE = {
   '4k': 0.18,
 };
 
-// Tuzi default GPT Image 2：元 / 次（一张）。用户提供的 2026-09-01 调价公告。
+// Tuzi default GPT Image 2：元 / 次（一张）。用户提供的 2026-09-03 调价公告。
 // default 分组按最终 size 分流；quality 不参与此表的档位判断。
 export const TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE = {
-  '1k': 0.035,
+  '1k': 0.028,
   '2k': 0.21,
   '4k': 0.21,
 };
