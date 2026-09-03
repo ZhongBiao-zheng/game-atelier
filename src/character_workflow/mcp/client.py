@@ -16,7 +16,8 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 OPERATIONS = frozenset({
     "list-projects", "list-targets", "get-context", "list-models", "create-target", "read-document",
     "write-document", "acknowledge-feedback", "list-media", "read-media",
-    "prepare-generation", "get-generation", "withdraw-generation",
+    "prepare-generation", "get-generation", "withdraw-generation", "approve-generation",
+    "read-lessons", "append-lesson",
 })
 _ERROR_MESSAGES = {
     "CONNECTION_REQUIRED": "请在本机 Atelier 管理页重新授权 Agent。",

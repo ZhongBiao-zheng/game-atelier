@@ -60,8 +60,9 @@ P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch
 - 血缘：`retry_of` `source_image`；创作台归档血缘写在 `params.archived_from_job_id / archived_from_path`
 - 工坊批准归属：`workshop_request_id`，仅服务端绑定冻结请求；普通 prompt 编辑接口拒绝修改已冻结工坊 Job
 
-`run_job` 只接受 `PENDING`。工坊 character / ui / video 还必须持有内容匹配的已批准请求，
-`POST /jobs/{id}/confirm` 不再直接批准旧工坊草稿；需重新准备，在本地 `/workshop/requests` 批准。
+`run_job` 接受 `PENDING_CONFIRM`（CLI 路径：终端确认即批准，运行时推进为 `PENDING`）与 `PENDING`。
+带 `workshop_request_id` 的 Job 还必须与已批准请求内容匹配；批准来源为本地页面，或持有
+`execute_generation` 能力的 Agent 会话（ADR-0017）。`POST /jobs/{id}/confirm` 继续批准 CLI 草稿。
 Canvas / Studio 保留自己的人工提交路径，不要求工坊请求。旧历史记录不伪造批准或批量改写。
 
 `JobParams` = `extra="allow"`（加字段不会被上游拒），但**双端仍要同步声明**，否则 TS 那边拿不到类型。Studio 在新建 Job 时可写 `estimated_cost_cny`，它是按当次 Key 渠道、模型与参数冻结的人民币预计总价；OpenRouter 等返回账单用量的 caller 可写 `actual_cost_cny`，历史优先实际费用、其次预计快照，缺失时不用当前 Key 重算。后端独占写入的还有 `actual_size`、`warnings`、`requested_size`、`provider_task_protocol`、`provider_task_ids` —— 前端只读不写。后两项用于恢复已计费的聚合商异步任务：任务 ID 必须在首次轮询前落盘，重启后只允许续查原任务，不能重新提交。

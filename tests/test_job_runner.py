@@ -13,7 +13,6 @@ from character_workflow.lib import job_runner
 from character_workflow.lib.active_character import write_active
 from character_workflow.lib.jobs import read_job, save_job, write_job
 from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus
-from tests.workshop_helpers import approved_character_job
 
 
 @pytest.fixture
@@ -70,16 +69,18 @@ def test_run_job_normalizes_refs_clears_error_and_skips_invalid_artifact(
 ):
     src = project / "characters" / "holy" / "source" / "ref.png"
     _write_png(src)
-    prepared = approved_character_job(
+    write_job(
+        job_id="promo-001",
         character_id="holy",
         prompt="圣灵祭祀冒险启程 KV",
         model="generate_image_gpt_image_2",
-        params={"size": "2048x1152", "n": 1},
-        asset_slot="promo",
+        params={"size": "2048x1152", "n": 1, "reference_images": []},
+        status=JobStatus.PENDING_CONFIRM,
+        asset_slot=AssetSlot.PROMO,
         source_image=str(src),
         alias="oai",
     )
-    _add_stale_error(project, prepared.job_id)
+    _add_stale_error(project, "promo-001")
 
     captured: dict[str, object] = {}
 
@@ -102,7 +103,7 @@ def test_run_job_normalizes_refs_clears_error_and_skips_invalid_artifact(
 
     monkeypatch.setattr(job_runner, "dispatch", fake_dispatch)
 
-    final = job_runner.run_job(prepared.job_id)
+    final = job_runner.run_job("promo-001")
 
     expected_path = project / "characters" / "holy" / "promo" / "v1.png"
     assert final.status == JobStatus.DONE
@@ -111,21 +112,31 @@ def test_run_job_normalizes_refs_clears_error_and_skips_invalid_artifact(
     assert expected_path.exists()
     assert (expected_path.with_suffix(".md")).exists()
     params = final.params.model_dump()
-    assert Path(params["reference_images"][0]).read_bytes() == src.read_bytes()
-    assert captured["reference_images"] == params["reference_images"]
+    # source_image gets normalized into reference_images and forwarded to dispatch.
+    assert params["reference_images"] == [str(src)]
+    assert captured["reference_images"] == [str(src)]
     assert params["requested_size"] == "2048x1152"
     assert params["actual_size"] == "3x2"
     assert captured["alias"] == "oai"
     assert captured["size"] == "2048x1152"
     assert captured["output_dir"] != expected_path.parent
-    assert read_job(prepared.job_id).output_paths == [str(expected_path)]
+    assert read_job("promo-001").output_paths == [str(expected_path)]
 
 
 def test_run_latest_uses_active_character_kind_and_newest_pending_job(project, monkeypatch):
     write_active("holy")
-    approved_character_job(prompt="old", model="m", asset_slot="portrait")
-    approved_character_job(prompt="old", model="m", asset_slot="promo")
-    latest = approved_character_job(prompt="new", model="m", asset_slot="promo")
+    write_job(
+        job_id="portrait-001", character_id="holy", prompt="old",
+        model="m", params={}, asset_slot=AssetSlot.PORTRAIT,
+    )
+    write_job(
+        job_id="promo-001", character_id="holy", prompt="old",
+        model="m", params={}, asset_slot=AssetSlot.PROMO,
+    )
+    write_job(
+        job_id="promo-002", character_id="holy", prompt="new",
+        model="m", params={}, asset_slot=AssetSlot.PROMO,
+    )
 
     captured: list[str] = []
 
@@ -137,8 +148,8 @@ def test_run_latest_uses_active_character_kind_and_newest_pending_job(project, m
 
     selected = job_runner.run_latest(kind=AssetSlot.PROMO)
 
-    assert selected.job_id == latest.job_id
-    assert captured == [latest.job_id]
+    assert selected.job_id == "promo-002"
+    assert captured == ["promo-002"]
 
 
 def test_run_job_routes_custom_provider_through_dispatch(project, monkeypatch):

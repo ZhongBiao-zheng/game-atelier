@@ -33,6 +33,17 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.36.0',
+    date: '2026-09-03',
+    headline: '本机连接鉴权与工坊 MCP 接入',
+    changes: [
+      { kind: 'feat', text: '页面与本机服务建立会话：只允许本机页面访问项目、媒体和事件流；同一时间一个编辑页面，第二个页面可显式接管，旧页面草稿保留可导出' },
+      { kind: 'feat', text: '新增「本机 Agent 连接」页：按项目授权 Codex / Claude 通过 MCP 读取上下文、维护文档、准备生成；勾选「直接执行生成」后终端确认即出图，否则在「待批准生成」页人工批准' },
+      { kind: 'feat', text: '终端 Skill 的 CLI 出图流程保持不变；Agent 可读写出图经验，评分高的图仍会提醒沉淀' },
+      { kind: 'feat', text: '启动器改为按运行实例握手，不再误判其他程序占用的端口；旧记录存活但无法核验时不会再开第二个服务' },
+    ],
+  },
+  {
     version: '5.35.0',
     date: '2026-09-03',
     headline: '画布图片可以拆分图层',

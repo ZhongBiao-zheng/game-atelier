@@ -439,7 +439,7 @@ def run_job(
             raise JobRunnerError(error.message) from error
         except Exception:
             job = read_job(job_id)
-            if job.namespace in {"character", "ui", "video"} and job.status == JobStatus.PENDING:
+            if job.workshop_request_id and job.status == JobStatus.PENDING:
                 from character_workflow.lib.workshop_generation import record_execution_rejection
                 record_execution_rejection(job_id, "执行意外中断，请核对任务和供应商订单；不会自动重试")
             raise
@@ -463,11 +463,14 @@ def _run_job_claimed(
             raise JobRunnerError("Canvas Run 已请求停止")
         update_job_phase(job.job_id, phase)
 
-    if job.status != JobStatus.PENDING:
+    # CLI 路径：终端确认即批准，PENDING_CONFIRM 在此推进；工坊请求路径的批准记录在 request 上。
+    if job.status not in (JobStatus.PENDING_CONFIRM, JobStatus.PENDING):
         raise JobRunnerError(f"job not in a runnable status (current: {job.status.value})")
-    if job.namespace in {"character", "ui", "video"}:
+    if job.workshop_request_id:
         from character_workflow.lib.workshop_generation import claim_execution
         claim_execution(job, workshop_grant_is_active)
+    if job.status == JobStatus.PENDING_CONFIRM:
+        job = update_job_status(job.job_id, status=JobStatus.PENDING, error=None)
     if job.kind == JobKind.TEXT:
         return _run_text_job(job)
     if job.kind == JobKind.VIDEO:
@@ -727,13 +730,12 @@ def run_latest(
         job for job in list_jobs()
         if (
             job.character_id == character_id
-            and job.status == JobStatus.PENDING
-            and job.workshop_request_id is not None
+            and job.status == JobStatus.PENDING_CONFIRM
             and (kind is None or job.asset_slot == kind)
         )
     ]
     if not candidates:
         suffix = f" asset_slot={kind.value}" if kind else ""
-        raise JobRunnerError(f"no approved pending job for {character_id}{suffix}")
+        raise JobRunnerError(f"no pending_confirm job for {character_id}{suffix}")
     candidates.sort(key=lambda j: (j.submitted_at, j.job_id))
     return run_job(candidates[-1].job_id)

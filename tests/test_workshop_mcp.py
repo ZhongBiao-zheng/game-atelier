@@ -152,7 +152,7 @@ def tool_payload(operation):
                 "idempotency_key": "create-bird-001"}
     if operation == "get-generation":
         return {"request_id": "request-test"}
-    if operation == "withdraw-generation":
+    if operation in {"withdraw-generation", "approve-generation"}:
         return {"request_id": "request-test", "expected_revision": 1}
     payload = {"target": TARGET}
     if operation in {"read-document", "write-document"}:
@@ -160,6 +160,8 @@ def tool_payload(operation):
     if operation == "write-document":
         payload.update(content="一只中文小鸟", expected_revision="a" * 64,
                        idempotency_key="write-bird-001")
+    if operation == "append-lesson":
+        payload.update(scope="project", line="经验一条", idempotency_key="lesson-bird-001")
     if operation == "acknowledge-feedback":
         payload.update(feedback_ids=["feedback-one"], idempotency_key="feedback-bird-001")
     if operation == "read-media":
@@ -200,7 +202,7 @@ async def test_stdio_exposes_and_calls_all_typed_workshop_tools(runtime, tmp_pat
             assert (await client.list_resources()).resources == []
             assert (await client.list_resource_templates()).resource_templates == []
     assert runtime["sessions"] == 1
-    assert len(runtime["calls"]) == 13
+    assert len(runtime["calls"]) == len(TOOL_INPUT_MODELS)
     assert not (tmp_path / "unused-data").exists()
 
 

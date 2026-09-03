@@ -110,6 +110,12 @@ GET /api/canvas/projects/{project_id}/jobs
 POST /api/canvas/projects/{project_id}/runs/reverse-prompt
 POST /api/canvas/projects/{project_id}/runs/angle
 POST /api/canvas/projects/{project_id}/runs/mask-edit
+POST /api/canvas/projects/{project_id}/runs/layer-decomposition
+GET /api/canvas/projects/{project_id}/batch-runs
+POST /api/canvas/projects/{project_id}/batch-runs/prepare
+GET /api/canvas/projects/{project_id}/batch-runs/{batch_id}
+POST /api/canvas/projects/{project_id}/batch-runs/{batch_id}/start
+POST /api/canvas/projects/{project_id}/batch-runs/{batch_id}/cancel
 POST /api/canvas/projects/{project_id}/runs/{run_id}/reverse-prompt-config
 POST /api/canvas/projects/{project_id}/runs
 POST /api/canvas/projects/{project_id}/runs/{run_id}/retry
@@ -141,7 +147,8 @@ MEDIA_ROUTES = frozenset({
 WORKSHOP_TOOLS = frozenset({
     "list-projects", "list-targets", "get-context", "list-models", "create-target", "read-document",
     "write-document", "acknowledge-feedback", "list-media", "read-media",
-    "prepare-generation", "get-generation", "withdraw-generation",
+    "prepare-generation", "get-generation", "withdraw-generation", "approve-generation",
+    "read-lessons", "append-lesson",
 })
 LOCAL_RULES = [
     (method, path, compile_path(path)[0])

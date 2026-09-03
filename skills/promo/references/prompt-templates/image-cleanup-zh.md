@@ -7,5 +7,4 @@
 减少画面破碎感，降低裂纹数量，减少过度锐化效果，减少字体裂痕与磨损纹理，减少背景杂乱细节，减少噪点与高频纹理，降低粒子密度，增强整体画面干净度，强化主体聚焦，增加大面积纯色与留白，提升角色边缘平滑度，提高抗锯齿质量，角色描边更加圆润干净，线条边缘清晰顺滑，避免锯齿感，整体改为高端手游海报渲染，柔和电影级光影，精致厚涂质感，细节清晰但不过度杂乱，提升高级感与商业感，增强角色面部精细度，服装纹理更加细腻统一，背景虚实分层明显，减少脏乱暗部，整体画风参考：高端国风手游UI海报、网易武侠手游宣传图、腾讯国风卡牌海报，超清晰，smooth edges, clean rendering, high quality anti-aliasing, cinematic lighting, premium mobile game art style
 ```
 
-**注意**：在 `workshop_prepare_generation.params` 显式保留当前图的 ratio / size，
-并按 `workshop_list_models` 的实际能力校验，不能依赖模型默认画幅。
+**注意**：必须显式传 `--size`（如 `--size 1536x1024`），否则 GPT Image 2 默认竖版。

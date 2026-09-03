@@ -13,8 +13,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from character_workflow.lib import workshop, workshop_generation as generation
 from character_workflow.lib.workshop_schema import (
     AcknowledgeFeedbackInput, ApproveGenerationInput, CreateTargetInput, GetGenerationInput,
-    ListMediaInput, ListProjectsInput, ListTargetsInput, PrepareGenerationInput, ReadDocumentInput,
-    ReadMediaInput, TargetInput, WithdrawGenerationInput, WriteDocumentInput,
+    AppendLessonInput, ApproveRequestInput, ListMediaInput, ListProjectsInput, ListTargetsInput,
+    PrepareGenerationInput, ReadDocumentInput, ReadMediaInput, TargetInput,
+    WithdrawGenerationInput, WriteDocumentInput,
 )
 from viewer_server.sse import hub
 
@@ -135,6 +136,31 @@ def withdraw_generation(request: Request, payload: WithdrawGenerationInput):
     return result
 
 
+@router.post("/read-lessons")
+def read_lessons(request: Request, payload: TargetInput):
+    return workshop.read_lessons(principal(request), payload)
+
+
+@router.post("/append-lesson")
+def append_lesson(request: Request, payload: AppendLessonInput):
+    return workshop.append_lesson(principal(request), payload)
+
+
+def _approve(request: Request, request_id: str, expected_revision: int) -> dict:
+    runtime = request.app.state.workshop_runtime
+    result = generation.approve_generation(principal(request), request_id,
+                                           expected_revision, runtime.grant_is_active)
+    hub.broadcast("workshop-request-changed", {"request_id": result["request_id"]})
+    if result["job"] is None or result["job"]["status"] == "pending":
+        runtime.schedule(result["job_id"])
+    return result
+
+
+@router.post("/approve-generation")
+def approve_generation_tool(request: Request, payload: ApproveRequestInput):
+    return _approve(request, payload.request_id, payload.expected_revision)
+
+
 @router.get("/requests")
 def list_requests(request: Request, page: int = Query(1, ge=1, le=10000),
                   page_size: int = Query(20, ge=1, le=100)):
@@ -143,13 +169,7 @@ def list_requests(request: Request, page: int = Query(1, ge=1, le=10000),
 
 @router.post("/requests/{request_id}/approve")
 def approve_generation(request_id: str, request: Request, payload: ApproveGenerationInput):
-    runtime = request.app.state.workshop_runtime
-    result = generation.approve_generation(principal(request), request_id,
-                                           payload.expected_revision, runtime.grant_is_active)
-    hub.broadcast("workshop-request-changed", {"request_id": result["request_id"]})
-    if result["job"] is None or result["job"]["status"] == "pending":
-        runtime.schedule(result["job_id"])
-    return result
+    return _approve(request, request_id, payload.expected_revision)
 
 
 @router.get("/requests/{request_id}")

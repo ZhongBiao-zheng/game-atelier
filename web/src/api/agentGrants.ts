@@ -1,6 +1,6 @@
 import { requestJson, request } from '@/api/http';
 
-export type AgentCapability = 'read' | 'edit_documents' | 'create_targets' | 'prepare_generation';
+export type AgentCapability = 'read' | 'edit_documents' | 'create_targets' | 'prepare_generation' | 'execute_generation';
 export interface AgentGrant {
   grant_id: string;
   name: string;

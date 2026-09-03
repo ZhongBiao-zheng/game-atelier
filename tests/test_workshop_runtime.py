@@ -195,10 +195,11 @@ def test_changed_frozen_inputs_or_provider_require_new_approval(setup, change):
     assert jobs.list_jobs() == []
 
 
-def test_agent_cannot_approve_and_revoked_grant_blocks_human_approval(setup):
+def test_agent_without_execute_capability_cannot_approve_and_revoked_grant_blocks_human(setup):
     request = prepare(setup)
     with pytest.raises(ws.WorkshopError) as error:
-        generation.approve_generation(setup.agent, request["request_id"], 1, lambda *_: True)
+        generation.approve_generation(setup.agent, request["request_id"], 1,
+                                      lambda _g, _p, capability: capability != "execute_generation")
     assert error.value.code == "CAPABILITY_DENIED"
     with pytest.raises(ws.WorkshopError):
         generation.approve_generation(setup.local, request["request_id"], 1, lambda *_: False)
@@ -251,14 +252,7 @@ def test_approval_transaction_recovery_and_unknown_execution_never_resubmits(set
     assert error.value.code == "EXECUTION_NEEDS_REVIEW"
 
 
-def test_legacy_pending_and_forged_job_cannot_bypass_approval(setup):
-    job = jobs.write_job(job_id="legacy", character_id="bird", prompt="x", model="gpt-image-1",
-                          params={}, alias="fake")
-    with pytest.raises(JobRunnerError):
-        run_job(job.job_id)
-    jobs.update_job_status(job.job_id, status=JobStatus.PENDING)
-    with pytest.raises(JobRunnerError):
-        run_job(job.job_id)
+def test_forged_approved_job_cannot_bypass_approval(setup):
     approved = approve(setup, prepare(setup))
     saved = jobs.read_job(approved["job_id"])
     jobs.save_job(saved.model_copy(update={"prompt": "changed after approval"}))
@@ -639,3 +633,16 @@ def test_display_name_fails_safely_without_affecting_target_identity(setup, tmp_
         outside.write_text("# 外部私有标题", encoding="utf-8")
         path.symlink_to(outside)
     assert ws.document_display_name(path, "stable-id") == "stable-id"
+
+
+def test_agent_with_execute_capability_approves_own_request_and_is_recorded(setup):
+    request = prepare(setup)
+    result = generation.approve_generation(setup.agent, request["request_id"], 1, lambda *_: True)
+    assert result["state"] == "approved"
+    saved = generation.read_request(request["request_id"])
+    assert saved.approved_by == "grant-one"
+    assert jobs.read_job(result["job_id"]).status == JobStatus.PENDING
+    other = SimpleNamespace(kind="agent", session_id="s2", grant_id="grant-two",
+                            project_ids=setup.agent.project_ids, capabilities=setup.agent.capabilities)
+    with pytest.raises(ws.WorkshopError):
+        generation.approve_generation(other, request["request_id"], 2, lambda *_: True)

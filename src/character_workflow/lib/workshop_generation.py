@@ -348,10 +348,16 @@ def _verify_snapshot(request: GenerationRequest) -> None:
 
 def approve_generation(principal: Any, request_id: str, expected_revision: int,
                        grant_is_active: Callable[[str, str, str], bool]) -> dict:
-    if actor_id(principal) != "local":
-        raise WorkshopError("CAPABILITY_DENIED", "出图必须由用户在本地页面确认", 403)
+    # Trigger: 非本地页面调用批准
+    # Why: ADR-0015 批准按能力分级——持有 execute_generation 的 Agent 会话可批准自己准备的请求，
+    #      终端确认即批准；没有该能力才落到 Atelier 页面。
+    # Outcome: 记录批准来源为 grant_id，或拒绝
     with file_lock(request_path(request_id).with_suffix(".lock")):
         request = _request_for(principal, request_id)
+        if actor_id(principal) != "local" and not grant_is_active(
+            principal.grant_id, request.input.target.project_id, "execute_generation"
+        ):
+            raise WorkshopError("CAPABILITY_DENIED", "当前授权不能直接执行生成，请在本地页面确认", 403)
         if request.state == "approved":
             try:
                 read_job(request.job_id)
@@ -361,7 +367,7 @@ def approve_generation(principal: Any, request_id: str, expected_revision: int,
                 _verify_grant(request, grant_is_active)
                 _verify_snapshot(request)
                 save_job(_job_for(request))
-            return request_view(request)
+            return request_view(request, agent=principal.kind == "agent")
         if request.revision != expected_revision:
             raise WorkshopError("DOCUMENT_CONFLICT", "生成请求已变化，请刷新")
         if request.state != "awaiting_approval":
@@ -375,12 +381,12 @@ def approve_generation(principal: Any, request_id: str, expected_revision: int,
         _verify_snapshot(request)
         request.state = "approved"
         request.approved_at = _now().isoformat()
-        request.approved_by = principal.session_id
+        request.approved_by = actor_id(principal)
         request.revision += 1
         _save(request)
         # The fixed Job id makes a crash between these two files recoverable without a new order.
         save_job(_job_for(request))
-        return request_view(request)
+        return request_view(request, agent=principal.kind == "agent")
 
 
 def withdraw_generation(principal: Any, payload: WithdrawGenerationInput) -> dict:

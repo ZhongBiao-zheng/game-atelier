@@ -1310,7 +1310,8 @@ it('pulls canvas jobs as soon as SSE says one changed, without waiting for the n
   // job-changed，画布只是一直没订阅：以前最坏要等一整轮兜底轮询才看见出图完成。
   const state = vi.spyOn(connection, 'useConnectionState').mockReturnValue({ phase: 'ready', generation: 1, editing: true, message: null });
   const events = createTestEventStream();
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(events.response));
+  // 画布里有多个 useSSE 订阅者，Response body 只能读一次，每次 fetch 发一份新流。
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(events.open())));
 
   const draft: CanvasGenerationDraft = {
     mode: 'image', prompt: '雨夜', input_policy: 'mentions_only',

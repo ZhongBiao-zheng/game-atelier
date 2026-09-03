@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib.canvas_projects import (
     canvas_output_dir,
@@ -368,7 +368,7 @@ def test_layer_decomposition_endpoint_schedules_the_canvas_job(
         "_run_canvas_job_safely",
         lambda job_id: scheduled.append(job_id),
     )
-    client = TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    client = TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
     response = client.post(
         f"/api/canvas/projects/{project.project_id}/runs/layer-decomposition",

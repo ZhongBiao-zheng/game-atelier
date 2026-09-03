@@ -34,7 +34,7 @@ export function WorkshopRequestsPage() {
   }
 
   return <div className="mx-auto max-w-4xl space-y-6 px-6 py-8">
-    <header className="flex flex-wrap items-center justify-between gap-4"><div><h1 className="font-display text-display">待批准生成</h1><p className="mt-2 text-sm text-muted-foreground">核对本次内容与费用后再批准，Agent 不能替你确认。</p></div><Link href="/connection" className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">管理 Agent 授权</Link></header>
+    <header className="flex flex-wrap items-center justify-between gap-4"><div><h1 className="font-display text-display">待批准生成</h1><p className="mt-2 text-sm text-muted-foreground">核对本次内容与费用后再批准。未获「直接执行」授权的 Agent 不能替你确认。</p></div><Link href="/connection" className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">管理 Agent 授权</Link></header>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {loading && requests.length === 0 && <p role="status" className="text-sm text-muted-foreground">读取中…</p>}
     {!loading && requests.length === 0 && <p className="py-8 text-sm text-muted-foreground">没有待处理的生成请求。</p>}

@@ -78,24 +78,23 @@ def test_write_job_ui_namespace_roundtrip(project):
 
 # ---------- submit-screen CLI ----------
 
-def test_submit_screen_cli_prepares_approval_without_creating_job(tmp_path, capsys, project):
+def test_submit_screen_cli_writes_pending_confirm_job(tmp_path, capsys, project):
     _seed_key()
     prompt_file = tmp_path / "prompt.txt"
     prompt_file.write_text("首页基准页", encoding="utf-8")
-    ui_jobs.screen_output_dir(project.id, "v1", "home").mkdir(parents=True)
     rc = main([
         "submit-screen", "--project", "mohuan", "--screen", "home",
         "--prompt-file", str(prompt_file),
     ])
     assert rc == 0
-    import json
-    request = json.loads(capsys.readouterr().out)
-    assert request["state"] == "awaiting_approval" and request["job_id"] is None
-    assert request["target"]["type"] == "ui"
-    assert request["target"]["project_id"] == project.id
-    assert request["target"]["screen_id"] == "home"
-    assert request["alias"] == "img-main" and request["model"] == "gpt-image-1"
-    assert jobs.list_jobs() == []
+    job_id = capsys.readouterr().out.strip()
+    job = jobs.read_job(job_id)
+    assert job.status.value == "pending_confirm"
+    assert job.namespace == "ui"
+    assert job.project_id == project.id
+    assert job.screen_id == "home"
+    assert job.alias == "img-main"
+    assert job.model == "gpt-image-1"
 
 
 def test_submit_screen_cli_rejects_bad_screen_id(tmp_path, capsys, project):

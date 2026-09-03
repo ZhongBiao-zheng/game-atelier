@@ -25,8 +25,8 @@ class GrantPayload(ControlPayload):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
     project_ids: Annotated[list[TextId], Field(min_length=1, max_length=32)]
     capabilities: Annotated[list[Literal[
-        "read", "edit_documents", "create_targets", "prepare_generation",
-    ]], Field(min_length=1, max_length=4)]
+        "read", "edit_documents", "create_targets", "prepare_generation", "execute_generation",
+    ]], Field(min_length=1, max_length=5)]
     days: Annotated[int, Field(ge=1, le=30)] = 7
 
 

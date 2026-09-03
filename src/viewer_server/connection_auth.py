@@ -16,7 +16,9 @@ from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.private_json import read_private_json, write_private_json
 from character_workflow.lib.projects import read_projects
 
-AGENT_CAPABILITIES = frozenset({"read", "edit_documents", "create_targets", "prepare_generation"})
+AGENT_CAPABILITIES = frozenset({
+    "read", "edit_documents", "create_targets", "prepare_generation", "execute_generation",
+})
 SESSION_LIMIT = 64
 GRANT_LIMIT = 32
 COOKIE_NAME = "atelier_local_session"

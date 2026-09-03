@@ -1,12 +1,11 @@
 from pathlib import Path
 
 import pytest
-import json
 from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.__main__ import main
 from character_workflow.lib import canonical, keys, ui_schemes
-from character_workflow.lib.jobs import job_output_dir_for, save_job
+from character_workflow.lib.jobs import job_output_dir_for, read_job, save_job
 from character_workflow.lib.projects import assign_character, create_project
 from character_workflow.lib.schemas import (
     AssetSlot,
@@ -247,14 +246,16 @@ def test_submit_video_production_creates_one_job_for_multi_shot_prompt(
         "--ratio", "9:16",
     ]) == 0
     captured = capsys.readouterr()
-    request = json.loads(captured.out)
-    assert request["target"]["production_id"] == "launch-pv"
-    assert request["params"]["duration"] == 15
-    assert request["params"]["ratio"] == "9:16"
-    assert request["prompt"].count("镜头") == 3
-    assert request["references"][0]["title"] == "v1.png"
-    assert request["state"] == "awaiting_approval" and request["job_id"] is None
-    assert "本地工坊批准页" in captured.err
+    job = read_job(captured.out.strip())
+
+    assert job.production_id == "launch-pv"
+    assert job.params.duration == 15
+    assert job.params.ratio == "9:16"
+    assert job.prompt.count("镜头") == 3
+    assert job.params.reference_images == [
+        str((isolated_data_root / references[0]).resolve())
+    ]
+    assert "企划   : launch-pv（项目完整视频 job）" in captured.err
 
 
 def test_list_and_select_complete_video_versions(isolated_data_root: Path):

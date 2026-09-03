@@ -86,6 +86,9 @@ project / ui_scheme 只用于文档与上下文，不能 prepare 生成；新项
 | `workshop_prepare_generation` | target、prompt、alias、model、typed params、media refs、幂等键 → request | prepare_generation；落准备记录，不调用供应商 |
 | `workshop_get_generation` | request_id → 批准状态、Job 摘要、产物引用 | read；只读；不无限阻塞或私自重试 |
 | `workshop_withdraw_generation` | request_id、expected_revision → 已撤回 / 已开始不可撤回 | prepare_generation；仅撤回尚未执行的自身请求 |
+| `workshop_approve_generation` | request_id、expected_revision → approved + Job | execute_generation；仅批准自身请求，用户在对话中明确肯定后调用 |
+| `workshop_read_lessons` | target → workspace / project 两层经验（按资产槽位） | read；只读 |
+| `workshop_append_lesson` | target、scope、line?、distilled_media_ids、幂等键 → 写入位置 | edit_documents；line 省略时只标记证据图已处理 |
 
 `tools/list` 的注解用于说明副作用，不承担权限验证。内部 HTTP 对应同名语义的 `/api/workshop/...`
 端点，不能提供 `/execute-command` 或任意 `method/path/body` 的工具。
@@ -139,9 +142,9 @@ UI 页面可发现同项目、同方案内其他页面的定稿图片（不含�
 
 ### 批准
 
-只有具有人类交互批准能力的本地 / 网站页面可以调用
-`POST /api/workshop/requests/{id}/approve`，请求 `{ expected_revision }`；
-MCP 身份即便猜到端点也返回 `CAPABILITY_DENIED`。批准入口检查有效编辑会话、归属、
+本地 / 网站页面调用 `POST /api/workshop/requests/{id}/approve`，请求 `{ expected_revision }`。
+Agent 会话调用 `workshop_approve_generation`，仅当其授权含 `execute_generation` 且请求由自己准备时通过，
+服务端记录 `approved_by = grant_id`（ADR-0017）；否则返回 `CAPABILITY_DENIED`。批准入口检查有效编辑会话、归属、
 快照与当前调用配置的指纹，防止确认前 alias 被改成另一供应商或参数能力发生变化。
 
 批准与冻结 Job 绑定在一次可恢复事务中：持锁重读→核验未撤回 / 未到期 / 修订未变→

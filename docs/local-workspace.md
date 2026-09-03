@@ -43,8 +43,8 @@ Codex / Claude         │     └─ 工坊服务 → 人工批准 → Job Runn
 下表是 P0 核验的改造前差距，不是本地整合分支的当前可用性。当前新增实现包括
 `connection_*` 的会话 / 租约 / 授权、`web/src/api/connection.ts` 与带身份的 fetch SSE、
 `workshop.py` 的目标 / 文档 / 媒体权限、`workshop_generation.py` 的批准与恢复、
-`character_workflow.mcp` 的 13 个 typed 工具。旧 `submit*` CLI 只准备请求并返回批准位置，
-`run_job` 不接受未批准工坊任务。媒体继续使用同源 HttpOnly cookie 和原生 Range，不全量转成 Blob。
+`character_workflow.mcp` 的 16 个 typed 工具。按 ADR-0017，`submit*` CLI 保留「终端确认 → run-job」路径，
+`run_job` 只对带 `workshop_request_id` 的任务核对服务端批准记录。媒体继续使用同源 HttpOnly cookie 和原生 Range，不全量转成 Blob。
 客户端说明见[本机 MCP](mcp-local-client.md)。SDK 测试不等于已验收所有真实 Agent 客户端。
 
 | 已核验的代码 | 当前行为 | 改造要求 |
@@ -55,7 +55,7 @@ Codex / Claude         │     └─ 工坊服务 → 人工批准 → Job Runn
 | `web/src/hooks/useSSE.ts` | `EventSource('/events')`，同源假设 | 带鉴权的事件流；撤销和换连接时立即停止旧流 |
 | `routes.py` 的 key / raw / gallery / download 路由 | 本地页面可管理配置并取媒体 | 原始密钥与本机设置仅本地管理；媒体和下载也必须鉴权 |
 | `POST /api/jobs/{id}/confirm` | 仅将待确认任务改为待执行，Skill 负责启动 | 服务端批准、冻结、调度形成一个可靠流程 |
-| `job_runner.run_job` | 接受 `PENDING_CONFIRM`，执行时自行转 `PENDING` | 运行器不接受未批准任务；原 CLI / Skill 路径一起更新，不留下绕过入口 |
+| `job_runner.run_job` | 接受 `PENDING_CONFIRM`，执行时自行转 `PENDING` | CLI 路径保留（终端确认即批准）；工坊请求路径核对批准记录（ADR-0017） |
 | `Job.runner_started_at` | schema 限定只用于 Canvas | 不直接借给工坊；工坊执行声明与恢复规则单独建模、复用现有锁 |
 | `skills/*/SKILL.md`、工作流 CLI | 工坊上下文与操作规则完整，但偏直接文件 / CLI 调用 | 保留生产规则，新增受限工具路径；不复制一套提示词、模型或归档逻辑 |
 
@@ -156,7 +156,7 @@ P1b 在读取请求体和路由处理前，校验实际监听端口对应的 Hos
 - macOS 上使用真实本机服务、构建后的页面和应用内浏览器验证自动连接、授权创建 / 撤销、
   管理页与画布之间切换、第二标签页显式接管、原页面草稿保留与导出入口。
 - 隔离项目中完成“冻结参考图 → 页面批准 → fake provider → 原工坊产物 → 查看 / 下载入口”。
-  使用页面创建的受保护凭据运行真实 stdio MCP 客户端；可发现 13 个工具，准备不出图，撤销后调用被拒绝。
+  使用页面创建的受保护凭据运行真实 stdio MCP 客户端；可发现 16 个工具，准备不出图，撤销后调用被拒绝。
 - 领域回归覆盖角色、UI、视频；UI 可用同方案已定稿页面继续延展，参考内容在准备时冻结。
   故障恢复回归使用模拟供应商；没有拿用户 Key 做真实出图，也没有修改全局 Agent 配置。
 - 独立双轴审查发现并修复了项目索引并发丢写、角色改名覆盖文档、新 UI 页无法发现基准图三项问题；

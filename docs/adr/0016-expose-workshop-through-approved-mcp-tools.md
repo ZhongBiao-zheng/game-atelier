@@ -1,6 +1,8 @@
 ---
-status: proposed
+status: accepted
 ---
+
+> 「Skill 只经 MCP 操作」与「付费批准只在 Atelier 页面」两条已被 [ADR-0017](0017-separate-agent-transport-from-skill-knowledge-and-approval.md) 取代。
 
 # 外部工坊 MCP 与受限画布 Agent 分开授权，共用 Job 执行
 

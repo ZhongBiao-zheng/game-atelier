@@ -1076,8 +1076,6 @@ def post_job_confirm(job_id: str) -> dict:
         job = read_job(job_id)
     except FileNotFoundError:
         raise HTTPException(404, detail=f"找不到出图记录 {job_id}（可能已被删除）") from None
-    if job.namespace in {"character", "ui", "video"}:
-        raise HTTPException(409, detail="工坊草稿请重新准备，在本地工坊批准页确认后由服务执行")
     if job.status != JobStatus.PENDING_CONFIRM:
         raise HTTPException(
             409,

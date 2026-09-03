@@ -1,61 +1,131 @@
 ---
 name: ui-anchor
+version: 1.0.0
 description: |
-  游戏 UI 策划锚：对话生成或增量补全 GDD、PRD、交互逻辑，交叉检查后等待画师批准。
-  通过工坊 MCP 保存到当前项目，三文档 approved 是 UI 生图门禁。
-  用户要写策划、PRD、交互逻辑、准备 UI 需求或调用 /game-atelier:ui-anchor 时使用。
+  游戏 UI 设计的策划锚阶段：对话式生成项目三锚文档（gdd / prd / interaction），
+  交叉检查一致后停在批准门。三文档 approved 是 UI 页面生图的正式门禁。
+  用户要写策划文档 / PRD / 交互逻辑、为 UI 生成做准备，或调用
+  /game-atelier:ui-anchor 时使用；已有外部 GDD 时只补缺不重写。
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Edit
+  - AskUserQuestion
+triggers:
+  - /game-atelier:ui-anchor
+  - 写策划文档
+  - 写 PRD
+  - 写交互逻辑
+  - UI 策划锚
 ---
 
-# UI 策划锚
+## 定位
 
-先完整读取 [MCP 工作流](../../docs/references/workshop-mcp-workflow.md)。
-本 Skill 只写文档，不出图，不需要供应商 Key；也不自行启动服务或直接写文件。
+三锚文档是全部 UI 视觉决策的锚：页面清单从玩家旅程推导，不凭空堆页面。本 skill 只产文档，不出图、不启 viewer-server。产出全部落 `<data_root>/projects/<slug>/design/`：
 
-正式门禁：三锚全部 approved 才能进入 UI 生图；仅有效且范围匹配的在案豁免例外。
-`design_waiver` 对应项目 `design/waiver.md`，当前只读，不接受口头豁免。
+| 文件 | 内容 | 模板 |
+|---|---|---|
+| `design/gdd.md` | 定位 / 核心循环 / 系统清单 / 世界观最小集 | `docs/references/gdd-template.md` |
+| `design/prd.md` | P0/P1 需求 / 信息架构 / 页面范围 / 边界异常 | `docs/references/prd-template.md` |
+| `design/interaction.md` | 全局导航 / 分页面主流程 / 状态机 / 跨页链路 | `docs/references/interaction-template.md` |
 
-## 定项目与现状
+**正式门禁**：三文档 `status: approved` 前，ui-page 不生图；确需跳过必须显式记录（见「豁免阀」）。
 
-用 `workshop_list_projects` 明确已授权项目，以 `{type:"project",project_id}`
-为文档目标；新项目不需要先有角色或页面。没有授权项目请用户到 Atelier 创建 / 授权。
-`workshop_get_context` 查看基线，再 `workshop_read_document` 读完整
-`worldview / project_style / gdd / prd / interaction`。不能拿截断摘要覆盖全文。
+## 运行模式（CLI 前缀判断）
 
-三文档齐且 approved 时先说明已就绪，用户要修订再按指定范围改；批准过的内容变更后回 draft
-重新审阅。已有外部 GDD 只补经确认的缺节，不重写已有内容；部分存在则从缺的文档继续。
+与 character 主 Skill 同一套三选一规则（详见其「启动自检」节）：
 
-## 文档顺序
+- `${CLAUDE_PLUGIN_ROOT}` 非空 → Installed Plugin mode：CLI 一律 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap.py" --run -m character_workflow <subcmd>`（Windows 用 `python`）。
+- 为空且运行于 Codex → 解析 `$BOOT` 后 `python "$BOOT" --run -m character_workflow <subcmd>`，绝不 `uv run`。
+- 为空且在仓库内开发 → `uv run python -m character_workflow <subcmd>`。
 
-先分别完整读取 [GDD 模板](../../docs/references/gdd-template.md)、
-[PRD 模板](../../docs/references/prd-template.md)、
-[交互模板](../../docs/references/interaction-template.md)。
+本 skill 不出图，无需启动 viewer-server、无需 API Key。
 
-1. GDD：定位、核心体验、循环、系统优先级、世界观最小集。
-2. PRD：由循环推导需求、页面范围、信息架构、边界异常。每条 P0 都有承接页面。
-3. Interaction：对 must-have 页面写主流程、控件行为、状态机与跨页链路。
-   状态名一经批准是下游契约，brief / Prompt 不另起近义名。
+## 工作流
 
-每轮问 1–3 个决定性问题，Worldview 已有的定位 / 调性直接引用，未定字段省略，
-不写问号占位、TBD、“待定”。每份内容从 draft 起步，以
-`workshop_write_document` 完整保存并带最新 revision、幂等键。
+### 1. 定项目
 
-页面逻辑名称和真实目标 ID 要明确映射；未创建的页面可先在文档中定义稳定逻辑 screen-id，
-创建后记录工具返回的实际 ID，不能假称某个逻辑名已是可调用目标。
+```bash
+uv run python -m character_workflow turn-start
+```
 
-## 交叉检查与批准门
+只取 `has_projects` / `projects` / `project_id·slug·name`（active 角色归属项目）：
 
-把三项检查结果展示给画师，不通过先修再查：
+- 有归属项目 → AskUserQuestion 确认「就是给 <项目名> 做 UI 锚文档吗」，画师可换选其他项目。
+- 多项目无归属 → 列项目让画师选。
+- `has_projects == false` → 先走 character skill 的建项目流程（`create-project`），或让画师一句话说清项目定位后代建。
 
-- GDD 核心循环每个主要界面都在 PRD 页面范围中。
-- PRD 每条 P0 的对应页面都在范围表中。
-- 每个 must-have 页面在 Interaction 有同名 `screen.<id>` 节，拼写、状态、流程一致。
+### 2. 摸现状（增量优先，不重写）
 
-通过后每份文档给三行内摘要，请画师审阅，停下等真实回答。
-明确“批准 / 定了”后，重新读最新文档并通过 MCP 把 frontmatter 改为 approved、更新日期。
-这只批准设计，不批准任何付费生成。
+Read `projects/<slug>/design/` 三文件与 `worldview.md` / `style.md`：
 
-既有 `design_waiver` 在上下文中可读；只在范围与当前任务匹配且未截断时据它放行。
-当前 MCP 不支持新增 waiver，不能凭用户一句“跳过”伪造在案记录或用 shell 代写；
-要新豁免须说明入口限制，不能继续生图。不主动建议绕过策划。
+- 三文档全 `approved` → 告知锚已就绪，问是否要修订（修订 approved 文档须画师确认，改完 status 回 `draft` 重走批准门）。
+- **gdd.md 已存在**（如 game-concept skill 产出、画师手写）→ 不重写；对照模板列出缺节，经画师确认后只补缺节，已有内容原样保留。
+- 部分存在 → 从缺的文档继续，已有的只做交叉检查。
 
-产物仍属项目 design/ 三锚。收尾按共享七件套，三文档未 approved 不宣称策划锚已就绪。
+### 3. 对话式生成（顺序 gdd → prd → interaction）
+
+- **所有提问用 AskUserQuestion**（单次 ≤4 问、每问 ≤4 选项；更多拆两级：先大方向后细节）。工具不可用时输出文本确认卡并就地停下（格式同 character skill 降级协议）。
+- 每份文档 1-2 轮问答问清，按模板落盘，`status: draft` 起步。**零占位**：不写 `?` / TBD / 待定；没问清的字段整行省略。
+- worldview.md 已有的定位 / 调性 / 用语直接引用不重复问。
+- prd 的页面范围从 gdd 核心循环的「主要界面」列推导，摆给画师增删确认，不凭空造页面。
+- interaction 只为 prd 页面范围里 must-have 页面写分页节；状态名一经批准即是契约（后续 screen brief / prompt 必须沿用）。
+
+### 4. 交叉检查（硬门，不过不进批准门）
+
+逐条核对并把结果亮给画师：
+
+1. gdd 核心循环每个「主要界面」都出现在 prd 页面范围。
+2. prd 每条 P0 需求的「对应页面」都在页面范围表里。
+3. prd 页面范围的每个 must-have `screen-id` 在 interaction 有对应 `## screen.<id>` 节，且 id 拼写一致。
+
+不一致 → 列出差异，回到对应文档修，改完重查。
+
+### 5. 批准门（停）
+
+三文档齐 + 交叉检查过 → 输出摘要（每文档 3 行内）+ 文件路径，请画师审阅。**就地停下等画师表态**：
+
+- 画师明确说「批准 / approved / 定了」→ 把三文档 frontmatter 改 `status: approved` + 刷新 `updated`，报完成。
+- 画师提修改 → 改完重走交叉检查再进批准门。
+- 沉默 / 模糊 → 不推进，不把沉默当批准。
+
+### 豁免阀（预期不常用）
+
+画师明确说「跳过策划门禁」→ 写 `projects/<slug>/design/waiver.md`（日期 + 画师原话 + 跳过范围），告知：后续 ui-page 凭 waiver 放行，但风格漂移 / 页面范围失控的风险自担。不主动提议跳过。
+
+## Turn 收尾报告（七件套）
+
+每轮有实质产物（文档落盘 / status 变更）时，以固定七件套收尾：
+
+```text
+当前步骤：
+完成状态：
+本步产物：
+需要你检查：
+可选操作：
+进入下一步的条件：
+下一步可直接说的话：
+```
+
+## 手的选择（CLI / MCP 双路径）
+
+本 Skill 的知识层（记忆注入、设定协议、prompt 规则、经验沉淀）与「手」无关；只有读写资料 / 准备 / 执行这一层按可用性选一条：
+
+- 客户端工具列表里有 `workshop_*` 工具 → 走 MCP：按 `docs/references/workshop-mcp-workflow.md` 用同名工具替代本文的 turn-start / submit / run-job / append-memory 等命令，其余章节照旧。
+- 没有 → 走本文的 CLI 命令。
+
+两条路径的批准门相同：确认卡 + 画师明确肯定。MCP 路径下，授权带 `execute_generation` 时用 `workshop_approve_generation` 完成批准；不带时请画师去 Atelier「待批准生成」页确认。同一轮绝不混用两条手。
+
+## Guardrails
+
+- 三文档 approved 前不得宣称锚已就绪；不得用空模板或只改标题冒充已批准文档。
+- 修改 approved 文档必须先经画师确认。
+- 交叉检查三条全过才能进批准门；批准门必须停，沉默 / 模糊不当批准。
+- 已有 gdd 只补缺不重写；补哪些节先经画师确认。
+- 跳过门禁必须落 waiver.md，不接受口头豁免。
+- 零占位；所有提问走 AskUserQuestion，降级用文本确认卡。
+
+## 跳过条件
+
+git / 代码 / 纯问答；画师在做角色资产（走 character / promo / turnaround）；画师只想直接出一张 UI 图且明确说跳过门禁（走豁免阀后转 ui 总控）。

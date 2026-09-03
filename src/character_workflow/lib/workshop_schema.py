@@ -167,6 +167,18 @@ class ApproveGenerationInput(StrictInput):
     expected_revision: int = Field(ge=1)
 
 
+class ApproveRequestInput(GetGenerationInput):
+    expected_revision: int = Field(ge=1)
+
+
+class AppendLessonInput(TargetInput):
+    scope: Literal["workspace", "project"]
+    # line 为空只标记证据图已处理（画师说「不用沉这张」），不写入经验。
+    line: Annotated[str, StringConstraints(min_length=1, max_length=3000)] | None = None
+    distilled_media_ids: list[Identifier] = Field(default_factory=list, max_length=20)
+    idempotency_key: IdempotencyKey
+
+
 TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "list-projects": ListProjectsInput,
     "list-targets": ListTargetsInput,
@@ -181,4 +193,7 @@ TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "prepare-generation": PrepareGenerationInput,
     "get-generation": GetGenerationInput,
     "withdraw-generation": WithdrawGenerationInput,
+    "approve-generation": ApproveRequestInput,
+    "read-lessons": TargetInput,
+    "append-lesson": AppendLessonInput,
 }

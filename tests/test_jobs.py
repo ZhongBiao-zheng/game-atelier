@@ -168,7 +168,7 @@ def test_list_jobs_ignores_lock_files(runtime):
 def test_clone_job_for_retry(runtime):
     """failed job 克隆为新 PENDING_CONFIRM job：参数原样、结果字段清空、retry_of 指回原 job。"""
     write_job(
-        job_id="job-001", character_id="c1", prompt="p", model="m", namespace="studio",
+        job_id="job-001", character_id="c1", prompt="p", model="m",
         params={
             "size": "1024x1024", "n": 2,
             "reference_images": ["/tmp/a.png"],
@@ -202,7 +202,7 @@ def test_clone_job_for_retry(runtime):
 def test_clone_job_for_retry_rejects_non_failed(runtime):
     write_job(
         job_id="job-002", character_id="c1", prompt="p",
-        model="m", params={}, namespace="studio",
+        model="m", params={},
     )
     with pytest.raises(ValueError, match="not failed"):
         clone_job_for_retry("job-002")

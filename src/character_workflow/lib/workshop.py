@@ -17,7 +17,7 @@ from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.jobs import list_jobs
 from character_workflow.lib.schemas import UiSchemeCreate
 from character_workflow.lib.workshop_schema import (
-    AcknowledgeFeedbackInput, CharacterTarget, CreateTargetInput, ListMediaInput,
+    AcknowledgeFeedbackInput, AppendLessonInput, CharacterTarget, CreateTargetInput, ListMediaInput,
     ListProjectsInput, ListTargetsInput, ReadDocumentInput, ReadMediaInput, TargetInput, UiTarget,
     VideoTarget, UiSchemeTarget, WorkshopTarget, WriteDocumentInput,
 )
@@ -561,7 +561,17 @@ def get_context(principal: Any, payload: TargetInput) -> dict:
         selected = video_jobs.read_selected(directory)
         if selected and str(safe_path(Path(selected))) in media_by_path:
             canonical["video"] = {"media_id": media_by_path[str(safe_path(Path(selected)))]}
+    pending_distill = []
+    if target.type == "character":
+        from character_workflow.lib.distill import pending_for_character
+        base = data_root.resolve_data_root().resolve()
+        for item in pending_for_character(target.character_id):
+            media_id = media_by_path.get(str(base / item["path"]))
+            if media_id:
+                pending_distill.append({"media_id": media_id, "rating": item["rating"],
+                                        "kind": item["kind"]})
     return {"target": payload.target.model_dump(),
+            "pending_distill": pending_distill,
             "project_name": projects.resolve_project(payload.target.project_id).name,
             "documents": [document_view(path, kind, 8000) for kind, path in paths.items()],
             "feedback": feedback[:100], "feedback_truncated": len(feedback) > 100,
@@ -569,3 +579,49 @@ def get_context(principal: Any, payload: TargetInput) -> dict:
             "derivative_source_media_ids": derivative_sources,
             "project_lessons": project_lessons[:8000], "project_lessons_truncated": len(project_lessons) > 8000,
             "design_waiver": document_view(project_dir / "design" / "waiver.md", "design_waiver", 8000)}
+
+
+def _lesson_kind(target: WorkshopTarget) -> str | None:
+    """经验按角色资产槽位分卷（portrait / promo / turnaround）；其他目标暂无经验卷。"""
+    return target.asset_slot if target.type == "character" else None
+
+
+def read_lessons(principal: Any, payload: TargetInput) -> dict:
+    resolve_target(principal, payload.target)
+    kind = _lesson_kind(payload.target)
+    if kind is None:
+        return {"kind": None, "workspace": "", "project": ""}
+    from character_workflow.lib.context_loader import load_lessons_project, load_lessons_workspace
+    slug = projects.resolve_project(payload.target.project_id).slug
+    return {"kind": kind, "workspace": load_lessons_workspace(kind),
+            "project": load_lessons_project(slug, kind)}
+
+
+def append_lesson(principal: Any, payload: AppendLessonInput) -> dict:
+    resolve_target(principal, payload.target, "edit_documents")
+    kind = _lesson_kind(payload.target)
+    if kind is None:
+        raise WorkshopError("DOCUMENT_NOT_ALLOWED", "目标不支持经验沉淀", 422)
+    entries = {entry["media_id"]: path for entry, path in media_entries(principal, payload.target)}
+    if any(media_id not in entries for media_id in payload.distilled_media_ids):
+        raise WorkshopError("REFERENCE_NOT_ALLOWED", "证据图不属于当前目标", 403)
+    base = data_root.resolve_data_root().resolve()
+
+    def perform():
+        from character_workflow.lib import distill
+        from character_workflow.lib.lessons import append_memory
+        slug = projects.resolve_project(payload.target.project_id).slug
+        memory = None
+        if payload.line is not None:
+            try:
+                path = append_memory(kind=kind, line=payload.line, scope=payload.scope,
+                                     project_slug=slug)
+            except ValueError as error:
+                raise WorkshopError("INVALID_PARAMETERS", str(error), 422) from None
+            memory = path.relative_to(base).as_posix()
+        for media_id in payload.distilled_media_ids:
+            distill.mark_distilled(entries[media_id].relative_to(base).as_posix())
+        return {"kind": kind, "scope": payload.scope, "memory": memory,
+                "distilled_media_ids": payload.distilled_media_ids}
+    return idempotent(principal, "append-lesson", payload.target.model_dump(),
+                      payload.idempotency_key, payload.model_dump(), perform)

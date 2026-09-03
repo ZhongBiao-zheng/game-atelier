@@ -10,6 +10,7 @@ const CAPABILITIES: { value: AgentCapability; label: string }[] = [
   { value: 'edit_documents', label: '编辑工作流文档' },
   { value: 'create_targets', label: '创建角色、UI 或视频目标' },
   { value: 'prepare_generation', label: '准备生成（仍需你批准）' },
+  { value: 'execute_generation', label: '直接执行生成（终端确认即批准，不经页面）' },
 ];
 
 export function ConnectionPage() {

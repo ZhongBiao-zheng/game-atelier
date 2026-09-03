@@ -82,8 +82,9 @@ PYTHONPATH=src uv run python - <<'PY'
 from character_workflow.lib.jobs import list_jobs
 print(len(list_jobs()))
 PY
-curl -sS http://127.0.0.1:5174/api/jobs >/dev/null
 ```
+
+业务 API 现在要求本地会话 cookie，`curl` 匿名访问返回 401；用上面的 `list_jobs()` 全量校验即可，Web 端刷新页面看 job 列表是否正常。
 
 特别注意：`params.warnings` 是数组，不是字符串；`status` / `kind` / `asset_slot` 等字段必须使用 schema 允许的枚举值。不要让一条人工补档记录拖垮整个前端。
 

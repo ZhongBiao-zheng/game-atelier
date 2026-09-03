@@ -32,10 +32,16 @@ _DESCRIPTIONS = {
     ),
     "get-generation": "Read a prepared request's approval status and existing Job result; never retry it.",
     "withdraw-generation": "Withdraw your unstarted generation request at the expected revision.",
+    "approve-generation": (
+        "Approve your own prepared request after the human confirmed it in chat. Requires the "
+        "execute_generation capability; otherwise the human approves in Atelier."
+    ),
+    "read-lessons": "Read workspace and project generation lessons for this target's asset slot.",
+    "append-lesson": "Append one confirmed single-line lesson to workspace or project memory.",
 }
 _READ_ONLY = frozenset({
     "list-projects", "list-targets", "get-context", "list-models", "read-document", "list-media",
-    "read-media", "get-generation",
+    "read-media", "get-generation", "read-lessons",
 })
 
 
