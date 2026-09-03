@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from character_workflow.lib.canvas_projects import (
     AUDIO_UPLOAD_EXTS, IMAGE_UPLOAD_EXTS, VIDEO_UPLOAD_EXTS, CanvasDocumentError,
     list_canvas_project_options, read_canvas_document, read_canvas_project, resolve_canvas_media,
@@ -247,9 +249,19 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
                            if change.node_id not in (e.source_node_id, e.target_node_id)]
             existing_ids.discard(change.node_id)
     nodes = _mention_connected_text(nodes, connections, touched_drafts, timestamp)
-    return document.model_copy(update={
+    updated = document.model_copy(update={
         "nodes": nodes, "connections": connections, "content_versions": versions,
-    }), created
+    })
+    # model_copy 不跑 validator；Web 路径靠 FastAPI 入参校验兜底，Agent 路径只有这一道。
+    # 不在这里拦，坏文档落盘后下一次读取 model_validate_json 抛错，整张画布对双端永久 500。
+    try:
+        updated = CanvasDocument.model_validate(updated.model_dump(mode="json"))
+    except ValidationError as error:
+        first = error.errors()[0]
+        location = ".".join(str(part) for part in first.get("loc", ()))
+        raise WorkshopError("INVALID_PARAMETERS",
+                            f"改动后的画布不合法（{location}：{first.get('msg')}）", 422) from None
+    return updated, created
 
 
 def _mention_connected_text(nodes: list[CanvasNode], connections: list[CanvasConnection],
@@ -371,7 +383,7 @@ def run(principal: Any, payload: RunInput) -> tuple[dict, Job]:
     except RuntimeError as error:
         if str(error).startswith("revision_conflict:"):
             raise WorkshopError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改") from None
-        raise WorkshopError("INVALID_PARAMETERS", str(error), 422) from None
+        raise  # 锁 / IO / 事务恢复失败是服务端问题，不能翻成「参数错」让调用方改参数重试
     except ValueError as error:
         raise WorkshopError("INVALID_PARAMETERS", str(error), 422) from None
     return {"revision": document.revision, **_job_view(job, agent=principal.kind == "agent")}, job

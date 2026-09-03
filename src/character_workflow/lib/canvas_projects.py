@@ -331,12 +331,20 @@ def _normalized_web_document(
                 "派生连线由服务端在生成时写入，保存请求不能新建或改动它，没有保存。",
             )
 
-    return submitted.model_copy(update={
+    normalized = submitted.model_copy(update={
         "revision": current.revision + 1,
         "updated_at": timestamp,
         "content_versions": versions,
         "nodes": _draft_sanitized_nodes(submitted.nodes),
     })
+    # 只动了视口（滚轮 / 缩放 / fitView）不算改文档：revision 是并发版本号，浏览器空闲时
+    # 每滚一下都 +1 会让 Agent 的 expected_revision 连续撞 DOCUMENT_CONFLICT。视口照样落盘。
+    volatile = {"revision", "updated_at", "viewport"}
+    if normalized.model_dump(exclude=volatile) == current.model_dump(exclude=volatile):
+        return normalized.model_copy(update={
+            "revision": current.revision, "updated_at": current.updated_at,
+        })
+    return normalized
 
 
 def _is_proven_local_tool_history_restore(

@@ -444,9 +444,9 @@ def list_prompt_asset_index(
 
 def read_prompt_asset(asset_id: str, project_id: str | None = None) -> dict:
     """读一条提示词资产全文并记一次使用（Agent 只读它准备采用的那条；浏览走索引接口）。"""
-    asset = mark_creation_asset_used(asset_id, project_id)
-    if asset.kind != "prompt":
+    if get_creation_asset(asset_id).kind != "prompt":
         raise ValueError("只有提示词资产可以通过这个入口读取")
+    asset = mark_creation_asset_used(asset_id, project_id)
     segments = asset.content.segments
     return {
         "asset_id": asset.asset_id,

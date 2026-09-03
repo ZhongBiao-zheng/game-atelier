@@ -108,3 +108,16 @@ def test_workshop_tools_accept_workshop_or_canvas_read_and_scope_project(isolate
     with pytest.raises(workshop.WorkshopError) as missing:
         workshop.read_prompt_asset(_agent({"read"}), ReadPromptAssetInput(asset_id="creation-asset-x"))
     assert missing.value.status == 404
+
+
+def test_read_rejects_image_assets_without_marking_them_used(isolated_data_root):
+    import base64
+    from character_workflow.lib.creation_assets import create_image_asset_from_bytes, get_creation_asset
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    image = create_image_asset_from_bytes(title="图", body=png, filename="a.png", mime_type="image/png", tags=[])
+    with pytest.raises(ValueError):
+        read_prompt_asset(image.asset_id, "project-a")
+    after = get_creation_asset(image.asset_id)
+    assert after.last_used_at is None and after.project_ids == []
