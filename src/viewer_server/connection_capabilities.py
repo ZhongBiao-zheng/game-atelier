@@ -148,7 +148,7 @@ WORKSHOP_TOOLS = frozenset({
     "list-projects", "list-targets", "get-context", "list-models", "create-target", "read-document",
     "write-document", "acknowledge-feedback", "list-media", "read-media",
     "prepare-generation", "get-generation", "withdraw-generation", "approve-generation",
-    "read-lessons", "append-lesson",
+    "read-lessons", "append-lesson", "list-prompt-assets", "read-prompt-asset",
 })
 CANVAS_TOOLS = frozenset({
     "list-projects", "get-document", "list-models", "apply-changes", "import-media", "run",

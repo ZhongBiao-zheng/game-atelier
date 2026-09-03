@@ -112,7 +112,7 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle,layer-decomposition}`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
-`POST /creation-assets/prompts` `POST /creation-assets/images/{upload,from-path}`
+`POST /creation-assets/prompts`（可带 `recommendation: {mode, model, params}`，model 为模型 id，params 键须在对应 mode 的草稿白名单内）`POST /creation-assets/images/{upload,from-path}`
 `PUT /creation-assets/{asset_id}/{prompt,image}`
 `POST /creation-assets/{asset_id}/use` `DELETE /creation-assets/{asset_id}`
 `POST /canvas/projects/{id}/creation-assets/{asset_id}/insert`

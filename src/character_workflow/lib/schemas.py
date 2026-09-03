@@ -1556,6 +1556,24 @@ CreationAssetContent = Annotated[
 ]
 
 
+class CreationAssetRecommendation(BaseModel):
+    """提示词资产可选携带的推荐出图配置。存模型 id 不存别名：别名是本机 keys.json 的东西，
+    换机器或删 key 就失效；运行时按 id 在可用模型里找，找不到由调用方回落默认并明说。
+    params 只收标量，键必须在对应 mode 的浏览器草稿白名单内（路径类字段永远进不来）。"""
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["image", "video"] = "image"
+    model: str = Field(min_length=1, max_length=200)
+    params: dict[str, str | int | float | bool] = Field(default_factory=dict, max_length=40)
+
+    @model_validator(mode="after")
+    def validate_param_keys(self) -> "CreationAssetRecommendation":
+        allowed = CANVAS_DRAFT_PARAM_FIELDS[self.mode]
+        rejected = sorted(key for key in self.params if key not in allowed)
+        if rejected:
+            raise ValueError(f"推荐参数不允许这些字段：{', '.join(rejected)}")
+        return self
+
+
 class CreationAsset(BaseModel):
     model_config = ConfigDict(extra="forbid")
     asset_id: str = Field(min_length=1, max_length=160)
@@ -1567,9 +1585,12 @@ class CreationAsset(BaseModel):
     last_used_at: str | None = None
     content: CreationAssetContent
     project_ids: list[str] = Field(default_factory=list)
+    recommendation: CreationAssetRecommendation | None = None
 
     @model_validator(mode="after")
     def validate_content_identity(self) -> "CreationAsset":
+        if self.recommendation is not None and self.kind != "prompt":
+            raise ValueError("只有提示词资产可以携带推荐配置")
         if self.content.kind != self.kind:
             raise ValueError("creation asset content must match asset kind")
         if len(self.project_ids) != len(set(self.project_ids)):
@@ -1605,6 +1626,7 @@ class CreationPromptAssetCreate(BaseModel):
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
     tags: list[str] = Field(default_factory=list, max_length=20)
     project_id: str | None = Field(default=None, min_length=1, max_length=160)
+    recommendation: CreationAssetRecommendation | None = None
 
 
 class CreationPromptAssetUpdate(BaseModel):
@@ -1612,6 +1634,7 @@ class CreationPromptAssetUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
     tags: list[str] = Field(default_factory=list, max_length=20)
+    recommendation: CreationAssetRecommendation | None = None
 
 
 class CreationImagePathCreate(BaseModel):

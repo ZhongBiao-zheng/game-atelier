@@ -20,6 +20,13 @@ export interface CreationImageAssetContent {
 
 export type CreationAssetContent = CreationPromptAssetContent | CreationImageAssetContent;
 
+/** 提示词资产可选的推荐出图配置；model 是模型 id，不是本机别名。 */
+export interface CreationAssetRecommendation {
+  mode: 'image' | 'video';
+  model: string;
+  params: Record<string, string | number | boolean>;
+}
+
 export interface CreationAsset {
   asset_id: string;
   kind: CreationAssetKind;
@@ -30,6 +37,7 @@ export interface CreationAsset {
   last_used_at: string | null;
   content: CreationAssetContent;
   project_ids: string[];
+  recommendation?: CreationAssetRecommendation | null;
 }
 
 export interface CreationAssetList {

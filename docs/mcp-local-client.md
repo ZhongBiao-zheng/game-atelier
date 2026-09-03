@@ -53,7 +53,7 @@ claude mcp add --transport stdio --scope local game-atelier -- /absolute/path/to
 
 ## 工具可见与 Skill 可见是两件事
 
-重启或刷新客户端连接后，先确认工具列表中存在 16 个 `workshop_*` 与 8 个 `canvas_*` 工具，再确认客户端加载了
+重启或刷新客户端连接后，先确认工具列表中存在 18 个 `workshop_*` 与 8 个 `canvas_*` 工具，再确认客户端加载了
 本项目原有的 Character、Promo、Turnaround、UI 或 Video Skill。注册 MCP 不会自动安装 Skill。
 不要为通过 MCP 检查给 Agent 开放整个 data root 或无关目录，也不要关闭客户端安全确认。
 
@@ -104,7 +104,7 @@ MCP 限制的是本工具服务，不是整个 Agent：如果宿主另外授予�
 uv run pytest -q tests/test_workshop_mcp.py tests/test_mcp_sdk_dependency.py
 ```
 
-`test_workshop_mcp.py` 启动真实 SDK 客户端与本模块子进程，用隔离 HTTP 服务验证 16 个工具的
+`test_workshop_mcp.py` 启动真实 SDK 客户端与本模块子进程，用隔离 HTTP 服务验证 18 个工具的
 序列化、严格输入、会话换取、撤销、实例变化、结果大小、禁止代理 / 重定向和错误脱敏。
 另有真实 `build_app` 集成：通过本机浏览器鉴权创建授权，再经 MCP 创建角色、读写实际文档、
 读写新项目 GDD 与空 UI 方案规范、验证目标发现 / 幂等 / 冲突，撤销后立即拒绝工具调用。

@@ -13,8 +13,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from character_workflow.lib import workshop, workshop_generation as generation
 from character_workflow.lib.workshop_schema import (
     AcknowledgeFeedbackInput, ApproveGenerationInput, CreateTargetInput, GetGenerationInput,
-    AppendLessonInput, ApproveRequestInput, ListMediaInput, ListProjectsInput, ListTargetsInput,
-    PrepareGenerationInput, ReadDocumentInput, ReadMediaInput, TargetInput,
+    AppendLessonInput, ApproveRequestInput, ListMediaInput, ListProjectsInput,
+    ListPromptAssetsInput, ListTargetsInput, PrepareGenerationInput, ReadDocumentInput,
+    ReadMediaInput, ReadPromptAssetInput, TargetInput,
     WithdrawGenerationInput, WriteDocumentInput,
 )
 from viewer_server.sse import hub
@@ -139,6 +140,16 @@ def withdraw_generation(request: Request, payload: WithdrawGenerationInput):
 @router.post("/read-lessons")
 def read_lessons(request: Request, payload: TargetInput):
     return workshop.read_lessons(principal(request), payload)
+
+
+@router.post("/list-prompt-assets")
+def list_prompt_assets(request: Request, payload: ListPromptAssetsInput):
+    return workshop.list_prompt_assets(principal(request), payload)
+
+
+@router.post("/read-prompt-asset")
+def read_prompt_asset(request: Request, payload: ReadPromptAssetInput):
+    return workshop.read_prompt_asset(principal(request), payload)
 
 
 @router.post("/append-lesson")

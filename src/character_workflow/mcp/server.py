@@ -39,6 +39,14 @@ _DESCRIPTIONS = {
     ),
     "read-lessons": "Read workspace and project generation lessons for this target's asset slot.",
     "append-lesson": "Append one confirmed single-line lesson to workspace or project memory.",
+    "list-prompt-assets": (
+        "Browse the user's saved prompt assets: filter by tags/title, get id, title, tags and the "
+        "library-wide tag facets. No prompt bodies; call this once a task is known, not at startup."
+    ),
+    "read-prompt-asset": (
+        "Read one prompt asset you intend to use: segments, variables, rendered default prompt and "
+        "optional recommended model/params. Records a use on the asset."
+    ),
     "canvas-list-projects": "List canvas projects this grant may operate.",
     "canvas-get-document": "Read a canvas: nodes, text, drafts, connections, media versions and revision.",
     "canvas-list-models": "List configured image/video models usable in canvas drafts, without credentials.",
@@ -69,7 +77,7 @@ def operation_of(name: str) -> str:
     return name.removeprefix("workshop_").replace("_", "-")
 _READ_ONLY = frozenset({
     "list-projects", "list-targets", "get-context", "list-models", "read-document", "list-media",
-    "read-media", "get-generation", "read-lessons",
+    "read-media", "get-generation", "read-lessons", "list-prompt-assets",
     "canvas-list-projects", "canvas-get-document", "canvas-list-models", "canvas-get-run",
     "canvas-read-media",
 })

@@ -88,6 +88,8 @@ project / ui_scheme 只用于文档与上下文，不能 prepare 生成；新项
 | `workshop_withdraw_generation` | request_id、expected_revision → 已撤回 / 已开始不可撤回 | prepare_generation；仅撤回尚未执行的自身请求 |
 | `workshop_approve_generation` | request_id、expected_revision → approved + Job | execute_generation；仅批准自身请求，用户在对话中明确肯定后调用 |
 | `workshop_read_lessons` | target → workspace / project 两层经验（按资产槽位） | read；只读 |
+| `workshop_list_prompt_assets` | tags?、query?、project_id?、limit → 提示词资产索引（id / 标题 / 标签 / 最近使用 / 有无推荐配置）+ 全库 `tag_facets` | read 或 canvas_read；只读；不带正文，任务明确后调一次 |
+| `workshop_read_prompt_asset` | asset_id、project_id? → segments、variables、按默认值渲染的 prompt、可选 `recommendation`（mode / model id / 白名单 params） | read 或 canvas_read；记一次使用并关联项目 |
 | `workshop_append_lesson` | target、scope、line?、distilled_media_ids、幂等键 → 写入位置 | edit_documents；line 省略时只标记证据图已处理 |
 
 `tools/list` 的注解用于说明副作用，不承担权限验证。内部 HTTP 对应同名语义的 `/api/workshop/...`

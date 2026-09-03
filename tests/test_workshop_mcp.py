@@ -166,6 +166,10 @@ def tool_payload(operation):
                 "idempotency_key": "create-bird-001"}
     if operation == "get-generation":
         return {"request_id": "request-test"}
+    if operation == "list-prompt-assets":
+        return {"tags": ["高清"], "limit": 5}
+    if operation == "read-prompt-asset":
+        return {"asset_id": "creation-asset-0001"}
     if operation in {"withdraw-generation", "approve-generation"}:
         return {"request_id": "request-test", "expected_revision": 1}
     payload = {"target": TARGET}

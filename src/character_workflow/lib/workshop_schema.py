@@ -62,6 +62,20 @@ class TargetInput(StrictInput):
     target: WorkshopTarget
 
 
+class ListPromptAssetsInput(StrictInput):
+    tags: list[Annotated[str, StringConstraints(min_length=1, max_length=40)]] = Field(
+        default_factory=list, max_length=10,
+    )
+    query: Annotated[str, StringConstraints(min_length=1, max_length=120)] | None = None
+    project_id: Identifier | None = None
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+class ReadPromptAssetInput(StrictInput):
+    asset_id: Identifier
+    project_id: Identifier | None = None
+
+
 class ListTargetsInput(StrictInput):
     project_id: Identifier
     type: Literal["character", "ui", "video"] | None = None
@@ -196,4 +210,6 @@ TOOL_INPUT_MODELS: dict[str, type[BaseModel]] = {
     "approve-generation": ApproveRequestInput,
     "read-lessons": TargetInput,
     "append-lesson": AppendLessonInput,
+    "list-prompt-assets": ListPromptAssetsInput,
+    "read-prompt-asset": ReadPromptAssetInput,
 }

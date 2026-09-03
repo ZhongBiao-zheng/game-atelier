@@ -2480,6 +2480,7 @@ def post_creation_prompt(payload: CreationPromptAssetCreate):
             payload.segments,
             payload.tags,
             payload.project_id,
+            recommendation=payload.recommendation,
         )
     except ValueError as error:
         _raise_creation_asset_error(error)
@@ -2535,6 +2536,7 @@ def put_creation_prompt_asset(asset_id: str, payload: CreationPromptAssetUpdate)
             title=payload.title,
             segments=payload.segments,
             tags=payload.tags,
+            recommendation=payload.recommendation,
         )
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
