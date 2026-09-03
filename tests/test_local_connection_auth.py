@@ -237,7 +237,7 @@ def test_unknown_registered_app_route_fails_closed(client):
 
 def test_all_existing_data_routes_are_explicitly_registered(tmp_path):
     # 扫整个 app 而非单个 router：canvas batch 等独立 router 漏登记会静默 403。
-    handled_elsewhere = ("/api/connection/", "/api/workshop/")
+    handled_elsewhere = ("/api/connection/", "/api/workshop/", "/api/canvas-agent/")
     for route in build_app(dist_dir=tmp_path).routes:
         path = getattr(route, "path", "")
         if not path.startswith("/api/") or path.startswith(handled_elsewhere):

@@ -1,6 +1,6 @@
 # 工坊 MCP 与生成批准契约
 
-> 本地整合已实现工具、人工批准、原 Runner 执行与保守恢复，正在验收。外部工具协议为 `atelier-workshop/1`；不改变
+> 本地整合已实现工具、人工批准、原 Runner 执行与保守恢复，正在验收。画布工具见[画布 MCP](canvas-mcp.md)。外部工具协议为 `atelier-workshop/1`；不改变
 > [ADR-0011](../adr/0011-restrict-canvas-agent-to-approved-change-sets.md) 的画布 Agent 权限。
 
 ## 范围

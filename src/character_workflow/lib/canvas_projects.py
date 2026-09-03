@@ -88,6 +88,18 @@ class CanvasStorageError(CanvasDocumentError):
     """
 
 
+# 上传 / 导入的媒体类型与大小上限：Web 路由与 canvas_* 工具共用同一份。
+IMAGE_UPLOAD_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+VIDEO_UPLOAD_EXTS = frozenset({".mp4", ".webm", ".mov"})
+AUDIO_UPLOAD_EXTS = frozenset({".mp3", ".wav", ".m4a", ".aac"})
+IMAGE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10MB — stills
+MEDIA_UPLOAD_MAX_BYTES = 100 * 1024 * 1024  # 100MB — video/audio reference assets
+
+
+def upload_max_bytes(ext: str) -> int:
+    return IMAGE_UPLOAD_MAX_BYTES if ext in IMAGE_UPLOAD_EXTS else MEDIA_UPLOAD_MAX_BYTES
+
+
 def _sniff_media_mime(body: bytes) -> str | None:
     if body.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"

@@ -13,12 +13,21 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 
 MAX_RESPONSE_BYTES = 1024 * 1024
-OPERATIONS = frozenset({
+_WORKSHOP_OPERATIONS = (
     "list-projects", "list-targets", "get-context", "list-models", "create-target", "read-document",
     "write-document", "acknowledge-feedback", "list-media", "read-media",
     "prepare-generation", "get-generation", "withdraw-generation", "approve-generation",
     "read-lessons", "append-lesson",
-})
+)
+_CANVAS_OPERATIONS = (
+    "list-projects", "get-document", "list-models", "apply-changes", "import-media", "run",
+    "get-run", "read-media",
+)
+# 操作名 → 本机 HTTP 路径。画布操作以 "canvas-" 前缀区分，工具名相应为 canvas_*。
+OPERATIONS: dict[str, str] = {
+    **{name: f"/api/workshop/{name}" for name in _WORKSHOP_OPERATIONS},
+    **{f"canvas-{name}": f"/api/canvas-agent/{name}" for name in _CANVAS_OPERATIONS},
+}
 _ERROR_MESSAGES = {
     "CONNECTION_REQUIRED": "请在本机 Atelier 管理页重新授权 Agent。",
     "SESSION_REQUIRED": "请在本机 Atelier 管理页重新授权 Agent。",
@@ -123,6 +132,7 @@ class ToolSession(BaseModel):
     instance_id: str = Field(min_length=1, max_length=128)
     capabilities: list[str] = Field(max_length=16)
     project_ids: list[str] = Field(max_length=128)
+    canvas_project_ids: list[str] = Field(default_factory=list, max_length=128)
 
     @field_validator("expires_at")
     @classmethod
@@ -173,7 +183,7 @@ class WorkshopClient:
 
     def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
         headers = {}
-        if self._session is not None and path.startswith("/api/workshop/"):
+        if self._session is not None and path.startswith(("/api/workshop/", "/api/canvas-agent/")):
             headers["Authorization"] = f"Bearer {self._session.session_token}"
         try:
             with self._http.request(
@@ -260,7 +270,7 @@ class WorkshopClient:
                 self._connect(status)
             try:
                 result = self._request(
-                    "POST", f"/api/workshop/{operation}", payload.model_dump(mode="json"),
+                    "POST", OPERATIONS[operation], payload.model_dump(mode="json"),
                 )
             except AdapterError as error:
                 if error.code != "SESSION_EXPIRED":
@@ -269,7 +279,7 @@ class WorkshopClient:
                 self._session = None
                 self._connect(self._status())
                 result = self._request(
-                    "POST", f"/api/workshop/{operation}", payload.model_dump(mode="json"),
+                    "POST", OPERATIONS[operation], payload.model_dump(mode="json"),
                 )
             if not _safe_result(result):
                 raise AdapterError("RESPONSE_INVALID", "工坊响应包含不允许通过工具返回的字段。")

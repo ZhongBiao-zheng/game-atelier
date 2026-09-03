@@ -18,6 +18,7 @@ from character_workflow.lib.projects import read_projects
 
 AGENT_CAPABILITIES = frozenset({
     "read", "edit_documents", "create_targets", "prepare_generation", "execute_generation",
+    "canvas_read", "canvas_edit", "canvas_generate",
 })
 SESSION_LIMIT = 64
 GRANT_LIMIT = 32
@@ -45,6 +46,7 @@ class ConnectionPrincipal:
     grant_id: str | None = None
     project_ids: frozenset[str] = frozenset()
     capabilities: frozenset[str] = AGENT_CAPABILITIES
+    canvas_project_ids: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -88,12 +90,14 @@ class ConnectionStore:
         self, kind: Literal["local", "agent"], origin: str | None, expires_at: float,
         *, name: str, grant_id: str | None = None, project_ids: frozenset[str] = frozenset(),
         capabilities: frozenset[str] = AGENT_CAPABILITIES,
+        canvas_project_ids: frozenset[str] = frozenset(),
     ) -> tuple[Session, str]:
         self._refresh()
         if len(self.sessions) >= SESSION_LIMIT:
             raise ConnectionError("CONNECTION_RATE_LIMITED", "连接数量已达上限，请先断开旧连接", 429)
         token = secrets.token_urlsafe(32)
-        principal = ConnectionPrincipal(kind, uuid.uuid4().hex, grant_id, project_ids, capabilities)
+        principal = ConnectionPrincipal(kind, uuid.uuid4().hex, grant_id, project_ids, capabilities,
+                                        canvas_project_ids)
         session = Session(principal, digest(token), origin, expires_at, name)
         self.sessions[principal.session_id] = session
         return session, token
@@ -181,22 +185,35 @@ class ConnectionStore:
         with self.lock:
             self._refresh()
             grant = self._read_grants().get(grant_id)
+            scope = "canvas_project_ids" if capability.startswith("canvas_") else "project_ids"
             return bool(
                 grant and datetime.fromisoformat(grant["expires_at"]).timestamp() > time.time()
-                and project_id in grant["project_ids"] and capability in grant["capabilities"]
+                and project_id in grant.get(scope, []) and capability in grant["capabilities"]
             )
 
     def create_grant(
         self, *, name: str, project_ids: list[str], capabilities: list[str], days: int,
-        base_url: str,
+        base_url: str, canvas_project_ids: list[str] | None = None,
     ) -> dict:
+        canvas_project_ids = list(canvas_project_ids or [])
         with self.lock:
             self._refresh()
             known = {project.id for project in read_projects().projects}
-            if not project_ids or not set(project_ids) <= known:
+            if not set(project_ids) <= known:
                 raise ConnectionError("TARGET_NOT_AUTHORIZED", "请选择现有工坊项目")
-            if not set(capabilities) <= AGENT_CAPABILITIES or "read" not in capabilities:
-                raise ConnectionError("CAPABILITY_DENIED", "Agent 授权需要读取能力")
+            if canvas_project_ids:
+                from character_workflow.lib.canvas_projects import list_canvas_project_options
+                known_canvas = {p.project_id for p in list_canvas_project_options()}
+                if not set(canvas_project_ids) <= known_canvas:
+                    raise ConnectionError("TARGET_NOT_AUTHORIZED", "请选择现有画布项目")
+            if not project_ids and not canvas_project_ids:
+                raise ConnectionError("TARGET_NOT_AUTHORIZED", "请至少选择一个工坊项目或画布")
+            if not set(capabilities) <= AGENT_CAPABILITIES:
+                raise ConnectionError("CAPABILITY_DENIED", "Agent 授权包含未知能力")
+            if project_ids and "read" not in capabilities:
+                raise ConnectionError("CAPABILITY_DENIED", "工坊授权需要读取能力")
+            if canvas_project_ids and "canvas_read" not in capabilities:
+                raise ConnectionError("CAPABILITY_DENIED", "画布授权需要画布读取能力")
             path = self._grants_path()
             with file_lock(path.with_suffix(".lock")):
                 grants = self._read_grants()
@@ -207,6 +224,7 @@ class ConnectionStore:
                 grant = {
                     "grant_id": grant_id, "name": name,
                     "project_ids": sorted(set(project_ids)), "capabilities": sorted(set(capabilities)),
+                    "canvas_project_ids": sorted(set(canvas_project_ids)),
                     "expires_at": iso_time(time.time() + days * 86400),
                     "credential_path": str(credential_path), "token_hash": digest(token),
                 }
@@ -252,4 +270,5 @@ class ConnectionStore:
                 "agent", None, min(now + 2 * 3600, expiry), name=grant["name"], grant_id=grant_id,
                 project_ids=frozenset(grant["project_ids"]),
                 capabilities=frozenset(grant["capabilities"]),
+                canvas_project_ids=frozenset(grant.get("canvas_project_ids", [])),
             )

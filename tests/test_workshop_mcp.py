@@ -23,7 +23,8 @@ from pydantic import ValidationError
 from PIL import Image
 
 from character_workflow.lib.private_json import write_private_json
-from character_workflow.lib.workshop_schema import ListProjectsInput, TOOL_INPUT_MODELS
+from character_workflow.lib.workshop_schema import ListProjectsInput
+from character_workflow.mcp.server import ALL_TOOL_INPUT_MODELS as TOOL_INPUT_MODELS, tool_name
 from character_workflow.mcp.client import (
     AdapterError, Credentials, MAX_RESPONSE_BYTES, WorkshopClient, load_credentials,
 )
@@ -79,7 +80,7 @@ def runtime(tmp_path):
                                 "instance_id": state["instance_id"], "capabilities": ["read"],
                                 "project_ids": ["project-a"]})
                 return
-            assert self.path.startswith("/api/workshop/")
+            assert self.path.startswith(("/api/workshop/", "/api/canvas-agent/"))
             assert self.headers.get("Authorization") == f"Bearer {state['session_token']}"
             assert self.headers.get("Origin") is None
             state["calls"].append((self.path, payload))
@@ -113,7 +114,7 @@ def runtime(tmp_path):
             elif self.path.endswith("list-projects"):
                 self.send_json({"items": [{"id": "project-a", "name": "测试项目"}], "page": 1})
             else:
-                self.send_json({"accepted": self.path.removeprefix("/api/workshop/"),
+                self.send_json({"accepted": self.path.rsplit("/", 1)[1],
                                 "state": "awaiting_approval", "request_id": "request-test"})
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -143,6 +144,19 @@ def parameters(runtime, tmp_path):
 
 
 def tool_payload(operation):
+    if operation.startswith("canvas-"):
+        canvas = {"project_id": "canvas-project-a"}
+        return {
+            "canvas-list-projects": {},
+            "canvas-get-document": canvas,
+            "canvas-list-models": {**canvas, "mode": "image"},
+            "canvas-apply-changes": {**canvas, "expected_revision": 3, "changes": [
+                {"op": "add_text", "title": "提示", "text": "雨夜", "position": {"x": 0, "y": 0}}]},
+            "canvas-import-media": {**canvas, "expected_revision": 3, "path": "/tmp/example.png"},
+            "canvas-run": {**canvas, "surface_node_id": "image-one", "expected_revision": 3},
+            "canvas-get-run": {**canvas, "run_id": "run-1"},
+            "canvas-read-media": {**canvas, "version_id": "media-one"},
+        }[operation]
     if operation == "list-targets":
         return {"project_id": TARGET["project_id"], "page_size": 50}
     if operation == "list-projects":
@@ -179,26 +193,26 @@ async def test_stdio_exposes_and_calls_all_typed_workshop_tools(runtime, tmp_pat
         async with Client(parameters(runtime, tmp_path), mode=mode,
                           read_timeout_seconds=10) as client:
             listing = await client.list_tools()
-            names = {f"workshop_{name.replace('-', '_')}" for name in TOOL_INPUT_MODELS}
+            names = {tool_name(name) for name in TOOL_INPUT_MODELS}
             assert {tool.name for tool in listing.tools} == names
             for tool in listing.tools:
                 assert tool.input_schema["additionalProperties"] is False
                 assert tool.annotations.open_world_hint is False
             for operation in TOOL_INPUT_MODELS:
-                result = await client.call_tool(f"workshop_{operation.replace('-', '_')}", {
+                result = await client.call_tool(tool_name(operation), {
                     "payload": tool_payload(operation),
                 })
                 assert not result.is_error
                 assert result.structured_content is not None
-                if operation == "list-projects":
+                if operation.endswith("list-projects"):
                     assert result.structured_content["items"][0]["name"] == "测试项目"
-                elif operation == "read-media":
+                elif operation.endswith("read-media"):
                     assert result.structured_content["media_id"] == "media-one"
                     assert "preview" not in result.structured_content
                     assert result.content[1].type == "image"
                     assert result.content[1].mime_type == "image/jpeg"
                 else:
-                    assert result.structured_content["accepted"] == operation
+                    assert result.structured_content["accepted"] == operation.removeprefix("canvas-")
             assert (await client.list_resources()).resources == []
             assert (await client.list_resource_templates()).resource_templates == []
     assert runtime["sessions"] == 1

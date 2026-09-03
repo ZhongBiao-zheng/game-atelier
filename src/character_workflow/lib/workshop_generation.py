@@ -100,7 +100,10 @@ def model_configuration(alias: str, model_id: str, kind: str):
 
 def list_models(principal: Any, payload: TargetInput) -> dict:
     resolve_target(principal, payload.target)
-    kind = "video" if payload.target.type == "video" else "image"
+    return {"models": model_rows("video" if payload.target.type == "video" else "image")}
+
+
+def model_rows(kind: str) -> list[dict]:
     rows = []
     for key in keys.read_keys_db().keys:
         for model in key.models:
@@ -144,7 +147,7 @@ def list_models(principal: Any, payload: TargetInput) -> dict:
                          "request_limits": {"max_references": 12},
                          "capability_basis": "当前本地适配器约束；null 表示未确认，prepare 会校验已知限制",
                          "price_basis": "费用待确认；以供应商实际账单为准"})
-    return {"models": rows}
+    return rows
 
 
 def _normalized(payload: PrepareGenerationInput, entries: list[dict], model, key) -> dict:

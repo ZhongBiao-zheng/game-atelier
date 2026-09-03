@@ -23,10 +23,12 @@ class EditorPayload(ControlPayload):
 
 class GrantPayload(ControlPayload):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
-    project_ids: Annotated[list[TextId], Field(min_length=1, max_length=32)]
+    project_ids: Annotated[list[TextId], Field(max_length=32)] = []
+    canvas_project_ids: Annotated[list[TextId], Field(max_length=32)] = []
     capabilities: Annotated[list[Literal[
         "read", "edit_documents", "create_targets", "prepare_generation", "execute_generation",
-    ]], Field(min_length=1, max_length=5)]
+        "canvas_read", "canvas_edit", "canvas_generate",
+    ]], Field(min_length=1, max_length=8)]
     days: Annotated[int, Field(ge=1, le=30)] = 7
 
 
@@ -102,6 +104,7 @@ def connection_router(store: ConnectionStore) -> APIRouter:
             "instance_id": store.instance_id, "expires_at": iso_time(session.expires_at),
             "capabilities": sorted(session.principal.capabilities),
             "project_ids": sorted(session.principal.project_ids),
+            "canvas_project_ids": sorted(session.principal.canvas_project_ids),
         }
 
     return router

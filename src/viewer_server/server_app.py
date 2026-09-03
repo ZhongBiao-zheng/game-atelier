@@ -254,6 +254,9 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     from viewer_server.workshop_routes import register_workshop_routes
 
     app.state.workshop_runtime = register_workshop_routes(app, connection_store.grant_allows)
+    from viewer_server.canvas_agent_routes import register_canvas_agent_routes
+
+    register_canvas_agent_routes(app)
 
     if dist_dir is None:
         dist_dir = Path(__file__).resolve().parents[2] / "web" / "dist"

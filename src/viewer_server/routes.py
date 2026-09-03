@@ -518,16 +518,14 @@ def get_raw_image(path: str, job_id: str | None = None) -> FileResponse:
     return FileResponse(str(target))
 
 
-_IMAGE_UPLOAD_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
-_VIDEO_UPLOAD_EXTS = {".mp4", ".webm", ".mov"}
-_AUDIO_UPLOAD_EXTS = {".mp3", ".wav", ".m4a", ".aac"}
+from character_workflow.lib.canvas_projects import (  # noqa: E402
+    AUDIO_UPLOAD_EXTS as _AUDIO_UPLOAD_EXTS, IMAGE_UPLOAD_EXTS as _IMAGE_UPLOAD_EXTS,
+    IMAGE_UPLOAD_MAX_BYTES as _IMAGE_UPLOAD_MAX_BYTES, VIDEO_UPLOAD_EXTS as _VIDEO_UPLOAD_EXTS,
+    upload_max_bytes as _upload_max_bytes,
+)
+
 _UPLOAD_ALLOWED_EXTS = _IMAGE_UPLOAD_EXTS | _VIDEO_UPLOAD_EXTS | _AUDIO_UPLOAD_EXTS
-_IMAGE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10MB — stills
-_MEDIA_UPLOAD_MAX_BYTES = 100 * 1024 * 1024  # 100MB — video/audio reference assets
 
-
-def _upload_max_bytes(ext: str) -> int:
-    return _IMAGE_UPLOAD_MAX_BYTES if ext in _IMAGE_UPLOAD_EXTS else _MEDIA_UPLOAD_MAX_BYTES
 
 
 def _mb(num_bytes: int) -> str:

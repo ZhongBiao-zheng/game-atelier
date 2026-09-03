@@ -11,6 +11,7 @@ from mcp.server import MCPServer
 from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 from pydantic import ValidationError
 
+from character_workflow.lib.canvas_agent_schema import CANVAS_TOOL_INPUT_MODELS
 from character_workflow.lib.workshop_schema import TOOL_INPUT_MODELS
 from character_workflow.mcp.client import AdapterError, WorkshopClient
 
@@ -38,10 +39,39 @@ _DESCRIPTIONS = {
     ),
     "read-lessons": "Read workspace and project generation lessons for this target's asset slot.",
     "append-lesson": "Append one confirmed single-line lesson to workspace or project memory.",
+    "canvas-list-projects": "List canvas projects this grant may operate.",
+    "canvas-get-document": "Read a canvas: nodes, text, drafts, connections, media versions and revision.",
+    "canvas-list-models": "List configured image/video models usable in canvas drafts, without credentials.",
+    "canvas-apply-changes": (
+        "Apply a typed change set (add/edit text, set drafts, connect, move, remove) at the "
+        "expected revision. Never touches generated versions or derivation edges."
+    ),
+    "canvas-import-media": "Copy one local media file into the canvas as an immutable version plus node.",
+    "canvas-run": "Start a generation run on a surface node. Paid; requires canvas_generate.",
+    "canvas-get-run": "Read a run's status, candidates and output version ids; never retries.",
+    "canvas-read-media": "Read a bounded preview/metadata of one media version in this canvas.",
 }
+ALL_TOOL_INPUT_MODELS = {
+    **TOOL_INPUT_MODELS,
+    **{f"canvas-{name}": model for name, model in CANVAS_TOOL_INPUT_MODELS.items()},
+}
+
+
+def tool_name(operation: str) -> str:
+    if operation.startswith("canvas-"):
+        return "canvas_" + operation.removeprefix("canvas-").replace("-", "_")
+    return "workshop_" + operation.replace("-", "_")
+
+
+def operation_of(name: str) -> str:
+    if name.startswith("canvas_"):
+        return "canvas-" + name.removeprefix("canvas_").replace("_", "-")
+    return name.removeprefix("workshop_").replace("_", "-")
 _READ_ONLY = frozenset({
     "list-projects", "list-targets", "get-context", "list-models", "read-document", "list-media",
     "read-media", "get-generation", "read-lessons",
+    "canvas-list-projects", "canvas-get-document", "canvas-list-models", "canvas-get-run",
+    "canvas-read-media",
 })
 
 
@@ -56,7 +86,7 @@ def _error_result(error: AdapterError) -> CallToolResult:
 def _success_result(operation: str, result: dict) -> CallToolResult:
     content = []
     metadata = dict(result)
-    preview = metadata.pop("preview", None) if operation == "read-media" else None
+    preview = metadata.pop("preview", None) if operation.endswith("read-media") else None
     if preview is not None:
         try:
             if not isinstance(preview, dict) or preview.get("mime_type") != "image/jpeg":
@@ -75,8 +105,8 @@ def _success_result(operation: str, result: dict) -> CallToolResult:
 async def _strict_tool_arguments(context, call_next):
     if context.method == "tools/call" and isinstance(context.params, dict):
         name = context.params.get("name", "")
-        operation = name.removeprefix("workshop_").replace("_", "-") if isinstance(name, str) else ""
-        model = TOOL_INPUT_MODELS.get(operation)
+        operation = operation_of(name) if isinstance(name, str) else ""
+        model = ALL_TOOL_INPUT_MODELS.get(operation)
         if model is not None:
             arguments = context.params.get("arguments")
             try:
@@ -124,16 +154,17 @@ def create_server(client: WorkshopClient) -> MCPServer:
                 except AdapterError as error:
                     return _error_result(error)
 
-        invoke.__name__ = f"workshop_{operation.replace('-', '_')}"
+        invoke.__name__ = tool_name(operation)
         invoke.__annotations__["payload"] = model
         return invoke
 
-    for operation, model in TOOL_INPUT_MODELS.items():
+    for operation, model in ALL_TOOL_INPUT_MODELS.items():
         server.add_tool(
             bind(operation, model), description=_DESCRIPTIONS[operation],
             annotations=ToolAnnotations(
                 read_only_hint=operation in _READ_ONLY,
-                destructive_hint=operation in {"write-document", "acknowledge-feedback"},
+                destructive_hint=operation in {"write-document", "acknowledge-feedback",
+                                               "canvas-apply-changes"},
                 idempotent_hint=True, open_world_hint=False,
             ),
         )

@@ -150,6 +150,10 @@ WORKSHOP_TOOLS = frozenset({
     "prepare-generation", "get-generation", "withdraw-generation", "approve-generation",
     "read-lessons", "append-lesson",
 })
+CANVAS_TOOLS = frozenset({
+    "list-projects", "get-document", "list-models", "apply-changes", "import-media", "run",
+    "get-run", "read-media",
+})
 LOCAL_RULES = [
     (method, path, compile_path(path)[0])
     for entry in _LOCAL_ROUTES

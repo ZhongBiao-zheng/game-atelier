@@ -6,6 +6,7 @@ const grant = { grant_id: 'g1', name: 'Codex 角色助手', project_ids: ['p1'],
 function server(existing = false) {
   const network = vi.fn(async (url: string, init?: RequestInit) => {
     if (url === '/api/projects') return new Response(JSON.stringify({ projects: [{ id: 'p1', name: '测试项目' }], assignments: {} }));
+    if (url === '/api/canvas/project-options') return new Response(JSON.stringify([{ project_id: 'canvas-one', name: '测试画布' }]));
     if (url === '/api/connection/agent-grants' && init?.method === 'POST') return new Response(JSON.stringify(grant));
     if (url === '/api/connection/agent-grants/g1') return new Response(null, { status: 204 });
     return new Response(JSON.stringify({ grants: existing ? [grant] : [] }));
@@ -24,7 +25,7 @@ describe('local Agent authorization UI', () => {
     fireEvent.click(screen.getByLabelText('准备生成（仍需你批准）'));
     fireEvent.click(create); await screen.findByText(grant.credential_path);
     const call = network.mock.calls.find(([url, init]) => url.endsWith('agent-grants') && init?.method === 'POST');
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ name: grant.name, project_ids: ['p1'], capabilities: ['read', 'prepare_generation'], days: 7 });
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ name: grant.name, project_ids: ['p1'], canvas_project_ids: [], capabilities: ['read', 'prepare_generation'], days: 7 });
     expect(screen.queryByText(/token/i)).not.toBeInTheDocument();
   });
   it('copies only the credential file path and revokes only after confirmation', async () => {

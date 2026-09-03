@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from viewer_server.connection_auth import COOKIE_NAME, ConnectionError, ConnectionStore
-from viewer_server.connection_capabilities import WORKSHOP_TOOLS, local_capability
+from viewer_server.connection_capabilities import CANVAS_TOOLS, WORKSHOP_TOOLS, local_capability
 from viewer_server.request_boundary import _authority, _header
 
 _CONTROL_ROUTES = {
@@ -94,7 +94,10 @@ class ConnectionMiddleware:
                     raise ConnectionError("CONNECTION_REQUIRED", "请先连接本机工坊", 401)
                 state["connection_session"] = session
                 state["connection_principal"] = session.principal
-                tool = method == "POST" and path.removeprefix("/api/workshop/") in WORKSHOP_TOOLS
+                tool = method == "POST" and (
+                    path.removeprefix("/api/workshop/") in WORKSHOP_TOOLS
+                    or path.removeprefix("/api/canvas-agent/") in CANVAS_TOOLS
+                )
                 approval = method == "POST" and bool(re.fullmatch(
                     r"/api/workshop/requests/[A-Za-z0-9_-]+/approve", path,
                 ))
@@ -115,7 +118,7 @@ class ConnectionMiddleware:
             if method not in {"GET", "HEAD", "OPTIONS"} and _private_path(path):
                 content_type = (_header(scope, b"content-type") or "").split(";", 1)[0]
                 if content_type not in {"application/json", "multipart/form-data"} or (
-                    (control or path.startswith("/api/workshop/"))
+                    (control or path.startswith(("/api/workshop/", "/api/canvas-agent/")))
                     and content_type != "application/json"
                 ):
                     raise ConnectionError("CONTENT_TYPE_DENIED", "请使用正确的请求格式", 415)
@@ -124,7 +127,9 @@ class ConnectionMiddleware:
                     if origin is None:
                         raise ConnectionError("ORIGIN_DENIED", "本地修改需要页面来源信息")
             body_limit = 16 * 1024 if control else (
-                1024 * 1024 if path.startswith("/api/workshop/") and method == "POST" else None
+                1024 * 1024
+                if path.startswith(("/api/workshop/", "/api/canvas-agent/")) and method == "POST"
+                else None
             )
             if body_limit is not None:
                 content_length = _header(scope, b"content-length")
