@@ -42,12 +42,13 @@ triggers:
 | 放一段提示词 | `add_text` | title 简短可辨；text 就是提示词正文 |
 | 放一张本机图 / 视频 / 音频 | 先 `canvas_import_media` 再（如需另建节点）`add_media_node` | 导入本身已建节点；只接受绝对路径，图 ≤10 MB，视频音频 ≤100 MB |
 | 新建生成面 | `add_surface`（kind=image/video/audio）| Web 的生成面就是一个空的图片 / 视频节点，产物直接落在它身上；**不要用空文本节点当生成面**，那会多出一个无用节点 |
-| 给生成面填配置 | `set_draft` | mode / prompt / model / alias 必填；prompt 里用 `@[node:<提示词节点 id>]` 引用提示词节点，这样浏览器里能看到引用；model 与 alias 来自 `canvas_list_models`，不虚构 |
+| 给生成面填配置 | `set_draft` | mode / prompt / model / alias 必填；mode 必须与节点类型一致（给文本节点填 image 会被拒）；接进来的文本节点会自动以 `@[node:id]` 出现在 prompt 里，不用手写；model 与 alias 来自 `canvas_list_models`，不虚构 |
 | 把素材接进生成面 | `connect` | source 是素材或提示词节点，target 是生成面；视频首尾帧用 `slot` |
 | 调整 / 清理 | `move` / `set_text` / `disconnect` / `remove_node` | 只能断输入连线；派生连线与生成产物由服务端持有，不可动 |
 
 搭「提示词 → 参考图 → 生成面」的标准三件：一条 change set 里 `add_text` + `add_surface`（image）+
-`set_draft`（prompt 写 `@[node:<提示词节点 id>]`）+ `connect`（提示词 → 生成面、参考图 → 生成面）。
+`set_draft`（prompt 只写补充描述，可为空）+ `connect`（提示词 → 生成面、参考图 → 生成面）；
+提示词引用由工具自动补进 prompt。
 已有图片节点也可以直接当生成面，不新建。`input_policy` 缺省 `all_connected`（接进来的都当输入）；
 只想引用 @ 提到的素材才用 `mentions_only`。
 

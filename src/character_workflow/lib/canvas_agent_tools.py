@@ -156,6 +156,7 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
     versions = dict(document.content_versions)
     created: dict[str, list[str]] = {"node_ids": [], "connection_ids": [], "version_ids": []}
     existing_ids = {n.id for n in nodes}
+    touched_drafts: set[str] = set()
 
     def new_node_id(requested: str | None) -> str:
         node_id = requested or f"mcp-{uuid.uuid4().hex[:12]}"
@@ -202,6 +203,14 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
             node = _find_node(document.model_copy(update={"nodes": nodes}), change.node_id)
             if node.type not in {"text", "image", "video", "audio", "config"}:
                 raise WorkshopError("INVALID_TARGET", "这个节点不能承载生成配置", 422)
+            # 生成面的类型决定产物落点：文本节点只能生成文本，图片 / 视频 / 音频节点模式必须与
+            # 节点类型一致，否则服务端只能另建一个结果节点，画布上就多出一个无用节点。
+            if node.type != "config" and change.mode != node.type:
+                raise WorkshopError(
+                    "INVALID_TARGET",
+                    f"{node.type} 节点只能承载 {node.type} 模式的生成配置；要生成 {change.mode}"
+                    f" 请先用 add_surface 建一个 {change.mode} 节点", 422,
+                )
             field = "draft" if node.type == "config" else "generation_draft"
             current = getattr(node.data, field)
             policy = change.input_policy or (current.input_policy if current else "all_connected")
@@ -211,6 +220,7 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
                                           alias=change.alias, input_policy=policy, params=params,
                                           updated_at=timestamp)
             replace(node.id, node.model_copy(update={"data": node.data.model_copy(update={field: draft})}))
+            touched_drafts.add(node.id)
         elif change.op == "connect":
             scratch = document.model_copy(update={"nodes": nodes})
             _find_node(scratch, change.source_node_id)
@@ -220,6 +230,7 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
                                          target_node_id=change.target_node_id, slot=change.slot)
             connections.append(edge)
             created["connection_ids"].append(edge.id)
+            touched_drafts.add(change.target_node_id)
         elif change.op == "disconnect":
             edge = next((e for e in connections if e.id == change.connection_id), None)
             if edge is None or edge.role != "input":
@@ -235,9 +246,37 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
             connections = [e for e in connections
                            if change.node_id not in (e.source_node_id, e.target_node_id)]
             existing_ids.discard(change.node_id)
+    nodes = _mention_connected_text(nodes, connections, touched_drafts, timestamp)
     return document.model_copy(update={
         "nodes": nodes, "connections": connections, "content_versions": versions,
     }), created
+
+
+def _mention_connected_text(nodes: list[CanvasNode], connections: list[CanvasConnection],
+                            touched: set[str], timestamp: str) -> list[CanvasNode]:
+    """接进生成面的文本节点在 prompt 里以 @[node:id] 出现，与 Web 面板显示的引用一致。"""
+    by_id = {n.id: n for n in nodes}
+    result = []
+    for node in nodes:
+        field = "draft" if node.type == "config" else "generation_draft"
+        draft = getattr(node.data, field, None) if node.id in touched else None
+        if draft is None or node.type == "text":
+            result.append(node)
+            continue
+        mentions = [
+            f"@[node:{edge.source_node_id}]" for edge in connections
+            if edge.role == "input" and edge.target_node_id == node.id
+            and by_id.get(edge.source_node_id) is not None
+            and by_id[edge.source_node_id].type == "text"
+            and f"@[node:{edge.source_node_id}]" not in draft.prompt
+        ]
+        if not mentions:
+            result.append(node)
+            continue
+        prompt = " ".join([*mentions, draft.prompt]).strip()
+        updated = draft.model_copy(update={"prompt": prompt, "updated_at": timestamp})
+        result.append(node.model_copy(update={"data": node.data.model_copy(update={field: updated})}))
+    return result
 
 
 def _save(project_id: str, updated: CanvasDocument, expected_revision: int) -> CanvasDocument:

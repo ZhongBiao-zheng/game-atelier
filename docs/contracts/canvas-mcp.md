@@ -41,8 +41,8 @@ HTTP 端点 `POST /api/canvas-agent/<op>`，请求体 JSON ≤ 1 MiB，参数包
 | `add_media_node` | title、version_id、position、node_id? | 引用本画布已有媒体版本建节点 |
 | `add_surface` | kind(image/video/audio)、title、position、node_id? | 空媒体节点作生成面，产物落在同一节点；与 Web 行为一致 |
 | `set_text` | node_id、text | 文本节点新版本，旧版本不可变 |
-| `set_draft` | node_id、mode、prompt、model、alias?、input_policy?、params? | 生成配置；params 只收标量并按浏览器白名单过滤，路径类字段丢弃 |
-| `connect` / `disconnect` | source/target/slot? · connection_id | 只处理 `input` 连线，派生连线由服务端写 |
+| `set_draft` | node_id、mode、prompt、model、alias?、input_policy?、params? | 生成配置；mode 必须与节点类型一致（text→text，image/video/audio 节点→同类，config 任意），否则 `INVALID_TARGET`；params 只收标量并按浏览器白名单过滤，路径类字段丢弃 |
+| `connect` / `disconnect` | source/target/slot? · connection_id | 只处理 `input` 连线，派生连线由服务端写。文本节点接进带 draft 的节点时，服务端自动把 `@[node:<id>]` 补进 prompt（已有则不重复） |
 | `move` / `remove_node` | node_id、position · node_id | 删节点同时删其输入连线 |
 
 revision 不符返回 `DOCUMENT_CONFLICT`，重读后再改。生成产物、派生连线、历史版本由服务端持有，

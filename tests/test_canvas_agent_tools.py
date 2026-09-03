@@ -52,7 +52,7 @@ def test_change_set_edits_document_at_expected_revision(canvas):
         {"op": "add_text", "node_id": "prompt-1", "title": "提示词", "text": "雨夜列车",
          "position": {"x": 0, "y": 0}},
         {"op": "add_surface", "node_id": "image-1", "kind": "image", "title": "结果", "position": {"x": 400, "y": 0}},
-        {"op": "set_draft", "node_id": "image-1", "mode": "image", "prompt": "@[node:prompt-1]", "model": "gpt-image-1",
+        {"op": "set_draft", "node_id": "image-1", "mode": "image", "prompt": "", "model": "gpt-image-1",
          "alias": "fake", "params": {"n": 2, "size": "1024x1024", "mask_image": "/etc/passwd"}},
         {"op": "connect", "source_node_id": "prompt-1", "target_node_id": "image-1"},
     ]))
@@ -62,7 +62,7 @@ def test_change_set_edits_document_at_expected_revision(canvas):
     image = next(node for node in view["nodes"] if node["id"] == "image-1")
     assert prompt["text"] == "雨夜列车"
     assert image["type"] == "image" and image["version_id"] is None
-    assert image["draft"]["prompt"] == "@[node:prompt-1]"
+    assert image["draft"]["prompt"] == "@[node:prompt-1]"  # connect 自动补上文本引用
     assert image["draft"]["params"] == {"n": 2, "size": "1024x1024"}  # 路径类字段被丢弃
     assert view["connections"][0]["source_node_id"] == "prompt-1"
 
@@ -139,3 +139,26 @@ def test_http_agent_session_reaches_canvas_tools_only_within_grant(canvas, tmp_p
     # 画布授权不继承工坊读取能力。
     workshop = anonymous.post("/api/workshop/list-projects", json={}, headers=headers)
     assert workshop.status_code == 403
+
+
+def test_draft_mode_must_match_surface_type_and_mentions_follow_connections(canvas):
+    pid = canvas.project.project_id
+    with pytest.raises(WorkshopError) as error:
+        tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=0, changes=[
+            {"op": "add_text", "node_id": "note", "title": "文本", "text": "x", "position": {"x": 0, "y": 0}},
+            {"op": "set_draft", "node_id": "note", "mode": "image", "prompt": "p", "model": "gpt-image-1", "alias": "fake"},
+        ]))
+    assert error.value.code == "INVALID_TARGET" and "add_surface" in error.value.message
+    # 先连线再填配置，引用同样补齐；已有引用不重复。
+    result = tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=0, changes=[
+        {"op": "add_text", "node_id": "p1", "title": "提示词", "text": "雨夜", "position": {"x": 0, "y": 0}},
+        {"op": "add_text", "node_id": "p2", "title": "补充", "text": "列车", "position": {"x": 0, "y": 200}},
+        {"op": "add_surface", "node_id": "img", "kind": "image", "title": "图", "position": {"x": 400, "y": 0}},
+        {"op": "connect", "source_node_id": "p1", "target_node_id": "img"},
+        {"op": "connect", "source_node_id": "p2", "target_node_id": "img"},
+        {"op": "set_draft", "node_id": "img", "mode": "image", "prompt": "@[node:p2] 蓝色调", "model": "gpt-image-1", "alias": "fake"},
+    ]))
+    view = tools.get_document(canvas.agent, CanvasProjectInput(project_id=pid))
+    img = next(node for node in view["nodes"] if node["id"] == "img")
+    assert img["draft"]["prompt"] == "@[node:p1] @[node:p2] 蓝色调"
+    assert result["revision"] == 1
