@@ -287,8 +287,9 @@ Input Connection。图片模型优先使用仍可路由的画布图片生成偏�
 不可变源图片 Version，并在左侧展示它；右侧保存用户选择的 `alias + model` 与可选拆分要求。`POST
 /canvas/projects/{id}/runs/layer-decomposition` 只接受该节点的 `surface_node_id + expected_revision + alias + model`，
 服务端还会核对请求选择与节点已保存设置完全一致。只接受火山直连或明确使用 Ark 协议的 Seedream 5.0 Pro，
-绝不自动替换渠道或模型。调用固定提交
-单张源图、`layer_decomposition=true`、`size=2K`、`output_format=png`、`response_format=b64_json` 与
+绝不自动替换渠道或模型。比例固定为“智能”并继承输入图；分辨率默认 `auto`，可显式选择
+`1K / 1.5K / 2K`。调用固定提交单张源图、`layer_decomposition=true`、节点保存的 `size`、
+`output_format=png`、`response_format=b64_json` 与
 `watermark=false`，不自动回退到其他渠道或普通生图。提交与完成事务都复用原 `layer_stack` 节点；完成后把背景图
 和最多 16 张透明 PNG 全部登记为不可变图片 Version，并保存厂商返回的 `z_index`、`name`、
 `description`、`bounding_box`。底图使用普通 `job_output` 血缘，透明层使用带 `job_id + output_index` 的

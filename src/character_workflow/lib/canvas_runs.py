@@ -1497,7 +1497,7 @@ def submit_layer_decomposition_run(
         )]
         normalized = {
             "layer_decomposition": True,
-            "size": "2K",
+            "size": surface.data.resolution,
             "output_format": "png",
             "watermark": False,
             "n": 1,
@@ -1531,7 +1531,7 @@ def submit_layer_decomposition_run(
         paths = _input_paths(project_id, current, inputs)
         job_params = JobParams(
             n=1,
-            size="2K",
+            size=surface.data.resolution,
             reference_images=paths["image"],
             layer_decomposition=True,
         )

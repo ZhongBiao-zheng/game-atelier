@@ -2405,6 +2405,7 @@ function CanvasEditorInner({
         alias: choice?.key.alias ?? null,
         model: choice?.model.id ?? null,
         prompt: '',
+        resolution: 'auto',
         base_version_id: null,
         base_visible: true,
         layers: [],

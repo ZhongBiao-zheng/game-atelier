@@ -289,11 +289,16 @@ def render(
             raise OpenAIImageError("layer decomposition requires an Ark-compatible Seedream 5.0 Pro")
         if not isinstance(ref_image, str):
             raise OpenAIImageError("layer decomposition requires exactly one source image")
+        layer_size = str(requested_size or "auto")
+        if layer_size not in {"auto", "1K", "1.5K", "2K"}:
+            raise OpenAIImageError(
+                "layer decomposition size must be auto, 1K, 1.5K, or 2K"
+            )
         payload: dict[str, Any] = {
             "model": model,
             "image": ref_image,
             "layer_decomposition": True,
-            "size": "2K",
+            "size": layer_size,
             "output_format": "png",
             "response_format": "b64_json",
             "watermark": False,

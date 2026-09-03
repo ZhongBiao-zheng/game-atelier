@@ -691,6 +691,7 @@ class CanvasLayerStackData(BaseModel):
     alias: str | None = Field(default=None, min_length=1, max_length=120)
     model: str | None = Field(default=None, min_length=1, max_length=240)
     prompt: str = Field(default="", max_length=4000)
+    resolution: Literal["auto", "1K", "1.5K", "2K"] = "auto"
     base_version_id: str | None = Field(default=None, max_length=160)
     base_visible: bool = True
     layers: list[CanvasLayerStackLayer] = Field(default_factory=list, max_length=16)

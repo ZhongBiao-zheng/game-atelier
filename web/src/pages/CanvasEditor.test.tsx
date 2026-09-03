@@ -408,6 +408,7 @@ it('creates an editable layer-decomposition node before calling the model', asyn
     const stack = saved?.nodes.find(node => node.type === 'layer_stack');
     expect(stack?.data).toMatchObject({
       source_version_id: 'source-version', alias: 'tokendance', model: 'seedream-5.0-pro',
+      resolution: 'auto',
     });
     expect(saved?.connections).toContainEqual(expect.objectContaining({
       role: 'input', source_node_id: 'source-image', target_node_id: stack?.id,

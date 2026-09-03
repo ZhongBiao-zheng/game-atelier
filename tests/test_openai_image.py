@@ -2068,6 +2068,7 @@ def test_render_seedream_layer_decomposition_supports_selected_tokendance_ark_mo
         model="seedream-5.0-pro",
         alias="td-layers",
         output_dir=tmp_path / "outputs",
+        size="1.5K",
         params=params,
     )
 
@@ -2075,6 +2076,7 @@ def test_render_seedream_layer_decomposition_supports_selected_tokendance_ark_mo
         "https://tokendance.space/gateway/ark/v3/images/generations"
     )
     assert captured["payload"]["layer_decomposition"] is True
+    assert captured["payload"]["size"] == "1.5K"
 
 
 def test_render_writes_warnings_for_silent_rewrites(isolated_data_root, tmp_path, monkeypatch):

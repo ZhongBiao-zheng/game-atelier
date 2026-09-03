@@ -2800,7 +2800,7 @@ export function CanvasLayerStackSurface({
     setPromptDraft(node.data.prompt);
   }, [node.data.prompt]);
 
-  function updateDraft(patch: Partial<Pick<CanvasLayerStackNode['data'], 'alias' | 'model' | 'prompt'>>) {
+  function updateDraft(patch: Partial<Pick<CanvasLayerStackNode['data'], 'alias' | 'model' | 'prompt' | 'resolution'>>) {
     context.updateNode(node.id, candidate => candidate.type === 'layer_stack'
       ? { ...candidate, data: { ...candidate.data, ...patch, error: null } }
       : candidate);
@@ -2917,7 +2917,7 @@ export function CanvasLayerStackSurface({
             ))}
           </div>
         ) : (
-          <div className="flex h-full flex-col gap-4 p-4" aria-label="图层拆分设置">
+          <div className="flex h-full flex-col gap-3 p-4" aria-label="图层拆分设置">
             <label className="space-y-2 text-xs text-muted-foreground">
               <span>模型</span>
               <span className="flex">
@@ -2933,7 +2933,7 @@ export function CanvasLayerStackSurface({
                 />
               </span>
             </label>
-            <label className="flex min-h-0 flex-1 flex-col gap-2 text-xs text-muted-foreground">
+            <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
               <span>拆分要求</span>
               <textarea
                 aria-label="拆分要求"
@@ -2941,21 +2941,52 @@ export function CanvasLayerStackSurface({
                 disabled={busy}
                 maxLength={4000}
                 placeholder="留空则自动识别图层"
-                className="min-h-24 flex-1 resize-none rounded-md border border-border bg-transparent p-3 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary"
+                className="h-16 resize-none rounded-md border border-border bg-transparent p-3 text-sm leading-relaxed text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-primary"
                 onFocus={() => context.recordHistory()}
                 onChange={event => {
                   setPromptDraft(event.target.value);
                   updateDraft({ prompt: event.target.value });
                 }}
               />
+              <span className="leading-relaxed">
+                留空会自动识别主要图层。写法示例：对输入图进行精确图层分离，识别并独立拆分标题文字、辅助文案、主体与装饰元素。手动对指定文字图层和元素位置进行调整，保持原始画面风格、光影、色调和杂志封面质感不变。
+              </span>
             </label>
+            <div className="space-y-1.5 text-xs text-muted-foreground">
+              <span>图片比例</span>
+              <div aria-label="图片比例" className="flex h-8 items-center justify-center rounded-md bg-popover text-sm text-foreground">
+                智能
+              </div>
+            </div>
+            <div className="space-y-1.5 text-xs text-muted-foreground">
+              <span>分辨率</span>
+              <div role="listbox" aria-label="选择拆分分辨率" className="grid grid-cols-4 rounded-lg bg-popover p-0.5">
+                {(['auto', '1K', '1.5K', '2K'] as const).map(resolution => (
+                  <button
+                    key={resolution}
+                    type="button"
+                    role="option"
+                    aria-selected={node.data.resolution === resolution}
+                    disabled={busy}
+                    onClick={() => {
+                      if (node.data.resolution === resolution) return;
+                      context.recordHistory();
+                      updateDraft({ resolution });
+                    }}
+                    className="h-8 rounded-md px-1 text-center text-sm text-foreground transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 disabled:opacity-50"
+                  >
+                    {resolution === 'auto' ? '智能' : resolution}
+                  </button>
+                ))}
+              </div>
+            </div>
             {node.data.error && (
               <p role="alert" className="line-clamp-3 text-xs leading-relaxed text-[color:var(--status-failed)]">
                 {canvasNodeRunDisplayError(node.data.error, '图层拆分失败，请重试')}
               </p>
             )}
             <div className="mt-auto flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">2K · PNG</span>
+              <span className="text-xs text-muted-foreground">保持原图比例 · PNG</span>
               {choices.length ? (
                 <Button
                   type="button"

@@ -497,7 +497,7 @@ it('rebuilds a decomposed image from layers and hides a selected part', () => {
     id: 'layer-stack', title: '图层拆分', type: 'layer_stack', position: { x: 0, y: 0 }, z_index: 0,
     size: { width: 760, height: 480 },
     data: {
-      source_version_id: 'source', alias: 'tokendance', model: 'seedream-5.0-pro', prompt: '',
+      source_version_id: 'source', alias: 'tokendance', model: 'seedream-5.0-pro', prompt: '', resolution: 'auto',
       base_version_id: 'base', base_visible: true, active_run_id: null,
       error: null,
       layers: [{
@@ -545,7 +545,7 @@ it('configures and starts layer decomposition inside the new node', () => {
     id: 'layer-stack-draft', title: '拆分图层', type: 'layer_stack', position: { x: 0, y: 0 }, z_index: 0,
     size: { width: 760, height: 480 },
     data: {
-      source_version_id: 'source', alias: 'tokendance', model: 'seedream-5.0-pro', prompt: '',
+      source_version_id: 'source', alias: 'tokendance', model: 'seedream-5.0-pro', prompt: '', resolution: 'auto',
       base_version_id: null, base_visible: true, layers: [], active_run_id: null, error: null,
     },
   } satisfies Extract<CanvasNode, { type: 'layer_stack' }>;
@@ -568,10 +568,16 @@ it('configures and starts layer decomposition inside the new node', () => {
     expect.stringContaining('/versions/source/media'),
   );
   expect(screen.getByRole('button', { name: '选择生成模型' })).toHaveTextContent('Seedream 5.0 Pro');
-  expect(screen.getByText('2K · PNG')).toBeInTheDocument();
+  expect(screen.getByText('保持原图比例 · PNG')).toBeInTheDocument();
+  expect(screen.getByLabelText('图片比例')).toHaveTextContent('智能');
+  expect(screen.getByText(/写法示例：对输入图进行精确图层分离/)).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: '智能' })).toHaveAttribute('aria-selected', 'true');
+  fireEvent.click(screen.getByRole('option', { name: '1.5K' }));
+  const resolutionUpdate = vi.mocked(context.updateNode).mock.calls.at(-1)?.[1];
+  expect(resolutionUpdate?.(layerStack)).toMatchObject({ data: { resolution: '1.5K' } });
   fireEvent.focus(screen.getByRole('textbox', { name: '拆分要求' }));
   fireEvent.change(screen.getByRole('textbox', { name: '拆分要求' }), { target: { value: '拆出主体' } });
-  expect(context.recordHistory).toHaveBeenCalledOnce();
+  expect(context.recordHistory).toHaveBeenCalledTimes(2);
   expect(context.updateNode).toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '开始拆分' }));
   expect(context.submitLayerDecomposition).toHaveBeenCalledWith('layer-stack-draft');

@@ -98,6 +98,7 @@ def _project_with_decomposition_node(
     alias: str = "ark",
     model: str = "doubao-seedream-5-0-pro-260628",
     prompt: str = "",
+    resolution: str = "auto",
 ):
     project, current, version = _project_with_source_image()
     stack = CanvasLayerStackNode(
@@ -112,6 +113,7 @@ def _project_with_decomposition_node(
             alias=alias,
             model=model,
             prompt=prompt,
+            resolution=resolution,
         ),
     )
     edge = CanvasInputConnection(
@@ -133,7 +135,10 @@ def _project_with_decomposition_node(
 
 def test_layer_decomposition_runs_existing_stack_and_registers_every_output(isolated_data_root):
     _configure_seedream()
-    project, current, source_version = _project_with_decomposition_node(prompt="拆出主体")
+    project, current, source_version = _project_with_decomposition_node(
+        prompt="拆出主体",
+        resolution="1.5K",
+    )
 
     job, submitted = submit_layer_decomposition_run(
         project.project_id,
@@ -153,6 +158,8 @@ def test_layer_decomposition_runs_existing_stack_and_registers_every_output(isol
     assert job.canvas_run.snapshot.final_prompt == "拆出主体"
     assert job.provider == "seedream"
     assert job.params.layer_decomposition is True
+    assert job.params.size == "1.5K"
+    assert job.canvas_run.snapshot.normalized_params["size"] == "1.5K"
     assert job.params.reference_images and len(job.params.reference_images) == 1
 
     output_dir = canvas_output_dir(project.project_id, job.job_id)
@@ -376,5 +383,7 @@ def test_layer_decomposition_endpoint_schedules_the_canvas_job(
     assert response.status_code == 201, response.json()
     payload = response.json()
     assert scheduled == [payload["job"]["job_id"]]
+    assert payload["job"]["params"]["size"] == "auto"
+    assert payload["job"]["canvas_run"]["snapshot"]["normalized_params"]["size"] == "auto"
     stack = next(node for node in payload["document"]["nodes"] if node["id"] == "layer-stack")
     assert stack["data"]["active_run_id"] == payload["job"]["canvas_run"]["run_id"]
