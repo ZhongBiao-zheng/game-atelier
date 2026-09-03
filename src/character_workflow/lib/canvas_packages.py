@@ -36,6 +36,7 @@ from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.jobs import job_lock, new_job_id, read_job
 from character_workflow.lib.schemas import (
     CanvasAgentSession,
+    CanvasContentVersion,
     CanvasDocument,
     CanvasPluginState,
     CanvasProject,
@@ -318,19 +319,65 @@ def _assert_jobs_are_quiescent(jobs: list[Job]) -> None:
         )
 
 
+def _output_versions_for_job(
+    job: Job,
+    document: CanvasDocument,
+    *,
+    origin_job_id: str | None = None,
+) -> list[CanvasContentVersion]:
+    if job.canvas_run is None:
+        raise CanvasPackageError(f"画布任务 {job.job_id} 缺少运行快照")
+    candidate_versions: list[CanvasContentVersion] = []
+    for candidate in job.canvas_run.candidates:
+        if candidate.version_id is None:
+            continue
+        version = document.content_versions.get(candidate.version_id)
+        if version is None:
+            raise CanvasPackageError(f"任务 {job.job_id} 的候选结果缺少内容版本")
+        candidate_versions.append(version)
+
+    result = job.params.layer_decomposition_result
+    if not job.params.layer_decomposition or result is None:
+        return candidate_versions
+
+    owner_id = origin_job_id or job.job_id
+    base = next(
+        (
+            version
+            for version in candidate_versions
+            if version.kind == "image" and version.origin.kind == "job_output"
+        ),
+        None,
+    )
+    layers_by_index = {
+        version.origin.output_index: version
+        for version in document.content_versions.values()
+        if (
+            version.kind == "image"
+            and version.origin.kind == "layer_decomposition"
+            and version.origin.job_id == owner_id
+        )
+    }
+    ordered: list[CanvasContentVersion] = []
+    for output in result.outputs:
+        version = base if output.z_index == 0 else layers_by_index.get(output.output_index)
+        if version is None:
+            raise CanvasPackageError(
+                f"任务 {job.job_id} 的图层输出 {output.output_index} 缺少内容版本"
+            )
+        ordered.append(version)
+    return ordered
+
+
 def _portable_job(job: Job, document: CanvasDocument) -> bytes:
     if job.canvas_run is None:
         raise CanvasPackageError(f"画布任务 {job.job_id} 缺少运行快照")
     versions = document.content_versions
-    output_paths: list[str] = []
-    for candidate in job.canvas_run.candidates:
-        if candidate.version_id is None:
-            continue
-        version = versions.get(candidate.version_id)
-        if version is None:
-            raise CanvasPackageError(f"任务 {job.job_id} 的候选结果缺少内容版本")
-        if version.kind != "text":
-            output_paths.append(version.path)
+    output_paths = [
+        version.path
+        for version in _output_versions_for_job(job, document)
+        if version.kind != "text"
+    ]
 
     references: dict[str, list[str]] = {"image": [], "video": [], "audio": []}
     for item in job.canvas_run.snapshot.inputs:
@@ -794,6 +841,7 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
             entry_by_path[path] for path in row.entry_paths if entry_by_path[path].role == "blob"
         ]
         jobs_by_id = {job.job_id: job for job in jobs}
+        seen_layer_outputs: set[tuple[str, int]] = set()
         for version in document.content_versions.values():
             if version.origin.kind in {"user_mask", "local_tool"} and (
                 version.origin.source_version_id not in document.content_versions
@@ -815,6 +863,30 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
                     raise CanvasPackageError(
                         f"内容版本 {version.version_id} 的 Job candidate 血缘无法解析"
                     )
+            if version.origin.kind == "layer_decomposition":
+                owner = jobs_by_id.get(version.origin.job_id)
+                result = None if owner is None else owner.params.layer_decomposition_result
+                output = None if result is None else next(
+                    (
+                        item for item in result.outputs
+                        if item.output_index == version.origin.output_index
+                    ),
+                    None,
+                )
+                lineage = (version.origin.job_id, version.origin.output_index)
+                if (
+                    owner is None
+                    or not owner.params.layer_decomposition
+                    or output is None
+                    or output.z_index == 0
+                    or version.origin.output_index >= len(owner.output_paths)
+                    or owner.output_paths[version.origin.output_index] != version.path
+                    or lineage in seen_layer_outputs
+                ):
+                    raise CanvasPackageError(
+                        f"内容版本 {version.version_id} 的图层拆分血缘无法解析"
+                    )
+                seen_layer_outputs.add(lineage)
             if version.kind == "text":
                 continue
             matches = [entry for entry in blob_entries if entry.sha256 == version.sha256]
@@ -822,6 +894,15 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
                 raise CanvasPackageError(f"内容版本 {version.version_id} 缺少媒体 blob")
             if all(entry.mime_type != version.mime_type for entry in matches):
                 raise CanvasPackageError(f"内容版本 {version.version_id} 的 blob MIME 不一致")
+        expected_layer_outputs = {
+            (job.job_id, output.output_index)
+            for job in jobs
+            if job.params.layer_decomposition_result is not None
+            for output in job.params.layer_decomposition_result.outputs
+            if output.z_index > 0
+        }
+        if seen_layer_outputs != expected_layer_outputs:
+            raise CanvasPackageError("图层拆分任务的透明层内容版本不完整")
 
 
 def inspect_canvas_package(zip_path: Path) -> CanvasPackageInspection:
@@ -914,7 +995,7 @@ def _remap_document(
             edge["origin"]["run_id"] = run_ids[old_run_id]
     for version in raw["content_versions"].values():
         origin = version["origin"]
-        if origin["kind"] == "job_output":
+        if origin["kind"] in {"job_output", "layer_decomposition"}:
             old_job_id = origin["job_id"]
             if old_job_id not in job_ids:
                 raise CanvasPackageError(f"内容版本 {version['version_id']} 的 job_id 无法重写")
@@ -925,7 +1006,7 @@ def _remap_document(
         if blob is None:
             raise CanvasPackageError(f"内容版本 {version['version_id']} 缺少 blob")
         suffix = PurePosixPath(blob.path).suffix
-        if origin["kind"] == "job_output":
+        if origin["kind"] in {"job_output", "layer_decomposition"}:
             version["path"] = f"outputs/{origin['job_id']}/{version['version_id']}{suffix}"
         elif origin["kind"] == "local_tool":
             version["path"] = f"derived/{origin['operation_id']}/{version['version_id']}{suffix}"
@@ -971,13 +1052,15 @@ def _remap_jobs(
             if mask_version_id is not None
             else None
         )
-        raw["output_paths"] = []
-        for candidate in job.canvas_run.candidates:
-            if candidate.version_id is None:
-                continue
-            version = document.content_versions[candidate.version_id]
-            if version.kind != "text":
-                raw["output_paths"].append(f"canvases/{project_id}/{version.path}")
+        raw["output_paths"] = [
+            f"canvases/{project_id}/{version.path}"
+            for version in _output_versions_for_job(
+                job,
+                document,
+                origin_job_id=raw["job_id"],
+            )
+            if version.kind != "text"
+        ]
         raw["source_image"] = None
         remapped.append(Job.model_validate(raw))
     return remapped

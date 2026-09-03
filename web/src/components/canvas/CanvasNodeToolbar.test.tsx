@@ -5,6 +5,7 @@ import { expect, it, vi } from 'vitest';
 import {
   CanvasNodeCard,
   CanvasNodeContext,
+  CanvasLayerStackSurface,
   type CanvasNodeContextValue,
 } from './CanvasEditorViews';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from './canvasImageToolbar';
@@ -122,6 +123,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     saveAsset: vi.fn(async () => undefined),
     copyPrompt: vi.fn(async () => undefined),
     reversePrompt: vi.fn(async () => undefined),
+    decomposeLayers: vi.fn(async () => undefined),
     recoverReversePromptConfig: vi.fn(async () => undefined),
     reversePromptConfiguredNodeIds: new Set(),
     replaceMedia: vi.fn(),
@@ -458,6 +460,8 @@ it('shows every configured image action after selection and keeps it mounted whi
   expect(within(toolbar).getByRole('button', { name: '裁剪 图片' })).toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '切分 图片' })).toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '本地放大 图片' })).toBeInTheDocument();
+  fireEvent.click(within(toolbar).getByRole('button', { name: '拆分 图片 的图层' }));
+  expect(context.decomposeLayers).toHaveBeenCalledWith(image);
   const settingsButton = within(toolbar).getByRole('button', { name: '配置图片快捷工具' });
   act(() => settingsButton.focus());
   fireEvent.click(settingsButton);
@@ -471,6 +475,61 @@ it('shows every configured image action after selection and keeps it mounted whi
 
   expect(document.querySelector('[data-canvas-node-toolbar="image"]')).toBeInTheDocument();
   expect(screen.getByRole('dialog', { name: '自定义图片快捷工具' })).toBeInTheDocument();
+});
+
+it('rebuilds a decomposed image from layers and hides a selected part', () => {
+  const versions: Record<string, CanvasContentVersion> = {
+    base: {
+      version_id: 'base', kind: 'image', path: 'outputs/job-layer/base.png', mime_type: 'image/png', bytes: 42,
+      width: 1000, height: 800, duration_ms: null, created_at: '2026-09-03T00:00:00Z',
+      sha256: 'a'.repeat(64), origin: { kind: 'job_output', job_id: 'job-layer', candidate_id: 'base' },
+    },
+    subject: {
+      version_id: 'subject', kind: 'image', path: 'outputs/job-layer/subject.png', mime_type: 'image/png', bytes: 42,
+      width: 400, height: 500, duration_ms: null, created_at: '2026-09-03T00:00:00Z',
+      sha256: 'b'.repeat(64),
+      origin: { kind: 'layer_decomposition', job_id: 'job-layer', output_index: 1 },
+    },
+  };
+  const layerStack = {
+    id: 'layer-stack', title: '图层拆分', type: 'layer_stack', position: { x: 0, y: 0 }, z_index: 0,
+    size: { width: 760, height: 480 },
+    data: {
+      source_version_id: 'source', base_version_id: 'base', base_visible: true, active_run_id: null,
+      error: null,
+      layers: [{
+        id: 'layer-subject', version_id: 'subject', z_index: 1, name: '主体', description: '透明主体',
+        bounding_box: { absolute: [100, 120, 500, 620], normalized: [100, 150, 500, 775] },
+        visible: true,
+      }],
+    },
+  } satisfies Extract<CanvasNode, { type: 'layer_stack' }>;
+  const context = nodeContext({ resolveVersion: versionResolver(versions) });
+
+  const { container, rerender } = render(
+    <CanvasLayerStackSurface node={layerStack} context={context} />,
+  );
+
+  expect(container.querySelector('[data-layer-stack-part="base"]')).toBeInTheDocument();
+  expect(container.querySelector('[data-layer-stack-part="layer-subject"]')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '隐藏主体' }));
+  expect(context.recordHistory).toHaveBeenCalledOnce();
+  const update = vi.mocked(context.updateNode).mock.calls[0][1];
+  const hidden = update(layerStack) as typeof layerStack;
+
+  rerender(<CanvasLayerStackSurface node={hidden} context={context} />);
+  expect(container.querySelector('[data-layer-stack-part="base"]')).toBeInTheDocument();
+  expect(container.querySelector('[data-layer-stack-part="layer-subject"]')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '显示主体' })).toBeInTheDocument();
+
+  rerender(<CanvasLayerStackSurface
+    node={{
+      ...layerStack,
+      data: { ...layerStack.data, base_version_id: null, layers: [], error: '上游拆分失败' },
+    }}
+    context={context}
+  />);
+  expect(screen.getByRole('alert')).toHaveTextContent('上游拆分失败');
 });
 
 it('treats an uploaded image as a pure material with toolbar and one direct replace action only', async () => {

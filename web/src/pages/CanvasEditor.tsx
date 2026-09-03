@@ -68,6 +68,7 @@ import {
   runCanvasMediaOperation,
   saveCanvasDocument,
   submitCanvasAngleRun,
+  submitCanvasLayerDecomposition,
   submitCanvasRun,
   submitCanvasMaskEdit,
   submitCanvasReversePrompt,
@@ -537,6 +538,13 @@ function CanvasEditorInner({
           return additions.length ? { ...node, data: { ...node.data,
             member_node_ids: [...new Set([...node.data.member_node_ids, ...additions])],
           } } : node;
+        }
+        if (
+          node.type === 'layer_stack'
+          && serverNode?.type === 'layer_stack'
+          && resultNodeIds.has(node.id)
+        ) {
+          return { ...node, data: serverNode.data };
         }
         if (!serverNode || !isContentNode(node) || !isContentNode(serverNode)) return node;
         if (!resultNodeIds.has(node.id) && !runIds.has(serverNode.data.active_run_id ?? '')) return node;
@@ -2357,6 +2365,51 @@ function CanvasEditorInner({
     projectId,
   ]);
 
+  const decomposeLayers = useCallback(async (
+    node: Extract<CanvasContentNode, { type: 'image' }>,
+  ) => {
+    if (!node.data.current_version_id) {
+      setError('请选择一个已有内容的图片节点再拆分图层。');
+      return;
+    }
+    if (runSubmissionInFlight.current) {
+      setError('另一项生成正在提交，请稍后再试。');
+      return;
+    }
+    setSubmittingNodeIds(current => new Set(current).add(node.id));
+    setError(null);
+    try {
+      if (!await persistNow()) return;
+      const dirtyAtSubmission = dirtyVersion.current;
+      runSubmissionInFlight.current = true;
+      const run = await submitCanvasLayerDecomposition(
+        projectId,
+        node.id,
+        serverRevision.current,
+      );
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      applyLocalJob(run.job);
+      const resultId = run.job.canvas_run?.result_node_id;
+      if (resultId) setSelectedNodeIds(new Set([resultId]));
+    } catch (submitError) {
+      setError((submitError as Error).message);
+    } finally {
+      runSubmissionInFlight.current = false;
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+      setSubmittingNodeIds(current => {
+        const next = new Set(current);
+        next.delete(node.id);
+        return next;
+      });
+    }
+  }, [
+    applyLocalJob,
+    flushSave,
+    mergeSubmittedRunDocument,
+    persistNow,
+    projectId,
+  ]);
+
   const retryRun = useCallback(async (nodeId: string, runId: string) => {
     if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return; }
     if (canvasRequiresBatchRun(latestDocument.current, nodeId)) {
@@ -3497,6 +3550,7 @@ function CanvasEditorInner({
     saveAsset: saveNodeToLibrary,
     copyPrompt,
     reversePrompt,
+    decomposeLayers,
     recoverReversePromptConfig,
     reversePromptConfiguredNodeIds,
     replaceMedia,
@@ -3547,6 +3601,7 @@ function CanvasEditorInner({
     recoverReversePromptConfig,
     replaceMedia,
     reversePrompt,
+    decomposeLayers,
     reversePromptConfiguredNodeIds,
     retryRun,
     renameNode,
@@ -3595,7 +3650,10 @@ function CanvasEditorInner({
   const previewPrompt = previewNode
     ? copyablePromptForNode(previewNode, jobsByResultNodeId)
     : null;
-  const previewJobId = preview && preview.version.origin.kind === 'job_output'
+  const previewJobId = preview && (
+    preview.version.origin.kind === 'job_output'
+    || preview.version.origin.kind === 'layer_decomposition'
+  )
     ? preview.version.origin.job_id
     : null;
   const previewJob = previewJobId
@@ -4481,6 +4539,9 @@ function contentOriginLabel(version: CanvasContentVersion, job?: Job) {
   if (origin.kind === 'upload') return '上传素材';
   if (origin.kind === 'user_mask') return '局部编辑蒙版';
   if (origin.kind === 'job_output') return job?.model ? `AI 生成 · ${job.model}` : 'AI 生成';
+  if (origin.kind === 'layer_decomposition') {
+    return job?.model ? `图层拆分 · ${job.model}` : '图层拆分';
+  }
   if (origin.kind === 'import') return '项目包导入';
   if (origin.kind === 'creation_asset_snapshot') return `创作资产 · ${origin.title}`;
   if (origin.operation.kind === 'crop') return '本地裁剪';
@@ -4747,6 +4808,7 @@ function cloneCanvasNode(
     };
   }
   if (clone.type === 'batch_material') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
+  if (clone.type === 'layer_stack') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
   return {
     ...clone,
     id: idMap.get(source.id)!,

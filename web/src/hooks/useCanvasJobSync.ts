@@ -109,10 +109,14 @@ export function useCanvasJobSync({
           // Multi-text slots keep their node IDs and have no active_run_id. Match
           // their new versions to the actual Job outputs, not unrelated idle nodes.
           const outputVersionIds = new Set(newCandidateVersionIds);
-          const resultNodeIds = new Set(remote.nodes.flatMap(node => (
+          const resultNodeIds = new Set([
+            ...completedRuns.map(job => job.canvas_run!.result_node_id),
+            ...jobsWithNewCandidateVersions.map(job => job.canvas_run!.result_node_id),
+            ...remote.nodes.flatMap(node => (
             'current_version_id' in node.data && outputVersionIds.has(node.data.current_version_id ?? '')
               ? [node.id] : []
-          )));
+            )),
+          ]);
           mergeRunDocument(remote, runIdsToSync, resultNodeIds);
           for (const job of completedRuns) syncedTerminalRuns.current.add(job.canvas_run!.run_id);
           for (const versionId of newCandidateVersionIds) syncedCandidateVersionIds.current.add(versionId);

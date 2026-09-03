@@ -258,7 +258,10 @@ export function canvasDeletionBlockedMessage(
 }
 
 export function canvasNodeAcceptsInput(node: CanvasNode) {
-  return node.type !== 'group' && node.type !== 'plugin' && node.type !== 'batch_material';
+  return node.type !== 'group'
+    && node.type !== 'plugin'
+    && node.type !== 'batch_material'
+    && node.type !== 'layer_stack';
 }
 
 export function canvasNodeProvidesContent(node: CanvasNode): node is CanvasContentNode {

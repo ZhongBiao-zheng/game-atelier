@@ -240,6 +240,7 @@ vi.mock('@/api/canvas', () => ({
   runCanvasMediaOperation: vi.fn(),
   saveCanvasDocument: vi.fn(),
   submitCanvasAngleRun: vi.fn(),
+  submitCanvasLayerDecomposition: vi.fn(),
   submitCanvasMaskEdit: vi.fn(),
   submitCanvasReversePrompt: vi.fn(),
   submitCanvasRun: vi.fn(),

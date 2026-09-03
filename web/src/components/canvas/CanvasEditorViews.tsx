@@ -10,7 +10,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, Check, ChevronRight, ClipboardCopy, Download, Ellipsis, Eye, EyeOff, FileAudio, FileImage, FileUp, FileVideo, Layers3, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef,
   useState,
@@ -70,6 +70,7 @@ import type {
   CanvasGenerationDraft,
   CanvasImageQuickToolId,
   CanvasImageToolbarPreferences,
+  CanvasLayerStackNode,
   CanvasNode,
   CanvasPoint,
   CanvasSize,
@@ -163,6 +164,7 @@ export interface CanvasNodeContextValue {
   saveAsset: (node: CanvasContentNode) => Promise<void>;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
   reversePrompt: (node: CanvasContentNode) => Promise<void>;
+  decomposeLayers: (node: Extract<CanvasContentNode, { type: 'image' }>) => Promise<void>;
   recoverReversePromptConfig: (job: Job) => Promise<void>;
   reversePromptConfiguredNodeIds: ReadonlySet<string>;
   replaceMedia: (node: CanvasContentNode) => void;
@@ -426,8 +428,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
       <NodeResizer
         isVisible={selected && !context.multiSelectionActive && !replacingMedia}
         keepAspectRatio={node.type === 'image' && !node.data.display.free_resize}
-        minWidth={node.type === 'text' ? 220 : 240}
-        minHeight={node.type === 'text' ? 120 : 150}
+        minWidth={node.type === 'text' ? 220 : node.type === 'layer_stack' ? 560 : 240}
+        minHeight={node.type === 'text' ? 120 : node.type === 'layer_stack' ? 320 : 150}
         maxWidth={CANVAS_MAX_NODE_SIZE}
         maxHeight={CANVAS_MAX_NODE_SIZE}
         color="var(--primary)"
@@ -737,6 +739,9 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
             <CanvasConfigNodeSurface node={node} context={context} />
           )}
           {node.type === 'batch_material' && <CanvasBatchMaterialEditor node={node} context={context} />}
+          {node.type === 'layer_stack' && (
+            <CanvasLayerStackSurface node={node} context={context} />
+          )}
           {node.type === 'plugin' && !content && (
             <div className="grid min-h-44 place-items-center px-4 text-center text-xs text-muted-foreground">
               插件节点
@@ -747,7 +752,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
       <CanvasNodeRunLiveRegion state={nodeRunState} />
       <CanvasNodeRunOverlay
         state={nodeRunState}
-        hasContent={Boolean(content)}
+        hasContent={Boolean(content || (node.type === 'layer_stack' && node.data.base_version_id))}
       />
       {canvasNodeAcceptsInput(node) && (
         <Handle type="target" position={Position.Left} className="canvas-node-handle" aria-label="连接到此节点">
@@ -1688,6 +1693,14 @@ function ImageNodeToolbar({
           {action.icon}
         </MediaToolButton>
       ))}
+      <MediaToolButton
+        label={`拆分 ${node.title} 的图层`}
+        text={context.canvasUiPreferences.image_toolbar.show_labels ? '拆分图层' : undefined}
+        disabled={!currentVersionId || submitting || replacing}
+        onClick={() => void context.decomposeLayers(node)}
+      >
+        <Layers3 />
+      </MediaToolButton>
       <MediaToolButton
         label="配置图片快捷工具"
         text={context.canvasUiPreferences.image_toolbar.show_labels ? '更多' : undefined}
@@ -2753,7 +2766,192 @@ function nodeIcon(node: CanvasNode) {
   if (node.type === 'image') return <FileImage className="size-3.5 shrink-0" />;
   if (node.type === 'video') return <FileVideo className="size-3.5 shrink-0" />;
   if (node.type === 'audio') return <FileAudio className="size-3.5 shrink-0" />;
+  if (node.type === 'layer_stack') return <Layers3 className="size-3.5 shrink-0" />;
   return <Sparkles className="size-3.5 shrink-0" />;
+}
+
+export function CanvasLayerStackSurface({
+  node,
+  context,
+}: {
+  node: CanvasLayerStackNode;
+  context: CanvasNodeContextValue;
+}) {
+  const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null);
+  const base = context.resolveVersion(node.data.base_version_id);
+  const baseImage = base?.kind === 'image' ? base : undefined;
+  const layers = node.data.layers.flatMap(layer => {
+    const version = context.resolveVersion(layer.version_id);
+    return version?.kind === 'image' ? [{ layer, version }] : [];
+  });
+
+  function updateVisibility(layerId: string | null, visible: boolean) {
+    context.recordHistory();
+    context.updateNode(node.id, candidate => {
+      if (candidate.type !== 'layer_stack') return candidate;
+      if (layerId === null) {
+        return { ...candidate, data: { ...candidate.data, base_visible: visible } };
+      }
+      return {
+        ...candidate,
+        data: {
+          ...candidate.data,
+          layers: candidate.data.layers.map(layer => (
+            layer.id === layerId ? { ...layer, visible } : layer
+          )),
+        },
+      };
+    });
+  }
+
+  return (
+    <div className="flex h-full min-h-0">
+      <div className="flex min-w-0 flex-1 items-center justify-center p-3">
+        {baseImage?.width && baseImage.height ? (
+          <svg
+            viewBox={`0 0 ${baseImage.width} ${baseImage.height}`}
+            role="img"
+            aria-label={`${node.title} 合成预览`}
+            className="h-full w-full"
+            preserveAspectRatio="xMidYMid meet"
+          >
+            {node.data.base_visible && (
+              <image
+                data-layer-stack-part="base"
+                href={canvasMediaUrl(context.projectId, baseImage.version_id)}
+                x={0}
+                y={0}
+                width={baseImage.width}
+                height={baseImage.height}
+                preserveAspectRatio="none"
+              />
+            )}
+            {layers.map(({ layer, version }) => {
+              if (!layer.visible) return null;
+              const [left, top, right, bottom] = layer.bounding_box.absolute;
+              return (
+                <image
+                  key={layer.id}
+                  data-layer-stack-part={layer.id}
+                  href={canvasMediaUrl(context.projectId, version.version_id)}
+                  x={left}
+                  y={top}
+                  width={right - left}
+                  height={bottom - top}
+                  preserveAspectRatio="none"
+                />
+              );
+            })}
+            {layers.map(({ layer }) => {
+              if (hoveredLayerId !== layer.id || !layer.visible) return null;
+              const [left, top, right, bottom] = layer.bounding_box.absolute;
+              return (
+                <rect
+                  key={`outline-${layer.id}`}
+                  x={left}
+                  y={top}
+                  width={right - left}
+                  height={bottom - top}
+                  fill="none"
+                  stroke="var(--primary)"
+                  strokeWidth="2"
+                  vectorEffect="non-scaling-stroke"
+                  pointerEvents="none"
+                />
+              );
+            })}
+          </svg>
+        ) : node.data.error ? (
+          <span role="alert" className="max-w-sm text-center text-xs leading-relaxed text-[color:var(--status-failed)]">
+            {canvasNodeRunDisplayError(node.data.error, '图层拆分失败，请重试')}
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">等待图层结果</span>
+        )}
+      </div>
+      <div
+        className="nodrag nowheel w-64 shrink-0 overflow-y-auto border-l border-border p-2"
+        aria-label="图层列表"
+        onPointerDown={event => event.stopPropagation()}
+      >
+        {baseImage && (
+          <LayerStackRow
+            name="背景"
+            description={`${baseImage.width ?? 0}×${baseImage.height ?? 0}`}
+            src={canvasMediaUrl(context.projectId, baseImage.version_id, 128)}
+            downloadHref={canvasDownloadUrl(context.projectId, baseImage.version_id)}
+            visible={node.data.base_visible}
+            onVisibleChange={visible => updateVisibility(null, visible)}
+          />
+        )}
+        {layers.map(({ layer, version }) => (
+          <LayerStackRow
+            key={layer.id}
+            name={layer.name || `图层 ${layer.z_index}`}
+            description={layer.description}
+            src={canvasMediaUrl(context.projectId, version.version_id, 128)}
+            downloadHref={canvasDownloadUrl(context.projectId, version.version_id)}
+            visible={layer.visible}
+            onVisibleChange={visible => updateVisibility(layer.id, visible)}
+            onHoverChange={hovered => setHoveredLayerId(hovered ? layer.id : null)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LayerStackRow({
+  name,
+  description,
+  src,
+  downloadHref,
+  visible,
+  onVisibleChange,
+  onHoverChange,
+}: {
+  name: string;
+  description: string;
+  src: string;
+  downloadHref: string;
+  visible: boolean;
+  onVisibleChange: (visible: boolean) => void;
+  onHoverChange?: (hovered: boolean) => void;
+}) {
+  return (
+    <div
+      className="flex items-center gap-2 rounded-md p-2 transition-colors hover:bg-secondary/60 focus-within:bg-secondary/60"
+      title={description || name}
+      onMouseEnter={() => onHoverChange?.(true)}
+      onMouseLeave={() => onHoverChange?.(false)}
+      onFocus={() => onHoverChange?.(true)}
+      onBlur={() => onHoverChange?.(false)}
+    >
+      <img src={src} alt="" className="size-12 shrink-0 rounded-md bg-secondary/40 object-contain" />
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{name}</span>
+      <a
+        href={downloadHref}
+        download
+        aria-label={`下载${name}`}
+        className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={event => event.stopPropagation()}
+      >
+        <Download className="size-4" />
+      </a>
+      <button
+        type="button"
+        aria-label={`${visible ? '隐藏' : '显示'}${name}`}
+        aria-pressed={visible}
+        className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={event => {
+          event.stopPropagation();
+          onVisibleChange(!visible);
+        }}
+      >
+        {visible ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+      </button>
+    </div>
+  );
 }
 
 function textScaleClass(scale: 'xs' | 'sm' | 'base') {
