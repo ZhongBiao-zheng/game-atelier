@@ -8,6 +8,7 @@ import secrets
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+from typing import Callable
 
 from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
@@ -453,7 +454,12 @@ def save_canvas_upload(
     body: bytes,
     media_kind: str,
     expected_revision: int,
+    node_factory: Callable[[CanvasMediaVersion], CanvasNode] | None = None,
 ) -> tuple[CanvasMediaVersion, CanvasDocument, str]:
+    """新建不可变 upload 版本；node_factory 给出时在同一把锁、同一次提交里顺带建引用节点。
+
+    分两步（先存版本再另存节点）会在中间撞 revision 时留下孤儿版本且 version_id 传不回去，
+    Agent 重读重试就重复导入同一文件。"""
     with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         project = read_canvas_project(project_id)
@@ -462,11 +468,15 @@ def save_canvas_upload(
             raise RuntimeError(f"revision_conflict:{current.revision}")
         timestamp = _now()
         version, target = _new_upload_version(project_id, ext, body, media_kind, timestamp)
-        updated = current.model_copy(update={
+        nodes = current.nodes
+        if node_factory is not None:
+            nodes = [*nodes, node_factory(version)]
+        updated = CanvasDocument.model_validate(current.model_copy(update={
             "revision": current.revision + 1,
             "updated_at": timestamp,
             "content_versions": {**current.content_versions, version.version_id: version},
-        })
+            "nodes": nodes,
+        }).model_dump(mode="json"))
         _commit_canvas_upload(project_id, project, updated, target, body, timestamp)
         return version, updated, _display_filename(raw_name)
 

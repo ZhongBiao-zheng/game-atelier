@@ -16,6 +16,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from character_workflow.lib import data_root
 from character_workflow.lib.canvas_projects import (
     AUDIO_UPLOAD_EXTS, IMAGE_UPLOAD_EXTS, VIDEO_UPLOAD_EXTS, CanvasDocumentError,
     list_canvas_project_options, read_canvas_document, read_canvas_project, resolve_canvas_media,
@@ -319,8 +320,14 @@ def import_media(principal: Any, payload: ImportMediaInput) -> dict:
     source = Path(payload.path).expanduser()
     if not source.is_absolute():
         raise WorkshopError("REFERENCE_NOT_ALLOWED", "请提供本机绝对路径", 422)
-    if not source.is_file():
+    try:
+        real = source.resolve(strict=True)  # 跟到符号链接终点再判边界
+    except (FileNotFoundError, RuntimeError):
+        raise WorkshopError("REFERENCE_NOT_ALLOWED", "文件不存在或不是普通文件", 404) from None
+    if not real.is_file():
         raise WorkshopError("REFERENCE_NOT_ALLOWED", "文件不存在或不是普通文件", 404)
+    _check_import_boundary(real, payload.project_id)
+    source = real
     ext = source.suffix.lower()
     if ext in IMAGE_UPLOAD_EXTS:
         kind = "image"
@@ -333,24 +340,36 @@ def import_media(principal: Any, payload: ImportMediaInput) -> dict:
     if source.stat().st_size > upload_max_bytes(ext):
         raise WorkshopError("CONTENT_TOO_LARGE", "文件超过画布导入大小上限", 413)
     body = source.read_bytes()
+    node_id = f"mcp-{uuid.uuid4().hex[:12]}"
+    position = CanvasPoint(**(payload.position.model_dump() if payload.position else {"x": 0, "y": 0}))
+    title = payload.title or source.stem[:120] or kind
     try:
-        version, document, filename = save_canvas_upload(
+        # 版本 + 节点在同一把锁、同一次提交里落盘：中途撞 revision 不会留下孤儿版本。
+        version, saved, filename = save_canvas_upload(
             payload.project_id, source.name, ext, body, kind, payload.expected_revision,
+            node_factory=lambda created: _media_node(kind, node_id, title, position, created.version_id),
         )
     except RuntimeError as error:
         if str(error).startswith("revision_conflict:"):
             raise WorkshopError("DOCUMENT_CONFLICT", "画布已变化，请重新读取后再改") from None
         raise
-    except ValueError as error:
+    except (ValueError, CanvasDocumentError) as error:
         raise WorkshopError("INVALID_PARAMETERS", str(error), 422) from None
-    node_id = f"mcp-{uuid.uuid4().hex[:12]}"
-    position = CanvasPoint(**(payload.position.model_dump() if payload.position else {"x": 0, "y": 0}))
-    node = _media_node(kind, node_id, payload.title or Path(filename).stem[:120] or kind, position,
-                       version.version_id)
-    saved = _save(payload.project_id, document.model_copy(update={"nodes": [*document.nodes, node]}),
-                  document.revision)
     return {"project_id": saved.project_id, "revision": saved.revision, "node_id": node_id,
             "version_id": version.version_id, "kind": kind, "filename": filename}
+
+
+def _check_import_boundary(real: Path, project_id: str) -> None:
+    """导入只允许用户家目录与工作区内的文件；工作区里别的画布目录不算。
+
+    这条工具是 project-scoped 授权，不能变成「持一个画布授权就能读走本机任意图片」；
+    工坊侧同类读取全部走 safe_path，画布侧要同一标准。符号链接按终点判。"""
+    roots = [Path.home().resolve(), data_root.resolve_data_root().resolve()]
+    if not any(real.is_relative_to(root) for root in roots):
+        raise WorkshopError("REFERENCE_NOT_ALLOWED", "只能导入家目录或工作区内的文件", 403)
+    canvases = data_root.canvases_dir().resolve()
+    if real.is_relative_to(canvases) and real.relative_to(canvases).parts[:1] != (project_id,):
+        raise WorkshopError("REFERENCE_NOT_ALLOWED", "不能读取其他画布的文件", 403)
 
 
 def _job_view(job: Job, *, agent: bool) -> dict:

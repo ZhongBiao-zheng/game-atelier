@@ -40,7 +40,7 @@ triggers:
 | 要做 | op | 注意 |
 | --- | --- | --- |
 | 放一段提示词 | `add_text` | title 简短可辨；text 就是提示词正文 |
-| 放一张本机图 / 视频 / 音频 | 先 `canvas_import_media` 再（如需另建节点）`add_media_node` | 导入本身已建节点；只接受绝对路径，图 ≤10 MB，视频音频 ≤100 MB |
+| 放一张本机图 / 视频 / 音频 | 先 `canvas_import_media` 再（如需另建节点）`add_media_node` | 导入本身已建节点；只接受绝对路径且必须在用户家目录或工作区内（别的画布目录不行），图 ≤10 MB，视频音频 ≤100 MB |
 | 新建生成面 | `add_surface`（kind=image/video/audio）| Web 的生成面就是一个空的图片 / 视频节点，产物直接落在它身上；**不要用空文本节点当生成面**，那会多出一个无用节点 |
 | 给生成面填配置 | `set_draft` | mode / prompt / model / alias 必填；mode 必须与节点类型一致（给文本节点填 image 会被拒）；接进来的文本节点会自动以 `@[node:id]` 出现在 prompt 里，不用手写；model 与 alias 来自 `canvas_list_models`，不虚构 |
 | 把素材接进生成面 | `connect` | source 是素材或提示词节点，target 是生成面；视频首尾帧用 `slot` |

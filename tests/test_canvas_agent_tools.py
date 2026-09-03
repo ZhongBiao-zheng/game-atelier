@@ -10,7 +10,7 @@ from character_workflow.lib import canvas_agent_tools as tools, keys
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasListProjectsInput, CanvasProjectInput, ImportMediaInput, RunInput,
 )
-from character_workflow.lib.canvas_projects import create_canvas_project, read_canvas_document
+from character_workflow.lib.canvas_projects import canvas_project_dir, create_canvas_project, read_canvas_document
 from character_workflow.lib.private_json import read_private_json
 from character_workflow.lib.workshop import WorkshopError
 from viewer_server.server_app import build_app
@@ -81,27 +81,55 @@ def test_change_set_edits_document_at_expected_revision(canvas):
     assert document.content_versions[document.nodes[0].data.current_version_id].text == "黎明列车"
 
 
-def test_import_media_copies_local_file_and_rejects_unknown_types(canvas, tmp_path):
+def test_import_media_copies_local_file_and_rejects_unknown_types(canvas, tmp_path, isolated_data_root):
     pid = canvas.project.project_id
-    source = tmp_path / "ref.png"
+    inbox = isolated_data_root / "inbox"
+    inbox.mkdir()
+    source = inbox / "ref.png"
     Image.new("RGB", (8, 6), "red").save(source)
     result = tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=0,
                                                               path=str(source), title="参考"))
     document = read_canvas_document(pid)
-    assert result["kind"] == "image" and document.revision == result["revision"] == 2
+    # 版本与节点一次提交：revision 只 +1
+    assert result["kind"] == "image" and document.revision == result["revision"] == 1
     version = document.content_versions[result["version_id"]]
     assert version.kind == "image" and version.origin.kind == "upload" and version.width == 8
     assert document.nodes[0].id == result["node_id"] and document.nodes[0].type == "image"
     preview = tools.read_media(canvas.agent, tools.CanvasReadMediaInput(project_id=pid, version_id=version.version_id))
     assert preview["preview"]["mime_type"] == "image/jpeg"
 
-    (tmp_path / "notes.txt").write_text("x")
+    (inbox / "notes.txt").write_text("x")
     with pytest.raises(WorkshopError) as error:
-        tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=2,
-                                                         path=str(tmp_path / "notes.txt")))
+        tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=1,
+                                                         path=str(inbox / "notes.txt")))
     assert error.value.code == "REFERENCE_NOT_ALLOWED"
     with pytest.raises(WorkshopError):
-        tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=2, path="ref.png"))
+        tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=1, path="ref.png"))
+
+    # 边界：家目录 / 工作区之外、别的画布目录、指向外面的符号链接，都不能导。
+    outside = tmp_path / "outside.png"
+    Image.new("RGB", (4, 4), "blue").save(outside)
+    with pytest.raises(WorkshopError) as denied:
+        tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=1, path=str(outside)))
+    assert (denied.value.code, denied.value.status) == ("REFERENCE_NOT_ALLOWED", 403)
+    link = inbox / "link.png"
+    link.symlink_to(outside)
+    with pytest.raises(WorkshopError) as via_link:
+        tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=1, path=str(link)))
+    assert via_link.value.code == "REFERENCE_NOT_ALLOWED"
+    foreign = canvas_project_dir(canvas.other.project_id) / "media"
+    foreign.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (4, 4), "green").save(foreign / "secret.png")
+    with pytest.raises(WorkshopError) as other_canvas:
+        tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=1,
+                                                         path=str(foreign / "secret.png")))
+    assert other_canvas.value.message == "不能读取其他画布的文件"
+    # 冲突时不留孤儿版本
+    before = len(read_canvas_document(pid).content_versions)
+    with pytest.raises(WorkshopError) as conflict:
+        tools.import_media(canvas.agent, ImportMediaInput(project_id=pid, expected_revision=0, path=str(source)))
+    assert conflict.value.code == "DOCUMENT_CONFLICT"
+    assert len(read_canvas_document(pid).content_versions) == before
 
 
 def test_run_requires_generate_capability_and_a_prepared_draft(canvas):
