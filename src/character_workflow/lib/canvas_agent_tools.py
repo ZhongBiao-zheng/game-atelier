@@ -137,7 +137,8 @@ def _text_version(text: str, timestamp: str) -> CanvasTextVersion:
     )
 
 
-def _media_node(kind: str, node_id: str, title: str, position: CanvasPoint, version_id: str):
+def _media_node(kind: str, node_id: str, title: str, position: CanvasPoint,
+                version_id: str | None):
     if kind == "image":
         return CanvasImageNode(id=node_id, title=title, position=position, type="image",
                                data=CanvasMediaNodeData(current_version_id=version_id))
@@ -184,6 +185,9 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
                 raise WorkshopError("REFERENCE_NOT_ALLOWED", "媒体版本不属于这个画布", 403)
             nodes.append(_media_node(version.kind, new_node_id(change.node_id), change.title,
                                      CanvasPoint(**change.position.model_dump()), version.version_id))
+        elif change.op == "add_surface":
+            nodes.append(_media_node(change.kind, new_node_id(change.node_id), change.title,
+                                     CanvasPoint(**change.position.model_dump()), None))
         elif change.op == "set_text":
             node = _find_node(document.model_copy(update={"nodes": nodes}), change.node_id)
             if node.type != "text":

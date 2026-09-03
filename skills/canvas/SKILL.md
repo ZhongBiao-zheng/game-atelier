@@ -41,12 +41,14 @@ triggers:
 | --- | --- | --- |
 | 放一段提示词 | `add_text` | title 简短可辨；text 就是提示词正文 |
 | 放一张本机图 / 视频 / 音频 | 先 `canvas_import_media` 再（如需另建节点）`add_media_node` | 导入本身已建节点；只接受绝对路径，图 ≤10 MB，视频音频 ≤100 MB |
-| 让某节点成为生成面 | `set_draft` | mode / prompt / model / alias 必填；model 与 alias 来自 `canvas_list_models`，不虚构 |
+| 新建生成面 | `add_surface`（kind=image/video/audio）| Web 的生成面就是一个空的图片 / 视频节点，产物直接落在它身上；**不要用空文本节点当生成面**，那会多出一个无用节点 |
+| 给生成面填配置 | `set_draft` | mode / prompt / model / alias 必填；prompt 里用 `@[node:<提示词节点 id>]` 引用提示词节点，这样浏览器里能看到引用；model 与 alias 来自 `canvas_list_models`，不虚构 |
 | 把素材接进生成面 | `connect` | source 是素材或提示词节点，target 是生成面；视频首尾帧用 `slot` |
 | 调整 / 清理 | `move` / `set_text` / `disconnect` / `remove_node` | 只能断输入连线；派生连线与生成产物由服务端持有，不可动 |
 
-搭「提示词 → 参考图 → 生成面」的标准三件：一条 change set 里 `add_text` + `set_draft` + 两条 `connect`，
-生成面用一个空文本节点或已有图片节点承载 draft。`input_policy` 缺省 `all_connected`（接进来的都当输入）；
+搭「提示词 → 参考图 → 生成面」的标准三件：一条 change set 里 `add_text` + `add_surface`（image）+
+`set_draft`（prompt 写 `@[node:<提示词节点 id>]`）+ `connect`（提示词 → 生成面、参考图 → 生成面）。
+已有图片节点也可以直接当生成面，不新建。`input_policy` 缺省 `all_connected`（接进来的都当输入）；
 只想引用 @ 提到的素材才用 `mentions_only`。
 
 `params` 只收标量，按浏览器白名单过滤：图片常用 `n / size / ratio / quality`，视频 `duration / resolution / ratio`。
@@ -59,7 +61,8 @@ triggers:
 2. 等用户明确肯定（出图 / 可以 / 走）。沉默、模糊、「再想想」都不推进；模糊用 AskUserQuestion 二选一。
 3. 授权含 `canvas_generate` → 调 `canvas_run`（surface_node_id + 当前 revision + requested_count）。
    返回 `TARGET_NOT_AUTHORIZED` 表示授权没给发起生成，告知用户在授权页补勾，不能改走其他路径。
-4. `canvas_run` 后服务端会在生成面右侧建结果节点，文档 revision 变化；之后所有修改先重读。
+4. `canvas_run` 后产物落在生成面节点本身（用 `add_surface` 建的空媒体节点）；若生成面是文本节点，
+   服务端会另建结果节点并留下派生连线，那就是用错了。文档 revision 变化，之后所有修改先重读。
 5. `canvas_get_run` 查同一 `run_id`：`candidates[].version_id` 是产物版本；`failed` 只报告安全摘要，
    不自动重跑。用户要再来一张 = 新的确认卡 + 新的 `canvas_run`。
 

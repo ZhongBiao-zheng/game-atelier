@@ -39,6 +39,7 @@ HTTP 端点 `POST /api/canvas-agent/<op>`，请求体 JSON ≤ 1 MiB，参数包
 | --- | --- | --- |
 | `add_text` | title、text、position、node_id? | 新建文本节点 + user_edit 文本版本 |
 | `add_media_node` | title、version_id、position、node_id? | 引用本画布已有媒体版本建节点 |
+| `add_surface` | kind(image/video/audio)、title、position、node_id? | 空媒体节点作生成面，产物落在同一节点；与 Web 行为一致 |
 | `set_text` | node_id、text | 文本节点新版本，旧版本不可变 |
 | `set_draft` | node_id、mode、prompt、model、alias?、input_policy?、params? | 生成配置；params 只收标量并按浏览器白名单过滤，路径类字段丢弃 |
 | `connect` / `disconnect` | source/target/slot? · connection_id | 只处理 `input` 连线，派生连线由服务端写 |

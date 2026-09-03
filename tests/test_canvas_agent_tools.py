@@ -51,8 +51,8 @@ def test_change_set_edits_document_at_expected_revision(canvas):
     result = tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=0, changes=[
         {"op": "add_text", "node_id": "prompt-1", "title": "提示词", "text": "雨夜列车",
          "position": {"x": 0, "y": 0}},
-        {"op": "add_text", "node_id": "image-1", "title": "结果", "text": "", "position": {"x": 400, "y": 0}},
-        {"op": "set_draft", "node_id": "image-1", "mode": "image", "prompt": "雨夜列车", "model": "gpt-image-1",
+        {"op": "add_surface", "node_id": "image-1", "kind": "image", "title": "结果", "position": {"x": 400, "y": 0}},
+        {"op": "set_draft", "node_id": "image-1", "mode": "image", "prompt": "@[node:prompt-1]", "model": "gpt-image-1",
          "alias": "fake", "params": {"n": 2, "size": "1024x1024", "mask_image": "/etc/passwd"}},
         {"op": "connect", "source_node_id": "prompt-1", "target_node_id": "image-1"},
     ]))
@@ -61,6 +61,8 @@ def test_change_set_edits_document_at_expected_revision(canvas):
     prompt = next(node for node in view["nodes"] if node["id"] == "prompt-1")
     image = next(node for node in view["nodes"] if node["id"] == "image-1")
     assert prompt["text"] == "雨夜列车"
+    assert image["type"] == "image" and image["version_id"] is None
+    assert image["draft"]["prompt"] == "@[node:prompt-1]"
     assert image["draft"]["params"] == {"n": 2, "size": "1024x1024"}  # 路径类字段被丢弃
     assert view["connections"][0]["source_node_id"] == "prompt-1"
 

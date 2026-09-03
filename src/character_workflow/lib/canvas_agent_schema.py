@@ -42,6 +42,15 @@ class AddMediaNodeChange(StrictInput):
     node_id: NodeId | None = None
 
 
+class AddSurfaceChange(StrictInput):
+    """空的图片 / 视频 / 音频节点：Web 的生成面就是它，跑完产物直接落在同一个节点上。"""
+    op: Literal["add_surface"]
+    kind: Literal["image", "video", "audio"]
+    title: Title
+    position: CanvasPointInput
+    node_id: NodeId | None = None
+
+
 class SetTextChange(StrictInput):
     op: Literal["set_text"]
     node_id: NodeId
@@ -84,7 +93,7 @@ class RemoveNodeChange(StrictInput):
 
 
 CanvasChange = Annotated[
-    AddTextChange | AddMediaNodeChange | SetTextChange | SetDraftChange | ConnectChange
+    AddTextChange | AddMediaNodeChange | AddSurfaceChange | SetTextChange | SetDraftChange | ConnectChange
     | DisconnectChange | MoveChange | RemoveNodeChange,
     Field(discriminator="op"),
 ]
