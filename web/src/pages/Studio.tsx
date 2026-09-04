@@ -30,6 +30,7 @@ import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
+import { readStudioDraft, writeStudioDraft } from './studioDraft';
 import { creationAssetImageUrl } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
 import type { CreationAsset, CreationImageAssetContent } from '@/schema/creationAssets';
@@ -80,6 +81,7 @@ export function Studio({ compact = false }: { compact?: boolean }) {
 
 function StudioFull() {
   const [saved] = useState(loadSelection);
+  const [draft] = useState(readStudioDraft);
   const [rounds, setRounds] = useState<RoundState[]>([]);
   // 查询面板筛选 + 收藏/隐藏集（渲染端筛选用，state 仍保留全量轮）。setHistoryFilters 喂 StudioQueryBar，
   // toggleFavorite 透传到结果卡 ★ 收藏按钮。
@@ -122,38 +124,53 @@ function StudioFull() {
   // 出图配置每次启动回默认（飙哥指定）：不从 localStorage 回填 ratio/像素/质量/数量，
   // 每次重启网站都是 1:1 + 默认像素（2K 档算）+ low（仅区分质量的模型显示）+ 1 张。
   // provider/model 仍按 saved 恢复（见下方 listKeys 后的恢复逻辑），只重置这 4+1 个配置项。
-  const [ratio, setRatio] = useState('1:1');
-  const [resolution, setResolution] = useState<'2K' | '4K'>('2K');
-  const [count, setCount] = useState(1);
-  const [customSize, setCustomSize] = useState('');
-  const [customSizeManual, setCustomSizeManual] = useState(false);
-  const [quality, setQuality] = useState<Quality>('low');
+  const [ratio, setRatio] = useState(draft?.ratio ?? '1:1');
+  const [resolution, setResolution] = useState<'2K' | '4K'>(draft?.resolution ?? '2K');
+  const [count, setCount] = useState(draft?.count ?? 1);
+  const [customSize, setCustomSize] = useState(draft?.customSize ?? '');
+  const [customSizeManual, setCustomSizeManual] = useState(draft?.customSizeManual ?? false);
+  const [quality, setQuality] = useState<Quality>(draft?.quality ?? 'low');
   // MJ 参数不进 localStorage —— 与 ratio/像素/质量/数量 同一政策：出图配置每次启动回默认。
-  const [mjParams, setMjParams] = useState<MjParams>(MJ_DEFAULTS);
+  const [mjParams, setMjParams] = useState<MjParams>(draft?.mjParams ?? MJ_DEFAULTS);
   // MJ 四个语义参考组；每组允许多图，垫图最终仍落 reference_images。
-  const [mjRefs, setMjRefs] = useState<MjRefSlots>(EMPTY_MJ_REFS);
+  const [mjRefs, setMjRefs] = useState<MjRefSlots>(draft?.mjRefs ?? EMPTY_MJ_REFS);
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
-  const [promptText, setPromptText] = useState('');
+  const [promptText, setPromptText] = useState(draft?.promptText ?? '');
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [assetPanelKind, setAssetPanelKind] = useState<'prompt' | 'image'>('prompt');
   const [assetSaveRequest, setAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
   const assetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const [canvasTargets, setCanvasTargets] = useState<CanvasProject[]>([]);
-  const [promptAssetSourceTitle, setPromptAssetSourceTitle] = useState<string | null>(null);
-  const [referenceImages, setReferenceImages] = useState<File[]>([]);
-  const [kind, setKind] = useState<JobKind>(saved.kind ?? 'image');
+  const [promptAssetSourceTitle, setPromptAssetSourceTitle] = useState<string | null>(draft?.promptAssetSourceTitle ?? null);
+  const [referenceImages, setReferenceImages] = useState<File[]>(draft?.referenceImages ?? []);
+  const [kind, setKind] = useState<JobKind>(draft?.kind ?? saved.kind ?? 'image');
   // 旧版本 videoMode 存过 t2v/i2v/ref/v2v —— 仅 'omni' 原样保留，其余一律回落首尾帧。
-  const [videoMode, setVideoMode] = useState<VideoMode>(saved.videoMode === 'omni' ? 'omni' : 'firstlast');
-  const [duration, setDuration] = useState<number>(saved.duration ?? 5);
-  const [videoResolution, setVideoResolution] = useState<string>(saved.videoResolution ?? '720p');
-  const [videoRatio, setVideoRatio] = useState<string>(saved.videoRatio ?? '16:9');
-  const [videoQuality, setVideoQuality] = useState<VideoQuality>(saved.videoQuality === 'pro' ? 'pro' : 'std');
-  const [videoCount, setVideoCount] = useState<number>(clampImageCount(saved.videoCount ?? 1));
-  const [generateAudio, setGenerateAudio] = useState<boolean>(saved.generateAudio ?? false);
-  const [referenceVideos, setReferenceVideos] = useState<File[]>([]);
-  const [referenceAudios, setReferenceAudios] = useState<File[]>([]);
+  const [videoMode, setVideoMode] = useState<VideoMode>(draft?.videoMode ?? (saved.videoMode === 'omni' ? 'omni' : 'firstlast'));
+  const [duration, setDuration] = useState<number>(draft?.duration ?? saved.duration ?? 5);
+  const [videoResolution, setVideoResolution] = useState<string>(draft?.videoResolution ?? saved.videoResolution ?? '720p');
+  const [videoRatio, setVideoRatio] = useState<string>(draft?.videoRatio ?? saved.videoRatio ?? '16:9');
+  const [videoQuality, setVideoQuality] = useState<VideoQuality>(draft?.videoQuality ?? (saved.videoQuality === 'pro' ? 'pro' : 'std'));
+  const [videoCount, setVideoCount] = useState<number>(draft?.videoCount ?? clampImageCount(saved.videoCount ?? 1));
+  const [generateAudio, setGenerateAudio] = useState<boolean>(draft?.generateAudio ?? saved.generateAudio ?? false);
+  const [referenceVideos, setReferenceVideos] = useState<File[]>(draft?.referenceVideos ?? []);
+  const [referenceAudios, setReferenceAudios] = useState<File[]>(draft?.referenceAudios ?? []);
   // 首尾帧模式的双槽（与 referenceImages 分离：两个槽各自独立可空，仅尾帧也合法）。
-  const [videoFrames, setVideoFrames] = useState<FrameSlots>({ first: null, last: null });
+  const [videoFrames, setVideoFrames] = useState<FrameSlots>(draft?.videoFrames ?? { first: null, last: null });
+
+  // 每次改动都把未提交的输入写进内存草稿；切页卸载后回来按它恢复，刷新即清空。
+  useEffect(() => {
+    writeStudioDraft({
+      providerAlias, model, kind, promptText, promptAssetSourceTitle,
+      referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
+      ratio, resolution, count, customSize, customSizeManual, quality,
+      videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
+    });
+  }, [
+    providerAlias, model, kind, promptText, promptAssetSourceTitle,
+    referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
+    ratio, resolution, count, customSize, customSizeManual, quality,
+    videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
+  ]);
 
   useEffect(() => {
     if (!assetPanelOpen) return;
@@ -335,13 +352,15 @@ function StudioFull() {
         const usable = resp.keys.filter((key) => key.models.length > 0);
         setKeys(usable);
         // 优先恢复上次保存的供应商/模型（校验仍存在），否则回落到第一个可用 key。
-        const savedKey = saved.providerAlias
-          ? usable.find((key) => key.alias === saved.providerAlias)
+        const wantedAlias = draft?.providerAlias || saved.providerAlias;
+        const wantedModel = draft?.model || saved.model;
+        const savedKey = wantedAlias
+          ? usable.find((key) => key.alias === wantedAlias)
           : undefined;
         const selected = savedKey ?? usable[0];
         setProviderAlias(selected?.alias ?? '');
-        const savedModelValid = saved.model && selected?.models.some((m) => m.id === saved.model);
-        const nextModel = savedModelValid ? saved.model! : selected?.models[0]?.id ?? '';
+        const savedModelValid = wantedModel && selected?.models.some((m) => m.id === wantedModel);
+        const nextModel = savedModelValid ? wantedModel! : selected?.models[0]?.id ?? '';
         setModel(nextModel);
         // 恢复手动自定义尺寸：标准尺寸由 ratio/resolution 自动重算，仅当保存值偏离标准时用 sizeOverride 覆盖。
         // 只恢复用户**亲手改过**的尺寸，凭存档里的 customSizeManual 标记判断。

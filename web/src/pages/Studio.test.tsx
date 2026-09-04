@@ -4,6 +4,7 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
 import { Studio } from './Studio';
+import { clearStudioDraft } from './studioDraft';
 import * as connection from '@/api/connection';
 import { createTestEventStream } from '@/test/eventStream';
 
@@ -14,6 +15,7 @@ function typePrompt(editor: Element, value: string) {
 }
 
 beforeEach(() => {
+  clearStudioDraft();
   localStorage.clear();
   (globalThis.URL as any).createObjectURL ??= vi.fn(() => 'blob:test');
   (globalThis.URL as any).revokeObjectURL ??= vi.fn();
