@@ -23,7 +23,7 @@ from viewer_server.connection_status import (  # noqa: E402
     INSTANCE_ENV, new_instance_id, probe_connection_status,
 )
 from viewer_server.pid import (  # noqa: E402
-    cleanup_stale_pid, read_instance, read_pid, read_port, write_instance, write_pid, write_port,
+    _is_alive, cleanup_stale_pid, read_instance, read_pid, read_port, write_instance, write_pid, write_port,
 )
 
 
@@ -126,6 +126,10 @@ def _find_free_port(start: int) -> int:
     port = start
     while port < start + 100:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            # 刚停掉的服务留下的 TIME_WAIT 会让裸 bind 失败，把端口一路推到 5175/5176；uvicorn 自己
+            # 带 SO_REUSEADDR 能绑上，探测要用同样的口径。Windows 上这个选项会放行抢占正在监听的端口，不开。
+            if sys.platform != "win32":
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind(("127.0.0.1", port))
                 return port
@@ -139,6 +143,18 @@ def _server_responds(port: int, instance_id: str | None) -> bool:
         return False
     status = probe_connection_status(port)
     return status is not None and status.instance_id == instance_id
+
+
+STOP_TIMEOUT_SECONDS = 20.0
+
+
+def _wait_for_exit(pid: int, *, timeout: float = STOP_TIMEOUT_SECONDS) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not _is_alive(pid):
+            return True
+        time.sleep(0.2)
+    return False
 
 
 def _wait_for_server(port: int, instance_id: str, *, timeout: float = 8.0) -> bool:
@@ -258,11 +274,22 @@ def cmd_stop() -> None:
         if instance_id is not None and not _server_responds(port, instance_id):
             print("无法验证运行实例，未向该 PID 发送停止信号。请检查原启动终端。", file=sys.stderr)
             sys.exit(1)
-        if _terminate(pid):
-            print(f"sent terminate signal to pid {pid}")
-        else:
+        if not _terminate(pid):
             print(f"pid {pid} not found — cleaning stale PID")
             cleanup_stale_pid(runtime)
+            return
+        print(f"sent terminate signal to pid {pid}")
+        # 一键启动脚本是 stop 紧接 start：不等进程真正退出，start 会读到「还活着但已不应答」的
+        # 记录并拒绝启动。等到退出再清记录，start 才能干净接手。
+        if _wait_for_exit(pid):
+            cleanup_stale_pid(runtime)
+            return
+        print(
+            f"pid {pid} 在 {STOP_TIMEOUT_SECONDS:.0f} 秒内没有退出（可能还在收尾出图任务），"
+            "启动记录保留；等它退出后再启动。",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def cmd_open_browser() -> None:

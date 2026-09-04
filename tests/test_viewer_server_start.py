@@ -1,6 +1,7 @@
 import os
 import http.client
 import subprocess
+import threading
 import sys
 import time
 from pathlib import Path
@@ -146,6 +147,7 @@ def test_stop_verified_instance_only(tmp_path, monkeypatch):
     ))
     stopped = []
     monkeypatch.setattr(server, "_terminate", lambda pid: stopped.append(pid) or True)
+    monkeypatch.setattr(server, "_wait_for_exit", lambda pid: True)
     server.cmd_stop()
     assert stopped == [os.getpid()]
 
@@ -267,6 +269,10 @@ def test_real_local_runtime_can_be_discovered_reused_and_stopped(isolated_data_r
         assert read_pid(runtime) == runtime_pid
         assert read_instance(runtime) == first_instance
 
+        # 真实启动器里 stop 与服务不是父子进程；这里 pytest 是父进程，退出后的子进程在被 wait 前是
+        # 僵尸（kill(pid, 0) 仍成功），先起线程 wait 掉，stop 的等退出才判得准。
+        reaper = threading.Thread(target=process.wait, kwargs={"timeout": 15}, daemon=True)
+        reaper.start()
         stopped = subprocess.run(
             [sys.executable, "-c", prefix + "server.cmd_stop()"],
             env=env, capture_output=True, text=True, encoding="utf-8", timeout=10,
@@ -308,5 +314,42 @@ def test_legacy_record_without_instance_can_be_stopped_and_start_points_to_stop(
 
     stopped = []
     monkeypatch.setattr(server, "_terminate", lambda pid: stopped.append(pid) or True)
+    monkeypatch.setattr(server, "_wait_for_exit", lambda pid: True)
     server.cmd_stop()
     assert stopped == [os.getpid()]
+
+
+def test_stop_waits_for_exit_then_clears_records_so_start_can_follow(tmp_path, monkeypatch):
+    """一键启动 = stop 紧接 start：stop 必须等进程退出并清掉记录，否则 start 读到「活着但不应答」的记录就拒启。"""
+    write_pid(tmp_path, os.getpid())
+    write_port(tmp_path, 5188)
+    write_instance(tmp_path, "a" * 32)
+    monkeypatch.setattr(data_root, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(server, "probe_connection_status", lambda port: LocalConnectionStatus(
+        service="game-atelier", instance_id="a" * 32, app_version="5.33.2", protocol="atelier-local/1",
+    ))
+    monkeypatch.setattr(server, "_terminate", lambda pid: True)
+    alive = {"value": True}
+    import viewer_server.pid as pid_module
+    monkeypatch.setattr(server, "_is_alive", lambda pid: alive["value"])
+    monkeypatch.setattr(pid_module, "_is_alive", lambda pid: alive["value"])
+    monkeypatch.setattr(server.time, "sleep", lambda s: alive.update(value=False))
+    server.cmd_stop()
+    assert not (tmp_path / "server.pid").exists()
+    assert not (tmp_path / "server.instance").exists()
+
+
+def test_stop_keeps_records_when_process_does_not_exit(tmp_path, monkeypatch, capsys):
+    write_pid(tmp_path, os.getpid())
+    write_port(tmp_path, 5188)
+    write_instance(tmp_path, "a" * 32)
+    monkeypatch.setattr(data_root, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(server, "probe_connection_status", lambda port: LocalConnectionStatus(
+        service="game-atelier", instance_id="a" * 32, app_version="5.33.2", protocol="atelier-local/1",
+    ))
+    monkeypatch.setattr(server, "_terminate", lambda pid: True)
+    monkeypatch.setattr(server, "_wait_for_exit", lambda pid: False)
+    with pytest.raises(SystemExit):
+        server.cmd_stop()
+    assert (tmp_path / "server.pid").exists()
+    assert "没有退出" in capsys.readouterr().err

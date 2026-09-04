@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.37.1',
+    date: '2026-09-04',
+    headline: '一键启动不再卡在「无法验证运行实例」',
+    changes: [
+      { kind: 'fix', text: '一键启动停掉旧工坊后会等它真正退出再启动新的，不再因为旧进程还在收尾而误报「已有存活的工坊启动记录，但无法验证运行实例」' },
+      { kind: 'fix', text: '重启后工坊回到 5174 端口，不再每重启一次就往后挪一个端口' },
+    ],
+  },
+  {
     version: '5.37.0',
     date: '2026-09-04',
     headline: '创作台可以停止生成',
