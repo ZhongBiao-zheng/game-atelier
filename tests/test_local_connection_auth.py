@@ -298,3 +298,22 @@ def test_session_limit_prevents_unbounded_growth():
     with pytest.raises(ConnectionError) as error:
         store.local_session(ORIGIN, None)
     assert error.value.status == 429
+
+
+def test_hot_path_reads_grants_file_only_when_it_changes(client, monkeypatch):
+    # authenticate 跑在事件循环上、SSE 每 0.5s 刷一次：授权文件必须按 stat 缓存，不能每次都读盘。
+    bootstrap(client)
+    native, _project, grant, _credential = create_grant(client)
+    import viewer_server.connection_auth as auth
+    reads: list[Path] = []
+    original = auth.read_private_json
+    monkeypatch.setattr(auth, "read_private_json", lambda path, *a, **k: reads.append(path) or original(path, *a, **k))
+    for _ in range(5):
+        assert native.post("/api/workshop/list-projects", json={}).status_code == 200
+        assert client.get("/api/connection/agent-grants").status_code == 200
+    assert len(reads) <= 1
+    grants_path = Path(grant["credential_path"]).parent / "grants.json"
+    write_private_json(grants_path, read_private_json(grants_path, 128 * 1024))
+    before = len(reads)
+    assert native.post("/api/workshop/list-projects", json={}).status_code == 200
+    assert len(reads) == before + 1

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import secrets
 import threading
 import time
@@ -69,10 +70,29 @@ class ConnectionStore:
         self.lease: tuple[str, str, float] | None = None
         self.lock = threading.RLock()
         self._attempts: list[float] = []
+        # 热路径不碰磁盘：authenticate 走在事件循环上、SSE 每 0.5s 刷一次，
+        # 授权文件与 data-root 配置都按 stat 结果缓存，只在文件变化时重读。
+        self._root_key: tuple[str | None, int | None] | None = None
+        self._grants_key: tuple[int, int, int] | None = None
+        self._grants_cache: dict = {}
+
+    def _resolve_root(self) -> Path:
+        cfg = data_root._global_config_file()
+        try:
+            mtime = cfg.stat().st_mtime_ns
+        except OSError:
+            mtime = None
+        key = (os.environ.get(data_root._ENV_VAR), mtime)
+        if key != self._root_key or self.root is None:
+            self._root_key = key
+            return data_root.resolve_data_root()
+        assert self.root is not None
+        return self.root
 
     def _refresh(self) -> None:
-        root = data_root.resolve_data_root()
+        root = self._resolve_root()
         if root != self.root:
+            self._grants_key, self._grants_cache = None, {}
             for session in self.sessions.values():
                 session.revoked.set()
             self.sessions.clear()
@@ -163,8 +183,22 @@ class ConnectionStore:
         return self.root / ".config" / "connections" / "grants.json"
 
     def _read_grants(self) -> dict:
+        """按 (inode, size, mtime) 缓存；命中时零文件读取，也不跑 Windows ACL 校验。"""
         path = self._grants_path()
-        return read_private_json(path, 128 * 1024) if path.exists() else {}
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            with self.lock:
+                self._grants_key, self._grants_cache = None, {}
+            return {}
+        key = (stat.st_ino, stat.st_size, stat.st_mtime_ns)
+        with self.lock:
+            if key == self._grants_key:
+                return self._grants_cache
+        grants = read_private_json(path, 128 * 1024)
+        with self.lock:
+            self._grants_key, self._grants_cache = key, grants
+        return grants
 
     def list_grants(self) -> list[dict]:
         with self.lock:
@@ -196,56 +230,59 @@ class ConnectionStore:
         base_url: str, canvas_project_ids: list[str] | None = None,
     ) -> dict:
         canvas_project_ids = list(canvas_project_ids or [])
+        # 磁盘读写与 flock 都在 store.lock 之外：这把锁被事件循环上的 authenticate 与 SSE 刷新共用，
+        # 持锁做文件 I/O（Windows 上还有 ACL 调用）会把整条事件循环拖停。
         with self.lock:
             self._refresh()
-            known = {project.id for project in read_projects().projects}
-            if not set(project_ids) <= known:
-                raise ConnectionError("TARGET_NOT_AUTHORIZED", "请选择现有工坊项目")
-            if canvas_project_ids:
-                from character_workflow.lib.canvas_projects import list_canvas_project_options
-                known_canvas = {p.project_id for p in list_canvas_project_options()}
-                if not set(canvas_project_ids) <= known_canvas:
-                    raise ConnectionError("TARGET_NOT_AUTHORIZED", "请选择现有画布项目")
-            if not project_ids and not canvas_project_ids:
-                raise ConnectionError("TARGET_NOT_AUTHORIZED", "请至少选择一个工坊项目或画布")
-            if not set(capabilities) <= AGENT_CAPABILITIES:
-                raise ConnectionError("CAPABILITY_DENIED", "Agent 授权包含未知能力")
-            if project_ids and "read" not in capabilities:
-                raise ConnectionError("CAPABILITY_DENIED", "工坊授权需要读取能力")
-            if canvas_project_ids and "canvas_read" not in capabilities:
-                raise ConnectionError("CAPABILITY_DENIED", "画布授权需要画布读取能力")
             path = self._grants_path()
-            with file_lock(path.with_suffix(".lock")):
-                grants = self._read_grants()
-                if len(grants) >= GRANT_LIMIT:
-                    raise ConnectionError("CONNECTION_RATE_LIMITED", "授权数量已达上限，请撤销旧授权", 429)
-                grant_id, token = uuid.uuid4().hex, secrets.token_urlsafe(32)
-                credential_path = path.parent / f"{grant_id}.json"
-                grant = {
-                    "grant_id": grant_id, "name": name,
-                    "project_ids": sorted(set(project_ids)), "capabilities": sorted(set(capabilities)),
-                    "canvas_project_ids": sorted(set(canvas_project_ids)),
-                    "expires_at": iso_time(time.time() + days * 86400),
-                    "credential_path": str(credential_path), "token_hash": digest(token),
-                }
-                write_private_json(credential_path, {
-                    "service": "game-atelier", "base_url": base_url, "grant_id": grant_id,
-                    "grant_token": token, "expires_at": grant["expires_at"],
-                })
-                grants[grant_id] = grant
-                write_private_json(path, grants)
-                return self._public_grant(grant)
+        known = {project.id for project in read_projects().projects}
+        if not set(project_ids) <= known:
+            raise ConnectionError("TARGET_NOT_AUTHORIZED", "请选择现有工坊项目")
+        if canvas_project_ids:
+            from character_workflow.lib.canvas_projects import list_canvas_project_options
+            known_canvas = {p.project_id for p in list_canvas_project_options()}
+            if not set(canvas_project_ids) <= known_canvas:
+                raise ConnectionError("TARGET_NOT_AUTHORIZED", "请选择现有画布项目")
+        if not project_ids and not canvas_project_ids:
+            raise ConnectionError("TARGET_NOT_AUTHORIZED", "请至少选择一个工坊项目或画布")
+        if not set(capabilities) <= AGENT_CAPABILITIES:
+            raise ConnectionError("CAPABILITY_DENIED", "Agent 授权包含未知能力")
+        if project_ids and "read" not in capabilities:
+            raise ConnectionError("CAPABILITY_DENIED", "工坊授权需要读取能力")
+        if canvas_project_ids and "canvas_read" not in capabilities:
+            raise ConnectionError("CAPABILITY_DENIED", "画布授权需要画布读取能力")
+        with file_lock(path.with_suffix(".lock")):
+            grants = dict(self._read_grants())
+            if len(grants) >= GRANT_LIMIT:
+                raise ConnectionError("CONNECTION_RATE_LIMITED", "授权数量已达上限，请撤销旧授权", 429)
+            grant_id, token = uuid.uuid4().hex, secrets.token_urlsafe(32)
+            credential_path = path.parent / f"{grant_id}.json"
+            grant = {
+                "grant_id": grant_id, "name": name,
+                "project_ids": sorted(set(project_ids)), "capabilities": sorted(set(capabilities)),
+                "canvas_project_ids": sorted(set(canvas_project_ids)),
+                "expires_at": iso_time(time.time() + days * 86400),
+                "credential_path": str(credential_path), "token_hash": digest(token),
+            }
+            write_private_json(credential_path, {
+                "service": "game-atelier", "base_url": base_url, "grant_id": grant_id,
+                "grant_token": token, "expires_at": grant["expires_at"],
+            })
+            grants[grant_id] = grant
+            write_private_json(path, grants)
+            return self._public_grant(grant)
 
     def revoke_grant(self, grant_id: str) -> None:
         with self.lock:
             self._refresh()
             path = self._grants_path()
-            with file_lock(path.with_suffix(".lock")):
-                grants = self._read_grants()
-                grant = grants.pop(grant_id, None)
-                if grant is not None:
-                    write_private_json(path, grants)
-                    # Keep the revoked credential file: revocation, not possession, is authoritative.
+        with file_lock(path.with_suffix(".lock")):
+            grants = dict(self._read_grants())
+            grant = grants.pop(grant_id, None)
+            if grant is not None:
+                write_private_json(path, grants)
+                # Keep the revoked credential file: revocation, not possession, is authoritative.
+        with self.lock:
             for session in self.sessions.values():
                 if session.principal.grant_id == grant_id:
                     session.revoked.set()
