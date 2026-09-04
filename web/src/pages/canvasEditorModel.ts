@@ -23,6 +23,7 @@ import type {
   CanvasMediaVersion,
   CanvasNode,
   CanvasPoint,
+  CanvasMediaOperation,
   CanvasSize,
 } from '@/schema/canvas';
 import {
@@ -320,6 +321,47 @@ export function canvasDeletionBlockedMessage(
   if (blocked.length === 0) return null;
   if (blocked.length === 1) return `「${blocked[0].title}」正在生成，结束后才能删除。`;
   return `选中的节点里有 ${blocked.length} 个正在生成，结束后才能删除。`;
+}
+
+export interface CanvasMediaOperationPlaceholder {
+  id: string;
+  position: { x: number; y: number };
+  size: CanvasSize;
+  label: string;
+}
+
+const MEDIA_OPERATION_PLACEHOLDER_LABEL: Record<CanvasMediaOperation['kind'], string> = {
+  crop: '裁剪中…',
+  split: '切图中…',
+  upscale: '放大中…',
+  remove_background: '抠图中…',
+};
+
+/** 本地媒体操作是同步接口，结果节点要等处理完才从服务端回来。这段空档给用户一个占位节点，
+ *  落点镜像服务端 canvas_media_operations 的公式（源节点右侧 96px、垂直居中、长边 320 / 切图 240），
+ *  结果一到就撤掉换成真节点。服务端为避让已有节点可能再做纵向偏移，占位不追。 */
+export function canvasMediaOperationPlaceholder(
+  source: CanvasNode,
+  version: { width: number; height: number },
+  operation: CanvasMediaOperation,
+): CanvasMediaOperationPlaceholder {
+  const sourceWidth = source.size?.width ?? 320;
+  const sourceHeight = source.size?.height ?? 176;
+  const preferred = operation.kind === 'split' ? 240 : 320;
+  const longEdge = Math.max(version.width, version.height);
+  const shortEdge = Math.min(version.width, version.height);
+  let scale = Math.max(preferred / longEdge, 80 / shortEdge);
+  if (longEdge * scale > 1600) scale = 1600 / longEdge;
+  const size = { width: version.width * scale, height: version.height * scale };
+  return {
+    id: `placeholder-${operation.kind}`,
+    position: {
+      x: source.position.x + sourceWidth + 96,
+      y: source.position.y + (sourceHeight - size.height) / 2,
+    },
+    size,
+    label: MEDIA_OPERATION_PLACEHOLDER_LABEL[operation.kind],
+  };
 }
 
 export function canvasNodeAcceptsInput(node: CanvasNode) {

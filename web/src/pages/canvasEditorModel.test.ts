@@ -3,6 +3,7 @@ import { expect, it, test } from 'vitest';
 import {
   acceptCanvasJobs,
   canvasDeletionBlockedMessage,
+  canvasMediaOperationPlaceholder,
   canvasNodeRenderZIndex,
   canvasPendingInputNodes,
   clampCanvasNodeSize,
@@ -123,6 +124,23 @@ test('canvasDeletionBlockedMessage 只拦 job 仍在跑的节点，生成完成�
   expect(canvasDeletionBlockedMessage([node], ids, new Map())).toBeNull();
   expect(canvasDeletionBlockedMessage([node], ids, jobFor('pending'))).toContain('正在生成');
   expect(canvasDeletionBlockedMessage([node], ids, jobFor('pending_confirm'))).toContain('正在生成');
+});
+
+test('canvasMediaOperationPlaceholder 镜像服务端落点：源节点右侧 96px、垂直居中、长边 320（切图 240）', () => {
+  const source = { ...placementNode('image-a', 100, 200), size: { width: 400, height: 300 } } as CanvasNode;
+  const matting = canvasMediaOperationPlaceholder(source, { width: 1024, height: 768 }, { kind: 'remove_background' });
+  expect(matting).toEqual({
+    id: 'placeholder-remove_background',
+    position: { x: 596, y: 230 },
+    size: { width: 320, height: 240 },
+    label: '抠图中…',
+  });
+  const split = canvasMediaOperationPlaceholder(source, { width: 1024, height: 768 }, { kind: 'split', horizontal_lines: [], vertical_lines: [] });
+  expect(split.size).toEqual({ width: 240, height: 180 });
+  expect(split.label).toBe('切图中…');
+  // 短边保底 80px：极细长图不会缩成一条线。
+  const strip = canvasMediaOperationPlaceholder(source, { width: 2000, height: 100 }, { kind: 'crop', rect: { x: 0, y: 0, width: 1, height: 1 } });
+  expect(strip.size.height).toBe(80);
 });
 
 function placementNode(id: string, x: number, y: number): CanvasNode {

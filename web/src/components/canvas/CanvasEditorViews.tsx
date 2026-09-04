@@ -98,7 +98,10 @@ import {
   type CanvasPendingInput,
 } from '@/pages/canvasEditorModel';
 
-export type FlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
+export type CanvasFlowNode = Node<{ domain: CanvasNode }, 'canvasNode'>;
+/** 本地媒体操作（抠图 / 裁剪 / 切图 / 放大）进行中的占位节点：不在文档里，结果节点落地即撤。 */
+export type CanvasPlaceholderFlowNode = Node<{ label: string }, 'canvasPlaceholder'>;
+export type FlowNode = CanvasFlowNode | CanvasPlaceholderFlowNode;
 
 export interface CanvasGenerationPanelContextValue {
   dismissedNodeId: string | null;
@@ -188,7 +191,24 @@ const EMPTY_VIDEO_FRAME_NODE_IDS: Readonly<Partial<Record<CanvasVideoFrameSlot, 
 const EMPTY_CANVAS_PENDING_INPUTS: readonly CanvasPendingInput[] = [];
 const EMPTY_CANVAS_MENTION_REFERENCES: readonly CanvasMentionReference[] = [];
 
-export function CanvasNodeCard({ data, selected }: NodeProps<FlowNode>) {
+export function CanvasPlaceholderCard({ data }: NodeProps<CanvasPlaceholderFlowNode>) {
+  return (
+    <article
+      role="status"
+      aria-busy="true"
+      aria-label={data.label}
+      data-canvas-placeholder="true"
+      className="relative flex h-full flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-dashed border-border bg-card/95 px-5 text-center text-xs text-[color:var(--status-running)] shell-glow"
+    >
+      <span data-canvas-generation-indicator="true" className="canvas-generation-indicator size-12" aria-hidden="true">
+        <LoaderCircle className="size-5" />
+      </span>
+      <span>{data.label}</span>
+    </article>
+  );
+}
+
+export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   const context = useContext(CanvasNodeContext);
   const setTextEditing = context?.setTextEditing;
   const node = data.domain;
@@ -3357,4 +3377,5 @@ export const canvasNodeTypes = {
     previous.selected === next.selected
     && previous.data.domain === next.data.domain
   )),
+  canvasPlaceholder: CanvasPlaceholderCard,
 };

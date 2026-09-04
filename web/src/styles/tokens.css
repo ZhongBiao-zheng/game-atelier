@@ -449,6 +449,14 @@
   .canvas-flow .react-flow__resize-control.canvas-node-resize-handle.bottom {
     top: calc(100% + 1px);
   }
+  /* 框选后的选区框往外让 12px，不贴着节点边缘。React Flow 用内联 width/height 定尺寸，
+     所以外扩靠 content-box + padding，负 margin 把左上角挪回去。 */
+  .canvas-flow .react-flow__nodesselection-rect {
+    box-sizing: content-box;
+    padding: 12px;
+    margin: -12px;
+    border-radius: 0.5rem;
+  }
   .canvas-flow .react-flow__edge-path {
     stroke-width: 1.5 !important;
   }

@@ -49,7 +49,7 @@ vi.mock('@xyflow/react', () => {
       nodeLookup: Map<string, MockInternalNode>;
     }) => unknown) => selector({ transform: flowTransform, nodeLookup: flowNodeLookup }),
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, multiSelectionKeyCode, selectionKeyCode, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onNodeMouseEnter, onMove, onMoveEnd, onDragOver, onDrop }: {
+    ReactFlow: ({ children, edges, nodes, nodeTypes, onlyRenderVisibleElements, multiSelectionKeyCode, selectionKeyCode, onConnect, onConnectEnd, onEdgesChange, onNodesChange, onNodeClick, onNodeMouseEnter, onMove, onMoveEnd, onDragOver, onDrop, onSelectionStart, onSelectionEnd }: {
       children: React.ReactNode;
       edges: Array<{ id: string; selected?: boolean }>;
       nodes: Array<{
@@ -64,6 +64,8 @@ vi.mock('@xyflow/react', () => {
       onConnect?: (connection: { source: string; target: string; sourceHandle: null; targetHandle: null }) => void;
       onConnectEnd?: (event: MouseEvent, state: { isValid: boolean; fromNode: { id: string }; fromHandle: { type: 'source' | 'target' }; toNode?: { id: string } }) => void;
       onEdgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean }>) => void;
+      onSelectionStart?: () => void;
+      onSelectionEnd?: () => void;
       onNodesChange?: (changes: Array<{ id: string; type: string; selected?: boolean; position?: { x: number; y: number } }>) => void;
       onNodeClick?: (event: React.MouseEvent, node: { id: string }) => void;
       onNodeMouseEnter?: (event: unknown, node: { id: string }) => void;
@@ -150,12 +152,24 @@ vi.mock('@xyflow/react', () => {
             </>
           )}
           {edges.length > 0 && (
-            <button
-              type="button"
-              aria-label="simulate edge selection"
-              data-edge-selected={edges[0].selected}
-              onClick={() => onEdgesChange?.([{ id: edges[0].id, type: 'select', selected: true }])}
-            />
+            <>
+              <button
+                type="button"
+                aria-label="simulate edge selection"
+                data-edge-selected={edges[0].selected}
+                onClick={() => onEdgesChange?.([{ id: edges[0].id, type: 'select', selected: true }])}
+              />
+              <button
+                type="button"
+                aria-label="simulate box selection over edge"
+                onClick={() => {
+                  onSelectionStart?.();
+                  onNodesChange?.(nodes.map(node => ({ id: node.id, type: 'select', selected: true })));
+                  onEdgesChange?.([{ id: edges[0].id, type: 'select', selected: true }]);
+                  onSelectionEnd?.();
+                }}
+              />
+            </>
           )}
           <button type="button" aria-label="simulate viewport change" onClick={() => onMoveEnd?.({}, { x: 120, y: -40, zoom: 0.7 })} />
           <button type="button" aria-label="simulate live zoom" onClick={() => onMove?.({}, { x: 0, y: 0, zoom: 0.42 })} />
@@ -1468,4 +1482,23 @@ it('keeps a single source when the dragged node is outside the selection', async
       expect.objectContaining({ role: 'input', source_node_id: 'source-one', target_node_id: 'target-one' }),
     ],
   })));
+});
+
+it('does not select edges swept by a box selection, only by click', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [textNode('source-one', '甲', 'version-one'), imageNode('target-one', '图片', imageDraft)],
+    connections: [{ id: 'connection-one', role: 'input', source_node_id: 'source-one', target_node_id: 'target-one' }],
+    content_versions: {
+      'version-one': { version_id: 'version-one', kind: 'text', text: '甲', created_at: '2026-08-26T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'user_edit' } },
+    },
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+
+  fireEvent.click(screen.getByRole('button', { name: 'simulate box selection over edge' }));
+  expect(screen.getByRole('toolbar', { name: '已选择 2 个节点' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'simulate edge selection' })).toHaveAttribute('data-edge-selected', 'false');
+
+  fireEvent.click(screen.getByRole('button', { name: 'simulate edge selection' }));
+  expect(screen.getByRole('button', { name: 'simulate edge selection' })).toHaveAttribute('data-edge-selected', 'true');
 });

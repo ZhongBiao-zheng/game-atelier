@@ -185,6 +185,8 @@ import {
   acceptServerContentVersions,
   canvasConnectionCreationCapabilities,
   canvasDeletionBlockedMessage,
+  canvasMediaOperationPlaceholder,
+  type CanvasMediaOperationPlaceholder,
   canvasNodeRenderZIndex,
   canvasNodeProvidesOutput,
   canvasNodeRenderedSize,
@@ -431,6 +433,10 @@ function CanvasEditorInner({
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
+  const [mediaPlaceholder, setMediaPlaceholder] = useState<CanvasMediaOperationPlaceholder | null>(null);
+  // 框选期间 React Flow 会把与选中节点相连的边一并选中，边上的剪刀就冒出来了。
+  // 边的选中只认点击，框选期间到达的 select 变更一律丢弃。
+  const selectionRectActive = useRef(false);
   const [mediaOperationError, setMediaOperationError] = useState<string | null>(null);
   const [mattingPrompt, setMattingPrompt] = useState<MattingPromptState | null>(null);
   const [mattingDownloading, setMattingDownloading] = useState(false);
@@ -1192,8 +1198,26 @@ function CanvasEditorInner({
     for (const id of flowNodeCache.current.keys()) {
       if (!activeIds.has(id)) flowNodeCache.current.delete(id);
     }
+    if (mediaPlaceholder) {
+      next.push({
+        id: mediaPlaceholder.id,
+        type: 'canvasPlaceholder',
+        position: mediaPlaceholder.position,
+        style: {
+          width: mediaPlaceholder.size.width,
+          height: mediaPlaceholder.size.height,
+          zIndex: maximumPersistedZIndex + 2,
+        },
+        data: { label: mediaPlaceholder.label },
+        selectable: false,
+        draggable: false,
+        connectable: false,
+        deletable: false,
+        focusable: false,
+      });
+    }
     return next;
-  }, [document?.content_versions, document?.nodes, liveNodeLayout, selectedNodeIds]);
+  }, [document?.content_versions, document?.nodes, liveNodeLayout, mediaPlaceholder, selectedNodeIds]);
 
   const activeNodeId = hoveredNodeId ?? (
     selectedNodeIds.size === 1 ? selectedNodeIds.values().next().value ?? null : null
@@ -1527,10 +1551,15 @@ function CanvasEditorInner({
   }, [connectSources, connectionSourceIds, onConnect, screenToFlowPosition]);
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
+    // 框选态要在事件到达的当下判定：setState 的 updater 可能延后到框选结束之后才跑。
+    const swept = selectionRectActive.current;
     setSelectedConnectionIds(current => {
       const next = new Set(current);
       for (const change of changes) {
-        if (change.type === 'select') change.selected ? next.add(change.id) : next.delete(change.id);
+        if (change.type === 'select') {
+          if (change.selected && swept) continue;
+          change.selected ? next.add(change.id) : next.delete(change.id);
+        }
         if (change.type === 'remove') next.delete(change.id);
       }
       return next;
@@ -3524,6 +3553,15 @@ function CanvasEditorInner({
       }
       const before = latestDocument.current;
       if (!before) return;
+      const sourceNode = before.nodes.find(node => node.id === target.nodeId);
+      const sourceVersion = before.content_versions[target.versionId];
+      if (sourceNode && sourceVersion?.kind === 'image' && sourceVersion.width && sourceVersion.height) {
+        setMediaPlaceholder(canvasMediaOperationPlaceholder(
+          sourceNode,
+          { width: sourceVersion.width, height: sourceVersion.height },
+          operation,
+        ));
+      }
       const dirtyAtCommand = dirtyVersion.current;
       documentCommandInFlight.current = true;
       const result = await runCanvasMediaOperation(
@@ -3578,6 +3616,7 @@ function CanvasEditorInner({
     } finally {
       documentCommandInFlight.current = false;
       mediaOperationInFlight.current = false;
+      setMediaPlaceholder(null);
       setMediaOperationBusy(false);
       if (saveQueued.current) void flushSave().catch(() => {
         setError('图片处理已完成，但并发编辑尚未保存。请检查服务后重试。');
@@ -4049,6 +4088,8 @@ function CanvasEditorInner({
           edges={flowEdges}
           nodeTypes={canvasNodeTypes}
           edgeTypes={canvasEdgeTypes}
+          onSelectionStart={() => { selectionRectActive.current = true; }}
+          onSelectionEnd={() => { selectionRectActive.current = false; }}
           onConnect={onConnect}
           onConnectStart={() => setConnectionInProgress(true)}
           onConnectEnd={onConnectEnd}

@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.39.0',
+    date: '2026-09-04',
+    headline: '画布：抠图先出占位节点，框选不再误选连线',
+    changes: [
+      { kind: 'feat', text: '抠图 / 裁剪 / 切图 / 放大点下去立刻在源节点右侧出现「处理中」占位节点，结果好了原地换成真节点' },
+      { kind: 'fix', text: '框选节点时不再把相连的连线一起选中，连线上的剪刀只在点击连线时出现' },
+      { kind: 'fix', text: '框选后的选区框往外让出 12px，不再贴着节点边缘' },
+    ],
+  },
+  {
     version: '5.38.0',
     date: '2026-09-04',
     headline: '画布：⌘G 打组，多选拖线一次全连',
