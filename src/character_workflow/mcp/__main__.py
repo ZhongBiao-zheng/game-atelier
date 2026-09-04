@@ -19,8 +19,9 @@ def main() -> int:
         print(f"{error.code}: {error.message}", file=sys.stderr)
         return 2
     client = WorkshopClient(credentials)
+    # 不在启动时连 viewer-server：Agent 宿主常先于工坊启动，启动即退出会让整个会话工具不可见。
+    # 会话按需建立（call 内部），服务未起时每次调用返回 LOCAL_SERVICE_UNAVAILABLE 与启动指引。
     try:
-        client.connect()
         create_server(client).run(transport="stdio")
     except AdapterError as error:
         print(f"{error.code}: {error.message}", file=sys.stderr)

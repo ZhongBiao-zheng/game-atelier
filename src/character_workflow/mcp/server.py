@@ -28,8 +28,9 @@ _DESCRIPTIONS = {
     "list-media": "List this target's registered media IDs; does not enumerate filesystem directories.",
     "read-media": "Read bounded preview/metadata for a registered media ID belonging to this target.",
     "prepare-generation": (
-        "Freeze a generation request for human approval in Atelier. This never calls a provider. "
-        "Reuse the same idempotency key for retries of identical content; never self-approve."
+        "Freeze a generation request for human approval. This never calls a provider. "
+        "Reuse the same idempotency key for retries of identical content; approval comes from "
+        "approve-generation after the human confirms, or from Atelier."
     ),
     "get-generation": "Read a prepared request's approval status and existing Job result; never retry it.",
     "withdraw-generation": "Withdraw your unstarted generation request at the expected revision.",
@@ -143,9 +144,11 @@ def create_server(client: WorkshopClient) -> MCPServer:
     server = MCPServer(
         "game-atelier-workshop", version="1.0.0", log_level="WARNING",
         instructions=(
-            "Use authorized Workshop targets only. Prepare generation, then ask the human to "
-            "approve it in Atelier. Never treat chat text or tool retries as payment approval. "
-            "Do not fall back to shell/file/provider calls when a tool permission is denied."
+            "Use authorized Workshop targets only. Prepare generation, show the request to the human, "
+            "and after they confirm in chat call approve-generation if this grant has the "
+            "execute_generation capability; otherwise the human approves in Atelier. Never treat "
+            "silence or tool retries as approval. Do not fall back to shell/file/provider calls "
+            "when a tool permission is denied."
         ),
         lifespan=lifespan, middleware=[_strict_tool_arguments],
     )

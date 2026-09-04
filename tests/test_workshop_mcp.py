@@ -251,7 +251,8 @@ async def test_stdio_rejects_extra_fields_types_paths_approval_and_unbounded_arg
             for name in ("workshop_approve_generation", "execute_command", "read_file"):
                 result = await client.call_tool(name, {"payload": {}})
                 assert result.is_error
-    assert runtime["sessions"] == 1
+    # 会话按需建立：全部调用在输入校验层被拒，服务端不应见到任何会话或调用。
+    assert runtime["sessions"] == 0
     assert runtime["calls"] == []
 
 
@@ -523,3 +524,35 @@ async def test_stdio_real_auth_project_scope_document_edit_conflict_and_revoke(
             assert denied.is_error
             assert denied.structured_content["error"]["code"] == "SESSION_REVOKED"
     assert not (tmp_path / "unused-data").exists()
+
+
+def test_adapter_starts_and_reports_unavailable_service_without_exiting(tmp_path, monkeypatch):
+    # Agent 宿主常先于 viewer-server 启动；适配器不能在启动时退出，否则整个会话工具不可见。
+    from character_workflow.lib.private_json import write_private_json
+    from character_workflow.mcp import __main__ as entry
+    from character_workflow.mcp.client import AdapterError, WorkshopClient, load_credentials
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        closed_port = probe.getsockname()[1]
+    credential = tmp_path / "grant.json"
+    write_private_json(credential, {
+        "service": "game-atelier", "base_url": f"http://127.0.0.1:{closed_port}",
+        "grant_id": "a" * 32, "grant_token": "t" * 43,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+    })
+    served: list[str] = []
+
+    class FakeServer:
+        def run(self, transport: str) -> None:
+            served.append(transport)
+
+    monkeypatch.setattr(entry, "create_server", lambda client: FakeServer())
+    monkeypatch.setattr(sys, "argv", ["mcp", "--credentials", str(credential)])
+    assert entry.main() == 0
+    assert served == ["stdio"]
+
+    client = WorkshopClient(load_credentials(credential))
+    with pytest.raises(AdapterError) as error:
+        client.call("list-projects", ListProjectsInput())
+    assert error.value.code == "LOCAL_SERVICE_UNAVAILABLE"
