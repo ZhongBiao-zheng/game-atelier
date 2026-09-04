@@ -424,6 +424,8 @@ export interface CanvasMattingModelStatus {
   ready: boolean;
   bytes: number;
   provider: string;
+  available: boolean;
+  message: string | null;
 }
 
 export interface CanvasMediaOperationResult {

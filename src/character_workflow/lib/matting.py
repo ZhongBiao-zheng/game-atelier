@@ -52,6 +52,20 @@ class MattingModelStatus:
     ready: bool
     bytes: int
     provider: str
+    available: bool
+    message: str | None
+
+
+UNAVAILABLE_MESSAGE = "本机抠图需要 onnxruntime，当前平台（如 Intel Mac）没有对应安装包。"
+
+
+def runtime_available() -> bool:
+    """onnxruntime 按平台条件安装（见 pyproject）；缺失时抠图整体不可用，其余功能不受影响。"""
+    try:
+        import onnxruntime  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 def models_dir() -> Path:
@@ -71,6 +85,8 @@ def _file_sha256(path: Path) -> str:
 
 
 def selected_provider() -> str:
+    if not runtime_available():
+        return "unavailable"
     import onnxruntime as ort
 
     available = set(ort.get_available_providers())
@@ -82,16 +98,21 @@ def selected_provider() -> str:
 
 def model_status() -> MattingModelStatus:
     path = model_path()
+    available = runtime_available()
     return MattingModelStatus(
         model_id=MODEL_ID,
-        ready=path.is_file() and path.stat().st_size == _MODEL_BYTES,
+        ready=available and path.is_file() and path.stat().st_size == _MODEL_BYTES,
         bytes=_MODEL_BYTES,
         provider=selected_provider(),
+        available=available,
+        message=None if available else UNAVAILABLE_MESSAGE,
     )
 
 
 def ensure_model() -> Path:
     """下载并校验模型；已存在且完整就直接返回。流式写 tmp，sha256 对上才 replace 到位。"""
+    if not runtime_available():
+        raise RuntimeError(UNAVAILABLE_MESSAGE)
     path = model_path()
     if path.is_file() and path.stat().st_size == _MODEL_BYTES:
         return path
@@ -120,6 +141,8 @@ def _get_session() -> Any:
     global _session
     with _session_lock:
         if _session is None:
+            if not runtime_available():
+                raise MattingModelMissing(UNAVAILABLE_MESSAGE)
             path = model_path()
             if not (path.is_file() and path.stat().st_size == _MODEL_BYTES):
                 raise MattingModelMissing("抠图模型尚未下载")

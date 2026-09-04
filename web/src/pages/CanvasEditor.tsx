@@ -3541,6 +3541,10 @@ function CanvasEditorInner({
         setError((statusError as Error).message);
         return;
       }
+      if (!status.available) {
+        setError(status.message ?? '当前平台不支持本机抠图。');
+        return;
+      }
       if (!status.ready) {
         setMattingPrompt({ ...target, title: node.title, bytes: status.bytes });
         return;

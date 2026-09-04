@@ -2800,6 +2800,8 @@ class CanvasMattingModelStatus(BaseModel):
     ready: bool
     bytes: int
     provider: str
+    available: bool
+    message: str | None
 
 
 def _matting_model_status() -> CanvasMattingModelStatus:
@@ -2808,6 +2810,7 @@ def _matting_model_status() -> CanvasMattingModelStatus:
     status = model_status()
     return CanvasMattingModelStatus(
         model_id=status.model_id, ready=status.ready, bytes=status.bytes, provider=status.provider,
+        available=status.available, message=status.message,
     )
 
 
@@ -2819,8 +2822,12 @@ async def get_canvas_matting_model() -> CanvasMattingModelStatus:
 @router.post("/canvas/matting-model", response_model=CanvasMattingModelStatus)
 async def post_canvas_matting_model() -> CanvasMattingModelStatus:
     """下载抠图模型（约 214 MB）。同步等待，前端按需提示进度。"""
-    from character_workflow.lib.matting import ensure_model
+    from character_workflow.lib.matting import UNAVAILABLE_MESSAGE, ensure_model, runtime_available
 
+    if not runtime_available():
+        raise HTTPException(422, detail={
+            "code": "canvas_matting_unavailable", "message": UNAVAILABLE_MESSAGE,
+        })
     try:
         await run_in_threadpool(ensure_model)
     except RuntimeError as error:
