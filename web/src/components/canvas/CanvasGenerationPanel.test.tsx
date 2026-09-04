@@ -1002,6 +1002,7 @@ it('flips the generation panel above the node when there is no room below', () =
 
   expect(placement.top).toBe(254);
   expect(placement.top + 290).toBeLessThanOrEqual(nearBottom.top - 16);
+  expect(placement.side).toBe('above');
 });
 
 it('chooses the roomier vertical side without changing horizontal alignment', () => {
@@ -1023,6 +1024,7 @@ it('keeps the generation panel directly below instead of jumping sideways', () =
   expect(placement.left).toBe(-49);
   expect(placement.top).toBe(node.bottom + 16);
   expect(placement.width).toBe(608);
+  expect(placement.side).toBe('below');
 });
 
 it('prefers the roomier side even when the panel extends beyond the viewport', () => {

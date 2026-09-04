@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.39.1',
+    date: '2026-09-04',
+    headline: '画布：占位节点接上连线，面板在上方时工具栏翻到下方',
+    changes: [
+      { kind: 'fix', text: '抠图等处理中的占位节点长得和图片节点一样，并用虚线连着源素材' },
+      { kind: 'fix', text: '鼠标停在节点上方的工具栏上时，双指也能平移画布' },
+      { kind: 'fix', text: '生成面板落在节点上方时，节点的标题栏和工具栏（含上传附件）翻到节点下方，不再被盖住' },
+    ],
+  },
+  {
     version: '5.39.0',
     date: '2026-09-04',
     headline: '画布：抠图先出占位节点，框选不再误选连线',

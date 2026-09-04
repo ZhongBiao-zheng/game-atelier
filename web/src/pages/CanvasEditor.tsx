@@ -1279,8 +1279,22 @@ function CanvasEditorInner({
       return previous;
     }
     flowEdgesRef.current = next;
+    if (mediaPlaceholder) {
+      // 占位节点与源素材之间先画一条派生虚线，结果节点落地后由真连接接替。
+      next.push({
+        id: `${mediaPlaceholder.id}-edge`,
+        source: mediaPlaceholder.sourceNodeId,
+        target: mediaPlaceholder.id,
+        type: 'canvasConnection',
+        className: 'canvas-provenance-edge',
+        interactionWidth: 0,
+        selectable: false,
+        focusable: false,
+        deletable: false,
+      });
+    }
     return next;
-  }, [activeBatch, activeNodeId, document?.connections, document?.nodes, selectedConnectionIds]);
+  }, [activeBatch, activeNodeId, document?.connections, document?.nodes, mediaPlaceholder, selectedConnectionIds]);
 
   const isValidConnection = useCallback<IsValidConnection>((connection) => (
     canCreateCanvasInputConnection(latestDocument.current, connection)

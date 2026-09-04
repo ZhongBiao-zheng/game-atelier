@@ -192,19 +192,34 @@ const EMPTY_CANVAS_PENDING_INPUTS: readonly CanvasPendingInput[] = [];
 const EMPTY_CANVAS_MENTION_REFERENCES: readonly CanvasMentionReference[] = [];
 
 export function CanvasPlaceholderCard({ data }: NodeProps<CanvasPlaceholderFlowNode>) {
+  // 长得和生成中的图片节点一样：上方标题栏（图标 + 「图片」+ 运行态标签）、卡片里转圈。
   return (
-    <article
-      role="status"
-      aria-busy="true"
-      aria-label={data.label}
-      data-canvas-placeholder="true"
-      className="relative flex h-full flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-dashed border-border bg-card/95 px-5 text-center text-xs text-[color:var(--status-running)] shell-glow"
-    >
-      <span data-canvas-generation-indicator="true" className="canvas-generation-indicator size-12" aria-hidden="true">
-        <LoaderCircle className="size-5" />
-      </span>
-      <span>{data.label}</span>
-    </article>
+    <div className="relative h-full" data-canvas-placeholder="true">
+      <header className="absolute bottom-full left-0 right-0 flex items-center pb-2 text-xs text-muted-foreground">
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <FileImage className="size-3.5 shrink-0" />
+          <span className="min-w-0 truncate font-medium text-foreground">图片</span>
+        </span>
+        <span className="ml-2 flex shrink-0 items-center gap-1 text-xs font-medium text-[color:var(--status-running)]">
+          <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+          {data.label}
+        </span>
+      </header>
+      <article
+        role="status"
+        aria-busy="true"
+        aria-label={`图片，${data.label}`}
+        className="relative flex h-full flex-col items-center justify-center gap-3 overflow-hidden rounded-lg border border-border bg-card/95 px-5 text-center text-xs text-[color:var(--status-running)] shell-glow"
+      >
+        <span data-canvas-generation-indicator="true" className="canvas-generation-indicator size-12" aria-hidden="true">
+          <LoaderCircle className="size-5" />
+        </span>
+        <span>{data.label}</span>
+      </article>
+      <Handle type="target" position={Position.Left} className="canvas-node-handle" isConnectable={false} aria-label="处理中的节点">
+        <span className="canvas-node-handle-dot" aria-hidden="true" />
+      </Handle>
+    </div>
   );
 }
 
@@ -229,6 +244,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   const restoreTitleFocus = useRef(false);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [toolbarOverlayOpen, setToolbarOverlayOpen] = useState(false);
+  const [panelSide, setPanelSide] = useState<CanvasPanelSide>('below');
   const [candidateBatchExpanded, setCandidateBatchExpanded] = useState(false);
   const [materialPickPointer, setMaterialPickPointer] = useState<{ left: number; top: number } | null>(null);
   const draft = generationDraft(node);
@@ -247,6 +263,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     && !context.generationPanel.narrowViewport
     && context.generationPanel.dismissedNodeId !== node.id,
   );
+  // 生成面板落在节点上方时会盖住标题栏与工具栏（含「上传附件」），这两样翻到节点下方去。
+  const chromeBelow = generationPanelVisible && panelSide === 'above';
   const materialPickEligible = Boolean(context?.materialPick?.selectableNodeIds.has(node.id));
   const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -464,7 +482,13 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
         onResize={handleResize}
         onResizeEnd={handleResizeEnd}
       />
-      <header className="absolute bottom-full left-0 right-0 flex items-center pb-2 text-xs text-muted-foreground">
+      <header
+        data-canvas-node-chrome={chromeBelow ? 'below' : 'above'}
+        className={cn(
+          'absolute left-0 right-0 flex items-center text-xs text-muted-foreground',
+          chromeBelow ? 'top-full pt-2' : 'bottom-full pb-2',
+        )}
+      >
         <span
           className="flex min-w-0 flex-1 items-center gap-1.5"
           onPointerDown={event => event.stopPropagation()}
@@ -522,10 +546,10 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
           !context.multiSelectionActive
           && (selected || toolbarOverlayOpen)
         }
-        position={Position.Top}
+        position={chromeBelow ? Position.Bottom : Position.Top}
         align="center"
         offset={32}
-        className="nodrag nowheel"
+        className="nodrag"
       >
         <div
           ref={toolbarRef}
@@ -799,6 +823,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
           nodeId={node.id}
           anchor={shellElement}
           surfaceRef={context.generationPanel.surfaceRef}
+          onSideChange={setPanelSide}
         >
           <CanvasGenerationComposer
             node={node}
@@ -825,11 +850,15 @@ export interface CanvasPanelRect {
   height: number;
 }
 
+export type CanvasPanelSide = 'below' | 'above';
+
 export interface CanvasPanelPlacement {
   left: number;
   top: number;
   width: number;
   maxHeight: number;
+  /** 面板落在节点下方还是上方。节点自己的标题栏与工具栏据此翻到另一侧，不被面板盖住。 */
+  side: CanvasPanelSide;
 }
 
 /** 生成面板只贴在节点正下方或正上方，视口坐标系。
@@ -852,20 +881,22 @@ export function placeCanvasGenerationPanel(
 
   const below = anchor.bottom + gap;
   if (below + height <= bounds.bottom - gap) {
-    return { left: alignedLeft, top: below, width, maxHeight };
+    return { left: alignedLeft, top: below, width, maxHeight, side: 'below' };
   }
   const above = anchor.top - gap - height;
   if (above >= bounds.top + gap) {
-    return { left: alignedLeft, top: above, width, maxHeight };
+    return { left: alignedLeft, top: above, width, maxHeight, side: 'above' };
   }
 
   const roomBelow = bounds.bottom - anchor.bottom;
   const roomAbove = anchor.top - bounds.top;
+  const side: CanvasPanelSide = roomBelow >= roomAbove ? 'below' : 'above';
   return {
     left: alignedLeft,
-    top: roomBelow >= roomAbove ? below : above,
+    top: side === 'below' ? below : above,
     width,
     maxHeight,
+    side,
   };
 }
 
@@ -916,7 +947,8 @@ function samePlacement(a: CanvasPanelPlacement | null, b: CanvasPanelPlacement) 
     && Math.abs(a.left - b.left) < 0.5
     && Math.abs(a.top - b.top) < 0.5
     && a.width === b.width
-    && a.maxHeight === b.maxHeight;
+    && a.maxHeight === b.maxHeight
+    && a.side === b.side;
 }
 
 /** 生成面板挂在画布区域上，不再挂在节点里面。
@@ -934,9 +966,11 @@ function CanvasNodeFloatingPanel({
   nodeId,
   anchor,
   surfaceRef,
+  onSideChange,
   children,
 }: {
   nodeId: string;
+  onSideChange?: (side: CanvasPanelSide) => void;
   /** 节点外壳的 DOM 节点。传元素而不是 ref：子组件的 layout effect 在父级 ref 挂上之前就跑，
    *  用 ref 会拿到 null，首帧永远定位不上。父级用 callback ref 把它变成 state 传下来。 */
   anchor: HTMLElement | null;
@@ -945,6 +979,10 @@ function CanvasNodeFloatingPanel({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [placement, setPlacement] = useState<CanvasPanelPlacement | null>(null);
+  const side = placement?.side;
+  useEffect(() => {
+    if (side) onSideChange?.(side);
+  }, [onSideChange, side]);
   // 平移与缩放都改 transform，订阅它就不用起 rAF 常驻轮询。
   const transform = useStore(canvasFlowTransform);
   // 拖动 / 缩放这个节点本身不动 transform，得另外订阅节点自己的几何。

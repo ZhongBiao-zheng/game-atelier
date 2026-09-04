@@ -131,6 +131,7 @@ test('canvasMediaOperationPlaceholder 镜像服务端落点：源节点右侧 96
   const matting = canvasMediaOperationPlaceholder(source, { width: 1024, height: 768 }, { kind: 'remove_background' });
   expect(matting).toEqual({
     id: 'placeholder-remove_background',
+    sourceNodeId: 'image-a',
     position: { x: 596, y: 230 },
     size: { width: 320, height: 240 },
     label: '抠图中…',

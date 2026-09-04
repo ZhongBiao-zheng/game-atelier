@@ -325,6 +325,7 @@ export function canvasDeletionBlockedMessage(
 
 export interface CanvasMediaOperationPlaceholder {
   id: string;
+  sourceNodeId: string;
   position: { x: number; y: number };
   size: CanvasSize;
   label: string;
@@ -355,6 +356,7 @@ export function canvasMediaOperationPlaceholder(
   const size = { width: version.width * scale, height: version.height * scale };
   return {
     id: `placeholder-${operation.kind}`,
+    sourceNodeId: source.id,
     position: {
       x: source.position.x + sourceWidth + 96,
       y: source.position.y + (sourceHeight - size.height) / 2,
