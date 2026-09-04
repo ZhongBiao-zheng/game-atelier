@@ -182,11 +182,21 @@ def _start_locked(runtime: Path, *, background: bool) -> tuple[FastAPI, int] | N
             cmd_open_browser()
             return None
         # A living but unverified process may still be generating. Never start another writer.
-        print(
-            "已有存活的工坊启动记录，但无法验证运行实例。"
-            "请检查原启动终端；若仍是旧版本，先从原入口正常停止后再启动。未覆盖记录或启动第二个服务。",
-            file=sys.stderr,
-        )
+        if read_instance(runtime) is None:
+            # Trigger: 记录来自不写 server.instance 的旧版本，升级后老服务还在跑
+            # Why: 旧服务没有 /api/connection/status，永远验不过；用户唯一出口就是这里的 stop
+            # Outcome: 指到可执行的 stop，由 stop 按 legacy 规则终止记录里的 PID
+            print(
+                f"旧版本工坊仍在运行（pid={existing_pid}）。"
+                "请先执行 `stop` 子命令停止它，再重新启动。未覆盖记录或启动第二个服务。",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "已有存活的工坊启动记录，但无法验证运行实例。"
+                "请检查原启动终端，从原入口正常停止后再启动。未覆盖记录或启动第二个服务。",
+                file=sys.stderr,
+            )
         sys.exit(1)
 
     port = _find_free_port(DEFAULT_PORT)
@@ -242,7 +252,10 @@ def cmd_stop() -> None:
             print("viewer-server not running")
             return
         port = read_port(runtime) or DEFAULT_PORT
-        if not _server_responds(port, read_instance(runtime)):
+        instance_id = read_instance(runtime)
+        # 没有 instance 记录 = 旧版本写下的 PID，无法用实例验证；这条记录是本启动器自己写的，照旧发停止信号。
+        # 有 instance 记录却验不过 = 端口上是别的服务，绝不碰记录里的 PID。
+        if instance_id is not None and not _server_responds(port, instance_id):
             print("无法验证运行实例，未向该 PID 发送停止信号。请检查原启动终端。", file=sys.stderr)
             sys.exit(1)
         if _terminate(pid):

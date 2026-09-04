@@ -289,3 +289,24 @@ def test_real_local_runtime_can_be_discovered_reused_and_stopped(isolated_data_r
                 process.kill()
                 process.wait(timeout=5)
         process.stdout.close()
+
+
+def test_legacy_record_without_instance_can_be_stopped_and_start_points_to_stop(
+    tmp_path, monkeypatch, capsys,
+):
+    # 旧版本只写 pid/port，不写 server.instance；升级后老服务仍在跑，用户必须能从 stop 出去。
+    write_pid(tmp_path, os.getpid())
+    write_port(tmp_path, 5188)
+    monkeypatch.setattr(data_root, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(server, "_bootstrap_gate", lambda background: True)
+    monkeypatch.setattr(server, "probe_connection_status", lambda port: None)
+    monkeypatch.setattr(server, "_spawn_detached", lambda *a, **k: pytest.fail("second writer"))
+
+    with pytest.raises(SystemExit):
+        server.cmd_start(background=True)
+    assert "stop" in capsys.readouterr().err
+
+    stopped = []
+    monkeypatch.setattr(server, "_terminate", lambda pid: stopped.append(pid) or True)
+    server.cmd_stop()
+    assert stopped == [os.getpid()]
