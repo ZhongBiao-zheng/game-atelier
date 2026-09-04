@@ -620,6 +620,9 @@ function CanvasEditorInner({
     mergeRunDocument,
     onError: setError,
   });
+  const jobsByRunId = useMemo(() => new Map(
+    jobs.flatMap(job => job.canvas_run ? [[job.canvas_run.run_id, job] as const] : []),
+  ), [jobs]);
   const { runs: batchRuns, active: activeBatch, acceptRun: acceptBatchRun } = useCanvasBatchRuns(
     projectId, acceptJobs, mergeRunDocument, setError,
   );
@@ -1499,7 +1502,11 @@ function CanvasEditorInner({
   const deleteSelection = useCallback(() => {
     if (selectedNodeIds.size === 0 && selectedConnectionIds.size === 0) return;
     const nodeIds = selectedNodeIds;
-    const blocked = canvasDeletionBlockedMessage(latestDocument.current?.nodes ?? [], nodeIds);
+    const blocked = canvasDeletionBlockedMessage(
+      latestDocument.current?.nodes ?? [],
+      nodeIds,
+      jobsByRunId,
+    );
     if (blocked) {
       setError(blocked);
       return;
@@ -1515,7 +1522,7 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set());
     setSelectedConnectionIds(new Set());
     requestAnimationFrame(() => editorRegionRef.current?.focus());
-  }, [commit, selectedConnectionIds, selectedNodeIds]);
+  }, [commit, jobsByRunId, selectedConnectionIds, selectedNodeIds]);
 
   useEffect(() => {
     function handleDelete(event: KeyboardEvent) {
@@ -2213,6 +2220,7 @@ function CanvasEditorInner({
     const blocked = canvasDeletionBlockedMessage(
       latestDocument.current?.nodes ?? [],
       new Set([nodeId]),
+      jobsByRunId,
     );
     if (blocked) {
       setError(blocked);
@@ -2231,7 +2239,7 @@ function CanvasEditorInner({
       return next;
     });
     requestAnimationFrame(() => editorRegionRef.current?.focus());
-  }, [commit]);
+  }, [commit, jobsByRunId]);
 
   const reportError = useCallback((message: string) => setError(message), []);
 
@@ -2812,9 +2820,6 @@ function CanvasEditorInner({
     });
   }, [recordHistorySnapshot, updateNode]);
 
-  const jobsByRunId = useMemo(() => new Map(
-    jobs.flatMap(job => job.canvas_run ? [[job.canvas_run.run_id, job] as const] : []),
-  ), [jobs]);
   const jobsByResultNodeId = useMemo(() => {
     const grouped = new Map<string, Job[]>();
     for (const job of jobs) {

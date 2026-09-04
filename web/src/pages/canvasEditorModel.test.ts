@@ -1,7 +1,8 @@
-import { expect, it } from 'vitest';
+import { expect, it, test } from 'vitest';
 
 import {
   acceptCanvasJobs,
+  canvasDeletionBlockedMessage,
   canvasNodeRenderZIndex,
   canvasPendingInputNodes,
   clampCanvasNodeSize,
@@ -109,6 +110,19 @@ it('follows an upstream image only while a layer stack is an idle draft', () => 
   };
   expect(syncDraftLayerStackSources(running)).toBe(running);
   expect(syncDraftLayerStackSources(completed)).toBe(completed);
+});
+
+test('canvasDeletionBlockedMessage 只拦 job 仍在跑的节点，生成完成后 active_run_id 残留不拦', () => {
+  const base = placementNode('image-a', 0, 0);
+  const node = { ...base, data: { ...base.data, active_run_id: 'run-a' } } as CanvasNode;
+  const ids = new Set([node.id]);
+  const jobFor = (status: Job['status']) => new Map([['run-a', { status } as Job]]);
+
+  expect(canvasDeletionBlockedMessage([node], ids, jobFor('done'))).toBeNull();
+  expect(canvasDeletionBlockedMessage([node], ids, jobFor('failed'))).toBeNull();
+  expect(canvasDeletionBlockedMessage([node], ids, new Map())).toBeNull();
+  expect(canvasDeletionBlockedMessage([node], ids, jobFor('pending'))).toContain('正在生成');
+  expect(canvasDeletionBlockedMessage([node], ids, jobFor('pending_confirm'))).toContain('正在生成');
 });
 
 function placementNode(id: string, x: number, y: number): CanvasNode {

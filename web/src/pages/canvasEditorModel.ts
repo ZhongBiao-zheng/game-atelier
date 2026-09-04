@@ -305,10 +305,18 @@ export function canvasNodeActiveRunId(node: CanvasNode): string | null {
 export function canvasDeletionBlockedMessage(
   nodes: readonly CanvasNode[],
   nodeIds: ReadonlySet<string>,
+  jobsByRunId: ReadonlyMap<string, Job>,
 ): string | null {
-  const blocked = nodes.filter(
-    node => nodeIds.has(node.id) && canvasNodeActiveRunId(node) !== null,
-  );
+  // 判据与节点角标同源：看 job 是否还在跑，不看 active_run_id 是否非空。
+  // 内容节点的 active_run_id 在生成结束后不清（角标靠它找到 job 显示「生成完成 / 失败原因」），
+  // 单看它非空会把所有生成过的节点永久判成「正在生成」。
+  const blocked = nodes.filter(node => {
+    if (!nodeIds.has(node.id)) return false;
+    const runId = canvasNodeActiveRunId(node);
+    if (runId === null) return false;
+    const status = jobsByRunId.get(runId)?.status;
+    return status === 'pending' || status === 'pending_confirm';
+  });
   if (blocked.length === 0) return null;
   if (blocked.length === 1) return `「${blocked[0].title}」正在生成，结束后才能删除。`;
   return `选中的节点里有 ${blocked.length} 个正在生成，结束后才能删除。`;

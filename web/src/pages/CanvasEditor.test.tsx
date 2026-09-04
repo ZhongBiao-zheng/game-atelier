@@ -803,9 +803,29 @@ it('refuses to delete a node while its generation is still running', async () =>
     data: { ...imageNode('image-1', '雨夜列车').data, active_run_id: 'run-1' },
   };
   vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [running] }));
+  // 拦不拦看 job 是否还在跑；active_run_id 生成完成后仍会残留在节点上。
+  vi.mocked(listCanvasJobs).mockResolvedValue([{
+    job_id: 'job-run-1', character_id: 'main', prompt: '雨夜', submitted_at: '2026-08-26T00:00:00Z',
+    model: 'gpt-image-2', params: { n: 1 }, output_paths: [], status: 'pending', error: null,
+    kind: 'image', namespace: 'canvas', canvas_project_id: 'canvas-one', alias: 'default',
+    provider: 'openai',
+    canvas_run: {
+      run_id: 'run-1', result_node_id: 'image-1',
+      candidates: [{ candidate_id: 'run-1-0', index: 0, status: 'pending', version_id: null, error: null }],
+      snapshot: {
+        snapshot_version: 1, surface_node_id: 'image-1', result_node_id: 'image-1',
+        mode: 'image', final_prompt: '雨夜', input_policy: 'mentions_only',
+        model: 'gpt-image-2', provider: 'openai', alias: 'default', normalized_params: {},
+        inputs: [], mask_version_id: null, submitted_at: '2026-08-26T00:00:00Z',
+        submitted_by: { kind: 'user', actor_id: null }, request_fingerprint: 'f',
+      },
+    },
+  } as unknown as Job]);
 
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await screen.findByLabelText('画布编辑器 列车短片');
+  await waitFor(() => expect(listCanvasJobs).toHaveBeenCalled());
+  await act(async () => {});
   fireEvent.click(screen.getByRole('button', { name: 'simulate node select' }));
   fireEvent.keyDown(window, { key: 'Delete' });
 

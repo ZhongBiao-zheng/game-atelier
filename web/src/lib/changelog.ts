@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.37.2',
+    date: '2026-09-04',
+    headline: '画布里生成完成的节点可以删除了',
+    changes: [
+      { kind: 'fix', text: '画布节点生成完成后仍被判成「正在生成，结束后才能删除」，现在只有 job 还在跑才拦' },
+    ],
+  },
+  {
     version: '5.37.1',
     date: '2026-09-04',
     headline: '一键启动不再卡在「无法验证运行实例」',
