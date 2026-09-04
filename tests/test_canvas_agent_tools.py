@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from pathlib import Path
+
 import pytest
 from PIL import Image
 
@@ -81,7 +83,9 @@ def test_change_set_edits_document_at_expected_revision(canvas):
     assert document.content_versions[document.nodes[0].data.current_version_id].text == "黎明列车"
 
 
-def test_import_media_copies_local_file_and_rejects_unknown_types(canvas, tmp_path, isolated_data_root):
+def test_import_media_copies_local_file_and_rejects_unknown_types(canvas, tmp_path, isolated_data_root, monkeypatch):
+    # Windows 的 tmp_path 本身在家目录下（AppData\Local\Temp），把「家」钉到 tmp 里的一个子目录，边界断言才成立。
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     pid = canvas.project.project_id
     inbox = isolated_data_root / "inbox"
     inbox.mkdir()

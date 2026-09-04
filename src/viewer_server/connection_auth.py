@@ -77,12 +77,15 @@ class ConnectionStore:
         self._grants_cache: dict = {}
 
     def _resolve_root(self) -> Path:
-        cfg = data_root._global_config_file()
-        try:
-            mtime = cfg.stat().st_mtime_ns
-        except OSError:
-            mtime = None
-        key = (os.environ.get(data_root._ENV_VAR), mtime)
+        env = os.environ.get(data_root._ENV_VAR)
+        mtime = None
+        if env is None:
+            # 环境变量优先于配置文件；有它就别碰 platformdirs（测试替换 sys.platform 时它会抛 NotImplementedError）。
+            try:
+                mtime = data_root._global_config_file().stat().st_mtime_ns
+            except OSError:
+                mtime = None
+        key = (env, mtime)
         if key != self._root_key or self.root is None:
             self._root_key = key
             return data_root.resolve_data_root()
