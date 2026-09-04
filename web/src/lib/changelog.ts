@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.35.1',
+    date: '2026-09-04',
+    headline: 'Tuzi GPT Image 2 的 2K 价格下调',
+    changes: [
+      { kind: 'fix', text: 'Tuzi default 的 2K 估价降至 ¥0.12 / 张，1K ¥0.028、4K ¥0.21 不变' },
+      { kind: 'fix', text: '尺寸计价改为公告中的 11 个精确 1K 尺寸与总像素分档，历史费用不回算' },
+      { kind: 'feat', text: '支持 gpt-image-2-1k 固定价型号估价：¥0.028 / 张' },
+    ],
+  },
+  {
     version: '5.35.0',
     date: '2026-09-03',
     headline: '画布图片可以拆分图层',
