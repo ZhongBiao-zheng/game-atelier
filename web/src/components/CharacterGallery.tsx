@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, BadgeCheck, Download, Eye, EyeOff, Film, Heart, Loader2, PanelsTopLeft, Upload, X } from 'lucide-react';
 import type {
@@ -129,8 +130,8 @@ export function CharacterGallery({
     if (!characterId) return;
     let cancelled = false;
     Promise.all([
-      fetch('/api/projects').then(r => r.json() as Promise<ProjectsFile>),
-      fetch('/api/characters').then(r => r.json() as Promise<CharacterEntry[]>),
+      connectionFetch('/api/projects').then(r => r.json() as Promise<ProjectsFile>),
+      connectionFetch('/api/characters').then(r => r.json() as Promise<CharacterEntry[]>),
     ])
       .then(([pf, characters]) => {
         if (cancelled || !pf || !Array.isArray(pf.projects)) return;
@@ -155,7 +156,7 @@ export function CharacterGallery({
   useEffect(() => {
     if (!characterId) return;
     setLoading(true);
-    fetch(`/api/jobs`)
+    connectionFetch(`/api/jobs`)
       .then(r => r.json() as Promise<Job[]>)
       .then(all => setJobs(all.filter(j => j.character_id === characterId)))
       .catch(() => {})
@@ -214,7 +215,7 @@ export function CharacterGallery({
       variant: 'destructive',
       onConfirm: async () => {
         setDialog(null);
-        const r = await fetch(`/api/jobs/${jobId}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+        const r = await connectionFetch(`/api/jobs/${jobId}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
         if (!r.ok) { alert((await apiError(r, '删除这张图')).message); return; }
         setJobs(js => js.map(j => j.job_id === jobId
           ? { ...j, output_paths: j.output_paths.filter(p => p !== path) }
@@ -232,7 +233,7 @@ export function CharacterGallery({
       variant: 'destructive',
       onConfirm: async () => {
         setDialog(null);
-        const r = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+        const r = await connectionFetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
         if (!r.ok) { alert((await apiError(r, '删除失败记录')).message); return; }
         setJobs(js => js.filter(j => j.job_id !== jobId));
       },
@@ -268,7 +269,7 @@ export function CharacterGallery({
       variant: 'destructive',
       onConfirm: async () => {
         setDialog(null);
-        const r = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+        const r = await connectionFetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
         if (!r.ok) { alert((await apiError(r, '作废这个任务')).message); return; }
         // 后端把超时 pending 标成 failed 留痕；本地同步翻面，变成可删除的失败卡。
         setJobs(js => js.map(j => j.job_id === jobId
@@ -668,7 +669,7 @@ function GalleryUpload({
     try {
       const fd = new FormData();
       fd.append('file', file);
-      const r = await fetch(`/api/characters/${characterId}/gallery/${kind}`, { method: 'POST', body: fd });
+      const r = await connectionFetch(`/api/characters/${characterId}/gallery/${kind}`, { method: 'POST', body: fd });
       if (!r.ok) throw await apiError(r, `上传「${clip(file.name)}」到图廊`);
       onUploaded();
     } catch (e) {

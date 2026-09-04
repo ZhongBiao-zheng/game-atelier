@@ -4,6 +4,9 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
 import { Studio } from './Studio';
+import { clearStudioDraft } from './studioDraft';
+import * as connection from '@/api/connection';
+import { createTestEventStream } from '@/test/eventStream';
 
 /** contentEditable prompt 编辑器没有 .value：落 textContent + input 事件等效键入。 */
 function typePrompt(editor: Element, value: string) {
@@ -12,6 +15,7 @@ function typePrompt(editor: Element, value: string) {
 }
 
 beforeEach(() => {
+  clearStudioDraft();
   localStorage.clear();
   (globalThis.URL as any).createObjectURL ??= vi.fn(() => 'blob:test');
   (globalThis.URL as any).revokeObjectURL ??= vi.fn();
@@ -66,26 +70,6 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-
-// jsdom 没有 EventSource —— 用可手动触发事件的 stub 测 SSE 定向更新。
-class TestEventSource {
-  static last: TestEventSource | null = null;
-  listeners = new Map<string, Array<(ev: MessageEvent) => void>>();
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  constructor(public url: string) {
-    TestEventSource.last = this;
-  }
-  addEventListener(type: string, cb: (ev: MessageEvent) => void) {
-    const list = this.listeners.get(type) ?? [];
-    list.push(cb);
-    this.listeners.set(type, list);
-  }
-  close() {}
-  emit(type: string, data: unknown) {
-    this.listeners.get(type)?.forEach((cb) => cb({ data: JSON.stringify(data) } as MessageEvent));
-  }
-}
 
 function renderStudio() {
   const { hook } = memoryLocation({ path: '/studio', static: true });
@@ -951,8 +935,8 @@ describe('Studio', () => {
   });
 
   it('flips a pending studio job to done via SSE targeted update (no 2s full polling)', async () => {
-    vi.stubGlobal('EventSource', TestEventSource);
-    TestEventSource.last = null;
+    vi.spyOn(connection, 'useConnectionState').mockReturnValue({ phase: 'ready', generation: 1, editing: true, message: null });
+    const events = createTestEventStream();
     const firstJobs = [{
       job_id: 'job-pending-2',
       character_id: 'oa',
@@ -974,6 +958,7 @@ describe('Studio', () => {
       output_paths: ['/tmp/studio/job-pending-2/v1.png'],
     };
     globalThis.fetch = vi.fn((url: RequestInfo | URL) => {
+      if (url === '/events') return Promise.resolve(events.response);
       if (url === '/api/keys') {
         return Promise.resolve({
           ok: true,
@@ -1005,10 +990,10 @@ describe('Studio', () => {
 
     renderStudio();
     expect(await screen.findByTestId('studio-pending-job-pending-2')).toBeInTheDocument();
-    expect(TestEventSource.last).not.toBeNull();
+    expect(globalThis.fetch).toHaveBeenCalledWith('/events', expect.anything());
 
     await act(async () => {
-      TestEventSource.last!.emit('job-changed', { job_id: 'job-pending-2', status: 'done' });
+      events.emit('job-changed', { job_id: 'job-pending-2', status: 'done' });
     });
 
     await waitFor(() => {
@@ -1021,7 +1006,7 @@ describe('Studio', () => {
   });
 
   it('polls /api/jobs while a round is pending and flips it to done without any SSE (Windows 代理缓冲兜底)', async () => {
-    // jsdom 无 EventSource → useSSE 直接 early-return，这里不 stub → 隔离出兜底轮询单独路径：
+    // 独立业务测试未建立连接 → useSSE 不建流，隔离出兜底轮询单独路径：
     // 证明就算 SSE 完全不通（系统代理把流式响应缓冲死），pending 卡也能靠 4s 轮询自动翻面。
     vi.useFakeTimers();
     const pendingJob = {
@@ -1752,7 +1737,7 @@ describe('Studio video submission', () => {
     expect(panel.textContent).toContain('视频1');
     expect(panel.textContent).toContain('音频1');
     expect(fetchMock.mock.calls.filter(([calledUrl]) => String(calledUrl).startsWith('/api/raw'))).toHaveLength(2);
-    expect(fetchMock).toHaveBeenCalledWith('https://cdn.example/reference.mp4');
+    expect(fetchMock).toHaveBeenCalledWith('https://cdn.example/reference.mp4', { credentials: 'omit' });
   });
 });
 

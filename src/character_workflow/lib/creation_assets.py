@@ -28,6 +28,7 @@ from character_workflow.lib.schemas import (
     CreationAsset,
     CreationAssetCatalog,
     CreationAssetList,
+    CreationAssetRecommendation,
     CreationImageAssetContent,
     CreationPromptAssetContent,
     CreationPromptSegment,
@@ -234,6 +235,7 @@ def _new_asset(
     tags: list[str],
     content: CreationPromptAssetContent | CreationImageAssetContent,
     project_id: str | None,
+    recommendation: CreationAssetRecommendation | None = None,
 ) -> CreationAsset:
     timestamp = _now()
     return CreationAsset(
@@ -245,6 +247,7 @@ def _new_asset(
         updated_at=timestamp,
         content=content,
         project_ids=[project_id] if project_id else [],
+        recommendation=recommendation,
     )
 
 
@@ -253,6 +256,7 @@ def create_prompt_asset(
     segments: list[CreationPromptSegment] | list[dict[str, str]],
     tags: list[str],
     project_id: str | None = None,
+    recommendation: CreationAssetRecommendation | None = None,
 ) -> CreationAsset:
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
@@ -262,6 +266,7 @@ def create_prompt_asset(
             tags=tags,
             content=_prompt_content(segments),
             project_id=project_id,
+            recommendation=recommendation,
         )
         _write_catalog_unlocked(current, [asset, *current.assets])
         return asset
@@ -389,12 +394,79 @@ def list_creation_assets(
         return CreationAssetList(revision=current.revision, assets=rows)
 
 
+def list_prompt_asset_index(
+    *,
+    tags: list[str] | None = None,
+    query: str | None = None,
+    project_id: str | None = None,
+    limit: int = 20,
+) -> dict:
+    """Agent 用的提示词资产索引：不带正文，服务端过滤，附全库标签词表。
+
+    tags 为「全部命中」（大小写不敏感）；query 是标题子串。排序：归属当前项目的在前，
+    再按最近使用 / 创建时间倒序。tag_facets 统计的是全部提示词资产，不受过滤影响——
+    Agent 靠它知道库里有哪些标签可选。
+    """
+    migrate_legacy_canvas_libraries()
+    wanted = {tag.strip().casefold() for tag in (tags or []) if tag.strip()}
+    needle = (query or "").strip().casefold()
+    with file_lock(_catalog_lock_path()):
+        prompts = [asset for asset in _read_catalog_unlocked().assets if asset.kind == "prompt"]
+    counts: dict[str, int] = {}
+    labels: dict[str, str] = {}
+    for asset in prompts:
+        for tag in asset.tags:
+            key = tag.casefold()
+            counts[key] = counts.get(key, 0) + 1
+            labels.setdefault(key, tag)
+    facets = [{"tag": labels[key], "count": counts[key]}
+              for key in sorted(counts, key=lambda k: (-counts[k], labels[k]))]
+    rows = [
+        asset for asset in prompts
+        if wanted <= {tag.casefold() for tag in asset.tags}
+        and (not needle or needle in asset.title.casefold())
+    ]
+    rows.sort(key=lambda asset: asset.last_used_at or asset.created_at, reverse=True)
+    if project_id:
+        rows.sort(key=lambda asset: 0 if project_id in asset.project_ids else 1)
+    return {
+        "assets": [{
+            "asset_id": asset.asset_id,
+            "title": asset.title,
+            "tags": asset.tags,
+            "last_used_at": asset.last_used_at,
+            "has_recommendation": asset.recommendation is not None,
+        } for asset in rows[:limit]],
+        "total": len(rows),
+        "tag_facets": facets,
+    }
+
+
+def read_prompt_asset(asset_id: str, project_id: str | None = None) -> dict:
+    """读一条提示词资产全文并记一次使用（Agent 只读它准备采用的那条；浏览走索引接口）。"""
+    if get_creation_asset(asset_id).kind != "prompt":
+        raise ValueError("只有提示词资产可以通过这个入口读取")
+    asset = mark_creation_asset_used(asset_id, project_id)
+    segments = asset.content.segments
+    return {
+        "asset_id": asset.asset_id,
+        "title": asset.title,
+        "tags": asset.tags,
+        "segments": [segment.model_dump() for segment in segments],
+        "variables": [{"name": segment.name, "default_value": segment.default_value}
+                      for segment in segments if segment.kind == "variable"],
+        "prompt": render_prompt_segments(segments, {}),
+        "recommendation": asset.recommendation.model_dump() if asset.recommendation else None,
+    }
+
+
 def update_prompt_asset(
     asset_id: str,
     *,
     title: str,
     segments: list[CreationPromptSegment] | list[dict[str, str]],
     tags: list[str],
+    recommendation: CreationAssetRecommendation | None = None,
 ) -> CreationAsset:
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
@@ -407,6 +479,7 @@ def update_prompt_asset(
             "title": _required_text(title, "资产标题"),
             "tags": _normalize_tags(tags),
             "content": _prompt_content(segments),
+            "recommendation": recommendation,
             "updated_at": _now(),
         })
         _replace_asset(current, updated)

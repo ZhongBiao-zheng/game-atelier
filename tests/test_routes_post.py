@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from viewer_server.server_app import build_app
 
@@ -23,11 +23,12 @@ def runtime(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(runtime):
-    return TestClient(build_app())
+    return TestClient(base_url="http://127.0.0.1", app=build_app())
 
 
 def test_post_spec_writes_file(client, runtime):
-    r = client.post("/api/spec/shadow", json={"content": "# new content"})
+    revision = client.get("/api/spec/shadow").json()["revision"]
+    r = client.post("/api/spec/shadow", json={"content": "# new content", "expected_revision": revision})
     assert r.status_code == 200
     assert (Path.cwd() / "characters" / "shadow" / "spec.md").read_text() == "# new content"
 

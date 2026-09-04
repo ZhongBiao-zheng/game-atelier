@@ -83,6 +83,7 @@ UI：  锚文档 <x/3 approved> · UI 规范 <未建立/draft/approved> · 页�
 | 游戏 UI 任一阶段（策划锚 / UI 规范 / 页面生成 / 风格切换 / 页面延展） | Skill 工具调起 `ui`（UI 总控，内部再分派到 ui-anchor / ui-page / ui-screens） |
 | 项目视频（企划 / 完整多镜头 Prompt / 整片生成 / 选版） | Skill 工具调起 `video`；无项目自由试验才去 Web 创作台 |
 | 开窗看图 / 起 server / 加 API Key / Web 界面 | Skill 工具调起 `viewer-server` |
+| 在画布上摆节点 / 连线 / 导入本机图 / 画布出图 | Skill 工具调起 `canvas`（只走 canvas_* MCP，需画布授权） |
 | 新建项目 / 定项目定位 | 本总控处理（问一句定位 → `create-project "<项目名>"`） |
 | 世界观 / 项目经验 | 指向 Web「项目经验」页（写 `projects/<slug>/worldview.md`），总控不代笔 |
 | 改代码 / 排 bug / 跑测试 / 发版 / 纯问答 | 不归本总控，见「跳过条件」 |
@@ -128,6 +129,15 @@ UI：  锚文档 <x/3 approved> · UI 规范 <未建立/draft/approved> · 页�
 ```
 
 纯诊断轮（只回答「进度到哪了」）用进度卡即可，不必套七件套。
+
+## 手的选择（CLI / MCP 双路径）
+
+本 Skill 的知识层（记忆注入、设定协议、prompt 规则、经验沉淀）与「手」无关；只有读写资料 / 准备 / 执行这一层按可用性选一条：
+
+- 客户端工具列表里有 `workshop_*` 工具 → 走 MCP：按 `docs/references/workshop-mcp-workflow.md` 用同名工具替代本文的 turn-start / submit / run-job / append-memory 等命令，其余章节照旧。
+- 没有 → 走本文的 CLI 命令。
+
+两条路径的批准门相同：确认卡 + 画师明确肯定。MCP 路径下，授权带 `execute_generation` 时用 `workshop_approve_generation` 完成批准；不带时请画师去 Atelier「待批准生成」页确认。同一轮绝不混用两条手。
 
 ## Guardrails
 

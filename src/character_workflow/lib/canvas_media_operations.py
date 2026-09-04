@@ -37,6 +37,8 @@ from character_workflow.lib.schemas import (
     CanvasMediaOperationResponse,
     CanvasMediaVersion,
     CanvasPoint,
+    CanvasRemoveBackgroundMediaOperation,
+    CanvasRemoveBackgroundOperation,
     CanvasSize,
     CanvasSplitMediaOperation,
     CanvasSplitOperation,
@@ -44,12 +46,18 @@ from character_workflow.lib.schemas import (
     CanvasUpscaleOperation,
 )
 
+_MediaOperation = (
+    CanvasCropMediaOperation | CanvasSplitMediaOperation | CanvasUpscaleMediaOperation
+    | CanvasRemoveBackgroundMediaOperation
+)
 
 _GLOBAL_OPERATION_GATE = BoundedSemaphore(2)
 _MAX_PIXELS = 64_000_000
 _MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 _MAX_OUTPUT_BYTES = 256 * 1024 * 1024
 _OPERATION_TIMEOUT_SECONDS = 60.0
+# 抠图跑神经网络：M1 Pro CPU 约 10s，低端 Windows CPU 可到 30s+，首张还要加载模型。
+_MATTING_TIMEOUT_SECONDS = 180.0
 _PNG_MIME = "image/png"
 _PIL_FORMAT_MIME = {
     "PNG": "image/png",
@@ -336,12 +344,17 @@ def _split_axis(lines: list[float], length: int) -> tuple[list[float], list[int]
 
 def _render_outputs(
     source: Image.Image,
-    operation: CanvasCropMediaOperation | CanvasSplitMediaOperation | CanvasUpscaleMediaOperation,
+    operation: _MediaOperation,
     stage: Path,
 ) -> tuple[list[_RenderedOutput], tuple[list[float], list[float]] | None]:
     outputs: list[_RenderedOutput] = []
     split_lines: tuple[list[float], list[float]] | None = None
-    if isinstance(operation, CanvasCropMediaOperation):
+    if isinstance(operation, CanvasRemoveBackgroundMediaOperation):
+        from character_workflow.lib.matting import remove_background
+
+        with remove_background(source) as result:
+            outputs.append(_save_png(result, stage, "result.png", 0, 0))
+    elif isinstance(operation, CanvasCropMediaOperation):
         with source.crop(_crop_box(operation, *source.size)) as result:
             outputs.append(_save_png(result, stage, "result.png", 0, 0))
     elif isinstance(operation, CanvasSplitMediaOperation):
@@ -439,11 +452,15 @@ def _placement_shift(
 def _origin_for_output(
     operation_id: str,
     source_version_id: str,
-    operation: CanvasCropMediaOperation | CanvasSplitMediaOperation | CanvasUpscaleMediaOperation,
+    operation: _MediaOperation,
     output: _RenderedOutput,
     split_lines: tuple[list[float], list[float]] | None,
 ) -> CanvasLocalToolOrigin:
-    if isinstance(operation, CanvasCropMediaOperation):
+    if isinstance(operation, CanvasRemoveBackgroundMediaOperation):
+        from character_workflow.lib.matting import MODEL_ID
+
+        detail = CanvasRemoveBackgroundOperation(kind="remove_background", model=MODEL_ID)
+    elif isinstance(operation, CanvasCropMediaOperation):
         detail = CanvasCropOperation(kind="crop", rect=operation.rect)
     elif isinstance(operation, CanvasSplitMediaOperation):
         assert split_lines is not None
@@ -542,6 +559,8 @@ def _build_document(
         )
         if isinstance(request.operation, CanvasSplitMediaOperation):
             title = f"切图 {output.row + 1}-{output.column + 1}"
+        elif isinstance(request.operation, CanvasRemoveBackgroundMediaOperation):
+            title = "抠图"
         else:
             title = "裁剪结果" if isinstance(request.operation, CanvasCropMediaOperation) else "本地放大"
         node = CanvasImageNode(
@@ -627,10 +646,15 @@ def execute_canvas_media_operation(
         try:
             source_image = _decode_source(source_path, source_version)
             outputs, split_lines = _render_outputs(source_image, request.operation, stage)
-            if time.monotonic() - started > _OPERATION_TIMEOUT_SECONDS:
+            timeout = (
+                _MATTING_TIMEOUT_SECONDS
+                if isinstance(request.operation, CanvasRemoveBackgroundMediaOperation)
+                else _OPERATION_TIMEOUT_SECONDS
+            )
+            if time.monotonic() - started > timeout:
                 raise CanvasMediaOperationError(
                     "canvas_media_output_too_large",
-                    "本地图片处理超过 60 秒，未提交任何画布变化。",
+                    f"本地图片处理超过 {timeout:.0f} 秒，未提交任何画布变化。",
                 )
 
             with file_lock(canvas_project_lock_path(project_id)):

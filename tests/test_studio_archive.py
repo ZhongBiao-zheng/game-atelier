@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib.jobs import read_job, save_job
 from character_workflow.lib.projects import assign_character, create_project
@@ -12,7 +12,7 @@ from viewer_server.server_app import build_app
 
 @pytest.fixture
 def client(isolated_data_root: Path) -> TestClient:
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def _seed_project(root: Path):

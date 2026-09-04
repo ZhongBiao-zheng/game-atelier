@@ -34,7 +34,7 @@ This file provides guidance to Claude Code (claude.ai/code) and Codex when worki
 
 - **viewer-server** (`src/viewer_server/`)：FastAPI，绑死 `127.0.0.1:5174`（被占用自动 +1）。文件读写 + SSE 推送。
 - **web** (`web/`)：Vite + React，dev 在 `5173`，build 落在 `web/dist/`，由 viewer-server 直接挂载。
-- **Skill 套件** (`skills/{character,promo,turnaround,viewer-server}/SKILL.md` + `src/character_workflow/` Python lib)：在 CC 里被 `/game-atelier:character <名>` 等触发，读 `<data_root>/.runtime/draft/`、调 Lovart / OpenAI / ... 出图。
+- **Skill 套件** (`skills/{character,promo,turnaround,ui*,video,canvas,viewer-server}/SKILL.md` + `src/character_workflow/` Python lib)：在 CC 里被 `/game-atelier:character <名>` 等触发，读 `<data_root>/.runtime/draft/`、调 Lovart / OpenAI / ... 出图。
 
 ## Dev mode
 
@@ -82,8 +82,9 @@ PYTHONPATH=src uv run python - <<'PY'
 from character_workflow.lib.jobs import list_jobs
 print(len(list_jobs()))
 PY
-curl -sS http://127.0.0.1:5174/api/jobs >/dev/null
 ```
+
+业务 API 现在要求本地会话 cookie，`curl` 匿名访问返回 401；用上面的 `list_jobs()` 全量校验即可，Web 端刷新页面看 job 列表是否正常。
 
 特别注意：`params.warnings` 是数组，不是字符串；`status` / `kind` / `asset_slot` 等字段必须使用 schema 允许的枚举值。不要让一条人工补档记录拖垮整个前端。
 
@@ -108,7 +109,7 @@ curl -sS http://127.0.0.1:5174/api/jobs >/dev/null
 make install                                          # uv sync + pnpm install
 
 # 启动（双终端）
-uv run python src/viewer_server/server.py start     # 终端 A — server
+GAME_ATELIER_DEV_ORIGIN=http://localhost:5173 uv run python src/viewer_server/server.py start # 终端 A
 cd web && pnpm dev                                    # 终端 B — Vite dev
 
 # Skill 软链到 .claude/skills/（重启 CC 生效）

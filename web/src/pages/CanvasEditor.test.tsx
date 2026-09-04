@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { useContext } from 'react';
+import * as connection from '@/api/connection';
+import { createTestEventStream } from '@/test/eventStream';
 
 import { CanvasEditor } from './CanvasEditor';
 import { CanvasNodeContext } from '@/components/canvas/CanvasEditorViews';
@@ -1305,23 +1307,10 @@ it('re-places the generation panel when the node it is anchored to moves', async
 it('pulls canvas jobs as soon as SSE says one changed, without waiting for the next poll', async () => {
   // 画布 job 和角色 / Studio 的 job 在同一个 .runtime/jobs 目录下，watcher 早就在广播
   // job-changed，画布只是一直没订阅：以前最坏要等一整轮兜底轮询才看见出图完成。
-  class TestEventSource {
-    static last: TestEventSource | null = null;
-    listeners = new Map<string, Array<(event: MessageEvent) => void>>();
-    onopen: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-    constructor(public url: string) { TestEventSource.last = this; }
-    addEventListener(type: string, callback: (event: MessageEvent) => void) {
-      this.listeners.set(type, [...(this.listeners.get(type) ?? []), callback]);
-    }
-    close() {}
-    emit(type: string, data: unknown) {
-      this.listeners.get(type)?.forEach(callback => (
-        callback({ data: JSON.stringify(data) } as MessageEvent)
-      ));
-    }
-  }
-  vi.stubGlobal('EventSource', TestEventSource);
+  const state = vi.spyOn(connection, 'useConnectionState').mockReturnValue({ phase: 'ready', generation: 1, editing: true, message: null });
+  const events = createTestEventStream();
+  // 画布里有多个 useSSE 订阅者，Response body 只能读一次，每次 fetch 发一份新流。
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(events.open())));
 
   const draft: CanvasGenerationDraft = {
     mode: 'image', prompt: '雨夜', input_policy: 'mentions_only',
@@ -1353,19 +1342,20 @@ it('pulls canvas jobs as soon as SSE says one changed, without waiting for the n
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await screen.findByLabelText('画布编辑器 列车短片');
   await waitFor(() => expect(listCanvasJobs).toHaveBeenCalled());
-  await waitFor(() => expect(TestEventSource.last).not.toBeNull());
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/events', expect.anything()));
 
   const before = vi.mocked(listCanvasJobs).mock.calls.length;
   await act(async () => {
-    TestEventSource.last!.emit('job-changed', { job_id: 'job-canvas-1', status: 'done' });
+    events.emit('job-changed', { job_id: 'job-canvas-1', status: 'done' });
   });
   expect(vi.mocked(listCanvasJobs).mock.calls.length).toBe(before + 1);
 
   // 别的命名空间的 job（角色 / Studio 出图）也走同一条广播，画布不该跟着拉。
   await act(async () => {
-    TestEventSource.last!.emit('job-changed', { job_id: 'job-character-9', status: 'done' });
+    events.emit('job-changed', { job_id: 'job-character-9', status: 'done' });
   });
   expect(vi.mocked(listCanvasJobs).mock.calls.length).toBe(before + 1);
 
   vi.unstubAllGlobals();
+  state.mockRestore();
 });

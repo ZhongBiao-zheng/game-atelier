@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { useState } from 'react';
 import { Send, CheckCircle2 } from 'lucide-react';
 import { useClipboard } from '../hooks/useClipboard';
@@ -13,7 +14,7 @@ export function FeedbackInput({ characterId }: Props) {
 
   async function submit() {
     if (!characterId || !text.trim()) return;
-    await fetch('/api/feedback', {
+    await connectionFetch('/api/feedback', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, character_id: characterId }),
     });

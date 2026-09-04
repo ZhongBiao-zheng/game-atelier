@@ -4,6 +4,7 @@ export interface UiScheme {
   id: string;
   name: string;
   created_at: string;
+  creation_request_id?: string | null;
 }
 
 export interface UiSchemesFile {

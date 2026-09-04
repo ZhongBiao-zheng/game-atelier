@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Trash2, CheckCircle2, Copy, PanelLeftOpen, Save } from 'lucide-react';
 import type { Job, WebEditableJobPatch } from '../schema/jobs';
@@ -36,7 +37,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
   const { getRating, setRating } = useGalleryRatings();
 
   useEffect(() => {
-    fetch(`/api/jobs/${jobId}`).then(r => r.json()).then(setJob);
+    connectionFetch(`/api/jobs/${jobId}`).then(r => r.json()).then(setJob);
   }, [jobId]);
 
   useEffect(() => {
@@ -59,7 +60,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
     if (Object.keys(patch).length === 0) return;
     setSaving(true);
     try {
-      const r = await fetch(`/api/prompt/${jobId}`, {
+      const r = await connectionFetch(`/api/prompt/${jobId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
@@ -83,7 +84,7 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
       variant: 'destructive',
       onConfirm: async () => {
         setDialog(null);
-        const r = await fetch(`/api/jobs/${jobId}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+        const r = await connectionFetch(`/api/jobs/${jobId}/image?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
         if (!r.ok) { setToast((await apiError(r, '删除这张图')).message); return; }
         onBack();
       },

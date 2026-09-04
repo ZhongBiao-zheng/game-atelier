@@ -1,5 +1,5 @@
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib import keys
 from viewer_server.server_app import build_app
@@ -7,7 +7,7 @@ from viewer_server.server_app import build_app
 
 @pytest.fixture
 def client(isolated_data_root):
-    return TestClient(build_app())
+    return TestClient(base_url="http://127.0.0.1", app=build_app())
 
 
 def _make_payload(alias: str = "lov") -> dict:
@@ -200,7 +200,7 @@ def test_delete_key(client):
 def test_models_preview_attaches_video_protocol_guess(tmp_path, monkeypatch):
     """视频模型附带 protocol guess；图片模型返回 None。"""
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
 
     upstream_models = [
         {"id": "doubao-seedance-2-0"},
@@ -235,7 +235,7 @@ def test_models_preview_attaches_video_protocol_guess(tmp_path, monkeypatch):
 def test_models_preview_reads_image_protocol_from_upstream_annotation(tmp_path, monkeypatch):
     """图片协议直接取上游标注：只声明 ark 的必须走 Ark 端点，否则网关判 503 无可用端点。"""
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
 
     upstream_models = [
         # 只有 ark 图片协议（词元跳动 seedream-5.0-pro 的真实标注）
@@ -324,7 +324,7 @@ def _make_key(client, alias="td", base_url="https://tokendance.space/gateway/v1"
 def test_models_preview_refuses_stored_key_to_a_different_host(tmp_path, monkeypatch):
     """存储的是明文密钥：不许调用方指定把它发去哪个域名（DNS rebinding 可从本机页面触发）。"""
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
     _make_key(client)
     seen: dict = {}
     with _stub_models_get(monkeypatch, seen):
@@ -338,7 +338,7 @@ def test_models_preview_refuses_stored_key_to_a_different_host(tmp_path, monkeyp
 def test_models_preview_allows_same_host_path_change_with_stored_key(tmp_path, monkeypatch):
     """同 host 换路径是正常编辑行为，照常用存储密钥。"""
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
     _make_key(client)
     seen: dict = {}
     with _stub_models_get(monkeypatch, seen):
@@ -352,7 +352,7 @@ def test_models_preview_allows_same_host_path_change_with_stored_key(tmp_path, m
 def test_models_preview_allows_any_host_when_caller_brings_its_own_key(tmp_path, monkeypatch):
     """自带密钥时地址随它——泄露面止于调用方自己刚输入的密钥。"""
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
     _make_key(client)
     seen: dict = {}
     with _stub_models_get(monkeypatch, seen):
@@ -445,7 +445,7 @@ def _preview_with_upstream(client, rows, **payload):
 
 def test_models_preview_filters_non_visual_and_reports_counts(tmp_path, monkeypatch):
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
     rows = [
         {"id": "seedream-5.0-pro", "supported_protocols": ["ark:image-generations"]},
         {"id": "seedance-2.0", "supported_protocols": ["seedance:generations"]},
@@ -468,7 +468,7 @@ def test_models_preview_filters_non_visual_and_reports_counts(tmp_path, monkeypa
 def test_models_preview_include_all_is_the_escape_hatch(tmp_path, monkeypatch):
     """deny 词表判过头时，画师要能自己看到全量，不能变成死路。"""
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
     rows = [{"id": "glm-4.7", "supported_protocols": ["openai:chat-completions"]}]
     body = _preview_with_upstream(client, rows, include_all=True).json()
     assert [m["id"] for m in body["models"]] == ["glm-4.7"]
@@ -478,7 +478,7 @@ def test_models_preview_include_all_is_the_escape_hatch(tmp_path, monkeypatch):
 def test_models_preview_dedupes_upstream_ids(tmp_path, monkeypatch):
     """聚合商常给同一模型挂多个别名条目，重复 id 会让前端 key 冲突。"""
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
     rows = [
         {"id": "seedream-5.0-pro", "supported_protocols": ["ark:image-generations"]},
         {"id": "seedream-5.0-pro", "supported_protocols": ["ark:image-generations"]},
@@ -495,7 +495,7 @@ def test_models_preview_pulls_openrouter_video_list_separately(tmp_path, monkeyp
     kling / seedance 只在 `?output_modalities=video` 下列出。
     """
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
     import unittest.mock as mock
 
     def fake_get(url, headers=None, timeout=None):
@@ -531,7 +531,7 @@ def test_models_preview_pulls_openrouter_video_list_separately(tmp_path, monkeyp
 def test_models_preview_survives_missing_extra_video_list(tmp_path, monkeypatch):
     """额外列表拉不到时降级成「只有图片模型」，不能让整个功能报错。"""
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
-    client = TestClient(build_app())
+    client = TestClient(base_url="http://127.0.0.1", app=build_app())
     import unittest.mock as mock
 
     def fake_get(url, headers=None, timeout=None):

@@ -273,18 +273,6 @@ export function CanvasImageSettings({
             </SettingsSection>
           )}
 
-          {caps.supportsTransparentBackground && (
-            <SettingsSection title="透明背景">
-              <OptionTrack
-                label="透明背景开关"
-                values={['transparent', 'auto']}
-                selected={params.background === 'transparent' ? 'transparent' : 'auto'}
-                getLabel={value => value === 'transparent' ? '开启' : '关闭'}
-                onSelect={value => onPatch({ background: value as 'auto' | 'transparent' })}
-              />
-            </SettingsSection>
-          )}
-
           <SettingsSection title="生成数量">
             {caps.family === 'midjourney' ? (
               <p className="rounded-lg bg-popover px-3 py-2 text-xs text-muted-foreground">

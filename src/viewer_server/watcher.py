@@ -64,6 +64,14 @@ class CharactersHandler(FileSystemEventHandler):
         hub.broadcast("spec-changed", {"character_id": p.parent.name})
 
 
+class WorkshopRequestsHandler(JobsHandler):
+    def _emit(self, raw_path: str, is_dir: bool) -> None:
+        path = Path(raw_path)
+        if is_dir or path.suffix != ".json" or not path.stem.startswith("wr-"):
+            return
+        hub.broadcast("workshop-request-changed", {"request_id": path.stem})
+
+
 class ProjectsHandler(FileSystemEventHandler):
     def on_modified(self, event: FileSystemEvent) -> None:
         self._emit(event.src_path)
@@ -127,6 +135,9 @@ def start_watchers() -> Observer:
     jobs_dir = runtime / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     observer.schedule(JobsHandler(), str(jobs_dir), recursive=False)
+    requests_dir = runtime / "workshop" / "requests"
+    requests_dir.mkdir(parents=True, exist_ok=True)
+    observer.schedule(WorkshopRequestsHandler(), str(requests_dir), recursive=False)
 
     runtime.mkdir(parents=True, exist_ok=True)
     observer.schedule(ActiveCharacterHandler(), str(runtime), recursive=False)

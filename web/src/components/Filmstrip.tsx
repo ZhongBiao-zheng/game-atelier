@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { useEffect, useState } from 'react';
 import type { AssetSlot, Job } from '../schema/jobs';
 import { cn } from '@/lib/utils';
@@ -22,7 +23,7 @@ export function Filmstrip({ characterId, assetSlot, currentPath, onSelect, sseSi
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/jobs')
+    connectionFetch('/api/jobs')
       .then(r => r.json() as Promise<Job[]>)
       .then(all => {
         if (cancelled || !Array.isArray(all)) return;

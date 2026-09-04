@@ -5,7 +5,7 @@ import base64
 import json
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib.canvas_projects import canvas_project_lock_path
 from character_workflow.lib.jobs import job_output_dir_for, read_job
@@ -39,7 +39,7 @@ def client(isolated_data_root, monkeypatch):
     from viewer_server import routes as routes_module
     monkeypatch.setattr(routes_module, "_run_studio_job_safely", lambda _job_id: None)
     monkeypatch.setattr(routes_module, "_run_canvas_job_safely", lambda _job_id: None)
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def _document(client: TestClient, project_id: str) -> dict:
@@ -448,3 +448,18 @@ def test_canvas_jobs_endpoint_scans_the_jobs_directory_once(client, monkeypatch)
     response = client.get(f"/api/canvas/projects/{project_id}/jobs")
     assert response.status_code == 200, response.text
     assert len(scans) == 1
+
+
+def test_viewport_only_save_keeps_revision_but_persists_viewport(client):
+    project_id = _create_project(client)["project_id"]
+    current = _document(client, project_id)
+    moved = _save_document(client, project_id, {**current, "viewport": {"x": 300, "y": -50, "zoom": 1.4}})
+    assert moved.status_code == 200, moved.json()
+    assert moved.json()["revision"] == current["revision"]
+    assert moved.json()["updated_at"] == current["updated_at"]
+    assert _document(client, project_id)["viewport"] == {"x": 300.0, "y": -50.0, "zoom": 1.4}
+    changed = _save_document(client, project_id, {
+        **current, "settings": {**current["settings"], "background": "dots"},
+    })
+    assert changed.status_code == 200, changed.json()
+    assert changed.json()["revision"] == current["revision"] + 1

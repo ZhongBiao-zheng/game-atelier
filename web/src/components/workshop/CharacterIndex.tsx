@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { useEffect, useMemo, useState } from 'react';
 import { Layers2, MoreHorizontal, Pencil, Plus, Search, Trash2, UserRound } from 'lucide-react';
 
@@ -53,7 +54,7 @@ export function CharacterIndex({
     if (!name) return;
     setError(null);
     try {
-      const response = await fetch('/api/characters', {
+      const response = await connectionFetch('/api/characters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, project_id: projectId }),
@@ -76,7 +77,7 @@ export function CharacterIndex({
       return;
     }
     try {
-      const response = await fetch(`/api/characters/${encodeURIComponent(renaming.id)}/rename`, {
+      const response = await connectionFetch(`/api/characters/${encodeURIComponent(renaming.id)}/rename`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -96,7 +97,7 @@ export function CharacterIndex({
     const target = deleteTarget;
     setDeleteTarget(null);
     try {
-      const response = await fetch(`/api/characters/${encodeURIComponent(target.id)}`, { method: 'DELETE' });
+      const response = await connectionFetch(`/api/characters/${encodeURIComponent(target.id)}`, { method: 'DELETE' });
       if (!response.ok) throw await apiError(response, `删除角色「${target.name}」`);
       setItems(current => current.filter(item => item.character.id !== target.id));
     } catch (reason) {

@@ -6,7 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib.canvas_agent_sessions import (
     append_canvas_agent_message,
@@ -30,7 +30,7 @@ from viewer_server.server_app import build_app
 
 @pytest.fixture
 def client(isolated_data_root):
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def _create_project(client: TestClient) -> str:

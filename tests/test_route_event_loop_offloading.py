@@ -13,7 +13,7 @@ import asyncio
 import base64
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from viewer_server.server_app import build_app
 
@@ -26,7 +26,7 @@ _PNG = base64.b64decode(
 
 @pytest.fixture
 def client(isolated_data_root):
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def _patch(monkeypatch, module_path: str, name: str, *, short_circuit=None) -> list[bool]:

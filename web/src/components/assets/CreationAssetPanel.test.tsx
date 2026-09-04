@@ -151,6 +151,28 @@ describe('CreationAssetPanel', () => {
     expect(await screen.findByRole('heading', { name: '新标题' })).toBeInTheDocument();
   });
 
+  it('saves an optional recommendation as model id plus typed params and shows it in detail', async () => {
+    const recommendation = { mode: 'image' as const, model: 'gpt-image-2', params: { quality: 'high', n: 2, watermark: false } };
+    const updated = { ...promptAsset, recommendation };
+    mocks.list
+      .mockResolvedValueOnce({ revision: 1, assets: [promptAsset] })
+      .mockResolvedValue({ revision: 2, assets: [updated] });
+    mocks.updatePrompt.mockResolvedValue(updated);
+    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    fireEvent.change(screen.getByLabelText('推荐模型'), { target: { value: ' gpt-image-2 ' } });
+    fireEvent.change(screen.getByLabelText('推荐参数'), { target: { value: 'quality=high\nn=2\nwatermark=false\n垃圾行' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存修改' }));
+
+    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledWith(
+      'asset-prompt',
+      expect.objectContaining({ recommendation }),
+    ));
+    expect(await screen.findByText('推荐：gpt-image-2 · quality=high · n=2 · watermark=false')).toBeInTheDocument();
+  });
+
   it('asks before discarding a dirty edit', async () => {
     mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);

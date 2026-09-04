@@ -159,6 +159,22 @@ uv run python -m character_workflow set-screen-canonical \
 下一步可直接说的话：
 ```
 
+## 提示词资产（任务明确后先查）
+
+写 prompt 前先查画师存的提示词模板：按需求挑标签查索引 → 命中则读全文、填变量、按其
+`recommendation` 定模型参数（本机无此模型则回落默认并说明）→ 确认卡注明「提示词来自资产〈标题〉」
+与配置来源层级；没命中就明说后自己组，不硬套。两级接口、优先级与不做的事见
+`docs/references/prompt-assets.md`。不在启动时读全库。
+
+## 手的选择（CLI / MCP 双路径）
+
+本 Skill 的知识层（记忆注入、设定协议、prompt 规则、经验沉淀）与「手」无关；只有读写资料 / 准备 / 执行这一层按可用性选一条：
+
+- 客户端工具列表里有 `workshop_*` 工具 → 走 MCP：按 `docs/references/workshop-mcp-workflow.md` 用同名工具替代本文的 turn-start / submit / run-job / append-memory 等命令，其余章节照旧。
+- 没有 → 走本文的 CLI 命令。
+
+两条路径的批准门相同：确认卡 + 画师明确肯定。MCP 路径下，授权带 `execute_generation` 时用 `workshop_approve_generation` 完成批准；不带时请画师去 Atelier「待批准生成」页确认。同一轮绝不混用两条手。
+
 ## Guardrails
 
 - 三锚文档未 approved 且无 waiver → 不生图；style.md 缺失 → 不生图。门禁必停，不得代画师批准。

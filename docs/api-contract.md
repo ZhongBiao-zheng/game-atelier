@@ -2,12 +2,38 @@
 
 > 前后端形状的单一真值源。**改任一端先改这里**。厂商侧契约见 [references/provider-config.md](references/provider-config.md)。
 
+## 开发中的扩展契约
+
+网站连接本机与外部 Agent 工坊入口已进入分阶段开发：
+[开发范围与验收](local-workspace.md)、[本机连接](contracts/local-connection.md)、
+[工坊 MCP 与生成批准](contracts/workshop-mcp.md)。本地整合分支已实现状态、鉴权、授权、编辑租约、
+工坊 typed 工具与批准执行；网站配对 / CORS / 媒体票据仍是未开放的目标，不得混称上线。
+
+改造不把项目改存浏览器、不把 Key 发给网站、不扩张 Canvas Agent 权限，也不增加第二条供应商执行路径。
+
+`GET /api/connection/status` 返回 `{ service: "game-atelier", instance_id, app_version, protocol: "atelier-local/1" }`。
+instance 是每次启动的 32 位小写十六进制标识，不是访问凭据；app_version 从插件 manifest 读取。
+响应 `Cache-Control: no-store`，不读取用户配置或数据。本地协议就绪不代表网站已配对，
+不能据此开放跨源调用或跳过鉴权；旧 null 协议不被新前端继续使用。
+
+P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch Metadata；地址不符返回 421
+`HOST_DENIED`，来源不符返回 403 `ORIGIN_DENIED`。错误为
+`{ error: { code, message, request_id } }`，不回显来源或密钥，并设置 `Cache-Control: no-store`。
+当前鉴权覆盖业务 API、媒体、SSE 与内部文档；本地 cookie / Agent bearer 不得混用。
+本地写入需要编辑租约（设置 / 授权管理除外），Agent 只可调用授权项目内的工坊工具。
+未知 API 默认 `CAPABILITY_DENIED`，未认证返回 `CONNECTION_REQUIRED`；不存在匿名原生业务旁路。
+开发来源登记与导航例外见连接契约。
+
 ## 双端同步点
 
 改左边必须同步右边，反之亦然。没有代码层共享，只有约定 + 守卫。
 
 | 契约 | Python | TypeScript | 守卫 |
 |---|---|---|---|
+| LocalConnectionStatus | `viewer_server/connection_status.py` | `web/src/schema/connection.ts` | `tests/test_connection_status.py` |
+| LocalConnectionBoundaryError | `viewer_server/request_boundary.py` | `web/src/schema/connection.ts` | `tests/test_local_request_boundary.py` + `api/http.test.ts` |
+| 本地会话 / Agent grant / 编辑租约 | `viewer_server/connection_routes.py` | `web/src/api/connection.ts` + `api/agentGrants.ts` | `tests/test_local_connection_auth.py` + `api/connection.test.ts` |
+| 工坊目标 / 生成请求 | `lib/workshop_schema.py` + `lib/workshop_generation.py` | `web/src/api/workshopRequests.ts` | `tests/test_workshop_runtime.py` + `tests/test_workshop_mcp.py` |
 | Job / JobParams | `lib/schemas.py` | `web/src/schema/jobs.ts` | 无 —— 靠人 |
 | Key / ModelSpec | `lib/keys.py` | `web/src/api/keys.ts` | 无 —— 靠人 |
 | CharacterDerivative / CharacterEntry | `lib/schemas.py` | `web/src/schema/jobs.ts` | `tests/test_character_derivatives.py` + `LeftSidebar.test.tsx` |
@@ -32,6 +58,12 @@
 - 归属：`character_id` `project_id` `ui_scheme_id` `screen_id` `production_id` `canvas_project_id` `namespace` `asset_slot` `kind`
 - 路由：`alias` `provider` `model` —— 换模型只能新建 job（`POST /studio/jobs`），不能改已有的
 - 血缘：`retry_of` `source_image`；创作台归档血缘写在 `params.archived_from_job_id / archived_from_path`
+- 工坊批准归属：`workshop_request_id`，仅服务端绑定冻结请求；普通 prompt 编辑接口拒绝修改已冻结工坊 Job
+
+`run_job` 接受 `PENDING_CONFIRM`（CLI 路径：终端确认即批准，运行时推进为 `PENDING`）与 `PENDING`。
+带 `workshop_request_id` 的 Job 还必须与已批准请求内容匹配；批准来源为本地页面，或持有
+`execute_generation` 能力的 Agent 会话（ADR-0017）。`POST /jobs/{id}/confirm` 继续批准 CLI 草稿。
+Canvas / Studio 保留自己的人工提交路径，不要求工坊请求。旧历史记录不伪造批准或批量改写。
 
 `JobParams` = `extra="allow"`（加字段不会被上游拒），但**双端仍要同步声明**，否则 TS 那边拿不到类型。Studio 在新建 Job 时可写 `estimated_cost_cny`，它是按当次 Key 渠道、模型与参数冻结的人民币预计总价；OpenRouter 等返回账单用量的 caller 可写 `actual_cost_cny`，历史优先实际费用、其次预计快照，缺失时不用当前 Key 重算。后端独占写入的还有 `actual_size`、`warnings`、`requested_size`、`provider_task_protocol`、`provider_task_ids` —— 前端只读不写。后两项用于恢复已计费的聚合商异步任务：任务 ID 必须在首次轮询前落盘，重启后只允许续查原任务，不能重新提交。
 
@@ -46,6 +78,16 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 ## 端点
 
 写操作按「谁有权」分组。全部前缀 `/api`，服务绑死 `127.0.0.1`。
+
+工坊本地请求管理为 `GET /workshop/requests` 和
+`POST /workshop/requests/{request_id}/approve { expected_revision }`；Agent 身份经 `workshop_approve_generation` 批准自身请求，须持 `execute_generation`。
+其余 MCP 工具均为专用 POST 输入，详见工坊契约，不提供通用 HTTP / 文件工具。
+
+`GET /spec/{id}` 返回 `{ content, revision }`；`POST /spec/{id}` 要求
+`{ content, expected_revision }`。项目 experience 中的 worldview 同样返回 revision 并要求
+expected_revision 写入。revision 为完整内容 SHA-256；Web 与 MCP 复用同一锁与 CAS，
+冲突返回 `DOCUMENT_CONFLICT`，不覆盖更新内容。新文档修订是空字节 SHA-256。
+UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，不是客户端权限字段。
 
 **Web 独占写**（Skill 不碰）
 `POST /spec/{id}` `POST /prompt/{job_id}` `POST /feedback` `POST /uploads` `POST /studio/jobs`
@@ -70,7 +112,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle,layer-decomposition}`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
-`POST /creation-assets/prompts` `POST /creation-assets/images/{upload,from-path}`
+`POST /creation-assets/prompts`（可带 `recommendation: {mode, model, params}`，model 为模型 id，params 键须在对应 mode 的草稿白名单内）`POST /creation-assets/images/{upload,from-path}`
 `PUT /creation-assets/{asset_id}/{prompt,image}`
 `POST /creation-assets/{asset_id}/use` `DELETE /creation-assets/{asset_id}`
 `POST /canvas/projects/{id}/creation-assets/{asset_id}/insert`
@@ -315,9 +357,14 @@ default Key、再按登记顺序选择首个支持至少一张参考图的图片
 generation-run Derivation Connection；original retry 重新校验源图摘要并逐字段复用原 Snapshot。
 
 `POST /canvas/projects/{id}/media-operations` 只接受当前图片节点和不可变源 Version ID，并以
-discriminated union 执行 `crop`、`split` 或确定性 `upscale`。服务端用 Pillow 校验真实格式、摘要、静态帧、
+discriminated union 执行 `crop`、`split`、确定性 `upscale` 或本机模型 `remove_background`。服务端用 Pillow 校验真实格式、摘要、静态帧、
 EXIF 方向与 64MP 上限，统一输出剥离元数据的 RGB/RGBA PNG；切图限制 2–12 行列且每块最短边至少 16px，
-放大只允许 1024/2048/3072/4096 长边和 nearest/bilinear/lanczos，明确不提供 AI 细节恢复。一次命令在
+放大只允许 1024/2048/3072/4096 长边和 nearest/bilinear/lanczos，明确不提供 AI 细节恢复。`remove_background`
+无参数：固定用 BiRefNet-general-lite（MIT，onnxruntime CPU/CUDA/DirectML 按可用挑）在本机推理，源图透明度与
+预测掩码相乘后输出 RGBA PNG，origin 记录 `model` id；模型文件由 `GET/POST /canvas/matting-model` 查询与
+下载到 `<data_root>/.config/models/`（sha256 校验），未下载时操作返回 422 `canvas_matting_model_missing`；
+onnxruntime 只在有 wheel 的平台安装（Intel Mac 排除），缺失时状态回 `available=false` + `message`，下载返回 422 `canvas_matting_unavailable`，
+抠图的处理时限为 180s（其余操作 60s）。一次命令在
 项目级串行、全局最多并发 2 个；全部输出先写 staging，校验总块数与体积后原子移动到
 `derived/<operation_id>/` 并提交 Document。若进程在移动后中断，下一次项目访问按事务摘要完成提交；恢复不
 重跑图片处理。冲突为零写，源文件永不覆盖；一次 split 的结果节点和 `local_tool` 派生边作为一个画布历史

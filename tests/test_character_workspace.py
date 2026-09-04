@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib.jobs import update_job_status, write_job
 from character_workflow.lib.schemas import JobKind, JobStatus
@@ -16,7 +16,7 @@ from viewer_server.server_app import build_app
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     (tmp_path / "characters").mkdir()
-    return TestClient(build_app(dist_dir=tmp_path / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=tmp_path / "dist"))
 
 
 def _project(client: TestClient) -> dict:

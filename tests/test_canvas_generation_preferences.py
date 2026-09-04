@@ -1,6 +1,6 @@
 import json
 
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib import data_root
 from character_workflow.lib.canvas_runs import _resolve_default_image_model
@@ -9,7 +9,7 @@ from viewer_server.server_app import build_app
 
 
 def _client(isolated_data_root) -> TestClient:
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def _payload(revision: int = 0) -> dict:
@@ -64,7 +64,7 @@ def test_generation_preferences_default_get_is_v2_and_does_not_write(isolated_da
         "image_toolbar": {
             "tool_ids": [
                 "info", "delete", "saveAsset", "download", "copyPrompt", "reversePrompt",
-                "replace", "maskEdit", "crop", "split", "upscale",
+                "replace", "maskEdit", "crop", "split", "removeBackground", "upscale",
             ],
             "show_labels": False,
         },
@@ -270,7 +270,6 @@ def test_reverse_prompt_recovery_normalizes_auto_params_for_selected_model(isola
             "resolution": "4K",
             "size": "2048x2048",
             "quality": "high",
-            "background": "transparent",
         },
     }
     assert _client(isolated_data_root).put(

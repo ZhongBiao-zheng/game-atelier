@@ -8,7 +8,7 @@
 - 唯一存储 `<data_root>/.config/keys.json`（默认 `~/game-atelier/.config/keys.json`），Web 与 Skill 经 `lib/keys.py` 读同一份，`.config/` 始终 gitignore。
 - 字段：`alias`（唯一标识）/ `provider`（路由依据）/ `base_url` / `access_key` / `capabilities`（portrait/promo/turnaround）/ `models[]`（`{name, id, modality}`，modality 决定 Studio 图/视频模式可见性）。
 - 配置入口：设置页 →「+ 新建供应商」；拉模型列表 `POST /api/keys/models-preview`。
-- 手改 JSON 后必验：`curl -sS http://127.0.0.1:5174/api/keys >/dev/null`，任何 schema 错都会 500。
+- 手改 JSON 后必验：`PYTHONPATH=src uv run python -c "from character_workflow.lib.keys import read_keys_db; read_keys_db()"`，任何 schema 错都会让 `/api/keys` 500（匿名 `curl` 现在返回 401，不能用来验）。
 
 ### models-preview 契约（前后端唯一形状来源）
 

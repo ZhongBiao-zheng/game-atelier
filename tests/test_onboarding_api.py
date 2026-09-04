@@ -1,14 +1,14 @@
 import os
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from viewer_server.server_app import build_app
 
 
 @pytest.fixture
 def client(isolated_data_root):
-    return TestClient(build_app())
+    return TestClient(base_url="http://127.0.0.1", app=build_app())
 
 
 def test_onboarding_status_returns_bootstrap_check_payload(client):
@@ -30,6 +30,11 @@ def test_post_data_root_writes_global_config(client, tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(cfg_home))
     # Clear the data-root override so bootstrap writes to global config
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", "")
+    # The root change invalidates the old connection; reconnect before editing configuration.
+    assert client.post("/api/connection/local-session", json={}).status_code == 200
+    assert client.post("/api/connection/editor-lease", json={
+        "client_id": client.headers["X-Atelier-Client"],
+    }).status_code == 200
     resp = client.post("/api/onboarding/data-root", json={"path": str(new_root)})
     assert resp.status_code == 200, resp.text
     body = resp.json()

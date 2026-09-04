@@ -8,6 +8,7 @@ import secrets
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+from typing import Callable
 
 from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
@@ -86,6 +87,18 @@ class CanvasStorageError(CanvasDocumentError):
     而对着一个不存在的 canvas.json 重试永远不会成功；前端的 409 文案正好写着「刷新后重试」，
     画师会照着刷一整天。这类一律 500，让人去看服务端日志和数据目录。
     """
+
+
+# 上传 / 导入的媒体类型与大小上限：Web 路由与 canvas_* 工具共用同一份。
+IMAGE_UPLOAD_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+VIDEO_UPLOAD_EXTS = frozenset({".mp4", ".webm", ".mov"})
+AUDIO_UPLOAD_EXTS = frozenset({".mp3", ".wav", ".m4a", ".aac"})
+IMAGE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10MB — stills
+MEDIA_UPLOAD_MAX_BYTES = 100 * 1024 * 1024  # 100MB — video/audio reference assets
+
+
+def upload_max_bytes(ext: str) -> int:
+    return IMAGE_UPLOAD_MAX_BYTES if ext in IMAGE_UPLOAD_EXTS else MEDIA_UPLOAD_MAX_BYTES
 
 
 def _sniff_media_mime(body: bytes) -> str | None:
@@ -319,12 +332,20 @@ def _normalized_web_document(
                 "派生连线由服务端在生成时写入，保存请求不能新建或改动它，没有保存。",
             )
 
-    return submitted.model_copy(update={
+    normalized = submitted.model_copy(update={
         "revision": current.revision + 1,
         "updated_at": timestamp,
         "content_versions": versions,
         "nodes": _draft_sanitized_nodes(submitted.nodes),
     })
+    # 只动了视口（滚轮 / 缩放 / fitView）不算改文档：revision 是并发版本号，浏览器空闲时
+    # 每滚一下都 +1 会让 Agent 的 expected_revision 连续撞 DOCUMENT_CONFLICT。视口照样落盘。
+    volatile = {"revision", "updated_at", "viewport"}
+    if normalized.model_dump(exclude=volatile) == current.model_dump(exclude=volatile):
+        return normalized.model_copy(update={
+            "revision": current.revision, "updated_at": current.updated_at,
+        })
+    return normalized
 
 
 def _is_proven_local_tool_history_restore(
@@ -433,7 +454,12 @@ def save_canvas_upload(
     body: bytes,
     media_kind: str,
     expected_revision: int,
+    node_factory: Callable[[CanvasMediaVersion], CanvasNode] | None = None,
 ) -> tuple[CanvasMediaVersion, CanvasDocument, str]:
+    """新建不可变 upload 版本；node_factory 给出时在同一把锁、同一次提交里顺带建引用节点。
+
+    分两步（先存版本再另存节点）会在中间撞 revision 时留下孤儿版本且 version_id 传不回去，
+    Agent 重读重试就重复导入同一文件。"""
     with file_lock(canvas_project_lock_path(project_id)):
         _recover_canvas_transactions_unlocked(project_id)
         project = read_canvas_project(project_id)
@@ -442,11 +468,15 @@ def save_canvas_upload(
             raise RuntimeError(f"revision_conflict:{current.revision}")
         timestamp = _now()
         version, target = _new_upload_version(project_id, ext, body, media_kind, timestamp)
-        updated = current.model_copy(update={
+        nodes = current.nodes
+        if node_factory is not None:
+            nodes = [*nodes, node_factory(version)]
+        updated = CanvasDocument.model_validate(current.model_copy(update={
             "revision": current.revision + 1,
             "updated_at": timestamp,
             "content_versions": {**current.content_versions, version.version_id: version},
-        })
+            "nodes": nodes,
+        }).model_dump(mode="json"))
         _commit_canvas_upload(project_id, project, updated, target, body, timestamp)
         return version, updated, _display_filename(raw_name)
 

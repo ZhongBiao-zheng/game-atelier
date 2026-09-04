@@ -174,6 +174,7 @@ export interface CanvasNodeContextValue {
   replaceMedia: (node: CanvasContentNode) => void;
   toggleFreeResize: (node: CanvasContentNode) => void;
   openMediaOperation: (node: CanvasContentNode, tool: CanvasMediaTool) => void;
+  removeBackground: (node: CanvasContentNode) => void;
   openMaskEdit: (node: CanvasContentNode) => void;
   openAngle: (node: CanvasContentNode) => void;
   editVideo: (node: CanvasContentNode) => void;
@@ -1639,6 +1640,15 @@ function ImageNodeToolbar({
         if (currentVersionId) context.openMediaOperation(node, 'upscale');
       },
     };
+    if (definition.id === 'removeBackground') action = {
+      ...common,
+      label: `抠图 ${node.title}`,
+      icon: <Icon />,
+      disabled: !currentVersionId || replacing,
+      run: () => {
+        if (currentVersionId) context.removeBackground(node);
+      },
+    };
     if (definition.id === 'angle') action = {
       ...common,
       label: `多角度 ${node.title}`,
@@ -1754,7 +1764,6 @@ export function CanvasGenerationComposer({
     ? imageControlCaps(
         draft.model,
         selectedKey?.provider,
-        selectedModel?.protocol,
         selectedKey?.base_url,
       )
     : null;
@@ -2057,7 +2066,6 @@ export function CanvasGenerationComposer({
                     model.id,
                     key.provider,
                     current.params,
-                    model.protocol,
                     key.base_url,
                   )
                 : draft.mode === 'text'
@@ -2105,9 +2113,6 @@ export function CanvasGenerationComposer({
                   current.model,
                   context.keys.find(key => key.alias === current.alias)?.provider,
                   merged,
-                  context.keys
-                    .find(key => key.alias === current.alias)
-                    ?.models.find(model => model.id === current.model)?.protocol,
                   context.keys.find(key => key.alias === current.alias)?.base_url,
                 ),
               };

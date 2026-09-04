@@ -301,6 +301,7 @@ class Job(BaseModel):
     provider: str | None = None
     # 2026-06-10: retry-job 克隆 failed job 时指回原 job_id；原 job 错误记录保留。
     retry_of: str | None = None
+    workshop_request_id: str | None = Field(default=None, pattern=r"^wr-[a-f0-9]{40}$")
     # 2026-06-12: 出图进度真实卡点（视频 caller 经 job_runner 回写；Web 不能改）。
     # sent=任务已全部提交上游；downloading=任务成功、产物下载中。终态时清空。
     progress_phase: Literal["sent", "downloading"] | None = None
@@ -314,6 +315,8 @@ class Job(BaseModel):
 
     @model_validator(mode="after")
     def validate_namespace_ownership(self) -> "Job":
+        if self.workshop_request_id and self.namespace not in {"character", "ui", "video"}:
+            raise ValueError("workshop_request_id is only valid for Workshop jobs")
         if self.namespace == "ui":
             if not self.project_id or not self.ui_scheme_id or not self.screen_id:
                 raise ValueError("ui job requires project_id, ui_scheme_id and screen_id")
@@ -396,6 +399,7 @@ CanvasImageQuickToolId = Literal[
     "crop",
     "split",
     "upscale",
+    "removeBackground",
     "angle",
 ]
 
@@ -443,7 +447,6 @@ class CanvasImageDefaultParams(BaseModel):
     resolution: CanvasSafeOption | None = None
     size: CanvasSafeOption | None = None
     quality: Literal["low", "medium", "high", "auto"] | None = None
-    background: Literal["auto", "opaque", "transparent"] | None = None
 
 
 class CanvasVideoDefaultParams(BaseModel):
@@ -560,7 +563,7 @@ class CanvasGenerationDraft(BaseModel):
 # Content Version，所以全部路径类字段都不在名单里；新增控件时必须同时把字段加进这里。
 CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     "image": frozenset({
-        "n", "size", "ratio", "resolution", "quality", "background",
+        "n", "size", "ratio", "resolution", "quality",
         "creation_asset_source_title",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
         "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",
@@ -910,8 +913,15 @@ class CanvasUpscaleOperation(BaseModel):
     algorithm: Literal["nearest", "bilinear", "lanczos"]
 
 
+class CanvasRemoveBackgroundOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["remove_background"]
+    model: str = Field(min_length=1, max_length=80)
+
+
 CanvasLocalToolOperation = Annotated[
-    CanvasCropOperation | CanvasSplitOperation | CanvasUpscaleOperation,
+    CanvasCropOperation | CanvasSplitOperation | CanvasUpscaleOperation
+    | CanvasRemoveBackgroundOperation,
     Field(discriminator="kind"),
 ]
 
@@ -1361,8 +1371,14 @@ class CanvasUpscaleMediaOperation(BaseModel):
     algorithm: Literal["nearest", "bilinear", "lanczos"]
 
 
+class CanvasRemoveBackgroundMediaOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["remove_background"]
+
+
 CanvasMediaOperation = Annotated[
-    CanvasCropMediaOperation | CanvasSplitMediaOperation | CanvasUpscaleMediaOperation,
+    CanvasCropMediaOperation | CanvasSplitMediaOperation | CanvasUpscaleMediaOperation
+    | CanvasRemoveBackgroundMediaOperation,
     Field(discriminator="kind"),
 ]
 
@@ -1554,6 +1570,24 @@ CreationAssetContent = Annotated[
 ]
 
 
+class CreationAssetRecommendation(BaseModel):
+    """提示词资产可选携带的推荐出图配置。存模型 id 不存别名：别名是本机 keys.json 的东西，
+    换机器或删 key 就失效；运行时按 id 在可用模型里找，找不到由调用方回落默认并明说。
+    params 只收标量，键必须在对应 mode 的浏览器草稿白名单内（路径类字段永远进不来）。"""
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["image", "video"] = "image"
+    model: str = Field(min_length=1, max_length=200)
+    params: dict[str, str | int | float | bool] = Field(default_factory=dict, max_length=40)
+
+    @model_validator(mode="after")
+    def validate_param_keys(self) -> "CreationAssetRecommendation":
+        allowed = CANVAS_DRAFT_PARAM_FIELDS[self.mode]
+        rejected = sorted(key for key in self.params if key not in allowed)
+        if rejected:
+            raise ValueError(f"推荐参数不允许这些字段：{', '.join(rejected)}")
+        return self
+
+
 class CreationAsset(BaseModel):
     model_config = ConfigDict(extra="forbid")
     asset_id: str = Field(min_length=1, max_length=160)
@@ -1565,9 +1599,12 @@ class CreationAsset(BaseModel):
     last_used_at: str | None = None
     content: CreationAssetContent
     project_ids: list[str] = Field(default_factory=list)
+    recommendation: CreationAssetRecommendation | None = None
 
     @model_validator(mode="after")
     def validate_content_identity(self) -> "CreationAsset":
+        if self.recommendation is not None and self.kind != "prompt":
+            raise ValueError("只有提示词资产可以携带推荐配置")
         if self.content.kind != self.kind:
             raise ValueError("creation asset content must match asset kind")
         if len(self.project_ids) != len(set(self.project_ids)):
@@ -1603,6 +1640,7 @@ class CreationPromptAssetCreate(BaseModel):
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
     tags: list[str] = Field(default_factory=list, max_length=20)
     project_id: str | None = Field(default=None, min_length=1, max_length=160)
+    recommendation: CreationAssetRecommendation | None = None
 
 
 class CreationPromptAssetUpdate(BaseModel):
@@ -1610,6 +1648,7 @@ class CreationPromptAssetUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
     tags: list[str] = Field(default_factory=list, max_length=20)
+    recommendation: CreationAssetRecommendation | None = None
 
 
 class CreationImagePathCreate(BaseModel):
@@ -1813,7 +1852,9 @@ class VideoSelectedResponse(BaseModel):
 
 
 class SpecPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     content: str = Field(min_length=1)
+    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class FeedbackPost(BaseModel):
@@ -2030,6 +2071,7 @@ UiSchemeName = Annotated[
 
 
 class UiScheme(BaseModel):
+    creation_request_id: str | None = None
     model_config = ConfigDict(extra="forbid")
     id: str
     name: UiSchemeName

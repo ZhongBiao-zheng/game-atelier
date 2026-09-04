@@ -31,9 +31,11 @@ def test_clipboard_attempt_success_field_required():
         ClipboardAttempt(ts="2026-05-18T10:00:00Z")
 
 
-def test_spec_patch_accepts_partial():
-    patch = SpecPatch(content="# 角色: 暗影刺客\n年龄: 24")
+def test_spec_patch_requires_revision_for_conflict_safe_save():
+    patch = SpecPatch(content="# 角色: 暗影刺客\n年龄: 24", expected_revision="a" * 64)
     assert patch.content.startswith("# 角色")
+    with pytest.raises(ValidationError):
+        SpecPatch(content="不能省略已读取的修订")
 
 
 _ = JobStatus  # silence unused import

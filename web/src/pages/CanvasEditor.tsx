@@ -66,6 +66,8 @@ import {
   replaceCanvasNodeMedia,
   retryCanvasRun,
   runCanvasMediaOperation,
+  getCanvasMattingModel,
+  downloadCanvasMattingModel,
   saveCanvasDocument,
   submitCanvasAngleRun,
   submitCanvasLayerDecomposition,
@@ -109,6 +111,7 @@ import {
   CanvasAngleDialog,
   type CanvasAngleParams,
 } from '@/components/canvas/CanvasAngleDialog';
+import { CanvasMattingModelDialog } from '@/components/canvas/CanvasMattingModelDialog';
 import {
   CanvasMediaOperationDialog,
   type CanvasMediaTool,
@@ -156,6 +159,7 @@ import type {
   CanvasImageToolbarPreferences,
   CanvasLayerStackNode,
   CanvasMediaOperation,
+  CanvasMattingModelStatus,
   CanvasMediaVersion,
   CanvasNode,
   CanvasPoint,
@@ -224,6 +228,13 @@ interface MediaOperationState {
   title: string;
   tool: CanvasMediaTool;
   version: CanvasMediaVersion;
+}
+
+interface MattingPromptState {
+  nodeId: string;
+  title: string;
+  versionId: string;
+  bytes: number;
 }
 
 interface MaskEditState {
@@ -417,6 +428,8 @@ function CanvasEditorInner({
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
   const [mediaOperationError, setMediaOperationError] = useState<string | null>(null);
+  const [mattingPrompt, setMattingPrompt] = useState<MattingPromptState | null>(null);
+  const [mattingDownloading, setMattingDownloading] = useState(false);
   const [maskEdit, setMaskEdit] = useState<MaskEditState | null>(null);
   const [maskEditBusy, setMaskEditBusy] = useState(false);
   const [maskEditError, setMaskEditError] = useState<string | null>(null);
@@ -3421,10 +3434,15 @@ function CanvasEditorInner({
     projectId,
   ]);
 
-  const submitMediaOperation = useCallback(async (operation: CanvasMediaOperation) => {
-    if (!mediaOperation || mediaOperationInFlight.current) return;
+  const executeMediaOperation = useCallback(async (
+    target: { nodeId: string; versionId: string },
+    operation: CanvasMediaOperation,
+  ) => {
+    // 抠图没有对话框，错误走全局提示；其余操作的错误留在对话框里。
+    const reportError = operation.kind === 'remove_background' ? setError : setMediaOperationError;
+    if (mediaOperationInFlight.current) return;
     if (documentCommandInFlight.current) {
-      setMediaOperationError('另一个媒体操作正在处理，请稍后重试。');
+      reportError('另一个媒体操作正在处理，请稍后重试。');
       return;
     }
     mediaOperationInFlight.current = true;
@@ -3432,7 +3450,7 @@ function CanvasEditorInner({
     setMediaOperationError(null);
     try {
       if (!await persistNow()) {
-        setMediaOperationError('自动保存失败，图片处理尚未开始。请检查服务后重试。');
+        reportError('自动保存失败，图片处理尚未开始。请检查服务后重试。');
         return;
       }
       const before = latestDocument.current;
@@ -3441,8 +3459,8 @@ function CanvasEditorInner({
       documentCommandInFlight.current = true;
       const result = await runCanvasMediaOperation(
         projectId,
-        mediaOperation.nodeId,
-        mediaOperation.version.version_id,
+        target.nodeId,
+        target.versionId,
         serverRevision.current,
         operation,
       );
@@ -3482,11 +3500,12 @@ function CanvasEditorInner({
       announceToolNotice(
         operation.kind === 'split'
           ? `已生成 ${result.created_node_ids.length} 个切图节点`
-          : operation.kind === 'crop' ? '已生成裁剪节点' : '已生成本地放大节点',
+          : operation.kind === 'crop' ? '已生成裁剪节点'
+            : operation.kind === 'remove_background' ? '已生成抠图节点' : '已生成本地放大节点',
       );
       requestAnimationFrame(() => editorRegionRef.current?.focus());
     } catch (operationError) {
-      setMediaOperationError((operationError as Error).message);
+      reportError((operationError as Error).message);
     } finally {
       documentCommandInFlight.current = false;
       mediaOperationInFlight.current = false;
@@ -3495,7 +3514,63 @@ function CanvasEditorInner({
         setError('图片处理已完成，但并发编辑尚未保存。请检查服务后重试。');
       });
     }
-  }, [announceToolNotice, flushSave, mediaOperation, persistNow, projectId]);
+  }, [announceToolNotice, flushSave, persistNow, projectId]);
+
+  const submitMediaOperation = useCallback((operation: CanvasMediaOperation) => {
+    if (!mediaOperation) return Promise.resolve();
+    return executeMediaOperation(
+      { nodeId: mediaOperation.nodeId, versionId: mediaOperation.version.version_id },
+      operation,
+    );
+  }, [executeMediaOperation, mediaOperation]);
+
+  const removeBackground = useCallback((node: CanvasContentNode) => {
+    const versionId = node.data.current_version_id;
+    const version = versionId ? latestDocument.current?.content_versions[versionId] : null;
+    if (!version || version.kind !== 'image' || !version.width || !version.height) {
+      setError('这个节点没有可处理的本地图片。');
+      return;
+    }
+    setPreview(null);
+    const target = { nodeId: node.id, versionId: version.version_id };
+    void (async () => {
+      let status: CanvasMattingModelStatus;
+      try {
+        status = await getCanvasMattingModel();
+      } catch (statusError) {
+        setError((statusError as Error).message);
+        return;
+      }
+      if (!status.available) {
+        setError(status.message ?? '当前平台不支持本机抠图。');
+        return;
+      }
+      if (!status.ready) {
+        setMattingPrompt({ ...target, title: node.title, bytes: status.bytes });
+        return;
+      }
+      announceToolNotice(`正在为 ${node.title} 抠图…`);
+      await executeMediaOperation(target, { kind: 'remove_background' });
+    })();
+  }, [announceToolNotice, executeMediaOperation]);
+
+  const confirmMattingDownload = useCallback(async () => {
+    if (!mattingPrompt || mattingDownloading) return;
+    setMattingDownloading(true);
+    try {
+      await downloadCanvasMattingModel();
+      setMattingPrompt(null);
+      announceToolNotice(`模型已就绪，正在为 ${mattingPrompt.title} 抠图…`);
+      await executeMediaOperation(
+        { nodeId: mattingPrompt.nodeId, versionId: mattingPrompt.versionId },
+        { kind: 'remove_background' },
+      );
+    } catch (downloadError) {
+      setError((downloadError as Error).message);
+    } finally {
+      setMattingDownloading(false);
+    }
+  }, [announceToolNotice, executeMediaOperation, mattingDownloading, mattingPrompt]);
 
   const persistCanvasUiPreferences = useCallback(async (
     imageToolbar: CanvasImageToolbarPreferences,
@@ -3670,6 +3745,7 @@ function CanvasEditorInner({
     replaceLayerStackSource,
     toggleFreeResize,
     openMediaOperation,
+    removeBackground,
     openMaskEdit,
     openAngle,
     editVideo,
@@ -3708,6 +3784,7 @@ function CanvasEditorInner({
     openAngle,
     openMaskEdit,
     openMediaOperation,
+    removeBackground,
     previewContent,
     persistImageToolbarPreferences,
     projectId,
@@ -4453,6 +4530,18 @@ function CanvasEditorInner({
               }
             }}
             onSubmit={operation => void submitMediaOperation(operation)}
+          />
+        )}
+
+        {mattingPrompt && (
+          <CanvasMattingModelDialog
+            open
+            bytes={mattingPrompt.bytes}
+            downloading={mattingDownloading}
+            onCancel={() => {
+              if (!mattingDownloading) setMattingPrompt(null);
+            }}
+            onConfirm={() => void confirmMattingDownload()}
           />
         )}
 

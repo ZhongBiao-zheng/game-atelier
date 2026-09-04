@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from viewer_server.server_app import build_app
 
@@ -19,7 +19,7 @@ def runtime(isolated_data_root):
 
 @pytest.fixture
 def client(runtime):
-    return TestClient(build_app())
+    return TestClient(base_url="http://127.0.0.1", app=build_app())
 
 
 def test_get_jobs_empty(client):
@@ -126,3 +126,23 @@ def test_get_active_character_default_null(client):
     r = client.get("/api/active-character")
     assert r.status_code == 200
     assert r.json()["active_id"] is None
+
+
+def test_matting_model_status_reports_missing_runtime(client, monkeypatch):
+    from character_workflow.lib import matting
+
+    monkeypatch.setattr(matting, "runtime_available", lambda: False)
+    status = client.get("/api/canvas/matting-model")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["available"] is False and body["ready"] is False
+    assert body["message"]
+    download = client.post("/api/canvas/matting-model")
+    assert download.status_code == 422
+    assert download.json()["detail"]["code"] == "canvas_matting_unavailable"
+
+
+def test_matting_model_status_available_with_runtime(client):
+    body = client.get("/api/canvas/matting-model").json()
+    assert body["available"] is True and body["message"] is None
+    assert body["provider"] != "unavailable"

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.__main__ import main
 from character_workflow.lib import canonical, keys, ui_schemes
@@ -31,7 +31,7 @@ from viewer_server.server_app import build_app
 
 @pytest.fixture
 def client(isolated_data_root: Path) -> TestClient:
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def _seed_video_key() -> None:

@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { useCallback } from 'react';
 
 export function useClipboard() {
@@ -10,7 +11,7 @@ export function useClipboard() {
     } catch (e) {
       reason = (e as Error).message || 'clipboard write failed';
     }
-    fetch('/api/clipboard-attempt', {
+    connectionFetch('/api/clipboard-attempt', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ts: new Date().toISOString(), success, reason }),
     }).catch(() => {});

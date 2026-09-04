@@ -586,6 +586,16 @@ def main(argv: list[str] | None = None) -> int:
     p_lesson.add_argument("--kind", required=True, choices=("portrait", "promo", "turnaround"))
     p_lesson.add_argument("--line", required=True, help="完整一行 markdown，不带换行")
 
+    p_lpa = sub.add_parser("list-prompt-assets", help="提示词资产索引（不带正文）+ 全库标签词表")
+    p_lpa.add_argument("--tag", action="append", default=[], help="按标签过滤，可多次，全部命中")
+    p_lpa.add_argument("--query", default=None, help="标题子串")
+    p_lpa.add_argument("--project", default=None, help="归属该项目的排前面")
+    p_lpa.add_argument("--limit", type=int, default=20)
+
+    p_rpa = sub.add_parser("read-prompt-asset", help="读一条提示词资产全文（记一次使用）")
+    p_rpa.add_argument("asset_id")
+    p_rpa.add_argument("--project", default=None)
+
     p_cp = sub.add_parser("create-project", help="新建项目目录骨架 + 写 projects.json")
     p_cp.add_argument("--name", required=True)
     p_cp.add_argument("--slug", default=None, help="手动指定 slug,缺省自动生成")
@@ -806,6 +816,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "append-lesson":
         path = append_lesson(args.kind, args.line)
         print(json.dumps({"ok": True, "path": str(path)}, ensure_ascii=False))
+        return 0
+    if args.cmd == "list-prompt-assets":
+        from character_workflow.lib.creation_assets import list_prompt_asset_index
+        print(json.dumps(list_prompt_asset_index(
+            tags=args.tag, query=args.query, project_id=args.project, limit=args.limit,
+        ), ensure_ascii=False, indent=2))
+        return 0
+    if args.cmd == "read-prompt-asset":
+        from character_workflow.lib.creation_assets import read_prompt_asset
+        try:
+            print(json.dumps(read_prompt_asset(args.asset_id, args.project),
+                             ensure_ascii=False, indent=2))
+        except KeyError:
+            print(json.dumps({"error": "提示词资产不存在", "asset_id": args.asset_id},
+                             ensure_ascii=False))
+            return 1
         return 0
     if args.cmd == "create-project":
         return _create_project(args)

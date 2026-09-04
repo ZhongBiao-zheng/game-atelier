@@ -28,6 +28,7 @@ DEFAULT_IMAGE_TOOL_IDS = [
     "maskEdit",
     "crop",
     "split",
+    "removeBackground",
     "upscale",
 ]
 

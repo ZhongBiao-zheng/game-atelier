@@ -1,9 +1,20 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
+from starlette.requests import Request
 
 from viewer_server import sse as sse_mod
 from viewer_server.sse import hub, events as events_endpoint
+from viewer_server.connection_auth import ConnectionStore
+
+
+def local_request():
+    store = ConnectionStore("a" * 32)
+    session, _ = store.local_session("http://127.0.0.1", None)
+    return Request({"type": "http", "method": "GET", "path": "/events",
+                    "app": SimpleNamespace(state=SimpleNamespace(connection_store=store)),
+                    "state": {"connection_session": session}})
 
 
 @pytest.fixture
@@ -18,7 +29,7 @@ def runtime(tmp_path, monkeypatch):
 def test_events_endpoint_returns_sse_streaming_response(runtime):
     """Unit-test the endpoint factory directly to avoid hanging on the open SSE stream."""
     async def run():
-        return await events_endpoint()
+        return await events_endpoint(local_request())
     resp = asyncio.run(run())
     assert resp.media_type == "text/event-stream"
     assert resp.headers["cache-control"] == "no-cache"
@@ -42,7 +53,7 @@ def test_stream_emits_heartbeat_when_idle(runtime, monkeypatch):
     monkeypatch.setattr(sse_mod, "HEARTBEAT_SECONDS", 0.05)
 
     async def run() -> list[str]:
-        resp = await events_endpoint()
+        resp = await events_endpoint(local_request())
         it = resp.body_iterator
         first = await asyncio.wait_for(it.__anext__(), timeout=1.0)   # retry header
         ping = await asyncio.wait_for(it.__anext__(), timeout=1.0)    # idle → heartbeat
@@ -59,7 +70,7 @@ def test_stream_still_delivers_events_over_heartbeat(runtime, monkeypatch):
     monkeypatch.setattr(sse_mod, "HEARTBEAT_SECONDS", 5.0)
 
     async def run() -> str:
-        resp = await events_endpoint()
+        resp = await events_endpoint(local_request())
         it = resp.body_iterator
         await asyncio.wait_for(it.__anext__(), timeout=1.0)  # drain retry header
         await asyncio.sleep(0)  # let stream() reach q.get()
@@ -84,4 +95,19 @@ def test_hub_drops_on_full_queue(runtime):
             assert q.qsize() == 200
         finally:
             hub.unsubscribe(q)
+    asyncio.run(run())
+
+
+def test_revoked_session_closes_stream_and_releases_subscription(runtime):
+    async def run():
+        request = local_request()
+        session = request.state.connection_session
+        response = await events_endpoint(request)
+        stream = response.body_iterator
+        await stream.__anext__()
+        assert session.event_connections == 1
+        request.app.state.connection_store.revoke_session(session.principal.session_id)
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(stream.__anext__(), timeout=1)
+        assert session.event_connections == 0
     asyncio.run(run())

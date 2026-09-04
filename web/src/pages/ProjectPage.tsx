@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { useLocation } from 'wouter';
 
@@ -63,6 +63,8 @@ export function ProjectPage({
   const [editing, setEditing] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const currentEdit = useRef({ projectId, draft });
+  currentEdit.current = { projectId, draft };
 
   useEffect(() => {
     let cancelled = false;
@@ -206,13 +208,14 @@ export function ProjectPage({
     setSaving(true);
     setSaveError(null);
     try {
-      await saveExperience(projectId, draft!);
-      setData(value => value ? { ...value, worldview_md: draft! } : value);
-      setEditing(false);
+      const result = await saveExperience(projectId, draft!, data!.revision);
+      if (currentEdit.current.projectId !== projectId) return;
+      setData(value => value?.project.id === projectId ? { ...value, worldview_md: draft!, revision: result.revision } : value);
+      if (currentEdit.current.draft === draft) setEditing(false);
       setToast('已保存');
       window.setTimeout(() => setToast(null), 2000);
     } catch (error) {
-      setSaveError((error as Error).message);
+      if (currentEdit.current.projectId === projectId) setSaveError((error as Error).message);
     } finally {
       setSaving(false);
     }

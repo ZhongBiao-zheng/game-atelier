@@ -1,4 +1,4 @@
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib import canvas_runs
 from viewer_server.server_app import build_app
@@ -12,7 +12,7 @@ def test_retry_api_preserves_failure_code_and_recovery(
         raise RuntimeError("run_not_terminal")
 
     monkeypatch.setattr(canvas_runs, "retry_canvas_run", fail_retry)
-    client = TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    client = TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
     response = client.post(
         "/api/canvas/projects/canvas-one/runs/run-one/retry",

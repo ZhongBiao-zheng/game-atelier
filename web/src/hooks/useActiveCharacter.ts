@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { useEffect, useState } from 'react';
 import type { ActiveCharacterFile } from '../schema/jobs';
 
@@ -7,7 +8,7 @@ export function useActiveCharacter(refreshSignal: number): string | null | undef
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/active-character')
+    connectionFetch('/api/active-character')
       .then(r => r.json() as Promise<ActiveCharacterFile>)
       .then(d => { if (!cancelled) setActiveId(d.active_id); });
     return () => { cancelled = true; };

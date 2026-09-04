@@ -3,7 +3,8 @@ import os
 import pytest
 
 from viewer_server.pid import (
-    cleanup_stale_pid, read_pid, read_port, write_pid, write_port, _is_alive,
+    cleanup_stale_pid, read_instance, read_pid, read_port,
+    write_instance, write_pid, write_port, _is_alive,
 )
 
 
@@ -19,8 +20,10 @@ def test_cleanup_when_no_pid_file_noop(runtime):
 
 def test_cleanup_removes_dead_pid(runtime):
     (runtime / "server.pid").write_text("999999")  # impossibly high pid
+    write_instance(runtime, "a" * 32)
     cleanup_stale_pid(runtime)
     assert not (runtime / "server.pid").exists()
+    assert read_instance(runtime) is None
 
 
 def test_cleanup_keeps_alive_pid(runtime):
@@ -32,6 +35,18 @@ def test_cleanup_keeps_alive_pid(runtime):
 def test_port_roundtrip(runtime):
     write_port(runtime, 5174)
     assert read_port(runtime) == 5174
+
+
+def test_instance_roundtrip_and_invalid_record(runtime):
+    assert read_instance(runtime) is None
+    write_instance(runtime, "a" * 32)
+    assert read_instance(runtime) == "a" * 32
+    (runtime / "server.instance").write_bytes(b"\xff")
+    assert read_instance(runtime) is None
+    (runtime / "server.instance").write_text("not-an-id")
+    assert read_instance(runtime) is None
+    with pytest.raises(ValueError):
+        write_instance(runtime, "../other")
 
 
 def test_read_pid_missing_returns_none(runtime):

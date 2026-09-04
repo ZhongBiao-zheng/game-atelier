@@ -1,3 +1,4 @@
+import { ConnectionInterrupted, connectionFetch } from '@/api/connection';
 /** 请求失败 → 一句能定位问题的中文报错。
  *
  * 为什么收在一处：`throw new Error(\`upload failed: 413\`)` 这种原样冒到界面上，画师看到的是
@@ -53,7 +54,8 @@ export class ApiError extends Error {
 function readDetail(body: unknown): ApiErrorDetail {
   if (typeof body === 'string') return { message: body.trim() || null, code: null, recovery: null };
   if (!body || typeof body !== 'object') return { message: null, code: null, recovery: null };
-  const detail = (body as { detail?: unknown }).detail;
+  const payload = body as { detail?: unknown; error?: unknown };
+  const detail = payload.detail ?? payload.error;
   if (typeof detail === 'string') return { message: detail.trim() || null, code: null, recovery: null };
   if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
     const stable = detail as { message?: unknown; code?: unknown; recovery?: unknown };
@@ -108,6 +110,7 @@ export async function apiError(resp: Response, what: string): Promise<ApiError> 
 
 /** fetch 本身 reject（服务没起 / 端口被占 / 请求被掐断）→ 中文 Error。 */
 export function requestError(err: unknown, what: string): Error {
+  if (err instanceof ConnectionInterrupted) return err;
   const raw = err instanceof Error ? err.message : String(err);
   return new Error(
     `${what}失败：连不上本地服务（viewer-server 没在运行，或它的端口被别的程序占了）。` +
@@ -119,8 +122,7 @@ export function requestError(err: unknown, what: string): Error {
 export async function request(input: string, what: string, init?: RequestInit): Promise<Response> {
   let resp: Response;
   try {
-    // init 缺省时不传第二个参数：GET 调用保持单参形态（测试里的 fetch spy 按参数断言）。
-    resp = init ? await fetch(input, init) : await fetch(input);
+    resp = await connectionFetch(input, init);
   } catch (e) {
     throw requestError(e, what);
   }

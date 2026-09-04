@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'wouter';
 import { LeftSidebar } from './components/LeftSidebar';
@@ -55,7 +56,7 @@ export function MainApp({
   const [config, setConfig] = useState<Config | null>(null);
 
   useEffect(() => {
-    fetch('/api/config').then(r => r.json()).then(setConfig);
+    connectionFetch('/api/config').then(r => r.json()).then(setConfig);
   }, []);
 
   if (config === null) {
@@ -120,7 +121,7 @@ function ThreeColumnLayout({
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/projects')
+    connectionFetch('/api/projects')
       .then(r => r.json() as Promise<ProjectsFile>)
       .then(pf => {
         if (cancelled) return;
@@ -157,7 +158,7 @@ function ThreeColumnLayout({
       return;
     }
     let cancelled = false;
-    fetch('/api/characters')
+    connectionFetch('/api/characters')
       .then(r => r.json() as Promise<CharacterEntry[]>)
       .then(chars => {
         if (cancelled) return;

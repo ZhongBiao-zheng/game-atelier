@@ -8,9 +8,9 @@ import socket
 import subprocess
 import sys
 import time
-import urllib.request
 import webbrowser
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import uvicorn
 
@@ -18,13 +18,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from character_workflow.lib import data_root  # noqa: E402
 from character_workflow.lib import net_env  # noqa: E402
+from character_workflow.lib.file_lock import try_file_lock  # noqa: E402
+from viewer_server.connection_status import (  # noqa: E402
+    INSTANCE_ENV, new_instance_id, probe_connection_status,
+)
 from viewer_server.pid import (  # noqa: E402
-    cleanup_stale_pid, read_pid, read_port, write_pid, write_port,
+    cleanup_stale_pid, read_instance, read_pid, read_port, write_instance, write_pid, write_port,
 )
 
 
 DEFAULT_PORT = 5174
 _BOOTSTRAP = Path(__file__).resolve().parents[2] / "scripts" / "bootstrap.py"
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 
 def _bootstrap_gate(background: bool) -> bool:
@@ -127,17 +134,20 @@ def _find_free_port(start: int) -> int:
     raise RuntimeError(f"No free port in range {start}-{start+100}")
 
 
-def _server_responds(port: int) -> bool:
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/config", timeout=0.5):
-            return True
-    except Exception:
+def _server_responds(port: int, instance_id: str | None) -> bool:
+    if instance_id is None:
         return False
+    status = probe_connection_status(port)
+    return status is not None and status.instance_id == instance_id
 
 
-def _clear_server_files(runtime: Path) -> None:
-    (runtime / "server.pid").unlink(missing_ok=True)
-    (runtime / "server.port").unlink(missing_ok=True)
+def _wait_for_server(port: int, instance_id: str, *, timeout: float = 8.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _server_responds(port, instance_id):
+            return True
+        time.sleep(0.2)
+    return False
 
 
 def cmd_start(background: bool = False) -> None:
@@ -149,26 +159,56 @@ def cmd_start(background: bool = False) -> None:
 
     runtime = data_root.runtime_dir()
     runtime.mkdir(parents=True, exist_ok=True)
+    # Two launchers must not overwrite each other's PID/port/instance before either server is ready.
+    with try_file_lock(runtime / "server.start.lock") as acquired:
+        if not acquired:
+            print("工坊正在启动或停止，请稍后重试。", file=sys.stderr)
+            sys.exit(1)
+        foreground = _start_locked(runtime, background=background)
+    if foreground is not None:
+        app, port = foreground
+        uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+
+
+def _start_locked(runtime: Path, *, background: bool) -> tuple[FastAPI, int] | None:
     cleanup_stale_pid(runtime)
 
     existing_pid = read_pid(runtime)
     if existing_pid:
         port = read_port(runtime) or DEFAULT_PORT
-        if _server_responds(port):
+        if _server_responds(port, read_instance(runtime)):
             url = f"http://127.0.0.1:{port}/"
             print(f"工坊已在运行，正在打开浏览器：{url}")
             cmd_open_browser()
-            return
-        print(f"检测到旧启动记录但端口未响应，重新启动工坊 (pid={existing_pid}, port={port})")
-        _clear_server_files(runtime)
+            return None
+        # A living but unverified process may still be generating. Never start another writer.
+        if read_instance(runtime) is None:
+            # Trigger: 记录来自不写 server.instance 的旧版本，升级后老服务还在跑
+            # Why: 旧服务没有 /api/connection/status，永远验不过；用户唯一出口就是这里的 stop
+            # Outcome: 指到可执行的 stop，由 stop 按 legacy 规则终止记录里的 PID
+            print(
+                f"旧版本工坊仍在运行（pid={existing_pid}）。"
+                "请先执行 `stop` 子命令停止它，再重新启动。未覆盖记录或启动第二个服务。",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "已有存活的工坊启动记录，但无法验证运行实例。"
+                "请检查原启动终端，从原入口正常停止后再启动。未覆盖记录或启动第二个服务。",
+                file=sys.stderr,
+            )
+        sys.exit(1)
 
     port = _find_free_port(DEFAULT_PORT)
+    instance_id = new_instance_id()
     write_port(runtime, port)
+    write_instance(runtime, instance_id)
 
     if background:
         # 后台启动（Skill 调用路径）：非阻塞，只在首次启动时开浏览器
         project_root = str(Path(__file__).parent.parent.parent)
         env = os.environ.copy()
+        env[INSTANCE_ENV] = instance_id
         src_path = str(Path(__file__).parent.parent)
         env["PYTHONPATH"] = (
             f"{src_path}{os.pathsep}{env['PYTHONPATH']}"
@@ -182,33 +222,55 @@ def cmd_start(background: bool = False) -> None:
             env=env,
         )
         write_pid(runtime, pid)
+        if not _wait_for_server(port, instance_id):
+            print(
+                "工坊启动后尚未通过实例验证，未打开浏览器。"
+                "请检查服务启动情况；再次启动不会另开第二个服务。",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         print(f"viewer-server started at http://127.0.0.1:{port}/ (pid={pid})")
-        time.sleep(1.5)  # 等 uvicorn 就绪
         cmd_open_browser()
+        return None
     else:
         # 前台启动（终端 A 手动路径）：阻塞直到 Ctrl-C
         write_pid(runtime, os.getpid())
         print(f"viewer-server starting at http://127.0.0.1:{port}/")
         from viewer_server.server_app import build_app  # late import
-        uvicorn.run(build_app(), host="127.0.0.1", port=port, log_level="info")
+        return build_app(instance_id=instance_id), port
 
 
 def cmd_stop() -> None:
     runtime = data_root.runtime_dir()
-    pid = read_pid(runtime)
-    if not pid:
-        print("viewer-server not running")
-        return
-    if _terminate(pid):
-        print(f"sent terminate signal to pid {pid}")
-    else:
-        print(f"pid {pid} not found — cleaning stale PID")
+    with try_file_lock(runtime / "server.start.lock") as acquired:
+        if not acquired:
+            print("工坊正在启动或停止，请稍后重试。", file=sys.stderr)
+            sys.exit(1)
         cleanup_stale_pid(runtime)
+        pid = read_pid(runtime)
+        if not pid:
+            print("viewer-server not running")
+            return
+        port = read_port(runtime) or DEFAULT_PORT
+        instance_id = read_instance(runtime)
+        # 没有 instance 记录 = 旧版本写下的 PID，无法用实例验证；这条记录是本启动器自己写的，照旧发停止信号。
+        # 有 instance 记录却验不过 = 端口上是别的服务，绝不碰记录里的 PID。
+        if instance_id is not None and not _server_responds(port, instance_id):
+            print("无法验证运行实例，未向该 PID 发送停止信号。请检查原启动终端。", file=sys.stderr)
+            sys.exit(1)
+        if _terminate(pid):
+            print(f"sent terminate signal to pid {pid}")
+        else:
+            print(f"pid {pid} not found — cleaning stale PID")
+            cleanup_stale_pid(runtime)
 
 
 def cmd_open_browser() -> None:
     runtime = data_root.runtime_dir()
     port = read_port(runtime) or DEFAULT_PORT
+    if not _server_responds(port, read_instance(runtime)):
+        print("无法验证本机工坊，未打开浏览器。请先启动服务。", file=sys.stderr)
+        sys.exit(1)
     url = f"http://127.0.0.1:{port}/"
     webbrowser.open(url)
     print(url)

@@ -13,6 +13,7 @@ import { EMPTY_MJ_REFS, type MjRefSlots } from '@/components/studio/MjReferenceS
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import type { JobKind, JobParams } from '@/schema/jobs';
+import { readStudioDraft, writeStudioDraft } from './studioDraft';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
 
@@ -55,34 +56,50 @@ function saveSelection(sel: SavedSelection): void {
 export function StudioCompact() {
   const [, setLocation] = useLocation();
   const [saved] = useState(loadSelection);
+  const [draft] = useState(readStudioDraft);
   const [pending, setPending] = useState(false);
   const [compactError, setCompactError] = useState<string | null>(null);
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
-  const [ratio, setRatio] = useState('1:1');
-  const [resolution, setResolution] = useState<'2K' | '4K'>('2K');
-  const [count, setCount] = useState(1);
-  const [customSize, setCustomSize] = useState('');
-  const [customSizeManual, setCustomSizeManual] = useState(false);
-  const [quality, setQuality] = useState<Quality>('low');
+  const [ratio, setRatio] = useState(draft?.ratio ?? '1:1');
+  const [resolution, setResolution] = useState<'2K' | '4K'>(draft?.resolution ?? '2K');
+  const [count, setCount] = useState(draft?.count ?? 1);
+  const [customSize, setCustomSize] = useState(draft?.customSize ?? '');
+  const [customSizeManual, setCustomSizeManual] = useState(draft?.customSizeManual ?? false);
+  const [quality, setQuality] = useState<Quality>(draft?.quality ?? 'low');
   // 与 StudioFull 同一政策：MJ 参数不进 localStorage，每次启动回默认。
-  const [mjParams, setMjParams] = useState<MjParams>(MJ_DEFAULTS);
-  const [mjRefs, setMjRefs] = useState<MjRefSlots>(EMPTY_MJ_REFS);
+  const [mjParams, setMjParams] = useState<MjParams>(draft?.mjParams ?? MJ_DEFAULTS);
+  const [mjRefs, setMjRefs] = useState<MjRefSlots>(draft?.mjRefs ?? EMPTY_MJ_REFS);
   const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
-  const [promptText, setPromptText] = useState('');
-  const [referenceImages, setReferenceImages] = useState<File[]>([]);
-  const [kind, setKind] = useState<JobKind>(saved.kind ?? 'image');
-  const [videoMode, setVideoMode] = useState<VideoMode>(saved.videoMode === 'omni' ? 'omni' : 'firstlast');
-  const [duration, setDuration] = useState<number>(saved.duration ?? 5);
-  const [videoResolution, setVideoResolution] = useState<string>(saved.videoResolution ?? '720p');
-  const [videoRatio, setVideoRatio] = useState<string>(saved.videoRatio ?? '16:9');
-  const [videoQuality, setVideoQuality] = useState<VideoQuality>(saved.videoQuality === 'pro' ? 'pro' : 'std');
-  const [videoCount, setVideoCount] = useState<number>(clampImageCount(saved.videoCount ?? 1));
-  const [generateAudio, setGenerateAudio] = useState<boolean>(saved.generateAudio ?? false);
-  const [referenceVideos, setReferenceVideos] = useState<File[]>([]);
-  const [referenceAudios, setReferenceAudios] = useState<File[]>([]);
-  const [videoFrames, setVideoFrames] = useState<FrameSlots>({ first: null, last: null });
+  const [promptText, setPromptText] = useState(draft?.promptText ?? '');
+  const [referenceImages, setReferenceImages] = useState<File[]>(draft?.referenceImages ?? []);
+  const [kind, setKind] = useState<JobKind>(draft?.kind ?? saved.kind ?? 'image');
+  const [videoMode, setVideoMode] = useState<VideoMode>(draft?.videoMode ?? (saved.videoMode === 'omni' ? 'omni' : 'firstlast'));
+  const [duration, setDuration] = useState<number>(draft?.duration ?? saved.duration ?? 5);
+  const [videoResolution, setVideoResolution] = useState<string>(draft?.videoResolution ?? saved.videoResolution ?? '720p');
+  const [videoRatio, setVideoRatio] = useState<string>(draft?.videoRatio ?? saved.videoRatio ?? '16:9');
+  const [videoQuality, setVideoQuality] = useState<VideoQuality>(draft?.videoQuality ?? (saved.videoQuality === 'pro' ? 'pro' : 'std'));
+  const [videoCount, setVideoCount] = useState<number>(draft?.videoCount ?? clampImageCount(saved.videoCount ?? 1));
+  const [generateAudio, setGenerateAudio] = useState<boolean>(draft?.generateAudio ?? saved.generateAudio ?? false);
+  const [referenceVideos, setReferenceVideos] = useState<File[]>(draft?.referenceVideos ?? []);
+  const [referenceAudios, setReferenceAudios] = useState<File[]>(draft?.referenceAudios ?? []);
+  const [videoFrames, setVideoFrames] = useState<FrameSlots>(draft?.videoFrames ?? { first: null, last: null });
+
+  // 每次改动都把未提交的输入写进内存草稿；切页卸载后回来按它恢复，刷新即清空。
+  useEffect(() => {
+    writeStudioDraft({
+      providerAlias, model, kind, promptText, promptAssetSourceTitle: null,
+      referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
+      ratio, resolution, count, customSize, customSizeManual, quality,
+      videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
+    });
+  }, [
+    providerAlias, model, kind, promptText,
+    referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
+    ratio, resolution, count, customSize, customSizeManual, quality,
+    videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
+  ]);
   const selectedModelObj = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
   const videoCaps = videoControlCaps(model, selectedModelObj?.protocol);
 
@@ -93,13 +110,15 @@ export function StudioCompact() {
         if (cancelled) return;
         const usable = resp.keys.filter((key) => key.models.length > 0);
         setKeys(usable);
-        const savedKey = saved.providerAlias
-          ? usable.find((key) => key.alias === saved.providerAlias)
+        const wantedAlias = draft?.providerAlias || saved.providerAlias;
+        const wantedModel = draft?.model || saved.model;
+        const savedKey = wantedAlias
+          ? usable.find((key) => key.alias === wantedAlias)
           : undefined;
         const selected = savedKey ?? usable[0];
         setProviderAlias(selected?.alias ?? '');
-        const savedModelValid = saved.model && selected?.models.some((m) => m.id === saved.model);
-        const nextModel = savedModelValid ? saved.model! : selected?.models[0]?.id ?? '';
+        const savedModelValid = wantedModel && selected?.models.some((m) => m.id === wantedModel);
+        const nextModel = savedModelValid ? wantedModel! : selected?.models[0]?.id ?? '';
         setModel(nextModel);
         // 只恢复用户**亲手改过**的尺寸，凭存档里的 customSizeManual 标记判断。
         // 旧代码拿存档值和「当前」标准尺寸比，不等就当手动覆盖 —— 标准尺寸公式一改
@@ -122,7 +141,7 @@ export function StudioCompact() {
     return () => {
       cancelled = true;
     };
-  }, [saved]);
+  }, [saved, draft]);
 
   useEffect(() => {
     if (kind !== 'video' || keys.length === 0) return;
@@ -184,7 +203,6 @@ export function StudioCompact() {
     const caps = imageControlCaps(
       effectiveModel,
       effectiveProvider,
-      selectedKey?.models.find((item) => item.id === effectiveModel)?.protocol,
       selectedKey?.base_url,
     );
     // MJ 一次 imagine 固定回 4 张方案（同 Studio.onSubmit）。

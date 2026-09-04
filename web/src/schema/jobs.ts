@@ -185,6 +185,7 @@ export interface Job {
   // 人工画布 job（namespace='canvas'）归独立画布项目；Web 只读。
   canvas_project_id?: string | null;
   canvas_run?: CanvasJobContext | null;
+  workshop_request_id?: string | null;
 }
 
 export const WEB_EDITABLE_FIELDS = ['prompt', 'params'] as const;

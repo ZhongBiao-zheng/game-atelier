@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_library import create_canvas_prompt, save_canvas_asset
@@ -46,7 +46,7 @@ _PNG = base64.b64decode(
 
 @pytest.fixture
 def client(isolated_data_root):
-    return TestClient(build_app(dist_dir=isolated_data_root / "dist"))
+    return TestClient(base_url="http://127.0.0.1", app=build_app(dist_dir=isolated_data_root / "dist"))
 
 
 def _segments(subject: str = "白色三头犬") -> list[dict[str, str]]:
@@ -226,7 +226,9 @@ def test_creation_asset_http_api_exposes_single_content_edit_and_delete(client: 
     assert content.status_code == 200
     assert content.content == _PNG
 
-    assert client.post(f"/api/creation-assets/{prompt['asset_id']}/archive").status_code == 405
+    obsolete = client.post(f"/api/creation-assets/{prompt['asset_id']}/archive")
+    assert obsolete.status_code == 403
+    assert obsolete.json()["error"]["code"] == "CAPABILITY_DENIED"
     deleted = client.delete(f"/api/creation-assets/{prompt['asset_id']}")
     assert deleted.status_code == 204
 

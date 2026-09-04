@@ -1,3 +1,4 @@
+import { connectionFetch } from '@/api/connection';
 import { useEffect, useState } from 'react';
 import { FolderOpen, FolderEdit, AlertCircle, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,7 +19,7 @@ export function FirstRunConfig({ onSaved }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/home').then(r => r.ok ? r.json() : null).then(d => {
+    connectionFetch('/api/home').then(r => r.ok ? r.json() : null).then(d => {
       if (d?.home) setDefaultPath(`${d.home}/Pictures/character-assets`);
     }).catch(() => {});
   }, []);

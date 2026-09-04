@@ -3,6 +3,11 @@ import { render, screen, waitFor } from '@testing-library/react';
 
 import { App } from './App';
 
+// Authentication and retained drafts are exercised by LocalConnectionGate.test.tsx.
+vi.mock('@/components/LocalConnectionGate', () => ({
+  LocalConnectionGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn());
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
