@@ -1,6 +1,7 @@
 """Local-only management endpoints. Secrets never enter website or tool responses."""
 from __future__ import annotations
 
+import sys
 import time
 from typing import Annotated, Literal
 
@@ -83,7 +84,8 @@ def connection_router(store: ConnectionStore) -> APIRouter:
 
     @router.get("/agent-grants")
     def grants() -> dict:
-        return {"grants": store.list_grants()}
+        # 前端据此拼出可直接粘贴的 `claude mcp add` 命令：装了本项目依赖的解释器就是当前进程这一个。
+        return {"grants": store.list_grants(), "python": sys.executable}
 
     @router.post("/agent-grants", status_code=201)
     def create_grant(payload: GrantPayload, request: Request) -> dict:

@@ -13,7 +13,7 @@ export interface AgentGrant {
   credential_path: string;
 }
 export function fetchAgentGrants() {
-  return requestJson<{ grants: AgentGrant[] }>('/api/connection/agent-grants', '读取 Agent 授权');
+  return requestJson<{ grants: AgentGrant[]; python: string }>('/api/connection/agent-grants', '读取 Agent 授权');
 }
 export function createAgentGrant(input: { name: string; project_ids: string[]; canvas_project_ids: string[]; capabilities: AgentCapability[]; days: number }) {
   return requestJson<AgentGrant>('/api/connection/agent-grants', '创建 Agent 授权', {

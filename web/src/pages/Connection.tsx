@@ -28,8 +28,10 @@ export function ConnectionPage() {
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [canvasProjects, setCanvasProjects] = useState<CanvasProjectOption[]>([]);
   const [canvasProjectIds, setCanvasProjectIds] = useState<string[]>([]);
-  const [capabilities, setCapabilities] = useState<AgentCapability[]>(['read']);
-  const [days, setDays] = useState(7);
+  // 本机自用默认满能力、最长有效期：这是 ADR-0017 的默认场景，缩范围的人再取消勾选。
+  const [capabilities, setCapabilities] = useState<AgentCapability[]>([...CAPABILITIES, ...CANVAS_CAPABILITIES].map(item => item.value));
+  const [days, setDays] = useState(30);
+  const [python, setPython] = useState('');
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +40,7 @@ export function ConnectionPage() {
   useEffect(() => {
     let active = true;
     Promise.all([fetchAgentGrants(), fetchProjects(), requestJson<CanvasProjectOption[]>('/api/canvas/project-options', '读取画布列表')]).then(([result, projectFile, canvasOptions]) => {
-      if (active) { setGrants(result.grants); setProjects(projectFile.projects); setCanvasProjects(canvasOptions); }
+      if (active) { setGrants(result.grants); setPython(result.python); setProjects(projectFile.projects); setCanvasProjects(canvasOptions); }
     }).catch(error => { if (active) setError(String(error)); });
     return () => { active = false; };
   }, []);
@@ -56,11 +58,13 @@ export function ConnectionPage() {
     try { await revokeAgentGrant(grant.grant_id); setGrants(current => current.filter(item => item.grant_id !== grant.grant_id)); }
     catch (error) { setError(String(error)); } finally { setBusy(null); }
   }
+  const quote = (value: string) => (/\s/.test(value) ? `"${value}"` : value);
+  const command = (grant: AgentGrant) => `claude mcp add --transport stdio --scope local game-atelier -- ${quote(python)} -m character_workflow.mcp --credentials ${quote(grant.credential_path)}`;
   async function copy(grant: AgentGrant) {
     try {
-      await navigator.clipboard.writeText(grant.credential_path);
+      await navigator.clipboard.writeText(command(grant));
       setCopied(grant.grant_id);
-    } catch { setError('无法访问剪贴板，请手动复制凭据文件路径。'); }
+    } catch { setError('无法访问剪贴板，请手动复制命令。'); }
   }
 
   return <div className="mx-auto max-w-4xl space-y-8 px-6 py-8">
@@ -85,10 +89,10 @@ export function ConnectionPage() {
         <div className="flex items-center justify-between gap-4"><h2 className="text-base font-medium">{grant.name}</h2><button type="button" aria-label={`撤销 ${grant.name}`} disabled={busy !== null} onClick={() => void revoke(grant)} className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-destructive"><Trash2 size={16} aria-hidden /></button></div>
         <p className="text-sm text-muted-foreground">{[...grant.project_ids.map(id => projects.find(project => project.id === id)?.name ?? id), ...(grant.canvas_project_ids ?? []).map(id => `画布 · ${canvasProjects.find(project => project.project_id === id)?.name ?? id}`)].join(' · ')} · {new Date(grant.expires_at).toLocaleDateString()} 到期</p>
         <p className="text-xs text-muted-foreground">{grant.capabilities.map(value => [...CAPABILITIES, ...CANVAS_CAPABILITIES].find(item => item.value === value)?.label).filter(Boolean).join(' · ')}</p>
-        <div className="flex items-start gap-2"><code className="min-w-0 flex-1 break-all rounded-md bg-background p-3 font-mono text-xs">{grant.credential_path}</code><button type="button" onClick={() => void copy(grant)} aria-label={`复制 ${grant.name} 凭据路径`} className="shrink-0 rounded-md p-3 hover:bg-accent"><Copy size={16} aria-hidden /></button></div>
-        {copied === grant.grant_id && <p role="status" className="text-xs text-muted-foreground">已复制凭据文件路径，未复制密钥。</p>}
+        <div className="flex items-start gap-2"><code className="min-w-0 flex-1 break-all rounded-md bg-background p-3 font-mono text-xs">{command(grant)}</code><button type="button" onClick={() => void copy(grant)} aria-label={`复制 ${grant.name} 注册命令`} className="shrink-0 rounded-md p-3 hover:bg-accent"><Copy size={16} aria-hidden /></button></div>
+        {copied === grant.grant_id && <p role="status" className="text-xs text-muted-foreground">已复制注册命令，未复制密钥。</p>}
       </article>)}
     </section>
-    <details className="border-t border-border pt-5 text-sm"><summary className="cursor-pointer text-muted-foreground">如何在 Agent 中使用</summary><div className="mt-3 space-y-3 text-muted-foreground"><p>在 Codex / Claude 的 MCP 设置中，使用已安装 game-atelier 环境的 Python 解释器启动。连接不会自动修改你的 Agent 配置。</p><code className="block break-all rounded-md bg-background p-3 font-mono text-xs">/absolute/path/to/python -m character_workflow.mcp --credentials /path/to/credential.json</code><p>将示例中的解释器替换为本机安装路径，凭据路径替换为上方复制的路径；不要粘贴凭据文件内容。</p><p>工具连接与 Skill 安装是两件事。加载对应工坊 Skill 后，Agent 可以准备请求；只有你在“待批准生成”中确认，才会调用生成服务。</p><p>MCP 只限制这些工具的权限，不会限制你另外授予 Agent 的文件或终端访问权。</p></div></details>
+    <details className="border-t border-border pt-5 text-sm"><summary className="cursor-pointer text-muted-foreground">如何在 Agent 中使用</summary><div className="mt-3 space-y-3 text-muted-foreground"><p>在终端执行上面的命令注册（Codex 换成 <code className="font-mono text-xs">codex mcp add game-atelier -- …</code>），重启 Agent 后工具可见。凭据文件由本机保护，不要粘贴其内容。</p><p>Skill 照常安装；勾选「直接执行生成」后终端确认即出图，否则在「待批准生成」页确认。</p></div></details>
   </div>;
 }

@@ -7,10 +7,11 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const connection = useConnectionState();
   const [activated, setActivated] = useState(false);
-  const [epoch, setEpoch] = useState(0);
   // 用户点「取消」后弹窗收起、页面原样保留；重新连上后复位，下一次中断再弹。
   const [dismissed, setDismissed] = useState(false);
-  const editing = !location.startsWith('/connection');
+  // 第二个标签可以只看：不申请编辑租约，写操作会被服务端以 EDITOR_IN_USE 拒绝并再次弹出接管。
+  const [viewOnly, setViewOnly] = useState(false);
+  const editing = !viewOnly && !location.startsWith('/connection');
   const ready = connection.phase === 'ready';
   const busy = connection.phase === 'idle' || connection.phase === 'connecting';
 
@@ -30,17 +31,28 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => { if (ready) { setActivated(true); setDismissed(false); } }, [ready]);
 
-  async function reconnect() {
+  async function reconnect(takeover = connection.phase === 'editor_in_use') {
     setDismissed(false);
-    await localConnection.start({ editing, takeover: connection.phase === 'editor_in_use' });
-    if (localConnection.getSnapshot().phase === 'ready' && activated) setEpoch(value => value + 1);
+    setViewOnly(false);
+    await localConnection.start({ editing: !location.startsWith('/connection'), takeover });
+  }
+  function viewWithoutLease() {
+    setDismissed(false);
+    setViewOnly(true);
+    void localConnection.start({ editing: false });
   }
 
   const reconnectLabel = connection.phase === 'editor_in_use' ? '接管并加载' : activated ? '重新连接' : '重试连接';
 
   return (
     <>
-      <div>{activated && <div key={epoch}>{children}</div>}</div>
+      <div>{activated && children}</div>
+      {ready && viewOnly && (
+        <div className="fixed bottom-4 right-4 z-40 flex items-center gap-3 rounded-full border border-border bg-glass px-4 py-2 text-sm backdrop-blur-glass">
+          <span className="text-muted-foreground">只读 · 另一页面正在编辑</span>
+          <button type="button" onClick={() => void reconnect(true)} className="text-primary hover:underline">接管编辑</button>
+        </div>
+      )}
       {!ready && !busy && dismissed && (
         <div className="fixed bottom-4 right-4 z-40 flex items-center gap-3 rounded-full border border-border bg-glass px-4 py-2 text-sm backdrop-blur-glass">
           <span className="text-muted-foreground">本机连接已暂停</span>
@@ -56,6 +68,7 @@ export function LocalConnectionGate({ children }: { children: ReactNode }) {
           </DialogDescription>
           {!busy && <div className="flex flex-wrap justify-end gap-2">
             {!activated && editing && <Link href="/connection" className="rounded-md border border-border px-3 py-2 text-sm hover:bg-accent">仅管理连接</Link>}
+            {connection.phase === 'editor_in_use' && <button type="button" onClick={viewWithoutLease} className="rounded-md border border-border px-3 py-2 text-sm hover:bg-accent">只查看</button>}
             {activated && <button type="button" onClick={() => setDismissed(true)} className="rounded-md border border-border px-3 py-2 text-sm hover:bg-accent">取消</button>}
             <button type="button" onClick={() => void reconnect()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90">
               {reconnectLabel}

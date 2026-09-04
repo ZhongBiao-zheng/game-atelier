@@ -9,32 +9,32 @@ function server(existing = false) {
     if (url === '/api/canvas/project-options') return new Response(JSON.stringify([{ project_id: 'canvas-one', name: '测试画布' }]));
     if (url === '/api/connection/agent-grants' && init?.method === 'POST') return new Response(JSON.stringify(grant));
     if (url === '/api/connection/agent-grants/g1') return new Response(null, { status: 204 });
-    return new Response(JSON.stringify({ grants: existing ? [grant] : [] }));
+    return new Response(JSON.stringify({ grants: existing ? [grant] : [], python: '/opt/venv/bin/python' }));
   });
   vi.stubGlobal('fetch', network); return network;
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('local Agent authorization UI', () => {
-  it('requires explicit projects and capabilities without granting generation approval', async () => {
+  it('requires an explicit project, defaults to full local capabilities and lets the user narrow them', async () => {
     const network = server(); render(<ConnectionPage />);
     fireEvent.click(await screen.findByRole('button', { name: '添加 Agent 授权' }));
     const create = screen.getByRole('button', { name: '创建授权' }); expect(create).toBeDisabled();
     fireEvent.change(screen.getByLabelText('连接名称'), { target: { value: grant.name } });
     fireEvent.click(await screen.findByLabelText('测试项目'));
-    fireEvent.click(screen.getByLabelText('准备生成（仍需你批准）'));
-    fireEvent.click(create); await screen.findByText(grant.credential_path);
+    fireEvent.click(screen.getByLabelText('直接执行生成（终端确认即批准，不经页面）'));
+    fireEvent.click(create); await screen.findByText(new RegExp(grant.credential_path));
     const call = network.mock.calls.find(([url, init]) => url.endsWith('agent-grants') && init?.method === 'POST');
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ name: grant.name, project_ids: ['p1'], canvas_project_ids: [], capabilities: ['read', 'prepare_generation'], days: 7 });
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ name: grant.name, project_ids: ['p1'], canvas_project_ids: [], capabilities: ['read', 'edit_documents', 'create_targets', 'prepare_generation', 'canvas_read', 'canvas_edit', 'canvas_generate'], days: 30 });
     expect(screen.queryByText(/token/i)).not.toBeInTheDocument();
   });
-  it('copies only the credential file path and revokes only after confirmation', async () => {
+  it('copies the registration command with interpreter and credential path, revokes only after confirmation', async () => {
     const network = server(true); const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     render(<ConnectionPage />); await screen.findByText(grant.name);
-    fireEvent.click(screen.getByRole('button', { name: `复制 ${grant.name} 凭据路径` }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(grant.credential_path));
+    fireEvent.click(screen.getByRole('button', { name: `复制 ${grant.name} 注册命令` }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`claude mcp add --transport stdio --scope local game-atelier -- /opt/venv/bin/python -m character_workflow.mcp --credentials ${grant.credential_path}`));
     fireEvent.click(screen.getByRole('button', { name: `撤销 ${grant.name}` }));
     expect(network.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
     confirm.mockReturnValue(true); fireEvent.click(screen.getByRole('button', { name: `撤销 ${grant.name}` }));

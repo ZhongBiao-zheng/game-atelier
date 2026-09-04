@@ -76,6 +76,21 @@ describe('local connection gate', () => {
     fireEvent.click(screen.getByRole('button', { name: '接管并加载' })); await screen.findByLabelText('编辑草稿');
     expect(network.mock.calls.some(([url, init]) => url.endsWith('editor-lease') && JSON.parse(String(init.body)).takeover === true)).toBe(true);
   });
+  it('lets a second tab view without a lease and keeps mounted state when it later takes over', async () => {
+    const network = server({ occupied: true }); const onMount = vi.fn(); render(<LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate>);
+    await screen.findByText('另一个页面正在编辑');
+    fireEvent.click(screen.getByRole('button', { name: '只查看' }));
+    const editor = await screen.findByLabelText('编辑草稿');
+    expect(localConnection.getSnapshot()).toMatchObject({ phase: 'ready', editing: false });
+    expect(network.mock.calls.filter(([url]) => url.endsWith('editor-lease'))).toHaveLength(1);
+    expect(screen.getByText('只读 · 另一页面正在编辑')).toBeInTheDocument();
+    fireEvent.change(editor, { target: { value: '只读时写下的草稿' } });
+    fireEvent.click(screen.getByRole('button', { name: '接管编辑' }));
+    await waitFor(() => expect(localConnection.getSnapshot()).toMatchObject({ phase: 'ready', editing: true }));
+    // 重新拿到编辑权不重挂载：草稿留着，业务组件只挂载过一次。
+    expect(screen.getByLabelText('编辑草稿')).toHaveValue('只读时写下的草稿'); expect(onMount).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('只读 · 另一页面正在编辑')).not.toBeInTheDocument();
+  });
   it('opens authorization management without stealing the editor lease', async () => {
     const network = server(); const onMount = vi.fn(); const { hook } = memoryLocation({ path: '/connection' });
     render(<Router hook={hook}><LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate></Router>);
