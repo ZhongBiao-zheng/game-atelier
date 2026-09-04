@@ -2730,6 +2730,7 @@ async def post_canvas_media_operation(
         CanvasMediaOperationError,
         execute_canvas_media_operation,
     )
+    from character_workflow.lib.matting import MattingModelMissing
 
     try:
         request = CanvasMediaOperationRequest.model_validate(payload)
@@ -2757,6 +2758,11 @@ async def post_canvas_media_operation(
             status,
             detail={"code": error.code, "message": error.message},
         ) from error
+    except MattingModelMissing:
+        raise HTTPException(422, detail={
+            "code": "canvas_matting_model_missing",
+            "message": "抠图模型尚未下载，请先下载模型。",
+        }) from None
     except KeyError:
         raise HTTPException(404, detail={
             "code": "canvas_media_source_missing",
@@ -2787,6 +2793,42 @@ async def post_canvas_media_operation(
             "code": "canvas_media_transaction_failed",
             "message": "图片处理事务未能安全提交，请刷新画布后重试。",
         }) from error
+
+
+class CanvasMattingModelStatus(BaseModel):
+    model_id: str
+    ready: bool
+    bytes: int
+    provider: str
+
+
+def _matting_model_status() -> CanvasMattingModelStatus:
+    from character_workflow.lib.matting import model_status
+
+    status = model_status()
+    return CanvasMattingModelStatus(
+        model_id=status.model_id, ready=status.ready, bytes=status.bytes, provider=status.provider,
+    )
+
+
+@router.get("/canvas/matting-model", response_model=CanvasMattingModelStatus)
+async def get_canvas_matting_model() -> CanvasMattingModelStatus:
+    return await run_in_threadpool(_matting_model_status)
+
+
+@router.post("/canvas/matting-model", response_model=CanvasMattingModelStatus)
+async def post_canvas_matting_model() -> CanvasMattingModelStatus:
+    """下载抠图模型（约 214 MB）。同步等待，前端按需提示进度。"""
+    from character_workflow.lib.matting import ensure_model
+
+    try:
+        await run_in_threadpool(ensure_model)
+    except RuntimeError as error:
+        raise HTTPException(503, detail={
+            "code": "canvas_matting_model_download_failed",
+            "message": str(error),
+        }) from error
+    return await run_in_threadpool(_matting_model_status)
 
 
 @router.get("/canvas/projects/{project_id}/versions/{version_id}/media")

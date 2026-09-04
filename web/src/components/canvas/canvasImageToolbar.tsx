@@ -5,6 +5,7 @@ import {
   Eye,
   FileUp,
   Grid2X2,
+  Scissors,
   Library,
   Lock,
   Orbit,
@@ -39,6 +40,7 @@ export const CANVAS_IMAGE_TOOLS: CanvasImageToolDefinition[] = [
   { id: 'maskEdit', label: '局部编辑', icon: Paintbrush, defaultVisible: true },
   { id: 'crop', label: '裁剪', icon: Crop, defaultVisible: true },
   { id: 'split', label: '切分', icon: Grid2X2, defaultVisible: true },
+  { id: 'removeBackground', label: '抠图', icon: Scissors, defaultVisible: true },
   { id: 'upscale', label: '本地放大', icon: ZoomIn, defaultVisible: true },
   { id: 'angle', label: '多角度', icon: Orbit, defaultVisible: false },
 ];

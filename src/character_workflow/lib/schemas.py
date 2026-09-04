@@ -399,6 +399,7 @@ CanvasImageQuickToolId = Literal[
     "crop",
     "split",
     "upscale",
+    "removeBackground",
     "angle",
 ]
 
@@ -912,8 +913,15 @@ class CanvasUpscaleOperation(BaseModel):
     algorithm: Literal["nearest", "bilinear", "lanczos"]
 
 
+class CanvasRemoveBackgroundOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["remove_background"]
+    model: str = Field(min_length=1, max_length=80)
+
+
 CanvasLocalToolOperation = Annotated[
-    CanvasCropOperation | CanvasSplitOperation | CanvasUpscaleOperation,
+    CanvasCropOperation | CanvasSplitOperation | CanvasUpscaleOperation
+    | CanvasRemoveBackgroundOperation,
     Field(discriminator="kind"),
 ]
 
@@ -1363,8 +1371,14 @@ class CanvasUpscaleMediaOperation(BaseModel):
     algorithm: Literal["nearest", "bilinear", "lanczos"]
 
 
+class CanvasRemoveBackgroundMediaOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["remove_background"]
+
+
 CanvasMediaOperation = Annotated[
-    CanvasCropMediaOperation | CanvasSplitMediaOperation | CanvasUpscaleMediaOperation,
+    CanvasCropMediaOperation | CanvasSplitMediaOperation | CanvasUpscaleMediaOperation
+    | CanvasRemoveBackgroundMediaOperation,
     Field(discriminator="kind"),
 ]
 

@@ -174,6 +174,7 @@ export interface CanvasNodeContextValue {
   replaceMedia: (node: CanvasContentNode) => void;
   toggleFreeResize: (node: CanvasContentNode) => void;
   openMediaOperation: (node: CanvasContentNode, tool: CanvasMediaTool) => void;
+  removeBackground: (node: CanvasContentNode) => void;
   openMaskEdit: (node: CanvasContentNode) => void;
   openAngle: (node: CanvasContentNode) => void;
   editVideo: (node: CanvasContentNode) => void;
@@ -1637,6 +1638,15 @@ function ImageNodeToolbar({
       disabled: !currentVersionId || replacing,
       run: () => {
         if (currentVersionId) context.openMediaOperation(node, 'upscale');
+      },
+    };
+    if (definition.id === 'removeBackground') action = {
+      ...common,
+      label: `抠图 ${node.title}`,
+      icon: <Icon />,
+      disabled: !currentVersionId || replacing,
+      run: () => {
+        if (currentVersionId) context.removeBackground(node);
       },
     };
     if (definition.id === 'angle') action = {

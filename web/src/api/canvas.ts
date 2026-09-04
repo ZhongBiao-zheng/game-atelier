@@ -6,6 +6,7 @@ import type {
   CanvasDocument,
   CanvasMediaOperation,
   CanvasMediaOperationResult,
+  CanvasMattingModelStatus,
   CanvasPackageImport,
   CanvasPackageInspection,
   CanvasProject,
@@ -252,6 +253,14 @@ export function runCanvasMediaOperation(
       }),
     },
   );
+}
+
+export function getCanvasMattingModel(): Promise<CanvasMattingModelStatus> {
+  return requestJson<CanvasMattingModelStatus>('/api/canvas/matting-model', '读取抠图模型状态');
+}
+
+export function downloadCanvasMattingModel(): Promise<CanvasMattingModelStatus> {
+  return requestJson<CanvasMattingModelStatus>('/api/canvas/matting-model', '下载抠图模型', { method: 'POST' });
 }
 
 export function listCanvasJobs(projectId: string): Promise<Job[]> {

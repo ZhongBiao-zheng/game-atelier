@@ -104,6 +104,8 @@ POST /api/canvas/projects/{project_id}/creation-assets/{asset_id}/insert
 POST /api/canvas/projects/{project_id}/uploads
 POST /api/canvas/projects/{project_id}/nodes/{node_id}/replace
 POST /api/canvas/projects/{project_id}/media-operations
+GET /api/canvas/matting-model
+POST /api/canvas/matting-model
 GET /api/canvas/projects/{project_id}/versions/{version_id}/media
 GET /api/canvas/projects/{project_id}/versions/{version_id}/download
 GET /api/canvas/projects/{project_id}/jobs

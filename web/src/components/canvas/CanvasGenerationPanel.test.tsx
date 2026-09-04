@@ -107,6 +107,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     replaceMedia: vi.fn(),
     toggleFreeResize: vi.fn(),
     openMediaOperation: vi.fn(),
+    removeBackground: vi.fn(),
     openMaskEdit: vi.fn(),
     openAngle: vi.fn(),
     editVideo: vi.fn(),

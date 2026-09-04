@@ -27,6 +27,7 @@ export type CanvasImageQuickToolId =
   | 'crop'
   | 'split'
   | 'upscale'
+  | 'removeBackground'
   | 'angle';
 
 export interface CanvasImageToolbarPreferences {
@@ -266,7 +267,8 @@ export type CanvasContentOrigin =
       operation:
         | { kind: 'crop'; rect: { x: number; y: number; width: number; height: number } }
         | { kind: 'split'; horizontal_lines: number[]; vertical_lines: number[]; row: number; column: number }
-        | { kind: 'upscale'; target_long_edge: number; algorithm: 'nearest' | 'bilinear' | 'lanczos' };
+        | { kind: 'upscale'; target_long_edge: number; algorithm: 'nearest' | 'bilinear' | 'lanczos' }
+        | { kind: 'remove_background'; model: string };
     }
   | { kind: 'import'; package_id: string }
   | { kind: 'creation_asset_snapshot'; title: string };
@@ -414,7 +416,15 @@ export type CanvasMediaOperation =
       kind: 'upscale';
       target_long_edge: 1024 | 2048 | 3072 | 4096;
       algorithm: 'nearest' | 'bilinear' | 'lanczos';
-    };
+    }
+  | { kind: 'remove_background' };
+
+export interface CanvasMattingModelStatus {
+  model_id: string;
+  ready: boolean;
+  bytes: number;
+  provider: string;
+}
 
 export interface CanvasMediaOperationResult {
   operation_id: string;

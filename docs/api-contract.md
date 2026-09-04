@@ -357,9 +357,13 @@ default Key、再按登记顺序选择首个支持至少一张参考图的图片
 generation-run Derivation Connection；original retry 重新校验源图摘要并逐字段复用原 Snapshot。
 
 `POST /canvas/projects/{id}/media-operations` 只接受当前图片节点和不可变源 Version ID，并以
-discriminated union 执行 `crop`、`split` 或确定性 `upscale`。服务端用 Pillow 校验真实格式、摘要、静态帧、
+discriminated union 执行 `crop`、`split`、确定性 `upscale` 或本机模型 `remove_background`。服务端用 Pillow 校验真实格式、摘要、静态帧、
 EXIF 方向与 64MP 上限，统一输出剥离元数据的 RGB/RGBA PNG；切图限制 2–12 行列且每块最短边至少 16px，
-放大只允许 1024/2048/3072/4096 长边和 nearest/bilinear/lanczos，明确不提供 AI 细节恢复。一次命令在
+放大只允许 1024/2048/3072/4096 长边和 nearest/bilinear/lanczos，明确不提供 AI 细节恢复。`remove_background`
+无参数：固定用 BiRefNet-general-lite（MIT，onnxruntime CPU/CUDA/DirectML 按可用挑）在本机推理，源图透明度与
+预测掩码相乘后输出 RGBA PNG，origin 记录 `model` id；模型文件由 `GET/POST /canvas/matting-model` 查询与
+下载到 `<data_root>/.config/models/`（sha256 校验），未下载时操作返回 422 `canvas_matting_model_missing`，
+抠图的处理时限为 180s（其余操作 60s）。一次命令在
 项目级串行、全局最多并发 2 个；全部输出先写 staging，校验总块数与体积后原子移动到
 `derived/<operation_id>/` 并提交 Document。若进程在移动后中断，下一次项目访问按事务摘要完成提交；恢复不
 重跑图片处理。冲突为零写，源文件永不覆盖；一次 split 的结果节点和 `local_tool` 派生边作为一个画布历史
