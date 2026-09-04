@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.38.0',
+    date: '2026-09-04',
+    headline: '画布：⌘G 打组，多选拖线一次全连',
+    changes: [
+      { kind: 'feat', text: '框选多个节点后按 ⌘G / Ctrl+G 直接打组，快捷键面板同步列出' },
+      { kind: 'feat', text: '框选一组素材后从其中一个拖出连线：连到已有节点就把整组都接进去，拖到空白处新建的节点也一次接上全部' },
+    ],
+  },
+  {
     version: '5.37.2',
     date: '2026-09-04',
     headline: '画布里生成完成的节点可以删除了',

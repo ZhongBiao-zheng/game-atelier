@@ -186,6 +186,7 @@ import {
   canvasConnectionCreationCapabilities,
   canvasDeletionBlockedMessage,
   canvasNodeRenderZIndex,
+  canvasNodeProvidesOutput,
   canvasNodeRenderedSize,
   canCreateCanvasInputConnection,
   clampCanvasNodeSize,
@@ -207,7 +208,10 @@ import {
 interface CreateMenuState {
   screen: XYPosition;
   flow: XYPosition;
+  /** 拖出连线的那个节点。 */
   sourceId?: string;
+  /** 从输出侧拖出时要一起连进新节点的全部来源：起点在多选里就是整组，否则只有起点。 */
+  sourceIds?: string[];
   sourceHandle?: 'source' | 'target';
 }
 
@@ -1341,6 +1345,41 @@ function CanvasEditorInner({
     }, true);
   }, [commit]);
 
+  /** 从输出侧拖出连线时，哪些节点算来源。
+   *
+   *  框选一组素材后从其中一个拖线，用户的意图是「把这一组都接进去」而不是只接手里那一个。
+   *  起点不在选区里则维持单源：那是在拖一个未选中的节点，别把无关的选区一起带走。 */
+  const connectionSourceIds = useCallback((fromNodeId: string): string[] => {
+    const current = latestDocument.current;
+    const selection = latestSelectedNodeIds.current;
+    if (!current || selection.size < 2 || !selection.has(fromNodeId)) return [fromNodeId];
+    const ids = current.nodes
+      .filter(node => selection.has(node.id) && canvasNodeProvidesOutput(node))
+      .map(node => node.id);
+    return ids.includes(fromNodeId) ? ids : [fromNodeId, ...ids];
+  }, []);
+
+  const connectSources = useCallback((sourceIds: string[], targetNodeId: string) => {
+    const accepted = sourceIds.filter(sourceId => canCreateCanvasInputConnection(
+      latestDocument.current,
+      { source: sourceId, target: targetNodeId },
+    ));
+    if (accepted.length === 0) {
+      setError('选中的节点都不能连进这个节点。');
+      return;
+    }
+    setError(null);
+    commit(current => syncCanvasPromptReferences({
+      ...current,
+      connections: [...current.connections, ...accepted.map(sourceId => ({
+        id: makeId('connection'),
+        role: 'input' as const,
+        source_node_id: sourceId,
+        target_node_id: targetNodeId,
+      }))],
+    }, new Set([targetNodeId])), true);
+  }, [commit]);
+
   const setMaterialConnected = useCallback((
     sourceNodeId: string,
     targetNodeId: string,
@@ -1458,7 +1497,12 @@ function CanvasEditorInner({
     const dropNodeId = state.toNode?.id ?? (
       pointer ? connectionDropNodeId(pointer, startedFromTarget ? 'right' : 'left') : null
     );
+    const sourceIds = startedFromTarget ? [state.fromNode.id] : connectionSourceIds(state.fromNode.id);
     if (dropNodeId) {
+      if (sourceIds.length > 1) {
+        connectSources(sourceIds, dropNodeId);
+        return;
+      }
       const connection: Connection = {
         source: startedFromTarget ? dropNodeId : state.fromNode.id,
         target: startedFromTarget ? state.fromNode.id : dropNodeId,
@@ -1477,9 +1521,10 @@ function CanvasEditorInner({
       },
       flow: screenToFlowPosition(pointer),
       sourceId: state.fromNode.id,
+      sourceIds: startedFromTarget ? undefined : sourceIds,
       sourceHandle: state.fromHandle?.type ?? 'source',
     });
-  }, [onConnect, screenToFlowPosition]);
+  }, [connectSources, connectionSourceIds, onConnect, screenToFlowPosition]);
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     setSelectedConnectionIds(current => {
@@ -1824,18 +1869,21 @@ function CanvasEditorInner({
         current.content_versions,
       );
       if (menu?.sourceId) {
-        const sourceNodeId = menu.sourceHandle === 'target' ? node.id : menu.sourceId;
-        const targetNodeId = menu.sourceHandle === 'target' ? menu.sourceId : node.id;
-        if (canCreateCanvasInputConnection({ ...current, nodes, content_versions: contentVersions }, {
-          source: sourceNodeId,
-          target: targetNodeId,
-        })) {
-          connections.push({
-            id: makeId('connection'),
-            role: 'input',
-            source_node_id: sourceNodeId,
-            target_node_id: targetNodeId,
-          });
+        const pairs = menu.sourceHandle === 'target'
+          ? [{ sourceNodeId: node.id, targetNodeId: menu.sourceId }]
+          : (menu.sourceIds ?? [menu.sourceId]).map(sourceNodeId => ({ sourceNodeId, targetNodeId: node.id }));
+        for (const { sourceNodeId, targetNodeId } of pairs) {
+          if (canCreateCanvasInputConnection({ ...current, nodes, content_versions: contentVersions }, {
+            source: sourceNodeId,
+            target: targetNodeId,
+          })) {
+            connections.push({
+              id: makeId('connection'),
+              role: 'input',
+              source_node_id: sourceNodeId,
+              target_node_id: targetNodeId,
+            });
+          }
         }
       }
       const next = { ...current, nodes, connections, content_versions: contentVersions };
@@ -1939,7 +1987,7 @@ function CanvasEditorInner({
     const draft = createCanvasGenerationDraft(keys, 'image', {
       preference: canvasUiPreferences.generation_defaults.image,
       prompt: menu?.sourceId && menu.sourceHandle !== 'target'
-        ? `@[node:${menu.sourceId}]`
+        ? (menu.sourceIds ?? [menu.sourceId]).map(id => `@[node:${id}]`).join(' ')
         : '',
     });
     appendNode({
@@ -2755,6 +2803,22 @@ function CanvasEditorInner({
     dirtyVersion.current += 1;
     setDirtySignal(dirtyVersion.current);
   }, [document]);
+
+  const groupSelectionRef = useRef(groupSelection);
+  groupSelectionRef.current = groupSelection;
+  useEffect(() => {
+    function handleGroupShortcut(event: KeyboardEvent) {
+      if ((!event.metaKey && !event.ctrlKey) || event.shiftKey || event.altKey) return;
+      if (event.key.toLowerCase() !== 'g') return;
+      if (isCanvasShortcutBlockedTarget(event.target)) return;
+      // 不管选了几个都拦掉浏览器的「查找下一个」，画布里 ⌘G 只有打组一个含义。
+      event.preventDefault();
+      if (activeBatch || latestSelectedNodeIds.current.size < 2) return;
+      groupSelectionRef.current();
+    }
+    window.addEventListener('keydown', handleGroupShortcut);
+    return () => window.removeEventListener('keydown', handleGroupShortcut);
+  }, [activeBatch]);
 
   useEffect(() => {
     function handleHistoryShortcut(event: KeyboardEvent) {
@@ -4611,6 +4675,7 @@ const CANVAS_SHORTCUTS = [
   { keys: ['空白拖动'], label: '框选多个节点' },
   { keys: ['Shift / ⌘', '点击'], label: '追加选择节点' },
   { keys: ['⌘ / Ctrl', 'A'], label: '全选节点' },
+  { keys: ['⌘ / Ctrl', 'G'], label: '选中节点打组' },
   { keys: ['⌘ / Ctrl', 'C / V'], label: '复制 / 粘贴节点' },
   { keys: ['⌘ / Ctrl', 'Z'], label: '撤销' },
   { keys: ['⌘ / Ctrl', 'Shift', 'Z'], label: '重做' },

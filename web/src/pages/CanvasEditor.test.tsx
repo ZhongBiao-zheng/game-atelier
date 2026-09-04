@@ -62,7 +62,7 @@ vi.mock('@xyflow/react', () => {
       nodeTypes?: Record<string, React.ComponentType<Record<string, unknown>>>;
       onlyRenderVisibleElements?: boolean;
       onConnect?: (connection: { source: string; target: string; sourceHandle: null; targetHandle: null }) => void;
-      onConnectEnd?: (event: MouseEvent, state: { isValid: boolean; fromNode: { id: string }; fromHandle: { type: 'source' | 'target' } }) => void;
+      onConnectEnd?: (event: MouseEvent, state: { isValid: boolean; fromNode: { id: string }; fromHandle: { type: 'source' | 'target' }; toNode?: { id: string } }) => void;
       onEdgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean }>) => void;
       onNodesChange?: (changes: Array<{ id: string; type: string; selected?: boolean; position?: { x: number; y: number } }>) => void;
       onNodeClick?: (event: React.MouseEvent, node: { id: string }) => void;
@@ -116,6 +116,14 @@ vi.mock('@xyflow/react', () => {
                 onClick={() => onConnectEnd?.(
                   new MouseEvent('mouseup', { clientX: 480, clientY: 320 }),
                   { isValid: false, fromNode: { id: nodes[0].id }, fromHandle: { type: 'source' } },
+                )}
+              />
+              <button
+                type="button"
+                aria-label="simulate drop connection on last node"
+                onClick={() => onConnectEnd?.(
+                  new MouseEvent('mouseup', { clientX: 10, clientY: 10 }),
+                  { isValid: false, fromNode: { id: nodes[0].id }, fromHandle: { type: 'source' }, toNode: { id: nodes[nodes.length - 1].id } },
                 )}
               />
               <button
@@ -1378,4 +1386,86 @@ it('pulls canvas jobs as soon as SSE says one changed, without waiting for the n
 
   vi.unstubAllGlobals();
   state.mockRestore();
+});
+
+it('groups the selection with ⌘G / Ctrl+G', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [textNode('text-one', '甲'), textNode('text-two', '乙')],
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+
+  // 只选一个时不打组，但仍拦掉浏览器的「查找下一个」。
+  fireEvent.click(screen.getByRole('button', { name: 'simulate node select' }));
+  fireEvent.keyDown(window, { key: 'g', metaKey: true });
+  fireEvent.keyDown(window, { key: 'a', metaKey: true });
+  fireEvent.keyDown(window, { key: 'g', ctrlKey: true });
+
+  await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
+    nodes: expect.arrayContaining([
+      expect.objectContaining({ type: 'group', data: expect.objectContaining({ member_node_ids: ['text-one', 'text-two'] }) }),
+    ]),
+  })));
+  const saved = vi.mocked(saveCanvasDocument).mock.calls.at(-1)![1] as CanvasDocument;
+  expect(saved.nodes.filter(node => node.type === 'group')).toHaveLength(1);
+});
+
+it('connects every selected source when a connection is dragged out of a multi-selection', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [textNode('source-one', '甲', 'version-one'), textNode('source-two', '乙', 'version-two')],
+    content_versions: {
+      'version-one': { version_id: 'version-one', kind: 'text', text: '甲', created_at: '2026-08-26T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'user_edit' } },
+      'version-two': { version_id: 'version-two', kind: 'text', text: '乙', created_at: '2026-08-26T00:00:00Z', sha256: 'b'.repeat(64), origin: { kind: 'user_edit' } },
+    },
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+
+  fireEvent.keyDown(window, { key: 'a', metaKey: true });
+  fireEvent.click(screen.getByRole('button', { name: 'simulate blank connection' }));
+  const menu = screen.getByRole('menu', { name: '连接创建节点' });
+  fireEvent.click(within(menu).getByRole('menuitem', { name: /^图片/ }));
+
+  await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
+    connections: [
+      expect.objectContaining({ role: 'input', source_node_id: 'source-one', target_node_id: expect.stringMatching(/^image-/) }),
+      expect.objectContaining({ role: 'input', source_node_id: 'source-two', target_node_id: expect.stringMatching(/^image-/) }),
+    ],
+  })));
+});
+
+it('connects every selected source into an existing node dropped on', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [textNode('source-one', '甲'), textNode('source-two', '乙'), imageNode('target-one', '图片', imageDraft)],
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+
+  fireEvent.keyDown(window, { key: 'a', metaKey: true });
+  fireEvent.click(screen.getByRole('button', { name: 'simulate drop connection on last node' }));
+
+  await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
+    connections: [
+      expect.objectContaining({ role: 'input', source_node_id: 'source-one', target_node_id: 'target-one' }),
+      expect.objectContaining({ role: 'input', source_node_id: 'source-two', target_node_id: 'target-one' }),
+    ],
+  })));
+});
+
+it('keeps a single source when the dragged node is outside the selection', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [textNode('source-one', '甲'), textNode('source-two', '乙'), imageNode('target-one', '图片', imageDraft)],
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+
+  // 选区里只有 nodes[0]（起点自己）——单选不算多源，连线只连它。
+  fireEvent.click(screen.getByRole('button', { name: 'simulate node select' }));
+  fireEvent.click(screen.getByRole('button', { name: 'simulate drop connection on last node' }));
+
+  await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
+    connections: [
+      expect.objectContaining({ role: 'input', source_node_id: 'source-one', target_node_id: 'target-one' }),
+    ],
+  })));
 });
