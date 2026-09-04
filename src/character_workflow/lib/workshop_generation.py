@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from character_workflow.lib import keys
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
@@ -48,6 +49,8 @@ class GenerationRequest(BaseModel):
     execution_message: str | None = None
 
 
+logger = logging.getLogger(__name__)
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -65,6 +68,17 @@ def read_request(request_id: str) -> GenerationRequest:
         return GenerationRequest.model_validate_json(read_stable(request_path(request_id), 512000))
     except FileNotFoundError:
         raise WorkshopError("TARGET_NOT_AUTHORIZED", "找不到生成请求", 404) from None
+
+
+def _stored_requests() -> list[GenerationRequest]:
+    """读全部落盘请求；单条损坏只记 warning 跳过，绝不让一条坏文件拖垮启动恢复或整页列表。"""
+    requests = []
+    for path in sorted((root() / "requests").glob("wr-*.json"), reverse=True):
+        try:
+            requests.append(read_request(path.stem))
+        except (WorkshopError, ValidationError, ValueError, OSError) as error:
+            logger.warning("skip unreadable workshop request %s: %s", path.name, error)
+    return requests
 
 
 def _save(request: GenerationRequest) -> None:
@@ -327,10 +341,7 @@ def frozen_reference(principal: Any, request_id: str, media_id: str) -> tuple[Pa
 def list_requests(principal: Any, page: int = 1, page_size: int = 20) -> dict:
     if actor_id(principal) != "local":
         raise WorkshopError("CAPABILITY_DENIED", "待批准列表仅在本地管理页可见", 403)
-    items = []
-    for path in sorted((root() / "requests").glob("wr-*.json"), reverse=True):
-        request = read_request(path.stem)
-        items.append(request_view(request))
+    items = [request_view(request) for request in _stored_requests()]
     items.sort(key=lambda r: r["created_at"], reverse=True)
     return paginate(items, page, page_size, "requests")
 
@@ -464,9 +475,13 @@ def claim_execution(job: Job,
 def recover_requests(grant_is_active: Callable[[str, str, str], bool] | None = None) -> list[str]:
     """Recover only Workshop-owned approved records, never Studio/Canvas or legacy drafts."""
     queued = []
-    for path in (root() / "requests").glob("wr-*.json"):
+    for stored in _stored_requests():
+        path = request_path(stored.request_id)
         with file_lock(path.with_suffix(".lock")):
-            request = read_request(path.stem)
+            try:
+                request = read_request(stored.request_id)
+            except (WorkshopError, ValidationError, ValueError, OSError):
+                continue
             if request.state != "approved":
                 continue
             with job_execution_lock(request.job_id) as acquired:

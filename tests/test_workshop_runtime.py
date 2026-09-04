@@ -646,3 +646,14 @@ def test_agent_with_execute_capability_approves_own_request_and_is_recorded(setu
                             project_ids=setup.agent.project_ids, capabilities=setup.agent.capabilities)
     with pytest.raises(ws.WorkshopError):
         generation.approve_generation(other, request["request_id"], 2, lambda *_: True)
+
+
+def test_corrupt_request_file_is_skipped_by_list_and_recovery(setup):
+    request = prepare(setup)
+    requests_dir = ws.root() / "requests"
+    (requests_dir / "wr-broken.json").write_text("{not json", encoding="utf-8")
+    (requests_dir / "wr-oldschema.json").write_text(json.dumps({"request_id": "wr-oldschema"}),
+                                                    encoding="utf-8")
+    assert generation.recover_requests(lambda *_: True) == []
+    listed = generation.list_requests(setup.local)["requests"]
+    assert [item["request_id"] for item in listed] == [request["request_id"]]
