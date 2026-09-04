@@ -14,8 +14,9 @@ Agent 通过工具读取的文档、预览等获授权内容会进入其会话�
    见[画布 MCP 契约](contracts/canvas-mcp.md)；操作引导在 `skills/canvas/SKILL.md`。
 3. 保存页面提供的凭据文件位置。文件由服务端生成和保护，不要复制其中的 token，
    不要上传、提交或将它粘贴到聊天 / MCP 配置。
-4. 确定安装了本项目依赖的 Python 解释器绝对路径。源码开发环境通常是仓库的 `.venv/bin/python`；
-   Windows 为 `.venv\Scripts\python.exe`。使用此解释器，不要让 Agent 自行选择另一套 Python。
+4. 确定安装了本项目依赖的 Python 解释器绝对路径。插件用户是数据目录下的 `<data_root>/.venv/bin/python`
+   （Windows 为 `<data_root>\.venv\Scripts\python.exe`，默认 data root 是 `~/game-atelier`）；源码开发环境是仓库的 `.venv/bin/python`。
+   「本机 Agent 连接」页会直接给出带本机解释器路径的完整命令。使用此解释器，不要让 Agent 自行选择另一套 Python。
 
 MCP 启动命令如下，两个绝对路径都需替换为本机实际值：
 

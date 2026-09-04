@@ -50,7 +50,7 @@ claude --plugin-dir .
 3. **API Key** — 打开本地 Web UI，在设置页添加图像服务 Key
 4. **Agent 授权** — 设置 → 本机 Agent 连接，选择项目与能力；按[本机 MCP 说明](docs/mcp-local-client.md)配置 Codex / Claude
 
-已有 Skill 名称不变，但创作操作通过 13 个受限 `workshop_*` 工具。注册 MCP 不会自动安装 Skill；
+已有 Skill 名称不变；Skill 按可用性选手：有 `workshop_*` / `canvas_*` 工具就走 MCP，否则走原有 CLI。注册 MCP 不会自动安装 Skill；
 凭据只保存在 OS 权限保护的本地文件里，不粘贴 token，不给 Agent 默认开放整个数据目录。
 
 > 数据目录（角色档案、图片、API Key）与插件完全分离，卸载插件不会影响你的资产。
@@ -87,7 +87,7 @@ claude --plugin-dir .
 1. /game-atelier:viewer-server     → 打开 Web 画廊
 2. /game-atelier:character 暗影刺客  → 开始或继续角色
 3. 描述你想要的形象 → AI 整理 spec，生成 prompt 预览
-4. Agent 准备请求 → 在本地“待批准生成”页核对并批准 → 结果回到 Web 工坊
+4. 终端确认卡上说「出图」→ 出图 → 结果回到 Web 工坊（未授予「直接执行生成」的 Agent 走本地“待批准生成”页）
 5. 在 Web 上查看、编辑 spec、留下反馈
 6. 回到 Claude Code 继续迭代
 ```
@@ -186,6 +186,6 @@ claude plugin validate .
 ## 安全说明
 
 - viewer-server **仅绑定 `127.0.0.1`**，不对外网暴露
-- 项目、媒体、下载和 SSE 必须有本机会话；Agent 仅能使用授权项目的工坊工具，不能批准自己的生成请求
+- 项目、媒体、下载和 SSE 必须有本机会话；Agent 仅能使用授权项目的工坊工具；只有授予 `execute_generation` 的 Agent 才能在你确认后批准自己的生成请求
 - API Key 存储在本地 `.config/keys.json`，不写入任何日志或对话记录
 - 图片读取接口使用 job_id 白名单，只能访问已登记的输出文件

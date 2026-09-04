@@ -80,7 +80,7 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 写操作按「谁有权」分组。全部前缀 `/api`，服务绑死 `127.0.0.1`。
 
 工坊本地请求管理为 `GET /workshop/requests` 和
-`POST /workshop/requests/{request_id}/approve { expected_revision }`；Agent 身份不能批准。
+`POST /workshop/requests/{request_id}/approve { expected_revision }`；Agent 身份经 `workshop_approve_generation` 批准自身请求，须持 `execute_generation`。
 其余 MCP 工具均为专用 POST 输入，详见工坊契约，不提供通用 HTTP / 文件工具。
 
 `GET /spec/{id}` 返回 `{ content, revision }`；`POST /spec/{id}` 要求

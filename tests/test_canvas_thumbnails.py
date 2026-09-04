@@ -61,6 +61,8 @@ def test_display_width_gets_a_downscaled_webp_not_the_original(client):
 
     # 第二次请求走缓存，内容逐字节相同。
     assert client.get(url, params={"w": 320}).content == thumbnail.content
+    # 缩略图按 URL 维度不可变；连接中间件不得把它覆盖成 no-store（本机直服也过浏览器缓存）。
+    assert thumbnail.headers["cache-control"] == "private, max-age=31536000, immutable"
 
 
 def test_requests_wider_than_the_top_tier_and_small_originals_get_the_original(client):

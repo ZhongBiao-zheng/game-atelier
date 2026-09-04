@@ -9,7 +9,9 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from viewer_server.connection_auth import COOKIE_NAME, ConnectionError, ConnectionStore
-from viewer_server.connection_capabilities import CANVAS_TOOLS, WORKSHOP_TOOLS, local_capability
+from viewer_server.connection_capabilities import (
+    CANVAS_TOOLS, WORKSHOP_TOOLS, is_media_route, local_capability,
+)
 from viewer_server.request_boundary import _authority, _header
 
 _CONTROL_ROUTES = {
@@ -166,12 +168,18 @@ class ConnectionMiddleware:
             await connection_error(error)(scope, receive, send)
             return
 
+        keep_cache_header = is_media_route(path)
+
         async def private_send(message: dict) -> None:
             if message["type"] == "http.response.start":
-                headers = [(key, value) for key, value in message.get("headers", [])
-                           if key.lower() not in {b"referrer-policy", b"cache-control"}]
+                raw_headers = message.get("headers", [])
+                # 媒体路由（缩略图 / 原图）按 URL 维度不可变，路由自己给的 Cache-Control 是契约的一部分。
+                has_cache = keep_cache_header and any(k.lower() == b"cache-control" for k, _ in raw_headers)
+                dropped = {b"referrer-policy"} | (set() if has_cache else {b"cache-control"})
+                headers = [(key, value) for key, value in raw_headers if key.lower() not in dropped]
                 headers.append((b"referrer-policy", b"no-referrer"))
-                headers.append((b"cache-control", b"no-store" if _private_path(path) else b"no-cache"))
+                if not has_cache:
+                    headers.append((b"cache-control", b"no-store" if _private_path(path) else b"no-cache"))
                 message["headers"] = headers
             await send(message)
 

@@ -163,6 +163,11 @@ LOCAL_RULES = [
 ]
 
 
+def is_media_route(path: str) -> bool:
+    """媒体路由自带缓存策略（缩略图 immutable），中间件不覆盖它们的 Cache-Control。"""
+    return any(template in MEDIA_ROUTES and pattern.fullmatch(path) for _, template, pattern in LOCAL_RULES)
+
+
 def local_capability(method: str, path: str) -> str | None:
     for allowed_method, template, pattern in LOCAL_RULES:
         if (allowed_method == method or (

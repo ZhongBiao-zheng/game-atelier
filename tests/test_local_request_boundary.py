@@ -223,3 +223,18 @@ def test_boundary_error_shape_matches_typescript_contract(client):
     for field in error:
         assert f"    {field}:" in schema
     assert "'HOST_DENIED' | 'ORIGIN_DENIED'" in schema
+
+
+def test_localhost_document_navigation_redirects_to_loopback_address(client):
+    # 手输 / 收藏 http://localhost:<port> 的用户应被送到 127.0.0.1，而不是看到 JSON 错误页。
+    response = client.get("/canvas/abc?x=1", headers={
+        "Host": "localhost:5174", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document",
+    }, follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "http://127.0.0.1:5174/canvas/abc?x=1"
+    # API 与非导航请求照旧拒绝：不给 localhost 来源任何数据。
+    api = client.get("/api/connection/status", headers={"Host": "localhost:5174"})
+    assert api.status_code == 421
+    fetch = client.get("/", headers={"Host": "localhost:5174", "Sec-Fetch-Mode": "cors",
+                                     "Sec-Fetch-Dest": "empty"})
+    assert fetch.status_code == 421

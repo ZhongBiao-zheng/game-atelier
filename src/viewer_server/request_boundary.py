@@ -9,7 +9,7 @@ import os
 import uuid
 from urllib.parse import urlsplit
 
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 
@@ -81,7 +81,21 @@ class LocalRequestBoundary:
             return
         try:
             authority = _authority(scope)
-            if authority is None or _header(scope, b"host") != authority:
+            host = _header(scope, b"host")
+            if authority is None or host != authority:
+                # Trigger: 用户手输 / 收藏了 http://localhost:<port>，顶层文档导航
+                # Why: 连接已经落在 127.0.0.1 的 socket 上，回跳只是换个拼法，不放行任何 API
+                # Outcome: 307 到 127.0.0.1 同路径；其余 Host 不匹配照旧 421
+                if (
+                    authority is not None and host == authority.replace("127.0.0.1", "localhost")
+                    and _public_navigation(scope, _header(scope, b"sec-fetch-mode"),
+                                           _header(scope, b"sec-fetch-dest"))
+                ):
+                    target = f"http://{authority}{scope.get('raw_path', b'/').decode('latin-1')}"
+                    if scope.get("query_string"):
+                        target += "?" + scope["query_string"].decode("latin-1")
+                    await RedirectResponse(target, status_code=307)(scope, receive, send)
+                    return
                 await self._deny(scope, receive, send, "HOST_DENIED", "本机服务地址不匹配", 421)
                 return
             origin = _header(scope, b"origin")

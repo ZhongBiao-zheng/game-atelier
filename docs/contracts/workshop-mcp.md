@@ -180,7 +180,7 @@ Agent 会话调用 `workshop_approve_generation`，仅当其授权含 `execute_g
 
 ## 与现有入口的收敛
 
-`run_job` 最终只接受已批准的 `PENDING`，并检查工坊 Job 有匹配的已批准请求；
+`run_job` 接受 `PENDING_CONFIRM`（CLI 路径，终端确认即批准）与 `PENDING`，带 `workshop_request_id` 的 Job 还要有匹配的已批准请求；
 不能只是把状态改成 PENDING 就绕过批准。Studio / Canvas 保留自己的已有人工提交授权和 runner 调度，
 不能误用工坊批准记录覆盖它们。
 
