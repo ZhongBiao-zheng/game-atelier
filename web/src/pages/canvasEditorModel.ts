@@ -339,27 +339,29 @@ const MEDIA_OPERATION_PLACEHOLDER_LABEL: Record<CanvasMediaOperation['kind'], st
 };
 
 /** 本地媒体操作是同步接口，结果节点要等处理完才从服务端回来。这段空档给用户一个占位节点，
- *  落点镜像服务端 canvas_media_operations 的公式（源节点右侧 96px、垂直居中、长边 320 / 切图 240），
- *  结果一到就撤掉换成真节点。服务端为避让已有节点可能再做纵向偏移，占位不追。 */
+ *  落点镜像服务端 canvas_media_operations 的公式：源节点右侧 96px、垂直居中；尺寸与源节点在
+ *  画布上的实际尺寸一致（切图例外，按长边 240）。结果一到就撤掉换成真节点。
+ *  服务端为避让已有节点可能再做纵向偏移，占位不追。 */
 export function canvasMediaOperationPlaceholder(
   source: CanvasNode,
+  sourceSize: CanvasSize,
   version: { width: number; height: number },
   operation: CanvasMediaOperation,
 ): CanvasMediaOperationPlaceholder {
-  const sourceWidth = source.size?.width ?? 320;
-  const sourceHeight = source.size?.height ?? 176;
-  const preferred = operation.kind === 'split' ? 240 : 320;
-  const longEdge = Math.max(version.width, version.height);
-  const shortEdge = Math.min(version.width, version.height);
-  let scale = Math.max(preferred / longEdge, 80 / shortEdge);
-  if (longEdge * scale > 1600) scale = 1600 / longEdge;
-  const size = { width: version.width * scale, height: version.height * scale };
+  let size = sourceSize;
+  if (operation.kind === 'split') {
+    const longEdge = Math.max(version.width, version.height);
+    const shortEdge = Math.min(version.width, version.height);
+    let scale = Math.max(240 / longEdge, 80 / shortEdge);
+    if (longEdge * scale > 1600) scale = 1600 / longEdge;
+    size = { width: version.width * scale, height: version.height * scale };
+  }
   return {
     id: `placeholder-${operation.kind}`,
     sourceNodeId: source.id,
     position: {
-      x: source.position.x + sourceWidth + 96,
-      y: source.position.y + (sourceHeight - size.height) / 2,
+      x: source.position.x + sourceSize.width + 96,
+      y: source.position.y + (sourceSize.height - size.height) / 2,
     },
     size,
     label: MEDIA_OPERATION_PLACEHOLDER_LABEL[operation.kind],

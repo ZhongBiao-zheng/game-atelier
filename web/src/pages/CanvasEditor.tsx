@@ -434,6 +434,12 @@ function CanvasEditorInner({
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
   const [mediaPlaceholder, setMediaPlaceholder] = useState<CanvasMediaOperationPlaceholder | null>(null);
+  // 占位节点允许拖动；结果节点落地时按占位被拖走的位移搬过去。ref 供异步回调读最新位置。
+  const mediaPlaceholderRef = useRef<CanvasMediaOperationPlaceholder | null>(null);
+  const updateMediaPlaceholder = useCallback((next: CanvasMediaOperationPlaceholder | null) => {
+    mediaPlaceholderRef.current = next;
+    setMediaPlaceholder(next);
+  }, []);
   // 框选期间 React Flow 会把与选中节点相连的边一并选中，边上的剪刀就冒出来了。
   // 边的选中只认点击，框选期间到达的 select 变更一律丢弃。
   const selectionRectActive = useRef(false);
@@ -1210,7 +1216,7 @@ function CanvasEditorInner({
         },
         data: { label: mediaPlaceholder.label },
         selectable: false,
-        draggable: false,
+        draggable: true,
         connectable: false,
         deletable: false,
         focusable: false,
@@ -1313,10 +1319,18 @@ function CanvasEditorInner({
         return next;
       });
     }
+    const placeholder = mediaPlaceholderRef.current;
+    if (placeholder) {
+      const moved = changes.find(change => change.type === 'position' && change.id === placeholder.id && change.position);
+      if (moved?.type === 'position' && moved.position) {
+        updateMediaPlaceholder({ ...placeholder, position: moved.position });
+      }
+    }
     const graphChanges = changes.filter(change => (
-      change.type === 'remove'
+      (change.type === 'remove' && change.id !== placeholder?.id)
       || (
         change.type === 'position'
+        && change.id !== placeholder?.id
         && activeResizeNodeId.current !== change.id
       )
     ));
@@ -1361,7 +1375,7 @@ function CanvasEditorInner({
       resizePreviewFrame.current = null;
       setLiveNodeLayout(null);
     }
-  }, [commit]);
+  }, [commit, updateMediaPlaceholder]);
 
   const onConnect = useCallback((connection: Connection) => {
     if (!canCreateCanvasInputConnection(latestDocument.current, connection)) {
@@ -3569,12 +3583,15 @@ function CanvasEditorInner({
       if (!before) return;
       const sourceNode = before.nodes.find(node => node.id === target.nodeId);
       const sourceVersion = before.content_versions[target.versionId];
+      let placeholder: CanvasMediaOperationPlaceholder | null = null;
       if (sourceNode && sourceVersion?.kind === 'image' && sourceVersion.width && sourceVersion.height) {
-        setMediaPlaceholder(canvasMediaOperationPlaceholder(
+        placeholder = canvasMediaOperationPlaceholder(
           sourceNode,
+          canvasNodeRenderedSize(sourceNode, before.content_versions),
           { width: sourceVersion.width, height: sourceVersion.height },
           operation,
-        ));
+        );
+        updateMediaPlaceholder(placeholder);
       }
       const dirtyAtCommand = dirtyVersion.current;
       documentCommandInFlight.current = true;
@@ -3588,9 +3605,18 @@ function CanvasEditorInner({
       const concurrent = latestDocument.current ?? before;
       const knownNodeIds = new Set(concurrent.nodes.map(node => node.id));
       const knownConnectionIds = new Set(concurrent.connections.map(connection => connection.id));
-      const createdNodes = result.document.nodes.filter(node => (
-        result.created_node_ids.includes(node.id) && !knownNodeIds.has(node.id)
-      ));
+      // 占位节点被拖走过，结果节点整体跟着搬同样的位移。
+      const dragged = placeholder && mediaPlaceholderRef.current?.id === placeholder.id
+        ? mediaPlaceholderRef.current.position
+        : null;
+      const shift = dragged && placeholder
+        ? { x: dragged.x - placeholder.position.x, y: dragged.y - placeholder.position.y }
+        : { x: 0, y: 0 };
+      const createdNodes = result.document.nodes
+        .filter(node => result.created_node_ids.includes(node.id) && !knownNodeIds.has(node.id))
+        .map(node => (shift.x || shift.y
+          ? { ...node, position: { x: node.position.x + shift.x, y: node.position.y + shift.y } }
+          : node));
       const createdConnections = result.document.connections.filter(connection => (
         connection.role === 'derivation'
         && result.created_node_ids.includes(connection.target_node_id)
@@ -3630,13 +3656,13 @@ function CanvasEditorInner({
     } finally {
       documentCommandInFlight.current = false;
       mediaOperationInFlight.current = false;
-      setMediaPlaceholder(null);
+      updateMediaPlaceholder(null);
       setMediaOperationBusy(false);
       if (saveQueued.current) void flushSave().catch(() => {
         setError('图片处理已完成，但并发编辑尚未保存。请检查服务后重试。');
       });
     }
-  }, [announceToolNotice, flushSave, persistNow, projectId]);
+  }, [announceToolNotice, flushSave, persistNow, projectId, updateMediaPlaceholder]);
 
   const submitMediaOperation = useCallback((operation: CanvasMediaOperation) => {
     if (!mediaOperation) return Promise.resolve();

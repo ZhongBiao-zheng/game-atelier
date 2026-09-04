@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.39.2',
+    date: '2026-09-04',
+    headline: '画布：抠图结果与源图同尺寸，处理中的占位节点可拖动',
+    changes: [
+      { kind: 'fix', text: '抠图 / 放大生成的节点与源节点在画布上同尺寸，裁剪按源节点比例缩放，不再一律缩成长边 320' },
+      { kind: 'fix', text: '处理中的占位节点可以拖动，结果节点会落到拖到的位置' },
+    ],
+  },
+  {
     version: '5.39.1',
     date: '2026-09-04',
     headline: '画布：占位节点接上连线，面板在上方时工具栏翻到下方',

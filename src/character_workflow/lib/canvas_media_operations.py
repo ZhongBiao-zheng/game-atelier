@@ -411,6 +411,39 @@ def _display_size(width: int, height: int, preferred_long_edge: float) -> Canvas
     return CanvasSize(width=width * scale, height=height * scale)
 
 
+def _image_display_size(node: Any, version: Any) -> CanvasSize:
+    """镜像前端 sizeLockedToCanvasVersion：图片节点在画布上实际占的尺寸。
+
+    节点的 size 可能为空（上传后从未拖过），前端会按版本宽高比把默认宽 320 拉成实际高度；
+    服务端如果只看 node.size 就会算出 320×176，把派生节点摆错位、尺寸也对不上源图。"""
+    width_px = getattr(version, "width", None)
+    height_px = getattr(version, "height", None)
+    if not width_px or not height_px:
+        return _node_display_size(node)
+    display = getattr(node.data, "display", None)
+    if display is not None and getattr(display, "free_resize", False):
+        return _node_display_size(node)
+    ratio = width_px / height_px
+    width = min(4000.0, max(240.0, node.size.width if node.size is not None else 320.0))
+    height = width / ratio
+    if height < 150:
+        height = 150.0
+        width = height * ratio
+    if height > 4000:
+        height = 4000.0
+        width = height * ratio
+    if width > 4000:
+        width = 4000.0
+        height = width / ratio
+    return CanvasSize(width=round(width), height=round(height))
+
+
+def _fit_size(width: int, height: int, box: CanvasSize) -> CanvasSize:
+    """把 width×height 等比塞进 box。同宽高比时正好等于 box。"""
+    scale = min(box.width / width, box.height / height)
+    return CanvasSize(width=width * scale, height=height * scale)
+
+
 def _node_display_size(node: Any) -> CanvasSize:
     if node.size is not None:
         return node.size
@@ -499,10 +532,21 @@ def _build_document(
     connections = list(current.connections)
     created_version_ids: list[str] = []
     created_node_ids: list[str] = []
-    preferred = 240 if isinstance(request.operation, CanvasSplitMediaOperation) else 320
-    sizes = [_display_size(item.width, item.height, preferred) for item in outputs]
-    source_width = source.size.width if source.size is not None else 320
-    source_height = source.size.height if source.size is not None else 176
+    source_version = current.content_versions.get(source.data.current_version_id or "")
+    source_display = _image_display_size(source, source_version)
+    source_width = source_display.width
+    source_height = source_display.height
+    # 派生节点的画布尺寸跟着源节点走：抠图 / 放大与源图同宽高比，直接等于源节点大小；
+    # 裁剪按源节点的「每像素占几个画布单位」缩放，看起来就是从原图上切下来的那一块；
+    # 切图仍按长边 240 排成网格。
+    source_px_width = getattr(source_version, "width", None)
+    if isinstance(request.operation, CanvasSplitMediaOperation):
+        sizes = [_display_size(item.width, item.height, 240) for item in outputs]
+    elif request.operation.kind == "crop" and source_px_width:
+        scale = source_display.width / source_px_width
+        sizes = [CanvasSize(width=item.width * scale, height=item.height * scale) for item in outputs]
+    else:
+        sizes = [_fit_size(item.width, item.height, source_display) for item in outputs]
     start_x = source.position.x + source_width + 96
 
     column_widths: dict[int, float] = {}
