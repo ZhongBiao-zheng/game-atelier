@@ -5,6 +5,7 @@ import {
   estimateGenerationCostForSubmission,
   formatGenerationCost,
 } from './generationCost';
+import { normalizeStudioSizeForModel } from './studioSize';
 
 describe('estimateGenerationCost', () => {
   it('calculates fixed OpenAI-HK GPT Image 2 pricing regardless of quality', () => {
@@ -81,9 +82,13 @@ describe('estimateGenerationCost', () => {
   it.each([
     ['1024x1024', 'low', 1, 0.028],
     ['768x1024', 'high', 2, 0.056],
-    ['1025x1024', 'low', 1, 0.21],
-    ['2048x1152', 'auto', 1, 0.21],
-    ['2049x1024', 'low', 1, 0.21],
+    ['1025x1024', 'low', 1, 0.12],
+    ['2048x1152', 'auto', 1, 0.12],
+    ['2049x1024', 'low', 1, 0.12],
+    ['2048x512', 'auto', 1, 0.028],
+    ['2048x513', 'auto', 1, 0.12],
+    ['2048x2048', 'auto', 1, 0.12],
+    ['2048x2049', 'auto', 1, 0.21],
     ['3840x2160', 'high', 2, 0.42],
   ] as const)(
     'prices Tuzi default GPT Image 2 size %s independently of quality',
@@ -95,7 +100,57 @@ describe('estimateGenerationCost', () => {
     },
   );
 
-  it.each([undefined, '', '1024', '1024:1024', '0x1024', '1024x-1', 'foo'])(
+  it.each([
+    [1254, 1254], [1024, 1536], [1536, 1024],
+    [1086, 1448], [1448, 1086], [1122, 1402], [1402, 1122],
+    [1672, 941], [941, 1672], [1915, 821], [821, 1915],
+  ])('prices the exact Tuzi 1K size %sx%s without widening its boundary', (w, h) => {
+    for (const [size, price] of [
+      [`${w}x${h}`, 0.028], [`${w}X${h}`, 0.028],
+      [`${w - 1}x${h}`, 0.12], [`${w + 1}x${h}`, 0.12],
+      [`${w}x${h - 1}`, 0.12], [`${w}x${h + 1}`, 0.12],
+      [`0${w}x${h}`, 0.12],
+    ] as const) {
+      expect(estimateGenerationCost({
+        provider: { baseUrl: 'https://api.tu-zi.com', billingGroup: 'default' },
+        model: { id: 'gpt-image-2' }, kind: 'image', size,
+      }), size).toBe(price);
+    }
+  });
+
+  it.each([undefined, 'auto', '1024x1024', '2048x2048', '3840x2160'])(
+    'prices Tuzi gpt-image-2-1k at its fixed rate for size %s', (size) => {
+      expect(estimateGenerationCost({
+        provider: { baseUrl: 'https://api.tu-zi.com', billingGroup: 'default' },
+        model: { id: 'gpt-image-2-1k' }, kind: 'image', size, quality: 'high', count: 3,
+      })).toBe(0.084);
+    },
+  );
+
+  it('does not apply the fixed 1K SKU price to other groups, channels or model spellings', () => {
+    for (const provider of [
+      { baseUrl: 'https://api.tu-zi.com' },
+      { baseUrl: 'https://api.tu-zi.com', billingGroup: '绘画' },
+      { baseUrl: 'https://api.tu-zi.com', billingGroup: 'unknown' },
+      { baseUrl: 'https://api.openai-hk.com', billingGroup: 'default' },
+      { baseUrl: 'https://api.tu-zi.com.example.com', billingGroup: 'default' },
+    ]) {
+      expect(estimateGenerationCost({
+        provider, model: { id: 'gpt-image-2-1k' }, kind: 'image', size: '1024x1024',
+      })).toBeNull();
+    }
+    for (const id of ['gpt-image-2-1k-vip', 'gpt-image-2-2k', 'GPT_IMAGE_2_1K']) {
+      expect(estimateGenerationCost({
+        provider: { baseUrl: 'https://api.tu-zi.com', billingGroup: 'default' },
+        model: { id }, kind: 'image', size: '1024x1024',
+      })).toBeNull();
+    }
+  });
+
+  it.each([
+    undefined, '', '1024', '1024:1024', '0x1024', '1024x-1', 'foo',
+    '9007199254740992x1', '9007199254740991x2',
+  ])(
     'does not guess Tuzi default GPT Image 2 pricing for size %s',
     (size) => {
       expect(estimateGenerationCost({
@@ -105,6 +160,15 @@ describe('estimateGenerationCost', () => {
     },
   );
 
+  it('prices the final aligned size rather than the pre-normalized 1K whitelist input', () => {
+    const size = normalizeStudioSizeForModel('1254x1254', 'gpt-image-2');
+    expect(size).toBe('1248x1248');
+    expect(estimateGenerationCost({
+      provider: { baseUrl: 'https://api.tu-zi.com', billingGroup: 'default' },
+      model: { id: 'gpt-image-2' }, kind: 'image', size,
+    })).toBe(0.12);
+  });
+
   it('passes the frozen submission size into Tuzi GPT Image 2 pricing', () => {
     const params = { size: '2048x2048', quality: 'low', n: 2, estimated_cost_cny: 0.07 };
     expect(estimateGenerationCostForSubmission({
@@ -112,7 +176,7 @@ describe('estimateGenerationCost', () => {
       billing_group: 'default', access_key: 'masked', secret_key: null,
       capabilities: ['portrait'], notes: '', created_at: '2026-09-01T00:00:00Z',
       models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' }],
-    }, 'gpt-image-2', 'image', params)).toBe(0.42);
+    }, 'gpt-image-2', 'image', params)).toBe(0.24);
     expect(params).toEqual({
       size: '2048x2048', quality: 'low', n: 2, estimated_cost_cny: 0.07,
     });

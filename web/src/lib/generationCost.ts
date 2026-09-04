@@ -10,6 +10,9 @@ import {
   OPENAI_HK_NANO_BANANA_2_YUAN,
   TOKEN_DANCE_YUAN_PER_IMAGE,
   TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE,
+  TUZI_GPT_IMAGE_2_1K_SIZES,
+  TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE,
+  TUZI_GPT_IMAGE_2_PIXEL_LIMITS,
   TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE,
   TUZI_GROUP_YUAN_PER_IMAGE,
   TUZI_MIDJOURNEY_YUAN_PER_TASK,
@@ -153,8 +156,12 @@ function estimateTuziImage(request: GenerationCostRequest): number | null {
       : request.quality === 'high' ? '4k' : request.quality === 'medium' ? '2k' : '1k';
     return priced(TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE[tier] * safeCount(request.count));
   }
+  if (group === 'default' && exactModel === 'gpt-image-2-1k') {
+    return priced(TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE * safeCount(request.count));
+  }
   if (group === 'default' && exactModel === 'gpt-image-2') {
-    const size = request.size ? parsePixelSize(request.size) : null;
+    const rawSize = request.size?.toLowerCase() ?? '';
+    const size = rawSize ? parsePixelSize(rawSize) : null;
     if (
       !size
       || !Number.isSafeInteger(size.w)
@@ -162,8 +169,12 @@ function estimateTuziImage(request: GenerationCostRequest): number | null {
       || size.w < 1
       || size.h < 1
     ) return null;
-    const maxEdge = Math.max(size.w, size.h);
-    const tier = maxEdge <= 1024 ? '1k' : maxEdge <= 2048 ? '2k' : '4k';
+    const pixels = size.w * size.h;
+    if (!Number.isSafeInteger(pixels)) return null;
+    // 上游 upper(size) 做字符串精确匹配：不把近似比例、邻近尺寸或补零串扩成低价范围。
+    const is1k = TUZI_GPT_IMAGE_2_1K_SIZES.has(rawSize)
+      || pixels <= TUZI_GPT_IMAGE_2_PIXEL_LIMITS['1k'];
+    const tier = is1k ? '1k' : pixels <= TUZI_GPT_IMAGE_2_PIXEL_LIMITS['2k'] ? '2k' : '4k';
     return priced(TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE[tier] * safeCount(request.count));
   }
   const unitPrice = TUZI_GROUP_YUAN_PER_IMAGE[group]?.[model];

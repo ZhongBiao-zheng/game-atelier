@@ -123,10 +123,12 @@ def test_render_openai_provider_posts_to_image_endpoint_and_writes_data_url(
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
+@pytest.mark.parametrize("model", ["gpt-image-2", "gpt-image-2-1k"])
 def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
     isolated_data_root,
     tmp_path,
     monkeypatch,
+    model,
 ):
     _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
     image_bytes = b"\x89PNG\r\n\x1a\ntuzi"
@@ -144,7 +146,7 @@ def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
 
     paths = openai_image.render(
         prompt="fox",
-        model="gpt-image-2",
+        model=model,
         alias="Tuzi",
         output_dir=tmp_path,
         n=1,
@@ -154,6 +156,7 @@ def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
     )
 
     assert calls[0]["url"] == "https://api.tu-zi.com/v1/images/generations"
+    assert calls[0]["payload"]["model"] == model
     assert calls[0]["task_id"] == "saved-1"
     assert calls[0]["payload"]["size"] == "2048x2048"
     assert calls[0]["payload"].get("quality") is None
@@ -258,10 +261,12 @@ def test_render_tuzi_resume_never_submits_supplemental_billed_task(
     assert "只返回了 1 张图" in params["warnings"][0]
 
 
+@pytest.mark.parametrize("model", ["gpt-image-2", "gpt-image-2-1k"])
 def test_render_tuzi_reference_edit_uses_async_multipart(
     isolated_data_root,
     tmp_path,
     monkeypatch,
+    model,
 ):
     _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
     reference = tmp_path / "reference.png"
@@ -279,7 +284,7 @@ def test_render_tuzi_reference_edit_uses_async_multipart(
 
     paths = openai_image.render(
         prompt="restyle",
-        model="gpt-image-2",
+        model=model,
         alias="Tuzi",
         output_dir=tmp_path / "out",
         n=1,
@@ -289,7 +294,7 @@ def test_render_tuzi_reference_edit_uses_async_multipart(
     )
 
     assert captured["url"] == "https://api.tu-zi.com/v1/images/edits"
-    assert captured["fields"]["model"] == "gpt-image-2"
+    assert captured["fields"]["model"] == model
     assert captured["files"][0][0] == "image"
     assert params["provider_task_ids"] == ["edit-task-1"]
     assert Path(paths[0]).read_bytes() == image_bytes

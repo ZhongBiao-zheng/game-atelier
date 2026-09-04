@@ -34,7 +34,7 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 export const CHANGELOG: ChangelogEntry[] = [
   {
     version: '5.36.0',
-    date: '2026-09-03',
+    date: '2026-09-04',
     headline: '本机连接鉴权与工坊 MCP 接入',
     changes: [
       { kind: 'feat', text: '页面与本机服务建立会话：只允许本机页面访问项目、媒体和事件流；同一时间一个编辑页面，第二个页面可「只查看」或显式接管，旧页面内容原样保留；重新连接不再整页重载' },
@@ -48,6 +48,16 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: 'fix', text: '本机连接中断时可以直接「取消」收起提示继续看页面，右下角随时重新连接' },
       { kind: 'fix', text: '画布图片配置去掉「透明背景」开关：它对实际出图没有作用，透明背景写进提示词即可' },
       { kind: 'fix', text: '用 http://localhost:端口 打开工坊会自动跳到 127.0.0.1，不再显示错误页；MCP 适配器在工坊未启动时保持在线，调用时提示先启动' },
+    ],
+  },
+  {
+    version: '5.35.1',
+    date: '2026-09-04',
+    headline: 'Tuzi GPT Image 2 的 2K 价格下调',
+    changes: [
+      { kind: 'fix', text: 'Tuzi default 的 2K 估价降至 ¥0.12 / 张，1K ¥0.028、4K ¥0.21 不变' },
+      { kind: 'fix', text: '尺寸计价改为公告中的 11 个精确 1K 尺寸与总像素分档，历史费用不回算' },
+      { kind: 'feat', text: '支持 gpt-image-2-1k 固定价型号估价：¥0.028 / 张' },
     ],
   },
   {

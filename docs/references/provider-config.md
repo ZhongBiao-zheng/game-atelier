@@ -126,10 +126,12 @@
 单价的唯一维护入口是 [`web/src/lib/generationPrices.ts`](../../web/src/lib/generationPrices.ts)，
 各表单位与更新流程见 [价格清单维护](generation-pricing.md)。Tuzi default 香蕉 Pro
 已按用户提供的 2026-08-31 公告改为 1K / 2K / 4K 分档；两个 Gemini 名称与工坊展示别名共用单价。
-Tuzi default 的 GPT Image 2 按最终 `size` 的最大边分 1K / 2K / 4K 计费；2026-09-03
-起普通账号 1K 为 `¥0.028 / 张`，2K 与 4K 同为 `¥0.21 / 张`，`quality` 不参与该分组
-的计价。公告中的 Tier 5 账号 1K 优惠价为 `¥0.024 / 张`；当前 Key 没有账号等级字段，
-因此不会自动套用该优惠。
+Tuzi default 的 GPT Image 2 自 2026-09-04 起，按最终 `size` 的 11 个精确 1K 尺寸白名单
+与总像素数分档：表外 ≤1,048,576 像素为 1K，≤4,194,304 为 2K，再大为 4K，不再按最长边。
+界面现有 `quality=low/medium/high/auto` 不参与该分组计价；独立型号 `gpt-image-2-1k`
+按固定单价计费，不因 size/quality 改价，厂商会映射为最近比例的 1K 输出。
+金额与白名单集中维护在价表，核对来源与尺寸对齐注意事项见 [价格清单维护](generation-pricing.md)。
+2026-09-03 公告另列 Tier 5 账号的 1K 优惠；当前 Key 没有账号等级字段，不自动套用该优惠。
 
 OpenAI-HK 按张：GPT Image 2 `¥0.08`、Nano Banana `¥0.20`、Nano Banana HD
 `¥0.32`；Nano Banana 2 的 low / medium / high 分别对应基础 / 2K / 4K，单价
