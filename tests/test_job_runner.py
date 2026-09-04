@@ -767,3 +767,61 @@ def test_friendly_error_never_swallows_task_id():
 def test_friendly_error_passes_unknown_errors_through():
     err = Exception("something nobody has a translation for")
     assert job_runner._friendly_error(err) == "something nobody has a translation for"
+
+
+def _studio_job(job_id: str, kind: JobKind, **over) -> Job:
+    return Job(
+        job_id=job_id, character_id="studio", prompt="p", submitted_at="2026-09-04T00:00:00Z",
+        model="m", params=JobParams(), output_paths=[], status=JobStatus.PENDING, error=None,
+        namespace="studio", kind=kind, alias="oa", provider="openai", **over,
+    )
+
+
+def test_run_job_cancel_requested_before_dispatch_lands_canceled_without_calling_provider(
+    project, monkeypatch,
+):
+    save_job(_studio_job("c1", JobKind.IMAGE, cancel_requested_at="2026-09-04T00:00:01Z"))
+    calls: list[str] = []
+    monkeypatch.setattr(job_runner, "dispatch", lambda **kw: calls.append("dispatch"))
+
+    with pytest.raises(job_runner.JobCanceled):
+        job_runner.run_job("c1")
+
+    saved = read_job("c1")
+    assert saved.status is JobStatus.CANCELED
+    assert saved.error == "已停止"
+    assert calls == []
+
+
+def test_run_job_cancel_during_generation_beats_pending_and_names_paid_task(project, monkeypatch):
+    """出图中途按停：caller 抛的是 Tuzi PendingError 也不能把 job 留在 PENDING；已提交的任务 id 写进 error。"""
+    from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
+
+    save_job(_studio_job("c2", JobKind.IMAGE))
+
+    def fake_dispatch(*, params, should_cancel, on_params_changed, **kw):
+        params["provider_task_ids"] = ["paid-1"]
+        on_params_changed()
+        job_runner_jobs.request_job_cancel("c2")
+        assert should_cancel()
+        raise TuziAsyncPendingError("生成已按请求停止 [paid-1]")
+
+    from character_workflow.lib import jobs as job_runner_jobs
+    monkeypatch.setattr(job_runner, "dispatch", fake_dispatch)
+
+    with pytest.raises(job_runner.JobCanceled):
+        job_runner.run_job("c2")
+
+    saved = read_job("c2")
+    assert saved.status is JobStatus.CANCELED
+    assert saved.error == "已停止；上游任务 paid-1 已提交，可能已扣费"
+
+
+def test_run_job_video_cancel_requested_lands_canceled(project, monkeypatch):
+    save_job(_studio_job("c3", JobKind.VIDEO, cancel_requested_at="2026-09-04T00:00:01Z"))
+    monkeypatch.setattr(job_runner, "dispatch_video", lambda **kw: pytest.fail("must not dispatch"))
+
+    with pytest.raises(job_runner.JobCanceled):
+        job_runner.run_job("c3")
+
+    assert read_job("c3").status is JobStatus.CANCELED

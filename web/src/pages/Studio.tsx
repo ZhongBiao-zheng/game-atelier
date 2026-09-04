@@ -740,6 +740,7 @@ function StudioFull() {
           hiddenPaths={hiddenPaths}
           onToggleHidden={toggleHidden}
           onDeleteFailed={deleteFailedRound}
+          onCancel={cancelRound}
           onReEdit={reEdit}
           onRegenerate={regenerate}
           onDeleteBatch={deleteDoneBatch}
@@ -939,6 +940,15 @@ function StudioFull() {
     // （后端其实已经删掉，刷新页面才看得出来）。两处一起清。
     setPersistedJobs((jobs) => jobs.filter((j) => j.job_id !== jobId));
     setRounds((items) => items.filter((item) => item.kind !== 'failed' || item.jobId !== jobId));
+  }
+
+  async function cancelRound(jobId: string) {
+    const resp = await connectionFetch(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' });
+    if (!resp.ok) { alert((await apiError(resp, '停止生成')).message); return; }
+    // 后端只登记停止请求，status 仍是 pending；本地先把按钮翻成「正在停止」，终态由 SSE 带回。
+    setPersistedJobs((jobs) => jobs.map((j) => (
+      j.job_id === jobId && !j.cancel_requested_at ? { ...j, cancel_requested_at: new Date().toISOString() } : j
+    )));
   }
 
   async function reEdit(config: RoundConfig, jobId?: string) {
@@ -1208,13 +1218,15 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
           config: configForJob(job, keys),
         }];
       }
-      if (job.status === 'failed') {
+      if (job.status === 'failed' || job.status === 'canceled') {
+        const canceled = job.status === 'canceled';
         return [{
           kind: 'failed' as const,
           mode,
           jobId: job.job_id,
           submittedAt: job.submitted_at,
-          reason: job.error ?? '生成失败',
+          reason: job.error ?? (canceled ? '已停止' : '生成失败'),
+          canceled,
           config: configForJob(job, keys),
         }];
       }
@@ -1224,6 +1236,7 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
         jobId: job.job_id,
         startedAt: Date.parse(job.submitted_at) || Date.now(),
         progressPhase: job.progress_phase ?? null,
+        cancelRequested: job.cancel_requested_at != null,
         config: configForJob(job, keys),
       }];
     });

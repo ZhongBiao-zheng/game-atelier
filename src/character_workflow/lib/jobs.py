@@ -254,6 +254,23 @@ def update_job_status(
         return _write(updated)
 
 
+def request_job_cancel(job_id: str) -> Job:
+    """登记停止请求（幂等）。只写标记不改 status：runner 在下一个可中断点把它落成 CANCELED，
+    同步阻塞中的上游请求打不断，不能假装已经停了。终态 job 原样返回。"""
+    with job_lock(job_id):
+        job = read_job(job_id)
+        if job.status in (
+            JobStatus.DONE,
+            JobStatus.PARTIAL,
+            JobStatus.FAILED,
+            JobStatus.CANCELED,
+        ) or job.cancel_requested_at is not None:
+            return job
+        return _write(job.model_copy(update={
+            "cancel_requested_at": datetime.now(timezone.utc).isoformat(),
+        }))
+
+
 def update_job_phase(job_id: str, phase: str) -> Job:
     """视频 caller 回写进度卡点（sent / downloading）。终态 job 不回写。"""
     with job_lock(job_id):
@@ -284,10 +301,10 @@ def remove_image_from_job(job_id: str, image_path: str) -> Job:
 
 
 def delete_failed_job(job_id: str) -> None:
-    """删除 failed job 的元数据；若它意外带 output_paths，也一并清理文件。"""
+    """删除 failed / canceled job 的元数据；若它意外带 output_paths，也一并清理文件。"""
     with job_lock(job_id):
         job = read_job(job_id)
-        if job.status != JobStatus.FAILED:
+        if job.status not in (JobStatus.FAILED, JobStatus.CANCELED):
             raise ValueError(f"job {job_id} is {job.status.value}, not failed")
         for image_path in job.output_paths:
             p = Path(image_path)

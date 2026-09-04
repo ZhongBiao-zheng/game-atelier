@@ -41,7 +41,7 @@ from character_workflow.lib.atomic_io import (
 from character_workflow.lib.job_runner import image_dimensions_from_bytes
 from character_workflow.lib.jobs import (
     _load_job, delete_failed_job, is_resumable_studio_job, job_lock, list_jobs, read_job,
-    remove_image_from_job,
+    remove_image_from_job, request_job_cancel,
     new_job_id, save_job, update_job_status, write_job,
 )
 from character_workflow.lib.schemas import AssetSlot as _AssetSlot
@@ -1107,7 +1107,9 @@ def post_job_cancel(job_id: str) -> dict:
 
     - pending_confirm：从未真出图 —— 直接删 json 文件
       （留 FAILED 残骸会让 Web 把"作废的 prompt"误显示成"出图失败"）。
-    - pending 且超过 STALE_PENDING_MINUTES：出图进程疑似已死 —— 标 FAILED 留痕。
+    - pending：登记 cancel_requested_at，runner 在下一个可中断点落 CANCELED（同步阻塞的
+      上游请求打不断，所以这里只登记、不改 status；已提交的厂商任务可能已扣费，由 runner 写进 error）。
+    - pending 且超过 STALE_PENDING_MINUTES：出图进程疑似已死 —— 直接标 FAILED 留痕。
       不删文件：万一 Skill 进程还活着并完成出图，update_job_status 仍能落 DONE 覆盖。
     """
     try:
@@ -1118,28 +1120,15 @@ def post_job_cancel(job_id: str) -> dict:
         (_runtime() / "jobs" / f"{job_id}.json").unlink()
         return {"ok": True, "job_id": job_id, "deleted": True}
     if job.status == JobStatus.PENDING:
-        if is_resumable_studio_job(job):
-            raise HTTPException(
-                409,
-                detail=(
-                    "这笔厂商任务已经提交并可能已扣费，不能作废。系统会继续查询同一个任务，"
-                    "不会重新下单；请等待恢复结果。"
-                ),
-            )
         age = _pending_age_minutes(job)
-        if age is None or age >= STALE_PENDING_MINUTES:
+        if not is_resumable_studio_job(job) and (age is None or age >= STALE_PENDING_MINUTES):
             update_job_status(
                 job_id, status=JobStatus.FAILED,
                 error=f"cancelled: pending 超过 {STALE_PENDING_MINUTES} 分钟，疑似进程中断",
             )
             return {"ok": True, "job_id": job_id, "status": JobStatus.FAILED.value}
-        raise HTTPException(
-            409,
-            detail=(
-                f"这一单还在出图中（已等 {age:.0f} 分钟），不到 {STALE_PENDING_MINUTES} 分钟不能作废"
-                " —— 过早作废会让真出完的图找不回来。请再等等，或到厂商后台确认。"
-            ),
-        )
+        request_job_cancel(job_id)
+        return {"ok": True, "job_id": job_id, "status": JobStatus.PENDING.value, "cancel_requested": True}
     raise HTTPException(
         409,
         detail=(

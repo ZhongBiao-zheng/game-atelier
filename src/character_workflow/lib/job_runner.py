@@ -48,17 +48,30 @@ def _actual_cost_recorder(job_id: str, params: dict[str, Any]) -> Callable[[floa
     return record
 
 
+class JobCanceled(JobRunnerError):
+    """画师请求停止；runner 在可中断点抛出，终态落 CANCELED 而非 FAILED。"""
+
+
 def _cancel_checker(
     job: Job,
     external: Callable[[], bool] | None = None,
-) -> Callable[[], bool] | None:
-    if job.namespace != "canvas":
-        return external
-
+) -> Callable[[], bool]:
     def should_cancel() -> bool:
         return bool(external and external()) or read_job(job.job_id).cancel_requested_at is not None
 
     return should_cancel
+
+
+def _raise_if_canceled(should_cancel: Callable[[], bool]) -> None:
+    if should_cancel():
+        raise JobCanceled("已按请求停止")
+
+
+def _canceled_error(params: dict[str, Any]) -> str:
+    ids = [str(task_id) for task_id in (params.get("provider_task_ids") or []) if task_id]
+    if not ids:
+        return "已停止"
+    return f"已停止；上游任务 {', '.join(ids)} 已提交，可能已扣费"
 
 
 def _friendly_error(err: BaseException) -> str:
@@ -459,8 +472,7 @@ def _run_job_claimed(
     should_cancel = _cancel_checker(job, should_cancel_external)
 
     def on_phase(phase: str) -> None:
-        if should_cancel is not None and should_cancel():
-            raise JobRunnerError("Canvas Run 已请求停止")
+        _raise_if_canceled(should_cancel)
         update_job_phase(job.job_id, phase)
 
     # CLI 路径：终端确认即批准，PENDING_CONFIRM 在此推进；工坊请求路径的批准记录在 request 上。
@@ -484,11 +496,8 @@ def _run_job_claimed(
     try:
         if not job.alias:
             raise JobRunnerError("job requires an alias to route to an image provider")
+        _raise_if_canceled(should_cancel)
         with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider or 'image'}-") as tmp:
-            dispatch_kwargs: dict[str, Any] = {}
-            if should_cancel is not None:
-                dispatch_kwargs["should_cancel"] = should_cancel
-
             def on_params_changed() -> None:
                 # Callers own provider-specific params; the runner only persists their mutation.
                 update_job_params(job.job_id, params)
@@ -506,7 +515,7 @@ def _run_job_claimed(
                 on_phase=on_phase,
                 on_params_changed=on_params_changed,
                 on_cost_usd=_actual_cost_recorder(job.job_id, params),
-                **dispatch_kwargs,
+                should_cancel=should_cancel,
             )
             selected = [(Path(p), dims) for p in paths if (dims := image_dimensions(Path(p)))]
             if not selected:
@@ -543,6 +552,10 @@ def _run_job_claimed(
     except Exception as e:
         from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
 
+        # 停止请求压过一切：Tuzi 轮询被打断时抛的也是 PendingError，不能让它把 job 留在 PENDING。
+        if should_cancel():
+            update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
+            raise JobCanceled("已按请求停止") from e
         provider_task_pending = isinstance(e, TuziAsyncPendingError)
         saved = update_job_status(
             job.job_id,
@@ -668,13 +681,13 @@ def _run_video_job(job: Job) -> Job:
     should_cancel = _cancel_checker(job)
 
     def on_phase(phase: str) -> None:
-        if should_cancel is not None and should_cancel():
-            raise JobRunnerError("Canvas Run 已请求停止")
+        _raise_if_canceled(should_cancel)
         update_job_phase(job.job_id, phase)
 
     try:
         if not job.alias:
             raise JobRunnerError("video job requires an alias to route to a provider")
+        _raise_if_canceled(should_cancel)
         with tempfile.TemporaryDirectory(prefix=f"{job.job_id}-{job.provider or 'video'}-") as tmp:
             paths = dispatch_video(
                 prompt=job.prompt,
@@ -709,6 +722,9 @@ def _run_video_job(job: Job) -> Job:
                 error=None,
             )
     except Exception as e:
+        if should_cancel():
+            update_job_status(job.job_id, status=JobStatus.CANCELED, error=_canceled_error(params))
+            raise JobCanceled("已按请求停止") from e
         update_job_status(job.job_id, status=JobStatus.FAILED, error=_friendly_error(e))
         if isinstance(e, JobRunnerError):
             raise
