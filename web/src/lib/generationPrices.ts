@@ -28,13 +28,21 @@ export const TUZI_GEMINI_3_PRO_YUAN_PER_IMAGE = {
   '4k': 0.18,
 };
 
-// Tuzi default GPT Image 2：元 / 次（一张）。用户提供的 2026-09-03 调价公告。
-// default 分组按最终 size 分流；quality 不参与此表的档位判断。
+// Tuzi default GPT Image 2：元 / 张。2026-09-04 用户公告及公开 /api/pricing 核对。
+// 最终 size 精确命中白名单时算 1K，其余按总像素分档；不是最长边。
 export const TUZI_GPT_IMAGE_2_YUAN_PER_IMAGE = {
   '1k': 0.028,
-  '2k': 0.21,
+  '2k': 0.12,
   '4k': 0.21,
 };
+export const TUZI_GPT_IMAGE_2_PIXEL_LIMITS = { '1k': 1048576, '2k': 4194304 };
+export const TUZI_GPT_IMAGE_2_1K_SIZES: ReadonlySet<string> = new Set([
+  '1254x1254', '1024x1536', '1536x1024',
+  '1086x1448', '1448x1086', '1122x1402', '1402x1122',
+  '1672x941', '941x1672', '1915x821', '821x1915',
+]);
+// 独立固定价型号，不因用户传入的 size / quality 改价；厂商负责匹配最近比例。
+export const TUZI_GPT_IMAGE_2_1K_YUAN_PER_IMAGE = 0.028;
 
 // Tuzi：元 / 张；其他模型与分组沿用已有核价。
 export const TUZI_GROUP_YUAN_PER_IMAGE: Record<string, Record<string, number>> = {
