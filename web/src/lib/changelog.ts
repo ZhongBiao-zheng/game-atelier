@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.37.0',
+    date: '2026-09-04',
+    headline: '创作台可以停止生成',
+    changes: [
+      { kind: 'feat', text: '创作台生成中的图片 / 视频可以「停止」：点后不再等结果，记录标为已停止、可删除；已提交给厂商的任务会在记录里注明任务 id（可能已扣费）' },
+      { kind: 'fix', text: '创作台生成的视频按图片同一宽度展示，不再明显大一号' },
+    ],
+  },
+  {
     version: '5.36.0',
     date: '2026-09-04',
     headline: '本机连接鉴权与工坊 MCP 接入',

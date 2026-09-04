@@ -934,6 +934,72 @@ describe('Studio', () => {
     expect(screen.getByTestId('studio-pending-job-pending-1')).toBeInTheDocument();
   });
 
+  it('生成中的记录能「停止」：POST /cancel 后按钮翻成「停止中」，SSE 带回 canceled 后显示已停止且可删除', async () => {
+    vi.spyOn(connection, 'useConnectionState').mockReturnValue({ phase: 'ready', generation: 1, editing: true, message: null });
+    const events = createTestEventStream();
+    const pendingJob = {
+      job_id: 'job-stop-1',
+      character_id: 'oa',
+      prompt: '要停掉的图',
+      submitted_at: '2026-09-04T02:05:00Z',
+      model: 'gpt-image-2',
+      params: { ratio: '1:1', resolution: '2K', size: '1024x1024' },
+      output_paths: [],
+      status: 'pending',
+      error: null,
+      kind: 'image',
+      namespace: 'studio',
+      alias: 'oa',
+      provider: 'openai',
+    };
+    let current: Record<string, unknown> = pendingJob;
+    const fetchMock = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      if (url === '/events') return Promise.resolve(events.response);
+      if (url === '/api/keys') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            default_alias: 'oa',
+            keys: [{
+              alias: 'oa', provider: 'openai', access_key: 'sk', secret_key: null, capabilities: [],
+              models: [{ name: 'GPT Image 2', id: 'gpt-image-2' }], notes: '', created_at: '2026-05-25T00:00:00Z', is_default: true,
+            }],
+          }),
+        } as any);
+      }
+      if (url === '/api/jobs') return Promise.resolve({ ok: true, json: async () => [current] } as any);
+      if (url === '/api/jobs/job-stop-1/cancel' && init?.method === 'POST') {
+        return Promise.resolve({ ok: true, json: async () => ({ ok: true, job_id: 'job-stop-1', status: 'pending', cancel_requested: true }) } as any);
+      }
+      if (url === '/api/jobs/job-stop-1') return Promise.resolve({ ok: true, json: async () => current } as any);
+      return Promise.resolve({ ok: true, json: async () => ({}) } as any);
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderStudio();
+    const stop = await screen.findByTestId('studio-cancel-round');
+    expect(stop).toHaveTextContent('停止');
+    expect(screen.queryByLabelText('删除出图记录')).not.toBeInTheDocument();
+
+    fireEvent.click(stop);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/jobs/job-stop-1/cancel', expect.objectContaining({ method: 'POST' }));
+    });
+    expect(await screen.findByTestId('studio-cancel-round')).toHaveTextContent('停止中');
+    expect(screen.getByTestId('studio-cancel-round')).toBeDisabled();
+
+    current = { ...pendingJob, status: 'canceled', error: '已停止', cancel_requested_at: '2026-09-04T02:06:00Z' };
+    await act(async () => {
+      events.emit('job-changed', { job_id: 'job-stop-1', status: 'canceled' });
+    });
+
+    const note = await screen.findByTestId('studio-canceled-note');
+    expect(note).toHaveTextContent('已停止');
+    expect(note.className).not.toContain('destructive');
+    expect(screen.getByLabelText('删除已停止记录')).toBeInTheDocument();
+    expect(screen.queryByTestId('studio-cancel-round')).not.toBeInTheDocument();
+  });
+
   it('flips a pending studio job to done via SSE targeted update (no 2s full polling)', async () => {
     vi.spyOn(connection, 'useConnectionState').mockReturnValue({ phase: 'ready', generation: 1, editing: true, message: null });
     const events = createTestEventStream();

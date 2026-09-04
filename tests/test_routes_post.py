@@ -334,21 +334,28 @@ def test_post_job_cancel_stale_pending_marks_failed(client, runtime):
     assert "中断" in data["error"]
 
 
-def test_post_job_cancel_fresh_pending_still_409(client, runtime):
-    """没到时限的 pending 可能真在出图，作废仍被拒。"""
+def test_post_job_cancel_fresh_pending_requests_stop(client, runtime):
+    """正在出图的 pending：只登记停止请求，status 由 runner 在可中断点落 CANCELED；重复点幂等。"""
     from datetime import datetime, timezone
     (runtime / "jobs" / "j1.json").write_text(json.dumps({
         "job_id": "j1", "character_id": "c", "prompt": "p",
         "submitted_at": datetime.now(timezone.utc).isoformat(), "model": "gpt_image_2",
         "params": {}, "seed": None, "output_paths": [],
-        "status": "pending", "error": None,
+        "status": "pending", "error": None, "namespace": "studio", "kind": "image",
     }))
     r = client.post("/api/jobs/j1/cancel")
-    assert r.status_code == 409
-    assert json.loads((runtime / "jobs" / "j1.json").read_text())["status"] == "pending"
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "job_id": "j1", "status": "pending", "cancel_requested": True}
+    saved = json.loads((runtime / "jobs" / "j1.json").read_text())
+    assert saved["status"] == "pending"
+    first = saved["cancel_requested_at"]
+    assert first
+    assert client.post("/api/jobs/j1/cancel").status_code == 200
+    assert json.loads((runtime / "jobs" / "j1.json").read_text())["cancel_requested_at"] == first
 
 
-def test_post_job_cancel_never_discards_resumable_paid_tuzi_task(client, runtime):
+def test_post_job_cancel_resumable_paid_tuzi_task_stops_polling_but_keeps_task_id(client, runtime):
+    """已提交的 Tuzi 任务：停止=不再轮询，任务 id 留在 params 里供人工对账；即便早已过时限也不标 FAILED。"""
     (runtime / "jobs" / "j1.json").write_text(json.dumps({
         "job_id": "j1", "character_id": "Tuzi", "prompt": "p",
         "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt-image-2",
@@ -362,10 +369,22 @@ def test_post_job_cancel_never_discards_resumable_paid_tuzi_task(client, runtime
 
     response = client.post("/api/jobs/j1/cancel")
 
-    assert response.status_code == 409
+    assert response.status_code == 200
     saved = json.loads((runtime / "jobs" / "j1.json").read_text())
     assert saved["status"] == "pending"
+    assert saved["cancel_requested_at"]
     assert saved["params"]["provider_task_ids"] == ["paid-task-1"]
+
+
+def test_delete_job_accepts_canceled(client, runtime):
+    (runtime / "jobs" / "j1.json").write_text(json.dumps({
+        "job_id": "j1", "character_id": "c", "prompt": "p",
+        "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt_image_2",
+        "params": {}, "seed": None, "output_paths": [],
+        "status": "canceled", "error": "已停止", "namespace": "studio", "kind": "image",
+    }))
+    assert client.delete("/api/jobs/j1").status_code == 200
+    assert not (runtime / "jobs" / "j1.json").exists()
 
 
 def test_delete_failed_job_removes_job_file(client, runtime):

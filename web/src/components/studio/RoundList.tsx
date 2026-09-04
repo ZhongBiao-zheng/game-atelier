@@ -1,6 +1,6 @@
 import { type ButtonHTMLAttributes, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Trash2 } from 'lucide-react';
+import { AlertTriangle, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Square, Trash2 } from 'lucide-react';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -67,10 +67,13 @@ export type RoundState =
       startedAt: number;
       // 后端回写的真实进度卡点（sent=已提交上游 / downloading=产物下载中），无 job 或未提交时为空。
       progressPhase?: 'sent' | 'downloading' | null;
+      // 已按「停止」：后端登记了 cancel_requested_at，等 runner 在可中断点落 canceled。
+      cancelRequested?: boolean;
       config: RoundConfig;
     }
   | { kind: 'done'; mode?: GenMode; jobId: string; submittedAt: string; completedAt?: string | null; imagePaths: string[]; generationCost?: number; config: RoundConfig }
-  | { kind: 'failed'; mode?: GenMode; jobId?: string; submittedAt: string; reason: string; config?: RoundConfig };
+  // canceled=画师主动停止（不是错误）：同一张卡，去掉警示色。
+  | { kind: 'failed'; mode?: GenMode; jobId?: string; submittedAt: string; reason: string; canceled?: boolean; config?: RoundConfig };
 
 /** 生成中占位框的宽高比：按目标比例（"16:9"）→ 退回尺寸（"1024x1536"）→ 退回 1:1。
  *  别再固定 aspect-square，否则出竖图/宽图时占位是方框、出图后尺寸跳变。 */
@@ -116,6 +119,7 @@ export function RoundList({
   hiddenPaths,
   onToggleHidden,
   onDeleteFailed,
+  onCancel,
   onReEdit,
   onRegenerate,
   onDeleteBatch,
@@ -132,6 +136,7 @@ export function RoundList({
   hiddenPaths?: string[];
   onToggleHidden?: (path: string) => void | Promise<void>;
   onDeleteFailed?: (jobId: string) => void | Promise<void>;
+  onCancel?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onDeleteBatch?: (jobId: string, imagePaths: string[]) => void | Promise<void>;
@@ -260,7 +265,7 @@ export function RoundList({
               {r.kind === 'pending' && (
                 <PendingBatch
                   round={r}
-                  onDeleteFailed={onDeleteFailed}
+                  onCancel={onCancel}
                   onReEdit={onReEdit}
                   onRegenerate={onRegenerate}
                   onReuseReferences={onReuseReferences}
@@ -316,14 +321,14 @@ export function RoundList({
 
 function PendingBatch({
   round,
-  onDeleteFailed,
+  onCancel,
   onReEdit,
   onRegenerate,
   onReuseReferences,
   mediaActive,
 }: {
   round: Extract<RoundState, { kind: 'pending' }>;
-  onDeleteFailed?: (jobId: string) => void | Promise<void>;
+  onCancel?: (jobId: string) => void | Promise<void>;
   onReEdit?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
   onRegenerate?: (config: RoundConfig) => void | Promise<void>;
   onReuseReferences?: (config: RoundConfig, jobId?: string) => void | Promise<void>;
@@ -389,14 +394,14 @@ function PendingBatch({
         <div className="flex items-center gap-2">
           <ActionButton onClick={() => { void onReEdit?.(round.config, round.jobId); }}>重新编辑</ActionButton>
           <ActionButton onClick={() => { void onRegenerate?.(round.config); }}>再次生成</ActionButton>
-          {round.jobId && onDeleteFailed && (
+          {round.jobId && onCancel && (
             <ActionButton
-              compact
-              aria-label="删除出图记录"
-              title="删除出图记录"
-              onClick={() => { void onDeleteFailed(round.jobId!); }}
+              data-testid="studio-cancel-round"
+              disabled={round.cancelRequested}
+              onClick={() => { void onCancel(round.jobId!); }}
             >
-              <Trash2 className="size-4" />
+              <Square className="mr-1.5 size-3 fill-current" aria-hidden />
+              {round.cancelRequested ? '停止中' : '停止'}
             </ActionButton>
           )}
         </div>
@@ -878,7 +883,7 @@ function DoneBatch({
                 <figure
                   key={path}
                   data-testid={`studio-result-video-${index + 1}`}
-                  className="group relative w-[420px] max-w-full overflow-hidden rounded-lg border border-border bg-card"
+                  className="group relative w-[251.5px] max-w-full overflow-hidden rounded-lg border border-border bg-card"
                 >
                   {mediaActive ? (
                     <video
@@ -1125,16 +1130,23 @@ function FailedCard({
           </div>
         </div>
       )}
-      <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
-        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive/70" aria-hidden />
+      <div
+        data-testid={round.canceled ? 'studio-canceled-note' : undefined}
+        className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${round.canceled ? 'border-border bg-card/40' : 'border-destructive/30 bg-destructive/5'}`}
+      >
+        {round.canceled
+          ? <Square className="mt-1 size-3 shrink-0 fill-current text-muted-foreground/70" aria-hidden />
+          : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive/70" aria-hidden />}
         <p className="flex-1 text-muted-foreground">{round.reason}</p>
         {round.jobId && onDeleteFailed && (
           <button
             type="button"
-            aria-label="删除失败记录"
-            title="删除失败记录"
+            aria-label={round.canceled ? '删除已停止记录' : '删除失败记录'}
+            title={round.canceled ? '删除已停止记录' : '删除失败记录'}
             onClick={() => { void onDeleteFailed(round.jobId!); }}
-            className="rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className={round.canceled
+              ? 'rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+              : 'rounded-md border border-destructive/30 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'}
           >
             删除
           </button>
