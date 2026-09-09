@@ -9,6 +9,9 @@
 `JobParams`、`CanvasImageDefaultParams` 增加 `size_mode?: auto | ratio | custom`、
 `custom_size?: string`。后者只是编辑器回切缓存；草稿允许暂不完整的数字输入，提交才严格验证。
 缺模式保留既有比例行为，不根据近似像素反推用户意图，不迁移旧记录。
+5.42.2起，首页、Studio、Canvas新建草稿及服务端新建默认配置，在所有尺寸字段
+（size_mode/size/ratio/resolution/custom_size）均未指定时，按当前模型能力默认AUTO；
+不支持AUTO时使用受支持的默认比例。已有尺寸选择、历史任务和重试不重置。
 
 - AUTO：服务端再次核对渠道+精确模型+协议，冻结 `size=auto`，移除 ratio/resolution。
   OpenRouter 出站为 `aspect_ratio=auto`，不是省略后隐含1:1；不改质量或数量。

@@ -55,7 +55,7 @@ it('creates a capability-honest config draft and preserves references while swit
   });
   expect(image).toMatchObject({
     mode: 'image', alias: 'image-key', model: 'gpt-image-2',
-    input_policy: 'mentions_only', params: { n: 1, ratio: '1:1' },
+    input_policy: 'mentions_only', params: { n: 1, size_mode: 'auto', size: 'auto', ratio: '1:1' },
   });
 
   const current: CanvasGenerationDraft = {

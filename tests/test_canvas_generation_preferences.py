@@ -217,7 +217,7 @@ def test_reverse_prompt_recovery_falls_back_without_leaking_stale_params(isolate
     key, model, params = _resolve_default_image_model()
 
     assert (key.alias, model.id) == ("fallback", "gpt-image-1")
-    assert params.model_dump(exclude_none=True) == {"n": 1, "ratio": "1:1"}
+    assert params.model_dump(exclude_none=True) == {"n": 1, "size_mode": "auto", "size": "auto"}
 
 
 def test_reverse_prompt_recovery_applies_auto_model_params(isolated_data_root):

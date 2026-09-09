@@ -724,7 +724,7 @@ function preferredCanvasGenerationModel(
 }
 
 function defaultCanvasGenerationParams(mode: CanvasGenerationDraft['mode']): JobParams {
-  if (mode === 'image') return { n: 1, ratio: '1:1' };
+  if (mode === 'image') return { n: 1 };
   if (mode === 'video') {
     return {
       duration: 5,

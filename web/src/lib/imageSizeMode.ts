@@ -7,6 +7,12 @@ export function imageSizeMode(params: JobParams): 'auto' | 'ratio' | 'custom' {
   return params.size_mode ?? (params.size === 'auto' ? 'auto' : 'ratio');
 }
 
+/** Missing sizing fields mean a fresh draft, not a saved ratio selection. */
+export function hasImageSizeSelection(params: JobParams): boolean {
+  return [params.size_mode, params.size, params.ratio, params.resolution, params.custom_size]
+    .some(value => value != null);
+}
+
 export function imageSizeSummary(params: JobParams): string {
   const mode = imageSizeMode(params);
   return mode === 'auto' ? 'AUTO' : mode === 'custom'
@@ -33,7 +39,7 @@ export function prepareImageSizeSubmission(
   if (error) return { error };
   const params = normalizeImageSizeParams(model, provider, baseUrl, draft);
   const mode = imageSizeMode(params);
-  if (mode !== imageSizeMode(draft)) return { error: '当前模型不支持原尺寸模式，请重新选择' };
+  if (hasImageSizeSelection(draft) && mode !== imageSizeMode(draft)) return { error: '当前模型不支持原尺寸模式，请重新选择' };
   if (mode === 'custom' && params.size) params.size = normalizeImagePixelSize(params.size, model, baseUrl);
   if (mode !== 'ratio') {
     delete params.ratio;
@@ -50,7 +56,7 @@ export function normalizeImageSizeParams(
 ): JobParams {
   const caps = imageControlCaps(model, provider, baseUrl);
   const { size: _size, resolution: _resolution, ...retained } = current;
-  let mode = imageSizeMode(current);
+  let mode = !hasImageSizeSelection(current) && caps.showAutoSize ? 'auto' as const : imageSizeMode(current);
   if ((mode === 'auto' && !caps.showAutoSize) || (mode === 'custom' && !caps.showCustomSize)) mode = 'ratio';
   const ratio = caps.ratios.includes(current.ratio ?? '') ? current.ratio! : caps.ratios[0];
   const resolution = caps.resolutions.includes(current.resolution as Resolution)

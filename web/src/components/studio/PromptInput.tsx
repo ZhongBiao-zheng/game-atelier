@@ -2,7 +2,7 @@ import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, 
 import { createPortal } from 'react-dom';
 import { ArrowUp, BookmarkPlus, Box, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Building2, Video, X } from 'lucide-react';
 import { modelModality, type KeyView } from '@/api/keys';
-import { imageSizeMode, imageSizeSummary, imageSizeError, normalizeImageSizeParams } from '@/lib/imageSizeMode';
+import { hasImageSizeSelection, imageSizeMode, imageSizeSummary, imageSizeError, normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { normalizeImagePixelSize } from '@/lib/studioSize';
 import { ImageSizeFields } from './ImageSizeFields';
 import { providerLabel } from '@/lib/providerLabels';
@@ -573,7 +573,7 @@ export function PromptInput({
     const initialize = sizeModelRef.current === null;
     sizeModelRef.current = identity;
     const normalized = normalizeImageSizeParams(selectedModel.id, provider.provider, provider.base_url, sizeParams);
-    if (imageSizeMode(normalized) !== imageSizeMode(sizeParams)) {
+    if (hasImageSizeSelection(sizeParams) && imageSizeMode(normalized) !== imageSizeMode(sizeParams)) {
       showRefHint('当前模型不支持原尺寸模式，已切换为比例');
     } else if ((changedModel || initialize) && imageSizeMode(normalized) === 'custom' && !imageSizeError(normalized, selectedModel.id)) {
       const size = normalizeImagePixelSize(normalized.size!, selectedModel.id, provider.base_url);

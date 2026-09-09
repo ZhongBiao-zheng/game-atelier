@@ -15,6 +15,26 @@ function Harness({ baseUrl }: { baseUrl?: string } = {}) {
 }
 
 describe('image size intent', () => {
+  it.each([
+    ['openai', null, 'gpt-image-2'],
+    ['custom', 'https://api.tu-zi.com/v1', 'gpt-image-2'],
+    ['custom', 'https://api.openai-hk.com', 'gpt-image-2'],
+    ['openrouter', 'https://openrouter.ai/api/v1', 'openai/gpt-image-2.5-flare'],
+  ])('defaults fresh drafts to AUTO for %s / %s', (provider, baseUrl, model) => {
+    expect(normalizeImageSizeParams(model!, provider, baseUrl, { n: 2 })).toMatchObject({
+      size_mode: 'auto', size: 'auto', n: 2,
+    });
+    expect(prepareImageSizeSubmission(model!, provider, baseUrl, { n: 2 })).toEqual({
+      params: { size_mode: 'auto', size: 'auto', n: 2 },
+    });
+  });
+  it('keeps unsupported models and explicit saved sizing on their existing rule', () => {
+    expect(normalizeImageSizeParams('nano-banana-pro', 'custom', 'https://api.tu-zi.com', {}))
+      .toMatchObject({ size_mode: 'ratio', ratio: '1:1' });
+    for (const params of [{ ratio: '2:3' }, { size: '1024x1536' }, { resolution: '2K' }]) {
+      expect(normalizeImageSizeParams('gpt-image-2', 'openai', null, params).size_mode).toBe('ratio');
+    }
+  });
   it.each(['gpt-image-2', 'gpt-image-1.5', 'gpt-image-1'])('accepts Tuzi AUTO for %s without inactive dimensions', model => {
     expect(imageControlCaps(model, 'custom', 'https://api.tu-zi.com/v1').showAutoSize).toBe(true);
     expect(prepareImageSizeSubmission(model, 'custom', 'https://api.tu-zi.com/v1', {

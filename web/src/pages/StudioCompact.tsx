@@ -58,7 +58,7 @@ export function StudioCompact() {
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
-  const [sizeParams, setSizeParams] = useState<JobParams>(draft?.sizeParams ?? saved.sizeParams ?? { size_mode: 'ratio', ratio: '1:1', resolution: '2K' });
+  const [sizeParams, setSizeParams] = useState<JobParams>(draft?.sizeParams ?? saved.sizeParams ?? {});
   const [count, setCount] = useState(draft?.count ?? 1);
   const [quality, setQuality] = useState<Quality>(draft?.quality ?? 'low');
   // 与 StudioFull 同一政策：MJ 参数不进 localStorage，每次启动回默认。

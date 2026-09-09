@@ -447,8 +447,10 @@ describe('Studio', () => {
     const body = JSON.parse(String(studioCall![1]!.body));
     expect(body.alias).toBe('oa');
     expect(body.model).toBe('gpt-image-2');
-    // 配置回默认：1:1 / 1 张，而非 localStorage 里的 16:9 / 3
-    expect(body.params.ratio).toBe('1:1');
+    // 旧版顶层 ratio/count 不参与尺寸选择，新草稿默认 AUTO / 1 张。
+    expect(body.params.size_mode).toBe('auto');
+    expect(body.params.size).toBe('auto');
+    expect(body.params).not.toHaveProperty('ratio');
     expect(body.params.n).toBe(1);
   });
 
@@ -1429,12 +1431,13 @@ describe('Studio', () => {
     expect(sizeButton).not.toHaveTextContent('2560');
   });
 
-  it('AUTO submits no pixel, ratio, resolution, draft cache, or guessed price in both Studio surfaces', async () => {
+  it('defaults to AUTO without stale sizing or guessed price in both fresh Studio surfaces', async () => {
     localStorage.setItem('studio:selection', JSON.stringify({ providerAlias: 'oa', model: 'gpt-image-2' }));
     const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
     const view = renderStudio();
     fireEvent.click(await screen.findByRole('button', { name: '选择比例和分辨率' }));
-    fireEvent.click(screen.getByRole('option', { name: 'AUTO' }));
+    expect(screen.getByRole('option', { name: 'AUTO' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByText('当前模型不支持原尺寸模式，已切换为比例')).not.toBeInTheDocument();
     expect(screen.getByRole('option', { name: '1:1' })).toHaveAttribute('aria-selected', 'false');
     expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('AUTO');
@@ -1446,6 +1449,7 @@ describe('Studio', () => {
     for (const key of ['ratio', 'resolution', 'custom_size', 'estimated_cost_cny']) expect(payload().params).not.toHaveProperty(key);
     view.unmount();
     clearStudioDraft();
+    localStorage.setItem('studio:selection', JSON.stringify({ providerAlias: 'oa', model: 'gpt-image-2' }));
     const { hook } = memoryLocation({ path: '/', static: true });
     render(<Router hook={hook}><Studio compact /></Router>);
     await waitFor(() => expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('AUTO'));
@@ -1460,6 +1464,7 @@ describe('Studio', () => {
     localStorage.setItem('studio:selection', JSON.stringify({ providerAlias: 'oa', model: 'gpt-image-2' }));
     renderStudio();
     fireEvent.click(await screen.findByRole('button', { name: '选择比例和分辨率' }));
+    fireEvent.click(screen.getByRole('option', { name: '自定义' }));
     fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '1360' } });
     fireEvent.change(screen.getByLabelText('输出高度'), { target: { value: '2048' } });
     expect(screen.getByRole('option', { name: '自定义' })).toHaveAttribute('aria-selected', 'true');

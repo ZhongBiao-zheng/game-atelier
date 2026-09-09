@@ -26,6 +26,30 @@ def _draft(mode: str, model: str, **params) -> CanvasGenerationDraft:
     )
 
 
+@pytest.mark.parametrize("provider,base_url", [
+    ("openai", None), ("custom", "https://api.tu-zi.com/v1"),
+    ("custom", "https://api.openai-hk.com"),
+])
+def test_new_canvas_image_preferences_default_to_auto(provider, base_url):
+    model = ModelSpec(name="GPT", id="gpt-image-2", modality="image")
+    key = _key(provider, model).model_copy(update={"base_url": base_url})
+    source = {"n": 2}
+    result = _normalized_image_preference_params(key, model, source)
+    assert result.model_dump(exclude_none=True) == {
+        "size_mode": "auto", "size": "auto", "n": 2,
+    }
+    assert source == {"n": 2}
+    for saved in ({"ratio": "2:3"}, {"size": "1024x1536"}, {"resolution": "2K"}):
+        assert _normalized_image_preference_params(key, model, saved).size != "auto"
+
+
+def test_new_canvas_unsupported_model_keeps_ratio_default():
+    model = ModelSpec(name="Nano", id="nano-banana-pro", modality="image")
+    result = _normalized_image_preference_params(_key("custom", model), model, {})
+    assert result.ratio == "1:1"
+    assert result.size != "auto"
+
+
 def test_canvas_server_locks_midjourney_to_four_candidates():
     model = ModelSpec(name="Midjourney V7", id="midjourney-v7", modality="image")
 

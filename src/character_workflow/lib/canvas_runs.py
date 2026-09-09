@@ -526,7 +526,16 @@ def _normalized_image_preference_params(
         normalize_image_pixel_size,
         normalized_model_id,
     )
-    from character_workflow.lib.image_size import normalize_image_size_params
+    from character_workflow.lib.image_size import (
+        normalize_image_size_params,
+        supports_auto_image_size,
+    )
+
+    if not any(params.get(field) is not None for field in (
+        "size_mode", "size", "ratio", "resolution", "custom_size",
+    )) and supports_auto_image_size(key.provider, key.base_url, model.id):
+        params = {**params, "size_mode": "auto", "size": "auto",
+                  "n": max(1, min(4, int(params.get("n") or 1)))}
 
     if params.get("size_mode") in {"auto", "custom"}:
         draft_params = normalize_image_size_params(key, model.id, params)

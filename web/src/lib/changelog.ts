@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.42.2',
+    date: '2026-09-09',
+    headline: '新建图片默认 AUTO',
+    changes: [
+      { kind: 'fix', text: '支持 AUTO 的模型新建时默认自动尺寸；保留已有比例、自定义尺寸与历史任务设置。' },
+    ],
+  },
+  {
     version: '5.42.1',
     date: '2026-09-09',
     headline: '补齐 Tuzi 图片 AUTO',

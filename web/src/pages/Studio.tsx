@@ -118,7 +118,7 @@ function StudioFull() {
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
   // 尺寸模式和自定义草稿一起恢复；质量与数量仍在刷新时回默认。
-  const [sizeParams, setSizeParams] = useState<JobParams>(draft?.sizeParams ?? saved.sizeParams ?? { size_mode: 'ratio', ratio: '1:1', resolution: '2K' });
+  const [sizeParams, setSizeParams] = useState<JobParams>(draft?.sizeParams ?? saved.sizeParams ?? {});
   const [count, setCount] = useState(draft?.count ?? 1);
   const [quality, setQuality] = useState<Quality>(draft?.quality ?? 'low');
   // MJ 参数不进 localStorage —— 与 ratio/像素/质量/数量 同一政策：出图配置每次启动回默认。
