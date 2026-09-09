@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.39.4',
+    date: '2026-09-09',
+    headline: '首页：排除残留图片，保留成功作品',
+    changes: [
+      { kind: 'fix', text: '创作台作品展示只收录任务已登记的成功图片，不再混入无任务归属的残留文件' },
+      { kind: 'fix', text: '同批生成部分失败时，已经成功的图片仍可正常展示' },
+    ],
+  },
+  {
     version: '5.39.3',
     date: '2026-09-09',
     headline: '模型设置：补全 OpenRouter 目录，新增模型自动定位',

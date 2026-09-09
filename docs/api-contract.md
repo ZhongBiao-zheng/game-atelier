@@ -79,6 +79,11 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 
 写操作按「谁有权」分组。全部前缀 `/api`，服务绑死 `127.0.0.1`。
 
+`GET /gallery/recent` 的 Studio 作品以 Job 登记为准：仅收录 `namespace=studio`、
+`kind=image`、状态为 `done` 或 `partial` 的 `output_paths`，且文件必须存在于 Studio
+目录内并为支持的图片扩展名。目录残留文件不自动成为作品，也不从目录名推断任务链接。
+部分成功任务保留成功产物；隐藏、收藏与评分规则继续生效，不依据图片颜色判定失败。
+
 工坊本地请求管理为 `GET /workshop/requests` 和
 `POST /workshop/requests/{request_id}/approve { expected_revision }`；Agent 身份经 `workshop_approve_generation` 批准自身请求，须持 `execute_generation`。
 其余 MCP 工具均为专用 POST 输入，详见工坊契约，不提供通用 HTTP / 文件工具。
