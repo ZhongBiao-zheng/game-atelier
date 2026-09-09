@@ -7,7 +7,8 @@ from PIL import Image
 from character_workflow.lib.canvas_layer_exports import export_canvas_layers
 from character_workflow.lib.canvas_media_operations import execute_canvas_media_operation
 from character_workflow.lib.canvas_projects import (
-    canvas_output_dir, read_canvas_document, replace_canvas_node_media, save_canvas_document,
+    CanvasMediaReplaceError, canvas_output_dir, read_canvas_document,
+    replace_canvas_node_media, save_canvas_document,
 )
 from character_workflow.lib.canvas_runs import _commit_frozen_run, finalize_canvas_run
 from character_workflow.lib.keys import KeySpec, ModelSpec
@@ -129,6 +130,10 @@ def test_generated_edit_reuses_material_updates_parent_only_on_success_and_allow
         "output_paths": [str(output)] if success else [],
         "error": None if success else "test failure",
     }))
+    # Runner status is terminal before candidate finalization: edits must still wait.
+    with pytest.raises(CanvasMediaReplaceError, match="正在生成"):
+        replace_canvas_node_media(project.project_id, "material", "racing.png", ".png",
+                                  _png(), "image", submitted.revision)
     finalize_canvas_run(project.project_id, job.job_id)
     current = read_canvas_document(project.project_id)
     assert (current.nodes[1].data.layers[0].version_id != previous) is success

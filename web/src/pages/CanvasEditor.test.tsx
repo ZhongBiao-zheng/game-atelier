@@ -43,6 +43,11 @@ vi.mock('@xyflow/react', () => {
   };
   const flowTransform: [number, number, number] = [0, 0, 1];
   let flowNodeLookup = new Map<string, MockInternalNode>();
+  // React Flow 的 useViewportHelper/useReactFlow 用 useMemo 保持这些方法的引用稳定。
+  const viewportHelpers = {
+    fitBounds: vi.fn().mockResolvedValue(true),
+    getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
+  };
   return {
     useStore: (selector: (state: {
       transform: [number, number, number];
@@ -199,7 +204,7 @@ vi.mock('@xyflow/react', () => {
     useReactFlow: () => ({
       screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
       fitView: vi.fn(),
-      getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
+      ...viewportHelpers,
       getZoom: () => 1,
       setCenter: vi.fn(),
       setViewport: vi.fn(),

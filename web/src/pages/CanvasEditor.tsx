@@ -529,6 +529,7 @@ function CanvasEditorInner({
   const {
     screenToFlowPosition,
     fitView,
+    fitBounds,
     getViewport,
     getZoom,
     setCenter,
@@ -2527,29 +2528,6 @@ function CanvasEditorInner({
     projectId,
   ]);
 
-  const expandLayerStack = useCallback((nodeId: string) => {
-    const current = latestDocument.current;
-    if (!current || batchBusyRef.current) return;
-    try {
-      const expanded = expandCanvasLayerStack(current, nodeId, makeId);
-      const replaced = new Set(expanded.nodes.map(node => node.id));
-      if (expanded.nodes.length) commit(document => ({ ...document,
-        nodes: [...document.nodes.filter(node => !replaced.has(node.id)).flatMap<CanvasNode>(node => {
-          if (node.id === expanded.stack.id) return [expanded.stack];
-          if (node.type !== 'group') return [node];
-          const members = node.data.member_node_ids.filter(id => !replaced.has(id));
-          return members.length || !node.data.member_node_ids.length
-            ? [{ ...node, data: { ...node.data, member_node_ids: members } }] : [];
-        }), ...expanded.nodes],
-      }), true);
-      setSelectedConnectionIds(new Set());
-      setSelectedNodeIds(new Set([expanded.groupId]));
-      setError(null);
-    } catch (error) {
-      setError((error as Error).message);
-    }
-  }, [commit]);
-
   const createLayerDecomposition = useCallback((sourceNode: Extract<CanvasContentNode, { type: 'image' }>) => {
     const current = latestDocument.current;
     const source = current?.nodes.find(node => node.id === sourceNode.id);
@@ -2854,6 +2832,34 @@ function CanvasEditorInner({
     void operation.then(clearPending, clearPending);
     return operation;
   }, [commitViewportDocument, getViewport, projectId]);
+
+  const expandLayerStack = useCallback((nodeId: string) => {
+    const current = latestDocument.current;
+    if (!current || batchBusyRef.current) return;
+    try {
+      const expanded = expandCanvasLayerStack(current, nodeId, makeId);
+      const replaced = new Set(expanded.nodes.map(node => node.id));
+      if (expanded.nodes.length) commit(document => ({ ...document,
+        nodes: [...document.nodes.filter(node => !replaced.has(node.id)).flatMap<CanvasNode>(node => {
+          if (node.id === expanded.stack.id) return [expanded.stack];
+          if (node.type !== 'group') return [node];
+          const members = node.data.member_node_ids.filter(id => !replaced.has(id));
+          return members.length || !node.data.member_node_ids.length
+            ? [{ ...node, data: { ...node.data, member_node_ids: members } }] : [];
+        }), ...expanded.nodes],
+      }), true);
+      setSelectedConnectionIds(new Set());
+      setSelectedNodeIds(new Set([expanded.groupId]));
+      setError(null);
+      const group = [...expanded.nodes, ...current.nodes].find(node => node.id === expanded.groupId);
+      if (group?.size) {
+        const bounds = { ...group.position, ...group.size };
+        void runViewportCommand(() => fitBounds(bounds, { duration: 150, padding: 0.14 }));
+      }
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  }, [commit, fitBounds, runViewportCommand]);
 
   const undo = useCallback(() => {
     if (batchBusyRef.current) return;

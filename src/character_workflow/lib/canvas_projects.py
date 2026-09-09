@@ -487,7 +487,9 @@ def canvas_node_has_pending_run(document: CanvasDocument, node: CanvasNode) -> b
     run_id = node.data.active_run_id if node.type in {"image", "video", "audio", "text"} else None
     return bool(run_id) and any(
         job.canvas_project_id == document.project_id and job.canvas_run is not None
-        and job.canvas_run.run_id == run_id and job.status == JobStatus.PENDING
+        and job.canvas_run.run_id == run_id
+        and (job.status == JobStatus.PENDING
+             or any(candidate.status == "pending" for candidate in job.canvas_run.candidates))
         for job in list_jobs()
     )
 
