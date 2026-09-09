@@ -198,6 +198,7 @@ export interface CanvasLayerStackLayer {
   description: string;
   bounding_box: CanvasLayerBoundingBox;
   visible: boolean;
+  material_node_id?: string | null;
 }
 
 export interface CanvasLayerStackNode extends CanvasNodeBase {
@@ -210,6 +211,8 @@ export interface CanvasLayerStackNode extends CanvasNodeBase {
     resolution: 'auto' | '1K' | '1.5K' | '2K';
     base_version_id: string | null;
     base_visible: boolean;
+    base_material_node_id?: string | null;
+    layout_size?: CanvasSize | null;
     layers: CanvasLayerStackLayer[];
     active_run_id: string | null;
     error: string | null;

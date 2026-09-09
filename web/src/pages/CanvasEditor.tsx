@@ -201,6 +201,8 @@ import {
   normalizeCanvasVideoParams,
   normalizeCanvasGroups,
   expandCanvasLayerStack,
+  syncLayerMaterials,
+  layerMaterialNodeIds,
   placeCanvasNodeWithoutOverlap,
   restoreContentVersions,
   sizeLockedToCanvasVersion,
@@ -887,7 +889,7 @@ function CanvasEditorInner({
   latestDocument.current = document;
   useEffect(() => {
     if (!document) return;
-    const synced = syncDraftLayerStackSources(document);
+    const synced = syncLayerMaterials(syncDraftLayerStackSources(document));
     if (synced === document) return;
     // 上游图片换版后，尚未运行的拆分节点必须在同一次本地收敛中更新快照与比例。
     // 已运行 / 已完成节点由 helper 明确跳过，避免历史产物跟着上游变化。
@@ -1281,6 +1283,16 @@ function CanvasEditorInner({
       if (!liveIds.has(id)) flowEdgeCache.current.delete(id);
     }
     // 逐项按引用比，而不是「有没有走过 else 分支」：顺序变了也要当成变了。
+    for (const stack of document?.nodes ?? []) {
+      if (stack.type !== 'layer_stack') continue;
+      for (const target of [stack.data.base_material_node_id, ...stack.data.layers.map(layer => layer.material_node_id)]) {
+        if (!target || !titles.has(target)) continue;
+        next.push({ id: `layer-material:${stack.id}:${target}`, source: stack.id, target,
+          type: 'canvasConnection', className: 'canvas-provenance-edge',
+          ariaLabel: `图层归属：${stack.title} → ${titles.get(target)}`,
+          selectable: false, focusable: false, deletable: false, interactionWidth: 0 });
+      }
+    }
     const previous = flowEdgesRef.current;
     if (next.length === previous.length && next.every((edge, index) => edge === previous[index])) {
       return previous;
@@ -2520,7 +2532,16 @@ function CanvasEditorInner({
     if (!current || batchBusyRef.current) return;
     try {
       const expanded = expandCanvasLayerStack(current, nodeId, makeId);
-      commit(document => ({ ...document, nodes: [...document.nodes, ...expanded.nodes] }), true);
+      const replaced = new Set(expanded.nodes.map(node => node.id));
+      if (expanded.nodes.length) commit(document => ({ ...document,
+        nodes: [...document.nodes.filter(node => !replaced.has(node.id)).flatMap<CanvasNode>(node => {
+          if (node.id === expanded.stack.id) return [expanded.stack];
+          if (node.type !== 'group') return [node];
+          const members = node.data.member_node_ids.filter(id => !replaced.has(id));
+          return members.length || !node.data.member_node_ids.length
+            ? [{ ...node, data: { ...node.data, member_node_ids: members } }] : [];
+        }), ...expanded.nodes],
+      }), true);
       setSelectedConnectionIds(new Set());
       setSelectedNodeIds(new Set([expanded.groupId]));
       setError(null);
@@ -3599,7 +3620,8 @@ function CanvasEditorInner({
       const sourceNode = before.nodes.find(node => node.id === target.nodeId);
       const sourceVersion = before.content_versions[target.versionId];
       let placeholder: CanvasMediaOperationPlaceholder | null = null;
-      if (sourceNode && sourceVersion?.kind === 'image' && sourceVersion.width && sourceVersion.height) {
+      const editsLayer = operation.kind !== 'split' && layerMaterialNodeIds(before).has(target.nodeId);
+      if (!editsLayer && sourceNode && sourceVersion?.kind === 'image' && sourceVersion.width && sourceVersion.height) {
         placeholder = canvasMediaOperationPlaceholder(
           sourceNode,
           canvasNodeRenderedSize(sourceNode, before.content_versions),
@@ -3641,7 +3663,11 @@ function CanvasEditorInner({
         ...concurrent,
         revision: result.document.revision,
         updated_at: result.document.updated_at,
-        nodes: [...concurrent.nodes, ...createdNodes],
+        nodes: [...concurrent.nodes.map(node => {
+          const updated = result.document.nodes.find(item => item.id === node.id);
+          return editsLayer && node.id === target.nodeId && node.type === 'image' && updated?.type === 'image'
+            ? { ...node, data: { ...node.data, current_version_id: updated.data.current_version_id } } : node;
+        }), ...createdNodes],
         connections: [...concurrent.connections, ...createdConnections],
         content_versions: acceptServerContentVersions(
           concurrent.content_versions,
@@ -3652,15 +3678,16 @@ function CanvasEditorInner({
       history.current.past = history.current.past.slice(-50);
       history.current.future = [];
       serverRevision.current = result.document.revision;
-      latestDocument.current = merged;
-      if (dirtyVersion.current > dirtyAtCommand) saveQueued.current = merged;
+      const synced = syncLayerMaterials(merged);
+      latestDocument.current = synced;
+      if (dirtyVersion.current > dirtyAtCommand) saveQueued.current = synced;
       flowNodeCache.current.clear();
-      setDocument(merged);
+      setDocument(synced);
       setSelectedConnectionIds(new Set());
       setSelectedNodeIds(new Set(result.created_node_ids));
       setMediaOperation(null);
       announceToolNotice(
-        operation.kind === 'split'
+        editsLayer ? '已更新图层素材' : operation.kind === 'split'
           ? `已生成 ${result.created_node_ids.length} 个切图节点`
           : operation.kind === 'crop' ? '已生成裁剪节点'
             : operation.kind === 'remove_background' ? '已生成抠图节点' : '已生成本地放大节点',
@@ -4690,6 +4717,7 @@ function CanvasEditorInner({
             mediaUrl={canvasMediaUrl(projectId, mediaOperation.version.version_id)}
             busy={mediaOperationBusy}
             error={mediaOperationError}
+            updatesMaterial={layerMaterialNodeIds(document).has(mediaOperation.nodeId)}
             onOpenChange={open => {
               if (!open) {
                 setMediaOperation(null);
@@ -5181,7 +5209,9 @@ function cloneCanvasNode(
     };
   }
   if (clone.type === 'batch_material') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
-  if (clone.type === 'layer_stack') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
+  if (clone.type === 'layer_stack') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex,
+    data: { ...clone.data, base_material_node_id: idMap.get(clone.data.base_material_node_id ?? '') ?? null,
+      layers: clone.data.layers.map(layer => ({ ...layer, material_node_id: idMap.get(layer.material_node_id ?? '') ?? null })) } };
   return {
     ...clone,
     id: idMap.get(source.id)!,

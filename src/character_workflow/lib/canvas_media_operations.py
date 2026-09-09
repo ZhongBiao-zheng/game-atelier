@@ -17,6 +17,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_projects import (
+    canvas_node_has_pending_run,
     canvas_project_dir,
     canvas_project_lock_path,
     read_canvas_project,
@@ -119,6 +120,7 @@ def _read_document_unlocked(project_id: str) -> CanvasDocument:
 
 
 def _write_project_state_unlocked(project_id: str, document: CanvasDocument) -> None:
+    document.sync_layer_materials()
     project = read_canvas_project(project_id)
     touched = project.model_copy(update={"updated_at": document.updated_at})
     atomic_write_json(_project_path(project_id), touched.model_dump(mode="json"))
@@ -233,6 +235,8 @@ def _validate_source(
             "canvas_media_source_missing",
             "当前节点已经切换到其他图片，请重新选择后再试。",
         )
+    if source.id in document.layer_material_node_ids() and canvas_node_has_pending_run(document, source):
+        raise CanvasMediaOperationError("canvas_layer_material_busy", "这个图层素材正在生成，请稍后再试。")
     return source
 
 
@@ -579,9 +583,10 @@ def _build_document(
     shift_y = _placement_shift(positions, sizes, nodes)
     positions = [position.model_copy(update={"y": position.y + shift_y}) for position in positions]
 
+    edits_layer = source.id in current.layer_material_node_ids() and request.operation.kind != "split"
     for output, size, position in zip(outputs, sizes, positions):
         version_id = f"version-{secrets.token_hex(12)}"
-        node_id = f"image-{secrets.token_hex(12)}"
+        node_id = source.id if edits_layer else f"image-{secrets.token_hex(12)}"
         origin = _origin_for_output(
             operation_id,
             request.source_version_id,
@@ -632,8 +637,13 @@ def _build_document(
             ),
         )
         versions[version_id] = version
-        nodes.append(node)
-        connections.append(edge)
+        if edits_layer:
+            nodes = [candidate.model_copy(update={
+                "data": candidate.data.model_copy(update={"current_version_id": version_id}),
+            }) if candidate.id == source.id else candidate for candidate in nodes]
+        else:
+            nodes.append(node)
+            connections.append(edge)
         created_version_ids.append(version_id)
         created_node_ids.append(node_id)
 
@@ -644,7 +654,7 @@ def _build_document(
         "connections": connections,
         "content_versions": versions,
     })
-    return document, created_version_ids, created_node_ids
+    return document.sync_layer_materials(), created_version_ids, created_node_ids
 
 
 def execute_canvas_media_operation(

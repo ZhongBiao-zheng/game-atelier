@@ -16,6 +16,7 @@ from typing import Any, Literal
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
 from character_workflow.lib.canvas_projects import (
+    canvas_node_has_pending_run,
     canvas_project_dir,
     canvas_project_lock_path,
     read_canvas_project,
@@ -159,6 +160,7 @@ def _canonical_sha(value: Any) -> str:
 
 
 def _write_project_state_unlocked(project_id: str, document: CanvasDocument) -> None:
+    document.sync_layer_materials()
     project = read_canvas_project(project_id)
     touched = project.model_copy(update={"updated_at": document.updated_at})
     atomic_write_json(_project_path(project_id), touched.model_dump(mode="json"))
@@ -180,7 +182,7 @@ def _prepare_transaction(
     artifacts: list[dict[str, Any]] | None = None,
 ) -> Path:
     job_payload = job.model_dump(mode="json")
-    document_payload = document.model_dump(mode="json")
+    document_payload = document.sync_layer_materials().model_dump(mode="json")
     transaction = {
         "schema_version": 2,
         "state": "prepared",
@@ -1100,7 +1102,10 @@ def _commit_frozen_run(
     timestamp = _now()
     job_id = job_id or new_job_id()
     run_id = run_id or f"run-{secrets.token_hex(12)}"
-    use_surface = (
+    edits_layer = mode == "image" and surface.id in current.layer_material_node_ids()
+    if edits_layer and canvas_node_has_pending_run(current, surface):
+        raise CanvasRunCommandError("canvas_layer_material_busy", "这个图层素材正在生成，请稍后再试。")
+    use_surface = edits_layer or (
         allow_surface_reuse
         and surface.type in {"text", "image", "video", "audio"}
         and surface.type == mode

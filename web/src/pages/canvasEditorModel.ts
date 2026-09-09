@@ -94,6 +94,8 @@ export function sizeLockedToCanvasVersion(
 ) {
   if (!version.width || !version.height) return current ?? CANVAS_DEFAULT_NODE_SIZE;
   const ratio = version.width / version.height;
+  if (current && current.width > 0 && current.height > 0 && current.width <= 4000 && current.height <= 4000
+    && Math.abs(current.width / ratio - current.height) <= 1) return current;
   let width = Math.min(4000, Math.max(240, current?.width ?? CANVAS_DEFAULT_NODE_SIZE.width));
   let height = width / ratio;
   if (height < 150) {
@@ -179,6 +181,7 @@ export function canvasNodeRenderedSize(
 
 /** Group membership is explicit; its frame follows its members, never creates dependencies. */
 export function normalizeCanvasGroups(document: CanvasDocument): CanvasDocument {
+  document = syncLayerMaterials(document);
   const byId = new Map(document.nodes.map(node => [node.id, node]));
   return { ...document, nodes: document.nodes.map(node => {
     if (node.type !== 'group') return node;
@@ -198,54 +201,117 @@ export function normalizeCanvasGroups(document: CanvasDocument): CanvasDocument 
   }) };
 }
 
-/** Expand a snapshot into independently editable nodes; never mutate the layer stack or its media. */
+export function layerMaterialNodeIds(document: CanvasDocument): Set<string> {
+  return new Set(document.nodes.flatMap(node => node.type === 'layer_stack'
+    ? [node.data.base_material_node_id, ...node.data.layers.map(layer => layer.material_node_id)]
+      .filter((id): id is string => Boolean(id)) : []));
+}
+
+export function syncLayerMaterials(document: CanvasDocument): CanvasDocument {
+  const byId = new Map(document.nodes.map(node => [node.id, node]));
+  let changed = false;
+  for (const id of layerMaterialNodeIds(document)) {
+    const image = byId.get(id);
+    if (image?.type !== 'image' || !image.size || image.data.display.free_resize) continue;
+    const version = document.content_versions[image.data.current_version_id ?? ''];
+    if (version?.kind !== 'image' || !version.width || !version.height) continue;
+    const scale = Math.max(image.size.width, image.size.height) / Math.max(version.width, version.height);
+    const size = { width: Math.max(1, version.width * scale), height: Math.max(1, version.height * scale) };
+    if (Math.abs(size.width - image.size.width) > 0.01 || Math.abs(size.height - image.size.height) > 0.01) {
+      byId.set(id, { ...image, size });
+      changed = true;
+    }
+  }
+  const nodes = document.nodes.map(node => {
+    if (node.type !== 'layer_stack') return byId.get(node.id)!;
+    const base = byId.get(node.data.base_material_node_id ?? '');
+    const baseId = base?.type === 'image' ? base.id : null;
+    const baseVersion = base?.type === 'image' ? base.data.current_version_id : node.data.base_version_id;
+    const layers = node.data.layers.map(layer => {
+      const image = byId.get(layer.material_node_id ?? '');
+      const materialId = image?.type === 'image' ? image.id : null;
+      const versionId = image?.type === 'image' ? image.data.current_version_id : layer.version_id;
+      const name = image?.type === 'image' ? image.title : layer.name;
+      return materialId === (layer.material_node_id ?? null) && versionId === layer.version_id && name === layer.name
+        ? layer : { ...layer, material_node_id: materialId, version_id: versionId!, name };
+    });
+    if (baseId === (node.data.base_material_node_id ?? null) && baseVersion === node.data.base_version_id
+      && layers.every((layer, index) => layer === node.data.layers[index])) return node;
+    changed = true;
+    return { ...node, data: { ...node.data, base_material_node_id: baseId, base_version_id: baseVersion, layers } };
+  });
+  return changed ? { ...document, nodes } : document;
+}
+
+/** Expose owned material views. Repeated expansion selects the existing group. */
 export function expandCanvasLayerStack(
   document: CanvasDocument,
   nodeId: string,
   makeId: (prefix: string) => string,
-): { nodes: CanvasNode[]; groupId: string } {
+): { nodes: CanvasNode[]; groupId: string; stack: Extract<CanvasNode, { type: 'layer_stack' }> } {
   const stack = document.nodes.find(node => node.id === nodeId);
   if (stack?.type !== 'layer_stack' || !stack.data.base_version_id || stack.data.active_run_id) {
     throw new Error('图层尚未拆分完成');
   }
   const entries = [
-    { name: '背景', versionId: stack.data.base_version_id },
-    ...stack.data.layers.map(layer => ({ name: layer.name || `图层 ${layer.z_index}`, versionId: layer.version_id })),
+    { name: '背景', versionId: stack.data.base_version_id, nodeId: stack.data.base_material_node_id },
+    ...stack.data.layers.map(layer => ({ name: layer.name || `图层 ${layer.z_index}`, versionId: layer.version_id, nodeId: layer.material_node_id })),
   ];
   const images: CanvasImageNode[] = entries.map(entry => {
     const version = document.content_versions[entry.versionId];
     if (version?.kind !== 'image') throw new Error('图层图片不可用，未展开');
+    const scale = 280 / Math.max(version.width || 280, version.height || 280);
+    const size = { width: Math.max(1, Math.round((version.width || 280) * scale)),
+      height: Math.max(1, Math.round((version.height || 280) * scale)) };
+    const existing = document.nodes.find(node => node.id === entry.nodeId);
+    if (existing?.type === 'image') return { ...existing, size };
     return {
       id: makeId('image'), type: 'image', title: entry.name,
-      position: { x: 0, y: 0 }, size: sizeLockedToCanvasVersion(null, version), z_index: stack.z_index,
+      position: { x: 0, y: 0 }, size, z_index: stack.z_index,
       data: { current_version_id: version.version_id, generation_draft: null, active_run_id: null,
         display: { fit: 'contain', free_resize: false } },
     };
   });
+  const existingGroup = document.nodes.find(node => node.type === 'group'
+    && images.every(image => node.data.member_node_ids.includes(image.id)));
+  const updatedStack = { ...stack, data: { ...stack.data, base_material_node_id: images[0].id,
+    layout_size: stack.data.layout_size ?? {
+      width: (document.content_versions[stack.data.base_version_id] as CanvasMediaVersion).width || 1,
+      height: (document.content_versions[stack.data.base_version_id] as CanvasMediaVersion).height || 1,
+    },
+    layers: stack.data.layers.map((layer, index) => ({ ...layer, material_node_id: images[index + 1].id })) } };
+  if (existingGroup) return { nodes: [], groupId: existingGroup.id, stack: updatedStack };
   const columns = Math.min(4, Math.ceil(Math.sqrt(images.length)));
-  const cellWidth = Math.max(...images.map(node => node.size!.width)) + 48;
-  const cellHeight = Math.max(...images.map(node => node.size!.height)) + 64;
-  const groupWidth = columns * cellWidth;
-  const groupHeight = Math.ceil(images.length / columns) * cellHeight;
+  const heights = Array.from({ length: columns }, () => 40);
+  const positions = images.map((image) => {
+    const column = heights.indexOf(Math.min(...heights));
+    const position = { x: 24 + column * 320, y: heights[column] };
+    heights[column] += image.size!.height + 48;
+    return position;
+  });
+  const groupWidth = columns * 320 + 8;
+  const groupHeight = Math.max(...heights) - 24;
   let left = stack.position.x + canvasNodeRenderedSize(stack, document.content_versions).width + 72;
   const top = stack.position.y;
   // Only shift the new group rightward; never rearrange the existing canvas or drift left of the stack.
-  for (const occupied of [...document.nodes].sort((a, b) => a.position.x - b.position.x)) {
+  const memberIds = new Set(images.map(image => image.id));
+  for (const occupied of [...document.nodes].filter(node => !memberIds.has(node.id)
+    && !(node.type === 'group' && node.data.member_node_ids.every(id => memberIds.has(id))))
+    .sort((a, b) => a.position.x - b.position.x)) {
     const size = canvasNodeRenderedSize(occupied, document.content_versions);
     if (top < occupied.position.y + size.height + 48 && top + groupHeight + 48 > occupied.position.y
       && left < occupied.position.x + size.width + 48 && left + groupWidth + 48 > occupied.position.x) {
       left = occupied.position.x + size.width + 72;
     }
   }
-  images.forEach((node, index) => {
-    node.position = { x: left + 24 + index % columns * cellWidth, y: top + 40 + Math.floor(index / columns) * cellHeight };
-  });
+  const placed = images.map((node, index) => ({ ...node,
+    position: { x: left + positions[index].x, y: top + positions[index].y } }));
   const group: CanvasGroupNode = {
     id: makeId('group'), type: 'group', title: `${stack.title} · 图层`,
     position: { x: left, y: top }, size: { width: groupWidth, height: groupHeight }, z_index: 0,
     data: { member_node_ids: images.map(node => node.id), repeat_count: 1 },
   };
-  return { nodes: [...images, group], groupId: group.id };
+  return { nodes: [...placed, group], groupId: group.id, stack: updatedStack };
 }
 
 /** 从期望位置开始，按网格圈由内向外找一个不与现有节点重叠的点。

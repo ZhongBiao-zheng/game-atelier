@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.41.0',
+    date: '2026-09-09',
+    headline: '图层素材：紧凑排列，编辑同步原图层',
+    changes: [
+      { kind: 'fix', text: '展开素材按比例紧凑排列，不再被大图和长条素材撑出巨大间隔' },
+      { kind: 'feat', text: '展开图片与原图层建立归属连线，编辑或替换后同步更新原图层及下载内容' },
+      { kind: 'fix', text: '重复展开定位已有分组，不再重复创建素材' },
+    ],
+  },
+  {
     version: '5.40.0',
     date: '2026-09-09',
     headline: '拆分图层：打包下载，一键展开到画布',

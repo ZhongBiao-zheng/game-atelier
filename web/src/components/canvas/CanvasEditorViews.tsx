@@ -809,9 +809,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
           <span className="canvas-node-handle-dot" aria-hidden="true" />
         </Handle>
       )}
-      {canvasNodeProvidesOutput(node) && (
+      {(canvasNodeProvidesOutput(node) || (node.type === 'layer_stack'
+        && (node.data.base_material_node_id || node.data.layers.some(layer => layer.material_node_id)))) && (
         <Handle
           type="source"
+          isConnectable={node.type !== 'layer_stack'}
           position={Position.Right}
           className="canvas-node-handle"
           aria-label="从此节点连接"
@@ -2879,6 +2881,8 @@ export function CanvasLayerStackSurface({
   const sourceImage = source?.kind === 'image' ? source : undefined;
   const base = context.resolveVersion(node.data.base_version_id);
   const baseImage = base?.kind === 'image' ? base : undefined;
+  const layoutWidth = node.data.layout_size?.width ?? baseImage?.width;
+  const layoutHeight = node.data.layout_size?.height ?? baseImage?.height;
   const layers = node.data.layers.flatMap(layer => {
     const version = context.resolveVersion(layer.version_id);
     return version?.kind === 'image' ? [{ layer, version }] : [];
@@ -2924,9 +2928,9 @@ export function CanvasLayerStackSurface({
   return (
     <div className="flex h-full min-h-0">
       <div className="relative flex min-w-0 flex-1 items-center justify-center p-3">
-        {baseImage?.width && baseImage.height ? (
+        {baseImage && layoutWidth && layoutHeight ? (
           <svg
-            viewBox={`0 0 ${baseImage.width} ${baseImage.height}`}
+            viewBox={`0 0 ${layoutWidth} ${layoutHeight}`}
             role="img"
             aria-label={`${node.title} 合成预览`}
             className="h-full w-full"
@@ -2938,9 +2942,9 @@ export function CanvasLayerStackSurface({
                 href={canvasMediaUrl(context.projectId, baseImage.version_id)}
                 x={0}
                 y={0}
-                width={baseImage.width}
-                height={baseImage.height}
-                preserveAspectRatio="none"
+                width={layoutWidth}
+                height={layoutHeight}
+                preserveAspectRatio="xMidYMid meet"
               />
             )}
             {layers.map(({ layer, version }) => {
@@ -2955,7 +2959,7 @@ export function CanvasLayerStackSurface({
                   y={top}
                   width={right - left}
                   height={bottom - top}
-                  preserveAspectRatio="none"
+                  preserveAspectRatio="xMidYMid meet"
                 />
               );
             })}

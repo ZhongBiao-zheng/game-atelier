@@ -683,6 +683,7 @@ class CanvasLayerStackLayer(BaseModel):
     description: str = Field(default="", max_length=2000)
     bounding_box: LayerDecompositionBoundingBox
     visible: bool = True
+    material_node_id: str | None = None
 
 
 class CanvasLayerStackData(BaseModel):
@@ -694,6 +695,8 @@ class CanvasLayerStackData(BaseModel):
     resolution: Literal["auto", "1K", "1.5K", "2K"] = "auto"
     base_version_id: str | None = Field(default=None, max_length=160)
     base_visible: bool = True
+    base_material_node_id: str | None = None
+    layout_size: CanvasGroupSize | None = None
     layers: list[CanvasLayerStackLayer] = Field(default_factory=list, max_length=16)
     active_run_id: str | None = Field(default=None, max_length=160)
     error: str | None = Field(default=None, max_length=4000)
@@ -1007,8 +1010,70 @@ class CanvasDocument(BaseModel):
     content_versions: dict[str, CanvasContentVersion] = Field(default_factory=dict)
     updated_at: str
 
+    def layer_material_node_ids(self) -> set[str]:
+        return {
+            node_id for node in self.nodes if node.type == "layer_stack"
+            for node_id in [node.data.base_material_node_id, *[
+                layer.material_node_id for layer in node.data.layers
+            ]] if node_id is not None
+        }
+
+    def sync_layer_materials(self) -> "CanvasDocument":
+        """Material nodes are the editable view; stack snapshots follow their current images."""
+        by_id = {node.id: node for node in self.nodes}
+        owners: set[str] = set()
+
+        def material(node_id):
+            if node_id is None:
+                return None
+            node = by_id.get(node_id)
+            if node is None:
+                return None
+            if node.type != "image" or not node.data.current_version_id or node_id in owners:
+                raise ValueError("layer material must be one uniquely owned populated image node")
+            owners.add(node_id)
+            version = self.content_versions.get(node.data.current_version_id)
+            if node.size and not node.data.display.free_resize and version is not None \
+                    and version.kind == "image" and version.width and version.height:
+                longest = max(node.size.width, node.size.height)
+                scale = longest / max(version.width, version.height)
+                node = node.model_copy(update={"size": CanvasSize(
+                    width=max(1, version.width * scale), height=max(1, version.height * scale),
+                )})
+                by_id[node_id] = node
+            return node
+
+        nodes = []
+        for node in self.nodes:
+            if node.type != "layer_stack":
+                nodes.append(node)
+                continue
+            base = material(node.data.base_material_node_id)
+            layout_size = node.data.layout_size
+            base_version = self.content_versions.get(node.data.base_version_id or "")
+            if base and layout_size is None and base_version is not None \
+                    and base_version.kind == "image" and base_version.width and base_version.height:
+                layout_size = CanvasGroupSize(width=base_version.width, height=base_version.height)
+            layers = []
+            for layer in node.data.layers:
+                image = material(layer.material_node_id)
+                layers.append(layer.model_copy(update={
+                    "material_node_id": image.id if image else None,
+                    "version_id": image.data.current_version_id if image else layer.version_id,
+                    "name": image.title if image else layer.name,
+                }))
+            nodes.append(node.model_copy(update={"data": node.data.model_copy(update={
+                "base_material_node_id": base.id if base else None,
+                "layout_size": layout_size,
+                "base_version_id": base.data.current_version_id if base else node.data.base_version_id,
+                "layers": layers,
+            })}))
+        self.nodes = [by_id[node.id] if node.id in owners else node for node in nodes]
+        return self
+
     @model_validator(mode="after")
     def validate_graph_references(self) -> "CanvasDocument":
+        self.sync_layer_materials()
         node_ids = [node.id for node in self.nodes]
         if len(node_ids) != len(set(node_ids)):
             raise ValueError("canvas node ids must be unique")

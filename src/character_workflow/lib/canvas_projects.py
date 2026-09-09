@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
 from character_workflow.lib.file_lock import file_lock
-from character_workflow.lib.jobs import read_job
+from character_workflow.lib.jobs import list_jobs, read_job
 from character_workflow.lib.schemas import (
     CanvasNode,
     CanvasAudioNode,
@@ -32,6 +32,7 @@ from character_workflow.lib.schemas import (
     CanvasUploadOrigin,
     CanvasVideoNode,
     JobParams,
+    JobStatus,
     canvas_allowed_draft_params,
 )
 
@@ -435,6 +436,7 @@ def save_canvas_document(
             )
         timestamp = _now()
         updated = _normalized_web_document(current, document, timestamp)
+        updated.sync_layer_materials()
         touched = project.model_copy(update={"updated_at": timestamp})
         atomic_write_json(_project_path(project_id), touched.model_dump(mode="json"))
         atomic_write_json(_document_path(project_id), updated.model_dump(mode="json"))
@@ -481,6 +483,15 @@ def save_canvas_upload(
         return version, updated, _display_filename(raw_name)
 
 
+def canvas_node_has_pending_run(document: CanvasDocument, node: CanvasNode) -> bool:
+    run_id = node.data.active_run_id if node.type in {"image", "video", "audio", "text"} else None
+    return bool(run_id) and any(
+        job.canvas_project_id == document.project_id and job.canvas_run is not None
+        and job.canvas_run.run_id == run_id and job.status == JobStatus.PENDING
+        for job in list_jobs()
+    )
+
+
 def replace_canvas_node_media(
     project_id: str,
     node_id: str,
@@ -505,6 +516,10 @@ def replace_canvas_node_media(
                 "找不到可替换的媒体节点。",
             )
         current_version_id = node.data.current_version_id
+        if node.id in current.layer_material_node_ids() and canvas_node_has_pending_run(current, node):
+            raise CanvasMediaReplaceError(
+                "canvas_layer_material_busy", "这个图层素材正在生成，请稍后再试。",
+            )
         current_version = (
             current.content_versions.get(current_version_id) if current_version_id else None
         )
@@ -589,6 +604,7 @@ def _commit_canvas_upload(
     timestamp: str,
 ) -> None:
     """Commit upload bytes and metadata before the canvas document reference."""
+    document.sync_layer_materials()
     try:
         atomic_write_bytes(target, body)
         atomic_write_json(

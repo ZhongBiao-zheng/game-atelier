@@ -13,11 +13,12 @@ import {
   normalizeCanvasImageParams,
   placeCanvasNodeWithoutOverlap,
   syncDraftLayerStackSources,
+  syncLayerMaterials,
 } from './canvasEditorModel';
 import type { CanvasDocument, CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 
-it('expands every layer including hidden ones into independent images grouped to the right', () => {
+it('expands every layer into compact owned material views and reuses the existing group', () => {
   const stack = {
     id: 'stack', title: '拆分图层', type: 'layer_stack', position: { x: 0, y: 0 },
     size: { width: 760, height: 480 }, z_index: 0,
@@ -38,7 +39,7 @@ it('expands every layer including hidden ones into independent images grouped to
   const before = structuredClone(current);
   let sequence = 0;
   const result = expandCanvasLayerStack(current, stack.id, prefix => `${prefix}-${++sequence}`);
-  const normalized = normalizeCanvasGroups({ ...current, nodes: [...current.nodes, ...result.nodes] });
+  const normalized = normalizeCanvasGroups({ ...current, nodes: [result.stack, occupied, ...result.nodes] });
   const images = result.nodes.filter(node => node.type === 'image');
   expect(images.map(node => node.title)).toEqual(['背景', '标题']);
   expect(images.map(node => node.data.current_version_id)).toEqual(['base', 'layer-image']);
@@ -49,8 +50,27 @@ it('expands every layer including hidden ones into independent images grouped to
   expect(group.position.x).toBeGreaterThan(occupied.position.x + occupied.size.width);
   expect(group).toMatchObject({ data: { member_node_ids: images.map(node => node.id) } });
   expect(current).toEqual(before);
+  expect(result.stack.data.base_material_node_id).toBe(images[0].id);
+  expect(result.stack.data.layers[0].material_node_id).toBe(images[1].id);
+  expect(images.every(image => Math.max(image.size!.width, image.size!.height) <= 280)).toBe(true);
   const repeated = expandCanvasLayerStack(normalized, stack.id, prefix => `${prefix}-${++sequence}`);
-  expect(repeated.nodes.at(-1)!.position.x).toBeGreaterThan(group.position.x + group.size!.width);
+  expect(repeated.nodes).toEqual([]);
+  expect(repeated.groupId).toBe(group.id);
+  const edited = { ...normalized, content_versions: { ...normalized.content_versions,
+    edited: { ...version, version_id: 'edited', width: 2800, height: 28 } },
+  nodes: normalized.nodes.map(node => node.id === images[1].id && node.type === 'image'
+    ? { ...node, title: '新标题', data: { ...node.data, current_version_id: 'edited' } } : node) };
+  const synced = syncLayerMaterials(edited);
+  expect(synced.nodes.find(node => node.id === stack.id)).toMatchObject({ data: { layers: [{
+    version_id: 'edited', name: '新标题', visible: false, bounding_box: stack.data.layers[0].bounding_box,
+  }] } });
+  expect(synced.nodes.find(node => node.id === images[1].id)?.size?.width).toBe(280);
+  expect(synced.nodes.find(node => node.id === images[1].id)?.size?.height).toBeCloseTo(2.8);
+  expect(syncLayerMaterials(synced)).toBe(synced);
+  const removed = syncLayerMaterials({ ...synced, nodes: synced.nodes.filter(node => node.id !== images[1].id) });
+  expect(removed.nodes.find(node => node.id === stack.id)).toMatchObject({ data: { layers: [{
+    material_node_id: null, version_id: 'edited', name: '新标题',
+  }] } });
   delete current.content_versions['layer-image'];
   expect(() => expandCanvasLayerStack(current, stack.id, () => 'unused')).toThrow('图层图片不可用');
   current.nodes[0] = { ...stack, data: { ...stack.data, base_version_id: null } };
