@@ -649,6 +649,8 @@ it('undoes a text field edit as one session snapshot', async () => {
   fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
 
   expect(screen.queryByText('可以撤销的修改')).not.toBeInTheDocument();
+  expect(screen.getByTestId('react-flow')).toHaveAttribute('data-node-count', '1');
+  await waitFor(() => expect(savedText(lastSavedDocument())).toBe(''));
 });
 
 it('undoes adding a node back to the loaded canvas', async () => {
