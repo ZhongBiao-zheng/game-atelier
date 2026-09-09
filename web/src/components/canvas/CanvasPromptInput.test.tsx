@@ -55,7 +55,9 @@ describe('CanvasPromptInput', () => {
     const [first, second] = screen.getAllByRole('textbox', { name: '变量：风格' });
     expect(first).toHaveFocus();
     expect(first).toHaveValue('');
-    expect(first).toHaveAttribute('placeholder', '风格：水墨');
+    expect(first).toHaveAttribute('placeholder', '水墨');
+    expect(first).toHaveAttribute('aria-required', 'false');
+    expect(resolvePromptVariables(`用${token}画图`)).toBe('用水墨画图');
     fireEvent.compositionStart(first);
     fireEvent.input(first, { target: { value: '卡' } });
     expect(saved).toBe('');

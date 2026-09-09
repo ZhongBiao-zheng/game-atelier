@@ -53,16 +53,17 @@ def test_post_studio_job_creates_pending(client):
     assert payload["params"]["n"] == 1
 
 
-def test_studio_freezes_resolved_variable_text(client):
+@pytest.mark.parametrize("value,expected", [("现代建筑", "现代建筑"), ("", "三头犬"), ("  ", "三头犬")])
+def test_studio_freezes_resolved_variable_text(client, value, expected):
     response = client.post("/api/studio/jobs", json={
-        "prompt": "绘制现代建筑", "prompt_template": "绘制" + variable(value="现代建筑"),
+        "prompt": "ignored", "prompt_template": "绘制" + variable(value=value),
         "model": "gpt-image-2", "params": {},
     })
     assert response.status_code == 201
-    assert response.json()["prompt"] == "绘制现代建筑"
+    assert response.json()["prompt"] == "绘制" + expected
 
 
-@pytest.mark.parametrize("prompt", [variable(), "@[variable:broken]", " \n"])
+@pytest.mark.parametrize("prompt", [variable(example=" "), "@[variable:broken]", " \n"])
 def test_studio_rejects_unfilled_or_malformed_variables_before_job_creation(client, tmp_path, prompt):
     response = client.post("/api/studio/jobs", json={
         "prompt": "placeholder", "prompt_template": prompt, "model": "gpt-image-2", "params": {},

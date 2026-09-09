@@ -15,9 +15,9 @@ function variableNode(variable: PromptVariable): HTMLElement {
   input.type = 'text';
   input.dataset.variableName = variable.name;
   input.setAttribute('aria-label', `变量：${variable.name}`);
-  input.setAttribute('aria-required', 'true');
-  input.placeholder = variable.example ? `${variable.name}：${variable.example}` : variable.name;
-  input.title = variable.example ? `${variable.name} · 例如：${variable.example}` : variable.name;
+  input.setAttribute('aria-required', String(!variable.example.trim()));
+  input.placeholder = variable.example || variable.name;
+  input.title = variable.name;
   input.value = variable.value;
   input.defaultValue = variable.value;
   input.className = 'max-w-full rounded border border-input bg-secondary/50 px-1.5 py-0.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary';

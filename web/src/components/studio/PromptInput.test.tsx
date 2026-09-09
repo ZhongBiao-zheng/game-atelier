@@ -55,18 +55,19 @@ describe('PromptInput 行内变量', () => {
       value={value} onValueChange={(next) => { setValue(next); onChange(next); }} />;
   }
 
-  it('以空框呈现变量，示例不算填写，提交前同步同名变量并序列化为正文', () => {
+  it('空框只显示默认内容，可直接生成，填写后同步同名变量并覆盖默认内容', () => {
     const onSubmit = vi.fn();
     const onChange = vi.fn();
     render(<Editor onSubmit={onSubmit} onChange={onChange} />);
     const fields = screen.getAllByLabelText('变量：风格') as HTMLInputElement[];
     expect(fields[0]).toHaveFocus();
     expect(fields[0]).toHaveValue('');
-    expect(fields[0]).toHaveAttribute('placeholder', '风格：卡通矢量');
+    expect(fields[0]).toHaveAttribute('placeholder', '卡通矢量');
+    expect(fields[0]).toHaveAttribute('aria-required', 'false');
     const editor = screen.getByLabelText('生图 prompt');
-    expect(editor).toHaveAccessibleDescription('请填写：风格');
     fireEvent.keyDown(editor, { key: 'Enter' });
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSubmit.mock.lastCall![0]).toBe('以卡通矢量处理 图1；保持卡通矢量');
+    onSubmit.mockClear();
     fireEvent.input(fields[0], { target: { value: '水彩' } });
     expect(screen.getAllByLabelText('变量：风格')[0]).toBe(fields[0]);
     expect(fields[1]).toHaveValue('水彩');

@@ -2,12 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { promptFromAsset, promptToAssetSegments, promptVariableError, promptVariableParts, promptVariableToken, readablePromptVariables, resolvePromptVariables } from './promptVariables';
 
 describe('inline prompt variables', () => {
-  it('preserves names and examples without treating defaults as filled', () => {
+  it('keeps the draft empty but uses defaults for generation and readable text', () => {
     const segments = [{ kind: 'text' as const, text: '画一只' }, { kind: 'variable' as const, name: '主体', default_value: '白猫' }];
     const prompt = promptFromAsset(segments);
-    expect(promptVariableError(prompt)).toBe('请填写：主体');
-    expect(readablePromptVariables(prompt)).toBe('画一只[主体]');
+    expect(promptVariableError(prompt)).toBeNull();
+    expect(resolvePromptVariables(prompt)).toBe('画一只白猫');
+    expect(readablePromptVariables(prompt)).toBe('画一只白猫');
     expect(promptToAssetSegments(prompt)).toEqual(segments);
+  });
+  it('uses defaults for whitespace, explicit values first, and requires content without defaults', () => {
+    const token = (value: string, example = '水墨') => promptVariableToken({ name: '风格', example, value });
+    expect(resolvePromptVariables(token(' \n'))).toBe('水墨');
+    expect(resolvePromptVariables(token(' 水彩 '))).toBe(' 水彩 ');
+    expect(() => resolvePromptVariables(token('', '  '))).toThrow('请填写');
+    expect(resolvePromptVariables(token('') + token('水墨'))).toBe('水墨水墨');
+    expect(() => resolvePromptVariables(token('') + token('', '水彩'))).toThrow('不一致');
   });
   it('round-trips unicode, delimiters, HTML and newlines as literal data', () => {
     const variable = { name: '主体', example: '猫 ] : %', value: '<b>雪山</b>\n@[variable:literal]' };

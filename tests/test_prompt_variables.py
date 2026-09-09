@@ -25,8 +25,7 @@ def test_template_keeps_example_separate_from_empty_value():
     token = variable()
     payload = json.loads(unquote(token[len("@[variable:"):-1]))
     assert payload == {"name": "主体", "example": "三头犬", "value": ""}
-    with pytest.raises(ValueError, match="请填写提示词变量：主体"):
-        resolve_prompt_variables("一只" + token)
+    assert resolve_prompt_variables("一只" + token) == "一只三头犬"
 
 
 def test_same_name_values_resolve_without_trimming_content_or_recursive_parsing():
@@ -38,11 +37,15 @@ def test_same_name_values_resolve_without_trimming_content_or_recursive_parsing(
 
 def test_missing_names_are_deduplicated_and_same_name_conflicts_rejected():
     with pytest.raises(ValueError, match="请填写提示词变量：主体、场景$"):
-        resolve_prompt_variables(variable() + variable("场景") + variable())
+        resolve_prompt_variables(variable(example=" ") + variable("场景", example=" ") + variable(example=" "))
     with pytest.raises(ValueError, match="同名提示词变量内容不一致：主体"):
         resolve_prompt_variables(variable(value="猫") + variable(value="狗"))
+    assert resolve_prompt_variables(variable(value=" \n\t")) == "三头犬"
+    assert resolve_prompt_variables(variable() + variable(value="三头犬")) == "三头犬三头犬"
+    with pytest.raises(ValueError, match="同名提示词变量内容不一致"):
+        resolve_prompt_variables(variable() + variable(example="猫"))
     with pytest.raises(ValueError, match="请填写提示词变量：主体"):
-        resolve_prompt_variables(variable(value=" \n\t"))
+        resolve_prompt_variables(variable(example=" \t", value=" \n"))
 
 
 @pytest.mark.parametrize("token", [

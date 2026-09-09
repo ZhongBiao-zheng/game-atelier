@@ -33,7 +33,11 @@ export function promptFromAsset(segments: readonly CreationPromptSegment[]): str
   })).join('');
 }
 
-/** Empty examples are not values. Reject damaged tokens before submitting. */
+function effectiveVariableValue({ value, example }: PromptVariable): string {
+  return value.trim() ? value : example;
+}
+
+/** Defaults apply at use time; damaged or genuinely empty slots cannot be submitted. */
 export function promptVariableError(prompt: string): string | null {
   const values = new Map<string, string>();
   const missing = new Set<string>();
@@ -42,7 +46,8 @@ export function promptVariableError(prompt: string): string | null {
       if (part.text.includes(PREFIX)) return '提示词变量格式无效，请重新使用提示词资产';
       continue;
     }
-    const { name, value } = part.variable;
+    const { name } = part.variable;
+    const value = effectiveVariableValue(part.variable);
     if (!value.trim()) missing.add(name);
     if (values.has(name) && values.get(name) !== value) return `变量「${name}」的内容不一致`;
     values.set(name, value);
@@ -53,17 +58,17 @@ export function promptVariableError(prompt: string): string | null {
 export function resolvePromptVariables(prompt: string): string {
   const error = promptVariableError(prompt);
   if (error) throw new Error(error);
-  return promptVariableParts(prompt).map(part => part.kind === 'text' ? part.text : part.variable.value).join('');
+  return promptVariableParts(prompt).map(part => part.kind === 'text' ? part.text : effectiveVariableValue(part.variable)).join('');
 }
 
 /** Copy/export is human-readable; persistence uses the original tokens. */
 export function readablePromptVariables(prompt: string): string {
-  return promptVariableParts(prompt).map(part => part.kind === 'text' ? part.text : part.variable.value || `[${part.variable.name}]`).join('');
+  return promptVariableParts(prompt).map(part => part.kind === 'text' ? part.text : effectiveVariableValue(part.variable) || `[${part.variable.name}]`).join('');
 }
 
 export function promptToAssetSegments(prompt: string): CreationPromptSegment[] {
   return promptVariableParts(prompt).map(part => part.kind === 'text' ? part : {
     kind: 'variable', name: part.variable.name,
-    default_value: part.variable.value || part.variable.example || part.variable.name,
+    default_value: effectiveVariableValue(part.variable) || part.variable.name,
   });
 }

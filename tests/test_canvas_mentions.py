@@ -157,6 +157,8 @@ def test_canvas_resolves_variables_in_draft_and_upstream_text_without_changing_d
     assert "@[variable:" not in final_prompt
     assert draft.prompt == prompt
     document.content_versions["version-text-a"].text = variable("风格")
+    assert "【文本1】\n三头犬" in _render_final_prompt(document, draft, inputs)
+    document.content_versions["version-text-a"].text = variable("风格", example=" ")
     with pytest.raises(ValueError, match="请填写提示词变量：风格"):
         _render_final_prompt(document, draft, inputs)
 

@@ -56,6 +56,8 @@ def resolve_prompt_variables(prompt: str) -> str:
         except (ValueError, UnicodeError) as error:
             raise ValueError("提示词变量格式无效，请重新插入提示词资产") from error
         name, value = payload["name"], payload["value"]
+        if not value.strip():
+            value = payload["example"]
         if name in values and values[name] != value:
             raise ValueError(f"同名提示词变量内容不一致：{name}")
         values[name] = value

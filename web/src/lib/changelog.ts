@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.43.2',
+    date: '2026-09-09',
+    headline: '简化提示词变量填写',
+    changes: [
+      { kind: 'fix', text: '变量框仅显示默认内容，去掉名称前缀；未填写时直接使用默认内容生成。' },
+    ],
+  },
+  {
     version: '5.43.1',
     date: '2026-09-09',
     headline: '修复图片任务长时间挂起',
