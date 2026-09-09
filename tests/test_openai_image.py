@@ -123,12 +123,14 @@ def test_render_openai_provider_posts_to_image_endpoint_and_writes_data_url(
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
+@pytest.mark.parametrize("size", ["auto", "2048x2048"])
 @pytest.mark.parametrize("model", ["gpt-image-2", "gpt-image-2-vip"])
 def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
     isolated_data_root,
     tmp_path,
     monkeypatch,
     model,
+    size,
 ):
     _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
     image_bytes = b"\x89PNG\r\n\x1a\ntuzi"
@@ -150,7 +152,7 @@ def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
         alias="Tuzi",
         output_dir=tmp_path,
         n=1,
-        size="2048x2048",
+        size=size,
         params=params,
         on_params_changed=lambda: persisted.extend(params["provider_task_ids"]),
     )
@@ -158,7 +160,7 @@ def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
     assert calls[0]["url"] == "https://api.tu-zi.com/v1/images/generations"
     assert calls[0]["payload"]["model"] == model
     assert calls[0]["task_id"] == "saved-1"
-    assert calls[0]["payload"]["size"] == "2048x2048"
+    assert calls[0]["payload"]["size"] == size
     assert calls[0]["payload"].get("quality") is None
     assert persisted == []
     assert Path(paths[0]).read_bytes() == image_bytes
@@ -299,7 +301,7 @@ def test_tuzi_native_multiple_images_persist_each_order_before_poll_and_download
     isolated_data_root, tmp_path, monkeypatch,
 ):
     _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
-    params = {"size_mode": "auto", "size": "auto"}
+    params = {"size_mode": "custom", "size": "2048x2048"}
     submitted = []
     persisted = []
     def post(url, **kwargs):
@@ -726,7 +728,7 @@ def test_dispatch_explicit_auto_reaches_image_json_and_multipart_without_pixel_d
         if body is None:
             body = {name: part[1] for name, part in kwargs["files"] if part[0] is None}
         captured.append((url, body))
-        if "tu-zi.com" in base_url:
+        if "tu-zi.com" in base_url and model != "gpt-image-2":
             return FakePostResponse({"id": "auto-task"})
         return FakePostResponse({"data": [{"b64_json": base64.b64encode(png).decode()}]})
     monkeypatch.setattr(openai_image.requests, "post", post)
@@ -747,7 +749,12 @@ def test_dispatch_explicit_auto_reaches_image_json_and_multipart_without_pixel_d
     assert len(paths) == 1
     url, body = captured[0]
     if "tu-zi.com" in base_url:
-        assert url == "https://api.tu-zi.com/v1/videos"
+        if model == "gpt-image-2":
+            assert url.endswith("/images/edits" if with_reference else "/images/generations")
+            assert len(captured) == 1
+            assert not params.get("provider_task_ids")
+        else:
+            assert url == "https://api.tu-zi.com/v1/videos"
         assert "quality" not in body
     else:
         assert url.endswith("/images/edits" if with_reference else "/images/generations")
@@ -758,6 +765,25 @@ def test_dispatch_explicit_auto_reaches_image_json_and_multipart_without_pixel_d
     assert "resolution" not in body
     assert "custom_size" not in body
     assert "size_mode" not in body
+
+
+@pytest.mark.parametrize("multipart", [False, True])
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_tuzi_auto_images_gateway_error_never_rebills(monkeypatch, multipart, status):
+    calls = []
+    def post(*args, **kwargs):
+        calls.append(args[0])
+        return FakePostResponse({"error": "upstream timeout"}, status_code=status)
+    monkeypatch.setattr(openai_image.requests, "post", post)
+    payload = {"model": "gpt-image-2", "size": "auto", "prompt": "architecture"}
+    with pytest.raises(openai_image.OpenAIImageError, match=str(status)):
+        if multipart:
+            openai_image._post_multipart("https://api.tu-zi.com/v1/images/edits", "test",
+                                         fields=payload, files=[], timeout=1)
+        else:
+            openai_image._post_json("https://api.tu-zi.com/v1/images/generations", "test",
+                                    payload, timeout=1)
+    assert len(calls) == 1
 
 
 def test_render_seedream_truncates_reference_images_to_cap(

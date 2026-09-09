@@ -8,6 +8,7 @@ import {
   canvasGenerationPreferenceForModel,
   firstCanvasGenerationModel,
   switchCanvasGenerationDraft,
+  resolveCanvasGenerationDraft,
 } from './canvasEditorModel';
 
 const keys: KeyView[] = [
@@ -48,6 +49,24 @@ function documentWithText(text = '雨夜列车分镜'): CanvasDocument {
     updated_at: '2026-08-25T00:00:00Z',
   };
 }
+
+it('offers an unconfigured text draft without borrowing a media model or changing existing drafts', () => {
+  const document = documentWithText();
+  const node = document.nodes[0];
+  expect(resolveCanvasGenerationDraft(node, keys)).toMatchObject({
+    mode: 'text', alias: null, model: '', prompt: '', input_policy: 'all_connected', params: {},
+  });
+  expect(document.nodes[0]).toMatchObject({ data: { generation_draft: null } });
+  const stored = createCanvasGenerationDraft(keys, 'text', { prompt: '已配置的提示词' });
+  if (node.type !== 'text') throw new Error('expected text fixture');
+  expect(resolveCanvasGenerationDraft({ ...node, data: { ...node.data, generation_draft: stored } }, keys))
+    .toBe(stored);
+  expect(resolveCanvasGenerationDraft({
+    id: 'image', title: '上传图片', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
+    data: { current_version_id: null, generation_draft: null, active_run_id: null,
+      display: { fit: 'contain', free_resize: false } },
+  }, keys)).toBeNull();
+});
 
 it('creates a capability-honest config draft and preserves references while switching modes', () => {
   const image = createCanvasGenerationDraft(keys, 'image', {

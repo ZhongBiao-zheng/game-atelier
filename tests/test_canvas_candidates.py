@@ -258,9 +258,24 @@ def test_tuzi_poll_abandon_settles_canvas_without_rebilling(monkeypatch, count, 
     failed = [c for c in result.canvas_run.candidates if c.status == "failed"]
     assert len(failed) == count - int(has_success)
     assert all("paid-1" in c.error and "本地等待" in c.error for c in failed)
+    assert "paid-1" in result.error and "本地等待" in result.error
     if has_success:
         assert result.canvas_run.candidates[0].version_id == primary
     assert read_job(job.job_id) == result
+
+
+@pytest.mark.parametrize("errors,expected", [
+    (["上游拒绝请求", "上游拒绝请求"], "上游拒绝请求"),
+    (["上游拒绝请求", "下载失败"], "上游拒绝请求；下载失败"),
+    ([None, "下载失败"], "下载失败"),
+    ([None], "Canvas Job 没有可登记的结果"),
+    ([], "Canvas Job 没有可登记的结果"),
+])
+def test_failed_candidate_aggregate_preserves_distinct_causes(errors, expected):
+    candidates = [CanvasResultCandidate(
+        candidate_id=f"candidate-{i}", index=i, status="failed", error=error,
+    ) for i, error in enumerate(errors)]
+    assert canvas_runs._candidate_aggregate(candidates) == (JobStatus.FAILED, expected)
 
 
 def test_cancel_wins_when_canvas_poll_failure_is_settled():

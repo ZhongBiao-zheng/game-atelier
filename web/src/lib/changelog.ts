@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.43.3',
+    date: '2026-09-09',
+    headline: '完善图片失败原因与文本节点配置',
+    changes: [
+      { kind: 'fix', text: 'Tuzi GPT Image 2 的 AUTO 改用已验证的图片接口，保留自动尺寸与参考图。' },
+      { kind: 'fix', text: '图片任务保留真实失败原因与厂商订单号，不再被无结果提示覆盖。' },
+      { kind: 'fix', text: 'MCP 创建的文本节点也能直接选择模型、配置参数与生成文本。' },
+    ],
+  },
+  {
     version: '5.43.2',
     date: '2026-09-09',
     headline: '简化提示词变量填写',

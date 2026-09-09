@@ -397,6 +397,61 @@ function lastSavedDocument() {
   return vi.mocked(saveCanvasDocument).mock.calls.at(-1)?.[1];
 }
 
+it.each([false, true])('configures an existing MCP text node with no draft (narrow=%s)', async narrow => {
+  const matchMedia = vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
+    matches: narrow && query === '(max-width: 767px)', media: query,
+    onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
+    addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+  }));
+  const original = documentWith({
+    nodes: [textNode('mcp-text', 'MCP 正文', 'mcp-version'), textNode('source', '输入', 'source-version')],
+    connections: [{ id: 'input', role: 'input', source_node_id: 'source', target_node_id: 'mcp-text' }],
+    content_versions: {
+      'mcp-version': { version_id: 'mcp-version', kind: 'text', text: '保留已有正文',
+        created_at: '2026-08-26T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'user_edit' } },
+      'source-version': { version_id: 'source-version', kind: 'text', text: '保留输入连接',
+        created_at: '2026-08-26T00:00:00Z', sha256: 'b'.repeat(64), origin: { kind: 'user_edit' } },
+    },
+  });
+  vi.mocked(getCanvasDocument).mockResolvedValue(original);
+  vi.mocked(listKeys).mockResolvedValue({ keys: [{
+    alias: 'text-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-08-26T00:00:00Z',
+    models: [{ id: 'gpt-5', name: 'GPT 5', modality: 'text', protocol: 'openai' }],
+  }] });
+  vi.mocked(getCanvasUiPreferences).mockResolvedValue({
+    ...DEFAULT_CANVAS_UI_PREFERENCES,
+    generation_defaults: { ...DEFAULT_CANVAS_UI_PREFERENCES.generation_defaults,
+      text: { selection: { alias: 'text-key', model: 'gpt-5' }, params: { n: 2, temperature: 0.4 } } },
+  });
+  vi.mocked(submitCanvasRun).mockRejectedValue(new Error('mock submission reached'));
+  try {
+    render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'flow-node-mcp-text' }));
+    const panel = await screen.findByRole('region', { name: '文本设置' });
+    expect(within(panel).getByRole('button', { name: '选择生成模型' })).toHaveTextContent('GPT 5');
+    expect(saveCanvasDocument).not.toHaveBeenCalled();
+    expect(submitCanvasRun).not.toHaveBeenCalled();
+    fireEvent.click(within(panel).getByRole('button', { name: '生成' }));
+    expect(await screen.findByText('先填写提示词。')).toBeInTheDocument();
+    expect(saveCanvasDocument).not.toHaveBeenCalled();
+    expect(submitCanvasRun).not.toHaveBeenCalled();
+    const prompt = within(panel).getByRole('combobox', { name: '提示词' });
+    fireEvent.input(prompt, { target: { textContent: '扩写这段描述' } });
+    await waitFor(() => expect(lastSavedDocument()?.nodes[0]).toMatchObject({
+      data: { generation_draft: { mode: 'text', alias: 'text-key', model: 'gpt-5',
+        prompt: '扩写这段描述', input_policy: 'all_connected', params: { n: 2, temperature: 0.4 } } },
+    }));
+    expect(lastSavedDocument()?.content_versions).toEqual(original.content_versions);
+    expect(lastSavedDocument()?.connections).toEqual(original.connections);
+    expect(lastSavedDocument()?.nodes[0]).toMatchObject({ data: { current_version_id: 'mcp-version' } });
+    fireEvent.click(within(panel).getByRole('button', { name: '生成' }));
+    await waitFor(() => expect(submitCanvasRun).toHaveBeenCalledWith('canvas-one', 'mcp-text', 7, 2));
+  } finally {
+    matchMedia.mockRestore();
+  }
+});
+
 it('does not force a minimum preview height or overlay metadata on a short populated image', async () => {
   const source = { ...imageNode('strip', '说明文字'), size: { width: 280, height: 11.315209404849375 },
     data: { ...imageNode('strip', '说明文字').data, current_version_id: 'strip-version' } };

@@ -2207,13 +2207,18 @@ def _candidate_aggregate(
     if any(candidate.status == "pending" for candidate in candidates):
         return JobStatus.PENDING, None
     successful = sum(candidate.status == "succeeded" for candidate in candidates)
-    if successful == len(candidates):
+    if candidates and successful == len(candidates):
         return JobStatus.DONE, None
+    errors = list(dict.fromkeys(
+        candidate.error.strip() for candidate in candidates
+        if candidate.status == "failed" and candidate.error and candidate.error.strip()
+    ))
+    detail = "；".join(errors)
     if successful:
-        return JobStatus.PARTIAL, "部分候选没有生成成功"
+        return JobStatus.PARTIAL, "部分候选没有生成成功" + (f"：{detail}" if detail else "")
     if candidates and all(candidate.status == "canceled" for candidate in candidates):
         return JobStatus.CANCELED, None
-    return JobStatus.FAILED, "Canvas Job 没有可登记的结果"
+    return JobStatus.FAILED, detail or "Canvas Job 没有可登记的结果"
 
 
 def _uses_incremental_candidates(job: Job) -> bool:

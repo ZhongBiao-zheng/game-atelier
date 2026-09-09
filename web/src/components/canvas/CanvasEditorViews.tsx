@@ -97,6 +97,7 @@ import {
   normalizeCanvasTextParams,
   normalizeCanvasVideoParams,
   supportsCanvasTextReasoning,
+  resolveCanvasGenerationDraft,
   switchCanvasGenerationDraft,
   type CanvasPendingInput,
 } from '@/pages/canvasEditorModel';
@@ -254,7 +255,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   const [panelSide, setPanelSide] = useState<CanvasPanelSide>('below');
   const [candidateBatchExpanded, setCandidateBatchExpanded] = useState(false);
   const [materialPickPointer, setMaterialPickPointer] = useState<{ left: number; top: number } | null>(null);
-  const draft = generationDraft(node);
+  const draftKeys = context?.keys;
+  const textPreference = context?.canvasUiPreferences.generation_defaults.text;
+  const draft = useMemo(() => draftKeys
+    ? resolveCanvasGenerationDraft(node, draftKeys, textPreference)
+    : null, [node, draftKeys, textPreference]);
   const nodeContent = context ? contentForNode(node, context.resolveVersion) : undefined;
   const uploadedImageMaterial = Boolean(
     context && isUploadedImageMaterialNode(node, nodeContent),
@@ -2007,7 +2012,7 @@ export function CanvasGenerationComposer({
   ]);
 
   function updateDraft(updater: (current: CanvasGenerationDraft) => CanvasGenerationDraft) {
-    context.updateNode(node.id, current => withGenerationDraft(current, updater(generationDraft(current)!)));
+    context.updateNode(node.id, current => withGenerationDraft(current, updater(generationDraft(current) ?? draft)));
   }
 
   function updateDraftWithHistory(

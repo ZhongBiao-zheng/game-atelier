@@ -131,6 +131,9 @@ def render(
 
     is_hk = _is_openai_hk(base_url)
     is_tuzi = _is_tuzi_gateway(base_url)
+    params = kwargs.get("params") if isinstance(kwargs.get("params"), dict) else None
+    has_native_order = bool(params and params.get("provider_task_protocol") == tuzi_async.TASK_PROTOCOL
+                            and params.get("provider_task_ids"))
     # Native tasks document neither mask nor independent quality/background controls.
     # Select the Images contract up front for those requests; never retry via another route.
     use_tuzi_tasks = (
@@ -138,9 +141,11 @@ def render(
         and _quality_param(kwargs) in {None, "auto"}
         and _background_param(kwargs) in {None, "auto"}
         and _effective_image_protocol(key, model) in {None, "openai"}
+        # Tuzi's native GPT2 AUTO tasks can stay queued indefinitely; Images AUTO is verified.
+        # Existing paid tasks retain their original protocol and are only polled, never resubmitted.
+        and (model != "gpt-image-2" or requested_size != "auto" or has_native_order)
     )
     requested = max(1, int(n or 1))
-    params = kwargs.get("params") if isinstance(kwargs.get("params"), dict) else None
     if params and params.get("provider_task_ids"):
         if params.get("provider_task_protocol") == "tuzi_async":
             raise OpenAIImageError("旧 Tuzi 异步接口已停用，请先核对厂商订单；不会自动重新生成")
@@ -506,7 +511,9 @@ def _post_multipart(
         resp = requests.post(url, headers=headers, data=fields, files=files, timeout=timeout)
         if resp.status_code >= 400:
             err = OpenAIImageError(f"image edits api {resp.status_code}: {resp.text[:500]}")
-            if _is_retryable(resp.status_code, resp.text) and attempt < 2:
+            if (_is_retryable(resp.status_code, resp.text) and attempt < 2
+                    and not (_is_tuzi_gateway(url) and fields.get("model") == "gpt-image-2"
+                             and fields.get("size") == "auto")):
                 time.sleep(1 + attempt)
                 continue
             raise err
@@ -779,7 +786,9 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[
             if resp.status_code >= 400:
                 err = OpenAIImageError(f"image api {resp.status_code}: {resp.text[:500]}")
                 # 瞬时网关错误复用网络异常那套退避重试（continue 进下一轮）；其余当场抛。
-                if _is_retryable(resp.status_code, resp.text) and attempt < 2:
+                if (_is_retryable(resp.status_code, resp.text) and attempt < 2
+                        and not (_is_tuzi_gateway(url) and payload.get("model") == "gpt-image-2"
+                                 and payload.get("size") == "auto")):
                     time.sleep(1 + attempt)
                     continue
                 raise err

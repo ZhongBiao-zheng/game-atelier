@@ -197,6 +197,7 @@ import {
   canvasRequiresBatchRun,
   closestCanvasConnectionEndpoint,
   createCanvasGenerationDraft,
+  resolveCanvasGenerationDraft,
   createConnectedCanvasConfig,
   layerStackSizeForCanvasVersion,
   normalizeCanvasVideoParams,
@@ -1670,10 +1671,10 @@ function CanvasEditorInner({
         : undefined,
     ),
   );
-  const selectedDraft = selectedNode && !selectedIsUploadedImageMaterial
+  const selectedDraft = useMemo(() => selectedNode && !selectedIsUploadedImageMaterial
     && !(selectedNode.type === 'config' && selectedNode.data.draft.mode === 'text')
-    ? generationDraftForNode(selectedNode)
-    : null;
+    ? resolveCanvasGenerationDraft(selectedNode, keys, canvasUiPreferences.generation_defaults.text)
+    : null, [selectedNode, selectedIsUploadedImageMaterial, keys, canvasUiPreferences.generation_defaults.text]);
   const generationPanelOpen = Boolean(
     selectedNode
     && selectedDraft
@@ -4608,7 +4609,7 @@ function CanvasEditorInner({
                   ...current,
                   nodes: current.nodes.map(node => {
                     if (node.id !== selectedNode.id) return node;
-                    const draft = generationDraftForNode(node);
+                    const draft = resolveCanvasGenerationDraft(node, keys, canvasUiPreferences.generation_defaults.text);
                     if (!draft) return node;
                     const params = {
                       ...draft.params,

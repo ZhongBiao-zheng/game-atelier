@@ -808,6 +808,21 @@ export function createCanvasGenerationDraft(
   };
 }
 
+export function resolveCanvasGenerationDraft(
+  node: CanvasNode,
+  keys: readonly KeyView[],
+  textPreference?: CanvasGenerationDefault<'text'>,
+): CanvasGenerationDraft | null {
+  if (node.type === 'config') return node.data.draft;
+  if (!('generation_draft' in node.data)) return null;
+  if (node.data.generation_draft) return node.data.generation_draft;
+  // 文本的生成能力由节点类型决定，MCP / 素材库创建的正文也可在首次操作时配置。
+  return node.type === 'text' ? createCanvasGenerationDraft(keys, 'text', {
+    inputPolicy: 'all_connected',
+    preference: textPreference,
+  }) : null;
+}
+
 export function switchCanvasGenerationDraft(
   keys: readonly KeyView[],
   current: CanvasGenerationDraft,
