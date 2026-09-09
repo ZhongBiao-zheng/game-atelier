@@ -27,6 +27,14 @@ function placeCaretAtEnd(element: HTMLElement) {
 }
 
 describe('CanvasPromptInput', () => {
+  it('honors an insertion focus request arriving after the text node has mounted', () => {
+    const value = promptVariableToken({ name: '主体', example: '猫', value: '' });
+    const props = { value, references: [], onChange: vi.fn() };
+    const { rerender } = render(<CanvasPromptInput {...props} autoFocusVariables={false} />);
+    expect(screen.getByRole('textbox', { name: '变量：主体' })).not.toHaveFocus();
+    rerender(<CanvasPromptInput {...props} autoFocusVariables />);
+    expect(screen.getByRole('textbox', { name: '变量：主体' })).toHaveFocus();
+  });
   it('renders inline empty fields, synchronizes duplicates and restores persisted values without losing the active input', () => {
     const token = promptVariableToken({ name: '风格', example: '水墨', value: '' });
     let saved = '';

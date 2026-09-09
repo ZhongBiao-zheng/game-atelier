@@ -62,6 +62,7 @@ export function CanvasPromptInput({
   const lastEmittedRef = useRef(value);
   const lastReferenceSignatureRef = useRef('');
   const initializedRef = useRef(false);
+  const focusEnabledRef = useRef(false);
   const previewRef = useRef(onPreviewReference);
   const [mention, setMention] = useState<MentionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -98,7 +99,8 @@ export function CanvasPromptInput({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    const focusVariables = autoFocusVariables && (!initializedRef.current || value !== lastEmittedRef.current);
+    const focusVariables = autoFocusVariables && (!focusEnabledRef.current || !initializedRef.current || value !== lastEmittedRef.current);
+    focusEnabledRef.current = autoFocusVariables;
     initializedRef.current = true;
     if (
       editor.contains(document.activeElement)
