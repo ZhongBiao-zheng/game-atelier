@@ -80,6 +80,16 @@ it('submits the visible draft independently of retrying the immutable failed tas
   expect(screen.getByText('原任务输入 · 0 项')).toBeInTheDocument();
 });
 
+it('shows resolved original-task prompt without exposing frozen text tokens or mutating the job', () => {
+  const prompt = '改写【文本1】\n\n参考文本：\n【文本1】\n真实文字';
+  const job = { ...batchJob(), status: 'failed' as const, prompt };
+  const context = nodeContext({ jobsByRunId: new Map([['run-batch', job]]) });
+  const { container } = render(<CanvasGenerationComposer node={imageResultNode} draft={draft} context={context} />);
+  expect(screen.getByText('改写真实文字')).toBeInTheDocument();
+  expect(container.textContent).not.toContain('【文本1】');
+  expect(job.prompt).toBe(prompt);
+});
+
 it('renders current input thumbnails in frozen connection order, not material or mention order', () => {
   const first = { nodeId: 'first', versionId: 'first-v', kind: 'image' as const, title: '第一张', label: '图片1' };
   const second = { nodeId: 'second', versionId: 'second-v', kind: 'image' as const, title: '第二张', label: '图片2' };

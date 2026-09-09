@@ -21,7 +21,7 @@ from character_workflow.lib.canvas_runs import (
     retry_canvas_run,
     run_canvas_job,
 )
-from character_workflow.lib.jobs import read_job, save_job, update_job_status
+from character_workflow.lib.jobs import list_jobs, read_job, save_job, update_job_status
 from character_workflow.lib.keys import KeySpec, KeysDB, ModelSpec, write_keys_db
 from character_workflow.lib.schemas import (
     CanvasActor,
@@ -264,6 +264,14 @@ def test_tuzi_poll_abandon_settles_canvas_without_rebilling(monkeypatch, count, 
     if has_success:
         assert result.canvas_run.candidates[0].version_id == primary
     assert read_job(job.job_id) == result
+    document = read_canvas_document(project.project_id)
+    existing_job_ids = {saved.job_id for saved in list_jobs()}
+    with pytest.raises(ValueError, match="厂商订单"):
+        retry_canvas_run(project.project_id, run_id, document.revision)
+    assert {saved.job_id for saved in list_jobs()} == existing_job_ids
+    assert read_canvas_document(project.project_id) == document
+    assert read_job(job.job_id) == result
+    assert calls == [1]
 
 
 @pytest.mark.parametrize("errors,expected", [
@@ -557,6 +565,25 @@ def test_retry_rejects_unknown_provider_state_after_stop():
     save_job(original)
     with pytest.raises(ValueError, match="状态未知"):
         retry_canvas_run(project.project_id, original.canvas_run.run_id, document.revision)
+
+
+@pytest.mark.parametrize("status", [JobStatus.FAILED, JobStatus.PARTIAL, JobStatus.CANCELED])
+@pytest.mark.parametrize("protocol", [None, "tuzi_async", "tuzi_images"])
+def test_retry_rejects_existing_provider_orders_without_relying_on_error_text(status, protocol):
+    project, document, original, _ = _failed_retry_with_reference()
+    original.status = status
+    original.error = None
+    original.params.provider_task_ids = ["paid-order"]
+    original.params.provider_task_protocol = protocol
+    save_job(original)
+    existing_job_ids = {saved.job_id for saved in list_jobs()}
+
+    with pytest.raises(ValueError, match="厂商订单"):
+        retry_canvas_run(project.project_id, original.canvas_run.run_id, document.revision)
+
+    assert {saved.job_id for saved in list_jobs()} == existing_job_ids
+    assert read_canvas_document(project.project_id) == document
+    assert read_job(original.job_id) == original
 
 
 def test_retry_uses_recorded_job_alias_when_snapshot_alias_is_missing():

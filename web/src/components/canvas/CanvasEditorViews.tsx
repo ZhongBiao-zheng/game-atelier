@@ -25,6 +25,7 @@ import { Link } from 'wouter';
 import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers } from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasExecutionGroup } from './CanvasBatchControls';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
+import { generationRecordPrompt } from './CanvasGenerationMetadata';
 import { orderedLayerStackParts } from './canvasLayerOrder';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
@@ -2114,7 +2115,7 @@ export function CanvasGenerationComposer({
                 </button>;
               })}
             </div>
-            <p className="whitespace-pre-wrap break-words">{activeJob.prompt}</p>
+            <p className="whitespace-pre-wrap break-words">{generationRecordPrompt(activeJob.prompt)}</p>
           </div>
         </details>
       )}

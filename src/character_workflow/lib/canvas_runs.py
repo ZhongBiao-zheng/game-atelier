@@ -2042,6 +2042,10 @@ def retry_canvas_run(
             raise RuntimeError("run_not_terminal")
         if original.status == JobStatus.DONE:
             raise ValueError("成功任务请使用生成；重试只适用于失败或已停止任务")
+        # A local terminal status does not establish the provider order's terminal state.
+        # Retrying from the immutable snapshot would discard these billed task IDs.
+        if original.params.provider_task_ids:
+            raise ValueError("原任务已有厂商订单，请先核对订单结果，不能直接重试以免重复计费")
         if (
             original.cancel_requested_at and original.runner_started_at
         ) or "状态未知" in (original.error or ""):

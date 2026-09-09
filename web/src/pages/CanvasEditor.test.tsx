@@ -5,12 +5,13 @@ import * as connection from '@/api/connection';
 import { createTestEventStream } from '@/test/eventStream';
 
 import { CanvasEditor } from './CanvasEditor';
-import { CanvasNodeContext } from '@/components/canvas/CanvasEditorViews';
+import { CanvasNodeContext, type CanvasNodeContextValue } from '@/components/canvas/CanvasEditorViews';
 import {
   createCanvasReversePromptConfig,
   getCanvasDocument,
   listCanvasJobs,
   listCanvasProjects,
+  retryCanvasRun,
   saveCanvasDocument,
   submitCanvasLayerDecomposition,
   submitCanvasRun,
@@ -396,6 +397,56 @@ beforeEach(() => {
 function lastSavedDocument() {
   return vi.mocked(saveCanvasDocument).mock.calls.at(-1)?.[1];
 }
+
+it.each(['image', 'layer_stack'] as const)('merges authoritative reused %s retry state while protecting concurrent edits', async kind => {
+  const target: CanvasNode = kind === 'image' ? imageNode('result', '重试素材', { ...imageDraft, prompt: '当前草稿' }) : {
+    id: 'result', type: 'layer_stack', title: '拆分图层', position: { x: 320, y: 0 }, z_index: 0,
+    data: { source_version_id: 'source-version', base_version_id: null, base_visible: true,
+      prompt: '当前草稿', alias: 'main', model: 'gpt-image-2', resolution: 'auto', layers: [], active_run_id: null, error: null },
+  };
+  const source = imageNode('source', '输入原图');
+  source.data.current_version_id = 'source-version';
+  const before = documentWith({ nodes: [source, target], content_versions: {
+    'source-version': { version_id: 'source-version', kind: 'image', path: 'source.png', mime_type: 'image/png',
+      width: 512, height: 512, bytes: 123, created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'upload', upload_id: 'source-upload' } },
+  } });
+  vi.mocked(getCanvasDocument).mockResolvedValue(before);
+  const context = () => canvasContextIdentities.at(-1) as CanvasNodeContextValue;
+  const remote = documentWith({ ...before, revision: 8, nodes: [source, target.type === 'image'
+    ? { ...target, data: { ...target.data, active_run_id: 'retry', generation_draft: { ...imageDraft, prompt: '原任务草稿' } } }
+    : { ...target, data: { ...target.data, active_run_id: 'retry', prompt: '原任务草稿' } }],
+  connections: [{ id: 'restored', role: 'input', source_node_id: 'source', target_node_id: 'result' }] });
+  const job = { job_id: 'retry-job', retry_of: 'original-job', status: 'pending', kind: 'image', prompt: '原任务草稿',
+    params: { n: 1 }, output_paths: [], canvas_run: { run_id: 'retry', result_node_id: 'result', candidates: [],
+      snapshot: { surface_node_id: 'result', inputs: [], final_prompt: '原任务草稿', normalized_params: {} } },
+  } as unknown as Job;
+  let resolveResponse!: (value: Awaited<ReturnType<typeof retryCanvasRun>>) => void;
+  vi.mocked(retryCanvasRun).mockImplementation(() => new Promise(resolve => { resolveResponse = resolve; }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  let request!: Promise<void>;
+  act(() => { request = context().retryRun('result', 'original-run'); });
+  await waitFor(() => expect(retryCanvasRun).toHaveBeenCalledTimes(1));
+  await act(async () => { resolveResponse({ document: remote, job }); await request; });
+  // A subsequent unrelated edit must save the restored recipe and inputs, not the pre-retry state.
+  act(() => context().updateNode('result', node => ({ ...node, title: '第一次重试' })));
+  await waitFor(() => expect(lastSavedDocument()?.connections).toEqual(remote.connections));
+  let savedTarget = lastSavedDocument()!.nodes.find(node => node.id === 'result')!;
+  expect(savedTarget.type === 'layer_stack' ? savedTarget.data.prompt : 'generation_draft' in savedTarget.data ? savedTarget.data.generation_draft?.prompt : null).toBe('原任务草稿');
+
+  act(() => { request = context().retryRun('result', 'original-run'); });
+  await waitFor(() => expect(retryCanvasRun).toHaveBeenCalledTimes(2));
+  act(() => {
+    context().setMaterialConnected('source', 'result', false);
+    context().updateNode('result', node => node.type === 'layer_stack'
+      ? { ...node, data: { ...node.data, prompt: '请求期间新编辑' } }
+      : node.type === 'image' ? { ...node, data: { ...node.data, generation_draft: { ...imageDraft, prompt: '请求期间新编辑' } } } : node);
+  });
+  await act(async () => { resolveResponse({ document: { ...remote, revision: 9 }, job }); await request; });
+  await waitFor(() => expect(lastSavedDocument()?.connections).toEqual([]));
+  savedTarget = lastSavedDocument()!.nodes.find(node => node.id === 'result')!;
+  expect(savedTarget.type === 'layer_stack' ? savedTarget.data.prompt : 'generation_draft' in savedTarget.data ? savedTarget.data.generation_draft?.prompt : null).toBe('请求期间新编辑');
+});
 
 it.each([false, true])('configures an existing MCP text node with no draft (narrow=%s)', async narrow => {
   const matchMedia = vi.spyOn(window, 'matchMedia').mockImplementation(query => ({

@@ -209,6 +209,7 @@ import {
   supportsCanvasVideoEdit,
   syncDraftLayerStackSources,
 } from './canvasEditorModel';
+import { restoreCanvasRetryConfiguration } from './canvasRetryMerge';
 
 interface CreateMenuState {
   screen: XYPosition;
@@ -774,14 +775,19 @@ function CanvasEditorInner({
     remote: CanvasDocument,
     job: Job,
     dirtyAtSubmission: number,
+    submittedDocument?: CanvasDocument | null,
   ) => {
     serverRevision.current = Math.max(serverRevision.current, remote.revision);
     const context = job.canvas_run;
-    const current = latestDocument.current;
-    if (!current || !context) {
+    const latest = latestDocument.current;
+    if (!latest || !context) {
       setDocument(remote);
       return;
     }
+    const restoringRetry = Boolean(job.retry_of && submittedDocument);
+    const current = restoringRetry && submittedDocument
+      ? restoreCanvasRetryConfiguration(latest, remote, submittedDocument, context.result_node_id)
+      : latest;
     const remoteNodes = new Map(remote.nodes.map(node => [node.id, node]));
     const remoteResult = remoteNodes.get(context.result_node_id);
     const hasResult = current.nodes.some(node => node.id === context.result_node_id);
@@ -789,7 +795,9 @@ function CanvasEditorInner({
     const nodes = current.nodes.map(node => {
       if (node.id !== context.result_node_id || !remoteResult) return node;
       if (node.type === 'layer_stack' && remoteResult.type === 'layer_stack') {
-        return { ...node, data: remoteResult.data };
+        return { ...node, data: restoringRetry
+          ? { ...node.data, active_run_id: remoteResult.data.active_run_id, error: remoteResult.data.error }
+          : remoteResult.data };
       }
       if (!isContentNode(node) || !isContentNode(remoteResult)) return node;
       return {
@@ -2597,13 +2605,14 @@ function CanvasEditorInner({
     setError(null);
     try {
       if (!await persistNow()) return;
+      const submittedDocument = latestDocument.current;
       const dirtyAtSubmission = dirtyVersion.current;
       runSubmissionInFlight.current = true;
       const run = await retryCanvasRun(projectId, runId, serverRevision.current);
       if (run.job.canvas_run && isReversePromptJob(run.job)) {
         reversePromptConfigEligibleRuns.current.add(run.job.canvas_run.run_id);
       }
-      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission, submittedDocument);
       applyLocalJob(run.job);
       const resultId = run.job.canvas_run?.result_node_id;
       if (resultId) setSelectedNodeIds(new Set([resultId]));

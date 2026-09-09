@@ -356,6 +356,7 @@ Content Version、candidate 状态与首个成功主结果；Midjourney 原生�
 停止且没有有效产物为 `canceled`；部分失败不会抹掉已经成功的 Content Version。
 `POST .../runs/{run_id}/retry` 只接受 `expected_revision`：按原 Job 的不可变 Snapshot、参数和精确输入版本创建新 Job/Run，设置 retry_of，不读取当前节点草稿重建输入。缺失或摘要不符的素材、不可用模型及已失效参数明确拒绝；不自动丢参考或换模型。修改配置后的“生成”使用当前草稿和实线，与原任务重试区分。
 新 Snapshot 同时冻结 `draft_prompt` 原始可编辑稿与 `final_prompt` 厂商提示词。重试发送后者，但结果节点只恢复前者；旧任务未记录原稿时留空，不把已经展开的历史参考正文写进新草稿。原任务仍可按其完整 `final_prompt` 重试。
+本地失败不等于厂商订单已终止。原 Job 保留 `params.provider_task_ids` 时拒绝直接重试，要求先核对订单结果；当前不持有可证明厂商终态的结构化状态，因此对失败、部分成功及已停止订单均采用此保守限制，避免从不含订单号的原 Snapshot 再次下单。
 `POST .../runs/{run_id}/cancel` 只持久化幂等 `cancel_requested_at`。Runner 尚未认领时不调用厂商并落为
 `canceled`；同步厂商请求已发出时不伪装即时中断，UI 明示上游可能继续执行，有效返回仍登记，未返回候选
 才标记 canceled。prepared 事务在下次项目访问或命令前完成/丢弃，不能从节点当前内容重造 Snapshot。
