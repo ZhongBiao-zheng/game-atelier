@@ -488,12 +488,9 @@ def test_models_preview_dedupes_upstream_ids(tmp_path, monkeypatch):
     assert body["total"] == 1
 
 
-def test_models_preview_pulls_openrouter_video_list_separately(tmp_path, monkeypatch):
-    """OpenRouter 的视频模型不在默认 /models 里 —— 不额外拉一次，用户永远只能手填 id。
-
-    实测 2026-08-13：`GET /api/v1/models` 409 条里一个视频模型都没有，23 个 veo / sora /
-    kling / seedance 只在 `?output_modalities=video` 下列出。
-    """
+@pytest.mark.parametrize("include_all", [False, True])
+def test_models_preview_fetches_complete_openrouter_catalog(tmp_path, monkeypatch, include_all):
+    """全量目录同时包含纯图像、视频和 speech；不用文本目录加视频补丁。"""
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     client = TestClient(base_url="http://127.0.0.1", app=build_app())
     import unittest.mock as mock
@@ -501,49 +498,51 @@ def test_models_preview_pulls_openrouter_video_list_separately(tmp_path, monkeyp
     def fake_get(url, headers=None, timeout=None):
         resp = mock.MagicMock()
         resp.status_code = 200
-        if "output_modalities=video" in url:
-            resp.json.return_value = {"data": [
-                {"id": "google/veo-3.1", "architecture": {"output_modalities": ["video"]}},
-            ]}
-        else:
-            resp.json.return_value = {"data": [
-                {"id": "openai/gpt-image-2", "architecture": {"output_modalities": ["image"]}},
-                {"id": "some/chat", "architecture": {"output_modalities": ["text"]}},
-            ]}
+        assert url == "https://openrouter.ai/api/v1/models?output_modalities=all"
+        resp.json.return_value = {"data": [
+            {"id": "google/veo-3.1", "architecture": {"output_modalities": ["video"]}},
+            {"id": "some/image", "architecture": {"output_modalities": ["image"]}},
+            {"id": "some/chat", "architecture": {"output_modalities": ["text"]}},
+            {"id": "fish-audio/s2-pro", "architecture": {
+                "output_modalities": ["speech"], "input_modalities": ["text", "audio"],
+            }},
+            {"id": "some/transcriber", "architecture": {"output_modalities": ["transcription"]}},
+        ]}
         return resp
 
-    with mock.patch("requests.get", side_effect=fake_get):
+    with mock.patch("requests.get", side_effect=fake_get) as get:
         r = client.post("/api/keys/models-preview", json={
             "provider": "openrouter", "base_url": "https://openrouter.ai/api/v1",
-            "access_key": "x",
+            "access_key": "x", "include_all": include_all,
         })
+    get.assert_called_once()
 
     body = r.json()
     by_id = {m["id"]: m for m in body["models"]}
     assert "google/veo-3.1" in by_id, "视频模型必须被合并进来"
     assert by_id["google/veo-3.1"]["modality"] == "video"
     assert by_id["google/veo-3.1"]["protocol"] == "openrouter"  # 可路由，不是留空
-    assert body["total"] == 3  # 两个列表合并后的去重总数
+    assert body["total"] == 5
+    assert by_id["some/image"]["modality"] == "image"
     assert by_id["some/chat"]["modality"] == "text"
-    assert body["excluded"] == 0
+    assert by_id["fish-audio/s2-pro"]["modality"] == "audio"
+    assert by_id["fish-audio/s2-pro"]["protocol"] == "openai-speech"
+    assert by_id["fish-audio/s2-pro"]["input_modalities"] == ["text", "audio"]
+    assert body["excluded"] == (0 if include_all else 1)
+    assert ("some/transcriber" in by_id) is include_all
 
 
-def test_models_preview_survives_missing_extra_video_list(tmp_path, monkeypatch):
-    """额外列表拉不到时降级成「只有图片模型」，不能让整个功能报错。"""
+def test_models_preview_reports_failed_complete_catalog(tmp_path, monkeypatch):
+    """全量目录失败应报错，不能把不完整的默认目录伪装成成功。"""
     monkeypatch.setenv("GAME_ATELIER_DATA_ROOT", str(tmp_path))
     client = TestClient(base_url="http://127.0.0.1", app=build_app())
     import unittest.mock as mock
 
     def fake_get(url, headers=None, timeout=None):
         resp = mock.MagicMock()
-        if "output_modalities=video" in url:
-            resp.status_code = 500
-            resp.text = "boom"
-            return resp
-        resp.status_code = 200
-        resp.json.return_value = {"data": [
-            {"id": "openai/gpt-image-2", "architecture": {"output_modalities": ["image"]}},
-        ]}
+        assert "output_modalities=all" in url
+        resp.status_code = 500
+        resp.text = "boom"
         return resp
 
     with mock.patch("requests.get", side_effect=fake_get):
@@ -552,15 +551,24 @@ def test_models_preview_survives_missing_extra_video_list(tmp_path, monkeypatch)
             "access_key": "x",
         })
 
-    assert r.status_code == 200, r.text
-    assert [m["id"] for m in r.json()["models"]] == ["openai/gpt-image-2"]
+    assert r.status_code == 502
+    assert "boom" in r.json()["detail"]
 
 
-def test_extra_model_list_urls_only_for_openrouter():
-    from viewer_server.routes import _extra_model_list_urls
-    assert _extra_model_list_urls("https://openrouter.ai/api/v1/models", "openrouter") == [
-        "https://openrouter.ai/api/v1/models?output_modalities=video"
-    ]
-    # host 判定优先，配成 custom 也认
-    assert _extra_model_list_urls("https://openrouter.ai/api/v1/models", "custom")
-    assert _extra_model_list_urls("https://tokendance.space/gateway/v1/models", "tokendance") == []
+@pytest.mark.parametrize("base,provider,expected", [
+    ("https://openrouter.ai/api/v1", "openrouter",
+     "https://openrouter.ai/api/v1/models?output_modalities=all"),
+    ("https://openrouter.ai/api/v1/models/", "custom",
+     "https://openrouter.ai/api/v1/models?output_modalities=all"),
+    ("https://openrouter.ai/api/v1?output_modalities=text&limit=10&offset=5&category=tools",
+     "custom", "https://openrouter.ai/api/v1/models?category=tools&output_modalities=all"),
+    ("https://proxy.example/v1", "openrouter",
+     "https://proxy.example/v1/models?output_modalities=all"),
+    ("https://tokendance.space/gateway/v1", "tokendance",
+     "https://tokendance.space/gateway/v1/models"),
+    ("https://openrouter.ai.example/v1?limit=10", "custom",
+     "https://openrouter.ai.example/v1/models?limit=10"),
+])
+def test_model_list_url(base, provider, expected):
+    from viewer_server.routes import _model_list_url
+    assert _model_list_url(base, provider) == expected

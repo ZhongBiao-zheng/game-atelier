@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Body, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -1505,6 +1505,8 @@ def _classify_model(item: dict) -> str:
         return "video"
     if "image" in out:
         return "image"
+    if "speech" in out:
+        return "audio"
     if "audio" in out:
         return (
             "audio"
@@ -1551,6 +1553,9 @@ def _audio_protocol(item: dict) -> str | None:
     protocols = [str(p).lower() for p in (item.get("supported_protocols") or [])]
     if any(_protocol_is_openai_speech(protocol) for protocol in protocols):
         return "openai-speech"
+    arch = item.get("architecture")
+    if isinstance(arch, dict) and "speech" in (arch.get("output_modalities") or []):
+        return "openai-speech"
     return None
 
 
@@ -1591,21 +1596,20 @@ def _fetch_model_rows(url: str, headers: dict) -> list:
     return rows
 
 
-def _extra_model_list_urls(models_url: str, provider: str) -> list[str]:
-    """默认 /models 之外还需要拉的列表 URL。
-
-    OpenRouter 实测（2026-08-13）：`GET /api/v1/models` 返回 409 条，里面**一个视频模型
-    都没有**；23 个视频模型（veo / sora / kling / seedance / hailuo / runway…）只在
-    `?output_modalities=video` 或 `/videos/models` 下列出。不额外拉这一次，OpenRouter key
-    的用户在设置页永远拉不到视频模型、只能手填 id —— keys.json 里那几个就是这么来的。
-
-    别把「默认端点里没有」当成「这个平台没有」：先按 host 试专用列表，再下结论。
-    """
-    host = urlsplit(models_url).netloc.lower()
-    if "openrouter.ai" in host or provider == "openrouter":
-        sep = "&" if "?" in models_url else "?"
-        return [f"{models_url}{sep}output_modalities=video"]
-    return []
+def _model_list_url(base_url: str, provider: str) -> str:
+    """OpenRouter 默认只返回文本输出；显式取全量，避免静默漏掉其他模态。"""
+    parts = urlsplit(base_url)
+    path = parts.path.rstrip("/")
+    if not path.endswith("/models"):
+        path += "/models"
+    host = (parts.hostname or "").lower()
+    query = parts.query
+    if host == "openrouter.ai" or host.endswith(".openrouter.ai") or provider == "openrouter":
+        # 官方契约：同时省略 offset / limit 才返回完整列表，而不是默认分页的 500 条。
+        params = [(k, v) for k, v in parse_qsl(query, keep_blank_values=True)
+                  if k not in {"output_modalities", "offset", "limit"}]
+        query = urlencode([*params, ("output_modalities", "all")])
+    return parts._replace(path=path, query=query, fragment="").geturl()
 
 
 def _url_host(url: str) -> str:
@@ -1652,8 +1656,6 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
     走服务端代理的原因：浏览器直连上游有 CORS；编辑已存 Key 时前端只有掩码密钥，
     必须由服务端按 alias 取真实密钥。
     """
-    import requests
-
     base_url = (payload.base_url or "").strip()
     access_key = (payload.access_key or "").strip()
     preview_provider: str = payload.provider or "custom"
@@ -1679,18 +1681,9 @@ def keys_models_preview(payload: _ModelsPreviewPayload) -> dict:
     if not base_url:
         raise HTTPException(422, "缺少 API 请求地址（base_url）")
 
-    url = base_url.rstrip("/")
-    if not url.endswith("/models"):
-        url = f"{url}/models"
+    url = _model_list_url(base_url, preview_provider)
     headers = {"Authorization": f"Bearer {access_key}"} if access_key else {}
     rows = _fetch_model_rows(url, headers)
-    # 有些上游把视频模型排除在默认 /models 之外，必须额外拉一次才看得见（见下方函数注释）。
-    # 额外列表拉不到不该让主列表失败：降级成「只有图片模型」，而不是整个功能报错。
-    for extra_url in _extra_model_list_urls(url, preview_provider):
-        try:
-            rows = rows + _fetch_model_rows(extra_url, headers)
-        except (HTTPException, requests.RequestException):
-            pass
 
     from character_workflow.lib.callers.video_registry import resolve_protocol
 
