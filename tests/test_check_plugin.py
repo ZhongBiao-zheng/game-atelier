@@ -27,6 +27,28 @@ def test_check_plugin_fails_when_manifest_missing(tmp_path):
     assert ".claude-plugin/plugin.json missing" in result.stdout
 
 
+def test_check_plugin_ignores_local_qa_artifacts_but_counts_release_assets(tmp_path):
+    (tmp_path / ".claude-plugin").mkdir()
+    (tmp_path / ".claude-plugin" / "plugin.json").write_text(json.dumps({
+        "name": "x", "version": "0.0.1", "description": "x",
+    }))
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "bootstrap.py").write_text("")
+    (tmp_path / "pyproject.toml").write_text("")
+    (tmp_path / "web" / "dist").mkdir(parents=True)
+    (tmp_path / "web" / "dist" / "index.html").write_text("ok")
+    (tmp_path / ".scratch").mkdir()
+    large = tmp_path / ".scratch" / "qa.bin"
+    with large.open("wb") as file:
+        file.truncate(11 * 1024 * 1024)
+    command = [sys.executable, str(SCRIPT), "--repo", str(tmp_path)]
+    assert subprocess.run(command, capture_output=True).returncode == 0
+    large.rename(tmp_path / "release.bin")
+    result = subprocess.run(command, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "exceeds 10MB cap" in result.stdout
+
+
 def test_check_plugin_fails_on_invalid_json(tmp_path):
     fake_repo = tmp_path / "fake-repo"
     (fake_repo / ".claude-plugin").mkdir(parents=True)

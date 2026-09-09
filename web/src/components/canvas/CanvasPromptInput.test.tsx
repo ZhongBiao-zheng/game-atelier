@@ -35,6 +35,15 @@ describe('CanvasPromptInput', () => {
     rerender(<CanvasPromptInput {...props} autoFocusVariables />);
     expect(screen.getByRole('textbox', { name: '变量：主体' })).toHaveFocus();
   });
+  it('retries insertion focus after React Flow finishes measuring a hidden node', async () => {
+    const focus = vi.spyOn(HTMLInputElement.prototype, 'focus').mockImplementationOnce(() => undefined);
+    const value = promptVariableToken({ name: '主体', example: '猫', value: '' });
+    try {
+      render(<CanvasPromptInput value={value} references={[]} onChange={vi.fn()} />);
+      await waitFor(() => expect(screen.getByRole('textbox', { name: '变量：主体' })).toHaveFocus());
+      expect(focus.mock.calls.length).toBeGreaterThan(1);
+    } finally { focus.mockRestore(); }
+  });
   it('renders inline empty fields, synchronizes duplicates and restores persisted values without losing the active input', () => {
     const token = promptVariableToken({ name: '风格', example: '水墨', value: '' });
     let saved = '';

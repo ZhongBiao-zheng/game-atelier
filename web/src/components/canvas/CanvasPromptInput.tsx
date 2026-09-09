@@ -111,7 +111,19 @@ export function CanvasPromptInput({
     editor.replaceChildren(...promptNodes(value, referenceById, mentionsEnabled));
     lastEmittedRef.current = value;
     lastReferenceSignatureRef.current = referenceSignature;
-    if (focusVariables) focusEmptyVariable(editor);
+    if (!focusVariables) return;
+    // React Flow initially hides new nodes while measuring them. Keep the explicit
+    // insertion request alive until its input is focusable; cancel on unmount/change.
+    let frame: number | undefined;
+    const focusWhenVisible = () => {
+      const empty = [...editor.querySelectorAll<HTMLInputElement>('input[data-variable-name]')]
+        .find(input => !input.value.trim());
+      if (!empty) return;
+      focusEmptyVariable(editor);
+      if (document.activeElement !== empty) frame = requestAnimationFrame(focusWhenVisible);
+    };
+    focusWhenVisible();
+    return () => { if (frame !== undefined) cancelAnimationFrame(frame); };
   }, [autoFocusVariables, mentionsEnabled, referenceById, referenceSignature, value]);
 
   useEffect(() => {
