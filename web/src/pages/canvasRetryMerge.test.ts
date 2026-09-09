@@ -28,6 +28,13 @@ function serverRetry(before: CanvasDocument): CanvasDocument {
 }
 
 describe('same-surface retry configuration merge', () => {
+  it('restores only generation inputs and preserves material associations', () => {
+    const before = documentFor('image');
+    const material = { id: 'material', role: 'material' as const, source_node_id: 'source', target_node_id: 'result' };
+    const current = { ...before, connections: [material] };
+    const merged = restoreCanvasRetryConfiguration(current, serverRetry(before), before, 'result');
+    expect(merged.connections).toEqual([material, ...serverRetry(before).connections]);
+  });
   it('does not restore a frozen prompt when only its input connection changed during the request', () => {
     const before = documentFor('image');
     const current = { ...before, connections: [{ id: 'new-input', role: 'input' as const, source_node_id: 'source', target_node_id: 'result' }] };

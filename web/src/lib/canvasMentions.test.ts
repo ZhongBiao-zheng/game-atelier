@@ -58,6 +58,18 @@ const versions: Record<string, CanvasContentVersion> = {
 };
 
 describe('Canvas connected mentions', () => {
+  it('uses only direct input material and never traces a material association back to the original', () => {
+    const original = contentNode('original', 'image', 'version-image-a');
+    const processed = contentNode('processed', 'image', 'version-image-b');
+    const connections: CanvasConnection[] = [
+      { id: 'material', role: 'material', source_node_id: original.id, target_node_id: processed.id },
+      { id: 'input', role: 'input', source_node_id: processed.id, target_node_id: config.id },
+    ];
+    expect(buildCanvasMentionReferences('canvas-test', processed, [original, processed, config], connections, versions)).toEqual([]);
+    expect(buildCanvasMentionReferences('canvas-test', config, [original, processed, config], connections, versions)).toEqual([
+      expect.objectContaining({ nodeId: processed.id, versionId: 'version-image-b', label: '图片1' }),
+    ]);
+  });
   it('lists every canvas material with a valid current content version', () => {
     const nodes = [
       contentNode('image-a', 'image', 'version-image-a'),

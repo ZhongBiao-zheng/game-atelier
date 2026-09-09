@@ -13,7 +13,10 @@ from character_workflow.lib import canvas_agent_tools as tools, keys
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasListProjectsInput, CanvasProjectInput, ImportMediaInput, RunInput,
 )
-from character_workflow.lib.canvas_projects import canvas_project_dir, create_canvas_project, read_canvas_document
+from character_workflow.lib.canvas_projects import (
+    canvas_project_dir, create_canvas_project, read_canvas_document, save_canvas_document,
+)
+from character_workflow.lib.schemas import CanvasMaterialConnection
 from character_workflow.lib.private_json import read_private_json
 from character_workflow.lib.workshop import WorkshopError
 from viewer_server.server_app import build_app
@@ -83,6 +86,46 @@ def test_change_set_edits_document_at_expected_revision(canvas):
     assert result["revision"] == 2 and [node.id for node in document.nodes] == ["prompt-1"]
     assert document.connections == []
     assert document.content_versions[document.nodes[0].data.current_version_id].text == "黎明列车"
+
+
+def test_agent_reads_material_edges_but_reference_updates_only_consider_inputs(canvas):
+    pid = canvas.project.project_id
+    tools.apply_changes(canvas.agent, ApplyChangesInput(
+        project_id=pid, expected_revision=0, changes=[
+            {"op": "add_surface", "node_id": node_id, "kind": "image", "title": node_id,
+             "position": {"x": index * 400, "y": 0}}
+            for index, node_id in enumerate(["source", "target"])
+        ] + [
+            {"op": "set_draft", "node_id": "target", "mode": "image",
+             "prompt": "参考 @[node:source]", "model": "gpt-image-1", "alias": "fake"},
+            {"op": "connect", "source_node_id": "source", "target_node_id": "target"},
+        ],
+    ))
+    document = read_canvas_document(pid)
+    material = CanvasMaterialConnection(
+        id="material-edge", role="material", source_node_id="source", target_node_id="target",
+    )
+    document = save_canvas_document(pid, document.model_copy(update={
+        "connections": [*document.connections, material],
+    }), document.revision)
+    view = tools.get_document(canvas.agent, CanvasProjectInput(project_id=pid))
+    assert [edge["role"] for edge in view["connections"]] == ["input", "material"]
+    tools.apply_changes(canvas.agent, ApplyChangesInput(
+        project_id=pid, expected_revision=document.revision, changes=[
+            {"op": "disconnect", "connection_id": document.connections[0].id},
+        ],
+    ))
+    disconnected = read_canvas_document(pid)
+    assert disconnected.connections == [material]
+    assert disconnected.nodes[1].data.generation_draft.prompt == "参考 "
+    tools.apply_changes(canvas.agent, ApplyChangesInput(
+        project_id=pid, expected_revision=disconnected.revision, changes=[
+            {"op": "remove_node", "node_id": "source"},
+        ],
+    ))
+    removed = read_canvas_document(pid)
+    assert removed.connections == []
+    assert removed.nodes[0].data.generation_draft == disconnected.nodes[1].data.generation_draft
 
 
 def test_import_media_copies_local_file_and_rejects_unknown_types(canvas, tmp_path, isolated_data_root, monkeypatch):

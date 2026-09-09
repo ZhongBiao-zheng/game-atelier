@@ -69,7 +69,7 @@ vi.mock('@xyflow/react', () => {
       onlyRenderVisibleElements?: boolean;
       onConnect?: (connection: { source: string; target: string; sourceHandle: null; targetHandle: null }) => void;
       onConnectEnd?: (event: MouseEvent, state: { isValid: boolean; fromNode: { id: string }; fromHandle: { type: 'source' | 'target' }; toNode?: { id: string } }) => void;
-      onEdgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean }>) => void;
+      onEdgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean } | { id: string; type: 'remove' }>) => void;
       onSelectionStart?: () => void;
       onSelectionEnd?: () => void;
       onNodesChange?: (changes: Array<{ id: string; type: string; selected?: boolean; position?: { x: number; y: number } }>) => void;
@@ -85,6 +85,7 @@ vi.mock('@xyflow/react', () => {
       const CanvasNode = nodeTypes?.canvasNode;
       if (flowEdgeIdentities[flowEdgeIdentities.length - 1] !== edges) flowEdgeIdentities.push(edges);
       flowHandlers.nodesChange = onNodesChange;
+      flowHandlers.edgesChange = onEdgesChange;
       flowNodeLookup = new Map(nodes.map(node => [node.id, {
         internals: { positionAbsolute: node.position ?? { x: 0, y: 0 } },
         measured: { width: node.style?.width, height: node.style?.height },
@@ -297,6 +298,7 @@ const flowEdgeIdentities: unknown[] = [];
 /** 直接拿到 ReactFlow 收到的 onNodesChange：position / remove 这类变更没有对应的 UI 入口。 */
 const flowHandlers: {
   nodesChange?: (changes: Array<{ id: string; type: string; selected?: boolean; position?: { x: number; y: number } }>) => void;
+  edgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean } | { id: string; type: 'remove' }>) => void;
 } = {};
 
 function CanvasContextIdentityProbe() {
@@ -370,6 +372,7 @@ beforeEach(() => {
   canvasContextIdentities.length = 0;
   flowEdgeIdentities.length = 0;
   flowHandlers.nodesChange = undefined;
+  flowHandlers.edgesChange = undefined;
   // jsdom 不实现 elementFromPoint，而连接拖到空白处要用它探测落点节点。
   document.elementFromPoint = () => null;
   // 编辑器只调 listCanvasProjects(true)（轻量分支，返回 CanvasProject[]）；
@@ -397,6 +400,59 @@ beforeEach(() => {
 function lastSavedDocument() {
   return vi.mocked(saveCanvasDocument).mock.calls.at(-1)?.[1];
 }
+
+it('renders solid material links without counting upstream originals and preserves their role when copied', async () => {
+  const original = imageNode('original', '原图');
+  original.data.current_version_id = 'original-version';
+  const processed = imageNode('processed', '处理后的素材', imageDraft);
+  processed.data.current_version_id = 'processed-version';
+  const version = { version_id: 'original-version', kind: 'image' as const, path: 'source.png', mime_type: 'image/png',
+    width: 512, height: 512, bytes: 123, created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'upload' as const, upload_id: 'source-upload' } };
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [original, processed, imageNode('result', '生成结果', imageDraft)],
+    connections: [
+      { id: 'material', role: 'material', source_node_id: 'original', target_node_id: 'processed' },
+      { id: 'input', role: 'input', source_node_id: 'processed', target_node_id: 'result' },
+    ], content_versions: { 'original-version': version, 'processed-version': { ...version, version_id: 'processed-version' } },
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  const context = canvasContextIdentities.at(-1) as CanvasNodeContextValue;
+  expect(context.mentionReferencesByNodeId.get('processed')).toEqual([]);
+  expect(context.mentionReferencesByNodeId.get('result')).toEqual([expect.objectContaining({ nodeId: 'processed', label: '图片1' })]);
+  const edges = flowEdgeIdentities.at(-1) as Array<{ id: string; className: string; ariaLabel: string }>;
+  expect(edges.find(edge => edge.id === 'material')).toMatchObject({ className: 'canvas-input-edge', ariaLabel: '素材来源：原图 → 处理后的素材' });
+  fireEvent.keyDown(window, { key: 'a', metaKey: true });
+  const clipboard = new Map<string, string>();
+  fireEvent.copy(window, { clipboardData: { setData: (type: string, value: string) => clipboard.set(type, value) } });
+  fireEvent.paste(window, { clipboardData: { getData: (type: string) => clipboard.get(type) ?? '', items: [] } });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(6));
+  expect(lastSavedDocument()?.connections.map(edge => edge.role)).toEqual(['material', 'input', 'material', 'input']);
+});
+
+it('derives read-only named layer ownership lines and removes them only when the binding is removed', async () => {
+  const material = imageNode('material', '活动标题');
+  const stack: CanvasNode = { id: 'stack', type: 'layer_stack', title: '拆分图层', position: { x: 0, y: 0 }, z_index: 0,
+    data: { source_version_id: 'source', base_version_id: null, base_visible: true, prompt: '', alias: null, model: null,
+      resolution: 'auto', active_run_id: null, error: null, layers: [{ id: 'title', version_id: 'version', material_node_id: 'material',
+        name: '活动标题', description: '', visible: true, z_index: 1, bounding_box: { absolute: [0, 0, 10, 10], normalized: [0, 0, 1000, 1000] } }] } };
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [stack, material] }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  const edges = () => flowEdgeIdentities.at(-1) as Array<{ id: string; selected: boolean; deletable: boolean; label?: string }>;
+  expect(edges()).toEqual([expect.objectContaining({ id: 'layer-material:stack:layer:title', ariaLabel: '素材来源：拆分图层 · 活动标题 → 活动标题', deletable: false, selectable: false })]);
+  expect(edges()[0].label).toBeUndefined();
+  act(() => flowHandlers.edgesChange?.([{ id: edges()[0].id, type: 'select', selected: true }]));
+  expect(edges()[0].selected).toBe(false);
+  act(() => flowHandlers.edgesChange?.([{ id: edges()[0].id, type: 'remove' }]));
+  expect(edges()).toHaveLength(1);
+  expect(saveCanvasDocument).not.toHaveBeenCalled();
+  act(() => flowHandlers.nodesChange?.([{ id: 'material', type: 'remove' }]));
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(1));
+  expect(edges()).toEqual([]);
+  expect(lastSavedDocument()?.connections).toEqual([]);
+  expect(lastSavedDocument()?.nodes[0]).toMatchObject({ data: { layers: [{ material_node_id: null }] } });
+});
 
 it.each(['image', 'layer_stack'] as const)('merges authoritative reused %s retry state while protecting concurrent edits', async kind => {
   const target: CanvasNode = kind === 'image' ? imageNode('result', '重试素材', { ...imageDraft, prompt: '当前草稿' }) : {

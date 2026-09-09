@@ -785,7 +785,17 @@ class CanvasInputConnection(BaseModel):
     slot: Literal["first_frame", "last_frame"] | None = None
 
 
-CanvasConnection = CanvasInputConnection
+class CanvasMaterialConnection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=160)
+    role: Literal["material"]
+    source_node_id: str = Field(min_length=1)
+    target_node_id: str = Field(min_length=1)
+
+
+CanvasConnection = Annotated[
+    CanvasInputConnection | CanvasMaterialConnection, Field(discriminator="role"),
+]
 
 
 class CanvasUserEditOrigin(BaseModel):
@@ -1122,6 +1132,8 @@ class CanvasDocument(BaseModel):
             target = nodes_by_id[edge.target_node_id]
             if source.type == "group" or target.type == "group":
                 raise ValueError("canvas group nodes cannot be connection endpoints")
+            if edge.role == "material" and (source.type != "image" or target.type != "image"):
+                raise ValueError("canvas material connections require image nodes")
             if edge.role == "input":
                 if source.type in {"config", "plugin", "layer_stack"}:
                     raise ValueError("canvas input source cannot provide content")

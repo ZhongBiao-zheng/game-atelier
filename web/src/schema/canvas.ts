@@ -248,7 +248,14 @@ export interface CanvasInputConnection {
   slot?: CanvasVideoFrameSlot | null;
 }
 
-export type CanvasConnection = CanvasInputConnection;
+export interface CanvasMaterialConnection {
+  id: string;
+  role: 'material';
+  source_node_id: string;
+  target_node_id: string;
+}
+
+export type CanvasConnection = CanvasInputConnection | CanvasMaterialConnection;
 
 export type CanvasContentOrigin =
   | { kind: 'user_edit' }

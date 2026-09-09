@@ -13,7 +13,9 @@ export function restoreCanvasRetryConfiguration(
   const before = submitted.nodes.find(node => node.id === resultNodeId);
   const restored = remote.nodes.find(node => node.id === resultNodeId);
   if (!before || !restored || !current.nodes.some(node => node.id === resultNodeId)) return current;
-  const incoming = (document: CanvasDocument) => document.connections.filter(connection => connection.target_node_id === resultNodeId);
+  const incoming = (document: CanvasDocument) => document.connections.filter(connection => (
+    connection.role === 'input' && connection.target_node_id === resultNodeId
+  ));
   const nodeIds = new Set(current.nodes.map(node => node.id));
   const inputsUnchanged = unchanged(incoming(current), incoming(submitted))
     && incoming(remote).every(connection => nodeIds.has(connection.source_node_id));
@@ -36,7 +38,7 @@ export function restoreCanvasRetryConfiguration(
   });
   // A retry restores its frozen recipe only where the user has not edited it since submission.
   const connections = inputsUnchanged
-    ? [...current.connections.filter(connection => connection.target_node_id !== resultNodeId),
+    ? [...current.connections.filter(connection => connection.role !== 'input' || connection.target_node_id !== resultNodeId),
       ...incoming(remote).filter(connection => nodeIds.has(connection.source_node_id))]
     : current.connections;
   return { ...current, nodes, connections };

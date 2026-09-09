@@ -117,7 +117,7 @@ function kindLabel(kind: CanvasGenerationSnapshot['mode']): string {
   return { text: '文本', image: '图片', video: '视频', audio: '音频' }[kind];
 }
 
-export function generationRecordPrompt(finalPrompt: string): string {
+function generationRecordPrompt(finalPrompt: string): string {
   const separator = '\n\n参考文本：\n';
   const separatorIndex = finalPrompt.indexOf(separator);
   if (separatorIndex < 0) return finalPrompt;

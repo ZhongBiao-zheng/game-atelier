@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.46.0',
+    date: '2026-09-09',
+    headline: '素材关联与生成面板简化',
+    changes: [
+      { kind: 'fix', text: '抠图、切图与展开图层保留素材实线，下游生成不再沿来源混入原图。' },
+      { kind: 'fix', text: '移除生成面板的原任务输入区块，只展示当前素材、提示词与设置。' },
+    ],
+  },
+  {
     version: '5.45.0',
     date: '2026-09-09',
     headline: '画布参考输入与实线统一',

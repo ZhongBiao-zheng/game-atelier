@@ -78,6 +78,11 @@ function document(nodes: CanvasNode[]): CanvasDocument {
 }
 
 describe('canvas connection policy', () => {
+  it('does not treat a material association as an existing generation input', () => {
+    const current = document([node('source', 'image'), node('target', 'image')]);
+    current.connections = [{ id: 'material', role: 'material', source_node_id: 'source', target_node_id: 'target' }];
+    expect(canCreateCanvasInputConnection(current, { source: 'source', target: 'target' })).toBe(true);
+  });
   it('shares endpoint capabilities between rendering and validation', () => {
     expect(canvasNodeProvidesContent(node('text', 'text'))).toBe(true);
     expect(canvasNodeProvidesContent(node('config', 'config'))).toBe(false);

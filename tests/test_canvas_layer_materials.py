@@ -15,7 +15,7 @@ from character_workflow.lib.keys import KeySpec, ModelSpec
 from character_workflow.lib.jobs import save_job
 from character_workflow.lib.schemas import (
     CanvasDocument, CanvasImageNode, CanvasMediaNodeData, CanvasPoint, CanvasSize,
-    CanvasMediaOperationRequest,
+    CanvasMaterialConnection, CanvasMediaOperationRequest, CanvasSnapshotInput,
     JobKind, JobParams, JobStatus,
 )
 from tests.test_canvas_layer_exports import _completed_stack
@@ -178,6 +178,32 @@ def test_local_crop_updates_owned_node_in_place_and_survives_reload():
     assert saved.nodes[2].data.current_version_id == result.created_version_ids[0]
     assert saved.nodes[2].size == CanvasSize(width=280, height=280)
     assert version.version_id in saved.content_versions
+
+
+def test_retry_owned_material_preserves_material_relationship_and_restores_input():
+    project, document = _bound_stack()
+    source = document.nodes[0]
+    edge = CanvasMaterialConnection(
+        id="material-relation", role="material", source_node_id=source.id, target_node_id="material",
+    )
+    document = save_canvas_document(project.project_id, document.model_copy(update={
+        "connections": [edge],
+    }), document.revision)
+    key = KeySpec(alias="test", provider="openai", access_key="test-only", models=[],
+                  created_at=document.updated_at)
+    model = ModelSpec(id="gpt-image-1", name="Test", modality="image")
+    _, submitted = _commit_frozen_run(
+        project.project_id, document, document.nodes[2], key, model, JobKind.IMAGE,
+        mode="image", final_prompt="调整素材", input_policy="all_connected", normalized={},
+        job_params=JobParams(n=1), inputs=[CanvasSnapshotInput(
+            order=0, source="input_connection", node_id=source.id,
+            version_id=source.data.current_version_id, kind="image",
+        )], requested_count=1, result_title="编辑", result_draft=None,
+        allow_surface_reuse=False, transaction_kind="submit", retry_of="original-job",
+    )
+    assert edge in submitted.connections
+    assert [(item.source_node_id, item.target_node_id) for item in submitted.connections
+            if item.role == "input"] == [(source.id, "material")]
 
 
 def test_material_ownership_rejects_multiple_parents_and_empty_or_nonimage_nodes():

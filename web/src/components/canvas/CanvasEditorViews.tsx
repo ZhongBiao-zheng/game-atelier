@@ -25,7 +25,6 @@ import { Link } from 'wouter';
 import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers } from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasExecutionGroup } from './CanvasBatchControls';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
-import { generationRecordPrompt } from './CanvasGenerationMetadata';
 import { orderedLayerStackParts } from './canvasLayerOrder';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
@@ -1938,11 +1937,6 @@ export function CanvasGenerationComposer({
   const nodeRunState = canvasNodeRunState(node, context.jobsByRunId);
   const activeJob = nodeRunState.job;
   const runId = activeJob?.canvas_run?.run_id;
-  const frozenCounts = { image: 0, text: 0, video: 0, audio: 0 };
-  const frozenInputs = activeJob?.canvas_run?.snapshot.inputs.map(input => ({
-    ...input,
-    label: `${mentionKindLabel(input.kind)}${++frozenCounts[input.kind]}`,
-  })) ?? [];
   const submitting = context.submittingNodeIds.has(node.id);
   const running = nodeRunState.status === 'loading';
   const textMode = draft.mode === 'text';
@@ -2096,29 +2090,6 @@ export function CanvasGenerationComposer({
           </Button>
         )}
       </div>
-      {activeJob?.canvas_run && (
-        <details className="mb-2 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">
-          <summary className="cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
-            {running ? '本轮冻结输入' : '原任务输入'} · {activeJob.canvas_run.snapshot.inputs.length} 项
-          </summary>
-          <div className="mt-2 max-h-48 space-y-2 overflow-y-auto">
-            <p>{activeJob.canvas_run.snapshot.model}</p>
-            <div className="flex flex-wrap gap-2">
-              {frozenInputs.map((input, index) => {
-                const version = context.resolveVersion(input.version_id);
-                return <button type="button" key={`${input.node_id}:${input.version_id}:${index}`}
-                  className="max-w-full rounded-md border border-border p-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  disabled={!version}
-                  onClick={() => context.previewContent(input.version_id, input.label, input.node_id)}>
-                  {version?.kind === 'image' && <img src={canvasMediaUrl(context.projectId, input.version_id, 160)} alt="" className="size-12 object-contain" />}
-                  <span>{version ? input.label : '素材已不可用'}</span>
-                </button>;
-              })}
-            </div>
-            <p className="whitespace-pre-wrap break-words">{generationRecordPrompt(activeJob.prompt)}</p>
-          </div>
-        </details>
-      )}
       {usesVideoFrameSlots && videoCaps ? (
         <CanvasVideoFrameConnections
           node={node}

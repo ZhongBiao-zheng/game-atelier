@@ -77,15 +77,16 @@ it('submits the visible draft independently of retrying the immutable failed tas
   expect(context.retryRun).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: '重试原任务' }));
   expect(context.retryRun).toHaveBeenCalledWith(imageResultNode.id, 'run-batch');
-  expect(screen.getByText('原任务输入 · 0 项')).toBeInTheDocument();
+  expect(screen.queryByText(/原任务输入|本轮冻结输入/)).not.toBeInTheDocument();
 });
 
-it('shows resolved original-task prompt without exposing frozen text tokens or mutating the job', () => {
+it('keeps the generation panel free of historical inputs without mutating the original job', () => {
   const prompt = '改写【文本1】\n\n参考文本：\n【文本1】\n真实文字';
   const job = { ...batchJob(), status: 'failed' as const, prompt };
   const context = nodeContext({ jobsByRunId: new Map([['run-batch', job]]) });
   const { container } = render(<CanvasGenerationComposer node={imageResultNode} draft={draft} context={context} />);
-  expect(screen.getByText('改写真实文字')).toBeInTheDocument();
+  expect(container.querySelector('details')).toBeNull();
+  expect(container.textContent).not.toContain('真实文字');
   expect(container.textContent).not.toContain('【文本1】');
   expect(job.prompt).toBe(prompt);
 });

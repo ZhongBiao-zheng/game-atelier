@@ -280,7 +280,8 @@ schema 的文件返回 409，原字节保持不变。`PUT /api/canvas/ui-prefere
 保持不变。该偏好跨项目生效，但不进入 `CanvasDocument`、undo/redo、项目 revision、项目包 manifest/zip
 或插件私有状态；凭证、Base URL 与模型目录仍只属于 Keys。
 
-`Input Connection` 是当前画布唯一可视实线，表示当前输入，不触发下游。来源关系只保留在 Job Snapshot 与 Content Version origin，不再创建派生边。普通生成不引用节点自身的当前内容；基于本图生成通过下游节点与实线明确输入。
+画布连接为 `role: input | material`，均以实线呈现。`Input Connection` 表示当前参考输入，不触发下游；只有 input 进入参考列表、输入解析和批量依赖。`Material Connection` 只含 `id / role / source_node_id / target_node_id`，两端须为图片节点，不带 slot，表达本地处理的素材来源，不自动追溯取图。两种角色可在同一对节点间共存。历史真源仍是 Job Snapshot 与 Content Version origin，不创建历史派生边。普通生成不引用节点自身的当前内容；基于本图生成通过下游节点与 input 明确输入。
+生成面板仅展示当前素材、提示词和生成设置，不展示“原任务输入／本轮冻结输入”重复区块；删除展示不改变 Snapshot、Job 历史或原参数重试。
 普通 `PUT document` 必须携带 `If-Match: <revision>`：服务端项目锁内校验后 revision + 1；冲突返回 409，不做自动合并。Web PUT 只能新增 `user_edit` 文本版本，不能写媒体版本、修改既有版本。输入连接可编辑，撤销/重做只改变画布节点与连接，必须保留全部已有内容版本；历史真实性不依赖当前连线。
 
 上传接口使用 multipart `file + expected_revision`，服务端登记不可变媒体 Content Version 并返回更新后的
@@ -415,7 +416,7 @@ Input Connection。图片模型优先使用仍可路由的画布图片生成偏�
 重复展开重新整理同一素材组并定位，不重复创建图片；布局一致时只定位，不新增编辑记录。
 部分入口被删除后，再次展开复用剩余入口并补齐缺项。图片预览容器跟随节点高度，不施加额外最小高度；
 高度不足 96 或宽度不足 160 的图片不叠加尺寸徽标，详情中仍保留原图参数。
-图层素材归属不再画线，通过父图层定位入口表达；绑定字段、共享版本与编辑同步保留，不参与生成输入或流程依赖。
+图层素材归属从已有绑定派生只读实线，并保留父图层定位入口；不另存连接副本，绑定字段、共享版本与编辑同步保留，不参与生成输入或流程依赖。
 素材替换、候选切换及单结果编辑（裁剪、抠图、放大、图片生成）同步更新父图层的版本和合成显示；
 本地单结果编辑复用节点，响应 `created_node_ids` 此时返回被更新的节点 ID。多结果“切图”仍创建独立派生结果。
 背景首次绑定时固定 `layout_size` 为原背景像素尺寸，后续素材按原 bbox 等比容纳，不改变合成坐标。
@@ -449,7 +450,7 @@ onnxruntime 只在有 wheel 的平台安装（Intel Mac 排除），缺失时状
 抠图的处理时限为 180s（其余操作 60s）。一次命令在
 项目级串行、全局最多并发 2 个；全部输出先写 staging，校验总块数与体积后原子移动到
 `derived/<operation_id>/` 并提交 Document。若进程在移动后中断，下一次项目访问按事务摘要完成提交；恢复不
-重跑图片处理。冲突为零写，源文件永不覆盖；一次 split 的结果节点和 输入连接作为一个画布历史
+重跑图片处理。冲突为零写，源文件永不覆盖；独立产物创建源图片到结果图片的 material 连接，图层素材原位编辑不创建自连接。一次 split 的结果节点和素材连接作为一个画布历史
 命令撤销/重做，Content Version 与字节继续保留。裁剪/切图参数校验分别固定返回
 `canvas_media_invalid_crop` / `canvas_media_invalid_split`，无法识别的请求或放大参数返回
 `canvas_media_invalid_request`；解码、规模、源不一致、revision 冲突、处理资源与事务失败均返回带

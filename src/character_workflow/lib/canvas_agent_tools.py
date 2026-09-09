@@ -176,7 +176,7 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
         nodes = [updated if n.id == node_id else n for n in nodes]
 
     def disconnected(edge: CanvasConnection) -> None:
-        if edge.slot is None:
+        if edge.role == "input" and edge.slot is None:
             touched_drafts.add(edge.target_node_id)
             disconnected_by_target.setdefault(edge.target_node_id, set()).add(edge.source_node_id)
 
@@ -211,7 +211,8 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
             }))
             touched_drafts.add(node.id)
             touched_drafts.update(edge.target_node_id for edge in connections
-                                  if edge.source_node_id == node.id and edge.slot is None)
+                                  if edge.role == "input"
+                                  and edge.source_node_id == node.id and edge.slot is None)
         elif change.op == "set_draft":
             node = _find_node(document.model_copy(update={"nodes": nodes}), change.node_id)
             if node.type not in {"text", "image", "video", "audio", "config"}:
@@ -294,7 +295,7 @@ def _sync_prompt_references(
             continue
         sources = list(dict.fromkeys(
             edge.source_node_id for edge in connections
-            if edge.target_node_id == node.id and edge.slot is None
+            if edge.role == "input" and edge.target_node_id == node.id and edge.slot is None
         ))
         removed = disconnected_by_target.get(node.id, set()).difference(sources)
         prompt = re.sub(r"@\[node:([^\]]+)\]",

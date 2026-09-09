@@ -27,7 +27,7 @@ from character_workflow.lib.file_lock import file_lock, try_file_lock
 from character_workflow.lib.schemas import (
     CanvasCropMediaOperation,
     CanvasCropOperation,
-    CanvasInputConnection,
+    CanvasMaterialConnection,
     CanvasDocument,
     CanvasImageNode,
     CanvasLocalToolOrigin,
@@ -620,9 +620,9 @@ def _build_document(
                 display=CanvasMediaDisplay(),
             ),
         )
-        edge = CanvasInputConnection(
+        edge = CanvasMaterialConnection(
             id=f"connection-{secrets.token_hex(12)}",
-            role="input",
+            role="material",
             source_node_id=source.id,
             target_node_id=node_id,
         )

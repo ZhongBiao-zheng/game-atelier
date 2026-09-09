@@ -210,6 +210,7 @@ import {
   syncDraftLayerStackSources,
 } from './canvasEditorModel';
 import { restoreCanvasRetryConfiguration } from './canvasRetryMerge';
+import { canvasLayerMaterialConnections, type CanvasLayerMaterialConnection } from './canvasLayerMaterialConnections';
 
 interface CreateMenuState {
   screen: XYPosition;
@@ -1223,15 +1224,19 @@ function CanvasEditorInner({
    *  全部连线都会换成新对象重画一遍。
    *
    *  数组本身也复用：一条都没变时返回上一次那个数组，`setEdges` 连跑都不用跑。 */
+  const layerConnectionSignature = JSON.stringify(canvasLayerMaterialConnections(document?.nodes ?? []));
+  const layerConnections = useMemo<CanvasLayerMaterialConnection[]>(() => JSON.parse(layerConnectionSignature), [layerConnectionSignature]);
   const flowEdges = useMemo(() => {
     const titles = new Map((document?.nodes ?? []).map(node => [node.id, node.title]));
     const liveIds = new Set<string>();
-    const next = (document?.connections ?? []).map(connection => {
+    const next = [...document?.connections ?? [], ...layerConnections].map(connection => {
       liveIds.add(connection.id);
       const active = activeNodeId === connection.source_node_id || activeNodeId === connection.target_node_id;
       const selected = selectedConnectionIds.has(connection.id);
       const sourceTitle = titles.get(connection.source_node_id) ?? connection.source_node_id;
       const targetTitle = titles.get(connection.target_node_id) ?? connection.target_node_id;
+      const layerName = 'layerName' in connection && typeof connection.layerName === 'string' ? connection.layerName : null;
+      const readOnly = layerName !== null;
       const cached = flowEdgeCache.current.get(connection.id);
       if (
         cached?.connection === connection
@@ -1239,7 +1244,7 @@ function CanvasEditorInner({
         && cached.selected === selected
         && cached.sourceTitle === sourceTitle
         && cached.targetTitle === targetTitle
-        && cached.flowEdge.deletable === !activeBatch
+        && cached.flowEdge.deletable === (!activeBatch && !readOnly)
       ) return cached.flowEdge;
       const flowEdge: Edge = {
         id: connection.id,
@@ -1250,12 +1255,14 @@ function CanvasEditorInner({
           'canvas-input-edge',
           active && 'canvas-active-edge',
         ),
-        ariaLabel: `输入连接：${sourceTitle} → ${targetTitle}`,
+        ariaLabel: connection.role === 'material'
+          ? `素材来源：${sourceTitle}${layerName ? ` · ${layerName}` : ''} → ${targetTitle}`
+          : `输入连接：${sourceTitle} → ${targetTitle}`,
         interactionWidth: 16,
         selected,
-        selectable: true,
+        selectable: !readOnly,
         focusable: true,
-        deletable: !activeBatch,
+        deletable: !activeBatch && !readOnly,
       };
       flowEdgeCache.current.set(
         connection.id,
@@ -1273,7 +1280,7 @@ function CanvasEditorInner({
     }
     flowEdgesRef.current = next;
     return next;
-  }, [activeBatch, activeNodeId, document?.connections, document?.nodes, selectedConnectionIds]);
+  }, [activeBatch, activeNodeId, document?.connections, document?.nodes, layerConnections, selectedConnectionIds]);
 
   const isValidConnection = useCallback<IsValidConnection>((connection) => (
     canCreateCanvasInputConnection(latestDocument.current, connection)
@@ -1554,9 +1561,11 @@ function CanvasEditorInner({
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     // 框选态要在事件到达的当下判定：setState 的 updater 可能延后到框选结束之后才跑。
     const swept = selectionRectActive.current;
+    const persistedIds = new Set(latestDocument.current?.connections.map(connection => connection.id));
     setSelectedConnectionIds(current => {
       const next = new Set(current);
       for (const change of changes) {
+        if (!('id' in change) || !persistedIds.has(change.id)) continue;
         if (change.type === 'select') {
           if (change.selected && swept) continue;
           change.selected ? next.add(change.id) : next.delete(change.id);
@@ -1565,7 +1574,9 @@ function CanvasEditorInner({
       }
       return next;
     });
-    const removedIds = new Set(changes.filter(change => change.type === 'remove').map(change => change.id));
+    const removedIds = new Set(changes.flatMap(change => (
+      change.type === 'remove' && persistedIds.has(change.id) ? [change.id] : []
+    )));
     if (removedIds.size) {
       commit(current => removeCanvasConnections(
         current,
@@ -2101,8 +2112,7 @@ function CanvasEditorInner({
       nodes,
       connections: document.connections
         .filter(connection => (
-          connection.role === 'input'
-          && copiedIds.has(connection.source_node_id)
+          copiedIds.has(connection.source_node_id)
           && copiedIds.has(connection.target_node_id)
         ))
         .map(connection => structuredClone(connection)),

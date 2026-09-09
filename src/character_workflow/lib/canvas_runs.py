@@ -1202,7 +1202,8 @@ def _commit_frozen_run(
                 restored_data = node.data.model_copy(update={"generation_draft": result_draft})
             restored_nodes.append(node.model_copy(update={"data": restored_data}))
         nodes = restored_nodes
-        connections = [edge for edge in connections if edge.target_node_id != result_id]
+        connections = [edge for edge in connections
+                       if edge.role != "input" or edge.target_node_id != result_id]
     if result_id != surface.id:
         nodes.append(_new_result_node(
             surface,
@@ -1219,7 +1220,8 @@ def _commit_frozen_run(
                 continue  # Dedicated edits expose their fixed source through the Snapshot.
             slot = item.source if item.source in {"first_frame", "last_frame"} else None
             if any(
-                edge.source_node_id == item.node_id and edge.target_node_id == result_id
+                edge.role == "input"
+                and edge.source_node_id == item.node_id and edge.target_node_id == result_id
                 and edge.slot == slot for edge in connections
             ):
                 continue
