@@ -24,6 +24,25 @@ export function imageSizeError(params: JobParams, model?: string): string | null
     ? null : '宽高请输入 1–100000 的整数';
 }
 
+/** Validate and prepare the effective rule before uploads or paid submission. */
+export function prepareImageSizeSubmission(
+  model: string, provider: string | null | undefined, baseUrl: string | null | undefined,
+  draft: JobParams,
+): { params: JobParams; error?: never } | { params?: never; error: string } {
+  const error = imageSizeError(draft, model);
+  if (error) return { error };
+  const params = normalizeImageSizeParams(model, provider, baseUrl, draft);
+  const mode = imageSizeMode(params);
+  if (mode !== imageSizeMode(draft)) return { error: '当前模型不支持原尺寸模式，请重新选择' };
+  if (mode === 'custom' && params.size) params.size = normalizeImagePixelSize(params.size, model, baseUrl);
+  if (mode !== 'ratio') {
+    delete params.ratio;
+    delete params.resolution;
+  }
+  delete params.custom_size;
+  return { params };
+}
+
 /** Drafts retain inactive choices; the server freezes only the active sizing rule. */
 export function normalizeImageSizeParams(
   model: string, provider: string | null | undefined, baseUrl: string | null | undefined,

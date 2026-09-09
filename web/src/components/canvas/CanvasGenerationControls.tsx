@@ -153,7 +153,7 @@ export function CanvasImageSettings({
   model: string;
   baseUrl?: string | null;
   params: JobParams;
-  onPatch: (patch: JobParams, options?: { resetSize?: boolean }) => void;
+  onPatch: (patch: JobParams) => void;
 } & ToolbarPopoverMenuProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);

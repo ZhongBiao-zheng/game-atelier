@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dialog';
 import { VideoControls } from '@/components/studio/VideoControls';
 import { imageControlCaps } from '@/lib/imageControlCaps';
+import { imageSizeMode } from '@/lib/imageSizeMode';
 import { cn } from '@/lib/utils';
 import {
   CANVAS_GENERATION_MODE_LABELS,
@@ -107,6 +108,7 @@ export function CanvasGenerationPreferencesDialog({
 }) {
   const [draft, setDraft] = useState(() => cloneDefaults(value));
   const [activeMode, setActiveMode] = useState<CanvasGenerationDraft['mode']>('image');
+  const [sizeNotice, setSizeNotice] = useState<string | null>(null);
   const dialogContentRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<HTMLButtonElement>(null);
 
@@ -114,6 +116,7 @@ export function CanvasGenerationPreferencesDialog({
     if (!open) return;
     setDraft(cloneDefaults(value));
     setActiveMode('image');
+    setSizeNotice(null);
   }, [open, value]);
 
   const preference = draft[activeMode];
@@ -149,13 +152,16 @@ export function CanvasGenerationPreferencesDialog({
       activeMode,
       selectedChoice || preference.selection === null ? preference.params as JobParams : {},
     );
-    if (next) setPreference(activeMode, next);
+    if (next) {
+      setSizeNotice(activeMode === 'image' && imageSizeMode(next.params as JobParams) !== imageSizeMode(params)
+        ? '当前模型不支持原尺寸模式，已切换为比例' : null);
+      setPreference(activeMode, next);
+    }
   }
 
-  function patchParams(patch: JobParams, options: { resetSize?: boolean } = {}) {
+  function patchParams(patch: JobParams) {
     if (!effectiveChoice) return;
     const merged = { ...params, ...patch };
-    if (options.resetSize) delete merged.size;
     const next = canvasGenerationPreferenceForModel(
       effectiveChoice.key,
       effectiveChoice.model,
@@ -209,6 +215,7 @@ export function CanvasGenerationPreferencesDialog({
         </DialogHeader>
 
         <div className="min-h-0 space-y-4 overflow-x-hidden overflow-y-auto">
+        {activeMode === 'image' && sizeNotice && <p role="status" className="text-xs text-muted-foreground">{sizeNotice}</p>}
         <div role="tablist" aria-label="生成类型" className="grid grid-cols-4 gap-1 rounded-xl border border-border bg-card p-1">
           {MODES.map(mode => {
             const Icon = MODE_ICONS[mode];

@@ -2209,9 +2209,8 @@ export function CanvasGenerationComposer({
             model={draft.model}
             baseUrl={selectedKey?.base_url}
             params={draft.params}
-            onPatch={(patch, options) => updateDraftWithHistory(current => {
+            onPatch={patch => updateDraftWithHistory(current => {
               const merged = { ...current.params, ...patch };
-              if (options?.resetSize) delete merged.size;
               return {
                 ...current,
                 params: normalizeCanvasImageParams(

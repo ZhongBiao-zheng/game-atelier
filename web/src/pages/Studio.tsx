@@ -18,8 +18,7 @@ import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/compone
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
 import { StudioArchiveDialog, type StudioArchiveRequest } from '@/components/studio/StudioArchiveDialog';
-import { imageSizeError, imageSizeMode, normalizeImageSizeParams } from '@/lib/imageSizeMode';
-import { normalizeImagePixelSize } from '@/lib/studioSize';
+import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { imageFamily } from '@/lib/modelFamily';
 import { maxReferenceImages } from '@/lib/referenceLimits';
@@ -409,16 +408,15 @@ function StudioFull() {
     const rawSizeParams: JobParams = overrideConfig
       ? { size_mode: overrideConfig.sizeMode ?? 'ratio', size: overrideConfig.size, ratio: overrideConfig.ratio, resolution: overrideConfig.resolution }
       : sizeParams;
-    if (imageSizeError(rawSizeParams, effectiveModel)) return;
-    const effectiveSizeParams = normalizeImageSizeParams(effectiveModel, effectiveProvider, selectedKey?.base_url, rawSizeParams);
-    const effectiveMode = imageSizeMode(effectiveSizeParams);
-    if (effectiveMode !== imageSizeMode(rawSizeParams)) {
-      alert('当前模型不支持原尺寸模式，请重新编辑后生成');
+    const preparedSize = prepareImageSizeSubmission(effectiveModel, effectiveProvider, selectedKey?.base_url, rawSizeParams);
+    if (preparedSize.error) {
+      alert(preparedSize.error);
       return;
     }
-    if (effectiveMode === 'custom' && effectiveSizeParams.size) {
-      effectiveSizeParams.size = normalizeImagePixelSize(effectiveSizeParams.size, effectiveModel, selectedKey?.base_url);
-      if (!overrideConfig) setSizeParams(previous => ({ ...previous, size: effectiveSizeParams.size, custom_size: effectiveSizeParams.size }));
+    const effectiveSizeParams = preparedSize.params!;
+    const effectiveMode = imageSizeMode(effectiveSizeParams);
+    if (effectiveMode === 'custom' && !overrideConfig) {
+      setSizeParams(previous => ({ ...previous, size: effectiveSizeParams.size, custom_size: effectiveSizeParams.size }));
     }
     const effectiveSize = effectiveSizeParams.size;
     const effectiveRatio = effectiveMode === 'ratio' ? effectiveSizeParams.ratio : undefined;

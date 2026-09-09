@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ImageSizeFields } from './ImageSizeFields';
 import { imageControlCaps } from '@/lib/imageControlCaps';
-import { imageSizeError, imageSizeSummary, normalizeImageSizeParams } from '@/lib/imageSizeMode';
+import { imageSizeError, imageSizeSummary, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
 import { normalizeImagePixelSize } from '@/lib/studioSize';
 import type { JobParams } from '@/schema/jobs';
 
@@ -15,6 +15,16 @@ function Harness({ baseUrl }: { baseUrl?: string } = {}) {
 }
 
 describe('image size intent', () => {
+  it('prepares only the active submission rule and rejects unsupported or invalid intent', () => {
+    expect(prepareImageSizeSubmission('gpt-image-2', 'openai', null,
+      { size_mode: 'auto', ratio: '2:3', resolution: '2K', custom_size: '1024x1024' }).params)
+      .toEqual({ size_mode: 'auto', size: 'auto' });
+    expect(prepareImageSizeSubmission('gpt-image-2', 'custom', 'https://api.openai-hk.com',
+      { size_mode: 'custom', size: '1360x2048', ratio: '2:3', resolution: '2K' }).params)
+      .toEqual({ size_mode: 'custom', size: '1376x2064' });
+    expect(prepareImageSizeSubmission('gpt-image-2', 'custom', 'https://api.tu-zi.com', { size_mode: 'auto' }).error).toBeTruthy();
+    expect(prepareImageSizeSubmission('gpt-image-2', 'openai', null, { size_mode: 'custom', size: 'x2048' }).error).toBeTruthy();
+  });
   it('does not snap dimensions while moving between width and height', () => {
     render(<Harness baseUrl="https://api.openai-hk.com" />);
     const width = screen.getByLabelText('输出宽度');
