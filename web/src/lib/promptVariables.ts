@@ -33,8 +33,13 @@ export function promptFromAsset(segments: readonly CreationPromptSegment[]): str
   })).join('');
 }
 
+export function hasPromptVariableContent(value: string): boolean {
+  // Use the union of JS/Python whitespace (including BOM) on both sides of the wire.
+  return /[^\s\u0085\u001c-\u001f]/.test(value);
+}
+
 function effectiveVariableValue({ value, example }: PromptVariable): string {
-  return value.trim() ? value : example;
+  return hasPromptVariableContent(value) ? value : example;
 }
 
 /** Defaults apply at use time; damaged or genuinely empty slots cannot be submitted. */
@@ -48,7 +53,7 @@ export function promptVariableError(prompt: string): string | null {
     }
     const { name } = part.variable;
     const value = effectiveVariableValue(part.variable);
-    if (!value.trim()) missing.add(name);
+    if (!hasPromptVariableContent(value)) missing.add(name);
     if (values.has(name) && values.get(name) !== value) return `变量「${name}」的内容不一致`;
     values.set(name, value);
   }

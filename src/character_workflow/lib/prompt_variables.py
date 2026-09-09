@@ -10,6 +10,8 @@ from character_workflow.lib.schemas import CreationPromptSegment
 
 _PREFIX = "@[variable:"
 _INVALID_PERCENT = re.compile(r"%(?![0-9a-fA-F]{2})")
+# Match the JS/Python whitespace union, so browser preview and frozen Job agree even on BOM.
+_CONTENT = re.compile(r"[^\s\ufeff]")
 
 
 def build_prompt_variable_template(
@@ -56,12 +58,12 @@ def resolve_prompt_variables(prompt: str) -> str:
         except (ValueError, UnicodeError) as error:
             raise ValueError("提示词变量格式无效，请重新插入提示词资产") from error
         name, value = payload["name"], payload["value"]
-        if not value.strip():
+        if not _CONTENT.search(value):
             value = payload["example"]
         if name in values and values[name] != value:
             raise ValueError(f"同名提示词变量内容不一致：{name}")
         values[name] = value
-        if not value.strip() and name not in missing:
+        if not _CONTENT.search(value) and name not in missing:
             missing.append(name)
         parts.extend((prompt[cursor:start], value))
         cursor = end + 1

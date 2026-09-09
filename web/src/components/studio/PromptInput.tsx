@@ -665,7 +665,7 @@ export function PromptInput({
 
   const submit = useCallback(() => {
     if (promptVariableError(text)) {
-      if (editorRef.current) focusEmptyVariable(editorRef.current);
+      if (editorRef.current) focusEmptyVariable(editorRef.current, true);
       return;
     }
     // @图1 → 图1：API 按序号自然语言绑定素材，@ 不出现在最终 prompt 里。

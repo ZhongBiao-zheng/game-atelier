@@ -1,4 +1,4 @@
-import { promptVariableParts, promptVariableToken, type PromptVariable } from './promptVariables';
+import { hasPromptVariableContent, promptVariableParts, promptVariableToken, type PromptVariable } from './promptVariables';
 
 /** Native inputs inside atomic spans keep IME, selection and input undo native. */
 export function variablePromptNodes(prompt: string, textNodes: (text: string) => Node[]): Node[] {
@@ -15,7 +15,7 @@ function variableNode(variable: PromptVariable): HTMLElement {
   input.type = 'text';
   input.dataset.variableName = variable.name;
   input.setAttribute('aria-label', `变量：${variable.name}`);
-  input.setAttribute('aria-required', String(!variable.example.trim()));
+  input.setAttribute('aria-required', String(!hasPromptVariableContent(variable.example)));
   input.placeholder = variable.example || variable.name;
   input.title = variable.name;
   input.value = variable.value;
@@ -53,8 +53,9 @@ export function syncVariableInput(editor: HTMLElement, target: EventTarget | nul
   return true;
 }
 
-export function focusEmptyVariable(editor: HTMLElement): boolean {
-  const input = [...editor.querySelectorAll<HTMLInputElement>('input[data-variable-name]')].find(field => !field.value.trim());
+export function focusEmptyVariable(editor: HTMLElement, requiredOnly = false): boolean {
+  const input = [...editor.querySelectorAll<HTMLInputElement>('input[data-variable-name]')].find(field =>
+    !hasPromptVariableContent(field.value) && (!requiredOnly || field.getAttribute('aria-required') === 'true'));
   input?.focus({ preventScroll: true });
   return Boolean(input);
 }

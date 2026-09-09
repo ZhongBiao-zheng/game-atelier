@@ -81,6 +81,18 @@ describe('PromptInput 行内变量', () => {
     cleanup();
   });
 
+  it('提交缺值时跳过已有默认内容的空框', () => {
+    const initial = promptVariableToken({ name: '风格', example: '水墨', value: '' })
+      + promptVariableToken({ name: '主体', example: '', value: '' });
+    const onSubmit = vi.fn();
+    render(<Editor initial={initial} onSubmit={onSubmit} />);
+    expect(screen.getByLabelText('变量：风格')).toHaveFocus();
+    fireEvent.keyDown(screen.getByLabelText('生图 prompt'), { key: 'Enter' });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('变量：主体')).toHaveFocus();
+    cleanup();
+  });
+
   it.each([
     '@[variable:damaged]',
     promptVariableToken({ name: '内部字面量', example: '', value: '不能被展开' }),

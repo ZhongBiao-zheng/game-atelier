@@ -41,6 +41,10 @@ def test_missing_names_are_deduplicated_and_same_name_conflicts_rejected():
     with pytest.raises(ValueError, match="同名提示词变量内容不一致：主体"):
         resolve_prompt_variables(variable(value="猫") + variable(value="狗"))
     assert resolve_prompt_variables(variable(value=" \n\t")) == "三头犬"
+    for whitespace in ("\ufeff", "\u0085", "\u001c", "\u00a0"):
+        assert resolve_prompt_variables(variable(value=whitespace)) == "三头犬"
+        with pytest.raises(ValueError, match="请填写提示词变量"):
+            resolve_prompt_variables(variable(example=whitespace))
     assert resolve_prompt_variables(variable() + variable(value="三头犬")) == "三头犬三头犬"
     with pytest.raises(ValueError, match="同名提示词变量内容不一致"):
         resolve_prompt_variables(variable() + variable(example="猫"))

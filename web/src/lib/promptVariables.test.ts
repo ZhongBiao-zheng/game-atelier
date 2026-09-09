@@ -13,6 +13,10 @@ describe('inline prompt variables', () => {
   it('uses defaults for whitespace, explicit values first, and requires content without defaults', () => {
     const token = (value: string, example = '水墨') => promptVariableToken({ name: '风格', example, value });
     expect(resolvePromptVariables(token(' \n'))).toBe('水墨');
+    for (const whitespace of ['\ufeff', '\u0085', '\u001c', '\u00a0']) {
+      expect(resolvePromptVariables(token(whitespace))).toBe('水墨');
+      expect(() => resolvePromptVariables(token('', whitespace))).toThrow('请填写');
+    }
     expect(resolvePromptVariables(token(' 水彩 '))).toBe(' 水彩 ');
     expect(() => resolvePromptVariables(token('', '  '))).toThrow('请填写');
     expect(resolvePromptVariables(token('') + token('水墨'))).toBe('水墨水墨');
