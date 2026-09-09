@@ -11,6 +11,7 @@ from character_workflow.lib.canvas_runs import (
 )
 from character_workflow.lib.keys import KeySpec, ModelSpec
 from character_workflow.lib.schemas import CanvasDocument, JobKind, JobParams
+from tests.test_prompt_variables import variable
 
 
 NOW = "2026-08-25T00:00:00Z"
@@ -141,6 +142,23 @@ def test_mentions_only_freezes_prompt_order_and_renumbers_each_media_kind():
     assert "参考素材编号：图片1、图片2" in final_prompt
     assert "【文本1】\n一列火车驶入雨夜" in final_prompt
     assert "@[node:" not in final_prompt
+
+
+def test_canvas_resolves_variables_in_draft_and_upstream_text_without_changing_draft():
+    prompt = "让" + variable(value="建筑") + "参考 @[node:text-a]"
+    document = _document(prompt)
+    document.content_versions["version-text-a"].text = variable("风格", value="卡通")
+    surface = next(node for node in document.nodes if node.id == "config")
+    draft = surface.data.draft
+    inputs = _resolve_inputs(document, surface, draft)
+    final_prompt = _render_final_prompt(document, draft, inputs)
+    assert "让建筑参考 【文本1】" in final_prompt
+    assert "【文本1】\n卡通" in final_prompt
+    assert "@[variable:" not in final_prompt
+    assert draft.prompt == prompt
+    document.content_versions["version-text-a"].text = variable("风格")
+    with pytest.raises(ValueError, match="请填写提示词变量：风格"):
+        _render_final_prompt(document, draft, inputs)
 
 
 def test_all_connected_keeps_unmentioned_inputs_after_mentions_and_labels_actual_order():

@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.43.0',
+    date: '2026-09-09',
+    headline: '提示词行内填写变量',
+    changes: [
+      { kind: 'feat', text: '提示词资产使用后可在正文方框中填写变量，同名内容同步，草稿保留填写进度。' },
+      { kind: 'fix', text: '模型与尺寸菜单自动避开浏览器边缘，内容过长时在菜单内滚动。' },
+    ],
+  },
+  {
     version: '5.42.3',
     date: '2026-09-09',
     headline: '修复 Tuzi 图片异步接口',

@@ -21,6 +21,7 @@ import { StudioArchiveDialog, type StudioArchiveRequest } from '@/components/stu
 import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { imageFamily } from '@/lib/modelFamily';
+import { promptToAssetSegments } from '@/lib/promptVariables';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import { hasSrefCode, MJ_DEFAULTS, mjParamsFromJob, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
@@ -734,7 +735,7 @@ function StudioFull() {
               requestId: crypto.randomUUID(),
               kind: 'prompt',
               title: config.prompt.trim().replace(/\s+/g, ' ').slice(0, 24),
-              segments: [{ kind: 'text', text: config.prompt }],
+              segments: promptToAssetSegments(config.prompt),
             });
           }}
           onSaveImageAsset={(path, config) => {
@@ -793,7 +794,7 @@ function StudioFull() {
             setAssetSaveRequest({
               requestId: crypto.randomUUID(),
               kind: 'prompt',
-              segments: [{ kind: 'text', text: promptText }],
+              segments: promptToAssetSegments(promptText),
             });
           }}
           onSaveReferenceImage={(file) => {

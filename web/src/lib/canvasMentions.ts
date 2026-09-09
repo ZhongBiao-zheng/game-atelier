@@ -1,4 +1,5 @@
 import { canvasMediaUrl } from '@/api/canvas';
+import { readablePromptVariables } from './promptVariables';
 import type {
   CanvasConnection,
   CanvasContentNode,
@@ -160,7 +161,7 @@ function canvasMaterialReference(
     versionId: version.version_id,
     kind: version.kind,
     title: node.title,
-    text: version.kind === 'text' ? version.text : undefined,
+    text: version.kind === 'text' ? readablePromptVariables(version.text) : undefined,
     // 这个 URL 只喂给素材芯片和 w-64 的悬浮详情，两处都是小图。
     previewUrl: version.kind === 'text'
       ? undefined

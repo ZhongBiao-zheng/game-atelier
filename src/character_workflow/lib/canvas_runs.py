@@ -41,6 +41,7 @@ from character_workflow.lib.jobs import (
     write_job_under_lock,
 )
 from character_workflow.lib.keys import KeySpec, ModelSpec, read_keys_db
+from character_workflow.lib.prompt_variables import resolve_prompt_variables
 from character_workflow.lib.schemas import (
     AssetSlot,
     CanvasActor,
@@ -804,6 +805,7 @@ def _render_final_prompt(
         )
     if appended_text:
         prompt = f"{prompt}\n\n参考文本：\n" + "\n\n".join(appended_text)
+    prompt = resolve_prompt_variables(prompt)
     if not prompt.strip():
         raise ValueError("生成提示词不能为空")
     return prompt

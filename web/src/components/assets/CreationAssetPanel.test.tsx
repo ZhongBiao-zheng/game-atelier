@@ -3,6 +3,7 @@ import { createRef } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CreationAsset } from '@/schema/creationAssets';
+import { promptFromAsset } from '@/lib/promptVariables';
 import {
   CreationAssetPanel,
   type CreationAssetPanelHandle,
@@ -52,7 +53,7 @@ describe('CreationAssetPanel', () => {
     vi.resetAllMocks();
   });
 
-  it('opens card detail, uses prompt defaults in one step, and closes', async () => {
+  it('inserts an unfilled inline template in one step and closes', async () => {
     mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
     mocks.markUsed.mockResolvedValue(promptAsset);
     const onUsePrompt = vi.fn();
@@ -64,13 +65,12 @@ describe('CreationAssetPanel', () => {
 
     await waitFor(() => expect(onUsePrompt).toHaveBeenCalledWith(
       promptAsset,
-      '一只白色三头犬站在火山口。',
-      {},
+      promptFromAsset(promptAsset.content.kind === 'prompt' ? promptAsset.content.segments : []),
     ));
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it('shares one input value between variables with the same name', async () => {
+  it('leaves repeated variables to be filled inside the prompt, not a separate form', async () => {
     const repeated: CreationAsset = {
       ...promptAsset,
       content: {
@@ -88,13 +88,12 @@ describe('CreationAssetPanel', () => {
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={onUsePrompt} onUseImage={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
-    fireEvent.change(screen.getByPlaceholderText('白犬'), { target: { value: '黑猫' } });
+    expect(screen.queryByPlaceholderText('白犬')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '使用' }));
 
     await waitFor(() => expect(onUsePrompt).toHaveBeenCalledWith(
       repeated,
-      '黑猫看向黑猫',
-      { 主体: '黑猫' },
+      promptFromAsset(repeated.content.kind === 'prompt' ? repeated.content.segments : []),
     ));
   });
 

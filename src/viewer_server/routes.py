@@ -2059,6 +2059,14 @@ def _create_user_job(
     namespace: Literal["studio"],
 ) -> Job:
     """Build and persist one Web-confirmed Studio job."""
+    from character_workflow.lib.prompt_variables import resolve_prompt_variables
+
+    try:
+        prompt = resolve_prompt_variables(body.prompt)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if not prompt.strip():
+        raise HTTPException(status_code=422, detail="生成提示词不能为空")
     if body.kind not in {JobKind.IMAGE, JobKind.VIDEO}:
         raise HTTPException(422, detail="创作台目前只接受图片或视频任务")
     db = keys.read_keys_db()
@@ -2090,7 +2098,7 @@ def _create_user_job(
     job = Job(
         job_id=new_job_id(),
         character_id=alias,
-        prompt=body.prompt,
+        prompt=prompt,
         submitted_at=datetime.now(timezone.utc).isoformat(),
         model=body.model,
         params=params,

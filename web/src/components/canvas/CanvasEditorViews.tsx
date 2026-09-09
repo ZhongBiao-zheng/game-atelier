@@ -1,5 +1,6 @@
 import { hasImageSizeSelection, imageSizeError, imageSizeMode } from '@/lib/imageSizeMode';
 import { normalizeImagePixelSize } from '@/lib/studioSize';
+import { promptVariableError, promptVariableParts, readablePromptVariables } from '@/lib/promptVariables';
 import {
   Handle,
   NodeResizer,
@@ -705,7 +706,18 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
         <div className={cn('h-full bg-secondary/20', node.type === 'text' ? 'min-h-32'
           : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44')}>
           {node.type === 'text' && (
-            isEditingText ? (
+            content?.kind === 'text' && promptVariableParts(content.text).some(part => part.kind === 'variable') ? (
+              <div className="nodrag nowheel h-full overflow-y-auto" onPointerDown={event => event.stopPropagation()}>
+                <CanvasPromptInput
+                  value={content.text}
+                  references={EMPTY_CANVAS_MENTION_REFERENCES}
+                  mentionsEnabled={false}
+                  onFocus={context.recordHistory}
+                  onChange={text => context.updateText(node.id, text)}
+                  className="h-full"
+                />
+              </div>
+            ) : isEditingText ? (
               <textarea
                 ref={textEditorRef}
                 aria-label={`编辑 ${node.title} 正文`}
@@ -1961,7 +1973,8 @@ export function CanvasGenerationComposer({
     modelSelected: Boolean(selectedModel),
     prompt: draft.prompt,
   });
-  const blockedReason = generateBlock?.message ?? referenceProblem;
+  const variableProblem = promptVariableError(draft.prompt);
+  const blockedReason = generateBlock?.message ?? variableProblem ?? referenceProblem;
 
   useEffect(() => {
     if (!usesVideoFrameSlots || !videoCaps) return;
@@ -2120,6 +2133,7 @@ export function CanvasGenerationComposer({
               ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
+      {variableProblem && <p role="status" className="px-3 text-xs text-muted-foreground">{variableProblem}</p>}
       {node.type === 'audio' && (
         <CandidateHistory
           nodeId={node.id}
@@ -2728,7 +2742,7 @@ function CandidateGrid({
             )}
           >
             {version?.kind === 'text'
-              ? <p className="line-clamp-4 min-h-20 whitespace-pre-wrap p-2 text-xs leading-relaxed text-foreground">{version.text}</p>
+              ? <p className="line-clamp-4 min-h-20 whitespace-pre-wrap p-2 text-xs leading-relaxed text-foreground">{readablePromptVariables(version.text)}</p>
               : version
                 ? <MediaPreview kind={version.kind} src={canvasMediaUrl(context.projectId, version.version_id, version.kind === 'image' ? 160 : undefined)} />
                 : (

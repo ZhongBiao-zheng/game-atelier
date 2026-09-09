@@ -6,6 +6,7 @@ import pytest
 from tests.local_client import LocalTestClient as TestClient
 
 from viewer_server.server_app import build_app
+from tests.test_prompt_variables import variable
 
 _FAKE_CREATED_AT = "2026-05-25T00:00:00+00:00"
 
@@ -50,6 +51,24 @@ def test_post_studio_job_creates_pending(client):
     assert payload["namespace"] == "studio"
     assert payload["kind"] == "image"
     assert payload["params"]["n"] == 1
+
+
+def test_studio_freezes_resolved_variable_text(client):
+    response = client.post("/api/studio/jobs", json={
+        "prompt": "绘制" + variable(value="现代建筑"),
+        "model": "gpt-image-2", "params": {},
+    })
+    assert response.status_code == 201
+    assert response.json()["prompt"] == "绘制现代建筑"
+
+
+@pytest.mark.parametrize("prompt", [variable(), "@[variable:broken]", " \n"])
+def test_studio_rejects_unfilled_or_malformed_variables_before_job_creation(client, tmp_path, prompt):
+    response = client.post("/api/studio/jobs", json={
+        "prompt": prompt, "model": "gpt-image-2", "params": {},
+    })
+    assert response.status_code == 422
+    assert not list((tmp_path / ".runtime" / "jobs").glob("*.json"))
 
 
 @pytest.mark.parametrize("mode,expected_size", [("auto", "auto"), ("custom", "1360x2048")])

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { CanvasMentionReference } from '@/lib/canvasMentions';
 import { CanvasPromptInput } from './CanvasPromptInput';
+import { promptVariableToken, resolvePromptVariables } from '@/lib/promptVariables';
 
 const references: CanvasMentionReference[] = [
   {
@@ -26,6 +27,44 @@ function placeCaretAtEnd(element: HTMLElement) {
 }
 
 describe('CanvasPromptInput', () => {
+  it('renders inline empty fields, synchronizes duplicates and restores persisted values without losing the active input', () => {
+    const token = promptVariableToken({ name: '风格', example: '水墨', value: '' });
+    let saved = '';
+    function Harness() {
+      const [value, setValue] = useState(`用${token}画图，再用${token}画建筑 @[node:image-a]`);
+      return <CanvasPromptInput value={value} references={references} onChange={next => { saved = next; setValue(next); }} />;
+    }
+    const view = render(<Harness />);
+    const [first, second] = screen.getAllByRole('textbox', { name: '变量：风格' });
+    expect(first).toHaveFocus();
+    expect(first).toHaveValue('');
+    expect(first).toHaveAttribute('placeholder', '风格：水墨');
+    fireEvent.compositionStart(first);
+    fireEvent.input(first, { target: { value: '卡' } });
+    expect(saved).toBe('');
+    fireEvent.input(first, { target: { value: '卡通' } });
+    fireEvent.compositionEnd(first);
+    expect(first).toHaveFocus();
+    expect(second).toHaveValue('卡通');
+    expect(resolvePromptVariables(saved)).toBe('用卡通画图，再用卡通画建筑 @[node:image-a]');
+    expect(screen.getByLabelText('引用图片：雨夜列车')).toBeInTheDocument();
+    view.unmount();
+    render(<CanvasPromptInput value={saved} references={references} onChange={vi.fn()} />);
+    expect(screen.getAllByRole('textbox', { name: '变量：风格' })[0]).toHaveValue('卡通');
+  });
+
+  it('keeps variable fields in models without mentions and copies readable text', () => {
+    const token = promptVariableToken({ name: '主体', example: '猫', value: '狐狸' });
+    render(<CanvasPromptInput value={`画${token}`} mentionsEnabled={false} references={[]} onChange={vi.fn()} />);
+    const editor = screen.getByRole('combobox', { name: '提示词' });
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    const setData = vi.fn();
+    fireEvent.copy(editor, { clipboardData: { setData } });
+    expect(setData).toHaveBeenCalledWith('text/plain', '画狐狸');
+  });
   it('opens a caret menu for @ and inserts a stable node token as an image chip', () => {
     const onChange = vi.fn();
     const { rerender } = render(

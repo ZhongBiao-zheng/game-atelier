@@ -478,6 +478,18 @@ asset_id 或可回写引用。Studio Job 的 `params.creation_asset_source_title
 后续编辑或删除资产都不会改变既有节点、草稿或生成记录，也不存在更新引用 API。画布项目包只携带已复制
 内容和来源标题，不携带个人资产库。
 
+使用提示词资产时，变量保留为正文内的可填写槽位，不再把模板默认内容自动视为已填写。
+草稿与 Canvas 文本版本的字符串使用 `@[variable:<encoded-json>]`；`encoded-json` 为
+`encodeURIComponent(JSON.stringify({name, example, value}))`，三个字段均为字符串，`name` 非空，
+`example` 是资产的 `default_value`，`value` 初始为空（插入 API 的显式 `variable_values` 可填写它）。
+同名槽位的值必须一致。模板仍受 Canvas 字符串的 40,000 字符限制，编码槽位计入长度；超限拒绝，
+不截断。此字符串随草稿/文本版本持久化，资产自身内容不变。
+
+Studio 创建 Job、Canvas 合并草稿与上游参考文本并冻结生成快照时，服务端解析并单遍替换槽位，
+只将填写结果作为 Job 提示词。空白值、同名冲突或格式损坏的保留标记均返回 422，且不创建 Job。
+填写值本身不递归解释为槽位；Canvas 节点引用仍按原有编号规则冻结。前端可提前校验，但不能替代
+服务端校验。
+
 旧 schema v1 在 server 启动时一次性迁移到 v2：迁移前把完整 `creation-assets/` 和将被改写的 Job/
 Canvas 文件复制到 `.runtime/backups/creation-assets/<UTC timestamp>/`；资产保留最新内容、恢复原归档项，
 旧引用转成标题快照。Job 与 Canvas 分别在正式锁内完成完整 schema 校验后落盘；已被淘汰的旧图片版本

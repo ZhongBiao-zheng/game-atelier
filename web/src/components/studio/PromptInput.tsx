@@ -6,6 +6,8 @@ import { hasImageSizeSelection, imageSizeMode, imageSizeSummary, imageSizeError,
 import { normalizeImagePixelSize } from '@/lib/studioSize';
 import { ImageSizeFields } from './ImageSizeFields';
 import { providerLabel } from '@/lib/providerLabels';
+import { promptVariableError, readablePromptVariables, resolvePromptVariables } from '@/lib/promptVariables';
+import { focusEmptyVariable, syncVariableInput, variableInput, variablePromptNodes } from '@/lib/promptVariableEditor';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import { imageFamily } from '@/lib/modelFamily';
 import {
@@ -183,6 +185,10 @@ export function domToText(root: HTMLElement): string {
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     const el = node as HTMLElement;
+    if (el.dataset.promptVariable) {
+      out += el.dataset.promptVariable;
+      return;
+    }
     const label = el.getAttribute('data-mention');
     if (label) {
       out += `@${label}`;
@@ -276,6 +282,7 @@ export function PromptInput({
   const [slotLightbox, setSlotLightbox] = useState<string | null>(null);
   const refFileInputRef = useRef<HTMLInputElement>(null);
   const refInputId = useId();
+  const variableErrorId = useId();
   // @引用编辑器：contentEditable DOM 是输入现场，text 字符串是状态层；
   // lastSynced 区分「用户输入回流」与「外部改写」——只有外部改写才重建 DOM。
   const editorRef = useRef<HTMLDivElement>(null);
@@ -370,22 +377,23 @@ export function PromptInput({
   mentionsEnabledRef.current = mentionsEnabled;
 
   /** prompt 字符串 → 编辑器 DOM：@图N 字面量渲染成原子 chip。仅外部改写时调用。 */
-  const renderDom = useCallback((value: string) => {
-    const root = editorRef.current;
-    if (!root) return;
-    // @引用未开放（MJ / 视频首尾帧）：prompt 是纯文本，@图N 不渲染成 chip。
-    if (!mentionsEnabledRef.current) { root.textContent = value; return; }
-    root.textContent = '';
+  const promptNodes = useCallback((value: string) => variablePromptNodes(value, (plain) => {
+    if (!mentionsEnabledRef.current) return [document.createTextNode(plain)];
+    const nodes: Node[] = [];
     let last = 0;
-    for (const m of value.matchAll(createMentionTokenRegex())) {
+    for (const m of plain.matchAll(createMentionTokenRegex())) {
       const idx = m.index ?? 0;
-      if (idx > last) root.appendChild(document.createTextNode(value.slice(last, idx)));
+      if (idx > last) nodes.push(document.createTextNode(plain.slice(last, idx)));
       const label = canonicalMentionLabel(m[1], m[2]);
-      root.appendChild(buildChipEl(label, chipMetaRef.current.get(label)));
+      nodes.push(buildChipEl(label, chipMetaRef.current.get(label)));
       last = idx + m[0].length;
     }
-    if (last < value.length) root.appendChild(document.createTextNode(value.slice(last)));
-  }, []);
+    if (last < plain.length) nodes.push(document.createTextNode(plain.slice(last)));
+    return nodes;
+  }), []);
+  const renderDom = useCallback((value: string) => {
+    editorRef.current?.replaceChildren(...promptNodes(value));
+  }, [promptNodes]);
 
   /** 编辑器 DOM → 状态层。输入回流的唯一入口；lastSynced 同步防止 effect 重建 DOM。 */
   const syncFromDom = useCallback(() => {
@@ -404,6 +412,7 @@ export function PromptInput({
     renderDom(text);
     lastSynced.current = text;
     const root = editorRef.current;
+    if (root && focusEmptyVariable(root)) return;
     if (root && document.activeElement === root) {
       const sel = window.getSelection();
       if (sel) {
@@ -493,7 +502,23 @@ export function PromptInput({
       selection.removeAllRanges();
       selection.addRange(range);
     }
-    insertPlainText(insertTextRequest.text);
+    const fragment = document.createElement('div');
+    fragment.append(...promptNodes(insertTextRequest.text));
+    if (fragment.querySelector('[data-prompt-variable]')) {
+      if (typeof document.execCommand === 'function') {
+        document.execCommand('insertHTML', false, fragment.innerHTML);
+      } else if (selection?.rangeCount) {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        const nodes = document.createDocumentFragment();
+        nodes.append(...fragment.childNodes);
+        range.insertNode(nodes);
+      }
+      syncFromDom();
+      focusEmptyVariable(root);
+    } else {
+      insertPlainText(insertTextRequest.text);
+    }
     rememberEditorRange();
   }, [insertTextRequest, rememberEditorRange]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -614,8 +639,10 @@ export function PromptInput({
     (videoCaps?.maxFrames ?? 0) >= 2 &&
     !videoFrames?.first &&
     Boolean(videoFrames?.last);
+  const variableError = promptVariableError(text);
   const canSubmit =
     Boolean(provider && selectedModel && text.trim() && !disabled) && !lastFrameOnlyBlocked
+      && !variableError
       && (isVideo || !imageSizeError(sizeParams, selectedModel?.id));
   // 控件行右缘渐隐 + 箭头几何：悬停时为箭头让出 36px 槽位，渐隐带 40px 落在箭头左侧。
   const SCROLL_ARROW = 36;
@@ -637,13 +664,18 @@ export function PromptInput({
   }, [refImagesLimit, referenceImages, onReferenceImagesChange, showRefHint]);
 
   const submit = useCallback(() => {
+    if (promptVariableError(text)) {
+      if (editorRef.current) focusEmptyVariable(editorRef.current);
+      return;
+    }
     // @图1 → 图1：API 按序号自然语言绑定素材，@ 不出现在最终 prompt 里。
-    const trimmed = serializeMentions(text).trim();
+    const trimmed = serializeMentions(resolvePromptVariables(text)).trim();
     if (!trimmed || disabled || !provider || !selectedModel || lastFrameOnlyBlocked || (!isVideo && imageSizeError(sizeParams, selectedModel?.id))) return;
     onSubmit(trimmed);
   }, [text, disabled, provider, selectedModel, onSubmit, lastFrameOnlyBlocked, isVideo, sizeParams]);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (variableInput(e.target)) return;
     if (e.key === 'Escape' && mentionOpen) {
       e.preventDefault();
       setMentionOpen(false);
@@ -663,15 +695,37 @@ export function PromptInput({
     submit();
   };
 
-  function onEditorInput() {
+  function onEditorInput(e: React.FormEvent<HTMLDivElement>) {
     if (composing.current) return; // 中文输入法组合期不回流，compositionend 一次性同步
+    const isVariable = editorRef.current && syncVariableInput(editorRef.current, e.target);
     syncFromDom();
-    updateMentionMenu();
+    if (isVariable) setMentionOpen(false);
+    else updateMentionMenu();
   }
 
   function onEditorPaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    if (variableInput(e.target)) return;
     e.preventDefault();
     insertPlainText(e.clipboardData.getData('text/plain'));
+  }
+
+  function onEditorCopy(e: React.ClipboardEvent<HTMLDivElement>) {
+    if (variableInput(e.target)) return;
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+    const fragment = document.createElement('div');
+    fragment.append(selection.getRangeAt(0).cloneContents());
+    if (!fragment.querySelector('[data-prompt-variable]')) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', readablePromptVariables(domToText(fragment)));
+  }
+
+  function onEditorCut(e: React.ClipboardEvent<HTMLDivElement>) {
+    onEditorCopy(e);
+    if (!e.isDefaultPrevented()) return;
+    if (typeof document.execCommand === 'function') document.execCommand('delete');
+    else window.getSelection()?.getRangeAt(0).deleteContents();
+    syncFromDom();
   }
 
   // chip hover 预览：事件委托在编辑器上，进出 [data-mention] 时开关
@@ -933,6 +987,7 @@ export function PromptInput({
           role="textbox"
           aria-multiline="true"
           aria-label="生图 prompt"
+          aria-describedby={variableError ? variableErrorId : undefined}
           data-placeholder={mentionsEnabled && stackItems.length > 0 ? '开始一段灵感对话，输入 @ 引用参考素材...' : '开始一段灵感对话...'}
           onInput={onEditorInput}
           onKeyDown={onKey}
@@ -940,14 +995,17 @@ export function PromptInput({
           onMouseUp={rememberEditorRange}
           onBlur={rememberEditorRange}
           onPaste={onEditorPaste}
+          onCopy={onEditorCopy}
+          onCut={onEditorCut}
           onCompositionStart={() => { composing.current = true; }}
-          onCompositionEnd={() => { composing.current = false; onEditorInput(); }}
+          onCompositionEnd={(e) => { composing.current = false; onEditorInput(e); }}
           onMouseOver={onEditorMouseOver}
           onMouseOut={onEditorMouseOut}
           className={`no-scrollbar flex-1 min-h-0 w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-sm text-foreground focus:outline-none rounded-md pl-2 transition-[height,padding] duration-300 empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground ${
             collapsed ? 'h-6 self-center overflow-hidden pr-10' : onSavePromptAsset ? 'h-full pr-10' : 'h-full pr-2'
           }`}
         />
+        {variableError && <span id={variableErrorId} className="sr-only">{variableError}</span>}
         {onSavePromptAsset && !collapsed && text.trim() && (
           <button
             type="button"

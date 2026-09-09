@@ -18,6 +18,7 @@ from character_workflow.lib.canvas_projects import (
     canvas_project_lock_path,
 )
 from character_workflow.lib.file_lock import file_lock
+from character_workflow.lib.prompt_variables import build_prompt_variable_template
 from character_workflow.lib.schemas import (
     CanvasCreationAssetSnapshotOrigin,
     CanvasInputConnection,
@@ -658,7 +659,7 @@ def insert_creation_asset_into_canvas(
         )
         write_target: Path | None = None
         if content.kind == "prompt":
-            rendered = render_prompt_segments(content.segments, values)
+            rendered = build_prompt_variable_template(content.segments, values)
             canvas_version = CanvasTextVersion(
                 version_id=version_id,
                 created_at=timestamp,

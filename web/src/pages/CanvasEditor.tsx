@@ -1,4 +1,5 @@
 import '@xyflow/react/dist/style.css';
+import { promptToAssetSegments, readablePromptVariables } from '@/lib/promptVariables';
 
 import {
   Background,
@@ -538,12 +539,14 @@ function CanvasEditorInner({
     zoomOut,
     zoomTo,
   } = useReactFlow<FlowNode>();
+  const usedPromptAssetRef = useRef(false);
   const closeLibrary = useCallback(() => {
     const trigger = libraryMode === 'prompts'
       ? promptLibraryTriggerRef.current
       : assetLibraryTriggerRef.current;
     setLibraryMode(null);
-    requestAnimationFrame(() => trigger?.focus());
+    if (!usedPromptAssetRef.current) requestAnimationFrame(() => trigger?.focus());
+    usedPromptAssetRef.current = false;
   }, [libraryMode]);
 
   const mergeRunDocument = useCallback((
@@ -1777,7 +1780,7 @@ function CanvasEditorInner({
         requestId: crypto.randomUUID(),
         kind: 'prompt',
         title: node.title,
-        segments: [{ kind: 'text', text: version.text }],
+        segments: promptToAssetSegments(version.text),
         projectId,
       });
       return;
@@ -4591,7 +4594,8 @@ function CanvasEditorInner({
               setCreationAssetSaveRequest(current => current?.requestId === requestId ? null : current);
             }}
             onClose={closeLibrary}
-            onUsePrompt={(asset, renderedPrompt, variableValues) => {
+            onUsePrompt={(asset, renderedPrompt) => {
+              usedPromptAssetRef.current = true;
               if (selectedNode && selectedDraft) {
                 commit(current => ({
                   ...current,
@@ -4613,7 +4617,7 @@ function CanvasEditorInner({
                 }), true);
                 return;
               }
-              void insertCreationAsset(asset.asset_id, variableValues);
+              void insertCreationAsset(asset.asset_id, {});
             }}
             onUseImage={(asset: CreationAsset) => {
               void insertCreationAsset(
@@ -4857,7 +4861,7 @@ function CanvasPreview({
     <div className="space-y-4">
       {version.kind === 'text' && (
         <p className="max-h-[58dvh] overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-background p-4 text-sm leading-relaxed text-foreground">
-          {version.text || '暂无文本内容'}
+          {readablePromptVariables(version.text) || '暂无文本内容'}
         </p>
       )}
       {version.kind === 'image' && src && (

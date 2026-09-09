@@ -36,6 +36,7 @@ from character_workflow.lib.schemas import (
     CanvasUploadOrigin,
     RevisionedSidecar,
 )
+from character_workflow.lib.prompt_variables import build_prompt_variable_template
 from viewer_server.server_app import build_app
 
 
@@ -246,7 +247,9 @@ def test_canvas_receives_disconnected_content_and_title_snapshot(client: TestCli
     document = inserted.json()
     node = document["nodes"][0]
     frozen = document["content_versions"][node["data"]["current_version_id"]]
-    assert frozen["text"] == "一只机械犬站在火山口中。"
+    assert frozen["text"] == build_prompt_variable_template(
+        prompt.content.segments, {"主体": "机械犬"},
+    )
     assert frozen["origin"] == {"kind": "creation_asset_snapshot", "title": "镜头"}
 
     update_prompt_asset(
