@@ -213,6 +213,7 @@ export interface CanvasLayerStackNode extends CanvasNodeBase {
     resolution: 'auto' | '1K' | '1.5K' | '2K';
     base_version_id: string | null;
     base_visible: boolean;
+    base_z_index?: number;
     base_material_node_id?: string | null;
     layout_size?: CanvasSize | null;
     layers: CanvasLayerStackLayer[];

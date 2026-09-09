@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.44.0',
+    date: '2026-09-09',
+    headline: '拖拽调整拆分图层顺序',
+    changes: [
+      { kind: 'feat', text: '拆分图层支持拖拽排序，列表越靠上，合成预览越靠前；背景也可调整。' },
+      { kind: 'feat', text: '图层顺序自动保存并支持撤销，也可用排序菜单逐层上移、下移。' },
+    ],
+  },
+  {
     version: '5.43.3',
     date: '2026-09-09',
     headline: '完善图片失败原因与文本节点配置',

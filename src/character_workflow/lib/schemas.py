@@ -683,7 +683,7 @@ class CanvasLayerStackLayer(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=120)
     version_id: str = Field(min_length=1, max_length=160)
-    z_index: int = Field(ge=1, le=16)
+    z_index: int = Field(ge=0, le=16)
     name: str = Field(default="", max_length=200)
     description: str = Field(default="", max_length=2000)
     bounding_box: LayerDecompositionBoundingBox
@@ -699,6 +699,7 @@ class CanvasLayerStackData(BaseModel):
     prompt: str = Field(default="", max_length=4000)
     resolution: Literal["auto", "1K", "1.5K", "2K"] = "auto"
     base_version_id: str | None = Field(default=None, max_length=160)
+    base_z_index: int = Field(default=0, ge=0, le=16)
     base_visible: bool = True
     base_material_node_id: str | None = None
     layout_size: CanvasGroupSize | None = None
@@ -1137,6 +1138,8 @@ class CanvasDocument(BaseModel):
                 layer_ids = [layer.id for layer in node.data.layers]
                 layer_versions = [layer.version_id for layer in node.data.layers]
                 z_indices = [layer.z_index for layer in node.data.layers]
+                if node.data.base_version_id is not None:
+                    z_indices.append(node.data.base_z_index)
                 if (
                     len(layer_ids) != len(set(layer_ids))
                     or len(layer_versions) != len(set(layer_versions))

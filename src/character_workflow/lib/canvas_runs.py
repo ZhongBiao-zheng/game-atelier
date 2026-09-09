@@ -2626,6 +2626,7 @@ def _finalize_layer_stack_under_locks(
         node.model_copy(update={
             "data": node.data.model_copy(update={
                 "base_version_id": base.version_id,
+                "base_z_index": 0,
                 "layers": layers,
                 "active_run_id": None,
                 "error": None,

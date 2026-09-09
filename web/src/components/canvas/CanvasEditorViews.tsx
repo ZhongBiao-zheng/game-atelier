@@ -13,7 +13,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, Check, ChevronRight, CircleHelp, ClipboardCopy, Download, Ellipsis, Eye, EyeOff, FileAudio, FileImage, FileUp, FileVideo, Layers3, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, Check, ChevronRight, CircleHelp, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Layers3, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef,
   useState,
@@ -24,6 +24,8 @@ import { Link } from 'wouter';
 
 import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers } from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasExecutionGroup } from './CanvasBatchControls';
+import { CanvasLayerStackList } from './CanvasLayerStackList';
+import { orderedLayerStackParts } from './canvasLayerOrder';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
@@ -2927,9 +2929,9 @@ export function CanvasLayerStackSurface({
   const baseImage = base?.kind === 'image' ? base : undefined;
   const layoutWidth = node.data.layout_size?.width ?? baseImage?.width;
   const layoutHeight = node.data.layout_size?.height ?? baseImage?.height;
-  const layers = node.data.layers.flatMap(layer => {
-    const version = context.resolveVersion(layer.version_id);
-    return version?.kind === 'image' ? [{ layer, version }] : [];
+  const layers = orderedLayerStackParts(node).flatMap(part => {
+    const version = context.resolveVersion(part.versionId);
+    return version?.kind === 'image' ? [{ ...part, version }] : [];
   });
   const selectedChoice = choices.find(choice => (
     choice.key.alias === node.data.alias && choice.model.id === node.data.model
@@ -2980,24 +2982,13 @@ export function CanvasLayerStackSurface({
             className="h-full w-full"
             preserveAspectRatio="xMidYMid meet"
           >
-            {node.data.base_visible && (
-              <image
-                data-layer-stack-part="base"
-                href={canvasMediaUrl(context.projectId, baseImage.version_id)}
-                x={0}
-                y={0}
-                width={layoutWidth}
-                height={layoutHeight}
-                preserveAspectRatio="xMidYMid meet"
-              />
-            )}
-            {layers.map(({ layer, version }) => {
-              if (!layer.visible) return null;
-              const [left, top, right, bottom] = layer.bounding_box.absolute;
+            {layers.map(({ key, layer, version, visible }) => {
+              if (!visible) return null;
+              const [left, top, right, bottom] = layer?.bounding_box.absolute ?? [0, 0, layoutWidth, layoutHeight];
               return (
                 <image
-                  key={layer.id}
-                  data-layer-stack-part={layer.id}
+                  key={key}
+                  data-layer-stack-part={layer?.id ?? 'base'}
                   href={canvasMediaUrl(context.projectId, version.version_id)}
                   x={left}
                   y={top}
@@ -3008,7 +2999,7 @@ export function CanvasLayerStackSurface({
               );
             })}
             {layers.map(({ layer }) => {
-              if (hoveredLayerId !== layer.id || !layer.visible) return null;
+              if (!layer || hoveredLayerId !== layer.id || !layer.visible) return null;
               const [left, top, right, bottom] = layer.bounding_box.absolute;
               return (
                 <rect
@@ -3057,28 +3048,8 @@ export function CanvasLayerStackSurface({
       </div>
       <div className="w-72 shrink-0 border-l border-border">
         {baseImage ? (
-          <div className="h-full overflow-y-auto p-2" aria-label="图层列表">
-            <LayerStackRow
-              name="背景"
-              description={`${baseImage.width ?? 0}×${baseImage.height ?? 0}`}
-              src={canvasMediaUrl(context.projectId, baseImage.version_id, 128)}
-              downloadHref={canvasDownloadUrl(context.projectId, baseImage.version_id)}
-              visible={node.data.base_visible}
-              onVisibleChange={visible => updateVisibility(null, visible)}
-            />
-            {layers.map(({ layer, version }) => (
-              <LayerStackRow
-                key={layer.id}
-                name={layer.name || `图层 ${layer.z_index}`}
-                description={layer.description}
-                src={canvasMediaUrl(context.projectId, version.version_id, 128)}
-                downloadHref={canvasDownloadUrl(context.projectId, version.version_id)}
-                visible={layer.visible}
-                onVisibleChange={visible => updateVisibility(layer.id, visible)}
-                onHoverChange={hovered => setHoveredLayerId(hovered ? layer.id : null)}
-              />
-            ))}
-          </div>
+          <CanvasLayerStackList node={node} context={context} disabled={busy || Boolean(context.batchBusy)}
+            onVisibility={updateVisibility} onHover={setHoveredLayerId} />
         ) : (
           <div className="relative flex h-full flex-col gap-3 overflow-y-auto p-4" aria-label="图层拆分设置">
             <div className="absolute right-2 top-2 z-10">
@@ -3185,59 +3156,6 @@ export function CanvasLayerStackSurface({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function LayerStackRow({
-  name,
-  description,
-  src,
-  downloadHref,
-  visible,
-  onVisibleChange,
-  onHoverChange,
-}: {
-  name: string;
-  description: string;
-  src: string;
-  downloadHref: string;
-  visible: boolean;
-  onVisibleChange: (visible: boolean) => void;
-  onHoverChange?: (hovered: boolean) => void;
-}) {
-  return (
-    <div
-      className="flex items-center gap-2 rounded-md p-2 transition-colors hover:bg-secondary/60 focus-within:bg-secondary/60"
-      title={description || name}
-      onMouseEnter={() => onHoverChange?.(true)}
-      onMouseLeave={() => onHoverChange?.(false)}
-      onFocus={() => onHoverChange?.(true)}
-      onBlur={() => onHoverChange?.(false)}
-    >
-      <img src={src} alt="" className="size-12 shrink-0 rounded-md bg-secondary/40 object-contain" />
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{name}</span>
-      <a
-        href={downloadHref}
-        download
-        aria-label={`下载${name}`}
-        className="nodrag grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={event => event.stopPropagation()}
-      >
-        <Download className="size-4" />
-      </a>
-      <button
-        type="button"
-        aria-label={`${visible ? '隐藏' : '显示'}${name}`}
-        aria-pressed={visible}
-        className="nodrag grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={event => {
-          event.stopPropagation();
-          onVisibleChange(!visible);
-        }}
-      >
-        {visible ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
-      </button>
     </div>
   );
 }

@@ -34,6 +34,12 @@ AUTO能力依据（2026-09-09）：[OpenAI Images](https://developers.openai.com
 VIP、固定1K等别名不由基础型号推断能力。Seedream/MJ/未知渠道暂不展示AUTO。
 AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单或有依据的固定单价。
 
+### 图层栈显示顺序（5.44.0）
+
+`layer_stack.data.base_z_index` 默认 0，背景与 `layers[].z_index` 共用 0–16 范围；存在背景时所有层级值必须唯一。
+左侧合成按 z 升序绘制，右侧列表按 z 降序展示。拖拽后统一编号 0..N-1，通过原 Document 保存与撤销链路持久化。
+层 id、version_id、bounding_box、可见性、material_node_id 不随排序改变；Job 中的原始输出层号仍表示不可变来源，不是编辑后的显示顺序。
+
 ### Tuzi 图片任务（5.42.3）
 
 - 精确 `gpt-image-2`、`gpt-image-2-vip`、`gpt-image-1.5`、`gpt-image-1` 普通出图走

@@ -220,6 +220,7 @@ def test_layer_decomposition_runs_existing_stack_and_registers_every_output(isol
     assert result_node.type == "layer_stack"
     assert result_node.data.active_run_id is None
     assert result_node.data.base_version_id in document.content_versions
+    assert result_node.data.base_z_index == 0
     assert len(result_node.data.layers) == 1
     assert result_node.data.layers[0].name == "主体"
     assert result_node.data.layers[0].bounding_box.absolute == (0, 0, 1, 1)
