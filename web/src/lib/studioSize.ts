@@ -7,7 +7,7 @@
  */
 import { imageFamily, normalizedModelId } from '@/lib/modelFamily';
 
-export type Resolution = '2K' | '4K';
+export type Resolution = '512' | '1K' | '2K' | '4K';
 
 // seedream 族像素下限（低于此值上游会拒或自动放大）。默认 3686400；
 // 分档 key 按归一 id（尾段 + lower + `_`/`.` 归一为 `-`）做子串匹配 ——
@@ -50,7 +50,7 @@ export function familyMaxPixels(modelId?: string | null): number | null {
 }
 
 // seedream 族的 2K/4K 标准档（火山官方尺寸表，已满足默认像素下限）。
-const SIZE_TABLE: Record<Resolution, Record<string, { w: number; h: number }>> = {
+const SIZE_TABLE: Record<'2K' | '4K', Record<string, { w: number; h: number }>> = {
   '2K': {
     '1:1': { w: 2048, h: 2048 },
     '4:3': { w: 2304, h: 1728 },
@@ -60,6 +60,8 @@ const SIZE_TABLE: Record<Resolution, Record<string, { w: number; h: number }>> =
     '3:2': { w: 2496, h: 1664 },
     '2:3': { w: 1664, h: 2496 },
     '21:9': { w: 3024, h: 1296 },
+    '4:5': { w: 1792, h: 2240 },
+    '5:4': { w: 2240, h: 1792 },
   },
   '4K': {
     '1:1': { w: 4096, h: 4096 },
@@ -70,6 +72,8 @@ const SIZE_TABLE: Record<Resolution, Record<string, { w: number; h: number }>> =
     '3:2': { w: 4096, h: 2731 },
     '2:3': { w: 2731, h: 4096 },
     '21:9': { w: 4096, h: 1755 },
+    '4:5': { w: 3277, h: 4096 },
+    '5:4': { w: 4096, h: 3277 },
   },
 };
 
@@ -103,9 +107,10 @@ export function computeStudioPixelSize(
     if (availableResolutions(modelId).length === 1) {
       return fitToPixels(SIZE_TABLE['2K'][ratio] ?? SIZE_TABLE['2K']['1:1'], familyMaxPixels(modelId)!);
     }
-    return SIZE_TABLE[resolution][ratio] ?? SIZE_TABLE[resolution]['1:1'];
+    const tier = resolution === '4K' ? '4K' : '2K';
+    return SIZE_TABLE[tier][ratio] ?? SIZE_TABLE[tier]['1:1'];
   }
-  const base = resolution === '4K' ? 4096 : 2048;
+  const base = { '512': 512, '1K': 1024, '2K': 2048, '4K': 4096 }[resolution];
   if (ratio === '1:1') return { w: base, h: base };
   const [a, b] = ratio.split(':').map(Number);
   if (!a || !b) return { w: base, h: base };

@@ -11,6 +11,7 @@ from character_workflow.lib.callers.openai_image import (
     normalize_image_pixel_size,
 )
 from character_workflow.lib.keys import KeySpec
+from character_workflow.lib.image_size_catalog import image_size_options, is_nano_image_size_model
 
 
 # Verified 2026-09-09: official/Tuzi Images API, HK GPT Image docs, and OpenRouter's
@@ -22,16 +23,14 @@ _OPENAI_AUTO_MODELS = frozenset({
 })
 _HK_AUTO_MODELS = frozenset({"gpt-image-1", "gpt-image-1.5", "gpt-image-2"})
 _TUZI_AUTO_MODELS = frozenset({"gpt-image-1", "gpt-image-1.5", "gpt-image-2"})
-_OPENROUTER_AUTO_MODELS = frozenset({
-    "openai/gpt-image-1", "openai/gpt-image-1-mini", "openai/gpt-image-2",
-    "openai/gpt-image-2.5-sunburst", "openai/gpt-image-2.5-flare",
-})
 
 
 def supports_auto_image_size(provider: str, base_url: str | None, model: str) -> bool:
     host = (urlsplit(base_url or "").hostname or "").lower()
     if provider == "openrouter":
-        return host == "openrouter.ai" and model in _OPENROUTER_AUTO_MODELS
+        return host == "openrouter.ai" and "auto" in image_size_options(
+            provider, base_url, model,
+        )["ratios"]
     if provider not in {"openai", "custom"}:
         return False
     if host == "tu-zi.com" or host.endswith(".tu-zi.com"):
@@ -49,6 +48,11 @@ def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]
     result = {name: value for name, value in params.items() if value is not None}
     result.pop("custom_size", None)
     mode = result.get("size_mode")
+    options = image_size_options(key.provider, key.base_url, model)
+    if not options["ratios"]:
+        for field in ("size_mode", "size", "ratio", "resolution"):
+            result.pop(field, None)
+        return result
     if mode is None:
         return result
     if mode == "auto":
@@ -61,7 +65,9 @@ def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]
         result.pop("ratio", None)
         result.pop("resolution", None)
     elif mode == "custom":
-        if key.provider != "openrouter" and image_family(model) in {"midjourney", "nano-banana"}:
+        if key.provider != "openrouter" and (
+            is_nano_image_size_model(model) or image_family(model) == "midjourney"
+        ):
             raise ValueError("当前模型不支持自定义像素尺寸")
         size = str(result.get("size") or "").strip()
         if not re.fullmatch(r"[1-9]\d*x[1-9]\d*", size):
@@ -77,6 +83,25 @@ def normalize_image_size_params(key: KeySpec, model: str, params: dict[str, Any]
     elif mode == "ratio":
         if result.get("size") == "auto":
             raise ValueError("比例模式不能使用 AUTO 尺寸，请重新选择比例")
+        ratio = result.get("ratio")
+        if ratio is None and ":" in str(result.get("size") or ""):
+            ratio = result["size"]
+        if ratio is not None and ratio not in options["ratios"]:
+            raise ValueError("当前模型或渠道不支持该图片比例")
+        if ratio == "auto":
+            raise ValueError("比例模式不能使用 AUTO 尺寸，请重新选择比例")
+        if key.provider == "openrouter" or is_nano_image_size_model(model):
+            result["ratio"] = ratio or options["ratios"][0]
+            result["size"] = result["ratio"]
+        resolution = result.get("resolution")
+        if resolution is not None:
+            resolution = str(resolution).upper()
+            if resolution not in options["resolutions"]:
+                if options["resolutions"]:
+                    raise ValueError("当前模型或渠道不支持该图片分辨率")
+                result.pop("resolution", None)
+            else:
+                result["resolution"] = resolution
         if isinstance(result.get("size"), str):
             result["size"] = normalized_image_submission_size(key, model, result["size"])
     else:

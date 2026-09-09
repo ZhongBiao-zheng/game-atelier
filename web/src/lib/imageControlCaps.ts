@@ -10,9 +10,8 @@
  * - gpt-image：size 自由像素(最大边≤3840/双边16倍数/宽高比≤3:1)，有质量(含 auto)。
  * - seedream / standard：比例 + 2K/4K 分辨率 + 自定义像素，无质量。
  *
- * provider 只影响**传输语义**，不影响族：OpenRouter 的 Image API 收 aspect_ratio 比例串
- * 而不是像素，所以 provider=openrouter 时全族都改走比例、且不暴露分辨率/自定义像素
- * （后端 openrouter_image 会把 params.resolution 当 API 参数发出去，控件藏了还写就是静默计费）。
+ * provider 决定传输与尺寸子集：OpenRouter 从共享目录读取精确型号的比例/分辨率；
+ * 分辨率默认不指定，不因为新增控件而静默改变计费档位。
  */
 import {
   imageFamily,
@@ -21,6 +20,7 @@ import {
   type ImageFamily,
 } from '@/lib/modelFamily';
 import { availableResolutions, type Resolution } from '@/lib/studioSize';
+import { imageSizeOptions, isNanoImageSizeModel } from './imageSizeCatalog';
 
 export type Quality = 'low' | 'medium' | 'high' | 'auto';
 
@@ -43,32 +43,21 @@ export interface ImageControlCaps {
   sizeKind: 'ratio' | 'pixels' | 'none';
 }
 
-// 文档未列 1:1，但实测 nano-banana 支持（size="1:1" → 1024×1024）。
-const NANO_BANANA_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '2:3', '3:2'];
-const GPT_IMAGE_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
-const STANDARD_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
-
-// OpenRouter Image API 通用比例（各厂商 clamp 到自己的子集；此集是 4 个精选模型的交集）。
-const OPENROUTER_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
-
 // resolutions 不在这张表里：它按【模型】的像素上限裁，不是族属性（同族的 pro 与 lite 就不一样）。
-const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'resolutions' | 'showAutoSize'>> = {
+const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'ratios' | 'resolutions' | 'showAutoSize'>> = {
   'nano-banana': {
-    ratios: NANO_BANANA_RATIOS,
     showResolution: false,
     showCustomSize: false,
     qualities: ['low', 'medium', 'high'],
     sizeKind: 'ratio',
   },
   'gpt-image': {
-    ratios: GPT_IMAGE_RATIOS,
     showResolution: false,
     showCustomSize: true,
     qualities: ['low', 'medium', 'high', 'auto'],
     sizeKind: 'pixels',
   },
   seedream: {
-    ratios: STANDARD_RATIOS,
     showResolution: true,
     showCustomSize: true,
     qualities: null,
@@ -79,14 +68,12 @@ const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'resolu
   // MJ 自己定（实测 1024²），所以 sizeKind='none'：不发 size、不给分辨率档、不给自定义像素。
   // 质量也不是 quality 参数而是 --stylize / --q 一类 flag，走 MJ 专属控件而不是通用质量档。
   midjourney: {
-    ratios: STANDARD_RATIOS,
     showResolution: false,
     showCustomSize: false,
     qualities: null,
     sizeKind: 'none',
   },
   standard: {
-    ratios: STANDARD_RATIOS,
     showResolution: true,
     showCustomSize: true,
     qualities: null,
@@ -101,6 +88,7 @@ export function imageControlCaps(
 ): ImageControlCaps {
   const family = imageFamily(modelId);
   const base = FAMILY_CAPS[family];
+  const sizeOptions = imageSizeOptions(modelId, provider, baseUrl);
   const normalized = normalizedModelId(modelId);
   let host = '';
   try { host = new URL(baseUrl ?? '').hostname.toLowerCase(); } catch { /* Unconfigured key. */ }
@@ -109,39 +97,38 @@ export function imageControlCaps(
   const tuziAutoModels = ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2'];
   const openaiAutoModels = ['gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2-2026-04-21',
     'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst-2026-09-08', 'gpt-image-2.5-flare-2026-09-08'];
-  const openrouterAutoModels = ['openai/gpt-image-1', 'openai/gpt-image-1-mini', 'openai/gpt-image-2',
-    'openai/gpt-image-2.5-sunburst', 'openai/gpt-image-2.5-flare'];
   const showAutoSize = ((provider === 'openai' || provider === 'custom')
       && (host === 'api.openai.com' || (!host && provider === 'openai')) && openaiAutoModels.includes(modelId ?? ''))
     || ((provider === 'openai' || provider === 'custom') && isHk && ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2'].includes(modelId ?? ''))
     || ((provider === 'openai' || provider === 'custom') && isTuzi && tuziAutoModels.includes(modelId ?? ''))
-    || (provider === 'openrouter' && host === 'openrouter.ai' && openrouterAutoModels.includes(modelId ?? ''));
+    || (provider === 'openrouter' && host === 'openrouter.ai' && sizeOptions.ratios.includes('auto'));
   // Tuzi 只有 Pro 与 2 的基础型号接收独立 quality；旧 2.5、HD/NT/VIP 的档位
   // 都编码在 model id。其他网关仍沿用共享的模型能力判定。
   const supportsTuziQuality = normalized === 'nano-banana-pro' || normalized === 'nano-banana-2';
   const qualities = supportsImageQuality(modelId) && (!isTuzi || supportsTuziQuality)
     ? base.qualities
     : null;
-  // OpenRouter：size 走 aspect_ratio 比例语义（分辨率由厂商默认档决定），
-  // 质量档位仍按模型能力给（固定 2K/4K Nano 型号不再叠加 quality）。
+  // OpenRouter 的尺寸以精确型号能力目录为准，不把模型交集当全集。
   if (provider === 'openrouter') {
     return {
       family,
-      ratios: OPENROUTER_RATIOS,
-      showResolution: false,
-      resolutions: [],
+      ratios: sizeOptions.ratios.filter(ratio => ratio !== 'auto'),
+      showResolution: sizeOptions.resolutions.length > 0,
+      resolutions: sizeOptions.resolutions,
       showCustomSize: false,
       showAutoSize,
       qualities,
-      sizeKind: 'ratio',
+      sizeKind: sizeOptions.ratios.length ? 'ratio' : 'none',
     };
   }
   return {
     family,
     ...base,
+    ...(isNanoImageSizeModel(modelId) ? { showResolution: false, showCustomSize: false, sizeKind: 'ratio' as const } : {}),
+    ratios: sizeOptions.ratios,
     showAutoSize,
     qualities,
-    resolutions: base.showResolution ? availableResolutions(modelId) : [],
+    resolutions: base.showResolution && !isNanoImageSizeModel(modelId) ? availableResolutions(modelId) : [],
   };
 }
 

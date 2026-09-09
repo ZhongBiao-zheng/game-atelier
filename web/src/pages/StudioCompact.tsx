@@ -200,7 +200,7 @@ export function StudioCompact() {
     }
     const effectiveSize = effectiveSizeParams.size;
     const effectiveRatio = effectiveMode === 'ratio' ? effectiveSizeParams.ratio : undefined;
-    const effectiveResolution = effectiveMode === 'ratio' ? effectiveSizeParams.resolution as '2K' | '4K' | undefined : undefined;
+    const effectiveResolution = effectiveMode === 'ratio' ? effectiveSizeParams.resolution as RoundConfig['resolution'] : undefined;
     const rawQuality = overrideConfig?.quality ?? quality;
     const effectiveQuality = caps.qualities?.includes(rawQuality) ? rawQuality : undefined;
     const effectiveMjParams = overrideConfig?.mjParams ?? mjParams;

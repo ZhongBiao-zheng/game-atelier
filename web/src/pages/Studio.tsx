@@ -421,7 +421,7 @@ function StudioFull() {
     }
     const effectiveSize = effectiveSizeParams.size;
     const effectiveRatio = effectiveMode === 'ratio' ? effectiveSizeParams.ratio : undefined;
-    const effectiveResolution = effectiveMode === 'ratio' ? effectiveSizeParams.resolution as '2K' | '4K' | undefined : undefined;
+    const effectiveResolution = effectiveMode === 'ratio' ? effectiveSizeParams.resolution as RoundConfig['resolution'] : undefined;
     // 质量档位只在该族真有时才发：seedream / dall-e 不认 low|high，nano-banana 不认 auto。
     const rawQuality = overrideConfig?.quality ?? quality;
     const effectiveQuality = caps.qualities?.includes(rawQuality) ? rawQuality : undefined;
@@ -1115,7 +1115,7 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
     model: job.model,
     modelName: selectedModel?.name,
     ratio: typeof p.ratio === 'string' ? p.ratio : undefined,
-    resolution: p.resolution === '4K' ? '4K' : p.resolution === '2K' ? '2K' : undefined,
+    resolution: ['512', '1K', '2K', '4K'].includes(p.resolution ?? '') ? p.resolution as RoundConfig['resolution'] : undefined,
     size: typeof p.size === 'string' ? p.size : undefined,
     sizeMode: imageSizeMode(p),
     n: typeof p.n === 'number' ? clampImageCount(p.n) : undefined,

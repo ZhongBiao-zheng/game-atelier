@@ -526,11 +526,14 @@ def _normalized_image_preference_params(
     from character_workflow.lib.callers.openai_image import (
         image_family,
         normalize_image_pixel_size,
-        normalized_model_id,
     )
     from character_workflow.lib.image_size import (
         normalize_image_size_params,
         supports_auto_image_size,
+    )
+    from character_workflow.lib.image_size_catalog import (
+        image_size_options,
+        is_nano_image_size_model,
     )
 
     if not any(params.get(field) is not None for field in (
@@ -542,19 +545,19 @@ def _normalized_image_preference_params(
     if params.get("size_mode") in {"auto", "custom"}:
         draft_params = normalize_image_size_params(key, model.id, params)
         for field in ("ratio", "resolution", "custom_size"):
-            if params.get(field) is not None:
+            if params.get(field) is not None and draft_params.get("size_mode"):
                 draft_params[field] = params[field]
         return JobParams.model_validate(draft_params)
 
     family = image_family(model.id)
-    ratios = {
-        "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3",
-        *(("21:9",) if family != "nano-banana" else ()),
-    }
-    ratio = str(params.get("ratio") or "1:1")
-    if ratio not in ratios:
-        ratio = "1:1"
+    options = image_size_options(key.provider, key.base_url, model.id)
+    ratios = [ratio for ratio in options["ratios"] if ratio != "auto"]
     count = 4 if family == "midjourney" else max(1, min(4, int(params.get("n") or 1)))
+    if not ratios:
+        return JobParams(n=count)
+    ratio = str(params.get("ratio") or ratios[0])
+    if ratio not in ratios:
+        ratio = ratios[0]
     normalized: dict[str, Any] = {"n": count, "ratio": ratio}
     if params.get("size_mode") == "ratio":
         normalized["size_mode"] = "ratio"
@@ -568,17 +571,18 @@ def _normalized_image_preference_params(
         normalized["quality"] = quality
     if family == "midjourney":
         return JobParams.model_validate(normalized)
-    if key.provider == "openrouter" or family == "nano-banana":
+    if key.provider == "openrouter" or is_nano_image_size_model(model.id):
         normalized["size"] = ratio
+        resolution = str(params.get("resolution") or "").upper()
+        if resolution in options["resolutions"]:
+            normalized["resolution"] = resolution
         return JobParams.model_validate(normalized)
 
     size = params.get("size")
     if isinstance(size, str) and re.fullmatch(r"\d+x\d+", size):
         normalized["size"] = normalize_image_pixel_size(model.id, size)
     if family in {"seedream", "standard"}:
-        resolutions = {"2K", "4K"}
-        if "seedream-5-0-pro" in normalized_model_id(model.id):
-            resolutions = {"2K"}
+        resolutions = options["resolutions"]
         resolution = str(params.get("resolution") or "2K").upper()
         normalized["resolution"] = resolution if resolution in resolutions else "2K"
     return JobParams.model_validate(normalized)

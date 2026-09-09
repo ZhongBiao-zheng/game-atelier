@@ -609,7 +609,7 @@ export function PromptInput({
     if (JSON.stringify(normalized) !== JSON.stringify(sizeParams)) onSizeParamsChange?.(normalized);
   }, [isVideo, selectedModel, provider, sizeParams, onSizeParamsChange, showRefHint]);
   const sizeControlDetail = caps.showResolution && imageSizeMode(sizeParams) === 'ratio'
-    ? (sizeParams.resolution === '4K' ? '超清 4K' : '高清 2K')
+    ? (sizeParams.resolution ?? (caps.sizeKind === 'ratio' ? null : '2K'))
     : caps.qualities?.length
       ? (QUALITY_LABELS[quality] ?? quality)
       : null;

@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.44.2',
+    date: '2026-09-09',
+    headline: '补齐图片模型尺寸选项',
+    changes: [
+      { kind: 'fix', text: 'Tuzi 香蕉补齐 21:9、4:5、5:4，修正保存与请求时的比例转换。' },
+      { kind: 'fix', text: 'OpenRouter 按具体模型显示完整比例和分辨率档位，默认档位不变。' },
+      { kind: 'fix', text: 'GPT Image、Seedream 和 Midjourney 补齐 4:5、5:4 常用比例。' },
+    ],
+  },
+  {
     version: '5.44.1',
     date: '2026-09-09',
     headline: '精简画布工具栏与透明图片展示',

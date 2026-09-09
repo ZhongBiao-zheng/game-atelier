@@ -18,6 +18,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from character_workflow.lib import net_env
 from character_workflow.lib.callers import tuzi_async
+from character_workflow.lib.image_size_catalog import image_size_options, is_nano_image_size_model
 
 DEFAULT_SEEDREAM_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -234,6 +235,10 @@ def render(
     # Tuzi 的 nano-banana-* 是展示别名，图片端点的正式路由使用 Gemini model id。
     # 非 VIP 固定 2K/4K 别名也走基础 canonical model + quality；它们在目录中
     # 虽有同名 canonical fixed model，但 default 分组未计价。VIP/HD 才保留固定型号。
+    if (is_hk or is_tuzi) and is_nano_image_size_model(model):
+        # These Images gateways spell ratio-valued sizes as 21x9; jobs keep 21:9.
+        if requested_size in image_size_options(key.provider, base_url, model)["ratios"]:
+            requested_size = str(requested_size).replace(":", "x")
     outbound_model = tuzi_outbound_image_model(model) if is_tuzi else model
     quality = _quality_param(kwargs) if supports_image_quality(model) else None
     if is_tuzi and family == "nano-banana":

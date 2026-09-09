@@ -1159,10 +1159,10 @@ def test_render_openai_hk_nano_banana_passes_ratio_size_and_backfills(
         params={"quality": "low"},
     )
 
-    # nano-banana：size 是比例字符串原样下发；单次只回 1 张 → 循环补足到 3 张。
+    # HK Nano 用 x 分隔比例；单次只回 1 张 → 循环补足到 3 张。
     assert captured["url"] == "https://api.openai-hk.com/v1/images/generations"
     assert len(captured["payloads"]) == 3
-    assert captured["payloads"][0]["size"] == "16:9"
+    assert captured["payloads"][0]["size"] == "16x9"
     assert captured["payloads"][0]["quality"] == "low"
     assert len(paths) == 3
 

@@ -62,7 +62,7 @@ export function normalizeImageSizeParams(
   const resolution = caps.resolutions.includes(current.resolution as Resolution)
     ? current.resolution as Resolution : caps.resolutions[0] ?? '2K';
   const params: JobParams = { ...retained, size_mode: mode, ratio };
-  if (caps.showResolution) params.resolution = resolution;
+  if (caps.showResolution && (provider !== 'openrouter' || caps.resolutions.includes(current.resolution as Resolution))) params.resolution = resolution;
   if (mode === 'auto') return { ...params, size: 'auto' };
   if (mode === 'custom') {
     // Preserve in-progress input. Blur/submit normalize legal pixels, never each keystroke.

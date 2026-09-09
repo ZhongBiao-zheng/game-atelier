@@ -25,7 +25,13 @@
 AUTO能力依据（2026-09-09）：[OpenAI Images](https://developers.openai.com/api/docs/guides/image-generation)、
 [HK GPT Image](https://www.openai-hk.com/docs/openai/gpt-image.html)、
 [OpenRouter图像API与模型能力](https://openrouter.ai/docs/guides/overview/multimodal/image-generation)。
-白名单由 `imageControlCaps.ts` 与 `image_size.py` 同步维护。
+5.44.2起，OpenRouter的比例、AUTO、分辨率按共享
+`src/character_workflow/image_size_catalog.json` 的精确型号描述读取；其他渠道AUTO仍由
+`imageControlCaps.ts` 与 `image_size.py` 同步维护。尺寸核查范围与来源见
+[图片尺寸能力核查](references/image-size-capabilities.md)。
+Tuzi Nano的21:9、4:5、5:4在偏好与冻结Job中保留冒号，已有Images请求出站使用21x9等格式；
+OpenRouter出站仍使用aspect_ratio冒号。OpenRouter新增分辨率档位默认不指定，只有显式选择才发送；
+未声明尺寸能力的型号不发尺寸字段。各模型常用预设不等于连续像素模型的全部可能尺寸。
 5.42.1补齐Tuzi的精确型号 `gpt-image-2`、`gpt-image-1.5`、`gpt-image-1`：
 [default文生图](https://tuzi-api.apifox.cn/343646952e0)、
 [官方兼容文生图](https://tuzi-api.apifox.cn/448333922e0)、

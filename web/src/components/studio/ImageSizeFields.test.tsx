@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ImageSizeFields } from './ImageSizeFields';
 import { imageControlCaps } from '@/lib/imageControlCaps';
 import { imageSizeError, imageSizeSummary, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
@@ -15,6 +15,29 @@ function Harness({ baseUrl }: { baseUrl?: string } = {}) {
 }
 
 describe('image size intent', () => {
+  it('shows all Tuzi Nano ratios and emits the selected ratio without custom pixels', () => {
+    const onPatch = vi.fn();
+    render(<ImageSizeFields model="nano-banana-pro" caps={imageControlCaps('nano-banana-pro', 'custom', 'https://api.tu-zi.com')}
+      params={{ ratio: '1:1' }} onPatch={onPatch} />);
+    expect(screen.getAllByRole('option')).toHaveLength(10);
+    for (const ratio of ['4:5', '5:4', '21:9']) {
+      fireEvent.click(screen.getByRole('option', { name: ratio }));
+      expect(onPatch).toHaveBeenLastCalledWith({ size_mode: 'ratio', ratio, size: undefined });
+    }
+    expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
+  });
+  it('offers OpenRouter resolution tiers without silently picking a billed tier', () => {
+    const model = 'google/gemini-3.1-flash-image-preview';
+    const onPatch = vi.fn();
+    render(<ImageSizeFields model={model} caps={imageControlCaps(model, 'openrouter', 'https://openrouter.ai')}
+      params={{ ratio: '1:1' }} onPatch={onPatch} />);
+    expect(screen.getByRole('option', { name: '默认' })).toHaveAttribute('aria-selected', 'true');
+    for (const value of ['1:8', '8:1', '512', '1K', '2K', '4K']) expect(screen.getByRole('option', { name: value })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: '512' }));
+    expect(onPatch).toHaveBeenLastCalledWith({ resolution: '512', size: undefined });
+    fireEvent.click(screen.getByRole('option', { name: '默认' }));
+    expect(onPatch).toHaveBeenLastCalledWith({ resolution: undefined, size: undefined });
+  });
   it.each([
     ['openai', null, 'gpt-image-2'],
     ['custom', 'https://api.tu-zi.com/v1', 'gpt-image-2'],

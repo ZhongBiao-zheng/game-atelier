@@ -32,7 +32,7 @@ export interface RoundConfig {
   model: string;
   modelName?: string;
   ratio?: string;
-  resolution?: '2K' | '4K';
+  resolution?: '512' | '1K' | '2K' | '4K';
   quality?: 'low' | 'medium' | 'high' | 'auto';
   size?: string;
   sizeMode?: 'auto' | 'ratio' | 'custom';

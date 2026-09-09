@@ -15,6 +15,8 @@ export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
   const mode = imageSizeMode(params);
   const ratio = params.ratio ?? caps.ratios[0];
   const resolution = (params.resolution ?? caps.resolutions[0] ?? '2K') as Resolution;
+  const providerResolution = caps.sizeKind === 'ratio' && caps.showResolution;
+  const selectedResolution = providerResolution ? params.resolution ?? 'default' : resolution;
   const size = mode === 'custom' ? params.size ?? params.custom_size ?? ''
     : params.size && /^\d+x\d+$/.test(params.size) ? params.size : studioSizeFor(ratio, resolution, model);
   const [width = '', height = ''] = size.split('x');
@@ -43,7 +45,7 @@ export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
 
   return (
     <>
-      <section>
+      {options.length > 0 && <section>
         <div className="mb-1 px-1 text-xs text-muted-foreground">尺寸</div>
         <div role="listbox" aria-label="选择图片尺寸" className="grid grid-cols-4 gap-y-1 rounded-lg bg-popover p-1">
           {options.map(value => (
@@ -57,15 +59,15 @@ export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
             </button>
           ))}
         </div>
-      </section>
+      </section>}
       {caps.showResolution && mode === 'ratio' && (
         <section>
           <div className="mb-1 px-1 text-xs text-muted-foreground">分辨率</div>
           <div role="listbox" aria-label="选择图片分辨率" className="flex rounded-lg bg-popover p-1">
-            {caps.resolutions.map(value => <button key={value} type="button" role="option"
-              aria-selected={resolution === value}
-              onClick={() => onPatch({ resolution: value, size: undefined })}
-              className="h-8 flex-1 rounded-md text-xs transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60">{value}</button>)}
+            {[...(providerResolution ? ['default'] : []), ...caps.resolutions].map(value => <button key={value} type="button" role="option"
+              aria-selected={selectedResolution === value}
+              onClick={() => onPatch({ resolution: value === 'default' ? undefined : value, size: undefined })}
+              className="h-8 flex-1 rounded-md text-xs transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60">{value === 'default' ? '默认' : value}</button>)}
           </div>
         </section>
       )}
