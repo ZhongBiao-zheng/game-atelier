@@ -360,7 +360,7 @@ def test_post_job_cancel_resumable_paid_tuzi_task_stops_polling_but_keeps_task_i
         "job_id": "j1", "character_id": "Tuzi", "prompt": "p",
         "submitted_at": "2026-05-18T10:00:00Z", "model": "gpt-image-2",
         "params": {
-            "provider_task_protocol": "tuzi_async",
+            "provider_task_protocol": "tuzi_images",
             "provider_task_ids": ["paid-task-1"],
         },
         "output_paths": [], "status": "pending", "error": None,

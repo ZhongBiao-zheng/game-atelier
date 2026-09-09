@@ -108,6 +108,7 @@ GET /api/canvas/matting-model
 POST /api/canvas/matting-model
 GET /api/canvas/projects/{project_id}/versions/{version_id}/media
 GET /api/canvas/projects/{project_id}/versions/{version_id}/download
+GET /api/canvas/projects/{project_id}/nodes/{node_id}/layers/download
 GET /api/canvas/projects/{project_id}/jobs
 POST /api/canvas/projects/{project_id}/runs/reverse-prompt
 POST /api/canvas/projects/{project_id}/runs/angle

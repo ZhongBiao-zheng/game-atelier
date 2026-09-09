@@ -123,6 +123,8 @@ class LayerDecompositionResult(BaseModel):
 class JobParams(BaseModel):
     model_config = ConfigDict(extra="allow")
     size: str | None = None
+    size_mode: Literal["auto", "ratio", "custom"] | None = None
+    custom_size: str | None = Field(default=None, max_length=40)
     steps: int | None = None
     cfg_scale: float | None = None
     # 出图卡片展示用 —— 让画师在确认前看到完整调用细节
@@ -147,7 +149,8 @@ class JobParams(BaseModel):
     actual_size: str | None = None
     warnings: list[str] | None = None
     # 聚合商异步任务恢复信息。任务提交成功后立即落盘；服务重启只轮询这些既有任务，绝不重提。
-    provider_task_protocol: Literal["tuzi_async"] | None = None
+    # tuzi_async is a historical ownership tag, never a supported submission protocol.
+    provider_task_protocol: Literal["tuzi_async", "tuzi_images"] | None = None
     provider_task_ids: list[ProviderTaskId] | None = Field(default=None, max_length=4)
     # 图片参数 —— 前端实际在发（Studio 提交链路），显式声明保证双端类型对齐
     ratio: str | None = None               # e.g. "16:9"
@@ -217,7 +220,7 @@ class CanvasActor(BaseModel):
 class CanvasSnapshotInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     order: int = Field(ge=0)
-    source: Literal["implicit_self", "input_connection", "first_frame", "last_frame"]
+    source: Literal["implicit_self", "explicit_source", "input_connection", "first_frame", "last_frame"]
     node_id: str
     version_id: str
     kind: Literal["text", "image", "video", "audio"]
@@ -230,6 +233,7 @@ class CanvasGenerationSnapshot(BaseModel):
     result_node_id: str
     mode: Literal["text", "image", "video", "audio"]
     final_prompt: str
+    draft_prompt: str | None = None
     input_policy: Literal["all_connected", "mentions_only"]
     model: str
     provider: str
@@ -442,7 +446,9 @@ class CanvasImageDefaultParams(BaseModel):
     n: int | None = Field(default=None, ge=1, le=4)
     ratio: CanvasSafeOption | None = None
     resolution: CanvasSafeOption | None = None
-    size: CanvasSafeOption | None = None
+    size: str | None = Field(default=None, max_length=40, pattern=r"^[A-Za-z0-9_.:+-]*$")
+    size_mode: Literal["auto", "ratio", "custom"] | None = None
+    custom_size: str | None = Field(default=None, max_length=40, pattern=r"^[A-Za-z0-9_.:+-]*$")
     quality: Literal["low", "medium", "high", "auto"] | None = None
 
 
@@ -544,7 +550,7 @@ class CanvasGenerationDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["text", "image", "video", "audio"]
     prompt: str = Field(default="", max_length=40_000)
-    input_policy: Literal["all_connected", "mentions_only"] = "all_connected"
+    input_policy: Literal["all_connected"] = "all_connected"
     model: str = Field(default="", max_length=200)
     alias: str | None = Field(default=None, max_length=120)
     params: JobParams = Field(default_factory=JobParams)
@@ -560,7 +566,7 @@ class CanvasGenerationDraft(BaseModel):
 # Content Version，所以全部路径类字段都不在名单里；新增控件时必须同时把字段加进这里。
 CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     "image": frozenset({
-        "n", "size", "ratio", "resolution", "quality",
+        "n", "size", "size_mode", "custom_size", "ratio", "resolution", "quality",
         "creation_asset_source_title",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
         "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",
@@ -592,14 +598,6 @@ def canvas_allowed_draft_params(mode: str, params: JobParams) -> dict[str, Any]:
         for field, value in params.model_dump(mode="json", exclude_none=True).items()
         if field in allowed
     }
-
-
-def _draft_with_default_policy(value: object, policy: str) -> object:
-    if isinstance(value, dict) and "input_policy" not in value:
-        return {**value, "input_policy": policy}
-    if isinstance(value, CanvasGenerationDraft) and "input_policy" not in value.model_fields_set:
-        return value.model_copy(update={"input_policy": policy})
-    return value
 
 
 class CanvasBatchResultBinding(BaseModel):
@@ -643,13 +641,6 @@ class CanvasConfigNodeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
     draft: CanvasGenerationDraft
 
-    @model_validator(mode="before")
-    @classmethod
-    def default_input_policy(cls, value: object) -> object:
-        if isinstance(value, dict) and "draft" in value:
-            return {**value, "draft": _draft_with_default_policy(value["draft"], "mentions_only")}
-        return value
-
 
 class CanvasGroupNodeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -678,11 +669,12 @@ class CanvasLayerStackLayer(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=120)
     version_id: str = Field(min_length=1, max_length=160)
-    z_index: int = Field(ge=1, le=16)
+    z_index: int = Field(ge=0, le=16)
     name: str = Field(default="", max_length=200)
     description: str = Field(default="", max_length=2000)
     bounding_box: LayerDecompositionBoundingBox
     visible: bool = True
+    material_node_id: str | None = None
 
 
 class CanvasLayerStackData(BaseModel):
@@ -693,7 +685,10 @@ class CanvasLayerStackData(BaseModel):
     prompt: str = Field(default="", max_length=4000)
     resolution: Literal["auto", "1K", "1.5K", "2K"] = "auto"
     base_version_id: str | None = Field(default=None, max_length=160)
+    base_z_index: int = Field(default=0, ge=0, le=16)
     base_visible: bool = True
+    base_material_node_id: str | None = None
+    layout_size: CanvasGroupSize | None = None
     layers: list[CanvasLayerStackLayer] = Field(default_factory=list, max_length=16)
     active_run_id: str | None = Field(default=None, max_length=160)
     error: str | None = Field(default=None, max_length=4000)
@@ -707,18 +702,6 @@ class CanvasPluginNodeData(BaseModel):
     data_schema_version: int = Field(ge=1)
     payload: JsonValue
     generation_draft: CanvasGenerationDraft | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def default_input_policy(cls, value: object) -> object:
-        if isinstance(value, dict) and value.get("generation_draft") is not None:
-            return {
-                **value,
-                "generation_draft": _draft_with_default_policy(
-                    value["generation_draft"], "mentions_only"
-                ),
-            }
-        return value
 
     @model_validator(mode="after")
     def validate_payload_size(self) -> "CanvasPluginNodeData":
@@ -802,36 +785,16 @@ class CanvasInputConnection(BaseModel):
     slot: Literal["first_frame", "last_frame"] | None = None
 
 
-class CanvasGenerationRunOrigin(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["generation_run"]
-    run_id: str = Field(min_length=1, max_length=160)
-
-
-class CanvasLocalToolConnectionOrigin(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["local_tool"]
-    operation_id: str = Field(min_length=1, max_length=160)
-
-
-CanvasDerivationOrigin = Annotated[
-    CanvasGenerationRunOrigin | CanvasLocalToolConnectionOrigin,
-    Field(discriminator="kind"),
-]
-
-
-class CanvasDerivationConnection(BaseModel):
+class CanvasMaterialConnection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=160)
-    role: Literal["derivation"]
+    role: Literal["material"]
     source_node_id: str = Field(min_length=1)
     target_node_id: str = Field(min_length=1)
-    origin: CanvasDerivationOrigin
 
 
 CanvasConnection = Annotated[
-    CanvasInputConnection | CanvasDerivationConnection,
-    Field(discriminator="role"),
+    CanvasInputConnection | CanvasMaterialConnection, Field(discriminator="role"),
 ]
 
 
@@ -1007,8 +970,70 @@ class CanvasDocument(BaseModel):
     content_versions: dict[str, CanvasContentVersion] = Field(default_factory=dict)
     updated_at: str
 
+    def layer_material_node_ids(self) -> set[str]:
+        return {
+            node_id for node in self.nodes if node.type == "layer_stack"
+            for node_id in [node.data.base_material_node_id, *[
+                layer.material_node_id for layer in node.data.layers
+            ]] if node_id is not None
+        }
+
+    def sync_layer_materials(self) -> "CanvasDocument":
+        """Material nodes are the editable view; stack snapshots follow their current images."""
+        by_id = {node.id: node for node in self.nodes}
+        owners: set[str] = set()
+
+        def material(node_id):
+            if node_id is None:
+                return None
+            node = by_id.get(node_id)
+            if node is None:
+                return None
+            if node.type != "image" or not node.data.current_version_id or node_id in owners:
+                raise ValueError("layer material must be one uniquely owned populated image node")
+            owners.add(node_id)
+            version = self.content_versions.get(node.data.current_version_id)
+            if node.size and not node.data.display.free_resize and version is not None \
+                    and version.kind == "image" and version.width and version.height:
+                longest = max(node.size.width, node.size.height)
+                scale = longest / max(version.width, version.height)
+                node = node.model_copy(update={"size": CanvasSize(
+                    width=max(1, version.width * scale), height=max(1, version.height * scale),
+                )})
+                by_id[node_id] = node
+            return node
+
+        nodes = []
+        for node in self.nodes:
+            if node.type != "layer_stack":
+                nodes.append(node)
+                continue
+            base = material(node.data.base_material_node_id)
+            layout_size = node.data.layout_size
+            base_version = self.content_versions.get(node.data.base_version_id or "")
+            if base and layout_size is None and base_version is not None \
+                    and base_version.kind == "image" and base_version.width and base_version.height:
+                layout_size = CanvasGroupSize(width=base_version.width, height=base_version.height)
+            layers = []
+            for layer in node.data.layers:
+                image = material(layer.material_node_id)
+                layers.append(layer.model_copy(update={
+                    "material_node_id": image.id if image else None,
+                    "version_id": image.data.current_version_id if image else layer.version_id,
+                    "name": image.title if image else layer.name,
+                }))
+            nodes.append(node.model_copy(update={"data": node.data.model_copy(update={
+                "base_material_node_id": base.id if base else None,
+                "layout_size": layout_size,
+                "base_version_id": base.data.current_version_id if base else node.data.base_version_id,
+                "layers": layers,
+            })}))
+        self.nodes = [by_id[node.id] if node.id in owners else node for node in nodes]
+        return self
+
     @model_validator(mode="after")
     def validate_graph_references(self) -> "CanvasDocument":
+        self.sync_layer_materials()
         node_ids = [node.id for node in self.nodes]
         if len(node_ids) != len(set(node_ids)):
             raise ValueError("canvas node ids must be unique")
@@ -1067,6 +1092,8 @@ class CanvasDocument(BaseModel):
                 layer_ids = [layer.id for layer in node.data.layers]
                 layer_versions = [layer.version_id for layer in node.data.layers]
                 z_indices = [layer.z_index for layer in node.data.layers]
+                if node.data.base_version_id is not None:
+                    z_indices.append(node.data.base_z_index)
                 if (
                     len(layer_ids) != len(set(layer_ids))
                     or len(layer_versions) != len(set(layer_versions))
@@ -1105,6 +1132,8 @@ class CanvasDocument(BaseModel):
             target = nodes_by_id[edge.target_node_id]
             if source.type == "group" or target.type == "group":
                 raise ValueError("canvas group nodes cannot be connection endpoints")
+            if edge.role == "material" and (source.type != "image" or target.type != "image"):
+                raise ValueError("canvas material connections require image nodes")
             if edge.role == "input":
                 if source.type in {"config", "plugin", "layer_stack"}:
                     raise ValueError("canvas input source cannot provide content")

@@ -10,7 +10,7 @@ import pytest
 import requests
 
 from character_workflow.lib import keys
-from character_workflow.lib.callers import openai_image
+from character_workflow.lib.callers import dispatch, openai_image
 from character_workflow.lib.keys import KeySpec
 
 IMAGE_ACCEPT = "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
@@ -123,16 +123,18 @@ def test_render_openai_provider_posts_to_image_endpoint_and_writes_data_url(
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
-@pytest.mark.parametrize("model", ["gpt-image-2", "gpt-image-2-1k"])
+@pytest.mark.parametrize("size", ["auto", "2048x2048"])
+@pytest.mark.parametrize("model", ["gpt-image-2", "gpt-image-2-vip"])
 def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
     isolated_data_root,
     tmp_path,
     monkeypatch,
     model,
+    size,
 ):
     _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
     image_bytes = b"\x89PNG\r\n\x1a\ntuzi"
-    params = {"provider_task_protocol": "tuzi_async", "provider_task_ids": ["saved-1"]}
+    params = {"provider_task_protocol": "tuzi_images", "provider_task_ids": ["saved-1"]}
     calls: list[dict[str, object]] = []
     persisted: list[str] = []
 
@@ -150,7 +152,7 @@ def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
         alias="Tuzi",
         output_dir=tmp_path,
         n=1,
-        size="2048x2048",
+        size=size,
         params=params,
         on_params_changed=lambda: persisted.extend(params["provider_task_ids"]),
     )
@@ -158,7 +160,7 @@ def test_render_tuzi_uses_async_tasks_and_reuses_persisted_ids(
     assert calls[0]["url"] == "https://api.tu-zi.com/v1/images/generations"
     assert calls[0]["payload"]["model"] == model
     assert calls[0]["task_id"] == "saved-1"
-    assert calls[0]["payload"]["size"] == "2048x2048"
+    assert calls[0]["payload"]["size"] == size
     assert calls[0]["payload"].get("quality") is None
     assert persisted == []
     assert Path(paths[0]).read_bytes() == image_bytes
@@ -211,13 +213,13 @@ def test_render_tuzi_routes_nano_models_to_billable_payloads(
     _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
     captured: dict[str, object] = {}
 
-    def fake_execute_json(**kwargs):
-        captured.update(kwargs)
+    def fake_post_json(url, api_key, payload, **kwargs):
+        captured.update(url=url, payload=payload)
         return {"data": [{
             "b64_json": base64.b64encode(b"\x89PNG\r\n\x1a\n4k").decode("ascii"),
         }]}
 
-    monkeypatch.setattr(openai_image.tuzi_async, "execute_json", fake_execute_json)
+    monkeypatch.setattr(openai_image, "_post_json", fake_post_json)
 
     openai_image.render(
         prompt="banana cat",
@@ -241,7 +243,7 @@ def test_render_tuzi_resume_never_submits_supplemental_billed_task(
 ):
     _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
     calls: list[str | None] = []
-    params = {"provider_task_protocol": "tuzi_async", "provider_task_ids": ["saved-1"]}
+    params = {"provider_task_protocol": "tuzi_images", "provider_task_ids": ["saved-1"]}
 
     def fake_execute_json(**kwargs):
         calls.append(kwargs["task_id"])
@@ -261,7 +263,69 @@ def test_render_tuzi_resume_never_submits_supplemental_billed_task(
     assert "只返回了 1 张图" in params["warnings"][0]
 
 
-@pytest.mark.parametrize("model", ["gpt-image-2", "gpt-image-2-1k"])
+def test_tuzi_legacy_order_is_never_sent_to_native_endpoint_or_resubmitted(
+    isolated_data_root, tmp_path, monkeypatch,
+):
+    _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
+    monkeypatch.setattr(openai_image.requests, "post", lambda *a, **k: pytest.fail("paid POST"))
+    monkeypatch.setattr(openai_image.requests, "get", lambda *a, **k: pytest.fail("wrong protocol"))
+    with pytest.raises(openai_image.OpenAIImageError, match="旧 Tuzi 异步接口已停用"):
+        openai_image.render(prompt="fox", model="gpt-image-2", alias="Tuzi", output_dir=tmp_path,
+                            params={"provider_task_protocol": "tuzi_async",
+                                    "provider_task_ids": ["old-paid-task"]})
+
+
+@pytest.mark.parametrize("model,extra", [
+    ("gpt-image-2-1k", {}),
+    ("gpt-image-2", {"quality": "high"}),
+    ("gpt-image-2", {"background": "transparent"}),
+])
+def test_tuzi_images_only_options_use_images_contract_without_changing_model(
+    isolated_data_root, tmp_path, monkeypatch, model, extra,
+):
+    _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
+    captured = []
+    def post(url, api_key, payload, **kwargs):
+        captured.append((url, payload))
+        return {"data": [{"b64_json": "aGk="}]}
+    monkeypatch.setattr(openai_image, "_post_json", post)
+    monkeypatch.setattr(openai_image.tuzi_async, "execute_json", lambda **k: pytest.fail("wrong API"))
+    openai_image.render(prompt="fox", model=model, alias="Tuzi", output_dir=tmp_path, params=extra)
+    assert captured[0][0] == "https://api.tu-zi.com/v1/images/generations"
+    assert captured[0][1]["model"] == model
+    for name, value in extra.items():
+        assert captured[0][1][name] == value
+
+
+def test_tuzi_native_multiple_images_persist_each_order_before_poll_and_download(
+    isolated_data_root, tmp_path, monkeypatch,
+):
+    _add_key(alias="Tuzi", provider="custom", base_url="https://api.tu-zi.com")
+    params = {"size_mode": "custom", "size": "2048x2048"}
+    submitted = []
+    persisted = []
+    def post(url, **kwargs):
+        assert url == "https://api.tu-zi.com/v1/videos"
+        submitted.append(f"order-{len(submitted) + 1}")
+        return FakePostResponse({"id": submitted[-1], "status": "queued"})
+    def get(url, **kwargs):
+        assert persisted[-1] == submitted
+        assert url == f"https://api.tu-zi.com/v1/videos/{submitted[-1]}"
+        return FakePostResponse({"status": "completed", "video_url": "https://cdn.example/image.png"})
+    monkeypatch.setattr(openai_image.requests, "post", post)
+    monkeypatch.setattr(openai_image.requests, "get", get)
+    monkeypatch.setattr(openai_image.tuzi_async.video_poll.time, "sleep", lambda _: None)
+    monkeypatch.setattr(openai_image, "_download_image_url", lambda url: b"image-bytes")
+    paths = openai_image.render(prompt="architecture", model="gpt-image-2", alias="Tuzi",
+                               output_dir=tmp_path, n=4, params=params,
+                               on_params_changed=lambda: persisted.append(list(params["provider_task_ids"])))
+    assert len(paths) == 4
+    assert len(set(submitted)) == 4
+    assert params["provider_task_protocol"] == "tuzi_images"
+    assert all(Path(p).read_bytes() == b"image-bytes" for p in paths)
+
+
+@pytest.mark.parametrize("model", ["gpt-image-2", "gpt-image-2-vip"])
 def test_render_tuzi_reference_edit_uses_async_multipart(
     isolated_data_root,
     tmp_path,
@@ -297,6 +361,7 @@ def test_render_tuzi_reference_edit_uses_async_multipart(
     assert captured["fields"]["model"] == model
     assert captured["files"][0][0] == "image"
     assert params["provider_task_ids"] == ["edit-task-1"]
+    assert params["provider_task_protocol"] == "tuzi_images"
     assert Path(paths[0]).read_bytes() == image_bytes
 
 
@@ -645,6 +710,80 @@ def test_render_openai_hk_gpt_image_no_reference_stays_on_generations(
     )
     assert captured["url"].endswith("/v1/images/generations")
     assert len(paths) == 1
+
+
+@pytest.mark.parametrize("base_url", [
+    "https://api.openai.com/v1", "https://api.openai-hk.com", "https://api.tu-zi.com/v1",
+])
+@pytest.mark.parametrize("model", ["gpt-image-2", "gpt-image-1.5", "gpt-image-1"])
+@pytest.mark.parametrize("with_reference", [False, True])
+def test_dispatch_explicit_auto_reaches_image_json_and_multipart_without_pixel_default(
+    isolated_data_root, tmp_path, monkeypatch, base_url, model, with_reference,
+):
+    _add_key(alias="auto-size", provider="custom", base_url=base_url)
+    captured = []
+    png = b"\x89PNG\r\n\x1a\nauto"
+    def post(url, **kwargs):
+        body = kwargs.get("json") or kwargs.get("data")
+        if body is None:
+            body = {name: part[1] for name, part in kwargs["files"] if part[0] is None}
+        captured.append((url, body))
+        if "tu-zi.com" in base_url and model != "gpt-image-2":
+            return FakePostResponse({"id": "auto-task"})
+        return FakePostResponse({"data": [{"b64_json": base64.b64encode(png).decode()}]})
+    monkeypatch.setattr(openai_image.requests, "post", post)
+    monkeypatch.setattr(openai_image.requests, "get", lambda *args, **kwargs: FakePostResponse({
+        "status": "completed", "video_url": "https://cdn.example/auto.png",
+    }))
+    monkeypatch.setattr(openai_image, "_download_image_url", lambda url: png)
+    params = {"size_mode": "auto", "size": "1360x2048", "ratio": "2:3",
+              "resolution": "2K", "custom_size": "1360x2048"}
+    if "tu-zi.com" not in base_url:
+        params["quality"] = "high"
+    if with_reference:
+        reference = tmp_path / "reference.png"
+        reference.write_bytes(png)
+        params["reference_images"] = [str(reference)]
+    paths = dispatch(prompt="architecture", model=model, alias="auto-size",
+                     output_dir=tmp_path / "out", params=params, size="1360x2048")
+    assert len(paths) == 1
+    url, body = captured[0]
+    if "tu-zi.com" in base_url:
+        if model == "gpt-image-2":
+            assert url.endswith("/images/edits" if with_reference else "/images/generations")
+            assert len(captured) == 1
+            assert not params.get("provider_task_ids")
+        else:
+            assert url == "https://api.tu-zi.com/v1/videos"
+        assert "quality" not in body
+    else:
+        assert url.endswith("/images/edits" if with_reference else "/images/generations")
+        assert body["quality"] == "high"
+    assert body["model"] == model
+    assert body["size"] == "auto"
+    assert "ratio" not in body
+    assert "resolution" not in body
+    assert "custom_size" not in body
+    assert "size_mode" not in body
+
+
+@pytest.mark.parametrize("multipart", [False, True])
+@pytest.mark.parametrize("status", [502, 503, 504])
+def test_tuzi_auto_images_gateway_error_never_rebills(monkeypatch, multipart, status):
+    calls = []
+    def post(*args, **kwargs):
+        calls.append(args[0])
+        return FakePostResponse({"error": "upstream timeout"}, status_code=status)
+    monkeypatch.setattr(openai_image.requests, "post", post)
+    payload = {"model": "gpt-image-2", "size": "auto", "prompt": "architecture"}
+    with pytest.raises(openai_image.OpenAIImageError, match=str(status)):
+        if multipart:
+            openai_image._post_multipart("https://api.tu-zi.com/v1/images/edits", "test",
+                                         fields=payload, files=[], timeout=1)
+        else:
+            openai_image._post_json("https://api.tu-zi.com/v1/images/generations", "test",
+                                    payload, timeout=1)
+    assert len(calls) == 1
 
 
 def test_render_seedream_truncates_reference_images_to_cap(
@@ -1020,10 +1159,10 @@ def test_render_openai_hk_nano_banana_passes_ratio_size_and_backfills(
         params={"quality": "low"},
     )
 
-    # nano-banana：size 是比例字符串原样下发；单次只回 1 张 → 循环补足到 3 张。
+    # HK Nano 用 x 分隔比例；单次只回 1 张 → 循环补足到 3 张。
     assert captured["url"] == "https://api.openai-hk.com/v1/images/generations"
     assert len(captured["payloads"]) == 3
-    assert captured["payloads"][0]["size"] == "16:9"
+    assert captured["payloads"][0]["size"] == "16x9"
     assert captured["payloads"][0]["quality"] == "low"
     assert len(paths) == 3
 
@@ -1499,10 +1638,10 @@ def test_custom_seedream_normalizes_size_to_minimum_pixels(tmp_path, monkeypatch
     ))
     posted = {}
     monkeypatch.setattr(
-        openai_image.tuzi_async,
-        "execute_json",
-        lambda **kwargs: (
-            posted.update(body=kwargs["payload"]),
+        openai_image,
+        "_post_json",
+        lambda url, api_key, payload, **kwargs: (
+            posted.update(body=payload),
             {"data": [{"b64_json": "aGk="}]},
         )[1],
     )

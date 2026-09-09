@@ -17,7 +17,7 @@ function CanvasConnectionEdge(props: EdgeProps) {
         markerEnd={props.markerEnd}
         interactionWidth={props.interactionWidth}
       />
-      <EdgeToolbar edgeId={props.id} x={x} y={y} isVisible={Boolean(props.selected)}>
+      <EdgeToolbar edgeId={props.id} x={x} y={y} isVisible={Boolean(props.selected) && props.deletable !== false}>
         <Button
           type="button"
           variant="outline"

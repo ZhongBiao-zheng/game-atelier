@@ -8,6 +8,7 @@ import {
   canvasGenerationPreferenceForModel,
   firstCanvasGenerationModel,
   switchCanvasGenerationDraft,
+  resolveCanvasGenerationDraft,
 } from './canvasEditorModel';
 
 const keys: KeyView[] = [
@@ -49,13 +50,31 @@ function documentWithText(text = '雨夜列车分镜'): CanvasDocument {
   };
 }
 
+it('offers an unconfigured text draft without borrowing a media model or changing existing drafts', () => {
+  const document = documentWithText();
+  const node = document.nodes[0];
+  expect(resolveCanvasGenerationDraft(node, keys)).toMatchObject({
+    mode: 'text', alias: null, model: '', prompt: '', input_policy: 'all_connected', params: {},
+  });
+  expect(document.nodes[0]).toMatchObject({ data: { generation_draft: null } });
+  const stored = createCanvasGenerationDraft(keys, 'text', { prompt: '已配置的提示词' });
+  if (node.type !== 'text') throw new Error('expected text fixture');
+  expect(resolveCanvasGenerationDraft({ ...node, data: { ...node.data, generation_draft: stored } }, keys))
+    .toBe(stored);
+  expect(resolveCanvasGenerationDraft({
+    id: 'image', title: '上传图片', type: 'image', position: { x: 0, y: 0 }, z_index: 0,
+    data: { current_version_id: null, generation_draft: null, active_run_id: null,
+      display: { fit: 'contain', free_resize: false } },
+  }, keys)).toBeNull();
+});
+
 it('creates a capability-honest config draft and preserves references while switching modes', () => {
   const image = createCanvasGenerationDraft(keys, 'image', {
     now: '2026-08-25T01:00:00Z',
   });
   expect(image).toMatchObject({
     mode: 'image', alias: 'image-key', model: 'gpt-image-2',
-    input_policy: 'mentions_only', params: { n: 1, ratio: '1:1' },
+    input_policy: 'all_connected', params: { n: 1, size_mode: 'auto', size: 'auto', ratio: '1:1' },
   });
 
   const current: CanvasGenerationDraft = {
@@ -70,7 +89,7 @@ it('creates a capability-honest config draft and preserves references while swit
   );
   expect(video).toMatchObject({
     mode: 'video', alias: 'video-key', model: 'seedance-2.0',
-    prompt: current.prompt, input_policy: 'mentions_only',
+    prompt: current.prompt, input_policy: 'all_connected',
     params: { duration: 5, resolution: '720p', ratio: '16:9' },
     updated_at: '2026-08-25T02:00:00Z',
   });
@@ -90,7 +109,7 @@ it('creates one connected image config to the right of a non-empty text node', (
     position: { x: 376, y: 48 },
     data: {
       draft: {
-        mode: 'image', prompt: '@[node:text-source]', input_policy: 'mentions_only',
+        mode: 'image', prompt: '@[node:text-source]', input_policy: 'all_connected',
       },
     },
   });
@@ -116,6 +135,22 @@ it('creates a connected config from blank text because text nodes always count a
     source_node_id: 'text-source',
     target_node_id: 'config-image',
   })]);
+});
+
+it.each(['image', 'video'] as const)('creates an explicit downstream %s node without changing the source', mode => {
+  const document = documentWithText();
+  const original = structuredClone(document);
+  const next = createConnectedCanvasConfig(document, 'text-source', createCanvasGenerationDraft(keys, mode), {
+    nodeId: `downstream-${mode}`, connectionId: 'explicit-input',
+  }, mode)!;
+  expect(next.nodes.at(-1)).toMatchObject({
+    type: mode, data: { current_version_id: null, generation_draft: { mode, input_policy: 'all_connected' } },
+  });
+  expect(next.connections).toEqual([{
+    id: 'explicit-input', role: 'input', source_node_id: 'text-source', target_node_id: `downstream-${mode}`,
+  }]);
+  expect(next.nodes[0]).toEqual(document.nodes[0]);
+  expect(document).toEqual(original);
 });
 
 it('skips models that the Canvas Runner cannot route', () => {
@@ -181,7 +216,7 @@ it('keeps model and capability params empty when no routable model exists', () =
   expect(createCanvasGenerationDraft(unavailable, 'image', {
     now: '2026-08-25T03:00:00Z',
   })).toEqual({
-    mode: 'image', prompt: '', input_policy: 'mentions_only', model: '', alias: null,
+    mode: 'image', prompt: '', input_policy: 'all_connected', model: '', alias: null,
     params: {}, updated_at: '2026-08-25T03:00:00Z',
   });
 });

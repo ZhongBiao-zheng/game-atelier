@@ -9,6 +9,8 @@ export type JobKind = 'text' | 'image' | 'video' | 'audio';
 export type Namespace = 'character' | 'studio' | 'ui' | 'video' | 'canvas';
 
 export interface JobParams {
+  size_mode?: 'auto' | 'ratio' | 'custom';
+  custom_size?: string;
   size?: string;
   steps?: number;
   cfg_scale?: number;
@@ -32,7 +34,7 @@ export interface JobParams {
   actual_size?: string;
   warnings?: string[];
   /** 聚合商异步任务恢复信息；Web 只读，重启后后端凭此续查，不能重新提交。 */
-  provider_task_protocol?: 'tuzi_async';
+  provider_task_protocol?: 'tuzi_async' | 'tuzi_images';
   provider_task_ids?: string[];
   // 图片参数 —— 与 schemas.py::JobParams 同步（ratio 如 "16:9"；quality: low|medium|high|auto）
   ratio?: string;
@@ -114,6 +116,7 @@ export interface CanvasGenerationSnapshot {
   result_node_id: string;
   mode: 'text' | 'image' | 'video' | 'audio';
   final_prompt: string;
+  draft_prompt?: string | null;
   input_policy: 'all_connected' | 'mentions_only';
   model: string;
   provider: string;
@@ -121,7 +124,7 @@ export interface CanvasGenerationSnapshot {
   normalized_params: Record<string, unknown>;
   inputs: Array<{
     order: number;
-    source: 'implicit_self' | 'input_connection' | 'first_frame' | 'last_frame';
+    source: 'implicit_self' | 'explicit_source' | 'input_connection' | 'first_frame' | 'last_frame';
     node_id: string;
     version_id: string;
     kind: 'text' | 'image' | 'video' | 'audio';

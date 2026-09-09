@@ -2,14 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Boxes, Check, Settings2 } from 'lucide-react';
 
 import type { KeyView } from '@/api/keys';
-import { RatioIcon } from '@/components/studio/RatioIcon';
+import { ImageSizeFields } from '@/components/studio/ImageSizeFields';
+import { imageSizeMode, imageSizeSummary } from '@/lib/imageSizeMode';
 import {
   ToolbarPopover,
   type ToolbarPopoverMenuProps,
 } from '@/components/studio/ToolbarPopover';
 import { QUALITY_LABELS, type ImageControlCaps, type Quality } from '@/lib/imageControlCaps';
 import { cn } from '@/lib/utils';
-import { normalizeStudioSizeForModel, type Resolution } from '@/lib/studioSize';
 import {
   AUDIO_FORMAT_OPTIONS,
   AUDIO_SPEED_PRESETS,
@@ -143,6 +143,7 @@ export function CanvasModelPicker({
 export function CanvasImageSettings({
   caps,
   model,
+  baseUrl,
   params,
   onPatch,
   menuDirection = 'up',
@@ -150,31 +151,21 @@ export function CanvasImageSettings({
 }: {
   caps: ImageControlCaps;
   model: string;
+  baseUrl?: string | null;
   params: JobParams;
-  onPatch: (patch: JobParams, options?: { resetSize?: boolean }) => void;
+  onPatch: (patch: JobParams) => void;
 } & ToolbarPopoverMenuProps) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
-  const ratio = String(params.ratio ?? caps.ratios[0] ?? '1:1');
   const count = caps.family === 'midjourney'
     ? 4
     : Math.max(1, Math.min(4, Number(params.n) || 1));
-  const size = typeof params.size === 'string' && /^\d+x\d+$/.test(params.size)
-    ? params.size
-    : '2048x2048';
-  const [width, height] = size.split('x').map(Number);
   const summary = [
-    ratio,
-    caps.showResolution ? String(params.resolution ?? caps.resolutions[0] ?? '') : null,
+    imageSizeSummary(params),
+    caps.showResolution && imageSizeMode(params) === 'ratio' ? String(params.resolution ?? caps.resolutions[0] ?? '') : null,
     caps.qualities ? QUALITY_LABELS[(params.quality as Quality) ?? caps.qualities[0]] : null,
     `${count} 张`,
   ].filter(Boolean).join(' · ');
-
-  function commitSize(nextWidth: number, nextHeight: number) {
-    const safeWidth = Number.isFinite(nextWidth) && nextWidth >= 16 ? nextWidth : width;
-    const safeHeight = Number.isFinite(nextHeight) && nextHeight >= 16 ? nextHeight : height;
-    onPatch({ size: normalizeStudioSizeForModel(`${safeWidth}x${safeHeight}`, model) });
-  }
 
   return (
     <div ref={anchorRef} className="relative min-w-0">
@@ -202,64 +193,7 @@ export function CanvasImageSettings({
         )}
       >
         <div className="space-y-4">
-          <SettingsSection title="比例">
-            <div role="listbox" aria-label="选择图片比例" className="grid grid-cols-4 gap-y-1 rounded-lg bg-popover p-1">
-              {caps.ratios.map(item => (
-                <button
-                  key={item}
-                  type="button"
-                  role="option"
-                  aria-selected={ratio === item}
-                  onClick={() => onPatch({ ratio: item }, { resetSize: true })}
-                  className="flex h-11 min-w-0 flex-col items-center justify-center gap-0.5 rounded-md text-xs transition-colors hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60"
-                >
-                  <RatioIcon ratio={item} box={16} />
-                  {item}
-                </button>
-              ))}
-            </div>
-          </SettingsSection>
-
-          {caps.showResolution && (
-            <SettingsSection title="分辨率">
-              <OptionTrack
-                label="选择图片分辨率"
-                values={caps.resolutions}
-                selected={String(params.resolution ?? caps.resolutions[0])}
-                onSelect={value => onPatch({ resolution: value as Resolution }, { resetSize: true })}
-              />
-            </SettingsSection>
-          )}
-
-          {caps.showCustomSize && (
-            <SettingsSection title="自定义尺寸">
-              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 rounded-lg bg-popover p-2">
-                <label className="text-xs text-muted-foreground">
-                  宽
-                  <input
-                    key={`w-${size}`}
-                    type="number"
-                    min={16}
-                    defaultValue={width}
-                    onBlur={event => commitSize(Number(event.target.value), height)}
-                    className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  />
-                </label>
-                <span className="pt-5 text-xs text-muted-foreground">×</span>
-                <label className="text-xs text-muted-foreground">
-                  高
-                  <input
-                    key={`h-${size}`}
-                    type="number"
-                    min={16}
-                    defaultValue={height}
-                    onBlur={event => commitSize(width, Number(event.target.value))}
-                    className="mt-1 h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  />
-                </label>
-              </div>
-            </SettingsSection>
-          )}
+          <ImageSizeFields caps={caps} model={model} baseUrl={baseUrl} params={params} onPatch={onPatch} />
 
           {caps.qualities && (
             <SettingsSection title="质量">

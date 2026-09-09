@@ -123,6 +123,15 @@ def test_generation_preferences_reject_paths_disguised_as_option_values(isolated
     assert not data_root.canvas_ui_file().exists()
 
 
+def test_generation_preferences_roundtrip_incomplete_custom_size_draft(isolated_data_root):
+    client = _client(isolated_data_root)
+    payload = _payload()
+    params = {"size_mode": "custom", "size": "x2048", "custom_size": "x2048", "ratio": "2:3"}
+    payload["generation_defaults"]["image"]["params"] = params
+    assert client.put("/api/canvas/ui-preferences", json=payload).status_code == 200
+    assert client.get("/api/canvas/ui-preferences").json()["generation_defaults"]["image"]["params"] == params
+
+
 def test_generation_preferences_do_not_silently_accept_v1_or_corrupt_files(isolated_data_root):
     client = _client(isolated_data_root)
     path = data_root.canvas_ui_file()
@@ -208,7 +217,7 @@ def test_reverse_prompt_recovery_falls_back_without_leaking_stale_params(isolate
     key, model, params = _resolve_default_image_model()
 
     assert (key.alias, model.id) == ("fallback", "gpt-image-1")
-    assert params.model_dump(exclude_none=True) == {"n": 1, "ratio": "1:1"}
+    assert params.model_dump(exclude_none=True) == {"n": 1, "size_mode": "auto", "size": "auto"}
 
 
 def test_reverse_prompt_recovery_applies_auto_model_params(isolated_data_root):

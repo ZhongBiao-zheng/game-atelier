@@ -9,6 +9,7 @@ import type { GenMode } from '@/lib/historyFilters';
 import { isGalleryFavorited, isGalleryHidden } from '@/api/gallery';
 import { formatBeijingTime } from '@/lib/time';
 import { formatGenerationCost } from '@/lib/generationCost';
+import { imageSizeSummary } from '@/lib/imageSizeMode';
 import {
   canonicalMentionLabel,
   createMentionTokenRegex,
@@ -31,9 +32,10 @@ export interface RoundConfig {
   model: string;
   modelName?: string;
   ratio?: string;
-  resolution?: '2K' | '4K';
+  resolution?: '512' | '1K' | '2K' | '4K';
   quality?: 'low' | 'medium' | 'high' | 'auto';
   size?: string;
+  sizeMode?: 'auto' | 'ratio' | 'custom';
   n?: number;
   referenceImages: string[];
   /** 使用创作资产时冻结的只读来源名称；不提供回跳或更新关系。 */
@@ -78,9 +80,9 @@ export type RoundState =
 /** 生成中占位框的宽高比：按目标比例（"16:9"）→ 退回尺寸（"1024x1536"）→ 退回 1:1。
  *  别再固定 aspect-square，否则出竖图/宽图时占位是方框、出图后尺寸跳变。 */
 function aspectStyle(config: RoundConfig): { aspectRatio: string } {
-  const r = config.ratio;
+  const r = !config.sizeMode || config.sizeMode === 'ratio' ? config.ratio : undefined;
   if (r && /^\d+\s*:\s*\d+$/.test(r)) return { aspectRatio: r.replace(/\s*:\s*/, ' / ') };
-  const m = config.size?.match(/^(\d+)\s*[x×]\s*(\d+)$/i);
+  const m = config.sizeMode !== 'auto' ? config.size?.match(/^(\d+)\s*[x×]\s*(\d+)$/i) : null;
   if (m) return { aspectRatio: `${m[1]} / ${m[2]}` };
   return { aspectRatio: '1 / 1' };
 }
@@ -88,9 +90,9 @@ function aspectStyle(config: RoundConfig): { aspectRatio: string } {
 function specMetadata(config: RoundConfig): string[] {
   const values = [
     config.modelName ?? config.model,
-    config.size,
-    config.ratio,
-    config.resolution,
+    ...(config.kind === 'video' ? [config.size, config.ratio, config.resolution]
+      : [imageSizeSummary({ size_mode: config.sizeMode, size: config.size, ratio: config.ratio }),
+        !config.sizeMode || config.sizeMode === 'ratio' ? config.resolution : undefined]),
     config.n && config.n > 1 ? `${config.n} 张` : undefined,
   ].filter((value): value is string => Boolean(value));
   return values.filter((value, index) => values.indexOf(value) === index);

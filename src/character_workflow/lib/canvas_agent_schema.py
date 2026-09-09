@@ -64,7 +64,7 @@ class SetDraftChange(StrictInput):
     prompt: Text
     model: Annotated[str, StringConstraints(min_length=1, max_length=200)]
     alias: Annotated[str, StringConstraints(min_length=1, max_length=120)] | None = None
-    input_policy: Literal["all_connected", "mentions_only"] | None = None
+    input_policy: Literal["all_connected"] | None = None
     # 只接受标量；服务端再按 CANVAS_DRAFT_PARAM_FIELDS 过滤，路径类字段永远进不来。
     params: dict[str, str | int | float | bool] = Field(default_factory=dict, max_length=40)
 

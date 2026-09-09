@@ -1738,7 +1738,7 @@ _GALLERY_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
     """Return random character images from portrait/promo/turnaround.
 
-    应用设置 show_studio_on_home 开启时，Studio 出图（studio/<job_id>/*）也混排进来。
+    开启 show_studio_on_home 时，只混入 Studio 已完成任务登记的图片产物。
     """
     characters_dir = _project_root() / "characters"
     items: list[dict] = []
@@ -1775,19 +1775,32 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                     })
     studio_dir = _project_root() / "studio"
     if bool(_read_config().get("show_studio_on_home", False)) and studio_dir.exists():
-        for job_dir in studio_dir.iterdir():
-            if not job_dir.is_dir():
+        studio_root = studio_dir.resolve()
+        seen_studio_paths: set[str] = set()
+        # 文件存在不代表生成成功：目录里可能留下测试图或落盘后未完成登记的产物。
+        # PARTIAL 已有成功结果，不能因为同批其他图片失败就把它们一起隐藏。
+        for job in list_jobs():
+            if (
+                job.namespace != "studio"
+                or job.kind != JobKind.IMAGE
+                or job.status not in (JobStatus.DONE, JobStatus.PARTIAL)
+            ):
                 continue
-            for f in job_dir.iterdir():
-                if f.suffix.lower() not in _GALLERY_EXTS:
-                    continue
-                rel = f.relative_to(_project_root()).as_posix()
-                if rel in hidden:
-                    continue
+            for raw_path in job.output_paths:
                 try:
+                    f = Path(raw_path)
+                    f = (f if f.is_absolute() else _project_root() / f).resolve()
+                    if not f.is_relative_to(studio_root) or not f.is_file():
+                        continue
+                    if f.suffix.lower() not in _GALLERY_EXTS:
+                        continue
+                    rel = f.relative_to(_project_root()).as_posix()
+                    if rel in hidden or rel in seen_studio_paths:
+                        continue
                     mtime = f.stat().st_mtime
-                except OSError:
+                except (OSError, ValueError, RuntimeError):
                     continue
+                seen_studio_paths.add(rel)
                 items.append({
                     "character_id": None,
                     "project_id": None,
@@ -1795,8 +1808,7 @@ def gallery_recent(limit: int = Query(default=24, ge=1, le=100)) -> dict:
                     "source": "studio",
                     "filename": f.name,
                     "path": rel,
-                    # jobs 索引兜底目录名：studio 输出目录名即 job_id。
-                    "job_id": job_ids_by_path.get(rel, job_dir.name),
+                    "job_id": job.job_id,
                     "mtime": mtime,
                 })
     favorites = set(_read_gallery_favorites())
@@ -2035,6 +2047,7 @@ def gallery_image(path: str) -> FileResponse:
 class _StudioJobCreate(BaseModel):
     model_config = {"extra": "forbid"}
     prompt: str = Field(min_length=1)
+    prompt_template: str | None = Field(default=None, max_length=40_000)
     model: str
     params: JobParams
     alias: str | None = None
@@ -2047,6 +2060,17 @@ def _create_user_job(
     namespace: Literal["studio"],
 ) -> Job:
     """Build and persist one Web-confirmed Studio job."""
+    from character_workflow.lib.prompt_variables import resolve_prompt_variables
+
+    try:
+        prompt = (
+            resolve_prompt_variables(body.prompt_template)
+            if body.prompt_template is not None else body.prompt
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if not prompt.strip():
+        raise HTTPException(status_code=422, detail="生成提示词不能为空")
     if body.kind not in {JobKind.IMAGE, JobKind.VIDEO}:
         raise HTTPException(422, detail="创作台目前只接受图片或视频任务")
     db = keys.read_keys_db()
@@ -2062,6 +2086,14 @@ def _create_user_job(
     params.provider_task_protocol = None
     params.provider_task_ids = None
     if body.kind == JobKind.IMAGE:
+        from character_workflow.lib.image_size import normalize_image_size_params
+
+        try:
+            params = JobParams(**normalize_image_size_params(
+                key_row, body.model, params.model_dump(exclude_none=True),
+            ))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         image_count = params.n if params.n is not None else 1
         if image_count < 1 or image_count > 4:
             raise HTTPException(status_code=422, detail="params.n must be between 1 and 4")
@@ -2070,7 +2102,7 @@ def _create_user_job(
     job = Job(
         job_id=new_job_id(),
         character_id=alias,
-        prompt=body.prompt,
+        prompt=prompt,
         submitted_at=datetime.now(timezone.utc).isoformat(),
         model=body.model,
         params=params,
@@ -2877,6 +2909,35 @@ def _canvas_media_file_response(
         raise HTTPException(404, detail="找不到这个画布媒体文件") from None
     except PermissionError as error:
         raise HTTPException(403, detail=str(error)) from error
+
+
+class _LayerArchiveResponse(FileResponse):
+    async def __call__(self, scope, receive, send) -> None:
+        # FileResponse can return early for invalid Range, or fail before its background task.
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            Path(self.path).unlink(missing_ok=True)
+
+
+@router.get("/canvas/projects/{project_id}/nodes/{node_id}/layers/download")
+def get_canvas_layers_download(project_id: str, node_id: str) -> FileResponse:
+    from character_workflow.lib.canvas_layer_exports import export_canvas_layers
+
+    try:
+        target, filename = export_canvas_layers(project_id, node_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个拆分图层节点") from None
+    except FileNotFoundError:
+        raise HTTPException(404, detail="图层文件缺失，未导出不完整的压缩包") from None
+    except PermissionError:
+        raise HTTPException(403, detail="图层文件不属于这个画布项目") from None
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    return _LayerArchiveResponse(
+        target, media_type="application/zip", filename=filename,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/canvas/projects/{project_id}/jobs", response_model=list[Job])

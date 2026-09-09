@@ -182,8 +182,7 @@ def _sources(document: CanvasDocument, node: CanvasNode) -> list[str]:
     draft = _draft_for_node(node)
     if draft is None:
         return []
-    return list(dict.fromkeys(source for role, source in canvas_input_sources(document, node, draft)
-                             if role != "implicit_self"))
+    return list(dict.fromkeys(source for _role, source in canvas_input_sources(document, node, draft)))
 
 
 def _executable(document: CanvasDocument, node: CanvasNode) -> bool:
@@ -265,7 +264,10 @@ def _layout_height(node: CanvasNode, document: CanvasDocument) -> float:
         dimensions.append((version.width, version.height))
     draft = _draft_for_node(node)
     if draft:
-        for value in (draft.params.size, draft.params.ratio):
+        values = (() if draft.params.size_mode == "auto" else
+                  (draft.params.size,) if draft.params.size_mode == "custom" else
+                  (draft.params.size, draft.params.ratio))
+        for value in values:
             match = re.fullmatch(r"(\d+(?:\.\d+)?)[x:](\d+(?:\.\d+)?)", str(value or ""))
             if match and float(match[1]) > 0 and float(match[2]) > 0:
                 dimensions.append((float(match[1]), float(match[2])))

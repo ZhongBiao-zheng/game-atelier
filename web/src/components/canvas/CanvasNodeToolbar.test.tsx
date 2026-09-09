@@ -1,15 +1,24 @@
 import type { CanvasContentVersion } from '@/schema/canvas';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { downloadCanvasLayers } from '@/api/canvas';
+import { act, createEvent, fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
+import { useState } from 'react';
+import { promptVariableToken } from '@/lib/promptVariables';
 
 import {
   CanvasNodeCard,
   CanvasNodeContext,
   CanvasLayerStackSurface,
+  copyablePromptForNode,
   type CanvasNodeContextValue,
 } from './CanvasEditorViews';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from './canvasImageToolbar';
 import type { CanvasNode } from '@/schema/canvas';
+
+vi.mock('@/api/canvas', async importOriginal => ({
+  ...await importOriginal<typeof import('@/api/canvas')>(),
+  downloadCanvasLayers: vi.fn(async () => undefined),
+}));
 
 
 /** context 里已经不再是版本表而是解析器（见 CanvasEditor 里 resolveVersion 的说明），
@@ -124,6 +133,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     copyPrompt: vi.fn(async () => undefined),
     reversePrompt: vi.fn(async () => undefined),
     createLayerDecomposition: vi.fn(),
+    expandLayerStack: vi.fn(),
     submitLayerDecomposition: vi.fn(async () => undefined),
     replaceLayerStackSource: vi.fn(),
     recoverReversePromptConfig: vi.fn(async () => undefined),
@@ -145,6 +155,55 @@ const NodeCard = CanvasNodeCard as React.ComponentType<{
   data: { domain: CanvasNode };
   selected: boolean;
 }>;
+
+it('locates a material parent from its title and explicitly creates downstream image work', () => {
+  const source = { ...nodes[1], data: { ...nodes[1].data, current_version_id: 'source-image' } } as CanvasNode;
+  const version: CanvasContentVersion = {
+    kind: 'image', version_id: 'source-image', path: 'source.png', mime_type: 'image/png', bytes: 20,
+    sha256: 'a'.repeat(64), created_at: '2026-09-09T00:00:00Z', origin: { kind: 'upload', upload_id: 'source' },
+  };
+  const context = nodeContext({
+    layerParentByNodeId: new Map([[source.id, { nodeId: 'parent-stack', title: '拆分图层' }]]),
+    locateNode: vi.fn(), createImageFromSource: vi.fn(), resolveVersion: () => version,
+  });
+  render(<CanvasNodeContext.Provider value={context}><NodeCard data={{ domain: source }} selected /></CanvasNodeContext.Provider>);
+  const parent = screen.getByRole('button', { name: '定位父图层：拆分图层' });
+  expect(parent.closest('header')).toBeTruthy();
+  fireEvent.click(parent);
+  expect(context.locateNode).toHaveBeenCalledWith('parent-stack');
+  fireEvent.click(screen.getByRole('button', { name: '基于 图片 生成' }));
+  expect(context.createImageFromSource).toHaveBeenCalledWith(source.id);
+});
+
+it('keeps a text node editor mounted after the last variable is removed, without stealing focus on load', () => {
+  function Harness() {
+    const [value, setValue] = useState(promptVariableToken({ name: '主体', example: '猫', value: '' }));
+    const textNode = { ...nodes[0], data: { ...nodes[0].data, current_version_id: 'inline-version' } } as CanvasNode;
+    const version: CanvasContentVersion = {
+      kind: 'text', text: value, version_id: 'inline-version', sha256: 'x',
+      created_at: '2026-09-09T00:00:00Z', origin: { kind: 'upload', upload_id: 'test' },
+    };
+    return <CanvasNodeContext.Provider value={nodeContext({
+      resolveVersion: () => version,
+      updateText: (_id, text) => setValue(text),
+    })}><NodeCard data={{ domain: textNode }} selected={false} /></CanvasNodeContext.Provider>;
+  }
+  render(<Harness />);
+  const input = screen.getByRole('textbox', { name: '变量：主体' });
+  expect(input).not.toHaveFocus();
+  const editor = screen.getByRole('combobox', { name: '提示词' });
+  fireEvent.focus(editor);
+  editor.textContent = '改成普通正文';
+  fireEvent.input(editor);
+  expect(screen.getByRole('combobox', { name: '提示词' })).toBe(editor);
+  expect(editor).toHaveTextContent('改成普通正文');
+});
+
+it('copies readable draft variables instead of internal tokens', () => {
+  const prompt = promptVariableToken({ name: '主体', example: '猫', value: '狐狸' });
+  const config = { ...nodes[4], data: { draft: { ...draft, prompt } } } as CanvasNode;
+  expect(copyablePromptForNode(config, new Map())).toBe('狐狸');
+});
 
 it('renders one independent selected toolbar for every canvas node type', () => {
   const context = nodeContext();
@@ -330,6 +389,7 @@ it('renders distinct empty media surfaces with direct upload actions', () => {
   );
 
   expect(screen.getByText('空图片节点')).toBeInTheDocument();
+  expect(screen.getByText('空图片节点').closest('article')).toHaveClass('bg-card/95');
   expect(screen.getByText('空视频节点')).toBeInTheDocument();
   expect(screen.getByText('空音频节点')).toBeInTheDocument();
 
@@ -381,6 +441,10 @@ it('keeps populated media playable inside the node without opening preview from 
   );
 
   expect(container.querySelector('img.object-fill')).toBeInTheDocument();
+  const imageSurface = container.querySelector('img.object-fill')!.closest('article')!;
+  expect(imageSurface).toHaveClass('bg-transparent');
+  expect(imageSurface.querySelector(':scope > div.h-full')).toHaveClass('bg-transparent');
+  expect(container.querySelector('video')!.closest('article')).toHaveClass('bg-card/95');
   const video = container.querySelector<HTMLVideoElement>('video[data-canvas-media-controls="video"]');
   const audio = container.querySelector<HTMLAudioElement>('audio[controls]');
   expect(video).toBeInTheDocument();
@@ -418,6 +482,39 @@ it('keeps populated media playable inside the node without opening preview from 
   fireEvent.doubleClick(video!);
   fireEvent.doubleClick(audio!);
   expect(context.previewContent).not.toHaveBeenCalled();
+});
+
+it('offers bulk layer actions only after completion and reports download failures', async () => {
+  const stack = {
+    id: 'stack-tools', title: '拆分图层', type: 'layer_stack', position: { x: 0, y: 0 }, z_index: 0,
+    size: { width: 760, height: 480 },
+    data: { source_version_id: 'source', alias: null, model: null, prompt: '', resolution: 'auto',
+      base_version_id: null, base_visible: true, layers: [], active_run_id: null, error: null },
+  } satisfies Extract<CanvasNode, { type: 'layer_stack' }>;
+  const context = nodeContext({ reportError: vi.fn() });
+  const view = (node: CanvasNode) => <CanvasNodeContext.Provider value={context}>
+    <NodeCard data={{ domain: node }} selected />
+  </CanvasNodeContext.Provider>;
+  const { rerender } = render(view(stack));
+  expect(screen.getByRole('button', { name: '下载全部图层' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '展开图层到画布并分组' })).toBeDisabled();
+  const ready = { ...stack, data: { ...stack.data, base_version_id: 'base' } };
+  rerender(view(ready));
+  fireEvent.click(screen.getByRole('button', { name: '展开图层到画布并分组' }));
+  expect(context.expandLayerStack).toHaveBeenCalledWith(stack.id);
+  let rejectDownload!: (error: Error) => void;
+  vi.mocked(downloadCanvasLayers).mockImplementationOnce(() => new Promise((_, reject) => { rejectDownload = reject; }));
+  fireEvent.click(screen.getByRole('button', { name: '下载全部图层' }));
+  expect(downloadCanvasLayers).toHaveBeenCalledWith('canvas-test', stack.id);
+  expect(screen.getByRole('button', { name: '下载全部图层' })).toBeDisabled();
+  await act(async () => rejectDownload(new Error('图层文件缺失')));
+  expect(context.reportError).toHaveBeenCalledWith('图层文件缺失');
+  expect(screen.getByRole('button', { name: '下载全部图层' })).toBeEnabled();
+  context.batchBusy = true;
+  rerender(view(ready));
+  expect(screen.getByRole('button', { name: '展开图层到画布并分组' })).toBeDisabled();
+  rerender(view({ ...ready, data: { ...ready.data, active_run_id: 'run' } }));
+  expect(screen.getByRole('button', { name: '下载全部图层' })).toBeDisabled();
 });
 
 it('shows every configured image action after selection and keeps it mounted while settings are open', async () => {
@@ -517,6 +614,34 @@ it('rebuilds a decomposed image from layers and hides a selected part', () => {
 
   expect(container.querySelector('[data-layer-stack-part="base"]')).toBeInTheDocument();
   expect(container.querySelector('[data-layer-stack-part="layer-subject"]')).toBeInTheDocument();
+  const listOrder = () => within(screen.getByRole('list', { name: '图层列表' })).getAllByRole('listitem').map(row => row.getAttribute('aria-label'));
+  const paintOrder = () => Array.from(container.querySelectorAll('image[data-layer-stack-part]')).map(image => image.getAttribute('data-layer-stack-part'));
+  expect(listOrder()).toEqual(['主体', '背景']);
+  expect(paintOrder()).toEqual(['base', 'layer-subject']);
+  fireEvent.drop(screen.getByRole('listitem', { name: '主体' }));
+  expect(context.updateNode).not.toHaveBeenCalled();
+  const dataTransfer = { setData: vi.fn(), effectAllowed: '', dropEffect: '' };
+  fireEvent.dragStart(screen.getByRole('listitem', { name: '主体' }), { dataTransfer });
+  const drop = createEvent.drop(screen.getByRole('listitem', { name: '背景' }), { dataTransfer });
+  Object.defineProperty(drop, 'clientY', { value: 10 });
+  fireEvent(screen.getByRole('listitem', { name: '背景' }), drop);
+  expect(context.recordHistory).toHaveBeenCalledOnce();
+  const reordered = vi.mocked(context.updateNode).mock.calls[0][1](layerStack) as typeof layerStack;
+  expect(reordered.data.layers[0]).toEqual({ ...layerStack.data.layers[0], z_index: 0 });
+  rerender(<CanvasLayerStackSurface node={reordered} context={context} />);
+  expect(listOrder()).toEqual(['背景', '主体']);
+  expect(paintOrder()).toEqual(['layer-subject', 'base']);
+  expect(screen.getByRole('link', { name: '下载主体' })).toHaveAttribute('href', expect.stringContaining('subject'));
+  fireEvent.keyDown(screen.getByRole('button', { name: '主体图层排序' }), { key: 'Enter' });
+  fireEvent.click(screen.getByRole('menuitem', { name: '上移一层' }));
+  const movedUp = vi.mocked(context.updateNode).mock.calls[1][1](reordered) as typeof layerStack;
+  expect(movedUp.data.layers).toEqual(layerStack.data.layers);
+  rerender(<CanvasLayerStackSurface node={{ ...layerStack, data: { ...layerStack.data, active_run_id: 'running' } }} context={context} />);
+  expect(screen.getByRole('listitem', { name: '主体' })).toHaveAttribute('draggable', 'false');
+  expect(screen.getByRole('button', { name: '主体图层排序' })).toBeDisabled();
+  rerender(<CanvasLayerStackSurface node={layerStack} context={context} />);
+  vi.mocked(context.recordHistory).mockClear();
+  vi.mocked(context.updateNode).mockClear();
   fireEvent.click(screen.getByRole('button', { name: '隐藏主体' }));
   expect(context.recordHistory).toHaveBeenCalledOnce();
   const update = vi.mocked(context.updateNode).mock.calls[0][1];

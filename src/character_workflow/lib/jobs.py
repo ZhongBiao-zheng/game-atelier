@@ -366,7 +366,7 @@ def is_resumable_studio_job(job: Job) -> bool:
     return bool(
         job.namespace == "studio"
         and job.status == JobStatus.PENDING
-        and job.params.provider_task_protocol == "tuzi_async"
+        and job.params.provider_task_protocol == "tuzi_images"
         and job.params.provider_task_ids
     )
 

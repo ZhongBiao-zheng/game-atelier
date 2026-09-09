@@ -58,6 +58,8 @@ export interface CanvasTextDefaultParams {
 }
 
 export interface CanvasImageDefaultParams {
+  size_mode?: 'auto' | 'ratio' | 'custom';
+  custom_size?: string;
   n?: number;
   ratio?: string;
   resolution?: string;
@@ -102,7 +104,7 @@ export type CanvasGenerationDefaults = {
 export interface CanvasGenerationDraft {
   mode: CanvasGenerationMode;
   prompt: string;
-  input_policy: 'all_connected' | 'mentions_only';
+  input_policy: 'all_connected';
   model: string;
   alias?: string | null;
   params: JobParams;
@@ -198,6 +200,7 @@ export interface CanvasLayerStackLayer {
   description: string;
   bounding_box: CanvasLayerBoundingBox;
   visible: boolean;
+  material_node_id?: string | null;
 }
 
 export interface CanvasLayerStackNode extends CanvasNodeBase {
@@ -210,6 +213,9 @@ export interface CanvasLayerStackNode extends CanvasNodeBase {
     resolution: 'auto' | '1K' | '1.5K' | '2K';
     base_version_id: string | null;
     base_visible: boolean;
+    base_z_index?: number;
+    base_material_node_id?: string | null;
+    layout_size?: CanvasSize | null;
     layers: CanvasLayerStackLayer[];
     active_run_id: string | null;
     error: string | null;
@@ -242,17 +248,14 @@ export interface CanvasInputConnection {
   slot?: CanvasVideoFrameSlot | null;
 }
 
-export interface CanvasDerivationConnection {
+export interface CanvasMaterialConnection {
   id: string;
-  role: 'derivation';
+  role: 'material';
   source_node_id: string;
   target_node_id: string;
-  origin:
-    | { kind: 'generation_run'; run_id: string }
-    | { kind: 'local_tool'; operation_id: string };
 }
 
-export type CanvasConnection = CanvasInputConnection | CanvasDerivationConnection;
+export type CanvasConnection = CanvasInputConnection | CanvasMaterialConnection;
 
 export type CanvasContentOrigin =
   | { kind: 'user_edit' }

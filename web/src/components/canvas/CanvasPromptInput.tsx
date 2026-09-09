@@ -9,6 +9,8 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { FileAudio, FileImage, FileText, FileVideo } from 'lucide-react';
+import { focusEmptyVariable, syncVariableInput, variableInput, variablePromptNodes } from '@/lib/promptVariableEditor';
+import { hasPromptVariableContent, readablePromptVariables } from '@/lib/promptVariables';
 
 import {
   canvasMentionMatches,
@@ -39,6 +41,7 @@ interface CanvasPromptInputProps {
   onPreviewReference?: (reference: CanvasMentionReference) => void;
   placeholder?: string;
   className?: string;
+  autoFocusVariables?: boolean;
 }
 
 export function CanvasPromptInput({
@@ -51,12 +54,15 @@ export function CanvasPromptInput({
   onPreviewReference,
   placeholder,
   className,
+  autoFocusVariables = true,
 }: CanvasPromptInputProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const composingRef = useRef(false);
   const lastEmittedRef = useRef(value);
   const lastReferenceSignatureRef = useRef('');
+  const initializedRef = useRef(false);
+  const focusEnabledRef = useRef(false);
   const previewRef = useRef(onPreviewReference);
   const [mention, setMention] = useState<MentionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -93,8 +99,11 @@ export function CanvasPromptInput({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
+    const focusVariables = autoFocusVariables && (!focusEnabledRef.current || !initializedRef.current || value !== lastEmittedRef.current);
+    focusEnabledRef.current = autoFocusVariables;
+    initializedRef.current = true;
     if (
-      document.activeElement === editor
+      editor.contains(document.activeElement)
       && value === lastEmittedRef.current
       && referenceSignature === lastReferenceSignatureRef.current
     ) return;
@@ -102,7 +111,20 @@ export function CanvasPromptInput({
     editor.replaceChildren(...promptNodes(value, referenceById, mentionsEnabled));
     lastEmittedRef.current = value;
     lastReferenceSignatureRef.current = referenceSignature;
-  }, [mentionsEnabled, referenceById, referenceSignature, value]);
+    if (!focusVariables) return;
+    // React Flow initially hides new nodes while measuring them. Keep the explicit
+    // insertion request alive until its input is focusable; cancel on unmount/change.
+    let frame: number | undefined;
+    const focusWhenVisible = () => {
+      const empty = [...editor.querySelectorAll<HTMLInputElement>('input[data-variable-name]')]
+        .find(input => !hasPromptVariableContent(input.value));
+      if (!empty) return;
+      focusEmptyVariable(editor);
+      if (document.activeElement !== empty) frame = requestAnimationFrame(focusWhenVisible);
+    };
+    focusWhenVisible();
+    return () => { if (frame !== undefined) cancelAnimationFrame(frame); };
+  }, [autoFocusVariables, mentionsEnabled, referenceById, referenceSignature, value]);
 
   useEffect(() => {
     if (!mentionsEnabled) closeMention();
@@ -115,7 +137,7 @@ export function CanvasPromptInput({
 
   function syncMention() {
     const editor = editorRef.current;
-    if (!mentionsEnabled || !editor || !availableReferences.length) {
+    if (!mentionsEnabled || !editor || variableInput(document.activeElement) || !availableReferences.length) {
       closeMention();
       return;
     }
@@ -198,14 +220,45 @@ export function CanvasPromptInput({
           className,
         )}
         onFocus={onFocus}
-        onInput={() => {
-          if (!composingRef.current) syncFromEditor();
+        onInput={event => {
+          if (composingRef.current) return;
+          syncVariableInput(event.currentTarget, event.target);
+          syncFromEditor();
         }}
         onCompositionStart={() => {
           composingRef.current = true;
         }}
-        onCompositionEnd={() => {
+        onCompositionEnd={event => {
           composingRef.current = false;
+          syncVariableInput(event.currentTarget, event.target);
+          syncFromEditor();
+        }}
+        onCopy={event => {
+          if (variableInput(event.target)) return;
+          const selection = window.getSelection();
+          if (!selection?.rangeCount) return;
+          const fragment = document.createElement('div');
+          fragment.append(selection.getRangeAt(0).cloneContents());
+          event.clipboardData.setData('text/plain', readablePromptVariables(serializePromptEditor(fragment)));
+          event.preventDefault();
+        }}
+        onPaste={event => {
+          if (variableInput(event.target)) return;
+          event.preventDefault();
+          const text = event.clipboardData.getData('text/plain');
+          if (typeof document.execCommand === 'function') {
+            document.execCommand('insertText', false, text);
+          } else {
+            const selection = window.getSelection();
+            if (!selection?.rangeCount) return;
+            const range = selection.getRangeAt(0);
+            if (!event.currentTarget.contains(range.commonAncestorContainer)) return;
+            range.deleteContents();
+            const node = document.createTextNode(text);
+            range.insertNode(node);
+            range.setStartAfter(node);
+            range.collapse(true);
+          }
           syncFromEditor();
         }}
         onClick={event => {
@@ -249,6 +302,7 @@ export function CanvasPromptInput({
         onScroll={() => setHoveredReference(null)}
         onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
           event.stopPropagation();
+          if (variableInput(event.target)) return;
           if (event.nativeEvent.isComposing) return;
           if (mention && candidates.length) {
             if (event.key === 'ArrowDown') {
@@ -281,6 +335,7 @@ export function CanvasPromptInput({
           }
         }}
         onKeyUp={event => {
+          if (variableInput(event.target)) return;
           if (
             mentionsEnabled
             && (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete')
@@ -427,6 +482,10 @@ function promptNodes(
   references: ReadonlyMap<string, CanvasMentionReference>,
   mentionsEnabled = true,
 ): Node[] {
+  return variablePromptNodes(value, text => mentionNodes(text, references, mentionsEnabled));
+}
+
+function mentionNodes(value: string, references: ReadonlyMap<string, CanvasMentionReference>, mentionsEnabled: boolean): Node[] {
   if (!mentionsEnabled) return [document.createTextNode(value)];
   const nodes: Node[] = [];
   let lastIndex = 0;
@@ -477,6 +536,10 @@ function serializeNodes(nodes: NodeListOf<ChildNode>): string {
       return;
     }
     if (!(node instanceof HTMLElement)) return;
+    if (node.dataset.promptVariable) {
+      value += node.dataset.promptVariable;
+      return;
+    }
     if (node.dataset.canvasMentionToken) {
       value += node.dataset.canvasMentionToken;
       return;
@@ -575,6 +638,5 @@ function findMentionSibling(node: Node, previous: boolean, includeSelf = false):
   while (current && current.nodeType === Node.TEXT_NODE && !(current.textContent ?? '').trim()) {
     current = previous ? current.previousSibling : current.nextSibling;
   }
-  return current instanceof HTMLElement && current.dataset.canvasMentionId ? current : null;
+  return current instanceof HTMLElement && (current.dataset.canvasMentionId || current.dataset.promptVariable) ? current : null;
 }
-

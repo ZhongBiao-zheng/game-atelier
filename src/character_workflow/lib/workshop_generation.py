@@ -460,7 +460,7 @@ def claim_execution(job: Job,
         if request.execution_state != "not_dispatched":
             resumable = (
                 request.execution_state == "claimed" and job.kind == JobKind.IMAGE
-                and job.params.provider_task_protocol == "tuzi_async"
+                and job.params.provider_task_protocol == "tuzi_images"
                 and len(job.params.provider_task_ids or []) == (job.params.n or 1)
             )
             if not resumable:
@@ -507,7 +507,7 @@ def recover_requests(grant_is_active: Callable[[str, str, str], bool] | None = N
                     continue
                 if request.execution_state == "not_dispatched" or (
                     request.execution_state == "claimed" and job.kind == JobKind.IMAGE
-                    and job.params.provider_task_protocol == "tuzi_async"
+                    and job.params.provider_task_protocol == "tuzi_images"
                     and len(job.params.provider_task_ids or []) == (job.params.n or 1)
                 ):
                     queued.append(request.job_id)

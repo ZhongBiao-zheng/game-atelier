@@ -60,7 +60,7 @@ def _image_draft() -> dict:
     return {
         "mode": "image",
         "prompt": "电影感雨夜列车",
-        "input_policy": "mentions_only",
+        "input_policy": "all_connected",
         "model": "gpt-image-2",
         "alias": "default",
         "params": {"n": 1, "ratio": "1:1"},

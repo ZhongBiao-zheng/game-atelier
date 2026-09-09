@@ -10,7 +10,7 @@ from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib.jobs import save_job
 from character_workflow.lib.projects import assign_character, create_project
-from character_workflow.lib.schemas import AssetSlot, Job, JobParams, JobStatus
+from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobParams, JobStatus
 from viewer_server.server_app import build_app
 
 
@@ -28,6 +28,17 @@ def _make_image(p: Path, mtime_offset: float = 0):
     if mtime_offset:
         target_mtime = time.time() + mtime_offset
         os.utime(p, (target_mtime, target_mtime))
+
+
+def _studio_job(root: Path, *, status=JobStatus.DONE, outputs=("v1.png",)):
+    job = Job(
+        job_id="job-x", namespace="studio", character_id="studio",
+        prompt="p", submitted_at="2026-09-09T00:00:00Z", model="m",
+        params=JobParams(), status=status, error=None, asset_slot=AssetSlot.PORTRAIT,
+        output_paths=[str(root / "studio" / "job-x" / name) for name in outputs],
+    )
+    save_job(job)
+    return job
 
 
 def test_empty_returns_empty_list(client):
@@ -112,9 +123,10 @@ def test_skips_studio_namespace(client, tmp_path):
 
 
 def test_studio_items_included_when_toggle_on(client, tmp_path):
-    """开关开启后 studio 出图混排；无角色归属字段为 None，job_id 兜底目录名。"""
+    """开关开启后混排任务正式登记的产物，深链使用真实 job_id。"""
     _make_image(tmp_path / "characters" / "char-a" / "portrait" / "char.png")
     _make_image(tmp_path / "studio" / "job-x" / "v1.png")
+    _studio_job(tmp_path)
     assert client.post("/api/config", json={"show_studio_on_home": True}).status_code == 200
 
     items = client.get("/api/gallery/recent").json()["items"]
@@ -129,6 +141,7 @@ def test_studio_items_included_when_toggle_on(client, tmp_path):
 def test_studio_items_respect_hidden(client, tmp_path):
     _make_image(tmp_path / "studio" / "job-x" / "v1.png")
     _make_image(tmp_path / "studio" / "job-x" / "v2.png")
+    _studio_job(tmp_path, outputs=("v1.png", "v2.png"))
     client.post("/api/config", json={"show_studio_on_home": True})
     client.post("/api/gallery/hidden", json={"path": "studio/job-x/v1.png", "hidden": True})
 
@@ -140,9 +153,53 @@ def test_studio_only_data_root_returns_studio_items(client, tmp_path):
     """characters/ 目录不存在时开关开启仍能返回 studio 图（早退 bug 回归）。"""
     (tmp_path / "characters").rmdir()
     _make_image(tmp_path / "studio" / "job-x" / "v1.png")
+    _studio_job(tmp_path)
     client.post("/api/config", json={"show_studio_on_home": True})
     items = client.get("/api/gallery/recent").json()["items"]
     assert [i["path"] for i in items] == ["studio/job-x/v1.png"]
+
+
+def test_studio_orphan_and_unregistered_files_are_not_artworks(client, tmp_path):
+    _make_image(tmp_path / "studio" / "studio-zz-001" / "v1.png")
+    _make_image(tmp_path / "studio" / "job-x" / "unregistered.png")
+    _studio_job(tmp_path, outputs=())
+    client.post("/api/config", json={"show_studio_on_home": True})
+    assert client.get("/api/gallery/recent").json()["items"] == []
+
+
+@pytest.mark.parametrize("status", list(JobStatus))
+def test_studio_gallery_requires_completed_results(client, tmp_path, status):
+    _make_image(tmp_path / "studio" / "job-x" / "v1.png")
+    _studio_job(tmp_path, status=status)
+    client.post("/api/config", json={"show_studio_on_home": True})
+    items = client.get("/api/gallery/recent").json()["items"]
+    assert len(items) == (1 if status in (JobStatus.DONE, JobStatus.PARTIAL) else 0)
+
+
+def test_studio_registered_paths_must_be_existing_contained_images(client, tmp_path):
+    good = tmp_path / "studio" / "job-x" / "v1.png"
+    _make_image(good)
+    _make_image(tmp_path / "outside.png")
+    (good.parent / "directory.png").mkdir()
+    (good.parent / "escape.png").symlink_to(tmp_path / "outside.png")
+    job = _studio_job(tmp_path)
+    save_job(job.model_copy(update={"output_paths": [
+        "studio/job-x/v1.png", str(good), str(good.parent / "missing.png"),
+        str(good.parent / "directory.png"), str(good.parent / "escape.png"),
+        str(tmp_path / "outside.png"),
+    ]}))
+    client.post("/api/config", json={"show_studio_on_home": True})
+    items = client.get("/api/gallery/recent").json()["items"]
+    assert [i["path"] for i in items] == ["studio/job-x/v1.png"]
+
+
+@pytest.mark.parametrize("override", [{"namespace": "canvas"}, {"kind": JobKind.VIDEO}])
+def test_studio_gallery_does_not_borrow_other_job_kinds(client, tmp_path, override):
+    _make_image(tmp_path / "studio" / "job-x" / "v1.png")
+    job = _studio_job(tmp_path)
+    save_job(job.model_copy(update=override))
+    client.post("/api/config", json={"show_studio_on_home": True})
+    assert client.get("/api/gallery/recent").json()["items"] == []
 
 
 def test_handles_missing_file_gracefully(client, tmp_path):

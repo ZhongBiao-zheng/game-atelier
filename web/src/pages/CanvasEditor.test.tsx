@@ -5,12 +5,13 @@ import * as connection from '@/api/connection';
 import { createTestEventStream } from '@/test/eventStream';
 
 import { CanvasEditor } from './CanvasEditor';
-import { CanvasNodeContext } from '@/components/canvas/CanvasEditorViews';
+import { CanvasNodeContext, type CanvasNodeContextValue } from '@/components/canvas/CanvasEditorViews';
 import {
   createCanvasReversePromptConfig,
   getCanvasDocument,
   listCanvasJobs,
   listCanvasProjects,
+  retryCanvasRun,
   saveCanvasDocument,
   submitCanvasLayerDecomposition,
   submitCanvasRun,
@@ -43,6 +44,11 @@ vi.mock('@xyflow/react', () => {
   };
   const flowTransform: [number, number, number] = [0, 0, 1];
   let flowNodeLookup = new Map<string, MockInternalNode>();
+  // React Flow 的 useViewportHelper/useReactFlow 用 useMemo 保持这些方法的引用稳定。
+  const viewportHelpers = {
+    fitBounds: vi.fn().mockResolvedValue(true),
+    getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
+  };
   return {
     useStore: (selector: (state: {
       transform: [number, number, number];
@@ -63,7 +69,7 @@ vi.mock('@xyflow/react', () => {
       onlyRenderVisibleElements?: boolean;
       onConnect?: (connection: { source: string; target: string; sourceHandle: null; targetHandle: null }) => void;
       onConnectEnd?: (event: MouseEvent, state: { isValid: boolean; fromNode: { id: string }; fromHandle: { type: 'source' | 'target' }; toNode?: { id: string } }) => void;
-      onEdgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean }>) => void;
+      onEdgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean } | { id: string; type: 'remove' }>) => void;
       onSelectionStart?: () => void;
       onSelectionEnd?: () => void;
       onNodesChange?: (changes: Array<{ id: string; type: string; selected?: boolean; position?: { x: number; y: number } }>) => void;
@@ -79,6 +85,7 @@ vi.mock('@xyflow/react', () => {
       const CanvasNode = nodeTypes?.canvasNode;
       if (flowEdgeIdentities[flowEdgeIdentities.length - 1] !== edges) flowEdgeIdentities.push(edges);
       flowHandlers.nodesChange = onNodesChange;
+      flowHandlers.edgesChange = onEdgesChange;
       flowNodeLookup = new Map(nodes.map(node => [node.id, {
         internals: { positionAbsolute: node.position ?? { x: 0, y: 0 } },
         measured: { width: node.style?.width, height: node.style?.height },
@@ -199,7 +206,7 @@ vi.mock('@xyflow/react', () => {
     useReactFlow: () => ({
       screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
       fitView: vi.fn(),
-      getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
+      ...viewportHelpers,
       getZoom: () => 1,
       setCenter: vi.fn(),
       setViewport: vi.fn(),
@@ -291,6 +298,7 @@ const flowEdgeIdentities: unknown[] = [];
 /** 直接拿到 ReactFlow 收到的 onNodesChange：position / remove 这类变更没有对应的 UI 入口。 */
 const flowHandlers: {
   nodesChange?: (changes: Array<{ id: string; type: string; selected?: boolean; position?: { x: number; y: number } }>) => void;
+  edgesChange?: (changes: Array<{ id: string; type: 'select'; selected: boolean } | { id: string; type: 'remove' }>) => void;
 } = {};
 
 function CanvasContextIdentityProbe() {
@@ -364,6 +372,7 @@ beforeEach(() => {
   canvasContextIdentities.length = 0;
   flowEdgeIdentities.length = 0;
   flowHandlers.nodesChange = undefined;
+  flowHandlers.edgesChange = undefined;
   // jsdom 不实现 elementFromPoint，而连接拖到空白处要用它探测落点节点。
   document.elementFromPoint = () => null;
   // 编辑器只调 listCanvasProjects(true)（轻量分支，返回 CanvasProject[]）；
@@ -391,6 +400,218 @@ beforeEach(() => {
 function lastSavedDocument() {
   return vi.mocked(saveCanvasDocument).mock.calls.at(-1)?.[1];
 }
+
+it('renders solid material links without counting upstream originals and preserves their role when copied', async () => {
+  const original = imageNode('original', '原图');
+  original.data.current_version_id = 'original-version';
+  const processed = imageNode('processed', '处理后的素材', imageDraft);
+  processed.data.current_version_id = 'processed-version';
+  const version = { version_id: 'original-version', kind: 'image' as const, path: 'source.png', mime_type: 'image/png',
+    width: 512, height: 512, bytes: 123, created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'upload' as const, upload_id: 'source-upload' } };
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [original, processed, imageNode('result', '生成结果', imageDraft)],
+    connections: [
+      { id: 'material', role: 'material', source_node_id: 'original', target_node_id: 'processed' },
+      { id: 'input', role: 'input', source_node_id: 'processed', target_node_id: 'result' },
+    ], content_versions: { 'original-version': version, 'processed-version': { ...version, version_id: 'processed-version' } },
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  const context = canvasContextIdentities.at(-1) as CanvasNodeContextValue;
+  expect(context.mentionReferencesByNodeId.get('processed')).toEqual([]);
+  expect(context.mentionReferencesByNodeId.get('result')).toEqual([expect.objectContaining({ nodeId: 'processed', label: '图片1' })]);
+  const edges = flowEdgeIdentities.at(-1) as Array<{ id: string; className: string; ariaLabel: string }>;
+  expect(edges.find(edge => edge.id === 'material')).toMatchObject({ className: 'canvas-input-edge', ariaLabel: '素材来源：原图 → 处理后的素材' });
+  fireEvent.keyDown(window, { key: 'a', metaKey: true });
+  const clipboard = new Map<string, string>();
+  fireEvent.copy(window, { clipboardData: { setData: (type: string, value: string) => clipboard.set(type, value) } });
+  fireEvent.paste(window, { clipboardData: { getData: (type: string) => clipboard.get(type) ?? '', items: [] } });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(6));
+  expect(lastSavedDocument()?.connections.map(edge => edge.role)).toEqual(['material', 'input', 'material', 'input']);
+});
+
+it('derives read-only named layer ownership lines and removes them only when the binding is removed', async () => {
+  const material = imageNode('material', '活动标题');
+  const stack: CanvasNode = { id: 'stack', type: 'layer_stack', title: '拆分图层', position: { x: 0, y: 0 }, z_index: 0,
+    data: { source_version_id: 'source', base_version_id: null, base_visible: true, prompt: '', alias: null, model: null,
+      resolution: 'auto', active_run_id: null, error: null, layers: [{ id: 'title', version_id: 'version', material_node_id: 'material',
+        name: '活动标题', description: '', visible: true, z_index: 1, bounding_box: { absolute: [0, 0, 10, 10], normalized: [0, 0, 1000, 1000] } }] } };
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [stack, material] }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  const edges = () => flowEdgeIdentities.at(-1) as Array<{ id: string; selected: boolean; deletable: boolean; label?: string }>;
+  expect(edges()).toEqual([expect.objectContaining({ id: 'layer-material:stack:layer:title', ariaLabel: '素材来源：拆分图层 · 活动标题 → 活动标题', deletable: false, selectable: false })]);
+  expect(edges()[0].label).toBeUndefined();
+  act(() => flowHandlers.edgesChange?.([{ id: edges()[0].id, type: 'select', selected: true }]));
+  expect(edges()[0].selected).toBe(false);
+  act(() => flowHandlers.edgesChange?.([{ id: edges()[0].id, type: 'remove' }]));
+  expect(edges()).toHaveLength(1);
+  expect(saveCanvasDocument).not.toHaveBeenCalled();
+  act(() => flowHandlers.nodesChange?.([{ id: 'material', type: 'remove' }]));
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(1));
+  expect(edges()).toEqual([]);
+  expect(lastSavedDocument()?.connections).toEqual([]);
+  expect(lastSavedDocument()?.nodes[0]).toMatchObject({ data: { layers: [{ material_node_id: null }] } });
+});
+
+it.each(['image', 'layer_stack'] as const)('merges authoritative reused %s retry state while protecting concurrent edits', async kind => {
+  const target: CanvasNode = kind === 'image' ? imageNode('result', '重试素材', { ...imageDraft, prompt: '当前草稿' }) : {
+    id: 'result', type: 'layer_stack', title: '拆分图层', position: { x: 320, y: 0 }, z_index: 0,
+    data: { source_version_id: 'source-version', base_version_id: null, base_visible: true,
+      prompt: '当前草稿', alias: 'main', model: 'gpt-image-2', resolution: 'auto', layers: [], active_run_id: null, error: null },
+  };
+  const source = imageNode('source', '输入原图');
+  source.data.current_version_id = 'source-version';
+  const before = documentWith({ nodes: [source, target], content_versions: {
+    'source-version': { version_id: 'source-version', kind: 'image', path: 'source.png', mime_type: 'image/png',
+      width: 512, height: 512, bytes: 123, created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'upload', upload_id: 'source-upload' } },
+  } });
+  vi.mocked(getCanvasDocument).mockResolvedValue(before);
+  const context = () => canvasContextIdentities.at(-1) as CanvasNodeContextValue;
+  const remote = documentWith({ ...before, revision: 8, nodes: [source, target.type === 'image'
+    ? { ...target, data: { ...target.data, active_run_id: 'retry', generation_draft: { ...imageDraft, prompt: '原任务草稿' } } }
+    : { ...target, data: { ...target.data, active_run_id: 'retry', prompt: '原任务草稿' } }],
+  connections: [{ id: 'restored', role: 'input', source_node_id: 'source', target_node_id: 'result' }] });
+  const job = { job_id: 'retry-job', retry_of: 'original-job', status: 'pending', kind: 'image', prompt: '原任务草稿',
+    params: { n: 1 }, output_paths: [], canvas_run: { run_id: 'retry', result_node_id: 'result', candidates: [],
+      snapshot: { surface_node_id: 'result', inputs: [], final_prompt: '原任务草稿', normalized_params: {} } },
+  } as unknown as Job;
+  let resolveResponse!: (value: Awaited<ReturnType<typeof retryCanvasRun>>) => void;
+  vi.mocked(retryCanvasRun).mockImplementation(() => new Promise(resolve => { resolveResponse = resolve; }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  let request!: Promise<void>;
+  act(() => { request = context().retryRun('result', 'original-run'); });
+  await waitFor(() => expect(retryCanvasRun).toHaveBeenCalledTimes(1));
+  await act(async () => { resolveResponse({ document: remote, job }); await request; });
+  // A subsequent unrelated edit must save the restored recipe and inputs, not the pre-retry state.
+  act(() => context().updateNode('result', node => ({ ...node, title: '第一次重试' })));
+  await waitFor(() => expect(lastSavedDocument()?.connections).toEqual(remote.connections));
+  let savedTarget = lastSavedDocument()!.nodes.find(node => node.id === 'result')!;
+  expect(savedTarget.type === 'layer_stack' ? savedTarget.data.prompt : 'generation_draft' in savedTarget.data ? savedTarget.data.generation_draft?.prompt : null).toBe('原任务草稿');
+
+  act(() => { request = context().retryRun('result', 'original-run'); });
+  await waitFor(() => expect(retryCanvasRun).toHaveBeenCalledTimes(2));
+  act(() => {
+    context().setMaterialConnected('source', 'result', false);
+    context().updateNode('result', node => node.type === 'layer_stack'
+      ? { ...node, data: { ...node.data, prompt: '请求期间新编辑' } }
+      : node.type === 'image' ? { ...node, data: { ...node.data, generation_draft: { ...imageDraft, prompt: '请求期间新编辑' } } } : node);
+  });
+  await act(async () => { resolveResponse({ document: { ...remote, revision: 9 }, job }); await request; });
+  await waitFor(() => expect(lastSavedDocument()?.connections).toEqual([]));
+  savedTarget = lastSavedDocument()!.nodes.find(node => node.id === 'result')!;
+  expect(savedTarget.type === 'layer_stack' ? savedTarget.data.prompt : 'generation_draft' in savedTarget.data ? savedTarget.data.generation_draft?.prompt : null).toBe('请求期间新编辑');
+});
+
+it.each([false, true])('configures an existing MCP text node with no draft (narrow=%s)', async narrow => {
+  const matchMedia = vi.spyOn(window, 'matchMedia').mockImplementation(query => ({
+    matches: narrow && query === '(max-width: 767px)', media: query,
+    onchange: null, addListener: vi.fn(), removeListener: vi.fn(),
+    addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+  }));
+  const original = documentWith({
+    nodes: [textNode('mcp-text', 'MCP 正文', 'mcp-version'), textNode('source', '输入', 'source-version')],
+    connections: [{ id: 'input', role: 'input', source_node_id: 'source', target_node_id: 'mcp-text' }],
+    content_versions: {
+      'mcp-version': { version_id: 'mcp-version', kind: 'text', text: '保留已有正文',
+        created_at: '2026-08-26T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'user_edit' } },
+      'source-version': { version_id: 'source-version', kind: 'text', text: '保留输入连接',
+        created_at: '2026-08-26T00:00:00Z', sha256: 'b'.repeat(64), origin: { kind: 'user_edit' } },
+    },
+  });
+  vi.mocked(getCanvasDocument).mockResolvedValue(original);
+  vi.mocked(listKeys).mockResolvedValue({ keys: [{
+    alias: 'text-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-08-26T00:00:00Z',
+    models: [{ id: 'gpt-5', name: 'GPT 5', modality: 'text', protocol: 'openai' }],
+  }] });
+  vi.mocked(getCanvasUiPreferences).mockResolvedValue({
+    ...DEFAULT_CANVAS_UI_PREFERENCES,
+    generation_defaults: { ...DEFAULT_CANVAS_UI_PREFERENCES.generation_defaults,
+      text: { selection: { alias: 'text-key', model: 'gpt-5' }, params: { n: 2, temperature: 0.4 } } },
+  });
+  vi.mocked(submitCanvasRun).mockRejectedValue(new Error('mock submission reached'));
+  try {
+    render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'flow-node-mcp-text' }));
+    const panel = await screen.findByRole('region', { name: '文本设置' });
+    expect(within(panel).getByRole('button', { name: '选择生成模型' })).toHaveTextContent('GPT 5');
+    expect(saveCanvasDocument).not.toHaveBeenCalled();
+    expect(submitCanvasRun).not.toHaveBeenCalled();
+    fireEvent.click(within(panel).getByRole('button', { name: '生成' }));
+    expect(await screen.findByText('先填写提示词。')).toBeInTheDocument();
+    expect(saveCanvasDocument).not.toHaveBeenCalled();
+    expect(submitCanvasRun).not.toHaveBeenCalled();
+    const prompt = within(panel).getByRole('combobox', { name: '提示词' });
+    fireEvent.input(prompt, { target: { textContent: '扩写这段描述' } });
+    await waitFor(() => expect(lastSavedDocument()?.nodes[0]).toMatchObject({
+      data: { generation_draft: { mode: 'text', alias: 'text-key', model: 'gpt-5',
+        prompt: '扩写这段描述', input_policy: 'all_connected', params: { n: 2, temperature: 0.4 } } },
+    }));
+    expect(lastSavedDocument()?.content_versions).toEqual(original.content_versions);
+    expect(lastSavedDocument()?.connections).toEqual(original.connections);
+    expect(lastSavedDocument()?.nodes[0]).toMatchObject({ data: { current_version_id: 'mcp-version' } });
+    fireEvent.click(within(panel).getByRole('button', { name: '生成' }));
+    await waitFor(() => expect(submitCanvasRun).toHaveBeenCalledWith('canvas-one', 'mcp-text', 7, 2));
+  } finally {
+    matchMedia.mockRestore();
+  }
+});
+
+it('does not force a minimum preview height or overlay metadata on a short populated image', async () => {
+  const source = { ...imageNode('strip', '说明文字'), size: { width: 280, height: 11.315209404849375 },
+    data: { ...imageNode('strip', '说明文字').data, current_version_id: 'strip-version' } };
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [source], content_versions: {
+    'strip-version': { version_id: 'strip-version', kind: 'image', path: 'uploads/strip.png',
+      mime_type: 'image/png', bytes: 400, width: 1361, height: 55,
+      created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'upload', upload_id: 'strip' } },
+  } }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'flow-node-strip' }));
+  const image = await screen.findByRole('img', { name: '说明文字' });
+  expect(image).toHaveClass('object-contain', 'block');
+  expect(image.parentElement).toHaveClass('h-full', 'min-h-0');
+  expect(image.parentElement).not.toHaveClass('min-h-44');
+  expect(within(image.closest('article')!).queryByText(/1361 × 55/)).not.toBeInTheDocument();
+});
+
+it('creates an explicit downstream image and keeps its source in the visible inputs', async () => {
+  const source = { ...imageNode('source-image', '源图'),
+    data: { ...imageNode('source-image', '源图').data, current_version_id: 'source-version' } };
+  const original = documentWith({ nodes: [source], content_versions: {
+    'source-version': { version_id: 'source-version', kind: 'image', path: 'source.png', mime_type: 'image/png',
+      bytes: 20, width: 100, height: 100, created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64),
+      origin: { kind: 'upload', upload_id: 'source' } },
+  } });
+  vi.mocked(getCanvasDocument).mockResolvedValue(original);
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'flow-node-source-image' }));
+  fireEvent.click(screen.getByRole('button', { name: '基于 源图 生成' }));
+  expect(await screen.findByRole('button', { name: '查看已对接素材 源图' })).toHaveTextContent('图片1');
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(2));
+  const saved = lastSavedDocument()!;
+  const downstream = saved.nodes.find(candidate => candidate.id !== source.id)!;
+  expect(downstream).toMatchObject({ type: 'image', data: { current_version_id: null } });
+  expect(saved.connections).toEqual([expect.objectContaining({
+    role: 'input', source_node_id: source.id, target_node_id: downstream.id,
+  })]);
+  expect(saved.nodes.find(candidate => candidate.id === source.id)).toEqual(source);
+  expect(submitCanvasRun).not.toHaveBeenCalled();
+});
+
+it('does not silently resubmit after the server rejects an input revision conflict', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [imageNode('image-one', '图片', { ...imageDraft, prompt: '画一座建筑' })],
+  }));
+  vi.mocked(submitCanvasRun).mockRejectedValueOnce(new Error('画布版本已更新，请刷新输入后再生成'));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'flow-node-image-one' }));
+  fireEvent.click(await screen.findByRole('button', { name: '开始生成' }));
+  expect(await screen.findByText('画布版本已更新，请刷新输入后再生成')).toBeInTheDocument();
+  expect(submitCanvasRun).toHaveBeenCalledOnce();
+  expect(submitCanvasRun).toHaveBeenCalledWith('canvas-one', 'image-one', 7, 1);
+});
 
 it('creates an editable layer-decomposition node before calling the model', async () => {
   const source = {
@@ -568,9 +789,12 @@ it('undoes a text field edit as one session snapshot', async () => {
   const editor = await addTextNodeWithBody('可以撤销的修改');
   expect(editor).toHaveValue('可以撤销的修改');
 
-  fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+  fireEvent.keyDown(editor, { key: 'Tab' });
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
 
-  expect(screen.getByLabelText('编辑 文本 正文')).toHaveValue('');
+  expect(screen.queryByText('可以撤销的修改')).not.toBeInTheDocument();
+  expect(screen.getByTestId('react-flow')).toHaveAttribute('data-node-count', '1');
+  await waitFor(() => expect(savedText(lastSavedDocument())).toBe(''));
 });
 
 it('undoes adding a node back to the loaded canvas', async () => {
@@ -580,10 +804,12 @@ it('undoes adding a node back to the loaded canvas', async () => {
   fireEvent.click(within(screen.getByRole('menu', { name: '添加节点' })).getByRole('menuitem', { name: /^图片/ }));
   expect(screen.getByTestId('react-flow')).toHaveAttribute('data-node-count', '1');
 
-  fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
 
   expect(screen.getByTestId('react-flow')).toHaveAttribute('data-node-count', '0');
   await waitFor(() => expect(lastSavedDocument()?.nodes).toEqual([]), { timeout: 1000 });
+  fireEvent.keyDown(window, { key: 'z', metaKey: true, shiftKey: true });
+  expect(screen.getByTestId('react-flow')).toHaveAttribute('data-node-count', '1');
 });
 
 it('submits one canvas run for the selected image node at the current server revision', async () => {
@@ -940,14 +1166,20 @@ it('keeps panning out of the undo stack so Ctrl+Z still undoes the last edit', a
   // 已经被 50 条上限挤出去了。
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await screen.findByLabelText('画布编辑器 列车短片');
-  expect(screen.getByRole('button', { name: '撤销' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: '撤销' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '重做' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '添加生成配置节点' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '添加节点' }));
+  expect(within(screen.getByRole('menu', { name: '添加节点' })).queryByRole('menuitem', { name: /^生成配置/ })).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'simulate viewport change' }));
   await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
     viewport: { x: 120, y: -40, zoom: 0.7 },
   })), { timeout: 1000 });
 
-  expect(screen.getByRole('button', { name: '撤销' })).toBeDisabled();
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+  expect(screen.getByTestId('react-flow')).toHaveAttribute('data-node-count', '0');
+  expect(lastSavedDocument()?.viewport).toEqual({ x: 120, y: -40, zoom: 0.7 });
 });
 
 it('blocks generation by name when a connected input has no content yet', async () => {
@@ -1355,7 +1587,7 @@ it('pulls canvas jobs as soon as SSE says one changed, without waiting for the n
   vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(events.open())));
 
   const draft: CanvasGenerationDraft = {
-    mode: 'image', prompt: '雨夜', input_policy: 'mentions_only',
+    mode: 'image', prompt: '雨夜', input_policy: 'all_connected',
     model: 'gpt-image-2', alias: 'default', params: {}, updated_at: '2026-08-26T00:00:00Z',
   };
   const pending = {

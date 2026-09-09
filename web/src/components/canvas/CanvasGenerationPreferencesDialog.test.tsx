@@ -62,6 +62,16 @@ function setup(overrides: Partial<Parameters<typeof CanvasGenerationPreferencesD
 }
 
 describe('CanvasGenerationPreferencesDialog', () => {
+  it('notifies when a model change replaces unsupported AUTO with ratio', async () => {
+    const user = userEvent.setup();
+    setup({ value: { ...EMPTY_DEFAULTS, image: {
+      selection: { alias: '主力图片', model: 'gpt-image-1' },
+      params: { size_mode: 'auto', size: 'auto' },
+    } } });
+    await user.click(screen.getByRole('button', { name: '选择生成模型' }));
+    await user.click(screen.getByRole('option', { name: 'Seedream 5 Lite' }));
+    expect(screen.getByRole('status')).toHaveTextContent('已切换为比例');
+  });
   it('lists only Runner-routable models and saves a selected model with its params', async () => {
     const user = userEvent.setup();
     const props = setup();

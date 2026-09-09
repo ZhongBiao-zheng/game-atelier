@@ -18,9 +18,10 @@ import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/compone
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
 import { StudioArchiveDialog, type StudioArchiveRequest } from '@/components/studio/StudioArchiveDialog';
-import { studioSizeFor, computeStudioPixelSize, normalizeStudioSizeForModel } from '@/lib/studioSize';
+import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { imageFamily } from '@/lib/modelFamily';
+import { promptToAssetSegments } from '@/lib/promptVariables';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import { hasSrefCode, MJ_DEFAULTS, mjParamsFromJob, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
@@ -41,13 +42,9 @@ const SELECTION_STORAGE_KEY = 'studio:selection';
 interface SavedSelection {
   providerAlias?: string;
   model?: string;
-  ratio?: string;
-  resolution?: '2K' | '4K';
+  sizeParams?: JobParams;
   count?: number;
   quality?: Quality;
-  customSize?: string;
-  /** 尺寸是用户亲手改的，不是自动算出来的。缺失按 false。 */
-  customSizeManual?: boolean;
   kind?: JobKind;
   videoMode?: VideoMode;
   duration?: number;
@@ -121,20 +118,14 @@ function StudioFull() {
   );
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
-  // 出图配置每次启动回默认（飙哥指定）：不从 localStorage 回填 ratio/像素/质量/数量，
-  // 每次重启网站都是 1:1 + 默认像素（2K 档算）+ low（仅区分质量的模型显示）+ 1 张。
-  // provider/model 仍按 saved 恢复（见下方 listKeys 后的恢复逻辑），只重置这 4+1 个配置项。
-  const [ratio, setRatio] = useState(draft?.ratio ?? '1:1');
-  const [resolution, setResolution] = useState<'2K' | '4K'>(draft?.resolution ?? '2K');
+  // 尺寸模式和自定义草稿一起恢复；质量与数量仍在刷新时回默认。
+  const [sizeParams, setSizeParams] = useState<JobParams>(draft?.sizeParams ?? saved.sizeParams ?? {});
   const [count, setCount] = useState(draft?.count ?? 1);
-  const [customSize, setCustomSize] = useState(draft?.customSize ?? '');
-  const [customSizeManual, setCustomSizeManual] = useState(draft?.customSizeManual ?? false);
   const [quality, setQuality] = useState<Quality>(draft?.quality ?? 'low');
   // MJ 参数不进 localStorage —— 与 ratio/像素/质量/数量 同一政策：出图配置每次启动回默认。
   const [mjParams, setMjParams] = useState<MjParams>(draft?.mjParams ?? MJ_DEFAULTS);
   // MJ 四个语义参考组；每组允许多图，垫图最终仍落 reference_images。
   const [mjRefs, setMjRefs] = useState<MjRefSlots>(draft?.mjRefs ?? EMPTY_MJ_REFS);
-  const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState(draft?.promptText ?? '');
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
   const [assetPanelKind, setAssetPanelKind] = useState<'prompt' | 'image'>('prompt');
@@ -162,13 +153,13 @@ function StudioFull() {
     writeStudioDraft({
       providerAlias, model, kind, promptText, promptAssetSourceTitle,
       referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
-      ratio, resolution, count, customSize, customSizeManual, quality,
+      sizeParams, count, quality,
       videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
     });
   }, [
     providerAlias, model, kind, promptText, promptAssetSourceTitle,
     referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
-    ratio, resolution, count, customSize, customSizeManual, quality,
+    sizeParams, count, quality,
     videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
   ]);
 
@@ -211,12 +202,12 @@ function StudioFull() {
     }
     if (caps.qualities && !caps.qualities.includes(videoQuality)) setVideoQuality(caps.qualities[0]);
   }, [kind, keys, providerAlias, model, videoMode, videoRatio, duration, videoResolution, videoQuality]);
-  // manual 由 PromptInput 给：只有亲手改宽高输入框才是 true，切比例/档位/模型的
-  // 自动重算是 false。存进 saveSelection 后，下次恢复不必再靠比对数值去猜意图。
-  const handleCustomSizeChange = useCallback((w: number, h: number, manual?: boolean) => {
-    setCustomSize(`${w}x${h}`);
-    setCustomSizeManual(Boolean(manual));
-  }, []);
+  const handleSizeParamsChange = useCallback((patch: JobParams) => {
+    setSizeParams(previous => {
+      const selected = keys.find(key => key.alias === providerAlias);
+      return normalizeImageSizeParams(model, selected?.provider, selected?.base_url, { ...previous, ...patch });
+    });
+  }, [keys, providerAlias, model]);
 
   // 点击历史记录里的参考图 → 把这批参考图（服务器路径）拉回成 File[]，整组塞进输入框复用出图。
   const handleReuseReferences = useCallback(async (config: RoundConfig, jobId?: string) => {
@@ -362,21 +353,6 @@ function StudioFull() {
         const savedModelValid = wantedModel && selected?.models.some((m) => m.id === wantedModel);
         const nextModel = savedModelValid ? wantedModel! : selected?.models[0]?.id ?? '';
         setModel(nextModel);
-        // 恢复手动自定义尺寸：标准尺寸由 ratio/resolution 自动重算，仅当保存值偏离标准时用 sizeOverride 覆盖。
-        // 只恢复用户**亲手改过**的尺寸，凭存档里的 customSizeManual 标记判断。
-        // 旧代码拿存档值和「当前」标准尺寸比，不等就当手动覆盖 —— 标准尺寸公式一改
-        // （PR #40 把 pro 的 2K 从 2048² 撑到上限 2150²），历史存档里那个曾经标准的
-        // 2048² 就被追认成手动选择：打开就显示 2048×2048，点一下比例才跳回 2150×2150，
-        // 期间出的图真按 2048² 出，白丢约 10% 像素。缺标记的旧存档按「非手动」处理，
-        // 回落到标准尺寸 —— 这个方向错了只是丢一次自定义值，反过来错则天天出小图。
-        if (saved.customSizeManual && saved.customSize) {
-          const [wStr, hStr] = saved.customSize.split('x');
-          const w = parseInt(wStr, 10);
-          const h = parseInt(hStr, 10);
-          if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
-            setSizeOverride((prev) => ({ key: (prev?.key ?? 0) + 1, w, h }));
-          }
-        }
       })
       .catch(() => {
         if (!cancelled) setKeys([]);
@@ -393,11 +369,11 @@ function StudioFull() {
   useEffect(() => {
     if (!providerAlias) return;
     saveSelection({
-      providerAlias, model, ratio, resolution, count, quality, customSize, customSizeManual,
+      providerAlias, model, sizeParams, count, quality,
       kind, videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
     });
   }, [
-    providerAlias, model, ratio, resolution, count, quality, customSize, customSizeManual,
+    providerAlias, model, sizeParams, count, quality,
     kind, videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
   ]);
 
@@ -410,14 +386,12 @@ function StudioFull() {
     );
   }, [keys, persistedJobs]);
 
-  const onSubmit = async (prompt: string, overrideConfig?: RoundConfig) => {
+  const onSubmit = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
     if (wantVideo) {
-      await onSubmitVideo(prompt, overrideConfig);
+      await onSubmitVideo(prompt, overrideConfig, promptTemplate);
       return;
     }
-    const effectiveRatio = overrideConfig?.ratio ?? ratio;
-    const effectiveResolution = overrideConfig?.resolution ?? resolution;
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
     const effectiveModel = overrideConfig?.model ?? model;
     const selectedKey = keys.find((item) => item.alias === effectiveAlias);
@@ -432,17 +406,22 @@ function StudioFull() {
     const effectiveCount = caps.family === 'midjourney'
       ? MJ_IMAGES_PER_TASK
       : clampImageCount(overrideConfig?.n ?? count);
-    // nano-banana / openrouter 的 size 是比例字符串（如 16:9）；其余是归一化后的像素 WxH。
-    // MJ（sizeKind='none'）一个尺寸参数都不发：比例由渠道锁定在 1:1，写了也只是自欺。
-    const effectiveSize = overrideConfig?.size
-      ?? (caps.sizeKind === 'none'
-        ? undefined
-        : caps.sizeKind === 'ratio'
-          ? effectiveRatio
-          : normalizeStudioSizeForModel(
-              customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveModel),
-              effectiveModel,
-            ));
+    const rawSizeParams: JobParams = overrideConfig
+      ? { size_mode: overrideConfig.sizeMode ?? 'ratio', size: overrideConfig.size, ratio: overrideConfig.ratio, resolution: overrideConfig.resolution }
+      : sizeParams;
+    const preparedSize = prepareImageSizeSubmission(effectiveModel, effectiveProvider, selectedKey?.base_url, rawSizeParams);
+    if (preparedSize.error) {
+      alert(preparedSize.error);
+      return;
+    }
+    const effectiveSizeParams = preparedSize.params!;
+    const effectiveMode = imageSizeMode(effectiveSizeParams);
+    if (effectiveMode === 'custom' && !overrideConfig) {
+      setSizeParams(previous => ({ ...previous, size: effectiveSizeParams.size, custom_size: effectiveSizeParams.size }));
+    }
+    const effectiveSize = effectiveSizeParams.size;
+    const effectiveRatio = effectiveMode === 'ratio' ? effectiveSizeParams.ratio : undefined;
+    const effectiveResolution = effectiveMode === 'ratio' ? effectiveSizeParams.resolution as RoundConfig['resolution'] : undefined;
     // 质量档位只在该族真有时才发：seedream / dall-e 不认 low|high，nano-banana 不认 auto。
     const rawQuality = overrideConfig?.quality ?? quality;
     const effectiveQuality = caps.qualities?.includes(rawQuality) ? rawQuality : undefined;
@@ -482,6 +461,7 @@ function StudioFull() {
       ratio: effectiveRatio,
       resolution: caps.showResolution ? effectiveResolution : undefined,
       size: effectiveSize,
+      sizeMode: effectiveMode,
       n: effectiveCount,
       quality: effectiveQuality,
       referenceImages: refPaths,
@@ -493,9 +473,10 @@ function StudioFull() {
     // 控件隐藏的参数一律不写进 params（与视频侧同写法）：后端 openrouter_image 会把
     // params.resolution 原样当 API 参数发出去，在别的 key 上选过 4K 就会被带过来按 4K 计费。
     const jobParams: JobParams = {
+      size_mode: effectiveMode,
       ...(effectiveSize ? { size: effectiveSize } : {}),
-      ...(caps.ratios.length > 0 ? { ratio: effectiveRatio } : {}),
-      ...(caps.showResolution ? { resolution: effectiveResolution } : {}),
+      ...(effectiveRatio ? { ratio: effectiveRatio } : {}),
+      ...(effectiveResolution ? { resolution: effectiveResolution } : {}),
       n: effectiveCount,
       ...(effectiveQuality ? { quality: effectiveQuality } : {}),
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
@@ -518,7 +499,7 @@ function StudioFull() {
       'image',
       jobParams,
     );
-    if (estimatedCost != null) jobParams.estimated_cost_cny = estimatedCost;
+    if (estimatedCost != null && effectiveMode !== 'auto') jobParams.estimated_cost_cny = estimatedCost;
 
     const startedAt = Date.now();
     const myRound: RoundState = { kind: 'pending', startedAt, config };
@@ -530,6 +511,7 @@ function StudioFull() {
     try {
       job = await createStudioJob({
         prompt,
+        ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
         alias: effectiveAlias ?? undefined,
         model: effectiveModel,
         params: jobParams,
@@ -557,7 +539,7 @@ function StudioFull() {
     );
   };
 
-  const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig) => {
+  const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     // 切到视频后 PromptInput 只是按模型分类过滤显示，父级 providerAlias/model 不一定已是视频 key——这里收敛。
     const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
     const videoKeys = keys.filter((item) => videoModelsOf(item).length > 0);
@@ -687,6 +669,7 @@ function StudioFull() {
     try {
       job = await createStudioJob({
         prompt,
+        ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
         alias: effectiveAlias ?? undefined,
         model: effectiveModel,
         params: videoParams,
@@ -803,7 +786,7 @@ function StudioFull() {
           collapsed={dockCollapsed}
           onExpandRequest={() => setClickPinned(true)}
           onShellFocusChange={setShellFocused}
-          onSubmit={onSubmit}
+          onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
           disabled={pending}
           value={promptText}
           onValueChange={setPromptText}
@@ -813,7 +796,7 @@ function StudioFull() {
             setAssetSaveRequest({
               requestId: crypto.randomUUID(),
               kind: 'prompt',
-              segments: [{ kind: 'text', text: promptText }],
+              segments: promptToAssetSegments(promptText),
             });
           }}
           onSaveReferenceImage={(file) => {
@@ -824,22 +807,24 @@ function StudioFull() {
           providers={keys}
           providerAlias={providerAlias}
           model={model}
-          ratio={ratio}
-          resolution={resolution}
+          sizeParams={sizeParams}
+          onSizeParamsChange={handleSizeParamsChange}
           count={count}
           quality={quality}
           mjParams={mjParams}
           onMjParamsChange={(patch) => setMjParams((prev) => ({ ...prev, ...patch }))}
           mjRefs={mjRefs}
           onMjRefsChange={setMjRefs}
-          onProviderChange={setProviderAlias}
-          onModelChange={setModel}
-          onRatioChange={setRatio}
-          onResolutionChange={setResolution}
+          onProviderChange={alias => {
+            setProviderAlias(alias);
+            setSizeParams(previous => imageSizeMode(previous) === 'ratio' ? { ...previous, size: undefined } : previous);
+          }}
+          onModelChange={next => {
+            setModel(next);
+            setSizeParams(previous => imageSizeMode(previous) === 'ratio' ? { ...previous, size: undefined } : previous);
+          }}
           onCountChange={setCount}
           onQualityChange={setQuality}
-          onCustomSizeChange={handleCustomSizeChange}
-          sizeOverride={sizeOverride}
           menuDirection="up"
           referenceImages={referenceImages}
           onReferenceImagesChange={setReferenceImages}
@@ -972,22 +957,10 @@ function StudioFull() {
         setVideoMode(isOmniVideoConfig(config) ? 'omni' : 'firstlast');
         setGenerateAudio(!!config.generateAudio);
       } else {
-        if (config.ratio) setRatio(config.ratio);
-        if (config.resolution) setResolution(config.resolution);
+        setSizeParams({ size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
         if (config.n) setCount(clampImageCount(config.n));
         if (config.quality) setQuality(config.quality);
         if (config.mjParams) setMjParams(config.mjParams);
-        if (config.size) {
-          const [wStr, hStr] = config.size.split('x');
-          const w = parseInt(wStr, 10);
-          const h = parseInt(hStr, 10);
-          if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
-            const standard = computeStudioPixelSize(config.ratio ?? ratio, config.resolution ?? resolution, config.model);
-            if (w !== standard.w || h !== standard.h) {
-              setSizeOverride((prev) => ({ key: (prev?.key ?? 0) + 1, w, h }));
-            }
-          }
-        }
       }
 
       setReferenceImages([]);
@@ -1040,8 +1013,7 @@ function StudioFull() {
       setVideoMode(isOmniVideoConfig(config) ? 'omni' : 'firstlast');
       setGenerateAudio(!!config.generateAudio);
     } else {
-      if (config.ratio) setRatio(config.ratio);
-      if (config.resolution) setResolution(config.resolution);
+      setSizeParams({ size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
       if (config.n) setCount(clampImageCount(config.n));
       if (config.mjParams) setMjParams(config.mjParams);
     }
@@ -1143,8 +1115,9 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
     model: job.model,
     modelName: selectedModel?.name,
     ratio: typeof p.ratio === 'string' ? p.ratio : undefined,
-    resolution: p.resolution === '4K' ? '4K' : p.resolution === '2K' ? '2K' : undefined,
+    resolution: ['512', '1K', '2K', '4K'].includes(p.resolution ?? '') ? p.resolution as RoundConfig['resolution'] : undefined,
     size: typeof p.size === 'string' ? p.size : undefined,
+    sizeMode: imageSizeMode(p),
     n: typeof p.n === 'number' ? clampImageCount(p.n) : undefined,
     quality: (p.quality === 'low' || p.quality === 'medium'
       || p.quality === 'high' || p.quality === 'auto')
@@ -1168,7 +1141,7 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
           },
         }
       : {}),
-    // 视频参数：再次生成时从原 job 还原（resolution 上面只认 2K/4K 图片语义，视频的 720p/1080p 存这里）。
+    // 视频参数：再次生成时从原 job 还原（上面只认图片分辨率档位，视频的 720p/1080p 存这里）。
     // referenceVideos/Audios 给空数组而非 undefined，避免 onSubmitVideo 的 ?? 回落到当前表单文件。
     ...(isVideo
       ? {

@@ -18,6 +18,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from character_workflow.lib import net_env
 from character_workflow.lib.callers import tuzi_async
+from character_workflow.lib.image_size_catalog import image_size_options, is_nano_image_size_model
 
 DEFAULT_SEEDREAM_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
@@ -131,11 +132,29 @@ def render(
 
     is_hk = _is_openai_hk(base_url)
     is_tuzi = _is_tuzi_gateway(base_url)
-    requested = max(1, int(n or 1))
     params = kwargs.get("params") if isinstance(kwargs.get("params"), dict) else None
+    has_native_order = bool(params and params.get("provider_task_protocol") == tuzi_async.TASK_PROTOCOL
+                            and params.get("provider_task_ids"))
+    # Native tasks document neither mask nor independent quality/background controls.
+    # Select the Images contract up front for those requests; never retry via another route.
+    use_tuzi_tasks = (
+        is_tuzi and model in tuzi_async.IMAGE_TASK_MODELS and not mask_path
+        and _quality_param(kwargs) in {None, "auto"}
+        and _background_param(kwargs) in {None, "auto"}
+        and _effective_image_protocol(key, model) in {None, "openai"}
+        # Tuzi's native GPT2 AUTO tasks can stay queued indefinitely; Images AUTO is verified.
+        # Existing paid tasks retain their original protocol and are only polled, never resubmitted.
+        and (not _is_tuzi_gpt2_auto(base_url, model, requested_size) or has_native_order)
+    )
+    requested = max(1, int(n or 1))
+    if params and params.get("provider_task_ids"):
+        if params.get("provider_task_protocol") == "tuzi_async":
+            raise OpenAIImageError("旧 Tuzi 异步接口已停用，请先核对厂商订单；不会自动重新生成")
+        if params.get("provider_task_protocol") == tuzi_async.TASK_PROTOCOL and not use_tuzi_tasks:
+            raise OpenAIImageError("已有 Tuzi 图片任务与当前模型或参数不匹配，不能重新提交")
     stored_task_ids = (
         list(params.get("provider_task_ids") or [])
-        if params and params.get("provider_task_protocol") == "tuzi_async"
+        if params and params.get("provider_task_protocol") == tuzi_async.TASK_PROTOCOL
         else []
     )
     resuming_stored_tasks = bool(stored_task_ids)
@@ -151,14 +170,14 @@ def render(
         if task_id not in stored_task_ids:
             stored_task_ids.append(task_id)
         if params is not None:
-            params["provider_task_protocol"] = "tuzi_async"
+            params["provider_task_protocol"] = tuzi_async.TASK_PROTOCOL
             params["provider_task_ids"] = list(stored_task_ids)
         callback = kwargs.get("on_params_changed")
         if callable(callback):
             callback()
 
     def _post_image_json(url: str, payload: dict) -> dict:
-        if not is_tuzi:
+        if not use_tuzi_tasks:
             return _post_json(url, key.access_key, payload, timeout=timeout)
         return tuzi_async.execute_json(
             url=url,
@@ -216,6 +235,10 @@ def render(
     # Tuzi 的 nano-banana-* 是展示别名，图片端点的正式路由使用 Gemini model id。
     # 非 VIP 固定 2K/4K 别名也走基础 canonical model + quality；它们在目录中
     # 虽有同名 canonical fixed model，但 default 分组未计价。VIP/HD 才保留固定型号。
+    if (is_hk or is_tuzi) and is_nano_image_size_model(model):
+        # These Images gateways spell ratio-valued sizes as 21x9; jobs keep 21:9.
+        if requested_size in image_size_options(key.provider, base_url, model)["ratios"]:
+            requested_size = str(requested_size).replace(":", "x")
     outbound_model = tuzi_outbound_image_model(model) if is_tuzi else model
     quality = _quality_param(kwargs) if supports_image_quality(model) else None
     if is_tuzi and family == "nano-banana":
@@ -258,7 +281,7 @@ def render(
                     on_task_id=_remember_task_id, on_phase=kwargs.get("on_phase"),
                     should_cancel=kwargs.get("should_cancel"),
                 )
-                if is_tuzi else
+                if use_tuzi_tasks else
                 _post_multipart(
                     _edits_url(base_url), key.access_key, fields=fields, files=files,
                     timeout=timeout,
@@ -493,7 +516,8 @@ def _post_multipart(
         resp = requests.post(url, headers=headers, data=fields, files=files, timeout=timeout)
         if resp.status_code >= 400:
             err = OpenAIImageError(f"image edits api {resp.status_code}: {resp.text[:500]}")
-            if _is_retryable(resp.status_code, resp.text) and attempt < 2:
+            if (_is_retryable(resp.status_code, resp.text) and attempt < 2
+                    and not _is_tuzi_gpt2_auto(url, fields.get("model"), fields.get("size"))):
                 time.sleep(1 + attempt)
                 continue
             raise err
@@ -508,6 +532,11 @@ def _is_retryable(status_code: int, body: str) -> bool:
         return False
     low = (body or "").lower()
     return not any(marker in low for marker in _FATAL_BODY_MARKERS)
+
+
+def _is_tuzi_gpt2_auto(url: str, model: object, size: object) -> bool:
+    """The verified AUTO Images route must not rebill after an ambiguous gateway failure."""
+    return _is_tuzi_gateway(url) and model == "gpt-image-2" and size == "auto"
 
 
 def _chat_image_url(base_url: str) -> str:
@@ -766,7 +795,8 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[
             if resp.status_code >= 400:
                 err = OpenAIImageError(f"image api {resp.status_code}: {resp.text[:500]}")
                 # 瞬时网关错误复用网络异常那套退避重试（continue 进下一轮）；其余当场抛。
-                if _is_retryable(resp.status_code, resp.text) and attempt < 2:
+                if (_is_retryable(resp.status_code, resp.text) and attempt < 2
+                        and not _is_tuzi_gpt2_auto(url, payload.get("model"), payload.get("size"))):
                     time.sleep(1 + attempt)
                     continue
                 raise err

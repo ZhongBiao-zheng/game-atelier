@@ -6,7 +6,7 @@ import { listKeys, modelModality, type KeyView } from '@/api/keys';
 import { PromptInput } from '@/components/studio/PromptInput';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import type { RoundConfig } from '@/components/studio/RoundList';
-import { normalizeStudioSizeForModel, studioSizeFor } from '@/lib/studioSize';
+import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { hasSrefCode, MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { EMPTY_MJ_REFS, type MjRefSlots } from '@/components/studio/MjReferenceSlots';
@@ -20,12 +20,8 @@ const SELECTION_STORAGE_KEY = 'studio:selection';
 interface SavedSelection {
   providerAlias?: string;
   model?: string;
-  ratio?: string;
-  resolution?: '2K' | '4K';
+  sizeParams?: JobParams;
   quality?: Quality;
-  customSize?: string;
-  /** 尺寸是用户亲手改的，不是自动算出来的。缺失按 false。 */
-  customSizeManual?: boolean;
   kind?: JobKind;
   videoMode?: VideoMode;
   duration?: number;
@@ -62,16 +58,12 @@ export function StudioCompact() {
   const [keys, setKeys] = useState<KeyView[]>([]);
   const [providerAlias, setProviderAlias] = useState('');
   const [model, setModel] = useState('');
-  const [ratio, setRatio] = useState(draft?.ratio ?? '1:1');
-  const [resolution, setResolution] = useState<'2K' | '4K'>(draft?.resolution ?? '2K');
+  const [sizeParams, setSizeParams] = useState<JobParams>(draft?.sizeParams ?? saved.sizeParams ?? {});
   const [count, setCount] = useState(draft?.count ?? 1);
-  const [customSize, setCustomSize] = useState(draft?.customSize ?? '');
-  const [customSizeManual, setCustomSizeManual] = useState(draft?.customSizeManual ?? false);
   const [quality, setQuality] = useState<Quality>(draft?.quality ?? 'low');
   // 与 StudioFull 同一政策：MJ 参数不进 localStorage，每次启动回默认。
   const [mjParams, setMjParams] = useState<MjParams>(draft?.mjParams ?? MJ_DEFAULTS);
   const [mjRefs, setMjRefs] = useState<MjRefSlots>(draft?.mjRefs ?? EMPTY_MJ_REFS);
-  const [sizeOverride, setSizeOverride] = useState<{ key: number; w: number; h: number } | undefined>(undefined);
   const [promptText, setPromptText] = useState(draft?.promptText ?? '');
   const [referenceImages, setReferenceImages] = useState<File[]>(draft?.referenceImages ?? []);
   const [kind, setKind] = useState<JobKind>(draft?.kind ?? saved.kind ?? 'image');
@@ -91,13 +83,13 @@ export function StudioCompact() {
     writeStudioDraft({
       providerAlias, model, kind, promptText, promptAssetSourceTitle: null,
       referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
-      ratio, resolution, count, customSize, customSizeManual, quality,
+      sizeParams, count, quality,
       videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
     });
   }, [
     providerAlias, model, kind, promptText,
     referenceImages, referenceVideos, referenceAudios, videoFrames, mjRefs, mjParams,
-    ratio, resolution, count, customSize, customSizeManual, quality,
+    sizeParams, count, quality,
     videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
   ]);
   const selectedModelObj = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
@@ -120,20 +112,6 @@ export function StudioCompact() {
         const savedModelValid = wantedModel && selected?.models.some((m) => m.id === wantedModel);
         const nextModel = savedModelValid ? wantedModel! : selected?.models[0]?.id ?? '';
         setModel(nextModel);
-        // 只恢复用户**亲手改过**的尺寸，凭存档里的 customSizeManual 标记判断。
-        // 旧代码拿存档值和「当前」标准尺寸比，不等就当手动覆盖 —— 标准尺寸公式一改
-        // （PR #40 把 pro 的 2K 从 2048² 撑到上限 2150²），历史存档里那个曾经标准的
-        // 2048² 就被追认成手动选择：打开就显示 2048×2048，点一下比例才跳回 2150×2150，
-        // 期间出的图真按 2048² 出，白丢约 10% 像素。缺标记的旧存档按「非手动」处理，
-        // 回落到标准尺寸 —— 这个方向错了只是丢一次自定义值，反过来错则天天出小图。
-        if (saved.customSizeManual && saved.customSize) {
-          const [wStr, hStr] = saved.customSize.split('x');
-          const w = parseInt(wStr, 10);
-          const h = parseInt(hStr, 10);
-          if (!isNaN(w) && !isNaN(h) && w > 0 && h > 0) {
-            setSizeOverride((prev) => ({ key: (prev?.key ?? 0) + 1, w, h }));
-          }
-        }
       })
       .catch(() => {
         if (!cancelled) setKeys([]);
@@ -172,29 +150,27 @@ export function StudioCompact() {
   useEffect(() => {
     if (!providerAlias) return;
     saveSelection({
-      providerAlias, model, ratio, resolution, quality, customSize, customSizeManual,
+      providerAlias, model, sizeParams, quality,
       kind, videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
     });
   }, [
-    providerAlias, model, ratio, resolution, quality, customSize, customSizeManual,
+    providerAlias, model, sizeParams, quality,
     kind, videoMode, duration, videoResolution, videoRatio, videoQuality, videoCount, generateAudio,
   ]);
 
-  // manual 由 PromptInput 给：只有亲手改宽高输入框才是 true，切比例/档位/模型的
-  // 自动重算是 false。存进 saveSelection 后，下次恢复不必再靠比对数值去猜意图。
-  const handleCustomSizeChange = useCallback((w: number, h: number, manual?: boolean) => {
-    setCustomSize(`${w}x${h}`);
-    setCustomSizeManual(Boolean(manual));
-  }, []);
+  const handleSizeParamsChange = useCallback((patch: JobParams) => {
+    setSizeParams(previous => {
+      const selected = keys.find(key => key.alias === providerAlias);
+      return normalizeImageSizeParams(model, selected?.provider, selected?.base_url, { ...previous, ...patch });
+    });
+  }, [keys, providerAlias, model]);
 
-  const onSubmit = async (prompt: string, overrideConfig?: RoundConfig) => {
+  const onSubmit = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
     if (wantVideo) {
-      await onSubmitVideo(prompt, overrideConfig);
+      await onSubmitVideo(prompt, overrideConfig, promptTemplate);
       return;
     }
-    const effectiveRatio = overrideConfig?.ratio ?? ratio;
-    const effectiveResolution = overrideConfig?.resolution ?? resolution;
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
     const effectiveModel = overrideConfig?.model ?? model;
     const selectedKey = keys.find((item) => item.alias === effectiveAlias);
@@ -209,16 +185,22 @@ export function StudioCompact() {
     const effectiveCount = caps.family === 'midjourney'
       ? MJ_IMAGES_PER_TASK
       : clampImageCount(overrideConfig?.n ?? count);
-    // MJ（sizeKind='none'）不发任何尺寸参数：比例由渠道锁定在 1:1。
-    const effectiveSize = overrideConfig?.size
-      ?? (caps.sizeKind === 'none'
-        ? undefined
-        : caps.sizeKind === 'ratio'
-          ? effectiveRatio
-          : normalizeStudioSizeForModel(
-              customSize || studioSizeFor(effectiveRatio, effectiveResolution, effectiveModel),
-              effectiveModel,
-            ));
+    const rawSizeParams: JobParams = overrideConfig
+      ? { size_mode: overrideConfig.sizeMode ?? 'ratio', size: overrideConfig.size, ratio: overrideConfig.ratio, resolution: overrideConfig.resolution }
+      : sizeParams;
+    const preparedSize = prepareImageSizeSubmission(effectiveModel, effectiveProvider, selectedKey?.base_url, rawSizeParams);
+    if (preparedSize.error) {
+      setCompactError(preparedSize.error);
+      return;
+    }
+    const effectiveSizeParams = preparedSize.params!;
+    const effectiveMode = imageSizeMode(effectiveSizeParams);
+    if (effectiveMode === 'custom' && !overrideConfig) {
+      setSizeParams(previous => ({ ...previous, size: effectiveSizeParams.size, custom_size: effectiveSizeParams.size }));
+    }
+    const effectiveSize = effectiveSizeParams.size;
+    const effectiveRatio = effectiveMode === 'ratio' ? effectiveSizeParams.ratio : undefined;
+    const effectiveResolution = effectiveMode === 'ratio' ? effectiveSizeParams.resolution as RoundConfig['resolution'] : undefined;
     const rawQuality = overrideConfig?.quality ?? quality;
     const effectiveQuality = caps.qualities?.includes(rawQuality) ? rawQuality : undefined;
     const effectiveMjParams = overrideConfig?.mjParams ?? mjParams;
@@ -242,9 +224,10 @@ export function StudioCompact() {
 
     // 控件隐藏的参数不写进 params（同 Studio.onSubmit）：openrouter 会把 resolution 当 API 参数发。
     const jobParams: JobParams = {
+      size_mode: effectiveMode,
       ...(effectiveSize ? { size: effectiveSize } : {}),
-      ...(caps.ratios.length > 0 ? { ratio: effectiveRatio } : {}),
-      ...(caps.showResolution ? { resolution: effectiveResolution } : {}),
+      ...(effectiveRatio ? { ratio: effectiveRatio } : {}),
+      ...(effectiveResolution ? { resolution: effectiveResolution } : {}),
       n: effectiveCount,
       ...(effectiveQuality ? { quality: effectiveQuality } : {}),
       ...(refPaths.length > 0 ? { reference_images: refPaths } : {}),
@@ -264,11 +247,12 @@ export function StudioCompact() {
       'image',
       jobParams,
     );
-    if (estimatedCost != null) jobParams.estimated_cost_cny = estimatedCost;
+    if (estimatedCost != null && effectiveMode !== 'auto') jobParams.estimated_cost_cny = estimatedCost;
 
     try {
       await createStudioJob({
         prompt,
+        ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
         alias: effectiveAlias ?? undefined,
         model: effectiveModel,
         params: jobParams,
@@ -281,7 +265,7 @@ export function StudioCompact() {
     }
   };
 
-  const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig) => {
+  const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
     const videoKeys = keys.filter((item) => videoModelsOf(item).length > 0);
     const selectedKey =
@@ -363,6 +347,7 @@ export function StudioCompact() {
     try {
       await createStudioJob({
         prompt,
+        ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
         alias: effectiveAlias ?? undefined,
         model: effectiveModel,
         params: videoParams,
@@ -382,29 +367,31 @@ export function StudioCompact() {
         描述你想生成的图片
       </h1>
       <PromptInput
-        onSubmit={onSubmit}
+        onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
         disabled={pending}
         value={promptText}
         onValueChange={setPromptText}
         providers={keys}
         providerAlias={providerAlias}
         model={model}
-        ratio={ratio}
-        resolution={resolution}
+        sizeParams={sizeParams}
+        onSizeParamsChange={handleSizeParamsChange}
         count={count}
         quality={quality}
         mjParams={mjParams}
         onMjParamsChange={(patch) => setMjParams((prev) => ({ ...prev, ...patch }))}
         mjRefs={mjRefs}
         onMjRefsChange={setMjRefs}
-        onProviderChange={setProviderAlias}
-        onModelChange={setModel}
-        onRatioChange={setRatio}
-        onResolutionChange={setResolution}
+        onProviderChange={alias => {
+          setProviderAlias(alias);
+          setSizeParams(previous => imageSizeMode(previous) === 'ratio' ? { ...previous, size: undefined } : previous);
+        }}
+        onModelChange={next => {
+          setModel(next);
+          setSizeParams(previous => imageSizeMode(previous) === 'ratio' ? { ...previous, size: undefined } : previous);
+        }}
         onCountChange={setCount}
         onQualityChange={setQuality}
-        onCustomSizeChange={handleCustomSizeChange}
-        sizeOverride={sizeOverride}
         menuDirection="down"
         referenceImages={referenceImages}
         onReferenceImagesChange={setReferenceImages}

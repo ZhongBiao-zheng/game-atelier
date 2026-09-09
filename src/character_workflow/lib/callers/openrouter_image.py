@@ -88,7 +88,9 @@ def _image_payload(*, prompt: str, model: str, n: int, kwargs: dict) -> dict:
 
     size = kwargs.get("size") or params.get("size")
     ratio = params.get("ratio")
-    if isinstance(size, str) and _PIXEL_SIZE.fullmatch(size.strip()):
+    if size == "auto":
+        payload["aspect_ratio"] = "auto"
+    elif isinstance(size, str) and _PIXEL_SIZE.fullmatch(size.strip()):
         # 显式像素是权威值，与 aspect_ratio/resolution 互斥（同发 400）。
         payload["size"] = size.strip()
     else:

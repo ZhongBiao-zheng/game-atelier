@@ -1,14 +1,10 @@
-"""Tuzi generic async wrapper for long-running image requests.
+"""Tuzi native image tasks (the provider calls the endpoint /v1/videos).
 
-Tuzi's synchronous image endpoint can close its HTTP connection before a slow upstream image
-finishes.  The upstream keeps running and bills the request, but the caller loses the response.
-The generic async wrapper returns a durable task id first, then exposes the original JSON response
-through ``GET /get-async``.  Polling transport failures therefore retry the same billed task instead
-of creating another one.
+Persist each task before polling so transport failures never cause another paid submission.
+The retired generic async transport is deliberately not used, even on failure.
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -30,19 +26,18 @@ _SUCCESS = frozenset({"completed", "success", "succeeded", "done"})
 _FAILURE = frozenset({"failure", "failed", "error", "expired", "cancelled", "canceled"})
 _PENDING = frozenset({"queued", "not_start", "submitted", "in_progress", "processing", "pending"})
 _POLL_TIMEOUT_SECONDS = 30
+_POLL_WINDOW_SECONDS = 10 * 60
+IMAGE_TASK_MODELS = frozenset({"gpt-image-2", "gpt-image-2-vip", "gpt-image-1.5", "gpt-image-1"})
+TASK_PROTOCOL = "tuzi_images"
 
 
 def _async_url(url: str) -> str:
     parts = urlsplit(url)
-    path = parts.path if parts.path.startswith("/") else f"/{parts.path}"
-    if not path.startswith("/async/"):
-        path = f"/async{path}"
-    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
+    return urlunsplit((parts.scheme, parts.netloc, "/v1/videos", "", ""))
 
 
 def _poll_url(url: str, task_id: str) -> str:
-    parts = urlsplit(url)
-    return urlunsplit((parts.scheme, parts.netloc, "/get-async", f"id={quote(task_id)}", ""))
+    return f"{_async_url(url)}/{quote(task_id, safe='')}"
 
 
 def _json(response: Any) -> dict[str, Any]:
@@ -78,31 +73,13 @@ def _task_id(payload: dict[str, Any]) -> str | None:
 
 
 def _result_json(payload: dict[str, Any], task_id: str) -> dict[str, Any]:
-    result: Any = payload.get("result")
-    status_code = payload.get("status_code")
-    if isinstance(result, dict):
-        status_code = result.get("status_code", status_code)
-        # Some deployments preserve the upstream body inside an HTTP result envelope.
-        if "body" in result and not any(k in result for k in ("data", "choices", "error")):
-            result = result["body"]
-    if isinstance(status_code, int) and status_code >= 400:
+    url = payload.get("video_url")
+    if (not isinstance(url, str) or urlsplit(url).scheme not in {"https", "http"}
+            or not urlsplit(url).hostname):
         raise TuziAsyncError(
-            video_poll.with_task_ref(
-                f"Tuzi 异步任务的上游响应失败（HTTP {status_code}）", task_id
-            )
+            video_poll.with_task_ref("Tuzi 图片任务完成但没有有效图片地址", task_id)
         )
-    if isinstance(result, str):
-        try:
-            result = json.loads(result)
-        except json.JSONDecodeError as e:
-            raise TuziAsyncError(
-                video_poll.with_task_ref("Tuzi 异步任务完成但结果不是 JSON", task_id)
-            ) from e
-    if not isinstance(result, dict):
-        raise TuziAsyncError(
-            video_poll.with_task_ref("Tuzi 异步任务完成但没有返回结果", task_id)
-        )
-    return result
+    return {"data": [{"url": url}]}
 
 
 def _execute(
@@ -120,6 +97,8 @@ def _execute(
     headers = {"Authorization": f"Bearer {api_key}"}
     current = task_id
     if not current:
+        if should_cancel and should_cancel():
+            raise TuziAsyncError("生成已按请求停止，尚未提交厂商任务")
         response = submit(_async_url(url), headers)
         payload = _json(response)
         if not 200 <= int(response.status_code) < 300:
@@ -133,6 +112,7 @@ def _execute(
     if on_phase:
         on_phase("sent")
 
+    status = ""
     for response in video_poll.poll_responses(
         url=_poll_url(url, current),
         headers=headers,
@@ -142,6 +122,7 @@ def _execute(
         task_ref=current,
         error_cls=TuziAsyncPendingError,
         should_cancel=should_cancel,
+        max_elapsed_seconds=_POLL_WINDOW_SECONDS,
     ):
         payload = _json(response)
         if not 200 <= int(response.status_code) < 300:
@@ -167,7 +148,10 @@ def _execute(
                 )
             )
     raise TuziAsyncPendingError(
-        video_poll.with_task_ref("Tuzi 异步任务轮询超时，任务可能仍在厂商侧运行", current)
+        video_poll.with_task_ref(
+            f"Tuzi 图片查询超时，厂商最后状态：{status or '未取得'}；任务可能仍在厂商侧运行",
+            current,
+        )
     )
 
 
@@ -184,24 +168,10 @@ def execute_json(
     poll_interval: float = 2.0,
     max_polls: int = 300,
 ) -> dict[str, Any]:
-    def submit(async_url: str, headers: dict[str, str]):
-        return requests.post(
-            async_url,
-            headers={**headers, "Content-Type": "application/json"},
-            json=payload,
-            timeout=submit_timeout,
-        )
-
-    return _execute(
-        url=url,
-        api_key=api_key,
-        submit=submit,
-        task_id=task_id,
-        on_task_id=on_task_id,
-        on_phase=on_phase,
-        should_cancel=should_cancel,
-        poll_interval=poll_interval,
-        max_polls=max_polls,
+    return execute_multipart(
+        url=url, api_key=api_key, fields=payload, files=[], task_id=task_id,
+        on_task_id=on_task_id, on_phase=on_phase, should_cancel=should_cancel,
+        submit_timeout=submit_timeout, poll_interval=poll_interval, max_polls=max_polls,
     )
 
 
@@ -219,13 +189,24 @@ def execute_multipart(
     poll_interval: float = 2.0,
     max_polls: int = 300,
 ) -> dict[str, Any]:
+    if not task_id and fields.get("model") not in IMAGE_TASK_MODELS:
+        raise TuziAsyncError("该模型未支持 Tuzi 图片异步任务接口")
+    # Images-only fields must not silently lose their meaning on the native task API.
+    if fields.get("quality") not in {None, "auto"} or fields.get("background") not in {None, "auto"}:
+        raise TuziAsyncError("Tuzi 图片异步接口不支持指定质量或背景")
+    if any(name not in {"image", "image[]"} for name, _ in files):
+        raise TuziAsyncError("Tuzi 图片异步接口不支持蒙版")
+    parts = [(name, (None, str(fields[name]))) for name in ("model", "prompt", "size")
+             if fields.get(name) is not None]
+    parts.extend(("input_reference", part) for _, part in files)
+
     def submit(async_url: str, headers: dict[str, str]):
         return requests.post(
             async_url,
             headers=headers,
-            data=fields,
-            files=files,
+            files=parts,
             timeout=submit_timeout,
+            allow_redirects=False,
         )
 
     return _execute(

@@ -1,4 +1,5 @@
 import '@xyflow/react/dist/style.css';
+import { promptToAssetSegments, readablePromptVariables } from '@/lib/promptVariables';
 
 import {
   Background,
@@ -38,14 +39,12 @@ import {
   MousePointer2,
   Pencil,
   Plus,
-  Redo2,
   Scan,
   Settings,
   Settings2,
   Square,
   Trash2,
   Type,
-  Undo2,
   Upload,
   WandSparkles,
   X,
@@ -196,16 +195,22 @@ import {
   canvasRequiresBatchRun,
   closestCanvasConnectionEndpoint,
   createCanvasGenerationDraft,
+  resolveCanvasGenerationDraft,
   createConnectedCanvasConfig,
   layerStackSizeForCanvasVersion,
   normalizeCanvasVideoParams,
   normalizeCanvasGroups,
+  expandCanvasLayerStack,
+  syncLayerMaterials,
+  layerMaterialNodeIds,
   placeCanvasNodeWithoutOverlap,
   restoreContentVersions,
   sizeLockedToCanvasVersion,
   supportsCanvasVideoEdit,
   syncDraftLayerStackSources,
 } from './canvasEditorModel';
+import { restoreCanvasRetryConfiguration } from './canvasRetryMerge';
+import { canvasLayerMaterialConnections, type CanvasLayerMaterialConnection } from './canvasLayerMaterialConnections';
 
 interface CreateMenuState {
   screen: XYPosition;
@@ -429,7 +434,6 @@ function CanvasEditorInner({
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
-  const [historyDepth, setHistoryDepth] = useState({ past: 0, future: 0 });
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
@@ -526,6 +530,7 @@ function CanvasEditorInner({
   const {
     screenToFlowPosition,
     fitView,
+    fitBounds,
     getViewport,
     getZoom,
     setCenter,
@@ -534,12 +539,16 @@ function CanvasEditorInner({
     zoomOut,
     zoomTo,
   } = useReactFlow<FlowNode>();
+  const usedPromptAssetRef = useRef(false);
+  const [focusVariableNodeId, setFocusVariableNodeId] = useState<string | null>(null);
+  const consumeVariableFocus = useCallback(() => setFocusVariableNodeId(null), []);
   const closeLibrary = useCallback(() => {
     const trigger = libraryMode === 'prompts'
       ? promptLibraryTriggerRef.current
       : assetLibraryTriggerRef.current;
     setLibraryMode(null);
-    requestAnimationFrame(() => trigger?.focus());
+    if (!usedPromptAssetRef.current) requestAnimationFrame(() => trigger?.focus());
+    usedPromptAssetRef.current = false;
   }, [libraryMode]);
 
   const mergeRunDocument = useCallback((
@@ -552,14 +561,7 @@ function CanvasEditorInner({
       if (!current || remote.revision < current.revision) return current;
       const remoteNodes = new Map(remote.nodes.map(node => [node.id, node]));
       const currentNodeIds = new Set(current.nodes.map(node => node.id));
-      const serverAddedNodeIds = new Set(remote.connections.flatMap(connection => (
-        connection.role === 'derivation'
-        && connection.origin.kind === 'generation_run'
-        && runIds.has(connection.origin.run_id)
-        && !currentNodeIds.has(connection.target_node_id)
-          ? [connection.target_node_id]
-          : []
-      )));
+      const serverAddedNodeIds = new Set<string>();
       for (const node of remote.nodes) {
         if (isContentNode(node) && (runIds.has(node.data.active_run_id ?? '') || resultNodeIds.has(node.id))
           && !currentNodeIds.has(node.id)) serverAddedNodeIds.add(node.id);
@@ -603,14 +605,7 @@ function CanvasEditorInner({
         !connectionIds.has(connection.id)
         && nodeIds.has(connection.source_node_id)
         && nodeIds.has(connection.target_node_id)
-        && (
-          (
-            connection.role === 'derivation'
-            && connection.origin.kind === 'generation_run'
-            && runIds.has(connection.origin.run_id)
-          )
-          || serverAddedNodeIds.has(connection.target_node_id)
-        )
+        && serverAddedNodeIds.has(connection.target_node_id)
       ));
       const merged: CanvasDocument = normalizeCanvasGroups({
         ...current,
@@ -781,14 +776,19 @@ function CanvasEditorInner({
     remote: CanvasDocument,
     job: Job,
     dirtyAtSubmission: number,
+    submittedDocument?: CanvasDocument | null,
   ) => {
     serverRevision.current = Math.max(serverRevision.current, remote.revision);
     const context = job.canvas_run;
-    const current = latestDocument.current;
-    if (!current || !context) {
+    const latest = latestDocument.current;
+    if (!latest || !context) {
       setDocument(remote);
       return;
     }
+    const restoringRetry = Boolean(job.retry_of && submittedDocument);
+    const current = restoringRetry && submittedDocument
+      ? restoreCanvasRetryConfiguration(latest, remote, submittedDocument, context.result_node_id)
+      : latest;
     const remoteNodes = new Map(remote.nodes.map(node => [node.id, node]));
     const remoteResult = remoteNodes.get(context.result_node_id);
     const hasResult = current.nodes.some(node => node.id === context.result_node_id);
@@ -796,7 +796,9 @@ function CanvasEditorInner({
     const nodes = current.nodes.map(node => {
       if (node.id !== context.result_node_id || !remoteResult) return node;
       if (node.type === 'layer_stack' && remoteResult.type === 'layer_stack') {
-        return { ...node, data: remoteResult.data };
+        return { ...node, data: restoringRetry
+          ? { ...node.data, active_run_id: remoteResult.data.active_run_id, error: remoteResult.data.error }
+          : remoteResult.data };
       }
       if (!isContentNode(node) || !isContentNode(remoteResult)) return node;
       return {
@@ -812,9 +814,7 @@ function CanvasEditorInner({
     const mergedNodeIds = new Set(nodes.map(node => node.id));
     const connectionIds = new Set(current.connections.map(connection => connection.id));
     const runConnections = remote.connections.filter(connection => (
-      connection.role === 'derivation'
-      && connection.origin.kind === 'generation_run'
-      && connection.origin.run_id === context.run_id
+      !hasResult && connection.target_node_id === context.result_node_id
       && !connectionIds.has(connection.id)
       && mergedNodeIds.has(connection.source_node_id)
       && mergedNodeIds.has(connection.target_node_id)
@@ -886,7 +886,7 @@ function CanvasEditorInner({
   latestDocument.current = document;
   useEffect(() => {
     if (!document) return;
-    const synced = syncDraftLayerStackSources(document);
+    const synced = syncLayerMaterials(syncDraftLayerStackSources(document));
     if (synced === document) return;
     // 上游图片换版后，尚未运行的拆分节点必须在同一次本地收敛中更新快照与比例。
     // 已运行 / 已完成节点由 helper 明确跳过，避免历史产物跟着上游变化。
@@ -1053,18 +1053,6 @@ function CanvasEditorInner({
     const timer = window.setTimeout(() => void flushSave().catch(() => undefined), 350);
     return () => window.clearTimeout(timer);
   }, [compositionSignal, dirtySignal, flushSave, textEditingSignal]);
-
-  // 撤销栈是个 ref（快照数组要在同一次事件里被连续读写，做不成 state），但撤销 / 重做按钮的禁用态
-  // 得跟着它变。所以这条 effect 故意不写依赖数组：历史在 9 处被就地修改，每一处都伴随一次
-  // setDocument，也就是每一次修改后都会跑到这里。两次长度读取 + 相等就 bail，代价是常数级。
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- 规则担心的更新链由上面的相等 bail 掐断
-  useEffect(() => {
-    setHistoryDepth(current => {
-      const past = history.current.past.length;
-      const future = history.current.future.length;
-      return current.past === past && current.future === future ? current : { past, future };
-    });
-  });
 
   // 上面那条 effect 每次 dirtySignal 变化都 clearTimeout，排队的快照没人接手。
   // 卸载（画布内返回、路由跳走、切项目）走的是 SPA 路径，fetch 不会被掐，所以这里补一次冲刷；
@@ -1236,15 +1224,19 @@ function CanvasEditorInner({
    *  全部连线都会换成新对象重画一遍。
    *
    *  数组本身也复用：一条都没变时返回上一次那个数组，`setEdges` 连跑都不用跑。 */
+  const layerConnectionSignature = JSON.stringify(canvasLayerMaterialConnections(document?.nodes ?? []));
+  const layerConnections = useMemo<CanvasLayerMaterialConnection[]>(() => JSON.parse(layerConnectionSignature), [layerConnectionSignature]);
   const flowEdges = useMemo(() => {
     const titles = new Map((document?.nodes ?? []).map(node => [node.id, node.title]));
     const liveIds = new Set<string>();
-    const next = (document?.connections ?? []).map(connection => {
+    const next = [...document?.connections ?? [], ...layerConnections].map(connection => {
       liveIds.add(connection.id);
       const active = activeNodeId === connection.source_node_id || activeNodeId === connection.target_node_id;
       const selected = selectedConnectionIds.has(connection.id);
       const sourceTitle = titles.get(connection.source_node_id) ?? connection.source_node_id;
       const targetTitle = titles.get(connection.target_node_id) ?? connection.target_node_id;
+      const layerName = 'layerName' in connection && typeof connection.layerName === 'string' ? connection.layerName : null;
+      const readOnly = layerName !== null;
       const cached = flowEdgeCache.current.get(connection.id);
       if (
         cached?.connection === connection
@@ -1252,7 +1244,7 @@ function CanvasEditorInner({
         && cached.selected === selected
         && cached.sourceTitle === sourceTitle
         && cached.targetTitle === targetTitle
-        && cached.flowEdge.deletable === !activeBatch
+        && cached.flowEdge.deletable === (!activeBatch && !readOnly)
       ) return cached.flowEdge;
       const flowEdge: Edge = {
         id: connection.id,
@@ -1260,15 +1252,17 @@ function CanvasEditorInner({
         target: connection.target_node_id,
         type: 'canvasConnection',
         className: cn(
-          connection.role === 'derivation' ? 'canvas-provenance-edge' : 'canvas-input-edge',
+          'canvas-input-edge',
           active && 'canvas-active-edge',
         ),
-        ariaLabel: `${connection.role === 'derivation' ? '派生' : '输入'}连接：${sourceTitle} → ${targetTitle}`,
+        ariaLabel: connection.role === 'material'
+          ? `素材来源：${sourceTitle}${layerName ? ` · ${layerName}` : ''} → ${targetTitle}`
+          : `输入连接：${sourceTitle} → ${targetTitle}`,
         interactionWidth: 16,
         selected,
-        selectable: true,
+        selectable: !readOnly,
         focusable: true,
-        deletable: !activeBatch,
+        deletable: !activeBatch && !readOnly,
       };
       flowEdgeCache.current.set(
         connection.id,
@@ -1285,22 +1279,8 @@ function CanvasEditorInner({
       return previous;
     }
     flowEdgesRef.current = next;
-    if (mediaPlaceholder) {
-      // 占位节点与源素材之间先画一条派生虚线，结果节点落地后由真连接接替。
-      next.push({
-        id: `${mediaPlaceholder.id}-edge`,
-        source: mediaPlaceholder.sourceNodeId,
-        target: mediaPlaceholder.id,
-        type: 'canvasConnection',
-        className: 'canvas-provenance-edge',
-        interactionWidth: 0,
-        selectable: false,
-        focusable: false,
-        deletable: false,
-      });
-    }
     return next;
-  }, [activeBatch, activeNodeId, document?.connections, document?.nodes, mediaPlaceholder, selectedConnectionIds]);
+  }, [activeBatch, activeNodeId, document?.connections, document?.nodes, layerConnections, selectedConnectionIds]);
 
   const isValidConnection = useCallback<IsValidConnection>((connection) => (
     canCreateCanvasInputConnection(latestDocument.current, connection)
@@ -1581,9 +1561,11 @@ function CanvasEditorInner({
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     // 框选态要在事件到达的当下判定：setState 的 updater 可能延后到框选结束之后才跑。
     const swept = selectionRectActive.current;
+    const persistedIds = new Set(latestDocument.current?.connections.map(connection => connection.id));
     setSelectedConnectionIds(current => {
       const next = new Set(current);
       for (const change of changes) {
+        if (!('id' in change) || !persistedIds.has(change.id)) continue;
         if (change.type === 'select') {
           if (change.selected && swept) continue;
           change.selected ? next.add(change.id) : next.delete(change.id);
@@ -1592,7 +1574,9 @@ function CanvasEditorInner({
       }
       return next;
     });
-    const removedIds = new Set(changes.filter(change => change.type === 'remove').map(change => change.id));
+    const removedIds = new Set(changes.flatMap(change => (
+      change.type === 'remove' && persistedIds.has(change.id) ? [change.id] : []
+    )));
     if (removedIds.size) {
       commit(current => removeCanvasConnections(
         current,
@@ -1651,10 +1635,10 @@ function CanvasEditorInner({
         : undefined,
     ),
   );
-  const selectedDraft = selectedNode && !selectedIsUploadedImageMaterial
+  const selectedDraft = useMemo(() => selectedNode && !selectedIsUploadedImageMaterial
     && !(selectedNode.type === 'config' && selectedNode.data.draft.mode === 'text')
-    ? generationDraftForNode(selectedNode)
-    : null;
+    ? resolveCanvasGenerationDraft(selectedNode, keys, canvasUiPreferences.generation_defaults.text)
+    : null, [selectedNode, selectedIsUploadedImageMaterial, keys, canvasUiPreferences.generation_defaults.text]);
   const generationPanelOpen = Boolean(
     selectedNode
     && selectedDraft
@@ -1763,7 +1747,7 @@ function CanvasEditorInner({
         requestId: crypto.randomUUID(),
         kind: 'prompt',
         title: node.title,
-        segments: [{ kind: 'text', text: version.text }],
+        segments: promptToAssetSegments(version.text),
         projectId,
       });
       return;
@@ -1872,6 +1856,7 @@ function CanvasEditorInner({
         flowNodeCache.current.clear();
         setSelectedConnectionIds(new Set());
         setSelectedNodeIds(new Set());
+        setFocusVariableNodeId(insertedNodes.find(node => node.type === 'text')?.id ?? null);
       } catch (insertError) {
         setError((insertError as Error).message);
       } finally {
@@ -2127,8 +2112,7 @@ function CanvasEditorInner({
       nodes,
       connections: document.connections
         .filter(connection => (
-          connection.role === 'input'
-          && copiedIds.has(connection.source_node_id)
+          copiedIds.has(connection.source_node_id)
           && copiedIds.has(connection.target_node_id)
         ))
         .map(connection => structuredClone(connection)),
@@ -2623,9 +2607,6 @@ function CanvasEditorInner({
 
   const retryRun = useCallback(async (nodeId: string, runId: string) => {
     if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return; }
-    if (canvasRequiresBatchRun(latestDocument.current, nodeId)) {
-      await prepareBatch(nodeId); return;
-    }
     if (runSubmissionInFlight.current) {
       setError('另一项生成正在提交，请稍后再试。');
       return;
@@ -2634,13 +2615,14 @@ function CanvasEditorInner({
     setError(null);
     try {
       if (!await persistNow()) return;
+      const submittedDocument = latestDocument.current;
       const dirtyAtSubmission = dirtyVersion.current;
       runSubmissionInFlight.current = true;
       const run = await retryCanvasRun(projectId, runId, serverRevision.current);
       if (run.job.canvas_run && isReversePromptJob(run.job)) {
         reversePromptConfigEligibleRuns.current.add(run.job.canvas_run.run_id);
       }
-      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission, submittedDocument);
       applyLocalJob(run.job);
       const resultId = run.job.canvas_run?.result_node_id;
       if (resultId) setSelectedNodeIds(new Set([resultId]));
@@ -2661,7 +2643,6 @@ function CanvasEditorInner({
     mergeSubmittedRunDocument,
     persistNow,
     projectId,
-    prepareBatch,
   ]);
 
   const cancelRun = useCallback(async (runId: string) => {
@@ -2818,6 +2799,34 @@ function CanvasEditorInner({
     void operation.then(clearPending, clearPending);
     return operation;
   }, [commitViewportDocument, getViewport, projectId]);
+
+  const expandLayerStack = useCallback((nodeId: string) => {
+    const current = latestDocument.current;
+    if (!current || batchBusyRef.current) return;
+    try {
+      const expanded = expandCanvasLayerStack(current, nodeId, makeId);
+      const replaced = new Set(expanded.nodes.map(node => node.id));
+      if (expanded.nodes.length) commit(document => ({ ...document,
+        nodes: [...document.nodes.filter(node => !replaced.has(node.id)).flatMap<CanvasNode>(node => {
+          if (node.id === expanded.stack.id) return [expanded.stack];
+          if (node.type !== 'group') return [node];
+          const members = node.data.member_node_ids.filter(id => !replaced.has(id));
+          return members.length || !node.data.member_node_ids.length
+            ? [{ ...node, data: { ...node.data, member_node_ids: members } }] : [];
+        }), ...expanded.nodes],
+      }), true);
+      setSelectedConnectionIds(new Set());
+      setSelectedNodeIds(new Set([expanded.groupId]));
+      setError(null);
+      const group = [...expanded.nodes, ...current.nodes].find(node => node.id === expanded.groupId);
+      if (group?.size) {
+        const bounds = { ...group.position, ...group.size };
+        void runViewportCommand(() => fitBounds(bounds, { duration: 150, padding: 0.14 }));
+      }
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  }, [commit, fitBounds, runViewportCommand]);
 
   const undo = useCallback(() => {
     if (batchBusyRef.current) return;
@@ -3468,15 +3477,16 @@ function CanvasEditorInner({
     setMaskEdit(null);
     setAngleState(null);
     setError(null);
-    commit(current => ({
-      ...current,
-      nodes: current.nodes.map(candidate => candidate.id === node.id && candidate.type === 'video'
-        ? { ...candidate, data: { ...candidate.data, generation_draft: draft } }
-        : candidate),
-    }), true);
+    const newNodeId = makeId('video');
+    const current = latestDocument.current;
+    const next = current && createConnectedCanvasConfig(current, node.id, draft,
+      { nodeId: newNodeId, connectionId: makeId('connection') }, 'video');
+    if (!next) { setError('无法创建视频编辑节点。'); return; }
+    commit(() => next, true);
+    setDismissedGenerationPanelNodeId(null);
     setSelectedConnectionIds(new Set());
-    setSelectedNodeIds(new Set([node.id]));
-    announceToolNotice(`已打开“${node.title}”的视频编辑设置`);
+    setSelectedNodeIds(new Set([newNodeId]));
+    announceToolNotice(`已创建“${node.title}”的下游视频节点`);
   }, [announceToolNotice, commit, jobsByResultNodeId, keys]);
 
   const createImageConfigFromText = useCallback((nodeId: string) => {
@@ -3509,6 +3519,22 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set());
     setAddOpen(false);
     setCreateMenu(null);
+  }, [canvasUiPreferences.generation_defaults.image, commit, keys]);
+
+  const createImageFromSource = useCallback((nodeId: string) => {
+    const current = latestDocument.current;
+    if (!current) return;
+    const newNodeId = makeId('image');
+    const next = createConnectedCanvasConfig(current, nodeId,
+      createCanvasGenerationDraft(keys, 'image', {
+        preference: canvasUiPreferences.generation_defaults.image,
+      }), { nodeId: newNodeId, connectionId: makeId('connection') }, 'image');
+    if (!next) { setError('这个节点没有可用的图片内容。'); return; }
+    setError(null);
+    commit(() => next, true);
+    setDismissedGenerationPanelNodeId(null);
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([newNodeId]));
   }, [canvasUiPreferences.generation_defaults.image, commit, keys]);
 
   const submitAngle = useCallback(async (params: CanvasAngleParams) => {
@@ -3584,7 +3610,8 @@ function CanvasEditorInner({
       const sourceNode = before.nodes.find(node => node.id === target.nodeId);
       const sourceVersion = before.content_versions[target.versionId];
       let placeholder: CanvasMediaOperationPlaceholder | null = null;
-      if (sourceNode && sourceVersion?.kind === 'image' && sourceVersion.width && sourceVersion.height) {
+      const editsLayer = operation.kind !== 'split' && layerMaterialNodeIds(before).has(target.nodeId);
+      if (!editsLayer && sourceNode && sourceVersion?.kind === 'image' && sourceVersion.width && sourceVersion.height) {
         placeholder = canvasMediaOperationPlaceholder(
           sourceNode,
           canvasNodeRenderedSize(sourceNode, before.content_versions),
@@ -3618,15 +3645,18 @@ function CanvasEditorInner({
           ? { ...node, position: { x: node.position.x + shift.x, y: node.position.y + shift.y } }
           : node));
       const createdConnections = result.document.connections.filter(connection => (
-        connection.role === 'derivation'
-        && result.created_node_ids.includes(connection.target_node_id)
+        result.created_node_ids.includes(connection.target_node_id)
         && !knownConnectionIds.has(connection.id)
       ));
       const merged: CanvasDocument = {
         ...concurrent,
         revision: result.document.revision,
         updated_at: result.document.updated_at,
-        nodes: [...concurrent.nodes, ...createdNodes],
+        nodes: [...concurrent.nodes.map(node => {
+          const updated = result.document.nodes.find(item => item.id === node.id);
+          return editsLayer && node.id === target.nodeId && node.type === 'image' && updated?.type === 'image'
+            ? { ...node, data: { ...node.data, current_version_id: updated.data.current_version_id } } : node;
+        }), ...createdNodes],
         connections: [...concurrent.connections, ...createdConnections],
         content_versions: acceptServerContentVersions(
           concurrent.content_versions,
@@ -3637,15 +3667,16 @@ function CanvasEditorInner({
       history.current.past = history.current.past.slice(-50);
       history.current.future = [];
       serverRevision.current = result.document.revision;
-      latestDocument.current = merged;
-      if (dirtyVersion.current > dirtyAtCommand) saveQueued.current = merged;
+      const synced = syncLayerMaterials(merged);
+      latestDocument.current = synced;
+      if (dirtyVersion.current > dirtyAtCommand) saveQueued.current = synced;
       flowNodeCache.current.clear();
-      setDocument(merged);
+      setDocument(synced);
       setSelectedConnectionIds(new Set());
       setSelectedNodeIds(new Set(result.created_node_ids));
       setMediaOperation(null);
       announceToolNotice(
-        operation.kind === 'split'
+        editsLayer ? '已更新图层素材' : operation.kind === 'split'
           ? `已生成 ${result.created_node_ids.length} 个切图节点`
           : operation.kind === 'crop' ? '已生成裁剪节点'
             : operation.kind === 'remove_background' ? '已生成抠图节点' : '已生成本地放大节点',
@@ -3834,7 +3865,32 @@ function CanvasEditorInner({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
   }, [mentionGraphSignature]);
 
+  const layerParentSignature = JSON.stringify((document?.nodes ?? []).flatMap(node => {
+    if (node.type !== 'layer_stack') return [];
+    return [node.data.base_material_node_id, ...node.data.layers.map(layer => layer.material_node_id)]
+      .filter((id): id is string => Boolean(id))
+      .map(id => [id, { nodeId: node.id, title: node.title }] as const);
+  }));
+  const layerParentByNodeId = useMemo(() => new Map<string, { nodeId: string; title: string }>(
+    JSON.parse(layerParentSignature),
+  ), [layerParentSignature]);
+  const locateNodeHandler = useRef<(id: string) => void>(() => undefined);
+  locateNodeHandler.current = (nodeId: string) => {
+    const current = latestDocument.current;
+    const node = current?.nodes.find(item => item.id === nodeId);
+    if (!current || !node) return;
+    selectOnlyNode(nodeId);
+    const size = canvasNodeRenderedSize(node, current.content_versions);
+    void runViewportCommand(() => setCenter(node.position.x + size.width / 2,
+      node.position.y + size.height / 2, { zoom: getZoom(), duration: 0 }));
+  };
+  const locateNode = useCallback((nodeId: string) => locateNodeHandler.current(nodeId), []);
+
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
+    layerParentByNodeId,
+    locateNode,
+    focusVariableNodeId,
+    consumeVariableFocus,
     batchBusy: Boolean(activeBatch),
     prepareBatch,
     uploadBatchImages,
@@ -3881,6 +3937,7 @@ function CanvasEditorInner({
     updateText,
     setTextEditing,
     createImageConfigFromText,
+    createImageFromSource,
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
     copyPrompt,
@@ -3891,6 +3948,7 @@ function CanvasEditorInner({
     reversePromptConfiguredNodeIds,
     replaceMedia,
     replaceLayerStackSource,
+    expandLayerStack,
     toggleFreeResize,
     openMediaOperation,
     removeBackground,
@@ -3911,6 +3969,9 @@ function CanvasEditorInner({
     completeNodeResize,
     copyPrompt,
     createImageConfigFromText,
+    createImageFromSource,
+    layerParentByNodeId,
+    locateNode,
     createLayerDecomposition,
     deleteNode,
     dismissedGenerationPanelNodeId,
@@ -3927,6 +3988,8 @@ function CanvasEditorInner({
     mediaReplaceError,
     materialReferences,
     materialPick,
+    focusVariableNodeId,
+    consumeVariableFocus,
     mentionReferencesByNodeId,
     narrowViewport,
     openAngle,
@@ -3941,6 +4004,7 @@ function CanvasEditorInner({
     recoverReversePromptConfig,
     replaceMedia,
     replaceLayerStackSource,
+    expandLayerStack,
     reversePrompt,
     reversePromptConfiguredNodeIds,
     retryRun,
@@ -4478,16 +4542,12 @@ function CanvasEditorInner({
             </span>
             <ToolButton label="选择工具" active={!addOpen && !createMenu} onClick={() => { setAddOpen(false); setCreateMenu(null); }}><MousePointer2 /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
-            <ToolButton label="撤销" disabled={historyDepth.past === 0} onClick={undo}><Undo2 /></ToolButton>
-            <ToolButton label="重做" disabled={historyDepth.future === 0} onClick={redo}><Redo2 /></ToolButton>
-            <div className="my-1 h-px w-7 bg-border" />
             <div className="hidden xl:contents">
               <ToolButton label="添加批量素材节点" onClick={() => addBatchMaterialNode(null)}><Layers /></ToolButton>
               <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><Type /></ToolButton>
               <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><FileImage /></ToolButton>
               <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><FileVideo /></ToolButton>
               <ToolButton label="添加音频节点" onClick={() => addGenerationNode('audio', null)}><FileAudio /></ToolButton>
-              <ToolButton label="添加生成配置节点" onClick={() => addConfigNode(null)}><WandSparkles /></ToolButton>
               <ToolButton label="上传素材" onClick={() => uploadRef.current?.click()}><Upload /></ToolButton>
               <div className="my-1 h-px w-7 bg-border" />
             </div>
@@ -4499,7 +4559,7 @@ function CanvasEditorInner({
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>
-              <CanvasCreateMenuItems allowEmptyNodes allowUpload allowConfig onAddBatch={() => addBatchMaterialNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onAddConfig={() => addConfigNode(null)} onUpload={() => uploadRef.current?.click()} />
+              <CanvasCreateMenuItems allowEmptyNodes allowUpload allowConfig={false} onAddBatch={() => addBatchMaterialNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onAddConfig={() => addConfigNode(null)} onUpload={() => uploadRef.current?.click()} />
             </div>
           )}
           </div>
@@ -4541,13 +4601,14 @@ function CanvasEditorInner({
               setCreationAssetSaveRequest(current => current?.requestId === requestId ? null : current);
             }}
             onClose={closeLibrary}
-            onUsePrompt={(asset, renderedPrompt, variableValues) => {
+            onUsePrompt={(asset, renderedPrompt) => {
+              usedPromptAssetRef.current = true;
               if (selectedNode && selectedDraft) {
                 commit(current => ({
                   ...current,
                   nodes: current.nodes.map(node => {
                     if (node.id !== selectedNode.id) return node;
-                    const draft = generationDraftForNode(node);
+                    const draft = resolveCanvasGenerationDraft(node, keys, canvasUiPreferences.generation_defaults.text);
                     if (!draft) return node;
                     const params = {
                       ...draft.params,
@@ -4563,7 +4624,7 @@ function CanvasEditorInner({
                 }), true);
                 return;
               }
-              void insertCreationAsset(asset.asset_id, variableValues);
+              void insertCreationAsset(asset.asset_id, {});
             }}
             onUseImage={(asset: CreationAsset) => {
               void insertCreationAsset(
@@ -4673,6 +4734,7 @@ function CanvasEditorInner({
             mediaUrl={canvasMediaUrl(projectId, mediaOperation.version.version_id)}
             busy={mediaOperationBusy}
             error={mediaOperationError}
+            updatesMaterial={layerMaterialNodeIds(document).has(mediaOperation.nodeId)}
             onOpenChange={open => {
               if (!open) {
                 setMediaOperation(null);
@@ -4806,7 +4868,7 @@ function CanvasPreview({
     <div className="space-y-4">
       {version.kind === 'text' && (
         <p className="max-h-[58dvh] overflow-y-auto whitespace-pre-wrap rounded-lg border border-border bg-background p-4 text-sm leading-relaxed text-foreground">
-          {version.text || '暂无文本内容'}
+          {readablePromptVariables(version.text) || '暂无文本内容'}
         </p>
       )}
       {version.kind === 'image' && src && (
@@ -5164,7 +5226,9 @@ function cloneCanvasNode(
     };
   }
   if (clone.type === 'batch_material') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
-  if (clone.type === 'layer_stack') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex };
+  if (clone.type === 'layer_stack') return { ...clone, id: idMap.get(source.id)!, position, z_index: zIndex,
+    data: { ...clone.data, base_material_node_id: idMap.get(clone.data.base_material_node_id ?? '') ?? null,
+      layers: clone.data.layers.map(layer => ({ ...layer, material_node_id: idMap.get(layer.material_node_id ?? '') ?? null })) } };
   return {
     ...clone,
     id: idMap.get(source.id)!,

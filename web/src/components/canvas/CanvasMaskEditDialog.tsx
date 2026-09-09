@@ -12,6 +12,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { imageControlCaps } from '@/lib/imageControlCaps';
+import { imageSizeError } from '@/lib/imageSizeMode';
+import { normalizeImagePixelSize } from '@/lib/studioSize';
 import { normalizeCanvasImageParams } from '@/pages/canvasEditorModel';
 import type { CanvasGenerationDraft, CanvasMediaVersion } from '@/schema/canvas';
 
@@ -57,6 +59,7 @@ export function CanvasMaskEditDialog({
   const [tool, setTool] = useState<MaskTool>('brush');
   const [brushSize, setBrushSize] = useState(72);
   const [ready, setReady] = useState(false);
+  const [sourceSize, setSourceSize] = useState('');
   const [historySignal, setHistorySignal] = useState(0);
   const availableKeys = useMemo(() => keys.filter(key => (
     (key.provider === 'openai' || key.provider === 'custom')
@@ -73,6 +76,11 @@ export function CanvasMaskEditDialog({
   const [requestedCount, setRequestedCount] = useState(Number(initialDraft?.params.n ?? 1));
   const selectedKey = availableKeys.find(key => key.alias === alias);
   const models = (selectedKey?.models ?? []).filter(candidate => isMaskModel(candidate, selectedKey));
+  const autoSize = imageControlCaps(model, selectedKey?.provider, selectedKey?.base_url).showAutoSize;
+  const sizeError = !autoSize && sourceSize
+    ? imageSizeError({ size_mode: 'custom', size: sourceSize }, model) : null;
+  const outputSize = autoSize ? 'auto' : sourceSize && !sizeError
+    ? normalizeImagePixelSize(sourceSize, model, selectedKey?.base_url) : '';
 
   useEffect(() => {
     if (!open) return;
@@ -86,6 +94,7 @@ export function CanvasMaskEditDialog({
     setRequestedCount(Math.max(1, Math.min(4, Number(initialDraft?.params.n ?? 1))));
     setTool('brush');
     setReady(false);
+    setSourceSize('');
     past.current = [];
     future.current = [];
     setHistorySignal(value => value + 1);
@@ -100,6 +109,7 @@ export function CanvasMaskEditDialog({
     const overlayContext = overlay.getContext('2d');
     if (!overlayContext) return;
     overlayContext.clearRect(0, 0, overlay.width, overlay.height);
+    setSourceSize(`${image.naturalWidth}x${image.naturalHeight}`);
     past.current = [];
     future.current = [];
     setHistorySignal(value => value + 1);
@@ -222,7 +232,7 @@ export function CanvasMaskEditDialog({
 
   async function submit() {
     const overlay = overlayRef.current;
-    if (!overlay || !prompt.trim() || !alias || !model) return;
+    if (!overlay || !ready || busy || sizeError || !outputSize || !prompt.trim() || !alias || !model) return;
     const canvas = document.createElement('canvas');
     canvas.width = overlay.width;
     canvas.height = overlay.height;
@@ -243,14 +253,16 @@ export function CanvasMaskEditDialog({
     );
     params.n = requestedCount;
     params.quality = quality;
-    params.size = 'auto';
+    params.size = outputSize;
+    params.size_mode = autoSize ? 'auto' : 'custom';
+    if (!autoSize) params.custom_size = outputSize;
     onSubmit({
       mask,
       requestedCount,
       draft: {
         mode: 'image',
         prompt: prompt.trim(),
-        input_policy: 'mentions_only',
+        input_policy: 'all_connected',
         alias,
         model,
         params,
@@ -330,6 +342,10 @@ export function CanvasMaskEditDialog({
                 </select>
               </label>
             </div>
+            <p className="text-xs text-muted-foreground" aria-label="局部编辑输出尺寸">
+              尺寸 {autoSize ? 'AUTO' : outputSize ? outputSize.replace('x', '×') : sourceSize ? sourceSize.replace('x', '×') : '读取中…'}
+            </p>
+            {sizeError && <p className="text-xs text-destructive" role="alert">{sizeError}</p>}
             {!availableKeys.length && <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">没有可用的 GPT Image 蒙版模型。请先在设置中配置 OpenAI 或兼容 `/images/edits` 的模型。</p>}
             {error && <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive" role="alert">{error}</p>}
           </div>
@@ -337,7 +353,7 @@ export function CanvasMaskEditDialog({
 
         <DialogFooter>
           <Button type="button" variant="ghost" disabled={busy} onClick={() => onOpenChange(false)}>取消</Button>
-          <Button type="button" disabled={busy || !ready || !prompt.trim() || !alias || !model || !availableKeys.length} onClick={() => void submit()}>
+          <Button type="button" disabled={busy || !ready || !!sizeError || !outputSize || !prompt.trim() || !alias || !model || !availableKeys.length} onClick={() => void submit()}>
             {busy ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
             {busy ? '提交中…' : '生成局部编辑'}
           </Button>

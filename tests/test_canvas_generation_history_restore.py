@@ -1,9 +1,13 @@
-"""Generation derivation undo/redo may restore only server-proven history."""
+"""Editable input connections never own immutable generated history."""
 from __future__ import annotations
 
-from character_workflow.lib.canvas_projects import _is_proven_generation_history_restore
-from character_workflow.lib.jobs import save_job
-from character_workflow.lib.schemas import CanvasDerivationConnection, CanvasDocument, Job
+import pytest
+from pydantic import ValidationError
+
+from character_workflow.lib.canvas_projects import (
+    CanvasDocumentError, _normalized_web_document, create_canvas_project,
+)
+from character_workflow.lib.schemas import CanvasInputConnection, CanvasDocument, CanvasPluginNodeData
 
 
 _NOW = "2026-08-25T00:00:00+00:00"
@@ -71,84 +75,45 @@ def _document(project_id: str = _PROJECT_ID) -> CanvasDocument:
     })
 
 
-def _job(candidate_status: str = "succeeded") -> Job:
-    return Job.model_validate({
-        "job_id": _JOB_ID,
-        "character_id": "canvas",
-        "prompt": "generate",
-        "submitted_at": _NOW,
-        "model": "text-model",
-        "params": {},
-        "output_paths": [],
-        "status": "done",
-        "error": None,
-        "asset_slot": "portrait",
-        "kind": "text",
-        "namespace": "canvas",
-        "canvas_project_id": _PROJECT_ID,
-        "canvas_run": {
-            "run_id": _RUN_ID,
-            "result_node_id": "target",
-            "snapshot": {
-                "surface_node_id": "source",
-                "result_node_id": "target",
-                "mode": "text",
-                "final_prompt": "generate",
-                "input_policy": "all_connected",
-                "model": "text-model",
-                "provider": "openai",
-                "normalized_params": {},
-                "inputs": [],
-                "submitted_at": _NOW,
-                "submitted_by": {"kind": "user"},
-                "request_fingerprint": "a" * 64,
-            },
-            "candidates": [{
-                "candidate_id": _CANDIDATE_ID,
-                "index": 0,
-                "status": candidate_status,
-                "version_id": _VERSION_ID,
-            }],
-        },
-    })
-
-
-def _edge(source_node_id: str = "source") -> CanvasDerivationConnection:
-    return CanvasDerivationConnection(
-        id="connection-proof-test",
-        role="derivation",
-        source_node_id=source_node_id,
-        target_node_id="target",
-        origin={"kind": "generation_run", "run_id": _RUN_ID},
+def test_input_changes_do_not_modify_generated_content_history():
+    current = _document(create_canvas_project("输入历史").project_id)
+    edge = CanvasInputConnection(
+        id="connection-input", role="input", source_node_id="source", target_node_id="target",
     )
-
-
-def test_generation_history_restore_requires_matching_successful_candidate():
-    current = _document()
-    submitted = current.model_copy(update={"connections": [_edge()]})
-
-    save_job(_job())
-    assert _is_proven_generation_history_restore(current, submitted, _edge())
-
-    save_job(_job("failed"))
-    assert not _is_proven_generation_history_restore(current, submitted, _edge())
-
-
-def test_generation_history_restore_rejects_forged_source_and_cross_project():
-    save_job(_job())
-    current = _document()
-    submitted = current.model_copy(update={"connections": [_edge()]})
-
-    assert not _is_proven_generation_history_restore(
-        current,
-        submitted,
-        _edge("forged-source"),
+    submitted = current.model_copy(update={"connections": [edge]})
+    connected = _normalized_web_document(current, submitted, _NOW)
+    assert connected.connections == [edge]
+    assert connected.content_versions == current.content_versions
+    removed = _normalized_web_document(
+        connected, connected.model_copy(update={"connections": []}), _NOW,
     )
+    assert removed.connections == []
+    assert removed.content_versions == current.content_versions
 
-    other_project = _document("canvas-other-project")
-    other_submission = other_project.model_copy(update={"connections": [_edge()]})
-    assert not _is_proven_generation_history_restore(
-        other_project,
-        other_submission,
-        _edge(),
-    )
+
+def test_input_edit_cannot_rewrite_generated_version_origin():
+    current = _document(create_canvas_project("输入历史").project_id)
+    versions = dict(current.content_versions)
+    versions[_VERSION_ID] = versions[_VERSION_ID].model_copy(update={"text": "forged"})
+    with pytest.raises(CanvasDocumentError, match="历史版本"):
+        _normalized_web_document(
+            current, current.model_copy(update={"content_versions": versions}), _NOW,
+        )
+
+
+def test_active_canvas_schema_rejects_non_input_connections():
+    raw = _document().model_dump(mode="json")
+    raw["connections"] = [{
+        "id": "old-edge", "role": "derivation", "source_node_id": "source",
+        "target_node_id": "target", "origin": {"kind": "generation_run", "run_id": _RUN_ID},
+    }]
+    with pytest.raises(ValidationError):
+        CanvasDocument.model_validate(raw)
+
+
+def test_removing_legacy_draft_defaults_preserves_plugin_payload_limit():
+    with pytest.raises(ValidationError, match="256 KiB"):
+        CanvasPluginNodeData(
+            plugin_id="qa", node_type="qa", plugin_version="1", data_schema_version=1,
+            payload={"text": "a" * (256 * 1024)},
+        )

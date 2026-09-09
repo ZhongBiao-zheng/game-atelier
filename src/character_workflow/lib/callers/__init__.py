@@ -73,6 +73,15 @@ def dispatch(
     fn = _provider_render(key, model)
     if fn is None:
         raise WrongProviderError(f"unknown provider {key.provider!r}")
+    params = kwargs.get("params")
+    if isinstance(params, dict) and params.get("size_mode") is not None:
+        from character_workflow.lib.image_size import normalize_image_size_params
+
+        normalized = normalize_image_size_params(key, model, params)
+        # Preserve the shared dictionary used by caller lifecycle callbacks.
+        params.clear()
+        params.update(normalized)
+        kwargs["size"] = params.get("size")
     return fn(prompt=prompt, model=model, alias=alias, **kwargs)
 
 

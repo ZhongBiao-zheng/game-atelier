@@ -576,6 +576,17 @@ describe('RoundList done metadata: 耗时 + 生成时间', () => {
     expect(screen.queryByText('Nano Banana Pro 4K · 3:4 · 3:4')).toBeNull();
   });
 
+  it('自定义与 AUTO 摘要不显示非生效比例或分辨率', () => {
+    const { rerender } = render(<RoundList rounds={[{ ...timedDone, config: {
+      ...timedDone.config, sizeMode: 'custom', size: '1360x2048', ratio: '2:3', resolution: '2K',
+    } }]} />);
+    expect(screen.getByText('gpt-image-2 · 1360×2048')).toBeInTheDocument();
+    rerender(<RoundList rounds={[{ ...timedDone, config: {
+      ...timedDone.config, sizeMode: 'auto', size: 'auto', ratio: '2:3', resolution: '2K',
+    } }]} />);
+    expect(screen.getByText('gpt-image-2 · AUTO')).toBeInTheDocument();
+  });
+
   it('显示出图耗时（completed_at − submitted_at）与北京时间生成时间', () => {
     const { container } = render(<RoundList rounds={[timedDone]} />);
     expect(container.textContent).toContain('耗时 12s');
@@ -636,6 +647,13 @@ describe('RoundList 生成中占位按目标比例', () => {
     const { container } = render(<RoundList rounds={[pendingWith({ ratio: '9:16' })]} />);
     const skel = container.querySelector('[data-skeleton]') as HTMLElement;
     expect(skel.style.aspectRatio).toBe('9 / 16');
+  });
+
+  it('自定义占位按像素，AUTO 不使用缓存比例', () => {
+    const { container, rerender } = render(<RoundList rounds={[pendingWith({ sizeMode: 'custom', size: '1360x2048', ratio: '1:1' })]} />);
+    expect((container.querySelector('[data-skeleton]') as HTMLElement).style.aspectRatio).toBe('1360 / 2048');
+    rerender(<RoundList rounds={[pendingWith({ sizeMode: 'auto', size: 'auto', ratio: '9:16' })]} />);
+    expect((container.querySelector('[data-skeleton]') as HTMLElement).style.aspectRatio).toBe('1 / 1');
   });
 
   it('无比例退回尺寸 1024x1536 → 1024 / 1536；都无退回 1 / 1', () => {

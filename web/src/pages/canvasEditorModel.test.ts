@@ -7,17 +7,112 @@ import {
   canvasNodeRenderZIndex,
   canvasPendingInputNodes,
   clampCanvasNodeSize,
+  expandCanvasLayerStack,
+  layerMaterialDisplaySize,
+  normalizeCanvasGroups,
   layerStackSizeForCanvasVersion,
   normalizeCanvasImageParams,
   placeCanvasNodeWithoutOverlap,
   syncDraftLayerStackSources,
+  syncLayerMaterials,
 } from './canvasEditorModel';
 import type { CanvasDocument, CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 
+it('expands every layer into compact owned material views and reuses the existing group', () => {
+  const stack = {
+    id: 'stack', title: '拆分图层', type: 'layer_stack', position: { x: 0, y: 0 },
+    size: { width: 760, height: 480 }, z_index: 0,
+    data: { source_version_id: 'base', alias: null, model: null, prompt: '', resolution: 'auto',
+      base_version_id: 'base', base_visible: false, active_run_id: null, error: null,
+      layers: [{ id: 'layer', version_id: 'layer-image', name: '标题', description: '', z_index: 1,
+        visible: false, bounding_box: { absolute: [0, 0, 10, 10], normalized: [0, 0, 1000, 1000] } }],
+    },
+  } satisfies Extract<CanvasNode, { type: 'layer_stack' }>;
+  const occupied = { ...stack, id: 'occupied', position: { x: 832, y: 0 } };
+  const current = documentWithNodes([stack, occupied], []);
+  const version = {
+    version_id: 'base', kind: 'image', path: 'uploads/base.png', mime_type: 'image/png', bytes: 42,
+    width: 100, height: 200, created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64),
+    origin: { kind: 'upload', upload_id: 'base' },
+  } as const;
+  current.content_versions = { base: version, 'layer-image': { ...version, version_id: 'layer-image', width: 200, height: 100 } };
+  const before = structuredClone(current);
+  let sequence = 0;
+  const result = expandCanvasLayerStack(current, stack.id, prefix => `${prefix}-${++sequence}`);
+  const normalized = normalizeCanvasGroups({ ...current, nodes: [result.stack, occupied, ...result.nodes] });
+  const images = result.nodes.filter(node => node.type === 'image');
+  expect(images.map(node => node.title)).toEqual(['背景', '标题']);
+  expect(images.map(node => node.data.current_version_id)).toEqual(['base', 'layer-image']);
+  expect(images.every(node => node.data.generation_draft === null && node.data.active_run_id === null)).toBe(true);
+  expect(images[0].size!.width / images[0].size!.height).toBe(0.5);
+  expect(images[1].size!.width / images[1].size!.height).toBe(2);
+  const group = normalized.nodes.find(node => node.id === result.groupId)!;
+  expect(group.position.x).toBeGreaterThan(occupied.position.x + occupied.size.width);
+  expect(group).toMatchObject({ data: { member_node_ids: images.map(node => node.id) } });
+  expect(current).toEqual(before);
+  expect(result.stack.data.base_material_node_id).toBe(images[0].id);
+  expect(result.stack.data.layers[0].material_node_id).toBe(images[1].id);
+  expect(images.every(image => Math.max(image.size!.width, image.size!.height) <= 280)).toBe(true);
+  const repeated = expandCanvasLayerStack(normalized, stack.id, prefix => `${prefix}-${++sequence}`);
+  expect(repeated.nodes).toEqual([]);
+  expect(repeated.groupId).toBe(group.id);
+  const stale = { ...normalized, nodes: normalized.nodes.map(node => node.id === images[0].id
+    ? { ...node, size: { width: 280, height: 560 } } : node) };
+  const reflowed = expandCanvasLayerStack(stale, stack.id, () => { throw new Error('must reuse IDs'); });
+  expect(reflowed.groupId).toBe(group.id);
+  expect(reflowed.nodes.filter(node => node.type === 'image').map(node => node.id)).toEqual(images.map(node => node.id));
+  const edited = { ...normalized, content_versions: { ...normalized.content_versions,
+    edited: { ...version, version_id: 'edited', width: 2800, height: 28 } },
+  nodes: normalized.nodes.map(node => node.id === images[1].id && node.type === 'image'
+    ? { ...node, title: '新标题', data: { ...node.data, current_version_id: 'edited' } } : node) };
+  const synced = syncLayerMaterials(edited);
+  expect(synced.nodes.find(node => node.id === stack.id)).toMatchObject({ data: { layers: [{
+    version_id: 'edited', name: '新标题', visible: false, bounding_box: stack.data.layers[0].bounding_box,
+  }] } });
+  expect(synced.nodes.find(node => node.id === images[1].id)?.size?.width).toBe(images[1].size!.width);
+  expect(synced.nodes.find(node => node.id === images[1].id)?.size?.height).toBeCloseTo(Math.max(1, images[1].size!.width / 100));
+  expect(syncLayerMaterials(synced)).toBe(synced);
+  const wide = expandCanvasLayerStack(synced, stack.id, () => { throw new Error('must reuse IDs'); });
+  const wideImages = wide.nodes.filter(node => node.type === 'image');
+  expect(wideImages[1].size!.width).toBeCloseTo(920);
+  for (const [index, image] of wideImages.entries()) {
+    for (const other of wideImages.slice(index + 1)) {
+      expect(image.position.x + image.size!.width + 40 <= other.position.x
+        || other.position.x + other.size!.width + 40 <= image.position.x
+        || image.position.y + image.size!.height + 48 <= other.position.y
+        || other.position.y + other.size!.height + 48 <= image.position.y).toBe(true);
+    }
+  }
+  const wideDocument = normalizeCanvasGroups({ ...synced, nodes: [wide.stack, occupied, ...wide.nodes] });
+  expect(expandCanvasLayerStack(wideDocument, stack.id, () => 'unused').nodes).toEqual([]);
+  expect(wideImages[1].data.current_version_id).toBe('edited');
+  const removed = syncLayerMaterials({ ...synced, nodes: synced.nodes.filter(node => node.id !== images[1].id) });
+  expect(removed.nodes.find(node => node.id === stack.id)).toMatchObject({ data: { layers: [{
+    material_node_id: null, version_id: 'edited', name: '新标题',
+  }] } });
+  delete current.content_versions['layer-image'];
+  expect(() => expandCanvasLayerStack(current, stack.id, () => 'unused')).toThrow('图层图片不可用');
+  current.nodes[0] = { ...stack, data: { ...stack.data, base_version_id: null } };
+  expect(() => expandCanvasLayerStack(current, stack.id, () => 'unused')).toThrow('尚未拆分完成');
+});
+
 it('raises selected nodes above every persisted canvas layer without changing other nodes', () => {
   expect(canvasNodeRenderZIndex(3, false, 12)).toBe(3);
   expect(canvasNodeRenderZIndex(3, true, 12)).toBe(13);
+});
+
+it('keeps icons smaller than characters and gives wide text a readable multi-column size', () => {
+  const icon = layerMaterialDisplaySize({ width: 565, height: 562 });
+  const character = layerMaterialDisplaySize({ width: 806, height: 766 });
+  expect(icon.width).toBeLessThan(character.width);
+  expect(layerMaterialDisplaySize({ width: 32, height: 32 })).toEqual({ width: 32, height: 32 });
+  for (const [width, height] of [[822, 244], [811, 207], [947, 345], [1021, 315], [1261, 137], [1361, 55]]) {
+    const size = layerMaterialDisplaySize({ width, height });
+    expect(size.width / size.height).toBeCloseTo(width / height);
+    expect(size.width).toBeLessThanOrEqual(920);
+    expect(size.height).toBeGreaterThanOrEqual(37);
+  }
 });
 
 it('normalizes model-specific image parameters when switching models', () => {
@@ -27,7 +122,7 @@ it('normalizes model-specific image parameters when switching models', () => {
     { n: 2, ratio: '21:9', resolution: '4K', quality: 'invalid' },
   );
 
-  expect(params).toEqual({ n: 2, ratio: '21:9', quality: 'low', size: '2048x880' });
+  expect(params).toEqual({ n: 2, ratio: '21:9', size_mode: 'ratio', quality: 'low', size: '2048x880' });
 });
 
 it('locks Midjourney jobs to the four paid outputs from one task', () => {
@@ -37,7 +132,7 @@ it('locks Midjourney jobs to the four paid outputs from one task', () => {
     { n: 1, ratio: '16:9', resolution: '4K', quality: 'high' },
   );
 
-  expect(params).toEqual({ n: 4, ratio: '16:9' });
+  expect(params).toEqual({ n: 4, ratio: '16:9', size_mode: 'ratio' });
 });
 
 

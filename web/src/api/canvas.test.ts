@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { canvasMediaUrl } from './canvas';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { canvasMediaUrl, downloadCanvasLayers } from './canvas';
 
 const BASE = '/api/canvas/projects/canvas-1/versions/v-1/media';
 
@@ -8,6 +8,41 @@ function setDevicePixelRatio(value: number) {
 }
 
 afterEach(() => setDevicePixelRatio(1));
+
+it('downloads a named ZIP and does not create a download on server error', async () => {
+  vi.useFakeTimers();
+  const createUrl = vi.fn(() => 'blob:layers');
+  const revokeUrl = vi.fn();
+  vi.stubGlobal('URL', class extends URL {
+    static createObjectURL = createUrl;
+    static revokeObjectURL = revokeUrl;
+  });
+  const fetchMock = vi.fn().mockResolvedValue(new Response('zip-bytes', {
+    headers: { 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent('拆分图层-全部图层.zip')}` },
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  let downloadedName = '';
+  const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    downloadedName = this.download;
+    expect(this.isConnected).toBe(true);
+  });
+  try {
+    await downloadCanvasLayers('canvas-1', 'layer/stack');
+    expect(fetchMock.mock.calls[0][0]).toContain('/nodes/layer%2Fstack/layers/download');
+    expect(downloadedName).toBe('拆分图层-全部图层.zip');
+    expect(click).toHaveBeenCalledOnce();
+    expect(revokeUrl).not.toHaveBeenCalled();
+    vi.runAllTimers();
+    expect(revokeUrl).toHaveBeenCalledWith('blob:layers');
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ detail: '图层文件缺失' }), { status: 404 }));
+    await expect(downloadCanvasLayers('canvas-1', 'stack')).rejects.toThrow();
+    expect(click).toHaveBeenCalledOnce();
+  } finally {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});
 
 describe('canvasMediaUrl', () => {
   it('asks for the original when no display width is given', () => {

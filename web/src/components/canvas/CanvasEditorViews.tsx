@@ -1,3 +1,6 @@
+import { hasImageSizeSelection, imageSizeError, imageSizeMode } from '@/lib/imageSizeMode';
+import { normalizeImagePixelSize } from '@/lib/studioSize';
+import { promptVariableError, promptVariableParts, readablePromptVariables } from '@/lib/promptVariables';
 import {
   Handle,
   NodeResizer,
@@ -10,7 +13,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, Check, ChevronRight, CircleHelp, ClipboardCopy, Download, Ellipsis, Eye, EyeOff, FileAudio, FileImage, FileUp, FileVideo, Layers3, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, Check, ChevronRight, CircleHelp, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Layers3, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef,
   useState,
@@ -19,8 +22,10 @@ import {
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
 
-import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
+import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers } from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasExecutionGroup } from './CanvasBatchControls';
+import { CanvasLayerStackList } from './CanvasLayerStackList';
+import { orderedLayerStackParts } from './canvasLayerOrder';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
@@ -94,6 +99,7 @@ import {
   normalizeCanvasTextParams,
   normalizeCanvasVideoParams,
   supportsCanvasTextReasoning,
+  resolveCanvasGenerationDraft,
   switchCanvasGenerationDraft,
   type CanvasPendingInput,
 } from '@/pages/canvasEditorModel';
@@ -116,6 +122,10 @@ export interface CanvasNodeContextValue {
   prepareBatch?: (nodeId: string) => Promise<void>;
   uploadBatchImages?: (nodeId: string, files: File[], itemId?: string) => Promise<void>;
   projectId: string;
+  layerParentByNodeId?: ReadonlyMap<string, { nodeId: string; title: string }>;
+  locateNode?: (id: string) => void;
+  focusVariableNodeId?: string | null;
+  consumeVariableFocus?: () => void;
   materialReferences: readonly CanvasMaterialReference[];
   connectedMaterialNodeIdsByNodeId: ReadonlyMap<string, ReadonlySet<string>>;
   videoFrameNodeIdsByNodeId?: ReadonlyMap<string, Readonly<Partial<Record<CanvasVideoFrameSlot, string>>>>;
@@ -165,6 +175,7 @@ export interface CanvasNodeContextValue {
   updateText: (id: string, text: string) => void;
   setTextEditing?: (id: string, editing: boolean) => void;
   createImageConfigFromText: (id: string) => void;
+  createImageFromSource?: (id: string) => void;
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
@@ -172,6 +183,7 @@ export interface CanvasNodeContextValue {
   createLayerDecomposition: (node: Extract<CanvasContentNode, { type: 'image' }>) => void;
   submitLayerDecomposition: (nodeId: string) => Promise<void>;
   replaceLayerStackSource: (nodeId: string) => void;
+  expandLayerStack: (nodeId: string) => void;
   recoverReversePromptConfig: (job: Job) => Promise<void>;
   reversePromptConfiguredNodeIds: ReadonlySet<string>;
   replaceMedia: (node: CanvasContentNode) => void;
@@ -229,6 +241,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   const node = data.domain;
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
+  const [isEditingInlineText, setIsEditingInlineText] = useState(false);
   const [titleDraft, setTitleDraft] = useState(node.title);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const titleTriggerRef = useRef<HTMLButtonElement>(null);
@@ -247,7 +260,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   const [panelSide, setPanelSide] = useState<CanvasPanelSide>('below');
   const [candidateBatchExpanded, setCandidateBatchExpanded] = useState(false);
   const [materialPickPointer, setMaterialPickPointer] = useState<{ left: number; top: number } | null>(null);
-  const draft = generationDraft(node);
+  const draftKeys = context?.keys;
+  const textPreference = context?.canvasUiPreferences.generation_defaults.text;
+  const draft = useMemo(() => draftKeys
+    ? resolveCanvasGenerationDraft(node, draftKeys, textPreference)
+    : null, [node, draftKeys, textPreference]);
   const nodeContent = context ? contentForNode(node, context.resolveVersion) : undefined;
   const uploadedImageMaterial = Boolean(
     context && isUploadedImageMaterialNode(node, nodeContent),
@@ -539,6 +556,19 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
             </button>
           )}
         </span>
+        {context.layerParentByNodeId?.get(node.id) && (
+          <button
+            type="button"
+            className="nodrag ml-2 flex shrink-0 items-center gap-1 rounded-sm px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            aria-label={`定位父图层：${context.layerParentByNodeId.get(node.id)!.title}`}
+            title={context.layerParentByNodeId.get(node.id)!.title}
+            onPointerDown={event => event.stopPropagation()}
+            onClick={event => {
+              event.stopPropagation();
+              context.locateNode?.(context.layerParentByNodeId!.get(node.id)!.nodeId);
+            }}
+          ><Layers3 className="size-3" aria-hidden="true" />父图层</button>
+        )}
         <CanvasNodeRunBadge state={nodeRunState} />
       </header>
       <NodeToolbar
@@ -641,7 +671,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
         aria-busy={replacingMedia || nodeRunState.status === 'loading'}
         aria-label={`选择节点 ${node.title}，${nodeRunState.label}`}
         className={cn(
-          'relative h-full overflow-hidden rounded-lg border bg-card/95 text-foreground transition-colors shell-glow',
+          'relative h-full overflow-hidden rounded-lg border text-foreground transition-colors shell-glow',
+          node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-card/95',
           selected ? 'border-primary' : 'border-border',
           context.materialPick && materialPickEligible && 'cursor-copy hover:border-primary focus-visible:border-primary',
           context.materialPick && !materialPickEligible && 'cursor-default',
@@ -699,9 +730,28 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
             {canvasNodeRunDisplayError(context.mediaReplaceError.message, '替换失败，请稍后重试')}
           </p>
         )}
-        <div className={cn('h-full bg-secondary/20', node.type === 'text' ? 'min-h-32' : 'min-h-44')}>
+        <div className={cn('h-full', node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-secondary/20', node.type === 'text' ? 'min-h-32'
+          : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44')}>
           {node.type === 'text' && (
-            isEditingText ? (
+            content?.kind === 'text' && (isEditingInlineText || promptVariableParts(content.text).some(part => part.kind === 'variable')) ? (
+              <div className="nodrag nowheel h-full overflow-y-auto" onPointerDown={event => event.stopPropagation()} onBlur={event => {
+                if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setIsEditingInlineText(false);
+              }}>
+                <CanvasPromptInput
+                  value={content.text}
+                  references={EMPTY_CANVAS_MENTION_REFERENCES}
+                  mentionsEnabled={false}
+                  autoFocusVariables={context.focusVariableNodeId === node.id}
+                  onFocus={() => {
+                    setIsEditingInlineText(true);
+                    context.recordHistory();
+                    if (context.focusVariableNodeId === node.id) context.consumeVariableFocus?.();
+                  }}
+                  onChange={text => context.updateText(node.id, text)}
+                  className="h-full"
+                />
+              </div>
+            ) : isEditingText ? (
               <textarea
                 ref={textEditorRef}
                 aria-label={`编辑 ${node.title} 正文`}
@@ -776,7 +826,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               {replacingMedia ? '替换中' : '替换'}
             </Button>
           )}
-          {node.type === 'image' && content?.kind === 'image' && context.showImageInfo && (
+          {node.type === 'image' && content?.kind === 'image' && context.showImageInfo
+            && (node.size?.height ?? 176) >= 96 && (node.size?.width ?? 320) >= 160 && (
             <span className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-[calc(100%-1.5rem)] truncate rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium tabular-nums text-foreground backdrop-blur-glass">
               {formatCanvasImageInfo(content)}
             </span>
@@ -808,9 +859,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
           <span className="canvas-node-handle-dot" aria-hidden="true" />
         </Handle>
       )}
-      {canvasNodeProvidesOutput(node) && (
+      {(canvasNodeProvidesOutput(node) || (node.type === 'layer_stack'
+        && (node.data.base_material_node_id || node.data.layers.some(layer => layer.material_node_id)))) && (
         <Handle
           type="source"
+          isConnectable={node.type !== 'layer_stack'}
           position={Position.Right}
           className="canvas-node-handle"
           aria-label="从此节点连接"
@@ -1084,7 +1137,7 @@ function MediaCandidateBatch({
         <span
           key={entry.candidate.candidate_id}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-lg border border-border bg-card"
+          className="pointer-events-none absolute inset-0 rounded-lg border border-border"
           style={{ transform: `translate(${10 + index * 6}px, ${5 + index * 4}px) rotate(${index + 1}deg)` }}
         />
       ))}
@@ -1151,7 +1204,7 @@ function MediaCandidateCard({
     <section
       role="group"
       aria-label={`候选 ${number}`}
-      className="pointer-events-auto absolute top-0 z-20 h-full overflow-hidden rounded-lg border border-border bg-card shell-glow"
+      className={cn('pointer-events-auto absolute top-0 z-20 h-full overflow-hidden rounded-lg border border-border shell-glow', version?.kind === 'image' ? 'bg-transparent' : 'bg-card')}
       style={{
         left: `calc(${horizontalOffset * 100}% + ${horizontalOffset * 16}px)`,
         width: '100%',
@@ -1381,6 +1434,9 @@ function CanvasNodeToolbar({
 }) {
   const contentNode = isCanvasContentNode(node) ? node : null;
   const mediaNode = contentNode && contentNode.type !== 'text' ? contentNode : null;
+  const [downloadingLayers, setDownloadingLayers] = useState(false);
+  const layersReady = node.type === 'layer_stack' && Boolean(node.data.base_version_id)
+    && !node.data.active_run_id && !submitting;
 
   return (
     <>
@@ -1409,6 +1465,29 @@ function CanvasNodeToolbar({
             onClick={() => context.createImageConfigFromText(node.id)}
           >
             <FileImage />
+          </MediaToolButton>
+        </>
+      )}
+      {node.type === 'layer_stack' && (
+        <>
+          <MediaToolButton
+            label="下载全部图层"
+            disabled={!layersReady || downloadingLayers}
+            onClick={() => {
+              setDownloadingLayers(true);
+              void downloadCanvasLayers(context.projectId, node.id)
+                .catch(error => context.reportError?.((error as Error).message))
+                .finally(() => setDownloadingLayers(false));
+            }}
+          >
+            {downloadingLayers ? <LoaderCircle className="animate-spin" /> : <Download />}
+          </MediaToolButton>
+          <MediaToolButton
+            label="展开图层到画布并分组"
+            disabled={!layersReady || context.batchBusy}
+            onClick={() => context.expandLayerStack(node.id)}
+          >
+            <Layers3 />
           </MediaToolButton>
         </>
       )}
@@ -1766,6 +1845,12 @@ function ImageNodeToolbar({
         </MediaToolButton>
       ))}
       <MediaToolButton
+        label={`基于 ${node.title} 生成`}
+        text={context.canvasUiPreferences.image_toolbar.show_labels ? '基于本图生成' : undefined}
+        disabled={!currentVersionId || submitting || replacing}
+        onClick={() => context.createImageFromSource?.(node.id)}
+      ><Sparkles /></MediaToolButton>
+      <MediaToolButton
         label={`拆分 ${node.title} 的图层`}
         text={context.canvasUiPreferences.image_toolbar.show_labels ? '拆分图层' : undefined}
         disabled={!currentVersionId || submitting || replacing}
@@ -1806,8 +1891,7 @@ export function CanvasGenerationComposer({
   onClose?: () => void;
 }) {
   const editingExistingVideo = draft.mode === 'video'
-    && node.type === 'video'
-    && Boolean(node.data.current_version_id);
+    && Boolean(context.mentionReferencesByNodeId.get(node.id)?.some(reference => reference.kind === 'video'));
   const acceptsModel = (model: KeyView['models'][number], key: KeyView) => (
     canvasGenerationModelSupportsMode(key, model, draft.mode, { editingExistingVideo })
   );
@@ -1902,22 +1986,20 @@ export function CanvasGenerationComposer({
       )
     )
   );
-  // 服务端在 all_connected 下把所有已连接节点无条件纳入，缺内容就整单 422。首尾帧模式下不带
-  // slot 的连线会被服务端整体丢掉，所以那时这些空输入不构成问题。
+  // 所有普通连接都参与；首尾帧槽位单独校验，额外普通连接必须移除。
   const pendingInputs = usesVideoFrameSlots
     ? EMPTY_CANVAS_PENDING_INPUTS
     : context.pendingInputNodesByNodeId?.get(node.id) ?? EMPTY_CANVAS_PENDING_INPUTS;
-  const blockingPendingInputs = draft.input_policy === 'all_connected'
-    ? pendingInputs
-    : pendingInputs.filter(input => (
-      canvasMentionMatches(draft.prompt).some(match => match.nodeId === input.nodeId)
-    ));
-  const referenceProblem = referenceErrorMessage({
+  const referenceProblem = usesVideoFrameSlots && connectedMaterialNodeIds.size > 0
+    ? '首尾帧模式请移除普通参考连接，使用首帧或尾帧槽位。'
+    : !usesVideoFrameSlots && Object.values(videoFrames).some(Boolean)
+      ? '请先移除首尾帧连接，再使用全能参考。'
+      : referenceErrorMessage({
     missingMentionCount: missingMentionIds.length,
     frameModeHasMentions,
     missingVideoFrame,
     videoReferenceCapacityExceeded,
-    pendingInputTitles: blockingPendingInputs.map(input => input.title),
+    pendingInputTitles: pendingInputs.map(input => input.title),
   });
   // 结构性问题优先，因为补引用也无法让一个没有模型或提示词的请求变得可提交。
   const generateBlock = canvasGenerateBlock({
@@ -1928,7 +2010,7 @@ export function CanvasGenerationComposer({
     modelSelected: Boolean(selectedModel),
     prompt: draft.prompt,
   });
-  const blockedReason = generateBlock?.message ?? referenceProblem;
+  const blockedReason = generateBlock?.message ?? promptVariableError(draft.prompt) ?? referenceProblem;
 
   useEffect(() => {
     if (!usesVideoFrameSlots || !videoCaps) return;
@@ -1952,7 +2034,7 @@ export function CanvasGenerationComposer({
   ]);
 
   function updateDraft(updater: (current: CanvasGenerationDraft) => CanvasGenerationDraft) {
-    context.updateNode(node.id, current => withGenerationDraft(current, updater(generationDraft(current)!)));
+    context.updateNode(node.id, current => withGenerationDraft(current, updater(generationDraft(current) ?? draft)));
   }
 
   function updateDraftWithHistory(
@@ -1965,12 +2047,13 @@ export function CanvasGenerationComposer({
   }
 
   function submitGeneration() {
-    if (blockedReason) {
-      context.reportError?.(blockedReason);
+    const sizeError = draft.mode === 'image' ? imageSizeError(draft.params, draft.model) : null;
+    if (sizeError) {
+      context.reportError?.(sizeError);
       return;
     }
-    if (activeJob && runId) {
-      void context.retryRun(node.id, runId);
+    if (blockedReason) {
+      context.reportError?.(blockedReason);
       return;
     }
     void context.submitRun(node.id);
@@ -2031,10 +2114,12 @@ export function CanvasGenerationComposer({
             frames,
           )}
         />
-      ) : (
+      ) : null}
+      {(!usesVideoFrameSlots || connectedMaterialNodeIds.size > 0) && (
         <CanvasMaterialConnections
           node={node}
           materials={materialReferences}
+          connectedReferences={mentionReferences.filter(reference => connectedMaterialNodeIds.has(reference.nodeId))}
           connectedNodeIds={context.connectedMaterialNodeIdsByNodeId.get(node.id) ?? EMPTY_CANVAS_NODE_IDS}
           limits={draft.mode === 'video' ? selectedVideoReferenceLimits : null}
           picking={context.materialPick?.targetNodeId === node.id
@@ -2098,6 +2183,19 @@ export function CanvasGenerationComposer({
           alias={draft.alias ?? null}
           model={draft.model}
           onSelect={({ key, model }) => {
+            const nextImageParams = draft.mode === 'image'
+              ? normalizeCanvasImageParams(model.id, key.provider, draft.params, key.base_url) : null;
+            if (draft.mode === 'image') {
+              const next = nextImageParams!;
+              if (hasImageSizeSelection(draft.params) && imageSizeMode(next) !== imageSizeMode(draft.params)) {
+                context.reportError?.('该模型不支持当前尺寸模式，已切换为比例');
+              } else if (imageSizeMode(next) === 'custom' && !imageSizeError(next, model.id)) {
+                const normalized = normalizeImagePixelSize(next.size!, model.id, key.base_url);
+                if (normalized !== next.size) context.reportError?.(`尺寸已调整为 ${normalized.replace('x', '×')}`);
+                next.size = normalized;
+                next.custom_size = normalized;
+              }
+            }
             if (draft.mode === 'video') {
               const nextParams = normalizeCanvasVideoParams(
                 model.id,
@@ -2120,12 +2218,7 @@ export function CanvasGenerationComposer({
               alias: key.alias,
               model: model.id,
               params: draft.mode === 'image'
-                ? normalizeCanvasImageParams(
-                    model.id,
-                    key.provider,
-                    current.params,
-                    key.base_url,
-                  )
+                ? nextImageParams!
                 : draft.mode === 'text'
                   ? normalizeCanvasTextParams(model.protocol, current.params)
                 : draft.mode === 'video'
@@ -2161,10 +2254,10 @@ export function CanvasGenerationComposer({
           <CanvasImageSettings
             caps={imageCaps}
             model={draft.model}
+            baseUrl={selectedKey?.base_url}
             params={draft.params}
-            onPatch={(patch, options) => updateDraftWithHistory(current => {
+            onPatch={patch => updateDraftWithHistory(current => {
               const merged = { ...current.params, ...patch };
-              if (options?.resetSize) delete merged.size;
               return {
                 ...current,
                 params: normalizeCanvasImageParams(
@@ -2256,19 +2349,19 @@ export function CanvasGenerationComposer({
             {activeJob.cancel_requested_at ? '正在停止…' : '停止'}
           </Button>
         )}
-        {!running && activeJob && runId && (
+        {!running && activeJob?.status === 'failed' && runId && (
           <Button
             type="button"
             size="sm"
+            variant="outline"
             className="shrink-0"
             disabled={submitting}
-            onClick={submitGeneration}
+            onClick={() => void context.retryRun(node.id, runId)}
           >
-            {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
-            {submitting ? '提交中…' : '生成'}
+            重试原任务
           </Button>
         )}
-        {!running && !activeJob && (
+        {!running && (
           <Button
             type="button"
             size="sm"
@@ -2433,6 +2526,7 @@ function CanvasMaterialConnections({
   node,
   materials,
   connectedNodeIds,
+  connectedReferences,
   limits,
   picking,
   onPreview,
@@ -2442,6 +2536,7 @@ function CanvasMaterialConnections({
   node: CanvasNode;
   materials: readonly CanvasMaterialReference[];
   connectedNodeIds: ReadonlySet<string>;
+  connectedReferences: readonly CanvasMentionReference[];
   limits?: VideoReferenceLimits | null;
   picking: boolean;
   onPreview: (reference: CanvasMaterialReference) => void;
@@ -2449,10 +2544,10 @@ function CanvasMaterialConnections({
   onConnectedChange: (sourceNodeId: string, connected: boolean) => void;
 }) {
   const choices = materials.filter(reference => reference.nodeId !== node.id);
-  const connected = choices.filter(reference => connectedNodeIds.has(reference.nodeId));
+  const connected = connectedReferences;
   const connectedCounts = connected.reduce<Record<'image' | 'video' | 'audio', number>>(
     (counts, reference) => {
-      if (reference.kind !== 'text') counts[reference.kind] += 1;
+      if (reference.kind !== 'text') counts[reference.kind] += reference.inputCount ?? 1;
       return counts;
     },
     { image: 0, video: 0, audio: 0 },
@@ -2502,6 +2597,7 @@ function CanvasMaterialConnections({
               <button
                 type="button"
                 aria-label={`查看已对接素材 ${reference.title}`}
+                title={`${reference.label} · ${reference.title}`}
                 aria-describedby={detailVisible ? `canvas-material-detail-${reference.nodeId}` : undefined}
                 className="relative grid size-12 place-items-center overflow-hidden rounded-lg border border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 onMouseEnter={event => showMaterialDetail(reference, event.currentTarget)}
@@ -2512,7 +2608,7 @@ function CanvasMaterialConnections({
               >
                 <CanvasMaterialPreview reference={reference} />
                 <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
-                  {reference.title}
+                  {reference.label}
                 </span>
               </button>
               <button
@@ -2682,7 +2778,7 @@ function CandidateGrid({
             )}
           >
             {version?.kind === 'text'
-              ? <p className="line-clamp-4 min-h-20 whitespace-pre-wrap p-2 text-xs leading-relaxed text-foreground">{version.text}</p>
+              ? <p className="line-clamp-4 min-h-20 whitespace-pre-wrap p-2 text-xs leading-relaxed text-foreground">{readablePromptVariables(version.text)}</p>
               : version
                 ? <MediaPreview kind={version.kind} src={canvasMediaUrl(context.projectId, version.version_id, version.kind === 'image' ? 160 : undefined)} />
                 : (
@@ -2815,7 +2911,7 @@ export function copyablePromptForNode(
   if (completed?.canvas_run?.snapshot.final_prompt) return completed.canvas_run.snapshot.final_prompt;
   if (history.length > 0) return null;
   const draft = generationDraft(node);
-  return draft?.prompt.trim() ? draft.prompt : null;
+  return draft?.prompt.trim() ? readablePromptVariables(draft.prompt) : null;
 }
 
 function withGenerationDraft(node: CanvasNode, draft: CanvasGenerationDraft): CanvasNode {
@@ -2852,9 +2948,11 @@ export function CanvasLayerStackSurface({
   const sourceImage = source?.kind === 'image' ? source : undefined;
   const base = context.resolveVersion(node.data.base_version_id);
   const baseImage = base?.kind === 'image' ? base : undefined;
-  const layers = node.data.layers.flatMap(layer => {
-    const version = context.resolveVersion(layer.version_id);
-    return version?.kind === 'image' ? [{ layer, version }] : [];
+  const layoutWidth = node.data.layout_size?.width ?? baseImage?.width;
+  const layoutHeight = node.data.layout_size?.height ?? baseImage?.height;
+  const layers = orderedLayerStackParts(node).flatMap(part => {
+    const version = context.resolveVersion(part.versionId);
+    return version?.kind === 'image' ? [{ ...part, version }] : [];
   });
   const selectedChoice = choices.find(choice => (
     choice.key.alias === node.data.alias && choice.model.id === node.data.model
@@ -2897,43 +2995,32 @@ export function CanvasLayerStackSurface({
   return (
     <div className="flex h-full min-h-0">
       <div className="relative flex min-w-0 flex-1 items-center justify-center p-3">
-        {baseImage?.width && baseImage.height ? (
+        {baseImage && layoutWidth && layoutHeight ? (
           <svg
-            viewBox={`0 0 ${baseImage.width} ${baseImage.height}`}
+            viewBox={`0 0 ${layoutWidth} ${layoutHeight}`}
             role="img"
             aria-label={`${node.title} 合成预览`}
             className="h-full w-full"
             preserveAspectRatio="xMidYMid meet"
           >
-            {node.data.base_visible && (
-              <image
-                data-layer-stack-part="base"
-                href={canvasMediaUrl(context.projectId, baseImage.version_id)}
-                x={0}
-                y={0}
-                width={baseImage.width}
-                height={baseImage.height}
-                preserveAspectRatio="none"
-              />
-            )}
-            {layers.map(({ layer, version }) => {
-              if (!layer.visible) return null;
-              const [left, top, right, bottom] = layer.bounding_box.absolute;
+            {layers.map(({ key, layer, version, visible }) => {
+              if (!visible) return null;
+              const [left, top, right, bottom] = layer?.bounding_box.absolute ?? [0, 0, layoutWidth, layoutHeight];
               return (
                 <image
-                  key={layer.id}
-                  data-layer-stack-part={layer.id}
+                  key={key}
+                  data-layer-stack-part={layer?.id ?? 'base'}
                   href={canvasMediaUrl(context.projectId, version.version_id)}
                   x={left}
                   y={top}
                   width={right - left}
                   height={bottom - top}
-                  preserveAspectRatio="none"
+                  preserveAspectRatio="xMidYMid meet"
                 />
               );
             })}
             {layers.map(({ layer }) => {
-              if (hoveredLayerId !== layer.id || !layer.visible) return null;
+              if (!layer || hoveredLayerId !== layer.id || !layer.visible) return null;
               const [left, top, right, bottom] = layer.bounding_box.absolute;
               return (
                 <rect
@@ -2982,28 +3069,8 @@ export function CanvasLayerStackSurface({
       </div>
       <div className="w-72 shrink-0 border-l border-border">
         {baseImage ? (
-          <div className="h-full overflow-y-auto p-2" aria-label="图层列表">
-            <LayerStackRow
-              name="背景"
-              description={`${baseImage.width ?? 0}×${baseImage.height ?? 0}`}
-              src={canvasMediaUrl(context.projectId, baseImage.version_id, 128)}
-              downloadHref={canvasDownloadUrl(context.projectId, baseImage.version_id)}
-              visible={node.data.base_visible}
-              onVisibleChange={visible => updateVisibility(null, visible)}
-            />
-            {layers.map(({ layer, version }) => (
-              <LayerStackRow
-                key={layer.id}
-                name={layer.name || `图层 ${layer.z_index}`}
-                description={layer.description}
-                src={canvasMediaUrl(context.projectId, version.version_id, 128)}
-                downloadHref={canvasDownloadUrl(context.projectId, version.version_id)}
-                visible={layer.visible}
-                onVisibleChange={visible => updateVisibility(layer.id, visible)}
-                onHoverChange={hovered => setHoveredLayerId(hovered ? layer.id : null)}
-              />
-            ))}
-          </div>
+          <CanvasLayerStackList node={node} context={context} disabled={busy || Boolean(context.batchBusy)}
+            onVisibility={updateVisibility} onHover={setHoveredLayerId} />
         ) : (
           <div className="relative flex h-full flex-col gap-3 overflow-y-auto p-4" aria-label="图层拆分设置">
             <div className="absolute right-2 top-2 z-10">
@@ -3114,59 +3181,6 @@ export function CanvasLayerStackSurface({
   );
 }
 
-function LayerStackRow({
-  name,
-  description,
-  src,
-  downloadHref,
-  visible,
-  onVisibleChange,
-  onHoverChange,
-}: {
-  name: string;
-  description: string;
-  src: string;
-  downloadHref: string;
-  visible: boolean;
-  onVisibleChange: (visible: boolean) => void;
-  onHoverChange?: (hovered: boolean) => void;
-}) {
-  return (
-    <div
-      className="flex items-center gap-2 rounded-md p-2 transition-colors hover:bg-secondary/60 focus-within:bg-secondary/60"
-      title={description || name}
-      onMouseEnter={() => onHoverChange?.(true)}
-      onMouseLeave={() => onHoverChange?.(false)}
-      onFocus={() => onHoverChange?.(true)}
-      onBlur={() => onHoverChange?.(false)}
-    >
-      <img src={src} alt="" className="size-12 shrink-0 rounded-md bg-secondary/40 object-contain" />
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{name}</span>
-      <a
-        href={downloadHref}
-        download
-        aria-label={`下载${name}`}
-        className="nodrag grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={event => event.stopPropagation()}
-      >
-        <Download className="size-4" />
-      </a>
-      <button
-        type="button"
-        aria-label={`${visible ? '隐藏' : '显示'}${name}`}
-        aria-pressed={visible}
-        className="nodrag grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={event => {
-          event.stopPropagation();
-          onVisibleChange(!visible);
-        }}
-      >
-        {visible ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
-      </button>
-    </div>
-  );
-}
-
 function textScaleClass(scale: 'xs' | 'sm' | 'base') {
   if (scale === 'xs') return 'text-xs';
   if (scale === 'base') return 'text-base';
@@ -3258,7 +3272,7 @@ function MediaPreview({
       decoding="async"
       draggable={false}
       className={cn(
-        'size-full select-none',
+        'block size-full select-none',
         freeResize ? 'object-fill' : fit === 'cover' ? 'object-cover' : 'object-contain',
         compact && 'max-h-48 rounded-md',
       )}

@@ -49,6 +49,7 @@ export function CanvasMediaOperationDialog({
   mediaUrl,
   busy,
   error,
+  updatesMaterial,
   onOpenChange,
   onSubmit,
 }: {
@@ -59,6 +60,7 @@ export function CanvasMediaOperationDialog({
   mediaUrl: string;
   busy: boolean;
   error: string | null;
+  updatesMaterial: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (operation: CanvasMediaOperation) => void;
 }) {
@@ -106,7 +108,7 @@ export function CanvasMediaOperationDialog({
   }, [height, open, version.version_id, width]);
 
   const dialogCopy = {
-    crop: { icon: <Crop aria-hidden="true" />, heading: `裁剪“${title}”`, description: '调整选区后生成一个新的图片节点，原图保持不变。' },
+    crop: { icon: <Crop aria-hidden="true" />, heading: `裁剪“${title}”`, description: updatesMaterial ? '裁剪后同步更新原图层，可撤销。' : '调整选区后生成一个新的图片节点，原图保持不变。' },
     split: { icon: <Grid2X2 aria-hidden="true" />, heading: `切分“${title}”`, description: '按切线一次生成整组图片节点，整批可以一次撤销。' },
     upscale: { icon: <ZoomIn aria-hidden="true" />, heading: `本地放大“${title}”`, description: '使用确定性重采样放大像素尺寸，不会恢复原图中不存在的新细节。' },
   }[tool];
@@ -215,7 +217,8 @@ export function CanvasMediaOperationDialog({
               aria-describedby={error ? 'canvas-media-operation-error' : undefined}
               onClick={submit}
             >
-              {busy ? '处理中…' : { crop: '生成裁剪节点', split: '生成切图节点', upscale: '生成放大节点' }[tool]}
+              {busy ? '处理中…' : updatesMaterial && tool !== 'split' ? '更新图层素材'
+                : { crop: '生成裁剪节点', split: '生成切图节点', upscale: '生成放大节点' }[tool]}
             </Button>
           </div>
         </DialogFooter>
@@ -692,4 +695,3 @@ function scaledSize(width: number, height: number, longEdge: number) {
   const scale = longEdge / Math.max(width, height);
   return { width: Math.round(width * scale), height: Math.round(height * scale) };
 }
-

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
+from zipfile import ZipFile
 
 import pytest
 from tests.local_client import LocalTestClient as TestClient
@@ -21,12 +23,15 @@ from character_workflow.lib.canvas_packages import (
 from character_workflow.lib.canvas_runs import (
     CanvasRunCommandError,
     finalize_canvas_run,
+    retry_canvas_run,
     submit_layer_decomposition_run,
 )
 from character_workflow.lib.jobs import save_job
 from character_workflow.lib.keys import KeySpec, KeysDB, ModelSpec, write_keys_db
 from character_workflow.lib.schemas import (
     CanvasImageNode,
+    CanvasGroupNode,
+    CanvasGroupNodeData,
     CanvasInputConnection,
     CanvasLayerStackData,
     CanvasLayerStackNode,
@@ -216,6 +221,7 @@ def test_layer_decomposition_runs_existing_stack_and_registers_every_output(isol
     assert result_node.type == "layer_stack"
     assert result_node.data.active_run_id is None
     assert result_node.data.base_version_id in document.content_versions
+    assert result_node.data.base_z_index == 0
     assert len(result_node.data.layers) == 1
     assert result_node.data.layers[0].name == "主体"
     assert result_node.data.layers[0].bounding_box.absolute == (0, 0, 1, 1)
@@ -229,6 +235,38 @@ def test_layer_decomposition_runs_existing_stack_and_registers_every_output(isol
     assert resolved_path == layer_path
     assert resolved.origin.kind == "layer_decomposition"
     assert resolved.origin.output_index == 1
+
+    client = TestClient(build_app(), base_url="http://127.0.0.1")
+    response = client.get(
+        f"/api/canvas/projects/{project.project_id}/nodes/{result_node.id}/layers/download",
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    with ZipFile(BytesIO(response.content)) as archive:
+        assert archive.namelist() == ["001-背景.png", "002-主体.png"]
+        assert all(archive.read(name) == PNG for name in archive.namelist())
+
+    # Expanded nodes point at the same immutable versions, but replacement only changes that node.
+    expanded = CanvasImageNode(
+        id="expanded-layer", title="主体", type="image", position=CanvasPoint(x=1300, y=40),
+        z_index=0, data=CanvasMediaNodeData(
+            current_version_id=result_node.data.layers[0].version_id,
+            display=CanvasMediaDisplay(),
+        ),
+    )
+    group = CanvasGroupNode(
+        id="expanded-group", title="图层", type="group", position=CanvasPoint(x=1276, y=0),
+        z_index=0, data=CanvasGroupNodeData(member_node_ids=[expanded.id]),
+    )
+    document = save_canvas_document(project.project_id, document.model_copy(update={
+        "nodes": [*document.nodes, expanded, group],
+    }), document.revision)
+    replacement, document, _ = replace_canvas_node_media(
+        project.project_id, expanded.id, "replacement.png", ".png", PNG, "image", document.revision,
+    )
+    assert next(node for node in document.nodes if node.id == expanded.id).data.current_version_id == replacement.version_id
+    assert next(node for node in document.nodes if node.id == result_node.id).data.layers[0].version_id == resolved.version_id
+    assert resolve_canvas_media(project.project_id, resolved.version_id)[0] == layer_path
 
     package_path, _filename = export_canvas_projects([project.project_id])
     try:
@@ -387,3 +425,39 @@ def test_layer_decomposition_endpoint_schedules_the_canvas_job(
     assert payload["job"]["canvas_run"]["snapshot"]["normalized_params"]["size"] == "auto"
     stack = next(node for node in payload["document"]["nodes"] if node["id"] == "layer-stack")
     assert stack["data"]["active_run_id"] == payload["job"]["canvas_run"]["run_id"]
+
+
+def test_layer_decomposition_retry_restores_frozen_source_settings_and_connection():
+    _configure_seedream()
+    project, current, source_version = _project_with_decomposition_node(
+        prompt="原拆分", resolution="1.5K",
+    )
+    original, submitted = submit_layer_decomposition_run(
+        project.project_id, "layer-stack", current.revision,
+        "ark", "doubao-seedream-5-0-pro-260628",
+    )
+    original.status = JobStatus.FAILED
+    original.error = "provider failed"
+    for candidate in original.canvas_run.candidates:
+        candidate.status = "failed"
+    save_job(original)
+    _failed, finished = finalize_canvas_run(project.project_id, original.job_id)
+    current = finished or read_canvas_document(project.project_id)
+    stack = next(node for node in current.nodes if node.type == "layer_stack")
+    stack.data.prompt = "修改后的拆分"
+    stack.data.resolution = "2K"
+    changed = save_canvas_document(
+        project.project_id, current.model_copy(update={"connections": []}), current.revision,
+    )
+    retry, retried = retry_canvas_run(project.project_id, original.canvas_run.run_id, changed.revision)
+    assert retry.canvas_run.result_node_id == "layer-stack"
+    assert retry.prompt == "原拆分"
+    assert retry.params.size == "1.5K"
+    assert retry.params.layer_decomposition is True
+    restored = next(node for node in retried.nodes if node.type == "layer_stack")
+    assert restored.data.source_version_id == source_version.version_id
+    assert restored.data.prompt == "原拆分"
+    assert restored.data.resolution == "1.5K"
+    assert [(edge.source_node_id, edge.target_node_id) for edge in retried.connections] == [
+        ("source-image", "layer-stack"),
+    ]

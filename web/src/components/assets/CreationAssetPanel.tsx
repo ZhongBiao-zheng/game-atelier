@@ -1,3 +1,4 @@
+import { promptFromAsset } from '@/lib/promptVariables';
 import {
   ChevronLeft,
   ExternalLink,
@@ -55,7 +56,6 @@ import {
   type CreationAssetKind,
   type CreationAssetRecommendation,
   type CreationImageAssetContent,
-  type CreationPromptAssetContent,
   type CreationPromptSegment,
 } from '@/schema/creationAssets';
 
@@ -88,7 +88,6 @@ export interface CreationAssetPanelProps {
   onUsePrompt: (
     asset: CreationAsset,
     renderedPrompt: string,
-    variableValues: Record<string, string>,
   ) => void;
   onUseImage: (asset: CreationAsset, content: CreationImageAssetContent) => void;
 }
@@ -140,7 +139,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [promptEditor, setPromptEditor] = useState<PromptEditorState | null>(null);
   const [imageEditor, setImageEditor] = useState<ImageEditorState | null>(null);
-  const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [variableName, setVariableName] = useState('');
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -238,7 +236,6 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     setSelectedId(asset.asset_id);
     setPromptEditor(null);
     setImageEditor(null);
-    setVariableValues({});
     setCanvasPickerAsset(null);
     setLinkedCanvas(null);
     setError(null);
@@ -282,13 +279,13 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     requestTransition: requestLeave,
   }));
 
-  async function applyAsset(asset: CreationAsset, values = variableValues) {
+  async function applyAsset(asset: CreationAsset) {
     setBusy(true);
     setError(null);
     try {
       const updated = await markCreationAssetUsed(asset.asset_id, projectId);
       if (updated.content.kind === 'prompt') {
-        onUsePrompt(updated, renderCreationPrompt(updated.content.segments, values), values);
+        onUsePrompt(updated, promptFromAsset(updated.content.segments));
       } else {
         onUseImage(updated, updated.content);
       }
@@ -583,7 +580,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         </div>
       )}
 
-      {selected && <AssetDetail asset={selected} busy={busy} values={variableValues} onValuesChange={setVariableValues} onUse={() => void applyAsset(selected)} onEdit={() => selected.kind === 'prompt' ? beginPromptEdit(selected) : beginImageEdit(selected)} />}
+      {selected && <AssetDetail asset={selected} busy={busy} onUse={() => void applyAsset(selected)} onEdit={() => selected.kind === 'prompt' ? beginPromptEdit(selected) : beginImageEdit(selected)} />}
 
       <Dialog open={discardOpen} onOpenChange={setDiscardOpen}>
         <DialogContent hideClose>
@@ -698,15 +695,12 @@ function DeleteAssetButton({ disabled, onClick }: { disabled: boolean; onClick: 
   return <div className="border-t border-border pt-4"><Button variant="ghost" className="w-full text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={disabled} onClick={onClick}><Trash2 />删除资产</Button></div>;
 }
 
-function AssetDetail({ asset, busy, values, onValuesChange, onUse, onEdit }: {
+function AssetDetail({ asset, busy, onUse, onEdit }: {
   asset: CreationAsset;
   busy: boolean;
-  values: Record<string, string>;
-  onValuesChange: (values: Record<string, string>) => void;
   onUse: () => void;
   onEdit: () => void;
 }) {
-  const variables = asset.content.kind === 'prompt' ? uniquePromptVariables(asset.content) : [];
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-4">
       {asset.content.kind === 'image' && <img src={creationAssetImageUrl(asset.asset_id)} alt={asset.title} className="aspect-square w-full rounded-lg border border-border bg-secondary object-contain" />}
@@ -714,7 +708,6 @@ function AssetDetail({ asset, busy, values, onValuesChange, onUse, onEdit }: {
       {asset.content.kind === 'prompt' && <PromptPreview segments={asset.content.segments} />}
       <TagList tags={asset.tags} />
       {asset.recommendation && <p className="mt-2 truncate text-xs text-muted-foreground" title={recommendationSummary(asset.recommendation)}>推荐：{recommendationSummary(asset.recommendation)}</p>}
-      {asset.content.kind === 'prompt' && variables.length > 0 && <div className="mt-4 space-y-3 rounded-lg border border-border bg-card p-3"><div><p className="text-sm font-medium">填写变量</p><p className="mt-1 text-xs text-muted-foreground">不填写时使用模板中的默认内容。</p></div>{variables.map(variable => <Field key={variable.name} label={variable.name} hint={`默认：${variable.defaultValue}`}><Input value={values[variable.name] ?? ''} onChange={event => onValuesChange({ ...values, [variable.name]: event.target.value })} placeholder={variable.defaultValue} /></Field>)}</div>}
       <div className="mt-4 flex gap-2"><Button className="flex-1" disabled={busy} onClick={onUse}>使用</Button><Button variant="outline" disabled={busy} onClick={onEdit}>编辑</Button></div>
     </div>
   );
@@ -747,12 +740,6 @@ function TagField({ value, onChange }: { value: string; onChange: (value: string
 function TagList({ tags }: { tags: string[] }) {
   if (!tags.length) return null;
   return <div className="mt-2 flex flex-wrap gap-1.5">{tags.map(tag => <span key={tag} className="rounded-full border border-border bg-secondary px-2 py-0.5 text-xs text-muted-foreground">{tag}</span>)}</div>;
-}
-
-function uniquePromptVariables(content: CreationPromptAssetContent): { name: string; defaultValue: string }[] {
-  const result = new Map<string, string>();
-  content.segments.forEach(segment => { if (segment.kind === 'variable' && !result.has(segment.name)) result.set(segment.name, segment.default_value); });
-  return [...result].map(([name, defaultValue]) => ({ name, defaultValue }));
 }
 
 function promptEditorSignature(state: Omit<PromptEditorState, 'assetId' | 'initialSignature'>): string {

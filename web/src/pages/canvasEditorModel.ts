@@ -1,9 +1,5 @@
+import { normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
-import {
-  normalizeStudioSizeForModel,
-  studioSizeFor,
-  type Resolution,
-} from '@/lib/studioSize';
 import type { Job, JobParams } from '@/schema/jobs';
 import { modelModality, type KeyView } from '@/api/keys';
 import {
@@ -24,6 +20,8 @@ import type {
   CanvasNode,
   CanvasPoint,
   CanvasMediaOperation,
+  CanvasImageNode,
+  CanvasGroupNode,
   CanvasSize,
 } from '@/schema/canvas';
 import {
@@ -92,6 +90,8 @@ export function sizeLockedToCanvasVersion(
 ) {
   if (!version.width || !version.height) return current ?? CANVAS_DEFAULT_NODE_SIZE;
   const ratio = version.width / version.height;
+  if (current && current.width > 0 && current.height > 0 && current.width <= 4000 && current.height <= 4000
+    && Math.abs(current.width / ratio - current.height) <= 1) return current;
   let width = Math.min(4000, Math.max(240, current?.width ?? CANVAS_DEFAULT_NODE_SIZE.width));
   let height = width / ratio;
   if (height < 150) {
@@ -177,6 +177,7 @@ export function canvasNodeRenderedSize(
 
 /** Group membership is explicit; its frame follows its members, never creates dependencies. */
 export function normalizeCanvasGroups(document: CanvasDocument): CanvasDocument {
+  document = syncLayerMaterials(document);
   const byId = new Map(document.nodes.map(node => [node.id, node]));
   return { ...document, nodes: document.nodes.map(node => {
     if (node.type !== 'group') return node;
@@ -194,6 +195,137 @@ export function normalizeCanvasGroups(document: CanvasDocument): CanvasDocument 
       && node.size?.height === size.height && members.length === node.data.member_node_ids.length) return node;
     return { ...node, position: { x, y }, size, data: { ...node.data, member_node_ids: members.map(member => member.id) } };
   }) };
+}
+
+export function layerMaterialNodeIds(document: CanvasDocument): Set<string> {
+  return new Set(document.nodes.flatMap(node => node.type === 'layer_stack'
+    ? [node.data.base_material_node_id, ...node.data.layers.map(layer => layer.material_node_id)]
+      .filter((id): id is string => Boolean(id)) : []));
+}
+
+export function syncLayerMaterials(document: CanvasDocument): CanvasDocument {
+  const byId = new Map(document.nodes.map(node => [node.id, node]));
+  let changed = false;
+  for (const id of layerMaterialNodeIds(document)) {
+    const image = byId.get(id);
+    if (image?.type !== 'image' || !image.size || image.data.display.free_resize) continue;
+    const version = document.content_versions[image.data.current_version_id ?? ''];
+    if (version?.kind !== 'image' || !version.width || !version.height) continue;
+    const scale = Math.max(image.size.width, image.size.height) / Math.max(version.width, version.height);
+    const size = { width: Math.max(1, version.width * scale), height: Math.max(1, version.height * scale) };
+    if (Math.abs(size.width - image.size.width) > 0.01 || Math.abs(size.height - image.size.height) > 0.01) {
+      byId.set(id, { ...image, size });
+      changed = true;
+    }
+  }
+  const nodes = document.nodes.map(node => {
+    if (node.type !== 'layer_stack') return byId.get(node.id)!;
+    const base = byId.get(node.data.base_material_node_id ?? '');
+    const baseId = base?.type === 'image' ? base.id : null;
+    const baseVersion = base?.type === 'image' ? base.data.current_version_id : node.data.base_version_id;
+    const layers = node.data.layers.map(layer => {
+      const image = byId.get(layer.material_node_id ?? '');
+      const materialId = image?.type === 'image' ? image.id : null;
+      const versionId = image?.type === 'image' ? image.data.current_version_id : layer.version_id;
+      const name = image?.type === 'image' ? image.title : layer.name;
+      return materialId === (layer.material_node_id ?? null) && versionId === layer.version_id && name === layer.name
+        ? layer : { ...layer, material_node_id: materialId, version_id: versionId!, name };
+    });
+    if (baseId === (node.data.base_material_node_id ?? null) && baseVersion === node.data.base_version_id
+      && layers.every((layer, index) => layer === node.data.layers[index])) return node;
+    changed = true;
+    return { ...node, data: { ...node.data, base_material_node_id: baseId, base_version_id: baseVersion, layers } };
+  });
+  return changed ? { ...document, nodes } : document;
+}
+
+/** Keep relative scale for ordinary assets; wide strips may span up to three columns. */
+export function layerMaterialDisplaySize(version: Pick<CanvasMediaVersion, 'width' | 'height'>): CanvasSize {
+  const width = version.width || 280;
+  const height = version.height || 280;
+  const scale = Math.min(1, Math.max(1 / 3, 48 / Math.min(width, height)), 920 / width, 280 / height);
+  return { width: Math.max(1, width * scale), height: Math.max(1, height * scale) };
+}
+
+/** Expose owned material views. Repeated expansion reflows the same nodes and group. */
+export function expandCanvasLayerStack(
+  document: CanvasDocument,
+  nodeId: string,
+  makeId: (prefix: string) => string,
+): { nodes: CanvasNode[]; groupId: string; stack: Extract<CanvasNode, { type: 'layer_stack' }> } {
+  const stack = document.nodes.find(node => node.id === nodeId);
+  if (stack?.type !== 'layer_stack' || !stack.data.base_version_id || stack.data.active_run_id) {
+    throw new Error('图层尚未拆分完成');
+  }
+  const entries = [
+    { name: '背景', versionId: stack.data.base_version_id, nodeId: stack.data.base_material_node_id },
+    ...stack.data.layers.map(layer => ({ name: layer.name || `图层 ${layer.z_index}`, versionId: layer.version_id, nodeId: layer.material_node_id })),
+  ];
+  const images: CanvasImageNode[] = entries.map(entry => {
+    const version = document.content_versions[entry.versionId];
+    if (version?.kind !== 'image') throw new Error('图层图片不可用，未展开');
+    const size = layerMaterialDisplaySize(version);
+    const existing = document.nodes.find(node => node.id === entry.nodeId);
+    if (existing?.type === 'image') return { ...existing, size };
+    return {
+      id: makeId('image'), type: 'image', title: entry.name,
+      position: { x: 0, y: 0 }, size, z_index: stack.z_index,
+      data: { current_version_id: version.version_id, generation_draft: null, active_run_id: null,
+        display: { fit: 'contain', free_resize: false } },
+    };
+  });
+  const existingGroup = document.nodes.find(node => node.type === 'group'
+    && node.data.member_node_ids.length === images.length
+    && images.every(image => node.data.member_node_ids.includes(image.id)));
+  const updatedStack = { ...stack, data: { ...stack.data, base_material_node_id: images[0].id,
+    layout_size: stack.data.layout_size ?? {
+      width: (document.content_versions[stack.data.base_version_id] as CanvasMediaVersion).width || 1,
+      height: (document.content_versions[stack.data.base_version_id] as CanvasMediaVersion).height || 1,
+    },
+    layers: stack.data.layers.map((layer, index) => ({ ...layer, material_node_id: images[index + 1].id })) } };
+  const spans = images.map(image => Math.ceil((image.size!.width + 40) / 320));
+  const columns = Math.max(...spans, Math.min(4, Math.ceil(Math.sqrt(images.length))));
+  const heights = Array.from({ length: columns }, () => 40);
+  const positions = images.map((image, index) => {
+    const span = spans[index];
+    const slots = Array.from({ length: columns - span + 1 }, (_, column) =>
+      Math.max(...heights.slice(column, column + span)));
+    const column = slots.indexOf(Math.min(...slots));
+    const position = { x: 24 + column * 320, y: slots[column] };
+    heights.fill(position.y + image.size!.height + 48, column, column + span);
+    return position;
+  });
+  const groupWidth = Math.max(...images.map((image, index) => positions[index].x + image.size!.width)) + 24;
+  const groupHeight = Math.max(...heights) - 24;
+  let left = existingGroup?.position.x ?? stack.position.x + canvasNodeRenderedSize(stack, document.content_versions).width + 72;
+  const top = existingGroup?.position.y ?? stack.position.y;
+  // Reflow only these owned views; avoid other canvas content without moving it.
+  const memberIds = new Set(images.map(image => image.id));
+  for (const occupied of [...document.nodes].filter(node => !memberIds.has(node.id)
+    && !(node.type === 'group' && node.data.member_node_ids.every(id => memberIds.has(id))))
+    .sort((a, b) => a.position.x - b.position.x)) {
+    const size = canvasNodeRenderedSize(occupied, document.content_versions);
+    if (top < occupied.position.y + size.height + 48 && top + groupHeight + 48 > occupied.position.y
+      && left < occupied.position.x + size.width + 48 && left + groupWidth + 48 > occupied.position.x) {
+      left = occupied.position.x + size.width + 72;
+    }
+  }
+  const placed = images.map((node, index) => ({ ...node,
+    position: { x: left + positions[index].x, y: top + positions[index].y } }));
+  const group: CanvasGroupNode = {
+    id: existingGroup?.id ?? makeId('group'), type: 'group', title: existingGroup?.title ?? `${stack.title} · 图层`,
+    position: { x: left, y: top }, size: { width: groupWidth, height: groupHeight }, z_index: existingGroup?.z_index ?? 0,
+    data: { member_node_ids: images.map(node => node.id), repeat_count: existingGroup?.type === 'group' ? existingGroup.data.repeat_count : 1 },
+  };
+  const arranged = [...placed, group];
+  if (existingGroup && arranged.every(node => {
+    const previous = document.nodes.find(item => item.id === node.id);
+    return previous && Math.abs(previous.position.x - node.position.x) < 0.01
+      && Math.abs(previous.position.y - node.position.y) < 0.01
+      && Math.abs((previous.size?.width ?? 0) - node.size!.width) < 0.01
+      && Math.abs((previous.size?.height ?? 0) - node.size!.height) < 0.01;
+  })) return { nodes: [], groupId: group.id, stack: updatedStack };
+  return { nodes: arranged, groupId: group.id, stack: updatedStack };
 }
 
 /** 从期望位置开始，按网格圈由内向外找一个不与现有节点重叠的点。
@@ -426,8 +558,8 @@ export function canvasRequiresBatchRun(document: CanvasDocument | null, nodeId: 
 
 /** 每个目标节点上「已连接但还没有内容」的输入源。
  *
- *  只看不带 slot 的 input 连线：首尾帧模式下服务端会把不带 slot 的连线全部丢掉，带 slot 的那两条
- *  由 missingVideoFrame 单独把关。 */
+ *  只看不带 slot 的普通 input；首尾帧的空来源由 missingVideoFrame 单独把关，
+ *  混用普通连接与首尾帧会在提交时拒绝，不能靠过滤来悄悄省略输入。 */
 export function canvasPendingInputNodes(
   document: CanvasDocument | null,
 ): Map<string, CanvasPendingInput[]> {
@@ -592,7 +724,7 @@ function preferredCanvasGenerationModel(
 }
 
 function defaultCanvasGenerationParams(mode: CanvasGenerationDraft['mode']): JobParams {
-  if (mode === 'image') return { n: 1, ratio: '1:1' };
+  if (mode === 'image') return { n: 1 };
   if (mode === 'video') {
     return {
       duration: 5,
@@ -668,12 +800,27 @@ export function createCanvasGenerationDraft(
   return {
     mode,
     prompt: options.prompt ?? '',
-    input_policy: options.inputPolicy ?? 'mentions_only',
+    input_policy: 'all_connected',
     model,
     alias: selected?.key.alias ?? null,
     params,
     updated_at: options.now ?? new Date().toISOString(),
   };
+}
+
+export function resolveCanvasGenerationDraft(
+  node: CanvasNode,
+  keys: readonly KeyView[],
+  textPreference?: CanvasGenerationDefault<'text'>,
+): CanvasGenerationDraft | null {
+  if (node.type === 'config') return node.data.draft;
+  if (!('generation_draft' in node.data)) return null;
+  if (node.data.generation_draft) return node.data.generation_draft;
+  // 文本的生成能力由节点类型决定，MCP / 素材库创建的正文也可在首次操作时配置。
+  return node.type === 'text' ? createCanvasGenerationDraft(keys, 'text', {
+    inputPolicy: 'all_connected',
+    preference: textPreference,
+  }) : null;
 }
 
 export function switchCanvasGenerationDraft(
@@ -696,6 +843,7 @@ export function createConnectedCanvasConfig(
   sourceNodeId: string,
   draft: CanvasGenerationDraft,
   ids: { nodeId: string; connectionId: string },
+  surfaceType: 'config' | 'image' | 'video' = 'config',
 ): CanvasDocument | null {
   if (
     document.nodes.some(node => node.id === ids.nodeId)
@@ -707,10 +855,9 @@ export function createConnectedCanvasConfig(
   const token = `@[node:${source.id}]`;
   const prompt = draft.prompt.trim() ? `${draft.prompt.trim()} ${token}` : token;
   const configSize = CANVAS_DEFAULT_NODE_SIZE;
-  const configNode: CanvasNode = {
+  const base = {
     id: ids.nodeId,
     title: `${CANVAS_GENERATION_MODE_LABELS[draft.mode]}生成`,
-    type: 'config',
     position: placeCanvasNodeWithoutOverlap(
       { x: source.position.x + sourceWidth + 96, y: source.position.y },
       document.nodes,
@@ -719,10 +866,14 @@ export function createConnectedCanvasConfig(
       node => canvasNodeRenderedSize(node, document.content_versions),
     ),
     z_index: 0,
-    data: {
-      draft: { ...draft, prompt, input_policy: 'mentions_only' },
-    },
   };
+  const connectedDraft = { ...draft, prompt, input_policy: 'all_connected' as const };
+  const configNode: CanvasNode = surfaceType === 'config'
+    ? { ...base, type: 'config', data: { draft: connectedDraft } }
+    : { ...base, type: surfaceType, data: {
+      current_version_id: null, active_run_id: null, generation_draft: connectedDraft,
+      display: { fit: 'contain', free_resize: false },
+    } };
   const nodes = [...document.nodes, configNode];
   if (!canCreateCanvasInputConnection({ ...document, nodes }, {
     source: source.id,
@@ -747,43 +898,11 @@ export function normalizeCanvasImageParams(
   baseUrl?: string | null,
 ): JobParams {
   const caps = imageControlCaps(model, provider, baseUrl);
-  const {
-    quality: currentQuality,
-    reference_images: _referenceImages,
-    reference_videos: _referenceVideos,
-    reference_audios: _referenceAudios,
-    resolution: _resolution,
-    size: _size,
-    ...retained
-  } = current;
-  const currentRatio = String(current.ratio ?? '');
-  const ratio = caps.ratios.includes(currentRatio) ? currentRatio : caps.ratios[0];
-  const n = caps.family === 'midjourney'
-    ? MJ_IMAGES_PER_TASK
-    : Math.max(1, Math.min(4, Number(current.n) || 1));
-  const params: JobParams = { ...retained, n, ratio };
-
-  if (caps.showResolution && caps.resolutions.length) {
-    params.resolution = caps.resolutions.includes(current.resolution as Resolution)
-      ? current.resolution
-      : caps.resolutions[0];
-  }
+  const { reference_images: _images, reference_videos: _videos, reference_audios: _audios, quality, ...retained } = current;
+  const params = normalizeImageSizeParams(model, provider, baseUrl, retained);
+  params.n = caps.family === 'midjourney' ? MJ_IMAGES_PER_TASK : Math.max(1, Math.min(4, Number(current.n) || 1));
   if (caps.qualities?.length) {
-    params.quality = caps.qualities.includes(currentQuality as Quality)
-      ? currentQuality
-      : caps.qualities[0];
-  }
-  if (caps.sizeKind === 'ratio') {
-    params.size = ratio;
-  } else if (caps.sizeKind === 'pixels') {
-    const resolution = (params.resolution as Resolution | undefined) ?? '2K';
-    const currentPixelSize = typeof current.size === 'string' && /^\d+x\d+$/.test(current.size)
-      ? current.size
-      : null;
-    params.size = normalizeStudioSizeForModel(
-      currentPixelSize ?? studioSizeFor(ratio, resolution, model),
-      model,
-    );
+    params.quality = caps.qualities.includes(quality as Quality) ? quality : caps.qualities[0];
   }
   return params;
 }

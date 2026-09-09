@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+import { toolbarPopoverContainerSpace, toolbarPopoverPosition } from './toolbarPopoverPosition';
 
 export type ToolbarPopoverDirection = 'up' | 'down';
 
@@ -41,8 +42,6 @@ interface Props {
   children: ReactNode;
 }
 
-const GAP = 12;
-
 /**
  * 控件 chip 的下拉面板 —— portal 到 body、按锚点 fixed 定位。
  *
@@ -66,56 +65,65 @@ export function ToolbarPopover({
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{
-    left?: number;
-    right?: number;
+    left: number;
     top?: number;
     bottom?: number;
+    maxWidth: number;
+    maxHeight: number;
+    direction: ToolbarPopoverDirection;
   } | null>(null);
-  /** 是否已经用「面板渲染后的实测宽度」摆过一次（每次开合重置）。 */
-  const measured = useRef(false);
   const focused = useRef(false);
 
   const place = useCallback(() => {
     const a = anchorRef.current;
     if (!a) return;
-    const r = a.getBoundingClientRect();
-    // 贴锚点，但两侧都夹在视口内：窄屏下宽面板贴锚点右缘会把左边缘顶出屏幕外
-    // （375px 视口实测 left=-104）。宽度要等面板渲染出来才量得到，所以首帧按锚点摆，
-    // 面板落地后由下面那个 layout effect 带着实测宽度再摆一次。
-    const w = panelRef.current?.offsetWidth ?? 0;
-    const clamp = (v: number) => Math.max(GAP, Math.min(v, window.innerWidth - w - GAP));
-    const globalX = align === 'end'
-      ? window.innerWidth - clamp(window.innerWidth - r.right) - w
-      : clamp(r.left);
-    const containerRect = portalContainerRef?.current?.getBoundingClientRect();
-    if (containerRect) {
-      setPos(direction === 'down'
-        ? { left: globalX - containerRect.left, top: r.bottom - containerRect.top + GAP }
-        : { left: globalX - containerRect.left, bottom: containerRect.bottom - r.top + GAP });
-      return;
-    }
-    const x = align === 'end'
-      ? { right: clamp(window.innerWidth - r.right) }
-      : { left: globalX };
-    setPos(
-      direction === 'down'
-        ? { ...x, top: r.bottom + GAP }
-        : { ...x, bottom: window.innerHeight - r.top + GAP },
-    );
+    const panel = panelRef.current;
+    const container = portalContainerRef?.current;
+    const space = toolbarPopoverContainerSpace(container);
+    const viewport = window.visualViewport;
+    const viewportLeft = viewport?.offsetLeft ?? 0;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const placement = toolbarPopoverPosition(a.getBoundingClientRect(), {
+      width: (panel?.offsetWidth ?? 0) * space.scaleX,
+      // A capped menu must still report its full content height, or it can flip back
+      // and forth between sides after its first constrained render.
+      height: panel ? (panel.scrollHeight + panel.offsetHeight - panel.clientHeight) * space.scaleY : 0,
+    }, {
+      left: viewportLeft,
+      top: viewportTop,
+      right: viewportLeft + (viewport?.width ?? window.innerWidth),
+      bottom: viewportTop + (viewport?.height ?? window.innerHeight),
+    }, direction, align);
+    const top = (placement.top - space.top) / space.scaleY + space.scrollTop;
+    const next = {
+      left: (placement.left - space.left) / space.scaleX + space.scrollLeft,
+      ...(placement.direction === 'down'
+        ? { top }
+        : { bottom: (container?.clientHeight ?? window.innerHeight) - top - placement.height / space.scaleY }),
+      maxWidth: placement.maxWidth / space.scaleX,
+      maxHeight: placement.maxHeight / space.scaleY,
+      direction: placement.direction,
+    };
+    setPos(current => current && Object.keys(next).every(key =>
+      current[key as keyof typeof next] === next[key as keyof typeof next],
+    ) ? current : next);
   }, [align, anchorRef, direction, portalContainerRef]);
 
   useLayoutEffect(() => {
     if (!open) {
-      measured.current = false;
       focused.current = false;
       return;
     }
     place();
     window.addEventListener('scroll', place, true);
     window.addEventListener('resize', place);
+    window.visualViewport?.addEventListener('resize', place);
+    window.visualViewport?.addEventListener('scroll', place);
     return () => {
       window.removeEventListener('scroll', place, true);
       window.removeEventListener('resize', place);
+      window.visualViewport?.removeEventListener('resize', place);
+      window.visualViewport?.removeEventListener('scroll', place);
     };
   }, [open, place]);
 
@@ -133,7 +141,8 @@ export function ToolbarPopover({
     if (!anchor) return;
     const rectKey = () => {
       const r = anchor.getBoundingClientRect();
-      return `${r.left},${r.top},${r.right},${r.bottom}`;
+      const c = portalContainerRef?.current?.getBoundingClientRect();
+      return `${r.left},${r.top},${r.right},${r.bottom},${c?.left},${c?.top},${c?.width},${c?.height}`;
     };
     let last = rectKey();
     let raf = requestAnimationFrame(function tick() {
@@ -145,15 +154,31 @@ export function ToolbarPopover({
       raf = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(raf);
-  }, [open, place, anchorRef]);
+  }, [open, place, anchorRef, portalContainerRef]);
 
   // 二次定位走 layout effect 而不是 rAF：标签页在后台时 rAF 被节流，面板会卡在首帧
   // 那个没夹紧的位置（本仓在 framer-motion 上踩过同一个节流坑）。
   useLayoutEffect(() => {
-    if (!open || pos === null || measured.current || !panelRef.current) return;
-    measured.current = true;
-    place();
-  }, [open, pos, place]);
+    if (open && panelRef.current) place();
+  });
+
+  const hasPosition = pos !== null;
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!open || !panel) return;
+    // Observe children too: their height can change while the outer menu is capped
+    // (custom size fields, async model lists, or late image/font loading).
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    const observeContent = () => {
+      resize?.disconnect();
+      resize?.observe(panel);
+      for (const child of panel.children) resize?.observe(child);
+    };
+    observeContent();
+    const mutation = new MutationObserver(() => { observeContent(); place(); });
+    mutation.observe(panel, { childList: true, subtree: true, characterData: true });
+    return () => { resize?.disconnect(); mutation.disconnect(); };
+  }, [open, hasPosition, place]);
 
   useLayoutEffect(() => {
     if (!autoFocus || !open || pos === null || focused.current || !panelRef.current) return;
@@ -162,7 +187,7 @@ export function ToolbarPopover({
     );
     if (!first) return;
     focused.current = true;
-    first.focus();
+    first.focus({ preventScroll: true });
   }, [autoFocus, open, pos]);
 
   useEffect(() => {
@@ -201,12 +226,19 @@ export function ToolbarPopover({
     <div
       ref={panelRef}
       data-toolbar-popover=""
+      data-side={pos.direction}
       style={{
         position: portalContainerRef?.current ? 'absolute' : 'fixed',
         left: pos.left,
-        right: pos.right,
         top: pos.top,
         bottom: pos.bottom,
+        maxWidth: pos.maxWidth,
+        maxHeight: pos.maxHeight,
+        minWidth: 0,
+        minHeight: 0,
+        boxSizing: 'border-box',
+        overflow: 'auto',
+        overscrollBehavior: 'contain',
         zIndex: 50,
       }}
       className={className}

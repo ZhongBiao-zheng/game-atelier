@@ -59,6 +59,31 @@ def test_image_payload_pixel_size_is_authoritative():
     assert payload["quality"] == "medium"  # gpt-image 尾段发 quality
 
 
+def test_image_payload_auto_does_not_fall_back_to_ratio_or_resolution():
+    payload = openrouter_image._image_payload(
+        prompt="p", model="openai/gpt-image-2", n=1,
+        kwargs={"size": "auto", "params": {"ratio": "1:1", "resolution": "4K"}},
+    )
+    assert payload == {"model": "openai/gpt-image-2", "prompt": "p", "n": 1,
+                       "aspect_ratio": "auto"}
+
+
+def test_dispatch_auto_overrides_stale_top_level_size(openrouter_key, tmp_path, monkeypatch):
+    seen = []
+    def post(url, api_key, payload, *, timeout):
+        seen.append(payload)
+        return {"data": [{"b64_json": base64.b64encode(_PNG).decode()}]}
+    monkeypatch.setattr(openrouter_image, "_post_json", post)
+    params = {"size_mode": "auto", "size": "1024x1024", "ratio": "1:1",
+              "resolution": "4K", "custom_size": "1600x2000"}
+    dispatch(prompt="p", model="openai/gpt-image-2", alias="OpenRouter",
+             output_dir=tmp_path / "out", size="1024x1024", params=params)
+    assert seen[0]["aspect_ratio"] == "auto"
+    assert "size" not in seen[0]
+    assert "resolution" not in seen[0]
+    assert params == {"size_mode": "auto", "size": "auto"}
+
+
 def test_image_payload_references_become_input_references(tmp_path):
     ref = tmp_path / "ref.png"
     ref.write_bytes(_PNG)

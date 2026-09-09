@@ -7,6 +7,7 @@ import {
   CanvasNodeCard,
   CanvasNodeContext,
   CanvasMobileGenerationPanel,
+  CanvasGenerationComposer,
   placeCanvasGenerationPanel,
   type CanvasNodeContextValue,
 } from './CanvasEditorViews';
@@ -61,6 +62,51 @@ const node: CanvasNode = {
   data: { draft },
 };
 
+it('submits the visible draft independently of retrying the immutable failed task', () => {
+  const job = { ...batchJob(), status: 'failed' as const };
+  const key = {
+    alias: 'main', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-09-09T00:00:00Z',
+    models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' as const, protocol: 'openai' }],
+  };
+  const currentDraft = { ...draft, model: 'gpt-image-2', alias: 'main', prompt: '修改后的新提示词' };
+  const context = nodeContext({ keys: [key], jobsByRunId: new Map([['run-batch', job]]) });
+  render(<CanvasGenerationComposer node={imageResultNode} draft={currentDraft} context={context} />);
+  fireEvent.click(screen.getByRole('button', { name: '开始生成' }));
+  expect(context.submitRun).toHaveBeenCalledWith(imageResultNode.id);
+  expect(context.retryRun).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '重试原任务' }));
+  expect(context.retryRun).toHaveBeenCalledWith(imageResultNode.id, 'run-batch');
+  expect(screen.queryByText(/原任务输入|本轮冻结输入/)).not.toBeInTheDocument();
+});
+
+it('keeps the generation panel free of historical inputs without mutating the original job', () => {
+  const prompt = '改写【文本1】\n\n参考文本：\n【文本1】\n真实文字';
+  const job = { ...batchJob(), status: 'failed' as const, prompt };
+  const context = nodeContext({ jobsByRunId: new Map([['run-batch', job]]) });
+  const { container } = render(<CanvasGenerationComposer node={imageResultNode} draft={draft} context={context} />);
+  expect(container.querySelector('details')).toBeNull();
+  expect(container.textContent).not.toContain('真实文字');
+  expect(container.textContent).not.toContain('【文本1】');
+  expect(job.prompt).toBe(prompt);
+});
+
+it('renders current input thumbnails in frozen connection order, not material or mention order', () => {
+  const first = { nodeId: 'first', versionId: 'first-v', kind: 'image' as const, title: '第一张', label: '图片1' };
+  const second = { nodeId: 'second', versionId: 'second-v', kind: 'image' as const, title: '第二张', label: '图片2' };
+  const context = nodeContext({
+    materialReferences: [second, first],
+    connectedMaterialNodeIdsByNodeId: new Map([[node.id, new Set(['first', 'second'])]]),
+    mentionReferencesByNodeId: new Map([[node.id, [first, second]]]),
+  });
+  render(<CanvasGenerationComposer node={node} draft={{ ...draft, prompt: '@[node:second] @[node:first]' }} context={context} />);
+  const group = screen.getByRole('group', { name: '分镜出图 已对接素材' });
+  const images = within(group).getAllByRole('button', { name: /查看已对接素材/ });
+  expect(images.map(button => button.textContent)).toEqual(['图片1', '图片2']);
+  fireEvent.click(within(group).getByRole('button', { name: '取消对接素材 第一张' }));
+  expect(context.setMaterialConnected).toHaveBeenCalledWith('first', node.id, false);
+});
+
 function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNodeContextValue {
   return {
     projectId: 'canvas-test',
@@ -100,6 +146,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     copyPrompt: vi.fn(async () => undefined),
     reversePrompt: vi.fn(async () => undefined),
     createLayerDecomposition: vi.fn(),
+    expandLayerStack: vi.fn(),
     submitLayerDecomposition: vi.fn(async () => undefined),
     replaceLayerStackSource: vi.fn(),
     recoverReversePromptConfig: vi.fn(async () => undefined),
@@ -233,6 +280,28 @@ it('renders the generation composer as an independent panel below the selected n
   expect(reportError).toHaveBeenCalledWith('还没有配置任何模型密钥。');
 });
 
+it('defaults a blank image config to AUTO on first model selection without a downgrade warning', () => {
+  const updateNode = vi.fn();
+  const reportError = vi.fn();
+  const imageKey = {
+    alias: 'image-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
+    models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' as const, protocol: 'openai' }],
+  };
+  const blank = { ...node, data: { draft: { ...draft, params: {} } } } as CanvasNode;
+  render(
+    <CanvasNodeContext.Provider value={nodeContext({ keys: [imageKey], updateNode, reportError })}>
+      <NodeCard data={{ domain: blank }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
+  fireEvent.click(screen.getByRole('option', { name: 'GPT Image 2' }));
+  expect(reportError).not.toHaveBeenCalled();
+  expect(updateNode.mock.calls[0]?.[1](blank)).toMatchObject({
+    data: { draft: { params: { size_mode: 'auto', size: 'auto' } } },
+  });
+});
+
 it('switches a config node between generation modes and summarizes connected inputs', () => {
   const recordHistory = vi.fn();
   const updateNode = vi.fn();
@@ -320,6 +389,8 @@ it('expands image candidates around the node and exposes candidate-specific acti
   expect(screen.getByTestId('canvas-candidate-stack')).toHaveAttribute('data-expanded', 'true');
   expect(screen.getByRole('group', { name: '候选 2' })).toBeInTheDocument();
   expect(screen.getByRole('group', { name: '候选 3' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: '候选 2' })).toHaveClass('bg-transparent');
+  expect(screen.getByRole('group', { name: '候选 3' })).toHaveClass('bg-card');
 
   fireEvent.click(screen.getByRole('button', { name: '将候选 2 设为主结果' }));
   expect(context.selectCandidate).toHaveBeenCalledWith(imageResultNode.id, 'version-other');
@@ -728,6 +799,7 @@ it('connects canvas materials above the prompt without rewriting its @ content',
   const connected = nodeContext({
     ...initial,
     connectedMaterialNodeIdsByNodeId: new Map([[node.id, new Set([material.nodeId])]]),
+    mentionReferencesByNodeId: new Map([[node.id, [{ ...material, label: '图片1' }]]]),
   });
   rerender(
     <CanvasNodeContext.Provider value={connected}>
@@ -735,7 +807,7 @@ it('connects canvas materials above the prompt without rewriting its @ content',
     </CanvasNodeContext.Provider>,
   );
   expect(screen.getByRole('button', { name: '查看已对接素材 雨夜列车' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '查看已对接素材 雨夜列车' })).toHaveTextContent('雨夜列车');
+  expect(screen.getByRole('button', { name: '查看已对接素材 雨夜列车' })).toHaveTextContent('图片1');
   expect(screen.getByRole('combobox', { name: '提示词' })).toHaveTextContent('保留 @ 原提示词');
 
   const materialButton = screen.getByRole('button', { name: '查看已对接素材 雨夜列车' });
@@ -763,6 +835,7 @@ it('plays a silent connected-video preview only while its material is hovered', 
   const context = nodeContext({
     materialReferences: [material],
     connectedMaterialNodeIdsByNodeId: new Map([[node.id, new Set([material.nodeId])]]),
+    mentionReferencesByNodeId: new Map([[node.id, [{ ...material, label: '视频1' }]]]),
   });
   render(
     <CanvasNodeContext.Provider value={context}>

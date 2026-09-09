@@ -6,6 +6,7 @@ import pytest
 from tests.local_client import LocalTestClient as TestClient
 
 from viewer_server.server_app import build_app
+from tests.test_prompt_variables import variable
 
 _FAKE_CREATED_AT = "2026-05-25T00:00:00+00:00"
 
@@ -50,6 +51,66 @@ def test_post_studio_job_creates_pending(client):
     assert payload["namespace"] == "studio"
     assert payload["kind"] == "image"
     assert payload["params"]["n"] == 1
+
+
+@pytest.mark.parametrize("value,expected", [("现代建筑", "现代建筑"), ("", "三头犬"), ("  ", "三头犬")])
+def test_studio_freezes_resolved_variable_text(client, value, expected):
+    response = client.post("/api/studio/jobs", json={
+        "prompt": "ignored", "prompt_template": "绘制" + variable(value=value),
+        "model": "gpt-image-2", "params": {},
+    })
+    assert response.status_code == 201
+    assert response.json()["prompt"] == "绘制" + expected
+
+
+@pytest.mark.parametrize("prompt", [variable(example=" "), "@[variable:broken]", " \n"])
+def test_studio_rejects_unfilled_or_malformed_variables_before_job_creation(client, tmp_path, prompt):
+    response = client.post("/api/studio/jobs", json={
+        "prompt": "placeholder", "prompt_template": prompt, "model": "gpt-image-2", "params": {},
+    })
+    assert response.status_code == 422
+    assert not list((tmp_path / ".runtime" / "jobs").glob("*.json"))
+
+
+def test_studio_template_and_plain_retry_preserve_literal_tokens(client):
+    literal = "@[variable:literal] " + variable(value="inner")
+    first = client.post("/api/studio/jobs", json={
+        "prompt": literal, "prompt_template": variable(value=literal),
+        "model": "gpt-image-2", "params": {},
+    })
+    assert first.status_code == 201
+    assert first.json()["prompt"] == literal
+    retry = client.post("/api/studio/jobs", json={
+        "prompt": first.json()["prompt"], "model": "gpt-image-2", "params": {},
+    })
+    assert retry.status_code == 201
+    assert retry.json()["prompt"] == literal
+
+
+@pytest.mark.parametrize("mode,expected_size", [("auto", "auto"), ("custom", "1360x2048")])
+def test_studio_job_freezes_active_size_mode(client, mode, expected_size):
+    response = client.post("/api/studio/jobs", json={
+        "prompt": "test", "model": "gpt-image-2",
+        "params": {"size_mode": mode, "size": "1360x2048", "custom_size": "1200x2000",
+                   "ratio": "2:3", "resolution": "2K", "quality": "medium"},
+    })
+    assert response.status_code == 201
+    params = response.json()["params"]
+    assert params["size"] == expected_size
+    assert params["size_mode"] == mode
+    assert params["quality"] == "medium"
+    assert params["ratio"] is None
+    assert params["resolution"] is None
+    assert params["custom_size"] is None
+
+
+def test_studio_rejects_incomplete_custom_size_before_job_creation(client, tmp_path):
+    response = client.post("/api/studio/jobs", json={
+        "prompt": "test", "model": "gpt-image-2",
+        "params": {"size_mode": "custom", "size": "x2048"},
+    })
+    assert response.status_code == 422
+    assert not list((tmp_path / ".runtime" / "jobs").glob("*.json"))
 
 
 def test_post_studio_job_strips_forged_provider_task_ids(client):

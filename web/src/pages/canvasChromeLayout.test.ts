@@ -30,13 +30,15 @@ describe('canvas chrome spatial hierarchy', () => {
       '添加图片节点',
       '添加视频节点',
       '添加音频节点',
-      '添加生成配置节点',
       '上传素材',
     ]) {
       expect(canvasEditorSource).toContain(`label="${label}"`);
     }
     // 文本节点与生成配置合并后不再有独立的 LLM 节点入口。
     expect(canvasEditorSource).not.toContain('添加 LLM 节点');
+    for (const label of ['添加生成配置节点', '撤销', '重做']) {
+      expect(canvasEditorSource).not.toContain(`label="${label}"`);
+    }
     expect(canvasEditorSource).toContain('hidden xl:contents');
     expect(canvasEditorSource).toContain('xl:hidden');
   });

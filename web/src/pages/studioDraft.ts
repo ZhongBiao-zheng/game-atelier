@@ -3,7 +3,7 @@ import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import type { Quality } from '@/lib/imageControlCaps';
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoMode, VideoQuality } from '@/lib/videoControlCaps';
-import type { JobKind } from '@/schema/jobs';
+import type { JobKind, JobParams } from '@/schema/jobs';
 
 /**
  * 创作台未提交的输入（提示词、参考素材、当前配置）。
@@ -24,11 +24,8 @@ export interface StudioDraft {
   videoFrames: FrameSlots;
   mjRefs: MjRefSlots;
   mjParams: MjParams;
-  ratio: string;
-  resolution: '2K' | '4K';
+  sizeParams: JobParams;
   count: number;
-  customSize: string;
-  customSizeManual: boolean;
   quality: Quality;
   videoMode: VideoMode;
   duration: number;

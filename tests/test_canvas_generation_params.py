@@ -1,6 +1,6 @@
 import pytest
 
-from character_workflow.lib.canvas_runs import _normalized_params
+from character_workflow.lib.canvas_runs import _normalized_image_preference_params, _normalized_params
 from character_workflow.lib.keys import KeySpec, ModelSpec
 from character_workflow.lib.schemas import CanvasGenerationDraft, JobParams
 
@@ -26,6 +26,30 @@ def _draft(mode: str, model: str, **params) -> CanvasGenerationDraft:
     )
 
 
+@pytest.mark.parametrize("provider,base_url", [
+    ("openai", None), ("custom", "https://api.tu-zi.com/v1"),
+    ("custom", "https://api.openai-hk.com"),
+])
+def test_new_canvas_image_preferences_default_to_auto(provider, base_url):
+    model = ModelSpec(name="GPT", id="gpt-image-2", modality="image")
+    key = _key(provider, model).model_copy(update={"base_url": base_url})
+    source = {"n": 2}
+    result = _normalized_image_preference_params(key, model, source)
+    assert result.model_dump(exclude_none=True) == {
+        "size_mode": "auto", "size": "auto", "n": 2,
+    }
+    assert source == {"n": 2}
+    for saved in ({"ratio": "2:3"}, {"size": "1024x1536"}, {"resolution": "2K"}):
+        assert _normalized_image_preference_params(key, model, saved).size != "auto"
+
+
+def test_new_canvas_unsupported_model_keeps_ratio_default():
+    model = ModelSpec(name="Nano", id="nano-banana-pro", modality="image")
+    result = _normalized_image_preference_params(_key("custom", model), model, {})
+    assert result.ratio == "1:1"
+    assert result.size != "auto"
+
+
 def test_canvas_server_locks_midjourney_to_four_candidates():
     model = ModelSpec(name="Midjourney V7", id="midjourney-v7", modality="image")
 
@@ -39,6 +63,36 @@ def test_canvas_server_locks_midjourney_to_four_candidates():
     assert requested_count == 4
     assert normalized["n"] == 4
     assert job_params.n == 4
+
+
+@pytest.mark.parametrize("mode,size,expected", [
+    ("auto", "1360x2048", {"size_mode": "auto", "size": "auto", "n": 2}),
+    ("custom", "1360x2048", {"size_mode": "custom", "size": "1360x2048", "n": 2}),
+])
+def test_canvas_freezes_only_active_size_intent(mode, size, expected):
+    model = ModelSpec(name="GPT", id="gpt-image-2", modality="image")
+    normalized, job_params, count = _normalized_params(
+        _draft("image", model.id, size_mode=mode, size=size,
+               ratio="2:3", resolution="2K", custom_size="1600x2000"),
+        2, _key("openai", model), model,
+    )
+    assert normalized == expected
+    assert job_params.model_dump(exclude_none=True) == expected
+    assert count == 2
+
+
+def test_canvas_preference_recovery_keeps_inactive_draft_values_until_freeze():
+    model = ModelSpec(name="GPT", id="gpt-image-2", modality="image")
+    key = _key("openai", model)
+    source = {"size_mode": "auto", "size": "1360x2048", "ratio": "2:3",
+              "resolution": "2K", "custom_size": "1360x2048"}
+    preference = _normalized_image_preference_params(key, model, source)
+    assert preference.size == "auto"
+    assert preference.ratio == "2:3"
+    assert preference.custom_size == "1360x2048"
+    draft = _draft("image", model.id, **preference.model_dump(exclude_none=True))
+    normalized, _, _ = _normalized_params(draft, 1, key, model)
+    assert normalized == {"size_mode": "auto", "size": "auto", "n": 1}
 
 
 def test_canvas_server_strips_unsupported_video_watermark():

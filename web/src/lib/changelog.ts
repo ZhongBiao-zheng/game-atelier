@@ -33,6 +33,160 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.46.0',
+    date: '2026-09-09',
+    headline: '素材关联与生成面板简化',
+    changes: [
+      { kind: 'fix', text: '抠图、切图与展开图层保留素材实线，下游生成不再沿来源混入原图。' },
+      { kind: 'fix', text: '移除生成面板的原任务输入区块，只展示当前素材、提示词与设置。' },
+    ],
+  },
+  {
+    version: '5.45.0',
+    date: '2026-09-09',
+    headline: '画布参考输入与实线统一',
+    changes: [
+      { kind: 'fix', text: '取消来源虚线与隐藏自身参考，实际生成只使用面板可见的输入素材。' },
+      { kind: 'fix', text: '失败重试保留原提示词、参数和参考版本，不再丢失素材。' },
+      { kind: 'feat', text: '通过“基于本图生成”明确创建下游参考，图层素材可直接定位父图层。' },
+    ],
+  },
+  {
+    version: '5.44.2',
+    date: '2026-09-09',
+    headline: '补齐图片模型尺寸选项',
+    changes: [
+      { kind: 'fix', text: 'Tuzi 香蕉补齐 21:9、4:5、5:4，修正保存与请求时的比例转换。' },
+      { kind: 'fix', text: 'OpenRouter 按具体模型显示完整比例和分辨率档位，默认档位不变。' },
+      { kind: 'fix', text: 'GPT Image、Seedream 和 Midjourney 补齐 4:5、5:4 常用比例。' },
+    ],
+  },
+  {
+    version: '5.44.1',
+    date: '2026-09-09',
+    headline: '精简画布工具栏与透明图片展示',
+    changes: [
+      { kind: 'fix', text: '移除左侧生成配置、撤销和重做按钮，撤销与重做快捷键继续可用。' },
+      { kind: 'fix', text: '图片节点不再铺默认底色，透明区域直接透出画布。' },
+    ],
+  },
+  {
+    version: '5.44.0',
+    date: '2026-09-09',
+    headline: '拖拽调整拆分图层顺序',
+    changes: [
+      { kind: 'feat', text: '拆分图层支持拖拽排序，列表越靠上，合成预览越靠前；背景也可调整。' },
+      { kind: 'feat', text: '图层顺序自动保存并支持撤销，也可用排序菜单逐层上移、下移。' },
+    ],
+  },
+  {
+    version: '5.43.3',
+    date: '2026-09-09',
+    headline: '完善图片失败原因与文本节点配置',
+    changes: [
+      { kind: 'fix', text: 'Tuzi GPT Image 2 的 AUTO 改用已验证的图片接口，保留自动尺寸与参考图。' },
+      { kind: 'fix', text: '图片任务保留真实失败原因与厂商订单号，不再被无结果提示覆盖。' },
+      { kind: 'fix', text: 'MCP 创建的文本节点也能直接选择模型、配置参数与生成文本。' },
+    ],
+  },
+  {
+    version: '5.43.2',
+    date: '2026-09-09',
+    headline: '简化提示词变量填写',
+    changes: [
+      { kind: 'fix', text: '变量框仅显示默认内容，去掉名称前缀；未填写时直接使用默认内容生成。' },
+    ],
+  },
+  {
+    version: '5.43.1',
+    date: '2026-09-09',
+    headline: '修复图片任务长时间挂起',
+    changes: [
+      { kind: 'fix', text: 'Tuzi 图片查询超时后，画布结束本地等待并保留订单号，不再一直显示生成中。' },
+      { kind: 'fix', text: '查询异常时停止剩余候选，保留已完成素材，避免继续提交新任务。' },
+    ],
+  },
+  {
+    version: '5.43.0',
+    date: '2026-09-09',
+    headline: '提示词行内填写变量',
+    changes: [
+      { kind: 'feat', text: '提示词资产使用后可在正文方框中填写变量，同名内容同步，草稿保留填写进度。' },
+      { kind: 'fix', text: '模型与尺寸菜单自动避开浏览器边缘，内容过长时在菜单内滚动。' },
+    ],
+  },
+  {
+    version: '5.42.3',
+    date: '2026-09-09',
+    headline: '修复 Tuzi 图片异步接口',
+    changes: [
+      { kind: 'fix', text: 'GPT Image 普通出图接入新的图片任务接口，修复旧接口停用导致的 410，支持 AUTO 与参考图。' },
+      { kind: 'fix', text: '保留图片任务订单用于恢复，公开接口路径不再误显示为本地路径。' },
+    ],
+  },
+  {
+    version: '5.42.2',
+    date: '2026-09-09',
+    headline: '新建图片默认 AUTO',
+    changes: [
+      { kind: 'fix', text: '支持 AUTO 的模型新建时默认自动尺寸；保留已有比例、自定义尺寸与历史任务设置。' },
+    ],
+  },
+  {
+    version: '5.42.1',
+    date: '2026-09-09',
+    headline: '补齐 Tuzi 图片 AUTO',
+    changes: [
+      { kind: 'fix', text: 'Tuzi 的 GPT Image 2、1.5、1 现可选择 AUTO 尺寸，画布、创作台和局部重绘同步支持。' },
+    ],
+  },
+  {
+    version: '5.42.0',
+    date: '2026-09-09',
+    headline: '图片尺寸模式统一',
+    changes: [
+      { kind: 'feat', text: '画布与创作台新增 AUTO 和自定义尺寸模式，按模型与渠道能力显示。' },
+      { kind: 'fix', text: '修改宽高自动切换自定义，摘要显示实际尺寸；切换模式保留自定义草稿。' },
+    ],
+  },
+  {
+    version: '5.41.1',
+    date: '2026-09-09',
+    headline: '图层素材：完整显示，按内容尺寸排列',
+    changes: [
+      { kind: 'fix', text: '修复横条、文字等矮图片被节点内部最小高度裁切，短图不再叠加尺寸标签' },
+      { kind: 'fix', text: '素材保留大小差异，宽横条跨列排列；再次展开可整理已有分组，不重复创建节点' },
+    ],
+  },
+  {
+    version: '5.41.0',
+    date: '2026-09-09',
+    headline: '图层素材：紧凑排列，编辑同步原图层',
+    changes: [
+      { kind: 'fix', text: '展开素材按比例紧凑排列，不再被大图和长条素材撑出巨大间隔' },
+      { kind: 'feat', text: '展开图片与原图层建立归属连线，编辑或替换后同步更新原图层及下载内容' },
+      { kind: 'fix', text: '重复展开定位已有分组，不再重复创建素材' },
+    ],
+  },
+  {
+    version: '5.40.0',
+    date: '2026-09-09',
+    headline: '拆分图层：打包下载，一键展开到画布',
+    changes: [
+      { kind: 'feat', text: '图层栈上方可将背景及全部图层打包下载为 ZIP，保留原图与名称' },
+      { kind: 'feat', text: '一键将全部图层展开为独立图片节点，自动排列到右侧并分组，支持整组撤销' },
+    ],
+  },
+  {
+    version: '5.39.4',
+    date: '2026-09-09',
+    headline: '首页：排除残留图片，保留成功作品',
+    changes: [
+      { kind: 'fix', text: '创作台作品展示只收录任务已登记的成功图片，不再混入无任务归属的残留文件' },
+      { kind: 'fix', text: '同批生成部分失败时，已经成功的图片仍可正常展示' },
+    ],
+  },
+  {
     version: '5.39.3',
     date: '2026-09-09',
     headline: '模型设置：补全 OpenRouter 目录，新增模型自动定位',

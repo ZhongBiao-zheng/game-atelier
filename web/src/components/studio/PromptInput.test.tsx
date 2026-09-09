@@ -3,6 +3,8 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 
 import { PromptInput, domToText, renumberMentions, serializeMentions } from './PromptInput';
 import type { KeyView } from '@/api/keys';
+import { useState } from 'react';
+import { promptFromAsset, promptVariableToken, resolvePromptVariables } from '@/lib/promptVariables';
 
 const hkKey: KeyView = {
   alias: 'hk',
@@ -36,6 +38,126 @@ describe('PromptInput 编辑区', () => {
     renderWith('gpt-image-2');
     const editor = screen.getByRole('textbox', { name: '生图 prompt' });
     expect(editor).toHaveClass('no-scrollbar', 'overflow-y-auto');
+    cleanup();
+  });
+});
+
+describe('PromptInput 行内变量', () => {
+  const template = promptFromAsset([
+    { kind: 'text', text: '以' },
+    { kind: 'variable', name: '风格', default_value: '卡通矢量' },
+    { kind: 'text', text: '处理 @图1；保持' },
+    { kind: 'variable', name: '风格', default_value: '卡通矢量' },
+  ]);
+  function Editor({ onSubmit = vi.fn(), onChange = vi.fn(), initial = template }) {
+    const [value, setValue] = useState(initial);
+    return <PromptInput onSubmit={onSubmit} providers={[hkKey]} providerAlias="hk" model="gpt-image-2"
+      value={value} onValueChange={(next) => { setValue(next); onChange(next); }} />;
+  }
+
+  it('空框只显示默认内容，可直接生成，填写后同步同名变量并覆盖默认内容', () => {
+    const onSubmit = vi.fn();
+    const onChange = vi.fn();
+    render(<Editor onSubmit={onSubmit} onChange={onChange} />);
+    const fields = screen.getAllByLabelText('变量：风格') as HTMLInputElement[];
+    expect(fields[0]).toHaveFocus();
+    expect(fields[0]).toHaveValue('');
+    expect(fields[0]).toHaveAttribute('placeholder', '卡通矢量');
+    expect(fields[0]).toHaveAttribute('aria-required', 'false');
+    const editor = screen.getByLabelText('生图 prompt');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(onSubmit.mock.lastCall![0]).toBe('以卡通矢量处理 图1；保持卡通矢量');
+    onSubmit.mockClear();
+    fireEvent.input(fields[0], { target: { value: '水彩' } });
+    expect(screen.getAllByLabelText('变量：风格')[0]).toBe(fields[0]);
+    expect(fields[1]).toHaveValue('水彩');
+    expect(resolvePromptVariables(onChange.mock.lastCall![0])).toBe('以水彩处理 @图1；保持水彩');
+    fireEvent.keyDown(fields[0], { key: 'Enter' });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(fireEvent.keyDown(fields[0], { key: 'Tab' })).toBe(true);
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(onSubmit.mock.lastCall![0]).toBe('以水彩处理 图1；保持水彩');
+    expect(resolvePromptVariables(onSubmit.mock.lastCall![1])).toBe(onSubmit.mock.lastCall![0]);
+    cleanup();
+  });
+
+  it('提交缺值时跳过已有默认内容的空框', () => {
+    const initial = promptVariableToken({ name: '风格', example: '水墨', value: '' })
+      + promptVariableToken({ name: '主体', example: '', value: '' });
+    const onSubmit = vi.fn();
+    render(<Editor initial={initial} onSubmit={onSubmit} />);
+    expect(screen.getByLabelText('变量：风格')).toHaveFocus();
+    fireEvent.keyDown(screen.getByLabelText('生图 prompt'), { key: 'Enter' });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('变量：主体')).toHaveFocus();
+    cleanup();
+  });
+
+  it.each([
+    '@[variable:damaged]',
+    promptVariableToken({ name: '内部字面量', example: '', value: '不能被展开' }),
+  ])('变量值含 token 字面量时只在冻结边界解析一次：%s', (literal) => {
+    const onSubmit = vi.fn();
+    const initial = `保留${promptVariableToken({ name: '内容', example: '', value: literal })}和 @图1`;
+    render(<Editor initial={initial} onSubmit={onSubmit} />);
+    fireEvent.keyDown(screen.getByLabelText('生图 prompt'), { key: 'Enter' });
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.lastCall![0]).toBe(`保留${literal}和 图1`);
+    expect(resolvePromptVariables(onSubmit.mock.lastCall![1])).toBe(onSubmit.mock.lastCall![0]);
+    cleanup();
+  });
+
+  it('中文组合结束才回写，原生撤销 input 事件恢复同名框而不替换正在编辑的 DOM', () => {
+    const onChange = vi.fn();
+    render(<Editor onChange={onChange} />);
+    const field = screen.getAllByLabelText('变量：风格')[0] as HTMLInputElement;
+    fireEvent.compositionStart(field);
+    fireEvent.input(field, { target: { value: '水' }, isComposing: true });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(field, { data: '水彩', target: { value: '水彩' } });
+    expect(screen.getAllByLabelText('变量：风格')[1]).toHaveValue('水彩');
+    fireEvent.input(field, { target: { value: '' }, inputType: 'historyUndo' });
+    expect(screen.getAllByLabelText('变量：风格')[0]).toBe(field);
+    expect(screen.getAllByLabelText('变量：风格')[1]).toHaveValue('');
+    cleanup();
+  });
+
+  it('草稿重建保留变量结构和值，复制正文不泄露内部编码', () => {
+    const initial = `以${promptVariableToken({ name: '风格', example: '矢量', value: '水彩' })}绘制`;
+    const { unmount } = render(<Editor initial={initial} />);
+    const saved = domToText(screen.getByLabelText('生图 prompt'));
+    unmount();
+    render(<Editor initial={saved} />);
+    expect(screen.getByLabelText('变量：风格')).toHaveValue('水彩');
+    const editor = screen.getByLabelText('生图 prompt');
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const setData = vi.fn();
+    fireEvent.copy(editor, { clipboardData: { setData } });
+    expect(setData).toHaveBeenCalledWith('text/plain', '以水彩绘制');
+    fireEvent.cut(editor, { clipboardData: { setData } });
+    expect(setData).toHaveBeenLastCalledWith('text/plain', '以水彩绘制');
+    expect(domToText(editor)).toBe('');
+    cleanup();
+  });
+
+  it('资产插入在既有光标位置生成变量框，不把编码显示成普通文字', () => {
+    const props = { onSubmit: vi.fn(), providers: [hkKey], providerAlias: 'hk', model: 'gpt-image-2', value: '前后', onValueChange: vi.fn() };
+    const { rerender } = render(<PromptInput {...props} />);
+    const editor = screen.getByLabelText('生图 prompt');
+    const range = document.createRange();
+    range.setStart(editor.firstChild!, 1);
+    range.collapse(true);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.mouseUp(editor);
+    rerender(<PromptInput {...props} insertTextRequest={{ requestId: 'variable-insert', text: template }} />);
+    expect(screen.getAllByLabelText('变量：风格')[0]).toHaveFocus();
+    expect(domToText(editor)).toBe(`前${template}后`);
+    expect(editor.textContent).not.toContain('@[variable:');
     cleanup();
   });
 });

@@ -7,12 +7,16 @@ from pathlib import Path
 
 import pytest
 from PIL import Image
+from pydantic import ValidationError
 
 from character_workflow.lib import canvas_agent_tools as tools, keys
 from character_workflow.lib.canvas_agent_schema import (
     ApplyChangesInput, CanvasListProjectsInput, CanvasProjectInput, ImportMediaInput, RunInput,
 )
-from character_workflow.lib.canvas_projects import canvas_project_dir, create_canvas_project, read_canvas_document
+from character_workflow.lib.canvas_projects import (
+    canvas_project_dir, create_canvas_project, read_canvas_document, save_canvas_document,
+)
+from character_workflow.lib.schemas import CanvasMaterialConnection
 from character_workflow.lib.private_json import read_private_json
 from character_workflow.lib.workshop import WorkshopError
 from viewer_server.server_app import build_app
@@ -64,7 +68,8 @@ def test_change_set_edits_document_at_expected_revision(canvas):
     image = next(node for node in view["nodes"] if node["id"] == "image-1")
     assert prompt["text"] == "雨夜列车"
     assert image["type"] == "image" and image["version_id"] is None
-    assert image["draft"]["prompt"] == "@[node:prompt-1]"  # connect 自动补上文本引用
+    assert image["draft"]["prompt"] == ""  # 普通生成使用全部实线，不自动改提示词。
+    assert image["draft"]["input_policy"] == "all_connected"
     assert image["draft"]["params"] == {"n": 2, "size": "1024x1024"}  # 路径类字段被丢弃
     assert view["connections"][0]["source_node_id"] == "prompt-1"
 
@@ -81,6 +86,46 @@ def test_change_set_edits_document_at_expected_revision(canvas):
     assert result["revision"] == 2 and [node.id for node in document.nodes] == ["prompt-1"]
     assert document.connections == []
     assert document.content_versions[document.nodes[0].data.current_version_id].text == "黎明列车"
+
+
+def test_agent_reads_material_edges_but_reference_updates_only_consider_inputs(canvas):
+    pid = canvas.project.project_id
+    tools.apply_changes(canvas.agent, ApplyChangesInput(
+        project_id=pid, expected_revision=0, changes=[
+            {"op": "add_surface", "node_id": node_id, "kind": "image", "title": node_id,
+             "position": {"x": index * 400, "y": 0}}
+            for index, node_id in enumerate(["source", "target"])
+        ] + [
+            {"op": "set_draft", "node_id": "target", "mode": "image",
+             "prompt": "参考 @[node:source]", "model": "gpt-image-1", "alias": "fake"},
+            {"op": "connect", "source_node_id": "source", "target_node_id": "target"},
+        ],
+    ))
+    document = read_canvas_document(pid)
+    material = CanvasMaterialConnection(
+        id="material-edge", role="material", source_node_id="source", target_node_id="target",
+    )
+    document = save_canvas_document(pid, document.model_copy(update={
+        "connections": [*document.connections, material],
+    }), document.revision)
+    view = tools.get_document(canvas.agent, CanvasProjectInput(project_id=pid))
+    assert [edge["role"] for edge in view["connections"]] == ["input", "material"]
+    tools.apply_changes(canvas.agent, ApplyChangesInput(
+        project_id=pid, expected_revision=document.revision, changes=[
+            {"op": "disconnect", "connection_id": document.connections[0].id},
+        ],
+    ))
+    disconnected = read_canvas_document(pid)
+    assert disconnected.connections == [material]
+    assert disconnected.nodes[1].data.generation_draft.prompt == "参考 "
+    tools.apply_changes(canvas.agent, ApplyChangesInput(
+        project_id=pid, expected_revision=disconnected.revision, changes=[
+            {"op": "remove_node", "node_id": "source"},
+        ],
+    ))
+    removed = read_canvas_document(pid)
+    assert removed.connections == []
+    assert removed.nodes[0].data.generation_draft == disconnected.nodes[1].data.generation_draft
 
 
 def test_import_media_copies_local_file_and_rejects_unknown_types(canvas, tmp_path, isolated_data_root, monkeypatch):
@@ -181,7 +226,7 @@ def test_draft_mode_must_match_surface_type_and_mentions_follow_connections(canv
             {"op": "set_draft", "node_id": "note", "mode": "image", "prompt": "p", "model": "gpt-image-1", "alias": "fake"},
         ]))
     assert error.value.code == "INVALID_TARGET" and "add_surface" in error.value.message
-    # 先连线再填配置，引用同样补齐；已有引用不重复。
+    # @ 仅引用已有输入，不暗中筛选或重排实线。
     result = tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=0, changes=[
         {"op": "add_text", "node_id": "p1", "title": "提示词", "text": "雨夜", "position": {"x": 0, "y": 0}},
         {"op": "add_text", "node_id": "p2", "title": "补充", "text": "列车", "position": {"x": 0, "y": 200}},
@@ -192,5 +237,83 @@ def test_draft_mode_must_match_surface_type_and_mentions_follow_connections(canv
     ]))
     view = tools.get_document(canvas.agent, CanvasProjectInput(project_id=pid))
     img = next(node for node in view["nodes"] if node["id"] == "img")
-    assert img["draft"]["prompt"] == "@[node:p1] @[node:p2] 蓝色调"
+    assert img["draft"]["prompt"] == "@[node:p2] 蓝色调"
+    assert img["draft"]["input_policy"] == "all_connected"
+    assert [edge["source_node_id"] for edge in view["connections"]] == ["p1", "p2"]
     assert result["revision"] == 1
+
+
+def test_draft_rejects_hidden_mentions_only_policy():
+    with pytest.raises(ValidationError):
+        ApplyChangesInput(project_id="canvas-test", expected_revision=0, changes=[{
+            "op": "set_draft", "node_id": "img", "mode": "image", "prompt": "p",
+            "model": "gpt-image-1", "input_policy": "mentions_only",
+        }])
+
+
+@pytest.mark.parametrize("mode, frame_mode, expected", [
+    ("image", None, ""), ("text", None, ""), ("video", "firstlast", ""),
+    ("video", "auto", "@[node:p1] @[node:p2]"),
+])
+def test_only_auto_video_adds_text_mentions_in_connection_order(canvas, mode, frame_mode, expected):
+    pid = canvas.project.project_id
+    surface = {"op": "add_surface", "node_id": "surface", "kind": mode, "title": "结果",
+               "position": {"x": 400, "y": 0}}
+    if mode == "text":
+        surface = {**surface, "op": "add_text", "text": ""}
+        del surface["kind"]
+    tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=0, changes=[
+        {"op": "add_text", "node_id": "p1", "title": "甲", "text": "A", "position": {"x": 0, "y": 0}},
+        {"op": "add_text", "node_id": "p2", "title": "乙", "text": "B", "position": {"x": 0, "y": 200}},
+        surface,
+        {"op": "connect", "source_node_id": "p1", "target_node_id": "surface"},
+        {"op": "connect", "source_node_id": "p2", "target_node_id": "surface"},
+        {"op": "set_draft", "node_id": "surface", "mode": mode, "prompt": "", "model": "test-model",
+         "params": {"frame_mode": frame_mode} if frame_mode else {}},
+    ]))
+    document = read_canvas_document(pid)
+    assert document.nodes[-1].data.generation_draft.prompt == expected
+    assert [edge.source_node_id for edge in document.connections] == ["p1", "p2"]
+
+
+@pytest.mark.parametrize("remove_op", ["disconnect", "remove_node"])
+def test_removing_source_cleans_mentions_and_keeps_remaining_input_and_history(canvas, remove_op):
+    pid = canvas.project.project_id
+    tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=0, changes=[
+        {"op": "add_text", "node_id": "p1", "title": "甲", "text": "A", "position": {"x": 0, "y": 0}},
+        {"op": "add_text", "node_id": "p2", "title": "乙", "text": "B", "position": {"x": 0, "y": 200}},
+        {"op": "add_surface", "node_id": "surface", "kind": "image", "title": "结果", "position": {"x": 400, "y": 0}},
+        {"op": "connect", "source_node_id": "p1", "target_node_id": "surface"},
+        {"op": "connect", "source_node_id": "p2", "target_node_id": "surface"},
+        {"op": "set_draft", "node_id": "surface", "mode": "image", "prompt": "@[node:p1] @[node:p2] @[node:p1]",
+         "model": "test-model"},
+    ]))
+    before = read_canvas_document(pid)
+    change = ({"op": "disconnect", "connection_id": before.connections[0].id}
+              if remove_op == "disconnect" else {"op": "remove_node", "node_id": "p1"})
+    tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=1, changes=[change]))
+    after = read_canvas_document(pid)
+    assert after.nodes[-1].data.generation_draft.prompt == " @[node:p2] "
+    assert [edge.source_node_id for edge in after.connections] == ["p2"]
+    assert after.content_versions == before.content_versions
+    tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=2, changes=[
+        {"op": "disconnect", "connection_id": after.connections[0].id},
+    ]))
+    assert read_canvas_document(pid).nodes[-1].data.generation_draft.prompt == ""
+
+
+def test_disconnect_reconnect_same_transaction_keeps_reference(canvas):
+    pid = canvas.project.project_id
+    tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=0, changes=[
+        {"op": "add_text", "node_id": "p1", "title": "甲", "text": "A", "position": {"x": 0, "y": 0}},
+        {"op": "add_surface", "node_id": "surface", "kind": "image", "title": "结果", "position": {"x": 400, "y": 0}},
+        {"op": "connect", "source_node_id": "p1", "target_node_id": "surface"},
+        {"op": "set_draft", "node_id": "surface", "mode": "image", "prompt": "@[node:p1] 保留",
+         "model": "test-model"},
+    ]))
+    before = read_canvas_document(pid)
+    tools.apply_changes(canvas.agent, ApplyChangesInput(project_id=pid, expected_revision=1, changes=[
+        {"op": "disconnect", "connection_id": before.connections[0].id},
+        {"op": "connect", "source_node_id": "p1", "target_node_id": "surface"},
+    ]))
+    assert read_canvas_document(pid).nodes[-1].data.generation_draft.prompt == "@[node:p1] 保留"

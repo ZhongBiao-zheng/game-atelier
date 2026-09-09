@@ -23,6 +23,7 @@ EXCLUDED_TOP_LEVEL = {
     ".pytest_cache",
     ".ruff_cache",
     ".runtime",
+    ".scratch",  # Local QA/spec artifacts are git-ignored and never shipped.
     ".venv",
     "archive",
     "characters",

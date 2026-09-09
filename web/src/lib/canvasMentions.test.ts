@@ -16,7 +16,7 @@ const now = '2026-08-25T00:00:00Z';
 const draft = {
   mode: 'image' as const,
   prompt: '',
-  input_policy: 'mentions_only' as const,
+  input_policy: 'all_connected' as const,
   model: 'gpt-image-2',
   alias: 'openai',
   params: {},
@@ -58,6 +58,18 @@ const versions: Record<string, CanvasContentVersion> = {
 };
 
 describe('Canvas connected mentions', () => {
+  it('uses only direct input material and never traces a material association back to the original', () => {
+    const original = contentNode('original', 'image', 'version-image-a');
+    const processed = contentNode('processed', 'image', 'version-image-b');
+    const connections: CanvasConnection[] = [
+      { id: 'material', role: 'material', source_node_id: original.id, target_node_id: processed.id },
+      { id: 'input', role: 'input', source_node_id: processed.id, target_node_id: config.id },
+    ];
+    expect(buildCanvasMentionReferences('canvas-test', processed, [original, processed, config], connections, versions)).toEqual([]);
+    expect(buildCanvasMentionReferences('canvas-test', config, [original, processed, config], connections, versions)).toEqual([
+      expect.objectContaining({ nodeId: processed.id, versionId: 'version-image-b', label: '图片1' }),
+    ]);
+  });
   it('lists every canvas material with a valid current content version', () => {
     const nodes = [
       contentNode('image-a', 'image', 'version-image-a'),
@@ -96,10 +108,6 @@ describe('Canvas connected mentions', () => {
       { id: 'e2', role: 'input', source_node_id: 'empty-video', target_node_id: 'config' },
       { id: 'e3', role: 'input', source_node_id: 'text-a', target_node_id: 'config' },
       { id: 'e4', role: 'input', source_node_id: 'image-b', target_node_id: 'config' },
-      {
-        id: 'history', role: 'derivation', source_node_id: 'image-b', target_node_id: 'config',
-        origin: { kind: 'generation_run', run_id: 'old-run' },
-      },
     ];
 
     expect(buildCanvasMentionReferences('canvas-test', config, nodes, connections, versions)).toEqual([
@@ -117,7 +125,7 @@ describe('Canvas connected mentions', () => {
     }])).toEqual(['missing']);
   });
 
-  it('reserves the implicit self label and keeps connected inputs for existing video edits', () => {
+  it('never counts existing output as input and labels explicit references from one', () => {
     const existingImage = contentNode('surface-image', 'image', 'version-image-a');
     if (existingImage.type !== 'image') throw new Error('expected image node');
     existingImage.data.generation_draft = draft;
@@ -127,7 +135,7 @@ describe('Canvas connected mentions', () => {
     }];
     expect(buildCanvasMentionReferences(
       'canvas-test', existingImage, [existingImage, imageSource], imageConnections, versions,
-    )[0]).toEqual(expect.objectContaining({ nodeId: imageSource.id, label: '图片2' }));
+    )[0]).toEqual(expect.objectContaining({ nodeId: imageSource.id, label: '图片1' }));
 
     const existingVideo = contentNode('surface-video', 'video', 'version-video');
     if (existingVideo.type !== 'video') throw new Error('expected video node');
