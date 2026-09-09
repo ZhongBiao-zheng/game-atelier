@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.43.1',
+    date: '2026-09-09',
+    headline: '修复图片任务长时间挂起',
+    changes: [
+      { kind: 'fix', text: 'Tuzi 图片查询超时后，画布结束本地等待并保留订单号，不再一直显示生成中。' },
+      { kind: 'fix', text: '查询异常时停止剩余候选，保留已完成素材，避免继续提交新任务。' },
+    ],
+  },
+  {
     version: '5.43.0',
     date: '2026-09-09',
     headline: '提示词行内填写变量',

@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
+from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
 from character_workflow.lib.canvas_projects import (
     canvas_node_has_pending_run,
     canvas_project_dir,
@@ -2353,6 +2354,8 @@ def _settle_pending_canvas_candidates(
             context = job.canvas_run
             if context is None:
                 raise ValueError("canvas job is missing run context")
+            if job.cancel_requested_at is not None:
+                candidate_status = "canceled"
             candidates = [
                 candidate.model_copy(update={"status": candidate_status, "error": error})
                 if candidate.status == "pending" else candidate
@@ -2362,6 +2365,7 @@ def _settle_pending_canvas_candidates(
             updated = job.model_copy(update={
                 "status": status,
                 "error": aggregate_error or error,
+                "params": job.params.model_copy(update={"n": len(candidates)}),
                 "progress_phase": None,
                 "completed_at": _now(),
                 "canvas_run": context.model_copy(update={"candidates": candidates}),
@@ -2431,6 +2435,8 @@ def _run_canvas_candidates_incrementally(job: Job) -> Job:
             # Another process owns this exact paid attempt. Leave the shared Job untouched;
             # the lock owner will commit the candidate when it finishes.
             return read_job(job.job_id)
+        except TuziAsyncPendingError:
+            raise
         except Exception:
             attempt = read_job(job.job_id)
             attempt_error = attempt.error
@@ -2874,13 +2880,18 @@ def run_canvas_job(job_id: str) -> Job:
             return canceled
         job = job.model_copy(update={"runner_started_at": _now()})
         write_job_under_lock(job)
-    if _uses_incremental_candidates(job):
-        return _run_canvas_candidates_incrementally(job)
     try:
+        if _uses_incremental_candidates(job):
+            return _run_canvas_candidates_incrementally(job)
         run_job(job_id)
     except JobExecutionBusy:
         # A duplicate scheduler must never mark the lock owner's in-flight Job as failed.
         return read_job(job_id)
+    except TuziAsyncPendingError as error:
+        return _fail_pending_canvas_candidates(
+            job.canvas_project_id, job_id,
+            f"已停止本地等待：{error}。请核对厂商订单，重新生成可能重复计费。",
+        )
     except Exception as error:
         latest = read_job(job_id)
         if latest.status not in {

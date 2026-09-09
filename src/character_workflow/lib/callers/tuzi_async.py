@@ -26,6 +26,7 @@ _SUCCESS = frozenset({"completed", "success", "succeeded", "done"})
 _FAILURE = frozenset({"failure", "failed", "error", "expired", "cancelled", "canceled"})
 _PENDING = frozenset({"queued", "not_start", "submitted", "in_progress", "processing", "pending"})
 _POLL_TIMEOUT_SECONDS = 30
+_POLL_WINDOW_SECONDS = 10 * 60
 IMAGE_TASK_MODELS = frozenset({"gpt-image-2", "gpt-image-2-vip", "gpt-image-1.5", "gpt-image-1"})
 TASK_PROTOCOL = "tuzi_images"
 
@@ -111,6 +112,7 @@ def _execute(
     if on_phase:
         on_phase("sent")
 
+    status = ""
     for response in video_poll.poll_responses(
         url=_poll_url(url, current),
         headers=headers,
@@ -120,6 +122,7 @@ def _execute(
         task_ref=current,
         error_cls=TuziAsyncPendingError,
         should_cancel=should_cancel,
+        max_elapsed_seconds=_POLL_WINDOW_SECONDS,
     ):
         payload = _json(response)
         if not 200 <= int(response.status_code) < 300:
@@ -145,7 +148,10 @@ def _execute(
                 )
             )
     raise TuziAsyncPendingError(
-        video_poll.with_task_ref("Tuzi 异步任务轮询超时，任务可能仍在厂商侧运行", current)
+        video_poll.with_task_ref(
+            f"Tuzi 图片查询超时，厂商最后状态：{status or '未取得'}；任务可能仍在厂商侧运行",
+            current,
+        )
     )
 
 

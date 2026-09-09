@@ -92,6 +92,25 @@ def test_pending_and_cancel_preserve_order_without_resubmit(monkeypatch):
                                 task_id="paid-1", should_cancel=lambda: True)
 
 
+@pytest.mark.parametrize("transient", [False, True])
+def test_poll_wall_clock_budget_includes_slow_and_transient_requests(monkeypatch, transient):
+    clock = [0.0]
+    calls = []
+    monkeypatch.setattr(tuzi_async.video_poll.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(tuzi_async.requests, "post", lambda *a, **k: pytest.fail("paid POST"))
+
+    def get(*args, **kwargs):
+        calls.append(kwargs["timeout"])
+        clock[0] += 200
+        return Response(503) if transient else Response(status="queued", progress=0)
+
+    monkeypatch.setattr(tuzi_async.requests, "get", get)
+    with pytest.raises(tuzi_async.TuziAsyncPendingError, match="paid-1"):
+        tuzi_async.execute_json(url="https://api.tu-zi.com", api_key="test", payload={},
+                                task_id="paid-1", poll_interval=0)
+    assert len(calls) == 3
+
+
 @pytest.mark.parametrize("response,match", [
     (Response(410, error={"message": "retired; please use /v1/videos"}), "HTTP 410"),
     (Response(id="x" * 513), "任务 ID 过长"),

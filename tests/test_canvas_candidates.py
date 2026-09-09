@@ -223,6 +223,59 @@ def test_text_batches_keep_the_existing_single_provider_request_path():
     assert canvas_runs._uses_incremental_candidates(job) is False
 
 
+@pytest.mark.parametrize("count,has_success", [(1, False), (3, False), (3, True)])
+def test_tuzi_poll_abandon_settles_canvas_without_rebilling(monkeypatch, count, has_success):
+    from character_workflow.lib import job_runner
+    from character_workflow.lib.callers.tuzi_async import TuziAsyncPendingError
+
+    run_id = "run-tuzi-poll-abandon"
+    project, _, primary = _project_with_result_node(
+        primary_version_id="existing" if has_success else None, active_run_id=run_id,
+    )
+    candidates = [CanvasResultCandidate(
+        candidate_id=f"candidate-{i}", index=i,
+        status="succeeded" if has_success and i == 0 else "pending",
+        version_id=primary if has_success and i == 0 else None,
+    ) for i in range(count)]
+    job = _job(project.project_id, run_id, candidates)
+    save_job(job)
+    calls = []
+
+    def dispatch(**kwargs):
+        calls.append(1)
+        kwargs["params"].update(provider_task_protocol="tuzi_images", provider_task_ids=["paid-1"])
+        kwargs["on_params_changed"]()
+        raise TuziAsyncPendingError("轮询超时（task_id=paid-1）")
+
+    monkeypatch.setattr(job_runner, "dispatch", dispatch)
+    result = run_canvas_job(job.job_id)
+    assert calls == [1]
+    assert result.status == (JobStatus.PARTIAL if has_success else JobStatus.FAILED)
+    assert result.completed_at and result.progress_phase is None
+    assert result.params.n == count
+    assert result.params.provider_task_ids == ["paid-1"]
+    assert result.params.provider_task_protocol == "tuzi_images"
+    failed = [c for c in result.canvas_run.candidates if c.status == "failed"]
+    assert len(failed) == count - int(has_success)
+    assert all("paid-1" in c.error and "本地等待" in c.error for c in failed)
+    if has_success:
+        assert result.canvas_run.candidates[0].version_id == primary
+    assert read_job(job.job_id) == result
+
+
+def test_cancel_wins_when_canvas_poll_failure_is_settled():
+    run_id = "run-cancel-at-poll-end"
+    project, _, _ = _project_with_result_node(primary_version_id=None, active_run_id=run_id)
+    job = _job(project.project_id, run_id, [CanvasResultCandidate(
+        candidate_id="candidate-0", index=0, status="pending",
+    )])
+    save_job(job)
+    request_canvas_run_cancel(project.project_id, run_id)
+    result = canvas_runs._fail_pending_canvas_candidates(project.project_id, job.job_id, "超时")
+    assert result.status == JobStatus.CANCELED
+    assert result.canvas_run.candidates[0].status == "canceled"
+
+
 def test_duplicate_incremental_runner_does_not_fail_owned_candidate(monkeypatch):
     run_id = "run-busy-incremental"
     project, _document, _primary = _project_with_result_node(

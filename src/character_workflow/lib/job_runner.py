@@ -584,6 +584,10 @@ def _run_job_claimed(
         # polling as a normal resumable outcome; bubbling an exception would make outer background
         # guards overwrite PENDING with FAILED.
         if provider_task_pending:
+            if job.namespace == "canvas":
+                # Canvas has no recovery waiter. Its owner must settle candidates instead of
+                # leaving an unowned PENDING Job or treating the next slot as a fresh submission.
+                raise
             return saved
         if isinstance(e, JobRunnerError):
             raise

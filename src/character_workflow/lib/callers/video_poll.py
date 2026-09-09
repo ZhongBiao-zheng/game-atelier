@@ -83,25 +83,34 @@ def poll_responses(
     task_ref: str,
     error_cls: type[Exception],
     should_cancel: Callable[[], bool] | None = None,
+    max_elapsed_seconds: float | None = None,
 ) -> Iterator[Any]:
     """按 poll_interval 节奏轮询 GET，逐次 yield「值得解读」的响应。
 
     可恢复失败（网络异常 / 5xx / 408 / 429）在内部吞掉重试：不 yield，也不扣
     max_polls。只有连续失败到超出容忍窗口才抛 error_cls，且消息里必带 task_ref。
     生成器正常耗尽 = 真的问了 max_polls 次仍无终态，由调用方按自己的文案报超时。
+    指定 max_elapsed_seconds 时，等待和请求同计墙钟预算，到期也正常耗尽；既有视频调用不启用。
     """
     limit = _transient_limit(poll_interval)
     consecutive = 0
     polls_left = max_polls
+    deadline = time.monotonic() + max_elapsed_seconds if max_elapsed_seconds is not None else None
     while polls_left > 0:
         if should_cancel and should_cancel():
             raise error_cls(with_task_ref("生成已按请求停止", task_ref))
+        if deadline is not None and time.monotonic() >= deadline:
+            return
         if poll_interval:
-            time.sleep(poll_interval)
+            time.sleep(min(poll_interval, max(0, deadline - time.monotonic()))
+                       if deadline is not None else poll_interval)
         if should_cancel and should_cancel():
             raise error_cls(with_task_ref("生成已按请求停止", task_ref))
+        remaining = deadline - time.monotonic() if deadline is not None else timeout
+        if remaining <= 0:
+            return
         try:
-            resp = requests.get(url, headers=headers, timeout=timeout)
+            resp = requests.get(url, headers=headers, timeout=min(timeout, remaining))
         except requests.RequestException as e:
             consecutive += 1
             if consecutive >= limit:
