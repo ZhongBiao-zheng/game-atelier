@@ -8,6 +8,7 @@ import {
   canvasPendingInputNodes,
   clampCanvasNodeSize,
   expandCanvasLayerStack,
+  layerMaterialDisplaySize,
   normalizeCanvasGroups,
   layerStackSizeForCanvasVersion,
   normalizeCanvasImageParams,
@@ -56,6 +57,11 @@ it('expands every layer into compact owned material views and reuses the existin
   const repeated = expandCanvasLayerStack(normalized, stack.id, prefix => `${prefix}-${++sequence}`);
   expect(repeated.nodes).toEqual([]);
   expect(repeated.groupId).toBe(group.id);
+  const stale = { ...normalized, nodes: normalized.nodes.map(node => node.id === images[0].id
+    ? { ...node, size: { width: 280, height: 560 } } : node) };
+  const reflowed = expandCanvasLayerStack(stale, stack.id, () => { throw new Error('must reuse IDs'); });
+  expect(reflowed.groupId).toBe(group.id);
+  expect(reflowed.nodes.filter(node => node.type === 'image').map(node => node.id)).toEqual(images.map(node => node.id));
   const edited = { ...normalized, content_versions: { ...normalized.content_versions,
     edited: { ...version, version_id: 'edited', width: 2800, height: 28 } },
   nodes: normalized.nodes.map(node => node.id === images[1].id && node.type === 'image'
@@ -64,9 +70,23 @@ it('expands every layer into compact owned material views and reuses the existin
   expect(synced.nodes.find(node => node.id === stack.id)).toMatchObject({ data: { layers: [{
     version_id: 'edited', name: '新标题', visible: false, bounding_box: stack.data.layers[0].bounding_box,
   }] } });
-  expect(synced.nodes.find(node => node.id === images[1].id)?.size?.width).toBe(280);
-  expect(synced.nodes.find(node => node.id === images[1].id)?.size?.height).toBeCloseTo(2.8);
+  expect(synced.nodes.find(node => node.id === images[1].id)?.size?.width).toBe(images[1].size!.width);
+  expect(synced.nodes.find(node => node.id === images[1].id)?.size?.height).toBeCloseTo(Math.max(1, images[1].size!.width / 100));
   expect(syncLayerMaterials(synced)).toBe(synced);
+  const wide = expandCanvasLayerStack(synced, stack.id, () => { throw new Error('must reuse IDs'); });
+  const wideImages = wide.nodes.filter(node => node.type === 'image');
+  expect(wideImages[1].size!.width).toBeCloseTo(920);
+  for (const [index, image] of wideImages.entries()) {
+    for (const other of wideImages.slice(index + 1)) {
+      expect(image.position.x + image.size!.width + 40 <= other.position.x
+        || other.position.x + other.size!.width + 40 <= image.position.x
+        || image.position.y + image.size!.height + 48 <= other.position.y
+        || other.position.y + other.size!.height + 48 <= image.position.y).toBe(true);
+    }
+  }
+  const wideDocument = normalizeCanvasGroups({ ...synced, nodes: [wide.stack, occupied, ...wide.nodes] });
+  expect(expandCanvasLayerStack(wideDocument, stack.id, () => 'unused').nodes).toEqual([]);
+  expect(wideImages[1].data.current_version_id).toBe('edited');
   const removed = syncLayerMaterials({ ...synced, nodes: synced.nodes.filter(node => node.id !== images[1].id) });
   expect(removed.nodes.find(node => node.id === stack.id)).toMatchObject({ data: { layers: [{
     material_node_id: null, version_id: 'edited', name: '新标题',
@@ -80,6 +100,19 @@ it('expands every layer into compact owned material views and reuses the existin
 it('raises selected nodes above every persisted canvas layer without changing other nodes', () => {
   expect(canvasNodeRenderZIndex(3, false, 12)).toBe(3);
   expect(canvasNodeRenderZIndex(3, true, 12)).toBe(13);
+});
+
+it('keeps icons smaller than characters and gives wide text a readable multi-column size', () => {
+  const icon = layerMaterialDisplaySize({ width: 565, height: 562 });
+  const character = layerMaterialDisplaySize({ width: 806, height: 766 });
+  expect(icon.width).toBeLessThan(character.width);
+  expect(layerMaterialDisplaySize({ width: 32, height: 32 })).toEqual({ width: 32, height: 32 });
+  for (const [width, height] of [[822, 244], [811, 207], [947, 345], [1021, 315], [1261, 137], [1361, 55]]) {
+    const size = layerMaterialDisplaySize({ width, height });
+    expect(size.width / size.height).toBeCloseTo(width / height);
+    expect(size.width).toBeLessThanOrEqual(920);
+    expect(size.height).toBeGreaterThanOrEqual(37);
+  }
 });
 
 it('normalizes model-specific image parameters when switching models', () => {

@@ -243,7 +243,15 @@ export function syncLayerMaterials(document: CanvasDocument): CanvasDocument {
   return changed ? { ...document, nodes } : document;
 }
 
-/** Expose owned material views. Repeated expansion selects the existing group. */
+/** Keep relative scale for ordinary assets; wide strips may span up to three columns. */
+export function layerMaterialDisplaySize(version: Pick<CanvasMediaVersion, 'width' | 'height'>): CanvasSize {
+  const width = version.width || 280;
+  const height = version.height || 280;
+  const scale = Math.min(1, Math.max(1 / 3, 48 / Math.min(width, height)), 920 / width, 280 / height);
+  return { width: Math.max(1, width * scale), height: Math.max(1, height * scale) };
+}
+
+/** Expose owned material views. Repeated expansion reflows the same nodes and group. */
 export function expandCanvasLayerStack(
   document: CanvasDocument,
   nodeId: string,
@@ -260,9 +268,7 @@ export function expandCanvasLayerStack(
   const images: CanvasImageNode[] = entries.map(entry => {
     const version = document.content_versions[entry.versionId];
     if (version?.kind !== 'image') throw new Error('图层图片不可用，未展开');
-    const scale = 280 / Math.max(version.width || 280, version.height || 280);
-    const size = { width: Math.max(1, Math.round((version.width || 280) * scale)),
-      height: Math.max(1, Math.round((version.height || 280) * scale)) };
+    const size = layerMaterialDisplaySize(version);
     const existing = document.nodes.find(node => node.id === entry.nodeId);
     if (existing?.type === 'image') return { ...existing, size };
     return {
@@ -273,6 +279,7 @@ export function expandCanvasLayerStack(
     };
   });
   const existingGroup = document.nodes.find(node => node.type === 'group'
+    && node.data.member_node_ids.length === images.length
     && images.every(image => node.data.member_node_ids.includes(image.id)));
   const updatedStack = { ...stack, data: { ...stack.data, base_material_node_id: images[0].id,
     layout_size: stack.data.layout_size ?? {
@@ -280,20 +287,23 @@ export function expandCanvasLayerStack(
       height: (document.content_versions[stack.data.base_version_id] as CanvasMediaVersion).height || 1,
     },
     layers: stack.data.layers.map((layer, index) => ({ ...layer, material_node_id: images[index + 1].id })) } };
-  if (existingGroup) return { nodes: [], groupId: existingGroup.id, stack: updatedStack };
-  const columns = Math.min(4, Math.ceil(Math.sqrt(images.length)));
+  const spans = images.map(image => Math.ceil((image.size!.width + 40) / 320));
+  const columns = Math.max(...spans, Math.min(4, Math.ceil(Math.sqrt(images.length))));
   const heights = Array.from({ length: columns }, () => 40);
-  const positions = images.map((image) => {
-    const column = heights.indexOf(Math.min(...heights));
-    const position = { x: 24 + column * 320, y: heights[column] };
-    heights[column] += image.size!.height + 48;
+  const positions = images.map((image, index) => {
+    const span = spans[index];
+    const slots = Array.from({ length: columns - span + 1 }, (_, column) =>
+      Math.max(...heights.slice(column, column + span)));
+    const column = slots.indexOf(Math.min(...slots));
+    const position = { x: 24 + column * 320, y: slots[column] };
+    heights.fill(position.y + image.size!.height + 48, column, column + span);
     return position;
   });
-  const groupWidth = columns * 320 + 8;
+  const groupWidth = Math.max(...images.map((image, index) => positions[index].x + image.size!.width)) + 24;
   const groupHeight = Math.max(...heights) - 24;
-  let left = stack.position.x + canvasNodeRenderedSize(stack, document.content_versions).width + 72;
-  const top = stack.position.y;
-  // Only shift the new group rightward; never rearrange the existing canvas or drift left of the stack.
+  let left = existingGroup?.position.x ?? stack.position.x + canvasNodeRenderedSize(stack, document.content_versions).width + 72;
+  const top = existingGroup?.position.y ?? stack.position.y;
+  // Reflow only these owned views; avoid other canvas content without moving it.
   const memberIds = new Set(images.map(image => image.id));
   for (const occupied of [...document.nodes].filter(node => !memberIds.has(node.id)
     && !(node.type === 'group' && node.data.member_node_ids.every(id => memberIds.has(id))))
@@ -307,11 +317,19 @@ export function expandCanvasLayerStack(
   const placed = images.map((node, index) => ({ ...node,
     position: { x: left + positions[index].x, y: top + positions[index].y } }));
   const group: CanvasGroupNode = {
-    id: makeId('group'), type: 'group', title: `${stack.title} · 图层`,
-    position: { x: left, y: top }, size: { width: groupWidth, height: groupHeight }, z_index: 0,
-    data: { member_node_ids: images.map(node => node.id), repeat_count: 1 },
+    id: existingGroup?.id ?? makeId('group'), type: 'group', title: existingGroup?.title ?? `${stack.title} · 图层`,
+    position: { x: left, y: top }, size: { width: groupWidth, height: groupHeight }, z_index: existingGroup?.z_index ?? 0,
+    data: { member_node_ids: images.map(node => node.id), repeat_count: existingGroup?.type === 'group' ? existingGroup.data.repeat_count : 1 },
   };
-  return { nodes: [...placed, group], groupId: group.id, stack: updatedStack };
+  const arranged = [...placed, group];
+  if (existingGroup && arranged.every(node => {
+    const previous = document.nodes.find(item => item.id === node.id);
+    return previous && Math.abs(previous.position.x - node.position.x) < 0.01
+      && Math.abs(previous.position.y - node.position.y) < 0.01
+      && Math.abs((previous.size?.width ?? 0) - node.size!.width) < 0.01
+      && Math.abs((previous.size?.height ?? 0) - node.size!.height) < 0.01;
+  })) return { nodes: [], groupId: group.id, stack: updatedStack };
+  return { nodes: arranged, groupId: group.id, stack: updatedStack };
 }
 
 /** 从期望位置开始，按网格圈由内向外找一个不与现有节点重叠的点。

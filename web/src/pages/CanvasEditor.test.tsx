@@ -397,6 +397,23 @@ function lastSavedDocument() {
   return vi.mocked(saveCanvasDocument).mock.calls.at(-1)?.[1];
 }
 
+it('does not force a minimum preview height or overlay metadata on a short populated image', async () => {
+  const source = { ...imageNode('strip', '说明文字'), size: { width: 280, height: 11.315209404849375 },
+    data: { ...imageNode('strip', '说明文字').data, current_version_id: 'strip-version' } };
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [source], content_versions: {
+    'strip-version': { version_id: 'strip-version', kind: 'image', path: 'uploads/strip.png',
+      mime_type: 'image/png', bytes: 400, width: 1361, height: 55,
+      created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64), origin: { kind: 'upload', upload_id: 'strip' } },
+  } }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'flow-node-strip' }));
+  const image = await screen.findByRole('img', { name: '说明文字' });
+  expect(image).toHaveClass('object-contain', 'block');
+  expect(image.parentElement).toHaveClass('h-full', 'min-h-0');
+  expect(image.parentElement).not.toHaveClass('min-h-44');
+  expect(within(image.closest('article')!).queryByText(/1361 × 55/)).not.toBeInTheDocument();
+});
+
 it('creates an editable layer-decomposition node before calling the model', async () => {
   const source = {
     ...imageNode('source-image', '源图'),

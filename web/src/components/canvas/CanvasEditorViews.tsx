@@ -700,7 +700,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
             {canvasNodeRunDisplayError(context.mediaReplaceError.message, '替换失败，请稍后重试')}
           </p>
         )}
-        <div className={cn('h-full bg-secondary/20', node.type === 'text' ? 'min-h-32' : 'min-h-44')}>
+        <div className={cn('h-full bg-secondary/20', node.type === 'text' ? 'min-h-32'
+          : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44')}>
           {node.type === 'text' && (
             isEditingText ? (
               <textarea
@@ -777,7 +778,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               {replacingMedia ? '替换中' : '替换'}
             </Button>
           )}
-          {node.type === 'image' && content?.kind === 'image' && context.showImageInfo && (
+          {node.type === 'image' && content?.kind === 'image' && context.showImageInfo
+            && (node.size?.height ?? 176) >= 96 && (node.size?.width ?? 320) >= 160 && (
             <span className="pointer-events-none absolute bottom-3 right-3 z-10 max-w-[calc(100%-1.5rem)] truncate rounded-md border border-border bg-glass px-2 py-1 text-xs font-medium tabular-nums text-foreground backdrop-blur-glass">
               {formatCanvasImageInfo(content)}
             </span>
@@ -3289,7 +3291,7 @@ function MediaPreview({
       decoding="async"
       draggable={false}
       className={cn(
-        'size-full select-none',
+        'block size-full select-none',
         freeResize ? 'object-fill' : fit === 'cover' ? 'object-cover' : 'object-contain',
         compact && 'max-h-48 rounded-md',
       )}
