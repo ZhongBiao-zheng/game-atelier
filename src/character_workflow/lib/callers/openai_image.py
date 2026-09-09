@@ -143,7 +143,7 @@ def render(
         and _effective_image_protocol(key, model) in {None, "openai"}
         # Tuzi's native GPT2 AUTO tasks can stay queued indefinitely; Images AUTO is verified.
         # Existing paid tasks retain their original protocol and are only polled, never resubmitted.
-        and (model != "gpt-image-2" or requested_size != "auto" or has_native_order)
+        and (not _is_tuzi_gpt2_auto(base_url, model, requested_size) or has_native_order)
     )
     requested = max(1, int(n or 1))
     if params and params.get("provider_task_ids"):
@@ -512,8 +512,7 @@ def _post_multipart(
         if resp.status_code >= 400:
             err = OpenAIImageError(f"image edits api {resp.status_code}: {resp.text[:500]}")
             if (_is_retryable(resp.status_code, resp.text) and attempt < 2
-                    and not (_is_tuzi_gateway(url) and fields.get("model") == "gpt-image-2"
-                             and fields.get("size") == "auto")):
+                    and not _is_tuzi_gpt2_auto(url, fields.get("model"), fields.get("size"))):
                 time.sleep(1 + attempt)
                 continue
             raise err
@@ -528,6 +527,11 @@ def _is_retryable(status_code: int, body: str) -> bool:
         return False
     low = (body or "").lower()
     return not any(marker in low for marker in _FATAL_BODY_MARKERS)
+
+
+def _is_tuzi_gpt2_auto(url: str, model: object, size: object) -> bool:
+    """The verified AUTO Images route must not rebill after an ambiguous gateway failure."""
+    return _is_tuzi_gateway(url) and model == "gpt-image-2" and size == "auto"
 
 
 def _chat_image_url(base_url: str) -> str:
@@ -787,8 +791,7 @@ def _post_json(url: str, api_key: str, payload: dict, *, timeout: float | tuple[
                 err = OpenAIImageError(f"image api {resp.status_code}: {resp.text[:500]}")
                 # 瞬时网关错误复用网络异常那套退避重试（continue 进下一轮）；其余当场抛。
                 if (_is_retryable(resp.status_code, resp.text) and attempt < 2
-                        and not (_is_tuzi_gateway(url) and payload.get("model") == "gpt-image-2"
-                                 and payload.get("size") == "auto")):
+                        and not _is_tuzi_gpt2_auto(url, payload.get("model"), payload.get("size"))):
                     time.sleep(1 + attempt)
                     continue
                 raise err
