@@ -27,6 +27,16 @@ function placeCaretAtEnd(element: HTMLElement) {
 }
 
 describe('CanvasPromptInput', () => {
+  it('uses the same whitespace predicate for focus selection without retrying animation frames', () => {
+    const frame = vi.spyOn(window, 'requestAnimationFrame');
+    const value = promptVariableToken({ name: '风格', example: '水墨', value: '\u0085' })
+      + promptVariableToken({ name: '主体', example: '建筑', value: '' });
+    try {
+      render(<CanvasPromptInput value={value} references={[]} onChange={vi.fn()} />);
+      expect(screen.getByLabelText('变量：风格')).toHaveFocus();
+      expect(frame).not.toHaveBeenCalled();
+    } finally { frame.mockRestore(); }
+  });
   it('honors an insertion focus request arriving after the text node has mounted', () => {
     const value = promptVariableToken({ name: '主体', example: '猫', value: '' });
     const props = { value, references: [], onChange: vi.fn() };

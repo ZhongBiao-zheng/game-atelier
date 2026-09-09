@@ -10,7 +10,7 @@ import {
 import { createPortal } from 'react-dom';
 import { FileAudio, FileImage, FileText, FileVideo } from 'lucide-react';
 import { focusEmptyVariable, syncVariableInput, variableInput, variablePromptNodes } from '@/lib/promptVariableEditor';
-import { readablePromptVariables } from '@/lib/promptVariables';
+import { hasPromptVariableContent, readablePromptVariables } from '@/lib/promptVariables';
 
 import {
   canvasMentionMatches,
@@ -117,7 +117,7 @@ export function CanvasPromptInput({
     let frame: number | undefined;
     const focusWhenVisible = () => {
       const empty = [...editor.querySelectorAll<HTMLInputElement>('input[data-variable-name]')]
-        .find(input => !input.value.trim());
+        .find(input => !hasPromptVariableContent(input.value));
       if (!empty) return;
       focusEmptyVariable(editor);
       if (document.activeElement !== empty) frame = requestAnimationFrame(focusWhenVisible);
