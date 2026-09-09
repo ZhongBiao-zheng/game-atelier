@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.42.0',
+    date: '2026-09-09',
+    headline: '图片尺寸模式统一',
+    changes: [
+      { kind: 'feat', text: '画布与创作台新增 AUTO 和自定义尺寸模式，按模型与渠道能力显示。' },
+      { kind: 'fix', text: '修改宽高自动切换自定义，摘要显示实际尺寸；切换模式保留自定义草稿。' },
+    ],
+  },
+  {
     version: '5.41.1',
     date: '2026-09-09',
     headline: '图层素材：完整显示，按内容尺寸排列',

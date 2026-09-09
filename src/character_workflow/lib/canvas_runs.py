@@ -526,6 +526,14 @@ def _normalized_image_preference_params(
         normalize_image_pixel_size,
         normalized_model_id,
     )
+    from character_workflow.lib.image_size import normalize_image_size_params
+
+    if params.get("size_mode") in {"auto", "custom"}:
+        draft_params = normalize_image_size_params(key, model.id, params)
+        for field in ("ratio", "resolution", "custom_size"):
+            if params.get(field) is not None:
+                draft_params[field] = params[field]
+        return JobParams.model_validate(draft_params)
 
     family = image_family(model.id)
     ratios = {
@@ -537,6 +545,10 @@ def _normalized_image_preference_params(
         ratio = "1:1"
     count = 4 if family == "midjourney" else max(1, min(4, int(params.get("n") or 1)))
     normalized: dict[str, Any] = {"n": count, "ratio": ratio}
+    if params.get("size_mode") == "ratio":
+        normalized["size_mode"] = "ratio"
+    if params.get("custom_size") is not None:
+        normalized["custom_size"] = params["custom_size"]
 
     quality = params.get("quality")
     if family in {"gpt-image", "nano-banana"} and quality in {
@@ -943,6 +955,9 @@ def _normalized_params(
     normalized.pop("watermark", None)
     effective_count = requested_count
     if draft.mode == "image":
+        from character_workflow.lib.image_size import normalize_image_size_params
+
+        normalized = normalize_image_size_params(key, model.id, normalized)
         family = image_family(model.id)
         if family == "midjourney":
             effective_count = 4

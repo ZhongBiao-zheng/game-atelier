@@ -2074,6 +2074,14 @@ def _create_user_job(
     params.provider_task_protocol = None
     params.provider_task_ids = None
     if body.kind == JobKind.IMAGE:
+        from character_workflow.lib.image_size import normalize_image_size_params
+
+        try:
+            params = JobParams(**normalize_image_size_params(
+                key_row, body.model, params.model_dump(exclude_none=True),
+            ))
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         image_count = params.n if params.n is not None else 1
         if image_count < 1 or image_count > 4:
             raise HTTPException(status_code=422, detail="params.n must be between 1 and 4")

@@ -35,6 +35,7 @@ export interface ImageControlCaps {
   resolutions: Resolution[];
   /** 是否显示手动 W/H 自定义尺寸。 */
   showCustomSize: boolean;
+  showAutoSize: boolean;
   /** 质量选项；null 表示该族不暴露质量控件（也不该写进 job params）。 */
   qualities: Quality[] | null;
   /** size 传给后端的语义：'ratio' = 传比例字符串(如 16:9)；'pixels' = 传 WxH；
@@ -51,7 +52,7 @@ const STANDARD_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:
 const OPENROUTER_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
 
 // resolutions 不在这张表里：它按【模型】的像素上限裁，不是族属性（同族的 pro 与 lite 就不一样）。
-const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'resolutions'>> = {
+const FAMILY_CAPS: Record<ImageFamily, Omit<ImageControlCaps, 'family' | 'resolutions' | 'showAutoSize'>> = {
   'nano-banana': {
     ratios: NANO_BANANA_RATIOS,
     showResolution: false,
@@ -101,6 +102,17 @@ export function imageControlCaps(
   const family = imageFamily(modelId);
   const base = FAMILY_CAPS[family];
   const normalized = normalizedModelId(modelId);
+  let host = '';
+  try { host = new URL(baseUrl ?? '').hostname.toLowerCase(); } catch { /* Unconfigured key. */ }
+  const isHk = host === 'openai-hk.com' || host.endsWith('.openai-hk.com');
+  const openaiAutoModels = ['gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2-2026-04-21',
+    'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst-2026-09-08', 'gpt-image-2.5-flare-2026-09-08'];
+  const openrouterAutoModels = ['openai/gpt-image-1', 'openai/gpt-image-1-mini', 'openai/gpt-image-2',
+    'openai/gpt-image-2.5-sunburst', 'openai/gpt-image-2.5-flare'];
+  const showAutoSize = ((provider === 'openai' || provider === 'custom')
+      && (host === 'api.openai.com' || (!host && provider === 'openai')) && openaiAutoModels.includes(modelId ?? ''))
+    || ((provider === 'openai' || provider === 'custom') && isHk && ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2'].includes(modelId ?? ''))
+    || (provider === 'openrouter' && host === 'openrouter.ai' && openrouterAutoModels.includes(modelId ?? ''));
   let isTuzi = false;
   try {
     const host = new URL(baseUrl ?? '').hostname.toLowerCase();
@@ -123,6 +135,7 @@ export function imageControlCaps(
       showResolution: false,
       resolutions: [],
       showCustomSize: false,
+      showAutoSize,
       qualities,
       sizeKind: 'ratio',
     };
@@ -130,6 +143,7 @@ export function imageControlCaps(
   return {
     family,
     ...base,
+    showAutoSize,
     qualities,
     resolutions: base.showResolution ? availableResolutions(modelId) : [],
   };

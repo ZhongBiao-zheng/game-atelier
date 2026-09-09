@@ -58,6 +58,8 @@ export interface CanvasTextDefaultParams {
 }
 
 export interface CanvasImageDefaultParams {
+  size_mode?: 'auto' | 'ratio' | 'custom';
+  custom_size?: string;
   n?: number;
   ratio?: string;
   resolution?: string;

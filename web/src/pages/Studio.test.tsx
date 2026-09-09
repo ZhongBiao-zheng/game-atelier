@@ -279,7 +279,7 @@ describe('Studio', () => {
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     fireEvent.click(screen.getByRole('option', { name: '16:9' }));
-    fireEvent.click(screen.getByRole('option', { name: /超清 4K/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^4K$/ }));
     fireEvent.click(screen.getByRole('button', { name: /选择出图数量/ }));
     fireEvent.click(screen.getByRole('option', { name: '3' }));
 
@@ -611,7 +611,7 @@ describe('Studio', () => {
 
   it('still restores a size the user actually typed', async () => {
     mockProKeys();
-    saveProSelection({ customSizeManual: true });
+    saveProSelection({ sizeParams: { size_mode: 'custom', size: '2048x2048', custom_size: '2048x2048', ratio: '1:1', resolution: '2K' } });
 
     renderStudio();
 
@@ -624,7 +624,7 @@ describe('Studio', () => {
   it('clamps a manually stored size that exceeds the current model cap', async () => {
     mockProKeys();
     // 4096x2304 = 9437184 像素，是 pro 上限 4624220 的两倍：换模型后原样套用必被上游拒。
-    saveProSelection({ customSize: '4096x2304', customSizeManual: true });
+    saveProSelection({ sizeParams: { size_mode: 'custom', size: '4096x2304', custom_size: '4096x2304', ratio: '1:1', resolution: '2K' } });
 
     renderStudio();
 
@@ -725,6 +725,9 @@ describe('Studio', () => {
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '1296' } });
+    fireEvent.change(screen.getByLabelText('输出高度'), { target: { value: '1296' } });
+    expect(screen.getByLabelText('输出宽度')).toHaveValue(1296);
+    fireEvent.blur(screen.getByLabelText('输出高度'));
     expect(screen.getByLabelText('输出宽度')).toHaveValue(1920);
     expect(screen.getByLabelText('输出高度')).toHaveValue(1920);
 
@@ -768,23 +771,15 @@ describe('Studio', () => {
     expect(screen.getByTestId('size-popover').style.bottom).not.toBe('');
   });
 
-  it('renders the size panel without smart ratio and with emphasized 1:1 option', async () => {
+  it('renders a single sizing selector with a custom option', async () => {
     renderStudio();
-
     fireEvent.click(await screen.findByRole('button', { name: /选择比例和分辨率/ }));
-
-    expect(screen.queryByRole('option', { name: '智能' })).not.toBeInTheDocument();
     expect(screen.getByTestId('size-popover')).toHaveClass('w-[320px]', 'p-3', 'border', 'bg-card');
-    expect(screen.getByRole('listbox', { name: '选择比例' })).toHaveClass('grid', 'rounded-lg', 'bg-popover', 'p-1');
-    expect(screen.getByRole('listbox', { name: '选择比例' }).firstElementChild).toHaveClass('h-[98px]', 'w-[296px]', 'grid-cols-[56px_1fr]');
-    expect(screen.getByRole('option', { name: '1:1' })).toHaveClass('h-[90px]', 'w-[56px]', 'text-sm');
-    expect(screen.getByTestId('side-ratio-grid')).toHaveClass('min-w-0', 'grid-cols-4', 'grid-rows-2');
-    expect(screen.getByRole('option', { name: '4:3' })).toHaveClass('h-[43px]', 'w-full', 'text-sm');
-    expect(screen.getByRole('listbox', { name: '选择分辨率' })).toHaveClass('h-9', 'p-0.5');
-    expect(screen.getByRole('option', { name: /高清 2K/ })).toHaveClass('h-8', 'text-sm');
-    expect(screen.getByLabelText('输出宽度').closest('div')?.parentElement).toHaveClass('w-[296px]');
-    expect(screen.getByLabelText('输出宽度')).toHaveClass('text-xs', 'tabular-nums');
-    expect(screen.getByLabelText('输出高度')).toHaveClass('text-xs', 'tabular-nums');
+    expect(screen.getByRole('listbox', { name: '选择图片尺寸' })).toHaveClass('grid', 'grid-cols-4');
+    expect(screen.getByRole('option', { name: '1:1' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('option', { name: '自定义' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.queryByRole('option', { name: 'AUTO' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('输出宽度')).toHaveClass('tabular-nums');
   });
 
   it('highlights prompt control buttons while their popovers are open', async () => {
@@ -1143,7 +1138,7 @@ describe('Studio', () => {
     );
     await waitFor(() => expect(screen.getAllByText(/图片 4.7/).length).toBeGreaterThan(0));
     expect(screen.getByText(/4:3/)).toBeInTheDocument();
-    expect(screen.getByText(/2304x1728/)).toBeInTheDocument();
+    expect(screen.getByText(/4:3/)).toBeInTheDocument();
     expect(screen.getAllByRole('img', { name: /生成结果/ })).toHaveLength(2);
     expect(screen.getByTestId('studio-result-thumb-1')).toHaveClass('w-[251.5px]');
     expect(screen.getByTestId('studio-result-thumb-2')).toHaveClass('w-[251.5px]');
@@ -1190,8 +1185,8 @@ describe('Studio', () => {
     });
     expect(screen.getByTestId('reference-images-panel').querySelector('img')).not.toBeNull();
     const sizeButton = screen.getByRole('button', { name: '选择比例和分辨率' });
-    expect(sizeButton).not.toHaveTextContent('4:3');
-    expect(sizeButton).toHaveTextContent('2304');
+    expect(sizeButton).toHaveTextContent('4:3');
+    expect(sizeButton).not.toHaveTextContent('2304');
     expect(sizeButton).toHaveTextContent('高清 2K');
   });
 
@@ -1342,7 +1337,7 @@ describe('Studio', () => {
     expect(screen.getByRole('button', { name: '删除失败记录' })).toBeInTheDocument();
   });
 
-  it('adjusts height when width is edited with ratio locked', async () => {
+  it('switches to custom without changing the other dimension', async () => {
     const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {
       if (url === '/api/keys') {
         return Promise.resolve({
@@ -1373,7 +1368,9 @@ describe('Studio', () => {
     expect(screen.getByLabelText('输出高度')).toHaveValue(1536);
 
     fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '2000' } });
-    expect(screen.getByLabelText('输出高度')).toHaveValue(1500);
+    expect(screen.getByLabelText('输出高度')).toHaveValue(1536);
+    expect(screen.getByRole('option', { name: '4:3' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('option', { name: '自定义' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('submits custom dimensions when W/H are manually edited', async () => {
@@ -1404,7 +1401,6 @@ describe('Studio', () => {
     renderStudio();
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
-    fireEvent.click(screen.getByRole('button', { name: '解除比例锁定' }));
     fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '1920' } });
     fireEvent.change(screen.getByLabelText('输出高度'), { target: { value: '1080' } });
 
@@ -1415,18 +1411,103 @@ describe('Studio', () => {
     const call = fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs');
     const body = JSON.parse(String(call![1]!.body));
     expect(body.params.size).toBe('1920x1080');
+    expect(body.params.size_mode).toBe('custom');
+    expect(body.params).not.toHaveProperty('ratio');
+    expect(body.params).not.toHaveProperty('resolution');
+    expect(body.params).not.toHaveProperty('custom_size');
   });
 
-  it('ControlButton shows pixel dimensions instead of ratio after ratio is selected', async () => {
+  it('ControlButton shows the preset ratio in ratio mode', async () => {
     renderStudio();
     await screen.findByRole('button', { name: /选择比例和分辨率/ });
     fireEvent.click(screen.getByRole('button', { name: /选择比例和分辨率/ }));
     fireEvent.click(screen.getByRole('option', { name: '16:9' }));
 
     const sizeButton = screen.getByRole('button', { name: /选择比例和分辨率/ });
-    expect(sizeButton).not.toHaveTextContent('16:9');
+    expect(sizeButton).toHaveTextContent('16:9');
     expect(sizeButton).toHaveTextContent('高清 2K');
-    expect(sizeButton).toHaveTextContent('2560');
+    expect(sizeButton).not.toHaveTextContent('2560');
+  });
+
+  it('AUTO submits no pixel, ratio, resolution, draft cache, or guessed price in both Studio surfaces', async () => {
+    localStorage.setItem('studio:selection', JSON.stringify({ providerAlias: 'oa', model: 'gpt-image-2' }));
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const view = renderStudio();
+    fireEvent.click(await screen.findByRole('button', { name: '选择比例和分辨率' }));
+    fireEvent.click(screen.getByRole('option', { name: 'AUTO' }));
+    expect(screen.getByRole('option', { name: '1:1' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('AUTO');
+    typePrompt(screen.getByLabelText('生图 prompt'), '自动构图');
+    fireEvent.click(screen.getByLabelText('提交生成'));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
+    const payload = () => JSON.parse(String(fetchMock.mock.calls.filter(([url]) => url === '/api/studio/jobs').at(-1)![1].body));
+    expect(payload().params).toMatchObject({ size_mode: 'auto', size: 'auto' });
+    for (const key of ['ratio', 'resolution', 'custom_size', 'estimated_cost_cny']) expect(payload().params).not.toHaveProperty(key);
+    view.unmount();
+    clearStudioDraft();
+    const { hook } = memoryLocation({ path: '/', static: true });
+    render(<Router hook={hook}><Studio compact /></Router>);
+    await waitFor(() => expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('AUTO'));
+    typePrompt(screen.getByLabelText('生图 prompt'), '首页自动构图');
+    fireEvent.click(screen.getByLabelText('提交生成'));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === '/api/studio/jobs')).toHaveLength(2));
+    expect(payload().params).toMatchObject({ size_mode: 'auto', size: 'auto' });
+    for (const key of ['ratio', 'resolution', 'custom_size', 'estimated_cost_cny']) expect(payload().params).not.toHaveProperty(key);
+  });
+
+  it('restores custom drafts when switching back and blocks invalid size submission', async () => {
+    localStorage.setItem('studio:selection', JSON.stringify({ providerAlias: 'oa', model: 'gpt-image-2' }));
+    renderStudio();
+    fireEvent.click(await screen.findByRole('button', { name: '选择比例和分辨率' }));
+    fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '1360' } });
+    fireEvent.change(screen.getByLabelText('输出高度'), { target: { value: '2048' } });
+    expect(screen.getByRole('option', { name: '自定义' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('1360×2048');
+    fireEvent.click(screen.getByRole('option', { name: '2:3' }));
+    expect(screen.getByRole('option', { name: '自定义' })).toHaveAttribute('aria-selected', 'false');
+    fireEvent.click(screen.getByRole('option', { name: '自定义' }));
+    expect(screen.getByLabelText('输出宽度')).toHaveValue(1360);
+    expect(screen.getByLabelText('输出高度')).toHaveValue(2048);
+    fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '' } });
+    typePrompt(screen.getByLabelText('生图 prompt'), '无效尺寸');
+    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+    fireEvent.keyDown(screen.getByLabelText('生图 prompt'), { key: 'Enter' });
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(false);
+  });
+
+  it('clears an unsupported AUTO selection when switching to a ratio-only model', async () => {
+    localStorage.setItem('studio:selection', JSON.stringify({ providerAlias: 'oa', model: 'gpt-image-2', sizeParams: { size_mode: 'auto', size: 'auto' } }));
+    renderStudio();
+    await waitFor(() => expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('AUTO'));
+    fireEvent.click(screen.getByRole('button', { name: '选择厂商' }));
+    fireEvent.click(screen.getByRole('option', { name: /volc/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '选择比例和分辨率' })).not.toHaveTextContent('AUTO'));
+    expect(screen.getByText('当前模型不支持原尺寸模式，已切换为比例')).toBeInTheDocument();
+  });
+
+  it('restores an explicit custom history mode and regenerates without stale ratio', async () => {
+    const fetchMock = mockCompletedBatchAndKeys();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const response = await originalFetch(url, init);
+      if (url !== '/api/jobs') return response;
+      const jobs = await response.json();
+      jobs[0].params = { ...jobs[0].params, size_mode: 'custom', size: '2048x2048' };
+      return { ...response, json: async () => jobs };
+    });
+    renderStudio();
+    fireEvent.click(await screen.findByRole('button', { name: '重新编辑' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('2048×2048'));
+    fireEvent.click(screen.getByRole('button', { name: '选择比例和分辨率' }));
+    expect(screen.getByRole('option', { name: '自定义' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('option', { name: '4:3' })).toHaveAttribute('aria-selected', 'false');
+    fireEvent.click(screen.getByRole('button', { name: '再次生成' }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1]!.body));
+    expect(payload.params).toMatchObject({ size_mode: 'custom', size: '2048x2048' });
+    expect(payload.params).not.toHaveProperty('ratio');
+    expect(payload.params).not.toHaveProperty('resolution');
   });
 });
 

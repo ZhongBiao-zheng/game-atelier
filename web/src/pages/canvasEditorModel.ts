@@ -1,9 +1,5 @@
+import { normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
-import {
-  normalizeStudioSizeForModel,
-  studioSizeFor,
-  type Resolution,
-} from '@/lib/studioSize';
 import type { Job, JobParams } from '@/schema/jobs';
 import { modelModality, type KeyView } from '@/api/keys';
 import {
@@ -883,43 +879,11 @@ export function normalizeCanvasImageParams(
   baseUrl?: string | null,
 ): JobParams {
   const caps = imageControlCaps(model, provider, baseUrl);
-  const {
-    quality: currentQuality,
-    reference_images: _referenceImages,
-    reference_videos: _referenceVideos,
-    reference_audios: _referenceAudios,
-    resolution: _resolution,
-    size: _size,
-    ...retained
-  } = current;
-  const currentRatio = String(current.ratio ?? '');
-  const ratio = caps.ratios.includes(currentRatio) ? currentRatio : caps.ratios[0];
-  const n = caps.family === 'midjourney'
-    ? MJ_IMAGES_PER_TASK
-    : Math.max(1, Math.min(4, Number(current.n) || 1));
-  const params: JobParams = { ...retained, n, ratio };
-
-  if (caps.showResolution && caps.resolutions.length) {
-    params.resolution = caps.resolutions.includes(current.resolution as Resolution)
-      ? current.resolution
-      : caps.resolutions[0];
-  }
+  const { reference_images: _images, reference_videos: _videos, reference_audios: _audios, quality, ...retained } = current;
+  const params = normalizeImageSizeParams(model, provider, baseUrl, retained);
+  params.n = caps.family === 'midjourney' ? MJ_IMAGES_PER_TASK : Math.max(1, Math.min(4, Number(current.n) || 1));
   if (caps.qualities?.length) {
-    params.quality = caps.qualities.includes(currentQuality as Quality)
-      ? currentQuality
-      : caps.qualities[0];
-  }
-  if (caps.sizeKind === 'ratio') {
-    params.size = ratio;
-  } else if (caps.sizeKind === 'pixels') {
-    const resolution = (params.resolution as Resolution | undefined) ?? '2K';
-    const currentPixelSize = typeof current.size === 'string' && /^\d+x\d+$/.test(current.size)
-      ? current.size
-      : null;
-    params.size = normalizeStudioSizeForModel(
-      currentPixelSize ?? studioSizeFor(ratio, resolution, model),
-      model,
-    );
+    params.quality = caps.qualities.includes(quality as Quality) ? quality : caps.qualities[0];
   }
   return params;
 }

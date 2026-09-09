@@ -52,6 +52,32 @@ def test_post_studio_job_creates_pending(client):
     assert payload["params"]["n"] == 1
 
 
+@pytest.mark.parametrize("mode,expected_size", [("auto", "auto"), ("custom", "1360x2048")])
+def test_studio_job_freezes_active_size_mode(client, mode, expected_size):
+    response = client.post("/api/studio/jobs", json={
+        "prompt": "test", "model": "gpt-image-2",
+        "params": {"size_mode": mode, "size": "1360x2048", "custom_size": "1200x2000",
+                   "ratio": "2:3", "resolution": "2K", "quality": "medium"},
+    })
+    assert response.status_code == 201
+    params = response.json()["params"]
+    assert params["size"] == expected_size
+    assert params["size_mode"] == mode
+    assert params["quality"] == "medium"
+    assert params["ratio"] is None
+    assert params["resolution"] is None
+    assert params["custom_size"] is None
+
+
+def test_studio_rejects_incomplete_custom_size_before_job_creation(client, tmp_path):
+    response = client.post("/api/studio/jobs", json={
+        "prompt": "test", "model": "gpt-image-2",
+        "params": {"size_mode": "custom", "size": "x2048"},
+    })
+    assert response.status_code == 422
+    assert not list((tmp_path / ".runtime" / "jobs").glob("*.json"))
+
+
 def test_post_studio_job_strips_forged_provider_task_ids(client):
     resp = client.post("/api/studio/jobs", json={
         "prompt": "a quiet warm gallery",

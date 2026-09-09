@@ -123,6 +123,8 @@ class LayerDecompositionResult(BaseModel):
 class JobParams(BaseModel):
     model_config = ConfigDict(extra="allow")
     size: str | None = None
+    size_mode: Literal["auto", "ratio", "custom"] | None = None
+    custom_size: str | None = Field(default=None, max_length=40)
     steps: int | None = None
     cfg_scale: float | None = None
     # 出图卡片展示用 —— 让画师在确认前看到完整调用细节
@@ -442,7 +444,9 @@ class CanvasImageDefaultParams(BaseModel):
     n: int | None = Field(default=None, ge=1, le=4)
     ratio: CanvasSafeOption | None = None
     resolution: CanvasSafeOption | None = None
-    size: CanvasSafeOption | None = None
+    size: str | None = Field(default=None, max_length=40, pattern=r"^[A-Za-z0-9_.:+-]*$")
+    size_mode: Literal["auto", "ratio", "custom"] | None = None
+    custom_size: str | None = Field(default=None, max_length=40, pattern=r"^[A-Za-z0-9_.:+-]*$")
     quality: Literal["low", "medium", "high", "auto"] | None = None
 
 
@@ -560,7 +564,7 @@ class CanvasGenerationDraft(BaseModel):
 # Content Version，所以全部路径类字段都不在名单里；新增控件时必须同时把字段加进这里。
 CANVAS_DRAFT_PARAM_FIELDS: dict[str, frozenset[str]] = {
     "image": frozenset({
-        "n", "size", "ratio", "resolution", "quality",
+        "n", "size", "size_mode", "custom_size", "ratio", "resolution", "quality",
         "creation_asset_source_title",
         # 多角度生成由服务端写进结果 Draft，浏览器会原样回传，必须放行。
         "angle_horizontal", "angle_pitch", "angle_distance", "angle_wide",

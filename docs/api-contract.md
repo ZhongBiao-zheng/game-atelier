@@ -4,6 +4,27 @@
 
 ## 开发中的扩展契约
 
+### 图片尺寸意图（5.42.0）
+
+`JobParams`、`CanvasImageDefaultParams` 增加 `size_mode?: auto | ratio | custom`、
+`custom_size?: string`。后者只是编辑器回切缓存；草稿允许暂不完整的数字输入，提交才严格验证。
+缺模式保留既有比例行为，不根据近似像素反推用户意图，不迁移旧记录。
+
+- AUTO：服务端再次核对渠道+精确模型+协议，冻结 `size=auto`，移除 ratio/resolution。
+  OpenRouter 出站为 `aspect_ratio=auto`，不是省略后隐含1:1；不改质量或数量。
+- ratio：保留选中比例及当前模型支持的分辨率，计算提交尺寸。
+- custom：size是唯一像素权威，去ratio/resolution；正整数边长≤100000，GPT长短边≤3:1。
+  Blur/提交规范模型尺寸，HK先吸附其30项表，前端预览与后端规范一致。
+- 所有冻结入口删除custom_size；Job、Snapshot、再次生成仅用生效参数，原图实际尺寸另记actual_size。
+- Canvas/Studio/首页Studio共用尺寸字段；编辑宽高即选custom，聚焦不切换，恰好等于预设比例也不自动回切。
+  AUTO不显示宽高，自定义不显示分辨率；摘要分别AUTO/比例/W×H。切模式保留自定义缓存，换模型不支持时短提示并回比例。
+
+AUTO能力依据（2026-09-09）：[OpenAI Images](https://developers.openai.com/api/docs/guides/image-generation)、
+[HK GPT Image](https://www.openai-hk.com/docs/openai/gpt-image.html)、
+[OpenRouter图像API与模型能力](https://openrouter.ai/docs/guides/overview/multimodal/image-generation)。
+白名单由 `imageControlCaps.ts` 与 `image_size.py` 同步维护。Tuzi/Seedream/MJ/未知渠道未确认AUTO，暂不展示。
+AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单或有依据的固定单价。
+
 网站连接本机与外部 Agent 工坊入口已进入分阶段开发：
 [开发范围与验收](local-workspace.md)、[本机连接](contracts/local-connection.md)、
 [工坊 MCP 与生成批准](contracts/workshop-mcp.md)。本地整合分支已实现状态、鉴权、授权、编辑租约、

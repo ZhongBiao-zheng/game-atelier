@@ -9,6 +9,8 @@ export type JobKind = 'text' | 'image' | 'video' | 'audio';
 export type Namespace = 'character' | 'studio' | 'ui' | 'video' | 'canvas';
 
 export interface JobParams {
+  size_mode?: 'auto' | 'ratio' | 'custom';
+  custom_size?: string;
   size?: string;
   steps?: number;
   cfg_scale?: number;

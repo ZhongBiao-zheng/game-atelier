@@ -10,7 +10,7 @@ import pytest
 import requests
 
 from character_workflow.lib import keys
-from character_workflow.lib.callers import openai_image
+from character_workflow.lib.callers import dispatch, openai_image
 from character_workflow.lib.keys import KeySpec
 
 IMAGE_ACCEPT = "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
@@ -645,6 +645,37 @@ def test_render_openai_hk_gpt_image_no_reference_stays_on_generations(
     )
     assert captured["url"].endswith("/v1/images/generations")
     assert len(paths) == 1
+
+
+@pytest.mark.parametrize("base_url", ["https://api.openai.com/v1", "https://api.openai-hk.com"])
+@pytest.mark.parametrize("with_reference", [False, True])
+def test_dispatch_explicit_auto_reaches_image_json_and_multipart_without_pixel_default(
+    isolated_data_root, tmp_path, monkeypatch, base_url, with_reference,
+):
+    _add_key(alias="auto-size", provider="custom", base_url=base_url)
+    captured = []
+    png = b"\x89PNG\r\n\x1a\nauto"
+    def post(url, **kwargs):
+        captured.append((url, kwargs.get("json") or kwargs.get("data")))
+        return FakePostResponse({"data": [{"b64_json": base64.b64encode(png).decode()}]})
+    monkeypatch.setattr(openai_image.requests, "post", post)
+    params = {"size_mode": "auto", "size": "1360x2048", "ratio": "2:3",
+              "resolution": "2K", "custom_size": "1360x2048", "quality": "high"}
+    if with_reference:
+        reference = tmp_path / "reference.png"
+        reference.write_bytes(png)
+        params["reference_images"] = [str(reference)]
+    paths = dispatch(prompt="architecture", model="gpt-image-2", alias="auto-size",
+                     output_dir=tmp_path / "out", params=params, size="1360x2048")
+    assert len(paths) == 1
+    url, body = captured[0]
+    assert url.endswith("/images/edits" if with_reference else "/images/generations")
+    assert body["size"] == "auto"
+    assert body["quality"] == "high"
+    assert "ratio" not in body
+    assert "resolution" not in body
+    assert "custom_size" not in body
+    assert "size_mode" not in body
 
 
 def test_render_seedream_truncates_reference_images_to_cap(

@@ -1,3 +1,5 @@
+import { imageSizeError, imageSizeMode } from '@/lib/imageSizeMode';
+import { normalizeImagePixelSize } from '@/lib/studioSize';
 import {
   Handle,
   NodeResizer,
@@ -1996,6 +1998,11 @@ export function CanvasGenerationComposer({
   }
 
   function submitGeneration() {
+    const sizeError = draft.mode === 'image' ? imageSizeError(draft.params, draft.model) : null;
+    if (sizeError) {
+      context.reportError?.(sizeError);
+      return;
+    }
     if (blockedReason) {
       context.reportError?.(blockedReason);
       return;
@@ -2129,6 +2136,19 @@ export function CanvasGenerationComposer({
           alias={draft.alias ?? null}
           model={draft.model}
           onSelect={({ key, model }) => {
+            const nextImageParams = draft.mode === 'image'
+              ? normalizeCanvasImageParams(model.id, key.provider, draft.params, key.base_url) : null;
+            if (draft.mode === 'image') {
+              const next = nextImageParams!;
+              if (imageSizeMode(next) !== imageSizeMode(draft.params)) {
+                context.reportError?.('该模型不支持当前尺寸模式，已切换为比例');
+              } else if (imageSizeMode(next) === 'custom' && !imageSizeError(next, model.id)) {
+                const normalized = normalizeImagePixelSize(next.size!, model.id, key.base_url);
+                if (normalized !== next.size) context.reportError?.(`尺寸已调整为 ${normalized.replace('x', '×')}`);
+                next.size = normalized;
+                next.custom_size = normalized;
+              }
+            }
             if (draft.mode === 'video') {
               const nextParams = normalizeCanvasVideoParams(
                 model.id,
@@ -2151,12 +2171,7 @@ export function CanvasGenerationComposer({
               alias: key.alias,
               model: model.id,
               params: draft.mode === 'image'
-                ? normalizeCanvasImageParams(
-                    model.id,
-                    key.provider,
-                    current.params,
-                    key.base_url,
-                  )
+                ? nextImageParams!
                 : draft.mode === 'text'
                   ? normalizeCanvasTextParams(model.protocol, current.params)
                 : draft.mode === 'video'
@@ -2192,6 +2207,7 @@ export function CanvasGenerationComposer({
           <CanvasImageSettings
             caps={imageCaps}
             model={draft.model}
+            baseUrl={selectedKey?.base_url}
             params={draft.params}
             onPatch={(patch, options) => updateDraftWithHistory(current => {
               const merged = { ...current.params, ...patch };

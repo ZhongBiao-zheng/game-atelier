@@ -1,0 +1,54 @@
+import type { JobParams } from '@/schema/jobs';
+import { imageControlCaps } from './imageControlCaps';
+import { imageFamily } from './modelFamily';
+import { normalizeImagePixelSize, studioSizeFor, type Resolution } from './studioSize';
+
+export function imageSizeMode(params: JobParams): 'auto' | 'ratio' | 'custom' {
+  return params.size_mode ?? (params.size === 'auto' ? 'auto' : 'ratio');
+}
+
+export function imageSizeSummary(params: JobParams): string {
+  const mode = imageSizeMode(params);
+  return mode === 'auto' ? 'AUTO' : mode === 'custom'
+    ? (params.size || params.custom_size || '').replace('x', '×') : params.ratio || '1:1';
+}
+
+export function imageSizeError(params: JobParams, model?: string): string | null {
+  if (imageSizeMode(params) !== 'custom') return null;
+  const match = /^(\d+)x(\d+)$/.exec(params.size ?? '');
+  if (match && imageFamily(model) === 'gpt-image') {
+    const w = Number(match[1]), h = Number(match[2]);
+    if (w > 0 && h > 0 && Math.max(w / h, h / w) > 3) return '该模型的长短边比例不能超过 3:1';
+  }
+  return match && match.slice(1).every(value => Number.isSafeInteger(Number(value)) && Number(value) > 0 && Number(value) <= 100_000)
+    ? null : '宽高请输入 1–100000 的整数';
+}
+
+/** Drafts retain inactive choices; the server freezes only the active sizing rule. */
+export function normalizeImageSizeParams(
+  model: string, provider: string | null | undefined, baseUrl: string | null | undefined,
+  current: JobParams,
+): JobParams {
+  const caps = imageControlCaps(model, provider, baseUrl);
+  const { size: _size, resolution: _resolution, ...retained } = current;
+  let mode = imageSizeMode(current);
+  if ((mode === 'auto' && !caps.showAutoSize) || (mode === 'custom' && !caps.showCustomSize)) mode = 'ratio';
+  const ratio = caps.ratios.includes(current.ratio ?? '') ? current.ratio! : caps.ratios[0];
+  const resolution = caps.resolutions.includes(current.resolution as Resolution)
+    ? current.resolution as Resolution : caps.resolutions[0] ?? '2K';
+  const params: JobParams = { ...retained, size_mode: mode, ratio };
+  if (caps.showResolution) params.resolution = resolution;
+  if (mode === 'auto') return { ...params, size: 'auto' };
+  if (mode === 'custom') {
+    // Preserve in-progress input. Blur/submit normalize legal pixels, never each keystroke.
+    const size = current.size ?? current.custom_size ?? studioSizeFor(ratio, resolution, model);
+    return { ...params, size, custom_size: size };
+  }
+  if (caps.sizeKind === 'ratio') params.size = ratio;
+  else if (caps.sizeKind === 'pixels') {
+    const size = /^\d+x\d+$/.test(current.size ?? '') && imageSizeMode(current) === 'ratio'
+      ? current.size! : studioSizeFor(ratio, resolution, model);
+    params.size = normalizeImagePixelSize(size, model, baseUrl);
+  }
+  return params;
+}

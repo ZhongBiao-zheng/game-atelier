@@ -302,6 +302,7 @@ export function CanvasGenerationPreferencesDialog({
                   <CanvasImageSettings
                     caps={imageCaps}
                     model={effectiveChoice.model.id}
+                    baseUrl={effectiveChoice.key.base_url}
                     params={params}
                     menuDirection="up"
                     portalContainerRef={dialogContentRef}

@@ -1,8 +1,10 @@
 import { type ButtonHTMLAttributes, type KeyboardEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUp, BookmarkPlus, Box, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Building2, Link2, Video, X } from 'lucide-react';
+import { ArrowUp, BookmarkPlus, Box, ChevronRight, Film, ImageIcon, Images, Music, Plus, Square, Building2, Video, X } from 'lucide-react';
 import { modelModality, type KeyView } from '@/api/keys';
-import { availableResolutions, computeStudioPixelSize, normalizeStudioPixelSizeForModel } from '@/lib/studioSize';
+import { imageSizeMode, imageSizeSummary, imageSizeError, normalizeImageSizeParams } from '@/lib/imageSizeMode';
+import { normalizeImagePixelSize } from '@/lib/studioSize';
+import { ImageSizeFields } from './ImageSizeFields';
 import { providerLabel } from '@/lib/providerLabels';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import { imageFamily } from '@/lib/modelFamily';
@@ -25,10 +27,9 @@ import {
   type FrameSlots,
 } from './VideoReferenceAssets';
 import { Lightbox } from '../Lightbox';
-import { RatioIcon } from './RatioIcon';
 import { ToolbarPopover } from './ToolbarPopover';
 import type { VideoControlCaps, VideoMode, VideoQuality } from '@/lib/videoControlCaps';
-import type { JobKind } from '@/schema/jobs';
+import type { JobKind, JobParams } from '@/schema/jobs';
 import {
   canonicalMentionLabel,
   createMentionTokenRegex,
@@ -47,19 +48,12 @@ interface Props {
   providers?: KeyView[];
   providerAlias?: string;
   model?: string;
-  ratio?: string;
-  resolution?: '2K' | '4K';
+  sizeParams?: JobParams;
+  onSizeParamsChange?: (patch: JobParams) => void;
   count?: number;
   onProviderChange?: (alias: string) => void;
   onModelChange?: (model: string) => void;
-  onRatioChange?: (ratio: string) => void;
-  onResolutionChange?: (resolution: '2K' | '4K') => void;
   onCountChange?: (count: number) => void;
-  /** manual=true 只在用户亲手改宽高输入框（或恢复一个亲手改过的存档值）时传。
-   * 自动重算（切比例/档位/模型）一律不传 —— 上层据此判断「这是不是用户的选择」，
-   * 绝不能再靠「值是否等于当前标准尺寸」去反推：标准尺寸的公式一改，
-   * 历史存档里那个曾经标准的值就会被追认成手动选择（2026-08-14 画师侧现象）。 */
-  onCustomSizeChange?: (w: number, h: number, manual?: boolean) => void;
   quality?: Quality;
   onQualityChange?: (quality: Quality) => void;
   /** Midjourney 专属参数（family=midjourney 时才渲染面板）。 */
@@ -68,8 +62,6 @@ interface Props {
   /** MJ 的三个语义参考槽（风格 / 角色 / Omni）。垫图仍走通用参考图栏位。 */
   mjRefs?: MjRefSlots;
   onMjRefsChange?: (refs: MjRefSlots) => void;
-  /** When set, overrides localW/localH after the ratio/resolution effect; keyed to ensure re-runs. */
-  sizeOverride?: { key: number; w: number; h: number };
   menuDirection?: 'up' | 'down';
   /** Studio 滚动联动：true 时收成单行胶囊（控件行折叠、参考区缩放、rounded-full）。 */
   collapsed?: boolean;
@@ -104,8 +96,6 @@ interface Props {
   videoFrames?: FrameSlots;
   onVideoFramesChange?: (frames: FrameSlots) => void;
 }
-
-const SIDE_RATIOS = ['4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'];
 
 const REF_W = 56.5;
 const REF_H = 70;
@@ -221,22 +211,18 @@ export function PromptInput({
   providers = [],
   providerAlias,
   model,
-  ratio = '1:1',
-  resolution = '2K',
+  sizeParams = { size_mode: 'ratio', ratio: '1:1', resolution: '2K' },
+  onSizeParamsChange,
   count = 1,
   onProviderChange,
   onModelChange,
-  onRatioChange,
-  onResolutionChange,
   onCountChange,
-  onCustomSizeChange,
   quality = 'medium' as Quality,
   mjParams = MJ_DEFAULTS,
   onMjParamsChange,
   mjRefs = EMPTY_MJ_REFS,
   onMjRefsChange,
   onQualityChange,
-  sizeOverride,
   menuDirection = 'up',
   collapsed = false,
   onExpandRequest,
@@ -573,18 +559,32 @@ export function PromptInput({
     ro.observe(el);
     return () => ro.disconnect();
   }, [updateScroll, isVideo, videoMode, model, providerAlias, providers, collapsed]);
-  const initSize = computeStudioPixelSize(ratio, resolution, selectedModel?.id);
-  const [localW, setLocalW] = useState(initSize.w);
-  const [localH, setLocalH] = useState(initSize.h);
-  const [sizeLocked, setSizeLocked] = useState(true);
   // 能力四项按模型族判（provider 只决定端点/协议，openrouter 另外改 size 语义）。
   const caps = imageControlCaps(
     selectedModel?.id,
     provider?.provider,
     provider?.base_url,
   );
-  const sizeControlDetail = caps.showResolution
-    ? (resolution === '2K' ? '高清 2K' : '超清 4K')
+  const sizeModelRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isVideo || !selectedModel || !provider) return;
+    const identity = `${provider.alias}:${selectedModel.id}:${provider.base_url ?? ''}`;
+    const changedModel = sizeModelRef.current !== null && sizeModelRef.current !== identity;
+    const initialize = sizeModelRef.current === null;
+    sizeModelRef.current = identity;
+    const normalized = normalizeImageSizeParams(selectedModel.id, provider.provider, provider.base_url, sizeParams);
+    if (imageSizeMode(normalized) !== imageSizeMode(sizeParams)) {
+      showRefHint('当前模型不支持原尺寸模式，已切换为比例');
+    } else if ((changedModel || initialize) && imageSizeMode(normalized) === 'custom' && !imageSizeError(normalized, selectedModel.id)) {
+      const size = normalizeImagePixelSize(normalized.size!, selectedModel.id, provider.base_url);
+      if (size !== normalized.size) showRefHint(`尺寸已调整为 ${size.replace('x', '×')}`);
+      normalized.size = size;
+      normalized.custom_size = size;
+    }
+    if (JSON.stringify(normalized) !== JSON.stringify(sizeParams)) onSizeParamsChange?.(normalized);
+  }, [isVideo, selectedModel, provider, sizeParams, onSizeParamsChange, showRefHint]);
+  const sizeControlDetail = caps.showResolution && imageSizeMode(sizeParams) === 'ratio'
+    ? (sizeParams.resolution === '4K' ? '超清 4K' : '高清 2K')
     : caps.qualities?.length
       ? (QUALITY_LABELS[quality] ?? quality)
       : null;
@@ -615,8 +615,8 @@ export function PromptInput({
     !videoFrames?.first &&
     Boolean(videoFrames?.last);
   const canSubmit =
-    Boolean(provider && selectedModel && text.trim() && !disabled) && !lastFrameOnlyBlocked;
-  const minPx = 1;
+    Boolean(provider && selectedModel && text.trim() && !disabled) && !lastFrameOnlyBlocked
+      && (isVideo || !imageSizeError(sizeParams, selectedModel?.id));
   // 控件行右缘渐隐 + 箭头几何：悬停时为箭头让出 36px 槽位，渐隐带 40px 落在箭头左侧。
   const SCROLL_ARROW = 36;
   const SCROLL_FADE = 40;
@@ -624,24 +624,6 @@ export function PromptInput({
   const scrollBlockWidth = scrollReserve + SCROLL_FADE;
   const trackMask =
     `linear-gradient(to right, black calc(100% - ${scrollBlockWidth}px), transparent calc(100% - ${scrollReserve}px))`;
-
-  useEffect(() => {
-    const { w, h } = computeStudioPixelSize(ratio, resolution, selectedModel?.id);
-    const normalized = normalizeStudioPixelSizeForModel({ w, h }, selectedModel?.id);
-    setLocalW(normalized.w);
-    setLocalH(normalized.h);
-    onCustomSizeChange?.(normalized.w, normalized.h);
-  }, [ratio, resolution, selectedModel?.id, onCustomSizeChange]);
-
-  // 分辨率不变式：状态里的档位永远在当前模型能选的集合里。从 lite 切到 seedream-5.0-pro
-  // （4K 够不着、按钮不再渲染）时若不回落，chip 会继续显示「超清 4K」而面板里无一项选中，
-  // 而且这个 4K 会跟着 saveSelection 落进本地存档、下次进来照样对不上。
-  useEffect(() => {
-    if (!caps.showResolution) return;
-    const allowed = availableResolutions(selectedModel?.id);
-    if (allowed.length === 0 || allowed.includes(resolution)) return;
-    onResolutionChange?.(allowed[0]);
-  }, [caps.showResolution, selectedModel?.id, resolution, onResolutionChange]);
 
   // 参考图数量不变式：永远 ≤ 当前模型族上限。切换模型（16 张的 gpt-image → 3 张的 nano-banana）
   // 或整组复用历史参考图都可能撑爆上限 —— 旧行为是界面上 chip 全在、后端只发前 N 张（静默丢弃）。
@@ -654,26 +636,12 @@ export function PromptInput({
     showRefHint(`参考图最多 ${refImagesLimit} 张，已移除超出的 ${dropped} 张`);
   }, [refImagesLimit, referenceImages, onReferenceImagesChange, showRefHint]);
 
-  // Runs after the ratio/resolution effect so it wins — used by reEdit to restore custom sizes.
-  // 覆盖值同样要过模型归一：存档/历史轮次里的尺寸可能来自上限更高的模型，原样套到
-  // seedream-5.0-pro 这种低上限模型上就是一个必被上游拒的尺寸。
-  useEffect(() => {
-    if (!sizeOverride) return;
-    const normalized = normalizeStudioPixelSizeForModel(
-      { w: sizeOverride.w, h: sizeOverride.h },
-      selectedModel?.id,
-    );
-    setLocalW(normalized.w);
-    setLocalH(normalized.h);
-    onCustomSizeChange?.(normalized.w, normalized.h, true);
-  }, [sizeOverride, selectedModel?.id, onCustomSizeChange]);
-
   const submit = useCallback(() => {
     // @图1 → 图1：API 按序号自然语言绑定素材，@ 不出现在最终 prompt 里。
     const trimmed = serializeMentions(text).trim();
-    if (!trimmed || disabled || !provider || !selectedModel || lastFrameOnlyBlocked) return;
+    if (!trimmed || disabled || !provider || !selectedModel || lastFrameOnlyBlocked || (!isVideo && imageSizeError(sizeParams, selectedModel?.id))) return;
     onSubmit(trimmed);
-  }, [text, disabled, provider, selectedModel, onSubmit, lastFrameOnlyBlocked]);
+  }, [text, disabled, provider, selectedModel, onSubmit, lastFrameOnlyBlocked, isVideo, sizeParams]);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Escape' && mentionOpen) {
@@ -774,72 +742,6 @@ export function PromptInput({
     }
     // prompt 里的 @引用跟着素材删除重编号，避免「图2」悬空指错素材。
     if (text.includes('@')) setText(renumberMentions(text, MENTION_LABELS[item.kind], removedNumber));
-  }
-
-  function handleRatioSelect(newRatio: string) {
-    onRatioChange?.(newRatio);
-    const { w, h } = computeStudioPixelSize(newRatio, resolution, selectedModel?.id);
-    const normalized = normalizeStudioPixelSizeForModel({ w, h }, selectedModel?.id);
-    setLocalW(normalized.w);
-    setLocalH(normalized.h);
-    onCustomSizeChange?.(normalized.w, normalized.h);
-  }
-
-  function handleResolutionSelect(newResolution: '2K' | '4K') {
-    onResolutionChange?.(newResolution);
-    const { w, h } = computeStudioPixelSize(ratio, newResolution, selectedModel?.id);
-    const normalized = normalizeStudioPixelSizeForModel({ w, h }, selectedModel?.id);
-    setLocalW(normalized.w);
-    setLocalH(normalized.h);
-    onCustomSizeChange?.(normalized.w, normalized.h);
-  }
-
-  function handleWChange(raw: string) {
-    const newW = Math.max(minPx, parseInt(raw, 10) || minPx);
-    setLocalW(newW);
-    if (sizeLocked) {
-      const [a, b] = ratio.split(':').map(Number);
-      const newH = a > 0 ? Math.max(minPx, Math.round((newW * b) / a)) : localH;
-      const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: newH }, selectedModel?.id);
-      setLocalW(normalized.w);
-      setLocalH(normalized.h);
-      onCustomSizeChange?.(normalized.w, normalized.h, true);
-    } else {
-      const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: localH }, selectedModel?.id);
-      setLocalW(normalized.w);
-      setLocalH(normalized.h);
-      onCustomSizeChange?.(normalized.w, normalized.h, true);
-    }
-  }
-
-  function handleHChange(raw: string) {
-    const newH = Math.max(minPx, parseInt(raw, 10) || minPx);
-    setLocalH(newH);
-    if (sizeLocked) {
-      const [a, b] = ratio.split(':').map(Number);
-      const newW = b > 0 ? Math.max(minPx, Math.round((newH * a) / b)) : localW;
-      const normalized = normalizeStudioPixelSizeForModel({ w: newW, h: newH }, selectedModel?.id);
-      setLocalW(normalized.w);
-      setLocalH(normalized.h);
-      onCustomSizeChange?.(normalized.w, normalized.h, true);
-    } else {
-      const normalized = normalizeStudioPixelSizeForModel({ w: localW, h: newH }, selectedModel?.id);
-      setLocalW(normalized.w);
-      setLocalH(normalized.h);
-      onCustomSizeChange?.(normalized.w, normalized.h, true);
-    }
-  }
-
-  function handleToggleLock() {
-    const next = !sizeLocked;
-    setSizeLocked(next);
-    if (next) {
-      const { w, h } = computeStudioPixelSize(ratio, resolution, selectedModel?.id);
-      const normalized = normalizeStudioPixelSizeForModel({ w, h }, selectedModel?.id);
-      setLocalW(normalized.w);
-      setLocalH(normalized.h);
-      onCustomSizeChange?.(normalized.w, normalized.h);
-    }
   }
 
   return (
@@ -1282,7 +1184,7 @@ export function PromptInput({
               onClick={() => setOpenPanel(openPanel === 'size' ? null : 'size')}
             >
               <Square size={14} aria-hidden />
-              {caps.showCustomSize ? <>{localW}:{localH}</> : <>{ratio}</>}
+              {imageSizeSummary(sizeParams)}
               {/* 第二段没有实际参数时连分隔符一起省掉，避免按钮末尾挂一根竖线。 */}
               {sizeControlDetail && (
                 <>
@@ -1300,133 +1202,7 @@ export function PromptInput({
               className="w-[320px] max-h-[70vh] overflow-y-auto rounded-xl border border-border bg-card p-3"
             >
                 <div className="space-y-4">
-                  <section className="w-[296px]">
-                    <div className="py-1 px-1 text-xs text-muted-foreground">比例</div>
-                    {isMj && (
-                      <p data-testid="mj-size-note" className="px-1 pb-2 text-xs text-muted-foreground">
-                        Midjourney 按比例出图（拼成 --ar），像素边长由它自己定，没有分辨率档。
-                      </p>
-                    )}
-                    <div
-                      role="listbox"
-                      aria-label="选择比例"
-                      className="grid rounded-lg bg-popover p-1"
-                    >
-                      {/* 强调 1:1 的双栏布局属于「比例 + 2K/4K 分辨率」的像素族（seedream / standard）；
-                          只发比例串的族（nano-banana / gpt-image / 走 OpenRouter 的一切）用紧凑四列网格。 */}
-                      {!caps.showResolution ? (
-                        <div className="grid grid-cols-4 gap-y-1">
-                          {caps.ratios.map((item) => (
-                            <button
-                              key={item}
-                              type="button"
-                              role="option"
-                              aria-selected={ratio === item}
-                              onClick={() => handleRatioSelect(item)}
-                              className="flex h-[43px] w-full flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
-                            >
-                              <RatioIcon ratio={item} box={18} />
-                              <span>{item}</span>
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="h-[98px] w-[296px] grid grid-cols-[56px_1fr]">
-                          <button
-                            type="button"
-                            role="option"
-                            aria-selected={ratio === '1:1'}
-                            onClick={() => handleRatioSelect('1:1')}
-                            className="flex h-[90px] w-[56px] flex-col items-center justify-center gap-2 rounded-lg text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
-                          >
-                            <RatioIcon ratio="1:1" box={28} />
-                            <span>1:1</span>
-                          </button>
-                          <div data-testid="side-ratio-grid" className="grid min-w-0 grid-cols-4 grid-rows-2 gap-y-1">
-                            {SIDE_RATIOS.map((item) => (
-                              <button
-                                key={item}
-                                type="button"
-                                role="option"
-                                aria-selected={ratio === item}
-                                onClick={() => handleRatioSelect(item)}
-                                className="flex h-[43px] w-full flex-col items-center justify-center gap-0.5 rounded-lg text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
-                              >
-                                <RatioIcon ratio={item} box={18} />
-                                <span>{item}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </section>
-
-                  {caps.showResolution && (
-                    <section className="w-[296px]">
-                      <div className="py-1 px-1 text-xs text-muted-foreground">分辨率</div>
-                      <div
-                        role="listbox"
-                        aria-label="选择分辨率"
-                        className={`grid h-9 rounded-lg bg-popover p-0.5 ${
-                          caps.resolutions.length > 1 ? 'grid-cols-2' : 'grid-cols-1'
-                        }`}
-                      >
-                        {caps.resolutions.map((item) => (
-                          <button
-                            key={item}
-                            type="button"
-                            role="option"
-                            aria-selected={resolution === item}
-                            onClick={() => handleResolutionSelect(item)}
-                            className="h-8 rounded-md text-center text-sm hover:bg-secondary/60 aria-selected:bg-secondary aria-selected:ring-1 aria-selected:ring-primary/60 transition-colors"
-                          >
-                            {item === '2K' ? '高清 2K' : '超清 4K'}
-                          </button>
-                        ))}
-                      </div>
-                    </section>
-                  )}
-
-                  {caps.showCustomSize && (
-                      <section className="w-[296px]">
-                        <div className="py-1 px-1 text-xs text-muted-foreground">尺寸</div>
-                        <div className="flex w-[296px] items-center gap-2">
-                          <div className="flex min-w-0 flex-1 items-center h-[34px] rounded-md bg-popover px-4 py-[10px]">
-                            <span className="shrink-0 text-xs text-muted-foreground">W</span>
-                            <input
-                              type="number"
-                              aria-label="输出宽度"
-                              value={localW}
-                              min={minPx}
-                              onChange={(e) => handleWChange(e.target.value)}
-                              className="min-w-0 flex-1 bg-transparent text-xs tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pt-[7px] pb-[7px] pl-2 pr-0"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            aria-label={sizeLocked ? '解除比例锁定' : '锁定比例'}
-                            title={sizeLocked ? '解除比例锁定' : '锁定比例'}
-                            onClick={handleToggleLock}
-                            className={`grid size-6 shrink-0 place-items-center rounded transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary ${sizeLocked ? 'text-primary' : 'text-muted-foreground'}`}
-                          >
-                            <Link2 size={15} aria-hidden />
-                          </button>
-                          <div className="flex min-w-0 flex-1 items-center h-[34px] rounded-md bg-popover px-4 py-[10px]">
-                            <span className="shrink-0 text-xs text-muted-foreground">H</span>
-                            <input
-                              type="number"
-                              aria-label="输出高度"
-                              value={localH}
-                              min={minPx}
-                              onChange={(e) => handleHChange(e.target.value)}
-                              className="min-w-0 flex-1 bg-transparent text-xs tabular-nums focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none pt-[7px] pb-[7px] pl-2 pr-0"
-                            />
-                          </div>
-                          <span className="shrink-0 text-xs text-muted-foreground">PX</span>
-                        </div>
-                      </section>
-                  )}
+                  <ImageSizeFields caps={caps} model={selectedModel?.id ?? ''} baseUrl={provider?.base_url} params={sizeParams} onPatch={patch => onSizeParamsChange?.(patch)} />
 
                   {caps.qualities && (
                     <section className="w-[296px]">

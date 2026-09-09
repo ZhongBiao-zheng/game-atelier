@@ -244,6 +244,7 @@ export function CanvasMaskEditDialog({
     params.n = requestedCount;
     params.quality = quality;
     params.size = 'auto';
+    params.size_mode = 'auto';
     onSubmit({
       mask,
       requestedCount,

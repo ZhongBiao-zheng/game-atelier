@@ -10,6 +10,7 @@ interface CanvasNodeIdentity {
 
 const PARAM_LABELS: Record<string, string> = {
   size: '尺寸',
+  size_mode: '尺寸模式',
   ratio: '比例',
   quality: '质量',
   background: '背景',
@@ -100,6 +101,7 @@ function sanitizeParameter(value: unknown, key = ''): unknown {
 }
 
 function formatParameter(value: unknown, key: string): string {
+  if (key === 'size_mode') return ({ auto: 'AUTO', ratio: '比例', custom: '自定义' } as Record<string, string>)[String(value)] ?? String(value);
   const sanitized = sanitizeParameter(value, key);
   if (typeof sanitized === 'boolean') return sanitized ? '开启' : '关闭';
   if (typeof sanitized === 'string' || typeof sanitized === 'number') return String(sanitized);
