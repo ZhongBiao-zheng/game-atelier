@@ -647,29 +647,40 @@ def test_render_openai_hk_gpt_image_no_reference_stays_on_generations(
     assert len(paths) == 1
 
 
-@pytest.mark.parametrize("base_url", ["https://api.openai.com/v1", "https://api.openai-hk.com"])
+@pytest.mark.parametrize("base_url", [
+    "https://api.openai.com/v1", "https://api.openai-hk.com", "https://api.tu-zi.com/v1",
+])
+@pytest.mark.parametrize("model", ["gpt-image-2", "gpt-image-1.5", "gpt-image-1"])
 @pytest.mark.parametrize("with_reference", [False, True])
 def test_dispatch_explicit_auto_reaches_image_json_and_multipart_without_pixel_default(
-    isolated_data_root, tmp_path, monkeypatch, base_url, with_reference,
+    isolated_data_root, tmp_path, monkeypatch, base_url, model, with_reference,
 ):
     _add_key(alias="auto-size", provider="custom", base_url=base_url)
     captured = []
     png = b"\x89PNG\r\n\x1a\nauto"
     def post(url, **kwargs):
         captured.append((url, kwargs.get("json") or kwargs.get("data")))
+        if "tu-zi.com" in base_url:
+            return FakePostResponse({"id": "auto-task"})
         return FakePostResponse({"data": [{"b64_json": base64.b64encode(png).decode()}]})
     monkeypatch.setattr(openai_image.requests, "post", post)
+    monkeypatch.setattr(openai_image.requests, "get", lambda *args, **kwargs: FakePostResponse({
+        "status": "completed", "result": {"data": [{"b64_json": base64.b64encode(png).decode()}]},
+    }))
     params = {"size_mode": "auto", "size": "1360x2048", "ratio": "2:3",
               "resolution": "2K", "custom_size": "1360x2048", "quality": "high"}
     if with_reference:
         reference = tmp_path / "reference.png"
         reference.write_bytes(png)
         params["reference_images"] = [str(reference)]
-    paths = dispatch(prompt="architecture", model="gpt-image-2", alias="auto-size",
+    paths = dispatch(prompt="architecture", model=model, alias="auto-size",
                      output_dir=tmp_path / "out", params=params, size="1360x2048")
     assert len(paths) == 1
     url, body = captured[0]
     assert url.endswith("/images/edits" if with_reference else "/images/generations")
+    if "tu-zi.com" in base_url:
+        assert "/async/v1/images/" in url
+    assert body["model"] == model
     assert body["size"] == "auto"
     assert body["quality"] == "high"
     assert "ratio" not in body

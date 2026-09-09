@@ -42,7 +42,7 @@ describe('mask edit output size', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('uses real source pixels for a channel without verified AUTO support', async () => {
-    const onSubmit = openDialog([key('Tuzi', 'https://api.tu-zi.com/v1')]);
+    const onSubmit = openDialog([key('Unknown', 'https://unknown.example/v1')]);
     expect(screen.getByLabelText('局部编辑输出尺寸')).toHaveTextContent('1360×2048');
     fireEvent.click(screen.getByRole('button', { name: '生成局部编辑' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
@@ -51,9 +51,9 @@ describe('mask edit output size', () => {
     });
   });
 
-  it('uses AUTO only for a verified channel and updates the summary when switching keys', async () => {
-    const onSubmit = openDialog([key('Tuzi', 'https://api.tu-zi.com/v1'), key('HK', 'https://api.openai-hk.com')]);
-    fireEvent.change(screen.getByLabelText('局部编辑密钥'), { target: { value: 'HK' } });
+  it.each(['https://api.openai-hk.com', 'https://api.tu-zi.com/v1'])('uses AUTO for verified channel %s and updates the summary when switching keys', async (baseUrl) => {
+    const onSubmit = openDialog([key('Unknown', 'https://unknown.example/v1'), key('Verified', baseUrl)]);
+    fireEvent.change(screen.getByLabelText('局部编辑密钥'), { target: { value: 'Verified' } });
     expect(screen.getByLabelText('局部编辑输出尺寸')).toHaveTextContent('AUTO');
     fireEvent.click(screen.getByRole('button', { name: '生成局部编辑' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
@@ -61,7 +61,7 @@ describe('mask edit output size', () => {
   });
 
   it('previews normalized pixels before submitting custom source dimensions', async () => {
-    const onSubmit = openDialog([key('Tuzi', 'https://api.tu-zi.com/v1')], 1361, 2049);
+    const onSubmit = openDialog([key('Unknown', 'https://unknown.example/v1')], 1361, 2049);
     expect(screen.getByLabelText('局部编辑输出尺寸')).toHaveTextContent('1360×2048');
     fireEvent.click(screen.getByRole('button', { name: '生成局部编辑' }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
@@ -69,7 +69,7 @@ describe('mask edit output size', () => {
   });
 
   it('blocks unsupported source aspect ratios instead of silently changing the image', () => {
-    const onSubmit = openDialog([key('Tuzi', 'https://api.tu-zi.com/v1')], 4000, 1000);
+    const onSubmit = openDialog([key('Unknown', 'https://unknown.example/v1')], 4000, 1000);
     expect(screen.getByRole('alert')).toHaveTextContent('不能超过 3:1');
     expect(screen.getByRole('button', { name: '生成局部编辑' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '生成局部编辑' }));

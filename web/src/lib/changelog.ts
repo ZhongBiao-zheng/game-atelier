@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.42.1',
+    date: '2026-09-09',
+    headline: '补齐 Tuzi 图片 AUTO',
+    changes: [
+      { kind: 'fix', text: 'Tuzi 的 GPT Image 2、1.5、1 现可选择 AUTO 尺寸，画布、创作台和局部重绘同步支持。' },
+    ],
+  },
+  {
     version: '5.42.0',
     date: '2026-09-09',
     headline: '图片尺寸模式统一',

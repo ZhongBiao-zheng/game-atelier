@@ -17,7 +17,13 @@ def _key(provider="openai", base_url=None):
     ("custom", "https://api.openai.com/v1", "gpt-image-2.5-flare", True),
     ("custom", "https://api.openai-hk.com/v1", "gpt-image-2", True),
     ("custom", "https://api.openai-hk.com/v1", "gpt-image-2.5-flare", False),
-    ("custom", "https://api.tu-zi.com/v1", "gpt-image-2", False),
+    ("custom", "https://api.tu-zi.com/v1", "gpt-image-2", True),
+    ("openai", "https://api.tu-zi.com/v1", "gpt-image-1.5", True),
+    ("custom", "https://tu-zi.com/v1", "gpt-image-1", True),
+    ("custom", "https://api.tu-zi.com/v1", "gpt-image-2-vip", False),
+    ("custom", "https://api.tu-zi.com/v1", "gpt-image-2-1k", False),
+    ("custom", "https://api.tu-zi.com/v1", "nano-banana-pro", False),
+    ("custom", "https://tu-zi.com.example/v1", "gpt-image-2", False),
     ("openai", "https://other.example/v1", "gpt-image-2", False),
     ("custom", "https://openai-hk.com.example/v1", "gpt-image-2", False),
     ("openrouter", "https://openrouter.ai/api/v1", "openai/gpt-image-2.5-sunburst", True),
@@ -62,7 +68,7 @@ def test_legacy_auto_is_not_reinterpreted_as_explicit_mode():
 
 def test_explicit_auto_rejects_unknown_channel():
     with pytest.raises(ValueError, match="尚未确认支持 AUTO"):
-        normalize_image_size_params(_key("custom", "https://api.tu-zi.com/v1"),
+        normalize_image_size_params(_key("custom", "https://unknown.example/v1"),
                                     "gpt-image-2", {"size_mode": "auto"})
 
 

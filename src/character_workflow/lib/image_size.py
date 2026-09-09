@@ -13,7 +13,7 @@ from character_workflow.lib.callers.openai_image import (
 from character_workflow.lib.keys import KeySpec
 
 
-# Verified 2026-09-09: official Images API, HK GPT Image docs, and OpenRouter's
+# Verified 2026-09-09: official/Tuzi Images API, HK GPT Image docs, and OpenRouter's
 # public /images/models capability descriptors. A compatible name alone is not evidence.
 _OPENAI_AUTO_MODELS = frozenset({
     "gpt-image-1", "gpt-image-1-mini", "gpt-image-1.5", "gpt-image-2",
@@ -21,6 +21,7 @@ _OPENAI_AUTO_MODELS = frozenset({
     "gpt-image-2.5-sunburst-2026-09-08", "gpt-image-2.5-flare-2026-09-08",
 })
 _HK_AUTO_MODELS = frozenset({"gpt-image-1", "gpt-image-1.5", "gpt-image-2"})
+_TUZI_AUTO_MODELS = frozenset({"gpt-image-1", "gpt-image-1.5", "gpt-image-2"})
 _OPENROUTER_AUTO_MODELS = frozenset({
     "openai/gpt-image-1", "openai/gpt-image-1-mini", "openai/gpt-image-2",
     "openai/gpt-image-2.5-sunburst", "openai/gpt-image-2.5-flare",
@@ -33,6 +34,8 @@ def supports_auto_image_size(provider: str, base_url: str | None, model: str) ->
         return host == "openrouter.ai" and model in _OPENROUTER_AUTO_MODELS
     if provider not in {"openai", "custom"}:
         return False
+    if host == "tu-zi.com" or host.endswith(".tu-zi.com"):
+        return model in _TUZI_AUTO_MODELS
     if host == "openai-hk.com" or host.endswith(".openai-hk.com"):
         return model in _HK_AUTO_MODELS
     return (

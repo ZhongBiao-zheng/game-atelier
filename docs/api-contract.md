@@ -22,7 +22,13 @@
 AUTO能力依据（2026-09-09）：[OpenAI Images](https://developers.openai.com/api/docs/guides/image-generation)、
 [HK GPT Image](https://www.openai-hk.com/docs/openai/gpt-image.html)、
 [OpenRouter图像API与模型能力](https://openrouter.ai/docs/guides/overview/multimodal/image-generation)。
-白名单由 `imageControlCaps.ts` 与 `image_size.py` 同步维护。Tuzi/Seedream/MJ/未知渠道未确认AUTO，暂不展示。
+白名单由 `imageControlCaps.ts` 与 `image_size.py` 同步维护。
+5.42.1补齐Tuzi的精确型号 `gpt-image-2`、`gpt-image-1.5`、`gpt-image-1`：
+[default文生图](https://tuzi-api.apifox.cn/343646952e0)、
+[官方兼容文生图](https://tuzi-api.apifox.cn/448333922e0)、
+[官方兼容编辑](https://tuzi-api.apifox.cn/448333992e0)均注明size=auto；
+复用现有Images端点与通用异步包装，不改走独立的 `/v1/videos` 图片任务接口。
+VIP、固定1K等别名不由基础型号推断能力。Seedream/MJ/未知渠道暂不展示AUTO。
 AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单或有依据的固定单价。
 
 网站连接本机与外部 Agent 工坊入口已进入分阶段开发：

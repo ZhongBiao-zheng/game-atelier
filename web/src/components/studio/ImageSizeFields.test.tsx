@@ -9,12 +9,31 @@ import type { JobParams } from '@/schema/jobs';
 
 function Harness({ baseUrl }: { baseUrl?: string } = {}) {
   const [params, setParams] = useState<JobParams>({ size_mode: 'ratio', ratio: '2:3', size: '1360x2048' });
-  return <><output>{imageSizeSummary(params)}</output><ImageSizeFields caps={imageControlCaps('gpt-image-2', 'openai')}
+  return <><output>{imageSizeSummary(params)}</output><ImageSizeFields caps={imageControlCaps('gpt-image-2', 'openai', baseUrl)}
     model="gpt-image-2" baseUrl={baseUrl} params={params}
     onPatch={patch => setParams(current => normalizeImageSizeParams('gpt-image-2', 'openai', baseUrl, { ...current, ...patch }))} /></>;
 }
 
 describe('image size intent', () => {
+  it.each(['gpt-image-2', 'gpt-image-1.5', 'gpt-image-1'])('accepts Tuzi AUTO for %s without inactive dimensions', model => {
+    expect(imageControlCaps(model, 'custom', 'https://api.tu-zi.com/v1').showAutoSize).toBe(true);
+    expect(prepareImageSizeSubmission(model, 'custom', 'https://api.tu-zi.com/v1', {
+      size_mode: 'auto', size: '1360x2048', ratio: '2:3', resolution: '2K', custom_size: '1360x2048',
+    }).params).toEqual({ size_mode: 'auto', size: 'auto' });
+  });
+  it.each(['gpt-image-2-vip', 'gpt-image-2-1k', 'nano-banana-pro'])('does not infer AUTO for Tuzi alias %s', model => {
+    expect(imageControlCaps(model, 'custom', 'https://api.tu-zi.com/v1').showAutoSize).toBe(false);
+  });
+  it('offers Tuzi AUTO in the shared controls and retains its custom draft', () => {
+    render(<Harness baseUrl="https://api.tu-zi.com/v1" />);
+    fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '1024' } });
+    fireEvent.click(screen.getByRole('option', { name: 'AUTO' }));
+    expect(screen.getByRole('status')).toHaveTextContent('AUTO');
+    expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: '自定义' }));
+    expect(screen.getByLabelText('输出宽度')).toHaveValue(1024);
+    expect(imageControlCaps('gpt-image-2', 'custom', 'https://tu-zi.com.example/v1').showAutoSize).toBe(false);
+  });
   it('prepares only the active submission rule and rejects unsupported or invalid intent', () => {
     expect(prepareImageSizeSubmission('gpt-image-2', 'openai', null,
       { size_mode: 'auto', ratio: '2:3', resolution: '2K', custom_size: '1024x1024' }).params)
@@ -22,7 +41,7 @@ describe('image size intent', () => {
     expect(prepareImageSizeSubmission('gpt-image-2', 'custom', 'https://api.openai-hk.com',
       { size_mode: 'custom', size: '1360x2048', ratio: '2:3', resolution: '2K' }).params)
       .toEqual({ size_mode: 'custom', size: '1376x2064' });
-    expect(prepareImageSizeSubmission('gpt-image-2', 'custom', 'https://api.tu-zi.com', { size_mode: 'auto' }).error).toBeTruthy();
+    expect(prepareImageSizeSubmission('gpt-image-2', 'custom', 'https://unknown.example', { size_mode: 'auto' }).error).toBeTruthy();
     expect(prepareImageSizeSubmission('gpt-image-2', 'openai', null, { size_mode: 'custom', size: 'x2048' }).error).toBeTruthy();
   });
   it('does not snap dimensions while moving between width and height', () => {
@@ -71,7 +90,7 @@ describe('image size intent', () => {
 
   it('only offers AUTO for verified models and channels, and previews HK submission sizes', () => {
     expect(imageControlCaps('gpt-image-2', 'custom', 'https://api.openai-hk.com').showAutoSize).toBe(true);
-    expect(imageControlCaps('gpt-image-2', 'custom', 'https://api.tu-zi.com').showAutoSize).toBe(false);
+    expect(imageControlCaps('gpt-image-2', 'custom', 'https://api.tu-zi.com').showAutoSize).toBe(true);
     expect(imageControlCaps('openai/gpt-image-2.5-flare', 'openrouter', 'https://openrouter.ai/api/v1').showAutoSize).toBe(true);
     expect(imageControlCaps('openai/gpt-image-2.5-flare', 'openrouter', 'https://unknown.test').showAutoSize).toBe(false);
     expect(imageControlCaps('unknown', 'openai').showAutoSize).toBe(false);

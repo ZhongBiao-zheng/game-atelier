@@ -105,6 +105,8 @@ export function imageControlCaps(
   let host = '';
   try { host = new URL(baseUrl ?? '').hostname.toLowerCase(); } catch { /* Unconfigured key. */ }
   const isHk = host === 'openai-hk.com' || host.endsWith('.openai-hk.com');
+  const isTuzi = host === 'tu-zi.com' || host.endsWith('.tu-zi.com');
+  const tuziAutoModels = ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2'];
   const openaiAutoModels = ['gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2-2026-04-21',
     'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst-2026-09-08', 'gpt-image-2.5-flare-2026-09-08'];
   const openrouterAutoModels = ['openai/gpt-image-1', 'openai/gpt-image-1-mini', 'openai/gpt-image-2',
@@ -112,14 +114,8 @@ export function imageControlCaps(
   const showAutoSize = ((provider === 'openai' || provider === 'custom')
       && (host === 'api.openai.com' || (!host && provider === 'openai')) && openaiAutoModels.includes(modelId ?? ''))
     || ((provider === 'openai' || provider === 'custom') && isHk && ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2'].includes(modelId ?? ''))
+    || ((provider === 'openai' || provider === 'custom') && isTuzi && tuziAutoModels.includes(modelId ?? ''))
     || (provider === 'openrouter' && host === 'openrouter.ai' && openrouterAutoModels.includes(modelId ?? ''));
-  let isTuzi = false;
-  try {
-    const host = new URL(baseUrl ?? '').hostname.toLowerCase();
-    isTuzi = host === 'tu-zi.com' || host.endsWith('.tu-zi.com');
-  } catch {
-    // Missing or relative URLs are not Tuzi endpoints.
-  }
   // Tuzi 只有 Pro 与 2 的基础型号接收独立 quality；旧 2.5、HD/NT/VIP 的档位
   // 都编码在 model id。其他网关仍沿用共享的模型能力判定。
   const supportsTuziQuality = normalized === 'nano-banana-pro' || normalized === 'nano-banana-2';
