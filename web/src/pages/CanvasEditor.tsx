@@ -200,6 +200,7 @@ import {
   layerStackSizeForCanvasVersion,
   normalizeCanvasVideoParams,
   normalizeCanvasGroups,
+  expandCanvasLayerStack,
   placeCanvasNodeWithoutOverlap,
   restoreContentVersions,
   sizeLockedToCanvasVersion,
@@ -2514,6 +2515,20 @@ function CanvasEditorInner({
     projectId,
   ]);
 
+  const expandLayerStack = useCallback((nodeId: string) => {
+    const current = latestDocument.current;
+    if (!current || batchBusyRef.current) return;
+    try {
+      const expanded = expandCanvasLayerStack(current, nodeId, makeId);
+      commit(document => ({ ...document, nodes: [...document.nodes, ...expanded.nodes] }), true);
+      setSelectedConnectionIds(new Set());
+      setSelectedNodeIds(new Set([expanded.groupId]));
+      setError(null);
+    } catch (error) {
+      setError((error as Error).message);
+    }
+  }, [commit]);
+
   const createLayerDecomposition = useCallback((sourceNode: Extract<CanvasContentNode, { type: 'image' }>) => {
     const current = latestDocument.current;
     const source = current?.nodes.find(node => node.id === sourceNode.id);
@@ -3891,6 +3906,7 @@ function CanvasEditorInner({
     reversePromptConfiguredNodeIds,
     replaceMedia,
     replaceLayerStackSource,
+    expandLayerStack,
     toggleFreeResize,
     openMediaOperation,
     removeBackground,
@@ -3941,6 +3957,7 @@ function CanvasEditorInner({
     recoverReversePromptConfig,
     replaceMedia,
     replaceLayerStackSource,
+    expandLayerStack,
     reversePrompt,
     reversePromptConfiguredNodeIds,
     retryRun,

@@ -345,6 +345,15 @@ Input Connection。图片模型优先使用仍可路由的画布图片生成偏�
 `layer_decomposition` 血缘；媒体读取和项目包导入导出均校验该索引与 Job 输出一致。图层栈按绝对 bbox
 重建原图，显隐只修改节点呈现状态，不改写产物字节或 Job 历史。
 
+完成后的图层栈工具栏提供“下载全部图层”和“展开图层到画布并分组”。两者均包含背景及隐藏图层，
+顺序与右侧列表一致，不包含原始源图或合成预览。“下载全部图层”调用
+`GET /canvas/projects/{id}/nodes/{node_id}/layers/download`，复用本地会话与媒体归属校验，返回 ZIP
+附件；文件名带顺序号及安全化图层名，保留原始图片字节。未完成返回 422，缺失节点/文件返回 404，
+越权媒体返回 403；任一文件不可用时不输出缺图的压缩包。临时 ZIP 在响应完成后清理。
+“展开”在一次可撤销的文档编辑中创建普通图片节点及一个 Group，按列表顺序网格排列在原节点右侧，
+避开已有内容并选中新分组。新节点复用不可变 Version，不复制文件、不新建 Run 或派生连线；
+替换或删除新节点不改原图层栈。原图层显隐不影响新图片节点的可见性。
+
 `POST /canvas/projects/{id}/runs/mask-edit` 使用 multipart，只接受 `surface_node_id / expected_revision /
 requested_count / mask_file`。prompt、alias、model 与参数必须先保存为源图片节点的 image Draft，服务端
 读取后冻结；浏览器不能传媒体路径或绕过 Draft。蒙版必须是与 EXIF 归一后源图同尺寸的单帧 PNG，透明或

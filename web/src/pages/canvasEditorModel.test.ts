@@ -7,6 +7,8 @@ import {
   canvasNodeRenderZIndex,
   canvasPendingInputNodes,
   clampCanvasNodeSize,
+  expandCanvasLayerStack,
+  normalizeCanvasGroups,
   layerStackSizeForCanvasVersion,
   normalizeCanvasImageParams,
   placeCanvasNodeWithoutOverlap,
@@ -14,6 +16,46 @@ import {
 } from './canvasEditorModel';
 import type { CanvasDocument, CanvasNode } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
+
+it('expands every layer including hidden ones into independent images grouped to the right', () => {
+  const stack = {
+    id: 'stack', title: '拆分图层', type: 'layer_stack', position: { x: 0, y: 0 },
+    size: { width: 760, height: 480 }, z_index: 0,
+    data: { source_version_id: 'base', alias: null, model: null, prompt: '', resolution: 'auto',
+      base_version_id: 'base', base_visible: false, active_run_id: null, error: null,
+      layers: [{ id: 'layer', version_id: 'layer-image', name: '标题', description: '', z_index: 1,
+        visible: false, bounding_box: { absolute: [0, 0, 10, 10], normalized: [0, 0, 1000, 1000] } }],
+    },
+  } satisfies Extract<CanvasNode, { type: 'layer_stack' }>;
+  const occupied = { ...stack, id: 'occupied', position: { x: 832, y: 0 } };
+  const current = documentWithNodes([stack, occupied], []);
+  const version = {
+    version_id: 'base', kind: 'image', path: 'uploads/base.png', mime_type: 'image/png', bytes: 42,
+    width: 100, height: 200, created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64),
+    origin: { kind: 'upload', upload_id: 'base' },
+  } as const;
+  current.content_versions = { base: version, 'layer-image': { ...version, version_id: 'layer-image', width: 200, height: 100 } };
+  const before = structuredClone(current);
+  let sequence = 0;
+  const result = expandCanvasLayerStack(current, stack.id, prefix => `${prefix}-${++sequence}`);
+  const normalized = normalizeCanvasGroups({ ...current, nodes: [...current.nodes, ...result.nodes] });
+  const images = result.nodes.filter(node => node.type === 'image');
+  expect(images.map(node => node.title)).toEqual(['背景', '标题']);
+  expect(images.map(node => node.data.current_version_id)).toEqual(['base', 'layer-image']);
+  expect(images.every(node => node.data.generation_draft === null && node.data.active_run_id === null)).toBe(true);
+  expect(images[0].size!.width / images[0].size!.height).toBe(0.5);
+  expect(images[1].size!.width / images[1].size!.height).toBe(2);
+  const group = normalized.nodes.find(node => node.id === result.groupId)!;
+  expect(group.position.x).toBeGreaterThan(occupied.position.x + occupied.size.width);
+  expect(group).toMatchObject({ data: { member_node_ids: images.map(node => node.id) } });
+  expect(current).toEqual(before);
+  const repeated = expandCanvasLayerStack(normalized, stack.id, prefix => `${prefix}-${++sequence}`);
+  expect(repeated.nodes.at(-1)!.position.x).toBeGreaterThan(group.position.x + group.size!.width);
+  delete current.content_versions['layer-image'];
+  expect(() => expandCanvasLayerStack(current, stack.id, () => 'unused')).toThrow('图层图片不可用');
+  current.nodes[0] = { ...stack, data: { ...stack.data, base_version_id: null } };
+  expect(() => expandCanvasLayerStack(current, stack.id, () => 'unused')).toThrow('尚未拆分完成');
+});
 
 it('raises selected nodes above every persisted canvas layer without changing other nodes', () => {
   expect(canvasNodeRenderZIndex(3, false, 12)).toBe(3);

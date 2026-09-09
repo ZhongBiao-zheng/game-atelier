@@ -100,6 +100,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     copyPrompt: vi.fn(async () => undefined),
     reversePrompt: vi.fn(async () => undefined),
     createLayerDecomposition: vi.fn(),
+    expandLayerStack: vi.fn(),
     submitLayerDecomposition: vi.fn(async () => undefined),
     replaceLayerStackSource: vi.fn(),
     recoverReversePromptConfig: vi.fn(async () => undefined),

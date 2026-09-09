@@ -24,6 +24,8 @@ import type {
   CanvasNode,
   CanvasPoint,
   CanvasMediaOperation,
+  CanvasImageNode,
+  CanvasGroupNode,
   CanvasSize,
 } from '@/schema/canvas';
 import {
@@ -194,6 +196,56 @@ export function normalizeCanvasGroups(document: CanvasDocument): CanvasDocument 
       && node.size?.height === size.height && members.length === node.data.member_node_ids.length) return node;
     return { ...node, position: { x, y }, size, data: { ...node.data, member_node_ids: members.map(member => member.id) } };
   }) };
+}
+
+/** Expand a snapshot into independently editable nodes; never mutate the layer stack or its media. */
+export function expandCanvasLayerStack(
+  document: CanvasDocument,
+  nodeId: string,
+  makeId: (prefix: string) => string,
+): { nodes: CanvasNode[]; groupId: string } {
+  const stack = document.nodes.find(node => node.id === nodeId);
+  if (stack?.type !== 'layer_stack' || !stack.data.base_version_id || stack.data.active_run_id) {
+    throw new Error('图层尚未拆分完成');
+  }
+  const entries = [
+    { name: '背景', versionId: stack.data.base_version_id },
+    ...stack.data.layers.map(layer => ({ name: layer.name || `图层 ${layer.z_index}`, versionId: layer.version_id })),
+  ];
+  const images: CanvasImageNode[] = entries.map(entry => {
+    const version = document.content_versions[entry.versionId];
+    if (version?.kind !== 'image') throw new Error('图层图片不可用，未展开');
+    return {
+      id: makeId('image'), type: 'image', title: entry.name,
+      position: { x: 0, y: 0 }, size: sizeLockedToCanvasVersion(null, version), z_index: stack.z_index,
+      data: { current_version_id: version.version_id, generation_draft: null, active_run_id: null,
+        display: { fit: 'contain', free_resize: false } },
+    };
+  });
+  const columns = Math.min(4, Math.ceil(Math.sqrt(images.length)));
+  const cellWidth = Math.max(...images.map(node => node.size!.width)) + 48;
+  const cellHeight = Math.max(...images.map(node => node.size!.height)) + 64;
+  const groupWidth = columns * cellWidth;
+  const groupHeight = Math.ceil(images.length / columns) * cellHeight;
+  let left = stack.position.x + canvasNodeRenderedSize(stack, document.content_versions).width + 72;
+  const top = stack.position.y;
+  // Only shift the new group rightward; never rearrange the existing canvas or drift left of the stack.
+  for (const occupied of [...document.nodes].sort((a, b) => a.position.x - b.position.x)) {
+    const size = canvasNodeRenderedSize(occupied, document.content_versions);
+    if (top < occupied.position.y + size.height + 48 && top + groupHeight + 48 > occupied.position.y
+      && left < occupied.position.x + size.width + 48 && left + groupWidth + 48 > occupied.position.x) {
+      left = occupied.position.x + size.width + 72;
+    }
+  }
+  images.forEach((node, index) => {
+    node.position = { x: left + 24 + index % columns * cellWidth, y: top + 40 + Math.floor(index / columns) * cellHeight };
+  });
+  const group: CanvasGroupNode = {
+    id: makeId('group'), type: 'group', title: `${stack.title} · 图层`,
+    position: { x: left, y: top }, size: { width: groupWidth, height: groupHeight }, z_index: 0,
+    data: { member_node_ids: images.map(node => node.id), repeat_count: 1 },
+  };
+  return { nodes: [...images, group], groupId: group.id };
 }
 
 /** 从期望位置开始，按网格圈由内向外找一个不与现有节点重叠的点。

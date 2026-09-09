@@ -2891,6 +2891,27 @@ def _canvas_media_file_response(
         raise HTTPException(403, detail=str(error)) from error
 
 
+@router.get("/canvas/projects/{project_id}/nodes/{node_id}/layers/download")
+def get_canvas_layers_download(project_id: str, node_id: str) -> FileResponse:
+    from character_workflow.lib.canvas_layer_exports import export_canvas_layers
+
+    try:
+        target, filename = export_canvas_layers(project_id, node_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个拆分图层节点") from None
+    except FileNotFoundError:
+        raise HTTPException(404, detail="图层文件缺失，未导出不完整的压缩包") from None
+    except PermissionError:
+        raise HTTPException(403, detail="图层文件不属于这个画布项目") from None
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    return FileResponse(
+        target, media_type="application/zip", filename=filename,
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        background=BackgroundTask(target.unlink, missing_ok=True),
+    )
+
+
 @router.get("/canvas/projects/{project_id}/jobs", response_model=list[Job])
 def get_canvas_jobs(project_id: str) -> list[Job]:
     from character_workflow.lib.canvas_runs import reconcile_canvas_jobs

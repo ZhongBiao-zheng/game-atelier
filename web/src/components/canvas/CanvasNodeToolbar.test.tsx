@@ -1,4 +1,5 @@
 import type { CanvasContentVersion } from '@/schema/canvas';
+import { downloadCanvasLayers } from '@/api/canvas';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 
@@ -10,6 +11,11 @@ import {
 } from './CanvasEditorViews';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from './canvasImageToolbar';
 import type { CanvasNode } from '@/schema/canvas';
+
+vi.mock('@/api/canvas', async importOriginal => ({
+  ...await importOriginal<typeof import('@/api/canvas')>(),
+  downloadCanvasLayers: vi.fn(async () => undefined),
+}));
 
 
 /** context 里已经不再是版本表而是解析器（见 CanvasEditor 里 resolveVersion 的说明），
@@ -124,6 +130,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     copyPrompt: vi.fn(async () => undefined),
     reversePrompt: vi.fn(async () => undefined),
     createLayerDecomposition: vi.fn(),
+    expandLayerStack: vi.fn(),
     submitLayerDecomposition: vi.fn(async () => undefined),
     replaceLayerStackSource: vi.fn(),
     recoverReversePromptConfig: vi.fn(async () => undefined),
@@ -418,6 +425,39 @@ it('keeps populated media playable inside the node without opening preview from 
   fireEvent.doubleClick(video!);
   fireEvent.doubleClick(audio!);
   expect(context.previewContent).not.toHaveBeenCalled();
+});
+
+it('offers bulk layer actions only after completion and reports download failures', async () => {
+  const stack = {
+    id: 'stack-tools', title: '拆分图层', type: 'layer_stack', position: { x: 0, y: 0 }, z_index: 0,
+    size: { width: 760, height: 480 },
+    data: { source_version_id: 'source', alias: null, model: null, prompt: '', resolution: 'auto',
+      base_version_id: null, base_visible: true, layers: [], active_run_id: null, error: null },
+  } satisfies Extract<CanvasNode, { type: 'layer_stack' }>;
+  const context = nodeContext({ reportError: vi.fn() });
+  const view = (node: CanvasNode) => <CanvasNodeContext.Provider value={context}>
+    <NodeCard data={{ domain: node }} selected />
+  </CanvasNodeContext.Provider>;
+  const { rerender } = render(view(stack));
+  expect(screen.getByRole('button', { name: '下载全部图层' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '展开图层到画布并分组' })).toBeDisabled();
+  const ready = { ...stack, data: { ...stack.data, base_version_id: 'base' } };
+  rerender(view(ready));
+  fireEvent.click(screen.getByRole('button', { name: '展开图层到画布并分组' }));
+  expect(context.expandLayerStack).toHaveBeenCalledWith(stack.id);
+  let rejectDownload!: (error: Error) => void;
+  vi.mocked(downloadCanvasLayers).mockImplementationOnce(() => new Promise((_, reject) => { rejectDownload = reject; }));
+  fireEvent.click(screen.getByRole('button', { name: '下载全部图层' }));
+  expect(downloadCanvasLayers).toHaveBeenCalledWith('canvas-test', stack.id);
+  expect(screen.getByRole('button', { name: '下载全部图层' })).toBeDisabled();
+  await act(async () => rejectDownload(new Error('图层文件缺失')));
+  expect(context.reportError).toHaveBeenCalledWith('图层文件缺失');
+  expect(screen.getByRole('button', { name: '下载全部图层' })).toBeEnabled();
+  context.batchBusy = true;
+  rerender(view(ready));
+  expect(screen.getByRole('button', { name: '展开图层到画布并分组' })).toBeDisabled();
+  rerender(view({ ...ready, data: { ...ready.data, active_run_id: 'run' } }));
+  expect(screen.getByRole('button', { name: '下载全部图层' })).toBeDisabled();
 });
 
 it('shows every configured image action after selection and keeps it mounted while settings are open', async () => {

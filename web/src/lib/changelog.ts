@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.40.0',
+    date: '2026-09-09',
+    headline: '拆分图层：打包下载，一键展开到画布',
+    changes: [
+      { kind: 'feat', text: '图层栈上方可将背景及全部图层打包下载为 ZIP，保留原图与名称' },
+      { kind: 'feat', text: '一键将全部图层展开为独立图片节点，自动排列到右侧并分组，支持整组撤销' },
+    ],
+  },
+  {
     version: '5.39.4',
     date: '2026-09-09',
     headline: '首页：排除残留图片，保留成功作品',

@@ -19,7 +19,7 @@ import {
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
 
-import { canvasDownloadUrl, canvasMediaUrl } from '@/api/canvas';
+import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers } from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasExecutionGroup } from './CanvasBatchControls';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
@@ -172,6 +172,7 @@ export interface CanvasNodeContextValue {
   createLayerDecomposition: (node: Extract<CanvasContentNode, { type: 'image' }>) => void;
   submitLayerDecomposition: (nodeId: string) => Promise<void>;
   replaceLayerStackSource: (nodeId: string) => void;
+  expandLayerStack: (nodeId: string) => void;
   recoverReversePromptConfig: (job: Job) => Promise<void>;
   reversePromptConfiguredNodeIds: ReadonlySet<string>;
   replaceMedia: (node: CanvasContentNode) => void;
@@ -1381,6 +1382,9 @@ function CanvasNodeToolbar({
 }) {
   const contentNode = isCanvasContentNode(node) ? node : null;
   const mediaNode = contentNode && contentNode.type !== 'text' ? contentNode : null;
+  const [downloadingLayers, setDownloadingLayers] = useState(false);
+  const layersReady = node.type === 'layer_stack' && Boolean(node.data.base_version_id)
+    && !node.data.active_run_id && !submitting;
 
   return (
     <>
@@ -1409,6 +1413,29 @@ function CanvasNodeToolbar({
             onClick={() => context.createImageConfigFromText(node.id)}
           >
             <FileImage />
+          </MediaToolButton>
+        </>
+      )}
+      {node.type === 'layer_stack' && (
+        <>
+          <MediaToolButton
+            label="下载全部图层"
+            disabled={!layersReady || downloadingLayers}
+            onClick={() => {
+              setDownloadingLayers(true);
+              void downloadCanvasLayers(context.projectId, node.id)
+                .catch(error => context.reportError?.((error as Error).message))
+                .finally(() => setDownloadingLayers(false));
+            }}
+          >
+            {downloadingLayers ? <LoaderCircle className="animate-spin" /> : <Download />}
+          </MediaToolButton>
+          <MediaToolButton
+            label="展开图层到画布并分组"
+            disabled={!layersReady || context.batchBusy}
+            onClick={() => context.expandLayerStack(node.id)}
+          >
+            <Layers3 />
           </MediaToolButton>
         </>
       )}

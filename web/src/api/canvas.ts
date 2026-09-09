@@ -96,19 +96,33 @@ export async function exportCanvasProjects(projectIds: string[]): Promise<void> 
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ project_ids: projectIds }),
   });
+  await downloadResponse(response, '画布项目.game-atelier-canvas.zip');
+}
+
+export async function downloadCanvasLayers(projectId: string, nodeId: string): Promise<void> {
+  const response = await request(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(nodeId)}/layers/download`,
+    '下载全部图层',
+  );
+  await downloadResponse(response, '全部图层.zip');
+}
+
+async function downloadResponse(response: Response, fallbackName: string): Promise<void> {
   const blob = await response.blob();
   const disposition = response.headers.get('content-disposition') ?? '';
   const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
   const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1];
   const filename = encodedName
     ? decodeURIComponent(encodedName)
-    : plainName ?? '画布项目.game-atelier-canvas.zip';
+    : plainName ?? fallbackName;
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = filename;
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function inspectCanvasPackage(file: File): Promise<CanvasPackageInspection> {

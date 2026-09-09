@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
+from zipfile import ZipFile
 
 import pytest
 from tests.local_client import LocalTestClient as TestClient
@@ -229,6 +231,16 @@ def test_layer_decomposition_runs_existing_stack_and_registers_every_output(isol
     assert resolved_path == layer_path
     assert resolved.origin.kind == "layer_decomposition"
     assert resolved.origin.output_index == 1
+
+    client = TestClient(build_app(), base_url="http://127.0.0.1")
+    response = client.get(
+        f"/api/canvas/projects/{project.project_id}/nodes/{result_node.id}/layers/download",
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    with ZipFile(BytesIO(response.content)) as archive:
+        assert archive.namelist() == ["001-背景.png", "002-主体.png"]
+        assert all(archive.read(name) == PNG for name in archive.namelist())
 
     package_path, _filename = export_canvas_projects([project.project_id])
     try:
