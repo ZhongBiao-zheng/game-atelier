@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.44.1',
+    date: '2026-09-09',
+    headline: '精简画布工具栏与透明图片展示',
+    changes: [
+      { kind: 'fix', text: '移除左侧生成配置、撤销和重做按钮，撤销与重做快捷键继续可用。' },
+      { kind: 'fix', text: '图片节点不再铺默认底色，透明区域直接透出画布。' },
+    ],
+  },
+  {
     version: '5.44.0',
     date: '2026-09-09',
     headline: '拖拽调整拆分图层顺序',

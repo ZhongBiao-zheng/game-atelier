@@ -343,6 +343,8 @@ it('expands image candidates around the node and exposes candidate-specific acti
   expect(screen.getByTestId('canvas-candidate-stack')).toHaveAttribute('data-expanded', 'true');
   expect(screen.getByRole('group', { name: '候选 2' })).toBeInTheDocument();
   expect(screen.getByRole('group', { name: '候选 3' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: '候选 2' })).toHaveClass('bg-transparent');
+  expect(screen.getByRole('group', { name: '候选 3' })).toHaveClass('bg-card');
 
   fireEvent.click(screen.getByRole('button', { name: '将候选 2 设为主结果' }));
   expect(context.selectCandidate).toHaveBeenCalledWith(imageResultNode.id, 'version-other');

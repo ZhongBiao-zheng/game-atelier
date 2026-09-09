@@ -370,6 +370,7 @@ it('renders distinct empty media surfaces with direct upload actions', () => {
   );
 
   expect(screen.getByText('空图片节点')).toBeInTheDocument();
+  expect(screen.getByText('空图片节点').closest('article')).toHaveClass('bg-card/95');
   expect(screen.getByText('空视频节点')).toBeInTheDocument();
   expect(screen.getByText('空音频节点')).toBeInTheDocument();
 
@@ -421,6 +422,10 @@ it('keeps populated media playable inside the node without opening preview from 
   );
 
   expect(container.querySelector('img.object-fill')).toBeInTheDocument();
+  const imageSurface = container.querySelector('img.object-fill')!.closest('article')!;
+  expect(imageSurface).toHaveClass('bg-transparent');
+  expect(imageSurface.querySelector(':scope > div.h-full')).toHaveClass('bg-transparent');
+  expect(container.querySelector('video')!.closest('article')).toHaveClass('bg-card/95');
   const video = container.querySelector<HTMLVideoElement>('video[data-canvas-media-controls="video"]');
   const audio = container.querySelector<HTMLAudioElement>('audio[controls]');
   expect(video).toBeInTheDocument();

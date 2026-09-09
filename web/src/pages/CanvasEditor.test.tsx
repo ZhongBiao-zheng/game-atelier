@@ -645,9 +645,10 @@ it('undoes a text field edit as one session snapshot', async () => {
   const editor = await addTextNodeWithBody('可以撤销的修改');
   expect(editor).toHaveValue('可以撤销的修改');
 
-  fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+  fireEvent.keyDown(editor, { key: 'Tab' });
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
 
-  expect(screen.getByLabelText('编辑 文本 正文')).toHaveValue('');
+  expect(screen.queryByText('可以撤销的修改')).not.toBeInTheDocument();
 });
 
 it('undoes adding a node back to the loaded canvas', async () => {
@@ -657,10 +658,12 @@ it('undoes adding a node back to the loaded canvas', async () => {
   fireEvent.click(within(screen.getByRole('menu', { name: '添加节点' })).getByRole('menuitem', { name: /^图片/ }));
   expect(screen.getByTestId('react-flow')).toHaveAttribute('data-node-count', '1');
 
-  fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
 
   expect(screen.getByTestId('react-flow')).toHaveAttribute('data-node-count', '0');
   await waitFor(() => expect(lastSavedDocument()?.nodes).toEqual([]), { timeout: 1000 });
+  fireEvent.keyDown(window, { key: 'z', metaKey: true, shiftKey: true });
+  expect(screen.getByTestId('react-flow')).toHaveAttribute('data-node-count', '1');
 });
 
 it('submits one canvas run for the selected image node at the current server revision', async () => {
@@ -1017,14 +1020,20 @@ it('keeps panning out of the undo stack so Ctrl+Z still undoes the last edit', a
   // 已经被 50 条上限挤出去了。
   render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
   await screen.findByLabelText('画布编辑器 列车短片');
-  expect(screen.getByRole('button', { name: '撤销' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: '撤销' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '重做' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '添加生成配置节点' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '添加节点' }));
+  expect(within(screen.getByRole('menu', { name: '添加节点' })).queryByRole('menuitem', { name: /^生成配置/ })).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: 'simulate viewport change' }));
   await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalledWith('canvas-one', expect.objectContaining({
     viewport: { x: 120, y: -40, zoom: 0.7 },
   })), { timeout: 1000 });
 
-  expect(screen.getByRole('button', { name: '撤销' })).toBeDisabled();
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+  expect(screen.getByTestId('react-flow')).toHaveAttribute('data-node-count', '0');
+  expect(lastSavedDocument()?.viewport).toEqual({ x: 120, y: -40, zoom: 0.7 });
 });
 
 it('blocks generation by name when a connected input has no content yet', async () => {

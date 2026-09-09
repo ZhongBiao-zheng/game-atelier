@@ -655,7 +655,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
         aria-busy={replacingMedia || nodeRunState.status === 'loading'}
         aria-label={`选择节点 ${node.title}，${nodeRunState.label}`}
         className={cn(
-          'relative h-full overflow-hidden rounded-lg border bg-card/95 text-foreground transition-colors shell-glow',
+          'relative h-full overflow-hidden rounded-lg border text-foreground transition-colors shell-glow',
+          node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-card/95',
           selected ? 'border-primary' : 'border-border',
           context.materialPick && materialPickEligible && 'cursor-copy hover:border-primary focus-visible:border-primary',
           context.materialPick && !materialPickEligible && 'cursor-default',
@@ -713,7 +714,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
             {canvasNodeRunDisplayError(context.mediaReplaceError.message, '替换失败，请稍后重试')}
           </p>
         )}
-        <div className={cn('h-full bg-secondary/20', node.type === 'text' ? 'min-h-32'
+        <div className={cn('h-full', node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-secondary/20', node.type === 'text' ? 'min-h-32'
           : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44')}>
           {node.type === 'text' && (
             content?.kind === 'text' && (isEditingInlineText || promptVariableParts(content.text).some(part => part.kind === 'variable')) ? (
@@ -1120,7 +1121,7 @@ function MediaCandidateBatch({
         <span
           key={entry.candidate.candidate_id}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-lg border border-border bg-card"
+          className="pointer-events-none absolute inset-0 rounded-lg border border-border"
           style={{ transform: `translate(${10 + index * 6}px, ${5 + index * 4}px) rotate(${index + 1}deg)` }}
         />
       ))}
@@ -1187,7 +1188,7 @@ function MediaCandidateCard({
     <section
       role="group"
       aria-label={`候选 ${number}`}
-      className="pointer-events-auto absolute top-0 z-20 h-full overflow-hidden rounded-lg border border-border bg-card shell-glow"
+      className={cn('pointer-events-auto absolute top-0 z-20 h-full overflow-hidden rounded-lg border border-border shell-glow', version?.kind === 'image' ? 'bg-transparent' : 'bg-card')}
       style={{
         left: `calc(${horizontalOffset * 100}% + ${horizontalOffset * 16}px)`,
         width: '100%',

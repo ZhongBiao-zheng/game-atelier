@@ -39,14 +39,12 @@ import {
   MousePointer2,
   Pencil,
   Plus,
-  Redo2,
   Scan,
   Settings,
   Settings2,
   Square,
   Trash2,
   Type,
-  Undo2,
   Upload,
   WandSparkles,
   X,
@@ -434,7 +432,6 @@ function CanvasEditorInner({
   const [error, setError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
-  const [historyDepth, setHistoryDepth] = useState({ past: 0, future: 0 });
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
@@ -1063,18 +1060,6 @@ function CanvasEditorInner({
     const timer = window.setTimeout(() => void flushSave().catch(() => undefined), 350);
     return () => window.clearTimeout(timer);
   }, [compositionSignal, dirtySignal, flushSave, textEditingSignal]);
-
-  // 撤销栈是个 ref（快照数组要在同一次事件里被连续读写，做不成 state），但撤销 / 重做按钮的禁用态
-  // 得跟着它变。所以这条 effect 故意不写依赖数组：历史在 9 处被就地修改，每一处都伴随一次
-  // setDocument，也就是每一次修改后都会跑到这里。两次长度读取 + 相等就 bail，代价是常数级。
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- 规则担心的更新链由上面的相等 bail 掐断
-  useEffect(() => {
-    setHistoryDepth(current => {
-      const past = history.current.past.length;
-      const future = history.current.future.length;
-      return current.past === past && current.future === future ? current : { past, future };
-    });
-  });
 
   // 上面那条 effect 每次 dirtySignal 变化都 clearTimeout，排队的快照没人接手。
   // 卸载（画布内返回、路由跳走、切项目）走的是 SPA 路径，fetch 不会被掐，所以这里补一次冲刷；
@@ -4539,16 +4524,12 @@ function CanvasEditorInner({
             </span>
             <ToolButton label="选择工具" active={!addOpen && !createMenu} onClick={() => { setAddOpen(false); setCreateMenu(null); }}><MousePointer2 /></ToolButton>
             <div className="my-1 h-px w-7 bg-border" />
-            <ToolButton label="撤销" disabled={historyDepth.past === 0} onClick={undo}><Undo2 /></ToolButton>
-            <ToolButton label="重做" disabled={historyDepth.future === 0} onClick={redo}><Redo2 /></ToolButton>
-            <div className="my-1 h-px w-7 bg-border" />
             <div className="hidden xl:contents">
               <ToolButton label="添加批量素材节点" onClick={() => addBatchMaterialNode(null)}><Layers /></ToolButton>
               <ToolButton label="添加文本节点" onClick={() => addTextNode(null)}><Type /></ToolButton>
               <ToolButton label="添加图片节点" onClick={() => addGenerationNode('image', null)}><FileImage /></ToolButton>
               <ToolButton label="添加视频节点" onClick={() => addGenerationNode('video', null)}><FileVideo /></ToolButton>
               <ToolButton label="添加音频节点" onClick={() => addGenerationNode('audio', null)}><FileAudio /></ToolButton>
-              <ToolButton label="添加生成配置节点" onClick={() => addConfigNode(null)}><WandSparkles /></ToolButton>
               <ToolButton label="上传素材" onClick={() => uploadRef.current?.click()}><Upload /></ToolButton>
               <div className="my-1 h-px w-7 bg-border" />
             </div>
@@ -4560,7 +4541,7 @@ function CanvasEditorInner({
           {addOpen && (
             <div ref={addMenuRef} id="canvas-add-menu" role="menu" aria-label="添加节点" onKeyDown={handleMenuNavigation} className="canvas-add-menu popover-in absolute left-14 top-0 w-56 rounded-xl border border-border bg-popover p-2 shell-glow">
               <p className="px-2 pb-2 pt-1 text-xs uppercase tracking-label text-muted-foreground">添加节点</p>
-              <CanvasCreateMenuItems allowEmptyNodes allowUpload allowConfig onAddBatch={() => addBatchMaterialNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onAddConfig={() => addConfigNode(null)} onUpload={() => uploadRef.current?.click()} />
+              <CanvasCreateMenuItems allowEmptyNodes allowUpload allowConfig={false} onAddBatch={() => addBatchMaterialNode(null)} onAddText={() => addTextNode(null)} onAddImage={() => addGenerationNode('image', null)} onAddVideo={() => addGenerationNode('video', null)} onAddAudio={() => addGenerationNode('audio', null)} onAddConfig={() => addConfigNode(null)} onUpload={() => uploadRef.current?.click()} />
             </div>
           )}
           </div>
