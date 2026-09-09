@@ -15,6 +15,13 @@ function Harness({ baseUrl }: { baseUrl?: string } = {}) {
 }
 
 describe('image size intent', () => {
+  it('renders no size fields for a model without sizing parameters and an empty draft', () => {
+    const model = 'meta/muse-image';
+    const { container } = render(<ImageSizeFields model={model}
+      caps={imageControlCaps(model, 'openrouter', 'https://openrouter.ai')}
+      params={{}} onPatch={vi.fn()} />);
+    expect(container).toBeEmptyDOMElement();
+  });
   it('shows all Tuzi Nano ratios and emits the selected ratio without custom pixels', () => {
     const onPatch = vi.fn();
     render(<ImageSizeFields model="nano-banana-pro" caps={imageControlCaps('nano-banana-pro', 'custom', 'https://api.tu-zi.com')}

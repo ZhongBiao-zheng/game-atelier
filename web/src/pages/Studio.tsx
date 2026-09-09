@@ -1141,7 +1141,7 @@ function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
           },
         }
       : {}),
-    // 视频参数：再次生成时从原 job 还原（resolution 上面只认 2K/4K 图片语义，视频的 720p/1080p 存这里）。
+    // 视频参数：再次生成时从原 job 还原（上面只认图片分辨率档位，视频的 720p/1080p 存这里）。
     // referenceVideos/Audios 给空数组而非 undefined，避免 onSubmitVideo 的 ?? 回落到当前表单文件。
     ...(isVideo
       ? {

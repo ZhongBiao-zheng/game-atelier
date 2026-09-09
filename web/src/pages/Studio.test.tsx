@@ -1229,7 +1229,7 @@ describe('Studio', () => {
     const sizeButton = screen.getByRole('button', { name: '选择比例和分辨率' });
     expect(sizeButton).toHaveTextContent('4:3');
     expect(sizeButton).not.toHaveTextContent('2304');
-    expect(sizeButton).toHaveTextContent('高清 2K');
+    expect(sizeButton).toHaveTextContent('2K');
   });
 
   it('keeps the current editor snapshot when a re-edit reference cannot be restored', async () => {
@@ -1467,7 +1467,7 @@ describe('Studio', () => {
 
     const sizeButton = screen.getByRole('button', { name: /选择比例和分辨率/ });
     expect(sizeButton).toHaveTextContent('16:9');
-    expect(sizeButton).toHaveTextContent('高清 2K');
+    expect(sizeButton).toHaveTextContent('2K');
     expect(sizeButton).not.toHaveTextContent('2560');
   });
 

@@ -17,7 +17,7 @@ export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
   const resolution = (params.resolution ?? caps.resolutions[0] ?? '2K') as Resolution;
   const providerResolution = caps.sizeKind === 'ratio' && caps.showResolution;
   const selectedResolution = providerResolution ? params.resolution ?? 'default' : resolution;
-  const size = mode === 'custom' ? params.size ?? params.custom_size ?? ''
+  const size = !caps.showCustomSize ? '' : mode === 'custom' ? params.size ?? params.custom_size ?? ''
     : params.size && /^\d+x\d+$/.test(params.size) ? params.size : studioSizeFor(ratio, resolution, model);
   const [width = '', height = ''] = size.split('x');
   const error = imageSizeError(params, model);
