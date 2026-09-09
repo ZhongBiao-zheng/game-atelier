@@ -30,9 +30,22 @@ AUTO能力依据（2026-09-09）：[OpenAI Images](https://developers.openai.com
 [default文生图](https://tuzi-api.apifox.cn/343646952e0)、
 [官方兼容文生图](https://tuzi-api.apifox.cn/448333922e0)、
 [官方兼容编辑](https://tuzi-api.apifox.cn/448333992e0)均注明size=auto；
-复用现有Images端点与通用异步包装，不改走独立的 `/v1/videos` 图片任务接口。
+5.42.3修正调用层：通用异步包装已被上游410拒绝，停止使用 `/async/*` 和 `/get-async`。
 VIP、固定1K等别名不由基础型号推断能力。Seedream/MJ/未知渠道暂不展示AUTO。
 AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单或有依据的固定单价。
+
+### Tuzi 图片任务（5.42.3）
+
+- 精确 `gpt-image-2`、`gpt-image-2-vip`、`gpt-image-1.5`、`gpt-image-1` 普通出图走
+  `POST /v1/videos` multipart；字段model/prompt/size，参考图重复input_reference，size保留auto或像素。
+  每次提交一张，多张按槽独立提交；不传Images专用n/response_format。
+- `GET /v1/videos/{id}` 的 completed.video_url 实为图片URL，复用图片下载和落盘。
+  依据：[创建任务](https://tuzi-api.apifox.cn/472418522e0)、[查询任务](https://tuzi-api.apifox.cn/472418529e0)。
+- 未列模型（含固定1K、Nano、Seedream）、蒙版、独立quality/background要求，预先选择原生兼容Images接口。
+  不推断别名的异步支持，不换计费模型，不在请求失败后改路重提；蒙版等参数不静默丢弃。
+- 新任务 `provider_task_protocol=tuzi_images`，首次获取ID立即保存provider_task_ids，恢复只查询既有订单。
+  历史tuzi_async标签仅保留记录可读性，不再自动恢复、迁移ID或重提旧订单。
+- 错误脱敏仅保留精确公开接口路径，本地路径和密钥继续隐藏。
 
 网站连接本机与外部 Agent 工坊入口已进入分阶段开发：
 [开发范围与验收](local-workspace.md)、[本机连接](contracts/local-connection.md)、

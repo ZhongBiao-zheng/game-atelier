@@ -660,6 +660,18 @@ def test_friendly_error_path_redaction_preserves_following_task_id():
     assert "cgt-keep-after-file" in msg
 
 
+def test_friendly_error_preserves_exact_public_endpoint_but_not_local_paths():
+    message = job_runner._friendly_error(Exception(
+        "Tuzi async HTTP 410: generic async endpoint is no longer available; "
+        "please use /v1/videos; source=/Users/alice/private.png; "
+        "file=/v1/videos/private.png; secret_key=secret123"
+    ))
+    assert "please use /v1/videos;" in message
+    assert "/Users/alice" not in message
+    assert "/v1/videos/private.png" not in message
+    assert "secret123" not in message
+
+
 def test_friendly_error_ssl_handshake_failure_is_not_generic_network_error():
     err = Exception("SSLError: [SSL: WRONG_VERSION_NUMBER] wrong version number")
     msg = job_runner._friendly_error(err)

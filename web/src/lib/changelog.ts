@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.42.3',
+    date: '2026-09-09',
+    headline: '修复 Tuzi 图片异步接口',
+    changes: [
+      { kind: 'fix', text: 'GPT Image 普通出图接入新的图片任务接口，修复旧接口停用导致的 410，支持 AUTO 与参考图。' },
+      { kind: 'fix', text: '保留图片任务订单用于恢复，公开接口路径不再误显示为本地路径。' },
+    ],
+  },
+  {
     version: '5.42.2',
     date: '2026-09-09',
     headline: '新建图片默认 AUTO',

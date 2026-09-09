@@ -39,7 +39,7 @@ def test_recoverable_tuzi_async_job_is_resumed_instead_of_failed(isolated_data_r
     resumable = _studio_job("studio-tuzi", JobStatus.PENDING).model_copy(update={
         "kind": JobKind.IMAGE,
         "params": JobParams(
-            provider_task_protocol="tuzi_async",
+            provider_task_protocol="tuzi_images",
             provider_task_ids=["async-1"],
         ),
     })
@@ -52,6 +52,16 @@ def test_recoverable_tuzi_async_job_is_resumed_instead_of_failed(isolated_data_r
     assert jobs_lib.read_job("studio-tuzi").status == JobStatus.PENDING
 
 
+def test_retired_generic_order_is_not_automatically_resumed(isolated_data_root):
+    legacy = _studio_job("studio-old-tuzi", JobStatus.PENDING).model_copy(update={
+        "params": JobParams(provider_task_protocol="tuzi_async", provider_task_ids=["old-paid"]),
+    })
+    jobs_lib.save_job(legacy)
+    assert not jobs_lib.is_resumable_studio_job(legacy)
+    assert jobs_lib.resumable_studio_jobs() == []
+    assert jobs_lib.read_job(legacy.job_id).params.provider_task_ids == ["old-paid"]
+
+
 def test_lifespan_resumes_tuzi_async_job_on_startup(isolated_data_root, monkeypatch):
     from threading import Event
 
@@ -61,7 +71,7 @@ def test_lifespan_resumes_tuzi_async_job_on_startup(isolated_data_root, monkeypa
     resumable = _studio_job("studio-tuzi", JobStatus.PENDING).model_copy(update={
         "kind": JobKind.IMAGE,
         "params": JobParams(
-            provider_task_protocol="tuzi_async",
+            provider_task_protocol="tuzi_images",
             provider_task_ids=["async-1"],
         ),
     })

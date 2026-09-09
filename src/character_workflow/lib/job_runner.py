@@ -112,6 +112,18 @@ def _redact_local_paths(message: str) -> str:
         return f"__SAFE_HTTP_URL_{len(urls) - 1}__"
 
     message = re.sub(r"https?://[^\s'\"\)\]\}}]+", stash_url, message, flags=re.IGNORECASE)
+    # Only exact public endpoints are safe; arbitrary /v1/... strings may be local paths.
+    api_paths: list[str] = []
+
+    def stash_api_path(match: re.Match[str]) -> str:
+        api_paths.append(match.group(0))
+        return f"__SAFE_API_PATH_{len(api_paths) - 1}__"
+
+    message = re.sub(
+        r"(?<![\w/])/(?:v1/videos|(?:async/)?v1/images/(?:generations|edits)|get-async)"
+        r"(?=$|[\s'\".,;:)\]}])(?![.,][\w/])",
+        stash_api_path, message,
+    )
     message = re.sub(
         r"(['\"])(?:/|[A-Za-z]:\\|\\\\)[^'\"\n]+\1",
         "<local-path>",
@@ -148,6 +160,8 @@ def _redact_local_paths(message: str) -> str:
     )
     for index, url in enumerate(urls):
         message = message.replace(f"__SAFE_HTTP_URL_{index}__", url)
+    for index, path in enumerate(api_paths):
+        message = message.replace(f"__SAFE_API_PATH_{index}__", path)
     return message
 
 

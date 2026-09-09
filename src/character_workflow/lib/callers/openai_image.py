@@ -131,11 +131,24 @@ def render(
 
     is_hk = _is_openai_hk(base_url)
     is_tuzi = _is_tuzi_gateway(base_url)
+    # Native tasks document neither mask nor independent quality/background controls.
+    # Select the Images contract up front for those requests; never retry via another route.
+    use_tuzi_tasks = (
+        is_tuzi and model in tuzi_async.IMAGE_TASK_MODELS and not mask_path
+        and _quality_param(kwargs) in {None, "auto"}
+        and _background_param(kwargs) in {None, "auto"}
+        and _effective_image_protocol(key, model) in {None, "openai"}
+    )
     requested = max(1, int(n or 1))
     params = kwargs.get("params") if isinstance(kwargs.get("params"), dict) else None
+    if params and params.get("provider_task_ids"):
+        if params.get("provider_task_protocol") == "tuzi_async":
+            raise OpenAIImageError("旧 Tuzi 异步接口已停用，请先核对厂商订单；不会自动重新生成")
+        if params.get("provider_task_protocol") == tuzi_async.TASK_PROTOCOL and not use_tuzi_tasks:
+            raise OpenAIImageError("已有 Tuzi 图片任务与当前模型或参数不匹配，不能重新提交")
     stored_task_ids = (
         list(params.get("provider_task_ids") or [])
-        if params and params.get("provider_task_protocol") == "tuzi_async"
+        if params and params.get("provider_task_protocol") == tuzi_async.TASK_PROTOCOL
         else []
     )
     resuming_stored_tasks = bool(stored_task_ids)
@@ -151,14 +164,14 @@ def render(
         if task_id not in stored_task_ids:
             stored_task_ids.append(task_id)
         if params is not None:
-            params["provider_task_protocol"] = "tuzi_async"
+            params["provider_task_protocol"] = tuzi_async.TASK_PROTOCOL
             params["provider_task_ids"] = list(stored_task_ids)
         callback = kwargs.get("on_params_changed")
         if callable(callback):
             callback()
 
     def _post_image_json(url: str, payload: dict) -> dict:
-        if not is_tuzi:
+        if not use_tuzi_tasks:
             return _post_json(url, key.access_key, payload, timeout=timeout)
         return tuzi_async.execute_json(
             url=url,
@@ -258,7 +271,7 @@ def render(
                     on_task_id=_remember_task_id, on_phase=kwargs.get("on_phase"),
                     should_cancel=kwargs.get("should_cancel"),
                 )
-                if is_tuzi else
+                if use_tuzi_tasks else
                 _post_multipart(
                     _edits_url(base_url), key.access_key, fields=fields, files=files,
                     timeout=timeout,
