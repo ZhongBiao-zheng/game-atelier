@@ -119,6 +119,8 @@ export interface CanvasNodeContextValue {
   prepareBatch?: (nodeId: string) => Promise<void>;
   uploadBatchImages?: (nodeId: string, files: File[], itemId?: string) => Promise<void>;
   projectId: string;
+  focusVariableNodeId?: string | null;
+  consumeVariableFocus?: () => void;
   materialReferences: readonly CanvasMaterialReference[];
   connectedMaterialNodeIdsByNodeId: ReadonlyMap<string, ReadonlySet<string>>;
   videoFrameNodeIdsByNodeId?: ReadonlyMap<string, Readonly<Partial<Record<CanvasVideoFrameSlot, string>>>>;
@@ -233,6 +235,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   const node = data.domain;
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
+  const [isEditingInlineText, setIsEditingInlineText] = useState(false);
   const [titleDraft, setTitleDraft] = useState(node.title);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const titleTriggerRef = useRef<HTMLButtonElement>(null);
@@ -706,13 +709,20 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
         <div className={cn('h-full bg-secondary/20', node.type === 'text' ? 'min-h-32'
           : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44')}>
           {node.type === 'text' && (
-            content?.kind === 'text' && promptVariableParts(content.text).some(part => part.kind === 'variable') ? (
-              <div className="nodrag nowheel h-full overflow-y-auto" onPointerDown={event => event.stopPropagation()}>
+            content?.kind === 'text' && (isEditingInlineText || promptVariableParts(content.text).some(part => part.kind === 'variable')) ? (
+              <div className="nodrag nowheel h-full overflow-y-auto" onPointerDown={event => event.stopPropagation()} onBlur={event => {
+                if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) setIsEditingInlineText(false);
+              }}>
                 <CanvasPromptInput
                   value={content.text}
                   references={EMPTY_CANVAS_MENTION_REFERENCES}
                   mentionsEnabled={false}
-                  onFocus={context.recordHistory}
+                  autoFocusVariables={context.focusVariableNodeId === node.id}
+                  onFocus={() => {
+                    setIsEditingInlineText(true);
+                    context.recordHistory();
+                    if (context.focusVariableNodeId === node.id) context.consumeVariableFocus?.();
+                  }}
                   onChange={text => context.updateText(node.id, text)}
                   className="h-full"
                 />
@@ -1973,8 +1983,7 @@ export function CanvasGenerationComposer({
     modelSelected: Boolean(selectedModel),
     prompt: draft.prompt,
   });
-  const variableProblem = promptVariableError(draft.prompt);
-  const blockedReason = generateBlock?.message ?? variableProblem ?? referenceProblem;
+  const blockedReason = generateBlock?.message ?? promptVariableError(draft.prompt) ?? referenceProblem;
 
   useEffect(() => {
     if (!usesVideoFrameSlots || !videoCaps) return;
@@ -2133,7 +2142,6 @@ export function CanvasGenerationComposer({
               ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
-      {variableProblem && <p role="status" className="px-3 text-xs text-muted-foreground">{variableProblem}</p>}
       {node.type === 'audio' && (
         <CandidateHistory
           nodeId={node.id}
@@ -2875,7 +2883,7 @@ export function copyablePromptForNode(
   if (completed?.canvas_run?.snapshot.final_prompt) return completed.canvas_run.snapshot.final_prompt;
   if (history.length > 0) return null;
   const draft = generationDraft(node);
-  return draft?.prompt.trim() ? draft.prompt : null;
+  return draft?.prompt.trim() ? readablePromptVariables(draft.prompt) : null;
 }
 
 function withGenerationDraft(node: CanvasNode, draft: CanvasGenerationDraft): CanvasNode {

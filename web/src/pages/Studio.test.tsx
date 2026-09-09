@@ -7,6 +7,7 @@ import { Studio } from './Studio';
 import { clearStudioDraft } from './studioDraft';
 import * as connection from '@/api/connection';
 import { createTestEventStream } from '@/test/eventStream';
+import { promptVariableToken, resolvePromptVariables } from '@/lib/promptVariables';
 
 /** contentEditable prompt 编辑器没有 .value：落 textContent + input 事件等效键入。 */
 function typePrompt(editor: Element, value: string) {
@@ -79,6 +80,45 @@ function renderStudio() {
     </Router>,
   );
 }
+
+describe('Studio 变量冻结边界', () => {
+  it.each([false, true])('普通正文和模板分开提交，compact=%s', async (compact) => {
+    const { hook } = memoryLocation({ path: compact ? '/' : '/studio', static: true });
+    render(<Router hook={hook}><Studio compact={compact} /></Router>);
+    await screen.findByRole('button', { name: '选择比例和分辨率' });
+    const template = `绘制${promptVariableToken({ name: '内容', example: '', value: '城堡' })}`;
+    typePrompt(screen.getByLabelText('生图 prompt'), template);
+    await waitFor(() => expect(screen.getByLabelText('提交生成')).not.toBeDisabled());
+    fireEvent.click(screen.getByLabelText('提交生成'));
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1].body));
+    expect(payload.prompt).toBe('绘制城堡');
+    expect(payload.prompt_template).toBe(template);
+    expect(resolvePromptVariables(payload.prompt_template)).toBe(payload.prompt);
+    if (!compact) expect(screen.getByText('绘制城堡')).toBeInTheDocument();
+  });
+
+  it('历史 Job 的 token 字面量保持原文显示和重试，不作为新模板提交', async () => {
+    const fetchMock = mockCompletedBatchAndKeys();
+    const originalFetch = fetchMock.getMockImplementation()!;
+    const literal = `保留${promptVariableToken({ name: '字面量', example: '', value: '不可展开' })}`;
+    fetchMock.mockImplementation(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const response = await originalFetch(url, init);
+      if (url !== '/api/jobs') return response;
+      const jobs = await response.json();
+      jobs[0].prompt = literal;
+      return { ...response, json: async () => jobs };
+    });
+    renderStudio();
+    expect(await screen.findByText(literal)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '再次生成' }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/studio/jobs')).toBe(true));
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([url]) => url === '/api/studio/jobs')![1]!.body));
+    expect(payload.prompt).toBe(literal);
+    expect(payload).not.toHaveProperty('prompt_template');
+  });
+});
 
 function mockCompletedBatchAndKeys() {
   const fetchMock = vi.fn((url: RequestInfo | URL, _init?: RequestInit) => {

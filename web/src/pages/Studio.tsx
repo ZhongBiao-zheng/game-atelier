@@ -386,10 +386,10 @@ function StudioFull() {
     );
   }, [keys, persistedJobs]);
 
-  const onSubmit = async (prompt: string, overrideConfig?: RoundConfig) => {
+  const onSubmit = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
     if (wantVideo) {
-      await onSubmitVideo(prompt, overrideConfig);
+      await onSubmitVideo(prompt, overrideConfig, promptTemplate);
       return;
     }
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
@@ -511,6 +511,7 @@ function StudioFull() {
     try {
       job = await createStudioJob({
         prompt,
+        ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
         alias: effectiveAlias ?? undefined,
         model: effectiveModel,
         params: jobParams,
@@ -538,7 +539,7 @@ function StudioFull() {
     );
   };
 
-  const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig) => {
+  const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     // 切到视频后 PromptInput 只是按模型分类过滤显示，父级 providerAlias/model 不一定已是视频 key——这里收敛。
     const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
     const videoKeys = keys.filter((item) => videoModelsOf(item).length > 0);
@@ -668,6 +669,7 @@ function StudioFull() {
     try {
       job = await createStudioJob({
         prompt,
+        ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
         alias: effectiveAlias ?? undefined,
         model: effectiveModel,
         params: videoParams,
@@ -735,7 +737,7 @@ function StudioFull() {
               requestId: crypto.randomUUID(),
               kind: 'prompt',
               title: config.prompt.trim().replace(/\s+/g, ' ').slice(0, 24),
-              segments: promptToAssetSegments(config.prompt),
+              segments: [{ kind: 'text', text: config.prompt }],
             });
           }}
           onSaveImageAsset={(path, config) => {
@@ -784,7 +786,7 @@ function StudioFull() {
           collapsed={dockCollapsed}
           onExpandRequest={() => setClickPinned(true)}
           onShellFocusChange={setShellFocused}
-          onSubmit={onSubmit}
+          onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
           disabled={pending}
           value={promptText}
           onValueChange={setPromptText}

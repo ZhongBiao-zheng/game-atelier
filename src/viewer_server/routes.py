@@ -2047,6 +2047,7 @@ def gallery_image(path: str) -> FileResponse:
 class _StudioJobCreate(BaseModel):
     model_config = {"extra": "forbid"}
     prompt: str = Field(min_length=1)
+    prompt_template: str | None = Field(default=None, max_length=40_000)
     model: str
     params: JobParams
     alias: str | None = None
@@ -2062,7 +2063,10 @@ def _create_user_job(
     from character_workflow.lib.prompt_variables import resolve_prompt_variables
 
     try:
-        prompt = resolve_prompt_variables(body.prompt)
+        prompt = (
+            resolve_prompt_variables(body.prompt_template)
+            if body.prompt_template is not None else body.prompt
+        )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     if not prompt.strip():

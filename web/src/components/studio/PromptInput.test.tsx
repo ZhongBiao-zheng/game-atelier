@@ -75,7 +75,22 @@ describe('PromptInput 行内变量', () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(fireEvent.keyDown(fields[0], { key: 'Tab' })).toBe(true);
     fireEvent.keyDown(editor, { key: 'Enter' });
-    expect(onSubmit).toHaveBeenCalledWith('以水彩处理 图1；保持水彩');
+    expect(onSubmit.mock.lastCall![0]).toBe('以水彩处理 图1；保持水彩');
+    expect(resolvePromptVariables(onSubmit.mock.lastCall![1])).toBe(onSubmit.mock.lastCall![0]);
+    cleanup();
+  });
+
+  it.each([
+    '@[variable:damaged]',
+    promptVariableToken({ name: '内部字面量', example: '', value: '不能被展开' }),
+  ])('变量值含 token 字面量时只在冻结边界解析一次：%s', (literal) => {
+    const onSubmit = vi.fn();
+    const initial = `保留${promptVariableToken({ name: '内容', example: '', value: literal })}和 @图1`;
+    render(<Editor initial={initial} onSubmit={onSubmit} />);
+    fireEvent.keyDown(screen.getByLabelText('生图 prompt'), { key: 'Enter' });
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.lastCall![0]).toBe(`保留${literal}和 图1`);
+    expect(resolvePromptVariables(onSubmit.mock.lastCall![1])).toBe(onSubmit.mock.lastCall![0]);
     cleanup();
   });
 

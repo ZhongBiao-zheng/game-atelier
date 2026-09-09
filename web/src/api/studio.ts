@@ -4,6 +4,7 @@ import type { Job, JobKind, JobParams } from '@/schema/jobs';
 
 export interface StudioJobCreate {
   prompt: string;
+  prompt_template?: string;
   model: string;
   params: JobParams;
   alias?: string;

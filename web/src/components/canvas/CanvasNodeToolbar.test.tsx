@@ -2,11 +2,14 @@ import type { CanvasContentVersion } from '@/schema/canvas';
 import { downloadCanvasLayers } from '@/api/canvas';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
+import { useState } from 'react';
+import { promptVariableToken } from '@/lib/promptVariables';
 
 import {
   CanvasNodeCard,
   CanvasNodeContext,
   CanvasLayerStackSurface,
+  copyablePromptForNode,
   type CanvasNodeContextValue,
 } from './CanvasEditorViews';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from './canvasImageToolbar';
@@ -152,6 +155,36 @@ const NodeCard = CanvasNodeCard as React.ComponentType<{
   data: { domain: CanvasNode };
   selected: boolean;
 }>;
+
+it('keeps a text node editor mounted after the last variable is removed, without stealing focus on load', () => {
+  function Harness() {
+    const [value, setValue] = useState(promptVariableToken({ name: '主体', example: '猫', value: '' }));
+    const textNode = { ...nodes[0], data: { ...nodes[0].data, current_version_id: 'inline-version' } } as CanvasNode;
+    const version: CanvasContentVersion = {
+      kind: 'text', text: value, version_id: 'inline-version', sha256: 'x',
+      created_at: '2026-09-09T00:00:00Z', origin: { kind: 'upload', upload_id: 'test' },
+    };
+    return <CanvasNodeContext.Provider value={nodeContext({
+      resolveVersion: () => version,
+      updateText: (_id, text) => setValue(text),
+    })}><NodeCard data={{ domain: textNode }} selected={false} /></CanvasNodeContext.Provider>;
+  }
+  render(<Harness />);
+  const input = screen.getByRole('textbox', { name: '变量：主体' });
+  expect(input).not.toHaveFocus();
+  const editor = screen.getByRole('combobox', { name: '提示词' });
+  fireEvent.focus(editor);
+  editor.textContent = '改成普通正文';
+  fireEvent.input(editor);
+  expect(screen.getByRole('combobox', { name: '提示词' })).toBe(editor);
+  expect(editor).toHaveTextContent('改成普通正文');
+});
+
+it('copies readable draft variables instead of internal tokens', () => {
+  const prompt = promptVariableToken({ name: '主体', example: '猫', value: '狐狸' });
+  const config = { ...nodes[4], data: { draft: { ...draft, prompt } } } as CanvasNode;
+  expect(copyablePromptForNode(config, new Map())).toBe('狐狸');
+});
 
 it('renders one independent selected toolbar for every canvas node type', () => {
   const context = nodeContext();

@@ -55,7 +55,7 @@ def test_post_studio_job_creates_pending(client):
 
 def test_studio_freezes_resolved_variable_text(client):
     response = client.post("/api/studio/jobs", json={
-        "prompt": "绘制" + variable(value="现代建筑"),
+        "prompt": "绘制现代建筑", "prompt_template": "绘制" + variable(value="现代建筑"),
         "model": "gpt-image-2", "params": {},
     })
     assert response.status_code == 201
@@ -65,10 +65,25 @@ def test_studio_freezes_resolved_variable_text(client):
 @pytest.mark.parametrize("prompt", [variable(), "@[variable:broken]", " \n"])
 def test_studio_rejects_unfilled_or_malformed_variables_before_job_creation(client, tmp_path, prompt):
     response = client.post("/api/studio/jobs", json={
-        "prompt": prompt, "model": "gpt-image-2", "params": {},
+        "prompt": "placeholder", "prompt_template": prompt, "model": "gpt-image-2", "params": {},
     })
     assert response.status_code == 422
     assert not list((tmp_path / ".runtime" / "jobs").glob("*.json"))
+
+
+def test_studio_template_and_plain_retry_preserve_literal_tokens(client):
+    literal = "@[variable:literal] " + variable(value="inner")
+    first = client.post("/api/studio/jobs", json={
+        "prompt": literal, "prompt_template": variable(value=literal),
+        "model": "gpt-image-2", "params": {},
+    })
+    assert first.status_code == 201
+    assert first.json()["prompt"] == literal
+    retry = client.post("/api/studio/jobs", json={
+        "prompt": first.json()["prompt"], "model": "gpt-image-2", "params": {},
+    })
+    assert retry.status_code == 201
+    assert retry.json()["prompt"] == literal
 
 
 @pytest.mark.parametrize("mode,expected_size", [("auto", "auto"), ("custom", "1360x2048")])

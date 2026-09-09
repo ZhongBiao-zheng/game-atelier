@@ -65,6 +65,20 @@ describe('CanvasPromptInput', () => {
     fireEvent.copy(editor, { clipboardData: { setData } });
     expect(setData).toHaveBeenCalledWith('text/plain', '画狐狸');
   });
+
+  it('does not delete the variable chip when Backspace is pressed inside its native input', () => {
+    const token = promptVariableToken({ name: '主体', example: '猫', value: '狐狸' });
+    const onChange = vi.fn();
+    render(<CanvasPromptInput value={token} references={[]} onChange={onChange} />);
+    const editor = screen.getByRole('combobox', { name: '提示词' });
+    editor.focus();
+    placeCaretAtEnd(editor);
+    const field = screen.getByRole('textbox', { name: '变量：主体' });
+    field.focus();
+    expect(fireEvent.keyDown(field, { key: 'Backspace' })).toBe(true);
+    expect(field).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
   it('opens a caret menu for @ and inserts a stable node token as an image chip', () => {
     const onChange = vi.fn();
     const { rerender } = render(

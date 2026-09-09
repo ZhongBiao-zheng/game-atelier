@@ -540,6 +540,8 @@ function CanvasEditorInner({
     zoomTo,
   } = useReactFlow<FlowNode>();
   const usedPromptAssetRef = useRef(false);
+  const [focusVariableNodeId, setFocusVariableNodeId] = useState<string | null>(null);
+  const consumeVariableFocus = useCallback(() => setFocusVariableNodeId(null), []);
   const closeLibrary = useCallback(() => {
     const trigger = libraryMode === 'prompts'
       ? promptLibraryTriggerRef.current
@@ -1889,6 +1891,7 @@ function CanvasEditorInner({
         flowNodeCache.current.clear();
         setSelectedConnectionIds(new Set());
         setSelectedNodeIds(new Set());
+        setFocusVariableNodeId(insertedNodes.find(node => node.type === 'text')?.id ?? null);
       } catch (insertError) {
         setError((insertError as Error).message);
       } finally {
@@ -3886,6 +3889,8 @@ function CanvasEditorInner({
   }, [mentionGraphSignature]);
 
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
+    focusVariableNodeId,
+    consumeVariableFocus,
     batchBusy: Boolean(activeBatch),
     prepareBatch,
     uploadBatchImages,
@@ -3979,6 +3984,8 @@ function CanvasEditorInner({
     mediaReplaceError,
     materialReferences,
     materialPick,
+    focusVariableNodeId,
+    consumeVariableFocus,
     mentionReferencesByNodeId,
     narrowViewport,
     openAngle,

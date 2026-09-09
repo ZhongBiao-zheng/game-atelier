@@ -165,10 +165,10 @@ export function StudioCompact() {
     });
   }, [keys, providerAlias, model]);
 
-  const onSubmit = async (prompt: string, overrideConfig?: RoundConfig) => {
+  const onSubmit = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     const wantVideo = overrideConfig ? overrideConfig.kind === 'video' : kind === 'video';
     if (wantVideo) {
-      await onSubmitVideo(prompt, overrideConfig);
+      await onSubmitVideo(prompt, overrideConfig, promptTemplate);
       return;
     }
     const effectiveAlias = overrideConfig?.alias ?? providerAlias;
@@ -252,6 +252,7 @@ export function StudioCompact() {
     try {
       await createStudioJob({
         prompt,
+        ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
         alias: effectiveAlias ?? undefined,
         model: effectiveModel,
         params: jobParams,
@@ -264,7 +265,7 @@ export function StudioCompact() {
     }
   };
 
-  const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig) => {
+  const onSubmitVideo = async (prompt: string, overrideConfig?: RoundConfig, promptTemplate?: string) => {
     const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
     const videoKeys = keys.filter((item) => videoModelsOf(item).length > 0);
     const selectedKey =
@@ -346,6 +347,7 @@ export function StudioCompact() {
     try {
       await createStudioJob({
         prompt,
+        ...(promptTemplate ? { prompt_template: promptTemplate } : {}),
         alias: effectiveAlias ?? undefined,
         model: effectiveModel,
         params: videoParams,
@@ -365,7 +367,7 @@ export function StudioCompact() {
         描述你想生成的图片
       </h1>
       <PromptInput
-        onSubmit={onSubmit}
+        onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
         disabled={pending}
         value={promptText}
         onValueChange={setPromptText}

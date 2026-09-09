@@ -41,6 +41,7 @@ interface CanvasPromptInputProps {
   onPreviewReference?: (reference: CanvasMentionReference) => void;
   placeholder?: string;
   className?: string;
+  autoFocusVariables?: boolean;
 }
 
 export function CanvasPromptInput({
@@ -53,12 +54,14 @@ export function CanvasPromptInput({
   onPreviewReference,
   placeholder,
   className,
+  autoFocusVariables = true,
 }: CanvasPromptInputProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const composingRef = useRef(false);
   const lastEmittedRef = useRef(value);
   const lastReferenceSignatureRef = useRef('');
+  const initializedRef = useRef(false);
   const previewRef = useRef(onPreviewReference);
   const [mention, setMention] = useState<MentionState | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -95,6 +98,8 @@ export function CanvasPromptInput({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
+    const focusVariables = autoFocusVariables && (!initializedRef.current || value !== lastEmittedRef.current);
+    initializedRef.current = true;
     if (
       editor.contains(document.activeElement)
       && value === lastEmittedRef.current
@@ -104,8 +109,8 @@ export function CanvasPromptInput({
     editor.replaceChildren(...promptNodes(value, referenceById, mentionsEnabled));
     lastEmittedRef.current = value;
     lastReferenceSignatureRef.current = referenceSignature;
-    focusEmptyVariable(editor);
-  }, [mentionsEnabled, referenceById, referenceSignature, value]);
+    if (focusVariables) focusEmptyVariable(editor);
+  }, [autoFocusVariables, mentionsEnabled, referenceById, referenceSignature, value]);
 
   useEffect(() => {
     if (!mentionsEnabled) closeMention();
@@ -252,7 +257,6 @@ export function CanvasPromptInput({
           if (!reference || reference.kind === 'text') return;
           event.preventDefault();
           event.stopPropagation();
-          if (variableInput(event.target)) return;
           previewRef.current?.(reference);
         }}
         onMouseOver={event => {
@@ -284,6 +288,7 @@ export function CanvasPromptInput({
         onScroll={() => setHoveredReference(null)}
         onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
           event.stopPropagation();
+          if (variableInput(event.target)) return;
           if (event.nativeEvent.isComposing) return;
           if (mention && candidates.length) {
             if (event.key === 'ArrowDown') {

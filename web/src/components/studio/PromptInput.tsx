@@ -6,7 +6,7 @@ import { hasImageSizeSelection, imageSizeMode, imageSizeSummary, imageSizeError,
 import { normalizeImagePixelSize } from '@/lib/studioSize';
 import { ImageSizeFields } from './ImageSizeFields';
 import { providerLabel } from '@/lib/providerLabels';
-import { promptVariableError, readablePromptVariables, resolvePromptVariables } from '@/lib/promptVariables';
+import { promptVariableError, promptVariableParts, readablePromptVariables, resolvePromptVariables } from '@/lib/promptVariables';
 import { focusEmptyVariable, syncVariableInput, variableInput, variablePromptNodes } from '@/lib/promptVariableEditor';
 import { maxReferenceImages } from '@/lib/referenceLimits';
 import { imageFamily } from '@/lib/modelFamily';
@@ -39,7 +39,7 @@ import {
 } from '@/lib/mentionTokens';
 
 interface Props {
-  onSubmit: (prompt: string) => void | Promise<void>;
+  onSubmit: (prompt: string, promptTemplate?: string) => void | Promise<void>;
   disabled?: boolean;
   value?: string;
   onValueChange?: (value: string) => void;
@@ -669,9 +669,11 @@ export function PromptInput({
       return;
     }
     // @图1 → 图1：API 按序号自然语言绑定素材，@ 不出现在最终 prompt 里。
-    const trimmed = serializeMentions(resolvePromptVariables(text)).trim();
+    const template = serializeMentions(text).trim();
+    const trimmed = resolvePromptVariables(template).trim();
     if (!trimmed || disabled || !provider || !selectedModel || lastFrameOnlyBlocked || (!isVideo && imageSizeError(sizeParams, selectedModel?.id))) return;
-    onSubmit(trimmed);
+    if (promptVariableParts(template).some(part => part.kind === 'variable')) onSubmit(trimmed, template);
+    else onSubmit(trimmed);
   }, [text, disabled, provider, selectedModel, onSubmit, lastFrameOnlyBlocked, isVideo, sizeParams]);
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
