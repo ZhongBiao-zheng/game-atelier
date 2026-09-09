@@ -234,6 +234,28 @@ it('renders the generation composer as an independent panel below the selected n
   expect(reportError).toHaveBeenCalledWith('还没有配置任何模型密钥。');
 });
 
+it('defaults a blank image config to AUTO on first model selection without a downgrade warning', () => {
+  const updateNode = vi.fn();
+  const reportError = vi.fn();
+  const imageKey = {
+    alias: 'image-key', provider: 'openai', base_url: null, access_key: '***', secret_key: null,
+    capabilities: [], notes: '', created_at: '2026-08-25T00:00:00Z',
+    models: [{ id: 'gpt-image-2', name: 'GPT Image 2', modality: 'image' as const, protocol: 'openai' }],
+  };
+  const blank = { ...node, data: { draft: { ...draft, params: {} } } } as CanvasNode;
+  render(
+    <CanvasNodeContext.Provider value={nodeContext({ keys: [imageKey], updateNode, reportError })}>
+      <NodeCard data={{ domain: blank }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '选择生成模型' }));
+  fireEvent.click(screen.getByRole('option', { name: 'GPT Image 2' }));
+  expect(reportError).not.toHaveBeenCalled();
+  expect(updateNode.mock.calls[0]?.[1](blank)).toMatchObject({
+    data: { draft: { params: { size_mode: 'auto', size: 'auto' } } },
+  });
+});
+
 it('switches a config node between generation modes and summarizes connected inputs', () => {
   const recordHistory = vi.fn();
   const updateNode = vi.fn();
