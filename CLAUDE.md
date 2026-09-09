@@ -181,6 +181,13 @@ Key routing rules:
 
 ## Agent skills
 
+### 分支流程
+
+- 日常开发统一在长期 `dev` 分支完成并推送；本地工作目录默认保持在 `dev`，不再为每项开发默认新建功能分支。
+- `main` 是稳定同步分支。只有用户明确说“同步”或指定本次合入 `main`，才通过 `dev → main` PR 同步；开发完成、测试通过、普通提交或推送都不代表同步授权。
+- 同步前核对范围与 CI；同步后保留 `dev` 和 `main` 两个长期分支，回到 `dev` 继续开发。保留既有未合并分支与工作树，不自动吸收其改动。
+- 2026-09-09 的 PR #97 已按用户明确要求先合入 `main`；后续遵循上述流程。
+
 ### Product features
 
 共享资产、跨 Studio/Canvas 交互或领域对象变更，开发前读取 `docs/agents/product-feature-workflow.md`。
@@ -189,7 +196,7 @@ UI 改动需真实页面验证；用户明确授权后才合并，保留其他�
 
 ### Issue tracker
 
-任务使用本地 Markdown，存放在 `.scratch/<feature>/`；代码改动通过 GitHub PR 提交。详见 `docs/agents/issue-tracker.md`。
+任务使用本地 Markdown，存放在 `.scratch/<feature>/`；日常代码提交到 `dev`，用户要求同步时通过 GitHub PR 合入 `main`。详见 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
