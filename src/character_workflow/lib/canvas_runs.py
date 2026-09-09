@@ -50,10 +50,8 @@ from character_workflow.lib.schemas import (
     CanvasContentVersion,
     CanvasConfigNode,
     CanvasConfigNodeData,
-    CanvasDerivationConnection,
     CanvasDocument,
     CanvasGenerationDraft,
-    CanvasGenerationRunOrigin,
     CanvasGenerationSnapshot,
     CanvasAudioNode,
     CanvasContentNodeData,
@@ -306,16 +304,15 @@ def _remove_transaction_artifacts(
             final.unlink(missing_ok=True)
 
 
-def _document_has_run(document: CanvasDocument, run_id: str) -> bool:
+def _document_has_run(document: CanvasDocument, run_id: str, job_id: str) -> bool:
     for node in document.nodes:
-        if node.type in {"text", "image", "video", "audio"}:
+        if node.type in {"text", "image", "video", "audio", "layer_stack"}:
             if node.data.active_run_id == run_id:
                 return True
     return any(
-        edge.role == "derivation"
-        and edge.origin.kind == "generation_run"
-        and edge.origin.run_id == run_id
-        for edge in document.connections
+        version.origin.kind in {"job_output", "layer_decomposition"}
+        and version.origin.job_id == job_id
+        for version in document.content_versions.values()
     )
 
 
@@ -427,7 +424,7 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
                     continue
                 if (
                     current.revision >= raw["target_revision"]
-                    or _document_has_run(current, raw["run_id"])
+                    or _document_has_run(current, raw["run_id"], job.job_id)
                 ):
                     _install_transaction_artifacts(project_id, artifacts)
                     if not job_matches or recovered_job != job:
@@ -682,28 +679,14 @@ def canvas_input_sources(
 ) -> list[tuple[str, str]]:
     """Select source nodes once, shared by batch dependency planning and input freezing."""
     candidates: list[tuple[str, str]] = []
-    self_version_id = _current_version_id(surface)
-    if self_version_id is not None and draft.mode != "audio":
-        candidates.append(("implicit_self", surface.id))
-
-    editing_existing_video = (
-        surface.type == "video"
-        and draft.mode == "video"
-        and self_version_id is not None
-    )
-    if editing_existing_video and _uses_video_frame_slots(draft):
-        raise ValueError("已有视频的再次编辑只支持全能参考模式")
-    if editing_existing_video and _MENTION.search(draft.prompt):
-        raise ValueError("视频编辑只使用当前视频，不接受其它节点引用")
-
     incoming = [
         edge for edge in document.connections
         if edge.role == "input" and edge.target_node_id == surface.id
     ]
-    if editing_existing_video:
-        incoming = []
     uses_video_frame_slots = _uses_video_frame_slots(draft)
     if uses_video_frame_slots:
+        if any(edge.slot is None for edge in incoming):
+            raise ValueError("首尾帧模式只接受首帧或尾帧连接，请调整其它输入连接")
         if _MENTION.search(draft.prompt):
             raise ValueError("首尾帧模式不支持 @ 引用，请删除引用后再生成")
         for slot in ("first_frame", "last_frame"):
@@ -713,18 +696,14 @@ def canvas_input_sources(
             if edges:
                 candidates.append((slot, edges[0].source_node_id))
     else:
-        # Slot connections belong exclusively to first/last-frame mode. A stale slot left by an
-        # interrupted client update must never silently change an omni-reference request.
-        incoming = [edge for edge in incoming if edge.slot is None]
+        if any(edge.slot is not None for edge in incoming):
+            raise ValueError("当前模式不接受首尾帧连接，请调整输入连接或生成模式")
         connected_ids = list(dict.fromkeys(edge.source_node_id for edge in incoming))
         mentioned_ids = list(dict.fromkeys(_MENTION.findall(draft.prompt)))
         unknown_mentions = [node_id for node_id in mentioned_ids if node_id not in connected_ids]
         if unknown_mentions:
             raise ValueError("提示词引用了未连接到当前节点的内容")
-        selected_ids = mentioned_ids
-        if draft.input_policy == "all_connected":
-            selected_ids.extend(node_id for node_id in connected_ids if node_id not in mentioned_ids)
-        candidates.extend(("input_connection", node_id) for node_id in selected_ids)
+        candidates.extend(("input_connection", node_id) for node_id in connected_ids)
 
     return candidates
 
@@ -762,6 +741,8 @@ def _resolve_inputs(
             raise ValueError("首帧或尾帧只能使用一张图片")
         for selected_id in version_ids:
             version = document.content_versions[selected_id]
+            if version.kind == "text" and not version.text.strip():
+                raise ValueError(f"已连接的「{node.title}」文本为空，请填写内容或断开这条连接")
             if source in {"first_frame", "last_frame"} and version.kind != "image":
                 raise ValueError("首帧和尾帧只能选择图片素材")
             resolved.append(CanvasSnapshotInput(
@@ -1029,7 +1010,7 @@ def _normalized_params(
 
 
 def _with_active_run(node: CanvasNode, run_id: str) -> CanvasNode:
-    if node.type not in {"text", "image", "video", "audio"}:
+    if node.type not in {"text", "image", "video", "audio", "layer_stack"}:
         return node
     return node.model_copy(update={
         "data": node.data.model_copy(update={"active_run_id": run_id})
@@ -1129,6 +1110,7 @@ def _commit_frozen_run(
     artifacts: list[dict[str, Any]] | None = None,
     batch_origin: CanvasBatchJobOrigin | None = None,
     job_id: str | None = None,
+    retry_of: str | None = None,
 ) -> tuple[Job, CanvasDocument]:
     timestamp = _now()
     job_id = job_id or new_job_id()
@@ -1136,7 +1118,7 @@ def _commit_frozen_run(
     edits_layer = mode == "image" and surface.id in current.layer_material_node_ids()
     if edits_layer and canvas_node_has_pending_run(current, surface):
         raise CanvasRunCommandError("canvas_layer_material_busy", "这个图层素材正在生成，请稍后再试。")
-    use_surface = edits_layer or (
+    use_surface = (surface.type == "layer_stack" and job_params.layer_decomposition) or edits_layer or (
         allow_surface_reuse
         and surface.type in {"text", "image", "video", "audio"}
         and surface.type == mode
@@ -1149,6 +1131,7 @@ def _commit_frozen_run(
         "result_node_id": result_id,
         "mode": mode,
         "final_prompt": final_prompt,
+        "draft_prompt": result_draft.prompt if result_draft is not None else None,
         "input_policy": input_policy,
         "model": model.id,
         "provider": key.provider,
@@ -1195,6 +1178,7 @@ def _commit_frozen_run(
         canvas_run=context,
         alias=key.alias,
         provider=key.provider,
+        retry_of=retry_of,
     )
 
     nodes = [
@@ -1202,6 +1186,23 @@ def _commit_frozen_run(
         for node in current.nodes
     ]
     connections = list(current.connections)
+    if use_surface and retry_of:
+        restored_nodes = []
+        for node in nodes:
+            if node.id != result_id:
+                restored_nodes.append(node)
+                continue
+            if node.type == "layer_stack":
+                restored_data = node.data.model_copy(update={
+                    "source_version_id": inputs[0].version_id, "prompt": final_prompt,
+                    "alias": key.alias, "model": model.id, "resolution": str(job_params.size),
+                    "error": None,
+                })
+            else:
+                restored_data = node.data.model_copy(update={"generation_draft": result_draft})
+            restored_nodes.append(node.model_copy(update={"data": restored_data}))
+        nodes = restored_nodes
+        connections = [edge for edge in connections if edge.target_node_id != result_id]
     if result_id != surface.id:
         nodes.append(_new_result_node(
             surface,
@@ -1212,13 +1213,20 @@ def _commit_frozen_run(
             result_id,
             result_title,
         ))
-        connections.append(CanvasDerivationConnection(
-            id=f"connection-{secrets.token_hex(12)}",
-            role="derivation",
-            source_node_id=surface.id,
-            target_node_id=result_id,
-            origin=CanvasGenerationRunOrigin(kind="generation_run", run_id=run_id),
-        ))
+    if result_id != surface.id or retry_of:
+        for item in inputs:
+            if item.node_id == result_id:
+                continue  # Dedicated edits expose their fixed source through the Snapshot.
+            slot = item.source if item.source in {"first_frame", "last_frame"} else None
+            if any(
+                edge.source_node_id == item.node_id and edge.target_node_id == result_id
+                and edge.slot == slot for edge in connections
+            ):
+                continue
+            connections.append(CanvasInputConnection(
+                id=f"connection-{secrets.token_hex(12)}", role="input",
+                source_node_id=item.node_id, target_node_id=result_id, slot=slot,
+            ))
     content_versions = dict(current.content_versions)
     for version in additional_versions or []:
         if version.version_id in content_versions:
@@ -1383,7 +1391,7 @@ def submit_reverse_prompt_run(
         key, model = _resolve_reverse_prompt_model()
         inputs = [CanvasSnapshotInput(
             order=0,
-            source="implicit_self",
+            source="explicit_source",
             node_id=surface.id,
             version_id=version.version_id,
             kind="image",
@@ -1407,7 +1415,7 @@ def submit_reverse_prompt_run(
             JobKind.TEXT,
             mode="text",
             final_prompt=_REVERSE_PROMPT,
-            input_policy="mentions_only",
+            input_policy="all_connected",
             normalized=normalized,
             job_params=job_params,
             inputs=inputs,
@@ -1491,7 +1499,7 @@ def submit_layer_decomposition_run(
         )
         inputs = [CanvasSnapshotInput(
             order=0,
-            source="implicit_self",
+            source="explicit_source",
             node_id=source_node.id,
             version_id=source.version_id,
             kind="image",
@@ -1509,7 +1517,8 @@ def submit_layer_decomposition_run(
             "result_node_id": surface.id,
             "mode": "image",
             "final_prompt": surface.data.prompt,
-            "input_policy": "mentions_only",
+            "draft_prompt": surface.data.prompt,
+            "input_policy": "all_connected",
             "model": model.id,
             "provider": key.provider,
             "alias": key.alias,
@@ -1648,7 +1657,7 @@ def submit_mask_edit_run(
                 )
             inputs = [CanvasSnapshotInput(
                 order=0,
-                source="implicit_self",
+                source="explicit_source",
                 node_id=surface.id,
                 version_id=source.version_id,
                 kind="image",
@@ -1705,7 +1714,7 @@ def submit_mask_edit_run(
                 kind,
                 mode="image",
                 final_prompt=final_prompt,
-                input_policy="mentions_only",
+                input_policy="all_connected",
                 normalized=normalized,
                 job_params=job_params,
                 inputs=inputs,
@@ -1823,7 +1832,7 @@ def submit_angle_run(
         key, model = _resolve_default_image_edit_model()
         inputs = [CanvasSnapshotInput(
             order=0,
-            source="implicit_self",
+            source="explicit_source",
             node_id=surface.id,
             version_id=source.version_id,
             kind="image",
@@ -1853,7 +1862,7 @@ def submit_angle_run(
         result_draft = CanvasGenerationDraft(
             mode="image",
             prompt=final_prompt,
-            input_policy="mentions_only",
+            input_policy="all_connected",
             model=model.id,
             alias=key.alias,
             params=job_params.model_copy(update={"reference_images": None}),
@@ -1868,7 +1877,7 @@ def submit_angle_run(
             JobKind.IMAGE,
             mode="image",
             final_prompt=final_prompt,
-            input_policy="mentions_only",
+            input_policy="all_connected",
             normalized=normalized,
             job_params=job_params,
             inputs=inputs,
@@ -1966,7 +1975,7 @@ def create_reverse_prompt_config(
                 data=CanvasConfigNodeData(draft=CanvasGenerationDraft(
                     mode="image",
                     prompt=f"@[node:{result.id}]",
-                    input_policy="mentions_only",
+                    input_policy="all_connected",
                     model=model.id,
                     alias=key.alias,
                     params=params,
@@ -2017,33 +2026,111 @@ def retry_canvas_run(
     run_id: str,
     expected_revision: int,
 ) -> tuple[Job, CanvasDocument]:
-    """Submit the result node's current Draft again as a brand-new Run."""
+    """Revalidate an immutable failed request and submit its exact inputs as a new Job."""
     original = _job_for_run(project_id, run_id)
-    context = original.canvas_run
-    if context is None:
-        raise ValueError("Canvas Run 缺少 Snapshot")
-    with job_lock(original.job_id):
-        original = read_job(original.job_id)
-    if original.status in {JobStatus.PENDING, JobStatus.PENDING_CONFIRM}:
-        raise RuntimeError("run_not_terminal")
-    current = _read_document_unlocked(project_id)
-    result = next(
-        (node for node in current.nodes if node.id == context.result_node_id),
-        None,
-    )
-    draft = _draft_for_node(result) if result is not None else None
-    if draft is None:
-        raise RuntimeError("result_node_missing")
-    requested_count = (
-        max(1, min(4, int(draft.params.n or 1)))
-        if draft.mode in {"text", "image"} else 1
-    )
-    return submit_canvas_run(
-        project_id,
-        context.result_node_id,
-        expected_revision,
-        requested_count,
-    )
+    with file_lock(canvas_project_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        current = _read_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
+        with job_lock(original.job_id):
+            original = read_job(original.job_id)
+        context = original.canvas_run
+        if context is None:
+            raise ValueError("Canvas Run 缺少 Snapshot")
+        if original.status in {JobStatus.PENDING, JobStatus.PENDING_CONFIRM}:
+            raise RuntimeError("run_not_terminal")
+        if original.status == JobStatus.DONE:
+            raise ValueError("成功任务请使用生成；重试只适用于失败或已停止任务")
+        if (
+            original.cancel_requested_at and original.runner_started_at
+        ) or "状态未知" in (original.error or ""):
+            raise ValueError("原任务厂商状态未知，请先核对厂商结果，不能直接重试")
+        snapshot = context.snapshot
+        result = next((node for node in current.nodes if node.id == context.result_node_id), None)
+        if result is None:
+            raise RuntimeError("result_node_missing")
+        if canvas_node_has_pending_run(current, result) and (
+            getattr(result.data, "active_run_id", None) != context.run_id
+        ):
+            raise ValueError("结果节点正在生成，请等待完成后再重试")
+        frozen_params = JobParams.model_validate(snapshot.normalized_params)
+        alias = snapshot.alias or original.alias
+        if not alias:
+            raise ValueError("原任务没有记录密钥渠道，不能改用当前默认模型重试")
+        draft = CanvasGenerationDraft(
+            mode=snapshot.mode, prompt=snapshot.draft_prompt or "", input_policy="all_connected",
+            model=snapshot.model, alias=alias, params=frozen_params, updated_at=_now(),
+        )
+        key, model, kind = _resolve_key_and_model(draft)
+        if key.provider != snapshot.provider:
+            raise ValueError("原任务模型渠道已经变化，请调整配置后使用生成")
+        requested_count = len(context.candidates)
+        normalized, checked_params, effective_count = _normalized_params(
+            draft, requested_count, key, model,
+        )
+        expected = canvas_allowed_draft_params(snapshot.mode, frozen_params)
+        if normalized != expected or effective_count != requested_count:
+            raise ValueError("原任务参数已不符合当前模型要求，请调整后使用生成")
+        if kind == JobKind.IMAGE and not _supports_canvas_image_generation(key, model):
+            raise ValueError("原任务图片模型当前不可用")
+        inputs = [item.model_copy(deep=True) for item in snapshot.inputs]
+        if [item.order for item in inputs] != list(range(len(inputs))):
+            raise ValueError("原任务输入顺序无效")
+        nodes = {node.id for node in current.nodes}
+        for item in inputs:
+            version = current.content_versions.get(item.version_id)
+            if item.node_id not in nodes or version is None or version.kind != item.kind:
+                raise ValueError("原任务输入节点或精确内容版本已不存在，不能省略参考重试")
+        _validate_input_capabilities(model, kind, inputs, checked_params, key.provider)
+        paths = _retry_input_paths(project_id, current, inputs)
+        job_params = frozen_params.model_copy(update={
+            "reference_images": paths["image"] or None,
+            "reference_videos": paths["video"] or None,
+            "reference_audios": paths["audio"] or None,
+        })
+        if snapshot.mask_version_id:
+            from character_workflow.lib.callers.openai_image import supports_image_mask
+
+            mask = current.content_versions.get(snapshot.mask_version_id)
+            if not supports_image_mask(key.provider, model.id, model.protocol):
+                raise ValueError("原任务模型已不支持局部蒙版编辑")
+            if (
+                not isinstance(mask, CanvasMediaVersion) or mask.kind != "image"
+                or mask.origin.kind != "user_mask" or len(inputs) != 1
+                or mask.origin.source_version_id != inputs[0].version_id
+            ):
+                raise ValueError("原任务蒙版或源图版本已不存在")
+            mask_paths = _retry_input_paths(project_id, current, [CanvasSnapshotInput(
+                order=0, source="explicit_source", node_id=result.id,
+                version_id=mask.version_id, kind="image",
+            )])
+            job_params.mask_image = mask_paths["image"][0]
+        if frozen_params.layer_decomposition:
+            _resolve_layer_decomposition_model(key.alias, model.id)
+            if result.type != "layer_stack" or len(inputs) != 1 or inputs[0].kind != "image":
+                raise ValueError("原任务图层拆分源图或结果节点已不存在")
+        return _commit_frozen_run(
+            project_id, current, result, key, model, kind, mode=snapshot.mode,
+            final_prompt=snapshot.final_prompt, input_policy=snapshot.input_policy,
+            normalized=dict(snapshot.normalized_params), job_params=job_params, inputs=inputs,
+            requested_count=requested_count, result_title=result.title, result_draft=draft,
+            allow_surface_reuse=False, transaction_kind="submit",
+            mask_version_id=snapshot.mask_version_id, retry_of=original.job_id,
+        )
+
+
+def _retry_input_paths(
+    project_id: str, document: CanvasDocument, inputs: list[CanvasSnapshotInput],
+) -> dict[str, list[str]]:
+    paths = _input_paths(project_id, document, inputs)
+    for item in inputs:
+        version = document.content_versions[item.version_id]
+        if isinstance(version, CanvasMediaVersion):
+            path = canvas_project_dir(project_id) / version.path
+            if path.stat().st_size != version.bytes or hashlib.sha256(path.read_bytes()).hexdigest() != version.sha256:
+                raise ValueError("原任务参考文件已变化，请恢复精确版本后再重试")
+    return paths
 
 
 def request_canvas_run_cancel(project_id: str, run_id: str) -> Job:
@@ -2777,12 +2864,7 @@ def _finalize_canvas_run_under_locks(
             2: (0, node_height + 120),
             3: (node_width + 120, node_height + 120),
         }
-        source_inputs = [
-            connection
-            for connection in current.connections
-            if connection.role == "input"
-            and connection.target_node_id == result_node.id
-        ]
+        source_inputs = context.snapshot.inputs
         for candidate in successful:
             if candidate.index not in offsets:
                 continue
@@ -2814,26 +2896,12 @@ def _finalize_canvas_run_under_locks(
                 nodes.append(candidate_node)
             else:
                 nodes[existing_index] = candidate_node
-            if not any(
-                connection.role == "derivation"
-                and connection.source_node_id == result_node.id
-                and connection.target_node_id == candidate_node_id
-                for connection in connections
-            ):
-                connections.append(CanvasDerivationConnection(
-                    id=f"connection-{secrets.token_hex(12)}",
-                    role="derivation",
-                    source_node_id=result_node.id,
-                    target_node_id=candidate_node_id,
-                    origin=CanvasGenerationRunOrigin(
-                        kind="generation_run",
-                        run_id=context.run_id,
-                    ),
-                ))
-            for connection in source_inputs:
+            for item in source_inputs:
+                if item.node_id not in {node.id for node in nodes}:
+                    continue
                 if any(
                     existing.role == "input"
-                    and existing.source_node_id == connection.source_node_id
+                    and existing.source_node_id == item.node_id
                     and existing.target_node_id == candidate_node_id
                     for existing in connections
                 ):
@@ -2841,7 +2909,7 @@ def _finalize_canvas_run_under_locks(
                 connections.append(CanvasInputConnection(
                     id=f"connection-{secrets.token_hex(12)}",
                     role="input",
-                    source_node_id=connection.source_node_id,
+                    source_node_id=item.node_id,
                     target_node_id=candidate_node_id,
                 ))
     timestamp = _now()

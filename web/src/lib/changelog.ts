@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.45.0',
+    date: '2026-09-09',
+    headline: '画布参考输入与实线统一',
+    changes: [
+      { kind: 'fix', text: '取消来源虚线与隐藏自身参考，实际生成只使用面板可见的输入素材。' },
+      { kind: 'fix', text: '失败重试保留原提示词、参数和参考版本，不再丢失素材。' },
+      { kind: 'feat', text: '通过“基于本图生成”明确创建下游参考，图层素材可直接定位父图层。' },
+    ],
+  },
+  {
     version: '5.44.2',
     date: '2026-09-09',
     headline: '补齐图片模型尺寸选项',

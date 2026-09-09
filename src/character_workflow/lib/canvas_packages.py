@@ -833,10 +833,6 @@ def _validate_project_metadata(archive: zipfile.ZipFile, manifest: _PackageManif
             active_run_id = getattr(node.data, "active_run_id", None)
             if active_run_id is not None and active_run_id not in run_ids:
                 raise CanvasPackageError(f"节点 {node.id} 引用了不存在的运行记录")
-        for edge in document.connections:
-            if edge.role == "derivation" and edge.origin.kind == "generation_run":
-                if edge.origin.run_id not in run_ids:
-                    raise CanvasPackageError(f"连接 {edge.id} 引用了不存在的运行记录")
         blob_entries = [
             entry_by_path[path] for path in row.entry_paths if entry_by_path[path].role == "blob"
         ]
@@ -987,12 +983,6 @@ def _remap_document(
             if active_run_id not in run_ids:
                 raise CanvasPackageError(f"节点 {node['id']} 的 active_run_id 无法重写")
             node["data"]["active_run_id"] = run_ids[active_run_id]
-    for edge in raw["connections"]:
-        if edge["role"] == "derivation" and edge["origin"]["kind"] == "generation_run":
-            old_run_id = edge["origin"]["run_id"]
-            if old_run_id not in run_ids:
-                raise CanvasPackageError(f"连接 {edge['id']} 的 run_id 无法重写")
-            edge["origin"]["run_id"] = run_ids[old_run_id]
     for version in raw["content_versions"].values():
         origin = version["origin"]
         if origin["kind"] in {"job_output", "layer_decomposition"}:

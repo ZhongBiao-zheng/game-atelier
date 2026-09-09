@@ -558,8 +558,8 @@ export function canvasRequiresBatchRun(document: CanvasDocument | null, nodeId: 
 
 /** 每个目标节点上「已连接但还没有内容」的输入源。
  *
- *  只看不带 slot 的 input 连线：首尾帧模式下服务端会把不带 slot 的连线全部丢掉，带 slot 的那两条
- *  由 missingVideoFrame 单独把关。 */
+ *  只看不带 slot 的普通 input；首尾帧的空来源由 missingVideoFrame 单独把关，
+ *  混用普通连接与首尾帧会在提交时拒绝，不能靠过滤来悄悄省略输入。 */
 export function canvasPendingInputNodes(
   document: CanvasDocument | null,
 ): Map<string, CanvasPendingInput[]> {
@@ -800,7 +800,7 @@ export function createCanvasGenerationDraft(
   return {
     mode,
     prompt: options.prompt ?? '',
-    input_policy: options.inputPolicy ?? 'mentions_only',
+    input_policy: 'all_connected',
     model,
     alias: selected?.key.alias ?? null,
     params,
@@ -843,6 +843,7 @@ export function createConnectedCanvasConfig(
   sourceNodeId: string,
   draft: CanvasGenerationDraft,
   ids: { nodeId: string; connectionId: string },
+  surfaceType: 'config' | 'image' | 'video' = 'config',
 ): CanvasDocument | null {
   if (
     document.nodes.some(node => node.id === ids.nodeId)
@@ -854,10 +855,9 @@ export function createConnectedCanvasConfig(
   const token = `@[node:${source.id}]`;
   const prompt = draft.prompt.trim() ? `${draft.prompt.trim()} ${token}` : token;
   const configSize = CANVAS_DEFAULT_NODE_SIZE;
-  const configNode: CanvasNode = {
+  const base = {
     id: ids.nodeId,
     title: `${CANVAS_GENERATION_MODE_LABELS[draft.mode]}生成`,
-    type: 'config',
     position: placeCanvasNodeWithoutOverlap(
       { x: source.position.x + sourceWidth + 96, y: source.position.y },
       document.nodes,
@@ -866,10 +866,14 @@ export function createConnectedCanvasConfig(
       node => canvasNodeRenderedSize(node, document.content_versions),
     ),
     z_index: 0,
-    data: {
-      draft: { ...draft, prompt, input_policy: 'mentions_only' },
-    },
   };
+  const connectedDraft = { ...draft, prompt, input_policy: 'all_connected' as const };
+  const configNode: CanvasNode = surfaceType === 'config'
+    ? { ...base, type: 'config', data: { draft: connectedDraft } }
+    : { ...base, type: surfaceType, data: {
+      current_version_id: null, active_run_id: null, generation_draft: connectedDraft,
+      display: { fit: 'contain', free_resize: false },
+    } };
   const nodes = [...document.nodes, configNode];
   if (!canCreateCanvasInputConnection({ ...document, nodes }, {
     source: source.id,

@@ -460,9 +460,6 @@
   .canvas-flow .react-flow__edge-path {
     stroke-width: 1.5 !important;
   }
-  .canvas-flow .canvas-provenance-edge .react-flow__edge-path {
-    stroke-dasharray: 5 5;
-  }
   .canvas-flow .react-flow__edge.canvas-active-edge .react-flow__edge-path {
     stroke: color-mix(in srgb, var(--primary) 72%, var(--border)) !important;
     stroke-width: 2 !important;

@@ -27,10 +27,9 @@ from character_workflow.lib.file_lock import file_lock, try_file_lock
 from character_workflow.lib.schemas import (
     CanvasCropMediaOperation,
     CanvasCropOperation,
-    CanvasDerivationConnection,
+    CanvasInputConnection,
     CanvasDocument,
     CanvasImageNode,
-    CanvasLocalToolConnectionOrigin,
     CanvasLocalToolOrigin,
     CanvasMediaDisplay,
     CanvasMediaNodeData,
@@ -152,12 +151,7 @@ def _document_has_operation(document: CanvasDocument, operation_id: str) -> bool
         for version in document.content_versions.values()
     ):
         return True
-    return any(
-        edge.role == "derivation"
-        and edge.origin.kind == "local_tool"
-        and edge.origin.operation_id == operation_id
-        for edge in document.connections
-    )
+    return False
 
 
 def _validate_manifest(derived: Path, manifest: list[dict[str, Any]]) -> None:
@@ -626,15 +620,11 @@ def _build_document(
                 display=CanvasMediaDisplay(),
             ),
         )
-        edge = CanvasDerivationConnection(
+        edge = CanvasInputConnection(
             id=f"connection-{secrets.token_hex(12)}",
-            role="derivation",
+            role="input",
             source_node_id=source.id,
             target_node_id=node_id,
-            origin=CanvasLocalToolConnectionOrigin(
-                kind="local_tool",
-                operation_id=operation_id,
-            ),
         )
         versions[version_id] = version
         if edits_layer:

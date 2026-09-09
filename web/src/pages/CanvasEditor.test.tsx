@@ -469,6 +469,43 @@ it('does not force a minimum preview height or overlay metadata on a short popul
   expect(within(image.closest('article')!).queryByText(/1361 × 55/)).not.toBeInTheDocument();
 });
 
+it('creates an explicit downstream image and keeps its source in the visible inputs', async () => {
+  const source = { ...imageNode('source-image', '源图'),
+    data: { ...imageNode('source-image', '源图').data, current_version_id: 'source-version' } };
+  const original = documentWith({ nodes: [source], content_versions: {
+    'source-version': { version_id: 'source-version', kind: 'image', path: 'source.png', mime_type: 'image/png',
+      bytes: 20, width: 100, height: 100, created_at: '2026-09-09T00:00:00Z', sha256: 'a'.repeat(64),
+      origin: { kind: 'upload', upload_id: 'source' } },
+  } });
+  vi.mocked(getCanvasDocument).mockResolvedValue(original);
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'flow-node-source-image' }));
+  fireEvent.click(screen.getByRole('button', { name: '基于 源图 生成' }));
+  expect(await screen.findByRole('button', { name: '查看已对接素材 源图' })).toHaveTextContent('图片1');
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(2));
+  const saved = lastSavedDocument()!;
+  const downstream = saved.nodes.find(candidate => candidate.id !== source.id)!;
+  expect(downstream).toMatchObject({ type: 'image', data: { current_version_id: null } });
+  expect(saved.connections).toEqual([expect.objectContaining({
+    role: 'input', source_node_id: source.id, target_node_id: downstream.id,
+  })]);
+  expect(saved.nodes.find(candidate => candidate.id === source.id)).toEqual(source);
+  expect(submitCanvasRun).not.toHaveBeenCalled();
+});
+
+it('does not silently resubmit after the server rejects an input revision conflict', async () => {
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [imageNode('image-one', '图片', { ...imageDraft, prompt: '画一座建筑' })],
+  }));
+  vi.mocked(submitCanvasRun).mockRejectedValueOnce(new Error('画布版本已更新，请刷新输入后再生成'));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'flow-node-image-one' }));
+  fireEvent.click(await screen.findByRole('button', { name: '开始生成' }));
+  expect(await screen.findByText('画布版本已更新，请刷新输入后再生成')).toBeInTheDocument();
+  expect(submitCanvasRun).toHaveBeenCalledOnce();
+  expect(submitCanvasRun).toHaveBeenCalledWith('canvas-one', 'image-one', 7, 1);
+});
+
 it('creates an editable layer-decomposition node before calling the model', async () => {
   const source = {
     ...imageNode('source-image', '源图'),
@@ -1443,7 +1480,7 @@ it('pulls canvas jobs as soon as SSE says one changed, without waiting for the n
   vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(events.open())));
 
   const draft: CanvasGenerationDraft = {
-    mode: 'image', prompt: '雨夜', input_policy: 'mentions_only',
+    mode: 'image', prompt: '雨夜', input_policy: 'all_connected',
     model: 'gpt-image-2', alias: 'default', params: {}, updated_at: '2026-08-26T00:00:00Z',
   };
   const pending = {

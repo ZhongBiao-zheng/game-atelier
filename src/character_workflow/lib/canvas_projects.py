@@ -20,15 +20,12 @@ from character_workflow.lib.jobs import list_jobs, read_job
 from character_workflow.lib.schemas import (
     CanvasNode,
     CanvasAudioNode,
-    CanvasDerivationConnection,
     CanvasDocument,
     CanvasImageNode,
     CanvasMediaVersion,
     CanvasProject,
     CanvasProjectCover,
     CanvasProjectSummary,
-    CanvasTextNode,
-    CanvasTextVersion,
     CanvasUploadOrigin,
     CanvasVideoNode,
     JobParams,
@@ -315,24 +312,6 @@ def _normalized_web_document(
             }
         )
 
-    current_derivations = {
-        edge.id: edge for edge in current.connections if edge.role == "derivation"
-    }
-    submitted_derivations = {
-        edge.id: edge for edge in submitted.connections if edge.role == "derivation"
-    }
-    for edge_id, edge in submitted_derivations.items():
-        if current_derivations.get(edge_id) == edge:
-            continue
-        if not (
-            _is_proven_local_tool_history_restore(current, submitted, edge)
-            or _is_proven_generation_history_restore(current, submitted, edge)
-        ):
-            raise CanvasDocumentError(
-                "canvas_derivation_readonly",
-                "派生连线由服务端在生成时写入，保存请求不能新建或改动它，没有保存。",
-            )
-
     normalized = submitted.model_copy(update={
         "revision": current.revision + 1,
         "updated_at": timestamp,
@@ -347,77 +326,6 @@ def _normalized_web_document(
             "revision": current.revision, "updated_at": current.updated_at,
         })
     return normalized
-
-
-def _is_proven_local_tool_history_restore(
-    current: CanvasDocument,
-    submitted: CanvasDocument,
-    edge: CanvasDerivationConnection,
-) -> bool:
-    """Allow redo to restore an exact, already-committed local-tool derivation.
-
-    The browser still cannot mint provenance: the target version and its immutable origin must
-    already exist in the server document, and both submitted nodes must point at the exact source
-    and result versions recorded by that origin.
-    """
-    if edge.origin.kind != "local_tool":
-        return False
-    source = next((node for node in submitted.nodes if node.id == edge.source_node_id), None)
-    target = next((node for node in submitted.nodes if node.id == edge.target_node_id), None)
-    if not isinstance(source, CanvasImageNode) or not isinstance(target, CanvasImageNode):
-        return False
-    target_version_id = target.data.current_version_id
-    source_version_id = source.data.current_version_id
-    if not target_version_id or not source_version_id:
-        return False
-    target_version = current.content_versions.get(target_version_id)
-    if not isinstance(target_version, CanvasMediaVersion):
-        return False
-    origin = target_version.origin
-    return (
-        origin.kind == "local_tool"
-        and origin.operation_id == edge.origin.operation_id
-        and origin.source_version_id == source_version_id
-    )
-
-
-def _is_proven_generation_history_restore(
-    current: CanvasDocument,
-    submitted: CanvasDocument,
-    edge: CanvasDerivationConnection,
-) -> bool:
-    if edge.origin.kind != "generation_run":
-        return False
-    target = next((node for node in submitted.nodes if node.id == edge.target_node_id), None)
-    if not isinstance(target, (CanvasTextNode, CanvasImageNode, CanvasVideoNode, CanvasAudioNode)):
-        return False
-    target_version_id = target.data.current_version_id
-    target_version = current.content_versions.get(target_version_id or "")
-    if not isinstance(target_version, (CanvasTextVersion, CanvasMediaVersion)):
-        return False
-    origin = target_version.origin
-    if origin.kind != "job_output":
-        return False
-    try:
-        job = read_job(origin.job_id)
-    except (FileNotFoundError, json.JSONDecodeError, ValidationError):
-        return False
-    run = job.canvas_run
-    if (
-        job.namespace != "canvas"
-        or job.canvas_project_id != current.project_id
-        or run is None
-        or run.run_id != edge.origin.run_id
-        or run.snapshot.surface_node_id != edge.source_node_id
-        or run.result_node_id != edge.target_node_id
-    ):
-        return False
-    return any(
-        candidate.status == "succeeded"
-        and candidate.candidate_id == origin.candidate_id
-        and candidate.version_id == target_version_id
-        for candidate in run.candidates
-    )
 
 
 def save_canvas_document(

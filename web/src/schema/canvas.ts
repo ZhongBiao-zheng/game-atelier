@@ -104,7 +104,7 @@ export type CanvasGenerationDefaults = {
 export interface CanvasGenerationDraft {
   mode: CanvasGenerationMode;
   prompt: string;
-  input_policy: 'all_connected' | 'mentions_only';
+  input_policy: 'all_connected';
   model: string;
   alias?: string | null;
   params: JobParams;
@@ -248,17 +248,7 @@ export interface CanvasInputConnection {
   slot?: CanvasVideoFrameSlot | null;
 }
 
-export interface CanvasDerivationConnection {
-  id: string;
-  role: 'derivation';
-  source_node_id: string;
-  target_node_id: string;
-  origin:
-    | { kind: 'generation_run'; run_id: string }
-    | { kind: 'local_tool'; operation_id: string };
-}
-
-export type CanvasConnection = CanvasInputConnection | CanvasDerivationConnection;
+export type CanvasConnection = CanvasInputConnection;
 
 export type CanvasContentOrigin =
   | { kind: 'user_edit' }

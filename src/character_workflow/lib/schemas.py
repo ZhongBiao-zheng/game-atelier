@@ -220,7 +220,7 @@ class CanvasActor(BaseModel):
 class CanvasSnapshotInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     order: int = Field(ge=0)
-    source: Literal["implicit_self", "input_connection", "first_frame", "last_frame"]
+    source: Literal["implicit_self", "explicit_source", "input_connection", "first_frame", "last_frame"]
     node_id: str
     version_id: str
     kind: Literal["text", "image", "video", "audio"]
@@ -233,6 +233,7 @@ class CanvasGenerationSnapshot(BaseModel):
     result_node_id: str
     mode: Literal["text", "image", "video", "audio"]
     final_prompt: str
+    draft_prompt: str | None = None
     input_policy: Literal["all_connected", "mentions_only"]
     model: str
     provider: str
@@ -549,7 +550,7 @@ class CanvasGenerationDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["text", "image", "video", "audio"]
     prompt: str = Field(default="", max_length=40_000)
-    input_policy: Literal["all_connected", "mentions_only"] = "all_connected"
+    input_policy: Literal["all_connected"] = "all_connected"
     model: str = Field(default="", max_length=200)
     alias: str | None = Field(default=None, max_length=120)
     params: JobParams = Field(default_factory=JobParams)
@@ -599,14 +600,6 @@ def canvas_allowed_draft_params(mode: str, params: JobParams) -> dict[str, Any]:
     }
 
 
-def _draft_with_default_policy(value: object, policy: str) -> object:
-    if isinstance(value, dict) and "input_policy" not in value:
-        return {**value, "input_policy": policy}
-    if isinstance(value, CanvasGenerationDraft) and "input_policy" not in value.model_fields_set:
-        return value.model_copy(update={"input_policy": policy})
-    return value
-
-
 class CanvasBatchResultBinding(BaseModel):
     model_config = ConfigDict(extra="forbid")
     batch_id: str
@@ -647,13 +640,6 @@ class CanvasMediaNodeData(CanvasContentNodeData):
 class CanvasConfigNodeData(BaseModel):
     model_config = ConfigDict(extra="forbid")
     draft: CanvasGenerationDraft
-
-    @model_validator(mode="before")
-    @classmethod
-    def default_input_policy(cls, value: object) -> object:
-        if isinstance(value, dict) and "draft" in value:
-            return {**value, "draft": _draft_with_default_policy(value["draft"], "mentions_only")}
-        return value
 
 
 class CanvasGroupNodeData(BaseModel):
@@ -716,18 +702,6 @@ class CanvasPluginNodeData(BaseModel):
     data_schema_version: int = Field(ge=1)
     payload: JsonValue
     generation_draft: CanvasGenerationDraft | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def default_input_policy(cls, value: object) -> object:
-        if isinstance(value, dict) and value.get("generation_draft") is not None:
-            return {
-                **value,
-                "generation_draft": _draft_with_default_policy(
-                    value["generation_draft"], "mentions_only"
-                ),
-            }
-        return value
 
     @model_validator(mode="after")
     def validate_payload_size(self) -> "CanvasPluginNodeData":
@@ -811,37 +785,7 @@ class CanvasInputConnection(BaseModel):
     slot: Literal["first_frame", "last_frame"] | None = None
 
 
-class CanvasGenerationRunOrigin(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["generation_run"]
-    run_id: str = Field(min_length=1, max_length=160)
-
-
-class CanvasLocalToolConnectionOrigin(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["local_tool"]
-    operation_id: str = Field(min_length=1, max_length=160)
-
-
-CanvasDerivationOrigin = Annotated[
-    CanvasGenerationRunOrigin | CanvasLocalToolConnectionOrigin,
-    Field(discriminator="kind"),
-]
-
-
-class CanvasDerivationConnection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id: str = Field(min_length=1, max_length=160)
-    role: Literal["derivation"]
-    source_node_id: str = Field(min_length=1)
-    target_node_id: str = Field(min_length=1)
-    origin: CanvasDerivationOrigin
-
-
-CanvasConnection = Annotated[
-    CanvasInputConnection | CanvasDerivationConnection,
-    Field(discriminator="role"),
-]
+CanvasConnection = CanvasInputConnection
 
 
 class CanvasUserEditOrigin(BaseModel):

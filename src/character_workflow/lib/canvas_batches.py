@@ -182,8 +182,7 @@ def _sources(document: CanvasDocument, node: CanvasNode) -> list[str]:
     draft = _draft_for_node(node)
     if draft is None:
         return []
-    return list(dict.fromkeys(source for role, source in canvas_input_sources(document, node, draft)
-                             if role != "implicit_self"))
+    return list(dict.fromkeys(source for _role, source in canvas_input_sources(document, node, draft)))
 
 
 def _executable(document: CanvasDocument, node: CanvasNode) -> bool:

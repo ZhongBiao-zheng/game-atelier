@@ -262,7 +262,7 @@ export function CanvasMaskEditDialog({
       draft: {
         mode: 'image',
         prompt: prompt.trim(),
-        input_policy: 'mentions_only',
+        input_policy: 'all_connected',
         alias,
         model,
         params,

@@ -116,6 +116,7 @@ export interface CanvasGenerationSnapshot {
   result_node_id: string;
   mode: 'text' | 'image' | 'video' | 'audio';
   final_prompt: string;
+  draft_prompt?: string | null;
   input_policy: 'all_connected' | 'mentions_only';
   model: string;
   provider: string;
@@ -123,7 +124,7 @@ export interface CanvasGenerationSnapshot {
   normalized_params: Record<string, unknown>;
   inputs: Array<{
     order: number;
-    source: 'implicit_self' | 'input_connection' | 'first_frame' | 'last_frame';
+    source: 'implicit_self' | 'explicit_source' | 'input_connection' | 'first_frame' | 'last_frame';
     node_id: string;
     version_id: string;
     kind: 'text' | 'image' | 'video' | 'audio';

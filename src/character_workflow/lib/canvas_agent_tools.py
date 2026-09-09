@@ -9,6 +9,7 @@ import base64
 import hashlib
 import io
 import mimetypes
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -160,6 +161,7 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
     created: dict[str, list[str]] = {"node_ids": [], "connection_ids": [], "version_ids": []}
     existing_ids = {n.id for n in nodes}
     touched_drafts: set[str] = set()
+    disconnected_by_target: dict[str, set[str]] = {}
 
     def new_node_id(requested: str | None) -> str:
         node_id = requested or f"mcp-{uuid.uuid4().hex[:12]}"
@@ -172,6 +174,11 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
     def replace(node_id: str, updated: CanvasNode) -> None:
         nonlocal nodes
         nodes = [updated if n.id == node_id else n for n in nodes]
+
+    def disconnected(edge: CanvasConnection) -> None:
+        if edge.slot is None:
+            touched_drafts.add(edge.target_node_id)
+            disconnected_by_target.setdefault(edge.target_node_id, set()).add(edge.source_node_id)
 
     for change in changes:
         if change.op == "add_text":
@@ -202,6 +209,9 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
             replace(node.id, node.model_copy(update={
                 "data": node.data.model_copy(update={"current_version_id": version.version_id}),
             }))
+            touched_drafts.add(node.id)
+            touched_drafts.update(edge.target_node_id for edge in connections
+                                  if edge.source_node_id == node.id and edge.slot is None)
         elif change.op == "set_draft":
             node = _find_node(document.model_copy(update={"nodes": nodes}), change.node_id)
             if node.type not in {"text", "image", "video", "audio", "config"}:
@@ -215,12 +225,10 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
                     f" 请先用 add_surface 建一个 {change.mode} 节点", 422,
                 )
             field = "draft" if node.type == "config" else "generation_draft"
-            current = getattr(node.data, field)
-            policy = change.input_policy or (current.input_policy if current else "all_connected")
             params = JobParams(**canvas_allowed_draft_params(
                 change.mode, JobParams(**change.params)))
             draft = CanvasGenerationDraft(mode=change.mode, prompt=change.prompt, model=change.model,
-                                          alias=change.alias, input_policy=policy, params=params,
+                                          alias=change.alias, input_policy="all_connected", params=params,
                                           updated_at=timestamp)
             replace(node.id, node.model_copy(update={"data": node.data.model_copy(update={field: draft})}))
             touched_drafts.add(node.id)
@@ -238,6 +246,7 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
             edge = next((e for e in connections if e.id == change.connection_id), None)
             if edge is None or edge.role != "input":
                 raise WorkshopError("INVALID_TARGET", "只能断开输入连线", 422)
+            disconnected(edge)
             connections = [e for e in connections if e.id != edge.id]
         elif change.op == "move":
             node = _find_node(document.model_copy(update={"nodes": nodes}), change.node_id)
@@ -246,10 +255,15 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
         elif change.op == "remove_node":
             _find_node(document.model_copy(update={"nodes": nodes}), change.node_id)
             nodes = [n for n in nodes if n.id != change.node_id]
+            for edge in connections:
+                if change.node_id in (edge.source_node_id, edge.target_node_id):
+                    disconnected(edge)
             connections = [e for e in connections
                            if change.node_id not in (e.source_node_id, e.target_node_id)]
             existing_ids.discard(change.node_id)
-    nodes = _mention_connected_text(nodes, connections, touched_drafts, timestamp)
+    nodes = _sync_prompt_references(
+        nodes, connections, touched_drafts, disconnected_by_target, timestamp,
+    )
     updated = document.model_copy(update={
         "nodes": nodes, "connections": connections, "content_versions": versions,
     })
@@ -265,28 +279,37 @@ def _apply(document: CanvasDocument, changes: list, timestamp: str) -> tuple[Can
     return updated, created
 
 
-def _mention_connected_text(nodes: list[CanvasNode], connections: list[CanvasConnection],
-                            touched: set[str], timestamp: str) -> list[CanvasNode]:
-    """接进生成面的文本节点在 prompt 里以 @[node:id] 出现，与 Web 面板显示的引用一致。"""
+def _sync_prompt_references(
+    nodes: list[CanvasNode], connections: list[CanvasConnection], touched: set[str],
+    disconnected_by_target: dict[str, set[str]], timestamp: str,
+) -> list[CanvasNode]:
+    """Match Web reference edits without using mentions to select or reorder inputs."""
     by_id = {n.id: n for n in nodes}
     result = []
     for node in nodes:
         field = "draft" if node.type == "config" else "generation_draft"
         draft = getattr(node.data, field, None) if node.id in touched else None
-        if draft is None or node.type == "text":
+        if draft is None:
             result.append(node)
             continue
-        mentions = [
-            f"@[node:{edge.source_node_id}]" for edge in connections
-            if edge.role == "input" and edge.target_node_id == node.id
-            and by_id.get(edge.source_node_id) is not None
-            and by_id[edge.source_node_id].type == "text"
-            and f"@[node:{edge.source_node_id}]" not in draft.prompt
-        ]
-        if not mentions:
+        sources = list(dict.fromkeys(
+            edge.source_node_id for edge in connections
+            if edge.target_node_id == node.id and edge.slot is None
+        ))
+        removed = disconnected_by_target.get(node.id, set()).difference(sources)
+        prompt = re.sub(r"@\[node:([^\]]+)\]",
+                        lambda match: "" if match[1] in removed else match[0], draft.prompt)
+        if draft.mode == "video" and draft.params.frame_mode == "auto":
+            for source_id in sources:
+                source = by_id.get(source_id)
+                token = f"@[node:{source_id}]"
+                if source and source.type == "text" and source.data.current_version_id \
+                        and token not in prompt:
+                    prompt = f"{prompt.rstrip()} {token}" if prompt.strip() else token
+        prompt = prompt if prompt.strip() else ""
+        if prompt == draft.prompt:
             result.append(node)
             continue
-        prompt = " ".join([*mentions, draft.prompt]).strip()
         updated = draft.model_copy(update={"prompt": prompt, "updated_at": timestamp})
         result.append(node.model_copy(update={"data": node.data.model_copy(update={field: updated})}))
     return result

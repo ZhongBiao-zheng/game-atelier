@@ -6,6 +6,7 @@ import pytest
 
 from character_workflow.lib.canvas_projects import (
     canvas_output_dir,
+    canvas_project_dir,
     create_canvas_project,
     read_canvas_document,
     replace_canvas_node_media,
@@ -27,6 +28,7 @@ from character_workflow.lib.schemas import (
     CanvasGenerationSnapshot,
     CanvasJobContext,
     CanvasResultCandidate,
+    CanvasSnapshotInput,
     Job,
     JobKind,
     JobParams,
@@ -438,7 +440,7 @@ def test_only_failed_or_canceled_candidate_can_be_hidden(status: str):
         )
 
 
-def test_retry_resubmits_the_result_node_current_draft():
+def test_retry_resubmits_frozen_prompt_instead_of_current_draft():
     run_id = "run-retry-current-draft"
     project, document, _primary = _project_with_result_node(
         primary_version_id=None,
@@ -474,10 +476,190 @@ def test_retry_resubmits_the_result_node_current_draft():
         document.revision,
     )
 
-    # 重试不再复刻冻结快照，而是拿节点当前 Draft 重新解析并冻结新的 Snapshot。
     assert retry.job_id != original.job_id
     assert retry.canvas_run.run_id != run_id
-    assert retry.prompt == "换个角度的纸雕狐狸"
-    assert retry.canvas_run.snapshot.final_prompt == "换个角度的纸雕狐狸"
-    assert retry.canvas_run.result_node_id == "image-result"
+    assert retry.prompt == original.canvas_run.snapshot.final_prompt
+    assert retry.canvas_run.snapshot.final_prompt == original.canvas_run.snapshot.final_prompt
+    assert retry.canvas_run.result_node_id != "image-result"
+    retry_result = next(node for node in updated_document.nodes if node.id == retry.canvas_run.result_node_id)
+    assert retry_result.data.generation_draft.prompt == ""
+    assert next(node for node in updated_document.nodes if node.id == "image-result").data.generation_draft.prompt == "换个角度的纸雕狐狸"
     assert updated_document.revision > document.revision
+
+
+def _failed_retry_with_reference():
+    run_id = "run-retry-reference"
+    project, document, version_id = _project_with_result_node(
+        primary_version_id="existing", active_run_id=run_id,
+    )
+    write_keys_db(KeysDB(default_alias="openai-main", keys=[KeySpec(
+        alias="openai-main", provider="openai", access_key="test-key", created_at=NOW,
+        models=[ModelSpec(name="GPT", id="gpt-image-1", modality="image")],
+    )]))
+    original = _job(project.project_id, run_id, [CanvasResultCandidate(
+        candidate_id="failed-ref", index=0, status="failed", error="network down",
+    )]).model_copy(update={"status": JobStatus.FAILED, "error": "network down"})
+    original.canvas_run.snapshot.inputs = [CanvasSnapshotInput(
+        order=0, source="implicit_self", node_id="image-result", version_id=version_id, kind="image",
+    )]
+    save_job(original)
+    return project, document, original, version_id
+
+
+def test_retry_keeps_exact_original_reference_after_source_changes():
+    project, document, original, version_id = _failed_retry_with_reference()
+    current_version, changed, _ = replace_canvas_node_media(
+        project.project_id, "image-result", "new.png", ".png", PNG, "image", document.revision,
+    )
+    retry, updated = retry_canvas_run(project.project_id, original.canvas_run.run_id, changed.revision)
+    assert current_version.version_id != version_id
+    assert retry.canvas_run.snapshot.inputs == original.canvas_run.snapshot.inputs
+    assert retry.params.reference_images == [str(canvas_project_dir(project.project_id) / document.content_versions[version_id].path)]
+    assert retry.retry_of == original.job_id
+    assert retry.canvas_run.result_node_id != "image-result"
+    assert any(edge.source_node_id == "image-result" and edge.target_node_id == retry.canvas_run.result_node_id for edge in updated.connections)
+    assert read_job(original.job_id).status == JobStatus.FAILED
+
+
+@pytest.mark.parametrize("damage", ["missing", "changed"])
+def test_retry_rejects_missing_or_changed_original_reference(damage):
+    project, document, original, version_id = _failed_retry_with_reference()
+    path = canvas_project_dir(project.project_id) / document.content_versions[version_id].path
+    if damage == "missing":
+        path.unlink()
+    else:
+        path.write_bytes(b"changed reference")
+    with pytest.raises(ValueError, match="不存在|已变化"):
+        retry_canvas_run(project.project_id, original.canvas_run.run_id, document.revision)
+    assert read_canvas_document(project.project_id).revision == document.revision
+
+
+def test_retry_rejects_model_removal_instead_of_using_current_default():
+    project, document, original, _ = _failed_retry_with_reference()
+    write_keys_db(KeysDB(keys=[]))
+    with pytest.raises(ValueError, match="密钥"):
+        retry_canvas_run(project.project_id, original.canvas_run.run_id, document.revision)
+
+
+def test_retry_rejects_currently_invalid_frozen_params():
+    project, document, original, _ = _failed_retry_with_reference()
+    original.canvas_run.snapshot.normalized_params.update({"size_mode": "ratio", "ratio": "8:1"})
+    save_job(original)
+    with pytest.raises(ValueError, match="比例"):
+        retry_canvas_run(project.project_id, original.canvas_run.run_id, document.revision)
+
+
+def test_retry_rejects_unknown_provider_state_after_stop():
+    project, document, original, _ = _failed_retry_with_reference()
+    original.status = JobStatus.CANCELED
+    original.cancel_requested_at = NOW
+    original.runner_started_at = NOW
+    save_job(original)
+    with pytest.raises(ValueError, match="状态未知"):
+        retry_canvas_run(project.project_id, original.canvas_run.run_id, document.revision)
+
+
+def test_retry_uses_recorded_job_alias_when_snapshot_alias_is_missing():
+    project, document, original, _ = _failed_retry_with_reference()
+    original.canvas_run.snapshot.alias = None
+    save_job(original)
+    write_keys_db(KeysDB(default_alias="different", keys=[
+        KeySpec(alias="different", provider="openai", access_key="other", created_at=NOW,
+                models=[ModelSpec(name="Other", id="gpt-image-1", modality="image")]),
+        KeySpec(alias="openai-main", provider="openai", access_key="original", created_at=NOW,
+                models=[ModelSpec(name="Original", id="gpt-image-1", modality="image")]),
+    ]))
+    retry, _ = retry_canvas_run(project.project_id, original.canvas_run.run_id, document.revision)
+    assert retry.alias == "openai-main"
+
+
+@pytest.mark.parametrize("status", [JobStatus.FAILED, JobStatus.CANCELED])
+def test_run_recovery_proof_does_not_require_connections_or_outputs(status):
+    project, document, _ = _project_with_result_node(
+        primary_version_id=None, active_run_id="run-empty-terminal",
+    )
+    job = _job(project.project_id, "run-empty-terminal", [CanvasResultCandidate(
+        candidate_id="empty-terminal", index=0,
+        status="failed" if status == JobStatus.FAILED else "canceled",
+    )]).model_copy(update={"status": status})
+    save_job(job)
+    assert not document.connections
+    assert not document.content_versions
+    assert canvas_runs._document_has_run(document, "run-empty-terminal", job.job_id)
+
+
+def test_layer_stack_run_recovery_proof_uses_active_run_without_connections():
+    from tests.test_canvas_layer_decomposition import _project_with_decomposition_node
+
+    _project, document, _version = _project_with_decomposition_node()
+    stack = next(node for node in document.nodes if node.type == "layer_stack")
+    stack.data.active_run_id = "run-stack"
+    document.connections = []
+    assert canvas_runs._document_has_run(document, "run-stack", "job-stack")
+
+
+def test_mask_retry_keeps_exact_source_and_mask_after_source_changes():
+    from io import BytesIO
+    from PIL import Image
+
+    project, current, _previous, _ = _failed_retry_with_reference()
+    surface = current.nodes[0]
+    surface.data.generation_draft = canvas_runs.CanvasGenerationDraft(
+        mode="image", prompt="只改蒙版区域", model="gpt-image-1", alias="openai-main",
+        params=JobParams(n=1, ratio="1:1"), updated_at=NOW,
+    )
+    current = save_canvas_document(project.project_id, current, current.revision)
+    body = BytesIO()
+    Image.new("RGBA", (1, 1), (0, 0, 0, 0)).save(body, format="PNG")
+    original, submitted = canvas_runs.submit_mask_edit_run(
+        project.project_id, "image-result", current.revision, 1, body.getvalue(),
+    )
+    original.status = JobStatus.FAILED
+    original.error = "provider failed"
+    for candidate in original.canvas_run.candidates:
+        candidate.status = "failed"
+    save_job(original)
+    _new_version, changed, _ = replace_canvas_node_media(
+        project.project_id, "image-result", "changed.png", ".png", PNG, "image", submitted.revision,
+    )
+    retry, _ = retry_canvas_run(project.project_id, original.canvas_run.run_id, changed.revision)
+    assert retry.canvas_run.snapshot.inputs == original.canvas_run.snapshot.inputs
+    assert retry.canvas_run.snapshot.inputs[0].source == "explicit_source"
+    assert retry.canvas_run.snapshot.mask_version_id == original.canvas_run.snapshot.mask_version_id
+    assert retry.params.reference_images == original.params.reference_images
+    assert retry.params.mask_image == original.params.mask_image
+
+
+def test_retry_preserves_editable_prompt_without_baking_in_reference_text():
+    from tests.test_canvas_mentions import _document
+
+    project = create_canvas_project("原始提示词重试")
+    document = _document("画一幅雨夜场景").model_copy(update={"project_id": project.project_id})
+    document.connections = [edge for edge in document.connections if edge.source_node_id == "text-a"]
+    canvas_runs._write_project_state_unlocked(project.project_id, document)
+    write_keys_db(KeysDB(default_alias="openai", keys=[KeySpec(
+        alias="openai", provider="openai", access_key="test", created_at=NOW,
+        models=[ModelSpec(name="GPT", id="gpt-image-2", modality="image")],
+    )]))
+    original, submitted = canvas_runs.submit_canvas_run(
+        project.project_id, "config", document.revision,
+    )
+    original.status = JobStatus.FAILED
+    original.error = "failed"
+    for candidate in original.canvas_run.candidates:
+        candidate.status = "failed"
+    save_job(original)
+    retry, updated = retry_canvas_run(project.project_id, original.canvas_run.run_id, submitted.revision)
+    result = next(node for node in updated.nodes if node.id == retry.canvas_run.result_node_id)
+    assert original.canvas_run.snapshot.draft_prompt == "画一幅雨夜场景"
+    assert retry.prompt == original.prompt
+    assert result.data.generation_draft.prompt == "画一幅雨夜场景"
+    prepared = canvas_runs.prepare_canvas_generation(project.project_id, updated, result)
+    assert prepared.final_prompt == original.prompt
+    assert prepared.final_prompt.count("一列火车驶入雨夜") == 1
+    disconnected = updated.model_copy(update={
+        "connections": [edge for edge in updated.connections if edge.target_node_id != result.id],
+    })
+    prepared = canvas_runs.prepare_canvas_generation(project.project_id, disconnected, result)
+    assert prepared.final_prompt == "画一幅雨夜场景"
+    assert "一列火车驶入雨夜" not in prepared.final_prompt

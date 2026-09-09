@@ -40,7 +40,7 @@ function node(
         draft: {
           mode: 'image',
           prompt: '',
-          input_policy: 'mentions_only',
+          input_policy: 'all_connected',
           model: '',
           params: {},
           updated_at: '2026-08-25T00:00:00Z',

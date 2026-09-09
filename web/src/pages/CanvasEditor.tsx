@@ -559,14 +559,7 @@ function CanvasEditorInner({
       if (!current || remote.revision < current.revision) return current;
       const remoteNodes = new Map(remote.nodes.map(node => [node.id, node]));
       const currentNodeIds = new Set(current.nodes.map(node => node.id));
-      const serverAddedNodeIds = new Set(remote.connections.flatMap(connection => (
-        connection.role === 'derivation'
-        && connection.origin.kind === 'generation_run'
-        && runIds.has(connection.origin.run_id)
-        && !currentNodeIds.has(connection.target_node_id)
-          ? [connection.target_node_id]
-          : []
-      )));
+      const serverAddedNodeIds = new Set<string>();
       for (const node of remote.nodes) {
         if (isContentNode(node) && (runIds.has(node.data.active_run_id ?? '') || resultNodeIds.has(node.id))
           && !currentNodeIds.has(node.id)) serverAddedNodeIds.add(node.id);
@@ -610,14 +603,7 @@ function CanvasEditorInner({
         !connectionIds.has(connection.id)
         && nodeIds.has(connection.source_node_id)
         && nodeIds.has(connection.target_node_id)
-        && (
-          (
-            connection.role === 'derivation'
-            && connection.origin.kind === 'generation_run'
-            && runIds.has(connection.origin.run_id)
-          )
-          || serverAddedNodeIds.has(connection.target_node_id)
-        )
+        && serverAddedNodeIds.has(connection.target_node_id)
       ));
       const merged: CanvasDocument = normalizeCanvasGroups({
         ...current,
@@ -819,9 +805,7 @@ function CanvasEditorInner({
     const mergedNodeIds = new Set(nodes.map(node => node.id));
     const connectionIds = new Set(current.connections.map(connection => connection.id));
     const runConnections = remote.connections.filter(connection => (
-      connection.role === 'derivation'
-      && connection.origin.kind === 'generation_run'
-      && connection.origin.run_id === context.run_id
+      !hasResult && connection.target_node_id === context.result_node_id
       && !connectionIds.has(connection.id)
       && mergedNodeIds.has(connection.source_node_id)
       && mergedNodeIds.has(connection.target_node_id)
@@ -1255,10 +1239,10 @@ function CanvasEditorInner({
         target: connection.target_node_id,
         type: 'canvasConnection',
         className: cn(
-          connection.role === 'derivation' ? 'canvas-provenance-edge' : 'canvas-input-edge',
+          'canvas-input-edge',
           active && 'canvas-active-edge',
         ),
-        ariaLabel: `${connection.role === 'derivation' ? '派生' : '输入'}连接：${sourceTitle} → ${targetTitle}`,
+        ariaLabel: `输入连接：${sourceTitle} → ${targetTitle}`,
         interactionWidth: 16,
         selected,
         selectable: true,
@@ -1275,37 +1259,13 @@ function CanvasEditorInner({
       if (!liveIds.has(id)) flowEdgeCache.current.delete(id);
     }
     // 逐项按引用比，而不是「有没有走过 else 分支」：顺序变了也要当成变了。
-    for (const stack of document?.nodes ?? []) {
-      if (stack.type !== 'layer_stack') continue;
-      for (const target of [stack.data.base_material_node_id, ...stack.data.layers.map(layer => layer.material_node_id)]) {
-        if (!target || !titles.has(target)) continue;
-        next.push({ id: `layer-material:${stack.id}:${target}`, source: stack.id, target,
-          type: 'canvasConnection', className: 'canvas-provenance-edge',
-          ariaLabel: `图层归属：${stack.title} → ${titles.get(target)}`,
-          selectable: false, focusable: false, deletable: false, interactionWidth: 0 });
-      }
-    }
     const previous = flowEdgesRef.current;
     if (next.length === previous.length && next.every((edge, index) => edge === previous[index])) {
       return previous;
     }
     flowEdgesRef.current = next;
-    if (mediaPlaceholder) {
-      // 占位节点与源素材之间先画一条派生虚线，结果节点落地后由真连接接替。
-      next.push({
-        id: `${mediaPlaceholder.id}-edge`,
-        source: mediaPlaceholder.sourceNodeId,
-        target: mediaPlaceholder.id,
-        type: 'canvasConnection',
-        className: 'canvas-provenance-edge',
-        interactionWidth: 0,
-        selectable: false,
-        focusable: false,
-        deletable: false,
-      });
-    }
     return next;
-  }, [activeBatch, activeNodeId, document?.connections, document?.nodes, mediaPlaceholder, selectedConnectionIds]);
+  }, [activeBatch, activeNodeId, document?.connections, document?.nodes, selectedConnectionIds]);
 
   const isValidConnection = useCallback<IsValidConnection>((connection) => (
     canCreateCanvasInputConnection(latestDocument.current, connection)
@@ -2629,9 +2589,6 @@ function CanvasEditorInner({
 
   const retryRun = useCallback(async (nodeId: string, runId: string) => {
     if (batchBusyRef.current) { setError('批量执行期间请先等待或停止'); return; }
-    if (canvasRequiresBatchRun(latestDocument.current, nodeId)) {
-      await prepareBatch(nodeId); return;
-    }
     if (runSubmissionInFlight.current) {
       setError('另一项生成正在提交，请稍后再试。');
       return;
@@ -2667,7 +2624,6 @@ function CanvasEditorInner({
     mergeSubmittedRunDocument,
     persistNow,
     projectId,
-    prepareBatch,
   ]);
 
   const cancelRun = useCallback(async (runId: string) => {
@@ -3502,15 +3458,16 @@ function CanvasEditorInner({
     setMaskEdit(null);
     setAngleState(null);
     setError(null);
-    commit(current => ({
-      ...current,
-      nodes: current.nodes.map(candidate => candidate.id === node.id && candidate.type === 'video'
-        ? { ...candidate, data: { ...candidate.data, generation_draft: draft } }
-        : candidate),
-    }), true);
+    const newNodeId = makeId('video');
+    const current = latestDocument.current;
+    const next = current && createConnectedCanvasConfig(current, node.id, draft,
+      { nodeId: newNodeId, connectionId: makeId('connection') }, 'video');
+    if (!next) { setError('无法创建视频编辑节点。'); return; }
+    commit(() => next, true);
+    setDismissedGenerationPanelNodeId(null);
     setSelectedConnectionIds(new Set());
-    setSelectedNodeIds(new Set([node.id]));
-    announceToolNotice(`已打开“${node.title}”的视频编辑设置`);
+    setSelectedNodeIds(new Set([newNodeId]));
+    announceToolNotice(`已创建“${node.title}”的下游视频节点`);
   }, [announceToolNotice, commit, jobsByResultNodeId, keys]);
 
   const createImageConfigFromText = useCallback((nodeId: string) => {
@@ -3543,6 +3500,22 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set());
     setAddOpen(false);
     setCreateMenu(null);
+  }, [canvasUiPreferences.generation_defaults.image, commit, keys]);
+
+  const createImageFromSource = useCallback((nodeId: string) => {
+    const current = latestDocument.current;
+    if (!current) return;
+    const newNodeId = makeId('image');
+    const next = createConnectedCanvasConfig(current, nodeId,
+      createCanvasGenerationDraft(keys, 'image', {
+        preference: canvasUiPreferences.generation_defaults.image,
+      }), { nodeId: newNodeId, connectionId: makeId('connection') }, 'image');
+    if (!next) { setError('这个节点没有可用的图片内容。'); return; }
+    setError(null);
+    commit(() => next, true);
+    setDismissedGenerationPanelNodeId(null);
+    setSelectedConnectionIds(new Set());
+    setSelectedNodeIds(new Set([newNodeId]));
   }, [canvasUiPreferences.generation_defaults.image, commit, keys]);
 
   const submitAngle = useCallback(async (params: CanvasAngleParams) => {
@@ -3653,8 +3626,7 @@ function CanvasEditorInner({
           ? { ...node, position: { x: node.position.x + shift.x, y: node.position.y + shift.y } }
           : node));
       const createdConnections = result.document.connections.filter(connection => (
-        connection.role === 'derivation'
-        && result.created_node_ids.includes(connection.target_node_id)
+        result.created_node_ids.includes(connection.target_node_id)
         && !knownConnectionIds.has(connection.id)
       ));
       const merged: CanvasDocument = {
@@ -3874,7 +3846,30 @@ function CanvasEditorInner({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- 见上方图签名说明
   }, [mentionGraphSignature]);
 
+  const layerParentSignature = JSON.stringify((document?.nodes ?? []).flatMap(node => {
+    if (node.type !== 'layer_stack') return [];
+    return [node.data.base_material_node_id, ...node.data.layers.map(layer => layer.material_node_id)]
+      .filter((id): id is string => Boolean(id))
+      .map(id => [id, { nodeId: node.id, title: node.title }] as const);
+  }));
+  const layerParentByNodeId = useMemo(() => new Map<string, { nodeId: string; title: string }>(
+    JSON.parse(layerParentSignature),
+  ), [layerParentSignature]);
+  const locateNodeHandler = useRef<(id: string) => void>(() => undefined);
+  locateNodeHandler.current = (nodeId: string) => {
+    const current = latestDocument.current;
+    const node = current?.nodes.find(item => item.id === nodeId);
+    if (!current || !node) return;
+    selectOnlyNode(nodeId);
+    const size = canvasNodeRenderedSize(node, current.content_versions);
+    void runViewportCommand(() => setCenter(node.position.x + size.width / 2,
+      node.position.y + size.height / 2, { zoom: getZoom(), duration: 0 }));
+  };
+  const locateNode = useCallback((nodeId: string) => locateNodeHandler.current(nodeId), []);
+
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
+    layerParentByNodeId,
+    locateNode,
     focusVariableNodeId,
     consumeVariableFocus,
     batchBusy: Boolean(activeBatch),
@@ -3923,6 +3918,7 @@ function CanvasEditorInner({
     updateText,
     setTextEditing,
     createImageConfigFromText,
+    createImageFromSource,
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
     copyPrompt,
@@ -3954,6 +3950,9 @@ function CanvasEditorInner({
     completeNodeResize,
     copyPrompt,
     createImageConfigFromText,
+    createImageFromSource,
+    layerParentByNodeId,
+    locateNode,
     createLayerDecomposition,
     deleteNode,
     dismissedGenerationPanelNodeId,

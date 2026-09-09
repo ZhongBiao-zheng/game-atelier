@@ -23,6 +23,7 @@ from character_workflow.lib.canvas_packages import (
 from character_workflow.lib.canvas_runs import (
     CanvasRunCommandError,
     finalize_canvas_run,
+    retry_canvas_run,
     submit_layer_decomposition_run,
 )
 from character_workflow.lib.jobs import save_job
@@ -424,3 +425,39 @@ def test_layer_decomposition_endpoint_schedules_the_canvas_job(
     assert payload["job"]["canvas_run"]["snapshot"]["normalized_params"]["size"] == "auto"
     stack = next(node for node in payload["document"]["nodes"] if node["id"] == "layer-stack")
     assert stack["data"]["active_run_id"] == payload["job"]["canvas_run"]["run_id"]
+
+
+def test_layer_decomposition_retry_restores_frozen_source_settings_and_connection():
+    _configure_seedream()
+    project, current, source_version = _project_with_decomposition_node(
+        prompt="原拆分", resolution="1.5K",
+    )
+    original, submitted = submit_layer_decomposition_run(
+        project.project_id, "layer-stack", current.revision,
+        "ark", "doubao-seedream-5-0-pro-260628",
+    )
+    original.status = JobStatus.FAILED
+    original.error = "provider failed"
+    for candidate in original.canvas_run.candidates:
+        candidate.status = "failed"
+    save_job(original)
+    _failed, finished = finalize_canvas_run(project.project_id, original.job_id)
+    current = finished or read_canvas_document(project.project_id)
+    stack = next(node for node in current.nodes if node.type == "layer_stack")
+    stack.data.prompt = "修改后的拆分"
+    stack.data.resolution = "2K"
+    changed = save_canvas_document(
+        project.project_id, current.model_copy(update={"connections": []}), current.revision,
+    )
+    retry, retried = retry_canvas_run(project.project_id, original.canvas_run.run_id, changed.revision)
+    assert retry.canvas_run.result_node_id == "layer-stack"
+    assert retry.prompt == "原拆分"
+    assert retry.params.size == "1.5K"
+    assert retry.params.layer_decomposition is True
+    restored = next(node for node in retried.nodes if node.type == "layer_stack")
+    assert restored.data.source_version_id == source_version.version_id
+    assert restored.data.prompt == "原拆分"
+    assert restored.data.resolution == "1.5K"
+    assert [(edge.source_node_id, edge.target_node_id) for edge in retried.connections] == [
+        ("source-image", "layer-stack"),
+    ]

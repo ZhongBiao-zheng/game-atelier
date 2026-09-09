@@ -156,6 +156,25 @@ const NodeCard = CanvasNodeCard as React.ComponentType<{
   selected: boolean;
 }>;
 
+it('locates a material parent from its title and explicitly creates downstream image work', () => {
+  const source = { ...nodes[1], data: { ...nodes[1].data, current_version_id: 'source-image' } } as CanvasNode;
+  const version: CanvasContentVersion = {
+    kind: 'image', version_id: 'source-image', path: 'source.png', mime_type: 'image/png', bytes: 20,
+    sha256: 'a'.repeat(64), created_at: '2026-09-09T00:00:00Z', origin: { kind: 'upload', upload_id: 'source' },
+  };
+  const context = nodeContext({
+    layerParentByNodeId: new Map([[source.id, { nodeId: 'parent-stack', title: '拆分图层' }]]),
+    locateNode: vi.fn(), createImageFromSource: vi.fn(), resolveVersion: () => version,
+  });
+  render(<CanvasNodeContext.Provider value={context}><NodeCard data={{ domain: source }} selected /></CanvasNodeContext.Provider>);
+  const parent = screen.getByRole('button', { name: '定位父图层：拆分图层' });
+  expect(parent.closest('header')).toBeTruthy();
+  fireEvent.click(parent);
+  expect(context.locateNode).toHaveBeenCalledWith('parent-stack');
+  fireEvent.click(screen.getByRole('button', { name: '基于 图片 生成' }));
+  expect(context.createImageFromSource).toHaveBeenCalledWith(source.id);
+});
+
 it('keeps a text node editor mounted after the last variable is removed, without stealing focus on load', () => {
   function Harness() {
     const [value, setValue] = useState(promptVariableToken({ name: '主体', example: '猫', value: '' }));

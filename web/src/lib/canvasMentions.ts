@@ -16,6 +16,7 @@ export interface CanvasMaterialReference {
   title: string;
   text?: string;
   previewUrl?: string;
+  inputCount?: number;
 }
 
 export interface CanvasMentionReference extends CanvasMaterialReference {
@@ -84,16 +85,6 @@ export function buildCanvasMentionReferences(
     video: 0,
     audio: 0,
   };
-  const surfaceVersionId = isMentionContentNode(surface)
-    ? surface.data.current_version_id
-    : null;
-  const surfaceVersion = surfaceVersionId ? contentVersions[surfaceVersionId] : undefined;
-  const draft = surface.type === 'config'
-    ? surface.data.draft
-    : isMentionContentNode(surface)
-      ? surface.data.generation_draft
-      : null;
-  if (surfaceVersion && draft?.mode !== 'audio') counts[surfaceVersion.kind] += 1;
   const seen = new Set<string>();
   return connections.flatMap(connection => {
     if (
@@ -108,10 +99,11 @@ export function buildCanvasMentionReferences(
         ? surface.data.batch_result : null)
       : null;
     if (!material) return [];
-    const index = ++counts[material.kind];
+    const index = counts[material.kind] + 1;
+    counts[material.kind] += material.inputCount ?? 1;
     return [{
       ...material,
-      label: `${mentionKindLabel(material.kind)}${index}`,
+      label: `${mentionKindLabel(material.kind)}${index}${counts[material.kind] > index ? `–${counts[material.kind]}` : ''}`,
     }];
   });
 }
@@ -148,7 +140,7 @@ function canvasMaterialReference(
     const bound = binding?.source_node_id === node.id ? binding : null;
     const versionId = bound ? bound.image_version_ids[0] : node.data.items[0]?.image_version_ids[0];
     if (!versionId || contentVersions[versionId]?.kind !== 'image') return null;
-    return { nodeId: node.id, versionId, kind: 'image', title: bound
+    return { nodeId: node.id, versionId, kind: 'image', inputCount: bound?.image_version_ids.length ?? 1, title: bound
       ? `${node.title} · 本批 ${bound.image_version_ids.length} 张` : `${node.title} · ${node.data.items.length} 项`,
       previewUrl: canvasMediaUrl(projectId, versionId, 256) };
   }

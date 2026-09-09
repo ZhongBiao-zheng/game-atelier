@@ -280,14 +280,8 @@ schema 的文件返回 409，原字节保持不变。`PUT /api/canvas/ui-prefere
 保持不变。该偏好跨项目生效，但不进入 `CanvasDocument`、undo/redo、项目 revision、项目包 manifest/zip
 或插件私有状态；凭证、Base URL 与模型目录仍只属于 Keys。
 
-`Input Connection` 是当前可编辑输入资格，不触发下游；`Derivation Connection` 只由生成提交或受控本地
-媒体命令创建。真实生成输入冻结在 Canvas Job 的 `canvas_run.snapshot`，节点不保存 `job_ids` 或候选数组。
-普通 `PUT document` 必须携带 `If-Match: <revision>`：服务端项目锁内校验后 revision + 1；冲突返回 409，
-不做自动合并。Web PUT 只能新增 `user_edit` 文本版本，不能写媒体版本、修改既有版本或伪造派生连接。
-历史重做只允许恢复两种已有权威证据的受控例外：其一是结果 Content Version 已存在于服务端，且其不可变
-`local_tool` `operation_id/source_version_id` 与提交的源节点、结果节点和派生边吻合；其二是结果 Version 的
-`job_output` 指向同项目 Canvas Job 的成功 Candidate，且 Job 的 `canvas_run`、Snapshot 源节点、结果节点、
-Run ID 与派生边全部吻合。两种例外都只恢复已提交历史，不创建新 Version，也不重新执行工具或生成任务。
+`Input Connection` 是当前画布唯一可视实线，表示当前输入，不触发下游。来源关系只保留在 Job Snapshot 与 Content Version origin，不再创建派生边。普通生成不引用节点自身的当前内容；基于本图生成通过下游节点与实线明确输入。
+普通 `PUT document` 必须携带 `If-Match: <revision>`：服务端项目锁内校验后 revision + 1；冲突返回 409，不做自动合并。Web PUT 只能新增 `user_edit` 文本版本，不能写媒体版本、修改既有版本。输入连接可编辑，撤销/重做只改变画布节点与连接，必须保留全部已有内容版本；历史真实性不依赖当前连线。
 
 上传接口使用 multipart `file + expected_revision`，服务端登记不可变媒体 Content Version 并返回更新后的
 Document；扩展名只作入口白名单，文件类型、MIME、摘要、大小和图片尺寸均由服务端字节重算，伪扩展上传
@@ -295,7 +289,7 @@ Document；扩展名只作入口白名单，文件类型、MIME、摘要、大�
 256 KiB。媒体读取只收 `version_id`，不接受裸 path/job_id。Canvas Job 禁止通过通用 `/prompt/{job_id}`
 修改快照、prompt 或参数。`POST /canvas/projects/{id}/runs` 只接受
 `surface_node_id / expected_revision / requested_count`；服务端从已保存 Draft、连接与 Content Version
-解析真实输入，冻结 `canvas_run.snapshot`，并用项目内短事务原子提交 Job、结果节点与 Derivation Connection。
+解析真实输入，冻结 `canvas_run.snapshot`，并用项目内短事务原子提交 Job、结果节点与实际输入连接。
 Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_FIELDS`）：`PUT .../document`
 落盘前过一次，冻结 Snapshot 时再过一次，名单外的键一律丢弃。所有路径类字段
 （`reference_images/videos/audios`、`mask_image`、`mj_sref/cref/oref`）与 caller 回写字段
@@ -334,21 +328,20 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 OpenAI-compatible `chat/completions` 或 `responses`，后者支持 `reasoning_effort`，其中 `auto` 只作为
 Draft 选择且冻结/请求时省略；音频只接受 OpenAI-compatible `audio/speech`，冻结并发送白名单内的
 voice/format、0.25–4 的 speed 与去除首尾空白后的非空 instructions。模型配置的 protocol 不匹配时明确
-拒绝，不做伪兼容。连接输入会先按 Prompt 内 `@[node:id]` 的出现顺序冻结，再补未提及连接，并在冻结前按
+拒绝，不做伪兼容。所有连接输入按连接顺序冻结，`@[node:id]` 只引用、不筛选或重排，并在冻结前按
 模型/协议校验媒体类型和数量。`@` 菜单只枚举当前 surface 的直接 incoming `Input Connection` 且已有
 同模态 Content Version 的文本、图片、视频和音频；Draft 永远保存稳定 node token，不保存“图片1”等
 显示标签或 Version/path。断开连接时 Web 同一事务删除对应 token，不展示失效引用；服务端仍拒绝绕过 Web
 提交的异常 missing token，不能降级成普通文本。冻结后服务端按 Snapshot 实际输入顺序分别为文本、图片、视频、音频从 1 编号，重复 token 复用
 同一编号；final prompt 的标签与 `reference_images/reference_videos/reference_audios` 各自数组顺序一致，
-隐式自身输入也参与编号。非原生批量的图片候选按槽位执行，每个成功槽位立即通过短事务登记
+普通生成不存在隐式自身输入。专用编辑使用 `explicit_source` 标记明确的操作源；历史 `implicit_self` 仍可读取但不参与当前输入推断。非原生批量的图片候选按槽位执行，每个成功槽位立即通过短事务登记
 Content Version、candidate 状态与首个成功主结果；Midjourney 原生四宫格仍保留单次请求再逐槽登记。
 
 视频 Draft 的 `frame_mode=first|last|firstlast` 使用语义化 Input Connection：可选 `slot` 只能是
 `first_frame` 或 `last_frame`，源节点必须是已有图片 Content Version，目标必须是视频生成节点，且同一
-目标的每个槽位最多一条连接；同一图片允许同时占用首帧和尾帧。首尾帧模式不解析普通素材连接，也禁止
+目标的每个槽位最多一条连接；同一图片允许同时占用首帧和尾帧。首尾帧模式拒绝普通素材连接，也禁止
 `@[node:*]`；用户在提示词内输入 `@` 时，浏览器只在输入框内部给出简短提示，服务端再次拒绝；切换到
-全能参考会删除槽位连接，服务端也会忽略任何
-异常残留槽位。提交时按实际槽位推导 wire `frame_mode` 和首尾图片顺序，不能由浏览器伪造媒体数组。
+全能参考会删除槽位连接，服务端拒绝异常残留槽位，不能静默丢输入。提交时按实际槽位推导 wire `frame_mode` 和首尾图片顺序，不能由浏览器伪造媒体数组。
 模型选择器只展示模型名；当前视频模式名后的帮助入口在 hover 时显示图片、视频、音频与混合上限。
 素材区的 `+` 不打开候选菜单，而是进入画布点选状态，用户可移动画布并点击一个合法素材节点完成连接；
 点选期间界面进入专注态：隐藏小地图/缩放、右上配置和底部主工具栏，在顶部显示“从画布选择参考”与退出
@@ -361,8 +354,8 @@ Content Version、candidate 状态与首个成功主结果；Midjourney 原生�
 
 批量候选逐个校验：全部成功为 `done`，部分成功为 `partial`，全部失败为 `failed`，
 停止且没有有效产物为 `canceled`；部分失败不会抹掉已经成功的 Content Version。
-`POST .../runs/{run_id}/retry` 只接受 `expected_revision`：从结果节点当前 Draft/连接重新解析并冻结新
-Snapshot，创建新 Job/Run，不覆盖旧记录。没有按原 Snapshot 重跑的入口，也不能只补跑单个候选。
+`POST .../runs/{run_id}/retry` 只接受 `expected_revision`：按原 Job 的不可变 Snapshot、参数和精确输入版本创建新 Job/Run，设置 retry_of，不读取当前节点草稿重建输入。缺失或摘要不符的素材、不可用模型及已失效参数明确拒绝；不自动丢参考或换模型。修改配置后的“生成”使用当前草稿和实线，与原任务重试区分。
+新 Snapshot 同时冻结 `draft_prompt` 原始可编辑稿与 `final_prompt` 厂商提示词。重试发送后者，但结果节点只恢复前者；旧任务未记录原稿时留空，不把已经展开的历史参考正文写进新草稿。原任务仍可按其完整 `final_prompt` 重试。
 `POST .../runs/{run_id}/cancel` 只持久化幂等 `cancel_requested_at`。Runner 尚未认领时不调用厂商并落为
 `canceled`；同步厂商请求已发出时不伪装即时中断，UI 明示上游可能继续执行，有效返回仍登记，未返回候选
 才标记 canceled。prepared 事务在下次项目访问或命令前完成/丢弃，不能从节点当前内容重造 Snapshot。
@@ -375,15 +368,13 @@ Midjourney 异步轮询会在每个间隔和下载前检查停止请求。进程
 2 个、视频 1 个；HTTP 后台任务与重启恢复共用同一组门控。文本/图片允许候选批量，视频/音频固定单
 结果。旧 `POST .../jobs` 已删除。
 
-已有 Video Content Node 以 video Draft 提交时属于视频派生编辑：Snapshot 固定只冻结节点当前视频一个
-`implicit_self`，忽略该节点的 Input Connection，并在创建 Run 前拒绝 `@[node:*]` mention；结果始终写入
-独立视频节点与 generation-run Derivation Connection，不覆盖源节点。
+已有视频不再隐式成为输入，也不忽略用户实线。视频编辑使用显式视频来源连接，模型能力与首尾帧约束继续在提交前校验；结果不覆盖源视频。
 
 `POST /canvas/projects/{id}/runs/reverse-prompt` 只接受 `surface_node_id + expected_revision`。服务端固定
 `canvas.reverse_prompt` preset v1，优先全局 default Key、再按登记顺序选择首个 `modality=text`、
 `input_modalities` 明确包含 image 且支持 OpenAI-compatible chat 的模型；浏览器不能传 preset、alias、
 model 或媒体路径。Snapshot 冻结完整 preset 正文/版本、真实模型与唯一图片 Version，文本 caller 用
-multimodal content 发送服务端解析的项目内图片。成功结果是独立文本节点及 generation-run 派生边，源图片
+multimodal content 发送服务端解析的项目内图片。成功结果是独立文本节点及 实际输入连接，源图片
 Draft 不读不改；停止与 original retry 复用普通 Run 生命周期，current retry 不适用。
 
 普通文本 Run 可冻结并传输图片、视频和音频 Input Connection，但只认所选文本模型显式声明的
@@ -423,7 +414,7 @@ Input Connection。图片模型优先使用仍可路由的画布图片生成偏�
 重复展开重新整理同一素材组并定位，不重复创建图片；布局一致时只定位，不新增编辑记录。
 部分入口被删除后，再次展开复用剩余入口并补齐缺项。图片预览容器跟随节点高度，不施加额外最小高度；
 高度不足 96 或宽度不足 160 的图片不叠加尺寸徽标，详情中仍保留原图参数。
-归属连线由绑定字段派生展示，不写入 `connections`，不参与生成输入或流程依赖。
+图层素材归属不再画线，通过父图层定位入口表达；绑定字段、共享版本与编辑同步保留，不参与生成输入或流程依赖。
 素材替换、候选切换及单结果编辑（裁剪、抠图、放大、图片生成）同步更新父图层的版本和合成显示；
 本地单结果编辑复用节点，响应 `created_node_ids` 此时返回被更新的节点 ID。多结果“切图”仍创建独立派生结果。
 背景首次绑定时固定 `layout_size` 为原背景像素尺寸，后续素材按原 bbox 等比容纳，不改变合成坐标。
@@ -434,7 +425,7 @@ Version 不可变、历史保留；分组只管理布局。删除编辑入口保
 requested_count / mask_file`。prompt、alias、model 与参数必须先保存为源图片节点的 image Draft，服务端
 读取后冻结；浏览器不能传媒体路径或绕过 Draft。蒙版必须是与 EXIF 归一后源图同尺寸的单帧 PNG，透明或
 灰度值 0 表示编辑、255 表示保留，空蒙版拒绝。服务端把归一灰度蒙版登记为不可变 `user_mask` Content
-Version，并与 Job、Snapshot、结果节点、派生边在同一可恢复事务提交；Snapshot 记录
+Version，并与 Job、Snapshot、结果节点、实际输入连接在同一可恢复事务提交；Snapshot 记录
 `mask_version_id`，且唯一输入固定为当前源图 Version，不接收其它连接节点引用；original retry 重新校验
 源图与蒙版摘要后原样复用。首版只允许已验证走 OpenAI-compatible
 `/images/edits` 的 GPT Image 模型；不支持时返回 `canvas_media_capability_missing`，绝不降级为整图生成。
@@ -444,7 +435,7 @@ Version，并与 Job、Snapshot、结果节点、派生边在同一可恢复事�
 default Key、再按登记顺序选择首个支持至少一张参考图的图片模型；浏览器不能传自由 prompt、alias、model
 或媒体路径。服务端固定 `canvas.angle_edit` preset v1，把当前图片 Version 作为唯一 Snapshot input，完整
 机位参数、preset、真实 provider/alias/model 和受控最终 prompt 一并冻结。结果始终是独立图片节点及一条
-generation-run Derivation Connection；original retry 重新校验源图摘要并逐字段复用原 Snapshot。
+实际输入连接；original retry 重新校验源图摘要并逐字段复用原 Snapshot。
 
 `POST /canvas/projects/{id}/media-operations` 只接受当前图片节点和不可变源 Version ID，并以
 discriminated union 执行 `crop`、`split`、确定性 `upscale` 或本机模型 `remove_background`。服务端用 Pillow 校验真实格式、摘要、静态帧、
@@ -457,7 +448,7 @@ onnxruntime 只在有 wheel 的平台安装（Intel Mac 排除），缺失时状
 抠图的处理时限为 180s（其余操作 60s）。一次命令在
 项目级串行、全局最多并发 2 个；全部输出先写 staging，校验总块数与体积后原子移动到
 `derived/<operation_id>/` 并提交 Document。若进程在移动后中断，下一次项目访问按事务摘要完成提交；恢复不
-重跑图片处理。冲突为零写，源文件永不覆盖；一次 split 的结果节点和 `local_tool` 派生边作为一个画布历史
+重跑图片处理。冲突为零写，源文件永不覆盖；一次 split 的结果节点和 输入连接作为一个画布历史
 命令撤销/重做，Content Version 与字节继续保留。裁剪/切图参数校验分别固定返回
 `canvas_media_invalid_crop` / `canvas_media_invalid_split`，无法识别的请求或放大参数返回
 `canvas_media_invalid_request`；解码、规模、源不一致、revision 冲突、处理资源与事务失败均返回带
@@ -476,7 +467,7 @@ onnxruntime 只在有 wheel 的平台安装（Intel Mac 排除），缺失时状
 MIME 与角色，项目内容放在 `projects/<package_project_id>/`，媒体放在
 `blobs/sha256/<first2>/<sha256>.<ext>`。导入先调用 `inspect` 完成路径、链接、重复条目、压缩比、配额、
 schema、摘要和项目内引用校验，再凭 30 分钟 token 调用 `commit`；commit 永远创建新项目，并重映射所有
-全局 Canvas Job ID、Run ID、output path、retry/derivation/content origin 引用。node/version/connection
+全局 Canvas Job ID、Run ID、output path、retry/content origin 引用。node/version/connection
 等项目内 ID 保留。包不包含凭证、全局 provider 配置、缓存、插件代码或运行中事务；存在 pending Job
 时导出、导入和删除均返回 409。
 导入与删除分别使用持久事务记录和固定锁序；服务启动时回滚中断的导入，并完成中断的永久删除。每 6 小时

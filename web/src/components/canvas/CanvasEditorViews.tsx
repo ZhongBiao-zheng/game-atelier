@@ -122,6 +122,8 @@ export interface CanvasNodeContextValue {
   prepareBatch?: (nodeId: string) => Promise<void>;
   uploadBatchImages?: (nodeId: string, files: File[], itemId?: string) => Promise<void>;
   projectId: string;
+  layerParentByNodeId?: ReadonlyMap<string, { nodeId: string; title: string }>;
+  locateNode?: (id: string) => void;
   focusVariableNodeId?: string | null;
   consumeVariableFocus?: () => void;
   materialReferences: readonly CanvasMaterialReference[];
@@ -173,6 +175,7 @@ export interface CanvasNodeContextValue {
   updateText: (id: string, text: string) => void;
   setTextEditing?: (id: string, editing: boolean) => void;
   createImageConfigFromText: (id: string) => void;
+  createImageFromSource?: (id: string) => void;
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
   copyPrompt: (node: CanvasContentNode) => Promise<void>;
@@ -553,6 +556,19 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
             </button>
           )}
         </span>
+        {context.layerParentByNodeId?.get(node.id) && (
+          <button
+            type="button"
+            className="nodrag ml-2 flex shrink-0 items-center gap-1 rounded-sm px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            aria-label={`定位父图层：${context.layerParentByNodeId.get(node.id)!.title}`}
+            title={context.layerParentByNodeId.get(node.id)!.title}
+            onPointerDown={event => event.stopPropagation()}
+            onClick={event => {
+              event.stopPropagation();
+              context.locateNode?.(context.layerParentByNodeId!.get(node.id)!.nodeId);
+            }}
+          ><Layers3 className="size-3" aria-hidden="true" />父图层</button>
+        )}
         <CanvasNodeRunBadge state={nodeRunState} />
       </header>
       <NodeToolbar
@@ -1829,6 +1845,12 @@ function ImageNodeToolbar({
         </MediaToolButton>
       ))}
       <MediaToolButton
+        label={`基于 ${node.title} 生成`}
+        text={context.canvasUiPreferences.image_toolbar.show_labels ? '基于本图生成' : undefined}
+        disabled={!currentVersionId || submitting || replacing}
+        onClick={() => context.createImageFromSource?.(node.id)}
+      ><Sparkles /></MediaToolButton>
+      <MediaToolButton
         label={`拆分 ${node.title} 的图层`}
         text={context.canvasUiPreferences.image_toolbar.show_labels ? '拆分图层' : undefined}
         disabled={!currentVersionId || submitting || replacing}
@@ -1869,8 +1891,7 @@ export function CanvasGenerationComposer({
   onClose?: () => void;
 }) {
   const editingExistingVideo = draft.mode === 'video'
-    && node.type === 'video'
-    && Boolean(node.data.current_version_id);
+    && Boolean(context.mentionReferencesByNodeId.get(node.id)?.some(reference => reference.kind === 'video'));
   const acceptsModel = (model: KeyView['models'][number], key: KeyView) => (
     canvasGenerationModelSupportsMode(key, model, draft.mode, { editingExistingVideo })
   );
@@ -1916,6 +1937,11 @@ export function CanvasGenerationComposer({
   const nodeRunState = canvasNodeRunState(node, context.jobsByRunId);
   const activeJob = nodeRunState.job;
   const runId = activeJob?.canvas_run?.run_id;
+  const frozenCounts = { image: 0, text: 0, video: 0, audio: 0 };
+  const frozenInputs = activeJob?.canvas_run?.snapshot.inputs.map(input => ({
+    ...input,
+    label: `${mentionKindLabel(input.kind)}${++frozenCounts[input.kind]}`,
+  })) ?? [];
   const submitting = context.submittingNodeIds.has(node.id);
   const running = nodeRunState.status === 'loading';
   const textMode = draft.mode === 'text';
@@ -1965,22 +1991,20 @@ export function CanvasGenerationComposer({
       )
     )
   );
-  // 服务端在 all_connected 下把所有已连接节点无条件纳入，缺内容就整单 422。首尾帧模式下不带
-  // slot 的连线会被服务端整体丢掉，所以那时这些空输入不构成问题。
+  // 所有普通连接都参与；首尾帧槽位单独校验，额外普通连接必须移除。
   const pendingInputs = usesVideoFrameSlots
     ? EMPTY_CANVAS_PENDING_INPUTS
     : context.pendingInputNodesByNodeId?.get(node.id) ?? EMPTY_CANVAS_PENDING_INPUTS;
-  const blockingPendingInputs = draft.input_policy === 'all_connected'
-    ? pendingInputs
-    : pendingInputs.filter(input => (
-      canvasMentionMatches(draft.prompt).some(match => match.nodeId === input.nodeId)
-    ));
-  const referenceProblem = referenceErrorMessage({
+  const referenceProblem = usesVideoFrameSlots && connectedMaterialNodeIds.size > 0
+    ? '首尾帧模式请移除普通参考连接，使用首帧或尾帧槽位。'
+    : !usesVideoFrameSlots && Object.values(videoFrames).some(Boolean)
+      ? '请先移除首尾帧连接，再使用全能参考。'
+      : referenceErrorMessage({
     missingMentionCount: missingMentionIds.length,
     frameModeHasMentions,
     missingVideoFrame,
     videoReferenceCapacityExceeded,
-    pendingInputTitles: blockingPendingInputs.map(input => input.title),
+    pendingInputTitles: pendingInputs.map(input => input.title),
   });
   // 结构性问题优先，因为补引用也无法让一个没有模型或提示词的请求变得可提交。
   const generateBlock = canvasGenerateBlock({
@@ -2037,10 +2061,6 @@ export function CanvasGenerationComposer({
       context.reportError?.(blockedReason);
       return;
     }
-    if (activeJob && runId) {
-      void context.retryRun(node.id, runId);
-      return;
-    }
     void context.submitRun(node.id);
   }
 
@@ -2075,6 +2095,29 @@ export function CanvasGenerationComposer({
           </Button>
         )}
       </div>
+      {activeJob?.canvas_run && (
+        <details className="mb-2 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">
+          <summary className="cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+            {running ? '本轮冻结输入' : '原任务输入'} · {activeJob.canvas_run.snapshot.inputs.length} 项
+          </summary>
+          <div className="mt-2 max-h-48 space-y-2 overflow-y-auto">
+            <p>{activeJob.canvas_run.snapshot.model}</p>
+            <div className="flex flex-wrap gap-2">
+              {frozenInputs.map((input, index) => {
+                const version = context.resolveVersion(input.version_id);
+                return <button type="button" key={`${input.node_id}:${input.version_id}:${index}`}
+                  className="max-w-full rounded-md border border-border p-1 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  disabled={!version}
+                  onClick={() => context.previewContent(input.version_id, input.label, input.node_id)}>
+                  {version?.kind === 'image' && <img src={canvasMediaUrl(context.projectId, input.version_id, 160)} alt="" className="size-12 object-contain" />}
+                  <span>{version ? input.label : '素材已不可用'}</span>
+                </button>;
+              })}
+            </div>
+            <p className="whitespace-pre-wrap break-words">{activeJob.prompt}</p>
+          </div>
+        </details>
+      )}
       {usesVideoFrameSlots && videoCaps ? (
         <CanvasVideoFrameConnections
           node={node}
@@ -2099,10 +2142,12 @@ export function CanvasGenerationComposer({
             frames,
           )}
         />
-      ) : (
+      ) : null}
+      {(!usesVideoFrameSlots || connectedMaterialNodeIds.size > 0) && (
         <CanvasMaterialConnections
           node={node}
           materials={materialReferences}
+          connectedReferences={mentionReferences.filter(reference => connectedMaterialNodeIds.has(reference.nodeId))}
           connectedNodeIds={context.connectedMaterialNodeIdsByNodeId.get(node.id) ?? EMPTY_CANVAS_NODE_IDS}
           limits={draft.mode === 'video' ? selectedVideoReferenceLimits : null}
           picking={context.materialPick?.targetNodeId === node.id
@@ -2332,19 +2377,19 @@ export function CanvasGenerationComposer({
             {activeJob.cancel_requested_at ? '正在停止…' : '停止'}
           </Button>
         )}
-        {!running && activeJob && runId && (
+        {!running && activeJob?.status === 'failed' && runId && (
           <Button
             type="button"
             size="sm"
+            variant="outline"
             className="shrink-0"
             disabled={submitting}
-            onClick={submitGeneration}
+            onClick={() => void context.retryRun(node.id, runId)}
           >
-            {submitting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
-            {submitting ? '提交中…' : '生成'}
+            重试原任务
           </Button>
         )}
-        {!running && !activeJob && (
+        {!running && (
           <Button
             type="button"
             size="sm"
@@ -2509,6 +2554,7 @@ function CanvasMaterialConnections({
   node,
   materials,
   connectedNodeIds,
+  connectedReferences,
   limits,
   picking,
   onPreview,
@@ -2518,6 +2564,7 @@ function CanvasMaterialConnections({
   node: CanvasNode;
   materials: readonly CanvasMaterialReference[];
   connectedNodeIds: ReadonlySet<string>;
+  connectedReferences: readonly CanvasMentionReference[];
   limits?: VideoReferenceLimits | null;
   picking: boolean;
   onPreview: (reference: CanvasMaterialReference) => void;
@@ -2525,10 +2572,10 @@ function CanvasMaterialConnections({
   onConnectedChange: (sourceNodeId: string, connected: boolean) => void;
 }) {
   const choices = materials.filter(reference => reference.nodeId !== node.id);
-  const connected = choices.filter(reference => connectedNodeIds.has(reference.nodeId));
+  const connected = connectedReferences;
   const connectedCounts = connected.reduce<Record<'image' | 'video' | 'audio', number>>(
     (counts, reference) => {
-      if (reference.kind !== 'text') counts[reference.kind] += 1;
+      if (reference.kind !== 'text') counts[reference.kind] += reference.inputCount ?? 1;
       return counts;
     },
     { image: 0, video: 0, audio: 0 },
@@ -2578,6 +2625,7 @@ function CanvasMaterialConnections({
               <button
                 type="button"
                 aria-label={`查看已对接素材 ${reference.title}`}
+                title={`${reference.label} · ${reference.title}`}
                 aria-describedby={detailVisible ? `canvas-material-detail-${reference.nodeId}` : undefined}
                 className="relative grid size-12 place-items-center overflow-hidden rounded-lg border border-border bg-secondary/55 text-muted-foreground transition-colors hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 onMouseEnter={event => showMaterialDetail(reference, event.currentTarget)}
@@ -2588,7 +2636,7 @@ function CanvasMaterialConnections({
               >
                 <CanvasMaterialPreview reference={reference} />
                 <span className="absolute inset-x-0 bottom-0 truncate bg-background/80 px-1 text-xs text-foreground">
-                  {reference.title}
+                  {reference.label}
                 </span>
               </button>
               <button

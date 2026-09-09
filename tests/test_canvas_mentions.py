@@ -17,7 +17,7 @@ from tests.test_prompt_variables import variable
 NOW = "2026-08-25T00:00:00Z"
 
 
-def _document(prompt: str, *, policy: str = "mentions_only") -> CanvasDocument:
+def _document(prompt: str, *, policy: str = "all_connected") -> CanvasDocument:
     nodes = [
         {
             "id": "image-a",
@@ -124,7 +124,7 @@ def _document(prompt: str, *, policy: str = "mentions_only") -> CanvasDocument:
     })
 
 
-def test_mentions_only_freezes_prompt_order_and_renumbers_each_media_kind():
+def test_mentions_keep_connection_order_and_renumber_each_media_kind():
     prompt = (
         "让 @[node:image-b] 延续 @[node:text-a] 的叙事，再参考 @[node:image-a]，"
         "最后回到 @[node:image-b]"
@@ -136,9 +136,9 @@ def test_mentions_only_freezes_prompt_order_and_renumbers_each_media_kind():
     inputs = _resolve_inputs(document, surface, draft)
     final_prompt = _render_final_prompt(document, draft, inputs)
 
-    assert [item.node_id for item in inputs] == ["image-b", "text-a", "image-a"]
+    assert [item.node_id for item in inputs] == ["image-a", "text-a", "image-b"]
     assert [item.order for item in inputs] == [0, 1, 2]
-    assert "让 图片1 延续 【文本1】 的叙事，再参考 图片2，最后回到 图片1" in final_prompt
+    assert "让 图片2 延续 【文本1】 的叙事，再参考 图片1，最后回到 图片2" in final_prompt
     assert "参考素材编号：图片1、图片2" in final_prompt
     assert "【文本1】\n一列火车驶入雨夜" in final_prompt
     assert "@[node:" not in final_prompt
@@ -163,7 +163,7 @@ def test_canvas_resolves_variables_in_draft_and_upstream_text_without_changing_d
         _render_final_prompt(document, draft, inputs)
 
 
-def test_all_connected_keeps_unmentioned_inputs_after_mentions_and_labels_actual_order():
+def test_all_connected_keeps_unmentioned_inputs_in_connection_order():
     document = _document("以 @[node:image-b] 为主", policy="all_connected")
     surface = next(node for node in document.nodes if node.id == "config")
     draft = surface.data.draft
@@ -171,8 +171,8 @@ def test_all_connected_keeps_unmentioned_inputs_after_mentions_and_labels_actual
     inputs = _resolve_inputs(document, surface, draft)
     final_prompt = _render_final_prompt(document, draft, inputs)
 
-    assert [item.node_id for item in inputs] == ["image-b", "image-a", "text-a"]
-    assert "以 图片1 为主" in final_prompt
+    assert [item.node_id for item in inputs] == ["image-a", "text-a", "image-b"]
+    assert "以 图片2 为主" in final_prompt
     assert "参考素材编号：图片1、图片2" in final_prompt
     assert "【文本1】\n一列火车驶入雨夜" in final_prompt
 
@@ -188,7 +188,7 @@ def test_disconnected_mention_is_rejected_instead_of_becoming_plain_text():
         _resolve_inputs(document, surface, surface.data.draft)
 
 
-def test_existing_text_surface_includes_its_implicit_current_version():
+def test_existing_text_surface_does_not_include_its_current_version():
     document = _document("把原文改成更克制的旁白")
     surface = next(node for node in document.nodes if node.id == "text-a")
     config = next(node for node in document.nodes if node.id == "config")
@@ -201,11 +201,11 @@ def test_existing_text_surface_includes_its_implicit_current_version():
     inputs = _resolve_inputs(document, surface, surface.data.generation_draft)
     final_prompt = _render_final_prompt(document, surface.data.generation_draft, inputs)
 
-    assert [(item.source, item.node_id) for item in inputs] == [("implicit_self", "text-a")]
-    assert "参考文本：\n【文本1】\n一列火车驶入雨夜" in final_prompt
+    assert inputs == []
+    assert "一列火车驶入雨夜" not in final_prompt
 
 
-def test_existing_image_keeps_implicit_self_as_first_reference_when_mentioning_an_input():
+def test_existing_image_uses_only_visible_input_when_mentioning_an_input():
     document = _document("让 @[node:image-b] 延续原图")
     surface = next(node for node in document.nodes if node.id == "image-a")
     config = next(node for node in document.nodes if node.id == "config")
@@ -222,11 +222,55 @@ def test_existing_image_keeps_implicit_self_as_first_reference_when_mentioning_a
     final_prompt = _render_final_prompt(document, surface.data.generation_draft, inputs)
 
     assert [(item.source, item.node_id) for item in inputs] == [
-        ("implicit_self", "image-a"),
         ("input_connection", "image-b"),
     ]
-    assert "参考素材编号：图片1、图片2" in final_prompt
-    assert "让 图片2 延续原图" in final_prompt
+    assert "参考素材编号：图片1。" in final_prompt
+    assert "让 图片1 延续原图" in final_prompt
+
+
+def test_mentions_do_not_filter_unmentioned_connected_inputs():
+    document = _document("以 @[node:image-b] 为主")
+    surface = next(node for node in document.nodes if node.id == "config")
+    inputs = _resolve_inputs(document, surface, surface.data.draft)
+    assert [item.node_id for item in inputs] == ["image-a", "text-a", "image-b"]
+
+
+def test_existing_image_without_incoming_connections_is_text_to_image():
+    document = _document("画一个新场景")
+    surface = next(node for node in document.nodes if node.id == "image-a")
+    config = next(node for node in document.nodes if node.id == "config")
+    surface.data.generation_draft = config.data.draft
+    assert _resolve_inputs(document, surface, surface.data.generation_draft) == []
+
+
+def test_existing_video_uses_visible_connections_instead_of_its_previous_output():
+    payload = _document("以 @[node:image-b] 为参考生成视频").model_dump(mode="json")
+    payload["nodes"][0]["type"] = "video"
+    payload["nodes"][0]["data"]["generation_draft"] = {
+        **payload["nodes"][-1]["data"]["draft"], "mode": "video", "params": {"frame_mode": "auto"},
+    }
+    payload["content_versions"]["version-image-a"].update({
+        "kind": "video", "path": "uploads/image-a.mp4", "mime_type": "video/mp4",
+    })
+    payload["connections"] = [{
+        "id": "video-input", "role": "input", "source_node_id": "image-b", "target_node_id": "image-a",
+    }]
+    document = CanvasDocument.model_validate(payload)
+    surface = document.nodes[0]
+    inputs = _resolve_inputs(document, surface, surface.data.generation_draft)
+    assert [(item.kind, item.node_id) for item in inputs] == [("image", "image-b")]
+
+
+@pytest.mark.parametrize("frame_mode,slot", [("auto", "first_frame"), ("first", None)])
+def test_video_mode_does_not_silently_discard_incompatible_input_connections(frame_mode, slot):
+    document = _document("生成视频")
+    surface = document.nodes[-1]
+    surface.data.draft = surface.data.draft.model_copy(update={
+        "mode": "video", "params": JobParams(frame_mode=frame_mode),
+    })
+    document.connections = [document.connections[0].model_copy(update={"slot": slot})]
+    with pytest.raises(ValueError, match="连接"):
+        _resolve_inputs(document, surface, surface.data.draft)
 
 
 def test_submit_keeps_snapshot_labels_and_all_job_media_arrays_in_frozen_order(
@@ -349,22 +393,23 @@ def test_submit_keeps_snapshot_labels_and_all_job_media_arrays_in_frozen_order(
     submit_canvas_run(document.project_id, "config", document.revision)
 
     assert [item.node_id for item in captured["inputs"]] == [
-        "video-a",
-        "image-b",
-        "audio-a",
         "image-a",
+        "text-a",
+        "image-b",
+        "video-a",
+        "audio-a",
     ]
-    assert "让 视频1 对照 图片1，听 音频1，再看 图片2" in captured["final_prompt"]
+    assert "让 视频1 对照 图片2，听 音频1，再看 图片1" in captured["final_prompt"]
     params = captured["job_params"]
     assert params.reference_images == [
-        str(tmp_path / "uploads/image-b.png"),
         str(tmp_path / "uploads/image-a.png"),
+        str(tmp_path / "uploads/image-b.png"),
     ]
     assert params.reference_videos == [str(tmp_path / "uploads/video-a.mp4")]
     assert params.reference_audios == [str(tmp_path / "uploads/audio-a.wav")]
 
 
-def test_config_video_commit_creates_downstream_video_with_derivation(monkeypatch):
+def test_config_video_commit_connects_actual_inputs_to_downstream_video(monkeypatch):
     document = _document("把 @[node:text-a] 做成一段雨夜列车镜头")
     surface = next(node for node in document.nodes if node.id == "config")
     draft = surface.data.draft.model_copy(update={
@@ -419,13 +464,10 @@ def test_config_video_commit_creates_downstream_video_with_derivation(monkeypatc
     result = next(node for node in updated.nodes if node.id == job.canvas_run.result_node_id)
     assert result.type == "video"
     assert result.data.active_run_id == "run-video"
-    assert any(
-        edge.role == "derivation"
-        and edge.source_node_id == "config"
-        and edge.target_node_id == result.id
-        and edge.origin.run_id == "run-video"
-        for edge in updated.connections
-    )
+    assert [edge.source_node_id for edge in updated.connections if edge.target_node_id == result.id] == [
+        "image-a", "text-a", "image-b",
+    ]
+    assert all(edge.role == "input" for edge in updated.connections)
 
 
 def test_empty_connected_input_is_rejected_by_name_not_as_an_anonymous_error():
