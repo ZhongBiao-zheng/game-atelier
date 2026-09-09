@@ -82,3 +82,40 @@ def test_download_rejects_missing_file_and_anonymous_access():
     url = f"/api/canvas/projects/{project.project_id}/nodes/layer-stack/layers/download"
     assert LocalTestClient(build_app(), base_url="http://127.0.0.1").get(url).status_code == 404
     assert AnonymousClient(build_app(), base_url="http://127.0.0.1").get(url).status_code == 401
+
+
+@pytest.mark.parametrize("range_header, status", [("bytes=999999-", 416), ("bytes=invalid", 400)])
+def test_download_cleans_archive_after_invalid_range(monkeypatch, range_header, status):
+    project, _, _ = _completed_stack()
+    created = []
+    original = canvas_layer_exports.export_canvas_layers
+
+    def capture(*args):
+        result = original(*args)
+        created.append(result[0])
+        return result
+
+    monkeypatch.setattr(canvas_layer_exports, "export_canvas_layers", capture)
+    response = LocalTestClient(build_app(), base_url="http://127.0.0.1").get(
+        f"/api/canvas/projects/{project.project_id}/nodes/layer-stack/layers/download",
+        headers={"Range": range_header},
+    )
+    assert response.status_code == status
+    assert created and not created[0].exists()
+
+
+@pytest.mark.asyncio
+async def test_download_cleans_archive_after_send_failure(tmp_path):
+    from viewer_server.routes import _LayerArchiveResponse
+
+    target = tmp_path / "download.zip"
+    target.write_bytes(b"test archive")
+
+    async def fail_send(message):
+        raise ConnectionError("download interrupted")
+
+    with pytest.raises(ConnectionError):
+        await _LayerArchiveResponse(target)(
+            {"type": "http", "method": "GET", "headers": []}, None, fail_send,
+        )
+    assert not target.exists()

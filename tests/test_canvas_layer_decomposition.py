@@ -29,6 +29,8 @@ from character_workflow.lib.jobs import save_job
 from character_workflow.lib.keys import KeySpec, KeysDB, ModelSpec, write_keys_db
 from character_workflow.lib.schemas import (
     CanvasImageNode,
+    CanvasGroupNode,
+    CanvasGroupNodeData,
     CanvasInputConnection,
     CanvasLayerStackData,
     CanvasLayerStackNode,
@@ -241,6 +243,28 @@ def test_layer_decomposition_runs_existing_stack_and_registers_every_output(isol
     with ZipFile(BytesIO(response.content)) as archive:
         assert archive.namelist() == ["001-背景.png", "002-主体.png"]
         assert all(archive.read(name) == PNG for name in archive.namelist())
+
+    # Expanded nodes point at the same immutable versions, but replacement only changes that node.
+    expanded = CanvasImageNode(
+        id="expanded-layer", title="主体", type="image", position=CanvasPoint(x=1300, y=40),
+        z_index=0, data=CanvasMediaNodeData(
+            current_version_id=result_node.data.layers[0].version_id,
+            display=CanvasMediaDisplay(),
+        ),
+    )
+    group = CanvasGroupNode(
+        id="expanded-group", title="图层", type="group", position=CanvasPoint(x=1276, y=0),
+        z_index=0, data=CanvasGroupNodeData(member_node_ids=[expanded.id]),
+    )
+    document = save_canvas_document(project.project_id, document.model_copy(update={
+        "nodes": [*document.nodes, expanded, group],
+    }), document.revision)
+    replacement, document, _ = replace_canvas_node_media(
+        project.project_id, expanded.id, "replacement.png", ".png", PNG, "image", document.revision,
+    )
+    assert next(node for node in document.nodes if node.id == expanded.id).data.current_version_id == replacement.version_id
+    assert next(node for node in document.nodes if node.id == result_node.id).data.layers[0].version_id == resolved.version_id
+    assert resolve_canvas_media(project.project_id, resolved.version_id)[0] == layer_path
 
     package_path, _filename = export_canvas_projects([project.project_id])
     try:

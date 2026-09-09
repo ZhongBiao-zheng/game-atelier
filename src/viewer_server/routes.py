@@ -2891,6 +2891,15 @@ def _canvas_media_file_response(
         raise HTTPException(403, detail=str(error)) from error
 
 
+class _LayerArchiveResponse(FileResponse):
+    async def __call__(self, scope, receive, send) -> None:
+        # FileResponse can return early for invalid Range, or fail before its background task.
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            Path(self.path).unlink(missing_ok=True)
+
+
 @router.get("/canvas/projects/{project_id}/nodes/{node_id}/layers/download")
 def get_canvas_layers_download(project_id: str, node_id: str) -> FileResponse:
     from character_workflow.lib.canvas_layer_exports import export_canvas_layers
@@ -2905,10 +2914,9 @@ def get_canvas_layers_download(project_id: str, node_id: str) -> FileResponse:
         raise HTTPException(403, detail="图层文件不属于这个画布项目") from None
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
-    return FileResponse(
+    return _LayerArchiveResponse(
         target, media_type="application/zip", filename=filename,
         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
-        background=BackgroundTask(target.unlink, missing_ok=True),
     )
 
 
