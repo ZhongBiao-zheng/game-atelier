@@ -4,6 +4,8 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { KeysPage } from './Keys';
 import { KeyForm } from './KeyForm';
 
+const originalScrollIntoView = Element.prototype.scrollIntoView;
+
 const mockKey = {
   alias: 'lov',
   provider: 'openai',
@@ -18,10 +20,12 @@ const mockKey = {
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn());
+  Element.prototype.scrollIntoView = vi.fn();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  Element.prototype.scrollIntoView = originalScrollIntoView;
 });
 
 describe('KeysPage', () => {
@@ -336,6 +340,27 @@ describe('KeyForm', () => {
     expect(screen.queryByLabelText('路由范围')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('路由类别')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('模型命中词')).not.toBeInTheDocument();
+  });
+
+  it('scrolls to and focuses each newly added model without stealing focus while typing', () => {
+    render(<KeyForm onCreated={() => {}} onCancel={() => {}} initial={{
+      ...mockKey,
+      models: Array.from({ length: 20 }, (_, i) => ({ name: `Model ${i}`, id: `model-${i}` })),
+    }} />);
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+    for (const index of [21, 22]) {
+      fireEvent.click(screen.getByRole('button', { name: '添加模型' }));
+      const name = screen.getByLabelText(`模型名称 ${index}`);
+      expect(name).toHaveFocus();
+      expect(name).toHaveValue('');
+      expect(Element.prototype.scrollIntoView).toHaveBeenLastCalledWith({ block: 'center', behavior: 'instant' });
+      fireEvent.change(name, { target: { value: 'New model' } });
+      const id = screen.getByLabelText(`模型 ID ${index}`);
+      id.focus();
+      fireEvent.change(id, { target: { value: 'new-model' } });
+      expect(id).toHaveFocus();
+    }
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(2);
   });
 
   it('tags per-model modality on a custom key and derives key-level modalities', async () => {

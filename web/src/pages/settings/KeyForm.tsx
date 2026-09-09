@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ArrowLeft, Eye, EyeOff, X } from 'lucide-react';
 import { createKey, patchKey, modelModality, previewModels, revealKey, type KeyCreatePayload, type KeyModel, type ModelCategory, type ModelInputModality, type ModelModality, type ModelsPreview, type RemoteModel } from '@/api/keys';
 
@@ -88,6 +88,7 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
       ? initial.models.map((m) => ({ ...m, modality: modelModality(m, initial), _locked: mode === 'edit' }))
       : providerByValue(initial?.provider ?? 'openai').defaultModels,
   );
+  const pendingModelFocus = useRef<number | null>(null);
   const [urlTest, setUrlTest] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -685,7 +686,10 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                     </button>
                     <button
                       type="button"
-                      onClick={() => setModels([...models, { name: '', id: '' }])}
+                      onClick={() => {
+                        pendingModelFocus.current = models.length;
+                        setModels([...models, { name: '', id: '' }]);
+                      }}
                       className={ghostButtonClass}
                     >
                       添加模型
@@ -704,6 +708,12 @@ export function KeyForm({ initial, onCreated, onCancel, submitLabel = '保存', 
                     <div key={index} className="grid grid-cols-[1fr_1fr_15rem_auto] items-center gap-2">
                       <label className="sr-only" htmlFor={`key-model-name-${index}`}>模型名称 {index + 1}</label>
                       <input
+                        ref={(input) => {
+                          if (!input || pendingModelFocus.current !== index) return;
+                          pendingModelFocus.current = null;
+                          input.focus({ preventScroll: true });
+                          input.scrollIntoView({ block: 'center', behavior: 'instant' });
+                        }}
                         id={`key-model-name-${index}`}
                         aria-label={`模型名称 ${index + 1}`}
                         value={model.name}

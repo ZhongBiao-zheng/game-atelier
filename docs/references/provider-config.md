@@ -1,6 +1,6 @@
 # API Key / 厂商配置参考
 
-> 配置 key、设计出图/出视频参数、排错时只看这份。汇总自官方文档与实测，2026-06-11 起持续更新（最近一次 2026-08-28）。
+> 配置 key、设计出图/出视频参数、排错时只看这份。汇总自官方文档与实测，2026-06-11 起持续更新（最近一次 2026-09-09）。
 > Skill 按任务挑模型、按模型族写提示词 → [model-routing.md](model-routing.md)。
 
 ## 配置在哪
@@ -16,18 +16,23 @@
 **安全边界**：传了 `alias` 而不带 `access_key` 时会取出存储的**明文密钥**，所以此时请求体里的
 `base_url` 只允许与存储值同 host（换域名要自带密钥）——否则等于让调用方指定「把密钥发到哪」。
 
-响应：`{ models: [{ id, name, modality, category, protocol }], total, excluded }`
+响应：`{ models: [{ id, name, modality, category, protocol, input_modalities }], total, excluded }`
 
 | 字段 | 取值 | 含义 |
 |---|---|---|
-| `category` | `image` / `video` / `unknown` / `excluded` | 分类结果。`excluded` 只在 `include_all: true` 时出现在 `models` 里 |
-| `modality` | `image` / `video` / `null` | 只有前两类给值；`unknown` 一律 `null`，由画师在 picker 里显式二选一（**不再静默兜底成 image**）|
-| `protocol` | 见上方各厂契约 / `null` | 视频=seedance·kling·dashscope·openrouter；图片=ark·openai |
-| `total` / `excluded` | 数字 | 上游去重后的总数 / 被判「明确非视觉」而未返回的条数，前端据此显示「上游 78 个 · 已过滤 61 个」+ 逃生舱 |
+| `category` | `text` / `image` / `video` / `audio` / `unknown` / `excluded` | 分类结果。`excluded` 只在 `include_all: true` 时出现在 `models` 里 |
+| `modality` | `text` / `image` / `video` / `audio` / `null` | 四种生成类别给值；`unknown` / `excluded` 为 `null`，由画师在 picker 显式指定（不静默兜底成 image）|
+| `protocol` | 见各厂契约 / `null` | 对话=openai-chat·openai-responses；视频=seedance·kling·dashscope·openrouter；图片=ark·openai；语音合成=openai-speech |
+| `input_modalities` | 数组 | 上游显式声明的 text / image / video / audio 输入，不凭模型名猜能力 |
+| `total` / `excluded` | 数字 | 上游去重总数 / 明确不可生成而未返回的条数；「显示全部」可查看被过滤项 |
 
-**默认 `/models` 不一定是全集**：OpenRouter 把视频模型排除在外，必须额外拉
-`?output_modalities=video`（`routes.py::_extra_model_list_urls`，拉不到时降级为只有图片模型，
-不让整个功能报错）。接新上游时别把「默认端点里没有」当成「这个平台没有」——先按 host 试专用列表。
+**默认 `/models` 不一定是全集**：OpenRouter [官方 Models API](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties)
+默认 `output_modalities=text`。使用 `?output_modalities=all`，同时省略 offset / limit，
+一次取得全量；目录请求失败要报错，不能静默返回缺模态的部分列表。2026-09-09 实测默认
+431 条、全量 584 条，纯图片 43、视频 28、speech 18。
+根据 [TTS 文档](https://openrouter.ai/docs/guides/overview/multimodal/tts)，输出 `speech`
+归为音频并标注 `openai-speech`；普通 `audio` 不等于 TTS，无法确认协议时留作 unknown。
+获取目录不代表已适配每个模型的音色与生成参数；上游专属参数仍需各 caller 单独支持。
 
 分类是四级瀑布（`routes.py::_classify_model`）：协议标注判视觉 → 协议**全部**是非视觉动词才判
 `excluded` → 读 `architecture.output_modalities`（OpenRouter 的权威字段）→ id 关键词（**词边界**
@@ -36,7 +41,8 @@
 **认不出一律 `unknown` 留着，绝不丢**：协议词汇是各厂自造的（实测同一份词元跳动数据里就有
 `zai:layout-parsing` / `bocha:web-search` / `unifuncs:web-reader`），词表永远追不完，「认不出就
 丢」会让某个网关的模型列表整片消失且用户看不出原因。实测:词元跳动 78 → 排除 61 / 图 2 / 视频 15
-（17 个视觉模型逐条核对无误伤）；OpenRouter 409 → 排除 398 / 图 11。
+（17 个视觉模型逐条核对无误伤）。2026-09-09 OpenRouter 全量 584 → 对话 416 / 图 54 /
+视频 28 / 语音 18 / 未识别 4 / 排除 64（转录、向量、重排），「显示全部」仍能查看 584 条。
 
 ## 当前已接厂商
 
@@ -46,7 +52,7 @@
 | `OpenAI-HK` | custom | `https://api.openai-hk.com` | gpt-image-2、nano-banana / -2 / -hd | 实测通；kling caller 已写、模型未挂 key |
 | `tokendance` | tokendance | `https://tokendance.space/gateway/v1` | seedream-5.0-lite / -pro（图）、seedance-2.0 系 + happyhorse 系（视频） | 2026-08-13 出图实测通（pro 走 Ark 端点，960² 约 88s）|
 | `Tuzi` | custom | `https://api.tu-zi.com` | gpt-image-2、doubao-seedream-4-5、nano-banana-pro / -2 系 | **当前 default_alias** —— Skill 不指定 alias 时默认走这把。图片走通用异步任务：先保存 task ID，再轮询原任务；短暂断网或 viewer-server 重启后可续查，不重发已计费请求 |
-| `OpenRouter` | openrouter | `https://openrouter.ai/api/v1` | gpt-image-2、seedream-4.5、gemini-3-pro-image、flux.2-pro（图）+ veo / sora / seedance / kling（视频，手填）| 实测通。契约与国内聚合商不同族，见 [openrouter-pricing.md](openrouter-pricing.md)：专用 `/images`（回 b64_json）+ 异步 `/videos` job；**视频模型不在默认 `/models` 里**（实测 409 条一个都没有），要用 `?output_modalities=video` 或 `/videos/models` 才列得出来（23 个：veo / sora / kling / seedance / hailuo / runway / wan / happyhorse…）——models-preview 已自动合并拉取 |
+| `OpenRouter` | openrouter | `https://openrouter.ai/api/v1` | gpt-image-2、seedream-4.5、gemini-3-pro-image、flux.2-pro（图）+ veo / sora / seedance / kling（视频）| 实测通。见 [openrouter-pricing.md](openrouter-pricing.md)：专用 `/images`（回 b64_json）+ 异步 `/videos` job；models-preview 使用 `output_modalities=all` 获取包含语音的全量目录 |
 
 密钥获取：火山 `console.volcengine.com/ark`、词元跳动 `tokendance.space/keys`、HK `open-hk.com` 控制台。
 
@@ -136,6 +142,10 @@ Tuzi default 的 GPT Image 2 自 2026-09-04 起，按最终 `size` 的 11 个精
 OpenAI-HK 按张：GPT Image 2 `¥0.08`、Nano Banana `¥0.20`、Nano Banana HD
 `¥0.32`；Nano Banana 2 的 low / medium / high 分别对应基础 / 2K / 4K，单价
 `¥0.48 / ¥0.72 / ¥1.00`。
+
+2026-09-09 用户确认：`gpt-image-2.5-sunburst` / `gpt-image-2.5-flare` 均为每张
+2400 积分（¥0.24），已按精确型号加入统一价表。费用快照目前接在 Studio 提交链路，画布没有接入
+这套估价与费用显示；历史无快照的 Job 不用当前价表回填。
 
 Tuzi 必须在 Key 上显式配置 `billing_group`。`default` 分组已核实 GPT Image 2、
 Seedream 4.5、Seedream 5.0 Pro、Nano Banana Pro、Nano Banana 2 与 Midjourney；

@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.39.3',
+    date: '2026-09-09',
+    headline: '模型设置：补全 OpenRouter 目录，新增模型自动定位',
+    changes: [
+      { kind: 'fix', text: 'OpenRouter 获取全量模型目录，不再遗漏纯图像、视频与语音合成模型' },
+      { kind: 'fix', text: '点击添加模型后自动滚到新行，并聚焦名称输入框' },
+      { kind: 'fix', text: '补上 OpenAI-HK Sunburst 和 Flare 的费用估算，均为每张 ¥0.24' },
+    ],
+  },
+  {
     version: '5.39.2',
     date: '2026-09-04',
     headline: '画布：抠图结果与源图同尺寸，处理中的占位节点可拖动',

@@ -8,6 +8,32 @@ import {
 import { normalizeStudioSizeForModel } from './studioSize';
 
 describe('estimateGenerationCost', () => {
+  it.each(['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'])(
+    'prices OpenAI-HK %s at the confirmed per-image rate for every quality', (id) => {
+      for (const quality of ['low', 'medium', 'high', 'auto', undefined] as const) {
+        expect(estimateGenerationCost({
+          provider: { provider: 'custom', baseUrl: 'https://api.openai-hk.com' },
+          model: { id }, kind: 'image', count: 3, quality,
+        })).toBe(0.72);
+      }
+      expect(estimateGenerationCost({
+        provider: { provider: 'custom', baseUrl: 'https://api.example.com' },
+        model: { id }, kind: 'image', count: 1,
+      })).toBeNull();
+      expect(estimateGenerationCost({
+        provider: { provider: 'custom', baseUrl: 'https://api.openai-hk.com' },
+        model: { id: `${id}-unknown` }, kind: 'image', count: 1,
+      })).toBeNull();
+      const params = { n: 2, quality: 'low' };
+      expect(estimateGenerationCostForSubmission({
+        alias: 'OpenAI-HK', provider: 'custom', base_url: 'https://api.openai-hk.com',
+        access_key: 'masked', secret_key: null, capabilities: ['portrait'], notes: '',
+        created_at: '2026-09-09T00:00:00Z',
+        models: [{ id, name: id, modality: 'image' }],
+      }, id, 'image', params)).toBe(0.48);
+      expect(params).toEqual({ n: 2, quality: 'low' });
+    },
+  );
   it('calculates fixed OpenAI-HK GPT Image 2 pricing regardless of quality', () => {
     const result = estimateGenerationCost({
       provider: { provider: 'custom', baseUrl: 'https://api.openai-hk.com' },

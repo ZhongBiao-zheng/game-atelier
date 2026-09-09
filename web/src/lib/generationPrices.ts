@@ -7,9 +7,11 @@
  */
 import type { Quality } from '@/lib/imageControlCaps';
 
-// OpenAI-HK：元 / 张；沿用已核实价格，本轮未调价。
+// OpenAI-HK：元 / 张。2.5 两型号由用户于 2026-09-09 确认均为 2400 积分 / 张。
 export const OPENAI_HK_FIXED_YUAN_PER_IMAGE: Record<string, number> = {
   'gpt-image-2': 0.08,
+  'gpt-image-2-5-sunburst': 0.24,
+  'gpt-image-2-5-flare': 0.24,
   'nano-banana': 0.2,
   'nano-banana-hd': 0.32,
 };
