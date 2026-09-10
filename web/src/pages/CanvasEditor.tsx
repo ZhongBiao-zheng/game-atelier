@@ -96,6 +96,7 @@ import {
 } from '@/components/canvas/CanvasEditorViews';
 import { canvasNodeRunDisplayError, isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
 import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
+import { CanvasLayerStackPreview } from '@/components/canvas/CanvasLayerStackPreview';
 import { CanvasThemeSelector } from '@/components/canvas/CanvasThemeSelector';
 import {
   CanvasGenerationMetadata,
@@ -435,6 +436,7 @@ function CanvasEditorInner({
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [layerPreviewId, setLayerPreviewId] = useState<string | null>(null);
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
   const [mediaPlaceholder, setMediaPlaceholder] = useState<CanvasMediaOperationPlaceholder | null>(null);
@@ -678,6 +680,7 @@ function CanvasEditorInner({
     setCanvasUiPreferences(DEFAULT_CANVAS_UI_PREFERENCES);
     setCanvasUiPreferencesError(null);
     setPreview(null);
+    setLayerPreviewId(null);
     setMediaOperation(null);
     setMediaOperationBusy(false);
     setMediaOperationError(null);
@@ -3052,6 +3055,8 @@ function CanvasEditorInner({
     if (version) setPreview({ nodeId, title, version });
   }, []);
 
+  const previewLayerStack = useCallback((nodeId: string) => setLayerPreviewId(nodeId), []);
+
   const announceToolNotice = useCallback((message: string) => {
     setToolNotice(message);
     if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
@@ -3988,6 +3993,7 @@ function CanvasEditorInner({
     setVideoFrameConnections,
     selectNode: selectOnlyNode,
     previewContent,
+    previewLayerStack,
     selectCandidate,
     reportError,
     submitRun,
@@ -4061,6 +4067,7 @@ function CanvasEditorInner({
     openMediaOperation,
     removeBackground,
     previewContent,
+    previewLayerStack,
     persistImageToolbarPreferences,
     projectId,
     reportError,
@@ -4113,6 +4120,7 @@ function CanvasEditorInner({
   if (!document) return <EditorMessage text={error || '画布读取失败'} action={<Button onClick={onBack}>返回项目列表</Button>} />;
 
   const background = backgroundVariant(document.settings.background);
+  const layerPreviewNode = document.nodes.find(node => node.id === layerPreviewId);
   const previewNode = preview
     ? document.nodes.find(node => node.id === preview.nodeId) ?? null
     : null;
@@ -4233,7 +4241,7 @@ function CanvasEditorInner({
     </>
   );
 
-  const canvasFeedbackVisible = !preview && !mediaOperation && !maskEdit && !angleState
+  const canvasFeedbackVisible = !preview && !layerPreviewNode && !mediaOperation && !maskEdit && !angleState
     && !shortcutsOpen && !generationPreferencesOpen;
 
   return (
@@ -4831,6 +4839,11 @@ function CanvasEditorInner({
         <div className="absolute bottom-16 right-3 z-20 md:bottom-3">
           <CanvasBatchResults projectId={projectId} runs={batchRuns} resolveVersion={resolveVersion} onCancel={stopBatch} onPreview={previewContent} />
         </div>
+        <Dialog open={layerPreviewNode?.type === 'layer_stack'} onOpenChange={open => { if (!open) setLayerPreviewId(null); }}>
+          {layerPreviewNode?.type === 'layer_stack' && <CanvasLayerStackPreview key={layerPreviewNode.id}
+            node={layerPreviewNode} projectId={projectId} resolveVersion={resolveVersion}
+            onCloseAutoFocus={event => { event.preventDefault(); restoreCanvasNodeFocus(layerPreviewNode.id); }} />}
+        </Dialog>
         <Dialog open={Boolean(preview)} onOpenChange={open => { if (!open) setPreview(null); }}>
           {preview && (
             <DialogContent className="max-h-[90dvh] max-w-4xl overflow-y-auto">

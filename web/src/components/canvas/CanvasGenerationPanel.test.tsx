@@ -132,6 +132,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     setMaterialConnected: vi.fn(),
     selectNode: vi.fn(),
     previewContent: vi.fn(),
+    previewLayerStack: vi.fn(),
     selectCandidate: vi.fn(),
     submitRun: vi.fn(async () => undefined),
     retryRun: vi.fn(async () => undefined),

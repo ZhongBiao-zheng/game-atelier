@@ -119,6 +119,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     setMaterialConnected: vi.fn(),
     selectNode: vi.fn(),
     previewContent: vi.fn(),
+    previewLayerStack: vi.fn(),
     selectCandidate: vi.fn(),
     submitRun: vi.fn(async () => undefined),
     retryRun: vi.fn(async () => undefined),
@@ -500,6 +501,10 @@ it('offers bulk layer actions only after completion and reports download failure
   expect(screen.getByRole('button', { name: '展开图层到画布并分组' })).toBeDisabled();
   const ready = { ...stack, data: { ...stack.data, base_version_id: 'base' } };
   rerender(view(ready));
+  fireEvent.click(screen.getByRole('button', { name: '查看 拆分图层 详情' }));
+  expect(context.previewLayerStack).toHaveBeenCalledWith(stack.id);
+  fireEvent.doubleClick(screen.getByRole('group', { name: /选择节点 拆分图层/ }));
+  expect(context.previewLayerStack).toHaveBeenCalledTimes(2);
   fireEvent.click(screen.getByRole('button', { name: '展开图层到画布并分组' }));
   expect(context.expandLayerStack).toHaveBeenCalledWith(stack.id);
   let rejectDownload!: (error: Error) => void;

@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.47.1',
+    date: '2026-09-10',
+    headline: '拆分图层详情预览',
+    changes: [
+      { kind: 'fix', text: '修复拆分图层详情按钮无响应，支持查看合成大图和每层原图、名称、尺寸及说明。' },
+    ],
+  },
+  {
     version: '5.47.0',
     date: '2026-09-10',
     headline: '画布批量添加素材',

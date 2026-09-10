@@ -25,7 +25,7 @@ import { Link } from 'wouter';
 import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers } from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasExecutionGroup } from './CanvasBatchControls';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
-import { orderedLayerStackParts } from './canvasLayerOrder';
+import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
@@ -162,6 +162,7 @@ export interface CanvasNodeContextValue {
   ) => void;
   selectNode: (id: string) => void;
   previewContent: (id: string, title: string, nodeId: string) => void;
+  previewLayerStack: (nodeId: string) => void;
   selectCandidate: (id: string, versionId: string) => void;
   reportError?: (message: string) => void;
   submitRun: (id: string) => Promise<void>;
@@ -704,7 +705,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
             beginTextEditing();
             return;
           }
-          if (content) context.previewContent(content.version_id, node.title, node.id);
+          if (node.type === 'layer_stack') context.previewLayerStack(node.id);
+          else if (content) context.previewContent(content.version_id, node.title, node.id);
         }}
         onKeyDown={event => {
           if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -1492,9 +1494,10 @@ function CanvasNodeToolbar({
         </>
       )}
       <MediaToolButton
-        label={content ? `查看 ${node.title} 详情` : `查看 ${node.title} 设置`}
+        label={content || node.type === 'layer_stack' ? `查看 ${node.title} 详情` : `查看 ${node.title} 设置`}
         onClick={() => {
-          if (content) context.previewContent(content.version_id, node.title, node.id);
+          if (node.type === 'layer_stack') context.previewLayerStack(node.id);
+          else if (content) context.previewContent(content.version_id, node.title, node.id);
           else context.selectNode(node.id);
         }}
       >
@@ -2950,10 +2953,6 @@ export function CanvasLayerStackSurface({
   const baseImage = base?.kind === 'image' ? base : undefined;
   const layoutWidth = node.data.layout_size?.width ?? baseImage?.width;
   const layoutHeight = node.data.layout_size?.height ?? baseImage?.height;
-  const layers = orderedLayerStackParts(node).flatMap(part => {
-    const version = context.resolveVersion(part.versionId);
-    return version?.kind === 'image' ? [{ ...part, version }] : [];
-  });
   const selectedChoice = choices.find(choice => (
     choice.key.alias === node.data.alias && choice.model.id === node.data.model
   ));
@@ -2996,48 +2995,8 @@ export function CanvasLayerStackSurface({
     <div className="flex h-full min-h-0">
       <div className="relative flex min-w-0 flex-1 items-center justify-center p-3">
         {baseImage && layoutWidth && layoutHeight ? (
-          <svg
-            viewBox={`0 0 ${layoutWidth} ${layoutHeight}`}
-            role="img"
-            aria-label={`${node.title} 合成预览`}
-            className="h-full w-full"
-            preserveAspectRatio="xMidYMid meet"
-          >
-            {layers.map(({ key, layer, version, visible }) => {
-              if (!visible) return null;
-              const [left, top, right, bottom] = layer?.bounding_box.absolute ?? [0, 0, layoutWidth, layoutHeight];
-              return (
-                <image
-                  key={key}
-                  data-layer-stack-part={layer?.id ?? 'base'}
-                  href={canvasMediaUrl(context.projectId, version.version_id)}
-                  x={left}
-                  y={top}
-                  width={right - left}
-                  height={bottom - top}
-                  preserveAspectRatio="xMidYMid meet"
-                />
-              );
-            })}
-            {layers.map(({ layer }) => {
-              if (!layer || hoveredLayerId !== layer.id || !layer.visible) return null;
-              const [left, top, right, bottom] = layer.bounding_box.absolute;
-              return (
-                <rect
-                  key={`outline-${layer.id}`}
-                  x={left}
-                  y={top}
-                  width={right - left}
-                  height={bottom - top}
-                  fill="none"
-                  stroke="var(--primary)"
-                  strokeWidth="2"
-                  vectorEffect="non-scaling-stroke"
-                  pointerEvents="none"
-                />
-              );
-            })}
-          </svg>
+          <CanvasLayerStackComposite node={node} projectId={context.projectId}
+            resolveVersion={context.resolveVersion} hoveredLayerId={hoveredLayerId} />
         ) : sourceImage ? (
           <img
             src={canvasMediaUrl(context.projectId, sourceImage.version_id, 1024)}
