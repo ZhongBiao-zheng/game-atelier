@@ -17,12 +17,20 @@ from pathlib import Path
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
-from character_workflow.lib.confirm_card import confirmation_card_html, confirmation_card_text
+from character_workflow.lib.confirm_card import (
+    confirmation_card_html,
+    confirmation_card_text,
+    result_card_html,
+    result_card_text,
+)
 from character_workflow.lib.jobs import clone_job_for_retry, new_job_id, read_job, write_job
 from character_workflow.lib.job_runner import run_job, run_latest
 from character_workflow.lib.lessons import append_lesson
 from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobStatus
 from character_workflow.lib.turn_start import turn_start
+
+# submit 缺省尺寸按 kind 定：美宣 KV 与三视图三联默认 16:9 横版，立绘竖版。
+_DEFAULT_SIZE = {"portrait": "1024x1536", "promo": "2048x1152", "turnaround": "2048x1152"}
 
 
 def _force_utf8_stdio() -> None:
@@ -68,6 +76,7 @@ def _submit(args: argparse.Namespace) -> int:
         resolved = str(Path(raw).expanduser().resolve())
         if resolved not in reference_images:
             reference_images.append(resolved)
+    size = args.size or _DEFAULT_SIZE[args.kind]
     alias = args.alias or keys.preferred_alias_for_kind(args.kind)
     key = keys.find_by_alias(alias) if alias else None
     if key is None:
@@ -89,8 +98,8 @@ def _submit(args: argparse.Namespace) -> int:
 
     params: dict = {
         "vendor": f"{key.alias} ({key.provider})",
-        "size": args.size,
-        "requested_size": args.size,
+        "size": size,
+        "requested_size": size,
         "n": args.n,
         "reference_images": reference_images,
     }
@@ -640,7 +649,10 @@ def main(argv: list[str] | None = None) -> int:
         help="角色 id；缺省读 .runtime/active-character.json",
     )
     p_submit.add_argument("--n", type=int, default=1, help="出图数量，默认 1")
-    p_submit.add_argument("--size", default="1024x1536", help="出图尺寸，默认 1024x1536")
+    p_submit.add_argument(
+        "--size", default=None,
+        help="出图尺寸；缺省按 --kind 取默认（portrait 1024x1536，promo / turnaround 2048x1152 横版）",
+    )
     p_submit.add_argument(
         "--alias", default=None,
         help="指定 Key alias；缺省用当前 kind 的默认 Key（按任务跨 Key 选模型时配合 --model）",
@@ -733,7 +745,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_card = sub.add_parser(
         "card",
-        help="按 job JSON 重新渲染出图确认卡；--format html 给 show_widget 原样使用，text 同 submit 的 stderr",
+        help="按 job JSON 渲染卡片：未完成出确认卡（text 同 submit 的 stderr），done / partial 出结果卡（含缩略图）；html 给 show_widget 原样使用",
     )
     p_card.add_argument("job_id")
     p_card.add_argument("--format", choices=["html", "text"], default="html")
@@ -852,7 +864,12 @@ def main(argv: list[str] | None = None) -> int:
         except FileNotFoundError:
             print(f"card: job {args.job_id} 不存在", file=sys.stderr)
             return 2
-        render = confirmation_card_html if args.format == "html" else confirmation_card_text
+        # done / partial 出结果卡（缩略图 + 定稿按钮），其余状态出确认卡。
+        finished = job.status in (JobStatus.DONE, JobStatus.PARTIAL)
+        if args.format == "html":
+            render = result_card_html if finished else confirmation_card_html
+        else:
+            render = result_card_text if finished else confirmation_card_text
         print(render(job))
         return 0
     if args.cmd == "retry-job":

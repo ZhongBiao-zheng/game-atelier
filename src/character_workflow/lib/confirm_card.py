@@ -1,14 +1,23 @@
-"""出图确认卡的两种呈现：终端文本（stderr 原样转发）与 show_widget HTML（有可视化工具时）。
+"""出图卡的呈现：确认卡（文本 / HTML）与结果卡（HTML，含缩略图）。
 
 两种形态都由这里按 job JSON 生成，Skill 只负责转发，杜绝 Agent 手写漏字段或改字段。
-按钮点击通过 sendPrompt 发出固定原话「出图 <job_id>」/「要改 <job_id>」/「先不出 <job_id>」，
-让画师的回复落在 Skill 判定表里的明确分支，不再出现模糊表态。
+按钮点击通过 sendPrompt 发出固定原话（「出图 <job_id>」/「要改 <job_id>」/「先不出 <job_id>」，
+结果卡是「vN 定稿」/「要改 <job_id>」/「先放着 <job_id>」），让画师的回复落在 Skill 判定表的明确分支。
+
+结果卡的图只能走 data URI：show_widget 的 CSP 拦掉 file:// 与 127.0.0.1，且 iframe 没有本机 cookie。
+data URI 要经过模型的工具调用，所以只嵌长边 320px 的 JPEG 缩略图；原图仍由 Skill 按渲染通道另发。
 """
 from __future__ import annotations
 
+import base64
 import html
+import io
+from pathlib import Path
 
-from character_workflow.lib.schemas import AssetSlot, Job, JobKind
+from character_workflow.lib import data_root
+from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobStatus
+
+THUMB_LONG_EDGE = 320
 
 _SLOT_LABEL = {
     AssetSlot.PORTRAIT: "立绘",
@@ -126,3 +135,95 @@ def confirmation_card_html(job: Job) -> str:
         "<script>document.querySelectorAll('button[data-say]').forEach(function (b) {"
         " b.addEventListener('click', function () { sendPrompt(b.dataset.say); }); });</script>"
     )
+
+
+def _resolve_output(path: str) -> Path:
+    p = Path(path)
+    return p if p.is_absolute() else data_root.resolve_data_root() / p
+
+
+def _thumbnail(path: Path) -> tuple[str, str] | None:
+    """返回 (data URI, 原图尺寸文案)；文件缺失或不是图片返回 None。"""
+    try:
+        from PIL import Image
+
+        with Image.open(path) as im:
+            size = f"{im.width}×{im.height}"
+            im = im.convert("RGB")
+            im.thumbnail((THUMB_LONG_EDGE, THUMB_LONG_EDGE))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=70, optimize=True)
+    except Exception:
+        return None
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii"), size
+
+
+def result_card_html(job: Job) -> str:
+    """出图结果卡：缩略图 + 定稿 / 要改 / 先放着按钮。job 需已 done / partial。"""
+    e = html.escape
+    is_video = job.kind is JobKind.VIDEO
+    title = "出视频结果" if is_video else "出图结果"
+    ok = job.status is JobStatus.DONE
+    status_label, status_bg, status_fg = (
+        ("已出图" if not is_video else "已出片", "var(--bg-success)", "var(--text-success)")
+        if ok else ("部分成功", "var(--bg-warning)", "var(--text-warning)")
+    )
+    label_td = 'style="color: var(--text-secondary); padding: 4px 12px 4px 0; width: 72px; vertical-align: top; white-space: nowrap;"'
+    value_td = 'style="padding: 4px 0; font-family: var(--font-mono); word-break: break-all;"'
+    rows = [("job_id", job.job_id), ("model", job.model)]
+    if is_video:
+        rows.append(("参数", f"{job.params.duration}s · {job.params.resolution} · {job.params.ratio}"))
+    else:
+        rows.append(("size", str(job.params.size)))
+    rows.append(("产物", f"{len(job.output_paths)} {'个' if is_video else '张'}"))
+    rows_html = "".join(
+        f"<tr><td {label_td}>{e(k)}</td><td {value_td}>{e(v)}</td></tr>" for k, v in rows
+    )
+    figures = ""
+    version_buttons = ""
+    for path in job.output_paths:
+        resolved = _resolve_output(path)
+        stem = resolved.stem
+        thumb = None if is_video else _thumbnail(resolved)
+        caption = f"{stem} · {thumb[1]} · {path}" if thumb else f"{stem} · {path}"
+        if thumb:
+            img = (f'<img src="{thumb[0]}" alt="{e(stem)}" '
+                   'style="display: block; max-width: 100%; border-radius: var(--radius);">')
+        elif is_video or not resolved.exists():
+            note = "视频文件，卡片内不预览" if is_video else "文件不存在"
+            img = f'<p style="font-size: 13px; color: var(--text-secondary); margin: 0;">{note}</p>'
+        else:
+            img = '<p style="font-size: 13px; color: var(--text-secondary); margin: 0;">无法生成预览</p>'
+        figures += (
+            '<figure style="margin: 12px 0 0;">'
+            f"{img}"
+            f'<figcaption style="font-size: 12px; color: var(--text-secondary); font-family: var(--font-mono); word-break: break-all; margin-top: 4px;">{e(caption)}</figcaption>'
+            "</figure>"
+        )
+        version_buttons += f'<button data-say="{e(f"{stem} 定稿", quote=True)}">{e(stem)} 定稿 ↗</button>'
+    buttons = (
+        version_buttons
+        + f'<button data-say="{e(f"要改 {job.job_id}", quote=True)}">要改 ↗</button>'
+        + f'<button data-say="{e(f"先放着 {job.job_id}", quote=True)}">先放着 ↗</button>'
+    )
+    return (
+        f'<h2 class="sr-only">{e(title)}卡：{e(job.job_id)}，{len(job.output_paths)} 个产物，等待画师定稿或修改</h2>'
+        '<div style="background: var(--surface-2); border-radius: 12px; border: 0.5px solid var(--border); padding: 1rem 1.25rem;">'
+        '<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">'
+        f'<p style="font-weight: 500; font-size: 15px; margin: 0; flex: 1;">{e(title)}</p>'
+        f'<span style="font-size: 12px; padding: 4px 12px; border-radius: var(--radius); background: var(--surface-1); color: var(--text-secondary);">{e(_kind_label(job))}</span>'
+        f'<span style="font-size: 12px; padding: 4px 12px; border-radius: var(--radius); background: {status_bg}; color: {status_fg};">{status_label}</span>'
+        "</div>"
+        f'<table style="width: 100%; font-size: 13px; border-top: 0.5px solid var(--border); padding-top: 8px;">{rows_html}</table>'
+        f"{figures}"
+        f'<div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;">{buttons}</div>'
+        "</div>"
+        "<script>document.querySelectorAll('button[data-say]').forEach(function (b) {"
+        " b.addEventListener('click', function () { sendPrompt(b.dataset.say); }); });</script>"
+    )
+
+
+def result_card_text(job: Job) -> str:
+    lines = ["─── 出图结果 ───", f"job_id : {job.job_id}", f"model  : {job.model}", "产物   :"]
+    lines.extend(f"  {i}. {p}" for i, p in enumerate(job.output_paths, 1))
+    return "\n".join(lines)

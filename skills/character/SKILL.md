@@ -331,7 +331,7 @@ uv run python -m character_workflow set-canonical --kind portrait --path <该图
    uv run python -m character_workflow run-latest --kind portrait
    ```
 
-4. 渲染成品给画师：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 Markdown 图片，末尾提一句"Web 也能看，或直接说要改哪张"。图片地址按**渲染通道**选（**完整规则 + 判断方法 + 降级顺序见 `docs/references/image-presentation.md`**）：
+4. 渲染成品给画师：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 Markdown 图片，末尾提一句"Web 也能看，或直接说要改哪张"。客户端有 `show_widget` 时先跑 `card <job_id>`（job 已 done 会输出结果卡：缩略图 + 「vN 定稿 / 要改 / 先放着」按钮）渲染成卡片，再按下面的渲染通道把原图发给画师——卡片里只有缩略图，不替代原图（`docs/references/card-widget.md` 第四节）。图片地址按**渲染通道**选（**完整规则 + 判断方法 + 降级顺序见 `docs/references/image-presentation.md`**）：
    - **终端内联图像**（iTerm2 / kitty 等终端里的 Claude Code / Codex CLI）→ 本地绝对路径 `![vN](output_paths[i])`；
    - **HTML 渲染能访问本地文件**（`file://` 页面或应用自行注入本地资源）→ 本地绝对路径可行；
    - **HTML 渲染不能访问本地文件**（`http://` 页面，如 DeepSeek Harness GUI）→ **本地路径会裂图**，优先转 viewer-server `/api/raw` HTTP URL：`http://127.0.0.1:<port>/api/raw?path=<data-root相对路径>&job_id=<job_id>`（带本次 job_id 白名单鉴权；端口读 `.runtime/server.port`，别写死 5174）；**项目没有后端 / server 不可用时用 base64 data URI**（`data:image/png;base64,...`，零依赖，任何 HTML 渲染都显示，大图先压小）。

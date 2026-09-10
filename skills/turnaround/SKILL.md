@@ -115,7 +115,7 @@ uv run python -m character_workflow turn-start --kind turnaround
 - 三视图是工程图：建模师/动画师/卡牌画师靠它对结构，美感是副产物，能对得上比好看更重要
 - spec 锚点 100% 继承：发色/瞳色/服装/武器已锁定；三视图只补"另外两面长什么样"，不顺手微调
 - 三面比例严格对齐：正/侧/背同一头顶线 + 同一脚底基线；武器/披风/配饰各面长度必须一致
-- 构图平实：横幅 1536×1024，三面均匀分布，浅灰/米白网格背景；不做戏剧化光线和场景背景
+- 构图平实：横幅 2048×1152，三面均匀分布，浅灰/米白网格背景；不做戏剧化光线和场景背景
 - 道具说清三面：各面可见的扣环位置、斜度、握持方式逐面标注；道具特写非默认，画师明示才拆
 - "你定"时：三选一并说明对下游影响（A 纯三视图-建模够用 / B 加表情包-卡牌动画 / C 加武器拆解-武器系）
 - 不接受"差不多就行"：三视图精度决定下游返工成本，`consistency_level: strict`
@@ -142,7 +142,7 @@ uv run python -m character_workflow turn-start --kind turnaround
 | 视图组合 | 标准三视图（正/侧/背）？要不要加 3/4 侧、表情包、动作小图？ |
 | 比例尺 | 三面身高严格一致？头身比？武器/披风长度各面对齐？ |
 | 道具拆解 | 武器单独拆视图还是挂在腰间？头饰要不要独立特写？ |
-| 画面规格 | 默认 1536×1024 横版三联；要不要加灰底等高辅助线 / 网格背景？ |
+| 画面规格 | 默认 2048×1152 横版三联；要不要加灰底等高辅助线 / 网格背景？ |
 
 ## 写 prompt
 
@@ -175,12 +175,12 @@ uv run python -m character_workflow turn-start --kind turnaround
 
 ## 出图流程
 
-默认单张出图；画幅 1536×1024 横版三联（下游建模 / 卡牌按此对结构，是设计约束不是 CLI 默认）；张数缺省由 CLI 按 `--kind` 决定。
+默认单张出图；画幅 2048×1152 横版三联（下游建模 / 卡牌按此对结构；CLI 按 `--kind` 缺省即此，不必手传 `--size`）；张数缺省同样由 CLI 决定。
 
 1. `uv run python -m character_workflow submit --kind turnaround --alias <选定alias> --model <选定model-id> --prompt-file <path> [--reference-image <path> ...] [--source-image <path>]` → 落盘 PENDING_CONFIRM（`--alias`/`--model` 按 model-routing 选；缺省回退默认 Key 首模型；`--reference-image` 可重复传多张，`--source-image` 是首张参考图的兼容别名——参考图一律走 CLI 参数，禁止手改 job JSON）
-2. 把 submit 在 stderr 打出的确认卡**原样转发**给画师（job_id / Key / model / 尺寸 1536×1024 / 参考图全列表 / 完整 prompt 原文），不得手写或摘要。客户端工具列表里有 `show_widget` 时，改为跑 `card "$JOB_ID"`，把输出的 HTML 原样作为 `widget_code` 渲染成卡片（首次先 `read_me`；规则与按钮语义见 `docs/references/card-widget.md`）；没有就转发 stderr 文本卡。
+2. 把 submit 在 stderr 打出的确认卡**原样转发**给画师（job_id / Key / model / 尺寸 2048×1152 / 参考图全列表 / 完整 prompt 原文），不得手写或摘要。客户端工具列表里有 `show_widget` 时，改为跑 `card "$JOB_ID"`，把输出的 HTML 原样作为 `widget_code` 渲染成卡片（首次先 `read_me`；规则与按钮语义见 `docs/references/card-widget.md`）；没有就转发 stderr 文本卡。
 3. 判定画师回复：**明确肯定**（出图 / 确认 / OK / 可以 / 行 / 就这样 / 走吧 / 好，或按钮「出图 <job_id>」）→ `uv run python -m character_workflow run-job <job_id>`；**要改**（具体改点；按钮「要改 <job_id>」没带改点则先问要改哪里）→ 改 prompt 重新 submit 出新确认卡（旧 PENDING_CONFIRM 作废、不复用），不 run-job；**否定 / 犹豫**（再想想 / 先不出 / 算了，或按钮「先不出 <job_id>」）→ 停在 PENDING_CONFIRM，不推进、不催；**模糊**（看不出肯定还是想改）→ 不擅自当肯定，用 AskUserQuestion 二选一「直接出图 / 还想改」。绝不把沉默或模糊当默认推进。
-4. 渲染成品给画师：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 Markdown 图片。图片地址按**渲染通道**选（**完整规则 + 判断方法 + 降级顺序见 `docs/references/image-presentation.md`**）：
+4. 渲染成品给画师：只用 run-job 返回 JSON 里的 `output_paths` 数组（本次 job 自己的字段），按序每张一行 Markdown 图片。客户端有 `show_widget` 时先跑 `card <job_id>`（job 已 done 会输出结果卡：缩略图 + 「vN 定稿 / 要改 / 先放着」按钮）渲染成卡片，再按下面的渲染通道把原图发给画师——卡片里只有缩略图，不替代原图（`docs/references/card-widget.md` 第四节）。图片地址按**渲染通道**选（**完整规则 + 判断方法 + 降级顺序见 `docs/references/image-presentation.md`**）：
    - **终端内联图像**（iTerm2 / kitty 等终端里的 Claude Code / Codex CLI）→ 本地绝对路径 `![vN](output_paths[i])`；
    - **HTML 渲染能访问本地文件**（`file://` 页面或应用自行注入本地资源）→ 本地绝对路径可行；
    - **HTML 渲染不能访问本地文件**（`http://` 页面，如 DeepSeek Harness GUI）→ **本地路径会裂图**，优先转 viewer-server `/api/raw` HTTP URL：`http://127.0.0.1:<port>/api/raw?path=<data-root相对路径>&job_id=<job_id>`（带本次 job_id 白名单鉴权；端口读 `.runtime/server.port`，别写死 5174）；**项目没有后端 / server 不可用时用 base64 data URI**（`data:image/png;base64,...`，零依赖，任何 HTML 渲染都显示，大图先压小）。

@@ -89,7 +89,7 @@ stdout 是纯 job_id，stderr 是确认卡——**原样转发确认卡给画师
 ### 6. 确认后执行
 
 画师明确说「出图」→ `run-job <job_id>`。产物落当前方案 `screens/<screen-id>/vN.png`，
-提示画师在 Web 项目页「页面」区查看。失败 → 把 job.error 的中文原因给画师，经确认后 `retry-job <job_id>`。
+提示画师在 Web 项目页「页面」区查看；客户端有 `show_widget` 时先 `card <job_id>` 渲染结果卡（缩略图 + 定稿 / 要改按钮，`docs/references/card-widget.md` 第四节）。失败 → 把 job.error 的中文原因给画师，经确认后 `retry-job <job_id>`。
 screen-map 存在时，把该页清单表状态推进为 `generated`（定稿后推进为 `canonical`）。
 
 ## 风格切换模式（B3）
