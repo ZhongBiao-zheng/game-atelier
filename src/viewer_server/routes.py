@@ -2921,11 +2921,20 @@ class _LayerArchiveResponse(FileResponse):
 
 
 @router.get("/canvas/projects/{project_id}/nodes/{node_id}/layers/download")
-def get_canvas_layers_download(project_id: str, node_id: str) -> FileResponse:
-    from character_workflow.lib.canvas_layer_exports import export_canvas_layers
+def get_canvas_layers_download(
+    project_id: str,
+    node_id: str,
+    format: Literal["zip", "psd"] = Query("zip"),
+) -> FileResponse:
+    from character_workflow.lib import canvas_layer_exports
 
+    export = (
+        canvas_layer_exports.export_canvas_layers_psd
+        if format == "psd"
+        else canvas_layer_exports.export_canvas_layers
+    )
     try:
-        target, filename = export_canvas_layers(project_id, node_id)
+        target, filename = export(project_id, node_id)
     except KeyError:
         raise HTTPException(404, detail="找不到这个拆分图层节点") from None
     except FileNotFoundError:
@@ -2935,7 +2944,9 @@ def get_canvas_layers_download(project_id: str, node_id: str) -> FileResponse:
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
     return _LayerArchiveResponse(
-        target, media_type="application/zip", filename=filename,
+        target,
+        media_type="image/vnd.adobe.photoshop" if format == "psd" else "application/zip",
+        filename=filename,
         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
     )
 

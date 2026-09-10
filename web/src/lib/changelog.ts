@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.49.0',
+    date: '2026-09-10',
+    headline: '拆分图层可导出 PSD',
+    changes: [
+      { kind: 'feat', text: '图层栈工具栏新增「导出 PSD」：背景与全部图层按当前顺序写成分层 PSD，保留图层名、位置和显隐，可在 Photoshop 等软件中继续编辑。' },
+    ],
+  },
+  {
     version: '5.48.1',
     date: '2026-09-10',
     headline: '精简节点快捷工具',

@@ -510,11 +510,16 @@ it('offers bulk layer actions only after completion and reports download failure
   let rejectDownload!: (error: Error) => void;
   vi.mocked(downloadCanvasLayers).mockImplementationOnce(() => new Promise((_, reject) => { rejectDownload = reject; }));
   fireEvent.click(screen.getByRole('button', { name: '下载全部图层' }));
-  expect(downloadCanvasLayers).toHaveBeenCalledWith('canvas-test', stack.id);
+  expect(downloadCanvasLayers).toHaveBeenCalledWith('canvas-test', stack.id, 'zip');
   expect(screen.getByRole('button', { name: '下载全部图层' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '导出 PSD' })).toBeDisabled();
   await act(async () => rejectDownload(new Error('图层文件缺失')));
   expect(context.reportError).toHaveBeenCalledWith('图层文件缺失');
   expect(screen.getByRole('button', { name: '下载全部图层' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: '导出 PSD' }));
+  expect(downloadCanvasLayers).toHaveBeenLastCalledWith('canvas-test', stack.id, 'psd');
+  await act(async () => undefined);
+  expect(screen.getByRole('button', { name: '导出 PSD' })).toBeEnabled();
   context.batchBusy = true;
   rerender(view(ready));
   expect(screen.getByRole('button', { name: '展开图层到画布并分组' })).toBeDisabled();

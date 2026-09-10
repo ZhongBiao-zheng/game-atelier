@@ -99,12 +99,16 @@ export async function exportCanvasProjects(projectIds: string[]): Promise<void> 
   await downloadResponse(response, '画布项目.game-atelier-canvas.zip');
 }
 
-export async function downloadCanvasLayers(projectId: string, nodeId: string): Promise<void> {
+export type CanvasLayerExportFormat = 'zip' | 'psd';
+
+export async function downloadCanvasLayers(
+  projectId: string, nodeId: string, format: CanvasLayerExportFormat = 'zip',
+): Promise<void> {
   const response = await request(
-    `/api/canvas/projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(nodeId)}/layers/download`,
-    '下载全部图层',
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(nodeId)}/layers/download?format=${format}`,
+    format === 'psd' ? '导出 PSD' : '下载全部图层',
   );
-  await downloadResponse(response, '全部图层.zip');
+  await downloadResponse(response, format === 'psd' ? '图层.psd' : '全部图层.zip');
 }
 
 async function downloadResponse(response: Response, fallbackName: string): Promise<void> {

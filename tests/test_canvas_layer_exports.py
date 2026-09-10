@@ -119,3 +119,53 @@ async def test_download_cleans_archive_after_send_failure(tmp_path):
             {"type": "http", "method": "GET", "headers": []}, None, fail_send,
         )
     assert not target.exists()
+
+
+def test_download_psd_stacks_layers_by_order_with_names_positions_and_visibility(monkeypatch):
+    from psd_tools import PSDImage
+
+    project, document, version = _completed_stack()
+    stack = document.nodes[1]
+    # Move the base above the first layer to prove PSD stacking follows z_index, not list order.
+    stack = stack.model_copy(update={"data": stack.data.model_copy(update={
+        "base_z_index": 1, "base_visible": True,
+        "layers": [
+            stack.data.layers[0].model_copy(update={"z_index": 0}),
+            stack.data.layers[1].model_copy(update={"z_index": 2, "name": "", "visible": True}),
+        ],
+    })})
+    save_canvas_document(project.project_id, document.model_copy(update={
+        "nodes": [document.nodes[0], stack],
+    }), document.revision)
+    created = []
+    original = canvas_layer_exports.export_canvas_layers_psd
+
+    def capture(*args):
+        result = original(*args)
+        created.append(result[0])
+        return result
+
+    monkeypatch.setattr(canvas_layer_exports, "export_canvas_layers_psd", capture)
+    response = LocalTestClient(build_app(), base_url="http://127.0.0.1").get(
+        f"/api/canvas/projects/{project.project_id}/nodes/layer-stack/layers/download?format=psd",
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/vnd.adobe.photoshop")
+    assert ".psd" in response.headers["content-disposition"]
+    assert response.headers["cache-control"] == "no-store"
+    psd = PSDImage.open(BytesIO(response.content))
+    assert psd.size == (1, 1)
+    # psd-tools iterates bottom to top.
+    assert [layer.name for layer in psd] == ["../背景:一", "背景", "图层 2"]
+    assert [layer._record.name for layer in psd] == ["layer1", "layer2", "layer3"]
+    assert [(layer.left, layer.top, layer.size) for layer in psd] == [(0, 0, (1, 1))] * 3
+    assert [layer.visible for layer in psd] == [False, True, True]
+    assert created and not created[0].exists()
+
+
+def test_download_rejects_unknown_format():
+    project, _, _ = _completed_stack()
+    response = LocalTestClient(build_app(), base_url="http://127.0.0.1").get(
+        f"/api/canvas/projects/{project.project_id}/nodes/layer-stack/layers/download?format=tiff",
+    )
+    assert response.status_code == 422

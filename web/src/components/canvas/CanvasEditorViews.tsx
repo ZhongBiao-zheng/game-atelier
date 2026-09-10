@@ -13,7 +13,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef,
   useState,
@@ -22,7 +22,7 @@ import {
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
 
-import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers } from '@/api/canvas';
+import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers, type CanvasLayerExportFormat } from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasExecutionGroup } from './CanvasBatchControls';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
@@ -1409,7 +1409,7 @@ function CanvasNodeToolbar({
 }) {
   const contentNode = isCanvasContentNode(node) ? node : null;
   const mediaNode = contentNode && contentNode.type !== 'text' ? contentNode : null;
-  const [downloadingLayers, setDownloadingLayers] = useState(false);
+  const [downloadingLayers, setDownloadingLayers] = useState<CanvasLayerExportFormat | null>(null);
   const layersReady = node.type === 'layer_stack' && Boolean(node.data.base_version_id)
     && !node.data.active_run_id && !submitting;
 
@@ -1445,18 +1445,24 @@ function CanvasNodeToolbar({
       )}
       {node.type === 'layer_stack' && (
         <>
-          <MediaToolButton
-            label="下载全部图层"
-            disabled={!layersReady || downloadingLayers}
-            onClick={() => {
-              setDownloadingLayers(true);
-              void downloadCanvasLayers(context.projectId, node.id)
-                .catch(error => context.reportError?.((error as Error).message))
-                .finally(() => setDownloadingLayers(false));
-            }}
-          >
-            {downloadingLayers ? <LoaderCircle className="animate-spin" /> : <Download />}
-          </MediaToolButton>
+          {([['zip', '下载全部图层', <Download />], ['psd', '导出 PSD', <FileDown />]] as const).map(
+            ([format, label, icon]) => (
+              <MediaToolButton
+                key={format}
+                label={label}
+                text={format === 'psd' ? 'PSD' : undefined}
+                disabled={!layersReady || downloadingLayers !== null}
+                onClick={() => {
+                  setDownloadingLayers(format);
+                  void downloadCanvasLayers(context.projectId, node.id, format)
+                    .catch(error => context.reportError?.((error as Error).message))
+                    .finally(() => setDownloadingLayers(null));
+                }}
+              >
+                {downloadingLayers === format ? <LoaderCircle className="animate-spin" /> : icon}
+              </MediaToolButton>
+            ),
+          )}
           <MediaToolButton
             label="展开图层到画布并分组"
             disabled={!layersReady || context.batchBusy}
