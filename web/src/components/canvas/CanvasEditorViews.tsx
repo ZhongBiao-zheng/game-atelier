@@ -1694,7 +1694,7 @@ function ImageNodeToolbar({
         ...common,
         label: currentVersionId && targets.length === 0
           ? `${node.title} 已达 4K，无需放大`
-          : `高清放大 ${node.title}`,
+          : `AI高清 ${node.title}`,
         icon: <Icon />,
         disabled: !currentVersionId || submitting || replacing || targets.length === 0,
         run: () => undefined,

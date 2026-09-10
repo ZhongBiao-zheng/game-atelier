@@ -30,11 +30,11 @@ export const CANVAS_IMAGE_TOOLS: CanvasImageToolDefinition[] = [
   { id: 'crop', label: '裁剪', icon: Crop, defaultVisible: true },
   { id: 'split', label: '切分', icon: Grid2X2, defaultVisible: true },
   { id: 'removeBackground', label: '抠图', icon: Scissors, defaultVisible: true },
-  { id: 'upscale', label: '高清放大', icon: ZoomIn, defaultVisible: true },
+  { id: 'upscale', label: 'AI高清', icon: ZoomIn, defaultVisible: true },
   { id: 'angle', label: '多角度', icon: Orbit, defaultVisible: false },
 ];
 
-/** 高清放大走 Nano Banana 生成，档位即模型能出的长边；长边不超过原图的档位不展示。 */
+/** AI高清走 Nano Banana 生成，档位即模型能出的长边；长边不超过原图的档位不展示。 */
 export const CANVAS_UPSCALE_TARGETS: ReadonlyArray<{ id: CanvasUpscaleTarget; longEdge: number }> = [
   { id: '2K', longEdge: 2048 },
   { id: '4K', longEdge: 4096 },

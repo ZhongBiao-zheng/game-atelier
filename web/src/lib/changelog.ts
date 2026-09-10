@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.50.2',
+    date: '2026-09-10',
+    headline: '「高清放大」更名「AI高清」',
+    changes: [
+      { kind: 'fix', text: '图片工具栏的「高清放大」按钮及相关提示统一改名为「AI高清」。' },
+    ],
+  },
+  {
     version: '5.50.1',
     date: '2026-09-10',
     headline: '生成中的图片节点按输出比例占位',

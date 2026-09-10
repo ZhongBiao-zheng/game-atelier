@@ -407,7 +407,7 @@ export function submitCanvasUpscaleRun(
 ): Promise<CanvasRun> {
   return requestJson<CanvasRun>(
     `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/upscale`,
-    '提交高清放大',
+    '提交 AI高清',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

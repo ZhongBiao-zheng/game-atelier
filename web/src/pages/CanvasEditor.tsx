@@ -3663,7 +3663,7 @@ function CanvasEditorInner({
     setSubmittingNodeIds(current => new Set(current).add(node.id));
     try {
       if (!await persistNow()) {
-        setError('自动保存失败，高清放大尚未提交。请检查服务后重试。');
+        setError('自动保存失败，AI高清尚未提交。请检查服务后重试。');
         return;
       }
       const dirtyAtSubmission = dirtyVersion.current;
@@ -3677,7 +3677,7 @@ function CanvasEditorInner({
       applyLocalJob(run.job);
       const resultId = run.job.canvas_run?.result_node_id;
       if (resultId) setSelectedNodeIds(new Set([resultId]));
-      announceToolNotice(`已提交“${node.title}”的 ${target} 高清放大`);
+      announceToolNotice(`已提交“${node.title}”的 ${target} AI高清`);
     } catch (submitError) {
       setError((submitError as Error).message);
     } finally {
