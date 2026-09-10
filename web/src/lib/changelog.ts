@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.53.0',
+    date: '2026-09-10',
+    headline: '网站可配对连接本机工坊',
+    changes: [
+      { kind: 'feat', text: '「本机连接」页可为托管网站生成 5 分钟一次性配对码，并查看、断开已连接的网站。' },
+      { kind: 'feat', text: '托管网站打开后填写本机端口与配对码即可连接，数据仍全部留在本机；密钥、数据目录与 Agent 授权只能在本机页面管理。' },
+      { kind: 'feat', text: '本机连接协议升级到 atelier-local/2；托管网站遇到旧版本机服务会提示先更新。' },
+    ],
+  },
+  {
     version: '5.52.2',
     date: '2026-09-10',
     headline: '拆分图层节点显示尺寸与大小',

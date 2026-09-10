@@ -61,3 +61,6 @@ web/src/**/*.js
 web/tsconfig.tsbuildinfo
 
 .gstack/
+
+# Vercel CLI 本地项目链接（含项目 / 组织 id，不入库）
+.vercel

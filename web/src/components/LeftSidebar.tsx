@@ -1,4 +1,5 @@
 import { connectionFetch } from '@/api/connection';
+import { mediaUrl } from '@/api/connection';
 import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Layers2, LibraryBig, Trash2, UserPlus } from 'lucide-react';
 import { Link } from 'wouter';
@@ -340,7 +341,7 @@ function CharacterAvatar({ name, thumbnail, active }: {
   if (thumbnail) {
     return (
       <img
-        src={`/api/gallery/image?path=${encodeURIComponent(thumbnail)}`}
+        src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(thumbnail)}`)}
         alt=""
         className={cn(
           'size-7 shrink-0 rounded-sm border border-border object-cover',

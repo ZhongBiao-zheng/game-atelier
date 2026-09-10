@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { mediaUrl } from '@/api/connection';
 import { FolderPlus, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { fetchProjectIndex, type ProjectIndexItem } from '@/api/gallery';
@@ -295,7 +296,7 @@ function ProjectCover({ paths, projectName }: { paths: string[]; projectName: st
       {visible.map((path, index) => (
         <img
           key={path}
-          src={`/api/gallery/image?path=${encodeURIComponent(path)}`}
+          src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`)}
           alt=""
           loading="lazy"
           className={cn(

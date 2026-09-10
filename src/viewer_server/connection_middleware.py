@@ -12,17 +12,27 @@ from viewer_server.connection_auth import COOKIE_NAME, ConnectionError, Connecti
 from viewer_server.connection_capabilities import (
     CANVAS_TOOLS, WORKSHOP_TOOLS, is_media_route, local_capability,
 )
-from viewer_server.request_boundary import _authority, _header
+from viewer_server.request_boundary import _authority, _header, media_token_param
 
 _CONTROL_ROUTES = {
     ("POST", "/api/connection/local-session"),
     ("POST", "/api/connection/agent-sessions"),
+    ("POST", "/api/connection/pairings"),
+    ("POST", "/api/connection/pair"),
+    ("POST", "/api/connection/media-token"),
     ("POST", "/api/connection/editor-lease"),
     ("DELETE", "/api/connection/editor-lease"),
     ("GET", "/api/connection/sessions"),
     ("GET", "/api/connection/agent-grants"),
     ("POST", "/api/connection/agent-grants"),
 }
+# 网站会话能碰的控制端点：租约、媒体令牌、撤销自己；配对管理与 Agent 授权只属本机页面。
+_SITE_CONTROL_ROUTES = {
+    ("POST", "/api/connection/media-token"),
+    ("POST", "/api/connection/editor-lease"),
+    ("DELETE", "/api/connection/editor-lease"),
+}
+_LOCAL_ONLY = ConnectionError("CAPABILITY_DENIED", "此操作只能在本机页面进行")
 
 
 def _cookie(scope: Scope) -> str | None:
@@ -79,18 +89,37 @@ class ConnectionMiddleware:
             )
             bootstrap = method == "POST" and path == "/api/connection/local-session"
             agent_bootstrap = method == "POST" and path == "/api/connection/agent-sessions"
+            pair_bootstrap = method == "POST" and path == "/api/connection/pair"
+            site_origin = origin if origin is not None and origin in self.store.site_origins() else None
+            media_token = media_token_param(scope) if method in {"GET", "HEAD"} else None
             if bootstrap:
-                if origin is None or site != "same-origin" or authorization:
+                if origin is None or site != "same-origin" or authorization or site_origin:
                     raise ConnectionError("ORIGIN_DENIED", "请从本地页面建立连接")
             elif agent_bootstrap:
                 if origin or site or cookie or authorization:
                     raise ConnectionError("CAPABILITY_DENIED", "此入口仅用于已授权的本地 Agent")
+            elif pair_bootstrap:
+                if site_origin is None or cookie or authorization:
+                    raise ConnectionError("ORIGIN_DENIED", "请先在本机为该网站生成配对码")
             elif _private_path(path) and path != "/api/connection/status":
-                if authorization:
-                    if not authorization.startswith("Bearer ") or origin or site:
+                if media_token is not None:
+                    if cookie or authorization or not is_media_route(path):
+                        raise ConnectionError("CAPABILITY_DENIED", "媒体令牌只能单独用于媒体地址")
+                    session = self.store.authenticate_media(media_token)
+                elif authorization:
+                    if not authorization.startswith("Bearer "):
+                        raise ConnectionError("CAPABILITY_DENIED", "连接凭据无效")
+                    if site_origin is not None:
+                        session = self.store.authenticate(
+                            authorization[7:], kind="site", origin=site_origin,
+                        )
+                    elif origin or site:
                         raise ConnectionError("CAPABILITY_DENIED", "Agent 连接凭据无效")
-                    session = self.store.authenticate(authorization[7:], kind="agent", origin=None)
+                    else:
+                        session = self.store.authenticate(authorization[7:], kind="agent", origin=None)
                 elif cookie:
+                    if site_origin is not None:
+                        raise ConnectionError("CAPABILITY_DENIED", "网站不能使用本机页面的凭据")
                     session = self.store.authenticate(cookie, kind="local", origin=origin)
                 else:
                     raise ConnectionError("CONNECTION_REQUIRED", "请先连接本机工坊", 401)
@@ -107,6 +136,25 @@ class ConnectionMiddleware:
                 if session.principal.kind == "agent":
                     if not tool:
                         raise ConnectionError("CAPABILITY_DENIED", "此 Agent 仅可使用授权工坊工具")
+                elif media_token is not None:
+                    pass  # 令牌已绑定会话，路由本身限定为只读媒体。
+                elif session.principal.kind == "site":
+                    if control:
+                        own = path == f"/api/connection/sessions/{session.principal.session_id}"
+                        if (method, path) not in _SITE_CONTROL_ROUTES and not (
+                            method == "DELETE" and own
+                        ):
+                            raise _LOCAL_ONLY
+                    else:
+                        capability = local_capability(method, path)
+                        if tool or approval or capability == "manage":
+                            raise _LOCAL_ONLY
+                        if requests:
+                            capability = "read"
+                        if capability is None:
+                            raise ConnectionError("CAPABILITY_DENIED", "此入口未授权")
+                        if capability == "edit":
+                            self.store.require_editor(session, _header(scope, b"x-atelier-client"))
                 elif not control:
                     capability = local_capability(method, path)
                     if tool or approval:
@@ -125,7 +173,7 @@ class ConnectionMiddleware:
                 ):
                     raise ConnectionError("CONTENT_TYPE_DENIED", "请使用正确的请求格式", 415)
                 session = state.get("connection_session")
-                if not agent_bootstrap and (not session or session.principal.kind == "local"):
+                if not agent_bootstrap and (not session or session.principal.kind != "agent"):
                     if origin is None:
                         raise ConnectionError("ORIGIN_DENIED", "本地修改需要页面来源信息")
             body_limit = 16 * 1024 if control else (

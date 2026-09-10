@@ -1,7 +1,8 @@
 # 本机连接契约
 
 > 本地整合已实现握手、Host / Origin 边界、会话、编辑租约、Agent 项目授权与统一传输。
-> `atelier-local/1` 表示本地鉴权协议；网站配对、跨源 CORS、媒体票据仍为后续目标，当前不开放。
+> `atelier-local/2`（5.53.0 起）在此之上实现网站配对、按登记来源的 CORS 与会话级只读媒体令牌。
+> 真实 HTTPS 站点的浏览器联调在首次 Vercel 部署后进行，通过前浏览器支持状态标「未验证」。
 > 范围与阶段见[开发说明](../local-workspace.md)。正常数据 API 仍遵循 [API 契约](../api-contract.md)。
 
 ## 身份与信任
@@ -43,7 +44,7 @@ Fetch Metadata；不接受无 Origin 的匿名请求，不向网站提供 CORS �
 本地同源 cookie 不作为网站跨站身份。网站的 Authorization 与本地管理 cookie 不可混用，
 有冲突的凭据拒绝；带管理 cookie 也不能让网站来源调用管理端点。
 
-## 网站配对（后续目标）
+## 网站配对
 
 1. 用户显式启动本机服务并打开本地管理页。在该页填写或确认网站的精确 HTTPS Origin。
    禁止通配符、`null`、`file:`、`data:`、含用户名密码的 URL 和任意子域。
@@ -60,29 +61,37 @@ Fetch Metadata；不接受无 Origin 的匿名请求，不向网站提供 CORS �
 不保存 Key 或项目内容；断开立即清除。它仍可被同源脚本读取，不应被描述为 HttpOnly 或防 XSS 存储。
 初次实现统一采用这一策略，不同时保留多个持久化方案。
 
+实现要点（5.53.0）：配对码 `secrets.token_urlsafe(24)`，服务端只存 SHA-256 摘要，同一来源只保留最新一枚，
+待配对最多 8 个；配对与 Agent 会话共用每分钟 30 次的尝试限流。网站会话 kind 为 `site`，能力固定 `read` / `edit`，
+可申请编辑租约；控制端点只开放 `editor-lease`、`media-token` 与撤销自己。Origin 校验允许 `https://` 任意主机
+和 `http://localhost:<port>`（只为本地 `vite preview` 验证托管模式，生产网站必须 HTTPS）；`http://127.0.0.1:*`、服务自身地址与 Vite 开发来源一律拒绝，登记它们会把本地页面的 cookie 引导当成跨源拒绝。
+托管网站直接进入界面，不调用 `/api/onboarding/status`（含本机路径，属管理端点）。
+
 配对码只能由本地管理页创建；网站不能自行创建码，也不能通过“首次请求的 Origin 自动绑定”抢占服务。
 `OPTIONS` 只允许已经登记的待配对 / 已配对 Origin，精确响应允许的方法和头，设置 `Vary: Origin`；
 不用 `Access-Control-Allow-Origin: *`，也不把 CORS 当身份验证。其它请求体在鉴权前不能被完整读取。
+边界层对已登记来源的所有响应（含 401 / 403 拒绝）都附精确 `Access-Control-Allow-Origin`，否则浏览器
+只能看到不透明的网络错误；预检带 `Access-Control-Request-Private-Network` 时回 `Allow-Private-Network: true`
+（旧版 Chrome PNA 预检，新版走本地网络权限弹窗）。待配对码过期或网站会话撤销后，该来源立刻回到 403。
 
 ### 连接端点
 
-当前已实现 status、local-session、sessions、editor-lease；表中 pairings / pair /
-media-tickets 未注册，不属于本地验收。当前 status 的 protocol 为 `atelier-local/1`。
+当前 status 的 protocol 为 `atelier-local/2`；表中 `media-tickets` 已由会话级 `media-token` 取代（见下）。
 本地引导 `{}` 返回 `{ session_id, instance_id, expires_at }` 并设置最长 12 小时 cookie。
 租约 POST 接收 `{ client_id, takeover?: false }`，DELETE 接收 `{ client_id }` 并返回 204。
 控制请求最大 16 KiB，每实例最多 64 会话，每会话最多 4 路事件流。
 
 | 方法与路径 | 身份 | 请求 / 响应重点 |
 | --- | --- | --- |
-| `GET /api/connection/status` | 无 | `{ service: "game-atelier", instance_id, app_version, protocol }`；P1a 的 protocol 固定为 null，完整鉴权就绪后才声明 `"atelier-local/1"`；不含目录、项目数、Key 或会话 |
+| `GET /api/connection/status` | 无 | `{ service: "game-atelier", instance_id, app_version, protocol }`；当前为 `"atelier-local/2"`，托管网站据此判断本机是否需要更新；不含目录、项目数、Key 或会话 |
 | `POST /api/connection/local-session` | 本地同源引导 | 本地 cookie；无业务数据 |
-| `POST /api/connection/pairings` | 本地管理 | `{ origin }` → `{ pairing_code, expires_at, instance_id }` |
-| `POST /api/connection/pair` | 已登记的待配对 Origin | `{ pairing_code, instance_id }` → `{ session_token, session_id, expires_at, capabilities }` |
-| `GET /api/connection/sessions` | 本地管理 | 会话名称、Origin、项目范围、过期时间；永不返回令牌 |
-| `DELETE /api/connection/sessions/{id}` | 本地管理或当前会话自撤销 | 撤销身份及其编辑租约、媒体票据和事件流 |
+| `POST /api/connection/pairings` | 本地管理 | `{ origin }` → `{ pairing_code, origin, expires_at, instance_id }`；来源不合规 422 |
+| `POST /api/connection/pair` | 已登记的待配对 Origin | `{ pairing_code, instance_id }` → `{ session_token, session_id, instance_id, expires_at, capabilities }`；码错 / 过期 / 来源不符统一 403 `SESSION_REVOKED`，实例不符 409 |
+| `GET /api/connection/sessions` | 本地管理 | 会话 kind、名称、`origin`、项目范围、过期时间；永不返回令牌 |
+| `DELETE /api/connection/sessions/{id}` | 本地管理或当前会话自撤销 | 撤销身份及其编辑租约、媒体令牌和事件流 |
+| `POST /api/connection/media-token` | 网站会话 | `{}` → `{ media_token, expires_at }`；见「媒体令牌」 |
 | `POST /api/connection/editor-lease` | 编辑页面 | 显式申请唯一编辑租约，冲突返回 `EDITOR_IN_USE`；不静默踢出旧页 |
 | `DELETE /api/connection/editor-lease` | 租约持有者 | 主动释放，不撤销仍需使用的本地管理能力 |
-| `POST /api/connection/media-tickets` | 有对应资源读取权的页面 | `{ resources: [{ path, query }] }` → 每项受限 URL 与 `expires_at` |
 
 这些端点与其 schema 在实现 PR 中同时落到 Python、TS 和测试；版本号不取代协议版本。
 Web 与服务必须协商同一个受支持协议；不匹配时停止读取与写入，显示更新指引，不试旧式匿名 API。
@@ -103,7 +112,8 @@ Vite 通过 `GAME_ATELIER_DEV_ORIGIN=http://localhost:5173` 显式登记一个�
 生产运行不设置该变量；网站配对不能借用这个入口。
 
 P1b 本身不是鉴权；当前整合在其内侧增加 cookie / bearer 身份和显式能力登记，
-无 Origin / Fetch Metadata 的原生本机业务请求也必须认证。CORS 与网站配对继续关闭。
+无 Origin / Fetch Metadata 的原生本机业务请求也必须认证。带 Origin 的 bearer 只在该 Origin 已登记为网站时
+按 `site` 会话鉴权；不带 Origin 的 bearer 仍走 Agent 入口，网站令牌放到那里是错误身份而非匿名。
 
 ### 编辑租约与换连接
 
@@ -129,18 +139,28 @@ P1b 本身不是鉴权；当前整合在其内侧增加 cookie / bearer 身份�
 本地页面的原生媒体、上传与下载使用同源 HttpOnly cookie，所有资源路由仍经鉴权和原白名单校验。
 同源媒体不另造 URL 令牌。`/events` 使用带身份的 fetch 事件流，撤销 / 到期后关闭。
 
-### 资源级媒体票据（后续网站目标）
+### 会话级媒体令牌（5.53.0 实现；替代原「逐资源票据」方案）
 
 原生 `<img>` / `<video>` / `<audio>` 和下载链接不能统一附带 Authorization。
 不依赖第三方 cookie，不把完整会话 bearer 放进媒体 URL，也不把大视频全量下载成 Blob。
-页面用已认证 POST 为具体资源换取短期、只读票据，作为该资源 URL 的 query 值。
+网站会话用 `POST /api/connection/media-token` 换取一枚只读媒体令牌，作为媒体 URL 的 `media_token` query 值：
 
-- 票据绑定实例、会话、精确规范化资源路径与 query、GET / HEAD、用途及到期时间；初始有效期 2 分钟。
-  服务端只接受内部媒体 / 下载路由白名单，不接受绝对 URL、跳转目标或任意 API 地址。
-- 发行与使用时均验证对象归属和路径白名单；票据不能用于目录列举、JSON API、写操作或换其它资源。
-  `/raw` 现有 Job 白名单与路径包含性检查继续有效；符号链接、编码路径穿越、重复 query 不得绕过。
-- 每个 Range / HEAD 请求重新验证，过期后客户端刷新票据并恢复播放位置；已撤销会话不能刷新。
-  验证期间要实际测试拖动、暂停超过有效期后继续，以及多小时视频；不通过则不能发布该链路。
+- 令牌 30 分钟有效、随会话撤销；每会话最多保留 4 枚，前端每 20 分钟换新，旧令牌到期前仍可用，
+  已加载的 `<img>` / `<video>` 不会因换令牌而重新请求。
+- 边界层只对 GET / HEAD 的媒体路由（`MEDIA_ROUTES`：raw / images / gallery image / 创作资产内容 /
+  画布版本 media 与 download / 图层下载 / 工坊参考图）放行带令牌的 cross-site 请求；JSON API、写操作、
+  连接控制端点带令牌一律拒绝。令牌与 cookie / Authorization 混用拒绝，重复出现拒绝。
+- 与原方案的差异：令牌绑定会话而非单个资源。泄漏影响面是该会话已可读的媒体、最长 30 分钟；
+  换来的是 30 余处同步 `<img src>` 无需改成异步取票。这是 2026-09-10 实现时的显式取舍：
+  用户当日只定了「先补配对再上线」，未逐条审过票据方案，若要收紧回逐资源票据需另立任务。
+- 连续播放超过令牌有效期的视频，后续 Range 请求会 401，需要刷新页面；属已知限制，未做自动续播。
+
+以下条目保留原方案中仍然成立的约束（「票据」读作「令牌」）：
+
+- 令牌只在服务端内部媒体 / 下载路由白名单上生效，不接受绝对 URL、跳转目标或任意 API 地址；
+  不能用于目录列举、JSON API、写操作。`/raw` 现有 Job 白名单与路径包含性检查继续有效；
+  符号链接、编码路径穿越、重复 query 不得绕过。
+- 每个 Range / HEAD 请求重新验证令牌与会话；已撤销会话不能换新令牌。
 - 票据 URL 不记录在 access log、异常上报、Referer、复制分享或 Job 中；页面与媒体使用
   `Referrer-Policy: no-referrer`，私有响应不进入共享缓存。撤销不能追回已下载或已缓冲的字节。
 - Web 合并相同资源的并发取票，缓存有界（初始最多 64 项）并到期淘汰；按可见列表请求，
@@ -209,9 +229,12 @@ Chrome 的 [Local Network Access 文档](https://developer.chrome.com/blog/local
 
 ### Vercel 测试站
 
-用户指定先用 Vercel 免费方案测试；部署前核实账号计划适用范围、项目权限和当前限制，不购买升级。
+用户 2026-09-10 确认：Vercel Hobby 绑自己的 GitHub 账号（ZhongBiao-zheng），Hobby 禁商用条款可接受。
 使用平台 HTTPS 域名，构建目标为 `web/` 的静态 Vite 产物，不能部署 viewer-server、用户项目或 Key。
-配置 SPA 刷新路由；Vercel Functions 不能代理访问用户电脑的 127.0.0.1。可参考
+仓库根 `vercel.json` 固定：`cd web && npx pnpm@11.1.2` 安装与构建（与 CI 同版本，Vercel 默认 pnpm 不认
+`pnpm-workspace.yaml` 的 `allowBuilds`）、输出 `web/dist`、SPA 重写、CSP（`connect-src` / `img-src` /
+`media-src` 只放行 `'self'` 与 `http://127.0.0.1:*`，字体来自 Google Fonts）、`dev` 分支不触发部署。
+Vercel Functions 不能代理访问用户电脑的 127.0.0.1。可参考
 [Vite on Vercel](https://vercel.com/docs/frameworks/frontend/vite) 的框架与路由说明。
 
 每个预览域名都是独立 Origin，需要在本机显式授权；不信任 `*.vercel.app`，不自动继承另一分支站点的权限。

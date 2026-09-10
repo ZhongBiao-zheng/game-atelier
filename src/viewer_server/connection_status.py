@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 
 INSTANCE_ENV = "GAME_ATELIER_SERVER_INSTANCE"
 STATUS_PATH = "/api/connection/status"
+PROTOCOL = "atelier-local/2"
 _MAX_STATUS_BYTES = 4096
 InstanceId = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$", strict=True)]
 
@@ -25,8 +26,9 @@ class LocalConnectionStatus(BaseModel):
     service: Literal["game-atelier"]
     instance_id: InstanceId
     app_version: Annotated[str, StringConstraints(min_length=1, max_length=80, strict=True)]
-    # Protocol capability is not authorization; cross-origin pairing remains separately gated.
-    protocol: Literal["atelier-local/1"]
+    # 启动器只用它核验「端口上是不是本项目的这个实例」，所以接受任何 atelier-local/N：
+    # 升级后旧服务还在跑时，新启动器必须能验过并正常停止它。协议是否可用由 Web / MCP 客户端各自判断。
+    protocol: Annotated[str, StringConstraints(pattern=r"^atelier-local/[0-9]+$", strict=True)]
 
 
 def new_instance_id() -> str:
@@ -41,7 +43,7 @@ def create_connection_status(instance_id: str | None = None) -> LocalConnectionS
         service="game-atelier",
         instance_id=identity if identity is not None else new_instance_id(),
         app_version=version,
-        protocol="atelier-local/1",
+        protocol=PROTOCOL,
     )
 
 

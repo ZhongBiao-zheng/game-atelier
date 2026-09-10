@@ -1,4 +1,5 @@
 import { Link } from 'wouter';
+import { mediaUrl } from '@/api/connection';
 
 import type { ProjectGalleryMedia } from '@/api/gallery';
 import type { AssetSlot } from '@/schema/jobs';
@@ -33,7 +34,7 @@ export function ArtWorkspace({
             className="group relative mb-4 block break-inside-avoid overflow-hidden rounded-2xl"
           >
             <img
-              src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
+              src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(item.path)}`)}
               alt=""
               className="block w-full"
               loading="lazy"

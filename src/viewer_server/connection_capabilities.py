@@ -140,12 +140,16 @@ GET /api/workshop/requests/{request_id}/references/{media_id}
 LOCAL_MANAGEMENT = frozenset({
     "/api/config", "/api/keys", "/api/keys/{alias}", "/api/keys/{alias}/reveal",
     "/api/keys/models-preview", "/api/folder-picker", "/api/onboarding/status",
+    "/api/onboarding/data-root",
 })
+# 已脱敏的 Key 列表（alias / 能力 / 掩码）是选模型的依据，网站会话也要读；增删改与 reveal 仍属管理。
+_MANAGEMENT_READ_EXEMPT = frozenset({("GET", "/api/keys")})
 MEDIA_ROUTES = frozenset({
     "/api/raw", "/api/images", "/api/gallery/image",
     "/api/creation-assets/{asset_id}/content",
     "/api/canvas/projects/{project_id}/versions/{version_id}/media",
     "/api/canvas/projects/{project_id}/versions/{version_id}/download",
+    "/api/canvas/projects/{project_id}/nodes/{node_id}/layers/download",
     "/api/workshop/requests/{request_id}/references/{media_id}",
 })
 WORKSHOP_TOOLS = frozenset({
@@ -175,7 +179,7 @@ def local_capability(method: str, path: str) -> str | None:
         if (allowed_method == method or (
             method == "HEAD" and allowed_method == "GET" and template in MEDIA_ROUTES
         )) and pattern.fullmatch(path):
-            if template in LOCAL_MANAGEMENT:
+            if template in LOCAL_MANAGEMENT and (method, template) not in _MANAGEMENT_READ_EXEMPT:
                 return "manage"
             return "read" if method in {"GET", "HEAD"} else "edit"
     return None

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from viewer_server.connection_auth import COOKIE_NAME, ConnectionStore, iso_time
+from viewer_server.request_boundary import development_origin
 
 TextId = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")]
 
@@ -36,6 +37,15 @@ class GrantPayload(ControlPayload):
 class AgentSessionPayload(ControlPayload):
     grant_id: TextId
     grant_token: Annotated[str, StringConstraints(min_length=32, max_length=128)]
+    instance_id: TextId
+
+
+class PairingPayload(ControlPayload):
+    origin: Annotated[str, StringConstraints(strip_whitespace=True, min_length=8, max_length=253)]
+
+
+class PairPayload(ControlPayload):
+    pairing_code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=16, max_length=128)]
     instance_id: TextId
 
 
@@ -72,10 +82,32 @@ def connection_router(store: ConnectionStore) -> APIRouter:
             store._refresh()
             return {"sessions": [{
                 "session_id": value.principal.session_id, "kind": value.principal.kind,
-                "name": value.name, "expires_at": iso_time(value.expires_at),
+                "name": value.name, "origin": value.origin, "expires_at": iso_time(value.expires_at),
                 "project_ids": sorted(value.principal.project_ids),
                 "capabilities": sorted(value.principal.capabilities),
             } for value in store.sessions.values()]}
+
+    @router.post("/pairings", status_code=201)
+    def create_pairing(payload: PairingPayload, request: Request) -> dict:
+        # 本机页面与 Vite 开发来源不能登记为网站：它们走 cookie 引导，被当成网站来源就连不上了。
+        reserved = frozenset(filter(None, {request.state.connection_base_url, development_origin()}))
+        code, pairing = store.create_pairing(payload.origin, reserved)
+        return {"pairing_code": code, "origin": pairing.origin,
+                "expires_at": iso_time(pairing.expires_at), "instance_id": store.instance_id}
+
+    @router.post("/pair")
+    def pair(payload: PairPayload, request: Request) -> dict:
+        session, token = store.pair(payload.pairing_code, payload.instance_id, request.headers["origin"])
+        return {
+            "session_token": token, "session_id": session.principal.session_id,
+            "instance_id": store.instance_id, "expires_at": iso_time(session.expires_at),
+            "capabilities": sorted(session.principal.capabilities),
+        }
+
+    @router.post("/media-token")
+    def media_token(payload: ControlPayload, request: Request) -> dict:
+        token, expires_at = store.issue_media_token(request.state.connection_session)
+        return {"media_token": token, "expires_at": iso_time(expires_at)}
 
     @router.delete("/sessions/{session_id}", status_code=204)
     def revoke(session_id: str) -> Response:

@@ -2,6 +2,9 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'wouter';
 import { Copy, Plus, Trash2 } from 'lucide-react';
 import { createAgentGrant, fetchAgentGrants, revokeAgentGrant, type AgentCapability, type AgentGrant } from '@/api/agentGrants';
+import { HOSTED_SITE } from '@/api/connection';
+import { createSitePairing, fetchConnectionSessions, revokeConnectionSession, type ConnectionSession, type SitePairing } from '@/api/sitePairing';
+import { HostedManagementNotice } from '@/components/HostedManagementNotice';
 import { fetchProjects } from '@/api/projects';
 import { requestJson } from '@/api/http';
 import type { ProjectsFile } from '@/schema/jobs';
@@ -22,6 +25,11 @@ const CANVAS_CAPABILITIES: { value: AgentCapability; label: string }[] = [
 ];
 
 export function ConnectionPage() {
+  if (HOSTED_SITE) return <HostedManagementNotice title="本机连接" />;
+  return <LocalConnectionPage />;
+}
+
+function LocalConnectionPage() {
   const [grants, setGrants] = useState<AgentGrant[]>([]);
   const [projects, setProjects] = useState<ProjectsFile['projects']>([]);
   const [name, setName] = useState('');
@@ -69,10 +77,12 @@ export function ConnectionPage() {
 
   return <div className="mx-auto max-w-4xl space-y-8 px-6 py-8">
     <header className="flex flex-wrap items-start justify-between gap-4">
-      <div><h1 className="font-display text-display">本机 Agent 连接</h1><p className="mt-2 text-sm text-muted-foreground">按项目授权给 Codex 或 Claude，数据仍保留在本机。</p></div>
+      <div><h1 className="font-display text-display">本机连接</h1><p className="mt-2 text-sm text-muted-foreground">网站与 Agent 都在这里授权，数据仍保留在本机。</p></div>
       <Link href="/workshop/requests" className="rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">待批准生成</Link>
     </header>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    <SitePairingSection />
+    <h2 className="text-base font-medium">Agent 授权</h2>
     {!creating ? <button type="button" onClick={() => setCreating(true)} className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"><Plus size={16} aria-hidden />添加 Agent 授权</button> :
       <form onSubmit={event => void create(event)} className="space-y-5 rounded-lg border border-border bg-card p-5">
         <label className="block space-y-2 text-sm"><span>连接名称</span><input required maxLength={80} value={name} onChange={event => setName(event.target.value)} placeholder="例如：Codex 美术助手" className="block w-full rounded-md border border-input bg-transparent px-3 py-2 focus-visible:ring-1 focus-visible:ring-ring" /></label>
@@ -95,4 +105,62 @@ export function ConnectionPage() {
     </section>
     <details className="border-t border-border pt-5 text-sm"><summary className="cursor-pointer text-muted-foreground">如何在 Agent 中使用</summary><div className="mt-3 space-y-3 text-muted-foreground"><p>在终端执行上面的命令注册（Codex 换成 <code className="font-mono text-xs">codex mcp add game-atelier -- …</code>），重启 Agent 后工具可见。凭据文件由本机保护，不要粘贴其内容。</p><p>Skill 照常安装；勾选「直接执行生成」后终端确认即出图，否则在「待批准生成」页确认。</p></div></details>
   </div>;
+}
+
+/** 为托管网站签发一次性配对码，并列出已配对的网站会话。 */
+function SitePairingSection() {
+  const [origin, setOrigin] = useState(() => new URLSearchParams(window.location.search).get('site') ?? '');
+  const [pairing, setPairing] = useState<SitePairing | null>(null);
+  const [sessions, setSessions] = useState<ConnectionSession[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const load = () => fetchConnectionSessions()
+    .then(result => setSessions((result.sessions ?? []).filter(session => session.kind === 'site')))
+    .catch(() => setSessions([]));
+  useEffect(() => { void load(); }, []);
+
+  async function generate(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setError(null); setCopied(false);
+    try { setPairing(await createSitePairing(origin.trim())); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+    finally { setBusy(false); }
+  }
+  async function copy() {
+    if (!pairing) return;
+    try { await navigator.clipboard.writeText(pairing.pairing_code); setCopied(true); }
+    catch { setError('无法访问剪贴板，请手动复制配对码。'); }
+  }
+  async function revoke(session: ConnectionSession) {
+    setBusy(true); setError(null);
+    try { await revokeConnectionSession(session.session_id); await load(); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+    finally { setBusy(false); }
+  }
+
+  return <section aria-label="网站连接" className="space-y-4 rounded-lg border border-border bg-card p-5">
+    <div><h2 className="text-base font-medium">网站连接</h2><p className="mt-1 text-sm text-muted-foreground">让托管网站连到这台电脑。配对码 5 分钟内有效，只能用一次。</p></div>
+    <form onSubmit={event => void generate(event)} className="flex flex-wrap items-end gap-2">
+      <label className="min-w-64 flex-1 space-y-2 text-sm"><span>网站地址</span>
+        <input required value={origin} onChange={event => setOrigin(event.target.value)} placeholder="https://xxx.vercel.app" autoComplete="off" spellCheck={false}
+          className="block w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono focus-visible:ring-1 focus-visible:ring-ring" /></label>
+      <button disabled={busy || !origin.trim()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{busy ? '生成中…' : '生成配对码'}</button>
+    </form>
+    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {pairing && <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <code aria-label="配对码" className="rounded-md bg-background px-3 py-2 font-mono text-base tracking-wider">{pairing.pairing_code}</code>
+        <button type="button" onClick={() => void copy()} aria-label="复制配对码" className="rounded-md p-2 hover:bg-accent"><Copy size={16} aria-hidden /></button>
+      </div>
+      <p className="text-xs text-muted-foreground">{pairing.origin} · {new Date(pairing.expires_at).toLocaleTimeString()} 前有效{copied && ' · 已复制'}</p>
+    </div>}
+    {sessions.length > 0 && <ul aria-label="已连接的网站" className="divide-y divide-border text-sm">
+      {sessions.map(session => <li key={session.session_id} className="flex items-center justify-between gap-4 py-2">
+        <span className="min-w-0 truncate font-mono">{session.origin ?? session.name}</span>
+        <span className="shrink-0 text-xs text-muted-foreground">{new Date(session.expires_at).toLocaleString()} 到期</span>
+        <button type="button" disabled={busy} onClick={() => void revoke(session)} aria-label={`断开 ${session.origin ?? session.name}`} className="shrink-0 rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-destructive"><Trash2 size={16} aria-hidden /></button>
+      </li>)}
+    </ul>}
+  </section>;
 }

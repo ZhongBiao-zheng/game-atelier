@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { mediaUrl } from '@/api/connection';
 import { Check, Copy, Film } from 'lucide-react';
 import { Link } from 'wouter';
 
@@ -194,7 +195,7 @@ function ProductionDetail({
               return (
                 <figure key={path} className="w-72 shrink-0 space-y-2">
                   <video
-                    src={`/api/gallery/image?path=${encodeURIComponent(path)}`}
+                    src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`)}
                     controls
                     preload="metadata"
                     className="aspect-video w-full rounded-lg border border-border bg-background object-cover"
@@ -344,7 +345,7 @@ function ReferenceSelector({
               >
                 <div className="relative aspect-video overflow-hidden border-b border-border bg-card">
                   <img
-                    src={`/api/gallery/image?path=${encodeURIComponent(candidate.path)}`}
+                    src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(candidate.path)}`)}
                     alt=""
                     className="h-full w-full object-cover"
                   />
@@ -450,7 +451,7 @@ function ReferenceAssets({ record }: { record: ProjectVideoJobRecord }) {
     ['参考音频', record.params.reference_audios ?? []],
   ].filter(([, paths]) => (paths as string[]).length > 0) as Array<[string, string[]]>;
   if (groups.length === 0) return null;
-  const rawSource = (path: string) => `/api/raw?job_id=${encodeURIComponent(record.job_id)}&path=${encodeURIComponent(path)}`;
+  const rawSource = (path: string) => mediaUrl(`/api/raw?job_id=${encodeURIComponent(record.job_id)}&path=${encodeURIComponent(path)}`);
   return (
     <div className="space-y-2 border-t border-border pt-3">
       {groups.map(([label, paths]) => (

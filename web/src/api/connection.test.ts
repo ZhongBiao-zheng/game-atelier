@@ -9,7 +9,7 @@ function server(overrides?: (url: string, init: RequestInit) => Response | Promi
   const mocked = vi.fn(async (url: string, init: RequestInit) => {
     const response = overrides?.(url, init);
     if (response) return response;
-    if (url === '/api/connection/status') return json({ service: 'game-atelier', instance_id: 'i1', app_version: '1', protocol: 'atelier-local/1' });
+    if (url === '/api/connection/status') return json({ service: 'game-atelier', instance_id: 'i1', app_version: '1', protocol: 'atelier-local/2' });
     if (url === '/api/connection/local-session') return json({ session_id: 's1', instance_id: 'i1', expires_at: '2099-01-01T00:00:00Z' });
     if (url === '/api/connection/editor-lease') return json({ client_id: JSON.parse(String(init.body)).client_id, expires_at: '2099-01-01T00:00:00Z' });
     return json({ ok: true });
@@ -20,8 +20,10 @@ function server(overrides?: (url: string, init: RequestInit) => Response | Promi
 afterEach(() => { clients.splice(0).forEach(item => item.dispose()); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('local connection', () => {
-  it.each(['60', new Date(Date.now() + 60_000).toUTCString()])('honors Retry-After %s before reconnecting', async retryAfter => {
+  it.each(['seconds', 'http-date'])('honors Retry-After (%s) before reconnecting', async form => {
     vi.useFakeTimers();
+    // HTTP 日期在假时钟下算，否则收集到执行之间流过的真实秒数会把 60s 等待缩短（慢 CI 上偶发）。
+    const retryAfter = form === 'seconds' ? '60' : new Date(Date.now() + 60_000).toUTCString();
     const network = server(() => new Response('{}', { status: 429, headers: { 'Retry-After': retryAfter } }));
     const connection = client(); await connection.start();
     await vi.advanceTimersByTimeAsync(59_000);
@@ -94,7 +96,7 @@ describe('local connection', () => {
     vi.useFakeTimers(); let offline = false; let instance = 'i1';
     server(url => {
       if (offline) throw new TypeError('Failed to fetch');
-      if (url.endsWith('/status')) return json({ service: 'game-atelier', instance_id: instance, protocol: 'atelier-local/1' });
+      if (url.endsWith('/status')) return json({ service: 'game-atelier', instance_id: instance, protocol: 'atelier-local/2' });
       if (url.endsWith('/local-session')) return json({ session_id: 's1', instance_id: instance });
     });
     const connection = client(); await connection.start(); offline = true;
@@ -204,7 +206,7 @@ describe('local connection', () => {
     await vi.waitFor(() => expect(resume).toBeDefined());
     const editing = connection.start({ editing: true });
     const read = connection.fetch('/api/config');
-    resume(json({ service: 'game-atelier', instance_id: 'i1', protocol: 'atelier-local/1' }));
+    resume(json({ service: 'game-atelier', instance_id: 'i1', protocol: 'atelier-local/2' }));
     await management; await editing; await (await read).json();
     expect(connection.getSnapshot()).toMatchObject({ phase: 'ready', editing: true });
     expect(network.mock.calls.filter(([url, init]) => url.endsWith('editor-lease') && init.method === 'POST')).toHaveLength(2);
@@ -218,7 +220,7 @@ describe('local connection', () => {
     const first = connection.start({ editing: false });
     const second = connection.start({ editing: true });
     expect(connection.start({ editing: false })).toBe(first);
-    resume(json({ service: 'game-atelier', instance_id: 'i1', protocol: 'atelier-local/1' }));
+    resume(json({ service: 'game-atelier', instance_id: 'i1', protocol: 'atelier-local/2' }));
     await first; await second;
     expect(connection.getSnapshot()).toMatchObject({ phase: 'ready', editing: false });
     expect(network.mock.calls.some(([url]) => url.endsWith('editor-lease'))).toBe(false);
@@ -294,5 +296,115 @@ describe('local connection', () => {
     connection.pause('连接已更换');
     writer.enqueue(new TextEncoder().encode('true}')); writer.close();
     await expect(body).rejects.toBeInstanceOf(ConnectionInterrupted);
+  });
+});
+
+describe('hosted site connection', () => {
+  const BASE = 'http://127.0.0.1:5174';
+  const status = { service: 'game-atelier', instance_id: 'i1', app_version: '1', protocol: 'atelier-local/2' };
+  const link = { base: BASE, token: 'tok-stored', sessionId: 's-stored', instanceId: 'i1', expiresAt: '2099-01-01T00:00:00Z' };
+  function hostedServer(overrides?: (url: string, init: RequestInit) => Response | undefined) {
+    const mocked = vi.fn(async (url: string, init: RequestInit) => {
+      const response = overrides?.(url, init);
+      if (response) return response;
+      if (url === `${BASE}/api/connection/status`) return json(status);
+      if (url === `${BASE}/api/connection/pair`) return json({ session_token: 'tok-1', session_id: 's1', instance_id: 'i1', expires_at: '2099-01-01T00:00:00Z', capabilities: ['edit', 'read'] });
+      if (url === `${BASE}/api/connection/editor-lease`) return json({ client_id: JSON.parse(String(init.body)).client_id, expires_at: '2099-01-01T00:00:00Z' });
+      if (url === `${BASE}/api/connection/media-token`) return json({ media_token: 'media-1', expires_at: '2099-01-01T00:00:00Z' });
+      return json({ ok: true });
+    });
+    vi.stubGlobal('fetch', mocked);
+    return mocked;
+  }
+  function hosted() { const value = new LocalConnection({ hosted: true }); clients.push(value); return value; }
+  afterEach(() => { sessionStorage.clear(); });
+
+  it('starts unpaired, pairs with a one-time code and then talks to the loopback base with a bearer token', async () => {
+    const network = hostedServer();
+    const connection = hosted();
+    await connection.start();
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'unpaired', target: null });
+    expect(network).not.toHaveBeenCalled();
+    await connection.pair({ port: '5174', code: ' code-1 ' });
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'ready', editing: true, target: BASE });
+    const pairCall = network.mock.calls.find(([url]) => url === `${BASE}/api/connection/pair`)!;
+    expect(JSON.parse(String(pairCall[1].body))).toEqual({ pairing_code: 'code-1', instance_id: 'i1' });
+    expect(pairCall[1].credentials).toBe('omit');
+    expect(network.mock.calls.some(([url]) => url.endsWith('/local-session'))).toBe(false);
+    await connection.fetch('/api/projects');
+    const read = network.mock.calls.find(([url]) => url === `${BASE}/api/projects`)!;
+    expect(new Headers(read[1].headers).get('Authorization')).toBe('Bearer tok-1');
+    expect(read[1].credentials).toBe('omit');
+    expect(connection.mediaUrl('/api/raw?path=a')).toBe(`${BASE}/api/raw?path=a&media_token=media-1`);
+    expect(connection.mediaUrl('/api/canvas/projects/p/versions/v/media')).toBe(`${BASE}/api/canvas/projects/p/versions/v/media?media_token=media-1`);
+    expect(JSON.parse(sessionStorage.getItem('atelier-site-link')!)).toMatchObject({ base: BASE, token: 'tok-1', sessionId: 's1', instanceId: 'i1' });
+  });
+
+  it('restores a stored link without pairing again and returns to pairing once the session is revoked', async () => {
+    const network = hostedServer(url => url === `${BASE}/api/revoked` ? json({ error: { code: 'SESSION_REVOKED', message: '连接已被本机断开' } }, 403) : undefined);
+    sessionStorage.setItem('atelier-site-link', JSON.stringify(link));
+    const connection = hosted();
+    await connection.start();
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'ready', target: BASE });
+    expect(network.mock.calls.some(([url]) => url.endsWith('/pair'))).toBe(false);
+    expect(new Headers(network.mock.calls.find(([url]) => url.endsWith('/editor-lease'))![1].headers).get('Authorization')).toBe('Bearer tok-stored');
+    await connection.fetch('/api/revoked').catch(() => {});
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'unpaired', message: '连接已被本机断开', recovering: false, target: null });
+    expect(sessionStorage.getItem('atelier-site-link')).toBeNull();
+    expect(connection.mediaUrl('/api/raw?path=a')).toBe('/api/raw?path=a');
+  });
+
+  it('drops a stored link when the local server restarted under a new instance', async () => {
+    hostedServer();
+    sessionStorage.setItem('atelier-site-link', JSON.stringify({ ...link, instanceId: 'old-instance' }));
+    const connection = hosted();
+    await connection.start();
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'unpaired' });
+    expect(connection.getSnapshot().message).toMatch(/重新生成配对码/);
+    expect(sessionStorage.getItem('atelier-site-link')).toBeNull();
+  });
+
+  it('explains pairing failures without entering the recovery loop', async () => {
+    let scenario: 'unregistered' | 'old' | 'wrong-code' = 'unregistered';
+    hostedServer((url) => {
+      if (url.endsWith('/status')) {
+        if (scenario === 'unregistered') return json({ error: { code: 'ORIGIN_DENIED', message: '此来源尚未获准连接本机' } }, 403);
+        if (scenario === 'old') return json({ ...status, protocol: 'atelier-local/1' });
+      }
+      if (url.endsWith('/pair') && scenario === 'wrong-code') return json({ error: { code: 'SESSION_REVOKED', message: '配对码无效或已过期，请在本机重新生成' } }, 403);
+      return undefined;
+    });
+    const connection = hosted();
+    await connection.start();
+    await expect(connection.pair({ port: 5174, code: 'x' })).rejects.toThrow(/生成配对码/);
+    scenario = 'old';
+    await expect(connection.pair({ port: 5174, code: 'x' })).rejects.toThrow(/版本过旧/);
+    scenario = 'wrong-code';
+    await expect(connection.pair({ port: 5174, code: 'x' })).rejects.toThrow('配对码无效或已过期，请在本机重新生成');
+    await expect(connection.pair({ port: 'abc', code: 'x' })).rejects.toThrow(/端口/);
+    await expect(connection.pair({ port: 5174, code: '   ' })).rejects.toThrow(/配对码/);
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'unpaired', recovering: false });
+    expect(sessionStorage.getItem('atelier-site-link')).toBeNull();
+  });
+
+  it('disconnect revokes its own session and clears the stored link', async () => {
+    const network = hostedServer(url => url === `${BASE}/api/connection/sessions/s-stored` ? new Response(null, { status: 204 }) : undefined);
+    sessionStorage.setItem('atelier-site-link', JSON.stringify(link));
+    const connection = hosted();
+    await connection.start();
+    await connection.disconnect();
+    const revoke = network.mock.calls.find(([url]) => url === `${BASE}/api/connection/sessions/s-stored`)!;
+    expect(revoke[1].method).toBe('DELETE');
+    expect(new Headers(revoke[1].headers).get('Authorization')).toBe('Bearer tok-stored');
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'unpaired', target: null });
+    expect(sessionStorage.getItem('atelier-site-link')).toBeNull();
+  });
+
+  it('keeps relative media URLs and cookies on the local page', async () => {
+    const network = server();
+    const connection = client(); await connection.start();
+    expect(connection.mediaUrl('/api/raw?path=a')).toBe('/api/raw?path=a');
+    expect(network.mock.calls.every(([, init]) => init.credentials === 'same-origin')).toBe(true);
+    expect(network.mock.calls.some(([url]) => url.endsWith('/media-token'))).toBe(false);
   });
 });

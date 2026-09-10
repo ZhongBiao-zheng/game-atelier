@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 function server(options: { occupied?: boolean } = {}) {
   const network = vi.fn(async (url: string, init: RequestInit) => {
-    if (url.endsWith('/status')) return response({ service: 'game-atelier', instance_id: 'i1', app_version: '1', protocol: 'atelier-local/1' });
+    if (url.endsWith('/status')) return response({ service: 'game-atelier', instance_id: 'i1', app_version: '1', protocol: 'atelier-local/2' });
     if (url.endsWith('/local-session')) return response({ session_id: 's1', instance_id: 'i1', expires_at: '2099-01-01T00:00:00Z' });
     if (url.endsWith('/editor-lease')) {
       if (options.occupied && !JSON.parse(String(init.body)).takeover) return response({ error: { code: 'EDITOR_IN_USE', message: '已有编辑页面' } }, 409);
@@ -209,5 +209,51 @@ describe('local connection gate', () => {
     fireEvent.click(screen.getByRole('link', { name: '返回设置' }));
     await screen.findByRole('link', { name: '管理授权' }); await screen.findByText('读取成功');
     expect(localConnection.getSnapshot()).toMatchObject({ phase: 'ready', editing: true });
+  });
+});
+
+describe('hosted pairing form', () => {
+  const BASE = 'http://127.0.0.1:5174';
+  function hostedServer() {
+    const network = vi.fn(async (url: string, init: RequestInit) => {
+      if (url === `${BASE}/api/connection/status`) return response({ service: 'game-atelier', instance_id: 'i1', app_version: '1', protocol: 'atelier-local/2' });
+      if (url === `${BASE}/api/connection/pair`) return response({ session_token: 'tok-1', session_id: 's1', instance_id: 'i1', expires_at: '2099-01-01T00:00:00Z', capabilities: ['edit', 'read'] });
+      if (url === `${BASE}/api/connection/editor-lease`) return response({ client_id: JSON.parse(String(init.body)).client_id, expires_at: '2099-01-01T00:00:00Z' });
+      if (url === `${BASE}/api/connection/media-token`) return response({ media_token: 'media-1', expires_at: '2099-01-01T00:00:00Z' });
+      return response({});
+    });
+    vi.stubGlobal('fetch', network); return network;
+  }
+  afterEach(() => { Object.defineProperty(localConnection, 'hosted', { value: false, configurable: true }); sessionStorage.clear(); });
+
+  it('asks for a port and code, links to the local pairing page and mounts the app after pairing', async () => {
+    Object.defineProperty(localConnection, 'hosted', { value: true, configurable: true });
+    const network = hostedServer(); const onMount = vi.fn();
+    render(<LocalConnectionGate><Draft onMount={onMount} /></LocalConnectionGate>);
+    await screen.findByRole('heading', { name: '连接本机工坊' });
+    expect(network).not.toHaveBeenCalled(); expect(onMount).not.toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: '本机连接页' })).toHaveAttribute('href', `${BASE}/connection?site=${encodeURIComponent(window.location.origin)}`);
+    const code = screen.getByLabelText('配对码');
+    const typed = vi.fn(); code.addEventListener('keydown', typed);
+    fireEvent.keyDown(code, { key: 'a' });
+    expect(typed).toHaveBeenCalledTimes(1);
+    fireEvent.change(code, { target: { value: 'code-1' } });
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+    await screen.findByLabelText('编辑草稿');
+    expect(JSON.parse(String(network.mock.calls.find(([url]) => url.endsWith('/pair'))![1].body))).toEqual({ pairing_code: 'code-1', instance_id: 'i1' });
+    expect(localConnection.getSnapshot()).toMatchObject({ phase: 'ready', target: BASE });
+    expect(sessionStorage.getItem('atelier-site-port')).toBe('5174');
+  });
+
+  it('shows the pairing error inline and stays on the form', async () => {
+    Object.defineProperty(localConnection, 'hosted', { value: true, configurable: true });
+    const network = hostedServer();
+    network.mockImplementation(async () => response({ error: { code: 'ORIGIN_DENIED', message: '此来源尚未获准连接本机' } }, 403));
+    render(<LocalConnectionGate><Draft onMount={vi.fn()} /></LocalConnectionGate>);
+    fireEvent.change(await screen.findByLabelText('配对码'), { target: { value: 'code-1' } });
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('本机尚未为这个网站生成配对码');
+    expect(screen.getByLabelText('配对码')).toHaveValue('code-1');
+    expect(localConnection.getSnapshot().phase).toBe('unpaired');
   });
 });

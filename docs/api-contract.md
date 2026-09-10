@@ -77,7 +77,7 @@ AUTO不承诺跟随参考图，不能据固定像素估价；保留真实账单�
 
 改造不把项目改存浏览器、不把 Key 发给网站、不扩张 Canvas Agent 权限，也不增加第二条供应商执行路径。
 
-`GET /api/connection/status` 返回 `{ service: "game-atelier", instance_id, app_version, protocol: "atelier-local/1" }`。
+`GET /api/connection/status` 返回 `{ service: "game-atelier", instance_id, app_version, protocol: "atelier-local/2" }`。
 instance 是每次启动的 32 位小写十六进制标识，不是访问凭据；app_version 从插件 manifest 读取。
 响应 `Cache-Control: no-store`，不读取用户配置或数据。本地协议就绪不代表网站已配对，
 不能据此开放跨源调用或跳过鉴权；旧 null 协议不被新前端继续使用。
