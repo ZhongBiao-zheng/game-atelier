@@ -20,6 +20,133 @@ function server(overrides?: (url: string, init: RequestInit) => Response | Promi
 afterEach(() => { clients.splice(0).forEach(item => item.dispose()); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('local connection', () => {
+  it.each(['60', new Date(Date.now() + 60_000).toUTCString()])('honors Retry-After %s before reconnecting', async retryAfter => {
+    vi.useFakeTimers();
+    const network = server(() => new Response('{}', { status: 429, headers: { 'Retry-After': retryAfter } }));
+    const connection = client(); await connection.start();
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(network).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(network).toHaveBeenCalledTimes(2);
+  });
+
+  it('recovers a handshake whose body fails after successful headers', async () => {
+    vi.useFakeTimers(); let broken = true;
+    const network = server(url => url.endsWith('/status') && broken ? new Response(new ReadableStream({
+      start(controller) { controller.error(new TypeError('network interrupted')); },
+    })) : undefined);
+    const connection = client(); await connection.start();
+    expect(connection.getSnapshot().recovering).toBe(true);
+    broken = false; await vi.advanceTimersByTimeAsync(1000);
+    expect(connection.getSnapshot().phase).toBe('ready');
+    expect(network.mock.calls.filter(([url]) => url.endsWith('/status'))).toHaveLength(2);
+  });
+
+  it('retries a failed initial read once after recovery, without replaying it indefinitely', async () => {
+    vi.useFakeTimers(); let broken = true;
+    const network = server(url => { if (url === '/api/projects' && broken) throw new TypeError('offline'); return undefined; });
+    const connection = client(); await connection.start();
+    const read = connection.fetch('/api/projects');
+    await vi.advanceTimersByTimeAsync(1);
+    broken = false; await vi.advanceTimersByTimeAsync(1000);
+    expect(await (await read).json()).toEqual({ ok: true });
+    expect(network.mock.calls.filter(([url]) => url === '/api/projects')).toHaveLength(2);
+    broken = true;
+    const failedRead = expect(connection.fetch('/api/projects')).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(1001); await failedRead;
+    expect(network.mock.calls.filter(([url]) => url === '/api/projects')).toHaveLength(4);
+  });
+
+  it.each(['abort', 'dispose'])('cancels a pending recovery read on %s', async action => {
+    vi.useFakeTimers();
+    const network = server(url => { if (url === '/api/projects') throw new TypeError('offline'); return undefined; });
+    const connection = client(); await connection.start();
+    const controller = new AbortController();
+    const read = expect(connection.fetch('/api/projects', { signal: controller.signal })).rejects.toBeInstanceOf(ConnectionInterrupted);
+    await vi.advanceTimersByTimeAsync(1);
+    if (action === 'abort') controller.abort(); else connection.dispose();
+    await read; await vi.advanceTimersByTimeAsync(1000);
+    expect(network.mock.calls.filter(([url]) => url === '/api/projects')).toHaveLength(1);
+  });
+
+  it('times out a stalled handshake and makes a bounded automatic retry', async () => {
+    vi.useFakeTimers();
+    const network = server((_url, init) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    }));
+    const connection = client(); const pending = connection.start();
+    await vi.advanceTimersByTimeAsync(8000); await pending;
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'interrupted', recovering: true, message: '工坊服务响应超时。' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(network).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['ORIGIN_DENIED', 'HOST_DENIED', 'SESSION_REVOKED', 'PROTOCOL_MISMATCH'])('does not automatically retry %s', async code => {
+    vi.useFakeTimers();
+    const network = server(() => json({ error: { code, message: '需要人工处理' } }, 403));
+    const connection = client(); await connection.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(network).toHaveBeenCalledTimes(1);
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'interrupted', recovering: false });
+  });
+
+  it('requires an explicit reconnect if the server restarted during automatic recovery', async () => {
+    vi.useFakeTimers(); let offline = false; let instance = 'i1';
+    server(url => {
+      if (offline) throw new TypeError('Failed to fetch');
+      if (url.endsWith('/status')) return json({ service: 'game-atelier', instance_id: instance, protocol: 'atelier-local/1' });
+      if (url.endsWith('/local-session')) return json({ session_id: 's1', instance_id: instance });
+    });
+    const connection = client(); await connection.start(); offline = true;
+    await expect(connection.fetch('/api/save', { method: 'PUT' })).rejects.toThrow();
+    offline = false; instance = 'i2'; await vi.advanceTimersByTimeAsync(1000);
+    expect(connection.getSnapshot()).toMatchObject({ phase: 'interrupted', recovering: false, message: expect.stringContaining('已重启') });
+    await connection.start(); expect(connection.getSnapshot().phase).toBe('ready');
+  });
+
+  it('renews an expired local session without replaying writes', async () => {
+    vi.useFakeTimers();
+    const network = server(url => url === '/api/save' ? json({ error: { code: 'SESSION_EXPIRED' } }, 401) : undefined);
+    const connection = client(); await connection.start();
+    await connection.fetch('/api/save', { method: 'PUT' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(connection.getSnapshot().phase).toBe('ready');
+    expect(network.mock.calls.filter(([url]) => url === '/api/save')).toHaveLength(1);
+  });
+
+  it('recovers a transient disconnect without replaying the failed mutation', async () => {
+    vi.useFakeTimers();
+    let offline = false;
+    const network = server(() => { if (offline) throw new TypeError('Failed to fetch'); return undefined; });
+    const connection = client(); await connection.start(); offline = true;
+    await expect(connection.fetch('/api/generate', { method: 'POST' })).rejects.toThrow();
+    offline = false;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(connection.getSnapshot().phase).toBe('ready');
+    expect(network.mock.calls.filter(([url]) => url === '/api/generate')).toHaveLength(1);
+  });
+
+  it('stops after three automatic retries and cancels scheduled retries on disposal', async () => {
+    vi.useFakeTimers();
+    const network = server(() => { throw new TypeError('Failed to fetch'); });
+    const connection = client(); await connection.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(network).toHaveBeenCalledTimes(4);
+    expect(connection.getSnapshot().phase).toBe('interrupted');
+    await connection.start();
+    connection.dispose();
+    const count = network.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(network).toHaveBeenCalledTimes(count);
+  });
+
+  it('refuses business writes while connected without an editor lease but allows authorization management', async () => {
+    const network = server(); const connection = client(); await connection.start({ editing: false });
+    await expect(connection.fetch('/api/generate', { method: 'POST' })).rejects.toBeInstanceOf(ConnectionInterrupted);
+    await connection.fetch('/api/connection/agent-grants', { method: 'POST' });
+    expect(network.mock.calls.some(([url]) => url === '/api/generate')).toBe(false);
+  });
+
   it('does not make business requests before the local session is ready', async () => {
     const network = server();
     await expect(client().fetch('/api/projects')).rejects.toBeInstanceOf(ConnectionInterrupted);

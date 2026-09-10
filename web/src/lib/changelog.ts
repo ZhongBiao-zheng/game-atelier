@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.48.0',
+    date: '2026-09-10',
+    headline: '工坊连接不再打断创作',
+    changes: [
+      { kind: 'fix', text: '进入工坊不再自动弹出连接窗口；本机 Agent 连接仍在设置中按需打开。' },
+      { kind: 'fix', text: '短暂断连自动尝试恢复并保留草稿，不重复提交任务；多页面编辑先只读，接管前需确认。' },
+    ],
+  },
+  {
     version: '5.47.2',
     date: '2026-09-10',
     headline: '拆分图层详情补齐提示词',
