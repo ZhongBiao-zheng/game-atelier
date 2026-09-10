@@ -106,7 +106,8 @@ spec 变更影响当前角色各槽位；方案 ui_style 变更影响当前方�
 5. 领域门禁通过，调用 `workshop_prepare_generation`，冻结 target、prompt、alias/model、
    类型化 params、有序 media_ids。保存 `request_id`，向用户概括目标、内容、参考与费用状态。
    **此时只准备请求，未调用供应商、未完成出图。**
-6. 把确认卡（目标、模型、参考清单、参数、费用状态、提示词与配置来源）转发画师，等明确肯定；沉默、模糊回答、
+6. 把确认卡（目标、模型、参考清单、参数、费用状态、提示词与配置来源）转发画师（有 `show_widget` 时按 `docs/references/card-widget.md`
+   第三节渲染成卡片，按钮「出图 <request_id>」= 明确肯定），等明确肯定；沉默、模糊回答、
    工具重试都不算批准，模糊时二选一追问。授权含 `execute_generation` 时，画师肯定后调
    `workshop_approve_generation`（request_id + 当前 revision）即完成批准；不含时请画师在 Atelier
    「待批准生成」页确认。两种批准都由服务端记录来源。

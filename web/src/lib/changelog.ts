@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.54.0',
+    date: '2026-09-10',
+    headline: '确认卡变成可点的卡片',
+    changes: [
+      { kind: 'feat', text: '在支持可视化卡片的客户端里，出图 / 出视频确认卡、沉淀确认卡、进度卡与收尾七件套都渲染成卡片；卡上直接点「出图 / 要改 / 先不出」，不必再打字确认。' },
+      { kind: 'feat', text: '命令行新增 card <job_id>，按 job 记录重新输出确认卡（HTML 或文本），字段与 submit 打出的完全一致。' },
+    ],
+  },
+  {
     version: '5.53.0',
     date: '2026-09-10',
     headline: '网站可配对连接本机工坊',

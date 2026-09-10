@@ -65,7 +65,8 @@ triggers:
 ## 生成：先确认卡，再看能力
 
 1. 发起前打确认卡给用户：画布名、生成面节点、模型 alias / model、prompt 摘要、接入的素材节点列表、
-   数量与参数、费用状态（本地未核价即写「费用待确认」）。
+   数量与参数、费用状态（本地未核价即写「费用待确认」）。有 `show_widget` 时按 `docs/references/card-widget.md` 第三节
+   渲染成卡片（按钮「出图 / 要改 / 先不出」，回话按下一条判定）。
 2. 等用户明确肯定（出图 / 可以 / 走）。沉默、模糊、「再想想」都不推进；模糊用 AskUserQuestion 二选一。
 3. 授权含 `canvas_generate` → 调 `canvas_run`（surface_node_id + 当前 revision + requested_count）。
    返回 `TARGET_NOT_AUTHORIZED` 表示授权没给发起生成，告知用户在授权页补勾，不能改走其他路径。
@@ -91,6 +92,8 @@ triggers:
 进入下一步的条件：
 下一步可直接说的话：
 ```
+
+客户端有 `show_widget` 时按 `docs/references/card-widget.md` 第三节把这套渲染成卡片，「下一步可直接说的话」每条一个按钮；没有就原样文本。
 
 状态区分「已改画布（revision N）/ 待你确认出图 / 生成中 / 已生成」，不把建议写成已执行。
 

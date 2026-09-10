@@ -317,11 +317,11 @@ uv run python -m character_workflow set-canonical --kind portrait --path <该图
 
    `--alias` / `--model` 按 `docs/references/model-routing.md` 选定（常规→gpt-image / 风格调整→nano-banana）；缺省回退当前 kind 默认 Key 的首个模型。`--n` / 尺寸等缺省值由 CLI 按 `--kind` 决定，不在此硬写；`--reference-image <绝对路径>` 可重复传多张参考图（`--source-image` 是首张参考图的兼容别名）——参考图一律走 CLI 参数，**禁止手改 job JSON**。stdout 是纯 job_id，stderr 是 CLI 生成的出图确认卡。
 
-2. 把 submit 在 stderr 打出的确认卡**原样转发**给画师（含 job_id / Key / model / 尺寸 / 参考图全列表 / 完整 prompt 原文），不得手写或摘要确认卡
+2. 把 submit 在 stderr 打出的确认卡**原样转发**给画师（含 job_id / Key / model / 尺寸 / 参考图全列表 / 完整 prompt 原文），不得手写或摘要确认卡。客户端工具列表里有 `show_widget` 时，改为跑 `card "$JOB_ID"`，把输出的 HTML 原样作为 `widget_code` 渲染成卡片（首次先 `read_me`；规则与按钮语义见 `docs/references/card-widget.md`）；没有就转发 stderr 文本卡。
 3. 判定画师回复（确认卡已转发后），再决定是否 run-job：
-   - **推进** = 任何明确肯定（出图 / 确认 / OK / 可以 / 行 / 就这样 / 走吧 / 好）→ run-job。
-   - **修改** = 画师提出具体改点 → 改 prompt 重新 submit 出新确认卡，**不** run-job（旧 PENDING_CONFIRM 作废，不复用）。
-   - **否定 / 犹豫**（再想想 / 先不出 / 算了）→ 停在 PENDING_CONFIRM，不推进、不催。
+   - **推进** = 任何明确肯定（出图 / 确认 / OK / 可以 / 行 / 就这样 / 走吧 / 好，或卡片按钮发出的「出图 <job_id>」）→ run-job。
+   - **修改** = 画师提出具体改点 → 改 prompt 重新 submit 出新确认卡，**不** run-job（旧 PENDING_CONFIRM 作废，不复用）。卡片按钮「要改 <job_id>」没带改点，先问要改哪里再重新 submit。
+   - **否定 / 犹豫**（再想想 / 先不出 / 算了，或按钮「先不出 <job_id>」）→ 停在 PENDING_CONFIRM，不推进、不催。
    - **模糊**（看不出是肯定还是想改）→ **不擅自当肯定**，用 AskUserQuestion 二选一确认「直接出图 / 还想改」。
    绝不把沉默或模糊当默认推进。明确肯定后：
 
@@ -352,7 +352,7 @@ turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、
 - **何时问**：`pending_distill` 非空 **且** 画师本轮不在赶活（intent≠revise、非出图确认中）。开口：「这几张你打了高分还没沉淀经验：<列路径/缩略>，要我帮你记吗？」一次说清，不反复唠叨。
 - **画师同意（或「沉第 N 张」）**：看那张图 + 读它的 job（prompt/model/params）+ 评分 → 拟**一条人话经验**（讲清「为什么成功 / 下次怎么复用」），单行，带证据图路径：
   `- <日期> [<slot>·<评分>★] <人话经验>。证据图 <相对路径>`
-  把这条打成**沉淀确认卡**（复用出图确认卡格式）让画师过目。
+  把这条打成**沉淀确认卡**（复用出图确认卡格式）让画师过目；有 `show_widget` 时按 `docs/references/card-widget.md` 第三节渲染成卡片（按钮「沉淀这条 / 不用沉这张」）。
 - **画师确认** → 跑 `append-memory --kind <slot> --scope <见下> --line "<上面那条>"`，再跑 `mark-distilled <该图相对路径>`。
 - **画师说「不用沉这张」** → 只跑 `mark-distilled <该图相对路径>`（当忽略，不再提醒）。
 - **scope 决策**：经验含具体角色/风格/配色/类目 → `--scope project`；通用技巧/prompt 协议 → `--scope workspace`。两者都进 MEMORY.md、都 agent-only、都不上 Web。
@@ -370,6 +370,8 @@ turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、
 进入下一步的条件：
 下一步可直接说的话：
 ```
+
+客户端有 `show_widget` 时按 `docs/references/card-widget.md` 第三节把这套渲染成卡片，「下一步可直接说的话」每条一个按钮；没有就原样文本。
 
 ## 提示词资产（任务明确后先查）
 
@@ -394,7 +396,7 @@ turn-start 返回的 `pending_distill`（数组）= 画师给了高分/喜欢、
 - `needs_web_build` / `needs_uv` / `needs_venv` / `needs_data_root` 态**绝不**启 viewer-server、绝不开窗。
 - 参考图一律走 CLI `--reference-image` / `--source-image`，**禁止手改 job JSON**。
 - 用户参考图必须走 `import-reference`；Lovart / 外部生成结果必须走 `import-output`。禁止直接复制进角色槽位，确保图片落盘与 Web 展示 Job 同时完成。
-- 确认卡原样转发 CLI（stderr）全文，不手写、不摘要、不增删字段。
+- 确认卡只用 CLI 产物：文本通道转发 submit 的 stderr 全文，`show_widget` 通道转发 `card <job_id>` 的 HTML；不手写、不摘要、不增删字段。
 - 出图链路 submit→PENDING_CONFIRM→画师明确肯定→run-job；**绝不把沉默 / 模糊当默认推进**，模糊用 AskUserQuestion 二选一。
 - 三模式（A 编辑 / B 重出 / C 混合）互斥不混用；重出 / 修图仍过确认门。
 - 所有提问走 AskUserQuestion，单次 ≤4 问、每问 ≤4 选项；工具不可用时走文本确认卡降级，不松散凑合。

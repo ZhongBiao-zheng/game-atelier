@@ -108,6 +108,8 @@ Read `projects/<slug>/design/` 三文件与 `worldview.md` / `style.md`：
 下一步可直接说的话：
 ```
 
+客户端有 `show_widget` 时按 `docs/references/card-widget.md` 第三节把这套渲染成卡片，「下一步可直接说的话」每条一个按钮；没有就原样文本。
+
 ## 手的选择（CLI / MCP 双路径）
 
 本 Skill 的知识层（记忆注入、设定协议、prompt 规则、经验沉淀）与「手」无关；只有读写资料 / 准备 / 执行这一层按可用性选一条：
