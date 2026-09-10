@@ -17,7 +17,8 @@ from pathlib import Path
 
 from character_workflow.lib import data_root, keys
 from character_workflow.lib.active_character import read_active, write_active
-from character_workflow.lib.jobs import clone_job_for_retry, new_job_id, write_job
+from character_workflow.lib.confirm_card import confirmation_card_html, confirmation_card_text
+from character_workflow.lib.jobs import clone_job_for_retry, new_job_id, read_job, write_job
 from character_workflow.lib.job_runner import run_job, run_latest
 from character_workflow.lib.lessons import append_lesson
 from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobStatus
@@ -323,42 +324,7 @@ def _set_video_selected(args: argparse.Namespace) -> int:
 def _confirmation_card(job: Job) -> str:
     """出图确认卡 —— CLI 统一生成（打到 stderr），Skill 原样转发给画师，
     杜绝 Agent 手写漏字段。stdout 仍是纯 job_id，不破 $() 捕获契约。"""
-    refs = job.params.reference_images or []
-    lines = [
-        "─── 出图确认卡 ───",
-        f"job_id : {job.job_id}",
-        f"Key    : {job.alias} ({job.provider})",
-        f"model  : {job.model}",
-    ]
-    if job.kind is JobKind.VIDEO:
-        lines.append(
-            f"参数   : {job.params.duration}s · {job.params.resolution} · {job.params.ratio}"
-        )
-    else:
-        lines.append(f"size   : {job.params.size}  n: {job.params.n}")
-    if job.screen_id:
-        label = f"screen : {job.screen_id}（UI 页面 job，产物归项目）"
-        if job.params.style_variant:
-            base = f" ← {job.params.base_version}" if job.params.base_version else ""
-            label += f"\n风格   : {job.params.style_variant}{base}"
-        lines.insert(2, label)
-    if job.production_id:
-        lines.insert(2, f"企划   : {job.production_id}（项目完整视频 job）")
-    if job.retry_of:
-        lines.append(f"retry_of: {job.retry_of}（原 job 错误记录已保留）")
-    lines.append(f"参考图 : {len(refs)} 张")
-    lines.extend(f"  {i}. {p}" for i, p in enumerate(refs, 1))
-    if job.kind is JobKind.VIDEO:
-        video_refs = job.params.reference_videos or []
-        audio_refs = job.params.reference_audios or []
-        lines.append(f"参考视频: {len(video_refs)} 个")
-        lines.extend(f"  {i}. {p}" for i, p in enumerate(video_refs, 1))
-        lines.append(f"参考音频: {len(audio_refs)} 个")
-        lines.extend(f"  {i}. {p}" for i, p in enumerate(audio_refs, 1))
-    lines.append("prompt :")
-    lines.append(job.prompt.rstrip("\n"))
-    lines.append("─── 画师确认后 run-job ───")
-    return "\n".join(lines)
+    return confirmation_card_text(job)
 
 
 def _retry_job(args: argparse.Namespace) -> int:
@@ -765,6 +731,12 @@ def main(argv: list[str] | None = None) -> int:
     p_vc.add_argument("--path", default=None, help="要选定的 mp4 路径")
     p_vc.add_argument("--clear", action="store_true", help="取消选定")
 
+    p_card = sub.add_parser(
+        "card",
+        help="按 job JSON 重新渲染出图确认卡；--format html 给 show_widget 原样使用，text 同 submit 的 stderr",
+    )
+    p_card.add_argument("job_id")
+    p_card.add_argument("--format", choices=["html", "text"], default="html")
     p_run_job = sub.add_parser("run-job", help="确认并执行一个 PENDING_CONFIRM job")
     p_run_job.add_argument("job_id")
 
@@ -874,6 +846,15 @@ def main(argv: list[str] | None = None) -> int:
         return _submit_video_production(args)
     if args.cmd == "set-video-selected":
         return _set_video_selected(args)
+    if args.cmd == "card":
+        try:
+            job = read_job(args.job_id)
+        except FileNotFoundError:
+            print(f"card: job {args.job_id} 不存在", file=sys.stderr)
+            return 2
+        render = confirmation_card_html if args.format == "html" else confirmation_card_text
+        print(render(job))
+        return 0
     if args.cmd == "retry-job":
         return _retry_job(args)
     if args.cmd == "run-job":

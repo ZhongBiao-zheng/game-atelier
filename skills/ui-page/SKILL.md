@@ -83,6 +83,7 @@ uv run python -m character_workflow submit-screen \
 ```
 
 stdout 是纯 job_id，stderr 是确认卡——**原样转发确认卡给画师，就地停下**（同 character skill 出图前确认协议）。
+客户端有 `show_widget` 时改为 `card <job_id>` 输出的 HTML 渲染成卡片，按钮「出图 / 要改 / 先不出 <job_id>」按同一判定表处理（`docs/references/card-widget.md`）。
 尺寸默认横幅 1536x1024，画面为竖版游戏时传 `--size 1024x1536`。
 
 ### 6. 确认后执行
@@ -117,7 +118,7 @@ uv run python -m character_workflow submit-screen \
   --reference-image <基准页图绝对路径>
 ```
 
-确认卡逐条转发给画师；**全部候选可一次性确认后连续 run-job**，但每条失败各自报错、各自重试。
+确认卡逐条转发给画师（卡片通道每个 job 一张 `card` 卡）；**全部候选可一次性确认后连续 run-job**，但每条失败各自报错、各自重试。
 旧候选一律保留不删——版本对比历史是后续经验沉淀的素材。
 
 ### 4. 画师选定 → 定稿
@@ -158,6 +159,8 @@ uv run python -m character_workflow set-screen-canonical \
 进入下一步的条件：
 下一步可直接说的话：
 ```
+
+客户端有 `show_widget` 时按 `docs/references/card-widget.md` 第三节把这套渲染成卡片，「下一步可直接说的话」每条一个按钮；没有就原样文本。
 
 ## 提示词资产（任务明确后先查）
 
