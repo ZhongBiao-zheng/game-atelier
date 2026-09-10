@@ -70,7 +70,12 @@ def test_generation_preferences_default_get_is_v2_and_does_not_write(isolated_da
             mode: {"selection": None, "params": {}}
             for mode in ("text", "image", "video", "audio")
         },
-        "upscale": {"selection": None, "prompt": CANVAS_UPSCALE_DEFAULT_PROMPT},
+        "upscale": {
+            "tiers": {
+                target: {"selection": None, "quality": None, "prompt": CANVAS_UPSCALE_DEFAULT_PROMPT}
+                for target in ("2K", "4K", "8K")
+            },
+        },
         "updated_at": None,
     }
     assert not data_root.canvas_ui_file().exists()

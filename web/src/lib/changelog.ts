@@ -33,6 +33,32 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.52.2',
+    date: '2026-09-10',
+    headline: '拆分图层节点显示尺寸与大小',
+    changes: [
+      { kind: 'feat', text: '拆分图层节点标题行右侧常显「宽 × 高 · 大小」，大小为底图与全部图层文件之和。' },
+    ],
+  },
+  {
+    version: '5.52.1',
+    date: '2026-09-10',
+    headline: '拆分图层结果与原图分辨率一致',
+    changes: [
+      { kind: 'fix', text: '拆分图层的底图与各图层按原图分辨率重采样（Seedream 拆图最小出 1K，小图会被放大）；画布预览、素材节点与 PNG / PSD 导出同步保持原图尺寸。' },
+    ],
+  },
+  {
+    version: '5.52.0',
+    date: '2026-09-10',
+    headline: 'AI高清按档位配置：2K / 4K / 8K 各自选模型、提示词与分辨率',
+    changes: [
+      { kind: 'feat', text: '生成偏好「AI高清」页签改为按档位配置，新增 8K 档；每档可分别指定模型与提示词。' },
+      { kind: 'feat', text: 'AI高清可选任何吃参考图的画布图片模型（Nano Banana / GPT Image / Seedream 等，MJ 除外）；有质量档的模型用质量档，按像素出图的模型直接按档位长边等比放大。' },
+      { kind: 'fix', text: '8K 档没有自动路线，未配置时点击会提示并提供「前往配置」。' },
+    ],
+  },
+  {
     version: '5.51.0',
     date: '2026-09-10',
     headline: 'AI高清可配置模型与提示词',

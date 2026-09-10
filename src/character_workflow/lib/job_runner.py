@@ -167,6 +167,11 @@ def _redact_local_paths(message: str) -> str:
 
 def _error_hint(low: str) -> str | None:
     """按报文特征给中文提示；认不出返回 None（调用方原样透出）。"""
+    # 聚合商（Tuzi 等 new-api）在扣费预留阶段撞上自家数据库故障：
+    # `transaction token_count_reserve failed: stage=token_idempotency db_code=mysql:1290`。
+    # 与我们的参数无关，也没扣到费，稍后重试即可。
+    if "token_count_reserve" in low or "db_code=mysql" in low:
+        return "聚合商计费系统暂时不可用（上游数据库故障，请求未执行），请稍后重试。"
     if (
         "cors" in low
         or "cross-origin" in low

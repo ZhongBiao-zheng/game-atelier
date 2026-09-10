@@ -487,7 +487,7 @@ function SettingsSection({ title, children }: { title: string; children: ReactNo
   );
 }
 
-function OptionTrack<T extends string | number>({
+export function OptionTrack<T extends string | number>({
   label,
   values,
   selected,

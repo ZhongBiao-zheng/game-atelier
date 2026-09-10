@@ -540,10 +540,20 @@ CANVAS_UPSCALE_DEFAULT_PROMPT = (
 )
 
 
-class CanvasUpscalePreferences(BaseModel):
-    """「AI高清」用哪个模型、什么提示词；selection 为 None 时服务端自动挑首个质量可调的 Nano Banana。"""
+CanvasUpscaleTarget = Literal["2K", "4K", "8K"]
+CANVAS_UPSCALE_TARGETS: tuple[CanvasUpscaleTarget, ...] = ("2K", "4K", "8K")
+CANVAS_UPSCALE_LONG_EDGES: dict[str, int] = {"2K": 2048, "4K": 4096, "8K": 8192}
+
+
+class CanvasUpscaleTierPreferences(BaseModel):
+    """一个档位的 AI高清配置：模型、提示词、质量。
+
+    selection 为 None 时服务端自动选模（只有 2K / 4K 有 Nano Banana 自动路线）。
+    分辨率按模型族取：暴露 quality 的模型用 quality，按像素出图的模型直接用档位长边。
+    """
     model_config = ConfigDict(extra="forbid", strict=True)
     selection: CanvasGenerationModelSelection | None = None
+    quality: Literal["low", "medium", "high", "auto"] | None = None
     prompt: str = Field(default=CANVAS_UPSCALE_DEFAULT_PROMPT, max_length=4000)
 
     @field_validator("prompt")
@@ -551,6 +561,36 @@ class CanvasUpscalePreferences(BaseModel):
     def default_when_blank(cls, value: str) -> str:
         # 清空即恢复内置提示词，前端不必再持有第二份默认文案。
         return value.strip() or CANVAS_UPSCALE_DEFAULT_PROMPT
+
+
+def _default_upscale_tiers() -> dict[CanvasUpscaleTarget, CanvasUpscaleTierPreferences]:
+    return {target: CanvasUpscaleTierPreferences() for target in CANVAS_UPSCALE_TARGETS}
+
+
+class CanvasUpscalePreferences(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    tiers: dict[CanvasUpscaleTarget, CanvasUpscaleTierPreferences] = Field(
+        default_factory=_default_upscale_tiers,
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def lift_single_model_shape(cls, value: object) -> object:
+        # 5.51.0 只存一个模型 + 一段提示词（`{selection, prompt}`），当时的 2K / 4K 都用它。
+        if isinstance(value, dict) and "tiers" not in value and {"selection", "prompt"} & set(value):
+            tier = {name: value[name] for name in ("selection", "prompt") if name in value}
+            return {"tiers": {target: dict(tier) for target in ("2K", "4K")}}
+        return value
+
+    @field_validator("tiers")
+    @classmethod
+    def every_tier_present(
+        cls, value: dict[CanvasUpscaleTarget, CanvasUpscaleTierPreferences],
+    ) -> dict[CanvasUpscaleTarget, CanvasUpscaleTierPreferences]:
+        return {
+            target: value.get(target) or CanvasUpscaleTierPreferences()
+            for target in CANVAS_UPSCALE_TARGETS
+        }
 
 
 class CanvasUiPreferences(BaseModel):
@@ -1481,9 +1521,6 @@ class CanvasAngleRunCreate(BaseModel):
     pitch_angle: int = Field(default=9, ge=-45, le=45)
     camera_distance: float = Field(default=4.8, ge=1, le=10)
     wide_angle: bool = False
-
-
-CanvasUpscaleTarget = Literal["2K", "4K"]
 
 
 class CanvasUpscaleRunCreate(BaseModel):

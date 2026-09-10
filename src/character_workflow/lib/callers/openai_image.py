@@ -326,7 +326,9 @@ def render(
         if prompt.strip():
             payload["prompt"] = prompt.strip()
         data = _post_json(generations_url, key.access_key, payload, timeout=timeout)
-        paths, result = _write_layer_decomposition_outputs(data, out_dir)
+        paths, result = _write_layer_decomposition_outputs(
+            data, out_dir, _source_image_size(_collect_ref_paths(kwargs, key.provider, model)[0]),
+        )
         params["layer_decomposition_result"] = result
         callback = kwargs.get("on_params_changed")
         if callable(callback):
@@ -866,9 +868,73 @@ def _write_outputs(payload: dict, output_dir: Path, *, start_index: int = 1) -> 
     return paths
 
 
+def _source_image_size(path: str) -> tuple[int, int] | None:
+    try:
+        with Image.open(path) as image:
+            return ImageOps.exif_transpose(image).size
+    except (OSError, UnidentifiedImageError, ValueError):
+        return None
+
+
+def _scaled_layer_bounds(
+    bounds: object, scale_x: float, scale_y: float, width: int, height: int,
+) -> object:
+    if not isinstance(bounds, dict) or not isinstance(bounds.get("absolute"), (list, tuple)):
+        return bounds
+    absolute = bounds["absolute"]
+    if len(absolute) != 4 or not all(isinstance(value, int) for value in absolute):
+        return bounds
+    left, top, right, bottom = absolute
+    left = min(max(0, round(left * scale_x)), width - 1)
+    top = min(max(0, round(top * scale_y)), height - 1)
+    # 至少保留 1px，否则缩得太小的图层会把包围盒压成空盒（schema 拒收 left >= right）。
+    right = min(max(left + 1, round(right * scale_x)), width)
+    bottom = min(max(top + 1, round(bottom * scale_y)), height)
+    return {**bounds, "absolute": [left, top, right, bottom]}
+
+
+def _resample_layer_decomposition(
+    items: list[tuple[dict[str, Any], bytes]],
+    source_size: tuple[int, int],
+) -> list[tuple[dict[str, Any], bytes]]:
+    """把整套拆分产物缩到源图分辨率：Seedream 拆图最小出 1K，660×630 的原图会变成 1000+ 像素。
+
+    底图整幅缩放到源图尺寸；每个透明图层的包围盒按同一比例换算，图层像素缩到新包围盒大小，
+    这样画布预览、PSD / ZIP 导出、素材节点全部按源图分辨率对齐，不必各自再算一次。
+    """
+    base = next(item for item in items if item[0]["z_index"] == 0)
+    with Image.open(io.BytesIO(base[1])) as base_image:
+        base_width, base_height = base_image.size
+    width, height = source_size
+    if (base_width, base_height) == (width, height) or min(base_width, base_height) <= 0:
+        return items
+    scale_x, scale_y = width / base_width, height / base_height
+    resampled: list[tuple[dict[str, Any], bytes]] = []
+    for item, image_bytes in items:
+        if item["z_index"] == 0:
+            target = (width, height)
+            bounds = item.get("bounding_box")
+        else:
+            bounds = _scaled_layer_bounds(item.get("bounding_box"), scale_x, scale_y, width, height)
+            if not isinstance(bounds, dict):
+                raise OpenAIImageError("layer decomposition response contains invalid layer metadata")
+            left, top, right, bottom = bounds["absolute"]
+            target = (right - left, bottom - top)
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            mode = "RGBA" if item["z_index"] > 0 or image.mode in {"RGBA", "LA", "P"} else "RGB"
+            output = io.BytesIO()
+            image.convert(mode).resize(target, Image.Resampling.LANCZOS).save(output, format="PNG")
+        resampled.append((
+            {**item, "size": f"{target[0]}x{target[1]}", "bounding_box": bounds},
+            output.getvalue(),
+        ))
+    return resampled
+
+
 def _write_layer_decomposition_outputs(
     payload: dict[str, Any],
     output_dir: Path,
+    source_size: tuple[int, int] | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """Persist one base plus ordered transparent layers without discarding placement metadata."""
     from character_workflow.lib.schemas import LayerDecompositionResult
@@ -883,9 +949,8 @@ def _write_layer_decomposition_outputs(
         typed_items.append(item)
     typed_items.sort(key=lambda item: item["z_index"])
 
-    paths: list[str] = []
-    outputs: list[dict[str, Any]] = []
-    for output_index, item in enumerate(typed_items):
+    decoded: list[tuple[dict[str, Any], bytes]] = []
+    for item in typed_items:
         b64 = item.get("b64_json")
         url = item.get("url")
         if isinstance(b64, str) and b64:
@@ -894,6 +959,16 @@ def _write_layer_decomposition_outputs(
             image_bytes = _download_image_url(_clean_image_url(url))
         else:
             raise OpenAIImageError("layer decomposition response contains no downloadable image")
+        decoded.append((item, image_bytes))
+    if source_size is not None and any(item["z_index"] == 0 for item, _ in decoded):
+        try:
+            decoded = _resample_layer_decomposition(decoded, source_size)
+        except (OSError, UnidentifiedImageError, ValueError) as error:
+            raise OpenAIImageError(f"layer decomposition outputs could not be resampled: {error}") from error
+
+    paths: list[str] = []
+    outputs: list[dict[str, Any]] = []
+    for output_index, (item, image_bytes) in enumerate(decoded):
         target = output_dir / f"v{output_index + 1}.png"
         target.write_bytes(image_bytes)
         paths.append(str(target))

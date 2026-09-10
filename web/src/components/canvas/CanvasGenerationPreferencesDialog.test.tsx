@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { KeyView } from '@/api/keys';
 import type { CanvasGenerationDefaults } from '@/schema/canvas';
 import { CanvasGenerationPreferencesDialog } from './CanvasGenerationPreferencesDialog';
+import { emptyCanvasUpscalePreferences } from './canvasImageToolbar';
 
 const EMPTY_DEFAULTS: CanvasGenerationDefaults = {
   text: { selection: null, params: {} },
@@ -50,7 +51,7 @@ function setup(overrides: Partial<Parameters<typeof CanvasGenerationPreferencesD
   const props: Parameters<typeof CanvasGenerationPreferencesDialog>[0] = {
     open: true,
     value: EMPTY_DEFAULTS,
-    upscale: { selection: null, prompt: '' },
+    upscale: emptyCanvasUpscalePreferences(),
     keys: KEYS,
     saving: false,
     error: null,

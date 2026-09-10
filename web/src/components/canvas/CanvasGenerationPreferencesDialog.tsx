@@ -8,8 +8,10 @@ import {
   CanvasImageSettings,
   CanvasModelPicker,
   CanvasTextSettings,
+  OptionTrack,
   type CanvasModelChoice,
 } from '@/components/canvas/CanvasGenerationControls';
+import { CANVAS_UPSCALE_TARGETS } from '@/components/canvas/canvasImageToolbar';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -21,13 +23,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { VideoControls } from '@/components/studio/VideoControls';
-import { imageControlCaps } from '@/lib/imageControlCaps';
+import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
 import { imageSizeMode } from '@/lib/imageSizeMode';
 import { cn } from '@/lib/utils';
 import {
   CANVAS_GENERATION_MODE_LABELS,
   canvasGenerationModelSupportsMode,
   canvasGenerationPreferenceForModel,
+  canvasUpscaleAutoChoice,
   canvasUpscaleModelChoices,
   canvasVideoEditCaps,
   supportsCanvasTextReasoning,
@@ -38,6 +41,8 @@ import type {
   CanvasGenerationDraft,
   CanvasGenerationMode,
   CanvasUpscalePreferences,
+  CanvasUpscaleTarget,
+  CanvasUpscaleTierPreferences,
 } from '@/schema/canvas';
 import type { JobParams } from '@/schema/jobs';
 
@@ -63,6 +68,38 @@ function cloneDefaults(value: CanvasGenerationDefaults): CanvasGenerationDefault
     video: { selection: value.video.selection && { ...value.video.selection }, params: { ...value.video.params } },
     audio: { selection: value.audio.selection && { ...value.audio.selection }, params: { ...value.audio.params } },
   };
+}
+
+function cloneUpscale(value: CanvasUpscalePreferences): CanvasUpscalePreferences {
+  const tiers = {} as CanvasUpscalePreferences['tiers'];
+  for (const target of CANVAS_UPSCALE_TARGETS) {
+    const tier = value.tiers[target.id];
+    tiers[target.id] = { ...tier, selection: tier.selection && { ...tier.selection } };
+  }
+  return { tiers };
+}
+
+/** 失效的固定模型回到自动选择；模型没有质量档时不保存 quality。 */
+function upscaleForSave(value: CanvasUpscalePreferences, keys: KeyView[]): CanvasUpscalePreferences {
+  const choices = canvasUpscaleModelChoices(keys);
+  const automatic = canvasUpscaleAutoChoice(keys);
+  const tiers = {} as CanvasUpscalePreferences['tiers'];
+  for (const target of CANVAS_UPSCALE_TARGETS) {
+    const tier = value.tiers[target.id];
+    const selected = tier.selection
+      ? choices.find(choice => choice.key.alias === tier.selection?.alias && choice.model.id === tier.selection.model) ?? null
+      : null;
+    const effective = selected ?? (target.autoQuality ? automatic : null);
+    const qualities = effective
+      ? imageControlCaps(effective.model.id, effective.key.provider, effective.key.base_url).qualities
+      : null;
+    tiers[target.id] = {
+      selection: selected ? tier.selection : null,
+      quality: qualities?.includes(tier.quality as Quality) ? tier.quality : null,
+      prompt: tier.prompt,
+    };
+  }
+  return { tiers };
 }
 
 function defaultsForSave(
@@ -122,7 +159,8 @@ export function CanvasGenerationPreferencesDialog({
   onSave: (value: CanvasGenerationDefaults, upscale: CanvasUpscalePreferences) => void;
 }) {
   const [draft, setDraft] = useState(() => cloneDefaults(value));
-  const [upscaleDraft, setUpscaleDraft] = useState<CanvasUpscalePreferences>(() => ({ ...upscale }));
+  const [upscaleDraft, setUpscaleDraft] = useState<CanvasUpscalePreferences>(() => cloneUpscale(upscale));
+  const [upscaleTarget, setUpscaleTarget] = useState<CanvasUpscaleTarget>('2K');
   const [tab, setTab] = useState<CanvasGenerationPreferencesTab>(initialTab);
   const [sizeNotice, setSizeNotice] = useState<string | null>(null);
   const dialogContentRef = useRef<HTMLDivElement>(null);
@@ -131,7 +169,8 @@ export function CanvasGenerationPreferencesDialog({
   useEffect(() => {
     if (!open) return;
     setDraft(cloneDefaults(value));
-    setUpscaleDraft({ ...upscale });
+    setUpscaleDraft(cloneUpscale(upscale));
+    setUpscaleTarget('2K');
     setTab(initialTab);
     setSizeNotice(null);
   }, [initialTab, open, upscale, value]);
@@ -140,14 +179,32 @@ export function CanvasGenerationPreferencesDialog({
   const activeMode: CanvasGenerationDraft['mode'] = tab === 'upscale' ? 'image' : tab;
   const preference = draft[activeMode];
   const upscaleChoices = useMemo(() => canvasUpscaleModelChoices(keys), [keys]);
-  const selectedUpscaleChoice = upscaleDraft.selection
+  const upscaleAutoChoice = useMemo(() => canvasUpscaleAutoChoice(keys), [keys]);
+  const upscaleTargetSpec = CANVAS_UPSCALE_TARGETS.find(target => target.id === upscaleTarget) ?? CANVAS_UPSCALE_TARGETS[0];
+  const upscaleTier = upscaleDraft.tiers[upscaleTarget];
+  const selectedUpscaleChoice = upscaleTier.selection
     ? upscaleChoices.find(choice => (
-        choice.key.alias === upscaleDraft.selection?.alias
-        && choice.model.id === upscaleDraft.selection.model
+        choice.key.alias === upscaleTier.selection?.alias
+        && choice.model.id === upscaleTier.selection.model
       )) ?? null
     : null;
-  const effectiveUpscaleChoice = selectedUpscaleChoice ?? upscaleChoices[0] ?? null;
-  const upscaleStale = upscaleDraft.selection !== null && selectedUpscaleChoice === null;
+  const effectiveUpscaleChoice = selectedUpscaleChoice ?? (upscaleTargetSpec.autoQuality ? upscaleAutoChoice : null);
+  const upscaleStale = upscaleTier.selection !== null && selectedUpscaleChoice === null;
+  const upscaleQualities = effectiveUpscaleChoice
+    ? imageControlCaps(effectiveUpscaleChoice.model.id, effectiveUpscaleChoice.key.provider, effectiveUpscaleChoice.key.base_url).qualities
+    : null;
+  const upscaleQuality = upscaleQualities?.includes(upscaleTier.quality as Quality)
+    ? upscaleTier.quality as Quality
+    : upscaleTargetSpec.autoQuality && upscaleQualities?.includes(upscaleTargetSpec.autoQuality)
+      ? upscaleTargetSpec.autoQuality
+      : upscaleQualities?.[0] ?? null;
+
+  function patchUpscaleTier(patch: Partial<CanvasUpscaleTierPreferences>) {
+    setUpscaleDraft(current => ({
+      tiers: { ...current.tiers, [upscaleTarget]: { ...current.tiers[upscaleTarget], ...patch } },
+    }));
+  }
+
   const choices = useMemo<CanvasModelChoice[]>(() => keys.flatMap(key => key.models
     .filter(model => canvasGenerationModelSupportsMode(key, model, activeMode))
     .map(model => ({ key, model }))), [activeMode, keys]);
@@ -278,20 +335,35 @@ export function CanvasGenerationPreferencesDialog({
           className="space-y-4 rounded-xl border border-border bg-card p-4"
         >
           <div className="space-y-2">
+            <p className="text-sm font-medium">档位</p>
+            <OptionTrack
+              label="选择 AI高清档位"
+              values={CANVAS_UPSCALE_TARGETS.map(target => target.id)}
+              selected={upscaleTarget}
+              onSelect={value => setUpscaleTarget(value)}
+            />
+          </div>
+          <div className="space-y-2 border-t border-border pt-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-medium">放大模型</p>
-                <p className="text-xs text-muted-foreground">只列出质量可调的 Nano Banana 模型，2K / 4K 由质量档决定。</p>
+                <p className="text-sm font-medium">{upscaleTarget} 模型</p>
+                <p className="text-xs text-muted-foreground">
+                  {upscaleTargetSpec.autoQuality
+                    ? '未固定时自动选质量可调的 Nano Banana。'
+                    : `${upscaleTarget} 没有自动路线，需手动选择模型。`}
+                </p>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={upscaleDraft.selection === null}
-                onClick={() => setUpscaleDraft(current => ({ ...current, selection: null }))}
-              >
-                <RotateCcw aria-hidden="true" />恢复自动选择
-              </Button>
+              {upscaleTargetSpec.autoQuality && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={upscaleTier.selection === null}
+                  onClick={() => patchUpscaleTier({ selection: null })}
+                >
+                  <RotateCcw aria-hidden="true" />恢复自动选择
+                </Button>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-secondary/20 p-2">
               <CanvasModelPicker
@@ -300,36 +372,56 @@ export function CanvasGenerationPreferencesDialog({
                 model={effectiveUpscaleChoice?.model.id ?? ''}
                 menuDirection="down"
                 portalContainerRef={dialogContentRef}
-                onSelect={choice => setUpscaleDraft(current => ({
-                  ...current,
+                onSelect={choice => patchUpscaleTier({
                   selection: { alias: choice.key.alias, model: choice.model.id },
-                }))}
+                })}
               />
               <span className="shrink-0 rounded-full border border-border px-2 py-1 text-xs text-muted-foreground">
-                {upscaleDraft.selection ? '固定模型' : '自动选择'}
+                {upscaleTier.selection ? '固定模型' : effectiveUpscaleChoice ? '自动选择' : '未配置'}
               </span>
             </div>
             {upscaleStale && (
               <p role="alert" className="text-sm text-destructive">
-                已保存的放大模型不再可用。保存后将改为自动选择。
+                已保存的 {upscaleTarget} 模型不再可用。保存后将{upscaleTargetSpec.autoQuality ? '改为自动选择' : '清空该档位'}。
               </p>
             )}
             {!upscaleChoices.length && (
               <p role="alert" className="text-sm text-destructive">
-                当前没有质量可调的 Nano Banana 模型，AI高清无法执行。请先在供应商设置中接入 Nano Banana Pro。
+                当前没有可用于 AI高清 的图片模型，请先在供应商设置中接入。
               </p>
             )}
           </div>
+          {effectiveUpscaleChoice && (
+            <div className="space-y-2 border-t border-border pt-4">
+              <div>
+                <p className="text-sm font-medium">分辨率</p>
+                <p className="text-xs text-muted-foreground">
+                  {upscaleQualities
+                    ? `该模型按质量档出图；目标长边 ${upscaleTargetSpec.longEdge}px。`
+                    : `该模型按像素出图，直接以长边 ${upscaleTargetSpec.longEdge}px 等比放大。`}
+                </p>
+              </div>
+              {upscaleQualities && upscaleQuality && (
+                <OptionTrack
+                  label="选择 AI高清质量"
+                  values={upscaleQualities}
+                  selected={upscaleQuality}
+                  getLabel={value => QUALITY_LABELS[value]}
+                  onSelect={value => patchUpscaleTier({ quality: value })}
+                />
+              )}
+            </div>
+          )}
           <div className="space-y-2 border-t border-border pt-4">
             <label htmlFor="canvas-upscale-prompt" className="block">
-              <span className="text-sm font-medium">提示词</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">每次 AI高清 都用这段提示词重绘；清空后保存即恢复内置提示词。</span>
+              <span className="text-sm font-medium">{upscaleTarget} 提示词</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">该档位每次 AI高清 都用这段提示词重绘；清空后保存即恢复内置提示词。</span>
             </label>
             <Textarea
               id="canvas-upscale-prompt"
               rows={6}
-              value={upscaleDraft.prompt}
-              onChange={event => setUpscaleDraft(current => ({ ...current, prompt: event.target.value }))}
+              value={upscaleTier.prompt}
+              onChange={event => patchUpscaleTier({ prompt: event.target.value })}
             />
           </div>
         </section>
@@ -459,10 +551,7 @@ export function CanvasGenerationPreferencesDialog({
           <Button
             type="button"
             disabled={saving}
-            onClick={() => onSave(defaultsForSave(draft, keys), {
-              selection: selectedUpscaleChoice ? upscaleDraft.selection : null,
-              prompt: upscaleDraft.prompt,
-            })}
+            onClick={() => onSave(defaultsForSave(draft, keys), upscaleForSave(upscaleDraft, keys))}
           >
             {saving ? '保存中…' : '保存偏好'}
           </Button>

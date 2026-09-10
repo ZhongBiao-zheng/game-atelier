@@ -48,10 +48,18 @@ export interface CanvasGenerationModelSelection {
   model: string;
 }
 
-/** 「AI高清」偏好：selection 为 null 时服务端自动选模；prompt 留空保存后服务端填回内置提示词。 */
-export interface CanvasUpscalePreferences {
+export type CanvasUpscaleTarget = '2K' | '4K' | '8K';
+
+/** 一个档位的「AI高清」配置：selection 为 null 时服务端自动选模（仅 2K / 4K 有自动路线）；
+ *  quality 只对暴露质量档的模型生效，按像素出图的模型直接用档位长边；prompt 留空保存后服务端填回内置提示词。 */
+export interface CanvasUpscaleTierPreferences {
   selection: CanvasGenerationModelSelection | null;
+  quality: 'low' | 'medium' | 'high' | 'auto' | null;
   prompt: string;
+}
+
+export interface CanvasUpscalePreferences {
+  tiers: Record<CanvasUpscaleTarget, CanvasUpscaleTierPreferences>;
 }
 
 export type CanvasGenerationMode = 'text' | 'image' | 'video' | 'audio';
@@ -422,8 +430,6 @@ export type CanvasMediaOperation =
   | { kind: 'crop'; rect: { x: number; y: number; width: number; height: number } }
   | { kind: 'split'; horizontal_lines: number[]; vertical_lines: number[] }
   | { kind: 'remove_background' };
-
-export type CanvasUpscaleTarget = '2K' | '4K';
 
 export interface CanvasMattingModelStatus {
   model_id: string;

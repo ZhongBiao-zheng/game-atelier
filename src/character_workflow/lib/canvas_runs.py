@@ -70,6 +70,7 @@ from character_workflow.lib.schemas import (
     CanvasResultCandidate,
     CanvasSize,
     CanvasSnapshotInput,
+    CANVAS_UPSCALE_LONG_EDGES,
     CanvasTextNode,
     CanvasTextNodeData,
     CanvasTextVersion,
@@ -109,9 +110,8 @@ _ANGLE_PROMPT_PRESET_ID = "canvas.angle_edit"
 _ANGLE_PROMPT_PRESET_VERSION = 1
 _UPSCALE_PROMPT_PRESET_ID = "canvas.upscale"
 _UPSCALE_PROMPT_PRESET_VERSION = 1
-_UPSCALE_LONG_EDGES: dict[str, int] = {"2K": 2048, "4K": 4096}
-# 与 Nano Banana 共用的 UI 质量档：medium 出 2K、high 出 4K（见 openai_image.tuzi_image_quality）。
-_UPSCALE_QUALITY: dict[str, str] = {"2K": "medium", "4K": "high"}
+# 只有 Nano Banana 有自动路线（quality 决定分辨率）；8K 超出 Gemini 上限，必须手选模型。
+_UPSCALE_AUTO_QUALITY: dict[str, str] = {"2K": "medium", "4K": "high"}
 _REVERSE_PROMPT = (
     "分析唯一附带的图片，写出一段可以直接用于图像生成模型的中文提示词。"
     "准确描述主体、动作或状态、构图、场景、光线、色彩、材质、镜头视角与画面风格；"
@@ -1942,63 +1942,99 @@ def _nearest_ratio(width: int, height: int, ratios: list[str]) -> str:
 
 
 def _upscale_model_eligible(key: KeySpec, model: ModelSpec) -> bool:
-    """AI高清只认 quality 可调的 Nano Banana 基础型号（low=1K / medium=2K / high=4K）。
-
-    `-2k` / `-4k` 这类把分辨率编进 id 的固定型号不收：档位由 quality 决定，模型保持一个。
-    """
-    from character_workflow.lib.callers.openai_image import (
-        image_family,
-        max_reference_images,
-        supports_image_quality,
-    )
+    """AI高清可指定任何画布能运行、且吃参考图的图片模型；MJ 不收：无尺寸参数且固定出四宫格。"""
+    from character_workflow.lib.callers.openai_image import image_family, max_reference_images
 
     return (
-        _model_modality(model, key) == "image"
-        and image_family(model.id) == "nano-banana"
-        and supports_image_quality(model.id)
+        _supports_canvas_image_generation(key, model)
+        and image_family(model.id) != "midjourney"
         and max_reference_images(model.id) >= 1
     )
 
 
-def _resolve_upscale_model(target: str) -> tuple[KeySpec, ModelSpec, str, str]:
-    """Key / model / quality / prompt for an AI 高清 run, following the canvas upscale preference.
+def _upscale_auto_candidate(key: KeySpec, model: ModelSpec) -> bool:
+    """未固定模型时只在 quality 可调的 Nano Banana 基础型号里挑（low=1K / medium=2K / high=4K）。"""
+    from character_workflow.lib.callers.openai_image import image_family, supports_image_quality
 
-    偏好固定了模型就只用它，失效报 stale；没固定则自动挑：默认 Key 优先、同一 Key 内 Pro 优先。
+    return (
+        _upscale_model_eligible(key, model)
+        and image_family(model.id) == "nano-banana"
+        and supports_image_quality(model.id)
+    )
+
+
+def _resolve_upscale_model(target: str) -> tuple[KeySpec, ModelSpec, str | None, str]:
+    """Key / model / quality / prompt for an AI 高清 run, following that tier's preference.
+
+    档位固定了模型就只用它，失效报 stale；没固定则自动挑：默认 Key 优先、同一 Key 内 Pro 优先。
     """
     from character_workflow.lib.callers.openai_image import normalized_model_id
 
     try:
-        preference = read_canvas_ui_preferences().upscale
+        tier = read_canvas_ui_preferences().upscale.tiers[target]
     except CanvasUiPreferencesError as error:
         raise CanvasRunCommandError(
             "canvas_ui_preferences_invalid",
             "画布生成偏好文件损坏，请先在画布中重新保存生成偏好。",
         ) from error
     keys = _keys_default_first()
-    quality = _UPSCALE_QUALITY[target]
-    if preference.selection is not None:
+    if tier.selection is not None:
         for key in keys:
-            if key.alias != preference.selection.alias:
+            if key.alias != tier.selection.alias:
                 continue
             for model in key.models:
-                if model.id == preference.selection.model and _upscale_model_eligible(key, model):
-                    return key, model, quality, preference.prompt
+                if model.id == tier.selection.model and _upscale_model_eligible(key, model):
+                    return key, model, tier.quality, tier.prompt
         raise CanvasRunCommandError(
             "canvas_upscale_model_stale",
-            "已保存的 AI高清模型不再可用，请在生成偏好里重新选择。",
+            f"已保存的 {target} 档 AI高清模型不再可用，请在生成偏好里重新选择。",
+        )
+    auto_quality = _UPSCALE_AUTO_QUALITY.get(target)
+    if auto_quality is None:
+        raise CanvasRunCommandError(
+            "canvas_upscale_model_missing",
+            f"{target} 档尚未配置 AI高清模型，请在生成偏好里选择。",
         )
     for key in keys:
-        candidates = [model for model in key.models if _upscale_model_eligible(key, model)]
+        candidates = [model for model in key.models if _upscale_auto_candidate(key, model)]
         if candidates:
             model = min(
                 candidates,
                 key=lambda item: 0 if "pro" in f"{normalized_model_id(item.id)} {item.name}".lower() else 1,
             )
-            return key, model, quality, preference.prompt
+            return key, model, tier.quality or auto_quality, tier.prompt
     raise CanvasRunCommandError(
         "canvas_upscale_model_missing",
-        "未配置 AI高清模型：需要一个质量可调的 Nano Banana 模型（如 Nano Banana Pro），请在生成偏好里设置。",
+        f"{target} 档尚未配置 AI高清模型：没有可自动选择的 Nano Banana 模型，请在生成偏好里设置。",
     )
+
+
+def _upscale_size_params(
+    key: KeySpec,
+    model: ModelSpec,
+    target: str,
+    width: int,
+    height: int,
+    quality: str | None,
+) -> dict[str, Any]:
+    """分辨率按模型族取：比例族（Nano Banana / OpenRouter）靠 quality 或分辨率档，像素族直接按档位长边等比算尺寸。"""
+    from character_workflow.lib.callers.openai_image import supports_image_quality
+    from character_workflow.lib.image_size_catalog import image_size_options, is_nano_image_size_model
+
+    options = image_size_options(key.provider, key.base_url, model.id)
+    params: dict[str, Any] = {"n": 1, "ratio": _nearest_ratio(width, height, options["ratios"])}
+    if quality and supports_image_quality(model.id):
+        params["quality"] = quality
+    if key.provider == "openrouter":
+        if target in options["resolutions"]:
+            params["resolution"] = target
+        return params
+    if is_nano_image_size_model(model.id):
+        return params
+    scale = CANVAS_UPSCALE_LONG_EDGES[target] / max(width, height)
+    params["size_mode"] = "custom"
+    params["size"] = f"{max(1, round(width * scale))}x{max(1, round(height * scale))}"
+    return params
 
 
 def submit_upscale_run(
@@ -2007,12 +2043,10 @@ def submit_upscale_run(
     expected_revision: int,
     target: str,
 ) -> tuple[Job, CanvasDocument]:
-    """Freeze one owned image into a fixed-prompt Nano Banana Run at 2K or 4K."""
-    from character_workflow.lib.image_size_catalog import image_size_options
-
-    long_edge = _UPSCALE_LONG_EDGES.get(target)
+    """Freeze one owned image into a fixed-prompt image Run at the tier's resolution."""
+    long_edge = CANVAS_UPSCALE_LONG_EDGES.get(target)
     if long_edge is None:
-        raise CanvasRunCommandError("canvas_upscale_target_invalid", "放大只支持 2K 或 4K。")
+        raise CanvasRunCommandError("canvas_upscale_target_invalid", "放大只支持 2K / 4K / 8K。")
     with file_lock(canvas_project_lock_path(project_id)):
         recover_canvas_transactions_unlocked(project_id)
         current = _read_document_unlocked(project_id)
@@ -2050,12 +2084,12 @@ def submit_upscale_run(
                 f"原图长边已达到 {max(width, height)}px，不需要放大到 {target}。",
             )
         key, model, quality, prompt = _resolve_upscale_model(target)
-        ratio = _nearest_ratio(
-            width, height, image_size_options(key.provider, key.base_url, model.id)["ratios"],
-        )
-        job_params = _normalized_image_preference_params(
-            key, model, {"n": 1, "ratio": ratio, "quality": quality},
-        )
+        try:
+            job_params = _normalized_image_preference_params(
+                key, model, _upscale_size_params(key, model, target, width, height, quality),
+            )
+        except ValueError as error:
+            raise CanvasRunCommandError("canvas_upscale_size_invalid", str(error)) from error
         _validate_input_capabilities(model, JobKind.IMAGE, inputs, job_params)
         job_params.reference_images = paths["image"]
         normalized = job_params.model_dump(mode="json", exclude_none=True)
