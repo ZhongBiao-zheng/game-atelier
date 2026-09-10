@@ -1,4 +1,5 @@
 import { connectionFetch } from '@/api/connection';
+import { mediaUrl } from '@/api/connection';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Trash2, CheckCircle2, Copy, PanelLeftOpen, Save } from 'lucide-react';
 import type { Job, WebEditableJobPatch } from '../schema/jobs';
@@ -148,13 +149,13 @@ export function ImageDetail({ jobId, path, onBack, onLightbox, stripCollapsed, o
            * onError 降级保留作保险，应对 gallery 端点不覆盖的极端路径。
            */}
           <img
-            src={`/api/gallery/image?path=${encodeURIComponent(path)}`}
+            src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`)}
             alt="大图"
-            onClick={() => onLightbox?.(`/api/gallery/image?path=${encodeURIComponent(path)}`)}
+            onClick={() => onLightbox?.(mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`))}
             className="max-h-[72vh] max-w-full object-contain rounded-lg border border-border cursor-zoom-in"
             onError={(e) => {
               const img = e.target as HTMLImageElement;
-              const fallback = `/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`;
+              const fallback = mediaUrl(`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`);
               if (img.src !== fallback) img.src = fallback;
             }}
           />

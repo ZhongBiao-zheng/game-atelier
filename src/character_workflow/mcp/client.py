@@ -120,7 +120,7 @@ class ServiceStatus(BaseModel):
     service: Literal["game-atelier"]
     instance_id: str = Field(min_length=1, max_length=128)
     app_version: str = Field(max_length=128)
-    protocol: Literal["atelier-local/1"]
+    protocol: Literal["atelier-local/2"]
 
 
 class ToolSession(BaseModel):

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { mediaUrl } from '@/api/connection';
 import { Link } from 'wouter';
 import { Heart } from 'lucide-react';
 
@@ -40,7 +41,7 @@ export function Home() {
           className="block"
         >
           <img
-            src={`/api/gallery/image?path=${encodeURIComponent(item.path)}`}
+            src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(item.path)}`)}
             alt=""
             className="w-full block"
             loading="lazy"

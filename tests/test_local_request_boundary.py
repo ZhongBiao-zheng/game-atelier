@@ -76,7 +76,7 @@ def test_public_status_advertises_protocol_without_granting_a_session(client):
     for headers in ({}, {"Origin": "http://127.0.0.1:5174", "Sec-Fetch-Site": "same-origin"}):
         response = client.get("/api/connection/status", headers=headers)
         assert response.status_code == 200
-        assert response.json()["protocol"] == "atelier-local/1"
+        assert response.json()["protocol"] == "atelier-local/2"
         assert "set-cookie" not in response.headers
         assert "access-control-allow-origin" not in response.headers
 

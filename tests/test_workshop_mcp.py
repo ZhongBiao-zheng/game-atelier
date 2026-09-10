@@ -66,7 +66,7 @@ def runtime(tmp_path):
             assert self.path == "/api/connection/status"
             self.send_json({"service": state.get("service", "game-atelier"),
                             "instance_id": state["instance_id"], "app_version": "test",
-                            "protocol": state.get("protocol", "atelier-local/1")})
+                            "protocol": state.get("protocol", "atelier-local/2")})
 
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -321,7 +321,7 @@ def test_transport_bounds_errors_and_does_not_replay_ambiguous_operations(runtim
 
 
 @pytest.mark.parametrize("field,value", [("service", "wrong-app"), ("protocol", None),
-                                        ("protocol", "atelier-local/2")])
+                                        ("protocol", "atelier-local/1")])
 def test_transport_fails_closed_before_grant_exchange_for_wrong_service(runtime, field, value):
     runtime[field] = value
     client = WorkshopClient(load_credentials(runtime["credentials"]))

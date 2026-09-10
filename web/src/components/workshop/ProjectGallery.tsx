@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { mediaUrl as connectionMediaUrl } from '@/api/connection';
 import {
   ChevronLeft,
   ChevronRight,
@@ -324,7 +325,7 @@ export function ProjectGallery({ projectId }: { projectId: string }) {
 }
 
 function mediaUrl(path: string): string {
-  return `/api/gallery/image?path=${encodeURIComponent(path)}`;
+  return connectionMediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`);
 }
 
 function assetHref(projectId: string, item: ProjectGalleryMedia): string {

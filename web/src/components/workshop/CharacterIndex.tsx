@@ -1,4 +1,5 @@
 import { connectionFetch } from '@/api/connection';
+import { mediaUrl } from '@/api/connection';
 import { useEffect, useMemo, useState } from 'react';
 import { Layers2, MoreHorizontal, Pencil, Plus, Search, Trash2, UserRound } from 'lucide-react';
 
@@ -238,7 +239,7 @@ function CharacterCard({
         <span className="block h-48 bg-border">
         {item.cover_path ? (
           <img
-            src={`/api/gallery/image?path=${encodeURIComponent(item.cover_path)}`}
+            src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(item.cover_path)}`)}
             alt=""
             className="h-full w-full object-cover"
           />

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import secrets
 import threading
 import time
@@ -11,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from character_workflow.lib import data_root
 from character_workflow.lib.file_lock import file_lock
@@ -23,7 +25,13 @@ AGENT_CAPABILITIES = frozenset({
 })
 SESSION_LIMIT = 64
 GRANT_LIMIT = 32
+PAIRING_LIMIT = 8
+PAIRING_TTL = 5 * 60
+MEDIA_TOKEN_TTL = 30 * 60
+MEDIA_TOKENS_PER_SESSION = 4
+SITE_CAPABILITIES = frozenset({"read", "edit"})
 COOKIE_NAME = "atelier_local_session"
+PrincipalKind = Literal["local", "agent", "site"]
 
 
 def iso_time(timestamp: float) -> str:
@@ -40,9 +48,41 @@ class ConnectionError(Exception):
         super().__init__(message)
 
 
+def validate_site_origin(origin: str) -> str:
+    """网站配对只接受精确 Origin：HTTPS 任意主机，HTTP 仅回环（本地 vite preview 验证托管模式）。"""
+    try:
+        url = urlsplit(origin)
+    except ValueError:
+        url = None
+    if url is None or url.hostname is None or url.username or url.password or url.path \
+            or url.query or url.fragment or not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?",
+                                                             url.hostname):
+        raise ConnectionError("ORIGIN_DENIED", "网站地址必须是精确的 https 来源", 422)
+    if url.scheme == "https":
+        default_port = 443
+    elif url.scheme == "http" and url.hostname in {"localhost", "127.0.0.1"} and url.port:
+        default_port = 80
+    else:
+        raise ConnectionError("ORIGIN_DENIED", "网站地址必须是精确的 https 来源", 422)
+    port = url.port
+    if port is not None and not 1 <= port <= 65535:
+        raise ConnectionError("ORIGIN_DENIED", "网站地址必须是精确的 https 来源", 422)
+    authority = url.hostname if port in {None, default_port} else f"{url.hostname}:{port}"
+    normalized = f"{url.scheme}://{authority}"
+    if normalized != origin:
+        raise ConnectionError("ORIGIN_DENIED", "网站地址必须是精确的 https 来源", 422)
+    return normalized
+
+
+@dataclass
+class Pairing:
+    origin: str
+    expires_at: float
+
+
 @dataclass(frozen=True)
 class ConnectionPrincipal:
-    kind: Literal["local", "agent"]
+    kind: PrincipalKind
     session_id: str
     grant_id: str | None = None
     project_ids: frozenset[str] = frozenset()
@@ -67,6 +107,9 @@ class ConnectionStore:
         # Discovery is public and must not resolve or read user configuration.
         self.root: Path | None = None
         self.sessions: dict[str, Session] = {}
+        # 配对码摘要 → 待配对网站；媒体令牌摘要 → (session_id, expires_at)。都只活在本进程。
+        self.pairings: dict[str, Pairing] = {}
+        self.media_tokens: dict[str, tuple[str, float]] = {}
         self.lease: tuple[str, str, float] | None = None
         self.lock = threading.RLock()
         self._attempts: list[float] = []
@@ -99,6 +142,8 @@ class ConnectionStore:
             for session in self.sessions.values():
                 session.revoked.set()
             self.sessions.clear()
+            self.pairings.clear()
+            self.media_tokens.clear()
             self.lease = None
             self.root = root
         now = time.time()
@@ -106,11 +151,17 @@ class ConnectionStore:
             if session.expires_at <= now or session.revoked.is_set():
                 session.revoked.set()
                 del self.sessions[key]
+        for key, pairing in list(self.pairings.items()):
+            if pairing.expires_at <= now:
+                del self.pairings[key]
+        for key, (session_id, expires_at) in list(self.media_tokens.items()):
+            if expires_at <= now or session_id not in self.sessions:
+                del self.media_tokens[key]
         if self.lease and self.lease[2] <= now:
             self.lease = None
 
     def _new_session(
-        self, kind: Literal["local", "agent"], origin: str | None, expires_at: float,
+        self, kind: PrincipalKind, origin: str | None, expires_at: float,
         *, name: str, grant_id: str | None = None, project_ids: frozenset[str] = frozenset(),
         capabilities: frozenset[str] = AGENT_CAPABILITIES,
         canvas_project_ids: frozenset[str] = frozenset(),
@@ -155,7 +206,7 @@ class ConnectionStore:
     def editor_lease(self, session: Session, client_id: str, *, takeover: bool = False) -> dict:
         with self.lock:
             self._refresh()
-            if session.revoked.is_set() or session.principal.kind != "local":
+            if session.revoked.is_set() or session.principal.kind not in {"local", "site"}:
                 raise ConnectionError("CAPABILITY_DENIED", "此连接不能编辑页面")
             identity = (session.principal.session_id, client_id)
             if self.lease and self.lease[:2] != identity and not takeover:
@@ -180,6 +231,90 @@ class ConnectionStore:
                 session.revoked.set()
             if self.lease and self.lease[0] == session_id:
                 self.lease = None
+            for key, (owner, _) in list(self.media_tokens.items()):
+                if owner == session_id:
+                    del self.media_tokens[key]
+
+    # ---- 网站配对 ----------------------------------------------------------------
+
+    def site_origins(self) -> frozenset[str]:
+        """已登记的网站来源 = 待配对 + 已配对；边界层只对它们放行跨源请求与 CORS。"""
+        with self.lock:
+            self._refresh()
+            return frozenset(
+                {pairing.origin for pairing in self.pairings.values()}
+                | {s.origin for s in self.sessions.values()
+                   if s.principal.kind == "site" and s.origin}
+            )
+
+    def create_pairing(self, origin: str) -> tuple[str, Pairing]:
+        normalized = validate_site_origin(origin)
+        with self.lock:
+            self._refresh()
+            if len(self.pairings) >= PAIRING_LIMIT:
+                raise ConnectionError("CONNECTION_RATE_LIMITED", "待配对的网站过多，请稍后再试", 429)
+            # 同一来源只保留最新一枚码，旧码立即作废。
+            for key, pairing in list(self.pairings.items()):
+                if pairing.origin == normalized:
+                    del self.pairings[key]
+            code = secrets.token_urlsafe(24)
+            pairing = Pairing(normalized, time.time() + PAIRING_TTL)
+            self.pairings[digest(code)] = pairing
+            return code, pairing
+
+    def _throttle_attempt(self, now: float) -> None:
+        self._attempts = [timestamp for timestamp in self._attempts if timestamp > now - 60]
+        if len(self._attempts) >= 30:
+            raise ConnectionError("CONNECTION_RATE_LIMITED", "连接尝试过于频繁，请稍后再试", 429)
+        self._attempts.append(now)
+
+    def pair(self, code: str, instance_id: str, origin: str) -> tuple[Session, str]:
+        with self.lock:
+            self._refresh()
+            now = time.time()
+            self._throttle_attempt(now)
+            if instance_id != self.instance_id:
+                raise ConnectionError("INSTANCE_CHANGED", "本机服务已变化，请重新连接", 409)
+            hashed = digest(code)
+            matched = next((key for key in self.pairings
+                            if secrets.compare_digest(key, hashed)), None)
+            # 码不存在 / 已用 / 来源不符共用一条错误，不暴露码是否存在。
+            if matched is None or self.pairings[matched].origin != origin:
+                raise ConnectionError("SESSION_REVOKED", "配对码无效或已过期，请在本机重新生成")
+            pairing = self.pairings.pop(matched)
+            session, token = self._new_session(
+                "site", pairing.origin, now + 12 * 3600, name=pairing.origin,
+                capabilities=SITE_CAPABILITIES,
+            )
+            return session, token
+
+    def issue_media_token(self, session: Session) -> tuple[str, float]:
+        with self.lock:
+            self._refresh()
+            if session.revoked.is_set() or session.principal.kind != "site":
+                raise ConnectionError("CAPABILITY_DENIED", "此连接不需要媒体令牌")
+            owned = sorted(
+                ((expires_at, key) for key, (owner, expires_at) in self.media_tokens.items()
+                 if owner == session.principal.session_id),
+            )
+            for _, key in owned[: max(0, len(owned) + 1 - MEDIA_TOKENS_PER_SESSION)]:
+                del self.media_tokens[key]
+            token = secrets.token_urlsafe(32)
+            expires_at = min(time.time() + MEDIA_TOKEN_TTL, session.expires_at)
+            self.media_tokens[digest(token)] = (session.principal.session_id, expires_at)
+            return token, expires_at
+
+    def authenticate_media(self, token: str) -> Session:
+        with self.lock:
+            self._refresh()
+            hashed = digest(token)
+            for key, (session_id, _) in self.media_tokens.items():
+                if secrets.compare_digest(key, hashed):
+                    session = self.sessions.get(session_id)
+                    if session is None or session.revoked.is_set():
+                        break
+                    return session
+        raise ConnectionError("SESSION_EXPIRED", "媒体令牌已过期，请刷新页面", 401)
 
     def _grants_path(self) -> Path:
         assert self.root is not None
@@ -294,10 +429,7 @@ class ConnectionStore:
         with self.lock:
             self._refresh()
             now = time.time()
-            self._attempts = [timestamp for timestamp in self._attempts if timestamp > now - 60]
-            if len(self._attempts) >= 30:
-                raise ConnectionError("CONNECTION_RATE_LIMITED", "连接尝试过于频繁，请稍后再试", 429)
-            self._attempts.append(now)
+            self._throttle_attempt(now)
             if instance_id != self.instance_id:
                 raise ConnectionError("INSTANCE_CHANGED", "本机服务已变化，请重新连接", 409)
             grant = self._read_grants().get(grant_id)

@@ -1,4 +1,5 @@
 import { type ButtonHTMLAttributes, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { mediaUrl } from '@/api/connection';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Square, Trash2 } from 'lucide-react';
 
@@ -491,12 +492,12 @@ function ProgressBadge({
 }
 
 function imageSrc(path: string) {
-  return `/api/gallery/image?path=${encodeURIComponent(path)}`;
+  return mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`);
 }
 
 // 视频复用与图片相同的字节端点（output_paths 白名单内）。
 function videoSrc(path: string) {
-  return `/api/gallery/image?path=${encodeURIComponent(path)}`;
+  return mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`);
 }
 
 function isImagePath(path: string): boolean {
@@ -514,11 +515,11 @@ function isAudioPath(path: string): boolean {
 // - 其余（.runtime/uploads/ 的画师临时上传）：走 /api/raw
 function refImageSrc(path: string, jobId?: string) {
   if (path.startsWith('http')) return path;
-  if (jobId) return `/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`;
+  if (jobId) return mediaUrl(`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`);
   if (/^(characters|studio)\//.test(path)) {
-    return `/api/gallery/image?path=${encodeURIComponent(path)}`;
+    return mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`);
   }
-  return `/api/raw?path=${encodeURIComponent(path)}`;
+  return mediaUrl(`/api/raw?path=${encodeURIComponent(path)}`);
 }
 
 // 历史参考堆叠合并三类素材（视频 round 常只有视频/音频参考，单看图片会整组消失）。

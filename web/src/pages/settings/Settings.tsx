@@ -6,10 +6,17 @@ import { chooseFolder } from '@/api/folders';
 import { fetchConfig, updateConfig } from '@/api/config';
 import { fetchOnboardingStatus, setDataRoot } from '@/api/onboarding';
 import { KeysPage } from './Keys';
+import { HOSTED_SITE } from '@/api/connection';
+import { HostedManagementNotice } from '@/components/HostedManagementNotice';
 
 const DEFAULT_ROOT = '~/game-atelier';
 
 export function SettingsPage() {
+  if (HOSTED_SITE) return <HostedManagementNotice title="设置" />;
+  return <LocalSettingsPage />;
+}
+
+function LocalSettingsPage() {
   const [savedRoot, setSavedRoot] = useState('');
   const [pendingRoot, setPendingRoot] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -83,7 +90,7 @@ export function SettingsPage() {
   return (
     <div className="px-6 py-8 max-w-5xl mx-auto">
       <h1 className="font-display text-display text-foreground">设置</h1>
-      <Link href="/connection" className="mt-5 inline-flex rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">本机 Agent 连接</Link>
+      <Link href="/connection" className="mt-5 inline-flex rounded-md border border-border px-4 py-2 text-sm hover:bg-accent">本机连接</Link>
 
       <section className="grid gap-6 py-10 md:grid-cols-[220px_1fr] md:gap-12">
         <div>

@@ -1,4 +1,5 @@
 import { connectionFetch } from '@/api/connection';
+import { mediaUrl } from '@/api/connection';
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, BadgeCheck, Download, Eye, EyeOff, Film, Heart, Loader2, PanelsTopLeft, Upload, X } from 'lucide-react';
 import type {
@@ -324,7 +325,7 @@ export function CharacterGallery({
               const hidden = isGalleryHidden(img.path, hiddenPaths);
               const canonicalEntry = canonicalFile?.[tab];
               const canonical = isCanonicalPath(img.path, canonicalEntry);
-              const rawSrc = `/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`;
+              const rawSrc = mediaUrl(`/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`);
               const btn = 'size-7 rounded-full bg-scrim grid place-items-center transition-opacity backdrop-blur-glass cursor-pointer border-0';
               return (
               <figure key={i} className="group relative mb-4 break-inside-avoid">
@@ -559,14 +560,14 @@ function RelatedWorkCard({
       {item.featured_path && (
         mediaType === 'video' ? (
           <video
-            src={`/api/gallery/image?path=${encodeURIComponent(item.featured_path)}`}
+            src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(item.featured_path)}`)}
             muted
             preload="metadata"
             className="aspect-video w-full border-b border-border bg-background object-cover"
           />
         ) : (
           <img
-            src={`/api/gallery/image?path=${encodeURIComponent(item.featured_path)}`}
+            src={mediaUrl(`/api/gallery/image?path=${encodeURIComponent(item.featured_path)}`)}
             alt=""
             className="aspect-video w-full border-b border-border bg-background object-cover"
           />

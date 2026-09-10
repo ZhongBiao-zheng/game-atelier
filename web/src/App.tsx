@@ -4,6 +4,7 @@ import { DataRootPage } from './pages/onboarding/DataRoot';
 import { KeysPage } from './pages/settings/Keys';
 import { AppShell } from '@/components/AppShell';
 import { LocalConnectionGate } from '@/components/LocalConnectionGate';
+import { HOSTED_SITE } from '@/api/connection';
 
 export function App() {
   return <LocalConnectionGate><ConnectedApp /></LocalConnectionGate>;
@@ -19,8 +20,10 @@ function ConnectedApp() {
       .catch(e => setError(String(e)));
   }, []);
 
-  useEffect(() => { reload(); }, [reload]);
+  // 初始化状态含本机路径，属管理端点；网站能配对成功就说明本机已初始化，直接进界面。
+  useEffect(() => { if (!HOSTED_SITE) reload(); }, [reload]);
 
+  if (HOSTED_SITE) return <AppShell />;
   if (error) {
     return (
       <div className="grid h-screen place-items-center bg-background p-8 text-destructive">

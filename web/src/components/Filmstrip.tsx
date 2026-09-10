@@ -1,4 +1,5 @@
 import { connectionFetch } from '@/api/connection';
+import { mediaUrl } from '@/api/connection';
 import { useEffect, useState } from 'react';
 import type { AssetSlot, Job } from '../schema/jobs';
 import { cn } from '@/lib/utils';
@@ -65,7 +66,7 @@ export function Filmstrip({ characterId, assetSlot, currentPath, onSelect, sseSi
             )}
           >
             <img
-              src={`/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`}
+              src={mediaUrl(`/api/raw?path=${encodeURIComponent(img.path)}&job_id=${encodeURIComponent(img.jobId)}`)}
               alt=""
               className="block aspect-[3/2] w-full object-cover"
             />

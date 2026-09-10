@@ -1,4 +1,5 @@
 import { connectionFetch } from '@/api/connection';
+import { mediaUrl } from '@/api/connection';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearch } from 'wouter';
 import { ChevronsDown, Library } from 'lucide-react';
@@ -748,7 +749,7 @@ function StudioFull() {
               kind: 'image',
               title: config.prompt.trim().replace(/\s+/g, ' ').slice(0, 24),
               sourcePath: path,
-              previewUrl: `/api/gallery/image?path=${encodeURIComponent(path)}`,
+              previewUrl: mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`),
             });
           }}
         />
@@ -1040,10 +1041,10 @@ async function fetchAssetAsFile(path: string, baseName: string, jobId?: string):
   const url = path.startsWith('http')
     ? path
     : jobId
-      ? `/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`
+      ? mediaUrl(`/api/raw?path=${encodeURIComponent(path)}&job_id=${encodeURIComponent(jobId)}`)
       : /^(characters|studio)\//.test(path) || /\/(characters|studio)\//.test(path)
-        ? `/api/gallery/image?path=${encodeURIComponent(path)}`
-        : `/api/raw?path=${encodeURIComponent(path)}`;
+        ? mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`)
+        : mediaUrl(`/api/raw?path=${encodeURIComponent(path)}`);
   const resp = await (url.startsWith('http') ? fetch(url, { credentials: 'omit' }) : connectionFetch(url));
   if (!resp.ok) throw await apiError(resp, `取回参考图（${path}）`);
   const blob = await resp.blob();

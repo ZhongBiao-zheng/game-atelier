@@ -7,13 +7,20 @@ from __future__ import annotations
 
 import os
 import uuid
-from urllib.parse import urlsplit
+from typing import Callable
+from urllib.parse import parse_qs, urlsplit
 
-from starlette.responses import JSONResponse, RedirectResponse
+from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+from viewer_server.connection_capabilities import is_media_route
 
 
 DEV_ORIGIN_ENV = "GAME_ATELIER_DEV_ORIGIN"
+MEDIA_TOKEN_PARAM = "media_token"
+_CORS_METHODS = "GET, HEAD, POST, PUT, PATCH, DELETE"
+_CORS_HEADERS = "Authorization, Content-Type, X-Atelier-Client, Accept, Range"
+_CORS_EXPOSE = "Content-Disposition, Content-Length, Content-Range, Accept-Ranges, Retry-After"
 
 
 def development_origin() -> str | None:
@@ -51,6 +58,26 @@ def _authority(scope: Scope) -> str | None:
     return "127.0.0.1" if server[1] == 80 else f"127.0.0.1:{server[1]}"
 
 
+def media_token_param(scope: Scope) -> str | None:
+    """媒体令牌只从 query 取；重复出现按无效处理。"""
+    values = parse_qs(scope.get("query_string", b"").decode("latin-1"), keep_blank_values=True)
+    tokens = values.get(MEDIA_TOKEN_PARAM)
+    if not tokens:
+        return None
+    if len(tokens) > 1:
+        raise ValueError("duplicate media token")
+    return tokens[0]
+
+
+def _tokened_media_read(scope: Scope) -> bool:
+    """网站的 <img>/<video>/下载不带 Origin，只带 cross-site 元数据；放行到中间件由令牌鉴权。"""
+    return (
+        scope.get("method") in {"GET", "HEAD"}
+        and is_media_route(scope.get("path", ""))
+        and media_token_param(scope) is not None
+    )
+
+
 def _public_navigation(scope: Scope, mode: str | None, dest: str | None) -> bool:
     path = scope.get("path", "")
     private = (
@@ -67,9 +94,14 @@ def _public_navigation(scope: Scope, mode: str | None, dest: str | None) -> bool
 
 
 class LocalRequestBoundary:
-    def __init__(self, app: ASGIApp, *, dev_origin: str | None = None) -> None:
+    def __init__(
+        self, app: ASGIApp, *, dev_origin: str | None = None,
+        site_origins: Callable[[], frozenset[str]] | None = None,
+    ) -> None:
         self.app = app
         self.dev_origin = dev_origin
+        # 已登记（待配对 / 已配对）的网站来源由 ConnectionStore 提供；边界层不自己记 Origin。
+        self.site_origins = site_origins or (lambda: frozenset())
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "lifespan":
@@ -111,17 +143,59 @@ class LocalRequestBoundary:
             allowed_origins = {f"http://{authority}"}
             if self.dev_origin is not None:
                 allowed_origins.add(self.dev_origin)
+            site_origin = origin if origin is not None and origin in self.site_origins() else None
+            if site_origin is not None:
+                if scope["method"] == "OPTIONS" and _header(scope, b"access-control-request-method"):
+                    await self._preflight(scope, receive, send, site_origin)
+                    return
+                await self.app(scope, receive, self._cors_send(send, site_origin))
+                return
             if origin is not None and origin not in allowed_origins:
                 await self._deny(scope, receive, send, "ORIGIN_DENIED", "此来源尚未获准连接本机")
                 return
             # Same-site is insufficient: another localhost port is a different application.
-            if metadata_names and site != "same-origin" and not _public_navigation(scope, mode, dest):
+            if (
+                metadata_names and site != "same-origin"
+                and not _public_navigation(scope, mode, dest) and not _tokened_media_read(scope)
+            ):
                 await self._deny(scope, receive, send, "ORIGIN_DENIED", "请从本机页面访问工坊")
                 return
         except ValueError:
             await self._deny(scope, receive, send, "ORIGIN_DENIED", "请求来源信息无效")
             return
         await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _preflight(scope: Scope, receive: Receive, send: Send, origin: str) -> None:
+        headers = {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Methods": _CORS_METHODS,
+            "Access-Control-Allow-Headers": _CORS_HEADERS,
+            "Access-Control-Max-Age": "600",
+            "Vary": "Origin",
+            "Cache-Control": "no-store",
+        }
+        # 旧版 Chrome 的 Private Network Access 预检；新版走本地网络权限弹窗，此头无害。
+        if _header(scope, b"access-control-request-private-network") == "true":
+            headers["Access-Control-Allow-Private-Network"] = "true"
+        await Response(status_code=204, headers=headers)(scope, receive, send)
+
+    @staticmethod
+    def _cors_send(send: Send, origin: str) -> Send:
+        async def cors_send(message: dict) -> None:
+            if message["type"] == "http.response.start":
+                raw = [(k, v) for k, v in message.get("headers", [])
+                       if k.lower() not in {b"access-control-allow-origin", b"vary"}]
+                vary = [v.decode("latin-1") for k, v in message.get("headers", [])
+                        if k.lower() == b"vary"]
+                raw.extend([
+                    (b"access-control-allow-origin", origin.encode("latin-1")),
+                    (b"access-control-expose-headers", _CORS_EXPOSE.encode("latin-1")),
+                    (b"vary", ", ".join([*vary, "Origin"]).encode("latin-1")),
+                ])
+                message["headers"] = raw
+            await send(message)
+        return cors_send
 
     @staticmethod
     async def _deny(
