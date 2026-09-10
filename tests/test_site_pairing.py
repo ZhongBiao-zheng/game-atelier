@@ -61,7 +61,6 @@ def pair(local, site, origin=SITE):
 
 @pytest.mark.parametrize("origin", [
     "https://atelier.example", "https://atelier.example:8443", "http://localhost:4173",
-    "http://127.0.0.1:4173",
 ])
 def test_exact_site_origins_are_accepted(origin):
     assert validate_site_origin(origin) == origin
@@ -71,11 +70,32 @@ def test_exact_site_origins_are_accepted(origin):
     "null", "file://", "http://atelier.example", "https://atelier.example/", "https://atelier.example/app",
     "https://user:pw@atelier.example", "https://*.vercel.app", "https://Atelier.example",
     "https://atelier.example:443", "http://localhost", "https://atelier.example?x=1", "ws://x",
+    "http://127.0.0.1:4173", "http://127.0.0.1:5174",
 ])
 def test_loose_site_origins_are_rejected(origin):
     with pytest.raises(ConnectionError) as error:
         validate_site_origin(origin)
     assert error.value.status == 422
+
+
+def test_registering_a_site_never_breaks_the_local_page(app, local, monkeypatch):
+    """本机页面自己的来源、Vite 开发来源都不能登记为网站；登记了别的网站后本地引导照常工作。"""
+    monkeypatch.setenv("GAME_ATELIER_DEV_ORIGIN", "http://localhost:5173")
+    for origin in (ORIGIN, "http://127.0.0.1:5175", "http://localhost:5173"):
+        response = local.post("/api/connection/pairings", json={"origin": origin})
+        assert response.status_code == 422, origin
+    assert "本机页面" in response.json()["error"]["message"]
+    create_code(local, "http://localhost:4173")
+    create_code(local)
+    fresh = TestClient(app, base_url=ORIGIN)
+    fresh.headers.update(LOCAL_HEADERS)
+    assert fresh.post("/api/connection/local-session", json={}).status_code == 200
+    assert fresh.post("/api/connection/editor-lease", json={"client_id": "page-two"}).status_code in {200, 409}
+    assert fresh.get("/api/projects").status_code == 200
+    assert "access-control-allow-origin" not in fresh.get("/api/projects").headers
+    # 本地页面的媒体照旧走 cookie，不需要令牌（<img> 请求不带 Origin）。
+    fresh.headers.pop("Origin")
+    assert fresh.get("/api/raw", params={"path": "missing.png"}).status_code == 404
 
 
 def test_pairing_requires_local_management_session(app, local):

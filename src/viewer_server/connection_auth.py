@@ -48,8 +48,12 @@ class ConnectionError(Exception):
         super().__init__(message)
 
 
-def validate_site_origin(origin: str) -> str:
-    """网站配对只接受精确 Origin：HTTPS 任意主机，HTTP 仅回环（本地 vite preview 验证托管模式）。"""
+def validate_site_origin(origin: str, reserved: frozenset[str] = frozenset()) -> str:
+    """网站配对只接受精确 Origin：HTTPS 任意主机，HTTP 仅 localhost:<port>（本地 vite preview 验证托管模式）。
+
+    `http://127.0.0.1:*` 是本机页面自己的来源空间，登记成网站会让本地页面的引导被当成跨源拒绝；
+    `reserved`（服务自身地址、Vite 开发来源）同理一律拒绝。
+    """
     try:
         url = urlsplit(origin)
     except ValueError:
@@ -60,7 +64,7 @@ def validate_site_origin(origin: str) -> str:
         raise ConnectionError("ORIGIN_DENIED", "网站地址必须是精确的 https 来源", 422)
     if url.scheme == "https":
         default_port = 443
-    elif url.scheme == "http" and url.hostname in {"localhost", "127.0.0.1"} and url.port:
+    elif url.scheme == "http" and url.hostname == "localhost" and url.port:
         default_port = 80
     else:
         raise ConnectionError("ORIGIN_DENIED", "网站地址必须是精确的 https 来源", 422)
@@ -71,6 +75,8 @@ def validate_site_origin(origin: str) -> str:
     normalized = f"{url.scheme}://{authority}"
     if normalized != origin:
         raise ConnectionError("ORIGIN_DENIED", "网站地址必须是精确的 https 来源", 422)
+    if normalized in reserved:
+        raise ConnectionError("ORIGIN_DENIED", "网站地址不能是本机页面自己的地址", 422)
     return normalized
 
 
@@ -247,8 +253,8 @@ class ConnectionStore:
                    if s.principal.kind == "site" and s.origin}
             )
 
-    def create_pairing(self, origin: str) -> tuple[str, Pairing]:
-        normalized = validate_site_origin(origin)
+    def create_pairing(self, origin: str, reserved: frozenset[str] = frozenset()) -> tuple[str, Pairing]:
+        normalized = validate_site_origin(origin, reserved)
         with self.lock:
             self._refresh()
             if len(self.pairings) >= PAIRING_LIMIT:

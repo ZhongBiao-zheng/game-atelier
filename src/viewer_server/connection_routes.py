@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from viewer_server.connection_auth import COOKIE_NAME, ConnectionStore, iso_time
+from viewer_server.request_boundary import development_origin
 
 TextId = Annotated[str, StringConstraints(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")]
 
@@ -87,8 +88,10 @@ def connection_router(store: ConnectionStore) -> APIRouter:
             } for value in store.sessions.values()]}
 
     @router.post("/pairings", status_code=201)
-    def create_pairing(payload: PairingPayload) -> dict:
-        code, pairing = store.create_pairing(payload.origin)
+    def create_pairing(payload: PairingPayload, request: Request) -> dict:
+        # 本机页面与 Vite 开发来源不能登记为网站：它们走 cookie 引导，被当成网站来源就连不上了。
+        reserved = frozenset(filter(None, {request.state.connection_base_url, development_origin()}))
+        code, pairing = store.create_pairing(payload.origin, reserved)
         return {"pairing_code": code, "origin": pairing.origin,
                 "expires_at": iso_time(pairing.expires_at), "instance_id": store.instance_id}
 

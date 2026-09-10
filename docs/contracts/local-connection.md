@@ -64,7 +64,7 @@ Fetch Metadata；不接受无 Origin 的匿名请求，不向网站提供 CORS �
 实现要点（5.53.0）：配对码 `secrets.token_urlsafe(24)`，服务端只存 SHA-256 摘要，同一来源只保留最新一枚，
 待配对最多 8 个；配对与 Agent 会话共用每分钟 30 次的尝试限流。网站会话 kind 为 `site`，能力固定 `read` / `edit`，
 可申请编辑租约；控制端点只开放 `editor-lease`、`media-token` 与撤销自己。Origin 校验允许 `https://` 任意主机
-和 `http://localhost|127.0.0.1:<port>`（后者只为本地 `vite preview` 验证托管模式，生产网站必须 HTTPS）。
+和 `http://localhost:<port>`（只为本地 `vite preview` 验证托管模式，生产网站必须 HTTPS）；`http://127.0.0.1:*`、服务自身地址与 Vite 开发来源一律拒绝，登记它们会把本地页面的 cookie 引导当成跨源拒绝。
 托管网站直接进入界面，不调用 `/api/onboarding/status`（含本机路径，属管理端点）。
 
 配对码只能由本地管理页创建；网站不能自行创建码，也不能通过“首次请求的 Origin 自动绑定”抢占服务。
