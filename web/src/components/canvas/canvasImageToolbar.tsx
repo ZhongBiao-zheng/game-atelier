@@ -56,6 +56,8 @@ export const DEFAULT_CANVAS_UI_PREFERENCES: CanvasUiPreferences = {
     video: { selection: null, params: {} },
     audio: { selection: null, params: {} },
   },
+  // 提示词以服务端返回为准；这里只是加载前的占位，空串保存会被服务端填回内置提示词。
+  upscale: { selection: null, prompt: '' },
   updated_at: null,
 };
 

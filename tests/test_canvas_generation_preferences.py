@@ -3,6 +3,7 @@ import json
 from tests.local_client import LocalTestClient as TestClient
 
 from character_workflow.lib import data_root
+from character_workflow.lib.schemas import CANVAS_UPSCALE_DEFAULT_PROMPT
 from character_workflow.lib.canvas_runs import _resolve_default_image_model
 from character_workflow.lib.keys import KeySpec, KeysDB, ModelSpec, write_keys_db
 from viewer_server.server_app import build_app
@@ -69,6 +70,7 @@ def test_generation_preferences_default_get_is_v2_and_does_not_write(isolated_da
             mode: {"selection": None, "params": {}}
             for mode in ("text", "image", "video", "audio")
         },
+        "upscale": {"selection": None, "prompt": CANVAS_UPSCALE_DEFAULT_PROMPT},
         "updated_at": None,
     }
     assert not data_root.canvas_ui_file().exists()

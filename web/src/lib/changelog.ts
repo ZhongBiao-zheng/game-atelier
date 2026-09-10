@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.51.0',
+    date: '2026-09-10',
+    headline: 'AI高清可配置模型与提示词',
+    changes: [
+      { kind: 'feat', text: '生成偏好新增「AI高清」页签：可固定放大用的 Nano Banana 模型，也可修改通用高清提示词（清空保存即恢复内置版）。' },
+      { kind: 'feat', text: '没有可用模型或已保存模型失效时，点 AI高清 会提示并提供「前往配置」直接跳到该页签。' },
+    ],
+  },
+  {
     version: '5.50.2',
     date: '2026-09-10',
     headline: '「高清放大」更名「AI高清」',

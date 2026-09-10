@@ -1,5 +1,5 @@
 import { Link } from 'wouter';
-import { AudioLines, Clapperboard, Image as ImageIcon, RotateCcw, Type } from 'lucide-react';
+import { AudioLines, Clapperboard, Image as ImageIcon, RotateCcw, Type, ZoomIn } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { KeyView } from '@/api/keys';
@@ -11,6 +11,7 @@ import {
   type CanvasModelChoice,
 } from '@/components/canvas/CanvasGenerationControls';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -27,6 +28,7 @@ import {
   CANVAS_GENERATION_MODE_LABELS,
   canvasGenerationModelSupportsMode,
   canvasGenerationPreferenceForModel,
+  canvasUpscaleModelChoices,
   canvasVideoEditCaps,
   supportsCanvasTextReasoning,
 } from '@/pages/canvasEditorModel';
@@ -35,15 +37,23 @@ import type {
   CanvasGenerationDefaults,
   CanvasGenerationDraft,
   CanvasGenerationMode,
+  CanvasUpscalePreferences,
 } from '@/schema/canvas';
 import type { JobParams } from '@/schema/jobs';
 
 const MODES = ['text', 'image', 'video', 'audio'] as const;
-const MODE_ICONS = {
+export type CanvasGenerationPreferencesTab = CanvasGenerationMode | 'upscale';
+const TABS: CanvasGenerationPreferencesTab[] = [...MODES, 'upscale'];
+const TAB_LABELS: Record<CanvasGenerationPreferencesTab, string> = {
+  ...CANVAS_GENERATION_MODE_LABELS,
+  upscale: 'AI高清',
+};
+const TAB_ICONS = {
   text: Type,
   image: ImageIcon,
   video: Clapperboard,
   audio: AudioLines,
+  upscale: ZoomIn,
 };
 
 function cloneDefaults(value: CanvasGenerationDefaults): CanvasGenerationDefaults {
@@ -92,22 +102,28 @@ function defaultsForSave(
 export function CanvasGenerationPreferencesDialog({
   open,
   value,
+  upscale,
   keys,
   saving,
   error,
+  initialTab = 'image',
   onOpenChange,
   onSave,
 }: {
   open: boolean;
   value: CanvasGenerationDefaults;
+  upscale: CanvasUpscalePreferences;
   keys: KeyView[];
   saving: boolean;
   error: string | null;
+  /** 从「前往配置」进来时直接落在 AI高清 页签。 */
+  initialTab?: CanvasGenerationPreferencesTab;
   onOpenChange: (open: boolean) => void;
-  onSave: (value: CanvasGenerationDefaults) => void;
+  onSave: (value: CanvasGenerationDefaults, upscale: CanvasUpscalePreferences) => void;
 }) {
   const [draft, setDraft] = useState(() => cloneDefaults(value));
-  const [activeMode, setActiveMode] = useState<CanvasGenerationDraft['mode']>('image');
+  const [upscaleDraft, setUpscaleDraft] = useState<CanvasUpscalePreferences>(() => ({ ...upscale }));
+  const [tab, setTab] = useState<CanvasGenerationPreferencesTab>(initialTab);
   const [sizeNotice, setSizeNotice] = useState<string | null>(null);
   const dialogContentRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<HTMLButtonElement>(null);
@@ -115,11 +131,23 @@ export function CanvasGenerationPreferencesDialog({
   useEffect(() => {
     if (!open) return;
     setDraft(cloneDefaults(value));
-    setActiveMode('image');
+    setUpscaleDraft({ ...upscale });
+    setTab(initialTab);
     setSizeNotice(null);
-  }, [open, value]);
+  }, [initialTab, open, upscale, value]);
 
+  // 生成类型页签之外还有 AI高清；下面按模态计算的部分在 AI高清 页签下不渲染，取 image 只为类型收窄。
+  const activeMode: CanvasGenerationDraft['mode'] = tab === 'upscale' ? 'image' : tab;
   const preference = draft[activeMode];
+  const upscaleChoices = useMemo(() => canvasUpscaleModelChoices(keys), [keys]);
+  const selectedUpscaleChoice = upscaleDraft.selection
+    ? upscaleChoices.find(choice => (
+        choice.key.alias === upscaleDraft.selection?.alias
+        && choice.model.id === upscaleDraft.selection.model
+      )) ?? null
+    : null;
+  const effectiveUpscaleChoice = selectedUpscaleChoice ?? upscaleChoices[0] ?? null;
+  const upscaleStale = upscaleDraft.selection !== null && selectedUpscaleChoice === null;
   const choices = useMemo<CanvasModelChoice[]>(() => keys.flatMap(key => key.models
     .filter(model => canvasGenerationModelSupportsMode(key, model, activeMode))
     .map(model => ({ key, model }))), [activeMode, keys]);
@@ -216,10 +244,10 @@ export function CanvasGenerationPreferencesDialog({
 
         <div className="min-h-0 space-y-4 overflow-x-hidden overflow-y-auto">
         {activeMode === 'image' && sizeNotice && <p role="status" className="text-xs text-muted-foreground">{sizeNotice}</p>}
-        <div role="tablist" aria-label="生成类型" className="grid grid-cols-4 gap-1 rounded-xl border border-border bg-card p-1">
-          {MODES.map(mode => {
-            const Icon = MODE_ICONS[mode];
-            const active = activeMode === mode;
+        <div role="tablist" aria-label="生成类型" className="grid grid-cols-5 gap-1 rounded-xl border border-border bg-card p-1">
+          {TABS.map(mode => {
+            const Icon = TAB_ICONS[mode];
+            const active = tab === mode;
             return (
               <button
                 key={mode}
@@ -228,20 +256,84 @@ export function CanvasGenerationPreferencesDialog({
                 role="tab"
                 aria-selected={active}
                 aria-controls="canvas-generation-preference-panel"
-                onClick={() => setActiveMode(mode)}
+                onClick={() => setTab(mode)}
                 className={cn(
                   'relative flex h-11 min-w-0 items-center justify-center gap-2 rounded-lg px-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
                   active ? 'text-foreground' : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
                 )}
               >
                 <Icon className="size-4 shrink-0" aria-hidden="true" />
-                <span className="truncate">{CANVAS_GENERATION_MODE_LABELS[mode]}</span>
+                <span className="truncate">{TAB_LABELS[mode]}</span>
                 {active && <span className="absolute inset-x-3 bottom-0 h-px bg-primary" aria-hidden="true" />}
               </button>
             );
           })}
         </div>
 
+        {tab === 'upscale' ? (
+        <section
+          id="canvas-generation-preference-panel"
+          role="tabpanel"
+          aria-label="AI高清偏好"
+          className="space-y-4 rounded-xl border border-border bg-card p-4"
+        >
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">放大模型</p>
+                <p className="text-xs text-muted-foreground">只列出质量可调的 Nano Banana 模型，2K / 4K 由质量档决定。</p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={upscaleDraft.selection === null}
+                onClick={() => setUpscaleDraft(current => ({ ...current, selection: null }))}
+              >
+                <RotateCcw aria-hidden="true" />恢复自动选择
+              </Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-secondary/20 p-2">
+              <CanvasModelPicker
+                choices={upscaleChoices}
+                alias={effectiveUpscaleChoice?.key.alias ?? null}
+                model={effectiveUpscaleChoice?.model.id ?? ''}
+                menuDirection="down"
+                portalContainerRef={dialogContentRef}
+                onSelect={choice => setUpscaleDraft(current => ({
+                  ...current,
+                  selection: { alias: choice.key.alias, model: choice.model.id },
+                }))}
+              />
+              <span className="shrink-0 rounded-full border border-border px-2 py-1 text-xs text-muted-foreground">
+                {upscaleDraft.selection ? '固定模型' : '自动选择'}
+              </span>
+            </div>
+            {upscaleStale && (
+              <p role="alert" className="text-sm text-destructive">
+                已保存的放大模型不再可用。保存后将改为自动选择。
+              </p>
+            )}
+            {!upscaleChoices.length && (
+              <p role="alert" className="text-sm text-destructive">
+                当前没有质量可调的 Nano Banana 模型，AI高清无法执行。请先在供应商设置中接入 Nano Banana Pro。
+              </p>
+            )}
+          </div>
+          <div className="space-y-2 border-t border-border pt-4">
+            <label htmlFor="canvas-upscale-prompt" className="block">
+              <span className="text-sm font-medium">提示词</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">每次 AI高清 都用这段提示词重绘；清空后保存即恢复内置提示词。</span>
+            </label>
+            <Textarea
+              id="canvas-upscale-prompt"
+              rows={6}
+              value={upscaleDraft.prompt}
+              onChange={event => setUpscaleDraft(current => ({ ...current, prompt: event.target.value }))}
+            />
+          </div>
+        </section>
+        ) : (
         <section
           id="canvas-generation-preference-panel"
           role="tabpanel"
@@ -349,6 +441,7 @@ export function CanvasGenerationPreferencesDialog({
             </div>
           )}
         </section>
+        )}
 
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 px-4 py-3">
           <p className="text-xs text-muted-foreground">密钥、渠道和模型清单仍由全局设置统一管理。</p>
@@ -363,7 +456,14 @@ export function CanvasGenerationPreferencesDialog({
 
         <DialogFooter>
           <Button type="button" variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>取消</Button>
-          <Button type="button" disabled={saving} onClick={() => onSave(defaultsForSave(draft, keys))}>
+          <Button
+            type="button"
+            disabled={saving}
+            onClick={() => onSave(defaultsForSave(draft, keys), {
+              selection: selectedUpscaleChoice ? upscaleDraft.selection : null,
+              prompt: upscaleDraft.prompt,
+            })}
+          >
             {saving ? '保存中…' : '保存偏好'}
           </Button>
         </DialogFooter>

@@ -3,6 +3,7 @@ import type {
   CanvasGenerationDefaults,
   CanvasImageToolbarPreferences,
   CanvasUiPreferences,
+  CanvasUpscalePreferences,
 } from '@/schema/canvas';
 
 export function getCanvasUiPreferences(): Promise<CanvasUiPreferences> {
@@ -13,6 +14,7 @@ export function saveCanvasUiPreferences(
   expectedRevision: number,
   imageToolbar: CanvasImageToolbarPreferences,
   generationDefaults: CanvasGenerationDefaults,
+  upscale: CanvasUpscalePreferences,
 ): Promise<CanvasUiPreferences> {
   return requestJson<CanvasUiPreferences>('/api/canvas/ui-preferences', '保存画布界面偏好', {
     method: 'PUT',
@@ -21,6 +23,7 @@ export function saveCanvasUiPreferences(
       expected_revision: expectedRevision,
       image_toolbar: imageToolbar,
       generation_defaults: generationDefaults,
+      upscale,
     }),
   });
 }
