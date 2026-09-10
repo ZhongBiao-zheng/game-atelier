@@ -98,7 +98,7 @@ submit-video-production \
 
 缺省读取企划目录的 `prompt.md`。stdout 是 job_id，stderr 是确认卡。原样展示确认卡并停；画师明确
 说“生成 / 出片”后才 `run-job <job_id>`。客户端有 `show_widget` 时改为 `card <job_id>` 的 HTML 渲染成卡片，
-按钮「出视频 <job_id>」= 明确肯定、「要改 <job_id>」先问改点、「先不出 <job_id>」停（`docs/references/card-widget.md`）。无论 Prompt 内有几个 Shot，只运行一次 Job。
+按钮「出视频 <job_id>」= 明确肯定、「要改 <job_id>」先问改点、「先不出 <job_id>」停（`docs/references/card-widget.md`）。无论 Prompt 内有几个 Shot，只运行一次 Job。出片后有 `show_widget` 可 `card <job_id>` 出结果卡（视频只列路径不预览，`docs/references/card-widget.md` 第四节）。
 
 ### 5. 重试与整片选版
 

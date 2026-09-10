@@ -84,7 +84,22 @@ Installed Plugin / Codex 模式按各 SKILL.md「运行模式」把 `uv run pyth
 
 HTML 里的 `<` `&` `"` 必须转义（`&lt;` `&amp;` `&quot;`），提示词原文尤其注意；不加 emoji、不加渐变 / 阴影、不放 `<style>` 块。
 
-## 四、不变的事
+## 四、出图结果卡（job 完成后）
+
+`card <job_id>` 对 `done` / `partial` 的 job 自动输出**结果卡**：产物缩略图（长边 320px JPEG，data URI 内嵌）+
+job_id / model / size / 张数 + 按钮。**卡片里只有缩略图**：show_widget 的 CSP 拦掉 `file://` 与 `127.0.0.1`，
+iframe 里也没有本机 cookie，所以原图仍按 `docs/references/image-presentation.md` 的渲染通道另发（文件面板 / Markdown 图片），
+结果卡不替代原图。视频 job 的结果卡只列路径不预览。
+
+| 按钮 | 画师侧发出的话 | 对应处理 |
+|---|---|---|
+| vN 定稿 | `vN 定稿` | 按各 SKILL.md 的定稿规则（AskUserQuestion 确认后 `set-canonical`） |
+| 要改 | `要改 <job_id>` | 先问改点与 A / B / C 模式，再重新 submit 出新确认卡 |
+| 先放着 | `先放着 <job_id>` | 不推进，进入七件套收尾 |
+
+出图完成的顺序：结果卡 → 原图（渲染通道）→ 收尾验证 → 七件套。文本通道没有结果卡，直接原图 + 七件套。
+
+## 五、不变的事
 
 - 卡是**停下等回复**的信号，不是流程推进。卡出完本轮结束，任何自动 run-job / approve 都违规。
 - 「结构化提问工具不可用时的【待确认】文本卡」是 AskUserQuestion 的降级，与本文无关：有 `show_widget` 的环境必然有 AskUserQuestion，仍用 AskUserQuestion 提问。

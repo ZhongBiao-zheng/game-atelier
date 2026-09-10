@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.55.0',
+    date: '2026-09-10',
+    headline: '出图结果直接显示在卡片里',
+    changes: [
+      { kind: 'feat', text: '出图完成后，支持可视化卡片的客户端会收到结果卡：产物缩略图、模型与尺寸，以及「vN 定稿 / 要改 / 先放着」按钮。原图仍照常另发。' },
+      { kind: 'feat', text: '命令行 card <job_id> 对已完成的 job 自动输出结果卡，未完成的仍输出确认卡。' },
+    ],
+  },
+  {
     version: '5.54.2',
     date: '2026-09-10',
     headline: '三视图默认横版三联',
