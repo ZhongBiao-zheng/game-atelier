@@ -33,6 +33,12 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.47.2',
+    date: '2026-09-10',
+    headline: '拆分图层详情补齐提示词',
+    changes: [{ kind: 'fix', text: '拆分图层详情可直接查看、选取复制完整提示词，切换图层时仍保持显示。' }],
+  },
+  {
     version: '5.47.1',
     date: '2026-09-10',
     headline: '拆分图层详情预览',

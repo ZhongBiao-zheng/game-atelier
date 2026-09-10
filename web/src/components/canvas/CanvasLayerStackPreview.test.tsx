@@ -12,6 +12,23 @@ const node: CanvasLayerStackNode = { id: 'stack', type: 'layer_stack', title: '�
     prompt: '', resolution: 'auto', layers: [], active_run_id: null, error: null } };
 const resolveVersion = (id: string | null | undefined) => id === 'image' ? image : undefined;
 
+it('shows the complete user prompt as read-only text in details', () => {
+  const prompt = '分离角色、衣服与武器。\n保留透明背景和原始颜色。';
+  render(<Dialog open><CanvasLayerStackPreview node={{ ...node, data: { ...node.data, prompt, base_version_id: 'image' } }}
+    projectId="canvas-test" resolveVersion={resolveVersion} onCloseAutoFocus={() => undefined} /></Dialog>);
+  const content = screen.getByLabelText('拆分提示词');
+  expect(content.textContent).toBe(prompt);
+  expect(screen.queryByRole('textbox')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '查看图层 背景' }));
+  expect(screen.getByLabelText('拆分提示词').textContent).toBe(prompt);
+});
+
+it('does not invent a user prompt when none was entered', () => {
+  render(<Dialog open><CanvasLayerStackPreview node={node} projectId="canvas-test" resolveVersion={resolveVersion}
+    onCloseAutoFocus={() => undefined} /></Dialog>);
+  expect(screen.getByLabelText('拆分提示词')).toHaveTextContent('未填写提示词');
+});
+
 it('previews the source before decomposition and reports an unreadable original', () => {
   render(<Dialog open><CanvasLayerStackPreview node={node} projectId="canvas-test" resolveVersion={resolveVersion}
     onCloseAutoFocus={() => undefined} /></Dialog>);

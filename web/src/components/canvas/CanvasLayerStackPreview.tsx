@@ -103,5 +103,12 @@ export function CanvasLayerStackPreview({ node, projectId, resolveVersion, onClo
         </button>)}
       </div>}
     </div>
+    <section className="min-w-0 shrink-0 space-y-1 border-t border-border pt-3" aria-label="提示词">
+      <p className="text-xs text-muted-foreground">提示词</p>
+      <p aria-label="拆分提示词" tabIndex={0}
+        className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words text-pretty text-sm select-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        {node.data.prompt.trim() ? node.data.prompt : '未填写提示词'}
+      </p>
+    </section>
   </DialogContent>;
 }

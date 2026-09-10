@@ -409,7 +409,7 @@ it('opens layer-stack details and inspects hidden layers without changing the ca
   vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
     nodes: [{ id: 'stack-detail', title: '拆分图层', type: 'layer_stack', position: { x: 0, y: 0 }, z_index: 0,
       data: { source_version_id: base.version_id, base_version_id: base.version_id, base_visible: true,
-        prompt: '', alias: null, model: null, resolution: 'auto', layers: [{ id: 'hidden-layer', name: '金色头饰的完整名称', description: '头饰细节说明',
+        prompt: '拆出头饰，保持原始色彩。', alias: null, model: null, resolution: 'auto', layers: [{ id: 'hidden-layer', name: '金色头饰的完整名称', description: '头饰细节说明',
           version_id: layer.version_id, visible: false, z_index: 1,
           bounding_box: { absolute: [20, 30, 100, 70], normalized: [0, 0, 1000, 1000] } }],
         active_run_id: null, error: null } }],
@@ -420,6 +420,7 @@ it('opens layer-stack details and inspects hidden layers without changing the ca
   fireEvent.click(screen.getByLabelText('simulate node select'));
   fireEvent.click(screen.getByRole('button', { name: /查看 拆分图层/ }));
   const dialog = await screen.findByRole('dialog', { name: '拆分图层' });
+  expect(within(dialog).getByLabelText('拆分提示词')).toHaveTextContent('拆出头饰，保持原始色彩。');
   expect(within(dialog).getByRole('img', { name: '拆分图层 合成预览' })).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: '查看图层 金色头饰的完整名称' }));
   expect(within(dialog).getByRole('img', { name: '金色头饰的完整名称' })).toHaveAttribute('src', '/media');
