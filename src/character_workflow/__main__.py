@@ -24,6 +24,9 @@ from character_workflow.lib.lessons import append_lesson
 from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobStatus
 from character_workflow.lib.turn_start import turn_start
 
+# submit 缺省尺寸按 kind 定：美宣默认 16:9 横版 KV，其余竖版。
+_DEFAULT_SIZE = {"portrait": "1024x1536", "promo": "2048x1152", "turnaround": "1024x1536"}
+
 
 def _force_utf8_stdio() -> None:
     """Windows 控制台默认 GBK；强制 stdout/stderr UTF-8，防大块中文 JSON mojibake / WinError 87。"""
@@ -68,6 +71,7 @@ def _submit(args: argparse.Namespace) -> int:
         resolved = str(Path(raw).expanduser().resolve())
         if resolved not in reference_images:
             reference_images.append(resolved)
+    size = args.size or _DEFAULT_SIZE[args.kind]
     alias = args.alias or keys.preferred_alias_for_kind(args.kind)
     key = keys.find_by_alias(alias) if alias else None
     if key is None:
@@ -89,8 +93,8 @@ def _submit(args: argparse.Namespace) -> int:
 
     params: dict = {
         "vendor": f"{key.alias} ({key.provider})",
-        "size": args.size,
-        "requested_size": args.size,
+        "size": size,
+        "requested_size": size,
         "n": args.n,
         "reference_images": reference_images,
     }
@@ -640,7 +644,10 @@ def main(argv: list[str] | None = None) -> int:
         help="角色 id；缺省读 .runtime/active-character.json",
     )
     p_submit.add_argument("--n", type=int, default=1, help="出图数量，默认 1")
-    p_submit.add_argument("--size", default="1024x1536", help="出图尺寸，默认 1024x1536")
+    p_submit.add_argument(
+        "--size", default=None,
+        help="出图尺寸；缺省按 --kind 取默认（portrait / turnaround 1024x1536，promo 2048x1152 横版）",
+    )
     p_submit.add_argument(
         "--alias", default=None,
         help="指定 Key alias；缺省用当前 kind 的默认 Key（按任务跨 Key 选模型时配合 --model）",

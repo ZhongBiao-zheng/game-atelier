@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.54.1',
+    date: '2026-09-10',
+    headline: '美宣默认横版 16:9',
+    changes: [
+      { kind: 'fix', text: '命令行 submit 的默认尺寸按类型区分：美宣默认 2048x1152 横版，立绘与三视图保持 1024x1536；显式传 --size 仍以传入为准。' },
+    ],
+  },
+  {
     version: '5.54.0',
     date: '2026-09-10',
     headline: '确认卡变成可点的卡片',
