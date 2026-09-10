@@ -24,8 +24,8 @@ from character_workflow.lib.lessons import append_lesson
 from character_workflow.lib.schemas import AssetSlot, Job, JobKind, JobStatus
 from character_workflow.lib.turn_start import turn_start
 
-# submit 缺省尺寸按 kind 定：美宣默认 16:9 横版 KV，其余竖版。
-_DEFAULT_SIZE = {"portrait": "1024x1536", "promo": "2048x1152", "turnaround": "1024x1536"}
+# submit 缺省尺寸按 kind 定：美宣 KV 与三视图三联默认 16:9 横版，立绘竖版。
+_DEFAULT_SIZE = {"portrait": "1024x1536", "promo": "2048x1152", "turnaround": "2048x1152"}
 
 
 def _force_utf8_stdio() -> None:
@@ -646,7 +646,7 @@ def main(argv: list[str] | None = None) -> int:
     p_submit.add_argument("--n", type=int, default=1, help="出图数量，默认 1")
     p_submit.add_argument(
         "--size", default=None,
-        help="出图尺寸；缺省按 --kind 取默认（portrait / turnaround 1024x1536，promo 2048x1152 横版）",
+        help="出图尺寸；缺省按 --kind 取默认（portrait 1024x1536，promo / turnaround 2048x1152 横版）",
     )
     p_submit.add_argument(
         "--alias", default=None,

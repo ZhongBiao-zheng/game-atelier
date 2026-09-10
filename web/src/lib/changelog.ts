@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.54.2',
+    date: '2026-09-10',
+    headline: '三视图默认横版三联',
+    changes: [
+      { kind: 'fix', text: '命令行 submit 的三视图默认尺寸改为 2048x1152 横版三联，与角色 spec 的设计约束一致。' },
+    ],
+  },
+  {
     version: '5.54.1',
     date: '2026-09-10',
     headline: '美宣默认横版 16:9',
