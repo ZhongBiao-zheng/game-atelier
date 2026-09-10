@@ -112,6 +112,7 @@ GET /api/canvas/projects/{project_id}/nodes/{node_id}/layers/download
 GET /api/canvas/projects/{project_id}/jobs
 POST /api/canvas/projects/{project_id}/runs/reverse-prompt
 POST /api/canvas/projects/{project_id}/runs/angle
+POST /api/canvas/projects/{project_id}/runs/upscale
 POST /api/canvas/projects/{project_id}/runs/mask-edit
 POST /api/canvas/projects/{project_id}/runs/layer-decomposition
 GET /api/canvas/projects/{project_id}/batch-runs

@@ -33,6 +33,86 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.50.2',
+    date: '2026-09-10',
+    headline: '「高清放大」更名「AI高清」',
+    changes: [
+      { kind: 'fix', text: '图片工具栏的「高清放大」按钮及相关提示统一改名为「AI高清」。' },
+    ],
+  },
+  {
+    version: '5.50.1',
+    date: '2026-09-10',
+    headline: '生成中的图片节点按输出比例占位',
+    changes: [
+      { kind: 'fix', text: '图片生成中的结果节点按本次输出比例定宽高，图出来后不再跳变；比例为自动时按 1:1 占位。' },
+      { kind: 'fix', text: '高清放大固定用基础型号 Nano Banana Pro，由质量档决定 2K / 4K，不再挑带分辨率后缀的型号。' },
+    ],
+  },
+  {
+    version: '5.50.0',
+    date: '2026-09-10',
+    headline: '高清放大改用 Nano Banana',
+    changes: [
+      { kind: 'feat', text: '选中图片点「高清放大」直接选 2K 或 4K，由 Nano Banana Pro 按内置提示词重绘出高清版本；不超过原图长边的档位不显示，原图已达 4K 时按钮置灰。' },
+      { kind: 'feat', text: '原「本地放大」重采样弹窗移除；以前生成的本地放大节点照常保留。' },
+    ],
+  },
+  {
+    version: '5.49.1',
+    date: '2026-09-10',
+    headline: '节点工具栏显示名称',
+    changes: [
+      { kind: 'feat', text: '选中节点后上方的工具按钮统一显示图标和名称，不再需要悬停辨认；「显示按钮文字」开关随之移除。' },
+    ],
+  },
+  {
+    version: '5.49.0',
+    date: '2026-09-10',
+    headline: '拆分图层可导出 PSD',
+    changes: [
+      { kind: 'feat', text: '图层栈工具栏新增「导出 PSD」：背景与全部图层按当前顺序写成分层 PSD，保留图层名、位置和显隐，可在 Photoshop 等软件中继续编辑。' },
+    ],
+  },
+  {
+    version: '5.48.1',
+    date: '2026-09-10',
+    headline: '精简节点快捷工具',
+    changes: [{ kind: 'fix', text: '移除节点上的删除、存资产、复制/反推提示词、替换和局部编辑入口，空节点仍可上传附件。' }],
+  },
+  {
+    version: '5.48.0',
+    date: '2026-09-10',
+    headline: '工坊连接不再打断创作',
+    changes: [
+      { kind: 'fix', text: '进入工坊不再自动弹出连接窗口；本机 Agent 连接仍在设置中按需打开。' },
+      { kind: 'fix', text: '短暂断连自动尝试恢复并保留草稿，不重复提交任务；多页面编辑先只读，接管前需确认。' },
+    ],
+  },
+  {
+    version: '5.47.2',
+    date: '2026-09-10',
+    headline: '拆分图层详情补齐提示词',
+    changes: [{ kind: 'fix', text: '拆分图层详情可直接查看、选取复制完整提示词，切换图层时仍保持显示。' }],
+  },
+  {
+    version: '5.47.1',
+    date: '2026-09-10',
+    headline: '拆分图层详情预览',
+    changes: [
+      { kind: 'fix', text: '修复拆分图层详情按钮无响应，支持查看合成大图和每层原图、名称、尺寸及说明。' },
+    ],
+  },
+  {
+    version: '5.47.0',
+    date: '2026-09-10',
+    headline: '画布批量添加素材',
+    changes: [
+      { kind: 'feat', text: '上传附件支持多选，文件夹内的多个素材可一次拖入画布并独立摆放。' },
+      { kind: 'fix', text: '批量上传保留已有节点和并发编辑，个别文件失败不会中断其余素材。' },
+    ],
+  },
+  {
     version: '5.46.0',
     date: '2026-09-09',
     headline: '素材关联与生成面板简化',

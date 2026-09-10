@@ -28,15 +28,20 @@ it('downloads a named ZIP and does not create a download on server error', async
   });
   try {
     await downloadCanvasLayers('canvas-1', 'layer/stack');
-    expect(fetchMock.mock.calls[0][0]).toContain('/nodes/layer%2Fstack/layers/download');
+    expect(fetchMock.mock.calls[0][0]).toContain('/nodes/layer%2Fstack/layers/download?format=zip');
     expect(downloadedName).toBe('拆分图层-全部图层.zip');
     expect(click).toHaveBeenCalledOnce();
+    fetchMock.mockResolvedValueOnce(new Response('psd-bytes'));
+    await downloadCanvasLayers('canvas-1', 'stack', 'psd');
+    expect(fetchMock.mock.calls[1][0]).toContain('/nodes/stack/layers/download?format=psd');
+    expect(downloadedName).toBe('图层.psd');
+    expect(click).toHaveBeenCalledTimes(2);
     expect(revokeUrl).not.toHaveBeenCalled();
     vi.runAllTimers();
     expect(revokeUrl).toHaveBeenCalledWith('blob:layers');
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ detail: '图层文件缺失' }), { status: 404 }));
     await expect(downloadCanvasLayers('canvas-1', 'stack')).rejects.toThrow();
-    expect(click).toHaveBeenCalledOnce();
+    expect(click).toHaveBeenCalledTimes(2);
   } finally {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();

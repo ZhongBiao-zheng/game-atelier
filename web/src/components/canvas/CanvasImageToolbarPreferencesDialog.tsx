@@ -42,7 +42,7 @@ export function CanvasImageToolbarPreferencesDialog({
   }, [draft.tool_ids, selected]);
 
   useEffect(() => {
-    if (open) setDraft(value);
+    if (open) setDraft({ ...value, tool_ids: orderedCanvasImageTools(value.tool_ids).map(tool => tool.id) });
   }, [open, value]);
 
   function setVisible(id: CanvasImageQuickToolId, visible: boolean) {
@@ -84,7 +84,7 @@ export function CanvasImageToolbarPreferencesDialog({
                 return (
                   <span key={tool.id} className="flex h-9 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground">
                     <Icon className="size-4" aria-hidden="true" />
-                    {draft.show_labels && <span>{tool.label}</span>}
+                    <span>{tool.label}</span>
                   </span>
                 );
               })}
@@ -97,19 +97,6 @@ export function CanvasImageToolbarPreferencesDialog({
             <span className="flex items-center gap-2 text-sm"><ImageIcon className="size-5" aria-hidden="true" />图片节点</span>
           </div>
         </section>
-
-        <label className="flex items-center justify-between gap-4 rounded-lg border border-border bg-card px-4 py-3 text-sm">
-          <span>
-            <span className="block font-medium">显示按钮文字</span>
-            <span className="block text-xs text-muted-foreground">关闭时仍保留悬停提示和无障碍名称。</span>
-          </span>
-          <input
-            type="checkbox"
-            checked={draft.show_labels}
-            onChange={event => setDraft(current => ({ ...current, show_labels: event.target.checked }))}
-            className="size-4 accent-primary"
-          />
-        </label>
 
         <section aria-label="快捷工具顺序" className="space-y-2">
           <div className="flex items-center justify-between gap-3">

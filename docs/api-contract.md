@@ -404,11 +404,13 @@ Input Connection。图片模型优先使用仍可路由的画布图片生成偏�
 `layer_decomposition` 血缘；媒体读取和项目包导入导出均校验该索引与 Job 输出一致。图层栈按绝对 bbox
 重建原图，显隐只修改节点呈现状态，不改写产物字节或 Job 历史。
 
-完成后的图层栈工具栏提供“下载全部图层”和“展开图层到画布并分组”。两者均包含背景及隐藏图层，
-顺序与右侧列表一致，不包含原始源图或合成预览。“下载全部图层”调用
-`GET /canvas/projects/{id}/nodes/{node_id}/layers/download`，复用本地会话与媒体归属校验，返回 ZIP
-附件；文件名带顺序号及安全化图层名，保留原始图片字节。未完成返回 422，缺失节点/文件返回 404，
-越权媒体返回 403；任一文件不可用时不输出缺图的压缩包。临时 ZIP 在响应完成后清理。
+完成后的图层栈工具栏提供“下载全部图层”、“导出 PSD”和“展开图层到画布并分组”。三者均包含背景及隐藏图层，
+顺序与右侧列表一致（按 `base_z_index` / `z_index` 自底向上），不包含原始源图或合成预览。前两者调用
+`GET /canvas/projects/{id}/nodes/{node_id}/layers/download?format=zip|psd`（缺省 zip），复用本地会话与媒体归属校验。
+ZIP 文件名带顺序号及安全化图层名，保留原始图片字节。PSD（5.49.0）以背景尺寸建 8 位 RGBA 画布，每层按
+`bounding_box.absolute` 的左上角放置（图片尺寸与框不一致时缩放到框），图层名写入 Unicode 名块（旧式 MacRoman
+名字段固定为 `layerN`），隐藏层写为不可见；PSD 由服务端重新编码像素，不保留原始字节。未完成返回 422，缺失节点/文件返回 404，
+越权媒体返回 403，未知 format 返回 422；任一文件不可用时不输出缺图的文件。临时文件在响应完成后清理。
 “展开”在一次可撤销的文档编辑中创建图层素材的图片编辑入口及一个 Group。普通素材默认按原尺寸
 的三分之一等比展示，短边目标至少 48（不放大超过原图），高度上限 280、宽度上限 920；极端比例优先守上限。
 最多四列、宽素材跨列并优先填充短列，排列在原节点右侧并避开已有内容。背景通过 `base_material_node_id`、
@@ -439,10 +441,16 @@ default Key、再按登记顺序选择首个支持至少一张参考图的图片
 机位参数、preset、真实 provider/alias/model 和受控最终 prompt 一并冻结。结果始终是独立图片节点及一条
 实际输入连接；original retry 重新校验源图摘要并逐字段复用原 Snapshot。
 
+`POST /canvas/projects/{id}/runs/upscale` 只接受 `surface_node_id / expected_revision / target(2K|4K)`。服务端先校验
+源图长边小于目标长边（否则 422 `canvas_upscale_not_needed`），再在 Nano Banana 族里选模型：只认 quality 可调的基础型号（medium=2K、high=4K，跳过
+`-2k` / `-4k` 固定型号），默认 Key 优先、同一 Key 内 Pro 优先于 2 / 2.5，无可用型号返回 422
+`canvas_upscale_model_missing`；比例取该渠道支持列表中最接近源图的一档。服务端固定 `canvas.upscale` preset v1 提示词，
+把当前图片 Version 作为唯一 Snapshot input 冻结为 n=1 的图片 Run（`normalized_params.upscale_target` 记录档位）；结果是
+独立图片节点及一条实际输入连接。浏览器不能传 prompt、alias、model 或其他参数。
+
 `POST /canvas/projects/{id}/media-operations` 只接受当前图片节点和不可变源 Version ID，并以
-discriminated union 执行 `crop`、`split`、确定性 `upscale` 或本机模型 `remove_background`。服务端用 Pillow 校验真实格式、摘要、静态帧、
-EXIF 方向与 64MP 上限，统一输出剥离元数据的 RGB/RGBA PNG；切图限制 2–12 行列且每块最短边至少 16px，
-放大只允许 1024/2048/3072/4096 长边和 nearest/bilinear/lanczos，明确不提供 AI 细节恢复。`remove_background`
+discriminated union 执行 `crop`、`split` 或本机模型 `remove_background`。服务端用 Pillow 校验真实格式、摘要、静态帧、
+EXIF 方向与 64MP 上限，统一输出剥离元数据的 RGB/RGBA PNG；切图限制 2–12 行列且每块最短边至少 16px。旧文档里的 `upscale` origin 记录仍可读取，但浏览器不再能发起本地重采样放大。`remove_background`
 无参数：固定用 BiRefNet-general-lite（MIT，onnxruntime CPU/CUDA/DirectML 按可用挑）在本机推理，源图透明度与
 预测掩码相乘后输出 RGBA PNG，origin 记录 `model` id；模型文件由 `GET/POST /canvas/matting-model` 查询与
 下载到 `<data_root>/.config/models/`（sha256 校验），未下载时操作返回 422 `canvas_matting_model_missing`；

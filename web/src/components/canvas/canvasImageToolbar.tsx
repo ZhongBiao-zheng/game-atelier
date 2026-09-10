@@ -1,17 +1,11 @@
 import {
-  ClipboardCopy,
   Crop,
   Download,
   Eye,
-  FileUp,
   Grid2X2,
   Scissors,
-  Library,
   Lock,
   Orbit,
-  Paintbrush,
-  ScanText,
-  Trash2,
   ZoomIn,
   type LucideIcon,
 } from 'lucide-react';
@@ -19,6 +13,7 @@ import {
 import type {
   CanvasImageQuickToolId,
   CanvasUiPreferences,
+  CanvasUpscaleTarget,
 } from '@/schema/canvas';
 
 export interface CanvasImageToolDefinition {
@@ -30,19 +25,19 @@ export interface CanvasImageToolDefinition {
 
 export const CANVAS_IMAGE_TOOLS: CanvasImageToolDefinition[] = [
   { id: 'info', label: '查看详情', icon: Eye, defaultVisible: true },
-  { id: 'delete', label: '删除节点', icon: Trash2, defaultVisible: true },
-  { id: 'saveAsset', label: '存入资产库', icon: Library, defaultVisible: true },
   { id: 'download', label: '下载图片', icon: Download, defaultVisible: true },
-  { id: 'copyPrompt', label: '复制提示词', icon: ClipboardCopy, defaultVisible: true },
-  { id: 'reversePrompt', label: '反推提示词', icon: ScanText, defaultVisible: true },
-  { id: 'replace', label: '替换图片', icon: FileUp, defaultVisible: true },
   { id: 'resize', label: '比例缩放', icon: Lock, defaultVisible: false },
-  { id: 'maskEdit', label: '局部编辑', icon: Paintbrush, defaultVisible: true },
   { id: 'crop', label: '裁剪', icon: Crop, defaultVisible: true },
   { id: 'split', label: '切分', icon: Grid2X2, defaultVisible: true },
   { id: 'removeBackground', label: '抠图', icon: Scissors, defaultVisible: true },
-  { id: 'upscale', label: '本地放大', icon: ZoomIn, defaultVisible: true },
+  { id: 'upscale', label: 'AI高清', icon: ZoomIn, defaultVisible: true },
   { id: 'angle', label: '多角度', icon: Orbit, defaultVisible: false },
+];
+
+/** AI高清走 Nano Banana 生成，档位即模型能出的长边；长边不超过原图的档位不展示。 */
+export const CANVAS_UPSCALE_TARGETS: ReadonlyArray<{ id: CanvasUpscaleTarget; longEdge: number }> = [
+  { id: '2K', longEdge: 2048 },
+  { id: '4K', longEdge: 4096 },
 ];
 
 export const DEFAULT_CANVAS_IMAGE_TOOL_IDS = CANVAS_IMAGE_TOOLS
@@ -54,7 +49,6 @@ export const DEFAULT_CANVAS_UI_PREFERENCES: CanvasUiPreferences = {
   revision: 0,
   image_toolbar: {
     tool_ids: DEFAULT_CANVAS_IMAGE_TOOL_IDS,
-    show_labels: false,
   },
   generation_defaults: {
     text: { selection: null, params: {} },

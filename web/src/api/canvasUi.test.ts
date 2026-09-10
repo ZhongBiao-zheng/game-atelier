@@ -10,7 +10,6 @@ afterEach(() => {
 it('reads and writes the complete revisioned Canvas UI preference document', async () => {
   const imageToolbar: CanvasImageToolbarPreferences = {
     tool_ids: ['info', 'download'],
-    show_labels: true,
   };
   const generationDefaults: CanvasGenerationDefaults = {
     text: { selection: null, params: {} },

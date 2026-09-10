@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -67,6 +68,7 @@ from character_workflow.lib.schemas import (
     CanvasMediaVersion,
     CanvasNode,
     CanvasResultCandidate,
+    CanvasSize,
     CanvasSnapshotInput,
     CanvasTextNode,
     CanvasTextNodeData,
@@ -105,6 +107,20 @@ _REVERSE_PROMPT_PRESET_ID = "canvas.reverse_prompt"
 _REVERSE_PROMPT_PRESET_VERSION = 1
 _ANGLE_PROMPT_PRESET_ID = "canvas.angle_edit"
 _ANGLE_PROMPT_PRESET_VERSION = 1
+_UPSCALE_PROMPT_PRESET_ID = "canvas.upscale"
+_UPSCALE_PROMPT_PRESET_VERSION = 1
+_UPSCALE_LONG_EDGES: dict[str, int] = {"2K": 2048, "4K": 4096}
+# 与 Nano Banana 共用的 UI 质量档：medium 出 2K、high 出 4K（见 openai_image.tuzi_image_quality）。
+_UPSCALE_QUALITY: dict[str, str] = {"2K": "medium", "4K": "high"}
+# 源自画师资产库「通用高清-真实-Banana Pro」，去掉了写实限定，让卡通 / 矢量素材同样适用。
+_UPSCALE_PROMPT = (
+    "分析画面构图、光影、对比度、色彩饱和度与纯度。保持原有构图，保持原有背景不变，"
+    "保持与原图光影一致，无缝集成，完美融合，以原图风格为基础进行操作："
+    "不能缩放旋转画面，保持原有材质，保持明度不变，保持画面色相饱和度不变，"
+    "保持画面伽马值与对比度不变。按照以上指令基准守则进行以下操作："
+    "使图片变清晰，添加细节纹理，高清，4K，8K，超清画质，更精致的画质表现。"
+    "masterpiece, best quality, highres:1.2"
+)
 _REVERSE_PROMPT = (
     "分析唯一附带的图片，写出一段可以直接用于图像生成模型的中文提示词。"
     "准确描述主体、动作或状态、构图、场景、光线、色彩、材质、镜头视角与画面风格；"
@@ -214,7 +230,9 @@ def _commit_transaction_unlocked(
     job_locked: bool = False,
     artifacts: list[dict[str, Any]] | None = None,
 ) -> None:
-    if kind in {"submit", "reverse_prompt", "mask_edit", "angle", "layer_decomposition"} and job.canvas_run \
+    if kind in {
+        "submit", "reverse_prompt", "mask_edit", "angle", "upscale", "layer_decomposition",
+    } and job.canvas_run \
             and job.canvas_run.batch is None:
         from character_workflow.lib.canvas_batches import assert_node_not_batch_running
 
@@ -384,7 +402,7 @@ def recover_canvas_transactions_unlocked(project_id: str) -> None:
                 raise ValueError("canvas transaction document fingerprint mismatch")
             job = Job.model_validate(job_payload)
             creates_run = raw.get("kind") in {
-                "submit", "reverse_prompt", "mask_edit", "angle", "layer_decomposition"
+                "submit", "reverse_prompt", "mask_edit", "angle", "upscale", "layer_decomposition",
             }
             recovered_job = _failed_recovered_submit(job) if creates_run else job
             target = CanvasDocument.model_validate(document_payload)
@@ -1017,6 +1035,29 @@ def _with_active_run(node: CanvasNode, run_id: str) -> CanvasNode:
     })
 
 
+def _result_image_size(params: JobParams) -> CanvasSize:
+    """Size the pending result card to the output aspect so it does not jump when the image lands.
+
+    比例来源按 size（nano 比例串 / gpt 像素 WxH）→ ratio → custom_size 取第一个能解析的；
+    `auto` 或解析不出时按 1:1。宽高钳制与前端 sizeLockedToCanvasVersion 一致。
+    """
+    aspect = 1.0
+    for raw in (params.size, params.ratio, params.custom_size):
+        match = re.fullmatch(r"(\d+)\s*[x:×]\s*(\d+)", str(raw or "").strip())
+        if match and int(match.group(1)) > 0 and int(match.group(2)) > 0:
+            aspect = int(match.group(1)) / int(match.group(2))
+            break
+    width = 320.0
+    height = width / aspect
+    if height < 150:
+        height = 150.0
+        width = height * aspect
+    if height > 4000:
+        height = 4000.0
+        width = height * aspect
+    return CanvasSize(width=round(width), height=round(height))
+
+
 def _new_result_node(
     surface: CanvasNode,
     existing_nodes: list[CanvasNode],
@@ -1025,11 +1066,13 @@ def _new_result_node(
     run_id: str,
     result_id: str,
     title: str,
+    job_params: JobParams,
 ) -> CanvasNode:
     width = surface.size.width if surface.size is not None else 320
     position = surface.position.model_copy(update={"x": surface.position.x + width + 120})
-    candidate_width = 320
-    candidate_height = 240
+    image_size = _result_image_size(job_params) if mode == "image" else None
+    candidate_width = image_size.width if image_size is not None else 320
+    candidate_height = image_size.height if image_size is not None else 240
     occupied = sorted(
         (
             node.position.y,
@@ -1081,7 +1124,7 @@ def _new_result_node(
         display=CanvasMediaDisplay(),
     )
     if mode == "image":
-        return CanvasImageNode(**common, type="image", data=data)
+        return CanvasImageNode(**common, type="image", size=image_size, data=data)
     return CanvasVideoNode(**common, type="video", data=data)
 
 
@@ -1213,6 +1256,7 @@ def _commit_frozen_run(
             run_id,
             result_id,
             result_title,
+            job_params,
         ))
     if result_id != surface.id or retry_of:
         for item in inputs:
@@ -1892,6 +1936,144 @@ def submit_angle_run(
             result_draft=result_draft,
             allow_surface_reuse=False,
             transaction_kind="angle",
+        )
+
+
+def _nearest_ratio(width: int, height: int, ratios: list[str]) -> str:
+    """Pick the channel ratio closest to the source so the upscale keeps its composition."""
+    aspect = math.log(width / height)
+
+    def distance(ratio: str) -> float:
+        ratio_width, ratio_height = ratio.split(":")
+        return abs(aspect - math.log(int(ratio_width) / int(ratio_height)))
+
+    return min((ratio for ratio in ratios if ":" in ratio), key=distance)
+
+
+def _resolve_upscale_model(target: str) -> tuple[KeySpec, ModelSpec, str]:
+    """Base Nano Banana model whose quality dial sets the resolution, plus the quality to send.
+
+    只认基础型号（quality 可调：low=1K / medium=2K / high=4K），跳过 `-2k` / `-4k` 这类把
+    分辩率编进 id 的固定型号；默认 Key 优先、再按登记顺序，同一 Key 内 Pro 优先于 2 / 2.5。
+    """
+    from character_workflow.lib.callers.openai_image import (
+        image_family,
+        max_reference_images,
+        normalized_model_id,
+        supports_image_quality,
+    )
+
+    for key in _keys_default_first():
+        candidates = [
+            model for model in key.models
+            if _model_modality(model, key) == "image"
+            and image_family(model.id) == "nano-banana"
+            and supports_image_quality(model.id)
+            and max_reference_images(model.id) >= 1
+        ]
+        if candidates:
+            model = min(
+                candidates,
+                key=lambda item: 0 if "pro" in f"{normalized_model_id(item.id)} {item.name}".lower() else 1,
+            )
+            return key, model, _UPSCALE_QUALITY[target]
+    raise CanvasRunCommandError(
+        "canvas_upscale_model_missing",
+        "未配置可调质量的 Nano Banana 模型。请先在设置中接入 Nano Banana Pro。",
+    )
+
+
+def submit_upscale_run(
+    project_id: str,
+    surface_node_id: str,
+    expected_revision: int,
+    target: str,
+) -> tuple[Job, CanvasDocument]:
+    """Freeze one owned image into a fixed-prompt Nano Banana Run at 2K or 4K."""
+    from character_workflow.lib.image_size_catalog import image_size_options
+
+    long_edge = _UPSCALE_LONG_EDGES.get(target)
+    if long_edge is None:
+        raise CanvasRunCommandError("canvas_upscale_target_invalid", "放大只支持 2K 或 4K。")
+    with file_lock(canvas_project_lock_path(project_id)):
+        recover_canvas_transactions_unlocked(project_id)
+        current = _read_document_unlocked(project_id)
+        if current.revision != expected_revision:
+            raise RuntimeError(f"revision_conflict:{current.revision}")
+        surface = next((node for node in current.nodes if node.id == surface_node_id), None)
+        if not isinstance(surface, CanvasImageNode) or not surface.data.current_version_id:
+            raise CanvasRunCommandError(
+                "canvas_upscale_source_missing",
+                "请选择一个已有内容的图片节点再放大。",
+            )
+        source = current.content_versions.get(surface.data.current_version_id)
+        if not isinstance(source, CanvasMediaVersion) or source.kind != "image":
+            raise CanvasRunCommandError(
+                "canvas_upscale_source_missing",
+                "图片节点当前没有可读取的项目内版本。",
+            )
+        inputs = [CanvasSnapshotInput(
+            order=0,
+            source="explicit_source",
+            node_id=surface.id,
+            version_id=source.version_id,
+            kind="image",
+        )]
+        paths = _input_paths(project_id, current, inputs)
+        width, height = source.width, source.height
+        if not width or not height:
+            from PIL import Image
+
+            with Image.open(paths["image"][0]) as image:
+                width, height = image.size
+        if max(width, height) >= long_edge:
+            raise CanvasRunCommandError(
+                "canvas_upscale_not_needed",
+                f"原图长边已达到 {max(width, height)}px，不需要放大到 {target}。",
+            )
+        key, model, quality = _resolve_upscale_model(target)
+        ratio = _nearest_ratio(
+            width, height, image_size_options(key.provider, key.base_url, model.id)["ratios"],
+        )
+        job_params = _normalized_image_preference_params(
+            key, model, {"n": 1, "ratio": ratio, "quality": quality},
+        )
+        _validate_input_capabilities(model, JobKind.IMAGE, inputs, job_params)
+        job_params.reference_images = paths["image"]
+        normalized = job_params.model_dump(mode="json", exclude_none=True)
+        normalized.pop("reference_images", None)
+        normalized.update({
+            "preset_id": _UPSCALE_PROMPT_PRESET_ID,
+            "preset_version": _UPSCALE_PROMPT_PRESET_VERSION,
+            "upscale_target": target,
+        })
+        result_draft = CanvasGenerationDraft(
+            mode="image",
+            prompt=_UPSCALE_PROMPT,
+            input_policy="all_connected",
+            model=model.id,
+            alias=key.alias,
+            params=job_params.model_copy(update={"reference_images": None}),
+            updated_at=_now(),
+        )
+        return _commit_frozen_run(
+            project_id,
+            current,
+            surface,
+            key,
+            model,
+            JobKind.IMAGE,
+            mode="image",
+            final_prompt=_UPSCALE_PROMPT,
+            input_policy="all_connected",
+            normalized=normalized,
+            job_params=job_params,
+            inputs=inputs,
+            requested_count=1,
+            result_title=f"{surface.title} {target}",
+            result_draft=result_draft,
+            allow_surface_reuse=False,
+            transaction_kind="upscale",
         )
 
 

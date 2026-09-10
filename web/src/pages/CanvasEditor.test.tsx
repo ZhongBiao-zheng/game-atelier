@@ -12,6 +12,7 @@ import {
   listCanvasJobs,
   listCanvasProjects,
   retryCanvasRun,
+  replaceCanvasNodeMedia,
   saveCanvasDocument,
   submitCanvasLayerDecomposition,
   submitCanvasRun,
@@ -184,6 +185,7 @@ vi.mock('@xyflow/react', () => {
           <button
             type="button"
             aria-label="simulate file drop"
+            onDrop={onDrop}
             onClick={event => {
               let overPrevented = false;
               let dropPrevented = false;
@@ -400,6 +402,37 @@ beforeEach(() => {
 function lastSavedDocument() {
   return vi.mocked(saveCanvasDocument).mock.calls.at(-1)?.[1];
 }
+
+it('opens layer-stack details and inspects hidden layers without changing the canvas', async () => {
+  const base = mockFileUpload(new File(['x'], 'base.png'), 7).version;
+  const layer = { ...base, version_id: 'layer-detail', width: 80, height: 40 };
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({
+    nodes: [{ id: 'stack-detail', title: '拆分图层', type: 'layer_stack', position: { x: 0, y: 0 }, z_index: 0,
+      data: { source_version_id: base.version_id, base_version_id: base.version_id, base_visible: true,
+        prompt: '拆出头饰，保持原始色彩。', alias: null, model: null, resolution: 'auto', layers: [{ id: 'hidden-layer', name: '金色头饰的完整名称', description: '头饰细节说明',
+          version_id: layer.version_id, visible: false, z_index: 1,
+          bounding_box: { absolute: [20, 30, 100, 70], normalized: [0, 0, 1000, 1000] } }],
+        active_run_id: null, error: null } }],
+    content_versions: { [base.version_id]: base, [layer.version_id]: layer },
+  }));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByLabelText('simulate node select'));
+  fireEvent.click(screen.getByRole('button', { name: /查看 拆分图层/ }));
+  const dialog = await screen.findByRole('dialog', { name: '拆分图层' });
+  expect(within(dialog).getByLabelText('拆分提示词')).toHaveTextContent('拆出头饰，保持原始色彩。');
+  expect(within(dialog).getByRole('img', { name: '拆分图层 合成预览' })).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole('button', { name: '查看图层 金色头饰的完整名称' }));
+  expect(within(dialog).getByRole('img', { name: '金色头饰的完整名称' })).toHaveAttribute('src', '/media');
+  expect(within(dialog).getByText('80 × 40')).toBeTruthy();
+  expect(within(dialog).getByText('头饰细节说明')).toBeTruthy();
+  expect(within(dialog).getByRole('link', { name: '下载原图' })).toHaveAttribute('href', '/download');
+  fireEvent.click(within(dialog).getByRole('button', { name: '合成预览' }));
+  expect(within(dialog).getByRole('img', { name: '拆分图层 合成预览' }).querySelector('[data-layer-stack-part="hidden-layer"]')).toBeNull();
+  fireEvent.click(within(dialog).getByRole('button', { name: '关闭' }));
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(saveCanvasDocument).not.toHaveBeenCalled();
+});
 
 it('renders solid material links without counting upstream originals and preserves their role when copied', async () => {
   const original = imageNode('original', '原图');
@@ -1123,6 +1156,127 @@ it('keeps a dropped file inside the app and uploads it to the canvas', async () 
   expect(drop.dataset.overPrevented).toBe('true');
   expect(drop.dataset.dropPrevented).toBe('true');
   await waitFor(() => expect(uploadCanvasMedia).toHaveBeenCalled());
+});
+
+function mockFileUpload(file: File, revision: number) {
+  const version = { version_id: `version-${file.name}`, kind: 'image' as const,
+    created_at: '2026-09-10T00:00:00Z', sha256: 'b'.repeat(64),
+    origin: { kind: 'upload' as const, upload_id: file.name }, path: `uploads/${file.name}`,
+    mime_type: 'image/png', bytes: file.size, width: 300, height: 180 };
+  return { version, filename: file.name, document: { ...emptyDocument, revision: revision + 1,
+    content_versions: { [version.version_id]: version } } };
+}
+
+it('imports every chosen file as separate non-overlapping material nodes', async () => {
+  vi.mocked(uploadCanvasMedia).mockImplementation(async (_project, file, revision) => mockFileUpload(file, revision));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  const input = await screen.findByLabelText('选择上传素材');
+  expect(input).toHaveAttribute('multiple');
+  const files = ['one.png', 'two.png', 'three.png'].map(name => new File(['x'], name, { type: 'image/png' }));
+  fireEvent.change(input, { target: { files } });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(3));
+  expect(vi.mocked(uploadCanvasMedia).mock.calls.map(call => call[1].name)).toEqual(files.map(file => file.name));
+  expect(new Set(lastSavedDocument()!.nodes.map(node => JSON.stringify(node.position))).size).toBe(3);
+  expect(Object.keys(lastSavedDocument()!.content_versions)).toHaveLength(3);
+  expect(input).toHaveValue('');
+});
+
+it('continues a multi-file drop after a bad file and retains its error', async () => {
+  vi.mocked(uploadCanvasMedia).mockImplementation(async (_project, file, revision) => {
+    if (file.name === 'bad.png') throw new Error('图片损坏');
+    return mockFileUpload(file, revision);
+  });
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.drop(screen.getByLabelText('simulate file drop'), { dataTransfer: { files:
+    ['one.png', 'bad.png', 'three.png'].map(name => new File(['x'], name, { type: 'image/png' })) }, clientX: 200, clientY: 160 });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(2));
+  expect(await screen.findByText(/bad.png.*图片损坏/)).toBeTruthy();
+  expect(Object.keys(lastSavedDocument()!.content_versions)).toHaveLength(2);
+});
+
+it('fills an empty attachment node once and adds the remaining selections without overwriting it', async () => {
+  const empty = imageNode('empty-image', '图片', imageDraft);
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [empty] }));
+  vi.mocked(replaceCanvasNodeMedia).mockImplementation(async (_project, _node, file, revision) => {
+    const uploaded = mockFileUpload(file, revision);
+    return { ...uploaded, document: { ...uploaded.document, nodes: [{ ...empty,
+      data: { ...empty.data, current_version_id: uploaded.version.version_id } }] } };
+  });
+  vi.mocked(uploadCanvasMedia).mockImplementation(async (_project, file, revision) => mockFileUpload(file, revision));
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByLabelText('simulate node select'));
+  fireEvent.click(await screen.findByRole('button', { name: '上传图片' }));
+  const input = await screen.findByLabelText('选择上传媒体');
+  expect(input).toHaveAttribute('multiple');
+  fireEvent.change(input, { target: { files: ['first.png', 'second.png'].map(name => new File(['x'], name, { type: 'image/png' })) } });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(2));
+  expect(replaceCanvasNodeMedia).toHaveBeenCalledTimes(1);
+  expect(lastSavedDocument()!.nodes[0]).toMatchObject({ id: 'empty-image', data: { current_version_id: 'version-first.png' } });
+  expect(lastSavedDocument()!.nodes[1]).toMatchObject({ data: { current_version_id: 'version-second.png' } });
+});
+
+it('queues consecutive drops and saves concurrent edits after the whole batch', async () => {
+  const existing = imageNode('existing', '已有节点');
+  vi.mocked(getCanvasDocument).mockResolvedValue(documentWith({ nodes: [existing] }));
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(uploadCanvasMedia).mockImplementation(async (_project, file, revision) => {
+    if (file.name === 'first.png') await pending;
+    return mockFileUpload(file, revision);
+  });
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  const drop = (names: string[]) => fireEvent.drop(screen.getByLabelText('simulate file drop'), {
+    dataTransfer: { files: names.map(name => new File(['x'], name, { type: 'image/png' })) },
+    clientX: 200, clientY: 160,
+  });
+  drop(['first.png', 'second.png']);
+  await waitFor(() => expect(uploadCanvasMedia).toHaveBeenCalledTimes(1));
+  drop(['third.png']);
+  act(() => flowHandlers.nodesChange?.([{ id: 'existing', type: 'position', position: { x: 700, y: 400 } }]));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+  expect(uploadCanvasMedia).toHaveBeenCalledTimes(1);
+  expect(saveCanvasDocument).not.toHaveBeenCalled();
+  await act(async () => { release(); });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(4));
+  expect(vi.mocked(uploadCanvasMedia).mock.calls.map(call => call[1].name)).toEqual(['first.png', 'second.png', 'third.png']);
+  expect(vi.mocked(uploadCanvasMedia).mock.calls.map(call => call[2])).toEqual([7, 8, 9]);
+  expect(lastSavedDocument()!.nodes[0].position).toEqual({ x: 700, y: 400 });
+  expect(Object.keys(lastSavedDocument()!.content_versions)).toHaveLength(3);
+});
+
+it('uses authoritative text hashes before starting the next queued upload batch', async () => {
+  const canonical = new Map<string, string>();
+  vi.mocked(saveCanvasDocument).mockImplementation(async (_id, payload) => {
+    const versions = Object.fromEntries(Object.entries(payload.content_versions).map(([id, version]) => {
+      if (canonical.has(id) && version.sha256 !== canonical.get(id)) throw new Error('existing canvas content versions are immutable');
+      const hash = version.kind === 'text' ? 'c'.repeat(64) : version.sha256;
+      canonical.set(id, hash);
+      return [id, { ...version, sha256: hash }];
+    }));
+    return { ...payload, revision: payload.revision + 1, content_versions: versions };
+  });
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(uploadCanvasMedia).mockImplementation(async (_project, file, revision) => {
+    if (file.name === 'first.png') await pending;
+    return mockFileUpload(file, revision);
+  });
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  const input = screen.getByLabelText('选择上传素材');
+  fireEvent.change(input, { target: { files: [new File(['x'], 'first.png', { type: 'image/png' })] } });
+  await waitFor(() => expect(uploadCanvasMedia).toHaveBeenCalledTimes(1));
+  fireEvent.change(input, { target: { files: [new File(['x'], 'second.png', { type: 'image/png' })] } });
+  const editor = await addTextNodeWithBody('上传期间输入的文字');
+  fireEvent.keyDown(editor, { key: 'Tab' });
+  await act(async () => { release(); });
+  await waitFor(() => expect(uploadCanvasMedia).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(3));
+  expect(savedText(lastSavedDocument())).toBe('上传期间输入的文字');
+  expect(screen.queryByText(/immutable/)).not.toBeInTheDocument();
 });
 
 it('clamps an oversized node resize instead of letting every later save 422', async () => {

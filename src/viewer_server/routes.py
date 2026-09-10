@@ -64,7 +64,7 @@ from character_workflow.lib.schemas import (
     ActiveCharacterFile, CanonicalSet, CanonicalStatusFile, CharacterEntry,
     CharacterAssociationPatch, CharacterAssociationsFile,
     CanvasAgentSession, CanvasAgentSessionCreate, CanvasAgentSessionList,
-    CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument,
+    CanvasAngleRunCreate, CanvasCandidateDismiss, CanvasDocument, CanvasUpscaleRunCreate,
     CanvasCreationAssetInsertRequest,
     CanvasLayerDecompositionCreate,
     CanvasPackageCommitRequest, CanvasPackageImportResponse,
@@ -2757,11 +2757,10 @@ async def post_canvas_media_operation(
         error_code = {
             "crop": "canvas_media_invalid_crop",
             "split": "canvas_media_invalid_split",
-            "upscale": "canvas_media_invalid_request",
         }.get(operation_kind, "canvas_media_invalid_request")
         raise HTTPException(422, detail={
             "code": error_code,
-            "message": "图片处理参数无效，请检查选区、切线或放大设置。",
+            "message": "图片处理参数无效，请检查选区或切线。",
         }) from None
 
     try:
@@ -2921,11 +2920,20 @@ class _LayerArchiveResponse(FileResponse):
 
 
 @router.get("/canvas/projects/{project_id}/nodes/{node_id}/layers/download")
-def get_canvas_layers_download(project_id: str, node_id: str) -> FileResponse:
-    from character_workflow.lib.canvas_layer_exports import export_canvas_layers
+def get_canvas_layers_download(
+    project_id: str,
+    node_id: str,
+    format: Literal["zip", "psd"] = Query("zip"),
+) -> FileResponse:
+    from character_workflow.lib import canvas_layer_exports
 
+    export = (
+        canvas_layer_exports.export_canvas_layers_psd
+        if format == "psd"
+        else canvas_layer_exports.export_canvas_layers
+    )
     try:
-        target, filename = export_canvas_layers(project_id, node_id)
+        target, filename = export(project_id, node_id)
     except KeyError:
         raise HTTPException(404, detail="找不到这个拆分图层节点") from None
     except FileNotFoundError:
@@ -2935,7 +2943,9 @@ def get_canvas_layers_download(project_id: str, node_id: str) -> FileResponse:
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
     return _LayerArchiveResponse(
-        target, media_type="application/zip", filename=filename,
+        target,
+        media_type="image/vnd.adobe.photoshop" if format == "psd" else "application/zip",
+        filename=filename,
         headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
     )
 
@@ -3088,6 +3098,44 @@ def post_canvas_angle_run(
             payload.pitch_angle,
             payload.camera_distance,
             payload.wide_angle,
+        )
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None
+    except CanvasRunCommandError as error:
+        raise HTTPException(422, detail={
+            "code": error.code,
+            "message": error.message,
+        }) from error
+    except RuntimeError as error:
+        conflict = _canvas_run_revision_conflict(error)
+        if conflict is not None:
+            raise conflict from None
+        raise HTTPException(409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
+    from viewer_server import routes as _self
+    background.add_task(_self._run_canvas_job_safely, job.job_id)
+    return CanvasRunResponse(job=job, document=document)
+
+
+@router.post(
+    "/canvas/projects/{project_id}/runs/upscale",
+    response_model=CanvasRunResponse,
+    status_code=201,
+)
+def post_canvas_upscale_run(
+    project_id: str,
+    payload: CanvasUpscaleRunCreate,
+    background: BackgroundTasks,
+) -> CanvasRunResponse:
+    from character_workflow.lib.canvas_runs import CanvasRunCommandError, submit_upscale_run
+
+    try:
+        job, document = submit_upscale_run(
+            project_id,
+            payload.surface_node_id,
+            payload.expected_revision,
+            payload.target,
         )
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目或图片节点") from None

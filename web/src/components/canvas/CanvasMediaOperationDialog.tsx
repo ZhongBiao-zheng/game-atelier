@@ -1,4 +1,4 @@
-import { Crop, Grid2X2, Redo2, Undo2, ZoomIn } from 'lucide-react';
+import { Crop, Grid2X2, Redo2, Undo2 } from 'lucide-react';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ import {
 import { clamp, cn } from '@/lib/utils';
 import type { CanvasMediaOperation, CanvasMediaVersion } from '@/schema/canvas';
 
-export type CanvasMediaTool = 'crop' | 'split' | 'upscale';
+export type CanvasMediaTool = 'crop' | 'split';
 
 interface NormalizedRect {
   x: number;
@@ -34,12 +34,6 @@ const CROP_RATIOS: Array<{ value: CropRatio; label: string }> = [
   { value: '16:9', label: '16:9' },
   { value: '9:16', label: '9:16' },
 ];
-const UPSCALE_TARGETS = [1024, 2048, 3072, 4096] as const;
-const UPSCALE_ALGORITHMS = [
-  { value: 'nearest', label: '像素', description: '保留硬边，适合像素画' },
-  { value: 'bilinear', label: '平滑', description: '速度快，边缘更柔和' },
-  { value: 'lanczos', label: '高质量', description: '细节过渡最好，处理稍慢' },
-] as const;
 
 export function CanvasMediaOperationDialog({
   open,
@@ -76,9 +70,6 @@ export function CanvasMediaOperationDialog({
   const [splitLines, setSplitLines] = useState<SplitLines>(() => evenSplit(2, 2));
   const splitPast = useRef<SplitLines[]>([]);
   const splitFuture = useRef<SplitLines[]>([]);
-  const availableTarget = UPSCALE_TARGETS.find(target => target > Math.max(width, height)) ?? null;
-  const [upscaleTarget, setUpscaleTarget] = useState<(typeof UPSCALE_TARGETS)[number] | null>(availableTarget);
-  const [upscaleAlgorithm, setUpscaleAlgorithm] = useState<'nearest' | 'bilinear' | 'lanczos'>('lanczos');
 
   useEffect(() => {
     if (!open) return;
@@ -103,14 +94,11 @@ export function CanvasMediaOperationDialog({
     setSplitLines(evenSplit(2, 2));
     splitPast.current = [];
     splitFuture.current = [];
-    setUpscaleTarget(UPSCALE_TARGETS.find(target => target > Math.max(width, height)) ?? null);
-    setUpscaleAlgorithm('lanczos');
   }, [height, open, version.version_id, width]);
 
   const dialogCopy = {
     crop: { icon: <Crop aria-hidden="true" />, heading: `裁剪“${title}”`, description: updatesMaterial ? '裁剪后同步更新原图层，可撤销。' : '调整选区后生成一个新的图片节点，原图保持不变。' },
     split: { icon: <Grid2X2 aria-hidden="true" />, heading: `切分“${title}”`, description: '按切线一次生成整组图片节点，整批可以一次撤销。' },
-    upscale: { icon: <ZoomIn aria-hidden="true" />, heading: `本地放大“${title}”`, description: '使用确定性重采样放大像素尺寸，不会恢复原图中不存在的新细节。' },
   }[tool];
 
   function commitSplit(next: SplitLines) {
@@ -141,19 +129,11 @@ export function CanvasMediaOperationDialog({
       horizontal_lines: splitLines.horizontal,
       vertical_lines: splitLines.vertical,
     });
-    if (tool === 'upscale' && upscaleTarget) onSubmit({
-      kind: 'upscale',
-      target_long_edge: upscaleTarget,
-      algorithm: upscaleAlgorithm,
-    });
   }
 
   const output = tool === 'crop'
     ? cropPixelSize(cropRect, width, height)
-    : tool === 'split'
-      ? { width: splitLines.vertical.length + 1, height: splitLines.horizontal.length + 1 }
-      : upscaleTarget ? scaledSize(width, height, upscaleTarget) : null;
-  const confirmDisabled = busy || (tool === 'upscale' && upscaleTarget === null);
+    : { width: splitLines.vertical.length + 1, height: splitLines.horizontal.length + 1 };
 
   return (
     <Dialog open={open} onOpenChange={next => { if (!busy) onOpenChange(next); }}>
@@ -191,34 +171,23 @@ export function CanvasMediaOperationDialog({
             onRedo={redoSplit}
           />
         )}
-        {tool === 'upscale' && (
-          <UpscaleEditor
-            width={width}
-            height={height}
-            target={upscaleTarget}
-            algorithm={upscaleAlgorithm}
-            onTargetChange={setUpscaleTarget}
-            onAlgorithmChange={setUpscaleAlgorithm}
-          />
-        )}
 
         {error && <p id="canvas-media-operation-error" role="alert" className="text-sm text-destructive">{error}</p>}
         {busy && <p role="status" className="text-sm text-muted-foreground">正在处理图片并提交画布，请稍候…</p>}
 
         <DialogFooter className="items-center sm:justify-between">
           <p className="text-xs tabular-nums text-muted-foreground">
-            {tool === 'split' && output ? `${output.height} 行 × ${output.width} 列 · ${output.height * output.width} 个结果` : null}
-            {tool !== 'split' && output ? `输出 ${output.width} × ${output.height} px` : null}
+            {tool === 'split' ? `${output.height} 行 × ${output.width} 列 · ${output.height * output.width} 个结果` : `输出 ${output.width} × ${output.height} px`}
           </p>
           <div className="flex gap-2">
             <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>取消</Button>
             <Button
-              disabled={confirmDisabled}
+              disabled={busy}
               aria-describedby={error ? 'canvas-media-operation-error' : undefined}
               onClick={submit}
             >
               {busy ? '处理中…' : updatesMaterial && tool !== 'split' ? '更新图层素材'
-                : { crop: '生成裁剪节点', split: '生成切图节点', upscale: '生成放大节点' }[tool]}
+                : { crop: '生成裁剪节点', split: '生成切图节点' }[tool]}
             </Button>
           </div>
         </DialogFooter>
@@ -480,62 +449,6 @@ function SplitEditor({
   );
 }
 
-function UpscaleEditor({
-  width,
-  height,
-  target,
-  algorithm,
-  onTargetChange,
-  onAlgorithmChange,
-}: {
-  width: number;
-  height: number;
-  target: (typeof UPSCALE_TARGETS)[number] | null;
-  algorithm: 'nearest' | 'bilinear' | 'lanczos';
-  onTargetChange: (target: (typeof UPSCALE_TARGETS)[number]) => void;
-  onAlgorithmChange: (algorithm: 'nearest' | 'bilinear' | 'lanczos') => void;
-}) {
-  const longEdge = Math.max(width, height);
-  return (
-    <div className="space-y-6">
-      <fieldset>
-        <legend className="mb-2 text-xs text-muted-foreground">目标长边</legend>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {UPSCALE_TARGETS.map(item => (
-            <Button
-              key={item}
-              type="button"
-              variant={target === item ? 'secondary' : 'outline'}
-              disabled={item <= longEdge}
-              aria-pressed={target === item}
-              onClick={() => onTargetChange(item)}
-              className="tabular-nums"
-            >{item}px</Button>
-          ))}
-        </div>
-      </fieldset>
-      <fieldset>
-        <legend className="mb-2 text-xs text-muted-foreground">重采样算法</legend>
-        <div className="grid gap-2 sm:grid-cols-3">
-          {UPSCALE_ALGORITHMS.map(item => (
-            <label key={item.value} className={cn('cursor-pointer rounded-lg border p-4', algorithm === item.value ? 'border-primary bg-secondary' : 'border-border bg-card')}>
-              <span className="flex items-center gap-2 text-sm font-medium">
-                <input type="radio" name="upscale-algorithm" checked={algorithm === item.value} onChange={() => onAlgorithmChange(item.value)} />
-                {item.label}
-              </span>
-              <span className="mt-1 block text-xs text-muted-foreground">{item.description}</span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
-      <div className="rounded-lg border border-border bg-background p-4 text-sm text-muted-foreground">
-        <p className="text-pretty">本地放大只改变像素尺寸，不是 AI 超分，也不会补回原图中不存在的纹理或细节。</p>
-        {target === null && <p className="mt-2 text-destructive">原图长边已经达到 4096px，不能继续本地放大。</p>}
-      </div>
-    </div>
-  );
-}
-
 function LabeledCount({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
   return (
     <label className="space-y-1 text-xs text-muted-foreground">
@@ -689,9 +602,4 @@ function moveSplitLine(
   const values = next[axis];
   values[index] = clamp(value, (values[index - 1] ?? 0) + minimum, (values[index + 1] ?? 1) - minimum);
   return next;
-}
-
-function scaledSize(width: number, height: number, longEdge: number) {
-  const scale = longEdge / Math.max(width, height);
-  return { width: Math.round(width * scale), height: Math.round(height * scale) };
 }

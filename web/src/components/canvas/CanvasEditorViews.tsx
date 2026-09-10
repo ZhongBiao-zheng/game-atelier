@@ -13,21 +13,27 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, Check, ChevronRight, CircleHelp, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Layers3, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
-  createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef,
-  useState,
+  createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
+  useRef, useState,
   type FocusEvent as ReactFocusEvent, type ReactNode, type Ref, type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
 
-import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers } from '@/api/canvas';
+import { canvasDownloadUrl, canvasMediaUrl, downloadCanvasLayers, type CanvasLayerExportFormat } from '@/api/canvas';
 import { CanvasBatchMaterialEditor, CanvasExecutionGroup } from './CanvasBatchControls';
 import { CanvasLayerStackList } from './CanvasLayerStackList';
-import { orderedLayerStackParts } from './canvasLayerOrder';
+import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
 import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
 import {
@@ -52,7 +58,7 @@ import {
   isReversePromptJob,
 } from '@/components/canvas/CanvasNodeRunStatus';
 import { formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
-import { orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
+import { CANVAS_UPSCALE_TARGETS, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
 import { imageControlCaps } from '@/lib/imageControlCaps';
 import { VideoControls } from '@/components/studio/VideoControls';
@@ -82,13 +88,13 @@ import type {
   CanvasPoint,
   CanvasSize,
   CanvasUiPreferences,
+  CanvasUpscaleTarget,
   CanvasVideoFrameSlot,
 } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
 import {
   canvasNodeAcceptsInput,
   canvasNodeProvidesOutput,
-  canvasNodeProvidesContent,
   CANVAS_GENERATION_MODE_LABELS,
   CANVAS_MAX_NODE_SIZE,
   canvasGenerateBlock,
@@ -162,6 +168,7 @@ export interface CanvasNodeContextValue {
   ) => void;
   selectNode: (id: string) => void;
   previewContent: (id: string, title: string, nodeId: string) => void;
+  previewLayerStack: (nodeId: string) => void;
   selectCandidate: (id: string, versionId: string) => void;
   reportError?: (message: string) => void;
   submitRun: (id: string) => Promise<void>;
@@ -192,6 +199,7 @@ export interface CanvasNodeContextValue {
   removeBackground: (node: CanvasContentNode) => void;
   openMaskEdit: (node: CanvasContentNode) => void;
   openAngle: (node: CanvasContentNode) => void;
+  upscaleImage: (node: CanvasContentNode, target: CanvasUpscaleTarget) => void;
   editVideo: (node: CanvasContentNode) => void;
   saveImageToolbarPreferences: (value: CanvasImageToolbarPreferences) => Promise<void>;
   deleteNode: (id: string) => void;
@@ -372,10 +380,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   if (node.type === 'group') return <CanvasExecutionGroup node={node} context={context} selected={Boolean(selected)} />;
   const renameNode = context.renameNode;
   const content = nodeContent;
-  const copyablePrompt = copyablePromptForNode(
-    node,
-    context.jobsByResultNodeId,
-  );
   const replacingMedia = context.mediaReplaceBusyNodeIds.has(node.id);
   const submittingNode = context.submittingNodeIds.has(node.id);
   const nodeRunState = canvasNodeRunState(node, context.jobsByRunId);
@@ -600,6 +604,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               label={nodeRunState.reversePrompt
                 ? nodeJob.cancel_requested_at ? '正在停止反推提示词' : '停止反推提示词'
                 : nodeJob.cancel_requested_at ? `正在停止 ${node.title}` : `停止 ${node.title} 的生成`}
+              text="停止"
               disabled={Boolean(nodeJob.cancel_requested_at)}
               onClick={() => void context.cancelRun(nodeJob.canvas_run!.run_id)}
             >
@@ -622,13 +627,13 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
                 content={content}
                 replacing={replacingMedia}
                 submitting={submittingNode}
-                copyablePrompt={copyablePrompt}
                 context={context}
                 onOverlayOpenChange={setToolbarOverlayOpen}
               />
               {reversePromptJob && reversePromptSucceeded && !context.reversePromptConfiguredNodeIds.has(node.id) && (
                 <MediaToolButton
                   label="从反推文本创建图片配置"
+                  text="生成配置"
                   disabled={submittingNode}
                   onClick={() => void context.recoverReversePromptConfig(reversePromptJob)}
                 >
@@ -642,7 +647,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               content={content}
               replacing={replacingMedia}
               submitting={submittingNode || nodeRunState.status === 'loading'}
-              copyablePrompt={copyablePrompt}
               context={context}
               onEditText={beginTextEditing}
               onDecreaseText={() => setTextScale(-1)}
@@ -704,7 +708,8 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
             beginTextEditing();
             return;
           }
-          if (content) context.previewContent(content.version_id, node.title, node.id);
+          if (node.type === 'layer_stack') context.previewLayerStack(node.id);
+          else if (content) context.previewContent(content.version_id, node.title, node.id);
         }}
         onKeyDown={event => {
           if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -807,24 +812,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               fit={node.type === 'image' || node.type === 'video' ? node.data.display.fit : 'contain'}
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
             />
-          )}
-          {selected && !context.multiSelectionActive && uploadedImageMaterial && node.type === 'image' && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              aria-label={`替换图片 ${node.title}`}
-              disabled={replacingMedia}
-              className="nodrag absolute right-3 top-3 z-10"
-              onPointerDown={event => event.stopPropagation()}
-              onClick={event => {
-                event.stopPropagation();
-                context.replaceMedia(node);
-              }}
-            >
-              {replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}
-              {replacingMedia ? '替换中' : '替换'}
-            </Button>
           )}
           {node.type === 'image' && content?.kind === 'image' && context.showImageInfo
             && (node.size?.height ?? 176) >= 96 && (node.size?.width ?? 320) >= 160 && (
@@ -1416,7 +1403,6 @@ function CanvasNodeToolbar({
   content,
   replacing,
   submitting,
-  copyablePrompt,
   context,
   onEditText,
   onDecreaseText,
@@ -1426,7 +1412,6 @@ function CanvasNodeToolbar({
   content: CanvasContentVersion | undefined;
   replacing: boolean;
   submitting: boolean;
-  copyablePrompt: string | null;
   context: CanvasNodeContextValue;
   onEditText: () => void;
   onDecreaseText: () => void;
@@ -1434,7 +1419,7 @@ function CanvasNodeToolbar({
 }) {
   const contentNode = isCanvasContentNode(node) ? node : null;
   const mediaNode = contentNode && contentNode.type !== 'text' ? contentNode : null;
-  const [downloadingLayers, setDownloadingLayers] = useState(false);
+  const [downloadingLayers, setDownloadingLayers] = useState<CanvasLayerExportFormat | null>(null);
   const layersReady = node.type === 'layer_stack' && Boolean(node.data.base_version_id)
     && !node.data.active_run_id && !submitting;
 
@@ -1442,11 +1427,12 @@ function CanvasNodeToolbar({
     <>
       {node.type === 'text' && (
         <>
-          <MediaToolButton label={`编辑文本 ${node.title}`} disabled={submitting} onClick={onEditText}>
+          <MediaToolButton label={`编辑文本 ${node.title}`} text="编辑" disabled={submitting} onClick={onEditText}>
             <Pencil />
           </MediaToolButton>
           <MediaToolButton
             label={`减小 ${node.title} 字号`}
+            text="减小字号"
             disabled={node.data.display.scale === 'xs'}
             onClick={onDecreaseText}
           >
@@ -1454,6 +1440,7 @@ function CanvasNodeToolbar({
           </MediaToolButton>
           <MediaToolButton
             label={`增大 ${node.title} 字号`}
+            text="增大字号"
             disabled={node.data.display.scale === 'base'}
             onClick={onIncreaseText}
           >
@@ -1461,6 +1448,7 @@ function CanvasNodeToolbar({
           </MediaToolButton>
           <MediaToolButton
             label={`用 ${node.title} 生成图片`}
+            text="生成图片"
             disabled={content?.kind !== 'text'}
             onClick={() => context.createImageConfigFromText(node.id)}
           >
@@ -1470,20 +1458,27 @@ function CanvasNodeToolbar({
       )}
       {node.type === 'layer_stack' && (
         <>
-          <MediaToolButton
-            label="下载全部图层"
-            disabled={!layersReady || downloadingLayers}
-            onClick={() => {
-              setDownloadingLayers(true);
-              void downloadCanvasLayers(context.projectId, node.id)
-                .catch(error => context.reportError?.((error as Error).message))
-                .finally(() => setDownloadingLayers(false));
-            }}
-          >
-            {downloadingLayers ? <LoaderCircle className="animate-spin" /> : <Download />}
-          </MediaToolButton>
+          {([['zip', '下载全部图层', '下载图层', <Download />], ['psd', '导出 PSD', 'PSD', <FileDown />]] as const).map(
+            ([format, label, text, icon]) => (
+              <MediaToolButton
+                key={format}
+                label={label}
+                text={text}
+                disabled={!layersReady || downloadingLayers !== null}
+                onClick={() => {
+                  setDownloadingLayers(format);
+                  void downloadCanvasLayers(context.projectId, node.id, format)
+                    .catch(error => context.reportError?.((error as Error).message))
+                    .finally(() => setDownloadingLayers(null));
+                }}
+              >
+                {downloadingLayers === format ? <LoaderCircle className="animate-spin" /> : icon}
+              </MediaToolButton>
+            ),
+          )}
           <MediaToolButton
             label="展开图层到画布并分组"
+            text="展开图层"
             disabled={!layersReady || context.batchBusy}
             onClick={() => context.expandLayerStack(node.id)}
           >
@@ -1492,51 +1487,33 @@ function CanvasNodeToolbar({
         </>
       )}
       <MediaToolButton
-        label={content ? `查看 ${node.title} 详情` : `查看 ${node.title} 设置`}
+        label={content || node.type === 'layer_stack' ? `查看 ${node.title} 详情` : `查看 ${node.title} 设置`}
+        text={content || node.type === 'layer_stack' ? '查看详情' : '查看设置'}
         onClick={() => {
-          if (content) context.previewContent(content.version_id, node.title, node.id);
+          if (node.type === 'layer_stack') context.previewLayerStack(node.id);
+          else if (content) context.previewContent(content.version_id, node.title, node.id);
           else context.selectNode(node.id);
         }}
       >
         <Eye />
       </MediaToolButton>
-      {contentNode && canvasNodeProvidesContent(contentNode) && (content || mediaNode) && (
-        <MediaToolButton
-          label={`将 ${node.title} 存入资产库`}
-          disabled={!content || context.libraryBusy}
-          onClick={() => {
-            if (content) void context.saveAsset(contentNode);
-          }}
-        >
-          <Library />
-        </MediaToolButton>
-      )}
       {content && content.kind !== 'text' ? (
         <MediaToolLink
           label={`下载 ${node.title}`}
+          text="下载"
           href={canvasDownloadUrl(context.projectId, content.version_id)}
         >
           <Download />
         </MediaToolLink>
       ) : mediaNode ? (
-        <MediaToolButton label={`下载 ${node.title}`} disabled onClick={() => undefined}>
+        <MediaToolButton label={`下载 ${node.title}`} text="下载" disabled onClick={() => undefined}>
           <Download />
         </MediaToolButton>
       ) : null}
-      {contentNode && canvasNodeProvidesContent(contentNode) && (copyablePrompt || mediaNode) && (
+      {mediaNode && !content && (
         <MediaToolButton
-          label={`复制 ${node.title} 的生成提示词`}
-          disabled={!copyablePrompt}
-          onClick={() => {
-            if (copyablePrompt) void context.copyPrompt(contentNode);
-          }}
-        >
-          <ClipboardCopy />
-        </MediaToolButton>
-      )}
-      {mediaNode && (
-        <MediaToolButton
-          label={content ? `替换 ${node.title}` : `上传到 ${node.title}`}
+          label={`上传到 ${node.title}`}
+          text="上传"
           disabled={replacing}
           onClick={() => context.replaceMedia(mediaNode)}
         >
@@ -1546,6 +1523,7 @@ function CanvasNodeToolbar({
       {node.type === 'video' && (
         <MediaToolButton
           label={`编辑视频 ${node.title}`}
+          text="编辑视频"
           disabled={content?.kind !== 'video' || submitting || replacing}
           onClick={() => {
             if (content?.kind === 'video') context.editVideo(node);
@@ -1554,13 +1532,6 @@ function CanvasNodeToolbar({
           <MessageSquare />
         </MediaToolButton>
       )}
-      <MediaToolButton
-        label={`删除 ${node.title}`}
-        destructive
-        onClick={() => context.deleteNode(node.id)}
-      >
-        <Trash2 />
-      </MediaToolButton>
     </>
   );
 }
@@ -1639,6 +1610,8 @@ type ImageToolbarAction = {
   destructive?: boolean;
   href?: string;
   run: () => void;
+  /** 有菜单的按钮点击后展开选项，不直接执行 run。 */
+  menu?: Array<{ id: string; title: string; detail: string; onSelect: () => void }>;
 };
 
 function ImageNodeToolbar({
@@ -1646,7 +1619,6 @@ function ImageNodeToolbar({
   content,
   replacing,
   submitting,
-  copyablePrompt,
   context,
   onOverlayOpenChange,
 }: {
@@ -1654,7 +1626,6 @@ function ImageNodeToolbar({
   content: CanvasContentVersion | undefined;
   replacing: boolean;
   submitting: boolean;
-  copyablePrompt: string | null;
   context: CanvasNodeContextValue;
   onOverlayOpenChange: (open: boolean) => void;
 }) {
@@ -1667,7 +1638,6 @@ function ImageNodeToolbar({
   }, [onOverlayOpenChange]);
   useEffect(() => () => onOverlayOpenChangeRef.current(false), []);
   const resizeUnlocked = node.data.display.free_resize;
-  const uploadedImageMaterial = isUploadedImageMaterialNode(node, content);
   const imageContent = content?.kind === 'image' ? content : undefined;
   const currentVersionId = imageContent?.version_id;
   const definitions = orderedCanvasImageTools(context.canvasUiPreferences.image_toolbar.tool_ids);
@@ -1683,22 +1653,6 @@ function ImageNodeToolbar({
         ? context.previewContent(currentVersionId, node.title, node.id)
         : context.selectNode(node.id),
     };
-    if (definition.id === 'delete') action = {
-      ...common,
-      label: `删除 ${node.title}`,
-      icon: <Icon />,
-      destructive: true,
-      run: () => context.deleteNode(node.id),
-    };
-    if (definition.id === 'saveAsset') action = {
-      ...common,
-      label: `将 ${node.title} 存入资产库`,
-      icon: <Icon />,
-      disabled: !currentVersionId || context.libraryBusy,
-      run: () => {
-        if (currentVersionId) void context.saveAsset(node);
-      },
-    };
     if (definition.id === 'download') action = {
       ...common,
       label: `下载 ${node.title}`,
@@ -1707,32 +1661,6 @@ function ImageNodeToolbar({
       href: currentVersionId ? canvasDownloadUrl(context.projectId, currentVersionId) : undefined,
       run: () => undefined,
     };
-    if (definition.id === 'copyPrompt') action = {
-      ...common,
-      label: `复制 ${node.title} 的生成提示词`,
-      icon: <Icon />,
-      disabled: !copyablePrompt,
-      run: () => {
-        if (copyablePrompt) void context.copyPrompt(node);
-      },
-    };
-    if (definition.id === 'reversePrompt') action = {
-      ...common,
-      label: `反推 ${node.title} 的提示词`,
-      icon: submitting ? <LoaderCircle className="animate-spin" /> : <Icon />,
-      disabled: !currentVersionId || submitting || replacing,
-      run: () => {
-        if (currentVersionId) void context.reversePrompt(node);
-      },
-    };
-    if (definition.id === 'replace' && !uploadedImageMaterial) action = {
-      ...common,
-      label: currentVersionId ? `替换 ${node.title}` : `上传到 ${node.title}`,
-      text: currentVersionId ? definition.label : '上传图片',
-      icon: replacing ? <LoaderCircle className="animate-spin" /> : <Icon />,
-      disabled: replacing,
-      run: () => context.replaceMedia(node),
-    };
     if (definition.id === 'resize') action = {
       ...common,
       label: resizeUnlocked ? `锁定 ${node.title} 比例` : `自由缩放 ${node.title}`,
@@ -1740,15 +1668,6 @@ function ImageNodeToolbar({
       icon: resizeUnlocked ? <Lock /> : <Unlock />,
       disabled: replacing,
       run: () => context.toggleFreeResize(node),
-    };
-    if (definition.id === 'maskEdit') action = {
-      ...common,
-      label: `局部编辑 ${node.title}`,
-      icon: <Icon />,
-      disabled: !currentVersionId || submitting || replacing,
-      run: () => {
-        if (currentVersionId) context.openMaskEdit(node);
-      },
     };
     if (definition.id === 'crop') action = {
       ...common,
@@ -1768,15 +1687,25 @@ function ImageNodeToolbar({
         if (currentVersionId) context.openMediaOperation(node, 'split');
       },
     };
-    if (definition.id === 'upscale') action = {
-      ...common,
-      label: `本地放大 ${node.title}`,
-      icon: <Icon />,
-      disabled: !currentVersionId || replacing,
-      run: () => {
-        if (currentVersionId) context.openMediaOperation(node, 'upscale');
-      },
-    };
+    if (definition.id === 'upscale') {
+      const longEdge = Math.max(imageContent?.width ?? 0, imageContent?.height ?? 0);
+      const targets = CANVAS_UPSCALE_TARGETS.filter(target => target.longEdge > longEdge);
+      action = {
+        ...common,
+        label: currentVersionId && targets.length === 0
+          ? `${node.title} 已达 4K，无需放大`
+          : `AI高清 ${node.title}`,
+        icon: <Icon />,
+        disabled: !currentVersionId || submitting || replacing || targets.length === 0,
+        run: () => undefined,
+        menu: targets.map(target => ({
+          id: target.id,
+          title: target.id,
+          detail: `长边 ${target.longEdge}px`,
+          onSelect: () => context.upscaleImage(node, target.id),
+        })),
+      };
+    }
     if (definition.id === 'removeBackground') action = {
       ...common,
       label: `抠图 ${node.title}`,
@@ -1800,6 +1729,11 @@ function ImageNodeToolbar({
 
   function updateSettingsOpen(open: boolean) {
     setSettingsOpen(open);
+    onOverlayOpenChange(open);
+  }
+
+  // 菜单展开期间节点可能失去选中，工具栏要像设置弹窗一样保持可见。
+  function updateMenuOpen(open: boolean) {
     onOverlayOpenChange(open);
   }
 
@@ -1827,16 +1761,45 @@ function ImageNodeToolbar({
         <MediaToolLink
           key={action.id}
           label={action.label}
-          text={context.canvasUiPreferences.image_toolbar.show_labels ? action.text : undefined}
+          text={action.text}
           href={action.href}
         >
           {action.icon}
         </MediaToolLink>
+      ) : action.menu ? (
+        <DropdownMenu key={action.id} onOpenChange={updateMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <MediaToolButton
+              label={action.label}
+              text={action.text}
+              disabled={action.disabled}
+              onClick={() => undefined}
+            >
+              {action.icon}
+            </MediaToolButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="center"
+            className="nodrag min-w-36"
+            onPointerDown={event => event.stopPropagation()}
+          >
+            {action.menu.map(item => (
+              <DropdownMenuItem
+                key={item.id}
+                className="justify-between gap-4 tabular-nums"
+                onSelect={item.onSelect}
+              >
+                <span>{item.title}</span>
+                <span className="text-xs text-muted-foreground">{item.detail}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : (
         <MediaToolButton
           key={action.id}
           label={action.label}
-          text={context.canvasUiPreferences.image_toolbar.show_labels ? action.text : undefined}
+          text={action.text}
           destructive={action.destructive}
           disabled={action.disabled}
           onClick={action.run}
@@ -1846,13 +1809,13 @@ function ImageNodeToolbar({
       ))}
       <MediaToolButton
         label={`基于 ${node.title} 生成`}
-        text={context.canvasUiPreferences.image_toolbar.show_labels ? '基于本图生成' : undefined}
+        text="图生图"
         disabled={!currentVersionId || submitting || replacing}
         onClick={() => context.createImageFromSource?.(node.id)}
       ><Sparkles /></MediaToolButton>
       <MediaToolButton
         label={`拆分 ${node.title} 的图层`}
-        text={context.canvasUiPreferences.image_toolbar.show_labels ? '拆分图层' : undefined}
+        text="拆分图层"
         disabled={!currentVersionId || submitting || replacing}
         onClick={() => context.createLayerDecomposition(node)}
       >
@@ -1860,7 +1823,7 @@ function ImageNodeToolbar({
       </MediaToolButton>
       <MediaToolButton
         label="配置图片快捷工具"
-        text={context.canvasUiPreferences.image_toolbar.show_labels ? '更多' : undefined}
+        text="更多"
         onClick={openSettings}
       >
         <Ellipsis />
@@ -2829,39 +2792,48 @@ export function ToolButton({ label, active, disabled, onClick, children, buttonR
   return <button ref={buttonRef} type="button" title={label} aria-label={label} aria-pressed={active} aria-expanded={expanded} aria-controls={controlsId} aria-haspopup={controlsId && popup ? popup : undefined} disabled={disabled} onClick={onClick} className={cn('grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-30', active && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground')}>{children}</button>;
 }
 
-function MediaToolButton({ label, text, destructive = false, disabled = false, onClick, children }: {
+// forwardRef + 透传其余属性：作为 Radix DropdownMenuTrigger 的 asChild 子元素时要接住它注入的
+// ref 与 onPointerDown / onKeyDown / aria-* 才能展开菜单。
+const MediaToolButton = forwardRef<HTMLButtonElement, {
   label: string;
-  text?: string;
+  text: string;
   destructive?: boolean;
   disabled?: boolean;
   onClick: () => void;
   children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      className={cn(
-        'nodrag flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30',
-        text ? 'gap-1 px-2' : 'w-7',
-        destructive && 'hover:text-destructive',
-      )}
-      onClick={event => {
-        event.stopPropagation();
-        onClick();
-      }}
-    >
-      <span aria-hidden="true" className="[&>svg]:size-3.5">{children}</span>
-      {text && <span className="text-xs">{text}</span>}
-    </button>
-  );
-}
+} & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onClick' | 'children' | 'disabled'>>(
+  function MediaToolButton(
+    { label, text, destructive = false, disabled = false, onClick, children, className, ...rest },
+    ref,
+  ) {
+    return (
+      <button
+        {...rest}
+        ref={ref}
+        type="button"
+        title={label}
+        aria-label={label}
+        disabled={disabled}
+        className={cn(
+          'nodrag flex h-7 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full px-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30',
+          destructive && 'hover:text-destructive',
+          className,
+        )}
+        onClick={event => {
+          event.stopPropagation();
+          onClick();
+        }}
+      >
+        <span aria-hidden="true" className="[&>svg]:size-3.5">{children}</span>
+        <span className="text-xs">{text}</span>
+      </button>
+    );
+  },
+);
 
 function MediaToolLink({ label, text, href, children }: {
   label: string;
-  text?: string;
+  text: string;
   href: string;
   children: React.ReactNode;
 }) {
@@ -2950,10 +2922,6 @@ export function CanvasLayerStackSurface({
   const baseImage = base?.kind === 'image' ? base : undefined;
   const layoutWidth = node.data.layout_size?.width ?? baseImage?.width;
   const layoutHeight = node.data.layout_size?.height ?? baseImage?.height;
-  const layers = orderedLayerStackParts(node).flatMap(part => {
-    const version = context.resolveVersion(part.versionId);
-    return version?.kind === 'image' ? [{ ...part, version }] : [];
-  });
   const selectedChoice = choices.find(choice => (
     choice.key.alias === node.data.alias && choice.model.id === node.data.model
   ));
@@ -2996,48 +2964,8 @@ export function CanvasLayerStackSurface({
     <div className="flex h-full min-h-0">
       <div className="relative flex min-w-0 flex-1 items-center justify-center p-3">
         {baseImage && layoutWidth && layoutHeight ? (
-          <svg
-            viewBox={`0 0 ${layoutWidth} ${layoutHeight}`}
-            role="img"
-            aria-label={`${node.title} 合成预览`}
-            className="h-full w-full"
-            preserveAspectRatio="xMidYMid meet"
-          >
-            {layers.map(({ key, layer, version, visible }) => {
-              if (!visible) return null;
-              const [left, top, right, bottom] = layer?.bounding_box.absolute ?? [0, 0, layoutWidth, layoutHeight];
-              return (
-                <image
-                  key={key}
-                  data-layer-stack-part={layer?.id ?? 'base'}
-                  href={canvasMediaUrl(context.projectId, version.version_id)}
-                  x={left}
-                  y={top}
-                  width={right - left}
-                  height={bottom - top}
-                  preserveAspectRatio="xMidYMid meet"
-                />
-              );
-            })}
-            {layers.map(({ layer }) => {
-              if (!layer || hoveredLayerId !== layer.id || !layer.visible) return null;
-              const [left, top, right, bottom] = layer.bounding_box.absolute;
-              return (
-                <rect
-                  key={`outline-${layer.id}`}
-                  x={left}
-                  y={top}
-                  width={right - left}
-                  height={bottom - top}
-                  fill="none"
-                  stroke="var(--primary)"
-                  strokeWidth="2"
-                  vectorEffect="non-scaling-stroke"
-                  pointerEvents="none"
-                />
-              );
-            })}
-          </svg>
+          <CanvasLayerStackComposite node={node} projectId={context.projectId}
+            resolveVersion={context.resolveVersion} hoveredLayerId={hoveredLayerId} />
         ) : sourceImage ? (
           <img
             src={canvasMediaUrl(context.projectId, sourceImage.version_id, 1024)}

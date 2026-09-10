@@ -408,7 +408,6 @@ CanvasImageQuickToolId = Literal[
 class CanvasImageToolbarPreferences(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     tool_ids: list[CanvasImageQuickToolId]
-    show_labels: bool = False
 
     @model_validator(mode="after")
     def unique_tools(self) -> "CanvasImageToolbarPreferences":
@@ -867,6 +866,8 @@ class CanvasSplitOperation(BaseModel):
 
 
 class CanvasUpscaleOperation(BaseModel):
+    # 5.50.0 起放大改走 Nano Banana 生成 Run，浏览器不再能发起本地重采样；这个 origin 记录
+    # 只为读取旧文档里已存在的「本地放大」版本保留。
     model_config = ConfigDict(extra="forbid")
     kind: Literal["upscale"]
     target_long_edge: int = Field(gt=0, le=4096)
@@ -1390,21 +1391,13 @@ class CanvasSplitMediaOperation(BaseModel):
     vertical_lines: list[CanvasSplitLine] = Field(min_length=1, max_length=11)
 
 
-class CanvasUpscaleMediaOperation(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["upscale"]
-    target_long_edge: Literal[1024, 2048, 3072, 4096]
-    algorithm: Literal["nearest", "bilinear", "lanczos"]
-
-
 class CanvasRemoveBackgroundMediaOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["remove_background"]
 
 
 CanvasMediaOperation = Annotated[
-    CanvasCropMediaOperation | CanvasSplitMediaOperation | CanvasUpscaleMediaOperation
-    | CanvasRemoveBackgroundMediaOperation,
+    CanvasCropMediaOperation | CanvasSplitMediaOperation | CanvasRemoveBackgroundMediaOperation,
     Field(discriminator="kind"),
 ]
 
@@ -1462,6 +1455,16 @@ class CanvasAngleRunCreate(BaseModel):
     pitch_angle: int = Field(default=9, ge=-45, le=45)
     camera_distance: float = Field(default=4.8, ge=1, le=10)
     wide_angle: bool = False
+
+
+CanvasUpscaleTarget = Literal["2K", "4K"]
+
+
+class CanvasUpscaleRunCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    surface_node_id: str = Field(min_length=1, max_length=120)
+    expected_revision: int = Field(ge=0)
+    target: CanvasUpscaleTarget
 
 
 class CanvasRunResponse(BaseModel):

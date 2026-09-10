@@ -6,7 +6,11 @@ import { cn } from '@/lib/utils';
 
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
-export const DialogClose = DialogPrimitive.Close;
+export const DialogClose = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Close>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Close>
+>((props, ref) => <DialogPrimitive.Close {...props} ref={ref} data-connection-dismiss />);
+DialogClose.displayName = DialogPrimitive.Close.displayName;
 
 export const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
@@ -37,6 +41,7 @@ export const DialogContent = React.forwardRef<
       {children}
       {!hideClose && (
         <DialogPrimitive.Close
+          data-connection-dismiss
           aria-label="关闭"
           className="absolute right-3 top-3 inline-flex size-9 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >

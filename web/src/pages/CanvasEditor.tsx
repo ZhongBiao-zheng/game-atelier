@@ -70,6 +70,7 @@ import {
   saveCanvasDocument,
   submitCanvasAngleRun,
   submitCanvasLayerDecomposition,
+  submitCanvasUpscaleRun,
   submitCanvasRun,
   submitCanvasMaskEdit,
   submitCanvasReversePrompt,
@@ -96,6 +97,7 @@ import {
 } from '@/components/canvas/CanvasEditorViews';
 import { canvasNodeRunDisplayError, isReversePromptJob } from '@/components/canvas/CanvasNodeRunStatus';
 import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
+import { CanvasLayerStackPreview } from '@/components/canvas/CanvasLayerStackPreview';
 import { CanvasThemeSelector } from '@/components/canvas/CanvasThemeSelector';
 import {
   CanvasGenerationMetadata,
@@ -149,22 +151,23 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type {
-  CanvasContentVersion,
   CanvasConnection,
   CanvasContentNode,
+  CanvasContentVersion,
   CanvasDocument,
   CanvasGenerationDefaults,
   CanvasGenerationDraft,
   CanvasImageToolbarPreferences,
   CanvasLayerStackNode,
-  CanvasMediaOperation,
   CanvasMattingModelStatus,
+  CanvasMediaOperation,
   CanvasMediaVersion,
   CanvasNode,
   CanvasPoint,
   CanvasSize,
   CanvasTextVersion,
   CanvasUiPreferences,
+  CanvasUpscaleTarget,
   CanvasVideoFrameSlot,
 } from '@/schema/canvas';
 import type { CreationAsset } from '@/schema/creationAssets';
@@ -435,6 +438,7 @@ function CanvasEditorInner({
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [layerPreviewId, setLayerPreviewId] = useState<string | null>(null);
   const [mediaOperation, setMediaOperation] = useState<MediaOperationState | null>(null);
   const [mediaOperationBusy, setMediaOperationBusy] = useState(false);
   const [mediaPlaceholder, setMediaPlaceholder] = useState<CanvasMediaOperationPlaceholder | null>(null);
@@ -504,6 +508,7 @@ function CanvasEditorInner({
   const libraryInsertCommand = useRef<Promise<void> | null>(null);
   const mediaOperationInFlight = useRef(false);
   const documentCommandInFlight = useRef(false);
+  const uploadQueue = useRef<Promise<void> | null>(null);
   const canvasUiPreferencesSaveInFlight = useRef(false);
   const toolNoticeTimer = useRef<number | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
@@ -677,6 +682,7 @@ function CanvasEditorInner({
     setCanvasUiPreferences(DEFAULT_CANVAS_UI_PREFERENCES);
     setCanvasUiPreferencesError(null);
     setPreview(null);
+    setLayerPreviewId(null);
     setMediaOperation(null);
     setMediaOperationBusy(false);
     setMediaOperationError(null);
@@ -723,6 +729,7 @@ function CanvasEditorInner({
     serverRevision.current = 0;
     runSubmissionInFlight.current = false;
     documentCommandInFlight.current = false;
+    uploadQueue.current = null;
     canvasUiPreferencesSaveInFlight.current = false;
     projectRenameInFlight.current = false;
     cancelProjectRename.current = false;
@@ -982,7 +989,7 @@ function CanvasEditorInner({
               ),
             };
           }
-          setDocument(current => {
+          const acceptSaved = (current: CanvasDocument | null) => {
             if (!current) return current;
             if (current === snapshot && saved.revision === authoritativeRevision) return saved;
             return {
@@ -993,7 +1000,10 @@ function CanvasEditorInner({
                 saved.content_versions,
               ),
             };
-          });
+          };
+          // 排队的上传会在下一次 React render 前接着保存，必须先同步权威版本。
+          latestDocument.current = acceptSaved(latestDocument.current);
+          setDocument(acceptSaved);
         }
         setSaveState('saved');
         setSaveErrorDetail(null);
@@ -1065,7 +1075,7 @@ function CanvasEditorInner({
   // 关标签 / 刷新 / 硬跳转时 fetch 会被浏览器一起掐掉，冲不出去，只能拦一下让画师自己决定。
   useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
-      if (!saveQueued.current && !saveInFlight.current) return;
+      if (!saveQueued.current && !saveInFlight.current && !uploadQueue.current) return;
       event.preventDefault();
       event.returnValue = '';
     }
@@ -1885,14 +1895,7 @@ function CanvasEditorInner({
       // 未保存的画布内容一起丢。快捷键面板本来就承诺「拖入图片 / 视频 / 音频 → 上传到画布」。
       event.preventDefault();
       const origin = screenToFlowPosition({ x: event.clientX, y: event.clientY });
-      void (async () => {
-        for (const [index, file] of files.entries()) {
-          await handleUpload(file, {
-            screen: { x: event.clientX, y: event.clientY },
-            flow: { x: origin.x + index * 32, y: origin.y + index * 32 },
-          });
-        }
-      })();
+      handleUploads(files, { screen: { x: event.clientX, y: event.clientY }, flow: origin });
       return;
     }
   }
@@ -1941,6 +1944,7 @@ function CanvasEditorInner({
       history.current.past = history.current.past.slice(-50);
       history.current.future = [];
       const next = apply(baseDocument);
+      latestDocument.current = next;
       setDocument(next);
       dirtyVersion.current += 1;
       setDirtySignal(dirtyVersion.current);
@@ -2044,59 +2048,124 @@ function CanvasEditorInner({
     }, menu);
   }
 
-  async function handleUpload(file: File, menuOverride: CreateMenuState | null = createMenu) {
-    const menu = menuOverride;
-    if (!await persistNow()) return;
-    const current = latestDocument.current;
-    if (!current) return;
-    setAddOpen(false);
-    setError(null);
-    try {
-      const uploaded = await uploadCanvasMedia(projectId, file, serverRevision.current);
-      serverRevision.current = uploaded.document.revision;
-      const version = uploaded.version;
-      const concurrent = latestDocument.current ?? uploaded.document;
-      const baseDocument: CanvasDocument = {
-        ...concurrent,
-        revision: uploaded.document.revision,
-        updated_at: uploaded.document.updated_at,
-        content_versions: acceptServerContentVersions(
-          concurrent.content_versions,
-          uploaded.document.content_versions,
-        ),
-      };
-      const base = {
-        id: makeId(version.kind),
-        title: uploaded.filename,
-        position: (() => {
-          const size = version.kind === 'image'
-            ? sizeLockedToCanvasVersion(null, version)
-            : CANVAS_DEFAULT_NODE_SIZE;
-          return menu?.flow ? placeNewNode(menu.flow, size) : defaultPosition(size);
-        })(),
-        z_index: 0,
-      };
-      const node: CanvasContentNode = version.kind === 'audio'
+  async function uploadMaterial(file: File, menu: CreateMenuState | null) {
+    const uploaded = await uploadCanvasMedia(projectId, file, serverRevision.current);
+    if (latestDocument.current?.project_id !== projectId) return null;
+    serverRevision.current = Math.max(serverRevision.current, uploaded.document.revision);
+    const version = uploaded.version;
+    const concurrent = latestDocument.current ?? uploaded.document;
+    const baseDocument: CanvasDocument = {
+      ...concurrent,
+      revision: serverRevision.current,
+      updated_at: uploaded.document.updated_at,
+      content_versions: acceptServerContentVersions(
+        concurrent.content_versions,
+        uploaded.document.content_versions,
+      ),
+    };
+    const base = {
+      id: makeId(version.kind),
+      title: uploaded.filename,
+      position: (() => {
+        const size = version.kind === 'image'
+          ? sizeLockedToCanvasVersion(null, version)
+          : CANVAS_DEFAULT_NODE_SIZE;
+        return menu?.flow ? placeNewNode(menu.flow, size) : defaultPosition(size);
+      })(),
+      z_index: 0,
+    };
+    const node: CanvasContentNode = version.kind === 'audio'
+      ? {
+          ...base,
+          type: 'audio',
+          data: { current_version_id: version.version_id, generation_draft: null, active_run_id: null },
+        }
+      : version.kind === 'image'
         ? {
             ...base,
-            type: 'audio',
-            data: { current_version_id: version.version_id, generation_draft: null, active_run_id: null },
+            type: 'image',
+            data: { current_version_id: version.version_id, generation_draft: null, active_run_id: null, display: { fit: 'contain', free_resize: false } },
           }
-        : version.kind === 'image'
-          ? {
-              ...base,
-              type: 'image',
-              data: { current_version_id: version.version_id, generation_draft: null, active_run_id: null, display: { fit: 'contain', free_resize: false } },
+        : {
+            ...base,
+            type: 'video',
+            data: { current_version_id: version.version_id, generation_draft: null, active_run_id: null, display: { fit: 'contain', free_resize: false } },
+          };
+    appendNode(node, menu, baseDocument);
+    return node.id;
+  }
+
+  function handleUploads(files: File[], menu: CreateMenuState | null = createMenu, emptyTarget?: MediaReplaceTarget) {
+    if (!files.length) return;
+    // Each batch owns the document command window; later drops wait instead of racing revisions.
+    const command = (uploadQueue.current ?? Promise.resolve()).then(async () => {
+      if (latestDocument.current?.project_id !== projectId || !await persistNow()) return;
+      if (documentCommandInFlight.current || batchBusyRef.current) {
+        setError('请等待当前画布操作完成后再上传。');
+        return;
+      }
+      documentCommandInFlight.current = true;
+      setAddOpen(false);
+      setCreateMenu(null);
+      setError(null);
+      if (emptyTarget) setMediaReplaceBusyNodeIds(current => new Set(current).add(emptyTarget.nodeId));
+      const failures: string[] = [];
+      const added: string[] = [];
+      try {
+        for (const [index, file] of files.entries()) {
+          if (latestDocument.current?.project_id !== projectId) return;
+          try {
+            if (index === 0 && emptyTarget) {
+              const before = latestDocument.current;
+              const target = before.nodes.find(node => node.id === emptyTarget.nodeId);
+              // A chooser can stay open while the target changes; never overwrite newer content.
+              if (!target || !isContentNode(target) || target.data.current_version_id) {
+                throw new Error('原空节点已有内容或已删除，请重新选择上传位置。');
+              }
+              const dirtyAtCommand = dirtyVersion.current;
+              const uploaded = await replaceCanvasNodeMedia(projectId, target.id, file, serverRevision.current);
+              if (latestDocument.current?.project_id !== projectId) return;
+              mergeMediaPointerCommand(uploaded.document, target.id, dirtyAtCommand, before);
+              added.push(target.id);
+            } else {
+              const id = await uploadMaterial(file, menu);
+              if (id) added.push(id);
             }
-          : {
-              ...base,
-              type: 'video',
-              data: { current_version_id: version.version_id, generation_draft: null, active_run_id: null, display: { fit: 'contain', free_resize: false } },
-            };
-      appendNode(node, menu, baseDocument);
-    } catch (uploadError) {
-      setError((uploadError as Error).message);
-    }
+          } catch (error) {
+            failures.push(`${file.name}：${(error as Error).message}`);
+          }
+        }
+      } finally {
+        if (latestDocument.current?.project_id === projectId) {
+          documentCommandInFlight.current = false;
+          if (emptyTarget) setMediaReplaceTarget(null);
+          if (emptyTarget) setMediaReplaceBusyNodeIds(current => {
+            const next = new Set(current);
+            next.delete(emptyTarget.nodeId);
+            return next;
+          });
+          // Upload responses register versions, not the new nodes or concurrent local edits.
+          saveQueued.current = latestDocument.current;
+          try {
+            await flushSave(true);
+          } catch {
+            failures.push('素材已上传，但画布尚未保存，请重试保存。');
+          }
+          if (latestDocument.current?.project_id === projectId) {
+            setSelectedConnectionIds(new Set());
+            setSelectedNodeIds(new Set(added));
+            if (failures.length) setError(failures.slice(0, 3).join('；') + (failures.length > 3 ? `；共 ${failures.length} 项失败` : ''));
+            else announceToolNotice(`已添加 ${added.length} 个素材`);
+          }
+        }
+      }
+    }).catch(error => {
+      if (latestDocument.current?.project_id === projectId) setError((error as Error).message);
+    });
+    uploadQueue.current = command;
+    void command.finally(() => {
+      if (uploadQueue.current === command) uploadQueue.current = null;
+    });
   }
 
   function copySelectedNodes(event: ClipboardEvent) {
@@ -2238,7 +2307,7 @@ function CanvasEditorInner({
       if (image) {
         event.preventDefault();
         const flow = defaultPosition();
-        void handleUpload(image, { screen: { x: 0, y: 0 }, flow });
+        handleUploads([image], { screen: { x: 0, y: 0 }, flow });
         return;
       }
       const text = clipboard.getData('text/plain');
@@ -2988,6 +3057,8 @@ function CanvasEditorInner({
     if (version) setPreview({ nodeId, title, version });
   }, []);
 
+  const previewLayerStack = useCallback((nodeId: string) => setLayerPreviewId(nodeId), []);
+
   const announceToolNotice = useCallback((message: string) => {
     setToolNotice(message);
     if (toolNoticeTimer.current !== null) window.clearTimeout(toolNoticeTimer.current);
@@ -3586,6 +3657,47 @@ function CanvasEditorInner({
     projectId,
   ]);
 
+  const upscaleImage = useCallback(async (node: CanvasContentNode, target: CanvasUpscaleTarget) => {
+    if (runSubmissionInFlight.current) return;
+    setPreview(null);
+    setSubmittingNodeIds(current => new Set(current).add(node.id));
+    try {
+      if (!await persistNow()) {
+        setError('自动保存失败，AI高清尚未提交。请检查服务后重试。');
+        return;
+      }
+      const dirtyAtSubmission = dirtyVersion.current;
+      runSubmissionInFlight.current = true;
+      const run = await submitCanvasUpscaleRun(projectId, {
+        surface_node_id: node.id,
+        expected_revision: serverRevision.current,
+        target,
+      });
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      applyLocalJob(run.job);
+      const resultId = run.job.canvas_run?.result_node_id;
+      if (resultId) setSelectedNodeIds(new Set([resultId]));
+      announceToolNotice(`已提交“${node.title}”的 ${target} AI高清`);
+    } catch (submitError) {
+      setError((submitError as Error).message);
+    } finally {
+      runSubmissionInFlight.current = false;
+      setSubmittingNodeIds(current => {
+        const next = new Set(current);
+        next.delete(node.id);
+        return next;
+      });
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+    }
+  }, [
+    announceToolNotice,
+    applyLocalJob,
+    flushSave,
+    mergeSubmittedRunDocument,
+    persistNow,
+    projectId,
+  ]);
+
   const executeMediaOperation = useCallback(async (
     target: { nodeId: string; versionId: string },
     operation: CanvasMediaOperation,
@@ -3678,8 +3790,7 @@ function CanvasEditorInner({
       announceToolNotice(
         editsLayer ? '已更新图层素材' : operation.kind === 'split'
           ? `已生成 ${result.created_node_ids.length} 个切图节点`
-          : operation.kind === 'crop' ? '已生成裁剪节点'
-            : operation.kind === 'remove_background' ? '已生成抠图节点' : '已生成本地放大节点',
+          : operation.kind === 'crop' ? '已生成裁剪节点' : '已生成抠图节点',
       );
       requestAnimationFrame(() => editorRegionRef.current?.focus());
     } catch (operationError) {
@@ -3924,6 +4035,7 @@ function CanvasEditorInner({
     setVideoFrameConnections,
     selectNode: selectOnlyNode,
     previewContent,
+    previewLayerStack,
     selectCandidate,
     reportError,
     submitRun,
@@ -3954,6 +4066,7 @@ function CanvasEditorInner({
     removeBackground,
     openMaskEdit,
     openAngle,
+    upscaleImage,
     editVideo,
     saveImageToolbarPreferences: persistImageToolbarPreferences,
     deleteNode,
@@ -3993,10 +4106,12 @@ function CanvasEditorInner({
     mentionReferencesByNodeId,
     narrowViewport,
     openAngle,
+    upscaleImage,
     openMaskEdit,
     openMediaOperation,
     removeBackground,
     previewContent,
+    previewLayerStack,
     persistImageToolbarPreferences,
     projectId,
     reportError,
@@ -4049,6 +4164,7 @@ function CanvasEditorInner({
   if (!document) return <EditorMessage text={error || '画布读取失败'} action={<Button onClick={onBack}>返回项目列表</Button>} />;
 
   const background = backgroundVariant(document.settings.background);
+  const layerPreviewNode = document.nodes.find(node => node.id === layerPreviewId);
   const previewNode = preview
     ? document.nodes.find(node => node.id === preview.nodeId) ?? null
     : null;
@@ -4169,8 +4285,8 @@ function CanvasEditorInner({
     </>
   );
 
-  const canvasFeedbackVisible = !preview && !mediaOperation && !maskEdit && !angleState
-    && !shortcutsOpen && !generationPreferencesOpen && selectedNodeIds.size <= 1;
+  const canvasFeedbackVisible = !preview && !layerPreviewNode && !mediaOperation && !maskEdit && !angleState
+    && !shortcutsOpen && !generationPreferencesOpen;
 
   return (
     <CanvasNodeContext.Provider value={contextValue}>
@@ -4565,19 +4681,24 @@ function CanvasEditorInner({
           </div>
         )}
 
-        <input ref={uploadRef} type="file" className="sr-only" accept="image/*,video/*,audio/*" onChange={event => { const file = event.target.files?.[0]; if (file) void handleUpload(file); event.target.value = ''; }} />
+        <input ref={uploadRef} type="file" multiple aria-label="选择上传素材" className="sr-only" accept="image/*,video/*,audio/*" onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; handleUploads(files); }} />
         <input
           ref={replaceMediaRef}
           type="file"
           className="sr-only"
+          multiple={Boolean(mediaReplaceTarget && !mediaReplaceTarget.hadContent)}
           aria-label={mediaReplaceTarget
             ? mediaReplaceTarget.hadContent ? '选择替换媒体' : '选择上传媒体'
             : '选择节点媒体文件'}
           accept={mediaReplaceTarget ? replacementAccept(mediaReplaceTarget.kind) : undefined}
           onChange={event => {
-            const file = event.target.files?.[0];
+            const files = Array.from(event.target.files ?? []);
             const target = mediaReplaceTarget;
-            if (file && target) void handleMediaReplace(file, target);
+            if (files.length && target && !target.hadContent) {
+              const node = latestDocument.current?.nodes.find(node => node.id === target.nodeId);
+              const flow = node ? { x: node.position.x + (node.size?.width ?? CANVAS_DEFAULT_NODE_SIZE.width) + 32, y: node.position.y } : defaultPosition();
+              handleUploads(files, { screen: { x: 0, y: 0 }, flow }, target);
+            } else if (files[0] && target) void handleMediaReplace(files[0], target);
             else setMediaReplaceTarget(null);
             event.target.value = '';
           }}
@@ -4762,6 +4883,11 @@ function CanvasEditorInner({
         <div className="absolute bottom-16 right-3 z-20 md:bottom-3">
           <CanvasBatchResults projectId={projectId} runs={batchRuns} resolveVersion={resolveVersion} onCancel={stopBatch} onPreview={previewContent} />
         </div>
+        <Dialog open={layerPreviewNode?.type === 'layer_stack'} onOpenChange={open => { if (!open) setLayerPreviewId(null); }}>
+          {layerPreviewNode?.type === 'layer_stack' && <CanvasLayerStackPreview key={layerPreviewNode.id}
+            node={layerPreviewNode} projectId={projectId} resolveVersion={resolveVersion}
+            onCloseAutoFocus={event => { event.preventDefault(); restoreCanvasNodeFocus(layerPreviewNode.id); }} />}
+        </Dialog>
         <Dialog open={Boolean(preview)} onOpenChange={open => { if (!open) setPreview(null); }}>
           {preview && (
             <DialogContent className="max-h-[90dvh] max-w-4xl overflow-y-auto">
