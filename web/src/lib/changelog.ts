@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.52.1',
+    date: '2026-09-10',
+    headline: '拆分图层结果与原图分辨率一致',
+    changes: [
+      { kind: 'fix', text: '拆分图层的底图与各图层按原图分辨率重采样（Seedream 拆图最小出 1K，小图会被放大）；画布预览、素材节点与 PNG / PSD 导出同步保持原图尺寸。' },
+    ],
+  },
+  {
     version: '5.52.0',
     date: '2026-09-10',
     headline: 'AI高清按档位配置：2K / 4K / 8K 各自选模型、提示词与分辨率',
