@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.52.2',
+    date: '2026-09-10',
+    headline: '拆分图层节点显示尺寸与大小',
+    changes: [
+      { kind: 'feat', text: '拆分图层节点标题行右侧常显「宽 × 高 · 大小」，大小为底图与全部图层文件之和。' },
+    ],
+  },
+  {
     version: '5.52.1',
     date: '2026-09-10',
     headline: '拆分图层结果与原图分辨率一致',

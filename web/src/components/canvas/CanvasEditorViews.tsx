@@ -57,7 +57,7 @@ import {
   canvasNodeRunState,
   isReversePromptJob,
 } from '@/components/canvas/CanvasNodeRunStatus';
-import { formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
+import { formatCanvasBytes, formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
 import { CANVAS_UPSCALE_TARGETS, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
 import { imageControlCaps } from '@/lib/imageControlCaps';
@@ -380,6 +380,17 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   if (node.type === 'group') return <CanvasExecutionGroup node={node} context={context} selected={Boolean(selected)} />;
   const renameNode = context.renameNode;
   const content = nodeContent;
+  // 拆分图层节点没有单一 content：尺寸取底图，大小是底图 + 全部图层文件之和。
+  const layerStackInfo = (() => {
+    if (node.type !== 'layer_stack') return null;
+    const base = context.resolveVersion(node.data.base_version_id);
+    if (base?.kind !== 'image' || !base.width || !base.height) return null;
+    const bytes = node.data.layers.reduce((total, layer) => {
+      const version = context.resolveVersion(layer.version_id);
+      return total + (version?.kind === 'image' ? version.bytes : 0);
+    }, base.bytes);
+    return `${base.width} × ${base.height} · ${formatCanvasBytes(bytes)}`;
+  })();
   const replacingMedia = context.mediaReplaceBusyNodeIds.has(node.id);
   const submittingNode = context.submittingNodeIds.has(node.id);
   const nodeRunState = canvasNodeRunState(node, context.jobsByRunId);
@@ -572,6 +583,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               context.locateNode?.(context.layerParentByNodeId!.get(node.id)!.nodeId);
             }}
           ><Layers3 className="size-3" aria-hidden="true" />父图层</button>
+        )}
+        {layerStackInfo && (
+          <span className="ml-2 shrink-0 truncate tabular-nums" aria-label={`图层栈尺寸 ${layerStackInfo}`}>
+            {layerStackInfo}
+          </span>
         )}
         <CanvasNodeRunBadge state={nodeRunState} />
       </header>
