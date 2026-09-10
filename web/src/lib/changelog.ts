@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.47.0',
+    date: '2026-09-10',
+    headline: '画布批量添加素材',
+    changes: [
+      { kind: 'feat', text: '上传附件支持多选，文件夹内的多个素材可一次拖入画布并独立摆放。' },
+      { kind: 'fix', text: '批量上传保留已有节点和并发编辑，个别文件失败不会中断其余素材。' },
+    ],
+  },
+  {
     version: '5.46.0',
     date: '2026-09-09',
     headline: '素材关联与生成面板简化',
