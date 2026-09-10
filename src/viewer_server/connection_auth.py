@@ -299,11 +299,11 @@ class ConnectionStore:
             self._refresh()
             if session.revoked.is_set() or session.principal.kind != "site":
                 raise ConnectionError("CAPABILITY_DENIED", "此连接不需要媒体令牌")
-            owned = sorted(
-                ((expires_at, key) for key, (owner, expires_at) in self.media_tokens.items()
-                 if owner == session.principal.session_id),
-            )
-            for _, key in owned[: max(0, len(owned) + 1 - MEDIA_TOKENS_PER_SESSION)]:
+            # 按签发顺序淘汰（dict 保持插入序）；Windows 的 time.time() 粒度 ~15ms，
+            # 连发的令牌 expires_at 相同，按到期时间排序会随机淘汰。
+            owned = [key for key, (owner, _) in self.media_tokens.items()
+                     if owner == session.principal.session_id]
+            for key in owned[: max(0, len(owned) + 1 - MEDIA_TOKENS_PER_SESSION)]:
                 del self.media_tokens[key]
             token = secrets.token_urlsafe(32)
             expires_at = min(time.time() + MEDIA_TOKEN_TTL, session.expires_at)
