@@ -145,6 +145,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     removeBackground: vi.fn(),
     openMaskEdit: vi.fn(),
     openAngle: vi.fn(),
+    upscaleImage: vi.fn(),
     editVideo: vi.fn(),
     saveImageToolbarPreferences: vi.fn(async () => undefined),
     deleteNode: vi.fn(),
@@ -578,7 +579,7 @@ it('omits removed actions even in saved preferences and keeps allowed tools moun
   }
   expect(within(toolbar).getByRole('button', { name: '裁剪 图片' })).toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '切分 图片' })).toBeInTheDocument();
-  expect(within(toolbar).getByRole('button', { name: '本地放大 图片' })).toBeInTheDocument();
+  expect(within(toolbar).getByRole('button', { name: '高清放大 图片' })).toBeInTheDocument();
   fireEvent.click(within(toolbar).getByRole('button', { name: '拆分 图片 的图层' }));
   expect(context.createLayerDecomposition).toHaveBeenCalledWith(image);
   expect(screen.queryByRole('dialog', { name: '拆分图层' })).not.toBeInTheDocument();

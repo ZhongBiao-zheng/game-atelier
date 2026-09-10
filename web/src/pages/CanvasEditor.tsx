@@ -70,6 +70,7 @@ import {
   saveCanvasDocument,
   submitCanvasAngleRun,
   submitCanvasLayerDecomposition,
+  submitCanvasUpscaleRun,
   submitCanvasRun,
   submitCanvasMaskEdit,
   submitCanvasReversePrompt,
@@ -150,22 +151,23 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type {
-  CanvasContentVersion,
   CanvasConnection,
   CanvasContentNode,
+  CanvasContentVersion,
   CanvasDocument,
   CanvasGenerationDefaults,
   CanvasGenerationDraft,
   CanvasImageToolbarPreferences,
   CanvasLayerStackNode,
-  CanvasMediaOperation,
   CanvasMattingModelStatus,
+  CanvasMediaOperation,
   CanvasMediaVersion,
   CanvasNode,
   CanvasPoint,
   CanvasSize,
   CanvasTextVersion,
   CanvasUiPreferences,
+  CanvasUpscaleTarget,
   CanvasVideoFrameSlot,
 } from '@/schema/canvas';
 import type { CreationAsset } from '@/schema/creationAssets';
@@ -3655,6 +3657,47 @@ function CanvasEditorInner({
     projectId,
   ]);
 
+  const upscaleImage = useCallback(async (node: CanvasContentNode, target: CanvasUpscaleTarget) => {
+    if (runSubmissionInFlight.current) return;
+    setPreview(null);
+    setSubmittingNodeIds(current => new Set(current).add(node.id));
+    try {
+      if (!await persistNow()) {
+        setError('自动保存失败，高清放大尚未提交。请检查服务后重试。');
+        return;
+      }
+      const dirtyAtSubmission = dirtyVersion.current;
+      runSubmissionInFlight.current = true;
+      const run = await submitCanvasUpscaleRun(projectId, {
+        surface_node_id: node.id,
+        expected_revision: serverRevision.current,
+        target,
+      });
+      mergeSubmittedRunDocument(run.document, run.job, dirtyAtSubmission);
+      applyLocalJob(run.job);
+      const resultId = run.job.canvas_run?.result_node_id;
+      if (resultId) setSelectedNodeIds(new Set([resultId]));
+      announceToolNotice(`已提交“${node.title}”的 ${target} 高清放大`);
+    } catch (submitError) {
+      setError((submitError as Error).message);
+    } finally {
+      runSubmissionInFlight.current = false;
+      setSubmittingNodeIds(current => {
+        const next = new Set(current);
+        next.delete(node.id);
+        return next;
+      });
+      if (saveQueued.current) void flushSave().catch(() => undefined);
+    }
+  }, [
+    announceToolNotice,
+    applyLocalJob,
+    flushSave,
+    mergeSubmittedRunDocument,
+    persistNow,
+    projectId,
+  ]);
+
   const executeMediaOperation = useCallback(async (
     target: { nodeId: string; versionId: string },
     operation: CanvasMediaOperation,
@@ -3747,8 +3790,7 @@ function CanvasEditorInner({
       announceToolNotice(
         editsLayer ? '已更新图层素材' : operation.kind === 'split'
           ? `已生成 ${result.created_node_ids.length} 个切图节点`
-          : operation.kind === 'crop' ? '已生成裁剪节点'
-            : operation.kind === 'remove_background' ? '已生成抠图节点' : '已生成本地放大节点',
+          : operation.kind === 'crop' ? '已生成裁剪节点' : '已生成抠图节点',
       );
       requestAnimationFrame(() => editorRegionRef.current?.focus());
     } catch (operationError) {
@@ -4024,6 +4066,7 @@ function CanvasEditorInner({
     removeBackground,
     openMaskEdit,
     openAngle,
+    upscaleImage,
     editVideo,
     saveImageToolbarPreferences: persistImageToolbarPreferences,
     deleteNode,
@@ -4063,6 +4106,7 @@ function CanvasEditorInner({
     mentionReferencesByNodeId,
     narrowViewport,
     openAngle,
+    upscaleImage,
     openMaskEdit,
     openMediaOperation,
     removeBackground,

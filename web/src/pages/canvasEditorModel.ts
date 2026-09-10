@@ -466,7 +466,6 @@ export interface CanvasMediaOperationPlaceholder {
 const MEDIA_OPERATION_PLACEHOLDER_LABEL: Record<CanvasMediaOperation['kind'], string> = {
   crop: '裁剪中…',
   split: '切图中…',
-  upscale: '放大中…',
   remove_background: '抠图中…',
 };
 

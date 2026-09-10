@@ -15,8 +15,8 @@ import {
 } from '@xyflow/react';
 import { ArrowLeftRight, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
-  createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef,
-  useState,
+  createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
+  useRef, useState,
   type FocusEvent as ReactFocusEvent, type ReactNode, type Ref, type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -28,6 +28,12 @@ import { CanvasLayerStackList } from './CanvasLayerStackList';
 import { CanvasLayerStackComposite } from './CanvasLayerStackPreview';
 import type { KeyView } from '@/api/keys';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { CanvasImageToolbarPreferencesDialog } from '@/components/canvas/CanvasImageToolbarPreferencesDialog';
 import { layerDecompositionModelChoices } from '@/components/canvas/canvasLayerDecomposition';
 import {
@@ -52,7 +58,7 @@ import {
   isReversePromptJob,
 } from '@/components/canvas/CanvasNodeRunStatus';
 import { formatCanvasImageInfo } from '@/components/canvas/canvasMediaFormatting';
-import { orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
+import { CANVAS_UPSCALE_TARGETS, orderedCanvasImageTools } from '@/components/canvas/canvasImageToolbar';
 import { isUploadedImageMaterialNode } from '@/components/canvas/canvasNodePanelInteraction';
 import { imageControlCaps } from '@/lib/imageControlCaps';
 import { VideoControls } from '@/components/studio/VideoControls';
@@ -82,6 +88,7 @@ import type {
   CanvasPoint,
   CanvasSize,
   CanvasUiPreferences,
+  CanvasUpscaleTarget,
   CanvasVideoFrameSlot,
 } from '@/schema/canvas';
 import type { Job } from '@/schema/jobs';
@@ -192,6 +199,7 @@ export interface CanvasNodeContextValue {
   removeBackground: (node: CanvasContentNode) => void;
   openMaskEdit: (node: CanvasContentNode) => void;
   openAngle: (node: CanvasContentNode) => void;
+  upscaleImage: (node: CanvasContentNode, target: CanvasUpscaleTarget) => void;
   editVideo: (node: CanvasContentNode) => void;
   saveImageToolbarPreferences: (value: CanvasImageToolbarPreferences) => Promise<void>;
   deleteNode: (id: string) => void;
@@ -1602,6 +1610,8 @@ type ImageToolbarAction = {
   destructive?: boolean;
   href?: string;
   run: () => void;
+  /** 有菜单的按钮点击后展开选项，不直接执行 run。 */
+  menu?: Array<{ id: string; title: string; detail: string; onSelect: () => void }>;
 };
 
 function ImageNodeToolbar({
@@ -1677,15 +1687,25 @@ function ImageNodeToolbar({
         if (currentVersionId) context.openMediaOperation(node, 'split');
       },
     };
-    if (definition.id === 'upscale') action = {
-      ...common,
-      label: `本地放大 ${node.title}`,
-      icon: <Icon />,
-      disabled: !currentVersionId || replacing,
-      run: () => {
-        if (currentVersionId) context.openMediaOperation(node, 'upscale');
-      },
-    };
+    if (definition.id === 'upscale') {
+      const longEdge = Math.max(imageContent?.width ?? 0, imageContent?.height ?? 0);
+      const targets = CANVAS_UPSCALE_TARGETS.filter(target => target.longEdge > longEdge);
+      action = {
+        ...common,
+        label: currentVersionId && targets.length === 0
+          ? `${node.title} 已达 4K，无需放大`
+          : `高清放大 ${node.title}`,
+        icon: <Icon />,
+        disabled: !currentVersionId || submitting || replacing || targets.length === 0,
+        run: () => undefined,
+        menu: targets.map(target => ({
+          id: target.id,
+          title: target.id,
+          detail: `长边 ${target.longEdge}px`,
+          onSelect: () => context.upscaleImage(node, target.id),
+        })),
+      };
+    }
     if (definition.id === 'removeBackground') action = {
       ...common,
       label: `抠图 ${node.title}`,
@@ -1709,6 +1729,11 @@ function ImageNodeToolbar({
 
   function updateSettingsOpen(open: boolean) {
     setSettingsOpen(open);
+    onOverlayOpenChange(open);
+  }
+
+  // 菜单展开期间节点可能失去选中，工具栏要像设置弹窗一样保持可见。
+  function updateMenuOpen(open: boolean) {
     onOverlayOpenChange(open);
   }
 
@@ -1741,6 +1766,35 @@ function ImageNodeToolbar({
         >
           {action.icon}
         </MediaToolLink>
+      ) : action.menu ? (
+        <DropdownMenu key={action.id} onOpenChange={updateMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <MediaToolButton
+              label={action.label}
+              text={action.text}
+              disabled={action.disabled}
+              onClick={() => undefined}
+            >
+              {action.icon}
+            </MediaToolButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="center"
+            className="nodrag min-w-36"
+            onPointerDown={event => event.stopPropagation()}
+          >
+            {action.menu.map(item => (
+              <DropdownMenuItem
+                key={item.id}
+                className="justify-between gap-4 tabular-nums"
+                onSelect={item.onSelect}
+              >
+                <span>{item.title}</span>
+                <span className="text-xs text-muted-foreground">{item.detail}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : (
         <MediaToolButton
           key={action.id}
@@ -2738,34 +2792,44 @@ export function ToolButton({ label, active, disabled, onClick, children, buttonR
   return <button ref={buttonRef} type="button" title={label} aria-label={label} aria-pressed={active} aria-expanded={expanded} aria-controls={controlsId} aria-haspopup={controlsId && popup ? popup : undefined} disabled={disabled} onClick={onClick} className={cn('grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-30', active && 'bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground')}>{children}</button>;
 }
 
-function MediaToolButton({ label, text, destructive = false, disabled = false, onClick, children }: {
+// forwardRef + 透传其余属性：作为 Radix DropdownMenuTrigger 的 asChild 子元素时要接住它注入的
+// ref 与 onPointerDown / onKeyDown / aria-* 才能展开菜单。
+const MediaToolButton = forwardRef<HTMLButtonElement, {
   label: string;
   text: string;
   destructive?: boolean;
   disabled?: boolean;
   onClick: () => void;
   children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      className={cn(
-        'nodrag flex h-7 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full px-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30',
-        destructive && 'hover:text-destructive',
-      )}
-      onClick={event => {
-        event.stopPropagation();
-        onClick();
-      }}
-    >
-      <span aria-hidden="true" className="[&>svg]:size-3.5">{children}</span>
-      <span className="text-xs">{text}</span>
-    </button>
-  );
-}
+} & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onClick' | 'children' | 'disabled'>>(
+  function MediaToolButton(
+    { label, text, destructive = false, disabled = false, onClick, children, className, ...rest },
+    ref,
+  ) {
+    return (
+      <button
+        {...rest}
+        ref={ref}
+        type="button"
+        title={label}
+        aria-label={label}
+        disabled={disabled}
+        className={cn(
+          'nodrag flex h-7 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full px-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30',
+          destructive && 'hover:text-destructive',
+          className,
+        )}
+        onClick={event => {
+          event.stopPropagation();
+          onClick();
+        }}
+      >
+        <span aria-hidden="true" className="[&>svg]:size-3.5">{children}</span>
+        <span className="text-xs">{text}</span>
+      </button>
+    );
+  },
+);
 
 function MediaToolLink({ label, text, href, children }: {
   label: string;

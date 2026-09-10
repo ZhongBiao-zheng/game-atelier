@@ -158,6 +158,7 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     removeBackground: vi.fn(),
     openMaskEdit: vi.fn(),
     openAngle: vi.fn(),
+    upscaleImage: vi.fn(),
     editVideo: vi.fn(),
     saveImageToolbarPreferences: vi.fn(async () => undefined),
     deleteNode: vi.fn(),

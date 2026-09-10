@@ -42,13 +42,10 @@ from character_workflow.lib.schemas import (
     CanvasSize,
     CanvasSplitMediaOperation,
     CanvasSplitOperation,
-    CanvasUpscaleMediaOperation,
-    CanvasUpscaleOperation,
 )
 
 _MediaOperation = (
-    CanvasCropMediaOperation | CanvasSplitMediaOperation | CanvasUpscaleMediaOperation
-    | CanvasRemoveBackgroundMediaOperation
+    CanvasCropMediaOperation | CanvasSplitMediaOperation | CanvasRemoveBackgroundMediaOperation
 )
 
 _GLOBAL_OPERATION_GATE = BoundedSemaphore(2)
@@ -355,7 +352,7 @@ def _render_outputs(
     elif isinstance(operation, CanvasCropMediaOperation):
         with source.crop(_crop_box(operation, *source.size)) as result:
             outputs.append(_save_png(result, stage, "result.png", 0, 0))
-    elif isinstance(operation, CanvasSplitMediaOperation):
+    else:
         horizontal, y_cuts = _split_axis(operation.horizontal_lines, source.height)
         vertical, x_cuts = _split_axis(operation.vertical_lines, source.width)
         if len(y_cuts) - 1 > 12 or len(x_cuts) - 1 > 12:
@@ -369,26 +366,6 @@ def _render_outputs(
                 with source.crop((left, top, right, bottom)) as result:
                     filename = f"piece-r{row + 1:02d}-c{column + 1:02d}.png"
                     outputs.append(_save_png(result, stage, filename, row, column))
-    else:
-        long_edge = max(source.size)
-        if operation.target_long_edge <= long_edge:
-            raise CanvasMediaOperationError(
-                "canvas_media_upscale_not_needed",
-                "目标长边必须大于原图；本地放大不会恢复新的图像细节。",
-            )
-        scale = operation.target_long_edge / long_edge
-        target_size = (
-            max(1, round(source.width * scale)),
-            max(1, round(source.height * scale)),
-        )
-        _validate_output_size(*target_size)
-        resampling = {
-            "nearest": Image.Resampling.NEAREST,
-            "bilinear": Image.Resampling.BILINEAR,
-            "lanczos": Image.Resampling.LANCZOS,
-        }[operation.algorithm]
-        with source.resize(target_size, resample=resampling) as result:
-            outputs.append(_save_png(result, stage, "result.png", 0, 0))
 
     uncompressed = sum(item.width * item.height * 4 for item in outputs)
     stored = sum(item.byte_count for item in outputs)
@@ -493,7 +470,7 @@ def _origin_for_output(
         detail = CanvasRemoveBackgroundOperation(kind="remove_background", model=MODEL_ID)
     elif isinstance(operation, CanvasCropMediaOperation):
         detail = CanvasCropOperation(kind="crop", rect=operation.rect)
-    elif isinstance(operation, CanvasSplitMediaOperation):
+    else:
         assert split_lines is not None
         detail = CanvasSplitOperation(
             kind="split",
@@ -501,12 +478,6 @@ def _origin_for_output(
             vertical_lines=split_lines[1],
             row=output.row,
             column=output.column,
-        )
-    else:
-        detail = CanvasUpscaleOperation(
-            kind="upscale",
-            target_long_edge=operation.target_long_edge,
-            algorithm=operation.algorithm,
         )
     return CanvasLocalToolOrigin(
         kind="local_tool",
@@ -605,7 +576,7 @@ def _build_document(
         elif isinstance(request.operation, CanvasRemoveBackgroundMediaOperation):
             title = "抠图"
         else:
-            title = "裁剪结果" if isinstance(request.operation, CanvasCropMediaOperation) else "本地放大"
+            title = "裁剪结果"
         node = CanvasImageNode(
             id=node_id,
             type="image",

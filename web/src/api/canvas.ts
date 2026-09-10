@@ -4,15 +4,16 @@ import type {
   CanvasAgentSession,
   CanvasAgentSessionList,
   CanvasDocument,
+  CanvasMattingModelStatus,
   CanvasMediaOperation,
   CanvasMediaOperationResult,
-  CanvasMattingModelStatus,
   CanvasPackageImport,
   CanvasPackageInspection,
   CanvasProject,
   CanvasProjectSummary,
   CanvasRun,
   CanvasUpload,
+  CanvasUpscaleTarget,
 } from '@/schema/canvas';
 
 export function listCanvasProjects(lightweight: true): Promise<CanvasProject[]>;
@@ -386,6 +387,27 @@ export function submitCanvasAngleRun(
   return requestJson<CanvasRun>(
     `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/angle`,
     '提交多角度生成',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export interface CanvasUpscaleRunPayload {
+  surface_node_id: string;
+  expected_revision: number;
+  target: CanvasUpscaleTarget;
+}
+
+export function submitCanvasUpscaleRun(
+  projectId: string,
+  payload: CanvasUpscaleRunPayload,
+): Promise<CanvasRun> {
+  return requestJson<CanvasRun>(
+    `/api/canvas/projects/${encodeURIComponent(projectId)}/runs/upscale`,
+    '提交高清放大',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

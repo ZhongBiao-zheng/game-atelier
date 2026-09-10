@@ -48,7 +48,6 @@ def _cropped_project(operation=None):
 @pytest.mark.parametrize("operation,count", [
     ({"kind": "remove_background"}, 1),
     ({"kind": "split", "horizontal_lines": [0.5], "vertical_lines": [0.5]}, 4),
-    ({"kind": "upscale", "target_long_edge": 1024, "algorithm": "nearest"}, 1),
 ])
 def test_independent_media_outputs_only_create_material_relationships(monkeypatch, operation, count):
     from character_workflow.lib import matting

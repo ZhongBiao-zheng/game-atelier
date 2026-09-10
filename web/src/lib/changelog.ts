@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.50.0',
+    date: '2026-09-10',
+    headline: '高清放大改用 Nano Banana',
+    changes: [
+      { kind: 'feat', text: '选中图片点「高清放大」直接选 2K 或 4K，由 Nano Banana Pro 按内置提示词重绘出高清版本；不超过原图长边的档位不显示，原图已达 4K 时按钮置灰。' },
+      { kind: 'feat', text: '原「本地放大」重采样弹窗移除；以前生成的本地放大节点照常保留。' },
+    ],
+  },
+  {
     version: '5.49.1',
     date: '2026-09-10',
     headline: '节点工具栏显示名称',
