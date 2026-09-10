@@ -20,8 +20,10 @@ function server(overrides?: (url: string, init: RequestInit) => Response | Promi
 afterEach(() => { clients.splice(0).forEach(item => item.dispose()); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('local connection', () => {
-  it.each(['60', new Date(Date.now() + 60_000).toUTCString()])('honors Retry-After %s before reconnecting', async retryAfter => {
+  it.each(['seconds', 'http-date'])('honors Retry-After (%s) before reconnecting', async form => {
     vi.useFakeTimers();
+    // HTTP 日期在假时钟下算，否则收集到执行之间流过的真实秒数会把 60s 等待缩短（慢 CI 上偶发）。
+    const retryAfter = form === 'seconds' ? '60' : new Date(Date.now() + 60_000).toUTCString();
     const network = server(() => new Response('{}', { status: 429, headers: { 'Retry-After': retryAfter } }));
     const connection = client(); await connection.start();
     await vi.advanceTimersByTimeAsync(59_000);
