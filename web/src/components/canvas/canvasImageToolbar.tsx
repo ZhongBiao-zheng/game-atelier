@@ -42,7 +42,6 @@ export const DEFAULT_CANVAS_UI_PREFERENCES: CanvasUiPreferences = {
   revision: 0,
   image_toolbar: {
     tool_ids: DEFAULT_CANVAS_IMAGE_TOOL_IDS,
-    show_labels: false,
   },
   generation_defaults: {
     text: { selection: null, params: {} },

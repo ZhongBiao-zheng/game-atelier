@@ -32,7 +32,6 @@ export type CanvasImageQuickToolId =
 
 export interface CanvasImageToolbarPreferences {
   tool_ids: CanvasImageQuickToolId[];
-  show_labels: boolean;
 }
 
 export interface CanvasUiPreferences {

@@ -536,7 +536,6 @@ it('omits removed actions even in saved preferences and keeps allowed tools moun
     canvasUiPreferences: {
       ...DEFAULT_CANVAS_UI_PREFERENCES,
       image_toolbar: {
-        show_labels: false,
         tool_ids: ['delete', 'info', 'saveAsset', 'download', 'copyPrompt', 'reversePrompt', 'replace', 'maskEdit', 'crop', 'split', 'removeBackground', 'upscale'],
       },
     },

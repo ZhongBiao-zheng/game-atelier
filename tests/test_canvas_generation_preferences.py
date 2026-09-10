@@ -17,7 +17,6 @@ def _payload(revision: int = 0) -> dict:
         "expected_revision": revision,
         "image_toolbar": {
             "tool_ids": ["info", "download"],
-            "show_labels": True,
         },
         "generation_defaults": {
             "text": {
@@ -65,7 +64,6 @@ def test_generation_preferences_default_get_is_v2_and_does_not_write(isolated_da
             "tool_ids": [
                 "info", "download", "crop", "split", "removeBackground", "upscale",
             ],
-            "show_labels": False,
         },
         "generation_defaults": {
             mode: {"selection": None, "params": {}}

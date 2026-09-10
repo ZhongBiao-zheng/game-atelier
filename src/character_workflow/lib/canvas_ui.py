@@ -41,7 +41,6 @@ def default_canvas_ui_preferences() -> CanvasUiPreferences:
     return CanvasUiPreferences(
         image_toolbar=CanvasImageToolbarPreferences(
             tool_ids=DEFAULT_IMAGE_TOOL_IDS,
-            show_labels=False,
         ),
         generation_defaults=CanvasGenerationDefaults(),
     )
@@ -52,7 +51,14 @@ def _read_unlocked() -> CanvasUiPreferences:
     if not path.exists():
         return default_canvas_ui_preferences()
     try:
-        return CanvasUiPreferences.model_validate_json(path.read_text(encoding="utf-8"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        # Trigger: 5.48.1 曾把「显示按钮文字」存成 image_toolbar.show_labels，5.49.1 起文字常显、字段退役
+        # Why: schema 是 extra=forbid，不丢这个键，升级前写过偏好的用户会被判成文件损坏
+        # Outcome: 只丢这一个键，其余内容照常严格校验
+        if isinstance(raw, dict) and isinstance(raw.get("image_toolbar"), dict):
+            raw["image_toolbar"].pop("show_labels", None)
+        # strict 模式下 datetime 只在 JSON 校验路径接受字符串，所以丢键后仍走 JSON 校验。
+        return CanvasUiPreferences.model_validate_json(json.dumps(raw))
     except (OSError, ValidationError, json.JSONDecodeError) as error:
         raise CanvasUiPreferencesError(
             "Canvas 界面偏好文件损坏，请检查 .config/canvas-ui.json"

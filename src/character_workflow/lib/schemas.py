@@ -408,7 +408,6 @@ CanvasImageQuickToolId = Literal[
 class CanvasImageToolbarPreferences(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     tool_ids: list[CanvasImageQuickToolId]
-    show_labels: bool = False
 
     @model_validator(mode="after")
     def unique_tools(self) -> "CanvasImageToolbarPreferences":

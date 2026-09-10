@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.49.1',
+    date: '2026-09-10',
+    headline: '节点工具栏显示名称',
+    changes: [
+      { kind: 'feat', text: '选中节点后上方的工具按钮统一显示图标和名称，不再需要悬停辨认；「显示按钮文字」开关随之移除。' },
+    ],
+  },
+  {
     version: '5.49.0',
     date: '2026-09-10',
     headline: '拆分图层可导出 PSD',

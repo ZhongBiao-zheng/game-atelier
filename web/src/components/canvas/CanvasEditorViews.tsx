@@ -596,6 +596,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               label={nodeRunState.reversePrompt
                 ? nodeJob.cancel_requested_at ? '正在停止反推提示词' : '停止反推提示词'
                 : nodeJob.cancel_requested_at ? `正在停止 ${node.title}` : `停止 ${node.title} 的生成`}
+              text="停止"
               disabled={Boolean(nodeJob.cancel_requested_at)}
               onClick={() => void context.cancelRun(nodeJob.canvas_run!.run_id)}
             >
@@ -624,6 +625,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               {reversePromptJob && reversePromptSucceeded && !context.reversePromptConfiguredNodeIds.has(node.id) && (
                 <MediaToolButton
                   label="从反推文本创建图片配置"
+                  text="生成配置"
                   disabled={submittingNode}
                   onClick={() => void context.recoverReversePromptConfig(reversePromptJob)}
                 >
@@ -1417,11 +1419,12 @@ function CanvasNodeToolbar({
     <>
       {node.type === 'text' && (
         <>
-          <MediaToolButton label={`编辑文本 ${node.title}`} disabled={submitting} onClick={onEditText}>
+          <MediaToolButton label={`编辑文本 ${node.title}`} text="编辑" disabled={submitting} onClick={onEditText}>
             <Pencil />
           </MediaToolButton>
           <MediaToolButton
             label={`减小 ${node.title} 字号`}
+            text="减小字号"
             disabled={node.data.display.scale === 'xs'}
             onClick={onDecreaseText}
           >
@@ -1429,6 +1432,7 @@ function CanvasNodeToolbar({
           </MediaToolButton>
           <MediaToolButton
             label={`增大 ${node.title} 字号`}
+            text="增大字号"
             disabled={node.data.display.scale === 'base'}
             onClick={onIncreaseText}
           >
@@ -1436,6 +1440,7 @@ function CanvasNodeToolbar({
           </MediaToolButton>
           <MediaToolButton
             label={`用 ${node.title} 生成图片`}
+            text="生成图片"
             disabled={content?.kind !== 'text'}
             onClick={() => context.createImageConfigFromText(node.id)}
           >
@@ -1445,12 +1450,12 @@ function CanvasNodeToolbar({
       )}
       {node.type === 'layer_stack' && (
         <>
-          {([['zip', '下载全部图层', <Download />], ['psd', '导出 PSD', <FileDown />]] as const).map(
-            ([format, label, icon]) => (
+          {([['zip', '下载全部图层', '下载图层', <Download />], ['psd', '导出 PSD', 'PSD', <FileDown />]] as const).map(
+            ([format, label, text, icon]) => (
               <MediaToolButton
                 key={format}
                 label={label}
-                text={format === 'psd' ? 'PSD' : undefined}
+                text={text}
                 disabled={!layersReady || downloadingLayers !== null}
                 onClick={() => {
                   setDownloadingLayers(format);
@@ -1465,6 +1470,7 @@ function CanvasNodeToolbar({
           )}
           <MediaToolButton
             label="展开图层到画布并分组"
+            text="展开图层"
             disabled={!layersReady || context.batchBusy}
             onClick={() => context.expandLayerStack(node.id)}
           >
@@ -1474,6 +1480,7 @@ function CanvasNodeToolbar({
       )}
       <MediaToolButton
         label={content || node.type === 'layer_stack' ? `查看 ${node.title} 详情` : `查看 ${node.title} 设置`}
+        text={content || node.type === 'layer_stack' ? '查看详情' : '查看设置'}
         onClick={() => {
           if (node.type === 'layer_stack') context.previewLayerStack(node.id);
           else if (content) context.previewContent(content.version_id, node.title, node.id);
@@ -1485,18 +1492,20 @@ function CanvasNodeToolbar({
       {content && content.kind !== 'text' ? (
         <MediaToolLink
           label={`下载 ${node.title}`}
+          text="下载"
           href={canvasDownloadUrl(context.projectId, content.version_id)}
         >
           <Download />
         </MediaToolLink>
       ) : mediaNode ? (
-        <MediaToolButton label={`下载 ${node.title}`} disabled onClick={() => undefined}>
+        <MediaToolButton label={`下载 ${node.title}`} text="下载" disabled onClick={() => undefined}>
           <Download />
         </MediaToolButton>
       ) : null}
       {mediaNode && !content && (
         <MediaToolButton
           label={`上传到 ${node.title}`}
+          text="上传"
           disabled={replacing}
           onClick={() => context.replaceMedia(mediaNode)}
         >
@@ -1506,6 +1515,7 @@ function CanvasNodeToolbar({
       {node.type === 'video' && (
         <MediaToolButton
           label={`编辑视频 ${node.title}`}
+          text="编辑视频"
           disabled={content?.kind !== 'video' || submitting || replacing}
           onClick={() => {
             if (content?.kind === 'video') context.editVideo(node);
@@ -1726,7 +1736,7 @@ function ImageNodeToolbar({
         <MediaToolLink
           key={action.id}
           label={action.label}
-          text={context.canvasUiPreferences.image_toolbar.show_labels ? action.text : undefined}
+          text={action.text}
           href={action.href}
         >
           {action.icon}
@@ -1735,7 +1745,7 @@ function ImageNodeToolbar({
         <MediaToolButton
           key={action.id}
           label={action.label}
-          text={context.canvasUiPreferences.image_toolbar.show_labels ? action.text : undefined}
+          text={action.text}
           destructive={action.destructive}
           disabled={action.disabled}
           onClick={action.run}
@@ -1745,13 +1755,13 @@ function ImageNodeToolbar({
       ))}
       <MediaToolButton
         label={`基于 ${node.title} 生成`}
-        text={context.canvasUiPreferences.image_toolbar.show_labels ? '基于本图生成' : undefined}
+        text="图生图"
         disabled={!currentVersionId || submitting || replacing}
         onClick={() => context.createImageFromSource?.(node.id)}
       ><Sparkles /></MediaToolButton>
       <MediaToolButton
         label={`拆分 ${node.title} 的图层`}
-        text={context.canvasUiPreferences.image_toolbar.show_labels ? '拆分图层' : undefined}
+        text="拆分图层"
         disabled={!currentVersionId || submitting || replacing}
         onClick={() => context.createLayerDecomposition(node)}
       >
@@ -1759,7 +1769,7 @@ function ImageNodeToolbar({
       </MediaToolButton>
       <MediaToolButton
         label="配置图片快捷工具"
-        text={context.canvasUiPreferences.image_toolbar.show_labels ? '更多' : undefined}
+        text="更多"
         onClick={openSettings}
       >
         <Ellipsis />
@@ -2730,7 +2740,7 @@ export function ToolButton({ label, active, disabled, onClick, children, buttonR
 
 function MediaToolButton({ label, text, destructive = false, disabled = false, onClick, children }: {
   label: string;
-  text?: string;
+  text: string;
   destructive?: boolean;
   disabled?: boolean;
   onClick: () => void;
@@ -2743,8 +2753,7 @@ function MediaToolButton({ label, text, destructive = false, disabled = false, o
       aria-label={label}
       disabled={disabled}
       className={cn(
-        'nodrag flex h-7 shrink-0 items-center justify-center whitespace-nowrap rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30',
-        text ? 'gap-1 px-2' : 'w-7',
+        'nodrag flex h-7 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full px-2 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-30',
         destructive && 'hover:text-destructive',
       )}
       onClick={event => {
@@ -2753,14 +2762,14 @@ function MediaToolButton({ label, text, destructive = false, disabled = false, o
       }}
     >
       <span aria-hidden="true" className="[&>svg]:size-3.5">{children}</span>
-      {text && <span className="text-xs">{text}</span>}
+      <span className="text-xs">{text}</span>
     </button>
   );
 }
 
 function MediaToolLink({ label, text, href, children }: {
   label: string;
-  text?: string;
+  text: string;
   href: string;
   children: React.ReactNode;
 }) {
