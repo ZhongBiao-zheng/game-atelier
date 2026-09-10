@@ -442,8 +442,8 @@ default Key、再按登记顺序选择首个支持至少一张参考图的图片
 实际输入连接；original retry 重新校验源图摘要并逐字段复用原 Snapshot。
 
 `POST /canvas/projects/{id}/runs/upscale` 只接受 `surface_node_id / expected_revision / target(2K|4K)`。服务端先校验
-源图长边小于目标长边（否则 422 `canvas_upscale_not_needed`），再在 Nano Banana 族里选模型：默认 Key 优先、同一 Key 内
-固定 2K/4K 型号优先于靠 quality 调档（medium=2K、high=4K）的型号、Pro 优先于 2 / 2.5，无可用型号返回 422
+源图长边小于目标长边（否则 422 `canvas_upscale_not_needed`），再在 Nano Banana 族里选模型：只认 quality 可调的基础型号（medium=2K、high=4K，跳过
+`-2k` / `-4k` 固定型号），默认 Key 优先、同一 Key 内 Pro 优先于 2 / 2.5，无可用型号返回 422
 `canvas_upscale_model_missing`；比例取该渠道支持列表中最接近源图的一档。服务端固定 `canvas.upscale` preset v1 提示词，
 把当前图片 Version 作为唯一 Snapshot input 冻结为 n=1 的图片 Run（`normalized_params.upscale_target` 记录档位）；结果是
 独立图片节点及一条实际输入连接。浏览器不能传 prompt、alias、model 或其他参数。

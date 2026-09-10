@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.50.1',
+    date: '2026-09-10',
+    headline: '生成中的图片节点按输出比例占位',
+    changes: [
+      { kind: 'fix', text: '图片生成中的结果节点按本次输出比例定宽高，图出来后不再跳变；比例为自动时按 1:1 占位。' },
+      { kind: 'fix', text: '高清放大固定用基础型号 Nano Banana Pro，由质量档决定 2K / 4K，不再挑带分辨率后缀的型号。' },
+    ],
+  },
+  {
     version: '5.50.0',
     date: '2026-09-10',
     headline: '高清放大改用 Nano Banana',

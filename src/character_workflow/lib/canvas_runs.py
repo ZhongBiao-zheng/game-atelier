@@ -68,6 +68,7 @@ from character_workflow.lib.schemas import (
     CanvasMediaVersion,
     CanvasNode,
     CanvasResultCandidate,
+    CanvasSize,
     CanvasSnapshotInput,
     CanvasTextNode,
     CanvasTextNodeData,
@@ -1034,6 +1035,29 @@ def _with_active_run(node: CanvasNode, run_id: str) -> CanvasNode:
     })
 
 
+def _result_image_size(params: JobParams) -> CanvasSize:
+    """Size the pending result card to the output aspect so it does not jump when the image lands.
+
+    比例来源按 size（nano 比例串 / gpt 像素 WxH）→ ratio → custom_size 取第一个能解析的；
+    `auto` 或解析不出时按 1:1。宽高钳制与前端 sizeLockedToCanvasVersion 一致。
+    """
+    aspect = 1.0
+    for raw in (params.size, params.ratio, params.custom_size):
+        match = re.fullmatch(r"(\d+)\s*[x:×]\s*(\d+)", str(raw or "").strip())
+        if match and int(match.group(1)) > 0 and int(match.group(2)) > 0:
+            aspect = int(match.group(1)) / int(match.group(2))
+            break
+    width = 320.0
+    height = width / aspect
+    if height < 150:
+        height = 150.0
+        width = height * aspect
+    if height > 4000:
+        height = 4000.0
+        width = height * aspect
+    return CanvasSize(width=round(width), height=round(height))
+
+
 def _new_result_node(
     surface: CanvasNode,
     existing_nodes: list[CanvasNode],
@@ -1042,11 +1066,13 @@ def _new_result_node(
     run_id: str,
     result_id: str,
     title: str,
+    job_params: JobParams,
 ) -> CanvasNode:
     width = surface.size.width if surface.size is not None else 320
     position = surface.position.model_copy(update={"x": surface.position.x + width + 120})
-    candidate_width = 320
-    candidate_height = 240
+    image_size = _result_image_size(job_params) if mode == "image" else None
+    candidate_width = image_size.width if image_size is not None else 320
+    candidate_height = image_size.height if image_size is not None else 240
     occupied = sorted(
         (
             node.position.y,
@@ -1098,7 +1124,7 @@ def _new_result_node(
         display=CanvasMediaDisplay(),
     )
     if mode == "image":
-        return CanvasImageNode(**common, type="image", data=data)
+        return CanvasImageNode(**common, type="image", size=image_size, data=data)
     return CanvasVideoNode(**common, type="video", data=data)
 
 
@@ -1230,6 +1256,7 @@ def _commit_frozen_run(
             run_id,
             result_id,
             result_title,
+            job_params,
         ))
     if result_id != surface.id or retry_of:
         for item in inputs:
@@ -1923,46 +1950,36 @@ def _nearest_ratio(width: int, height: int, ratios: list[str]) -> str:
     return min((ratio for ratio in ratios if ":" in ratio), key=distance)
 
 
-def _resolve_upscale_model(target: str) -> tuple[KeySpec, ModelSpec, str | None]:
-    """First Nano Banana model that can emit the target resolution, plus the quality to send.
+def _resolve_upscale_model(target: str) -> tuple[KeySpec, ModelSpec, str]:
+    """Base Nano Banana model whose quality dial sets the resolution, plus the quality to send.
 
-    默认 Key 优先、再按登记顺序；同一 Key 内固定 2K/4K 型号优先于靠 quality 调档的型号
-    （固定型号不依赖网关对 quality 的翻译），其次 Pro 优先于 2 / 2.5。
+    只认基础型号（quality 可调：low=1K / medium=2K / high=4K），跳过 `-2k` / `-4k` 这类把
+    分辩率编进 id 的固定型号；默认 Key 优先、再按登记顺序，同一 Key 内 Pro 优先于 2 / 2.5。
     """
     from character_workflow.lib.callers.openai_image import (
-        fixed_nano_resolution_quality,
         image_family,
         max_reference_images,
         normalized_model_id,
         supports_image_quality,
     )
 
-    def route(model: ModelSpec) -> tuple[int, str | None] | None:
-        fixed = fixed_nano_resolution_quality(model.id)
-        if fixed is not None:
-            return (0, None) if fixed == target.lower() else None
-        if supports_image_quality(model.id):
-            return 1, _UPSCALE_QUALITY[target]
-        return None
-
     for key in _keys_default_first():
-        candidates: list[tuple[int, int, ModelSpec, str | None]] = []
-        for model in key.models:
-            if _model_modality(model, key) != "image" or image_family(model.id) != "nano-banana":
-                continue
-            if max_reference_images(model.id) < 1:
-                continue
-            routed = route(model)
-            if routed is None:
-                continue
-            is_pro = "pro" in f"{normalized_model_id(model.id)} {model.name}".lower()
-            candidates.append((routed[0], 0 if is_pro else 1, model, routed[1]))
+        candidates = [
+            model for model in key.models
+            if _model_modality(model, key) == "image"
+            and image_family(model.id) == "nano-banana"
+            and supports_image_quality(model.id)
+            and max_reference_images(model.id) >= 1
+        ]
         if candidates:
-            _rank, _pro, model, quality = min(candidates, key=lambda item: (item[0], item[1]))
-            return key, model, quality
+            model = min(
+                candidates,
+                key=lambda item: 0 if "pro" in f"{normalized_model_id(item.id)} {item.name}".lower() else 1,
+            )
+            return key, model, _UPSCALE_QUALITY[target]
     raise CanvasRunCommandError(
         "canvas_upscale_model_missing",
-        f"未配置能输出 {target} 的 Nano Banana 模型。请先在设置中接入 Nano Banana Pro。",
+        "未配置可调质量的 Nano Banana 模型。请先在设置中接入 Nano Banana Pro。",
     )
 
 
