@@ -42,7 +42,7 @@ export function CanvasImageToolbarPreferencesDialog({
   }, [draft.tool_ids, selected]);
 
   useEffect(() => {
-    if (open) setDraft(value);
+    if (open) setDraft({ ...value, tool_ids: orderedCanvasImageTools(value.tool_ids).map(tool => tool.id) });
   }, [open, value]);
 
   function setVisible(id: CanvasImageQuickToolId, visible: boolean) {

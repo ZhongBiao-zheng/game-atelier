@@ -19,13 +19,7 @@ from character_workflow.lib.schemas import (
 
 DEFAULT_IMAGE_TOOL_IDS = [
     "info",
-    "delete",
-    "saveAsset",
     "download",
-    "copyPrompt",
-    "reversePrompt",
-    "replace",
-    "maskEdit",
     "crop",
     "split",
     "removeBackground",

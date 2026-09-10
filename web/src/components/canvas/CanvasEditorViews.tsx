@@ -13,7 +13,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, Check, ChevronRight, CircleHelp, ClipboardCopy, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Layers3, Library, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, FileAudio, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef,
   useState,
@@ -88,7 +88,6 @@ import type { Job } from '@/schema/jobs';
 import {
   canvasNodeAcceptsInput,
   canvasNodeProvidesOutput,
-  canvasNodeProvidesContent,
   CANVAS_GENERATION_MODE_LABELS,
   CANVAS_MAX_NODE_SIZE,
   canvasGenerateBlock,
@@ -373,10 +372,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   if (node.type === 'group') return <CanvasExecutionGroup node={node} context={context} selected={Boolean(selected)} />;
   const renameNode = context.renameNode;
   const content = nodeContent;
-  const copyablePrompt = copyablePromptForNode(
-    node,
-    context.jobsByResultNodeId,
-  );
   const replacingMedia = context.mediaReplaceBusyNodeIds.has(node.id);
   const submittingNode = context.submittingNodeIds.has(node.id);
   const nodeRunState = canvasNodeRunState(node, context.jobsByRunId);
@@ -623,7 +618,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
                 content={content}
                 replacing={replacingMedia}
                 submitting={submittingNode}
-                copyablePrompt={copyablePrompt}
                 context={context}
                 onOverlayOpenChange={setToolbarOverlayOpen}
               />
@@ -643,7 +637,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               content={content}
               replacing={replacingMedia}
               submitting={submittingNode || nodeRunState.status === 'loading'}
-              copyablePrompt={copyablePrompt}
               context={context}
               onEditText={beginTextEditing}
               onDecreaseText={() => setTextScale(-1)}
@@ -809,24 +802,6 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               fit={node.type === 'image' || node.type === 'video' ? node.data.display.fit : 'contain'}
               freeResize={(node.type === 'image' || node.type === 'video') && node.data.display.free_resize}
             />
-          )}
-          {selected && !context.multiSelectionActive && uploadedImageMaterial && node.type === 'image' && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              aria-label={`替换图片 ${node.title}`}
-              disabled={replacingMedia}
-              className="nodrag absolute right-3 top-3 z-10"
-              onPointerDown={event => event.stopPropagation()}
-              onClick={event => {
-                event.stopPropagation();
-                context.replaceMedia(node);
-              }}
-            >
-              {replacingMedia ? <LoaderCircle className="animate-spin" /> : <FileUp />}
-              {replacingMedia ? '替换中' : '替换'}
-            </Button>
           )}
           {node.type === 'image' && content?.kind === 'image' && context.showImageInfo
             && (node.size?.height ?? 176) >= 96 && (node.size?.width ?? 320) >= 160 && (
@@ -1418,7 +1393,6 @@ function CanvasNodeToolbar({
   content,
   replacing,
   submitting,
-  copyablePrompt,
   context,
   onEditText,
   onDecreaseText,
@@ -1428,7 +1402,6 @@ function CanvasNodeToolbar({
   content: CanvasContentVersion | undefined;
   replacing: boolean;
   submitting: boolean;
-  copyablePrompt: string | null;
   context: CanvasNodeContextValue;
   onEditText: () => void;
   onDecreaseText: () => void;
@@ -1503,17 +1476,6 @@ function CanvasNodeToolbar({
       >
         <Eye />
       </MediaToolButton>
-      {contentNode && canvasNodeProvidesContent(contentNode) && (content || mediaNode) && (
-        <MediaToolButton
-          label={`将 ${node.title} 存入资产库`}
-          disabled={!content || context.libraryBusy}
-          onClick={() => {
-            if (content) void context.saveAsset(contentNode);
-          }}
-        >
-          <Library />
-        </MediaToolButton>
-      )}
       {content && content.kind !== 'text' ? (
         <MediaToolLink
           label={`下载 ${node.title}`}
@@ -1526,20 +1488,9 @@ function CanvasNodeToolbar({
           <Download />
         </MediaToolButton>
       ) : null}
-      {contentNode && canvasNodeProvidesContent(contentNode) && (copyablePrompt || mediaNode) && (
+      {mediaNode && !content && (
         <MediaToolButton
-          label={`复制 ${node.title} 的生成提示词`}
-          disabled={!copyablePrompt}
-          onClick={() => {
-            if (copyablePrompt) void context.copyPrompt(contentNode);
-          }}
-        >
-          <ClipboardCopy />
-        </MediaToolButton>
-      )}
-      {mediaNode && (
-        <MediaToolButton
-          label={content ? `替换 ${node.title}` : `上传到 ${node.title}`}
+          label={`上传到 ${node.title}`}
           disabled={replacing}
           onClick={() => context.replaceMedia(mediaNode)}
         >
@@ -1557,13 +1508,6 @@ function CanvasNodeToolbar({
           <MessageSquare />
         </MediaToolButton>
       )}
-      <MediaToolButton
-        label={`删除 ${node.title}`}
-        destructive
-        onClick={() => context.deleteNode(node.id)}
-      >
-        <Trash2 />
-      </MediaToolButton>
     </>
   );
 }
@@ -1649,7 +1593,6 @@ function ImageNodeToolbar({
   content,
   replacing,
   submitting,
-  copyablePrompt,
   context,
   onOverlayOpenChange,
 }: {
@@ -1657,7 +1600,6 @@ function ImageNodeToolbar({
   content: CanvasContentVersion | undefined;
   replacing: boolean;
   submitting: boolean;
-  copyablePrompt: string | null;
   context: CanvasNodeContextValue;
   onOverlayOpenChange: (open: boolean) => void;
 }) {
@@ -1670,7 +1612,6 @@ function ImageNodeToolbar({
   }, [onOverlayOpenChange]);
   useEffect(() => () => onOverlayOpenChangeRef.current(false), []);
   const resizeUnlocked = node.data.display.free_resize;
-  const uploadedImageMaterial = isUploadedImageMaterialNode(node, content);
   const imageContent = content?.kind === 'image' ? content : undefined;
   const currentVersionId = imageContent?.version_id;
   const definitions = orderedCanvasImageTools(context.canvasUiPreferences.image_toolbar.tool_ids);
@@ -1686,22 +1627,6 @@ function ImageNodeToolbar({
         ? context.previewContent(currentVersionId, node.title, node.id)
         : context.selectNode(node.id),
     };
-    if (definition.id === 'delete') action = {
-      ...common,
-      label: `删除 ${node.title}`,
-      icon: <Icon />,
-      destructive: true,
-      run: () => context.deleteNode(node.id),
-    };
-    if (definition.id === 'saveAsset') action = {
-      ...common,
-      label: `将 ${node.title} 存入资产库`,
-      icon: <Icon />,
-      disabled: !currentVersionId || context.libraryBusy,
-      run: () => {
-        if (currentVersionId) void context.saveAsset(node);
-      },
-    };
     if (definition.id === 'download') action = {
       ...common,
       label: `下载 ${node.title}`,
@@ -1710,32 +1635,6 @@ function ImageNodeToolbar({
       href: currentVersionId ? canvasDownloadUrl(context.projectId, currentVersionId) : undefined,
       run: () => undefined,
     };
-    if (definition.id === 'copyPrompt') action = {
-      ...common,
-      label: `复制 ${node.title} 的生成提示词`,
-      icon: <Icon />,
-      disabled: !copyablePrompt,
-      run: () => {
-        if (copyablePrompt) void context.copyPrompt(node);
-      },
-    };
-    if (definition.id === 'reversePrompt') action = {
-      ...common,
-      label: `反推 ${node.title} 的提示词`,
-      icon: submitting ? <LoaderCircle className="animate-spin" /> : <Icon />,
-      disabled: !currentVersionId || submitting || replacing,
-      run: () => {
-        if (currentVersionId) void context.reversePrompt(node);
-      },
-    };
-    if (definition.id === 'replace' && !uploadedImageMaterial) action = {
-      ...common,
-      label: currentVersionId ? `替换 ${node.title}` : `上传到 ${node.title}`,
-      text: currentVersionId ? definition.label : '上传图片',
-      icon: replacing ? <LoaderCircle className="animate-spin" /> : <Icon />,
-      disabled: replacing,
-      run: () => context.replaceMedia(node),
-    };
     if (definition.id === 'resize') action = {
       ...common,
       label: resizeUnlocked ? `锁定 ${node.title} 比例` : `自由缩放 ${node.title}`,
@@ -1743,15 +1642,6 @@ function ImageNodeToolbar({
       icon: resizeUnlocked ? <Lock /> : <Unlock />,
       disabled: replacing,
       run: () => context.toggleFreeResize(node),
-    };
-    if (definition.id === 'maskEdit') action = {
-      ...common,
-      label: `局部编辑 ${node.title}`,
-      icon: <Icon />,
-      disabled: !currentVersionId || submitting || replacing,
-      run: () => {
-        if (currentVersionId) context.openMaskEdit(node);
-      },
     };
     if (definition.id === 'crop') action = {
       ...common,

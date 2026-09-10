@@ -63,8 +63,7 @@ def test_generation_preferences_default_get_is_v2_and_does_not_write(isolated_da
         "revision": 0,
         "image_toolbar": {
             "tool_ids": [
-                "info", "delete", "saveAsset", "download", "copyPrompt", "reversePrompt",
-                "replace", "maskEdit", "crop", "split", "removeBackground", "upscale",
+                "info", "download", "crop", "split", "removeBackground", "upscale",
             ],
             "show_labels": False,
         },

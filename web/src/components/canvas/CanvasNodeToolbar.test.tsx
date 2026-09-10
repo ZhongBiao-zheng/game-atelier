@@ -215,7 +215,7 @@ it('renders one independent selected toolbar for every canvas node type', () => 
   );
 
   expect(screen.getAllByRole('toolbar')).toHaveLength(7);
-  // 空媒体节点（image/video/audio）的工具条只保留一个上传入口，删除等动作要等它拿到内容版本。
+  // 空媒体节点继续保留唯一上传入口；分组的“解散”不是删除素材。
   const emptyMediaTitles = new Set(['图片', '视频', '音频']);
   for (const node of nodes) {
     const toolbar = screen.getByRole('toolbar', { name: `${node.title} 节点工具` });
@@ -225,14 +225,14 @@ it('renders one independent selected toolbar for every canvas node type', () => 
         .toEqual([`上传${node.title}`]);
       continue;
     }
-    expect(within(toolbar).getByRole('button', { name: `删除 ${node.title}` })).toBeInTheDocument();
+    if (node.type !== 'group') expect(within(toolbar).queryByRole('button', { name: `删除 ${node.title}` })).not.toBeInTheDocument();
   }
 
   const imageToolbar = screen.getByRole('toolbar', { name: '图片 节点工具' });
   fireEvent.click(within(imageToolbar).getByRole('button', { name: '上传图片' }));
   expect(context.replaceMedia).toHaveBeenCalledWith(nodes[1]);
 
-  const configToolbar = screen.getByRole('toolbar', { name: '配置 节点工具' });
+  const configToolbar = screen.getByRole('toolbar', { name: '文本 节点工具' });
   const firstTool = within(configToolbar).getAllByRole('button')[0];
   const secondTool = within(configToolbar).getAllByRole('button')[1];
   expect(firstTool).toHaveAttribute('tabindex', '0');
@@ -281,9 +281,9 @@ it('shows content actions in the floating toolbar instead of the title row', () 
 
   const toolbar = screen.getByRole('toolbar', { name: '视频 节点工具' });
   expect(within(toolbar).getByRole('button', { name: '查看 视频 详情' })).toBeInTheDocument();
-  expect(within(toolbar).getByRole('button', { name: '将 视频 存入资产库' })).toBeInTheDocument();
+  expect(within(toolbar).queryByRole('button', { name: '将 视频 存入资产库' })).not.toBeInTheDocument();
   expect(within(toolbar).getByRole('link', { name: '下载 视频' })).toBeInTheDocument();
-  expect(within(toolbar).getByRole('button', { name: '替换 视频' })).toBeInTheDocument();
+  expect(within(toolbar).queryByRole('button', { name: '替换 视频' })).not.toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '编辑视频 视频' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '重命名节点 视频' }).closest('header')).not.toContainElement(toolbar);
 });
@@ -522,12 +522,19 @@ it('offers bulk layer actions only after completion and reports download failure
   expect(screen.getByRole('button', { name: '下载全部图层' })).toBeDisabled();
 });
 
-it('shows every configured image action after selection and keeps it mounted while settings are open', async () => {
+it('omits removed actions even in saved preferences and keeps allowed tools mounted while settings are open', async () => {
   const image = {
     ...nodes[1],
     data: { ...nodes[1].data, current_version_id: 'version-image' },
   } as CanvasNode;
   const context = nodeContext({
+    canvasUiPreferences: {
+      ...DEFAULT_CANVAS_UI_PREFERENCES,
+      image_toolbar: {
+        show_labels: false,
+        tool_ids: ['delete', 'info', 'saveAsset', 'download', 'copyPrompt', 'reversePrompt', 'replace', 'maskEdit', 'crop', 'split', 'removeBackground', 'upscale'],
+      },
+    },
     resolveVersion: versionResolver({
       'version-image': {
         version_id: 'version-image',
@@ -561,7 +568,10 @@ it('shows every configured image action after selection and keeps it mounted whi
   );
 
   const toolbar = screen.getByRole('toolbar', { name: '图片 节点工具' });
-  expect(within(toolbar).getByRole('button', { name: '局部编辑 图片' })).toBeInTheDocument();
+  expect(within(toolbar).queryByRole('button', { name: '局部编辑 图片' })).not.toBeInTheDocument();
+  for (const label of ['删除 图片', '将 图片 存入资产库', '复制 图片 的生成提示词', '反推 图片 的提示词', '替换 图片']) {
+    expect(within(toolbar).queryByRole('button', { name: label })).not.toBeInTheDocument();
+  }
   expect(within(toolbar).getByRole('button', { name: '裁剪 图片' })).toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '切分 图片' })).toBeInTheDocument();
   expect(within(toolbar).getByRole('button', { name: '本地放大 图片' })).toBeInTheDocument();
@@ -572,6 +582,9 @@ it('shows every configured image action after selection and keeps it mounted whi
   act(() => settingsButton.focus());
   fireEvent.click(settingsButton);
   expect(await screen.findByRole('dialog', { name: '自定义图片快捷工具' })).toBeInTheDocument();
+  for (const label of ['删除节点', '存入资产库', '复制提示词', '反推提示词', '替换图片', '局部编辑']) {
+    expect(screen.queryByRole('checkbox', { name: `显示${label}` })).not.toBeInTheDocument();
+  }
 
   rerender(
     <CanvasNodeContext.Provider value={context}>
@@ -760,8 +773,8 @@ it('treats an uploaded image as a pure material with toolbar and one direct repl
 
   expect(screen.getByRole('toolbar', { name: '图片 节点工具' })).toBeInTheDocument();
   expect(screen.queryByRole('region', { name: '图片设置' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '替换图片 图片' }));
-  expect(context.replaceMedia).toHaveBeenCalledWith(uploadedImage);
+  expect(screen.queryByRole('button', { name: '替换图片 图片' })).not.toBeInTheDocument();
+  expect(context.replaceMedia).not.toHaveBeenCalled();
 
   const toolbar = screen.getByRole('toolbar', { name: '图片 节点工具' });
   expect(within(toolbar).queryByRole('button', { name: '替换 图片' })).not.toBeInTheDocument();

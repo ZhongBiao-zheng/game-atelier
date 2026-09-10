@@ -33,6 +33,12 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.48.1',
+    date: '2026-09-10',
+    headline: '精简节点快捷工具',
+    changes: [{ kind: 'fix', text: '移除节点上的删除、存资产、复制/反推提示词、替换和局部编辑入口，空节点仍可上传附件。' }],
+  },
+  {
     version: '5.48.0',
     date: '2026-09-10',
     headline: '工坊连接不再打断创作',
