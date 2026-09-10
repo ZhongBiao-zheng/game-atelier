@@ -39,12 +39,19 @@ export interface CanvasUiPreferences {
   revision: number;
   image_toolbar: CanvasImageToolbarPreferences;
   generation_defaults: CanvasGenerationDefaults;
+  upscale: CanvasUpscalePreferences;
   updated_at: string | null;
 }
 
 export interface CanvasGenerationModelSelection {
   alias: string;
   model: string;
+}
+
+/** 「AI高清」偏好：selection 为 null 时服务端自动选模；prompt 留空保存后服务端填回内置提示词。 */
+export interface CanvasUpscalePreferences {
+  selection: CanvasGenerationModelSelection | null;
+  prompt: string;
 }
 
 export type CanvasGenerationMode = 'text' | 'image' | 'video' | 'audio';

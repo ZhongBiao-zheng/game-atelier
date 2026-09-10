@@ -271,9 +271,10 @@ sequence，只保存可见消息、reasoning summary、稳定 node/version 引�
 画布界面与生成偏好是工作区应用级状态，文件真源为 `.config/canvas-ui.json`，不属于任何画布项目。
 `GET /api/canvas/ui-preferences` 在文件不存在时返回 revision 0 的默认值且不制造文件；损坏或不符合严格
 schema 的文件返回 409，原字节保持不变。`PUT /api/canvas/ui-preferences` 请求为
-`{ expected_revision, image_toolbar, generation_defaults }`。`image_toolbar` 的工具 ID 必须来自固定枚举，
+`{ expected_revision, image_toolbar, generation_defaults, upscale }`。`image_toolbar` 的工具 ID 必须来自固定枚举，
 不允许重复但允许空清单；`generation_defaults` 严格包含 text/image/video/audio 四项，每项只保存可选的
-`{ alias, model }` 与该模态白名单参数。媒体引用、蒙版、本机路径、运行回写字段和跨模态参数一律 422。
+`{ alias, model }` 与该模态白名单参数；`upscale` 为 AI高清偏好 `{ selection, prompt }`，selection 为 null 时服务端自动选模，
+prompt 留空保存即恢复内置提示词（服务端填回全文，GET 永远返回实际生效的提示词）。媒体引用、蒙版、本机路径、运行回写字段和跨模态参数一律 422。
 服务端在独立文件锁内校验 revision 并原子替换，冲突返回当前 revision。生成偏好只影响后续新建 Draft
 和配置节点模式切换；模型保持自动选择时仍独立应用该模态默认参数。失效的显式模型回退首个 Runner 可路由
 模型且不继承旧参数，已有节点、Run Snapshot 与 Job
@@ -442,9 +443,10 @@ default Key、再按登记顺序选择首个支持至少一张参考图的图片
 实际输入连接；original retry 重新校验源图摘要并逐字段复用原 Snapshot。
 
 `POST /canvas/projects/{id}/runs/upscale` 只接受 `surface_node_id / expected_revision / target(2K|4K)`。服务端先校验
-源图长边小于目标长边（否则 422 `canvas_upscale_not_needed`），再在 Nano Banana 族里选模型：只认 quality 可调的基础型号（medium=2K、high=4K，跳过
-`-2k` / `-4k` 固定型号），默认 Key 优先、同一 Key 内 Pro 优先于 2 / 2.5，无可用型号返回 422
-`canvas_upscale_model_missing`；比例取该渠道支持列表中最接近源图的一档。服务端固定 `canvas.upscale` preset v1 提示词，
+源图长边小于目标长边（否则 422 `canvas_upscale_not_needed`），再按 `ui-preferences.upscale` 选模型：固定了 selection 就只用它，失效返回 422 `canvas_upscale_model_stale`；未固定时在
+quality 可调的 Nano Banana 基础型号里自动挑（medium=2K、high=4K，跳过 `-2k` / `-4k` 固定型号），默认 Key 优先、同一 Key 内
+Pro 优先于 2 / 2.5，无可用型号返回 422 `canvas_upscale_model_missing`；比例取该渠道支持列表中最接近源图的一档。提示词取
+`ui-preferences.upscale.prompt`（preset id 仍为 `canvas.upscale` v1），
 把当前图片 Version 作为唯一 Snapshot input 冻结为 n=1 的图片 Run（`normalized_params.upscale_target` 记录档位）；结果是
 独立图片节点及一条实际输入连接。浏览器不能传 prompt、alias、model 或其他参数。
 

@@ -20,11 +20,13 @@ it('reads and writes the complete revisioned Canvas UI preference document', asy
     video: { selection: null, params: {} },
     audio: { selection: null, params: {} },
   };
+  const upscale = { selection: null, prompt: '使图片变清晰' };
   const response = {
     schema_version: 2,
     revision: 5,
     image_toolbar: imageToolbar,
     generation_defaults: generationDefaults,
+    upscale,
     updated_at: '2026-08-25T00:00:00Z',
   };
   const fetchMock = vi.fn()
@@ -33,7 +35,7 @@ it('reads and writes the complete revisioned Canvas UI preference document', asy
   vi.stubGlobal('fetch', fetchMock);
 
   await getCanvasUiPreferences();
-  await saveCanvasUiPreferences(4, imageToolbar, generationDefaults);
+  await saveCanvasUiPreferences(4, imageToolbar, generationDefaults, upscale);
 
   expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/canvas/ui-preferences');
   expect(fetchMock).toHaveBeenNthCalledWith(
@@ -45,6 +47,7 @@ it('reads and writes the complete revisioned Canvas UI preference document', asy
         expected_revision: 4,
         image_toolbar: imageToolbar,
         generation_defaults: generationDefaults,
+        upscale,
       }),
     }),
   );

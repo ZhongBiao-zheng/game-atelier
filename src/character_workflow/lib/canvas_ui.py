@@ -79,6 +79,7 @@ def save_canvas_ui_preferences(payload: CanvasUiPreferencesUpdate) -> CanvasUiPr
             revision=current.revision + 1,
             image_toolbar=payload.image_toolbar,
             generation_defaults=payload.generation_defaults,
+            upscale=payload.upscale,
             updated_at=datetime.now(timezone.utc),
         )
         atomic_write_json(path, updated.model_dump(mode="json", exclude_none=True))

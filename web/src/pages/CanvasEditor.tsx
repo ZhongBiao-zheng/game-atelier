@@ -103,7 +103,11 @@ import {
   CanvasGenerationMetadata,
   canvasRetryErrorMessage,
 } from '@/components/canvas/CanvasGenerationMetadata';
-import { CanvasGenerationPreferencesDialog } from '@/components/canvas/CanvasGenerationPreferencesDialog';
+import {
+  CanvasGenerationPreferencesDialog,
+  type CanvasGenerationPreferencesTab,
+} from '@/components/canvas/CanvasGenerationPreferencesDialog';
+import { ApiError } from '@/api/http';
 import {
   CanvasMaskEditDialog,
   type CanvasMaskEditSubmission,
@@ -167,6 +171,7 @@ import type {
   CanvasSize,
   CanvasTextVersion,
   CanvasUiPreferences,
+  CanvasUpscalePreferences,
   CanvasUpscaleTarget,
   CanvasVideoFrameSlot,
 } from '@/schema/canvas';
@@ -429,12 +434,15 @@ function CanvasEditorInner({
   const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [generationPreferencesOpen, setGenerationPreferencesOpen] = useState(false);
+  const [generationPreferencesTab, setGenerationPreferencesTab] = useState<CanvasGenerationPreferencesTab>('image');
   const [generationPreferencesSaving, setGenerationPreferencesSaving] = useState(false);
   const [viewportZoom, setViewportZoom] = useState(1);
   const [projectRenameDraft, setProjectRenameDraft] = useState<string | null>(null);
   const [projectRenameBusy, setProjectRenameBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 只对当前这条 error 生效：message 不匹配就不渲染按钮，换了别的错误自然失效。
+  const [errorAction, setErrorAction] = useState<{ message: string; label: string; run: () => void } | null>(null);
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [saveErrorDetail, setSaveErrorDetail] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
@@ -475,6 +483,10 @@ function CanvasEditorInner({
   const createMenuRef = useRef<HTMLDivElement>(null);
   const shortcutsTriggerRef = useRef<HTMLButtonElement>(null);
   const generationPreferencesTriggerRef = useRef<HTMLButtonElement>(null);
+  const openGenerationPreferences = useCallback((tab: CanvasGenerationPreferencesTab) => {
+    setGenerationPreferencesTab(tab);
+    setGenerationPreferencesOpen(true);
+  }, []);
   const flowNodeCache = useRef(new Map<string, {
     node: CanvasNode;
     selected: boolean;
@@ -3679,7 +3691,12 @@ function CanvasEditorInner({
       if (resultId) setSelectedNodeIds(new Set([resultId]));
       announceToolNotice(`已提交“${node.title}”的 ${target} AI高清`);
     } catch (submitError) {
-      setError((submitError as Error).message);
+      const message = (submitError as Error).message;
+      setError(message);
+      const code = submitError instanceof ApiError ? submitError.code : null;
+      setErrorAction(code === 'canvas_upscale_model_missing' || code === 'canvas_upscale_model_stale'
+        ? { message, label: '前往配置', run: () => { setError(null); openGenerationPreferences('upscale'); } }
+        : null);
     } finally {
       runSubmissionInFlight.current = false;
       setSubmittingNodeIds(current => {
@@ -3694,6 +3711,7 @@ function CanvasEditorInner({
     applyLocalJob,
     flushSave,
     mergeSubmittedRunDocument,
+    openGenerationPreferences,
     persistNow,
     projectId,
   ]);
@@ -3865,6 +3883,7 @@ function CanvasEditorInner({
   const persistCanvasUiPreferences = useCallback(async (
     imageToolbar: CanvasImageToolbarPreferences,
     generationDefaults: CanvasGenerationDefaults,
+    upscale: CanvasUpscalePreferences,
     successNotice: string,
   ) => {
     if (canvasUiPreferencesSaveInFlight.current) {
@@ -3876,6 +3895,7 @@ function CanvasEditorInner({
         canvasUiPreferences.revision,
         imageToolbar,
         generationDefaults,
+        upscale,
       );
       setCanvasUiPreferences(saved);
       setCanvasUiPreferencesError(null);
@@ -3901,11 +3921,13 @@ function CanvasEditorInner({
   ) => persistCanvasUiPreferences(
     value,
     canvasUiPreferences.generation_defaults,
+    canvasUiPreferences.upscale,
     '图片快捷工具已更新',
-  ), [canvasUiPreferences.generation_defaults, persistCanvasUiPreferences]);
+  ), [canvasUiPreferences.generation_defaults, canvasUiPreferences.upscale, persistCanvasUiPreferences]);
 
   const persistGenerationPreferences = useCallback(async (
     value: CanvasGenerationDefaults,
+    upscale: CanvasUpscalePreferences,
   ) => {
     setGenerationPreferencesSaving(true);
     setCanvasUiPreferencesError(null);
@@ -3913,6 +3935,7 @@ function CanvasEditorInner({
       await persistCanvasUiPreferences(
         canvasUiPreferences.image_toolbar,
         value,
+        upscale,
         '生成偏好已更新',
       );
       setGenerationPreferencesOpen(false);
@@ -4213,7 +4236,7 @@ function CanvasEditorInner({
         onClick={() => {
           setAddOpen(false);
           setCreateMenu(null);
-          setGenerationPreferencesOpen(true);
+          openGenerationPreferences('image');
         }}
       ><Settings2 /></ToolButton>
       <DropdownMenu>
@@ -4769,7 +4792,7 @@ function CanvasEditorInner({
           <CanvasActionFeedback
             error={error}
             notice={null}
-            onDismissError={() => setError(null)}
+            action={errorAction && errorAction.message === error ? errorAction : null} onDismissError={() => setError(null)}
             className="absolute left-1/2 top-20 z-30 w-full max-w-lg -translate-x-1/2 items-center px-3"
           />
         )}
@@ -4778,7 +4801,7 @@ function CanvasEditorInner({
           <CanvasActionFeedback
             error={null}
             notice={toolNotice}
-            onDismissError={() => setError(null)}
+            action={errorAction && errorAction.message === error ? errorAction : null} onDismissError={() => setError(null)}
             className="absolute right-3 top-20 z-30 max-w-sm items-end md:right-4"
           />
         )}
@@ -4836,6 +4859,8 @@ function CanvasEditorInner({
         <CanvasGenerationPreferencesDialog
           open={generationPreferencesOpen}
           value={canvasUiPreferences.generation_defaults}
+          upscale={canvasUiPreferences.upscale}
+          initialTab={generationPreferencesTab}
           keys={keys}
           saving={generationPreferencesSaving}
           error={canvasUiPreferencesError}
@@ -4843,7 +4868,7 @@ function CanvasEditorInner({
             setGenerationPreferencesOpen(open);
             if (!open) requestAnimationFrame(() => generationPreferencesTriggerRef.current?.focus());
           }}
-          onSave={value => void persistGenerationPreferences(value)}
+          onSave={(value, upscale) => void persistGenerationPreferences(value, upscale)}
         />
 
         {mediaOperation && (
@@ -4895,7 +4920,7 @@ function CanvasEditorInner({
                 <DialogTitle>{preview.title}</DialogTitle>
                 <DialogDescription>原始内容、来源与生成信息</DialogDescription>
               </DialogHeader>
-              <CanvasActionFeedback error={error} notice={toolNotice} onDismissError={() => setError(null)} />
+              <CanvasActionFeedback error={error} notice={toolNotice} action={errorAction && errorAction.message === error ? errorAction : null} onDismissError={() => setError(null)} />
               <CanvasPreview
                 projectId={projectId}
                 preview={preview}
@@ -5038,9 +5063,10 @@ function CanvasPreview({
   );
 }
 
-function CanvasActionFeedback({ error, notice, onDismissError, className }: {
+function CanvasActionFeedback({ error, notice, action = null, onDismissError, className }: {
   error: string | null;
   notice: string | null;
+  action?: { label: string; run: () => void } | null;
   onDismissError: () => void;
   className?: string;
 }) {
@@ -5051,6 +5077,13 @@ function CanvasActionFeedback({ error, notice, onDismissError, className }: {
       {error && (
         <div role="alert" className="flex min-w-0 items-start gap-2 overflow-hidden rounded-lg border border-destructive/30 bg-popover px-3 py-2 text-sm text-destructive shell-glow">
           <span className="line-clamp-3 min-w-0 flex-1 break-words leading-relaxed">{displayError}</span>
+          {action && (
+            <button
+              type="button"
+              className="shrink-0 rounded-md border border-destructive/40 px-2 py-0.5 text-xs text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              onClick={action.run}
+            >{action.label}</button>
+          )}
           <button type="button" aria-label="关闭错误提示" onClick={onDismissError}><X className="size-4" /></button>
         </div>
       )}

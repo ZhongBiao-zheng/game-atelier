@@ -50,6 +50,7 @@ function setup(overrides: Partial<Parameters<typeof CanvasGenerationPreferencesD
   const props: Parameters<typeof CanvasGenerationPreferencesDialog>[0] = {
     open: true,
     value: EMPTY_DEFAULTS,
+    upscale: { selection: null, prompt: '' },
     keys: KEYS,
     saving: false,
     error: null,
@@ -99,7 +100,7 @@ describe('CanvasGenerationPreferencesDialog', () => {
         selection: { alias: '备用图片', model: 'seedream-5.0-lite' },
         params: expect.objectContaining({ n: 2, ratio: '1:1' }),
       }),
-    }));
+    }), expect.anything());
   });
 
   it('warns about a stale explicit model and clears stale params when saving', async () => {
@@ -160,6 +161,6 @@ describe('CanvasGenerationPreferencesDialog', () => {
         selection: null,
         params: expect.objectContaining({ n: 2, ratio: '1:1' }),
       },
-    }));
+    }), expect.anything());
   });
 });

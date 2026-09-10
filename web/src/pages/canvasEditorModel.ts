@@ -2,6 +2,8 @@ import { normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import type { Job, JobParams } from '@/schema/jobs';
 import { modelModality, type KeyView } from '@/api/keys';
+import { imageFamily, supportsImageQuality } from '@/lib/modelFamily';
+import { maxReferenceImages } from '@/lib/referenceLimits';
 import {
   normalizeAudioFormat,
   normalizeAudioSpeed,
@@ -679,6 +681,16 @@ function canvasVideoModelIsRoutable(key: KeyView, model: KeyView['models'][numbe
   if (!['seedance', 'kling', 'dashscope', 'openrouter'].includes(String(protocol))) return false;
   // Canvas Runner 明确拒绝 HappyHorse video-edit：它只收公网 URL，画布内容是本地版本。
   return protocol !== 'dashscope' || !model.id.toLowerCase().includes('video-edit');
+}
+
+/** AI高清可用的模型：quality 可调的 Nano Banana 基础型号（档位由 quality 决定），与服务端 _upscale_model_eligible 同判据。 */
+export function canvasUpscaleModelChoices(keys: KeyView[]) {
+  return keys.flatMap(key => key.models
+    .filter(model => modelModality(model, key) === 'image'
+      && imageFamily(model.id) === 'nano-banana'
+      && supportsImageQuality(model.id)
+      && maxReferenceImages(model.id) >= 1)
+    .map(model => ({ key, model })));
 }
 
 export function canvasGenerationModelSupportsMode(

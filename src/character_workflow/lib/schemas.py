@@ -529,12 +529,37 @@ class CanvasGenerationDefaults(BaseModel):
     audio: CanvasAudioGenerationDefault = Field(default_factory=CanvasAudioGenerationDefault)
 
 
+# 源自画师资产库「通用高清-真实-Banana Pro」，去掉写实限定，卡通 / 矢量素材同样适用。
+CANVAS_UPSCALE_DEFAULT_PROMPT = (
+    "分析画面构图、光影、对比度、色彩饱和度与纯度。保持原有构图，保持原有背景不变，"
+    "保持与原图光影一致，无缝集成，完美融合，以原图风格为基础进行操作："
+    "不能缩放旋转画面，保持原有材质，保持明度不变，保持画面色相饱和度不变，"
+    "保持画面伽马值与对比度不变。按照以上指令基准守则进行以下操作："
+    "使图片变清晰，添加细节纹理，高清，4K，8K，超清画质，更精致的画质表现。"
+    "masterpiece, best quality, highres:1.2"
+)
+
+
+class CanvasUpscalePreferences(BaseModel):
+    """「AI高清」用哪个模型、什么提示词；selection 为 None 时服务端自动挑首个质量可调的 Nano Banana。"""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    selection: CanvasGenerationModelSelection | None = None
+    prompt: str = Field(default=CANVAS_UPSCALE_DEFAULT_PROMPT, max_length=4000)
+
+    @field_validator("prompt")
+    @classmethod
+    def default_when_blank(cls, value: str) -> str:
+        # 清空即恢复内置提示词，前端不必再持有第二份默认文案。
+        return value.strip() or CANVAS_UPSCALE_DEFAULT_PROMPT
+
+
 class CanvasUiPreferences(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[2] = 2
     revision: int = Field(default=0, ge=0)
     image_toolbar: CanvasImageToolbarPreferences
     generation_defaults: CanvasGenerationDefaults
+    upscale: CanvasUpscalePreferences = Field(default_factory=CanvasUpscalePreferences)
     updated_at: datetime | None = None
 
 
@@ -543,6 +568,7 @@ class CanvasUiPreferencesUpdate(BaseModel):
     expected_revision: int = Field(ge=0)
     image_toolbar: CanvasImageToolbarPreferences
     generation_defaults: CanvasGenerationDefaults
+    upscale: CanvasUpscalePreferences = Field(default_factory=CanvasUpscalePreferences)
 
 
 class CanvasGenerationDraft(BaseModel):
