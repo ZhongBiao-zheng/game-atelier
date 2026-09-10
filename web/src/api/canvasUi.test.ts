@@ -20,7 +20,13 @@ it('reads and writes the complete revisioned Canvas UI preference document', asy
     video: { selection: null, params: {} },
     audio: { selection: null, params: {} },
   };
-  const upscale = { selection: null, prompt: '使图片变清晰' };
+  const upscale = {
+    tiers: {
+      '2K': { selection: null, quality: null, prompt: '使图片变清晰' },
+      '4K': { selection: null, quality: 'high' as const, prompt: '' },
+      '8K': { selection: { alias: 'tuzi', model: 'doubao-seedream-4-5' }, quality: null, prompt: '' },
+    },
+  };
   const response = {
     schema_version: 2,
     revision: 5,

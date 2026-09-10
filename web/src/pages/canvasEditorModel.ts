@@ -683,14 +683,25 @@ function canvasVideoModelIsRoutable(key: KeyView, model: KeyView['models'][numbe
   return protocol !== 'dashscope' || !model.id.toLowerCase().includes('video-edit');
 }
 
-/** AI高清可用的模型：quality 可调的 Nano Banana 基础型号（档位由 quality 决定），与服务端 _upscale_model_eligible 同判据。 */
+/** AI高清可指定的模型：画布能运行、吃参考图的图片模型；MJ 不收（无尺寸参数且固定出四宫格）。与服务端 _upscale_model_eligible 同判据。 */
 export function canvasUpscaleModelChoices(keys: KeyView[]) {
   return keys.flatMap(key => key.models
-    .filter(model => modelModality(model, key) === 'image'
-      && imageFamily(model.id) === 'nano-banana'
-      && supportsImageQuality(model.id)
+    .filter(model => canvasGenerationModelSupportsMode(key, model, 'image')
+      && imageFamily(model.id) !== 'midjourney'
       && maxReferenceImages(model.id) >= 1)
     .map(model => ({ key, model })));
+}
+
+/** 未固定模型时服务端会选的那一个：默认 Key 优先、quality 可调的 Nano Banana，Pro 优先。 */
+export function canvasUpscaleAutoChoice(keys: KeyView[]) {
+  for (const key of keys) {
+    const candidates = canvasUpscaleModelChoices([key])
+      .filter(choice => imageFamily(choice.model.id) === 'nano-banana' && supportsImageQuality(choice.model.id));
+    if (candidates.length) {
+      return candidates.find(choice => `${choice.model.id} ${choice.model.name}`.toLowerCase().includes('pro')) ?? candidates[0];
+    }
+  }
+  return null;
 }
 
 export function canvasGenerationModelSupportsMode(

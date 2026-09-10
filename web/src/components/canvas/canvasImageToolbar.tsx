@@ -13,7 +13,9 @@ import {
 import type {
   CanvasImageQuickToolId,
   CanvasUiPreferences,
+  CanvasUpscalePreferences,
   CanvasUpscaleTarget,
+  CanvasUpscaleTierPreferences,
 } from '@/schema/canvas';
 
 export interface CanvasImageToolDefinition {
@@ -34,11 +36,28 @@ export const CANVAS_IMAGE_TOOLS: CanvasImageToolDefinition[] = [
   { id: 'angle', label: '多角度', icon: Orbit, defaultVisible: false },
 ];
 
-/** AI高清走 Nano Banana 生成，档位即模型能出的长边；长边不超过原图的档位不展示。 */
-export const CANVAS_UPSCALE_TARGETS: ReadonlyArray<{ id: CanvasUpscaleTarget; longEdge: number }> = [
-  { id: '2K', longEdge: 2048 },
-  { id: '4K', longEdge: 4096 },
+/** AI高清档位：longEdge 是该档的目标长边，长边不超过原图的档位不展示；
+ *  autoQuality 是未固定模型时自动选 Nano Banana 用的质量档，没有的档位（8K）必须手选模型。 */
+export const CANVAS_UPSCALE_TARGETS: ReadonlyArray<{
+  id: CanvasUpscaleTarget;
+  longEdge: number;
+  autoQuality: CanvasUpscaleTierPreferences['quality'];
+}> = [
+  { id: '2K', longEdge: 2048, autoQuality: 'medium' },
+  { id: '4K', longEdge: 4096, autoQuality: 'high' },
+  { id: '8K', longEdge: 8192, autoQuality: null },
 ];
+
+// 提示词以服务端返回为准；这里只是加载前的占位，空串保存会被服务端填回内置提示词。
+export function emptyCanvasUpscalePreferences(): CanvasUpscalePreferences {
+  return {
+    tiers: {
+      '2K': { selection: null, quality: null, prompt: '' },
+      '4K': { selection: null, quality: null, prompt: '' },
+      '8K': { selection: null, quality: null, prompt: '' },
+    },
+  };
+}
 
 export const DEFAULT_CANVAS_IMAGE_TOOL_IDS = CANVAS_IMAGE_TOOLS
   .filter(tool => tool.defaultVisible)
@@ -56,8 +75,7 @@ export const DEFAULT_CANVAS_UI_PREFERENCES: CanvasUiPreferences = {
     video: { selection: null, params: {} },
     audio: { selection: null, params: {} },
   },
-  // 提示词以服务端返回为准；这里只是加载前的占位，空串保存会被服务端填回内置提示词。
-  upscale: { selection: null, prompt: '' },
+  upscale: emptyCanvasUpscalePreferences(),
   updated_at: null,
 };
 

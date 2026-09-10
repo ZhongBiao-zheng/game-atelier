@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.52.0',
+    date: '2026-09-10',
+    headline: 'AI高清按档位配置：2K / 4K / 8K 各自选模型、提示词与分辨率',
+    changes: [
+      { kind: 'feat', text: '生成偏好「AI高清」页签改为按档位配置，新增 8K 档；每档可分别指定模型与提示词。' },
+      { kind: 'feat', text: 'AI高清可选任何吃参考图的画布图片模型（Nano Banana / GPT Image / Seedream 等，MJ 除外）；有质量档的模型用质量档，按像素出图的模型直接按档位长边等比放大。' },
+      { kind: 'fix', text: '8K 档没有自动路线，未配置时点击会提示并提供「前往配置」。' },
+    ],
+  },
+  {
     version: '5.51.0',
     date: '2026-09-10',
     headline: 'AI高清可配置模型与提示词',

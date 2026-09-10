@@ -1693,7 +1693,7 @@ function ImageNodeToolbar({
       action = {
         ...common,
         label: currentVersionId && targets.length === 0
-          ? `${node.title} 已达 4K，无需放大`
+          ? `${node.title} 已达 8K，无需放大`
           : `AI高清 ${node.title}`,
         icon: <Icon />,
         disabled: !currentVersionId || submitting || replacing || targets.length === 0,
