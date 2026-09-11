@@ -17,7 +17,7 @@ const MAX_DPR = 2;
 const BASE_ALPHA = 0.07;
 const HOVER = { r: 186, g: 224, b: 255, a: 0.175 };
 const MASK =
-  'linear-gradient(to bottom, #000 0%, #000 30%, rgba(0,0,0,0.08) 55%, transparent 70%)';
+  'linear-gradient(to bottom, #000 0%, #000 35%, rgba(0,0,0,0.08) 78%, transparent 100%)';
 
 /** 读 --foreground（hex）→ rgb，让基础点色跟随深浅主题 */
 function readForeground(): { r: number; g: number; b: number } {

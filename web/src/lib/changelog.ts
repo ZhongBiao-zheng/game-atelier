@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.55.1',
+    date: '2026-09-11',
+    headline: '首页点阵背景延长',
+    changes: [
+      { kind: 'fix', text: '首页点阵背景向下延伸到整页，不再在上半段截断。' },
+    ],
+  },
+  {
     version: '5.55.0',
     date: '2026-09-10',
     headline: '出图结果直接显示在卡片里',
