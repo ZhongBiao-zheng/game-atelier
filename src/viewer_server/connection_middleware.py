@@ -130,7 +130,7 @@ class ConnectionMiddleware:
                     or path.removeprefix("/api/canvas-agent/") in CANVAS_TOOLS
                 )
                 approval = method == "POST" and bool(re.fullmatch(
-                    r"/api/workshop/requests/[A-Za-z0-9_-]+/approve", path,
+                    r"/api/workshop/requests/[A-Za-z0-9_-]+/(?:approve|reject)", path,
                 ))
                 requests = method == "GET" and path == "/api/workshop/requests"
                 if session.principal.kind == "agent":

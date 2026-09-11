@@ -174,8 +174,16 @@ def approve_generation_tool(request: Request, payload: ApproveRequestInput):
 
 @router.get("/requests")
 def list_requests(request: Request, page: int = Query(1, ge=1, le=10000),
-                  page_size: int = Query(20, ge=1, le=100)):
-    return generation.list_requests(principal(request), page, page_size)
+                  page_size: int = Query(20, ge=1, le=100),
+                  scope: str = Query("awaiting", pattern="^(awaiting|history|all)$")):
+    return generation.list_requests(principal(request), page, page_size, scope)
+
+
+@router.post("/requests/{request_id}/reject")
+def reject_generation(request_id: str, request: Request, payload: ApproveGenerationInput):
+    result = generation.reject_generation(principal(request), request_id, payload.expected_revision)
+    hub.broadcast("workshop-request-changed", {"request_id": result["request_id"]})
+    return result
 
 
 @router.post("/requests/{request_id}/approve")

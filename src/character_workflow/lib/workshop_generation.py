@@ -30,7 +30,7 @@ class GenerationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: str
     revision: int = 1
-    state: Literal["awaiting_approval", "approved", "withdrawn", "expired"] = "awaiting_approval"
+    state: Literal["awaiting_approval", "approved", "withdrawn", "rejected", "expired"] = "awaiting_approval"
     owner_id: str
     grant_id: str | None
     input: PrepareGenerationInput
@@ -45,6 +45,8 @@ class GenerationRequest(BaseModel):
     job_id: str
     approved_at: str | None = None
     approved_by: str | None = None
+    rejected_at: str | None = None
+    rejected_by: str | None = None
     execution_state: Literal["not_dispatched", "claimed", "needs_review"] = "not_dispatched"
     execution_message: str | None = None
 
@@ -287,6 +289,9 @@ def request_view(request: GenerationRequest, *, agent: bool = False) -> dict:
                        for ref in request.references],
         "estimated_cost_cny": None, "price_basis": "费用待确认；以供应商实际账单为准",
         "created_at": request.created_at, "expires_at": request.expires_at,
+        # 审计字段：页面定位是「审计与兜底」，谁在何时批准 / 拒绝必须看得见（#90）。
+        "approved_at": request.approved_at, "approved_by": request.approved_by,
+        "rejected_at": request.rejected_at, "rejected_by": request.rejected_by,
         "job_id": request.job_id if request.state == "approved" else None,
         "job": job, "output_media_ids": output_media_ids,
         "execution_state": request.execution_state,
@@ -338,12 +343,47 @@ def frozen_reference(principal: Any, request_id: str, media_id: str) -> tuple[Pa
     return path, ref["mime_type"]
 
 
-def list_requests(principal: Any, page: int = 1, page_size: int = 20) -> dict:
+def _awaiting(request: GenerationRequest, now: datetime) -> bool:
+    return (
+        request.state == "awaiting_approval"
+        and datetime.fromisoformat(request.expires_at) > now
+    )
+
+
+def list_requests(principal: Any, page: int = 1, page_size: int = 20,
+                  scope: str = "awaiting") -> dict:
+    """scope=awaiting 只列还能批准的；history 列已批准 / 撤回 / 拒绝 / 过期（含到期未落盘的）。"""
     if actor_id(principal) != "local":
         raise WorkshopError("CAPABILITY_DENIED", "待批准列表仅在本地管理页可见", 403)
-    items = [request_view(request) for request in _stored_requests()]
+    now = _now()
+    stored = _stored_requests()
+    if scope == "awaiting":
+        stored = [request for request in stored if _awaiting(request, now)]
+    elif scope == "history":
+        stored = [request for request in stored if not _awaiting(request, now)]
+    items = [request_view(request) for request in stored]
     items.sort(key=lambda r: r["created_at"], reverse=True)
     return paginate(items, page, page_size, "requests")
+
+
+def reject_generation(principal: Any, request_id: str, expected_revision: int) -> dict:
+    """本机页面拒绝一条待批准请求：不再等 24 小时过期。Agent 只能撤回自己的，不能拒绝。"""
+    if actor_id(principal) != "local":
+        raise WorkshopError("CAPABILITY_DENIED", "拒绝只能在本地管理页进行", 403)
+    with file_lock(request_path(request_id).with_suffix(".lock")):
+        request = _request_for(principal, request_id)
+        if request.state == "rejected":
+            return request_view(request)
+        if request.revision != expected_revision:
+            raise WorkshopError("DOCUMENT_CONFLICT", "生成请求已变化，请刷新")
+        if request.state != "awaiting_approval":
+            raise WorkshopError("APPROVAL_REQUIRED", "该请求已批准、撤回或失效，不能拒绝")
+        request.state = "rejected"
+        request.rejected_at = _now().isoformat()
+        request.rejected_by = actor_id(principal)
+        request.revision += 1
+        _save(request)
+        return request_view(request)
 
 
 def _verify_snapshot(request: GenerationRequest) -> None:

@@ -226,6 +226,26 @@ def test_expiry_withdraw_and_idempotency_conflicts(setup):
     assert generation.read_request(request["request_id"]).state == "expired"
 
 
+def test_local_reject_records_actor_and_hides_from_awaiting_list(setup):
+    """拒绝只给本机页面；拒绝后不再出现在待批列表，历史列表带审计字段（#90）。"""
+    request = prepare(setup)
+    with pytest.raises(ws.WorkshopError) as denied:
+        generation.reject_generation(setup.agent, request["request_id"], request["revision"])
+    assert denied.value.code == "CAPABILITY_DENIED"
+    rejected = generation.reject_generation(setup.local, request["request_id"], request["revision"])
+    assert rejected["state"] == "rejected"
+    assert rejected["rejected_by"] == "local" and rejected["rejected_at"]
+    assert rejected["approved_by"] is None
+    # 幂等：再拒一次返回同一状态；批准被拒绝的请求要报错。
+    assert generation.reject_generation(setup.local, request["request_id"], 99)["state"] == "rejected"
+    with pytest.raises(ws.WorkshopError):
+        approve(setup, rejected)
+    awaiting = generation.list_requests(setup.local, scope="awaiting")["requests"]
+    history = generation.list_requests(setup.local, scope="history")["requests"]
+    assert [row["request_id"] for row in awaiting] == []
+    assert [row["state"] for row in history] == ["rejected"]
+
+
 def test_double_approve_concurrency_reuses_single_job(setup):
     request = prepare(setup)
     with ThreadPoolExecutor(max_workers=2) as pool:

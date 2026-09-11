@@ -144,7 +144,10 @@ UI 页面可发现同项目、同方案内其他页面的定稿图片（不含�
 
 ### 批准
 
-本地 / 网站页面调用 `POST /api/workshop/requests/{id}/approve`，请求 `{ expected_revision }`。
+本地 / 网站页面调用 `POST /api/workshop/requests/{id}/approve`，请求 `{ expected_revision }`；
+本机页面还可 `POST /api/workshop/requests/{id}/reject`（同一请求体）把待批准请求标为 `rejected`，
+记录 `rejected_by / rejected_at`；Agent 只能撤回自己的请求。`GET /api/workshop/requests?scope=awaiting|history|all`
+默认只列还能批准的请求，历史（已批准 / 撤回 / 拒绝 / 过期）单独列，视图带 `approved_by / approved_at`。
 Agent 会话调用 `workshop_approve_generation`，仅当其授权含 `execute_generation` 且请求由自己准备时通过，
 服务端记录 `approved_by = grant_id`（ADR-0017）；否则返回 `CAPABILITY_DENIED`。批准入口检查有效编辑会话、归属、
 快照与当前调用配置的指纹，防止确认前 alias 被改成另一供应商或参数能力发生变化。

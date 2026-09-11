@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.58.0',
+    date: '2026-09-11',
+    headline: '待批准生成页可拒绝、显示批准人、历史单列',
+    changes: [
+      { kind: 'feat', text: '待批准生成页新增「拒绝」：不想要的请求当场关掉，不必等 24 小时过期。' },
+      { kind: 'feat', text: '已批准 / 已拒绝的请求显示由谁（本机页面或哪条 Agent 授权）在何时决定。' },
+      { kind: 'feat', text: '页面默认只列还能批准的请求，已批准 / 撤回 / 拒绝 / 过期的收进「历史」页签。' },
+    ],
+  },
+  {
     version: '5.57.0',
     date: '2026-09-11',
     headline: '画布节点的「正在生成」标记只在生成中存在',

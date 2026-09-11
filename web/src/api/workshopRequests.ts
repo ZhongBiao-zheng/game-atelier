@@ -9,7 +9,7 @@ export type WorkshopGenerationTarget =
 export interface WorkshopRequest {
   request_id: string;
   revision: number;
-  state: 'awaiting_approval' | 'approved' | 'withdrawn' | 'expired';
+  state: 'awaiting_approval' | 'approved' | 'withdrawn' | 'rejected' | 'expired';
   target: WorkshopGenerationTarget;
   target_name: string;
   alias: string;
@@ -26,7 +26,12 @@ export interface WorkshopRequest {
   job: { status: string; error: string | null; output_count: number } | null;
   execution_state: 'not_dispatched' | 'claimed' | 'needs_review';
   approval_url: string;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  rejected_at?: string | null;
+  rejected_by?: string | null;
 }
+export type WorkshopRequestScope = 'awaiting' | 'history';
 export function workshopTargetUrl(target: WorkshopGenerationTarget) {
   const project = encodeURIComponent(target.project_id);
   if (target.type === 'character') return `/workshop/${project}/art/characters/${encodeURIComponent(target.character_id)}/${target.asset_slot}`;
@@ -39,10 +44,16 @@ export function workshopReferenceUrl(requestId: string, mediaId: string) {
 export function fetchWorkshopRequest(requestId: string) {
   return requestJson<WorkshopRequest>(`/api/workshop/requests/${encodeURIComponent(requestId)}`, '读取生成请求');
 }
-export function fetchWorkshopRequests(page = 1) {
+export function fetchWorkshopRequests(page = 1, scope: WorkshopRequestScope = 'awaiting') {
   return requestJson<{ requests: WorkshopRequest[]; page: number; page_size: number; total: number }>(
-    `/api/workshop/requests?page=${page}&page_size=20`, '读取待批准生成',
+    `/api/workshop/requests?page=${page}&page_size=20&scope=${scope}`, scope === 'awaiting' ? '读取待批准生成' : '读取历史请求',
   );
+}
+export function rejectWorkshopRequest(request: WorkshopRequest) {
+  return requestJson<WorkshopRequest>(`/api/workshop/requests/${encodeURIComponent(request.request_id)}/reject`, '拒绝生成', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expected_revision: request.revision }),
+  });
 }
 export function approveWorkshopRequest(request: WorkshopRequest) {
   return requestJson<WorkshopRequest>(`/api/workshop/requests/${encodeURIComponent(request.request_id)}/approve`, '批准生成', {

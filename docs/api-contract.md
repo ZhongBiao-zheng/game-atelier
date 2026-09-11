@@ -156,8 +156,10 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 目录内并为支持的图片扩展名。目录残留文件不自动成为作品，也不从目录名推断任务链接。
 部分成功任务保留成功产物；隐藏、收藏与评分规则继续生效，不依据图片颜色判定失败。
 
-工坊本地请求管理为 `GET /workshop/requests` 和
-`POST /workshop/requests/{request_id}/approve { expected_revision }`；Agent 身份经 `workshop_approve_generation` 批准自身请求，须持 `execute_generation`。
+工坊本地请求管理为 `GET /workshop/requests?scope=awaiting|history|all`（默认只列还能批准的）、
+`POST /workshop/requests/{request_id}/approve { expected_revision }` 与
+`POST /workshop/requests/{request_id}/reject { expected_revision }`（仅本机页面；状态 `rejected`，记
+`rejected_by / rejected_at`；视图同时回 `approved_by / approved_at`）；Agent 身份经 `workshop_approve_generation` 批准自身请求，须持 `execute_generation`。
 其余 MCP 工具均为专用 POST 输入，详见工坊契约，不提供通用 HTTP / 文件工具。
 
 `GET /spec/{id}` 返回 `{ content, revision }`；`POST /spec/{id}` 要求
