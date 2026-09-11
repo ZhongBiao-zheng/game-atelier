@@ -103,12 +103,9 @@ screen-map approved 后，逐页生成走 `ui-page`（它从 map 的 `## screen.
 
 ## 手的选择（CLI / MCP 双路径）
 
-本 Skill 的知识层（记忆注入、设定协议、prompt 规则、经验沉淀）与「手」无关；只有读写资料 / 准备 / 执行这一层按可用性选一条：
+本 Skill 的知识层（记忆注入、设定协议、prompt 规则、经验沉淀）与「手」无关。客户端工具列表里有 `workshop_*` 工具 → 走 MCP，CLI 命令与 MCP 工具的对应关系见 `docs/references/workshop-mcp-workflow.md`「连接与资料边界」；没有 → 走本文的 CLI 命令。同一轮绝不混用两条手。
 
-- 客户端工具列表里有 `workshop_*` 工具 → 走 MCP：按 `docs/references/workshop-mcp-workflow.md` 用同名工具替代本文的 turn-start / submit / run-job / append-memory 等命令，其余章节照旧。
-- 没有 → 走本文的 CLI 命令。
-
-两条路径的批准门相同：确认卡 + 画师明确肯定。MCP 路径下，授权带 `execute_generation` 时用 `workshop_approve_generation` 完成批准；不带时请画师去 Atelier「待批准生成」页确认。同一轮绝不混用两条手。
+本 Skill 不提交生成、不批准；批准门由被路由到的子技能各自守，这里不重复。
 
 ## Guardrails
 

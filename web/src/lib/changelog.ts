@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.56.1',
+    date: '2026-09-11',
+    headline: 'Skill 文档去重，画布授权即批准写进 ADR',
+    changes: [
+      { kind: 'fix', text: '九份 Skill 的「手的选择」段收成一句引用，CLI 命令与 MCP 工具的对应表只在 workshop-mcp-workflow.md 维护；路由类 Skill 不再复写批准门。' },
+      { kind: 'fix', text: 'ADR-0011 标记为被 ADR-0017 取代：画布 MCP 的批准是授权级（持有 canvas_edit / canvas_generate 即批准），契约文档同步。' },
+    ],
+  },
+  {
     version: '5.56.0',
     date: '2026-09-11',
     headline: 'Agent 改画布实时可见，MCP 不再钉死端口',
