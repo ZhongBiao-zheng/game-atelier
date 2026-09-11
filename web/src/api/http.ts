@@ -18,7 +18,7 @@ function statusReason(status: number, statusText: string): string {
   if (status === 413) return '文件超出服务端允许的大小';
   if (status === 422) return '提交的内容不合接口要求';
   if (status === 429) return '请求太频繁，被限流了';
-  if (status >= 500) return '服务端内部出错（详情看 viewer-server 终端的日志）';
+  if (status >= 500) return '服务端内部出错（原因见 data root 下 .runtime/server.log，或 viewer-server 终端）';
   if (status >= 400) return statusText || '请求被服务端拒绝';
   return statusText || '未知错误';
 }

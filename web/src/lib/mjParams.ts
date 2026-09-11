@@ -19,6 +19,8 @@ export interface MjParams {
   chaos: number;
   /** 空串 = 不发。只存数字本体，caller 负责拼成 `--sref <code>`。 */
   srefCode: string;
+  /** 空串 = 不发。只存 Profile code/ID 本体，caller 负责拼成 `--profile <value>`。 */
+  profile: string;
   weird: number;
   /** 空串 = 不发（输入框友好；MJ 的 seed 无「默认值」概念）。 */
   seed: string;
@@ -38,6 +40,7 @@ export const MJ_DEFAULTS: MjParams = {
   stylize: 100,
   chaos: 0,
   srefCode: '',
+  profile: '',
   weird: 0,
   seed: '',
   no: '',
@@ -104,6 +107,14 @@ export function hasSrefCode(p: MjParams): boolean {
   return p.srefCode.trim().length > 0;
 }
 
+/** 输入框同时兼容 code/ID 本体和完整参数；非法输入返回 null，不能静默改成另一个 ID。 */
+export function normalizeProfileInput(value: string): string | null {
+  const normalized = value
+    .trim()
+    .replace(/^--(?:profile|p)\s+/i, '');
+  return /^[A-Za-z0-9]{0,64}$/.test(normalized) ? normalized : null;
+}
+
 /** 面板状态 → job params（键名与 schemas.py::JobParams 的 mj_* 字段一一对应）。
  *
  * version / stylize / chaos / weird 一律显式发，即使等于厂商默认值：这些参数直接决定产物
@@ -120,6 +131,7 @@ export function mjParamsToJob(p: MjParams): Record<string, unknown> {
     mj_weird: p.weird,
   };
   if (/^\d+$/.test(p.srefCode.trim())) out.mj_sref_code = p.srefCode.trim();
+  if (/^[A-Za-z0-9]{1,64}$/.test(p.profile.trim())) out.mj_profile = p.profile.trim();
   const seed = Number.parseInt(p.seed.trim(), 10);
   if (Number.isFinite(seed)) out.mj_seed = seed;
   if (p.no.trim()) out.mj_no = p.no.trim();
@@ -146,6 +158,9 @@ export function mjParamsFromJob(params: Record<string, unknown> | undefined): Mj
     chaos: num(p.mj_chaos, MJ_DEFAULTS.chaos),
     srefCode: typeof p.mj_sref_code === 'string' && /^\d+$/.test(p.mj_sref_code)
       ? p.mj_sref_code
+      : '',
+    profile: typeof p.mj_profile === 'string' && /^[A-Za-z0-9]{1,64}$/.test(p.mj_profile)
+      ? p.mj_profile
       : '',
     weird: num(p.mj_weird, MJ_DEFAULTS.weird),
     seed: typeof p.mj_seed === 'number' ? String(p.mj_seed) : '',

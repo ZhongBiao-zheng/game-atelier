@@ -179,6 +179,26 @@ def create_grant(client):
     return native, project, grant, credential
 
 
+def test_credential_store_failure_is_reported_with_reason(client, monkeypatch):
+    """Windows ACL / pywin32 / 磁盘不支持权限时写凭据会抛 OSError；页面要看到原因，不是裸 500。"""
+    bootstrap(client)
+    project = create_project("凭据失败")
+    from viewer_server import connection_auth
+
+    def broken(path, value):
+        raise PermissionError("Credential ACL grants another principal access")
+
+    monkeypatch.setattr(connection_auth, "write_private_json", broken)
+    response = client.post("/api/connection/agent-grants", json={
+        "name": "坏盘", "project_ids": [project.id], "capabilities": ["read"], "days": 7,
+    })
+    assert response.status_code == 500
+    body = response.json()["error"]
+    assert body["code"] == "CREDENTIAL_STORE_FAILED"
+    assert "PermissionError" in body["message"] and "pywin32" in body["message"]
+    assert client.get("/api/connection/agent-grants").json()["grants"] == []
+
+
 def test_grant_exchange_tool_scoping_and_immediate_revocation(client):
     bootstrap(client)
     native, project, grant, credential = create_grant(client)

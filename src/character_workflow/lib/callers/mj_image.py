@@ -199,6 +199,16 @@ def _ref_flags(params: dict[str, Any], params_in: dict[str, Any] | None = None) 
     return out
 
 
+def _profile_flag(params: dict[str, Any]) -> str | None:
+    """只接收 Profile code/ID 本体，禁止把自由文本借此注入 prompt。"""
+    profile = str(params.get("mj_profile") or "").strip()
+    if not profile:
+        return None
+    if len(profile) > 64 or not (profile.isascii() and profile.isalnum()):
+        raise MidjourneyError("profile 只允许 1-64 位英文字母或数字")
+    return f"--profile {profile}"
+
+
 def _version_flag(params: dict[str, Any]) -> str | None:
     """版本 flag —— niji 与 Midjourney 是两套体系，flag 名和版本号都不通用。
 
@@ -228,6 +238,9 @@ def _append_flags(prompt: str, params: dict[str, Any],
         if value is None or value == "":
             continue
         parts.append(f"--{flag} {cast(value)}")
+    profile_flag = _profile_flag(params)
+    if profile_flag:
+        parts.append(profile_flag)
     parts.extend(_ref_flags(params, params_in))
     if params.get("mj_tile"):
         parts.append("--tile")  # 无值开关

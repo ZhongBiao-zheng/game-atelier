@@ -33,6 +33,51 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.0',
+    date: '2026-09-11',
+    headline: '画布视频节点按真实尺寸显示，生成面板固定在节点下方',
+    changes: [
+      { kind: 'fix', text: '视频生成中的占位节点按请求的画幅比例显示，与图片一致；生成完成后节点按视频真实像素比例锁定（从文件头读取，读不到时按请求比例）。' },
+      { kind: 'fix', text: '视频全屏播放时按空格可播放 / 暂停。' },
+      { kind: 'fix', text: '生成面板不再在节点上下翻转：固定在节点正下方，靠近可视区边界时停在边界处，节点继续拖动面板跟随。' },
+    ],
+  },
+  {
+    version: '5.61.0',
+    date: '2026-09-11',
+    headline: '本机 Agent 一键连接',
+    changes: [
+      { kind: 'feat', text: '「本机连接」页点「连接本机 Agent」即创建授权：全部项目、全部画布、全部能力、30 天，不再逐项勾选。要缩范围点「自定义」。' },
+    ],
+  },
+  {
+    version: '5.60.2',
+    date: '2026-09-11',
+    headline: '一键启动不再卡死，输出只剩状态与报错',
+    changes: [
+      { kind: 'fix', text: 'Windows 一键启动的脚本文件带了 BOM，导致 @echo off 失效，每条命令都被回显成一长串；已去掉，窗口只显示状态、警告（黄）和错误（红）。' },
+      { kind: 'fix', text: '更新前先探测 GitHub 是否可达（6 秒），git 拉取加低速超时，uv 下载加 20 秒超时；离线时跳过更新、沿用现有依赖直接启动，不再无限等待。' },
+      { kind: 'fix', text: 'Windows 命令行在 UTF-8 码页下会把含中文的长注释行错认成命令，脚本里的长注释已全部移除。' },
+    ],
+  },
+  {
+    version: '5.60.1',
+    date: '2026-09-11',
+    headline: '创建 Agent 授权失败时能看到原因',
+    changes: [
+      { kind: 'fix', text: 'Agent 凭据文件写不进去（Windows 权限、pywin32 缺失、磁盘不支持权限）时，页面直接显示具体原因，不再只报 500。' },
+      { kind: 'fix', text: '后台启动的服务把运行日志写到 data root 的 .runtime/server.log（每次启动覆盖），排查报错不再无处可查。' },
+    ],
+  },
+  {
+    version: '5.60.0',
+    date: '2026-09-11',
+    headline: 'Midjourney 支持个性化 Profile',
+    changes: [
+      { kind: 'feat', text: 'Midjourney 参数面板新增 profile：填 Profile code 或 ID，也可直接粘贴 --profile 参数；进入出图记录，历史恢复与再次生成不会丢。' },
+    ],
+  },
+  {
     version: '5.59.0',
     date: '2026-09-11',
     headline: '待批数显示在顶栏，历史请求自动归档',

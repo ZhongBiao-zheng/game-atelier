@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
@@ -25,7 +25,7 @@ echo [自检] web\dist 有本地构建残留或文件缺失，正在安全还原
 git restore --source=HEAD --staged --worktree -- web/dist 2>nul
 if errorlevel 1 git checkout HEAD -- web/dist 2>nul
 if errorlevel 1 goto :dist_failed
-REM web\dist 是发布生成物；只清这里的未跟踪文件，不碰角色资产或其他本地改动。
+REM 只清 web\dist 的未跟踪文件
 git clean -qfd -- web/dist
 if errorlevel 1 goto :dist_failed
 

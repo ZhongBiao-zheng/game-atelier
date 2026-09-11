@@ -48,18 +48,28 @@ function LocalConnectionPage() {
   useEffect(() => {
     let active = true;
     Promise.all([fetchAgentGrants(), fetchProjects(), requestJson<CanvasProjectOption[]>('/api/canvas/project-options', '读取画布列表')]).then(([result, projectFile, canvasOptions]) => {
-      if (active) { setGrants(result.grants); setPython(result.python); setProjects(projectFile.projects); setCanvasProjects(canvasOptions); }
+      if (active) {
+        setGrants(result.grants); setPython(result.python); setProjects(projectFile.projects); setCanvasProjects(canvasOptions);
+        // 默认全选：本机自用一键连接就是全部项目 + 全部画布 + 满能力，要缩范围走「自定义」。
+        setProjectIds(projectFile.projects.map(project => project.id));
+        setCanvasProjectIds(canvasOptions.map(project => project.project_id));
+      }
     }).catch(error => { if (active) setError(String(error)); });
     return () => { active = false; };
   }, []);
 
-  async function create(event: FormEvent) {
-    event.preventDefault(); setError(null); setBusy('create');
+  async function submitGrant(grantName: string) {
+    setError(null); setBusy('create');
     try {
-      const grant = await createAgentGrant({ name: name.trim(), project_ids: projectIds, canvas_project_ids: canvasProjectIds, capabilities, days });
+      const grant = await createAgentGrant({ name: grantName, project_ids: projectIds, canvas_project_ids: canvasProjectIds, capabilities, days });
       setGrants(current => [grant, ...current]); setCreating(false); setName('');
     } catch (error) { setError(String(error)); } finally { setBusy(null); }
   }
+  function create(event: FormEvent) {
+    event.preventDefault();
+    void submitGrant(name.trim());
+  }
+  const nothingToGrant = projectIds.length === 0 && canvasProjectIds.length === 0;
   async function revoke(grant: AgentGrant) {
     if (!window.confirm(`撤销「${grant.name}」的连接授权？已提交的生成不会因此取消。`)) return;
     setBusy(grant.grant_id); setError(null);
@@ -83,15 +93,19 @@ function LocalConnectionPage() {
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     <SitePairingSection />
     <h2 className="text-base font-medium">Agent 授权</h2>
-    {!creating ? <button type="button" onClick={() => setCreating(true)} className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"><Plus size={16} aria-hidden />添加 Agent 授权</button> :
-      <form onSubmit={event => void create(event)} className="space-y-5 rounded-lg border border-border bg-card p-5">
+    {!creating ? <div className="flex flex-wrap items-center gap-3">
+        <button type="button" disabled={busy !== null || nothingToGrant} onClick={() => void submitGrant('本机 Agent')} className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"><Plus size={16} aria-hidden />{busy === 'create' ? '连接中…' : '连接本机 Agent'}</button>
+        <button type="button" onClick={() => setCreating(true)} className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">自定义</button>
+        {nothingToGrant && <span className="text-sm text-muted-foreground">先创建项目或画布</span>}
+      </div> :
+      <form onSubmit={create} className="space-y-5 rounded-lg border border-border bg-card p-5">
         <label className="block space-y-2 text-sm"><span>连接名称</span><input required maxLength={80} value={name} onChange={event => setName(event.target.value)} placeholder="例如：Codex 美术助手" className="block w-full rounded-md border border-input bg-transparent px-3 py-2 focus-visible:ring-1 focus-visible:ring-ring" /></label>
         <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">允许访问的项目</legend>{projects.length === 0 && <p className="text-sm text-muted-foreground">先在工坊创建项目。</p>}{projects.map(project => <label key={project.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={projectIds.includes(project.id)} onChange={event => setProjectIds(current => event.target.checked ? [...current, project.id] : current.filter(id => id !== project.id))} />{project.name}</label>)}</fieldset>
         <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">允许访问的画布</legend>{canvasProjects.length === 0 && <p className="text-sm text-muted-foreground">还没有画布项目。</p>}{canvasProjects.map(project => <label key={project.project_id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={canvasProjectIds.includes(project.project_id)} onChange={event => setCanvasProjectIds(current => event.target.checked ? [...current, project.project_id] : current.filter(id => id !== project.project_id))} />{project.name}</label>)}</fieldset>
         <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">允许的工坊操作</legend>{CAPABILITIES.map(capability => <label key={capability.value} className="flex items-center gap-2 text-sm"><input type="checkbox" disabled={capability.value === 'read'} checked={capabilities.includes(capability.value)} onChange={event => setCapabilities(current => event.target.checked ? [...current, capability.value] : current.filter(value => value !== capability.value))} />{capability.label}</label>)}</fieldset>
         <fieldset className="space-y-2"><legend className="mb-2 text-sm font-medium">允许的画布操作</legend>{CANVAS_CAPABILITIES.map(capability => <label key={capability.value} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={capabilities.includes(capability.value)} onChange={event => setCapabilities(current => event.target.checked ? [...current, capability.value] : current.filter(value => value !== capability.value))} />{capability.label}</label>)}</fieldset>
         <label className="flex items-center gap-3 text-sm">有效天数<input type="number" min={1} max={30} required value={days} onChange={event => setDays(Number(event.target.value))} className="w-20 rounded-md border border-input bg-transparent px-3 py-2" /></label>
-        <div className="flex gap-2"><button disabled={busy !== null || (projectIds.length === 0 && canvasProjectIds.length === 0) || !name.trim()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{busy === 'create' ? '创建中…' : '创建授权'}</button><button type="button" onClick={() => setCreating(false)} className="rounded-md px-4 py-2 text-sm hover:bg-accent">取消</button></div>
+        <div className="flex gap-2"><button disabled={busy !== null || nothingToGrant || !name.trim()} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{busy === 'create' ? '创建中…' : '创建授权'}</button><button type="button" onClick={() => setCreating(false)} className="rounded-md px-4 py-2 text-sm hover:bg-accent">取消</button></div>
       </form>}
     <section aria-label="已有 Agent 授权" className="space-y-3">
       {grants.length === 0 && !creating && <p className="py-8 text-sm text-muted-foreground">尚未授权任何 Agent。</p>}

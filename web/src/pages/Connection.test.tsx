@@ -16,17 +16,26 @@ function server(existing = false) {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('local Agent authorization UI', () => {
-  it('requires an explicit project, defaults to full local capabilities and lets the user narrow them', async () => {
+  it('connects with one click using every project, canvas and capability', async () => {
     const network = server(); render(<ConnectionPage />);
-    fireEvent.click(await screen.findByRole('button', { name: '添加 Agent 授权' }));
+    const connect = await screen.findByRole('button', { name: '连接本机 Agent' });
+    await waitFor(() => expect(connect).toBeEnabled());
+    fireEvent.click(connect); await screen.findByText(new RegExp(grant.credential_path));
+    const call = network.mock.calls.find(([url, init]) => url.endsWith('agent-grants') && init?.method === 'POST');
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ name: '本机 Agent', project_ids: ['p1'], canvas_project_ids: ['canvas-one'], capabilities: ['read', 'edit_documents', 'create_targets', 'prepare_generation', 'execute_generation', 'canvas_read', 'canvas_edit', 'canvas_generate'], days: 30 });
+    expect(screen.queryByText(/token/i)).not.toBeInTheDocument();
+  });
+  it('lets the user narrow scope and capabilities through the custom form', async () => {
+    const network = server(); render(<ConnectionPage />);
+    await screen.findByRole('button', { name: '连接本机 Agent' });
+    fireEvent.click(screen.getByRole('button', { name: '自定义' }));
     const create = screen.getByRole('button', { name: '创建授权' }); expect(create).toBeDisabled();
     fireEvent.change(screen.getByLabelText('连接名称'), { target: { value: grant.name } });
-    fireEvent.click(await screen.findByLabelText('测试项目'));
+    fireEvent.click(await screen.findByLabelText('测试画布'));
     fireEvent.click(screen.getByLabelText('直接执行生成（终端确认即批准，不经页面）'));
     fireEvent.click(create); await screen.findByText(new RegExp(grant.credential_path));
     const call = network.mock.calls.find(([url, init]) => url.endsWith('agent-grants') && init?.method === 'POST');
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ name: grant.name, project_ids: ['p1'], canvas_project_ids: [], capabilities: ['read', 'edit_documents', 'create_targets', 'prepare_generation', 'canvas_read', 'canvas_edit', 'canvas_generate'], days: 30 });
-    expect(screen.queryByText(/token/i)).not.toBeInTheDocument();
   });
   it('copies the registration command with interpreter and credential path, revokes only after confirmation', async () => {
     const network = server(true); const writeText = vi.fn().mockResolvedValue(undefined);

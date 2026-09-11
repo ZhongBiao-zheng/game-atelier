@@ -102,6 +102,7 @@ function specMetadata(config: RoundConfig): string[] {
 function shownMjMetadata(config: RoundConfig): string {
   const flags = visibleMjFlags(config.mjFlags);
   const srefCode = config.mjParams?.srefCode.trim();
+  const profile = config.mjParams?.profile.trim();
   const seed = config.mjParams?.seed.trim();
   const additions: string[] = [];
   if (srefCode) {
@@ -109,6 +110,9 @@ function shownMjMetadata(config: RoundConfig): string {
     if (config.mjParams?.sw !== null && config.mjParams?.sw !== undefined) {
       additions.push(`--sw ${config.mjParams.sw}`);
     }
+  }
+  if (profile && !/(?:^|\s)--(?:profile|p)(?:\s|$)/.test(flags)) {
+    additions.push(`--profile ${profile}`);
   }
   if (seed && !/(?:^|\s)--seed(?:\s|$)/.test(flags)) additions.push(`--seed ${seed}`);
   return [flags, ...additions].filter(Boolean).join(' ');
