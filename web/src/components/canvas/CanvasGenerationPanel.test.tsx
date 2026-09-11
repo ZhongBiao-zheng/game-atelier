@@ -1060,56 +1060,45 @@ function rect(left: number, top: number, width: number, height: number) {
 
 const VIEWPORT = rect(0, 0, 1280, 720);
 
-it('keeps the generation panel horizontally centered on a node near the left edge', () => {
+it('clamps the generation panel inside the left edge instead of centering off-screen', () => {
   const nearLeftEdge = rect(180, 200, 94, 160);
 
   const placement = placeCanvasGenerationPanel(nearLeftEdge, VIEWPORT, 290);
 
-  expect(placement.left).toBe(-77);
+  expect(placement.left).toBe(16);
   expect(placement.width).toBe(608);
   expect(placement.top).toBe(376);
+  expect(placement.side).toBe('below');
 });
 
-it('flips the generation panel above the node when there is no room below', () => {
+it('stays below the node and stops at the bottom edge instead of flipping above', () => {
   const nearBottom = rect(500, 560, 240, 140);
 
   const placement = placeCanvasGenerationPanel(nearBottom, VIEWPORT, 290);
 
-  expect(placement.top).toBe(254);
-  expect(placement.top + 290).toBeLessThanOrEqual(nearBottom.top - 16);
-  expect(placement.side).toBe('above');
+  expect(placement.side).toBe('below');
+  expect(placement.top).toBe(VIEWPORT.bottom - 16 - 290);
+  expect(placement.top).toBeLessThan(nearBottom.bottom + 16);
 });
 
-it('chooses the roomier vertical side without changing horizontal alignment', () => {
-  const tallNode = rect(400, 40, 320, 640);
+it('keeps the generation panel directly below a node with room to spare', () => {
+  const node = rect(400, 60, 330, 330);
 
-  const placement = placeCanvasGenerationPanel(tallNode, rect(0, 0, 700, 400), 600);
+  const placement = placeCanvasGenerationPanel(node, rect(0, 0, 1440, 900), 400);
 
-  expect(placement.left).toBe(256);
-  expect(placement.top).toBe(-344);
-  expect(placement.maxHeight).toBe(368);
-  expect(placement.width).toBe(608);
-});
-
-it('keeps the generation panel directly below instead of jumping sideways', () => {
-  const node = rect(90, 60, 330, 330);
-
-  const placement = placeCanvasGenerationPanel(node, rect(0, 0, 1440, 900), 860);
-
-  expect(placement.left).toBe(-49);
+  expect(placement.left).toBe(400 + 165 - 304);
   expect(placement.top).toBe(node.bottom + 16);
   expect(placement.width).toBe(608);
-  expect(placement.side).toBe('below');
 });
 
-it('prefers the roomier side even when the panel extends beyond the viewport', () => {
-  const wideNode = rect(0, 40, 1400, 640);
+it('clamps at the right edge and limits the panel height to the viewport', () => {
+  const wideNode = rect(900, 40, 1400, 640);
 
   const placement = placeCanvasGenerationPanel(wideNode, rect(0, 0, 1440, 900), 860);
 
-  expect(placement.left).toBe(396);
-  expect(placement.top).toBe(wideNode.bottom + 16);
-  expect(placement.width).toBe(608);
+  expect(placement.left).toBe(1440 - 16 - 608);
+  expect(placement.maxHeight).toBe(868);
+  expect(placement.top).toBe(900 - 16 - 860);
 });
 
 it('keeps job state on the node badge without a persistent panel status line', () => {

@@ -33,6 +33,7 @@ from character_workflow.lib.job_runner import (
     image_dimensions,
     is_valid_audio,
     run_job,
+    video_dimensions,
 )
 from character_workflow.lib.jobs import (
     job_lock,
@@ -1027,6 +1028,19 @@ def _with_active_run(node: CanvasNode, run_id: str) -> CanvasNode:
     })
 
 
+def _nominal_video_dimensions(params: JobParams) -> tuple[int, int] | None:
+    match = re.fullmatch(r"(\d+)\s*[x:×]\s*(\d+)", str(params.ratio or "").strip())
+    if not match:
+        return None
+    aspect_w, aspect_h = int(match.group(1)), int(match.group(2))
+    if aspect_w <= 0 or aspect_h <= 0:
+        return None
+    short_side = {"480p": 480, "720p": 720, "1080p": 1080}.get(str(params.resolution or ""), 720)
+    if aspect_w >= aspect_h:
+        return round(short_side * aspect_w / aspect_h), short_side
+    return short_side, round(short_side * aspect_h / aspect_w)
+
+
 def _result_image_size(params: JobParams) -> CanvasSize:
     """Size the pending result card to the output aspect so it does not jump when the image lands.
 
@@ -1062,7 +1076,8 @@ def _new_result_node(
 ) -> CanvasNode:
     width = surface.size.width if surface.size is not None else 320
     position = surface.position.model_copy(update={"x": surface.position.x + width + 120})
-    image_size = _result_image_size(job_params) if mode == "image" else None
+    # 视频同样按请求比例占位（ratio 如 16:9），出片后节点不跳尺寸。
+    image_size = _result_image_size(job_params) if mode in {"image", "video"} else None
     candidate_width = image_size.width if image_size is not None else 320
     candidate_height = image_size.height if image_size is not None else 240
     occupied = sorted(
@@ -1117,7 +1132,7 @@ def _new_result_node(
     )
     if mode == "image":
         return CanvasImageNode(**common, type="image", size=image_size, data=data)
-    return CanvasVideoNode(**common, type="video", data=data)
+    return CanvasVideoNode(**common, type="video", size=image_size, data=data)
 
 
 def _commit_frozen_run(
@@ -2487,6 +2502,11 @@ def _output_version(
         if dimensions is None:
             raise ValueError("Canvas Job 返回了无效图片")
         width, height = dimensions
+    if job.kind == JobKind.VIDEO:
+        # 没探出像素就按请求的比例 × 分辩率给一个名义尺寸：节点比例由它决定，不能空着。
+        dimensions = video_dimensions(target) or _nominal_video_dimensions(job.params)
+        if dimensions is not None:
+            width, height = dimensions
     if job.kind == JobKind.AUDIO and not is_valid_audio(target):
         raise ValueError("Canvas Job 返回了无效音频")
     return CanvasMediaVersion(

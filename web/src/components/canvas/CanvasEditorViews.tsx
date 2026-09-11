@@ -917,13 +917,12 @@ export interface CanvasPanelPlacement {
   side: CanvasPanelSide;
 }
 
-/** 生成面板只贴在节点正下方或正上方，视口坐标系。
+/** 生成面板永远贴在节点正下方，视口坐标系；只做边界夹紧，不翻到上方。
  *
- *  横坐标永远按节点中心对齐，不再为了留在屏幕里而夹边、压窄或跳到节点左右。这样拖动节点时
- *  面板与节点的空间关系始终稳定；节点靠近画布边缘时允许面板自然超出可视范围。
- *
- *  垂直方向优先放下方，下方放不下再放上方；两边都放不下时选剩余空间更大的一侧。maxHeight
- *  仍负责限制超高内容并让面板内部滚动，不参与横向适配。 */
+ *  横向按节点中心对齐，纵向紧跟节点底边；面板任一边离可视区边界不足一个 gap 时停在边界处，
+ *  节点继续往外拖时面板留在边上、节点自己走。所以节点靠底时面板会盖住节点下半部分——这是
+ *  飙哥 2026-09-11 明确要的行为（「就在下面，靠边就停」），换掉了原来的上下翻转。
+ *  maxHeight 仍限制超高内容并让面板内部滚动。 */
 export function placeCanvasGenerationPanel(
   anchor: CanvasPanelRect,
   bounds: CanvasPanelRect,
@@ -933,27 +932,10 @@ export function placeCanvasGenerationPanel(
   const width = CANVAS_GENERATION_PANEL_WIDTH;
   const maxHeight = Math.max(160, bounds.height - gap * 2);
   const height = Math.min(panelHeight > 0 ? panelHeight : maxHeight, maxHeight);
-  const alignedLeft = anchor.left + anchor.width / 2 - width / 2;
-
-  const below = anchor.bottom + gap;
-  if (below + height <= bounds.bottom - gap) {
-    return { left: alignedLeft, top: below, width, maxHeight, side: 'below' };
-  }
-  const above = anchor.top - gap - height;
-  if (above >= bounds.top + gap) {
-    return { left: alignedLeft, top: above, width, maxHeight, side: 'above' };
-  }
-
-  const roomBelow = bounds.bottom - anchor.bottom;
-  const roomAbove = anchor.top - bounds.top;
-  const side: CanvasPanelSide = roomBelow >= roomAbove ? 'below' : 'above';
-  return {
-    left: alignedLeft,
-    top: side === 'below' ? below : above,
-    width,
-    maxHeight,
-    side,
-  };
+  const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), Math.max(low, high));
+  const left = clamp(anchor.left + anchor.width / 2 - width / 2, bounds.left + gap, bounds.right - gap - width);
+  const top = clamp(anchor.bottom + gap, bounds.top + gap, bounds.bottom - gap - height);
+  return { left, top, width, maxHeight, side: 'below' };
 }
 
 /** 画布外框上的常驻控件占了哪几条边。
@@ -3208,6 +3190,19 @@ function MediaPreview({
     if (!video?.requestFullscreen) return;
     void video.requestFullscreen().catch(() => undefined);
   };
+  // 原生全屏下 <video> 没开 controls，空格不会自己播放/暂停；只在本节点的视频占着全屏时接管空格。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const video = videoElement.current;
+      if (!video || document.fullscreenElement !== video) return;
+      if (event.key !== ' ' && event.code !== 'Space') return;
+      event.preventDefault();
+      if (video.paused) void video.play().catch(() => undefined);
+      else video.pause();
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, []);
   if (kind === 'image') return (
     <img
       src={src}

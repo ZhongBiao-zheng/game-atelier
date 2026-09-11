@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.0',
+    date: '2026-09-11',
+    headline: '画布视频节点按真实尺寸显示，生成面板固定在节点下方',
+    changes: [
+      { kind: 'fix', text: '视频生成中的占位节点按请求的画幅比例显示，与图片一致；生成完成后节点按视频真实像素比例锁定（从文件头读取，读不到时按请求比例）。' },
+      { kind: 'fix', text: '视频全屏播放时按空格可播放 / 暂停。' },
+      { kind: 'fix', text: '生成面板不再在节点上下翻转：固定在节点正下方，靠近可视区边界时停在边界处，节点继续拖动面板跟随。' },
+    ],
+  },
+  {
     version: '5.61.0',
     date: '2026-09-11',
     headline: '本机 Agent 一键连接',

@@ -168,11 +168,12 @@ export function canvasNodeRenderedSize(
   versions: Readonly<Record<string, CanvasContentVersion>>,
 ): CanvasSize {
   if (node.type === 'text') return node.size ?? CANVAS_TEXT_NODE_DEFAULT_SIZE;
-  if (node.type !== 'image' || node.data.display.free_resize || !node.data.current_version_id) {
+  if ((node.type !== 'image' && node.type !== 'video') || node.data.display.free_resize || !node.data.current_version_id) {
     return node.size ?? CANVAS_DEFAULT_NODE_SIZE;
   }
   const version = versions[node.data.current_version_id];
-  return version?.kind === 'image'
+  // 图片与视频都按产物像素比例锁节点比例；视频的宽高由服务端从 mp4 头探出（或按请求比例给名义值）。
+  return version?.kind === 'image' || version?.kind === 'video'
     ? sizeLockedToCanvasVersion(node.size, version)
     : node.size ?? CANVAS_DEFAULT_NODE_SIZE;
 }
