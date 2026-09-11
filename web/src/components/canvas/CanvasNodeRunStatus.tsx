@@ -26,10 +26,16 @@ export function canvasNodeRunDisplayError(
 export function canvasNodeRunState(
   node: CanvasNode,
   jobsByRunId: ReadonlyMap<string, Job>,
+  jobsByResultNodeId?: ReadonlyMap<string, Job[]>,
 ): CanvasNodeRunState {
+  // active_run_id 只在生成进行中非空（服务端 finalize / 失败 / 停止都会清）；
+  // 「生成完成 / 失败原因」的角标改从 jobsByResultNodeId 反查该节点最近一次 job。
   const runId = activeRunId(node);
   const mappedJob = runId ? jobsByRunId.get(runId) : undefined;
-  const job = mappedJob?.canvas_run?.result_node_id === node.id ? mappedJob : undefined;
+  const activeJob = mappedJob?.canvas_run?.result_node_id === node.id ? mappedJob : undefined;
+  const history = (jobsByResultNodeId?.get(node.id) ?? [])
+    .filter(candidate => candidate.canvas_run?.result_node_id === node.id);
+  const job = activeJob ?? history[history.length - 1];
   if (!job) {
     return { status: 'idle', label: '待编辑', detail: null, job: undefined, reversePrompt: false };
   }

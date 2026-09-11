@@ -320,6 +320,8 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 - `GET .../batch-runs` / `GET .../batch-runs/{batch_id}`：读取最近 20 份计划/单份计划，
   包含每项每步的 Job、Run、结果 Version ID 和状态；`executions[].result_node_id` 在展开前为空，
   首次提交事务展开链路后指向对应普通节点。未提交步骤不伪造节点的 `active_run_id`。
+- 节点 `active_run_id` 只在 run 进行中非空：finalize / failed / canceled 三条路径都清掉（内容节点与
+  layer_stack 一致）。「最近一次生成」由 job 的 `canvas_run.result_node_id` 反查，不读该字段。
 
 批量计划冻结数据落在项目 `.runtime/batch-plans/`；进度在 `.runtime/batches/`，活动计划索引为
 `.runtime/batch-active.json`。同项同轮上游输出绑定到下游的精确 Version ID。

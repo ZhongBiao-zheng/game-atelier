@@ -160,6 +160,38 @@ def test_cancel_with_one_output_keeps_success_and_cancels_remaining_slots():
     assert result.data.current_version_id == finalized.canvas_run.candidates[0].version_id
 
 
+def test_finalize_clears_active_run_id_on_success_and_failure():
+    """active_run_id 只在 run 进行中非空（#96）：成功挂产物后清，失败没产物也要清并落一版文档。"""
+    run_id = "run-release"
+    project, _document, _primary = _project_with_result_node(primary_version_id=None, active_run_id=run_id)
+    candidates = [CanvasResultCandidate(candidate_id="candidate-0", index=0, status="pending")]
+    job = _job(project.project_id, run_id, candidates)
+    output = _write_output(project.project_id, job.job_id)
+    save_job(job.model_copy(update={"status": JobStatus.DONE, "output_paths": [output]}))
+
+    finalized, document = finalize_canvas_run(project.project_id, job.job_id)
+
+    assert finalized.status == JobStatus.DONE
+    result = next(node for node in document.nodes if node.id == "image-result")
+    assert result.data.current_version_id == finalized.canvas_run.candidates[0].version_id
+    assert result.data.active_run_id is None
+
+    failed_run = "run-release-failed"
+    project, before, _primary = _project_with_result_node(primary_version_id=None, active_run_id=failed_run)
+    job = _job(project.project_id, failed_run, [
+        CanvasResultCandidate(candidate_id="candidate-0", index=0, status="pending"),
+    ])
+    save_job(job.model_copy(update={"status": JobStatus.FAILED, "error": "厂商 500"}))
+
+    finalized, document = finalize_canvas_run(project.project_id, job.job_id)
+
+    assert finalized.status == JobStatus.FAILED
+    assert document is not None and document.revision == before.revision + 1
+    result = next(node for node in document.nodes if node.id == "image-result")
+    assert result.data.active_run_id is None
+    assert read_canvas_document(project.project_id).revision == document.revision
+
+
 def test_non_native_batch_commits_each_slot_before_starting_the_next(monkeypatch):
     run_id = "run-incremental"
     project, _document, _primary = _project_with_result_node(

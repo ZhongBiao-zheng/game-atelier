@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.57.0',
+    date: '2026-09-11',
+    headline: '画布节点的「正在生成」标记只在生成中存在',
+    changes: [
+      { kind: 'fix', text: '生成完成、失败或停止后，画布结果节点不再残留「正在生成」标记；「生成完成 / 失败原因」角标改按该节点最近一次生成记录显示，结果与之前一致。' },
+    ],
+  },
+  {
     version: '5.56.1',
     date: '2026-09-11',
     headline: 'Skill 文档去重，画布授权即批准写进 ADR',
