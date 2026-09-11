@@ -1,8 +1,11 @@
+import { useEffect, useState } from 'react';
 import { LayoutGroup, motion } from 'motion/react';
 import { Link, Redirect, Route, Switch, useLocation } from 'wouter';
 import { HomeIcon, LibraryBig, Moon, Palette, Settings, Sparkles, Sun } from 'lucide-react';
 
 import { ChangelogButton } from '@/components/ChangelogButton';
+import { fetchWorkshopRequests } from '@/api/workshopRequests';
+import { useSSE } from '@/hooks/useSSE';
 import { Home } from '@/pages/Home';
 import { Studio } from '@/pages/Studio';
 import { CanvasProjectIndex } from '@/pages/CanvasProjectIndex';
@@ -39,11 +42,12 @@ const NAV_TABS: { to: string; label: string; icon: typeof HomeIcon }[] = [
   { to: '/workshop', label: '工坊', icon: LibraryBig },
 ];
 
-function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string; isActive: boolean; icon: typeof HomeIcon }) {
+function NavTab({ to, label, isActive, icon: Icon, badge = 0 }: { to: string; label: string; isActive: boolean; icon: typeof HomeIcon; badge?: number }) {
   return (
     <Link
       href={to}
       aria-current={isActive ? 'page' : undefined}
+      aria-label={badge > 0 ? `${label}，${badge} 个待批准` : undefined}
       className={[
         // 透明壳 + isolate 自成层叠上下文：选中态玻璃药丸是底层 motion 元素，文字常驻其上
         'relative isolate h-9 md:h-10 inline-flex shrink-0 items-center gap-1.5 md:gap-2 rounded-full px-2 sm:px-3 md:px-5 text-xs md:text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
@@ -65,8 +69,23 @@ function NavTab({ to, label, isActive, icon: Icon }: { to: string; label: string
       )}
       <Icon size={18} aria-hidden />
       {label}
+      {badge > 0 && <span aria-hidden className="ml-0.5 rounded-full bg-primary px-1.5 text-xs leading-4 text-primary-foreground">{badge}</span>}
     </Link>
   );
+}
+
+/** 待批准生成数：只在本机页面能读到；网站会话 / 未连接时接口拒绝，按 0 处理。 */
+function useAwaitingWorkshopRequests(): number {
+  const signal = useSSE();
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let active = true;
+    fetchWorkshopRequests(1, 'awaiting')
+      .then(result => { if (active) setCount(Number(result?.total) || 0); })
+      .catch(() => { if (active) setCount(0); });
+    return () => { active = false; };
+  }, [signal]);
+  return count;
 }
 
 export function AppShell() {
@@ -78,6 +97,7 @@ export function AppShell() {
   const onSettings = loc.startsWith('/settings');
   const immersiveCanvas = /^\/canvas\/[^/]+$/.test(loc);
   const activeIndex = onHome ? 0 : onStudio ? 1 : onCanvas ? 2 : onWorkshop ? 3 : -1;
+  const awaiting = useAwaitingWorkshopRequests();
 
   return (
     <div className="flex flex-col h-screen bg-background text-foreground">
@@ -92,7 +112,7 @@ export function AppShell() {
           <LayoutGroup>
             <nav className="order-last col-span-2 flex min-w-0 items-center justify-center gap-1 overflow-x-auto no-scrollbar px-2 lg:order-none lg:col-span-1 lg:gap-3 lg:px-3">
               {NAV_TABS.map((t, i) => (
-                <NavTab key={t.to} to={t.to} label={t.label} isActive={activeIndex === i} icon={t.icon} />
+                <NavTab key={t.to} to={t.to} label={t.label} isActive={activeIndex === i} icon={t.icon} badge={t.to === '/workshop' ? awaiting : 0} />
               ))}
             </nav>
           </LayoutGroup>

@@ -246,6 +246,29 @@ def test_local_reject_records_actor_and_hides_from_awaiting_list(setup):
     assert [row["state"] for row in history] == ["rejected"]
 
 
+def test_list_sweep_marks_expired_and_archives_old_terminal_requests(setup):
+    """列表页打开即整理：到期落盘 expired；终态满 30 天移到 archive/，深链仍可读（#90）。"""
+    stale = prepare(setup)
+    record = generation.read_request(stale["request_id"])
+    record.expires_at = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    generation._save(record)
+    old = prepare(setup, idempotency_key="old-rejected")
+    generation.reject_generation(setup.local, old["request_id"], old["revision"])
+    record = generation.read_request(old["request_id"])
+    record.created_at = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+    generation._save(record)
+
+    listed = generation.list_requests(setup.local, scope="all")["requests"]
+
+    by_id = {row["request_id"]: row for row in listed}
+    assert by_id[stale["request_id"]]["state"] == "expired"
+    assert generation.read_request(stale["request_id"]).state == "expired"
+    assert old["request_id"] not in by_id
+    assert not generation.request_path(old["request_id"]).exists()
+    assert generation.read_request(old["request_id"]).state == "rejected"
+    assert generation.get_generation(setup.local, GetGenerationInput(request_id=old["request_id"]))["state"] == "rejected"
+
+
 def test_double_approve_concurrency_reuses_single_job(setup):
     request = prepare(setup)
     with ThreadPoolExecutor(max_workers=2) as pool:

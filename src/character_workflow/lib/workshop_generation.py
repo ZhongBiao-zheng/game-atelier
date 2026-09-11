@@ -65,11 +65,50 @@ def request_path(request_id: str) -> Path:
     return safe_path(root() / "requests" / f"{request_id}.json")
 
 
+# 终态请求（已批准 / 撤回 / 拒绝 / 过期）超过这个时长后移出列表目录，深链仍可读。
+REQUEST_ARCHIVE_AFTER = timedelta(days=30)
+_TERMINAL_STATES = {"approved", "withdrawn", "rejected", "expired"}
+
+
+def _archive_path(request_id: str) -> Path:
+    return safe_path(root() / "requests" / "archive" / f"{request_id}.json")
+
+
 def read_request(request_id: str) -> GenerationRequest:
+    path = request_path(request_id)
+    if not path.exists() and _archive_path(request_id).exists():
+        path = _archive_path(request_id)
     try:
-        return GenerationRequest.model_validate_json(read_stable(request_path(request_id), 512000))
+        return GenerationRequest.model_validate_json(read_stable(path, 512000))
     except FileNotFoundError:
         raise WorkshopError("TARGET_NOT_AUTHORIZED", "找不到生成请求", 404) from None
+
+
+def _sweep_requests(now: datetime) -> None:
+    """本机列表页打开时顺手整理：到期的落盘成 expired；终态超过 30 天的移到 archive/。
+
+    过期原来只在有人点批准时才落盘，否则文件永远停在 awaiting_approval；归档让列表目录
+    只剩近期请求，深链靠 read_request 的 archive 回退照样能看（#90）。
+    """
+    for request in _stored_requests():
+        path = request_path(request.request_id)
+        with file_lock(path.with_suffix(".lock")):
+            try:
+                request = read_request(request.request_id)
+            except WorkshopError:
+                continue
+            if request.state == "awaiting_approval" and datetime.fromisoformat(request.expires_at) <= now:
+                request.state = "expired"
+                request.revision += 1
+                _save(request)
+            if (
+                request.state in _TERMINAL_STATES
+                and datetime.fromisoformat(request.created_at) <= now - REQUEST_ARCHIVE_AFTER
+                and path.exists()
+            ):
+                target = _archive_path(request.request_id)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                path.replace(target)
 
 
 def _stored_requests() -> list[GenerationRequest]:
@@ -356,6 +395,7 @@ def list_requests(principal: Any, page: int = 1, page_size: int = 20,
     if actor_id(principal) != "local":
         raise WorkshopError("CAPABILITY_DENIED", "待批准列表仅在本地管理页可见", 403)
     now = _now()
+    _sweep_requests(now)
     stored = _stored_requests()
     if scope == "awaiting":
         stored = [request for request in stored if _awaiting(request, now)]

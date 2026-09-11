@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.59.0',
+    date: '2026-09-11',
+    headline: '待批数显示在顶栏，历史请求自动归档',
+    changes: [
+      { kind: 'feat', text: '顶栏「工坊」显示待批准生成的数量，有请求在等时不必进页面才知道。' },
+      { kind: 'feat', text: '打开待批准页时自动整理：到期请求标为已过期；已批准 / 撤回 / 拒绝 / 过期满 30 天的移入归档，列表只剩近期项，原链接仍可打开。' },
+      { kind: 'fix', text: '待批准页去掉说明段，规则说明收进标题旁的「?」提示。' },
+    ],
+  },
+  {
     version: '5.58.0',
     date: '2026-09-11',
     headline: '待批准生成页可拒绝、显示批准人、历史单列',
