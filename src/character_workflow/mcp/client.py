@@ -169,9 +169,28 @@ def _safe_result(value: object, depth: int = 0) -> bool:
     return True
 
 
+def _runtime_base_url(fallback: str) -> str:
+    """服务地址以 <data_root>/.runtime/server.port 为准，凭据里的 base_url 只是签发时的快照。
+
+    端口被占（TIME_WAIT 把 5174 顶到 5175）后服务照常运行，按快照连只会把它误报成「未启动」，
+    而 server.port 是本机服务自己维护的运行时约定，不属于「扫描用户目录」。实例是否还是签发时那个
+    由 /api/connection/status 的 instance_id 核验，这里只解决「连到哪个端口」。
+    """
+    from character_workflow.lib import data_root
+
+    try:
+        port = int((data_root.runtime_dir() / "server.port").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return fallback
+    if not 1 <= port <= 65535:
+        return fallback
+    return f"http://127.0.0.1:{port}"
+
+
 class WorkshopClient:
     def __init__(self, credentials: Credentials):
         self._credentials = credentials
+        self._base_url = credentials.base_url
         self._http = requests.Session()
         self._http.trust_env = False
         self._http.headers.update({"Accept": "application/json"})
@@ -187,7 +206,7 @@ class WorkshopClient:
             headers["Authorization"] = f"Bearer {self._session.session_token}"
         try:
             with self._http.request(
-                method, self._credentials.base_url + path, json=payload, headers=headers,
+                method, self._base_url + path, json=payload, headers=headers,
                 allow_redirects=False, timeout=(3, 30), stream=True,
             ) as response:
                 if 300 <= response.status_code < 400:
@@ -227,7 +246,8 @@ class WorkshopClient:
             # No retry after an ambiguous write: the server may already have committed it.
             raise AdapterError(
                 "LOCAL_SERVICE_UNAVAILABLE",
-                "无法连接本机 Atelier。请先启动本机服务；若操作已提交，请查询状态而非重复生成。",
+                f"无法连接本机 Atelier（{self._base_url}）。请先启动本机服务；"
+                "若操作已提交，请查询状态而非重复生成。",
             ) from None
 
     def _connect(self, status: ServiceStatus) -> None:
@@ -249,6 +269,8 @@ class WorkshopClient:
         self._session = session
 
     def _status(self) -> ServiceStatus:
+        # 每次探测都重读端口：服务重启后端口可能漂移，凭据不重签也要能连上。
+        self._base_url = _runtime_base_url(self._credentials.base_url)
         try:
             return ServiceStatus.model_validate(self._request("GET", "/api/connection/status"))
         except ValidationError:

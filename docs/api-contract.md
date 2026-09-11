@@ -86,6 +86,12 @@ P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch
 `HOST_DENIED`，来源不符返回 403 `ORIGIN_DENIED`。错误为
 `{ error: { code, message, request_id } }`，不回显来源或密钥，并设置 `Cache-Control: no-store`。
 当前鉴权覆盖业务 API、媒体、SSE 与内部文档；本地 cookie / Agent bearer 不得混用。
+
+SSE（`GET /events`）事件：`job-changed` `image-added` `spec-changed` `active-character-changed`
+`projects-changed` `workshop-request-changed` `canvas-document-changed`。最后一个由 watcher 盯
+`canvases/<project_id>/canvas.json` 发出（`{project_id, revision}`），浏览器保存与 Agent 经 MCP 的
+`canvas_apply_changes` / `canvas_import_media` / `canvas_run` 都会触发；画布编辑器按 `revision` 判断
+忽略 / 直接重载 / 提示「重新载入（放弃本页改动）」，保存撞 409 走同一动作。
 本地写入需要编辑租约（设置 / 授权管理除外），Agent 只可调用授权项目内的工坊工具。
 未知 API 默认 `CAPABILITY_DENIED`，未认证返回 `CONNECTION_REQUIRED`；不存在匿名原生业务旁路。
 开发来源登记与导航例外见连接契约。

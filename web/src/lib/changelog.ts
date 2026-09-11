@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.56.0',
+    date: '2026-09-11',
+    headline: 'Agent 改画布实时可见，MCP 不再钉死端口',
+    changes: [
+      { kind: 'fix', text: 'Agent 经 MCP 改动画布后，已打开的画布页立刻同步；本页有未保存改动时提示「重新载入」而不是静默 409。' },
+      { kind: 'fix', text: '保存画布撞上版本冲突时，直接给出「重新载入」动作，文案说明是其他来源改过。' },
+      { kind: 'fix', text: 'Agent 连接本机服务时以运行中的端口为准，服务端口从 5174 漂到 5175 后不再被误报为「未启动」。' },
+    ],
+  },
+  {
     version: '5.55.1',
     date: '2026-09-11',
     headline: '首页点阵背景延长',
