@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.60.0',
+    date: '2026-09-11',
+    headline: 'Midjourney 支持个性化 Profile',
+    changes: [
+      { kind: 'feat', text: 'Midjourney 参数面板新增 profile：填 Profile code 或 ID，也可直接粘贴 --profile 参数；进入出图记录，历史恢复与再次生成不会丢。' },
+    ],
+  },
+  {
     version: '5.59.0',
     date: '2026-09-11',
     headline: '待批数显示在顶栏，历史请求自动归档',

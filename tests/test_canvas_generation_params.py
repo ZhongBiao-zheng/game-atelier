@@ -54,7 +54,7 @@ def test_canvas_server_locks_midjourney_to_four_candidates():
     model = ModelSpec(name="Midjourney V7", id="midjourney-v7", modality="image")
 
     normalized, job_params, requested_count = _normalized_params(
-        _draft("image", model.id, n=1),
+        _draft("image", model.id, n=1, mj_profile="e6wl24r"),
         1,
         _key("custom", model),
         model,
@@ -63,6 +63,7 @@ def test_canvas_server_locks_midjourney_to_four_candidates():
     assert requested_count == 4
     assert normalized["n"] == 4
     assert job_params.n == 4
+    assert normalized["mj_profile"] == "e6wl24r"
 
 
 @pytest.mark.parametrize("mode,size,expected", [

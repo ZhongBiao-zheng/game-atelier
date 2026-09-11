@@ -5,6 +5,7 @@ import {
   mjParamsFromJob,
   mjParamsToJob,
   mjSummary,
+  normalizeProfileInput,
   normalizeVersion,
   versionsFor,
   type MjParams,
@@ -31,6 +32,7 @@ describe('mjParamsToJob', () => {
     expect(out).not.toHaveProperty('mj_iw');
     expect(out).not.toHaveProperty('mj_tile');
     expect(out).not.toHaveProperty('mj_sref_code');
+    expect(out).not.toHaveProperty('mj_profile');
   });
 
   it('给了值就发，seed 走整数、no 去空白', () => {
@@ -57,6 +59,20 @@ describe('mjParamsToJob', () => {
   });
 });
 
+describe('normalizeProfileInput', () => {
+  it('完整参数粘贴不会占用 64 位 ID 的长度预算', () => {
+    const profile = 'a'.repeat(64);
+    expect(normalizeProfileInput(`--profile ${profile}`)).toBe(profile);
+    expect(normalizeProfileInput(`--p ${profile}`)).toBe(profile);
+  });
+
+  it('非法字符与超长值直接拒绝，不改写成另一个 ID', () => {
+    expect(normalizeProfileInput('abc-def')).toBeNull();
+    expect(normalizeProfileInput('bad profile')).toBeNull();
+    expect(normalizeProfileInput('a'.repeat(65))).toBeNull();
+  });
+});
+
 describe('mjParamsFromJob', () => {
   it('往返不丢：面板 → job params → 面板', () => {
     const original: MjParams = {
@@ -66,6 +82,7 @@ describe('mjParamsFromJob', () => {
       stylize: 750,
       chaos: 25,
       srefCode: '1967932137',
+      profile: 'e6wl24r',
       weird: 1000,
       seed: '999',
       no: 'blur',
@@ -96,6 +113,7 @@ describe('mjParamsFromJob', () => {
     expect(restored.stylize).toBe(MJ_DEFAULTS.stylize);
     expect(restored.chaos).toBe(MJ_DEFAULTS.chaos);
     expect(restored.version).toBe(MJ_DEFAULTS.version);
+    expect(mjParamsFromJob({ mj_profile: '--profile e6wl24r' }).profile).toBe('');
   });
 });
 

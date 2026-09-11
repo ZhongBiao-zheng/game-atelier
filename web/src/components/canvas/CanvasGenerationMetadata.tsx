@@ -37,6 +37,7 @@ const PARAM_LABELS: Record<string, string> = {
   mj_stylize: '风格化',
   mj_chaos: '混沌',
   mj_weird: '奇异',
+  mj_profile: '个性化 Profile',
   mj_seed: 'Seed',
   mj_no: '排除词',
   mj_tile: '无缝平铺',

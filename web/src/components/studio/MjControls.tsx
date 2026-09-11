@@ -12,6 +12,7 @@ import {
   MJ_SW_STEPS,
   MJ_WEIRD_STEPS,
   mjSummary,
+  normalizeProfileInput,
   normalizeVersion,
   versionsFor,
   type MjParams,
@@ -192,6 +193,23 @@ export function MjControls({
               onChange={(e) => onChange({ srefCode: e.target.value.replace(/[^0-9]/g, '') })}
               placeholder="例如 1967932137"
               aria-label="sref 编号"
+              className="h-9 w-full rounded-lg border border-input bg-popover px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60"
+            />
+          </Section>
+
+          <Section title="个性化 profile" hint="填写 Midjourney Profile code 或 ID">
+            <input
+              type="text"
+              value={value.profile}
+              onChange={(e) => {
+                const profile = normalizeProfileInput(e.target.value);
+                if (profile !== null) onChange({ profile });
+              }}
+              placeholder="例如 e6wl24r"
+              aria-label="profile"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               className="h-9 w-full rounded-lg border border-input bg-popover px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/60"
             />
           </Section>
