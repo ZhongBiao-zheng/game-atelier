@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.60.2',
+    date: '2026-09-11',
+    headline: '一键启动不再卡死，输出只剩状态与报错',
+    changes: [
+      { kind: 'fix', text: 'Windows 一键启动的脚本文件带了 BOM，导致 @echo off 失效，每条命令都被回显成一长串；已去掉，窗口只显示状态、警告（黄）和错误（红）。' },
+      { kind: 'fix', text: '更新前先探测 GitHub 是否可达（6 秒），git 拉取加低速超时，uv 下载加 20 秒超时；离线时跳过更新、沿用现有依赖直接启动，不再无限等待。' },
+      { kind: 'fix', text: 'Windows 命令行在 UTF-8 码页下会把含中文的长注释行错认成命令，脚本里的长注释已全部移除。' },
+    ],
+  },
+  {
     version: '5.60.1',
     date: '2026-09-11',
     headline: '创建 Agent 授权失败时能看到原因',

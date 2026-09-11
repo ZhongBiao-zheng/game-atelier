@@ -350,8 +350,13 @@ def test_stop_keeps_records_when_process_does_not_exit(tmp_path, monkeypatch, ca
         service="game-atelier", instance_id="a" * 32, app_version="5.33.2", protocol="atelier-local/2",
     ))
     monkeypatch.setattr(server, "_terminate", lambda pid: True)
-    monkeypatch.setattr(server, "_wait_for_exit", lambda pid: False)
+    monkeypatch.setattr(server, "_wait_for_exit", lambda pid, **_kwargs: False)
+    forced: list[int] = []
+    # 记录里的 pid 是 pytest 自己：强杀必须被拦成记录，否则会把测试进程杀掉。
+    monkeypatch.setattr(server, "_force_kill", lambda pid: forced.append(pid) or True)
     with pytest.raises(SystemExit):
         server.cmd_stop()
+    assert forced == [os.getpid()]
     assert (tmp_path / "server.pid").exists()
-    assert "没有退出" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "强制结束" in err and "无法结束" in err

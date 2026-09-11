@@ -154,6 +154,20 @@ def _server_responds(port: int, instance_id: str | None) -> bool:
 STOP_TIMEOUT_SECONDS = 20.0
 
 
+FORCE_KILL_WAIT_SECONDS = 5.0
+
+
+def _force_kill(pid: int) -> bool:
+    """优雅停止超时后的兜底：SSE 长连接会让 uvicorn 的 graceful shutdown 永远等不完。"""
+    if sys.platform == "win32":
+        return _terminate(pid)  # taskkill /F 本就是强制
+    try:
+        os.kill(pid, signal.SIGKILL)
+        return True
+    except ProcessLookupError:
+        return False
+
+
 def _wait_for_exit(pid: int, *, timeout: float = STOP_TIMEOUT_SECONDS) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -189,7 +203,8 @@ def cmd_start(background: bool = False) -> None:
         foreground = _start_locked(runtime, background=background)
     if foreground is not None:
         app, port = foreground
-        uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+        uvicorn.run(app, host="127.0.0.1", port=port, log_level="info",
+                    timeout_graceful_shutdown=3)
 
 
 def _start_locked(runtime: Path, *, background: bool) -> tuple[FastAPI, int] | None:
@@ -239,7 +254,10 @@ def _start_locked(runtime: Path, *, background: bool) -> tuple[FastAPI, int] | N
         pid = _spawn_detached(
             [sys.executable, "-m", "uvicorn",
              "viewer_server.server_app:build_app", "--factory",
-             "--host", "127.0.0.1", "--port", str(port), "--log-level", "info"],
+             "--host", "127.0.0.1", "--port", str(port), "--log-level", "info",
+             # 浏览器的 /events SSE 长连接不会自己断，不设上限 SIGTERM 后永远停在
+             # "Waiting for connections to close"，一键启动的 stop→start 就卡死。
+             "--timeout-graceful-shutdown", "3"],
             cwd=project_root,
             env=env,
             log_path=runtime / "server.log",
@@ -291,11 +309,13 @@ def cmd_stop() -> None:
         if _wait_for_exit(pid):
             cleanup_stale_pid(runtime)
             return
-        print(
-            f"pid {pid} 在 {STOP_TIMEOUT_SECONDS:.0f} 秒内没有退出（可能还在收尾出图任务），"
-            "启动记录保留；等它退出后再启动。",
-            file=sys.stderr,
-        )
+        # 旧版本服务没有 graceful 上限，SSE 连接会拖住退出；等够优雅期就强制结束，
+        # 否则一键启动永远停在这一步。落盘都是原子写 + 锁，强杀不会留半个文件。
+        print(f"pid {pid} 在 {STOP_TIMEOUT_SECONDS:.0f} 秒内没有退出，强制结束。", file=sys.stderr)
+        if _force_kill(pid) and _wait_for_exit(pid, timeout=FORCE_KILL_WAIT_SECONDS):
+            cleanup_stale_pid(runtime)
+            return
+        print(f"pid {pid} 无法结束，启动记录保留；请手动结束该进程后再启动。", file=sys.stderr)
         sys.exit(1)
 
 
