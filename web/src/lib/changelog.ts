@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.61.0',
+    date: '2026-09-11',
+    headline: '本机 Agent 一键连接',
+    changes: [
+      { kind: 'feat', text: '「本机连接」页点「连接本机 Agent」即创建授权：全部项目、全部画布、全部能力、30 天，不再逐项勾选。要缩范围点「自定义」。' },
+    ],
+  },
+  {
     version: '5.60.2',
     date: '2026-09-11',
     headline: '一键启动不再卡死，输出只剩状态与报错',
