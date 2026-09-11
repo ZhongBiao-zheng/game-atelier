@@ -7,11 +7,18 @@ export interface JobChangedPayload {
   status?: string;
 }
 
+export interface CanvasDocumentChangedPayload {
+  project_id?: string;
+  revision?: number | null;
+}
+
 interface UseSSEOptions {
   /** false 时整个 hook 不建连（compact 模式 / 不需要推送的页面）。 */
   enabled?: boolean;
   /** job-changed 事件携带 {job_id, status}（watcher 已在广播），定向更新用，不再扔掉 payload。 */
   onJobChanged?: (data: JobChangedPayload) => void;
+  /** 画布文档落盘（浏览器保存、Agent 经 MCP 改动都算）→ {project_id, revision}；只发回调，不触发全局刷新信号。 */
+  onCanvasDocumentChanged?: (data: CanvasDocumentChangedPayload) => void;
   /** 连接（含重连）成功时回调 —— 全量刷新兜底，覆盖断连期间丢失的事件。 */
   onConnect?: () => void;
 }
@@ -23,6 +30,8 @@ export function useSSE(options?: UseSSEOptions): number {
   // 回调走 ref：每次 render 更新引用，effect 只建一次连接，不随回调变化重连。
   const onJobChangedRef = useRef(options?.onJobChanged);
   onJobChangedRef.current = options?.onJobChanged;
+  const onCanvasDocumentChangedRef = useRef(options?.onCanvasDocumentChanged);
+  onCanvasDocumentChangedRef.current = options?.onCanvasDocumentChanged;
   const onConnectRef = useRef(options?.onConnect);
   onConnectRef.current = options?.onConnect;
 
@@ -50,6 +59,9 @@ export function useSSE(options?: UseSSEOptions): number {
           if (['job-changed', 'image-added', 'spec-changed', 'active-character-changed', 'projects-changed', 'workshop-request-changed'].includes(event)) bump();
           if (event === 'job-changed') {
             try { onJobChangedRef.current?.(JSON.parse(data) as JobChangedPayload); } catch { /* Index invalidation already ran. */ }
+          }
+          if (event === 'canvas-document-changed') {
+            try { onCanvasDocumentChangedRef.current?.(JSON.parse(data) as CanvasDocumentChangedPayload); } catch { /* Malformed payload: the next save or reload resyncs. */ }
           }
         }, controller.signal);
       } catch { /* Reconnect only while this connection generation remains mounted. */ }

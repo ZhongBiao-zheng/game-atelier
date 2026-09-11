@@ -1,8 +1,9 @@
 # 画布 MCP 契约
 
 > 与[工坊 MCP](workshop-mcp.md) 共用同一个 stdio 进程、同一份凭据文件，但授权与工具分开
-> （ADR-0017 决定 4，遵守 [ADR-0011](../adr/0011-restrict-canvas-agent-to-approved-change-sets.md) 的
-> change set 原则）。画布是 server 持有、带 revision 的活文档，Agent 只能经这些工具改，不能改文件。
+> （ADR-0017 决定 4；沿用 [ADR-0011](../adr/0011-restrict-canvas-agent-to-approved-change-sets.md) 的
+> typed change set 与 revision 原则，批准粒度为授权级：持有 `canvas_edit` / `canvas_generate` 即批准，
+> 无 change-set 逐次确认）。画布是 server 持有、带 revision 的活文档，Agent 只能经这些工具改，不能改文件。
 
 ## 授权
 

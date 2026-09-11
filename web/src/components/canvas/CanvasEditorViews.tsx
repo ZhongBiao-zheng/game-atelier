@@ -393,7 +393,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
   })();
   const replacingMedia = context.mediaReplaceBusyNodeIds.has(node.id);
   const submittingNode = context.submittingNodeIds.has(node.id);
-  const nodeRunState = canvasNodeRunState(node, context.jobsByRunId);
+  const nodeRunState = canvasNodeRunState(node, context.jobsByRunId, context.jobsByResultNodeId);
   const nodeJob = nodeRunState.job;
   const emptyMediaNode = node.type !== 'text' && isCanvasContentNode(node) && !content
     ? node
@@ -1913,7 +1913,7 @@ export function CanvasGenerationComposer({
     : null;
   const videoFrames = context.videoFrameNodeIdsByNodeId?.get(node.id)
     ?? EMPTY_VIDEO_FRAME_NODE_IDS;
-  const nodeRunState = canvasNodeRunState(node, context.jobsByRunId);
+  const nodeRunState = canvasNodeRunState(node, context.jobsByRunId, context.jobsByResultNodeId);
   const activeJob = nodeRunState.job;
   const runId = activeJob?.canvas_run?.run_id;
   const submitting = context.submittingNodeIds.has(node.id);

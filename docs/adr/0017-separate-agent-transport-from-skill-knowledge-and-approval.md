@@ -31,9 +31,10 @@ PR #82 把三层焊在一起：换手的同时把批准搬到浏览器，并删�
    不持有者的请求才落到 Atelier「待批准生成」页面。页面是审计与兜底，不是必经之路。
    `run_job` 继续接受 `PENDING_CONFIRM`，CLI 路径的批准记录写在 Job 上；工坊请求路径的批准记录写在请求上。
 4. **画布 MCP 独立。** 画布是 server 持有、带修订号、前端实时渲染的活文档，CLI 改文件会绕过并发控制，
-   这是 MCP 相对 CLI 真正的增量。画布工具集单独授权、单独工具前缀，遵守 ADR-0011 的 change set 与
-   逐次确认规则；不与工坊工具共用授权，也不继承工坊能力。ADR-0011 目前只有会话记录落地，
-   read / propose / status 工具尚未实现，属于本决定之后的新工作。
+   这是 MCP 相对 CLI 真正的增量。画布工具集单独授权、单独工具前缀，沿用 ADR-0011 的 typed change set
+   与 `expected_revision` 原则，但批准粒度是**授权级**：持有 `canvas_edit` / `canvas_generate` 即批准，
+   服务端记录会话来源，不做 change-set 逐次确认（ADR-0011 据此标记 superseded）；不与工坊工具共用
+   授权，也不继承工坊能力。
 
 ## 不做
 

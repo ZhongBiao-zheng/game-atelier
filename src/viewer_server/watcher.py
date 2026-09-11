@@ -112,6 +112,36 @@ class ActiveCharacterHandler(FileSystemEventHandler):
         hub.broadcast("active-character-changed", {"active_id": data.get("active_id")})
 
 
+class CanvasDocumentsHandler(FileSystemEventHandler):
+    # 画布文档 canvas.json 也是 tmp+replace 原子写：Linux 发 moved，首次建项目是 created。
+    # Agent（canvas_apply_changes / import_media / run）与浏览器都经 save_canvas_document 落盘，
+    # 只盯文件就能覆盖全部写入方；浏览器拿到事件后按 revision 决定要不要重载。
+    def on_modified(self, event: FileSystemEvent) -> None:
+        self._emit(event.src_path, event.is_directory)
+
+    def on_created(self, event: FileSystemEvent) -> None:
+        self._emit(event.src_path, event.is_directory)
+
+    def on_moved(self, event: FileSystemEvent) -> None:
+        dest = getattr(event, "dest_path", "") or event.src_path
+        self._emit(dest, event.is_directory)
+
+    def _emit(self, raw_path: str, is_dir: bool) -> None:
+        if is_dir:
+            return
+        p = Path(raw_path)
+        if p.name != "canvas.json":
+            return
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        hub.broadcast("canvas-document-changed", {
+            "project_id": p.parent.name,
+            "revision": data.get("revision"),
+        })
+
+
 class ImagesHandler(FileSystemEventHandler):
     def __init__(self, character_resolver):
         self._resolve = character_resolver
@@ -149,6 +179,11 @@ def start_watchers() -> Observer:
     chars_dir.mkdir(parents=True, exist_ok=True)
     # recursive=True: spec.md 现在嵌在 characters/<id>/ 下，FSEvents 不递归看不见。
     observer.schedule(CharactersHandler(), str(chars_dir), recursive=True)
+
+    canvases_dir = data_root.canvases_dir()
+    canvases_dir.mkdir(parents=True, exist_ok=True)
+    # recursive=True：canvas.json 在 canvases/<project_id>/ 下；媒体文件也在里面，靠文件名过滤。
+    observer.schedule(CanvasDocumentsHandler(), str(canvases_dir), recursive=True)
 
     cfg_path = runtime / "config.json"
     if cfg_path.exists():

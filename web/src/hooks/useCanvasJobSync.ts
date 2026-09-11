@@ -25,11 +25,16 @@ export function useCanvasJobSync({
   projectId,
   mergeRunDocument,
   onError,
+  onDocumentChanged,
 }: {
   projectId: string;
   mergeRunDocument: (remote: CanvasDocument, runIds: ReadonlySet<string>, nodeIds?: ReadonlySet<string>) => void;
   onError: (message: string) => void;
+  /** 本项目的画布文档在服务端落盘（含 Agent 改动）→ 带上新 revision；由编辑器决定重载还是提示。 */
+  onDocumentChanged?: (revision: number | null) => void;
 }): CanvasJobSync {
+  const onDocumentChangedRef = useRef(onDocumentChanged);
+  onDocumentChangedRef.current = onDocumentChanged;
   const [jobs, setJobs] = useState<Job[]>([]);
   // 每一次本地乐观写入都推进 epoch。轮询在发请求前拍下 epoch，响应落地时若 epoch 变了，
   // 说明这份列表已经落后于本地，只能并进去，不能整体赋值。见 acceptCanvasJobs。
@@ -168,8 +173,12 @@ export function useCanvasJobSync({
 
   // useSSE 每次 render 都把回调换到 ref 上，所以这里直接闭包捕获就是最新的一份。
   useSSE({
-    // 只在有 job 在跑时建连：画布之外没有别的东西会改这个项目的 job，闲着时这条连接没有用处。
-    enabled: hasRunningJobs,
+    // 常驻建连：Agent 经 MCP 改画布不经过浏览器，只有 canvas-document-changed 能让本页看见（#92）。
+    enabled: true,
+    onCanvasDocumentChanged: data => {
+      if (data.project_id !== projectId) return;
+      onDocumentChangedRef.current?.(typeof data.revision === 'number' ? data.revision : null);
+    },
     onJobChanged: data => {
       // job-changed 是全局广播，角色出图和 Studio 出图也会进来。认得的才拉。
       if (data.job_id && !canvasJobIds.has(data.job_id)) return;

@@ -18,6 +18,21 @@ Read 只用于当前插件自带的 SKILL 与参考文件：Claude 安装模式�
 与 project 两层，按当前资产槽位使用；`workshop_get_context` 的 `project_lessons` 只是项目层摘要，
 截断时不得声称已读全，也不据截断内容覆盖原文。
 
+### CLI 命令 ↔ MCP 工具
+
+各 SKILL.md 的正文按 CLI 写；走 MCP 时用同名工具替代，其余章节照旧：
+
+| SKILL.md 里的 CLI | MCP 路径 |
+| --- | --- |
+| `turn-start` | `workshop_list_targets` + `workshop_get_context` |
+| `submit` / `submit-screen` / `submit-video-production` | `workshop_prepare_generation`（只准备，不出图） |
+| 确认卡 + 画师明确肯定 → `run-job` | 同一确认门；持 `execute_generation` 者 `workshop_approve_generation`，否则画师去「待批准生成」页 |
+| 产物查看 | `workshop_get_generation` + `workshop_read_media` |
+| `append-memory` / `append-lesson` | `workshop_append_lesson` |
+| `list-prompt-assets` / `read-prompt-asset` | `workshop_list_prompt_assets` / `workshop_read_prompt_asset` |
+
+路由类 Skill（game-atelier / ui / ui-anchor / ui-screens）不提交生成也不批准，批准门由被路由到的子技能守。
+
 ## 先锁定项目与目标
 
 1. `workshop_list_projects` 分页列已授权项目。用户明确点名时匹配返回值；重名或多项不确定时问一次。

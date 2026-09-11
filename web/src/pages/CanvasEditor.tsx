@@ -525,6 +525,10 @@ function CanvasEditorInner({
   const toolNoticeTimer = useRef<number | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
   const pendingTextVersions = useRef(new Map<string, string>());
+  // Agent 经 MCP 改画布后的重载入口（#92）。用 ref 是因为保存失败分支（flushSave）声明在它之前，
+  // 又不能把它塞进 flushSave 的依赖里让保存闭包每次重建。
+  const reloadDocumentRef = useRef<() => Promise<void>>(async () => undefined);
+  const remoteDocumentChanged = useRef<(revision: number | null) => void>(() => undefined);
   const reversePromptConfigAttempts = useRef(new Set<string>());
   // 只有本会话提交过的反推 run 才会自动生成图片配置节点。原来的判据是「这个结果节点上还没挂配置」，
   // 于是删掉配置节点后刷新，甚至只是第一次打开一个有历史反推记录的项目，节点都会自己长回来。
@@ -647,6 +651,7 @@ function CanvasEditorInner({
     projectId,
     mergeRunDocument,
     onError: setError,
+    onDocumentChanged: revision => remoteDocumentChanged.current(revision),
   });
   const jobsByRunId = useMemo(() => new Map(
     jobs.flatMap(job => job.canvas_run ? [[job.canvas_run.run_id, job] as const] : []),
@@ -1025,6 +1030,18 @@ function CanvasEditorInner({
         // 自动保存的失败在这里是唯一能被观察到的地方：调用方基本都 .catch(() => undefined)，
         // 而状态药丸在窄屏被 max-w-24 truncate 掉。保存一失败，本地文档就和服务端分叉了，
         // 之后每一次编辑都不落盘，所以必须把服务端的 detail 原样送到报错条上。
+        if (saveError instanceof ApiError && saveError.status === 409) {
+          // 409 只有一种来源：别处（Agent 经 MCP、另一标签页）已经写过新版本。通用文案「刷新后重试」
+          // 会让人反复刷新；这里直接给重载动作，重载会放弃本页未保存的改动。
+          const message = '画布已被其他来源（Agent 或另一标签页）改动，本页版本已过期；重新载入后再继续编辑。';
+          setSaveErrorDetail(message);
+          setError(message);
+          setErrorAction({
+            message, label: '重新载入',
+            run: () => { void reloadDocumentRef.current().catch(reloadError => setError((reloadError as Error).message)); },
+          });
+          throw saveError;
+        }
         const detail = (saveError as Error).message;
         setSaveErrorDetail(detail);
         setError(detail);
@@ -1037,6 +1054,52 @@ function CanvasEditorInner({
     saveInFlight.current = promise;
     return promise;
   }, [projectId]);
+
+  // Agent 经 MCP 改画布（#92）：服务端 canvas.json 一落盘就广播 canvas-document-changed，
+  // 本页按 revision 判断是不是别人的改动——自己的保存也会触发同一事件。
+  const reloadDocumentFromServer = useCallback(async () => {
+    const remote = await getCanvasDocument(projectId);
+    const hydrated = materializeEmptyTextContent(remote);
+    pendingTextVersions.current.clear();
+    for (const [nodeId, versionId] of hydrated.versionIds) {
+      pendingTextVersions.current.set(nodeId, versionId);
+    }
+    saveQueued.current = null;
+    activeTextEditingNodeIds.current.clear();
+    autosaveObservedDirtyVersion.current = 0;
+    serverRevision.current = remote.revision;
+    setDocument(normalizeCanvasGroups(hydrated.document));
+    // 与首屏加载相同：补出来的空文本版本还没落盘，要再保存一次。
+    dirtyVersion.current = hydrated.versionIds.size ? 1 : 0;
+    setDirtySignal(dirtyVersion.current);
+    setSaveState('saved');
+    setSaveErrorDetail(null);
+    setError(null);
+    setErrorAction(null);
+  }, [projectId]);
+  reloadDocumentRef.current = reloadDocumentFromServer;
+  remoteDocumentChanged.current = (revision: number | null) => {
+    if (revision === null || revision <= serverRevision.current) return;
+    const inFlight = saveInFlight.current;
+    if (inFlight) {
+      // 自己的保存在途：等它落地把 serverRevision 推上去，再看这条事件是不是别人的。
+      void inFlight.catch(() => undefined).then(() => remoteDocumentChanged.current(revision));
+      return;
+    }
+    const hasLocalChanges = saveQueued.current !== null
+      || activeTextEditingNodeIds.current.size > 0
+      || saveState === 'error';
+    if (!hasLocalChanges) {
+      void reloadDocumentFromServer().catch(reloadError => setError((reloadError as Error).message));
+      return;
+    }
+    const message = `画布已被其他来源（Agent 或另一标签页）改到版本 ${revision}，本页还有未保存的改动。`;
+    setError(message);
+    setErrorAction({
+      message, label: '重新载入（放弃本页改动）',
+      run: () => { void reloadDocumentFromServer().catch(reloadError => setError((reloadError as Error).message)); },
+    });
+  };
 
   // 中文 / 日文输入法在候选未确认前一直处于 composition 状态，而自动保存的去抖只有 350ms，
   // 很容易在「拼音打完、还没选字」这个空档里触发。组合期间落盘既会把半成品文本写进版本，

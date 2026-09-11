@@ -86,6 +86,12 @@ P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch
 `HOST_DENIED`，来源不符返回 403 `ORIGIN_DENIED`。错误为
 `{ error: { code, message, request_id } }`，不回显来源或密钥，并设置 `Cache-Control: no-store`。
 当前鉴权覆盖业务 API、媒体、SSE 与内部文档；本地 cookie / Agent bearer 不得混用。
+
+SSE（`GET /events`）事件：`job-changed` `image-added` `spec-changed` `active-character-changed`
+`projects-changed` `workshop-request-changed` `canvas-document-changed`。最后一个由 watcher 盯
+`canvases/<project_id>/canvas.json` 发出（`{project_id, revision}`），浏览器保存与 Agent 经 MCP 的
+`canvas_apply_changes` / `canvas_import_media` / `canvas_run` 都会触发；画布编辑器按 `revision` 判断
+忽略 / 直接重载 / 提示「重新载入（放弃本页改动）」，保存撞 409 走同一动作。
 本地写入需要编辑租约（设置 / 授权管理除外），Agent 只可调用授权项目内的工坊工具。
 未知 API 默认 `CAPABILITY_DENIED`，未认证返回 `CONNECTION_REQUIRED`；不存在匿名原生业务旁路。
 开发来源登记与导航例外见连接契约。
@@ -150,8 +156,10 @@ Midjourney 的 `mj_sref`、`mj_cref`、`mj_oref` 均为图片路径数组（每�
 目录内并为支持的图片扩展名。目录残留文件不自动成为作品，也不从目录名推断任务链接。
 部分成功任务保留成功产物；隐藏、收藏与评分规则继续生效，不依据图片颜色判定失败。
 
-工坊本地请求管理为 `GET /workshop/requests` 和
-`POST /workshop/requests/{request_id}/approve { expected_revision }`；Agent 身份经 `workshop_approve_generation` 批准自身请求，须持 `execute_generation`。
+工坊本地请求管理为 `GET /workshop/requests?scope=awaiting|history|all`（默认只列还能批准的）、
+`POST /workshop/requests/{request_id}/approve { expected_revision }` 与
+`POST /workshop/requests/{request_id}/reject { expected_revision }`（仅本机页面；状态 `rejected`，记
+`rejected_by / rejected_at`；视图同时回 `approved_by / approved_at`）；Agent 身份经 `workshop_approve_generation` 批准自身请求，须持 `execute_generation`。
 其余 MCP 工具均为专用 POST 输入，详见工坊契约，不提供通用 HTTP / 文件工具。
 
 `GET /spec/{id}` 返回 `{ content, revision }`；`POST /spec/{id}` 要求
@@ -314,6 +322,8 @@ Draft 的 `params` 两侧都按 mode 走白名单（`schemas.CANVAS_DRAFT_PARAM_
 - `GET .../batch-runs` / `GET .../batch-runs/{batch_id}`：读取最近 20 份计划/单份计划，
   包含每项每步的 Job、Run、结果 Version ID 和状态；`executions[].result_node_id` 在展开前为空，
   首次提交事务展开链路后指向对应普通节点。未提交步骤不伪造节点的 `active_run_id`。
+- 节点 `active_run_id` 只在 run 进行中非空：finalize / failed / canceled 三条路径都清掉（内容节点与
+  layer_stack 一致）。「最近一次生成」由 job 的 `canvas_run.result_node_id` 反查，不读该字段。
 
 批量计划冻结数据落在项目 `.runtime/batch-plans/`；进度在 `.runtime/batches/`，活动计划索引为
 `.runtime/batch-active.json`。同项同轮上游输出绑定到下游的精确 Version ID。

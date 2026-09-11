@@ -268,6 +268,38 @@ async def test_stdio_returns_structured_permission_error_without_secret_details(
     assert len(runtime["calls"]) == 1
 
 
+def test_client_follows_runtime_server_port_over_credential_snapshot(runtime, tmp_path):
+    """端口漂移（5174 被占顶到 5175）后凭据里的 base_url 就是死地址；以 .runtime/server.port 为准（#91）。"""
+    from character_workflow.lib import data_root
+    from character_workflow.lib.private_json import write_private_json
+
+    live = load_credentials(runtime["credentials"])
+    stale = tmp_path / "stale-grant.json"
+    write_private_json(stale, {
+        "service": "game-atelier", "base_url": "http://127.0.0.1:1",
+        "grant_id": live.grant_id, "grant_token": live.grant_token, "expires_at": live.expires_at,
+    })
+    runtime_dir = data_root.runtime_dir()
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "server.port").write_text(live.base_url.rsplit(":", 1)[1], encoding="utf-8")
+    client = WorkshopClient(load_credentials(stale))
+    try:
+        client.call("list-projects", ListProjectsInput())
+        assert runtime["sessions"] == 1
+    finally:
+        client.close()
+    # 端口文件缺失时退回凭据快照，且错误里带上尝试过的地址。
+    (runtime_dir / "server.port").unlink()
+    client = WorkshopClient(load_credentials(stale))
+    try:
+        with pytest.raises(AdapterError) as caught:
+            client.call("list-projects", ListProjectsInput())
+        assert caught.value.code == "LOCAL_SERVICE_UNAVAILABLE"
+        assert "http://127.0.0.1:1" in str(caught.value)
+    finally:
+        client.close()
+
+
 def test_client_reauthenticates_only_explicit_expiry_and_instance_restart(runtime):
     client = WorkshopClient(load_credentials(runtime["credentials"]))
     try:

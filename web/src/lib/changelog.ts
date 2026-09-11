@@ -33,6 +33,61 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.59.0',
+    date: '2026-09-11',
+    headline: '待批数显示在顶栏，历史请求自动归档',
+    changes: [
+      { kind: 'feat', text: '顶栏「工坊」显示待批准生成的数量，有请求在等时不必进页面才知道。' },
+      { kind: 'feat', text: '打开待批准页时自动整理：到期请求标为已过期；已批准 / 撤回 / 拒绝 / 过期满 30 天的移入归档，列表只剩近期项，原链接仍可打开。' },
+      { kind: 'fix', text: '待批准页去掉说明段，规则说明收进标题旁的「?」提示。' },
+    ],
+  },
+  {
+    version: '5.58.0',
+    date: '2026-09-11',
+    headline: '待批准生成页可拒绝、显示批准人、历史单列',
+    changes: [
+      { kind: 'feat', text: '待批准生成页新增「拒绝」：不想要的请求当场关掉，不必等 24 小时过期。' },
+      { kind: 'feat', text: '已批准 / 已拒绝的请求显示由谁（本机页面或哪条 Agent 授权）在何时决定。' },
+      { kind: 'feat', text: '页面默认只列还能批准的请求，已批准 / 撤回 / 拒绝 / 过期的收进「历史」页签。' },
+    ],
+  },
+  {
+    version: '5.57.0',
+    date: '2026-09-11',
+    headline: '画布节点的「正在生成」标记只在生成中存在',
+    changes: [
+      { kind: 'fix', text: '生成完成、失败或停止后，画布结果节点不再残留「正在生成」标记；「生成完成 / 失败原因」角标改按该节点最近一次生成记录显示，结果与之前一致。' },
+    ],
+  },
+  {
+    version: '5.56.1',
+    date: '2026-09-11',
+    headline: 'Skill 文档去重，画布授权即批准写进 ADR',
+    changes: [
+      { kind: 'fix', text: '九份 Skill 的「手的选择」段收成一句引用，CLI 命令与 MCP 工具的对应表只在 workshop-mcp-workflow.md 维护；路由类 Skill 不再复写批准门。' },
+      { kind: 'fix', text: 'ADR-0011 标记为被 ADR-0017 取代：画布 MCP 的批准是授权级（持有 canvas_edit / canvas_generate 即批准），契约文档同步。' },
+    ],
+  },
+  {
+    version: '5.56.0',
+    date: '2026-09-11',
+    headline: 'Agent 改画布实时可见，MCP 不再钉死端口',
+    changes: [
+      { kind: 'fix', text: 'Agent 经 MCP 改动画布后，已打开的画布页立刻同步；本页有未保存改动时提示「重新载入」而不是静默 409。' },
+      { kind: 'fix', text: '保存画布撞上版本冲突时，直接给出「重新载入」动作，文案说明是其他来源改过。' },
+      { kind: 'fix', text: 'Agent 连接本机服务时以运行中的端口为准，服务端口从 5174 漂到 5175 后不再被误报为「未启动」。' },
+    ],
+  },
+  {
+    version: '5.55.1',
+    date: '2026-09-11',
+    headline: '首页点阵背景延长',
+    changes: [
+      { kind: 'fix', text: '首页点阵背景向下延伸到整页，不再在上半段截断。' },
+    ],
+  },
+  {
     version: '5.55.0',
     date: '2026-09-10',
     headline: '出图结果直接显示在卡片里',

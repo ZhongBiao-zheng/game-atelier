@@ -25,6 +25,19 @@ def test_jobs_handler_on_moved_broadcasts(tmp_path, monkeypatch):
     assert events == [("job-changed", {"job_id": "j1", "status": "done"})]
 
 
+def test_canvas_documents_handler_broadcasts_project_and_revision(tmp_path, monkeypatch):
+    """Agent 经 MCP 改画布只落 canvas.json，浏览器要靠这条事件才看得到（#92）。"""
+    events = _capture(monkeypatch)
+    project = tmp_path / "cp-abc123"
+    project.mkdir()
+    dest = project / "canvas.json"
+    dest.write_text(json.dumps({"revision": 7, "nodes": []}))
+    handler = watcher.CanvasDocumentsHandler()
+    handler.on_moved(FileMovedEvent(str(project / "canvas.json.tmp"), str(dest)))
+    handler.on_created(FileCreatedEvent(str(project / "upload.png")))
+    assert events == [("canvas-document-changed", {"project_id": "cp-abc123", "revision": 7})]
+
+
 def test_active_character_handler_on_moved_and_created(tmp_path, monkeypatch):
     events = _capture(monkeypatch)
     dest = tmp_path / "active-character.json"

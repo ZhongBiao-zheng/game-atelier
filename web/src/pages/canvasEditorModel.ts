@@ -442,9 +442,8 @@ export function canvasDeletionBlockedMessage(
   nodeIds: ReadonlySet<string>,
   jobsByRunId: ReadonlyMap<string, Job>,
 ): string | null {
-  // 判据与节点角标同源：看 job 是否还在跑，不看 active_run_id 是否非空。
-  // 内容节点的 active_run_id 在生成结束后不清（角标靠它找到 job 显示「生成完成 / 失败原因」），
-  // 单看它非空会把所有生成过的节点永久判成「正在生成」。
+  // 判据与节点角标同源：看 job 是否还在跑。服务端从 5.57.0 起在 finalize / 失败 / 停止时清
+  // active_run_id，但旧文档里仍可能残留已完成 run 的 id，所以照旧以 job 状态为准。
   const blocked = nodes.filter(node => {
     if (!nodeIds.has(node.id)) return false;
     const runId = canvasNodeActiveRunId(node);

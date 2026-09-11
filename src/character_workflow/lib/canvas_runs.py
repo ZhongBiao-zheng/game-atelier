@@ -314,6 +314,7 @@ def _remove_transaction_artifacts(
 
 
 def _document_has_run(document: CanvasDocument, run_id: str, job_id: str) -> bool:
+    # active_run_id 只覆盖进行中的 run；已 finalize 的靠 content_versions 的来源 job 判。
     for node in document.nodes:
         if node.type in {"text", "image", "video", "audio", "layer_stack"}:
             if node.data.active_run_id == run_id:
@@ -2988,6 +2989,50 @@ def _finalize_layer_stack_under_locks(
     return updated_job, updated
 
 
+def _release_result_node(
+    project_id: str,
+    current: CanvasDocument,
+    context,
+    terminal: Job,
+) -> tuple[Job, CanvasDocument | None]:
+    """run 终结但没有产物可挂时，把结果节点的 active_run_id 清掉。
+
+    active_run_id 只在 run 进行中非空（#96）：不清的话字段语义漂成「最近一次 run」，任何按
+    「非空 = 正在生成」读它的地方都会误判；「最近一次生成」由 job.canvas_run.result_node_id 反查。
+    """
+    nodes: list[CanvasNode] = []
+    changed = False
+    for node in current.nodes:
+        if (
+            node.id == context.result_node_id
+            and node.type in {"text", "image", "video", "audio"}
+            and node.data.active_run_id == context.run_id
+        ):
+            node = node.model_copy(update={
+                "data": node.data.model_copy(update={"active_run_id": None}),
+            })
+            changed = True
+        nodes.append(node)
+    if not changed:
+        write_job_under_lock(terminal)
+        return terminal, None
+    updated = current.model_copy(update={
+        "revision": current.revision + 1,
+        "updated_at": _now(),
+        "nodes": nodes,
+    })
+    _commit_transaction_unlocked(
+        project_id,
+        context.run_id,
+        "finalize",
+        current.revision,
+        terminal,
+        updated,
+        job_locked=True,
+    )
+    return terminal, updated
+
+
 def _finalize_canvas_run_under_locks(
     project_id: str,
     job_id: str,
@@ -3003,14 +3048,12 @@ def _finalize_canvas_run_under_locks(
         return _finalize_layer_stack_under_locks(project_id, current, job)
     if job.status == JobStatus.CANCELED:
         canceled = _canceled_candidates(job)
-        write_job_under_lock(canceled)
-        return canceled, None
+        return _release_result_node(project_id, current, context, canceled)
     if job.status == JobStatus.FAILED:
         terminal = _canceled_candidates(job) if job.cancel_requested_at else _failed_candidates(job)
         terminal_status = JobStatus.CANCELED if job.cancel_requested_at else JobStatus.FAILED
         terminal = terminal.model_copy(update={"status": terminal_status})
-        write_job_under_lock(terminal)
-        return terminal, None
+        return _release_result_node(project_id, current, context, terminal)
     if job.status not in {JobStatus.DONE, JobStatus.PARTIAL}:
         return job, None
     if all(candidate.status != "pending" for candidate in context.candidates):
@@ -3048,8 +3091,7 @@ def _finalize_canvas_run_under_locks(
             "completed_at": job.completed_at or _now(),
             "canvas_run": context.model_copy(update={"candidates": candidates}),
         })
-        write_job_under_lock(terminal)
-        return terminal, None
+        return _release_result_node(project_id, current, context, terminal)
 
     partial = any(candidate.status != "succeeded" for candidate in candidates)
     updated_job = job.model_copy(update={
@@ -3078,16 +3120,15 @@ def _finalize_canvas_run_under_locks(
                 job.kind != JobKind.TEXT
                 or text_primary is not None
             )
+            # run 已终结：active_run_id 归 None（#96），产物挂在 current_version_id 上。
+            data_update: dict[str, object] = {"active_run_id": None}
             if should_display_version:
-                node = node.model_copy(update={
-                    "data": node.data.model_copy(update={
-                        "current_version_id": (
-                            text_primary.version_id
-                            if job.kind == JobKind.TEXT and text_primary is not None
-                            else primary_version_id
-                        ),
-                    })
-                })
+                data_update["current_version_id"] = (
+                    text_primary.version_id
+                    if job.kind == JobKind.TEXT and text_primary is not None
+                    else primary_version_id
+                )
+            node = node.model_copy(update={"data": node.data.model_copy(update=data_update)})
             if node.type == "text":
                 result_node = node
         nodes.append(node)
