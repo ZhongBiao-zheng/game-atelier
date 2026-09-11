@@ -48,6 +48,20 @@ class ConnectionError(Exception):
         super().__init__(message)
 
 
+def _credential_store_error(action: str, error: Exception) -> ConnectionError:
+    """凭据文件读写失败（Windows ACL / pywin32 缺失 / 磁盘不支持权限）要带原因回给页面。
+
+    后台服务的 stderr 进 DEVNULL，裸 500 等于把原因扔掉；用户只能报「创建授权失败 500」。
+    异常文本来自 OS / pywin32，不含令牌本体。
+    """
+    return ConnectionError(
+        "CREDENTIAL_STORE_FAILED",
+        f"{action}失败：{type(error).__name__}: {error}。请检查 data root 所在磁盘是否支持文件权限"
+        "（NTFS / 非同步盘），以及依赖是否装全（Windows 需要 pywin32）。",
+        500,
+    )
+
+
 def validate_site_origin(origin: str, reserved: frozenset[str] = frozenset()) -> str:
     """网站配对只接受精确 Origin：HTTPS 任意主机，HTTP 仅 localhost:<port>（本地 vite preview 验证托管模式）。
 
@@ -339,7 +353,10 @@ class ConnectionStore:
         with self.lock:
             if key == self._grants_key:
                 return self._grants_cache
-        grants = read_private_json(path, 128 * 1024)
+        try:
+            grants = read_private_json(path, 128 * 1024)
+        except (OSError, ImportError, ValueError) as error:
+            raise _credential_store_error("读取 Agent 授权记录", error) from error
         with self.lock:
             self._grants_key, self._grants_cache = key, grants
         return grants
@@ -408,12 +425,15 @@ class ConnectionStore:
                 "expires_at": iso_time(time.time() + days * 86400),
                 "credential_path": str(credential_path), "token_hash": digest(token),
             }
-            write_private_json(credential_path, {
-                "service": "game-atelier", "base_url": base_url, "grant_id": grant_id,
-                "grant_token": token, "expires_at": grant["expires_at"],
-            })
-            grants[grant_id] = grant
-            write_private_json(path, grants)
+            try:
+                write_private_json(credential_path, {
+                    "service": "game-atelier", "base_url": base_url, "grant_id": grant_id,
+                    "grant_token": token, "expires_at": grant["expires_at"],
+                })
+                grants[grant_id] = grant
+                write_private_json(path, grants)
+            except (OSError, ImportError) as error:
+                raise _credential_store_error("写入 Agent 凭据文件", error) from error
             return self._public_grant(grant)
 
     def revoke_grant(self, grant_id: str) -> None:

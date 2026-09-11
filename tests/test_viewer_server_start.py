@@ -77,7 +77,8 @@ def test_start_passes_instance_to_child_and_only_opens_after_verification(tmp_pa
     captured = {}
     opened = []
 
-    def spawn(cmd, *, cwd, env):
+    def spawn(cmd, *, cwd, env, log_path):
+        captured["log_path"] = log_path
         captured.update(cmd=cmd, env=env)
         return 43210
 
@@ -97,6 +98,7 @@ def test_start_passes_instance_to_child_and_only_opens_after_verification(tmp_pa
     server.cmd_start(background=True)
 
     assert read_pid(runtime) == 43210
+    assert captured["log_path"] == runtime / "server.log"
     assert read_port(runtime) == 5188
     assert opened == [True]
     assert captured["cmd"][captured["cmd"].index("--host") + 1] == "127.0.0.1"

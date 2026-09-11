@@ -89,21 +89,27 @@ def _run_ensure_venv() -> bool:
     return True
 
 
-def _spawn_detached(cmd: list[str], *, cwd: str, env: dict[str, str]) -> int:
-    """Cross-platform: detach a subprocess so the parent can exit while it keeps running."""
+def _spawn_detached(cmd: list[str], *, cwd: str, env: dict[str, str], log_path: Path) -> int:
+    """Cross-platform: detach a subprocess so the parent can exit while it keeps running.
+
+    stdout / stderr 落 log_path（每次启动覆盖，只保留本次运行）：后台服务的 500 traceback
+    以前进 DEVNULL，用户只能报「失败 500」，没有任何地方能查原因。
+    """
+    log = open(log_path, "wb")  # noqa: SIM115 — 句柄交给子进程，父进程随后退出
     if sys.platform == "win32":
         flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
         proc = subprocess.Popen(
             cmd, creationflags=flags,
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
             cwd=cwd, env=env,
         )
     else:
         proc = subprocess.Popen(
             cmd, start_new_session=True,
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
             cwd=cwd, env=env,
         )
+    log.close()
     return proc.pid
 
 
@@ -236,6 +242,7 @@ def _start_locked(runtime: Path, *, background: bool) -> tuple[FastAPI, int] | N
              "--host", "127.0.0.1", "--port", str(port), "--log-level", "info"],
             cwd=project_root,
             env=env,
+            log_path=runtime / "server.log",
         )
         write_pid(runtime, pid)
         if not _wait_for_server(port, instance_id):

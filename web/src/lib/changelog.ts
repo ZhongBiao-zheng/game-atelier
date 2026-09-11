@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.60.1',
+    date: '2026-09-11',
+    headline: '创建 Agent 授权失败时能看到原因',
+    changes: [
+      { kind: 'fix', text: 'Agent 凭据文件写不进去（Windows 权限、pywin32 缺失、磁盘不支持权限）时，页面直接显示具体原因，不再只报 500。' },
+      { kind: 'fix', text: '后台启动的服务把运行日志写到 data root 的 .runtime/server.log（每次启动覆盖），排查报错不再无处可查。' },
+    ],
+  },
+  {
     version: '5.60.0',
     date: '2026-09-11',
     headline: 'Midjourney 支持个性化 Profile',
