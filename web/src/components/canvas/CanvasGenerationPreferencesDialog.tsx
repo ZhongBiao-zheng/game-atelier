@@ -24,7 +24,6 @@ import {
 } from '@/components/ui/dialog';
 import { VideoControls } from '@/components/studio/VideoControls';
 import { imageControlCaps, QUALITY_LABELS, type Quality } from '@/lib/imageControlCaps';
-import { imageSizeMode } from '@/lib/imageSizeMode';
 import { cn } from '@/lib/utils';
 import {
   CANVAS_GENERATION_MODE_LABELS,
@@ -162,7 +161,6 @@ export function CanvasGenerationPreferencesDialog({
   const [upscaleDraft, setUpscaleDraft] = useState<CanvasUpscalePreferences>(() => cloneUpscale(upscale));
   const [upscaleTarget, setUpscaleTarget] = useState<CanvasUpscaleTarget>('2K');
   const [tab, setTab] = useState<CanvasGenerationPreferencesTab>(initialTab);
-  const [sizeNotice, setSizeNotice] = useState<string | null>(null);
   const dialogContentRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<HTMLButtonElement>(null);
 
@@ -172,7 +170,6 @@ export function CanvasGenerationPreferencesDialog({
     setUpscaleDraft(cloneUpscale(upscale));
     setUpscaleTarget('2K');
     setTab(initialTab);
-    setSizeNotice(null);
   }, [initialTab, open, upscale, value]);
 
   // 生成类型页签之外还有 AI高清；下面按模态计算的部分在 AI高清 页签下不渲染，取 image 只为类型收窄。
@@ -237,11 +234,7 @@ export function CanvasGenerationPreferencesDialog({
       activeMode,
       selectedChoice || preference.selection === null ? preference.params as JobParams : {},
     );
-    if (next) {
-      setSizeNotice(activeMode === 'image' && imageSizeMode(next.params as JobParams) !== imageSizeMode(params)
-        ? '当前模型不支持原尺寸模式，已切换为比例' : null);
-      setPreference(activeMode, next);
-    }
+    if (next) setPreference(activeMode, next);
   }
 
   function patchParams(patch: JobParams) {
@@ -300,7 +293,6 @@ export function CanvasGenerationPreferencesDialog({
         </DialogHeader>
 
         <div className="min-h-0 space-y-4 overflow-x-hidden overflow-y-auto">
-        {activeMode === 'image' && sizeNotice && <p role="status" className="text-xs text-muted-foreground">{sizeNotice}</p>}
         <div role="tablist" aria-label="生成类型" className="grid grid-cols-5 gap-1 rounded-xl border border-border bg-card p-1">
           {TABS.map(mode => {
             const Icon = TAB_ICONS[mode];

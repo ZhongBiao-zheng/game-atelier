@@ -2190,11 +2190,9 @@ export function CanvasGenerationComposer({
               ? normalizeCanvasImageParams(model.id, key.provider, draft.params, key.base_url) : null;
             if (draft.mode === 'image') {
               const next = nextImageParams!;
-              if (hasImageSizeSelection(draft.params) && imageSizeMode(next) !== imageSizeMode(draft.params)) {
-                context.reportError?.('该模型不支持当前尺寸模式，已切换为比例');
-              } else if (imageSizeMode(next) === 'custom' && !imageSizeError(next, model.id)) {
+              const modeChanged = hasImageSizeSelection(draft.params) && imageSizeMode(next) !== imageSizeMode(draft.params);
+              if (!modeChanged && imageSizeMode(next) === 'custom' && !imageSizeError(next, model.id)) {
                 const normalized = normalizeImagePixelSize(next.size!, model.id, key.base_url);
-                if (normalized !== next.size) context.reportError?.(`尺寸已调整为 ${normalized.replace('x', '×')}`);
                 next.size = normalized;
                 next.custom_size = normalized;
               }
