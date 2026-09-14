@@ -99,6 +99,32 @@ def upload_max_bytes(ext: str) -> int:
     return IMAGE_UPLOAD_MAX_BYTES if ext in IMAGE_UPLOAD_EXTS else MEDIA_UPLOAD_MAX_BYTES
 
 
+_ISO_BMFF_TOP_BOXES = {b"ftyp", b"styp", b"moov", b"mdat", b"free", b"skip", b"wide", b"pnot", b"uuid"}
+
+
+def _iso_bmff_major_brand(body: bytes) -> bytes | None:
+    """走顶层 box 找 ftyp；找不到 ftyp 但开头就是合法顶层 box 也算 ISO BMFF（返回空品牌）。
+
+    有些导出（飞书 / 微信转存、部分剪辑软件）在 ftyp 前放 free / wide / mdat，
+    只看偏移 4 会把真 mp4 判成「内容与扩展名不一致」。"""
+    if len(body) < 8 or body[4:8] not in _ISO_BMFF_TOP_BOXES:
+        return None
+    offset = 0
+    for _ in range(16):
+        if offset + 8 > len(body):
+            break
+        size = int.from_bytes(body[offset:offset + 4], "big")
+        box = body[offset + 4:offset + 8]
+        if box == b"ftyp":
+            return body[offset + 8:offset + 12]
+        if size == 1 and offset + 16 <= len(body):
+            size = int.from_bytes(body[offset + 8:offset + 16], "big")
+        if size < 8:
+            break
+        offset += size
+    return b""
+
+
 def _sniff_media_mime(body: bytes) -> str | None:
     if body.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
@@ -116,15 +142,25 @@ def _sniff_media_mime(body: bytes) -> str | None:
         return "audio/mpeg"
     if len(body) >= 2 and body[0] == 0xFF and body[1] & 0xF6 == 0xF0:
         return "audio/aac"
-    if len(body) >= 12 and body[4:8] == b"ftyp":
-        major_brand = body[8:12]
+    major_brand = _iso_bmff_major_brand(body)
+    if major_brand is not None:
         has_video_track = b"vide" in body
         has_audio_track = b"soun" in body
-        if has_video_track:
+        if has_video_track or not has_audio_track:
+            # 没有任何 hdlr（如 moov 缺失的残片）按容器默认当视频，交给播放器判。
             return "video/quicktime" if major_brand == b"qt  " else "video/mp4"
-        if has_audio_track:
-            return "audio/mp4"
+        return "audio/mp4"
     return None
+
+
+# 同一个 ISO BMFF 容器既可能叫 .mp4 也可能叫 .mov（品牌 qt 与 isom/mp42 互换很常见），
+# 两个扩展名互相认；其余扩展名只认自己的 MIME。
+_ACCEPTED_MIMES = {
+    ext: {mime} for ext, mime in _MEDIA_MIME.items()
+} | {
+    ".mp4": {"video/mp4", "video/quicktime"},
+    ".mov": {"video/mp4", "video/quicktime"},
+}
 
 
 def _now() -> str:
@@ -481,10 +517,11 @@ def _new_upload_version(
     upload_id = secrets.token_hex(16)
     target = canvas_project_dir(project_id) / "uploads" / f"{upload_id}{ext}"
     detected_mime = _sniff_media_mime(body)
-    if detected_mime is None or detected_mime != _MEDIA_MIME[ext]:
+    if detected_mime is None or detected_mime not in _ACCEPTED_MIMES[ext]:
+        detected = detected_mime or "未识别的格式"
         raise CanvasDocumentError(
             "canvas_upload_ext_mismatch",
-            "文件的实际内容和扩展名不一致（按魔术字节判定），没有上传。",
+            f"文件的实际内容（{detected}）和扩展名 {ext} 不一致，没有上传。",
         )
     width: int | None = None
     height: int | None = None

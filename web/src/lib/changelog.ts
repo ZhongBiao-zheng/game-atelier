@@ -38,6 +38,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     headline: '画布上传素材后节点不再消失',
     changes: [
       { kind: 'fix', text: '通过「上传素材」按钮或拖入文件上传时，画布提示已添加却看不到节点、拖入后瞬间消失（Windows 常见）已修复；此前服务端写盘的通知先于上传结果到达，页面误判为他人改动而重载，把刚加的节点盖掉。' },
+      { kind: 'fix', text: '上传 .mp4 / .mov 时，品牌为 QuickTime 的 mp4、ftyp 前带空白 box 的视频（飞书 / 微信转存常见）不再被判「内容与扩展名不一致」；被拒时报错会点名实际识别出的类型。' },
     ],
   },
   {

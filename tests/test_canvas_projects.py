@@ -256,8 +256,55 @@ def test_upload_rejection_says_which_check_failed_in_chinese(client):
     assert response.status_code == 422, response.text
     assert response.json()["detail"] == {
         "code": "canvas_upload_ext_mismatch",
-        "message": "文件的实际内容和扩展名不一致（按魔术字节判定），没有上传。",
+        "message": "文件的实际内容（未识别的格式）和扩展名 .png 不一致，没有上传。",
     }
+
+
+def _mp4_bytes(*boxes: bytes) -> bytes:
+    body = b"".join(boxes)
+    # 一个最小 moov，只带 hdlr 里的 handler_type，够探测器判「有视频轨」。
+    hdlr = b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + b"vide" + b"\x00" * 13
+    moov = (len(hdlr) + 8).to_bytes(4, "big") + b"moov" + hdlr
+    return body + moov
+
+
+def _box(kind: bytes, payload: bytes = b"") -> bytes:
+    return (len(payload) + 8).to_bytes(4, "big") + kind + payload
+
+
+def _upload_video(client, project_id, name, body):
+    return client.post(
+        f"/api/canvas/projects/{project_id}/uploads",
+        files={"file": (name, body, "video/mp4")},
+        data={"expected_revision": "0"},
+    )
+
+
+def test_upload_accepts_mp4_with_quicktime_brand_or_leading_free_box(client):
+    # 飙哥 2026-09-14 实测：飞书转存的 .mp4 被判「内容与扩展名不一致」。
+    # 品牌为 qt 的 .mp4、ftyp 前带 free/wide box 的 mp4 都是合法 ISO BMFF。
+    project_id = _create_project(client)["project_id"]
+    quicktime_branded = _mp4_bytes(_box(b"ftyp", b"qt  " + b"\x00" * 8))
+    response = _upload_video(client, project_id, "clip.mp4", quicktime_branded)
+    assert response.status_code == 201, response.text
+    assert response.json()["version"]["mime_type"] == "video/quicktime"
+
+    project_id = _create_project(client)["project_id"]
+    leading_free = _mp4_bytes(_box(b"free", b"\x00" * 16), _box(b"ftyp", b"isom" + b"\x00" * 8))
+    response = _upload_video(client, project_id, "clip.mp4", leading_free)
+    assert response.status_code == 201, response.text
+    assert response.json()["version"]["mime_type"] == "video/mp4"
+
+
+def test_upload_mismatch_names_the_detected_type(client):
+    project_id = _create_project(client)["project_id"]
+    response = client.post(
+        f"/api/canvas/projects/{project_id}/uploads",
+        files={"file": ("photo.jpg", _PNG, "image/jpeg")},
+        data={"expected_revision": "0"},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["message"] == "文件的实际内容（image/png）和扩展名 .jpg 不一致，没有上传。"
 
 
 def test_canvas_upload_and_media_endpoint_stay_inside_project(client, isolated_data_root):
