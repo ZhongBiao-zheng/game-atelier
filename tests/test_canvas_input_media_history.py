@@ -48,6 +48,7 @@ def _cropped_project(operation=None):
 @pytest.mark.parametrize("operation,count", [
     ({"kind": "remove_background"}, 1),
     ({"kind": "split", "horizontal_lines": [0.5], "vertical_lines": [0.5]}, 4),
+    ({"kind": "split", "horizontal_lines": [], "vertical_lines": [0.5]}, 2),
 ])
 def test_independent_media_outputs_only_create_material_relationships(monkeypatch, operation, count):
     from character_workflow.lib import matting
@@ -155,3 +156,13 @@ def test_only_direct_inputs_are_resolved_alongside_material_relationships(monkey
         / document.content_versions[derived.data.current_version_id].path
     )]
     assert read_canvas_document(project.project_id).connections == document.connections
+
+
+def test_split_requires_at_least_one_line():
+    import pytest
+    from pydantic import ValidationError
+
+    from character_workflow.lib.schemas import CanvasSplitMediaOperation
+
+    with pytest.raises(ValidationError, match="至少需要一条切线"):
+        CanvasSplitMediaOperation(kind="split", horizontal_lines=[], vertical_lines=[])

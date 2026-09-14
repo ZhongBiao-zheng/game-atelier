@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.7',
+    date: '2026-09-14',
+    headline: '图片切分支持单行或单列',
+    changes: [
+      { kind: 'feat', text: '画布图片「切分」的行数、列数可以选 1，用来横切成一排或竖切成一列；1 行 × 1 列不能提交。' },
+    ],
+  },
+  {
     version: '5.62.6',
     date: '2026-09-14',
     headline: '去掉画布冲突横幅和输入框、偏好弹窗的瞬时提示',

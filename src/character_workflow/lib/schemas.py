@@ -1455,8 +1455,15 @@ class CanvasCropMediaOperation(BaseModel):
 class CanvasSplitMediaOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["split"]
-    horizontal_lines: list[CanvasSplitLine] = Field(min_length=1, max_length=11)
-    vertical_lines: list[CanvasSplitLine] = Field(min_length=1, max_length=11)
+    # 单轴切分（1 行 N 列 / N 行 1 列）合法，但两轴都没有切线就是原图，拒绝。
+    horizontal_lines: list[CanvasSplitLine] = Field(max_length=11)
+    vertical_lines: list[CanvasSplitLine] = Field(max_length=11)
+
+    @model_validator(mode="after")
+    def _require_a_cut(self) -> "CanvasSplitMediaOperation":
+        if not self.horizontal_lines and not self.vertical_lines:
+            raise ValueError("切分至少需要一条切线。")
+        return self
 
 
 class CanvasRemoveBackgroundMediaOperation(BaseModel):
