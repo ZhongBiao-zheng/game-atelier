@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.6',
+    date: '2026-09-14',
+    headline: '去掉画布冲突横幅和创作台输入框的瞬时提示',
+    changes: [
+      { kind: 'fix', text: '画布被 Agent 或另一标签页改动后不再弹「重新载入（放弃本页改动）」横幅，本页直接同步到服务端最新版本；正在编辑的文本节点会等编辑结束再同步。' },
+      { kind: 'fix', text: '首页与创作台输入框不再显示「当前模型不支持原尺寸模式」「参考图最多 N 张」这类提示，尺寸与参考图数量按模型上限静默调整。' },
+    ],
+  },
+  {
     version: '5.62.5',
     date: '2026-09-14',
     headline: '长提示词默认折叠，新建节点自动对焦',
