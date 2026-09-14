@@ -2154,7 +2154,7 @@ function CanvasEditorInner({
       id: makeId(version.kind),
       title: uploaded.filename,
       position: (() => {
-        const size = version.kind === 'image'
+        const size = version.kind === 'image' || version.kind === 'video'
           ? sizeLockedToCanvasVersion(null, version)
           : CANVAS_DEFAULT_NODE_SIZE;
         return menu?.flow ? placeNewNode(menu.flow, size) : defaultPosition(size);

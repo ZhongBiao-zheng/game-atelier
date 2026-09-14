@@ -17,6 +17,7 @@ from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_bytes, atomic_write_json
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.jobs import list_jobs, read_job
+from character_workflow.lib.media_probe import mp4_track_dimensions
 from character_workflow.lib.schemas import (
     CanvasNode,
     CanvasAudioNode,
@@ -527,6 +528,11 @@ def _new_upload_version(
     height: int | None = None
     if media_kind == "image":
         width, height = _display_image_dimensions(body)
+    elif media_kind == "video" and detected_mime in {"video/mp4", "video/quicktime"}:
+        # 上传视频与出片视频同一条规则：有像素尺寸节点才能按真实比例占位，否则落默认横版。
+        dimensions = mp4_track_dimensions(body)
+        if dimensions:
+            width, height = dimensions
     version = CanvasMediaVersion(
         version_id=f"version-{secrets.token_hex(12)}",
         created_at=timestamp,

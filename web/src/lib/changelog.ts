@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.3',
+    date: '2026-09-14',
+    headline: '上传的视频节点按真实比例占位',
+    changes: [
+      { kind: 'fix', text: '上传 mp4 / mov 时从文件头读出像素尺寸，节点按视频真实比例占位并锁定，与生成的视频节点一致；此前一律落成默认横版，竖版视频两侧留黑边。' },
+    ],
+  },
+  {
     version: '5.62.2',
     date: '2026-09-14',
     headline: '画布上传素材后节点不再消失',

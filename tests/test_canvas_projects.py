@@ -260,12 +260,15 @@ def test_upload_rejection_says_which_check_failed_in_chinese(client):
     }
 
 
-def _mp4_bytes(*boxes: bytes) -> bytes:
+def _mp4_bytes(*boxes: bytes, size: tuple[int, int] = (720, 1280)) -> bytes:
     body = b"".join(boxes)
-    # 一个最小 moov，只带 hdlr 里的 handler_type，够探测器判「有视频轨」。
-    hdlr = b"\x00\x00\x00\x21hdlr" + b"\x00" * 8 + b"vide" + b"\x00" * 13
-    moov = (len(hdlr) + 8).to_bytes(4, "big") + b"moov" + hdlr
-    return body + moov
+    # 最小 moov：trak→tkhd 带 16.16 定点宽高（节点按真实比例占位靠它），hdlr 带 vide 判视频轨。
+    width, height = size
+    tkhd_payload = b"\x00" * 76 + (width << 16).to_bytes(4, "big") + (height << 16).to_bytes(4, "big")
+    tkhd = _box(b"tkhd", tkhd_payload)
+    hdlr = _box(b"hdlr", b"\x00" * 8 + b"vide" + b"\x00" * 13)
+    trak = _box(b"trak", tkhd + hdlr)
+    return body + _box(b"moov", trak)
 
 
 def _box(kind: bytes, payload: bytes = b"") -> bytes:
@@ -288,6 +291,8 @@ def test_upload_accepts_mp4_with_quicktime_brand_or_leading_free_box(client):
     response = _upload_video(client, project_id, "clip.mp4", quicktime_branded)
     assert response.status_code == 201, response.text
     assert response.json()["version"]["mime_type"] == "video/quicktime"
+    # 上传的竖版视频节点要按 720×1280 占位，不落默认横版（飙哥 2026-09-14：左侧那样很丑）。
+    assert (response.json()["version"]["width"], response.json()["version"]["height"]) == (720, 1280)
 
     project_id = _create_project(client)["project_id"]
     leading_free = _mp4_bytes(_box(b"free", b"\x00" * 16), _box(b"ftyp", b"isom" + b"\x00" * 8))

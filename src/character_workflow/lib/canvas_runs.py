@@ -33,8 +33,8 @@ from character_workflow.lib.job_runner import (
     image_dimensions,
     is_valid_audio,
     run_job,
-    video_dimensions,
 )
+from character_workflow.lib.media_probe import video_dimensions
 from character_workflow.lib.jobs import (
     job_lock,
     list_jobs,
