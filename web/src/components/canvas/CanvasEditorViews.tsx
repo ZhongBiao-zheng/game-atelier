@@ -3250,7 +3250,7 @@ function MediaPreview({
           }}
         />
         <div
-          className="nodrag nowheel absolute bottom-2 left-2 right-2 z-10 flex items-center gap-2 rounded-lg border border-border bg-glass p-1.5 text-foreground backdrop-blur-glass"
+          className="nodrag nowheel absolute bottom-2 left-2 right-2 z-10 flex items-center gap-1 rounded-lg border border-border bg-glass px-1.5 py-1 text-foreground backdrop-blur-glass"
           onPointerDown={stopCanvasInteraction}
           onDoubleClick={stopCanvasInteraction}
           onClick={stopCanvasInteraction}
@@ -3266,6 +3266,7 @@ function MediaPreview({
               ? <Pause className="size-4" aria-hidden="true" />
               : <Play className="size-4" aria-hidden="true" />}
           </button>
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{formatMediaTime(videoCurrentTime)}</span>
           <input
             type="range"
             aria-label="视频播放进度"
@@ -3273,32 +3274,41 @@ function MediaPreview({
             max={videoDuration || 0}
             step="any"
             value={Math.min(videoCurrentTime, videoDuration || 0)}
-            className="min-w-0 flex-1 accent-primary"
+            className="range-progress min-w-0 flex-1"
+            style={{ '--progress': `${videoDuration ? Math.min(100, (videoCurrentTime / videoDuration) * 100) : 0}%` } as React.CSSProperties}
             onChange={event => seekVideo(Number(event.currentTarget.value))}
           />
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-            {formatMediaTime(videoCurrentTime)} / {formatMediaTime(videoDuration)}
+            -{formatMediaTime(Math.max(0, videoDuration - videoCurrentTime))}
           </span>
-          <button
-            type="button"
-            aria-label={`${videoMuted ? '取消静音' : '静音'} ${mediaLabel}`}
-            className="grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            onClick={toggleVideoMuted}
-          >
-            {videoMuted || videoVolume === 0
-              ? <VolumeX className="size-4" aria-hidden="true" />
-              : <Volume2 className="size-4" aria-hidden="true" />}
-          </button>
-          <input
-            type="range"
-            aria-label="视频音量"
-            min={0}
-            max={1}
-            step={0.05}
-            value={videoMuted ? 0 : videoVolume}
-            className="w-16 accent-primary"
-            onChange={event => setVolume(Number(event.currentTarget.value))}
-          />
+          {/* 命名 group：节点卡片自己就是 .group，裸 group-hover 会在悬停整个节点时把音量弹出来。 */}
+          <div className="group/volume relative shrink-0">
+            <button
+              type="button"
+              aria-label={`${videoMuted ? '取消静音' : '静音'} ${mediaLabel}`}
+              className="grid size-7 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              onClick={toggleVideoMuted}
+            >
+              {videoMuted || videoVolume === 0
+                ? <VolumeX className="size-4" aria-hidden="true" />
+                : <Volume2 className="size-4" aria-hidden="true" />}
+            </button>
+            <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-1 opacity-0 transition-opacity group-focus-within/volume:pointer-events-auto group-focus-within/volume:opacity-100 group-hover/volume:pointer-events-auto group-hover/volume:opacity-100">
+              <div className="grid h-24 w-7 place-items-center rounded-lg border border-border bg-glass py-2 backdrop-blur-glass">
+                <input
+                  type="range"
+                  aria-label="视频音量"
+                  aria-orientation="vertical"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={videoMuted ? 0 : videoVolume}
+                  className="h-full w-4 accent-primary [direction:rtl] [writing-mode:vertical-lr]"
+                  onChange={event => setVolume(Number(event.currentTarget.value))}
+                />
+              </div>
+            </div>
+          </div>
           <button
             type="button"
             aria-label={`全屏播放 ${mediaLabel}`}
