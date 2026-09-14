@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.1',
+    date: '2026-09-14',
+    headline: '一键启动不再被过期的启动记录卡住',
+    changes: [
+      { kind: 'fix', text: '重启电脑后旧启动记录里的进程号被其他程序占用时，启动器会核对该进程是否真是工坊服务，不是就清掉记录正常启动；此前会一直报「无法验证运行实例」。' },
+      { kind: 'fix', text: '工坊进程卡死无应答时，停止命令会核对进程后照常结束它，不再拒绝。' },
+    ],
+  },
+  {
     version: '5.62.0',
     date: '2026-09-11',
     headline: '画布视频节点按真实尺寸显示，生成面板固定在节点下方',

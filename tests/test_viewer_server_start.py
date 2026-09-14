@@ -17,6 +17,16 @@ from viewer_server.pid import (
 )
 
 
+
+@pytest.fixture(autouse=True)
+def _records_belong_to_viewer_server(monkeypatch):
+    """既有用例用 os.getpid()（pytest 自身）冒充存活的服务进程，按命令行核对会被判成别人的进程。"""
+    import viewer_server.pid as pidmod
+
+    monkeypatch.setattr(pidmod, "is_viewer_server_process", lambda pid: True)
+    monkeypatch.setattr(server, "is_viewer_server_process", lambda pid: True)
+
+
 def test_bootstrap_gate_decodes_check_output_as_utf8(monkeypatch):
     """父进程读 bootstrap --check 必须显式 encoding=utf-8。
 
@@ -360,3 +370,75 @@ def test_stop_keeps_records_when_process_does_not_exit(tmp_path, monkeypatch, ca
     assert (tmp_path / "server.pid").exists()
     err = capsys.readouterr().err
     assert "强制结束" in err and "无法结束" in err
+
+
+def test_start_recovers_from_reused_pid_that_is_not_viewer_server(tmp_path, monkeypatch):
+    """同事重启 Windows 后 PID 被复用：旧记录存活但不是自家服务，start 清掉记录后正常启动。"""
+    import viewer_server.pid as pidmod
+
+    runtime = tmp_path / ".runtime"
+    runtime.mkdir()
+    write_pid(runtime, os.getpid())
+    write_port(runtime, 5174)
+    write_instance(runtime, "a" * 32)
+    monkeypatch.setattr(pidmod, "is_viewer_server_process", lambda pid: False)
+    monkeypatch.setattr(server, "is_viewer_server_process", lambda pid: False)
+    monkeypatch.setattr(data_root, "runtime_dir", lambda: runtime)
+    monkeypatch.setattr(server, "_bootstrap_gate", lambda background: True)
+    monkeypatch.setattr(server, "probe_connection_status", lambda port: None)
+    monkeypatch.setattr(server, "_find_free_port", lambda start: 5174)
+    spawned = []
+    monkeypatch.setattr(server, "_spawn_detached", lambda *a, **k: spawned.append(k) or 4242)
+    monkeypatch.setattr(server, "_wait_for_server", lambda port, instance_id: True)
+    monkeypatch.setattr(server, "cmd_open_browser", lambda: None)
+
+    server.cmd_start(background=True)
+
+    assert spawned
+    assert read_pid(runtime) == 4242
+
+
+def test_stop_terminates_own_server_that_no_longer_responds(tmp_path, monkeypatch):
+    """自家服务卡死（实例探测不过），命令行核对是 viewer-server 就照常发停止信号。"""
+    write_pid(tmp_path, os.getpid())
+    write_port(tmp_path, 5188)
+    write_instance(tmp_path, "a" * 32)
+    monkeypatch.setattr(data_root, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(server, "probe_connection_status", lambda port: None)
+    stopped = []
+    monkeypatch.setattr(server, "_terminate", lambda pid: stopped.append(pid) or True)
+    monkeypatch.setattr(server, "_wait_for_exit", lambda pid, **_k: True)
+    server.cmd_stop()
+    assert stopped == [os.getpid()]
+
+
+def test_stop_refuses_unverifiable_record_when_command_line_unreadable(tmp_path, monkeypatch):
+    import viewer_server.pid as pidmod
+
+    write_pid(tmp_path, os.getpid())
+    write_port(tmp_path, 5188)
+    write_instance(tmp_path, "a" * 32)
+    monkeypatch.setattr(pidmod, "is_viewer_server_process", lambda pid: None)
+    monkeypatch.setattr(server, "is_viewer_server_process", lambda pid: None)
+    monkeypatch.setattr(data_root, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(server, "probe_connection_status", lambda port: None)
+    monkeypatch.setattr(server, "_terminate", lambda pid: pytest.fail("must not touch unverified pid"))
+    with pytest.raises(SystemExit):
+        server.cmd_stop()
+    assert read_pid(tmp_path) == os.getpid()
+
+
+def test_start_points_to_stop_when_own_server_is_alive_but_silent(tmp_path, monkeypatch, capsys):
+    runtime = tmp_path / ".runtime"
+    runtime.mkdir()
+    write_pid(runtime, os.getpid())
+    write_port(runtime, 5174)
+    write_instance(runtime, "a" * 32)
+    monkeypatch.setattr(data_root, "runtime_dir", lambda: runtime)
+    monkeypatch.setattr(server, "_bootstrap_gate", lambda background: True)
+    monkeypatch.setattr(server, "probe_connection_status", lambda port: None)
+    monkeypatch.setattr(server, "_spawn_detached", lambda *a, **k: pytest.fail("second writer"))
+    with pytest.raises(SystemExit):
+        server.cmd_start(background=True)
+    assert "stop" in capsys.readouterr().err
+    assert read_pid(runtime) == os.getpid()

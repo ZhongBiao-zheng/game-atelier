@@ -23,7 +23,8 @@ from viewer_server.connection_status import (  # noqa: E402
     INSTANCE_ENV, new_instance_id, probe_connection_status,
 )
 from viewer_server.pid import (  # noqa: E402
-    _is_alive, cleanup_stale_pid, read_instance, read_pid, read_port, write_instance, write_pid, write_port,
+    _is_alive, cleanup_stale_pid, is_viewer_server_process, read_instance, read_pid, read_port,
+    write_instance, write_pid, write_port,
 )
 
 
@@ -213,13 +214,22 @@ def _start_locked(runtime: Path, *, background: bool) -> tuple[FastAPI, int] | N
     existing_pid = read_pid(runtime)
     if existing_pid:
         port = read_port(runtime) or DEFAULT_PORT
-        if _server_responds(port, read_instance(runtime)):
+        instance_id = read_instance(runtime)
+        status = probe_connection_status(port)
+        if instance_id is not None and status is not None and status.instance_id == instance_id:
             url = f"http://127.0.0.1:{port}/"
             print(f"工坊已在运行，正在打开浏览器：{url}")
             cmd_open_browser()
             return None
         # A living but unverified process may still be generating. Never start another writer.
-        if read_instance(runtime) is None:
+        if status is None and is_viewer_server_process(existing_pid):
+            # 自家进程还在但不应答（卡死 / 尚未起完）：stop 会按命令行核对后终止它。
+            print(
+                f"工坊进程仍在运行但无应答（pid={existing_pid}）。"
+                "请先执行 `stop` 子命令停止它，再重新启动。未覆盖记录或启动第二个服务。",
+                file=sys.stderr,
+            )
+        elif instance_id is None:
             # Trigger: 记录来自不写 server.instance 的旧版本，升级后老服务还在跑
             # Why: 旧服务没有 /api/connection/status，永远验不过；用户唯一出口就是这里的 stop
             # Outcome: 指到可执行的 stop，由 stop 按 legacy 规则终止记录里的 PID
@@ -295,8 +305,13 @@ def cmd_stop() -> None:
         port = read_port(runtime) or DEFAULT_PORT
         instance_id = read_instance(runtime)
         # 没有 instance 记录 = 旧版本写下的 PID，无法用实例验证；这条记录是本启动器自己写的，照旧发停止信号。
-        # 有 instance 记录却验不过 = 端口上是别的服务，绝不碰记录里的 PID。
-        if instance_id is not None and not _server_responds(port, instance_id):
+        # 有 instance 记录却验不过：端口无应答且命令行核对是自家 viewer-server（卡死）照常停止；
+        # 端口上答的是别的实例、或命令行核对不了，绝不碰记录里的 PID。
+        status = probe_connection_status(port) if instance_id is not None else None
+        verified = status is not None and status.instance_id == instance_id
+        if instance_id is not None and not verified and (
+            status is not None or is_viewer_server_process(pid) is not True
+        ):
             print("无法验证运行实例，未向该 PID 发送停止信号。请检查原启动终端。", file=sys.stderr)
             sys.exit(1)
         if not _terminate(pid):
