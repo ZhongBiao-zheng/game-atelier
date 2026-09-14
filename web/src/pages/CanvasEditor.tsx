@@ -1086,6 +1086,18 @@ function CanvasEditorInner({
       void inFlight.catch(() => undefined).then(() => remoteDocumentChanged.current(revision));
       return;
     }
+    // 上传 / 媒体操作这类命令由服务端先写盘、本页拿到响应后再加节点。watcher 广播可能比
+    // HTTP 响应先到（Windows 实测），此时 serverRevision 还没推上去，若当成别人的改动去重载，
+    // 服务端文档（只有版本、没有节点）就会盖掉刚加的节点——表现为「提示已添加，画布上没有」。
+    const command = uploadQueue.current;
+    if (command) {
+      void command.then(() => remoteDocumentChanged.current(revision));
+      return;
+    }
+    if (documentCommandInFlight.current) {
+      window.setTimeout(() => remoteDocumentChanged.current(revision), 200);
+      return;
+    }
     const hasLocalChanges = saveQueued.current !== null
       || activeTextEditingNodeIds.current.size > 0
       || saveState === 'error';

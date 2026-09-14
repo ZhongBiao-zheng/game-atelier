@@ -1181,6 +1181,41 @@ it('imports every chosen file as separate non-overlapping material nodes', async
   expect(input).toHaveValue('');
 });
 
+it('keeps the uploaded node when the server broadcast lands before the upload response', async () => {
+  // Windows 实测：上传落盘触发的 canvas-document-changed 比 HTTP 201 先到浏览器。
+  // 此时 serverRevision 还是旧值，若把这条事件当成别人的改动去重载，服务端文档
+  // （只登记了版本、没有节点）会盖掉刚加的节点——「提示已添加 1 个素材，画布上却没有」。
+  const state = vi.spyOn(connection, 'useConnectionState').mockReturnValue({ phase: 'ready', generation: 1, editing: true, message: null });
+  const events = createTestEventStream();
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(events.open())));
+  vi.mocked(uploadCanvasMedia).mockImplementation(async (_project, file, revision) => {
+    const uploaded = mockFileUpload(file, revision);
+    // 服务端已写盘：之后的 GET 返回带版本、无节点的新文档，watcher 广播先于响应到达。
+    vi.mocked(getCanvasDocument).mockResolvedValue(uploaded.document);
+    await act(async () => {
+      events.emit('canvas-document-changed', { project_id: 'canvas-one', revision: uploaded.document.revision });
+    });
+    return uploaded;
+  });
+
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/events', expect.anything()));
+  vi.mocked(getCanvasDocument).mockClear();
+
+  const input = screen.getByLabelText('选择上传素材');
+  fireEvent.change(input, { target: { files: [new File(['x'], 'late-event.png', { type: 'image/png' })] } });
+  await waitFor(() => expect(lastSavedDocument()?.nodes).toHaveLength(1));
+  expect(lastSavedDocument()!.nodes[0]).toMatchObject({ type: 'image', title: 'late-event.png' });
+  // 本页自己的命令落地后 revision 已对齐，这条广播不该再触发重载。
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
+  expect(getCanvasDocument).not.toHaveBeenCalled();
+  expect(screen.queryByText(/已被其他来源/)).toBeNull();
+
+  vi.unstubAllGlobals();
+  state.mockRestore();
+});
+
 it('continues a multi-file drop after a bad file and retains its error', async () => {
   vi.mocked(uploadCanvasMedia).mockImplementation(async (_project, file, revision) => {
     if (file.name === 'bad.png') throw new Error('图片损坏');

@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.2',
+    date: '2026-09-14',
+    headline: '画布上传素材后节点不再消失',
+    changes: [
+      { kind: 'fix', text: '通过「上传素材」按钮或拖入文件上传时，画布提示已添加却看不到节点、拖入后瞬间消失（Windows 常见）已修复；此前服务端写盘的通知先于上传结果到达，页面误判为他人改动而重载，把刚加的节点盖掉。' },
+    ],
+  },
+  {
     version: '5.62.1',
     date: '2026-09-14',
     headline: '一键启动不再被过期的启动记录卡住',
