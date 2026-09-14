@@ -4,6 +4,7 @@ viewer-server start 时先调 cleanup_stale_pid() 避免端口冲突。
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -62,6 +63,40 @@ def _is_alive(pid: int) -> bool:
     return True
 
 
+def process_command_line(pid: int) -> str | None:
+    """读取进程命令行；读不到（进程已退、无权限、工具缺失）返回 None。"""
+    if sys.platform == "win32":
+        cmd = [
+            "powershell", "-NoProfile", "-NonInteractive", "-Command",
+            f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine",
+        ]
+    else:
+        cmd = ["ps", "-o", "command=", "-p", str(int(pid))]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    line = result.stdout.strip()
+    return line or None
+
+
+def is_viewer_server_process(pid: int) -> bool | None:
+    """记录里的 PID 是否真是 viewer-server。
+
+    Windows 重启后 PID 会被无关进程复用，只查「存活」会把别人的进程当成自家服务，start / stop
+    双双拒绝动手、用户无路可走。后台启动命令行含 `viewer_server.server_app`，前台含
+    `viewer_server/server.py`，两种都带 `viewer_server`。读不到命令行返回 None，由调用方保守处理。
+    """
+    line = process_command_line(pid)
+    if line is None:
+        return None
+    return "viewer_server" in line.replace("\\", "/")
+
+
 def read_pid(runtime: Path) -> int | None:
     p = _pid_path(runtime)
     if not p.exists():
@@ -109,11 +144,14 @@ def write_instance(runtime: Path, instance_id: str) -> None:
 
 
 def cleanup_stale_pid(runtime: Path) -> bool:
-    """Remove server.pid if the process is dead. Returns True if cleanup happened."""
+    """Remove the records if the process is dead or is not ours (PID reused).
+
+    Returns True if cleanup happened.
+    """
     pid = read_pid(runtime)
     if pid is None:
         return False
-    if _is_alive(pid):
+    if _is_alive(pid) and is_viewer_server_process(pid) is not False:
         return False
     _pid_path(runtime).unlink(missing_ok=True)
     _port_path(runtime).unlink(missing_ok=True)
