@@ -182,7 +182,7 @@ export function CanvasMediaOperationDialog({
           <div className="flex gap-2">
             <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>取消</Button>
             <Button
-              disabled={busy}
+              disabled={busy || (tool === 'split' && output.width * output.height < 2)}
               aria-describedby={error ? 'canvas-media-operation-error' : undefined}
               onClick={submit}
             >
@@ -454,7 +454,7 @@ function LabeledCount({ label, value, onChange }: { label: string; value: number
     <label className="space-y-1 text-xs text-muted-foreground">
       <span>{label}</span>
       <select value={value} onChange={event => onChange(Number(event.target.value))} className="h-9 rounded-md border border-input bg-transparent px-3 text-sm tabular-nums text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary">
-        {Array.from({ length: 11 }, (_, index) => index + 2).map(item => <option key={item} value={item}>{item}</option>)}
+        {Array.from({ length: 12 }, (_, index) => index + 1).map(item => <option key={item} value={item}>{item}</option>)}
       </select>
     </label>
   );
