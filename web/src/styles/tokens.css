@@ -288,6 +288,57 @@
     border-radius: 999px;
   }
 
+  /* 画布视频进度条：无滑钮，只显示已播部分（飙哥 2026-09-14）。填充量由 tsx 写 --progress
+     （0–100%），轨底 --secondary、已播 --primary；Firefox 直接用 ::-moz-range-progress。
+     thumb 不能删（删了拖不动），设成 0×0 透明保留拖拽与键盘。 */
+  .range-progress {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 14px;
+    background: transparent;
+    cursor: pointer;
+  }
+  .range-progress::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 999px;
+    background: linear-gradient(
+      to right,
+      var(--primary) 0,
+      var(--primary) var(--progress, 0%),
+      var(--secondary) var(--progress, 0%),
+      var(--secondary) 100%
+    );
+  }
+  .range-progress::-moz-range-track {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--secondary);
+  }
+  .range-progress::-moz-range-progress {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--primary);
+  }
+  .range-progress::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 0;
+    height: 0;
+    border: 0;
+    background: transparent;
+  }
+  .range-progress::-moz-range-thumb {
+    width: 0;
+    height: 0;
+    border: 0;
+    background: transparent;
+  }
+  .range-progress:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 3px;
+    border-radius: 999px;
+  }
+
   .canvas-input {
     width: 100%;
     border: 1px solid var(--input);

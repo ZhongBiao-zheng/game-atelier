@@ -3274,7 +3274,8 @@ function MediaPreview({
             max={videoDuration || 0}
             step="any"
             value={Math.min(videoCurrentTime, videoDuration || 0)}
-            className="min-w-0 flex-1 accent-primary"
+            className="range-progress min-w-0 flex-1"
+            style={{ '--progress': `${videoDuration ? Math.min(100, (videoCurrentTime / videoDuration) * 100) : 0}%` } as React.CSSProperties}
             onChange={event => seekVideo(Number(event.currentTarget.value))}
           />
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
