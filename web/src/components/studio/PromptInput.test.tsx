@@ -423,7 +423,6 @@ describe('PromptInput 参考素材超限提示', () => {
     const input = container.querySelector('input[type=file]')!;
     const files = [1, 2, 3, 4].map((i) => new File(['x'], `r${i}.png`, { type: 'image/png' }));
     fireEvent.change(input, { target: { files } });
-    expect(screen.getByRole('status')).toHaveTextContent('参考图最多 3 张，已忽略 1 个文件');
     expect(onChange).toHaveBeenCalledWith(files.slice(0, 3));
     cleanup();
   });
@@ -443,7 +442,6 @@ describe('PromptInput 参考素材超限提示', () => {
         referenceImages={files} onReferenceImagesChange={onChange} />,
     );
     expect(onChange).toHaveBeenCalledWith(files.slice(0, 3));
-    expect(screen.getByRole('status')).toHaveTextContent('参考图最多 3 张，已移除超出的 2 张');
     cleanup();
   });
 });

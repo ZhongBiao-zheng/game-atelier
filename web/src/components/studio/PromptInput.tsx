@@ -293,15 +293,6 @@ export function PromptInput({
   const [mentionOpen, setMentionOpen] = useState(false);
   // chip hover 预览：标签 + fixed 锚点坐标（portal 到 body，浮在参考内容上方）
   const [chipHover, setChipHover] = useState<{ label: string; left: number; top: number } | null>(null);
-  // 参考素材瞬时提示（超限被忽略 / 已达上限），数秒自动消失。
-  const [refHint, setRefHint] = useState<string | null>(null);
-  const refHintTimer = useRef<number | undefined>(undefined);
-  const showRefHint = useCallback((msg: string) => {
-    setRefHint(msg);
-    window.clearTimeout(refHintTimer.current);
-    refHintTimer.current = window.setTimeout(() => setRefHint(null), 5000);
-  }, []);
-  useEffect(() => () => window.clearTimeout(refHintTimer.current), []);
   // 厂商/模型列表按当前生成类型过滤：模型级 modality 标注优先，未标注按 key 级 modalities 兜底。
   const wantedModality = isVideo ? 'video' : 'image';
   const visibleProviders = providers.filter(
@@ -598,16 +589,14 @@ export function PromptInput({
     const initialize = sizeModelRef.current === null;
     sizeModelRef.current = identity;
     const normalized = normalizeImageSizeParams(selectedModel.id, provider.provider, provider.base_url, sizeParams);
-    if (hasImageSizeSelection(sizeParams) && imageSizeMode(normalized) !== imageSizeMode(sizeParams)) {
-      showRefHint('当前模型不支持原尺寸模式，已切换为比例');
-    } else if ((changedModel || initialize) && imageSizeMode(normalized) === 'custom' && !imageSizeError(normalized, selectedModel.id)) {
+    const modeChanged = hasImageSizeSelection(sizeParams) && imageSizeMode(normalized) !== imageSizeMode(sizeParams);
+    if (!modeChanged && (changedModel || initialize) && imageSizeMode(normalized) === 'custom' && !imageSizeError(normalized, selectedModel.id)) {
       const size = normalizeImagePixelSize(normalized.size!, selectedModel.id, provider.base_url);
-      if (size !== normalized.size) showRefHint(`尺寸已调整为 ${size.replace('x', '×')}`);
       normalized.size = size;
       normalized.custom_size = size;
     }
     if (JSON.stringify(normalized) !== JSON.stringify(sizeParams)) onSizeParamsChange?.(normalized);
-  }, [isVideo, selectedModel, provider, sizeParams, onSizeParamsChange, showRefHint]);
+  }, [isVideo, selectedModel, provider, sizeParams, onSizeParamsChange]);
   const sizeControlDetail = caps.showResolution && imageSizeMode(sizeParams) === 'ratio'
     ? (sizeParams.resolution ?? (caps.sizeKind === 'ratio' ? null : '2K'))
     : caps.qualities?.length
@@ -654,14 +643,12 @@ export function PromptInput({
 
   // 参考图数量不变式：永远 ≤ 当前模型族上限。切换模型（16 张的 gpt-image → 3 张的 nano-banana）
   // 或整组复用历史参考图都可能撑爆上限 —— 旧行为是界面上 chip 全在、后端只发前 N 张（静默丢弃）。
-  // 这里当场裁掉并提示裁了几张，用户看到的堆叠就是真正会发出去的那几张。
+  // 这里当场裁掉，用户看到的堆叠就是真正会发出去的那几张。
   const refImagesLimit = isVideo ? (isOmni ? maxRefImgs : null) : maxRef;
   useEffect(() => {
     if (refImagesLimit === null || referenceImages.length <= refImagesLimit) return;
-    const dropped = referenceImages.length - refImagesLimit;
     onReferenceImagesChange?.(referenceImages.slice(0, refImagesLimit));
-    showRefHint(`参考图最多 ${refImagesLimit} 张，已移除超出的 ${dropped} 张`);
-  }, [refImagesLimit, referenceImages, onReferenceImagesChange, showRefHint]);
+  }, [refImagesLimit, referenceImages, onReferenceImagesChange]);
 
   const submit = useCallback(() => {
     if (promptVariableError(text)) {
@@ -747,35 +734,23 @@ export function PromptInput({
     const files = e.target.files;
     if (!files?.length) return;
     if (isOmni) {
-      // 单入口收所有类型：按 MIME 分流进各自数组并执行 9/3/3 上限；超限不再静默丢弃，按类目提示。
+      // 单入口收所有类型：按 MIME 分流进各自数组并执行 9/3/3 上限，超限的文件直接丢弃。
       const images = [...referenceImages];
       const videos = [...referenceVideos];
       const audios = [...referenceAudios];
-      const dropped = { image: 0, video: 0, audio: 0 };
       for (const file of Array.from(files)) {
         if (file.type.startsWith('video/')) {
           if (videoCaps?.supportsReferenceVideo && videos.length < maxRefVids) videos.push(file);
-          else dropped.video++;
         } else if (file.type.startsWith('audio/')) {
           if (videoCaps?.supportsReferenceAudio && audios.length < maxRefAudios) audios.push(file);
-          else dropped.audio++;
         } else if (file.type.startsWith('image/')) {
           if (images.length < maxRefImgs) images.push(file);
-          else dropped.image++;
         }
       }
       onReferenceImagesChange?.(images);
       onReferenceVideosChange?.(videos);
       onReferenceAudiosChange?.(audios);
-      const parts: string[] = [];
-      if (dropped.image) parts.push(`参考图最多 ${maxRefImgs} 张`);
-      if (dropped.video) parts.push(videoCaps?.supportsReferenceVideo ? `参考视频最多 ${maxRefVids} 个` : '当前模型不支持参考视频');
-      if (dropped.audio) parts.push(videoCaps?.supportsReferenceAudio ? `参考音频最多 ${maxRefAudios} 段` : '当前模型不支持参考音频');
-      const droppedTotal = dropped.image + dropped.video + dropped.audio;
-      if (parts.length) showRefHint(`${parts.join('，')}，已忽略 ${droppedTotal} 个文件`);
     } else {
-      const total = referenceImages.length + files.length;
-      if (total > maxRef) showRefHint(`参考图最多 ${maxRef} 张，已忽略 ${total - maxRef} 个文件`);
       onReferenceImagesChange?.([...referenceImages, ...Array.from(files)].slice(0, maxRef));
     }
     e.target.value = '';
@@ -933,13 +908,7 @@ export function PromptInput({
                   <label
                     htmlFor={stackCanAdd ? refInputId : undefined}
                     aria-disabled={!stackCanAdd}
-                    onClick={stackCanAdd ? undefined : (e) => {
-                      e.preventDefault();
-                      // 已达上限的入口置灰但保持可点 → 点击解释原因（pointer-events-none 会吞掉 title）。
-                      showRefHint(isOmni
-                        ? `参考素材已达上限，已忽略新文件（图 ${maxRefImgs}${videoCaps?.supportsReferenceVideo ? ` / 视频 ${maxRefVids}` : ''}${videoCaps?.supportsReferenceAudio ? ` / 音频 ${maxRefAudios}` : ''}）`
-                        : `参考图最多 ${maxRef} 张，删除后才能继续添加`);
-                    }}
+                    onClick={stackCanAdd ? undefined : (e) => e.preventDefault()}
                     className={`absolute flex items-center justify-center rounded-full border-[0.5px] border-border bg-secondary transition-colors ${
                       stackCanAdd
                         ? 'cursor-pointer text-muted-foreground hover:text-foreground hover:border-input hover:bg-card'
@@ -1090,12 +1059,6 @@ export function PromptInput({
               collapsed ? 'scale-90 translate-y-2 opacity-0 blur-[6px]' : 'scale-100 translate-y-0 opacity-100 blur-none'
             }`}
           >
-      {/* 参考素材瞬时提示（超限被忽略 / 已达上限）。本地视频已由后端经 OSS 中转成直链，无需常驻警示。 */}
-      {refHint && (
-        <div role="status" className="pb-1.5 text-xs text-muted-foreground">
-          {refHint}
-        </div>
-      )}
       <div
         onMouseEnter={() => setBarHovering(true)}
         onMouseLeave={() => setBarHovering(false)}

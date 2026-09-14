@@ -1033,15 +1033,9 @@ function CanvasEditorInner({
         // 而状态药丸在窄屏被 max-w-24 truncate 掉。保存一失败，本地文档就和服务端分叉了，
         // 之后每一次编辑都不落盘，所以必须把服务端的 detail 原样送到报错条上。
         if (saveError instanceof ApiError && saveError.status === 409) {
-          // 409 只有一种来源：别处（Agent 经 MCP、另一标签页）已经写过新版本。通用文案「刷新后重试」
-          // 会让人反复刷新；这里直接给重载动作，重载会放弃本页未保存的改动。
-          const message = '画布已被其他来源（Agent 或另一标签页）改动，本页版本已过期；重新载入后再继续编辑。';
-          setSaveErrorDetail(message);
-          setError(message);
-          setErrorAction({
-            message, label: '重新载入',
-            run: () => { void reloadDocumentRef.current().catch(reloadError => setError((reloadError as Error).message)); },
-          });
+          // 409 只有一种来源：别处（Agent 经 MCP、另一标签页）已经写过新版本。服务端文档是唯一
+          // 事实源，直接重载覆盖本页（本页未落盘的改动最多是一次去抖窗口内的编辑），不弹横幅。
+          void reloadDocumentRef.current().catch(reloadError => setError((reloadError as Error).message));
           throw saveError;
         }
         const detail = (saveError as Error).message;
@@ -1100,19 +1094,14 @@ function CanvasEditorInner({
       window.setTimeout(() => remoteDocumentChanged.current(revision), 200);
       return;
     }
-    const hasLocalChanges = saveQueued.current !== null
-      || activeTextEditingNodeIds.current.size > 0
-      || saveState === 'error';
-    if (!hasLocalChanges) {
-      void reloadDocumentFromServer().catch(reloadError => setError((reloadError as Error).message));
+    if (activeTextEditingNodeIds.current.size > 0) {
+      // 正在编辑文本节点：重载会卸载 textarea、掐断输入法组合，等编辑结束再收服务端版本。
+      window.setTimeout(() => remoteDocumentChanged.current(revision), 200);
       return;
     }
-    const message = `画布已被其他来源（Agent 或另一标签页）改到版本 ${revision}，本页还有未保存的改动。`;
-    setError(message);
-    setErrorAction({
-      message, label: '重新载入（放弃本页改动）',
-      run: () => { void reloadDocumentFromServer().catch(reloadError => setError((reloadError as Error).message)); },
-    });
+    // 其余情况一律以服务端文档为准：排队中的本地改动最多是一次去抖窗口内的编辑，
+    // 直接覆盖，不再弹「重新载入（放弃本页改动）」横幅让人做选择。
+    void reloadDocumentFromServer().catch(reloadError => setError((reloadError as Error).message));
   };
 
   // 中文 / 日文输入法在候选未确认前一直处于 composition 状态，而自动保存的去抖只有 350ms，

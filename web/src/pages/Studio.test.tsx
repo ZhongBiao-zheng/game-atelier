@@ -1477,7 +1477,6 @@ describe('Studio', () => {
     const view = renderStudio();
     fireEvent.click(await screen.findByRole('button', { name: '选择比例和分辨率' }));
     expect(screen.getByRole('option', { name: 'AUTO' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.queryByText('当前模型不支持原尺寸模式，已切换为比例')).not.toBeInTheDocument();
     expect(screen.getByRole('option', { name: '1:1' })).toHaveAttribute('aria-selected', 'false');
     expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('AUTO');
@@ -1528,7 +1527,6 @@ describe('Studio', () => {
     fireEvent.click(screen.getByRole('button', { name: '选择厂商' }));
     fireEvent.click(screen.getByRole('option', { name: /volc/ }));
     await waitFor(() => expect(screen.getByRole('button', { name: '选择比例和分辨率' })).not.toHaveTextContent('AUTO'));
-    expect(screen.getByText('当前模型不支持原尺寸模式，已切换为比例')).toBeInTheDocument();
   });
 
   it('restores an explicit custom history mode and regenerates without stale ratio', async () => {
