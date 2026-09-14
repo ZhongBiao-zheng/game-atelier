@@ -521,6 +521,8 @@ function CanvasEditorInner({
   const mediaOperationInFlight = useRef(false);
   const documentCommandInFlight = useRef(false);
   const uploadQueue = useRef<Promise<void> | null>(null);
+  // 新建节点后把视口对到它上面；实现在 runViewportCommand 定义之后挂到 ref 上。
+  const focusNewNodeHandler = useRef<(node: CanvasNode) => void>(() => undefined);
   const canvasUiPreferencesSaveInFlight = useRef(false);
   const toolNoticeTimer = useRef<number | null>(null);
   const latestDocument = useRef<CanvasDocument | null>(null);
@@ -2042,6 +2044,7 @@ function CanvasEditorInner({
     setSelectedNodeIds(new Set());
     setAddOpen(false);
     setCreateMenu(null);
+    focusNewNodeHandler.current(node);
   }
 
   function addTextNode(menu: CreateMenuState | null = createMenu) {
@@ -4094,6 +4097,15 @@ function CanvasEditorInner({
       node.position.y + size.height / 2, { zoom: getZoom(), duration: 0 }));
   };
   const locateNode = useCallback((nodeId: string) => locateNodeHandler.current(nodeId), []);
+  // 新建节点：视口动画对中并放大到节点占视口大部分（飙哥 2026-09-14）。padding 按视口比例，
+  // 0.3 ≈ 节点占约六成；小节点受 CANVAS_MAX_ZOOM 限制不会放到糊。
+  focusNewNodeHandler.current = (node: CanvasNode) => {
+    const size = canvasNodeRenderedSize(node, latestDocument.current?.content_versions ?? {});
+    void runViewportCommand(() => fitBounds(
+      { x: node.position.x, y: node.position.y, width: size.width, height: size.height },
+      { duration: 250, padding: 0.3 },
+    ));
+  };
 
   const contextValue = useMemo<CanvasNodeContextValue>(() => ({
     layerParentByNodeId,

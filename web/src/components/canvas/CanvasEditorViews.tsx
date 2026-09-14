@@ -1905,6 +1905,24 @@ export function CanvasGenerationComposer({
   const panelLabel = `${modeLabel}设置`;
   const mentionReferences = context.mentionReferencesByNodeId.get(node.id)
     ?? EMPTY_CANVAS_MENTION_REFERENCES;
+  // 提示词摘要态 / 展开态（飙哥 2026-09-14）：已有内容时默认只露 3 行，点提示词或「展开」进编辑态；
+  // 面板外点一下或 Esc 收回。收起由明确动作触发，不挂 blur——切窗口 / 输入法候选框夺焦都会误收。
+  const panelRef = useRef<HTMLElement>(null);
+  const [promptExpanded, setPromptExpanded] = useState(false);
+  const promptCollapsed = !promptExpanded && isLongCanvasPrompt(draft.prompt);
+  useEffect(() => { setPromptExpanded(false); }, [node.id]);
+  useEffect(() => {
+    if (!promptExpanded) return;
+    const panel = panelRef.current;
+    panel?.querySelector<HTMLElement>('[role="combobox"][aria-label="提示词"]')?.focus();
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target || panel?.contains(target) || target.closest('[data-canvas-prompt-menu]')) return;
+      setPromptExpanded(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onPointerDown, true);
+  }, [promptExpanded]);
   const batchBinding = isCanvasContentNode(node) ? node.data.batch_result : null;
   const boundMaterial = mentionReferences.find(reference => reference.nodeId === batchBinding?.source_node_id);
   const materialReferences = boundMaterial
@@ -2022,6 +2040,7 @@ export function CanvasGenerationComposer({
 
   return (
     <section
+      ref={panelRef}
       aria-label={panelLabel}
       data-floating-node-panel="true"
       className={cn(
@@ -2031,6 +2050,13 @@ export function CanvasGenerationComposer({
       )}
       onClick={event => event.stopPropagation()}
       onKeyDown={event => event.stopPropagation()}
+      // 捕获阶段：提示词编辑器自己会吃掉 Escape（关 @ 菜单）；菜单开着时让它先关，否则收面板。
+      onKeyDownCapture={event => {
+        if (event.key !== 'Escape' || !promptExpanded) return;
+        if (document.querySelector('[data-canvas-prompt-menu]')) return;
+        setPromptExpanded(false);
+        (document.activeElement as HTMLElement | null)?.blur();
+      }}
     >
       <div className="mb-1 flex min-w-0 items-center justify-between gap-2 px-1">
         <p className="flex min-w-0 items-center gap-2 text-xs font-medium text-foreground">
@@ -2101,11 +2127,26 @@ export function CanvasGenerationComposer({
           )}
         />
       )}
+      {promptCollapsed ? (
+        <button
+          type="button"
+          aria-label="展开提示词"
+          className="block w-full rounded-md px-3 pb-1 pt-3 text-left transition-colors hover:bg-secondary/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          onClick={() => setPromptExpanded(true)}
+        >
+          {/* padding 不能放在 line-clamp 元素上：-webkit-box 会把第 4 行露进 padding 区。 */}
+          <p className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
+            {canvasPromptSummary(draft.prompt, mentionReferences)}
+          </p>
+          <span className="block text-right text-xs text-muted-foreground">展开</span>
+        </button>
+      ) : (
       <CanvasPromptInput
         value={draft.prompt}
         references={mentionReferences}
         mentionsEnabled={mentionsEnabled}
         disabledMentionHint={usesVideoFrameSlots ? '首尾帧模式不使用 @' : undefined}
+        className="max-h-[50vh]"
         onFocus={context.recordHistory}
         onChange={prompt => updateDraft(current => ({
           ...current,
@@ -2128,6 +2169,7 @@ export function CanvasGenerationComposer({
               ? '描述要创作的文案、脚本或内容，输入 @ 引用已连接内容'
               : '描述任何你想要生成的内容，输入 @ 引用已连接内容'}
       />
+      )}
       {node.type === 'audio' && (
         <CandidateHistory
           nodeId={node.id}
@@ -3338,6 +3380,21 @@ function MediaPreview({
       />
     </div>
   );
+}
+
+/** 提示词超过约 3 行才进摘要态；短提示词直接给编辑器，少一次点击。 */
+export function isLongCanvasPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  return text.length > 120 || (text.match(/\n/g)?.length ?? 0) >= 3;
+}
+
+/** 摘要态用纯文本：@[node:id] 换成 @标签，其它原样。 */
+export function canvasPromptSummary(prompt: string, references: readonly { nodeId: string; label: string }[]): string {
+  const labelById = new Map(references.map(reference => [reference.nodeId, reference.label]));
+  return prompt.replace(/@\[node:([^\]]+)\]/g, (token, nodeId: string) => {
+    const label = labelById.get(nodeId);
+    return label ? `@${label}` : token;
+  });
 }
 
 function formatMediaTime(seconds: number) {

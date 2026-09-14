@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.5',
+    date: '2026-09-14',
+    headline: '长提示词默认折叠，新建节点自动对焦',
+    changes: [
+      { kind: 'feat', text: '生成面板里超过约 3 行的提示词默认只显示摘要，点提示词或「展开」进入编辑；面板外点一下或按 Esc 收回。此前长提示词会把面板撑到遮住大半画布。' },
+      { kind: 'feat', text: '新建节点或上传素材后，视口自动平移缩放到该节点，节点居中并占视口大部分。' },
+    ],
+  },
+  {
     version: '5.62.4',
     date: '2026-09-14',
     headline: '画布视频控制栏重排',
