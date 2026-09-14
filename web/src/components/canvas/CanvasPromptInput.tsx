@@ -415,6 +415,7 @@ function CanvasMentionMenu({
 
   return createPortal(
     <div
+      data-canvas-prompt-menu="true"
       className="fixed z-20 max-h-60 w-72 overflow-y-auto rounded-xl border border-border bg-card p-1"
       style={{ left, top }}
       onPointerDown={(event: PointerEvent<HTMLDivElement>) => event.stopPropagation()}

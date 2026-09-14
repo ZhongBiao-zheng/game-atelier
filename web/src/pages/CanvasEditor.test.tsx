@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, expect, it, vi } from 'vitest';
 import { useContext } from 'react';
 import * as connection from '@/api/connection';
+import { useReactFlow } from '@xyflow/react';
 import { createTestEventStream } from '@/test/eventStream';
 
 import { CanvasEditor } from './CanvasEditor';
@@ -730,6 +731,21 @@ it('loads the immersive editor and stores a manually-authored text node as one c
   await waitFor(() => expect(saveCanvasDocument).toHaveBeenCalled(), { timeout: 1000 });
   await waitFor(() => expect(savedText(lastSavedDocument())).toBe('雨夜列车分镜'), { timeout: 1000 });
   expect(lastSavedDocument()?.nodes[0]).toMatchObject({ type: 'text', title: '文本' });
+});
+
+it('fits the viewport onto a newly created node', async () => {
+  // 飙哥 2026-09-14：新建节点后视口直接对到它上面，节点居中并占视口大部分。
+  const { fitBounds } = useReactFlow();
+  vi.mocked(fitBounds).mockClear();
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await addTextNodeWithBody('新建后对焦');
+  await waitFor(() => expect(fitBounds).toHaveBeenCalled());
+  const [bounds, options] = vi.mocked(fitBounds).mock.calls.at(-1)!;
+  expect(typeof bounds.x).toBe('number');
+  expect(typeof bounds.y).toBe('number');
+  expect(bounds.width).toBeGreaterThan(0);
+  expect(bounds.height).toBeGreaterThan(0);
+  expect(options).toMatchObject({ padding: 0.3 });
 });
 
 it('does not autosave during text editing and saves exactly once after exit', async () => {

@@ -80,6 +80,46 @@ it('submits the visible draft independently of retrying the immutable failed tas
   expect(screen.queryByText(/原任务输入|本轮冻结输入/)).not.toBeInTheDocument();
 });
 
+it('collapses a long prompt to a summary and expands it on click, Escape, or outside click', () => {
+  // 飙哥 2026-09-14：提示词一长面板盖住大半屏。已有内容默认只露摘要；点开才进编辑态。
+  const longPrompt = '【风格】3D CG 毛绒布偶质感 @[node:second] 真实小区实景合成\n电影级渲染\n清晨低角度侧逆光\n空气里一层薄晨霭';
+  const context = nodeContext({
+    mentionReferencesByNodeId: new Map([[imageResultNode.id, [
+      { nodeId: 'second', versionId: 'v-2', kind: 'image' as const, title: '第二张', label: '图片2' },
+    ]]]),
+  });
+  render(<CanvasGenerationComposer node={imageResultNode} draft={{ ...draft, prompt: longPrompt }} context={context} />);
+
+  const summary = screen.getByRole('button', { name: '展开提示词' });
+  expect(summary).toHaveTextContent('@图片2');
+  expect(summary).toHaveTextContent('展开');
+  expect(screen.queryByRole('combobox', { name: '提示词' })).not.toBeInTheDocument();
+
+  fireEvent.click(summary);
+  const editor = screen.getByRole('combobox', { name: '提示词' });
+  expect(editor).toHaveClass('max-h-[50vh]');
+  expect(screen.queryByRole('button', { name: '展开提示词' })).not.toBeInTheDocument();
+
+  fireEvent.keyDown(editor, { key: 'Escape' });
+  expect(screen.getByRole('button', { name: '展开提示词' })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: '展开提示词' }));
+  // 面板内点击不收；面板外 pointerdown 收。
+  fireEvent.pointerDown(screen.getByRole('combobox', { name: '提示词' }));
+  expect(screen.getByRole('combobox', { name: '提示词' })).toBeInTheDocument();
+  fireEvent.pointerDown(document.body);
+  expect(screen.getByRole('button', { name: '展开提示词' })).toBeInTheDocument();
+});
+
+it('shows the editor directly while the prompt is empty or short', () => {
+  const { rerender } = render(<CanvasGenerationComposer node={imageResultNode} draft={draft} context={nodeContext()} />);
+  expect(screen.getByRole('combobox', { name: '提示词' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '展开提示词' })).not.toBeInTheDocument();
+  rerender(<CanvasGenerationComposer node={imageResultNode} draft={{ ...draft, prompt: '雨夜列车，胶片质感' }} context={nodeContext()} />);
+  expect(screen.getByRole('combobox', { name: '提示词' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '展开提示词' })).not.toBeInTheDocument();
+});
+
 it('keeps the generation panel free of historical inputs without mutating the original job', () => {
   const prompt = '改写【文本1】\n\n参考文本：\n【文本1】\n真实文字';
   const job = { ...batchJob(), status: 'failed' as const, prompt };
