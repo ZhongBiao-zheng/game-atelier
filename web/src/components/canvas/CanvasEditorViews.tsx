@@ -3250,22 +3250,13 @@ function MediaPreview({
           }}
         />
         <div
-          className="nodrag nowheel absolute bottom-2 left-2 right-2 z-10 flex items-center gap-2 rounded-lg border border-border bg-glass p-1.5 text-foreground backdrop-blur-glass"
+          className="nodrag nowheel absolute bottom-2 left-2 right-2 z-10 flex flex-col gap-1 rounded-lg border border-border bg-glass px-2 pb-1 pt-1.5 text-foreground backdrop-blur-glass"
           onPointerDown={stopCanvasInteraction}
           onDoubleClick={stopCanvasInteraction}
           onClick={stopCanvasInteraction}
           onKeyDown={stopCanvasInteraction}
         >
-          <button
-            type="button"
-            aria-label={`${videoPlaying ? '暂停' : '播放'} ${mediaLabel}`}
-            className="grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            onClick={toggleVideoPlayback}
-          >
-            {videoPlaying
-              ? <Pause className="size-4" aria-hidden="true" />
-              : <Play className="size-4" aria-hidden="true" />}
-          </button>
+          {/* 时间线独占一行铺满（YouTube 式），按钮与时间放下一行；音量竖着弹出，不再占时间线的宽度。 */}
           <input
             type="range"
             aria-label="视频播放进度"
@@ -3273,40 +3264,59 @@ function MediaPreview({
             max={videoDuration || 0}
             step="any"
             value={Math.min(videoCurrentTime, videoDuration || 0)}
-            className="min-w-0 flex-1 accent-primary"
+            className="h-4 w-full min-w-0 accent-primary"
             onChange={event => seekVideo(Number(event.currentTarget.value))}
           />
-          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-            {formatMediaTime(videoCurrentTime)} / {formatMediaTime(videoDuration)}
-          </span>
-          <button
-            type="button"
-            aria-label={`${videoMuted ? '取消静音' : '静音'} ${mediaLabel}`}
-            className="grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            onClick={toggleVideoMuted}
-          >
-            {videoMuted || videoVolume === 0
-              ? <VolumeX className="size-4" aria-hidden="true" />
-              : <Volume2 className="size-4" aria-hidden="true" />}
-          </button>
-          <input
-            type="range"
-            aria-label="视频音量"
-            min={0}
-            max={1}
-            step={0.05}
-            value={videoMuted ? 0 : videoVolume}
-            className="w-16 accent-primary"
-            onChange={event => setVolume(Number(event.currentTarget.value))}
-          />
-          <button
-            type="button"
-            aria-label={`全屏播放 ${mediaLabel}`}
-            className="grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            onClick={showVideoFullscreen}
-          >
-            <Maximize2 className="size-4" aria-hidden="true" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-label={`${videoPlaying ? '暂停' : '播放'} ${mediaLabel}`}
+              className="grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              onClick={toggleVideoPlayback}
+            >
+              {videoPlaying
+                ? <Pause className="size-4" aria-hidden="true" />
+                : <Play className="size-4" aria-hidden="true" />}
+            </button>
+            <div className="group relative shrink-0">
+              <button
+                type="button"
+                aria-label={`${videoMuted ? '取消静音' : '静音'} ${mediaLabel}`}
+                className="grid size-7 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                onClick={toggleVideoMuted}
+              >
+                {videoMuted || videoVolume === 0
+                  ? <VolumeX className="size-4" aria-hidden="true" />
+                  : <Volume2 className="size-4" aria-hidden="true" />}
+              </button>
+              <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 pb-1 opacity-0 transition-opacity group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100">
+                <div className="grid h-24 w-7 place-items-center rounded-lg border border-border bg-glass py-2 backdrop-blur-glass">
+                  <input
+                    type="range"
+                    aria-label="视频音量"
+                    aria-orientation="vertical"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={videoMuted ? 0 : videoVolume}
+                    className="h-full w-4 accent-primary [direction:rtl] [writing-mode:vertical-lr]"
+                    onChange={event => setVolume(Number(event.currentTarget.value))}
+                  />
+                </div>
+              </div>
+            </div>
+            <span className="min-w-0 truncate px-1 text-xs tabular-nums text-muted-foreground">
+              {formatMediaTime(videoCurrentTime)} / {formatMediaTime(videoDuration)}
+            </span>
+            <button
+              type="button"
+              aria-label={`全屏播放 ${mediaLabel}`}
+              className="ml-auto grid size-7 shrink-0 place-items-center rounded-full transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              onClick={showVideoFullscreen}
+            >
+              <Maximize2 className="size-4" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </div>
     );

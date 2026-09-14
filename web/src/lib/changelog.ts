@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.4',
+    date: '2026-09-14',
+    headline: '画布视频控制栏改为时间线独占一行',
+    changes: [
+      { kind: 'feat', text: '视频节点的播放进度条铺满整行，播放 / 音量 / 时间放在下一行；音量改为悬停音量图标时竖向弹出，不再挤占进度条。' },
+    ],
+  },
+  {
     version: '5.62.3',
     date: '2026-09-14',
     headline: '上传的视频节点按真实比例占位',
