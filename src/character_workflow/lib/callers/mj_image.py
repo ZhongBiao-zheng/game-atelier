@@ -27,6 +27,7 @@ SUCCESS 后取 imageUrls[].url，并通过 GET /mj/task/{id}/image-seed 取回�
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -326,19 +327,45 @@ def _image_urls(payload: dict[str, Any]) -> list[str]:
     return [single] if isinstance(single, str) and single.startswith("http") else []
 
 
+# 产物下载的重试：这一步发生在「任务已成功、已计费」之后，CDN 抖一下就判失败等于把一次
+# 已付费的成功生成扔掉。政策与轮询一致（video_poll.is_transient_status）：5xx / 408 / 429
+# 与传输层异常退避重试，其余 4xx 当场致命。
+_DOWNLOAD_TRIES = 3
+_DOWNLOAD_BACKOFF_SECONDS = 2.0
+
+
 def _download_png(url: str, output_dir: Path, index: int, *, task_ref: str = "") -> str:
     output_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        resp = requests.get(url, headers=_IMAGE_DOWNLOAD_HEADERS, timeout=300)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        # 任务已跑完并计费，只是产物没拉下来 —— 带上 task_id 和源地址供人工找回。
-        raise MidjourneyError(
-            video_poll.with_task_ref(f"下载 Midjourney 产物失败（源地址 {url}）: {e}", task_ref)
-        ) from e
-    path = output_dir / f"mj{index}.png"
-    path.write_bytes(resp.content)
-    return str(path)
+    last_exc: Exception | None = None
+    last_status: int | None = None
+    for attempt in range(_DOWNLOAD_TRIES):
+        try:
+            resp = requests.get(url, headers=_IMAGE_DOWNLOAD_HEADERS, timeout=300)
+        except requests.RequestException as e:
+            last_exc, last_status = e, None
+        else:
+            if resp.ok:
+                path = output_dir / f"mj{index}.png"
+                path.write_bytes(resp.content)
+                return str(path)
+            last_exc, last_status = None, int(resp.status_code)
+            if not video_poll.is_transient_status(last_status):
+                break
+        if attempt < _DOWNLOAD_TRIES - 1:
+            time.sleep(_DOWNLOAD_BACKOFF_SECONDS * (attempt + 1))
+    # 任务已跑完并计费，只是产物没拉下来 —— 带上 task_id 和源地址供人工找回。
+    # 刻意不把原始异常文本拼进来：job_runner._friendly_error 按英文关键词整条替换消息
+    # （gateway / timed out / max retries…），CDN 的 "502 Bad Gateway" 会命中 gateway 那条，
+    # 把这句连同 task_id、源地址一起换成「上游过载或排队，请稍后重试」——原因是错的，
+    # 人工找回的钩子也没了。原始异常经 `raise ... from` 留在 traceback / server.log 里。
+    cause = f"产物地址返回 HTTP {last_status}" if last_status else "连不上产物地址"
+    raise MidjourneyError(
+        video_poll.with_task_ref(
+            f"Midjourney 已经出图，但产物没能下载下来（{cause}，源地址 {url}）："
+            "任务在厂商侧已成功并计费，可凭上面的标识与地址手动取回；直接重新生成会二次计费。",
+            task_ref,
+        )
+    ) from last_exc
 
 
 def _poll_task(

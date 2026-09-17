@@ -36,7 +36,7 @@ def _transient_limit(poll_interval: float) -> int:
     return max(_MIN_TRANSIENT_TRIES, ceil(_TRANSIENT_WINDOW_SECONDS / step))
 
 
-def _is_transient_status(code: int) -> bool:
+def is_transient_status(code: int) -> bool:
     """轮询期该把这个 HTTP 状态当「还没问到」还是「任务失败」。
 
     取舍与提交阶段相反：提交阶段失败没有已计费的任务要保，当场报错最省事；
@@ -116,7 +116,7 @@ def poll_responses(
             if consecutive >= limit:
                 raise error_cls(_abandon_message(task_ref, consecutive, None)) from e
             continue
-        if _is_transient_status(int(getattr(resp, "status_code", 0) or 0)):
+        if is_transient_status(int(getattr(resp, "status_code", 0) or 0)):
             consecutive += 1
             if consecutive >= limit:
                 raise error_cls(_abandon_message(task_ref, consecutive, resp.status_code))

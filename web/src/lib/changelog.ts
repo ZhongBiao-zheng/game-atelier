@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.10',
+    date: '2026-09-17',
+    headline: 'Midjourney 出图成功后产物没下下来会自动重试',
+    changes: [
+      { kind: 'fix', text: 'Midjourney 任务在厂商侧已经成功之后，下载那 4 张图时遇到图床瞬时故障会自动重试，不再一次抖动就把已经出图、已经计费的这一单判成失败。' },
+      { kind: 'fix', text: '真的下不下来时，报错改成「已经出图，但产物没能下载下来」并带上任务 ID 和图片地址，不再在句首扣一顶「上游过载或排队」的错帽子。' },
+    ],
+  },
+  {
     version: '5.62.9',
     date: '2026-09-17',
     headline: '兔子的 GPT Image 改用 1K / 2K 档位',
