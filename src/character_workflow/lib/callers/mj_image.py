@@ -244,7 +244,10 @@ def _append_flags(prompt: str, params: dict[str, Any],
         parts.append(profile_flag)
     parts.extend(_ref_flags(params, params_in))
     if params.get("mj_tile"):
-        parts.append("--tile")  # 无值开关
+        # 无值开关。niji 也吃这个 flag —— 2026-09-17 实测 `--niji 6 --ar 1:1 --tile` 正常
+        # 出图，且产物首尾列/行的差异与相邻列/行同量级（7.72 vs 7.2），是真的可四方连续。
+        # 所以不要按 botType 给它加门禁（cref / oref 那种版本门禁是另一回事，见 _REF_VERSION_SUPPORT）。
+        parts.append("--tile")
     return " ".join(parts)
 
 
