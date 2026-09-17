@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.12',
+    date: '2026-09-17',
+    headline: 'niji 7 不再提供无缝平铺开关',
+    changes: [
+      { kind: 'fix', text: 'Midjourney 选 niji 7 时收起「无缝平铺」开关：实测这个组合会被上游判成提示词格式错误，整单失败但照样计费。切到 niji 6 或 niji 5 就能用，Midjourney 主线版本不受影响。' },
+    ],
+  },
+  {
     version: '5.62.11',
     date: '2026-09-17',
     headline: '去掉 Midjourney 卡片上的 seed 提示',

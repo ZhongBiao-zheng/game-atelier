@@ -14,6 +14,7 @@ import {
   mjSummary,
   normalizeProfileInput,
   normalizeVersion,
+  tileSupported,
   versionsFor,
   type MjParams,
 } from '@/lib/mjParams';
@@ -73,10 +74,10 @@ export function MjControls({
                   selected={value.botType === item.value}
                   // 切模型要一起纠版本：两套体系的版本号不通用（--v 7 vs --niji 6），
                   // 留着旧值等于发一个不存在的组合。
-                  onClick={() => onChange({
+                  onClick={() => onChange(withTileGate({
                     botType: item.value,
                     version: normalizeVersion(item.value, value.version),
-                  })}
+                  }, value))}
                 >
                   {item.label}
                 </SegmentButton>
@@ -91,7 +92,7 @@ export function MjControls({
             <select
               aria-label="选择版本"
               value={value.version}
-              onChange={(e) => onChange({ version: e.target.value })}
+              onChange={(e) => onChange(withTileGate({ version: e.target.value }, value))}
               className="h-9 w-full rounded-lg border border-input bg-popover px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary/60"
             >
               {versionsFor(value.botType).map((item) => (
@@ -247,16 +248,26 @@ export function MjControls({
             </div>
           </Section>
 
-          <Section title="无缝平铺 tile" hint="出可四方连续的贴图">
-            <div role="listbox" aria-label="无缝平铺开关" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
-              <SegmentButton selected={value.tile} onClick={() => onChange({ tile: true })}>开启</SegmentButton>
-              <SegmentButton selected={!value.tile} onClick={() => onChange({ tile: false })}>关闭</SegmentButton>
-            </div>
-          </Section>
+          {tileSupported(value.botType, value.version) && (
+            <Section title="无缝平铺 tile" hint="出可四方连续的贴图">
+              <div role="listbox" aria-label="无缝平铺开关" className="grid h-9 grid-cols-2 rounded-lg bg-popover p-0.5">
+                <SegmentButton selected={value.tile} onClick={() => onChange({ tile: true })}>开启</SegmentButton>
+                <SegmentButton selected={!value.tile} onClick={() => onChange({ tile: false })}>关闭</SegmentButton>
+              </div>
+            </Section>
+          )}
         </div>
       </ToolbarPopover>
     </div>
   );
+}
+
+/** 换模型 / 换版本时，如果新组合不支持 tile 就把它一起关掉：控件会随之收起，留着
+ *  tile=true 等于攒一个到提交时才被后端摘掉的死开关。 */
+function withTileGate(patch: Partial<MjParams>, current: MjParams): Partial<MjParams> {
+  const botType = patch.botType ?? current.botType;
+  const version = patch.version ?? current.version;
+  return tileSupported(botType, version) ? patch : { ...patch, tile: false };
 }
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {

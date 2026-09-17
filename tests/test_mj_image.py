@@ -563,6 +563,31 @@ def test_cref_dropped_on_unsupported_version_with_warning(mj_key, tmp_path, monk
     assert any("角色参考" in w and "v6" in w for w in params["warnings"])
 
 
+def test_tile_dropped_on_niji_7_with_warning(mj_key, tmp_path, monkeypatch):
+    """niji 7 + --tile 会让整条任务 FAILURE（实测 [invalid_parameter]）：提交前摘掉并回传。"""
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    params: dict = {"bot_type": "NIJI_JOURNEY", "mj_version": "7", "mj_tile": True, "ratio": "1:1"}
+
+    _render(tmp_path, n=4, params=params)
+
+    assert "--tile" not in posted[0]["body"]["prompt"]
+    assert any("niji 7" in w for w in params["warnings"])
+
+
+@pytest.mark.parametrize("bot_type,version", [
+    ("NIJI_JOURNEY", "6"), ("NIJI_JOURNEY", "5"), ("MID_JOURNEY", "8.2"),
+])
+def test_tile_kept_on_verified_versions(mj_key, tmp_path, monkeypatch, bot_type, version):
+    """只剔除已证伪的那一个组合，别给 tile 建版本白名单把没测过的一起关掉。"""
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    params: dict = {"bot_type": bot_type, "mj_version": version, "mj_tile": True, "ratio": "1:1"}
+
+    _render(tmp_path, n=4, params=params)
+
+    assert "--tile" in posted[0]["body"]["prompt"]
+    assert not params.get("warnings")
+
+
 def test_only_sref_survives_on_v8(mj_key, tmp_path, monkeypatch):
     """v8.2 实测：--sref 正常出图，--cref / --oref 都让任务 FAILURE，所以只有 sref 活着。"""
     posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})

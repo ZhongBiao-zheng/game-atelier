@@ -153,7 +153,22 @@ _REF_VERSION_SUPPORT: dict[str, set[str]] = {
     "cref": {"6", "6.0"},
     "oref": {"7", "7.0"},
 }
+# tile 的版本门禁 —— 2026-09-17 单变量实测（同 prompt、同 --ar 1:1）：
+#   --v 8.2 + --tile ✓、--niji 6 + --tile ✓、--niji 5 + --tile ✓
+#     （三者产物的首尾列差与相邻列差同量级，是真的四方连续，不只是「上游收下了」）
+#   --niji 7 + --tile ✗ 整条任务 FAILURE：[invalid_parameter] prompt 格式错误
+#     （对照组：--niji 7 不带 tile 正常出图，所以拒的是 tile 不是 niji 7）
+# 只剔除这一个已证伪的组合，不给 tile 建版本白名单：没实测过的版本多半能用，
+# 白名单会把它们一起关掉。与 cref / oref 相反 —— 那两个是实测只有单一版本能用。
+_TILE_REJECTED: set[tuple[str, str]] = {("NIJI_JOURNEY", "7")}
+
 _REF_SLOT_LABELS = {"cref": "角色参考", "oref": "Omni 参考"}
+
+
+def _tile_rejected(params: dict[str, Any]) -> bool:
+    bot_type = str(params.get("bot_type") or "MID_JOURNEY").strip().upper()
+    version = str(params.get("mj_version") or "").strip()
+    return (bot_type, version) in _TILE_REJECTED
 _MAX_REFS_PER_SLOT = 4
 
 
@@ -244,10 +259,11 @@ def _append_flags(prompt: str, params: dict[str, Any],
         parts.append(profile_flag)
     parts.extend(_ref_flags(params, params_in))
     if params.get("mj_tile"):
-        # 无值开关。niji 也吃这个 flag —— 2026-09-17 实测 `--niji 6 --ar 1:1 --tile` 正常
-        # 出图，且产物首尾列/行的差异与相邻列/行同量级（7.72 vs 7.2），是真的可四方连续。
-        # 所以不要按 botType 给它加门禁（cref / oref 那种版本门禁是另一回事，见 _REF_VERSION_SUPPORT）。
-        parts.append("--tile")
+        if _tile_rejected(params):
+            _warn(params_in, "无缝平铺（--tile）在 niji 7 上会被上游判成提示词格式错误，"
+                             "本次已去掉；要用它请把版本切到 niji 6 或 niji 5。")
+        else:
+            parts.append("--tile")  # 无值开关
     return " ".join(parts)
 
 

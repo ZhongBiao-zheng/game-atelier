@@ -93,6 +93,14 @@ export function refSlotSupported(slot: 'cref' | 'oref', version: string): boolea
   return REF_SLOT_VERSIONS[slot].includes(version);
 }
 
+/** tile 的版本门禁 —— 与后端 mj_image._TILE_REJECTED 一致（后端是权威，会摘掉并回传
+ *  warning，这里只是提前把开关收起来，省掉一次必然失败、且照样计费的调用）。
+ *  2026-09-17 实测：v8.2 / niji 6 / niji 5 都出真无缝图，唯独 niji 7 整条任务被判
+ *  [invalid_parameter] 提示词格式错误（对照组 niji 7 不带 tile 正常）。 */
+export function tileSupported(botType: MjBotType, version: string): boolean {
+  return !(botType === 'NIJI_JOURNEY' && version === '7');
+}
+
 export const MJ_STYLIZE_STEPS = [0, 100, 250, 500, 750, 1000];
 export const MJ_CHAOS_STEPS = [0, 10, 25, 50, 100];
 export const MJ_WEIRD_STEPS = [0, 250, 1000, 3000];

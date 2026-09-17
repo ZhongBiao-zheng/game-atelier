@@ -7,6 +7,7 @@ import {
   mjSummary,
   normalizeProfileInput,
   normalizeVersion,
+  tileSupported,
   versionsFor,
   type MjParams,
 } from './mjParams';
@@ -153,5 +154,15 @@ describe('mjSummary', () => {
       tile: true,
     });
     expect(s).toBe('niji 7 · 极速 · s100 · c10 · w250 · 平铺');
+  });
+});
+
+describe('tile 的版本门禁', () => {
+  it('只挡 niji 7 —— 已实测能用的版本一个都不许被顺手关掉', () => {
+    expect(tileSupported('NIJI_JOURNEY', '7')).toBe(false);
+    expect(tileSupported('NIJI_JOURNEY', '6')).toBe(true);
+    expect(tileSupported('NIJI_JOURNEY', '5')).toBe(true);
+    expect(tileSupported('MID_JOURNEY', '8.2')).toBe(true);
+    expect(tileSupported('MID_JOURNEY', '7')).toBe(true);
   });
 });
