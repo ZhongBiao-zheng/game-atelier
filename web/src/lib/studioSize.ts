@@ -95,6 +95,14 @@ export function availableResolutions(modelId?: string | null): Resolution[] {
   return anyReachable ? ['2K', '4K'] : ['2K'];
 }
 
+/** 档位表的默认档：有 2K 就用 2K，不拿数组第一项。
+ *
+ * Tuzi 的 gpt-image 档位是 ['1K', '2K']（按从小到大排给画师看），拿第一项当默认会把所有
+ * 没显式选过档位的草稿静默降到 1K。默认档是「画师没选时该给什么」，与展示顺序无关。 */
+export function defaultResolution(resolutions: Resolution[]): Resolution {
+  return resolutions.includes('2K') ? '2K' : resolutions[0] ?? '2K';
+}
+
 export function computeStudioPixelSize(
   ratio: string,
   resolution: Resolution,

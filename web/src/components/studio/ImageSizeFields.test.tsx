@@ -74,15 +74,30 @@ describe('image size intent', () => {
   it.each(['gpt-image-2-vip', 'gpt-image-2-1k', 'nano-banana-pro'])('does not infer AUTO for Tuzi alias %s', model => {
     expect(imageControlCaps(model, 'custom', 'https://api.tu-zi.com/v1').showAutoSize).toBe(false);
   });
-  it('offers Tuzi AUTO in the shared controls and retains its custom draft', () => {
+  it('gives Tuzi gpt-image AUTO plus 1K/2K tiers instead of a pixel box', () => {
     render(<Harness baseUrl="https://api.tu-zi.com/v1" />);
-    fireEvent.change(screen.getByLabelText('输出宽度'), { target: { value: '1024' } });
+    expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '自定义' })).not.toBeInTheDocument();
+    // 档位表是 1K 在前，但没显式选过的草稿仍落在 2K，不被静默降档。
+    expect(screen.getByRole('option', { name: '2K' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(screen.getByRole('option', { name: '1K' }));
+    expect(screen.getByRole('option', { name: '1K' })).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(screen.getByRole('option', { name: 'AUTO' }));
     expect(screen.getByRole('status')).toHaveTextContent('AUTO');
-    expect(screen.queryByLabelText('输出宽度')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('option', { name: '自定义' }));
-    expect(screen.getByLabelText('输出宽度')).toHaveValue(1024);
     expect(imageControlCaps('gpt-image-2', 'custom', 'https://tu-zi.com.example/v1').showAutoSize).toBe(false);
+  });
+
+  it('keeps the pixel box on other gpt-image channels', () => {
+    const caps = imageControlCaps('gpt-image-2', 'custom', 'https://api.openai-hk.com');
+    expect(caps.showCustomSize).toBe(true);
+    expect(caps.showResolution).toBe(false);
+    const tuzi = imageControlCaps('gpt-image-2.5-flare', 'custom', 'https://api.tu-zi.com');
+    expect(tuzi.showCustomSize).toBe(false);
+    expect(tuzi.resolutions).toEqual(['1K', '2K']);
+    // seedream 在 Tuzi 上不受影响，仍是 2K/4K + 自定义像素。
+    const seedream = imageControlCaps('doubao-seedream-4-5-251128', 'custom', 'https://api.tu-zi.com');
+    expect(seedream.resolutions).toEqual(['2K', '4K']);
+    expect(seedream.showCustomSize).toBe(true);
   });
   it('prepares only the active submission rule and rejects unsupported or invalid intent', () => {
     expect(prepareImageSizeSubmission('gpt-image-2', 'openai', null,

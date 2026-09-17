@@ -2,7 +2,7 @@ import { Scan, SlidersHorizontal } from 'lucide-react';
 import type { JobParams } from '@/schema/jobs';
 import type { ImageControlCaps } from '@/lib/imageControlCaps';
 import { imageSizeError, imageSizeMode } from '@/lib/imageSizeMode';
-import { normalizeImagePixelSize, studioSizeFor, type Resolution } from '@/lib/studioSize';
+import { defaultResolution, normalizeImagePixelSize, studioSizeFor, type Resolution } from '@/lib/studioSize';
 import { RatioIcon } from './RatioIcon';
 
 export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
@@ -14,7 +14,7 @@ export function ImageSizeFields({ caps, model, baseUrl, params, onPatch }: {
 }) {
   const mode = imageSizeMode(params);
   const ratio = params.ratio ?? caps.ratios[0];
-  const resolution = (params.resolution ?? caps.resolutions[0] ?? '2K') as Resolution;
+  const resolution = (params.resolution as Resolution | undefined) ?? defaultResolution(caps.resolutions);
   const providerResolution = caps.sizeKind === 'ratio' && caps.showResolution;
   const selectedResolution = providerResolution ? params.resolution ?? 'default' : resolution;
   const size = !caps.showCustomSize ? '' : mode === 'custom' ? params.size ?? params.custom_size ?? ''

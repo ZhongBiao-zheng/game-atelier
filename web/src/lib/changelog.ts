@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.9',
+    date: '2026-09-17',
+    headline: '兔子的 GPT Image 改用 1K / 2K 档位',
+    changes: [
+      { kind: 'feat', text: '兔子渠道的 GPT Image 尺寸改成「比例 + 1K / 2K」两个档位，不再手填像素。质量决定渲染精细度和费用，尺寸由档位决定，两件事分开选。' },
+      { kind: 'fix', text: '兔子的 GPT Image 不提供 4K 档：单边最多 2880，选 4K 也拿不到真 4K，还会比按 2880 出图多花一倍费用。其他渠道的尺寸控件不变。' },
+    ],
+  },
+  {
     version: '5.62.8',
     date: '2026-09-17',
     headline: '兔子渠道的 GPT Image 恢复质量选择，2.5 支持原尺寸',

@@ -3,6 +3,7 @@ import { Boxes, Check, Settings2 } from 'lucide-react';
 
 import type { KeyView } from '@/api/keys';
 import { ImageSizeFields } from '@/components/studio/ImageSizeFields';
+import { defaultResolution } from '@/lib/studioSize';
 import { imageSizeMode, imageSizeSummary } from '@/lib/imageSizeMode';
 import {
   ToolbarPopover,
@@ -162,7 +163,7 @@ export function CanvasImageSettings({
     : Math.max(1, Math.min(4, Number(params.n) || 1));
   const summary = [
     imageSizeSummary(params),
-    caps.showResolution && imageSizeMode(params) === 'ratio' ? String(params.resolution ?? caps.resolutions[0] ?? '') : null,
+    caps.showResolution && imageSizeMode(params) === 'ratio' ? String(params.resolution ?? defaultResolution(caps.resolutions)) : null,
     caps.qualities ? QUALITY_LABELS[(params.quality as Quality) ?? caps.qualities[0]] : null,
     `${count} 张`,
   ].filter(Boolean).join(' · ');

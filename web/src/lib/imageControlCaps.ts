@@ -24,6 +24,8 @@ import { imageSizeOptions, isNanoImageSizeModel } from './imageSizeCatalog';
 
 export type Quality = 'low' | 'medium' | 'high' | 'auto';
 
+const TUZI_GPT_IMAGE_RESOLUTIONS: Resolution[] = ['1K', '2K'];
+
 export interface ImageControlCaps {
   family: ImageFamily;
   /** 比例枚举（standard 族由 PromptInput 用 1:1 + 侧比例的特殊布局，此处仍给全集）。 */
@@ -111,6 +113,10 @@ export function imageControlCaps(
   // 的档位都编码在 model id。这条限制只属于 nano-banana 族——原先写成整个 Tuzi 网关的闸门，
   // 把 gpt-image 的质量控件一起关掉了。2026-09-17 实测 Tuzi 的 gpt-image-2 / 2.5 /
   // 2.5-flare / 2.5-sunburst 都按 quality 改计费（output_tokens：low 272 / 缺省 1056 / high 4160）。
+  // Tuzi 的 gpt-image 用 1K / 2K 档位代替自定义像素框：quality 只改渲染消耗、不改尺寸，
+  // 尺寸得自己有档位可选。不给 4K —— 2026-09-17 实测单边封顶 2880（发 3840 或 4096 都回
+  // 2880²），而且超限请求比按 2880 发多花一倍 token（1483 vs 659）。
+  const tuziGptImageTiers = isTuzi && family === 'gpt-image';
   const tuziNanoWithoutQuality = isTuzi && family === 'nano-banana'
     && normalized !== 'nano-banana-pro' && normalized !== 'nano-banana-2';
   const qualities = supportsImageQuality(modelId) && !tuziNanoWithoutQuality
@@ -133,10 +139,12 @@ export function imageControlCaps(
     family,
     ...base,
     ...(isNanoImageSizeModel(modelId) ? { showResolution: false, showCustomSize: false, sizeKind: 'ratio' as const } : {}),
+    ...(tuziGptImageTiers ? { showResolution: true, showCustomSize: false } : {}),
     ratios: sizeOptions.ratios,
     showAutoSize,
     qualities,
-    resolutions: base.showResolution && !isNanoImageSizeModel(modelId) ? availableResolutions(modelId) : [],
+    resolutions: tuziGptImageTiers ? TUZI_GPT_IMAGE_RESOLUTIONS
+      : base.showResolution && !isNanoImageSizeModel(modelId) ? availableResolutions(modelId) : [],
   };
 }
 
