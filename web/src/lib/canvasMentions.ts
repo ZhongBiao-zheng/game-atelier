@@ -71,6 +71,22 @@ export function missingCanvasMentionIds(
   return [...new Set(canvasMentionNodeIds(prompt).filter(nodeId => !available.has(nodeId)))];
 }
 
+/** 一条 input 连线的源，展开成真正参与这次生成的节点 id。
+ *
+ *  分组是「素材包」：连的是包，进模型的是包里的成员，顺序即 member_node_ids。这里的顺序
+ *  同时决定提示词里的「图片1 / 图片2」编号，必须与后端 canvas_runs.canvas_input_sources
+ *  的展开逐条对齐——两边不一致的话，画师在卡片上看到的编号指的不是同一张图。 */
+export function canvasInputSourceIds(
+  nodes: readonly CanvasNode[],
+  sourceNodeId: string,
+): string[] {
+  const source = nodes.find(node => node.id === sourceNodeId);
+  if (!source) return [];
+  if (source.type !== 'group') return [sourceNodeId];
+  const ids = new Set(nodes.map(node => node.id));
+  return source.data.member_node_ids.filter(id => ids.has(id));
+}
+
 export function buildCanvasMentionReferences(
   projectId: string,
   surface: CanvasNode,
@@ -87,24 +103,23 @@ export function buildCanvasMentionReferences(
   };
   const seen = new Set<string>();
   return connections.flatMap(connection => {
-    if (
-      connection.role !== 'input'
-      || connection.target_node_id !== surface.id
-      || seen.has(connection.source_node_id)
-    ) return [];
-    seen.add(connection.source_node_id);
-    const node = nodesById.get(connection.source_node_id);
-    const material = node
-      ? canvasMaterialReference(projectId, node, contentVersions, isMentionContentNode(surface)
-        ? surface.data.batch_result : null)
-      : null;
-    if (!material) return [];
-    const index = counts[material.kind] + 1;
-    counts[material.kind] += material.inputCount ?? 1;
-    return [{
-      ...material,
-      label: `${mentionKindLabel(material.kind)}${index}${counts[material.kind] > index ? `–${counts[material.kind]}` : ''}`,
-    }];
+    if (connection.role !== 'input' || connection.target_node_id !== surface.id) return [];
+    return canvasInputSourceIds(nodes, connection.source_node_id).flatMap(sourceId => {
+      if (seen.has(sourceId)) return [];
+      seen.add(sourceId);
+      const node = nodesById.get(sourceId);
+      const material = node
+        ? canvasMaterialReference(projectId, node, contentVersions, isMentionContentNode(surface)
+          ? surface.data.batch_result : null)
+        : null;
+      if (!material) return [];
+      const index = counts[material.kind] + 1;
+      counts[material.kind] += material.inputCount ?? 1;
+      return [{
+        ...material,
+        label: `${mentionKindLabel(material.kind)}${index}${counts[material.kind] > index ? `–${counts[material.kind]}` : ''}`,
+      }];
+    });
   });
 }
 

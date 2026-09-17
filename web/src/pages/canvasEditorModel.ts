@@ -1,3 +1,4 @@
+import { canvasInputSourceIds } from '@/lib/canvasMentions';
 import { normalizeImageSizeParams } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import type { Job, JobParams } from '@/schema/jobs';
@@ -548,12 +549,8 @@ export function canvasNodeProvidesOutput(
  *  canvas_runs.canvas_input_sources 的展开逐条对齐。两端各展开一次是必然的（一端画界面、
  *  一端组请求），所以顺序判据只有一个：member_node_ids 本身，谁都不再自己排一遍。 */
 export function expandCanvasInputSource(document: CanvasDocument, sourceId: string): string[] {
-  const source = document.nodes.find(node => node.id === sourceId);
-  if (!source) return [];
-  if (source.type !== 'group') return [sourceId];
-  const byId = new Map(document.nodes.map(node => [node.id, node]));
-  return source.data.member_node_ids.filter(id => {
-    const member = byId.get(id);
+  return canvasInputSourceIds(document.nodes, sourceId).filter(id => {
+    const member = document.nodes.find(node => node.id === id);
     return Boolean(member && canvasNodeProvidesContent(member));
   });
 }

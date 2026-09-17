@@ -70,6 +70,45 @@ describe('Canvas connected mentions', () => {
       expect.objectContaining({ nodeId: processed.id, versionId: 'version-image-b', label: '图片1' }),
     ]);
   });
+  it('把分组展开成成员再编号：连的是包，卡片上要看到包里的图', () => {
+    const imageA = contentNode('image-a', 'image', 'version-image-a');
+    const imageB = contentNode('image-b', 'image', 'version-image-b');
+    const group: CanvasNode = {
+      id: 'group', title: '执行分组', type: 'group', position: { x: 0, y: 0 }, z_index: 0,
+      data: { member_node_ids: ['image-b', 'image-a'] },
+    };
+    const nodes = [imageA, imageB, group, config];
+    const connections: CanvasConnection[] = [
+      { id: 'bundle', role: 'input', source_node_id: 'group', target_node_id: config.id },
+    ];
+
+    // 编号顺序照 member_node_ids，与后端 canvas_input_sources 的展开一致：
+    // 提示词里的「图片1」必须就是画师在卡片上看到的第一张。
+    expect(buildCanvasMentionReferences('canvas-test', config, nodes, connections, versions)).toEqual([
+      expect.objectContaining({ nodeId: 'image-b', label: '图片1' }),
+      expect.objectContaining({ nodeId: 'image-a', label: '图片2' }),
+    ]);
+  });
+
+  it('同一张图既直连又在组里时只编一次号', () => {
+    const imageA = contentNode('image-a', 'image', 'version-image-a');
+    const imageB = contentNode('image-b', 'image', 'version-image-b');
+    const group: CanvasNode = {
+      id: 'group', title: '执行分组', type: 'group', position: { x: 0, y: 0 }, z_index: 0,
+      data: { member_node_ids: ['image-a', 'image-b'] },
+    };
+    const nodes = [imageA, imageB, group, config];
+    const connections: CanvasConnection[] = [
+      { id: 'direct', role: 'input', source_node_id: 'image-b', target_node_id: config.id },
+      { id: 'bundle', role: 'input', source_node_id: 'group', target_node_id: config.id },
+    ];
+
+    expect(buildCanvasMentionReferences('canvas-test', config, nodes, connections, versions)).toEqual([
+      expect.objectContaining({ nodeId: 'image-b', label: '图片1' }),
+      expect.objectContaining({ nodeId: 'image-a', label: '图片2' }),
+    ]);
+  });
+
   it('lists every canvas material with a valid current content version', () => {
     const nodes = [
       contentNode('image-a', 'image', 'version-image-a'),
