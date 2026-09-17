@@ -33,6 +33,14 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.11',
+    date: '2026-09-17',
+    headline: '去掉 Midjourney 卡片上的 seed 提示',
+    changes: [
+      { kind: 'fix', text: '取不到 Midjourney seed 时不再在卡片下方留一行提示。卡片上的提示只用来说明「参数被静默改过」，而这一条什么都没改。' },
+    ],
+  },
+  {
     version: '5.62.10',
     date: '2026-09-17',
     headline: 'Midjourney 出图成功后产物没下下来会自动重试',

@@ -359,7 +359,8 @@ def test_seed_lookup_failure_does_not_discard_paid_images(mj_key, tmp_path, monk
 
     assert len(out) == 4
     assert "mj_seed" not in params
-    assert any("seed" in warning for warning in params["warnings"])
+    # 没有改写任何参数，就不该往 warnings 里塞东西（卡片上只显示真正的静默改写）。
+    assert not params.get("warnings")
 
 
 def test_more_than_four_wanted_submits_twice(mj_key, tmp_path, monkeypatch):

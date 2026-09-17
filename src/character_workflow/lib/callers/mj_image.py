@@ -494,17 +494,14 @@ def render(
         )
         # UI 的 Midjourney 一次任务固定返回 4 张，共享同一个 seed。多任务（n>4）会有多个
         # seed，现有 JobParams 没有可准确表达它们的字段，因此只在单任务时回填。
+        # 取不到就算了，不出提示：warnings 是「后端静默改写了你的参数」的回传通道，
+        # 而这里什么都没被改写（图和参数都是画师要的那些），补不上的只是一条元数据。
         if len(task_ids) == 1 and params.get("mj_seed") in (None, ""):
             generated_seed = _fetch_image_seed(root=root, headers=headers, task_id=task_id)
             if generated_seed is not None:
                 params["mj_seed"] = generated_seed
                 if params_in is not None:
                     params_in["mj_seed"] = generated_seed
-            else:
-                _warn(
-                    params_in,
-                    "未能取回 Midjourney seed；渠道需要配置 Bot 私信 ID，图片结果不受影响",
-                )
         for url in urls:
             if on_phase and not downloading:
                 downloading = True
