@@ -33,6 +33,15 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.62.8',
+    date: '2026-09-17',
+    headline: '兔子渠道的 GPT Image 恢复质量选择，2.5 支持原尺寸',
+    changes: [
+      { kind: 'fix', text: '兔子渠道选 GPT Image 2 / 2.5 时重新出现质量档（低 / 中 / 高 / 自动）。这条限制本来只属于香蕉的固定分辨率型号，之前被写成整个渠道的开关，把 GPT Image 的质量一起关掉了。' },
+      { kind: 'feat', text: '兔子的 GPT Image 2.5、2.5 Flare、2.5 Sunburst 和 OpenAI-HK 的 2.5 Flare、2.5 Sunburst 可以选原尺寸。' },
+    ],
+  },
+  {
     version: '5.62.7',
     date: '2026-09-14',
     headline: '图片切分支持单行或单列',

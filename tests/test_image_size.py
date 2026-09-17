@@ -16,8 +16,15 @@ def _key(provider="openai", base_url=None):
     ("openai", None, "gpt-image-2", True),
     ("custom", "https://api.openai.com/v1", "gpt-image-2.5-flare", True),
     ("custom", "https://api.openai-hk.com/v1", "gpt-image-2", True),
-    ("custom", "https://api.openai-hk.com/v1", "gpt-image-2.5-flare", False),
+    # 2026-09-17 对两家网关实打 size=auto 都正常出图，从「未验证」改为放行。
+    ("custom", "https://api.openai-hk.com/v1", "gpt-image-2.5-flare", True),
+    ("custom", "https://api.openai-hk.com/v1", "gpt-image-2.5-sunburst", True),
     ("custom", "https://api.tu-zi.com/v1", "gpt-image-2", True),
+    ("custom", "https://api.tu-zi.com/v1", "gpt-image-2.5", True),
+    ("custom", "https://api.tu-zi.com/v1", "gpt-image-2.5-flare", True),
+    ("custom", "https://api.tu-zi.com/v1", "gpt-image-2.5-sunburst", True),
+    # HK 侧没验过裸 gpt-image-2.5，名单里就不该有它。
+    ("custom", "https://api.openai-hk.com/v1", "gpt-image-2.5", False),
     ("openai", "https://api.tu-zi.com/v1", "gpt-image-1.5", True),
     ("custom", "https://tu-zi.com/v1", "gpt-image-1", True),
     ("custom", "https://api.tu-zi.com/v1", "gpt-image-2-vip", False),

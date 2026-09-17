@@ -94,18 +94,26 @@ export function imageControlCaps(
   try { host = new URL(baseUrl ?? '').hostname.toLowerCase(); } catch { /* Unconfigured key. */ }
   const isHk = host === 'openai-hk.com' || host.endsWith('.openai-hk.com');
   const isTuzi = host === 'tu-zi.com' || host.endsWith('.tu-zi.com');
-  const tuziAutoModels = ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2'];
+  // 2026-09-17 实测：Tuzi / OpenAI-HK 的 gpt-image-2.5 系也接受 size=auto 并正常出图，
+  // 与 gpt-image-2 一样进白名单。名单只收实打实发过 auto 请求验证过的型号。
+  const tuziAutoModels = ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2',
+    'gpt-image-2.5', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
+  const hkAutoModels = ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2',
+    'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'];
   const openaiAutoModels = ['gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2-2026-04-21',
     'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst-2026-09-08', 'gpt-image-2.5-flare-2026-09-08'];
   const showAutoSize = ((provider === 'openai' || provider === 'custom')
       && (host === 'api.openai.com' || (!host && provider === 'openai')) && openaiAutoModels.includes(modelId ?? ''))
-    || ((provider === 'openai' || provider === 'custom') && isHk && ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2'].includes(modelId ?? ''))
+    || ((provider === 'openai' || provider === 'custom') && isHk && hkAutoModels.includes(modelId ?? ''))
     || ((provider === 'openai' || provider === 'custom') && isTuzi && tuziAutoModels.includes(modelId ?? ''))
     || (provider === 'openrouter' && host === 'openrouter.ai' && sizeOptions.ratios.includes('auto'));
-  // Tuzi 只有 Pro 与 2 的基础型号接收独立 quality；旧 2.5、HD/NT/VIP 的档位
-  // 都编码在 model id。其他网关仍沿用共享的模型能力判定。
-  const supportsTuziQuality = normalized === 'nano-banana-pro' || normalized === 'nano-banana-2';
-  const qualities = supportsImageQuality(modelId) && (!isTuzi || supportsTuziQuality)
+  // Tuzi 的 nano-banana 只有 Pro 与 2 的基础型号接收独立 quality；HD/NT/VIP 与固定 2K/4K
+  // 的档位都编码在 model id。这条限制只属于 nano-banana 族——原先写成整个 Tuzi 网关的闸门，
+  // 把 gpt-image 的质量控件一起关掉了。2026-09-17 实测 Tuzi 的 gpt-image-2 / 2.5 /
+  // 2.5-flare / 2.5-sunburst 都按 quality 改计费（output_tokens：low 272 / 缺省 1056 / high 4160）。
+  const tuziNanoWithoutQuality = isTuzi && family === 'nano-banana'
+    && normalized !== 'nano-banana-pro' && normalized !== 'nano-banana-2';
+  const qualities = supportsImageQuality(modelId) && !tuziNanoWithoutQuality
     ? base.qualities
     : null;
   // OpenRouter 的尺寸以精确型号能力目录为准，不把模型交集当全集。
