@@ -221,7 +221,13 @@ class CanvasActor(BaseModel):
 class CanvasSnapshotInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     order: int = Field(ge=0)
-    source: Literal["implicit_self", "explicit_source", "input_connection", "first_frame", "last_frame"]
+    source: Literal[
+        "implicit_self", "explicit_source", "input_connection",
+        # 由分组展开而来的成员：与直连素材一样参与编号和能力校验，但超出模型参考图上限时
+        # 先从它们里截断（整包是顺手连上的，逐条直连是画师一笔一笔连的，优先保留后者）。
+        "group_member",
+        "first_frame", "last_frame",
+    ]
     node_id: str
     version_id: str
     kind: Literal["text", "image", "video", "audio"]
@@ -1199,8 +1205,13 @@ class CanvasDocument(BaseModel):
                 raise ValueError("canvas connection cannot target itself")
             source = nodes_by_id[edge.source_node_id]
             target = nodes_by_id[edge.target_node_id]
-            if source.type == "group" or target.type == "group":
-                raise ValueError("canvas group nodes cannot be connection endpoints")
+            # 分组可以作为「素材包」整包供参考，所以它是合法的 input 源；但它永远不是终点
+            # （分组不接收内容，也不改变资产归属），也不承担首尾帧这类语义槽位——槽位要的是
+            # 一张确定的图，一个包给不出这个承诺。
+            if target.type == "group":
+                raise ValueError("canvas group nodes cannot receive connections")
+            if source.type == "group" and (edge.role != "input" or edge.slot is not None):
+                raise ValueError("canvas group can only be an unslotted input source")
             if edge.role == "material" and (source.type != "image" or target.type != "image"):
                 raise ValueError("canvas material connections require image nodes")
             if edge.role == "input":

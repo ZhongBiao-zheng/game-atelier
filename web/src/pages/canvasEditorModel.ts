@@ -536,8 +536,50 @@ export function canvasNodeHasCurrentContent(
  *  四类内容节点一视同仁之后就不再需要版本表了：canvasNodeHasCurrentContent 的第一道判据也是
  *  canvasNodeProvidesContent，`A || (A && …)` 恒等于 A。留着那个参数只会逼调用方去拿全量版本表
  *  （节点卡因此每一次按键都要重渲染，见 CanvasEditor 里 resolveVersion 的说明）。 */
-export function canvasNodeProvidesOutput(node: CanvasNode): node is CanvasContentNode | CanvasBatchMaterialNode {
-  return canvasNodeProvidesContent(node) || node.type === 'batch_material';
+export function canvasNodeProvidesOutput(
+  node: CanvasNode,
+): node is CanvasContentNode | CanvasBatchMaterialNode | CanvasGroupNode {
+  return canvasNodeProvidesContent(node) || node.type === 'batch_material' || node.type === 'group';
+}
+
+/** 一条 input 连线的源，展开成真正会被喂给模型的节点 id。
+ *
+ *  分组是「素材包」：连的是包，进模型的是包里的内容成员，顺序即 member_node_ids —— 与后端
+ *  canvas_runs.canvas_input_sources 的展开逐条对齐。两端各展开一次是必然的（一端画界面、
+ *  一端组请求），所以顺序判据只有一个：member_node_ids 本身，谁都不再自己排一遍。 */
+export function expandCanvasInputSource(document: CanvasDocument, sourceId: string): string[] {
+  const source = document.nodes.find(node => node.id === sourceId);
+  if (!source) return [];
+  if (source.type !== 'group') return [sourceId];
+  const byId = new Map(document.nodes.map(node => [node.id, node]));
+  return source.data.member_node_ids.filter(id => {
+    const member = byId.get(id);
+    return Boolean(member && canvasNodeProvidesContent(member));
+  });
+}
+
+/** 画布阅读顺序：先行后列。y 相差不到两者中较矮那个高度一半的算同一行，行内从左到右。
+ *
+ *  打组时用它写 member_node_ids —— 这个顺序就是分组当素材包时的参考编号顺序，也是超出模型
+ *  上限时从尾部截断的依据。所以它必须是画师在画布上看得见的那个顺序，不能是选中的先后。 */
+export function canvasReadingOrder(
+  nodes: readonly CanvasNode[],
+  versions: Readonly<Record<string, CanvasContentVersion>>,
+): CanvasNode[] {
+  const sized = nodes.map(node => ({ node, height: canvasNodeRenderedSize(node, versions).height }));
+  const rows: (typeof sized)[] = [];
+  for (const item of [...sized].sort((a, b) => a.node.position.y - b.node.position.y)) {
+    const row = rows[rows.length - 1];
+    const anchor = row?.[0];
+    if (anchor && item.node.position.y - anchor.node.position.y < Math.min(anchor.height, item.height) / 2) {
+      row.push(item);
+    } else {
+      rows.push([item]);
+    }
+  }
+  return rows.flatMap(row => [...row]
+    .sort((a, b) => a.node.position.x - b.node.position.x)
+    .map(item => item.node));
 }
 
 export interface CanvasPendingInput {
@@ -569,7 +611,9 @@ export function canvasPendingInputNodes(
   const nodes = new Map(document.nodes.map(node => [node.id, node]));
   for (const connection of document.connections) {
     if (connection.role !== 'input' || connection.slot) continue;
-    const source = nodes.get(connection.source_node_id);
+    // 分组按成员逐个判空：提交时服务端拒的是那个空成员，拦截文案也要指名到它。
+    for (const sourceId of expandCanvasInputSource(document, connection.source_node_id)) {
+    const source = nodes.get(sourceId);
     if (!source || canvasNodeHasCurrentContent(source, document.content_versions)) continue;
     if (source.type === 'batch_material') {
       const target = nodes.get(connection.target_node_id);
@@ -583,6 +627,7 @@ export function canvasPendingInputNodes(
     const pending = result.get(connection.target_node_id) ?? [];
     pending.push({ nodeId: source.id, title: source.title });
     result.set(connection.target_node_id, pending);
+    }
   }
   return result;
 }

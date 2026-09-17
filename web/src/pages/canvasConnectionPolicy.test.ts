@@ -9,7 +9,9 @@ import {
   canvasNodeHasCurrentContent,
   canvasNodeProvidesOutput,
   canvasNodeProvidesContent,
+  canvasPendingInputNodes,
   closestCanvasConnectionEndpoint,
+  expandCanvasInputSource,
 } from './canvasEditorModel';
 
 const contentData = {
@@ -88,6 +90,8 @@ describe('canvas connection policy', () => {
     expect(canvasNodeProvidesContent(node('config', 'config'))).toBe(false);
     expect(canvasNodeAcceptsInput(node('config', 'config'))).toBe(true);
     expect(canvasNodeAcceptsInput(node('group', 'group'))).toBe(false);
+    // 分组只出不进：它能当素材包连给生成节点，但永远不接收内容。
+    expect(canvasNodeProvidesOutput(node('group', 'group'))).toBe(true);
     expect(canvasNodeAcceptsInput(node('plugin', 'plugin'))).toBe(false);
     expect(canvasNodeHasCurrentContent(node('empty', 'text'), {})).toBe(false);
     expect(canvasNodeHasCurrentContent(node('missing', 'text', 'version-missing'), {})).toBe(false);
@@ -136,6 +140,7 @@ describe('canvas connection policy', () => {
     expect(canCreateCanvasInputConnection(current, { source: 'empty-image', target: 'target' })).toBe(true);
     expect(canCreateCanvasInputConnection(current, { source: 'empty-video', target: 'target' })).toBe(true);
     expect(canCreateCanvasInputConnection(current, { source: 'source', target: 'group' })).toBe(false);
+    expect(canCreateCanvasInputConnection(current, { source: 'group', target: 'target' })).toBe(true);
     expect(canCreateCanvasInputConnection(current, { source: 'source', target: 'plugin' })).toBe(false);
 
     current.connections.push({
@@ -170,5 +175,47 @@ describe('canvas connection policy', () => {
       allowUpload: false,
       allowConfig: true,
     });
+  });
+});
+
+function groupNode(id: string, memberIds: string[]): CanvasNode {
+  return { id, title: id, position: { x: 0, y: 0 }, z_index: 0, type: 'group', data: { member_node_ids: memberIds } };
+}
+
+function textVersion(versionId: string, text: string) {
+  return {
+    version_id: versionId, kind: 'text' as const, text,
+    created_at: '2026-09-17T00:00:00Z', sha256: '3'.repeat(64),
+    origin: { kind: 'user_edit' as const },
+  };
+}
+
+describe('分组作为素材包', () => {
+  it('把分组展开成它的内容成员，顺序照 member_node_ids 走', () => {
+    const current = document([
+      node('text-a', 'text', 'v-a'),
+      node('text-b', 'text', 'v-b'),
+      node('config', 'config'),
+      groupNode('group', ['text-b', 'text-a', 'config']),
+    ]);
+    // 配置节点不提供内容，展开时丢掉；顺序就是 member_node_ids 的顺序，不重排。
+    expect(expandCanvasInputSource(current, 'group')).toEqual(['text-b', 'text-a']);
+    expect(expandCanvasInputSource(current, 'text-a')).toEqual(['text-a']);
+    expect(expandCanvasInputSource(current, 'missing')).toEqual([]);
+  });
+
+  it('组里的空成员会被点名拦在生成按钮上，而不是等提交时整单被拒', () => {
+    const current = document([
+      node('text-a', 'text', 'v-a'),
+      node('empty-text', 'text'),
+      node('config', 'config'),
+      groupNode('group', ['text-a', 'empty-text']),
+    ]);
+    current.content_versions = { 'v-a': textVersion('v-a', 'a') };
+    current.connections.push({
+      id: 'c-group', role: 'input', source_node_id: 'group', target_node_id: 'config',
+    });
+    const pending = canvasPendingInputNodes(current).get('config') ?? [];
+    expect(pending.map(item => item.nodeId)).toEqual(['empty-text']);
   });
 });

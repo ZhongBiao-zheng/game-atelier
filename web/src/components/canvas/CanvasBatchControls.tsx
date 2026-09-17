@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from 'react';
+import { Handle, Position } from '@xyflow/react';
 import { ArrowDown, ArrowUp, CircleHelp, Layers, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -125,6 +126,12 @@ export function CanvasExecutionGroup({ node, context, selected }: {
 }) {
   return <div className="pointer-events-none h-full w-full rounded-2xl border border-dashed border-border bg-secondary/10"
     data-selected={selected ? 'true' : 'false'}>
+    {/* 分组作为素材包整包供参考：这是它唯一的连线端点（只出不进）。外层 flow 节点是
+        pointer-events:none（好让下面的连线露出来），所以这个把手要自己开回可点。 */}
+    <Handle type="source" position={Position.Right}
+      className="canvas-node-handle pointer-events-auto" aria-label="把这个分组作为素材包连出去">
+      <span className="canvas-node-handle-dot" aria-hidden="true" />
+    </Handle>
     <div className="pointer-events-auto absolute bottom-full left-0 flex items-center gap-2 pb-3 text-xs">
       <button type="button" className="rounded-md px-2 py-1 font-medium text-foreground hover:bg-secondary focus-visible:ring-2 focus-visible:ring-primary"
         onClick={() => context.selectNode(node.id)}>{node.title} · {node.data.member_node_ids.length} 节点</button>

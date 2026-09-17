@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.63.0',
+    date: '2026-09-17',
+    headline: '画布的分组可以整包当参考素材',
+    changes: [
+      { kind: 'feat', text: '框选素材按 ⌘G / Ctrl+G 打组后，从分组右侧的连接点拉一条线到生成节点，组里的图就整包成为这次生成的参考素材。' },
+      { kind: 'feat', text: '组里加图删图之后，已经连上的生成节点下次出图直接用组当下的内容，不用重新连线。' },
+      { kind: 'fix', text: '组里的图超过模型参考图上限时，按组里的顺序取前几张照常出图，并在卡片上说明用了几张；顺序就是打组时画布上的阅读顺序（先上下行、行内从左到右）。' },
+    ],
+  },
+  {
     version: '5.62.12',
     date: '2026-09-17',
     headline: 'niji 7 不再提供无缝平铺开关',
