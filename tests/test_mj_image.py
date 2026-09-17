@@ -118,6 +118,60 @@ def test_submits_polls_and_downloads_four_images(mj_key, tmp_path, monkeypatch):
     assert all(Path(p).read_bytes() == b"PNG" for p in out)
 
 
+def test_transient_cdn_failure_on_download_is_retried(mj_key, tmp_path, monkeypatch):
+    """产物下载发生在任务已成功、已计费之后：CDN 一次 502 不能把这单判死。"""
+    monkeypatch.setattr(mj.time, "sleep", lambda _s: None)
+    attempts: list[int] = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        return _FakeResp(200, {"code": 1, "description": "Submit Success", "result": "t-1"})
+
+    def fake_get(url, headers=None, timeout=None):
+        if "/fetch" in url:
+            return _FakeResp(200, _success(1))
+        if "/image-seed" in url:
+            return _FakeResp(200, {"code": 1, "result": "1"})
+        attempts.append(1)
+        return _FakeResp(502, {}) if len(attempts) == 1 else _FakeResp(200, {}, content=b"PNG")
+
+    monkeypatch.setattr(mj.requests, "post", fake_post)
+    monkeypatch.setattr(mj.requests, "get", fake_get)
+
+    out = _render(tmp_path, n=4)
+
+    assert len(attempts) == 2, "第一次 502 要重试，而不是把已计费的成功任务判失败"
+    assert Path(out[0]).read_bytes() == b"PNG"
+
+
+def test_download_failure_keeps_task_id_and_source_url(mj_key, tmp_path, monkeypatch):
+    """报错文案不能拼原始异常：拼了会让 job_runner 在句首扣一顶「上游过载」的错帽子。"""
+    from character_workflow.lib.job_runner import _error_hint
+
+    monkeypatch.setattr(mj.time, "sleep", lambda _s: None)
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        return _FakeResp(200, {"code": 1, "description": "Submit Success", "result": "t-1"})
+
+    def fake_get(url, headers=None, timeout=None):
+        if "/fetch" in url:
+            return _FakeResp(200, _success(1))
+        if "/image-seed" in url:
+            return _FakeResp(200, {"code": 1, "result": "1"})
+        return _FakeResp(502, {})
+
+    monkeypatch.setattr(mj.requests, "post", fake_post)
+    monkeypatch.setattr(mj.requests, "get", fake_get)
+
+    with pytest.raises(mj.MidjourneyError) as excinfo:
+        _render(tmp_path, n=4)
+
+    message = str(excinfo.value)
+    assert "task_id=t-1" in message
+    assert "https://cdn.mj/out1.png" in message
+    assert "已经出图" in message
+    assert _error_hint(message.lower()) is None, "不该再被冠以「上游过载或排队」那句通用提示"
+
+
 def test_downloads_with_browser_image_headers(mj_key, tmp_path, monkeypatch):
     """产物 CDN 有 Cloudflare 反爬；裸 requests 会 403，图片请求头是下载契约。"""
     seen_headers: list[dict[str, str]] = []
@@ -305,7 +359,8 @@ def test_seed_lookup_failure_does_not_discard_paid_images(mj_key, tmp_path, monk
 
     assert len(out) == 4
     assert "mj_seed" not in params
-    assert any("seed" in warning for warning in params["warnings"])
+    # 没有改写任何参数，就不该往 warnings 里塞东西（卡片上只显示真正的静默改写）。
+    assert not params.get("warnings")
 
 
 def test_more_than_four_wanted_submits_twice(mj_key, tmp_path, monkeypatch):
@@ -506,6 +561,31 @@ def test_cref_dropped_on_unsupported_version_with_warning(mj_key, tmp_path, monk
     assert "--cref" not in sent
     assert "--cw" not in sent
     assert any("角色参考" in w and "v6" in w for w in params["warnings"])
+
+
+def test_tile_dropped_on_niji_7_with_warning(mj_key, tmp_path, monkeypatch):
+    """niji 7 + --tile 会让整条任务 FAILURE（实测 [invalid_parameter]）：提交前摘掉并回传。"""
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    params: dict = {"bot_type": "NIJI_JOURNEY", "mj_version": "7", "mj_tile": True, "ratio": "1:1"}
+
+    _render(tmp_path, n=4, params=params)
+
+    assert "--tile" not in posted[0]["body"]["prompt"]
+    assert any("niji 7" in w for w in params["warnings"])
+
+
+@pytest.mark.parametrize("bot_type,version", [
+    ("NIJI_JOURNEY", "6"), ("NIJI_JOURNEY", "5"), ("MID_JOURNEY", "8.2"),
+])
+def test_tile_kept_on_verified_versions(mj_key, tmp_path, monkeypatch, bot_type, version):
+    """只剔除已证伪的那一个组合，别给 tile 建版本白名单把没测过的一起关掉。"""
+    posted = _wire(monkeypatch, submit={"code": 1, "description": "ok", "result": "t-1"})
+    params: dict = {"bot_type": bot_type, "mj_version": version, "mj_tile": True, "ratio": "1:1"}
+
+    _render(tmp_path, n=4, params=params)
+
+    assert "--tile" in posted[0]["body"]["prompt"]
+    assert not params.get("warnings")
 
 
 def test_only_sref_survives_on_v8(mj_key, tmp_path, monkeypatch):

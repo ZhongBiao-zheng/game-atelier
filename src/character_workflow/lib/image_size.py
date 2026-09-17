@@ -21,8 +21,16 @@ _OPENAI_AUTO_MODELS = frozenset({
     "gpt-image-2-2026-04-21", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare",
     "gpt-image-2.5-sunburst-2026-09-08", "gpt-image-2.5-flare-2026-09-08",
 })
-_HK_AUTO_MODELS = frozenset({"gpt-image-1", "gpt-image-1.5", "gpt-image-2"})
-_TUZI_AUTO_MODELS = frozenset({"gpt-image-1", "gpt-image-1.5", "gpt-image-2"})
+# 2026-09-17 实测：两家网关的 gpt-image-2.5 系发 size=auto 都正常出图，与 gpt-image-2 同列。
+# 名单只收真打过 auto 请求验证过的型号；HK 侧没验过裸 gpt-image-2.5，就不写进来。
+_HK_AUTO_MODELS = frozenset({
+    "gpt-image-1", "gpt-image-1.5", "gpt-image-2",
+    "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
+})
+_TUZI_AUTO_MODELS = frozenset({
+    "gpt-image-1", "gpt-image-1.5", "gpt-image-2",
+    "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
+})
 
 
 def supports_auto_image_size(provider: str, base_url: str | None, model: str) -> bool:

@@ -27,6 +27,7 @@ SUCCESS 后取 imageUrls[].url，并通过 GET /mj/task/{id}/image-seed 取回�
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -152,7 +153,22 @@ _REF_VERSION_SUPPORT: dict[str, set[str]] = {
     "cref": {"6", "6.0"},
     "oref": {"7", "7.0"},
 }
+# tile 的版本门禁 —— 2026-09-17 单变量实测（同 prompt、同 --ar 1:1）：
+#   --v 8.2 + --tile ✓、--niji 6 + --tile ✓、--niji 5 + --tile ✓
+#     （三者产物的首尾列差与相邻列差同量级，是真的四方连续，不只是「上游收下了」）
+#   --niji 7 + --tile ✗ 整条任务 FAILURE：[invalid_parameter] prompt 格式错误
+#     （对照组：--niji 7 不带 tile 正常出图，所以拒的是 tile 不是 niji 7）
+# 只剔除这一个已证伪的组合，不给 tile 建版本白名单：没实测过的版本多半能用，
+# 白名单会把它们一起关掉。与 cref / oref 相反 —— 那两个是实测只有单一版本能用。
+_TILE_REJECTED: set[tuple[str, str]] = {("NIJI_JOURNEY", "7")}
+
 _REF_SLOT_LABELS = {"cref": "角色参考", "oref": "Omni 参考"}
+
+
+def _tile_rejected(params: dict[str, Any]) -> bool:
+    bot_type = str(params.get("bot_type") or "MID_JOURNEY").strip().upper()
+    version = str(params.get("mj_version") or "").strip()
+    return (bot_type, version) in _TILE_REJECTED
 _MAX_REFS_PER_SLOT = 4
 
 
@@ -243,7 +259,11 @@ def _append_flags(prompt: str, params: dict[str, Any],
         parts.append(profile_flag)
     parts.extend(_ref_flags(params, params_in))
     if params.get("mj_tile"):
-        parts.append("--tile")  # 无值开关
+        if _tile_rejected(params):
+            _warn(params_in, "无缝平铺（--tile）在 niji 7 上会被上游判成提示词格式错误，"
+                             "本次已去掉；要用它请把版本切到 niji 6 或 niji 5。")
+        else:
+            parts.append("--tile")  # 无值开关
     return " ".join(parts)
 
 
@@ -326,19 +346,45 @@ def _image_urls(payload: dict[str, Any]) -> list[str]:
     return [single] if isinstance(single, str) and single.startswith("http") else []
 
 
+# 产物下载的重试：这一步发生在「任务已成功、已计费」之后，CDN 抖一下就判失败等于把一次
+# 已付费的成功生成扔掉。政策与轮询一致（video_poll.is_transient_status）：5xx / 408 / 429
+# 与传输层异常退避重试，其余 4xx 当场致命。
+_DOWNLOAD_TRIES = 3
+_DOWNLOAD_BACKOFF_SECONDS = 2.0
+
+
 def _download_png(url: str, output_dir: Path, index: int, *, task_ref: str = "") -> str:
     output_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        resp = requests.get(url, headers=_IMAGE_DOWNLOAD_HEADERS, timeout=300)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        # 任务已跑完并计费，只是产物没拉下来 —— 带上 task_id 和源地址供人工找回。
-        raise MidjourneyError(
-            video_poll.with_task_ref(f"下载 Midjourney 产物失败（源地址 {url}）: {e}", task_ref)
-        ) from e
-    path = output_dir / f"mj{index}.png"
-    path.write_bytes(resp.content)
-    return str(path)
+    last_exc: Exception | None = None
+    last_status: int | None = None
+    for attempt in range(_DOWNLOAD_TRIES):
+        try:
+            resp = requests.get(url, headers=_IMAGE_DOWNLOAD_HEADERS, timeout=300)
+        except requests.RequestException as e:
+            last_exc, last_status = e, None
+        else:
+            if resp.ok:
+                path = output_dir / f"mj{index}.png"
+                path.write_bytes(resp.content)
+                return str(path)
+            last_exc, last_status = None, int(resp.status_code)
+            if not video_poll.is_transient_status(last_status):
+                break
+        if attempt < _DOWNLOAD_TRIES - 1:
+            time.sleep(_DOWNLOAD_BACKOFF_SECONDS * (attempt + 1))
+    # 任务已跑完并计费，只是产物没拉下来 —— 带上 task_id 和源地址供人工找回。
+    # 刻意不把原始异常文本拼进来：job_runner._friendly_error 按英文关键词整条替换消息
+    # （gateway / timed out / max retries…），CDN 的 "502 Bad Gateway" 会命中 gateway 那条，
+    # 把这句连同 task_id、源地址一起换成「上游过载或排队，请稍后重试」——原因是错的，
+    # 人工找回的钩子也没了。原始异常经 `raise ... from` 留在 traceback / server.log 里。
+    cause = f"产物地址返回 HTTP {last_status}" if last_status else "连不上产物地址"
+    raise MidjourneyError(
+        video_poll.with_task_ref(
+            f"Midjourney 已经出图，但产物没能下载下来（{cause}，源地址 {url}）："
+            "任务在厂商侧已成功并计费，可凭上面的标识与地址手动取回；直接重新生成会二次计费。",
+            task_ref,
+        )
+    ) from last_exc
 
 
 def _poll_task(
@@ -467,17 +513,14 @@ def render(
         )
         # UI 的 Midjourney 一次任务固定返回 4 张，共享同一个 seed。多任务（n>4）会有多个
         # seed，现有 JobParams 没有可准确表达它们的字段，因此只在单任务时回填。
+        # 取不到就算了，不出提示：warnings 是「后端静默改写了你的参数」的回传通道，
+        # 而这里什么都没被改写（图和参数都是画师要的那些），补不上的只是一条元数据。
         if len(task_ids) == 1 and params.get("mj_seed") in (None, ""):
             generated_seed = _fetch_image_seed(root=root, headers=headers, task_id=task_id)
             if generated_seed is not None:
                 params["mj_seed"] = generated_seed
                 if params_in is not None:
                     params_in["mj_seed"] = generated_seed
-            else:
-                _warn(
-                    params_in,
-                    "未能取回 Midjourney seed；渠道需要配置 Bot 私信 ID，图片结果不受影响",
-                )
         for url in urls:
             if on_phase and not downloading:
                 downloading = True

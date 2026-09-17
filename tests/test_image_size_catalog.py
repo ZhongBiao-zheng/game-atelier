@@ -46,6 +46,18 @@ def test_model_normalization_matches_browser_dimensions():
     assert image_size_options("tokendance", None, "seedream-5.0-pro")["resolutions"] == ["2K"]
 
 
+def test_tuzi_gpt_image_uses_tiers_instead_of_custom_pixels():
+    """Tuzi 的 gpt-image 用 1K/2K 档位；4K 拿不到（单边封顶 2880），其他网关不受影响。"""
+    for model in ("gpt-image-2", "gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"):
+        assert image_size_options("custom", "https://api.tu-zi.com", model)["resolutions"] == ["1K", "2K"]
+    assert image_size_options("custom", "https://api.openai-hk.com", "gpt-image-2")["resolutions"] == []
+    assert image_size_options("openai", None, "gpt-image-2")["resolutions"] == []
+    assert image_size_options("custom", "https://api.tu-zi.com", "nano-banana-pro")["resolutions"] == []
+    assert image_size_options(
+        "custom", "https://api.tu-zi.com", "doubao-seedream-4-5-251128",
+    )["resolutions"] == ["2K", "4K"]
+
+
 def test_openrouter_model_specific_ratios_resolutions_and_unknown_model():
     options = image_size_options("openrouter", None, "google/gemini-3.1-flash-image-preview")
     assert "8:1" in options["ratios"]

@@ -216,6 +216,8 @@ import {
   sizeLockedToCanvasVersion,
   supportsCanvasVideoEdit,
   syncDraftLayerStackSources,
+  canvasReadingOrder,
+  expandCanvasInputSource,
 } from './canvasEditorModel';
 import { restoreCanvasRetryConfiguration } from './canvasRetryMerge';
 import { canvasLayerMaterialConnections, type CanvasLayerMaterialConnection } from './canvasLayerMaterialConnections';
@@ -338,7 +340,11 @@ function mentionNodeFragment(node: CanvasNode): string {
           node.data.generation_draft?.mode ?? null,
           node.data.batch_result ?? null,
         ]
-        : [node.id, node.title, node.type, node.type === 'batch_material' ? node.data.items : null],
+        // 分组的成员表必须进签名：它决定面板上看到哪几张参考图。漏了的话把节点拖进 / 拖出
+        // 分组只换了分组这一个对象，签名值不变，下游 memo 一个都不重算，参考位要硬刷新才更新。
+        : [node.id, node.title, node.type,
+          node.type === 'batch_material' ? node.data.items
+            : node.type === 'group' ? node.data.member_node_ids : null],
   );
   mentionNodeFragments.set(node, fragment);
   return fragment;
@@ -354,7 +360,7 @@ function mentionConnectionFragment(connection: CanvasConnection): string {
   return fragment;
 }
 
-function canvasMentionGraphSignature(document: CanvasDocument | null): string {
+export function canvasMentionGraphSignature(document: CanvasDocument | null): string {
   if (!document) return '';
   const nodes = document.nodes.map(mentionNodeFragment).join(',');
   const connections = document.connections
@@ -1209,7 +1215,8 @@ function CanvasEditorInner({
         history.current.future = [];
       }
       return {
-        ...normalizeCanvasGroups(syncDraftLayerStackSources(updater(current))),
+        // 传 current 进去当「谁动过」的判据：只有自己刚动过的节点会被分组吞进去。
+        ...normalizeCanvasGroups(syncDraftLayerStackSources(updater(current)), current),
         updated_at: new Date().toISOString(),
       };
     });
@@ -2062,7 +2069,12 @@ function CanvasEditorInner({
     const id = makeId('group');
     commit(document => ({ ...document, nodes: [...document.nodes, { id, type: 'group', title: '执行分组',
       position: { x: left, y: top }, size: { width: right - left, height: bottom - top }, z_index: 0,
-      data: { member_node_ids: members.map(node => node.id), repeat_count: 1 } }] }), true);
+      data: {
+        // 顺序按画布阅读顺序写死在数据里：它既是分组当素材包时的参考编号顺序，也是超上限时
+        // 的截断依据。存成数据而不是两端各排一次，省掉一个必然漂移的判据。
+        member_node_ids: canvasReadingOrder(members, current.content_versions).map(node => node.id),
+        repeat_count: 1,
+      } }] }), true);
     setSelectedNodeIds(new Set([id]));
   }
 
@@ -4042,7 +4054,10 @@ function CanvasEditorInner({
     for (const connection of current?.connections ?? []) {
       if (connection.role !== 'input' || connection.slot) continue;
       const sources = result.get(connection.target_node_id) ?? new Set<string>();
-      sources.add(connection.source_node_id);
+      // 连的是分组时，界面上的参考位要显示包里的成员——和真正发出去的那批素材保持一致。
+      for (const sourceId of current ? expandCanvasInputSource(current, connection.source_node_id) : []) {
+        sources.add(sourceId);
+      }
       result.set(connection.target_node_id, sources);
     }
     return result;

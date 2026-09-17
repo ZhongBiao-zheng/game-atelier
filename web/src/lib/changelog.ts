@@ -33,6 +33,61 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.63.0',
+    date: '2026-09-17',
+    headline: '画布的分组可以整包当参考素材',
+    changes: [
+      { kind: 'feat', text: '框选素材按 ⌘G / Ctrl+G 打组后，从分组右侧的连接点拉一条线到生成节点，组里的图就整包成为这次生成的参考素材。' },
+      { kind: 'feat', text: '组里加图删图之后，已经连上的生成节点下次出图直接用组当下的内容，不用重新连线。' },
+      { kind: 'fix', text: '组里的图超过模型参考图上限时，按组里的顺序取前几张照常出图，并在卡片上说明用了几张；顺序就是画布上的阅读顺序（先上下行、行内从左到右）。' },
+      { kind: 'feat', text: '把节点拖进分组框里就自动入组，拖出去就自动移出；拖动分组本身不会把路过的节点吞进来。' },
+      { kind: 'feat', text: '分组的框不再跟着成员长：创建时按当时的成员算一次，之后选中分组像调节点一样拖四角调整。把框改小、成员被挤到框外，同样算移出分组。' },
+    ],
+  },
+  {
+    version: '5.62.12',
+    date: '2026-09-17',
+    headline: 'niji 7 不再提供无缝平铺开关',
+    changes: [
+      { kind: 'fix', text: 'Midjourney 选 niji 7 时收起「无缝平铺」开关：实测这个组合会被上游判成提示词格式错误，整单失败但照样计费。切到 niji 6 或 niji 5 就能用，Midjourney 主线版本不受影响。' },
+    ],
+  },
+  {
+    version: '5.62.11',
+    date: '2026-09-17',
+    headline: '去掉 Midjourney 卡片上的 seed 提示',
+    changes: [
+      { kind: 'fix', text: '取不到 Midjourney seed 时不再在卡片下方留一行提示。卡片上的提示只用来说明「参数被静默改过」，而这一条什么都没改。' },
+    ],
+  },
+  {
+    version: '5.62.10',
+    date: '2026-09-17',
+    headline: 'Midjourney 出图成功后产物没下下来会自动重试',
+    changes: [
+      { kind: 'fix', text: 'Midjourney 任务在厂商侧已经成功之后，下载那 4 张图时遇到图床瞬时故障会自动重试，不再一次抖动就把已经出图、已经计费的这一单判成失败。' },
+      { kind: 'fix', text: '真的下不下来时，报错改成「已经出图，但产物没能下载下来」并带上任务 ID 和图片地址，不再在句首扣一顶「上游过载或排队」的错帽子。' },
+    ],
+  },
+  {
+    version: '5.62.9',
+    date: '2026-09-17',
+    headline: '兔子的 GPT Image 改用 1K / 2K 档位',
+    changes: [
+      { kind: 'feat', text: '兔子渠道的 GPT Image 尺寸改成「比例 + 1K / 2K」两个档位，不再手填像素。质量决定渲染精细度和费用，尺寸由档位决定，两件事分开选。' },
+      { kind: 'fix', text: '兔子的 GPT Image 不提供 4K 档：单边最多 2880，选 4K 也拿不到真 4K，还会比按 2880 出图多花一倍费用。其他渠道的尺寸控件不变。' },
+    ],
+  },
+  {
+    version: '5.62.8',
+    date: '2026-09-17',
+    headline: '兔子渠道的 GPT Image 恢复质量选择，2.5 支持原尺寸',
+    changes: [
+      { kind: 'fix', text: '兔子渠道选 GPT Image 2 / 2.5 时重新出现质量档（低 / 中 / 高 / 自动）。这条限制本来只属于香蕉的固定分辨率型号，之前被写成整个渠道的开关，把 GPT Image 的质量一起关掉了。' },
+      { kind: 'feat', text: '兔子的 GPT Image 2.5、2.5 Flare、2.5 Sunburst 和 OpenAI-HK 的 2.5 Flare、2.5 Sunburst 可以选原尺寸。' },
+    ],
+  },
+  {
     version: '5.62.7',
     date: '2026-09-14',
     headline: '图片切分支持单行或单列',

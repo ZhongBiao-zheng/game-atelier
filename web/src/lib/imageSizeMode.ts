@@ -1,7 +1,7 @@
 import type { JobParams } from '@/schema/jobs';
 import { imageControlCaps } from './imageControlCaps';
 import { imageFamily } from './modelFamily';
-import { normalizeImagePixelSize, studioSizeFor, type Resolution } from './studioSize';
+import { defaultResolution, normalizeImagePixelSize, studioSizeFor, type Resolution } from './studioSize';
 
 export function imageSizeMode(params: JobParams): 'auto' | 'ratio' | 'custom' {
   return params.size_mode ?? (params.size === 'auto' ? 'auto' : 'ratio');
@@ -60,7 +60,7 @@ export function normalizeImageSizeParams(
   if ((mode === 'auto' && !caps.showAutoSize) || (mode === 'custom' && !caps.showCustomSize)) mode = 'ratio';
   const ratio = caps.ratios.includes(current.ratio ?? '') ? current.ratio! : caps.ratios[0];
   const resolution = caps.resolutions.includes(current.resolution as Resolution)
-    ? current.resolution as Resolution : caps.resolutions[0] ?? '2K';
+    ? current.resolution as Resolution : defaultResolution(caps.resolutions);
   const params: JobParams = { ...retained, size_mode: mode, ratio };
   if (caps.showResolution && (provider !== 'openrouter' || caps.resolutions.includes(current.resolution as Resolution))) params.resolution = resolution;
   if (mode === 'auto') return { ...params, size: 'auto' };

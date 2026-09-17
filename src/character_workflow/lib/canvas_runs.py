@@ -709,12 +709,27 @@ def canvas_input_sources(
     else:
         if any(edge.slot is not None for edge in incoming):
             raise ValueError("当前模式不接受首尾帧连接，请调整输入连接或生成模式")
-        connected_ids = list(dict.fromkeys(edge.source_node_id for edge in incoming))
+        nodes_by_id = {node.id: node for node in document.nodes}
+        roles: dict[str, str] = {}
+        for edge in incoming:
+            source = nodes_by_id.get(edge.source_node_id)
+            if source is not None and source.type == "group":
+                # 分组整包供参考：就地展开成成员，顺序即 member_node_ids 的顺序（打组时按画布
+                # 阅读顺序写入）。展开后分组 id 不再出现在下游——编号、能力上限、批量依赖、
+                # 结果节点的回连全都按成员走，分组只是一次打包方式，不是素材本身。
+                for member_id in source.data.member_node_ids:
+                    member = nodes_by_id.get(member_id)
+                    if member is not None and member.type in {"text", "image", "video", "audio"}:
+                        roles.setdefault(member_id, "group_member")
+                continue
+            # 同一个节点既直连又在组里时按直连算：直连是画师一笔一笔连的，截断时优先保留。
+            roles[edge.source_node_id] = "input_connection"
+        connected_ids = list(roles)
         mentioned_ids = list(dict.fromkeys(_MENTION.findall(draft.prompt)))
         unknown_mentions = [node_id for node_id in mentioned_ids if node_id not in connected_ids]
         if unknown_mentions:
             raise ValueError("提示词引用了未连接到当前节点的内容")
-        candidates.extend(("input_connection", node_id) for node_id in connected_ids)
+        candidates.extend((roles[node_id], node_id) for node_id in connected_ids)
 
     return candidates
 
@@ -833,6 +848,40 @@ def _input_paths(
             raise ValueError("生成输入媒体不存在或不属于当前画布")
         paths[version.kind].append(str(target))
     return paths
+
+
+def _trim_group_images_to_limit(
+    model: ModelSpec,
+    kind: JobKind,
+    inputs: list[CanvasSnapshotInput],
+    params: JobParams,
+) -> list[CanvasSnapshotInput]:
+    """分组整包超出模型参考图上限时截断，并把这次改写回传给画师。
+
+    只截断分组展开来的图片：直连是画师一笔一笔连上去的，超了就该当场报错让他自己取舍；
+    整包是顺手连的一捆，为它把整单拒掉只会逼人回去手动拆组。从包的尾部开始丢，因为
+    member_node_ids 的顺序就是画布上的阅读顺序，前面的更可能是主素材。
+    """
+    if kind != JobKind.IMAGE:
+        return inputs
+    from character_workflow.lib.callers.openai_image import max_reference_images
+
+    limit = max_reference_images(model.id)
+    images = [item for item in inputs if item.kind == "image"]
+    if len(images) <= limit:
+        return inputs
+    droppable = [item for item in reversed(images) if item.source == "group_member"]
+    dropped: set[int] = set()
+    for item in droppable:
+        if len(images) - len(dropped) <= limit:
+            break
+        dropped.add(item.order)
+    if not dropped:
+        return inputs
+    params.warnings = [*(params.warnings or []),
+                       f"分组里的参考图超过该模型上限 {limit} 张，本次只用了前 {limit} 张。"]
+    kept = [item for item in inputs if item.order not in dropped]
+    return [item.model_copy(update={"order": index}) for index, item in enumerate(kept)]
 
 
 def _validate_input_capabilities(
@@ -1355,6 +1404,7 @@ def prepare_canvas_generation(
             normalized.pop("frame_mode", None)
         else:
             normalized["frame_mode"] = effective_frame_mode
+    inputs = _trim_group_images_to_limit(model, kind, inputs, job_params)
     _validate_input_capabilities(model, kind, inputs, job_params, key.provider)
     final_prompt = _render_final_prompt(document, draft, inputs)
     if resolve_media_paths:
