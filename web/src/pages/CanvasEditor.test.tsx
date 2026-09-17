@@ -5,7 +5,7 @@ import * as connection from '@/api/connection';
 import { useReactFlow } from '@xyflow/react';
 import { createTestEventStream } from '@/test/eventStream';
 
-import { CanvasEditor } from './CanvasEditor';
+import { CanvasEditor, canvasMentionGraphSignature } from './CanvasEditor';
 import { CanvasNodeContext, type CanvasNodeContextValue } from '@/components/canvas/CanvasEditorViews';
 import {
   createCanvasReversePromptConfig,
@@ -1938,4 +1938,30 @@ it('does not select edges swept by a box selection, only by click', async () => 
 
   fireEvent.click(screen.getByRole('button', { name: 'simulate edge selection' }));
   expect(screen.getByRole('button', { name: 'simulate edge selection' })).toHaveAttribute('data-edge-selected', 'true');
+});
+
+it('分组成员变化会改变引用图签名，参考位不用硬刷新', () => {
+  const base = {
+    schema_version: 2 as const, project_id: 'canvas-signature', revision: 1,
+    viewport: { x: 0, y: 0, zoom: 1 },
+    settings: { background: 'dots' as const, show_image_info: true, show_minimap: false },
+    updated_at: '2026-09-17T00:00:00Z', connections: [], content_versions: {},
+  };
+  const image = {
+    id: 'image', title: 'image', type: 'image' as const, position: { x: 0, y: 0 }, z_index: 0,
+    data: {
+      current_version_id: null, generation_draft: null, active_run_id: null,
+      display: { fit: 'contain' as const, free_resize: false },
+    },
+  };
+  const group = (memberIds: string[]) => ({
+    id: 'group', title: '执行分组', type: 'group' as const,
+    position: { x: 0, y: 0 }, size: { width: 400, height: 400 }, z_index: 0,
+    data: { member_node_ids: memberIds, repeat_count: 1 },
+  });
+
+  const before = canvasMentionGraphSignature({ ...base, nodes: [image, group([])] });
+  const after = canvasMentionGraphSignature({ ...base, nodes: [image, group(['image'])] });
+
+  expect(after).not.toEqual(before);
 });

@@ -340,7 +340,11 @@ function mentionNodeFragment(node: CanvasNode): string {
           node.data.generation_draft?.mode ?? null,
           node.data.batch_result ?? null,
         ]
-        : [node.id, node.title, node.type, node.type === 'batch_material' ? node.data.items : null],
+        // 分组的成员表必须进签名：它决定面板上看到哪几张参考图。漏了的话把节点拖进 / 拖出
+        // 分组只换了分组这一个对象，签名值不变，下游 memo 一个都不重算，参考位要硬刷新才更新。
+        : [node.id, node.title, node.type,
+          node.type === 'batch_material' ? node.data.items
+            : node.type === 'group' ? node.data.member_node_ids : null],
   );
   mentionNodeFragments.set(node, fragment);
   return fragment;
@@ -356,7 +360,7 @@ function mentionConnectionFragment(connection: CanvasConnection): string {
   return fragment;
 }
 
-function canvasMentionGraphSignature(document: CanvasDocument | null): string {
+export function canvasMentionGraphSignature(document: CanvasDocument | null): string {
   if (!document) return '';
   const nodes = document.nodes.map(mentionNodeFragment).join(',');
   const connections = document.connections
