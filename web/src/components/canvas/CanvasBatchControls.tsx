@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { Handle, NodeResizer, Position } from '@xyflow/react';
 import { ArrowDown, ArrowUp, CircleHelp, Layers, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -126,6 +126,24 @@ export function CanvasExecutionGroup({ node, context, selected }: {
 }) {
   return <div className="pointer-events-none h-full w-full rounded-2xl border border-dashed border-border bg-secondary/10"
     data-selected={selected ? 'true' : 'false'}>
+    {/* 分组的框由画师决定，不再跟着成员长。改框只改框：框外的成员会被摘掉，但把框拉大盖住
+        的节点不会被吞进来（要吞得去碰那个节点），见 normalizeCanvasGroups。 */}
+    <NodeResizer
+      isVisible={selected && !context.multiSelectionActive}
+      minWidth={160} minHeight={120}
+      color="var(--primary)"
+      handleClassName="canvas-node-resize-handle pointer-events-auto"
+      lineClassName="canvas-node-resize-line pointer-events-auto"
+      onResizeStart={() => context.recordHistory()}
+      onResize={(_, params) => context.previewNodeResize?.(node.id, {
+        position: { x: params.x, y: params.y },
+        size: { width: params.width, height: params.height },
+      })}
+      onResizeEnd={(_, params) => context.completeNodeResize?.(node.id, {
+        position: { x: params.x, y: params.y },
+        size: { width: params.width, height: params.height },
+      })}
+    />
     {/* 分组作为素材包整包供参考：这是它唯一的连线端点（只出不进）。外层 flow 节点是
         pointer-events:none（好让下面的连线露出来），所以这个把手要自己开回可点。 */}
     <Handle type="source" position={Position.Right}

@@ -385,3 +385,64 @@ it('lists connected-but-empty inputs per target so the button can name them befo
   ]);
   expect(canvasPendingInputNodes(null).size).toBe(0);
 });
+
+// —— 分组成员关系按空间包含决定（飙哥 2026-09-17）——
+function groupDoc(
+  groupFrame: { x: number; y: number; width: number; height: number },
+  members: string[],
+  placements: Record<string, { x: number; y: number }>,
+): CanvasDocument {
+  const nodes: CanvasNode[] = Object.entries(placements).map(([id, position]) => ({
+    id, title: id, type: 'text', position, size: { width: 100, height: 100 }, z_index: 0,
+    data: { current_version_id: null, generation_draft: null, active_run_id: null, display: { scale: 'sm' } },
+  } as CanvasNode));
+  nodes.push({
+    id: 'group', title: '执行分组', type: 'group',
+    position: { x: groupFrame.x, y: groupFrame.y },
+    size: { width: groupFrame.width, height: groupFrame.height },
+    z_index: 0, data: { member_node_ids: members, repeat_count: 1 },
+  } as CanvasNode);
+  return {
+    schema_version: 2, project_id: 'canvas-group', revision: 1,
+    viewport: { x: 0, y: 0, zoom: 1 },
+    settings: { background: 'dots', show_image_info: true, show_minimap: false },
+    updated_at: '2026-09-17T00:00:00Z',
+    nodes, connections: [], content_versions: {},
+  };
+}
+
+const frame = { x: 0, y: 0, width: 400, height: 400 };
+
+function members(document: CanvasDocument): string[] {
+  const group = document.nodes.find(node => node.type === 'group');
+  return group?.type === 'group' ? group.data.member_node_ids : [];
+}
+
+it('把节点拖进框里就入组，拖出去就移出', () => {
+  const before = groupDoc(frame, ['inside'], { inside: { x: 10, y: 10 }, outside: { x: 900, y: 10 } });
+  const moved = groupDoc(frame, ['inside'], { inside: { x: 10, y: 10 }, outside: { x: 200, y: 10 } });
+  expect(members(normalizeCanvasGroups(moved, before))).toEqual(['inside', 'outside']);
+
+  const left = groupDoc(frame, ['inside'], { inside: { x: 900, y: 10 }, outside: { x: 900, y: 200 } });
+  expect(members(normalizeCanvasGroups(left, before))).toEqual([]);
+});
+
+it('拖动分组本身不会把路过的节点吞进来', () => {
+  const before = groupDoc({ ...frame, x: 0 }, [], { bystander: { x: 500, y: 10 } });
+  // 只有分组自己动了，旁观者一动没动 —— 即使现在它完整落在框里也不入组。
+  const swept = groupDoc({ ...frame, x: 450 }, [], { bystander: { x: 500, y: 10 } });
+  expect(members(normalizeCanvasGroups(swept, before))).toEqual([]);
+});
+
+it('把框改小、成员被挤到框外时照样移出', () => {
+  const before = groupDoc(frame, ['far'], { far: { x: 250, y: 250 } });
+  const shrunk = groupDoc({ ...frame, width: 200, height: 200 }, ['far'], { far: { x: 250, y: 250 } });
+  expect(members(normalizeCanvasGroups(shrunk, before))).toEqual([]);
+});
+
+it('成员顺序按画布阅读顺序：先上下行，行内从左到右', () => {
+  const before = groupDoc(frame, ['a', 'b', 'c'], {
+    a: { x: 200, y: 0 }, b: { x: 0, y: 0 }, c: { x: 0, y: 200 },
+  });
+  expect(members(normalizeCanvasGroups(before, before))).toEqual(['b', 'a', 'c']);
+});

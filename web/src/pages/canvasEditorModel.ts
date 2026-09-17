@@ -179,25 +179,80 @@ export function canvasNodeRenderedSize(
     : node.size ?? CANVAS_DEFAULT_NODE_SIZE;
 }
 
-/** Group membership is explicit; its frame follows its members, never creates dependencies. */
-export function normalizeCanvasGroups(document: CanvasDocument): CanvasDocument {
+/** 分组的成员关系由空间包含决定，框由画师决定。
+ *
+ *  两条不对称的判据（飙哥 2026-09-17 定）：
+ *  - **移出**无条件：只要成员不再完整落在框里就摘掉，不管是把它拖走了还是把框改小了。
+ *  - **移入**只认「这个节点自己刚动过」：拖动分组时成员跟着走，路过的节点没动，不会被一路
+ *    吞进来；把框拉大盖住某个节点也不算，得去碰一下那个节点。previous 就是这个「谁动过」
+ *    的判据来源，没有 previous（首次加载 / 服务端合并）时只做移出。
+ *
+ *  成员顺序每次都按画布阅读顺序重排：成员关系已经是空间关系了，顺序再按别的来只会对不上
+ *  眼睛看到的。这个顺序就是它当素材包时的参考编号顺序。 */
+export function normalizeCanvasGroups(
+  document: CanvasDocument,
+  previous?: CanvasDocument | null,
+): CanvasDocument {
   document = syncLayerMaterials(document);
+  const versions = document.content_versions;
   const byId = new Map(document.nodes.map(node => [node.id, node]));
+  const previousById = new Map((previous?.nodes ?? []).map(node => [node.id, node]));
+  const geometryChanged = (node: CanvasNode) => {
+    if (!previous) return false;
+    const before = previousById.get(node.id);
+    if (!before) return true;
+    const after = canvasNodeRenderedSize(node, versions);
+    const size = canvasNodeRenderedSize(before, previous.content_versions);
+    return before.position.x !== node.position.x || before.position.y !== node.position.y
+      || size.width !== after.width || size.height !== after.height;
+  };
+  const contains = (group: CanvasGroupNode, node: CanvasNode) => {
+    if (!group.size) return false;
+    const { width, height } = canvasNodeRenderedSize(node, versions);
+    return node.position.x >= group.position.x
+      && node.position.y >= group.position.y
+      && node.position.x + width <= group.position.x + group.size.width
+      && node.position.y + height <= group.position.y + group.size.height;
+  };
+  // 一个节点只属于一个分组：先把现有成员占住，再让「刚动过」的节点去认领空位。
+  const claimed = new Set(document.nodes.flatMap(node => node.type === 'group'
+    ? node.data.member_node_ids : []));
+  const memberIds = new Map<string, string[]>();
+  for (const group of document.nodes) {
+    if (group.type !== 'group') continue;
+    const kept = group.data.member_node_ids.filter(id => {
+      const member = byId.get(id);
+      if (!member || member.type === 'group') return false;
+      if (!group.size) return true;  // 没有框（历史数据）时不做几何裁决，保留原成员
+      if (contains(group, member)) return true;
+      claimed.delete(id);
+      return false;
+    });
+    memberIds.set(group.id, kept);
+  }
+  for (const group of document.nodes) {
+    if (group.type !== 'group' || !group.size) continue;
+    const kept = memberIds.get(group.id) ?? [];
+    for (const node of document.nodes) {
+      if (node.type === 'group' || claimed.has(node.id)) continue;
+      if (!geometryChanged(node) || !contains(group, node)) continue;
+      claimed.add(node.id);
+      kept.push(node.id);
+    }
+    memberIds.set(group.id, kept);
+  }
   return { ...document, nodes: document.nodes.map(node => {
     if (node.type !== 'group') return node;
-    const members = node.data.member_node_ids.flatMap(id => {
-      const member = byId.get(id);
-      return member && member.type !== 'group' ? [member] : [];
-    });
-    if (!members.length) return { ...node, data: { ...node.data, member_node_ids: [] } };
-    const x = Math.min(...members.map(member => member.position.x)) - 24;
-    const y = Math.min(...members.map(member => member.position.y)) - 40;
-    const right = Math.max(...members.map(member => member.position.x + canvasNodeRenderedSize(member, document.content_versions).width)) + 24;
-    const bottom = Math.max(...members.map(member => member.position.y + canvasNodeRenderedSize(member, document.content_versions).height)) + 24;
-    const size = { width: right - x, height: bottom - y };
-    if (node.position.x === x && node.position.y === y && node.size?.width === size.width
-      && node.size?.height === size.height && members.length === node.data.member_node_ids.length) return node;
-    return { ...node, position: { x, y }, size, data: { ...node.data, member_node_ids: members.map(member => member.id) } };
+    const ordered = canvasReadingOrder(
+      (memberIds.get(node.id) ?? []).flatMap(id => {
+        const member = byId.get(id);
+        return member ? [member] : [];
+      }),
+      versions,
+    ).map(member => member.id);
+    const same = ordered.length === node.data.member_node_ids.length
+      && ordered.every((id, index) => node.data.member_node_ids[index] === id);
+    return same ? node : { ...node, data: { ...node.data, member_node_ids: ordered } };
   }) };
 }
 

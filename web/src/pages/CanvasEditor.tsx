@@ -1211,7 +1211,8 @@ function CanvasEditorInner({
         history.current.future = [];
       }
       return {
-        ...normalizeCanvasGroups(syncDraftLayerStackSources(updater(current))),
+        // 传 current 进去当「谁动过」的判据：只有自己刚动过的节点会被分组吞进去。
+        ...normalizeCanvasGroups(syncDraftLayerStackSources(updater(current)), current),
         updated_at: new Date().toISOString(),
       };
     });
