@@ -23,6 +23,7 @@ from viewer_server.routes import router
 from viewer_server.request_boundary import LocalRequestBoundary, development_origin
 from viewer_server.routes_canvas_batches import router as canvas_batches_router
 from viewer_server.sse import hub, sse_router
+from viewer_server.team_library_routes import team_library_router
 from viewer_server.watcher import start_watchers
 
 
@@ -260,6 +261,7 @@ def build_app(dist_dir: Path | None = None, *, instance_id: str | None = None) -
     app.include_router(router)
     app.include_router(connection_router(connection_store))
     app.include_router(canvas_batches_router)
+    app.include_router(team_library_router)
     app.include_router(sse_router)
     from viewer_server.workshop_routes import register_workshop_routes
 

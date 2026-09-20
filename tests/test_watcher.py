@@ -62,3 +62,37 @@ def test_start_watchers_creates_missing_characters_dir(isolated_data_root):
     finally:
         obs.stop()
         obs.join(timeout=5)
+
+
+def test_team_library_handler_rescans_and_broadcasts_diff(isolated_data_root, tmp_path, monkeypatch):
+    from character_workflow.lib import team_library as tl
+
+    events = _capture(monkeypatch)
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    mount = tl.mount_library(project_id="p1", path=str(folder), name=None, created_by="我")
+    handler = watcher.TeamLibraryHandler(mount, delay=0)
+    handler.rescan()  # 首扫：空
+    (folder / "a.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    handler.rescan()
+    assert events[-1][0] == "team-library-changed"
+    assert events[-1][1]["change"] == "added" and events[-1][1]["kind"] == "raw"
+    assert events[-1][1]["library_id"] == mount.library_id
+
+
+def test_team_library_handler_ignores_hidden_paths(isolated_data_root, tmp_path, monkeypatch):
+    """.svn / .git 里的写入不该触发重扫——活工作副本每次 update 都会改它们。"""
+    from character_workflow.lib import team_library as tl
+
+    _capture(monkeypatch)
+    folder = tmp_path / "lib"
+    (folder / ".svn" / "tmp").mkdir(parents=True)
+    mount = tl.mount_library(project_id="p1", path=str(folder), name=None, created_by="我")
+    handler = watcher.TeamLibraryHandler(mount, delay=0)
+    rescans: list[int] = []
+    monkeypatch.setattr(handler, "rescan", lambda: rescans.append(1))
+    handler.on_any_event(FileCreatedEvent(str(folder / ".svn" / "tmp" / "entries")))
+    assert handler._timer is None and rescans == []
+    handler.on_any_event(FileCreatedEvent(str(folder / "a.png")))
+    handler._timer.join(5)
+    assert rescans == [1]

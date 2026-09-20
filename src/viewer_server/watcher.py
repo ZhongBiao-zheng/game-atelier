@@ -4,6 +4,7 @@ macOS 用 FSEvents（默认）；Linux 用 inotify；显式不用 PollingObserve
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
@@ -156,6 +157,73 @@ class ImagesHandler(FileSystemEventHandler):
         hub.broadcast("image-added", {"character_id": cid, "path": str(p)})
 
 
+class TeamLibraryHandler(FileSystemEventHandler):
+    """挂载目录任何变化 → 防抖后全量重扫 → 按 diff 广播 team-library-changed。
+
+    团队库是活的 SVN / 网盘工作副本：一次 update 会发出成百上千条事件，逐条解析没有意义，
+    也测不准（FSEvents 会合并）。这里只把事件当「有动静」的信号，真值永远来自一次全量重扫。
+    """
+
+    def __init__(self, mount, delay: float = 2.0):
+        self.mount = mount
+        self.delay = delay
+        self._timer: threading.Timer | None = None
+        self._lock = threading.Lock()
+
+    def on_any_event(self, event: FileSystemEvent) -> None:
+        # .svn / .git 内部每次同步都在改写，扫描本就剪枝掉了它们，别让它们持续拖住防抖。
+        root_parts = len(Path(self.mount.mount_path).parts)
+        parts = Path(event.src_path).parts[root_parts:]
+        if any(part.startswith(".") for part in parts):
+            return
+        with self._lock:
+            if self._timer is not None:
+                self._timer.cancel()
+            self._timer = threading.Timer(self.delay, self.rescan)
+            self._timer.daemon = True
+            self._timer.start()
+
+    def rescan(self) -> None:
+        from character_workflow.lib import team_library_index as idx
+
+        before = idx.read_index(self.mount.library_id)
+        try:
+            after = idx.scan_library(self.mount)
+        except OSError:
+            # 目录被卸掉 / 网盘掉线：保留上一次索引，下次事件再试。
+            return
+        for change in idx.diff_index(before, after):
+            hub.broadcast(
+                "team-library-changed", {"library_id": self.mount.library_id, **change}
+            )
+
+
+_observer: Observer | None = None
+_team_watches: dict[str, object] = {}
+
+
+def watch_team_library(mount) -> None:
+    """热挂载：同一 library_id 只 schedule 一次（多项目共用同一目录时用第一条）。"""
+    if _observer is None or mount.library_id in _team_watches:
+        return
+    try:
+        _team_watches[mount.library_id] = _observer.schedule(
+            TeamLibraryHandler(mount), mount.mount_path, recursive=True
+        )
+    except OSError:
+        # 目录不可达不拦服务：画师下次 rescan / 重新挂载会补上。
+        pass
+
+
+def unwatch_team_library(library_id: str) -> None:
+    watch = _team_watches.pop(library_id, None)
+    if _observer is not None and watch is not None:
+        try:
+            _observer.unschedule(watch)
+        except KeyError:
+            pass
+
+
 def start_watchers() -> Observer:
     runtime = data_root.runtime_dir()
     project_root = data_root.resolve_data_root()
@@ -199,6 +267,19 @@ def start_watchers() -> Observer:
             except OSError:
                 # config 里的路径建不出来（权限/挂载盘掉了）→ 跳过该 watcher，不拦启动。
                 pass
+
+    global _observer
+    _observer = observer
+    _team_watches.clear()
+    from character_workflow.lib import team_library
+
+    try:
+        mounts = team_library.list_mounts()
+    except ValueError:
+        # 挂载表坏了只影响团队库监听，不该拦住整个服务启动（路由层会把它报成 500）。
+        mounts = []
+    for mount in mounts:
+        watch_team_library(mount)
 
     observer.start()
     return observer

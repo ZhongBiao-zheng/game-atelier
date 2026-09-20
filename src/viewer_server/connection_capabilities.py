@@ -101,6 +101,16 @@ POST /api/creation-assets/{asset_id}/use
 DELETE /api/creation-assets/{asset_id}
 GET /api/creation-assets/{asset_id}/content
 POST /api/canvas/projects/{project_id}/creation-assets/{asset_id}/insert
+GET /api/profile
+PUT /api/profile
+GET /api/team-libraries
+POST /api/team-libraries
+DELETE /api/team-libraries/{library_id}
+POST /api/team-libraries/{library_id}/rescan
+GET /api/team-libraries/{library_id}/assets
+GET /api/team-libraries/{library_id}/assets/{entry_id}/content
+GET /api/team-libraries/{library_id}/assets/{entry_id}/thumb
+POST /api/team-libraries/{library_id}/assets/{entry_id}/adopt
 POST /api/canvas/projects/{project_id}/uploads
 POST /api/canvas/projects/{project_id}/nodes/{node_id}/replace
 POST /api/canvas/projects/{project_id}/media-operations
@@ -151,6 +161,8 @@ MEDIA_ROUTES = frozenset({
     "/api/canvas/projects/{project_id}/versions/{version_id}/download",
     "/api/canvas/projects/{project_id}/nodes/{node_id}/layers/download",
     "/api/workshop/requests/{request_id}/references/{media_id}",
+    "/api/team-libraries/{library_id}/assets/{entry_id}/content",
+    "/api/team-libraries/{library_id}/assets/{entry_id}/thumb",
 })
 WORKSHOP_TOOLS = frozenset({
     "list-projects", "list-targets", "get-context", "list-models", "create-target", "read-document",

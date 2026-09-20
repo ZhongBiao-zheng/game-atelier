@@ -88,7 +88,10 @@ P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch
 当前鉴权覆盖业务 API、媒体、SSE 与内部文档；本地 cookie / Agent bearer 不得混用。
 
 SSE（`GET /events`）事件：`job-changed` `image-added` `spec-changed` `active-character-changed`
-`projects-changed` `workshop-request-changed` `canvas-document-changed`。最后一个由 watcher 盯
+`projects-changed` `workshop-request-changed` `canvas-document-changed` `team-library-changed`。
+`team-library-changed` 为 `{library_id, asset_id, kind, author, change}`，`change ∈ added | updated | removed`，
+由 watcher 盯挂载目录发出：任何变化触发 2 秒防抖后的全量重扫，再按索引 diff 逐条广播（隐藏目录不触发）。
+`canvas-document-changed` 由 watcher 盯
 `canvases/<project_id>/canvas.json` 发出（`{project_id, revision}`），浏览器保存与 Agent 经 MCP 的
 `canvas_apply_changes` / `canvas_import_media` / `canvas_run` 都会触发；画布编辑器按 `revision` 判断
 忽略 / 直接重载 / 提示「重新载入（放弃本页改动）」，保存撞 409 走同一动作。
@@ -195,6 +198,10 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `PUT /creation-assets/{asset_id}/{prompt,media}`
 `POST /creation-assets/{asset_id}/use` `DELETE /creation-assets/{asset_id}`
 `POST /canvas/projects/{id}/creation-assets/{asset_id}/insert`
+`PUT /profile`
+`POST /team-libraries` `DELETE /team-libraries/{library_id}`
+`POST /team-libraries/{library_id}/rescan`
+`POST /team-libraries/{library_id}/assets/{entry_id}/adopt`
 `POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
 `DELETE /canvas/projects/{id}`
 `PUT /canvas/ui-preferences`
@@ -218,6 +225,9 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `GET /canvas/projects/{id}/versions/{version_id}/media`
 `GET /canvas/projects/{id}/versions/{version_id}/download`
 `GET /creation-assets?kind={prompt,media}` `/creation-assets/{asset_id}/content`
+`GET /profile` `GET /team-libraries?project_id=`
+`GET /team-libraries/{library_id}/assets?kind&author&tag&q&cursor&limit`
+`GET /team-libraries/{library_id}/assets/{entry_id}/{content,thumb?w=}`
 `GET /canvas/projects/{id}/agent/sessions` `/canvas/projects/{id}/agent/sessions/{session_id}`
 `GET /canvas/ui-preferences`
 
@@ -737,6 +747,39 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 响应为 `{ paths: string[] }`。草稿落 `projects/<slug>/videos/<production>/references.json`；
 `submit-video-production` 创建一个完整视频 Job 时把这些路径复制进 `params.reference_images`。因此后续切换 canonical
 只改变候选，不会改写历史 Job。
+
+### 团队库契约
+
+团队库是画师自己用 SVN / 网盘同步的共享目录，本机只读写目录、永不执行同步命令（ADR-0020）。
+挂载记录在 `.config/team-libraries.json`，显示名在 `.config/profile.json`；库内唯一会被写入的文件是
+挂载时补的 `.atelier-library.json`（清单，含 `library_id`）。索引是本机缓存
+（`.runtime/team-libraries/<library_id>/index.json` 与 `thumbs/`），可随时删除重建，绝不写进挂载目录。
+
+| 方法 | 路径 | 请求 | 响应 |
+|---|---|---|---|
+| GET | `/profile` | — | `{display_name: string \| null}` |
+| PUT | `/profile` | `UserProfile` | `UserProfile` |
+| GET | `/team-libraries?project_id=` | — | `list[TeamLibraryView]` |
+| POST | `/team-libraries` | `TeamLibraryMountRequest` | `TeamLibraryView` 201 |
+| DELETE | `/team-libraries/{library_id}?project_id=` | — | 204 |
+| POST | `/team-libraries/{library_id}/rescan` | — | `TeamLibraryView` |
+| GET | `/team-libraries/{library_id}/assets?kind&author&tag&q&cursor&limit` | — | `TeamLibraryAssetPage` |
+| GET | `/team-libraries/{library_id}/assets/{entry_id}/content` | — | 文件 |
+| GET | `/team-libraries/{library_id}/assets/{entry_id}/thumb?w=` | — | `image/webp` |
+| POST | `/team-libraries/{library_id}/assets/{entry_id}/adopt` | `TeamAssetAdoptRequest` | `TeamAssetAdoptResponse` |
+
+错误语义按「谁能修」分：没设显示名挂不了库，409 `{code: "profile_required"}`；挂载点不存在、
+或指向 data root / 其祖先 / `.runtime` 内部，422；挂载目录当前不可达（清单读不到）503
+`{code: "library_unreachable"}`，列表仍返回该库并标 `reachable: false`；这条资产现在不能采用
+（没同步完整、内容与 `asset.json` 的 sha256 对不上、库内 `asset.json` 损坏、生成资产尚未开放）
+409 `{code: "not_adoptable"}`；库 / 资产不存在 404。`limit` 由路由夹到 `[1, 200]`，非法 `cursor` 422。
+挂载表自身损坏是磁盘状态故障，500 带上文件路径。
+
+`TeamLibraryIndexEntry.kind` 为 `generation | media | prompt | raw`：前三种来自
+`shared/<作者>/<asset_id>/asset.json`，`raw` 是库内直接摆着的媒体文件（`id` 为
+`"raw_" + sha1(relative_path)[:24]`）。`prompt` 没有文件本体，`content` 与 `thumb` 一律 404。
+采用永远是拷贝——落进个人创作资产库并记 `adopted_from`，本机对象不依赖库内路径；
+同一条团队资产重复采用返回既有资产且 `created: false`。
 
 ### 几个要当心的
 
