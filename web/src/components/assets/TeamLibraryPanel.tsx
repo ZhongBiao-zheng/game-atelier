@@ -135,6 +135,7 @@ export function TeamLibraryPanel({
       setCursor(null);
       return;
     }
+    let alive = true;
     const token = ++requestId.current;
     setError(null);
     void listTeamAssets(libraryId, {
@@ -142,16 +143,17 @@ export function TeamLibraryPanel({
       ...(search ? { q: search } : {}),
     })
       .then(page => {
-        if (token !== requestId.current) return;
+        if (!alive || token !== requestId.current) return;
         setEntries(page.entries);
         setCursor(page.next_cursor);
       })
       .catch(() => {
-        if (token !== requestId.current) return;
+        if (!alive || token !== requestId.current) return;
         setEntries([]);
         setCursor(null);
         setError('读取失败');
       });
+    return () => { alive = false; };
   }, [libraryId, search, typeFilter]);
 
   const loadMore = useCallback(() => {
@@ -180,11 +182,13 @@ export function TeamLibraryPanel({
         setLibraries(current =>
           current.map(item => (item.library_id === view.library_id ? view : item)),
         );
-        requestId.current += 1;
+        // 刷新期间用户可能切库 / 改搜索 / 换类型：迟到的扫描结果不许覆盖更新的请求。
+        const token = ++requestId.current;
         return listTeamAssets(view.library_id, {
           ...(typeFilter === 'prompt' ? { kind: 'prompt' as const } : {}),
           ...(search ? { q: search } : {}),
         }).then(page => {
+          if (token !== requestId.current) return;
           setEntries(page.entries);
           setCursor(page.next_cursor);
         });
@@ -255,8 +259,7 @@ export function TeamLibraryPanel({
         <Button
           size="icon"
           variant="ghost"
-          aria-label="重新扫描"
-          title="重新扫描挂载目录，更新可见内容"
+          aria-label="刷新"
           disabled={busy}
           onClick={rescan}
         >

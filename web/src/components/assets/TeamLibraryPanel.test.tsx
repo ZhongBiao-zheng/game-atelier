@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TeamLibraryPanel } from './TeamLibraryPanel';
 import type { TeamLibraryIndexEntry, TeamLibraryView } from '@/schema/teamLibrary';
@@ -53,6 +53,33 @@ describe('TeamLibraryPanel', () => {
     const setData = vi.fn();
     fireEvent.dragStart(card, { dataTransfer: { setData, effectAllowed: '' } });
     expect(setData).toHaveBeenCalledWith(TEAM_ASSET_DRAG_TYPE, JSON.stringify({ library_id: library.library_id, entry_id: 'raw_a' }));
+  });
+  it('drops a late rescan result when the query changed meanwhile', async () => {
+    api.listTeamLibraries.mockResolvedValue([library]);
+    api.rescanTeamLibrary.mockResolvedValue(library);
+    const stale: TeamLibraryIndexEntry = { ...raw, id: 'raw_stale', title: 'stale.png' };
+    let releaseRescanList: (page: unknown) => void = () => {};
+    api.listTeamAssets
+      .mockResolvedValueOnce({ entries: [raw], next_cursor: null })
+      .mockImplementationOnce(() => new Promise(resolve => { releaseRescanList = resolve; }))
+      .mockResolvedValue({ entries: [shared], next_cursor: null });
+
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} onOpenSettings={vi.fn()} />);
+    await screen.findByText('castle.png');
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }));
+    await waitFor(() => expect(api.listTeamAssets).toHaveBeenCalledTimes(2));
+
+    fireEvent.change(screen.getByPlaceholderText('搜索'), { target: { value: '董' } });
+    await screen.findByText('董卓 待机');
+
+    await act(async () => {
+      releaseRescanList({ entries: [stale], next_cursor: null });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByText('stale.png')).toBeNull();
+    expect(screen.getByText('董卓 待机')).toBeInTheDocument();
   });
   it('greys out incomplete entries and hides adopt', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
