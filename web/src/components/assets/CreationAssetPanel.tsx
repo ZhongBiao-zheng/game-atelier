@@ -2,8 +2,10 @@ import { promptFromAsset } from '@/lib/promptVariables';
 import {
   ChevronLeft,
   ExternalLink,
+  FileAudio,
   FileImage,
   FileText,
+  FileVideo,
   Plus,
   Search,
   Tags,
@@ -23,14 +25,14 @@ import {
 import {
   DuplicateCreationAssetError,
   createPromptCreationAsset,
-  creationAssetImageUrl,
+  creationAssetMediaUrl,
   deleteCreationAsset,
   listCreationAssets,
   markCreationAssetUsed,
-  saveImageCreationAssetFromPath,
-  updateImageCreationAsset,
+  saveMediaCreationAssetFromPath,
+  updateMediaCreationAsset,
   updatePromptCreationAsset,
-  uploadImageCreationAsset,
+  uploadMediaCreationAsset,
 } from '@/api/creationAssets';
 import { Button } from '@/components/ui/button';
 import {
@@ -55,7 +57,7 @@ import {
   type CreationAsset,
   type CreationAssetKind,
   type CreationAssetRecommendation,
-  type CreationImageAssetContent,
+  type CreationMediaAssetContent,
   type CreationPromptSegment,
 } from '@/schema/creationAssets';
 
@@ -69,7 +71,7 @@ export type CreationAssetSaveRequest =
   }
   | {
     requestId: string;
-    kind: 'image';
+    kind: 'media';
     title?: string;
     file?: File;
     sourcePath?: string;
@@ -89,7 +91,7 @@ export interface CreationAssetPanelProps {
     asset: CreationAsset,
     renderedPrompt: string,
   ) => void;
-  onUseImage: (asset: CreationAsset, content: CreationImageAssetContent) => void;
+  onUseMedia: (asset: CreationAsset, content: CreationMediaAssetContent) => void;
 }
 
 export interface CreationAssetPanelHandle {
@@ -110,7 +112,7 @@ type PromptEditorState = {
   initialSignature: string;
 };
 
-type ImageEditorState = {
+type MediaEditorState = {
   assetId?: string;
   title: string;
   tags: string;
@@ -130,7 +132,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   onSaveRequestHandled,
   onClose,
   onUsePrompt,
-  onUseImage,
+  onUseMedia,
 }: CreationAssetPanelProps, ref) {
   const [kind, setKind] = useState<CreationAssetKind>(initialKind);
   const [scope, setScope] = useState<'all' | 'project'>(projectId ? 'project' : 'all');
@@ -138,13 +140,13 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [promptEditor, setPromptEditor] = useState<PromptEditorState | null>(null);
-  const [imageEditor, setImageEditor] = useState<ImageEditorState | null>(null);
+  const [mediaEditor, setMediaEditor] = useState<MediaEditorState | null>(null);
   const [variableName, setVariableName] = useState('');
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicatePromptTitle, setDuplicatePromptTitle] = useState<string | null>(null);
-  const [duplicateImageAssetId, setDuplicateImageAssetId] = useState<string | null>(null);
+  const [duplicateMediaAssetId, setDuplicateMediaAssetId] = useState<string | null>(null);
   const [addToCanvasAfterSave, setAddToCanvasAfterSave] = useState(false);
   const [canvasPickerAsset, setCanvasPickerAsset] = useState<CreationAsset | null>(null);
   const [linkedCanvas, setLinkedCanvas] = useState<{ projectId: string; name: string } | null>(null);
@@ -167,8 +169,8 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 
   const editorDirty = promptEditor
     ? promptEditor.initialSignature !== promptEditorSignature(promptEditor)
-    : imageEditor
-      ? imageEditor.initialSignature !== imageEditorSignature(imageEditor) || Boolean(imageEditor.file)
+    : mediaEditor
+      ? mediaEditor.initialSignature !== mediaEditorSignature(mediaEditor) || Boolean(mediaEditor.file)
       : false;
 
   async function refresh(preferredId?: string) {
@@ -202,7 +204,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     setCanvasPickerAsset(null);
     setLinkedCanvas(null);
     setDuplicatePromptTitle(null);
-    setDuplicateImageAssetId(null);
+    setDuplicateMediaAssetId(null);
     setError(null);
     if (saveRequest.kind === 'prompt') {
       const template = promptTemplateFromSegments(saveRequest.segments);
@@ -216,17 +218,17 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         recommendationParams: '',
       };
       setPromptEditor({ ...draft, initialSignature: promptEditorSignature(draft) });
-      setImageEditor(null);
+      setMediaEditor(null);
     } else {
       const draft = {
-        title: saveRequest.title?.trim() || defaultImageTitle(saveRequest),
+        title: saveRequest.title?.trim() || defaultMediaTitle(saveRequest),
         tags: '',
         file: saveRequest.file,
         sourcePath: saveRequest.sourcePath,
         previewUrl: saveRequest.previewUrl,
         projectId: saveRequest.projectId,
       };
-      setImageEditor({ ...draft, initialSignature: imageEditorSignature(draft) });
+      setMediaEditor({ ...draft, initialSignature: mediaEditorSignature(draft) });
       setPromptEditor(null);
     }
     onSaveRequestHandled?.(saveRequest.requestId);
@@ -235,7 +237,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   function openAsset(asset: CreationAsset) {
     setSelectedId(asset.asset_id);
     setPromptEditor(null);
-    setImageEditor(null);
+    setMediaEditor(null);
     setCanvasPickerAsset(null);
     setLinkedCanvas(null);
     setError(null);
@@ -252,16 +254,16 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 
   function clearEditor() {
     setPromptEditor(null);
-    setImageEditor(null);
+    setMediaEditor(null);
     setSelection(null);
     setVariableName('');
     setDuplicatePromptTitle(null);
-    setDuplicateImageAssetId(null);
+    setDuplicateMediaAssetId(null);
   }
 
   function back() {
     requestLeave(() => {
-      const editingId = promptEditor?.assetId ?? imageEditor?.assetId;
+      const editingId = promptEditor?.assetId ?? mediaEditor?.assetId;
       clearEditor();
       setSelectedId(editingId ?? null);
       setCanvasPickerAsset(null);
@@ -287,7 +289,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       if (updated.content.kind === 'prompt') {
         onUsePrompt(updated, promptFromAsset(updated.content.segments));
       } else {
-        onUseImage(updated, updated.content);
+        onUseMedia(updated, updated.content);
       }
       onClose();
     } catch (caught) {
@@ -313,23 +315,23 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       recommendationParams: formatRecommendationParams(asset?.recommendation?.params),
     };
     setSelectedId(null);
-    setImageEditor(null);
+    setMediaEditor(null);
     setPromptEditor({ ...draft, initialSignature: promptEditorSignature(draft) });
     setSelection(null);
     setVariableName('');
   }
 
-  function beginImageEdit(asset: CreationAsset) {
-    if (asset.content.kind !== 'image') return;
+  function beginMediaEdit(asset: CreationAsset) {
+    if (asset.content.kind !== 'media') return;
     const draft = {
       assetId: asset.asset_id,
       title: asset.title,
       tags: asset.tags.join(', '),
-      previewUrl: creationAssetImageUrl(asset.asset_id),
+      previewUrl: creationAssetMediaUrl(asset.asset_id),
     };
     setSelectedId(null);
     setPromptEditor(null);
-    setImageEditor({ ...draft, initialSignature: imageEditorSignature(draft) });
+    setMediaEditor({ ...draft, initialSignature: mediaEditorSignature(draft) });
   }
 
   async function savePrompt(addToCanvas = false, allowDuplicate = false) {
@@ -371,40 +373,40 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     }
   }
 
-  async function saveImage(addToCanvas = false, allowExisting = false) {
-    if (!imageEditor?.title.trim()) {
-      setError('图片资产标题不能为空。');
+  async function saveMedia(addToCanvas = false, allowExisting = false) {
+    if (!mediaEditor?.title.trim()) {
+      setError('媒体资产标题不能为空。');
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const common = { title: imageEditor.title.trim(), tags: parseTags(imageEditor.tags) };
+      const common = { title: mediaEditor.title.trim(), tags: parseTags(mediaEditor.tags) };
       let saved: CreationAsset;
-      if (imageEditor.assetId) {
-        saved = await updateImageCreationAsset(imageEditor.assetId, { ...common, file: imageEditor.file });
-      } else if (imageEditor.file) {
-        saved = await uploadImageCreationAsset({
+      if (mediaEditor.assetId) {
+        saved = await updateMediaCreationAsset(mediaEditor.assetId, { ...common, file: mediaEditor.file });
+      } else if (mediaEditor.file) {
+        saved = await uploadMediaCreationAsset({
           ...common,
-          file: imageEditor.file,
+          file: mediaEditor.file,
           allowExisting,
-          projectId: imageEditor.projectId ?? projectId,
+          projectId: mediaEditor.projectId ?? projectId,
         });
-      } else if (imageEditor.sourcePath) {
-        saved = await saveImageCreationAssetFromPath({
+      } else if (mediaEditor.sourcePath) {
+        saved = await saveMediaCreationAssetFromPath({
           ...common,
-          sourcePath: imageEditor.sourcePath,
+          sourcePath: mediaEditor.sourcePath,
           allowExisting,
-          projectId: imageEditor.projectId ?? projectId,
+          projectId: mediaEditor.projectId ?? projectId,
         });
       } else {
-        throw new Error('没有可保存的图片文件。');
+        throw new Error('没有可保存的媒体文件。');
       }
-      setDuplicateImageAssetId(null);
+      setDuplicateMediaAssetId(null);
       await finishSave(saved, addToCanvas);
     } catch (caught) {
       if (caught instanceof DuplicateCreationAssetError) {
-        setDuplicateImageAssetId(caught.assetId);
+        setDuplicateMediaAssetId(caught.assetId);
         setAddToCanvasAfterSave(addToCanvas);
       } else {
         setError(errorMessage(caught));
@@ -494,8 +496,8 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
     });
   }
 
-  const isEditing = Boolean(promptEditor || imageEditor || canvasPickerAsset);
-  const editingAsset = assets.find(asset => asset.asset_id === (promptEditor?.assetId ?? imageEditor?.assetId));
+  const isEditing = Boolean(promptEditor || mediaEditor || canvasPickerAsset);
+  const editingAsset = assets.find(asset => asset.asset_id === (promptEditor?.assetId ?? mediaEditor?.assetId));
 
   return (
     <aside aria-label="创作资产" className={cn('fixed bottom-56 right-4 top-24 z-40 flex w-[min(25rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-popover shell-glow', className)}>
@@ -503,7 +505,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         <div className="flex min-w-0 items-center gap-2">
           {(selected || isEditing) && <Button variant="ghost" size="icon" aria-label="返回资产列表" onClick={back}><ChevronLeft /></Button>}
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium">{canvasPickerAsset ? '加入画布' : promptEditor?.assetId || imageEditor?.assetId ? '编辑资产' : isEditing ? '保存为创作资产' : selected?.title ?? '创作资产'}</p>
+            <p className="truncate text-sm font-medium">{canvasPickerAsset ? '加入画布' : promptEditor?.assetId || mediaEditor?.assetId ? '编辑资产' : isEditing ? '保存为创作资产' : selected?.title ?? '创作资产'}</p>
             <p className="text-xs text-muted-foreground">创作台与画布共用</p>
           </div>
         </div>
@@ -516,7 +518,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         <>
           <div className="grid grid-cols-2 border-b border-border p-1.5" role="group" aria-label="资产类型">
             <PanelTab active={kind === 'prompt'} onClick={() => setKind('prompt')}><FileText />提示词</PanelTab>
-            <PanelTab active={kind === 'image'} onClick={() => setKind('image')}><FileImage />图片</PanelTab>
+            <PanelTab active={kind === 'media'} onClick={() => setKind('media')}><FileImage />媒体</PanelTab>
           </div>
           <div className="space-y-2 border-b border-border p-3">
             {projectId && <div className="flex gap-1" role="group" aria-label="资产范围"><ScopeButton active={scope === 'all'} onClick={() => setScope('all')}>全部资产</ScopeButton><ScopeButton active={scope === 'project'} onClick={() => setScope('project')}>本项目</ScopeButton></div>}
@@ -529,7 +531,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             {visibleAssets.length ? visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} onOpen={() => openAsset(asset)} />) : (
-              <div className="grid min-h-40 place-items-center rounded-lg border border-dashed border-border px-8 text-center text-xs leading-relaxed text-muted-foreground">{normalizedQuery ? '没有匹配的创作资产' : kind === 'prompt' ? '还没有提示词资产' : '还没有图片资产'}</div>
+              <div className="grid min-h-40 place-items-center rounded-lg border border-dashed border-border px-8 text-center text-xs leading-relaxed text-muted-foreground">{normalizedQuery ? '没有匹配的创作资产' : kind === 'prompt' ? '还没有提示词资产' : '还没有媒体资产'}</div>
             )}
           </div>
         </>
@@ -557,17 +559,17 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         />
       )}
 
-      {imageEditor && (
-        <ImageEditor
-          state={imageEditor}
+      {mediaEditor && (
+        <MediaEditor
+          state={mediaEditor}
           busy={busy}
-          duplicateTitle={assets.find(asset => asset.asset_id === duplicateImageAssetId)?.title}
-          showSaveAndAddCanvas={canvasTargets.length > 0 && !imageEditor.assetId}
-          onChange={setImageEditor}
-          onSave={() => void saveImage(false)}
-          onSaveAndAddCanvas={() => void saveImage(true)}
-          onConfirmDuplicate={() => void saveImage(addToCanvasAfterSave, true)}
-          onCancelDuplicate={() => setDuplicateImageAssetId(null)}
+          duplicateTitle={assets.find(asset => asset.asset_id === duplicateMediaAssetId)?.title}
+          showSaveAndAddCanvas={canvasTargets.length > 0 && !mediaEditor.assetId}
+          onChange={setMediaEditor}
+          onSave={() => void saveMedia(false)}
+          onSaveAndAddCanvas={() => void saveMedia(true)}
+          onConfirmDuplicate={() => void saveMedia(addToCanvasAfterSave, true)}
+          onCancelDuplicate={() => setDuplicateMediaAssetId(null)}
           onDelete={editingAsset ? () => setDeleteTarget(editingAsset) : undefined}
         />
       )}
@@ -580,7 +582,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
         </div>
       )}
 
-      {selected && <AssetDetail asset={selected} busy={busy} onUse={() => void applyAsset(selected)} onEdit={() => selected.kind === 'prompt' ? beginPromptEdit(selected) : beginImageEdit(selected)} />}
+      {selected && <AssetDetail asset={selected} busy={busy} onUse={() => void applyAsset(selected)} onEdit={() => selected.kind === 'prompt' ? beginPromptEdit(selected) : beginMediaEdit(selected)} />}
 
       <Dialog open={discardOpen} onOpenChange={setDiscardOpen}>
         <DialogContent hideClose>
@@ -591,7 +593,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 
       <Dialog open={Boolean(deleteTarget)} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
         <DialogContent hideClose>
-          <DialogHeader><DialogTitle>删除“{deleteTarget?.title}”？</DialogTitle><DialogDescription>删除后不可恢复。已经使用过的提示词、图片和来源名称快照不会受影响。</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>删除“{deleteTarget?.title}”？</DialogTitle><DialogDescription>删除后不可恢复。已经使用过的提示词、媒体和来源名称快照不会受影响。</DialogDescription></DialogHeader>
           <DialogFooter><Button variant="outline" disabled={busy} onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="destructive" disabled={busy} onClick={() => void confirmDelete()}>{busy ? '删除中…' : '确认删除'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
@@ -602,7 +604,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 function AssetCard({ asset, onOpen }: { asset: CreationAsset; onOpen: () => void }) {
   return (
     <button type="button" className="mb-2 w-full rounded-lg border border-border bg-card p-3 text-left outline-none hover:bg-secondary/50 focus-visible:ring-2 focus-visible:ring-primary" onClick={onOpen}>
-      {asset.content.kind === 'image' && <img src={creationAssetImageUrl(asset.asset_id)} alt="" loading="lazy" className="mb-3 aspect-[4/3] w-full rounded-md bg-secondary object-cover" />}
+      {asset.content.kind === 'media' && <MediaPreview assetId={asset.asset_id} content={asset.content} alt="" className="mb-3 aspect-[4/3] w-full rounded-md bg-secondary object-cover" />}
       <p className="truncate text-sm font-medium">{asset.title}</p>
       {asset.content.kind === 'prompt' ? <PromptPreview segments={asset.content.segments} /> : <p className="mt-1 truncate text-xs text-muted-foreground">{asset.content.filename}</p>}
       <TagList tags={asset.tags} />
@@ -610,14 +612,43 @@ function AssetCard({ asset, onOpen }: { asset: CreationAsset; onOpen: () => void
   );
 }
 
-function ObjectUrlImage({ file }: { file: File }) {
+/** 服务端能存的媒体类型（与 creation_assets.MEDIA_SUFFIXES 一致）。 */
+const MEDIA_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm,video/quicktime,audio/mpeg,audio/wav,audio/mp4';
+
+/** 已入库的媒体：图片直接显示，视频/音频给原生播放器。 */
+function MediaPreview({ assetId, content, alt, className }: {
+  assetId: string;
+  content: CreationMediaAssetContent;
+  alt: string;
+  className: string;
+}) {
+  const src = creationAssetMediaUrl(assetId);
+  if (content.mime_type.startsWith('image/')) return <img src={src} alt={alt} loading="lazy" className={className} />;
+  if (content.mime_type.startsWith('video/')) return <video src={src} muted playsInline preload="metadata" className={className} />;
+  if (content.mime_type.startsWith('audio/')) return <audio src={src} controls preload="metadata" className="w-full" />;
+  return null;
+}
+
+/** 还没上传的本地文件：图片出缩略图，其余用图标占位。 */
+function PendingFilePreview({ file }: { file: File }) {
   const [url, setUrl] = useState('');
+  const isImage = file.type.startsWith('image/');
   useEffect(() => {
+    if (!isImage) return;
     const next = URL.createObjectURL(file);
     setUrl(next);
     return () => URL.revokeObjectURL(next);
-  }, [file]);
-  return url ? <img src={url} alt="待保存图片预览" className="aspect-square w-full rounded-lg border border-border object-contain" /> : null;
+  }, [file, isImage]);
+  if (isImage) {
+    return url ? <img src={url} alt="待保存媒体预览" className="aspect-square w-full rounded-lg border border-border object-contain" /> : null;
+  }
+  const Icon = file.type.startsWith('audio/') ? FileAudio : FileVideo;
+  return (
+    <div className="grid aspect-square w-full place-items-center gap-2 rounded-lg border border-border text-muted-foreground">
+      <Icon className="size-8" />
+      <p className="max-w-full truncate px-4 text-xs">{file.name}</p>
+    </div>
+  );
 }
 
 function PromptPreview({ segments }: { segments: CreationPromptSegment[] }) {
@@ -667,12 +698,12 @@ function PromptEditor({ state, busy, textareaRef, variableName, selection, dupli
   );
 }
 
-function ImageEditor({ state, busy, duplicateTitle, showSaveAndAddCanvas, onChange, onSave, onSaveAndAddCanvas, onConfirmDuplicate, onCancelDuplicate, onDelete }: {
-  state: ImageEditorState;
+function MediaEditor({ state, busy, duplicateTitle, showSaveAndAddCanvas, onChange, onSave, onSaveAndAddCanvas, onConfirmDuplicate, onCancelDuplicate, onDelete }: {
+  state: MediaEditorState;
   busy: boolean;
   duplicateTitle?: string;
   showSaveAndAddCanvas: boolean;
-  onChange: (state: ImageEditorState) => void;
+  onChange: (state: MediaEditorState) => void;
   onSave: () => void;
   onSaveAndAddCanvas: () => void;
   onConfirmDuplicate: () => void;
@@ -681,11 +712,11 @@ function ImageEditor({ state, busy, duplicateTitle, showSaveAndAddCanvas, onChan
 }) {
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-      {state.file ? <ObjectUrlImage file={state.file} /> : state.previewUrl || state.sourcePath ? <img src={state.previewUrl || state.sourcePath} alt="图片资产预览" className="aspect-square w-full rounded-lg border border-border object-contain" /> : null}
-      {state.assetId && <label className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-secondary focus-within:ring-1 focus-within:ring-primary"><FileImage className="size-4" />{state.file ? '重新选择图片' : '替换图片（可选）'}<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (file) onChange({ ...state, file }); event.target.value = ''; }} /></label>}
+      {state.file ? <PendingFilePreview file={state.file} /> : state.previewUrl || state.sourcePath ? <img src={state.previewUrl || state.sourcePath} alt="媒体资产预览" className="aspect-square w-full rounded-lg border border-border object-contain" /> : null}
+      {state.assetId && <label className="inline-flex h-9 w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-border px-3 text-sm font-medium hover:bg-secondary focus-within:ring-1 focus-within:ring-primary"><FileImage className="size-4" />{state.file ? '重新选择文件' : '替换文件（可选）'}<input type="file" accept={MEDIA_ACCEPT} className="sr-only" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (file) onChange({ ...state, file }); event.target.value = ''; }} /></label>}
       <Field label="标题"><Input value={state.title} onChange={event => onChange({ ...state, title: event.target.value })} /></Field>
       <TagField value={state.tags} onChange={tags => onChange({ ...state, tags })} />
-      {duplicateTitle ? <div className="rounded-lg border border-border bg-card p-3 text-xs leading-relaxed"><p>这张图片已经在资产库的“{duplicateTitle}”中。可以复用原资产，不会创建重复副本。</p><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={onCancelDuplicate}>取消</Button>{!state.assetId && <Button size="sm" disabled={busy} onClick={onConfirmDuplicate}>复用原资产</Button>}</div></div> : <div className="grid gap-2"><Button className="w-full" disabled={busy} onClick={onSave}>{busy ? '保存中…' : state.assetId ? '保存修改' : '保存图片资产'}</Button>{showSaveAndAddCanvas && <Button variant="outline" className="w-full" disabled={busy} onClick={onSaveAndAddCanvas}>保存并加入画布</Button>}</div>}
+      {duplicateTitle ? <div className="rounded-lg border border-border bg-card p-3 text-xs leading-relaxed"><p>这个文件已经在资产库的“{duplicateTitle}”中。可以复用原资产，不会创建重复副本。</p><div className="mt-3 flex justify-end gap-2"><Button variant="ghost" size="sm" onClick={onCancelDuplicate}>取消</Button>{!state.assetId && <Button size="sm" disabled={busy} onClick={onConfirmDuplicate}>复用原资产</Button>}</div></div> : <div className="grid gap-2"><Button className="w-full" disabled={busy} onClick={onSave}>{busy ? '保存中…' : state.assetId ? '保存修改' : '保存媒体资产'}</Button>{showSaveAndAddCanvas && <Button variant="outline" className="w-full" disabled={busy} onClick={onSaveAndAddCanvas}>保存并加入画布</Button>}</div>}
       {onDelete && <DeleteAssetButton disabled={busy} onClick={onDelete} />}
     </div>
   );
@@ -703,7 +734,7 @@ function AssetDetail({ asset, busy, onUse, onEdit }: {
 }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto p-4">
-      {asset.content.kind === 'image' && <img src={creationAssetImageUrl(asset.asset_id)} alt={asset.title} className="aspect-square w-full rounded-lg border border-border bg-secondary object-contain" />}
+      {asset.content.kind === 'media' && <MediaPreview assetId={asset.asset_id} content={asset.content} alt={asset.title} className="aspect-square w-full rounded-lg border border-border bg-secondary object-contain" />}
       <h2 className="mt-3 text-base font-medium">{asset.title}</h2>
       {asset.content.kind === 'prompt' && <PromptPreview segments={asset.content.segments} />}
       <TagList tags={asset.tags} />
@@ -774,7 +805,7 @@ function recommendationSummary(recommendation: CreationAssetRecommendation): str
   return [recommendation.model, ...params].join(' · ');
 }
 
-function imageEditorSignature(state: Pick<ImageEditorState, 'title' | 'tags'>): string {
+function mediaEditorSignature(state: Pick<MediaEditorState, 'title' | 'tags'>): string {
   return JSON.stringify({ title: state.title, tags: state.tags });
 }
 
@@ -782,8 +813,8 @@ function defaultPromptTitle(text: string): string {
   return text.trim().replace(/\s+/g, ' ').slice(0, 24) || '未命名提示词';
 }
 
-function defaultImageTitle(request: Extract<CreationAssetSaveRequest, { kind: 'image' }>): string {
-  return request.file?.name.replace(/\.[^.]+$/, '') || request.sourcePath?.split('/').pop()?.replace(/\.[^.]+$/, '') || '未命名图片';
+function defaultMediaTitle(request: Extract<CreationAssetSaveRequest, { kind: 'media' }>): string {
+  return request.file?.name.replace(/\.[^.]+$/, '') || request.sourcePath?.split('/').pop()?.replace(/\.[^.]+$/, '') || '未命名媒体';
 }
 
 function parseTags(value: string): string[] {

@@ -58,7 +58,7 @@ describe('CreationAssetPanel', () => {
     mocks.markUsed.mockResolvedValue(promptAsset);
     const onUsePrompt = vi.fn();
     const onClose = vi.fn();
-    render(<CreationAssetPanel onClose={onClose} onUsePrompt={onUsePrompt} onUseImage={vi.fn()} />);
+    render(<CreationAssetPanel onClose={onClose} onUsePrompt={onUsePrompt} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
     fireEvent.click(screen.getByRole('button', { name: '使用' }));
@@ -85,7 +85,7 @@ describe('CreationAssetPanel', () => {
     mocks.list.mockResolvedValue({ revision: 1, assets: [repeated] });
     mocks.markUsed.mockResolvedValue(repeated);
     const onUsePrompt = vi.fn();
-    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={onUsePrompt} onUseImage={vi.fn()} />);
+    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={onUsePrompt} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
     expect(screen.queryByPlaceholderText('白犬')).not.toBeInTheDocument();
@@ -100,7 +100,7 @@ describe('CreationAssetPanel', () => {
   it('warns about an identical prompt but still allows an explicit duplicate save', async () => {
     mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
     mocks.createPrompt.mockResolvedValue({ ...promptAsset, asset_id: 'asset-copy' });
-    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
+    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: '新建提示词资产' }));
     fireEvent.change(screen.getByPlaceholderText('给这条提示词起个名字'), { target: { value: '副本' } });
@@ -119,7 +119,7 @@ describe('CreationAssetPanel', () => {
         ? { revision: 1, assets: [promptAsset] }
         : { revision: 1, assets: [] }
     ));
-    render(<CreationAssetPanel projectId="canvas-demo-1234" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
+    render(<CreationAssetPanel projectId="canvas-demo-1234" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: '新建提示词资产' }));
     fireEvent.change(screen.getByPlaceholderText('给这条提示词起个名字'), { target: { value: '项目内副本' } });
@@ -136,7 +136,7 @@ describe('CreationAssetPanel', () => {
       .mockResolvedValueOnce({ revision: 1, assets: [promptAsset] })
       .mockResolvedValue({ revision: 2, assets: [updated] });
     mocks.updatePrompt.mockResolvedValue(updated);
-    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
+    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
     fireEvent.click(screen.getByRole('button', { name: '编辑' }));
@@ -157,7 +157,7 @@ describe('CreationAssetPanel', () => {
       .mockResolvedValueOnce({ revision: 1, assets: [promptAsset] })
       .mockResolvedValue({ revision: 2, assets: [updated] });
     mocks.updatePrompt.mockResolvedValue(updated);
-    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
+    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
     fireEvent.click(screen.getByRole('button', { name: '编辑' }));
@@ -174,7 +174,7 @@ describe('CreationAssetPanel', () => {
 
   it('asks before discarding a dirty edit', async () => {
     mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
-    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
+    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
     fireEvent.click(screen.getByRole('button', { name: '编辑' }));
@@ -190,7 +190,7 @@ describe('CreationAssetPanel', () => {
     mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
     const onClose = vi.fn();
     const panelRef = createRef<CreationAssetPanelHandle>();
-    render(<CreationAssetPanel ref={panelRef} onClose={onClose} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
+    render(<CreationAssetPanel ref={panelRef} onClose={onClose} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
     fireEvent.click(screen.getByRole('button', { name: '编辑' }));
@@ -208,7 +208,7 @@ describe('CreationAssetPanel', () => {
       .mockResolvedValueOnce({ revision: 1, assets: [promptAsset] })
       .mockResolvedValue({ revision: 2, assets: [] });
     mocks.deleteAsset.mockResolvedValue(undefined);
-    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseImage={vi.fn()} />);
+    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
     fireEvent.click(screen.getByRole('button', { name: '编辑' }));

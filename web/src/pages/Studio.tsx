@@ -33,9 +33,9 @@ import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 import { readStudioDraft, writeStudioDraft } from './studioDraft';
-import { creationAssetImageUrl } from '@/api/creationAssets';
+import { creationAssetMediaUrl } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
-import type { CreationAsset, CreationImageAssetContent } from '@/schema/creationAssets';
+import type { CreationAsset, CreationMediaAssetContent } from '@/schema/creationAssets';
 import type { CanvasProject } from '@/schema/canvas';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
@@ -129,7 +129,7 @@ function StudioFull() {
   const [mjRefs, setMjRefs] = useState<MjRefSlots>(draft?.mjRefs ?? EMPTY_MJ_REFS);
   const [promptText, setPromptText] = useState(draft?.promptText ?? '');
   const [assetPanelOpen, setAssetPanelOpen] = useState(false);
-  const [assetPanelKind, setAssetPanelKind] = useState<'prompt' | 'image'>('prompt');
+  const [assetPanelKind, setAssetPanelKind] = useState<'prompt' | 'media'>('prompt');
   const [assetSaveRequest, setAssetSaveRequest] = useState<CreationAssetSaveRequest | null>(null);
   const assetPanelRef = useRef<CreationAssetPanelHandle>(null);
   const [canvasTargets, setCanvasTargets] = useState<CanvasProject[]>([]);
@@ -742,11 +742,11 @@ function StudioFull() {
             });
           }}
           onSaveImageAsset={(path, config) => {
-            setAssetPanelKind('image');
+            setAssetPanelKind('media');
             setAssetPanelOpen(true);
             setAssetSaveRequest({
               requestId: crypto.randomUUID(),
-              kind: 'image',
+              kind: 'media',
               title: config.prompt.trim().replace(/\s+/g, ' ').slice(0, 24),
               sourcePath: path,
               previewUrl: mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`),
@@ -801,9 +801,9 @@ function StudioFull() {
             });
           }}
           onSaveReferenceImage={(file) => {
-            setAssetPanelKind('image');
+            setAssetPanelKind('media');
             setAssetPanelOpen(true);
-            setAssetSaveRequest({ requestId: crypto.randomUUID(), kind: 'image', file });
+            setAssetSaveRequest({ requestId: crypto.randomUUID(), kind: 'media', file });
           }}
           providers={keys}
           providerAlias={providerAlias}
@@ -892,17 +892,17 @@ function StudioFull() {
             setPromptAssetSourceTitle(asset.title);
             setClickPinned(true);
           }}
-          onUseImage={(asset, content) => { void addCreationAssetReference(asset, content); }}
+          onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
         />
       )}
       <StudioArchiveDialog request={archiveRequest} onClose={() => setArchiveRequest(null)} />
     </div>
   );
 
-  async function addCreationAssetReference(asset: CreationAsset, content: CreationImageAssetContent) {
+  async function addCreationAssetReference(asset: CreationAsset, content: CreationMediaAssetContent) {
     try {
-      const response = await connectionFetch(creationAssetImageUrl(asset.asset_id));
-      if (!response.ok) throw await apiError(response, '读取图片资产');
+      const response = await connectionFetch(creationAssetMediaUrl(asset.asset_id));
+      if (!response.ok) throw await apiError(response, '读取媒体资产');
       const blob = await response.blob();
       const file = new File([blob], content.filename, { type: content.mime_type });
       setReferenceImages(current => [...current, file].slice(0, maxReferenceImagesForCurrentModel()));

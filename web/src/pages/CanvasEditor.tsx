@@ -1851,7 +1851,7 @@ function CanvasEditorInner({
       setLibraryMode('assets');
       setCreationAssetSaveRequest({
         requestId: crypto.randomUUID(),
-        kind: 'image',
+        kind: 'media',
         title: node.title,
         sourcePath: `canvases/${projectId}/${version.path}`,
         previewUrl: canvasMediaUrl(projectId, version.version_id),
@@ -4315,7 +4315,7 @@ function CanvasEditorInner({
           settings: { ...current.settings, show_minimap: !current.settings.show_minimap },
         }), true)}
       ><MapPinned /></button>
-      <ToolButton buttonRef={assetLibraryTriggerRef} label="图片资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('assets'); else if (libraryMode === 'assets') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('assets')); }}><Library /></ToolButton>
+      <ToolButton buttonRef={assetLibraryTriggerRef} label="媒体资产" active={libraryMode === 'assets'} expanded={libraryMode === 'assets'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('assets'); else if (libraryMode === 'assets') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('assets')); }}><Library /></ToolButton>
       <ToolButton buttonRef={promptLibraryTriggerRef} label="提示词资产" active={libraryMode === 'prompts'} expanded={libraryMode === 'prompts'} controlsId="canvas-library-panel" popup={false} onClick={() => { setAddOpen(false); setCreateMenu(null); if (!libraryMode) setLibraryMode('prompts'); else if (libraryMode === 'prompts') creationAssetPanelRef.current?.requestClose(); else creationAssetPanelRef.current?.requestTransition(() => setLibraryMode('prompts')); }}><WandSparkles /></ToolButton>
       <ToolButton
         buttonRef={generationPreferencesTriggerRef}
@@ -4830,7 +4830,7 @@ function CanvasEditorInner({
             ref={creationAssetPanelRef}
             className="canvas-library-panel"
             projectId={projectId}
-            initialKind={libraryMode === 'prompts' ? 'prompt' : 'image'}
+            initialKind={libraryMode === 'prompts' ? 'prompt' : 'media'}
             saveRequest={creationAssetSaveRequest}
             onSaveRequestHandled={requestId => {
               setCreationAssetSaveRequest(current => current?.requestId === requestId ? null : current);
@@ -4861,7 +4861,7 @@ function CanvasEditorInner({
               }
               void insertCreationAsset(asset.asset_id, {});
             }}
-            onUseImage={(asset: CreationAsset) => {
+            onUseMedia={(asset: CreationAsset) => {
               void insertCreationAsset(
                 asset.asset_id,
                 {},

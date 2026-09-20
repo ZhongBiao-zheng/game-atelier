@@ -13,7 +13,7 @@ export class DuplicateCreationAssetError extends Error {
   readonly assetId: string;
 
   constructor(assetId: string) {
-    super('这张图片已经在资产库中');
+    super('这个文件已经在资产库中');
     this.name = 'DuplicateCreationAssetError';
     this.assetId = assetId;
   }
@@ -52,7 +52,7 @@ export function createPromptCreationAsset(input: {
   });
 }
 
-export async function uploadImageCreationAsset(input: {
+export async function uploadMediaCreationAsset(input: {
   file: File;
   title: string;
   tags: string[];
@@ -67,9 +67,9 @@ export async function uploadImageCreationAsset(input: {
   if (input.allowExisting) form.append('allow_existing', 'true');
   let response: Response;
   try {
-    response = await connectionFetch('/api/creation-assets/images/upload', { method: 'POST', body: form });
+    response = await connectionFetch('/api/creation-assets/media/upload', { method: 'POST', body: form });
   } catch (error) {
-    throw new Error(`保存图片资产失败：${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`保存媒体资产失败：${error instanceof Error ? error.message : String(error)}`);
   }
   if (response.status === 409) {
     const body = await response.clone().json().catch(() => null) as {
@@ -79,11 +79,11 @@ export async function uploadImageCreationAsset(input: {
       throw new DuplicateCreationAssetError(body.detail.asset_id);
     }
   }
-  if (!response.ok) throw await apiError(response, '保存图片资产');
+  if (!response.ok) throw await apiError(response, '保存媒体资产');
   return response.json() as Promise<CreationAsset>;
 }
 
-export async function saveImageCreationAssetFromPath(input: {
+export async function saveMediaCreationAssetFromPath(input: {
   sourcePath: string;
   title: string;
   tags: string[];
@@ -92,7 +92,7 @@ export async function saveImageCreationAssetFromPath(input: {
 }): Promise<CreationAsset> {
   let response: Response;
   try {
-    response = await connectionFetch('/api/creation-assets/images/from-path', {
+    response = await connectionFetch('/api/creation-assets/media/from-path', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -104,7 +104,7 @@ export async function saveImageCreationAssetFromPath(input: {
       }),
     });
   } catch (error) {
-    throw new Error(`保存图片资产失败：${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`保存媒体资产失败：${error instanceof Error ? error.message : String(error)}`);
   }
   if (response.status === 409) {
     const body = await response.clone().json().catch(() => null) as {
@@ -114,7 +114,7 @@ export async function saveImageCreationAssetFromPath(input: {
       throw new DuplicateCreationAssetError(body.detail.asset_id);
     }
   }
-  if (!response.ok) throw await apiError(response, '保存图片资产');
+  if (!response.ok) throw await apiError(response, '保存媒体资产');
   return response.json() as Promise<CreationAsset>;
 }
 
@@ -133,7 +133,7 @@ export function updatePromptCreationAsset(
   );
 }
 
-export async function updateImageCreationAsset(
+export async function updateMediaCreationAsset(
   assetId: string,
   input: { title: string; tags: string[]; file?: File },
 ): Promise<CreationAsset> {
@@ -144,11 +144,11 @@ export async function updateImageCreationAsset(
   let response: Response;
   try {
     response = await connectionFetch(
-      `/api/creation-assets/${encodeURIComponent(assetId)}/image`,
+      `/api/creation-assets/${encodeURIComponent(assetId)}/media`,
       { method: 'PUT', body: form },
     );
   } catch (error) {
-    throw new Error(`编辑图片资产失败：${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`编辑媒体资产失败：${error instanceof Error ? error.message : String(error)}`);
   }
   if (response.status === 409) {
     const body = await response.clone().json().catch(() => null) as {
@@ -158,7 +158,7 @@ export async function updateImageCreationAsset(
       throw new DuplicateCreationAssetError(body.detail.asset_id);
     }
   }
-  if (!response.ok) throw await apiError(response, '编辑图片资产');
+  if (!response.ok) throw await apiError(response, '编辑媒体资产');
   return response.json() as Promise<CreationAsset>;
 }
 
@@ -184,7 +184,7 @@ export function markCreationAssetUsed(
   );
 }
 
-export function creationAssetImageUrl(assetId: string): string {
+export function creationAssetMediaUrl(assetId: string): string {
   return `/api/creation-assets/${encodeURIComponent(assetId)}/content`;
 }
 
