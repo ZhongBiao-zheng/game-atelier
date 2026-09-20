@@ -33,6 +33,16 @@ export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
 /** 新版在前，最新日志必须覆盖插件当前版本。 */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '5.64.0',
+    date: '2026-09-20',
+    headline: '团队库：挂一个共享目录，直接用同事的素材',
+    changes: [
+      { kind: 'feat', text: '团队库：在设置里给项目挂一个同步目录，资产面板多出「团队」一栏，能浏览同事放进去的图 / 视频 / 音频并采用到自己的资产库，或直接拖上画布。' },
+      { kind: 'feat', text: '设置里可以填显示名，分享时用它标作者。' },
+      { kind: 'fix', text: '「图片资产」改名「媒体资产」，现在也能存视频和音频。' },
+    ],
+  },
+  {
     version: '5.63.0',
     date: '2026-09-17',
     headline: '画布的分组可以整包当参考素材',
