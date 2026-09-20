@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import base64
 import json
+from pathlib import Path
+
+import pytest
 
 from character_workflow.lib import team_library as tl
 from character_workflow.lib import team_library_index as idx
+from character_workflow.lib.schemas import TeamLibraryIndexEntry
 
 _PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
@@ -25,6 +29,10 @@ def _shared_asset(folder, author="老王", title="董卓 待机", kind="media"):
     }
     (asset_dir / "asset.json").write_text(json.dumps(body, ensure_ascii=False), "utf-8")
     return asset_dir
+
+
+def _version(entry) -> str:
+    return __import__("hashlib").sha1(entry.updated_at.encode("utf-8")).hexdigest()[:10]
 
 
 def _mount(tmp_path):
@@ -100,5 +108,105 @@ def test_thumbnail_is_cached_outside_library(isolated_data_root, tmp_path):
     entry = index.entries[0]
     data = idx.thumbnail_bytes(mount, entry, 256)
     assert data and data[:4] == b"RIFF"
-    assert (idx.cache_dir(mount.library_id) / "thumbs" / f"{entry.id}-256.webp").is_file()
+    thumbs = list((idx.cache_dir(mount.library_id) / "thumbs").iterdir())
+    assert [p.name for p in thumbs] == [f"{entry.id}-256-{_version(entry)}.webp"]
     assert sorted(p.name for p in folder.iterdir()) == [tl.MANIFEST_NAME, "a.png"]
+
+
+def test_thumbnail_cache_key_versions_on_updated_at(isolated_data_root, tmp_path):
+    """SVN 覆盖同名文件后 updated_at 变化 → 缓存键变化，不会永久命中旧图。"""
+    folder, mount = _mount(tmp_path)
+    (folder / "a.png").write_bytes(_PNG)
+    entry = idx.scan_library(mount).entries[0]
+    assert idx.thumbnail_bytes(mount, entry, 256)
+    newer = entry.model_copy(update={"updated_at": "2030-01-01T00:00:00+00:00"})
+    assert idx.thumbnail_bytes(mount, newer, 256)
+    thumbs = sorted(p.name for p in (idx.cache_dir(mount.library_id) / "thumbs").iterdir())
+    assert len(thumbs) == 2 and all(name.startswith(f"{entry.id}-256-") for name in thumbs)
+
+
+def test_thumbnail_returns_none_on_decompression_bomb(isolated_data_root, tmp_path, monkeypatch):
+    folder, mount = _mount(tmp_path)
+    (folder / "a.png").write_bytes(_PNG)
+    entry = idx.scan_library(mount).entries[0]
+
+    def boom(*_args, **_kwargs):
+        raise idx.Image.DecompressionBombError("too big")
+
+    monkeypatch.setattr(idx.Image, "open", boom)
+    assert idx.thumbnail_bytes(mount, entry, 256) is None
+
+
+def _raw_entry(relative_path: str) -> TeamLibraryIndexEntry:
+    return TeamLibraryIndexEntry(
+        id="raw_x", kind="raw", title="x", author=None, tags=[], mime_type="image/png",
+        bytes=1, relative_path=relative_path, sha256=None,
+        updated_at="2026-09-20T00:00:00+00:00", reproducible=False, status="ready",
+    )
+
+
+def test_entry_content_path_rejects_escaping_relative_path(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    (tmp_path / "outside.png").write_bytes(_PNG)
+    with pytest.raises(FileNotFoundError):
+        idx.entry_content_path(mount, _raw_entry("../outside.png"))
+
+
+def test_entry_content_path_rejects_escaping_media_filename(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    asset_dir = _shared_asset(folder)
+    data = json.loads((asset_dir / "asset.json").read_text("utf-8"))
+    data["media"]["filename"] = "../../../outside.png"
+    (asset_dir / "asset.json").write_text(json.dumps(data, ensure_ascii=False), "utf-8")
+    (tmp_path.parent / "outside.png").write_bytes(_PNG)
+    entry = idx.scan_library(mount).entries[0]
+    with pytest.raises(FileNotFoundError):
+        idx.entry_content_path(mount, entry)
+
+
+def test_scan_skips_symlink_pointing_outside_library(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    (folder / "inside.png").write_bytes(_PNG)
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(_PNG)
+    (folder / "linked.png").symlink_to(outside)
+    entries = idx.scan_library(mount).entries
+    assert [e.relative_path for e in entries] == ["inside.png"]
+
+
+def test_scan_prunes_hidden_dirs(isolated_data_root, tmp_path, monkeypatch):
+    """.svn 工作副本元数据永远不被下潜（os.walk 就地剪枝）。"""
+    folder, mount = _mount(tmp_path)
+    (folder / "a.png").write_bytes(_PNG)
+    pristine = folder / ".svn" / "pristine"
+    pristine.mkdir(parents=True)
+    for i in range(50):
+        (pristine / f"f{i}.png").write_bytes(_PNG)
+    visited: list[str] = []
+    real_walk = idx.os.walk
+
+    def spy(top, *args, **kwargs):
+        for dirpath, dirnames, filenames in real_walk(top, *args, **kwargs):
+            visited.append(dirpath)
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(idx.os, "walk", spy)
+    entries = idx.scan_library(mount).entries
+    assert [e.relative_path for e in entries] == ["a.png"]
+    assert visited and not any(".svn" in path for path in visited)
+
+
+def test_scan_survives_file_vanishing_mid_scan(isolated_data_root, tmp_path, monkeypatch):
+    folder, mount = _mount(tmp_path)
+    (folder / "a.png").write_bytes(_PNG)
+    (folder / "b.png").write_bytes(_PNG)
+    real_stat = Path.stat
+
+    def flaky(self, *args, **kwargs):
+        if self.name == "b.png":
+            raise FileNotFoundError(str(self))
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", flaky)
+    entries = idx.scan_library(mount).entries
+    assert [e.relative_path for e in entries] == ["a.png"]

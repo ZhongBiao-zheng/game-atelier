@@ -68,7 +68,11 @@ def _read_mounts_unlocked() -> TeamLibraryMountFile:
     path = _mounts_path()
     if not path.is_file():
         return TeamLibraryMountFile(mounts=[])
-    return TeamLibraryMountFile.model_validate_json(path.read_text(encoding="utf-8"))
+    try:
+        return TeamLibraryMountFile.model_validate_json(path.read_text(encoding="utf-8"))
+    except ValidationError as error:
+        # 显式 fail-loud：挂载表坏了要让路由层报出是哪个文件，不能静默当成「没挂过库」。
+        raise ValueError(f"挂载记录格式不对：{path}") from error
 
 
 def _write_mounts_unlocked(mounts: list[TeamLibraryMount]) -> None:
@@ -126,10 +130,15 @@ def mount_library(
         mounted_at=_now(),
     )
     with file_lock(_mounts_lock()):
+        # 去重键是 (project_id, library_id)：同一个库在同一项目下 checkout 两份，后挂载的那份生效，
+        # 保证 get_mount(library_id) 唯一。同时清掉同项目下路径相同的旧记录（库 id 被改写过的情况）。
         rows = [
             m
             for m in _read_mounts_unlocked().mounts
-            if not (m.project_id == project_id and Path(m.mount_path) == folder)
+            if not (
+                m.project_id == project_id
+                and (m.library_id == manifest.library_id or Path(m.mount_path) == folder)
+            )
         ]
         _write_mounts_unlocked([*rows, mount])
     return mount

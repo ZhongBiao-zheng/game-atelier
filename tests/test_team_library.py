@@ -62,3 +62,27 @@ def test_mount_rejects_missing_dir(isolated_data_root, tmp_path):
 def test_new_ulid_shape():
     value = tl.new_ulid()
     assert len(value) == 26 and set(value) <= set("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+
+
+def test_same_library_twice_in_one_project_keeps_latest(isolated_data_root, tmp_path):
+    """同一个库 checkout 两份挂进同一项目：去重按 (project_id, library_id)，get_mount 唯一。"""
+    first_dir = tmp_path / "co-a"
+    first_dir.mkdir()
+    first = tl.mount_library(project_id="p1", path=str(first_dir), name=None, created_by="老王")
+    second_dir = tmp_path / "co-b"
+    second_dir.mkdir()
+    (second_dir / tl.MANIFEST_NAME).write_text(
+        (first_dir / tl.MANIFEST_NAME).read_text("utf-8"), "utf-8"
+    )
+    second = tl.mount_library(project_id="p1", path=str(second_dir), name=None, created_by="老王")
+    assert second.library_id == first.library_id
+    rows = tl.list_mounts("p1")
+    assert len(rows) == 1 and rows[0].mount_path == str(second_dir.resolve())
+    assert tl.get_mount(first.library_id).mount_path == str(second_dir.resolve())
+
+
+def test_broken_mount_file_fails_loud(isolated_data_root):
+    path = isolated_data_root / ".config" / "team-libraries.json"
+    path.write_text(json.dumps({"mounts": [{"library_id": "nope"}]}), "utf-8")
+    with pytest.raises(ValueError, match="team-libraries.json"):
+        tl.list_mounts()
