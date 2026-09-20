@@ -16,6 +16,8 @@ import type { TeamLibraryView } from '@/schema/teamLibrary';
 
 const SYNC_HINT = '目录由团队自己的 SVN / Git / 网盘同步；这里只登记本机路径';
 
+const BAD_PAYLOAD = '读取列表失败：返回格式不对';
+
 const rowButton =
   'rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
@@ -28,31 +30,50 @@ export function TeamLibrariesSection() {
   const [pendingUnmount, setPendingUnmount] = useState<TeamLibraryView | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     fetchProjects()
       .then(file => {
-        // 服务端载荷缺字段时按空列表处理：本节是设置页的一个子块，不该拖垮整页。
-        const list = Array.isArray(file?.projects) ? file.projects : [];
-        setProjects(list);
-        setProjectId(current => current || list[0]?.id || '');
+        if (cancelled) return;
+        // 载荷不合契约不静默退化成空列表——那样「读失败」和「真的没有」长得一模一样。
+        if (!Array.isArray(file?.projects)) {
+          console.error('项目列表返回格式不对', file);
+          setError(BAD_PAYLOAD);
+          return;
+        }
+        setProjects(file.projects);
+        setProjectId(current => current || file.projects[0]?.id || '');
       })
-      .catch(e => setError(e instanceof Error ? e.message : String(e)));
+      .catch(e => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => { cancelled = true; };
   }, []);
 
-  const reload = useCallback(async (id: string) => {
+  const reload = useCallback(async (id: string, cancelled?: () => boolean) => {
+    const dropped = () => cancelled?.() ?? false;
     if (!id) {
-      setLibraries([]);
+      if (!dropped()) setLibraries([]);
       return;
     }
     try {
       const views = await listTeamLibraries(id);
-      setLibraries(Array.isArray(views) ? views : []);
+      if (dropped()) return;
+      if (!Array.isArray(views)) {
+        console.error('团队库列表返回格式不对', views);
+        setLibraries([]);
+        setError(BAD_PAYLOAD);
+        return;
+      }
+      setLibraries(views);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (!dropped()) setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
 
   useEffect(() => {
-    void reload(projectId);
+    let cancelled = false;
+    void reload(projectId, () => cancelled);
+    return () => { cancelled = true; };
   }, [projectId, reload]);
 
   async function run(action: () => Promise<unknown>) {

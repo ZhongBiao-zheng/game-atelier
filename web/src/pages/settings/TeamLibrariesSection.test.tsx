@@ -112,6 +112,26 @@ describe('TeamLibrariesSection', () => {
     );
   });
 
+  it('库列表返回格式不对时报错，不装成空列表', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockList.mockResolvedValue({} as unknown as TeamLibraryView[]);
+    render(<TeamLibrariesSection />);
+
+    expect(await screen.findByText('读取列表失败：返回格式不对')).toBeInTheDocument();
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
+
+  it('项目列表返回格式不对时报错', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockProjects.mockResolvedValue({} as unknown as Awaited<ReturnType<typeof fetchProjects>>);
+    render(<TeamLibrariesSection />);
+
+    expect(await screen.findByText('读取列表失败：返回格式不对')).toBeInTheDocument();
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
+
   it('点扫描调用 rescan', async () => {
     render(<TeamLibrariesSection />);
     await screen.findByText('美术共享盘');
