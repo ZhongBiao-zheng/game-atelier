@@ -6,6 +6,8 @@ import { chooseFolder } from '@/api/folders';
 import { fetchConfig, updateConfig } from '@/api/config';
 import { fetchOnboardingStatus, setDataRoot } from '@/api/onboarding';
 import { KeysPage } from './Keys';
+import { ProfileSection } from './ProfileSection';
+import { TeamLibrariesSection } from './TeamLibrariesSection';
 import { HOSTED_SITE } from '@/api/connection';
 import { HostedManagementNotice } from '@/components/HostedManagementNotice';
 
@@ -185,6 +187,14 @@ function LocalSettingsPage() {
             </button>
           </div>
         </div>
+      </section>
+
+      <section className="grid gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">
+        <ProfileSection />
+      </section>
+
+      <section className="grid gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">
+        <TeamLibrariesSection />
       </section>
 
       <section className="grid gap-6 border-t border-border py-10 md:grid-cols-[220px_1fr] md:gap-12">

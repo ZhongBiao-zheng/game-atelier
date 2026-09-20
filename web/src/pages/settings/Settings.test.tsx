@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 import { SettingsPage } from './Settings';
 
@@ -36,6 +36,24 @@ beforeEach(() => {
         json: async () => ({ path: '/Users/me/new-root' }),
       } as Response);
     }
+    if (url === '/api/profile') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ display_name: '老王' }),
+      } as Response);
+    }
+    if (url === '/api/projects') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          projects: [{ id: 'p1', slug: 'maipai', name: '买牌三国', created_at: '2026-01-01T00:00:00Z' }],
+          assignments: {},
+        }),
+      } as Response);
+    }
+    if (typeof url === 'string' && url.startsWith('/api/team-libraries')) {
+      return Promise.resolve({ ok: true, json: async () => [] } as Response);
+    }
     if (url === '/api/config') {
       return Promise.resolve({
         ok: true,
@@ -57,12 +75,14 @@ describe('SettingsPage', () => {
 
     const path = await screen.findByLabelText('数据目录');
     expect(path).toHaveTextContent('/Users/me/game-atelier');
+    // 「保存」在设置页有多处（显示名节也有），按节限定查询
+    const rootSection = within(path.closest('section') as HTMLElement);
     // 保存按需浮现：路径未变更时不出现
-    expect(screen.queryByRole('button', { name: /保存/ })).not.toBeInTheDocument();
+    expect(rootSection.queryByRole('button', { name: /保存/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /更换文件夹/ }));
+    fireEvent.click(rootSection.getByRole('button', { name: /更换文件夹/ }));
     await waitFor(() => expect(path).toHaveTextContent('/Users/me/new-root'));
-    fireEvent.click(screen.getByRole('button', { name: /保存/ }));
+    fireEvent.click(rootSection.getByRole('button', { name: /保存/ }));
 
     await waitFor(() => {
       expect(globalThis.fetch as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
