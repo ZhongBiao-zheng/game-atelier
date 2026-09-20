@@ -144,3 +144,35 @@ def test_adopt_rejects_path_escaping_mount(isolated_data_root, tmp_path):
     )
     with pytest.raises(TeamAssetAdoptError):
         adopt_team_asset(mount=mount, entry=entry, project_id="p1")
+
+
+def test_adopt_rejects_kind_mismatch_between_index_and_asset_json(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    asset_dir = folder / "shared" / "老王" / _ID
+    asset_dir.mkdir(parents=True)
+    (asset_dir / "dz.png").write_bytes(_PNG)
+    (asset_dir / "asset.json").write_text(
+        json.dumps(
+            {
+                "team_asset_version": 1,
+                "asset_id": _ID,
+                "kind": "generation",
+                "title": "董卓",
+                "tags": ["皮肤"],
+                "author": {"display_name": "老王"},
+                "shared_at": "2026-09-20T00:00:00Z",
+                "updated_at": "2026-09-20T00:00:00Z",
+                "media": {
+                    "filename": "dz.png",
+                    "mime_type": "image/png",
+                    "bytes": len(_PNG),
+                    "sha256": hashlib.sha256(_PNG).hexdigest(),
+                },
+                "snapshot": {"model": "seedream"},
+            },
+            ensure_ascii=False,
+        ),
+        "utf-8",
+    )
+    with pytest.raises(TeamAssetAdoptError):
+        adopt_team_asset(mount=mount, entry=_entry(), project_id="p1")

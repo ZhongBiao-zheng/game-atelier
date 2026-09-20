@@ -80,6 +80,8 @@ def adopt_team_asset(
 
     asset_json = _library_file(mount, f"{entry.relative_path}/asset.json")
     team_asset = TeamAssetFile.model_validate_json(asset_json.read_text(encoding="utf-8"))
+    if team_asset.kind != entry.kind:
+        raise TeamAssetAdoptError("索引与库内记录不一致，请重新扫描")
     origin = AdoptionOrigin(
         library_id=mount.library_id,
         asset_id=team_asset.asset_id,
