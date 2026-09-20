@@ -240,6 +240,28 @@ describe('CreationAssetPanel', () => {
     expect(screen.queryByPlaceholderText('搜索标题、正文或标签')).not.toBeInTheDocument();
   });
 
+  it('falls back to prompts when the project behind the team tab disappears', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
+    const view = render(
+      <CreationAssetPanel
+        projectId="proj-1"
+        onClose={vi.fn()}
+        onUsePrompt={vi.fn()}
+        onUseMedia={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+    expect(await screen.findByTestId('team-panel')).toBeInTheDocument();
+
+    view.rerender(
+      <CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />,
+    );
+
+    expect(await screen.findByPlaceholderText('搜索标题、正文或标签')).toBeInTheDocument();
+    expect(screen.queryByTestId('team-panel')).not.toBeInTheDocument();
+  });
+
   it('hides the team tab without a project', async () => {
     mocks.list.mockResolvedValue({ revision: 1, assets: [] });
     render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);

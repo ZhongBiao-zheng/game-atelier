@@ -61,7 +61,7 @@ import {
   type CreationMediaAssetContent,
   type CreationPromptSegment,
 } from '@/schema/creationAssets';
-import type { TeamAssetAdoptResponse } from '@/schema/teamLibrary';
+import type { TeamAssetAdoptResponse, TeamLibraryIndexEntry } from '@/schema/teamLibrary';
 
 /** 面板的三个模式：前两个是本机创作资产，第三个是只读的团队库。 */
 export type CreationAssetPanelMode = 'prompt' | 'media' | 'team';
@@ -98,7 +98,7 @@ export interface CreationAssetPanelProps {
   ) => void;
   onUseMedia: (asset: CreationAsset, content: CreationMediaAssetContent) => void;
   onOpenSettings?: () => void;
-  onTeamAssetAdopted?: (result: TeamAssetAdoptResponse) => void;
+  onTeamAssetAdopted?: (result: TeamAssetAdoptResponse, entry: TeamLibraryIndexEntry) => void;
 }
 
 export interface CreationAssetPanelHandle {
@@ -207,6 +207,11 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   }, [kind, projectId, scope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => setKind(initialKind), [initialKind]);
+
+  // 团队库整块挂在 projectId 上：项目消失时 tab 和主体会同时消失，用户困在空面板里切不走。
+  useEffect(() => {
+    if (kind === 'team' && !projectId) setKind('prompt');
+  }, [kind, projectId]);
 
   useEffect(() => {
     if (!saveRequest) return;
@@ -535,7 +540,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
           {kind === 'team' && projectId && (
             <TeamLibraryPanel
               projectId={projectId}
-              onAdopted={result => { void refresh(); onTeamAssetAdopted?.(result); }}
+              onAdopted={(result, entry) => { void refresh(); onTeamAssetAdopted?.(result, entry); }}
               onOpenSettings={onOpenSettings ?? (() => {})}
               className="min-h-0 flex-1"
             />
