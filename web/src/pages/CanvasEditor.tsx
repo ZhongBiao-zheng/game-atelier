@@ -134,6 +134,8 @@ import {
   type CreationAssetSaveRequest,
 } from '@/components/assets/CreationAssetPanel';
 import { insertCreationAssetIntoCanvas } from '@/api/creationAssets';
+import { adoptTeamAsset } from '@/api/teamLibraries';
+import { TEAM_ASSET_DRAG_TYPE, readTeamAssetDrag } from '@/schema/teamLibrary';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -398,7 +400,7 @@ const CANVAS_MAX_ZOOM = 2.5;
 // xyflow 默认只认 Meta/Control，Shift 归 selectionKeyCode（框选）。框选已经由 selectionOnDrag
 // 接管，所以把 Shift 也并进多选键、并把 selectionKeyCode 置空，和快捷键面板写的「Shift / ⌘ 点击」对齐。
 const CANVAS_MULTI_SELECT_KEYS = ['Shift', 'Meta', 'Control'];
-type CanvasLibraryMode = 'assets' | 'prompts';
+type CanvasLibraryMode = 'assets' | 'prompts' | 'team';
 
 const CANVAS_CHROME_BUTTON_CLASS = 'grid size-10 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
@@ -1974,6 +1976,24 @@ function CanvasEditorInner({
   }
 
   function handleCanvasDrop(event: DragEvent) {
+    // 团队库的拖放先落成本机创作资产，再走与「资产面板拖入」完全一样的插入路径。
+    // 先看 types：文件拖放不带这个类型，没必要（也不保证能）读 dataTransfer。
+    const teamAsset = Array.from(event.dataTransfer.types ?? []).includes(TEAM_ASSET_DRAG_TYPE)
+      ? readTeamAssetDrag(event.dataTransfer)
+      : null;
+    if (teamAsset) {
+      event.preventDefault();
+      const flow = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      void (async () => {
+        try {
+          const result = await adoptTeamAsset(teamAsset.library_id, teamAsset.entry_id, projectId);
+          await insertCreationAsset(result.asset.asset_id, {}, undefined, flow);
+        } catch (adoptError) {
+          setError(adoptError instanceof Error ? adoptError.message : String(adoptError));
+        }
+      })();
+      return;
+    }
     const files = Array.from(event.dataTransfer.files ?? []);
     if (files.length) {
       // 不 preventDefault 的话浏览器按默认行为打开这个文件，整个应用被顶掉，
@@ -4467,7 +4487,7 @@ function CanvasEditorInner({
             const types = event.dataTransfer.types;
             // 'Files' 也要接：dragover 不 preventDefault 时 drop 事件根本不会派发，
             // 浏览器直接导航到被拖进来的文件。
-            if (!types.includes('Files')) return;
+            if (!types.includes('Files') && !types.includes(TEAM_ASSET_DRAG_TYPE)) return;
             event.preventDefault();
             event.dataTransfer.dropEffect = 'copy';
           }}
@@ -4830,7 +4850,7 @@ function CanvasEditorInner({
             ref={creationAssetPanelRef}
             className="canvas-library-panel"
             projectId={projectId}
-            initialKind={libraryMode === 'prompts' ? 'prompt' : 'media'}
+            initialKind={libraryMode === 'prompts' ? 'prompt' : libraryMode === 'team' ? 'team' : 'media'}
             saveRequest={creationAssetSaveRequest}
             onSaveRequestHandled={requestId => {
               setCreationAssetSaveRequest(current => current?.requestId === requestId ? null : current);

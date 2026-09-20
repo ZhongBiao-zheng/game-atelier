@@ -1,7 +1,7 @@
 import { connectionFetch } from '@/api/connection';
 import { mediaUrl } from '@/api/connection';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearch } from 'wouter';
+import { useLocation, useSearch } from 'wouter';
 import { ChevronsDown, Library } from 'lucide-react';
 
 import { createStudioJob, getStudioJob, listStudioJobs, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
@@ -97,6 +97,8 @@ function StudioFull() {
   const [shellFocused, setShellFocused] = useState(false);
   const [clickPinned, setClickPinned] = useState(false);
   const [reuseLimitNotice, setReuseLimitNotice] = useState(false);
+  const [adoptNotice, setAdoptNotice] = useState<string | null>(null);
+  const [, setLocation] = useLocation();
   const [archiveRequest, setArchiveRequest] = useState<StudioArchiveRequest | null>(null);
   const dockCollapsed = scrolledUp && !shellFocused && !clickPinned;
 
@@ -226,6 +228,12 @@ function StudioFull() {
     const timer = window.setTimeout(() => setReuseLimitNotice(false), 2400);
     return () => window.clearTimeout(timer);
   }, [reuseLimitNotice]);
+
+  useEffect(() => {
+    if (!adoptNotice) return;
+    const timer = window.setTimeout(() => setAdoptNotice(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [adoptNotice]);
 
   // 图卡左下角「编辑」→ 把这张生成结果取回成 File，塞进「当前模式下真正会被提交的那个槽位」。
   // 一律塞 referenceImages 是错的：MJ 和视频首尾帧模式下通用参考图栏位是隐藏的，
@@ -775,6 +783,14 @@ function StudioFull() {
             <ChevronsDown size={13} aria-hidden />
             回到底部
           </button>
+        {adoptNotice && (
+          <span
+            role="status"
+            className="absolute bottom-full left-0 mb-2 rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
+          >
+            {adoptNotice}
+          </span>
+        )}
         {reuseLimitNotice && (
           <span
             role="status"
@@ -878,6 +894,7 @@ function StudioFull() {
         <CreationAssetPanel
           ref={assetPanelRef}
           initialKind={assetPanelKind}
+          projectId={canvasTargets[0]?.project_id}
           canvasTargets={canvasTargets.map(target => ({
             projectId: target.project_id,
             name: target.name,
@@ -893,6 +910,8 @@ function StudioFull() {
             setClickPinned(true);
           }}
           onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
+          onOpenSettings={() => setLocation('/settings')}
+          onTeamAssetAdopted={result => setAdoptNotice(result.created ? '已加入资产库' : '已在你的资产库')}
         />
       )}
       <StudioArchiveDialog request={archiveRequest} onClose={() => setArchiveRequest(null)} />

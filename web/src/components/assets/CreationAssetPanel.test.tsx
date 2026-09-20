@@ -48,6 +48,10 @@ vi.mock('@/api/creationAssets', async importOriginal => {
   };
 });
 
+vi.mock('./TeamLibraryPanel', () => ({
+  TeamLibraryPanel: () => <div data-testid="team-panel" />,
+}));
+
 describe('CreationAssetPanel', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -218,5 +222,29 @@ describe('CreationAssetPanel', () => {
 
     await waitFor(() => expect(mocks.deleteAsset).toHaveBeenCalledWith('asset-prompt'));
     expect(await screen.findByText('还没有提示词资产')).toBeInTheDocument();
+  });
+
+  it('opens the team library only when a project is in scope', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [] });
+    render(
+      <CreationAssetPanel
+        projectId="proj-1"
+        onClose={vi.fn()}
+        onUsePrompt={vi.fn()}
+        onUseMedia={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+    expect(await screen.findByTestId('team-panel')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('搜索标题、正文或标签')).not.toBeInTheDocument();
+  });
+
+  it('hides the team tab without a project', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [] });
+    render(<CreationAssetPanel onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />);
+
+    await screen.findByRole('button', { name: '提示词' });
+    expect(screen.queryByRole('button', { name: '团队' })).not.toBeInTheDocument();
   });
 });

@@ -10,6 +10,7 @@ import {
   Search,
   Tags,
   Trash2,
+  Users,
   X,
 } from 'lucide-react';
 import {
@@ -34,6 +35,7 @@ import {
   updatePromptCreationAsset,
   uploadMediaCreationAsset,
 } from '@/api/creationAssets';
+import { TeamLibraryPanel } from '@/components/assets/TeamLibraryPanel';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -55,11 +57,14 @@ import { cn } from '@/lib/utils';
 import {
   renderCreationPrompt,
   type CreationAsset,
-  type CreationAssetKind,
   type CreationAssetRecommendation,
   type CreationMediaAssetContent,
   type CreationPromptSegment,
 } from '@/schema/creationAssets';
+import type { TeamAssetAdoptResponse } from '@/schema/teamLibrary';
+
+/** 面板的三个模式：前两个是本机创作资产，第三个是只读的团队库。 */
+export type CreationAssetPanelMode = 'prompt' | 'media' | 'team';
 
 export type CreationAssetSaveRequest =
   | {
@@ -83,7 +88,7 @@ export interface CreationAssetPanelProps {
   className?: string;
   projectId?: string;
   canvasTargets?: { projectId: string; name: string }[];
-  initialKind?: CreationAssetKind;
+  initialKind?: CreationAssetPanelMode;
   saveRequest?: CreationAssetSaveRequest | null;
   onSaveRequestHandled?: (requestId: string) => void;
   onClose: () => void;
@@ -92,6 +97,8 @@ export interface CreationAssetPanelProps {
     renderedPrompt: string,
   ) => void;
   onUseMedia: (asset: CreationAsset, content: CreationMediaAssetContent) => void;
+  onOpenSettings?: () => void;
+  onTeamAssetAdopted?: (result: TeamAssetAdoptResponse) => void;
 }
 
 export interface CreationAssetPanelHandle {
@@ -133,8 +140,10 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
   onClose,
   onUsePrompt,
   onUseMedia,
+  onOpenSettings,
+  onTeamAssetAdopted,
 }: CreationAssetPanelProps, ref) {
-  const [kind, setKind] = useState<CreationAssetKind>(initialKind);
+  const [kind, setKind] = useState<CreationAssetPanelMode>(initialKind);
   const [scope, setScope] = useState<'all' | 'project'>(projectId ? 'project' : 'all');
   const [assets, setAssets] = useState<CreationAsset[]>([]);
   const [query, setQuery] = useState('');
@@ -174,6 +183,8 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
       : false;
 
   async function refresh(preferredId?: string) {
+    // 团队库是只读的外部挂载，不走本机创作资产目录。
+    if (kind === 'team') return;
     try {
       setError(null);
       const response = await listCreationAssets({
@@ -516,10 +527,20 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 
       {!selected && !isEditing && (
         <>
-          <div className="grid grid-cols-2 border-b border-border p-1.5" role="group" aria-label="资产类型">
+          <div className={cn('grid border-b border-border p-1.5', projectId ? 'grid-cols-3' : 'grid-cols-2')} role="group" aria-label="资产类型">
             <PanelTab active={kind === 'prompt'} onClick={() => setKind('prompt')}><FileText />提示词</PanelTab>
             <PanelTab active={kind === 'media'} onClick={() => setKind('media')}><FileImage />媒体</PanelTab>
+            {projectId && <PanelTab active={kind === 'team'} onClick={() => setKind('team')}><Users />团队</PanelTab>}
           </div>
+          {kind === 'team' && projectId && (
+            <TeamLibraryPanel
+              projectId={projectId}
+              onAdopted={result => { void refresh(); onTeamAssetAdopted?.(result); }}
+              onOpenSettings={onOpenSettings ?? (() => {})}
+              className="min-h-0 flex-1"
+            />
+          )}
+          {kind !== 'team' && (
           <div className="space-y-2 border-b border-border p-3">
             {projectId && <div className="flex gap-1" role="group" aria-label="资产范围"><ScopeButton active={scope === 'all'} onClick={() => setScope('all')}>全部资产</ScopeButton><ScopeButton active={scope === 'project'} onClick={() => setScope('project')}>本项目</ScopeButton></div>}
             <label className="relative block">
@@ -529,11 +550,14 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
             </label>
             {kind === 'prompt' && <Button variant="outline" size="sm" className="w-full" onClick={() => beginPromptEdit()}><Plus />新建提示词资产</Button>}
           </div>
+          )}
+          {kind !== 'team' && (
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             {visibleAssets.length ? visibleAssets.map(asset => <AssetCard key={asset.asset_id} asset={asset} onOpen={() => openAsset(asset)} />) : (
               <div className="grid min-h-40 place-items-center rounded-lg border border-dashed border-border px-8 text-center text-xs leading-relaxed text-muted-foreground">{normalizedQuery ? '没有匹配的创作资产' : kind === 'prompt' ? '还没有提示词资产' : '还没有媒体资产'}</div>
             )}
           </div>
+          )}
         </>
       )}
 

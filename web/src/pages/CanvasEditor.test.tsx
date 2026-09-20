@@ -21,6 +21,8 @@ import {
 } from '@/api/canvas';
 import { getCanvasUiPreferences } from '@/api/canvasUi';
 import { listKeys } from '@/api/keys';
+import { insertCreationAssetIntoCanvas } from '@/api/creationAssets';
+import { adoptTeamAsset } from '@/api/teamLibraries';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from '@/components/canvas/canvasImageToolbar';
 import type { Job } from '@/schema/jobs';
 import type {
@@ -185,6 +187,27 @@ vi.mock('@xyflow/react', () => {
           <CanvasContextIdentityProbe />
           <button
             type="button"
+            aria-label="simulate team asset drop"
+            onClick={event => {
+              let dropPrevented = false;
+              const dataTransfer = {
+                files: [],
+                types: ['application/x-game-atelier-team-asset'],
+                getData: (type: string) => (
+                  type === 'application/x-game-atelier-team-asset'
+                    ? JSON.stringify({ library_id: 'lib_0123456789abcdef', entry_id: 'ta-entry' })
+                    : ''
+                ),
+                dropEffect: '',
+              };
+              onDragOver?.({ dataTransfer, preventDefault: () => {} });
+              onDrop?.({ dataTransfer, clientX: 240, clientY: 180, preventDefault: () => { dropPrevented = true; } });
+              event.currentTarget.dataset.dropEffect = dataTransfer.dropEffect;
+              event.currentTarget.dataset.dropPrevented = String(dropPrevented);
+            }}
+          />
+          <button
+            type="button"
             aria-label="simulate file drop"
             onDrop={onDrop}
             onClick={event => {
@@ -286,6 +309,16 @@ vi.mock('@/api/canvasUi', () => ({
   getCanvasUiPreferences: vi.fn(),
   saveCanvasUiPreferences: vi.fn(),
 }));
+
+vi.mock('@/api/creationAssets', async importOriginal => {
+  const original = await importOriginal<typeof import('@/api/creationAssets')>();
+  return { ...original, insertCreationAssetIntoCanvas: vi.fn() };
+});
+
+vi.mock('@/api/teamLibraries', async importOriginal => {
+  const original = await importOriginal<typeof import('@/api/teamLibraries')>();
+  return { ...original, adoptTeamAsset: vi.fn() };
+});
 
 vi.mock('@/api/keys', async importOriginal => {
   const original = await importOriginal<typeof import('@/api/keys')>();
@@ -1172,6 +1205,24 @@ it('keeps a dropped file inside the app and uploads it to the canvas', async () 
   expect(drop.dataset.overPrevented).toBe('true');
   expect(drop.dataset.dropPrevented).toBe('true');
   await waitFor(() => expect(uploadCanvasMedia).toHaveBeenCalled());
+});
+
+it('adopts a team asset dropped on the canvas and inserts it', async () => {
+  vi.mocked(adoptTeamAsset).mockResolvedValue({
+    asset: { asset_id: 'ca1' } as never,
+    created: true,
+  });
+  vi.mocked(insertCreationAssetIntoCanvas).mockResolvedValue({ ...emptyDocument, revision: 8 });
+
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  const drop = screen.getByRole('button', { name: 'simulate team asset drop' });
+  fireEvent.click(drop);
+
+  expect(drop.dataset.dropPrevented).toBe('true');
+  expect(drop.dataset.dropEffect).toBe('copy');
+  await waitFor(() => expect(adoptTeamAsset).toHaveBeenCalledWith('lib_0123456789abcdef', 'ta-entry', 'canvas-one'));
+  await waitFor(() => expect(vi.mocked(insertCreationAssetIntoCanvas).mock.calls.at(-1)?.[0].assetId).toBe('ca1'));
 });
 
 function mockFileUpload(file: File, revision: number) {
