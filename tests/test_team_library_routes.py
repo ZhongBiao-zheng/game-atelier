@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import json
 
 import pytest
 from tests.local_client import LocalTestClient as TestClient
@@ -169,33 +171,48 @@ def test_prompt_entry_content_is_404(client, tmp_path):
     assert adopted.status_code == 200 and adopted.json()["asset"]["kind"] == "prompt"
 
 
-def test_adopt_broken_asset_json_is_409(client, tmp_path, monkeypatch):
+def test_adopt_broken_asset_json_is_409(client, tmp_path):
+    """库里 asset.json 坏掉（generation 缺 snapshot）→ 409，绝不 500。
+
+    坏文件来自别人的机器，随时可能同步进来；它只是「这条现在不能采用」，不是本机故障。
+    """
+    from character_workflow.lib.team_library import new_ulid
+
     folder = tmp_path / "lib"
-    folder.mkdir()
-    (folder / "a.png").write_bytes(_PNG)
+    asset_dir = folder / "shared" / "老王" / f"ta_{new_ulid()}"
+    asset_dir.mkdir(parents=True)
+    (asset_dir / "a.png").write_bytes(_PNG)
+    # kind=generation 但没有 snapshot：TeamAssetFile 的 validator 会在采用时读盘才炸。
+    (asset_dir / "asset.json").write_text(
+        json.dumps({
+            "team_asset_version": 1,
+            "asset_id": asset_dir.name,
+            "kind": "generation",
+            "title": "半成品",
+            "tags": [],
+            "author": {"display_name": "老王"},
+            "shared_at": "2026-09-20T00:00:00+00:00",
+            "updated_at": "2026-09-20T00:00:00+00:00",
+            "media": {
+                "filename": "a.png",
+                "mime_type": "image/png",
+                "bytes": len(_PNG),
+                "sha256": hashlib.sha256(_PNG).hexdigest(),
+            },
+        }),
+        encoding="utf-8",
+    )
     client.put("/api/profile", json={"display_name": "老王"})
     lib = client.post(
         "/api/team-libraries", json={"project_id": "p1", "path": str(folder), "name": None}
     ).json()
     entry = client.get(f"/api/team-libraries/{lib['library_id']}/assets").json()["entries"][0]
-
-    from pydantic import ValidationError
-
-    from character_workflow.lib.schemas import TeamAssetFile
-    from viewer_server import team_library_routes
-
-    def boom(**_kwargs):
-        try:
-            TeamAssetFile.model_validate({})
-        except ValidationError as error:
-            raise error
-
-    monkeypatch.setattr(team_library_routes, "adopt_team_asset", boom)
     resp = client.post(
         f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}/adopt",
         json={"project_id": None},
     )
-    assert resp.status_code == 409 and resp.json()["detail"]["code"] == "not_adoptable"
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "not_adoptable"
 
 
 def test_rescan_returns_fresh_count(client, tmp_path):
@@ -209,3 +226,58 @@ def test_rescan_returns_fresh_count(client, tmp_path):
     (folder / "a.png").write_bytes(_PNG)
     rescanned = client.post(f"/api/team-libraries/{lib['library_id']}/rescan")
     assert rescanned.status_code == 200 and rescanned.json()["asset_count"] == 1
+
+
+def test_read_endpoint_does_not_scan_when_index_is_missing(client, tmp_path):
+    """读端点不顺手扫：扫描要走整棵工作副本，挂在读上就是每次刷新并发全量扫描。"""
+    from character_workflow.lib import team_library_index as idx
+
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    (folder / "a.png").write_bytes(_PNG)
+    client.put("/api/profile", json={"display_name": "老王"})
+    lib = client.post(
+        "/api/team-libraries", json={"project_id": "p1", "path": str(folder), "name": None}
+    ).json()
+    assert client.get(f"/api/team-libraries/{lib['library_id']}/assets").status_code == 200
+
+    (idx.cache_dir(lib["library_id"]) / "index.json").unlink()
+    missing = client.get(f"/api/team-libraries/{lib['library_id']}/assets")
+    assert missing.status_code == 503, missing.text
+    assert missing.json()["detail"]["code"] == "library_unreachable"
+    assert not (idx.cache_dir(lib["library_id"]) / "index.json").exists()
+
+    assert client.post(f"/api/team-libraries/{lib['library_id']}/rescan").status_code == 200
+    restored = client.get(f"/api/team-libraries/{lib['library_id']}/assets")
+    assert restored.status_code == 200 and len(restored.json()["entries"]) == 1
+
+
+def test_limit_is_clamped_not_rejected(client, tmp_path):
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    for n in range(3):
+        (folder / f"a{n}.png").write_bytes(_PNG)
+    client.put("/api/profile", json={"display_name": "老王"})
+    lib = client.post(
+        "/api/team-libraries", json={"project_id": "p1", "path": str(folder), "name": None}
+    ).json()
+    url = f"/api/team-libraries/{lib['library_id']}/assets"
+
+    huge = client.get(url, params={"limit": 999})
+    assert huge.status_code == 200 and len(huge.json()["entries"]) == 3
+
+    zero = client.get(url, params={"limit": 0})
+    assert zero.status_code == 200 and len(zero.json()["entries"]) == 1
+
+    negative = client.get(url, params={"limit": -5})
+    assert negative.status_code == 200 and len(negative.json()["entries"]) == 1
+
+
+def test_broken_mount_table_is_500_naming_the_file(client, isolated_data_root):
+    """挂载表坏掉是磁盘状态故障：报 500 并说清是哪个文件，画师才修得动。"""
+    path = isolated_data_root / ".config" / "team-libraries.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"schema_version": 1, "mounts": "不是数组"}', encoding="utf-8")
+    resp = client.get("/api/team-libraries", params={"project_id": "p1"})
+    assert resp.status_code == 500, resp.text
+    assert "team-libraries.json" in json.dumps(resp.json(), ensure_ascii=False)

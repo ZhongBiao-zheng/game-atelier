@@ -161,7 +161,6 @@ MEDIA_ROUTES = frozenset({
     "/api/canvas/projects/{project_id}/versions/{version_id}/download",
     "/api/canvas/projects/{project_id}/nodes/{node_id}/layers/download",
     "/api/workshop/requests/{request_id}/references/{media_id}",
-    "/api/team-libraries/{library_id}/assets/{entry_id}/content",
     "/api/team-libraries/{library_id}/assets/{entry_id}/thumb",
 })
 WORKSHOP_TOOLS = frozenset({

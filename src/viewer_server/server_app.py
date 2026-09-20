@@ -24,7 +24,7 @@ from viewer_server.request_boundary import LocalRequestBoundary, development_ori
 from viewer_server.routes_canvas_batches import router as canvas_batches_router
 from viewer_server.sse import hub, sse_router
 from viewer_server.team_library_routes import team_library_router
-from viewer_server.watcher import start_watchers
+from viewer_server.watcher import start_watchers, stop_team_library_watches
 
 
 _CANVAS_DOCUMENT_MAX_BYTES = 25 * 1024 * 1024
@@ -206,6 +206,7 @@ async def lifespan(app: FastAPI):
         maintenance_task.cancel()
         for task in resume_tasks:
             task.cancel()
+        stop_team_library_watches()
         observer.stop()
         observer.join(timeout=2)
         app.state.workshop_runtime.close()

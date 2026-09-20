@@ -96,3 +96,48 @@ def test_team_library_handler_ignores_hidden_paths(isolated_data_root, tmp_path,
     handler.on_any_event(FileCreatedEvent(str(folder / "a.png")))
     handler._timer.join(5)
     assert rescans == [1]
+
+
+def test_team_library_handler_keeps_index_when_directory_goes_offline(
+    isolated_data_root, tmp_path, monkeypatch
+):
+    """目录掉线不是「库空了」：scan_library 对不存在的目录只会返回空索引，不抛 OSError。
+
+    照扫就会清空缓存并广播一整轮 removed —— 网盘抖一下，画师的库在界面上就全没了。
+    """
+    import shutil
+
+    from character_workflow.lib import team_library as tl
+    from character_workflow.lib import team_library_index as idx
+
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    (folder / "a.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    mount = tl.mount_library(project_id="p1", path=str(folder), name=None, created_by="我")
+    handler = watcher.TeamLibraryHandler(mount, delay=0)
+    handler.rescan()
+    before = (idx.cache_dir(mount.library_id) / "index.json").read_text(encoding="utf-8")
+    assert len(idx.read_index(mount.library_id).entries) == 1
+
+    events = _capture(monkeypatch)
+    shutil.rmtree(folder)
+    handler.rescan()
+    assert events == []
+    assert (idx.cache_dir(mount.library_id) / "index.json").read_text(encoding="utf-8") == before
+
+
+def test_team_library_cancel_drops_pending_rescan(isolated_data_root, tmp_path, monkeypatch):
+    from character_workflow.lib import team_library as tl
+
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    mount = tl.mount_library(project_id="p1", path=str(folder), name=None, created_by="我")
+    handler = watcher.TeamLibraryHandler(mount, delay=30)
+    rescans: list[int] = []
+    monkeypatch.setattr(handler, "rescan", lambda: rescans.append(1))
+    handler.on_any_event(FileCreatedEvent(str(folder / "a.png")))
+    pending = handler._timer
+    assert pending is not None and pending.is_alive()
+    handler.cancel()
+    pending.join(5)
+    assert handler._timer is None and not pending.is_alive() and rescans == []

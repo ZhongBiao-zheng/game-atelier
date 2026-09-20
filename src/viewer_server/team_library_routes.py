@@ -35,9 +35,12 @@ _UNREACHABLE = {"code": "library_unreachable", "message": "团队库目录不可
 def _mounts(project_id: str | None = None) -> list[TeamLibraryMount]:
     try:
         return tl.list_mounts(project_id)
+    # 挂载表损坏是磁盘状态故障，不是这次请求的错：500 带上是哪个文件，让画师能去修。
+    # OSError 一并兜住——读不动那个文件（权限 / 编码）和内容坏掉对画师是同一件事。
     except ValueError as error:
-        # 挂载表损坏是磁盘状态故障，不是这次请求的错：500 带上是哪个文件，让画师能去修。
         raise HTTPException(500, detail=str(error)) from error
+    except OSError as error:
+        raise HTTPException(500, detail=f"读不了挂载记录：{tl._mounts_path()}（{error}）") from error
 
 
 def _view(mount: TeamLibraryMount) -> TeamLibraryView:
@@ -62,15 +65,21 @@ def _mount_or_404(library_id: str) -> TeamLibraryMount:
 
 
 def _index_or_503(mount: TeamLibraryMount) -> TeamLibraryIndex:
+    """读端点只读缓存索引，绝不顺手扫一次。
+
+    扫描要走整棵工作副本，几万个文件时是秒级；挂在读端点上，每个没命中缓存的请求都会各扫
+    一遍（没有单飞），刷新一下页面就是并发全量扫描。扫描只发生在挂载与 rescan——那两处本来
+    就在调 scan_library，而且是画师主动触发、等得起的动作。
+    """
     if not tl.library_reachable(mount):
         raise HTTPException(503, detail=_UNREACHABLE)
     index = idx.read_index(mount.library_id)
-    if index is not None:
-        return index
-    try:
-        return idx.scan_library(mount)
-    except OSError as error:
-        raise HTTPException(503, detail=_UNREACHABLE) from error
+    if index is None:
+        raise HTTPException(
+            503,
+            detail={"code": "library_unreachable", "message": "索引尚未建立，请重新扫描"},
+        )
+    return index
 
 
 def _reject_reserved_mount_path(raw: str) -> None:
@@ -127,10 +136,7 @@ def post_team_library(payload: TeamLibraryMountRequest) -> TeamLibraryView:
         raise HTTPException(422, detail="目录不存在") from None
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
-    try:
-        idx.scan_library(mount)
-    except OSError as error:
-        raise HTTPException(503, detail=_UNREACHABLE) from error
+    idx.scan_library(mount)
     from viewer_server.watcher import watch_team_library
 
     watch_team_library(mount)
@@ -157,10 +163,7 @@ def post_rescan(library_id: str) -> TeamLibraryView:
     mount = _mount_or_404(library_id)
     if not tl.library_reachable(mount):
         raise HTTPException(503, detail=_UNREACHABLE)
-    try:
-        idx.scan_library(mount)
-    except OSError as error:
-        raise HTTPException(503, detail=_UNREACHABLE) from error
+    idx.scan_library(mount)
     return _view(mount)
 
 
@@ -174,13 +177,15 @@ def get_team_assets(
     tag: str | None = None,
     q: str | None = None,
     cursor: str | None = None,
-    limit: int = Query(default=200, ge=1, le=200),
+    limit: int = Query(default=200),
 ) -> TeamLibraryAssetPage:
     mount = _mount_or_404(library_id)
     index = _index_or_503(mount)
+    # limit 是夹紧不是拒绝：翻页参数越界是客户端小毛病，不值得让整页资产打不开。
     try:
         return idx.query_index(
-            index, kind=kind, author=author, tag=tag, q=q, cursor=cursor, limit=limit
+            index, kind=kind, author=author, tag=tag, q=q, cursor=cursor,
+            limit=max(1, min(limit, 200)),
         )
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error

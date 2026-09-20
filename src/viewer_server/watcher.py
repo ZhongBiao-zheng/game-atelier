@@ -183,15 +183,24 @@ class TeamLibraryHandler(FileSystemEventHandler):
             self._timer.daemon = True
             self._timer.start()
 
+    def cancel(self) -> None:
+        """取消还没跑的那次重扫（卸载 / 停服）。"""
+        with self._lock:
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+
     def rescan(self) -> None:
+        from character_workflow.lib import team_library as tl
         from character_workflow.lib import team_library_index as idx
 
-        before = idx.read_index(self.mount.library_id)
-        try:
-            after = idx.scan_library(self.mount)
-        except OSError:
-            # 目录被卸掉 / 网盘掉线：保留上一次索引，下次事件再试。
+        # 目录掉线不能当成「库空了」：scan_library 对不存在的目录不抛 OSError，
+        # 它只会返回空索引（is_dir() 假 → 空列表；os.walk 缺目录静默跳过）。
+        # 照扫就会把缓存索引清空并广播一整轮 removed，网盘一抖画师的库就「全没了」。
+        if not tl.library_reachable(self.mount):
             return
+        before = idx.read_index(self.mount.library_id)
+        after = idx.scan_library(self.mount)
         for change in idx.diff_index(before, after):
             hub.broadcast(
                 "team-library-changed", {"library_id": self.mount.library_id, **change}
@@ -200,16 +209,19 @@ class TeamLibraryHandler(FileSystemEventHandler):
 
 _observer: Observer | None = None
 _team_watches: dict[str, object] = {}
+_team_handlers: dict[str, TeamLibraryHandler] = {}
 
 
 def watch_team_library(mount) -> None:
     """热挂载：同一 library_id 只 schedule 一次（多项目共用同一目录时用第一条）。"""
     if _observer is None or mount.library_id in _team_watches:
         return
+    handler = TeamLibraryHandler(mount)
     try:
         _team_watches[mount.library_id] = _observer.schedule(
-            TeamLibraryHandler(mount), mount.mount_path, recursive=True
+            handler, mount.mount_path, recursive=True
         )
+        _team_handlers[mount.library_id] = handler
     except OSError:
         # 目录不可达不拦服务：画师下次 rescan / 重新挂载会补上。
         pass
@@ -217,11 +229,23 @@ def watch_team_library(mount) -> None:
 
 def unwatch_team_library(library_id: str) -> None:
     watch = _team_watches.pop(library_id, None)
+    handler = _team_handlers.pop(library_id, None)
+    if handler is not None:
+        # 先取消待跑的防抖重扫：卸载后再跑一次就是对着一个已经不该看的目录写缓存。
+        handler.cancel()
     if _observer is not None and watch is not None:
         try:
             _observer.unschedule(watch)
         except KeyError:
             pass
+
+
+def stop_team_library_watches() -> None:
+    """停服：取消全部待跑重扫，别让 daemon timer 在解释器关闭时才醒。"""
+    for handler in list(_team_handlers.values()):
+        handler.cancel()
+    _team_handlers.clear()
+    _team_watches.clear()
 
 
 def start_watchers() -> Observer:
@@ -270,7 +294,7 @@ def start_watchers() -> Observer:
 
     global _observer
     _observer = observer
-    _team_watches.clear()
+    stop_team_library_watches()
     from character_workflow.lib import team_library
 
     try:
