@@ -12,12 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from character_workflow.lib import data_root
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.canvas_projects import canvas_project_lock_path
 from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.jobs import job_lock, write_job_under_lock
-from character_workflow.lib.schemas import CanvasDocument, Job
+from character_workflow.lib.schemas import CanvasDocument, CreationAssetCatalog, Job
 
 
 def migrate_creation_assets_to_single_content() -> dict[str, Any] | None:
@@ -78,22 +80,66 @@ def migrate_creation_assets_to_media() -> dict[str, Any] | None:
         return None
     if raw.get("schema_version") != 2:
         raise ValueError("unsupported creation asset catalog schema")
+    # 先在内存里改写并整表校验，通过了才备份 + 落盘：任何一条坏记录都让 v2 原文原封不动。
+    assets: list[dict[str, Any]] = []
+    broken: list[str] = []
+    for asset in raw.get("assets", []):
+        if not isinstance(asset, dict):
+            broken.append("<非对象记录>")
+            continue
+        asset_id = asset.get("asset_id")
+        label = asset_id if isinstance(asset_id, str) and asset_id else "<缺 asset_id>"
+        if asset.get("kind") == "image":
+            content = asset.get("content")
+            if not isinstance(content, dict):
+                broken.append(label)
+                continue
+            asset["kind"] = "media"
+            content["kind"] = "media"
+        assets.append(asset)
+    if broken:
+        raise ValueError(
+            "创作资产目录 v2→v3 迁移中止（原文未改写），这些资产的 content 不是对象："
+            + "、".join(broken)
+        )
+    payload = {
+        **raw, "schema_version": 3, "revision": int(raw.get("revision", 0)) + 1,
+        "updated_at": datetime.now(timezone.utc).isoformat(), "assets": assets,
+    }
+    try:
+        CreationAssetCatalog.model_validate(payload)
+    except ValidationError as error:
+        raise ValueError(
+            "创作资产目录 v2→v3 迁移校验失败（原文未改写）："
+            + _describe_catalog_errors(error, assets)
+        ) from error
+
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     backup_root = data_root.runtime_dir() / "backups" / "creation-assets" / timestamp
     backup_root.mkdir(parents=True, exist_ok=False)
     shutil.copy2(catalog_path, backup_root / "catalog.json")
-    assets = []
-    for asset in raw.get("assets", []):
-        if asset.get("kind") == "image":
-            asset["kind"] = "media"
-            asset["content"]["kind"] = "media"
-        assets.append(asset)
-    atomic_write_json(catalog_path, {
-        **raw, "schema_version": 3, "revision": int(raw.get("revision", 0)) + 1,
-        "updated_at": datetime.now(timezone.utc).isoformat(), "assets": assets,
-    })
+    atomic_write_json(catalog_path, payload)
     return {"migration": "creation-assets-v2-to-v3-media", "catalog_assets": len(assets),
             "backup_path": str(backup_root)}
+
+
+def _describe_catalog_errors(
+    error: ValidationError,
+    assets: list[dict[str, Any]],
+) -> str:
+    """把 pydantic 的 loc 下标翻回 asset_id，否则报错里只有一串数字。"""
+    seen: list[str] = []
+    for detail in error.errors():
+        loc = detail.get("loc", ())
+        label = "<目录本身>"
+        if len(loc) >= 2 and loc[0] == "assets" and isinstance(loc[1], int):
+            asset = assets[loc[1]] if loc[1] < len(assets) else {}
+            asset_id = asset.get("asset_id")
+            label = asset_id if isinstance(asset_id, str) and asset_id else f"#{loc[1]}"
+        entry = f"{label}（{detail.get('msg', '')}）"
+        if entry not in seen:
+            seen.append(entry)
+    return "、".join(seen)
 
 
 def _flatten_asset(asset: dict[str, Any]) -> dict[str, Any]:

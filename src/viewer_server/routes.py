@@ -2528,9 +2528,12 @@ async def post_creation_media_upload(
         parsed_tags = json.loads(tags)
         if not isinstance(parsed_tags, list) or not all(isinstance(tag, str) for tag in parsed_tags):
             raise ValueError("tags 必须是字符串数组")
-        return create_media_asset_from_bytes(
+        body = await file.read()
+        # 抢 catalog 文件锁 + sha256 + 落盘（视频上限 500 MiB）：留在事件循环里会连 SSE 一起卡住。
+        return await asyncio.to_thread(
+            create_media_asset_from_bytes,
             title=title,
-            body=await file.read(),
+            body=body,
             filename=file.filename or "media",
             mime_type=file.content_type,
             tags=parsed_tags,
@@ -2569,7 +2572,8 @@ async def put_creation_media_asset(
         if not isinstance(parsed_tags, list) or not all(isinstance(tag, str) for tag in parsed_tags):
             raise ValueError("tags 必须是字符串数组")
         body = await file.read() if file is not None else None
-        return update_media_asset_from_bytes(
+        return await asyncio.to_thread(
+            update_media_asset_from_bytes,
             asset_id,
             title=title,
             tags=parsed_tags,

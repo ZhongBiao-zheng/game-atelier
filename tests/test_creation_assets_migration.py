@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.creation_assets import list_creation_assets
 from character_workflow.lib.creation_assets_migration import (
@@ -204,3 +206,59 @@ def test_v2_image_assets_migrate_to_media_v3(isolated_data_root):
     raw = json.loads((isolated_data_root / "creation-assets" / "catalog.json").read_text("utf-8"))
     assert raw["schema_version"] == 3
     assert migrate_creation_assets_to_media() is None
+
+
+def _v2_catalog(content: object) -> dict:
+    return {
+        "schema_version": 2, "revision": 1, "updated_at": "2026-09-01T00:00:00Z",
+        "migrated_canvas_project_ids": [],
+        "assets": [{
+            "asset_id": "creation-asset-img2", "kind": "image", "title": "旧图",
+            "tags": [], "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z",
+            "last_used_at": None, "project_ids": [], "recommendation": None,
+            "content": content,
+        }],
+    }
+
+
+def test_media_migration_keeps_v2_intact_when_content_is_not_an_object(isolated_data_root):
+    catalog_path = isolated_data_root / "creation-assets" / "catalog.json"
+    atomic_write_json(catalog_path, _v2_catalog("creation-assets/blobs/x.png"))
+
+    with pytest.raises(ValueError, match="creation-asset-img2"):
+        migrate_creation_assets_to_media()
+
+    raw = json.loads(catalog_path.read_text("utf-8"))
+    assert raw["schema_version"] == 2 and raw["assets"][0]["kind"] == "image"
+    assert not (isolated_data_root / ".runtime" / "backups" / "creation-assets").exists()
+
+
+def test_media_migration_keeps_v2_intact_when_a_row_fails_validation(isolated_data_root):
+    catalog_path = isolated_data_root / "creation-assets" / "catalog.json"
+    # sha256 不是 64 位十六进制：整表校验必须在落盘前拦住它。
+    atomic_write_json(catalog_path, _v2_catalog({
+        "kind": "image", "path": "creation-assets/blobs/bad.png", "mime_type": "image/png",
+        "bytes": 10, "sha256": "not-a-digest", "filename": "bad.png",
+    }))
+
+    with pytest.raises(ValueError, match="creation-asset-img2"):
+        migrate_creation_assets_to_media()
+
+    raw = json.loads(catalog_path.read_text("utf-8"))
+    assert raw["schema_version"] == 2 and raw["assets"][0]["kind"] == "image"
+    assert not (isolated_data_root / ".runtime" / "backups" / "creation-assets").exists()
+
+
+def test_reading_the_catalog_outside_the_server_migrates_v2_to_v3(isolated_data_root):
+    """Skill CLI / workshop 入口没有 lifespan：读目录本身必须先过 v2→v3。"""
+    catalog_path = isolated_data_root / "creation-assets" / "catalog.json"
+    atomic_write_json(catalog_path, _v2_catalog({
+        "kind": "image", "path": "creation-assets/blobs/" + "c" * 64 + ".png",
+        "mime_type": "image/png", "bytes": 10, "sha256": "c" * 64, "filename": "x.png",
+    }))
+
+    listed = list_creation_assets()
+
+    assert [asset.kind for asset in listed.assets] == ["media"]
+    assert listed.assets[0].content.kind == "media"
+    assert json.loads(catalog_path.read_text("utf-8"))["schema_version"] == 3

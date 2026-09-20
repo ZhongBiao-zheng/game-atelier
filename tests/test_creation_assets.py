@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 
 import pytest
 from tests.local_client import LocalTestClient as TestClient
@@ -14,10 +15,16 @@ from character_workflow.lib.canvas_projects import (
 )
 from character_workflow.lib.creation_assets import (
     CreationAssetDuplicateError,
+    create_adopted_asset,
     create_media_asset_from_bytes,
     create_prompt_asset,
     creation_asset_media_path,
     delete_creation_asset,
+    find_adopted_asset,
+    find_media_asset_by_sha256,
+    insert_creation_asset_into_canvas,
+    new_creation_asset_id,
+    store_media_blob,
     list_creation_assets,
     mark_creation_asset_used,
     migrate_legacy_canvas_libraries,
@@ -26,6 +33,8 @@ from character_workflow.lib.creation_assets import (
     update_prompt_asset,
 )
 from character_workflow.lib.schemas import (
+    TEAM_ASSET_ID_PATTERN,
+    AdoptionOrigin,
     CanvasGenerationDraft,
     CanvasImageNode,
     CanvasLibraryAsset,
@@ -34,7 +43,9 @@ from character_workflow.lib.schemas import (
     CanvasPoint,
     CanvasPrompt,
     CanvasUploadOrigin,
+    CreationAsset,
     RevisionedSidecar,
+    TeamAssetAuthor,
 )
 from character_workflow.lib.prompt_variables import build_prompt_variable_template
 from viewer_server.server_app import build_app
@@ -313,3 +324,142 @@ def test_media_asset_accepts_mp4(client):
         files={"file": ("clip.mp4", body, "video/mp4")}, data={"title": "片段", "tags": "[]"})
     assert response.status_code == 201, response.text
     assert response.json()["content"]["mime_type"] == "video/mp4"
+
+
+# 最小的合法 ISO BMFF：ftyp + 带 tkhd 的 moov，tkhd 里宽高是 16.16 定点数。
+def _mp4_bytes(width: int = 640, height: int = 360) -> bytes:
+    import struct
+    tkhd_body = (
+        b"\x00" + b"\x00" * 3          # version 0 + flags
+        + b"\x00" * 4 * 4              # created / modified / track_id / reserved
+        + b"\x00" * 4                  # duration
+        + b"\x00" * 8                  # reserved
+        + b"\x00" * 2 * 4              # layer / alternate_group / volume / reserved
+        + b"\x00" * 36                 # matrix
+        + struct.pack(">II", width << 16, height << 16)
+    )
+    tkhd = struct.pack(">I", 8 + len(tkhd_body)) + b"tkhd" + tkhd_body
+    trak = struct.pack(">I", 8 + len(tkhd)) + b"trak" + tkhd
+    moov = struct.pack(">I", 8 + len(trak)) + b"moov" + trak
+    ftyp = b"ftypisom\x00\x00\x02\x00"
+    return struct.pack(">I", 4 + len(ftyp)) + ftyp + moov
+
+
+_MP3 = b"ID3\x03\x00\x00\x00\x00\x00\x00" + b"\x00" * 64
+
+
+def test_mp4_asset_inserts_into_canvas_as_a_video_node():
+    project = create_canvas_project("视频画布")
+    asset = create_media_asset_from_bytes(
+        title="片段", body=_mp4_bytes(), filename="clip.mp4", mime_type="video/mp4", tags=[],
+    )
+
+    document = insert_creation_asset_into_canvas(
+        project_id=project.project_id,
+        asset_id=asset.asset_id,
+        position=CanvasPoint(x=0, y=0),
+        expected_revision=0,
+    )
+
+    node = document.nodes[0]
+    version = document.content_versions[node.data.current_version_id]
+    assert node.type == "video"
+    assert version.kind == "video"
+    assert version.mime_type == "video/mp4"
+    assert (version.width, version.height) == (640, 360)
+
+
+def test_mp3_asset_inserts_into_canvas_as_an_audio_node():
+    project = create_canvas_project("音频画布")
+    asset = create_media_asset_from_bytes(
+        title="配乐", body=_MP3, filename="bgm.mp3", mime_type="audio/mpeg", tags=[],
+    )
+
+    document = insert_creation_asset_into_canvas(
+        project_id=project.project_id,
+        asset_id=asset.asset_id,
+        position=CanvasPoint(x=0, y=0),
+        expected_revision=0,
+    )
+
+    node = document.nodes[0]
+    version = document.content_versions[node.data.current_version_id]
+    assert node.type == "audio"
+    assert version.kind == "audio"
+    assert version.mime_type == "audio/mpeg"
+    assert version.width is None and version.height is None
+
+
+def test_non_image_media_cannot_feed_a_generation_panel(client: TestClient):
+    project = create_canvas_project("生成画布")
+    current = read_canvas_document(project.project_id)
+    target = CanvasImageNode(
+        id="image-target", title="待生成", type="image", position=CanvasPoint(x=0, y=0), z_index=0,
+        data=CanvasMediaNodeData(generation_draft=CanvasGenerationDraft(
+            mode="image", prompt="", model="gpt-image-2", updated_at="2026-08-29T00:00:00+00:00",
+        )),
+    )
+    atomic_write_json(
+        _document_path(project.project_id),
+        current.model_copy(update={"nodes": [target]}).model_dump(mode="json"),
+    )
+    asset = create_media_asset_from_bytes(
+        title="片段", body=_mp4_bytes(), filename="clip.mp4", mime_type="video/mp4", tags=[],
+    )
+
+    response = client.post(
+        f"/api/canvas/projects/{project.project_id}/creation-assets/{asset.asset_id}/insert",
+        headers={"If-Match": "0"},
+        json={"position": {"x": 30, "y": 40}, "target_node_id": target.id},
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_m4a_trusts_the_declared_audio_mime_for_a_plain_mp4_brand():
+    asset = create_media_asset_from_bytes(
+        title="人声", body=_mp4_bytes(), filename="voice.m4a", mime_type="audio/mp4", tags=[],
+    )
+    assert asset.content.mime_type == "audio/mp4"
+    assert asset.content.path.endswith(".m4a")
+
+
+def test_adopted_assets_round_trip_through_the_catalog():
+    origin = AdoptionOrigin(
+        library_id="lib_" + "a" * 16,
+        asset_id="ta_" + "0" * 26,
+        source_updated_at="2026-09-20T00:00:00Z",
+        raw_path=None,
+    )
+    asset_id = new_creation_asset_id()
+    assert asset_id.startswith("creation-asset-")
+    assert asset_id != new_creation_asset_id()
+
+    content = store_media_blob(_PNG, "adopted.png", "image/png")
+    adopted = create_adopted_asset(CreationAsset(
+        asset_id=asset_id,
+        kind="media",
+        title="团队图",
+        tags=["团队"],
+        created_at="2026-09-20T00:00:00Z",
+        updated_at="2026-09-20T00:00:00Z",
+        content=content,
+        adopted_from=origin,
+    ))
+
+    assert find_adopted_asset(origin.library_id, origin.asset_id).asset_id == adopted.asset_id
+    assert find_adopted_asset(origin.library_id, "ta_" + "1" * 26) is None
+    assert find_adopted_asset("lib_" + "b" * 16, origin.asset_id) is None
+    assert find_media_asset_by_sha256(content.sha256).asset_id == adopted.asset_id
+    assert find_media_asset_by_sha256("f" * 64) is None
+    with pytest.raises(ValueError, match="already exists"):
+        create_adopted_asset(adopted)
+
+
+def test_team_asset_id_pattern_accepts_crockford_ulid_only():
+    base = "ta_" + "0" * 26
+    AdoptionOrigin(library_id="lib_" + "a" * 16, asset_id=base, source_updated_at="t")
+    TeamAssetAuthor(display_name="飙哥")
+    assert re.fullmatch(TEAM_ASSET_ID_PATTERN, base)
+    assert re.fullmatch(TEAM_ASSET_ID_PATTERN, "ta_01JZ9KHVTPQRSXYZABCDEFGHJK")
+    for bad in ("ta_" + "0" * 25, "ta_" + "I" * 26, "ta_" + "l" * 26, "ta_" + "u" * 26):
+        assert re.fullmatch(TEAM_ASSET_ID_PATTERN, bad) is None

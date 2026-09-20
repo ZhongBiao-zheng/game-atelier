@@ -214,8 +214,15 @@ def _media_mime(body: bytes, declared: str | None, filename: str) -> str:
         detected = "image/gif"
     elif len(body) >= 12 and body[4:8] == b"ftyp":
         brand = body[8:12]
-        detected = "audio/mp4" if brand in {b"M4A ", b"M4B "} else (
-            "video/quicktime" if brand == b"qt  " else "video/mp4")
+        if brand in {b"M4A ", b"M4B "}:
+            detected = "audio/mp4"
+        elif brand == b"qt  ":
+            detected = "video/quicktime"
+        elif declared == "audio/mp4":
+            # ffmpeg 产出的 .m4a brand 常是 mp42 / isom，容器与 mp4 同构，brand 分不出音轨：信声明。
+            detected = "audio/mp4"
+        else:
+            detected = "video/mp4"
     elif body.startswith(b"\x1a\x45\xdf\xa3"):
         detected = "video/webm"
     elif body.startswith(b"ID3") or body[:2] in {b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"}:
@@ -243,9 +250,10 @@ def store_media_blob(
     safe_filename = Path(filename).name or "media"
     detected_mime = _media_mime(body, mime_type, safe_filename)
     family = detected_mime.split("/", 1)[0]
-    limit = _MEDIA_SIZE_LIMITS[family]
+    limit = _MEDIA_SIZE_LIMITS.get(family, 50 * 1024 * 1024)
     if len(body) > limit:
-        raise ValueError(f"{_MEDIA_SIZE_LABELS[family]}不能超过 {limit // (1024 * 1024)} MiB")
+        label = _MEDIA_SIZE_LABELS.get(family, "文件")
+        raise ValueError(f"{label}不能超过 {limit // (1024 * 1024)} MiB")
     digest = hashlib.sha256(body).hexdigest()
     suffix = MEDIA_SUFFIXES[detected_mime]
     relative = Path("creation-assets") / "blobs" / f"{digest}{suffix}"
@@ -790,7 +798,20 @@ def insert_creation_asset_into_canvas(
     return updated
 
 
+def migrate_creation_asset_catalog_schema() -> None:
+    """读目录前先把 v2 目录升到 v3。
+
+    server 启动时已经跑过一次；Skill CLI / workshop 这些非 server 入口没有 lifespan，
+    不在这里补一次就会在 `_read_catalog_unlocked` 里以「创作资产库状态损坏」炸出来。
+    延迟 import：迁移模块反向依赖 canvas_projects / jobs。
+    """
+    from character_workflow.lib.creation_assets_migration import migrate_creation_assets_to_media
+
+    migrate_creation_assets_to_media()
+
+
 def migrate_legacy_canvas_libraries() -> int:
+    migrate_creation_asset_catalog_schema()
     root = data_root.canvases_dir()
     if not root.is_dir():
         return 0
