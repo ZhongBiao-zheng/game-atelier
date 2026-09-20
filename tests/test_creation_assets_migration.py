@@ -6,6 +6,7 @@ from pathlib import Path
 from character_workflow.lib.atomic_io import atomic_write_json
 from character_workflow.lib.creation_assets import list_creation_assets
 from character_workflow.lib.creation_assets_migration import (
+    migrate_creation_assets_to_media,
     migrate_creation_assets_to_single_content,
 )
 
@@ -157,6 +158,8 @@ def test_versioned_assets_are_backed_up_and_migrated_once(isolated_data_root):
     assert (backup / "jobs" / "job-old.json").is_file()
     assert (backup / "canvases" / canvas_id / "canvas.json").is_file()
     assert (creation_assets_dir.parent / ".runtime" / "backups" / "creation-assets").is_dir()
+    # server 启动顺序：v1→v2 之后紧接 v2→v3，之后目录才可读。
+    assert migrate_creation_assets_to_media()["catalog_assets"] == 2
     restored = next(asset for asset in list_creation_assets().assets if asset.asset_id == asset_id)
     assert restored.title == "旧提示词"
     assert restored.content.segments[0].text == "最新正文"
@@ -178,3 +181,26 @@ def test_versioned_assets_are_backed_up_and_migrated_once(isolated_data_root):
     assert migrated_params["creation_asset_source_title"] == "旧提示词"
     assert "creation_prompt_asset_id" not in migrated_params
     assert migrate_creation_assets_to_single_content() is None
+
+
+def test_v2_image_assets_migrate_to_media_v3(isolated_data_root):
+    catalog = {
+        "schema_version": 2, "revision": 3, "updated_at": "2026-09-01T00:00:00Z",
+        "migrated_canvas_project_ids": [],
+        "assets": [{
+            "asset_id": "creation-asset-img1", "kind": "image", "title": "旧图",
+            "tags": [], "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-01T00:00:00Z",
+            "last_used_at": None, "project_ids": [], "recommendation": None,
+            "content": {"kind": "image", "path": "creation-assets/blobs/" + "a" * 64 + ".png",
+                        "mime_type": "image/png", "bytes": 10, "sha256": "a" * 64, "filename": "x.png"},
+        }],
+    }
+    atomic_write_json(isolated_data_root / "creation-assets" / "catalog.json", catalog)
+    from character_workflow.lib.creation_assets_migration import migrate_creation_assets_to_media
+    result = migrate_creation_assets_to_media()
+    assert result["catalog_assets"] == 1
+    listed = list_creation_assets(kind="media")
+    assert listed.assets[0].kind == "media" and listed.assets[0].content.kind == "media"
+    raw = json.loads((isolated_data_root / "creation-assets" / "catalog.json").read_text("utf-8"))
+    assert raw["schema_version"] == 3
+    assert migrate_creation_assets_to_media() is None

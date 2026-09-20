@@ -25,7 +25,8 @@ def migrate_creation_assets_to_single_content() -> dict[str, Any] | None:
     if not catalog_path.is_file():
         return None
     raw = json.loads(catalog_path.read_text(encoding="utf-8"))
-    if raw.get("schema_version") == 2:
+    # v2 之后的任何版本都已越过这一步：v2→v3 跑完后再次启动 server 必须静默跳过，不能报错。
+    if raw.get("schema_version") in {2, 3}:
         return None
     if raw.get("schema_version") != 1:
         raise ValueError("unsupported creation asset catalog schema")
@@ -65,6 +66,34 @@ def migrate_creation_assets_to_single_content() -> dict[str, Any] | None:
     }
     atomic_write_json(backup_root / "manifest.json", manifest)
     return {**manifest, "backup_path": str(backup_root)}
+
+
+def migrate_creation_assets_to_media() -> dict[str, Any] | None:
+    """v2 → v3：资产种类 image 改名 media。无备份目录之外的改动，不动 blobs。"""
+    catalog_path = data_root.creation_assets_dir() / "catalog.json"
+    if not catalog_path.is_file():
+        return None
+    raw = json.loads(catalog_path.read_text(encoding="utf-8"))
+    if raw.get("schema_version") == 3:
+        return None
+    if raw.get("schema_version") != 2:
+        raise ValueError("unsupported creation asset catalog schema")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    backup_root = data_root.runtime_dir() / "backups" / "creation-assets" / timestamp
+    backup_root.mkdir(parents=True, exist_ok=False)
+    shutil.copy2(catalog_path, backup_root / "catalog.json")
+    assets = []
+    for asset in raw.get("assets", []):
+        if asset.get("kind") == "image":
+            asset["kind"] = "media"
+            asset["content"]["kind"] = "media"
+        assets.append(asset)
+    atomic_write_json(catalog_path, {
+        **raw, "schema_version": 3, "revision": int(raw.get("revision", 0)) + 1,
+        "updated_at": datetime.now(timezone.utc).isoformat(), "assets": assets,
+    })
+    return {"migration": "creation-assets-v2-to-v3-media", "catalog_assets": len(assets),
+            "backup_path": str(backup_root)}
 
 
 def _flatten_asset(asset: dict[str, Any]) -> dict[str, Any]:

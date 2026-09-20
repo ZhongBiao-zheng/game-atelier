@@ -1666,20 +1666,33 @@ class CreationPromptAssetContent(BaseModel):
     segments: list[CreationPromptSegment] = Field(min_length=1, max_length=400)
 
 
-class CreationImageAssetContent(BaseModel):
+MEDIA_MIME_PATTERN = r"^(image|video|audio)/"
+TEAM_LIBRARY_ID_PATTERN = r"^lib_[a-f0-9]{16}$"
+TEAM_ASSET_ID_PATTERN = r"^ta_[0-9A-HJKMNP-TV-Z]{26}$"
+
+
+class CreationMediaAssetContent(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["image"]
+    kind: Literal["media"]
     path: str = Field(min_length=1)
-    mime_type: str = Field(pattern=r"^image/")
+    mime_type: str = Field(pattern=MEDIA_MIME_PATTERN)
     bytes: int = Field(ge=1)
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     filename: str = Field(min_length=1, max_length=255)
 
 
 CreationAssetContent = Annotated[
-    CreationPromptAssetContent | CreationImageAssetContent,
+    CreationPromptAssetContent | CreationMediaAssetContent,
     Field(discriminator="kind"),
 ]
+
+
+class AdoptionOrigin(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    asset_id: str = Field(min_length=1, max_length=160)
+    source_updated_at: str
+    raw_path: str | None = None
 
 
 class CreationAssetRecommendation(BaseModel):
@@ -1703,7 +1716,7 @@ class CreationAssetRecommendation(BaseModel):
 class CreationAsset(BaseModel):
     model_config = ConfigDict(extra="forbid")
     asset_id: str = Field(min_length=1, max_length=160)
-    kind: Literal["prompt", "image"]
+    kind: Literal["prompt", "media"]
     title: str = Field(min_length=1, max_length=120)
     tags: list[str] = Field(default_factory=list, max_length=20)
     created_at: str
@@ -1712,6 +1725,7 @@ class CreationAsset(BaseModel):
     content: CreationAssetContent
     project_ids: list[str] = Field(default_factory=list)
     recommendation: CreationAssetRecommendation | None = None
+    adopted_from: AdoptionOrigin | None = None
 
     @model_validator(mode="after")
     def validate_content_identity(self) -> "CreationAsset":
@@ -1726,7 +1740,7 @@ class CreationAsset(BaseModel):
 
 class CreationAssetCatalog(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     revision: int = Field(default=0, ge=0)
     updated_at: str
     assets: list[CreationAsset] = Field(default_factory=list)
@@ -1763,7 +1777,7 @@ class CreationPromptAssetUpdate(BaseModel):
     recommendation: CreationAssetRecommendation | None = None
 
 
-class CreationImagePathCreate(BaseModel):
+class CreationMediaPathCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=120)
     source_path: str = Field(min_length=1)
@@ -2396,3 +2410,138 @@ class TurnStartResult(BaseModel):
     derivative: CharacterDerivativeContext | None = None
     # v5.4.0 (A2): active 角色定稿 ← characters/<id>/canonical.json（promo/turnaround 选参考图用）。
     canonical: dict = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# 团队库（P1）：挂载目录只读共享，本机身份只有一个显示名。
+# ---------------------------------------------------------------------------
+
+
+class UserProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    display_name: str = Field(min_length=1, max_length=40)
+
+
+class TeamLibraryManifest(BaseModel):
+    """挂载目录里唯一被写入的文件 `.atelier-library.json`。"""
+    model_config = ConfigDict(extra="forbid")
+    format_version: Literal[1] = 1
+    library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    name: str = Field(min_length=1, max_length=120)
+    created_at: str
+    created_by: str = Field(min_length=1, max_length=40)
+
+
+class TeamAssetAuthor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    display_name: str = Field(min_length=1, max_length=40)
+
+
+class TeamAssetMedia(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    filename: str = Field(min_length=1, max_length=255)
+    mime_type: str = Field(pattern=MEDIA_MIME_PATTERN)
+    bytes: int = Field(ge=1)
+    sha256: str
+
+
+class TeamAssetFile(BaseModel):
+    """分享资产的 `<asset_id>/asset.json`。"""
+    model_config = ConfigDict(extra="forbid")
+    team_asset_version: Literal[1] = 1
+    asset_id: str = Field(pattern=TEAM_ASSET_ID_PATTERN)
+    kind: Literal["generation", "media", "prompt"]
+    title: str = Field(min_length=1, max_length=120)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    author: TeamAssetAuthor
+    shared_at: str
+    updated_at: str
+    media: TeamAssetMedia | None = None
+    prompt: CreationPromptAssetContent | None = None
+    snapshot: dict[str, Any] | None = None
+    origin: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_kind_payload(self) -> "TeamAssetFile":
+        if self.kind in {"generation", "media"} and self.media is None:
+            raise ValueError("媒体或生成资产必须带 media")
+        if self.kind == "prompt" and self.prompt is None:
+            raise ValueError("提示词资产必须带 prompt")
+        if self.kind == "generation" and self.snapshot is None:
+            raise ValueError("生成资产必须带 snapshot")
+        return self
+
+
+class TeamLibraryMount(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    project_id: str = Field(min_length=1, max_length=160)
+    mount_path: str
+    name: str = Field(min_length=1, max_length=120)
+    mounted_at: str
+
+
+class TeamLibraryMountFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1] = 1
+    mounts: list[TeamLibraryMount] = Field(default_factory=list)
+
+
+class TeamLibraryIndexEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1)
+    kind: Literal["generation", "media", "prompt", "raw"]
+    title: str
+    author: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    mime_type: str | None = None
+    bytes: int = Field(ge=0)
+    relative_path: str
+    sha256: str | None = None
+    updated_at: str
+    reproducible: bool
+    status: Literal["ready", "incomplete"]
+
+
+class TeamLibraryIndex(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1] = 1
+    library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    scanned_at: str
+    entries: list[TeamLibraryIndexEntry] = Field(default_factory=list)
+
+
+class TeamLibraryView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    library_id: str = Field(pattern=TEAM_LIBRARY_ID_PATTERN)
+    project_id: str = Field(min_length=1, max_length=160)
+    name: str = Field(min_length=1, max_length=120)
+    mount_path: str
+    mounted_at: str
+    reachable: bool
+    asset_count: int = Field(ge=0)
+    scanned_at: str | None = None
+
+
+class TeamLibraryAssetPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    entries: list[TeamLibraryIndexEntry] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class TeamLibraryMountRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_id: str = Field(min_length=1, max_length=160)
+    path: str = Field(min_length=1)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+class TeamAssetAdoptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class TeamAssetAdoptResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset: CreationAsset
+    created: bool

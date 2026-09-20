@@ -77,7 +77,7 @@ from character_workflow.lib.schemas import (
     CharacterDerivativeCreate,
     CharacterProjectAssign, ClipboardAttempt,
     CreationAsset, CreationAssetList, CreationAssetUseRequest,
-    CreationImagePathCreate, CreationPromptAssetCreate, CreationPromptAssetUpdate,
+    CreationMediaPathCreate, CreationPromptAssetCreate, CreationPromptAssetUpdate,
     FeedbackPost, GalleryMedia, Job, JobKind, JobParams, JobStatus, ProjectCreate,
     ProjectRename, ProjectGalleryResponse, ProjectIndexResponse,
     ProjectVideoProduction, ProjectVideoReferencesResponse,
@@ -2470,7 +2470,7 @@ def _raise_creation_asset_error(error: Exception) -> None:
 
 @router.get("/creation-assets", response_model=CreationAssetList)
 def get_creation_assets(
-    kind: Literal["prompt", "image"] | None = Query(default=None),
+    kind: Literal["prompt", "media"] | None = Query(default=None),
     scope: Literal["all", "project"] = Query(default="all"),
     project_id: str | None = Query(default=None),
 ):
@@ -2500,11 +2500,11 @@ def post_creation_prompt(payload: CreationPromptAssetCreate):
         _raise_creation_asset_error(error)
 
 
-@router.post("/creation-assets/images/from-path", response_model=CreationAsset, status_code=201)
-def post_creation_image_from_path(payload: CreationImagePathCreate):
-    from character_workflow.lib.creation_assets import create_image_asset_from_path
+@router.post("/creation-assets/media/from-path", response_model=CreationAsset, status_code=201)
+def post_creation_media_from_path(payload: CreationMediaPathCreate):
+    from character_workflow.lib.creation_assets import create_media_asset_from_path
     try:
-        return create_image_asset_from_path(
+        return create_media_asset_from_path(
             title=payload.title,
             source_path=payload.source_path,
             tags=payload.tags,
@@ -2515,23 +2515,23 @@ def post_creation_image_from_path(payload: CreationImagePathCreate):
         _raise_creation_asset_error(error)
 
 
-@router.post("/creation-assets/images/upload", response_model=CreationAsset, status_code=201)
-async def post_creation_image_upload(
+@router.post("/creation-assets/media/upload", response_model=CreationAsset, status_code=201)
+async def post_creation_media_upload(
     file: UploadFile = File(...),
     title: str = Form(...),
     tags: str = Form(default="[]"),
     project_id: str | None = Form(default=None),
     allow_existing: bool = Form(default=False),
 ):
-    from character_workflow.lib.creation_assets import create_image_asset_from_bytes
+    from character_workflow.lib.creation_assets import create_media_asset_from_bytes
     try:
         parsed_tags = json.loads(tags)
         if not isinstance(parsed_tags, list) or not all(isinstance(tag, str) for tag in parsed_tags):
             raise ValueError("tags 必须是字符串数组")
-        return create_image_asset_from_bytes(
+        return create_media_asset_from_bytes(
             title=title,
             body=await file.read(),
-            filename=file.filename or "image",
+            filename=file.filename or "media",
             mime_type=file.content_type,
             tags=parsed_tags,
             project_id=project_id,
@@ -2556,25 +2556,25 @@ def put_creation_prompt_asset(asset_id: str, payload: CreationPromptAssetUpdate)
         _raise_creation_asset_error(error)
 
 
-@router.put("/creation-assets/{asset_id}/image", response_model=CreationAsset)
-async def put_creation_image_asset(
+@router.put("/creation-assets/{asset_id}/media", response_model=CreationAsset)
+async def put_creation_media_asset(
     asset_id: str,
     title: str = Form(...),
     tags: str = Form(default="[]"),
     file: UploadFile | None = File(default=None),
 ):
-    from character_workflow.lib.creation_assets import update_image_asset_from_bytes
+    from character_workflow.lib.creation_assets import update_media_asset_from_bytes
     try:
         parsed_tags = json.loads(tags)
         if not isinstance(parsed_tags, list) or not all(isinstance(tag, str) for tag in parsed_tags):
             raise ValueError("tags 必须是字符串数组")
         body = await file.read() if file is not None else None
-        return update_image_asset_from_bytes(
+        return update_media_asset_from_bytes(
             asset_id,
             title=title,
             tags=parsed_tags,
             body=body,
-            filename=file.filename or "image" if file is not None else "image",
+            filename=file.filename or "media" if file is not None else "media",
             mime_type=file.content_type if file is not None else None,
         )
     except (json.JSONDecodeError, KeyError, ValueError) as error:
@@ -2602,9 +2602,9 @@ def delete_creation_asset_route(asset_id: str) -> Response:
 
 @router.get("/creation-assets/{asset_id}/content")
 def get_creation_asset_content(asset_id: str):
-    from character_workflow.lib.creation_assets import creation_asset_image_path
+    from character_workflow.lib.creation_assets import creation_asset_media_path
     try:
-        return FileResponse(creation_asset_image_path(asset_id))
+        return FileResponse(creation_asset_media_path(asset_id))
     except (KeyError, ValueError) as error:
         _raise_creation_asset_error(error)
 

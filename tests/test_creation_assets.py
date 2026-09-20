@@ -14,15 +14,15 @@ from character_workflow.lib.canvas_projects import (
 )
 from character_workflow.lib.creation_assets import (
     CreationAssetDuplicateError,
-    create_image_asset_from_bytes,
+    create_media_asset_from_bytes,
     create_prompt_asset,
-    creation_asset_image_path,
+    creation_asset_media_path,
     delete_creation_asset,
     list_creation_assets,
     mark_creation_asset_used,
     migrate_legacy_canvas_libraries,
     render_prompt_segments,
-    update_image_asset_from_bytes,
+    update_media_asset_from_bytes,
     update_prompt_asset,
 )
 from character_workflow.lib.schemas import (
@@ -92,8 +92,8 @@ def test_project_scope_uses_last_used_sorting():
     assert [row.asset_id for row in rows.assets] == [first.asset_id, second.asset_id]
 
 
-def test_image_assets_are_deduplicated_and_edit_in_place():
-    created = create_image_asset_from_bytes(
+def test_media_assets_are_deduplicated_and_edit_in_place():
+    created = create_media_asset_from_bytes(
         title="测试图",
         body=_PNG,
         filename="test.png",
@@ -101,7 +101,7 @@ def test_image_assets_are_deduplicated_and_edit_in_place():
         tags=["测试"],
     )
     with pytest.raises(CreationAssetDuplicateError) as duplicate:
-        create_image_asset_from_bytes(
+        create_media_asset_from_bytes(
             title="另一个名字",
             body=_PNG,
             filename="copy.png",
@@ -110,7 +110,7 @@ def test_image_assets_are_deduplicated_and_edit_in_place():
         )
     assert duplicate.value.asset_id == created.asset_id
 
-    updated = update_image_asset_from_bytes(
+    updated = update_media_asset_from_bytes(
         created.asset_id,
         title="改名后的图",
         tags=["新标签"],
@@ -119,8 +119,8 @@ def test_image_assets_are_deduplicated_and_edit_in_place():
     assert updated.content == created.content
     assert updated.title == "改名后的图"
 
-    old_blob = creation_asset_image_path(created.asset_id)
-    replaced = update_image_asset_from_bytes(
+    old_blob = creation_asset_media_path(created.asset_id)
+    replaced = update_media_asset_from_bytes(
         created.asset_id,
         title="替换后的图",
         tags=["新标签"],
@@ -129,19 +129,19 @@ def test_image_assets_are_deduplicated_and_edit_in_place():
         mime_type="image/png",
     )
     assert replaced.asset_id == created.asset_id
-    assert creation_asset_image_path(created.asset_id).is_file()
+    assert creation_asset_media_path(created.asset_id).is_file()
     assert not old_blob.exists()
 
 
 def test_physical_delete_removes_catalog_entry_and_orphan_blob():
-    created = create_image_asset_from_bytes(
+    created = create_media_asset_from_bytes(
         title="待删除",
         body=_PNG,
         filename="delete.png",
         mime_type="image/png",
         tags=[],
     )
-    blob = creation_asset_image_path(created.asset_id)
+    blob = creation_asset_media_path(created.asset_id)
     assert blob.is_file()
 
     delete_creation_asset(created.asset_id)
@@ -193,7 +193,7 @@ def test_legacy_canvas_prompts_and_images_migrate_once(isolated_data_root):
     assert migrate_legacy_canvas_libraries() == 2
     assets = list_creation_assets(scope="project", project_id=project.project_id).assets
     assert {(asset.kind, asset.title) for asset in assets} == {
-        ("image", "旧图片"),
+        ("media", "旧图片"),
         ("prompt", "旧提示词"),
     }
     assert migrate_legacy_canvas_libraries() == 0
@@ -217,7 +217,7 @@ def test_creation_asset_http_api_exposes_single_content_edit_and_delete(client: 
     assert "versions" not in updated.json()
 
     image = client.post(
-        "/api/creation-assets/images/upload",
+        "/api/creation-assets/media/upload",
         files={"file": ("dog.png", _PNG, "image/png")},
         data={"title": "地狱犬", "tags": '["角色"]'},
     )
@@ -264,7 +264,7 @@ def test_canvas_receives_disconnected_content_and_title_snapshot(client: TestCli
     assert unchanged.content_versions[node["data"]["current_version_id"]].origin.title == "镜头"
 
 
-def test_image_asset_can_become_reference_for_active_canvas_generation(client: TestClient):
+def test_media_asset_can_become_reference_for_active_canvas_generation(client: TestClient):
     project = create_canvas_project("生成画布")
     current = read_canvas_document(project.project_id)
     target = CanvasImageNode(
@@ -286,7 +286,7 @@ def test_image_asset_can_become_reference_for_active_canvas_generation(client: T
         _document_path(project.project_id),
         current.model_copy(update={"nodes": [target]}).model_dump(mode="json"),
     )
-    asset = create_image_asset_from_bytes(
+    asset = create_media_asset_from_bytes(
         title="参考图",
         body=_PNG,
         filename="reference.png",
@@ -305,3 +305,11 @@ def test_image_asset_can_become_reference_for_active_canvas_generation(client: T
     assert document["connections"][0]["source_node_id"] == inserted["id"]
     version = document["content_versions"][inserted["data"]["current_version_id"]]
     assert version["origin"] == {"kind": "creation_asset_snapshot", "title": "参考图"}
+
+
+def test_media_asset_accepts_mp4(client):
+    body = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 64
+    response = client.post("/api/creation-assets/media/upload",
+        files={"file": ("clip.mp4", body, "video/mp4")}, data={"title": "片段", "tags": "[]"})
+    assert response.status_code == 201, response.text
+    assert response.json()["content"]["mime_type"] == "video/mp4"

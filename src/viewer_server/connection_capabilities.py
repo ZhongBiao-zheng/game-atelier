@@ -93,10 +93,10 @@ GET /api/canvas/projects/{project_id}/agent/sessions/{session_id}
 DELETE /api/canvas/projects/{project_id}/agent/sessions/{session_id}
 GET /api/creation-assets
 POST /api/creation-assets/prompts
-POST /api/creation-assets/images/from-path
-POST /api/creation-assets/images/upload
+POST /api/creation-assets/media/from-path
+POST /api/creation-assets/media/upload
 PUT /api/creation-assets/{asset_id}/prompt
-PUT /api/creation-assets/{asset_id}/image
+PUT /api/creation-assets/{asset_id}/media
 POST /api/creation-assets/{asset_id}/use
 DELETE /api/creation-assets/{asset_id}
 GET /api/creation-assets/{asset_id}/content

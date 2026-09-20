@@ -191,8 +191,8 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `POST /canvas/projects/{id}/uploads` `POST /canvas/projects/{id}/media-operations`
 `POST /canvas/projects/{id}/runs` `POST /canvas/projects/{id}/runs/{reverse-prompt,mask-edit,angle,layer-decomposition}`
 `POST /canvas/projects/{id}/runs/{run_id}/{retry,cancel}`
-`POST /creation-assets/prompts`（可带 `recommendation: {mode, model, params}`，model 为模型 id，params 键须在对应 mode 的草稿白名单内）`POST /creation-assets/images/{upload,from-path}`
-`PUT /creation-assets/{asset_id}/{prompt,image}`
+`POST /creation-assets/prompts`（可带 `recommendation: {mode, model, params}`，model 为模型 id，params 键须在对应 mode 的草稿白名单内）`POST /creation-assets/media/{upload,from-path}`
+`PUT /creation-assets/{asset_id}/{prompt,media}`
 `POST /creation-assets/{asset_id}/use` `DELETE /creation-assets/{asset_id}`
 `POST /canvas/projects/{id}/creation-assets/{asset_id}/insert`
 `POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
@@ -217,7 +217,7 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `GET /canvas/projects` `/canvas/project-options` `/canvas/projects/{id}/document` `/canvas/projects/{id}/jobs`
 `GET /canvas/projects/{id}/versions/{version_id}/media`
 `GET /canvas/projects/{id}/versions/{version_id}/download`
-`GET /creation-assets` `/creation-assets/{asset_id}/content`
+`GET /creation-assets?kind={prompt,media}` `/creation-assets/{asset_id}/content`
 `GET /canvas/projects/{id}/agent/sessions` `/canvas/projects/{id}/agent/sessions/{session_id}`
 `GET /canvas/ui-preferences`
 
@@ -505,9 +505,11 @@ schema、摘要和项目内引用校验，再凭 30 分钟 token 调用 `commit`
 项目从索引消失后不可恢复。画布不提供回收区、撤销删除或恢复 API。
 
 创作资产是应用级个人数据，真源为 `creation-assets/catalog.json` 与
-`creation-assets/blobs/<sha256>.<ext>`，Studio 与所有 Canvas 共享同一资产身份。资产只有 prompt/image
-两类，每个资产只维护一份当前内容；标题、标签、提示词正文/变量和图片均由同一个编辑入口原位更新。
-图片按 SHA-256 去重，提示词重复只在 Web 提醒。资产可物理删除，删除前必须显式确认，删除后不可恢复。
+`creation-assets/blobs/<sha256>.<ext>`，Studio 与所有 Canvas 共享同一资产身份。资产只有 prompt / media
+（media 覆盖图片 / 视频 / 音频）两类，每个资产只维护一份当前内容；标题、标签、提示词正文/变量和媒体文件
+均由同一个编辑入口原位更新。媒体按 SHA-256 去重，提示词重复只在 Web 提醒。
+上传上限按类型分档：图片 50 MiB、音频 100 MiB、视频 500 MiB；插入 Canvas 生成面板作参考素材仍只收
+`image/*`。资产可物理删除，删除前必须显式确认，删除后不可恢复。
 
 Canvas 的“本项目”是 CreationAsset 上的项目关系过滤，不是项目内第二套可编辑 sidecar。首次使用资产会
 建立关系；删除画布会清理该项目关系。旧版
@@ -539,6 +541,9 @@ Canvas 合并草稿与上游参考文本并冻结生成快照时，服务端解�
 Canvas 文件复制到 `.runtime/backups/creation-assets/<UTC timestamp>/`；资产保留最新内容、恢复原归档项，
 旧引用转成标题快照。Job 与 Canvas 分别在正式锁内完成完整 schema 校验后落盘；已被淘汰的旧图片版本
 blob 只在备份完成后从活动目录清理。运行时永不读取该备份。
+
+v2 在同一次启动中紧接着迁移到 v3：资产种类 `image` 改名 `media`，只改写 `catalog.json`（备份同一份到
+`.runtime/backups/creation-assets/<UTC timestamp>/catalog.json`），blob 文件不动。`image` 不保留兼容读法。
 
 ### 角色衍生契约
 
