@@ -1137,7 +1137,7 @@ function stringList(value: unknown): string[] {
     : [];
 }
 
-function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
+export function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
   const selectedKey = keys.find((item) => item.alias === job.alias);
   const selectedModel = selectedKey?.models.find((item) => item.id === job.model);
   const isVideo = job.kind === 'video';
