@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 
 import { createStudioJob, resolveImageReferencePaths, uploadReferenceImage } from '@/api/studio';
-import { listKeys, modelModality, type KeyView } from '@/api/keys';
+import { listKeys, modelModality, type KeyModel, type KeyView } from '@/api/keys';
 import { PromptInput } from '@/components/studio/PromptInput';
 import type { FrameSlots } from '@/components/studio/VideoReferenceAssets';
 import type { RoundConfig } from '@/components/studio/RoundList';
@@ -47,6 +47,40 @@ function saveSelection(sel: SavedSelection): void {
   } catch {
     // localStorage 不可用时不影响首页输入。
   }
+}
+
+/** 该 key 下属于这个生成类型的模型（模型级 modality 优先，key 级兜底；与 PromptInput 的过滤一致）。 */
+export function modelsForKind(key: KeyView | undefined, kind: JobKind): KeyModel[] {
+  const wanted = kind === 'video' ? 'video' : 'image';
+  return (key?.models ?? []).filter((m) => modelModality(m, key) === wanted);
+}
+
+/**
+ * 切换生成类型 / keys 加载后让 alias、model 落到本类模型上，保证「界面显示的 = 实际提交的」：
+ * - 当前 key 没有本类模型 → 换到含当前模型的 key，否则第一个有本类模型的 key；
+ * - model 属于另一类 → 换成该 key 本类第一个模型；
+ * - model 为空（复刻时本机没有配方模型）→ 只收敛 alias，模型位留空等用户选；
+ * - 本机不存在的 model id 原样保留，由 PromptInput 显示「选择模型」并禁用生成。
+ * 返回 null 表示不用改。
+ */
+export function convergeModelSelection(
+  keys: KeyView[],
+  kind: JobKind,
+  alias: string,
+  model: string,
+): { alias: string; model: string } | null {
+  const current = keys.find((k) => k.alias === alias);
+  const key = modelsForKind(current, kind).length > 0
+    ? current
+    : keys.find((k) => modelsForKind(k, kind).some((m) => m.id === model))
+      ?? keys.find((k) => modelsForKind(k, kind).length > 0);
+  if (!key) return null;
+  const models = modelsForKind(key, kind);
+  const otherKind = model !== '' && !models.some((m) => m.id === model)
+    && keys.some((k) => (k.models ?? []).some((m) => m.id === model));
+  const nextModel = otherKind ? models[0].id : model;
+  if (key.alias === alias && nextModel === model) return null;
+  return { alias: key.alias, model: nextModel };
 }
 
 export function StudioCompact() {
@@ -110,7 +144,11 @@ export function StudioCompact() {
         const selected = savedKey ?? usable[0];
         setProviderAlias(selected?.alias ?? '');
         const savedModelValid = wantedModel && selected?.models.some((m) => m.id === wantedModel);
-        const nextModel = savedModelValid ? wantedModel! : selected?.models[0]?.id ?? '';
+        // 没有可恢复的模型时取本类第一个；该 key 没有本类模型就先占一个，交给收敛 effect 换 key。
+        const initialKind = draft?.kind ?? saved.kind ?? 'image';
+        const nextModel = savedModelValid
+          ? wantedModel!
+          : modelsForKind(selected, initialKind)[0]?.id ?? selected?.models[0]?.id ?? '';
         setModel(nextModel);
       })
       .catch(() => {
@@ -121,21 +159,18 @@ export function StudioCompact() {
     };
   }, [saved, draft]);
 
+  // 只在切换生成类型 / keys 加载时收敛；alias / model 不入依赖，用户手动改选不被抢回。
   useEffect(() => {
-    if (kind !== 'video' || keys.length === 0) return;
-    const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
-    const cur = keys.find((k) => k.alias === providerAlias);
-    if (cur && videoModelsOf(cur).length > 0) return;
-    const v = keys.find((k) => videoModelsOf(k).length > 0);
-    if (v) {
-      setProviderAlias(v.alias);
-      setModel(videoModelsOf(v)[0]?.id ?? '');
-    }
+    const next = convergeModelSelection(keys, kind, providerAlias, model);
+    if (!next) return;
+    setProviderAlias(next.alias);
+    setModel(next.model);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, keys]);
 
   useEffect(() => {
-    if (kind !== 'video') return;
+    // 模型未定时不按兜底 caps 钳制，选了模型再按它的能力收。
+    if (kind !== 'video' || !model) return;
     const selModel = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
     const caps = videoControlCaps(model, selModel?.protocol);
     if (!caps.modes.includes(videoMode)) setVideoMode(caps.modes[0]);

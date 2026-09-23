@@ -74,7 +74,18 @@ export type RoundState =
       cancelRequested?: boolean;
       config: RoundConfig;
     }
-  | { kind: 'done'; mode?: GenMode; jobId: string; submittedAt: string; completedAt?: string | null; imagePaths: string[]; generationCost?: number; config: RoundConfig }
+  | {
+      kind: 'done';
+      mode?: GenMode;
+      jobId: string;
+      submittedAt: string;
+      completedAt?: string | null;
+      imagePaths: string[];
+      generationCost?: number;
+      /** job.namespace === 'studio'：只有 Studio 自家出图能分享到团队库。 */
+      shareable?: boolean;
+      config: RoundConfig;
+    }
   // canceled=画师主动停止（不是错误）：同一张卡，去掉警示色。
   | { kind: 'failed'; mode?: GenMode; jobId?: string; submittedAt: string; reason: string; canceled?: boolean; config?: RoundConfig };
 
@@ -857,8 +868,7 @@ function DoneBatch({
     round.completedAt ? formatBeijingTime(round.completedAt) : undefined,
   ].filter(Boolean);
   const shownMjFlags = shownMjMetadata(round.config);
-  // skill 出图是角色正式资产，不在出图页分享（与归档同一门控）。
-  const share = round.mode !== 'skill' ? onShareResult : undefined;
+  const share = round.shareable ? onShareResult : undefined;
 
   return (
     <section className="space-y-3">

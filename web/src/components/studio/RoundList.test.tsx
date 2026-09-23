@@ -820,6 +820,7 @@ describe('RoundList 分享到团队库', () => {
     kind: 'done',
     mode: 'image',
     jobId: 'job-share-image',
+    shareable: true,
     submittedAt: '2026-09-23T10:00:00Z',
     imagePaths: ['/data/studio/job-share-image/v1.png', '/data/studio/job-share-image/v2.png'],
     config: { prompt: '立绘', model: 'gpt-image-2', kind: 'image', referenceImages: [] },
@@ -840,7 +841,7 @@ describe('RoundList 分享到团队库', () => {
 
   it('视频结果也能分享', () => {
     const onShareResult = vi.fn();
-    render(<RoundList rounds={[videoDone]} onShareResult={onShareResult} />);
+    render(<RoundList rounds={[{ ...videoDone, shareable: true } as RoundState]} onShareResult={onShareResult} />);
 
     fireEvent.click(screen.getByLabelText('分享生成结果 1'));
     expect(onShareResult).toHaveBeenCalledWith('job-vid-1', 0, '/data/studio/job-vid-1/v1.mp4', videoDone.config);
@@ -852,11 +853,13 @@ describe('RoundList 分享到团队库', () => {
     expect(screen.queryByAltText('大图')).not.toBeInTheDocument();
   });
 
-  it('skill 出图与未传回调时不显示分享', () => {
-    const { unmount } = render(<RoundList rounds={[{ ...imageBatch, mode: 'skill' }]} onShareResult={vi.fn()} />);
-    expect(screen.queryByLabelText('分享生成结果 1')).not.toBeInTheDocument();
+  it('不可分享的记录（非 studio namespace，含归档来的角色出图）与未传回调时不显示分享', () => {
+    const { unmount } = render(
+      <RoundList rounds={[{ ...imageBatch, shareable: false }, videoDone]} onShareResult={vi.fn()} />,
+    );
+    expect(screen.queryByLabelText(/分享生成结果/)).not.toBeInTheDocument();
     unmount();
-    render(<RoundList rounds={[imageBatch, videoDone]} />);
+    render(<RoundList rounds={[imageBatch]} />);
     expect(screen.queryByLabelText(/分享生成结果/)).not.toBeInTheDocument();
   });
 });

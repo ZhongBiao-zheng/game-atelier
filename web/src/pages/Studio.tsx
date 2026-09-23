@@ -31,7 +31,7 @@ import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilte
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
-import { StudioCompact } from './StudioCompact';
+import { StudioCompact, convergeModelSelection, modelsForKind } from './StudioCompact';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 import { readStudioDraft, writeStudioDraft } from './studioDraft';
 import { clampImageCount, configForJob, isOmniVideoConfig, referencePathCounts } from './studioJobConfig';
@@ -205,25 +205,20 @@ function StudioFull() {
   const reEditSequence = useRef(0);
   const selectedModelObj = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
   const videoCaps = videoControlCaps(model, selectedModelObj?.protocol);
-  // 切到视频模式时，若当前 key 没有视频模型，自动选中首个带视频模型的 key —— 让 videoCaps 立即正确（否则退化成 STANDARD_CAPS）。
+  // 切换生成类型 / keys 加载时把 alias、model 收敛到本类模型（规则见 convergeModelSelection）：
+  // 界面显示的模型就是提交的模型；复刻缺模型（model 为空）时只换 key，模型位留空。
   useEffect(() => {
-    if (kind !== 'video' || keys.length === 0) return;
-    // 复刻缺模型时模型位必须空着等用户选，不替用户挑一个。
-    if (recipeNotice?.missingModel) return;
-    const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
-    const cur = keys.find((k) => k.alias === providerAlias);
-    if (cur && videoModelsOf(cur).length > 0) return;
-    const v = keys.find((k) => videoModelsOf(k).length > 0);
-    if (v) {
-      setProviderAlias(v.alias);
-      setModel(videoModelsOf(v)[0]?.id ?? '');
-    }
-    // 仅在切到视频模式 / keys 加载时触发；providerAlias 不入依赖，避免用户改回非视频 key 时被反复抢选成死循环。
+    const next = convergeModelSelection(keys, kind, providerAlias, model);
+    if (!next) return;
+    setProviderAlias(next.alias);
+    setModel(next.model);
+    // 仅在切换类型 / keys 加载时触发；alias / model 不入依赖，避免用户改选时被反复抢回成死循环。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, keys]);
   // 切换视频模型族时把超出 caps 的选择拉回合法值（如 seedance 21:9 → kling 没有；kling 档位 ↔ seedance 无档位）。
   useEffect(() => {
-    if (kind !== 'video') return;
+    // 模型未定（复刻缺模型）时不按兜底 caps 钳制：配方的时长 / 分辨率 / 比例留到用户选了模型再按它收。
+    if (kind !== 'video' || !model) return;
     const selModel = keys.find((k) => k.alias === providerAlias)?.models.find((m) => m.id === model);
     const caps = videoControlCaps(model, selModel?.protocol);
     if (!caps.modes.includes(videoMode)) setVideoMode(caps.modes[0]);
@@ -389,7 +384,10 @@ function StudioFull() {
         const selected = savedKey ?? usable[0];
         setProviderAlias(selected?.alias ?? '');
         const savedModelValid = wantedModel && selected?.models.some((m) => m.id === wantedModel);
-        const nextModel = savedModelValid ? wantedModel! : selected?.models[0]?.id ?? '';
+        // 没有可恢复的模型时取本类第一个；该 key 没有本类模型就先占一个，交给收敛 effect 换 key。
+        const nextModel = savedModelValid
+          ? wantedModel!
+          : modelsForKind(selected, kind)[0]?.id ?? selected?.models[0]?.id ?? '';
         setModel(nextModel);
       })
       .catch(() => {
@@ -564,6 +562,8 @@ function StudioFull() {
       return;
     }
     setPending(false);
+    // 提交真正发出去了，复刻时的提示才算用完。
+    setRecipeNotice(null);
 
     setPersistedJobs((items) => upsertJob(items, job));
     // 终态翻面交给 SSE 定向更新（handleJobChanged → persistedJobs → mergePersistedRounds），
@@ -723,6 +723,7 @@ function StudioFull() {
       return;
     }
     setPending(false);
+    setRecipeNotice(null);
 
     setPersistedJobs((items) => upsertJob(items, job));
     // 同 onSubmit：终态翻面走 SSE 定向更新，无 per-job 轮询（视频分钟级，轮询放大更明显）。
@@ -850,10 +851,7 @@ function StudioFull() {
           collapsed={dockCollapsed}
           onExpandRequest={() => setClickPinned(true)}
           onShellFocusChange={setShellFocused}
-          onSubmit={(prompt, template) => {
-            setRecipeNotice(null);
-            return onSubmit(prompt, undefined, template);
-          }}
+          onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
           disabled={pending}
           value={promptText}
           onValueChange={setPromptText}
@@ -1007,6 +1005,11 @@ function StudioFull() {
 
   // 复刻 = 把生成资产的配方填进当前输入框（同「重新编辑」），不自动提交；已有输入先确认覆盖。
   function requestReproduce(asset: CreationAsset) {
+    // keys 未加载时判不出本机有没有配方模型，不能当成缺模型去填。
+    if (keys.length === 0) {
+      setAssetNotice('模型列表未加载');
+      return;
+    }
     if (hasEditorInput()) {
       setReproduceConfirm(asset);
       return;
@@ -1287,6 +1290,8 @@ function studioJobsToRounds(jobs: Job[], keys: KeyView[] = []): RoundState[] {
           submittedAt: job.submitted_at,
           completedAt: job.completed_at,
           imagePaths: job.output_paths,
+          // R6：只有 studio 自家出图能分享；归档来的角色 / UI 等记录不行。
+          shareable: job.namespace === 'studio',
           generationCost: frozenGenerationCost(job),
           config: configForJob(job, keys),
         }];

@@ -567,20 +567,44 @@ describe('PromptInput 模型不在当前列表（复刻缺模型）', () => {
     cleanup();
   });
 
-  it('切换生成类型残留的另一类模型仍显示本类第一个模型（与提交时的回落一致）', () => {
-    const mixedKey: KeyView = {
-      ...hkKey,
-      alias: 'mixed',
-      models: [
-        { name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image' },
-        { name: 'Sora 2', id: 'sora-2', modality: 'video' },
-      ],
-      modalities: ['image', 'video'],
-    };
+  const mixedKey: KeyView = {
+    ...hkKey,
+    alias: 'mixed',
+    models: [
+      { name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image' },
+      { name: 'Sora 2', id: 'sora-2', modality: 'video' },
+    ],
+    modalities: ['image', 'video'],
+  };
+
+  it('残留的另一类模型也不回落：显示「选择模型」、生成禁用（收敛由上层做）', () => {
     render(
       <PromptInput onSubmit={vi.fn()} providers={[mixedKey]} providerAlias="mixed" model="gpt-image-2" kind="video" value="跑步" />,
     );
-    expect(screen.getByLabelText('选择模型')).toHaveTextContent('Sora 2');
+    expect(screen.getByLabelText('选择模型')).toHaveTextContent('选择模型');
+    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+    cleanup();
+  });
+
+  it('点厂商按当前生成类型取该厂商第一个模型', () => {
+    const onModelChange = vi.fn();
+    const onProviderChange = vi.fn();
+    const imageFirst: KeyView = { ...mixedKey, alias: 'image-first' };
+    render(
+      <PromptInput
+        onSubmit={vi.fn()}
+        providers={[imageFirst]}
+        providerAlias="image-first"
+        model="sora-2"
+        kind="video"
+        onModelChange={onModelChange}
+        onProviderChange={onProviderChange}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('选择厂商'));
+    fireEvent.click(screen.getAllByRole('option')[0]);
+    expect(onProviderChange).toHaveBeenCalledWith('image-first');
+    expect(onModelChange).toHaveBeenCalledWith('sora-2');
     cleanup();
   });
 });
