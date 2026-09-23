@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -35,18 +36,22 @@ from character_workflow.lib.schemas import (
     CreationMediaAssetContent,
     Job,
     JobKind,
+    JobParams,
     JobStatus,
     RecipeInputRole,
     TeamAssetAuthor,
     TeamAssetFile,
     TeamAssetMedia,
     TeamAssetOrigin,
+    TeamAssetUpdateRequest,
     TeamGenerationSnapshot,
     TeamLibraryMount,
     TeamPromptContent,
     TeamRecipeInput,
 )
 from character_workflow.lib.team_library import new_ulid
+
+logger = logging.getLogger(__name__)
 
 LARGE_REFS_BYTES = 200 * 1024 * 1024
 THUMB_MAX_EDGE = 512
@@ -66,6 +71,9 @@ RECIPE_PARAM_EXCLUDE = frozenset({
     # 本机来源记录
     "creation_asset_source_title", "archived_from_job_id",
 })
+# 白名单：JobParams 声明过的字段去掉上面的排除项，再放行前端可编辑的 seed。
+# JobParams 是 extra="allow"，浏览器能塞任意键（含路径）：未声明的额外键一律不进快照。
+RECIPE_PARAM_ALLOW = frozenset(set(JobParams.model_fields) - RECIPE_PARAM_EXCLUDE) | {"seed"}
 
 # 参考在快照里的顺序（order 全局递增）；首尾帧靠 params.frame_mode 解释 reference_images 顺序。
 _JOB_REF_FIELDS: tuple[tuple[str, RecipeInputRole], ...] = (
@@ -82,6 +90,13 @@ _SHAREABLE_KINDS = frozenset({JobKind.IMAGE, JobKind.VIDEO})
 _SUFFIX_MIMES = {suffix: mime for mime, suffix in MEDIA_SUFFIXES.items()} | {".jpeg": "image/jpeg"}
 _RESERVED_NAMES = frozenset({"asset.json", "thumb.webp", "refs"})
 _UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_WINDOWS_RESERVED = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+_FILENAME_MAX_BYTES = 255
+_SUFFIX_MAX_BYTES = 16
 _AUTHOR_UNSAFE_CHARS = re.compile(r"[^\w-]")
 _COPY_CHUNK = 1024 * 1024
 
@@ -124,12 +139,30 @@ def author_dir_name(display_name: str) -> str:
 # ------------------------------------------------------------------ 文件工具
 
 
+def _fit_filename_bytes(name: str) -> str:
+    """UTF-8 超 255 字节时截断主名、保留扩展名（库目录会被 SVN 检出到任意文件系统）。"""
+    if len(name.encode("utf-8")) <= _FILENAME_MAX_BYTES:
+        return name
+    suffix = Path(name).suffix
+    if len(suffix.encode("utf-8")) > _SUFFIX_MAX_BYTES:
+        suffix = ""
+    stem = name[: len(name) - len(suffix)] if suffix else name
+    budget = _FILENAME_MAX_BYTES - len(suffix.encode("utf-8"))
+    while len(stem.encode("utf-8")) > budget:
+        stem = stem[:-1]
+    return f"{stem.rstrip(' .')}{suffix}"
+
+
 def _media_filename(name: str) -> str:
-    """成片在资产目录里的文件名：去分隔符与 Windows 非法字符，避开 asset.json / thumb.webp / refs。"""
+    """成片在资产目录里的文件名：去分隔符与 Windows 非法字符 / 保留名，避开 asset.json /
+    thumb.webp / refs，UTF-8 不超过 255 字节。"""
+    suffix = Path(name).suffix.lower()
     cleaned = _UNSAFE_FILENAME_CHARS.sub("-", Path(name).name).strip(" .")
     if not cleaned or cleaned.lower() in _RESERVED_NAMES or cleaned.startswith("."):
-        return f"media{Path(name).suffix.lower()}"
-    return cleaned
+        return f"media{suffix}" if len(suffix.encode("utf-8")) <= _SUFFIX_MAX_BYTES else "media"
+    if cleaned.split(".", 1)[0].rstrip(" ").upper() in _WINDOWS_RESERVED:
+        cleaned = f"media-{cleaned}"
+    return _fit_filename_bytes(cleaned)
 
 
 def _mime_for(path: Path) -> str:
@@ -140,11 +173,24 @@ def _mime_for(path: Path) -> str:
 
 
 def _local_file(value: str) -> Path:
-    """job 里登记的路径：绝对路径或数据根相对路径（与 /api/raw 白名单同一解析）。"""
+    """job 里登记的参考路径：绝对路径或数据根相对路径。
+
+    浏览器能经 POST /api/prompt/{job_id} 整体替换 params，所以这是最后一道闸：resolve 后
+    （symlink 已展开）必须在数据根内，不能在 .config/ 下，.runtime/ 下只认 uploads/。
+    """
     if value.startswith(("http://", "https://")):
         raise TeamShareError("not_shareable", "网络地址的参考无法打包进团队库")
+    root = data_root.resolve_data_root().resolve()
     raw = Path(value)
-    path = (raw if raw.is_absolute() else data_root.resolve_data_root() / raw).resolve()
+    path = (raw if raw.is_absolute() else root / raw).resolve()
+    try:
+        parts = path.relative_to(root).parts
+    except ValueError as error:
+        raise TeamShareError("not_shareable", "参考文件不在数据目录内") from error
+    if not parts or parts[0] == ".config" or (
+        parts[0] == ".runtime" and (len(parts) < 3 or parts[1] != "uploads")
+    ):
+        raise TeamShareError("not_shareable", "参考文件不在允许分享的目录内")
     if not path.is_file():
         raise TeamShareError("source_missing", f"本机找不到文件：{path.name}")
     return path
@@ -245,7 +291,21 @@ def _stage_input(
 
 
 def _recipe_params(params: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in params.items() if k not in RECIPE_PARAM_EXCLUDE and v is not None}
+    return {k: v for k, v in params.items() if k in RECIPE_PARAM_ALLOW and v is not None}
+
+
+def _validated_author(author: str) -> TeamAssetAuthor:
+    return TeamAssetAuthor(display_name=_required_text(author, "显示名"))
+
+
+def _validated_meta(
+    title: str, tags: list[str], author: str
+) -> tuple[str, list[str], TeamAssetAuthor]:
+    """任何 I/O 之前校验标题 / 标签 / 显示名（含长度上限）：失败不建目录、不读源。"""
+    request = TeamAssetUpdateRequest(
+        title=_required_text(title, "标题"), tags=_normalize_tags(tags)
+    )
+    return request.title, request.tags, _validated_author(author)
 
 
 # ------------------------------------------------------------------ job_output
@@ -309,12 +369,12 @@ def share_job_output(
     author: str,
     allow_large: bool = False,
 ) -> TeamAssetFile:
+    clean_title, clean_tags, team_author = _validated_meta(title, tags, author)
     job = _read_studio_job(job_id)
     output = _job_output(job, output_index)
     output_mime = _mime_for(output)
     refs = _job_refs(job)
     _check_refs_size([path for _, path, _ in refs], allow_large)
-    clean_title, clean_tags = _required_text(title, "标题"), _normalize_tags(tags)
     cost_cny, cost_basis = _job_cost(job)
 
     def stage(asset_id: str, folder: Path) -> TeamAssetFile:
@@ -333,12 +393,11 @@ def share_job_output(
         timestamp = _now()
         return TeamAssetFile(
             asset_id=asset_id, kind="generation", title=clean_title, tags=clean_tags,
-            author=TeamAssetAuthor(display_name=author), shared_at=timestamp,
-            updated_at=timestamp, media=media, snapshot=snapshot,
-            origin=TeamAssetOrigin(job_id=job.job_id),
+            author=team_author, shared_at=timestamp, updated_at=timestamp, media=media,
+            snapshot=snapshot, origin=TeamAssetOrigin(job_id=job.job_id),
         )
 
-    return _write_new_asset(mount, author, stage)
+    return _write_new_asset(mount, team_author.display_name, stage)
 
 
 # ------------------------------------------------------------ creation_asset
@@ -398,23 +457,22 @@ def share_creation_asset(
     author: str,
     allow_large: bool = False,
 ) -> TeamAssetFile:
+    clean_title, clean_tags, team_author = _validated_meta(title, tags, author)
     try:
         asset = get_creation_asset(asset_id)
     except KeyError as error:
         raise TeamShareNotFound(asset_id) from error
     payload_for = _creation_stage(asset, allow_large)
-    clean_title, clean_tags = _required_text(title, "标题"), _normalize_tags(tags)
 
     def stage(team_asset_id: str, folder: Path) -> TeamAssetFile:
         payload = payload_for(folder)
         timestamp = _now()
         return TeamAssetFile(
-            asset_id=team_asset_id, title=clean_title, tags=clean_tags,
-            author=TeamAssetAuthor(display_name=author), shared_at=timestamp,
-            updated_at=timestamp, **payload,
+            asset_id=team_asset_id, title=clean_title, tags=clean_tags, author=team_author,
+            shared_at=timestamp, updated_at=timestamp, **payload,
         )
 
-    return _write_new_asset(mount, author, stage)
+    return _write_new_asset(mount, team_author.display_name, stage)
 
 
 # ---------------------------------------------------------- update / withdraw
@@ -422,29 +480,38 @@ def share_creation_asset(
 
 def _locate_own_asset(
     mount: TeamLibraryMount, asset_id: str, author: str
-) -> tuple[Path, TeamAssetFile]:
-    """在 shared/*/<asset_id>/ 找资产：找不到 → NotFound；作者不是本人 → Forbidden。"""
+) -> tuple[Path, dict[str, Any]]:
+    """只在 shared/<author_dir_name(author)>/<asset_id>/ 找本人的资产，返回 (目录, asset.json 原始 dict)。
+
+    只在别的作者目录里有同 id → Forbidden；哪都没有 → NotFound。资产目录（或其上层）是
+    symlink 时 resolve 后不再是这个路径 → Forbidden：不能借链接改到别处的文件。
+    """
     if not re.fullmatch(TEAM_ASSET_ID_PATTERN, asset_id):
         raise TeamShareNotFound(asset_id)
-    shared_root = Path(mount.mount_path) / "shared"
-    try:
-        author_dirs = sorted(
-            p for p in shared_root.iterdir() if p.is_dir() and not p.name.startswith(".")
-        )
-    except (FileNotFoundError, NotADirectoryError) as error:
-        raise TeamShareNotFound(asset_id) from error
-    for author_dir in author_dirs:
-        folder = author_dir / asset_id
-        manifest = folder / "asset.json"
-        if not manifest.is_file():
-            continue
+    shared_root = Path(mount.mount_path).resolve() / "shared"
+    own_slug = author_dir_name(author)
+    folder = shared_root / own_slug / asset_id
+    manifest = folder / "asset.json"
+    if manifest.is_file():
+        if folder.resolve() != folder:
+            raise TeamShareForbidden(asset_id)
         try:
-            asset = TeamAssetFile.model_validate_json(manifest.read_text(encoding="utf-8"))
-        except ValueError:
-            continue
+            raw = json.loads(manifest.read_text(encoding="utf-8"))
+            asset = TeamAssetFile.model_validate(raw)
+        except ValueError as error:
+            raise TeamShareNotFound(asset_id) from error
         if asset.author.display_name != author:
             raise TeamShareForbidden(asset_id)
-        return folder, asset
+        return folder, raw
+    try:
+        others = [
+            p for p in shared_root.iterdir()
+            if p.is_dir() and not p.name.startswith(".") and p.name != own_slug
+        ]
+    except (FileNotFoundError, NotADirectoryError) as error:
+        raise TeamShareNotFound(asset_id) from error
+    if any((p / asset_id / "asset.json").is_file() for p in others):
+        raise TeamShareForbidden(asset_id)
     raise TeamShareNotFound(asset_id)
 
 
@@ -456,22 +523,24 @@ def update_shared_asset(
     tags: list[str],
     author: str,
 ) -> TeamAssetFile:
-    folder, current = _locate_own_asset(mount, asset_id, author)
-    # model_validate 而非 model_copy：新标题 / 标签要过同一套校验再落盘。
-    updated = TeamAssetFile.model_validate({
-        **_dump(current),
-        "title": _required_text(title, "标题"),
-        "tags": _normalize_tags(tags),
-        "updated_at": _now(),
-    })
-    atomic_write_json(folder / "asset.json", _dump(updated))
+    clean_title, clean_tags, team_author = _validated_meta(title, tags, author)
+    folder, raw = _locate_own_asset(mount, asset_id, team_author.display_name)
+    # 改原始 dict 而不是重新 dump 模型：别的版本多写的字段（R1 读时忽略）原样保留。
+    updated_raw = {**raw, "title": clean_title, "tags": clean_tags, "updated_at": _now()}
+    updated = TeamAssetFile.model_validate(updated_raw)
+    atomic_write_json(folder / "asset.json", updated_raw)
     return updated
 
 
 def withdraw_shared_asset(mount: TeamLibraryMount, *, asset_id: str, author: str) -> None:
-    folder, _ = _locate_own_asset(mount, asset_id, author)
+    team_author = _validated_author(author)
+    folder, _ = _locate_own_asset(mount, asset_id, team_author.display_name)
     trash = folder.parent / f".tmp-del-{asset_id}"
     if trash.exists():
-        shutil.rmtree(trash)
+        shutil.rmtree(trash, ignore_errors=True)
     os.replace(folder, trash)
-    shutil.rmtree(trash)
+    # 改名成功即已撤回（索引跳过点目录）；删不干净只留一个点目录，不让撤回失败。
+    try:
+        shutil.rmtree(trash)
+    except OSError:
+        logger.warning("撤回 %s 后清理 %s 失败", asset_id, trash, exc_info=True)

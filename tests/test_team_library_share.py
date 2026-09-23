@@ -13,9 +13,11 @@ from PIL import Image
 
 from character_workflow.lib import team_library_share as share
 from character_workflow.lib.creation_assets import (
+    blob_path_for,
     create_generation_asset,
     create_media_asset_from_bytes,
     create_prompt_asset,
+    creation_asset_input_path,
     store_media_blob,
 )
 from character_workflow.lib.jobs import new_job_id, save_job
@@ -31,6 +33,7 @@ from character_workflow.lib.schemas import (
     TeamLibraryMount,
 )
 from character_workflow.lib.studio_jobs import studio_output_dir
+from character_workflow.lib.team_library_adopt import adopt_team_asset
 from character_workflow.lib.team_library_index import scan_library
 from character_workflow.lib.team_library_share import (
     RECIPE_PARAM_EXCLUDE,
@@ -248,13 +251,6 @@ def test_share_video_job_packs_video_and_audio_refs_without_thumbnail(isolated_d
     assert written.snapshot.params == {"duration": 5, "frame_mode": "first"}
 
 
-def test_shared_job_output_is_indexed_ready(isolated_data_root, mount):
-    job = _studio_job(outputs=[("1.png", _png((3, 3, 3)))])
-    written = share_job_output(
-        mount, job_id=job.job_id, output_index=0, title="t", tags=[], author=_AUTHOR
-    )
-    entry = next(e for e in scan_library(mount).entries if e.id == written.asset_id)
-    assert entry.status == "ready" and entry.kind == "generation" and entry.author == _AUTHOR
 
 
 @pytest.mark.parametrize(
@@ -526,3 +522,424 @@ def test_author_dir_name_has_no_separators():
 def test_author_dir_name_normalizes_to_nfc():
     decomposed = "é"
     assert author_dir_name(decomposed) == "é"
+
+
+# ================================================================ fix round 1
+
+
+def _index_entry(mount, asset_id):
+    return next(e for e in scan_library(mount).entries if e.id == asset_id)
+
+
+# ---------------------------------------------------- C1 参考路径的最后一道闸
+
+
+@pytest.mark.parametrize(
+    "where", ["outside", "relative_escape", "config", "runtime_jobs", "runtime_root", "symlink_out"]
+)
+def test_share_job_rejects_reference_outside_allowed_dirs(
+    isolated_data_root, mount, tmp_path, where
+):
+    body = _png((60, 60, 60))
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(body)
+    if where == "outside":
+        value = str(outside)
+    elif where == "relative_escape":
+        value = "../outside.png"
+    elif where == "config":
+        ref = isolated_data_root / ".config" / "secret.png"
+        ref.write_bytes(body)
+        value = str(ref)
+    elif where == "runtime_jobs":
+        ref = isolated_data_root / ".runtime" / "jobs" / "x.png"
+        ref.parent.mkdir(parents=True, exist_ok=True)
+        ref.write_bytes(body)
+        value = str(ref)
+    elif where == "runtime_root":
+        ref = isolated_data_root / ".runtime" / "x.png"
+        ref.write_bytes(body)
+        value = ".runtime/x.png"
+    else:
+        link = isolated_data_root / ".runtime" / "uploads" / "link.png"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(outside)
+        value = str(link)
+    job = _studio_job(outputs=[("1.png", _png((61, 61, 61)))], params={"reference_images": [value]})
+
+    with pytest.raises(TeamShareError) as caught:
+        share_job_output(
+            mount, job_id=job.job_id, output_index=0, title="t", tags=[], author=_AUTHOR
+        )
+    assert caught.value.code == "not_shareable"
+    assert not (Path(mount.mount_path) / "shared").exists()
+
+
+def test_share_job_accepts_reference_from_uploads_and_studio_outputs(isolated_data_root, mount):
+    upload_body, studio_body = _png((62, 62, 62)), _png((63, 63, 63))
+    upload = _write_upload(isolated_data_root, "u.png", upload_body)
+    earlier = studio_output_dir(new_job_id()) / "1.png"
+    earlier.write_bytes(studio_body)
+    job = _studio_job(
+        outputs=[("1.png", _png((64, 64, 64)))],
+        params={"reference_images": [str(upload), str(earlier)]},
+    )
+    written = share_job_output(
+        mount, job_id=job.job_id, output_index=0, title="t", tags=[], author=_AUTHOR
+    )
+    assert [r.sha256 for r in written.snapshot.inputs] == [_sha(upload_body), _sha(studio_body)]
+
+
+# ------------------------------------------------ I1 分享 → 索引 → 采用 端到端
+
+
+def test_shared_job_output_round_trips_through_index_and_adoption(isolated_data_root, mount):
+    ref_a, ref_b = _png((70, 0, 0)), _png((0, 70, 0))
+    path_a = _write_upload(isolated_data_root, "ra.png", ref_a)
+    path_b = _write_upload(isolated_data_root, "rb.png", ref_b)
+    job = _studio_job(
+        outputs=[("1.png", _png((71, 71, 71)))],
+        params={"reference_images": [str(path_a)], "mask_image": str(path_b),
+                "actual_cost_cny": 0.21},
+    )
+    written = share_job_output(
+        mount, job_id=job.job_id, output_index=0, title="红猫", tags=["猫"], author=_AUTHOR
+    )
+
+    entry = _index_entry(mount, written.asset_id)
+    assert entry.status == "ready" and entry.kind == "generation" and entry.author == _AUTHOR
+    assert entry.model == "gpt-image-2" and entry.cost_cny == 0.21
+
+    adopted, created = adopt_team_asset(mount=mount, entry=entry, project_id="canvas-p1")
+    assert created and adopted.kind == "generation"
+    for order, body in enumerate([ref_a, ref_b]):
+        path, _mime = creation_asset_input_path(adopted.asset_id, order)
+        assert path.read_bytes() == body
+
+
+def test_adopted_generation_asset_can_be_shared_again(isolated_data_root, mount):
+    ref_body = _png((80, 0, 80))
+    ref = _write_upload(isolated_data_root, "r.png", ref_body)
+    job = _studio_job(
+        outputs=[("1.png", _png((81, 81, 81)))],
+        params={"reference_images": [str(ref)], "estimated_cost_cny": 0.4},
+    )
+    first = share_job_output(
+        mount, job_id=job.job_id, output_index=0, title="紫", tags=[], author=_AUTHOR
+    )
+    adopted, _ = adopt_team_asset(
+        mount=mount, entry=_index_entry(mount, first.asset_id), project_id="canvas-p1"
+    )
+
+    again = share_creation_asset(
+        mount, asset_id=adopted.asset_id, title="紫 改", tags=[], author="小李"
+    )
+
+    entry = _index_entry(mount, again.asset_id)
+    assert entry.status == "ready" and entry.author == "小李"
+    assert entry.model == "gpt-image-2" and entry.cost_cny == 0.4
+    assert again.snapshot.cost_basis == "estimated"
+    assert [r.sha256 for r in again.snapshot.inputs] == [r.sha256 for r in first.snapshot.inputs]
+    folder = Path(mount.mount_path) / "shared" / "小李" / again.asset_id
+    assert (folder / again.snapshot.inputs[0].path).read_bytes() == ref_body
+    readopted, created = adopt_team_asset(mount=mount, entry=entry, project_id="canvas-p1")
+    assert created
+    path, _mime = creation_asset_input_path(readopted.asset_id, 0)
+    assert path.read_bytes() == ref_body
+
+
+# ------------------------------------------- I2 编辑 / 撤回只认本人目录
+
+
+def _foreign_copy(mount, asset_id: str, author: str = "小李") -> Path:
+    folder = Path(mount.mount_path) / "shared" / author / asset_id
+    folder.mkdir(parents=True)
+    (folder / "asset.json").write_text(json.dumps({
+        "team_asset_version": 1, "asset_id": asset_id, "kind": "prompt", "title": "别人的",
+        "tags": [], "author": {"display_name": author}, "shared_at": "2026-09-23T00:00:00Z",
+        "updated_at": "2026-09-23T00:00:00Z",
+        "prompt": {"kind": "prompt", "segments": [{"kind": "text", "text": "x"}]},
+    }, ensure_ascii=False), encoding="utf-8")
+    return folder
+
+
+def test_asset_only_in_other_author_dir_is_forbidden(isolated_data_root, mount):
+    asset_id = "ta_01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    foreign = _foreign_copy(mount, asset_id)
+    before = (foreign / "asset.json").read_text(encoding="utf-8")
+    with pytest.raises(TeamShareForbidden):
+        update_shared_asset(mount, asset_id=asset_id, title="抢", tags=[], author=_AUTHOR)
+    with pytest.raises(TeamShareForbidden):
+        withdraw_shared_asset(mount, asset_id=asset_id, author=_AUTHOR)
+    assert (foreign / "asset.json").read_text(encoding="utf-8") == before
+
+
+def test_update_and_withdraw_touch_only_own_copy_when_other_dir_has_same_id(
+    isolated_data_root, mount
+):
+    own = _shared(mount)
+    foreign = _foreign_copy(mount, own.asset_id)
+    before = (foreign / "asset.json").read_text(encoding="utf-8")
+
+    updated = update_shared_asset(mount, asset_id=own.asset_id, title="新", tags=[], author=_AUTHOR)
+    assert updated.title == "新" and _read_asset(mount, own.asset_id).title == "新"
+    withdraw_shared_asset(mount, asset_id=own.asset_id, author=_AUTHOR)
+
+    assert not _asset_dir(mount, own.asset_id).exists()
+    assert (foreign / "asset.json").read_text(encoding="utf-8") == before
+
+
+def test_symlinked_asset_dir_is_rejected(isolated_data_root, mount, tmp_path):
+    asset_id = "ta_01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    target = _foreign_copy(
+        TeamLibraryMount(**{**mount.model_dump(), "mount_path": str(tmp_path / "elsewhere")}),
+        asset_id, author=_AUTHOR,
+    )
+    own_root = Path(mount.mount_path) / "shared" / author_dir_name(_AUTHOR)
+    own_root.mkdir(parents=True)
+    (own_root / asset_id).symlink_to(target, target_is_directory=True)
+    before = (target / "asset.json").read_text(encoding="utf-8")
+
+    with pytest.raises(TeamShareForbidden):
+        update_shared_asset(mount, asset_id=asset_id, title="改", tags=[], author=_AUTHOR)
+    with pytest.raises(TeamShareForbidden):
+        withdraw_shared_asset(mount, asset_id=asset_id, author=_AUTHOR)
+    assert (target / "asset.json").read_text(encoding="utf-8") == before
+
+
+# ------------------------------------------------------ I3 params 白名单
+
+
+def test_unknown_param_keys_never_reach_snapshot(isolated_data_root, mount):
+    job = _studio_job(
+        outputs=[("1.png", _png((90, 90, 90)))],
+        params={"size": "1024x1024", "seed": 42, "legacy_ref": "/etc/passwd",
+                "mj_sw": 100},
+    )
+    written = share_job_output(
+        mount, job_id=job.job_id, output_index=0, title="t", tags=[], author=_AUTHOR
+    )
+    assert written.snapshot.params == {"size": "1024x1024", "seed": 42, "mj_sw": 100}
+    assert share.RECIPE_PARAM_ALLOW.isdisjoint(RECIPE_PARAM_EXCLUDE)
+
+
+def test_generation_asset_share_drops_unknown_param_keys(isolated_data_root, mount):
+    output = store_media_blob(_png((91, 91, 91)), "o.png", "image/png")
+    snapshot = GenerationRecipe(
+        mode="image", model="m", final_prompt="p", params={"size": "1x1", "legacy_ref": "/x"},
+        submitted_at="2026-09-23T00:00:00Z",
+    )
+    asset = create_generation_asset(title="g", tags=[], media=output, snapshot=snapshot)
+    written = share_creation_asset(mount, asset_id=asset.asset_id, title="g", tags=[], author=_AUTHOR)
+    assert written.snapshot.params == {"size": "1x1"}
+
+
+# --------------------------------------------- M1 元数据先校验、不建目录
+
+
+@pytest.mark.parametrize(
+    ("title", "tags", "author"),
+    [
+        ("   ", [], _AUTHOR),
+        ("x" * 121, [], _AUTHOR),
+        ("t", [f"t{i}" for i in range(21)], _AUTHOR),
+        ("t", ["x" * 41], _AUTHOR),
+        ("t", [], ""),
+        ("t", [], "   "),
+        ("t", [], "x" * 41),
+    ],
+)
+def test_invalid_metadata_fails_before_any_io(
+    isolated_data_root, mount, monkeypatch, title, tags, author
+):
+    ref = _write_upload(isolated_data_root, "r.png", _png((95, 95, 95)))
+    job = _studio_job(outputs=[("1.png", _png((96, 96, 96)))], params={"reference_images": [str(ref)]})
+    monkeypatch.setattr(share, "LARGE_REFS_BYTES", 1)
+    prompt = create_prompt_asset("p", [{"kind": "text", "text": "x"}], [])
+
+    for call in (
+        lambda: share_job_output(mount, job_id=job.job_id, output_index=0, title=title,
+                                 tags=tags, author=author),
+        lambda: share_job_output(mount, job_id="job-missing", output_index=0, title=title,
+                                 tags=tags, author=author),
+        lambda: share_creation_asset(mount, asset_id=prompt.asset_id, title=title, tags=tags,
+                                     author=author),
+    ):
+        with pytest.raises(ValueError) as caught:
+            call()
+        assert not isinstance(caught.value, (TeamShareTooLarge, TeamShareError))
+    assert not (Path(mount.mount_path) / "shared").exists()
+
+
+def test_invalid_update_metadata_leaves_file_untouched(isolated_data_root, mount):
+    original = _shared(mount)
+    before = (_asset_dir(mount, original.asset_id) / "asset.json").read_text(encoding="utf-8")
+    with pytest.raises(ValueError):
+        update_shared_asset(mount, asset_id=original.asset_id, title="x" * 121, tags=[],
+                            author=_AUTHOR)
+    after = (_asset_dir(mount, original.asset_id) / "asset.json").read_text(encoding="utf-8")
+    assert after == before
+
+
+# ------------------------------------------------ M2 编辑保留未知字段
+
+
+def test_update_preserves_unknown_fields(isolated_data_root, mount):
+    original = _shared(mount)
+    manifest = _asset_dir(mount, original.asset_id) / "asset.json"
+    raw = json.loads(manifest.read_text(encoding="utf-8"))
+    raw["future_field"] = {"from": "新版本"}
+    raw["prompt"]["future_segment_meta"] = 1
+    manifest.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+
+    update_shared_asset(mount, asset_id=original.asset_id, title="新", tags=["b"], author=_AUTHOR)
+
+    saved = json.loads(manifest.read_text(encoding="utf-8"))
+    assert saved["future_field"] == {"from": "新版本"}
+    assert saved["prompt"]["future_segment_meta"] == 1
+    assert saved["title"] == "新" and saved["tags"] == ["b"]
+    assert saved["updated_at"] != raw["updated_at"] and saved["shared_at"] == raw["shared_at"]
+
+
+# ------------------------------------------- M3 撤回后清理失败不抛
+
+
+def test_withdraw_succeeds_when_cleanup_fails(isolated_data_root, mount, monkeypatch, caplog):
+    original = _shared(mount)
+
+    def fail_rmtree(path, *args, **kwargs):
+        if kwargs.get("ignore_errors"):
+            return None
+        raise OSError("busy")
+
+    monkeypatch.setattr(share.shutil, "rmtree", fail_rmtree)
+    with caplog.at_level("WARNING", logger=share.__name__):
+        withdraw_shared_asset(mount, asset_id=original.asset_id, author=_AUTHOR)
+    assert not _asset_dir(mount, original.asset_id).exists()
+    assert (_asset_dir(mount, original.asset_id).parent / f".tmp-del-{original.asset_id}").is_dir()
+    assert any("清理" in record.message for record in caplog.records)
+    entries = [e for e in scan_library(mount).entries if e.id == original.asset_id]
+    assert entries == []
+
+
+# ---------------------------------------------------------- M5 补测
+
+
+def test_all_seven_reference_fields_keep_their_order(isolated_data_root, mount):
+    bodies = {name: _png((i * 20, 0, 0)) for i, name in enumerate("abcdefg", start=1)}
+    paths = {name: _write_upload(isolated_data_root, f"{name}.png", body)
+             for name, body in bodies.items()}
+    video = _write_upload(isolated_data_root, "v.mp4", _FAKE_MP4)
+    audio = _write_upload(isolated_data_root, "a.mp3", _FAKE_MP3)
+    job = _studio_job(
+        outputs=[("1.png", _png((1, 2, 3)))],
+        params={
+            "mj_oref": [str(paths["g"])],
+            "mj_cref": [str(paths["f"])],
+            "mj_sref": [str(paths["e"])],
+            "mask_image": str(paths["d"]),
+            "reference_audios": [str(audio)],
+            "reference_videos": [str(video)],
+            "reference_images": [str(paths["a"]), str(paths["b"])],
+        },
+    )
+    written = share_job_output(
+        mount, job_id=job.job_id, output_index=0, title="t", tags=[], author=_AUTHOR
+    )
+    inputs = written.snapshot.inputs
+    assert [r.order for r in inputs] == list(range(8))
+    assert [(r.role, r.kind) for r in inputs] == [
+        ("reference", "image"), ("reference", "image"), ("reference", "video"),
+        ("reference", "audio"), ("mask", "image"), ("mj_sref", "image"),
+        ("mj_cref", "image"), ("mj_oref", "image"),
+    ]
+    expected = [bodies["a"], bodies["b"], _FAKE_MP4, _FAKE_MP3,
+                bodies["d"], bodies["e"], bodies["f"], bodies["g"]]
+    assert [r.sha256 for r in inputs] == [_sha(body) for body in expected]
+
+
+def test_media_asset_blob_missing_is_source_missing(isolated_data_root, mount):
+    asset = create_media_asset_from_bytes(
+        title="m", body=_png((100, 1, 1)), filename="m.png", mime_type="image/png", tags=[]
+    )
+    blob_path_for(asset.content.sha256, asset.content.mime_type).unlink()
+    with pytest.raises(TeamShareError) as caught:
+        share_creation_asset(mount, asset_id=asset.asset_id, title="m", tags=[], author=_AUTHOR)
+    assert caught.value.code == "source_missing"
+    assert not (Path(mount.mount_path) / "shared").exists()
+
+
+@pytest.mark.parametrize("missing", ["output", "reference"])
+def test_generation_asset_blob_missing_is_source_missing(isolated_data_root, mount, missing):
+    output = store_media_blob(_png((101, 1, 1)), "o.png", "image/png")
+    ref = store_media_blob(_png((102, 1, 1)), "r.png", "image/png")
+    snapshot = GenerationRecipe(
+        mode="image", model="m", final_prompt="p", submitted_at="2026-09-23T00:00:00Z",
+        inputs=[RecipeInput(order=0, role="reference", kind="image", sha256=ref.sha256,
+                            mime_type="image/png")],
+    )
+    asset = create_generation_asset(title="g", tags=[], media=output, snapshot=snapshot)
+    gone = output if missing == "output" else ref
+    blob_path_for(gone.sha256, gone.mime_type).unlink()
+    with pytest.raises(TeamShareError) as caught:
+        share_creation_asset(mount, asset_id=asset.asset_id, title="g", tags=[], author=_AUTHOR)
+    assert caught.value.code == "source_missing"
+    assert not (Path(mount.mount_path) / "shared").exists()
+
+
+def test_copy_failure_mid_stage_cleans_tmp(isolated_data_root, mount, monkeypatch):
+    refs = [_write_upload(isolated_data_root, f"r{i}.png", _png((110 + i, 0, 0))) for i in range(3)]
+    job = _studio_job(
+        outputs=[("1.png", _png((120, 0, 0)))],
+        params={"reference_images": [str(path) for path in refs]},
+    )
+    real_copy = share._copy_hashed
+    calls = {"n": 0}
+
+    def flaky_copy(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise OSError("io error")
+        return real_copy(*args, **kwargs)
+
+    monkeypatch.setattr(share, "_copy_hashed", flaky_copy)
+    with pytest.raises(OSError, match="io error"):
+        share_job_output(
+            mount, job_id=job.job_id, output_index=0, title="t", tags=[], author=_AUTHOR
+        )
+    author_root = Path(mount.mount_path) / "shared" / author_dir_name(_AUTHOR)
+    assert list(author_root.iterdir()) == []
+
+
+# ------------------------------------------------------ M6 成片文件名
+
+
+@pytest.mark.parametrize(
+    "name", ["CON.png", "nul", "com1.tar.png", "Aux .png", "LPT9.JPG", "prn"],
+)
+def test_media_filename_avoids_windows_reserved_names(name):
+    cleaned = share._media_filename(name)
+    stem = cleaned.split(".", 1)[0].rstrip(" ").upper()
+    assert stem not in {"CON", "PRN", "AUX", "NUL", "COM1", "LPT9"}
+    assert cleaned.endswith(Path(name).suffix)
+
+
+def test_media_filename_keeps_ordinary_names():
+    assert share._media_filename("console.png") == "console.png"
+    assert share._media_filename("董卓.png") == "董卓.png"
+
+
+def test_media_filename_truncates_to_255_utf8_bytes_keeping_extension():
+    cleaned = share._media_filename("猫" * 100 + ".png")
+    assert len(cleaned.encode("utf-8")) <= 255
+    assert cleaned.endswith(".png") and cleaned.startswith("猫")
+
+
+def test_share_media_with_long_name_writes_truncated_file(isolated_data_root, mount):
+    body = _png((130, 0, 0))
+    asset = create_media_asset_from_bytes(
+        title="长", body=body, filename="猫" * 100 + ".png", mime_type="image/png", tags=[]
+    )
+    written = share_creation_asset(mount, asset_id=asset.asset_id, title="长", tags=[], author=_AUTHOR)
+    assert len(written.media.filename.encode("utf-8")) <= 255
+    assert (_asset_dir(mount, written.asset_id) / written.media.filename).read_bytes() == body
