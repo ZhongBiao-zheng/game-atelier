@@ -223,7 +223,7 @@ it('renders one independent selected toolbar for every canvas node type', () => 
     expect(toolbar).toHaveAttribute('data-canvas-node-toolbar', node.id);
     if (emptyMediaTitles.has(node.title)) {
       expect(within(toolbar).getAllByRole('button').map(button => button.getAttribute('aria-label')))
-        .toEqual([`上传${node.title}`]);
+        .toEqual([`上传${node.title}`, `隐藏 ${node.title} 的内容`]);
       continue;
     }
     if (node.type !== 'group') expect(within(toolbar).queryByRole('button', { name: `删除 ${node.title}` })).not.toBeInTheDocument();
@@ -817,4 +817,25 @@ it('loads node-card images at the tier above the card width, not the original', 
     'src',
     '/api/canvas/projects/canvas-test/versions/version-image/media?w=512',
   );
+});
+
+it('hide toggles the node hidden flag and flips the button label', () => {
+  const context = nodeContext();
+  const { rerender } = render(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: nodes[0] }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: '隐藏 文本 的内容' }));
+  expect(context.recordHistory).toHaveBeenCalled();
+  const updater = (context.updateNode as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as (node: CanvasNode) => CanvasNode;
+  expect(updater(nodes[0]).hidden).toBe(true);
+
+  rerender(
+    <CanvasNodeContext.Provider value={context}>
+      <NodeCard data={{ domain: { ...nodes[0], hidden: true } }} selected />
+    </CanvasNodeContext.Provider>,
+  );
+  expect(screen.getByRole('button', { name: '显示 文本 的内容' })).toBeInTheDocument();
+  expect(document.querySelector('[data-canvas-node-hidden="true"]')).not.toBeNull();
 });

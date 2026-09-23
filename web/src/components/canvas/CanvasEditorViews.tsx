@@ -13,7 +13,7 @@ import {
   type OnResize,
   type OnResizeEnd,
 } from '@xyflow/react';
-import { ArrowLeftRight, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowLeftRight, Check, ChevronRight, CircleHelp, Download, Ellipsis, Eye, EyeOff, FileAudio, FileDown, FileImage, FileUp, FileVideo, Layers3, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Pause, Pencil, Play, Plus, Sparkles, Square, Trash2, Type, Unlock, Volume2, VolumeX, X } from 'lucide-react';
 import {
   createContext, forwardRef, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo,
   useRef, useState,
@@ -481,6 +481,12 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
     restoreTextEditingFocus();
   }
 
+  function toggleHidden() {
+    if (!context) return;
+    context.recordHistory();
+    context.updateNode(node.id, candidate => ({ ...candidate, hidden: !candidate.hidden }));
+  }
+
   function setTextScale(direction: -1 | 1) {
     if (!context || node.type !== 'text') return;
     const scales = ['xs', 'sm', 'base'] as const;
@@ -668,6 +674,13 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
               onIncreaseText={() => setTextScale(1)}
             />
           )}
+          <MediaToolButton
+            label={node.hidden ? `显示 ${node.title} 的内容` : `隐藏 ${node.title} 的内容`}
+            text={node.hidden ? '显示' : '隐藏'}
+            onClick={toggleHidden}
+          >
+            {node.hidden ? <Eye /> : <EyeOff />}
+          </MediaToolButton>
         </div>
       </NodeToolbar>
       {node.type === 'image' && mediaCandidates.length > 0 && (
@@ -750,8 +763,11 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
             {canvasNodeRunDisplayError(context.mediaReplaceError.message, '替换失败，请稍后重试')}
           </p>
         )}
-        <div className={cn('h-full', node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-secondary/20', node.type === 'text' ? 'min-h-32'
-          : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44')}>
+        <div
+          data-canvas-node-hidden={node.hidden ? 'true' : undefined}
+          className={cn('h-full', node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-secondary/20', node.type === 'text' ? 'min-h-32'
+            : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44', node.hidden && 'canvas-node-hidden')}
+        >
           {node.type === 'text' && (
             content?.kind === 'text' && (isEditingInlineText || promptVariableParts(content.text).some(part => part.kind === 'variable')) ? (
               <div className="nodrag nowheel h-full overflow-y-auto" onPointerDown={event => event.stopPropagation()} onBlur={event => {

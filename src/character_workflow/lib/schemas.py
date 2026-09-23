@@ -793,6 +793,8 @@ class CanvasNodeBase(BaseModel):
     position: CanvasPoint
     size: CanvasSize | None = None
     z_index: int = Field(default=0, ge=-10_000, le=10_000)
+    # 内容打码：只影响显示，连线 / 导出 / 参考照常。随文档保存。
+    hidden: bool = False
 
 
 class CanvasTextNode(CanvasNodeBase):

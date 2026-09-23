@@ -158,6 +158,8 @@ interface CanvasNodeBase {
   position: CanvasPoint;
   size?: CanvasSize | null;
   z_index: number;
+  /** 内容打码：只影响显示，连线 / 导出 / 参考照常。 */
+  hidden?: boolean;
 }
 
 export interface CanvasTextNode extends CanvasNodeBase {

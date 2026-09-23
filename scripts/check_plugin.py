@@ -24,6 +24,7 @@ EXCLUDED_TOP_LEVEL = {
     ".ruff_cache",
     ".runtime",
     ".scratch",  # Local QA/spec artifacts are git-ignored and never shipped.
+    ".superpowers",  # subagent-driven-development 的本地 ledger / 截图，git-ignored。
     ".venv",
     "archive",
     "characters",
