@@ -102,6 +102,7 @@ describe('CreationAssetPanel', () => {
     render(<CreationAssetPanel onClose={onClose} onUsePrompt={onUsePrompt} onUseMedia={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /火山口三头犬/ }));
+    expect(mocks.list.mock.calls[0][0]).toEqual(expect.objectContaining({ kind: 'prompt' }));
     fireEvent.click(screen.getByRole('button', { name: '使用' }));
 
     await waitFor(() => expect(onUsePrompt).toHaveBeenCalledWith(
@@ -387,6 +388,8 @@ describe('CreationAssetPanel', () => {
     );
 
     const card = await screen.findByRole('button', { name: /雪山白犬/ });
+    // 生成资产只能在不按 kind 过滤的列表里拿到；改回 kind: 'media' 会把它们漏掉。
+    expect(mocks.list.mock.calls[0][0]).toHaveProperty('kind', undefined);
     expect(screen.queryByRole('button', { name: /火山口三头犬/ })).not.toBeInTheDocument();
     expect(card).toHaveTextContent('white-dog.png');
     expect(container.querySelector('img')).toHaveAttribute('src', creationAssetMediaUrl('asset-generation'));
@@ -421,7 +424,7 @@ describe('CreationAssetPanel', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /雪山白犬/ }));
     expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+    fireEvent.click(screen.getByRole('button', { name: '删除资产' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
 
     await waitFor(() => expect(mocks.deleteAsset).toHaveBeenCalledWith('asset-generation'));

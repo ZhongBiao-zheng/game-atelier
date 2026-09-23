@@ -64,6 +64,27 @@ describe('teamLibraries api', () => {
     expect(String(fetchMock.mock.calls[0][0])).toBe('/api/team-libraries?project_id=canvas-a');
   });
 
+  it('keeps an empty project id scoped instead of listing all libraries', async () => {
+    fetchMock.mockResolvedValue(json([], 200));
+    await listTeamLibraries('');
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/team-libraries?project_id=');
+  });
+
+  it('share reports a non-JSON success body in Chinese', async () => {
+    fetchMock.mockResolvedValue(new Response('<html>', { status: 201 }));
+    await expect(shareToTeamLibrary(LIB, {
+      source: { kind: 'creation_asset', asset_id: 'asset-1' }, title: 't', tags: [],
+    })).rejects.toThrow('分享到团队库失败：服务端返回的不是合法 JSON（HTTP 201）');
+  });
+
+  it('share treats a 413 without refs_too_large as a generic error', async () => {
+    fetchMock.mockResolvedValue(json({ detail: { code: 'other', bytes: 1 } }, 413));
+    const error = await shareToTeamLibrary(LIB, {
+      source: { kind: 'creation_asset', asset_id: 'asset-1' }, title: 't', tags: [],
+    }).catch((caught: unknown) => caught);
+    expect(error).not.toBeInstanceOf(TeamRefsTooLargeError);
+  });
+
   it('shares a job output and returns the index entry', async () => {
     fetchMock.mockResolvedValue(json({ id: ASSET }, 201));
     const request = { source: { kind: 'job_output' as const, job_id: 'job-1', output_index: 0 }, title: '白犬', tags: ['角色'] };

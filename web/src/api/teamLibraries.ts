@@ -55,7 +55,7 @@ export function saveProfile(displayName: string): Promise<UserProfile> {
 
 /** 省略 projectId = 本机全部挂载（按库去重）。 */
 export function listTeamLibraries(projectId?: string): Promise<TeamLibraryView[]> {
-  const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+  const query = projectId !== undefined ? `?project_id=${encodeURIComponent(projectId)}` : '';
   return requestJson<TeamLibraryView[]>(`${base}${query}`, '读取团队库');
 }
 
@@ -136,6 +136,15 @@ async function errorCode(response: Response): Promise<{ code?: string; bytes?: n
   return body?.detail ?? null;
 }
 
+/** 与 requestJson 同款兜底：响应体不是 JSON 时给中文报错，而不是抛 SyntaxError。 */
+async function readJson<T>(response: Response, what: string): Promise<T> {
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new Error(`${what}失败：服务端返回的不是合法 JSON（HTTP ${response.status}）`);
+  }
+}
+
 /** 分享 / 编辑 / 撤回共用的错误映射：先认稳定错误码，其余走通用中文报错。 */
 async function teamWrite(url: string, what: string, init: RequestInit): Promise<Response> {
   let response: Response;
@@ -147,7 +156,9 @@ async function teamWrite(url: string, what: string, init: RequestInit): Promise<
   if (response.ok) return response;
   const detail = await errorCode(response);
   if (response.status === 409 && detail?.code === 'profile_required') throw new ProfileRequiredError();
-  if (response.status === 413 && typeof detail?.bytes === 'number') throw new TeamRefsTooLargeError(detail.bytes);
+  if (response.status === 413 && detail?.code === 'refs_too_large' && typeof detail.bytes === 'number') {
+    throw new TeamRefsTooLargeError(detail.bytes);
+  }
   if (response.status === 403 && detail?.code === 'not_author') throw new TeamNotAuthorError();
   throw await apiError(response, what);
 }
@@ -161,7 +172,7 @@ export async function shareToTeamLibrary(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(request),
   });
-  return response.json() as Promise<TeamLibraryIndexEntry>;
+  return readJson<TeamLibraryIndexEntry>(response, '分享到团队库');
 }
 
 export async function updateTeamAsset(
@@ -174,7 +185,7 @@ export async function updateTeamAsset(
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  return response.json() as Promise<TeamLibraryIndexEntry>;
+  return readJson<TeamLibraryIndexEntry>(response, '编辑团队资产');
 }
 
 export async function withdrawTeamAsset(libraryId: string, assetId: string): Promise<void> {

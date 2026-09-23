@@ -794,8 +794,8 @@ function AssetDetail({ asset, busy, onUse, onEdit, onDelete }: {
       <div className="mt-4 flex gap-2">
         <Button className="flex-1" disabled={busy} onClick={onUse}>使用</Button>
         {onEdit && <Button variant="outline" disabled={busy} onClick={onEdit}>编辑</Button>}
-        {onDelete && <Button variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy} onClick={onDelete}>删除</Button>}
       </div>
+      {onDelete && <div className="mt-4"><DeleteAssetButton disabled={busy} onClick={onDelete} /></div>}
     </div>
   );
 }
