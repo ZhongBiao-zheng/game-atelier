@@ -639,10 +639,10 @@
   overscroll-behavior: none;
 }
 
-/* 节点内容打码：高斯模糊 28px（约等于 240px 示例图上的 20px），外扩 1.15 倍吃掉模糊透明边；
+/* 节点内容打码：高斯模糊 36px，外扩 1.15 倍吃掉模糊透明边；
    只作用于内容区，标题、工具栏、连接点不受影响。 */
 .canvas-node-hidden {
-  filter: blur(28px);
+  filter: blur(36px);
   transform: scale(1.15);
   pointer-events: none;
   user-select: none;
