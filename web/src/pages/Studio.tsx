@@ -23,7 +23,7 @@ import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } f
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { imageFamily } from '@/lib/modelFamily';
 import { promptToAssetSegments } from '@/lib/promptVariables';
-import { hasSrefCode, MJ_DEFAULTS, mjParamsFromJob, mjParamsToJob, type MjParams } from '@/lib/mjParams';
+import { hasSrefCode, MJ_DEFAULTS, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
@@ -32,6 +32,7 @@ import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 import { readStudioDraft, writeStudioDraft } from './studioDraft';
+import { clampImageCount, configForJob, isOmniVideoConfig, referencePathCounts } from './studioJobConfig';
 import { routeStudioMediaAsset } from './studioAssetRouting';
 import { creationAssetMediaUrl } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
@@ -990,7 +991,7 @@ function StudioFull() {
         if (config.duration) setDuration(config.duration);
         if (config.videoQuality) setVideoQuality(config.videoQuality);
         if (config.n) setVideoCount(clampImageCount(config.n));
-        setVideoMode(isOmniVideoConfig(config) ? 'omni' : 'firstlast');
+        setVideoMode(isOmniVideoConfig(config.frameMode, referencePathCounts(config)) ? 'omni' : 'firstlast');
         setGenerateAudio(!!config.generateAudio);
       } else {
         setSizeParams({ size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
@@ -1005,7 +1006,7 @@ function StudioFull() {
       setVideoFrames({ first: null, last: null });
       setMjRefs(EMPTY_MJ_REFS);
       if (targetKind === 'video') {
-        if (isOmniVideoConfig(config)) {
+        if (isOmniVideoConfig(config.frameMode, referencePathCounts(config))) {
           setReferenceImages(refs.images);
           setReferenceVideos(refs.videos);
           setReferenceAudios(refs.audios);
@@ -1046,7 +1047,7 @@ function StudioFull() {
       if (config.n) setVideoCount(clampImageCount(config.n));
       // 旧 job 的 frame_mode 不回填用户态（提交时按帧数推导）；只同步生成方式：
       // 带视频/音频参考、或参考图没有帧语义（无 frame_mode / auto）→ 全能参考，否则首尾帧。
-      setVideoMode(isOmniVideoConfig(config) ? 'omni' : 'firstlast');
+      setVideoMode(isOmniVideoConfig(config.frameMode, referencePathCounts(config)) ? 'omni' : 'firstlast');
       setGenerateAudio(!!config.generateAudio);
     } else {
       setSizeParams({ size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
@@ -1100,103 +1101,6 @@ async function fetchRoundReferences(config: RoundConfig, jobId?: string) {
     fetchGroup(config.mjRefPaths?.oref ?? [], 'omni-ref'),
   ]);
   return { images, videos, audios, sref, cref, oref };
-}
-
-function isOmniVideoConfig(config: RoundConfig): boolean {
-  return Boolean(
-    config.referenceVideos?.length
-    || config.referenceAudios?.length
-    || (config.referenceImages.length && (!config.frameMode || config.frameMode === 'auto'))
-  );
-}
-
-function referenceImagesFor(job: Job): string[] {
-  const params = job.params ?? {};
-  const refs = [
-    job.source_image,
-    ...(Array.isArray(params.reference_images) ? params.reference_images : []),
-  ].filter((value): value is string => typeof value === 'string' && value.length > 0);
-  // 同一资产可能因 data root 迁移（旧仓 game-ui-ai-workflow → 分离后的 game-atelier）以不同前缀
-  // 重复登记：source_image 存新路径（可渲染）、reference_images 仍是旧仓路径（文件已不在 → 裂图）。
-  // 按尾段（角色/槽位/文件名）去重并保留首个（source_image 在前＝有效路径），消除历史里
-  // 「一张有效 + 一张裂图」的重复缩略图。本地上传走 .runtime/uploads/<uuid> 尾段唯一，不会误并。
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const ref of refs) {
-    const key = ref.startsWith('http') ? ref : ref.split('/').slice(-3).join('/');
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(ref);
-  }
-  return out;
-}
-
-function stringList(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string' && item.length > 0)
-    : [];
-}
-
-export function configForJob(job: Job, keys: KeyView[] = []): RoundConfig {
-  const selectedKey = keys.find((item) => item.alias === job.alias);
-  const selectedModel = selectedKey?.models.find((item) => item.id === job.model);
-  const isVideo = job.kind === 'video';
-  // 记录统一后更多 job 流经此处（含 skill 出图 / 乐观提交回包），params 缺省给 {} 兜底，免渲染期崩溃。
-  const p = job.params ?? {};
-  return {
-    prompt: job.prompt ?? '',
-    kind: isVideo ? 'video' : 'image',
-    alias: job.alias,
-    provider: job.provider,
-    model: job.model,
-    modelName: selectedModel?.name,
-    ratio: typeof p.ratio === 'string' ? p.ratio : undefined,
-    resolution: ['512', '1K', '2K', '4K'].includes(p.resolution ?? '') ? p.resolution as RoundConfig['resolution'] : undefined,
-    size: typeof p.size === 'string' ? p.size : undefined,
-    sizeMode: imageSizeMode(p),
-    n: typeof p.n === 'number' ? clampImageCount(p.n) : undefined,
-    quality: (p.quality === 'low' || p.quality === 'medium'
-      || p.quality === 'high' || p.quality === 'auto')
-      ? p.quality
-      : undefined,
-    referenceImages: referenceImagesFor(job),
-    sourceAssetTitle: typeof p.creation_asset_source_title === 'string'
-      ? p.creation_asset_source_title
-      : undefined,
-    // 后端跑 job 时回写的静默改写提示（尺寸归一化 / 参考图截断）——两端 schema 早有此字段。
-    warnings: stringList(p.warnings),
-    // MJ 参数从 job 还原：编辑导入 / 再次生成不带上就等于拿默认值重出一张不一样的图。
-    ...(imageFamily(job.model) === 'midjourney'
-      ? {
-          mjParams: mjParamsFromJob(p),
-          mjFlags: typeof p.mj_flags === 'string' ? p.mj_flags : undefined,
-          mjRefPaths: {
-            sref: stringList(p.mj_sref),
-            cref: stringList(p.mj_cref),
-            oref: stringList(p.mj_oref),
-          },
-        }
-      : {}),
-    // 视频参数：再次生成时从原 job 还原（上面只认图片分辨率档位，视频的 720p/1080p 存这里）。
-    // referenceVideos/Audios 给空数组而非 undefined，避免 onSubmitVideo 的 ?? 回落到当前表单文件。
-    ...(isVideo
-      ? {
-          duration: typeof p.duration === 'number' ? p.duration : undefined,
-          videoResolution: typeof p.resolution === 'string' ? p.resolution : undefined,
-          videoQuality: (p.mode === 'std' || p.mode === 'pro') ? p.mode : undefined,
-          frameMode: p.frame_mode,
-          generateAudio: p.generate_audio === true,
-          referenceVideos: stringList(p.reference_videos),
-          referenceAudios: stringList(p.reference_audios),
-        }
-      : {}),
-  };
-}
-
-function clampImageCount(value: unknown): number {
-  const parsed = typeof value === 'number' ? value : parseInt(String(value ?? 1), 10);
-  if (!Number.isFinite(parsed)) return 1;
-  return Math.min(4, Math.max(1, Math.floor(parsed)));
 }
 
 function hydrateRoundModelName(round: RoundState, keys: KeyView[]): RoundState {

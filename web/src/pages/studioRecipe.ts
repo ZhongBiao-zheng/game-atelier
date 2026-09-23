@@ -2,7 +2,7 @@ import type { KeyView } from '@/api/keys';
 import type { RoundConfig } from '@/components/studio/RoundList';
 import type { GenerationRecipe, RecipeInput, RecipeInputRole } from '@/schema/creationAssets';
 import type { Job, JobParams } from '@/schema/jobs';
-import { configForJob } from './Studio';
+import { configForJob } from './studioJobConfig';
 
 export interface RecipeModelMatch { alias: string; model: string }
 
@@ -32,7 +32,8 @@ export function resolveRecipeModel(recipe: GenerationRecipe, keys: KeyView[]): R
 export function recipeToDraft(recipe: GenerationRecipe, keys: KeyView[]): RecipeDraft {
   const match = resolveRecipeModel(recipe, keys);
   const matchedKey = match ? keys.find((key) => key.alias === match.alias) : undefined;
-  const base = configForJob(syntheticJob(recipe, match?.alias ?? null, matchedKey?.provider ?? recipe.provider), keys);
+  // 缺模型时 alias / provider 都置空：配方里的是出图那台机器的，本机没有对应 key。
+  const base = configForJob(syntheticJob(recipe, match?.alias ?? null, matchedKey?.provider ?? null), keys);
   const hasMask = recipe.inputs.some((item) => item.role === 'mask');
   const config: RoundConfig = {
     ...base,

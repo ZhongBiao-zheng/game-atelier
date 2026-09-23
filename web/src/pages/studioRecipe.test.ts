@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { KeyView } from '@/api/keys';
 import type { GenerationRecipe, RecipeInput } from '@/schema/creationAssets';
 import type { Job } from '@/schema/jobs';
-import { configForJob } from './Studio';
+import { configForJob, isOmniVideoConfig } from './studioJobConfig';
 import { recipeToDraft, resolveRecipeModel } from './studioRecipe';
 
 function key(alias: string, provider: string, modelIds: string[]): KeyView {
@@ -153,6 +153,28 @@ describe('recipeToDraft', () => {
     });
   });
 
+  it('视频配方 frame_mode auto + 视频参考：保留 auto，按输入数量判为全能参考', () => {
+    const r = recipe({
+      mode: 'video',
+      model: 'doubao-seedance-2-0-260128',
+      provider: 'volces',
+      alias: 'ark',
+      params: { duration: 5, frame_mode: 'auto' },
+      inputs: [input(0, 'reference', 'image'), input(1, 'reference', 'video')],
+    });
+    const draft = recipeToDraft(r, [key('ark', 'volces', ['doubao-seedance-2-0-260128'])]);
+    expect(draft.config.frameMode).toBe('auto');
+    expect(draft.config.referenceVideos).toEqual([]);
+    expect(draft.inputs.images.map((item) => item.order)).toEqual([0]);
+    expect(draft.inputs.videos.map((item) => item.order)).toEqual([1]);
+    const counts = {
+      images: draft.inputs.images.length,
+      videos: draft.inputs.videos.length,
+      audios: draft.inputs.audios.length,
+    };
+    expect(isOmniVideoConfig(draft.config.frameMode, counts)).toBe(true);
+  });
+
   it('inputs 按 role 与 kind 分组，组内按 order 升序', () => {
     const r = recipe({
       inputs: [
@@ -200,11 +222,12 @@ describe('recipeToDraft', () => {
     expect(video.config.referenceAudios).toEqual([]);
   });
 
-  it('缺模型：model 为 null，config 保留配方模型 id、不带 alias', () => {
+  it('缺模型：model 为 null，config 保留配方模型 id、不带 alias 与 provider', () => {
     const draft = recipeToDraft(recipe(), [key('work', 'openai', ['dall-e-3'])]);
     expect(draft.model).toBeNull();
     expect(draft.config.model).toBe('gpt-image-2');
     expect(draft.config.alias).toBeNull();
+    expect(draft.config.provider).toBeNull();
     expect(draft.config.modelName).toBeUndefined();
   });
 
