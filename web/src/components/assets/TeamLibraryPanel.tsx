@@ -31,8 +31,8 @@ export interface TeamLibraryPanelProps {
   projectId: string;
   /** 采用完成后交给调用方：由它决定提示与后续动作。 */
   onAdopted: (result: TeamAssetAdoptResponse, entry: TeamLibraryIndexEntry) => void;
-  /** 没有挂载库时的「挂载」出口。 */
-  onOpenSettings: () => void;
+  /** 没有挂载库时的「挂载」出口；不给就不显示按钮。 */
+  onOpenSettings?: () => void;
   className?: string;
 }
 
@@ -233,8 +233,8 @@ export function TeamLibraryPanel({
   if (libraries.length === 0) {
     return (
       <div className={cn('grid place-items-center gap-3 p-8 text-center', className)}>
-        <p className="text-xs text-muted-foreground">这个项目还没有团队库</p>
-        <Button size="sm" variant="outline" onClick={onOpenSettings}>挂载</Button>
+        <p className="text-xs text-muted-foreground">这个画布还没有团队库</p>
+        {onOpenSettings && <Button size="sm" variant="outline" onClick={onOpenSettings}>挂载</Button>}
       </div>
     );
   }

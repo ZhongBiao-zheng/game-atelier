@@ -23,7 +23,6 @@ import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } f
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { imageFamily } from '@/lib/modelFamily';
 import { promptToAssetSegments } from '@/lib/promptVariables';
-import { maxReferenceImages } from '@/lib/referenceLimits';
 import { hasSrefCode, MJ_DEFAULTS, mjParamsFromJob, mjParamsToJob, type MjParams } from '@/lib/mjParams';
 import { videoControlCaps, type VideoMode, type VideoQuality } from '@/lib/videoControlCaps';
 import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilters } from '@/lib/historyFilters';
@@ -33,6 +32,7 @@ import { useGalleryHidden } from '@/hooks/useGalleryHidden';
 import { StudioCompact } from './StudioCompact';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 import { readStudioDraft, writeStudioDraft } from './studioDraft';
+import { routeStudioMediaAsset } from './studioAssetRouting';
 import { creationAssetMediaUrl } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
 import type { CreationAsset, CreationMediaAssetContent } from '@/schema/creationAssets';
@@ -97,7 +97,7 @@ function StudioFull() {
   const [shellFocused, setShellFocused] = useState(false);
   const [clickPinned, setClickPinned] = useState(false);
   const [reuseLimitNotice, setReuseLimitNotice] = useState(false);
-  const [adoptNotice, setAdoptNotice] = useState<string | null>(null);
+  const [assetNotice, setAssetNotice] = useState<string | null>(null);
   const [, setLocation] = useLocation();
   const [archiveRequest, setArchiveRequest] = useState<StudioArchiveRequest | null>(null);
   const dockCollapsed = scrolledUp && !shellFocused && !clickPinned;
@@ -230,10 +230,10 @@ function StudioFull() {
   }, [reuseLimitNotice]);
 
   useEffect(() => {
-    if (!adoptNotice) return;
-    const timer = window.setTimeout(() => setAdoptNotice(null), 2400);
+    if (!assetNotice) return;
+    const timer = window.setTimeout(() => setAssetNotice(null), 2400);
     return () => window.clearTimeout(timer);
-  }, [adoptNotice]);
+  }, [assetNotice]);
 
   // 图卡左下角「编辑」→ 把这张生成结果取回成 File，塞进「当前模式下真正会被提交的那个槽位」。
   // 一律塞 referenceImages 是错的：MJ 和视频首尾帧模式下通用参考图栏位是隐藏的，
@@ -783,12 +783,12 @@ function StudioFull() {
             <ChevronsDown size={13} aria-hidden />
             回到底部
           </button>
-        {adoptNotice && (
+        {assetNotice && (
           <span
             role="status"
             className="absolute bottom-full left-0 mb-2 rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
           >
-            {adoptNotice}
+            {assetNotice}
           </span>
         )}
         {reuseLimitNotice && (
@@ -909,30 +909,47 @@ function StudioFull() {
             setClickPinned(true);
           }}
           onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
-          onOpenSettings={() => setLocation('/settings')}
-          onTeamAssetAdopted={result => setAdoptNotice(result.created ? '已加入资产库' : '已在你的资产库')}
+          onOpenSettings={canvasId => setLocation(`/settings?canvas=${encodeURIComponent(canvasId)}`)}
+          onTeamAssetAdopted={result => setAssetNotice(result.created ? '已加入资产库' : '已在你的资产库')}
         />
       )}
       <StudioArchiveDialog request={archiveRequest} onClose={() => setArchiveRequest(null)} />
     </div>
   );
 
+  // 媒体资产「使用」：按 mime 落到当前模式下真正会被提交的槽位；收不了的类型不取文件，只给一句提示。
   async function addCreationAssetReference(asset: CreationAsset, content: CreationMediaAssetContent) {
+    const route = routeStudioMediaAsset(content.mime_type, {
+      kind,
+      videoMode,
+      model,
+      videoCaps: kind === 'video' ? videoCaps : null,
+      counts: {
+        images: referenceImages.length,
+        mj: mjRefs.image.length,
+        videos: referenceVideos.length,
+        audios: referenceAudios.length,
+      },
+    });
+    if ('notice' in route) {
+      setAssetNotice(route.notice);
+      return;
+    }
     try {
       const response = await connectionFetch(creationAssetMediaUrl(asset.asset_id));
       if (!response.ok) throw await apiError(response, '读取媒体资产');
       const blob = await response.blob();
       const file = new File([blob], content.filename, { type: content.mime_type });
-      setReferenceImages(current => [...current, file].slice(0, maxReferenceImagesForCurrentModel()));
+      if (route.target === 'frame') setVideoFrames(current => ({ ...current, first: file }));
+      else if (route.target === 'mj') setMjRefs(current => ({ ...current, image: [...current.image, file] }));
+      else if (route.target === 'videos') setReferenceVideos(current => [...current, file]);
+      else if (route.target === 'audios') setReferenceAudios(current => [...current, file]);
+      else setReferenceImages(current => [...current, file]);
       setPromptAssetSourceTitle(asset.title);
       setClickPinned(true);
     } catch (error) {
       alert(error instanceof Error ? error.message : String(error));
     }
-  }
-
-  function maxReferenceImagesForCurrentModel(): number {
-    return maxReferenceImages(model);
   }
 
   async function deleteFailedRound(jobId: string) {

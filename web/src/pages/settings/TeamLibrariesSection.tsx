@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { HelpCircle } from 'lucide-react';
+import { useSearch } from 'wouter';
 
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { chooseFolder } from '@/api/folders';
@@ -22,6 +23,9 @@ const rowButton =
   'rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
 export function TeamLibrariesSection() {
+  const search = useSearch();
+  // 从画布 / 创作台团队栏的「挂载」跳来时带 ?canvas=<id>：只在首次载入时用作默认选中。
+  const [requestedCanvas] = useState(() => new URLSearchParams(search).get('canvas'));
   const [projects, setProjects] = useState<CanvasProject[]>([]);
   const [projectId, setProjectId] = useState('');
   const [libraries, setLibraries] = useState<TeamLibraryView[]>([]);
@@ -42,13 +46,14 @@ export function TeamLibrariesSection() {
           return;
         }
         setProjects(list);
-        setProjectId(current => current || list[0]?.project_id || '');
+        const requested = list.find(project => project.project_id === requestedCanvas);
+        setProjectId(current => current || requested?.project_id || list[0]?.project_id || '');
       })
       .catch(e => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [requestedCanvas]);
 
   const reload = useCallback(async (id: string, cancelled?: () => boolean) => {
     const dropped = () => cancelled?.() ?? false;

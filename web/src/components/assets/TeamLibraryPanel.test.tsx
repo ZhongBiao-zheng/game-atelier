@@ -25,6 +25,12 @@ describe('TeamLibraryPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
     expect(onOpenSettings).toHaveBeenCalled();
   });
+  it('hides the mount button when there is no mount exit', async () => {
+    api.listTeamLibraries.mockResolvedValue([]);
+    render(<TeamLibraryPanel projectId="p1" onAdopted={vi.fn()} />);
+    expect(await screen.findByText('这个画布还没有团队库')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '挂载' })).not.toBeInTheDocument();
+  });
   it('lists entries grouped by tree and filters by kind and query', async () => {
     api.listTeamLibraries.mockResolvedValue([library]);
     api.listTeamAssets.mockResolvedValue({ entries: [raw, shared], next_cursor: null });

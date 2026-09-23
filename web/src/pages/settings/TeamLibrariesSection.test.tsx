@@ -138,4 +138,25 @@ describe('TeamLibrariesSection', () => {
     fireEvent.click(screen.getByRole('button', { name: '扫描' }));
     await waitFor(() => expect(mockRescan).toHaveBeenCalledWith('lib_0123456789abcdef'));
   });
+
+  it('按 ?canvas= 默认选中画布，不在列表里就回落第一个', async () => {
+    mockProjects.mockResolvedValue([
+      { schema_version: 2, project_id: 'p1', name: '买牌三国', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
+      { schema_version: 2, project_id: 'p2', name: '列车短片', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
+    ] as never);
+    try {
+      window.history.replaceState(null, '', '/settings?canvas=p2');
+      const first = render(<TeamLibrariesSection />);
+      await waitFor(() => expect(screen.getByLabelText('画布项目')).toHaveValue('p2'));
+      await waitFor(() => expect(mockList).toHaveBeenCalledWith('p2'));
+      expect(mockList).not.toHaveBeenCalledWith('p1');
+      first.unmount();
+
+      window.history.replaceState(null, '', '/settings?canvas=gone');
+      render(<TeamLibrariesSection />);
+      await waitFor(() => expect(screen.getByLabelText('画布项目')).toHaveValue('p1'));
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
+  });
 });

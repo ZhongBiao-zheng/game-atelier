@@ -230,6 +230,42 @@ describe('Studio', () => {
     );
   });
 
+  it('媒体资产按类型分流：图片模式点「使用」音频不进参考图，给一句提示', async () => {
+    const audio = {
+      asset_id: 'asset-bgm', kind: 'media', title: '战鼓', tags: [], project_ids: [],
+      created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z', last_used_at: null,
+      content: { kind: 'media', path: 'creation-assets/blobs/a.mp3', mime_type: 'audio/mpeg', bytes: 3, sha256: 'a'.repeat(64), filename: 'drum.mp3' },
+    };
+    const image = { ...audio, asset_id: 'asset-img', title: '城堡', content: { ...audio.content, mime_type: 'image/png', filename: 'castle.png' } };
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (href.startsWith('/api/canvas/project-options')) return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (href.startsWith('/api/creation-assets?')) return Promise.resolve({ ok: true, json: async () => ({ revision: 1, assets: [audio, image] }) } as any);
+      if (href === '/api/creation-assets/asset-bgm/use') return Promise.resolve({ ok: true, json: async () => audio } as any);
+      if (href === '/api/creation-assets/asset-img/use') return Promise.resolve({ ok: true, json: async () => image } as any);
+      if (href === '/api/creation-assets/asset-img/content') return Promise.resolve({ ok: true, blob: async () => new Blob(['png'], { type: 'image/png' }) } as any);
+      return fallback(url, init);
+    });
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    fireEvent.click(screen.getByLabelText('打开创作资产'));
+    fireEvent.click(await screen.findByRole('button', { name: /媒体/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /战鼓/ }));
+    fireEvent.click(screen.getByRole('button', { name: '使用' }));
+    expect(await screen.findByText('当前模式不支持音频参考')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/creation-assets/asset-bgm/content')).toBe(false);
+
+    fireEvent.click(screen.getByLabelText('打开创作资产'));
+    fireEvent.click(await screen.findByRole('button', { name: /媒体/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /城堡/ }));
+    fireEvent.click(screen.getByRole('button', { name: '使用' }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/creation-assets/asset-img/content')).toBe(true));
+    await waitFor(() => expect(screen.queryByLabelText('添加参考图')).not.toBeInTheDocument());
+  });
+
   it('资产入口与展开态生成按钮同尺寸、同底部高度', () => {
     renderStudio();
 

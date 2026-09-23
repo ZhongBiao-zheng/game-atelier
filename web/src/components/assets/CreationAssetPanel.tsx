@@ -97,7 +97,8 @@ export interface CreationAssetPanelProps {
     renderedPrompt: string,
   ) => void;
   onUseMedia: (asset: CreationAsset, content: CreationMediaAssetContent) => void;
-  onOpenSettings?: () => void;
+  /** 团队栏「挂载」出口，参数是团队栏当前的画布项目；不给就不显示挂载按钮。 */
+  onOpenSettings?: (projectId: string) => void;
   onTeamAssetAdopted?: (result: TeamAssetAdoptResponse, entry: TeamLibraryIndexEntry) => void;
 }
 
@@ -566,7 +567,7 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
               key={teamProjectId}
               projectId={teamProjectId}
               onAdopted={(result, entry) => { void refresh(); onTeamAssetAdopted?.(result, entry); }}
-              onOpenSettings={onOpenSettings ?? (() => {})}
+              onOpenSettings={onOpenSettings ? () => onOpenSettings(teamProjectId) : undefined}
               className="min-h-0 flex-1"
             />
           )}

@@ -50,7 +50,7 @@ import {
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from 'react';
-import { Link } from 'wouter';
+import { Link, useLocation } from 'wouter';
 
 import {
   cancelCanvasRun,
@@ -422,6 +422,7 @@ function CanvasEditorInner({
   onSwitchProject: (projectId: string) => void;
 }) {
   const narrowViewport = useNarrowCanvasViewport();
+  const [, setLocation] = useLocation();
   const [document, setDocument] = useState<CanvasDocument | null>(null);
   const [projects, setProjects] = useState<Array<{ project_id: string; name: string }>>([]);
   const [keys, setKeys] = useState<KeyView[]>([]);
@@ -4854,6 +4855,8 @@ function CanvasEditorInner({
                 selectedNode && selectedDraft ? selectedNode.id : undefined,
               );
             }}
+            onOpenSettings={canvasId => setLocation(`/settings?canvas=${encodeURIComponent(canvasId)}`)}
+            onTeamAssetAdopted={result => announceToolNotice(result.created ? '已加入资产库' : '已在你的资产库')}
           />
         )}
 

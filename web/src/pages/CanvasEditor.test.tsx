@@ -21,8 +21,8 @@ import {
 } from '@/api/canvas';
 import { getCanvasUiPreferences } from '@/api/canvasUi';
 import { listKeys } from '@/api/keys';
-import { insertCreationAssetIntoCanvas } from '@/api/creationAssets';
-import { adoptTeamAsset } from '@/api/teamLibraries';
+import { insertCreationAssetIntoCanvas, listCreationAssets } from '@/api/creationAssets';
+import { adoptTeamAsset, listTeamAssets, listTeamLibraries } from '@/api/teamLibraries';
 import { DEFAULT_CANVAS_UI_PREFERENCES } from '@/components/canvas/canvasImageToolbar';
 import type { Job } from '@/schema/jobs';
 import type {
@@ -312,12 +312,12 @@ vi.mock('@/api/canvasUi', () => ({
 
 vi.mock('@/api/creationAssets', async importOriginal => {
   const original = await importOriginal<typeof import('@/api/creationAssets')>();
-  return { ...original, insertCreationAssetIntoCanvas: vi.fn() };
+  return { ...original, insertCreationAssetIntoCanvas: vi.fn(), listCreationAssets: vi.fn() };
 });
 
 vi.mock('@/api/teamLibraries', async importOriginal => {
   const original = await importOriginal<typeof import('@/api/teamLibraries')>();
-  return { ...original, adoptTeamAsset: vi.fn() };
+  return { ...original, adoptTeamAsset: vi.fn(), listTeamLibraries: vi.fn(), listTeamAssets: vi.fn() };
 });
 
 vi.mock('@/api/keys', async importOriginal => {
@@ -1223,6 +1223,42 @@ it('adopts a team asset dropped on the canvas and inserts it', async () => {
   expect(drop.dataset.dropEffect).toBe('copy');
   await waitFor(() => expect(adoptTeamAsset).toHaveBeenCalledWith('lib_0123456789abcdef', 'ta-entry', 'canvas-one'));
   await waitFor(() => expect(vi.mocked(insertCreationAssetIntoCanvas).mock.calls.at(-1)?.[0].assetId).toBe('ca1'));
+});
+
+async function openTeamTab() {
+  render(<CanvasEditor projectId="canvas-one" onBack={vi.fn()} onSwitchProject={vi.fn()} />);
+  await screen.findByLabelText('画布编辑器 列车短片');
+  fireEvent.click(screen.getByRole('button', { name: '媒体资产' }));
+  fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+}
+
+it('team tab mount exit opens settings on the current canvas', async () => {
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
+  vi.mocked(listTeamLibraries).mockResolvedValue([]);
+  try {
+    await openTeamTab();
+    fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
+    await waitFor(() => expect(`${window.location.pathname}${window.location.search}`).toBe('/settings?canvas=canvas-one'));
+  } finally {
+    window.history.replaceState(null, '', '/');
+  }
+});
+
+it('announces a team asset adopted from the panel', async () => {
+  vi.mocked(listCreationAssets).mockResolvedValue({ revision: 1, assets: [] });
+  vi.mocked(listTeamLibraries).mockResolvedValue([{
+    library_id: 'lib_0123456789abcdef', project_id: 'canvas-one', name: '角色参考', mount_path: '/x',
+    mounted_at: '', reachable: true, asset_count: 1, scanned_at: null,
+  }]);
+  vi.mocked(listTeamAssets).mockResolvedValue({ entries: [{
+    id: 'raw_a', kind: 'raw', title: 'castle.png', author: null, tags: [], mime_type: 'image/png', bytes: 1,
+    relative_path: 'concept/castle.png', sha256: null, updated_at: '2026-09-20T00:00:00Z', reproducible: false, status: 'ready',
+  }], next_cursor: null });
+  vi.mocked(adoptTeamAsset).mockResolvedValueOnce({ asset: { asset_id: 'ca1' } as never, created: true });
+  await openTeamTab();
+  fireEvent.click(await screen.findByRole('button', { name: '采用' }));
+  expect(await screen.findByText('已加入资产库')).toBeInTheDocument();
+  expect(adoptTeamAsset).toHaveBeenCalledWith('lib_0123456789abcdef', 'raw_a', 'canvas-one');
 });
 
 function mockFileUpload(file: File, revision: number) {

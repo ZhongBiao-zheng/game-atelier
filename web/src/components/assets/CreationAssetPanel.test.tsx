@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createRef } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { creationAssetMediaUrl } from '@/api/creationAssets';
 import type { CreationAsset } from '@/schema/creationAssets';
 import { promptFromAsset } from '@/lib/promptVariables';
 import {
@@ -49,7 +50,11 @@ vi.mock('@/api/creationAssets', async importOriginal => {
 });
 
 vi.mock('./TeamLibraryPanel', () => ({
-  TeamLibraryPanel: ({ projectId }: { projectId: string }) => <div data-testid="team-panel" data-project-id={projectId} />,
+  TeamLibraryPanel: ({ projectId, onOpenSettings }: { projectId: string; onOpenSettings?: () => void }) => (
+    <div data-testid="team-panel" data-project-id={projectId}>
+      {onOpenSettings && <button type="button" onClick={onOpenSettings}>挂载</button>}
+    </div>
+  ),
 }));
 
 describe('CreationAssetPanel', () => {
@@ -288,5 +293,62 @@ describe('CreationAssetPanel', () => {
 
     await screen.findByRole('button', { name: '提示词' });
     expect(screen.queryByRole('button', { name: '团队' })).not.toBeInTheDocument();
+  });
+
+  it('passes the team canvas to the mount exit and hides it when no exit is given', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [] });
+    const onOpenSettings = vi.fn();
+    const view = render(
+      <CreationAssetPanel
+        projectId="canvas-a"
+        onClose={vi.fn()}
+        onUsePrompt={vi.fn()}
+        onUseMedia={vi.fn()}
+        onOpenSettings={onOpenSettings}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+    fireEvent.click(await screen.findByRole('button', { name: '挂载' }));
+    expect(onOpenSettings).toHaveBeenCalledWith('canvas-a');
+
+    view.rerender(
+      <CreationAssetPanel projectId="canvas-a" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />,
+    );
+    expect(await screen.findByTestId('team-panel')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '挂载' })).not.toBeInTheDocument();
+  });
+
+  it('previews video and audio media with native players', async () => {
+    const media = {
+      ...promptAsset,
+      kind: 'media' as const,
+      tags: [],
+      content: {
+        kind: 'media' as const,
+        path: 'creation-assets/blobs/clip.mp4',
+        mime_type: 'video/mp4',
+        bytes: 3,
+        sha256: 'a'.repeat(64),
+        filename: 'clip.mp4',
+      },
+    };
+    const video: CreationAsset = { ...media, asset_id: 'asset-video', title: '开场' };
+    const audio: CreationAsset = {
+      ...media,
+      asset_id: 'asset-audio',
+      title: '战鼓',
+      content: { ...media.content, mime_type: 'audio/mpeg', filename: 'drum.mp3' },
+    };
+    mocks.list.mockResolvedValue({ revision: 1, assets: [video, audio] });
+    const { container } = render(
+      <CreationAssetPanel initialKind="media" onClose={vi.fn()} onUsePrompt={vi.fn()} onUseMedia={vi.fn()} />,
+    );
+
+    await screen.findByRole('button', { name: /开场/ });
+    const player = container.querySelector('video');
+    expect(player).toHaveAttribute('src', creationAssetMediaUrl('asset-video'));
+    expect(player?.muted).toBe(true);
+    expect(container.querySelector('audio')).toHaveAttribute('src', creationAssetMediaUrl('asset-audio'));
+    expect(container.querySelector('img')).toBeNull();
   });
 });

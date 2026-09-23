@@ -26,6 +26,13 @@ describe('changelog 数据', () => {
     }
   });
 
+  it('团队库挂在画布上，日志不说成「给项目挂」', () => {
+    const teamLibrary = CHANGELOG.find((e) => e.version === '5.64.0')!;
+    const text = teamLibrary.changes.map((c) => c.text).join('\n');
+    expect(text).toContain('给画布挂');
+    expect(text).not.toContain('给项目挂');
+  });
+
   it('每条都有日期、概括和至少一项改动', () => {
     for (const e of CHANGELOG) {
       expect(e.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
