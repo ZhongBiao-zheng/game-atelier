@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Share2 } from 'lucide-react';
 
 import {
@@ -31,17 +31,24 @@ import { Label } from '@/components/ui/label';
 export interface TeamShareDialogRequest {
   source: TeamShareSource;
   defaultTitle: string;
+  /** 只传图片 URL（渲染成 <img>）；视频等其他媒体不传。 */
   previewUrl?: string | null;
 }
 
 export interface TeamShareDialogProps {
-  /** null = 关闭。 */
+  /**
+   * null = 关闭。必须是稳定引用（放在调用方 state 里）：引用一变就视为重新打开，
+   * 表单重置并重新拉取显示名与团队库。
+   */
   request: TeamShareDialogRequest | null;
   onClose(): void;
   onShared(entry: TeamLibraryIndexEntry, libraryName: string): void;
-  /** 没有可达库时显示「挂载」。 */
+  /** 没有可达库时显示「挂载」。本组件只回调，离开页面或关闭对话框由调用方负责。 */
   onOpenSettings?(): void;
 }
+
+const TITLE_MAX_LENGTH = 120;
+const MAX_TAGS = 20;
 
 const selectClass = 'min-h-11 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -70,6 +77,8 @@ export function TeamShareDialog({ request, onClose, onShared, onOpenSettings }: 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [largeRefs, setLargeRefs] = useState<TeamRefsTooLargeError | null>(null);
+  // state 要等下一次渲染才生效；同一 tick 内的重复调用靠 ref 拦住。
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (!request) return;
@@ -105,12 +114,14 @@ export function TeamShareDialog({ request, onClose, onShared, onOpenSettings }: 
     [libraries, libraryId],
   );
   const canSubmit = Boolean(request && library && title.trim())
+    && parseTags(tags).length <= MAX_TAGS
     && (!needsName || Boolean(displayName.trim()))
     && !loading
     && !submitting;
 
   async function share(allowLarge: boolean) {
-    if (!request || !library) return;
+    if (!request || !library || submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setError(null);
     setLargeRefs(null);
@@ -135,6 +146,7 @@ export function TeamShareDialog({ request, onClose, onShared, onOpenSettings }: 
         setError(cause.message);
       } else setError(errorMessage(cause, '分享失败'));
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
@@ -207,6 +219,7 @@ export function TeamShareDialog({ request, onClose, onShared, onOpenSettings }: 
               <Input
                 id="team-share-title"
                 value={title}
+                maxLength={TITLE_MAX_LENGTH}
                 disabled={submitting}
                 onChange={event => setTitle(event.target.value)}
               />

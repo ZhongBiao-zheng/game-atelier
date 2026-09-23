@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TeamShareDialog, type TeamShareDialogRequest } from './TeamShareDialog';
 import {
+  ProfileRequiredError,
   TeamRefsTooLargeError,
   fetchProfile,
   listTeamLibraries,
@@ -114,14 +115,15 @@ describe('TeamShareDialog', () => {
   it('只列可达的库并按 library_id 去重，多个库时需手动选择', async () => {
     mockList.mockResolvedValue([
       view({ library_id: 'lib_a', name: '美术共享盘' }),
-      view({ library_id: 'lib_a', project_id: 'canvas-2', name: '美术共享盘' }),
+      view({ library_id: 'lib_a', project_id: 'canvas-2', name: '美术盘（画布 2）' }),
       view({ library_id: 'lib_b', name: '策划盘' }),
       view({ library_id: 'lib_c', name: '断开的盘', reachable: false }),
     ]);
     renderDialog();
 
     expect(await screen.findByRole('option', { name: '策划盘' })).toBeInTheDocument();
-    expect(screen.getAllByRole('option', { name: '美术共享盘' })).toHaveLength(1);
+    expect(screen.getByRole('option', { name: '美术共享盘' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '美术盘（画布 2）' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: '断开的盘' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('团队库')).toHaveValue('');
     expect(screen.getByRole('button', { name: '分享' })).toBeDisabled();
@@ -207,6 +209,110 @@ describe('TeamShareDialog', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('分享到团队库失败：团队库不可达');
     expect(onShared).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('同 library_id 不可达的挂载在前、可达的在后时仍保留可达那条', async () => {
+    mockList.mockResolvedValue([
+      view({ library_id: 'lib_a', name: '断开的挂载', reachable: false }),
+      view({ library_id: 'lib_a', project_id: 'canvas-2', name: '可达的挂载' }),
+    ]);
+    renderDialog();
+
+    const select = await screen.findByLabelText('团队库');
+    await waitFor(() => expect(select).toHaveValue('lib_a'));
+    expect(screen.getByRole('option', { name: '可达的挂载' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: '断开的挂载' })).not.toBeInTheDocument();
+  });
+
+  it('标题限长 120，标签超过 20 个时禁用分享', async () => {
+    renderDialog();
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+    expect(screen.getByLabelText('标题')).toHaveAttribute('maxLength', '120');
+
+    const tagInput = screen.getByPlaceholderText('输入标签，按 Enter 添加');
+    const twenty = Array.from({ length: 20 }, (_, index) => `t${index}`).join(',');
+    fireEvent.change(tagInput, { target: { value: twenty } });
+    fireEvent.keyDown(tagInput, { key: 'Enter' });
+    expect(screen.getByRole('button', { name: '分享' })).toBeEnabled();
+
+    fireEvent.change(tagInput, { target: { value: 't20' } });
+    fireEvent.keyDown(tagInput, { key: 'Enter' });
+    expect(screen.getByRole('button', { name: '分享' })).toBeDisabled();
+  });
+
+  it('提交中重复点击只发一次请求', async () => {
+    let resolveShare: (value: TeamLibraryIndexEntry) => void = () => {};
+    mockShare.mockReturnValue(new Promise(resolve => { resolveShare = resolve; }));
+    const { onShared } = renderDialog();
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+
+    const button = screen.getByRole('button', { name: '分享' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(mockShare).toHaveBeenCalledTimes(1);
+    resolveShare(entry);
+    await waitFor(() => expect(onShared).toHaveBeenCalledTimes(1));
+  });
+
+  it('分享时报需要显示名，重新露出显示名输入并显示错误', async () => {
+    mockShare.mockRejectedValueOnce(new ProfileRequiredError());
+    const { onShared, onClose } = renderDialog();
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+    expect(screen.queryByLabelText('显示名')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '分享' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('先设置显示名');
+    expect(screen.getByLabelText('显示名')).toBeInTheDocument();
+    expect(onShared).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('保存显示名失败时显示错误且不分享', async () => {
+    mockProfile.mockResolvedValue({ display_name: null });
+    mockSaveProfile.mockRejectedValue(new Error('保存显示名失败：磁盘只读'));
+    renderDialog();
+
+    fireEvent.change(await screen.findByLabelText('显示名'), { target: { value: '小李' } });
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+    fireEvent.click(screen.getByRole('button', { name: '分享' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存显示名失败：磁盘只读');
+    expect(mockShare).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('显示名')).toBeInTheDocument();
+  });
+
+  it('参考内容过大时点取消不重发，分享对话框仍开着', async () => {
+    mockShare.mockRejectedValueOnce(new TeamRefsTooLargeError(300 * 1024 * 1024));
+    const { onShared, onClose } = renderDialog();
+    await waitFor(() => expect(screen.getByLabelText('团队库')).toHaveValue('lib_a'));
+
+    fireEvent.click(screen.getByRole('button', { name: '分享' }));
+    const confirm = await screen.findByRole('dialog', { name: '参考内容较大' });
+    fireEvent.click(within(confirm).getByRole('button', { name: '取消' }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '参考内容较大' })).not.toBeInTheDocument();
+    });
+    expect(mockShare).toHaveBeenCalledTimes(1);
+    expect(onShared).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: '分享到团队库' })).toBeInTheDocument();
+  });
+
+  it('request 切到 null 后迟到的响应被丢弃', async () => {
+    let resolveFirst: (value: TeamLibraryView[]) => void = () => {};
+    mockList.mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve; }));
+    mockList.mockReturnValueOnce(new Promise(() => {}));
+    const props = { onClose: vi.fn(), onShared: vi.fn() };
+    const { rerender } = render(<TeamShareDialog request={request} {...props} />);
+
+    rerender(<TeamShareDialog request={null} {...props} />);
+    rerender(<TeamShareDialog request={{ ...request, defaultTitle: '第二张' }} {...props} />);
+    resolveFirst([view({ name: '迟到的库' })]);
+
+    expect(await screen.findByRole('option', { name: '正在读取…' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('标题')).toHaveValue('第二张'));
+    expect(screen.queryByRole('option', { name: '迟到的库' })).not.toBeInTheDocument();
   });
 
   it('读取团队库失败时显示错误', async () => {
