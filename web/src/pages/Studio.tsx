@@ -19,6 +19,8 @@ import { EMPTY_MJ_REFS, routeReusedImageFiles, type MjRefSlots } from '@/compone
 import { RoundList, type RoundConfig, type RoundState } from '@/components/studio/RoundList';
 import { StudioQueryBar } from '@/components/studio/StudioQueryBar';
 import { StudioArchiveDialog, type StudioArchiveRequest } from '@/components/studio/StudioArchiveDialog';
+import { TeamShareDialog, type TeamShareDialogRequest } from '@/components/studio/TeamShareDialog';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { imageSizeMode, normalizeImageSizeParams, prepareImageSizeSubmission } from '@/lib/imageSizeMode';
 import { imageControlCaps, MJ_IMAGES_PER_TASK, type Quality } from '@/lib/imageControlCaps';
 import { imageFamily } from '@/lib/modelFamily';
@@ -34,12 +36,33 @@ import type { Job, JobKind, JobParams } from '@/schema/jobs';
 import { readStudioDraft, writeStudioDraft } from './studioDraft';
 import { clampImageCount, configForJob, isOmniVideoConfig, referencePathCounts } from './studioJobConfig';
 import { routeStudioMediaAsset } from './studioAssetRouting';
-import { creationAssetMediaUrl } from '@/api/creationAssets';
+import { recipeToDraft } from './studioRecipe';
+import { creationAssetInputUrl, creationAssetMediaUrl } from '@/api/creationAssets';
 import { listCanvasProjects } from '@/api/canvas';
-import type { CreationAsset, CreationMediaAssetContent } from '@/schema/creationAssets';
+import type { CreationAsset, CreationMediaAssetContent, RecipeInput } from '@/schema/creationAssets';
 import type { CanvasProject } from '@/schema/canvas';
 
 const SELECTION_STORAGE_KEY = 'studio:selection';
+const ASSET_TITLE_LENGTH = 24;
+
+interface RoundReferenceFiles {
+  images: File[];
+  videos: File[];
+  audios: File[];
+  sref: File[];
+  cref: File[];
+  oref: File[];
+}
+
+/** 复刻后输入框上方的常驻提示：本机缺的模型 + 配方还原时丢掉的东西。 */
+interface RecipeNotice {
+  missingModel: string | null;
+  warnings: string[];
+}
+
+function assetTitleFromPrompt(prompt: string): string {
+  return prompt.trim().replace(/\s+/g, ' ').slice(0, ASSET_TITLE_LENGTH);
+}
 
 interface SavedSelection {
   providerAlias?: string;
@@ -101,6 +124,9 @@ function StudioFull() {
   const [assetNotice, setAssetNotice] = useState<string | null>(null);
   const [, setLocation] = useLocation();
   const [archiveRequest, setArchiveRequest] = useState<StudioArchiveRequest | null>(null);
+  const [shareRequest, setShareRequest] = useState<TeamShareDialogRequest | null>(null);
+  const [reproduceConfirm, setReproduceConfirm] = useState<CreationAsset | null>(null);
+  const [recipeNotice, setRecipeNotice] = useState<RecipeNotice | null>(null);
   const dockCollapsed = scrolledUp && !shellFocused && !clickPinned;
 
   // 不走 rAF 节流：后台标签页 rAF 会挂起导致联动滞后；setState 同值自动 bail-out，开销可忽略。
@@ -182,6 +208,8 @@ function StudioFull() {
   // 切到视频模式时，若当前 key 没有视频模型，自动选中首个带视频模型的 key —— 让 videoCaps 立即正确（否则退化成 STANDARD_CAPS）。
   useEffect(() => {
     if (kind !== 'video' || keys.length === 0) return;
+    // 复刻缺模型时模型位必须空着等用户选，不替用户挑一个。
+    if (recipeNotice?.missingModel) return;
     const videoModelsOf = (k: KeyView) => (k.models ?? []).filter((m) => modelModality(m, k) === 'video');
     const cur = keys.find((k) => k.alias === providerAlias);
     if (cur && videoModelsOf(cur).length > 0) return;
@@ -740,13 +768,19 @@ function StudioFull() {
           onReuseReferences={handleReuseReferences}
           onEditAsReference={handleEditAsReference}
           onArchive={(jobId, path, mediaKind) => setArchiveRequest({ jobId, path, mediaKind })}
+          onShareResult={(jobId, index, path, config) => setShareRequest({
+            source: { kind: 'job_output', job_id: jobId, output_index: index },
+            defaultTitle: assetTitleFromPrompt(config.prompt),
+            // 对话框只把 previewUrl 渲染成 <img>：视频结果不传。
+            ...(config.kind === 'video' ? {} : { previewUrl: galleryMediaUrl(path) }),
+          })}
           onSavePromptAsset={(config) => {
             setAssetPanelKind('prompt');
             setAssetPanelOpen(true);
             setAssetSaveRequest({
               requestId: crypto.randomUUID(),
               kind: 'prompt',
-              title: config.prompt.trim().replace(/\s+/g, ' ').slice(0, 24),
+              title: assetTitleFromPrompt(config.prompt),
               segments: [{ kind: 'text', text: config.prompt }],
             });
           }}
@@ -756,9 +790,9 @@ function StudioFull() {
             setAssetSaveRequest({
               requestId: crypto.randomUUID(),
               kind: 'media',
-              title: config.prompt.trim().replace(/\s+/g, ' ').slice(0, 24),
+              title: assetTitleFromPrompt(config.prompt),
               sourcePath: path,
-              previewUrl: mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`),
+              previewUrl: galleryMediaUrl(path),
             });
           }}
         />
@@ -784,27 +818,42 @@ function StudioFull() {
             <ChevronsDown size={13} aria-hidden />
             回到底部
           </button>
-        {assetNotice && (
-          <span
-            role="status"
-            className="absolute bottom-full left-0 mb-2 rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
-          >
-            {assetNotice}
-          </span>
-        )}
-        {reuseLimitNotice && (
-          <span
-            role="status"
-            className="absolute bottom-full left-0 mb-2 rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
-          >
-            历史参考图超过 MJ 每槽 4 张，已保留前 4 张
-          </span>
-        )}
+        <div className="absolute bottom-full left-0 mb-2 flex flex-col items-start gap-1">
+          {recipeNotice && (
+            <div
+              role="status"
+              data-testid="studio-recipe-notice"
+              className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
+            >
+              {recipeNotice.missingModel && <p>本机没有 {recipeNotice.missingModel}</p>}
+              {recipeNotice.warnings.map((warning) => <p key={warning}>{warning}</p>)}
+            </div>
+          )}
+          {assetNotice && (
+            <span
+              role="status"
+              className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
+            >
+              {assetNotice}
+            </span>
+          )}
+          {reuseLimitNotice && (
+            <span
+              role="status"
+              className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground"
+            >
+              历史参考图超过 MJ 每槽 4 张，已保留前 4 张
+            </span>
+          )}
+        </div>
         <PromptInput
           collapsed={dockCollapsed}
           onExpandRequest={() => setClickPinned(true)}
           onShellFocusChange={setShellFocused}
-          onSubmit={(prompt, template) => onSubmit(prompt, undefined, template)}
+          onSubmit={(prompt, template) => {
+            setRecipeNotice(null);
+            return onSubmit(prompt, undefined, template);
+          }}
           disabled={pending}
           value={promptText}
           onValueChange={setPromptText}
@@ -839,6 +888,7 @@ function StudioFull() {
           }}
           onModelChange={next => {
             setModel(next);
+            if (next) setRecipeNotice(current => withoutMissingModel(current));
             setSizeParams(previous => imageSizeMode(previous) === 'ratio' ? { ...previous, size: undefined } : previous);
           }}
           onCountChange={setCount}
@@ -910,13 +960,94 @@ function StudioFull() {
             setClickPinned(true);
           }}
           onUseMedia={(asset, content) => { void addCreationAssetReference(asset, content); }}
+          onReproduce={requestReproduce}
           onOpenSettings={canvasId => setLocation(`/settings?canvas=${encodeURIComponent(canvasId)}`)}
           onTeamAssetAdopted={result => setAssetNotice(result.created ? '已加入资产库' : '已在你的资产库')}
         />
       )}
       <StudioArchiveDialog request={archiveRequest} onClose={() => setArchiveRequest(null)} />
+      <TeamShareDialog
+        request={shareRequest}
+        onClose={() => setShareRequest(null)}
+        onShared={(_entry, libraryName) => setAssetNotice(`已分享到 ${libraryName}`)}
+        onOpenSettings={() => {
+          setShareRequest(null);
+          setLocation('/settings');
+        }}
+      />
+      <ConfirmDialog
+        open={reproduceConfirm !== null}
+        title="覆盖当前输入？"
+        message=""
+        confirmText="覆盖"
+        onConfirm={() => {
+          const asset = reproduceConfirm;
+          setReproduceConfirm(null);
+          if (asset) void reproduce(asset);
+        }}
+        onCancel={() => setReproduceConfirm(null)}
+      />
     </div>
   );
+
+  function hasEditorInput(): boolean {
+    return Boolean(
+      promptText.trim()
+      || referenceImages.length
+      || referenceVideos.length
+      || referenceAudios.length
+      || videoFrames.first
+      || videoFrames.last
+      || mjRefs.image.length
+      || mjRefs.sref.length
+      || mjRefs.cref.length
+      || mjRefs.oref.length,
+    );
+  }
+
+  // 复刻 = 把生成资产的配方填进当前输入框（同「重新编辑」），不自动提交；已有输入先确认覆盖。
+  function requestReproduce(asset: CreationAsset) {
+    if (hasEditorInput()) {
+      setReproduceConfirm(asset);
+      return;
+    }
+    void reproduce(asset);
+  }
+
+  async function reproduce(asset: CreationAsset) {
+    if (asset.content.kind !== 'generation') return;
+    const recipe = asset.content.snapshot;
+    const requestSequence = ++reEditSequence.current;
+    const recipeDraft = recipeToDraft(recipe, keys);
+    setClickPinned(true);
+    try {
+      const fetchGroup = (inputs: RecipeInput[]) => Promise.all(
+        inputs.map((input) => fetchRecipeInput(asset.asset_id, input)),
+      );
+      const { inputs } = recipeDraft;
+      const [images, videos, audios, sref, cref, oref] = await Promise.all([
+        fetchGroup(inputs.images),
+        fetchGroup(inputs.videos),
+        fetchGroup(inputs.audios),
+        fetchGroup(inputs.mj.sref),
+        fetchGroup(inputs.mj.cref),
+        fetchGroup(inputs.mj.oref),
+      ]);
+      if (requestSequence !== reEditSequence.current) return;
+      applyRoundConfig(
+        { ...recipeDraft.config, sourceAssetTitle: asset.title },
+        { images, videos, audios, sref, cref, oref },
+      );
+      // 缺模型：alias 不动（配置里本就为空），模型位空着等用户选；MJ 参考分组仍按配方模型路由。
+      if (!recipeDraft.model) setModel('');
+      const warnings = recipeDraft.config.warnings ?? [];
+      const missingModel = recipeDraft.model ? null : recipe.model;
+      setRecipeNotice(missingModel || warnings.length > 0 ? { missingModel, warnings } : null);
+    } catch (error) {
+      if (requestSequence !== reEditSequence.current) return;
+      alert(error instanceof Error ? error.message : '参考素材恢复失败');
+    }
+  }
 
   // 媒体资产「使用」：按 mime 落到当前模式下真正会被提交的槽位；收不了的类型不取文件，只给一句提示。
   async function addCreationAssetReference(asset: CreationAsset, content: CreationMediaAssetContent) {
@@ -975,67 +1106,78 @@ function StudioFull() {
 
   async function reEdit(config: RoundConfig, jobId?: string) {
     const requestSequence = ++reEditSequence.current;
-    const targetKind = config.kind ?? 'image';
     setClickPinned(true);
     try {
       const refs = await fetchRoundReferences(config, jobId);
       if (requestSequence !== reEditSequence.current) return;
-
-      // 素材全部取回后再一次性替换编辑器快照；任何素材失败都保留用户当前编辑内容。
-      setKind(targetKind);
-      if (config.alias) setProviderAlias(config.alias);
-      setModel(config.model);
-      if (targetKind === 'video') {
-        if (config.ratio) setVideoRatio(config.ratio);
-        if (config.videoResolution) setVideoResolution(config.videoResolution);
-        if (config.duration) setDuration(config.duration);
-        if (config.videoQuality) setVideoQuality(config.videoQuality);
-        if (config.n) setVideoCount(clampImageCount(config.n));
-        setVideoMode(isOmniVideoConfig(config.frameMode, referencePathCounts(config)) ? 'omni' : 'firstlast');
-        setGenerateAudio(!!config.generateAudio);
-      } else {
-        setSizeParams({ size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
-        if (config.n) setCount(clampImageCount(config.n));
-        if (config.quality) setQuality(config.quality);
-        if (config.mjParams) setMjParams(config.mjParams);
-      }
-
-      setReferenceImages([]);
-      setReferenceVideos([]);
-      setReferenceAudios([]);
-      setVideoFrames({ first: null, last: null });
-      setMjRefs(EMPTY_MJ_REFS);
-      if (targetKind === 'video') {
-        if (isOmniVideoConfig(config.frameMode, referencePathCounts(config))) {
-          setReferenceImages(refs.images);
-          setReferenceVideos(refs.videos);
-          setReferenceAudios(refs.audios);
-        } else if (config.frameMode === 'last') {
-          setVideoFrames({ first: null, last: refs.images[0] ?? null });
-        } else {
-          setVideoFrames({ first: refs.images[0] ?? null, last: refs.images[1] ?? null });
-        }
-      } else {
-        const routed = routeReusedImageFiles(config.model, config.model, {
-          image: refs.images,
-          sref: refs.sref,
-          cref: refs.cref,
-          oref: refs.oref,
-        });
-        setReferenceImages(routed.referenceImages);
-        setMjRefs(routed.mjRefs);
-        setReuseLimitNotice(routed.droppedCount > 0);
-      }
-      // 模式与素材已同步排入同一批状态更新，Prompt 里的 @图片N 会直接生成带缩略图的 chip。
-      setPromptText(config.prompt);
-      setPromptAssetSourceTitle(config.sourceAssetTitle ?? null);
+      applyRoundConfig(config, refs);
     } catch (error) {
       if (requestSequence !== reEditSequence.current) return;
       alert(error instanceof Error ? error.message : '参考素材恢复失败');
     }
   }
 
+  // 素材全部取回后再一次性替换编辑器快照（重新编辑 / 复刻共用）；取回失败时调用方不会走到这里，
+  // 用户当前编辑内容原样保留。全能参考按实际取回的素材判：复刻时 config 的路径字段是空的。
+  function applyRoundConfig(config: RoundConfig, refs: RoundReferenceFiles) {
+    const targetKind = config.kind ?? 'image';
+    const omni = isOmniVideoConfig(config.frameMode, {
+      images: refs.images.length,
+      videos: refs.videos.length,
+      audios: refs.audios.length,
+    });
+    setRecipeNotice(null);
+    setKind(targetKind);
+    if (config.alias) setProviderAlias(config.alias);
+    setModel(config.model);
+    if (targetKind === 'video') {
+      if (config.ratio) setVideoRatio(config.ratio);
+      if (config.videoResolution) setVideoResolution(config.videoResolution);
+      if (config.duration) setDuration(config.duration);
+      if (config.videoQuality) setVideoQuality(config.videoQuality);
+      if (config.n) setVideoCount(clampImageCount(config.n));
+      setVideoMode(omni ? 'omni' : 'firstlast');
+      setGenerateAudio(!!config.generateAudio);
+    } else {
+      setSizeParams({ size_mode: config.sizeMode ?? 'ratio', size: config.size, ratio: config.ratio, resolution: config.resolution, ...(config.sizeMode === 'custom' ? { custom_size: config.size } : {}) });
+      if (config.n) setCount(clampImageCount(config.n));
+      if (config.quality) setQuality(config.quality);
+      if (config.mjParams) setMjParams(config.mjParams);
+    }
+
+    setReferenceImages([]);
+    setReferenceVideos([]);
+    setReferenceAudios([]);
+    setVideoFrames({ first: null, last: null });
+    setMjRefs(EMPTY_MJ_REFS);
+    if (targetKind === 'video') {
+      if (omni) {
+        setReferenceImages(refs.images);
+        setReferenceVideos(refs.videos);
+        setReferenceAudios(refs.audios);
+      } else if (config.frameMode === 'last') {
+        setVideoFrames({ first: null, last: refs.images[0] ?? null });
+      } else {
+        setVideoFrames({ first: refs.images[0] ?? null, last: refs.images[1] ?? null });
+      }
+    } else {
+      const routed = routeReusedImageFiles(config.model, config.model, {
+        image: refs.images,
+        sref: refs.sref,
+        cref: refs.cref,
+        oref: refs.oref,
+      });
+      setReferenceImages(routed.referenceImages);
+      setMjRefs(routed.mjRefs);
+      setReuseLimitNotice(routed.droppedCount > 0);
+    }
+    // 模式与素材已同步排入同一批状态更新，Prompt 里的 @图片N 会直接生成带缩略图的 chip。
+    setPromptText(config.prompt);
+    setPromptAssetSourceTitle(config.sourceAssetTitle ?? null);
+  }
+
   async function regenerate(config: RoundConfig) {
+    setRecipeNotice(null);
     if (config.alias) setProviderAlias(config.alias);
     setModel(config.model);
     // 提交本身走 overrideConfig（不依赖表单态）；这里只是把表单同步成原 job 参数，便于继续微调。
@@ -1088,7 +1230,25 @@ async function fetchAssetAsFile(path: string, baseName: string, jobId?: string):
   return new File([blob], `${baseName}.${ext}`, { type: blob.type || 'image/png' });
 }
 
-async function fetchRoundReferences(config: RoundConfig, jobId?: string) {
+function galleryMediaUrl(path: string): string {
+  return mediaUrl(`/api/gallery/image?path=${encodeURIComponent(path)}`);
+}
+
+/** 生成资产冻结快照里的一份参考内容 → File（按快照登记的 mime 命名，不信任响应头）。 */
+async function fetchRecipeInput(assetId: string, input: RecipeInput): Promise<File> {
+  const response = await connectionFetch(creationAssetInputUrl(assetId, input.order));
+  if (!response.ok) throw await apiError(response, '取回复刻参考素材');
+  const blob = await response.blob();
+  const ext = (input.mime_type.split('/')[1] ?? 'bin').split(/[+;]/)[0].replace('jpeg', 'jpg');
+  return new File([blob], `ref-${input.order + 1}.${ext}`, { type: input.mime_type });
+}
+
+function withoutMissingModel(notice: RecipeNotice | null): RecipeNotice | null {
+  if (!notice?.missingModel) return notice;
+  return notice.warnings.length > 0 ? { missingModel: null, warnings: notice.warnings } : null;
+}
+
+async function fetchRoundReferences(config: RoundConfig, jobId?: string): Promise<RoundReferenceFiles> {
   const fetchGroup = (paths: string[], prefix: string) => Promise.all(
     paths.map((path, i) => fetchAssetAsFile(path, `${prefix}-${i + 1}`, jobId)),
   );

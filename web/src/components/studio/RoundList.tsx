@@ -1,7 +1,7 @@
 import { type ButtonHTMLAttributes, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { mediaUrl } from '@/api/connection';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Square, Trash2 } from 'lucide-react';
+import { AlertTriangle, BookmarkPlus, Download, Eye, EyeOff, Film, FolderInput, Heart, Info, Music, Pencil, Share2, Square, Trash2 } from 'lucide-react';
 
 import type { MjParams } from '@/lib/mjParams';
 import type { VideoFrameMode } from '@/lib/videoControlCaps';
@@ -135,6 +135,7 @@ export function RoundList({
   onArchive,
   onSavePromptAsset,
   onSaveImageAsset,
+  onShareResult,
 }: {
   rounds: RoundState[];
   focusJobId?: string;
@@ -152,6 +153,8 @@ export function RoundList({
   onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
   onSavePromptAsset?: (config: RoundConfig) => void;
   onSaveImageAsset?: (path: string, config: RoundConfig) => void;
+  /** index 是 imagePaths 下标（= Job.output_paths 下标），分享来源的 output_index 直接用它。 */
+  onShareResult?: ShareResultHandler;
 }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const lightboxSources = useMemo(() => rounds.flatMap((round) => (
@@ -295,6 +298,7 @@ export function RoundList({
                   onArchive={onArchive}
                   onSavePromptAsset={onSavePromptAsset}
                   onSaveImageAsset={onSaveImageAsset}
+                  onShareResult={onShareResult}
                   mediaActive={mediaActive}
                 />
               )}
@@ -773,6 +777,27 @@ function RefThumb({ src, jobId, mediaActive }: { src: string; jobId?: string; me
   );
 }
 
+type ShareResultHandler = (jobId: string, index: number, path: string, config: RoundConfig) => void;
+
+const RESULT_ACTION_CLASS = 'grid size-8 place-items-center rounded-full border border-border bg-scrim text-white opacity-0 backdrop-blur-glass transition-opacity hover:bg-background/90 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+
+function ShareResultButton({ index, onClick }: { index: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      aria-label={`分享生成结果 ${index + 1}`}
+      title="分享到团队库"
+      className={RESULT_ACTION_CLASS}
+    >
+      <Share2 className="size-4" aria-hidden />
+    </button>
+  );
+}
+
 function DoneBatch({
   round,
   favorites,
@@ -788,6 +813,7 @@ function DoneBatch({
   onArchive,
   onSavePromptAsset,
   onSaveImageAsset,
+  onShareResult,
   mediaActive,
 }: {
   round: Extract<RoundState, { kind: 'done' }>;
@@ -804,6 +830,7 @@ function DoneBatch({
   onArchive?: (jobId: string, path: string, kind: 'image' | 'video') => void;
   onSavePromptAsset?: (config: RoundConfig) => void;
   onSaveImageAsset?: (path: string, config: RoundConfig) => void;
+  onShareResult?: ShareResultHandler;
   mediaActive: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -830,6 +857,8 @@ function DoneBatch({
     round.completedAt ? formatBeijingTime(round.completedAt) : undefined,
   ].filter(Boolean);
   const shownMjFlags = shownMjMetadata(round.config);
+  // skill 出图是角色正式资产，不在出图页分享（与归档同一门控）。
+  const share = round.mode !== 'skill' ? onShareResult : undefined;
 
   return (
     <section className="space-y-3">
@@ -910,6 +939,9 @@ function DoneBatch({
                     </div>
                   )}
                   <div className="absolute right-2 top-2 flex gap-1.5">
+                    {share && (
+                      <ShareResultButton index={index} onClick={() => share(round.jobId, index, path, round.config)} />
+                    )}
                     {round.mode !== 'skill' && onArchive && (
                       <button
                         type="button"
@@ -961,6 +993,9 @@ function DoneBatch({
                     className="h-full w-full object-contain"
                   />
                   <div className="absolute right-2 top-2 flex gap-1.5">
+                    {share && (
+                      <ShareResultButton index={index} onClick={() => share(round.jobId, index, path, round.config)} />
+                    )}
                     {onSaveImageAsset && (
                       <button
                         type="button"

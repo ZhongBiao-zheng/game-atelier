@@ -814,3 +814,49 @@ describe('RoundList reference assets', () => {
     expect(screen.getByTestId('pending-spec-meta')).toHaveTextContent('--profile e6wl24r');
   });
 });
+
+describe('RoundList 分享到团队库', () => {
+  const imageBatch: RoundState = {
+    kind: 'done',
+    mode: 'image',
+    jobId: 'job-share-image',
+    submittedAt: '2026-09-23T10:00:00Z',
+    imagePaths: ['/data/studio/job-share-image/v1.png', '/data/studio/job-share-image/v2.png'],
+    config: { prompt: '立绘', model: 'gpt-image-2', kind: 'image', referenceImages: [] },
+  };
+
+  it('每张图片结果都有分享按钮，回传 imagePaths 下标', () => {
+    const onShareResult = vi.fn();
+    render(<RoundList rounds={[imageBatch]} onShareResult={onShareResult} />);
+
+    fireEvent.click(screen.getByLabelText('分享生成结果 2'));
+    expect(onShareResult).toHaveBeenCalledWith(
+      'job-share-image',
+      1,
+      '/data/studio/job-share-image/v2.png',
+      imageBatch.config,
+    );
+  });
+
+  it('视频结果也能分享', () => {
+    const onShareResult = vi.fn();
+    render(<RoundList rounds={[videoDone]} onShareResult={onShareResult} />);
+
+    fireEvent.click(screen.getByLabelText('分享生成结果 1'));
+    expect(onShareResult).toHaveBeenCalledWith('job-vid-1', 0, '/data/studio/job-vid-1/v1.mp4', videoDone.config);
+  });
+
+  it('点分享不打开大图', () => {
+    render(<RoundList rounds={[imageBatch]} onShareResult={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText('分享生成结果 1'));
+    expect(screen.queryByAltText('大图')).not.toBeInTheDocument();
+  });
+
+  it('skill 出图与未传回调时不显示分享', () => {
+    const { unmount } = render(<RoundList rounds={[{ ...imageBatch, mode: 'skill' }]} onShareResult={vi.fn()} />);
+    expect(screen.queryByLabelText('分享生成结果 1')).not.toBeInTheDocument();
+    unmount();
+    render(<RoundList rounds={[imageBatch, videoDone]} />);
+    expect(screen.queryByLabelText(/分享生成结果/)).not.toBeInTheDocument();
+  });
+});

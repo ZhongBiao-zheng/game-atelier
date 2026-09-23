@@ -4,7 +4,21 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
 import { Studio } from './Studio';
-import { clearStudioDraft } from './studioDraft';
+import { clearStudioDraft, readStudioDraft } from './studioDraft';
+import type { CreationAsset, GenerationRecipe } from '@/schema/creationAssets';
+
+// 透传真实面板，只记下 Studio 传进来的 props：复刻入口的按钮在面板里（另一个 Task），
+// Studio 侧只需验证拿到 onReproduce 之后怎么填输入框。
+const assetPanelProps = vi.hoisted(() => ({ current: null as null | Record<string, any> }));
+vi.mock('@/components/assets/CreationAssetPanel', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/assets/CreationAssetPanel')>();
+  const { createElement, forwardRef } = await import('react');
+  const Recording = forwardRef<unknown, Record<string, any>>((props, ref) => {
+    assetPanelProps.current = props;
+    return createElement(actual.CreationAssetPanel as any, { ...props, ref });
+  });
+  return { ...actual, CreationAssetPanel: Recording };
+});
 import * as connection from '@/api/connection';
 import { createTestEventStream } from '@/test/eventStream';
 import { promptVariableToken, resolvePromptVariables } from '@/lib/promptVariables';
@@ -2131,5 +2145,224 @@ describe('Studio 图卡编辑导入参考图', () => {
     expect(screen.queryByRole('alert')).toBeNull();
     // 空参考图槽还在（没有塞进半个坏文件）
     expect(screen.getByLabelText('添加参考图')).toBeInTheDocument();
+  });
+});
+
+describe('Studio 分享生成结果到团队库', () => {
+  function mockShareEndpoints() {
+    const fetchMock = mockCompletedBatchAndKeys();
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (href === '/api/profile') {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ display_name: '老王' }) } as any);
+      }
+      if (href === '/api/team-libraries') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => [{
+            library_id: 'lib-art', project_id: 'canvas-1', name: '美术库', mount_path: '/tmp/art',
+            mounted_at: '2026-09-20T00:00:00Z', reachable: true, asset_count: 0, scanned_at: null,
+          }],
+        } as any);
+      }
+      if (href === '/api/team-libraries/lib-art/share') {
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 'ta_1', kind: 'generation', title: 't', author: '老王', tags: [], mime_type: 'image/png',
+            bytes: 1, relative_path: 'shared/老王/ta_1', sha256: null, updated_at: '2026-09-23T00:00:00Z',
+            reproducible: true, status: 'ready', model: 'doubao-seedream-4-5-251128', cost_cny: 0.63,
+          }),
+        } as any);
+      }
+      return fallback(url, init);
+    });
+    return fetchMock;
+  }
+
+  it('点第 2 张的分享：来源是该 job 的 output_index 1，默认标题取提示词前 24 字，成功后提示库名', async () => {
+    const fetchMock = mockShareEndpoints();
+    renderStudio();
+
+    fireEvent.click(await screen.findByLabelText('分享生成结果 2'));
+    expect(await screen.findByText('分享到团队库')).toBeInTheDocument();
+    expect(screen.getByLabelText('标题')).toHaveValue(
+      '一个身披白床单的幽灵般的身影在上海某城市公园的儿童游乐场玩耍，她戴着太阳镜，没有眼。背景是万圣节夜森。'.slice(0, 24),
+    );
+    const preview = document.querySelector('img[src*="v2.png"]');
+    expect(preview).not.toBeNull();
+
+    const shareButton = screen.getByRole('button', { name: '分享' });
+    await waitFor(() => expect(shareButton).not.toBeDisabled());
+    fireEvent.click(shareButton);
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/team-libraries/lib-art/share')).toBe(true));
+    const call = fetchMock.mock.calls.find(([url]) => url === '/api/team-libraries/lib-art/share')!;
+    expect(JSON.parse(String(call[1]!.body)).source).toEqual({
+      kind: 'job_output', job_id: 'job-studio-1', output_index: 1,
+    });
+    expect(await screen.findByText('已分享到 美术库')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('分享到团队库')).not.toBeInTheDocument());
+  });
+});
+
+describe('Studio 复刻生成资产', () => {
+  function recipe(overrides: Partial<GenerationRecipe> = {}): GenerationRecipe {
+    return {
+      mode: 'image',
+      model: 'gpt-image-2',
+      provider: 'openai',
+      alias: 'oa',
+      final_prompt: '橘猫坐在窗台',
+      draft_prompt: null,
+      params: { size_mode: 'ratio', ratio: '3:4', resolution: '2K', n: 2 },
+      inputs: [{ order: 0, role: 'reference', kind: 'image', sha256: 'a'.repeat(64), mime_type: 'image/png' }],
+      cost_cny: 0.21,
+      cost_basis: 'actual',
+      submitted_at: '2026-09-20T10:00:00Z',
+      ...overrides,
+    };
+  }
+
+  function generationAsset(snapshot: GenerationRecipe): CreationAsset {
+    return {
+      asset_id: 'gen-1', kind: 'generation', title: '窗台橘猫', tags: [], project_ids: [],
+      created_at: '2026-09-20T00:00:00Z', updated_at: '2026-09-20T00:00:00Z', last_used_at: null,
+      content: {
+        kind: 'generation',
+        media: { kind: 'media', path: 'creation-assets/blobs/b.png', mime_type: 'image/png', bytes: 3, sha256: 'b'.repeat(64), filename: 'cat.png' },
+        snapshot,
+      },
+    };
+  }
+
+  function mockPanelEndpoints(keys?: unknown) {
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    const fallback = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+      const href = String(url);
+      if (keys && href === '/api/keys') return Promise.resolve({ ok: true, json: async () => keys } as any);
+      if (href.startsWith('/api/canvas/project-options')) return Promise.resolve({ ok: true, json: async () => [] } as any);
+      if (href.startsWith('/api/creation-assets?')) return Promise.resolve({ ok: true, json: async () => ({ revision: 1, assets: [] }) } as any);
+      if (href.startsWith('/api/creation-assets/gen-1/inputs/')) {
+        const order = Number(href.split('/').pop());
+        const type = order === 1 ? 'video/mp4' : 'image/png';
+        return Promise.resolve({ ok: true, blob: async () => new Blob(['ref'], { type }) } as any);
+      }
+      return fallback(url, init);
+    });
+    return fetchMock;
+  }
+
+  async function openPanelAndReproduce(asset: CreationAsset) {
+    fireEvent.click(screen.getByLabelText('打开创作资产'));
+    await waitFor(() => expect(assetPanelProps.current?.onReproduce).toBeTypeOf('function'));
+    await act(async () => { await assetPanelProps.current!.onReproduce(asset); });
+  }
+
+  it('输入框为空时直接填入提示词、模型、参数与参考图，来源记为资产标题', async () => {
+    const fetchMock = mockPanelEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    await openPanelAndReproduce(generationAsset(recipe()));
+
+    const editor = screen.getByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/creation-assets/gen-1/inputs/0')).toBe(true);
+    expect(screen.getByTestId('reference-images-panel').querySelector('img')).not.toBeNull();
+    expect(screen.getByLabelText('选择模型')).toHaveTextContent('GPT Image 2');
+    expect(screen.getByRole('button', { name: '选择比例和分辨率' })).toHaveTextContent('3:4');
+    expect(readStudioDraft()?.promptAssetSourceTitle).toBe('窗台橘猫');
+    expect(readStudioDraft()?.count).toBe(2);
+    expect(screen.queryByText(/本机没有/)).not.toBeInTheDocument();
+  });
+
+  it('已有输入时先确认覆盖；取消不动，确认后覆盖', async () => {
+    const fetchMock = mockPanelEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+    const editor = screen.getByLabelText('生图 prompt');
+    typePrompt(editor, '我正在写的');
+
+    await openPanelAndReproduce(generationAsset(recipe()));
+    expect(await screen.findByText('覆盖当前输入？')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(screen.queryByText('覆盖当前输入？')).not.toBeInTheDocument());
+    expect(editor.textContent).toContain('我正在写的');
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/inputs/'))).toBe(false);
+
+    await act(async () => { await assetPanelProps.current!.onReproduce(generationAsset(recipe())); });
+    fireEvent.click(await screen.findByRole('button', { name: '覆盖' }));
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    expect(editor.textContent).not.toContain('我正在写的');
+  });
+
+  it('本机没有配方模型：模型位空着、生成禁用、常驻提示连同配方提示；选了模型后提示消失', async () => {
+    mockPanelEndpoints();
+    renderStudio();
+    await screen.findByText('火山引擎');
+
+    await openPanelAndReproduce(generationAsset(recipe({
+      model: 'seedream-9',
+      provider: 'seedream',
+      alias: 'far-away',
+      inputs: [
+        { order: 0, role: 'reference', kind: 'image', sha256: 'a'.repeat(64), mime_type: 'image/png' },
+        { order: 1, role: 'mask', kind: 'image', sha256: 'c'.repeat(64), mime_type: 'image/png' },
+      ],
+    })));
+
+    const editor = screen.getByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    const notice = screen.getByTestId('studio-recipe-notice');
+    expect(notice).toHaveTextContent('本机没有 seedream-9');
+    expect(notice).toHaveTextContent('遮罩参考未带入');
+    expect(screen.getByLabelText('选择模型')).toHaveTextContent('选择模型');
+    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText('选择模型'));
+    fireEvent.click(screen.getByRole('option', { name: /图片 4.7/ }));
+    await waitFor(() => expect(screen.queryByText('本机没有 seedream-9')).not.toBeInTheDocument());
+    expect(screen.getByLabelText('提交生成')).not.toBeDisabled();
+  });
+
+  it('带参考视频的视频配方复刻后进全能参考，参考图与参考视频都不丢', async () => {
+    const fetchMock = mockPanelEndpoints({
+      default_alias: 'tokendance',
+      keys: [{
+        alias: 'tokendance', provider: 'tokendance', access_key: 'key', secret_key: null,
+        capabilities: [], modalities: ['video'],
+        models: [{ name: 'Seedance 2.0 Mini', id: 'seedance-2.0-mini', protocol: 'seedance' }],
+        notes: '', created_at: '2026-08-22T00:00:00Z', is_default: true,
+      }],
+    });
+    renderStudio();
+    await screen.findByLabelText('选择模型');
+
+    await openPanelAndReproduce(generationAsset(recipe({
+      mode: 'video',
+      model: 'seedance-2.0-mini',
+      provider: 'tokendance',
+      alias: 'tokendance',
+      final_prompt: '参考@图片1 和@视频1 做个转场',
+      params: { duration: 5, resolution: '720p', ratio: '16:9' },
+      inputs: [
+        { order: 0, role: 'reference', kind: 'image', sha256: 'a'.repeat(64), mime_type: 'image/png' },
+        { order: 1, role: 'reference', kind: 'video', sha256: 'd'.repeat(64), mime_type: 'video/mp4' },
+      ],
+    })));
+
+    await waitFor(() => {
+      const panel = screen.getByTestId('reference-images-panel');
+      expect(panel.textContent).toContain('图1');
+      expect(panel.textContent).toContain('视频1');
+    });
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/creation-assets/gen-1/inputs/1')).toBe(true);
+    expect(readStudioDraft()?.videoMode).toBe('omni');
+    expect(readStudioDraft()?.referenceVideos).toHaveLength(1);
   });
 });

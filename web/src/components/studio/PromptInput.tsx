@@ -301,7 +301,12 @@ export function PromptInput({
   const provider = visibleProviders.find((item) => item.alias === providerAlias) ?? visibleProviders[0];
   const providerDisplayName = providerName(provider);
   const models = (provider?.models ?? []).filter((m) => modelModality(m, provider) === wantedModality);
-  const selectedModel = models.find((item) => item.id === model) ?? models[0];
+  // 模型不在当前列表时模型位空着、不能生成（复刻时本机没有配方模型），不偷偷换成第一个模型。
+  // 唯一例外：切换生成类型后残留的另一类模型，沿用旧行为显示本类第一个（视频提交也回落到第一个视频模型）。
+  const leftoverOtherModality = Boolean(model) && providers.some((p) => (p.models ?? []).some(
+    (m) => m.id === model && modelModality(m, p) !== wantedModality,
+  ));
+  const selectedModel = models.find((item) => item.id === model) ?? (leftoverOtherModality ? models[0] : undefined);
   const isOmni = isVideo && videoMode === 'omni' && Boolean(videoCaps);
   // @引用开放给两类入口：视频「全能参考」(omni)，以及图片图生图（MJ 除外）。@ 提交时只剩
   // 「图N」字面量（见 serializeMentions），能不能吃到取决于模型是否按输入顺序理解序号：
@@ -1164,7 +1169,7 @@ export function PromptInput({
               onClick={() => setOpenPanel(openPanel === 'model' ? null : 'model')}
               disabled={!provider || models.length === 0}
             >
-              <Box size={14} aria-hidden /> {selectedModel ? selectedModel.name : '未配置模型'}
+              <Box size={14} aria-hidden /> {selectedModel ? selectedModel.name : models.length > 0 ? '选择模型' : '未配置模型'}
             </ControlButton>
             <ToolbarPopover
               open={openPanel === 'model'}

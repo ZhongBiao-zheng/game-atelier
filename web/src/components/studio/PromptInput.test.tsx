@@ -534,3 +534,53 @@ describe('PromptInput 创作资产插入', () => {
     cleanup();
   });
 });
+
+describe('PromptInput 模型不在当前列表（复刻缺模型）', () => {
+  function renderModel(model: string, providers: KeyView[] = [hkKey], alias = 'hk') {
+    return render(
+      <PromptInput onSubmit={vi.fn()} providers={providers} providerAlias={alias} model={model} value="一座城堡" />,
+    );
+  }
+
+  it('model 为空：模型位显示「选择模型」，生成禁用，不回落第一个模型', () => {
+    renderModel('');
+    const modelButton = screen.getByLabelText('选择模型');
+    expect(modelButton).toHaveTextContent('选择模型');
+    expect(modelButton).not.toHaveTextContent('GPT Image 2');
+    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+    fireEvent.click(modelButton);
+    expect(screen.getByRole('option', { name: /GPT Image 2/ })).toHaveAttribute('aria-selected', 'false');
+    cleanup();
+  });
+
+  it('本机没有的模型 id 同样显示「选择模型」且生成禁用', () => {
+    renderModel('seedream-9');
+    expect(screen.getByLabelText('选择模型')).toHaveTextContent('选择模型');
+    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+    cleanup();
+  });
+
+  it('选中列表内模型后可生成', () => {
+    renderModel('nano-banana');
+    expect(screen.getByLabelText('选择模型')).toHaveTextContent('Nano Banana');
+    expect(screen.getByLabelText('提交生成')).not.toBeDisabled();
+    cleanup();
+  });
+
+  it('切换生成类型残留的另一类模型仍显示本类第一个模型（与提交时的回落一致）', () => {
+    const mixedKey: KeyView = {
+      ...hkKey,
+      alias: 'mixed',
+      models: [
+        { name: 'GPT Image 2', id: 'gpt-image-2', modality: 'image' },
+        { name: 'Sora 2', id: 'sora-2', modality: 'video' },
+      ],
+      modalities: ['image', 'video'],
+    };
+    render(
+      <PromptInput onSubmit={vi.fn()} providers={[mixedKey]} providerAlias="mixed" model="gpt-image-2" kind="video" value="跑步" />,
+    );
+    expect(screen.getByLabelText('选择模型')).toHaveTextContent('Sora 2');
+    cleanup();
+  });
+});
