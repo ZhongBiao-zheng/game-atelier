@@ -648,7 +648,7 @@
   user-select: none;
 }
 
-/* 文字细，12px 已认不出字形；图片 / 视频要 36px 才盖得住轮廓。 */
+/* 文字细，6px 已认不出字形；图片 / 视频要 36px 才盖得住轮廓。 */
 .canvas-node-hidden.canvas-node-hidden-text {
-  filter: blur(12px);
+  filter: blur(6px);
 }
