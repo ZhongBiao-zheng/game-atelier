@@ -114,6 +114,8 @@ function StudioFull() {
   const [persistedJobs, setPersistedJobs] = useState<Job[]>([]);
   const [pending, setPending] = useState(false);
   const [keys, setKeys] = useState<KeyView[]>([]);
+  // listKeys 返回（成功或失败）后才为 true：区分「还在加载」与「加载完了但一个 key 都没有」。
+  const [keysLoaded, setKeysLoaded] = useState(false);
   // 滚动联动收放：历史区 col-reverse（|scrollTop| 即距底距离），>160 收 / <80 展（滞回防抖）。
   // shellFocused / clickPinned 是两个展开覆盖：输入焦点期间恒展开；点击收缩壳展开但不回滚，
   // 再次滚动（dist>160 的 scroll 事件）即取消点击钉住。
@@ -390,9 +392,12 @@ function StudioFull() {
           ? wantedModel!
           : modelsForKind(selected, kind)[0]?.id ?? selected?.models[0]?.id ?? '';
         setModel(nextModel);
+        setKeysLoaded(true);
       })
       .catch(() => {
-        if (!cancelled) setKeys([]);
+        if (cancelled) return;
+        setKeys([]);
+        setKeysLoaded(true);
       });
     return () => {
       cancelled = true;
@@ -1006,8 +1011,8 @@ function StudioFull() {
 
   // 复刻 = 把生成资产的配方填进当前输入框（同「重新编辑」），不自动提交；已有输入先确认覆盖。
   function requestReproduce(asset: CreationAsset) {
-    // keys 未加载时判不出本机有没有配方模型，不能当成缺模型去填。
-    if (keys.length === 0) {
+    // keys 未加载时判不出本机有没有配方模型，不能当成缺模型去填；加载完为空则照常按缺模型填。
+    if (!keysLoaded) {
       setAssetNotice('模型列表未加载');
       return;
     }

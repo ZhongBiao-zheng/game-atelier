@@ -2563,6 +2563,22 @@ describe('Studio 复刻：边界', () => {
     expect(editor.textContent).not.toContain('橘猫坐在窗台');
   });
 
+  it('模型列表已加载但为空（没配任何 key）：照常填入，提示本机没有该模型，生成禁用', async () => {
+    const fetchMock = mockPanelEndpoints({ default_alias: null, keys: [] });
+    renderStudio();
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/keys')).toBe(true));
+    await screen.findByLabelText('选择模型');
+
+    await openPanelAndReproduce(generationAsset(recipe()));
+
+    const editor = screen.getByLabelText('生图 prompt');
+    await waitFor(() => expect(editor.textContent).toContain('橘猫坐在窗台'));
+    expect(screen.queryByText('模型列表未加载')).not.toBeInTheDocument();
+    expect(readStudioDraft()?.referenceImages).toHaveLength(1);
+    expect(screen.getByTestId('studio-recipe-notice')).toHaveTextContent('本机没有 gpt-image-2');
+    expect(screen.getByLabelText('提交生成')).toBeDisabled();
+  });
+
   it('模型列表还没加载时不判缺模型，提示后不填', async () => {
     const fetchMock = mockPanelEndpoints('never');
     renderStudio();
