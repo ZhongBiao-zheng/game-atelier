@@ -766,7 +766,7 @@ export function CanvasNodeCard({ data, selected }: NodeProps<CanvasFlowNode>) {
         <div
           data-canvas-node-hidden={node.hidden ? 'true' : undefined}
           className={cn('h-full', node.type === 'image' && content?.kind === 'image' ? 'bg-transparent' : 'bg-secondary/20', node.type === 'text' ? 'min-h-32'
-            : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44', node.hidden && 'canvas-node-hidden')}
+            : node.type === 'image' && content?.kind === 'image' ? 'min-h-0' : 'min-h-44', node.hidden && 'canvas-node-hidden', node.hidden && node.type === 'text' && 'canvas-node-hidden-text')}
         >
           {node.type === 'text' && (
             content?.kind === 'text' && (isEditingInlineText || promptVariableParts(content.text).some(part => part.kind === 'variable')) ? (
