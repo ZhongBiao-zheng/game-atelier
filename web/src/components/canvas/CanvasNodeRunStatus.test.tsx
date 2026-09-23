@@ -204,7 +204,7 @@ function nodeContext(job: Job): CanvasNodeContextValue {
     updateNode: vi.fn(),
     renameNode: vi.fn(),
     updateText: vi.fn(),
-    createImageConfigFromText: vi.fn(),
+    createImageFromSource: vi.fn(),
     recordHistory: vi.fn(),
     saveAsset: vi.fn(async () => undefined),
     copyPrompt: vi.fn(async () => undefined),

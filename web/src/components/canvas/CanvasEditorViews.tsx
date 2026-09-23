@@ -181,7 +181,6 @@ export interface CanvasNodeContextValue {
   renameNode: (id: string, title: string) => void;
   updateText: (id: string, text: string) => void;
   setTextEditing?: (id: string, editing: boolean) => void;
-  createImageConfigFromText: (id: string) => void;
   createImageFromSource?: (id: string) => void;
   recordHistory: () => void;
   saveAsset: (node: CanvasContentNode) => Promise<void>;
@@ -1448,7 +1447,7 @@ function CanvasNodeToolbar({
             label={`用 ${node.title} 生成图片`}
             text="生成图片"
             disabled={content?.kind !== 'text'}
-            onClick={() => context.createImageConfigFromText(node.id)}
+            onClick={() => context.createImageFromSource?.(node.id)}
           >
             <FileImage />
           </MediaToolButton>

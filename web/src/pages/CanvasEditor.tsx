@@ -3671,38 +3671,6 @@ function CanvasEditorInner({
     announceToolNotice(`已创建“${node.title}”的下游视频节点`);
   }, [announceToolNotice, commit, jobsByResultNodeId, keys]);
 
-  const createImageConfigFromText = useCallback((nodeId: string) => {
-    const current = latestDocument.current;
-    const source = current?.nodes.find(node => node.id === nodeId);
-    const version = source && source.type === 'text' && source.data.current_version_id
-      ? current?.content_versions[source.data.current_version_id]
-      : null;
-    if (!current || !source || source.type !== 'text' || version?.kind !== 'text') {
-      setError('这个文本节点暂时无法创建图片生成配置。');
-      return;
-    }
-    const configId = makeId('config');
-    const next = createConnectedCanvasConfig(
-      current,
-      nodeId,
-      createCanvasGenerationDraft(keys, 'image', {
-        preference: canvasUiPreferences.generation_defaults.image,
-      }),
-      { nodeId: configId, connectionId: makeId('connection') },
-    );
-    if (!next) {
-      setError('无法从这个文本节点创建图片生成配置。');
-      return;
-    }
-    setError(null);
-    commit(() => next, true);
-    setDismissedGenerationPanelNodeId(null);
-    setSelectedConnectionIds(new Set());
-    setSelectedNodeIds(new Set());
-    setAddOpen(false);
-    setCreateMenu(null);
-  }, [canvasUiPreferences.generation_defaults.image, commit, keys]);
-
   const createImageFromSource = useCallback((nodeId: string) => {
     const current = latestDocument.current;
     if (!current) return;
@@ -3711,7 +3679,7 @@ function CanvasEditorInner({
       createCanvasGenerationDraft(keys, 'image', {
         preference: canvasUiPreferences.generation_defaults.image,
       }), { nodeId: newNodeId, connectionId: makeId('connection') }, 'image');
-    if (!next) { setError('这个节点没有可用的图片内容。'); return; }
+    if (!next) { setError('这个节点没有可用的内容。'); return; }
     setError(null);
     commit(() => next, true);
     setDismissedGenerationPanelNodeId(null);
@@ -4182,7 +4150,6 @@ function CanvasEditorInner({
     renameNode,
     updateText,
     setTextEditing,
-    createImageConfigFromText,
     createImageFromSource,
     recordHistory: recordHistorySnapshot,
     saveAsset: saveNodeToLibrary,
@@ -4215,7 +4182,6 @@ function CanvasEditorInner({
     connectedMaterialNodeIdsByNodeId,
     completeNodeResize,
     copyPrompt,
-    createImageConfigFromText,
     createImageFromSource,
     layerParentByNodeId,
     locateNode,

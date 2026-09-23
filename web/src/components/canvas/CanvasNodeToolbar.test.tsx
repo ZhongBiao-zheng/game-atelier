@@ -128,11 +128,11 @@ function nodeContext(overrides: Partial<CanvasNodeContextValue> = {}): CanvasNod
     updateNode: vi.fn(),
     renameNode: vi.fn(),
     updateText: vi.fn(),
-    createImageConfigFromText: vi.fn(),
     recordHistory: vi.fn(),
     saveAsset: vi.fn(async () => undefined),
     copyPrompt: vi.fn(async () => undefined),
     reversePrompt: vi.fn(async () => undefined),
+    createImageFromSource: vi.fn(),
     createLayerDecomposition: vi.fn(),
     expandLayerStack: vi.fn(),
     submitLayerDecomposition: vi.fn(async () => undefined),
@@ -351,7 +351,7 @@ it('cycles text size through Atelier type tokens', () => {
   expect(context.recordHistory).toHaveBeenCalledTimes(2);
 });
 
-it('creates an image config from populated text and disables the shortcut for empty text', () => {
+it('creates an image node from populated text and disables the shortcut for empty text', () => {
   const populated = {
     ...nodes[0],
     data: { ...nodes[0].data, current_version_id: 'version-text' },
@@ -372,7 +372,7 @@ it('creates an image config from populated text and disables the shortcut for em
   );
 
   fireEvent.click(screen.getByRole('button', { name: '用 文本 生成图片' }));
-  expect(context.createImageConfigFromText).toHaveBeenCalledWith('text');
+  expect(context.createImageFromSource).toHaveBeenCalledWith('text');
 
   rerender(
     <CanvasNodeContext.Provider value={context}>
