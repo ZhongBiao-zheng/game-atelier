@@ -3,7 +3,7 @@ import { HelpCircle } from 'lucide-react';
 
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { chooseFolder } from '@/api/folders';
-import { fetchProjects } from '@/api/projects';
+import { listCanvasProjects } from '@/api/canvas';
 import {
   ProfileRequiredError,
   listTeamLibraries,
@@ -11,7 +11,7 @@ import {
   rescanTeamLibrary,
   unmountTeamLibrary,
 } from '@/api/teamLibraries';
-import type { Project } from '@/schema/jobs';
+import type { CanvasProject } from '@/schema/canvas';
 import type { TeamLibraryView } from '@/schema/teamLibrary';
 
 const SYNC_HINT = '目录由团队自己的 SVN / Git / 网盘同步；这里只登记本机路径';
@@ -22,7 +22,7 @@ const rowButton =
   'rounded-md px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
 export function TeamLibrariesSection() {
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projects, setProjects] = useState<CanvasProject[]>([]);
   const [projectId, setProjectId] = useState('');
   const [libraries, setLibraries] = useState<TeamLibraryView[]>([]);
   const [busy, setBusy] = useState(false);
@@ -31,17 +31,18 @@ export function TeamLibrariesSection() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchProjects()
-      .then(file => {
+    // 团队库挂在画布项目上：Studio 与画布的团队栏都按画布项目 ID 查挂载。
+    listCanvasProjects(true)
+      .then(list => {
         if (cancelled) return;
         // 载荷不合契约不静默退化成空列表——那样「读失败」和「真的没有」长得一模一样。
-        if (!Array.isArray(file?.projects)) {
-          console.error('项目列表返回格式不对', file);
+        if (!Array.isArray(list)) {
+          console.error('画布项目列表返回格式不对', list);
           setError(BAD_PAYLOAD);
           return;
         }
-        setProjects(file.projects);
-        setProjectId(current => current || file.projects[0]?.id || '');
+        setProjects(list);
+        setProjectId(current => current || list[0]?.project_id || '');
       })
       .catch(e => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -113,13 +114,13 @@ export function TeamLibrariesSection() {
       </div>
       <div className="min-w-0 space-y-3">
         <select
-          aria-label="项目"
+          aria-label="画布项目"
           value={projectId}
           onChange={event => setProjectId(event.target.value)}
           className="h-9 rounded-md border border-input bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
           {projects.map(project => (
-            <option key={project.id} value={project.id}>
+            <option key={project.project_id} value={project.project_id}>
               {project.name}
             </option>
           ))}

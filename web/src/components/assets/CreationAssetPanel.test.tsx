@@ -49,7 +49,7 @@ vi.mock('@/api/creationAssets', async importOriginal => {
 });
 
 vi.mock('./TeamLibraryPanel', () => ({
-  TeamLibraryPanel: () => <div data-testid="team-panel" />,
+  TeamLibraryPanel: ({ projectId }: { projectId: string }) => <div data-testid="team-panel" data-project-id={projectId} />,
 }));
 
 describe('CreationAssetPanel', () => {
@@ -260,6 +260,26 @@ describe('CreationAssetPanel', () => {
 
     expect(await screen.findByPlaceholderText('搜索标题、正文或标签')).toBeInTheDocument();
     expect(screen.queryByTestId('team-panel')).not.toBeInTheDocument();
+  });
+
+  it('lets Studio pick a canvas project for the team tab without scoping personal assets', async () => {
+    mocks.list.mockResolvedValue({ revision: 1, assets: [promptAsset] });
+    render(
+      <CreationAssetPanel
+        canvasTargets={[{ projectId: 'canvas-a', name: '画布甲' }, { projectId: 'canvas-b', name: '画布乙' }]}
+        onClose={vi.fn()}
+        onUsePrompt={vi.fn()}
+        onUseMedia={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByPlaceholderText('搜索标题、正文或标签')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '资产范围' })).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: '团队' }));
+    expect(await screen.findByTestId('team-panel')).toHaveAttribute('data-project-id', 'canvas-a');
+    fireEvent.change(screen.getByLabelText('画布项目'), { target: { value: 'canvas-b' } });
+    expect(await screen.findByTestId('team-panel')).toHaveAttribute('data-project-id', 'canvas-b');
   });
 
   it('hides the team tab without a project', async () => {

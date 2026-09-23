@@ -9,7 +9,7 @@ import {
   rescanTeamLibrary,
   unmountTeamLibrary,
 } from '@/api/teamLibraries';
-import { fetchProjects } from '@/api/projects';
+import { listCanvasProjects } from '@/api/canvas';
 import { chooseFolder } from '@/api/folders';
 import type { TeamLibraryView } from '@/schema/teamLibrary';
 
@@ -23,14 +23,14 @@ vi.mock('@/api/teamLibraries', async importOriginal => {
     rescanTeamLibrary: vi.fn(),
   };
 });
-vi.mock('@/api/projects', () => ({ fetchProjects: vi.fn() }));
+vi.mock('@/api/canvas', () => ({ listCanvasProjects: vi.fn() }));
 vi.mock('@/api/folders', () => ({ chooseFolder: vi.fn() }));
 
 const mockList = vi.mocked(listTeamLibraries);
 const mockMount = vi.mocked(mountTeamLibrary);
 const mockUnmount = vi.mocked(unmountTeamLibrary);
 const mockRescan = vi.mocked(rescanTeamLibrary);
-const mockProjects = vi.mocked(fetchProjects);
+const mockProjects = vi.mocked(listCanvasProjects);
 const mockChooseFolder = vi.mocked(chooseFolder);
 
 const view: TeamLibraryView = {
@@ -46,10 +46,9 @@ const view: TeamLibraryView = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockProjects.mockResolvedValue({
-    projects: [{ id: 'p1', slug: 'maipai', name: '买牌三国', created_at: '2026-01-01T00:00:00Z' }],
-    assignments: {},
-  });
+  mockProjects.mockResolvedValue([
+    { schema_version: 2, project_id: 'p1', name: '买牌三国', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
+  ] as never);
   mockList.mockResolvedValue([view]);
   mockMount.mockResolvedValue(view);
   mockUnmount.mockResolvedValue(undefined);
@@ -61,7 +60,7 @@ describe('TeamLibrariesSection', () => {
   it('渲染项目选择与该项目的库列表', async () => {
     render(<TeamLibrariesSection />);
 
-    const select = await screen.findByLabelText('项目');
+    const select = await screen.findByLabelText('画布项目');
     await waitFor(() => expect(select).toHaveValue('p1'));
     expect(screen.getByRole('option', { name: '买牌三国' })).toBeInTheDocument();
 
@@ -124,7 +123,7 @@ describe('TeamLibrariesSection', () => {
 
   it('项目列表返回格式不对时报错', async () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
-    mockProjects.mockResolvedValue({} as unknown as Awaited<ReturnType<typeof fetchProjects>>);
+    mockProjects.mockResolvedValue({} as never);
     render(<TeamLibrariesSection />);
 
     expect(await screen.findByText('读取列表失败：返回格式不对')).toBeInTheDocument();

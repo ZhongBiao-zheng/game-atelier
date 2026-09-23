@@ -894,7 +894,6 @@ function StudioFull() {
         <CreationAssetPanel
           ref={assetPanelRef}
           initialKind={assetPanelKind}
-          projectId={canvasTargets[0]?.project_id}
           canvasTargets={canvasTargets.map(target => ({
             projectId: target.project_id,
             name: target.name,

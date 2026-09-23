@@ -208,10 +208,20 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 
   useEffect(() => setKind(initialKind), [initialKind]);
 
-  // 团队库整块挂在 projectId 上：项目消失时 tab 和主体会同时消失，用户困在空面板里切不走。
+  // 团队库挂在画布项目上。画布里固定用当前画布；Studio 没有当前画布，从可连接的画布里选。
+  const teamProjectChoices = useMemo(
+    () => projectId ? [] : canvasTargets,
+    [projectId, canvasTargets],
+  );
+  const [pickedTeamProjectId, setPickedTeamProjectId] = useState<string | null>(null);
+  const teamProjectId = projectId
+    ?? teamProjectChoices.find(target => target.projectId === pickedTeamProjectId)?.projectId
+    ?? teamProjectChoices[0]?.projectId;
+
+  // 可用的画布项目消失时，团队 tab 和主体会同时消失，用户困在空面板里切不走。
   useEffect(() => {
-    if (kind === 'team' && !projectId) setKind('prompt');
-  }, [kind, projectId]);
+    if (kind === 'team' && !teamProjectId) setKind('prompt');
+  }, [kind, teamProjectId]);
 
   useEffect(() => {
     if (!saveRequest) return;
@@ -532,14 +542,29 @@ export const CreationAssetPanel = forwardRef<CreationAssetPanelHandle, CreationA
 
       {!selected && !isEditing && (
         <>
-          <div className={cn('grid border-b border-border p-1.5', projectId ? 'grid-cols-3' : 'grid-cols-2')} role="group" aria-label="资产类型">
+          <div className={cn('grid border-b border-border p-1.5', teamProjectId ? 'grid-cols-3' : 'grid-cols-2')} role="group" aria-label="资产类型">
             <PanelTab active={kind === 'prompt'} onClick={() => setKind('prompt')}><FileText />提示词</PanelTab>
             <PanelTab active={kind === 'media'} onClick={() => setKind('media')}><FileImage />媒体</PanelTab>
-            {projectId && <PanelTab active={kind === 'team'} onClick={() => setKind('team')}><Users />团队</PanelTab>}
+            {teamProjectId && <PanelTab active={kind === 'team'} onClick={() => setKind('team')}><Users />团队</PanelTab>}
           </div>
-          {kind === 'team' && projectId && (
+          {kind === 'team' && teamProjectId && teamProjectChoices.length > 1 && (
+            <div className="border-b border-border p-3">
+              <select
+                aria-label="画布项目"
+                value={teamProjectId}
+                onChange={event => setPickedTeamProjectId(event.target.value)}
+                className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {teamProjectChoices.map(target => (
+                  <option key={target.projectId} value={target.projectId}>{target.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {kind === 'team' && teamProjectId && (
             <TeamLibraryPanel
-              projectId={projectId}
+              key={teamProjectId}
+              projectId={teamProjectId}
               onAdopted={(result, entry) => { void refresh(); onTeamAssetAdopted?.(result, entry); }}
               onOpenSettings={onOpenSettings ?? (() => {})}
               className="min-h-0 flex-1"
