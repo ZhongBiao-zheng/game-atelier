@@ -101,6 +101,7 @@ POST /api/creation-assets/{asset_id}/use
 DELETE /api/creation-assets/{asset_id}
 GET /api/creation-assets/{asset_id}/content
 GET /api/creation-assets/{asset_id}/inputs/{order}
+GET /api/creation-assets/{asset_id}/staleness
 POST /api/canvas/projects/{project_id}/creation-assets/{asset_id}/insert
 GET /api/profile
 PUT /api/profile
@@ -112,6 +113,10 @@ GET /api/team-libraries/{library_id}/assets
 GET /api/team-libraries/{library_id}/assets/{entry_id}/content
 GET /api/team-libraries/{library_id}/assets/{entry_id}/thumb
 POST /api/team-libraries/{library_id}/assets/{entry_id}/adopt
+GET /api/team-libraries/related
+POST /api/team-libraries/{library_id}/share
+PUT /api/team-libraries/{library_id}/assets/{asset_id}
+DELETE /api/team-libraries/{library_id}/assets/{asset_id}
 POST /api/canvas/projects/{project_id}/uploads
 POST /api/canvas/projects/{project_id}/nodes/{node_id}/replace
 POST /api/canvas/projects/{project_id}/media-operations

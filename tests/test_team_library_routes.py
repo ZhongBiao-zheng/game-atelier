@@ -409,3 +409,366 @@ def test_blank_display_name_is_422(client):
     resp = client.put("/api/profile", json={"display_name": "   "})
     assert resp.status_code == 422, resp.text
     assert client.get("/api/profile").json() == {"display_name": None}
+
+
+# ------------------------------------------------------------------ P2：分享 / 编辑 / 撤回
+
+
+def _studio_job_with_output(root, *, reference: bool = False, namespace: str = "studio"):
+    """一条 Studio 图片 job，output_paths[0] 是真实文件；reference=True 时带一张上传参考。"""
+    from character_workflow.lib.jobs import new_job_id, save_job
+    from character_workflow.lib.schemas import Job, JobKind, JobParams, JobStatus
+    from character_workflow.lib.studio_jobs import studio_output_dir
+
+    job_id = new_job_id()
+    paths: list[str] = []
+    if namespace == "studio":
+        output = studio_output_dir(job_id) / "1.png"
+        output.write_bytes(_PNG)
+        paths.append(str(output))
+    params: dict = {}
+    if reference:
+        upload = root / ".runtime" / "uploads" / f"{job_id}.png"
+        upload.parent.mkdir(parents=True, exist_ok=True)
+        upload.write_bytes(_PNG)
+        params["reference_images"] = [str(upload)]
+    return save_job(Job(
+        job_id=job_id,
+        character_id="c1" if namespace == "character" else "",
+        prompt="一只红色的猫",
+        submitted_at="2026-09-23T01:00:00Z",
+        model="gpt-image-2",
+        params=JobParams(**params),
+        output_paths=paths,
+        status=JobStatus.DONE,
+        error=None,
+        kind=JobKind.IMAGE,
+        namespace=namespace,
+        provider="tuzi",
+        alias="tuzi-main",
+    ))
+
+
+def _broadcasts(monkeypatch) -> list[tuple[str, dict]]:
+    from viewer_server import watcher
+
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(watcher.hub, "broadcast", lambda event, data: events.append((event, data)))
+    return events
+
+
+def _share_job(client, library_id: str, job_id: str, **extra):
+    return client.post(
+        f"/api/team-libraries/{library_id}/share",
+        json={
+            "source": {"kind": "job_output", "job_id": job_id, "output_index": 0},
+            "title": "红猫", "tags": ["猫"], **extra,
+        },
+    )
+
+
+@pytest.fixture
+def shared_lib(client, tmp_path):
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    client.put("/api/profile", json={"display_name": "老王"})
+    return _mount(client, "canvas-1", folder), folder
+
+
+def test_share_job_output_returns_refreshed_entry_and_broadcasts_added(
+    client, isolated_data_root, shared_lib, monkeypatch
+):
+    lib, _ = shared_lib
+    events = _broadcasts(monkeypatch)
+    job = _studio_job_with_output(isolated_data_root, reference=True)
+    resp = _share_job(client, lib["library_id"], job.job_id)
+    assert resp.status_code == 201, resp.text
+    entry = resp.json()
+    assert entry["id"].startswith("ta_") and entry["kind"] == "generation"
+    assert entry["status"] == "ready" and entry["model"] == "gpt-image-2"
+    assert entry["title"] == "红猫" and entry["author"] == "老王"
+    listed = client.get(f"/api/team-libraries/{lib['library_id']}/assets").json()["entries"]
+    assert [e["id"] for e in listed] == [entry["id"]]
+    assert events == [(
+        "team-library-changed",
+        {"library_id": lib["library_id"], "asset_id": entry["id"], "kind": "generation",
+         "author": "老王", "change": "added"},
+    )]
+
+
+def test_share_creation_asset(client, shared_lib):
+    from character_workflow.lib.creation_assets import create_media_asset_from_bytes
+
+    lib, _ = shared_lib
+    asset = create_media_asset_from_bytes(
+        title="一张图", body=_PNG, filename="a.png", mime_type="image/png", tags=[],
+    )
+    resp = client.post(
+        f"/api/team-libraries/{lib['library_id']}/share",
+        json={"source": {"kind": "creation_asset", "asset_id": asset.asset_id}, "title": "图"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["kind"] == "media" and resp.json()["model"] is None
+
+
+def test_share_requires_profile(client, tmp_path, isolated_data_root):
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    client.put("/api/profile", json={"display_name": "老王"})
+    lib = _mount(client, "canvas-1", folder)
+    (isolated_data_root / ".config" / "profile.json").unlink()
+    job = _studio_job_with_output(isolated_data_root)
+    resp = _share_job(client, lib["library_id"], job.job_id)
+    assert resp.status_code == 409 and resp.json()["detail"]["code"] == "profile_required"
+
+
+def test_share_unreachable_library_is_503(client, isolated_data_root, shared_lib):
+    import shutil
+
+    lib, folder = shared_lib
+    shutil.rmtree(folder)
+    job = _studio_job_with_output(isolated_data_root)
+    resp = _share_job(client, lib["library_id"], job.job_id)
+    assert resp.status_code == 503 and resp.json()["detail"]["code"] == "library_unreachable"
+
+
+def test_share_not_found_cases_are_404(client, shared_lib):
+    lib, _ = shared_lib
+    assert _share_job(client, "lib_0000000000000000", "job-x").status_code == 404
+    assert _share_job(client, lib["library_id"], "job-missing").status_code == 404
+    missing_asset = client.post(
+        f"/api/team-libraries/{lib['library_id']}/share",
+        json={"source": {"kind": "creation_asset", "asset_id": "ca_missing"}, "title": "图"},
+    )
+    assert missing_asset.status_code == 404, missing_asset.text
+
+
+def test_share_not_shareable_and_source_missing_are_422_with_code(
+    client, isolated_data_root, shared_lib
+):
+    from pathlib import Path
+
+    lib, _ = shared_lib
+    character_job = _studio_job_with_output(isolated_data_root, namespace="character")
+    resp = _share_job(client, lib["library_id"], character_job.job_id)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "not_shareable"
+    assert resp.json()["detail"]["message"]
+
+    gone = _studio_job_with_output(isolated_data_root)
+    Path(gone.output_paths[0]).unlink()
+    resp = _share_job(client, lib["library_id"], gone.job_id)
+    assert resp.status_code == 422 and resp.json()["detail"]["code"] == "source_missing"
+
+
+def test_share_blank_title_is_422_invalid(client, isolated_data_root, shared_lib):
+    lib, folder = shared_lib
+    job = _studio_job_with_output(isolated_data_root)
+    resp = client.post(
+        f"/api/team-libraries/{lib['library_id']}/share",
+        json={"source": {"kind": "job_output", "job_id": job.job_id, "output_index": 0},
+              "title": "   "},
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "invalid"
+    assert not (folder / "shared").exists()
+
+
+def test_share_large_refs_is_413_until_allowed(client, isolated_data_root, shared_lib, monkeypatch):
+    from character_workflow.lib import team_library_share as share
+
+    lib, _ = shared_lib
+    monkeypatch.setattr(share, "LARGE_REFS_BYTES", 1)
+    job = _studio_job_with_output(isolated_data_root, reference=True)
+    resp = _share_job(client, lib["library_id"], job.job_id)
+    assert resp.status_code == 413, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "refs_too_large" and detail["bytes"] == len(_PNG)
+    allowed = _share_job(client, lib["library_id"], job.job_id, allow_large=True)
+    assert allowed.status_code == 201, allowed.text
+
+
+def _shared_entry(client, isolated_data_root, library_id: str) -> dict:
+    job = _studio_job_with_output(isolated_data_root)
+    resp = _share_job(client, library_id, job.job_id)
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_update_shared_asset_returns_entry_and_broadcasts_updated(
+    client, isolated_data_root, shared_lib, monkeypatch
+):
+    lib, _ = shared_lib
+    entry = _shared_entry(client, isolated_data_root, lib["library_id"])
+    events = _broadcasts(monkeypatch)
+    resp = client.put(
+        f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}",
+        json={"title": "改名的猫", "tags": ["新"]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["title"] == "改名的猫" and resp.json()["tags"] == ["新"]
+    assert [(e, d["asset_id"], d["change"]) for e, d in events] == [
+        ("team-library-changed", entry["id"], "updated")
+    ]
+
+
+def test_withdraw_shared_asset_is_204_and_broadcasts_removed(
+    client, isolated_data_root, shared_lib, monkeypatch
+):
+    lib, _ = shared_lib
+    entry = _shared_entry(client, isolated_data_root, lib["library_id"])
+    events = _broadcasts(monkeypatch)
+    resp = client.delete(f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}")
+    assert resp.status_code == 204, resp.text
+    assert client.get(f"/api/team-libraries/{lib['library_id']}/assets").json()["entries"] == []
+    assert [(d["asset_id"], d["change"]) for _, d in events] == [(entry["id"], "removed")]
+
+
+@pytest.mark.parametrize("method", ["PUT", "DELETE"])
+def test_edit_and_withdraw_error_codes(client, isolated_data_root, shared_lib, method):
+    import shutil
+
+    lib, folder = shared_lib
+    entry = _shared_entry(client, isolated_data_root, lib["library_id"])
+    url = f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}"
+    body = {"json": {"title": "改", "tags": []}} if method == "PUT" else {}
+
+    client.put("/api/profile", json={"display_name": "小李"})
+    forbidden = client.request(method, url, **body)
+    assert forbidden.status_code == 403, forbidden.text
+    assert forbidden.json()["detail"]["code"] == "not_author"
+
+    client.put("/api/profile", json={"display_name": "老王"})
+    missing = client.request(
+        method, f"/api/team-libraries/{lib['library_id']}/assets/ta_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        **body,
+    )
+    assert missing.status_code == 404, missing.text
+    unknown_lib = client.request(
+        method, f"/api/team-libraries/lib_0000000000000000/assets/{entry['id']}", **body
+    )
+    assert unknown_lib.status_code == 404
+
+    (isolated_data_root / ".config" / "profile.json").unlink()
+    no_profile = client.request(method, url, **body)
+    assert no_profile.status_code == 409 and no_profile.json()["detail"]["code"] == "profile_required"
+
+    client.put("/api/profile", json={"display_name": "老王"})
+    shutil.rmtree(folder)
+    offline = client.request(method, url, **body)
+    assert offline.status_code == 503 and offline.json()["detail"]["code"] == "library_unreachable"
+
+
+def test_update_blank_title_is_422_invalid(client, isolated_data_root, shared_lib):
+    lib, _ = shared_lib
+    entry = _shared_entry(client, isolated_data_root, lib["library_id"])
+    resp = client.put(
+        f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}",
+        json={"title": "  ", "tags": []},
+    )
+    assert resp.status_code == 422 and resp.json()["detail"]["code"] == "invalid"
+
+
+# ------------------------------------------------------------------ P2：列表 / 相关配方 / 过时
+
+
+def test_list_without_project_id_dedupes_by_library(client, tmp_path):
+    import shutil
+
+    old = tmp_path / "old"
+    old.mkdir()
+    client.put("/api/profile", json={"display_name": "老王"})
+    first = _mount(client, "canvas-1", old)
+    new = tmp_path / "new"
+    shutil.copytree(old, new)
+    _mount(client, "canvas-2", new)
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    other = _mount(client, "canvas-2", other_dir)
+
+    rows = client.get("/api/team-libraries").json()
+    assert sorted(r["library_id"] for r in rows) == sorted([first["library_id"], other["library_id"]])
+    same = next(r for r in rows if r["library_id"] == first["library_id"])
+    # get_mount 选中的是最近挂载的可达记录：画布 2 那条。
+    assert same["project_id"] == "canvas-2" and same["mount_path"] == str(new.resolve())
+    assert len(client.get("/api/team-libraries", params={"project_id": "canvas-1"}).json()) == 1
+
+
+def test_related_merges_libraries_sorted_and_capped(client, isolated_data_root, tmp_path):
+    import shutil
+
+    client.put("/api/profile", json={"display_name": "老王"})
+    folders = [tmp_path / "a", tmp_path / "b", tmp_path / "offline"]
+    for folder in folders:
+        folder.mkdir()
+    (folders[0] / "raw.png").write_bytes(_PNG)
+    libs = [_mount(client, "canvas-1", folder) for folder in folders]
+    _mount(client, "canvas-2", tmp_path / "a")  # 同库另一画布挂载不影响画布 1 的结果
+    shared: list[str] = []
+    for n in range(22):
+        shared.append(_shared_entry(client, isolated_data_root, libs[n % 2]["library_id"])["id"])
+    _shared_entry(client, isolated_data_root, libs[2]["library_id"])
+    shutil.rmtree(folders[2])
+
+    resp = client.get("/api/team-libraries/related", params={"project_id": "canvas-1"})
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()
+    assert [r["entry"]["id"] for r in rows] == list(reversed(shared))[:20]
+    assert {r["library_id"] for r in rows} == {libs[0]["library_id"], libs[1]["library_id"]}
+    assert all(r["entry"]["kind"] == "generation" for r in rows)
+    assert rows[0]["library_name"] == libs[1]["name"]
+    assert client.get("/api/team-libraries/related", params={"project_id": "canvas-x"}).json() == []
+
+
+def test_related_requires_project_id_and_is_not_swallowed_by_library_routes(client):
+    assert client.get("/api/team-libraries/related").status_code == 422
+    resp = client.get("/api/team-libraries/related", params={"project_id": "canvas-1"})
+    assert resp.status_code == 200 and resp.json() == []
+
+
+def test_staleness_reports_all_four_states(client, isolated_data_root, shared_lib):
+    from character_workflow.lib.creation_assets import create_media_asset_from_bytes
+
+    lib, _ = shared_lib
+    own = create_media_asset_from_bytes(
+        title="本机图", body=_PNG, filename="a.png", mime_type="image/png", tags=[],
+    )
+    assert client.get(f"/api/creation-assets/{own.asset_id}/staleness").json() == {
+        "status": "unknown"
+    }
+
+    entry = _shared_entry(client, isolated_data_root, lib["library_id"])
+    adopted = client.post(
+        f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}/adopt",
+        json={"project_id": "canvas-1"},
+    )
+    assert adopted.status_code == 200, adopted.text
+    asset_id = adopted.json()["asset"]["asset_id"]
+    url = f"/api/creation-assets/{asset_id}/staleness"
+    assert client.get(url).json() == {"status": "fresh"}
+
+    client.put(
+        f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}",
+        json={"title": "改过", "tags": []},
+    )
+    assert client.get(url).json() == {"status": "stale"}
+
+    client.delete(f"/api/team-libraries/{lib['library_id']}/assets/{entry['id']}")
+    assert client.get(url).json() == {"status": "withdrawn"}
+
+
+def test_staleness_unknown_asset_is_404(client):
+    assert client.get("/api/creation-assets/ca_missing/staleness").status_code == 404
+
+
+@pytest.mark.parametrize(("method", "path", "capability"), [
+    ("POST", "/api/team-libraries/lib_x/share", "edit"),
+    ("PUT", "/api/team-libraries/lib_x/assets/ta_x", "edit"),
+    ("DELETE", "/api/team-libraries/lib_x/assets/ta_x", "edit"),
+    ("GET", "/api/team-libraries/related", "read"),
+    ("GET", "/api/creation-assets/ca_x/staleness", "read"),
+])
+def test_new_routes_capabilities(method, path, capability):
+    from viewer_server.connection_capabilities import local_capability
+
+    assert local_capability(method, path) == capability

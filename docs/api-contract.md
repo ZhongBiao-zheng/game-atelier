@@ -90,7 +90,8 @@ P1b 对全部路由先校验实际监听 Host、精确 Origin 与浏览器 Fetch
 SSE（`GET /events`）事件：`job-changed` `image-added` `spec-changed` `active-character-changed`
 `projects-changed` `workshop-request-changed` `canvas-document-changed` `team-library-changed`。
 `team-library-changed` 为 `{library_id, asset_id, kind, author, change}`，`change ∈ added | updated | removed`，
-由 watcher 盯挂载目录发出：任何变化触发 2 秒防抖后的全量重扫，再按索引 diff 逐条广播（隐藏目录不触发）。
+由 watcher 盯挂载目录发出：任何变化触发 2 秒防抖后的全量重扫，再按索引 diff 逐条广播（隐藏目录不触发）；
+分享 / 编辑 / 撤回 / 重扫接口在同一请求内走同一个刷新（`refresh_team_library`），不等防抖。
 `canvas-document-changed` 由 watcher 盯
 `canvases/<project_id>/canvas.json` 发出（`{project_id, revision}`），浏览器保存与 Agent 经 MCP 的
 `canvas_apply_changes` / `canvas_import_media` / `canvas_run` 都会触发；画布编辑器按 `revision` 判断
@@ -202,6 +203,8 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `POST /team-libraries` `DELETE /team-libraries/{library_id}`
 `POST /team-libraries/{library_id}/rescan`
 `POST /team-libraries/{library_id}/assets/{entry_id}/adopt`
+`POST /team-libraries/{library_id}/share`
+`PUT /team-libraries/{library_id}/assets/{asset_id}` `DELETE /team-libraries/{library_id}/assets/{asset_id}`
 `POST /canvas/projects/export` `POST /canvas/projects/import/{inspect,commit}`
 `DELETE /canvas/projects/{id}`
 `PUT /canvas/ui-preferences`
@@ -225,8 +228,8 @@ UI Scheme 的可选 `creation_request_id` 仅为服务器幂等创建索引，�
 `GET /canvas/projects/{id}/versions/{version_id}/media`
 `GET /canvas/projects/{id}/versions/{version_id}/download`
 `GET /creation-assets?kind={prompt,media,generation}` `/creation-assets/{asset_id}/content`
-`GET /creation-assets/{asset_id}/inputs/{order}`
-`GET /profile` `GET /team-libraries?project_id=`
+`GET /creation-assets/{asset_id}/inputs/{order}` `GET /creation-assets/{asset_id}/staleness`
+`GET /profile` `GET /team-libraries?project_id=` `GET /team-libraries/related?project_id=`
 `GET /team-libraries/{library_id}/assets?kind&author&tag&q&cursor&limit`
 `GET /team-libraries/{library_id}/assets/{entry_id}/{content,thumb?w=}`
 `GET /canvas/projects/{id}/agent/sessions` `/canvas/projects/{id}/agent/sessions/{session_id}`
@@ -773,7 +776,7 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 |---|---|---|---|
 | GET | `/profile` | — | `{display_name: string \| null}` |
 | PUT | `/profile` | `UserProfile` | `UserProfile` |
-| GET | `/team-libraries?project_id=` | — | `list[TeamLibraryView]` |
+| GET | `/team-libraries?project_id=` | — | `list[TeamLibraryView]`（`project_id` 可选） |
 | POST | `/team-libraries` | `TeamLibraryMountRequest` | `TeamLibraryView` 201 |
 | DELETE | `/team-libraries/{library_id}?project_id=` | — | 204 |
 | POST | `/team-libraries/{library_id}/rescan` | — | `TeamLibraryView` |
@@ -781,6 +784,14 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 | GET | `/team-libraries/{library_id}/assets/{entry_id}/content` | — | 文件 |
 | GET | `/team-libraries/{library_id}/assets/{entry_id}/thumb?w=` | — | `image/webp` |
 | POST | `/team-libraries/{library_id}/assets/{entry_id}/adopt` | `TeamAssetAdoptRequest` | `TeamAssetAdoptResponse` |
+| POST | `/team-libraries/{library_id}/share` | `TeamShareRequest` | `TeamLibraryIndexEntry` 201 |
+| PUT | `/team-libraries/{library_id}/assets/{asset_id}` | `TeamAssetUpdateRequest` | `TeamLibraryIndexEntry` |
+| DELETE | `/team-libraries/{library_id}/assets/{asset_id}` | — | 204 |
+| GET | `/team-libraries/related?project_id=` | — | `list[TeamRelatedEntry]` |
+| GET | `/creation-assets/{asset_id}/staleness` | — | `CreationAssetStaleness` |
+
+`GET /team-libraries` 带 `project_id` 时只列该画布的挂载；不带时列本机全部挂载，按 `library_id` 去重，
+每个库取库级端点选中的那条记录（见下）。分享对话框用不带参数的形式。
 
 挂载（`POST /team-libraries`）与 `/folder-picker` 同属本机管理能力，网站会话 403；列表、卸载、重扫、
 读条目、采用照常按读 / 编辑能力放行。同一个库可以挂在多个画布上，库级端点取可达记录中最近挂载的那条
@@ -789,16 +800,75 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 错误语义按「谁能修」分：没设显示名挂不了库，409 `{code: "profile_required"}`；显示名去掉首尾空白后为空，
 422；挂载点不存在、或指向 data root / 其祖先 / 其内部任意目录，422；挂载目录当前不可达（清单读不到）503
 `{code: "library_unreachable"}`，列表仍返回该库并标 `reachable: false`；这条资产现在不能采用
-（没同步完整、内容与 `asset.json` 的 sha256 对不上、库内 `asset.json` 损坏、生成资产尚未开放）
+（没同步完整、内容与 `asset.json` 的 sha256 对不上、库内 `asset.json` 损坏）
 409 `{code: "not_adoptable"}`；库 / 资产不存在 404。`limit` 由路由夹到 `[1, 200]`，非法 `cursor` 422。
 挂载表自身损坏是磁盘状态故障，500 带上文件路径。
+
+分享、编辑、撤回的错误码（`detail` 为对象时带 `code` 与 `message`）：
+
+| 状态 | `code` | 场景 |
+|---|---|---|
+| 409 | `profile_required` | 本机没设显示名 |
+| 503 | `library_unreachable` | 挂载目录当前不可达 |
+| 404 | — | 库不存在；分享源（Studio job / 创作资产）不存在；编辑 / 撤回的资产不在库里 |
+| 403 | `not_author` | 编辑 / 撤回别人的资产（作者 = `asset.json.author.display_name` 与本机显示名相同） |
+| 413 | `refs_too_large` | 参考内容合计超过 200 MB，`detail.bytes` 为合计字节数；确认后带 `allow_large: true` 重发 |
+| 422 | `not_shareable` | 源不可分享：非 Studio 记录、未完成、非图片 / 视频、`output_index` 越界 |
+| 422 | `source_missing` | 本机找不到成片或某份参考的文件 |
+| 422 | `invalid` | 标题 / 标签 / 显示名去空白后为空或超长 |
+
+检查顺序为显示名 → 库存在 → 库可达 → 源。`TeamShareRequest.source` 为
+`{kind: "job_output", job_id, output_index}`（`output_index` 是 `Job.output_paths` 的下标，只收
+`namespace == "studio"`、`status ∈ done | partial`、`kind ∈ image | video`）或
+`{kind: "creation_asset", asset_id}`（prompt / media / generation 三类都可分享）。成功后路由在同一请求内
+重扫该库、按 diff 广播 `team-library-changed`，响应条目取自重扫后的索引（分享资产的条目 `id` 等于
+`asset_id`，形如 `ta_<ULID>`）。编辑只改 `title` / `tags` / `updated_at`；撤回删掉整个资产目录，条目随之消失。
+
+`GET /team-libraries/related` 是团队栏的「相关配方」：该画布挂载的全部可达库中 `kind == "generation"` 且
+`status == "ready"` 的条目，跨库合并后按 `updated_at` 时刻降序取 20；不可达或尚未扫描的库直接跳过，
+不报错。`TeamRelatedEntry = {library_id, library_name, entry}`，`library_name` 取该画布自己那条挂载的名字。
+
+`GET /creation-assets/{asset_id}/staleness` 判断采用副本相对团队来源的状态：`fresh`（来源没变）、
+`stale`（来源 `updated_at` 晚于采用时；原始文件还要内容 sha256 真变了才算）、`withdrawn`（库可达、
+已扫描但条目不在了）、`unknown`（不是采用来的、库没挂 / 不可达 / 没扫过、条目同步中）。资产不存在 404。
 
 `TeamLibraryIndexEntry.kind` 为 `generation | media | prompt | raw`：前三种来自
 `shared/<作者>/<asset_id>/asset.json`，`raw` 是库内直接摆着的媒体文件（`id` 为
 `"raw_" + sha1(relative_path)[:24]`）。`prompt` 没有文件本体，`content` 与 `thumb` 一律 404。
+`generation` 条目额外带 `model`（模型 id）与 `cost_cny`（快照里的花费，可空），其余种类两者为 `null`。
 采用永远是拷贝——落进个人创作资产库并记 `adopted_from`，本机对象不依赖库内路径；
 同一条团队资产重复采用返回既有资产且 `created: false`。`raw` 条目只按内容 sha256 去重（路径不变、
 内容被同步更新后再采用会得到新副本），命中既有资产时把这次的 `project_id` 补进它的 `project_ids`。
+
+分享资产的目录布局为 `shared/<作者目录>/<asset_id>/`：`asset.json`、成片本体、图片成片的
+`thumb.webp`（最长边 ≤ 512，视频不生成）、`refs/NN-<sha256 前 12 位>.<ext>`（`NN = order + 1`）。
+先写同级 `.tmp-<asset_id>/` 再整体改名，撤回先改名成 `.tmp-del-<asset_id>/` 再删；扫描跳过点目录。
+`asset.json` 为 `TeamAssetFile`（`team_asset_version: 1`，读取时忽略未知字段，版本不是 1 的条目标
+`incomplete`）；生成资产的 `snapshot` 结构：
+
+```json
+{
+  "mode": "image | video",
+  "model": "gpt-image-2",
+  "provider": "tuzi",
+  "alias": "tuzi-main",
+  "final_prompt": "…",
+  "draft_prompt": null,
+  "params": {},
+  "inputs": [
+    {"order": 0, "role": "reference | mask | mj_sref | mj_cref | mj_oref",
+     "kind": "image | video | audio", "sha256": "<64 hex>", "mime_type": "image/png",
+     "path": "refs/01-<sha256 前 12 位>.png"}
+  ],
+  "cost_cny": 0.3,
+  "cost_basis": "actual | estimated",
+  "submitted_at": "2026-09-23T01:00:00Z"
+}
+```
+
+`params` 只留 `JobParams` 的声明字段并去掉路径 / 费用 / 运行态字段；`inputs` 按 `order` 升序且恰为
+`0..n-1`；`cost_basis` 与 `cost_cny` 同时为空或同时有值。`origin = {job_id?, canvas_project_id?}` 只作追溯。
+采用时转成本机 `GenerationRecipe`（去掉 `inputs[].path`，参考内容按 sha256 进 blobs）。
 
 ### 几个要当心的
 

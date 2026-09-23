@@ -1,4 +1,4 @@
-"""团队库 API：挂载 / 索引 / 内容 / 缩略图 / 采用 / 显示名。
+"""团队库 API：挂载 / 索引 / 内容 / 缩略图 / 采用 / 分享 / 编辑 / 撤回 / 相关配方 / 过时 / 显示名。
 
 所有路径经本地会话 cookie（与 routes.py 同一 middleware）。路由一律写成同步 `def`：
 本模块每个处理器都会读盘 / 抢挂载表文件锁，FastAPI 会把同步路由挪到线程池，
@@ -6,6 +6,9 @@
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -15,21 +18,44 @@ from pydantic import ValidationError
 from character_workflow.lib import data_root
 from character_workflow.lib import team_library as tl
 from character_workflow.lib import team_library_index as idx
+from character_workflow.lib.creation_assets import get_creation_asset
 from character_workflow.lib.schemas import (
+    CreationAssetStaleness,
     TeamAssetAdoptRequest,
     TeamAssetAdoptResponse,
+    TeamAssetUpdateRequest,
     TeamLibraryAssetPage,
     TeamLibraryIndex,
+    TeamLibraryIndexEntry,
     TeamLibraryMount,
     TeamLibraryMountRequest,
     TeamLibraryView,
+    TeamRelatedEntry,
+    TeamShareRequest,
     UserProfile,
 )
-from character_workflow.lib.team_library_adopt import TeamAssetAdoptError, adopt_team_asset
+from character_workflow.lib.team_library_adopt import (
+    TeamAssetAdoptError,
+    adopt_team_asset,
+    adoption_staleness,
+)
+from character_workflow.lib.team_library_share import (
+    TeamShareError,
+    TeamShareForbidden,
+    TeamShareNotFound,
+    TeamShareTooLarge,
+    share_creation_asset,
+    share_job_output,
+    update_shared_asset,
+    withdraw_shared_asset,
+)
 
 team_library_router = APIRouter(prefix="/api")
 
 _UNREACHABLE = {"code": "library_unreachable", "message": "团队库目录不可达"}
+_PROFILE_REQUIRED = {"code": "profile_required", "message": "先设置显示名"}
+_RELATED_LIMIT = 20
+_EARLIEST = datetime.min.replace(tzinfo=timezone.utc)
 
 
 def _mounts(project_id: str | None = None) -> list[TeamLibraryMount]:
@@ -83,6 +109,55 @@ def _index_or_503(mount: TeamLibraryMount) -> TeamLibraryIndex:
     return index
 
 
+def _author_or_409() -> str:
+    profile = tl.read_profile()
+    if profile is None:
+        raise HTTPException(409, detail=_PROFILE_REQUIRED)
+    return profile.display_name
+
+
+def _writable_mount(library_id: str) -> TeamLibraryMount:
+    mount = _mount_or_404(library_id)
+    if not tl.library_reachable(mount):
+        raise HTTPException(503, detail=_UNREACHABLE)
+    return mount
+
+
+@contextmanager
+def _share_errors() -> Iterator[None]:
+    """分享 / 编辑 / 撤回的错误映射。顺序要紧：TooLarge 与 TeamShareError 都是 ValueError。
+
+    只认 lib 声明的异常与 ValueError（标题 / 标签 / 显示名非法，含 pydantic ValidationError）；
+    其余异常照常冒成 500，别把真 bug 翻成「请求不合法」。
+    """
+    try:
+        yield
+    except TeamShareTooLarge as error:
+        raise HTTPException(
+            413, detail={"code": "refs_too_large", "bytes": error.bytes, "message": str(error)}
+        ) from error
+    except TeamShareError as error:
+        raise HTTPException(422, detail={"code": error.code, "message": str(error)}) from error
+    except TeamShareNotFound:
+        raise HTTPException(404, detail="找不到要分享的内容或这条团队资产") from None
+    except TeamShareForbidden:
+        raise HTTPException(
+            403, detail={"code": "not_author", "message": "只有作者本人能改或撤回"}
+        ) from None
+    except ValueError as error:
+        raise HTTPException(422, detail={"code": "invalid", "message": str(error)}) from error
+
+
+def _refreshed_entry(mount: TeamLibraryMount, asset_id: str) -> TeamLibraryIndexEntry:
+    from viewer_server.watcher import refresh_team_library
+
+    index = refresh_team_library(mount)
+    try:
+        return idx.get_entry(index, asset_id)
+    except KeyError:
+        raise HTTPException(500, detail=f"已写入团队库，但重扫后找不到 {asset_id}") from None
+
+
 def _reject_reserved_mount_path(raw: str) -> None:
     """data root 自身 / 它的祖先 / 它里面的任意目录都不能当挂载点。
 
@@ -117,8 +192,39 @@ def put_profile(payload: UserProfile) -> UserProfile:
 
 
 @team_library_router.get("/team-libraries", response_model=list[TeamLibraryView])
-def get_team_libraries(project_id: str = Query(...)) -> list[TeamLibraryView]:
-    return [_view(mount) for mount in _mounts(project_id)]
+def get_team_libraries(project_id: str | None = None) -> list[TeamLibraryView]:
+    if project_id is not None:
+        return [_view(mount) for mount in _mounts(project_id)]
+    # 不限画布（分享对话框）：同一个库挂在多个画布上只列一次，取库级端点会用的那条记录。
+    library_ids = list(dict.fromkeys(mount.library_id for mount in _mounts()))
+    return [_view(tl.get_mount(library_id)) for library_id in library_ids]
+
+
+# 必须注册在任何 /team-libraries/{library_id} 通配 GET 之前，否则 "related" 会被当成 library_id。
+@team_library_router.get("/team-libraries/related", response_model=list[TeamRelatedEntry])
+def get_related_team_assets(project_id: str = Query(...)) -> list[TeamRelatedEntry]:
+    """该画布挂载的全部可达库里最近的可复刻配方；不可达 / 没扫过的库跳过，不拖垮整栏。"""
+    rows: list[TeamRelatedEntry] = []
+    seen: set[str] = set()
+    for own in _mounts(project_id):
+        if own.library_id in seen:
+            continue
+        seen.add(own.library_id)
+        try:
+            mount = tl.get_mount(own.library_id)
+        except KeyError:
+            continue
+        if not tl.library_reachable(mount):
+            continue
+        index = idx.read_index(own.library_id)
+        if index is None:
+            continue
+        rows.extend(
+            TeamRelatedEntry(library_id=own.library_id, library_name=own.name, entry=entry)
+            for entry in idx.related_entries(index, limit=_RELATED_LIMIT)
+        )
+    rows.sort(key=lambda row: idx.parse_instant(row.entry.updated_at) or _EARLIEST, reverse=True)
+    return rows[:_RELATED_LIMIT]
 
 
 @team_library_router.post("/team-libraries", response_model=TeamLibraryView, status_code=201)
@@ -164,10 +270,10 @@ def post_rescan(library_id: str) -> TeamLibraryView:
     mount = _mount_or_404(library_id)
     if not tl.library_reachable(mount):
         raise HTTPException(503, detail=_UNREACHABLE)
-    idx.scan_library(mount)
     # 启动时不可达的库没 schedule 上：恢复后画师点重扫，顺手把监听补上。
-    from viewer_server.watcher import sync_team_library_watch
+    from viewer_server.watcher import refresh_team_library, sync_team_library_watch
 
+    refresh_team_library(mount)
     sync_team_library_watch(library_id)
     return _view(mount)
 
@@ -259,3 +365,68 @@ def post_team_asset_adopt(
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
     return TeamAssetAdoptResponse(asset=asset, created=created)
+
+
+@team_library_router.post(
+    "/team-libraries/{library_id}/share",
+    response_model=TeamLibraryIndexEntry,
+    status_code=201,
+)
+def post_team_share(library_id: str, payload: TeamShareRequest) -> TeamLibraryIndexEntry:
+    author = _author_or_409()
+    mount = _writable_mount(library_id)
+    source = payload.source
+    with _share_errors():
+        if source.kind == "job_output":
+            asset = share_job_output(
+                mount, job_id=source.job_id, output_index=source.output_index,
+                title=payload.title, tags=payload.tags, author=author,
+                allow_large=payload.allow_large,
+            )
+        else:
+            asset = share_creation_asset(
+                mount, asset_id=source.asset_id, title=payload.title, tags=payload.tags,
+                author=author, allow_large=payload.allow_large,
+            )
+    return _refreshed_entry(mount, asset.asset_id)
+
+
+@team_library_router.put(
+    "/team-libraries/{library_id}/assets/{asset_id}", response_model=TeamLibraryIndexEntry
+)
+def put_team_asset(
+    library_id: str, asset_id: str, payload: TeamAssetUpdateRequest
+) -> TeamLibraryIndexEntry:
+    author = _author_or_409()
+    mount = _writable_mount(library_id)
+    with _share_errors():
+        update_shared_asset(
+            mount, asset_id=asset_id, title=payload.title, tags=payload.tags, author=author
+        )
+    return _refreshed_entry(mount, asset_id)
+
+
+@team_library_router.delete("/team-libraries/{library_id}/assets/{asset_id}", status_code=204)
+def delete_team_asset(library_id: str, asset_id: str) -> Response:
+    author = _author_or_409()
+    mount = _writable_mount(library_id)
+    with _share_errors():
+        withdraw_shared_asset(mount, asset_id=asset_id, author=author)
+    from viewer_server.watcher import refresh_team_library
+
+    refresh_team_library(mount)
+    return Response(status_code=204)
+
+
+@team_library_router.get(
+    "/creation-assets/{asset_id}/staleness", response_model=CreationAssetStaleness
+)
+def get_creation_asset_staleness(asset_id: str) -> CreationAssetStaleness:
+    """采用副本相对团队来源的状态；非采用资产恒为 unknown。"""
+    try:
+        asset = get_creation_asset(asset_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个创作资产") from None
+    if asset.adopted_from is not None:
+        _mounts()  # 挂载表损坏 → 500 带文件名，别被当成 unknown 静默吞掉
+    return CreationAssetStaleness(status=adoption_staleness(asset))

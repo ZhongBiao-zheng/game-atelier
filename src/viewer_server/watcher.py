@@ -6,12 +6,16 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from character_workflow.lib import data_root
 from viewer_server.sse import hub
+
+if TYPE_CHECKING:
+    from character_workflow.lib.schemas import TeamLibraryIndex, TeamLibraryMount
 
 
 class JobsHandler(FileSystemEventHandler):
@@ -192,19 +196,38 @@ class TeamLibraryHandler(FileSystemEventHandler):
 
     def rescan(self) -> None:
         from character_workflow.lib import team_library as tl
-        from character_workflow.lib import team_library_index as idx
 
         # 目录掉线不能当成「库空了」：scan_library 对不存在的目录不抛 OSError，
         # 它只会返回空索引（is_dir() 假 → 空列表；os.walk 缺目录静默跳过）。
         # 照扫就会把缓存索引清空并广播一整轮 removed，网盘一抖画师的库就「全没了」。
         if not tl.library_reachable(self.mount):
             return
-        before = idx.read_index(self.mount.library_id)
-        after = idx.scan_library(self.mount)
+        refresh_team_library(self.mount)
+
+
+_refresh_guard = threading.Lock()
+_refresh_locks: dict[str, threading.Lock] = {}
+
+
+def _refresh_lock(library_id: str) -> threading.Lock:
+    with _refresh_guard:
+        return _refresh_locks.setdefault(library_id, threading.Lock())
+
+
+def refresh_team_library(mount: TeamLibraryMount) -> TeamLibraryIndex:
+    """读旧索引 → 全量重扫 → 按 diff 逐条广播 team-library-changed，返回新索引。
+
+    同一个库串行：分享路由的刷新与防抖重扫撞在一起时，各自读到同一份旧索引就会把同一条
+    added 广播两遍。调用方负责先判可达（不可达时扫出的是空索引，见 TeamLibraryHandler.rescan）。
+    """
+    from character_workflow.lib import team_library_index as idx
+
+    with _refresh_lock(mount.library_id):
+        before = idx.read_index(mount.library_id)
+        after = idx.scan_library(mount)
         for change in idx.diff_index(before, after):
-            hub.broadcast(
-                "team-library-changed", {"library_id": self.mount.library_id, **change}
-            )
+            hub.broadcast("team-library-changed", {"library_id": mount.library_id, **change})
+    return after
 
 
 _observer: Observer | None = None
