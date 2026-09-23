@@ -31,7 +31,8 @@ import { deriveGenMode, filterRounds, DEFAULT_HISTORY_FILTERS, type HistoryFilte
 import { estimateGenerationCostForSubmission } from '@/lib/generationCost';
 import { useGalleryFavorites } from '@/hooks/useGalleryFavorites';
 import { useGalleryHidden } from '@/hooks/useGalleryHidden';
-import { StudioCompact, convergeModelSelection, modelsForKind } from './StudioCompact';
+import { StudioCompact } from './StudioCompact';
+import { convergeModelSelection, modelsForKind } from './studioModelSelection';
 import type { Job, JobKind, JobParams } from '@/schema/jobs';
 import { readStudioDraft, writeStudioDraft } from './studioDraft';
 import { clampImageCount, configForJob, isOmniVideoConfig, referencePathCounts } from './studioJobConfig';
