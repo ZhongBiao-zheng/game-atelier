@@ -48,7 +48,8 @@ def _mtime_iso(path: Path) -> str:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
 
 
-def _raw_id(relative_path: str) -> str:
+def raw_entry_id(relative_path: str) -> str:
+    """原始文件的条目 id 只由库内相对路径得来：改名即新资产。"""
     # 活工作副本里可能有非 UTF-8 文件名（os.walk 以 surrogateescape 解出），不能让哈希在此炸掉。
     return "raw_" + hashlib.sha1(relative_path.encode("utf-8", "surrogateescape")).hexdigest()[:24]
 
@@ -75,6 +76,25 @@ def _incomplete_entry(asset_dir: Path, relative: str) -> TeamLibraryIndexEntry:
     )
 
 
+def asset_dir_file(asset_dir: Path, relative: str) -> Path | None:
+    """资产目录内的文件：resolve 后必须仍在资产目录里（挡 ../ 与指向外面的 symlink）。"""
+    try:
+        base = asset_dir.resolve()
+        target = (asset_dir / relative).resolve()
+        target.relative_to(base)
+        return target if target.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _asset_files_present(asset_dir: Path, asset: TeamAssetFile) -> bool:
+    """成片与每份参考都在：SVN 还没同步完的资产标 incomplete，不让人点采用再失败。"""
+    names = [asset.media.filename] if asset.media else []
+    if asset.snapshot is not None:
+        names.extend(row.path for row in asset.snapshot.inputs)
+    return all(asset_dir_file(asset_dir, name) is not None for name in names)
+
+
 def _shared_entry(root: Path, asset_dir: Path) -> TeamLibraryIndexEntry:
     relative = asset_dir.relative_to(root).as_posix()
     try:
@@ -83,16 +103,16 @@ def _shared_entry(root: Path, asset_dir: Path) -> TeamLibraryIndexEntry:
         )
     except (OSError, ValidationError, ValueError):
         return _incomplete_entry(asset_dir, relative)
-    try:
-        media_ok = asset.media is None or (asset_dir / asset.media.filename).is_file()
-    except OSError:
-        media_ok = False
+    snapshot = asset.snapshot
     return TeamLibraryIndexEntry(
         id=asset.asset_id, kind=asset.kind, title=asset.title, author=asset.author.display_name,
         tags=asset.tags, mime_type=asset.media.mime_type if asset.media else "text/plain",
         bytes=asset.media.bytes if asset.media else 0, relative_path=relative,
         sha256=asset.media.sha256 if asset.media else None, updated_at=asset.updated_at,
-        reproducible=asset.kind == "generation", status="ready" if media_ok else "incomplete",
+        reproducible=asset.kind == "generation",
+        status="ready" if _asset_files_present(asset_dir, asset) else "incomplete",
+        model=snapshot.model if snapshot else None,
+        cost_cny=snapshot.cost_cny if snapshot else None,
     )
 
 
@@ -155,7 +175,7 @@ def _scan_raw(root: Path) -> list[TeamLibraryIndexEntry]:
                 continue
             relative = path.relative_to(root).as_posix()
             entries.append(TeamLibraryIndexEntry(
-                id=_raw_id(relative), kind="raw", title=path.name, author=None, tags=[],
+                id=raw_entry_id(relative), kind="raw", title=path.name, author=None, tags=[],
                 mime_type=mime, bytes=stat_result.st_size, relative_path=relative, sha256=None,
                 updated_at=datetime.fromtimestamp(
                     stat_result.st_mtime, tz=timezone.utc
@@ -247,6 +267,13 @@ def query_index(
     if start + limit < len(rows):
         next_cursor = base64.urlsafe_b64encode(str(start + limit).encode("ascii")).decode("ascii")
     return TeamLibraryAssetPage(entries=page, next_cursor=next_cursor)
+
+
+def related_entries(index: TeamLibraryIndex, *, limit: int = 20) -> list[TeamLibraryIndexEntry]:
+    """团队栏「相关配方」：可复刻（generation 且 ready）的条目，最近更新的在前。"""
+    rows = [e for e in index.entries if e.kind == "generation" and e.status == "ready"]
+    rows.sort(key=lambda e: e.updated_at, reverse=True)
+    return rows[:max(0, limit)]
 
 
 def entry_content_path(mount: TeamLibraryMount, entry: TeamLibraryIndexEntry) -> Path:

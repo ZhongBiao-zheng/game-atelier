@@ -210,3 +210,125 @@ def test_scan_survives_file_vanishing_mid_scan(isolated_data_root, tmp_path, mon
     monkeypatch.setattr(Path, "stat", flaky)
     entries = idx.scan_library(mount).entries
     assert [e.relative_path for e in entries] == ["a.png"]
+
+
+def _generation_asset(folder, *, extra=None, ref=True):
+    import hashlib
+
+    asset_dir = folder / "shared" / "老王" / _ASSET_ID
+    (asset_dir / "refs").mkdir(parents=True)
+    (asset_dir / "dz.png").write_bytes(_PNG)
+    sha = hashlib.sha256(_PNG).hexdigest()
+    ref_path = f"refs/01-{sha[:12]}.png"
+    if ref:
+        (asset_dir / ref_path).write_bytes(_PNG)
+    body = {
+        "team_asset_version": 1, "asset_id": _ASSET_ID, "kind": "generation", "title": "董卓",
+        "tags": [], "author": {"display_name": "老王"}, "shared_at": "2026-09-20T00:00:00Z",
+        "updated_at": "2026-09-20T00:00:00Z",
+        "media": {"filename": "dz.png", "mime_type": "image/png", "bytes": len(_PNG),
+                  "sha256": sha},
+        "snapshot": {
+            "mode": "image", "model": "doubao-seedream-4-0", "final_prompt": "董卓",
+            "inputs": [{"order": 0, "role": "reference", "kind": "image", "sha256": sha,
+                        "mime_type": "image/png", "path": ref_path}],
+            "cost_cny": 0.21, "cost_basis": "estimated", "submitted_at": "2026-09-19T00:00:00Z",
+        },
+        **(extra or {}),
+    }
+    (asset_dir / "asset.json").write_text(json.dumps(body, ensure_ascii=False), "utf-8")
+    return asset_dir
+
+
+def test_generation_entry_carries_model_and_cost(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    _generation_asset(folder)
+    (folder / "castle.png").write_bytes(_PNG)
+    entries = {e.kind: e for e in idx.scan_library(mount).entries}
+    generation = entries["generation"]
+    assert generation.status == "ready" and generation.reproducible
+    assert generation.model == "doubao-seedream-4-0" and generation.cost_cny == 0.21
+    assert entries["raw"].model is None and entries["raw"].cost_cny is None
+
+
+def test_media_entry_has_no_model(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    _shared_asset(folder)
+    entry = idx.scan_library(mount).entries[0]
+    assert entry.model is None and entry.cost_cny is None
+
+
+def test_unknown_fields_from_newer_writer_stay_ready(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    asset_dir = _generation_asset(folder, extra={"license": "CC0"})
+    data = json.loads((asset_dir / "asset.json").read_text("utf-8"))
+    data["snapshot"]["seed_policy"] = "fixed"
+    data["snapshot"]["inputs"][0]["weight"] = 0.5
+    data["author"]["avatar"] = "x.png"
+    (asset_dir / "asset.json").write_text(json.dumps(data, ensure_ascii=False), "utf-8")
+    entry = idx.scan_library(mount).entries[0]
+    assert entry.kind == "generation" and entry.status == "ready"
+
+
+def test_future_asset_version_is_incomplete(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    _generation_asset(folder, extra={"team_asset_version": 2})
+    entry = idx.scan_library(mount).entries[0]
+    assert entry.status == "incomplete" and not entry.reproducible
+
+
+def test_generation_with_missing_ref_is_incomplete(isolated_data_root, tmp_path):
+    """refs 还没同步到：采用必失败，索引不能标 ready。"""
+    folder, mount = _mount(tmp_path)
+    _generation_asset(folder, ref=False)
+    entry = idx.scan_library(mount).entries[0]
+    assert entry.kind == "generation" and entry.status == "incomplete"
+
+
+def test_generation_with_ref_symlink_outside_is_incomplete(isolated_data_root, tmp_path):
+    import hashlib
+
+    folder, mount = _mount(tmp_path)
+    asset_dir = _generation_asset(folder, ref=False)
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(_PNG)
+    sha = hashlib.sha256(_PNG).hexdigest()
+    (asset_dir / f"refs/01-{sha[:12]}.png").symlink_to(outside)
+    entry = idx.scan_library(mount).entries[0]
+    assert entry.status == "incomplete"
+
+
+def _index_entry(entry_id: str, *, kind="generation", status="ready", updated_at="2026-09-20"):
+    return TeamLibraryIndexEntry(
+        id=entry_id, kind=kind, title=entry_id, author="老王", tags=[], mime_type="image/png",
+        bytes=1, relative_path=f"shared/老王/{entry_id}", sha256=None, updated_at=updated_at,
+        reproducible=kind == "generation", status=status,
+    )
+
+
+def test_related_entries_only_ready_generations_newest_first():
+    from character_workflow.lib.schemas import TeamLibraryIndex
+
+    index = TeamLibraryIndex(
+        library_id="lib_" + "1" * 16,
+        scanned_at="2026-09-23T00:00:00Z",
+        entries=[
+            _index_entry("g_old", updated_at="2026-09-01T00:00:00Z"),
+            _index_entry("g_new", updated_at="2026-09-22T00:00:00Z"),
+            _index_entry("g_mid", updated_at="2026-09-10T00:00:00Z"),
+            _index_entry("g_broken", status="incomplete", updated_at="2026-09-23T00:00:00Z"),
+            _index_entry("m_new", kind="media", updated_at="2026-09-23T00:00:00Z"),
+            _index_entry("raw_new", kind="raw", updated_at="2026-09-23T00:00:00Z"),
+        ],
+    )
+    assert [e.id for e in idx.related_entries(index)] == ["g_new", "g_mid", "g_old"]
+    assert [e.id for e in idx.related_entries(index, limit=2)] == ["g_new", "g_mid"]
+    assert idx.related_entries(index, limit=0) == []
+
+
+def test_raw_entry_id_matches_scanned_id(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    (folder / "concept").mkdir()
+    (folder / "concept" / "castle.png").write_bytes(_PNG)
+    entry = idx.scan_library(mount).entries[0]
+    assert entry.id == idx.raw_entry_id("concept/castle.png")
