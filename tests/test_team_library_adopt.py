@@ -521,9 +521,143 @@ def test_staleness_raw_entry_follows_raw_path(isolated_data_root, tmp_path):
     asset = _adopt_from_index(mount, idx.raw_entry_id("concept/castle.png"))
     assert asset.adopted_from.raw_path == "concept/castle.png"
     assert adoption_staleness(asset) == "fresh"
+    target.write_bytes(_REF_A)
     os.utime(target, (1_800_000_000, 1_800_000_000))
     idx.scan_library(mount)
     assert adoption_staleness(asset) == "stale"
     target.rename(folder / "concept" / "castle-v2.png")
     idx.scan_library(mount)
     assert adoption_staleness(asset) == "withdrawn"
+
+
+def test_raw_touched_without_content_change_stays_fresh(isolated_data_root, tmp_path):
+    """SVN 检出会重写 mtime：mtime 变晚但内容没变，不算过时。"""
+    import os
+
+    from character_workflow.lib import team_library_index as idx
+    from character_workflow.lib.team_library_adopt import adoption_staleness
+
+    folder, mount = _registered_mount(tmp_path)
+    target = folder / "castle.png"
+    target.write_bytes(_PNG)
+    os.utime(target, (1_700_000_000, 1_700_000_000))
+    asset = _adopt_from_index(mount, idx.raw_entry_id("castle.png"))
+    os.utime(target, (1_800_000_000, 1_800_000_000))
+    idx.scan_library(mount)
+    assert adoption_staleness(asset) == "fresh"
+
+
+def test_staleness_unknown_while_entry_is_syncing(isolated_data_root, tmp_path):
+    """SVN 同步到一半 asset.json 读不出来：条目 incomplete，不能报撤回也不能报过时。"""
+    from character_workflow.lib import team_library_index as idx
+    from character_workflow.lib.team_library_adopt import adoption_staleness
+
+    folder, mount = _registered_mount(tmp_path)
+    asset_dir = _write_generation(folder)
+    asset = _adopt_from_index(mount, _ID)
+    (asset_dir / "asset.json").write_text('{"team_asset_version": 1, "asset_id": ', "utf-8")
+    entry = idx.get_entry(idx.scan_library(mount), _ID)
+    assert entry.status == "incomplete"
+    assert adoption_staleness(asset) == "unknown"
+
+
+def _blob_files(data_root_path):
+    blobs = data_root_path / "creation-assets" / "blobs"
+    return sorted(p.name for p in blobs.iterdir()) if blobs.is_dir() else []
+
+
+def test_adopt_generation_validates_everything_before_storing(isolated_data_root, tmp_path):
+    """最后一份参考不对：前面的成片与参考也不能先落进 blobs。"""
+    folder, mount = _mount(tmp_path)
+    asset_dir = _write_generation(folder)
+    (asset_dir / _ref_path(1, _REF_B)).write_bytes(_REF_A)
+    with pytest.raises(TeamAssetAdoptError):
+        adopt_team_asset(mount=mount, entry=_generation_entry(), project_id=None)
+    assert _blob_files(isolated_data_root) == []
+
+
+def test_adopt_rejects_declared_mime_that_content_contradicts(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    asset_dir = _write_generation(folder)
+
+    def declare_jpeg(data):
+        data["snapshot"]["inputs"][1]["mime_type"] = "image/jpeg"
+
+    _rewrite_asset_json(asset_dir, declare_jpeg)
+    with pytest.raises(TeamAssetAdoptError):
+        adopt_team_asset(mount=mount, entry=_generation_entry(), project_id=None)
+    assert _blob_files(isolated_data_root) == []
+    _rewrite_asset_json(asset_dir, lambda data: data["media"].update(mime_type="image/jpeg"))
+    with pytest.raises(TeamAssetAdoptError):
+        adopt_team_asset(mount=mount, entry=_generation_entry(), project_id=None)
+
+
+def test_adopt_store_failure_becomes_adopt_error(isolated_data_root, tmp_path, monkeypatch):
+    """store_media_blob 的超上限等 ValueError 也是「现在不能采用」。"""
+    from character_workflow.lib import team_library_adopt as adopt
+
+    folder, mount = _mount(tmp_path)
+    _write_shared(folder)
+
+    def too_big(*_args, **_kwargs):
+        raise ValueError("图片不能超过 50 MiB")
+
+    monkeypatch.setattr(adopt, "store_media_blob", too_big)
+    with pytest.raises(TeamAssetAdoptError, match="50 MiB"):
+        adopt_team_asset(mount=mount, entry=_entry(), project_id=None)
+
+
+@pytest.mark.parametrize("kind", ["media", "generation", "raw"])
+def test_concurrent_adoption_of_one_entry_keeps_a_single_copy(
+    isolated_data_root, tmp_path, monkeypatch, kind
+):
+    """四个请求同时越过锁外的预查：只允许建出一条，其余拿回同一条且 created=False。"""
+    import threading
+
+    from character_workflow.lib import team_library_adopt as adopt
+
+    folder, mount = _mount(tmp_path)
+    if kind == "generation":
+        _write_generation(folder)
+        entry = _generation_entry()
+    elif kind == "raw":
+        (folder / "castle.png").write_bytes(_PNG)
+        entry = _raw_entry("castle.png")
+    else:
+        _write_shared(folder)
+        entry = _entry()
+    barrier = threading.Barrier(4, timeout=10)
+    real_find_adopted, real_find_sha = adopt.find_adopted_asset, adopt.find_media_asset_by_sha256
+
+    def find_adopted(*args):
+        found = real_find_adopted(*args)
+        barrier.wait()
+        return found
+
+    def find_sha(*args):
+        found = real_find_sha(*args)
+        barrier.wait()
+        return found
+
+    monkeypatch.setattr(adopt, "find_adopted_asset", find_adopted)
+    monkeypatch.setattr(adopt, "find_media_asset_by_sha256", find_sha)
+    results: list = []
+    errors: list = []
+
+    def run(project_id):
+        try:
+            results.append(adopt_team_asset(mount=mount, entry=entry, project_id=project_id))
+        except Exception as error:  # noqa: BLE001 - 线程里的失败要带回主线程断言
+            errors.append(error)
+
+    threads = [threading.Thread(target=run, args=(f"p{i}",)) for i in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    assert sorted(created for _, created in results) == [False, False, False, True]
+    assert len({asset.asset_id for asset, _ in results}) == 1
+    catalog = list_creation_assets().assets
+    assert len(catalog) == 1
+    assert sorted(catalog[0].project_ids) == ["p0", "p1", "p2", "p3"]

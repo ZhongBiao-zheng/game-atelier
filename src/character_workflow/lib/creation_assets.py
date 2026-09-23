@@ -376,26 +376,24 @@ def create_generation_asset(
     adopted_from: AdoptionOrigin | None = None,
 ) -> CreationAsset:
     """建一条生成资产目录项。成片与每份参考须已由调用方经 store_media_blob 落进 blobs；
-    缺任何一份就拒绝，否则目录里会留一条复刻不了的记录。"""
+    缺任何一份就拒绝，否则目录里会留一条复刻不了的记录。
+    带 adopted_from 且同一来源已采用过 → 返回已有那条（补上 project_id），不重复建。"""
     content = CreationGenerationAssetContent(kind="generation", media=media, snapshot=snapshot)
-    required = [_media_blob_path(media)] + [
-        blob_path_for(row.sha256, row.mime_type) for row in snapshot.inputs
-    ]
+    asset = _new_asset(
+        kind="generation",
+        title=title,
+        tags=tags,
+        content=content,
+        project_id=project_id,
+        adopted_from=adopted_from,
+    )
     migrate_creation_asset_catalog_schema()
     with file_lock(_catalog_lock_path()):
-        # 持锁再查：删除资产时的孤儿 blob 清理也在这把锁下判定，锁外查完可能被并发删掉。
-        missing = [path for path in required if not path.is_file()]
-        if missing:
-            raise FileNotFoundError(missing[0])
         current = _read_catalog_unlocked()
-        asset = _new_asset(
-            kind="generation",
-            title=title,
-            tags=tags,
-            content=content,
-            project_id=project_id,
-            adopted_from=adopted_from,
-        )
+        duplicate = _adopted_duplicate(current, asset)
+        if duplicate is not None:
+            return _join_projects_unlocked(current, duplicate, asset.project_ids)
+        _require_blobs(asset)
         _write_catalog_unlocked(current, [asset, *current.assets])
         return asset
 
@@ -736,13 +734,73 @@ def creation_asset_input_path(asset_id: str, order: int) -> tuple[Path, str]:
     return path, row.mime_type
 
 
+def _required_blob_paths(asset: CreationAsset) -> list[Path]:
+    media = asset_media_content(asset)
+    paths = [_media_blob_path(media)] if media is not None else []
+    if asset.content.kind == "generation":
+        paths.extend(blob_path_for(row.sha256, row.mime_type) for row in asset.content.snapshot.inputs)
+    return paths
+
+
+def _require_blobs(asset: CreationAsset) -> None:
+    """持锁调用：删除资产时的孤儿 blob 清理也在这把锁下判定，锁外查完可能被并发删掉。"""
+    missing = [path for path in _required_blob_paths(asset) if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(missing[0])
+
+
+def _adopted_duplicate(
+    catalog: CreationAssetCatalog, asset: CreationAsset
+) -> CreationAsset | None:
+    """同一来源已采用过的那条。原始文件按内容去重（它的 id 只由路径得来），分享资产按来源 id。"""
+    origin = asset.adopted_from
+    if origin is None:
+        return None
+    if origin.raw_path is not None:
+        media = asset_media_content(asset)
+        return _media_duplicate(catalog, media.sha256) if media is not None else None
+    return next(
+        (
+            row for row in catalog.assets
+            if row.adopted_from is not None
+            and row.adopted_from.library_id == origin.library_id
+            and row.adopted_from.asset_id == origin.asset_id
+        ),
+        None,
+    )
+
+
+def _join_projects_unlocked(
+    current: CreationAssetCatalog, asset: CreationAsset, project_ids: list[str]
+) -> CreationAsset:
+    added = [value for value in project_ids if value not in asset.project_ids]
+    if not added:
+        return asset
+    timestamp = _now()
+    updated = asset.model_copy(update={
+        "last_used_at": timestamp,
+        "updated_at": timestamp,
+        "project_ids": _normalize_project_ids([*asset.project_ids, *added]),
+    })
+    _replace_asset(current, updated)
+    return updated
+
+
 def create_adopted_asset(asset: CreationAsset) -> CreationAsset:
-    """把已经构造好的采用资产追加进目录（asset_id 由调用方生成）。"""
+    """把已经构造好的采用资产追加进目录（asset_id 由调用方生成）。
+
+    持锁再按来源查一次：并发采用同一条时只留一份。命中则返回已有那条（补上 project_ids），
+    调用方以「返回的 asset_id 与传入的不同」判定没有新建。
+    """
     migrate_legacy_canvas_libraries()
     with file_lock(_catalog_lock_path()):
         current = _read_catalog_unlocked()
         if any(row.asset_id == asset.asset_id for row in current.assets):
             raise ValueError("creation asset id already exists")
+        duplicate = _adopted_duplicate(current, asset)
+        if duplicate is not None:
+            return _join_projects_unlocked(current, duplicate, asset.project_ids)
+        _require_blobs(asset)
         _write_catalog_unlocked(current, [*current.assets, asset])
         return asset
 

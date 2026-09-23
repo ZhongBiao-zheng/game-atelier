@@ -416,3 +416,28 @@ def test_team_asset_media_sha256_must_be_hex():
     payload["media"]["sha256"] = "not-a-digest"
     with pytest.raises(ValidationError):
         TeamAssetFile.model_validate(payload)
+
+
+def test_generation_asset_with_same_adoption_origin_is_not_duplicated():
+    """持锁再查来源：并发采用同一条团队资产只留一条，后到的补上自己的画布。"""
+    from character_workflow.lib.schemas import AdoptionOrigin
+
+    origin = AdoptionOrigin(
+        library_id="lib_" + "a" * 16,
+        asset_id="ta_" + "0" * 26,
+        source_updated_at="2026-09-20T00:00:00Z",
+    )
+    media = store_media_blob(_OUTPUT, "out.png", "image/png")
+    first = create_generation_asset(
+        title="红猫", tags=[], media=media, snapshot=_recipe(), project_id="canvas-a",
+        adopted_from=origin,
+    )
+    again = create_generation_asset(
+        title="红猫", tags=[], media=media, snapshot=_recipe(), project_id="canvas-b",
+        adopted_from=origin,
+    )
+    assert again.asset_id == first.asset_id
+    assert again.project_ids == ["canvas-a", "canvas-b"]
+    assert [row.asset_id for row in list_creation_assets().assets] == [first.asset_id]
+    local = create_generation_asset(title="红猫", tags=[], media=media, snapshot=_recipe())
+    assert local.asset_id != first.asset_id

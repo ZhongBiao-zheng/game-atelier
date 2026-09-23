@@ -7,7 +7,7 @@ import os
 import re
 from datetime import datetime, timezone
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
@@ -44,6 +44,18 @@ def _index_path(library_id: str) -> Path:
     return cache_dir(library_id) / "index.json"
 
 
+def parse_instant(value: str) -> datetime | None:
+    """团队侧时间戳可能是 Z / +00:00 / +08:00：按时刻比，不按字符串比。无时区当 UTC。"""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+_EARLIEST = datetime.min.replace(tzinfo=timezone.utc)
+
+
 def _mtime_iso(path: Path) -> str:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
 
@@ -76,15 +88,52 @@ def _incomplete_entry(asset_dir: Path, relative: str) -> TeamLibraryIndexEntry:
     )
 
 
-def asset_dir_file(asset_dir: Path, relative: str) -> Path | None:
-    """资产目录内的文件：resolve 后必须仍在资产目录里（挡 ../ 与指向外面的 symlink）。"""
+def _needs_resolve(asset_dir: Path, relative: str, plain_dirs: set[str]) -> bool:
+    """字面在目录内且沿途没有 symlink 的路径不必 resolve；已确认不是 symlink 的中间目录记进 plain_dirs。"""
+    pure = PurePath(relative)
+    if pure.anchor or not pure.parts or ".." in pure.parts:
+        return True
+    current = asset_dir
+    for depth, part in enumerate(pure.parts):
+        current = current / part
+        is_last = depth == len(pure.parts) - 1
+        key = "/".join(pure.parts[:depth + 1])
+        if not is_last and key in plain_dirs:
+            continue
+        if current.is_symlink():
+            return True
+        if not is_last:
+            plain_dirs.add(key)
+    return False
+
+
+def _inside_file(asset_dir: Path, relative: str, plain_dirs: set[str]) -> Path | None:
+    target = asset_dir / relative
     try:
-        base = asset_dir.resolve()
-        target = (asset_dir / relative).resolve()
-        target.relative_to(base)
+        if _needs_resolve(asset_dir, relative, plain_dirs):
+            resolved = target.resolve()
+            resolved.relative_to(asset_dir.resolve())
+            target = resolved
         return target if target.is_file() else None
     except (OSError, ValueError):
         return None
+
+
+def asset_dir_file(asset_dir: Path, relative: str) -> Path | None:
+    """资产目录内的文件：必须真在资产目录里（挡 ../ 与指向外面的 symlink），否则 None。"""
+    return _inside_file(asset_dir, relative, set())
+
+
+def shared_asset_dir(mount: TeamLibraryMount, entry: TeamLibraryIndexEntry) -> Path:
+    """分享资产的目录（已 resolve，且在库根之内）；不在 → FileNotFoundError。"""
+    try:
+        root = Path(mount.mount_path).resolve()
+        asset_dir = (root / entry.relative_path).resolve()
+        if root not in asset_dir.parents or not asset_dir.is_dir():
+            raise FileNotFoundError(entry.id)
+    except OSError as error:
+        raise FileNotFoundError(entry.id) from error
+    return asset_dir
 
 
 def _asset_files_present(asset_dir: Path, asset: TeamAssetFile) -> bool:
@@ -92,7 +141,8 @@ def _asset_files_present(asset_dir: Path, asset: TeamAssetFile) -> bool:
     names = [asset.media.filename] if asset.media else []
     if asset.snapshot is not None:
         names.extend(row.path for row in asset.snapshot.inputs)
-    return all(asset_dir_file(asset_dir, name) is not None for name in names)
+    plain_dirs: set[str] = set()
+    return all(_inside_file(asset_dir, name, plain_dirs) is not None for name in names)
 
 
 def _shared_entry(root: Path, asset_dir: Path) -> TeamLibraryIndexEntry:
@@ -102,6 +152,9 @@ def _shared_entry(root: Path, asset_dir: Path) -> TeamLibraryIndexEntry:
             (asset_dir / "asset.json").read_text(encoding="utf-8")
         )
     except (OSError, ValidationError, ValueError):
+        return _incomplete_entry(asset_dir, relative)
+    if asset.asset_id != asset_dir.name:
+        # 目录名就是资产 id：对不上说明是手工拷贝 / 改名，采用与撤回都会找错目录。
         return _incomplete_entry(asset_dir, relative)
     snapshot = asset.snapshot
     return TeamLibraryIndexEntry(
@@ -116,22 +169,27 @@ def _shared_entry(root: Path, asset_dir: Path) -> TeamLibraryIndexEntry:
     )
 
 
+def _child_dirs(parent: Path, root_resolved: Path) -> list[Path]:
+    """可见子目录；指向库外的 symlink 目录不属于这个库，剪掉。"""
+    return sorted(
+        p for p in parent.iterdir()
+        if not p.name.startswith(".") and p.is_dir() and not _escapes_root(p, root_resolved)
+    )
+
+
 def _scan_shared(root: Path) -> list[TeamLibraryIndexEntry]:
     shared_root = root / "shared"
     entries: list[TeamLibraryIndexEntry] = []
     try:
-        if not shared_root.is_dir():
+        root_resolved = root.resolve()
+        if not shared_root.is_dir() or _escapes_root(shared_root, root_resolved):
             return entries
-        author_dirs = sorted(
-            p for p in shared_root.iterdir() if p.is_dir() and not p.name.startswith(".")
-        )
+        author_dirs = _child_dirs(shared_root, root_resolved)
     except OSError:
         return entries
     for author_dir in author_dirs:
         try:
-            asset_dirs = sorted(
-                p for p in author_dir.iterdir() if p.is_dir() and not p.name.startswith(".")
-            )
+            asset_dirs = _child_dirs(author_dir, root_resolved)
         except OSError:
             continue
         for asset_dir in asset_dirs:
@@ -272,30 +330,36 @@ def query_index(
 def related_entries(index: TeamLibraryIndex, *, limit: int = 20) -> list[TeamLibraryIndexEntry]:
     """团队栏「相关配方」：可复刻（generation 且 ready）的条目，最近更新的在前。"""
     rows = [e for e in index.entries if e.kind == "generation" and e.status == "ready"]
-    rows.sort(key=lambda e: e.updated_at, reverse=True)
+    rows.sort(key=lambda e: parse_instant(e.updated_at) or _EARLIEST, reverse=True)
     return rows[:max(0, limit)]
 
 
-def entry_content_path(mount: TeamLibraryMount, entry: TeamLibraryIndexEntry) -> Path:
-    root = Path(mount.mount_path)
-    root_resolved = root.resolve()
-    target = root / entry.relative_path
-    if entry.kind != "raw":
-        try:
-            asset = TeamAssetFile.model_validate_json(
-                (target / "asset.json").read_text(encoding="utf-8")
-            )
-        except (OSError, ValidationError, ValueError) as error:
-            raise FileNotFoundError(entry.id) from error
-        if asset.media is None:
-            raise FileNotFoundError(entry.id)
-        target = target / asset.media.filename
-    resolved = target.resolve()
-    if root_resolved not in resolved.parents:
-        raise FileNotFoundError(entry.id)
-    if not resolved.is_file():
+def _raw_content_path(mount: TeamLibraryMount, entry: TeamLibraryIndexEntry) -> Path:
+    root_resolved = Path(mount.mount_path).resolve()
+    resolved = (Path(mount.mount_path) / entry.relative_path).resolve()
+    if root_resolved not in resolved.parents or not resolved.is_file():
         raise FileNotFoundError(entry.id)
     return resolved
+
+
+def entry_content_path(mount: TeamLibraryMount, entry: TeamLibraryIndexEntry) -> Path:
+    """条目的媒体本体。未同步完整的条目不给读；分享资产的文件必须在它自己的资产目录里。"""
+    if entry.status != "ready":
+        raise FileNotFoundError(entry.id)
+    if entry.kind == "raw":
+        return _raw_content_path(mount, entry)
+    asset_dir = shared_asset_dir(mount, entry)
+    manifest = asset_dir_file(asset_dir, "asset.json")
+    if manifest is None:
+        raise FileNotFoundError(entry.id)
+    try:
+        asset = TeamAssetFile.model_validate_json(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValidationError, ValueError) as error:
+        raise FileNotFoundError(entry.id) from error
+    target = asset_dir_file(asset_dir, asset.media.filename) if asset.media else None
+    if target is None:
+        raise FileNotFoundError(entry.id)
+    return target
 
 
 def _thumb_path(library_id: str, entry: TeamLibraryIndexEntry, width: int) -> Path:

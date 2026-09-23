@@ -332,3 +332,75 @@ def test_raw_entry_id_matches_scanned_id(isolated_data_root, tmp_path):
     (folder / "concept" / "castle.png").write_bytes(_PNG)
     entry = idx.scan_library(mount).entries[0]
     assert entry.id == idx.raw_entry_id("concept/castle.png")
+
+
+def test_entry_content_path_refuses_entries_that_are_not_ready(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    _shared_asset(folder)
+    entry = idx.scan_library(mount).entries[0].model_copy(update={"status": "incomplete"})
+    with pytest.raises(FileNotFoundError):
+        idx.entry_content_path(mount, entry)
+    assert idx.thumbnail_bytes(mount, entry, 256) is None
+
+
+def test_entry_content_path_keeps_media_inside_its_asset_dir(isolated_data_root, tmp_path):
+    """文件名指到库内别的目录也不行：分享资产只能读它自己的资产目录。"""
+    folder, mount = _mount(tmp_path)
+    asset_dir = _shared_asset(folder)
+    (folder / "shared" / "老王" / "dz.png").write_bytes(_PNG)
+    data = json.loads((asset_dir / "asset.json").read_text("utf-8"))
+    data["media"]["filename"] = "../dz.png"
+    (asset_dir / "asset.json").write_text(json.dumps(data, ensure_ascii=False), "utf-8")
+    entry = idx.scan_library(mount).entries[0]
+    assert entry.status == "incomplete"
+    with pytest.raises(FileNotFoundError):
+        idx.entry_content_path(mount, entry.model_copy(update={"status": "ready"}))
+    assert idx.thumbnail_bytes(mount, entry.model_copy(update={"status": "ready"}), 256) is None
+
+
+def test_entry_content_path_rejects_media_symlink_out_of_asset_dir(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    asset_dir = _shared_asset(folder)
+    other = folder / "concept"
+    other.mkdir()
+    (other / "dz.png").write_bytes(_PNG)
+    (asset_dir / "dz.png").unlink()
+    (asset_dir / "dz.png").symlink_to(other / "dz.png")
+    entry = idx.scan_library(mount).entries
+    shared = next(e for e in entry if e.kind == "media")
+    assert shared.status == "incomplete"
+    with pytest.raises(FileNotFoundError):
+        idx.entry_content_path(mount, shared.model_copy(update={"status": "ready"}))
+
+
+def test_scan_skips_shared_dirs_symlinked_outside_library(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    outside = tmp_path / "elsewhere"
+    _shared_asset(outside)  # elsewhere/shared/老王/<id>/ 是一份完整资产
+    (folder / "shared").mkdir()
+    (folder / "shared" / "老王").symlink_to(outside / "shared" / "老王")
+    (folder / "shared" / "小李").mkdir()
+    (folder / "shared" / "小李" / _ASSET_ID).symlink_to(outside / "shared" / "老王" / _ASSET_ID)
+    assert idx.scan_library(mount).entries == []
+
+
+def test_asset_dir_name_must_match_asset_id(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    asset_dir = _shared_asset(folder)
+    asset_dir.rename(asset_dir.parent / "ta_01ARZ3NDEKTSV4RRFFQ69G5FAW")
+    entry = idx.scan_library(mount).entries[0]
+    assert entry.status == "incomplete" and entry.id == "ta_01ARZ3NDEKTSV4RRFFQ69G5FAW"
+
+
+def test_related_entries_sort_by_instant_not_string():
+    from character_workflow.lib.schemas import TeamLibraryIndex
+
+    index = TeamLibraryIndex(
+        library_id="lib_" + "1" * 16,
+        scanned_at="2026-09-23T00:00:00Z",
+        entries=[
+            _index_entry("g_east", updated_at="2026-09-20T08:00:00+08:00"),  # = 00:00Z
+            _index_entry("g_utc", updated_at="2026-09-20T01:00:00Z"),
+        ],
+    )
+    assert [e.id for e in idx.related_entries(index)] == ["g_utc", "g_east"]
