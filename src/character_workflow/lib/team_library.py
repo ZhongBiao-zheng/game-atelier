@@ -59,7 +59,10 @@ def read_profile() -> UserProfile | None:
 
 
 def write_profile(display_name: str) -> UserProfile:
-    profile = UserProfile(display_name=display_name.strip())
+    name = display_name.strip()
+    if not name:
+        raise ValueError("显示名不能为空")
+    profile = UserProfile(display_name=name)
     atomic_write_json(_profile_path(), profile.model_dump(mode="json"))
     return profile
 
@@ -86,10 +89,16 @@ def list_mounts(project_id: str | None = None) -> list[TeamLibraryMount]:
 
 
 def get_mount(library_id: str) -> TeamLibraryMount:
-    for mount in list_mounts():
-        if mount.library_id == library_id:
-            return mount
-    raise KeyError(library_id)
+    """同一个库可以挂在多个画布上：可达的优先，其中取最近挂载的；全不可达时取最近挂载的。
+
+    按文件顺序取第一条会让「盘符变了重挂到另一个画布」一直读旧路径，永远 503。
+    """
+    rows = [(i, m) for i, m in enumerate(list_mounts()) if m.library_id == library_id]
+    if not rows:
+        raise KeyError(library_id)
+    reachable = [row for row in rows if library_reachable(row[1])]
+    _, mount = max(reachable or rows, key=lambda row: (row[1].mounted_at, row[0]))
+    return mount
 
 
 def read_manifest(mount_path: Path) -> TeamLibraryManifest:
@@ -131,7 +140,7 @@ def mount_library(
     )
     with file_lock(_mounts_lock()):
         # 去重键是 (project_id, library_id)：同一个库在同一项目下 checkout 两份，后挂载的那份生效，
-        # 保证 get_mount(library_id) 唯一。同时清掉同项目下路径相同的旧记录（库 id 被改写过的情况）。
+        # 同项目下只留一条。同时清掉同项目下路径相同的旧记录（库 id 被改写过的情况）。
         rows = [
             m
             for m in _read_mounts_unlocked().mounts
@@ -142,6 +151,19 @@ def mount_library(
         ]
         _write_mounts_unlocked([*rows, mount])
     return mount
+
+
+def remove_project_mounts(project_id: str) -> list[str]:
+    """删除画布时清掉它的全部挂载，返回因此不再有任何挂载的 library_id。"""
+    with file_lock(_mounts_lock()):
+        rows = _read_mounts_unlocked().mounts
+        kept = [m for m in rows if m.project_id != project_id]
+        if len(kept) == len(rows):
+            return []
+        _write_mounts_unlocked(kept)
+    removed = {m.library_id for m in rows if m.project_id == project_id}
+    still_mounted = {m.library_id for m in kept}
+    return sorted(removed - still_mounted)
 
 
 def unmount_library(library_id: str, project_id: str) -> None:

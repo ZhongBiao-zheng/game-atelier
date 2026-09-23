@@ -2263,7 +2263,6 @@ def delete_canvas_project_route(
     )
     try:
         delete_canvas_project(project_id, payload.expected_revision)
-        return Response(status_code=204)
     except KeyError:
         raise HTTPException(404, detail="找不到这个画布项目（可能已被删除）") from None
     except CanvasProjectBusyError as error:
@@ -2278,6 +2277,11 @@ def delete_canvas_project_route(
         raise
     except CanvasPackageError as error:
         raise HTTPException(422, detail=str(error)) from error
+    # 删画布时挂载记录已随之清掉；已无任何挂载的库停止监听，还有挂载的对齐到剩下那条。
+    from viewer_server.watcher import sync_team_library_watches
+
+    sync_team_library_watches()
+    return Response(status_code=204)
 
 
 @router.get("/canvas/projects/{project_id}/document", response_model=CanvasDocument)

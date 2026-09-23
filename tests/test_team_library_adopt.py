@@ -176,3 +176,47 @@ def test_adopt_rejects_kind_mismatch_between_index_and_asset_json(isolated_data_
     )
     with pytest.raises(TeamAssetAdoptError):
         adopt_team_asset(mount=mount, entry=_entry(), project_id="p1")
+
+
+def _raw_entry(relative_path="concept/castle.png"):
+    return _entry(
+        id="raw_abc",
+        kind="raw",
+        title="castle.png",
+        author=None,
+        tags=[],
+        relative_path=relative_path,
+        sha256=None,
+    )
+
+
+def test_adopt_raw_after_content_change_creates_new_copy(isolated_data_root, tmp_path):
+    """原始文件的 id 只由路径得来：SVN update 改了内容，重新采用必须拿到新内容。"""
+    from io import BytesIO
+
+    from PIL import Image
+
+    folder, mount = _mount(tmp_path)
+    (folder / "concept").mkdir()
+    target = folder / "concept" / "castle.png"
+    target.write_bytes(_PNG)
+    first, created = adopt_team_asset(mount=mount, entry=_raw_entry(), project_id="p1")
+    assert created
+    buffer = BytesIO()
+    Image.new("RGB", (2, 2), (10, 20, 30)).save(buffer, format="PNG")
+    changed = buffer.getvalue()
+    target.write_bytes(changed)
+    second, created_again = adopt_team_asset(mount=mount, entry=_raw_entry(), project_id="p1")
+    assert created_again and second.asset_id != first.asset_id
+    assert second.content.sha256 == hashlib.sha256(changed).hexdigest()
+
+
+def test_adopt_raw_duplicate_joins_the_new_project(isolated_data_root, tmp_path):
+    folder, mount = _mount(tmp_path)
+    (folder / "concept").mkdir()
+    (folder / "concept" / "castle.png").write_bytes(_PNG)
+    first, _ = adopt_team_asset(mount=mount, entry=_raw_entry(), project_id="p1")
+    again, created = adopt_team_asset(mount=mount, entry=_raw_entry(), project_id="p2")
+    assert not created and again.asset_id == first.asset_id
+    assert again.project_ids == ["p1", "p2"]
+    assert [a.project_ids for a in list_creation_assets().assets] == [["p1", "p2"]]

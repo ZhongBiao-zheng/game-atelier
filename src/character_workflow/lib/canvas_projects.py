@@ -707,7 +707,8 @@ def _cover_for_project(
     document: CanvasDocument,
 ) -> CanvasProjectCover | None:
     for node in reversed(document.nodes):
-        if node.type != "image" or node.data.current_version_id is None:
+        # 打码的节点不当封面：封面是原图，不走节点上的模糊显示。
+        if node.type != "image" or node.hidden or node.data.current_version_id is None:
             continue
         version = document.content_versions.get(node.data.current_version_id)
         if version is None or version.kind != "image":

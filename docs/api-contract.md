@@ -768,8 +768,12 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 | GET | `/team-libraries/{library_id}/assets/{entry_id}/thumb?w=` | — | `image/webp` |
 | POST | `/team-libraries/{library_id}/assets/{entry_id}/adopt` | `TeamAssetAdoptRequest` | `TeamAssetAdoptResponse` |
 
-错误语义按「谁能修」分：没设显示名挂不了库，409 `{code: "profile_required"}`；挂载点不存在、
-或指向 data root / 其祖先 / `.runtime` 内部，422；挂载目录当前不可达（清单读不到）503
+挂载（`POST /team-libraries`）与 `/folder-picker` 同属本机管理能力，网站会话 403；列表、卸载、重扫、
+读条目、采用照常按读 / 编辑能力放行。同一个库可以挂在多个画布上，库级端点取可达记录中最近挂载的那条
+（全不可达时取最近挂载的），目录监听也跟着这条走。删画布时一并删掉它的挂载记录。
+
+错误语义按「谁能修」分：没设显示名挂不了库，409 `{code: "profile_required"}`；显示名去掉首尾空白后为空，
+422；挂载点不存在、或指向 data root / 其祖先 / 其内部任意目录，422；挂载目录当前不可达（清单读不到）503
 `{code: "library_unreachable"}`，列表仍返回该库并标 `reachable: false`；这条资产现在不能采用
 （没同步完整、内容与 `asset.json` 的 sha256 对不上、库内 `asset.json` 损坏、生成资产尚未开放）
 409 `{code: "not_adoptable"}`；库 / 资产不存在 404。`limit` 由路由夹到 `[1, 200]`，非法 `cursor` 422。
@@ -779,7 +783,8 @@ canonical 文件；角色没有立绘定稿时返回最早立绘并标记“尚�
 `shared/<作者>/<asset_id>/asset.json`，`raw` 是库内直接摆着的媒体文件（`id` 为
 `"raw_" + sha1(relative_path)[:24]`）。`prompt` 没有文件本体，`content` 与 `thumb` 一律 404。
 采用永远是拷贝——落进个人创作资产库并记 `adopted_from`，本机对象不依赖库内路径；
-同一条团队资产重复采用返回既有资产且 `created: false`。
+同一条团队资产重复采用返回既有资产且 `created: false`。`raw` 条目只按内容 sha256 去重（路径不变、
+内容被同步更新后再采用会得到新副本），命中既有资产时把这次的 `project_id` 补进它的 `project_ids`。
 
 ### 几个要当心的
 

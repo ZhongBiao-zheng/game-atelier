@@ -213,9 +213,17 @@ _team_handlers: dict[str, TeamLibraryHandler] = {}
 
 
 def watch_team_library(mount) -> None:
-    """热挂载：同一 library_id 只 schedule 一次（多项目共用同一目录时用第一条）。"""
-    if _observer is None or mount.library_id in _team_watches:
+    """同一 library_id 只监听一条路径；路径变了（重挂到别的画布 / 盘符变了）就换过去。
+
+    schedule 失败（目录此刻不可达）不记录：下次挂载 / rescan / 卸载同步时会再试。
+    """
+    if _observer is None:
         return
+    current = _team_handlers.get(mount.library_id)
+    if current is not None and current.mount.mount_path == mount.mount_path:
+        return
+    if current is not None:
+        unwatch_team_library(mount.library_id)
     handler = TeamLibraryHandler(mount)
     try:
         _team_watches[mount.library_id] = _observer.schedule(
@@ -223,8 +231,32 @@ def watch_team_library(mount) -> None:
         )
         _team_handlers[mount.library_id] = handler
     except OSError:
-        # 目录不可达不拦服务：画师下次 rescan / 重新挂载会补上。
         pass
+
+
+def sync_team_library_watch(library_id: str) -> None:
+    """按挂载表把某个库的监听对齐到 get_mount 选中的那条；已无挂载就停掉。"""
+    from character_workflow.lib import team_library as tl
+
+    try:
+        mount = tl.get_mount(library_id)
+    except KeyError:
+        unwatch_team_library(library_id)
+        return
+    watch_team_library(mount)
+
+
+def sync_team_library_watches() -> None:
+    """全量对齐：挂载表里的每个库监听 get_mount 选中的路径，已不在表里的停掉。"""
+    from character_workflow.lib import team_library as tl
+
+    try:
+        mounted = {mount.library_id for mount in tl.list_mounts()}
+    except ValueError:
+        # 挂载表坏了只影响团队库监听，不该拦住启动 / 删画布（路由层会把它报成 500）。
+        return
+    for library_id in sorted(mounted | set(_team_handlers)):
+        sync_team_library_watch(library_id)
 
 
 def unwatch_team_library(library_id: str) -> None:
@@ -295,15 +327,7 @@ def start_watchers() -> Observer:
     global _observer
     _observer = observer
     stop_team_library_watches()
-    from character_workflow.lib import team_library
-
-    try:
-        mounts = team_library.list_mounts()
-    except ValueError:
-        # 挂载表坏了只影响团队库监听，不该拦住整个服务启动（路由层会把它报成 500）。
-        mounts = []
-    for mount in mounts:
-        watch_team_library(mount)
+    sync_team_library_watches()
 
     observer.start()
     return observer

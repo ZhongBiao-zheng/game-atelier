@@ -151,9 +151,12 @@ LOCAL_MANAGEMENT = frozenset({
     "/api/config", "/api/keys", "/api/keys/{alias}", "/api/keys/{alias}/reveal",
     "/api/keys/models-preview", "/api/folder-picker", "/api/onboarding/status",
     "/api/onboarding/data-root",
+    # 挂载团队库 = 往本机任意目录写清单并整棵扫描，同 folder-picker 只给本机页面。
+    "/api/team-libraries",
 })
 # 已脱敏的 Key 列表（alias / 能力 / 掩码）是选模型的依据，网站会话也要读；增删改与 reveal 仍属管理。
-_MANAGEMENT_READ_EXEMPT = frozenset({("GET", "/api/keys")})
+# 已挂载的团队库列表同理：网站会话要读它才能浏览 / 采用。
+_MANAGEMENT_READ_EXEMPT = frozenset({("GET", "/api/keys"), ("GET", "/api/team-libraries")})
 MEDIA_ROUTES = frozenset({
     "/api/raw", "/api/images", "/api/gallery/image",
     "/api/creation-assets/{asset_id}/content",

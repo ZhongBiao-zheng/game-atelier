@@ -86,3 +86,69 @@ def test_broken_mount_file_fails_loud(isolated_data_root):
     path.write_text(json.dumps({"mounts": [{"library_id": "nope"}]}), "utf-8")
     with pytest.raises(ValueError, match="team-libraries.json"):
         tl.list_mounts()
+
+
+def _write_mounts(isolated_data_root, rows):
+    path = isolated_data_root / ".config" / "team-libraries.json"
+    path.write_text(json.dumps({"schema_version": 1, "mounts": rows}), "utf-8")
+
+
+def _library_dir(tmp_path, name, library_id):
+    folder = tmp_path / name
+    folder.mkdir()
+    manifest = TeamLibraryManifest(
+        library_id=library_id, name="lib", created_at="2026-09-20T00:00:00Z", created_by="老王"
+    )
+    (folder / tl.MANIFEST_NAME).write_text(manifest.model_dump_json(), "utf-8")
+    return folder
+
+
+def _row(library_id, project_id, folder, mounted_at):
+    return {
+        "library_id": library_id,
+        "project_id": project_id,
+        "mount_path": str(folder),
+        "name": "lib",
+        "mounted_at": mounted_at,
+    }
+
+
+def test_get_mount_prefers_reachable_then_latest(isolated_data_root, tmp_path):
+    """同一个库挂在多个画布上：不可达的记录不能挡住可达的，可达里取最近挂载的。"""
+    lib = "lib_" + "a" * 16
+    old = _library_dir(tmp_path, "old", lib)
+    new = _library_dir(tmp_path, "new", lib)
+    gone = tmp_path / "gone"
+    _write_mounts(isolated_data_root, [
+        _row(lib, "canvas-1", gone, "2026-09-22T00:00:00+00:00"),
+        _row(lib, "canvas-2", new, "2026-09-21T00:00:00+00:00"),
+        _row(lib, "canvas-3", old, "2026-09-20T00:00:00+00:00"),
+    ])
+    assert tl.get_mount(lib).mount_path == str(new)
+    _write_mounts(isolated_data_root, [
+        _row(lib, "canvas-1", tmp_path / "gone-a", "2026-09-20T00:00:00+00:00"),
+        _row(lib, "canvas-2", tmp_path / "gone-b", "2026-09-21T00:00:00+00:00"),
+    ])
+    assert tl.get_mount(lib).project_id == "canvas-2"
+    with pytest.raises(KeyError):
+        tl.get_mount("lib_" + "b" * 16)
+
+
+def test_remove_project_mounts_returns_orphaned_libraries(isolated_data_root, tmp_path):
+    shared = "lib_" + "a" * 16
+    only = "lib_" + "b" * 16
+    folder = tmp_path / "x"
+    _write_mounts(isolated_data_root, [
+        _row(shared, "canvas-1", folder, "2026-09-20T00:00:00+00:00"),
+        _row(shared, "canvas-2", folder, "2026-09-20T00:00:00+00:00"),
+        _row(only, "canvas-1", folder, "2026-09-20T00:00:00+00:00"),
+    ])
+    assert tl.remove_project_mounts("canvas-1") == [only]
+    assert [(m.library_id, m.project_id) for m in tl.list_mounts()] == [(shared, "canvas-2")]
+    assert tl.remove_project_mounts("canvas-9") == []
+
+
+def test_write_profile_rejects_blank_name(isolated_data_root):
+    with pytest.raises(ValueError):
+        tl.write_profile("   ")
+    assert tl.read_profile() is None

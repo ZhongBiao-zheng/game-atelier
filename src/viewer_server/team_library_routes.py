@@ -58,10 +58,11 @@ def _view(mount: TeamLibraryMount) -> TeamLibraryView:
 
 
 def _mount_or_404(library_id: str) -> TeamLibraryMount:
-    for mount in _mounts():
-        if mount.library_id == library_id:
-            return mount
-    raise HTTPException(404, detail="找不到这个团队库")
+    _mounts()  # 挂载表损坏 → 500 带文件名，别被下面当成 404
+    try:
+        return tl.get_mount(library_id)
+    except KeyError:
+        raise HTTPException(404, detail="找不到这个团队库") from None
 
 
 def _index_or_503(mount: TeamLibraryMount) -> TeamLibraryIndex:
@@ -83,10 +84,11 @@ def _index_or_503(mount: TeamLibraryMount) -> TeamLibraryIndex:
 
 
 def _reject_reserved_mount_path(raw: str) -> None:
-    """data root 自身 / 它的祖先 / `.runtime` 内部都不能当挂载点。
+    """data root 自身 / 它的祖先 / 它里面的任意目录都不能当挂载点。
 
     挂载会往目录里写 `.atelier-library.json`、并把整棵树当团队库扫描；指到 data root
-    （或它上面的某一层）就等于把画师自己的全部创作资产当成「团队库」，采用时还会自采自己。
+    （或它上面的某一层）就等于把画师自己的全部创作资产当成「团队库」，采用时还会自采自己；
+    指到它里面（画布目录、创作资产、.runtime）就是往工作目录里写别人的清单。
     """
     import os
 
@@ -95,11 +97,8 @@ def _reject_reserved_mount_path(raw: str) -> None:
     except (OSError, ValueError) as error:
         raise HTTPException(422, detail="路径不合法") from error
     root = data_root.resolve_data_root().resolve()
-    runtime = data_root.runtime_dir().resolve()
-    if folder == root or folder in root.parents:
-        raise HTTPException(422, detail="不能把工作目录或它的上级目录当团队库")
-    if folder == runtime or runtime in folder.parents:
-        raise HTTPException(422, detail="不能把 .runtime 里的目录当团队库")
+    if folder == root or folder in root.parents or root in folder.parents:
+        raise HTTPException(422, detail="不能把工作目录、它的上级或里面的目录当团队库")
 
 
 @team_library_router.get("/profile")
@@ -111,7 +110,10 @@ def get_profile() -> dict:
 
 @team_library_router.put("/profile", response_model=UserProfile)
 def put_profile(payload: UserProfile) -> UserProfile:
-    return tl.write_profile(payload.display_name)
+    try:
+        return tl.write_profile(payload.display_name)
+    except ValueError as error:
+        raise HTTPException(422, detail=str(error)) from error
 
 
 @team_library_router.get("/team-libraries", response_model=list[TeamLibraryView])
@@ -137,9 +139,9 @@ def post_team_library(payload: TeamLibraryMountRequest) -> TeamLibraryView:
     except ValueError as error:
         raise HTTPException(422, detail=str(error)) from error
     idx.scan_library(mount)
-    from viewer_server.watcher import watch_team_library
+    from viewer_server.watcher import sync_team_library_watch
 
-    watch_team_library(mount)
+    sync_team_library_watch(mount.library_id)
     return _view(mount)
 
 
@@ -151,10 +153,9 @@ def delete_team_library(library_id: str, project_id: str = Query(...)) -> Respon
         raise HTTPException(404, detail="找不到这个团队库") from None
     except ValueError as error:
         raise HTTPException(500, detail=str(error)) from error
-    if not any(m.library_id == library_id for m in _mounts()):
-        from viewer_server.watcher import unwatch_team_library
+    from viewer_server.watcher import sync_team_library_watch
 
-        unwatch_team_library(library_id)
+    sync_team_library_watch(library_id)
     return Response(status_code=204)
 
 
@@ -164,6 +165,10 @@ def post_rescan(library_id: str) -> TeamLibraryView:
     if not tl.library_reachable(mount):
         raise HTTPException(503, detail=_UNREACHABLE)
     idx.scan_library(mount)
+    # 启动时不可达的库没 schedule 上：恢复后画师点重扫，顺手把监听补上。
+    from viewer_server.watcher import sync_team_library_watch
+
+    sync_team_library_watch(library_id)
     return _view(mount)
 
 

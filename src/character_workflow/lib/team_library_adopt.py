@@ -9,6 +9,7 @@ from character_workflow.lib.creation_assets import (
     create_adopted_asset,
     find_adopted_asset,
     find_media_asset_by_sha256,
+    mark_creation_asset_used,
     new_creation_asset_id,
     store_media_blob,
 )
@@ -47,17 +48,17 @@ def adopt_team_asset(
         raise TeamAssetAdoptError("这条资产还没同步完整")
     if entry.kind == "generation":
         raise TeamAssetAdoptError("生成资产的采用尚未开放")
-    existing = find_adopted_asset(mount.library_id, entry.id)
-    if existing is not None:
-        return existing, False
     timestamp = _now()
     project_ids = [project_id] if project_id else []
 
     if entry.kind == "raw":
+        # 原始文件的 id 只由路径得来，内容会被 SVN update 换掉：只按内容去重，不按来源 id。
         body = _library_file(mount, entry.relative_path).read_bytes()
         digest = hashlib.sha256(body).hexdigest()
         duplicate = find_media_asset_by_sha256(digest)
         if duplicate is not None:
+            if project_id and project_id not in duplicate.project_ids:
+                duplicate = mark_creation_asset_used(duplicate.asset_id, project_id)
             return duplicate, False
         content = store_media_blob(body, Path(entry.relative_path).name, entry.mime_type)
         asset = CreationAsset(
@@ -78,6 +79,9 @@ def adopt_team_asset(
         )
         return create_adopted_asset(asset), True
 
+    existing = find_adopted_asset(mount.library_id, entry.id)
+    if existing is not None:
+        return existing, False
     asset_json = _library_file(mount, f"{entry.relative_path}/asset.json")
     team_asset = TeamAssetFile.model_validate_json(asset_json.read_text(encoding="utf-8"))
     if team_asset.kind != entry.kind:

@@ -281,3 +281,131 @@ def test_broken_mount_table_is_500_naming_the_file(client, isolated_data_root):
     resp = client.get("/api/team-libraries", params={"project_id": "p1"})
     assert resp.status_code == 500, resp.text
     assert "team-libraries.json" in json.dumps(resp.json(), ensure_ascii=False)
+
+
+class _FakeObserver:
+    """记录 schedule / unschedule，不真起 watchdog 线程。"""
+
+    def __init__(self):
+        self.scheduled: list[str] = []
+        self.unscheduled: list[str] = []
+
+    def schedule(self, handler, path, recursive=False):
+        from pathlib import Path
+
+        if not Path(path).is_dir():
+            raise OSError(path)
+        self.scheduled.append(path)
+        return path
+
+    def unschedule(self, watch):
+        self.unscheduled.append(watch)
+
+
+@pytest.fixture
+def observer(monkeypatch):
+    from viewer_server import watcher
+
+    fake = _FakeObserver()
+    monkeypatch.setattr(watcher, "_observer", fake)
+    monkeypatch.setattr(watcher, "_team_watches", {})
+    monkeypatch.setattr(watcher, "_team_handlers", {})
+    return fake
+
+
+def _mount(client, project_id, folder):
+    resp = client.post(
+        "/api/team-libraries", json={"project_id": project_id, "path": str(folder), "name": None}
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()
+
+
+def test_library_on_two_canvases_reads_the_reachable_mount(client, tmp_path, observer):
+    """同一个库先挂在画布 1，盘符变了又挂到画布 2：读端点要走可达的那条，watcher 跟着换路径。"""
+    import shutil
+
+    old = tmp_path / "old"
+    old.mkdir()
+    (old / "a.png").write_bytes(_PNG)
+    client.put("/api/profile", json={"display_name": "老王"})
+    first = _mount(client, "canvas-1", old)
+    new = tmp_path / "new"
+    shutil.copytree(old, new)
+    second = _mount(client, "canvas-2", new)
+    assert second["library_id"] == first["library_id"]
+    shutil.rmtree(old)
+    resp = client.get(f"/api/team-libraries/{first['library_id']}/assets")
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()["entries"]) == 1
+    assert observer.scheduled == [str(old.resolve()), str(new.resolve())]
+    assert observer.unscheduled == [str(old.resolve())]
+
+
+def test_rescan_watches_library_that_was_offline_at_startup(client, tmp_path, monkeypatch):
+    from viewer_server import watcher
+
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    client.put("/api/profile", json={"display_name": "老王"})
+    monkeypatch.setattr(watcher, "_observer", None)
+    lib = _mount(client, "canvas-1", folder)
+    fake = _FakeObserver()
+    monkeypatch.setattr(watcher, "_observer", fake)
+    monkeypatch.setattr(watcher, "_team_watches", {})
+    monkeypatch.setattr(watcher, "_team_handlers", {})
+    assert client.post(f"/api/team-libraries/{lib['library_id']}/rescan").status_code == 200
+    assert fake.scheduled == [str(folder.resolve())]
+    assert client.post(f"/api/team-libraries/{lib['library_id']}/rescan").status_code == 200
+    assert fake.scheduled == [str(folder.resolve())]
+
+
+def test_unmount_moves_watch_to_the_remaining_mount(client, tmp_path, observer):
+    import shutil
+
+    first_dir = tmp_path / "a"
+    first_dir.mkdir()
+    client.put("/api/profile", json={"display_name": "老王"})
+    lib = _mount(client, "canvas-1", first_dir)
+    second_dir = tmp_path / "b"
+    shutil.copytree(first_dir, second_dir)
+    _mount(client, "canvas-2", second_dir)
+    client.delete(f"/api/team-libraries/{lib['library_id']}", params={"project_id": "canvas-2"})
+    a, b = str(first_dir.resolve()), str(second_dir.resolve())
+    assert observer.scheduled == [a, b, a]
+    client.delete(f"/api/team-libraries/{lib['library_id']}", params={"project_id": "canvas-1"})
+    assert observer.unscheduled[-1] == str(first_dir.resolve())
+
+
+def test_deleting_canvas_drops_its_mounts_and_watch(client, tmp_path, observer):
+    created = client.post("/api/canvas/projects", json={"name": "团队库画布"})
+    assert created.status_code == 201, created.text
+    project_id = created.json()["project_id"]
+    folder = tmp_path / "lib"
+    folder.mkdir()
+    client.put("/api/profile", json={"display_name": "老王"})
+    _mount(client, project_id, folder)
+    revision = client.get(f"/api/canvas/projects/{project_id}/document").json()["revision"]
+    deleted = client.request(
+        "DELETE", f"/api/canvas/projects/{project_id}", json={"expected_revision": revision}
+    )
+    assert deleted.status_code == 204, deleted.text
+    assert client.get("/api/team-libraries", params={"project_id": project_id}).json() == []
+    assert observer.unscheduled == [str(folder.resolve())]
+
+
+def test_mount_rejects_any_path_inside_data_root(client, isolated_data_root):
+    client.put("/api/profile", json={"display_name": "老王"})
+    inside = isolated_data_root / "canvases" / "canvas-abc"
+    inside.mkdir(parents=True)
+    resp = client.post(
+        "/api/team-libraries", json={"project_id": "p1", "path": str(inside), "name": None}
+    )
+    assert resp.status_code == 422, resp.text
+    assert not (inside / ".atelier-library.json").exists()
+
+
+def test_blank_display_name_is_422(client):
+    resp = client.put("/api/profile", json={"display_name": "   "})
+    assert resp.status_code == 422, resp.text
+    assert client.get("/api/profile").json() == {"display_name": None}
