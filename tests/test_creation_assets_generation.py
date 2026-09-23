@@ -22,9 +22,11 @@ from character_workflow.lib.creation_assets import (
     insert_creation_asset_into_canvas,
     list_creation_assets,
     store_media_blob,
+    update_media_asset_from_bytes,
 )
 from character_workflow.lib.schemas import (
     CanvasPoint,
+    CreationAsset,
     CreationMediaAssetContent,
     GenerationRecipe,
     RecipeInput,
@@ -310,12 +312,103 @@ def test_team_generation_snapshot_inputs_must_carry_a_path():
         TeamAssetFile.model_validate(payload)
 
 
-def test_team_generation_snapshot_input_path_stays_inside_the_asset():
-    for bad in ("/etc/passwd", "../other/a.png", "refs\\a.png"):
+def test_team_generation_snapshot_input_path_follows_the_refs_layout():
+    for bad in (
+        "/etc/passwd", "../other/a.png", "../x", "refs/../x", "refs\\01-bbbbbbbbbbbb.png",
+        "C:/Windows/win.ini", "C:foo", "refs/1-bbbbbbbbbbbb.png", "refs/01-BBBBBBBBBBBB.png",
+        "refs/01-bbbbbbbbbbbb.png/../../x", "refs/٠١-bbbbbbbbbbbb.png",
+    ):
         payload = _team_asset_payload()
         payload["snapshot"]["inputs"][0]["path"] = bad
         with pytest.raises(ValidationError):
             TeamAssetFile.model_validate(payload)
+
+
+def test_team_prompt_asset_ignores_fields_from_newer_machines():
+    payload = _team_asset_payload(
+        kind="prompt", media=None, snapshot=None,
+        prompt={
+            "kind": "prompt", "language": "zh",
+            "segments": [
+                {"kind": "text", "text": "一只", "style": "bold"},
+                {"kind": "variable", "name": "主体", "default_value": "猫", "hint": "动物"},
+            ],
+        },
+    )
+    team_asset = TeamAssetFile.model_validate(payload)
+    assert team_asset.prompt is not None
+    assert team_asset.prompt.model_dump() == {
+        "kind": "prompt",
+        "segments": [
+            {"kind": "text", "text": "一只"},
+            {"kind": "variable", "name": "主体", "default_value": "猫"},
+        ],
+    }
+
+
+def test_team_prompt_accepts_the_local_prompt_content_when_sharing():
+    """分享写 asset.json 时直接拿本机提示词内容；采用时团队侧内容又直接回到 CreationAsset。"""
+    local = create_prompt_asset("猫", [
+        {"kind": "text", "text": "一只"}, {"kind": "variable", "name": "主体", "default_value": "猫"},
+    ], [])
+    payload = _team_asset_payload(kind="prompt", media=None, snapshot=None)
+    team_asset = TeamAssetFile.model_validate({**payload, "prompt": local.content})
+    assert team_asset.prompt is not None
+    assert team_asset.prompt.model_dump() == local.content.model_dump()
+    adopted = local.model_copy(update={"content": team_asset.prompt})
+    assert CreationAsset.model_validate(adopted.model_dump()).content == local.content
+
+
+def test_recipe_rejects_inputs_whose_type_has_no_blob_suffix():
+    with pytest.raises(ValidationError):
+        RecipeInput(order=0, role="reference", kind="image", sha256="b" * 64, mime_type="image/bmp")
+    with pytest.raises(ValidationError):
+        GenerationRecipe.model_validate({**_recipe().model_dump(), "inputs": [{
+            "order": 0, "role": "reference", "kind": "image", "sha256": "b" * 64,
+            "mime_type": "image/bmp",
+        }]})
+
+
+def test_replacing_media_body_keeps_blob_a_generation_asset_uses():
+    output_twin = create_media_asset_from_bytes(
+        title="成片副本", body=_OUTPUT, filename="out.png", mime_type="image/png", tags=[],
+    )
+    ref_twin = create_media_asset_from_bytes(
+        title="参考副本", body=_REF_B, filename="b.png", mime_type="image/png", tags=[],
+    )
+    _, media, _, ref_b = _generation_asset()
+
+    update_media_asset_from_bytes(
+        output_twin.asset_id, title="成片副本", tags=[], body=_png((1, 2, 3)),
+        filename="new.png", mime_type="image/png",
+    )
+    update_media_asset_from_bytes(
+        ref_twin.asset_id, title="参考副本", tags=[], body=_png((4, 5, 6)),
+        filename="new2.png", mime_type="image/png",
+    )
+
+    assert blob_path_for(media.sha256, media.mime_type).is_file()
+    assert blob_path_for(ref_b.sha256, ref_b.mime_type).is_file()
+
+
+def test_replacing_media_body_removes_blob_nobody_uses():
+    asset = create_media_asset_from_bytes(
+        title="孤图", body=_REF_A, filename="a.png", mime_type="image/png", tags=[],
+    )
+    old = blob_path_for(asset.content.sha256, asset.content.mime_type)
+
+    update_media_asset_from_bytes(
+        asset.asset_id, title="孤图", tags=[], body=_png((7, 8, 9)),
+        filename="n.png", mime_type="image/png",
+    )
+
+    assert not old.exists()
+
+
+def test_inputs_endpoint_is_404_when_reference_blob_is_missing(client: TestClient):
+    asset, _, ref_a, _ = _generation_asset()
+    blob_path_for(ref_a.sha256, ref_a.mime_type).unlink()
+    assert client.get(f"/api/creation-assets/{asset.asset_id}/inputs/0").status_code == 404
 
 
 def test_team_asset_media_sha256_must_be_hex():

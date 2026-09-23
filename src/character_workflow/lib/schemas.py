@@ -1669,6 +1669,20 @@ class CreationPromptAssetContent(BaseModel):
 
 
 MEDIA_MIME_PATTERN = r"^(image|video|audio)/"
+# 创作资产 blob 能存的媒体类型 → 后缀；快照参考只收这张表里的类型，否则 blob 路径算不出来。
+MEDIA_SUFFIXES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+    "audio/mpeg": ".mp3",
+    "audio/wav": ".wav",
+    "audio/mp4": ".m4a",
+}
+TEAM_RECIPE_INPUT_PATH_PATTERN = r"^refs/[0-9]{2}-[a-f0-9]{12}\.[a-z0-9]{2,5}$"
 SHA256_PATTERN = r"^[a-f0-9]{64}$"
 TEAM_LIBRARY_ID_PATTERN = r"^lib_[a-f0-9]{16}$"
 TEAM_ASSET_ID_PATTERN = r"^ta_[0-9A-HJKMNP-TV-Z]{26}$"
@@ -1698,10 +1712,18 @@ class RecipeInput(BaseModel):
     mime_type: str = Field(pattern=MEDIA_MIME_PATTERN)
 
     @model_validator(mode="after")
-    def validate_kind_matches_mime(self) -> "RecipeInput":
+    def validate_mime(self) -> "RecipeInput":
+        if self.mime_type not in MEDIA_SUFFIXES:
+            raise ValueError(f"参考的媒体类型不受支持：{self.mime_type}")
         if self.mime_type.split("/", 1)[0] != self.kind:
             raise ValueError("参考的 kind 与 mime_type 不一致")
         return self
+
+
+def _check_input_orders(inputs: list[RecipeInput]) -> None:
+    orders = [row.order for row in inputs]
+    if orders != list(range(len(orders))):
+        raise ValueError("参考的 order 必须按升序从 0 连续编号")
 
 
 class _RecipeFields(BaseModel):
@@ -1719,12 +1741,9 @@ class _RecipeFields(BaseModel):
     submitted_at: str
 
     @model_validator(mode="after")
-    def validate_recipe_shape(self) -> "_RecipeFields":
+    def validate_cost_pair(self) -> "_RecipeFields":
         if (self.cost_cny is None) != (self.cost_basis is None):
             raise ValueError("cost_cny 与 cost_basis 必须同时为空或同时有值")
-        orders = [row.order for row in self.inputs]  # type: ignore[attr-defined]
-        if orders != list(range(len(orders))):
-            raise ValueError("参考的 order 必须按升序从 0 连续编号")
         return self
 
 
@@ -1732,6 +1751,11 @@ class GenerationRecipe(_RecipeFields):
     """生成资产的本机冻结快照：自包含，参考按 sha256 引用 blobs（不同于画布按 version_id 引用）。"""
     model_config = ConfigDict(extra="forbid")
     inputs: list[RecipeInput] = Field(default_factory=list, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_input_orders(self) -> "GenerationRecipe":
+        _check_input_orders(self.inputs)
+        return self
 
 
 class CreationGenerationAssetContent(BaseModel):
@@ -2486,17 +2510,9 @@ class TeamAssetMedia(BaseModel):
 
 
 class TeamRecipeInput(RecipeInput):
-    """团队库里的参考：多一个相对资产目录的 POSIX 路径（refs/NN-<sha12>.<ext>）。"""
+    """团队库里的参考：多一个相对资产目录的路径，白名单只认 asset.json 布局的 refs/NN-<sha12>.<ext>。"""
     model_config = ConfigDict(extra="ignore")
-    path: str = Field(min_length=1, max_length=255)
-
-    @field_validator("path")
-    @classmethod
-    def validate_relative_posix(cls, value: str) -> str:
-        parts = value.split("/")
-        if "\\" in value or value.startswith("/") or any(part in {"", ".", ".."} for part in parts):
-            raise ValueError("参考路径必须是资产目录内的相对 POSIX 路径")
-        return value
+    path: str = Field(pattern=TEAM_RECIPE_INPUT_PATH_PATTERN)
 
 
 class TeamGenerationSnapshot(_RecipeFields):
@@ -2505,6 +2521,32 @@ class TeamGenerationSnapshot(_RecipeFields):
     """
     model_config = ConfigDict(extra="ignore")
     inputs: list[TeamRecipeInput] = Field(default_factory=list, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_input_orders(self) -> "TeamGenerationSnapshot":
+        _check_input_orders(self.inputs)
+        return self
+
+
+# from_attributes：分享时直接传本机 CreationPromptAssetContent 实例也能写进 TeamAssetFile。
+class TeamPromptTextSegment(CreationPromptTextSegment):
+    model_config = ConfigDict(extra="ignore", from_attributes=True)
+
+
+class TeamPromptVariableSegment(CreationPromptVariableSegment):
+    model_config = ConfigDict(extra="ignore", from_attributes=True)
+
+
+TeamPromptSegment = Annotated[
+    TeamPromptTextSegment | TeamPromptVariableSegment,
+    Field(discriminator="kind"),
+]
+
+
+class TeamPromptContent(CreationPromptAssetContent):
+    """asset.json 里的 prompt：团队侧宽松读（R1）。继承本机模型，采用时可直接作为 content。"""
+    model_config = ConfigDict(extra="ignore", from_attributes=True)
+    segments: list[TeamPromptSegment] = Field(min_length=1, max_length=400)
 
 
 class TeamAssetOrigin(BaseModel):
@@ -2526,7 +2568,7 @@ class TeamAssetFile(BaseModel):
     shared_at: str
     updated_at: str
     media: TeamAssetMedia | None = None
-    prompt: CreationPromptAssetContent | None = None
+    prompt: TeamPromptContent | None = None
     snapshot: TeamGenerationSnapshot | None = None
     origin: TeamAssetOrigin | None = None
 

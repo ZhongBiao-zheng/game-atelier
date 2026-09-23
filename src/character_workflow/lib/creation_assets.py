@@ -22,6 +22,7 @@ from character_workflow.lib.file_lock import file_lock
 from character_workflow.lib.media_probe import mp4_track_dimensions as video_dimensions_from_bytes
 from character_workflow.lib.prompt_variables import build_prompt_variable_template
 from character_workflow.lib.schemas import (
+    MEDIA_SUFFIXES,
     AdoptionOrigin,
     CanvasCreationAssetSnapshotOrigin,
     CanvasInputConnection,
@@ -44,18 +45,6 @@ from character_workflow.lib.schemas import (
 
 
 _PROMPT_SEGMENTS = TypeAdapter(list[CreationPromptSegment])
-MEDIA_SUFFIXES = {
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-    "video/mp4": ".mp4",
-    "video/webm": ".webm",
-    "video/quicktime": ".mov",
-    "audio/mpeg": ".mp3",
-    "audio/wav": ".wav",
-    "audio/mp4": ".m4a",
-}
 # 上限按类型分档：图片小、音频中、视频大。
 _MEDIA_SIZE_LIMITS = {
     "image": 50 * 1024 * 1024,
@@ -312,11 +301,15 @@ def _asset_blob_paths(asset: CreationAsset) -> set[str]:
 
 
 def _orphan_blob_paths(removed: set[str], remaining: list[CreationAsset]) -> list[Path]:
-    still_used = set().union(*(_asset_blob_paths(row) for row in remaining))
+    """两边都 resolve 后再比：同一个 blob 的不同拼法（./、..）不能被误判成孤儿删掉。"""
     root = data_root.resolve_data_root().resolve()
+    still_used = {
+        (root / relative).resolve()
+        for row in remaining
+        for relative in _asset_blob_paths(row)
+    }
     orphans: list[Path] = []
-    for relative in sorted(removed - still_used):
-        path = (root / relative).resolve()
+    for path in sorted({(root / relative).resolve() for relative in removed} - still_used):
         try:
             path.relative_to(root / _BLOB_DIR)
         except ValueError as error:
@@ -388,11 +381,12 @@ def create_generation_asset(
     required = [_media_blob_path(media)] + [
         blob_path_for(row.sha256, row.mime_type) for row in snapshot.inputs
     ]
-    missing = [path for path in required if not path.is_file()]
-    if missing:
-        raise FileNotFoundError(missing[0])
     migrate_creation_asset_catalog_schema()
     with file_lock(_catalog_lock_path()):
+        # 持锁再查：删除资产时的孤儿 blob 清理也在这把锁下判定，锁外查完可能被并发删掉。
+        missing = [path for path in required if not path.is_file()]
+        if missing:
+            raise FileNotFoundError(missing[0])
         current = _read_catalog_unlocked()
         asset = _new_asset(
             kind="generation",
